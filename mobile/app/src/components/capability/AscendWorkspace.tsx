@@ -193,7 +193,6 @@ function Reader({
       bookAudioMetadata(detail.book, chapter),
       { showSeekBackward: true, showSeekForward: true },
     );
-    return () => player.clearLockScreenControls();
   }, [chapter, detail.book, player]);
 
   useEffect(() => {

@@ -86,7 +86,10 @@ export type BottomSheetProps = {
   description?: string;
   dismissible?: boolean;
   footer?: ReactNode;
+  headerLeading?: ReactNode;
+  headerTrailing?: ReactNode;
   hideHeading?: boolean;
+  hideCloseButton?: boolean;
   mutation?: boolean;
   onOpenChange: (open: boolean) => void;
   open: boolean;
@@ -99,7 +102,10 @@ export function BottomSheet({
   description,
   dismissible = true,
   footer,
+  headerLeading,
+  headerTrailing,
   hideHeading = false,
+  hideCloseButton = false,
   mutation = false,
   onOpenChange,
   open,
@@ -108,6 +114,7 @@ export function BottomSheet({
 }: BottomSheetProps) {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
+  const androidBottomInset = Platform.OS === "android" ? Math.max(insets.bottom, 12) : 0;
   const setSceneSheetOpen = useContext(BottomSheetSceneContext);
   const [visible, setVisible] = useState(open);
   const [reducedMotion, setReducedMotion] = useState(false);
@@ -182,7 +189,7 @@ export function BottomSheet({
       translateY.setValue(reducedMotionRef.current ? 0 : closedOffsetRef.current);
       overlayOpacity.setValue(reducedMotionRef.current ? 1 : 0);
       animate(true);
-    } else if (visible) {
+    } else if (visible && !dismissingRef.current) {
       animate(false);
     }
     // Animated values are stable refs; visibility is intentionally driven by open.
@@ -223,12 +230,13 @@ export function BottomSheet({
     <Modal
       accessibilityViewIsModal
       animationType="none"
+      navigationBarTranslucent={false}
       onRequestClose={dismiss}
       statusBarTranslucent
       transparent
       visible
     >
-      <View style={styles.root}>
+      <View style={[styles.root, { paddingBottom: androidBottomInset }]}>
         <Animated.View style={[styles.overlay, { opacity: overlayOpacity }]}>
           <Button
             accessibilityLabel="Close bottom sheet"
@@ -248,8 +256,9 @@ export function BottomSheet({
             mutation && styles.mutationSheet,
             Platform.OS === "android" && styles.androidSheet,
             {
-              marginTop: mutation ? insets.top : 0,
-              marginBottom: Platform.OS === "android" ? Math.max(insets.bottom, 12) : 0,
+              bottom: mutation ? androidBottomInset : undefined,
+              height: mutation ? windowHeight - insets.top - androidBottomInset : undefined,
+              top: mutation ? insets.top : undefined,
               paddingBottom: Platform.OS === "android" ? 16 : Math.max(insets.bottom, 16),
               transform: [{ translateY }],
             },
@@ -264,7 +273,9 @@ export function BottomSheet({
               {!hideHeading ? <Text accessibilityRole="header" style={styles.title}>{title}</Text> : null}
               {!hideHeading && description ? <Text style={styles.description}>{description}</Text> : null}
             </View>
-            <Button
+            {headerLeading ? <View style={[styles.headerSlot, styles.headerLeading]}>{headerLeading}</View> : null}
+            {headerTrailing ? <View style={[styles.headerSlot, styles.headerTrailing]}>{headerTrailing}</View> : null}
+            {!hideCloseButton && !headerTrailing ? <Button
               accessibilityLabel="Close bottom sheet"
               contentMode="raw"
               disabled={!dismissible}
@@ -274,7 +285,7 @@ export function BottomSheet({
               variant="icon"
             >
               <CloseIcon size="sm" />
-            </Button>
+            </Button> : null}
           </View>
           <View style={[styles.content, (tall || mutation) && styles.flexContent]}>{children}</View>
           {footer ? <View style={styles.footer}>{footer}</View> : null}
@@ -331,9 +342,11 @@ const styles = StyleSheet.create({
   },
   tallSheet: { height: "72%" },
   mutationSheet: {
-    flex: 1,
-    height: "100%",
+    bottom: 0,
+    left: 0,
     maxHeight: "100%",
+    position: "absolute",
+    right: 0,
   },
   headerDragTarget: { marginHorizontal: -20, paddingHorizontal: 20 },
   dragTarget: { alignItems: "center", minHeight: 36, paddingBottom: 14, paddingTop: 12 },
@@ -347,6 +360,9 @@ const styles = StyleSheet.create({
   header: { gap: 6, paddingBottom: 18, paddingHorizontal: 4, paddingRight: 48 },
   headerWithoutHeading: { minHeight: 42 },
   closeButton: { position: "absolute", right: 20, top: 20, zIndex: 1 },
+  headerSlot: { position: "absolute", top: 20, zIndex: 1 },
+  headerLeading: { left: 20 },
+  headerTrailing: { right: 20 },
   title: {
     color: "#F5F7F8",
     fontFamily: "Geist_600SemiBold",

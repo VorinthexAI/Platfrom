@@ -8,8 +8,14 @@ import {
   compassQueryKeys,
   galleryQueryKeys,
   invalidateAssistantChanges,
+  patchGalleryImage,
+  removeCachedGalleryImages,
+  restoreGalleryOverviews,
+  snapshotGalleryOverviews,
   signalQueryKeys,
+  transferCachedGalleryImages,
 } from "./workspace-query-cache";
+import type { GalleryImage, GalleryOverview } from "./gallery-client";
 
 const context: ContentContext = { organizationKey: "org-a", scopeKey: "scope-a", agentKey: "agent-a" };
 const otherContext: ContentContext = { organizationKey: "org-b", scopeKey: "scope-b", agentKey: "agent-b" };
@@ -38,4 +44,52 @@ test("assistant changes invalidate exact workspace prefixes without crossing con
   expect(client.getQueryState(archiveLocation)?.isInvalidated).toBe(true);
   expect(client.getQueryState(otherGallery)?.isInvalidated).toBe(false);
   expect(client.getQueryState(signalOverview)?.isInvalidated).toBe(false);
+});
+
+const image = (key: string, isFavorite = false): GalleryImage => ({ key, filename: `${key}.jpg`, caption: key, imageCaptionKey: null, mimeType: "image/jpeg", sizeBytes: 100, width: 10, height: 10, isFavorite, createdAt: "2026-08-14T00:00:00.000Z", updatedAt: "2026-08-14T00:00:00.000Z", url: `https://images.example/${key}` });
+
+test("optimistically patches favorites across every Gallery overview", () => {
+  const client = new QueryClient();
+  const original = image("image");
+  const overview: GalleryOverview = { collections: [], images: [original] };
+  client.setQueryData(galleryQueryKeys.overview(context), overview);
+  client.setQueryData(galleryQueryKeys.overview(context, "collection"), overview);
+
+  patchGalleryImage(client, context, { ...original, isFavorite: true });
+
+  expect(client.getQueryData<GalleryOverview>(galleryQueryKeys.overview(context))?.images[0]?.isFavorite).toBe(true);
+  expect(client.getQueryData<GalleryOverview>(galleryQueryKeys.overview(context, "collection"))?.images[0]?.isFavorite).toBe(true);
+});
+
+test("optimistically copies and moves many images to many collection caches", () => {
+  const client = new QueryClient();
+  const first = image("first"), second = image("second");
+  const collections = [
+    { key: "source", name: "Source", description: null, count: 2, coverUrl: first.url },
+    { key: "one", name: "One", description: null, count: 0, coverUrl: null },
+    { key: "two", name: "Two", description: null, count: 0, coverUrl: null },
+  ];
+  client.setQueryData(galleryQueryKeys.overview(context), { collections, images: [first, second] });
+  client.setQueryData(galleryQueryKeys.overview(context, "source"), { collections, images: [first, second] });
+  client.setQueryData(galleryQueryKeys.overview(context, "one"), { collections, images: [] });
+  client.setQueryData(galleryQueryKeys.overview(context, "two"), { collections, images: [] });
+
+  transferCachedGalleryImages(client, context, { sourceCollectionKey: "source", destinationCollectionKeys: ["one", "two"], images: [first, second], mode: "move" });
+
+  expect(client.getQueryData<GalleryOverview>(galleryQueryKeys.overview(context, "source"))?.images).toEqual([]);
+  expect(client.getQueryData<GalleryOverview>(galleryQueryKeys.overview(context, "one"))?.images).toEqual([first, second]);
+  expect(client.getQueryData<GalleryOverview>(galleryQueryKeys.overview(context, "two"))?.images).toEqual([first, second]);
+});
+
+test("removes deleted images everywhere and restores exact optimistic snapshots", () => {
+  const client = new QueryClient();
+  const deleted = image("deleted"), retained = image("retained");
+  const key = galleryQueryKeys.overview(context, "collection");
+  client.setQueryData(key, { collections: [{ key: "collection", name: "Collection", description: null, count: 2, coverUrl: deleted.url }], images: [deleted, retained] });
+  const snapshot = snapshotGalleryOverviews(client, context);
+
+  removeCachedGalleryImages(client, context, [deleted]);
+  expect(client.getQueryData<GalleryOverview>(key)).toMatchObject({ collections: [{ count: 1 }], images: [retained] });
+  restoreGalleryOverviews(client, snapshot);
+  expect(client.getQueryData<GalleryOverview>(key)?.images).toEqual([deleted, retained]);
 });

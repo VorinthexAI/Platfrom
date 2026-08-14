@@ -11,7 +11,7 @@ import { imageIdentitySchema } from '@/lib/db/image-identities.node';
 import type { getUserOrganizationByOrganizationAndUser } from '@/lib/db/user-organization.node';
 import { processImage } from '@/lib/ai/image-processing';
 import { imageCaptionTool } from '@/lib/ai/tools/image-caption';
-import { imageSearchTool } from '@/lib/ai/tools/image-search';
+import { imageSearchInputSchema, imageSearchTool } from '@/lib/ai/tools/image-search';
 import { imageCreateVisualIdentityTool } from '@/lib/ai/tools/image-create-visual-identity';
 import { documentStorage } from '@/lib/ai/document-processing/storage';
 import { currentEmbeddingSchema, embedText } from '@/lib/embeddings';
@@ -26,9 +26,10 @@ const collectionCreateSchema = strictObject({ name: z.string().trim().min(1).max
 const uploadFileSchema = strictObject({ clientKey: z.string().min(1).max(120), filename: z.string().trim().regex(/^[^/\\]+\.jpe?g$/i), sizeBytes: z.number().int().positive().max(20 * 1024 * 1024) });
 const presignSchema = strictObject({ collectionKey: z.string().cuid().nullable().optional(), files: z.array(uploadFileSchema).min(1).max(20) });
 const completeSchema = strictObject({ uploadKeys: z.array(z.string().cuid()).min(1).max(20) });
-const searchSchema = strictObject({ query: z.string().trim().min(1).max(12_000).optional(), imageKey: z.string().cuid().optional(), threshold: z.number().min(-1).max(1).optional(), limit: z.number().int().min(1).max(50).default(50) }).refine((value) => Boolean(value.query) !== Boolean(value.imageKey), 'Provide exactly one of query or imageKey');
+const searchSchema = imageSearchInputSchema;
 const statusSchema = strictObject({ uploadKeys: z.array(z.string().cuid()).min(1).max(20) });
 const favoriteSchema = strictObject({ imageKey: z.string().cuid(), isFavorite: z.boolean() });
+const deleteImagesSchema = strictObject({ imageKeys: z.array(z.string().cuid()).min(1).max(100) }).refine(({ imageKeys }) => new Set(imageKeys).size === imageKeys.length, 'Image keys must be unique');
 const duplicatesSchema = strictObject({ collectionKey: z.string().cuid() });
 const deleteDuplicatesSchema = strictObject({ collectionKey: z.string().cuid(), imageKeys: z.array(z.string().cuid()).min(1).max(500) });
 const subjectListSchema = strictObject({ includeDeleted: z.boolean().default(false) });
@@ -195,20 +196,45 @@ async function uploadStatus(rawInput: unknown, context: GalleryOperationContext)
 async function search(rawInput: unknown, context: GalleryOperationContext) {
     const input = { ...searchSchema.parse(rawInput), ...context };
     const membership = await authorize(context);
-    let matches: Array<{ image: z.infer<typeof imageSchema>; score: number }>;
-    if (input.query) {
-      const output = await imageSearchTool.execute({ query: input.query, threshold: input.threshold, limit: input.limit }, { context: { organizationKey: input.organizationKey, runtimeScopeKey: input.scopeKey, principal: { kind: 'member', user: { key: membership.userId }, userOrganization: membership, scopeMember: null } as never } });
+    const collection = input.collectionKey ? await repository.getCollection(input.scopeKey, input.collectionKey) : undefined;
+    if (input.collectionKey && !collection) throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.');
+    let sourceImage: z.infer<typeof imageSchema> | undefined;
+    if ('imageKey' in input) {
+      sourceImage = await repository.getImage(input.imageKey) ?? undefined;
+      if (!sourceImage || sourceImage.scopeKey !== input.scopeKey || !await repository.canAccessImage(input.scopeKey, sourceImage.key, membership.key)) throw new GalleryOperationError(404, 'GALLERY_IMAGE_NOT_FOUND', 'Image not found.');
+    }
+    const toolInput = searchSchema.parse(rawInput);
+    const resolvedImages = new Map<string, z.infer<typeof imageSchema>>();
+    if (sourceImage) resolvedImages.set(sourceImage.key, sourceImage);
+    const output = await imageSearchTool.execute(toolInput, {
+      context: { organizationKey: input.organizationKey, runtimeScopeKey: input.scopeKey, principal: { kind: 'member', user: { key: membership.userId }, userOrganization: membership, scopeMember: null } as never },
+      searchImages: async (searchInput) => {
+        const results = await repository.searchAccessibleImages(searchInput);
+        for (const result of results) resolvedImages.set(result.image.key, result.image);
+        return results;
+      },
+      getImage: async (key) => resolvedImages.get(key) ?? repository.getImage(key),
+      canAccessImage: async () => true,
+      canAccessCollection: async () => true,
+      getCollection: async () => collection ?? null,
+      findDuplicateImages: async (scopeKey, collectionKey) => {
+        const images = await repository.listRedundantCollectionImages(scopeKey, collectionKey);
+        for (const image of images) resolvedImages.set(image.key, image);
+        return images;
+      },
+    });
+    let matches: Array<{ image: z.infer<typeof imageSchema>; score?: number }> = await Promise.all(output.images.map(async ({ key, score }) => {
+      const image = resolvedImages.get(key) ?? await repository.getImage(key);
+      if (!image) throw new GalleryOperationError(404, 'GALLERY_IMAGE_NOT_FOUND', 'Image not found.');
+      return { image, score };
+    }));
+    if ('query' in input) {
       const namedIdentities = await repository.listMatchingIdentityNames(input.scopeKey, input.query);
       await Promise.all(namedIdentities.map((identity) => reconcileVisualIdentity(identity, input.organizationKey, membership.key)));
-      const named = await repository.listImagesForMatchingIdentityNames(input.scopeKey, input.query);
-      const semantic = await Promise.all(output.images.map(async ({ key, score }) => { const image = await repository.getImage(key); if (!image) throw new GalleryOperationError(404, 'GALLERY_IMAGE_NOT_FOUND', 'Image not found.'); return { image, score }; }));
-      const unique = new Map(named.map((match) => [match.image.key, match]));
-      for (const match of semantic) if (!unique.has(match.image.key)) unique.set(match.image.key, match);
+      const named = await repository.listImagesForMatchingIdentityNames(input.scopeKey, input.query, input.collectionKey);
+      const unique = new Map<string, { image: z.infer<typeof imageSchema>; score?: number }>(named.map((match) => [match.image.key, match]));
+      for (const match of matches) if (!unique.has(match.image.key)) unique.set(match.image.key, match);
       matches = [...unique.values()].slice(0, input.limit);
-    } else {
-      const source = await repository.getImage(input.imageKey!);
-      if (!source || source.scopeKey !== input.scopeKey || !await repository.canAccessImage(input.scopeKey, source.key, membership.key)) throw new GalleryOperationError(404, 'GALLERY_IMAGE_NOT_FOUND', 'Image not found.');
-      matches = (await repository.searchAccessibleImages({ organizationKey: input.organizationKey, scopeKey: input.scopeKey, actorKey: membership.key, embedding: source.embedding, threshold: input.threshold, limit: input.limit + 1 })).filter(({ image }) => image.key !== source.key).slice(0, input.limit);
     }
     return { images: await Promise.all(matches.map(({ image, score }) => safeImage(image, score))) };
 }
@@ -221,12 +247,17 @@ async function setFavorite(rawInput: unknown, context: GalleryOperationContext) 
     return { image: await safeImage(image) };
 }
 
+async function deleteImages(rawInput: unknown, context: GalleryOperationContext) {
+    const input = { ...deleteImagesSchema.parse(rawInput), ...context };
+    await authorize(context);
+    const deletion = await repository.deleteImages(input.scopeKey, input.imageKeys, new Date().toISOString());
+    if (!deletion) throw new GalleryOperationError(404, 'GALLERY_IMAGE_NOT_FOUND', 'One or more images were not found.');
+    return deletion;
+}
+
 async function findDuplicates(rawInput: unknown, context: GalleryOperationContext) {
     const input = { ...duplicatesSchema.parse(rawInput), ...context };
-    await authorize(context);
-    if (!await repository.getCollection(input.scopeKey, input.collectionKey)) throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.');
-    const images = await repository.listRedundantCollectionImages(input.scopeKey, input.collectionKey);
-    return { images: await Promise.all(images.map((image) => safeImage(image))) };
+    return search({ duplicates: true, collectionKey: input.collectionKey }, context);
 }
 
 async function deleteDuplicates(rawInput: unknown, context: GalleryOperationContext) {
@@ -312,6 +343,7 @@ export const galleryOperationInputSchemas = {
   uploadStatus: statusSchema,
   search: searchSchema,
   setFavorite: favoriteSchema,
+  deleteImages: deleteImagesSchema,
   findDuplicates: duplicatesSchema,
   deleteDuplicates: deleteDuplicatesSchema,
   transferCollectionImages: collectionTransferSchema,
@@ -330,6 +362,7 @@ export const galleryOperations = {
   uploadStatus,
   search,
   setFavorite,
+  deleteImages,
   findDuplicates,
   deleteDuplicates,
   transferCollectionImages,

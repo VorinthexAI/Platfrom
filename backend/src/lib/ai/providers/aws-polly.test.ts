@@ -12,8 +12,8 @@ describe('AWS Polly provider', () => {
       return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'content-type': 'audio/mpeg' } });
     }) as typeof fetch;
     const provider = createAwsPollyProvider({ region: 'us-east-1', accessKeyId: 'key', secretAccessKey: 'secret' });
-    const result = await provider.execute({ actionId: 'generate-speech', modelId: 'amazon.polly-generative', externalModelId: 'generative', input: { text: 'Hello', voice: 'Joanna', format: 'mp3' }, organizationKey: 'organization' });
+    const result = await provider.execute({ actionId: 'generate-speech', modelId: 'amazon.polly-generative', externalModelId: 'generative', input: { text: 'Hello', voice: 'Joanna', format: 'mp3', language: 'en-US' }, organizationKey: 'organization' });
     expect(result.output).toEqual({ audioBase64: 'AQID', mimeType: 'audio/mpeg' });
-    expect(JSON.parse(body)).toMatchObject({ Text: 'Hello', VoiceId: 'Joanna', Engine: 'generative' });
+    expect(JSON.parse(body)).toMatchObject({ Text: 'Hello', VoiceId: 'Joanna', Engine: 'generative', LanguageCode: 'en-US' });
   });
 });

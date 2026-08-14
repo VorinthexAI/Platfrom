@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { contentZodToJsonSchema } from '@/lib/ai/tools/content-json-schema';
 import type { AssistantCapability, AssistantCapabilityContext } from './capabilities';
 import { GalleryOperationError, galleryOperations, type GalleryOperationContext, type GalleryOperationName } from '@/lib/gallery/operations';
+import { imageSearchInputSchema, imageSearchTool } from '@/lib/ai/tools/image-search';
 
 type GalleryExecutor = (input: unknown, context: GalleryOperationContext) => Promise<unknown>;
 
@@ -9,7 +10,8 @@ const key = z.string().cuid();
 const keys = (maxItems: number) => z.array(key).min(1).max(maxItems);
 const toolNames: Record<string, string> = {
   gallery_overview: 'collection.list', gallery_collection_create: 'collection.create', search_images: 'image.search', gallery_image_favorite: 'image.favorite',
-  gallery_duplicates_find: 'collection.duplicates.find', gallery_duplicates_delete: 'collection.duplicates.delete', gallery_collection_transfer: 'collection.image.transfer',
+  image_delete: 'image.delete',
+  gallery_duplicates_delete: 'collection.duplicates.delete', gallery_collection_transfer: 'collection.image.transfer',
   gallery_subject_list: 'subject.list', gallery_subject_create: 'subject.create', gallery_subject_images: 'subject.image.list', gallery_subject_delete: 'subject.delete', gallery_subject_restore: 'subject.restore',
   gallery_upload_reserve: 'image.upload.reserve', gallery_upload_status: 'image.upload.status', gallery_upload_complete: 'image.upload.complete',
 };
@@ -23,9 +25,9 @@ const definitions: Array<{
 }> = [
   { operation: 'overview', name: 'gallery_overview', description: 'List Gallery collections and recent images, optionally within one collection.', schema: z.object({ collectionKey: key.optional() }).strict() },
   { operation: 'createCollection', name: 'gallery_collection_create', description: 'Create a Gallery collection.', schema: z.object({ name: z.string().trim().min(1).max(120), description: z.string().trim().min(1).max(1_000).optional() }).strict(), mutation: true },
-  { operation: 'search', name: 'search_images', description: 'Search Gallery by visible content or find images visually similar to one image.', schema: z.object({ query: z.string().trim().min(1).max(12_000).optional(), imageKey: key.optional(), threshold: z.number().min(-1).max(1).optional(), limit: z.number().int().min(1).max(50).default(50) }).strict().refine((value) => Boolean(value.query) !== Boolean(value.imageKey), 'Provide exactly one of query or imageKey') },
+  { operation: 'search', name: 'search_images', description: 'Search Gallery by visible content, find images visually similar to a source image, or find duplicates in a collection.', schema: imageSearchInputSchema },
   { operation: 'setFavorite', name: 'gallery_image_favorite', description: 'Set or clear an image favorite.', schema: z.object({ imageKey: key, isFavorite: z.boolean() }).strict(), mutation: true },
-  { operation: 'findDuplicates', name: 'gallery_duplicates_find', description: 'Find redundant images in a collection.', schema: z.object({ collectionKey: key }).strict() },
+  { operation: 'deleteImages', name: 'image_delete', description: 'Move Gallery images to trash and remove them from collections and subjects.', schema: z.object({ imageKeys: keys(100).refine((values) => new Set(values).size === values.length, 'Image keys must be unique') }).strict(), mutation: true },
   { operation: 'deleteDuplicates', name: 'gallery_duplicates_delete', description: 'Delete images returned by the latest duplicate check.', schema: z.object({ collectionKey: key, imageKeys: keys(500) }).strict(), mutation: true },
   { operation: 'transferCollectionImages', name: 'gallery_collection_transfer', description: 'Copy or move selected images from one collection to other collections.', schema: z.object({ sourceCollectionKey: key, destinationCollectionKeys: keys(20), imageKeys: keys(100), mode: z.enum(['copy', 'move']) }).strict(), mutation: true },
   { operation: 'listSubjects', name: 'gallery_subject_list', description: 'List Gallery subjects, optionally including deleted subjects.', schema: z.object({ includeDeleted: z.boolean().default(false) }).strict() },
@@ -54,7 +56,7 @@ export function createGalleryAssistantCapabilities(operations: Partial<Record<Ga
     return ({
     inputSchema: schema,
     ...(mutation ? { mutationWorkspace: 'gallery' as const } : {}),
-    definition: { name, description, inputSchema: contentZodToJsonSchema(schema) },
+    definition: { name, description, inputSchema: name === imageSearchTool.name ? imageSearchTool.providerDefinition.inputSchema : contentZodToJsonSchema(schema) },
     async execute(input, context) {
       const execute = context.gallery?.[operation] ?? operations[operation];
       if (!execute) throw new Error(`Gallery operation is unavailable: ${operation}`);

@@ -33,4 +33,19 @@ describe('Gallery duplicate clustering', () => {
       at('copy', '2026-08-11T12:00:00.000Z', '0000000000000003'),
     ])).toEqual(['copy']);
   });
+
+  test('is deterministic for shuffled equal-time inputs and lexical key ties', () => {
+    const first = at('a-copy', '2026-08-11T10:00:00.000Z', '0000000000000001');
+    const keeper = at('a-keeper', '2026-08-11T10:00:00.000Z', '0000000000000000');
+    expect(findRedundantGalleryImageKeys([first, keeper])).toEqual(['a-keeper']);
+    expect(findRedundantGalleryImageKeys([keeper, first])).toEqual(['a-keeper']);
+  });
+
+  test('clusters transitive near matches before selecting redundant images', () => {
+    expect(findRedundantGalleryImageKeys([
+      at('keeper', '2026-08-11T10:00:00.000Z', '0000000000000000'),
+      at('bridge', '2026-08-11T11:00:00.000Z', '0000000000000007'),
+      at('edge', '2026-08-11T12:00:00.000Z', '0000000000000037'),
+    ])).toEqual(['bridge', 'edge']);
+  });
 });

@@ -148,9 +148,7 @@
   opacity: 1;
 }
 
-/* The melt itself: a chrome gradient floods up from the floor of the
-   pill, its surface churning, bubbles climbing through it until the
-   whole button has filled with liquid metal. */
+/* A clean chrome gradient fills the button from the bottom. */
 .vui-button-fill {
   animation:
     vui-fill-rise 1.4s var(--vui-ease-luxury) forwards,
@@ -163,35 +161,6 @@
   position: absolute;
   transform-origin: bottom;
   z-index: -1;
-}
-
-.vui-button-fill::before,
-.vui-button-fill::after {
-  animation: vui-fill-bubble 1.3s ease-in infinite;
-  background: radial-gradient(
-    circle,
-    rgba(255, 255, 255, 0.95),
-    rgba(255, 255, 255, 0) 70%
-  );
-  border-radius: 50%;
-  bottom: -6px;
-  content: "";
-  height: 10px;
-  opacity: 0;
-  position: absolute;
-  width: 10px;
-}
-
-.vui-button-fill::before {
-  animation-delay: 0.25s;
-  left: 27%;
-}
-
-.vui-button-fill::after {
-  animation-delay: 0.85s;
-  height: 7px;
-  left: 66%;
-  width: 7px;
 }
 
 @keyframes vui-fill-rise {
@@ -212,20 +181,6 @@
   }
   100% {
     background-position: 0% 100%;
-  }
-}
-
-@keyframes vui-fill-bubble {
-  0% {
-    opacity: 0;
-    transform: translateY(0) scale(0.6);
-  }
-  25% {
-    opacity: 0.85;
-  }
-  100% {
-    opacity: 0;
-    transform: translateY(-34px) scale(1.2);
   }
 }
 
@@ -621,6 +576,39 @@
   height: 1px;
   width: 100%;
 }
+
+.vui-toast-viewport {
+  display: grid;
+  left: 50%;
+  perspective: 1000px;
+  pointer-events: none;
+  position: fixed;
+  top: 20px;
+  transform: translateX(-50%);
+  width: min(calc(100vw - 32px), 420px);
+  z-index: 2000;
+}
+
+.vui-toast {
+  background: linear-gradient(155deg, #171d26, #0b0f14);
+  border: 1px solid rgba(221, 226, 229, 0.24);
+  border-radius: var(--vui-radius-md);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.58), inset 0 1px rgba(255, 255, 255, 0.16);
+  display: grid;
+  gap: 3px;
+  grid-area: 1 / 1;
+  min-height: 72px;
+  padding: 14px 16px;
+  transition: opacity 180ms ease, transform 260ms var(--vui-ease-luxury);
+}
+
+.vui-toast strong,
+.vui-toast span {
+  font-family: var(--vui-font-ui);
+}
+
+.vui-toast strong { color: var(--vui-color-text); font-size: 14px; }
+.vui-toast span { color: var(--vui-color-muted); font-size: 12px; line-height: 1.4; }
 
 .vui-alert {
   border: 1px solid rgba(221, 226, 229, 0.14);

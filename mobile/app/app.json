@@ -62,7 +62,14 @@
         "expo-image-picker",
         {
           "photosPermission": "Allow Vorinthex to add the photos you choose to Gallery.",
-          "cameraPermission": "Allow Vorinthex to take photos for Gallery."
+          "cameraPermission": "Allow Vorinthex to scan documents and take photos for Gallery."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Vorinthex to scan documents and capture images for Gallery.",
+          "recordAudioAndroid": false
         }
       ],
       [
@@ -73,7 +80,9 @@
           "microphonePermission": false,
           "recordAudioAndroid": false
         }
-      ]
+      ],
+      "@config-plugins/react-native-pdf",
+      "@config-plugins/react-native-blob-util"
     ],
     "experiments": {
       "typedRoutes": true,

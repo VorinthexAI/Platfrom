@@ -5,54 +5,99 @@ import { searchAccessibleImages, type AccessibleImageSearchInput, type Accessibl
 import type { EmbeddingInput, EmbeddingOutput, ProviderExecuteResponse } from '@/lib/ai/providers';
 import type { DomainToolContext } from './domain-execute';
 import { imageSearchActor, imageSimilarityOutput, imageSimilarityThresholdSchema, type ImageSimilarityOutput } from './image-similarity';
+import { getDefaultGalleryRepository, type GalleryRepository } from '@/lib/gallery/repository';
 
-export const imageSearchInputSchema = z.object({
-  query: z.string().trim().min(1).max(12_000),
+const searchOptions = {
   threshold: imageSimilarityThresholdSchema.optional(),
   limit: z.number().int().min(1).max(50).default(50),
+} as const;
+
+const textSearchSchema = z.object({
+  query: z.string().trim().min(1).max(12_000),
+  collectionKey: z.string().cuid().optional(),
+  ...searchOptions,
 }).strict();
+const similarImageSearchSchema = z.object({
+  imageKey: z.string().cuid(),
+  collectionKey: z.string().cuid().optional(),
+  ...searchOptions,
+}).strict();
+const duplicateImageSearchSchema = z.object({ duplicates: z.literal(true), collectionKey: z.string().cuid() }).strict();
+
+export const imageSearchInputSchema = z.union([textSearchSchema, similarImageSearchSchema, duplicateImageSearchSchema]);
 export type ImageSearchInput = z.infer<typeof imageSearchInputSchema>;
 
 export interface ImageSearchToolDependencies extends ExecuteActionOptions {
   context: DomainToolContext;
   executeEmbedding?: (organizationKey: string, input: EmbeddingInput) => Promise<ProviderExecuteResponse<EmbeddingOutput>>;
   searchImages?: (input: AccessibleImageSearchInput) => Promise<AccessibleImageSearchResult[]>;
+  getImage?: GalleryRepository['getImage'];
+  canAccessImage?: GalleryRepository['canAccessImage'];
+  canAccessCollection?: GalleryRepository['canAccessCollection'];
+  getCollection?: GalleryRepository['getCollection'];
+  findDuplicateImages?: GalleryRepository['listRedundantCollectionImages'];
 }
+
+const repository = getDefaultGalleryRepository();
 
 export const imageSearchTool = {
   name: 'image.search',
   inputSchema: imageSearchInputSchema,
   providerDefinition: {
     name: 'image.search',
-    description: 'Search accessible Gallery images by semantic similarity, ordered from best match to worst.',
+    description: 'Search accessible images by text, find images similar to a source image, or find deterministic duplicates within a collection.',
     inputSchema: {
       type: 'object',
-      required: ['query'],
-      additionalProperties: false,
-      properties: {
-        query: { type: 'string', minLength: 1, maxLength: 12_000 },
-        threshold: { type: 'number', minimum: -1, maximum: 1 },
-        limit: { type: 'integer', minimum: 1, maximum: 50, default: 50 },
-      },
+      oneOf: [
+        { type: 'object', required: ['query'], additionalProperties: false, properties: { query: { type: 'string', minLength: 1, maxLength: 12_000 }, collectionKey: { type: 'string' }, threshold: { type: 'number', minimum: -1, maximum: 1 }, limit: { type: 'integer', minimum: 1, maximum: 50, default: 50 } } },
+        { type: 'object', required: ['imageKey'], additionalProperties: false, properties: { imageKey: { type: 'string' }, collectionKey: { type: 'string' }, threshold: { type: 'number', minimum: -1, maximum: 1 }, limit: { type: 'integer', minimum: 1, maximum: 50, default: 50 } } },
+        { type: 'object', required: ['duplicates', 'collectionKey'], additionalProperties: false, properties: { duplicates: { type: 'boolean', const: true }, collectionKey: { type: 'string' } } },
+      ],
     },
   },
   async execute(rawInput: unknown, dependencies: ImageSearchToolDependencies): Promise<ImageSimilarityOutput> {
     const input = imageSearchInputSchema.parse(rawInput);
     const actorKey = imageSearchActor(dependencies.context);
+    const scopeKey = dependencies.context.runtimeScopeKey;
+    const organizationKey = dependencies.context.organizationKey;
+    if ('collectionKey' in input && input.collectionKey) {
+      if (!await (dependencies.canAccessCollection ?? repository.canAccessCollection)(scopeKey, input.collectionKey, actorKey)) throw new Error('Image collection not found.');
+      const collection = await (dependencies.getCollection ?? repository.getCollection)(scopeKey, input.collectionKey);
+      if (!collection) throw new Error('Image collection not found.');
+    }
+    if ('duplicates' in input) {
+      const duplicates = await (dependencies.findDuplicateImages ?? repository.listRedundantCollectionImages)(scopeKey, input.collectionKey);
+      return imageSimilarityOutput(duplicates.slice(0, 500).map((image) => ({ image })));
+    }
+    if ('imageKey' in input) {
+      const source = await (dependencies.getImage ?? repository.getImage)(input.imageKey);
+      if (!source || source.scopeKey !== scopeKey || source.deletedAt || !await (dependencies.canAccessImage ?? repository.canAccessImage)(scopeKey, source.key, actorKey)) throw new Error('Source image not found.');
+      const results = await (dependencies.searchImages ?? repository.searchAccessibleImages)({
+        organizationKey,
+        scopeKey,
+        actorKey,
+        embedding: source.embedding,
+        ...(input.collectionKey ? { collectionKey: input.collectionKey } : {}),
+        threshold: input.threshold,
+        limit: input.limit + 1,
+      });
+      return imageSimilarityOutput(results.filter(({ image }) => image.key !== source.key).slice(0, input.limit));
+    }
     const embeddingInput = { text: prepareEmbeddingText(input.query, 'query') };
     const response = dependencies.executeEmbedding
-      ? await dependencies.executeEmbedding(dependencies.context.organizationKey, embeddingInput)
+      ? await dependencies.executeEmbedding(organizationKey, embeddingInput)
       : await executeAction<EmbeddingInput, EmbeddingOutput>({
           mode: 'auto',
-          organizationKey: dependencies.context.organizationKey,
+          organizationKey,
           actionSlug: 'embed',
         }, embeddingInput, dependencies);
     const embedding = currentEmbeddingSchema.parse(response.output.embedding);
     const results = await (dependencies.searchImages ?? searchAccessibleImages)({
-      organizationKey: dependencies.context.organizationKey,
-      scopeKey: dependencies.context.runtimeScopeKey,
+      organizationKey,
+      scopeKey,
       actorKey,
       embedding,
+      ...(input.collectionKey ? { collectionKey: input.collectionKey } : {}),
       threshold: input.threshold,
       limit: input.limit,
     });

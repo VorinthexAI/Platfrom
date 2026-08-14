@@ -20,6 +20,45 @@ describe('Gallery repository transactions', () => {
     expect(queries).toHaveLength(1);
   });
 
+  test('copies every selected image to every destination in one transaction', async () => {
+    const imageKeys = [newId(), newId()], destinationCollectionKeys = [newId(), newId()];
+    const queries: string[] = [];
+    const queryBindVars: Record<string, unknown>[] = [];
+    const database: MediaLibraryDatabase = { async query(query, bindVars) {
+      queries.push(query);
+      queryBindVars.push(bindVars ?? {});
+      return { async all() {
+        if (query.includes('LET relation = FIRST')) return imageKeys;
+        if (query.includes('LET member = FIRST')) return destinationCollectionKeys;
+        if (query.includes('UPSERT')) return [true];
+        return [];
+      } };
+    } };
+    const repository = createGalleryRepository(database, async (_collections, operation) => operation(database));
+    const result = await repository.transferCollectionImages({ scopeKey: newId(), actorKey: newId(), sourceCollectionKey: newId(), destinationCollectionKeys, imageKeys, mode: 'copy', now: '2026-08-13T12:00:00.000Z' });
+    expect(result).toEqual({ status: 'ok', createdRelationCount: 4 });
+    expect(queries.filter((query) => query.includes('UPSERT'))).toHaveLength(4);
+    expect(queryBindVars[0]).toEqual({ imageKeys, scopeKey: expect.any(String), sourceCollectionKey: expect.any(String) });
+  });
+
+  test('soft deletes images and removes dependent collection and subject links atomically', async () => {
+    const imageKeys = [newId(), newId()];
+    const queries: string[] = [];
+    let transactionCollections: unknown;
+    const database: MediaLibraryDatabase = { async query(query, bindVars) {
+      queries.push(query);
+      return { async all() { return query.includes('LET image = DOCUMENT') ? imageKeys : []; } };
+    } };
+    const repository = createGalleryRepository(database, async (collections, operation) => { transactionCollections = collections; return operation(database); });
+    await expect(repository.deleteImages(newId(), imageKeys, '2026-08-13T12:00:00.000Z')).resolves.toEqual({ deletedImageKeys: imageKeys });
+    expect(transactionCollections).toEqual({ read: ['images'], write: ['images', 'collectionImages', 'collections', 'imageIdentities', 'visualIdentities'] });
+    expect(queries).toHaveLength(6);
+    expect(queries.some((query) => query.includes('REMOVE relation IN collectionImages'))).toBe(true);
+    expect(queries.some((query) => query.includes('REMOVE relation IN imageIdentities'))).toBe(true);
+    expect(queries.some((query) => query.includes('LET replacement = FIRST') && query.includes('referenceImageKey: replacement'))).toBe(true);
+    expect(queries.some((query) => query.includes('UPDATE image WITH { deletedAt: @now'))).toBe(true);
+  });
+
   test('keeps operation persistence behind the repository boundary', async () => {
     const source = await Bun.file(new URL('./operations.ts', import.meta.url)).text();
     expect(source).not.toMatch(/\bdb\.query\b|\bwithTransaction\b|\btoArangoDoc\b/);

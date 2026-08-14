@@ -4,9 +4,11 @@ import { z } from 'zod';
 import type { DomainToolContext } from './domain-execute';
 import type { DocumentParseDependencies, DocumentParseInput } from '@/lib/ai/document-processing';
 import type { RouterDependencies } from '@/lib/ai/router';
+import { NoEligibleRouteError, ProviderExecutionError } from '@/lib/ai/router/errors';
 import type { DocumentObjectStorage } from '@/lib/ai/document-processing/storage';
 import type { Folder } from '@/lib/db/folders.node';
 import type { Document } from '@/lib/db/documents.node';
+import type { DocumentAudioVersion } from '@/lib/db/document-audio-versions.node';
 import type { DocumentShare } from '@/lib/db/document-shares.node';
 import { documentVersionSchema, type DocumentVersion } from '@/lib/db/document-versions.node';
 import { DocumentProcessingError } from '@/lib/ai/document-processing/errors';
@@ -14,13 +16,14 @@ import type { generateDocumentExport } from '@/lib/ai/document-processing/export
 import type { ContentToolName, ContentToolOutput } from './content-schemas';
 import { ContentError, type ContentErrorCode } from './content-errors';
 import { contentToolInputSchemas, contentToolOutputSchemas, isContentToolName } from './content-registry';
-import { htmlToPlainText, sanitizeDocumentHtml } from '@/lib/ai/document-processing/representation';
+import { htmlToDocumentPreviewBlocks, htmlToPlainText, sanitizeDocumentHtml } from '@/lib/ai/document-processing/representation';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
-import { chunkDocumentContent } from '@/lib/ai/document-processing/chunking';
+import { chunkDocumentContent, documentSemanticHash } from '@/lib/ai/document-processing/chunking';
 import type { BookGenerator } from '@/lib/books/service';
+import type { DocumentScanInput } from '@/lib/ai/document-scanning';
 
 type Role = 'viewer' | 'moderator' | 'admin' | 'owner';
-type Action = 'ask' | 'enhance' | 'translate' | 'read' | 'traverse' | 'insert' | 'update' | 'delete' | 'embed' | 'speak' | 'reason' | 'deep-reason' | 'document-generate-html' | 'document-generate-content' | 'document-embed';
+type Action = 'ask' | 'enhance' | 'translate' | 'read' | 'traverse' | 'insert' | 'update' | 'delete' | 'embed' | 'speak' | 'generate-speech' | 'reason' | 'deep-reason' | 'document-generate-html' | 'document-generate-content' | 'document-embed';
 type SafeEvent = {
   type: 'authorization' | 'resolution' | 'action' | 'db' | 'embedding' | 'storage' | 'speech' | 'cleanup';
   status: 'started' | 'succeeded' | 'failed';
@@ -64,19 +67,23 @@ export interface ContentRepository {
   listVersions(scopeKey: string, documentKeys: string[], includeArchived?: boolean): Promise<DocumentVersion[]>;
   createVersion(version: Omit<DocumentVersion, 'key' | 'version' | 'createdAt' | 'deletedAt'>): Promise<DocumentVersion>;
   deleteVersion(key: string): Promise<void>;
+  listAudioVersions?(scopeKey: string, documentKeys: string[]): Promise<DocumentAudioVersion[]>;
+  createAudioVersion?(version: Omit<DocumentAudioVersion, 'version'>): Promise<DocumentAudioVersion>;
+  deleteAudioVersion?(key: string): Promise<void>;
   semanticSearch(input: { embedding: number[]; authorizedScopeKeys: string[]; folderKeys?: string[]; documentKeys?: string[]; extensions?: Document['extension'][]; createdAfter?: string; createdBefore?: string; updatedAfter?: string; updatedBefore?: string; includeArchived?: boolean; minScore?: number; limit?: number }): Promise<Array<{ score: number; document: Document; matchedContent?: string }>>;
-  semanticSearchFolders?(input: { embedding: number[]; authorizedScopeKeys: string[]; minScore: number; limit: number }): Promise<Array<{ score: number; folder: Folder }>>;
+  semanticSearchFolders?(input: { embedding: number[]; authorizedScopeKeys: string[]; folderKeys?: string[]; minScore: number; limit: number }): Promise<Array<{ score: number; folder: Folder }>>;
   transaction?<T>(operation: (repository: ContentRepository) => Promise<T>): Promise<T>;
 }
 
 export interface ContentSearchQueryStore {
   get(input: { actorKey: string; scopeKey: string; normalizedQuery: string; folderKey: string | null; includeDescendants: boolean; cacheVersion: number }): Promise<{ output: unknown } | null>;
   record(input: { key: string; actorKey: string; scopeKey: string; query: string; normalizedQuery: string; folderKey: string | null; includeDescendants: boolean; cacheVersion: number; output: unknown; now: string }): Promise<void>;
-  list(input: { actorKey: string; scopeKey: string; folderKey: string | null; includeDescendants: boolean; limit: number }): Promise<Array<{ query: string; normalizedQuery: string; searchedAt: string; count: number; folderKey?: string; includeDescendants?: boolean; documents: Array<{ documentKey: string; scopeKey: string; folderKey?: string; name: string; score: number; summary: string }> }>>;
+  list(input: { actorKey: string; scopeKey: string; folderKey: string | null; includeDescendants: boolean; limit: number }): Promise<Array<{ query: string; normalizedQuery: string; searchedAt: string; count: number; folderKey?: string; includeDescendants?: boolean; documents: Array<{ documentKey: string; scopeKey: string; folderKey?: string; name: string; extension?: string; score: number; summary?: string }> }>>;
 }
 
 export interface ContentActionResult { text?: string; audio?: Uint8Array; audioBase64?: string; mimeType?: string; durationMs?: number; html?: string; content?: string; embedding?: number[]; contentChunks?: string[]; chunkEmbeddings?: number[][]; semanticChunkCount?: number; semanticContentHash?: string }
 export interface ContentToolDependencies extends RouterDependencies {
+  signal?: AbortSignal;
   repository?: ContentRepository;
   storage?: DocumentObjectStorage;
   parseDocument?: (input: DocumentParseInput, dependencies?: DocumentParseDependencies) => Promise<{ document: Document }>;
@@ -96,16 +103,25 @@ export interface ContentToolDependencies extends RouterDependencies {
   maxDownloadBytes?: number;
   generateExport?: typeof generateDocumentExport;
   searchQueries?: ContentSearchQueryStore;
+  searchEmbeddingTimeoutMs?: number;
   bookRuntime?: BookGenerator;
+  scanDocument?: (input: DocumentScanInput, organizationKey: string) => Promise<{ documentKey: string; content: string; storageKeys: string[] }>;
   getFolderCoverImage?: (scopeKey: string, imageKey: string) => Promise<{ storageKey: string } | null>;
   signFolderCoverUrl?: (storageKey: string) => Promise<string>;
+  signDocumentSourceUrl?: (storageKey: string) => Promise<string>;
+  signAudioUrl?: (storageKey: string) => Promise<string>;
+  mergeAudio?: (chunks: Uint8Array[], signal?: AbortSignal) => Promise<Uint8Array>;
+  audioDuration?: (bytes: Uint8Array) => number;
 }
 
 const rank: Record<Role, number> = { viewer: 1, moderator: 2, admin: 3, owner: 4 };
 const ROUTED_EMBEDDING_CONCURRENCY = 8;
+const PERSISTED_AUDIO_MAX_CHARACTERS = 120_000;
+const PERSISTED_AUDIO_MAX_CHUNKS = 80;
+const PERSISTED_AUDIO_MAX_BYTES = 100 * 1024 * 1024;
 const scrypt = promisify(nodeScrypt);
 const MUTATIONS = new Set<ContentToolName>([
-  'book.create-context', 'book.write', 'folder.create', 'folder.update', 'folder.rename', 'folder.move', 'folder.archive', 'folder.restore', 'folder.delete', 'document.parse', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.share', 'document.unshare', 'document.create-version', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.translate', 'document.rewrite',
+  'book.create-context', 'book.write', 'folder.create', 'folder.update', 'folder.rename', 'folder.move', 'folder.copy', 'folder.archive', 'folder.restore', 'folder.delete', 'document.parse', 'document.scan', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.share', 'document.unshare', 'document.create-version', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.translate', 'document.rewrite',
 ]);
 
 function fail(code: ContentErrorCode, message: string, tool: ContentToolName, action?: string, resourceKey?: string, cause?: unknown, retryable = false): never {
@@ -131,6 +147,26 @@ function mappedError(error: unknown, tool: ContentToolName, action?: string, res
   return new ContentError(validation ? 'CONTENT_INVALID_INPUT' : 'CONTENT_CONFLICT', validation ? 'Content tool input or output was invalid.' : 'Content operation failed.', tool, { action, resourceKey, cause: error, retryable: !validation });
 }
 
+function speechError(error: unknown, tool: ContentToolName, action: string, resourceKey: string): ContentError {
+  if (error instanceof ProviderExecutionError) {
+    const codes = new Set(error.attempts.map(({ code }) => code));
+    if (codes.has('authentication_failed') || codes.has('not_configured') || codes.has('adapter_unavailable')) {
+      return new ContentError('DOCUMENT_SPEECH_FAILED', 'Audio generation is unavailable because the speech provider is not configured.', tool, { action, resourceKey, cause: error });
+    }
+    if (codes.has('invalid_input') || codes.has('unsupported_action')) {
+      return new ContentError('DOCUMENT_SPEECH_FAILED', 'The selected language or voice is not supported for audio generation.', tool, { action, resourceKey, cause: error });
+    }
+    if (codes.has('rate_limited')) {
+      return new ContentError('DOCUMENT_SPEECH_FAILED', 'Audio generation is busy. Try again shortly.', tool, { action, resourceKey, cause: error, retryable: true });
+    }
+    if (codes.has('provider_unavailable') || codes.has('timeout')) {
+      return new ContentError('DOCUMENT_SPEECH_FAILED', 'Audio generation is temporarily unavailable. Try again.', tool, { action, resourceKey, cause: error, retryable: true });
+    }
+  }
+  if (error instanceof NoEligibleRouteError) return new ContentError('DOCUMENT_SPEECH_FAILED', 'Audio generation is not configured.', tool, { action, resourceKey, cause: error });
+  return new ContentError('DOCUMENT_SPEECH_FAILED', 'Document audio could not be generated.', tool, { action, resourceKey, cause: error, retryable: true });
+}
+
 async function folderView(folder: Folder, dependencies: Pick<RuntimeDefaults, 'getFolderCoverImage' | 'signFolderCoverUrl'>) {
   const { embedding: _embedding, coverImageKey, _internalDeletion: _internalDeletion, ...safe } = folder;
   if (!coverImageKey) return safe;
@@ -139,8 +175,8 @@ async function folderView(folder: Folder, dependencies: Pick<RuntimeDefaults, 'g
 }
 
 function documentView(document: Document) {
-  const { html: _html, content: _content, embedding: _embedding, contentChunks: _contentChunks, chunkEmbeddings: _chunkEmbeddings, semanticChunkCount: _semanticChunkCount, semanticContentHash: _semanticContentHash, _semanticChunkingSkipped: _semanticChunkingSkipped, storageKey: _storageKey, speechStorageKeys: _speechStorageKeys, _internalDeletion: _internalDeletion, ...safe } = document;
-  return safe;
+  const { html: _html, content: _content, embedding: _embedding, contentChunks: _contentChunks, chunkEmbeddings: _chunkEmbeddings, semanticChunkCount: _semanticChunkCount, semanticContentHash: _semanticContentHash, _semanticChunkingSkipped: _semanticChunkingSkipped, storageKey: _storageKey, speechStorageKeys: _speechStorageKeys, sourceStorageKeys: _sourceStorageKeys, _internalDeletion: _internalDeletion, ...safe } = document;
+  return { ...safe, ...(document.sourceStorageKeys?.length ? { sourceImageCount: document.sourceStorageKeys.length } : {}) };
 }
 
 function downloadFileName(name: string, extension: string) {
@@ -156,6 +192,19 @@ function shareView(share: DocumentShare) {
 function versionView(version: DocumentVersion, include: string[] = []) {
   const { embedding, chunkEmbeddings: _chunkEmbeddings, semanticChunkCount: _semanticChunkCount, semanticContentHash: _semanticContentHash, _semanticChunkingSkipped: _semanticChunkingSkipped, html, content: _content, ...safe } = version;
   return { ...safe, ...(include.includes('html') ? { html } : {}), ...(include.includes('content') ? { content: htmlToPlainText(html) } : {}), ...(include.includes('embedding') ? { embedding } : {}) };
+}
+
+function generatedAudioVersionView(version: DocumentAudioVersion) {
+  const { storageKey: _storageKey, createdByKey: _createdByKey, scopeKey: _scopeKey, ...safe } = version;
+  return safe;
+}
+
+async function audioVersionView(version: DocumentAudioVersion, current: Document, signUrl: (storageKey: string) => Promise<string>) {
+  return {
+    ...generatedAudioVersionView(version),
+    current: version.sourceContentHash === documentSemanticHash(current.content) && (!version.includeTitle || version.sourceTitle === current.name),
+    url: await signUrl(version.storageKey),
+  };
 }
 
 async function productionRepository(): Promise<ContentRepository> {
@@ -272,6 +321,12 @@ async function productionRepository(): Promise<ContentRepository> {
       const current = await persistence.getVersion(key);
       if (!current || !await persistence.deleteVersion(current.scopeKey, key)) throw new Error('Version was not found for scoped deletion.');
     },
+    listAudioVersions: persistence.listAudioVersions,
+    createAudioVersion: persistence.createAudioVersion,
+    async deleteAudioVersion(key) {
+      const current = await persistence.getAudioVersion(key);
+      if (!current || !await persistence.deleteAudioVersion(current.scopeKey, key)) throw new Error('Audio version was not found for scoped deletion.');
+    },
     semanticSearch: documents.semanticSearchDocuments,
     semanticSearchFolders: folders.semanticSearchFolders,
     transaction: (operation) => content.withContentPersistenceTransaction((bound) => operation(makeRepository(bound))),
@@ -317,10 +372,14 @@ interface RuntimeDefaults {
   generateExport: typeof generateDocumentExport;
   getFolderCoverImage: NonNullable<ContentToolDependencies['getFolderCoverImage']>;
   signFolderCoverUrl: NonNullable<ContentToolDependencies['signFolderCoverUrl']>;
+  signDocumentSourceUrl: NonNullable<ContentToolDependencies['signDocumentSourceUrl']>;
+  signAudioUrl: NonNullable<ContentToolDependencies['signAudioUrl']>;
+  mergeAudio: NonNullable<ContentToolDependencies['mergeAudio']>;
+  audioDuration: NonNullable<ContentToolDependencies['audioDuration']>;
 }
 
 async function defaults(deps: ContentToolDependencies, context: DomainToolContext): Promise<RuntimeDefaults> {
-  const [{ newId }, storage, processing, embeddings, router, ledger, exports, images, imageUrl] = await Promise.all([
+  const [{ newId }, storage, processing, embeddings, router, ledger, exports, images, imageUrl, audioUrl, audio, duration] = await Promise.all([
     import('@/lib/ids'),
     import('@/lib/ai/document-processing/storage'),
     import('@/lib/ai/document-processing'),
@@ -330,6 +389,9 @@ async function defaults(deps: ContentToolDependencies, context: DomainToolContex
     import('@/lib/ai/document-processing/exports'),
     import('@/lib/db/images.node'),
     import('@/lib/gallery/image-url'),
+    import('@/lib/ai/audio/audio-url'),
+    import('@/lib/ai/audio/merge-mp3'),
+    import('@/lib/ai/audio/mp3-duration'),
   ]);
   const executeAction = deps.executeAction ?? router.executeAction;
   const embedding = deps.embed ? (text: string) => deps.embed!(text) : async (text: string, purpose: 'document' | 'query' = 'document') => {
@@ -372,6 +434,10 @@ async function defaults(deps: ContentToolDependencies, context: DomainToolContex
     generateExport: deps.generateExport ?? exports.generateDocumentExport,
     getFolderCoverImage: deps.getFolderCoverImage ?? images.getImageInScope,
     signFolderCoverUrl: deps.signFolderCoverUrl ?? imageUrl.signedImageUrl,
+    signDocumentSourceUrl: deps.signDocumentSourceUrl ?? imageUrl.signedImageUrl,
+    signAudioUrl: deps.signAudioUrl ?? audioUrl.signedAudioUrl,
+    mergeAudio: deps.mergeAudio ?? audio.mergeMp3Chunks,
+    audioDuration: deps.audioDuration ?? duration.mp3DurationMs,
   };
 }
 
@@ -473,21 +539,6 @@ function speechChunks(raw: string, includeCode: boolean, maximum: number) {
     }
   }
   return chunks;
-}
-
-function audioExtension(mimeType: string): string | null {
-  const mime = mimeType.toLowerCase().split(';', 1)[0]!.trim();
-  return ({
-    'audio/mpeg': 'mp3',
-    'audio/mp3': 'mp3',
-    'audio/wav': 'wav',
-    'audio/x-wav': 'wav',
-    'audio/ogg': 'ogg',
-    'audio/webm': 'webm',
-    'audio/mp4': 'm4a',
-    'audio/aac': 'aac',
-    'audio/flac': 'flac',
-  } as Record<string, string>)[mime] ?? null;
 }
 
 async function hashPassword(password: string, random: (size: number) => Uint8Array) { const salt = Buffer.from(random(16)); const hash = await scrypt(password, salt, 32) as Buffer; return `scrypt:${salt.toString('hex')}:${hash.toString('hex')}`; }
@@ -638,6 +689,14 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
   const foldersIn = async (scopeKey: string, includePendingDeletion = false) => (await repo.listFolders(scopeKey, true, includePendingDeletion))
     .filter((item) => includePendingDeletion || !item._internalDeletion);
   const descendants = (all: Folder[], key: string) => { const out: Folder[] = []; const pending = [key]; const seen = new Set(pending); while (pending.length) { const parentKey = pending.shift()!; for (const child of all.filter((f) => f.parentFolderKey === parentKey)) if (!seen.has(child.key)) { seen.add(child.key); out.push(child); pending.push(child.key); } } return out; };
+  const availableCopyName = (requested: string, names: Set<string>) => {
+    if (!names.has(requested)) return requested;
+    for (let copy = 1; ; copy += 1) {
+      const suffix = copy === 1 ? ' (copy)' : ` (copy ${copy})`;
+      const candidate = `${requested.slice(0, 255 - suffix.length)}${suffix}`;
+      if (!names.has(candidate)) return candidate;
+    }
+  };
   const activeFolderHierarchy = async (key: string | undefined, scopeKey: string) => {
     let currentKey: string | undefined = key;
     const visited = new Set<string>();
@@ -775,20 +834,6 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
     if (tool === 'book.create-context' || tool === 'book.write') {
       const { runBookContentTool } = await import('./book-runtime');
       result = await runBookContentTool(tool, input, context, dependencies);
-    } else if (tool === 'autocomplete') {
-      const response = await action('ask', {
-        systemPrompt: `Continue the user's writing with exactly ${input.wordCount} words or fewer. Match the writer's voice and direction while favoring a vivid, specific, or subtly unexpected continuation over generic filler. Keep it coherent with the supplied context. Return only the continuation, without quotation marks, labels, commentary, or repeating the supplied context.`,
-        messages: [{ role: 'user', content: [{ type: 'text', text: input.context }] }],
-        options: { temperature: 0.7, maxTokens: Math.max(16, input.wordCount * 3) },
-      });
-      const completion = z.string().trim().min(1).parse(response.text)
-        .replace(/^(?:continuation\s*:\s*)/i, '')
-        .replace(/^["'\u2018\u2019\u201c\u201d]+|["'\u2018\u2019\u201c\u201d]+$/g, '')
-        .trim()
-        .split(/\s+/)
-        .slice(0, input.wordCount)
-        .join(' ');
-      result = { completion: z.string().min(1).parse(completion) };
     } else if (tool === 'enhance') {
       const response = await action('enhance', {
         systemPrompt: 'Correct spelling, grammar, awkward wording, and unclear phrasing. Preserve the original meaning, facts, tone, paragraph structure, line breaks, and formatting. Do not add new claims or commentary. Return only the revised text.',
@@ -821,6 +866,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             ...(item.description ? { description: item.description } : {}),
             ...(item.coverImageKey ? { coverImageKey: item.coverImageKey } : {}),
             embedding,
+            isFavorite: false,
             deletedAt: null,
             createdAt: timestamp,
             updatedAt: timestamp,
@@ -883,6 +929,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             ...(item.name !== undefined ? { name: item.name } : {}),
             ...(item.description !== undefined ? { description: item.description ?? undefined } : {}),
             ...(item.coverImageKey !== undefined ? { coverImageKey: item.coverImageKey ?? undefined } : {}),
+            ...(item.isFavorite !== undefined ? { isFavorite: item.isFavorite } : {}),
             ...(embedding ? { embedding } : {}),
             updatedAt: now(),
           };
@@ -909,6 +956,137 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           return { folder: await folderView(moved, d) };
         },
       })), input.atomic, repo);
+    } else if (tool === 'folder.copy') {
+      if (input.atomic) fail('CONTENT_CONFLICT', 'Atomic folder copy is unavailable because storage copy cannot be rolled back transactionally.', tool, 'storage');
+      result = await batch(tool, input.copies.map((item: any) => ({
+        key: item.folderKey,
+        run: async () => {
+          const source = await folder(item.folderKey, 'viewer', false);
+          const target = await location(item.targetScopeKey, item.targetParentFolderKey, 'moderator');
+          const sourceScopeFolders = (await foldersIn(source.scopeKey)).filter((candidate) => !candidate.deletedAt);
+          const sourceFolders = [source, ...descendants(sourceScopeFolders, source.key)];
+          const targetScopeFolders = source.scopeKey === item.targetScopeKey ? sourceScopeFolders : (await foldersIn(item.targetScopeKey)).filter((candidate) => !candidate.deletedAt);
+          const siblingNames = new Set(targetScopeFolders.filter((candidate) => candidate.parentFolderKey === target?.key).map((candidate) => candidate.name));
+          const rootName = availableCopyName(item.newName ?? source.name, siblingNames);
+          const sourceFolderKeys = new Set(sourceFolders.map((candidate) => candidate.key));
+          const sourceDocuments = (await repo.listDocuments(source.scopeKey)).filter((candidate) => candidate.folderKey && sourceFolderKeys.has(candidate.folderKey));
+          const folderKeys = new Map(sourceFolders.map((candidate) => [candidate.key, d.id()]));
+          const insertedFolderKeys: string[] = [];
+          const insertedDocumentKeys: string[] = [];
+          const copiedStorageKeys: string[] = [];
+          const documentStorageKeys = new Map<string, string[]>();
+          const timestamp = now();
+          const copyObject = async (sourceKey: string, destinationKey: string, mimeType?: string) => {
+            const copied = await storageOperation('copy', source.key, item.targetScopeKey, () => d.storage.copy({ sourceKey, destinationKey, mimeType }));
+            copiedStorageKeys.push(copied.storageKey);
+            return copied.storageKey;
+          };
+          try {
+            for (const current of sourceFolders) {
+              const key = folderKeys.get(current.key)!;
+              const parentFolderKey = current.key === source.key ? target?.key : folderKeys.get(current.parentFolderKey!);
+              const name = current.key === source.key ? rootName : current.name;
+              const embedding = current.key === source.key && name !== current.name
+                ? await embed([name, current.description].filter(Boolean).join('\n\n'), key, item.targetScopeKey)
+                : current.embedding;
+              const created = await repo.insertFolder({
+                ...current,
+                key,
+                scopeKey: item.targetScopeKey,
+                ...(parentFolderKey ? { parentFolderKey } : { parentFolderKey: undefined }),
+                name,
+                embedding,
+                ...(source.scopeKey === item.targetScopeKey ? {} : { coverImageKey: undefined }),
+                isFavorite: false,
+                deletedAt: null,
+                _internalDeletion: undefined,
+                createdAt: timestamp,
+                updatedAt: timestamp,
+              });
+              insertedFolderKeys.push(created.key);
+            }
+            for (const current of sourceDocuments) {
+              const key = d.id();
+              const base = `content/${context.organizationKey}/${item.targetScopeKey}/${key}`;
+              const storageKey = current.storageKey && current.extension
+                ? await copyObject(current.storageKey, `${base}/original.${current.extension}`, current.mimeType)
+                : undefined;
+              const sourceStorageKeys: string[] = [];
+              for (let index = 0; index < (current.sourceStorageKeys?.length ?? 0); index += 1) {
+                const sourceKey = current.sourceStorageKeys![index]!;
+                const suffix = sourceKey.match(/\.[a-z0-9]+$/i)?.[0] ?? '';
+                sourceStorageKeys.push(await copyObject(sourceKey, `${base}/sources/${index + 1}${suffix}`));
+              }
+              const speechStorageKeys: string[] = [];
+              for (let index = 0; index < (current.speechStorageKeys?.length ?? 0); index += 1) {
+                const sourceKey = current.speechStorageKeys![index]!;
+                const suffix = sourceKey.match(/\.[a-z0-9]+$/i)?.[0] ?? '';
+                speechStorageKeys.push(await copyObject(sourceKey, `${base}/speech/${index + 1}${suffix}`));
+              }
+              const created = await repo.insertDocument({
+                ...current,
+                key,
+                scopeKey: item.targetScopeKey,
+                folderKey: folderKeys.get(current.folderKey!)!,
+                ...(storageKey ? { storageKey } : { storageKey: undefined }),
+                ...(sourceStorageKeys.length ? { sourceStorageKeys } : { sourceStorageKeys: undefined }),
+                ...(speechStorageKeys.length ? { speechStorageKeys } : { speechStorageKeys: undefined }),
+                isFavorite: false,
+                deletedAt: null,
+                _internalDeletion: undefined,
+                createdAt: timestamp,
+                updatedAt: timestamp,
+              });
+              insertedDocumentKeys.push(created.key);
+              documentStorageKeys.set(created.key, [storageKey, ...sourceStorageKeys, ...speechStorageKeys].filter((value): value is string => Boolean(value)));
+            }
+            const copiedRoot = await repo.getFolder(folderKeys.get(source.key)!);
+            if (!copiedRoot) fail('CONTENT_CONFLICT', 'Copied folder root could not be read.', tool, 'read', source.key);
+            return { folder: await folderView(copiedRoot, d), folderCount: sourceFolders.length, documentCount: sourceDocuments.length };
+          } catch (error) {
+            const cleanupErrors: unknown[] = [];
+            const folderMarker = { kind: 'folder' as const, owner: invocationKey, startedAt: timestamp, folderKeys: insertedFolderKeys, documentKeys: insertedDocumentKeys, objectKeys: copiedStorageKeys };
+            try {
+              if (!repo.transaction) throw new Error('Transaction-bound copy compensation is unavailable.');
+              await repo.transaction(async (bound) => {
+                for (const key of insertedDocumentKeys) {
+                  const marker = { kind: 'document' as const, owner: invocationKey, startedAt: timestamp, objectKeys: documentStorageKeys.get(key) ?? [] };
+                  if (!await bound.setDocumentDeletion(key, marker)) throw new Error(`Copied document ${key} could not be frozen for compensation.`);
+                }
+                for (const key of [...insertedFolderKeys].reverse()) if (!await bound.setFolderDeletion(key, folderMarker)) throw new Error(`Copied folder ${key} could not be frozen for compensation.`);
+              });
+            } catch (cleanupError) {
+              cleanupErrors.push(cleanupError);
+            }
+            if (cleanupErrors.length === 0) {
+              const failedDocumentKeys = new Set<string>();
+              for (const key of [...insertedDocumentKeys].reverse()) await repo.deleteDocument(key).catch((cleanupError) => { failedDocumentKeys.add(key); cleanupErrors.push(cleanupError); });
+              const retainedStorageKeys = new Set([...failedDocumentKeys].flatMap((key) => documentStorageKeys.get(key) ?? []));
+              const failedStorageKeys = new Set(retainedStorageKeys);
+              for (const key of [...copiedStorageKeys].reverse()) if (!retainedStorageKeys.has(key)) {
+                await storageOperation('delete', source.key, item.targetScopeKey, () => d.storage.delete(key)).catch((cleanupError) => { failedStorageKeys.add(key); cleanupErrors.push(cleanupError); });
+              }
+              // Folder markers retain the manifest until every document pointer and object is gone.
+              const remainingFolderKeys = new Set(insertedFolderKeys);
+              if (cleanupErrors.length === 0) for (const key of [...insertedFolderKeys].reverse()) {
+                await repo.deleteFolder(key).then(() => remainingFolderKeys.delete(key)).catch((cleanupError) => cleanupErrors.push(cleanupError));
+              }
+              if (cleanupErrors.length > 0 && remainingFolderKeys.size > 0) {
+                const recoveryMarker = { ...folderMarker, folderKeys: [...remainingFolderKeys], documentKeys: [...failedDocumentKeys], objectKeys: [...failedStorageKeys] };
+                try {
+                  await repo.transaction!(async (bound) => {
+                    for (const key of remainingFolderKeys) if (!await bound.setFolderDeletion(key, recoveryMarker, invocationKey)) throw new Error(`Copied folder ${key} compensation manifest could not be updated.`);
+                  });
+                } catch (cleanupError) {
+                  cleanupErrors.push(cleanupError);
+                }
+              }
+            }
+            if (cleanupErrors.length) throw new ContentError('CONTENT_CONFLICT', 'Folder copy failed and compensation requires retry.', tool, { action: 'cleanup', resourceKey: insertedFolderKeys[0] ?? source.key, cause: new AggregateError([error, ...cleanupErrors]), retryable: true });
+            throw error;
+          }
+        },
+      })), false, repo);
     } else if (tool === 'folder.archive' || tool === 'folder.restore') {
       const restore = tool === 'folder.restore';
       const lifecycleItems = input.folderKeys.map((key: string) => ({
@@ -951,6 +1129,12 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         key,
         preflight: async () => {
           const root = await folder(key, 'owner', true, true);
+          if (root._internalDeletion) {
+            const manifest = root._internalDeletion;
+            if (input.atomic) fail('CONTENT_CONFLICT', 'Atomic folder deletion cannot resume an existing deletion manifest.', tool, 'transaction', key);
+            if (manifest.kind !== 'folder' || !manifest.folderKeys || !manifest.documentKeys || !manifest.folderKeys.includes(key)) fail('CONTENT_CONFLICT', 'Folder deletion manifest is incomplete.', tool, 'delete', key);
+            return;
+          }
           if (!root.deletedAt) fail('CONTENT_CONFLICT', 'Folder must be archived before permanent deletion.', tool, 'delete', key);
           if (!await canPermanentlyDelete({ kind: 'folder', deletedAt: root.deletedAt, context })) fail('CONTENT_FORBIDDEN', 'Folder retention policy denied permanent deletion.', tool, 'delete', key);
         },
@@ -1031,11 +1215,13 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
               document: item,
               versions: await repo.listVersions(item.scopeKey, [item.key], true),
               shares: await repo.listShares(item.scopeKey, [item.key], { includeArchived: true, includeExpired: true, includeRevoked: true }),
+              audioVersions: repo.listAudioVersions ? await repo.listAudioVersions(item.scopeKey, [item.key]) : [],
             })));
             for (const item of related) for (const version of item.versions) {
               if (!await canPermanentlyDelete({ kind: 'version', deletedAt: item.document.deletedAt, context })) fail('CONTENT_FORBIDDEN', 'Version retention policy denied permanent deletion.', tool, 'delete', version.key);
             }
-            const inventoriedKeys = [...new Set(related.flatMap((item) => [item.document.storageKey, ...(item.document.speechStorageKeys ?? [])]).filter((item): item is string => Boolean(item)))];
+            if (related.some((item) => item.audioVersions.length > 0) && !repo.deleteAudioVersion) fail('CONTENT_CONFLICT', 'Document audio deletion is unavailable.', tool, 'delete', key);
+            const inventoriedKeys = [...new Set(related.flatMap((item) => [item.document.storageKey, ...(item.document.speechStorageKeys ?? []), ...(item.document.sourceStorageKeys ?? []), ...item.audioVersions.map((audio) => audio.storageKey)]).filter((item): item is string => Boolean(item)))];
             const manifest = root._internalDeletion?.objectKeys ? root._internalDeletion : { ...root._internalDeletion!, objectKeys: inventoriedKeys };
             if (!root._internalDeletion?.objectKeys) {
               const persisted = await repo.transaction((bound) => bound.setFolderDeletion(root.key, manifest, root._internalDeletion!.owner));
@@ -1047,6 +1233,10 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           const removeMetadata = async (bound: ContentRepository) => {
             for (const item of related) {
               for (const version of item.versions) await bound.deleteVersion(version.key);
+              for (const audio of item.audioVersions) {
+                if (!bound.deleteAudioVersion) fail('CONTENT_CONFLICT', 'Transaction-bound audio deletion is unavailable.', tool, 'transaction', audio.key);
+                await bound.deleteAudioVersion(audio.key);
+              }
               for (const share of item.shares) await bound.deleteShare(share.key);
               await bound.deleteDocument(item.document.key);
             }
@@ -1084,6 +1274,40 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         },
       });
       result = { document: documentView(processed.document) };
+    } else if (tool === 'document.scan') {
+      await location(input.scopeKey, input.folderKey, 'moderator');
+      const processingInput = { ...input, idempotencyKey: input.idempotencyKey ? createHash('sha256').update(member.user.key).update('\0').update(input.idempotencyKey).digest('hex') : invocationKey };
+      const scan = dependencies.scanDocument ?? (await import('@/lib/ai/document-scanning')).scanDocumentImages;
+      const deterministicKey = (await import('@/lib/ai/document-processing')).documentKeyForRequest(input.scopeKey, input.folderKey, processingInput.idempotencyKey);
+      const replay = await repo.getDocument(deterministicKey);
+      if (replay) result = { document: documentView(replay) };
+      else {
+        const processed = await scan(processingInput, context.organizationKey);
+        try {
+          const transformed = await representations({ content: processed.content }, input.name ?? `Scanned document ${d.clock().toISOString().slice(0, 10)}`, processed.documentKey, input.scopeKey);
+          const timestamp = now();
+          const created = await repo.insertDocument({
+            key: processed.documentKey,
+            scopeKey: input.scopeKey,
+            ...(input.folderKey ? { folderKey: input.folderKey } : {}),
+            name: input.name ?? `Scanned document ${timestamp.slice(0, 10)}`,
+            isFavorite: false,
+            sourceStorageKeys: processed.storageKeys,
+            ...transformed,
+            deletedAt: null,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+          result = { document: documentView(created) };
+        } catch (error) {
+          const committed = await repo.getDocument(processed.documentKey).catch(() => null);
+          if (committed) result = { document: documentView(committed) };
+          else {
+            await Promise.allSettled(processed.storageKeys.map((key) => d.storage.delete(key)));
+            throw error;
+          }
+        }
+      }
     } else if (tool === 'document.create') {
       await location(input.scopeKey, input.folderKey, 'moderator');
       const key = d.id();
@@ -1113,12 +1337,14 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           return {
             document: {
               ...documentView(current),
+              ...(include.includes('blocks') ? { blocks: htmlToDocumentPreviewBlocks(current.html) } : {}),
               ...(include.includes('html') ? { html: current.html } : {}),
               ...(include.includes('content') ? { content: current.content } : {}),
               ...(include.includes('embedding') ? { embedding: current.embedding } : {}),
               ...(parent ? { folder: await folderView(parent, d) } : {}),
               ...(include.includes('shares') ? { shares: (await repo.listShares(current.scopeKey, [current.key])).map(shareView) } : {}),
               ...(latest ? { latestVersion: versionView(latest) } : {}),
+              ...(include.includes('sourceImages') ? { sourceImages: await Promise.all((current.sourceStorageKeys ?? []).map(async (storageKey, index) => ({ page: index + 1, url: await d.signDocumentSourceUrl(storageKey) }))) } : {}),
             },
           };
         },
@@ -1141,67 +1367,119 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       result = await batch(tool, input.documentKeys.map((key: string) => ({
         key,
         run: async () => {
-          const current = await document(key, 'viewer', false);
+          const current = await document(key, input.mode === 'audio' && input.persistAudio ? 'moderator' : 'viewer', false);
           if (input.mode === 'content') return { documentKey: key, title: current.name, content: current.content };
           if (input.mode === 'html') return { documentKey: key, title: current.name, html: current.html };
+          if (input.persistAudio && current.content.length > PERSISTED_AUDIO_MAX_CHARACTERS) fail('DOCUMENT_TOO_LARGE', `Full audio generation supports documents up to ${PERSISTED_AUDIO_MAX_CHARACTERS} characters.`, tool, 'generate-speech', key);
           const start = input.startOffset ?? 0;
           const end = Math.min(input.endOffset ?? current.content.length, current.content.length);
-          const maximum = Math.min(Math.max(dependencies.maxSpeechChunkCharacters ?? 1800, 200), 4000);
+          const maximum = Math.min(Math.max(dependencies.maxSpeechChunkCharacters ?? 1800, 200), input.persistAudio ? 2800 : 4000);
           const documentChunks = speechChunks(current.content.slice(start, end), input.includeCode ?? false, maximum)
             .map((chunk) => ({ ...chunk, start: start + chunk.start, end: start + chunk.end }));
           if (input.includeTitle && documentChunks[0]) documentChunks[0] = { ...documentChunks[0], text: `${current.name}. ${documentChunks[0].text}` };
           const chunks = documentChunks;
-          const audio: Array<{ index: number; storageKey?: string; url?: string; durationMs?: number; startCharacter: number; endCharacter: number }> = [];
-          const uploaded: string[] = [];
+          if (input.persistAudio && chunks.length > PERSISTED_AUDIO_MAX_CHUNKS) fail('DOCUMENT_TOO_LARGE', `Full audio generation supports at most ${PERSISTED_AUDIO_MAX_CHUNKS} speech segments.`, tool, 'generate-speech', key);
+          if (chunks.length === 0) fail('DOCUMENT_SPEECH_FAILED', 'This document has no text that can be narrated.', tool, input.persistAudio ? 'generate-speech' : 'speak', key);
+          const audio: Array<{ index: number; url: string; durationMs?: number; startCharacter: number; endCharacter: number }> = [];
+          const generated: Uint8Array[] = [];
+          let generatedBytes = 0;
           let duration = 0;
-          try {
-            for (let index = 0; index < chunks.length; index += 1) {
-              const chunk = chunks[index]!;
-              const spoken = await action('speak', {
+          for (let index = 0; index < chunks.length; index += 1) {
+            dependencies.signal?.throwIfAborted();
+            const chunk = chunks[index]!;
+            const speechAction = input.persistAudio ? 'generate-speech' : 'speak';
+            let spoken: ContentActionResult;
+            try {
+              spoken = await action(speechAction, {
                 text: chunk.text,
                 ...(input.language ? { language: input.language } : {}),
-                ...(input.voice ? { voice: input.voice } : {}),
+                ...(input.voice ? { voice: input.voice } : input.persistAudio ? { voice: 'Joanna' } : {}),
                 ...(input.speakingRate ? { speakingRate: input.speakingRate } : {}),
-                format: 'wav',
+                format: input.persistAudio ? 'mp3' : 'wav',
               }, key, current.scopeKey);
-              const bytes = spoken.audio
+            } catch (error) {
+              throw speechError(error, tool, speechAction, key);
+            }
+            let bytes: Uint8Array;
+            let mimeType: string;
+            try {
+              bytes = spoken.audio
                 ? z.instanceof(Uint8Array).parse(spoken.audio)
                 : new Uint8Array(Buffer.from(z.string().min(1).parse(spoken.audioBase64), 'base64'));
-              const mimeType = z.string().min(1).parse(spoken.mimeType ?? 'audio/mpeg');
-              const item = {
-                index,
-                startCharacter: chunk.start,
-                endCharacter: chunk.end,
-                ...(spoken.durationMs !== undefined ? { durationMs: spoken.durationMs } : {}),
-              };
-              if (input.persistAudio) {
-                const extension = audioExtension(mimeType);
-                if (!extension) fail('DOCUMENT_SPEECH_FAILED', 'Speech MIME type cannot be persisted safely.', tool, 'speak', key);
-                const storageKey = `content/${context.organizationKey}/${current.scopeKey}/${key}/speech/${invocationKey}/${String(index).padStart(4, '0')}.${extension}`;
-                await storageOperation('upload', key, current.scopeKey, () => d.storage.upload({ key: storageKey, bytes, mimeType }));
-                uploaded.push(storageKey);
-                audio.push({ ...item, storageKey });
-              } else {
-                audio.push({ ...item, url: `data:${mimeType};base64,${Buffer.from(bytes).toString('base64')}` });
-              }
-              duration += spoken.durationMs ?? 0;
+              if (bytes.byteLength === 0) throw new Error('Speech output was empty.');
+              mimeType = z.string().min(1).parse(spoken.mimeType ?? 'audio/mpeg');
+            } catch (error) {
+              throw new ContentError('DOCUMENT_SPEECH_FAILED', 'The speech provider returned invalid audio.', tool, { action: speechAction, resourceKey: key, cause: error, retryable: true });
             }
-            if (input.persistAudio && uploaded.length > 0) {
-              await repo.updateDocument(current.key, {
-                speechStorageKeys: [...new Set([...(current.speechStorageKeys ?? []), ...uploaded])],
-                updatedAt: now(),
-              });
-            }
-          } catch (error) {
-            const cleanupErrors: unknown[] = [];
-            for (const storageKey of uploaded.reverse()) {
-              try { await storageOperation('delete', key, current.scopeKey, () => d.storage.delete(storageKey)); }
-              catch (cleanupError) { cleanupErrors.push(cleanupError); await event('cleanup', 'failed', 'storage-delete', key, current.scopeKey); }
-            }
-            if (cleanupErrors.length) throw new ContentError('CONTENT_CONFLICT', 'Speech generation failed and uploaded audio cleanup requires retry.', tool, { action: 'cleanup', resourceKey: key, cause: new AggregateError([error, ...cleanupErrors]), retryable: true });
-            throw error;
+            dependencies.signal?.throwIfAborted();
+            const item = {
+              index,
+              startCharacter: chunk.start,
+              endCharacter: chunk.end,
+              ...(spoken.durationMs !== undefined ? { durationMs: spoken.durationMs } : {}),
+            };
+            if (input.persistAudio) {
+              if (mimeType !== 'audio/mpeg' && mimeType !== 'audio/mp3') fail('DOCUMENT_SPEECH_FAILED', 'Persisted document audio requires MP3 speech output.', tool, speechAction, key);
+              generatedBytes += bytes.byteLength;
+              if (generatedBytes > PERSISTED_AUDIO_MAX_BYTES) fail('DOCUMENT_TOO_LARGE', 'Generated speech segments exceed the 100 MiB processing limit.', tool, 'generate-speech', key);
+              generated.push(bytes);
+            } else audio.push({ ...item, url: `data:${mimeType};base64,${Buffer.from(bytes).toString('base64')}` });
+            duration += spoken.durationMs ?? 0;
           }
-          return { documentKey: key, title: current.name, audio, ...(duration ? { totalDurationMs: duration } : {}) };
+          if (!input.persistAudio) return { documentKey: key, title: current.name, audio, ...(duration ? { totalDurationMs: duration } : {}) };
+          if (!repo.createAudioVersion) fail('CONTENT_CONFLICT', 'Document audio persistence is unavailable.', tool, 'storage', key);
+          let bytes: Uint8Array;
+          try {
+            bytes = await d.mergeAudio(generated, dependencies.signal);
+          } catch (error) {
+            throw new ContentError('DOCUMENT_SPEECH_FAILED', 'Generated audio segments could not be finalized.', tool, { action: 'audio-merge', resourceKey: key, cause: error, retryable: true });
+          }
+          dependencies.signal?.throwIfAborted();
+          if (bytes.byteLength > PERSISTED_AUDIO_MAX_BYTES) fail('DOCUMENT_TOO_LARGE', 'Generated audio exceeds the 100 MiB storage limit.', tool, 'storage', key);
+          let durationMs: number;
+          try {
+            durationMs = d.audioDuration(bytes);
+            if (!Number.isFinite(durationMs) || durationMs <= 0) throw new Error('Audio duration must be positive.');
+          } catch (error) {
+            throw new ContentError('DOCUMENT_SPEECH_FAILED', 'Generated audio could not be validated.', tool, { action: 'audio-validate', resourceKey: key, cause: error, retryable: true });
+          }
+          const audioKey = d.id();
+          const requestedStorageKey = `content/${context.organizationKey}/${current.scopeKey}/${key}/audio/${audioKey}.mp3`;
+          let storageKey: string | undefined;
+          try {
+            storageKey = (await storageOperation('upload', key, current.scopeKey, () => d.storage.upload({ key: requestedStorageKey, bytes, mimeType: 'audio/mpeg' }))).storageKey;
+          } catch (error) {
+            throw new ContentError('DOCUMENT_SPEECH_FAILED', 'Generated audio could not be stored.', tool, { action: 'storage', resourceKey: key, cause: error, retryable: true });
+          }
+          try {
+            dependencies.signal?.throwIfAborted();
+            const created = await repo.createAudioVersion({
+              key: audioKey,
+              scopeKey: current.scopeKey,
+              documentKey: current.key,
+              sourceContentHash: documentSemanticHash(current.content),
+              sourceTitle: current.name,
+              sourceDocumentUpdatedAt: current.updatedAt,
+              storageKey,
+              mimeType: 'audio/mpeg',
+              sizeBytes: bytes.byteLength,
+              durationMs,
+              ...(input.voice ? { voice: input.voice } : {}),
+              ...(input.language ? { language: input.language } : {}),
+              ...(input.speakingRate ? { speakingRate: input.speakingRate } : {}),
+              includeTitle: input.includeTitle ?? false,
+              includeCode: input.includeCode ?? false,
+              createdByKey: member.userOrganization.key,
+              createdAt: now(),
+            });
+            return { documentKey: key, title: current.name, audioVersion: generatedAudioVersionView(created) };
+          } catch (error) {
+            if (storageKey) {
+              try { await storageOperation('delete', key, current.scopeKey, () => d.storage.delete(storageKey!)); }
+              catch (cleanupError) { throw new ContentError('DOCUMENT_SPEECH_FAILED', 'Audio version creation failed and uploaded audio cleanup requires retry.', tool, { action: 'cleanup', resourceKey: key, cause: new AggregateError([error, cleanupError]), retryable: true }); }
+            }
+            throw new ContentError('DOCUMENT_SPEECH_FAILED', 'The generated audio version could not be saved.', tool, { action: 'audio-version', resourceKey: key, cause: error, retryable: true });
+          }
         },
       })), input.atomic, repo);
     } else if (tool === 'document.update') {
@@ -1297,6 +1575,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
               isFavorite: false,
               ...semantics,
                ...(storageKey ? { storageKey } : {}),
+              sourceStorageKeys: undefined,
               deletedAt: null,
               createdAt: timestamp,
               updatedAt: timestamp,
@@ -1400,12 +1679,14 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           try {
             const versions = await repo.listVersions(current.scopeKey, [key], true);
             const shares = await repo.listShares(current.scopeKey, [key], { includeArchived: true, includeExpired: true, includeRevoked: true });
+            const audioVersions = repo.listAudioVersions ? await repo.listAudioVersions(current.scopeKey, [key]) : [];
+            if (audioVersions.length > 0 && !repo.deleteAudioVersion) fail('CONTENT_CONFLICT', 'Document audio deletion is unavailable.', tool, 'delete', key);
             if (versions.length > 0 && !input.deleteVersions) fail('CONTENT_CONFLICT', 'Document has retained versions.', tool, 'delete', key);
             if (shares.length > 0 && !input.deleteShares) fail('CONTENT_CONFLICT', 'Document has retained shares.', tool, 'delete', key);
             for (const version of versions) {
               if (!await canPermanentlyDelete({ kind: 'version', deletedAt: current.deletedAt, context })) fail('CONTENT_FORBIDDEN', 'Version retention policy denied permanent deletion.', tool, 'delete', version.key);
             }
-            const inventoriedKeys = [...new Set([current.storageKey, ...(current.speechStorageKeys ?? [])].filter((item): item is string => Boolean(item)))];
+            const inventoriedKeys = [...new Set([current.storageKey, ...(current.speechStorageKeys ?? []), ...(current.sourceStorageKeys ?? []), ...audioVersions.map((audio) => audio.storageKey)].filter((item): item is string => Boolean(item)))];
             const deletion = current._internalDeletion?.objectKeys ? current._internalDeletion : { ...current._internalDeletion!, objectKeys: inventoriedKeys };
             if (!current._internalDeletion?.objectKeys) {
               const persisted = await repo.transaction((bound) => bound.setDocumentDeletion(key, deletion, current._internalDeletion!.owner));
@@ -1416,6 +1697,10 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             await deleteStorageKeys(deletion.objectKeys ?? [], key, current.scopeKey);
             await repo.transaction(async (bound) => {
               for (const version of versions) await bound.deleteVersion(version.key);
+              for (const audio of audioVersions) {
+                if (!bound.deleteAudioVersion) fail('CONTENT_CONFLICT', 'Transaction-bound audio deletion is unavailable.', tool, 'transaction', audio.key);
+                await bound.deleteAudioVersion(audio.key);
+              }
               for (const share of shares) await bound.deleteShare(share.key);
               await bound.deleteDocument(key);
             });
@@ -1563,6 +1848,27 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           await document(version.documentKey, 'viewer');
           await roleFor(version.scopeKey, 'viewer', key);
           return { version: versionView(version, input.include) };
+        },
+      })), false, repo);
+    } else if (tool === 'document.list-audio-versions') {
+      result = await batch(tool, input.documentKeys.map((key: string) => ({
+        key,
+        run: async () => {
+          const current = await document(key, 'viewer');
+          if (!repo.listAudioVersions) fail('CONTENT_CONFLICT', 'Document audio history is unavailable.', tool, 'read', key);
+          let versions: DocumentAudioVersion[];
+          try {
+            versions = await repo.listAudioVersions(current.scopeKey, [key]);
+          } catch (error) {
+            throw new ContentError('DOCUMENT_SPEECH_FAILED', 'Audio version history could not be loaded.', tool, { action: 'audio-history', resourceKey: key, cause: error, retryable: true });
+          }
+          const offset = input.cursor ? Number(Buffer.from(input.cursor, 'base64url').toString()) || 0 : 0;
+          const limit = input.limit ?? 50;
+          return {
+            documentKey: key,
+            audioVersions: await Promise.all(versions.slice(offset, offset + limit).map((version) => audioVersionView(version, current, d.signAudioUrl))),
+            ...(offset + limit < versions.length ? { cursor: Buffer.from(String(offset + limit)).toString('base64url') } : {}),
+          };
         },
       })), false, repo);
     } else if (tool === 'document.list-versions') {
@@ -1724,7 +2030,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       const allowed = await repo.allowedScopeKeys(context.organizationKey, member.userOrganization.key);
       if (!allowed.includes(input.scopeKey)) fail('CONTENT_FORBIDDEN', 'The principal lacks access to the requested scope.', tool, 'authorization', input.scopeKey);
       const normalizedQuery = input.query.normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('en-US');
-      const cacheVersion = 2;
+      const cacheVersion = 3;
       const folderKey = input.folderKey ?? null;
       const includeDescendants = folderKey !== null && (input.includeDescendants ?? true);
       const store = dependencies.searchQueries ?? (await import('@/lib/db/content-search-queries.node')).contentSearchQueries;
@@ -1745,21 +2051,85 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       const documentRevision = revisionDocuments.map((item) => `${item.key}:${item.name}:${item.folderKey ?? ''}:${item.semanticContentHash ?? ''}:${item.deletedAt ?? ''}:${item._internalDeletion ? 'pending' : ''}`);
       const sourceRevision = createHash('sha256').update([...folderRevision, ...documentRevision].sort().join('\n')).digest('hex');
       const cached = await store.get({ actorKey: member.user.key, scopeKey: input.scopeKey, normalizedQuery, folderKey, includeDescendants, cacheVersion });
-      const cachedValue = cached?.output as { result?: unknown; sourceRevision?: string; minimumScore?: number; replayable?: boolean } | undefined;
-      const reusable = Boolean(cachedValue?.replayable && cachedValue.result && cachedValue.sourceRevision === sourceRevision && cachedValue.minimumScore === input.minimumScore);
+      const cachedValue = cached?.output as { result?: unknown; sourceRevision?: string; minimumScore?: number; includeSummaries?: boolean; replayable?: boolean } | undefined;
+      const reusable = Boolean(cachedValue?.replayable && cachedValue.result && cachedValue.sourceRevision === sourceRevision && cachedValue.minimumScore === input.minimumScore && cachedValue.includeSummaries === input.includeSummaries);
       if (reusable) {
         const parsed = contentToolOutputSchemas[tool].parse({ ...(cachedValue!.result as object), query: input.query, cached: true });
         await store.record({ key: d.id(), actorKey: member.user.key, scopeKey: input.scopeKey, query: input.query, normalizedQuery, folderKey, includeDescendants, cacheVersion, output: cachedValue, now: now() });
         result = parsed;
+      } else if (!input.includeSummaries) {
+        const queryText = normalizedQuery;
+        const queryTokens = new Set<string>(queryText.match(/[\p{L}\p{N}]+/gu) ?? []);
+        const scoreText = (value: string) => {
+          const normalized = value.normalize('NFKC').toLocaleLowerCase('en-US');
+          if (normalized.includes(queryText)) return 0.75;
+          const tokens = new Set<string>(normalized.match(/[\p{L}\p{N}]+/gu) ?? []);
+          const matched = [...queryTokens].filter((token) => tokens.has(token)).length;
+          return matched > 0 ? 0.4 + 0.3 * (matched / Math.max(queryTokens.size, 1)) : 0;
+        };
+        const activeFolders = [];
+        for (const current of allFolders) {
+          if (folderKeys && !folderKeys.includes(current.key)) continue;
+          if (current.deletedAt || current._internalDeletion || !await activeFolderHierarchy(current.key, current.scopeKey)) continue;
+          const score = scoreText(`${current.name}\n${current.description ?? ''}`);
+          if (score >= input.minimumScore) activeFolders.push({ folder: current, score });
+        }
+        const activeDocuments = [];
+        for (const current of allDocuments) {
+          if (folderKeys && (!current.folderKey || !folderKeys.includes(current.folderKey))) continue;
+          if (current.deletedAt || current._internalDeletion || !await activeFolderHierarchy(current.folderKey, current.scopeKey)) continue;
+          const score = scoreText(`${current.name}\n${current.content}`);
+          if (score >= input.minimumScore) activeDocuments.push({ document: current, score });
+        }
+        const hasExactMatch = activeFolders.some(({ score }) => score >= 0.75) || activeDocuments.some(({ score }) => score >= 0.75);
+        if (!hasExactMatch) {
+          let embeddingTimer: number | undefined;
+          const queryEmbedding = await Promise.race<number[] | undefined>([
+            embed(input.query, undefined, input.scopeKey, 'query').catch(() => undefined),
+            new Promise<undefined>((resolve) => { embeddingTimer = setTimeout(resolve, dependencies.searchEmbeddingTimeoutMs ?? 500); }),
+          ]);
+          if (embeddingTimer) clearTimeout(embeddingTimer);
+          if (queryEmbedding) {
+            const [documentMatches, folderMatches] = await Promise.all([
+              repo.semanticSearch({ embedding: queryEmbedding, authorizedScopeKeys: [input.scopeKey], ...(folderKeys ? { folderKeys } : {}), minScore: input.minimumScore, limit: 40 }),
+              repo.semanticSearchFolders?.({ embedding: queryEmbedding, authorizedScopeKeys: [input.scopeKey], ...(folderKeys ? { folderKeys } : {}), minScore: input.minimumScore, limit: 20 }) ?? [],
+            ]);
+            for (const match of folderMatches) {
+              if (match.folder.scopeKey !== input.scopeKey || folderKeys && !folderKeys.includes(match.folder.key) || match.folder.deletedAt || match.folder._internalDeletion || !await activeFolderHierarchy(match.folder.key, match.folder.scopeKey)) continue;
+              const previous = activeFolders.find(({ folder: current }) => current.key === match.folder.key);
+              if (previous) previous.score = Math.max(previous.score, match.score);
+              else activeFolders.push(match);
+            }
+            for (const match of documentMatches) {
+              if (match.document.scopeKey !== input.scopeKey || folderKeys && (!match.document.folderKey || !folderKeys.includes(match.document.folderKey)) || match.document.deletedAt || match.document._internalDeletion || !await activeFolderHierarchy(match.document.folderKey, match.document.scopeKey)) continue;
+              const previous = activeDocuments.find(({ document: current }) => current.key === match.document.key);
+              if (previous) previous.score = Math.max(previous.score, match.score);
+              else activeDocuments.push(match);
+            }
+          }
+        }
+        const folders = activeFolders.sort((left, right) => right.score - left.score || left.folder.key.localeCompare(right.folder.key)).slice(0, 4).map(({ folder: current, score }) => ({ key: current.key, scopeKey: current.scopeKey, ...(current.parentFolderKey ? { parentFolderKey: current.parentFolderKey } : {}), name: current.name, ...(current.description ? { description: current.description } : {}), score: Math.max(0, Math.min(1, score)) }));
+        const documents = activeDocuments.sort((left, right) => right.score - left.score || left.document.key.localeCompare(right.document.key)).slice(0, 10).map(({ document: current, score }) => ({ documentKey: current.key, scopeKey: current.scopeKey, ...(current.folderKey ? { folderKey: current.folderKey } : {}), name: current.name, ...(current.extension ? { extension: current.extension } : {}), score: Math.max(0, Math.min(1, score)) }));
+        const freshResult = { query: input.query, folders, documents, cached: false };
+        await store.record({ key: d.id(), actorKey: member.user.key, scopeKey: input.scopeKey, query: input.query, normalizedQuery, folderKey, includeDescendants, cacheVersion, output: { result: freshResult, sourceRevision, minimumScore: input.minimumScore, includeSummaries: false, replayable: true }, now: now() });
+        result = freshResult;
       } else {
         let queryEmbedding: number[];
         try { queryEmbedding = await embed(input.query, undefined, input.scopeKey, 'query'); }
         catch (error) { fail('CONTENT_SEARCH_EMBEDDING_FAILED', 'Search query embedding failed.', tool, 'embed', undefined, error, true); }
-        const documentMatches = await repo.semanticSearch({ embedding: queryEmbedding, authorizedScopeKeys: [input.scopeKey], ...(folderKeys ? { folderKeys } : {}), minScore: input.minimumScore, limit: 100 });
-        const folders: never[] = [];
+        const [documentMatches, folderMatches] = await Promise.all([
+          repo.semanticSearch({ embedding: queryEmbedding, authorizedScopeKeys: [input.scopeKey], ...(folderKeys ? { folderKeys } : {}), minScore: input.minimumScore, limit: 100 }),
+          repo.semanticSearchFolders?.({ embedding: queryEmbedding, authorizedScopeKeys: [input.scopeKey], ...(folderKeys ? { folderKeys } : {}), minScore: input.minimumScore, limit: 20 }) ?? [],
+        ]);
+        const folders = [];
+        for (const match of folderMatches) {
+          if (match.score < input.minimumScore || match.folder.scopeKey !== input.scopeKey || folderKeys && !folderKeys.includes(match.folder.key) || match.folder.deletedAt || match.folder._internalDeletion || !await activeFolderHierarchy(match.folder.key, match.folder.scopeKey)) continue;
+          folders.push({ key: match.folder.key, scopeKey: match.folder.scopeKey, ...(match.folder.parentFolderKey ? { parentFolderKey: match.folder.parentFolderKey } : {}), name: match.folder.name, ...(match.folder.description ? { description: match.folder.description } : {}), score: Math.max(0, Math.min(1, match.score)) });
+          if (folders.length === 4) break;
+        }
         const selectedDocuments = [];
         for (const match of documentMatches) {
-          if (match.score >= input.minimumScore && (!folderKeys || match.document.folderKey !== undefined && folderKeys.includes(match.document.folderKey)) && !match.document.deletedAt && !match.document._internalDeletion && await activeFolderHierarchy(match.document.folderKey, match.document.scopeKey)) selectedDocuments.push(match);
+          if (match.score >= input.minimumScore && match.document.scopeKey === input.scopeKey && (!folderKeys || match.document.folderKey !== undefined && folderKeys.includes(match.document.folderKey)) && !match.document.deletedAt && !match.document._internalDeletion && await activeFolderHierarchy(match.document.folderKey, match.document.scopeKey)) selectedDocuments.push(match);
           if (selectedDocuments.length === 10) break;
         }
         const documents = [];
@@ -1779,13 +2149,13 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
               complete = false;
               summary = `This document contains semantically relevant information for "${input.query}".`;
             }
-            return { complete, document: { documentKey: current.key, scopeKey: current.scopeKey, ...(current.folderKey ? { folderKey: current.folderKey } : {}), name: current.name, score: Math.max(0, Math.min(1, score)), summary } };
+            return { complete, document: { documentKey: current.key, scopeKey: current.scopeKey, ...(current.folderKey ? { folderKey: current.folderKey } : {}), name: current.name, ...(current.extension ? { extension: current.extension } : {}), score: Math.max(0, Math.min(1, score)), summary } };
           }));
           summariesComplete &&= batch.every(({ complete }) => complete);
           documents.push(...batch.map(({ document }) => document));
         }
         const freshResult = { query: input.query, folders, documents, cached: false };
-        await store.record({ key: d.id(), actorKey: member.user.key, scopeKey: input.scopeKey, query: input.query, normalizedQuery, folderKey, includeDescendants, cacheVersion, output: { result: freshResult, sourceRevision, minimumScore: input.minimumScore, replayable: summariesComplete }, now: now() });
+        await store.record({ key: d.id(), actorKey: member.user.key, scopeKey: input.scopeKey, query: input.query, normalizedQuery, folderKey, includeDescendants, cacheVersion, output: { result: freshResult, sourceRevision, minimumScore: input.minimumScore, includeSummaries: true, replayable: summariesComplete }, now: now() });
         result = freshResult;
       }
     } else {
@@ -1833,36 +2203,87 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           }
         }
       }
-      let embedding: number[];
-      try { embedding = await embed(input.query, undefined, undefined, 'query'); }
-      catch (error) { fail('CONTENT_SEARCH_EMBEDDING_FAILED', 'Search query embedding failed.', tool, 'embed', undefined, error, true); }
+      const queryText = input.query.trim().toLocaleLowerCase();
+      const queryTokens = [...new Set<string>(queryText.match(/[\p{L}\p{N}]+/gu) ?? [])];
+      const documentsByScope = new Map<string, Document[]>();
+      const lexicalMatches = async (scopeKeys: string[], folderKeys?: string[]) => {
+        const documents = (await Promise.all(scopeKeys.map(async (scopeKey) => {
+          let values = documentsByScope.get(scopeKey);
+          if (!values) {
+            values = await repo.listDocuments(scopeKey, includeArchived);
+            documentsByScope.set(scopeKey, values);
+          }
+          return values;
+        }))).flat();
+        return documents.flatMap((document) => {
+          if (document._internalDeletion || !includeArchived && document.deletedAt) return [];
+          if (folderKeys && (!document.folderKey || !folderKeys.includes(document.folderKey))) return [];
+          if (input.filters?.documentKeys && !input.filters.documentKeys.includes(document.key)) return [];
+          if (input.filters?.extensions && (!document.extension || !input.filters.extensions.includes(document.extension))) return [];
+          if (input.filters?.createdAfter && document.createdAt < input.filters.createdAfter) return [];
+          if (input.filters?.createdBefore && document.createdAt > input.filters.createdBefore) return [];
+          if (input.filters?.updatedAfter && document.updatedAt < input.filters.updatedAfter) return [];
+          if (input.filters?.updatedBefore && document.updatedAt > input.filters.updatedBefore) return [];
+          const searchable = `${document.name}\n${document.content}`.toLocaleLowerCase();
+          const documentTokens = new Set(searchable.match(/[\p{L}\p{N}]+/gu) ?? []);
+          const matchedTokens = queryTokens.filter((token) => documentTokens.has(token));
+          const exactMatch = searchable.includes(queryText);
+          if (!exactMatch && matchedTokens.length === 0) return [];
+          const score = exactMatch ? 0.75 : 0.4 + 0.3 * (matchedTokens.length / Math.max(queryTokens.length, 1));
+          if (input.minimumScore !== undefined && score < input.minimumScore) return [];
+          const contentText = document.content.toLocaleLowerCase();
+          const contentMatchAt = contentText.indexOf(exactMatch ? queryText : matchedTokens[0]!);
+          const matchAt = Math.max(0, contentMatchAt - 80);
+          return [{ score, document, matchedContent: document.content.slice(matchAt, matchAt + 300) }];
+        });
+      };
       const candidates = new Map<string, { score: number; document: Document; matchedContent?: string; source: { type: 'scope' | 'project' | 'folder'; key: string } }>();
+      const searchableSources: Array<{ source: (typeof resolvedSources)[number]; scopeKeys: string[]; folderKeys?: string[] }> = [];
       for (const source of resolvedSources) {
         const scopeKeys = source.scopeKeys.filter((key) => allowed.includes(key) && filterScopeKeys.has(key));
         if (scopeKeys.length === 0) continue;
         let folderKeys = source.folderKeys;
         if (filterFolderKeys) folderKeys = folderKeys ? folderKeys.filter((key) => filterFolderKeys.includes(key)) : filterFolderKeys;
         if (folderKeys?.length === 0) continue;
-        const matches = await repo.semanticSearch({
-          embedding,
-          authorizedScopeKeys: scopeKeys,
-          folderKeys,
-          documentKeys: input.filters?.documentKeys,
-          extensions: input.filters?.extensions,
-          createdAfter: input.filters?.createdAfter,
-          createdBefore: input.filters?.createdBefore,
-          updatedAfter: input.filters?.updatedAfter,
-          updatedBefore: input.filters?.updatedBefore,
-          includeArchived,
-          minScore: input.minimumScore,
-          limit: input.topK ?? 20,
-        });
+        searchableSources.push({ source, scopeKeys, ...(folderKeys ? { folderKeys } : {}) });
+      }
+      const collectMatches = async (matches: Array<{ score: number; document: Document; matchedContent?: string }>, source: (typeof resolvedSources)[number]) => {
         for (const match of matches) {
           if (match.document._internalDeletion) continue;
-           if (!includeArchived && !await activeFolderHierarchy(match.document.folderKey, match.document.scopeKey)) continue;
+          if (!includeArchived && !await activeFolderHierarchy(match.document.folderKey, match.document.scopeKey)) continue;
           if (!includeArchived && match.document.deletedAt) continue;
           const previous = candidates.get(match.document.key);
           if (!previous || match.score > previous.score) candidates.set(match.document.key, { ...match, source: { type: source.type, key: source.key } });
+        }
+      };
+      for (const { source, scopeKeys, folderKeys } of searchableSources) {
+        await collectMatches(await lexicalMatches(scopeKeys, folderKeys), source);
+      }
+      const exactFolderMatches = searchableSources.length > 0
+        && searchableSources.every(({ source }) => source.type === 'folder')
+        && [...candidates.values()].some(({ score }) => score >= 0.75);
+      if (!exactFolderMatches) {
+        let embeddingTimer: number | undefined;
+        const embedding = await Promise.race<number[] | undefined>([
+          embed(input.query, undefined, undefined, 'query').catch(() => undefined),
+          new Promise<undefined>((resolve) => { embeddingTimer = setTimeout(resolve, dependencies.searchEmbeddingTimeoutMs ?? 500); }),
+        ]);
+        if (embeddingTimer) clearTimeout(embeddingTimer);
+        if (embedding) for (const { source, scopeKeys, folderKeys } of searchableSources) {
+          await collectMatches(await repo.semanticSearch({
+            embedding,
+            authorizedScopeKeys: scopeKeys,
+            folderKeys,
+            documentKeys: input.filters?.documentKeys,
+            extensions: input.filters?.extensions,
+            createdAfter: input.filters?.createdAfter,
+            createdBefore: input.filters?.createdBefore,
+            updatedAfter: input.filters?.updatedAfter,
+            updatedBefore: input.filters?.updatedBefore,
+            includeArchived,
+            minScore: input.minimumScore,
+            limit: input.topK ?? 20,
+          }), source);
         }
       }
       if (resolvedSources.length === 0 || candidates.size === 0 && !resolvedSources.some((source) => source.scopeKeys.some((key) => allowed.includes(key)))) fail('CONTENT_SEARCH_NO_ACCESSIBLE_SOURCES', 'No accessible Content search source remains.', tool, 'authorization');
@@ -1877,6 +2298,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           return {
             documentKey: current.key,
             name: current.name,
+            ...(current.extension ? { extension: current.extension } : {}),
             scopeKey: current.scopeKey,
             ...(current.folderKey ? { folderKey: current.folderKey } : {}),
             score: normalizedScore,

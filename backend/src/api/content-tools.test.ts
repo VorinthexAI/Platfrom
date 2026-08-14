@@ -93,7 +93,7 @@ describe('Content tool API', () => {
       authorize: async () => ({} as never),
       getStatus: async (key, identity) => {
         expect(key).toBe(jobKey);
-        expect(identity).toEqual({ organizationKey, agentKey, authenticatedUserKey: user.key });
+        expect(identity).toEqual({ organizationKey, agentKey, authenticatedUserKey: user.key, tool: 'document.parse' });
         return completed ? { success: true, data: { document: { key: folderKey } } } : { key: jobKey, state: 'active' };
       },
     }));

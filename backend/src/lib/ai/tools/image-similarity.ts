@@ -19,7 +19,7 @@ export const imageSimilarityOutputSchema = z.object({
     isFavorite: z.boolean(),
     createdAt: z.string().datetime(),
     updatedAt: z.string().datetime(),
-    score: imageSimilarityThresholdSchema,
+    score: imageSimilarityThresholdSchema.optional(),
   }).strict()),
 }).strict();
 
@@ -36,7 +36,7 @@ export function imageSearchActor(context: DomainToolContext): string {
   return membership.key;
 }
 
-export function imageSimilarityOutput(results: AccessibleImageSearchResult[]): ImageSimilarityOutput {
+export function imageSimilarityOutput(results: Array<{ image: AccessibleImageSearchResult['image']; score?: number }>): ImageSimilarityOutput {
   return imageSimilarityOutputSchema.parse({
     images: results.map(({ image, score }) => ({
       key: image.key,
@@ -51,7 +51,7 @@ export function imageSimilarityOutput(results: AccessibleImageSearchResult[]): I
       isFavorite: image.isFavorite,
       createdAt: image.createdAt,
       updatedAt: image.updatedAt,
-      score,
+      ...(score === undefined ? {} : { score }),
     })),
   });
 }

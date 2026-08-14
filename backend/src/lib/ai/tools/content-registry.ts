@@ -15,12 +15,14 @@ export const contentToolOutputSchemas = Object.fromEntries(
 
 function providerInputSchema(name: ContentToolName) {
   const schema = contentZodToJsonSchema(contentToolContracts[name].input);
-  if (name === 'document.parse') {
+  if (name === 'document.parse' || name === 'document.scan') {
     const properties = schema.properties as Record<string, unknown>;
-    properties.file = {
+    const fileHandle = {
       type: 'object',
       description: 'Server-side file handle with name, type, size, and arrayBuffer(). Provider clients cannot send raw file bytes through JSON.',
     };
+    if (name === 'document.parse') properties.file = fileHandle;
+    else properties.pages = { type: 'array', minItems: 1, maxItems: 12, items: fileHandle };
   }
   if (name === 'document.unshare') {
     schema.oneOf = [

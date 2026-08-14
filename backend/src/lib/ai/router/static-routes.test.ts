@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createStaticProviderAdapter, isStaticProvider, resolveStaticBedrockEnvironment, resolveStaticOpenAIConfig, STATIC_PROVIDER_IDS } from './static-routes';
+import { createStaticProviderAdapter, isStaticProvider, resolveStaticBedrockEnvironment, resolveStaticOpenAIConfig, resolveStaticPollyEnvironment, STATIC_PROVIDER_IDS } from './static-routes';
 
 describe('static provider routes', () => {
   test('registers each environment-backed provider', () => {
@@ -53,6 +53,29 @@ describe('static provider routes', () => {
       AWS_DEFAULT_REGION: undefined,
       AWS_ACCESS_KEY_ID: 'generic-key',
       AWS_SECRET_ACCESS_KEY: 'generic-secret',
+    });
+  });
+
+  test('uses a supported Polly region and the deployed AWS credentials', () => {
+    expect(resolveStaticPollyEnvironment({
+      BEDROCK_REGION: 'eu-north-1',
+      BEDROCK_AWS_ACCESS_KEY_ID: 'bedrock-key',
+      BEDROCK_AWS_SECRET_ACCESS_KEY: 'bedrock-secret',
+    })).toEqual({
+      AWS_REGION: 'eu-central-1',
+      AWS_ACCESS_KEY_ID: 'bedrock-key',
+      AWS_SECRET_ACCESS_KEY: 'bedrock-secret',
+    });
+    expect(resolveStaticPollyEnvironment({
+      POLLY_REGION: 'us-east-1',
+      POLLY_AWS_ACCESS_KEY_ID: 'polly-key',
+      POLLY_AWS_SECRET_ACCESS_KEY: 'polly-secret',
+      BEDROCK_AWS_ACCESS_KEY_ID: 'bedrock-key',
+      BEDROCK_AWS_SECRET_ACCESS_KEY: 'bedrock-secret',
+    })).toEqual({
+      AWS_REGION: 'us-east-1',
+      AWS_ACCESS_KEY_ID: 'polly-key',
+      AWS_SECRET_ACCESS_KEY: 'polly-secret',
     });
   });
 });

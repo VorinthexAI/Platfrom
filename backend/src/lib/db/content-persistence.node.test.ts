@@ -20,6 +20,7 @@ describe('scoped Content persistence', () => {
       parentFolderKey: undefined,
       description: undefined,
       coverImageKey: undefined,
+      embedding,
       deletedAt: null,
       updatedAt: timestamp,
     });
@@ -28,8 +29,9 @@ describe('scoped Content persistence', () => {
     expect(calls[0]?.query).toContain('current._internalDeletion');
     expect(calls[0]?.query).toContain('DOCUMENT(folders, @destinationKey)');
     expect(calls[0]?.query).toContain('REPLACE current WITH UNSET');
-    expect(calls[0]?.bindVars).toMatchObject({ key: folderKey, scopeKey, unset: ['parentFolderKey', 'description', 'coverImageKey'], patch: { deletedAt: null, updatedAt: timestamp } });
+    expect(calls[0]?.bindVars).toMatchObject({ key: folderKey, scopeKey, unset: ['parentFolderKey', 'description', 'coverImageKey'], patch: { embedding, deletedAt: null, updatedAt: timestamp } });
     expect(calls[0]?.bindVars).not.toHaveProperty('changesLocation');
+    expect(() => createContentPersistence(executor).updateFolder(scopeKey, folderKey, { name: 'Renamed' })).toThrow('Folder semantic updates require a fresh embedding.');
   });
 
   test('returns false when a scope-bounded delete matches nothing', async () => {

@@ -11,20 +11,20 @@ import {
 } from './index';
 
 const expectedNames = [
-  'autocomplete', 'enhance',
+  'enhance',
   'book.create-context', 'book.write',
-  'folder.create', 'folder.find', 'folder.list', 'folder.update', 'folder.rename', 'folder.move', 'folder.archive', 'folder.restore', 'folder.delete',
-  'document.parse', 'document.create', 'document.find', 'document.list', 'document.read', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.download', 'document.export', 'document.share', 'document.unshare', 'document.list-shares', 'document.create-version', 'document.find-version', 'document.list-versions', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.translate', 'document.rewrite',
+  'folder.create', 'folder.find', 'folder.list', 'folder.update', 'folder.rename', 'folder.move', 'folder.copy', 'folder.archive', 'folder.restore', 'folder.delete',
+  'document.parse', 'document.scan', 'document.create', 'document.find', 'document.list', 'document.read', 'document.list-audio-versions', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.download', 'document.export', 'document.share', 'document.unshare', 'document.list-shares', 'document.create-version', 'document.find-version', 'document.list-versions', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.translate', 'document.rewrite',
   'scope.document.search', 'scope.content.search', 'scope.content.search-history', 'organization.document.search',
 ] as const;
 
 describe('Content tool registry', () => {
   test('contains exactly the registered dotted names and no action-style kebab names', () => {
     expect([...CONTENT_TOOL_NAMES]).toEqual([...expectedNames]);
-    expect(CONTENT_TOOL_NAMES).toHaveLength(42);
+    expect(CONTENT_TOOL_NAMES).toHaveLength(44);
     for (const name of CONTENT_TOOL_NAMES) {
       expect(name).toMatch(/^[a-z]+(?:[.-][a-z]+)*$/);
-      if (name !== 'autocomplete' && name !== 'enhance') expect(name).toContain('.');
+      if (name !== 'enhance') expect(name).toContain('.');
       expect(isContentToolName(name)).toBe(true);
     }
     expect(isContentToolName('document-create-version')).toBe(false);
@@ -50,6 +50,7 @@ describe('Content input contracts', () => {
     expect(contentToolInputSchemas['document.rewrite'].parse({ rewrites: [{ documentKey: key, instruction: 'Clarify' }] })).toMatchObject({ atomic: false, rewrites: [{ mode: 'preview' }] });
     expect(contentToolInputSchemas['document.restore-version'].parse({ restores: [{ documentKey: key, versionKey: newId() }] })).toMatchObject({ atomic: false, restores: [{ createBackupVersion: true }] });
     expect(contentToolInputSchemas['document.copy'].parse({ copies: [{ documentKey: key, targetScopeKey: newId(), targetFolderKey: newId() }] })).toMatchObject({ atomic: false, copies: [{ includeVersions: false, includeShares: false }] });
+    expect(contentToolInputSchemas['folder.copy'].parse({ copies: [{ folderKey: key, targetScopeKey: newId() }] })).toMatchObject({ atomic: false });
   });
 
   test('preserves specified optional controls', () => {
@@ -61,15 +62,14 @@ describe('Content input contracts', () => {
   });
 
   test('rejects unknown properties and invalid enum, score, and range values', () => {
-    expect(contentToolInputSchemas.autocomplete.parse({ context: 'The next step', wordCount: 8 })).toEqual({ context: 'The next step', wordCount: 8 });
-    expect(() => contentToolInputSchemas.autocomplete.parse({ context: 'Text', wordCount: 25 })).toThrow();
-    expect(() => contentToolInputSchemas.autocomplete.parse({ context: 'Text', wordCount: 8, model: 'other' })).toThrow();
     expect(contentToolInputSchemas.enhance.parse({ content: 'Fix teh wording.' })).toEqual({ content: 'Fix teh wording.' });
     expect(() => contentToolInputSchemas.enhance.parse({ content: 'Text', instruction: 'Change meaning' })).toThrow();
     expect(() => contentToolInputSchemas['folder.find'].parse({ folderKeys: [key], surprise: true })).toThrow();
     expect(() => contentToolInputSchemas['document.download'].parse({ documentKeys: [key], format: 'pdf' })).toThrow();
     expect(() => contentToolInputSchemas['scope.document.search'].parse({ scopeKey: key, query: 'roadmap', minimumScore: 1.1 })).toThrow();
     expect(() => contentToolInputSchemas['document.read'].parse({ documentKeys: [key], startOffset: 10, endOffset: 5 })).toThrow();
+    expect(() => contentToolInputSchemas['document.read'].parse({ documentKeys: [key], mode: 'audio', startOffset: 10, persistAudio: true })).toThrow();
+    expect(() => contentToolInputSchemas['document.read'].parse({ documentKeys: [key, newId()], mode: 'audio', persistAudio: true })).toThrow();
     expect(() => contentToolInputSchemas['document.read'].parse({ documentKeys: [key], mode: 'content', voice: 'alloy' })).toThrow();
     expect(() => contentToolInputSchemas['document.copy'].parse({ copies: [{ documentKey: key, targetFolderKey: newId(), name: 'Wrong field' }] })).toThrow();
     expect(contentToolInputSchemas['scope.document.search'].parse({ scopeKey: key, query: 'roadmap', sources: [{ type: 'project', projectKeys: [newId()] }] })).toMatchObject({ sources: [{ type: 'project' }] });
@@ -77,7 +77,7 @@ describe('Content input contracts', () => {
 
   test('enforces non-empty arrays for every batch-first contract', () => {
     const invalid: Array<[keyof typeof contentToolInputSchemas, object]> = [
-      ['folder.create', { folders: [] }], ['folder.update', { updates: [] }], ['folder.rename', { renames: [] }], ['folder.move', { moves: [] }],
+      ['folder.create', { folders: [] }], ['folder.update', { updates: [] }], ['folder.rename', { renames: [] }], ['folder.move', { moves: [] }], ['folder.copy', { copies: [] }],
       ['folder.archive', { folderKeys: [] }], ['folder.restore', { folderKeys: [] }], ['folder.delete', { folderKeys: [] }],
       ['document.find', { documentKeys: [] }], ['document.read', { documentKeys: [] }], ['document.update', { updates: [] }], ['document.rename', { renames: [] }],
       ['document.move', { moves: [] }], ['document.copy', { copies: [] }], ['document.archive', { documentKeys: [] }], ['document.restore', { documentKeys: [] }],
@@ -96,7 +96,7 @@ describe('Content input contracts', () => {
     expect(() => contentToolInputSchemas['document.update'].parse({ updates: [{ documentKey: key, createVersion: true }] })).toThrow();
     expect(contentToolInputSchemas['document.update'].parse({ updates: [{ documentKey: key, isFavorite: true }] }).updates[0]).toMatchObject({ isFavorite: true });
     expect(contentToolInputSchemas['document.update'].parse({ updates: [{ documentKey: key, content: 'x', isFavorite: true }] }).updates[0]).toMatchObject({ content: 'x', isFavorite: true });
-    expect(() => contentToolInputSchemas['folder.update'].parse({ updates: [{ folderKey: key, isFavorite: true }] })).toThrow();
+    expect(contentToolInputSchemas['folder.update'].parse({ updates: [{ folderKey: key, isFavorite: true }] }).updates[0]).toMatchObject({ isFavorite: true });
     expect(() => contentToolInputSchemas['document.create'].parse({ scopeKey: key, name: 'Notes', representation: { html: '<p>x</p>', content: 'x' } })).toThrow();
     expect(() => contentToolInputSchemas['document.create'].parse({ scopeKey: key, name: 'Notes', representation: {} })).toThrow();
   });
@@ -113,6 +113,7 @@ describe('Content input contracts', () => {
       ['folder.update', { updates: [{ folderKey: key, name: 'Folder' }] }],
       ['folder.rename', { renames: [{ folderKey: key, name: 'Folder' }] }],
       ['folder.move', { moves: [{ folderKey: key }] }],
+      ['folder.copy', { copies: [{ folderKey: key, targetScopeKey: newId() }] }],
       ['folder.archive', { folderKeys: [key] }], ['folder.restore', { folderKeys: [key] }], ['folder.delete', { folderKeys: [key] }],
       ['document.update', { updates: [{ documentKey: key, content: 'text' }] }],
       ['document.rename', { renames: [{ documentKey: key, name: 'Name' }] }],
@@ -149,10 +150,10 @@ describe('Content output contracts', () => {
     const folderKey = newId();
     const output = contentToolOutputSchemas['scope.document.search'].parse({
       query: 'roadmap',
-      results: [{ documentKey, name: 'Roadmap', scopeKey, folderKey, score: 0.9, matchedSource: { type: 'project', key: scopeKey }, scoreBreakdown: { vector: 0.9, lexical: 0.5, final: 0.8 } }],
+      results: [{ documentKey, name: 'Roadmap', extension: 'md', scopeKey, folderKey, score: 0.9, matchedSource: { type: 'project', key: scopeKey }, scoreBreakdown: { vector: 0.9, lexical: 0.5, final: 0.8 } }],
       totalCandidates: 12,
     });
-    expect(output).toMatchObject({ query: 'roadmap', results: [{ documentKey, scoreBreakdown: { vector: 0.9 } }], totalCandidates: 12 });
+    expect(output).toMatchObject({ query: 'roadmap', results: [{ documentKey, extension: 'md', scoreBreakdown: { vector: 0.9 } }], totalCandidates: 12 });
     expect(() => contentToolOutputSchemas['scope.document.search'].parse({ query: 'roadmap', results: [], total: 0 })).toThrow();
     expect(() => contentToolOutputSchemas['scope.document.search'].parse({ query: 'roadmap', results: [{ documentKey, name: 'Roadmap', scopeKey, folderKey, score: 2 }], totalCandidates: 1 })).toThrow();
     expect(() => contentToolOutputSchemas['scope.document.search'].parse({ query: 'roadmap', results: [{ documentKey, name: 'Roadmap', scopeKey, folderKey, score: 0.5, source: { type: 'scope', scopeKeys: [scopeKey] } }] })).toThrow();
@@ -180,7 +181,10 @@ describe('Content output contracts', () => {
   test('represents exact read payloads in one batch wrapper', () => {
     const key = newId();
     expect(contentToolOutputSchemas['document.read'].parse({ results: [{ key, success: true, data: { documentKey: key, title: 'Notes', content: 'Text' } }], summary: { requested: 1, succeeded: 1, failed: 0 } })).toMatchObject({ results: [{ data: { content: 'Text' } }] });
-    expect(contentToolOutputSchemas['document.read'].parse({ results: [{ key, success: true, data: { documentKey: key, title: 'Notes', audio: [{ index: 0, storageKey: 'audio/0.mp3', startCharacter: 0, endCharacter: 20 }], totalDurationMs: 900 } }], summary: { requested: 1, succeeded: 1, failed: 0 } })).toMatchObject({ results: [{ data: { audio: [{ index: 0 }] } }] });
+    expect(contentToolOutputSchemas['document.read'].parse({ results: [{ key, success: true, data: { documentKey: key, title: 'Notes', audio: [{ index: 0, url: 'data:audio/mpeg;base64,bXAz', startCharacter: 0, endCharacter: 20 }], totalDurationMs: 900 } }], summary: { requested: 1, succeeded: 1, failed: 0 } })).toMatchObject({ results: [{ data: { audio: [{ index: 0 }] } }] });
+    const audioVersion = { key, documentKey: key, version: 1, sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: '2026-07-22T10:00:00.000Z', mimeType: 'audio/mpeg', sizeBytes: 100, durationMs: 900, includeTitle: false, includeCode: false, createdAt: '2026-07-22T10:00:00.000Z' };
+    expect(contentToolOutputSchemas['document.read'].parse({ results: [{ key, success: true, data: { documentKey: key, title: 'Notes', audioVersion } }], summary: { requested: 1, succeeded: 1, failed: 0 } })).toMatchObject({ results: [{ data: { audioVersion: { version: 1 } } }] });
+    expect(() => contentToolOutputSchemas['document.read'].parse({ results: [{ key, success: true, data: { documentKey: key, title: 'Notes', audioVersion: { ...audioVersion, storageKey: 'private.mp3' } } }], summary: { requested: 1, succeeded: 1, failed: 0 } })).toThrow();
     expect(() => contentToolOutputSchemas['document.read'].parse({ results: [{ key, success: true, data: { documentKey: key, title: 'Notes', mode: 'html', content: 'wrong' } }], summary: { requested: 1, succeeded: 1, failed: 0 } })).toThrow();
   });
 

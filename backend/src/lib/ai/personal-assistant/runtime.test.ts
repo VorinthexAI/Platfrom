@@ -32,7 +32,7 @@ describe('personal assistant runtime', () => {
 
     expect(request).toEqual({ mode: 'model', organizationKey, actionSlug: 'orchestrator-chat', modelSlug: 'amazon.nova-lite' });
     expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual([
-      'folder.list', 'folder.create', 'folder.update', 'folder.move',
+      'folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy',
       'document.list', 'document.find', 'document.create', 'document.update',
       'document.rename', 'document.move', 'document.copy', 'document.translate',
       'document.list-versions', 'document.restore-version', 'document.download', 'knowledge.search', 'note.write', 'note.enhance', 'assistant.unsupported',
@@ -69,12 +69,13 @@ describe('personal assistant runtime', () => {
     });
 
     expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual([
-      'collection.list', 'collection.create', 'image.search', 'image.favorite', 'collection.duplicates.find',
+      'collection.list', 'collection.create', 'image.search', 'image.favorite', 'image.delete',
       'collection.duplicates.delete', 'collection.image.transfer', 'subject.list', 'subject.create',
       'subject.image.list', 'subject.delete', 'subject.restore', 'image.upload.reserve',
       'image.upload.status', 'image.upload.complete', 'assistant.unsupported',
     ]);
     expect(chatInput.systemPrompt).toContain('Call image.search whenever');
+    expect(chatInput.systemPrompt).toContain('duplicates true plus collectionKey');
     expect(chatInput.messages[0].content[0].text).toContain('"workspace":"Gallery"');
     expect(result).toEqual({ type: 'unsupported', message: 'This request is not supported in Gallery. Core can search your images.', sources: [] });
   });

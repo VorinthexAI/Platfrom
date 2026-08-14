@@ -16,10 +16,10 @@ export async function saveBase64Download(fileName: string, mimeType: string, con
       await ReactNativeBlobUtil.fs.writeFile(temporaryPath, content, "base64");
       await ReactNativeBlobUtil.MediaCollection.copyToMediaStore({
         name,
-        parentFolder: "Vorinthex",
+        parentFolder: "",
         mimeType,
       }, "Download", temporaryPath);
-      return `Downloads/Vorinthex/${name}`;
+      return "Downloads";
     } finally {
       await ReactNativeBlobUtil.fs.unlink(temporaryPath).catch(() => undefined);
     }
@@ -28,7 +28,7 @@ export async function saveBase64Download(fileName: string, mimeType: string, con
   const file = new File(Paths.document, "Downloads", name);
   file.parentDirectory.create({ idempotent: true, intermediates: true });
   await writeAsStringAsync(file.uri, content, { encoding: EncodingType.Base64 });
-  return `Vorinthex/Downloads/${name}`;
+  return "Downloads";
 }
 
 export async function saveTextDownload(fileName: string, content: string) {
@@ -39,10 +39,10 @@ export async function saveTextDownload(fileName: string, content: string) {
       await ReactNativeBlobUtil.fs.writeFile(temporaryPath, content, "utf8");
       await ReactNativeBlobUtil.MediaCollection.copyToMediaStore({
         name,
-        parentFolder: "Vorinthex",
+        parentFolder: "",
         mimeType: "text/plain",
       }, "Download", temporaryPath);
-      return `Downloads/Vorinthex/${name}`;
+      return "Downloads";
     } finally {
       await ReactNativeBlobUtil.fs.unlink(temporaryPath).catch(() => undefined);
     }
@@ -51,5 +51,11 @@ export async function saveTextDownload(fileName: string, content: string) {
   const file = new File(Paths.document, "Downloads", name);
   file.parentDirectory.create({ idempotent: true, intermediates: true });
   await writeAsStringAsync(file.uri, content, { encoding: EncodingType.UTF8 });
-  return `Vorinthex/Downloads/${name}`;
+  return "Downloads";
+}
+
+export async function saveTemporaryBase64File(fileName: string, content: string) {
+  const file = new File(Paths.cache, `${Date.now()}-${safeFileName(fileName)}`);
+  await writeAsStringAsync(file.uri, content, { encoding: EncodingType.Base64 });
+  return file;
 }

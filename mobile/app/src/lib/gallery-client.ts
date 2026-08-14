@@ -31,8 +31,25 @@ export type GalleryOverview = {
   images: GalleryImage[];
 };
 
-export function findInitialMediaCollection(collections: GalleryCollection[]) {
-  return collections.find(({ name }) => name === "My Images");
+export function filterCollections(collections: GalleryCollection[], query: string) {
+  const normalized = query.trim().toLocaleLowerCase();
+  if (!normalized) return collections;
+  return collections.filter(({ name, description }) => `${name}\n${description ?? ""}`.toLocaleLowerCase().includes(normalized));
+}
+
+export function filterMediaItems(items: GalleryImage[], query: string) {
+  const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return items;
+  return items.filter(({ caption, filename }) => {
+    const searchable = `${caption}\n${filename}`.toLocaleLowerCase();
+    return terms.every((term) => searchable.includes(term));
+  });
+}
+
+export function mergeMediaItems(primary: GalleryImage[], secondary: GalleryImage[]) {
+  const unique = new Map(primary.map((item) => [item.key, item]));
+  for (const item of secondary) if (!unique.has(item.key)) unique.set(item.key, item);
+  return [...unique.values()];
 }
 
 export type GallerySubject = {
@@ -79,6 +96,16 @@ async function postGallery<T>(path: string, input: Record<string, unknown>, time
   }
 }
 
+async function fetchWithTimeout(input: string, init: RequestInit | undefined, timeout: number) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function fetchGalleryOverview(collectionKey?: string) {
   return postGallery<GalleryOverview>("/gallery/overview", collectionKey ? { collectionKey } : {});
 }
@@ -106,26 +133,34 @@ export async function uploadGalleryImages(files: PreparedGalleryUpload[], collec
     await Promise.all(reservation.uploads.slice(index, index + 3).map(async (upload) => {
       const file = files.find((candidate) => candidate.clientKey === upload.clientKey);
       if (!file) throw new Error("An upload reservation could not be matched.");
-      const blob = await (await fetch(file.uri)).blob();
-      const response = await fetch(upload.url, { method: "PUT", headers: upload.headers, body: blob });
+      const blob = await (await fetchWithTimeout(file.uri, undefined, 30_000)).blob();
+      const response = await fetchWithTimeout(upload.url, { method: "PUT", headers: upload.headers, body: blob }, 2 * 60_000);
       if (!response.ok) throw new Error(`Image upload failed (${response.status}).`);
     }));
   }
 
-  return postGallery<{ jobs: { key: string; imageKey: string; status: string }[] }>(
+  const completed = await postGallery<{ jobs: { key: string; imageKey: string; status: string }[] }>(
     "/gallery/uploads/complete",
     { uploadKeys: reservation.uploads.map(({ uploadKey }) => uploadKey) },
   );
+  return {
+    jobs: completed.jobs.map((job) => {
+      const upload = reservation.uploads.find(({ uploadKey }) => uploadKey === job.key);
+      if (!upload) throw new Error("A completed image upload could not be matched.");
+      return { ...job, clientKey: upload.clientKey };
+    }),
+  };
 }
 
-export function fetchGalleryUploadStatus(uploadKeys: string[]) {
+export function fetchGalleryUploadStatus(uploadKeys: string[], timeout = 60_000) {
   return postGallery<{ jobs: { key: string; imageKey: string; status: string; errorCode: string | null }[] }>(
     "/gallery/uploads/status",
     { uploadKeys },
+    timeout,
   );
 }
 
-export function searchGalleryImages(input: { query?: string; imageKey?: string; limit?: number }) {
+export function searchGalleryImages(input: { query?: string; imageKey?: string; duplicates?: true; collectionKey?: string; limit?: number }) {
   return postGallery<{ images: GalleryImage[] }>("/gallery/images/search", input, 4 * 60_000);
 }
 
@@ -133,8 +168,12 @@ export function setGalleryImageFavorite(imageKey: string, isFavorite: boolean) {
   return postGallery<{ image: GalleryImage }>("/gallery/images/favorite", { imageKey, isFavorite });
 }
 
+export function deleteGalleryImages(imageKeys: string[]) {
+  return postGallery<{ deletedImageKeys: string[] }>("/gallery/images/delete", { imageKeys });
+}
+
 export function findGalleryCollectionDuplicates(collectionKey: string) {
-  return postGallery<{ images: GalleryImage[] }>("/gallery/collections/duplicates", { collectionKey });
+  return searchGalleryImages({ duplicates: true, collectionKey });
 }
 
 export function deleteGalleryCollectionDuplicates(collectionKey: string, imageKeys: string[]) {

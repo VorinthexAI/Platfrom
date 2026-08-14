@@ -99,7 +99,18 @@ export async function parseDocument(rawInput: DocumentParseInput, dependencies: 
   const storage = dependencies.storage ?? documentStorage;
   const uploaded = await actions.upload({ ...normalized, documentKey }, { storage, logger });
   try {
-    const extraction = await actions.extract({ ...normalized, storageKey: uploaded.storageKey }, { ocr: dependencies.ocr, logger });
+    let extraction;
+    try {
+      extraction = await actions.extract({ ...normalized, storageKey: uploaded.storageKey }, { ocr: dependencies.ocr, logger });
+    } catch (error) {
+      if (normalized.extension !== 'pdf') throw error;
+      logger({ action: 'document-extract', status: 'failed', documentKey, scopeKey: input.scopeKey, folderKey: input.folderKey, extension: normalized.extension, retained: true });
+      extraction = {
+        extractedText: 'Text extraction is unavailable for this PDF file.',
+        blocks: [{ type: 'paragraph' as const, text: 'Text extraction is unavailable for this PDF file.' }],
+        metadata: { extractionStatus: 'unavailable' },
+      };
+    }
     const generated = await actions.generateHtml(extraction, { logger });
     const html = sanitizeDocumentHtml(generated.html);
     const canonicalContent = htmlToPlainText(html);

@@ -9,6 +9,7 @@ import { Stack, usePathname, useRouter, useSegments, type Href } from "expo-rout
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { BottomSheetScene } from "@vorinthex/shared/ui/bottom-sheet";
+import { ToastProvider } from "@vorinthex/shared/ui/toast";
 import { useEffect } from "react";
 import { BackHandler, Platform } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -85,16 +86,18 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: palette.page }}>
       <SafeAreaProvider>
         <AppQueryProvider>
-          <BottomSheetScene>
-            <StatusBar style="light" />
-            <Stack
-              screenOptions={{
-                headerShown: false,
-                contentStyle: { backgroundColor: palette.page },
-                animation: "fade",
-              }}
-            />
-          </BottomSheetScene>
+          <ToastProvider>
+            <BottomSheetScene>
+              <StatusBar style="light" />
+              <Stack
+                screenOptions={{
+                  headerShown: false,
+                  contentStyle: { backgroundColor: palette.page },
+                  animation: "fade",
+                }}
+              />
+            </BottomSheetScene>
+          </ToastProvider>
         </AppQueryProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

@@ -35,37 +35,47 @@ testRuntime.__archiveApiPost = async (url: string, body: Record<string, any>, co
   }
   const response = responseForTool?.(tool ?? "");
   if (response) return response;
-  if (tool === "document.create" || tool === "document.parse") {
+  if (tool === "document.create" || tool === "document.parse" || tool === "document.scan") {
     return { data: { success: true, data: { document: { key: "document", name: "Note", isFavorite: false, updatedAt: "2026-08-10T00:00:00.000Z" } } } };
   }
   if (tool === "folder.create") {
     return { data: { success: true, data: { results: [{ success: true, data: { folder: { key: "folder", name: "Work" } } }] } } };
   }
-  if (tool === "document.update") {
+  if (tool === "document.update" || tool === "document.archive") {
     return { data: { success: true, data: { results: [{ success: true, data: { document: { key: "document", name: "Note", isFavorite: false, updatedAt: "2026-08-10T00:01:00.000Z" } } }] } } };
   }
   throw new Error(`Unexpected tool: ${tool}`);
 };
 
 const {
-  autocompleteContent,
+  archiveContentDocument,
+  archiveContentSelection,
   askPersonalAssistant,
   createContentDocument,
   createContentFolder,
   copyContentDocument,
+  copyContentSelection,
   downloadContentDocument,
   enhanceContent,
   findContentDocumentVersion,
+  generateContentDocumentAudio,
   loadInitialContentLocation,
   listContentSearchHistory,
+  listContentDocumentAudioVersions,
   moveContentFolder,
   moveContentDocument,
+  moveContentSelection,
+  readContentDocument,
+  readContentDocumentPreview,
+  readContentDocumentSources,
   renameContentDocument,
   saveContentDocument,
+  scanContentDocument,
   searchContent,
   searchContentMatches,
   summarizeContentDocument,
   setContentDocumentFavorite,
+  setContentSelectionFavorite,
   translateContentDocument,
   updateContentFolder,
   setContentFolderCover,
@@ -82,6 +92,38 @@ beforeEach(() => {
     scope: { key: "scope-authenticated" },
     contentExecution: { agentKey: "agent-authenticated" },
   };
+});
+
+test("loads editor content and native preview blocks through separate projections", async () => {
+  responseForTool = (tool) => tool === "document.find" ? { data: { success: true, data: { results: [{ success: true, data: { document: { key: "document", name: "Brief.pdf", extension: "pdf", mimeType: "application/pdf", isFavorite: false, updatedAt: "2026-08-10T00:00:00.000Z", content: "Brief", blocks: [{ type: "paragraph", content: [{ text: "Brief" }] }] } } }] } } } : undefined;
+
+  await expect(readContentDocument("document")).resolves.toMatchObject({ content: "Brief", extension: "pdf" });
+  await expect(readContentDocumentPreview("document")).resolves.toMatchObject({ blocks: [{ type: "paragraph", content: [{ text: "Brief" }] }], extension: "pdf" });
+  expect(calls.map(({ body }) => body.input)).toEqual([
+    { documentKeys: ["document"], include: ["content"] },
+    { documentKeys: ["document"], include: ["blocks"] },
+  ]);
+});
+
+test("rejects notes at the file-viewer boundary", async () => {
+  responseForTool = (tool) => tool === "document.find" ? { data: { success: true, data: { results: [{ success: true, data: { document: { key: "note", name: "Note", isFavorite: false, updatedAt: "2026-08-10T00:00:00.000Z", blocks: [{ type: "paragraph", content: [{ text: "Note body" }] }] } } }] } } } : undefined;
+  await expect(readContentDocumentPreview("note")).rejects.toThrow("Notes open in the document editor");
+  expect(calls[0]?.body.input).toEqual({ documentKeys: ["note"], include: ["blocks"] });
+});
+
+test("generates and lists independent full-audio versions", async () => {
+  const metadata = { key: "audio-version", documentKey: "document", version: 2, sourceContentHash: "a".repeat(64), sourceTitle: "Note", sourceDocumentUpdatedAt: "2026-08-10T00:00:00.000Z", mimeType: "audio/mpeg", sizeBytes: 1024, durationMs: 65_000, includeTitle: false, includeCode: false, createdAt: "2026-08-10T00:02:00.000Z" };
+  responseForTool = (tool) => tool === "document.read"
+    ? { data: { success: true, data: { results: [{ success: true, data: { audioVersion: metadata } }] } } }
+    : tool === "document.list-audio-versions"
+      ? { data: { success: true, data: { results: [{ success: true, data: { audioVersions: [{ ...metadata, current: true, url: "https://audio.example/version.mp3" }] } }] } } }
+      : undefined;
+
+  await expect(generateContentDocumentAudio("document")).resolves.toMatchObject({ key: "audio-version", version: 2 });
+  await expect(listContentDocumentAudioVersions("document")).resolves.toMatchObject([{ key: "audio-version", current: true }]);
+  expect(calls[0]?.body.input).toMatchObject({ documentKeys: ["document"], mode: "audio", persistAudio: true });
+  expect(calls[0]?.config.timeout).toBe(15 * 60_000);
+  expect(calls[1]?.body.input).toEqual({ documentKeys: ["document"], cursor: undefined, limit: 100 });
 });
 
 test("sends document and folder mutations with the authenticated Archive context", async () => {
@@ -122,6 +164,32 @@ test("uploads documents through the authenticated Archive context", async () => 
   expect(calls[0]?.config.timeout).toBe(5 * 60_000);
   expect(calls[0]?.body.input.idempotencyKey).toBe("upload-upload-digest-upload-digest-folder");
   expect(digestInputs).toEqual(["YWJj", "notes.txt\0text/plain"]);
+});
+
+test("submits ordered scan pages as one editable Archive document", async () => {
+  await scanContentDocument([{ name: "one.jpg", size: 4, base64: "/9j/2Q==" }, { name: "two.jpg", size: 4, base64: "/9j/2Q==" }], "folder");
+  expect(calls[0]?.url).toBe("/api/v1/content/tools/document.scan");
+  expect(calls[0]?.body.input).toMatchObject({
+    scopeKey: "scope-authenticated",
+    folderKey: "folder",
+    pages: [
+      { filename: "one.jpg", mimeType: "image/jpeg", sizeBytes: 4, encoding: "base64", content: "/9j/2Q==" },
+      { filename: "two.jpg", mimeType: "image/jpeg", sizeBytes: 4, encoding: "base64", content: "/9j/2Q==" },
+    ],
+  });
+  expect(calls[0]?.body.input.idempotencyKey).toBe("scan-upload-digest-folder");
+});
+
+test("reads authorized scanned source images without requesting storage keys", async () => {
+  responseForTool = () => ({ data: { success: true, data: { results: [{ success: true, data: { document: { key: "document", name: "Scan", isFavorite: false, updatedAt: "2026-08-10T00:00:00.000Z", sourceImages: [{ page: 1, url: "https://images.example/1" }] } } }] } } });
+  await expect(readContentDocumentSources("document")).resolves.toEqual([{ page: 1, url: "https://images.example/1" }]);
+  expect(calls[0]?.body.input).toEqual({ documentKeys: ["document"], include: ["sourceImages"] });
+});
+
+test("archives notes and uploaded files through the same document lifecycle", async () => {
+  await archiveContentDocument("document");
+  expect(calls[0]?.url).toBe("/api/v1/content/tools/document.archive");
+  expect(calls[0]?.body.input).toMatchObject({ documentKeys: ["document"], atomic: false });
 });
 
 test("polls an offloaded upload using the same authenticated Archive context", async () => {
@@ -185,6 +253,62 @@ test("updates folder details and moves folders with exact payloads", async () =>
   expect(calls[1]?.body.input).toEqual({ moves: [{ folderKey: "folder", targetParentFolderKey: "parent" }], atomic: false, idempotencyKey: expect.any(String) });
 });
 
+test("executes mixed batches with exact payloads and stable operation keys", async () => {
+  responseForTool = (tool) => {
+    if (tool.startsWith("folder.")) return { data: { success: true, data: { results: [{ success: true, data: { folder: { key: "folder-a", name: "Folder", isFavorite: true } } }] } } };
+    return { data: { success: true, data: { results: [{ success: true, data: { document: { key: "document-a", name: "Document", isFavorite: true, updatedAt: "after" } } }] } } };
+  };
+
+  const result = await setContentSelectionFavorite({ folderKeys: ["folder-a"], documentKeys: ["document-a"] }, true, "stable-favorite");
+  expect(result).toMatchObject({ requested: 2, succeeded: 2, failed: 0, folders: [{ key: "folder-a" }], documents: [{ key: "document-a" }], failures: [] });
+  expect(calls.map(({ url, body }) => ({ url, input: body.input }))).toEqual([
+    { url: "/api/v1/content/tools/folder.update", input: { updates: [{ folderKey: "folder-a", isFavorite: true }], atomic: false, idempotencyKey: "stable-favorite:folder.update" } },
+    { url: "/api/v1/content/tools/document.update", input: { updates: [{ documentKey: "document-a", isFavorite: true }], atomic: false, idempotencyKey: "stable-favorite:document.update" } },
+  ]);
+});
+
+test("returns copied records and surfaces item and tool partial failures", async () => {
+  responseForTool = (tool) => {
+    if (tool === "folder.copy") return { data: { success: true, data: { results: [
+      { success: true, data: { folder: { key: "folder-copy", name: "Folder copy" }, folderCount: 3, documentCount: 4 } },
+      { success: false, error: { message: "Folder destination denied" } },
+    ] } } };
+    if (tool === "document.copy") throw new Error("Document copy unavailable");
+  };
+
+  const result = await copyContentSelection(
+    { folderKeys: ["folder-a"], documentKeys: ["document-a"] },
+    ["destination-a", "destination-b"],
+    "stable-copy",
+  );
+  expect(result.copiedFolders).toEqual([{ folder: { key: "folder-copy", name: "Folder copy" }, folderCount: 3, documentCount: 4 }]);
+  expect(result).toMatchObject({ requested: 4, succeeded: 1, failed: 3 });
+  expect(result.failures).toEqual([
+    { kind: "folder", key: "folder-a", destinationFolderKey: "destination-b", tool: "folder.copy", message: "Folder destination denied" },
+    { kind: "document", key: "document-a", destinationFolderKey: "destination-a", tool: "document.copy", message: "Document copy unavailable" },
+    { kind: "document", key: "document-a", destinationFolderKey: "destination-b", tool: "document.copy", message: "Document copy unavailable" },
+  ]);
+  expect(calls[0]?.body.input.idempotencyKey).toBe("stable-copy:folder.copy");
+  expect(calls[1]?.body.input.idempotencyKey).toBe("stable-copy:document.copy");
+});
+
+test("moves and archives mixed selections through separate canonical tools", async () => {
+  responseForTool = (tool) => ({ data: { success: true, data: { results: [{ success: true, data: tool.startsWith("folder.")
+    ? { folder: { key: "folder-a", name: "Folder" } }
+    : { document: { key: "document-a", name: "Document", isFavorite: false, updatedAt: "after" } } }] } } });
+
+  await moveContentSelection({ folderKeys: ["folder-a"], documentKeys: ["document-a"] }, "destination", "stable-move");
+  await archiveContentSelection({ folderKeys: ["folder-a"], documentKeys: ["document-a"] }, "stable-archive");
+  expect(calls.map(({ url }) => url)).toEqual([
+    "/api/v1/content/tools/folder.move", "/api/v1/content/tools/document.move",
+    "/api/v1/content/tools/folder.archive", "/api/v1/content/tools/document.archive",
+  ]);
+  expect(calls[0]?.body.input).toEqual({ moves: [{ folderKey: "folder-a", targetParentFolderKey: "destination" }], atomic: false, idempotencyKey: "stable-move:folder.move" });
+  expect(calls[1]?.body.input).toEqual({ moves: [{ documentKey: "document-a", targetScopeKey: "scope-authenticated", targetFolderKey: "destination" }], atomic: false, idempotencyKey: "stable-move:document.move" });
+  expect(calls[2]?.body.input).toEqual({ folderKeys: ["folder-a"], includeDescendants: true, atomic: false, idempotencyKey: "stable-archive:folder.archive" });
+  expect(calls[3]?.body.input).toEqual({ documentKeys: ["document-a"], atomic: false, idempotencyKey: "stable-archive:document.archive" });
+});
+
 test("sets and clears folder covers with exact payloads", async () => {
   responseForTool = () => ({ data: { success: true, data: { results: [{ success: true, data: { folder: { key: "folder", name: "Plans" } } }] } } });
   await setContentFolderCover("folder", "image");
@@ -193,22 +317,19 @@ test("sets and clears folder covers with exact payloads", async () => {
   expect(calls[1]?.body.input).toEqual({ updates: [{ folderKey: "folder", coverImageKey: null }], atomic: false, idempotencyKey: expect.any(String) });
 });
 
-test("runs note autocomplete, enhancement, translation, and rename through document tools", async () => {
+test("runs note enhancement, translation, and rename through document tools", async () => {
   responseForTool = (tool) => {
-    if (tool === "autocomplete") return { data: { success: true, data: { completion: "next words" } } };
     if (tool === "enhance") return { data: { success: true, data: { content: "Improved note" } } };
     if (tool === "document.translate") return { data: { success: true, data: { results: [{ success: true, data: { text: "Nota", persistedDocumentKey: "document" } }] } } };
     if (tool === "document.rename") return { data: { success: true, data: { results: [{ success: true, data: { document: { key: "document", name: "Renamed note", isFavorite: false, updatedAt: "2026-08-10T00:02:00.000Z" } } }] } } };
   };
 
-  expect(await autocompleteContent("Draft context", 8)).toEqual({ completion: "next words" });
   expect(await enhanceContent("Rough note")).toEqual({ content: "Improved note" });
   expect((await translateContentDocument("document", "Spanish")).persistedDocumentKey).toBe("document");
   expect((await renameContentDocument("document", "Renamed note")).name).toBe("Renamed note");
-  expect(calls[0]?.body.input).toEqual({ context: "Draft context", wordCount: 8 });
-  expect(calls[1]?.body.input).toEqual({ content: "Rough note" });
-  expect(calls[2]?.body.input).toMatchObject({ documentKeys: ["document"], targetLanguage: "Spanish", preserveFormatting: true, mode: "replace" });
-  expect(calls[3]?.body.input).toMatchObject({ renames: [{ documentKey: "document", name: "Renamed note" }], atomic: false });
+  expect(calls[0]?.body.input).toEqual({ content: "Rough note" });
+  expect(calls[1]?.body.input).toMatchObject({ documentKeys: ["document"], targetLanguage: "Spanish", preserveFormatting: true, mode: "replace" });
+  expect(calls[2]?.body.input).toMatchObject({ renames: [{ documentKey: "document", name: "Renamed note" }], atomic: false });
 });
 
 test("sends Archive requests to the personal assistant surface", async () => {
@@ -252,16 +373,28 @@ test("scopes search and replayable history to a folder", async () => {
   expect(calls[1]?.body.input).toEqual({ scopeKey: "scope-authenticated", folderKey: "folder", includeDescendants: true, limit: 8 });
 });
 
-test("runs fast top-ten semantic search without a score threshold and summarizes on demand", async () => {
-  responseForTool = (tool) => tool === "scope.document.search"
-    ? { data: { success: true, data: { query: "roadmap", results: [{ documentKey: "document", scopeKey: "scope-authenticated", name: "Roadmap", score: 0.12 }] } } }
+test("runs fast combined search without summaries and summarizes on demand", async () => {
+  responseForTool = (tool) => tool === "scope.content.search"
+    ? { data: { success: true, data: { query: "roadmap", cached: false, folders: [{ key: "folder", scopeKey: "scope-authenticated", name: "Roadmaps", score: 0.8 }], documents: [{ documentKey: "document", scopeKey: "scope-authenticated", name: "Roadmap", extension: "docx", score: 0.72 }] } } }
     : { data: { success: true, data: { results: [{ success: true, data: { text: "A concise roadmap summary." } }] } } };
 
-  expect(await searchContentMatches("roadmap")).toHaveLength(1);
+  expect(await searchContentMatches("roadmap")).toMatchObject({ folders: [{ key: "folder" }], documents: [{ documentKey: "document", extension: "docx" }] });
   expect(await summarizeContentDocument("document")).toBe("A concise roadmap summary.");
-  expect(calls[0]?.body.input).toEqual({ scopeKey: "scope-authenticated", query: "roadmap", topK: 10 });
-  expect(calls[0]?.body.input).not.toHaveProperty("minimumScore");
+  expect(calls[0]?.body.input).toEqual({ scopeKey: "scope-authenticated", query: "roadmap", includeSummaries: false, minimumScore: 0.55 });
   expect(calls[1]?.body.input).toEqual({ documentKeys: ["document"], style: "brief", persist: false });
+});
+
+test("scopes fast semantic search to a folder and its descendants", async () => {
+  responseForTool = () => ({ data: { success: true, data: { query: "roadmap", cached: false, folders: [], documents: [] } } });
+  await searchContentMatches("roadmap", undefined, "folder");
+  expect(calls[0]?.body.input).toEqual({
+    scopeKey: "scope-authenticated",
+    query: "roadmap",
+    includeSummaries: false,
+    minimumScore: 0.55,
+    folderKey: "folder",
+    includeDescendants: true,
+  });
 });
 
 test("loads an existing My Documents folder as the initial Archive location", async () => {

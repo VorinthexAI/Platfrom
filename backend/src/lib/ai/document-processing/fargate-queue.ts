@@ -9,6 +9,7 @@ import { AgentRuntimeNotFoundError } from '@/lib/ai/agents/runtime';
 import { documentStorage } from './storage';
 import { documentParseInputSchema } from './schemas';
 import { documentValidate } from './actions';
+import { documentScanInputSchema } from '@/lib/ai/document-scanning';
 
 const QUEUE_NAME = 'document-processing';
 const LAUNCH_LOCK_SECONDS = 15 * 60;
@@ -28,7 +29,7 @@ const stagedFileSchema = z.object({
   storageKey: z.string().min(1),
 }).strict();
 
-const documentJobSchema = z.object({
+const parseDocumentJobSchema = z.object({
   schemaVersion: z.literal(1),
   organizationKey: z.string().min(1),
   agentKey: z.string().min(1),
@@ -41,6 +42,23 @@ const documentJobSchema = z.object({
     file: stagedFileSchema,
   }).strict(),
 }).strict();
+
+const scanDocumentJobSchema = z.object({
+  schemaVersion: z.literal(2),
+  tool: z.literal('document.scan'),
+  organizationKey: z.string().min(1),
+  agentKey: z.string().min(1),
+  authenticatedUserKey: z.string().min(1),
+  input: z.object({
+    scopeKey: z.string().min(1),
+    folderKey: z.string().min(1).optional(),
+    name: z.string().min(1).optional(),
+    idempotencyKey: z.string().min(1),
+    pages: z.array(stagedFileSchema).min(1).max(12),
+  }).strict(),
+}).strict();
+
+const documentJobSchema = z.union([parseDocumentJobSchema, scanDocumentJobSchema]);
 
 export type DocumentProcessingJob = z.infer<typeof documentJobSchema>;
 type DocumentProcessingResult = { success: true; data: unknown } | { success: false; error: ContentErrorShape };
@@ -194,22 +212,67 @@ export async function enqueueDocumentProcessing(input: {
   return { key: jobId, state: state === 'active' ? 'active' : state === 'delayed' ? 'delayed' : 'waiting' };
 }
 
+export async function enqueueDocumentScan(input: {
+  organizationKey: string;
+  agentKey: string;
+  authenticatedUserKey: string;
+  document: unknown;
+}): Promise<DocumentProcessingStatus> {
+  const parsed = documentScanInputSchema.parse(input.document);
+  const idempotencyKey = parsed.idempotencyKey ?? randomUUID();
+  const requestHash = createHash('sha256')
+    .update(parsed.scopeKey).update('\0').update(parsed.folderKey ?? '').update('\0').update(parsed.name ?? '').update('\0');
+  for (const page of parsed.pages) requestHash.update(page.mimeType).update('\0').update(page.bytes);
+  const jobId = stableJobId(input.organizationKey, input.agentKey, input.authenticatedUserKey, idempotencyKey, requestHash.digest('hex'));
+  const identity = createHash('sha256').update(input.organizationKey).update('\0').update(input.agentKey).update('\0').update(input.authenticatedUserKey).update('\0').update(idempotencyKey).digest('hex');
+  const mappingKey = `document-processing:idempotency:${identity}`;
+  const claimed = await jobRedisConnection().set(mappingKey, jobId, 'EX', 24 * 60 * 60, 'NX');
+  if (!claimed && await jobRedisConnection().get(mappingKey) !== jobId) return { success: false, error: new ContentError('CONTENT_CONFLICT', 'Idempotency key was already used with a different scan.', 'document.scan', { action: 'idempotency' }).toJSON() };
+  const targetQueue = processingQueue();
+  const existing = await Job.fromId<DocumentProcessingJob, DocumentProcessingResult>(targetQueue, jobId);
+  if (existing && await existing.getState() === 'completed') return existing.returnvalue;
+  const stagedPages: Array<{ filename: string; mimeType: string; sizeBytes: number; storageKey: string }> = [];
+  try {
+    for (const [index, page] of parsed.pages.entries()) {
+      const extension = page.mimeType === 'image/png' ? 'png' : 'jpg';
+      const storageKey = `pending/document-processing/${jobId}/page-${String(index + 1).padStart(2, '0')}.${extension}`;
+      await documentStorage.upload({ key: storageKey, bytes: page.bytes, mimeType: page.mimeType });
+      stagedPages.push({ filename: page.filename, mimeType: page.mimeType, sizeBytes: page.sizeBytes, storageKey });
+    }
+  } catch (error) {
+    await Promise.allSettled(stagedPages.map((page) => documentStorage.delete(page.storageKey)));
+    throw error;
+  }
+  const data = scanDocumentJobSchema.parse({ schemaVersion: 2, tool: 'document.scan', organizationKey: input.organizationKey, agentKey: input.agentKey, authenticatedUserKey: input.authenticatedUserKey, input: { scopeKey: parsed.scopeKey, ...(parsed.folderKey ? { folderKey: parsed.folderKey } : {}), ...(parsed.name ? { name: parsed.name } : {}), idempotencyKey, pages: stagedPages } });
+  let job: Job<DocumentProcessingJob, DocumentProcessingResult>;
+  try { job = existing ?? await targetQueue.add('scan-document', data, { ...jobOptions, jobId }); }
+  catch (error) { await Promise.allSettled(stagedPages.map((page) => documentStorage.delete(page.storageKey))); throw error; }
+  let state = await job.getState();
+  if (state === 'failed') { await job.retry(); state = 'waiting'; }
+  if (!['active', 'completed'].includes(state)) await launchWorker(jobId);
+  if (state === 'completed') return job.returnvalue;
+  return { key: jobId, state: state === 'active' ? 'active' : state === 'delayed' ? 'delayed' : 'waiting' };
+}
+
 export async function getDocumentProcessingStatus(jobId: string, identity: {
   organizationKey: string;
   agentKey: string;
   authenticatedUserKey: string;
+  tool?: 'document.parse' | 'document.scan';
 }): Promise<DocumentProcessingStatus | null> {
   const key = z.string().length(64).regex(/^[a-f0-9]+$/).parse(jobId);
   const job = await Job.fromId<DocumentProcessingJob, DocumentProcessingResult>(processingQueue(), key);
   if (!job) return null;
   const data = documentJobSchema.parse(job.data);
   if (data.organizationKey !== identity.organizationKey || data.agentKey !== identity.agentKey || data.authenticatedUserKey !== identity.authenticatedUserKey) return null;
+  const tool = data.schemaVersion === 2 ? 'document.scan' : 'document.parse';
+  if (identity.tool && identity.tool !== tool) return null;
   const state = await job.getState();
   if (state === 'completed') return job.returnvalue;
   if (state === 'failed') {
     return {
       success: false,
-      error: contentErrorSchema.parse({ code: 'DOCUMENT_PROCESSING_FAILED', message: 'Document processing failed after retrying.', tool: 'document.parse', action: 'worker', retryable: true }),
+      error: contentErrorSchema.parse({ code: 'DOCUMENT_PROCESSING_FAILED', message: 'Document processing failed after retrying.', tool, action: 'worker', retryable: true }),
     };
   }
   await recoverWorker(job, state);
@@ -218,10 +281,19 @@ export async function getDocumentProcessingStatus(jobId: string, identity: {
 
 async function processJob(job: Job<DocumentProcessingJob>) {
   const data = documentJobSchema.parse(job.data);
-  const stored = await documentStorage.download(data.input.file.storageKey);
-  if (stored.bytes.byteLength !== data.input.file.sizeBytes) throw new Error('Staged document size changed before processing.');
   const { runContentAgentTool } = await import('@/lib/ai/tools');
   try {
+    if (data.schemaVersion === 2) {
+      const pages = await Promise.all(data.input.pages.map(async (page) => {
+        const stored = await documentStorage.download(page.storageKey);
+        if (stored.bytes.byteLength !== page.sizeBytes) throw new Error('Staged scan page size changed before processing.');
+        return { filename: page.filename, mimeType: page.mimeType as 'image/jpeg' | 'image/png', sizeBytes: page.sizeBytes, bytes: stored.bytes };
+      }));
+      const output = await runContentAgentTool({ organizationKey: data.organizationKey, agentKey: data.agentKey, tool: 'document.scan', input: { scopeKey: data.input.scopeKey, ...(data.input.folderKey ? { folderKey: data.input.folderKey } : {}), ...(data.input.name ? { name: data.input.name } : {}), idempotencyKey: data.input.idempotencyKey, pages } }, { authenticatedUserKey: data.authenticatedUserKey });
+      return { success: true as const, data: output };
+    }
+    const stored = await documentStorage.download(data.input.file.storageKey);
+    if (stored.bytes.byteLength !== data.input.file.sizeBytes) throw new Error('Staged document size changed before processing.');
     const output = await runContentAgentTool({
       organizationKey: data.organizationKey,
       agentKey: data.agentKey,
@@ -242,8 +314,9 @@ async function processJob(job: Job<DocumentProcessingJob>) {
     return { success: true as const, data: output };
   } catch (error) {
     if (error instanceof ContentError && !error.retryable) return { success: false as const, error: error.toJSON() };
-    if (error instanceof AgentExecutionAccessError) return { success: false as const, error: new ContentError('CONTENT_FORBIDDEN', 'Agent execution access denied.', 'document.parse', { action: 'authorization' }).toJSON() };
-    if (error instanceof AgentRuntimeNotFoundError) return { success: false as const, error: new ContentError('CONTENT_NOT_FOUND', 'Agent runtime was not found.', 'document.parse', { action: 'authorization' }).toJSON() };
+    const tool = data.schemaVersion === 2 ? 'document.scan' : 'document.parse';
+    if (error instanceof AgentExecutionAccessError) return { success: false as const, error: new ContentError('CONTENT_FORBIDDEN', 'Agent execution access denied.', tool, { action: 'authorization' }).toJSON() };
+    if (error instanceof AgentRuntimeNotFoundError) return { success: false as const, error: new ContentError('CONTENT_NOT_FOUND', 'Agent runtime was not found.', tool, { action: 'authorization' }).toJSON() };
     throw error;
   }
 }
@@ -255,7 +328,9 @@ export async function runDocumentProcessingWorker(): Promise<void> {
   const finish = async (job: Job<DocumentProcessingJob> | undefined, failed: boolean) => {
     if (settled || !job || (failed && job.attemptsMade < (job.opts.attempts ?? 1))) return;
     settled = true;
-    await documentStorage.delete(job.data.input.file.storageKey).catch(() => undefined);
+    const data = documentJobSchema.parse(job.data);
+    const storageKeys = data.schemaVersion === 2 ? data.input.pages.map((page) => page.storageKey) : [data.input.file.storageKey];
+    await Promise.allSettled(storageKeys.map((key) => documentStorage.delete(key)));
     if (job.id) await jobRedisConnection().del(`document-processing:launch:${job.id}`).catch(() => undefined);
     await worker.close();
   };

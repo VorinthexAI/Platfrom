@@ -8,12 +8,17 @@ export const colors = {
   accentLight: "#FFFFFF",
   border: "#262D36",
   danger: "#B04A4A",
+  panel: "#0A0E13",
+  panelRaised: "#10151C",
+  hairline: "rgba(221, 226, 229, 0.14)",
+  hairlineBright: "rgba(255, 255, 255, 0.30)",
 } as const;
 
 export const radii = {
   sm: 10,
   md: 14,
   lg: 24,
+  xl: 28,
 } as const;
 
 export const spacing = {

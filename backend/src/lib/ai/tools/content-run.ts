@@ -6,6 +6,7 @@ import type { DomainToolContext } from './domain-execute';
 import { ContentError } from './content-errors';
 import { contentToolNameSchema } from './content-registry';
 import { runContentTool } from './content-runtime';
+import type { ContentToolDependencies } from './content-runtime';
 
 export const runContentAgentToolInputSchema = z.object({
   organizationKey: z.string().trim().min(1),
@@ -20,6 +21,7 @@ export interface RunContentAgentToolOptions {
   accessData?: ExecutionAccessDataSource;
   resolveMembership?: typeof getUserOrganizationByOrganizationAndUser;
   execute?: typeof runContentTool;
+  contentDependencies?: ContentToolDependencies;
 }
 
 const agentExecutionContextSchema = z.object({
@@ -56,5 +58,5 @@ export async function authorizeContentAgentTool(rawInput: z.input<typeof runCont
 /** Authenticated human boundary for invoking a registered Content tool. */
 export async function runContentAgentTool(rawInput: z.input<typeof runContentAgentToolInputSchema>, options: RunContentAgentToolOptions) {
   const { input, context } = await authorizeContentAgentTool(rawInput, options);
-  return (options.execute ?? runContentTool)(input.tool, input.input, context);
+  return (options.execute ?? runContentTool)(input.tool, input.input, context, options.contentDependencies);
 }

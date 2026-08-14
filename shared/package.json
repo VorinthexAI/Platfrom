@@ -19,6 +19,10 @@
       "react-native": "./packages/ui/components/spinner/spinner.mobile.tsx",
       "default": "./packages/ui/components/spinner/spinner.web.tsx"
     },
+    "./ui/badge": {
+      "react-native": "./packages/ui/components/badge/badge.mobile.tsx",
+      "default": "./packages/ui/components/badge/badge.web.tsx"
+    },
     "./ui/bottom-sheet": {
       "react-native": "./packages/ui/components/bottom-sheet/bottom-sheet.mobile.tsx",
       "default": "./packages/ui/components/bottom-sheet/bottom-sheet.web.tsx"
@@ -31,6 +35,19 @@
       "react-native": "./packages/ui/components/tabs/tabs.mobile.tsx",
       "default": "./packages/ui/components/tabs/tabs.web.tsx"
     },
+    "./ui/toast": {
+      "react-native": "./packages/ui/components/toast/toast.mobile.tsx",
+      "default": "./packages/ui/components/toast/toast.web.tsx"
+    },
+    "./ui/file-viewer": {
+      "react-native": "./packages/ui/components/file-viewer/file-viewer.mobile.tsx",
+      "default": "./packages/ui/components/file-viewer/file-viewer.web.tsx"
+    },
+    "./ui/slider": {
+      "react-native": "./packages/ui/components/slider/slider.mobile.tsx",
+      "default": "./packages/ui/components/slider/slider.web.tsx"
+    },
+    "./ui/document-search": "./packages/ui/document-search.ts",
     "./ui/components": "./packages/ui/components.ts",
     "./ui/icons": "./packages/ui/icons.ts",
     "./ui/icons-mobile": "./packages/ui/icons-mobile.ts",
@@ -62,6 +79,7 @@
   "peerDependencies": {
     "react": "19.2.3",
     "react-native": ">=0.86",
+    "react-native-pdf": ">=7",
     "react-native-safe-area-context": ">=5.7"
   },
   "devDependencies": {

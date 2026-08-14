@@ -13,7 +13,7 @@ const domain = {
 } as unknown as DomainToolContext;
 
 const expected: Array<[AssistantSurface, string[]]> = [
-  ['knowledge-workspace', ['folder.list', 'folder.create', 'folder.update', 'folder.move', 'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.translate', 'document.list-versions', 'document.restore-version', 'document.download', 'knowledge.search', 'note.write', 'note.enhance']],
+  ['knowledge-workspace', ['folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy', 'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.translate', 'document.list-versions', 'document.restore-version', 'document.download', 'knowledge.search', 'note.write', 'note.enhance']],
   ['travel-workspace', ['place.list', 'place.create', 'place.visit.create', 'trip.create', 'trip.place.add', 'trip.place.remove']],
   ['signal-workspace', ['email.overview', 'email.sync', 'email.thread.read', 'email.thread.favorite', 'email.draft.create', 'email.draft.update', 'email.draft.send', 'email.disconnect']],
   ['book-workspace', ['book.list', 'book.detail', 'book.chapter.progress', 'book.create-context', 'book.write']],
@@ -96,13 +96,18 @@ describe('personal assistant service capabilities', () => {
     const calls: unknown[] = [];
     const executeContent = async (...args: unknown[]) => { calls.push(args); return {}; };
     const create = defaultAssistantCapabilityRegistry.resolve('knowledge-workspace').find(({ definition }) => definition.name === 'folder.create')!;
+    const copy = defaultAssistantCapabilityRegistry.resolve('knowledge-workspace').find(({ definition }) => definition.name === 'folder.copy')!;
+    const folderKey = newId(), targetParentFolderKey = newId();
     const context: any = { domain, requestKey: 'stable-request', executeContent };
     await create.execute({ name: 'xyz' }, context);
     await create.execute({ name: 'xyz' }, context);
+    await copy.execute({ copies: [{ folderKey, targetParentFolderKey }] }, context);
     expect(calls).toEqual([
       ['folder.create', { folders: [{ scopeKey, name: 'xyz' }], idempotencyKey: 'stable-request:folder.create' }, domain, undefined],
       ['folder.create', { folders: [{ scopeKey, name: 'xyz' }], idempotencyKey: 'stable-request:folder.create' }, domain, undefined],
+      ['folder.copy', { copies: [{ folderKey, targetParentFolderKey, targetScopeKey: scopeKey }], idempotencyKey: 'stable-request:folder.copy' }, domain, undefined],
     ]);
+    expect(copy.mutationWorkspace).toBe('archive');
   });
 
   test('injects the trusted open document into document-specific Core actions', async () => {

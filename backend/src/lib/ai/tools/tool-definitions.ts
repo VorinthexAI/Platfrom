@@ -10,9 +10,9 @@ import { agentMemberReadTool } from './agent-member-read';
 import { agentMemberRevokeTool } from './agent-member-revoke';
 import { agentMemberSyncTool } from './agent-member-sync';
 import { artifactCreateTool } from './artifact-create';
+import { audioGenerateTool } from './audio-generate';
 import { bookCreateContextToolDefinition } from './book-create-context';
 import { bookWriteToolDefinition } from './book-write';
-import { autocompleteToolDefinition } from './autocomplete';
 import { documentContentToolDefinition } from './document-content';
 import { documentCreateToolDefinition } from './document-create';
 import { documentCopyToolDefinition } from './document-copy';
@@ -24,12 +24,14 @@ import { documentExportToolDefinition } from './document-export';
 import { documentFindToolDefinition } from './document-find';
 import { documentFindVersionToolDefinition } from './document-find-version';
 import { documentListToolDefinition } from './document-list';
+import { documentListAudioVersionsToolDefinition } from './document-list-audio-versions';
 import { documentListSharesToolDefinition } from './document-list-shares';
 import { documentListVersionsToolDefinition } from './document-list-versions';
 import { documentMoveToolDefinition } from './document-move';
 import { documentParseToolDefinition } from './document-parse';
 import { documentReadToolDefinition } from './document-read';
 import { documentRenameToolDefinition } from './document-rename';
+import { documentScanToolDefinition } from './document-scan';
 import { documentRestoreToolDefinition } from './document-restore';
 import { documentRestoreVersionToolDefinition } from './document-restore-version';
 import { documentRewriteToolDefinition } from './document-rewrite';
@@ -48,6 +50,7 @@ import { emailReadTool } from './email-read';
 import { emailThreadListTool } from './email-thread-list';
 import { emailThreadReadTool } from './email-thread-read';
 import { folderContentToolDefinition } from './folder-content';
+import { folderCopyToolDefinition } from './folder-copy';
 import { folderCreateToolDefinition } from './folder-create';
 import { folderDeleteToolDefinition } from './folder-delete';
 import { folderFindToolDefinition } from './folder-find';
@@ -149,18 +152,18 @@ import { WORKSPACE_TOOL_DEFINITIONS } from './workspace-tool-definitions';
 export const PUBLIC_TOOL_DEFINITIONS = Object.freeze([
   orchestratorChatTool,
   transcribeTool,
+  audioGenerateTool,
   imageCaptionTool,
   imageCreateVisualIdentityTool,
   imageSearchTool,
-  autocompleteToolDefinition,
   enhanceToolDefinition,
   bookCreateContextToolDefinition,
   bookWriteToolDefinition,
   emailThreadListTool, emailThreadReadTool, emailReadTool, emailReplyDraftTool,
   accessAgentEvaluateTool, accessAgentExplainTool, accessOrganizationEvaluateTool, accessOrganizationExplainTool, accessScopeEvaluateTool, accessScopeExplainTool,
   agentMemberGrantTool, agentMemberListTool, agentMemberReadTool, agentMemberRevokeTool, agentMemberSyncTool, artifactCreateTool,
-  documentContentToolDefinition, documentCreateToolDefinition, documentCopyToolDefinition, documentCreateVersionToolDefinition, documentDeleteToolDefinition, documentDeleteVersionToolDefinition, documentDownloadToolDefinition, documentExportToolDefinition, documentFindToolDefinition, documentFindVersionToolDefinition, documentListToolDefinition, documentListSharesToolDefinition, documentListVersionsToolDefinition, documentMoveToolDefinition, documentParseToolDefinition, documentReadToolDefinition, documentRenameToolDefinition, documentRestoreToolDefinition, documentRestoreVersionToolDefinition, documentRewriteToolDefinition, documentShareToolDefinition, documentShareContentTool, documentShareRestoreTool, documentSummarizeToolDefinition, documentTranslateToolDefinition, documentUnshareToolDefinition, documentUpdateToolDefinition, documentVersionContentTool, documentVersionRestoreTool,
-  folderContentToolDefinition, folderCreateToolDefinition, folderDeleteToolDefinition, folderFindToolDefinition, folderListToolDefinition, folderMoveToolDefinition, folderRenameToolDefinition, folderRestoreToolDefinition, folderUpdateToolDefinition,
+  documentContentToolDefinition, documentCreateToolDefinition, documentCopyToolDefinition, documentCreateVersionToolDefinition, documentDeleteToolDefinition, documentDeleteVersionToolDefinition, documentDownloadToolDefinition, documentExportToolDefinition, documentFindToolDefinition, documentFindVersionToolDefinition, documentListToolDefinition, documentListAudioVersionsToolDefinition, documentListSharesToolDefinition, documentListVersionsToolDefinition, documentMoveToolDefinition, documentParseToolDefinition, documentReadToolDefinition, documentRenameToolDefinition, documentScanToolDefinition, documentRestoreToolDefinition, documentRestoreVersionToolDefinition, documentRewriteToolDefinition, documentShareToolDefinition, documentShareContentTool, documentShareRestoreTool, documentSummarizeToolDefinition, documentTranslateToolDefinition, documentUnshareToolDefinition, documentUpdateToolDefinition, documentVersionContentTool, documentVersionRestoreTool,
+  folderContentToolDefinition, folderCopyToolDefinition, folderCreateToolDefinition, folderDeleteToolDefinition, folderFindToolDefinition, folderListToolDefinition, folderMoveToolDefinition, folderRenameToolDefinition, folderRestoreToolDefinition, folderUpdateToolDefinition,
   milestoneContentTool, milestoneChangeStatusTool, milestoneCompleteTool, milestoneCreateTool, milestoneDeleteTool, milestoneFindTool, milestoneListTool, milestoneMoveTool, milestoneRenameTool, milestoneReopenTool, milestoneRestoreTool, milestoneScheduleTool, milestoneUpdateTool,
   organizationContentTool, organizationDocumentSearchToolDefinition, organizationMemberActivateTool, organizationMemberAddTool, organizationMemberListTool, organizationMemberReadTool, organizationMemberRemoveTool, organizationMemberRoleUpdateTool, organizationMemberSuspendTool, organizationProjectSearchTool, organizationProviderDisableTool, organizationProviderEnableTool, organizationProviderListTool, organizationProviderReadTool, organizationProviderTestTool, organizationReadTool, organizationRestoreTool, organizationUpdateTool,
   projectContentTool, projectCreateTool, projectDeleteTool, projectFindTool, projectListTool, projectMoveTool, projectRenameTool, projectRestoreTool, projectUpdateTool,
