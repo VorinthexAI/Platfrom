@@ -127,7 +127,7 @@ export function createContentToolHandler(dependencies: ContentToolHandlerDepende
         }
         return c.json({ success: true as const, data: { job: queued } }, 202);
       }
-      const output = await (dependencies.run ?? runContentAgentTool)({ organizationKey: body.organizationKey, agentKey: body.agentKey, tool, input }, { ...dependencies.serviceOptions, authenticatedUserKey: identity.key });
+      const output = await (dependencies.run ?? runContentAgentTool)({ organizationKey: body.organizationKey, agentKey: body.agentKey, tool, input }, { ...dependencies.serviceOptions, authenticatedUserKey: identity.key, contentDependencies: { ...dependencies.serviceOptions?.contentDependencies, signal: c.req.raw.signal } });
       return c.json({ success: true, data: output });
     } catch (error) {
       if (error instanceof ContentError) return c.json(responseError(error), contentStatus(error.code));

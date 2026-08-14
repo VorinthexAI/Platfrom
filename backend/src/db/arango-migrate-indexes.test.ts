@@ -89,6 +89,12 @@ describe('Arango migration indexes', () => {
     expect(isLegacyIndex('documentVersions', ['storageKey'], [['storageKey']])).toBe(false);
     expect(isLegacyIndex('documentVersions', ['storageKey'], [['documentKey', 'version']])).toBe(true);
   });
+  test('declares private independent document audio version indexes', () => {
+    const audio = collections.find(({ name }) => name === 'documentAudioVersions');
+    expect(audio?.skipEmbedding).toBe(true);
+    expect(audio?.indexes).toContainEqual({ fields: ['scopeKey', 'documentKey', 'version'], unique: true });
+    expect(audio?.indexes).toContainEqual({ fields: ['storageKey'], unique: true });
+  });
   test('declares sparse direct-channel identity uniqueness and poll vote uniqueness', async () => {
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
     expect(source).toContain("{ fields: ['organizationKey', 'kind', 'name'], unique: true, sparse: true }");

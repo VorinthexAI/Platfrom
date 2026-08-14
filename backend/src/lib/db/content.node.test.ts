@@ -4,6 +4,7 @@ import { documentExtensionSchema, documentSchema, documentsEmbeddingFields } fro
 import { documentShareSchema, documentSharesEmbeddingFields } from './document-shares.node';
 import { folderSchema, foldersEmbeddingFields } from './folders.node';
 import { documentVersionSchema, documentVersionsEmbeddingFields } from './document-versions.node';
+import { documentAudioVersionSchema } from './document-audio-versions.node';
 import { EMBEDDING_DIMENSIONS } from '../embeddings';
 import { chunkDocumentContent } from '../ai/document-processing/chunking';
 
@@ -47,6 +48,18 @@ describe('Content node contracts', () => {
     expect(snapshot).not.toHaveProperty('sizeBytes');
     expect(() => documentVersionSchema.parse({ ...snapshot, html: '   ' })).toThrow();
     expect(() => documentVersionSchema.parse({ ...snapshot, content: '   ' })).toThrow();
+  });
+
+  test('audio versions are independent immutable document representations', () => {
+    const audio = documentAudioVersionSchema.parse({
+      key: 'cm00000000000000000000001', scopeKey: 'cm00000000000000000000002', documentKey: 'cm00000000000000000000003',
+      version: 3, sourceContentHash: 'a'.repeat(64), sourceTitle: 'Document', sourceDocumentUpdatedAt: '2026-07-22T09:00:00.000Z',
+      storageKey: 'content/document/audio/version.mp3', mimeType: 'audio/mpeg', sizeBytes: 128, durationMs: 1_200,
+      includeTitle: false, includeCode: false, createdByKey: 'cm00000000000000000000004', createdAt: '2026-07-22T10:00:00.000Z',
+    });
+    expect(audio).toMatchObject({ version: 3, documentKey: 'cm00000000000000000000003' });
+    expect(audio).not.toHaveProperty('documentVersionKey');
+    expect(() => documentAudioVersionSchema.parse({ ...audio, durationMs: 0 })).toThrow();
   });
 
   test('version content arrays reconstruct canonical text exactly', () => {

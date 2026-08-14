@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { highlightedSegments, searchDocumentPassages, type DocumentSearchMatch, type HighlightRange } from "../../document-search";
 import { ChevronLeftIcon } from "../../icons/chevron-left/chevron-left.mobile";
 import { CloseIcon } from "../../icons/close/close.mobile";
+import { ClockIcon } from "../../icons/clock/clock.mobile";
 import { MoreHorizontalIcon } from "../../icons/more-horizontal/more-horizontal.mobile";
 import { PauseIcon } from "../../icons/pause/pause.mobile";
 import { PlayIcon } from "../../icons/play/play.mobile";
@@ -27,7 +28,7 @@ export type FileViewerBlock =
   | { type: "horizontalRule" }
   | { type: "page"; page: number; children: FileViewerBlock[] };
 
-export type FileViewerProps = { blocks?: FileViewerBlock[]; error?: string; loading?: boolean; onBack: () => void; onMenu: () => void; onRead?: () => void; onRenderError?: (message: string) => void; pdfUri?: string; readLoading?: boolean; reading?: boolean; title: string };
+export type FileViewerProps = { blocks?: FileViewerBlock[]; error?: string; loading?: boolean; onBack: () => void; onHistory?: () => void; onMenu: () => void; onRead?: () => void; onRenderError?: (message: string) => void; pdfUri?: string; readLoading?: boolean; reading?: boolean; title: string };
 
 function passageText(runs: FileViewerInlineRun[]) {
   return runs.map(({ text }) => text).join("");
@@ -87,7 +88,7 @@ function Block({ block, capturePassage, depth = 0, id, matches }: BlockProps) {
   })}</View>)}</View>;
 }
 
-export function FileViewer({ blocks, error, loading = false, onBack, onMenu, onRead, onRenderError, pdfUri, readLoading = false, reading = false, title }: FileViewerProps) {
+export function FileViewer({ blocks, error, loading = false, onBack, onHistory, onMenu, onRead, onRenderError, pdfUri, readLoading = false, reading = false, title }: FileViewerProps) {
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState("");
   const [layoutVersion, setLayoutVersion] = useState(0);
@@ -122,7 +123,7 @@ export function FileViewer({ blocks, error, loading = false, onBack, onMenu, onR
   const searchStatus = !trimmedQuery ? "" : matches.length ? `${matches.length} ${matches.length === 1 ? "match" : "matches"}` : "No matches";
   const showNativePdf = Boolean(pdfUri && !trimmedQuery);
   return <View style={[styles.root, { paddingBottom: insets.bottom + 78 + spacing.md }]}><View style={styles.scene}>
-    <View style={styles.header}><Button accessibilityLabel="Back" contentMode="raw" onPress={onBack} size="sm" variant="icon"><ChevronLeftIcon size="sm" /></Button><View style={styles.headerSpacer} />{onRead ? <Button accessibilityLabel={reading ? "Pause listening" : "Listen to document"} contentMode="raw" loading={readLoading} onPress={onRead} size="sm" variant="icon">{reading ? <PauseIcon size="sm" /> : readLoading ? <VolumeIcon size="sm" /> : <PlayIcon size="sm" />}</Button> : null}<Button accessibilityLabel={`Manage ${title}`} contentMode="raw" onPress={onMenu} size="sm" variant="icon"><MoreHorizontalIcon size="sm" /></Button></View>
+    <View style={styles.header}><Button accessibilityLabel="Back" contentMode="raw" onPress={onBack} size="sm" variant="icon"><ChevronLeftIcon size="sm" /></Button><View style={styles.headerSpacer} />{onRead ? <Button accessibilityLabel={reading ? "Pause listening" : "Listen to document"} contentMode="raw" loading={readLoading} onPress={onRead} size="sm" variant="icon">{reading ? <PauseIcon size="sm" /> : readLoading ? <VolumeIcon size="sm" /> : <PlayIcon size="sm" />}</Button> : null}{onHistory ? <Button accessibilityLabel="Document and audio versions" contentMode="raw" onPress={onHistory} size="sm" variant="icon"><ClockIcon size="sm" /></Button> : null}<Button accessibilityLabel={`Manage ${title}`} contentMode="raw" onPress={onMenu} size="sm" variant="icon"><MoreHorizontalIcon size="sm" /></Button></View>
     <View style={styles.search}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel="Search in document" maxLength={200} onChangeText={setQuery} placeholder="Search in document" returnKeyType="search" style={styles.searchInput} value={query} />{query.trim() ? <Button accessibilityLabel="Clear document search" contentMode="raw" onPress={() => setQuery("")} size="xs" variant="icon"><CloseIcon size="sm" /></Button> : null}</View>
     {trimmedQuery ? <Text accessibilityLiveRegion="polite" style={styles.searchStatus}>{searchStatus}</Text> : null}
     <View style={styles.documentArea}>{loading ? <View accessibilityLabel={`Loading ${title}`} accessibilityRole="progressbar" style={styles.center}><Spinner size="large" /></View> : error ? <View style={styles.center}><Text accessibilityRole="alert" style={styles.error}>{error}</Text></View> : showNativePdf ? <View style={styles.content}><Text numberOfLines={2} style={styles.title}>{title}</Text><Pdf enableDoubleTapZoom={false} enablePaging={false} fitPolicy={0} horizontal={false} maxScale={1} minScale={1} onError={(cause) => onRenderError?.(cause.message || "The PDF could not be rendered.")} source={{ uri: pdfUri!, cache: false }} style={styles.pdf} trustAllCerts={false} /></View> : blocks ? <ScrollView contentContainerStyle={styles.document} horizontal={false} ref={scrollRef} showsHorizontalScrollIndicator={false}><Text numberOfLines={2} style={styles.title}>{title}</Text>{blocks.map((block, index) => <Block block={block} capturePassage={capturePassage} id={`block.${index}`} key={index} matches={matchesById} />)}</ScrollView> : <View style={styles.center}><Text style={styles.error}>Preview unavailable.</Text></View>}</View>

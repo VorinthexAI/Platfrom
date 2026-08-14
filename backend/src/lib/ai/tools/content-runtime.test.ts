@@ -12,7 +12,7 @@ const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
 
 function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
   const organizationKey = newId(), scopeKey = newId(), membershipKey = newId(), userKey = newId();
-  const folders = new Map<string, any>(), documents = new Map<string, any>(), shares = new Map<string, any>(), versions = new Map<string, any>();
+  const folders = new Map<string, any>(), documents = new Map<string, any>(), shares = new Map<string, any>(), versions = new Map<string, any>(), audioVersions = new Map<string, any>();
   const patches: Array<Record<string, unknown>> = [];
   const repository: ContentRepository = {
     async getScope(key) { return key === scopeKey ? { key, organizationKey } : null; },
@@ -45,6 +45,9 @@ function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
     async listVersions(_scopeKey, keys) { return [...versions.values()].filter((value) => keys.includes(value.documentKey)).sort((a, b) => b.version - a.version); },
     async createVersion(value) { const version = { ...value, key: newId(), version: [...versions.values()].filter((item) => item.documentKey === value.documentKey).length + 1, deletedAt: null, createdAt: now }; versions.set(version.key, version); return version; },
     async deleteVersion(key) { versions.delete(key); },
+    async listAudioVersions(_scopeKey, keys) { return [...audioVersions.values()].filter((value) => keys.includes(value.documentKey)).sort((a, b) => b.version - a.version); },
+    async createAudioVersion(value) { const version = { ...value, version: [...audioVersions.values()].filter((item) => item.documentKey === value.documentKey).length + 1 }; audioVersions.set(version.key, version); return version; },
+    async deleteAudioVersion(key) { audioVersions.delete(key); },
     async semanticSearch() { return [...documents.values()].map((document) => ({ score: 0.8, document })); },
     async semanticSearchFolders() { return [...folders.values()].map((folder) => ({ score: 0.8, folder })); },
     async transaction(operation) { return operation(repository); },
@@ -52,7 +55,7 @@ function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
   const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: membershipKey, organizationId: organizationKey, status: 'active', orgRole: role } } } as any;
   const folderKey = newId(); folders.set(folderKey, { key: folderKey, scopeKey, name: 'Root', embedding, createdAt: now, updatedAt: now });
   const addDocument = (content = 'First sentence. Second sentence.') => { const key = newId(); documents.set(key, { key, scopeKey, folderKey, name: 'Notes', extension: 'txt', mimeType: 'text/plain', sizeBytes: content.length, storageKey: `docs/${key}`, html: `<p>${content}</p>`, content, embedding, isFavorite: false, createdAt: now, updatedAt: now }); return key; };
-  return { repository, context, folders, documents, shares, versions, patches, scopeKey, folderKey, addDocument };
+  return { repository, context, folders, documents, shares, versions, audioVersions, patches, scopeKey, folderKey, addDocument };
 }
 
 describe('Content runtime', () => {
@@ -277,10 +280,10 @@ describe('Content runtime', () => {
   });
 
   test('returns playable audio with conservative document offsets and MIME-matched persistence', async () => {
-    const f = fixture('viewer');
+    const f = fixture('moderator');
     const documentKey = f.addDocument(`0123456789Visible sentence. ${'More words. '.repeat(30)} \`secret code\``);
     const spoken: string[] = [], uploaded: string[] = [];
-    const dependencies: any = { repository: f.repository, maxSpeechChunkCharacters: 200, runAction: async (action: string, input: any) => { expect(action).toBe('speak'); const parsed = speechInputSchema.parse(input); expect(parsed).toMatchObject({ language: 'English', speakingRate: 1.25, format: 'wav' }); spoken.push(parsed.text); return { audioBase64: Buffer.from([spoken.length]).toString('base64'), mimeType: 'audio/ogg', durationMs: 10 }; }, storage: { async upload(input: any) { uploaded.push(input.key); return { storageKey: input.key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } } };
+    const dependencies: any = { repository: f.repository, maxSpeechChunkCharacters: 200, runAction: async (action: string, input: any) => { expect(action).toBe('speak'); const parsed = speechInputSchema.parse(input); expect(parsed).toMatchObject({ language: 'English', speakingRate: 1.25 }); spoken.push(parsed.text); return { audioBase64: Buffer.from([spoken.length]).toString('base64'), mimeType: parsed.format === 'mp3' ? 'audio/mpeg' : 'audio/ogg', durationMs: 10 }; }, mergeAudio: async () => new Uint8Array([1, 2, 3]), audioDuration: () => 900, storage: { async upload(input: any) { uploaded.push(input.key); return { storageKey: input.key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } } };
     const ephemeral = await runContentTool('document.read', { documentKeys: [documentKey], mode: 'audio', startOffset: 10, includeTitle: true, language: 'English', speakingRate: 1.25 }, f.context, dependencies);
     const audio = (ephemeral.results[0]?.data as { audio: Array<{ index: number; url: string; startCharacter: number; endCharacter: number }> }).audio;
     expect(audio.map((item) => item.index)).toEqual([...spoken.keys()]);
@@ -289,25 +292,26 @@ describe('Content runtime', () => {
     expect(spoken[0]).toStartWith('Notes. Visible sentence.');
     expect(spoken.join(' ')).not.toContain('secret code');
     expect(uploaded).toHaveLength(0);
-    await runContentTool('document.read', { documentKeys: [documentKey], mode: 'audio', startOffset: 10, includeCode: false, persistAudio: true, language: 'English', speakingRate: 1.25 }, f.context, dependencies);
-    expect(uploaded.length).toBeGreaterThan(0);
-    expect(uploaded.every((key) => key.endsWith('.ogg'))).toBe(true);
-    expect(f.documents.get(documentKey).speechStorageKeys).toEqual(uploaded);
+    const persisted = await runContentTool('document.read', { documentKeys: [documentKey], mode: 'audio', includeCode: false, persistAudio: true, language: 'English', speakingRate: 1.25 }, f.context, dependencies);
+    expect(uploaded).toHaveLength(1);
+    expect(uploaded[0]).toEndWith('.mp3');
+    expect(persisted.results[0]?.data).toMatchObject({ audioVersion: { version: 1, durationMs: 900 } });
+    expect(f.audioVersions.size).toBe(1);
+    expect(f.documents.get(documentKey).speechStorageKeys).toBeUndefined();
+    expect(f.documents.get(documentKey).updatedAt).toBe(now);
   });
 
-  test('cleans persisted audio chunks when a later speech chunk fails', async () => {
-    const f = fixture('viewer');
+  test('cleans a persisted full-audio object when version metadata fails', async () => {
+    const f = fixture('moderator');
     const documentKey = f.addDocument('Long sentence. '.repeat(80));
     const uploaded: string[] = [], deleted: string[] = [];
-    let calls = 0;
+    f.repository.createAudioVersion = async () => { throw new Error('metadata failed'); };
     const output = await runContentTool('document.read', { documentKeys: [documentKey], mode: 'audio', persistAudio: true }, f.context, {
       repository: f.repository,
       maxSpeechChunkCharacters: 200,
-      runAction: async () => {
-        calls += 1;
-        if (calls === 2) throw new Error('speech failed');
-        return { audio: new Uint8Array([1]), mimeType: 'audio/wav' };
-      },
+      runAction: async () => ({ audio: new Uint8Array([1]), mimeType: 'audio/mpeg' }),
+      mergeAudio: async () => new Uint8Array([1]),
+      audioDuration: () => 100,
       storage: {
         async upload(input) { uploaded.push(input.key); return { storageKey: input.key }; },
         async delete(key) { deleted.push(key); },
@@ -317,8 +321,63 @@ describe('Content runtime', () => {
     });
     expect(output.results[0]?.success).toBe(false);
     expect(uploaded).toHaveLength(1);
-    expect(uploaded[0]).toEndWith('.wav');
+    expect(uploaded[0]).toEndWith('.mp3');
     expect(deleted).toEqual(uploaded);
+  });
+
+  test('stops persisted audio generation when its request is aborted', async () => {
+    const f = fixture('moderator');
+    const documentKey = f.addDocument('Long sentence. '.repeat(80));
+    const controller = new AbortController();
+    let uploads = 0;
+    const output = await runContentTool('document.read', { documentKeys: [documentKey], mode: 'audio', persistAudio: true }, f.context, {
+      repository: f.repository,
+      signal: controller.signal,
+      maxSpeechChunkCharacters: 200,
+      runAction: async () => { controller.abort(); return { audio: new Uint8Array([1]), mimeType: 'audio/mpeg' }; },
+      mergeAudio: async () => { throw new Error('merge should not run'); },
+      audioDuration: () => 100,
+      storage: { async upload({ key }) { uploads += 1; return { storageKey: key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
+    });
+    expect(output.results[0]?.success).toBe(false);
+    expect(uploads).toBe(0);
+    expect(f.audioVersions.size).toBe(0);
+  });
+
+  test('rejects oversized persisted narration before spending speech capacity', async () => {
+    const f = fixture('moderator');
+    const documentKey = f.addDocument('x'.repeat(120_001));
+    let speechCalls = 0;
+    const output = await runContentTool('document.read', { documentKeys: [documentKey], mode: 'audio', persistAudio: true }, f.context, {
+      repository: f.repository,
+      runAction: async () => { speechCalls += 1; return { audio: new Uint8Array([1]), mimeType: 'audio/mpeg' }; },
+    });
+    expect(output.results[0]).toMatchObject({ success: false, error: { code: 'DOCUMENT_TOO_LARGE' } });
+    expect(speechCalls).toBe(0);
+  });
+
+  test('versions audio independently from document snapshots and marks stale content', async () => {
+    const f = fixture('moderator');
+    const documentKey = f.addDocument('Stable source text.');
+    const dependencies: any = {
+      repository: f.repository,
+      runAction: async () => ({ audio: new Uint8Array([1]), mimeType: 'audio/mpeg' }),
+      mergeAudio: async () => new Uint8Array([1, 2]),
+      audioDuration: () => 1_200,
+      signAudioUrl: async (key: string) => `https://audio.example/${key}`,
+      storage: { async upload({ key }: any) { return { storageKey: key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
+      clock: () => new Date(now),
+    };
+    await runContentTool('document.read', { documentKeys: [documentKey], mode: 'audio', persistAudio: true }, f.context, dependencies);
+    await runContentTool('document.read', { documentKeys: [documentKey], mode: 'audio', persistAudio: true }, f.context, dependencies);
+    expect(f.versions.size).toBe(0);
+    expect([...f.audioVersions.values()].map(({ version }) => version)).toEqual([1, 2]);
+
+    const current = f.documents.get(documentKey);
+    current.content = 'Changed source text.';
+    current.html = '<p>Changed source text.</p>';
+    const listed = await runContentTool('document.list-audio-versions', { documentKeys: [documentKey] }, f.context, dependencies);
+    expect(listed.results[0]?.data?.audioVersions).toMatchObject([{ version: 2, current: false }, { version: 1, current: false }]);
   });
 
   test('filters semantic search to authorized scopes and rejects unresolved projects', async () => {
@@ -778,6 +837,7 @@ describe('Content runtime', () => {
     const version = await f.repository.createVersion({
       scopeKey: f.scopeKey, documentKey, html: '<p>old</p>', content: 'old', embedding,
     });
+    const audio = await f.repository.createAudioVersion!({ key: newId(), scopeKey: f.scopeKey, documentKey, sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: now, storageKey: 'audio/version.mp3', mimeType: 'audio/mpeg', sizeBytes: 10, durationMs: 100, includeTitle: false, includeCode: false, createdByKey: newId(), createdAt: now });
     const calls: string[] = [];
     const originalDelete = f.repository.deleteDocument;
     f.repository.deleteDocument = async (key) => { calls.push('metadata'); await originalDelete(key); };
@@ -790,9 +850,10 @@ describe('Content runtime', () => {
     storage.delete = async () => { calls.push('storage'); };
     const deleted = await runContentTool('document.delete', { documentKeys: [documentKey], deleteVersions: true, deleteShares: true }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
     expect(deleted.results[0]?.success).toBe(true);
-    expect(calls.filter((call) => call === 'storage').length).toBe(4);
+    expect(calls.filter((call) => call === 'storage').length).toBe(5);
     expect(calls.at(-1)).toBe('metadata');
     expect(f.versions.has(version.key)).toBe(false);
+    expect(f.audioVersions.has(audio.key)).toBe(false);
   });
 
   test('hides a pending document deletion after metadata commit failure and finishes on retry', async () => {
@@ -1090,7 +1151,8 @@ describe('Content runtime', () => {
       else if (name === 'document.create') input = { scopeKey: f.scopeKey, folderKey: f.folderKey, name: 'Created document', representation: { content: 'Created body' } };
       else if (name === 'document.find') input = { documentKeys: [documentKey], include: ['content'] };
       else if (name === 'document.list') input = { scopeKey: f.scopeKey, folderKey: f.folderKey };
-      else if (name === 'document.read') input = { documentKeys: [documentKey], mode: 'content' };
+       else if (name === 'document.read') input = { documentKeys: [documentKey], mode: 'content' };
+       else if (name === 'document.list-audio-versions') input = { documentKeys: [documentKey] };
       else if (name === 'document.update') input = { updates: [{ documentKey, content: 'Updated body' }] };
       else if (name === 'document.rename') input = { renames: [{ documentKey, name: 'Renamed' }] };
       else if (name === 'document.move') input = { moves: [{ documentKey, targetScopeKey: f.scopeKey, targetFolderKey: siblingKey }] };

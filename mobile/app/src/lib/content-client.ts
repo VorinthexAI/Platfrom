@@ -45,6 +45,26 @@ export type ContentDocumentVersion = {
   content?: string;
 };
 
+export type ContentDocumentAudioVersion = {
+  key: string;
+  documentKey: string;
+  version: number;
+  sourceContentHash: string;
+  sourceTitle: string;
+  sourceDocumentUpdatedAt: string;
+  mimeType: "audio/mpeg";
+  sizeBytes: number;
+  durationMs: number;
+  voice?: string;
+  language?: string;
+  speakingRate?: number;
+  includeTitle: boolean;
+  includeCode: boolean;
+  createdAt: string;
+  current: boolean;
+  url: string;
+};
+
 export type ContentSearchDocument = {
   documentKey: string;
   name: string;
@@ -147,7 +167,7 @@ async function callContentTool<T>(tool: string, input: Record<string, unknown>, 
       organizationKey: contentContext.organizationKey,
       agentKey: contentContext.agentKey,
       input,
-    }, { signal, timeout: tool === "document.parse" || tool === "document.scan" ? 5 * 60_000 : tool === "autocomplete" ? 15_000 : 60_000 });
+    }, { signal, timeout: tool === "document.read" && input.persistAudio === true ? 15 * 60_000 : tool === "document.parse" || tool === "document.scan" ? 5 * 60_000 : tool === "autocomplete" ? 15_000 : 60_000 });
     if (!response.data.success) throw new Error(response.data.error.message);
     return response.data.data;
   } catch (error) {
@@ -211,6 +231,30 @@ export async function listContentDocumentVersions(documentKey: string) {
     cursor = result.data.cursor;
   } while (cursor);
   return versions;
+}
+
+export async function listContentDocumentAudioVersions(documentKey: string) {
+  const versions: ContentDocumentAudioVersion[] = [];
+  let cursor: string | undefined;
+  do {
+    const data = await callContentTool<{
+      results: { success: boolean; data?: { audioVersions: ContentDocumentAudioVersion[]; cursor?: string }; error?: { message: string } }[];
+    }>("document.list-audio-versions", { documentKeys: [documentKey], cursor, limit: 100 });
+    const result = data.results[0];
+    if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "Audio versions could not be loaded.");
+    versions.push(...result.data.audioVersions);
+    cursor = result.data.cursor;
+  } while (cursor);
+  return versions;
+}
+
+export async function generateContentDocumentAudio(documentKey: string) {
+  const data = await callContentTool<{
+    results: { success: boolean; data?: { audioVersion: Omit<ContentDocumentAudioVersion, "current" | "url"> }; error?: { message: string } }[];
+  }>("document.read", { documentKeys: [documentKey], mode: "audio", persistAudio: true, idempotencyKey: createContentMutationKey() });
+  const result = data.results[0];
+  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "Document audio could not be generated.");
+  return result.data.audioVersion;
 }
 
 export async function findContentDocumentVersion(versionKey: string) {

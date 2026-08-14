@@ -57,8 +57,10 @@ const {
   downloadContentDocument,
   enhanceContent,
   findContentDocumentVersion,
+  generateContentDocumentAudio,
   loadInitialContentLocation,
   listContentSearchHistory,
+  listContentDocumentAudioVersions,
   moveContentFolder,
   moveContentDocument,
   readContentDocument,
@@ -104,6 +106,21 @@ test("rejects notes at the file-viewer boundary", async () => {
   responseForTool = (tool) => tool === "document.find" ? { data: { success: true, data: { results: [{ success: true, data: { document: { key: "note", name: "Note", isFavorite: false, updatedAt: "2026-08-10T00:00:00.000Z", blocks: [{ type: "paragraph", content: [{ text: "Note body" }] }] } } }] } } } : undefined;
   await expect(readContentDocumentPreview("note")).rejects.toThrow("Notes open in the document editor");
   expect(calls[0]?.body.input).toEqual({ documentKeys: ["note"], include: ["blocks"] });
+});
+
+test("generates and lists independent full-audio versions", async () => {
+  const metadata = { key: "audio-version", documentKey: "document", version: 2, sourceContentHash: "a".repeat(64), sourceTitle: "Note", sourceDocumentUpdatedAt: "2026-08-10T00:00:00.000Z", mimeType: "audio/mpeg", sizeBytes: 1024, durationMs: 65_000, includeTitle: false, includeCode: false, createdAt: "2026-08-10T00:02:00.000Z" };
+  responseForTool = (tool) => tool === "document.read"
+    ? { data: { success: true, data: { results: [{ success: true, data: { audioVersion: metadata } }] } } }
+    : tool === "document.list-audio-versions"
+      ? { data: { success: true, data: { results: [{ success: true, data: { audioVersions: [{ ...metadata, current: true, url: "https://audio.example/version.mp3" }] } }] } } }
+      : undefined;
+
+  await expect(generateContentDocumentAudio("document")).resolves.toMatchObject({ key: "audio-version", version: 2 });
+  await expect(listContentDocumentAudioVersions("document")).resolves.toMatchObject([{ key: "audio-version", current: true }]);
+  expect(calls[0]?.body.input).toMatchObject({ documentKeys: ["document"], mode: "audio", persistAudio: true });
+  expect(calls[0]?.config.timeout).toBe(15 * 60_000);
+  expect(calls[1]?.body.input).toEqual({ documentKeys: ["document"], cursor: undefined, limit: 100 });
 });
 
 test("sends document and folder mutations with the authenticated Archive context", async () => {

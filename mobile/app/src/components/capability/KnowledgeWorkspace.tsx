@@ -24,6 +24,7 @@ import {
   BrainIcon,
   CheckIcon,
   ChevronLeftIcon,
+  ChevronRightIcon,
   ClockIcon,
   DownloadIcon,
   EditIcon,
@@ -53,6 +54,7 @@ import {
   copyContentDocument,
   downloadContentDocument,
   findContentDocumentVersion,
+  generateContentDocumentAudio,
   getContentContext,
   isContentContextConfigured,
   listContentDocumentVersions,
@@ -72,6 +74,7 @@ import {
   type ContentDocumentPreview,
   type ContentDocumentSourceImage,
   type ContentDocumentVersion,
+  type ContentDocumentAudioVersion,
   type ContentFolder,
   type ContentSearchHistoryItem,
   type ContentSearchDocument,
@@ -85,11 +88,13 @@ import {
   contentQueryKeys,
   getContentDocument,
   getContentDocumentPreview,
+  getContentDocumentAudioVersions,
   getContentHistory,
   getContentLocation,
   invalidateContentLocations,
   invalidateContentHistories,
   refreshContentDocument,
+  refreshContentDocumentAudioVersions,
   refreshContentHistory,
   refreshContentLocation,
   replaceCachedContentDocument,
@@ -102,7 +107,6 @@ import {
 import { invalidateAssistantChanges } from "@/lib/workspace-query-cache";
 import { saveBase64Download, saveTemporaryBase64File, saveTextDownload } from "@/lib/device-download";
 import { fetchGalleryUploadStatus, uploadGalleryImages } from "@/lib/gallery-client";
-import { streamGeneratedAudio, type GeneratedAudioChunk } from "@/lib/audio-client";
 import { BOOK_AUDIO_MODE } from "@/lib/book-audio";
 import { audioTimelineDuration, audioTimelinePosition, formatAudioTime, resolveAudioTimelinePosition } from "@/lib/audio-playback-timeline";
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
@@ -111,9 +115,10 @@ import { useAuthStore } from "@/state/auth";
 type SaveState = "local" | "dirty" | "saving" | "saved" | "error";
 type WorkspaceMode = "auto" | "folders" | "folder" | "editor" | "viewer";
 type FolderContentTab = "folders" | "documents" | "files";
-type ArchiveSheet = "create" | "folder" | "library" | "documents" | "folders" | "enhance" | "versions" | "documentActions" | "deleteDocument" | "scanSources" | "destination" | "destinationBrowser" | "rename" | "summary" | "folderActions" | "folderDetails";
+type ArchiveSheet = "create" | "folder" | "library" | "documents" | "folders" | "enhance" | "historyChooser" | "versions" | "audioVersions" | "documentActions" | "deleteDocument" | "scanSources" | "destination" | "destinationBrowser" | "rename" | "summary" | "folderActions" | "folderDetails";
 type DestinationAction = "upload" | "move" | "copy" | "moveFolder";
 type UploadBatchItem = { id: string; file: File; name: string; status: "pending" | "uploading" | "success" | "error"; error?: string };
+type NarrationChunk = { durationMs: number; url: string };
 type PendingCreate = { name: string; content: string; folderKey?: string; mutationKey: string };
 type LocalDraft = {
   title?: unknown;
@@ -214,6 +219,10 @@ export function KnowledgeWorkspace() {
   const [versions, setVersions] = useState<ContentDocumentVersion[]>([]);
   const [loadingVersions, setLoadingVersions] = useState(false);
   const [versionActionKey, setVersionActionKey] = useState<string>();
+  const [audioVersions, setAudioVersions] = useState<ContentDocumentAudioVersion[]>([]);
+  const [loadingAudioVersions, setLoadingAudioVersions] = useState(false);
+  const [generatingAudioVersion, setGeneratingAudioVersion] = useState(false);
+  const [selectedAudioVersionKey, setSelectedAudioVersionKey] = useState<string>();
   const [saveState, setSaveState] = useState<SaveState>(hasContentContext ? "saved" : "local");
   const [folders, setFolders] = useState<ContentFolder[]>([]);
   const [rootFolders, setRootFolders] = useState<ContentFolder[]>([]);
@@ -235,10 +244,9 @@ export function KnowledgeWorkspace() {
   const [filePreviewUri, setFilePreviewUri] = useState<string>();
   const [fileContent, setFileContent] = useState("");
   const [documentSearchQuery, setDocumentSearchQuery] = useState("");
-  const [narrationState, setNarrationState] = useState<"idle" | "generating" | "playing" | "paused" | "waiting" | "ready" | "error">("idle");
-  const [narrationManifest, setNarrationManifest] = useState<GeneratedAudioChunk[]>([]);
+  const [narrationState, setNarrationState] = useState<"idle" | "playing" | "paused" | "ready" | "error">("idle");
+  const [narrationManifest, setNarrationManifest] = useState<NarrationChunk[]>([]);
   const [narrationActiveIndex, setNarrationActiveIndex] = useState(-1);
-  const [narrationGenerationComplete, setNarrationGenerationComplete] = useState(false);
   const [narrationTitle, setNarrationTitle] = useState("");
   const [narrationScrubValue, setNarrationScrubValue] = useState<number>();
   const [narrationError, setNarrationError] = useState<string>();
@@ -295,15 +303,12 @@ export function KnowledgeWorkspace() {
   const folderSearchRequest = useRef<AbortController | undefined>(undefined);
   const editorDocumentScroll = useRef<ScrollView | null>(null);
   const documentPassageOffsets = useRef(new Map<string, number>());
-  const narrationRequest = useRef<AbortController | undefined>(undefined);
-  const narrationGeneration = useRef(0);
-  const narrationChunks = useRef<GeneratedAudioChunk[]>([]);
+  const narrationChunks = useRef<NarrationChunk[]>([]);
+  const narrationPlaybackGeneration = useRef(0);
   const narrationChunkIndex = useRef(-1);
-  const narrationGenerating = useRef(false);
   const narrationStateRef = useRef(narrationState);
   const lastFinishedNarrationChunk = useRef(-1);
   const narrationTitleRef = useRef("");
-  const narrationDocumentKeyRef = useRef<string | undefined>(undefined);
   const pendingNarrationSeek = useRef<{ index: number; seconds: number; play: boolean } | undefined>(undefined);
   const summaryRequest = useRef<AbortController | undefined>(undefined);
   const previewFileRef = useRef<File | undefined>(undefined);
@@ -371,7 +376,7 @@ export function KnowledgeWorkspace() {
     if (!chunk) return false;
     narrationChunkIndex.current = index;
     setNarrationActiveIndex(index);
-    narrationPlayer.replace(`data:${chunk.mimeType};base64,${chunk.audioBase64}`);
+    narrationPlayer.replace(chunk.url);
     narrationPlayer.setActiveForLockScreen(true, { title: narrationTitleRef.current, artist: "Vorinthex Archive" }, { showSeekBackward: false, showSeekForward: false });
     narrationPlayer.play();
     updateNarrationState("playing");
@@ -379,14 +384,10 @@ export function KnowledgeWorkspace() {
   };
 
   const stopNarration = useCallback(() => {
-    narrationGeneration.current += 1;
-    narrationRequest.current?.abort();
-    narrationRequest.current = undefined;
-    narrationGenerating.current = false;
+    narrationPlaybackGeneration.current += 1;
     narrationChunks.current = [];
     narrationChunkIndex.current = -1;
     narrationTitleRef.current = "";
-    narrationDocumentKeyRef.current = undefined;
     pendingNarrationSeek.current = undefined;
     lastFinishedNarrationChunk.current = -1;
     narrationPlayer.pause();
@@ -395,49 +396,11 @@ export function KnowledgeWorkspace() {
     setNarrationState("idle");
     setNarrationManifest([]);
     setNarrationActiveIndex(-1);
-    setNarrationGenerationComplete(false);
     setNarrationTitle("");
+    setSelectedAudioVersionKey(undefined);
     setNarrationScrubValue(undefined);
     setNarrationError(undefined);
   }, [narrationPlayer]);
-
-  const startNarration = async (text: string, name: string, documentKey?: string) => {
-    if (!text.trim() || !organizationKey || !agentKey) return;
-    stopNarration();
-    narrationTitleRef.current = name;
-    narrationDocumentKeyRef.current = documentKey;
-    setNarrationTitle(name);
-    const generation = ++narrationGeneration.current;
-    const controller = new AbortController();
-    narrationRequest.current = controller;
-    narrationGenerating.current = true;
-    updateNarrationState("generating");
-    try {
-      await setAudioModeAsync(BOOK_AUDIO_MODE);
-      await streamGeneratedAudio({ organizationKey, agentKey, text, wordsPerChunk: 100 }, (chunk) => {
-        if (generation !== narrationGeneration.current) return;
-        narrationChunks.current.push(chunk);
-        setNarrationManifest([...narrationChunks.current]);
-        if (narrationChunkIndex.current < 0 || narrationStateRef.current === "waiting") playNarrationChunk(narrationChunks.current.length - 1);
-      }, controller.signal);
-      if (generation !== narrationGeneration.current) return;
-      narrationGenerating.current = false;
-      narrationRequest.current = undefined;
-      setNarrationGenerationComplete(true);
-      if (narrationChunks.current.length === 0) throw new Error("No audio was generated.");
-      if (narrationStateRef.current === "waiting") updateNarrationState("ready");
-    } catch (cause) {
-      if (generation !== narrationGeneration.current || controller.signal.aborted) return;
-      narrationGenerating.current = false;
-      narrationRequest.current = undefined;
-      setNarrationGenerationComplete(true);
-      const message = cause instanceof Error ? cause.message : "The document could not be read aloud.";
-      setNarrationError(message);
-      showToast({ title: "Read aloud failed", description: message });
-      if (narrationChunkIndex.current < 0) updateNarrationState("error");
-      else if (narrationStateRef.current === "waiting") updateNarrationState("ready");
-    }
-  };
 
   const toggleNarration = () => {
     if (narrationStateRef.current === "playing") {
@@ -451,14 +414,10 @@ export function KnowledgeWorkspace() {
       pendingNarrationSeek.current = { ...target, play: true };
       narrationChunkIndex.current = target.index;
       setNarrationActiveIndex(target.index);
-      narrationPlayer.replace(`data:${narrationChunks.current[target.index]!.mimeType};base64,${narrationChunks.current[target.index]!.audioBase64}`);
+      const chunk = narrationChunks.current[target.index]!;
+      narrationPlayer.replace(chunk.url);
       updateNarrationState("playing");
     }
-  };
-
-  const listenToNarration = (text: string, name: string, documentKey?: string) => {
-    if (narrationDocumentKeyRef.current === documentKey && narrationStateRef.current !== "idle" && narrationStateRef.current !== "error") toggleNarration();
-    else void startNarration(text, name, documentKey);
   };
 
   const seekNarration = (seconds: number) => {
@@ -474,7 +433,7 @@ export function KnowledgeWorkspace() {
     narrationChunkIndex.current = target.index;
     setNarrationActiveIndex(target.index);
     const chunk = narrationChunks.current[target.index]!;
-    narrationPlayer.replace(`data:${chunk.mimeType};base64,${chunk.audioBase64}`);
+    narrationPlayer.replace(chunk.url);
     if (!shouldPlay) updateNarrationState("paused");
   };
 
@@ -520,17 +479,13 @@ export function KnowledgeWorkspace() {
     if (current < 0 || lastFinishedNarrationChunk.current === current) return;
     lastFinishedNarrationChunk.current = current;
     if (playNarrationChunk(current + 1)) return;
-    if (narrationGenerating.current) updateNarrationState("waiting");
-    else {
-      narrationPlayer.clearLockScreenControls();
-      updateNarrationState("ready");
-    }
+    narrationPlayer.clearLockScreenControls();
+    updateNarrationState("ready");
     // Completion is edge-triggered; queue and generation state live in refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [narrationAudio.didJustFinish]);
 
   useEffect(() => () => {
-    narrationRequest.current?.abort();
     narrationPlayer.pause();
     narrationPlayer.clearLockScreenControls();
   }, [narrationPlayer]);
@@ -1042,27 +997,107 @@ export function KnowledgeWorkspace() {
     if (localDraftFile.exists) localDraftFile.delete();
   }
 
+  const openHistoryChooser = (document: ContentDocument) => {
+    setSelectedDocument(document);
+    openSheet("historyChooser");
+  };
+
   const openVersionHistory = async () => {
-    const documentKey = documentKeyRef.current;
+    const documentKey = selectedDocument?.key ?? documentKeyRef.current;
     if (!documentKey) {
       setSheetError("Save the document before opening version history.");
       return;
     }
-    if (dirty.current || saveInFlight.current || saveState !== "saved") {
+    if (documentKey === documentKeyRef.current && (dirty.current || saveInFlight.current || saveState !== "saved")) {
       setSheetError("Wait for the document to finish saving before opening version history.");
       return;
     }
-    const session = editorSession.current;
-    openSheet("versions");
+    const generation = ++restoreGeneration.current;
+    if (sheetOpen) pushSheet("versions");
+    else openSheet("versions");
     setVersions([]);
     setLoadingVersions(true);
     try {
       const history = await listContentDocumentVersions(documentKey);
-      if (session === editorSession.current && documentKeyRef.current === documentKey) setVersions(history);
+      if (generation === restoreGeneration.current) setVersions(history);
     } catch (cause) {
-      if (session === editorSession.current && documentKeyRef.current === documentKey && activeSheetRef.current === "versions") setSheetError(cause instanceof Error ? cause.message : "Version history could not be loaded.");
+      if (generation === restoreGeneration.current && activeSheetRef.current === "versions") setSheetError(cause instanceof Error ? cause.message : "Version history could not be loaded.");
     } finally {
-      if (session === editorSession.current) setLoadingVersions(false);
+      if (generation === restoreGeneration.current) setLoadingVersions(false);
+    }
+  };
+
+  const playAudioVersion = async (version: ContentDocumentAudioVersion, startSeconds = 0, autoPlay = true, refreshUrl = true) => {
+    const document = selectedDocument;
+    if (!document) return;
+    const generation = ++narrationPlaybackGeneration.current;
+    try {
+      const history = refreshUrl ? await refreshContentDocumentAudioVersions(queryClient, contentContext, document.key) : audioVersions;
+      if (generation !== narrationPlaybackGeneration.current) return;
+      if (refreshUrl) setAudioVersions(history);
+      const playable = history.find((item) => item.key === version.key) ?? version;
+      await setAudioModeAsync(BOOK_AUDIO_MODE);
+      if (generation !== narrationPlaybackGeneration.current) return;
+      stopNarration();
+      narrationTitleRef.current = document.name;
+      setNarrationTitle(`${document.name} · Audio ${playable.version}`);
+      setSelectedAudioVersionKey(playable.key);
+      const chunk: NarrationChunk = { durationMs: playable.durationMs, url: playable.url };
+      narrationChunks.current = [chunk];
+      narrationChunkIndex.current = 0;
+      setNarrationManifest([chunk]);
+      setNarrationActiveIndex(0);
+      pendingNarrationSeek.current = { index: 0, seconds: Math.min(startSeconds, playable.durationMs / 1_000), play: autoPlay };
+      narrationPlayer.replace(playable.url);
+      narrationPlayer.setActiveForLockScreen(true, { title: document.name, artist: "Vorinthex Archive" }, { showSeekBackward: false, showSeekForward: false });
+      if (autoPlay) narrationPlayer.play();
+      updateNarrationState(autoPlay ? "playing" : "paused");
+    } catch (cause) {
+      if (generation !== narrationPlaybackGeneration.current) return;
+      const message = cause instanceof Error ? cause.message : "This audio version could not be played.";
+      setNarrationError(message);
+      updateNarrationState("error");
+    }
+  };
+
+  const openAudioVersionHistory = async (targetDocument?: ContentDocument) => {
+    const documentKey = targetDocument?.key ?? selectedDocument?.key ?? documentKeyRef.current;
+    if (!documentKey) {
+      setSheetError("Save the document before opening audio versions.");
+      return;
+    }
+    if (targetDocument) setSelectedDocument(targetDocument);
+    const generation = ++restoreGeneration.current;
+    if (targetDocument) openSheet("audioVersions");
+    else if (sheetOpen) pushSheet("audioVersions");
+    else openSheet("audioVersions");
+    setAudioVersions([]);
+    setLoadingAudioVersions(true);
+    try {
+      const history = await getContentDocumentAudioVersions(queryClient, contentContext, documentKey);
+      if (generation === restoreGeneration.current) setAudioVersions(history);
+    } catch (cause) {
+      if (generation === restoreGeneration.current && activeSheetRef.current === "audioVersions") setSheetError(cause instanceof Error ? cause.message : "Audio versions could not be loaded.");
+    } finally {
+      if (generation === restoreGeneration.current) setLoadingAudioVersions(false);
+    }
+  };
+
+  const generateAudioVersion = async () => {
+    const document = selectedDocument;
+    if (!document || generatingAudioVersion) return;
+    setGeneratingAudioVersion(true);
+    setSheetError(undefined);
+    try {
+      const generated = await generateContentDocumentAudio(document.key);
+      const history = await refreshContentDocumentAudioVersions(queryClient, contentContext, document.key);
+      setAudioVersions(history);
+      const playable = history.find((version) => version.key === generated.key);
+      if (playable) await playAudioVersion(playable, 0, true, false);
+    } catch (cause) {
+      setSheetError(cause instanceof Error ? cause.message : "Document audio could not be generated.");
+    } finally {
+      setGeneratingAudioVersion(false);
     }
   };
 
@@ -1299,10 +1334,10 @@ export function KnowledgeWorkspace() {
 
   const listenToSelectedDocument = async () => {
     if (!selectedDocument) return;
+    const target = selectedDocument;
     setDocumentActionLoading("listen");
     try {
-      const detail = await getContentDocument(queryClient, contentContext, selectedDocument.key);
-      if (await openArchiveDocument(selectedDocument, true)) listenToNarration(detail.content, detail.name, detail.key);
+      if (await openArchiveDocument(target, true)) await openAudioVersionHistory(target);
     } catch (cause) {
       setSheetError(cause instanceof Error ? cause.message : "The document could not be opened for listening.");
     } finally {
@@ -2242,24 +2277,50 @@ export function KnowledgeWorkspace() {
     return null;
   }
 
+  const controlSelectedAudioVersion = () => {
+    if (narrationStateRef.current === "playing") {
+      toggleNarration();
+      return;
+    }
+    const version = audioVersions.find((item) => item.key === selectedAudioVersionKey);
+    if (version) void playAudioVersion(version, narrationStateRef.current === "ready" ? 0 : narrationElapsed);
+    else toggleNarration();
+  };
+
+  const scrubSelectedAudioVersion = (seconds: number) => {
+    const version = audioVersions.find((item) => item.key === selectedAudioVersionKey);
+    if (!version) {
+      seekNarration(seconds);
+      return;
+    }
+    const wasPlaying = narrationStateRef.current === "playing";
+    if (wasPlaying) {
+      narrationPlayer.pause();
+      updateNarrationState("paused");
+    }
+    void playAudioVersion(version, seconds, wasPlaying);
+  };
+
   const narrationAccessory = narrationState !== "idle" ? (
     <View style={styles.narrationPlayer}>
       <View style={styles.narrationHeading}>
         <View style={styles.narrationTitleBlock}>
           <Text numberOfLines={1} style={styles.narrationTitle}>{narrationTitle || "Document audio"}</Text>
-          <Text style={styles.narrationStatus}>{narrationGenerationComplete ? "LISTENING" : "GENERATING AUDIO"}</Text>
+          <Text style={styles.narrationStatus}>AUDIO VERSION</Text>
         </View>
         <Button accessibilityLabel="Close audio player" contentMode="raw" onPress={stopNarration} size="xs" variant="icon"><CloseIcon size="sm" /></Button>
       </View>
       <View style={styles.narrationControls}>
-        <Button accessibilityLabel={narrationState === "playing" ? "Pause listening" : "Play audio"} contentMode="raw" disabled={narrationManifest.length === 0} loading={narrationManifest.length === 0 && narrationState !== "error"} onPress={toggleNarration} size="sm" variant="icon">{narrationState === "playing" ? <PauseIcon size="sm" /> : <PlayIcon size="sm" />}</Button>
+        <Button accessibilityLabel={narrationState === "playing" ? "Pause listening" : "Play audio"} contentMode="raw" disabled={narrationManifest.length === 0} loading={narrationManifest.length === 0 && narrationState !== "error"} onPress={controlSelectedAudioVersion} size="sm" variant="icon">{narrationState === "playing" ? <PauseIcon size="sm" /> : <PlayIcon size="sm" />}</Button>
         <Text style={styles.narrationTime}>{formatAudioTime(narrationElapsed)}</Text>
-        <Slider accessibilityLabel="Audio progress" disabled={narrationDuration <= 0} max={Math.max(1, narrationDuration)} onSlidingComplete={(value) => { setNarrationScrubValue(undefined); seekNarration(value); }} onValueChange={setNarrationScrubValue} style={styles.narrationSlider} value={Math.min(narrationElapsed, narrationDuration)} />
-        <Text style={styles.narrationTime}>{formatAudioTime(narrationDuration)}{narrationGenerationComplete ? "" : "+"}</Text>
+        <Slider accessibilityLabel="Audio progress" disabled={narrationDuration <= 0} max={Math.max(1, narrationDuration)} onSlidingComplete={(value) => { setNarrationScrubValue(undefined); scrubSelectedAudioVersion(value); }} onValueChange={setNarrationScrubValue} style={styles.narrationSlider} value={Math.min(narrationElapsed, narrationDuration)} />
+        <Text style={styles.narrationTime}>{formatAudioTime(narrationDuration)}</Text>
       </View>
       {narrationError ? <Text accessibilityRole="alert" numberOfLines={2} style={styles.narrationError}>{narrationError}</Text> : null}
     </View>
   ) : undefined;
+  const selectedAudioVersionIndex = audioVersions.findIndex((version) => version.key === selectedAudioVersionKey);
+  const selectedAudioVersion = selectedAudioVersionIndex >= 0 ? audioVersions[selectedAudioVersionIndex] : undefined;
 
   return (
     <KeyboardAvoidingView behavior={aiInputFocused ? "height" : undefined} style={styles.root}>
@@ -2271,12 +2332,10 @@ export function KnowledgeWorkspace() {
         blocks={filePreview?.blocks}
         loading={Boolean(!filePreviewError && (!filePreview || filePreview.extension === "pdf" && !filePreviewUri))}
         onBack={leaveFileViewer}
+        onHistory={selectedDocument ? () => openHistoryChooser(selectedDocument) : undefined}
         onMenu={() => { if (selectedDocument) showDocumentActions(selectedDocument); }}
-        onRead={fileContent.trim() ? () => listenToNarration(fileContent, selectedDocument?.name ?? "File", selectedDocument?.key) : undefined}
         onRenderError={setFilePreviewError}
         pdfUri={filePreviewUri}
-        readLoading={narrationState === "waiting" || narrationState === "generating" && narrationManifest.length === 0}
-        reading={narrationState === "playing"}
         title={selectedDocument?.name ?? "File"}
       /> : <>
       <ScrollView
@@ -2400,9 +2459,8 @@ export function KnowledgeWorkspace() {
               {editorEditing
                 ? <Button accessibilityLabel="Save and lock document" accessibilityState={{ selected: true }} contentMode="raw" onPress={finishEditing} size="sm" variant="primary"><CheckIcon size="sm" variant="inverse" /></Button>
                 : <Button accessibilityLabel="Edit document" contentMode="raw" onPress={() => { stopNarration(); setDocumentSearchQuery(""); setEditorEditing(true); }} size="sm" variant="icon"><EditIcon size="sm" /></Button>}
-              {!editorEditing && content.trim() ? <Button accessibilityLabel={narrationState === "playing" ? "Pause listening" : "Listen to document"} contentMode="raw" loading={narrationState === "waiting" || narrationState === "generating" && narrationManifest.length === 0} onPress={() => listenToNarration(content, title, activeDocument?.key)} size="sm" variant="icon">{narrationState === "playing" ? <PauseIcon size="sm" /> : <PlayIcon size="sm" />}</Button> : null}
               <Button accessibilityLabel="AI document actions" contentMode="raw" disabled={!content.trim()} onPress={openEnhanceSheet} size="sm" variant="icon"><BrainIcon size="sm" /></Button>
-              <Button accessibilityLabel="Document version history" contentMode="raw" disabled={!activeDocument || saveState !== "saved"} onPress={() => void openVersionHistory()} size="sm" variant="icon"><ClockIcon size="sm" /></Button>
+              <Button accessibilityLabel="Document and audio versions" contentMode="raw" disabled={!activeDocument || saveState !== "saved"} onPress={() => { if (activeDocument) openHistoryChooser(activeDocument); }} size="sm" variant="icon"><ClockIcon size="sm" /></Button>
               <Button accessibilityLabel="Manage document" contentMode="raw" disabled={!activeDocument || saveState !== "saved"} onPress={() => { if (activeDocument) showDocumentActions(activeDocument); }} size="sm" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
             </View>
           </View>
@@ -2583,15 +2641,15 @@ export function KnowledgeWorkspace() {
       /> : null}
 
       <BottomSheet
-        description={activeSheet === "create" ? "Choose what to add to the current folder." : activeSheet === "versions" ? "Choose a version of this document to open or download." : activeSheet === "summary" ? "Review the match, then open its source document." : activeSheet === "deleteDocument" ? `Delete ${selectedDocument?.extension ? "file" : "document"} from Archive? It will move to trash.` : undefined}
-        dismissible={!versionActionKey && !coverActionLoading && !destinationLoading && !documentActionLoading}
+        description={activeSheet === "create" ? "Choose what to add to the current folder." : activeSheet === "historyChooser" ? "Choose which history to explore." : activeSheet === "versions" ? "Choose a version of this document to open or download." : activeSheet === "audioVersions" ? "Generated audio has its own history, independent from document versions." : activeSheet === "summary" ? "Review the match, then open its source document." : activeSheet === "deleteDocument" ? `Delete ${selectedDocument?.extension ? "file" : "document"} from Archive? It will move to trash.` : undefined}
+        dismissible={!versionActionKey && !generatingAudioVersion && !coverActionLoading && !destinationLoading && !documentActionLoading}
         footer={mutationFooter()}
         hideHeading={activeSheet === "create" || activeSheet === "documentActions" || activeSheet === "enhance"}
-        mutation={activeSheet === "documents" || activeSheet === "folder" || activeSheet === "folders" || activeSheet === "versions" || activeSheet === "rename" || activeSheet === "destinationBrowser" || activeSheet === "folderDetails"}
+        mutation={activeSheet === "documents" || activeSheet === "folder" || activeSheet === "folders" || activeSheet === "versions" || activeSheet === "audioVersions" || activeSheet === "rename" || activeSheet === "destinationBrowser" || activeSheet === "folderDetails"}
         onOpenChange={(open) => { if (!open) closeSheet(); }}
         open={sheetOpen}
-        tall={activeSheet === "library" || activeSheet === "documents" || activeSheet === "folders" || activeSheet === "scanSources"}
-        title={activeSheet === "enhance" ? "AI actions" : activeSheet === "versions" ? "Version history" : activeSheet === "scanSources" ? "Scanned pages" : activeSheet === "deleteDocument" ? `Delete ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "folder" ? "Create folder" : activeSheet === "documents" ? "Documents and files" : activeSheet === "folders" ? "Folders" : activeSheet === "destinationBrowser" ? destinationFolder?.name ?? "Archive" : activeSheet === "library" ? "Browse Archive" : activeSheet === "documentActions" ? selectedDocument?.name ?? "Document actions" : activeSheet === "destination" ? destinationAction === "upload" ? "Upload files" : "Choose destination" : activeSheet === "rename" ? selectedDocument?.extension ? "Rename file" : "Rename document" : activeSheet === "summary" ? selectedSummary?.name ?? "Document summary" : activeSheet === "folderActions" ? selectedFolder?.name ?? "Folder actions" : activeSheet === "folderDetails" ? "Folder details" : "New in Archive"}
+        tall={activeSheet === "library" || activeSheet === "documents" || activeSheet === "folders" || activeSheet === "scanSources" || activeSheet === "versions" || activeSheet === "audioVersions"}
+        title={activeSheet === "enhance" ? "AI actions" : activeSheet === "historyChooser" ? "Document history" : activeSheet === "versions" ? "Document versions" : activeSheet === "audioVersions" ? "Audio versions" : activeSheet === "scanSources" ? "Scanned pages" : activeSheet === "deleteDocument" ? `Delete ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "folder" ? "Create folder" : activeSheet === "documents" ? "Documents and files" : activeSheet === "folders" ? "Folders" : activeSheet === "destinationBrowser" ? destinationFolder?.name ?? "Archive" : activeSheet === "library" ? "Browse Archive" : activeSheet === "documentActions" ? selectedDocument?.name ?? "Document actions" : activeSheet === "destination" ? destinationAction === "upload" ? "Upload files" : "Choose destination" : activeSheet === "rename" ? selectedDocument?.extension ? "Rename file" : "Rename document" : activeSheet === "summary" ? selectedSummary?.name ?? "Document summary" : activeSheet === "folderActions" ? selectedFolder?.name ?? "Folder actions" : activeSheet === "folderDetails" ? "Folder details" : "New in Archive"}
       >
         {sheetError ? <Text accessibilityRole="alert" style={styles.notice}>{sheetError}</Text> : null}
         {activeSheet === "create" ? (
@@ -2601,6 +2659,12 @@ export function KnowledgeWorkspace() {
             <BottomSheetItem disabled={uploading} loading={uploading} onPress={() => void openDestinationPicker("upload")} variant="secondary">Upload files</BottomSheetItem>
             <BottomSheetItem disabled={uploading || scanBusy} onPress={startDocumentScan} variant="secondary">Scan documents</BottomSheetItem>
           </>
+        ) : null}
+        {activeSheet === "historyChooser" ? (
+          <View style={styles.historyChoices}>
+            <BottomSheetItem onPress={() => void openVersionHistory()}>Document versions</BottomSheetItem>
+            <BottomSheetItem onPress={() => void openAudioVersionHistory()}>Audio versions</BottomSheetItem>
+          </View>
         ) : null}
         {activeSheet === "documentActions" && selectedDocument ? (
           <>
@@ -2678,6 +2742,39 @@ export function KnowledgeWorkspace() {
                 <Button accessibilityLabel={`Download ${version.label ?? `version ${version.version}`} as TXT`} contentMode="raw" disabled={Boolean(versionActionKey)} onPress={() => void downloadVersion(version)} size="lg" variant="icon"><DownloadIcon size="md" /></Button>
               </View>
             ))}
+          </View>
+        ) : null}
+        {activeSheet === "audioVersions" ? (
+          <View style={styles.audioVersionPanel}>
+            <Button disabled={generatingAudioVersion || loadingAudioVersions} loading={generatingAudioVersion} onPress={() => void generateAudioVersion()} size="lg" variant="primary">Generate full audio</Button>
+            {selectedAudioVersion ? (
+              <View style={styles.audioVersionPlayer}>
+                <View style={styles.audioVersionNowPlaying}>
+                  <View style={styles.resultText}><Text style={styles.rowTitle}>Audio version {selectedAudioVersion.version}</Text><Text style={styles.rowSubtitle}>{selectedAudioVersion.current ? "Current document content" : "Earlier document content"} · {new Date(selectedAudioVersion.createdAt).toLocaleString()}</Text></View>
+                  <Button accessibilityLabel={narrationState === "playing" ? "Pause audio version" : "Play audio version"} contentMode="raw" onPress={controlSelectedAudioVersion} size="md" variant="icon">{narrationState === "playing" ? <PauseIcon size="md" /> : <PlayIcon size="md" />}</Button>
+                </View>
+                <View style={styles.narrationControls}>
+                  <Text style={styles.narrationTime}>{formatAudioTime(narrationElapsed)}</Text>
+                  <Slider accessibilityLabel="Audio version progress" max={Math.max(1, narrationDuration)} onSlidingComplete={(value) => { setNarrationScrubValue(undefined); scrubSelectedAudioVersion(value); }} onValueChange={setNarrationScrubValue} style={styles.narrationSlider} value={Math.min(narrationElapsed, narrationDuration)} />
+                  <Text style={styles.narrationTime}>{formatAudioTime(narrationDuration)}</Text>
+                </View>
+                <View style={styles.audioVersionNavigation}>
+                  <Button accessibilityLabel="Play older audio version" contentMode="raw" disabled={selectedAudioVersionIndex >= audioVersions.length - 1} onPress={() => void playAudioVersion(audioVersions[selectedAudioVersionIndex + 1]!)} size="sm" variant="icon"><ChevronLeftIcon size="sm" /></Button>
+                  <Text style={styles.audioVersionPosition}>{selectedAudioVersionIndex + 1} of {audioVersions.length}</Text>
+                  <Button accessibilityLabel="Play newer audio version" contentMode="raw" disabled={selectedAudioVersionIndex <= 0} onPress={() => void playAudioVersion(audioVersions[selectedAudioVersionIndex - 1]!)} size="sm" variant="icon"><ChevronRightIcon size="sm" /></Button>
+                </View>
+              </View>
+            ) : null}
+            {loadingAudioVersions ? <Text style={styles.empty}>Loading audio versions...</Text> : null}
+            {!loadingAudioVersions && audioVersions.length === 0 ? <Text style={styles.empty}>No audio versions yet. Generate one whenever you want a new recording of this document.</Text> : null}
+            <ScrollView contentContainerStyle={styles.audioVersionList} showsVerticalScrollIndicator={false}>
+              {audioVersions.map((version) => (
+                <Button contentMode="raw" key={version.key} onPress={() => selectedAudioVersionKey === version.key ? controlSelectedAudioVersion() : void playAudioVersion(version)} size="lg" style={styles.versionMain} variant={selectedAudioVersionKey === version.key ? "secondary" : "ghost"}>
+                  {selectedAudioVersionKey === version.key && narrationState === "playing" ? <PauseIcon size="md" /> : <PlayIcon size="md" />}
+                  <View style={styles.resultText}><Text style={styles.rowTitle}>Audio version {version.version}{version.current ? " · Current" : ""}</Text><Text style={styles.rowSubtitle}>{formatAudioTime(version.durationMs / 1_000)} · {new Date(version.createdAt).toLocaleString()}</Text></View>
+                </Button>
+              ))}
+            </ScrollView>
           </View>
         ) : null}
         {activeSheet === "folder" ? (
@@ -2835,6 +2932,13 @@ const styles = StyleSheet.create({
   versionPanel: { gap: 10 },
   versionRow: { flexDirection: "row", alignItems: "stretch", gap: 8 },
   versionMain: { flex: 1, justifyContent: "flex-start", paddingHorizontal: 14 },
+  historyChoices: { gap: spacing.sm },
+  audioVersionPanel: { flex: 1, minHeight: 0, gap: spacing.md },
+  audioVersionPlayer: { padding: spacing.md, gap: spacing.sm, borderRadius: radii.lg, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised },
+  audioVersionNowPlaying: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  audioVersionNavigation: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.md },
+  audioVersionPosition: { minWidth: 56, color: palette.silver300, fontFamily: fonts.medium, fontSize: 11, textAlign: "center" },
+  audioVersionList: { gap: spacing.xs, paddingBottom: spacing.xl },
   summaryPanel: { gap: 16 },
   summaryText: { color: palette.silver300, fontFamily: fonts.regular, fontSize: 15, lineHeight: 24 },
   destinationPanel: { flex: 1, gap: 12 },

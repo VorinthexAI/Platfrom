@@ -223,15 +223,41 @@ const workspaceDocumentMatchSchema = z.object({ documentKey: keySchema, scopeKey
 export const scopeContentSearchOutputSchema = z.object({ query: textSchema, folders: z.array(workspaceFolderMatchSchema).max(4), documents: z.array(workspaceDocumentMatchSchema).max(10), cached: z.boolean() }).strict();
 export const contentSearchHistoryItemSchema = z.object({ query: textSchema, normalizedQuery: textSchema, searchedAt: dateTimeSchema, count: z.number().int().positive(), folderKey: keySchema.optional(), includeDescendants: z.boolean().optional(), documents: z.array(workspaceDocumentMatchSchema).max(10) }).strict();
 
+const contentDocumentAudioVersionMetadataShape = {
+  key: keySchema,
+  documentKey: keySchema,
+  version: z.number().int().positive(),
+  sourceContentHash: z.string().regex(/^[a-f0-9]{64}$/),
+  sourceTitle: nameSchema,
+  sourceDocumentUpdatedAt: dateTimeSchema,
+  mimeType: z.literal('audio/mpeg'),
+  sizeBytes: z.number().int().positive(),
+  durationMs: z.number().int().positive(),
+  voice: textSchema.optional(),
+  language: textSchema.optional(),
+  speakingRate: z.number().min(0.25).max(4).optional(),
+  includeTitle: z.boolean(),
+  includeCode: z.boolean(),
+  createdAt: dateTimeSchema,
+};
+
+export const generatedDocumentAudioVersionSchema = z.object(contentDocumentAudioVersionMetadataShape).strict();
+export const contentDocumentAudioVersionSchema = z.object({
+  ...contentDocumentAudioVersionMetadataShape,
+  current: z.boolean(),
+  url: z.string().url(),
+}).strict();
+
 const documentReadDataSchema = z.union([
   z.object({ documentKey: keySchema, title: nameSchema, content: z.string() }).strict(),
   z.object({ documentKey: keySchema, title: nameSchema, html: z.string() }).strict(),
   z.object({
     documentKey: keySchema,
     title: nameSchema,
-    audio: z.array(z.object({ index: z.number().int().nonnegative(), storageKey: textSchema.optional(), url: z.string().url().optional(), durationMs: z.number().int().nonnegative().optional(), startCharacter: z.number().int().nonnegative(), endCharacter: z.number().int().nonnegative() }).strict()),
+    audio: z.array(z.object({ index: z.number().int().nonnegative(), url: z.string().min(1), durationMs: z.number().int().nonnegative().optional(), startCharacter: z.number().int().nonnegative(), endCharacter: z.number().int().nonnegative() }).strict()),
     totalDurationMs: z.number().int().nonnegative().optional(),
   }).strict(),
+  z.object({ documentKey: keySchema, title: nameSchema, audioVersion: generatedDocumentAudioVersionSchema }).strict(),
 ]);
 
 export const contentToolContracts = {
@@ -260,7 +286,10 @@ export const contentToolContracts = {
         if (value[field] !== undefined) context.addIssue({ code: z.ZodIssueCode.custom, path: [field], message: `${field} is only valid in audio mode` });
       }
     }
+    if (value.persistAudio && (value.startOffset !== undefined || value.endOffset !== undefined)) context.addIssue({ code: z.ZodIssueCode.custom, path: ['persistAudio'], message: 'persisted audio must cover the full document' });
+    if (value.persistAudio && value.documentKeys.length !== 1) context.addIssue({ code: z.ZodIssueCode.custom, path: ['documentKeys'], message: 'persisted audio generation accepts exactly one document' });
   }), output: contentBatchOutputSchema(documentReadDataSchema) },
+  'document.list-audio-versions': { description: 'List independently generated full-audio versions for documents.', input: z.object({ documentKeys: keysSchema, cursor: cursorSchema.optional(), limit: limitSchema.optional() }).strict(), output: contentBatchOutputSchema(z.object({ documentKey: keySchema, audioVersions: z.array(contentDocumentAudioVersionSchema), cursor: cursorSchema.optional() }).strict()) },
   'document.update': { description: 'Update document content.', input: z.object({ updates: z.array(documentUpdateSchema).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(documentDataSchema) },
   'document.rename': { description: 'Rename documents.', input: z.object({ renames: z.array(z.object({ documentKey: keySchema, name: nameSchema }).strict()).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(documentDataSchema) },
   'document.move': { description: 'Move documents to a scoped folder or the Content root.', input: z.object({ moves: z.array(z.object({ documentKey: keySchema, targetScopeKey: keySchema, targetFolderKey: keySchema.optional() }).strict()).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(documentDataSchema) },

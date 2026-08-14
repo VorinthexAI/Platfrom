@@ -7,6 +7,7 @@ import type { RouterDependencies } from '@/lib/ai/router';
 import type { DocumentObjectStorage } from '@/lib/ai/document-processing/storage';
 import type { Folder } from '@/lib/db/folders.node';
 import type { Document } from '@/lib/db/documents.node';
+import type { DocumentAudioVersion } from '@/lib/db/document-audio-versions.node';
 import type { DocumentShare } from '@/lib/db/document-shares.node';
 import { documentVersionSchema, type DocumentVersion } from '@/lib/db/document-versions.node';
 import { DocumentProcessingError } from '@/lib/ai/document-processing/errors';
@@ -16,7 +17,7 @@ import { ContentError, type ContentErrorCode } from './content-errors';
 import { contentToolInputSchemas, contentToolOutputSchemas, isContentToolName } from './content-registry';
 import { htmlToDocumentPreviewBlocks, htmlToPlainText, sanitizeDocumentHtml } from '@/lib/ai/document-processing/representation';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
-import { chunkDocumentContent } from '@/lib/ai/document-processing/chunking';
+import { chunkDocumentContent, documentSemanticHash } from '@/lib/ai/document-processing/chunking';
 import type { BookGenerator } from '@/lib/books/service';
 import type { DocumentScanInput } from '@/lib/ai/document-scanning';
 
@@ -65,6 +66,9 @@ export interface ContentRepository {
   listVersions(scopeKey: string, documentKeys: string[], includeArchived?: boolean): Promise<DocumentVersion[]>;
   createVersion(version: Omit<DocumentVersion, 'key' | 'version' | 'createdAt' | 'deletedAt'>): Promise<DocumentVersion>;
   deleteVersion(key: string): Promise<void>;
+  listAudioVersions?(scopeKey: string, documentKeys: string[]): Promise<DocumentAudioVersion[]>;
+  createAudioVersion?(version: Omit<DocumentAudioVersion, 'version'>): Promise<DocumentAudioVersion>;
+  deleteAudioVersion?(key: string): Promise<void>;
   semanticSearch(input: { embedding: number[]; authorizedScopeKeys: string[]; folderKeys?: string[]; documentKeys?: string[]; extensions?: Document['extension'][]; createdAfter?: string; createdBefore?: string; updatedAfter?: string; updatedBefore?: string; includeArchived?: boolean; minScore?: number; limit?: number }): Promise<Array<{ score: number; document: Document; matchedContent?: string }>>;
   semanticSearchFolders?(input: { embedding: number[]; authorizedScopeKeys: string[]; folderKeys?: string[]; minScore: number; limit: number }): Promise<Array<{ score: number; folder: Folder }>>;
   transaction?<T>(operation: (repository: ContentRepository) => Promise<T>): Promise<T>;
@@ -78,6 +82,7 @@ export interface ContentSearchQueryStore {
 
 export interface ContentActionResult { text?: string; audio?: Uint8Array; audioBase64?: string; mimeType?: string; durationMs?: number; html?: string; content?: string; embedding?: number[]; contentChunks?: string[]; chunkEmbeddings?: number[][]; semanticChunkCount?: number; semanticContentHash?: string }
 export interface ContentToolDependencies extends RouterDependencies {
+  signal?: AbortSignal;
   repository?: ContentRepository;
   storage?: DocumentObjectStorage;
   parseDocument?: (input: DocumentParseInput, dependencies?: DocumentParseDependencies) => Promise<{ document: Document }>;
@@ -103,10 +108,16 @@ export interface ContentToolDependencies extends RouterDependencies {
   getFolderCoverImage?: (scopeKey: string, imageKey: string) => Promise<{ storageKey: string } | null>;
   signFolderCoverUrl?: (storageKey: string) => Promise<string>;
   signDocumentSourceUrl?: (storageKey: string) => Promise<string>;
+  signAudioUrl?: (storageKey: string) => Promise<string>;
+  mergeAudio?: (chunks: Uint8Array[], signal?: AbortSignal) => Promise<Uint8Array>;
+  audioDuration?: (bytes: Uint8Array) => number;
 }
 
 const rank: Record<Role, number> = { viewer: 1, moderator: 2, admin: 3, owner: 4 };
 const ROUTED_EMBEDDING_CONCURRENCY = 8;
+const PERSISTED_AUDIO_MAX_CHARACTERS = 120_000;
+const PERSISTED_AUDIO_MAX_CHUNKS = 80;
+const PERSISTED_AUDIO_MAX_BYTES = 100 * 1024 * 1024;
 const scrypt = promisify(nodeScrypt);
 const MUTATIONS = new Set<ContentToolName>([
   'book.create-context', 'book.write', 'folder.create', 'folder.update', 'folder.rename', 'folder.move', 'folder.archive', 'folder.restore', 'folder.delete', 'document.parse', 'document.scan', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.share', 'document.unshare', 'document.create-version', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.translate', 'document.rewrite',
@@ -160,6 +171,19 @@ function shareView(share: DocumentShare) {
 function versionView(version: DocumentVersion, include: string[] = []) {
   const { embedding, chunkEmbeddings: _chunkEmbeddings, semanticChunkCount: _semanticChunkCount, semanticContentHash: _semanticContentHash, _semanticChunkingSkipped: _semanticChunkingSkipped, html, content: _content, ...safe } = version;
   return { ...safe, ...(include.includes('html') ? { html } : {}), ...(include.includes('content') ? { content: htmlToPlainText(html) } : {}), ...(include.includes('embedding') ? { embedding } : {}) };
+}
+
+function generatedAudioVersionView(version: DocumentAudioVersion) {
+  const { storageKey: _storageKey, createdByKey: _createdByKey, scopeKey: _scopeKey, ...safe } = version;
+  return safe;
+}
+
+async function audioVersionView(version: DocumentAudioVersion, current: Document, signUrl: (storageKey: string) => Promise<string>) {
+  return {
+    ...generatedAudioVersionView(version),
+    current: version.sourceContentHash === documentSemanticHash(current.content) && (!version.includeTitle || version.sourceTitle === current.name),
+    url: await signUrl(version.storageKey),
+  };
 }
 
 async function productionRepository(): Promise<ContentRepository> {
@@ -276,6 +300,12 @@ async function productionRepository(): Promise<ContentRepository> {
       const current = await persistence.getVersion(key);
       if (!current || !await persistence.deleteVersion(current.scopeKey, key)) throw new Error('Version was not found for scoped deletion.');
     },
+    listAudioVersions: persistence.listAudioVersions,
+    createAudioVersion: persistence.createAudioVersion,
+    async deleteAudioVersion(key) {
+      const current = await persistence.getAudioVersion(key);
+      if (!current || !await persistence.deleteAudioVersion(current.scopeKey, key)) throw new Error('Audio version was not found for scoped deletion.');
+    },
     semanticSearch: documents.semanticSearchDocuments,
     semanticSearchFolders: folders.semanticSearchFolders,
     transaction: (operation) => content.withContentPersistenceTransaction((bound) => operation(makeRepository(bound))),
@@ -322,10 +352,13 @@ interface RuntimeDefaults {
   getFolderCoverImage: NonNullable<ContentToolDependencies['getFolderCoverImage']>;
   signFolderCoverUrl: NonNullable<ContentToolDependencies['signFolderCoverUrl']>;
   signDocumentSourceUrl: NonNullable<ContentToolDependencies['signDocumentSourceUrl']>;
+  signAudioUrl: NonNullable<ContentToolDependencies['signAudioUrl']>;
+  mergeAudio: NonNullable<ContentToolDependencies['mergeAudio']>;
+  audioDuration: NonNullable<ContentToolDependencies['audioDuration']>;
 }
 
 async function defaults(deps: ContentToolDependencies, context: DomainToolContext): Promise<RuntimeDefaults> {
-  const [{ newId }, storage, processing, embeddings, router, ledger, exports, images, imageUrl] = await Promise.all([
+  const [{ newId }, storage, processing, embeddings, router, ledger, exports, images, imageUrl, audioUrl, audio, duration] = await Promise.all([
     import('@/lib/ids'),
     import('@/lib/ai/document-processing/storage'),
     import('@/lib/ai/document-processing'),
@@ -335,6 +368,9 @@ async function defaults(deps: ContentToolDependencies, context: DomainToolContex
     import('@/lib/ai/document-processing/exports'),
     import('@/lib/db/images.node'),
     import('@/lib/gallery/image-url'),
+    import('@/lib/ai/audio/audio-url'),
+    import('@/lib/ai/audio/merge-mp3'),
+    import('@/lib/ai/audio/mp3-duration'),
   ]);
   const executeAction = deps.executeAction ?? router.executeAction;
   const embedding = deps.embed ? (text: string) => deps.embed!(text) : async (text: string, purpose: 'document' | 'query' = 'document') => {
@@ -378,6 +414,9 @@ async function defaults(deps: ContentToolDependencies, context: DomainToolContex
     getFolderCoverImage: deps.getFolderCoverImage ?? images.getImageInScope,
     signFolderCoverUrl: deps.signFolderCoverUrl ?? imageUrl.signedImageUrl,
     signDocumentSourceUrl: deps.signDocumentSourceUrl ?? imageUrl.signedImageUrl,
+    signAudioUrl: deps.signAudioUrl ?? audioUrl.signedAudioUrl,
+    mergeAudio: deps.mergeAudio ?? audio.mergeMp3Chunks,
+    audioDuration: deps.audioDuration ?? duration.mp3DurationMs,
   };
 }
 
@@ -479,21 +518,6 @@ function speechChunks(raw: string, includeCode: boolean, maximum: number) {
     }
   }
   return chunks;
-}
-
-function audioExtension(mimeType: string): string | null {
-  const mime = mimeType.toLowerCase().split(';', 1)[0]!.trim();
-  return ({
-    'audio/mpeg': 'mp3',
-    'audio/mp3': 'mp3',
-    'audio/wav': 'wav',
-    'audio/x-wav': 'wav',
-    'audio/ogg': 'ogg',
-    'audio/webm': 'webm',
-    'audio/mp4': 'm4a',
-    'audio/aac': 'aac',
-    'audio/flac': 'flac',
-  } as Record<string, string>)[mime] ?? null;
 }
 
 async function hashPassword(password: string, random: (size: number) => Uint8Array) { const salt = Buffer.from(random(16)); const hash = await scrypt(password, salt, 32) as Buffer; return `scrypt:${salt.toString('hex')}:${hash.toString('hex')}`; }
@@ -1037,11 +1061,13 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
               document: item,
               versions: await repo.listVersions(item.scopeKey, [item.key], true),
               shares: await repo.listShares(item.scopeKey, [item.key], { includeArchived: true, includeExpired: true, includeRevoked: true }),
+              audioVersions: repo.listAudioVersions ? await repo.listAudioVersions(item.scopeKey, [item.key]) : [],
             })));
             for (const item of related) for (const version of item.versions) {
               if (!await canPermanentlyDelete({ kind: 'version', deletedAt: item.document.deletedAt, context })) fail('CONTENT_FORBIDDEN', 'Version retention policy denied permanent deletion.', tool, 'delete', version.key);
             }
-            const inventoriedKeys = [...new Set(related.flatMap((item) => [item.document.storageKey, ...(item.document.speechStorageKeys ?? []), ...(item.document.sourceStorageKeys ?? [])]).filter((item): item is string => Boolean(item)))];
+            if (related.some((item) => item.audioVersions.length > 0) && !repo.deleteAudioVersion) fail('CONTENT_CONFLICT', 'Document audio deletion is unavailable.', tool, 'delete', key);
+            const inventoriedKeys = [...new Set(related.flatMap((item) => [item.document.storageKey, ...(item.document.speechStorageKeys ?? []), ...(item.document.sourceStorageKeys ?? []), ...item.audioVersions.map((audio) => audio.storageKey)]).filter((item): item is string => Boolean(item)))];
             const manifest = root._internalDeletion?.objectKeys ? root._internalDeletion : { ...root._internalDeletion!, objectKeys: inventoriedKeys };
             if (!root._internalDeletion?.objectKeys) {
               const persisted = await repo.transaction((bound) => bound.setFolderDeletion(root.key, manifest, root._internalDeletion!.owner));
@@ -1053,6 +1079,10 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           const removeMetadata = async (bound: ContentRepository) => {
             for (const item of related) {
               for (const version of item.versions) await bound.deleteVersion(version.key);
+              for (const audio of item.audioVersions) {
+                if (!bound.deleteAudioVersion) fail('CONTENT_CONFLICT', 'Transaction-bound audio deletion is unavailable.', tool, 'transaction', audio.key);
+                await bound.deleteAudioVersion(audio.key);
+              }
               for (const share of item.shares) await bound.deleteShare(share.key);
               await bound.deleteDocument(item.document.key);
             }
@@ -1183,9 +1213,10 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       result = await batch(tool, input.documentKeys.map((key: string) => ({
         key,
         run: async () => {
-          const current = await document(key, 'viewer', false);
+          const current = await document(key, input.mode === 'audio' && input.persistAudio ? 'moderator' : 'viewer', false);
           if (input.mode === 'content') return { documentKey: key, title: current.name, content: current.content };
           if (input.mode === 'html') return { documentKey: key, title: current.name, html: current.html };
+          if (input.persistAudio && current.content.length > PERSISTED_AUDIO_MAX_CHARACTERS) fail('DOCUMENT_TOO_LARGE', `Full audio generation supports documents up to ${PERSISTED_AUDIO_MAX_CHARACTERS} characters.`, tool, 'speak', key);
           const start = input.startOffset ?? 0;
           const end = Math.min(input.endOffset ?? current.content.length, current.content.length);
           const maximum = Math.min(Math.max(dependencies.maxSpeechChunkCharacters ?? 1800, 200), 4000);
@@ -1193,57 +1224,79 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             .map((chunk) => ({ ...chunk, start: start + chunk.start, end: start + chunk.end }));
           if (input.includeTitle && documentChunks[0]) documentChunks[0] = { ...documentChunks[0], text: `${current.name}. ${documentChunks[0].text}` };
           const chunks = documentChunks;
-          const audio: Array<{ index: number; storageKey?: string; url?: string; durationMs?: number; startCharacter: number; endCharacter: number }> = [];
-          const uploaded: string[] = [];
+          if (input.persistAudio && chunks.length > PERSISTED_AUDIO_MAX_CHUNKS) fail('DOCUMENT_TOO_LARGE', `Full audio generation supports at most ${PERSISTED_AUDIO_MAX_CHUNKS} speech segments.`, tool, 'speak', key);
+          const audio: Array<{ index: number; url: string; durationMs?: number; startCharacter: number; endCharacter: number }> = [];
+          const generated: Uint8Array[] = [];
+          let generatedBytes = 0;
           let duration = 0;
+          for (let index = 0; index < chunks.length; index += 1) {
+            dependencies.signal?.throwIfAborted();
+            const chunk = chunks[index]!;
+            const spoken = await action('speak', {
+              text: chunk.text,
+              ...(input.language ? { language: input.language } : {}),
+              ...(input.voice ? { voice: input.voice } : {}),
+              ...(input.speakingRate ? { speakingRate: input.speakingRate } : {}),
+              format: input.persistAudio ? 'mp3' : 'wav',
+            }, key, current.scopeKey);
+            const bytes = spoken.audio
+              ? z.instanceof(Uint8Array).parse(spoken.audio)
+              : new Uint8Array(Buffer.from(z.string().min(1).parse(spoken.audioBase64), 'base64'));
+            const mimeType = z.string().min(1).parse(spoken.mimeType ?? 'audio/mpeg');
+            dependencies.signal?.throwIfAborted();
+            const item = {
+              index,
+              startCharacter: chunk.start,
+              endCharacter: chunk.end,
+              ...(spoken.durationMs !== undefined ? { durationMs: spoken.durationMs } : {}),
+            };
+            if (input.persistAudio) {
+              if (mimeType !== 'audio/mpeg' && mimeType !== 'audio/mp3') fail('DOCUMENT_SPEECH_FAILED', 'Persisted document audio requires MP3 speech output.', tool, 'speak', key);
+              generatedBytes += bytes.byteLength;
+              if (generatedBytes > PERSISTED_AUDIO_MAX_BYTES) fail('DOCUMENT_TOO_LARGE', 'Generated speech segments exceed the 100 MiB processing limit.', tool, 'speak', key);
+              generated.push(bytes);
+            } else audio.push({ ...item, url: `data:${mimeType};base64,${Buffer.from(bytes).toString('base64')}` });
+            duration += spoken.durationMs ?? 0;
+          }
+          if (!input.persistAudio) return { documentKey: key, title: current.name, audio, ...(duration ? { totalDurationMs: duration } : {}) };
+          if (!repo.createAudioVersion) fail('CONTENT_CONFLICT', 'Document audio persistence is unavailable.', tool, 'storage', key);
+          const bytes = await d.mergeAudio(generated, dependencies.signal);
+          dependencies.signal?.throwIfAborted();
+          if (bytes.byteLength > PERSISTED_AUDIO_MAX_BYTES) fail('DOCUMENT_TOO_LARGE', 'Generated audio exceeds the 100 MiB storage limit.', tool, 'storage', key);
+          const durationMs = d.audioDuration(bytes);
+          const audioKey = d.id();
+          const requestedStorageKey = `content/${context.organizationKey}/${current.scopeKey}/${key}/audio/${audioKey}.mp3`;
+          let storageKey: string | undefined;
           try {
-            for (let index = 0; index < chunks.length; index += 1) {
-              const chunk = chunks[index]!;
-              const spoken = await action('speak', {
-                text: chunk.text,
-                ...(input.language ? { language: input.language } : {}),
-                ...(input.voice ? { voice: input.voice } : {}),
-                ...(input.speakingRate ? { speakingRate: input.speakingRate } : {}),
-                format: 'wav',
-              }, key, current.scopeKey);
-              const bytes = spoken.audio
-                ? z.instanceof(Uint8Array).parse(spoken.audio)
-                : new Uint8Array(Buffer.from(z.string().min(1).parse(spoken.audioBase64), 'base64'));
-              const mimeType = z.string().min(1).parse(spoken.mimeType ?? 'audio/mpeg');
-              const item = {
-                index,
-                startCharacter: chunk.start,
-                endCharacter: chunk.end,
-                ...(spoken.durationMs !== undefined ? { durationMs: spoken.durationMs } : {}),
-              };
-              if (input.persistAudio) {
-                const extension = audioExtension(mimeType);
-                if (!extension) fail('DOCUMENT_SPEECH_FAILED', 'Speech MIME type cannot be persisted safely.', tool, 'speak', key);
-                const storageKey = `content/${context.organizationKey}/${current.scopeKey}/${key}/speech/${invocationKey}/${String(index).padStart(4, '0')}.${extension}`;
-                await storageOperation('upload', key, current.scopeKey, () => d.storage.upload({ key: storageKey, bytes, mimeType }));
-                uploaded.push(storageKey);
-                audio.push({ ...item, storageKey });
-              } else {
-                audio.push({ ...item, url: `data:${mimeType};base64,${Buffer.from(bytes).toString('base64')}` });
-              }
-              duration += spoken.durationMs ?? 0;
-            }
-            if (input.persistAudio && uploaded.length > 0) {
-              await repo.updateDocument(current.key, {
-                speechStorageKeys: [...new Set([...(current.speechStorageKeys ?? []), ...uploaded])],
-                updatedAt: now(),
-              });
-            }
+            storageKey = (await storageOperation('upload', key, current.scopeKey, () => d.storage.upload({ key: requestedStorageKey, bytes, mimeType: 'audio/mpeg' }))).storageKey;
+            dependencies.signal?.throwIfAborted();
+            const created = await repo.createAudioVersion({
+              key: audioKey,
+              scopeKey: current.scopeKey,
+              documentKey: current.key,
+              sourceContentHash: documentSemanticHash(current.content),
+              sourceTitle: current.name,
+              sourceDocumentUpdatedAt: current.updatedAt,
+              storageKey,
+              mimeType: 'audio/mpeg',
+              sizeBytes: bytes.byteLength,
+              durationMs,
+              ...(input.voice ? { voice: input.voice } : {}),
+              ...(input.language ? { language: input.language } : {}),
+              ...(input.speakingRate ? { speakingRate: input.speakingRate } : {}),
+              includeTitle: input.includeTitle ?? false,
+              includeCode: input.includeCode ?? false,
+              createdByKey: member.userOrganization.key,
+              createdAt: now(),
+            });
+            return { documentKey: key, title: current.name, audioVersion: generatedAudioVersionView(created) };
           } catch (error) {
-            const cleanupErrors: unknown[] = [];
-            for (const storageKey of uploaded.reverse()) {
-              try { await storageOperation('delete', key, current.scopeKey, () => d.storage.delete(storageKey)); }
-              catch (cleanupError) { cleanupErrors.push(cleanupError); await event('cleanup', 'failed', 'storage-delete', key, current.scopeKey); }
+            if (storageKey) {
+              try { await storageOperation('delete', key, current.scopeKey, () => d.storage.delete(storageKey!)); }
+              catch (cleanupError) { throw new ContentError('CONTENT_CONFLICT', 'Audio generation failed and uploaded audio cleanup requires retry.', tool, { action: 'cleanup', resourceKey: key, cause: new AggregateError([error, cleanupError]), retryable: true }); }
             }
-            if (cleanupErrors.length) throw new ContentError('CONTENT_CONFLICT', 'Speech generation failed and uploaded audio cleanup requires retry.', tool, { action: 'cleanup', resourceKey: key, cause: new AggregateError([error, ...cleanupErrors]), retryable: true });
             throw error;
           }
-          return { documentKey: key, title: current.name, audio, ...(duration ? { totalDurationMs: duration } : {}) };
         },
       })), input.atomic, repo);
     } else if (tool === 'document.update') {
@@ -1443,12 +1496,14 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           try {
             const versions = await repo.listVersions(current.scopeKey, [key], true);
             const shares = await repo.listShares(current.scopeKey, [key], { includeArchived: true, includeExpired: true, includeRevoked: true });
+            const audioVersions = repo.listAudioVersions ? await repo.listAudioVersions(current.scopeKey, [key]) : [];
+            if (audioVersions.length > 0 && !repo.deleteAudioVersion) fail('CONTENT_CONFLICT', 'Document audio deletion is unavailable.', tool, 'delete', key);
             if (versions.length > 0 && !input.deleteVersions) fail('CONTENT_CONFLICT', 'Document has retained versions.', tool, 'delete', key);
             if (shares.length > 0 && !input.deleteShares) fail('CONTENT_CONFLICT', 'Document has retained shares.', tool, 'delete', key);
             for (const version of versions) {
               if (!await canPermanentlyDelete({ kind: 'version', deletedAt: current.deletedAt, context })) fail('CONTENT_FORBIDDEN', 'Version retention policy denied permanent deletion.', tool, 'delete', version.key);
             }
-            const inventoriedKeys = [...new Set([current.storageKey, ...(current.speechStorageKeys ?? []), ...(current.sourceStorageKeys ?? [])].filter((item): item is string => Boolean(item)))];
+            const inventoriedKeys = [...new Set([current.storageKey, ...(current.speechStorageKeys ?? []), ...(current.sourceStorageKeys ?? []), ...audioVersions.map((audio) => audio.storageKey)].filter((item): item is string => Boolean(item)))];
             const deletion = current._internalDeletion?.objectKeys ? current._internalDeletion : { ...current._internalDeletion!, objectKeys: inventoriedKeys };
             if (!current._internalDeletion?.objectKeys) {
               const persisted = await repo.transaction((bound) => bound.setDocumentDeletion(key, deletion, current._internalDeletion!.owner));
@@ -1459,6 +1514,10 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             await deleteStorageKeys(deletion.objectKeys ?? [], key, current.scopeKey);
             await repo.transaction(async (bound) => {
               for (const version of versions) await bound.deleteVersion(version.key);
+              for (const audio of audioVersions) {
+                if (!bound.deleteAudioVersion) fail('CONTENT_CONFLICT', 'Transaction-bound audio deletion is unavailable.', tool, 'transaction', audio.key);
+                await bound.deleteAudioVersion(audio.key);
+              }
               for (const share of shares) await bound.deleteShare(share.key);
               await bound.deleteDocument(key);
             });
@@ -1606,6 +1665,22 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           await document(version.documentKey, 'viewer');
           await roleFor(version.scopeKey, 'viewer', key);
           return { version: versionView(version, input.include) };
+        },
+      })), false, repo);
+    } else if (tool === 'document.list-audio-versions') {
+      result = await batch(tool, input.documentKeys.map((key: string) => ({
+        key,
+        run: async () => {
+          const current = await document(key, 'viewer');
+          if (!repo.listAudioVersions) fail('CONTENT_CONFLICT', 'Document audio history is unavailable.', tool, 'read', key);
+          const versions = await repo.listAudioVersions(current.scopeKey, [key]);
+          const offset = input.cursor ? Number(Buffer.from(input.cursor, 'base64url').toString()) || 0 : 0;
+          const limit = input.limit ?? 50;
+          return {
+            documentKey: key,
+            audioVersions: await Promise.all(versions.slice(offset, offset + limit).map((version) => audioVersionView(version, current, d.signAudioUrl))),
+            ...(offset + limit < versions.length ? { cursor: Buffer.from(String(offset + limit)).toString('base64url') } : {}),
+          };
         },
       })), false, repo);
     } else if (tool === 'document.list-versions') {

@@ -2,6 +2,7 @@ import type { QueryClient } from "@tanstack/react-query";
 
 import {
   listContentLocation,
+  listContentDocumentAudioVersions,
   listContentSearchHistory,
   readContentDocument,
   readContentDocumentPreview,
@@ -21,6 +22,7 @@ export const contentQueryKeys = {
   document: (context: ContentContext, documentKey: string) => [...contentQueryKeys.all(context), "documents", documentKey] as const,
   preview: (context: ContentContext, documentKey: string) => [...contentQueryKeys.all(context), "previews", documentKey] as const,
   history: (context: ContentContext, folderKey?: string) => [...contentQueryKeys.all(context), "history", folderKey ?? null] as const,
+  audioVersions: (context: ContentContext, documentKey: string) => [...contentQueryKeys.document(context, documentKey), "audio-versions"] as const,
 };
 
 export function getContentLocation(queryClient: QueryClient, context: ContentContext, folderKey?: string) {
@@ -52,6 +54,19 @@ export function getContentDocumentPreview(queryClient: QueryClient, context: Con
 export async function refreshContentDocument(queryClient: QueryClient, context: ContentContext, documentKey: string) {
   await queryClient.invalidateQueries({ queryKey: contentQueryKeys.document(context, documentKey), exact: true, refetchType: "none" });
   return getContentDocument(queryClient, context, documentKey);
+}
+
+export function getContentDocumentAudioVersions(queryClient: QueryClient, context: ContentContext, documentKey: string) {
+  return queryClient.fetchQuery({
+    queryKey: contentQueryKeys.audioVersions(context, documentKey),
+    queryFn: () => listContentDocumentAudioVersions(documentKey),
+    staleTime: 0,
+  });
+}
+
+export async function refreshContentDocumentAudioVersions(queryClient: QueryClient, context: ContentContext, documentKey: string) {
+  await queryClient.invalidateQueries({ queryKey: contentQueryKeys.audioVersions(context, documentKey), exact: true, refetchType: "none" });
+  return getContentDocumentAudioVersions(queryClient, context, documentKey);
 }
 
 export function getContentHistory(queryClient: QueryClient, context: ContentContext, folderKey?: string) {
