@@ -964,7 +964,7 @@ export function KnowledgeWorkspace() {
     else openSheet("documentActions");
   };
 
-  const openNote = async (document: ContentDocument, reportError = setError) => {
+  const openNote = async (document: ContentDocument, reportError = setError, preserveSearch = false) => {
     if (!hasContentContext) return false;
     if (document.extension) {
       reportError("Files open in the file viewer, not the notes editor.");
@@ -1009,8 +1009,10 @@ export function KnowledgeWorkspace() {
       workspaceModeRef.current = "editor";
       setWorkspaceMode("editor");
       setSelectedSummary(undefined);
-      setQuery("");
-      setResults(undefined);
+      if (!preserveSearch) {
+        setQuery("");
+        setResults(undefined);
+      }
       return true;
     } catch (cause) {
       reportError(cause instanceof Error ? cause.message : "The document could not be opened.");
@@ -1022,7 +1024,7 @@ export function KnowledgeWorkspace() {
     }
   };
 
-  const openArchiveDocument = async (document: ContentDocument, fromSheet = false) => {
+  const openArchiveDocument = async (document: ContentDocument, fromSheet = false, preserveSearch = false) => {
     if (document.extension) {
       const generation = ++navigationGeneration.current;
       setSelectedDocument(document);
@@ -1054,7 +1056,7 @@ export function KnowledgeWorkspace() {
       }
       return;
     }
-    if (await openNote(document, fromSheet ? setSheetError : setError)) {
+    if (await openNote(document, fromSheet ? setSheetError : setError, preserveSearch)) {
       if (fromSheet) closeSheet();
     }
   };
@@ -1378,7 +1380,7 @@ export function KnowledgeWorkspace() {
     const normalized = query.trim();
     const folderKey = currentFolder?.key;
     folderSearchRequest.current?.abort();
-    if (!normalized || !hasContentContext || workspaceMode !== "folder" || !folderKey) {
+    if (!normalized || !hasContentContext || !folderKey) {
       setFolderSearching(false);
       setFolderSearchResults(undefined);
       return;
@@ -1401,13 +1403,13 @@ export function KnowledgeWorkspace() {
       clearTimeout(timeout);
       controller.abort();
     };
-  }, [currentFolder?.key, hasContentContext, query, workspaceMode]);
+  }, [currentFolder?.key, hasContentContext, query]);
 
   const openSearchDocument = async (document: ContentSearchMatch) => {
     setError(undefined);
     try {
       const opened = await getContentDocument(queryClient, contentContext, document.documentKey);
-      await openArchiveDocument(opened);
+      await openArchiveDocument(opened, false, true);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The document could not be opened.");
     }
