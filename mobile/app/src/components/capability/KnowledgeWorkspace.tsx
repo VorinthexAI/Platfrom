@@ -1,6 +1,5 @@
 import { useNavigation } from "expo-router";
 import { File, Paths } from "expo-file-system";
-import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
@@ -43,6 +42,7 @@ import {
 import { WorkspaceAppSwitcher } from "@/components/capability/WorkspaceAppSwitcher";
 import { DocumentScanModal, type DocumentScanPage } from "@/components/capability/DocumentScanModal";
 import { MAX_DOCUMENT_SCAN_BYTES, scanSessionSize } from "@/lib/document-scan-session";
+import { normalizeCapturedJpeg } from "@/lib/captured-image";
 import { normalizeStructurallyCoveredResources } from "@/lib/content-selection-ancestry";
 import { ChromeIcon } from "@/components/ChromeIcon";
 import { assistantIconSource } from "@/data/capability-icons";
@@ -275,7 +275,6 @@ export function KnowledgeWorkspace() {
   const [hydratingDocumentKeys, setHydratingDocumentKeys] = useState<string[]>([]);
   const [bulkLoading, setBulkLoading] = useState(false);
   const [temporarySingleSelection, setTemporarySingleSelection] = useState(false);
-  const [coverActionLoading, setCoverActionLoading] = useState(false);
   const [folderDetailsName, setFolderDetailsName] = useState("");
   const [folderDetailsDescription, setFolderDetailsDescription] = useState("");
   const [folderName, setFolderName] = useState("");
@@ -334,6 +333,7 @@ export function KnowledgeWorkspace() {
   const uploadBatchRef = useRef<UploadBatchItem[]>([]);
   const documentActionGeneration = useRef(0);
   const folderActionGeneration = useRef(0);
+  const folderCoverRequests = useRef(new Map<string, number>());
   const longPressedItem = useRef<string | undefined>(undefined);
   const contentContextKeyRef = useRef(contentContextKey);
   const draftIdentityRef = useRef(draftIdentity);
@@ -1544,22 +1544,27 @@ export function KnowledgeWorkspace() {
   };
 
   const chooseFolderCover = async () => {
-    if (!selectedFolder || coverActionLoading) return;
-    const folderKey = selectedFolder.key;
-    setCoverActionLoading(true);
+    if (!selectedFolder) return;
+    const previous = selectedFolder;
     setSheetError(undefined);
+    let result: ImagePicker.ImagePickerResult;
     try {
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permission.granted) throw new Error("Photo access is required to choose a folder cover.");
-      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsMultipleSelection: false, quality: 1 });
-      if (result.canceled) return;
-      const asset = result.assets[0];
-      if (!asset) return;
-      const maxSide = Math.max(asset.width, asset.height);
-      const actions: ImageManipulator.Action[] = maxSide > 2400 ? [{ resize: asset.width >= asset.height ? { width: 2400 } : { height: 2400 } }] : [];
-      const output = await ImageManipulator.manipulateAsync(asset.uri, actions, { compress: 0.88, format: ImageManipulator.SaveFormat.JPEG });
-      const blob = await (await fetch(output.uri)).blob();
-      const upload = await uploadGalleryImages([{ clientKey: `${Date.now()}-${folderKey}`, filename: `folder-cover-${Date.now()}.jpg`, uri: output.uri, sizeBytes: blob.size }]);
+      result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsMultipleSelection: false, quality: 1 });
+    } catch (cause) {
+      setSheetError(cause instanceof Error ? cause.message : "The image picker could not be opened.");
+      return;
+    }
+    if (result.canceled) return;
+    const asset = result.assets[0];
+    if (!asset) return;
+    const request = (folderCoverRequests.current.get(previous.key) ?? 0) + 1;
+    folderCoverRequests.current.set(previous.key, request);
+    replaceFolder({ ...previous, coverUrl: asset.uri });
+    void invalidateContentLocations(queryClient, contentContext, [previous.parentFolderKey]);
+    closeSheet();
+    void (async () => {
+      const output = await normalizeCapturedJpeg(asset, { maxSide: 2400, compress: 0.88 });
+      const upload = await uploadGalleryImages([{ clientKey: `${Date.now()}-${previous.key}`, filename: `folder-cover-${Date.now()}.jpg`, uri: output.uri, sizeBytes: output.sizeBytes }]);
       const job = upload.jobs[0];
       if (!job) throw new Error("The folder cover upload could not be started.");
       let status = job.status;
@@ -1568,28 +1573,33 @@ export function KnowledgeWorkspace() {
         status = (await fetchGalleryUploadStatus([job.key])).jobs[0]?.status ?? status;
       }
       if (status !== "completed") throw new Error("The folder cover could not be processed.");
-      const updated = await setContentFolderCover(folderKey, job.imageKey);
-      replaceFolder(updated);
-      closeSheet();
-    } catch (cause) {
-      setSheetError(cause instanceof Error ? cause.message : "The folder cover could not be updated.");
-    } finally {
-      setCoverActionLoading(false);
-    }
+      if (request !== folderCoverRequests.current.get(previous.key)) return;
+      const updated = await setContentFolderCover(previous.key, job.imageKey);
+      if (request !== folderCoverRequests.current.get(previous.key)) return;
+      replaceFolder(updated, false);
+    })().catch((cause: unknown) => {
+      if (request !== folderCoverRequests.current.get(previous.key)) return;
+      replaceFolder(previous, false);
+      showToast({ title: "Folder cover update failed", description: cause instanceof Error ? cause.message : "The folder cover could not be updated." });
+    });
   };
 
-  const clearFolderCover = async () => {
-    if (!selectedFolder || coverActionLoading) return;
-    setCoverActionLoading(true);
-    setSheetError(undefined);
-    try {
-      replaceFolder(await setContentFolderCover(selectedFolder.key, null));
-      closeSheet();
-    } catch (cause) {
-      setSheetError(cause instanceof Error ? cause.message : "The folder cover could not be cleared.");
-    } finally {
-      setCoverActionLoading(false);
-    }
+  const clearFolderCover = () => {
+    if (!selectedFolder) return;
+    const previous = selectedFolder;
+    const request = (folderCoverRequests.current.get(previous.key) ?? 0) + 1;
+    folderCoverRequests.current.set(previous.key, request);
+    replaceFolder({ ...previous, coverUrl: undefined });
+    void invalidateContentLocations(queryClient, contentContext, [previous.parentFolderKey]);
+    closeSheet();
+    void setContentFolderCover(previous.key, null).then((updated) => {
+      if (request !== folderCoverRequests.current.get(previous.key)) return;
+      replaceFolder(updated, false);
+    }).catch((cause: unknown) => {
+      if (request !== folderCoverRequests.current.get(previous.key)) return;
+      replaceFolder(previous, false);
+      showToast({ title: "Folder cover removal failed", description: cause instanceof Error ? cause.message : "The folder cover could not be cleared." });
+    });
   };
 
   const replaceFolder = (updated: ContentFolder, select = true) => {
@@ -1598,6 +1608,8 @@ export function KnowledgeWorkspace() {
     setRootFolders((current) => current.map(replace));
     setFolderStack((current) => current.map(replace));
     setDestinationFolders((current) => current.map(replace));
+    setRootSearchResults((current) => current ? { ...current, folders: current.folders.map((folder) => folder.key === updated.key ? { ...folder, ...updated } : folder) } : current);
+    setFolderSearchResults((current) => current ? { ...current, folders: current.folders.map((folder) => folder.key === updated.key ? { ...folder, ...updated } : folder) } : current);
     replaceCachedContentFolder(queryClient, contentContext, updated);
     if (select) setSelectedFolder(updated);
   };
@@ -2915,7 +2927,7 @@ export function KnowledgeWorkspace() {
 
       <BottomSheet
         description={activeSheet === "create" ? "Choose what to add to the current folder." : activeSheet === "versions" ? "Choose a version of this document to open or download." : activeSheet === "audioVersions" ? "Generated audio has its own history, independent from document versions." : activeSheet === "summary" ? "Review the match, then open its source document." : activeSheet === "deleteDocument" ? `Delete ${selectedDocument?.extension ? "file" : "document"} from Archive? It will move to trash.` : activeSheet === "bulkDelete" ? `Delete ${selectedCount} selected ${selectedCount === 1 ? "item" : "items"} from Archive? Selected folders include everything inside them.` : undefined}
-        dismissible={!versionActionKey && !generatingAudioVersion && !coverActionLoading && !destinationLoading && !documentActionLoading && !bulkLoading}
+        dismissible={!versionActionKey && !generatingAudioVersion && !destinationLoading && !documentActionLoading && !bulkLoading}
         footer={mutationFooter()}
         hideHeading={activeSheet === "create" || activeSheet === "documentActions" || activeSheet === "enhance" || activeSheet === "historyChooser" || activeSheet === "bulkActions"}
         mutation={activeSheet === "documents" || activeSheet === "folder" || activeSheet === "folders" || activeSheet === "versions" || activeSheet === "audioVersions" || activeSheet === "rename" || activeSheet === "destinationBrowser" || activeSheet === "folderDetails" || activeSheet === "bulkDelete"}
@@ -2970,8 +2982,8 @@ export function KnowledgeWorkspace() {
             <BottomSheetItem onPress={() => void openDestinationPicker("move", { folder: selectedFolder })}>Move folder</BottomSheetItem>
             <BottomSheetItem onPress={() => void openDestinationPicker("copy", { folder: selectedFolder })}>Copy folder</BottomSheetItem>
             <BottomSheetItem onPress={confirmSelectedFolderDelete}>Delete folder</BottomSheetItem>
-            <BottomSheetItem disabled={coverActionLoading} loading={coverActionLoading} onPress={() => void chooseFolderCover()}>{selectedFolder.coverUrl ? "Change cover" : "Set cover"}</BottomSheetItem>
-            {selectedFolder.coverUrl ? <BottomSheetItem disabled={coverActionLoading} onPress={() => void clearFolderCover()}>Remove cover</BottomSheetItem> : null}
+            <BottomSheetItem onPress={() => void chooseFolderCover()}>{selectedFolder.coverUrl ? "Change cover" : "Set cover"}</BottomSheetItem>
+            {selectedFolder.coverUrl ? <BottomSheetItem onPress={clearFolderCover}>Remove cover</BottomSheetItem> : null}
           </>
         ) : null}
         {activeSheet === "folderDetails" && selectedFolder ? (
