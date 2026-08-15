@@ -185,7 +185,7 @@ export function KnowledgeWorkspace() {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const archiveCardSize = Math.floor((width - spacing.md * 2 - 20) / 3);
-  const destinationCardSize = Math.floor((width - 40 - 20) / 3);
+  const destinationCardSize = Math.floor((width - 42 - 20) / 3);
   const userKey = useAuthStore((state) => state.user?.key ?? "");
   const organizationKey = useAuthStore((state) => typeof state.organization?.key === "string" ? state.organization.key : "");
   const scopeKey = useAuthStore((state) => typeof state.scope?.key === "string" ? state.scope.key : "");
@@ -3437,7 +3437,6 @@ export function KnowledgeWorkspace() {
                   <Button accessibilityLabel={`Open ${folder.name}`} contentMode="raw" onPress={() => void browseDestination(folder)} size="xl" style={[styles.rootFolderMain, folder.coverUrl && styles.coveredFolderMain]} variant="ghost">{folder.coverUrl ? null : <FolderIcon size="lg" />}<Text numberOfLines={1} style={[styles.archiveCardLabel, folder.coverUrl && styles.coveredFolderLabel]}>{folder.name}</Text></Button>
                 </View>;
               })}
-              {!destinationLoading && destinationFolders.filter((folder) => !selectedFolders.some(({ key }) => key === folder.key)).length === 0 ? <Text style={styles.empty}>No nested folders here.</Text> : null}
             </ScrollView>
           </View>
         ) : null}
