@@ -355,7 +355,7 @@ export function KnowledgeWorkspace() {
   const contentSelection: ContentSelection = { folderKeys: selectedFolders.map(({ key }) => key), documentKeys: selectedDocuments.map(({ key }) => key) };
   const selectedCount = selectedFolders.length + selectedDocuments.length;
   const selectionActive = selectedCount > 0;
-  const singleFolderDelete = activeSheet === "bulkDelete" && temporarySingleSelection && selectedFolders.length === 1 && selectedDocuments.length === 0;
+  const compactBulkDelete = activeSheet === "bulkDelete";
   const allSelectedFavorite = selectionActive && [...selectedFolders, ...selectedDocuments].every((item) => Boolean(item.isFavorite));
   const selectionMetadataLoading = hydratingFolderKeys.length > 0 || hydratingDocumentKeys.length > 0;
   const activeDocument = documentKeyRef.current
@@ -2989,9 +2989,7 @@ export function KnowledgeWorkspace() {
       <Button disabled={Boolean(documentActionLoading)} loading={documentActionLoading === "delete"} onPress={() => void deleteSelectedDocument()} size="lg" variant="danger">Delete</Button>
       {close(Boolean(documentActionLoading))}
     </>;
-    if (activeSheet === "bulkDelete") return <>
-      {singleFolderDelete ? null : <><Button disabled={bulkLoading} loading={bulkLoading} onPress={() => void deleteContentSelection()} size="lg" variant="primary">Delete</Button>{close(bulkLoading)}</>}
-    </>;
+    if (activeSheet === "bulkDelete") return null;
     if (activeSheet === "destinationBrowser") return <>
       {destinationAction !== "upload" && (destinationAtInitialLocation || destinationIsBlocked)
         ? <Text style={styles.invalidDestinationHelp}>Invalid destination. Choose another folder to {destinationAction} to.</Text>
@@ -3054,7 +3052,7 @@ export function KnowledgeWorkspace() {
   const selectedAudioVersionIndex = audioVersions.findIndex((version) => version.key === selectedAudioVersionKey);
   const selectedAudioVersion = selectedAudioVersionIndex >= 0 ? audioVersions[selectedAudioVersionIndex] : undefined;
   const bulkToolbar = selectionActive ? <Tabs style={styles.bulkToolbar}>
-    <Button accessibilityLabel="Clear selection" contentMode="raw" onPress={clearSelection} size="xs" style={styles.bulkToolbarAction} variant="ghost"><CloseIcon size="sm" /><Text style={styles.bulkSelectionText}>{selectedCount} selected</Text></Button>
+    <Button accessibilityLabel="Clear selection" contentMode="raw" onPress={clearSelection} size="xs" style={styles.bulkToolbarAction} variant="secondary"><CloseIcon size="sm" /><Text style={styles.bulkSelectionText}>{selectedCount} selected</Text></Button>
     <Button accessibilityLabel="Selected item actions" contentMode="raw" disabled={selectionMetadataLoading} loading={selectionMetadataLoading} onPress={() => openSheet("bulkActions")} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
   </Tabs> : null;
 
@@ -3370,18 +3368,18 @@ export function KnowledgeWorkspace() {
       /> : null}
 
       <BottomSheet
-        description={activeSheet === "create" ? "Choose what to add to the current folder." : activeSheet === "versions" ? "Choose a version of this document to open or download." : activeSheet === "audioVersions" ? "Generated audio has its own history, independent from document versions." : activeSheet === "summary" ? "Review the match, then open its source document." : activeSheet === "deleteDocument" ? `Delete ${selectedDocument?.extension ? "file" : "document"} from Archive? It will move to trash.` : activeSheet === "bulkDelete" && !singleFolderDelete ? `Delete ${selectedCount} selected ${selectedCount === 1 ? "item" : "items"} from Archive? Selected folders include everything inside them.` : undefined}
+        description={activeSheet === "create" ? "Choose what to add to the current folder." : activeSheet === "versions" ? "Choose a version of this document to open or download." : activeSheet === "audioVersions" ? "Generated audio has its own history, independent from document versions." : activeSheet === "summary" ? "Review the match, then open its source document." : activeSheet === "deleteDocument" ? `Delete ${selectedDocument?.extension ? "file" : "document"} from Archive? It will move to trash.` : undefined}
         dismissible={!versionActionKey && !generatingAudioVersion && !destinationLoading && !documentActionLoading && !bulkLoading}
         footer={mutationFooter()}
-        hideHeading={activeSheet === "create" || activeSheet === "documentActions" || activeSheet === "enhance" || activeSheet === "historyChooser" || activeSheet === "bulkActions" || singleFolderDelete}
-        mutation={activeSheet === "documents" || activeSheet === "folder" || activeSheet === "folders" || activeSheet === "versions" || activeSheet === "audioVersions" || activeSheet === "rename" || activeSheet === "destinationBrowser" || activeSheet === "folderDetails" || activeSheet === "bulkDelete" && !singleFolderDelete}
+        hideHeading={activeSheet === "create" || activeSheet === "documentActions" || activeSheet === "enhance" || activeSheet === "historyChooser" || activeSheet === "bulkActions" || compactBulkDelete}
+        mutation={activeSheet === "documents" || activeSheet === "folder" || activeSheet === "folders" || activeSheet === "versions" || activeSheet === "audioVersions" || activeSheet === "rename" || activeSheet === "destinationBrowser" || activeSheet === "folderDetails"}
         onOpenChange={(open) => { if (!open) closeSheet(); }}
         open={sheetOpen}
         tall={activeSheet === "library" || activeSheet === "documents" || activeSheet === "folders" || activeSheet === "scanSources" || activeSheet === "versions" || activeSheet === "audioVersions" || activeSheet === "folderDetails"}
         title={activeSheet === "enhance" ? "AI actions" : activeSheet === "historyChooser" ? "Document history" : activeSheet === "versions" ? "Document versions" : activeSheet === "audioVersions" ? "Audio versions" : activeSheet === "scanSources" ? "Scanned pages" : activeSheet === "deleteDocument" ? `Delete ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "bulkDelete" ? "Delete selected items" : activeSheet === "folder" ? "Create folder" : activeSheet === "documents" ? "Documents and files" : activeSheet === "folders" ? "Folders" : activeSheet === "destinationBrowser" ? destinationAction === "upload" ? destinationFolder?.name ?? "Archive" : destinationAction === "move" ? "Move to folder" : "Copy to folder" : activeSheet === "library" ? "Browse Archive" : activeSheet === "documentActions" ? selectedDocument?.name ?? "Document actions" : activeSheet === "destination" ? destinationAction === "upload" ? "Upload files" : "Choose destination" : activeSheet === "rename" ? selectedDocument?.extension ? "Rename file" : "Rename document" : activeSheet === "summary" ? selectedSummary?.name ?? "Document summary" : activeSheet === "folderActions" ? selectedFolder?.name ?? "Folder actions" : activeSheet === "folderDetails" ? "Edit folder" : "New in Archive"}
       >
         {sheetError ? <Text accessibilityRole="alert" style={styles.notice}>{sheetError}</Text> : null}
-        {singleFolderDelete ? <View style={styles.compactSheetActions}>
+        {compactBulkDelete ? <View style={styles.compactSheetActions}>
           <Button disabled={bulkLoading} loading={bulkLoading} onPress={() => void deleteContentSelection()} size="lg" variant="primary">Delete</Button>
           <Button disabled={bulkLoading} onPress={() => closeSheet()} size="lg" variant="secondary">Close</Button>
         </View> : null}
