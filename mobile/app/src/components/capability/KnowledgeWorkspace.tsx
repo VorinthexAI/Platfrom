@@ -126,7 +126,6 @@ type WorkspaceMode = "auto" | "folders" | "folder" | "editor" | "viewer";
 type FolderContentTab = "folders" | "documents" | "files";
 type ArchiveSheet = "create" | "folder" | "library" | "documents" | "folders" | "enhance" | "historyChooser" | "versions" | "audioVersions" | "documentActions" | "deleteDocument" | "scanSources" | "destination" | "destinationBrowser" | "rename" | "summary" | "folderActions" | "folderDetails" | "bulkActions" | "bulkDelete";
 type DestinationAction = "upload" | "move" | "copy";
-type DestinationChoice = { folder?: ContentFolder; stack: ContentFolder[] };
 type UploadBatchItem = { id: string; file: File; name: string; status: "pending" | "uploading" | "success" | "error"; error?: string };
 type NarrationChunk = { durationMs: number; url: string };
 type PendingCreate = { name: string; content: string; folderKey?: string; mutationKey: string };
@@ -266,8 +265,8 @@ export function KnowledgeWorkspace() {
   const [destinationAction, setDestinationAction] = useState<DestinationAction>();
   const [destinationStack, setDestinationStack] = useState<ContentFolder[]>([]);
   const [destinationFolders, setDestinationFolders] = useState<ContentFolder[]>([]);
-  const [destinationChoices, setDestinationChoices] = useState<DestinationChoice[]>([]);
   const [destinationUsesDirectSelection, setDestinationUsesDirectSelection] = useState(false);
+  const [destinationSourceFolderKey, setDestinationSourceFolderKey] = useState<string | null>();
   const [destinationLoading, setDestinationLoading] = useState(false);
   const [selectedFolders, setSelectedFolders] = useState<ContentFolder[]>([]);
   const [selectedDocuments, setSelectedDocuments] = useState<ContentDocument[]>([]);
@@ -386,6 +385,9 @@ export function KnowledgeWorkspace() {
   const visibleUploadBatch = uploadFolderKey === currentFolder?.key
     ? uploadBatch.filter(({ status }) => status === "pending" || status === "uploading")
     : [];
+  const destinationTargetKey = destinationFolder?.key ?? null;
+  const destinationAtSource = destinationSourceFolderKey !== undefined && destinationTargetKey === destinationSourceFolderKey;
+  const destinationIsSelectedFolder = selectedFolders.some(({ key }) => key === destinationFolder?.key);
   const showArchiveRoot = !libraryQuery.trim() || "archive".includes(libraryQuery.trim().toLowerCase());
   const narrationDuration = audioTimelineDuration(narrationManifest);
   const narrationElapsed = narrationScrubValue ?? audioTimelinePosition(narrationManifest, narrationActiveIndex, narrationAudio.currentTime);
@@ -550,7 +552,6 @@ export function KnowledgeWorkspace() {
       clearSelection();
       setTemporarySingleSelection(false);
       setDestinationUsesDirectSelection(false);
-      setDestinationChoices([]);
     }
     setSheetError(undefined);
     setActiveSheet(previous);
@@ -561,9 +562,11 @@ export function KnowledgeWorkspace() {
       destinationGeneration.current += 1;
       if (!preserveSelection && destinationUsesDirectSelection) clearSelection();
       setDestinationUsesDirectSelection(false);
-      setDestinationChoices([]);
       setDestinationStack([]);
       setDestinationFolders([]);
+      setDestinationSourceFolderKey(undefined);
+      setDestinationLoading(false);
+      setDestinationAction(undefined);
     }
     if (!preserveSelection && temporarySingleSelection) clearSelection();
     setTemporarySingleSelection(false);
@@ -663,9 +666,9 @@ export function KnowledgeWorkspace() {
     setSelectedDocuments([]);
     setHydratingFolderKeys([]);
     setHydratingDocumentKeys([]);
-    setDestinationChoices([]);
     setDestinationStack([]);
     setDestinationFolders([]);
+    setDestinationSourceFolderKey(undefined);
     setDestinationAction(undefined);
     setDestinationLoading(false);
     setDestinationUsesDirectSelection(false);
@@ -689,9 +692,9 @@ export function KnowledgeWorkspace() {
         setSelectedDocuments([]);
         setHydratingFolderKeys([]);
         setHydratingDocumentKeys([]);
-        setDestinationChoices([]);
         setDestinationStack([]);
         setDestinationFolders([]);
+        setDestinationSourceFolderKey(undefined);
         setDestinationAction(undefined);
         setDestinationLoading(false);
         setDestinationUsesDirectSelection(false);
@@ -765,9 +768,9 @@ export function KnowledgeWorkspace() {
       setSelectedDocuments([]);
       setHydratingFolderKeys([]);
       setHydratingDocumentKeys([]);
-      setDestinationChoices([]);
       setDestinationStack([]);
       setDestinationFolders([]);
+      setDestinationSourceFolderKey(undefined);
       setDestinationAction(undefined);
       setDestinationLoading(false);
       setDestinationUsesDirectSelection(false);
@@ -2042,8 +2045,20 @@ export function KnowledgeWorkspace() {
     setDestinationUsesDirectSelection(Boolean(directSelection));
     setTemporarySingleSelection(Boolean(directSelection));
     setDestinationAction(action);
-    setDestinationChoices([]);
-    setDestinationStack(action === "upload" ? folderStack : []);
+    const sourceFolderKey = action === "upload"
+      ? currentFolder?.key
+      : directSelection?.folder?.parentFolderKey ?? directSelection?.document?.folderKey ?? currentFolder?.key;
+    const sourceStackCandidate = action === "upload" || sourceFolderKey === currentFolder?.key
+      ? folderStack
+      : sourceFolderKey === folderStack.at(-2)?.key
+        ? folderStack.slice(0, -1)
+        : [];
+    const sourceStack = sourceStackCandidate.every((folder, index) => folder.parentFolderKey === sourceStackCandidate[index - 1]?.key)
+      ? sourceStackCandidate
+      : [];
+    setDestinationSourceFolderKey(action === "upload" ? undefined : sourceFolderKey ?? null);
+    setDestinationStack(sourceStack);
+    setDestinationFolders([]);
     if (action === "upload") {
       if (sheetOpen) pushSheet("destination");
       else openSheet("destination");
@@ -2051,8 +2066,28 @@ export function KnowledgeWorkspace() {
     else openSheet("destinationBrowser");
     setDestinationLoading(true);
     try {
-      const next = (await getContentLocation(queryClient, contentContext, action === "upload" ? currentFolder?.key : undefined)).folders;
-      if (generation === destinationGeneration.current) setDestinationFolders(next);
+      let resolvedStack = sourceStack;
+      if (sourceFolderKey && resolvedStack.at(-1)?.key !== sourceFolderKey) {
+        const queue: { folderKey?: string; stack: ContentFolder[] }[] = [{ stack: [] }];
+        const visited = new Set<string | undefined>();
+        while (queue.length) {
+          const candidate = queue.shift()!;
+          if (visited.has(candidate.folderKey)) continue;
+          visited.add(candidate.folderKey);
+          const location = await getContentLocation(queryClient, contentContext, candidate.folderKey);
+          const source = location.folders.find(({ key }) => key === sourceFolderKey);
+          if (source) {
+            resolvedStack = [...candidate.stack, source];
+            break;
+          }
+          location.folders.forEach((folder) => queue.push({ folderKey: folder.key, stack: [...candidate.stack, folder] }));
+        }
+      }
+      const next = (await getContentLocation(queryClient, contentContext, sourceFolderKey)).folders;
+      if (generation === destinationGeneration.current) {
+        setDestinationStack(resolvedStack);
+        setDestinationFolders(next);
+      }
     } catch (cause) {
       if (generation === destinationGeneration.current) setSheetError(cause instanceof Error ? cause.message : "Folders could not be loaded.");
     } finally {
@@ -2063,6 +2098,7 @@ export function KnowledgeWorkspace() {
   const openDestinationBrowser = async () => {
     const generation = ++destinationGeneration.current;
     setDestinationLoading(true);
+    setDestinationFolders([]);
     setSheetError(undefined);
     pushSheet("destinationBrowser");
     try {
@@ -2075,26 +2111,17 @@ export function KnowledgeWorkspace() {
     }
   };
 
-  const toggleDestinationChoice = (folder: ContentFolder | undefined, stack: ContentFolder[]) => {
-    const key = folder?.key;
-    setDestinationChoices((current) => {
-      const selected = current.some((choice) => choice.folder?.key === key);
-      if (selected) return current.filter((choice) => choice.folder?.key !== key);
-      const choice = { folder, stack };
-      return destinationAction === "move" ? [choice] : [...current, choice];
-    });
-  };
-
   const browseDestination = async (folder?: ContentFolder, back = false) => {
     const generation = ++destinationGeneration.current;
     const nextStack = back ? destinationStack.slice(0, -1) : folder ? [...destinationStack, folder] : [];
     setDestinationLoading(true);
+    setDestinationStack(nextStack);
+    setDestinationFolders([]);
     setSheetError(undefined);
     try {
       const next = (await getContentLocation(queryClient, contentContext, nextStack.at(-1)?.key)).folders;
       if (generation !== destinationGeneration.current) return;
       setDestinationFolders(next);
-      setDestinationStack(nextStack);
     } catch (cause) {
       if (generation === destinationGeneration.current) setSheetError(cause instanceof Error ? cause.message : "The folder could not be opened.");
     } finally {
@@ -2220,17 +2247,112 @@ export function KnowledgeWorkspace() {
       await pickAndUpload(destinationFolder?.key);
       return;
     }
-    if (!destinationAction || !destinationChoices.length || !selectedCount) return;
+    if (!destinationAction || !selectedCount) return;
     const action = destinationAction;
-    const choices = action === "move" ? destinationChoices.slice(0, 1) : destinationChoices;
-    const destinationKeys = choices.map((choice) => choice.folder?.key);
-    const first = choices[0];
-    if (!first) return;
+    const first = { folder: destinationFolder, stack: destinationStack };
+    const destinationKeys = [destinationFolder?.key];
+    const choices = [first];
     const selectedFoldersSnapshot = [...selectedFolders];
     const selectedDocumentsSnapshot = [...selectedDocuments];
     const directFolder = destinationUsesDirectSelection && selectedFoldersSnapshot.length === 1 && selectedDocumentsSnapshot.length === 0
       ? selectedFoldersSnapshot[0]
       : undefined;
+    const directDocument = destinationUsesDirectSelection && selectedDocumentsSnapshot.length === 1 && selectedFoldersSnapshot.length === 0
+      ? selectedDocumentsSnapshot[0]
+      : undefined;
+    if (directDocument) {
+      const sourceKey = directDocument.folderKey;
+      const targetKey = destinationFolder?.key;
+      const previousFolders = folders;
+      const previousDocuments = documents;
+      const previousRootFolders = rootFolders;
+      const previousRootDocuments = rootDocuments;
+      const previousFolderStack = folderStack;
+      const previousWorkspaceMode = workspaceMode;
+      const previousRootSearchQuery = rootSearchQuery;
+      const previousRootSearchResults = rootSearchResults;
+      const previousQuery = query;
+      const previousResults = results;
+      const previousFolderSearchResults = folderSearchResults;
+      const sourceLocation = queryClient.getQueryData<ContentLocation>(contentQueryKeys.location(contentContext, sourceKey));
+      const destinationLocation = queryClient.getQueryData<ContentLocation>(contentQueryKeys.location(contentContext, targetKey));
+      const optimistic = action === "move"
+        ? { ...directDocument, folderKey: targetKey }
+        : { ...directDocument, key: `optimistic-${createContentMutationKey()}`, folderKey: targetKey, name: `${directDocument.name} (copying)` };
+      if (action === "move") removeCachedContentDocument(queryClient, contentContext, sourceKey, directDocument.key);
+      addCachedContentDocument(queryClient, contentContext, targetKey, optimistic);
+      const optimisticLocation = queryClient.getQueryData<ContentLocation>(contentQueryKeys.location(contentContext, targetKey)) ?? { folders: [], documents: [optimistic] };
+      setFolders(optimisticLocation.folders);
+      setDocuments(optimisticLocation.documents);
+      if (destinationFolder) {
+        setFolderStack(destinationStack);
+        workspaceModeRef.current = "folder";
+        setWorkspaceMode("folder");
+      } else {
+        setRootFolders(optimisticLocation.folders);
+        setRootDocuments(optimisticLocation.documents);
+        setFolderStack([]);
+        workspaceModeRef.current = "folders";
+        setWorkspaceMode("folders");
+      }
+      setFolderContentTab(directDocument.extension ? "files" : "documents");
+      setRootSearchQuery("");
+      setRootSearchResults(undefined);
+      setQuery("");
+      setResults(undefined);
+      setFolderSearchResults(undefined);
+      void invalidateContentLocations(queryClient, contentContext, [sourceKey, targetKey]);
+      closeSheet();
+      const generation = ++documentActionGeneration.current;
+      const navigationRequest = navigationGeneration.current;
+      const requestContextKey = contentContextKey;
+      const isCurrent = () => generation === documentActionGeneration.current
+        && navigationRequest === navigationGeneration.current
+        && requestContextKey === contentContextKeyRef.current;
+      let committed = false;
+      void (action === "move"
+        ? moveContentSelection({ folderKeys: [], documentKeys: [directDocument.key] }, targetKey)
+        : copyContentSelection({ folderKeys: [], documentKeys: [directDocument.key] }, [targetKey])).then(async (outcome) => {
+        if (outcome.succeeded === 0) throw new Error(outcome.failures[0]?.message ?? `The ${directDocument.extension ? "file" : "document"} could not be ${action === "move" ? "moved" : "copied"}.`);
+        committed = true;
+        if (action === "copy") removeCachedContentDocument(queryClient, contentContext, targetKey, optimistic.key);
+        const updated = outcome.documents[0];
+        if (updated) {
+          addCachedContentDocument(queryClient, contentContext, updated.folderKey, updated);
+          if (isCurrent() && action === "copy") {
+            if (updated.folderKey === targetKey) setDocuments((current) => [...current.filter(({ key }) => key !== optimistic.key && key !== updated.key), updated]);
+            if (!updated.folderKey) setRootDocuments((current) => [...current.filter(({ key }) => key !== optimistic.key && key !== updated.key), updated]);
+          } else if (isCurrent()) replaceDocument(updated, false);
+        }
+        await invalidateContentLocations(queryClient, contentContext, [sourceKey, targetKey]);
+        await invalidateContentHistories(queryClient, contentContext, [sourceKey, targetKey, undefined]);
+        if (isCurrent()) showToast({ title: `${directDocument.extension ? "File" : "Document"} ${action === "move" ? "moved" : "copied"}` });
+      }).catch((cause: unknown) => {
+        if (committed) {
+          if (isCurrent()) showToast({ title: `${directDocument.extension ? "File" : "Document"} ${action === "move" ? "moved" : "copied"}`, description: "The change completed, but Archive could not refresh yet." });
+          return;
+        }
+        if (sourceLocation) queryClient.setQueryData(contentQueryKeys.location(contentContext, sourceKey), sourceLocation);
+        else queryClient.removeQueries({ queryKey: contentQueryKeys.location(contentContext, sourceKey), exact: true });
+        if (destinationLocation) queryClient.setQueryData(contentQueryKeys.location(contentContext, targetKey), destinationLocation);
+        else queryClient.removeQueries({ queryKey: contentQueryKeys.location(contentContext, targetKey), exact: true });
+        if (!isCurrent()) return;
+        setFolders(previousFolders);
+        setDocuments(previousDocuments);
+        setRootFolders(previousRootFolders);
+        setRootDocuments(previousRootDocuments);
+        setFolderStack(previousFolderStack);
+        workspaceModeRef.current = previousWorkspaceMode;
+        setWorkspaceMode(previousWorkspaceMode);
+        setRootSearchQuery(previousRootSearchQuery);
+        setRootSearchResults(previousRootSearchResults);
+        setQuery(previousQuery);
+        setResults(previousResults);
+        setFolderSearchResults(previousFolderSearchResults);
+        showToast({ title: `${directDocument.extension ? "File" : "Document"} ${action} failed`, description: cause instanceof Error ? cause.message : `The item could not be ${action === "move" ? "moved" : "copied"}.` });
+      });
+      return;
+    }
     if (directFolder) {
       const sourceKey = directFolder.parentFolderKey;
       const previousFolders = folders;
@@ -2257,8 +2379,10 @@ export function KnowledgeWorkspace() {
         const optimistic = { ...directFolder, parentFolderKey: destinationKeys[0] };
         removeCachedContentFolder(queryClient, contentContext, sourceKey, directFolder.key);
         addCachedContentFolder(queryClient, contentContext, destinationKeys[0], optimistic);
+        if (!queryClient.getQueryData(contentQueryKeys.location(contentContext, destinationKeys[0]))) queryClient.setQueryData(contentQueryKeys.location(contentContext, destinationKeys[0]), { folders: [optimistic], documents: [] });
       } else {
         placeholders.forEach((placeholder) => addCachedContentFolder(queryClient, contentContext, placeholder.parentFolderKey, placeholder));
+        if (!queryClient.getQueryData(contentQueryKeys.location(contentContext, destinationKeys[0]))) queryClient.setQueryData(contentQueryKeys.location(contentContext, destinationKeys[0]), { folders: placeholders, documents: [] });
       }
       const optimisticLocation = queryClient.getQueryData<ContentLocation>(contentQueryKeys.location(contentContext, first.folder?.key)) ?? { folders: [], documents: [] };
       setFolders(optimisticLocation.folders);
@@ -2310,7 +2434,7 @@ export function KnowledgeWorkspace() {
         } else {
           outcome.copiedFolders.forEach(({ folder }) => {
             addCachedContentFolder(queryClient, contentContext, folder.parentFolderKey, folder);
-            if (isCurrent() && folder.parentFolderKey === currentFolderKeyRef.current) setFolders((current) => [...current.filter(({ key }) => key !== folder.key), folder]);
+            if (isCurrent() && folder.parentFolderKey === destinationKeys[0]) setFolders((current) => [...current.filter(({ key }) => key !== folder.key), folder]);
             if (isCurrent() && !folder.parentFolderKey) setRootFolders((current) => [...current.filter(({ key }) => key !== folder.key), folder]);
           });
         }
@@ -2325,13 +2449,13 @@ export function KnowledgeWorkspace() {
           if (isCurrent()) showToast({ title: `Folder ${action === "move" ? "moved" : "copied"}`, description: "The change completed, but Archive could not refresh yet." });
           return;
         }
-        if (!isCurrent()) return;
         if (sourceLocation) queryClient.setQueryData(contentQueryKeys.location(contentContext, sourceKey), sourceLocation);
         else queryClient.removeQueries({ queryKey: contentQueryKeys.location(contentContext, sourceKey), exact: true });
         destinationLocations.forEach((location, key) => {
           if (location) queryClient.setQueryData(contentQueryKeys.location(contentContext, key), location);
           else queryClient.removeQueries({ queryKey: contentQueryKeys.location(contentContext, key), exact: true });
         });
+        if (!isCurrent()) return;
         setFolders(previousFolders);
         setDocuments(previousDocuments);
         setRootFolders(previousRootFolders);
@@ -2348,61 +2472,166 @@ export function KnowledgeWorkspace() {
       });
       return;
     }
+    const targetKey = destinationFolder?.key;
+    const previousFolders = folders;
+    const previousDocuments = documents;
+    const previousRootFolders = rootFolders;
+    const previousRootDocuments = rootDocuments;
+    const previousFolderStack = folderStack;
+    const previousWorkspaceMode = workspaceMode;
+    const previousRootSearchQuery = rootSearchQuery;
+    const previousRootSearchResults = rootSearchResults;
+    const previousQuery = query;
+    const previousResults = results;
+    const previousFolderSearchResults = folderSearchResults;
+    const sourceKeys = [...selectedFoldersSnapshot.map(({ parentFolderKey }) => parentFolderKey), ...selectedDocumentsSnapshot.map(({ folderKey }) => folderKey)];
+    const locationSnapshots = new Map([...new Set([...sourceKeys, targetKey])].map((key) => [key, queryClient.getQueryData<ContentLocation>(contentQueryKeys.location(contentContext, key))]));
+    const optimisticFolders = selectedFoldersSnapshot.map((folder, index): ContentFolder => action === "move"
+      ? { ...folder, parentFolderKey: targetKey }
+      : { ...folder, key: `optimistic-${createContentMutationKey()}-${index}`, parentFolderKey: targetKey, name: `${folder.name} (copying)`, isFavorite: false });
+    const optimisticDocuments = selectedDocumentsSnapshot.map((document, index): ContentDocument => action === "move"
+      ? { ...document, folderKey: targetKey }
+      : { ...document, key: `optimistic-${createContentMutationKey()}-${index}`, folderKey: targetKey, name: `${document.name} (copying)`, isFavorite: false });
+    if (action === "move") {
+      selectedFoldersSnapshot.forEach((folder) => removeCachedContentFolder(queryClient, contentContext, folder.parentFolderKey, folder.key));
+      selectedDocumentsSnapshot.forEach((document) => removeCachedContentDocument(queryClient, contentContext, document.folderKey, document.key));
+    }
+    optimisticFolders.forEach((folder) => addCachedContentFolder(queryClient, contentContext, targetKey, folder));
+    optimisticDocuments.forEach((document) => addCachedContentDocument(queryClient, contentContext, targetKey, document));
+    const optimisticLocation = queryClient.getQueryData<ContentLocation>(contentQueryKeys.location(contentContext, targetKey)) ?? { folders: optimisticFolders, documents: optimisticDocuments };
+    setFolders(optimisticLocation.folders);
+    setDocuments(optimisticLocation.documents);
+    if (destinationFolder) {
+      setFolderStack(destinationStack);
+      workspaceModeRef.current = "folder";
+      setWorkspaceMode("folder");
+    } else {
+      setRootFolders(optimisticLocation.folders);
+      setRootDocuments(optimisticLocation.documents);
+      setFolderStack([]);
+      workspaceModeRef.current = "folders";
+      setWorkspaceMode("folders");
+    }
+    setRootSearchQuery("");
+    setRootSearchResults(undefined);
+    setQuery("");
+    setResults(undefined);
+    setFolderSearchResults(undefined);
+    clearSelection();
+    closeSheet(true);
+    const transferNavigation = navigationGeneration.current;
+    const transferContextKey = contentContextKey;
+    const transferIsCurrent = () => transferNavigation === navigationGeneration.current && transferContextKey === contentContextKeyRef.current;
+    let transferCommitted = false;
     setBulkLoading(true);
     setSheetError(undefined);
     try {
       const { folders: operationFolders, documents: operationDocuments } = await resolveStructuralResources(selectedFoldersSnapshot, selectedDocumentsSnapshot);
+      if (transferContextKey !== contentContextKeyRef.current) throw new Error("Archive context changed before the transfer could start.");
+      locationSnapshots.forEach((location, key) => {
+        if (location) queryClient.setQueryData(contentQueryKeys.location(contentContext, key), location);
+        else queryClient.removeQueries({ queryKey: contentQueryKeys.location(contentContext, key), exact: true });
+      });
+      const normalizedFolders = operationFolders.map((folder, index): ContentFolder => action === "move"
+        ? { ...folder, parentFolderKey: targetKey }
+        : { ...folder, key: `optimistic-${createContentMutationKey()}-${index}`, parentFolderKey: targetKey, name: `${folder.name} (copying)`, isFavorite: false });
+      const normalizedDocuments = operationDocuments.map((document, index): ContentDocument => action === "move"
+        ? { ...document, folderKey: targetKey }
+        : { ...document, key: `optimistic-${createContentMutationKey()}-${index}`, folderKey: targetKey, name: `${document.name} (copying)`, isFavorite: false });
+      if (action === "move") {
+        operationFolders.forEach((folder) => removeCachedContentFolder(queryClient, contentContext, folder.parentFolderKey, folder.key));
+        operationDocuments.forEach((document) => removeCachedContentDocument(queryClient, contentContext, document.folderKey, document.key));
+      }
+      normalizedFolders.forEach((folder) => addCachedContentFolder(queryClient, contentContext, targetKey, folder));
+      normalizedDocuments.forEach((document) => addCachedContentDocument(queryClient, contentContext, targetKey, document));
+      if (transferIsCurrent()) {
+        const normalizedLocation = queryClient.getQueryData<ContentLocation>(contentQueryKeys.location(contentContext, targetKey));
+        if (normalizedLocation) {
+          setFolders(normalizedLocation.folders);
+          setDocuments(normalizedLocation.documents);
+          if (!targetKey) {
+            setRootFolders(normalizedLocation.folders);
+            setRootDocuments(normalizedLocation.documents);
+          }
+        }
+      }
       const sourceFolderKeys = [...operationFolders.map(({ parentFolderKey }) => parentFolderKey), ...operationDocuments.map(({ folderKey }) => folderKey)];
       const operationSelection: ContentSelection = { folderKeys: operationFolders.map(({ key }) => key), documentKeys: operationDocuments.map(({ key }) => key) };
-      setSelectedFolders(operationFolders);
-      setSelectedDocuments(operationDocuments);
       const outcome = action === "move"
         ? await moveContentSelection(operationSelection, destinationKeys[0])
         : await copyContentSelection(operationSelection, destinationKeys);
       if (outcome.succeeded === 0) throw new Error(outcome.failures[0]?.message ?? `The items could not be ${action === "move" ? "moved" : "copied"}.`);
+      transferCommitted = true;
       if (action === "move") {
         replaceCachedContentFolders(queryClient, contentContext, outcome.folders);
         replaceCachedContentDocuments(queryClient, contentContext, outcome.documents);
         outcome.documents.forEach((document) => replaceCachedContentDocumentDetail(queryClient, contentContext, document));
+      } else {
+        normalizedFolders.forEach((folder) => removeCachedContentFolder(queryClient, contentContext, targetKey, folder.key));
+        normalizedDocuments.forEach((document) => removeCachedContentDocument(queryClient, contentContext, targetKey, document.key));
+        outcome.copiedFolders.forEach(({ folder }) => addCachedContentFolder(queryClient, contentContext, folder.parentFolderKey, folder));
+        outcome.documents.forEach((document) => addCachedContentDocument(queryClient, contentContext, document.folderKey, document));
+        if (transferIsCurrent()) {
+          const reconciled = queryClient.getQueryData<ContentLocation>(contentQueryKeys.location(contentContext, targetKey));
+          if (reconciled) {
+            setFolders(reconciled.folders);
+            setDocuments(reconciled.documents);
+            if (!targetKey) {
+              setRootFolders(reconciled.folders);
+              setRootDocuments(reconciled.documents);
+            }
+          }
+        }
       }
       await invalidateContentLocations(queryClient, contentContext, [...sourceFolderKeys, ...destinationKeys]);
       await invalidateContentHistories(queryClient, contentContext, [...sourceFolderKeys, ...destinationKeys, undefined]);
       const location = await getContentLocation(queryClient, contentContext, first.folder?.key);
-      setFolders(location.folders);
-      setDocuments(location.documents);
-      if (first.folder) {
-        setFolderStack(first.stack);
-        workspaceModeRef.current = "folder";
-        setWorkspaceMode("folder");
-      } else {
-        setRootFolders(location.folders);
-        setRootDocuments(location.documents);
-        setFolderStack([]);
-        workspaceModeRef.current = "folders";
-        setWorkspaceMode("folders");
+      if (transferIsCurrent()) {
+        setFolders(location.folders);
+        setDocuments(location.documents);
+        if (!first.folder) {
+          setRootFolders(location.folders);
+          setRootDocuments(location.documents);
+        }
+        setRootSearchQuery("");
+        setRootSearchResults(undefined);
+        setQuery("");
+        setResults(undefined);
+        setFolderSearchResults(undefined);
       }
-      setRootSearchQuery("");
-      setRootSearchResults(undefined);
-      setQuery("");
-      setResults(undefined);
-      setFolderSearchResults(undefined);
-      const failedFolderKeys = new Set(outcome.failures.filter(({ kind }) => kind === "folder").map(({ key }) => key));
-      const failedDocumentKeys = new Set(outcome.failures.filter(({ kind }) => kind === "document").map(({ key }) => key));
-      setSelectedFolders(operationFolders.filter(({ key }) => failedFolderKeys.has(key)));
-      setSelectedDocuments(operationDocuments.filter(({ key }) => failedDocumentKeys.has(key)));
-      setDestinationChoices([]);
-      closeSheet(outcome.failed > 0);
       const resourceNames = new Map<string, string>([...operationFolders, ...operationDocuments].map((item) => [item.key, item.name]));
       const destinationNames = new Map(choices.map((choice) => [choice.folder?.key, choice.folder?.name ?? "Archive"]));
       const copyFailureDetails = action === "copy" && outcome.failed
         ? [...new Set(outcome.failures.map((failure) => `${resourceNames.get(failure.key) ?? failure.key} to ${destinationNames.get(failure.destinationFolderKey) ?? "Archive"}`))].join(", ")
         : undefined;
-      showToast({
+      if (transferIsCurrent()) showToast({
         title: `${outcome.succeeded} ${outcome.succeeded === 1 ? "item" : "items"} ${action === "move" ? "moved" : "copied"}`,
-        ...(outcome.failed ? { description: `${outcome.failed} of ${outcome.requested} operations failed${copyFailureDetails ? `: ${copyFailureDetails}` : ""}. Failed resources remain selected${copyFailureDetails ? "; retry each listed source and destination pair separately to avoid duplicate copies" : ""}. ${outcome.failures[0]?.message ?? "Try those items again."}` } : {}),
+        ...(outcome.failed ? { description: `${outcome.failed} of ${outcome.requested} operations failed${copyFailureDetails ? `: ${copyFailureDetails}` : ""}. ${outcome.failures[0]?.message ?? "Try those items again."}` } : {}),
       });
     } catch (cause) {
-      setSheetError(cause instanceof Error ? cause.message : `The items could not be ${action === "move" ? "moved" : "copied"}.`);
+      if (transferCommitted) {
+        if (transferIsCurrent()) showToast({ title: `${action === "move" ? "Move" : "Copy"} completed`, description: "The change completed, but Archive could not refresh yet." });
+        return;
+      }
+      locationSnapshots.forEach((location, key) => {
+        if (location) queryClient.setQueryData(contentQueryKeys.location(contentContext, key), location);
+        else queryClient.removeQueries({ queryKey: contentQueryKeys.location(contentContext, key), exact: true });
+      });
+      if (transferIsCurrent()) {
+        setFolders(previousFolders);
+        setDocuments(previousDocuments);
+        setRootFolders(previousRootFolders);
+        setRootDocuments(previousRootDocuments);
+        setFolderStack(previousFolderStack);
+        workspaceModeRef.current = previousWorkspaceMode;
+        setWorkspaceMode(previousWorkspaceMode);
+        setRootSearchQuery(previousRootSearchQuery);
+        setRootSearchResults(previousRootSearchResults);
+        setQuery(previousQuery);
+        setResults(previousResults);
+        setFolderSearchResults(previousFolderSearchResults);
+        showToast({ title: `${action === "move" ? "Move" : "Copy"} failed`, description: cause instanceof Error ? cause.message : `The items could not be ${action === "move" ? "moved" : "copied"}.` });
+      }
     } finally {
       setBulkLoading(false);
     }
@@ -2728,8 +2957,8 @@ export function KnowledgeWorkspace() {
       {close(bulkLoading)}
     </>;
     if (activeSheet === "destinationBrowser") return <>
-      <Button disabled={destinationLoading || destinationAction !== "upload" && destinationChoices.length === 0 || bulkLoading} loading={destinationLoading || bulkLoading} onPress={() => { if (destinationAction === "upload") goBackSheet(); else void selectDestination(); }} size="lg" variant="primary">{destinationAction === "upload" ? "Choose folder" : destinationAction === "move" ? "Move here" : `Copy to ${destinationChoices.length} ${destinationChoices.length === 1 ? "folder" : "folders"}`}</Button>
-      {close(destinationLoading || bulkLoading)}
+      <Button disabled={destinationAction !== "upload" && (destinationLoading || destinationAtSource || destinationIsSelectedFolder) || bulkLoading} onPress={() => { if (destinationAction === "upload") goBackSheet(); else void selectDestination(); }} size="lg" variant="primary">{destinationAction === "upload" ? "Choose folder" : destinationAction === "move" ? "Move here" : "Copy here"}</Button>
+      {close(bulkLoading)}
     </>;
     if (activeSheet === "destination" && destinationAction === "upload") return <>
       <Button disabled={destinationLoading} loading={destinationLoading} onPress={() => void selectDestination()} size="lg" variant="primary">Choose files for this folder</Button>
@@ -3199,15 +3428,13 @@ export function KnowledgeWorkspace() {
         ) : null}
         {activeSheet === "destinationBrowser" ? (
           <View style={styles.destinationBrowser}>
-            {destinationAction !== "upload" ? <Button accessibilityState={{ selected: destinationChoices.some((choice) => choice.folder?.key === destinationFolder?.key) }} disabled={selectedFolders.some(({ key }) => key === destinationFolder?.key)} icon={destinationChoices.some((choice) => choice.folder?.key === destinationFolder?.key) ? <CheckIcon size="sm" /> : <ArchiveIcon size="sm" />} onPress={() => toggleDestinationChoice(destinationFolder, destinationStack)} size="sm" style={[styles.currentDestination, destinationChoices.some((choice) => choice.folder?.key === destinationFolder?.key) && styles.selectedItem]} variant="secondary">Select {destinationFolder?.name ?? "Archive"}</Button> : null}
             <ScrollView contentContainerStyle={styles.destinationFolderGrid} keyboardShouldPersistTaps="handled" style={styles.folderList}>
-              {destinationStack.length > 0 ? <View style={[styles.rootFolderCard, { width: destinationCardSize, height: destinationCardSize }]}><Button accessibilityLabel={`Back to ${destinationStack.at(-2)?.name ?? "Archive"}`} contentMode="raw" disabled={destinationLoading} onPress={() => void browseDestination(undefined, true)} size="xl" style={styles.rootFolderMain} variant="ghost"><ChevronLeftIcon size="lg" /><Text numberOfLines={1} style={styles.archiveCardLabel}>{destinationStack.at(-2)?.name ?? "Archive"}</Text></Button></View> : null}
+              {destinationStack.length > 0 ? <View style={[styles.rootFolderCard, { width: destinationCardSize, height: destinationCardSize }]}><Button accessibilityLabel={`Back to ${destinationStack.at(-2)?.name ?? "Archive"}`} contentMode="raw" onPress={() => void browseDestination(undefined, true)} size="xl" style={styles.rootFolderMain} variant="ghost"><ChevronLeftIcon size="lg" /><Text numberOfLines={1} style={styles.archiveCardLabel}>{destinationStack.at(-2)?.name ?? "Archive"}</Text></Button></View> : null}
+              {destinationLoading ? Array.from({ length: 3 }, (_, index) => <View accessibilityLabel="Loading folders" accessibilityRole="progressbar" key={index} style={[styles.rootFolderCard, styles.skeletonCard, { width: destinationCardSize, height: destinationCardSize }]} />) : null}
               {destinationFolders.filter((folder) => !selectedFolders.some(({ key }) => key === folder.key)).map((folder) => {
-                const selected = destinationChoices.some((choice) => choice.folder?.key === folder.key);
-                return <View key={folder.key} style={[styles.rootFolderCard, selected && styles.selectedItem, { width: destinationCardSize, height: destinationCardSize }]}>
+                return <View key={folder.key} style={[styles.rootFolderCard, { width: destinationCardSize, height: destinationCardSize }]}>
                   {folder.coverUrl ? <Image contentFit="cover" source={folder.coverUrl} style={styles.folderCover} /> : null}
-                  <Button accessibilityLabel={destinationAction === "upload" ? `Open ${folder.name}` : `${selected ? "Remove" : "Select"} ${folder.name}`} accessibilityState={{ selected }} contentMode="raw" disabled={destinationLoading} onPress={() => destinationAction === "upload" ? void browseDestination(folder) : toggleDestinationChoice(folder, [...destinationStack, folder])} size="xl" style={[styles.rootFolderMain, folder.coverUrl && styles.coveredFolderMain]} variant="ghost">{selected ? <CheckIcon size="lg" /> : folder.coverUrl ? null : <FolderIcon size="lg" />}<Text numberOfLines={1} style={[styles.archiveCardLabel, folder.coverUrl && styles.coveredFolderLabel]}>{folder.name}</Text></Button>
-                  {destinationAction !== "upload" ? <Button accessibilityLabel={`Browse ${folder.name}`} contentMode="raw" disabled={destinationLoading} onPress={() => void browseDestination(folder)} size="xs" style={styles.destinationBrowseButton} variant="icon"><ChevronRightIcon size="sm" /></Button> : null}
+                  <Button accessibilityLabel={`Open ${folder.name}`} contentMode="raw" onPress={() => void browseDestination(folder)} size="xl" style={[styles.rootFolderMain, folder.coverUrl && styles.coveredFolderMain]} variant="ghost">{folder.coverUrl ? null : <FolderIcon size="lg" />}<Text numberOfLines={1} style={[styles.archiveCardLabel, folder.coverUrl && styles.coveredFolderLabel]}>{folder.name}</Text></Button>
                 </View>;
               })}
               {!destinationLoading && destinationFolders.filter((folder) => !selectedFolders.some(({ key }) => key === folder.key)).length === 0 ? <Text style={styles.empty}>No nested folders here.</Text> : null}
@@ -3438,10 +3665,8 @@ const styles = StyleSheet.create({
   destinationPanel: { flex: 1, gap: 12 },
   bulkActionList: { width: "100%", gap: spacing.sm },
   destinationBrowser: { flex: 1, minHeight: 0, gap: spacing.sm },
-  currentDestination: { width: "100%", justifyContent: "flex-start" },
   destinationFolders: { gap: 8, paddingVertical: 4 },
   destinationFolderGrid: { alignContent: "flex-start", flexDirection: "row", flexWrap: "wrap", gap: 10, paddingVertical: 4 },
-  destinationBrowseButton: { position: "absolute", right: 4, top: 4, height: 44, width: 44, backgroundColor: "rgba(8, 10, 13, 0.78)" },
   uploadDestinationButton: { justifyContent: "flex-start", paddingHorizontal: 14 },
   locationPreview: { gap: 4, marginTop: 10 },
   locationRow: { flexDirection: "row", alignItems: "center", gap: 4 },
