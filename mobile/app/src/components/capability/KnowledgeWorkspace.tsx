@@ -266,7 +266,7 @@ export function KnowledgeWorkspace() {
   const [destinationStack, setDestinationStack] = useState<ContentFolder[]>([]);
   const [destinationFolders, setDestinationFolders] = useState<ContentFolder[]>([]);
   const [destinationUsesDirectSelection, setDestinationUsesDirectSelection] = useState(false);
-  const [destinationSourceFolderKey, setDestinationSourceFolderKey] = useState<string | null>();
+  const [destinationSourceFolderKeys, setDestinationSourceFolderKeys] = useState<(string | null)[]>([]);
   const [destinationBlockedFolderKeys, setDestinationBlockedFolderKeys] = useState<string[]>([]);
   const [destinationLoading, setDestinationLoading] = useState(false);
   const [selectedFolders, setSelectedFolders] = useState<ContentFolder[]>([]);
@@ -388,7 +388,7 @@ export function KnowledgeWorkspace() {
     ? uploadBatch.filter(({ status }) => status === "pending" || status === "uploading")
     : [];
   const destinationTargetKey = destinationFolder?.key ?? null;
-  const destinationAtSource = destinationSourceFolderKey !== undefined && destinationTargetKey === destinationSourceFolderKey;
+  const destinationAtSource = destinationAction !== "upload" && destinationSourceFolderKeys.includes(destinationTargetKey);
   const destinationIsSelectedFolder = destinationStack.some(({ key }) => destinationBlockedFolderKeys.includes(key));
   const showArchiveRoot = !libraryQuery.trim() || "archive".includes(libraryQuery.trim().toLowerCase());
   const narrationDuration = audioTimelineDuration(narrationManifest);
@@ -566,7 +566,7 @@ export function KnowledgeWorkspace() {
       setDestinationUsesDirectSelection(false);
       setDestinationStack([]);
       setDestinationFolders([]);
-      setDestinationSourceFolderKey(undefined);
+      setDestinationSourceFolderKeys([]);
       setDestinationBlockedFolderKeys([]);
       setDestinationLoading(false);
       setDestinationAction(undefined);
@@ -671,7 +671,7 @@ export function KnowledgeWorkspace() {
     setHydratingDocumentKeys([]);
     setDestinationStack([]);
     setDestinationFolders([]);
-    setDestinationSourceFolderKey(undefined);
+    setDestinationSourceFolderKeys([]);
     setDestinationAction(undefined);
     setDestinationLoading(false);
     setDestinationUsesDirectSelection(false);
@@ -697,7 +697,7 @@ export function KnowledgeWorkspace() {
         setHydratingDocumentKeys([]);
         setDestinationStack([]);
         setDestinationFolders([]);
-        setDestinationSourceFolderKey(undefined);
+        setDestinationSourceFolderKeys([]);
         setDestinationAction(undefined);
         setDestinationLoading(false);
         setDestinationUsesDirectSelection(false);
@@ -773,7 +773,7 @@ export function KnowledgeWorkspace() {
       setHydratingDocumentKeys([]);
       setDestinationStack([]);
       setDestinationFolders([]);
-      setDestinationSourceFolderKey(undefined);
+      setDestinationSourceFolderKeys([]);
       setDestinationAction(undefined);
       setDestinationLoading(false);
       setDestinationUsesDirectSelection(false);
@@ -2059,7 +2059,14 @@ export function KnowledgeWorkspace() {
     const sourceStack = sourceStackCandidate.every((folder, index) => folder.parentFolderKey === sourceStackCandidate[index - 1]?.key)
       ? sourceStackCandidate
       : [];
-    setDestinationSourceFolderKey(action === "upload" ? undefined : sourceFolderKey ?? null);
+    const sourceFolderKeys = action === "upload"
+      ? []
+      : directSelection?.folder
+        ? [directSelection.folder.parentFolderKey ?? null]
+        : directSelection?.document
+          ? [directSelection.document.folderKey ?? null]
+          : [...new Set([...selectedFolders.map(({ parentFolderKey }) => parentFolderKey ?? null), ...selectedDocuments.map(({ folderKey }) => folderKey ?? null), ...(selectedCount ? [] : [currentFolder?.key ?? null])])];
+    setDestinationSourceFolderKeys(sourceFolderKeys);
     setDestinationBlockedFolderKeys(action === "upload" ? [] : directSelection?.folder ? [directSelection.folder.key] : selectedFolders.map(({ key }) => key));
     setDestinationStack(sourceStack);
     setDestinationFolders([]);
