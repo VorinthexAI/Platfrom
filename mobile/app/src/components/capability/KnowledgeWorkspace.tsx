@@ -3260,18 +3260,6 @@ export function KnowledgeWorkspace() {
                   value={content}
                 />
               </View>
-              {!content && (folders.length > 0 || documents.length > 0) ? (
-                <View style={styles.locationPreview}>
-                  <Text style={styles.eyebrow}>IN THIS LOCATION</Text>
-                  {folders.slice(0, 3).map((folder) => (
-                    <View key={folder.key} style={styles.locationRow}>
-                      <Button icon={<FolderIcon size="sm" />} onPress={() => void (hasContentContext ? openFolder(folder) : selectFolder(folder))} size="sm" style={styles.locationItem} variant="ghost">{folder.name}</Button>
-                      <Button accessibilityLabel={`Manage ${folder.name}`} contentMode="raw" onPress={() => showFolderActions(folder)} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
-                    </View>
-                  ))}
-                  {documents.slice(0, 3).map((document) => <Button key={document.key} onPress={() => void openArchiveDocument(document)} size="sm" variant="ghost" icon={<FileIcon size="sm" />}>{document.name}</Button>)}
-                </View>
-              ) : null}
             </> : <>
               {currentNotePassages.map((passage, index) => <View key={passage.id} onLayout={(event) => documentPassageOffsets.current.set(passage.id, { y: event.nativeEvent.layout.y, height: event.nativeEvent.layout.height })}>
                 <HighlightedText onTextLayout={documentSearchMatchesById.has(passage.id) ? (event) => {
@@ -3597,7 +3585,6 @@ export function KnowledgeWorkspace() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: palette.page },
   header: { minHeight: 64, paddingBottom: 8, paddingHorizontal: spacing.md, justifyContent: "center", borderBottomColor: palette.hairline, borderBottomWidth: 1 },
-  eyebrow: { color: palette.silver500, fontFamily: fonts.medium, fontSize: 9, letterSpacing: tracking.micro },
   scrollView: { flex: 1 },
   scroll: { flexGrow: 1, paddingHorizontal: spacing.md, paddingTop: spacing.md },
   archiveRoot: { flexGrow: 1, gap: spacing.md },
@@ -3718,9 +3705,6 @@ const styles = StyleSheet.create({
   destinationFolderGrid: { alignContent: "flex-start", flexDirection: "row", flexWrap: "wrap", gap: 10, paddingVertical: 4 },
   invalidDestinationHelp: { alignSelf: "stretch", color: palette.muted, fontFamily: fonts.regular, fontSize: 13, lineHeight: 18, textAlign: "left" },
   uploadDestinationButton: { justifyContent: "flex-start", paddingHorizontal: 14 },
-  locationPreview: { gap: 4, marginTop: 10 },
-  locationRow: { flexDirection: "row", alignItems: "center", gap: 4 },
-  locationItem: { flex: 1, justifyContent: "flex-start" },
   match: { gap: 7, marginBottom: 10, padding: 12, borderRadius: radii.md, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panel },
   results: { gap: 8 },
   resultsHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 6 },
