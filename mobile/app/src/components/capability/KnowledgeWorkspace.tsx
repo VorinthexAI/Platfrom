@@ -339,6 +339,7 @@ export function KnowledgeWorkspace() {
   const uploadBatchRef = useRef<UploadBatchItem[]>([]);
   const documentActionGeneration = useRef(0);
   const folderActionGeneration = useRef(0);
+  const bulkMutationLocked = useRef(false);
   const folderCoverRequests = useRef(new Map<string, number>());
   const longPressedItem = useRef<string | undefined>(undefined);
   const contentContextKeyRef = useRef(contentContextKey);
@@ -2478,6 +2479,20 @@ export function KnowledgeWorkspace() {
       });
       return;
     }
+    if (bulkMutationLocked.current) return;
+    bulkMutationLocked.current = true;
+    setBulkLoading(true);
+    setSheetError(undefined);
+    let operationFolders: ContentFolder[];
+    let operationDocuments: ContentDocument[];
+    try {
+      ({ folders: operationFolders, documents: operationDocuments } = await resolveStructuralResources(selectedFoldersSnapshot, selectedDocumentsSnapshot));
+    } catch (cause) {
+      bulkMutationLocked.current = false;
+      setBulkLoading(false);
+      setSheetError(cause instanceof Error ? cause.message : "The selected items could not be prepared.");
+      return;
+    }
     const targetKey = destinationFolder?.key;
     const previousFolders = folders;
     const previousDocuments = documents;
@@ -2490,17 +2505,18 @@ export function KnowledgeWorkspace() {
     const previousQuery = query;
     const previousResults = results;
     const previousFolderSearchResults = folderSearchResults;
-    const sourceKeys = [...selectedFoldersSnapshot.map(({ parentFolderKey }) => parentFolderKey), ...selectedDocumentsSnapshot.map(({ folderKey }) => folderKey)];
+    const folderTreeSnapshot = queryClient.getQueryData<ContentFolder[]>(contentQueryKeys.folderTree(contentContext));
+    const sourceKeys = [...operationFolders.map(({ parentFolderKey }) => parentFolderKey), ...operationDocuments.map(({ folderKey }) => folderKey)];
     const locationSnapshots = new Map([...new Set([...sourceKeys, targetKey])].map((key) => [key, queryClient.getQueryData<ContentLocation>(contentQueryKeys.location(contentContext, key))]));
     const optimisticFolders = action === "move"
-      ? selectedFoldersSnapshot.map((folder): ContentFolder => ({ ...folder, parentFolderKey: targetKey }))
+      ? operationFolders.map((folder): ContentFolder => ({ ...folder, parentFolderKey: targetKey }))
       : [];
-    const optimisticDocuments = selectedDocumentsSnapshot.map((document, index): ContentDocument => action === "move"
+    const optimisticDocuments = operationDocuments.map((document, index): ContentDocument => action === "move"
       ? { ...document, folderKey: targetKey }
       : { ...document, key: `optimistic-${createContentMutationKey()}-${index}`, folderKey: targetKey, name: `${document.name} (copying)`, isFavorite: false });
     if (action === "move") {
-      selectedFoldersSnapshot.forEach((folder) => removeCachedContentFolder(queryClient, contentContext, folder.parentFolderKey, folder.key));
-      selectedDocumentsSnapshot.forEach((document) => removeCachedContentDocument(queryClient, contentContext, document.folderKey, document.key));
+      operationFolders.forEach((folder) => removeCachedContentFolder(queryClient, contentContext, folder.parentFolderKey, folder.key));
+      operationDocuments.forEach((document) => removeCachedContentDocument(queryClient, contentContext, document.folderKey, document.key));
     }
     optimisticFolders.forEach((folder) => addCachedContentFolder(queryClient, contentContext, targetKey, folder));
     optimisticDocuments.forEach((document) => addCachedContentDocument(queryClient, contentContext, targetKey, document));
@@ -2533,15 +2549,14 @@ export function KnowledgeWorkspace() {
     const transferContextKey = contentContextKey;
     const transferIsCurrent = () => transferNavigation === navigationGeneration.current && transferContextKey === contentContextKeyRef.current;
     let transferCommitted = false;
-    setBulkLoading(true);
-    setSheetError(undefined);
     try {
-      const { folders: operationFolders, documents: operationDocuments } = await resolveStructuralResources(selectedFoldersSnapshot, selectedDocumentsSnapshot);
       if (transferContextKey !== contentContextKeyRef.current) throw new Error("Archive context changed before the transfer could start.");
       locationSnapshots.forEach((location, key) => {
         if (location) queryClient.setQueryData(contentQueryKeys.location(contentContext, key), location);
         else queryClient.removeQueries({ queryKey: contentQueryKeys.location(contentContext, key), exact: true });
       });
+      if (folderTreeSnapshot) queryClient.setQueryData(contentQueryKeys.folderTree(contentContext), folderTreeSnapshot);
+      else queryClient.removeQueries({ queryKey: contentQueryKeys.folderTree(contentContext), exact: true });
       const normalizedFolders = action === "move"
         ? operationFolders.map((folder): ContentFolder => ({ ...folder, parentFolderKey: targetKey }))
         : [];
@@ -2627,6 +2642,8 @@ export function KnowledgeWorkspace() {
         if (location) queryClient.setQueryData(contentQueryKeys.location(contentContext, key), location);
         else queryClient.removeQueries({ queryKey: contentQueryKeys.location(contentContext, key), exact: true });
       });
+      if (folderTreeSnapshot) queryClient.setQueryData(contentQueryKeys.folderTree(contentContext), folderTreeSnapshot);
+      else queryClient.removeQueries({ queryKey: contentQueryKeys.folderTree(contentContext), exact: true });
       if (transferIsCurrent()) {
         setFolders(previousFolders);
         setDocuments(previousDocuments);
@@ -2643,11 +2660,14 @@ export function KnowledgeWorkspace() {
         showToast({ title: `${action === "move" ? "Move" : "Copy"} failed`, description: cause instanceof Error ? cause.message : `The items could not be ${action === "move" ? "moved" : "copied"}.` });
       }
     } finally {
+      bulkMutationLocked.current = false;
       setBulkLoading(false);
     }
   };
 
   const updateSelectionFavorite = async () => {
+    if (bulkMutationLocked.current) return;
+    bulkMutationLocked.current = true;
     const nextFavorite = !allSelectedFavorite;
     setBulkLoading(true);
     setSheetError(undefined);
@@ -2676,6 +2696,7 @@ export function KnowledgeWorkspace() {
     } catch (cause) {
       setSheetError(cause instanceof Error ? cause.message : "Favorites could not be updated.");
     } finally {
+      bulkMutationLocked.current = false;
       setBulkLoading(false);
     }
   };
@@ -2765,6 +2786,8 @@ export function KnowledgeWorkspace() {
       });
       return;
     }
+    if (bulkMutationLocked.current) return;
+    bulkMutationLocked.current = true;
     setBulkLoading(true);
     setSheetError(undefined);
     try {
@@ -2800,6 +2823,7 @@ export function KnowledgeWorkspace() {
     } catch (cause) {
       setSheetError(cause instanceof Error ? cause.message : "The selected items could not be deleted.");
     } finally {
+      bulkMutationLocked.current = false;
       setBulkLoading(false);
     }
   };
@@ -2971,7 +2995,7 @@ export function KnowledgeWorkspace() {
     if (activeSheet === "destinationBrowser") return <>
       {destinationAction !== "upload" && (destinationAtInitialLocation || destinationIsBlocked)
         ? <Text style={styles.invalidDestinationHelp}>Invalid destination. Choose another folder to {destinationAction} to.</Text>
-        : <Button onPress={() => { if (destinationAction === "upload") goBackSheet(); else void selectDestination(); }} size="lg" variant="primary">{destinationAction === "upload" ? "Choose folder" : destinationAction === "move" ? "Move here" : "Copy here"}</Button>}
+        : <Button disabled={bulkLoading} loading={bulkLoading} onPress={() => { if (destinationAction === "upload") goBackSheet(); else void selectDestination(); }} size="lg" variant="primary">{destinationAction === "upload" ? "Choose folder" : destinationAction === "move" ? "Move here" : "Copy here"}</Button>}
       {close(bulkLoading)}
     </>;
     if (activeSheet === "destination" && destinationAction === "upload") return <>
@@ -3029,10 +3053,10 @@ export function KnowledgeWorkspace() {
   ) : undefined;
   const selectedAudioVersionIndex = audioVersions.findIndex((version) => version.key === selectedAudioVersionKey);
   const selectedAudioVersion = selectedAudioVersionIndex >= 0 ? audioVersions[selectedAudioVersionIndex] : undefined;
-  const bulkToolbar = selectionActive ? <View style={styles.bulkToolbar}>
+  const bulkToolbar = selectionActive ? <Tabs style={styles.bulkToolbar}>
     <Button accessibilityLabel="Clear selection" contentMode="raw" onPress={clearSelection} size="xs" style={styles.bulkToolbarAction} variant="ghost"><CloseIcon size="sm" /><Text style={styles.bulkSelectionText}>{selectedCount} selected</Text></Button>
-    <Button accessibilityLabel="Selected item actions" contentMode="raw" disabled={selectionMetadataLoading} loading={selectionMetadataLoading} onPress={() => openSheet("bulkActions")} size="xs" style={styles.bulkToolbarIcon} variant="icon"><MoreHorizontalIcon size="sm" /></Button>
-  </View> : null;
+    <Button accessibilityLabel="Selected item actions" contentMode="raw" disabled={selectionMetadataLoading} loading={selectionMetadataLoading} onPress={() => openSheet("bulkActions")} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
+  </Tabs> : null;
 
   return (
     <KeyboardAvoidingView behavior={aiInputFocused ? "height" : undefined} style={styles.root}>
@@ -3082,7 +3106,7 @@ export function KnowledgeWorkspace() {
                 {rootSearchFolders.map((folder) => { const selected = selectedFolders.some(({ key }) => key === folder.key); return <View key={folder.key} style={[styles.rootFolderCard, selected && styles.selectedItem, { width: archiveCardSize, height: archiveCardSize }]}><Button accessibilityState={{ selected }} contentMode="raw" onLongPress={() => handleFolderLongPress(folder)} onPress={() => handleFolderPress(folder)} size="xl" style={styles.rootFolderMain} variant="ghost"><FolderIcon size="lg" /><Text numberOfLines={1} style={styles.archiveCardLabel}>{folder.name}</Text></Button></View>; })}
                 {rootSearchFolders.length === 0 ? <Text style={styles.empty}>No folders matched this search.</Text> : null}
               </View> : <View accessibilityLiveRegion="polite" style={styles.rootDocuments}>
-                {rootSearchDocuments.map((document) => { const selected = selectedDocuments.some(({ key }) => key === document.documentKey); return <Button accessibilityState={{ selected }} contentMode="raw" key={document.documentKey} onLongPress={() => handleSearchDocumentLongPress(document)} onPress={() => handleSearchDocumentPress(document)} size="sm" style={[styles.documentButton, selected && styles.selectedItem]} variant="secondary"><FileIcon size="sm" /><Text numberOfLines={1} style={styles.documentButtonLabel}>{document.name}</Text></Button>; })}
+                {rootSearchDocuments.map((document) => { const selected = selectedDocuments.some(({ key }) => key === document.documentKey); return <Button accessibilityState={{ selected }} contentMode="raw" key={document.documentKey} onLongPress={() => handleSearchDocumentLongPress(document)} onPress={() => handleSearchDocumentPress(document)} size="sm" style={[styles.documentButton, selected && styles.selectedDocumentItem]} variant={selected ? "ghost" : "secondary"}><FileIcon size="sm" /><Text numberOfLines={1} style={styles.documentButtonLabel}>{document.name}</Text></Button>; })}
                 {rootSearchDocuments.length === 0 ? <Text style={styles.empty}>No {folderContentTab === "files" ? "files" : "documents"} matched this search.</Text> : null}
               </View> : archiveLocationLoading && (folderContentTab !== "folders" || !archiveFolderTreeReady) ? folderContentTab === "folders" ? <View accessibilityLabel="Loading folders" accessibilityRole="progressbar" style={[styles.rootFolderGrid, styles.loadingGrid]}>{Array.from({ length: 3 }, (_, index) => <View key={index} style={[styles.rootFolderCard, styles.skeletonCard, { width: archiveCardSize, height: archiveCardSize }]} />)}</View> : <View accessibilityLabel={`Loading ${folderContentTab}`} accessibilityRole="progressbar" style={styles.rootDocuments}>{Array.from({ length: 3 }, (_, index) => <View key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />)}</View> : folderContentTab === "folders" ? (
                 <View style={styles.rootFolderGrid}>
@@ -3097,7 +3121,7 @@ export function KnowledgeWorkspace() {
               ) : (
                 <View style={styles.rootDocuments}>
                   {rootTabDocuments.length ? rootTabDocuments.map((document) => (
-                    <Button accessibilityState={{ selected: selectedDocuments.some(({ key }) => key === document.key) }} contentMode="raw" key={document.key} onLongPress={() => handleDocumentLongPress(document)} onPress={() => handleDocumentPress(document)} size="sm" style={[styles.documentButton, selectedDocuments.some(({ key }) => key === document.key) && styles.selectedItem]} variant="secondary">
+                    <Button accessibilityState={{ selected: selectedDocuments.some(({ key }) => key === document.key) }} contentMode="raw" key={document.key} onLongPress={() => handleDocumentLongPress(document)} onPress={() => handleDocumentPress(document)} size="sm" style={[styles.documentButton, selectedDocuments.some(({ key }) => key === document.key) && styles.selectedDocumentItem]} variant={selectedDocuments.some(({ key }) => key === document.key) ? "ghost" : "secondary"}>
                       <FileIcon size="sm" />
                       <Text numberOfLines={1} style={styles.documentButtonLabel}>{document.name}</Text>
                       <ScannedBadge document={document} />
@@ -3111,7 +3135,7 @@ export function KnowledgeWorkspace() {
         ) : workspaceMode === "folder" ? (
           <View style={styles.archiveFolder}>
             <View style={styles.folderTitleRow}>
-              <Button accessibilityLabel={selectionActive ? "Clear selection" : `Back to ${folderStack.at(-2)?.name ?? "folders"}`} contentMode="raw" onPress={() => { if (selectionActive) clearSelection(); else void goBackFolder(); }} size="xs" variant="icon">{selectionActive ? <CloseIcon size="sm" /> : <ChevronLeftIcon size="sm" />}</Button>
+              <Button accessibilityLabel={`Back to ${folderStack.at(-2)?.name ?? "folders"}`} contentMode="raw" disabled={selectionActive} onPress={() => void goBackFolder()} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button>
               <Text numberOfLines={1} style={styles.folderTitle}>{currentFolder?.name ?? "Archive"}</Text>
               <View style={styles.folderTitleActions}>
                 {currentFolder ? <Button accessibilityLabel={`Manage ${currentFolder.name}`} contentMode="raw" onPress={() => showFolderActions(currentFolder)} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button> : null}
@@ -3139,7 +3163,7 @@ export function KnowledgeWorkspace() {
                 {folderSearchFolders.length === 0 ? <Text style={styles.empty}>No folders matched this search.</Text> : null}
               </View>
             ) : <View accessibilityLiveRegion="polite" style={[styles.folderDocuments, styles.folderTabContent]}>
-              {folderSearchDocuments.map((document) => { const selected = selectedDocuments.some(({ key }) => key === document.documentKey); return <Button accessibilityState={{ selected }} contentMode="raw" key={document.documentKey} onLongPress={() => handleSearchDocumentLongPress(document)} onPress={() => handleSearchDocumentPress(document)} size="sm" style={[styles.documentButton, selected && styles.selectedItem]} variant="secondary">
+              {folderSearchDocuments.map((document) => { const selected = selectedDocuments.some(({ key }) => key === document.documentKey); return <Button accessibilityState={{ selected }} contentMode="raw" key={document.documentKey} onLongPress={() => handleSearchDocumentLongPress(document)} onPress={() => handleSearchDocumentPress(document)} size="sm" style={[styles.documentButton, selected && styles.selectedDocumentItem]} variant={selected ? "ghost" : "secondary"}>
                 <FileIcon size="sm" />
                 <Text numberOfLines={1} style={styles.documentButtonLabel}>{document.name}</Text>
               </Button>; })}
@@ -3156,7 +3180,7 @@ export function KnowledgeWorkspace() {
             ) : (
               <View style={[styles.folderDocuments, styles.folderTabContent]}>
                 {folderTabDocuments.length ? folderTabDocuments.map((document) => (
-                  <Button accessibilityState={{ selected: selectedDocuments.some(({ key }) => key === document.key) }} contentMode="raw" key={document.key} onLongPress={() => handleDocumentLongPress(document)} onPress={() => handleDocumentPress(document)} size="sm" style={[styles.documentButton, selectedDocuments.some(({ key }) => key === document.key) && styles.selectedItem]} variant="secondary">
+                  <Button accessibilityState={{ selected: selectedDocuments.some(({ key }) => key === document.key) }} contentMode="raw" key={document.key} onLongPress={() => handleDocumentLongPress(document)} onPress={() => handleDocumentPress(document)} size="sm" style={[styles.documentButton, selectedDocuments.some(({ key }) => key === document.key) && styles.selectedDocumentItem]} variant={selectedDocuments.some(({ key }) => key === document.key) ? "ghost" : "secondary"}>
                     <FileIcon size="sm" />
                     <Text numberOfLines={1} style={styles.documentButtonLabel}>{document.name}</Text>
                     <ScannedBadge document={document} />
@@ -3575,16 +3599,15 @@ const styles = StyleSheet.create({
   eyebrow: { color: palette.silver500, fontFamily: fonts.medium, fontSize: 9, letterSpacing: tracking.micro },
   scrollView: { flex: 1 },
   scroll: { flexGrow: 1, paddingHorizontal: spacing.md, paddingTop: spacing.md },
-  archiveRoot: { flexGrow: 1 },
+  archiveRoot: { flexGrow: 1, gap: spacing.md },
   archiveFolder: { flexGrow: 1, gap: spacing.md },
   editorScroll: { flex: 1, minHeight: 0 },
   editorScene: { flex: 1, minHeight: 0, width: "100%", gap: spacing.sm },
   editorHeader: { minHeight: 40, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   editorHeaderActions: { flexDirection: "row", alignItems: "center", gap: 8 },
-  rootActions: { minHeight: 52, flexDirection: "row", alignItems: "center", gap: 8, marginBottom: spacing.md },
-  bulkToolbar: { minHeight: 44, marginBottom: spacing.md, paddingHorizontal: 2, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderTopColor: palette.hairline, borderBottomColor: palette.hairline, borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth },
-  bulkToolbarAction: { minHeight: 44 },
-  bulkToolbarIcon: { height: 44, width: 44 },
+  rootActions: { minHeight: 52, flexDirection: "row", alignItems: "center", gap: 8 },
+  bulkToolbar: { minHeight: 40, padding: 5, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderWidth: 1, backgroundColor: palette.panel },
+  bulkToolbarAction: { minHeight: 28 },
   bulkSelectionText: { color: palette.silver100, fontFamily: fonts.medium, fontSize: 12 },
   rootCreateButton: { height: 44, width: 44 },
   rootSearch: { minHeight: 44, flex: 1, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 7, borderRadius: 999, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised },
@@ -3600,6 +3623,7 @@ const styles = StyleSheet.create({
   loadingGrid: { flex: 1 },
   rootFolderCard: { position: "relative", borderRadius: radii.md, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised, overflow: "hidden" },
   selectedItem: { borderColor: palette.silver50, shadowColor: palette.silver50, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.62, shadowRadius: 5, elevation: 4 },
+  selectedDocumentItem: { borderColor: palette.silver50, borderWidth: 1, backgroundColor: "transparent" },
   optimisticCard: { opacity: 0.7 },
   rootFolderMain: { height: "100%", width: "100%", flexDirection: "column", justifyContent: "center", gap: 10, paddingHorizontal: 8 },
   folderCover: StyleSheet.absoluteFill,
