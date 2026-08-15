@@ -20,6 +20,7 @@ test('deploys compatible code before destructive migrations and data changes', a
   const migration = workflow.indexOf('\n  backend-migrate:');
   const migrationJob = workflow.slice(migration, workflow.indexOf('\n  seed-db-secrets:', migration));
   expect(migrationJob).toContain('needs: [changes, backend-image, backend-secrets, document-worker-deploy]');
+  expect(migrationJob).toContain('always()');
   expect(migrationJob).toContain("needs.document-worker-deploy.result == 'success'");
   expect(migrationJob).toContain('- name: Apply graph migrations');
   expect(migrationJob).toContain('run: bun run --cwd backend db:migrate:ci');
@@ -28,6 +29,7 @@ test('deploys compatible code before destructive migrations and data changes', a
   expect(earlyJob).not.toContain('needs.backend-migrate.result');
   const workerJob = workflow.slice(workflow.indexOf('document-worker-deploy:'), workflow.indexOf('\n  # LATER REFERENCE ONLY'));
   expect(workerJob).toContain('needs: [changes, backend-image, early-deploy]');
+  expect(workerJob).toContain('always()');
   expect(workerJob).toContain('register-task-definition');
   expect(workerJob).toContain('aws ecs wait services-stable');
   expect(workerJob).toContain('"${SSM_PATH%/}/COMPUTE_ECS_TASK_DEFINITION"');

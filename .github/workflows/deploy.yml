@@ -678,7 +678,13 @@ jobs:
     name: Migrate graph database
     runs-on: ubuntu-latest
     needs: [changes, backend-image, backend-secrets, document-worker-deploy]
-    if: needs.changes.outputs.backend == 'true' && needs.document-worker-deploy.result == 'success' && (github.event.pull_request.merged == true || inputs.deploy)
+    if: >-
+      always()
+      && needs.changes.outputs.backend == 'true'
+      && needs.backend-image.result == 'success'
+      && needs.backend-secrets.result == 'success'
+      && needs.document-worker-deploy.result == 'success'
+      && (github.event.pull_request.merged == true || inputs.deploy)
     defaults:
       run:
         working-directory: backend
@@ -1210,7 +1216,12 @@ jobs:
     name: Roll warm document worker
     runs-on: ubuntu-latest
     needs: [changes, backend-image, early-deploy]
-    if: needs.changes.outputs.backend == 'true' && needs.early-deploy.result == 'success' && (github.event.pull_request.merged == true || inputs.deploy)
+    if: >-
+      always()
+      && needs.changes.outputs.backend == 'true'
+      && needs.backend-image.result == 'success'
+      && needs.early-deploy.result == 'success'
+      && (github.event.pull_request.merged == true || inputs.deploy)
     environment: production
     steps:
       - uses: actions/checkout@v4
