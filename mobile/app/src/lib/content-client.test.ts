@@ -59,6 +59,7 @@ const {
   enhanceContent,
   findContentDocumentVersion,
   generateContentDocumentAudio,
+  getContentContext,
   loadInitialContentLocation,
   listContentSearchHistory,
   listContentDocumentAudioVersions,
@@ -150,7 +151,7 @@ test("sends document and folder mutations with the authenticated Archive context
 });
 
 test("uploads documents through the authenticated Archive context", async () => {
-  await uploadContentDocument({ name: "notes.txt", type: "text/plain", size: 3, base64: "YWJj" }, "folder");
+  await uploadContentDocument({ name: "notes.txt", type: "text/plain", size: 3, base64: "YWJj" }, "folder", getContentContext(), "upload-attempt");
 
   expect(calls[0]?.body).toMatchObject({
     organizationKey: "org-authenticated",
@@ -162,8 +163,15 @@ test("uploads documents through the authenticated Archive context", async () => 
     },
   });
   expect(calls[0]?.config.timeout).toBe(5 * 60_000);
-  expect(calls[0]?.body.input.idempotencyKey).toBe("upload-upload-digest-upload-digest-folder");
-  expect(digestInputs).toEqual(["YWJj", "notes.txt\0text/plain"]);
+  expect(calls[0]?.body.input.idempotencyKey).toBe("upload-attempt");
+});
+
+test("treats repeated selections of the same file as separate uploads", async () => {
+  const file = { name: "notes.txt", type: "text/plain", size: 3, base64: "YWJj" };
+  await uploadContentDocument(file, "folder");
+  await uploadContentDocument(file, "folder");
+
+  expect(calls[0]?.body.input.idempotencyKey).not.toBe(calls[1]?.body.input.idempotencyKey);
 });
 
 test("submits ordered scan pages as one editable Archive document", async () => {
@@ -207,7 +215,6 @@ test("polls an offloaded upload using the same authenticated Archive context", a
 test("normalizes platform PDF MIME aliases and missing filename extensions", async () => {
   await uploadContentDocument({ name: "Quarterly report", type: "application/x-pdf; charset=binary", size: 8, base64: "JVBERi0=" }, "folder");
   expect(calls[0]?.body.input.file).toMatchObject({ filename: "Quarterly report.pdf", mimeType: "application/pdf" });
-  expect(digestInputs).toEqual(["JVBERi0=", "Quarterly report.pdf\0application/pdf"]);
 });
 
 test("sends exact document action payloads and returns their results", async () => {

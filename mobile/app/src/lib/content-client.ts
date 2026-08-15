@@ -351,8 +351,7 @@ export async function restoreContentDocumentVersion(documentKey: string, version
   return result.data.document;
 }
 
-export async function listContentFolderTree(signal?: AbortSignal) {
-  const contentContext = getContentContext();
+export async function listContentFolderTree(signal?: AbortSignal, contentContext = getContentContext()) {
   const folders: ContentFolder[] = [];
   let cursor: string | undefined;
   do {
@@ -362,15 +361,14 @@ export async function listContentFolderTree(signal?: AbortSignal) {
       cursor,
       limit: 100,
       sort: { field: "name", direction: "asc" },
-    }, signal);
+    }, signal, contentContext);
     folders.push(...data.folders);
     cursor = data.cursor;
   } while (cursor);
   return folders;
 }
 
-export async function listContentDocumentsAtLocation(folderKey?: string, signal?: AbortSignal) {
-  const contentContext = getContentContext();
+export async function listContentDocumentsAtLocation(folderKey?: string, signal?: AbortSignal, contentContext = getContentContext()) {
   const documents: ContentDocument[] = [];
   let cursor: string | undefined;
   do {
@@ -380,7 +378,7 @@ export async function listContentDocumentsAtLocation(folderKey?: string, signal?
       cursor,
       limit: 100,
       sort: { field: "updatedAt", direction: "desc" },
-    }, signal);
+    }, signal, contentContext);
     documents.push(...data.documents);
     cursor = data.cursor;
   } while (cursor);
@@ -573,15 +571,10 @@ export async function archiveContentFolder(folderKey: string) {
   return singleBatchRecord(outcome, outcome.folders, "The folder could not be deleted.");
 }
 
-export async function uploadContentDocument(file: { name: string; type: string; size: number; base64: string }, folderKey?: string, contentContext = getContentContext()) {
+export async function uploadContentDocument(file: { name: string; type: string; size: number; base64: string }, folderKey?: string, contentContext = getContentContext(), idempotencyKey = createContentMutationKey()) {
   if (!isContentContextConfigured(contentContext)) throw new Error("Archive is unavailable for this session.");
   const mimeType = documentMimeType(file.name, file.type);
   const filename = documentFilename(file.name, mimeType);
-  const [contentDigest, identityDigest] = await Promise.all([
-    Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, file.base64),
-    Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${filename}\0${mimeType}`),
-  ]);
-  const idempotencyKey = `upload-${contentDigest}-${identityDigest}-${folderKey ?? "root"}`;
   let data = await callContentTool<{ document: ContentDocument } | { job: { key: string; state: string } }>("document.parse", {
     scopeKey: contentContext.scopeKey,
     folderKey,

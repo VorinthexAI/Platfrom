@@ -131,7 +131,7 @@ type WorkspaceMode = "auto" | "folders" | "folder" | "editor" | "viewer";
 type FolderContentTab = "folders" | "documents" | "files";
 type ArchiveSheet = "create" | "folder" | "library" | "documents" | "folders" | "enhance" | "historyChooser" | "versions" | "audioVersions" | "documentActions" | "documentDetails" | "deleteDocument" | "scanSources" | "destination" | "destinationBrowser" | "summary" | "folderActions" | "folderDetails" | "bulkActions" | "bulkDelete";
 type DestinationAction = "upload" | "move" | "copy";
-type UploadBatchItem = { id: string; file: File; name: string; status: "pending" | "uploading" | "success" | "error"; error?: string };
+type UploadBatchItem = { id: string; mutationKey: string; file: File; name: string; status: "pending" | "uploading" | "success" | "error"; error?: string };
 type NarrationChunk = { durationMs: number; url: string };
 type PendingCreate = { name: string; content: string; folderKey?: string; mutationKey: string };
 type LocalDraft = {
@@ -2103,7 +2103,6 @@ export function KnowledgeWorkspace() {
   };
 
   const pickAndUpload = async (folderKey?: string) => {
-    const visibleFolderKey = currentFolder?.key;
     const requestContext = getContentContext();
     const requestContextKey = `${requestContext.organizationKey}:${requestContext.scopeKey}:${requestContext.agentKey}`;
     const generation = ++uploadGeneration.current;
@@ -2111,7 +2110,7 @@ export function KnowledgeWorkspace() {
     try {
       const picked = await File.pickFileAsync({ multipleFiles: true, mimeTypes: UPLOAD_MIME_TYPES });
       if (picked.canceled) return;
-      const batch = picked.result.map((file, index): UploadBatchItem => ({ id: `${file.uri}-${index}`, file, name: file.name, status: "pending" }));
+      const batch = picked.result.map((file, index): UploadBatchItem => ({ id: `${file.uri}-${index}`, mutationKey: createContentMutationKey(), file, name: file.name, status: "pending" }));
       setUploadFolderKey(folderKey);
       uploadBatchRef.current = batch;
       setUploadBatch(batch);
@@ -2123,6 +2122,7 @@ export function KnowledgeWorkspace() {
         uploadBatchRef.current = uploadBatchRef.current.map((item) => item.id === id ? { ...item, ...change } : item);
         setUploadBatch(uploadBatchRef.current);
       };
+      const uploadedDocuments = new Map<string, ContentDocument>();
       const worker = async () => {
         while (cursor < batch.length) {
           const item = batch[cursor];
@@ -2131,16 +2131,9 @@ export function KnowledgeWorkspace() {
           update(item.id, { status: "uploading" });
           try {
             if (item.file.size > MAX_MOBILE_UPLOAD_BYTES) throw new Error("Mobile uploads must be 8 MB or smaller.");
-            const { document } = await uploadContentDocument({ name: item.file.name, type: item.file.type, size: item.file.size, base64: await item.file.base64() }, folderKey, requestContext);
+            const { document } = await uploadContentDocument({ name: item.file.name, type: item.file.type, size: item.file.size, base64: await item.file.base64() }, folderKey, requestContext, item.mutationKey);
             if (generation !== uploadGeneration.current || contentContextKeyRef.current !== requestContextKey) return;
-            addCachedContentDocument(queryClient, requestContext, folderKey, document);
-            if (currentFolderKeyRef.current === folderKey) {
-              const addDocument = (current: ContentDocument[]) => [...current.filter(({ key }) => key !== document.key), document]
-                .sort((left, right) => left.name.localeCompare(right.name));
-              setDocuments(addDocument);
-              if (!folderKey) setRootDocuments(addDocument);
-            }
-            update(item.id, { status: "success" });
+            uploadedDocuments.set(item.id, document);
           } catch (cause) {
             if (generation !== uploadGeneration.current || contentContextKeyRef.current !== requestContextKey) return;
             update(item.id, { status: "error", error: cause instanceof Error ? cause.message : "Upload failed." });
@@ -2149,17 +2142,21 @@ export function KnowledgeWorkspace() {
       };
       await Promise.all(Array.from({ length: Math.min(2, batch.length) }, () => worker()));
       if (generation !== uploadGeneration.current || contentContextKeyRef.current !== requestContextKey) return;
+      const location = await refreshContentLocation(queryClient, requestContext, folderKey);
+      if (generation !== uploadGeneration.current || contentContextKeyRef.current !== requestContextKey) return;
+      const visibleKeys = new Set(location.documents.map(({ key }) => key));
+      for (const [id, document] of uploadedDocuments) {
+        update(id, visibleKeys.has(document.key) && document.folderKey === folderKey
+          ? { status: "success", error: undefined }
+          : { status: "error", error: "The uploaded file was not found in this folder." });
+      }
       const completed = uploadBatchRef.current;
       const successCount = completed.filter(({ status }) => status === "success").length;
       const failureCount = completed.filter(({ status }) => status === "error").length;
-      const location = visibleFolderKey === folderKey
-        ? await refreshContentLocation(queryClient, requestContext, visibleFolderKey)
-        : undefined;
-      if (!location) await invalidateContentLocations(queryClient, requestContext, [folderKey]);
-      if (location && currentFolderKeyRef.current === visibleFolderKey) {
+      if (currentFolderKeyRef.current === folderKey) {
         setFolders(location.folders);
         setDocuments(location.documents);
-        if (!visibleFolderKey) {
+        if (!folderKey) {
           setRootFolders(location.folders);
           setRootDocuments(location.documents);
         }
@@ -2718,10 +2715,10 @@ export function KnowledgeWorkspace() {
         removeCachedContentFoldersEverywhere(queryClient, contentContext, [directFolder.key]);
         await invalidateContentLocations(queryClient, contentContext, [parentKey]);
         await invalidateContentHistories(queryClient, contentContext, [parentKey, undefined]);
-        showToast({ title: "Folder deleted" });
+        showToast({ title: "1 item deleted" });
       }).catch((cause: unknown) => {
         if (committed) {
-          if (isCurrent()) showToast({ title: "Folder deleted" });
+          if (isCurrent()) showToast({ title: "1 item deleted" });
           return;
         }
         if (!isCurrent()) return;
@@ -2766,12 +2763,11 @@ export function KnowledgeWorkspace() {
       if (outcome.succeeded) {
         closeSheet(outcome.failed > 0);
       }
-      const foldersOnly = operationFolders.length > 0 && operationDocuments.length === 0;
       showToast({
         title: outcome.succeeded
-          ? foldersOnly ? `${outcome.succeeded === 1 ? "Folder" : `${outcome.succeeded} folders`} deleted` : `${outcome.succeeded} ${outcome.succeeded === 1 ? "item" : "items"} deleted`
+          ? `${outcome.succeeded} ${outcome.succeeded === 1 ? "item" : "items"} deleted`
           : "Items could not be deleted",
-        ...(outcome.failed ? { description: `${outcome.failed} ${outcome.failed === 1 ? "item" : "items"} failed. ${outcome.failures[0]?.message ?? "Try again."}` } : foldersOnly ? {} : { description: "Moved to Archive trash." }),
+        ...(outcome.failed ? { description: `${outcome.failed} ${outcome.failed === 1 ? "item" : "items"} failed. ${outcome.failures[0]?.message ?? "Try again."}` } : {}),
       });
     } catch (cause) {
       setSheetError(cause instanceof Error ? cause.message : "The selected items could not be deleted.");
@@ -2936,7 +2932,7 @@ export function KnowledgeWorkspace() {
       setSelectedDocument(undefined);
       void invalidateContentLocations(queryClient, contentContext, [target.folderKey]);
       void invalidateContentHistories(queryClient, contentContext, [target.folderKey, undefined]);
-      showToast({ title: target.extension ? "File deleted" : "Document deleted", description: "Moved to Archive trash." });
+      showToast({ title: "1 item deleted" });
     } catch (cause) {
       setSheetError(cause instanceof Error ? cause.message : "The item could not be deleted.");
     } finally {
