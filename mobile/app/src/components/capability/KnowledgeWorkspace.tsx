@@ -19,6 +19,7 @@ import { TextInput } from "@vorinthex/shared/ui/text-input";
 import { useToast } from "@vorinthex/shared/ui/toast";
 import { Spinner } from "@vorinthex/shared/ui/spinner";
 import { Slider } from "@vorinthex/shared/ui/slider";
+import { Switch } from "@vorinthex/shared/ui/switch";
 import {
   ArchiveIcon,
   BrainIcon,
@@ -3363,10 +3364,10 @@ export function KnowledgeWorkspace() {
         dismissible={!versionActionKey && !generatingAudioVersion && !destinationLoading && !documentActionLoading && !bulkLoading}
         footer={mutationFooter()}
         hideHeading={activeSheet === "create" || activeSheet === "documentActions" || activeSheet === "enhance" || activeSheet === "historyChooser" || activeSheet === "bulkActions" || compactDelete}
-        mutation={activeSheet === "documents" || activeSheet === "folder" || activeSheet === "folders" || activeSheet === "versions" || activeSheet === "audioVersions" || activeSheet === "documentDetails" || activeSheet === "destinationBrowser" || activeSheet === "folderDetails"}
+        mutation={activeSheet === "documents" || activeSheet === "folder" || activeSheet === "folders" || activeSheet === "versions" || activeSheet === "audioVersions" || activeSheet === "destinationBrowser" || activeSheet === "folderDetails"}
         onOpenChange={(open) => { if (!open) closeSheet(); }}
         open={sheetOpen}
-        tall={activeSheet === "library" || activeSheet === "documents" || activeSheet === "folders" || activeSheet === "scanSources" || activeSheet === "versions" || activeSheet === "audioVersions" || activeSheet === "folderDetails"}
+        tall={activeSheet === "library" || activeSheet === "documents" || activeSheet === "folders" || activeSheet === "scanSources" || activeSheet === "versions" || activeSheet === "audioVersions"}
         title={activeSheet === "enhance" ? "AI actions" : activeSheet === "historyChooser" ? "Document history" : activeSheet === "versions" ? "Document versions" : activeSheet === "audioVersions" ? "Audio versions" : activeSheet === "scanSources" ? "Scanned pages" : activeSheet === "deleteDocument" ? `Delete ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "bulkDelete" ? "Delete selected items" : activeSheet === "folder" ? "Create folder" : activeSheet === "documents" ? "Documents and files" : activeSheet === "folders" ? "Folders" : activeSheet === "destinationBrowser" ? destinationAction === "upload" ? destinationFolder?.name ?? "Archive" : destinationAction === "move" ? "Move to folder" : "Copy to folder" : activeSheet === "library" ? "Browse Archive" : activeSheet === "documentActions" ? selectedDocument?.name ?? "Document actions" : activeSheet === "documentDetails" ? `Edit ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "destination" ? destinationAction === "upload" ? "Upload files" : "Choose destination" : activeSheet === "summary" ? selectedSummary?.name ?? "Document summary" : activeSheet === "folderActions" ? selectedFolder?.name ?? "Folder actions" : activeSheet === "folderDetails" ? "Edit folder" : "New in Archive"}
       >
         {sheetError ? <Text accessibilityRole="alert" style={styles.notice}>{sheetError}</Text> : null}
@@ -3418,25 +3419,30 @@ export function KnowledgeWorkspace() {
           </>
         ) : null}
         {activeSheet === "folderDetails" && selectedFolder ? (
-          <ScrollView contentContainerStyle={styles.folderDetailsForm} showsVerticalScrollIndicator={false}>
+          <View style={styles.folderDetailsForm}>
             <TextInput accessibilityLabel="Folder name" maxLength={255} onChangeText={setFolderDetailsName} placeholder="Folder name" value={folderDetailsName} />
             <TextInput accessibilityLabel="Folder description" maxLength={2000} multiline onChangeText={setFolderDetailsDescription} placeholder="What belongs in this folder?" style={styles.folderDescriptionInput} textAlignVertical="top" value={folderDetailsDescription} />
-            <View style={styles.folderDetailsCoverPreview}>
-              {(folderDetailsCoverAsset === undefined ? selectedFolder.coverUrl : folderDetailsCoverAsset?.uri)
-                ? <Image contentFit="cover" source={folderDetailsCoverAsset === undefined ? selectedFolder.coverUrl : folderDetailsCoverAsset?.uri} style={styles.folderCover} />
-                : <FolderIcon size="lg" />}
+            <View style={styles.folderDetailsCoverControl}>
+              <Button accessibilityLabel={(folderDetailsCoverAsset === undefined ? selectedFolder.coverUrl : folderDetailsCoverAsset?.uri) ? "Change folder cover" : "Set folder cover"} contentMode="raw" onPress={() => void chooseFolderCover()} size="xl" style={styles.folderDetailsCoverButton} variant="secondary">
+                {(folderDetailsCoverAsset === undefined ? selectedFolder.coverUrl : folderDetailsCoverAsset?.uri)
+                  ? <Image contentFit="cover" source={folderDetailsCoverAsset === undefined ? selectedFolder.coverUrl : folderDetailsCoverAsset?.uri} style={styles.folderCover} />
+                  : <FolderIcon size="lg" />}
+              </Button>
+              {(folderDetailsCoverAsset === undefined ? selectedFolder.coverUrl : folderDetailsCoverAsset?.uri) ? <Button accessibilityLabel="Remove folder cover" contentMode="raw" onPress={clearFolderCover} size="xs" style={styles.folderDetailsCoverRemove} variant="secondary"><CloseIcon size="sm" /></Button> : null}
             </View>
-            <View style={styles.folderDetailsActions}>
-              <Button onPress={() => void chooseFolderCover()} size="md" style={styles.folderDetailsAction} variant="secondary">{(folderDetailsCoverAsset === undefined ? selectedFolder.coverUrl : folderDetailsCoverAsset?.uri) ? "Change cover" : "Set cover"}</Button>
-              {(folderDetailsCoverAsset === undefined ? selectedFolder.coverUrl : folderDetailsCoverAsset?.uri) ? <Button onPress={clearFolderCover} size="md" style={styles.folderDetailsAction} variant="secondary">Remove cover</Button> : null}
+            <View style={styles.favoriteSwitchRow}>
+              <Switch accessibilityLabel="Favorite folder" checked={folderDetailsFavorite} onCheckedChange={setFolderDetailsFavorite} />
+              <Text style={styles.favoriteSwitchLabel}>Favorite</Text>
             </View>
-            <Button onPress={() => setFolderDetailsFavorite((current) => !current)} size="lg" variant={folderDetailsFavorite ? "primary" : "secondary"}>{folderDetailsFavorite ? "Remove from favorites" : "Add to favorites"}</Button>
-          </ScrollView>
+          </View>
         ) : null}
         {activeSheet === "documentDetails" && selectedDocument ? (
-          <View style={styles.namingForm}>
+          <View style={styles.documentDetailsForm}>
             <TextInput accessibilityLabel={`${selectedDocument.extension ? "File" : "Document"} name`} maxLength={255} onChangeText={setDocumentDetailsName} placeholder={`${selectedDocument.extension ? "File" : "Document"} name`} value={documentDetailsName} />
-            <Button onPress={() => setDocumentDetailsFavorite((current) => !current)} size="lg" variant={documentDetailsFavorite ? "primary" : "secondary"}>{documentDetailsFavorite ? "Remove from favorites" : "Add to favorites"}</Button>
+            <View style={styles.favoriteSwitchRow}>
+              <Switch accessibilityLabel={`Favorite ${selectedDocument.extension ? "file" : "document"}`} checked={documentDetailsFavorite} onCheckedChange={setDocumentDetailsFavorite} />
+              <Text style={styles.favoriteSwitchLabel}>Favorite</Text>
+            </View>
           </View>
         ) : null}
         {activeSheet === "summary" && selectedSummary ? (
@@ -3713,10 +3719,13 @@ const styles = StyleSheet.create({
   rowSubtitle: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 12, lineHeight: 18 },
   empty: { paddingVertical: 24, color: palette.silver500, fontFamily: fonts.regular, textAlign: "center" },
   namingForm: { flex: 1, gap: 12 },
-  folderDetailsForm: { gap: 12, paddingBottom: spacing.md },
-  folderDetailsCoverPreview: { height: 180, width: "100%", alignItems: "center", justifyContent: "center", position: "relative", overflow: "hidden", borderRadius: radii.lg, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised },
-  folderDetailsActions: { flexDirection: "row", gap: spacing.sm },
-  folderDetailsAction: { flex: 1 },
+  folderDetailsForm: { gap: 12, paddingBottom: spacing.xs },
+  folderDetailsCoverControl: { width: 88, height: 88, position: "relative", alignSelf: "flex-start" },
+  folderDetailsCoverButton: { width: 88, height: 88, paddingHorizontal: 0, paddingVertical: 0, overflow: "hidden", borderRadius: radii.sm },
+  folderDetailsCoverRemove: { width: 28, height: 28, paddingHorizontal: 0, paddingVertical: 0, position: "absolute", right: -7, top: -7 },
+  documentDetailsForm: { gap: 12, paddingBottom: spacing.xs },
+  favoriteSwitchRow: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  favoriteSwitchLabel: { color: palette.muted, fontFamily: fonts.regular, fontSize: 12 },
   inputLabel: { marginLeft: 2, color: palette.silver300, fontFamily: fonts.medium, fontSize: 12, letterSpacing: 0.4 },
   folderDescriptionInput: { minHeight: 120 },
   libraryChoices: { gap: 10 },

@@ -47,6 +47,10 @@
       "react-native": "./packages/ui/components/slider/slider.mobile.tsx",
       "default": "./packages/ui/components/slider/slider.web.tsx"
     },
+    "./ui/switch": {
+      "react-native": "./packages/ui/components/switch/switch.mobile.tsx",
+      "default": "./packages/ui/components/switch/switch.web.tsx"
+    },
     "./ui/document-search": "./packages/ui/document-search.ts",
     "./ui/components": "./packages/ui/components.ts",
     "./ui/icons": "./packages/ui/icons.ts",
