@@ -1762,6 +1762,7 @@ export function KnowledgeWorkspace() {
 
   const leaveFileViewer = () => {
     navigationGeneration.current += 1;
+    documentActionGeneration.current += 1;
     stopNarration();
     previewFileRef.current?.delete();
     previewFileRef.current = undefined;
@@ -2893,8 +2894,19 @@ export function KnowledgeWorkspace() {
   const showOriginal = async () => {
     if (!selectedDocument?.extension) return;
     const target = selectedDocument;
+    const showInViewer = target.extension === "pdf";
+    if (showInViewer) {
+      previewFileRef.current?.delete();
+      previewFileRef.current = undefined;
+      setFilePreview(undefined);
+      setFilePreviewError(undefined);
+      setFilePreviewUri(undefined);
+      workspaceModeRef.current = "viewer";
+      setWorkspaceMode("viewer");
+      closeSheet();
+    }
     const generation = ++documentActionGeneration.current;
-    setDocumentActionLoading("original");
+    if (!showInViewer) setDocumentActionLoading("original");
     setSheetError(undefined);
     try {
       const [download, preview] = await Promise.all([
@@ -2902,7 +2914,6 @@ export function KnowledgeWorkspace() {
         target.extension === "pdf" ? getContentDocumentPreview(queryClient, contentContext, target.key) : Promise.resolve(undefined),
       ]);
       if (generation !== documentActionGeneration.current) return;
-      previewFileRef.current?.delete();
       const file = target.extension === "pdf"
         ? await saveTemporaryBase64File(download.fileName, download.content)
         : await openTemporaryBase64File(download.fileName, download.mimeType, download.content);
@@ -2912,15 +2923,16 @@ export function KnowledgeWorkspace() {
         setFilePreview(preview);
         setFilePreviewError(undefined);
         setFilePreviewUri(file.uri);
-        workspaceModeRef.current = "viewer";
-        setWorkspaceMode("viewer");
       }
-      setDocumentActionLoading(undefined);
-      closeSheet();
+      if (!showInViewer) closeSheet();
     } catch (cause) {
-      if (generation === documentActionGeneration.current) setSheetError(cause instanceof Error ? cause.message : "The original file could not be opened.");
+      if (generation === documentActionGeneration.current) {
+        const message = cause instanceof Error ? cause.message : "The original file could not be opened.";
+        if (showInViewer) setFilePreviewError(message);
+        else setSheetError(message);
+      }
     } finally {
-      if (generation === documentActionGeneration.current) setDocumentActionLoading(undefined);
+      if (!showInViewer && generation === documentActionGeneration.current) setDocumentActionLoading(undefined);
     }
   };
 
@@ -3403,7 +3415,10 @@ export function KnowledgeWorkspace() {
         {activeSheet === "documentActions" && selectedDocument ? (
           <>
             <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={openDocumentDetails} style={styles.sheetAction}>Edit</BottomSheetItem>
-            {selectedDocument.extension ? <BottomSheetItem disabled={Boolean(documentActionLoading)} loading={documentActionLoading === "original"} onPress={() => void showOriginal()} style={styles.sheetAction}>Show original</BottomSheetItem> : null}
+            {selectedDocument.extension ? workspaceMode === "viewer"
+              ? <BottomSheetItem onPress={() => { closeSheet(); leaveFileViewer(); }} style={styles.sheetAction}>Show text</BottomSheetItem>
+              : <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void showOriginal()} style={styles.sheetAction}>Show original</BottomSheetItem>
+              : null}
             <BottomSheetItem disabled={Boolean(documentActionLoading)} loading={documentActionLoading === "listen"} onPress={() => void listenToSelectedDocument()} style={styles.sheetAction}>Listen</BottomSheetItem>
             <BottomSheetItem disabled={Boolean(documentActionLoading)} loading={documentActionLoading === "download"} onPress={() => void downloadOriginal()} style={styles.sheetAction}>Download</BottomSheetItem>
             {selectedDocument.sourceImageCount ? <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void openScanSources()} style={styles.sheetAction}>View scanned pages</BottomSheetItem> : null}
