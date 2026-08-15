@@ -277,6 +277,8 @@ export function KnowledgeWorkspace() {
   const [temporarySingleSelection, setTemporarySingleSelection] = useState(false);
   const [folderDetailsName, setFolderDetailsName] = useState("");
   const [folderDetailsDescription, setFolderDetailsDescription] = useState("");
+  const [folderDetailsFavorite, setFolderDetailsFavorite] = useState(false);
+  const [folderDetailsCoverAsset, setFolderDetailsCoverAsset] = useState<ImagePicker.ImagePickerAsset | null>();
   const [folderName, setFolderName] = useState("");
   const [folderDescription, setFolderDescription] = useState("");
   const [saveRetry, setSaveRetry] = useState(0);
@@ -1540,12 +1542,13 @@ export function KnowledgeWorkspace() {
     if (!selectedFolder) return;
     setFolderDetailsName(selectedFolder.name);
     setFolderDetailsDescription(selectedFolder.description ?? "");
+    setFolderDetailsFavorite(Boolean(selectedFolder.isFavorite));
+    setFolderDetailsCoverAsset(undefined);
     pushSheet("folderDetails");
   };
 
   const chooseFolderCover = async () => {
     if (!selectedFolder) return;
-    const previous = selectedFolder;
     setSheetError(undefined);
     let result: ImagePicker.ImagePickerResult;
     try {
@@ -1557,50 +1560,11 @@ export function KnowledgeWorkspace() {
     if (result.canceled) return;
     const asset = result.assets[0];
     if (!asset) return;
-    const request = (folderCoverRequests.current.get(previous.key) ?? 0) + 1;
-    folderCoverRequests.current.set(previous.key, request);
-    replaceFolder({ ...previous, coverUrl: asset.uri });
-    void invalidateContentLocations(queryClient, contentContext, [previous.parentFolderKey]);
-    closeSheet();
-    if (currentFolder?.key === previous.key) void goBackFolder();
-    void (async () => {
-      const output = await normalizeCapturedJpeg(asset, { maxSide: 2400, compress: 0.88 });
-      const upload = await uploadGalleryImages([{ clientKey: `${Date.now()}-${previous.key}`, filename: `folder-cover-${Date.now()}.jpg`, uri: output.uri, sizeBytes: output.sizeBytes, processingMode: "cover" }]);
-      const job = upload.jobs[0];
-      if (!job) throw new Error("The folder cover upload could not be started.");
-      let status = job.status;
-      for (let attempt = 0; status !== "completed" && status !== "failed" && attempt < 40; attempt += 1) {
-        await wait(3_000);
-        status = (await fetchGalleryUploadStatus([job.key])).jobs[0]?.status ?? status;
-      }
-      if (status !== "completed") throw new Error("The folder cover could not be processed.");
-      if (request !== folderCoverRequests.current.get(previous.key)) return;
-      const updated = await setContentFolderCover(previous.key, job.imageKey);
-      if (request !== folderCoverRequests.current.get(previous.key)) return;
-      replaceFolder(updated, false);
-    })().catch((cause: unknown) => {
-      if (request !== folderCoverRequests.current.get(previous.key)) return;
-      replaceFolder(previous, false);
-      showToast({ title: "Folder cover update failed", description: cause instanceof Error ? cause.message : "The folder cover could not be updated." });
-    });
+    setFolderDetailsCoverAsset(asset);
   };
 
   const clearFolderCover = () => {
-    if (!selectedFolder) return;
-    const previous = selectedFolder;
-    const request = (folderCoverRequests.current.get(previous.key) ?? 0) + 1;
-    folderCoverRequests.current.set(previous.key, request);
-    replaceFolder({ ...previous, coverUrl: undefined });
-    void invalidateContentLocations(queryClient, contentContext, [previous.parentFolderKey]);
-    closeSheet();
-    void setContentFolderCover(previous.key, null).then((updated) => {
-      if (request !== folderCoverRequests.current.get(previous.key)) return;
-      replaceFolder(updated, false);
-    }).catch((cause: unknown) => {
-      if (request !== folderCoverRequests.current.get(previous.key)) return;
-      replaceFolder(previous, false);
-      showToast({ title: "Folder cover removal failed", description: cause instanceof Error ? cause.message : "The folder cover could not be cleared." });
-    });
+    setFolderDetailsCoverAsset(null);
   };
 
   const replaceFolder = (updated: ContentFolder, select = true) => {
@@ -1638,20 +1602,50 @@ export function KnowledgeWorkspace() {
     const name = folderDetailsName.trim();
     if (!selectedFolder || !name) return;
     const previous = selectedFolder;
-    const optimistic = { ...previous, name, description: folderDetailsDescription.trim() || undefined };
+    const coverChange = folderDetailsCoverAsset;
+    const optimistic = {
+      ...previous,
+      name,
+      description: folderDetailsDescription.trim() || undefined,
+      isFavorite: folderDetailsFavorite,
+      ...(coverChange !== undefined ? { coverUrl: coverChange?.uri } : {}),
+    };
+    const coverRequest = coverChange !== undefined ? (folderCoverRequests.current.get(previous.key) ?? 0) + 1 : undefined;
+    if (coverRequest !== undefined) folderCoverRequests.current.set(previous.key, coverRequest);
     replaceFolder(optimistic);
+    void invalidateContentLocations(queryClient, contentContext, [previous.parentFolderKey]);
     closeSheet();
-    const generation = ++folderActionGeneration.current;
-    try {
-      const updated = await updateContentFolder(previous.key, name, folderDetailsDescription.trim() || null);
-      if (generation !== folderActionGeneration.current) return;
-      replaceFolder(updated);
+    if (coverChange !== undefined && currentFolder?.key === previous.key) void goBackFolder();
+    void (async () => {
+      let updated = await updateContentFolder(previous.key, name, folderDetailsDescription.trim() || null);
+      if (folderDetailsFavorite !== Boolean(previous.isFavorite)) updated = await setContentFolderFavorite(previous.key, folderDetailsFavorite);
+      if (coverChange === null) updated = await setContentFolderCover(previous.key, null);
+      if (coverChange) {
+        const output = await normalizeCapturedJpeg(coverChange, { maxSide: 2400, compress: 0.88 });
+        const upload = await uploadGalleryImages([{ clientKey: `${Date.now()}-${previous.key}`, filename: `folder-cover-${Date.now()}.jpg`, uri: output.uri, sizeBytes: output.sizeBytes, processingMode: "cover" }]);
+        const job = upload.jobs[0];
+        if (!job) throw new Error("The folder cover upload could not be started.");
+        let status = job.status;
+        for (let attempt = 0; status !== "completed" && status !== "failed" && attempt < 40; attempt += 1) {
+          await wait(3_000);
+          status = (await fetchGalleryUploadStatus([job.key])).jobs[0]?.status ?? status;
+        }
+        if (status !== "completed") throw new Error("The folder cover could not be processed.");
+        if (coverRequest !== folderCoverRequests.current.get(previous.key)) return;
+        updated = await setContentFolderCover(previous.key, job.imageKey);
+      }
+      if (coverRequest !== undefined && coverRequest !== folderCoverRequests.current.get(previous.key)) return;
+      replaceFolder(updated, false);
       void invalidateContentLocations(queryClient, contentContext, [previous.parentFolderKey]);
-    } catch (cause) {
-      if (generation !== folderActionGeneration.current) return;
-      replaceFolder(previous);
+    })().catch(async (cause: unknown) => {
+      try {
+        const location = await refreshContentLocation(queryClient, contentContext, previous.parentFolderKey);
+        replaceFolder(location.folders.find(({ key }) => key === previous.key) ?? previous, false);
+      } catch {
+        replaceFolder(previous, false);
+      }
       showToast({ title: "Folder update failed", description: cause instanceof Error ? cause.message : "The folder could not be updated." });
-    }
+    });
   };
 
   const openFolder = async (folder: ContentFolder) => {
@@ -2589,25 +2583,6 @@ export function KnowledgeWorkspace() {
     }
   };
 
-  const toggleSelectedFolderFavorite = async () => {
-    if (!selectedFolder) return;
-    const previous = selectedFolder;
-    const optimistic = { ...previous, isFavorite: !previous.isFavorite };
-    replaceFolder(optimistic);
-    closeSheet();
-    const generation = ++folderActionGeneration.current;
-    try {
-      const updated = await setContentFolderFavorite(previous.key, optimistic.isFavorite);
-      if (generation !== folderActionGeneration.current) return;
-      replaceFolder(updated);
-      void invalidateContentLocations(queryClient, contentContext, [updated.parentFolderKey]);
-    } catch (cause) {
-      if (generation !== folderActionGeneration.current) return;
-      replaceFolder(previous);
-      showToast({ title: "Favorite update failed", description: cause instanceof Error ? cause.message : "The folder favorite could not be updated." });
-    }
-  };
-
   const confirmSelectedFolderDelete = () => {
     if (!selectedFolder) return;
     beginSingleSelection(selectedFolder, "folder");
@@ -2738,8 +2713,7 @@ export function KnowledgeWorkspace() {
       {close(generatingAudioVersion)}
     </>;
     if (activeSheet === "folderDetails") return <>
-      <Button disabled={!folderDetailsName.trim()} onPress={() => void submitFolderDetails()} size="lg" variant="primary">Save folder details</Button>
-      {close(false)}
+      <Button disabled={!folderDetailsName.trim()} onPress={() => void submitFolderDetails()} size="lg" variant="primary">Save</Button>
     </>;
     if (activeSheet === "rename") return <>
       <Button disabled={!renameName.trim()} onPress={() => void submitRename()} size="lg" variant="primary">Rename</Button>
@@ -3136,8 +3110,8 @@ export function KnowledgeWorkspace() {
         mutation={activeSheet === "documents" || activeSheet === "folder" || activeSheet === "folders" || activeSheet === "versions" || activeSheet === "audioVersions" || activeSheet === "rename" || activeSheet === "destinationBrowser" || activeSheet === "folderDetails" || activeSheet === "bulkDelete"}
         onOpenChange={(open) => { if (!open) closeSheet(); }}
         open={sheetOpen}
-        tall={activeSheet === "library" || activeSheet === "documents" || activeSheet === "folders" || activeSheet === "scanSources" || activeSheet === "versions" || activeSheet === "audioVersions"}
-        title={activeSheet === "enhance" ? "AI actions" : activeSheet === "historyChooser" ? "Document history" : activeSheet === "versions" ? "Document versions" : activeSheet === "audioVersions" ? "Audio versions" : activeSheet === "scanSources" ? "Scanned pages" : activeSheet === "deleteDocument" ? `Delete ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "bulkDelete" ? "Delete selected items" : activeSheet === "folder" ? "Create folder" : activeSheet === "documents" ? "Documents and files" : activeSheet === "folders" ? "Folders" : activeSheet === "destinationBrowser" ? destinationAction === "upload" ? destinationFolder?.name ?? "Archive" : destinationAction === "move" ? "Move to folder" : "Copy to folders" : activeSheet === "library" ? "Browse Archive" : activeSheet === "documentActions" ? selectedDocument?.name ?? "Document actions" : activeSheet === "destination" ? destinationAction === "upload" ? "Upload files" : "Choose destination" : activeSheet === "rename" ? selectedDocument?.extension ? "Rename file" : "Rename document" : activeSheet === "summary" ? selectedSummary?.name ?? "Document summary" : activeSheet === "folderActions" ? selectedFolder?.name ?? "Folder actions" : activeSheet === "folderDetails" ? "Folder details" : "New in Archive"}
+        tall={activeSheet === "library" || activeSheet === "documents" || activeSheet === "folders" || activeSheet === "scanSources" || activeSheet === "versions" || activeSheet === "audioVersions" || activeSheet === "folderDetails"}
+        title={activeSheet === "enhance" ? "AI actions" : activeSheet === "historyChooser" ? "Document history" : activeSheet === "versions" ? "Document versions" : activeSheet === "audioVersions" ? "Audio versions" : activeSheet === "scanSources" ? "Scanned pages" : activeSheet === "deleteDocument" ? `Delete ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "bulkDelete" ? "Delete selected items" : activeSheet === "folder" ? "Create folder" : activeSheet === "documents" ? "Documents and files" : activeSheet === "folders" ? "Folders" : activeSheet === "destinationBrowser" ? destinationAction === "upload" ? destinationFolder?.name ?? "Archive" : destinationAction === "move" ? "Move to folder" : "Copy to folders" : activeSheet === "library" ? "Browse Archive" : activeSheet === "documentActions" ? selectedDocument?.name ?? "Document actions" : activeSheet === "destination" ? destinationAction === "upload" ? "Upload files" : "Choose destination" : activeSheet === "rename" ? selectedDocument?.extension ? "Rename file" : "Rename document" : activeSheet === "summary" ? selectedSummary?.name ?? "Document summary" : activeSheet === "folderActions" ? selectedFolder?.name ?? "Folder actions" : activeSheet === "folderDetails" ? "Edit folder" : "New in Archive"}
       >
         {sheetError ? <Text accessibilityRole="alert" style={styles.notice}>{sheetError}</Text> : null}
         {activeSheet === "create" ? (
@@ -3180,20 +3154,27 @@ export function KnowledgeWorkspace() {
         ) : null}
         {activeSheet === "folderActions" && selectedFolder ? (
           <>
-            <BottomSheetItem onPress={openFolderDetails}>Edit name and description</BottomSheetItem>
-            <BottomSheetItem onPress={() => void toggleSelectedFolderFavorite()}>{selectedFolder.isFavorite ? "Unfavorite" : "Favorite"}</BottomSheetItem>
+            <BottomSheetItem onPress={openFolderDetails}>Edit</BottomSheetItem>
             <BottomSheetItem onPress={() => void openDestinationPicker("move", { folder: selectedFolder })}>Move folder</BottomSheetItem>
             <BottomSheetItem onPress={() => void openDestinationPicker("copy", { folder: selectedFolder })}>Copy folder</BottomSheetItem>
             <BottomSheetItem onPress={confirmSelectedFolderDelete}>Delete folder</BottomSheetItem>
-            <BottomSheetItem onPress={() => void chooseFolderCover()}>{selectedFolder.coverUrl ? "Change cover" : "Set cover"}</BottomSheetItem>
-            {selectedFolder.coverUrl ? <BottomSheetItem onPress={clearFolderCover}>Remove cover</BottomSheetItem> : null}
           </>
         ) : null}
         {activeSheet === "folderDetails" && selectedFolder ? (
-          <View style={styles.namingForm}>
-            <TextInput accessibilityLabel="Folder name" autoFocus maxLength={255} onChangeText={setFolderDetailsName} placeholder="Folder name" value={folderDetailsName} />
+          <ScrollView contentContainerStyle={styles.folderDetailsForm} showsVerticalScrollIndicator={false}>
+            <View style={styles.folderDetailsCoverPreview}>
+              {(folderDetailsCoverAsset === undefined ? selectedFolder.coverUrl : folderDetailsCoverAsset?.uri)
+                ? <Image contentFit="cover" source={folderDetailsCoverAsset === undefined ? selectedFolder.coverUrl : folderDetailsCoverAsset?.uri} style={styles.folderCover} />
+                : <FolderIcon size="lg" />}
+            </View>
+            <View style={styles.folderDetailsActions}>
+              <Button onPress={() => void chooseFolderCover()} size="md" style={styles.folderDetailsAction} variant="secondary">{(folderDetailsCoverAsset === undefined ? selectedFolder.coverUrl : folderDetailsCoverAsset?.uri) ? "Change cover" : "Set cover"}</Button>
+              {(folderDetailsCoverAsset === undefined ? selectedFolder.coverUrl : folderDetailsCoverAsset?.uri) ? <Button onPress={clearFolderCover} size="md" style={styles.folderDetailsAction} variant="secondary">Remove cover</Button> : null}
+            </View>
+            <TextInput accessibilityLabel="Folder name" maxLength={255} onChangeText={setFolderDetailsName} placeholder="Folder name" value={folderDetailsName} />
             <TextInput accessibilityLabel="Folder description" maxLength={2000} multiline onChangeText={setFolderDetailsDescription} placeholder="What belongs in this folder?" style={styles.folderDescriptionInput} textAlignVertical="top" value={folderDetailsDescription} />
-          </View>
+            <Button onPress={() => setFolderDetailsFavorite((current) => !current)} size="lg" variant={folderDetailsFavorite ? "primary" : "secondary"}>{folderDetailsFavorite ? "Remove from favorites" : "Add to favorites"}</Button>
+          </ScrollView>
         ) : null}
         {activeSheet === "rename" ? (
           <View style={styles.namingForm}>
@@ -3477,6 +3458,10 @@ const styles = StyleSheet.create({
   rowSubtitle: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 12, lineHeight: 18 },
   empty: { paddingVertical: 24, color: palette.silver500, fontFamily: fonts.regular, textAlign: "center" },
   namingForm: { flex: 1, gap: 12 },
+  folderDetailsForm: { gap: 12, paddingBottom: spacing.md },
+  folderDetailsCoverPreview: { height: 180, width: "100%", alignItems: "center", justifyContent: "center", position: "relative", overflow: "hidden", borderRadius: radii.lg, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised },
+  folderDetailsActions: { flexDirection: "row", gap: spacing.sm },
+  folderDetailsAction: { flex: 1 },
   inputLabel: { marginLeft: 2, color: palette.silver300, fontFamily: fonts.medium, fontSize: 12, letterSpacing: 0.4 },
   folderDescriptionInput: { minHeight: 120 },
   libraryChoices: { gap: 10 },
