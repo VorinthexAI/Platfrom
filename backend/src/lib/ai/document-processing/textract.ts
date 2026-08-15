@@ -5,7 +5,16 @@ import {
   TextractClient,
   type Block,
 } from '@aws-sdk/client-textract';
-import { DeleteObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  CreateBucketCommand,
+  DeleteObjectCommand,
+  HeadBucketCommand,
+  PutBucketEncryptionCommand,
+  PutBucketLifecycleConfigurationCommand,
+  PutPublicAccessBlockCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import { createHash } from 'node:crypto';
 import { S3_BUCKET } from '@/lib/s3';
 import type { ExtractionResult } from './schemas';
@@ -21,7 +30,8 @@ const documentTextractSecretAccessKey = process.env.CONTENT_TEXTRACT_AWS_SECRET_
 const documentTextractSessionToken = process.env.CONTENT_TEXTRACT_AWS_SESSION_TOKEN ?? process.env.BEDROCK_AWS_SESSION_TOKEN ?? process.env.AWS_SESSION_TOKEN;
 const documentTextractUsesAwsCredentials = Boolean(process.env.CONTENT_TEXTRACT_AWS_ACCESS_KEY_ID || process.env.BEDROCK_AWS_ACCESS_KEY_ID);
 const documentTextractRegion = process.env.CONTENT_TEXTRACT_REGION ?? (documentTextractUsesAwsCredentials ? undefined : process.env.AWS_ENDPOINT_URL ? process.env.AWS_REGION : undefined) ?? 'eu-west-1';
-const documentTextractEndpoint = process.env.CONTENT_TEXTRACT_ENDPOINT ?? (documentTextractUsesAwsCredentials ? undefined : process.env.AWS_ENDPOINT_URL);
+const documentTextractEndpoint = process.env.CONTENT_TEXTRACT_ENDPOINT ?? (documentTextractUsesAwsCredentials ? `https://textract.${documentTextractRegion}.amazonaws.com` : process.env.AWS_ENDPOINT_URL);
+const documentTextractStorageEndpoint = process.env.CONTENT_TEXTRACT_S3_ENDPOINT ?? (documentTextractUsesAwsCredentials ? `https://s3.${documentTextractRegion}.amazonaws.com` : process.env.AWS_ENDPOINT_URL);
 const documentTextractCredentials = documentTextractAccessKeyId ? {
   accessKeyId: documentTextractAccessKeyId,
   secretAccessKey: documentTextractSecretAccessKey ?? '',
@@ -36,12 +46,13 @@ const textract = new TextractClient({
 
 const textractStorage = new S3Client({
   region: documentTextractRegion,
-  endpoint: documentTextractEndpoint,
-  forcePathStyle: Boolean(documentTextractEndpoint),
+  endpoint: documentTextractStorageEndpoint,
+  forcePathStyle: !documentTextractUsesAwsCredentials && Boolean(documentTextractStorageEndpoint),
   credentials: documentTextractCredentials,
 });
 
 const documentTextractBucket = process.env.CONTENT_TEXTRACT_BUCKET;
+let developmentBucketReady: Promise<void> | undefined;
 
 interface DocumentOcrOptions {
   textractClient?: Pick<TextractClient, 'send'>;
@@ -52,6 +63,57 @@ interface DocumentOcrOptions {
 
 function stagedDocumentKey(storageKey: string) {
   return `textract/${createHash('sha256').update(storageKey).digest('hex')}.pdf`;
+}
+
+async function ensureDevelopmentBucket() {
+  if (!documentTextractBucket || process.env.NODE_ENV !== 'development' || !documentTextractUsesAwsCredentials) return;
+  developmentBucketReady ??= (async () => {
+    let exists = true;
+    try {
+      await textractStorage.send(new HeadBucketCommand({ Bucket: documentTextractBucket }));
+    } catch (error) {
+      const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
+      if (status !== 404 && (error as { name?: string }).name !== 'NotFound') throw error;
+      exists = false;
+    }
+    if (!exists) {
+      try {
+        await textractStorage.send(new CreateBucketCommand({
+          Bucket: documentTextractBucket,
+          CreateBucketConfiguration: { LocationConstraint: 'eu-west-1' },
+        }));
+      } catch (error) {
+        if ((error as { name?: string }).name !== 'BucketAlreadyOwnedByYou') throw error;
+      }
+    }
+    const configure = async (send: () => Promise<unknown>) => {
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          await send();
+          return;
+        } catch (error) {
+          if ((error as { name?: string }).name !== 'OperationAborted' || attempt >= 4) throw error;
+          await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** attempt));
+        }
+      }
+    };
+    await configure(() => textractStorage.send(new PutPublicAccessBlockCommand({
+      Bucket: documentTextractBucket,
+      PublicAccessBlockConfiguration: { BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true },
+    })));
+    await configure(() => textractStorage.send(new PutBucketEncryptionCommand({
+      Bucket: documentTextractBucket,
+      ServerSideEncryptionConfiguration: { Rules: [{ ApplyServerSideEncryptionByDefault: { SSEAlgorithm: 'AES256' } }] },
+    })));
+    await configure(() => textractStorage.send(new PutBucketLifecycleConfigurationCommand({
+      Bucket: documentTextractBucket,
+      LifecycleConfiguration: { Rules: [{ ID: 'expire-textract-inputs', Status: 'Enabled', Filter: { Prefix: 'textract/' }, Expiration: { Days: 1 }, AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 } }] },
+    })));
+  })().catch((error) => {
+    developmentBucketReady = undefined;
+    throw error;
+  });
+  await developmentBucketReady;
 }
 
 const imageTextractAccessKeyId = process.env.CONTENT_SCAN_TEXTRACT_AWS_ACCESS_KEY_ID ?? process.env.BEDROCK_AWS_ACCESS_KEY_ID ?? process.env.AWS_ACCESS_KEY_ID;
@@ -198,6 +260,7 @@ export function createAwsTextractDocumentOcr(options: DocumentOcrOptions = {}): 
     try {
       if (stagingBucket) {
         if (!bytes?.byteLength) throw new Error('PDF bytes are required for cross-region Textract staging.');
+        if (storageClient === textractStorage) await ensureDevelopmentBucket();
         await storageClient.send(new PutObjectCommand({ Bucket: bucket, Key: objectKey, Body: bytes, ContentType: 'application/pdf' }), { abortSignal: controller.signal });
       }
       const started = await textractClient.send(new StartDocumentAnalysisCommand({
