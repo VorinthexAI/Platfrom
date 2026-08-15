@@ -1562,9 +1562,10 @@ export function KnowledgeWorkspace() {
     replaceFolder({ ...previous, coverUrl: asset.uri });
     void invalidateContentLocations(queryClient, contentContext, [previous.parentFolderKey]);
     closeSheet();
+    if (currentFolder?.key === previous.key) void goBackFolder();
     void (async () => {
       const output = await normalizeCapturedJpeg(asset, { maxSide: 2400, compress: 0.88 });
-      const upload = await uploadGalleryImages([{ clientKey: `${Date.now()}-${previous.key}`, filename: `folder-cover-${Date.now()}.jpg`, uri: output.uri, sizeBytes: output.sizeBytes }]);
+      const upload = await uploadGalleryImages([{ clientKey: `${Date.now()}-${previous.key}`, filename: `folder-cover-${Date.now()}.jpg`, uri: output.uri, sizeBytes: output.sizeBytes, processingMode: "cover" }]);
       const job = upload.jobs[0];
       if (!job) throw new Error("The folder cover upload could not be started.");
       let status = job.status;

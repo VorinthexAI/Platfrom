@@ -9,12 +9,12 @@ import { imageSchema } from '@/lib/db/images.node';
 import { visualIdentitySchema } from '@/lib/db/visual-identities.node';
 import { imageIdentitySchema } from '@/lib/db/image-identities.node';
 import type { getUserOrganizationByOrganizationAndUser } from '@/lib/db/user-organization.node';
-import { processImage } from '@/lib/ai/image-processing';
+import { ImageProcessingError, processImage } from '@/lib/ai/image-processing';
 import { imageCaptionTool } from '@/lib/ai/tools/image-caption';
 import { imageSearchInputSchema, imageSearchTool } from '@/lib/ai/tools/image-search';
 import { imageCreateVisualIdentityTool } from '@/lib/ai/tools/image-create-visual-identity';
 import { documentStorage } from '@/lib/ai/document-processing/storage';
-import { currentEmbeddingSchema, embedText } from '@/lib/embeddings';
+import { EMBEDDING_DIMENSIONS, currentEmbeddingSchema, embedText } from '@/lib/embeddings';
 import { newId } from '@/lib/ids';
 import { getDefaultGalleryRepository } from './repository';
 import { createPublicS3Client, s3, S3_BUCKET } from '@/lib/s3';
@@ -23,7 +23,7 @@ import { signedImageUrl } from './image-url';
 
 const overviewSchema = strictObject({ collectionKey: z.string().cuid().optional() });
 const collectionCreateSchema = strictObject({ name: z.string().trim().min(1).max(120), description: z.string().trim().min(1).max(1_000).optional() });
-const uploadFileSchema = strictObject({ clientKey: z.string().min(1).max(120), filename: z.string().trim().regex(/^[^/\\]+\.jpe?g$/i), sizeBytes: z.number().int().positive().max(20 * 1024 * 1024) });
+const uploadFileSchema = strictObject({ clientKey: z.string().min(1).max(120), filename: z.string().trim().regex(/^[^/\\]+\.jpe?g$/i), sizeBytes: z.number().int().positive().max(20 * 1024 * 1024), processingMode: z.enum(['library', 'cover']).default('library') });
 const presignSchema = strictObject({ collectionKey: z.string().cuid().nullable().optional(), files: z.array(uploadFileSchema).min(1).max(20) });
 const completeSchema = strictObject({ uploadKeys: z.array(z.string().cuid()).min(1).max(20) });
 const searchSchema = imageSearchInputSchema;
@@ -118,18 +118,23 @@ async function processReservedUpload(upload: GalleryUpload) {
     await repository.updateUpload(upload.key, { status: 'processing', updatedAt: new Date().toISOString() });
     const stored = await documentStorage.download(upload.storageKey);
     if (stored.bytes.byteLength !== upload.sizeBytes) throw new Error('Uploaded image size changed.');
-    const sourceUrl = await imageUrl(upload.storageKey);
+    const sourceUrl = upload.processingMode === 'library' ? await imageUrl(upload.storageKey) : undefined;
     const image = await processImage({ scopeKey: upload.scopeKey, ownerKey: upload.actorKey, file: { filename: upload.filename, mimeType: upload.mimeType, sizeBytes: upload.sizeBytes, bytes: stored.bytes } }, {
       createKey: () => upload.imageKey,
-      caption: async () => (await imageCaptionTool.execute({ imageUrls: [sourceUrl] }, { organizationKey: upload.organizationKey })).captions[0]!,
+      caption: upload.processingMode === 'cover'
+        ? async () => 'Folder cover image.'
+        : async () => (await imageCaptionTool.execute({ imageUrls: [sourceUrl!] }, { organizationKey: upload.organizationKey })).captions[0]!,
+      ...(upload.processingMode === 'cover' ? { embed: async () => Array(EMBEDDING_DIMENSIONS).fill(0) } : {}),
     });
     // Subject reads reconcile again, so a transient classification failure does not fail an otherwise valid upload.
     await classifyImageSubjects(image).catch(() => undefined);
     if (upload.collectionKey) await repository.addImageToCollection(collectionImageSchema.parse({ key: newId(), scopeKey: upload.scopeKey, collectionKey: upload.collectionKey, imageKey: image.key, addedByKey: upload.actorKey, createdAt: new Date().toISOString() }));
     await documentStorage.delete(upload.storageKey).catch(() => undefined);
     await repository.updateUpload(upload.key, { status: 'completed', updatedAt: new Date().toISOString(), errorCode: null });
-  } catch {
-    await repository.updateUpload(upload.key, { status: 'failed', errorCode: 'IMAGE_PROCESSING_FAILED', updatedAt: new Date().toISOString() }).catch(() => undefined);
+  } catch (error) {
+    const errorCode = error instanceof ImageProcessingError ? error.code : 'IMAGE_PROCESSING_FAILED';
+    console.error('gallery upload processing failed', { uploadKey: upload.key, imageKey: upload.imageKey, errorCode, error });
+    await repository.updateUpload(upload.key, { status: 'failed', errorCode, updatedAt: new Date().toISOString() }).catch(() => undefined);
   }
 }
 
@@ -161,7 +166,7 @@ async function reserveUploads(rawInput: unknown, context: GalleryOperationContex
     const uploads = await Promise.all(input.files.map(async (file) => {
       const key = newId(), imageKey = newId();
       const storageKey = `pending/gallery/${input.scopeKey}/${key}/original.jpg`;
-      const record = galleryUploadSchema.parse({ key, organizationKey: input.organizationKey, scopeKey: input.scopeKey, actorKey: membership.key, imageKey, collectionKey: input.collectionKey ?? null, filename: file.filename.replace(/\.jpeg$/i, '.jpg'), mimeType: 'image/jpeg', sizeBytes: file.sizeBytes, storageKey, status: 'reserved', errorCode: null, createdAt: now.toISOString(), updatedAt: now.toISOString(), expiresAt: new Date(now.getTime() + 15 * 60_000).toISOString() });
+      const record = galleryUploadSchema.parse({ key, organizationKey: input.organizationKey, scopeKey: input.scopeKey, actorKey: membership.key, imageKey, collectionKey: input.collectionKey ?? null, filename: file.filename.replace(/\.jpeg$/i, '.jpg'), mimeType: 'image/jpeg', sizeBytes: file.sizeBytes, storageKey, processingMode: file.processingMode, status: 'reserved', errorCode: null, createdAt: now.toISOString(), updatedAt: now.toISOString(), expiresAt: new Date(now.getTime() + 15 * 60_000).toISOString() });
       await repository.insertUpload(record);
       const url = await signUrl(publicS3, new PutObjectCommand({ Bucket: S3_BUCKET, Key: storageKey, ContentType: 'image/jpeg' }), { expiresIn: 10 * 60 });
       return { clientKey: file.clientKey, uploadKey: key, imageKey, url, headers: { 'Content-Type': 'image/jpeg' } };

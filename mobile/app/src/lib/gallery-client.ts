@@ -119,6 +119,7 @@ export type PreparedGalleryUpload = {
   filename: string;
   uri: string;
   sizeBytes: number;
+  processingMode?: "library" | "cover";
 };
 
 export async function uploadGalleryImages(files: PreparedGalleryUpload[], collectionKey?: string) {
@@ -126,7 +127,7 @@ export async function uploadGalleryImages(files: PreparedGalleryUpload[], collec
     uploads: { clientKey: string; uploadKey: string; imageKey: string; url: string; headers: Record<string, string> }[];
   }>("/gallery/uploads/presign", {
     collectionKey: collectionKey ?? null,
-    files: files.map(({ clientKey, filename, sizeBytes }) => ({ clientKey, filename, sizeBytes })),
+    files: files.map(({ clientKey, filename, sizeBytes, processingMode }) => ({ clientKey, filename, sizeBytes, ...(processingMode ? { processingMode } : {}) })),
   });
 
   for (let index = 0; index < reservation.uploads.length; index += 3) {
