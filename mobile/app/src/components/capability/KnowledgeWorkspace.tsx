@@ -128,7 +128,7 @@ import { useAuthStore } from "@/state/auth";
 type SaveState = "local" | "dirty" | "saving" | "saved" | "error";
 type WorkspaceMode = "auto" | "folders" | "folder" | "editor" | "viewer";
 type FolderContentTab = "folders" | "documents" | "files";
-type ArchiveSheet = "create" | "folder" | "library" | "documents" | "folders" | "enhance" | "historyChooser" | "versions" | "audioVersions" | "documentActions" | "deleteDocument" | "scanSources" | "destination" | "destinationBrowser" | "rename" | "summary" | "folderActions" | "folderDetails" | "bulkActions" | "bulkDelete";
+type ArchiveSheet = "create" | "folder" | "library" | "documents" | "folders" | "enhance" | "historyChooser" | "versions" | "audioVersions" | "documentActions" | "documentDetails" | "deleteDocument" | "scanSources" | "destination" | "destinationBrowser" | "summary" | "folderActions" | "folderDetails" | "bulkActions" | "bulkDelete";
 type DestinationAction = "upload" | "move" | "copy";
 type UploadBatchItem = { id: string; file: File; name: string; status: "pending" | "uploading" | "success" | "error"; error?: string };
 type NarrationChunk = { durationMs: number; url: string };
@@ -265,7 +265,8 @@ export function KnowledgeWorkspace() {
   const [documentActionLoading, setDocumentActionLoading] = useState<string>();
   const [sourceImages, setSourceImages] = useState<ContentDocumentSourceImage[]>([]);
   const [sourceImagesLoading, setSourceImagesLoading] = useState(false);
-  const [renameName, setRenameName] = useState("");
+  const [documentDetailsName, setDocumentDetailsName] = useState("");
+  const [documentDetailsFavorite, setDocumentDetailsFavorite] = useState(false);
   const [destinationAction, setDestinationAction] = useState<DestinationAction>();
   const [destinationStack, setDestinationStack] = useState<ContentFolder[]>([]);
   const [destinationFolders, setDestinationFolders] = useState<ContentFolder[]>([]);
@@ -355,7 +356,7 @@ export function KnowledgeWorkspace() {
   const contentSelection: ContentSelection = { folderKeys: selectedFolders.map(({ key }) => key), documentKeys: selectedDocuments.map(({ key }) => key) };
   const selectedCount = selectedFolders.length + selectedDocuments.length;
   const selectionActive = selectedCount > 0;
-  const compactBulkDelete = activeSheet === "bulkDelete";
+  const compactDelete = activeSheet === "bulkDelete" || activeSheet === "deleteDocument";
   const allSelectedFavorite = selectionActive && [...selectedFolders, ...selectedDocuments].every((item) => Boolean(item.isFavorite));
   const selectionMetadataLoading = hydratingFolderKeys.length > 0 || hydratingDocumentKeys.length > 0;
   const activeDocument = documentKeyRef.current
@@ -579,7 +580,7 @@ export function KnowledgeWorkspace() {
     }
     if (!preserveSelection && temporarySingleSelection) clearSelection();
     setTemporarySingleSelection(false);
-    if (activeSheetRef.current === "documentActions" || activeSheetRef.current === "rename") documentActionGeneration.current += 1;
+    if (activeSheetRef.current === "documentActions" || activeSheetRef.current === "documentDetails") documentActionGeneration.current += 1;
     if (activeSheetRef.current === "folderActions" || activeSheetRef.current === "folderDetails") folderActionGeneration.current += 1;
     if (activeSheetRef.current === "summary") {
       summaryRequest.current?.abort();
@@ -863,6 +864,13 @@ export function KnowledgeWorkspace() {
           const pending = pendingCreate.current;
           const created = await createContentDocument(pending.name, pending.content, pending.folderKey, pending.mutationKey);
           if (session !== editorSession.current) return;
+          addCachedContentDocument(queryClient, contentContext, pending.folderKey, created);
+          if (currentFolderKeyRef.current === pending.folderKey) {
+            const addDocument = (current: ContentDocument[]) => [created, ...current.filter(({ key }) => key !== created.key)];
+            setDocuments(addDocument);
+            if (!pending.folderKey) setRootDocuments(addDocument);
+          }
+          void invalidateContentLocations(queryClient, contentContext, [pending.folderKey]);
           pendingCreate.current = undefined;
           activeKey = created.key;
           activeUpdatedAt = created.updatedAt;
@@ -2187,6 +2195,7 @@ export function KnowledgeWorkspace() {
               setDocuments(addDocument);
               if (!folderKey) setRootDocuments(addDocument);
             }
+            void invalidateContentLocations(queryClient, requestContext, [folderKey]);
             update(item.id, { status: "success" });
           } catch (cause) {
             if (generation !== uploadGeneration.current || contentContextKeyRef.current !== requestContextKey) return;
@@ -2828,24 +2837,59 @@ export function KnowledgeWorkspace() {
     }
   };
 
-  const toggleFavorite = async () => {
+  const openDocumentDetails = () => {
     if (!selectedDocument) return;
+    setDocumentDetailsName(selectedDocument.name);
+    setDocumentDetailsFavorite(Boolean(selectedDocument.isFavorite));
+    pushSheet("documentDetails");
+  };
+
+  const submitDocumentDetails = async () => {
+    const name = documentDetailsName.trim();
+    if (!selectedDocument || !name) return;
     const previous = selectedDocument;
-    const optimistic = { ...previous, isFavorite: !previous.isFavorite };
+    const optimistic = { ...previous, name, isFavorite: documentDetailsFavorite };
+    const editorTitleAtStart = titleRef.current;
     replaceDocument(optimistic);
+    if (previous.key === documentKeyRef.current && titleRef.current === editorTitleAtStart) {
+      titleRef.current = name;
+      savedTitleRef.current = name;
+      setTitle(name);
+    }
     closeSheet();
     const generation = ++documentActionGeneration.current;
     try {
-      const updated = await trackActiveDocumentMutation(previous.key, setContentDocumentFavorite(previous.key, optimistic.isFavorite), (result) => {
+      const operation = (async () => {
+        let updated = previous;
+        if (name !== previous.name) updated = await renameContentDocument(previous.key, name);
+        if (documentDetailsFavorite !== Boolean(previous.isFavorite)) updated = await setContentDocumentFavorite(previous.key, documentDetailsFavorite);
+        return updated;
+      })();
+      const updated = await trackActiveDocumentMutation(previous.key, operation, (result) => {
         if (result.key === documentKeyRef.current) updatedAtRef.current = result.updatedAt;
       });
       if (generation !== documentActionGeneration.current) return;
       replaceDocument(updated);
+      if (updated.key === documentKeyRef.current && titleRef.current === name) {
+        titleRef.current = updated.name;
+        savedTitleRef.current = updated.name;
+        setTitle(updated.name);
+      }
       void invalidateContentLocations(queryClient, contentContext, [updated.folderKey]);
     } catch (cause) {
       if (generation !== documentActionGeneration.current) return;
-      replaceDocument(previous);
-      showToast({ title: "Favorite update failed", description: cause instanceof Error ? cause.message : "The favorite could not be updated." });
+      let restored = previous;
+      try {
+        const location = await refreshContentLocation(queryClient, contentContext, previous.folderKey);
+        restored = location.documents.find(({ key }) => key === previous.key) ?? previous;
+      } catch {}
+      replaceDocument(restored);
+      if (restored.key === documentKeyRef.current && titleRef.current === name) {
+        titleRef.current = restored.name;
+        savedTitleRef.current = restored.name;
+        setTitle(restored.name);
+      }
+      showToast({ title: "Update failed", description: cause instanceof Error ? cause.message : "The item could not be updated." });
     }
   };
 
@@ -2922,46 +2966,6 @@ export function KnowledgeWorkspace() {
     }
   };
 
-  const submitRename = async () => {
-    const name = renameName.trim();
-    if (!selectedDocument || !name) return;
-    const previous = selectedDocument;
-    const optimistic = { ...previous, name };
-    const editorTitleAtStart = titleRef.current;
-    replaceDocument(optimistic);
-    if (previous.key === documentKeyRef.current && titleRef.current === editorTitleAtStart) {
-      titleRef.current = name;
-      savedTitleRef.current = name;
-      setTitle(name);
-    }
-    closeSheet();
-    const generation = ++documentActionGeneration.current;
-    try {
-      const updated = await trackActiveDocumentMutation(previous.key, renameContentDocument(previous.key, name), (result) => {
-        if (result.key === documentKeyRef.current) updatedAtRef.current = result.updatedAt;
-      });
-      if (generation !== documentActionGeneration.current) return;
-      replaceDocument(updated);
-      if (updated.key === documentKeyRef.current) {
-        if (titleRef.current === name) {
-          titleRef.current = updated.name;
-          savedTitleRef.current = updated.name;
-          setTitle(updated.name);
-        }
-      }
-      void invalidateContentLocations(queryClient, contentContext, [updated.folderKey]);
-    } catch (cause) {
-      if (generation !== documentActionGeneration.current) return;
-      replaceDocument(previous);
-      if (previous.key === documentKeyRef.current && titleRef.current === name) {
-        titleRef.current = editorTitleAtStart;
-        savedTitleRef.current = editorTitleAtStart;
-        setTitle(editorTitleAtStart);
-      }
-      showToast({ title: "Rename failed", description: cause instanceof Error ? cause.message : "The document could not be renamed." });
-    }
-  };
-
   const finishEditing = () => {
     Keyboard.dismiss();
     setEditorFocused(false);
@@ -2981,14 +2985,10 @@ export function KnowledgeWorkspace() {
     if (activeSheet === "folderDetails") return <>
       <Button disabled={!folderDetailsName.trim()} onPress={() => void submitFolderDetails()} size="lg" variant="primary">Save</Button>
     </>;
-    if (activeSheet === "rename") return <>
-      <Button disabled={!renameName.trim()} onPress={() => void submitRename()} size="lg" variant="primary">Rename</Button>
-      {close(false)}
+    if (activeSheet === "documentDetails") return <>
+      <Button disabled={!documentDetailsName.trim()} onPress={() => void submitDocumentDetails()} size="lg" variant="primary">Save</Button>
     </>;
-    if (activeSheet === "deleteDocument") return <>
-      <Button disabled={Boolean(documentActionLoading)} loading={documentActionLoading === "delete"} onPress={() => void deleteSelectedDocument()} size="lg" variant="danger">Delete</Button>
-      {close(Boolean(documentActionLoading))}
-    </>;
+    if (activeSheet === "deleteDocument") return null;
     if (activeSheet === "bulkDelete") return null;
     if (activeSheet === "destinationBrowser") return <>
       {destinationAction !== "upload" && (destinationAtInitialLocation || destinationIsBlocked)
@@ -3359,20 +3359,20 @@ export function KnowledgeWorkspace() {
       /> : null}
 
       <BottomSheet
-        description={activeSheet === "create" ? "Choose what to add to the current folder." : activeSheet === "versions" ? "Choose a version of this document to open or download." : activeSheet === "audioVersions" ? "Generated audio has its own history, independent from document versions." : activeSheet === "summary" ? "Review the match, then open its source document." : activeSheet === "deleteDocument" ? `Delete ${selectedDocument?.extension ? "file" : "document"} from Archive? It will move to trash.` : undefined}
+        description={activeSheet === "create" ? "Choose what to add to the current folder." : activeSheet === "versions" ? "Choose a version of this document to open or download." : activeSheet === "audioVersions" ? "Generated audio has its own history, independent from document versions." : activeSheet === "summary" ? "Review the match, then open its source document." : undefined}
         dismissible={!versionActionKey && !generatingAudioVersion && !destinationLoading && !documentActionLoading && !bulkLoading}
         footer={mutationFooter()}
-        hideHeading={activeSheet === "create" || activeSheet === "documentActions" || activeSheet === "enhance" || activeSheet === "historyChooser" || activeSheet === "bulkActions" || compactBulkDelete}
-        mutation={activeSheet === "documents" || activeSheet === "folder" || activeSheet === "folders" || activeSheet === "versions" || activeSheet === "audioVersions" || activeSheet === "rename" || activeSheet === "destinationBrowser" || activeSheet === "folderDetails"}
+        hideHeading={activeSheet === "create" || activeSheet === "documentActions" || activeSheet === "enhance" || activeSheet === "historyChooser" || activeSheet === "bulkActions" || compactDelete}
+        mutation={activeSheet === "documents" || activeSheet === "folder" || activeSheet === "folders" || activeSheet === "versions" || activeSheet === "audioVersions" || activeSheet === "documentDetails" || activeSheet === "destinationBrowser" || activeSheet === "folderDetails"}
         onOpenChange={(open) => { if (!open) closeSheet(); }}
         open={sheetOpen}
         tall={activeSheet === "library" || activeSheet === "documents" || activeSheet === "folders" || activeSheet === "scanSources" || activeSheet === "versions" || activeSheet === "audioVersions" || activeSheet === "folderDetails"}
-        title={activeSheet === "enhance" ? "AI actions" : activeSheet === "historyChooser" ? "Document history" : activeSheet === "versions" ? "Document versions" : activeSheet === "audioVersions" ? "Audio versions" : activeSheet === "scanSources" ? "Scanned pages" : activeSheet === "deleteDocument" ? `Delete ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "bulkDelete" ? "Delete selected items" : activeSheet === "folder" ? "Create folder" : activeSheet === "documents" ? "Documents and files" : activeSheet === "folders" ? "Folders" : activeSheet === "destinationBrowser" ? destinationAction === "upload" ? destinationFolder?.name ?? "Archive" : destinationAction === "move" ? "Move to folder" : "Copy to folder" : activeSheet === "library" ? "Browse Archive" : activeSheet === "documentActions" ? selectedDocument?.name ?? "Document actions" : activeSheet === "destination" ? destinationAction === "upload" ? "Upload files" : "Choose destination" : activeSheet === "rename" ? selectedDocument?.extension ? "Rename file" : "Rename document" : activeSheet === "summary" ? selectedSummary?.name ?? "Document summary" : activeSheet === "folderActions" ? selectedFolder?.name ?? "Folder actions" : activeSheet === "folderDetails" ? "Edit folder" : "New in Archive"}
+        title={activeSheet === "enhance" ? "AI actions" : activeSheet === "historyChooser" ? "Document history" : activeSheet === "versions" ? "Document versions" : activeSheet === "audioVersions" ? "Audio versions" : activeSheet === "scanSources" ? "Scanned pages" : activeSheet === "deleteDocument" ? `Delete ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "bulkDelete" ? "Delete selected items" : activeSheet === "folder" ? "Create folder" : activeSheet === "documents" ? "Documents and files" : activeSheet === "folders" ? "Folders" : activeSheet === "destinationBrowser" ? destinationAction === "upload" ? destinationFolder?.name ?? "Archive" : destinationAction === "move" ? "Move to folder" : "Copy to folder" : activeSheet === "library" ? "Browse Archive" : activeSheet === "documentActions" ? selectedDocument?.name ?? "Document actions" : activeSheet === "documentDetails" ? `Edit ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "destination" ? destinationAction === "upload" ? "Upload files" : "Choose destination" : activeSheet === "summary" ? selectedSummary?.name ?? "Document summary" : activeSheet === "folderActions" ? selectedFolder?.name ?? "Folder actions" : activeSheet === "folderDetails" ? "Edit folder" : "New in Archive"}
       >
         {sheetError ? <Text accessibilityRole="alert" style={styles.notice}>{sheetError}</Text> : null}
-        {compactBulkDelete ? <View style={styles.compactSheetActions}>
-          <Button disabled={bulkLoading} loading={bulkLoading} onPress={() => void deleteContentSelection()} size="lg" variant="primary">Delete</Button>
-          <Button disabled={bulkLoading} onPress={() => closeSheet()} size="lg" variant="secondary">Close</Button>
+        {compactDelete ? <View style={styles.compactSheetActions}>
+          <Button disabled={activeSheet === "deleteDocument" ? Boolean(documentActionLoading) : bulkLoading} loading={activeSheet === "deleteDocument" ? documentActionLoading === "delete" : bulkLoading} onPress={() => void (activeSheet === "deleteDocument" ? deleteSelectedDocument() : deleteContentSelection())} size="lg" variant="primary">Delete</Button>
+          <Button disabled={activeSheet === "deleteDocument" ? Boolean(documentActionLoading) : bulkLoading} onPress={() => closeSheet()} size="lg" variant="secondary">Close</Button>
         </View> : null}
         {activeSheet === "create" ? (
           <>
@@ -3396,12 +3396,9 @@ export function KnowledgeWorkspace() {
         ) : null}
         {activeSheet === "documentActions" && selectedDocument ? (
           <>
+            <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={openDocumentDetails}>Edit</BottomSheetItem>
             <BottomSheetItem disabled={Boolean(documentActionLoading)} loading={documentActionLoading === "listen"} onPress={() => void listenToSelectedDocument()}>Listen</BottomSheetItem>
-            <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void toggleFavorite()}>{selectedDocument.isFavorite ? "Remove from favorites" : "Add to favorites"}</BottomSheetItem>
             <BottomSheetItem disabled={Boolean(documentActionLoading)} loading={documentActionLoading === "download"} onPress={() => void downloadOriginal()}>{selectedDocument.extension ? "Download original" : "Download as text"}</BottomSheetItem>
-            <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => { setRenameName(selectedDocument.name); pushSheet("rename"); }}>Rename</BottomSheetItem>
-            <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void openDestinationPicker("move", { document: selectedDocument })}>Move to folder</BottomSheetItem>
-            <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void openDestinationPicker("copy", { document: selectedDocument })}>Copy to folder</BottomSheetItem>
             {selectedDocument.sourceImageCount ? <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void openScanSources()}>View scanned pages</BottomSheetItem> : null}
             <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => pushSheet("deleteDocument")}>Delete {selectedDocument.extension ? "file" : "document"}</BottomSheetItem>
           </>
@@ -3436,10 +3433,10 @@ export function KnowledgeWorkspace() {
             <Button onPress={() => setFolderDetailsFavorite((current) => !current)} size="lg" variant={folderDetailsFavorite ? "primary" : "secondary"}>{folderDetailsFavorite ? "Remove from favorites" : "Add to favorites"}</Button>
           </ScrollView>
         ) : null}
-        {activeSheet === "rename" ? (
+        {activeSheet === "documentDetails" && selectedDocument ? (
           <View style={styles.namingForm}>
-            <Text style={styles.inputLabel}>Document name</Text>
-            <TextInput accessibilityLabel="Document name" autoFocus maxLength={255} onChangeText={setRenameName} onSubmitEditing={() => void submitRename()} placeholder="Document name" returnKeyType="done" value={renameName} />
+            <TextInput accessibilityLabel={`${selectedDocument.extension ? "File" : "Document"} name`} maxLength={255} onChangeText={setDocumentDetailsName} placeholder={`${selectedDocument.extension ? "File" : "Document"} name`} value={documentDetailsName} />
+            <Button onPress={() => setDocumentDetailsFavorite((current) => !current)} size="lg" variant={documentDetailsFavorite ? "primary" : "secondary"}>{documentDetailsFavorite ? "Remove from favorites" : "Add to favorites"}</Button>
           </View>
         ) : null}
         {activeSheet === "summary" && selectedSummary ? (
