@@ -3376,10 +3376,10 @@ export function KnowledgeWorkspace() {
         </View> : null}
         {activeSheet === "create" ? (
           <>
-            <BottomSheetItem onPress={() => { void startNewNote(); }} variant="secondary">New document</BottomSheetItem>
-            <BottomSheetItem onPress={openNewFolder} variant="secondary">New folder</BottomSheetItem>
-            <BottomSheetItem disabled={uploading} loading={uploading} onPress={() => void openDestinationPicker("upload")} variant="secondary">Upload files</BottomSheetItem>
-            <BottomSheetItem disabled={uploading || scanBusy} onPress={startDocumentScan} variant="secondary">Scan documents</BottomSheetItem>
+            <BottomSheetItem onPress={() => { void startNewNote(); }} style={styles.sheetAction} variant="secondary">New document</BottomSheetItem>
+            <BottomSheetItem onPress={openNewFolder} style={styles.sheetAction} variant="secondary">New folder</BottomSheetItem>
+            <BottomSheetItem disabled={uploading} loading={uploading} onPress={() => void openDestinationPicker("upload")} style={styles.sheetAction} variant="secondary">Upload files</BottomSheetItem>
+            <BottomSheetItem disabled={uploading || scanBusy} onPress={startDocumentScan} style={styles.sheetAction} variant="secondary">Scan documents</BottomSheetItem>
           </>
         ) : null}
         {activeSheet === "bulkActions" ? <View style={styles.bulkActionList}>
@@ -3390,17 +3390,17 @@ export function KnowledgeWorkspace() {
         </View> : null}
         {activeSheet === "historyChooser" ? (
           <View style={styles.historyChoices}>
-            <BottomSheetItem onPress={() => void openVersionHistory()}>Document versions</BottomSheetItem>
-            <BottomSheetItem onPress={() => void openAudioVersionHistory()}>Audio versions</BottomSheetItem>
+            <BottomSheetItem onPress={() => void openVersionHistory()} style={styles.sheetAction}>Document versions</BottomSheetItem>
+            <BottomSheetItem onPress={() => void openAudioVersionHistory()} style={styles.sheetAction}>Audio versions</BottomSheetItem>
           </View>
         ) : null}
         {activeSheet === "documentActions" && selectedDocument ? (
           <>
-            <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={openDocumentDetails}>Edit</BottomSheetItem>
-            <BottomSheetItem disabled={Boolean(documentActionLoading)} loading={documentActionLoading === "listen"} onPress={() => void listenToSelectedDocument()}>Listen</BottomSheetItem>
-            <BottomSheetItem disabled={Boolean(documentActionLoading)} loading={documentActionLoading === "download"} onPress={() => void downloadOriginal()}>{selectedDocument.extension ? "Download original" : "Download as text"}</BottomSheetItem>
-            {selectedDocument.sourceImageCount ? <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void openScanSources()}>View scanned pages</BottomSheetItem> : null}
-            <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => pushSheet("deleteDocument")}>Delete {selectedDocument.extension ? "file" : "document"}</BottomSheetItem>
+            <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={openDocumentDetails} style={styles.sheetAction}>Edit</BottomSheetItem>
+            <BottomSheetItem disabled={Boolean(documentActionLoading)} loading={documentActionLoading === "listen"} onPress={() => void listenToSelectedDocument()} style={styles.sheetAction}>Listen</BottomSheetItem>
+            <BottomSheetItem disabled={Boolean(documentActionLoading)} loading={documentActionLoading === "download"} onPress={() => void downloadOriginal()} style={styles.sheetAction}>Download</BottomSheetItem>
+            {selectedDocument.sourceImageCount ? <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void openScanSources()} style={styles.sheetAction}>View scanned pages</BottomSheetItem> : null}
+            <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => pushSheet("deleteDocument")} style={styles.sheetAction}>Delete {selectedDocument.extension ? "file" : "document"}</BottomSheetItem>
           </>
         ) : null}
         {activeSheet === "scanSources" ? (
@@ -3411,10 +3411,10 @@ export function KnowledgeWorkspace() {
         ) : null}
         {activeSheet === "folderActions" && selectedFolder ? (
           <>
-            <BottomSheetItem onPress={openFolderDetails}>Edit</BottomSheetItem>
-            <BottomSheetItem onPress={() => void openDestinationPicker("move", { folder: selectedFolder })}>Move folder</BottomSheetItem>
-            <BottomSheetItem onPress={() => void openDestinationPicker("copy", { folder: selectedFolder })}>Copy to folder</BottomSheetItem>
-            <BottomSheetItem onPress={confirmSelectedFolderDelete}>Delete folder</BottomSheetItem>
+            <BottomSheetItem onPress={openFolderDetails} style={styles.sheetAction}>Edit</BottomSheetItem>
+            <BottomSheetItem onPress={() => void openDestinationPicker("move", { folder: selectedFolder })} style={styles.sheetAction}>Move folder</BottomSheetItem>
+            <BottomSheetItem onPress={() => void openDestinationPicker("copy", { folder: selectedFolder })} style={styles.sheetAction}>Copy to folder</BottomSheetItem>
+            <BottomSheetItem onPress={confirmSelectedFolderDelete} style={styles.sheetAction}>Delete folder</BottomSheetItem>
           </>
         ) : null}
         {activeSheet === "folderDetails" && selectedFolder ? (
@@ -3451,7 +3451,7 @@ export function KnowledgeWorkspace() {
         ) : null}
         {activeSheet === "destination" ? (
           <View style={styles.destinationPanel}>
-            <BottomSheetItem disabled={destinationLoading} loading={destinationLoading} onPress={() => void openDestinationBrowser()}>Choose folder</BottomSheetItem>
+            <BottomSheetItem disabled={destinationLoading} loading={destinationLoading} onPress={() => void openDestinationBrowser()} style={styles.sheetAction}>Choose folder</BottomSheetItem>
           </View>
         ) : null}
         {activeSheet === "destinationBrowser" ? (
@@ -3695,6 +3695,7 @@ const styles = StyleSheet.create({
   destinationPanel: { flex: 1, gap: 12 },
   bulkActionList: { width: "100%", gap: spacing.sm },
   compactSheetActions: { width: "100%", gap: spacing.sm, padding: 2 },
+  sheetAction: { justifyContent: "center" },
   destinationBrowser: { flex: 1, minHeight: 0, gap: spacing.sm },
   destinationLocationLane: { minHeight: 40, flexDirection: "row", alignItems: "center", gap: spacing.xs },
   destinationLocationTitle: { flex: 1, color: palette.silver100, fontFamily: fonts.medium, fontSize: 14 },
