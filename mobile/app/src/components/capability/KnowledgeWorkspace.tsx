@@ -2985,9 +2985,11 @@ export function KnowledgeWorkspace() {
     </>;
     if (activeSheet === "folderDetails") return <>
       <Button disabled={!folderDetailsName.trim()} onPress={() => void submitFolderDetails()} size="lg" variant="primary">Save</Button>
+      {close(false)}
     </>;
     if (activeSheet === "documentDetails") return <>
       <Button disabled={!documentDetailsName.trim()} onPress={() => void submitDocumentDetails()} size="lg" variant="primary">Save</Button>
+      {close(false)}
     </>;
     if (activeSheet === "deleteDocument") return null;
     if (activeSheet === "bulkDelete") return null;
@@ -3423,7 +3425,7 @@ export function KnowledgeWorkspace() {
             <TextInput accessibilityLabel="Folder name" maxLength={255} onChangeText={setFolderDetailsName} placeholder="Folder name" value={folderDetailsName} />
             <TextInput accessibilityLabel="Folder description" maxLength={2000} multiline onChangeText={setFolderDetailsDescription} placeholder="What belongs in this folder?" style={styles.folderDescriptionInput} textAlignVertical="top" value={folderDetailsDescription} />
             <View style={styles.folderDetailsCoverControl}>
-              <Button accessibilityLabel={(folderDetailsCoverAsset === undefined ? selectedFolder.coverUrl : folderDetailsCoverAsset?.uri) ? "Change folder cover" : "Set folder cover"} contentMode="raw" onPress={() => void chooseFolderCover()} size="xl" style={styles.folderDetailsCoverButton} variant="secondary">
+              <Button accessibilityLabel={(folderDetailsCoverAsset === undefined ? selectedFolder.coverUrl : folderDetailsCoverAsset?.uri) ? "Change folder cover" : "Set folder cover"} contentMode="raw" onPress={() => void chooseFolderCover()} shape="rounded" size="xl" style={styles.folderDetailsCoverButton} variant="secondary">
                 {(folderDetailsCoverAsset === undefined ? selectedFolder.coverUrl : folderDetailsCoverAsset?.uri)
                   ? <Image contentFit="cover" source={folderDetailsCoverAsset === undefined ? selectedFolder.coverUrl : folderDetailsCoverAsset?.uri} style={styles.folderCover} />
                   : <FolderIcon size="lg" />}
@@ -3719,9 +3721,9 @@ const styles = StyleSheet.create({
   rowSubtitle: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 12, lineHeight: 18 },
   empty: { paddingVertical: 24, color: palette.silver500, fontFamily: fonts.regular, textAlign: "center" },
   namingForm: { flex: 1, gap: 12 },
-  folderDetailsForm: { gap: 12, paddingBottom: spacing.xs },
+  folderDetailsForm: { gap: spacing.lg, paddingBottom: spacing.xs },
   folderDetailsCoverControl: { width: 88, height: 88, position: "relative", alignSelf: "flex-start" },
-  folderDetailsCoverButton: { width: 88, height: 88, paddingHorizontal: 0, paddingVertical: 0, overflow: "hidden", borderRadius: radii.sm },
+  folderDetailsCoverButton: { width: 88, height: 88, paddingHorizontal: 0, paddingVertical: 0, overflow: "hidden" },
   folderDetailsCoverRemove: { width: 28, height: 28, paddingHorizontal: 0, paddingVertical: 0, position: "absolute", right: -7, top: -7 },
   documentDetailsForm: { gap: 12, paddingBottom: spacing.xs },
   favoriteSwitchRow: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: spacing.xs },

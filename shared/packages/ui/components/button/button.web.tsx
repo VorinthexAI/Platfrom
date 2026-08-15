@@ -12,11 +12,13 @@ export type ButtonVariant =
   | "icon";
 
 export type ButtonSize = "xs" | "sm" | "md" | "lg" | "xl";
+export type ButtonShape = "pill" | "rounded";
 
 export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   asChild?: boolean;
   icon?: ReactNode;
   loading?: boolean;
+  shape?: ButtonShape;
   size?: ButtonSize;
   variant?: ButtonVariant;
 };
@@ -29,6 +31,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
     disabled,
     icon,
     loading = false,
+    shape = "pill",
     size = "md",
     type = "button",
     variant = "secondary",
@@ -40,6 +43,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
     "vui-button",
     `vui-button-${variant}`,
     `vui-button-${size}`,
+    `vui-button-${shape}`,
     className,
   );
 

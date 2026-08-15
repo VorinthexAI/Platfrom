@@ -82,6 +82,10 @@
     transform 400ms var(--vui-ease-luxury);
 }
 
+.vui-button-rounded {
+  border-radius: var(--vui-radius-sm) !important;
+}
+
 .vui-button-xs {
   font-size: 10px;
   gap: 4px;
