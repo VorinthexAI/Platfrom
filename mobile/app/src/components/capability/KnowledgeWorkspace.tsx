@@ -147,8 +147,8 @@ type LocalDraft = {
 
 type NotePassage = DocumentPassage & { start?: number; end?: number };
 
-function notePassages(title: string, content: string): NotePassage[] {
-  const passages: NotePassage[] = [{ id: "title", text: title }];
+function notePassages(content: string): NotePassage[] {
+  const passages: NotePassage[] = [];
   for (const [index, match] of [...content.matchAll(/\S[\s\S]*?(?=\n{2,}|$)/g)].entries()) passages.push({ id: `body.${index}`, text: match[0], start: match.index, end: match.index + match[0].length });
   return passages;
 }
@@ -217,7 +217,6 @@ export function KnowledgeWorkspace() {
   const [sheetError, setSheetError] = useState<string>();
   const [editorFocused, setEditorFocused] = useState(false);
   const [editorEditing, setEditorEditing] = useState(false);
-  const [editorTitleHeight, setEditorTitleHeight] = useState(36);
   const [editorContentHeight, setEditorContentHeight] = useState(280);
   const [aiInputFocused, setAiInputFocused] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
@@ -398,7 +397,7 @@ export function KnowledgeWorkspace() {
   const folderSearchDocuments = (folderSearchResults?.documents ?? []).filter((document) => folderContentTab === "files" ? Boolean(document.extension) : !document.extension);
   const rootSearchFolders = rootSearchResults?.folders ?? [];
   const rootSearchDocuments = (rootSearchResults?.documents ?? []).filter((document) => folderContentTab === "files" ? Boolean(document.extension) : !document.extension);
-  const currentNotePassages = useMemo(() => notePassages(title, content), [content, title]);
+  const currentNotePassages = useMemo(() => notePassages(content), [content]);
   const documentSearchMatches = useMemo(() => editorEditing ? [] : searchDocumentPassagesLiteral(currentNotePassages, documentSearchQuery), [currentNotePassages, documentSearchQuery, editorEditing]);
   const documentSearchMatchesById = useMemo(() => new Map(documentSearchMatches.map((match) => [match.id, match])), [documentSearchMatches]);
   const documentSearchTargetId = documentSearchMatches[0]?.id;
@@ -1244,7 +1243,6 @@ export function KnowledgeWorkspace() {
     contentRef.current = "";
     savedTitleRef.current = nextTitle;
     savedContentRef.current = "";
-    setEditorTitleHeight(58);
     setEditorContentHeight(280);
     setTitle(nextTitle);
     setContent("");
@@ -1303,7 +1301,6 @@ export function KnowledgeWorkspace() {
     setVersionActionKey(undefined);
     setOpeningDocumentKey(document.key);
     setEditorEditing(false);
-    setEditorTitleHeight(58);
     setEditorContentHeight(280);
     setError(undefined);
     const previousMode = workspaceModeRef.current;
@@ -3086,7 +3083,9 @@ export function KnowledgeWorkspace() {
         error={filePreviewError}
         blocks={filePreview?.blocks}
         loading={Boolean(!filePreviewError && (!filePreview || filePreview.extension === "pdf" && !filePreviewUri))}
+        onAi={content.trim() ? openEnhanceSheet : undefined}
         onBack={leaveFileViewer}
+        onEdit={() => { leaveFileViewer(); setDocumentSearchQuery(""); setEditorEditing(true); }}
         onHistory={selectedDocument ? () => openHistoryChooser(selectedDocument) : undefined}
         onMenu={() => { if (selectedDocument) showDocumentActions(selectedDocument); }}
         onRenderError={setFilePreviewError}
@@ -3213,14 +3212,15 @@ export function KnowledgeWorkspace() {
         <View style={styles.editorScene}>
           <View style={styles.editorHeader}>
             <Button accessibilityLabel={`Back to ${currentFolder?.name ?? "folders"}`} contentMode="raw" onPress={leaveEditor} size="sm" variant="icon"><ChevronLeftIcon size="sm" /></Button>
-            <View style={styles.editorHeaderActions}>
-              {editorEditing
-                ? <Button accessibilityLabel="Save and lock document" accessibilityState={{ selected: true }} contentMode="raw" onPress={finishEditing} size="sm" variant="primary"><CheckIcon size="sm" variant="inverse" /></Button>
-                : <Button accessibilityLabel="Edit document" contentMode="raw" onPress={() => { stopNarration(); setDocumentSearchQuery(""); setEditorEditing(true); }} size="sm" variant="icon"><EditIcon size="sm" /></Button>}
-              <Button accessibilityLabel="AI document actions" contentMode="raw" disabled={!content.trim()} onPress={openEnhanceSheet} size="sm" variant="icon"><BrainIcon size="sm" /></Button>
-              <Button accessibilityLabel="Document and audio versions" contentMode="raw" disabled={!activeDocument || saveState !== "saved"} onPress={() => { if (activeDocument) openHistoryChooser(activeDocument); }} size="sm" variant="icon"><ClockIcon size="sm" /></Button>
-              <Button accessibilityLabel="Manage document" contentMode="raw" disabled={!activeDocument || saveState !== "saved"} onPress={() => { if (activeDocument) showDocumentActions(activeDocument); }} size="sm" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
-            </View>
+            <Text numberOfLines={1} style={styles.editorHeaderTitle}>{title}</Text>
+            <Button accessibilityLabel="Manage document" contentMode="raw" disabled={!activeDocument || saveState !== "saved"} onPress={() => { if (activeDocument) showDocumentActions(activeDocument); }} size="sm" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
+          </View>
+          <View style={styles.editorHeaderActions}>
+            {editorEditing
+              ? <Button accessibilityLabel="Save and lock document" accessibilityState={{ selected: true }} contentMode="raw" onPress={finishEditing} size="sm" variant="primary"><CheckIcon size="sm" variant="inverse" /></Button>
+              : <Button accessibilityLabel="Edit document" contentMode="raw" onPress={() => { stopNarration(); setDocumentSearchQuery(""); setEditorEditing(true); }} size="sm" variant="icon"><EditIcon size="sm" /></Button>}
+            <Button accessibilityLabel="AI document actions" contentMode="raw" disabled={!content.trim()} onPress={openEnhanceSheet} size="sm" variant="icon"><BrainIcon size="sm" /></Button>
+            <Button accessibilityLabel="Document and audio versions" contentMode="raw" disabled={!activeDocument || saveState !== "saved"} onPress={() => { if (activeDocument) openHistoryChooser(activeDocument); }} size="sm" variant="icon"><ClockIcon size="sm" /></Button>
           </View>
           <View style={[styles.rootSearch, styles.documentSearch]}>
             <SearchIcon size="sm" variant="muted" />
@@ -3230,7 +3230,6 @@ export function KnowledgeWorkspace() {
           {narrationError ? <Text accessibilityRole="alert" style={styles.documentSearchStatus}>{narrationError}</Text> : null}
           <View style={[styles.noteSheet, (editorFocused || aiInputFocused) && styles.noteSheetFocused]}>
           {openingDocumentKey ? <View accessibilityLabel={`Loading ${title}`} accessibilityRole="progressbar" style={styles.editorSkeleton}>
-            <View style={styles.editorTitleSkeleton} />
             <View style={styles.editorBodySkeleton} />
           </View> : <>
           {error ? <Text accessibilityRole="alert" style={styles.notice}>{error}</Text> : null}
@@ -3243,17 +3242,6 @@ export function KnowledgeWorkspace() {
 
           <ScrollView contentContainerStyle={styles.editorReadDocument} keyboardShouldPersistTaps="handled" nestedScrollEnabled onLayout={(event) => { editorDocumentViewportHeight.current = event.nativeEvent.layout.height; }} ref={editorDocumentScroll} showsVerticalScrollIndicator={false} style={styles.editorReadScroll}>
             {editorEditing ? <>
-              <TextInput
-                accessibilityLabel="Document title"
-                maxLength={255}
-                multiline
-                onChangeText={(value) => { titleRef.current = value; setTitle(value); markDirty(); persistLocalDraft(value, contentRef.current); }}
-                onContentSizeChange={(event) => setEditorTitleHeight(Math.max(36, Math.ceil(event.nativeEvent.contentSize.height)))}
-                scrollEnabled={false}
-                style={[styles.titleInput, { height: editorTitleHeight }]}
-                textAlignVertical="top"
-                value={title}
-              />
               <View style={[styles.editorFrame, (editorFocused || aiInputFocused) && styles.editorFrameFocused]}>
                 <TextInput
                   accessibilityLabel="Document content"
@@ -3279,7 +3267,7 @@ export function KnowledgeWorkspace() {
                 />
               </View>
             </> : <>
-              {currentNotePassages.map((passage, index) => <View key={passage.id} onLayout={(event) => documentPassageOffsets.current.set(passage.id, { y: event.nativeEvent.layout.y, height: event.nativeEvent.layout.height })}>
+              {currentNotePassages.map((passage) => <View key={passage.id} onLayout={(event) => documentPassageOffsets.current.set(passage.id, { y: event.nativeEvent.layout.y, height: event.nativeEvent.layout.height })}>
                 <HighlightedText onTextLayout={documentSearchMatchesById.has(passage.id) ? (event) => {
                   const range = documentSearchMatchesById.get(passage.id)?.ranges[0];
                   if (!range) return;
@@ -3297,7 +3285,7 @@ export function KnowledgeWorkspace() {
                     }
                     offset = next;
                   }
-                } : undefined} ranges={documentSearchMatchesById.get(passage.id)?.ranges} style={index === 0 ? styles.editorReadTitle : styles.editorReadText} text={passage.text} />
+                } : undefined} ranges={documentSearchMatchesById.get(passage.id)?.ranges} style={styles.editorReadText} text={passage.text} />
               </View>)}
             </>}
           </ScrollView>
@@ -3615,8 +3603,9 @@ const styles = StyleSheet.create({
   archiveFolder: { flexGrow: 1, gap: spacing.md },
   editorScroll: { flex: 1, minHeight: 0 },
   editorScene: { flex: 1, minHeight: 0, width: "100%", gap: spacing.sm },
-  editorHeader: { minHeight: 40, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  editorHeaderActions: { flexDirection: "row", alignItems: "center", gap: 8 },
+  editorHeader: { minHeight: 40, minWidth: 0, flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  editorHeaderTitle: { flex: 1, minWidth: 0, color: palette.silver50, fontFamily: fonts.medium, fontSize: 15, lineHeight: 20 },
+  editorHeaderActions: { minHeight: 40, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 8 },
   rootActions: { minHeight: 52, flexDirection: "row", alignItems: "center", gap: 8 },
   bulkToolbar: { minHeight: 40, padding: 5, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderWidth: 1, backgroundColor: palette.panel },
   bulkToolbarSelection: { flexDirection: "row", alignItems: "center", gap: 8 },
@@ -3666,7 +3655,6 @@ const styles = StyleSheet.create({
   emptyActionText: { color: palette.muted, letterSpacing: 0.4, textTransform: "none" },
   noteSheet: { flex: 1, minHeight: 0, width: "100%", padding: spacing.md, borderRadius: radii.xl, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised, overflow: "hidden" },
   editorSkeleton: { flex: 1, gap: spacing.lg },
-  editorTitleSkeleton: { width: "72%", height: 52, borderRadius: radii.md, backgroundColor: palette.hairlineBright, opacity: 0.72 },
   editorBodySkeleton: { flex: 1, minHeight: 280, borderRadius: radii.md, backgroundColor: palette.hairlineBright, opacity: 0.72 },
   noteSheetFocused: { flex: 1, minHeight: 0 },
   metaRow: { minHeight: 34, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
@@ -3677,13 +3665,11 @@ const styles = StyleSheet.create({
   notice: { marginBottom: 12, padding: 10, borderRadius: radii.sm, color: palette.silver300, backgroundColor: "rgba(120, 76, 40, 0.24)", fontFamily: fonts.regular, fontSize: 12 },
   saveErrorRow: { marginBottom: 10, padding: 10, flexDirection: "row", alignItems: "center", gap: 8, borderRadius: radii.sm, borderColor: palette.hairline, borderWidth: 1 },
   saveErrorText: { flex: 1, color: palette.silver300, fontFamily: fonts.regular, fontSize: 11, lineHeight: 16 },
-  titleInput: { minHeight: 36, width: "100%", paddingHorizontal: 0, paddingVertical: 0, borderWidth: 0, backgroundColor: "transparent", color: palette.silver50, fontFamily: fonts.medium, fontSize: 28, lineHeight: 36, textAlign: "left", writingDirection: "ltr" },
   editorFrame: { minHeight: 280, width: "100%", position: "relative", overflow: "hidden" },
   editorFrameFocused: { minHeight: 280 },
   editor: { minHeight: 280, width: "100%", paddingHorizontal: 0, paddingVertical: 0, borderWidth: 0, backgroundColor: "transparent", color: palette.silver100, fontFamily: fonts.regular, fontSize: 16, lineHeight: 26, textAlign: "left", writingDirection: "ltr" },
   editorReadScroll: { flex: 1, minHeight: 0, width: "100%" },
   editorReadDocument: { flexGrow: 1, width: "100%", gap: spacing.md, paddingBottom: spacing.xl },
-  editorReadTitle: { width: "100%", color: palette.silver50, fontFamily: fonts.medium, fontSize: 28, lineHeight: 36, textAlign: "left", writingDirection: "ltr" },
   editorReadText: { width: "100%", color: palette.silver100, fontFamily: fonts.regular, fontSize: 16, lineHeight: 26, textAlign: "left", writingDirection: "ltr" },
   editorFocused: { minHeight: 280 },
   aiComposerError: { paddingHorizontal: 8, color: "#D98B8B", fontFamily: fonts.regular, fontSize: 11, lineHeight: 16 },
