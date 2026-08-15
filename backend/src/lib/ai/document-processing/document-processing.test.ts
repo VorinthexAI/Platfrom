@@ -1,10 +1,13 @@
 import { describe, expect, test } from 'bun:test';
+import { DeleteObjectCommand, PutObjectCommand, type S3Client } from '@aws-sdk/client-s3';
+import { GetDocumentAnalysisCommand, StartDocumentAnalysisCommand, type Block, type TextractClient } from '@aws-sdk/client-textract';
 import { parseDocument } from '.';
 import { generateDocumentExport } from './exports';
 import type { Document } from '@/lib/db/documents.node';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
 import {
   canonicalDocumentRepresentations,
+  createAwsTextractDocumentOcr,
   documentEmbed,
   documentExtract,
   documentGenerateContent,
@@ -227,6 +230,106 @@ describe('document-extract action', () => {
       const result = await documentExtract({ ...normalized('pdf'), storageKey: 'pdf' }, { logger: quiet, ocr: { extract: async () => ({ extractedText: text, blocks: [{ type: 'paragraph', text }], metadata: { provider: 'aws-textract' } }) } });
       expect(result.extractedText).toBe(text);
     }
+  });
+
+  test('stages and extracts selectable, scanned, and multi-page dummy PDFs through Textract', async () => {
+    const fixtures: Array<{ name: string; pdf: Uint8Array; blocks: Block[]; text: string; pages: number }> = [
+      {
+        name: 'selectable',
+        pdf: bytes('%PDF-1.7\n1 0 obj<</Type/Page/Contents 2 0 R>>endobj\n2 0 obj<</Length 36>>stream\nBT (Selectable quarterly report) Tj ET\nendstream\nendobj\n%%EOF'),
+        blocks: [{ Id: 'selectable', BlockType: 'LAYOUT_TEXT', Page: 1, Text: 'Selectable quarterly report' }],
+        text: 'Selectable quarterly report',
+        pages: 1,
+      },
+      {
+        name: 'scanned',
+        pdf: bytes('%PDF-1.7\n1 0 obj<</Type/Page/Resources<</XObject<</Scan 2 0 R>>>>>>endobj\n2 0 obj<</Subtype/Image/Width 1200/Height 1600/BitsPerComponent 8>>stream\nDUMMY-SCANNED-PIXELS\nendstream\nendobj\n%%EOF'),
+        blocks: [{ Id: 'scan-line', BlockType: 'LINE', Page: 1, Text: 'OCR from scanned invoice' }],
+        text: 'OCR from scanned invoice',
+        pages: 1,
+      },
+      {
+        name: 'multi-page-table',
+        pdf: bytes('%PDF-1.7\n1 0 obj<</Type/Pages/Count 2/Kids[2 0 R 3 0 R]>>endobj\n2 0 obj<</Type/Page/Parent 1 0 R>>endobj\n3 0 obj<</Type/Page/Parent 1 0 R>>endobj\n%%EOF'),
+        blocks: [
+          { Id: 'page-one', BlockType: 'LAYOUT_TITLE', Page: 1, Text: 'Annual results' },
+          { Id: 'layout-table', BlockType: 'LAYOUT_TABLE', Page: 2, Relationships: [{ Type: 'CHILD', Ids: ['table'] }] },
+          { Id: 'table', BlockType: 'TABLE', Page: 2, Relationships: [{ Type: 'CHILD', Ids: ['cell'] }] },
+          { Id: 'cell', BlockType: 'CELL', Page: 2, RowIndex: 1, ColumnIndex: 1, Relationships: [{ Type: 'CHILD', Ids: ['word'] }] },
+          { Id: 'word', BlockType: 'WORD', Page: 2, Text: 'Revenue' },
+        ],
+        text: 'Annual results\n\nRevenue',
+        pages: 2,
+      },
+    ];
+
+    for (const fixture of fixtures) {
+      const storageCommands: Array<PutObjectCommand | DeleteObjectCommand> = [];
+      const textractCommands: Array<StartDocumentAnalysisCommand | GetDocumentAnalysisCommand> = [];
+      const storageClient = {
+        send: async (command: PutObjectCommand | DeleteObjectCommand) => {
+          storageCommands.push(command);
+          return {};
+        },
+      } as unknown as Pick<S3Client, 'send'>;
+      const textractClient = {
+        send: async (command: StartDocumentAnalysisCommand | GetDocumentAnalysisCommand) => {
+          textractCommands.push(command);
+          return command instanceof StartDocumentAnalysisCommand
+            ? { JobId: `job-${fixture.name}` }
+            : { JobStatus: 'SUCCEEDED', Blocks: fixture.blocks };
+        },
+      } as unknown as Pick<TextractClient, 'send'>;
+      const ocr = createAwsTextractDocumentOcr({
+        stagingBucket: 'dummy-textract-eu-west-1',
+        sourceBucket: 'dummy-source-eu-north-1',
+        storageClient,
+        textractClient,
+      });
+
+      const validated = await documentValidate({
+        file: { filename: `${fixture.name}.pdf`, mimeType: 'application/pdf', sizeBytes: fixture.pdf.byteLength, bytes: fixture.pdf },
+        scopeKey,
+        folderKey,
+      }, { logger: quiet });
+      const result = await documentExtract({ ...validated, storageKey: `content/${fixture.name}.pdf` }, { logger: quiet, ocr });
+
+      expect(storageCommands).toHaveLength(2);
+      expect(storageCommands[0]).toBeInstanceOf(PutObjectCommand);
+      expect(storageCommands[0]!.input).toMatchObject({ Bucket: 'dummy-textract-eu-west-1', Body: fixture.pdf, ContentType: 'application/pdf' });
+      expect(storageCommands[1]).toBeInstanceOf(DeleteObjectCommand);
+      expect(storageCommands[1]!.input).toMatchObject({ Bucket: 'dummy-textract-eu-west-1', Key: storageCommands[0]!.input.Key });
+      expect(textractCommands[0]).toBeInstanceOf(StartDocumentAnalysisCommand);
+      expect(textractCommands[0]!.input).toMatchObject({
+        DocumentLocation: { S3Object: { Bucket: 'dummy-textract-eu-west-1', Name: storageCommands[0]!.input.Key } },
+        FeatureTypes: ['LAYOUT', 'TABLES'],
+      });
+      expect(textractCommands[1]).toBeInstanceOf(GetDocumentAnalysisCommand);
+      expect(result.extractedText).toBe(fixture.text);
+      expect(result.metadata).toMatchObject({ provider: 'aws-textract', pages: fixture.pages });
+    }
+  });
+
+  test('removes a staged PDF when Textract rejects it', async () => {
+    const storageCommands: Array<PutObjectCommand | DeleteObjectCommand> = [];
+    const ocr = createAwsTextractDocumentOcr({
+      stagingBucket: 'dummy-textract-eu-west-1',
+      storageClient: {
+        send: async (command: PutObjectCommand | DeleteObjectCommand) => {
+          storageCommands.push(command);
+          return {};
+        },
+      } as unknown as Pick<S3Client, 'send'>,
+      textractClient: {
+        send: async (command: StartDocumentAnalysisCommand | GetDocumentAnalysisCommand) => command instanceof StartDocumentAnalysisCommand
+          ? { JobId: 'failed-job' }
+          : { JobStatus: 'FAILED' },
+      } as unknown as Pick<TextractClient, 'send'>,
+    });
+
+    await expect(ocr.extract('content/rejected.pdf', fileFor('pdf').bytes)).rejects.toThrow('could not extract');
+    expect(storageCommands.map((command) => command.constructor)).toEqual([PutObjectCommand, DeleteObjectCommand]);
+    expect(storageCommands[1]!.input.Key).toBe(storageCommands[0]!.input.Key);
   });
 
   test('reconstructs PDF pages, headings, and merged table cells from Textract layout blocks', () => {

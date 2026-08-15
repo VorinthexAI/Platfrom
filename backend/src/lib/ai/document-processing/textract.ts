@@ -43,6 +43,13 @@ const textractStorage = new S3Client({
 
 const documentTextractBucket = process.env.CONTENT_TEXTRACT_BUCKET;
 
+interface DocumentOcrOptions {
+  textractClient?: Pick<TextractClient, 'send'>;
+  storageClient?: Pick<S3Client, 'send'>;
+  stagingBucket?: string;
+  sourceBucket?: string;
+}
+
 function stagedDocumentKey(storageKey: string) {
   return `textract/${createHash('sha256').update(storageKey).digest('hex')}.pdf`;
 }
@@ -174,22 +181,26 @@ export function textractBlocksToExtractionResult(blocks: Block[]): ExtractionRes
   };
 }
 
-export const awsTextractDocumentOcr: DocumentOcr = {
-  async extract(storageKey, bytes) {
+export function createAwsTextractDocumentOcr(options: DocumentOcrOptions = {}): DocumentOcr {
+  const textractClient = options.textractClient ?? textract;
+  const storageClient = options.storageClient ?? textractStorage;
+  const stagingBucket = options.stagingBucket ?? documentTextractBucket;
+  const sourceBucket = options.sourceBucket ?? S3_BUCKET;
+  const extract: DocumentOcr['extract'] = async (storageKey, bytes) => {
     const timeoutMs = positiveLimit(process.env.CONTENT_TEXTRACT_TIMEOUT_MS, 300_000);
     const maxCharacters = positiveLimit(process.env.CONTENT_MAX_EXTRACTED_CHARACTERS, 10_000_000);
     const maxBlocks = positiveLimit(process.env.CONTENT_TEXTRACT_MAX_BLOCKS, 250_000);
     const deadline = Date.now() + timeoutMs;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
-    const bucket = documentTextractBucket ?? S3_BUCKET;
-    const objectKey = documentTextractBucket ? stagedDocumentKey(storageKey) : storageKey;
+    const bucket = stagingBucket ?? sourceBucket;
+    const objectKey = stagingBucket ? stagedDocumentKey(storageKey) : storageKey;
     try {
-      if (documentTextractBucket) {
+      if (stagingBucket) {
         if (!bytes?.byteLength) throw new Error('PDF bytes are required for cross-region Textract staging.');
-        await textractStorage.send(new PutObjectCommand({ Bucket: bucket, Key: objectKey, Body: bytes, ContentType: 'application/pdf' }), { abortSignal: controller.signal });
+        await storageClient.send(new PutObjectCommand({ Bucket: bucket, Key: objectKey, Body: bytes, ContentType: 'application/pdf' }), { abortSignal: controller.signal });
       }
-      const started = await textract.send(new StartDocumentAnalysisCommand({
+      const started = await textractClient.send(new StartDocumentAnalysisCommand({
         DocumentLocation: { S3Object: { Bucket: bucket, Name: objectKey } },
         FeatureTypes: ['LAYOUT', 'TABLES'],
         ClientRequestToken: createHash('sha256').update(bucket).update('\0').update(objectKey).digest('hex'),
@@ -205,7 +216,7 @@ export const awsTextractDocumentOcr: DocumentOcr = {
         let response;
         do {
           if (Date.now() >= deadline) throw new Error('AWS Textract extraction timed out.');
-          response = await textract.send(new GetDocumentAnalysisCommand({ JobId: started.JobId, NextToken: nextToken }), { abortSignal: controller.signal });
+          response = await textractClient.send(new GetDocumentAnalysisCommand({ JobId: started.JobId, NextToken: nextToken }), { abortSignal: controller.signal });
           if (response.JobStatus === 'FAILED' || response.JobStatus === 'PARTIAL_SUCCESS') {
             throw new Error('AWS Textract could not extract the document.');
           }
@@ -233,10 +244,13 @@ export const awsTextractDocumentOcr: DocumentOcr = {
       return result;
     } finally {
       clearTimeout(timeout);
-      if (documentTextractBucket) await textractStorage.send(new DeleteObjectCommand({ Bucket: bucket, Key: objectKey })).catch(() => undefined);
+      if (stagingBucket) await storageClient.send(new DeleteObjectCommand({ Bucket: bucket, Key: objectKey })).catch(() => undefined);
     }
-  },
-};
+  };
+  return { extract };
+}
+
+export const awsTextractDocumentOcr = createAwsTextractDocumentOcr();
 
 export const awsTextractImageOcr: DocumentImageOcr = {
   async extract(_storageKey, bytes) {
