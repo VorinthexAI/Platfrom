@@ -45,5 +45,6 @@ describe('S3 client configuration', () => {
 
     expect(config.endpoint).toBe('http://localhost:4566');
     expect(config.forcePathStyle).toBe(true);
+    expect(config.requestChecksumCalculation).toBe('WHEN_REQUIRED');
   });
 });
