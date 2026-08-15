@@ -267,6 +267,7 @@ export function KnowledgeWorkspace() {
   const [destinationFolders, setDestinationFolders] = useState<ContentFolder[]>([]);
   const [destinationUsesDirectSelection, setDestinationUsesDirectSelection] = useState(false);
   const [destinationSourceFolderKeys, setDestinationSourceFolderKeys] = useState<(string | null)[]>([]);
+  const [destinationInitialFolderKey, setDestinationInitialFolderKey] = useState<string | null>();
   const [destinationBlockedFolderKeys, setDestinationBlockedFolderKeys] = useState<string[]>([]);
   const [destinationLoading, setDestinationLoading] = useState(false);
   const [selectedFolders, setSelectedFolders] = useState<ContentFolder[]>([]);
@@ -389,6 +390,7 @@ export function KnowledgeWorkspace() {
     : [];
   const destinationTargetKey = destinationFolder?.key ?? null;
   const destinationAtSource = destinationAction !== "upload" && destinationSourceFolderKeys.includes(destinationTargetKey);
+  const destinationAtInitialLocation = destinationInitialFolderKey !== undefined && destinationTargetKey === destinationInitialFolderKey;
   const destinationIsSelectedFolder = destinationStack.some(({ key }) => destinationBlockedFolderKeys.includes(key));
   const destinationTransferDisabled = destinationAction !== "upload" && (destinationLoading || destinationAtSource || destinationIsSelectedFolder) || bulkLoading;
   const showArchiveRoot = !libraryQuery.trim() || "archive".includes(libraryQuery.trim().toLowerCase());
@@ -568,6 +570,7 @@ export function KnowledgeWorkspace() {
       setDestinationStack([]);
       setDestinationFolders([]);
       setDestinationSourceFolderKeys([]);
+      setDestinationInitialFolderKey(undefined);
       setDestinationBlockedFolderKeys([]);
       setDestinationLoading(false);
       setDestinationAction(undefined);
@@ -2068,6 +2071,7 @@ export function KnowledgeWorkspace() {
           ? [directSelection.document.folderKey ?? null]
           : [...new Set([...selectedFolders.map(({ parentFolderKey }) => parentFolderKey ?? null), ...selectedDocuments.map(({ folderKey }) => folderKey ?? null), ...(selectedCount ? [] : [currentFolder?.key ?? null])])];
     setDestinationSourceFolderKeys(sourceFolderKeys);
+    setDestinationInitialFolderKey(action === "upload" ? undefined : sourceFolderKey ?? null);
     setDestinationBlockedFolderKeys(action === "upload" ? [] : directSelection?.folder ? [directSelection.folder.key] : selectedFolders.map(({ key }) => key));
     setDestinationStack(sourceStack);
     setDestinationFolders([]);
@@ -2968,7 +2972,7 @@ export function KnowledgeWorkspace() {
       {singleFolderDelete ? null : <><Button disabled={bulkLoading} loading={bulkLoading} onPress={() => void deleteContentSelection()} size="lg" variant="primary">Delete</Button>{close(bulkLoading)}</>}
     </>;
     if (activeSheet === "destinationBrowser") return <>
-      {destinationAction !== "upload" && (destinationAtSource || destinationIsSelectedFolder) ? null : <Button disabled={destinationTransferDisabled} onPress={() => { if (destinationAction === "upload") goBackSheet(); else void selectDestination(); }} size="lg" style={destinationTransferDisabled ? styles.disabledPrimaryAction : undefined} variant="primary">{destinationAction === "upload" ? "Choose folder" : destinationAction === "move" ? "Move here" : "Copy here"}</Button>}
+      {destinationAction !== "upload" && destinationAtInitialLocation ? null : <Button disabled={destinationTransferDisabled} onPress={() => { if (destinationAction === "upload") goBackSheet(); else void selectDestination(); }} size="lg" style={destinationTransferDisabled ? styles.disabledPrimaryAction : undefined} variant="primary">{destinationAction === "upload" ? "Choose folder" : destinationAction === "move" ? "Move here" : "Copy here"}</Button>}
       {close(bulkLoading)}
     </>;
     if (activeSheet === "destination" && destinationAction === "upload") return <>
