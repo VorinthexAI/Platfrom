@@ -152,6 +152,7 @@ suite('Content live E2E', () => {
       runAction: async (action: string, input: any) => {
         if (action === 'ask' || action === 'enhance' || action === 'translate' || action === 'reason' || action === 'deep-reason') return { text: `Generated ${action}: deterministic archive result.` };
         if (action === 'speak' || action === 'generate-speech') return { audio: new TextEncoder().encode('deterministic audio'), mimeType: 'audio/mpeg', durationMs: 250 };
+        if (action === 'document-cleanup') return { html: `<p>${input.text}</p>` };
         if (action === 'document-generate-html') return documentGenerateHtml(input, { logger: () => undefined });
         if (action === 'document-generate-content') return documentGenerateContent(input, { logger: () => undefined });
         if (action === 'document-embed') return documentEmbed(input, { embed: async () => embedding, dimensions: 4096, logger: () => undefined });
@@ -232,7 +233,7 @@ suite('Content live E2E', () => {
       scopeKey, folderKey: childFolderKey, idempotencyKey: `processing-${organizationKey}`,
     });
     const documentKey = processed.document.key;
-    expect(processingOrder).toEqual(['document.parse', 'document-validate', 'storage-upload', 'document-extract', 'document-generate-html', 'document-generate-content', 'document-embed', 'document-insert']);
+    expect(processingOrder).toEqual(['document.parse', 'document-validate', 'storage-upload', 'document-extract', 'document-cleanup', 'document-generate-html', 'document-generate-content', 'document-embed', 'document-insert']);
     const createdDocument = await call('document.create', {
       scopeKey, folderKey: childFolderKey, name: 'Created note', representation: { content: 'Created directly through Content.' }, idempotencyKey: `created-${organizationKey}`,
     });

@@ -8,6 +8,7 @@ import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
 import {
   canonicalDocumentRepresentations,
   createAwsTextractDocumentOcr,
+  documentCleanup,
   documentEmbed,
   documentExtract,
   documentGenerateContent,
@@ -110,6 +111,49 @@ describe('document-validate action', () => {
     await expect(documentValidate({ file: { filename: 'x.pdf', mimeType: 'application/pdf', sizeBytes: truncated.length, bytes: truncated }, scopeKey }, { logger: quiet })).rejects.toMatchObject({ code: 'DOCUMENT_UPLOAD_INVALID' });
     await expect(documentValidate({ file: { ...fileFor('txt'), filename: 'folder\\report.txt' }, scopeKey }, { logger: quiet })).rejects.toMatchObject({ code: 'DOCUMENT_INVALID_FILENAME' });
     await expect(documentValidate({ file: { ...fileFor('txt'), filename: 'folder/report.txt' }, scopeKey }, { logger: quiet })).rejects.toMatchObject({ code: 'DOCUMENT_INVALID_FILENAME' });
+  });
+});
+
+describe('document-cleanup action', () => {
+  test('cleans chunks in source order and normalizes extraction whitespace without stripping meaningful symbols', async () => {
+    const source = `${'First section has value €42 and café. '.repeat(500)}\n\n###\nSecond\tsection.\u0000\n||||`;
+    const chunks: string[] = [];
+    const result = await documentCleanup({ text: source }, {
+      logger: quiet,
+      clean: async (text) => { chunks.push(text); return text.includes('Second') ? '<h2>Second</h2><p>Second section.</p>' : '<p>First section has value €42 and café.</p>'; },
+    });
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(result.extractedText).toContain('€42 and café.');
+    expect(result.extractedText).toEndWith('Second section.');
+    expect(result.extractedText).not.toContain('\t');
+    expect(result.extractedText).not.toContain('\u0000');
+    expect(result.extractedText).not.toContain('###');
+    expect(result.extractedText).not.toContain('||||');
+  });
+
+  test('rejects missing or empty model output', async () => {
+    await expect(documentCleanup({ text: 'Body' }, { logger: quiet })).rejects.toMatchObject({ code: 'DOCUMENT_TEXT_CLEANUP_FAILED', action: 'document-cleanup' });
+    await expect(documentCleanup({ text: 'Body' }, { logger: quiet, clean: async () => '   ' })).rejects.toMatchObject({ code: 'DOCUMENT_TEXT_CLEANUP_FAILED', action: 'document-cleanup' });
+  });
+
+  test('keeps chunk output ordered when concurrent model calls finish out of order', async () => {
+    const source = ['FIRST', 'SECOND', 'THIRD'].map((label) => `${label} ${'word '.repeat(800)}`).join('\n\n');
+    let active = 0;
+    let maximumActive = 0;
+    const result = await documentCleanup({ text: source }, {
+      logger: quiet,
+      clean: async (text) => {
+        active += 1;
+        maximumActive = Math.max(maximumActive, active);
+        const label = text.trimStart().split(' ')[0]!;
+        await new Promise((resolve) => setTimeout(resolve, label === 'FIRST' ? 20 : label === 'SECOND' ? 10 : 1));
+        active -= 1;
+        return `<h1>${label}</h1>`;
+      },
+    });
+    expect(result.extractedText).toBe('FIRST\n\nSECOND\n\nTHIRD');
+    expect(result.blocks.map(({ type }) => type)).toEqual(['heading', 'heading', 'heading']);
+    expect(maximumActive).toBe(3);
   });
 });
 
@@ -489,6 +533,7 @@ describe('document.parse tool', () => {
       validate: async (input) => { calls.push('document-validate'); fail('validate'); return normalized('txt', (input.file as ReturnType<typeof fileFor>).bytes); },
       upload: async (input, options) => options!.storage!.upload({ key: `content/${input.documentKey}`, bytes: input.fileInput, mimeType: input.mimeType }),
       extract: async () => { calls.push('document-extract'); fail('extract'); return { extractedText: 'Body', blocks: [{ type: 'paragraph', text: 'Body' }] }; },
+      cleanup: async () => { calls.push('document-cleanup'); fail('cleanup'); return { extractedText: 'Body', blocks: [{ type: 'paragraph', text: 'Body' }] }; },
       generateHtml: async () => { calls.push('document-generate-html'); fail('generateHtml'); return { html: '<p>Body</p>' }; },
       generateContent: async () => { calls.push('document-generate-content'); fail('generateContent'); return { content: 'Body' }; },
       embed: async () => { calls.push('document-embed'); fail('embed'); return { embedding: [1, 2], contentChunks: ['Body'], chunkEmbeddings: [[1, 2]], semanticChunkCount: 1, semanticContentHash: documentSemanticHash('Body') }; },
@@ -504,8 +549,21 @@ describe('document.parse tool', () => {
     const result = await parseDocument(input, { ...context, logger: quiet }) as DocumentParseResult;
     expect(result.document.content).toBe('Body');
     expect(result.document.isFavorite).toBe(false);
-    expect(context.calls).toEqual(['document-validate', 'storage-upload', 'document-extract', 'document-generate-html', 'document-generate-content', 'document-embed', 'document-insert']);
+    expect(context.calls).toEqual(['document-validate', 'storage-upload', 'document-extract', 'document-cleanup', 'document-generate-html', 'document-generate-content', 'document-embed', 'document-insert']);
     expect(context.calls.indexOf('document-embed')).toBeLessThan(context.calls.indexOf('document-insert'));
+  });
+
+  test('builds canonical representations and embeddings from cleaned text', async () => {
+    const context = harness();
+    context.actions.cleanup = async ({ text }) => { expect(text).toBe('Body'); return { extractedText: '# Cleaned\n\n- First item', blocks: [{ type: 'heading', level: 1, text: 'Cleaned' }, { type: 'bulletList', children: [{ type: 'listItem', text: 'First item' }] }] }; };
+    context.actions.generateHtml = async (source) => { expect('blocks' in source ? source.blocks.map(({ type }) => type) : []).toEqual(['heading', 'bulletList']); return { html: '<h1>Cleaned</h1><ul><li>First item</li></ul>' }; };
+    context.actions.generateContent = async () => ({ content: 'Cleaned\n\nFirst item' });
+    context.actions.embed = async ({ content }) => {
+      expect(content).toBe('Cleaned\n\nFirst item');
+      return { embedding: [1, 2], contentChunks: ['Cleaned\n\nFirst item'], chunkEmbeddings: [[1, 2]], semanticChunkCount: 1, semanticContentHash: documentSemanticHash(content) };
+    };
+    const result = await parseDocument(input, { ...context, logger: quiet });
+    expect(result.document).toMatchObject({ html: '<h1>Cleaned</h1><ul><li>First item</li></ul>', content: 'Cleaned\n\nFirst item' });
   });
 
   test('rejects action output when content drifts from generated HTML', async () => {
@@ -541,7 +599,7 @@ describe('document.parse tool', () => {
   });
 
   test('cleans S3 after non-recoverable post-upload stage failures', async () => {
-    for (const step of ['generateHtml', 'generateContent', 'embed', 'insert'] as const) {
+    for (const step of ['cleanup', 'generateHtml', 'generateContent', 'embed', 'insert'] as const) {
       const context = harness(step);
       await expect(parseDocument(input, { ...context, logger: quiet })).rejects.toThrow();
       expect(context.calls.at(-1)).toBe('storage-delete');

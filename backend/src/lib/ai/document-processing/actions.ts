@@ -18,7 +18,7 @@ import {
 } from './schemas';
 import { documentStorage, type DocumentStorage } from './storage';
 import { awsTextractDocumentOcr, type DocumentOcr } from './textract';
-import { chunkDocumentContent, documentEmbeddingTexts, documentSemanticHash } from './chunking';
+import { chunkDocumentContent, chunkDocumentText, documentEmbeddingTexts, documentSemanticHash } from './chunking';
 import {
   documentInputToHtml,
   htmlToExtractedBlocks,
@@ -296,6 +296,37 @@ export async function documentExtract(input: NormalizedDocument & { storageKey: 
   });
 }
 
+export async function documentCleanup(input: { text: string }, options: { clean?: (text: string) => Promise<string>; logger?: DocumentActionLogger } = {}): Promise<ExtractionResult> {
+  return observed('document-cleanup', {}, options.logger ?? defaultLogger, async () => {
+    try {
+      const clean = options.clean;
+      if (!clean) throw new Error('The document cleanup model is unavailable.');
+      const chunks = chunkDocumentText(input.text);
+      if (!chunks.length) throw new Error('The document contains no text to clean.');
+      const cleaned = new Array<string>(chunks.length);
+      let cursor = 0;
+      const worker = async () => {
+        while (cursor < chunks.length) {
+          const index = cursor++;
+          const chunk = chunks[index];
+          if (!chunk) return;
+          const html = await clean(chunk.text);
+          if (!html.trim()) throw new Error(`The document cleanup model returned no content for chunk ${index + 1}.`);
+          cleaned[index] = html;
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(4, chunks.length) }, () => worker()));
+      const html = sanitizeDocumentHtml(cleaned.join(''));
+      const content = htmlToPlainText(html);
+      if (!content) throw new Error('The document cleanup model returned no content.');
+      if (content.length > maxExtractedCharacters()) throw new Error('Cleaned document content exceeds the configured limit.');
+      return extractionResultSchema.parse({ extractedText: content, extractedHtml: html, blocks: htmlToExtractedBlocks(html), metadata: { format: 'html', cleaned: true } });
+    } catch (error) {
+      throw documentActionError(error, 'DOCUMENT_TEXT_CLEANUP_FAILED', 'Document text cleanup failed.', 'document-cleanup', true);
+    }
+  });
+}
+
 export async function documentGenerateHtml(input: DocumentHtmlInput, options: { logger?: DocumentActionLogger } = {}): Promise<{ html: string }> {
   return observed('document-generate-html', {}, options.logger ?? defaultLogger, async () => {
     try {
@@ -381,6 +412,7 @@ export const DOCUMENT_ACTIONS = {
   'document-validate': documentValidate,
   'storage-upload': storageUpload,
   'document-extract': documentExtract,
+  'document-cleanup': documentCleanup,
   'document-generate-html': documentGenerateHtml,
   'document-generate-content': documentGenerateContent,
   'document-embed': documentEmbed,

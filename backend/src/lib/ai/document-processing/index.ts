@@ -2,6 +2,7 @@ import type { Document } from '@/lib/db/documents.node';
 import { documentParseInputSchema, type DocumentParseInput } from './schemas';
 import {
   documentEmbed,
+  documentCleanup,
   documentExtract,
   documentGenerateContent,
   documentGenerateHtml,
@@ -17,7 +18,7 @@ import { documentStorage, type DocumentStorage } from './storage';
 import type { DocumentOcr } from './textract';
 import type { embedText } from '@/lib/embeddings';
 import type { embedTexts } from '@/lib/embeddings';
-import { htmlToPlainText, sanitizeDocumentHtml } from './representation';
+import { documentInputToHtml, htmlToMarkdown, htmlToPlainText, sanitizeDocumentHtml } from './representation';
 
 export interface DocumentParseDependencies extends DocumentInsertDependencies {
   storage?: DocumentStorage;
@@ -27,6 +28,7 @@ export interface DocumentParseDependencies extends DocumentInsertDependencies {
   embeddingDimensions?: number;
   maxBytes?: number;
   logger?: DocumentActionLogger;
+  cleanText?: (text: string) => Promise<string>;
   actions?: Partial<DocumentPipelineActions>;
 }
 
@@ -38,6 +40,7 @@ export interface DocumentPipelineActions {
   validate: typeof documentValidate;
   upload: typeof storageUpload;
   extract: typeof documentExtract;
+  cleanup: typeof documentCleanup;
   generateHtml: typeof documentGenerateHtml;
   generateContent: typeof documentGenerateContent;
   embed: typeof documentEmbed;
@@ -67,6 +70,7 @@ export async function parseDocument(rawInput: DocumentParseInput, dependencies: 
     validate: dependencies.actions?.validate ?? documentValidate,
     upload: dependencies.actions?.upload ?? storageUpload,
     extract: dependencies.actions?.extract ?? documentExtract,
+    cleanup: dependencies.actions?.cleanup ?? documentCleanup,
     generateHtml: dependencies.actions?.generateHtml ?? documentGenerateHtml,
     generateContent: dependencies.actions?.generateContent ?? documentGenerateContent,
     embed: dependencies.actions?.embed ?? documentEmbed,
@@ -101,7 +105,9 @@ export async function parseDocument(rawInput: DocumentParseInput, dependencies: 
   try {
     const extraction = await actions.extract({ ...normalized, storageKey: uploaded.storageKey }, { ocr: dependencies.ocr, logger });
     if (!extraction.extractedText.trim()) throw new DocumentProcessingError('DOCUMENT_EXTRACTION_FAILED', 'No text could be extracted from the document.', 'document-extract');
-    const generated = await actions.generateHtml(extraction, { logger });
+    const structuredText = htmlToMarkdown(documentInputToHtml(extraction)) || extraction.extractedText;
+    const cleaned = await actions.cleanup({ text: structuredText }, { clean: dependencies.cleanText, logger });
+    const generated = await actions.generateHtml(cleaned, { logger });
     const html = sanitizeDocumentHtml(generated.html);
     const canonicalContent = htmlToPlainText(html);
     const { content } = await actions.generateContent({ html }, { logger });

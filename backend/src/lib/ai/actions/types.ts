@@ -8,6 +8,7 @@ export const ACTION_SLUGS = [
   'generate-speech', 'analyze-audio', 'generate-music', 'orchestrator-chat',
   'document-validate', 'storage-upload', 'document-extract', 'document-generate-html',
   'document-generate-content', 'document-embed', 'document-insert', 'enhance', 'translate', 'caption-image', 'describe-visual-identity',
+  'document-cleanup',
 ] as const;
 export type ActionId = (typeof ACTION_SLUGS)[number] | (string & {});
 export const actionIdSchema = z.enum(ACTION_SLUGS) as z.ZodType<ActionId> & { options: typeof ACTION_SLUGS };

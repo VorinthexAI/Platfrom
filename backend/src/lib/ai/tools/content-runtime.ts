@@ -16,14 +16,15 @@ import type { generateDocumentExport } from '@/lib/ai/document-processing/export
 import type { ContentToolName, ContentToolOutput } from './content-schemas';
 import { ContentError, type ContentErrorCode } from './content-errors';
 import { contentToolInputSchemas, contentToolOutputSchemas, isContentToolName } from './content-registry';
-import { htmlToDocumentPreviewBlocks, htmlToPlainText, sanitizeDocumentHtml } from '@/lib/ai/document-processing/representation';
+import { documentCleanup } from '@/lib/ai/document-processing/actions';
+import { htmlToDocumentPreviewBlocks, htmlToPlainText, sanitizeDocumentHtml, type DocumentHtmlInput } from '@/lib/ai/document-processing/representation';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
 import { chunkDocumentContent, documentSemanticHash } from '@/lib/ai/document-processing/chunking';
 import type { BookGenerator } from '@/lib/books/service';
 import type { DocumentScanInput } from '@/lib/ai/document-scanning';
 
 type Role = 'viewer' | 'moderator' | 'admin' | 'owner';
-type Action = 'ask' | 'enhance' | 'translate' | 'read' | 'traverse' | 'insert' | 'update' | 'delete' | 'embed' | 'speak' | 'generate-speech' | 'reason' | 'deep-reason' | 'document-generate-html' | 'document-generate-content' | 'document-embed';
+type Action = 'ask' | 'enhance' | 'translate' | 'read' | 'traverse' | 'insert' | 'update' | 'delete' | 'embed' | 'speak' | 'generate-speech' | 'reason' | 'deep-reason' | 'document-cleanup' | 'document-generate-html' | 'document-generate-content' | 'document-embed';
 type SafeEvent = {
   type: 'authorization' | 'resolution' | 'action' | 'db' | 'embedding' | 'storage' | 'speech' | 'cleanup';
   status: 'started' | 'succeeded' | 'failed';
@@ -735,12 +736,17 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
     };
   };
   const representations = async (
-    source: { html?: string; content?: string },
+    source: DocumentHtmlInput,
     documentName: string,
     resourceKey: string,
     scopeKey: string,
   ) => {
-    const generatedHtml = await action('document-generate-html', source.html ? { html: source.html } : { content: source.content }, resourceKey, scopeKey);
+    const actionInput = 'extractedText' in source
+      ? source
+      : 'html' in source
+        ? { html: source.html }
+        : { content: source.content };
+    const generatedHtml = await action('document-generate-html', actionInput, resourceKey, scopeKey);
     const html = sanitizeDocumentHtml(z.string().min(1).parse(generatedHtml.html));
     const generatedContent = await action('document-generate-content', { html }, resourceKey, scopeKey);
     const content = htmlToPlainText(html);
@@ -1279,6 +1285,9 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       } : input;
       const processed = await d.parseDocument(processingInput, {
         ...dependencies.ingestion,
+        ...(!dependencies.ingestion?.cleanText ? {
+          cleanText: async (text) => z.string().trim().min(1).parse((await action('document-cleanup', { text }, undefined, input.scopeKey)).html),
+        } : {}),
         ...(!dependencies.ingestion?.embed && !dependencies.ingestion?.embedBatch ? {
           embedBatch: ({ texts, purpose = 'document' }) => d.embedBatch(texts, purpose),
         } : {}),
@@ -1300,7 +1309,11 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       else {
         const processed = await scan(processingInput, context.organizationKey);
         try {
-          const transformed = await representations({ content: processed.content }, input.name ?? `Scanned document ${d.clock().toISOString().slice(0, 10)}`, processed.documentKey, input.scopeKey);
+          const cleaned = await documentCleanup({ text: processed.content }, {
+            clean: async (text) => z.string().trim().min(1).parse((await action('document-cleanup', { text }, processed.documentKey, input.scopeKey)).html),
+            logger: () => undefined,
+          });
+          const transformed = await representations(cleaned, input.name ?? `Scanned document ${d.clock().toISOString().slice(0, 10)}`, processed.documentKey, input.scopeKey);
           const timestamp = now();
           const created = await repo.insertDocument({
             key: processed.documentKey,
@@ -1316,10 +1329,27 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           });
           result = { document: documentView(created) };
         } catch (error) {
-          const committed = await repo.getDocument(processed.documentKey).catch(() => null);
+          let committed: Document | null;
+          try {
+            committed = await repo.getDocument(processed.documentKey);
+          } catch (ownershipError) {
+            throw new ContentError('CONTENT_CONFLICT', 'Document ownership could not be verified after scanning failed; source images were retained for safe reconciliation.', tool, {
+              action: 'cleanup',
+              resourceKey: processed.documentKey,
+              retryable: true,
+              cause: new AggregateError([error, ownershipError], 'Document scanning and ownership verification failed.'),
+            });
+          }
           if (committed) result = { document: documentView(committed) };
           else {
-            await Promise.allSettled(processed.storageKeys.map((key) => d.storage.delete(key)));
+            const cleanup = await Promise.allSettled(processed.storageKeys.map((key) => d.storage.delete(key)));
+            const cleanupErrors = cleanup.flatMap((outcome) => outcome.status === 'rejected' ? [outcome.reason] : []);
+            if (cleanupErrors.length) throw new ContentError('CONTENT_CONFLICT', 'Document scanning failed and its source images could not be fully cleaned up.', tool, {
+              action: 'cleanup',
+              resourceKey: processed.documentKey,
+              retryable: true,
+              cause: new AggregateError([error, ...cleanupErrors], 'Document scanning and source cleanup failed.'),
+            });
             throw error;
           }
         }

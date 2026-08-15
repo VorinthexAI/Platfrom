@@ -5,6 +5,7 @@ export const DOCUMENT_ACTION_NAMES = [
   'document-validate',
   'storage-upload',
   'document-extract',
+  'document-cleanup',
   'document-generate-html',
   'document-generate-content',
   'document-embed',

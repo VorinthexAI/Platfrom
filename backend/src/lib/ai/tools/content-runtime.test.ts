@@ -100,6 +100,7 @@ describe('Content runtime', () => {
         return { documentKey: documentKeyForRequest(scanInput.scopeKey, scanInput.folderKey, scanInput.idempotencyKey), content: '## Page 1\n\nStore receipt\n\n## Page 2\n\nTotal: $42.00', storageKeys: ['scan/page-01.jpg', 'scan/page-02.jpg'] };
       },
       runAction: async (action: string, actionInput: any) => {
+        if (action === 'document-cleanup') return { html: `<p>${actionInput.text.replace('## Page 1', 'Page 1').replace('## Page 2', 'Page 2')}</p>` };
         if (action === 'document-generate-html') return documentGenerateHtml(actionInput);
         if (action === 'document-generate-content') return documentGenerateContent(actionInput);
         if (action === 'document-embed') return documentEmbed(actionInput, { embed: async () => embedding, dimensions: EMBEDDING_DIMENSIONS });
@@ -125,6 +126,51 @@ describe('Content runtime', () => {
       { page: 2, url: 'https://images.example/scan/page-02.jpg' },
     ] } } });
     expect(sources.results[0]?.data?.document).not.toHaveProperty('sourceStorageKeys');
+  });
+
+  test('reports a retryable cleanup failure when scan processing and source deletion both fail', async () => {
+    const f = fixture('moderator');
+    const documentKey = newId();
+    const deleted: string[] = [];
+    await expect(runContentTool('document.scan', {
+      scopeKey: f.scopeKey,
+      folderKey: f.folderKey,
+      pages: [{ filename: 'page.jpg', mimeType: 'image/jpeg', sizeBytes: 4, bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]) }],
+    }, f.context, {
+      repository: f.repository,
+      storage: {
+        async upload() { return { storageKey: '' }; },
+        async delete(key: string) { deleted.push(key); throw new Error('storage unavailable'); },
+        async download() { return { bytes: new Uint8Array() }; },
+        async copy() { return { storageKey: '' }; },
+      },
+      scanDocument: async () => ({ documentKey, content: 'Scanned body', storageKeys: ['scan/page-01.jpg'] }),
+      runAction: async (action: string) => { if (action === 'document-cleanup') throw new Error('cleanup unavailable'); throw new Error(`Unexpected action ${action}`); },
+    })).rejects.toMatchObject({ code: 'CONTENT_CONFLICT', action: 'cleanup', resourceKey: documentKey, retryable: true });
+    expect(deleted).toEqual(['scan/page-01.jpg']);
+  });
+
+  test('retains scan sources when ownership cannot be verified after processing fails', async () => {
+    const f = fixture('moderator');
+    const documentKey = newId();
+    const deleted: string[] = [];
+    const repository = { ...f.repository, async getDocument(key: string) { if (key === documentKey) throw new Error('database unavailable'); return f.repository.getDocument(key); } };
+    await expect(runContentTool('document.scan', {
+      scopeKey: f.scopeKey,
+      folderKey: f.folderKey,
+      pages: [{ filename: 'page.jpg', mimeType: 'image/jpeg', sizeBytes: 4, bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]) }],
+    }, f.context, {
+      repository,
+      storage: {
+        async upload() { return { storageKey: '' }; },
+        async delete(key: string) { deleted.push(key); },
+        async download() { return { bytes: new Uint8Array() }; },
+        async copy() { return { storageKey: '' }; },
+      },
+      scanDocument: async () => ({ documentKey, content: 'Scanned body', storageKeys: ['scan/page-01.jpg'] }),
+      runAction: async (action: string) => { if (action === 'document-cleanup') throw new Error('cleanup unavailable'); throw new Error(`Unexpected action ${action}`); },
+    })).rejects.toMatchObject({ code: 'CONTENT_CONFLICT', action: 'cleanup', resourceKey: documentKey, retryable: true });
+    expect(deleted).toEqual([]);
   });
 
   test('requires a resolved human principal for every registered tool', async () => {
@@ -1321,6 +1367,7 @@ describe('Content runtime', () => {
         runAction: async (action: string, input: any) => {
           if (action === 'ask' || action === 'enhance' || action === 'translate' || action === 'reason' || action === 'deep-reason') return { text: 'Generated text' };
           if (action === 'speak') return { audio: new Uint8Array([1]), mimeType: 'audio/mpeg' };
+          if (action === 'document-cleanup') return { html: `<p>${input.text}</p>` };
           if (action === 'document-generate-html') return documentGenerateHtml(input);
           if (action === 'document-generate-content') return documentGenerateContent(input);
           if (action === 'document-embed') return documentEmbed(input, { embed: async () => embedding, dimensions: EMBEDDING_DIMENSIONS });

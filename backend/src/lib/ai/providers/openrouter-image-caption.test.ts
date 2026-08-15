@@ -17,6 +17,32 @@ function completion(content: string) {
 }
 
 describe('OpenRouter image captions', () => {
+  test('cleans extracted document text with Qwen, strict output, and private routing', async () => {
+    let body: Record<string, any> = {};
+    globalThis.fetch = (async (_input, init) => {
+      body = JSON.parse(String(init?.body));
+      return Response.json(completion(JSON.stringify({ html: '<h1>Faktura</h1><p>Fakturans total är 42 €.</p>' })));
+    }) as typeof fetch;
+
+    const result = await createOpenRouterProvider({ apiKey: 'test-key' }).execute({
+      actionId: 'document-cleanup',
+      modelId: IMAGE_CAPTION_MODEL,
+      externalModelId: IMAGE_CAPTION_EXTERNAL_MODEL_ID,
+      input: { text: 'Fakturans   total ar 42 € . ###' },
+      organizationKey: 'organization-key',
+    });
+
+    expect(body.model).toBe(IMAGE_CAPTION_EXTERNAL_MODEL_ID);
+    expect(body.messages[0].content).toContain('original language or languages');
+    expect(body.messages[0].content).toContain('polished semantic HTML');
+    expect(body.messages[0].content).toContain('essential non-alphanumeric characters');
+    expect(body.messages[0].content).toContain('decorative separators and symbol-only fragments');
+    expect(body.messages[1]).toEqual({ role: 'user', content: 'Fakturans   total ar 42 € . ###' });
+    expect(body.response_format.json_schema.name).toBe('document_cleanup');
+    expect(body.provider).toEqual({ data_collection: 'deny' });
+    expect(result.output).toEqual({ html: '<h1>Faktura</h1><p>Fakturans total är 42 €.</p>' });
+  });
+
   test('sends all images in one ordered multimodal request and returns captions only', async () => {
     let body: Record<string, any> = {};
     globalThis.fetch = (async (_input, init) => {
@@ -77,6 +103,19 @@ describe('OpenRouter image captions', () => {
     globalThis.fetch = (async () => Response.json(completion('{not-json'))) as unknown as typeof fetch;
     await expect(createOpenRouterProvider({ apiKey: 'test-key' }).execute(request)).rejects.toMatchObject({ code: 'response_invalid' });
     globalThis.fetch = (async () => Response.json(completion(JSON.stringify({ captions: ['one', 'two'] })))) as unknown as typeof fetch;
+    await expect(createOpenRouterProvider({ apiKey: 'test-key' }).execute(request)).rejects.toMatchObject({ code: 'response_invalid' });
+    await expect(createOpenRouterProvider({ apiKey: 'test-key' }).execute({ ...request, externalModelId: 'other/model' })).rejects.toMatchObject({ code: 'unsupported_action' });
+  });
+
+  test('rejects malformed document cleanup output and the wrong model', async () => {
+    const request = {
+      actionId: 'document-cleanup' as const,
+      modelId: IMAGE_CAPTION_MODEL,
+      externalModelId: IMAGE_CAPTION_EXTERNAL_MODEL_ID,
+      input: { text: 'Extracted body' },
+      organizationKey: 'organization-key',
+    };
+    globalThis.fetch = (async () => Response.json(completion('{not-json'))) as unknown as typeof fetch;
     await expect(createOpenRouterProvider({ apiKey: 'test-key' }).execute(request)).rejects.toMatchObject({ code: 'response_invalid' });
     await expect(createOpenRouterProvider({ apiKey: 'test-key' }).execute({ ...request, externalModelId: 'other/model' })).rejects.toMatchObject({ code: 'unsupported_action' });
   });

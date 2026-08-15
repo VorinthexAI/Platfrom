@@ -194,6 +194,16 @@ export const imageCaptionOutputSchema = z.object({
 }).strict();
 export type ImageCaptionOutput = z.infer<typeof imageCaptionOutputSchema>;
 
+export const documentCleanupInputSchema = z.object({
+  text: z.string().trim().min(1).max(16_000),
+}).strict();
+export type DocumentCleanupInput = z.infer<typeof documentCleanupInputSchema>;
+
+export const documentCleanupOutputSchema = z.object({
+  html: z.string().trim().min(1).max(50_000),
+}).strict();
+export type DocumentCleanupOutput = z.infer<typeof documentCleanupOutputSchema>;
+
 export const visualIdentityDescriptionInputSchema = z.object({
   imageUrls: z.array(httpImageUrlSchema).min(1).max(8),
 }).strict();

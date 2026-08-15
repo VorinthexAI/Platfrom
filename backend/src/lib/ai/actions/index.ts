@@ -7,6 +7,7 @@ import { deepReasonAction } from './deep-reason';
 import { describeVisualIdentityAction } from './describe-visual-identity';
 import { deleteActionDefinition } from './delete';
 import { documentEmbedAction } from './document-embed';
+import { documentCleanupAction } from './document-cleanup';
 import { documentExtractAction } from './document-extract';
 import { documentGenerateContentAction } from './document-generate-content';
 import { documentGenerateHtmlAction } from './document-generate-html';
@@ -45,6 +46,7 @@ export { deepReasonAction } from './deep-reason';
 export { describeVisualIdentityAction } from './describe-visual-identity';
 export { deleteActionDefinition } from './delete';
 export { documentEmbedAction } from './document-embed';
+export { documentCleanupAction } from './document-cleanup';
 export { documentExtractAction } from './document-extract';
 export { documentGenerateContentAction } from './document-generate-content';
 export { documentGenerateHtmlAction } from './document-generate-html';
@@ -92,6 +94,7 @@ export const ACTION_DEFINITIONS: readonly ActionDefinition[] = [
   generateSpeechAction, analyzeAudioAction, generateMusicAction, orchestratorChatAction,
   documentValidateAction, storageUploadAction, documentExtractAction, documentGenerateHtmlAction,
   documentGenerateContentAction, documentEmbedAction, documentInsertAction, enhanceAction, translateAction, captionImageAction, describeVisualIdentityAction,
+  documentCleanupAction,
 ];
 export const getActionDefinition = (id: ActionId) => ACTION_DEFINITIONS.find((definition) => definition.id === id);
 
