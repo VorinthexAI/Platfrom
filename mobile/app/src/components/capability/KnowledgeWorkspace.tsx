@@ -2853,7 +2853,6 @@ export function KnowledgeWorkspace() {
                 </View>
               ) : (
                 <View style={styles.rootDocuments}>
-                  {folderContentTab === "files" ? visibleUploadBatch.map((item) => <Button accessibilityLabel={`Uploading ${item.name}`} contentMode="raw" disabled key={item.id} size="sm" style={[styles.documentButton, styles.uploadingFileButton]} variant="secondary"><FileIcon size="sm" variant="muted" /><Text numberOfLines={1} style={[styles.documentButtonLabel, styles.uploadingFileLabel]}>{item.name}</Text><Spinner size="small" variant="muted" /></Button>) : null}
                   {rootTabDocuments.length ? rootTabDocuments.map((document) => (
                     <Button accessibilityState={{ selected: selectedDocuments.some(({ key }) => key === document.key) }} contentMode="raw" key={document.key} onLongPress={() => handleDocumentLongPress(document)} onPress={() => handleDocumentPress(document)} size="sm" style={[styles.documentButton, selectedDocuments.some(({ key }) => key === document.key) && styles.selectedItem]} variant="secondary">
                       <FileIcon size="sm" />
@@ -2861,6 +2860,7 @@ export function KnowledgeWorkspace() {
                       <ScannedBadge document={document} />
                     </Button>
                   )) : visibleUploadBatch.length === 0 && !error ? <View style={styles.folderEmptyState}><Text style={styles.empty}>{folderContentTab === "files" ? "No files here yet." : "No documents here yet."}</Text><Button accessibilityLabel={folderContentTab === "files" ? "Upload files" : "Create document"} contentMode="raw" onPress={() => { if (folderContentTab === "files") void openDestinationPicker("upload"); else startNewNote(); }} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button></View> : null}
+                  {folderContentTab === "files" ? visibleUploadBatch.map((item) => <View accessibilityLabel={`Uploading ${item.name}`} accessibilityRole="progressbar" key={item.id} style={[styles.documentSkeleton, styles.skeletonCard]} />) : null}
                 </View>
               )}
             </View>
@@ -2912,7 +2912,6 @@ export function KnowledgeWorkspace() {
               </View>
             ) : (
               <View style={[styles.folderDocuments, styles.folderTabContent]}>
-                {folderContentTab === "files" ? visibleUploadBatch.map((item) => <Button accessibilityLabel={`Uploading ${item.name}`} contentMode="raw" disabled key={item.id} size="sm" style={[styles.documentButton, styles.uploadingFileButton]} variant="secondary"><FileIcon size="sm" variant="muted" /><Text numberOfLines={1} style={[styles.documentButtonLabel, styles.uploadingFileLabel]}>{item.name}</Text><Spinner size="small" variant="muted" /></Button>) : null}
                 {folderTabDocuments.length ? folderTabDocuments.map((document) => (
                   <Button accessibilityState={{ selected: selectedDocuments.some(({ key }) => key === document.key) }} contentMode="raw" key={document.key} onLongPress={() => handleDocumentLongPress(document)} onPress={() => handleDocumentPress(document)} size="sm" style={[styles.documentButton, selectedDocuments.some(({ key }) => key === document.key) && styles.selectedItem]} variant="secondary">
                     <FileIcon size="sm" />
@@ -2920,6 +2919,7 @@ export function KnowledgeWorkspace() {
                     <ScannedBadge document={document} />
                   </Button>
                 )) : visibleUploadBatch.length === 0 ? <View style={styles.folderEmptyState}><Text style={styles.empty}>{folderContentTab === "files" ? "No files here yet." : "No documents here yet."}</Text><Button accessibilityLabel={folderContentTab === "files" ? "Upload files" : "Create document"} contentMode="raw" onPress={() => { if (folderContentTab === "files") void openDestinationPicker("upload"); else startNewNote(); }} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button></View> : null}
+                {folderContentTab === "files" ? visibleUploadBatch.map((item) => <View accessibilityLabel={`Uploading ${item.name}`} accessibilityRole="progressbar" key={item.id} style={[styles.documentSkeleton, styles.skeletonCard]} />) : null}
               </View>
             )}
           </View>
@@ -3162,6 +3162,8 @@ export function KnowledgeWorkspace() {
         ) : null}
         {activeSheet === "folderDetails" && selectedFolder ? (
           <ScrollView contentContainerStyle={styles.folderDetailsForm} showsVerticalScrollIndicator={false}>
+            <TextInput accessibilityLabel="Folder name" maxLength={255} onChangeText={setFolderDetailsName} placeholder="Folder name" value={folderDetailsName} />
+            <TextInput accessibilityLabel="Folder description" maxLength={2000} multiline onChangeText={setFolderDetailsDescription} placeholder="What belongs in this folder?" style={styles.folderDescriptionInput} textAlignVertical="top" value={folderDetailsDescription} />
             <View style={styles.folderDetailsCoverPreview}>
               {(folderDetailsCoverAsset === undefined ? selectedFolder.coverUrl : folderDetailsCoverAsset?.uri)
                 ? <Image contentFit="cover" source={folderDetailsCoverAsset === undefined ? selectedFolder.coverUrl : folderDetailsCoverAsset?.uri} style={styles.folderCover} />
@@ -3171,8 +3173,6 @@ export function KnowledgeWorkspace() {
               <Button onPress={() => void chooseFolderCover()} size="md" style={styles.folderDetailsAction} variant="secondary">{(folderDetailsCoverAsset === undefined ? selectedFolder.coverUrl : folderDetailsCoverAsset?.uri) ? "Change cover" : "Set cover"}</Button>
               {(folderDetailsCoverAsset === undefined ? selectedFolder.coverUrl : folderDetailsCoverAsset?.uri) ? <Button onPress={clearFolderCover} size="md" style={styles.folderDetailsAction} variant="secondary">Remove cover</Button> : null}
             </View>
-            <TextInput accessibilityLabel="Folder name" maxLength={255} onChangeText={setFolderDetailsName} placeholder="Folder name" value={folderDetailsName} />
-            <TextInput accessibilityLabel="Folder description" maxLength={2000} multiline onChangeText={setFolderDetailsDescription} placeholder="What belongs in this folder?" style={styles.folderDescriptionInput} textAlignVertical="top" value={folderDetailsDescription} />
             <Button onPress={() => setFolderDetailsFavorite((current) => !current)} size="lg" variant={folderDetailsFavorite ? "primary" : "secondary"}>{folderDetailsFavorite ? "Remove from favorites" : "Add to favorites"}</Button>
           </ScrollView>
         ) : null}
@@ -3375,8 +3375,6 @@ const styles = StyleSheet.create({
   documentButtonLabel: { flex: 1, color: palette.silver100, fontFamily: fonts.medium, fontSize: 12, textAlign: "left" },
   scannedBadge: { marginRight: -6, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, backgroundColor: palette.panel },
   scannedBadgeText: { color: palette.muted, fontFamily: fonts.medium, fontSize: 9, letterSpacing: 0.4 },
-  uploadingFileButton: { opacity: 0.62 },
-  uploadingFileLabel: { color: palette.silver500 },
   sectionLabel: { marginTop: spacing.sm, color: palette.silver500, fontFamily: fonts.medium, fontSize: 9, letterSpacing: tracking.micro },
   documentRow: { justifyContent: "flex-start" },
   folderEmpty: { flexGrow: 1, minHeight: 220, alignItems: "center", justifyContent: "center" },
