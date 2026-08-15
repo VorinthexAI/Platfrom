@@ -252,7 +252,7 @@ export async function documentExtract(input: NormalizedDocument & { storageKey: 
   return observed('document-extract', { scopeKey: input.scopeKey, folderKey: input.folderKey, extension: input.extension, mimeType: input.mimeType, sizeBytes: input.sizeBytes }, options.logger ?? defaultLogger, async () => {
     try {
       if (input.extension === 'pdf') {
-        const result = extractionResultSchema.parse(await (options.ocr ?? awsTextractDocumentOcr).extract(input.storageKey));
+        const result = extractionResultSchema.parse(await (options.ocr ?? awsTextractDocumentOcr).extract(input.storageKey, input.fileInput));
         if (result.extractedText.length > maxExtractedCharacters()) throw new Error('Extracted document content exceeds the configured limit.');
         if (!result.extractedText.trim()) throw new Error('The document contains no extractable text.');
         return result;

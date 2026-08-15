@@ -112,6 +112,8 @@ locals {
     ARANGO_ROOT_PASSWORD       = random_password.graph_db_password.result
     REDIS_URL                  = "redis://localhost:6379"
     S3_BUCKET                  = module.storage.s3_bucket_name
+    CONTENT_TEXTRACT_BUCKET    = aws_s3_bucket.textract_staging.bucket
+    CONTENT_TEXTRACT_REGION    = "eu-west-1"
     API_KEY                    = random_password.api_key.result
     ACCESS_TOKEN_SECRET        = random_password.access_token_secret.result
     TOTP_SECRET_ENCRYPTION_KEY = random_password.totp_secret_encryption_key.result
@@ -125,6 +127,8 @@ locals {
     "ARANGO_ROOT_PASSWORD",
     "REDIS_URL",
     "S3_BUCKET",
+    "CONTENT_TEXTRACT_BUCKET",
+    "CONTENT_TEXTRACT_REGION",
     "API_KEY",
     "ACCESS_TOKEN_SECRET",
     "TOTP_SECRET_ENCRYPTION_KEY"

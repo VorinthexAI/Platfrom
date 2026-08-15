@@ -5,6 +5,7 @@ import {
   TextractClient,
   type Block,
 } from '@aws-sdk/client-textract';
+import { DeleteObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { createHash } from 'node:crypto';
 import { S3_BUCKET } from '@/lib/s3';
 import type { ExtractionResult } from './schemas';
@@ -15,15 +16,36 @@ function positiveLimit(value: unknown, fallback: number): number {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+const documentTextractAccessKeyId = process.env.CONTENT_TEXTRACT_AWS_ACCESS_KEY_ID ?? process.env.BEDROCK_AWS_ACCESS_KEY_ID ?? process.env.AWS_ACCESS_KEY_ID;
+const documentTextractSecretAccessKey = process.env.CONTENT_TEXTRACT_AWS_SECRET_ACCESS_KEY ?? process.env.BEDROCK_AWS_SECRET_ACCESS_KEY ?? process.env.AWS_SECRET_ACCESS_KEY;
+const documentTextractSessionToken = process.env.CONTENT_TEXTRACT_AWS_SESSION_TOKEN ?? process.env.BEDROCK_AWS_SESSION_TOKEN ?? process.env.AWS_SESSION_TOKEN;
+const documentTextractUsesAwsCredentials = Boolean(process.env.CONTENT_TEXTRACT_AWS_ACCESS_KEY_ID || process.env.BEDROCK_AWS_ACCESS_KEY_ID);
+const documentTextractRegion = process.env.CONTENT_TEXTRACT_REGION ?? (documentTextractUsesAwsCredentials ? undefined : process.env.AWS_ENDPOINT_URL ? process.env.AWS_REGION : undefined) ?? 'eu-west-1';
+const documentTextractEndpoint = process.env.CONTENT_TEXTRACT_ENDPOINT ?? (documentTextractUsesAwsCredentials ? undefined : process.env.AWS_ENDPOINT_URL);
+const documentTextractCredentials = documentTextractAccessKeyId ? {
+  accessKeyId: documentTextractAccessKeyId,
+  secretAccessKey: documentTextractSecretAccessKey ?? '',
+  ...(documentTextractSessionToken && documentTextractSessionToken !== 'undefined' ? { sessionToken: documentTextractSessionToken } : {}),
+} : undefined;
+
 const textract = new TextractClient({
-  region: process.env.AWS_REGION ?? 'eu-north-1',
-  endpoint: process.env.AWS_ENDPOINT_URL,
-  credentials: process.env.AWS_ACCESS_KEY_ID ? {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? '',
-    ...(process.env.AWS_SESSION_TOKEN ? { sessionToken: process.env.AWS_SESSION_TOKEN } : {}),
-  } : undefined,
+  region: documentTextractRegion,
+  endpoint: documentTextractEndpoint,
+  credentials: documentTextractCredentials,
 });
+
+const textractStorage = new S3Client({
+  region: documentTextractRegion,
+  endpoint: documentTextractEndpoint,
+  forcePathStyle: Boolean(documentTextractEndpoint),
+  credentials: documentTextractCredentials,
+});
+
+const documentTextractBucket = process.env.CONTENT_TEXTRACT_BUCKET;
+
+function stagedDocumentKey(storageKey: string) {
+  return `textract/${createHash('sha256').update(storageKey).digest('hex')}.pdf`;
+}
 
 const imageTextractAccessKeyId = process.env.CONTENT_SCAN_TEXTRACT_AWS_ACCESS_KEY_ID ?? process.env.BEDROCK_AWS_ACCESS_KEY_ID ?? process.env.AWS_ACCESS_KEY_ID;
 const imageTextractSecretAccessKey = process.env.CONTENT_SCAN_TEXTRACT_AWS_SECRET_ACCESS_KEY ?? process.env.BEDROCK_AWS_SECRET_ACCESS_KEY ?? process.env.AWS_SECRET_ACCESS_KEY;
@@ -56,7 +78,7 @@ const wait = (milliseconds: number, signal: AbortSignal) => new Promise<void>((r
 });
 
 export interface DocumentOcr {
-  extract(storageKey: string): Promise<ExtractionResult>;
+  extract(storageKey: string, bytes?: Uint8Array): Promise<ExtractionResult>;
 }
 
 export interface DocumentImageOcr {
@@ -153,18 +175,24 @@ export function textractBlocksToExtractionResult(blocks: Block[]): ExtractionRes
 }
 
 export const awsTextractDocumentOcr: DocumentOcr = {
-  async extract(storageKey) {
+  async extract(storageKey, bytes) {
     const timeoutMs = positiveLimit(process.env.CONTENT_TEXTRACT_TIMEOUT_MS, 300_000);
     const maxCharacters = positiveLimit(process.env.CONTENT_MAX_EXTRACTED_CHARACTERS, 10_000_000);
     const maxBlocks = positiveLimit(process.env.CONTENT_TEXTRACT_MAX_BLOCKS, 250_000);
     const deadline = Date.now() + timeoutMs;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const bucket = documentTextractBucket ?? S3_BUCKET;
+    const objectKey = documentTextractBucket ? stagedDocumentKey(storageKey) : storageKey;
     try {
+      if (documentTextractBucket) {
+        if (!bytes?.byteLength) throw new Error('PDF bytes are required for cross-region Textract staging.');
+        await textractStorage.send(new PutObjectCommand({ Bucket: bucket, Key: objectKey, Body: bytes, ContentType: 'application/pdf' }), { abortSignal: controller.signal });
+      }
       const started = await textract.send(new StartDocumentAnalysisCommand({
-        DocumentLocation: { S3Object: { Bucket: S3_BUCKET, Name: storageKey } },
+        DocumentLocation: { S3Object: { Bucket: bucket, Name: objectKey } },
         FeatureTypes: ['LAYOUT', 'TABLES'],
-        ClientRequestToken: createHash('sha256').update(S3_BUCKET).update('\0').update(storageKey).digest('hex'),
+        ClientRequestToken: createHash('sha256').update(bucket).update('\0').update(objectKey).digest('hex'),
       }), { abortSignal: controller.signal });
       if (!started.JobId) throw new Error('AWS Textract did not return a job identifier.');
 
@@ -205,6 +233,7 @@ export const awsTextractDocumentOcr: DocumentOcr = {
       return result;
     } finally {
       clearTimeout(timeout);
+      if (documentTextractBucket) await textractStorage.send(new DeleteObjectCommand({ Bucket: bucket, Key: objectKey })).catch(() => undefined);
     }
   },
 };

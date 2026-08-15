@@ -141,7 +141,8 @@ resource "aws_iam_role_policy" "early_app_archive_processing" {
         Resource = [
           "${module.storage.s3_bucket_arn}/archive/*",
           "${module.storage.s3_bucket_arn}/content/*",
-          "${module.storage.s3_bucket_arn}/pending/document-processing/*"
+          "${module.storage.s3_bucket_arn}/pending/document-processing/*",
+          "${aws_s3_bucket.textract_staging.arn}/textract/*"
         ]
       },
       {
@@ -222,7 +223,7 @@ resource "aws_iam_role_policy" "document_worker_runtime" {
       {
         Effect   = "Allow"
         Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
-        Resource = ["${module.storage.s3_bucket_arn}/content/*", "${module.storage.s3_bucket_arn}/pending/document-processing/*"]
+        Resource = ["${module.storage.s3_bucket_arn}/content/*", "${module.storage.s3_bucket_arn}/pending/document-processing/*", "${aws_s3_bucket.textract_staging.arn}/textract/*"]
       },
       { Effect = "Allow", Action = ["textract:StartDocumentAnalysis", "textract:GetDocumentAnalysis", "textract:AnalyzeDocument"], Resource = ["*"] }
     ]
@@ -268,7 +269,9 @@ resource "aws_ecs_task_definition" "document_worker" {
         "ARANGO_USERNAME",
         "OPENROUTER_API_KEY",
         "ORCHESTRATION_CREDENTIALS_MASTER_KEY",
-        "S3_BUCKET"
+        "S3_BUCKET",
+        "CONTENT_TEXTRACT_BUCKET",
+        "CONTENT_TEXTRACT_REGION"
       ] : { name = key, valueFrom = "${local.ssm_path}/${key}" }
       ], [
       { name = "REDIS_URL", valueFrom = "${local.ssm_path}/JOB_REDIS_URL" },
@@ -310,4 +313,53 @@ resource "aws_eip" "early_app" {
 resource "aws_eip_association" "early_app" {
   allocation_id = aws_eip.early_app.id
   instance_id   = aws_instance.early_app.id
+}
+resource "aws_s3_bucket" "textract_staging" {
+  provider = aws.eu_west_1
+  bucket   = "${var.s3_bucket_name}-textract-eu-west-1"
+
+  tags = merge(local.tags, { Name = "${var.name_prefix}-textract-staging" })
+}
+
+resource "aws_s3_bucket_public_access_block" "textract_staging" {
+  provider = aws.eu_west_1
+  bucket   = aws_s3_bucket.textract_staging.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "textract_staging" {
+  provider = aws.eu_west_1
+  bucket   = aws_s3_bucket.textract_staging.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "textract_staging" {
+  provider = aws.eu_west_1
+  bucket   = aws_s3_bucket.textract_staging.id
+
+  rule {
+    id     = "expire-textract-inputs"
+    status = "Enabled"
+
+    filter {
+      prefix = "textract/"
+    }
+
+    expiration {
+      days = 1
+    }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 1
+    }
+  }
 }

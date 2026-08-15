@@ -37,3 +37,14 @@ provider "aws" {
     tags = local.tags
   }
 }
+
+# Textract is unavailable in eu-north-1. PDF analysis and its temporary S3
+# objects must use the same supported region.
+provider "aws" {
+  alias  = "eu_west_1"
+  region = "eu-west-1"
+
+  default_tags {
+    tags = local.tags
+  }
+}
