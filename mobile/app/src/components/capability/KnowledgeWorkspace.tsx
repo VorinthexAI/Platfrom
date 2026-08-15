@@ -2075,7 +2075,11 @@ export function KnowledgeWorkspace() {
     setDestinationAction(action);
     const sourceFolderKey = action === "upload"
       ? currentFolder?.key
-      : directSelection?.folder?.parentFolderKey ?? directSelection?.document?.folderKey ?? currentFolder?.key;
+      : directSelection?.folder
+        ? directSelection.folder.parentFolderKey
+        : directSelection?.document
+          ? directSelection.document.folderKey
+          : currentFolder?.key;
     setDestinationInitialFolderKey(action === "upload" ? undefined : sourceFolderKey ?? null);
     setDestinationBlockedFolderKeys([]);
     setDestinationStack([]);
