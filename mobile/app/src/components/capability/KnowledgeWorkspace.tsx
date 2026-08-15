@@ -119,7 +119,7 @@ import {
   type ContentLocation,
 } from "@/lib/content-query-cache";
 import { invalidateAssistantChanges } from "@/lib/workspace-query-cache";
-import { saveBase64Download, saveTemporaryBase64File, saveTextDownload } from "@/lib/device-download";
+import { openTemporaryBase64File, saveBase64Download, saveTemporaryBase64File, saveTextDownload } from "@/lib/device-download";
 import { fetchGalleryUploadStatus, uploadGalleryImages } from "@/lib/gallery-client";
 import { BOOK_AUDIO_MODE } from "@/lib/book-audio";
 import { audioTimelineDuration, audioTimelinePosition, formatAudioTime, resolveAudioTimelinePosition } from "@/lib/audio-playback-timeline";
@@ -252,7 +252,6 @@ export function KnowledgeWorkspace() {
   const [filePreview, setFilePreview] = useState<ContentDocumentPreview>();
   const [filePreviewError, setFilePreviewError] = useState<string>();
   const [filePreviewUri, setFilePreviewUri] = useState<string>();
-  const [fileContent, setFileContent] = useState("");
   const [documentSearchQuery, setDocumentSearchQuery] = useState("");
   const [documentSearchRevision, setDocumentSearchRevision] = useState(0);
   const [documentSearchLayoutRevision, setDocumentSearchLayoutRevision] = useState(0);
@@ -631,10 +630,7 @@ export function KnowledgeWorkspace() {
       if (hasContentContext && draftDocumentKey && !pendingCreateFrom(draft.pendingCreate)) {
         const remote = await getContentDocument(queryClient, contentContext, draftDocumentKey);
         if (revision.current !== initialRevision || draftIdentityRef.current !== expectedDraftIdentity) return;
-        if (remote.extension) {
-          localDraftFile.delete();
-          return;
-        }
+        if (remote.extension) setSelectedDocument(remote);
       }
       if (typeof draft.title === "string") {
         titleRef.current = draft.title;
@@ -694,7 +690,6 @@ export function KnowledgeWorkspace() {
         stopNarration();
         previewFileRef.current?.delete();
         previewFileRef.current = undefined;
-        setFileContent("");
         setFilePreview(undefined);
         setFilePreviewUri(undefined);
         setDocumentSearchQuery("");
@@ -767,7 +762,6 @@ export function KnowledgeWorkspace() {
       setResults(undefined);
       setSelectedSummary(undefined);
       setSelectedDocument(undefined);
-      setFileContent("");
       setFilePreview(undefined);
       setFilePreviewError(undefined);
       setFilePreviewUri(undefined);
@@ -1277,10 +1271,6 @@ export function KnowledgeWorkspace() {
 
   const openNote = async (document: ContentDocument, reportError = setError, preserveSearch = false) => {
     if (!hasContentContext) return false;
-    if (document.extension) {
-      reportError("Files open in the file viewer, not the notes editor.");
-      return false;
-    }
     if (dirty.current || saveInFlight.current) {
       reportError("Wait for the current document to save before opening another.");
       return false;
@@ -1309,16 +1299,9 @@ export function KnowledgeWorkspace() {
     try {
       const opened = await getContentDocument(queryClient, contentContext, document.key);
       if (generation !== navigationGeneration.current) return false;
-      if (opened.extension) {
-        workspaceModeRef.current = previousMode;
-        setWorkspaceMode(previousMode);
-        setSelectedDocument(opened);
-        if (sheetOpen) pushSheet("documentActions");
-        else openSheet("documentActions");
-        return false;
-      }
       editorSession.current += 1;
       applyRemoteDocument(opened);
+      setSelectedDocument(opened);
       workspaceModeRef.current = "editor";
       setWorkspaceMode("editor");
       setSelectedSummary(undefined);
@@ -1338,44 +1321,6 @@ export function KnowledgeWorkspace() {
   };
 
   const openArchiveDocument = async (document: ContentDocument, fromSheet = false, preserveSearch = false) => {
-    if (document.extension) {
-      const generation = ++navigationGeneration.current;
-      stopNarration();
-      setSelectedDocument(document);
-      setFilePreview(undefined);
-      setFilePreviewError(undefined);
-      setFilePreviewUri(undefined);
-      setFileContent("");
-      setOpeningDocumentKey(document.key);
-      workspaceModeRef.current = "viewer";
-      setWorkspaceMode("viewer");
-      if (fromSheet) closeSheet();
-      try {
-        const [preview, detail] = await Promise.all([
-          getContentDocumentPreview(queryClient, contentContext, document.key),
-          getContentDocument(queryClient, contentContext, document.key),
-        ]);
-        if (generation !== navigationGeneration.current) return false;
-        setFilePreview(preview);
-        setFileContent(detail.content);
-        setSelectedDocument(preview);
-        if (preview.extension === "pdf") {
-          const original = await downloadContentDocument(preview.key, "original");
-          if (generation !== navigationGeneration.current) return false;
-          previewFileRef.current?.delete();
-          const file = await saveTemporaryBase64File(original.fileName, original.content);
-          if (generation !== navigationGeneration.current) { file.delete(); return false; }
-          previewFileRef.current = file;
-          setFilePreviewUri(file.uri);
-        }
-      } catch (cause) {
-        if (generation === navigationGeneration.current) setFilePreviewError(cause instanceof Error ? cause.message : "The file could not be opened.");
-        return false;
-      } finally {
-        if (generation === navigationGeneration.current) setOpeningDocumentKey(undefined);
-      }
-      return true;
-    }
     const opened = await openNote(document, fromSheet ? setSheetError : setError, preserveSearch);
     if (opened) {
       if (fromSheet) closeSheet();
@@ -1808,8 +1753,7 @@ export function KnowledgeWorkspace() {
     setFilePreview(undefined);
     setFilePreviewError(undefined);
     setFilePreviewUri(undefined);
-    setFileContent("");
-    const nextMode = folderStack.length ? "folder" : "folders";
+    const nextMode = documentKeyRef.current ? "editor" : folderStack.length ? "folder" : "folders";
     workspaceModeRef.current = nextMode;
     setWorkspaceMode(nextMode);
   };
@@ -2920,6 +2864,40 @@ export function KnowledgeWorkspace() {
     }
   };
 
+  const showOriginal = async () => {
+    if (!selectedDocument?.extension) return;
+    const target = selectedDocument;
+    const generation = ++documentActionGeneration.current;
+    setDocumentActionLoading("original");
+    setSheetError(undefined);
+    try {
+      const [download, preview] = await Promise.all([
+        downloadContentDocument(target.key, "original"),
+        target.extension === "pdf" ? getContentDocumentPreview(queryClient, contentContext, target.key) : Promise.resolve(undefined),
+      ]);
+      if (generation !== documentActionGeneration.current) return;
+      previewFileRef.current?.delete();
+      const file = target.extension === "pdf"
+        ? await saveTemporaryBase64File(download.fileName, download.content)
+        : await openTemporaryBase64File(download.fileName, download.mimeType, download.content);
+      if (generation !== documentActionGeneration.current) { file.delete(); return; }
+      previewFileRef.current = file;
+      if (target.extension === "pdf") {
+        setFilePreview(preview);
+        setFilePreviewError(undefined);
+        setFilePreviewUri(file.uri);
+        workspaceModeRef.current = "viewer";
+        setWorkspaceMode("viewer");
+      }
+      setDocumentActionLoading(undefined);
+      closeSheet();
+    } catch (cause) {
+      if (generation === documentActionGeneration.current) setSheetError(cause instanceof Error ? cause.message : "The original file could not be opened.");
+    } finally {
+      if (generation === documentActionGeneration.current) setDocumentActionLoading(undefined);
+    }
+  };
+
   const openScanSources = async (document = selectedDocument) => {
     if (!document?.sourceImageCount) return;
     setSelectedDocument(document);
@@ -3399,6 +3377,7 @@ export function KnowledgeWorkspace() {
         {activeSheet === "documentActions" && selectedDocument ? (
           <>
             <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={openDocumentDetails} style={styles.sheetAction}>Edit</BottomSheetItem>
+            {selectedDocument.extension ? <BottomSheetItem disabled={Boolean(documentActionLoading)} loading={documentActionLoading === "original"} onPress={() => void showOriginal()} style={styles.sheetAction}>Show original</BottomSheetItem> : null}
             <BottomSheetItem disabled={Boolean(documentActionLoading)} loading={documentActionLoading === "listen"} onPress={() => void listenToSelectedDocument()} style={styles.sheetAction}>Listen</BottomSheetItem>
             <BottomSheetItem disabled={Boolean(documentActionLoading)} loading={documentActionLoading === "download"} onPress={() => void downloadOriginal()} style={styles.sheetAction}>Download</BottomSheetItem>
             {selectedDocument.sourceImageCount ? <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void openScanSources()} style={styles.sheetAction}>View scanned pages</BottomSheetItem> : null}

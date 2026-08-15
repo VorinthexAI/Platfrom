@@ -59,3 +59,16 @@ export async function saveTemporaryBase64File(fileName: string, content: string)
   await writeAsStringAsync(file.uri, content, { encoding: EncodingType.Base64 });
   return file;
 }
+
+export async function openTemporaryBase64File(fileName: string, mimeType: string, content: string) {
+  const file = await saveTemporaryBase64File(fileName, content);
+  const path = file.uri.replace(/^file:\/\//, "");
+  try {
+    if (Platform.OS === "android") await ReactNativeBlobUtil.android.actionViewIntent(path, mimeType, `Open ${fileName}`);
+    else await ReactNativeBlobUtil.ios.openDocument(path);
+    return file;
+  } catch (cause) {
+    file.delete();
+    throw cause;
+  }
+}
