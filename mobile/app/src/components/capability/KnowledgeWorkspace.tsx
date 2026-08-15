@@ -2968,7 +2968,7 @@ export function KnowledgeWorkspace() {
       {singleFolderDelete ? null : <><Button disabled={bulkLoading} loading={bulkLoading} onPress={() => void deleteContentSelection()} size="lg" variant="primary">Delete</Button>{close(bulkLoading)}</>}
     </>;
     if (activeSheet === "destinationBrowser") return <>
-      {destinationAction !== "upload" && destinationAtSource ? null : <Button disabled={destinationTransferDisabled} onPress={() => { if (destinationAction === "upload") goBackSheet(); else void selectDestination(); }} size="lg" style={destinationTransferDisabled ? styles.disabledPrimaryAction : undefined} variant="primary">{destinationAction === "upload" ? "Choose folder" : destinationAction === "move" ? "Move here" : "Copy here"}</Button>}
+      {destinationAction !== "upload" && (destinationAtSource || destinationIsSelectedFolder) ? null : <Button disabled={destinationTransferDisabled} onPress={() => { if (destinationAction === "upload") goBackSheet(); else void selectDestination(); }} size="lg" style={destinationTransferDisabled ? styles.disabledPrimaryAction : undefined} variant="primary">{destinationAction === "upload" ? "Choose folder" : destinationAction === "move" ? "Move here" : "Copy here"}</Button>}
       {close(bulkLoading)}
     </>;
     if (activeSheet === "destination" && destinationAction === "upload") return <>
