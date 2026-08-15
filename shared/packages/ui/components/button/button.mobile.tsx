@@ -88,7 +88,7 @@ function ChromeGradient({ muted = false }: { muted?: boolean }) {
               {stops}
             </LinearGradient>
           </Defs>
-          <Rect fill={`url(#${gradientId})`} height={size.height} width={size.width} />
+          <Rect fill={`url(#${gradientId})`} height={size.height} rx={size.height / 2} ry={size.height / 2} width={size.width} />
         </Svg>
       ) : null}
     </View>

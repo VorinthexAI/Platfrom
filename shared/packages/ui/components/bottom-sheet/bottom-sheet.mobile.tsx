@@ -377,6 +377,6 @@ const styles = StyleSheet.create({
   },
   content: { gap: 6 },
   flexContent: { flex: 1 },
-  footer: { gap: 8, marginHorizontal: -20, paddingHorizontal: 20, paddingTop: 16, backgroundColor: colors.page },
+  footer: { gap: 8, marginHorizontal: -20, paddingHorizontal: 22, paddingBottom: 2, paddingTop: 18, backgroundColor: colors.page },
   item: { justifyContent: "flex-start", width: "100%" },
 });
