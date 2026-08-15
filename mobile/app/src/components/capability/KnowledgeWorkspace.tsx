@@ -132,6 +132,7 @@ type FolderContentTab = "folders" | "documents" | "files";
 type ArchiveSheet = "create" | "folder" | "library" | "documents" | "folders" | "enhance" | "historyChooser" | "versions" | "audioVersions" | "documentActions" | "documentDetails" | "deleteDocument" | "scanSources" | "destination" | "destinationBrowser" | "summary" | "folderActions" | "folderDetails" | "bulkActions" | "bulkDelete";
 type DestinationAction = "upload" | "move" | "copy";
 type UploadBatchItem = { id: string; mutationKey: string; file: File; name: string; status: "pending" | "uploading" | "success" | "error"; error?: string };
+type ProcessingScanItem = { id: string; folderKey?: string; name: string };
 type NarrationChunk = { durationMs: number; url: string };
 type PendingCreate = { name: string; content: string; folderKey?: string; mutationKey: string };
 type LocalDraft = {
@@ -183,6 +184,14 @@ function ScannedBadge({ document }: { document: ContentDocument }) {
   return document.sourceImageCount ? <Badge accessibilityLabel={`Scanned from ${document.sourceImageCount} ${document.sourceImageCount === 1 ? "image" : "images"}`} style={styles.scannedBadge}><Text style={styles.scannedBadgeText}>Scanned</Text></Badge> : null;
 }
 
+function ProcessingDocumentButton({ name }: { name: string }) {
+  return <Button accessibilityLabel={`Processing ${name}`} accessibilityState={{ busy: true }} contentMode="raw" disabled size="sm" style={styles.documentButton} variant="secondary">
+    <FileIcon size="sm" />
+    <Text numberOfLines={1} style={styles.documentButtonLabel}>{name}</Text>
+    <Spinner size="small" variant="muted" />
+  </Button>;
+}
+
 export function KnowledgeWorkspace() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
@@ -224,6 +233,7 @@ export function KnowledgeWorkspace() {
   const [scanBusy, setScanBusy] = useState(false);
   const [scanError, setScanError] = useState<string>();
   const [scanFolderKey, setScanFolderKey] = useState<string>();
+  const [processingScan, setProcessingScan] = useState<ProcessingScanItem>();
   const [uploadBatch, setUploadBatch] = useState<UploadBatchItem[]>([]);
   const [uploadFolderKey, setUploadFolderKey] = useState<string>();
   const [versions, setVersions] = useState<ContentDocumentVersion[]>([]);
@@ -337,6 +347,7 @@ export function KnowledgeWorkspace() {
   const instructionGeneration = useRef(0);
   const restoreGeneration = useRef(0);
   const uploadGeneration = useRef(0);
+  const scanGeneration = useRef(0);
   const uploadBatchRef = useRef<UploadBatchItem[]>([]);
   const documentActionGeneration = useRef(0);
   const folderActionGeneration = useRef(0);
@@ -394,6 +405,7 @@ export function KnowledgeWorkspace() {
   const visibleUploadBatch = uploadFolderKey === currentFolder?.key
     ? uploadBatch.filter(({ status }) => status === "pending" || status === "uploading")
     : [];
+  const visibleProcessingScan = processingScan?.folderKey === currentFolder?.key ? processingScan : undefined;
   const destinationTargetKey = destinationFolder?.key ?? null;
   const destinationAtInitialLocation = destinationInitialFolderKey !== undefined && destinationTargetKey === destinationInitialFolderKey;
   const destinationIsBlocked = typeof destinationTargetKey === "string" && destinationBlockedFolderKeys.includes(destinationTargetKey);
@@ -722,6 +734,7 @@ export function KnowledgeWorkspace() {
       folderActionGeneration.current += 1;
       restoreGeneration.current += 1;
       uploadGeneration.current += 1;
+      scanGeneration.current += 1;
       documentMetadataMutation.current = null;
       instructionGeneration.current += 1;
       instructionRequest.current?.abort();
@@ -737,6 +750,8 @@ export function KnowledgeWorkspace() {
       uploadBatchRef.current = [];
       setUploadBatch([]);
       setUploadFolderKey(undefined);
+      setScanBusy(false);
+      setProcessingScan(undefined);
       editorSession.current += 1;
       revision.current = 0;
       dirty.current = false;
@@ -2190,13 +2205,21 @@ export function KnowledgeWorkspace() {
     const requestContext = getContentContext();
     const requestContextKey = `${requestContext.organizationKey}:${requestContext.scopeKey}:${requestContext.agentKey}`;
     const folderKey = scanFolderKey;
+    const generation = ++scanGeneration.current;
+    const name = `Scanned document ${new Date().toISOString().slice(0, 10)}`;
+    let processingStarted = false;
     setScanBusy(true);
     setScanError(undefined);
     try {
       if (scanSessionSize(pages) > MAX_DOCUMENT_SCAN_BYTES) throw new Error("Scanned pages must be 16 MB or smaller in total.");
       const prepared = await Promise.all(pages.map(async (page, index) => ({ name: `scan-page-${index + 1}.jpg`, size: page.sizeBytes, base64: await new File(page.uri).base64() })));
-      const { document } = await scanContentDocument(prepared, folderKey, requestContext);
-      if (contentContextKeyRef.current !== requestContextKey) return;
+      if (generation !== scanGeneration.current || contentContextKeyRef.current !== requestContextKey) return;
+      processingStarted = true;
+      setProcessingScan({ id: `scan-${generation}`, folderKey, name });
+      setFolderContentTab("documents");
+      setScanOpen(false);
+      const { document } = await scanContentDocument(prepared, folderKey, requestContext, name);
+      if (generation !== scanGeneration.current || contentContextKeyRef.current !== requestContextKey) return;
       addCachedContentDocument(queryClient, requestContext, folderKey, document);
       if (currentFolderKeyRef.current === folderKey) {
         const addDocument = (current: ContentDocument[]) => [document, ...current.filter(({ key }) => key !== document.key)];
@@ -2204,13 +2227,17 @@ export function KnowledgeWorkspace() {
         if (!folderKey) setRootDocuments(addDocument);
       }
       await invalidateContentLocations(queryClient, requestContext, [folderKey]);
-      setFolderContentTab("documents");
-      setScanOpen(false);
       showToast({ title: "Document scanned", description: `${pages.length} ${pages.length === 1 ? "page" : "pages"} converted to an editable document.` });
     } catch (cause) {
-      setScanError(cause instanceof Error ? cause.message : "The document could not be scanned.");
+      if (generation !== scanGeneration.current || contentContextKeyRef.current !== requestContextKey) return;
+      const message = cause instanceof Error ? cause.message : "The document could not be scanned.";
+      if (processingStarted) showToast({ title: "Document could not be scanned", description: message });
+      else setScanError(message);
     } finally {
-      setScanBusy(false);
+      if (generation === scanGeneration.current) {
+        setScanBusy(false);
+        if (processingStarted) setProcessingScan(undefined);
+      }
     }
   };
 
@@ -3106,8 +3133,8 @@ export function KnowledgeWorkspace() {
                       <Text numberOfLines={1} style={styles.documentButtonLabel}>{document.name}</Text>
                       <ScannedBadge document={document} />
                     </Button>
-                  )) : visibleUploadBatch.length === 0 && !error ? <View style={styles.folderEmptyState}><Text style={styles.empty}>{folderContentTab === "files" ? "No files here yet." : "No documents here yet."}</Text><Button accessibilityLabel={folderContentTab === "files" ? "Upload files" : "Create document"} contentMode="raw" onPress={() => { if (folderContentTab === "files") void openDestinationPicker("upload"); else startNewNote(); }} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button></View> : null}
-                  {folderContentTab === "files" ? visibleUploadBatch.map((item) => <View accessibilityLabel={`Uploading ${item.name}`} accessibilityRole="progressbar" key={item.id} style={[styles.documentSkeleton, styles.skeletonCard]} />) : null}
+                  )) : (folderContentTab === "files" ? visibleUploadBatch.length === 0 : !visibleProcessingScan) && !error ? <View style={styles.folderEmptyState}><Text style={styles.empty}>{folderContentTab === "files" ? "No files here yet." : "No documents here yet."}</Text><Button accessibilityLabel={folderContentTab === "files" ? "Upload files" : "Create document"} contentMode="raw" onPress={() => { if (folderContentTab === "files") void openDestinationPicker("upload"); else startNewNote(); }} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button></View> : null}
+                  {folderContentTab === "files" ? visibleUploadBatch.map((item) => <ProcessingDocumentButton key={item.id} name={item.name} />) : visibleProcessingScan ? <ProcessingDocumentButton key={visibleProcessingScan.id} name={visibleProcessingScan.name} /> : null}
                 </View>
               )}
             </View>
@@ -3165,8 +3192,8 @@ export function KnowledgeWorkspace() {
                     <Text numberOfLines={1} style={styles.documentButtonLabel}>{document.name}</Text>
                     <ScannedBadge document={document} />
                   </Button>
-                )) : visibleUploadBatch.length === 0 ? <View style={styles.folderEmptyState}><Text style={styles.empty}>{folderContentTab === "files" ? "No files here yet." : "No documents here yet."}</Text><Button accessibilityLabel={folderContentTab === "files" ? "Upload files" : "Create document"} contentMode="raw" onPress={() => { if (folderContentTab === "files") void openDestinationPicker("upload"); else startNewNote(); }} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button></View> : null}
-                {folderContentTab === "files" ? visibleUploadBatch.map((item) => <View accessibilityLabel={`Uploading ${item.name}`} accessibilityRole="progressbar" key={item.id} style={[styles.documentSkeleton, styles.skeletonCard]} />) : null}
+                )) : (folderContentTab === "files" ? visibleUploadBatch.length === 0 : !visibleProcessingScan) ? <View style={styles.folderEmptyState}><Text style={styles.empty}>{folderContentTab === "files" ? "No files here yet." : "No documents here yet."}</Text><Button accessibilityLabel={folderContentTab === "files" ? "Upload files" : "Create document"} contentMode="raw" onPress={() => { if (folderContentTab === "files") void openDestinationPicker("upload"); else startNewNote(); }} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button></View> : null}
+                {folderContentTab === "files" ? visibleUploadBatch.map((item) => <ProcessingDocumentButton key={item.id} name={item.name} />) : visibleProcessingScan ? <ProcessingDocumentButton key={visibleProcessingScan.id} name={visibleProcessingScan.name} /> : null}
               </View>
             )}
           </View>

@@ -603,14 +603,14 @@ export async function uploadContentDocument(file: { name: string; type: string; 
   return data;
 }
 
-export async function scanContentDocument(pages: { name: string; size: number; base64: string }[], folderKey?: string, contentContext = getContentContext()) {
+export async function scanContentDocument(pages: { name: string; size: number; base64: string }[], folderKey?: string, contentContext = getContentContext(), name = `Scanned document ${new Date().toISOString().slice(0, 10)}`) {
   if (!isContentContextConfigured(contentContext)) throw new Error("Archive is unavailable for this session.");
   const contentDigest = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, pages.map((page) => page.base64).join("\0"));
   const idempotencyKey = `scan-${contentDigest}-${folderKey ?? "root"}`;
   let data = await callContentTool<{ document: ContentDocument } | { job: { key: string; state: string } }>("document.scan", {
     scopeKey: contentContext.scopeKey,
     folderKey,
-    name: `Scanned document ${new Date().toISOString().slice(0, 10)}`,
+    name,
     pages: pages.map((page) => ({ filename: page.name, mimeType: "image/jpeg", sizeBytes: page.size, encoding: "base64", content: page.base64 })),
     idempotencyKey,
   }, undefined, contentContext);

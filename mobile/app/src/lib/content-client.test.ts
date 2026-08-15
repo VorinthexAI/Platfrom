@@ -175,11 +175,12 @@ test("treats repeated selections of the same file as separate uploads", async ()
 });
 
 test("submits ordered scan pages as one editable Archive document", async () => {
-  await scanContentDocument([{ name: "one.jpg", size: 4, base64: "/9j/2Q==" }, { name: "two.jpg", size: 4, base64: "/9j/2Q==" }], "folder");
+  await scanContentDocument([{ name: "one.jpg", size: 4, base64: "/9j/2Q==" }, { name: "two.jpg", size: 4, base64: "/9j/2Q==" }], "folder", getContentContext(), "Scanned report");
   expect(calls[0]?.url).toBe("/api/v1/content/tools/document.scan");
   expect(calls[0]?.body.input).toMatchObject({
     scopeKey: "scope-authenticated",
     folderKey: "folder",
+    name: "Scanned report",
     pages: [
       { filename: "one.jpg", mimeType: "image/jpeg", sizeBytes: 4, encoding: "base64", content: "/9j/2Q==" },
       { filename: "two.jpg", mimeType: "image/jpeg", sizeBytes: 4, encoding: "base64", content: "/9j/2Q==" },
