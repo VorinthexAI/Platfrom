@@ -2092,9 +2092,7 @@ export function KnowledgeWorkspace() {
       const selectedFolderKeys = directSelection?.folder ? [directSelection.folder.key] : selectedFolders.map(({ key }) => key);
       const blockedFolderKeys = action === "move"
         ? contentFolderDescendantKeys(tree, selectedFolderKeys)
-        : action === "copy"
-          ? selectedFolderKeys
-          : [];
+        : [];
       if (generation === destinationGeneration.current) {
         setDestinationStack(resolvedStack);
         setDestinationFolders(contentFolderChildren(tree, sourceFolderKey));
@@ -2973,7 +2971,7 @@ export function KnowledgeWorkspace() {
       {singleFolderDelete ? null : <><Button disabled={bulkLoading} loading={bulkLoading} onPress={() => void deleteContentSelection()} size="lg" variant="primary">Delete</Button>{close(bulkLoading)}</>}
     </>;
     if (activeSheet === "destinationBrowser") return <>
-      {destinationAction !== "upload" && destinationAtInitialLocation ? null : <Button onPress={() => { if (destinationAction === "upload") goBackSheet(); else void selectDestination(); }} size="lg" variant="primary">{destinationAction === "upload" ? "Choose folder" : destinationAction === "move" ? "Move here" : "Copy here"}</Button>}
+      {destinationAction === "move" && destinationAtInitialLocation ? null : <Button onPress={() => { if (destinationAction === "upload") goBackSheet(); else void selectDestination(); }} size="lg" variant="primary">{destinationAction === "upload" ? "Choose folder" : destinationAction === "move" ? "Move here" : "Copy here"}</Button>}
       {close(bulkLoading)}
     </>;
     if (activeSheet === "destination" && destinationAction === "upload") return <>
