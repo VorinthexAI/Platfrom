@@ -1044,6 +1044,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             if (!copiedRoot) fail('CONTENT_CONFLICT', 'Copied folder root could not be read.', tool, 'read', source.key);
             return { folder: await folderView(copiedRoot, d), folderCount: sourceFolders.length, documentCount: sourceDocuments.length };
           } catch (error) {
+            console.error('folder copy failed before compensation', { sourceFolderKey: source.key, targetScopeKey: item.targetScopeKey, targetParentFolderKey: item.targetParentFolderKey, error });
             const cleanupErrors: unknown[] = [];
             const folderMarker = { kind: 'folder' as const, owner: invocationKey, startedAt: timestamp, folderKeys: insertedFolderKeys, documentKeys: insertedDocumentKeys, objectKeys: copiedStorageKeys };
             try {

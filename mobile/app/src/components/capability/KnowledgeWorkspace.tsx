@@ -267,6 +267,7 @@ export function KnowledgeWorkspace() {
   const [destinationFolders, setDestinationFolders] = useState<ContentFolder[]>([]);
   const [destinationUsesDirectSelection, setDestinationUsesDirectSelection] = useState(false);
   const [destinationSourceFolderKey, setDestinationSourceFolderKey] = useState<string | null>();
+  const [destinationBlockedFolderKeys, setDestinationBlockedFolderKeys] = useState<string[]>([]);
   const [destinationLoading, setDestinationLoading] = useState(false);
   const [selectedFolders, setSelectedFolders] = useState<ContentFolder[]>([]);
   const [selectedDocuments, setSelectedDocuments] = useState<ContentDocument[]>([]);
@@ -388,7 +389,7 @@ export function KnowledgeWorkspace() {
     : [];
   const destinationTargetKey = destinationFolder?.key ?? null;
   const destinationAtSource = destinationSourceFolderKey !== undefined && destinationTargetKey === destinationSourceFolderKey;
-  const destinationIsSelectedFolder = selectedFolders.some(({ key }) => key === destinationFolder?.key);
+  const destinationIsSelectedFolder = destinationStack.some(({ key }) => destinationBlockedFolderKeys.includes(key));
   const showArchiveRoot = !libraryQuery.trim() || "archive".includes(libraryQuery.trim().toLowerCase());
   const narrationDuration = audioTimelineDuration(narrationManifest);
   const narrationElapsed = narrationScrubValue ?? audioTimelinePosition(narrationManifest, narrationActiveIndex, narrationAudio.currentTime);
@@ -566,6 +567,7 @@ export function KnowledgeWorkspace() {
       setDestinationStack([]);
       setDestinationFolders([]);
       setDestinationSourceFolderKey(undefined);
+      setDestinationBlockedFolderKeys([]);
       setDestinationLoading(false);
       setDestinationAction(undefined);
     }
@@ -2058,6 +2060,7 @@ export function KnowledgeWorkspace() {
       ? sourceStackCandidate
       : [];
     setDestinationSourceFolderKey(action === "upload" ? undefined : sourceFolderKey ?? null);
+    setDestinationBlockedFolderKeys(action === "upload" ? [] : directSelection?.folder ? [directSelection.folder.key] : selectedFolders.map(({ key }) => key));
     setDestinationStack(sourceStack);
     setDestinationFolders([]);
     if (action === "upload") {
@@ -3438,7 +3441,7 @@ export function KnowledgeWorkspace() {
             </View>
             <ScrollView contentContainerStyle={styles.destinationFolderGrid} keyboardShouldPersistTaps="handled" style={styles.folderList}>
               {destinationLoading ? Array.from({ length: 3 }, (_, index) => <View accessibilityLabel="Loading folders" accessibilityRole="progressbar" key={index} style={[styles.rootFolderCard, styles.skeletonCard, { width: destinationCardSize, height: destinationCardSize }]} />) : null}
-              {destinationFolders.filter((folder) => !selectedFolders.some(({ key }) => key === folder.key)).map((folder) => {
+              {destinationFolders.filter((folder) => !destinationBlockedFolderKeys.includes(folder.key)).map((folder) => {
                 return <View key={folder.key} style={[styles.rootFolderCard, { width: destinationCardSize, height: destinationCardSize }]}>
                   {folder.coverUrl ? <Image contentFit="cover" source={folder.coverUrl} style={styles.folderCover} /> : null}
                   <Button accessibilityLabel={`Open ${folder.name}`} contentMode="raw" onPress={() => void browseDestination(folder)} size="xl" style={[styles.rootFolderMain, folder.coverUrl && styles.coveredFolderMain]} variant="ghost">{folder.coverUrl ? null : <FolderIcon size="lg" />}<Text numberOfLines={1} style={[styles.archiveCardLabel, folder.coverUrl && styles.coveredFolderLabel]}>{folder.name}</Text></Button>
