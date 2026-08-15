@@ -3344,7 +3344,7 @@ export function KnowledgeWorkspace() {
       >
         {sheetError ? <Text accessibilityRole="alert" style={styles.notice}>{sheetError}</Text> : null}
         {singleFolderDelete ? <View style={styles.compactSheetActions}>
-          <Button disabled={bulkLoading} loading={bulkLoading} onPress={() => void deleteContentSelection()} size="lg" variant="primary">Delete</Button>
+          <Button disabled={bulkLoading} loading={bulkLoading} onPress={() => void deleteContentSelection()} size="lg" style={styles.compactPrimaryButton} variant="primary">Delete</Button>
           <Button disabled={bulkLoading} onPress={() => closeSheet()} size="lg" variant="secondary">Close</Button>
         </View> : null}
         {activeSheet === "create" ? (
@@ -3670,7 +3670,8 @@ const styles = StyleSheet.create({
   summaryText: { color: palette.silver300, fontFamily: fonts.regular, fontSize: 15, lineHeight: 24 },
   destinationPanel: { flex: 1, gap: 12 },
   bulkActionList: { width: "100%", gap: spacing.sm },
-  compactSheetActions: { width: "100%", gap: spacing.sm },
+  compactSheetActions: { width: "100%", gap: spacing.sm, paddingHorizontal: 1 },
+  compactPrimaryButton: { overflow: "hidden" },
   destinationBrowser: { flex: 1, minHeight: 0, gap: spacing.sm },
   destinationLocationLane: { minHeight: 40, flexDirection: "row", alignItems: "center", gap: spacing.xs },
   destinationLocationTitle: { flex: 1, color: palette.silver100, fontFamily: fonts.medium, fontSize: 14 },
