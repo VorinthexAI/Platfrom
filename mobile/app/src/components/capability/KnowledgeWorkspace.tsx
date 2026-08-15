@@ -89,6 +89,9 @@ import {
 import {
   addCachedContentDocument,
   addCachedContentFolder,
+  contentFolderChildren,
+  contentFolderDescendantKeys,
+  contentFolderStack,
   contentQueryKeys,
   getContentDocument,
   getContentDocumentPreview,
@@ -99,6 +102,7 @@ import {
   invalidateContentHistories,
   refreshContentDocument,
   refreshContentDocumentAudioVersions,
+  refreshContentFolderTree,
   refreshContentHistory,
   refreshContentLocation,
   replaceCachedContentDocument,
@@ -2047,17 +2051,9 @@ export function KnowledgeWorkspace() {
     const sourceFolderKey = action === "upload"
       ? currentFolder?.key
       : directSelection?.folder?.parentFolderKey ?? directSelection?.document?.folderKey ?? currentFolder?.key;
-    const sourceStackCandidate = action === "upload" || sourceFolderKey === currentFolder?.key
-      ? folderStack
-      : sourceFolderKey === folderStack.at(-2)?.key
-        ? folderStack.slice(0, -1)
-        : [];
-    const sourceStack = sourceStackCandidate.every((folder, index) => folder.parentFolderKey === sourceStackCandidate[index - 1]?.key)
-      ? sourceStackCandidate
-      : [];
     setDestinationInitialFolderKey(action === "upload" ? undefined : sourceFolderKey ?? null);
-    setDestinationBlockedFolderKeys(action === "upload" ? [] : directSelection?.folder ? [directSelection.folder.key] : selectedFolders.map(({ key }) => key));
-    setDestinationStack(sourceStack);
+    setDestinationBlockedFolderKeys([]);
+    setDestinationStack([]);
     setDestinationFolders([]);
     if (action === "upload") {
       if (sheetOpen) pushSheet("destination");
@@ -2066,27 +2062,18 @@ export function KnowledgeWorkspace() {
     else openSheet("destinationBrowser");
     setDestinationLoading(true);
     try {
-      let resolvedStack = sourceStack;
-      if (sourceFolderKey && resolvedStack.at(-1)?.key !== sourceFolderKey) {
-        const queue: { folderKey?: string; stack: ContentFolder[] }[] = [{ stack: [] }];
-        const visited = new Set<string | undefined>();
-        while (queue.length) {
-          const candidate = queue.shift()!;
-          if (visited.has(candidate.folderKey)) continue;
-          visited.add(candidate.folderKey);
-          const location = await getContentLocation(queryClient, contentContext, candidate.folderKey);
-          const source = location.folders.find(({ key }) => key === sourceFolderKey);
-          if (source) {
-            resolvedStack = [...candidate.stack, source];
-            break;
-          }
-          location.folders.forEach((folder) => queue.push({ folderKey: folder.key, stack: [...candidate.stack, folder] }));
-        }
-      }
-      const next = (await refreshContentLocation(queryClient, contentContext, sourceFolderKey)).folders;
+      const tree = await refreshContentFolderTree(queryClient, contentContext);
+      const resolvedStack = contentFolderStack(tree, sourceFolderKey);
+      const selectedFolderKeys = directSelection?.folder ? [directSelection.folder.key] : selectedFolders.map(({ key }) => key);
+      const blockedFolderKeys = action === "move"
+        ? contentFolderDescendantKeys(tree, selectedFolderKeys)
+        : action === "copy"
+          ? selectedFolderKeys
+          : [];
       if (generation === destinationGeneration.current) {
         setDestinationStack(resolvedStack);
-        setDestinationFolders(next);
+        setDestinationFolders(contentFolderChildren(tree, sourceFolderKey));
+        setDestinationBlockedFolderKeys(blockedFolderKeys);
       }
     } catch (cause) {
       if (generation === destinationGeneration.current) setSheetError(cause instanceof Error ? cause.message : "Folders could not be loaded.");
@@ -2102,7 +2089,9 @@ export function KnowledgeWorkspace() {
     setSheetError(undefined);
     pushSheet("destinationBrowser");
     try {
-      const children = (await refreshContentLocation(queryClient, contentContext, destinationFolder?.key)).folders;
+      const tree = queryClient.getQueryData<ContentFolder[]>(contentQueryKeys.folderTree(contentContext))
+        ?? await refreshContentFolderTree(queryClient, contentContext);
+      const children = contentFolderChildren(tree, destinationFolder?.key);
       if (generation === destinationGeneration.current) setDestinationFolders(children);
     } catch (cause) {
       if (generation === destinationGeneration.current) setSheetError(cause instanceof Error ? cause.message : "Folders could not be loaded.");
@@ -2119,7 +2108,9 @@ export function KnowledgeWorkspace() {
     setDestinationFolders([]);
     setSheetError(undefined);
     try {
-      const next = (await refreshContentLocation(queryClient, contentContext, nextStack.at(-1)?.key)).folders;
+      const tree = queryClient.getQueryData<ContentFolder[]>(contentQueryKeys.folderTree(contentContext))
+        ?? await refreshContentFolderTree(queryClient, contentContext);
+      const next = contentFolderChildren(tree, nextStack.at(-1)?.key);
       if (generation !== destinationGeneration.current) return;
       setDestinationFolders(next);
     } catch (cause) {

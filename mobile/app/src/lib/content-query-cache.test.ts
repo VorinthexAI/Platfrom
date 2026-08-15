@@ -4,6 +4,9 @@ import { QueryClient } from "@tanstack/react-query";
 import {
   addCachedContentDocument,
   addCachedContentFolder,
+  contentFolderChildren,
+  contentFolderDescendantKeys,
+  contentFolderStack,
   contentQueryKeys,
   invalidateContentHistories,
   invalidateContentLocations,
@@ -33,10 +36,25 @@ const otherContext: ContentContext = {
 };
 
 test("scopes Archive cache keys by the complete content context", () => {
+  expect(contentQueryKeys.folderTree(context)).not.toEqual(contentQueryKeys.folderTree(otherContext));
   expect(contentQueryKeys.location(context, "folder-a")).not.toEqual(contentQueryKeys.location(otherContext, "folder-a"));
   expect(contentQueryKeys.document(context, "document-a")).not.toEqual(contentQueryKeys.document(otherContext, "document-a"));
   expect(contentQueryKeys.location(context)).not.toEqual(contentQueryKeys.location(context, "folder-a"));
   expect(contentQueryKeys.audioVersions(context, "document-a").slice(0, -1)).toEqual(contentQueryKeys.document(context, "document-a"));
+});
+
+test("derives folder children, ancestry, and descendants from one tree", () => {
+  const tree = [
+    { key: "root", name: "Root" },
+    { key: "child", name: "Child", parentFolderKey: "root" },
+    { key: "leaf", name: "Leaf", parentFolderKey: "child" },
+    { key: "other", name: "Other" },
+  ];
+
+  expect(contentFolderChildren(tree)).toEqual([tree[3], tree[0]]);
+  expect(contentFolderChildren(tree, "root")).toEqual([tree[1]]);
+  expect(contentFolderStack(tree, "leaf")).toEqual([tree[0], tree[1], tree[2]]);
+  expect(contentFolderDescendantKeys(tree, ["root"])).toEqual(["root", "child", "leaf"]);
 });
 
 test("patches cached document and folder metadata without evicting note content", () => {
@@ -125,6 +143,7 @@ test("optimistically adds and removes documents and folders in exact locations",
   const destination = contentQueryKeys.location(context, "destination");
   const document = { key: "document-a", name: "Document", folderKey: "source", isFavorite: false, updatedAt: "before" };
   const folder = { key: "folder-a", name: "Folder", parentFolderKey: "source" };
+  client.setQueryData(contentQueryKeys.folderTree(context), [folder]);
   client.setQueryData(source, { folders: [folder], documents: [document] });
   client.setQueryData(destination, { folders: [], documents: [] });
 
@@ -138,6 +157,7 @@ test("optimistically adds and removes documents and folders in exact locations",
     folders: [{ ...folder, parentFolderKey: "destination" }],
     documents: [{ ...document, folderKey: "destination" }],
   });
+  expect(client.getQueryData<any>(contentQueryKeys.folderTree(context))).toEqual([{ ...folder, parentFolderKey: "destination" }]);
 });
 
 test("removes deleted documents and evicts detail, preview, and nested audio queries", () => {
@@ -170,6 +190,11 @@ test("evicts all scoped locations when archived folders may contain cached desce
   client.setQueryData(descendant, { folders: [], documents: [] });
   client.setQueryData(stale, { folders: [], documents: [] });
   client.setQueryData(other, { folders: [], documents: [] });
+  client.setQueryData(contentQueryKeys.folderTree(context), [
+    { key: "folder-a", name: "Folder" },
+    { key: "folder-child", parentFolderKey: "folder-a", name: "Child" },
+    { key: "unrelated", name: "Unrelated" },
+  ]);
 
   removeCachedContentFoldersEverywhere(client, context, ["folder-a"]);
 
@@ -178,6 +203,7 @@ test("evicts all scoped locations when archived folders may contain cached desce
   expect(client.getQueryData(descendant)).toBeUndefined();
   expect(client.getQueryData(stale)).toBeUndefined();
   expect(client.getQueryData(other)).toEqual({ folders: [], documents: [] });
+  expect(client.getQueryData(contentQueryKeys.folderTree(context))).toEqual([{ key: "unrelated", name: "Unrelated" }]);
 });
 
 test("invalidates affected histories and patches moved document detail without corrupting locations", async () => {

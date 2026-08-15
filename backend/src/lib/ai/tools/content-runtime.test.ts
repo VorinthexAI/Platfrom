@@ -165,6 +165,21 @@ describe('Content runtime', () => {
     expect(f.patches.at(-1)).not.toHaveProperty('embedding');
   });
 
+  test('lists the complete active folder tree when descendants are requested', async () => {
+    const f = fixture('viewer');
+    const child = newId(), leaf = newId(), archived = newId(), hidden = newId();
+    f.folders.set(child, { key: child, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', embedding, createdAt: now, updatedAt: now });
+    f.folders.set(leaf, { key: leaf, scopeKey: f.scopeKey, parentFolderKey: child, name: 'Leaf', embedding, createdAt: now, updatedAt: now });
+    f.folders.set(archived, { key: archived, scopeKey: f.scopeKey, name: 'Archived', embedding, deletedAt: now, createdAt: now, updatedAt: now });
+    f.folders.set(hidden, { key: hidden, scopeKey: f.scopeKey, parentFolderKey: archived, name: 'Hidden', embedding, createdAt: now, updatedAt: now });
+
+    const direct = await runContentTool('folder.list', { scopeKey: f.scopeKey }, f.context, { repository: f.repository });
+    const tree = await runContentTool('folder.list', { scopeKey: f.scopeKey, includeDescendants: true }, f.context, { repository: f.repository });
+
+    expect(direct.folders.map((folder: any) => folder.key)).toEqual([f.folderKey]);
+    expect(tree.folders.map((folder: any) => folder.key).sort()).toEqual([f.folderKey, child, leaf].sort());
+  });
+
   test('projects native document blocks only when requested', async () => {
     const f = fixture('viewer');
     const documentKey = f.addDocument();

@@ -894,11 +894,36 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
     } else if (tool === 'folder.list') {
       await roleFor(input.scopeKey, 'viewer');
       if (input.parentFolderKey) {
-        await folder(input.parentFolderKey, 'viewer', input.includeArchived ?? false);
+        const parent = await folder(input.parentFolderKey, 'viewer', input.includeArchived ?? false);
+        if (parent.scopeKey !== input.scopeKey) fail('CONTENT_NOT_FOUND', 'Folder was not found in this scope.', tool, 'read', input.parentFolderKey);
         if (!input.includeArchived && !await activeFolderHierarchy(input.parentFolderKey, input.scopeKey)) fail('FOLDER_ARCHIVED', 'Folder hierarchy is archived.', tool, 'read', input.parentFolderKey);
       }
-      const values = (await foldersIn(input.scopeKey))
-        .filter((item) => item.parentFolderKey === input.parentFolderKey && (input.includeArchived || !item.deletedAt));
+      const allFolders = await foldersIn(input.scopeKey);
+      const folderByKey = new Map(allFolders.map((item) => [item.key, item]));
+      const isVisible = (item: Folder) => {
+        if (input.includeArchived) return true;
+        let current: Folder | undefined = item;
+        const visited = new Set<string>();
+        while (current) {
+          if (current.deletedAt || visited.has(current.key)) return false;
+          visited.add(current.key);
+          current = current.parentFolderKey ? folderByKey.get(current.parentFolderKey) : undefined;
+        }
+        return true;
+      };
+      const values = allFolders.filter((item) => {
+        if (!isVisible(item)) return false;
+        if (!input.includeDescendants) return item.parentFolderKey === input.parentFolderKey;
+        if (!input.parentFolderKey) return true;
+        let parentKey = item.parentFolderKey;
+        const visited = new Set<string>();
+        while (parentKey && !visited.has(parentKey)) {
+          if (parentKey === input.parentFolderKey) return true;
+          visited.add(parentKey);
+          parentKey = folderByKey.get(parentKey)?.parentFolderKey;
+        }
+        return false;
+      });
       const sort = input.sort ?? { field: 'name', direction: 'asc' };
       values.sort((left: any, right: any) => String(left[sort.field]).localeCompare(String(right[sort.field])) * (sort.direction === 'asc' ? 1 : -1));
       const offset = input.cursor ? Number(Buffer.from(input.cursor, 'base64url').toString()) || 0 : 0;

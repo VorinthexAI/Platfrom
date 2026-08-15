@@ -400,8 +400,10 @@ test("scopes fast semantic search to a folder and its descendants", async () => 
 test("loads an existing My Documents folder as the initial Archive location", async () => {
   responseForTool = (tool) => {
     if (tool === "folder.list") {
-      const parentFolderKey = calls.at(-1)?.body.input.parentFolderKey;
-      return { data: { success: true, data: { folders: parentFolderKey ? [{ key: "nested", parentFolderKey, name: "Projects" }] : [{ key: "my-documents", name: "My Documents" }] } } };
+      return { data: { success: true, data: { folders: [
+        { key: "my-documents", name: "My Documents" },
+        { key: "nested", parentFolderKey: "my-documents", name: "Projects" },
+      ] } } };
     }
     if (tool === "document.list") return { data: { success: true, data: { documents: [] } } };
   };
@@ -411,7 +413,7 @@ test("loads an existing My Documents folder as the initial Archive location", as
   expect(initial.initialFolder).toEqual({ key: "my-documents", name: "My Documents" });
   expect(initial.root.folders).toEqual([{ key: "my-documents", name: "My Documents" }]);
   expect(initial.location.folders).toEqual([{ key: "nested", parentFolderKey: "my-documents", name: "Projects" }]);
-  expect(calls.filter(({ url }) => url.endsWith("folder.list")).map(({ body }) => body.input.parentFolderKey)).toEqual([undefined, "my-documents"]);
+  expect(calls.filter(({ url }) => url.endsWith("folder.list")).map(({ body }) => body.input.includeDescendants)).toEqual([true]);
 });
 
 test("keeps legacy accounts at the root when My Documents is absent", async () => {

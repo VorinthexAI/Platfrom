@@ -351,50 +351,54 @@ export async function restoreContentDocumentVersion(documentKey: string, version
   return result.data.document;
 }
 
-export async function listContentLocation(folderKey?: string) {
+export async function listContentFolderTree() {
   const contentContext = getContentContext();
-  const location = folderKey ? { folderKey } : {};
-  const listFolders = async () => {
-    const folders: ContentFolder[] = [];
-    let cursor: string | undefined;
-    do {
-      const data: { folders: ContentFolder[]; cursor?: string } = await callContentTool("folder.list", {
-        scopeKey: contentContext.scopeKey,
-        parentFolderKey: folderKey,
-        cursor,
-        limit: 100,
-        sort: { field: "name", direction: "asc" },
-      });
-      folders.push(...data.folders);
-      cursor = data.cursor;
-    } while (cursor);
-    return folders;
-  };
-  const listDocuments = async () => {
-    const documents: ContentDocument[] = [];
-    let cursor: string | undefined;
-    do {
-      const data: { documents: ContentDocument[]; cursor?: string } = await callContentTool("document.list", {
-        scopeKey: contentContext.scopeKey,
-        ...location,
-        cursor,
-        limit: 100,
-        sort: { field: "updatedAt", direction: "desc" },
-      });
-      documents.push(...data.documents);
-      cursor = data.cursor;
-    } while (cursor);
-    return documents;
-  };
-  const [folders, documents] = await Promise.all([listFolders(), listDocuments()]);
-  return { folders, documents };
+  const folders: ContentFolder[] = [];
+  let cursor: string | undefined;
+  do {
+    const data: { folders: ContentFolder[]; cursor?: string } = await callContentTool("folder.list", {
+      scopeKey: contentContext.scopeKey,
+      includeDescendants: true,
+      cursor,
+      limit: 100,
+      sort: { field: "name", direction: "asc" },
+    });
+    folders.push(...data.folders);
+    cursor = data.cursor;
+  } while (cursor);
+  return folders;
+}
+
+export async function listContentDocumentsAtLocation(folderKey?: string) {
+  const contentContext = getContentContext();
+  const documents: ContentDocument[] = [];
+  let cursor: string | undefined;
+  do {
+    const data: { documents: ContentDocument[]; cursor?: string } = await callContentTool("document.list", {
+      scopeKey: contentContext.scopeKey,
+      ...(folderKey ? { folderKey } : {}),
+      cursor,
+      limit: 100,
+      sort: { field: "updatedAt", direction: "desc" },
+    });
+    documents.push(...data.documents);
+    cursor = data.cursor;
+  } while (cursor);
+  return documents;
+}
+
+export async function listContentLocation(folderKey?: string) {
+  const [tree, documents] = await Promise.all([listContentFolderTree(), listContentDocumentsAtLocation(folderKey)]);
+  return { folders: tree.filter((folder) => folder.parentFolderKey === folderKey), documents };
 }
 
 export async function loadInitialContentLocation() {
-  const root = await listContentLocation();
+  const [tree, rootDocuments] = await Promise.all([listContentFolderTree(), listContentDocumentsAtLocation()]);
+  const root = { folders: tree.filter((folder) => !folder.parentFolderKey), documents: rootDocuments };
   const initialFolder = root.folders.find((folder) => folder.name === "My Documents");
   if (!initialFolder) return { root, location: root };
-  return { root, location: await listContentLocation(initialFolder.key), initialFolder };
+  const documents = await listContentDocumentsAtLocation(initialFolder.key);
+  return { root, location: { folders: tree.filter((folder) => folder.parentFolderKey === initialFolder.key), documents }, initialFolder };
 }
 
 export async function readContentDocument(documentKey: string) {
