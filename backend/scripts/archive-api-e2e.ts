@@ -24,6 +24,27 @@ function firstResultData(value: Record<string, unknown>, label: string) {
   return object(result.data);
 }
 
+function minimalPdf(text: string) {
+  const escaped = text.replace(/[\\()]/g, (character) => `\\${character}`);
+  const stream = `BT /F1 12 Tf 72 720 Td (${escaped}) Tj ET`;
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+  ];
+  let source = '%PDF-1.4\n';
+  const offsets = [0];
+  objects.forEach((objectValue, index) => {
+    offsets.push(source.length);
+    source += `${index + 1} 0 obj\n${objectValue}\nendobj\n`;
+  });
+  const xref = source.length;
+  source += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.slice(1).map((offset) => `${String(offset).padStart(10, '0')} 00000 n `).join('\n')}\ntrailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return new TextEncoder().encode(source);
+}
+
 const suffix = crypto.randomUUID().replaceAll('-', '');
 const guestResponse = await fetch(`${apiBase}/api/v1/auth/guest`, {
   method: 'POST',
@@ -150,6 +171,25 @@ const uploaded = await tool('document.parse', {
 });
 const uploadedDocumentKey = string(object(uploaded.document).key, 'uploaded document key');
 
+const pdfPhrase = `PDF extraction verification ${suffix.slice(0, 8)} succeeded through AWS Textract.`;
+const pdfBytes = minimalPdf(pdfPhrase);
+const uploadedPdf = await tool('document.parse', {
+  scopeKey,
+  folderKey,
+  file: {
+    filename: 'archive-upload.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: pdfBytes.byteLength,
+    encoding: 'base64',
+    content: Buffer.from(pdfBytes).toString('base64'),
+  },
+  idempotencyKey: `archive-e2e-pdf-${suffix}`,
+});
+const uploadedPdfKey = string(object(uploadedPdf.document).key, 'uploaded PDF key');
+const foundPdf = await tool('document.find', { documentKeys: [uploadedPdfKey], include: ['content'] });
+const foundPdfDocument = object(object(object((foundPdf.results as unknown[])[0]).data).document);
+if (typeof foundPdfDocument.content !== 'string' || !foundPdfDocument.content.includes(pdfPhrase)) throw new Error(`Uploaded PDF text was not persisted: ${JSON.stringify(foundPdfDocument)}`);
+
 const fastFolderSearch = await tool('scope.content.search', { scopeKey, query: folderName, includeSummaries: false });
 if (!(fastFolderSearch.folders as unknown[]).some((entry) => object(entry).key === folderKey)) throw new Error('Fast search did not return the matching folder.');
 const fastFileSearch = await tool('scope.content.search', { scopeKey, folderKey, includeDescendants: true, query: 'silver observatory', includeSummaries: false });
@@ -167,8 +207,8 @@ if (!(replay.documents as unknown[]).some((entry) => object(entry).documentKey =
 const searchHistory = await tool('scope.content.search-history', { scopeKey, limit: 8 });
 if (!(searchHistory.history as unknown[]).some((entry) => object(entry).normalizedQuery === query && Number(object(entry).count) >= 2)) throw new Error('Semantic search history was not persisted.');
 
-await tool('document.archive', { documentKeys: [documentKey, uploadedDocumentKey], atomic: true });
-await tool('document.delete', { documentKeys: [documentKey, uploadedDocumentKey], deleteVersions: true, deleteShares: true });
+await tool('document.archive', { documentKeys: [documentKey, uploadedDocumentKey, uploadedPdfKey], atomic: true });
+await tool('document.delete', { documentKeys: [documentKey, uploadedDocumentKey, uploadedPdfKey], deleteVersions: true, deleteShares: true });
 await tool('folder.archive', { folderKeys: [folderKey], atomic: true });
 
-console.log(`Archive API E2E passed: guest auth, ${process.env.ARCHIVE_E2E_AUDIO === 'true' ? 'streamed Polly narration, ' : ''}folder/document creation, autosave, upload, fast folder/file search, semantic retrieval, and history.`);
+console.log(`Archive API E2E passed: guest auth, ${process.env.ARCHIVE_E2E_AUDIO === 'true' ? 'streamed Polly narration, ' : ''}folder/document creation, autosave, LocalStack upload, AWS PDF extraction, fast folder/file search, semantic retrieval, and history.`);

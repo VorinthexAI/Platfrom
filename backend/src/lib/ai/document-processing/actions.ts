@@ -288,7 +288,10 @@ export async function documentExtract(input: NormalizedDocument & { storageKey: 
       const extracted = await extractor.extract(Buffer.from(input.fileInput));
       return extractionFromText(extracted.getBody());
     } catch (error) {
-      throw documentActionError(error, 'DOCUMENT_EXTRACTION_FAILED', 'The document could not be extracted.', 'document-extract', true);
+      const message = process.env.NODE_ENV === 'development' && error instanceof Error
+        ? `The document could not be extracted: ${error.message}`
+        : 'The document could not be extracted.';
+      throw documentActionError(error, 'DOCUMENT_EXTRACTION_FAILED', message, 'document-extract', true);
     }
   });
 }
