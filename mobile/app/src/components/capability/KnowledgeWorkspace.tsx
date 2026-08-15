@@ -3052,7 +3052,10 @@ export function KnowledgeWorkspace() {
   const selectedAudioVersionIndex = audioVersions.findIndex((version) => version.key === selectedAudioVersionKey);
   const selectedAudioVersion = selectedAudioVersionIndex >= 0 ? audioVersions[selectedAudioVersionIndex] : undefined;
   const bulkToolbar = selectionActive ? <Tabs style={styles.bulkToolbar}>
-    <Button accessibilityLabel="Clear selection" contentMode="raw" onPress={clearSelection} size="xs" style={styles.bulkToolbarAction} variant="secondary"><CloseIcon size="sm" /><Text style={styles.bulkSelectionText}>{selectedCount} selected</Text></Button>
+    <View style={styles.bulkToolbarSelection}>
+      <Button accessibilityLabel="Clear selection" contentMode="raw" onPress={clearSelection} size="xs" style={styles.bulkToolbarClose} variant="secondary"><CloseIcon size="sm" /></Button>
+      <Text style={styles.bulkSelectionText}>{selectedCount} selected</Text>
+    </View>
     <Button accessibilityLabel="Selected item actions" contentMode="raw" disabled={selectionMetadataLoading} loading={selectionMetadataLoading} onPress={() => openSheet("bulkActions")} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
   </Tabs> : null;
 
@@ -3605,7 +3608,8 @@ const styles = StyleSheet.create({
   editorHeaderActions: { flexDirection: "row", alignItems: "center", gap: 8 },
   rootActions: { minHeight: 52, flexDirection: "row", alignItems: "center", gap: 8 },
   bulkToolbar: { minHeight: 40, padding: 5, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderWidth: 1, backgroundColor: palette.panel },
-  bulkToolbarAction: { minHeight: 28 },
+  bulkToolbarSelection: { flexDirection: "row", alignItems: "center", gap: 8 },
+  bulkToolbarClose: { height: 28, width: 28, paddingHorizontal: 0, paddingVertical: 0 },
   bulkSelectionText: { color: palette.silver100, fontFamily: fonts.medium, fontSize: 12 },
   rootCreateButton: { height: 44, width: 44 },
   rootSearch: { minHeight: 44, flex: 1, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 7, borderRadius: 999, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised },
