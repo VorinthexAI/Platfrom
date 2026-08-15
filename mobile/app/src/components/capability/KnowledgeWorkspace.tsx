@@ -2083,7 +2083,7 @@ export function KnowledgeWorkspace() {
           location.folders.forEach((folder) => queue.push({ folderKey: folder.key, stack: [...candidate.stack, folder] }));
         }
       }
-      const next = (await getContentLocation(queryClient, contentContext, sourceFolderKey)).folders;
+      const next = (await refreshContentLocation(queryClient, contentContext, sourceFolderKey)).folders;
       if (generation === destinationGeneration.current) {
         setDestinationStack(resolvedStack);
         setDestinationFolders(next);
@@ -2102,7 +2102,7 @@ export function KnowledgeWorkspace() {
     setSheetError(undefined);
     pushSheet("destinationBrowser");
     try {
-      const children = (await getContentLocation(queryClient, contentContext, destinationFolder?.key)).folders;
+      const children = (await refreshContentLocation(queryClient, contentContext, destinationFolder?.key)).folders;
       if (generation === destinationGeneration.current) setDestinationFolders(children);
     } catch (cause) {
       if (generation === destinationGeneration.current) setSheetError(cause instanceof Error ? cause.message : "Folders could not be loaded.");
@@ -2119,7 +2119,7 @@ export function KnowledgeWorkspace() {
     setDestinationFolders([]);
     setSheetError(undefined);
     try {
-      const next = (await getContentLocation(queryClient, contentContext, nextStack.at(-1)?.key)).folders;
+      const next = (await refreshContentLocation(queryClient, contentContext, nextStack.at(-1)?.key)).folders;
       if (generation !== destinationGeneration.current) return;
       setDestinationFolders(next);
     } catch (cause) {
