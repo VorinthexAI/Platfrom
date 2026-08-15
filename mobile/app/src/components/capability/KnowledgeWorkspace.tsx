@@ -2233,6 +2233,126 @@ export function KnowledgeWorkspace() {
     if (!first) return;
     const selectedFoldersSnapshot = [...selectedFolders];
     const selectedDocumentsSnapshot = [...selectedDocuments];
+    const directFolder = destinationUsesDirectSelection && selectedFoldersSnapshot.length === 1 && selectedDocumentsSnapshot.length === 0
+      ? selectedFoldersSnapshot[0]
+      : undefined;
+    if (directFolder) {
+      const sourceKey = directFolder.parentFolderKey;
+      const previousFolders = folders;
+      const previousDocuments = documents;
+      const previousRootFolders = rootFolders;
+      const previousRootDocuments = rootDocuments;
+      const previousFolderStack = folderStack;
+      const previousWorkspaceMode = workspaceMode;
+      const previousRootSearchQuery = rootSearchQuery;
+      const previousRootSearchResults = rootSearchResults;
+      const previousQuery = query;
+      const previousResults = results;
+      const previousFolderSearchResults = folderSearchResults;
+      const sourceLocation = queryClient.getQueryData<ContentLocation>(contentQueryKeys.location(contentContext, sourceKey));
+      const destinationLocations = new Map(destinationKeys.map((key) => [key, queryClient.getQueryData<ContentLocation>(contentQueryKeys.location(contentContext, key))]));
+      const placeholders = action === "copy" ? choices.map((choice, index): ContentFolder => ({
+        ...directFolder,
+        key: `optimistic-${createContentMutationKey()}-${index}`,
+        parentFolderKey: choice.folder?.key,
+        name: `${directFolder.name} (copying)`,
+        isFavorite: false,
+      })) : [];
+      if (action === "move") {
+        const optimistic = { ...directFolder, parentFolderKey: destinationKeys[0] };
+        removeCachedContentFolder(queryClient, contentContext, sourceKey, directFolder.key);
+        addCachedContentFolder(queryClient, contentContext, destinationKeys[0], optimistic);
+      } else {
+        placeholders.forEach((placeholder) => addCachedContentFolder(queryClient, contentContext, placeholder.parentFolderKey, placeholder));
+      }
+      const optimisticLocation = queryClient.getQueryData<ContentLocation>(contentQueryKeys.location(contentContext, first.folder?.key)) ?? { folders: [], documents: [] };
+      setFolders(optimisticLocation.folders);
+      setDocuments(optimisticLocation.documents);
+      if (first.folder) {
+        setFolderStack(first.stack);
+        workspaceModeRef.current = "folder";
+        setWorkspaceMode("folder");
+      } else {
+        setRootFolders(optimisticLocation.folders);
+        setRootDocuments(optimisticLocation.documents);
+        setFolderStack([]);
+        workspaceModeRef.current = "folders";
+        setWorkspaceMode("folders");
+      }
+      setRootSearchQuery("");
+      setRootSearchResults(undefined);
+      setQuery("");
+      setResults(undefined);
+      setFolderSearchResults(undefined);
+      void invalidateContentLocations(queryClient, contentContext, [sourceKey, ...destinationKeys]);
+      closeSheet();
+      const generation = ++folderActionGeneration.current;
+      const navigationRequest = navigationGeneration.current;
+      const requestContextKey = contentContextKey;
+      const isCurrent = () => generation === folderActionGeneration.current
+        && navigationRequest === navigationGeneration.current
+        && requestContextKey === contentContextKeyRef.current;
+      let committed = false;
+      void (async () => {
+        const outcome = action === "move"
+          ? await moveContentSelection({ folderKeys: [directFolder.key], documentKeys: [] }, destinationKeys[0])
+          : await copyContentSelection({ folderKeys: [directFolder.key], documentKeys: [] }, destinationKeys);
+        if (outcome.succeeded === 0) throw new Error(outcome.failures[0]?.message ?? `The folder could not be ${action === "move" ? "moved" : "copied"}.`);
+        committed = true;
+        placeholders.forEach((placeholder) => removeCachedContentFolder(queryClient, contentContext, placeholder.parentFolderKey, placeholder.key));
+        if (placeholders.length && isCurrent()) {
+          const placeholderKeys = new Set(placeholders.map(({ key }) => key));
+          setFolders((current) => current.filter(({ key }) => !placeholderKeys.has(key)));
+          setRootFolders((current) => current.filter(({ key }) => !placeholderKeys.has(key)));
+        }
+        if (action === "move") {
+          const updated = outcome.folders[0];
+          if (updated) {
+            removeCachedContentFolder(queryClient, contentContext, sourceKey, directFolder.key);
+            addCachedContentFolder(queryClient, contentContext, updated.parentFolderKey, updated);
+            if (isCurrent()) replaceFolder(updated, false);
+          }
+        } else {
+          outcome.copiedFolders.forEach(({ folder }) => {
+            addCachedContentFolder(queryClient, contentContext, folder.parentFolderKey, folder);
+            if (isCurrent() && folder.parentFolderKey === currentFolderKeyRef.current) setFolders((current) => [...current.filter(({ key }) => key !== folder.key), folder]);
+            if (isCurrent() && !folder.parentFolderKey) setRootFolders((current) => [...current.filter(({ key }) => key !== folder.key), folder]);
+          });
+        }
+        await invalidateContentLocations(queryClient, contentContext, [sourceKey, ...destinationKeys]);
+        await invalidateContentHistories(queryClient, contentContext, [sourceKey, ...destinationKeys, undefined]);
+        if (isCurrent()) showToast({
+          title: `${outcome.succeeded} ${outcome.succeeded === 1 ? "folder" : "folders"} ${action === "move" ? "moved" : "copied"}`,
+          ...(outcome.failed ? { description: `${outcome.failed} operations failed. ${outcome.failures[0]?.message ?? "Try again."}` } : {}),
+        });
+      })().catch((cause: unknown) => {
+        if (committed) {
+          if (isCurrent()) showToast({ title: `Folder ${action === "move" ? "moved" : "copied"}`, description: "The change completed, but Archive could not refresh yet." });
+          return;
+        }
+        if (!isCurrent()) return;
+        if (sourceLocation) queryClient.setQueryData(contentQueryKeys.location(contentContext, sourceKey), sourceLocation);
+        else queryClient.removeQueries({ queryKey: contentQueryKeys.location(contentContext, sourceKey), exact: true });
+        destinationLocations.forEach((location, key) => {
+          if (location) queryClient.setQueryData(contentQueryKeys.location(contentContext, key), location);
+          else queryClient.removeQueries({ queryKey: contentQueryKeys.location(contentContext, key), exact: true });
+        });
+        setFolders(previousFolders);
+        setDocuments(previousDocuments);
+        setRootFolders(previousRootFolders);
+        setRootDocuments(previousRootDocuments);
+        setFolderStack(previousFolderStack);
+        workspaceModeRef.current = previousWorkspaceMode;
+        setWorkspaceMode(previousWorkspaceMode);
+        setRootSearchQuery(previousRootSearchQuery);
+        setRootSearchResults(previousRootSearchResults);
+        setQuery(previousQuery);
+        setResults(previousResults);
+        setFolderSearchResults(previousFolderSearchResults);
+        showToast({ title: `Folder ${action} failed`, description: cause instanceof Error ? cause.message : `The folder could not be ${action === "move" ? "moved" : "copied"}.` });
+      });
+      return;
+    }
     setBulkLoading(true);
     setSheetError(undefined);
     try {
@@ -2329,6 +2449,88 @@ export function KnowledgeWorkspace() {
   const deleteContentSelection = async () => {
     const selectedFoldersSnapshot = [...selectedFolders];
     const selectedDocumentsSnapshot = [...selectedDocuments];
+    const directFolder = temporarySingleSelection && selectedFoldersSnapshot.length === 1 && selectedDocumentsSnapshot.length === 0
+      ? selectedFoldersSnapshot[0]
+      : undefined;
+    if (directFolder) {
+      const previousFolders = folders;
+      const previousDocuments = documents;
+      const previousRootFolders = rootFolders;
+      const previousRootDocuments = rootDocuments;
+      const previousFolderStack = folderStack;
+      const previousWorkspaceMode = workspaceMode;
+      const previousRootSearchResults = rootSearchResults;
+      const previousFolderSearchResults = folderSearchResults;
+      const parentKey = directFolder.parentFolderKey;
+      const parentLocation = queryClient.getQueryData<ContentLocation>(contentQueryKeys.location(contentContext, parentKey));
+      removeCachedContentFolder(queryClient, contentContext, parentKey, directFolder.key);
+      setFolders((current) => current.filter(({ key }) => key !== directFolder.key));
+      setRootFolders((current) => current.filter(({ key }) => key !== directFolder.key));
+      setRootSearchResults((current) => current ? { ...current, folders: current.folders.filter(({ key }) => key !== directFolder.key) } : current);
+      setFolderSearchResults((current) => current ? { ...current, folders: current.folders.filter(({ key }) => key !== directFolder.key) } : current);
+      if (currentFolder?.key === directFolder.key) {
+        const parentStack = folderStack.slice(0, -1);
+        const nextLocation = parentLocation ?? { folders: [], documents: [] };
+        setFolders(nextLocation.folders.filter(({ key }) => key !== directFolder.key));
+        setDocuments(nextLocation.documents);
+        setFolderStack(parentStack);
+        if (parentKey) {
+          workspaceModeRef.current = "folder";
+          setWorkspaceMode("folder");
+        } else {
+          setRootFolders(nextLocation.folders.filter(({ key }) => key !== directFolder.key));
+          setRootDocuments(nextLocation.documents);
+          workspaceModeRef.current = "folders";
+          setWorkspaceMode("folders");
+        }
+      }
+      void invalidateContentLocations(queryClient, contentContext, [parentKey]);
+      closeSheet();
+      const generation = ++folderActionGeneration.current;
+      const navigationRequest = navigationGeneration.current;
+      const requestContextKey = contentContextKey;
+      const isCurrent = () => generation === folderActionGeneration.current
+        && navigationRequest === navigationGeneration.current
+        && requestContextKey === contentContextKeyRef.current;
+      if (currentFolder?.key === directFolder.key && !parentLocation) {
+        void getContentLocation(queryClient, contentContext, parentKey).then((location) => {
+          if (!isCurrent()) return;
+          setFolders(location.folders.filter(({ key }) => key !== directFolder.key));
+          setDocuments(location.documents);
+          if (!parentKey) {
+            setRootFolders(location.folders.filter(({ key }) => key !== directFolder.key));
+            setRootDocuments(location.documents);
+          }
+        }).catch(() => undefined);
+      }
+      let committed = false;
+      void archiveContentSelection({ folderKeys: [directFolder.key], documentKeys: [] }).then(async (outcome) => {
+        if (outcome.succeeded === 0) throw new Error(outcome.failures[0]?.message ?? "The folder could not be deleted.");
+        committed = true;
+        removeCachedContentFoldersEverywhere(queryClient, contentContext, [directFolder.key]);
+        await invalidateContentLocations(queryClient, contentContext, [parentKey]);
+        await invalidateContentHistories(queryClient, contentContext, [parentKey, undefined]);
+        showToast({ title: "Folder deleted", description: "Moved to Archive trash." });
+      }).catch((cause: unknown) => {
+        if (committed) {
+          if (isCurrent()) showToast({ title: "Folder deleted", description: "The change completed, but Archive could not refresh yet." });
+          return;
+        }
+        if (!isCurrent()) return;
+        addCachedContentFolder(queryClient, contentContext, parentKey, directFolder);
+        setFolders(previousFolders);
+        setDocuments(previousDocuments);
+        setRootFolders(previousRootFolders);
+        setRootDocuments(previousRootDocuments);
+        setFolderStack(previousFolderStack);
+        workspaceModeRef.current = previousWorkspaceMode;
+        setWorkspaceMode(previousWorkspaceMode);
+        setRootSearchResults(previousRootSearchResults);
+        setFolderSearchResults(previousFolderSearchResults);
+        showToast({ title: "Folder deletion failed", description: cause instanceof Error ? cause.message : "The folder could not be deleted." });
+      });
+      return;
+    }
     setBulkLoading(true);
     setSheetError(undefined);
     try {
