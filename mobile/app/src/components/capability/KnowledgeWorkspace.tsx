@@ -394,6 +394,7 @@ export function KnowledgeWorkspace() {
     : [];
   const destinationTargetKey = destinationFolder?.key ?? null;
   const destinationAtInitialLocation = destinationInitialFolderKey !== undefined && destinationTargetKey === destinationInitialFolderKey;
+  const destinationIsBlocked = typeof destinationTargetKey === "string" && destinationBlockedFolderKeys.includes(destinationTargetKey);
   const showArchiveRoot = !libraryQuery.trim() || "archive".includes(libraryQuery.trim().toLowerCase());
   const narrationDuration = audioTimelineDuration(narrationManifest);
   const narrationElapsed = narrationScrubValue ?? audioTimelinePosition(narrationManifest, narrationActiveIndex, narrationAudio.currentTime);
@@ -2096,7 +2097,9 @@ export function KnowledgeWorkspace() {
       const selectedFolderKeys = directSelection?.folder ? [directSelection.folder.key] : selectedFolders.map(({ key }) => key);
       const blockedFolderKeys = action === "move"
         ? contentFolderDescendantKeys(tree, selectedFolderKeys)
-        : [];
+        : action === "copy"
+          ? selectedFolderKeys
+          : [];
       if (generation === destinationGeneration.current) {
         setDestinationStack(resolvedStack);
         setDestinationFolders(contentFolderChildren(tree, sourceFolderKey));
@@ -2384,21 +2387,14 @@ export function KnowledgeWorkspace() {
       const previousFolderSearchResults = folderSearchResults;
       const sourceLocation = queryClient.getQueryData<ContentLocation>(contentQueryKeys.location(contentContext, sourceKey));
       const destinationLocations = new Map(destinationKeys.map((key) => [key, queryClient.getQueryData<ContentLocation>(contentQueryKeys.location(contentContext, key))]));
-      const placeholders = action === "copy" ? choices.map((choice, index): ContentFolder => ({
-        ...directFolder,
-        key: `optimistic-${createContentMutationKey()}-${index}`,
-        parentFolderKey: choice.folder?.key,
-        name: directFolder.name,
-        isFavorite: false,
-      })) : [];
       if (action === "move") {
         const optimistic = { ...directFolder, parentFolderKey: destinationKeys[0] };
         removeCachedContentFolder(queryClient, contentContext, sourceKey, directFolder.key);
         addCachedContentFolder(queryClient, contentContext, destinationKeys[0], optimistic);
         if (!queryClient.getQueryData(contentQueryKeys.location(contentContext, destinationKeys[0]))) queryClient.setQueryData(contentQueryKeys.location(contentContext, destinationKeys[0]), { folders: [optimistic], documents: [] });
-      } else {
-        placeholders.forEach((placeholder) => addCachedContentFolder(queryClient, contentContext, placeholder.parentFolderKey, placeholder));
-        if (!queryClient.getQueryData(contentQueryKeys.location(contentContext, destinationKeys[0]))) queryClient.setQueryData(contentQueryKeys.location(contentContext, destinationKeys[0]), { folders: placeholders, documents: [] });
+      } else if (!queryClient.getQueryData(contentQueryKeys.location(contentContext, destinationKeys[0]))) {
+        const tree = queryClient.getQueryData<ContentFolder[]>(contentQueryKeys.folderTree(contentContext)) ?? [];
+        queryClient.setQueryData(contentQueryKeys.location(contentContext, destinationKeys[0]), { folders: contentFolderChildren(tree, destinationKeys[0]), documents: [] });
       }
       const optimisticLocation = queryClient.getQueryData<ContentLocation>(contentQueryKeys.location(contentContext, first.folder?.key)) ?? { folders: [], documents: [] };
       setFolders(optimisticLocation.folders);
@@ -2434,12 +2430,6 @@ export function KnowledgeWorkspace() {
           : await copyContentSelection({ folderKeys: [directFolder.key], documentKeys: [] }, destinationKeys);
         if (outcome.succeeded === 0) throw new Error(outcome.failures[0]?.message ?? `The folder could not be ${action === "move" ? "moved" : "copied"}.`);
         committed = true;
-        placeholders.forEach((placeholder) => removeCachedContentFolder(queryClient, contentContext, placeholder.parentFolderKey, placeholder.key));
-        if (placeholders.length && isCurrent()) {
-          const placeholderKeys = new Set(placeholders.map(({ key }) => key));
-          setFolders((current) => current.filter(({ key }) => !placeholderKeys.has(key)));
-          setRootFolders((current) => current.filter(({ key }) => !placeholderKeys.has(key)));
-        }
         if (action === "move") {
           const updated = outcome.folders[0];
           if (updated) {
@@ -2502,9 +2492,9 @@ export function KnowledgeWorkspace() {
     const previousFolderSearchResults = folderSearchResults;
     const sourceKeys = [...selectedFoldersSnapshot.map(({ parentFolderKey }) => parentFolderKey), ...selectedDocumentsSnapshot.map(({ folderKey }) => folderKey)];
     const locationSnapshots = new Map([...new Set([...sourceKeys, targetKey])].map((key) => [key, queryClient.getQueryData<ContentLocation>(contentQueryKeys.location(contentContext, key))]));
-    const optimisticFolders = selectedFoldersSnapshot.map((folder, index): ContentFolder => action === "move"
-      ? { ...folder, parentFolderKey: targetKey }
-      : { ...folder, key: `optimistic-${createContentMutationKey()}-${index}`, parentFolderKey: targetKey, name: folder.name, isFavorite: false });
+    const optimisticFolders = action === "move"
+      ? selectedFoldersSnapshot.map((folder): ContentFolder => ({ ...folder, parentFolderKey: targetKey }))
+      : [];
     const optimisticDocuments = selectedDocumentsSnapshot.map((document, index): ContentDocument => action === "move"
       ? { ...document, folderKey: targetKey }
       : { ...document, key: `optimistic-${createContentMutationKey()}-${index}`, folderKey: targetKey, name: `${document.name} (copying)`, isFavorite: false });
@@ -2514,7 +2504,11 @@ export function KnowledgeWorkspace() {
     }
     optimisticFolders.forEach((folder) => addCachedContentFolder(queryClient, contentContext, targetKey, folder));
     optimisticDocuments.forEach((document) => addCachedContentDocument(queryClient, contentContext, targetKey, document));
-    const optimisticLocation = queryClient.getQueryData<ContentLocation>(contentQueryKeys.location(contentContext, targetKey)) ?? { folders: optimisticFolders, documents: optimisticDocuments };
+    const targetTree = queryClient.getQueryData<ContentFolder[]>(contentQueryKeys.folderTree(contentContext)) ?? [];
+    const optimisticLocation = queryClient.getQueryData<ContentLocation>(contentQueryKeys.location(contentContext, targetKey)) ?? {
+      folders: action === "move" ? optimisticFolders : contentFolderChildren(targetTree, targetKey),
+      documents: optimisticDocuments,
+    };
     setFolders(optimisticLocation.folders);
     setDocuments(optimisticLocation.documents);
     if (destinationFolder) {
@@ -2548,9 +2542,9 @@ export function KnowledgeWorkspace() {
         if (location) queryClient.setQueryData(contentQueryKeys.location(contentContext, key), location);
         else queryClient.removeQueries({ queryKey: contentQueryKeys.location(contentContext, key), exact: true });
       });
-      const normalizedFolders = operationFolders.map((folder, index): ContentFolder => action === "move"
-        ? { ...folder, parentFolderKey: targetKey }
-        : { ...folder, key: `optimistic-${createContentMutationKey()}-${index}`, parentFolderKey: targetKey, name: folder.name, isFavorite: false });
+      const normalizedFolders = action === "move"
+        ? operationFolders.map((folder): ContentFolder => ({ ...folder, parentFolderKey: targetKey }))
+        : [];
       const normalizedDocuments = operationDocuments.map((document, index): ContentDocument => action === "move"
         ? { ...document, folderKey: targetKey }
         : { ...document, key: `optimistic-${createContentMutationKey()}-${index}`, folderKey: targetKey, name: `${document.name} (copying)`, isFavorite: false });
@@ -2975,7 +2969,7 @@ export function KnowledgeWorkspace() {
       {singleFolderDelete ? null : <><Button disabled={bulkLoading} loading={bulkLoading} onPress={() => void deleteContentSelection()} size="lg" variant="primary">Delete</Button>{close(bulkLoading)}</>}
     </>;
     if (activeSheet === "destinationBrowser") return <>
-      {destinationAction !== "upload" && destinationAtInitialLocation ? null : <Button onPress={() => { if (destinationAction === "upload") goBackSheet(); else void selectDestination(); }} size="lg" variant="primary">{destinationAction === "upload" ? "Choose folder" : destinationAction === "move" ? "Move here" : "Copy here"}</Button>}
+      {destinationAction !== "upload" && (destinationAtInitialLocation || destinationIsBlocked) ? null : <Button onPress={() => { if (destinationAction === "upload") goBackSheet(); else void selectDestination(); }} size="lg" variant="primary">{destinationAction === "upload" ? "Choose folder" : destinationAction === "move" ? "Move here" : "Copy here"}</Button>}
       {close(bulkLoading)}
     </>;
     if (activeSheet === "destination" && destinationAction === "upload") return <>
@@ -3457,10 +3451,9 @@ export function KnowledgeWorkspace() {
             <ScrollView contentContainerStyle={styles.destinationFolderGrid} keyboardShouldPersistTaps="handled" style={styles.folderList}>
               {destinationLoading ? Array.from({ length: 3 }, (_, index) => <View accessibilityLabel="Loading folders" accessibilityRole="progressbar" key={index} style={[styles.rootFolderCard, styles.skeletonCard, { width: destinationCardSize, height: destinationCardSize }]} />) : null}
               {destinationFolders.map((folder) => {
-                const blocked = destinationBlockedFolderKeys.includes(folder.key);
                 return <View key={folder.key} style={[styles.rootFolderCard, { width: destinationCardSize, height: destinationCardSize }]}>
                   {folder.coverUrl ? <Image contentFit="cover" source={folder.coverUrl} style={styles.folderCover} /> : null}
-                  <Button accessibilityLabel={blocked ? `${folder.name} is not a valid destination` : `Open ${folder.name}`} contentMode="raw" disabled={blocked} onPress={() => void browseDestination(folder)} size="xl" style={[styles.rootFolderMain, folder.coverUrl && styles.coveredFolderMain]} variant="ghost">{folder.coverUrl ? null : <FolderIcon size="lg" />}<Text numberOfLines={1} style={[styles.archiveCardLabel, folder.coverUrl && styles.coveredFolderLabel]}>{folder.name}</Text></Button>
+                  <Button accessibilityLabel={`Open ${folder.name}`} contentMode="raw" onPress={() => void browseDestination(folder)} size="xl" style={[styles.rootFolderMain, folder.coverUrl && styles.coveredFolderMain]} variant="ghost">{folder.coverUrl ? null : <FolderIcon size="lg" />}<Text numberOfLines={1} style={[styles.archiveCardLabel, folder.coverUrl && styles.coveredFolderLabel]}>{folder.name}</Text></Button>
                 </View>;
               })}
             </ScrollView>
