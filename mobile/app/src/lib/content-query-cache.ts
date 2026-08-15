@@ -89,7 +89,7 @@ export async function refreshContentLocation(queryClient: QueryClient, context: 
 export function getContentDocument(queryClient: QueryClient, context: ContentContext, documentKey: string) {
   return queryClient.fetchQuery({
     queryKey: contentQueryKeys.document(context, documentKey),
-    queryFn: () => readContentDocument(documentKey),
+    queryFn: () => readContentDocument(documentKey, context),
   });
 }
 

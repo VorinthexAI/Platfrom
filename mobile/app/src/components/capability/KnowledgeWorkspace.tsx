@@ -2133,6 +2133,9 @@ export function KnowledgeWorkspace() {
             if (item.file.size > MAX_MOBILE_UPLOAD_BYTES) throw new Error("Mobile uploads must be 8 MB or smaller.");
             const { document } = await uploadContentDocument({ name: item.file.name, type: item.file.type, size: item.file.size, base64: await item.file.base64() }, folderKey, requestContext, item.mutationKey);
             if (generation !== uploadGeneration.current || contentContextKeyRef.current !== requestContextKey) return;
+            const verified = await refreshContentDocument(queryClient, requestContext, document.key);
+            if (!verified.content.trim()) throw new Error("No text could be extracted from the uploaded file.");
+            if (generation !== uploadGeneration.current || contentContextKeyRef.current !== requestContextKey) return;
             uploadedDocuments.set(item.id, document);
           } catch (cause) {
             if (generation !== uploadGeneration.current || contentContextKeyRef.current !== requestContextKey) return;

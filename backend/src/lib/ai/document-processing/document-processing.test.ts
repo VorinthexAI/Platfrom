@@ -524,16 +524,20 @@ describe('document.parse tool', () => {
     }
   });
 
-  test('preserves PDFs when text extraction fails', async () => {
+  test('rejects PDFs when text extraction fails', async () => {
     const context = harness('extract');
     context.actions.validate = async (value) => normalized('pdf', (value.file as ReturnType<typeof fileFor>).bytes);
-    context.actions.generateHtml = async () => ({ html: '<p>Text extraction is unavailable for this PDF file.</p>' });
-    context.actions.generateContent = async ({ html }) => ({ content: html.replace(/<[^>]+>/g, '') });
-    context.actions.embed = async ({ content }) => ({ embedding: [1, 2], contentChunks: [content], chunkEmbeddings: [[1, 2]], semanticChunkCount: 1, semanticContentHash: documentSemanticHash(content) });
-    const result = await parseDocument({ ...input, file: fileFor('pdf') }, { ...context, logger: quiet }) as DocumentParseResult;
-    expect(result.document).toMatchObject({ extension: 'pdf', content: 'Text extraction is unavailable for this PDF file.' });
-    expect(context.calls).not.toContain('storage-delete');
-    expect(context.calls.at(-1)).toBe('document-insert');
+    await expect(parseDocument({ ...input, file: fileFor('pdf') }, { ...context, logger: quiet })).rejects.toThrow();
+    expect(context.calls).not.toContain('document-insert');
+    expect(context.calls.at(-1)).toBe('storage-delete');
+  });
+
+  test('rejects documents when extraction completes without text', async () => {
+    const context = harness();
+    context.actions.extract = async () => ({ extractedText: '', blocks: [] });
+    await expect(parseDocument(input, { ...context, logger: quiet })).rejects.toMatchObject({ code: 'DOCUMENT_EXTRACTION_FAILED' });
+    expect(context.calls).not.toContain('document-insert');
+    expect(context.calls.at(-1)).toBe('storage-delete');
   });
 
   test('cleans S3 after non-recoverable post-upload stage failures', async () => {

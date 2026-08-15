@@ -399,10 +399,10 @@ export async function loadInitialContentLocation() {
   return { root, location: { folders: tree.filter((folder) => folder.parentFolderKey === initialFolder.key), documents }, initialFolder };
 }
 
-export async function readContentDocument(documentKey: string) {
+export async function readContentDocument(documentKey: string, contentContext = getContentContext()) {
   const data = await callContentTool<{
     results: { success: boolean; data?: { document: ContentDocument & { content?: string } }; error?: { message: string } }[];
-  }>("document.find", { documentKeys: [documentKey], include: ["content"] });
+  }>("document.find", { documentKeys: [documentKey], include: ["content"] }, undefined, contentContext);
   const result = data.results[0];
   const document = result?.data?.document;
   if (!result?.success || !document || document.content === undefined) throw new Error(result?.error?.message ?? "The document could not be opened.");
