@@ -3381,7 +3381,7 @@ export function KnowledgeWorkspace() {
           <>
             <BottomSheetItem onPress={() => { void startNewNote(); }} style={styles.sheetAction} variant="secondary">New document</BottomSheetItem>
             <BottomSheetItem onPress={openNewFolder} style={styles.sheetAction} variant="secondary">New folder</BottomSheetItem>
-            <BottomSheetItem disabled={uploading} loading={uploading} onPress={() => void openDestinationPicker("upload")} style={styles.sheetAction} variant="secondary">Upload files</BottomSheetItem>
+            <BottomSheetItem disabled={uploading} loading={uploading} onPress={() => void pickAndUpload(currentFolder?.key)} style={styles.sheetAction} variant="secondary">Upload files</BottomSheetItem>
             <BottomSheetItem disabled={uploading || scanBusy} onPress={startDocumentScan} style={styles.sheetAction} variant="secondary">Scan documents</BottomSheetItem>
           </>
         ) : null}
