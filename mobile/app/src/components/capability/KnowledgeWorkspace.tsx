@@ -390,6 +390,7 @@ export function KnowledgeWorkspace() {
   const destinationTargetKey = destinationFolder?.key ?? null;
   const destinationAtSource = destinationAction !== "upload" && destinationSourceFolderKeys.includes(destinationTargetKey);
   const destinationIsSelectedFolder = destinationStack.some(({ key }) => destinationBlockedFolderKeys.includes(key));
+  const destinationTransferDisabled = destinationAction !== "upload" && (destinationLoading || destinationAtSource || destinationIsSelectedFolder) || bulkLoading;
   const showArchiveRoot = !libraryQuery.trim() || "archive".includes(libraryQuery.trim().toLowerCase());
   const narrationDuration = audioTimelineDuration(narrationManifest);
   const narrationElapsed = narrationScrubValue ?? audioTimelinePosition(narrationManifest, narrationActiveIndex, narrationAudio.currentTime);
@@ -2967,7 +2968,7 @@ export function KnowledgeWorkspace() {
       {singleFolderDelete ? null : <><Button disabled={bulkLoading} loading={bulkLoading} onPress={() => void deleteContentSelection()} size="lg" variant="primary">Delete</Button>{close(bulkLoading)}</>}
     </>;
     if (activeSheet === "destinationBrowser") return <>
-      <Button disabled={destinationAction !== "upload" && (destinationLoading || destinationAtSource || destinationIsSelectedFolder) || bulkLoading} onPress={() => { if (destinationAction === "upload") goBackSheet(); else void selectDestination(); }} size="lg" variant="primary">{destinationAction === "upload" ? "Choose folder" : destinationAction === "move" ? "Move here" : "Copy here"}</Button>
+      <Button disabled={destinationTransferDisabled} onPress={() => { if (destinationAction === "upload") goBackSheet(); else void selectDestination(); }} size="lg" style={destinationTransferDisabled ? styles.disabledPrimaryAction : undefined} variant="primary">{destinationAction === "upload" ? "Choose folder" : destinationAction === "move" ? "Move here" : "Copy here"}</Button>
       {close(bulkLoading)}
     </>;
     if (activeSheet === "destination" && destinationAction === "upload") return <>
@@ -3681,6 +3682,7 @@ const styles = StyleSheet.create({
   destinationPanel: { flex: 1, gap: 12 },
   bulkActionList: { width: "100%", gap: spacing.sm },
   compactSheetActions: { width: "100%", gap: spacing.sm, padding: 2 },
+  disabledPrimaryAction: { opacity: 0.8 },
   destinationBrowser: { flex: 1, minHeight: 0, gap: spacing.sm },
   destinationLocationLane: { minHeight: 40, flexDirection: "row", alignItems: "center", gap: spacing.xs },
   destinationLocationTitle: { flex: 1, color: palette.silver100, fontFamily: fonts.medium, fontSize: 14 },
