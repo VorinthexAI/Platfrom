@@ -836,7 +836,7 @@ export const collections: CollectionSpec[] = [
   { name: 'polls', embedKeys: ['question'], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['messageKey'], unique: true }, { fields: ['channelKey', 'status'] }] },
   { name: 'pollOptions', embedKeys: ['text'], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['pollKey'] }, { fields: ['pollKey', 'position'], unique: true }] },
   { name: 'pollVotes', embedKeys: [], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['pollKey'] }, { fields: ['optionKey'] }, { fields: ['participantKey'] }, { fields: ['pollKey', 'optionKey', 'participantKey'], unique: true }] },
-  { name: 'folders', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'parentFolderKey'] }, { fields: ['scopeKey', 'isFavorite', 'deletedAt'] }, { fields: ['scopeKey', 'parentFolderKey', 'name'], unique: true }] },
+  { name: 'folders', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'parentFolderKey'] }, { fields: ['scopeKey', 'isFavorite', 'deletedAt'] }, { fields: ['scopeKey', 'parentFolderKey', 'name'] }] },
   { name: 'images', embedKeys: ['filename', 'caption'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['imageCaptionKey'], sparse: true }, { fields: ['storageKey'], unique: true }] },
   { name: 'imageCaptions', skipEmbedding: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'hashAlgorithm', 'perceptualHash'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment0'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment1'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment2'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment3'], sparse: true }] },
   { name: 'visualIdentities', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'name'] }, { fields: ['scopeKey', 'referenceImageKey'] }] },
@@ -1268,6 +1268,15 @@ async function main() {
         if (fields.length === 2 && fields[0] === 'scopeKey' && fields[1] === 'name' && 'unique' in index && index.unique === true) {
           await collection.dropIndex(index.id);
           console.log(`Dropped obsolete unique channel-name index ${index.id}`);
+        }
+      }
+    }
+    if (spec.name === 'folders') {
+      for (const index of await collection.indexes()) {
+        const fields = 'fields' in index && Array.isArray(index.fields) ? index.fields.map(String) : [];
+        if (fields.join('\0') === ['scopeKey', 'parentFolderKey', 'name'].join('\0') && 'unique' in index && index.unique === true) {
+          await collection.dropIndex(index.id);
+          console.log(`Dropped obsolete unique folder-name index ${index.id}`);
         }
       }
     }

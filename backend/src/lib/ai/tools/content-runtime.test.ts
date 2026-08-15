@@ -828,7 +828,7 @@ describe('Content runtime', () => {
     expect(deletedObjects.length).toBeGreaterThan(0);
   });
 
-  test('allocates deterministic collision-safe copied root names', async () => {
+  test('preserves copied root names when sibling names match', async () => {
     const f = fixture('moderator');
     const targetKey = newId(), firstParentKey = newId(), secondParentKey = newId(), firstKey = newId(), secondKey = newId();
     f.folders.set(targetKey, { key: targetKey, scopeKey: f.scopeKey, name: 'Target', embedding, isFavorite: false, createdAt: now, updatedAt: now });
@@ -839,10 +839,10 @@ describe('Content runtime', () => {
     const dependencies = { repository: f.repository, embed: async () => embedding };
 
     const sameParent = await runContentTool('folder.copy', { copies: [{ folderKey: f.folderKey, targetScopeKey: f.scopeKey }] }, f.context, dependencies);
-    expect(sameParent.results[0]?.data?.folder.name).toBe('Root (copy)');
+    expect(sameParent.results[0]?.data?.folder.name).toBe('Root');
 
     const sameNames = await runContentTool('folder.copy', { copies: [{ folderKey: firstKey, targetScopeKey: f.scopeKey, targetParentFolderKey: targetKey }, { folderKey: secondKey, targetScopeKey: f.scopeKey, targetParentFolderKey: targetKey }] }, f.context, dependencies);
-    expect(sameNames.results.map((result) => result.data?.folder.name)).toEqual(['Report', 'Report (copy)']);
+    expect(sameNames.results.map((result) => result.data?.folder.name)).toEqual(['Report', 'Report']);
   });
 
   test('retains copied folders and referenced storage when document compensation deletion fails', async () => {

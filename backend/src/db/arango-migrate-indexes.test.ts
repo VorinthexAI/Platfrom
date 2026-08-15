@@ -108,6 +108,12 @@ describe('Arango migration indexes', () => {
     expect(backfill).toContain('spec.includeMetadata ? { ...values, provider: EMBEDDING_PROVIDER_ID, model: EMBEDDING_MODEL } : values');
     expect(backfill).toContain('...(spec.includeMetadata ? { embedKeys: spec.embedKeys } : {})');
   });
+  test('allows sibling folders to share names', async () => {
+    const folderNameIndex = collections.find(({ name }) => name === 'folders')?.indexes?.find(({ fields }) => fields.join('.') === 'scopeKey.parentFolderKey.name');
+    expect(folderNameIndex?.unique).not.toBe(true);
+    const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    expect(source).toContain('Dropped obsolete unique folder-name index');
+  });
   test('declares travel and book-generation collection indexes', () => {
     expect(collections.filter(({ name }) => ['places', 'trips', 'tripPlaces', 'placeVisits'].includes(name)).map(({ name }) => name)).toEqual(['places', 'trips', 'tripPlaces', 'placeVisits']);
     expect(collections.find(({ name }) => name === 'tripPlaces')?.indexes).toContainEqual({ fields: ['scopeKey', 'tripKey', 'position'], unique: true });

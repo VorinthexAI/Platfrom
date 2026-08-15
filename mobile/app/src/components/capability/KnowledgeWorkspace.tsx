@@ -2386,7 +2386,7 @@ export function KnowledgeWorkspace() {
         ...directFolder,
         key: `optimistic-${createContentMutationKey()}-${index}`,
         parentFolderKey: choice.folder?.key,
-        name: `${directFolder.name} (copying)`,
+        name: directFolder.name,
         isFavorite: false,
       })) : [];
       if (action === "move") {
@@ -2502,7 +2502,7 @@ export function KnowledgeWorkspace() {
     const locationSnapshots = new Map([...new Set([...sourceKeys, targetKey])].map((key) => [key, queryClient.getQueryData<ContentLocation>(contentQueryKeys.location(contentContext, key))]));
     const optimisticFolders = selectedFoldersSnapshot.map((folder, index): ContentFolder => action === "move"
       ? { ...folder, parentFolderKey: targetKey }
-      : { ...folder, key: `optimistic-${createContentMutationKey()}-${index}`, parentFolderKey: targetKey, name: `${folder.name} (copying)`, isFavorite: false });
+      : { ...folder, key: `optimistic-${createContentMutationKey()}-${index}`, parentFolderKey: targetKey, name: folder.name, isFavorite: false });
     const optimisticDocuments = selectedDocumentsSnapshot.map((document, index): ContentDocument => action === "move"
       ? { ...document, folderKey: targetKey }
       : { ...document, key: `optimistic-${createContentMutationKey()}-${index}`, folderKey: targetKey, name: `${document.name} (copying)`, isFavorite: false });
@@ -2548,7 +2548,7 @@ export function KnowledgeWorkspace() {
       });
       const normalizedFolders = operationFolders.map((folder, index): ContentFolder => action === "move"
         ? { ...folder, parentFolderKey: targetKey }
-        : { ...folder, key: `optimistic-${createContentMutationKey()}-${index}`, parentFolderKey: targetKey, name: `${folder.name} (copying)`, isFavorite: false });
+        : { ...folder, key: `optimistic-${createContentMutationKey()}-${index}`, parentFolderKey: targetKey, name: folder.name, isFavorite: false });
       const normalizedDocuments = operationDocuments.map((document, index): ContentDocument => action === "move"
         ? { ...document, folderKey: targetKey }
         : { ...document, key: `optimistic-${createContentMutationKey()}-${index}`, folderKey: targetKey, name: `${document.name} (copying)`, isFavorite: false });
@@ -2748,10 +2748,10 @@ export function KnowledgeWorkspace() {
         removeCachedContentFoldersEverywhere(queryClient, contentContext, [directFolder.key]);
         await invalidateContentLocations(queryClient, contentContext, [parentKey]);
         await invalidateContentHistories(queryClient, contentContext, [parentKey, undefined]);
-        showToast({ title: "Folder deleted", description: "Moved to Archive trash." });
+        showToast({ title: "Folder deleted" });
       }).catch((cause: unknown) => {
         if (committed) {
-          if (isCurrent()) showToast({ title: "Folder deleted", description: "The change completed, but Archive could not refresh yet." });
+          if (isCurrent()) showToast({ title: "Folder deleted" });
           return;
         }
         if (!isCurrent()) return;
@@ -2794,9 +2794,12 @@ export function KnowledgeWorkspace() {
       if (outcome.succeeded) {
         closeSheet(outcome.failed > 0);
       }
+      const foldersOnly = operationFolders.length > 0 && operationDocuments.length === 0;
       showToast({
-        title: outcome.succeeded ? `${outcome.succeeded} ${outcome.succeeded === 1 ? "item" : "items"} deleted` : "Items could not be deleted",
-        description: outcome.failed ? `${outcome.failed} ${outcome.failed === 1 ? "item" : "items"} failed. ${outcome.failures[0]?.message ?? "Try again."}` : "Moved to Archive trash.",
+        title: outcome.succeeded
+          ? foldersOnly ? `${outcome.succeeded === 1 ? "Folder" : `${outcome.succeeded} folders`} deleted` : `${outcome.succeeded} ${outcome.succeeded === 1 ? "item" : "items"} deleted`
+          : "Items could not be deleted",
+        ...(outcome.failed ? { description: `${outcome.failed} ${outcome.failed === 1 ? "item" : "items"} failed. ${outcome.failures[0]?.message ?? "Try again."}` } : foldersOnly ? {} : { description: "Moved to Archive trash." }),
       });
     } catch (cause) {
       setSheetError(cause instanceof Error ? cause.message : "The selected items could not be deleted.");

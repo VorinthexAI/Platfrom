@@ -689,14 +689,6 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
   const foldersIn = async (scopeKey: string, includePendingDeletion = false) => (await repo.listFolders(scopeKey, true, includePendingDeletion))
     .filter((item) => includePendingDeletion || !item._internalDeletion);
   const descendants = (all: Folder[], key: string) => { const out: Folder[] = []; const pending = [key]; const seen = new Set(pending); while (pending.length) { const parentKey = pending.shift()!; for (const child of all.filter((f) => f.parentFolderKey === parentKey)) if (!seen.has(child.key)) { seen.add(child.key); out.push(child); pending.push(child.key); } } return out; };
-  const availableCopyName = (requested: string, names: Set<string>) => {
-    if (!names.has(requested)) return requested;
-    for (let copy = 1; ; copy += 1) {
-      const suffix = copy === 1 ? ' (copy)' : ` (copy ${copy})`;
-      const candidate = `${requested.slice(0, 255 - suffix.length)}${suffix}`;
-      if (!names.has(candidate)) return candidate;
-    }
-  };
   const activeFolderHierarchy = async (key: string | undefined, scopeKey: string) => {
     let currentKey: string | undefined = key;
     const visited = new Set<string>();
@@ -990,9 +982,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           const target = await location(item.targetScopeKey, item.targetParentFolderKey, 'moderator');
           const sourceScopeFolders = (await foldersIn(source.scopeKey)).filter((candidate) => !candidate.deletedAt);
           const sourceFolders = [source, ...descendants(sourceScopeFolders, source.key)];
-          const targetScopeFolders = source.scopeKey === item.targetScopeKey ? sourceScopeFolders : (await foldersIn(item.targetScopeKey)).filter((candidate) => !candidate.deletedAt);
-          const siblingNames = new Set(targetScopeFolders.filter((candidate) => candidate.parentFolderKey === target?.key).map((candidate) => candidate.name));
-          const rootName = availableCopyName(item.newName ?? source.name, siblingNames);
+          const rootName = item.newName ?? source.name;
           const sourceFolderKeys = new Set(sourceFolders.map((candidate) => candidate.key));
           const sourceDocuments = (await repo.listDocuments(source.scopeKey)).filter((candidate) => candidate.folderKey && sourceFolderKeys.has(candidate.folderKey));
           const folderKeys = new Map(sourceFolders.map((candidate) => [candidate.key, d.id()]));
