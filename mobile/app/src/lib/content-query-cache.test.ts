@@ -160,7 +160,7 @@ test("optimistically adds and removes documents and folders in exact locations",
   expect(client.getQueryData<any>(contentQueryKeys.folderTree(context))).toEqual([{ ...folder, parentFolderKey: "destination" }]);
 });
 
-test("removes deleted documents and evicts detail, preview, and nested audio queries", () => {
+test("removes deleted documents and evicts detail and nested audio queries", () => {
   const client = new QueryClient();
   const first = contentQueryKeys.location(context, "first");
   const second = contentQueryKeys.location(context, "second");
@@ -168,13 +168,11 @@ test("removes deleted documents and evicts detail, preview, and nested audio que
   client.setQueryData(first, { folders: [], documents: [document] });
   client.setQueryData(second, { folders: [], documents: [document] });
   client.setQueryData(contentQueryKeys.document(context, document.key), { ...document, content: "Body" });
-  client.setQueryData(contentQueryKeys.preview(context, document.key), { ...document, blocks: [] });
   client.setQueryData(contentQueryKeys.audioVersions(context, document.key), [{ key: "audio-a" }]);
   removeCachedContentDocumentEverywhere(client, context, document.key);
   expect(client.getQueryData<any>(first).documents).toEqual([]);
   expect(client.getQueryData<any>(second).documents).toEqual([]);
   expect(client.getQueryData(contentQueryKeys.document(context, document.key))).toBeUndefined();
-  expect(client.getQueryData(contentQueryKeys.preview(context, document.key))).toBeUndefined();
   expect(client.getQueryData(contentQueryKeys.audioVersions(context, document.key))).toBeUndefined();
 });
 

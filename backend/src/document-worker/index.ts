@@ -2,8 +2,7 @@ import { runDocumentProcessingWorker } from '@/lib/ai/document-processing/fargat
 
 try {
   await runDocumentProcessingWorker();
-  process.exit(0);
 } catch (error) {
-  console.error(JSON.stringify({ action: 'document.worker', status: 'failed', error: error instanceof Error ? error.message : 'unknown error' }));
-  process.exit(1);
+  console.error(JSON.stringify({ action: 'document.queue.worker', status: 'failed', error: error instanceof Error ? error.message : 'unknown error' }));
+  process.exitCode = 1;
 }

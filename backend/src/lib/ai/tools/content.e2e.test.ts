@@ -13,8 +13,6 @@ suite('Content live E2E', () => {
   let toolNames: readonly string[];
   let outputSchemas: Record<string, { parse(value: unknown): unknown }>;
   let generateDocumentExport: any;
-  let documentGenerateHtml: any;
-  let documentGenerateContent: any;
   let documentEmbed: any;
   let ListObjectsV2Command: any;
   let DeleteObjectsCommand: any;
@@ -45,8 +43,6 @@ suite('Content live E2E', () => {
     runContentAgentTool = content.runContentAgentTool;
     toolNames = content.CONTENT_TOOL_NAMES;
     outputSchemas = content.contentToolOutputSchemas;
-    documentGenerateHtml = processing.documentGenerateHtml;
-    documentGenerateContent = processing.documentGenerateContent;
     documentEmbed = processing.documentEmbed;
     generateDocumentExport = exports.generateDocumentExport;
     s3 = s3Module.s3;
@@ -152,9 +148,7 @@ suite('Content live E2E', () => {
       runAction: async (action: string, input: any) => {
         if (action === 'ask' || action === 'enhance' || action === 'translate' || action === 'reason' || action === 'deep-reason') return { text: `Generated ${action}: deterministic archive result.` };
         if (action === 'speak' || action === 'generate-speech') return { audio: new TextEncoder().encode('deterministic audio'), mimeType: 'audio/mpeg', durationMs: 250 };
-        if (action === 'document-cleanup') return { html: `<p>${input.text}</p>` };
-        if (action === 'document-generate-html') return documentGenerateHtml(input, { logger: () => undefined });
-        if (action === 'document-generate-content') return documentGenerateContent(input, { logger: () => undefined });
+        if (action === 'document-cleanup') return { content: input.text };
         if (action === 'document-embed') return documentEmbed(input, { embed: async () => embedding, dimensions: 4096, logger: () => undefined });
         throw new Error(`Unexpected provider action: ${action}`);
       },
@@ -233,12 +227,12 @@ suite('Content live E2E', () => {
       scopeKey, folderKey: childFolderKey, idempotencyKey: `processing-${organizationKey}`,
     });
     const documentKey = processed.document.key;
-    expect(processingOrder).toEqual(['document.parse', 'document-validate', 'storage-upload', 'document-extract', 'document-cleanup', 'document-generate-html', 'document-generate-content', 'document-embed', 'document-insert']);
+    expect(processingOrder).toEqual(['document.parse', 'document-validate', 'storage-upload', 'document-extract', 'document-cleanup', 'document-embed', 'document-insert']);
     const createdDocument = await call('document.create', {
-      scopeKey, folderKey: childFolderKey, name: 'Created note', representation: { content: 'Created directly through Content.' }, idempotencyKey: `created-${organizationKey}`,
+      scopeKey, folderKey: childFolderKey, name: 'Created note', content: 'Created directly through Content.', idempotencyKey: `created-${organizationKey}`,
     });
     expect(createdDocument.document.key).toBeString();
-    expect((await call('document.find', { documentKeys: [documentKey], include: ['html', 'content', 'embedding', 'folder', 'shares'] })).results[0].data.document.embedding).toHaveLength(4096);
+    expect((await call('document.find', { documentKeys: [documentKey], include: ['content', 'embedding', 'folder', 'shares'] })).results[0].data.document.embedding).toHaveLength(4096);
     expect((await call('document.list', { scopeKey, folderKey: childFolderKey, extensions: ['md'] })).documents.map((item: any) => item.key)).toContain(documentKey);
 
     const [{ Hono }, { createContentToolHandler }] = await Promise.all([import('hono'), import('@/api/content-tools')]);
@@ -274,7 +268,7 @@ suite('Content live E2E', () => {
     const apiObject = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: apiDocument.storageKey }));
     expect(Buffer.from(await apiObject.Body.transformToByteArray()).toString()).toBe(apiText);
 
-    for (const mode of ['content', 'html'] as const) expect((await call('document.read', { documentKeys: [documentKey], mode })).summary.failed).toBe(0);
+    expect((await call('document.read', { documentKeys: [documentKey], mode: 'content' })).summary.failed).toBe(0);
     const ephemeralAudio = await call('document.read', { documentKeys: [documentKey], mode: 'audio', startOffset: 2, includeTitle: true, includeCode: false });
     expect(ephemeralAudio.results[0].data.audio[0].url).toStartWith('data:audio/mpeg;base64,');
     const persistedAudio = await call('document.read', { documentKeys: [documentKey], mode: 'audio', persistAudio: true, idempotencyKey: `audio-${organizationKey}` });
@@ -292,9 +286,8 @@ suite('Content live E2E', () => {
     expect((await signedAudio.arrayBuffer()).byteLength).toBeGreaterThan(0);
 
     await call('document.update', { updates: [{ documentKey, content: 'Canonical updated body with semantic roadmap.', createVersion: true }] });
-    const canonical = (await call('document.find', { documentKeys: [documentKey], include: ['html', 'content', 'embedding'] })).results[0].data.document;
+    const canonical = (await call('document.find', { documentKeys: [documentKey], include: ['content', 'embedding'] })).results[0].data.document;
     expect(canonical.content).toContain('Canonical updated body');
-    expect(canonical.html).toContain('Canonical updated body');
     expect(canonical.embedding).toHaveLength(4096);
     expect((await call('document.list-audio-versions', { documentKeys: [documentKey] })).results[0].data.audioVersions[0].current).toBe(false);
     const updatedAudio = await call('document.read', { documentKeys: [documentKey], mode: 'audio', persistAudio: true, idempotencyKey: `audio-updated-${organizationKey}` });
@@ -316,10 +309,10 @@ suite('Content live E2E', () => {
     expect(JSON.stringify(listedShares)).not.toContain('tokenHash');
 
     const versionOne = (await call('document.create-version', { documentKeys: [documentKey], labels: { [documentKey]: 'Release one' } })).results[0].data.version;
-    expect(Array.isArray((await db.collection('documentVersions').document(versionOne.key)).content)).toBe(true);
+    expect(typeof (await db.collection('documentVersions').document(versionOne.key)).content).toBe('string');
     const versionTwo = (await call('document.create-version', { documentKeys: [documentKey], labels: { [documentKey]: 'Release two' }, atomic: true })).results[0].data.version;
     expect(versionTwo.version).toBeGreaterThan(versionOne.version);
-    expect((await call('document.find-version', { versionKeys: [versionOne.key], include: ['html', 'content', 'embedding'] })).results[0].data.version.embedding).toHaveLength(4096);
+    expect((await call('document.find-version', { versionKeys: [versionOne.key], include: ['content', 'embedding'] })).results[0].data.version.embedding).toHaveLength(4096);
     expect((await call('document.list-versions', { documentKeys: [documentKey], limit: 1 })).results[0].data.versions).toHaveLength(1);
     const restoredVersion = await call('document.restore-version', { restores: [{ documentKey, versionKey: versionOne.key, createBackupVersion: true }], atomic: true });
     expect(restoredVersion.results[0].data.document.key).toBe(documentKey);
@@ -332,13 +325,12 @@ suite('Content live E2E', () => {
     const copiedAudio = await call('document.read', { documentKeys: [copiedDocumentKey], mode: 'audio', persistAudio: true, idempotencyKey: `audio-copy-${organizationKey}` });
     const copiedAudioRecord = await db.collection('documentAudioVersions').document(copiedAudio.results[0].data.audioVersion.key);
 
-    for (const format of ['original', 'html', 'txt', 'md'] as const) {
+    for (const format of ['original', 'txt'] as const) {
       const download = await call('document.download', { documentKeys: [documentKey], format });
       expect(Buffer.from(download.results[0].data.content, 'base64').byteLength).toBeGreaterThan(0);
     }
-    const exports = await call('document.export', { exports: ['html', 'txt', 'md', 'pdf', 'docx'].map((format) => ({ documentKey, format })), atomic: true });
-    expect(exports.summary).toEqual({ requested: 5, succeeded: 5, failed: 0 });
-    expect(Buffer.from(exports.results[4].data.content, 'base64').subarray(0, 2).toString()).toBe('PK');
+    const exports = await call('document.export', { exports: [{ documentKey, format: 'txt' }], atomic: true });
+    expect(exports.summary).toEqual({ requested: 1, succeeded: 1, failed: 0 });
 
     expect((await call('document.summarize', { documentKeys: [documentKey, copiedDocumentKey], combine: true })).results[0].data.text).toContain('deterministic');
     await call('document.summarize', { documentKeys: [documentKey], persist: true, idempotencyKey: `summary-${organizationKey}` });
@@ -361,8 +353,8 @@ suite('Content live E2E', () => {
     const outsiderFolderKey = newId();
     const outsiderDocumentKey = newId();
     await save('folders', { _key: outsiderFolderKey, scopeKey: outsiderScopeKey, name: 'Private outsider', embedding, createdAt: now, updatedAt: now });
-    await save('documents', { _key: outsiderDocumentKey, scopeKey: outsiderScopeKey, folderKey: outsiderFolderKey, name: 'Forbidden source', extension: 'txt', mimeType: 'text/plain', storageKey: `content/${outsiderOrganizationKey}/${outsiderScopeKey}/${outsiderDocumentKey}/original.txt`, sizeBytes: 8, html: '<p>roadmap</p>', content: 'roadmap', embedding, createdAt: now, updatedAt: now });
-    const scopedSearch = await call('scope.document.search', { scopeKey, query: 'roadmap', sources: [{ type: 'scope', scopeKeys: [scopeKey] }, { type: 'project', projectKeys: [secondScopeKey] }, { type: 'folder', folderKeys: [rootFolderKey], includeDescendants: true }], include: ['snippet', 'content', 'html', 'folder', 'scoreBreakdown'] });
+    await save('documents', { _key: outsiderDocumentKey, scopeKey: outsiderScopeKey, folderKey: outsiderFolderKey, name: 'Forbidden source', extension: 'txt', mimeType: 'text/plain', storageKey: `content/${outsiderOrganizationKey}/${outsiderScopeKey}/${outsiderDocumentKey}/original.txt`, sizeBytes: 8, content: 'roadmap', embedding, createdAt: now, updatedAt: now });
+    const scopedSearch = await call('scope.document.search', { scopeKey, query: 'roadmap', sources: [{ type: 'scope', scopeKeys: [scopeKey] }, { type: 'project', projectKeys: [secondScopeKey] }, { type: 'folder', folderKeys: [rootFolderKey], includeDescendants: true }], include: ['snippet', 'content', 'folder', 'scoreBreakdown'] });
     expect(scopedSearch.results.some((item: any) => item.documentKey === documentKey)).toBe(true);
     const organizationSearch = await call('organization.document.search', { organizationKey, query: 'roadmap', sources: [{ type: 'scope', scopeKeys: [scopeKey, secondScopeKey, outsiderScopeKey] }], include: ['snippet', 'scope', 'scoreBreakdown'] });
     expect(organizationSearch.results.map((item: any) => item.documentKey)).toContain(secondDocument.document.key);
@@ -459,7 +451,7 @@ suite('Content live E2E', () => {
       expect(await temporary.collection('documentShares').exists()).toBe(false);
       const versions = await (await temporary.query('FOR version IN documentVersions SORT version._key RETURN version')).all();
       expect(versions).toHaveLength(55);
-      expect(versions.every((version: any) => version.html.includes('<p>') && !('json' in version) && version.embedding.length === 4096)).toBe(true);
+      expect(versions.every((version: any) => !('html' in version) && !('json' in version) && version.embedding.length === 4096)).toBe(true);
       const shareIndexes = await temporary.collection('shares').indexes();
       const versionIndexes = await temporary.collection('documentVersions').indexes();
       expect(shareIndexes.some((index: any) => index.unique && index.fields?.join(',') === 'tokenHash')).toBe(true);

@@ -55,6 +55,11 @@ output "document_processing_task_definition" {
   value = aws_ecs_task_definition.document_worker.arn
 }
 
+output "document_worker_service" {
+  description = "Always-warm ECS service consuming the document processing queue."
+  value       = aws_ecs_service.document_worker.name
+}
+
 output "job_redis_url" {
   value = "redis://${aws_instance.early_app.private_ip}:6379"
 }
@@ -63,7 +68,6 @@ output "job_redis_url" {
 output "ssm_parameter_prefix" {
   value = local.normalized_ssm_prefix
 }
-
 
 
 

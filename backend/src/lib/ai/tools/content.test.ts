@@ -138,7 +138,7 @@ describe('Content input contracts', () => {
     const definitions = Object.fromEntries(CONTENT_TOOL_DEFINITIONS.map((definition) => [definition.name, definition.inputSchema])) as Record<string, any>;
     expect(definitions['document.parse'].properties.file).toMatchObject({ type: 'object' });
     expect(definitions['document.unshare'].oneOf).toHaveLength(2);
-    expect(definitions['document.update'].properties.updates.items.oneOf).toHaveLength(3);
+    expect(definitions['document.update'].properties.updates.items.oneOf).toHaveLength(2);
     expect(definitions['document.read'].description).toContain('endOffset');
   });
 });

@@ -200,7 +200,7 @@ export const documentCleanupInputSchema = z.object({
 export type DocumentCleanupInput = z.infer<typeof documentCleanupInputSchema>;
 
 export const documentCleanupOutputSchema = z.object({
-  html: z.string().trim().min(1).max(50_000),
+  content: z.string().trim().min(1).max(50_000),
 }).strict();
 export type DocumentCleanupOutput = z.infer<typeof documentCleanupOutputSchema>;
 

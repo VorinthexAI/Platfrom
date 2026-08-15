@@ -6,7 +6,6 @@ import {
   listContentDocumentAudioVersions,
   listContentSearchHistory,
   readContentDocument,
-  readContentDocumentPreview,
   type ContentContext,
   type ContentDocument,
   type ContentFolder,
@@ -22,7 +21,6 @@ export const contentQueryKeys = {
   locations: (context: ContentContext) => [...contentQueryKeys.all(context), "locations"] as const,
   location: (context: ContentContext, folderKey?: string) => [...contentQueryKeys.locations(context), folderKey ?? null] as const,
   document: (context: ContentContext, documentKey: string) => [...contentQueryKeys.all(context), "documents", documentKey] as const,
-  preview: (context: ContentContext, documentKey: string) => [...contentQueryKeys.all(context), "previews", documentKey] as const,
   history: (context: ContentContext, folderKey?: string) => [...contentQueryKeys.all(context), "history", folderKey ?? null] as const,
   audioVersions: (context: ContentContext, documentKey: string) => [...contentQueryKeys.document(context, documentKey), "audio-versions"] as const,
 };
@@ -90,13 +88,6 @@ export function getContentDocument(queryClient: QueryClient, context: ContentCon
   return queryClient.fetchQuery({
     queryKey: contentQueryKeys.document(context, documentKey),
     queryFn: () => readContentDocument(documentKey, context),
-  });
-}
-
-export function getContentDocumentPreview(queryClient: QueryClient, context: ContentContext, documentKey: string) {
-  return queryClient.fetchQuery({
-    queryKey: contentQueryKeys.preview(context, documentKey),
-    queryFn: () => readContentDocumentPreview(documentKey),
   });
 }
 
@@ -182,7 +173,6 @@ export function removeCachedContentDocumentsEverywhere(queryClient: QueryClient,
   } : location);
   documentKeys.forEach((documentKey) => {
     queryClient.removeQueries({ queryKey: contentQueryKeys.document(context, documentKey) });
-    queryClient.removeQueries({ queryKey: contentQueryKeys.preview(context, documentKey), exact: true });
   });
 }
 

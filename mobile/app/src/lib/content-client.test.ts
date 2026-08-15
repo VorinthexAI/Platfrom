@@ -67,7 +67,6 @@ const {
   moveContentDocument,
   moveContentSelection,
   readContentDocument,
-  readContentDocumentPreview,
   readContentDocumentSources,
   renameContentDocument,
   saveContentDocument,
@@ -95,21 +94,11 @@ beforeEach(() => {
   };
 });
 
-test("loads editor content and native preview blocks through separate projections", async () => {
-  responseForTool = (tool) => tool === "document.find" ? { data: { success: true, data: { results: [{ success: true, data: { document: { key: "document", name: "Brief.pdf", extension: "pdf", mimeType: "application/pdf", isFavorite: false, updatedAt: "2026-08-10T00:00:00.000Z", content: "Brief", blocks: [{ type: "paragraph", content: [{ text: "Brief" }] }] } } }] } } } : undefined;
+test("loads extracted text for uploaded files", async () => {
+  responseForTool = (tool) => tool === "document.find" ? { data: { success: true, data: { results: [{ success: true, data: { document: { key: "document", name: "Brief.pdf", extension: "pdf", mimeType: "application/pdf", isFavorite: false, updatedAt: "2026-08-10T00:00:00.000Z", content: "Brief" } } }] } } } : undefined;
 
   await expect(readContentDocument("document")).resolves.toMatchObject({ content: "Brief", extension: "pdf" });
-  await expect(readContentDocumentPreview("document")).resolves.toMatchObject({ blocks: [{ type: "paragraph", content: [{ text: "Brief" }] }], extension: "pdf" });
-  expect(calls.map(({ body }) => body.input)).toEqual([
-    { documentKeys: ["document"], include: ["content"] },
-    { documentKeys: ["document"], include: ["blocks"] },
-  ]);
-});
-
-test("rejects notes at the file-viewer boundary", async () => {
-  responseForTool = (tool) => tool === "document.find" ? { data: { success: true, data: { results: [{ success: true, data: { document: { key: "note", name: "Note", isFavorite: false, updatedAt: "2026-08-10T00:00:00.000Z", blocks: [{ type: "paragraph", content: [{ text: "Note body" }] }] } } }] } } } : undefined;
-  await expect(readContentDocumentPreview("note")).rejects.toThrow("Notes open in the document editor");
-  expect(calls[0]?.body.input).toEqual({ documentKeys: ["note"], include: ["blocks"] });
+  expect(calls[0]?.body.input).toEqual({ documentKeys: ["document"], include: ["content"] });
 });
 
 test("generates and lists independent full-audio versions", async () => {
@@ -213,8 +202,13 @@ test("polls an offloaded upload using the same authenticated Archive context", a
   expect(calls[1]?.body).toEqual({ organizationKey: "org-authenticated", agentKey: "agent-authenticated" });
 });
 
-test("normalizes platform PDF MIME aliases and missing filename extensions", async () => {
-  await uploadContentDocument({ name: "Quarterly report", type: "application/x-pdf; charset=binary", size: 8, base64: "JVBERi0=" }, "folder");
+test("normalizes platform PDF MIME aliases without changing the picker filename", async () => {
+  await uploadContentDocument({ name: "Quarterly Report FINAL.PDF", type: "application/x-pdf; charset=binary", size: 8, base64: "JVBERi0=" }, "folder");
+  expect(calls[0]?.body.input.file).toMatchObject({ filename: "Quarterly Report FINAL.PDF", mimeType: "application/pdf" });
+});
+
+test("adds a provider-omitted extension without replacing the picker filename", async () => {
+  await uploadContentDocument({ name: "Quarterly report", type: "application/pdf", size: 8, base64: "JVBERi0=" }, "folder");
   expect(calls[0]?.body.input.file).toMatchObject({ filename: "Quarterly report.pdf", mimeType: "application/pdf" });
 });
 

@@ -138,7 +138,7 @@ const documentResult = await tool('document.create', {
   scopeKey,
   folderKey,
   name: 'Archive verification note',
-  representation: { content: phrase },
+  content: phrase,
   idempotencyKey: `archive-e2e-document-${suffix}`,
 });
 const documentRecord = object(documentResult.document);

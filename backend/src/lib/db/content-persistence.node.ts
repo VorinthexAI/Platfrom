@@ -7,7 +7,6 @@ import { documentAudioVersionSchema, type DocumentAudioVersion } from './documen
 import { newId } from '@/lib/ids';
 import { toArangoDoc, withArangoKey } from './base';
 import { db, withTransaction } from './client';
-import { canonicalDocumentRepresentations } from '@/lib/ai/document-processing/representation';
 import { currentEmbeddingBatchSchema, currentEmbeddingSchema } from '@/lib/embeddings';
 import { chunkDocumentContent, documentSemanticHash } from '@/lib/ai/document-processing/chunking';
 import { z } from 'zod';
@@ -42,15 +41,9 @@ function toGlobalDocumentShare(share: DocumentShare): Share {
 }
 
 type MutableFolderField = 'parentFolderKey' | 'name' | 'description' | 'coverImageKey' | 'isFavorite' | 'deletedAt' | 'updatedAt' | 'embedding' | '_internalDeletion';
-type MutableDocumentField = 'folderKey' | 'name' | 'html' | 'content' | 'embedding' | 'contentChunks' | 'chunkEmbeddings' | 'semanticChunkCount' | 'semanticContentHash' | '_semanticChunkingSkipped' | 'speechStorageKeys' | 'isFavorite' | 'deletedAt' | 'updatedAt' | '_internalDeletion';
+type MutableDocumentField = 'folderKey' | 'name' | 'content' | 'embedding' | 'contentChunks' | 'chunkEmbeddings' | 'semanticChunkCount' | 'semanticContentHash' | '_semanticChunkingSkipped' | 'speechStorageKeys' | 'isFavorite' | 'deletedAt' | 'updatedAt' | '_internalDeletion';
 export type ScopedFolderPatch = Partial<Pick<Folder, MutableFolderField>>;
 export type ScopedDocumentPatch = Partial<Pick<Document, MutableDocumentField>>;
-
-function canonicalRepresentations(html: string, content: string) {
-  const canonical = canonicalDocumentRepresentations(html);
-  if (html !== canonical.html || content !== canonical.content) throw new Error('Document representations must be canonical and agreeing.');
-  return canonical;
-}
 
 function splitPatch(patch: Record<string, unknown>) {
   const set: Record<string, unknown> = {};
@@ -219,7 +212,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       const chunkEmbeddings = document.chunkEmbeddings ?? (contentChunks.length === 1 ? [document.embedding] : undefined);
       if (!chunkEmbeddings || contentChunks.length !== chunkEmbeddings.length) throw new Error('Documents require aligned semantic chunks and embeddings.');
       currentEmbeddingBatchSchema.parse(chunkEmbeddings);
-      const parsed = documentSchema.parse({ ...document, contentChunks, chunkEmbeddings, semanticChunkCount: contentChunks.length, semanticContentHash: documentSemanticHash(document.content), _semanticChunkingSkipped: undefined, ...canonicalRepresentations(document.html, document.content) });
+      const parsed = documentSchema.parse({ ...document, contentChunks, chunkEmbeddings, semanticChunkCount: contentChunks.length, semanticContentHash: documentSemanticHash(document.content), _semanticChunkingSkipped: undefined });
       const cursor = await executor.query(
         `LET folder = @folderKey == null ? null : DOCUMENT(folders, @folderKey)
          FILTER @folderKey == null || (folder != null && folder.scopeKey == @scopeKey)
@@ -265,7 +258,6 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
         semanticChunkCount: contentChunks.length,
         semanticContentHash: documentSemanticHash(version.content),
         _semanticChunkingSkipped: undefined,
-        ...canonicalRepresentations(version.html, version.content),
         key: newId(),
         createdAt: new Date().toISOString(),
       });
@@ -287,7 +279,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       `, {
         documentKey: version.documentKey,
         scopeKey: version.scopeKey,
-        snapshot: toArangoDoc({ ...snapshot, content: process.env.CONTENT_VERSION_CONTENT_ARRAY_ENABLED !== 'false' ? contentChunks : snapshot.content }),
+        snapshot: toArangoDoc(snapshot),
       });
       const created = await cursor.next();
       if (!created) throw new Error('Version owner is pending deletion.');
@@ -327,19 +319,17 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       return scopedUpdate(executor, 'folders', scopeKey, key, patch, (value) => folderSchema.parse(value));
     },
     updateDocument(scopeKey: string, key: string, patch: ScopedDocumentPatch, options?: { expectedUpdatedAt?: string }) {
-      if (patch.content !== undefined && patch.html === undefined) throw new Error('Document content must be updated through HTML.');
-      if (patch.html !== undefined && patch.embedding === undefined) throw new Error('Document HTML updates require a fresh embedding.');
-      if (patch.html !== undefined && patch.content === undefined) throw new Error('Document HTML updates require derived content.');
-      const contentChunks = patch.html !== undefined ? patch.contentChunks ?? chunkDocumentContent(patch.content!) : patch.contentChunks;
-      if (patch.html !== undefined && patch.contentChunks) {
+      if (patch.content !== undefined && patch.embedding === undefined) throw new Error('Document content updates require a fresh embedding.');
+      const contentChunks = patch.content !== undefined ? patch.contentChunks ?? chunkDocumentContent(patch.content) : patch.contentChunks;
+      if (patch.content !== undefined && patch.contentChunks) {
         const expectedChunks = chunkDocumentContent(patch.content!);
         if (patch.contentChunks.length !== expectedChunks.length || patch.contentChunks.some((chunk, index) => chunk !== expectedChunks[index])) throw new Error('Document chunks must be derived from canonical content.');
       }
-      const chunkEmbeddings = patch.html !== undefined ? patch.chunkEmbeddings ?? (contentChunks?.length === 1 ? [patch.embedding!] : undefined) : patch.chunkEmbeddings;
-      if (patch.html !== undefined && (!contentChunks || !chunkEmbeddings || contentChunks.length !== chunkEmbeddings.length)) throw new Error('Document HTML updates require aligned semantic chunks and embeddings.');
+      const chunkEmbeddings = patch.content !== undefined ? patch.chunkEmbeddings ?? (contentChunks?.length === 1 ? [patch.embedding!] : undefined) : patch.chunkEmbeddings;
+      if (patch.content !== undefined && (!contentChunks || !chunkEmbeddings || contentChunks.length !== chunkEmbeddings.length)) throw new Error('Document content updates require aligned semantic chunks and embeddings.');
       if (patch.embedding !== undefined) currentEmbeddingSchema.parse(patch.embedding);
       if (chunkEmbeddings !== undefined) currentEmbeddingBatchSchema.parse(chunkEmbeddings);
-      const preparedPatch = patch.html === undefined ? patch : { ...patch, contentChunks, chunkEmbeddings, semanticChunkCount: contentChunks!.length, semanticContentHash: documentSemanticHash(patch.content!), _semanticChunkingSkipped: undefined, ...canonicalRepresentations(patch.html, patch.content!) };
+      const preparedPatch = patch.content === undefined ? patch : { ...patch, contentChunks, chunkEmbeddings, semanticChunkCount: contentChunks!.length, semanticContentHash: documentSemanticHash(patch.content), _semanticChunkingSkipped: undefined };
       return scopedUpdate(executor, 'documents', scopeKey, key, preparedPatch, (value) => documentSchema.parse(value), options?.expectedUpdatedAt);
     },
     updateShare(scopeKey: string, key: string, patch: Partial<Pick<DocumentShare, 'revokedAt' | 'deletedAt' | 'updatedAt'>>) {

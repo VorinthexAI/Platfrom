@@ -33,16 +33,8 @@ function providerInputSchema(name: ContentToolName) {
   if (name === 'document.update') {
     const properties = schema.properties as Record<string, any>;
     properties.updates.items.oneOf = [
-      { required: ['html'], not: { required: ['content'] } },
-      { required: ['content'], not: { required: ['html'] } },
-      { required: ['isFavorite'], not: { anyOf: [{ required: ['html'] }, { required: ['content'] }] } },
-    ];
-  }
-  if (name === 'document.create') {
-    const properties = schema.properties as Record<string, any>;
-    properties.representation.oneOf = [
-      { required: ['html'], not: { required: ['content'] } },
-      { required: ['content'], not: { required: ['html'] } },
+      { required: ['content'] },
+      { required: ['isFavorite'], not: { required: ['content'] } },
     ];
   }
   if (name === 'document.read') {

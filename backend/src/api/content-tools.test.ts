@@ -68,12 +68,12 @@ describe('Content tool API', () => {
     expect(await tooLarge.json()).toMatchObject({ error: { code: 'DOCUMENT_TOO_LARGE' } });
   });
 
-  test('authorizes before returning an asynchronous Fargate document job', async () => {
+  test('authorizes before returning an asynchronous document worker job', async () => {
     const user = { key: newId(), identityType: 'user' as const };
     const order: string[] = [];
     const response = await request({
       getIdentity: async () => user,
-      fargateConfigured: () => true,
+      workerConfigured: () => true,
       authorize: async () => { order.push('authorize'); return { context: {} } as never; },
       authorizeLocation: async () => { order.push('location'); },
       enqueueDocument: async (input) => { order.push('enqueue'); expect(input.authenticatedUserKey).toBe(user.key); return { key: 'a'.repeat(64), state: 'waiting' }; },

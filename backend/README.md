@@ -24,7 +24,7 @@ Run the live content release gate with `bun run test:e2e:content`. It starts the
 
 ## Production
 
-Production deploys are defined in `.github/workflows/deploy.yml` and `deploy/`. The app role runs blue-green behind Caddy from `deploy/docker-compose.app.yml`; the render role runs as an ECS/Fargate service updated by task-definition revision. See `deploy/PROD-CHECKLIST.md` for required GitHub secrets, AWS SSM parameters, and deployment behavior.
+Production deploys are defined in `.github/workflows/deploy.yml` and `deploy/`. The app role runs blue-green behind Caddy. Document parsing and scanning are placed on BullMQ through `JOB_REDIS_URL`; an always-warm ECS/Fargate worker drains that queue with `DOCUMENT_WORKER_CONCURRENCY` jobs per task and gracefully drains on SIGTERM/SIGINT. Image hashing remains isolated transient Fargate compute.
 
 ## Blueprints
 

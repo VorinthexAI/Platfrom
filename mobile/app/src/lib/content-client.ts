@@ -41,11 +41,6 @@ export type ContentDocument = {
   updatedAt: string;
 };
 
-export type ContentDocumentPreview = ContentDocument & {
-  extension: string;
-  blocks: import("@vorinthex/shared/ui/file-viewer").FileViewerBlock[];
-};
-
 export type ContentDocumentSourceImage = { page: number; url: string };
 
 export type ContentDocumentVersion = {
@@ -223,15 +218,15 @@ function documentMimeType(name: string, reported: string) {
 }
 
 function documentFilename(name: string, mimeType: string) {
-  const normalized = name.trim() || "Document";
-  if (/\.(?:txt|md|pdf|doc|docx)$/i.test(normalized)) return normalized;
-  const extension = mimeType === "application/pdf" ? "pdf"
-    : mimeType === "text/plain" ? "txt"
-      : mimeType === "text/markdown" ? "md"
+  const filename = name.trim() || "Document";
+  if (/\.(?:txt|md|pdf|doc|docx)$/i.test(filename)) return filename;
+  const extension = mimeType === "text/plain" ? "txt"
+    : mimeType === "text/markdown" ? "md"
+      : mimeType === "application/pdf" ? "pdf"
         : mimeType === "application/msword" ? "doc"
           : mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ? "docx"
             : undefined;
-  return extension ? `${normalized}.${extension}` : normalized;
+  return extension ? `${filename}.${extension}` : filename;
 }
 
 const wait = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
@@ -407,17 +402,6 @@ export async function readContentDocument(documentKey: string, contentContext = 
   const document = result?.data?.document;
   if (!result?.success || !document || document.content === undefined) throw new Error(result?.error?.message ?? "The document could not be opened.");
   return { ...document, content: document.content };
-}
-
-export async function readContentDocumentPreview(documentKey: string) {
-  const data = await callContentTool<{
-    results: { success: boolean; data?: { document: ContentDocument & { blocks?: ContentDocumentPreview["blocks"] } }; error?: { message: string } }[];
-  }>("document.find", { documentKeys: [documentKey], include: ["blocks"] });
-  const result = data.results[0];
-  const document = result?.data?.document;
-  if (!result?.success || !document || document.blocks === undefined) throw new Error(result?.error?.message ?? "The file could not be opened.");
-  if (!document.extension) throw new Error("Notes open in the document editor, not the file viewer.");
-  return { ...document, extension: document.extension, blocks: document.blocks };
 }
 
 export async function readContentDocumentSources(documentKey: string) {

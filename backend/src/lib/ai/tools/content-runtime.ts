@@ -17,14 +17,14 @@ import type { ContentToolName, ContentToolOutput } from './content-schemas';
 import { ContentError, type ContentErrorCode } from './content-errors';
 import { contentToolInputSchemas, contentToolOutputSchemas, isContentToolName } from './content-registry';
 import { documentCleanup } from '@/lib/ai/document-processing/actions';
-import { htmlToDocumentPreviewBlocks, htmlToPlainText, sanitizeDocumentHtml, type DocumentHtmlInput } from '@/lib/ai/document-processing/representation';
+import { sanitizeDocumentContent } from '@/lib/ai/document-processing/actions';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
 import { chunkDocumentContent, documentSemanticHash } from '@/lib/ai/document-processing/chunking';
 import type { BookGenerator } from '@/lib/books/service';
 import type { DocumentScanInput } from '@/lib/ai/document-scanning';
 
 type Role = 'viewer' | 'moderator' | 'admin' | 'owner';
-type Action = 'ask' | 'enhance' | 'translate' | 'read' | 'traverse' | 'insert' | 'update' | 'delete' | 'embed' | 'speak' | 'generate-speech' | 'reason' | 'deep-reason' | 'document-cleanup' | 'document-generate-html' | 'document-generate-content' | 'document-embed';
+type Action = 'ask' | 'enhance' | 'translate' | 'read' | 'traverse' | 'insert' | 'update' | 'delete' | 'embed' | 'speak' | 'generate-speech' | 'reason' | 'deep-reason' | 'document-cleanup' | 'document-embed';
 type SafeEvent = {
   type: 'authorization' | 'resolution' | 'action' | 'db' | 'embedding' | 'storage' | 'speech' | 'cleanup';
   status: 'started' | 'succeeded' | 'failed';
@@ -82,7 +82,7 @@ export interface ContentSearchQueryStore {
   list(input: { actorKey: string; scopeKey: string; folderKey: string | null; includeDescendants: boolean; limit: number }): Promise<Array<{ query: string; normalizedQuery: string; searchedAt: string; count: number; folderKey?: string; includeDescendants?: boolean; documents: Array<{ documentKey: string; scopeKey: string; folderKey?: string; name: string; extension?: string; score: number; summary?: string }> }>>;
 }
 
-export interface ContentActionResult { text?: string; audio?: Uint8Array; audioBase64?: string; mimeType?: string; durationMs?: number; html?: string; content?: string; embedding?: number[]; contentChunks?: string[]; chunkEmbeddings?: number[][]; semanticChunkCount?: number; semanticContentHash?: string }
+export interface ContentActionResult { text?: string; audio?: Uint8Array; audioBase64?: string; mimeType?: string; durationMs?: number; content?: string; embedding?: number[]; contentChunks?: string[]; chunkEmbeddings?: number[][]; semanticChunkCount?: number; semanticContentHash?: string }
 export interface ContentToolDependencies extends RouterDependencies {
   signal?: AbortSignal;
   repository?: ContentRepository;
@@ -176,7 +176,7 @@ async function folderView(folder: Folder, dependencies: Pick<RuntimeDefaults, 'g
 }
 
 function documentView(document: Document) {
-  const { html: _html, content: _content, embedding: _embedding, contentChunks: _contentChunks, chunkEmbeddings: _chunkEmbeddings, semanticChunkCount: _semanticChunkCount, semanticContentHash: _semanticContentHash, _semanticChunkingSkipped: _semanticChunkingSkipped, storageKey: _storageKey, speechStorageKeys: _speechStorageKeys, sourceStorageKeys: _sourceStorageKeys, _internalDeletion: _internalDeletion, ...safe } = document;
+  const { content: _content, embedding: _embedding, contentChunks: _contentChunks, chunkEmbeddings: _chunkEmbeddings, semanticChunkCount: _semanticChunkCount, semanticContentHash: _semanticContentHash, _semanticChunkingSkipped: _semanticChunkingSkipped, storageKey: _storageKey, speechStorageKeys: _speechStorageKeys, sourceStorageKeys: _sourceStorageKeys, _internalDeletion: _internalDeletion, ...safe } = document;
   return { ...safe, ...(document.sourceStorageKeys?.length ? { sourceImageCount: document.sourceStorageKeys.length } : {}) };
 }
 
@@ -191,8 +191,8 @@ function shareView(share: DocumentShare) {
 }
 
 function versionView(version: DocumentVersion, include: string[] = []) {
-  const { embedding, chunkEmbeddings: _chunkEmbeddings, semanticChunkCount: _semanticChunkCount, semanticContentHash: _semanticContentHash, _semanticChunkingSkipped: _semanticChunkingSkipped, html, content: _content, ...safe } = version;
-  return { ...safe, ...(include.includes('html') ? { html } : {}), ...(include.includes('content') ? { content: htmlToPlainText(html) } : {}), ...(include.includes('embedding') ? { embedding } : {}) };
+  const { embedding, chunkEmbeddings: _chunkEmbeddings, semanticChunkCount: _semanticChunkCount, semanticContentHash: _semanticContentHash, _semanticChunkingSkipped: _semanticChunkingSkipped, content, ...safe } = version;
+  return { ...safe, ...(include.includes('content') ? { content } : {}), ...(include.includes('embedding') ? { embedding } : {}) };
 }
 
 function generatedAudioVersionView(version: DocumentAudioVersion) {
@@ -420,8 +420,6 @@ async function defaults(deps: ContentToolDependencies, context: DomainToolContex
     embed: embedding,
     embedBatch: embeddingBatch,
     runAction: deps.runAction ?? (async (action: Action, input: Record<string, unknown>): Promise<ContentActionResult> => {
-      if (action === 'document-generate-html') return processing.documentGenerateHtml(input as never) as Promise<ContentActionResult>;
-      if (action === 'document-generate-content') return processing.documentGenerateContent(input as never) as Promise<ContentActionResult>;
       if (action === 'document-embed') return processing.documentEmbed(input as never, { embedBatch: ({ texts }) => embeddingBatch(texts), dimensions: deps.ingestion?.embeddingDimensions }) as Promise<ContentActionResult>;
       const request = { mode: 'auto' as const, organizationKey: context.organizationKey, actionSlug: action };
       const response = await executeAction<Record<string, unknown>, ContentActionResult>(request, input, deps);
@@ -736,23 +734,15 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
     };
   };
   const representations = async (
-    source: DocumentHtmlInput,
+    source: string,
     documentName: string,
     resourceKey: string,
     scopeKey: string,
   ) => {
-    const actionInput = 'extractedText' in source
-      ? source
-      : 'html' in source
-        ? { html: source.html }
-        : { content: source.content };
-    const generatedHtml = await action('document-generate-html', actionInput, resourceKey, scopeKey);
-    const html = sanitizeDocumentHtml(z.string().min(1).parse(generatedHtml.html));
-    const generatedContent = await action('document-generate-content', { html }, resourceKey, scopeKey);
-    const content = htmlToPlainText(html);
-    if (z.string().parse(generatedContent.content) !== content) fail('CONTENT_CONFLICT', 'Document content must be derived from canonical HTML.', tool, 'document-generate-content', resourceKey);
+    const content = sanitizeDocumentContent(z.string().min(1).parse(source));
+    if (!content) fail('CONTENT_CONFLICT', 'Document content is empty.', tool, 'document-embed', resourceKey);
     const embedded = await action('document-embed', { name: documentName, content }, resourceKey, scopeKey);
-    return { html, content, ...parsedSemantics(embedded, content, resourceKey) };
+    return { content, ...parsedSemantics(embedded, content, resourceKey) };
   };
   const isCurrentEmbedding = (embedding: readonly number[]) => embedding.length === EMBEDDING_DIMENSIONS && embedding.every(Number.isFinite);
   const hasCurrentSemantics = (source: Pick<Document, 'embedding' | 'content' | 'contentChunks' | 'chunkEmbeddings'>) => {
@@ -771,18 +761,17 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
     name === source.name && hasCurrentSemantics(source)
       ? Promise.resolve({ embedding: source.embedding, contentChunks: source.contentChunks!, chunkEmbeddings: source.chunkEmbeddings!, semanticChunkCount: source.contentChunks!.length, semanticContentHash: createHash('sha256').update(source.content).digest('hex') })
       : generatedSemantics(name, source.content, source.key, source.scopeKey);
-  const currentVersionSemantics = async (source: Pick<DocumentVersion, 'html' | 'key' | 'scopeKey'> | Pick<Document, 'html' | 'key' | 'scopeKey'>, label?: string) => {
-    const { embedding, chunkEmbeddings, semanticChunkCount, semanticContentHash } = await generatedSemantics(label ?? '', htmlToPlainText(source.html), source.key, source.scopeKey);
+  const currentVersionSemantics = async (source: Pick<DocumentVersion, 'content' | 'key' | 'scopeKey'> | Pick<Document, 'content' | 'key' | 'scopeKey'>, label?: string) => {
+    const { embedding, chunkEmbeddings, semanticChunkCount, semanticContentHash } = await generatedSemantics(label ?? '', source.content, source.key, source.scopeKey);
     return { embedding, chunkEmbeddings, semanticChunkCount, semanticContentHash };
   };
   const persistGenerated = async (source: Document, text: string, mode: 'copy' | 'replace', suffix: string) => {
     const finalName = mode === 'copy' ? `${source.name} (${suffix})` : source.name;
-    const transformed = await representations({ content: text }, finalName, source.key, source.scopeKey);
+    const transformed = await representations(text, finalName, source.key, source.scopeKey);
     if (mode === 'replace') {
       const backup = await repo.createVersion({
         scopeKey: source.scopeKey,
         documentKey: source.key,
-        html: source.html,
         content: source.content,
         ...await currentVersionSemantics(source),
       });
@@ -1286,7 +1275,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       const processed = await d.parseDocument(processingInput, {
         ...dependencies.ingestion,
         ...(!dependencies.ingestion?.cleanText ? {
-          cleanText: async (text) => z.string().trim().min(1).parse((await action('document-cleanup', { text }, undefined, input.scopeKey)).html),
+          cleanText: async (text) => z.string().trim().min(1).parse((await action('document-cleanup', { text }, undefined, input.scopeKey)).content),
         } : {}),
         ...(!dependencies.ingestion?.embed && !dependencies.ingestion?.embedBatch ? {
           embedBatch: ({ texts, purpose = 'document' }) => d.embedBatch(texts, purpose),
@@ -1310,10 +1299,10 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         const processed = await scan(processingInput, context.organizationKey);
         try {
           const cleaned = await documentCleanup({ text: processed.content }, {
-            clean: async (text) => z.string().trim().min(1).parse((await action('document-cleanup', { text }, processed.documentKey, input.scopeKey)).html),
+            clean: async (text) => z.string().trim().min(1).parse((await action('document-cleanup', { text }, processed.documentKey, input.scopeKey)).content),
             logger: () => undefined,
           });
-          const transformed = await representations(cleaned, input.name ?? `Scanned document ${d.clock().toISOString().slice(0, 10)}`, processed.documentKey, input.scopeKey);
+          const transformed = await representations(cleaned.content, input.name ?? `Scanned document ${d.clock().toISOString().slice(0, 10)}`, processed.documentKey, input.scopeKey);
           const timestamp = now();
           const created = await repo.insertDocument({
             key: processed.documentKey,
@@ -1357,7 +1346,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
     } else if (tool === 'document.create') {
       await location(input.scopeKey, input.folderKey, 'moderator');
       const key = d.id();
-      const transformed = await representations(input.representation, input.name, key, input.scopeKey);
+      const transformed = await representations(input.content, input.name, key, input.scopeKey);
       const timestamp = now();
       const created = await repo.insertDocument({
         key,
@@ -1383,8 +1372,6 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           return {
             document: {
               ...documentView(current),
-              ...(include.includes('blocks') ? { blocks: htmlToDocumentPreviewBlocks(current.html) } : {}),
-              ...(include.includes('html') ? { html: current.html } : {}),
               ...(include.includes('content') ? { content: current.content } : {}),
               ...(include.includes('embedding') ? { embedding: current.embedding } : {}),
               ...(parent ? { folder: await folderView(parent, d) } : {}),
@@ -1415,7 +1402,6 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         run: async () => {
           const current = await document(key, input.mode === 'audio' && input.persistAudio ? 'moderator' : 'viewer', false);
           if (input.mode === 'content') return { documentKey: key, title: current.name, content: current.content };
-          if (input.mode === 'html') return { documentKey: key, title: current.name, html: current.html };
           if (input.persistAudio && current.content.length > PERSISTED_AUDIO_MAX_CHARACTERS) fail('DOCUMENT_TOO_LARGE', `Full audio generation supports documents up to ${PERSISTED_AUDIO_MAX_CHARACTERS} characters.`, tool, 'generate-speech', key);
           const start = input.startOffset ?? 0;
           const end = Math.min(input.endOffset ?? current.content.length, current.content.length);
@@ -1529,7 +1515,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         },
       })), input.atomic, repo);
     } else if (tool === 'document.update') {
-      const hasRepresentationUpdates = input.updates.some((item: any) => item.html !== undefined || item.content !== undefined);
+      const hasRepresentationUpdates = input.updates.some((item: any) => item.content !== undefined);
       if (input.atomic && hasRepresentationUpdates) fail('CONTENT_CONFLICT', 'Atomic document updates are unavailable because transformation and embedding actions are external side effects.', tool, 'document-embed');
       const updates = input.updates.map((item: any) => ({
         key: item.documentKey,
@@ -1537,14 +1523,13 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         run: async (mutationRepository: ContentRepository) => {
           const current = await document(item.documentKey, 'moderator', false);
           if (item.expectedUpdatedAt && current.updatedAt !== item.expectedUpdatedAt) fail('DOCUMENT_VERSION_CONFLICT', 'Document changed after it was read.', tool, 'update', current.key);
-          const hasRepresentation = item.html !== undefined || item.content !== undefined;
-          const transformed = hasRepresentation ? await representations(item, current.name, current.key, current.scopeKey) : undefined;
+          const hasRepresentation = item.content !== undefined;
+          const transformed = hasRepresentation ? await representations(item.content, current.name, current.key, current.scopeKey) : undefined;
           let backup: DocumentVersion | undefined;
           if (item.createVersion) {
             backup = await mutationRepository.createVersion({
               scopeKey: current.scopeKey,
               documentKey: current.key,
-              html: current.html,
               content: current.content,
               ...await currentVersionSemantics(current),
             });
@@ -1634,8 +1619,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
                    scopeKey: item.targetScopeKey,
                   documentKey: key,
                   label: version.label,
-                  html: version.html,
-                  content: htmlToPlainText(version.html),
+                   content: version.content,
                   ...await currentVersionSemantics(version, version.label),
                 });
                 insertedVersionKeys.push(created.key);
@@ -1781,7 +1765,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
               content: Buffer.from(object.bytes).toString('base64'),
             };
           }
-          const exported = await d.generateExport({ format: item.format, html: current.html });
+          const exported = await d.generateExport({ format: item.format, content: current.content });
           downloadedBytes += exported.bytes.byteLength;
           if (downloadedBytes > byteBudget) fail('DOCUMENT_TOO_LARGE', 'Combined export byte budget exceeded.', tool, 'export', current.key);
           return {
@@ -1878,7 +1862,6 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             scopeKey: current.scopeKey,
             documentKey: key,
             label: input.labels?.[key],
-            html: current.html,
             content: current.content,
             ...await currentVersionSemantics(current, input.labels?.[key]),
           });
@@ -1951,17 +1934,14 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             backup = await mutationRepository.createVersion({
               scopeKey: current.scopeKey,
               documentKey: current.key,
-              html: current.html,
               content: current.content,
               ...await currentVersionSemantics(current),
             });
           }
           try {
-            const content = htmlToPlainText(version.html);
             const restored = await mutationRepository.updateDocument(current.key, {
-              html: version.html,
-              content,
-              ...await generatedSemantics(current.name, content, current.key, current.scopeKey),
+              content: version.content,
+              ...await generatedSemantics(current.name, version.content, current.key, current.scopeKey),
               updatedAt: now(),
             });
             return { document: documentView(restored) };
@@ -2351,7 +2331,6 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             matchedSource: source,
             ...(input.include?.includes('snippet') ? { snippet: (matchedContent ?? current.content).slice(0, 300) } : {}),
             ...(input.include?.includes('content') ? { content: current.content } : {}),
-            ...(input.include?.includes('html') ? { html: current.html } : {}),
             ...(parent ? { folder: await folderView(parent, d) } : {}),
             ...(input.include?.includes('scope') ? { scope: { key: current.scopeKey } } : {}),
             ...(input.include?.includes('scoreBreakdown') ? { scoreBreakdown: { vector: normalizedScore, final: normalizedScore } } : {}),

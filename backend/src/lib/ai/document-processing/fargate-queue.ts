@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { Job, Queue, Worker, type JobsOptions } from 'bullmq';
 import { z } from 'zod';
-import { computeDispatch, computeDispatchConfigured } from '@/lib/compute-jobs';
 import { createRedisConnection } from '@/lib/redis';
 import { ContentError, contentErrorSchema, type ContentErrorShape } from '@/lib/ai/tools/content-errors';
 import { AgentExecutionAccessError } from '@/lib/ai/agents/access';
@@ -12,9 +11,6 @@ import { documentValidate } from './actions';
 import { documentScanInputSchema } from '@/lib/ai/document-scanning';
 
 const QUEUE_NAME = 'document-processing';
-const LAUNCH_LOCK_SECONDS = 15 * 60;
-const WAITING_RELAUNCH_SECONDS = 2 * 60;
-const ACTIVE_STALE_MS = 12 * 60_000;
 const jobOptions: JobsOptions = {
   attempts: 3,
   backoff: { type: 'exponential', delay: 5_000 },
@@ -68,7 +64,9 @@ export type DocumentProcessingStatus = {
 } | DocumentProcessingResult;
 
 function queueConnection() {
-  return createRedisConnection(process.env.JOB_REDIS_URL ?? process.env.REDIS_URL);
+  const redisUrl = process.env.JOB_REDIS_URL?.trim();
+  if (!redisUrl) throw new Error('JOB_REDIS_URL is required for document processing.');
+  return createRedisConnection(redisUrl);
 }
 
 let queue: Queue<DocumentProcessingJob, DocumentProcessingResult> | undefined;
@@ -82,8 +80,8 @@ function processingQueue() {
   return queue ??= new Queue<DocumentProcessingJob, DocumentProcessingResult>(QUEUE_NAME, { connection: queueConnection() });
 }
 
-export function documentFargateConfigured(): boolean {
-  return computeDispatchConfigured() && Boolean(process.env.JOB_REDIS_URL?.trim());
+export function documentWorkerConfigured(): boolean {
+  return process.env.DOCUMENT_WORKER_ENABLED === 'true' && Boolean(process.env.JOB_REDIS_URL?.trim());
 }
 
 function stableJobId(organizationKey: string, agentKey: string, authenticatedUserKey: string, idempotencyKey: string, requestHash: string) {
@@ -115,33 +113,6 @@ export function documentProcessingJobId(input: {
     .update(input.bytes)
     .digest('hex');
   return stableJobId(input.organizationKey, input.agentKey, input.authenticatedUserKey, input.idempotencyKey, requestHash);
-}
-
-async function launchWorker(jobId: string): Promise<void> {
-  const launchLock = `document-processing:launch:${jobId}`;
-  const acquired = await jobRedisConnection().set(launchLock, randomUUID(), 'EX', LAUNCH_LOCK_SECONDS, 'NX');
-  if (!acquired) return;
-  try {
-    await computeDispatch({ jobType: 'document-processing', jobKey: jobId });
-  } catch (error) {
-    await jobRedisConnection().del(launchLock).catch(() => undefined);
-    throw error;
-  }
-}
-
-async function recoverWorker(job: Job<DocumentProcessingJob, DocumentProcessingResult>, state: string): Promise<void> {
-  const jobId = z.string().parse(job.id);
-  const launchLock = `document-processing:launch:${jobId}`;
-  if (state === 'active') {
-    if (job.processedOn && Date.now() - job.processedOn >= ACTIVE_STALE_MS) {
-      await jobRedisConnection().del(launchLock);
-      await launchWorker(jobId);
-    }
-    return;
-  }
-  const ttl = await jobRedisConnection().ttl(launchLock);
-  if (ttl >= 0 && ttl <= LAUNCH_LOCK_SECONDS - WAITING_RELAUNCH_SECONDS) await jobRedisConnection().del(launchLock);
-  await launchWorker(jobId);
 }
 
 export async function enqueueDocumentProcessing(input: {
@@ -207,7 +178,6 @@ export async function enqueueDocumentProcessing(input: {
     await job.retry();
     state = 'waiting';
   }
-  if (!['active', 'completed'].includes(state)) await launchWorker(jobId);
   if (state === 'completed') return job.returnvalue;
   return { key: jobId, state: state === 'active' ? 'active' : state === 'delayed' ? 'delayed' : 'waiting' };
 }
@@ -249,7 +219,6 @@ export async function enqueueDocumentScan(input: {
   catch (error) { await Promise.allSettled(stagedPages.map((page) => documentStorage.delete(page.storageKey))); throw error; }
   let state = await job.getState();
   if (state === 'failed') { await job.retry(); state = 'waiting'; }
-  if (!['active', 'completed'].includes(state)) await launchWorker(jobId);
   if (state === 'completed') return job.returnvalue;
   return { key: jobId, state: state === 'active' ? 'active' : state === 'delayed' ? 'delayed' : 'waiting' };
 }
@@ -275,8 +244,12 @@ export async function getDocumentProcessingStatus(jobId: string, identity: {
       error: contentErrorSchema.parse({ code: 'DOCUMENT_PROCESSING_FAILED', message: 'Document processing failed after retrying.', tool, action: 'worker', retryable: true }),
     };
   }
-  await recoverWorker(job, state);
   return { key, state: state === 'active' ? 'active' : state === 'delayed' ? 'delayed' : 'waiting' };
+}
+
+async function cleanupStagedInput(data: DocumentProcessingJob) {
+  const storageKeys = data.schemaVersion === 2 ? data.input.pages.map((page) => page.storageKey) : [data.input.file.storageKey];
+  await Promise.allSettled(storageKeys.map((key) => documentStorage.delete(key)));
 }
 
 async function processJob(job: Job<DocumentProcessingJob>) {
@@ -290,7 +263,9 @@ async function processJob(job: Job<DocumentProcessingJob>) {
         return { filename: page.filename, mimeType: page.mimeType as 'image/jpeg' | 'image/png', sizeBytes: page.sizeBytes, bytes: stored.bytes };
       }));
       const output = await runContentAgentTool({ organizationKey: data.organizationKey, agentKey: data.agentKey, tool: 'document.scan', input: { scopeKey: data.input.scopeKey, ...(data.input.folderKey ? { folderKey: data.input.folderKey } : {}), ...(data.input.name ? { name: data.input.name } : {}), idempotencyKey: data.input.idempotencyKey, pages } }, { authenticatedUserKey: data.authenticatedUserKey });
-      return { success: true as const, data: output };
+      const result = { success: true as const, data: output };
+      await cleanupStagedInput(data);
+      return result;
     }
     const stored = await documentStorage.download(data.input.file.storageKey);
     if (stored.bytes.byteLength !== data.input.file.sizeBytes) throw new Error('Staged document size changed before processing.');
@@ -311,49 +286,60 @@ async function processJob(job: Job<DocumentProcessingJob>) {
         },
       },
     }, { authenticatedUserKey: data.authenticatedUserKey });
-    return { success: true as const, data: output };
+    const result = { success: true as const, data: output };
+    await cleanupStagedInput(data);
+    return result;
   } catch (error) {
-    if (error instanceof ContentError && !error.retryable) return { success: false as const, error: error.toJSON() };
     const tool = data.schemaVersion === 2 ? 'document.scan' : 'document.parse';
-    if (error instanceof AgentExecutionAccessError) return { success: false as const, error: new ContentError('CONTENT_FORBIDDEN', 'Agent execution access denied.', tool, { action: 'authorization' }).toJSON() };
-    if (error instanceof AgentRuntimeNotFoundError) return { success: false as const, error: new ContentError('CONTENT_NOT_FOUND', 'Agent runtime was not found.', tool, { action: 'authorization' }).toJSON() };
+    const terminal = error instanceof ContentError && !error.retryable
+      ? { success: false as const, error: error.toJSON() }
+      : error instanceof AgentExecutionAccessError
+        ? { success: false as const, error: new ContentError('CONTENT_FORBIDDEN', 'Agent execution access denied.', tool, { action: 'authorization' }).toJSON() }
+        : error instanceof AgentRuntimeNotFoundError
+          ? { success: false as const, error: new ContentError('CONTENT_NOT_FOUND', 'Agent runtime was not found.', tool, { action: 'authorization' }).toJSON() }
+          : undefined;
+    if (terminal) {
+      await cleanupStagedInput(data);
+      return terminal;
+    }
+    if (job.attemptsMade + 1 >= (job.opts.attempts ?? 1)) await cleanupStagedInput(data);
     throw error;
   }
 }
 
 export async function runDocumentProcessingWorker(): Promise<void> {
-  const targetJobId = z.string().length(64).regex(/^[a-f0-9]+$/).parse(process.env.DOCUMENT_PROCESSING_JOB_ID);
-  let worker!: Worker<DocumentProcessingJob, DocumentProcessingResult>;
-  let settled = false;
-  const finish = async (job: Job<DocumentProcessingJob> | undefined, failed: boolean) => {
-    if (settled || !job || (failed && job.attemptsMade < (job.opts.attempts ?? 1))) return;
-    settled = true;
-    const data = documentJobSchema.parse(job.data);
-    const storageKeys = data.schemaVersion === 2 ? data.input.pages.map((page) => page.storageKey) : [data.input.file.storageKey];
-    await Promise.allSettled(storageKeys.map((key) => documentStorage.delete(key)));
-    if (job.id) await jobRedisConnection().del(`document-processing:launch:${job.id}`).catch(() => undefined);
-    await worker.close();
-  };
-  worker = new Worker<DocumentProcessingJob, DocumentProcessingResult>(QUEUE_NAME, async (job) => {
-    const result = await processJob(job);
-    await worker.pause(true);
-    return result;
-  }, {
+  const concurrency = z.coerce.number().int().min(1).max(32).default(2).parse(process.env.DOCUMENT_WORKER_CONCURRENCY);
+  const worker = new Worker<DocumentProcessingJob, DocumentProcessingResult>(QUEUE_NAME, processJob, {
     connection: queueConnection(),
-    concurrency: 1,
-    autorun: false,
-    lockDuration: 10 * 60_000,
+    concurrency,
+    lockDuration: 120_000,
     stalledInterval: 30_000,
     maxStalledCount: 2,
   });
-  worker.on('completed', (job) => { void finish(job, false); });
-  worker.on('failed', (job) => { void finish(job, true); });
-  const idleTimeout = setTimeout(() => { if (!settled) void worker.close(); }, 5 * 60_000);
+  worker.on('error', (error) => console.error(JSON.stringify({ action: 'document.queue.worker', status: 'error', error: error.message })));
+
+  let resolveShutdown!: () => void;
+  let rejectShutdown!: (error: unknown) => void;
+  let stopping = false;
+  const shutdown = new Promise<void>((resolve, reject) => { resolveShutdown = resolve; rejectShutdown = reject; });
+  const stop = (signal: NodeJS.Signals) => {
+    if (stopping) return;
+    stopping = true;
+    console.info(JSON.stringify({ action: 'document.queue.worker', status: 'stopping', signal }));
+    void worker.close().then(resolveShutdown, rejectShutdown);
+  };
+  const stopForSigterm = () => stop('SIGTERM');
+  const stopForSigint = () => stop('SIGINT');
+  process.once('SIGTERM', stopForSigterm);
+  process.once('SIGINT', stopForSigint);
   try {
-    await worker.run();
+    await worker.waitUntilReady();
+    console.info(JSON.stringify({ action: 'document.queue.worker', status: 'started', concurrency }));
+    await shutdown;
   } finally {
-    clearTimeout(idleTimeout);
-    if (!settled) await worker.close();
-    console.info(JSON.stringify({ action: 'document.worker', status: 'stopped', targetJobId }));
+    process.off('SIGTERM', stopForSigterm);
+    process.off('SIGINT', stopForSigint);
+    await worker.close();
+    console.info(JSON.stringify({ action: 'document.queue.worker', status: 'stopped' }));
   }
 }

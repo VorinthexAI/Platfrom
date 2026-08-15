@@ -3,7 +3,7 @@ import { newId } from '@/lib/ids';
 import type { ContentRepository } from './content-runtime';
 import { authorizeDocumentParseLocation, CONTENT_TOOL_NAMES, ContentError, runContentTool, type ContentIdempotencyStore } from '.';
 import { documentKeyForRequest, DocumentProcessingError } from '@/lib/ai/document-processing';
-import { documentEmbed, documentGenerateContent, documentGenerateHtml } from '@/lib/ai/document-processing';
+import { documentEmbed } from '@/lib/ai/document-processing';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
 import { chatInputSchema, speechInputSchema } from '@/lib/ai/providers/types';
 import { ProviderExecutionError } from '@/lib/ai/router/errors';
@@ -55,7 +55,7 @@ function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
   };
   const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: membershipKey, organizationId: organizationKey, status: 'active', orgRole: role } } } as any;
   const folderKey = newId(); folders.set(folderKey, { key: folderKey, scopeKey, name: 'Root', embedding, createdAt: now, updatedAt: now });
-  const addDocument = (content = 'First sentence. Second sentence.') => { const key = newId(); documents.set(key, { key, scopeKey, folderKey, name: 'Notes', extension: 'txt', mimeType: 'text/plain', sizeBytes: content.length, storageKey: `docs/${key}`, html: `<p>${content}</p>`, content, embedding, isFavorite: false, createdAt: now, updatedAt: now }); return key; };
+  const addDocument = (content = 'First sentence. Second sentence.') => { const key = newId(); documents.set(key, { key, scopeKey, folderKey, name: 'Notes', extension: 'txt', mimeType: 'text/plain', sizeBytes: content.length, storageKey: `docs/${key}`, content, embedding, isFavorite: false, createdAt: now, updatedAt: now }); return key; };
   return { repository, context, folders, documents, shares, versions, audioVersions, patches, scopeKey, folderKey, addDocument };
 }
 
@@ -100,9 +100,7 @@ describe('Content runtime', () => {
         return { documentKey: documentKeyForRequest(scanInput.scopeKey, scanInput.folderKey, scanInput.idempotencyKey), content: '## Page 1\n\nStore receipt\n\n## Page 2\n\nTotal: $42.00', storageKeys: ['scan/page-01.jpg', 'scan/page-02.jpg'] };
       },
       runAction: async (action: string, actionInput: any) => {
-        if (action === 'document-cleanup') return { html: `<p>${actionInput.text.replace('## Page 1', 'Page 1').replace('## Page 2', 'Page 2')}</p>` };
-        if (action === 'document-generate-html') return documentGenerateHtml(actionInput);
-        if (action === 'document-generate-content') return documentGenerateContent(actionInput);
+        if (action === 'document-cleanup') return { content: actionInput.text.replace('## Page 1', 'Page 1').replace('## Page 2', 'Page 2') };
         if (action === 'document-embed') return documentEmbed(actionInput, { embed: async () => embedding, dimensions: EMBEDDING_DIMENSIONS });
         throw new Error(`Unexpected action ${action}`);
       },
@@ -116,7 +114,7 @@ describe('Content runtime', () => {
     expect(first.document).toMatchObject({ name: 'Scanned receipt', folderKey: f.folderKey });
     const stored = f.documents.get(first.document.key);
     expect(stored.content).toContain('Store receipt');
-    expect(stored.html).toContain('Total: $42.00');
+    expect(stored.content).toContain('Total: $42.00');
     expect(stored.sourceStorageKeys).toEqual(['scan/page-01.jpg', 'scan/page-02.jpg']);
     expect(stored.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
     expect(first.document.sourceImageCount).toBe(2);
@@ -226,17 +224,13 @@ describe('Content runtime', () => {
     expect(tree.folders.map((folder: any) => folder.key).sort()).toEqual([f.folderKey, child, leaf].sort());
   });
 
-  test('projects native document blocks only when requested', async () => {
+  test('projects only plain document content when requested', async () => {
     const f = fixture('viewer');
     const documentKey = f.addDocument();
-    f.documents.get(documentKey).html = '<h1><strong>Preview</strong></h1><p>Native body</p>';
-    const projected = await runContentTool('document.find', { documentKeys: [documentKey], include: ['blocks'] }, f.context, { repository: f.repository });
-    expect(projected.results[0]).toMatchObject({ success: true, data: { document: { blocks: [
-      { type: 'heading', level: 1, content: [{ text: 'Preview', bold: true }] },
-      { type: 'paragraph', content: [{ text: 'Native body' }] },
-    ] } } });
+    const projected = await runContentTool('document.find', { documentKeys: [documentKey], include: ['content'] }, f.context, { repository: f.repository });
+    expect(projected.results[0]).toMatchObject({ success: true, data: { document: { content: 'First sentence. Second sentence.' } } });
     const summary = await runContentTool('document.find', { documentKeys: [documentKey] }, f.context, { repository: f.repository });
-    expect(summary.results[0]?.data?.document).not.toHaveProperty('blocks');
+    expect(summary.results[0]?.data?.document).not.toHaveProperty('content');
     expect(projected.results[0]?.data?.document).not.toHaveProperty('html');
   });
 
@@ -486,7 +480,6 @@ describe('Content runtime', () => {
 
     const current = f.documents.get(documentKey);
     current.content = 'Changed source text.';
-    current.html = '<p>Changed source text.</p>';
     const listed = await runContentTool('document.list-audio-versions', { documentKeys: [documentKey] }, f.context, dependencies);
     expect(listed.results[0]?.data?.audioVersions).toMatchObject([{ version: 2, current: false }, { version: 1, current: false }]);
   });
@@ -534,7 +527,7 @@ describe('Content runtime', () => {
     expect(archived.results.map((item) => item.documentKey)).toEqual([documentKey]);
   });
 
-  test('runs real representation actions in canonical order before document update', async () => {
+  test('embeds plain content before document update', async () => {
     const f = fixture('moderator');
     const documentKey = f.addDocument('Old body');
     const actions: string[] = [];
@@ -549,14 +542,15 @@ describe('Content runtime', () => {
       },
     });
     expect(output.results[0]?.success).toBe(true);
-    expect(actions).toEqual(['document-generate-html', 'document-generate-content', 'document-embed']);
-    expect(f.documents.get(documentKey)).toMatchObject({ html: '<p>New body</p>', content: 'New body', embedding });
+    expect(actions).toEqual(['document-embed']);
+    expect(f.documents.get(documentKey)).toMatchObject({ content: 'New body', embedding });
+    expect(f.documents.get(documentKey)).not.toHaveProperty('html');
   });
 
   test('creates and autosaves live documents without versions', async () => {
     const f = fixture('moderator');
     const dependencies = { repository: f.repository, embed: async () => embedding, ingestion: { embeddingDimensions: EMBEDDING_DIMENSIONS } };
-    const created = await runContentTool('document.create', { scopeKey: f.scopeKey, folderKey: f.folderKey, name: 'Plan', representation: { content: 'Initial plan' } }, f.context, dependencies);
+    const created = await runContentTool('document.create', { scopeKey: f.scopeKey, folderKey: f.folderKey, name: 'Plan', content: 'Initial plan' }, f.context, dependencies);
     expect(created.document.name).toBe('Plan');
     expect(f.versions.size).toBe(0);
     const autosaved = await runContentTool('document.update', { updates: [{ documentKey: created.document.key, content: 'Autosaved plan', createVersion: false, expectedUpdatedAt: created.document.updatedAt }] }, f.context, dependencies);
@@ -596,7 +590,7 @@ describe('Content runtime', () => {
     };
     const dependencies = { repository: f.repository, executeAction };
     expect((await runContentTool('folder.create', { folders: [{ scopeKey: f.scopeKey, name: 'Routed folder' }] }, f.context, dependencies)).summary.failed).toBe(0);
-    expect((await runContentTool('document.create', { scopeKey: f.scopeKey, name: 'Routed note', representation: { content: 'Routed body' } }, f.context, dependencies)).document.name).toBe('Routed note');
+    expect((await runContentTool('document.create', { scopeKey: f.scopeKey, name: 'Routed note', content: 'Routed body' }, f.context, dependencies)).document.name).toBe('Routed note');
     expect(calls.map(({ actionSlug }) => actionSlug)).toEqual(['embed', 'embed']);
     expect(calls.filter(({ actionSlug }) => actionSlug === 'embed').every(({ input }) => typeof (input as { text?: unknown }).text === 'string')).toBe(true);
 
@@ -604,7 +598,7 @@ describe('Content runtime', () => {
     nextEmbedding = 0;
     maximumActiveEmbeddings = 0;
     const longContent = Array.from({ length: 10_500 }, () => 'word').join(' ');
-    const created = await runContentTool('document.create', { scopeKey: f.scopeKey, name: 'Chunked note', representation: { content: longContent } }, f.context, dependencies);
+    const created = await runContentTool('document.create', { scopeKey: f.scopeKey, name: 'Chunked note', content: longContent }, f.context, dependencies);
     const chunkEmbeddings = f.documents.get(created.document.key).chunkEmbeddings as number[][];
     expect(chunkEmbeddings.length).toBeGreaterThan(8);
     expect(maximumActiveEmbeddings).toBe(8);
@@ -778,7 +772,7 @@ describe('Content runtime', () => {
     expect(updated.results[0]?.success).toBe(true);
     expect([...f.versions.values()].at(-1)?.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
 
-    const legacyVersion = await f.repository.createVersion({ scopeKey: f.scopeKey, documentKey, html: '<p>Historical exact body</p>', content: 'Historical exact body', embedding });
+    const legacyVersion = await f.repository.createVersion({ scopeKey: f.scopeKey, documentKey, content: 'Historical exact body', embedding });
     f.documents.get(documentKey).embedding = embedding;
     const copied = await runContentTool('document.copy', { copies: [{ documentKey, targetScopeKey: f.scopeKey, targetFolderKey: f.folderKey, includeVersions: true }] }, f.context, dependencies);
     expect(copied.results[0]?.success).toBe(true);
@@ -798,8 +792,6 @@ describe('Content runtime', () => {
       ...dependencies,
       runAction: async (action: string, input: any) => {
         if (action === 'translate') return { text: 'Corps traduit' };
-        if (action === 'document-generate-html') return documentGenerateHtml(input);
-        if (action === 'document-generate-content') return documentGenerateContent(input);
         if (action === 'document-embed') return documentEmbed(input, { embed: async ({ text }) => { embeddedTexts.push(text); return embedding; }, dimensions: EMBEDDING_DIMENSIONS });
         throw new Error(`Unexpected action ${action}`);
       },
@@ -959,20 +951,18 @@ describe('Content runtime', () => {
     expect(fileName?.endsWith('.txt')).toBe(true);
   });
 
-  test('sanitizes HTML updates and persists canonical agreeing representations', async () => {
+  test('sanitizes plain-text updates', async () => {
     const f = fixture('moderator');
     const documentKey = f.addDocument('Old body');
     const output = await runContentTool('document.update', {
-      updates: [{ documentKey, html: '<p onclick="steal()">Safe <span>text</span></p><script>alert(1)</script><custom>drop</custom>', isFavorite: true }],
+      updates: [{ documentKey, content: 'Safe text\r\n\r\n\r\ndrop\u0000', isFavorite: true }],
     }, f.context, { repository: f.repository, embed: async () => embedding, ingestion: { embeddingDimensions: EMBEDDING_DIMENSIONS } });
     expect(output.results[0]?.success).toBe(true);
     const stored = f.documents.get(documentKey);
-    expect(stored.html).toBe('<p>Safe text</p>drop');
     expect(stored.content).toBe('Safe text\n\ndrop');
     expect(stored.isFavorite).toBe(true);
     expect(stored).not.toHaveProperty('json');
-    expect(stored.html).not.toContain('onclick');
-    expect(stored.html).not.toContain('custom');
+    expect(stored).not.toHaveProperty('html');
 
     const favoriteOnly = await runContentTool('document.update', { updates: [{ documentKey, isFavorite: false }] }, f.context, { repository: f.repository });
     expect(favoriteOnly.results[0]?.data?.document.isFavorite).toBe(false);
@@ -989,8 +979,6 @@ describe('Content runtime', () => {
       storage,
       runAction: async (action, input) => {
         if (action === 'translate') return { text: 'Texte traduit' };
-        if (action === 'document-generate-html') return documentGenerateHtml(input as never);
-        if (action === 'document-generate-content') return documentGenerateContent(input as never);
         if (action === 'document-embed') {
           embeddedNames.push(String(input.name));
           return documentEmbed(input as never, { embed: async () => embedding, dimensions: EMBEDDING_DIMENSIONS });
@@ -1031,11 +1019,11 @@ describe('Content runtime', () => {
     const generateExport: any = async () => {
       calls += 1;
       if (calls === 2) throw new Error('renderer failed');
-      return { bytes: new TextEncoder().encode('<p>ok</p>'), mimeType: 'text/html', extension: 'html' };
+      return { bytes: new TextEncoder().encode('ok'), mimeType: 'text/plain', extension: 'txt' };
     };
-    await expect(runContentTool('document.export', { exports: [{ documentKey: first, format: 'html' }, { documentKey: second, format: 'html' }], atomic: true }, f.context, { repository: f.repository, generateExport })).rejects.toMatchObject({ action: 'export', resourceKey: second });
+    await expect(runContentTool('document.export', { exports: [{ documentKey: first, format: 'txt' }, { documentKey: second, format: 'txt' }], atomic: true }, f.context, { repository: f.repository, generateExport })).rejects.toMatchObject({ action: 'export', resourceKey: second });
     calls = 0;
-    const output = await runContentTool('document.export', { exports: [{ documentKey: first, format: 'html' }, { documentKey: second, format: 'html' }], atomic: true }, f.context, { repository: f.repository, generateExport: async () => ({ bytes: new Uint8Array([1]), mimeType: 'text/html', extension: 'html' }) });
+    const output = await runContentTool('document.export', { exports: [{ documentKey: first, format: 'txt' }, { documentKey: second, format: 'txt' }], atomic: true }, f.context, { repository: f.repository, generateExport: async () => ({ bytes: new Uint8Array([1]), mimeType: 'text/plain', extension: 'txt' }) });
     expect(output.summary).toEqual({ requested: 2, succeeded: 2, failed: 0 });
   });
 
@@ -1072,7 +1060,7 @@ describe('Content runtime', () => {
     f.documents.get(documentKey).deletedAt = now;
     f.documents.get(documentKey).speechStorageKeys = ['speech/shared', 'speech/second'];
     const version = await f.repository.createVersion({
-      scopeKey: f.scopeKey, documentKey, html: '<p>old</p>', content: 'old', embedding,
+      scopeKey: f.scopeKey, documentKey, content: 'old', embedding,
     });
     const audio = await f.repository.createAudioVersion!({ key: newId(), scopeKey: f.scopeKey, documentKey, sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: now, storageKey: 'audio/version.mp3', mimeType: 'audio/mpeg', sizeBytes: 10, durationMs: 100, includeTitle: false, includeCode: false, createdByKey: newId(), createdAt: now });
     const calls: string[] = [];
@@ -1129,7 +1117,7 @@ describe('Content runtime', () => {
     const f = fixture('owner');
     const documentKey = f.addDocument();
     f.documents.get(documentKey).deletedAt = now;
-    const version = await f.repository.createVersion({ scopeKey: f.scopeKey, documentKey, html: '<p>old</p>', content: 'old', embedding });
+    const version = await f.repository.createVersion({ scopeKey: f.scopeKey, documentKey, content: 'old', embedding });
     let storageDeletes = 0;
     const storage: any = { async upload() { return { storageKey: '' }; }, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; }, async delete() { storageDeletes += 1; } };
     const deleted = await runContentTool('document.delete-version', { versionKeys: [version.key] }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
@@ -1367,9 +1355,7 @@ describe('Content runtime', () => {
         runAction: async (action: string, input: any) => {
           if (action === 'ask' || action === 'enhance' || action === 'translate' || action === 'reason' || action === 'deep-reason') return { text: 'Generated text' };
           if (action === 'speak') return { audio: new Uint8Array([1]), mimeType: 'audio/mpeg' };
-          if (action === 'document-cleanup') return { html: `<p>${input.text}</p>` };
-          if (action === 'document-generate-html') return documentGenerateHtml(input);
-          if (action === 'document-generate-content') return documentGenerateContent(input);
+          if (action === 'document-cleanup') return { content: input.text };
           if (action === 'document-embed') return documentEmbed(input, { embed: async () => embedding, dimensions: EMBEDDING_DIMENSIONS });
           throw new Error(`Unexpected action ${action}`);
         },
@@ -1395,7 +1381,7 @@ describe('Content runtime', () => {
       else if (name === 'folder.delete') { f.folders.get(childKey).deletedAt = now; input = { folderKeys: [childKey] }; }
       else if (name === 'document.parse') input = { file: { filename: 'notes.txt', mimeType: 'text/plain', sizeBytes: 4, bytes: new Uint8Array([1, 2, 3, 4]) }, scopeKey: f.scopeKey, folderKey: f.folderKey };
       else if (name === 'document.scan') input = { pages: [{ filename: 'page.jpg', mimeType: 'image/jpeg', sizeBytes: 4, bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]) }], scopeKey: f.scopeKey, folderKey: f.folderKey };
-      else if (name === 'document.create') input = { scopeKey: f.scopeKey, folderKey: f.folderKey, name: 'Created document', representation: { content: 'Created body' } };
+      else if (name === 'document.create') input = { scopeKey: f.scopeKey, folderKey: f.folderKey, name: 'Created document', content: 'Created body' };
       else if (name === 'document.find') input = { documentKeys: [documentKey], include: ['content'] };
       else if (name === 'document.list') input = { scopeKey: f.scopeKey, folderKey: f.folderKey };
        else if (name === 'document.read') input = { documentKeys: [documentKey], mode: 'content' };
@@ -1418,7 +1404,7 @@ describe('Content runtime', () => {
       else if (name === 'document.create-version') input = { documentKeys: [documentKey], labels: { [documentKey]: 'Release' } };
       else if (name === 'document.find-version' || name === 'document.list-versions' || name === 'document.restore-version' || name === 'document.delete-version') {
         const current = f.documents.get(documentKey);
-        const version = await f.repository.createVersion({ scopeKey: f.scopeKey, documentKey, html: current.html, content: current.content, embedding: current.embedding });
+        const version = await f.repository.createVersion({ scopeKey: f.scopeKey, documentKey, content: current.content, embedding: current.embedding });
         if (name === 'document.find-version') input = { versionKeys: [version.key] };
         else if (name === 'document.list-versions') input = { documentKeys: [documentKey] };
         else if (name === 'document.restore-version') input = { restores: [{ documentKey, versionKey: version.key }] };

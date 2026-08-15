@@ -21,7 +21,7 @@ describe('OpenRouter image captions', () => {
     let body: Record<string, any> = {};
     globalThis.fetch = (async (_input, init) => {
       body = JSON.parse(String(init?.body));
-      return Response.json(completion(JSON.stringify({ html: '<h1>Faktura</h1><p>Fakturans total är 42 €.</p>' })));
+      return Response.json(completion(JSON.stringify({ content: 'Faktura\n\nFakturans total är 42 €.' })));
     }) as typeof fetch;
 
     const result = await createOpenRouterProvider({ apiKey: 'test-key' }).execute({
@@ -34,13 +34,13 @@ describe('OpenRouter image captions', () => {
 
     expect(body.model).toBe(IMAGE_CAPTION_EXTERNAL_MODEL_ID);
     expect(body.messages[0].content).toContain('original language or languages');
-    expect(body.messages[0].content).toContain('polished semantic HTML');
-    expect(body.messages[0].content).toContain('essential non-alphanumeric characters');
-    expect(body.messages[0].content).toContain('decorative separators and symbol-only fragments');
+    expect(body.messages[0].content).toContain('polished plain text');
+    expect(body.messages[0].content).toContain('meaningful punctuation');
+    expect(body.messages[0].content).toContain('decorative symbol-only fragments');
     expect(body.messages[1]).toEqual({ role: 'user', content: 'Fakturans   total ar 42 € . ###' });
     expect(body.response_format.json_schema.name).toBe('document_cleanup');
     expect(body.provider).toEqual({ data_collection: 'deny' });
-    expect(result.output).toEqual({ html: '<h1>Faktura</h1><p>Fakturans total är 42 €.</p>' });
+    expect(result.output).toEqual({ content: 'Faktura\n\nFakturans total är 42 €.' });
   });
 
   test('sends all images in one ordered multimodal request and returns captions only', async () => {

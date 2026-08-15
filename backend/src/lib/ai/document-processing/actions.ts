@@ -11,7 +11,6 @@ import {
   extractionResultSchema,
   normalizedDocumentSchema,
   type DocumentActionName,
-  type ExtractedBlock,
   type ExtractionResult,
   type NormalizedDocument,
   type UploadedDocumentFile,
@@ -19,13 +18,6 @@ import {
 import { documentStorage, type DocumentStorage } from './storage';
 import { awsTextractDocumentOcr, type DocumentOcr } from './textract';
 import { chunkDocumentContent, chunkDocumentText, documentEmbeddingTexts, documentSemanticHash } from './chunking';
-import {
-  documentInputToHtml,
-  htmlToExtractedBlocks,
-  htmlToPlainText,
-  sanitizeDocumentHtml,
-  type DocumentHtmlInput,
-} from './representation';
 
 export const DEFAULT_MAX_DOCUMENT_BYTES = 25 * 1024 * 1024;
 export const DEFAULT_EMBEDDING_DIMENSIONS = EMBEDDING_DIMENSIONS;
@@ -174,73 +166,11 @@ export async function storageUpload(input: NormalizedDocument & { documentKey: s
   });
 }
 
-function paragraphs(text: string): ExtractedBlock[] {
-  return text.replace(/\r\n?/g, '\n').split(/\n{2,}/).map((part) => part.trim()).filter(Boolean).map((text) => ({ type: 'paragraph', text }));
-}
-
-function markdownInlineHtml(value: string): string {
-  const code: string[] = [];
-  const protectedValue = value.replace(/[\uE000\uE001]/g, '').replace(/`([^`\n]+)`/g, (_match, content: string) => {
-    code.push(content.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!));
-    return `\uE000${code.length - 1}\uE001`;
-  });
-  return protectedValue
-    .replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!)
-    .replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2">$1</a>')
-    .replace(/\*\*([^*\n]+)\*\*|__([^_\n]+)__/g, '<strong>$1$2</strong>')
-    .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)|(^|[^_])_([^_\n]+)_(?!_)/g, '$1$3<em>$2$4</em>')
-    .replace(/\uE000(\d+)\uE001/g, (_match, index: string) => `<code>${code[Number(index)]}</code>`);
-}
-
-function parseMarkdown(markdown: string): ExtractedBlock[] {
-  const blocks: ExtractedBlock[] = [];
-  const lines = markdown.replace(/\r\n?/g, '\n').split('\n');
-  let code: string[] | null = null;
-  let list: ExtractedBlock | null = null;
-  let paragraph: string[] = [];
-  const flushList = () => { if (list) blocks.push(list); list = null; };
-  const flushParagraph = () => {
-    if (paragraph.length) {
-      const text = paragraph.join(' ').trim();
-      blocks.push({ type: 'paragraph', text, attrs: { html: markdownInlineHtml(text) } });
-    }
-    paragraph = [];
-  };
-  for (const raw of lines) {
-    if (/^```/.test(raw)) {
-      flushParagraph();
-      flushList();
-      if (code) { blocks.push({ type: 'codeBlock', text: code.join('\n') }); code = null; } else code = [];
-      continue;
-    }
-    if (code) { code.push(raw); continue; }
-    const heading = /^(#{1,6})\s+(.+)$/.exec(raw);
-    if (heading) { flushParagraph(); flushList(); const text = heading[2]!.trim(); blocks.push({ type: 'heading', level: heading[1]!.length, text, attrs: { html: markdownInlineHtml(text) } }); continue; }
-    const item = /^\s*(?:([-+*])|(\d+)\.)\s+(.+)$/.exec(raw);
-    if (item) {
-      flushParagraph();
-      const type = item[1] ? 'bulletList' : 'orderedList';
-      if (!list || list.type !== type) { flushList(); list = { type, children: [] }; }
-      const text = item[3]!.trim();
-      list.children!.push({ type: 'listItem', text, attrs: { html: markdownInlineHtml(text) } });
-      continue;
-    }
-    if (!raw.trim()) { flushParagraph(); flushList(); continue; }
-    if (/^\s*([-*_])(?:\s*\1){2,}\s*$/.test(raw)) { flushParagraph(); flushList(); blocks.push({ type: 'horizontalRule' }); }
-    else if (/^>\s?/.test(raw)) { flushParagraph(); flushList(); const text = raw.replace(/^>\s?/, '').trim(); blocks.push({ type: 'blockquote', text, attrs: { html: markdownInlineHtml(text) } }); }
-    else { flushList(); paragraph.push(raw.trim()); }
-  }
-  flushParagraph();
-  flushList();
-  if (code) blocks.push({ type: 'codeBlock', text: code.join('\n') });
-  return blocks;
-}
-
-function extractionFromText(text: string, blocks = paragraphs(text), metadata?: Record<string, unknown>): ExtractionResult {
+function extractionFromText(text: string, metadata?: Record<string, unknown>): ExtractionResult {
   const maxCharacters = maxExtractedCharacters();
   if (text.length > maxCharacters) throw new Error('Extracted document content exceeds the configured limit.');
   if (!text.trim()) throw new Error('The document contains no extractable text.');
-  return extractionResultSchema.parse({ extractedText: text.trim(), blocks, metadata });
+  return extractionResultSchema.parse({ extractedText: text.trim(), metadata });
 }
 
 export async function documentExtract(input: NormalizedDocument & { storageKey: string }, options: {
@@ -261,27 +191,17 @@ export async function documentExtract(input: NormalizedDocument & { storageKey: 
         const text = new TextDecoder('utf-8', { fatal: true }).decode(input.fileInput);
         if (text.length > maxExtractedCharacters()) throw new Error('Extracted document content exceeds the configured limit.');
         const extracted = extractionFromText(text);
-        return extractionResultSchema.parse({
-          ...extracted,
-          extractedHtml: `<pre><code>${text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code></pre>`,
-          metadata: { format: 'plain-text', layout: 'preformatted' },
-        });
+        return extracted;
       }
       if (input.extension === 'md') {
         const text = new TextDecoder('utf-8', { fatal: true }).decode(input.fileInput);
         if (text.length > maxExtractedCharacters()) throw new Error('Extracted document content exceeds the configured limit.');
-        return extractionFromText(text, parseMarkdown(text), { format: 'markdown' });
+        return extractionFromText(text, { format: 'markdown' });
       }
       if (input.extension === 'docx') {
         if (options.extractDocx) return extractionFromText(await options.extractDocx(input.fileInput));
-        const result = await mammoth.convertToHtml({ buffer: Buffer.from(input.fileInput) });
-        const extractedHtml = sanitizeDocumentHtml(result.value);
-        const text = htmlToPlainText(extractedHtml);
-        return extractionResultSchema.parse({
-          ...extractionFromText(text, htmlToExtractedBlocks(extractedHtml)),
-          extractedHtml,
-          metadata: { format: 'docx', layout: 'semantic', warnings: result.messages.length },
-        });
+        const result = await mammoth.extractRawText({ buffer: Buffer.from(input.fileInput) });
+        return extractionFromText(result.value, { format: 'docx', warnings: result.messages.length });
       }
       if (options.extractDoc) return extractionFromText(await options.extractDoc(input.fileInput));
       const extractor = new WordExtractor();
@@ -296,7 +216,11 @@ export async function documentExtract(input: NormalizedDocument & { storageKey: 
   });
 }
 
-export async function documentCleanup(input: { text: string }, options: { clean?: (text: string) => Promise<string>; logger?: DocumentActionLogger } = {}): Promise<ExtractionResult> {
+export function sanitizeDocumentContent(value: string): string {
+  return value.replace(/\0/g, '').replace(/\r\n?/g, '\n').replace(/[\t ]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+export async function documentCleanup(input: { text: string }, options: { clean?: (text: string) => Promise<string>; logger?: DocumentActionLogger } = {}): Promise<{ content: string }> {
   return observed('document-cleanup', {}, options.logger ?? defaultLogger, async () => {
     try {
       const clean = options.clean;
@@ -310,39 +234,18 @@ export async function documentCleanup(input: { text: string }, options: { clean?
           const index = cursor++;
           const chunk = chunks[index];
           if (!chunk) return;
-          const html = await clean(chunk.text);
-          if (!html.trim()) throw new Error(`The document cleanup model returned no content for chunk ${index + 1}.`);
-          cleaned[index] = html;
+           const content = sanitizeDocumentContent(await clean(chunk.text));
+           if (!content) throw new Error(`The document cleanup model returned no content for chunk ${index + 1}.`);
+           cleaned[index] = content;
         }
       };
       await Promise.all(Array.from({ length: Math.min(4, chunks.length) }, () => worker()));
-      const html = sanitizeDocumentHtml(cleaned.join(''));
-      const content = htmlToPlainText(html);
+      const content = sanitizeDocumentContent(cleaned.join('\n\n'));
       if (!content) throw new Error('The document cleanup model returned no content.');
       if (content.length > maxExtractedCharacters()) throw new Error('Cleaned document content exceeds the configured limit.');
-      return extractionResultSchema.parse({ extractedText: content, extractedHtml: html, blocks: htmlToExtractedBlocks(html), metadata: { format: 'html', cleaned: true } });
+      return { content };
     } catch (error) {
       throw documentActionError(error, 'DOCUMENT_TEXT_CLEANUP_FAILED', 'Document text cleanup failed.', 'document-cleanup', true);
-    }
-  });
-}
-
-export async function documentGenerateHtml(input: DocumentHtmlInput, options: { logger?: DocumentActionLogger } = {}): Promise<{ html: string }> {
-  return observed('document-generate-html', {}, options.logger ?? defaultLogger, async () => {
-    try {
-      return { html: sanitizeDocumentHtml(documentInputToHtml(input)) };
-    } catch (error) {
-      throw documentActionError(error, 'DOCUMENT_HTML_GENERATION_FAILED', 'Document HTML generation failed.', 'document-generate-html');
-    }
-  });
-}
-
-export async function documentGenerateContent(input: { html: string }, options: { logger?: DocumentActionLogger } = {}): Promise<{ content: string }> {
-  return observed('document-generate-content', {}, options.logger ?? defaultLogger, async () => {
-    try {
-      return { content: htmlToPlainText(sanitizeDocumentHtml(input.html)) };
-    } catch (error) {
-      throw documentActionError(error, 'DOCUMENT_CONTENT_GENERATION_FAILED', 'Document content generation failed.', 'document-generate-content');
     }
   });
 }
@@ -413,8 +316,6 @@ export const DOCUMENT_ACTIONS = {
   'storage-upload': storageUpload,
   'document-extract': documentExtract,
   'document-cleanup': documentCleanup,
-  'document-generate-html': documentGenerateHtml,
-  'document-generate-content': documentGenerateContent,
   'document-embed': documentEmbed,
   'document-insert': documentInsert,
 } as const;

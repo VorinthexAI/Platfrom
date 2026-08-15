@@ -4,8 +4,6 @@ import {
   documentEmbed,
   documentCleanup,
   documentExtract,
-  documentGenerateContent,
-  documentGenerateHtml,
   documentInsert,
   documentKeyForRequest,
   documentValidate,
@@ -18,7 +16,6 @@ import { documentStorage, type DocumentStorage } from './storage';
 import type { DocumentOcr } from './textract';
 import type { embedText } from '@/lib/embeddings';
 import type { embedTexts } from '@/lib/embeddings';
-import { documentInputToHtml, htmlToMarkdown, htmlToPlainText, sanitizeDocumentHtml } from './representation';
 
 export interface DocumentParseDependencies extends DocumentInsertDependencies {
   storage?: DocumentStorage;
@@ -41,8 +38,6 @@ export interface DocumentPipelineActions {
   upload: typeof storageUpload;
   extract: typeof documentExtract;
   cleanup: typeof documentCleanup;
-  generateHtml: typeof documentGenerateHtml;
-  generateContent: typeof documentGenerateContent;
   embed: typeof documentEmbed;
   insert: typeof documentInsert;
 }
@@ -71,8 +66,6 @@ export async function parseDocument(rawInput: DocumentParseInput, dependencies: 
     upload: dependencies.actions?.upload ?? storageUpload,
     extract: dependencies.actions?.extract ?? documentExtract,
     cleanup: dependencies.actions?.cleanup ?? documentCleanup,
-    generateHtml: dependencies.actions?.generateHtml ?? documentGenerateHtml,
-    generateContent: dependencies.actions?.generateContent ?? documentGenerateContent,
     embed: dependencies.actions?.embed ?? documentEmbed,
     insert: dependencies.actions?.insert ?? documentInsert,
   };
@@ -105,13 +98,7 @@ export async function parseDocument(rawInput: DocumentParseInput, dependencies: 
   try {
     const extraction = await actions.extract({ ...normalized, storageKey: uploaded.storageKey }, { ocr: dependencies.ocr, logger });
     if (!extraction.extractedText.trim()) throw new DocumentProcessingError('DOCUMENT_EXTRACTION_FAILED', 'No text could be extracted from the document.', 'document-extract');
-    const structuredText = htmlToMarkdown(documentInputToHtml(extraction)) || extraction.extractedText;
-    const cleaned = await actions.cleanup({ text: structuredText }, { clean: dependencies.cleanText, logger });
-    const generated = await actions.generateHtml(cleaned, { logger });
-    const html = sanitizeDocumentHtml(generated.html);
-    const canonicalContent = htmlToPlainText(html);
-    const { content } = await actions.generateContent({ html }, { logger });
-    if (content !== canonicalContent) throw new DocumentProcessingError('DOCUMENT_CONTENT_GENERATION_FAILED', 'Document content must be derived from canonical HTML.', 'document-generate-content');
+    const { content } = await actions.cleanup({ text: extraction.extractedText }, { clean: dependencies.cleanText, logger });
     const semantics = await actions.embed({ name: normalized.name, content }, { embed: dependencies.embed, embedBatch: dependencies.embedBatch, dimensions: dependencies.embeddingDimensions, logger });
     const timestamp = new Date().toISOString();
     const result = await actions.insert({
@@ -123,7 +110,6 @@ export async function parseDocument(rawInput: DocumentParseInput, dependencies: 
       mimeType: normalized.mimeType,
       storageKey: uploaded.storageKey,
       sizeBytes: normalized.sizeBytes,
-      html,
       content,
       isFavorite: false,
       ...semantics,
@@ -176,7 +162,6 @@ export * from './actions';
 export * from './chunking';
 export * from './errors';
 export * from './exports';
-export * from './representation';
 export * from './schemas';
 export * from './storage';
 export * from './textract';

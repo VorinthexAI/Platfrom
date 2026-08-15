@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { documentParseInputSchema, documentPreviewBlockSchema } from '@/lib/ai/document-processing/schemas';
+import { documentParseInputSchema } from '@/lib/ai/document-processing/schemas';
 import { documentExtensionSchema } from '@/lib/ai/document-processing/schemas';
 import { documentScanInputSchema } from '@/lib/ai/document-scanning';
 import { contentErrorSchema } from './content-errors';
@@ -54,7 +54,6 @@ export const contentDocumentVersionSchema = z.object({
 }).strict();
 
 export const contentProjectedDocumentVersionSchema = contentDocumentVersionSchema.extend({
-  html: z.string().optional(),
   content: z.string().optional(),
   embedding: z.array(z.number().finite()).min(1).optional(),
 }).strict();
@@ -75,8 +74,6 @@ export const contentDocumentSchema = z.object({
 }).strict();
 
 export const contentProjectedDocumentSchema = contentDocumentSchema.extend({
-  blocks: z.array(documentPreviewBlockSchema).optional(),
-  html: z.string().optional(),
   content: z.string().optional(),
   embedding: z.array(z.number().finite()).min(1).optional(),
   folder: contentFolderSchema.optional(),
@@ -138,12 +135,6 @@ const projectedVersionDataSchema = z.object({ version: contentProjectedDocumentV
 const fileDataSchema = z.object({ documentKey: keySchema, format: z.string().trim().min(1), fileName: nameSchema, mimeType: textSchema, encoding: z.literal('base64'), content: z.string() }).strict();
 const generatedTextDataSchema = z.object({ documentKey: keySchema, text: z.string(), language: z.string().trim().min(1).optional(), persistedDocumentKey: keySchema.optional() }).strict();
 const enhancedContentDataSchema = z.object({ content: z.string().trim().min(1) }).strict();
-const canonicalRepresentationSchema = z.object({
-  html: z.string().min(1).optional(),
-  content: z.string().min(1).optional(),
-}).strict().superRefine((value, context) => {
-  if (Number(value.html !== undefined) + Number(value.content !== undefined) !== 1) context.addIssue({ code: z.ZodIssueCode.custom, message: 'exactly one of html or content is required' });
-});
 const bookBriefShape = {
   scopeKey: keySchema,
   topic: z.string().trim().min(1).max(500),
@@ -160,16 +151,13 @@ const folderUpdateSchema = z.object({ folderKey: keySchema, name: nameSchema.opt
   .refine((value) => value.name !== undefined || value.description !== undefined || value.coverImageKey !== undefined || value.isFavorite !== undefined, 'folder metadata is required');
 const documentUpdateSchema = z.object({
   documentKey: keySchema,
-  html: z.string().min(1).optional(),
   content: z.string().min(1).optional(),
   isFavorite: z.boolean().optional(),
   createVersion: z.boolean().optional(),
   expectedUpdatedAt: dateTimeSchema.optional(),
 }).strict().superRefine((value, context) => {
-  const representations = [value.html, value.content].filter((item) => item !== undefined).length;
-  if (representations === 0 && value.isFavorite === undefined) context.addIssue({ code: z.ZodIssueCode.custom, message: 'a document representation or isFavorite is required' });
-  if (representations > 1) context.addIssue({ code: z.ZodIssueCode.custom, message: 'html and content are mutually exclusive' });
-  if (value.createVersion && representations === 0) context.addIssue({ code: z.ZodIssueCode.custom, path: ['createVersion'], message: 'createVersion requires a document representation' });
+  if (value.content === undefined && value.isFavorite === undefined) context.addIssue({ code: z.ZodIssueCode.custom, message: 'content or isFavorite is required' });
+  if (value.createVersion && value.content === undefined) context.addIssue({ code: z.ZodIssueCode.custom, path: ['createVersion'], message: 'createVersion requires content' });
 });
 
 export const contentSearchSourceSchema = z.discriminatedUnion('type', [
@@ -194,8 +182,8 @@ export const organizationContentSearchFiltersSchema = z.object({
   projectKeys: keysSchema.optional(),
   folderKeys: keysSchema.optional(),
 }).strict();
-const searchIncludeSchema = z.array(z.enum(['snippet', 'content', 'html', 'folder', 'scoreBreakdown'])).min(1);
-const organizationSearchIncludeSchema = z.array(z.enum(['snippet', 'content', 'html', 'folder', 'scoreBreakdown', 'scope'])).min(1);
+const searchIncludeSchema = z.array(z.enum(['snippet', 'content', 'folder', 'scoreBreakdown'])).min(1);
+const organizationSearchIncludeSchema = z.array(z.enum(['snippet', 'content', 'folder', 'scoreBreakdown', 'scope'])).min(1);
 const searchInputShape = {
   query: textSchema.max(8_000),
   sources: z.array(contentSearchSourceSchema).min(1).optional(),
@@ -216,7 +204,6 @@ export const contentSearchResultSchema = z.object({
   score: normalizedScoreSchema,
   snippet: z.string().optional(),
   content: z.string().optional(),
-  html: z.string().optional(),
   folder: contentFolderSchema.optional(),
   scope: z.object({ key: keySchema }).strict().optional(),
   matchedSource: z.object({ type: z.enum(['scope', 'project', 'folder']), key: keySchema }).strict().optional(),
@@ -255,7 +242,6 @@ export const contentDocumentAudioVersionSchema = z.object({
 
 const documentReadDataSchema = z.union([
   z.object({ documentKey: keySchema, title: nameSchema, content: z.string() }).strict(),
-  z.object({ documentKey: keySchema, title: nameSchema, html: z.string() }).strict(),
   z.object({
     documentKey: keySchema,
     title: nameSchema,
@@ -279,12 +265,12 @@ export const contentToolContracts = {
   'folder.archive': { description: 'Content folders.', input: z.object({ folderKeys: keysSchema, includeDescendants: z.boolean().optional(), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(folderDataSchema) },
   'folder.restore': { description: 'Restore archived folders.', input: z.object({ folderKeys: keysSchema, includeDescendants: z.boolean().optional(), restoreAncestors: z.boolean().optional(), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(folderDataSchema) },
   'folder.delete': { description: 'Permanently delete folders.', input: z.object({ folderKeys: keysSchema, recursive: z.boolean().optional(), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(emptyDataSchema) },
-  'document.parse': { description: 'Parse a TXT, Markdown, DOC, DOCX, or PDF file into canonical HTML, derived plain text, and an embedding.', input: documentParseInputSchema.extend(idempotencyShape), output: z.object({ document: contentDocumentSchema }).strict() },
+  'document.parse': { description: 'Parse a TXT, Markdown, DOC, DOCX, or PDF file into cleaned plain text and an embedding.', input: documentParseInputSchema.extend(idempotencyShape), output: z.object({ document: contentDocumentSchema }).strict() },
   'document.scan': { description: 'Convert up to 12 ordered document images into one editable document using reconciled OCR while retaining the source images.', input: documentScanInputSchema, output: z.object({ document: contentDocumentSchema }).strict() },
-  'document.create': { description: 'Create a live document from exactly one canonical representation without creating a version.', input: z.object({ scopeKey: keySchema, folderKey: keySchema.optional(), name: nameSchema, representation: canonicalRepresentationSchema, ...idempotencyShape }).strict(), output: z.object({ document: contentDocumentSchema }).strict() },
-  'document.find': { description: 'Find documents by key.', input: z.object({ documentKeys: keysSchema, includeArchived: z.boolean().optional(), include: z.array(z.enum(['blocks', 'html', 'content', 'embedding', 'folder', 'shares', 'latestVersion', 'sourceImages'])).min(1).optional() }).strict(), output: contentBatchOutputSchema(projectedDocumentDataSchema) },
+  'document.create': { description: 'Create a live plain-text document without creating a version.', input: z.object({ scopeKey: keySchema, folderKey: keySchema.optional(), name: nameSchema, content: textSchema, ...idempotencyShape }).strict(), output: z.object({ document: contentDocumentSchema }).strict() },
+  'document.find': { description: 'Find documents by key.', input: z.object({ documentKeys: keysSchema, includeArchived: z.boolean().optional(), include: z.array(z.enum(['content', 'embedding', 'folder', 'shares', 'latestVersion', 'sourceImages'])).min(1).optional() }).strict(), output: contentBatchOutputSchema(projectedDocumentDataSchema) },
   'document.list': { description: 'List documents at a scope location; omit folderKey for the Content root.', input: z.object({ scopeKey: keySchema, folderKey: keySchema.optional(), includeArchived: z.boolean().optional(), cursor: cursorSchema.optional(), limit: limitSchema.optional(), sort: documentSortSchema.optional(), extensions: z.array(documentExtensionSchema).min(1).optional() }).strict(), output: z.object({ documents: z.array(contentDocumentSchema), cursor: cursorSchema.optional() }).strict() },
-  'document.read': { description: 'Read document content or generate chunked audio.', input: z.object({ documentKeys: keysSchema, mode: z.enum(['content', 'html', 'audio']).default('content'), language: textSchema.optional(), voice: textSchema.optional(), speakingRate: z.number().min(0.25).max(4).optional(), startOffset: z.number().int().nonnegative().optional(), endOffset: z.number().int().positive().optional(), includeTitle: z.boolean().optional(), includeCode: z.boolean().optional(), persistAudio: z.boolean().optional(), atomic: atomicSchema, ...idempotencyShape }).strict().superRefine((value, context) => {
+  'document.read': { description: 'Read document content or generate chunked audio.', input: z.object({ documentKeys: keysSchema, mode: z.enum(['content', 'audio']).default('content'), language: textSchema.optional(), voice: textSchema.optional(), speakingRate: z.number().min(0.25).max(4).optional(), startOffset: z.number().int().nonnegative().optional(), endOffset: z.number().int().positive().optional(), includeTitle: z.boolean().optional(), includeCode: z.boolean().optional(), persistAudio: z.boolean().optional(), atomic: atomicSchema, ...idempotencyShape }).strict().superRefine((value, context) => {
     if (value.endOffset !== undefined && value.startOffset !== undefined && value.endOffset <= value.startOffset) context.addIssue({ code: z.ZodIssueCode.custom, message: 'endOffset must be greater than startOffset' });
     if (value.mode !== 'audio') {
       for (const field of ['language', 'voice', 'speakingRate', 'startOffset', 'endOffset', 'includeTitle', 'includeCode', 'persistAudio'] as const) {
@@ -302,15 +288,15 @@ export const contentToolContracts = {
   'document.archive': { description: 'Content documents.', input: z.object({ documentKeys: keysSchema, atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(documentDataSchema) },
   'document.restore': { description: 'Restore archived documents.', input: z.object({ documentKeys: keysSchema, restoreAncestors: z.boolean().optional(), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(documentDataSchema) },
   'document.delete': { description: 'Permanently delete documents and optionally their versions and shares.', input: z.object({ documentKeys: keysSchema, deleteVersions: z.boolean().optional(), deleteShares: z.boolean().optional(), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(emptyDataSchema) },
-  'document.download': { description: 'Download documents.', input: z.object({ documentKeys: keysSchema, format: z.enum(['original', 'html', 'txt', 'md']).default('original') }).strict(), output: contentBatchOutputSchema(fileDataSchema) },
-  'document.export': { description: 'Export documents to selected formats.', input: z.object({ exports: z.array(z.object({ documentKey: keySchema, format: z.enum(['html', 'txt', 'md', 'pdf', 'docx']) }).strict()).min(1).max(100), atomic: atomicSchema }).strict(), output: contentBatchOutputSchema(fileDataSchema) },
+  'document.download': { description: 'Download original files or generated plain-text files.', input: z.object({ documentKeys: keysSchema, format: z.enum(['original', 'txt']).default('original') }).strict(), output: contentBatchOutputSchema(fileDataSchema) },
+  'document.export': { description: 'Export documents as plain text.', input: z.object({ exports: z.array(z.object({ documentKey: keySchema, format: z.literal('txt') }).strict()).min(1).max(100), atomic: atomicSchema }).strict(), output: contentBatchOutputSchema(fileDataSchema) },
   'document.share': { description: 'Create document shares.', input: z.object({ shares: z.array(z.object({ documentKey: keySchema, permission: z.enum(['read', 'comment']), expiresAt: dateTimeSchema.optional(), password: z.string().min(1).max(256).optional() }).strict()).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(createdShareDataSchema) },
   'document.unshare': { description: 'Revoke document shares.', input: z.object({ shareKeys: keysSchema.optional(), documentKeys: keysSchema.optional(), atomic: atomicSchema, ...idempotencyShape }).strict().refine((value) => Number(value.shareKeys !== undefined) + Number(value.documentKeys !== undefined) === 1, 'exactly one of shareKeys or documentKeys is required'), output: contentBatchOutputSchema(unsharedDataSchema) },
   'document.list-shares': { description: 'List shares for documents.', input: z.object({ documentKeys: keysSchema, includeExpired: z.boolean().optional(), includeRevoked: z.boolean().optional() }).strict(), output: contentBatchOutputSchema(z.object({ documentKey: keySchema, shares: z.array(contentDocumentShareSchema) }).strict()) },
   'document.create-version': { description: 'Create document versions.', input: z.object({ documentKeys: keysSchema, labels: z.record(z.string().trim().min(1).max(120)).optional(), atomic: atomicSchema, ...idempotencyShape }).strict().superRefine((value, context) => {
     for (const key of Object.keys(value.labels ?? {})) if (!value.documentKeys.includes(key)) context.addIssue({ code: z.ZodIssueCode.custom, path: ['labels', key], message: 'label key must be one of documentKeys' });
   }), output: contentBatchOutputSchema(versionDataSchema) },
-  'document.find-version': { description: 'Find document versions by key.', input: z.object({ versionKeys: keysSchema, include: z.array(z.enum(['html', 'content', 'embedding'])).min(1).optional() }).strict(), output: contentBatchOutputSchema(projectedVersionDataSchema) },
+  'document.find-version': { description: 'Find document versions by key.', input: z.object({ versionKeys: keysSchema, include: z.array(z.enum(['content', 'embedding'])).min(1).optional() }).strict(), output: contentBatchOutputSchema(projectedVersionDataSchema) },
   'document.list-versions': { description: 'List ordered versions grouped by document.', input: z.object({ documentKeys: keysSchema, cursor: cursorSchema.optional(), limit: limitSchema.optional() }).strict(), output: contentBatchOutputSchema(z.object({ documentKey: keySchema, versions: z.array(contentDocumentVersionSchema), cursor: cursorSchema.optional() }).strict()) },
   'document.restore-version': { description: 'Restore document versions.', input: z.object({ restores: z.array(z.object({ documentKey: keySchema, versionKey: keySchema, createBackupVersion: z.boolean().default(true) }).strict()).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(documentDataSchema) },
   'document.delete-version': { description: 'Delete document versions.', input: z.object({ versionKeys: keysSchema, atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(emptyDataSchema) },

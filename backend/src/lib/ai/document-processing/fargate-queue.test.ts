@@ -1,13 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { documentFargateConfigured, documentProcessingJobId } from './fargate-queue';
+import { documentProcessingJobId, documentWorkerConfigured } from './fargate-queue';
 
-const keys = [
-  'COMPUTE_ECS_CLUSTER',
-  'COMPUTE_ECS_TASK_DEFINITION',
-  'COMPUTE_ECS_SUBNETS',
-  'COMPUTE_ECS_SECURITY_GROUPS',
-  'JOB_REDIS_URL',
-] as const;
+const keys = ['JOB_REDIS_URL', 'DOCUMENT_WORKER_ENABLED'] as const;
 const original = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
 
 afterEach(() => {
@@ -18,26 +12,26 @@ afterEach(() => {
   }
 });
 
-describe('Fargate document processing', () => {
-  test('activates only when every ECS network setting is present', () => {
+describe('queued document processing', () => {
+  test('activates only when infrastructure enables the dedicated worker and job Redis', () => {
     for (const key of keys) delete process.env[key];
-    expect(documentFargateConfigured()).toBe(false);
-    for (const key of keys) process.env[key] = key;
-    expect(documentFargateConfigured()).toBe(true);
-    delete process.env.COMPUTE_ECS_SUBNETS;
-    expect(documentFargateConfigured()).toBe(false);
+    expect(documentWorkerConfigured()).toBe(false);
+    process.env.JOB_REDIS_URL = 'redis://jobs';
+    expect(documentWorkerConfigured()).toBe(false);
+    process.env.DOCUMENT_WORKER_ENABLED = 'true';
+    expect(documentWorkerConfigured()).toBe(true);
   });
 
-  test('keeps document bytes in S3 and launches one transient Fargate task', async () => {
+  test('keeps document bytes in S3 for a permanent queue consumer', async () => {
     const source = await Bun.file(new URL('./fargate-queue.ts', import.meta.url)).text();
     expect(source).toContain('pending/document-processing/${jobId}/original.${normalized.extension}');
-    expect(source).toContain("computeDispatch({ jobType: 'document-processing', jobKey: jobId })");
-    expect(source).toContain('process.env.JOB_REDIS_URL ?? process.env.REDIS_URL');
+    expect(source).toContain('process.env.JOB_REDIS_URL?.trim()');
     expect(source).toContain("attempts: 3");
-    expect(source).toContain('await worker.pause(true)');
-    expect(source).toContain('ACTIVE_STALE_MS');
-    expect(source).toContain('WAITING_RELAUNCH_SECONDS');
-    expect(source).toContain("del(`document-processing:launch:${job.id}`)");
+    expect(source).toContain('DOCUMENT_WORKER_CONCURRENCY');
+    expect(source).toContain("process.once('SIGTERM'");
+    expect(source).toContain("process.once('SIGINT'");
+    expect(source).not.toContain("jobType: 'document-processing'");
+    expect(source).not.toContain('DOCUMENT_PROCESSING_JOB_ID');
     expect(source).not.toContain('fileInput: normalized.fileInput');
   });
 
@@ -53,18 +47,22 @@ describe('Fargate document processing', () => {
     expect(documentProcessingJobId({ ...request, scopeKey: 'other-scope' })).not.toBe(first);
   });
 
-  test('defines Redis, task isolation, least-privilege launch, and worker cleanup in Terraform', async () => {
+  test('defines Redis, a warm document service, and transient image compute in Terraform', async () => {
     const infra = await Bun.file(new URL('../../../../../terraform/environments/production/early_app.tf', import.meta.url)).text();
     const deploy = await Bun.file(new URL('../../../../../deploy/early/deploy.sh', import.meta.url)).text();
     expect(deploy).toContain('--name job-redis');
     expect(deploy).toContain('-p 6379:6379');
     expect(infra).toContain('JOB_REDIS_URL               = "redis://${aws_instance.early_app.private_ip}:6379"');
+    expect(infra).toContain('DOCUMENT_WORKER_ENABLED     = "true"');
     expect(infra).toContain('security_group_id            = aws_security_group.early_app.id');
     expect(infra).not.toContain('module.cache.redis_url');
     expect(infra).toContain('requires_compatibilities = ["FARGATE"]');
+    expect(infra).toContain('resource "aws_ecs_service" "document_worker"');
+    expect(infra).toContain('desired_count                      = var.document_worker_desired_count');
+    expect(infra).toContain('stopTimeout = 120');
     expect(infra).toContain('Action   = ["ecs:RunTask"]');
     expect(infra).toContain('Action   = ["iam:PassRole"]');
     expect(infra).toContain('aws_security_group.document_worker.id');
-    expect(infra).toContain('command   = ["src/document-worker/index.ts"]');
+    expect(infra).toContain('["src/document-worker/index.ts"]');
   });
 });

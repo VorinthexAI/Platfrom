@@ -21,7 +21,7 @@ describe('Content node contracts', () => {
     expect(documentsEmbeddingFields).toEqual(['name', 'content']);
     expect(documentVersionsEmbeddingFields).toEqual(['label', 'content']);
     expect(documentSharesEmbeddingFields).toEqual([]);
-    expect(buildEmbeddingText(documentsEmbeddingFields, { name: 'Roadmap', content: 'Ship Content V1', html: '<p>Ship Content V1</p>' })).toBe('Roadmap\n\nShip Content V1');
+    expect(buildEmbeddingText(documentsEmbeddingFields, { name: 'Roadmap', content: 'Ship Content V1' })).toBe('Roadmap\n\nShip Content V1');
     expect(buildEmbeddingText(documentSharesEmbeddingFields, { token: 'not-embedded' })).toBeNull();
   });
 
@@ -35,10 +35,10 @@ describe('Content node contracts', () => {
     expect(documentSchema.shape.isFavorite.parse(undefined)).toBe(false);
   });
 
-  test('versions contain complete immutable HTML snapshots', () => {
+  test('versions contain complete immutable plain-text snapshots', () => {
     const snapshot = documentVersionSchema.parse({
       key: 'cm00000000000000000000001', scopeKey: 'cm00000000000000000000002', documentKey: 'cm00000000000000000000003',
-      version: 2, label: 'Before launch', html: '<p>Launch</p>',
+      version: 2, label: 'Before launch',
       content: ['Launch'], embedding, chunkEmbeddings: [embedding], createdAt: '2026-07-22T10:00:00.000Z',
     });
     expect(snapshot).toMatchObject({ version: 2, label: 'Before launch', content: 'Launch' });
@@ -46,7 +46,7 @@ describe('Content node contracts', () => {
     expect(snapshot.chunkEmbeddings).toEqual([embedding]);
     expect(snapshot).not.toHaveProperty('storageKey');
     expect(snapshot).not.toHaveProperty('sizeBytes');
-    expect(() => documentVersionSchema.parse({ ...snapshot, html: '   ' })).toThrow();
+    expect(documentVersionSchema.parse({ ...snapshot, html: '<p>ignored</p>' })).not.toHaveProperty('html');
     expect(() => documentVersionSchema.parse({ ...snapshot, content: '   ' })).toThrow();
   });
 
@@ -67,7 +67,7 @@ describe('Content node contracts', () => {
     const chunks = chunkDocumentContent(content);
     const snapshot = documentVersionSchema.parse({
       key: 'cm00000000000000000000001', scopeKey: 'cm00000000000000000000002', documentKey: 'cm00000000000000000000003',
-      version: 1, html: '<p>placeholder</p>', content: chunks, embedding, chunkEmbeddings: chunks.map(() => embedding), createdAt: '2026-07-22T10:00:00.000Z',
+      version: 1, content: chunks, embedding, chunkEmbeddings: chunks.map(() => embedding), createdAt: '2026-07-22T10:00:00.000Z',
     });
     expect(snapshot.content).toBe(content);
   });
@@ -90,7 +90,7 @@ describe('Content node contracts', () => {
   test('requires nonempty finite embeddings for persisted document snapshots', () => {
     const snapshot = {
       key: 'cm00000000000000000000001', scopeKey: 'cm00000000000000000000002', documentKey: 'cm00000000000000000000003',
-      version: 1, html: '<p>Text</p>', content: 'Text', createdAt: '2026-07-22T10:00:00.000Z',
+      version: 1, content: 'Text', createdAt: '2026-07-22T10:00:00.000Z',
     };
     expect(() => documentVersionSchema.parse({ ...snapshot, embedding: [] })).toThrow();
     expect(() => documentVersionSchema.parse({ ...snapshot, embedding: [Number.NaN] })).toThrow();

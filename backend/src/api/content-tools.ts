@@ -3,7 +3,7 @@ import { z, ZodError } from 'zod';
 import { AgentExecutionAccessError } from '@/lib/ai/agents/access';
 import { AgentRuntimeNotFoundError } from '@/lib/ai/agents/runtime';
 import { DEFAULT_MAX_DOCUMENT_BYTES, positiveDocumentLimit } from '@/lib/ai/document-processing/actions';
-import { documentFargateConfigured, enqueueDocumentProcessing, enqueueDocumentScan, getDocumentProcessingStatus } from '@/lib/ai/document-processing/fargate-queue';
+import { documentWorkerConfigured, enqueueDocumentProcessing, enqueueDocumentScan, getDocumentProcessingStatus } from '@/lib/ai/document-processing/fargate-queue';
 import { MAX_DOCUMENT_SCAN_PAGE_BYTES } from '@/lib/ai/document-scanning';
 import { authorizeContentAgentTool, authorizeDocumentParseLocation, ContentError, contentToolInputSchemas, contentToolNameSchema, isContentMutation, runContentAgentTool, type ContentErrorCode, type RunContentAgentToolOptions } from '@/lib/ai/tools';
 import { getAuthIdentity } from './security';
@@ -17,7 +17,7 @@ export interface ContentToolHandlerDependencies {
   run?: ContentToolRunner;
   serviceOptions?: Omit<RunContentAgentToolOptions, 'authenticatedUserKey'>;
   maxDocumentBytes?: number;
-  fargateConfigured?: typeof documentFargateConfigured;
+  workerConfigured?: typeof documentWorkerConfigured;
   enqueueDocument?: typeof enqueueDocumentProcessing;
   enqueueScan?: typeof enqueueDocumentScan;
   authorize?: typeof authorizeContentAgentTool;
@@ -114,7 +114,7 @@ export function createContentToolHandler(dependencies: ContentToolHandlerDepende
         ? Number(process.env.CONTENT_DEV_READ_DELAY_MS ?? 0)
         : 0;
       if (Number.isFinite(devDelayMs) && devDelayMs > 0) await Bun.sleep(Math.min(devDelayMs, 5_000));
-      if ((tool === 'document.parse' || tool === 'document.scan') && !dependencies.run && (dependencies.fargateConfigured ?? documentFargateConfigured)()) {
+      if ((tool === 'document.parse' || tool === 'document.scan') && !dependencies.run && (dependencies.workerConfigured ?? documentWorkerConfigured)()) {
         const authorized = await (dependencies.authorize ?? authorizeContentAgentTool)({ organizationKey: body.organizationKey, agentKey: body.agentKey, tool, input }, { ...dependencies.serviceOptions, authenticatedUserKey: identity.key });
         const location = z.object({ scopeKey: z.string().cuid(), folderKey: z.string().cuid().optional() }).parse(input);
         await (dependencies.authorizeLocation ?? authorizeDocumentParseLocation)(location, authorized.context);

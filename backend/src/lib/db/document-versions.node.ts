@@ -3,7 +3,6 @@ import { aql } from 'arangojs';
 import { createNodeHelpers, toArangoDoc, withArangoKey } from './base';
 import { db } from './client';
 import { EMBEDDING_DIMENSIONS, currentEmbeddingBatchSchema, currentEmbeddingSchema, embedTexts } from '@/lib/embeddings';
-import { canonicalDocumentRepresentations } from '@/lib/ai/document-processing/representation';
 import { chunkDocumentContent, documentContentChunksSchema, documentEmbeddingTexts, documentSemanticHash } from '@/lib/ai/document-processing/chunking';
 
 export const DOCUMENT_VERSIONS_COLLECTION = 'documentVersions';
@@ -14,7 +13,6 @@ export const documentVersionSchema = z.object({
   documentKey: z.string().cuid(),
   version: z.number().int().positive(),
   label: z.string().trim().min(1).max(120).optional(),
-  html: z.string().min(1).refine((value) => value.trim().length > 0, 'HTML must not be blank.'),
   content: z.union([z.string().trim().min(1), documentContentChunksSchema]).transform((value) => typeof value === 'string' ? value : value.join('')),
   embedding: currentEmbeddingSchema,
   chunkEmbeddings: currentEmbeddingBatchSchema.optional(),
@@ -39,8 +37,7 @@ function assertConfiguredEmbeddingDimensions(embedding: number[]): void {
 }
 
 function storedSnapshot(snapshot: DocumentVersion) {
-  const { content, ...fields } = snapshot;
-  return toArangoDoc({ ...fields, content: process.env.CONTENT_VERSION_CONTENT_ARRAY_ENABLED !== 'false' ? chunkDocumentContent(content) : content });
+  return toArangoDoc(snapshot);
 }
 
 export async function prepareDocumentVersionSemantics(content: string, label?: string) {
@@ -51,8 +48,6 @@ export async function prepareDocumentVersionSemantics(content: string, label?: s
 
 /** Prepared snapshots preserve the exact embedding that belonged to the saved content. */
 export async function insertDocumentVersion(input: DocumentVersion): Promise<DocumentVersion> {
-  const canonical = canonicalDocumentRepresentations(input.html);
-  if (canonical.html !== input.html || canonical.content !== input.content) throw new Error('Document version representations must be canonical and agreeing.');
   const snapshot = documentVersionSchema.parse(input);
   currentEmbeddingSchema.parse(snapshot.embedding);
   if (!snapshot.chunkEmbeddings || snapshot.chunkEmbeddings.length !== chunkDocumentContent(snapshot.content).length) throw new Error('Prepared document versions require aligned chunk embeddings.');
@@ -72,11 +67,9 @@ export async function insertDocumentVersion(input: DocumentVersion): Promise<Doc
 
 /** Migration/import-only keyed replacement; normal writes use createDocumentVersion. */
 export async function upsertDocumentVersionByKey(input: Omit<z.input<typeof documentVersionSchema>, 'embedding' | 'chunkEmbeddings'>): Promise<DocumentVersion> {
-  const canonical = canonicalDocumentRepresentations(input.html);
   const sourceContent = typeof input.content === 'string' ? input.content : input.content.join('');
-  if (canonical.html !== input.html || canonical.content !== sourceContent) throw new Error('Document version representations must be canonical and agreeing.');
-  const semantics = await prepareDocumentVersionSemantics(canonical.content, input.label);
-  const snapshot = documentVersionSchema.parse({ ...input, ...canonical, ...semantics });
+  const semantics = await prepareDocumentVersionSemantics(sourceContent, input.label);
+  const snapshot = documentVersionSchema.parse({ ...input, ...semantics });
   const result = await db.collection(DOCUMENT_VERSIONS_COLLECTION).save(storedSnapshot(snapshot), { returnNew: true, overwriteMode: 'replace' });
   return documentVersionSchema.parse(withArangoKey(result.new as Record<string, unknown>));
 }

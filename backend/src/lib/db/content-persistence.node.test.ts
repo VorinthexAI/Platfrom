@@ -52,7 +52,6 @@ describe('scoped Content persistence', () => {
       key: documentKey,
       scopeKey,
       name: 'Root note',
-      html: '<p>Body</p>',
       content: 'Body',
       embedding,
       isFavorite: false,
@@ -64,7 +63,7 @@ describe('scoped Content persistence', () => {
     expect(bindVars).toMatchObject({ folderKey: null, scopeKey });
   });
 
-  test('canonicalizes HTML and derives content at the document write boundary', async () => {
+  test('derives semantic fields at the plain-text document write boundary', async () => {
     const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
     const executor: ContentQueryExecutor = {
       async query(query, bindVars) {
@@ -73,16 +72,13 @@ describe('scoped Content persistence', () => {
       },
     };
     await createContentPersistence(executor).updateDocument(scopeKey, folderKey, {
-      html: '<p>Hello <strong>Core</strong></p>',
       content: 'Hello Core',
       embedding: Array(EMBEDDING_DIMENSIONS).fill(1),
     });
-    expect(calls[0]?.bindVars?.patch).toMatchObject({ html: '<p>Hello <strong>Core</strong></p>', content: 'Hello Core' });
+    expect(calls[0]?.bindVars?.patch).toMatchObject({ content: 'Hello Core' });
     expect(calls[0]?.bindVars).toMatchObject({ changesLocation: false });
     expect(calls[0]?.query).toContain('current.updatedAt == @expectedUpdatedAt');
-    expect(() => createContentPersistence(executor).updateDocument(scopeKey, folderKey, { content: 'detached' })).toThrow('Document content must be updated through HTML.');
-    expect(() => createContentPersistence(executor).updateDocument(scopeKey, folderKey, { html: '<p>Detached</p>' })).toThrow('Document HTML updates require a fresh embedding.');
-    expect(() => createContentPersistence(executor).updateDocument(scopeKey, folderKey, { html: '<p onclick="bad()">Detached</p>', content: 'Detached', embedding: Array(EMBEDDING_DIMENSIONS).fill(1) })).toThrow('Document representations must be canonical and agreeing.');
+    expect(() => createContentPersistence(executor).updateDocument(scopeKey, folderKey, { content: 'detached' })).toThrow('Document content updates require a fresh embedding.');
   });
 
   test('persists favorite-only document patches without representation fields', async () => {
