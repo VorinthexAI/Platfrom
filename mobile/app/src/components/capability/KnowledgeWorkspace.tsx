@@ -3667,7 +3667,7 @@ const styles = StyleSheet.create({
   destinationPanel: { flex: 1, gap: 12 },
   bulkActionList: { width: "100%", gap: spacing.sm },
   destinationBrowser: { flex: 1, minHeight: 0, gap: spacing.sm },
-  destinationLocationLane: { minHeight: 40, flexDirection: "row", alignItems: "center", gap: spacing.xs, borderBottomColor: palette.hairline, borderBottomWidth: 1 },
+  destinationLocationLane: { minHeight: 40, flexDirection: "row", alignItems: "center", gap: spacing.xs },
   destinationLocationTitle: { flex: 1, color: palette.silver100, fontFamily: fonts.medium, fontSize: 14 },
   destinationFolders: { gap: 8, paddingVertical: 4 },
   destinationFolderGrid: { alignContent: "flex-start", flexDirection: "row", flexWrap: "wrap", gap: 10, paddingVertical: 4 },
