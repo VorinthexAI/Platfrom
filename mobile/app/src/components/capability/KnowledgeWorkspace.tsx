@@ -3397,7 +3397,7 @@ export function KnowledgeWorkspace() {
         {activeSheet === "bulkActions" ? <View style={styles.bulkActionList}>
           <Button disabled={bulkLoading} loading={bulkLoading} onPress={() => void updateSelectionFavorite()} size="lg" variant="secondary">{allSelectedFavorite ? "Unfavorite" : "Favorite"}</Button>
           <Button disabled={bulkLoading} onPress={() => void openDestinationPicker("move")} size="lg" variant="secondary">Move to folder</Button>
-          <Button disabled={bulkLoading} onPress={() => void openDestinationPicker("copy")} size="lg" variant="secondary">Copy to folders</Button>
+          <Button disabled={bulkLoading} onPress={() => void openDestinationPicker("copy")} size="lg" variant="secondary">Copy to folder</Button>
           <Button disabled={bulkLoading} onPress={() => pushSheet("bulkDelete")} size="lg" variant="secondary">Delete</Button>
         </View> : null}
         {activeSheet === "historyChooser" ? (
@@ -3413,7 +3413,7 @@ export function KnowledgeWorkspace() {
             <BottomSheetItem disabled={Boolean(documentActionLoading)} loading={documentActionLoading === "download"} onPress={() => void downloadOriginal()}>{selectedDocument.extension ? "Download original" : "Download as text"}</BottomSheetItem>
             <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => { setRenameName(selectedDocument.name); pushSheet("rename"); }}>Rename</BottomSheetItem>
             <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void openDestinationPicker("move", { document: selectedDocument })}>Move to folder</BottomSheetItem>
-            <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void openDestinationPicker("copy", { document: selectedDocument })}>Copy to folders</BottomSheetItem>
+            <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void openDestinationPicker("copy", { document: selectedDocument })}>Copy to folder</BottomSheetItem>
             {selectedDocument.sourceImageCount ? <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void openScanSources()}>View scanned pages</BottomSheetItem> : null}
             <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => pushSheet("deleteDocument")}>Delete {selectedDocument.extension ? "file" : "document"}</BottomSheetItem>
           </>
@@ -3428,7 +3428,7 @@ export function KnowledgeWorkspace() {
           <>
             <BottomSheetItem onPress={openFolderDetails}>Edit</BottomSheetItem>
             <BottomSheetItem onPress={() => void openDestinationPicker("move", { folder: selectedFolder })}>Move folder</BottomSheetItem>
-            <BottomSheetItem onPress={() => void openDestinationPicker("copy", { folder: selectedFolder })}>Copy folder</BottomSheetItem>
+            <BottomSheetItem onPress={() => void openDestinationPicker("copy", { folder: selectedFolder })}>Copy to folder</BottomSheetItem>
             <BottomSheetItem onPress={confirmSelectedFolderDelete}>Delete folder</BottomSheetItem>
           </>
         ) : null}
