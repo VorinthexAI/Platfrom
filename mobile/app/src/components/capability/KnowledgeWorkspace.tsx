@@ -2196,7 +2196,6 @@ export function KnowledgeWorkspace() {
               setDocuments(addDocument);
               if (!folderKey) setRootDocuments(addDocument);
             }
-            void invalidateContentLocations(queryClient, requestContext, [folderKey]);
             update(item.id, { status: "success" });
           } catch (cause) {
             if (generation !== uploadGeneration.current || contentContextKeyRef.current !== requestContextKey) return;
@@ -2209,10 +2208,10 @@ export function KnowledgeWorkspace() {
       const completed = uploadBatchRef.current;
       const successCount = completed.filter(({ status }) => status === "success").length;
       const failureCount = completed.filter(({ status }) => status === "error").length;
-      await invalidateContentLocations(queryClient, contentContext, [folderKey]);
       const location = visibleFolderKey === folderKey
-        ? await getContentLocation(queryClient, contentContext, visibleFolderKey)
+        ? await refreshContentLocation(queryClient, requestContext, visibleFolderKey)
         : undefined;
+      if (!location) await invalidateContentLocations(queryClient, requestContext, [folderKey]);
       if (location && currentFolderKeyRef.current === visibleFolderKey) {
         setFolders(location.folders);
         setDocuments(location.documents);

@@ -63,17 +63,17 @@ export function contentFolderDescendantKeys(tree: readonly ContentFolder[], fold
 export function getContentFolderTree(queryClient: QueryClient, context: ContentContext) {
   return queryClient.fetchQuery({
     queryKey: contentQueryKeys.folderTree(context),
-    queryFn: listContentFolderTree,
+    queryFn: ({ signal }) => listContentFolderTree(signal),
   });
 }
 
 export function getContentLocation(queryClient: QueryClient, context: ContentContext, folderKey?: string) {
   return queryClient.fetchQuery({
     queryKey: contentQueryKeys.location(context, folderKey),
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const [tree, documents] = await Promise.all([
         getContentFolderTree(queryClient, context),
-        listContentDocumentsAtLocation(folderKey),
+        listContentDocumentsAtLocation(folderKey, signal),
       ]);
       return { folders: contentFolderChildren(tree, folderKey), documents };
     },
@@ -81,6 +81,7 @@ export function getContentLocation(queryClient: QueryClient, context: ContentCon
 }
 
 export async function refreshContentLocation(queryClient: QueryClient, context: ContentContext, folderKey?: string) {
+  await queryClient.cancelQueries({ queryKey: contentQueryKeys.location(context, folderKey), exact: true });
   await queryClient.invalidateQueries({ queryKey: contentQueryKeys.location(context, folderKey), exact: true, refetchType: "none" });
   return getContentLocation(queryClient, context, folderKey);
 }

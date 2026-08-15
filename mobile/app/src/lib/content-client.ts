@@ -351,7 +351,7 @@ export async function restoreContentDocumentVersion(documentKey: string, version
   return result.data.document;
 }
 
-export async function listContentFolderTree() {
+export async function listContentFolderTree(signal?: AbortSignal) {
   const contentContext = getContentContext();
   const folders: ContentFolder[] = [];
   let cursor: string | undefined;
@@ -362,14 +362,14 @@ export async function listContentFolderTree() {
       cursor,
       limit: 100,
       sort: { field: "name", direction: "asc" },
-    });
+    }, signal);
     folders.push(...data.folders);
     cursor = data.cursor;
   } while (cursor);
   return folders;
 }
 
-export async function listContentDocumentsAtLocation(folderKey?: string) {
+export async function listContentDocumentsAtLocation(folderKey?: string, signal?: AbortSignal) {
   const contentContext = getContentContext();
   const documents: ContentDocument[] = [];
   let cursor: string | undefined;
@@ -380,7 +380,7 @@ export async function listContentDocumentsAtLocation(folderKey?: string) {
       cursor,
       limit: 100,
       sort: { field: "updatedAt", direction: "desc" },
-    });
+    }, signal);
     documents.push(...data.documents);
     cursor = data.cursor;
   } while (cursor);
