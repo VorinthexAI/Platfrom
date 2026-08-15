@@ -96,13 +96,13 @@ import {
   getContentDocument,
   getContentDocumentPreview,
   getContentDocumentAudioVersions,
+  getContentFolderTree,
   getContentHistory,
   getContentLocation,
   invalidateContentLocations,
   invalidateContentHistories,
   refreshContentDocument,
   refreshContentDocumentAudioVersions,
-  refreshContentFolderTree,
   refreshContentHistory,
   refreshContentLocation,
   replaceCachedContentDocument,
@@ -367,6 +367,7 @@ export function KnowledgeWorkspace() {
       })
     : undefined;
   const archiveLocationLoading = locationLoading;
+  const archiveFolderTreeReady = Boolean(queryClient.getQueryData<ContentFolder[]>(contentQueryKeys.folderTree(contentContext)));
   const visibleFolders = rootFolders.filter((folder) => {
     const normalized = libraryQuery.trim().toLowerCase();
     return !normalized || folder.name.toLowerCase().includes(normalized) || folder.description?.toLowerCase().includes(normalized);
@@ -788,7 +789,14 @@ export function KnowledgeWorkspace() {
       setLocationLoading(true);
     }
     void (async () => {
-      const root = await getContentLocation(queryClient, contentContext);
+      const treeRequest = getContentFolderTree(queryClient, contentContext);
+      void treeRequest.then((tree) => {
+        if (contentContextKeyRef.current !== requestContextKey) return;
+        const rootChildren = contentFolderChildren(tree);
+        setRootFolders(rootChildren);
+        if (workspaceModeRef.current === "folders") setFolders(rootChildren);
+      }).catch(() => {});
+      const [root] = await Promise.all([getContentLocation(queryClient, contentContext), treeRequest]);
       const initialFolder = root.folders.find((folder) => folder.name === "My Documents");
       const initial = { root, location: initialFolder ? await getContentLocation(queryClient, contentContext, initialFolder.key) : root, initialFolder };
       const useInitialFolder = workspaceModeRef.current !== "folders" && Boolean(initial.initialFolder);
@@ -1671,12 +1679,13 @@ export function KnowledgeWorkspace() {
     const previousMode = workspaceModeRef.current;
     setError(undefined);
     const cached = queryClient.getQueryData<{ folders: ContentFolder[]; documents: ContentDocument[] }>(contentQueryKeys.location(contentContext, folder.key));
+    const tree = queryClient.getQueryData<ContentFolder[]>(contentQueryKeys.folderTree(contentContext));
     setLocationLoading(!cached);
     if (cached) {
       setFolders(cached.folders);
       setDocuments(cached.documents);
     } else {
-      setFolders([]);
+      setFolders(tree ? contentFolderChildren(tree, folder.key) : []);
       setDocuments([]);
     }
     setFolderStack((current) => [...current, folder]);
@@ -1727,12 +1736,13 @@ export function KnowledgeWorkspace() {
     setError(undefined);
     const nextFolderKey = nextStack.at(-1)?.key;
     const cached = queryClient.getQueryData<{ folders: ContentFolder[]; documents: ContentDocument[] }>(contentQueryKeys.location(contentContext, nextFolderKey));
+    const tree = queryClient.getQueryData<ContentFolder[]>(contentQueryKeys.folderTree(contentContext));
     setLocationLoading(!cached);
     if (cached) {
       setFolders(cached.folders);
       setDocuments(cached.documents);
     } else {
-      setFolders([]);
+      setFolders(tree ? contentFolderChildren(tree, nextFolderKey) : []);
       setDocuments([]);
     }
     setFolderStack(nextStack);
@@ -1944,7 +1954,18 @@ export function KnowledgeWorkspace() {
       return;
     }
     const generation = ++navigationGeneration.current;
-    setLocationLoading(true);
+    const tree = queryClient.getQueryData<ContentFolder[]>(contentQueryKeys.folderTree(contentContext));
+    const cached = queryClient.getQueryData<ContentLocation>(contentQueryKeys.location(contentContext));
+    setLocationLoading(!cached);
+    if (tree) {
+      const children = contentFolderChildren(tree);
+      setFolders(children);
+      setRootFolders(children);
+    }
+    if (cached) {
+      setDocuments(cached.documents);
+      setRootDocuments(cached.documents);
+    }
     setSheetError(undefined);
     try {
       if (hasContentContext) {
@@ -1977,7 +1998,11 @@ export function KnowledgeWorkspace() {
       return;
     }
     const generation = ++navigationGeneration.current;
-    setLocationLoading(true);
+    const tree = queryClient.getQueryData<ContentFolder[]>(contentQueryKeys.folderTree(contentContext));
+    const cached = queryClient.getQueryData<ContentLocation>(contentQueryKeys.location(contentContext, folder.key));
+    setLocationLoading(!cached);
+    if (tree) setFolders(contentFolderChildren(tree, folder.key));
+    if (cached) setDocuments(cached.documents);
     setSheetError(undefined);
     try {
       if (hasContentContext) {
@@ -2062,7 +2087,7 @@ export function KnowledgeWorkspace() {
     else openSheet("destinationBrowser");
     setDestinationLoading(true);
     try {
-      const tree = await refreshContentFolderTree(queryClient, contentContext);
+      const tree = await getContentFolderTree(queryClient, contentContext);
       const resolvedStack = contentFolderStack(tree, sourceFolderKey);
       const selectedFolderKeys = directSelection?.folder ? [directSelection.folder.key] : selectedFolders.map(({ key }) => key);
       const blockedFolderKeys = action === "move"
@@ -2089,8 +2114,7 @@ export function KnowledgeWorkspace() {
     setSheetError(undefined);
     pushSheet("destinationBrowser");
     try {
-      const tree = queryClient.getQueryData<ContentFolder[]>(contentQueryKeys.folderTree(contentContext))
-        ?? await refreshContentFolderTree(queryClient, contentContext);
+      const tree = await getContentFolderTree(queryClient, contentContext);
       const children = contentFolderChildren(tree, destinationFolder?.key);
       if (generation === destinationGeneration.current) setDestinationFolders(children);
     } catch (cause) {
@@ -2108,8 +2132,7 @@ export function KnowledgeWorkspace() {
     setDestinationFolders([]);
     setSheetError(undefined);
     try {
-      const tree = queryClient.getQueryData<ContentFolder[]>(contentQueryKeys.folderTree(contentContext))
-        ?? await refreshContentFolderTree(queryClient, contentContext);
+      const tree = await getContentFolderTree(queryClient, contentContext);
       const next = contentFolderChildren(tree, nextStack.at(-1)?.key);
       if (generation !== destinationGeneration.current) return;
       setDestinationFolders(next);
@@ -3060,7 +3083,7 @@ export function KnowledgeWorkspace() {
               </View> : <View accessibilityLiveRegion="polite" style={styles.rootDocuments}>
                 {rootSearchDocuments.map((document) => { const selected = selectedDocuments.some(({ key }) => key === document.documentKey); return <Button accessibilityState={{ selected }} contentMode="raw" key={document.documentKey} onLongPress={() => handleSearchDocumentLongPress(document)} onPress={() => handleSearchDocumentPress(document)} size="sm" style={[styles.documentButton, selected && styles.selectedItem]} variant="secondary"><FileIcon size="sm" /><Text numberOfLines={1} style={styles.documentButtonLabel}>{document.name}</Text></Button>; })}
                 {rootSearchDocuments.length === 0 ? <Text style={styles.empty}>No {folderContentTab === "files" ? "files" : "documents"} matched this search.</Text> : null}
-              </View> : archiveLocationLoading ? folderContentTab === "folders" ? <View accessibilityLabel="Loading folders" accessibilityRole="progressbar" style={[styles.rootFolderGrid, styles.loadingGrid]}>{Array.from({ length: 3 }, (_, index) => <View key={index} style={[styles.rootFolderCard, styles.skeletonCard, { width: archiveCardSize, height: archiveCardSize }]} />)}</View> : <View accessibilityLabel={`Loading ${folderContentTab}`} accessibilityRole="progressbar" style={styles.rootDocuments}>{Array.from({ length: 3 }, (_, index) => <View key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />)}</View> : folderContentTab === "folders" ? (
+              </View> : archiveLocationLoading && (folderContentTab !== "folders" || !archiveFolderTreeReady) ? folderContentTab === "folders" ? <View accessibilityLabel="Loading folders" accessibilityRole="progressbar" style={[styles.rootFolderGrid, styles.loadingGrid]}>{Array.from({ length: 3 }, (_, index) => <View key={index} style={[styles.rootFolderCard, styles.skeletonCard, { width: archiveCardSize, height: archiveCardSize }]} />)}</View> : <View accessibilityLabel={`Loading ${folderContentTab}`} accessibilityRole="progressbar" style={styles.rootDocuments}>{Array.from({ length: 3 }, (_, index) => <View key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />)}</View> : folderContentTab === "folders" ? (
                 <View style={styles.rootFolderGrid}>
                   {rootFolders.length ? rootFolders.map((folder) => {
                     const selected = selectedFolders.some(({ key }) => key === folder.key);
@@ -3120,7 +3143,7 @@ export function KnowledgeWorkspace() {
                 <Text numberOfLines={1} style={styles.documentButtonLabel}>{document.name}</Text>
               </Button>; })}
               {folderSearchDocuments.length === 0 ? <Text style={styles.empty}>No {folderContentTab === "files" ? "files" : "documents"} matched this search.</Text> : null}
-            </View> : archiveLocationLoading ? folderContentTab === "folders" ? <View accessibilityLabel="Loading folders" accessibilityRole="progressbar" style={[styles.rootFolderGrid, styles.folderTabContent]}>{Array.from({ length: 3 }, (_, index) => <View key={index} style={[styles.rootFolderCard, styles.skeletonCard, { width: archiveCardSize, height: archiveCardSize }]} />)}</View> : <View accessibilityLabel={`Loading ${folderContentTab}`} accessibilityRole="progressbar" style={[styles.folderDocuments, styles.folderTabContent]}>{Array.from({ length: 3 }, (_, index) => <View key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />)}</View> : folderContentTab === "folders" ? (
+            </View> : archiveLocationLoading && (folderContentTab !== "folders" || !archiveFolderTreeReady) ? folderContentTab === "folders" ? <View accessibilityLabel="Loading folders" accessibilityRole="progressbar" style={[styles.rootFolderGrid, styles.folderTabContent]}>{Array.from({ length: 3 }, (_, index) => <View key={index} style={[styles.rootFolderCard, styles.skeletonCard, { width: archiveCardSize, height: archiveCardSize }]} />)}</View> : <View accessibilityLabel={`Loading ${folderContentTab}`} accessibilityRole="progressbar" style={[styles.folderDocuments, styles.folderTabContent]}>{Array.from({ length: 3 }, (_, index) => <View key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />)}</View> : folderContentTab === "folders" ? (
               <View style={[styles.rootFolderGrid, styles.folderTabContent, archiveLocationLoading && styles.loadingGrid]}>
                 {folders.length ? folders.map((folder) => { const selected = selectedFolders.some(({ key }) => key === folder.key); return (
                   <View key={folder.key} style={[styles.rootFolderCard, selected && styles.selectedItem, folder.key.startsWith("optimistic-") && styles.optimisticCard, { width: archiveCardSize, height: archiveCardSize }]}>

@@ -67,20 +67,6 @@ export function getContentFolderTree(queryClient: QueryClient, context: ContentC
   });
 }
 
-export async function refreshContentFolderTree(queryClient: QueryClient, context: ContentContext) {
-  await queryClient.invalidateQueries({ queryKey: contentQueryKeys.folderTree(context), exact: true, refetchType: "none" });
-  const tree = await getContentFolderTree(queryClient, context);
-  queryClient.getQueriesData<ContentLocation>({ queryKey: contentQueryKeys.locations(context) }).forEach(([queryKey, location]) => {
-    if (!location) return;
-    const folderKey = queryKey.at(-1);
-    queryClient.setQueryData<ContentLocation>(queryKey, {
-      ...location,
-      folders: contentFolderChildren(tree, typeof folderKey === "string" ? folderKey : undefined),
-    });
-  });
-  return tree;
-}
-
 export function getContentLocation(queryClient: QueryClient, context: ContentContext, folderKey?: string) {
   return queryClient.fetchQuery({
     queryKey: contentQueryKeys.location(context, folderKey),
