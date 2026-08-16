@@ -6,9 +6,11 @@ import {
   listContentDocumentAudioVersions,
   listContentDocumentSummaries,
   listContentSearchHistory,
+  getContentDocumentTopics,
   readContentDocument,
   type ContentContext,
   type ContentDocument,
+  type ContentDocumentSummary,
   type ContentFolder,
 } from "./content-client";
 
@@ -25,6 +27,7 @@ export const contentQueryKeys = {
   history: (context: ContentContext, folderKey?: string) => [...contentQueryKeys.all(context), "history", folderKey ?? null] as const,
   audioVersions: (context: ContentContext, documentKey: string) => [...contentQueryKeys.document(context, documentKey), "audio-versions"] as const,
   summaries: (context: ContentContext, documentKey: string) => [...contentQueryKeys.document(context, documentKey), "summaries"] as const,
+  topics: (context: ContentContext, documentKey: string) => [...contentQueryKeys.document(context, documentKey), "topics"] as const,
 };
 
 export function contentFolderChildren(tree: readonly ContentFolder[], parentFolderKey?: string) {
@@ -115,13 +118,35 @@ export function getContentDocumentSummaries(queryClient: QueryClient, context: C
   return queryClient.fetchQuery({
     queryKey: contentQueryKeys.summaries(context, documentKey),
     queryFn: () => listContentDocumentSummaries(documentKey),
-    staleTime: 0,
+    staleTime: Infinity,
   });
+}
+
+export function addCachedContentDocumentSummary(queryClient: QueryClient, context: ContentContext, summary: ContentDocumentSummary) {
+  queryClient.setQueryData<ContentDocumentSummary[]>(contentQueryKeys.summaries(context, summary.documentKey), (current = []) => [
+    summary,
+    ...current.filter(({ key }) => key !== summary.key),
+  ].sort((left, right) => right.version - left.version));
+  return queryClient.getQueryData<ContentDocumentSummary[]>(contentQueryKeys.summaries(context, summary.documentKey))?.find(({ key }) => key === summary.key) ?? summary;
 }
 
 export async function refreshContentDocumentSummaries(queryClient: QueryClient, context: ContentContext, documentKey: string) {
   await queryClient.invalidateQueries({ queryKey: contentQueryKeys.summaries(context, documentKey), exact: true, refetchType: "none" });
   return getContentDocumentSummaries(queryClient, context, documentKey);
+}
+
+export function getCachedContentDocumentTopics(queryClient: QueryClient, context: ContentContext, documentKey: string) {
+  return queryClient.fetchQuery({
+    queryKey: contentQueryKeys.topics(context, documentKey),
+    queryFn: ({ signal }) => getContentDocumentTopics(documentKey, signal),
+    gcTime: Infinity,
+    staleTime: Infinity,
+  });
+}
+
+export async function invalidateContentDocumentTopics(queryClient: QueryClient, context: ContentContext, documentKey: string) {
+  await queryClient.cancelQueries({ queryKey: contentQueryKeys.topics(context, documentKey), exact: true });
+  await queryClient.invalidateQueries({ queryKey: contentQueryKeys.topics(context, documentKey), exact: true, refetchType: "none" });
 }
 
 export function getContentHistory(queryClient: QueryClient, context: ContentContext, folderKey?: string) {

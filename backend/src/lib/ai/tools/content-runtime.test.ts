@@ -1023,14 +1023,14 @@ describe('Content runtime', () => {
       const parsed = chatInputSchema.parse(input);
       expect(parsed.systemPrompt).toBeString();
       expect(parsed.messages[0]?.content[0]).toMatchObject({ type: 'text' });
-      return { text: action === 'document-topics' ? '```json\n{"topics":["Launch","Launch","Risk"]}\n```' : 'Generated text' };
+      return { text: action === 'document-topics' ? '```json\n{"topics":["Launch","Launch","Risk"]}\n```' : action === 'document-summarize' ? '```json\n{"sections":[{"heading":"Overview","body":"Generated text"},{"heading":"Details","body":"Additional context"}]}\n```' : 'Generated text' };
     };
     const dependencies = { repository: f.repository, runAction };
     expect((await runContentTool('document.summarize', { documentKeys: [first] }, f.context, dependencies)).results[0]?.success).toBe(true);
     expect((await runContentTool('document.summarize', { documentKeys: [first, second], combine: true }, f.context, dependencies)).summary.failed).toBe(0);
     const persisted = await runContentTool('document.summarize', { documentKeys: [first], topic: 'Launch', style: 'executive', persist: true }, f.context, dependencies);
     const summaryKey = persisted.results[0]?.data?.summary?.key;
-    expect(persisted.results[0]?.data).toMatchObject({ text: 'Generated text', summary: { version: 1, topic: 'Launch', style: 'executive' } });
+    expect(persisted.results[0]?.data).toMatchObject({ text: 'Overview\nGenerated text\n\nDetails\nAdditional context', summary: { version: 1, topic: 'Launch', style: 'executive', summary: 'Overview\nGenerated text\n\nDetails\nAdditional context' } });
     expect(f.documents.size).toBe(2);
     expect((await runContentTool('document.list-summaries', { documentKeys: [first] }, f.context, dependencies)).results[0]?.data?.summaries).toHaveLength(1);
     expect((await runContentTool('document.find-summary', { summaryKeys: [summaryKey] }, f.context, dependencies)).results[0]?.data?.summary.key).toBe(summaryKey);

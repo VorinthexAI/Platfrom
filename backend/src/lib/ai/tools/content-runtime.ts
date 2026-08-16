@@ -212,6 +212,36 @@ function summaryView(summary: DocumentSummary) {
   return safe;
 }
 
+function plainGeneratedSummary(value: unknown) {
+  return z.string().trim().min(1).parse(value)
+    .replace(/^```(?:markdown|text)?\s*\n?/i, '')
+    .replace(/\n?```$/i, '')
+    .replace(/^[ \t]{0,3}#{1,6}[ \t]+/gm, '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/^[ \t]*(?:[-*•]|\d+[.)])[ \t]+/gm, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+const generatedSummarySectionsSchema = z.object({
+  sections: z.array(z.object({
+    heading: z.string().trim().min(1).max(120),
+    body: z.string().trim().min(1),
+  }).strict()).min(2).max(4),
+}).strict();
+
+function sectionedGeneratedSummary(value: unknown) {
+  const raw = z.string().trim().min(1).parse(value);
+  const fenced = /^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i.exec(raw);
+  try {
+    const parsed = generatedSummarySectionsSchema.parse(JSON.parse(fenced?.[1]?.trim() ?? raw));
+    return parsed.sections.map(({ heading, body }) => `${plainGeneratedSummary(heading)}\n${plainGeneratedSummary(body)}`).join('\n\n');
+  } catch {
+    return plainGeneratedSummary(raw);
+  }
+}
+
 async function audioVersionView(version: DocumentAudioVersion, current: Document, signUrl: (storageKey: string) => Promise<string>) {
   return {
     ...generatedAudioVersionView(version),
@@ -2060,11 +2090,11 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       for (const key of input.documentKeys) sources.push(await document(key, input.persist ? 'moderator' : 'viewer', false));
       const generateSummary = async (sourceDocuments: Document[]) => {
         const generated = await action('document-summarize', {
-          systemPrompt: `Create a ${input.style} summary${input.topic ? ` focused on ${input.topic}` : ''}${input.language ? ` in ${input.language}` : ''}. Use only the supplied document content, preserve its facts, and return only the summary without commentary.`,
+          systemPrompt: `Create a ${input.style} summary${input.topic ? ` focused on ${input.topic}` : ''}${input.language ? ` in ${input.language}` : ''}. Use only the supplied document content and preserve its facts. Return strict JSON only in the form {"sections":[{"heading":"Short heading","body":"Prose paragraph"}]}. Return 2 to 4 distinct sections. Bodies must be prose paragraphs, never bullet points or numbered lists. Do not use Markdown, asterisks, or commentary.`,
           messages: [{ role: 'user', content: [{ type: 'text', text: sourceDocuments.map((item) => `Title: ${item.name}\n\n${item.content}`).join('\n\n---\n\n') }] }],
           options: { temperature: 0.2, maxTokens: 5_000 },
         }, sourceDocuments[0]!.key, sourceDocuments[0]!.scopeKey);
-        return z.string().trim().min(1).parse(generated.text);
+        return sectionedGeneratedSummary(generated.text);
       };
       if (input.combine) {
         const text = await generateSummary(sources);

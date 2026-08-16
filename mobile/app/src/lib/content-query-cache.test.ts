@@ -3,11 +3,13 @@ import { QueryClient } from "@tanstack/react-query";
 
 import {
   addCachedContentDocument,
+  addCachedContentDocumentSummary,
   addCachedContentFolder,
   contentFolderChildren,
   contentFolderDescendantKeys,
   contentFolderStack,
   contentQueryKeys,
+  invalidateContentDocumentTopics,
   invalidateContentHistories,
   invalidateContentLocations,
   replaceCachedContentDocument,
@@ -42,6 +44,33 @@ test("scopes Archive cache keys by the complete content context", () => {
   expect(contentQueryKeys.location(context)).not.toEqual(contentQueryKeys.location(context, "folder-a"));
   expect(contentQueryKeys.audioVersions(context, "document-a").slice(0, -1)).toEqual(contentQueryKeys.document(context, "document-a"));
   expect(contentQueryKeys.summaries(context, "document-a").slice(0, -1)).toEqual(contentQueryKeys.document(context, "document-a"));
+  expect(contentQueryKeys.topics(context, "document-a").slice(0, -1)).toEqual(contentQueryKeys.document(context, "document-a"));
+});
+
+test("invalidates only the edited document topic cache", async () => {
+  const client = new QueryClient();
+  const edited = contentQueryKeys.topics(context, "document-a");
+  const unrelated = contentQueryKeys.topics(context, "document-b");
+  client.setQueryData(edited, ["Before"]);
+  client.setQueryData(unrelated, ["Unrelated"]);
+
+  await invalidateContentDocumentTopics(client, context, "document-a");
+
+  expect(client.getQueryState(edited)?.isInvalidated).toBe(true);
+  expect(client.getQueryState(unrelated)?.isInvalidated).toBe(false);
+});
+
+test("stores generated summaries in the document summary query", () => {
+  const client = new QueryClient();
+  const first = { key: "summary-a", documentKey: "document-a", version: 1, summary: "First" } as any;
+  const second = { key: "summary-b", documentKey: "document-a", version: 2, summary: "Second" } as any;
+  client.setQueryData(contentQueryKeys.summaries(context, "document-a"), [first]);
+
+  const cached = addCachedContentDocumentSummary(client, context, second);
+
+  const summaries = client.getQueryData<any[]>(contentQueryKeys.summaries(context, "document-a"));
+  expect(cached).toBe(summaries?.[0]);
+  expect(summaries).toEqual([second, first]);
 });
 
 test("derives folder children, ancestry, and descendants from one tree", () => {

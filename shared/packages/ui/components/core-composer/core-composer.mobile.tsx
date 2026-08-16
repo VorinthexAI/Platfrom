@@ -247,17 +247,29 @@ export function CoreComposer({
   }
 
   return (
-    <View pointerEvents="box-none" style={styles.layer}>
+    <View
+      pointerEvents="box-none"
+      style={[
+        styles.layer,
+        sheetOpen
+          ? styles.layerOpen
+          : {
+              marginTop: spacing.sm,
+              paddingBottom: Math.max(insets.bottom, spacing.sm),
+              paddingLeft: Math.max(insets.left, spacing.md),
+              paddingRight: Math.max(insets.right, spacing.md),
+            },
+      ]}
+    >
       {sheetOpen ? <View onStartShouldSetResponder={() => true} style={styles.backdrop} /> : null}
       <Animated.View
         pointerEvents="box-none"
         style={[
           styles.wrap,
-          style,
           sheetOpen && styles.sheet,
+          sheetOpen && style,
           {
-            bottom: keyboardVisible ? 0 : insets.bottom + 12,
-            ...(sheetOpen ? { top: insets.top, transform: [{ translateY: sheetTranslateY }] } : {}),
+            ...(sheetOpen ? { bottom: keyboardVisible ? 0 : insets.bottom + 12, top: insets.top, transform: [{ translateY: sheetTranslateY }] } : {}),
           },
         ]}
       >
@@ -280,7 +292,7 @@ export function CoreComposer({
             </Button>
           </View>
         ) : null}
-        <View onStartShouldSetResponder={() => sheetOpen} style={styles.sheetBody}>
+        <View onStartShouldSetResponder={() => sheetOpen} style={[styles.sheetBody, sheetOpen && styles.sheetBodyOpen]}>
           {sheetOpen ? message : null}
           <View style={[styles.composer, sheetOpen && styles.composerOpen]}>
           {onLeadingPress ? (
@@ -353,12 +365,15 @@ export function CoreComposer({
 
 const styles = StyleSheet.create({
   layer: {
+    zIndex: 20,
+  },
+  layerOpen: {
     bottom: 0,
     left: 0,
+    marginTop: 0,
     position: "absolute",
     right: 0,
     top: 0,
-    zIndex: 20,
   },
   backdrop: {
     bottom: 0,
@@ -371,9 +386,6 @@ const styles = StyleSheet.create({
   },
   wrap: {
     gap: 6,
-    left: spacing.md,
-    position: "absolute",
-    right: spacing.md,
   },
   sheet: {
     backgroundColor: colors.page,
@@ -383,6 +395,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderBottomWidth: 0,
     left: 0,
+    position: "absolute",
     paddingBottom: spacing.md,
     paddingHorizontal: spacing.md,
     right: 0,
@@ -420,9 +433,11 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   sheetBody: {
-    flex: 1,
     gap: 6,
     justifyContent: "flex-end",
+  },
+  sheetBodyOpen: {
+    flex: 1,
   },
   sheetFooter: {
     paddingTop: spacing.sm,

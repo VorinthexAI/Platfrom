@@ -198,6 +198,7 @@ export function BottomSheet({
 
   const panResponder = useRef(
     PanResponder.create({
+      onStartShouldSetPanResponder: () => dismissibleRef.current,
       onMoveShouldSetPanResponder: (_, gesture) =>
         dismissibleRef.current && gesture.dy > 8 && Math.abs(gesture.dy) > Math.abs(gesture.dx) * 1.2,
       onMoveShouldSetPanResponderCapture: (_, gesture) =>
@@ -263,10 +264,9 @@ export function BottomSheet({
               transform: [{ translateY }],
             },
           ]}
-          {...panResponder.panHandlers}
         >
           <View style={styles.headerDragTarget}>
-            <View style={styles.dragTarget}>
+            <View collapsable={false} style={styles.dragTarget} {...panResponder.panHandlers}>
               <View style={styles.dragHandle} />
             </View>
             <View style={[styles.header, hideHeading && styles.headerWithoutHeading]}>

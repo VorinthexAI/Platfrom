@@ -1,7 +1,6 @@
 import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 import Pdf from "react-native-pdf";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
 import { BrainIcon } from "../../icons/brain/brain.mobile";
 import { ChevronLeftIcon } from "../../icons/chevron-left/chevron-left.mobile";
@@ -26,8 +25,7 @@ export type FileViewerProps = {
 };
 
 export function FileViewer({ error, htmlUri, loading = false, onAi, onBack, onEdit, onHistory, onMenu, onRenderError, pdfUri, title }: FileViewerProps) {
-  const insets = useSafeAreaInsets();
-  return <View style={[styles.root, { paddingBottom: insets.bottom + 78 + spacing.md }]}>
+  return <View style={styles.root}>
     <View style={styles.header}>
       <Button accessibilityLabel="Back" contentMode="raw" onPress={onBack} size="sm" variant="icon"><ChevronLeftIcon size="sm" /></Button>
       <Text numberOfLines={1} style={styles.headerTitle}>{title}</Text>
