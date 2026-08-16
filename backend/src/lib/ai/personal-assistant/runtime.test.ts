@@ -34,8 +34,8 @@ describe('personal assistant runtime', () => {
     expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual([
       'folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy',
       'document.list', 'document.find', 'document.create', 'document.update',
-      'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.summary.audio.generate', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.translate',
-      'document.list-versions', 'document.restore-version', 'document.download', 'content.neighbors', 'scope.content.search-history.delete', 'knowledge.search', 'note.write', 'note.enhance', 'assistant.unsupported',
+      'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.summary.audio.generate', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.enhance', 'document.translate',
+      'document.list-versions', 'document.restore-version', 'document.download', 'content.neighbors', 'scope.content.search-history.delete', 'knowledge.search', 'note.write', 'assistant.unsupported',
     ]);
     expect(result).toEqual({ type: 'unsupported', message: 'This request is not supported in Archive. Core can search your documents or help write the open note.', sources: [] });
   });
@@ -186,27 +186,22 @@ describe('personal assistant runtime', () => {
     expect(result).toEqual({ type: 'note', content: 'Rewritten text', message: 'Rewrote the note.', sources: [] });
   });
 
-  test('enhances selected text deterministically without changing surrounding text', async () => {
-    const content = 'Keep before. This are teh sentence. Keep after.';
-    const selected = 'This are teh sentence.';
-    const start = content.indexOf(selected);
+  test('provides the trusted open document key for Core enhancement', async () => {
+    let modelCalls = 0;
     let enhanceInput: unknown;
-    const result = await runPersonalAssistant({ ...input, message: 'Enhance the selected text', currentNote: { title: 'Notes', content, selection: { start, end: start + selected.length } } }, domain, {
-      execute: async () => response({ text: '', toolCalls: [{ id: 'enhance-1', name: 'note.enhance', arguments: { target: 'selection' } }], stopReason: 'tool_use' }),
-      executeContent: (async (name: string, nextInput: unknown) => { enhanceInput = { name, input: nextInput }; return { content: 'This is the sentence.' }; }) as any,
+    const result = await runPersonalAssistant({ ...input, message: 'Enhance this document', currentNote: { ...input.currentNote, documentKey } }, domain, {
+      execute: async () => {
+        modelCalls += 1;
+        if (modelCalls === 1) return response({ text: '', toolCalls: [{ id: 'enhance-1', name: 'document.enhance', arguments: {} }], stopReason: 'tool_use' });
+        return response({ text: 'Enhanced the open document.', toolCalls: [], stopReason: 'end_turn' });
+      },
+      executeContent: (async (name: string, nextInput: unknown) => {
+        enhanceInput = { name, input: nextInput };
+        return { results: [{ success: true, data: { documentKey, text: 'Improved text.', persistedDocumentKey: documentKey } }], summary: { requested: 1, succeeded: 1, failed: 0 } };
+      }) as any,
     });
-    expect(enhanceInput).toEqual({ name: 'enhance', input: { content: selected } });
-    expect(result).toEqual({ type: 'note', content: 'Keep before. This is the sentence. Keep after.', message: 'Enhanced the selected text.', sources: [] });
-  });
-
-  test('enhances the complete open document through the proofreading action', async () => {
-    let enhanceInput: unknown;
-    const result = await runPersonalAssistant({ ...input, message: 'Fix the wording, grammar, and spelling mistakes' }, domain, {
-      execute: async () => response({ text: '', toolCalls: [{ id: 'enhance-1', name: 'note.enhance', arguments: { target: 'document' } }], stopReason: 'tool_use' }),
-      executeContent: (async (name: string, nextInput: unknown) => { enhanceInput = { name, input: nextInput }; return { content: 'Improved text.' }; }) as any,
-    });
-    expect(enhanceInput).toEqual({ name: 'enhance', input: { content: 'Existing text' } });
-    expect(result).toMatchObject({ type: 'note', content: 'Improved text.' });
+    expect(enhanceInput).toEqual({ name: 'document.enhance', input: { documentKeys: [documentKey], mode: 'replace', idempotencyKey: expect.any(String) } });
+    expect(result).toMatchObject({ type: 'answer', changes: [{ workspace: 'archive' }] });
   });
 
   test('creates and writes a book through sequential scoped capabilities', async () => {

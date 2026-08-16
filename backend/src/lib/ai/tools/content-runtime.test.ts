@@ -877,12 +877,17 @@ describe('Content runtime', () => {
     const generated = await runContentTool('document.translate', { documentKeys: [documentKey], targetLanguage: 'French', mode: 'replace' }, f.context, {
       ...dependencies,
       runAction: async (action: string, input: any) => {
-        if (action === 'translate') return { text: 'Corps traduit' };
+        if (action === 'translate') {
+          expect(input.systemPrompt).toContain('collapse excessive blank lines');
+          expect(input.systemPrompt).toContain('readable sections');
+          return { text: '  Titre  \r\n\r\n\r\nCorps traduit  \r\n ' };
+        }
         if (action === 'document-embed') return documentEmbed(input, { embed: async ({ text }) => { embeddedTexts.push(text); return embedding; }, dimensions: EMBEDDING_DIMENSIONS });
         throw new Error(`Unexpected action ${action}`);
       },
     });
     expect(generated.results[0]?.success).toBe(true);
+    expect(generated.results[0]?.data?.text).toBe('Titre\n\nCorps traduit');
     expect([...f.versions.values()].at(-1)?.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
   });
 
@@ -1105,7 +1110,7 @@ describe('Content runtime', () => {
       const parsed = chatInputSchema.parse(input);
       expect(parsed.systemPrompt).toBeString();
       expect(parsed.messages[0]?.content[0]).toMatchObject({ type: 'text' });
-      return { text: action === 'document-topics' ? '```json\n{"topics":["Launch","Launch","Risk"]}\n```' : action === 'document-summarize' ? '```json\n{"sections":[{"heading":"Overview","body":"Generated text"},{"heading":"Details","body":"Additional context"}]}\n```' : 'Generated text' };
+      return { text: action === 'document-topics' ? '```json\n{"topics":["Launch","Launch","Risk"]}\n```' : action === 'document-summarize' ? '<thinking>Private model planning.</thinking>\nHere is the requested summary.\n```json\n{"sections":[{"heading":"Overview","body":"Generated text"},{"heading":"Details","body":"Additional context"}]}\n```\nNo further commentary.' : 'Generated text' };
     };
     const dependencies = { repository: f.repository, runAction };
     expect((await runContentTool('document.summarize', { documentKeys: [first] }, f.context, dependencies)).results[0]?.success).toBe(true);
@@ -1522,20 +1527,24 @@ describe('Content runtime', () => {
     expect(events.every((event: any) => typeof event.invocationKey === 'string')).toBe(true);
   });
 
-  test('enhances supplied text without persistence', async () => {
-    const f = fixture('viewer');
+  test('enhances a document through Nova Lite and persists replacement content', async () => {
+    const f = fixture('moderator');
+    const documentKey = f.addDocument('This are teh text.');
     let call: { action?: string; input?: any } = {};
-    const output = await runContentTool('enhance', { content: 'This are teh text.' }, f.context, {
+    const output = await runContentTool('document.enhance', { documentKeys: [documentKey], mode: 'replace' }, f.context, {
       repository: f.repository,
       runAction: async (action, input) => {
+        if (action === 'document-embed') return documentEmbed(input as { name: string; content: string }, { embed: async () => embedding, dimensions: EMBEDDING_DIMENSIONS });
         call = { action, input };
         return { text: '```text\nThis is the text.\n```' };
       },
     });
-    expect(output).toEqual({ content: 'This is the text.' });
+    expect(output.results[0]).toMatchObject({ success: true, data: { documentKey, text: 'This is the text.', persistedDocumentKey: documentKey } });
     expect(call.action).toBe('enhance');
+    expect(call.input.systemPrompt).toContain('collapse excessive blank lines');
+    expect(call.input.systemPrompt).toContain('readable sections');
     expect(call.input.options).toMatchObject({ temperature: 0.1, maxTokens: 256 });
-    expect(f.patches).toHaveLength(0);
+    expect(f.documents.get(documentKey).content).toBe('This is the text.');
   });
 
   test('executes one authorized valid behavior path for every registered tool', async () => {
@@ -1583,8 +1592,7 @@ describe('Content runtime', () => {
         signAudioUrl: async (key: string) => `https://audio.example/${key}`,
       };
       let input: any;
-       if (name === 'enhance') input = { content: 'Improve teh wording.' };
-       else if (name === 'book.create-context') input = { scopeKey: f.scopeKey, topic: 'Useful systems', goal: 'Build a durable practice', audience: 'Curious beginners', tone: 'Warm and direct', length: 'short', language: 'English' };
+       if (name === 'book.create-context') input = { scopeKey: f.scopeKey, topic: 'Useful systems', goal: 'Build a durable practice', audience: 'Curious beginners', tone: 'Warm and direct', length: 'short', language: 'English' };
        else if (name === 'book.write') input = { bookKey: newId(), scopeKey: f.scopeKey, topic: 'Useful systems', goal: 'Build a durable practice', audience: 'Curious beginners', tone: 'Warm and direct', length: 'short', language: 'English' };
       else if (name === 'folder.create') input = { folders: [{ scopeKey: f.scopeKey, name: 'Created' }] };
       else if (name === 'folder.find') input = { folderKeys: [f.folderKey] };
@@ -1641,6 +1649,7 @@ describe('Content runtime', () => {
         else { current.deletedAt = now; input = { versionKeys: [version.key] }; }
       } else if (name === 'document.summarize') input = { documentKeys: [documentKey] };
       else if (name === 'document.topics') input = { documentKey };
+      else if (name === 'document.enhance') input = { documentKeys: [documentKey] };
       else if (name === 'document.translate') input = { documentKeys: [documentKey], targetLanguage: 'French' };
       else if (name === 'document.rewrite') input = { rewrites: [{ documentKey, instruction: 'Improve clarity' }] };
       else if (name === 'scope.document.search') input = { scopeKey: f.scopeKey, query: 'source' };

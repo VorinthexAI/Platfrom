@@ -46,12 +46,13 @@ const {
   askPersonalAssistant,
   clearContentDocumentAudioPlayback,
   createContentDocument,
+  createContentDocumentVersion,
   createContentFolder,
   copyContentDocument,
   copyContentSelection,
   deleteContentSearchHistory,
   downloadContentDocument,
-  enhanceContent,
+  enhanceContentDocument,
   findContentDocumentSummary,
   findContentDocumentVersion,
   findContentNeighbors,
@@ -347,17 +348,20 @@ test("sets and clears folder covers with exact payloads", async () => {
 
 test("runs note enhancement, translation, and rename through document tools", async () => {
   responseForTool = (tool) => {
-    if (tool === "enhance") return { data: { success: true, data: { content: "Improved note" } } };
+    if (tool === "document.enhance") return { data: { success: true, data: { results: [{ success: true, data: { text: "Improved note", persistedDocumentKey: "document" } }] } } };
     if (tool === "document.translate") return { data: { success: true, data: { results: [{ success: true, data: { text: "Nota", persistedDocumentKey: "document" } }] } } };
+    if (tool === "document.create-version") return { data: { success: true, data: { results: [{ success: true, data: { version: { key: "version", documentKey: "document", version: 2, label: "Enhanced version", createdAt: "2026-08-10T00:03:00.000Z" } } }] } } };
     if (tool === "document.rename") return { data: { success: true, data: { results: [{ success: true, data: { document: { key: "document", name: "Renamed note", isFavorite: false, updatedAt: "2026-08-10T00:02:00.000Z" } } }] } } };
   };
 
-  expect(await enhanceContent("Rough note")).toEqual({ content: "Improved note" });
+  expect((await enhanceContentDocument("document", "Improve clarity")).text).toBe("Improved note");
   expect((await translateContentDocument("document", "Spanish")).persistedDocumentKey).toBe("document");
+  expect((await createContentDocumentVersion("document", "Enhanced version")).label).toBe("Enhanced version");
   expect((await renameContentDocument("document", "Renamed note")).name).toBe("Renamed note");
-  expect(calls[0]?.body.input).toEqual({ content: "Rough note" });
+  expect(calls[0]?.body.input).toEqual({ documentKeys: ["document"], instruction: "Improve clarity", mode: "preview" });
   expect(calls[1]?.body.input).toMatchObject({ documentKeys: ["document"], targetLanguage: "Spanish", preserveFormatting: true, mode: "replace" });
-  expect(calls[2]?.body.input).toMatchObject({ renames: [{ documentKey: "document", name: "Renamed note" }], atomic: false });
+  expect(calls[2]?.body.input).toMatchObject({ documentKeys: ["document"], labels: { document: "Enhanced version" } });
+  expect(calls[3]?.body.input).toMatchObject({ renames: [{ documentKey: "document", name: "Renamed note" }], atomic: false });
 });
 
 test("sends Archive requests to the personal assistant surface", async () => {

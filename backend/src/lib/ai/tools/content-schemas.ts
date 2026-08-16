@@ -160,7 +160,6 @@ export const contentSummaryAudioSchema = z.object({
 }).strict();
 export const contentDocumentSummarySchema = z.object({ ...documentSummaryMetadataShape, audio: contentSummaryAudioSchema.optional() }).strict();
 const generatedSummaryDataSchema = z.object({ documentKey: keySchema, text: z.string().trim().min(1), summary: contentDocumentSummarySchema.optional() }).strict();
-const enhancedContentDataSchema = z.object({ content: z.string().trim().min(1) }).strict();
 const bookBriefShape = {
   scopeKey: keySchema,
   topic: z.string().trim().min(1).max(500),
@@ -280,7 +279,6 @@ const documentReadDataSchema = z.union([
 ]);
 
 export const contentToolContracts = {
-  enhance: { description: 'Correct spelling, grammar, wording, and clarity while preserving meaning and formatting.', input: z.object({ content: z.string().trim().min(1).max(40_000) }).strict(), output: enhancedContentDataSchema },
   'book.create-context': { description: 'Create a resumable book and its generation context from a broad reader brief.', input: z.object({ ...bookBriefShape, ...idempotencyShape }).strict(), output: bookToolDataSchema },
   'book.write': { description: 'Generate or resume an outlined book, chapter prose, speech, and cover.', input: z.object({ bookKey: keySchema, ...bookBriefShape, ...idempotencyShape }).strict(), output: bookToolDataSchema },
   'folder.create': { description: 'Create one or more Content folders.', input: z.object({ folders: z.array(z.object({ key: keySchema.optional(), scopeKey: keySchema, parentFolderKey: keySchema.optional(), name: nameSchema, description: textSchema.optional(), coverImageKey: keySchema.optional() }).strict()).min(1).max(100), ...idempotencyShape }).strict(), output: contentBatchOutputSchema(folderDataSchema) },
@@ -340,7 +338,8 @@ export const contentToolContracts = {
     if (value.persist && value.combine) context.addIssue({ code: z.ZodIssueCode.custom, path: ['combine'], message: 'combine is only available for summary previews' });
   }), output: contentBatchOutputSchema(generatedSummaryDataSchema) },
   'document.topics': { description: 'Generate up to ten distinct concise topics for one document.', input: z.object({ documentKey: keySchema }).strict(), output: z.object({ documentKey: keySchema, topics: z.array(textSchema.max(200)).max(10) }).strict() },
-  'document.translate': { description: 'Translate documents.', input: z.object({ documentKeys: keysSchema, targetLanguage: textSchema, sourceLanguage: textSchema.optional(), preserveFormatting: z.boolean().optional(), mode: z.enum(['preview', 'replace', 'copy']).default('preview'), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(generatedTextDataSchema) },
+  'document.enhance': { description: 'Correct document spelling, grammar, wording, and clarity while preserving meaning and formatting.', input: z.object({ documentKeys: keysSchema, instruction: textSchema.max(8_000).optional(), mode: z.enum(['preview', 'replace', 'copy']).default('preview'), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(generatedTextDataSchema) },
+  'document.translate': { description: 'Translate documents.', input: z.object({ documentKeys: keysSchema, targetLanguage: textSchema, sourceLanguage: textSchema.optional(), instruction: textSchema.max(8_000).optional(), preserveFormatting: z.boolean().optional(), mode: z.enum(['preview', 'replace', 'copy']).default('preview'), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(generatedTextDataSchema) },
   'document.rewrite': { description: 'Rewrite documents from an instruction.', input: z.object({ rewrites: z.array(z.object({ documentKey: keySchema, instruction: textSchema.max(8_000), tone: textSchema.optional(), audience: textSchema.optional(), length: z.enum(['shorter', 'same', 'longer']).optional(), mode: z.enum(['preview', 'replace', 'copy']).default('preview') }).strict()).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(generatedTextDataSchema) },
   'scope.document.search': { description: 'Search documents available from a scope.', input: z.object({ scopeKey: keySchema, ...searchInputShape }).strict(), output: contentSearchOutputSchema },
   'scope.content.search': { description: 'Search authorized folders and documents in a scope or folder hierarchy.', input: z.object({ scopeKey: keySchema, query: textSchema.max(8_000), folderKey: keySchema.optional(), includeDescendants: z.boolean().optional(), includeSummaries: z.boolean().default(true), minimumScore: z.number().min(0).max(1).default(0.55) }).strict().superRefine((value, context) => { if (!value.folderKey && value.includeDescendants !== undefined) context.addIssue({ code: z.ZodIssueCode.custom, path: ['includeDescendants'], message: 'includeDescendants requires folderKey' }); }), output: scopeContentSearchOutputSchema },

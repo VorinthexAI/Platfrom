@@ -236,11 +236,16 @@ async function projectedSummaryView(summary: DocumentSummary, audio: DocumentSum
 
 function plainGeneratedSummary(value: unknown) {
   return z.string().trim().min(1).parse(value)
+    .replace(/<(?:analysis|thinking|reasoning)>[\s\S]*?<\/(?:analysis|thinking|reasoning)>/gi, '')
     .replace(/^```(?:markdown|text)?\s*\n?/i, '')
     .replace(/\n?```$/i, '')
+    .replace(/```(?:markdown|text)?\s*([\s\S]*?)```/gi, '$1')
+    .replace(/\[([^\]]+)]\([^)]+\)/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
     .replace(/^[ \t]{0,3}#{1,6}[ \t]+/gm, '')
     .replace(/\*\*([^*]+)\*\*/g, '$1')
     .replace(/__([^_]+)__/g, '$1')
+    .replace(/^[ \t]*>[ \t]?/gm, '')
     .replace(/^[ \t]*(?:[-*•]|\d+[.)])[ \t]+/gm, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
@@ -254,14 +259,25 @@ const generatedSummarySectionsSchema = z.object({
 }).strict();
 
 function sectionedGeneratedSummary(value: unknown) {
-  const raw = z.string().trim().min(1).parse(value);
-  const fenced = /^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i.exec(raw);
-  try {
-    const parsed = generatedSummarySectionsSchema.parse(JSON.parse(fenced?.[1]?.trim() ?? raw));
-    return parsed.sections.map(({ heading, body }) => `${plainGeneratedSummary(heading)}\n${plainGeneratedSummary(body)}`).join('\n\n');
-  } catch {
-    return plainGeneratedSummary(raw);
+  const raw = z.string().trim().min(1).parse(value)
+    .replace(/<(?:analysis|thinking|reasoning)>[\s\S]*?<\/(?:analysis|thinking|reasoning)>/gi, '')
+    .trim();
+  const candidates = [...raw.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)].map((match) => match[1]!.trim());
+  const firstBrace = raw.indexOf('{');
+  const lastBrace = raw.lastIndexOf('}');
+  if (firstBrace >= 0 && lastBrace > firstBrace) candidates.push(raw.slice(firstBrace, lastBrace + 1));
+  candidates.push(raw);
+  for (const candidate of candidates) {
+    try {
+      const parsed = generatedSummarySectionsSchema.parse(JSON.parse(candidate));
+      return parsed.sections.map(({ heading, body }) => `${plainGeneratedSummary(heading)}\n${plainGeneratedSummary(body)}`).join('\n\n');
+    } catch {
+      // Try the next JSON candidate before accepting a plain-text fallback.
+    }
   }
+  if (firstBrace >= 0 || lastBrace >= 0) throw new Error('The summary model returned malformed structured output.');
+  const plain = plainGeneratedSummary(raw).replace(/^(?:sure[,!.]?\s*|here(?:'s| is) (?:the |a )?summary:?\s*)/i, '').trim();
+  return `Summary\n${z.string().min(1).parse(plain)}`;
 }
 
 async function audioVersionView(version: DocumentAudioVersion, current: Document, signUrl: (storageKey: string) => Promise<string>) {
@@ -585,6 +601,7 @@ async function fingerprintInput(input: unknown): Promise<string> {
 export function isContentMutation(tool: ContentToolName, input: any): boolean {
   if (tool === 'document.read') return input.mode === 'audio' && input.persistAudio === true;
   if (tool === 'document.summarize') return input.persist === true;
+  if (tool === 'document.enhance') return input.mode !== 'preview';
   if (tool === 'document.translate') return input.mode !== 'preview';
   if (tool === 'document.rewrite') return Array.isArray(input?.rewrites) && input.rewrites.some((item: any) => item?.mode !== 'preview');
   return MUTATIONS.has(tool);
@@ -944,17 +961,6 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
     if (tool === 'book.create-context' || tool === 'book.write') {
       const { runBookContentTool } = await import('./book-runtime');
       result = await runBookContentTool(tool, input, context, dependencies);
-    } else if (tool === 'enhance') {
-      const response = await action('enhance', {
-        systemPrompt: 'Correct spelling, grammar, awkward wording, and unclear phrasing. Preserve the original meaning, facts, tone, paragraph structure, line breaks, and formatting. Do not add new claims or commentary. Return only the revised text.',
-        messages: [{ role: 'user', content: [{ type: 'text', text: input.content }] }],
-        options: { temperature: 0.1, maxTokens: Math.min(5_000, Math.max(256, Math.ceil(input.content.length / 3))) },
-      });
-      const content = z.string().trim().min(1).parse(response.text)
-        .replace(/^```(?:text)?\s*/i, '')
-        .replace(/\s*```$/i, '')
-        .trim();
-      result = { content: z.string().min(1).parse(content) };
     } else if (tool === 'folder.create') {
       const creates = input.folders.map((item: any) => ({ ...item, key: item.key ?? d.id() }));
       result = await batch(tool, creates.map((item: any) => ({
@@ -2207,7 +2213,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       for (const key of input.documentKeys) sources.push(await document(key, input.persist ? 'moderator' : 'viewer', false));
       const generateSummary = async (sourceDocuments: Document[]) => {
         const generated = await action('document-summarize', {
-          systemPrompt: `Create a ${input.style} summary${input.topic ? ` focused on ${input.topic}` : ''}${input.language ? ` in ${input.language}` : ''}. Use only the supplied document content and preserve its facts. Return strict JSON only in the form {"sections":[{"heading":"Short heading","body":"Prose paragraph"}]}. Return 2 to 4 distinct sections. Bodies must be prose paragraphs, never bullet points or numbered lists. Do not use Markdown, asterisks, or commentary.`,
+          systemPrompt: `Create a ${input.style} summary${input.topic ? ` focused on ${input.topic}` : ''}${input.language ? ` in ${input.language}` : ''}. Use only the supplied document content and preserve its facts. Return strict JSON only in the form {"sections":[{"heading":"Short heading","body":"Prose paragraph"}]}. Return 2 to 4 distinct sections. Bodies must be concise prose paragraphs, never bullet points or numbered lists. Do not include analysis, reasoning, planning, self-reference, a preamble, a conclusion about the task, Markdown, code fences, or commentary. Output the JSON object and nothing else.`,
           messages: [{ role: 'user', content: [{ type: 'text', text: sourceDocuments.map((item) => `Title: ${item.name}\n\n${item.content}`).join('\n\n---\n\n') }] }],
           options: { temperature: 0.2, maxTokens: 5_000 },
         }, sourceDocuments[0]!.key, sourceDocuments[0]!.scopeKey);
@@ -2229,7 +2235,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           },
         })), false, repo);
       }
-    } else if (tool === 'document.translate' || tool === 'document.rewrite') {
+    } else if (tool === 'document.enhance' || tool === 'document.translate' || tool === 'document.rewrite') {
       const items = tool === 'document.rewrite'
         ? input.rewrites
         : input.documentKeys.map((documentKey: string) => ({
@@ -2245,12 +2251,30 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             const instruction = tool === 'document.translate'
                 ? `Translate to ${input.targetLanguage}${input.sourceLanguage ? ` from ${input.sourceLanguage}` : ''}. ${input.preserveFormatting ? 'Preserve headings, lists, tables, paragraph boundaries, and inline emphasis.' : 'Return clear translated prose.'}`
                 : `${item.instruction}${item.tone ? ` Tone: ${item.tone}.` : ''}${item.audience ? ` Audience: ${item.audience}.` : ''}${item.length ? ` Length: ${item.length}.` : ''}`;
-            const text = tool === 'document.translate'
-              ? z.string().trim().min(1).parse((await action('translate', {
-                systemPrompt: `Translate the supplied text${input.sourceLanguage ? ` from ${input.sourceLanguage}` : ''} into ${input.targetLanguage} using fluent, idiomatic target-language grammar. Preserve meaning, facts, and tone. ${input.preserveFormatting ? 'Preserve paragraph structure, line breaks, and formatting.' : 'Use clear, natural prose.'} Return only the translated text without commentary.`,
+            const text = tool === 'document.enhance'
+              ? z.string().trim().min(1).parse((await action('enhance', {
+                systemPrompt: `Correct spelling, grammar, awkward wording, and unclear phrasing. Preserve the original meaning, facts, tone, and useful structure. Trim leading and trailing whitespace, remove trailing spaces, collapse excessive blank lines, and organize longer content into readable sections with concise plain-text headings when the material supports them. Do not force headings into short content. Do not add new claims, Markdown decoration, or commentary. ${input.instruction ? `Additional direction: ${input.instruction} ` : ''}Return only the revised text.`,
                 messages: [{ role: 'user', content: [{ type: 'text', text: current.content }] }],
                 options: { temperature: 0.1, maxTokens: Math.min(5_000, Math.max(256, Math.ceil(current.content.length / 3))) },
               }, current.key, current.scopeKey)).text)
+                .replace(/^```(?:text)?\s*/i, '')
+                .replace(/\s*```$/i, '')
+                .replace(/\r\n?/g, '\n')
+                .replace(/[ \t]+\n/g, '\n')
+                .replace(/\n{3,}/g, '\n\n')
+                .trim()
+              : tool === 'document.translate'
+              ? z.string().trim().min(1).parse((await action('translate', {
+                systemPrompt: `Translate the supplied text${input.sourceLanguage ? ` from ${input.sourceLanguage}` : ''} into ${input.targetLanguage} using fluent, idiomatic target-language grammar. Preserve meaning, facts, tone, and useful structure. Trim leading and trailing whitespace, remove trailing spaces, collapse excessive blank lines, and organize longer content into readable sections with concise plain-text headings when the material supports them. Do not force headings into short content. ${input.preserveFormatting ? 'Preserve meaningful paragraph boundaries and formatting.' : 'Use clear, natural prose.'} Do not add Markdown decoration or commentary. ${input.instruction ? `Additional direction: ${input.instruction} ` : ''}Return only the translated text.`,
+                messages: [{ role: 'user', content: [{ type: 'text', text: current.content }] }],
+                options: { temperature: 0.1, maxTokens: Math.min(5_000, Math.max(256, Math.ceil(current.content.length / 3))) },
+              }, current.key, current.scopeKey)).text)
+                .replace(/^```(?:text)?\s*/i, '')
+                .replace(/\s*```$/i, '')
+                .replace(/\r\n?/g, '\n')
+                .replace(/[ \t]+\n/g, '\n')
+                .replace(/\n{3,}/g, '\n\n')
+                .trim()
               : await generated(current, instruction, tool === 'document.rewrite');
             const persistedDocumentKey = item.mode === 'replace'
               ? await persistGenerated(current, text, 'replace', tool.split('.')[1])

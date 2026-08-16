@@ -92,6 +92,7 @@
     "react": "19.2.3",
     "react-native": ">=0.86",
     "react-native-pdf": ">=7",
+    "react-native-reanimated": ">=4",
     "react-native-safe-area-context": ">=5.7",
     "react-native-webview": ">=13.16"
   },

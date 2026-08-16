@@ -5,7 +5,7 @@ import * as ImagePicker from "expo-image-picker";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentRef, type ReactNode } from "react";
 import { BackHandler, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View, useWindowDimensions, type NativeSyntheticEvent, type TextLayoutEventData } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
@@ -56,11 +56,13 @@ import {
   askPersonalAssistant,
   clearContentDocumentAudioPlayback,
   createContentDocument,
+  createContentDocumentVersion,
   createContentFolder,
   createContentMutationKey,
   deleteContentSearchHistory,
   copyContentSelection,
   downloadContentDocument,
+  enhanceContentDocument,
   findContentNeighbors,
   findContentDocumentSummary,
   findContentDocumentVersion,
@@ -83,6 +85,7 @@ import {
   updateContentDocumentAudioPlayback,
   setContentFolderCover,
   summarizeContentDocument,
+  translateContentDocument,
   type ContentDocument,
   type ContentDocumentSourceImage,
   type ContentDocumentVersion,
@@ -146,7 +149,8 @@ import { useAuthStore } from "@/state/auth";
 type SaveState = "local" | "dirty" | "saving" | "saved" | "error";
 type WorkspaceMode = "auto" | "folders" | "folder" | "editor" | "viewer";
 type FolderContentTab = "folders" | "documents" | "files";
-type ArchiveSheet = "create" | "folder" | "library" | "documents" | "folders" | "searchHistory" | "similar" | "enhance" | "summarize" | "summaryVersions" | "summaryReader" | "historyChooser" | "versions" | "audioVersions" | "documentActions" | "documentDetails" | "deleteDocument" | "scanSources" | "destination" | "destinationBrowser" | "folderActions" | "folderDetails" | "bulkActions" | "bulkDelete";
+type ArchiveSheet = "create" | "folder" | "library" | "documents" | "folders" | "searchHistory" | "similar" | "enhance" | "transform" | "summarize" | "summaryVersions" | "summaryReader" | "historyChooser" | "versions" | "audioVersions" | "documentActions" | "documentDetails" | "deleteDocument" | "scanSources" | "destination" | "destinationBrowser" | "folderActions" | "folderDetails" | "bulkActions" | "bulkDelete";
+type DocumentTransformation = "enhance" | "translate";
 type DestinationAction = "upload" | "move" | "copy";
 type UploadBatchItem = { id: string; mutationKey: string; file: File; name: string; mimeType: string; status: "pending" | "uploading" | "success" | "error"; error?: string };
 type ProcessingScanItem = { id: string; folderKey?: string; name: string };
@@ -180,26 +184,60 @@ function documentDisplayName(document: Pick<ContentDocument, "name" | "extension
   return `${document.name}.${document.extension}`;
 }
 
+function translationTargetFromPrompt(prompt: string) {
+  return /\bto\s+(.+?)(?=\s+while\b|\s+and\s+preserv|[.,]|$)/i.exec(prompt)?.[1]?.trim().slice(0, 100) || "English";
+}
+
 function plainSummaryText(value: string) {
   return value
+    .replace(/<(?:analysis|thinking|reasoning)>[\s\S]*?<\/(?:analysis|thinking|reasoning)>/gi, "")
     .replace(/^```(?:markdown|text)?\s*\n?/i, "")
     .replace(/\n?```$/i, "")
+    .replace(/```(?:markdown|text)?\s*([\s\S]*?)```/gi, "$1")
+    .replace(/\[([^\]]+)]\([^)]+\)/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
     .replace(/^[ \t]{0,3}#{1,6}[ \t]+/gm, "")
     .replace(/\*\*([^*]+)\*\*/g, "$1")
     .replace(/__([^_]+)__/g, "$1")
+    .replace(/^[ \t]*>[ \t]?/gm, "")
     .replace(/^[ \t]*(?:[-*•]|\d+[.)])[ \t]+/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
 
 function SummaryText({ value }: { value: string }) {
-  const text = plainSummaryText(value);
-  const sections = text.split(/\n{2,}/).map((block) => {
-    const [heading, ...body] = block.split("\n");
-    return { heading, body: body.join("\n").trim() };
+  const withoutReasoning = value.replace(/<(?:analysis|thinking|reasoning)>[\s\S]*?<\/(?:analysis|thinking|reasoning)>/gi, "").trim();
+  const candidates = [...withoutReasoning.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)].map((match) => match[1]!.trim());
+  const firstBrace = withoutReasoning.indexOf("{");
+  const lastBrace = withoutReasoning.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) candidates.push(withoutReasoning.slice(firstBrace, lastBrace + 1));
+  let sections: { heading?: string; body: string }[] | undefined;
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate) as { sections?: unknown };
+      if (!Array.isArray(parsed.sections)) continue;
+      const structured = parsed.sections.flatMap((section) => {
+        if (!section || typeof section !== "object") return [];
+        const { heading, body } = section as { heading?: unknown; body?: unknown };
+        if (typeof heading !== "string" || typeof body !== "string" || !heading.trim() || !body.trim()) return [];
+        return [{ heading: plainSummaryText(heading), body: plainSummaryText(body) }];
+      });
+      if (structured.length > 0) {
+        sections = structured;
+        break;
+      }
+    } catch {
+      // Older summaries may be plain text rather than structured JSON.
+    }
+  }
+  const text = plainSummaryText(withoutReasoning);
+  sections ??= text.split(/\n{2,}/).filter(Boolean).map((block) => {
+    const lines = block.split("\n").filter(Boolean);
+    return lines.length > 1 ? { heading: lines[0], body: lines.slice(1).join("\n").trim() } : { body: lines[0] ?? "" };
   });
-  if (!sections.some(({ body }) => body)) return <Text selectable style={styles.summaryText}>{text}</Text>;
+  if (sections.length === 0) return null;
   return <View style={styles.summarySections}>{sections.map(({ heading, body }, index) => <View key={`${heading}-${index}`} style={styles.summarySection}>
-    <Text style={styles.summarySectionTitle}>{heading}</Text>
+    {heading ? <Text style={styles.summarySectionTitle}>{heading}</Text> : null}
     {body ? <Text selectable style={styles.summaryText}>{body}</Text> : null}
   </View>)}</View>;
 }
@@ -257,7 +295,6 @@ export function KnowledgeWorkspace() {
   const [aiInstructionError, setAiInstructionError] = useState<string>();
   const [aiResponse, setAiResponse] = useState<PersonalAssistantResponse>();
   const [instructing, setInstructing] = useState(false);
-  const [coreOpenRequest, setCoreOpenRequest] = useState(0);
   const [uploading, setUploading] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
   const [scanBusy, setScanBusy] = useState(false);
@@ -267,6 +304,9 @@ export function KnowledgeWorkspace() {
   const [uploadBatch, setUploadBatch] = useState<UploadBatchItem[]>([]);
   const [uploadFolderKey, setUploadFolderKey] = useState<string>();
   const [versions, setVersions] = useState<ContentDocumentVersion[]>([]);
+  const [documentTransformation, setDocumentTransformation] = useState<DocumentTransformation>("enhance");
+  const [documentTransformationPrompt, setDocumentTransformationPrompt] = useState("");
+  const [pendingDocumentVersionLabel, setPendingDocumentVersionLabel] = useState<string>();
   const [loadingVersions, setLoadingVersions] = useState(false);
   const [versionActionKey, setVersionActionKey] = useState<string>();
   const [audioVersions, setAudioVersions] = useState<ContentDocumentAudioVersion[]>([]);
@@ -336,6 +376,7 @@ export function KnowledgeWorkspace() {
   const [rootSearchResults, setRootSearchResults] = useState<ContentSearchResponse>();
   const [rootSearching, setRootSearching] = useState(false);
   const [rootSearchRevision, setRootSearchRevision] = useState(0);
+  const [rootSearchFocusable, setRootSearchFocusable] = useState(true);
   const [folderSearchResults, setFolderSearchResults] = useState<ContentSearchResponse>();
   const [folderSearching, setFolderSearching] = useState(false);
   const [folderSearchRevision, setFolderSearchRevision] = useState(0);
@@ -364,7 +405,6 @@ export function KnowledgeWorkspace() {
   const navigationGeneration = useRef(0);
   const destinationGeneration = useRef(0);
   const sheetCloseTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const coreOpenTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const activeSheetRef = useRef<ArchiveSheet | undefined>(undefined);
   const sheetBackStack = useRef<ArchiveSheet[]>([]);
   const currentFolderKeyRef = useRef<string | undefined>(undefined);
@@ -373,6 +413,8 @@ export function KnowledgeWorkspace() {
   const selectionContentContextKey = useRef(contentContextKey);
   const instructionRequest = useRef<AbortController | undefined>(undefined);
   const rootSearchRequest = useRef<AbortController | undefined>(undefined);
+  const rootSearchInputRef = useRef<ComponentRef<typeof TextInput>>(null);
+  const rootSearchFocusTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const folderSearchRequest = useRef<AbortController | undefined>(undefined);
   const similarRequest = useRef<AbortController | undefined>(undefined);
   const similarGeneration = useRef(0);
@@ -406,6 +448,9 @@ export function KnowledgeWorkspace() {
   const bulkMutationLocked = useRef(false);
   const folderCoverRequests = useRef(new Map<string, number>());
   const longPressedItem = useRef<string | undefined>(undefined);
+  const pendingNavigationAction = useRef<Parameters<typeof navigation.dispatch>[0] | undefined>(undefined);
+  const pendingEditorExit = useRef(false);
+  const allowNavigation = useRef(false);
   const contentContextKeyRef = useRef(contentContextKey);
   const folderStackRef = useRef(folderStack);
   const workspaceModeRef = useRef(workspaceMode);
@@ -462,7 +507,8 @@ export function KnowledgeWorkspace() {
   const destinationIsBlocked = typeof destinationTargetKey === "string" && destinationBlockedFolderKeys.includes(destinationTargetKey);
   const showArchiveRoot = !libraryQuery.trim() || "archive".includes(libraryQuery.trim().toLowerCase());
   const narrationDuration = audioTimelineDuration(narrationManifest);
-  const narrationElapsed = narrationScrubValue ?? audioTimelinePosition(narrationManifest, narrationActiveIndex, narrationAudio.currentTime);
+  const narrationPlayerElapsed = audioTimelinePosition(narrationManifest, narrationActiveIndex, narrationAudio.currentTime);
+  const narrationElapsed = narrationScrubValue ?? narrationPlayerElapsed;
 
   const updateNarrationState = (state: typeof narrationState) => {
     narrationStateRef.current = state;
@@ -566,9 +612,19 @@ export function KnowledgeWorkspace() {
   const seekNarration = (seconds: number) => {
     if (narrationChunks.current.length === 0) return;
     const target = resolveAudioTimelinePosition(narrationChunks.current, seconds);
+    const playbackPositionMs = Math.round(Math.min(audioTimelineDuration(narrationChunks.current), Math.max(0, seconds)) * 1_000);
+    const audioVersionKey = narrationAudioVersionKey.current;
+    const documentKey = narrationDocumentKey.current;
+    if (audioVersionKey && documentKey) {
+      persistedNarrationPositionMs.current = playbackPositionMs;
+      void queueAudioPlaybackUpdate(audioVersionKey, documentKey, playbackPositionMs).catch(() => setNarrationError("Playback progress could not be saved."));
+    }
     const shouldPlay = narrationStateRef.current === "playing";
     if (target.index === narrationChunkIndex.current) {
-      void narrationPlayer.seekTo(target.seconds);
+      void narrationPlayer.seekTo(target.seconds).catch(() => {
+        setNarrationScrubValue(undefined);
+        setNarrationError("The audio position could not be changed.");
+      });
       if (!shouldPlay) updateNarrationState("paused");
       return;
     }
@@ -605,8 +661,18 @@ export function KnowledgeWorkspace() {
     lastFinishedNarrationChunk.current = -1;
     void narrationPlayer.seekTo(pending.seconds).then(() => {
       if (pending.play) narrationPlayer.play();
+    }).catch(() => {
+      setNarrationScrubValue(undefined);
+      setNarrationError("The audio position could not be changed.");
     });
   }, [narrationAudio.isLoaded, narrationPlayer]);
+
+  useEffect(() => {
+    if (narrationScrubValue === undefined || pendingNarrationSeek.current) return;
+    if (Math.abs(narrationPlayerElapsed - narrationScrubValue) > 0.75) return;
+    const timeout = setTimeout(() => setNarrationScrubValue(undefined), 0);
+    return () => clearTimeout(timeout);
+  }, [narrationPlayerElapsed, narrationScrubValue]);
 
   useEffect(() => {
     if (!narrationAudio.didJustFinish) return;
@@ -647,6 +713,8 @@ export function KnowledgeWorkspace() {
   }, [selectedDocument?.key]);
 
   const openSheet = (sheet: ArchiveSheet) => {
+    rootSearchInputRef.current?.blur();
+    Keyboard.dismiss();
     if (sheetCloseTimer.current) clearTimeout(sheetCloseTimer.current);
     setSheetError(undefined);
     sheetBackStack.current = [];
@@ -684,6 +752,8 @@ export function KnowledgeWorkspace() {
   };
 
   const closeSheet = (preserveSelection = false) => {
+    rootSearchInputRef.current?.blur();
+    Keyboard.dismiss();
     if (activeSheetRef.current === "summaryReader" && narrationStatus === "SUMMARY AUDIO") stopNarration();
     if (activeSheetRef.current === "searchHistory") historyGeneration.current += 1;
     if (activeSheetRef.current === "similar") {
@@ -716,18 +786,48 @@ export function KnowledgeWorkspace() {
 
   useEffect(() => () => {
     if (sheetCloseTimer.current) clearTimeout(sheetCloseTimer.current);
-    if (coreOpenTimer.current) clearTimeout(coreOpenTimer.current);
+    if (rootSearchFocusTimer.current) clearTimeout(rootSearchFocusTimer.current);
     instructionRequest.current?.abort();
     summaryRequest.current?.abort();
     similarRequest.current?.abort();
     previewFileRef.current?.delete();
   }, []);
 
+  function completeEditorExit() {
+    Keyboard.dismiss();
+    persistNarrationPosition();
+    stopNarration();
+    setDocumentSearchQuery("");
+    const nextMode = folderStackRef.current.length ? "folder" : "folders";
+    workspaceModeRef.current = nextMode;
+    setWorkspaceMode(nextMode);
+  }
+
   useEffect(() => navigation.addListener("beforeRemove", (event) => {
+    if (allowNavigation.current) {
+      allowNavigation.current = false;
+      return;
+    }
     if (!hasContentContext || (saveState !== "dirty" && saveState !== "saving")) return;
     event.preventDefault();
-    setError("Wait for the current document to save before leaving.");
+    pendingNavigationAction.current = event.data.action;
+    saveImmediately.current = true;
+    setSaveRetry((current) => current + 1);
   }), [hasContentContext, navigation, saveState]);
+
+  useEffect(() => {
+    if (saveState !== "saved" && saveState !== "local") return;
+    if (pendingEditorExit.current) {
+      pendingEditorExit.current = false;
+      completeEditorExit();
+    }
+    if (pendingNavigationAction.current) {
+      const action = pendingNavigationAction.current;
+      pendingNavigationAction.current = undefined;
+      allowNavigation.current = true;
+      navigation.dispatch(action);
+    }
+  }, [navigation, saveState]);
 
   const loadLocation = async (folderKey?: string, refresh = false) => {
     const location = await (refresh
@@ -1117,21 +1217,56 @@ export function KnowledgeWorkspace() {
     pushSheet("summaryReader");
   };
 
-  const openCoreConfirmation = (prompt: string) => {
-    setAiInstruction(prompt);
-    setAiInstructionError(undefined);
-    setAiResponse(undefined);
-    closeSheet();
-    if (coreOpenTimer.current) clearTimeout(coreOpenTimer.current);
-    coreOpenTimer.current = setTimeout(() => setCoreOpenRequest((current) => current + 1), 240);
+  const openDocumentTransformation = (action: DocumentTransformation) => {
+    setDocumentTransformation(action);
+    setDocumentTransformationPrompt(action === "enhance"
+      ? "Correct wording, grammar, punctuation, and spelling while preserving the document's meaning, facts, tone, and structure."
+      : "Translate this document to English while preserving its meaning, facts, tone, and structure.");
+    pushSheet("transform");
   };
 
-  const confirmEnhancementWithCore = () => {
-    openCoreConfirmation("Enhance this document. Correct wording, grammar, punctuation, and spelling mistakes while preserving its meaning, facts, tone, and structure.");
-  };
-
-  const confirmTranslationWithCore = () => {
-    openCoreConfirmation("Translate this document to English while preserving its meaning and structure.");
+  const generateDocumentTransformation = async () => {
+    const action = documentTransformation;
+    const documentKey = documentKeyRef.current;
+    const prompt = documentTransformationPrompt.trim();
+    const expectedUpdatedAt = updatedAtRef.current;
+    const session = editorSession.current;
+    if (!documentKey || !prompt || !expectedUpdatedAt || saveState !== "saved" || documentActionLoading) return;
+    const pendingLabel = action === "enhance" ? "Enhancing version..." : "Translating version...";
+    setDocumentActionLoading(action);
+    setPendingDocumentVersionLabel(pendingLabel);
+    setSheetError(undefined);
+    pushSheet("versions");
+    setVersions([]);
+    setLoadingVersions(false);
+    try {
+      const targetLanguage = action === "translate" ? translationTargetFromPrompt(prompt) : undefined;
+      const generated = action === "enhance"
+        ? await enhanceContentDocument(documentKey, prompt, "preview")
+        : await translateContentDocument(documentKey, targetLanguage!, prompt, "preview");
+      if (session !== editorSession.current || documentKeyRef.current !== documentKey || updatedAtRef.current !== expectedUpdatedAt) throw new Error("The document changed while the new version was generating.");
+      const saved = await saveContentDocument(documentKey, generated.text, expectedUpdatedAt, false);
+      const version = await createContentDocumentVersion(documentKey, action === "enhance" ? "Enhanced version" : `${targetLanguage} translation`);
+      applyRemoteDocument({ ...saved, content: generated.text });
+      const history = await listContentDocumentVersions(documentKey).catch(() => [version]);
+      setPendingDocumentVersionLabel(undefined);
+      setVersions([version, ...history.filter(({ key }) => key !== version.key)]);
+      await invalidateContentDocumentTopics(queryClient, contentContext, documentKey);
+      await invalidateContentLocations(queryClient, contentContext, [currentFolder?.key]);
+      await loadLocation(currentFolder?.key);
+      if (activeSheetRef.current === "versions") closeSheet();
+      workspaceModeRef.current = "editor";
+      setWorkspaceMode("editor");
+      setEditorEditing(true);
+      showToast({ title: action === "enhance" ? "Enhanced version ready" : "Translated version ready" });
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : action === "enhance" ? "The document could not be enhanced." : "The document could not be translated.";
+      if (activeSheetRef.current === "versions") setSheetError(message);
+      else setError(message);
+    } finally {
+      setPendingDocumentVersionLabel(undefined);
+      setDocumentActionLoading(undefined);
+    }
   };
 
   const runNoteInstruction = async () => {
@@ -1994,16 +2129,12 @@ export function KnowledgeWorkspace() {
 
   const leaveEditor = () => {
     if (hasContentContext && (dirty.current || saveInFlight.current)) {
-      setError("Wait for the current document to save before leaving.");
+      pendingEditorExit.current = true;
+      saveImmediately.current = true;
+      setSaveRetry((current) => current + 1);
       return;
     }
-    Keyboard.dismiss();
-    persistNarrationPosition();
-    stopNarration();
-    setDocumentSearchQuery("");
-    const nextMode = folderStack.length ? "folder" : "folders";
-    workspaceModeRef.current = nextMode;
-    setWorkspaceMode(nextMode);
+    completeEditorExit();
   };
 
   const leaveFileViewer = () => {
@@ -3246,6 +3377,14 @@ export function KnowledgeWorkspace() {
 
   function mutationFooter() {
     const close = (disabled: boolean) => <Button disabled={disabled} onPress={() => closeSheet()} size="lg" variant="secondary">Close</Button>;
+    if (activeSheet === "transform") return <>
+      <Button disabled={!documentTransformationPrompt.trim() || !documentKeyRef.current || saveState !== "saved"} onPress={() => void generateDocumentTransformation()} size="lg" variant="primary">{documentTransformation === "enhance" ? "Enhance" : "Translate"}</Button>
+      {close(false)}
+    </>;
+    if (activeSheet === "versions") return <>
+      {documentActionLoading === "enhance" ? <LoadingText text="Enhancing document. This might take a while..." /> : documentActionLoading === "translate" ? <LoadingText text="Translating document. This might take a while..." /> : null}
+      {close(Boolean(documentActionLoading))}
+    </>;
     if (activeSheet === "summarize") return <>
       {sheetError ? <Button disabled={loadingSummaryTopics || generatingSummary} loading={loadingSummaryTopics} onPress={() => void loadSummaryTopics()} size="lg" variant="primary">Retry</Button> : null}
       {close(false)}
@@ -3309,7 +3448,7 @@ export function KnowledgeWorkspace() {
 
   const scrubSelectedAudioVersion = (seconds: number) => {
     const version = audioVersions.find((item) => item.key === selectedAudioVersionKey);
-    if (!version) {
+    if (!version || version.key === narrationAudioVersionKey.current) {
       seekNarration(seconds);
       return;
     }
@@ -3334,7 +3473,7 @@ export function KnowledgeWorkspace() {
           ? <View accessibilityLabel="Generating summary audio" accessibilityRole="progressbar" style={styles.summaryNarrationSpinner}><Spinner size="small" variant="muted" /></View>
           : <Button accessibilityLabel={narrationState === "playing" ? "Pause summary audio" : "Play summary audio"} contentMode="raw" disabled={narrationManifest.length === 0} onPress={controlSelectedAudioVersion} size="sm" variant="icon">{narrationState === "playing" ? <PauseIcon size="sm" /> : <PlayIcon size="sm" />}</Button>}
         <Text style={styles.narrationTime}>{formatAudioTime(generatingSummaryAudio ? 0 : narrationElapsed)}</Text>
-        <Slider accessibilityLabel="Summary audio progress" disabled={generatingSummaryAudio || narrationDuration <= 0} max={Math.max(1, generatingSummaryAudio ? 0 : narrationDuration)} onSlidingComplete={(value) => { setNarrationScrubValue(undefined); scrubSelectedAudioVersion(value); }} onValueChange={setNarrationScrubValue} style={styles.narrationSlider} value={generatingSummaryAudio ? 0 : Math.min(narrationElapsed, narrationDuration)} />
+        <Slider accessibilityLabel="Summary audio progress" disabled={generatingSummaryAudio || narrationDuration <= 0} max={Math.max(1, generatingSummaryAudio ? 0 : narrationDuration)} onSlidingComplete={(value) => { setNarrationScrubValue(value); scrubSelectedAudioVersion(value); }} onValueChange={setNarrationScrubValue} style={styles.narrationSlider} value={generatingSummaryAudio ? 0 : Math.min(narrationElapsed, narrationDuration)} />
         <Text style={styles.narrationTime}>{formatAudioTime(generatingSummaryAudio ? 0 : narrationDuration)}</Text>
       </View>
       {!generatingSummaryAudio && narrationError ? <Text accessibilityRole="alert" numberOfLines={2} style={styles.narrationError}>{narrationError}</Text> : null}
@@ -3354,7 +3493,7 @@ export function KnowledgeWorkspace() {
           ? <View accessibilityLabel="Generating document audio" accessibilityRole="progressbar" style={styles.summaryNarrationSpinner}><Spinner size="small" variant="muted" /></View>
           : <Button accessibilityLabel={narrationState === "playing" ? "Pause listening" : "Play audio"} contentMode="raw" disabled={narrationManifest.length === 0} loading={narrationManifest.length === 0 && narrationState !== "error"} onPress={controlSelectedAudioVersion} size="sm" variant="icon">{narrationState === "playing" ? <PauseIcon size="sm" /> : <PlayIcon size="sm" />}</Button>}
         <Text style={styles.narrationTime}>{formatAudioTime(generatingAudioVersion ? 0 : narrationElapsed)}</Text>
-        <Slider accessibilityLabel="Audio progress" disabled={generatingAudioVersion || narrationDuration <= 0} max={Math.max(1, generatingAudioVersion ? 0 : narrationDuration)} onSlidingComplete={(value) => { setNarrationScrubValue(undefined); scrubSelectedAudioVersion(value); }} onValueChange={setNarrationScrubValue} style={styles.narrationSlider} value={generatingAudioVersion ? 0 : Math.min(narrationElapsed, narrationDuration)} />
+        <Slider accessibilityLabel="Audio progress" disabled={generatingAudioVersion || narrationDuration <= 0} max={Math.max(1, generatingAudioVersion ? 0 : narrationDuration)} onSlidingComplete={(value) => { setNarrationScrubValue(value); scrubSelectedAudioVersion(value); }} onValueChange={setNarrationScrubValue} style={styles.narrationSlider} value={generatingAudioVersion ? 0 : Math.min(narrationElapsed, narrationDuration)} />
         <Text style={styles.narrationTime}>{formatAudioTime(generatingAudioVersion ? 0 : narrationDuration)}</Text>
       </View>
       {!generatingAudioVersion && narrationError ? <Text accessibilityRole="alert" numberOfLines={2} style={styles.narrationError}>{narrationError}</Text> : null}
@@ -3393,7 +3532,7 @@ export function KnowledgeWorkspace() {
             <View style={styles.rootActions}>
               <View style={styles.rootSearch}>
                 <SearchIcon size="sm" variant="muted" />
-                <TextInput accessibilityLabel="Search all Archive folders, documents, and files" onChangeText={setRootSearchQuery} placeholder="Search..." style={styles.rootSearchInput} value={rootSearchQuery} />
+                <TextInput accessibilityLabel="Search all Archive folders, documents, and files" editable={rootSearchFocusable} focusable={rootSearchFocusable} onChangeText={setRootSearchQuery} placeholder="Search..." ref={rootSearchInputRef} style={styles.rootSearchInput} value={rootSearchQuery} />
                 {rootSearchQuery.trim() ? <Button accessibilityLabel="Clear Archive search" contentMode="raw" onPress={() => setRootSearchQuery("")} size="xs" variant="icon"><CloseIcon size="sm" /></Button> : null}
               </View>
               <Button accessibilityLabel="Open Archive search history" contentMode="raw" disabled={!hasContentContext} onPress={() => void openSearchHistory()} size="sm" style={styles.searchHistoryButton} variant="icon"><ClockIcon size="sm" /></Button>
@@ -3606,6 +3745,17 @@ export function KnowledgeWorkspace() {
         </>}
         onChangeText={(value) => { setAiInstruction(value); if (aiInstructionError) setAiInstructionError(undefined); }}
         onFocusChange={(focused) => {
+          if (rootSearchFocusTimer.current) clearTimeout(rootSearchFocusTimer.current);
+          rootSearchInputRef.current?.blur();
+          Keyboard.dismiss();
+          setRootSearchFocusable(false);
+          if (!focused) {
+            rootSearchFocusTimer.current = setTimeout(() => {
+              rootSearchInputRef.current?.blur();
+              Keyboard.dismiss();
+              setRootSearchFocusable(true);
+            }, 300);
+          }
           setAiInputFocused(focused);
           if (!focused) {
             setAiResponse(undefined);
@@ -3614,22 +3764,21 @@ export function KnowledgeWorkspace() {
         }}
         onLeadingPress={openEnhanceSheet}
         onSubmit={() => void runNoteInstruction()}
-        openRequest={coreOpenRequest}
         prompts={CORE_PROMPTS}
         sendIcon={<SendIcon size="sm" />}
         value={aiInstruction}
       />
 
       <BottomSheet
-        description={activeSheet === "create" ? "Choose what to add to the current folder." : activeSheet === "versions" ? "Choose a version of this document to open or download." : activeSheet === "audioVersions" ? "Listen to your saved recordings." : activeSheet === "summarize" ? "Find the document's primary topics, then choose one to summarize." : activeSheet === "summaryVersions" ? "View saved summaries or create a new one." : undefined}
+        description={activeSheet === "create" ? "Choose what to add to the current folder." : activeSheet === "transform" ? documentTransformation === "enhance" ? "Review or adjust how this document should be enhanced." : "Review or adjust how this document should be translated." : activeSheet === "versions" ? "Choose a version of this document to open or download." : activeSheet === "audioVersions" ? "Listen to your saved recordings." : activeSheet === "summarize" ? `Choose one of the ${selectedDocument?.extension ? "file's" : "document's"} primary topics to summarize.` : activeSheet === "summaryVersions" ? "View saved summaries or create a new one." : undefined}
         dismissible={!versionActionKey && !destinationLoading && !documentActionLoading && !bulkLoading}
         footer={mutationFooter()}
         hideHeading={activeSheet === "create" || activeSheet === "documentActions" || activeSheet === "enhance" || activeSheet === "historyChooser" || activeSheet === "bulkActions" || compactDelete}
-        mutation={activeSheet === "documents" || activeSheet === "folder" || activeSheet === "folders" || activeSheet === "similar" || activeSheet === "versions" || activeSheet === "audioVersions" || activeSheet === "summarize" || activeSheet === "summaryVersions" || activeSheet === "summaryReader" || activeSheet === "scanSources" || activeSheet === "destinationBrowser" || activeSheet === "folderDetails" || activeSheet === "documentDetails"}
+        mutation={activeSheet === "documents" || activeSheet === "folder" || activeSheet === "folders" || activeSheet === "similar" || activeSheet === "transform" || activeSheet === "versions" || activeSheet === "audioVersions" || activeSheet === "summarize" || activeSheet === "summaryVersions" || activeSheet === "summaryReader" || activeSheet === "scanSources" || activeSheet === "destinationBrowser" || activeSheet === "folderDetails" || activeSheet === "documentDetails"}
         onOpenChange={(open) => { if (!open) closeSheet(); }}
         open={sheetOpen}
         tall={activeSheet === "library" || activeSheet === "documents" || activeSheet === "folders" || activeSheet === "searchHistory" || activeSheet === "scanSources" || activeSheet === "versions" || activeSheet === "audioVersions"}
-        title={activeSheet === "enhance" ? "AI actions" : activeSheet === "summarize" ? "Summarize document" : activeSheet === "summaryVersions" ? "Summary versions" : activeSheet === "summaryReader" ? selectedSummary?.topic ?? summaryReaderTopic ?? `Summary ${selectedSummary?.version ?? ""}` : activeSheet === "historyChooser" ? "Document history" : activeSheet === "searchHistory" ? "Search history" : activeSheet === "similar" ? "Archive" : activeSheet === "versions" ? "Document versions" : activeSheet === "audioVersions" ? "Audio versions" : activeSheet === "scanSources" ? "Scanned pages" : activeSheet === "deleteDocument" ? `Delete ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "bulkDelete" ? "Delete selected items" : activeSheet === "folder" ? "Create folder" : activeSheet === "documents" ? "Documents and files" : activeSheet === "folders" ? "Folders" : activeSheet === "destinationBrowser" ? destinationAction === "upload" ? destinationFolder?.name ?? "Archive" : destinationAction === "move" ? "Move to folder" : "Copy to folder" : activeSheet === "library" ? "Browse Archive" : activeSheet === "documentActions" ? selectedDocument?.name ?? "Document actions" : activeSheet === "documentDetails" ? `Edit ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "destination" ? destinationAction === "upload" ? "Upload files" : "Choose destination" : activeSheet === "folderActions" ? selectedFolder?.name ?? "Folder actions" : activeSheet === "folderDetails" ? "Edit folder" : "New in Archive"}
+        title={activeSheet === "enhance" ? "AI actions" : activeSheet === "transform" ? documentTransformation === "enhance" ? "Enhance document" : "Translate document" : activeSheet === "summarize" ? "Summarize document" : activeSheet === "summaryVersions" ? "Summary versions" : activeSheet === "summaryReader" ? selectedSummary?.topic ?? summaryReaderTopic ?? `Summary ${selectedSummary?.version ?? ""}` : activeSheet === "historyChooser" ? "Document history" : activeSheet === "searchHistory" ? "Search history" : activeSheet === "similar" ? "Archive" : activeSheet === "versions" ? "Document versions" : activeSheet === "audioVersions" ? "Audio versions" : activeSheet === "scanSources" ? "Scanned pages" : activeSheet === "deleteDocument" ? `Delete ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "bulkDelete" ? "Delete selected items" : activeSheet === "folder" ? "Create folder" : activeSheet === "documents" ? "Documents and files" : activeSheet === "folders" ? "Folders" : activeSheet === "destinationBrowser" ? destinationAction === "upload" ? destinationFolder?.name ?? "Archive" : destinationAction === "move" ? "Move to folder" : "Copy to folder" : activeSheet === "library" ? "Browse Archive" : activeSheet === "documentActions" ? selectedDocument?.name ?? "Document actions" : activeSheet === "documentDetails" ? `Edit ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "destination" ? destinationAction === "upload" ? "Upload files" : "Choose destination" : activeSheet === "folderActions" ? selectedFolder?.name ?? "Folder actions" : activeSheet === "folderDetails" ? "Edit folder" : "New in Archive"}
       >
         {sheetError ? <Text accessibilityRole="alert" style={styles.notice}>{sheetError}</Text> : null}
         {compactDelete ? <View style={styles.compactSheetActions}>
@@ -3803,14 +3952,16 @@ export function KnowledgeWorkspace() {
         {activeSheet === "enhance" ? (
           <View style={styles.enhancePanel}>
             <Button disabled={!documentKeyRef.current || saveState !== "saved"} onPress={openSummarizeSheet} size="lg" variant="secondary">Summarize document</Button>
-            <Button onPress={confirmEnhancementWithCore} size="lg" variant="secondary">Enhance document</Button>
-            <Button disabled={!documentKeyRef.current || saveState !== "saved"} onPress={confirmTranslationWithCore} size="lg" variant="secondary">Translate document</Button>
+            <Button disabled={!documentKeyRef.current || saveState !== "saved"} onPress={() => openDocumentTransformation("enhance")} size="lg" variant="secondary">Enhance document</Button>
+            <Button disabled={!documentKeyRef.current || saveState !== "saved"} onPress={() => openDocumentTransformation("translate")} size="lg" variant="secondary">Translate document</Button>
           </View>
         ) : null}
+        {activeSheet === "transform" ? <TextInput accessibilityLabel={`${documentTransformation === "enhance" ? "Enhancement" : "Translation"} prompt`} maxLength={8_000} multiline onChangeText={setDocumentTransformationPrompt} style={styles.transformationPrompt} textAlignVertical="top" value={documentTransformationPrompt} /> : null}
         {activeSheet === "versions" ? (
           <View style={styles.versionPanel}>
-            {loadingVersions ? <Text style={styles.empty}>Loading version history...</Text> : null}
-            {!loadingVersions && versions.length === 0 ? <Text style={styles.empty}>No previous versions yet.</Text> : null}
+            {loadingVersions && !pendingDocumentVersionLabel ? <Text style={styles.empty}>Loading version history...</Text> : null}
+            {!loadingVersions && !pendingDocumentVersionLabel && versions.length === 0 ? <Text style={styles.empty}>No previous versions yet.</Text> : null}
+            {pendingDocumentVersionLabel ? <Button accessibilityLabel={pendingDocumentVersionLabel} accessibilityState={{ busy: true }} contentMode="raw" disabled size="lg" style={styles.versionMain} variant="secondary"><ClockIcon size="md" variant="accent" /><View style={styles.resultText}><Text style={styles.rowTitle}>{pendingDocumentVersionLabel}</Text></View><Spinner size="small" variant="muted" /></Button> : null}
             {versions.map((version) => (
               <View key={version.key} style={styles.versionRow}>
                 <Button contentMode="raw" disabled={Boolean(versionActionKey)} loading={versionActionKey === version.key} onPress={() => void loadVersionIntoEditor(version)} size="lg" style={styles.versionMain} variant="secondary"><ClockIcon size="md" variant="accent" /><View style={styles.resultText}><Text style={styles.rowTitle}>{version.label ?? `Version ${version.version}`}</Text><Text style={styles.rowSubtitle}>{new Date(version.createdAt).toLocaleString()}</Text></View></Button>
@@ -3981,7 +4132,7 @@ const styles = StyleSheet.create({
   aiResponse: { paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, gap: 3, borderRadius: radii.md, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panel },
   aiResponseText: { color: palette.text, fontFamily: fonts.regular, fontSize: 14, lineHeight: 20 },
   aiResponseSources: { color: palette.muted, fontFamily: fonts.regular, fontSize: 11, lineHeight: 16 },
-  narrationPlayer: { marginHorizontal: 4, marginBottom: spacing.xs, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, gap: spacing.xs, borderRadius: radii.lg, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised },
+  narrationPlayer: { marginHorizontal: 4, marginBottom: spacing.xs, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, gap: spacing.xs, borderRadius: radii.lg, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.voidBlack },
   narrationHeading: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   narrationTitleBlock: { flex: 1, gap: 2 },
   narrationTitle: { color: palette.silver50, fontFamily: fonts.medium, fontSize: 13 },
@@ -3991,6 +4142,7 @@ const styles = StyleSheet.create({
   narrationError: { color: "#D98B8B", fontFamily: fonts.regular, fontSize: 10, lineHeight: 14 },
   summaryNarrationSpinner: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
   enhancePanel: { gap: 18 },
+  transformationPrompt: { flex: 1, minHeight: 220 },
   enhanceIdentity: { padding: 14, flexDirection: "row", alignItems: "center", gap: 12, borderRadius: radii.md, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panel },
   enhanceCopy: { flex: 1, gap: 4 },
   versionPanel: { gap: 10 },

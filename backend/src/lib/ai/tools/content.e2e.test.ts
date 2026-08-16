@@ -195,7 +195,6 @@ suite('Content live E2E', () => {
     outputSchemas['folder.list']!.parse(agentList);
     covered.add('folder.list');
 
-    expect((await call('enhance', { content: 'Improve teh note.' })).content).toContain('enhance');
     const bookInput = { scopeKey, topic: 'Deterministic systems', goal: 'Test the complete runtime', audience: 'Engineers', tone: 'Direct', length: 'short', language: 'English' } as const;
     const book = await call('book.create-context', bookInput);
     await call('book.write', { ...bookInput, bookKey: book.bookKey });
@@ -348,6 +347,10 @@ suite('Content live E2E', () => {
     const summaryAudio = await call('document.summary.audio.generate', { summaryKeys: [summaryKey], voice: 'Matthew' });
     expect(summaryAudio.results[0].data.audio).toMatchObject({ summaryKey, voice: 'Matthew', mimeType: 'audio/mpeg' });
     expect((await call('document.topics', { documentKey })).topics).toEqual(['Deterministic systems', 'Archive']);
+    const enhancementPreview = await call('document.enhance', { documentKeys: [documentKey], mode: 'preview' });
+    expect(enhancementPreview.results[0].data.text).toContain('enhance');
+    const enhancementReplace = await call('document.enhance', { documentKeys: [documentKey], mode: 'replace', idempotencyKey: `enhance-replace-${organizationKey}` });
+    expect(enhancementReplace.results[0].data.persistedDocumentKey).toBe(documentKey);
     const translationPreview = await call('document.translate', { documentKeys: [documentKey], targetLanguage: 'French', mode: 'preview' });
     expect(translationPreview.results[0].data.text).toContain('deterministic');
     const translationCopy = await call('document.translate', { documentKeys: [documentKey], targetLanguage: 'French', mode: 'copy', idempotencyKey: `translate-copy-${organizationKey}` });

@@ -11,10 +11,9 @@ import {
 } from './index';
 
 const expectedNames = [
-  'enhance',
   'book.create-context', 'book.write',
   'folder.create', 'folder.find', 'folder.list', 'folder.update', 'folder.rename', 'folder.move', 'folder.copy', 'folder.archive', 'folder.restore', 'folder.delete',
-  'document.parse', 'document.scan', 'document.create', 'document.find', 'document.list', 'document.read', 'document.list-audio-versions', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.list-summaries', 'document.find-summary', 'document.summary.audio.generate', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.download', 'document.export', 'document.share', 'document.unshare', 'document.list-shares', 'document.create-version', 'document.find-version', 'document.list-versions', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.topics', 'document.translate', 'document.rewrite',
+  'document.parse', 'document.scan', 'document.create', 'document.find', 'document.list', 'document.read', 'document.list-audio-versions', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.list-summaries', 'document.find-summary', 'document.summary.audio.generate', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.download', 'document.export', 'document.share', 'document.unshare', 'document.list-shares', 'document.create-version', 'document.find-version', 'document.list-versions', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.topics', 'document.enhance', 'document.translate', 'document.rewrite',
   'scope.document.search', 'scope.content.search', 'scope.content.search-history', 'scope.content.search-history.delete', 'content.neighbors', 'organization.document.search',
 ] as const;
 
@@ -24,7 +23,7 @@ describe('Content tool registry', () => {
     expect(CONTENT_TOOL_NAMES).toHaveLength(52);
     for (const name of CONTENT_TOOL_NAMES) {
       expect(name).toMatch(/^[a-z]+(?:[.-][a-z]+)*$/);
-      if (name !== 'enhance') expect(name).toContain('.');
+      expect(name).toContain('.');
       expect(isContentToolName(name)).toBe(true);
     }
     expect(isContentToolName('document-create-version')).toBe(false);
@@ -55,6 +54,7 @@ describe('Content input contracts', () => {
     expect(contentToolInputSchemas['document.download'].parse({ documentKeys: [key] }).format).toBe('original');
     expect(contentToolInputSchemas['document.download'].parse({ documentKeys: [key], format: 'html' }).format).toBe('html');
     expect(contentToolInputSchemas['document.translate'].parse({ documentKeys: [key], targetLanguage: 'French' })).toMatchObject({ mode: 'preview', atomic: false });
+    expect(contentToolInputSchemas['document.enhance'].parse({ documentKeys: [key] })).toMatchObject({ mode: 'preview', atomic: false });
     expect(contentToolInputSchemas['document.rewrite'].parse({ rewrites: [{ documentKey: key, instruction: 'Clarify' }] })).toMatchObject({ atomic: false, rewrites: [{ mode: 'preview' }] });
     expect(contentToolInputSchemas['document.restore-version'].parse({ restores: [{ documentKey: key, versionKey: newId() }] })).toMatchObject({ atomic: false, restores: [{ createBackupVersion: true }] });
     expect(contentToolInputSchemas['document.copy'].parse({ copies: [{ documentKey: key, targetScopeKey: newId(), targetFolderKey: newId() }] })).toMatchObject({ atomic: false, copies: [{ includeVersions: false, includeShares: false }] });
@@ -71,8 +71,8 @@ describe('Content input contracts', () => {
   });
 
   test('rejects unknown properties and invalid enum, score, and range values', () => {
-    expect(contentToolInputSchemas.enhance.parse({ content: 'Fix teh wording.' })).toEqual({ content: 'Fix teh wording.' });
-    expect(() => contentToolInputSchemas.enhance.parse({ content: 'Text', instruction: 'Change meaning' })).toThrow();
+    expect(contentToolInputSchemas['document.enhance'].parse({ documentKeys: [key] })).toMatchObject({ documentKeys: [key], mode: 'preview' });
+    expect(() => contentToolInputSchemas['document.enhance'].parse({ documentKeys: [key], surprise: true })).toThrow();
     expect(() => contentToolInputSchemas['folder.find'].parse({ folderKeys: [key], surprise: true })).toThrow();
     expect(() => contentToolInputSchemas['document.download'].parse({ documentKeys: [key], format: 'pdf' })).toThrow();
     expect(() => contentToolInputSchemas['scope.document.search'].parse({ scopeKey: key, query: 'roadmap', minimumScore: 1.1 })).toThrow();
@@ -102,7 +102,7 @@ describe('Content input contracts', () => {
       ['document.delete', { documentKeys: [] }], ['document.download', { documentKeys: [] }], ['document.export', { exports: [] }], ['document.share', { shares: [] }],
       ['document.list-shares', { documentKeys: [] }], ['document.create-version', { documentKeys: [] }], ['document.find-version', { versionKeys: [] }],
       ['document.list-versions', { documentKeys: [] }], ['document.list-summaries', { documentKeys: [] }], ['document.find-summary', { summaryKeys: [] }], ['document.summary.audio.generate', { summaryKeys: [] }], ['document.restore-version', { restores: [] }], ['document.delete-version', { versionKeys: [] }],
-      ['document.summarize', { documentKeys: [] }], ['document.translate', { documentKeys: [], targetLanguage: 'French' }], ['document.rewrite', { rewrites: [] }],
+      ['document.summarize', { documentKeys: [] }], ['document.enhance', { documentKeys: [] }], ['document.translate', { documentKeys: [], targetLanguage: 'French' }], ['document.rewrite', { rewrites: [] }],
     ];
     for (const [name, input] of invalid) expect(contentToolInputSchemas[name].safeParse(input).success, name).toBe(false);
   });
@@ -143,7 +143,7 @@ describe('Content input contracts', () => {
       ['document.restore-version', { restores: [{ documentKey: key, versionKey: newId() }] }],
       ['document.delete-version', { versionKeys: [key] }], ['document.summarize', { documentKeys: [key] }],
       ['document.summary.audio.generate', { summaryKeys: [key] }],
-      ['document.translate', { documentKeys: [key], targetLanguage: 'French' }],
+      ['document.enhance', { documentKeys: [key] }], ['document.translate', { documentKeys: [key], targetLanguage: 'French' }],
       ['document.rewrite', { rewrites: [{ documentKey: key, instruction: 'Improve' }] }],
       ['document.read', { documentKeys: [key], mode: 'audio', persistAudio: true }],
     ];

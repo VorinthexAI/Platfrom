@@ -286,8 +286,18 @@ async function callContentTool<T>(tool: string, input: Record<string, unknown>, 
   }
 }
 
-export function enhanceContent(content: string, signal?: AbortSignal) {
-  return callContentTool<{ content: string }>("enhance", { content }, signal);
+export async function enhanceContentDocument(documentKey: string, instruction?: string, mode: "preview" | "replace" = "preview") {
+  const data = await callContentTool<{
+    results: { success: boolean; data?: { text: string; persistedDocumentKey?: string }; error?: { message: string } }[];
+  }>("document.enhance", {
+    documentKeys: [documentKey],
+    instruction,
+    mode,
+    ...(mode === "replace" ? { idempotencyKey: createContentMutationKey() } : {}),
+  });
+  const result = data.results[0];
+  if (!result?.success || !result.data || mode === "replace" && result.data.persistedDocumentKey !== documentKey) throw new Error(result?.error?.message ?? "The document could not be enhanced.");
+  return result.data;
 }
 
 export async function askPersonalAssistant(message: string, currentNote: { documentKey?: string; title: string; content: string; selection?: { start: number; end: number } }, folderKey?: string, signal?: AbortSignal) {
@@ -308,19 +318,29 @@ export async function askPersonalAssistant(message: string, currentNote: { docum
   }
 }
 
-export async function translateContentDocument(documentKey: string, targetLanguage: string) {
+export async function translateContentDocument(documentKey: string, targetLanguage: string, instruction?: string, mode: "preview" | "replace" = "replace") {
   const data = await callContentTool<{
     results: { success: boolean; data?: { text: string; persistedDocumentKey?: string }; error?: { message: string } }[];
   }>("document.translate", {
     documentKeys: [documentKey],
     targetLanguage,
+    instruction,
     preserveFormatting: true,
-    mode: "replace",
-    idempotencyKey: createContentMutationKey(),
+    mode,
+    ...(mode === "replace" ? { idempotencyKey: createContentMutationKey() } : {}),
   });
   const result = data.results[0];
-  if (!result?.success || result.data?.persistedDocumentKey !== documentKey) throw new Error(result?.error?.message ?? "The note could not be translated.");
+  if (!result?.success || !result.data || mode === "replace" && result.data.persistedDocumentKey !== documentKey) throw new Error(result?.error?.message ?? "The note could not be translated.");
   return result.data;
+}
+
+export async function createContentDocumentVersion(documentKey: string, label: string) {
+  const data = await callContentTool<{
+    results: { success: boolean; data?: { version: ContentDocumentVersion }; error?: { message: string } }[];
+  }>("document.create-version", { documentKeys: [documentKey], labels: { [documentKey]: label }, idempotencyKey: createContentMutationKey() });
+  const result = data.results[0];
+  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The document version could not be created.");
+  return result.data.version;
 }
 
 export async function listContentDocumentVersions(documentKey: string) {
