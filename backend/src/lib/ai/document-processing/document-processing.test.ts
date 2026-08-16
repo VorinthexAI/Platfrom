@@ -124,8 +124,8 @@ describe('document-cleanup action', () => {
     expect(result.content).not.toContain('||||');
   });
 
-  test('rejects missing or empty model output', async () => {
-    await expect(documentCleanup({ text: 'Body' }, { logger: quiet })).rejects.toMatchObject({ code: 'DOCUMENT_TEXT_CLEANUP_FAILED', action: 'document-cleanup' });
+  test('uses deterministic cleanup without a model and rejects empty model output', async () => {
+    await expect(documentCleanup({ text: 'Body\r\n\r\n\tSecond  line' }, { logger: quiet })).resolves.toEqual({ content: 'Body\n\n\tSecond  line' });
     await expect(documentCleanup({ text: 'Body' }, { logger: quiet, clean: async () => '   ' })).rejects.toMatchObject({ code: 'DOCUMENT_TEXT_CLEANUP_FAILED', action: 'document-cleanup' });
   });
 
@@ -274,11 +274,12 @@ describe('document-extract action', () => {
 
   test('orders detected lines by page and position', () => {
     const result = textractBlocksToExtractionResult([
-      { Id: 'value', BlockType: 'LINE', Page: 1, Text: '$10M', Geometry: { BoundingBox: { Top: 0.2, Left: 0.1 } } },
-      { Id: 'title', BlockType: 'LINE', Page: 1, Text: 'Annual report', Geometry: { BoundingBox: { Top: 0.05, Left: 0.1 } } },
-      { Id: 'second-page', BlockType: 'LINE', Page: 2, Text: 'Appendix', Geometry: { BoundingBox: { Top: 0.05, Left: 0.1 } } },
+      { Id: 'value', BlockType: 'LINE', Page: 1, Text: '$10M', Confidence: 96, Geometry: { BoundingBox: { Top: 0.2, Left: 0.1 } } },
+      { Id: 'title', BlockType: 'LINE', Page: 1, Text: 'Annual report', Confidence: 99, Geometry: { BoundingBox: { Top: 0.05, Left: 0.1 } } },
+      { Id: 'second-page', BlockType: 'LINE', Page: 2, Text: 'Appendix', Confidence: 93, Geometry: { BoundingBox: { Top: 0.05, Left: 0.1 } } },
     ]);
     expect(result.extractedText).toBe('Annual report\n$10M\n\nAppendix');
+    expect(result.metadata).toMatchObject({ averageConfidence: 96, minimumConfidence: 93 });
     expect(result.metadata).toMatchObject({ provider: 'aws-textract', pages: 2 });
   });
 

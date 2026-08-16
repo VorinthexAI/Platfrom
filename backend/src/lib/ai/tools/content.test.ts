@@ -14,14 +14,14 @@ const expectedNames = [
   'enhance',
   'book.create-context', 'book.write',
   'folder.create', 'folder.find', 'folder.list', 'folder.update', 'folder.rename', 'folder.move', 'folder.copy', 'folder.archive', 'folder.restore', 'folder.delete',
-  'document.parse', 'document.scan', 'document.create', 'document.find', 'document.list', 'document.read', 'document.list-audio-versions', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.download', 'document.export', 'document.share', 'document.unshare', 'document.list-shares', 'document.create-version', 'document.find-version', 'document.list-versions', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.translate', 'document.rewrite',
+  'document.parse', 'document.scan', 'document.create', 'document.find', 'document.list', 'document.read', 'document.list-audio-versions', 'document.list-summaries', 'document.find-summary', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.download', 'document.export', 'document.share', 'document.unshare', 'document.list-shares', 'document.create-version', 'document.find-version', 'document.list-versions', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.topics', 'document.translate', 'document.rewrite',
   'scope.document.search', 'scope.content.search', 'scope.content.search-history', 'organization.document.search',
 ] as const;
 
 describe('Content tool registry', () => {
   test('contains exactly the registered dotted names and no action-style kebab names', () => {
     expect([...CONTENT_TOOL_NAMES]).toEqual([...expectedNames]);
-    expect(CONTENT_TOOL_NAMES).toHaveLength(44);
+    expect(CONTENT_TOOL_NAMES).toHaveLength(47);
     for (const name of CONTENT_TOOL_NAMES) {
       expect(name).toMatch(/^[a-z]+(?:[.-][a-z]+)*$/);
       if (name !== 'enhance') expect(name).toContain('.');
@@ -46,6 +46,7 @@ describe('Content input contracts', () => {
     expect(contentToolInputSchemas['folder.update'].parse({ updates: [{ folderKey: key, name: 'Renamed' }] }).atomic).toBe(false);
     expect(contentToolInputSchemas['document.read'].parse({ documentKeys: [key] })).toMatchObject({ mode: 'content', atomic: false });
     expect(contentToolInputSchemas['document.download'].parse({ documentKeys: [key] }).format).toBe('original');
+    expect(contentToolInputSchemas['document.download'].parse({ documentKeys: [key], format: 'html' }).format).toBe('html');
     expect(contentToolInputSchemas['document.translate'].parse({ documentKeys: [key], targetLanguage: 'French' })).toMatchObject({ mode: 'preview', atomic: false });
     expect(contentToolInputSchemas['document.rewrite'].parse({ rewrites: [{ documentKey: key, instruction: 'Clarify' }] })).toMatchObject({ atomic: false, rewrites: [{ mode: 'preview' }] });
     expect(contentToolInputSchemas['document.restore-version'].parse({ restores: [{ documentKey: key, versionKey: newId() }] })).toMatchObject({ atomic: false, restores: [{ createBackupVersion: true }] });
@@ -57,6 +58,7 @@ describe('Content input contracts', () => {
     expect(contentToolInputSchemas['folder.restore'].parse({ folderKeys: [key], restoreAncestors: true })).toMatchObject({ restoreAncestors: true });
     expect(contentToolInputSchemas['document.read'].parse({ documentKeys: [key], mode: 'audio', includeCode: true, persistAudio: true })).toMatchObject({ includeCode: true, persistAudio: true });
     expect(contentToolInputSchemas['document.summarize'].parse({ documentKeys: [key], combine: true })).toMatchObject({ combine: true });
+    expect(contentToolInputSchemas['document.summarize'].parse({ documentKeys: [key], topic: 'Launch' })).toMatchObject({ topic: 'Launch', style: 'brief' });
     expect(contentToolInputSchemas['folder.update'].parse({ updates: [{ folderKey: key, description: null }] })).toMatchObject({ updates: [{ description: null }] });
     expect(contentToolInputSchemas['document.delete'].parse({ documentKeys: [key], deleteVersions: true, deleteShares: true })).toMatchObject({ deleteVersions: true, deleteShares: true });
   });
@@ -72,6 +74,9 @@ describe('Content input contracts', () => {
     expect(() => contentToolInputSchemas['document.read'].parse({ documentKeys: [key, newId()], mode: 'audio', persistAudio: true })).toThrow();
     expect(() => contentToolInputSchemas['document.read'].parse({ documentKeys: [key], mode: 'content', voice: 'alloy' })).toThrow();
     expect(() => contentToolInputSchemas['document.copy'].parse({ copies: [{ documentKey: key, targetFolderKey: newId(), name: 'Wrong field' }] })).toThrow();
+    expect(() => contentToolInputSchemas['document.summarize'].parse({ documentKeys: [key, newId()], persist: true })).toThrow();
+    expect(() => contentToolInputSchemas['document.summarize'].parse({ documentKeys: [key], persist: true, combine: true })).toThrow();
+    expect(() => contentToolInputSchemas['document.topics'].parse({ documentKey: key, scopeKey: newId() })).toThrow();
     expect(contentToolInputSchemas['scope.document.search'].parse({ scopeKey: key, query: 'roadmap', sources: [{ type: 'project', projectKeys: [newId()] }] })).toMatchObject({ sources: [{ type: 'project' }] });
   });
 
@@ -83,7 +88,7 @@ describe('Content input contracts', () => {
       ['document.move', { moves: [] }], ['document.copy', { copies: [] }], ['document.archive', { documentKeys: [] }], ['document.restore', { documentKeys: [] }],
       ['document.delete', { documentKeys: [] }], ['document.download', { documentKeys: [] }], ['document.export', { exports: [] }], ['document.share', { shares: [] }],
       ['document.list-shares', { documentKeys: [] }], ['document.create-version', { documentKeys: [] }], ['document.find-version', { versionKeys: [] }],
-      ['document.list-versions', { documentKeys: [] }], ['document.restore-version', { restores: [] }], ['document.delete-version', { versionKeys: [] }],
+      ['document.list-versions', { documentKeys: [] }], ['document.list-summaries', { documentKeys: [] }], ['document.find-summary', { summaryKeys: [] }], ['document.restore-version', { restores: [] }], ['document.delete-version', { versionKeys: [] }],
       ['document.summarize', { documentKeys: [] }], ['document.translate', { documentKeys: [], targetLanguage: 'French' }], ['document.rewrite', { rewrites: [] }],
     ];
     for (const [name, input] of invalid) expect(contentToolInputSchemas[name].safeParse(input).success, name).toBe(false);

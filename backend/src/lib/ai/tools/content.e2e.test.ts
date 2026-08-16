@@ -69,6 +69,8 @@ suite('Content live E2E', () => {
     const skillKeys = await (await db.query('FOR row IN agentSkills FILTER row.agentKey IN @agentKeys RETURN DISTINCT row.skillKey', { agentKeys })).all();
     const removals: Array<[string, string, Record<string, unknown>]> = [
       ['shares', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
+      ['documentSummaries', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
+      ['documentAudioVersions', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
       ['documentVersions', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
       ['documents', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
       ['folders', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
@@ -146,7 +148,8 @@ suite('Content live E2E', () => {
         },
       },
       runAction: async (action: string, input: any) => {
-        if (action === 'ask' || action === 'enhance' || action === 'translate' || action === 'reason' || action === 'deep-reason') return { text: `Generated ${action}: deterministic archive result.` };
+        if (action === 'ask' || action === 'enhance' || action === 'translate' || action === 'reason' || action === 'deep-reason' || action === 'document-summarize') return { text: `Generated ${action}: deterministic archive result.` };
+        if (action === 'document-topics') return { text: '{"topics":["Deterministic systems","Archive"]}' };
         if (action === 'speak' || action === 'generate-speech') return { audio: new TextEncoder().encode('deterministic audio'), mimeType: 'audio/mpeg', durationMs: 250 };
         if (action === 'document-cleanup') return { content: input.text };
         if (action === 'document-embed') return documentEmbed(input, { embed: async () => embedding, dimensions: 4096, logger: () => undefined });
@@ -325,7 +328,7 @@ suite('Content live E2E', () => {
     const copiedAudio = await call('document.read', { documentKeys: [copiedDocumentKey], mode: 'audio', persistAudio: true, idempotencyKey: `audio-copy-${organizationKey}` });
     const copiedAudioRecord = await db.collection('documentAudioVersions').document(copiedAudio.results[0].data.audioVersion.key);
 
-    for (const format of ['original', 'txt'] as const) {
+    for (const format of ['original', 'html', 'txt'] as const) {
       const download = await call('document.download', { documentKeys: [documentKey], format });
       expect(Buffer.from(download.results[0].data.content, 'base64').byteLength).toBeGreaterThan(0);
     }
@@ -333,7 +336,11 @@ suite('Content live E2E', () => {
     expect(exports.summary).toEqual({ requested: 1, succeeded: 1, failed: 0 });
 
     expect((await call('document.summarize', { documentKeys: [documentKey, copiedDocumentKey], combine: true })).results[0].data.text).toContain('deterministic');
-    await call('document.summarize', { documentKeys: [documentKey], persist: true, idempotencyKey: `summary-${organizationKey}` });
+    const persistedSummary = await call('document.summarize', { documentKeys: [copiedDocumentKey], topic: 'systems', persist: true, idempotencyKey: `summary-${organizationKey}` });
+    const summaryKey = persistedSummary.results[0].data.summary.key;
+    expect((await call('document.list-summaries', { documentKeys: [copiedDocumentKey] })).results[0].data.summaries[0].key).toBe(summaryKey);
+    expect((await call('document.find-summary', { summaryKeys: [summaryKey] })).results[0].data.summary.summary).toContain('deterministic');
+    expect((await call('document.topics', { documentKey })).topics).toEqual(['Deterministic systems', 'Archive']);
     const translationPreview = await call('document.translate', { documentKeys: [documentKey], targetLanguage: 'French', mode: 'preview' });
     expect(translationPreview.results[0].data.text).toContain('deterministic');
     const translationCopy = await call('document.translate', { documentKeys: [documentKey], targetLanguage: 'French', mode: 'copy', idempotencyKey: `translate-copy-${organizationKey}` });
@@ -392,6 +399,7 @@ suite('Content live E2E', () => {
     expect((await call('document.delete', { documentKeys: [copiedDocumentKey], deleteVersions: true, deleteShares: true })).summary.failed).toBe(0);
     expect(await (await db.query('RETURN DOCUMENT(documents, @key) == null', { key: copiedDocumentKey })).next()).toBe(true);
     expect(await (await db.query('RETURN DOCUMENT(documentAudioVersions, @key) == null', { key: copiedAudio.results[0].data.audioVersion.key })).next()).toBe(true);
+    expect(await (await db.query('RETURN DOCUMENT(documentSummaries, @key) == null', { key: summaryKey })).next()).toBe(true);
     await expect(s3.send(new GetObjectCommand({ Bucket: bucket, Key: copiedStorageKey }))).rejects.toBeDefined();
     await expect(s3.send(new GetObjectCommand({ Bucket: bucket, Key: copiedAudioRecord.storageKey }))).rejects.toBeDefined();
 

@@ -13,7 +13,7 @@ const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
 
 function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
   const organizationKey = newId(), scopeKey = newId(), membershipKey = newId(), userKey = newId();
-  const folders = new Map<string, any>(), documents = new Map<string, any>(), shares = new Map<string, any>(), versions = new Map<string, any>(), audioVersions = new Map<string, any>();
+  const folders = new Map<string, any>(), documents = new Map<string, any>(), shares = new Map<string, any>(), versions = new Map<string, any>(), audioVersions = new Map<string, any>(), summaries = new Map<string, any>();
   const patches: Array<Record<string, unknown>> = [];
   const repository: ContentRepository = {
     async getScope(key) { return key === scopeKey ? { key, organizationKey } : null; },
@@ -49,6 +49,10 @@ function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
     async listAudioVersions(_scopeKey, keys) { return [...audioVersions.values()].filter((value) => keys.includes(value.documentKey)).sort((a, b) => b.version - a.version); },
     async createAudioVersion(value) { const version = { ...value, version: [...audioVersions.values()].filter((item) => item.documentKey === value.documentKey).length + 1 }; audioVersions.set(version.key, version); return version; },
     async deleteAudioVersion(key) { audioVersions.delete(key); },
+    async getSummary(key) { return summaries.get(key) ?? null; },
+    async listSummaries(_scopeKey, keys) { return [...summaries.values()].filter((value) => keys.includes(value.documentKey)).sort((a, b) => b.version - a.version); },
+    async createSummary(value) { const summary = { ...value, version: [...summaries.values()].filter((item) => item.documentKey === value.documentKey).length + 1 }; summaries.set(summary.key, summary); return summary; },
+    async deleteSummary(key) { summaries.delete(key); },
     async semanticSearch() { return [...documents.values()].map((document) => ({ score: 0.8, document })); },
     async semanticSearchFolders() { return [...folders.values()].map((folder) => ({ score: 0.8, folder })); },
     async transaction(operation) { return operation(repository); },
@@ -56,7 +60,7 @@ function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
   const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: membershipKey, organizationId: organizationKey, status: 'active', orgRole: role } } } as any;
   const folderKey = newId(); folders.set(folderKey, { key: folderKey, scopeKey, name: 'Root', embedding, createdAt: now, updatedAt: now });
   const addDocument = (content = 'First sentence. Second sentence.') => { const key = newId(); documents.set(key, { key, scopeKey, folderKey, name: 'Notes', extension: 'txt', mimeType: 'text/plain', sizeBytes: content.length, storageKey: `docs/${key}`, content, embedding, isFavorite: false, createdAt: now, updatedAt: now }); return key; };
-  return { repository, context, folders, documents, shares, versions, audioVersions, patches, scopeKey, folderKey, addDocument };
+  return { repository, context, folders, documents, shares, versions, audioVersions, summaries, patches, scopeKey, folderKey, addDocument };
 }
 
 describe('Content runtime', () => {
@@ -951,6 +955,23 @@ describe('Content runtime', () => {
     expect(fileName?.endsWith('.txt')).toBe(true);
   });
 
+  test('generates an HTML preview from authorized original bytes', async () => {
+    const f = fixture('viewer');
+    const documentKey = f.addDocument('Preview body');
+    const output = await runContentTool('document.download', { documentKeys: [documentKey], format: 'html' }, f.context, {
+      repository: f.repository,
+      storage: {
+        async download() { return { bytes: new TextEncoder().encode('Original body'), mimeType: 'text/plain' }; },
+        async copy(input) { return { storageKey: input.destinationKey }; },
+        async upload(input) { return { storageKey: input.key }; },
+        async delete() {},
+      },
+      generatePreview: async () => ({ bytes: new TextEncoder().encode('<html>Original body</html>'), mimeType: 'text/html; charset=utf-8', extension: 'html' }),
+    });
+    expect(output.results[0]?.data).toMatchObject({ format: 'html', fileName: 'Notes.html', mimeType: 'text/html; charset=utf-8' });
+    expect(Buffer.from(output.results[0]?.data?.content ?? '', 'base64').toString()).toBe('<html>Original body</html>');
+  });
+
   test('sanitizes plain-text updates', async () => {
     const f = fixture('moderator');
     const documentKey = f.addDocument('Old body');
@@ -992,8 +1013,8 @@ describe('Content runtime', () => {
     expect(persistedDocumentKey && f.documents.get(persistedDocumentKey)?.isFavorite).toBe(false);
   });
 
-  test('sends summaries and rewrites through provider-valid chat action inputs', async () => {
-    const f = fixture('viewer');
+  test('routes summaries and topics through dedicated actions and persists summary history', async () => {
+    const f = fixture('moderator');
     const first = f.addDocument('First source body');
     const second = f.addDocument('Second source body');
     const actions: string[] = [];
@@ -1002,13 +1023,27 @@ describe('Content runtime', () => {
       const parsed = chatInputSchema.parse(input);
       expect(parsed.systemPrompt).toBeString();
       expect(parsed.messages[0]?.content[0]).toMatchObject({ type: 'text' });
-      return { text: 'Generated text' };
+      return { text: action === 'document-topics' ? '```json\n{"topics":["Launch","Launch","Risk"]}\n```' : 'Generated text' };
     };
     const dependencies = { repository: f.repository, runAction };
     expect((await runContentTool('document.summarize', { documentKeys: [first] }, f.context, dependencies)).results[0]?.success).toBe(true);
     expect((await runContentTool('document.summarize', { documentKeys: [first, second], combine: true }, f.context, dependencies)).summary.failed).toBe(0);
-    expect((await runContentTool('document.rewrite', { rewrites: [{ documentKey: first, instruction: 'Improve clarity' }] }, f.context, dependencies)).results[0]?.success).toBe(true);
-    expect(actions).toEqual(['reason', 'deep-reason', 'deep-reason']);
+    const persisted = await runContentTool('document.summarize', { documentKeys: [first], topic: 'Launch', style: 'executive', persist: true }, f.context, dependencies);
+    const summaryKey = persisted.results[0]?.data?.summary?.key;
+    expect(persisted.results[0]?.data).toMatchObject({ text: 'Generated text', summary: { version: 1, topic: 'Launch', style: 'executive' } });
+    expect(f.documents.size).toBe(2);
+    expect((await runContentTool('document.list-summaries', { documentKeys: [first] }, f.context, dependencies)).results[0]?.data?.summaries).toHaveLength(1);
+    expect((await runContentTool('document.find-summary', { summaryKeys: [summaryKey] }, f.context, dependencies)).results[0]?.data?.summary.key).toBe(summaryKey);
+    expect(await runContentTool('document.topics', { documentKey: first }, f.context, dependencies)).toEqual({ documentKey: first, topics: ['Launch', 'Risk'] });
+    expect(actions).toEqual(['document-summarize', 'document-summarize', 'document-summarize', 'document-topics']);
+  });
+
+  test('rejects non-JSON and over-limit topic model output', async () => {
+    const f = fixture('viewer');
+    const documentKey = f.addDocument();
+    for (const text of ['topics: launch', JSON.stringify({ topics: Array.from({ length: 11 }, (_, index) => `Topic ${index}`) }), JSON.stringify({ topics: ['Launch'], extra: true })]) {
+      await expect(runContentTool('document.topics', { documentKey }, f.context, { repository: f.repository, runAction: async () => ({ text }) })).rejects.toMatchObject({ code: 'CONTENT_INVALID_INPUT' });
+    }
   });
 
   test('precomputes atomic exports and throws without returning partial success', async () => {
@@ -1063,6 +1098,7 @@ describe('Content runtime', () => {
       scopeKey: f.scopeKey, documentKey, content: 'old', embedding,
     });
     const audio = await f.repository.createAudioVersion!({ key: newId(), scopeKey: f.scopeKey, documentKey, sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: now, storageKey: 'audio/version.mp3', mimeType: 'audio/mpeg', sizeBytes: 10, durationMs: 100, includeTitle: false, includeCode: false, createdByKey: newId(), createdAt: now });
+    const summary = await f.repository.createSummary!({ key: newId(), scopeKey: f.scopeKey, documentKey, summary: 'Saved summary', style: 'brief', sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: now, createdByKey: newId(), createdAt: now });
     const calls: string[] = [];
     const originalDelete = f.repository.deleteDocument;
     f.repository.deleteDocument = async (key) => { calls.push('metadata'); await originalDelete(key); };
@@ -1079,6 +1115,7 @@ describe('Content runtime', () => {
     expect(calls.at(-1)).toBe('metadata');
     expect(f.versions.has(version.key)).toBe(false);
     expect(f.audioVersions.has(audio.key)).toBe(false);
+    expect(f.summaries.has(summary.key)).toBe(false);
   });
 
   test('hides a pending document deletion after metadata commit failure and finishes on retry', async () => {
@@ -1353,7 +1390,8 @@ describe('Content runtime', () => {
         scanDocument: async () => ({ documentKey: newId(), content: 'Scanned body', storageKeys: ['scan/page-01.jpg'] }),
         bookRuntime: { create: async () => newId(), write: async () => {} },
         runAction: async (action: string, input: any) => {
-          if (action === 'ask' || action === 'enhance' || action === 'translate' || action === 'reason' || action === 'deep-reason') return { text: 'Generated text' };
+          if (action === 'ask' || action === 'enhance' || action === 'translate' || action === 'reason' || action === 'deep-reason' || action === 'document-summarize') return { text: 'Generated text' };
+          if (action === 'document-topics') return { text: '{"topics":["Source"]}' };
           if (action === 'speak') return { audio: new Uint8Array([1]), mimeType: 'audio/mpeg' };
           if (action === 'document-cleanup') return { content: input.text };
           if (action === 'document-embed') return documentEmbed(input, { embed: async () => embedding, dimensions: EMBEDDING_DIMENSIONS });
@@ -1386,6 +1424,11 @@ describe('Content runtime', () => {
       else if (name === 'document.list') input = { scopeKey: f.scopeKey, folderKey: f.folderKey };
        else if (name === 'document.read') input = { documentKeys: [documentKey], mode: 'content' };
        else if (name === 'document.list-audio-versions') input = { documentKeys: [documentKey] };
+       else if (name === 'document.list-summaries') input = { documentKeys: [documentKey] };
+       else if (name === 'document.find-summary') {
+         const summary = await f.repository.createSummary!({ key: newId(), scopeKey: f.scopeKey, documentKey, summary: 'Saved', style: 'brief', sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: now, createdByKey: newId(), createdAt: now });
+         input = { summaryKeys: [summary.key] };
+       }
       else if (name === 'document.update') input = { updates: [{ documentKey, content: 'Updated body' }] };
       else if (name === 'document.rename') input = { renames: [{ documentKey, name: 'Renamed' }] };
       else if (name === 'document.move') input = { moves: [{ documentKey, targetScopeKey: f.scopeKey, targetFolderKey: siblingKey }] };
@@ -1410,6 +1453,7 @@ describe('Content runtime', () => {
         else if (name === 'document.restore-version') input = { restores: [{ documentKey, versionKey: version.key }] };
         else { current.deletedAt = now; input = { versionKeys: [version.key] }; }
       } else if (name === 'document.summarize') input = { documentKeys: [documentKey] };
+      else if (name === 'document.topics') input = { documentKey };
       else if (name === 'document.translate') input = { documentKeys: [documentKey], targetLanguage: 'French' };
       else if (name === 'document.rewrite') input = { rewrites: [{ documentKey, instruction: 'Improve clarity' }] };
       else if (name === 'scope.document.search') input = { scopeKey: f.scopeKey, query: 'source' };

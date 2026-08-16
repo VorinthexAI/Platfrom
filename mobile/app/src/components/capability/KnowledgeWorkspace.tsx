@@ -14,6 +14,7 @@ import { Badge } from "@vorinthex/shared/ui/badge";
 import { Button } from "@vorinthex/shared/ui/button";
 import { CoreComposer } from "@vorinthex/shared/ui/core-composer";
 import { FileViewer } from "@vorinthex/shared/ui/file-viewer";
+import { LoadingText } from "@vorinthex/shared/ui/loading-text";
 import { highlightedSegments, searchDocumentPassagesLiteral, type DocumentPassage, type HighlightRange } from "@vorinthex/shared/ui/document-search";
 import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
@@ -57,8 +58,10 @@ import {
   createContentMutationKey,
   copyContentSelection,
   downloadContentDocument,
+  findContentDocumentSummary,
   findContentDocumentVersion,
   generateContentDocumentAudio,
+  getContentDocumentTopics,
   getContentContext,
   isContentContextConfigured,
   listContentDocumentVersions,
@@ -75,10 +78,12 @@ import {
   uploadContentDocument,
   updateContentFolder,
   setContentFolderCover,
+  summarizeContentDocument,
   type ContentDocument,
   type ContentDocumentSourceImage,
   type ContentDocumentVersion,
   type ContentDocumentAudioVersion,
+  type ContentDocumentSummary,
   type ContentFolder,
   type ContentSearchHistoryItem,
   type ContentSearchDocument,
@@ -96,6 +101,7 @@ import {
   contentQueryKeys,
   getContentDocument,
   getContentDocumentAudioVersions,
+  getContentDocumentSummaries,
   getContentFolderTree,
   getContentHistory,
   getContentLocation,
@@ -103,6 +109,7 @@ import {
   invalidateContentHistories,
   refreshContentDocument,
   refreshContentDocumentAudioVersions,
+  refreshContentDocumentSummaries,
   refreshContentHistory,
   refreshContentLocation,
   replaceCachedContentDocument,
@@ -118,7 +125,7 @@ import {
   type ContentLocation,
 } from "@/lib/content-query-cache";
 import { invalidateAssistantChanges } from "@/lib/workspace-query-cache";
-import { openTemporaryBase64File, saveBase64Download, saveTemporaryBase64File, saveTextDownload } from "@/lib/device-download";
+import { saveBase64Download, saveTemporaryBase64File, saveTextDownload } from "@/lib/device-download";
 import { fetchGalleryUploadStatus, uploadGalleryImages } from "@/lib/gallery-client";
 import { BOOK_AUDIO_MODE } from "@/lib/book-audio";
 import { audioTimelineDuration, audioTimelinePosition, formatAudioTime, resolveAudioTimelinePosition } from "@/lib/audio-playback-timeline";
@@ -128,7 +135,7 @@ import { useAuthStore } from "@/state/auth";
 type SaveState = "local" | "dirty" | "saving" | "saved" | "error";
 type WorkspaceMode = "auto" | "folders" | "folder" | "editor" | "viewer";
 type FolderContentTab = "folders" | "documents" | "files";
-type ArchiveSheet = "create" | "folder" | "library" | "documents" | "folders" | "enhance" | "historyChooser" | "versions" | "audioVersions" | "documentActions" | "documentDetails" | "deleteDocument" | "scanSources" | "destination" | "destinationBrowser" | "summary" | "folderActions" | "folderDetails" | "bulkActions" | "bulkDelete";
+type ArchiveSheet = "create" | "folder" | "library" | "documents" | "folders" | "enhance" | "summarize" | "summaryVersions" | "summaryReader" | "historyChooser" | "versions" | "audioVersions" | "documentActions" | "documentDetails" | "deleteDocument" | "scanSources" | "destination" | "destinationBrowser" | "folderActions" | "folderDetails" | "bulkActions" | "bulkDelete";
 type DestinationAction = "upload" | "move" | "copy";
 type UploadBatchItem = { id: string; mutationKey: string; file: File; name: string; mimeType: string; status: "pending" | "uploading" | "success" | "error"; error?: string };
 type ProcessingScanItem = { id: string; folderKey?: string; name: string };
@@ -260,7 +267,7 @@ export function KnowledgeWorkspace() {
   const [openingDocumentKey, setOpeningDocumentKey] = useState<string>();
   const [results, setResults] = useState<ContentSearchResponse>();
   const [history, setHistory] = useState<ContentSearchHistoryItem[]>([]);
-  const [selectedSummary, setSelectedSummary] = useState<ContentSearchDocument>();
+  const [selectedSummary, setSelectedSummary] = useState<ContentDocumentSummary>();
   const [selectedDocument, setSelectedDocument] = useState<ContentDocument>();
   const [filePreviewError, setFilePreviewError] = useState<string>();
   const [filePreviewUri, setFilePreviewUri] = useState<string>();
@@ -305,7 +312,12 @@ export function KnowledgeWorkspace() {
   const [rootSearching, setRootSearching] = useState(false);
   const [folderSearchResults, setFolderSearchResults] = useState<ContentSearchResponse>();
   const [folderSearching, setFolderSearching] = useState(false);
-  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryTopics, setSummaryTopics] = useState<string[]>([]);
+  const [loadingSummaryTopics, setLoadingSummaryTopics] = useState(false);
+  const [summaries, setSummaries] = useState<ContentDocumentSummary[]>([]);
+  const [loadingSummaries, setLoadingSummaries] = useState(false);
+  const [generatingSummary, setGeneratingSummary] = useState(false);
+  const [summaryActionKey, setSummaryActionKey] = useState<string>();
   const [error, setError] = useState<string>();
   const editorSession = useRef(0);
   const revision = useRef(0);
@@ -345,6 +357,7 @@ export function KnowledgeWorkspace() {
   const narrationTitleRef = useRef("");
   const pendingNarrationSeek = useRef<{ index: number; seconds: number; play: boolean } | undefined>(undefined);
   const summaryRequest = useRef<AbortController | undefined>(undefined);
+  const summaryGeneration = useRef(0);
   const instructionGeneration = useRef(0);
   const previewFileRef = useRef<File | undefined>(undefined);
   const restoreGeneration = useRef(0);
@@ -596,10 +609,13 @@ export function KnowledgeWorkspace() {
     setTemporarySingleSelection(false);
     if (activeSheetRef.current === "documentActions" || activeSheetRef.current === "documentDetails") documentActionGeneration.current += 1;
     if (activeSheetRef.current === "folderActions" || activeSheetRef.current === "folderDetails") folderActionGeneration.current += 1;
-    if (activeSheetRef.current === "summary") {
+    if (activeSheetRef.current === "summarize" || activeSheetRef.current === "summaryVersions" || activeSheetRef.current === "summaryReader") {
+      summaryGeneration.current += 1;
       summaryRequest.current?.abort();
       summaryRequest.current = undefined;
-      setSummaryLoading(false);
+      setLoadingSummaryTopics(false);
+      setLoadingSummaries(false);
+      setGeneratingSummary(false);
     }
     setSheetOpen(false);
     sheetBackStack.current = [];
@@ -611,6 +627,7 @@ export function KnowledgeWorkspace() {
     if (sheetCloseTimer.current) clearTimeout(sheetCloseTimer.current);
     if (coreOpenTimer.current) clearTimeout(coreOpenTimer.current);
     instructionRequest.current?.abort();
+    summaryRequest.current?.abort();
     previewFileRef.current?.delete();
   }, []);
 
@@ -953,6 +970,109 @@ export function KnowledgeWorkspace() {
 
   const openEnhanceSheet = () => {
     openSheet("enhance");
+  };
+
+  const openSummarizeSheet = () => {
+    const document = activeDocument ?? selectedDocument;
+    if (!document?.key || saveState !== "saved") {
+      setSheetError("Save the document before creating a summary.");
+      return;
+    }
+    setSelectedDocument(document);
+    setSelectedSummary(undefined);
+    setSummaryTopics([]);
+    setSummaries([]);
+    if (sheetOpen) pushSheet("summarize");
+    else openSheet("summarize");
+  };
+
+  const loadSummaryTopics = async () => {
+    const documentKey = selectedDocument?.key ?? documentKeyRef.current;
+    if (!documentKey || loadingSummaryTopics) return;
+    const generation = ++summaryGeneration.current;
+    const controller = new AbortController();
+    summaryRequest.current?.abort();
+    summaryRequest.current = controller;
+    setSummaryTopics([]);
+    setLoadingSummaryTopics(true);
+    setSheetError(undefined);
+    try {
+      const topics = await getContentDocumentTopics(documentKey, controller.signal);
+      if (!controller.signal.aborted && generation === summaryGeneration.current) setSummaryTopics(topics);
+    } catch (cause) {
+      if (!controller.signal.aborted && generation === summaryGeneration.current) setSheetError(cause instanceof Error ? cause.message : "Document topics could not be generated.");
+    } finally {
+      if (summaryRequest.current === controller) summaryRequest.current = undefined;
+      if (generation === summaryGeneration.current) setLoadingSummaryTopics(false);
+    }
+  };
+
+  const openSummaryVersionHistory = async (targetDocument?: ContentDocument) => {
+    const document = targetDocument ?? selectedDocument ?? activeDocument;
+    if (!document?.key) {
+      setSheetError("Save the document before opening summary versions.");
+      return;
+    }
+    if (targetDocument) setSelectedDocument(targetDocument);
+    const generation = ++summaryGeneration.current;
+    if (targetDocument) openSheet("summaryVersions");
+    else if (sheetOpen) pushSheet("summaryVersions");
+    else openSheet("summaryVersions");
+    setSelectedSummary(undefined);
+    setSummaries([]);
+    setLoadingSummaries(true);
+    setSheetError(undefined);
+    try {
+      const history = await getContentDocumentSummaries(queryClient, contentContext, document.key);
+      if (generation === summaryGeneration.current) setSummaries(history);
+    } catch (cause) {
+      if (generation === summaryGeneration.current && activeSheetRef.current === "summaryVersions") setSheetError(cause instanceof Error ? cause.message : "Summary versions could not be loaded.");
+    } finally {
+      if (generation === summaryGeneration.current) setLoadingSummaries(false);
+    }
+  };
+
+  const generateSummaryForTopic = async (topic: string) => {
+    const document = selectedDocument ?? activeDocument;
+    if (!document?.key || generatingSummary) return;
+    const generation = ++summaryGeneration.current;
+    const controller = new AbortController();
+    summaryRequest.current?.abort();
+    summaryRequest.current = controller;
+    pushSheet("summaryVersions");
+    setSelectedSummary(undefined);
+    setSummaries([]);
+    setGeneratingSummary(true);
+    setLoadingSummaries(true);
+    setSheetError(undefined);
+    try {
+      await summarizeContentDocument(document.key, topic, controller.signal);
+      const history = await refreshContentDocumentSummaries(queryClient, contentContext, document.key);
+      if (!controller.signal.aborted && generation === summaryGeneration.current) setSummaries(history);
+    } catch (cause) {
+      if (!controller.signal.aborted && generation === summaryGeneration.current) setSheetError(cause instanceof Error ? cause.message : "The document summary could not be created.");
+    } finally {
+      if (summaryRequest.current === controller) summaryRequest.current = undefined;
+      if (generation === summaryGeneration.current) {
+        setGeneratingSummary(false);
+        setLoadingSummaries(false);
+      }
+    }
+  };
+
+  const openSummaryReader = async (summary: ContentDocumentSummary) => {
+    if (summaryActionKey) return;
+    setSummaryActionKey(summary.key);
+    setSheetError(undefined);
+    try {
+      const loaded = await findContentDocumentSummary(summary.key);
+      setSelectedSummary(loaded);
+      pushSheet("summaryReader");
+    } catch (cause) {
+      setSheetError(cause instanceof Error ? cause.message : "The summary could not be opened.");
+    } finally {
+      setSummaryActionKey(undefined);
+    }
   };
 
   const openCoreConfirmation = (prompt: string) => {
@@ -1974,29 +2094,6 @@ export function KnowledgeWorkspace() {
     setResults({ query: item.query, cached: true, folders: [], documents: item.documents });
   };
 
-  const openSummaryDocument = async () => {
-    if (!selectedSummary) return;
-    try {
-      const document = await getContentDocument(queryClient, contentContext, selectedSummary.documentKey);
-      if (document.extension) {
-        closeSheet();
-        await openArchiveDocument(document);
-        return;
-      }
-    } catch (cause) {
-      setSheetError(cause instanceof Error ? cause.message : "The file could not be opened.");
-      return;
-    }
-    const opened = await openNote({
-      key: selectedSummary.documentKey,
-      name: selectedSummary.name,
-      folderKey: selectedSummary.folderKey,
-      isFavorite: false,
-      updatedAt: new Date().toISOString(),
-    }, setSheetError);
-    if (opened) closeSheet();
-  };
-
   const openNewFolder = () => {
     setFolderName("");
     setFolderDescription("");
@@ -2126,7 +2223,7 @@ export function KnowledgeWorkspace() {
             const verified = await refreshContentDocument(queryClient, requestContext, document.key);
             if (!verified.content.trim()) throw new Error("No text could be extracted from the uploaded file.");
             if (generation !== uploadGeneration.current || contentContextKeyRef.current !== requestContextKey) return;
-            uploadedDocuments.set(item.id, document);
+            uploadedDocuments.set(item.id, verified);
           } catch (cause) {
             if (generation !== uploadGeneration.current || contentContextKeyRef.current !== requestContextKey) return;
             update(item.id, { status: "error", error: cause instanceof Error ? cause.message : "Upload failed." });
@@ -2161,6 +2258,10 @@ export function KnowledgeWorkspace() {
       uploadBatchRef.current = [];
       setUploadBatch([]);
       setUploadFolderKey(undefined);
+      if (batch.length === 1 && successCount === 1) {
+        const uploaded = uploadedDocuments.get(batch[0]!.id);
+        if (uploaded) await openNote(uploaded);
+      }
     } catch (cause) {
       setSheetError(cause instanceof Error ? cause.message : "Files could not be selected.");
     } finally {
@@ -2869,40 +2970,28 @@ export function KnowledgeWorkspace() {
     if (!selectedDocument?.extension) return;
     const document = selectedDocument;
     setSheetError(undefined);
-    if (document.extension === "pdf") {
-      previewFileRef.current?.delete();
-      previewFileRef.current = undefined;
-      setFilePreviewUri(undefined);
-      setFilePreviewError(undefined);
-      closeSheet();
-      workspaceModeRef.current = "viewer";
-      setWorkspaceMode("viewer");
-    } else {
-      setDocumentActionLoading("original");
-    }
+    previewFileRef.current?.delete();
+    previewFileRef.current = undefined;
+    setFilePreviewUri(undefined);
+    setFilePreviewError(undefined);
+    closeSheet();
+    workspaceModeRef.current = "viewer";
+    setWorkspaceMode("viewer");
     const generation = ++documentActionGeneration.current;
     try {
-      const download = await downloadContentDocument(document.key, "original");
+      const download = await downloadContentDocument(document.key, document.extension === "pdf" ? "original" : "html");
       if (generation !== documentActionGeneration.current) return;
-      if (document.extension === "pdf") {
-        const file = await saveTemporaryBase64File(download.fileName, download.content);
-        if (generation !== documentActionGeneration.current || workspaceModeRef.current !== "viewer") {
-          file.delete();
-          return;
-        }
-        previewFileRef.current = file;
-        setFilePreviewUri(file.uri);
-      } else {
-        const file = await openTemporaryBase64File(download.fileName, download.mimeType, download.content);
-        previewFileRef.current?.delete();
-        previewFileRef.current = file;
-        if (generation === documentActionGeneration.current && activeSheetRef.current === "documentActions") closeSheet();
+      const file = await saveTemporaryBase64File(download.fileName, download.content);
+      if (generation !== documentActionGeneration.current || workspaceModeRef.current !== "viewer") {
+        file.delete();
+        return;
       }
+      previewFileRef.current = file;
+      setFilePreviewUri(file.uri);
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "The original file could not be opened.";
       if (generation !== documentActionGeneration.current) return;
-      if (document.extension === "pdf") setFilePreviewError(message);
-      else setSheetError(message);
+      setFilePreviewError(message);
     } finally {
       if (generation === documentActionGeneration.current) setDocumentActionLoading(undefined);
     }
@@ -2968,6 +3057,11 @@ export function KnowledgeWorkspace() {
 
   function mutationFooter() {
     const close = (disabled: boolean) => <Button disabled={disabled} onPress={() => closeSheet()} size="lg" variant="secondary">Close</Button>;
+    if (activeSheet === "summarize") return <>
+      <Button disabled={loadingSummaryTopics || generatingSummary} loading={loadingSummaryTopics} onPress={() => void loadSummaryTopics()} size="lg" variant="primary">Summarize</Button>
+      {close(loadingSummaryTopics || generatingSummary)}
+    </>;
+    if (activeSheet === "summaryVersions" || activeSheet === "summaryReader") return close(generatingSummary || loadingSummaries || Boolean(summaryActionKey));
     if (activeSheet === "audioVersions") return <>
       <Button disabled={generatingAudioVersion || loadingAudioVersions} loading={generatingAudioVersion} onPress={() => void generateAudioVersion()} size="lg" variant="primary">Generate audio</Button>
       {close(generatingAudioVersion)}
@@ -3059,13 +3153,11 @@ export function KnowledgeWorkspace() {
       {workspaceMode === "viewer" ? <FileViewer
         error={filePreviewError}
         loading={!filePreviewError && !filePreviewUri}
-        onAi={content.trim() ? openEnhanceSheet : undefined}
         onBack={leaveFileViewer}
-        onEdit={() => { leaveFileViewer(); setDocumentSearchQuery(""); setEditorEditing(true); }}
-        onHistory={selectedDocument ? () => openHistoryChooser(selectedDocument) : undefined}
         onMenu={() => { if (selectedDocument) showDocumentActions(selectedDocument); }}
         onRenderError={setFilePreviewError}
-        pdfUri={filePreviewUri}
+        htmlUri={selectedDocument?.extension !== "pdf" ? filePreviewUri : undefined}
+        pdfUri={selectedDocument?.extension === "pdf" ? filePreviewUri : undefined}
         title={selectedDocument ? documentDisplayName(selectedDocument) : "File"}
       /> : <ScrollView
         automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
@@ -3113,6 +3205,7 @@ export function KnowledgeWorkspace() {
                 </View>
               ) : (
                 <View style={styles.rootDocuments}>
+                  {folderContentTab === "files" && visibleUploadBatch.length ? <LoadingText text={`Processing ${visibleUploadBatch.length} ${visibleUploadBatch.length === 1 ? "file" : "files"}, this might take a while...`} /> : null}
                   {folderContentTab === "files" ? visibleUploadBatch.map((item) => <ProcessingDocumentButton key={item.id} name={item.name} />) : visibleProcessingScan ? <ProcessingDocumentButton key={visibleProcessingScan.id} name={visibleProcessingScan.name} /> : null}
                   {rootTabDocuments.length ? rootTabDocuments.map((document) => (
                     <Button accessibilityState={{ selected: selectedDocuments.some(({ key }) => key === document.key) }} contentMode="raw" key={document.key} onLongPress={() => handleDocumentLongPress(document)} onPress={() => handleDocumentPress(document)} size="sm" style={[styles.documentButton, selectedDocuments.some(({ key }) => key === document.key) && styles.selectedDocumentItem]} variant={selectedDocuments.some(({ key }) => key === document.key) ? "ghost" : "secondary"}>
@@ -3172,6 +3265,7 @@ export function KnowledgeWorkspace() {
               </View>
             ) : (
               <View style={[styles.folderDocuments, styles.folderTabContent]}>
+                {folderContentTab === "files" && visibleUploadBatch.length ? <LoadingText text={`Processing ${visibleUploadBatch.length} ${visibleUploadBatch.length === 1 ? "file" : "files"}, this might take a while...`} /> : null}
                 {folderContentTab === "files" ? visibleUploadBatch.map((item) => <ProcessingDocumentButton key={item.id} name={item.name} />) : visibleProcessingScan ? <ProcessingDocumentButton key={visibleProcessingScan.id} name={visibleProcessingScan.name} /> : null}
                 {folderTabDocuments.length ? folderTabDocuments.map((document) => (
                   <Button accessibilityState={{ selected: selectedDocuments.some(({ key }) => key === document.key) }} contentMode="raw" key={document.key} onLongPress={() => handleDocumentLongPress(document)} onPress={() => handleDocumentPress(document)} size="sm" style={[styles.documentButton, selectedDocuments.some(({ key }) => key === document.key) && styles.selectedDocumentItem]} variant={selectedDocuments.some(({ key }) => key === document.key) ? "ghost" : "secondary"}>
@@ -3307,15 +3401,15 @@ export function KnowledgeWorkspace() {
       />
 
       <BottomSheet
-        description={activeSheet === "create" ? "Choose what to add to the current folder." : activeSheet === "versions" ? "Choose a version of this document to open or download." : activeSheet === "audioVersions" ? "Generated audio has its own history, independent from document versions." : activeSheet === "summary" ? "Review the match, then open its source document." : undefined}
-        dismissible={!versionActionKey && !generatingAudioVersion && !destinationLoading && !documentActionLoading && !bulkLoading}
+        description={activeSheet === "create" ? "Choose what to add to the current folder." : activeSheet === "versions" ? "Choose a version of this document to open or download." : activeSheet === "audioVersions" ? "Generated audio has its own history, independent from document versions." : activeSheet === "summarize" ? "Find the document's primary topics, then choose one to summarize." : activeSheet === "summaryVersions" ? "Open any generated summary for this document." : undefined}
+        dismissible={!versionActionKey && !summaryActionKey && !generatingAudioVersion && !generatingSummary && !loadingSummaryTopics && !destinationLoading && !documentActionLoading && !bulkLoading}
         footer={mutationFooter()}
         hideHeading={activeSheet === "create" || activeSheet === "documentActions" || activeSheet === "enhance" || activeSheet === "historyChooser" || activeSheet === "bulkActions" || compactDelete}
-        mutation={activeSheet === "documents" || activeSheet === "folder" || activeSheet === "folders" || activeSheet === "versions" || activeSheet === "audioVersions" || activeSheet === "destinationBrowser" || activeSheet === "folderDetails"}
+        mutation={activeSheet === "documents" || activeSheet === "folder" || activeSheet === "folders" || activeSheet === "versions" || activeSheet === "audioVersions" || activeSheet === "summarize" || activeSheet === "summaryVersions" || activeSheet === "summaryReader" || activeSheet === "destinationBrowser" || activeSheet === "folderDetails" || activeSheet === "documentDetails"}
         onOpenChange={(open) => { if (!open) closeSheet(); }}
         open={sheetOpen}
         tall={activeSheet === "library" || activeSheet === "documents" || activeSheet === "folders" || activeSheet === "scanSources" || activeSheet === "versions" || activeSheet === "audioVersions"}
-        title={activeSheet === "enhance" ? "AI actions" : activeSheet === "historyChooser" ? "Document history" : activeSheet === "versions" ? "Document versions" : activeSheet === "audioVersions" ? "Audio versions" : activeSheet === "scanSources" ? "Scanned pages" : activeSheet === "deleteDocument" ? `Delete ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "bulkDelete" ? "Delete selected items" : activeSheet === "folder" ? "Create folder" : activeSheet === "documents" ? "Documents and files" : activeSheet === "folders" ? "Folders" : activeSheet === "destinationBrowser" ? destinationAction === "upload" ? destinationFolder?.name ?? "Archive" : destinationAction === "move" ? "Move to folder" : "Copy to folder" : activeSheet === "library" ? "Browse Archive" : activeSheet === "documentActions" ? selectedDocument?.name ?? "Document actions" : activeSheet === "documentDetails" ? `Edit ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "destination" ? destinationAction === "upload" ? "Upload files" : "Choose destination" : activeSheet === "summary" ? selectedSummary?.name ?? "Document summary" : activeSheet === "folderActions" ? selectedFolder?.name ?? "Folder actions" : activeSheet === "folderDetails" ? "Edit folder" : "New in Archive"}
+        title={activeSheet === "enhance" ? "AI actions" : activeSheet === "summarize" ? "Summarize document" : activeSheet === "summaryVersions" ? "Summary versions" : activeSheet === "summaryReader" ? selectedSummary?.topic ?? `Summary ${selectedSummary?.version ?? ""}` : activeSheet === "historyChooser" ? "Document history" : activeSheet === "versions" ? "Document versions" : activeSheet === "audioVersions" ? "Audio versions" : activeSheet === "scanSources" ? "Scanned pages" : activeSheet === "deleteDocument" ? `Delete ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "bulkDelete" ? "Delete selected items" : activeSheet === "folder" ? "Create folder" : activeSheet === "documents" ? "Documents and files" : activeSheet === "folders" ? "Folders" : activeSheet === "destinationBrowser" ? destinationAction === "upload" ? destinationFolder?.name ?? "Archive" : destinationAction === "move" ? "Move to folder" : "Copy to folder" : activeSheet === "library" ? "Browse Archive" : activeSheet === "documentActions" ? selectedDocument?.name ?? "Document actions" : activeSheet === "documentDetails" ? `Edit ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "destination" ? destinationAction === "upload" ? "Upload files" : "Choose destination" : activeSheet === "folderActions" ? selectedFolder?.name ?? "Folder actions" : activeSheet === "folderDetails" ? "Edit folder" : "New in Archive"}
       >
         {sheetError ? <Text accessibilityRole="alert" style={styles.notice}>{sheetError}</Text> : null}
         {compactDelete ? <View style={styles.compactSheetActions}>
@@ -3340,6 +3434,7 @@ export function KnowledgeWorkspace() {
           <View style={styles.historyChoices}>
             <BottomSheetItem onPress={() => void openVersionHistory()} style={styles.sheetAction}>Document versions</BottomSheetItem>
             <BottomSheetItem onPress={() => void openAudioVersionHistory()} style={styles.sheetAction}>Audio versions</BottomSheetItem>
+            <BottomSheetItem onPress={() => void openSummaryVersionHistory()} style={styles.sheetAction}>Summary versions</BottomSheetItem>
           </View>
         ) : null}
         {activeSheet === "documentActions" && selectedDocument ? (
@@ -3396,15 +3491,40 @@ export function KnowledgeWorkspace() {
             </View>
           </View>
         ) : null}
-        {activeSheet === "summary" && selectedSummary ? (
-          <View style={styles.summaryPanel}>
-            <View style={styles.enhanceIdentity}>
-              <FileIcon size="lg" variant="accent" />
-              <View style={styles.enhanceCopy}><Text style={styles.rowTitle}>{selectedSummary.name}</Text><Text style={styles.meta}>SEARCH SUMMARY</Text></View>
-            </View>
-            {summaryLoading ? <Text style={styles.empty}>Creating summary...</Text> : selectedSummary.summary ? <Text style={styles.summaryText}>{selectedSummary.summary}</Text> : null}
-            <Button disabled={summaryLoading || openingDocumentKey !== undefined} onPress={() => void openSummaryDocument()} size="lg" variant="primary">Open document</Button>
+        {activeSheet === "summarize" ? (
+          <View style={styles.summaryTopicPanel}>
+            {!loadingSummaryTopics && summaryTopics.length === 0 ? <Text style={styles.empty}>Press Summarize to find up to 10 topics in this document.</Text> : null}
+            {loadingSummaryTopics ? Array.from({ length: 3 }, (_, index) => (
+              <View accessibilityLabel="Generating document topics" accessibilityRole="progressbar" key={index} style={styles.audioVersionSkeletonRow}>
+                <View style={styles.audioVersionSkeletonIcon} />
+                <View style={styles.audioVersionSkeletonCopy}><View style={styles.audioVersionSkeletonTitle} /><View style={styles.audioVersionSkeletonSubtitle} /></View>
+              </View>
+            )) : summaryTopics.map((topic) => <Button disabled={generatingSummary} key={topic} onPress={() => void generateSummaryForTopic(topic)} size="lg" variant="secondary">{topic}</Button>)}
           </View>
+        ) : null}
+        {activeSheet === "summaryVersions" ? (
+          <View style={styles.summaryVersionPanel}>
+            {!loadingSummaries && summaries.length === 0 ? <Text style={styles.empty}>No summaries yet. Choose a document topic to create one.</Text> : null}
+            <ScrollView contentContainerStyle={styles.audioVersionList} showsVerticalScrollIndicator={false}>
+              {loadingSummaries ? Array.from({ length: 3 }, (_, index) => (
+                <View accessibilityLabel={generatingSummary ? "Generating document summary" : "Loading summary versions"} accessibilityRole="progressbar" key={index} style={styles.audioVersionSkeletonRow}>
+                  <View style={styles.audioVersionSkeletonIcon} />
+                  <View style={styles.audioVersionSkeletonCopy}><View style={styles.audioVersionSkeletonTitle} /><View style={styles.audioVersionSkeletonSubtitle} /></View>
+                </View>
+              )) : summaries.map((summary) => (
+                <Button contentMode="raw" disabled={Boolean(summaryActionKey)} key={summary.key} loading={summaryActionKey === summary.key} onPress={() => void openSummaryReader(summary)} size="lg" style={styles.versionMain} variant="secondary">
+                  <FileIcon size="md" />
+                  <View style={styles.resultText}><Text numberOfLines={1} style={styles.rowTitle}>{summary.topic ?? `Summary ${summary.version}`}</Text><Text style={styles.rowSubtitle}>Version {summary.version} · {new Date(summary.createdAt).toLocaleString()}</Text></View>
+                </Button>
+              ))}
+            </ScrollView>
+          </View>
+        ) : null}
+        {activeSheet === "summaryReader" && selectedSummary ? (
+          <ScrollView contentContainerStyle={styles.summaryReader} showsVerticalScrollIndicator={false}>
+            <Text style={styles.meta}>SUMMARY VERSION {selectedSummary.version}</Text>
+            <Text selectable style={styles.summaryText}>{selectedSummary.summary}</Text>
+          </ScrollView>
         ) : null}
         {activeSheet === "destination" ? (
           <View style={styles.destinationPanel}>
@@ -3430,6 +3550,7 @@ export function KnowledgeWorkspace() {
         ) : null}
         {activeSheet === "enhance" ? (
           <View style={styles.enhancePanel}>
+            <Button disabled={!documentKeyRef.current || saveState !== "saved"} onPress={openSummarizeSheet} size="lg" variant="secondary">Summarize document</Button>
             <Button onPress={confirmEnhancementWithCore} size="lg" variant="secondary">Enhance document</Button>
             <Button disabled={!documentKeyRef.current || saveState !== "saved"} onPress={confirmTranslationWithCore} size="lg" variant="secondary">Translate document</Button>
           </View>
@@ -3645,7 +3766,9 @@ const styles = StyleSheet.create({
   audioVersionSkeletonCopy: { flex: 1, gap: 6 },
   audioVersionSkeletonTitle: { height: 12, width: "42%", borderRadius: radii.sm, backgroundColor: palette.hairlineBright },
   audioVersionSkeletonSubtitle: { height: 9, width: "68%", borderRadius: radii.sm, backgroundColor: palette.hairlineBright },
-  summaryPanel: { gap: 16 },
+  summaryTopicPanel: { flex: 1, gap: spacing.sm },
+  summaryVersionPanel: { flex: 1, minHeight: 0, gap: spacing.md },
+  summaryReader: { flexGrow: 1, gap: spacing.md, paddingBottom: spacing.xl },
   summaryText: { color: palette.silver300, fontFamily: fonts.regular, fontSize: 15, lineHeight: 24 },
   destinationPanel: { flex: 1, gap: 12 },
   bulkActionList: { width: "100%", gap: spacing.sm },

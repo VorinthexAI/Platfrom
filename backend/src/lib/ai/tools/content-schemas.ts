@@ -134,6 +134,21 @@ const versionDataSchema = z.object({ version: contentDocumentVersionSchema }).st
 const projectedVersionDataSchema = z.object({ version: contentProjectedDocumentVersionSchema }).strict();
 const fileDataSchema = z.object({ documentKey: keySchema, format: z.string().trim().min(1), fileName: nameSchema, mimeType: textSchema, encoding: z.literal('base64'), content: z.string() }).strict();
 const generatedTextDataSchema = z.object({ documentKey: keySchema, text: z.string(), language: z.string().trim().min(1).optional(), persistedDocumentKey: keySchema.optional() }).strict();
+const documentSummaryMetadataShape = {
+  key: keySchema,
+  documentKey: keySchema,
+  version: z.number().int().positive(),
+  summary: z.string().trim().min(1),
+  topic: textSchema.optional(),
+  style: z.enum(['brief', 'detailed', 'executive', 'bullet-points', 'technical']),
+  language: textSchema.optional(),
+  sourceContentHash: z.string().regex(/^[a-f0-9]{64}$/),
+  sourceTitle: nameSchema,
+  sourceDocumentUpdatedAt: dateTimeSchema,
+  createdAt: dateTimeSchema,
+};
+export const contentDocumentSummarySchema = z.object(documentSummaryMetadataShape).strict();
+const generatedSummaryDataSchema = z.object({ documentKey: keySchema, text: z.string().trim().min(1), summary: contentDocumentSummarySchema.optional() }).strict();
 const enhancedContentDataSchema = z.object({ content: z.string().trim().min(1) }).strict();
 const bookBriefShape = {
   scopeKey: keySchema,
@@ -281,6 +296,8 @@ export const contentToolContracts = {
     if (value.persistAudio && value.documentKeys.length !== 1) context.addIssue({ code: z.ZodIssueCode.custom, path: ['documentKeys'], message: 'persisted audio generation accepts exactly one document' });
   }), output: contentBatchOutputSchema(documentReadDataSchema) },
   'document.list-audio-versions': { description: 'List independently generated full-audio versions for documents.', input: z.object({ documentKeys: keysSchema, cursor: cursorSchema.optional(), limit: limitSchema.optional() }).strict(), output: contentBatchOutputSchema(z.object({ documentKey: keySchema, audioVersions: z.array(contentDocumentAudioVersionSchema), cursor: cursorSchema.optional() }).strict()) },
+  'document.list-summaries': { description: 'List immutable generated summary history for documents.', input: z.object({ documentKeys: keysSchema, cursor: cursorSchema.optional(), limit: limitSchema.optional() }).strict(), output: contentBatchOutputSchema(z.object({ documentKey: keySchema, summaries: z.array(contentDocumentSummarySchema), cursor: cursorSchema.optional() }).strict()) },
+  'document.find-summary': { description: 'Find persisted document summaries by key.', input: z.object({ summaryKeys: keysSchema }).strict(), output: contentBatchOutputSchema(z.object({ summary: contentDocumentSummarySchema }).strict()) },
   'document.update': { description: 'Update document content.', input: z.object({ updates: z.array(documentUpdateSchema).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(documentDataSchema) },
   'document.rename': { description: 'Rename documents.', input: z.object({ renames: z.array(z.object({ documentKey: keySchema, name: nameSchema }).strict()).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(documentDataSchema) },
   'document.move': { description: 'Move documents to a scoped folder or the Content root.', input: z.object({ moves: z.array(z.object({ documentKey: keySchema, targetScopeKey: keySchema, targetFolderKey: keySchema.optional() }).strict()).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(documentDataSchema) },
@@ -288,7 +305,7 @@ export const contentToolContracts = {
   'document.archive': { description: 'Content documents.', input: z.object({ documentKeys: keysSchema, atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(documentDataSchema) },
   'document.restore': { description: 'Restore archived documents.', input: z.object({ documentKeys: keysSchema, restoreAncestors: z.boolean().optional(), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(documentDataSchema) },
   'document.delete': { description: 'Permanently delete documents and optionally their versions and shares.', input: z.object({ documentKeys: keysSchema, deleteVersions: z.boolean().optional(), deleteShares: z.boolean().optional(), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(emptyDataSchema) },
-  'document.download': { description: 'Download original files or generated plain-text files.', input: z.object({ documentKeys: keysSchema, format: z.enum(['original', 'txt']).default('original') }).strict(), output: contentBatchOutputSchema(fileDataSchema) },
+  'document.download': { description: 'Download original files, sandboxed HTML previews, or generated plain-text files.', input: z.object({ documentKeys: keysSchema, format: z.enum(['original', 'html', 'txt']).default('original') }).strict(), output: contentBatchOutputSchema(fileDataSchema) },
   'document.export': { description: 'Export documents as plain text.', input: z.object({ exports: z.array(z.object({ documentKey: keySchema, format: z.literal('txt') }).strict()).min(1).max(100), atomic: atomicSchema }).strict(), output: contentBatchOutputSchema(fileDataSchema) },
   'document.share': { description: 'Create document shares.', input: z.object({ shares: z.array(z.object({ documentKey: keySchema, permission: z.enum(['read', 'comment']), expiresAt: dateTimeSchema.optional(), password: z.string().min(1).max(256).optional() }).strict()).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(createdShareDataSchema) },
   'document.unshare': { description: 'Revoke document shares.', input: z.object({ shareKeys: keysSchema.optional(), documentKeys: keysSchema.optional(), atomic: atomicSchema, ...idempotencyShape }).strict().refine((value) => Number(value.shareKeys !== undefined) + Number(value.documentKeys !== undefined) === 1, 'exactly one of shareKeys or documentKeys is required'), output: contentBatchOutputSchema(unsharedDataSchema) },
@@ -300,7 +317,11 @@ export const contentToolContracts = {
   'document.list-versions': { description: 'List ordered versions grouped by document.', input: z.object({ documentKeys: keysSchema, cursor: cursorSchema.optional(), limit: limitSchema.optional() }).strict(), output: contentBatchOutputSchema(z.object({ documentKey: keySchema, versions: z.array(contentDocumentVersionSchema), cursor: cursorSchema.optional() }).strict()) },
   'document.restore-version': { description: 'Restore document versions.', input: z.object({ restores: z.array(z.object({ documentKey: keySchema, versionKey: keySchema, createBackupVersion: z.boolean().default(true) }).strict()).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(documentDataSchema) },
   'document.delete-version': { description: 'Delete document versions.', input: z.object({ versionKeys: keysSchema, atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(emptyDataSchema) },
-  'document.summarize': { description: 'Summarize documents.', input: z.object({ documentKeys: keysSchema, style: z.enum(['brief', 'detailed', 'executive', 'bullet-points', 'technical']).optional(), language: textSchema.optional(), persist: z.boolean().optional(), combine: z.boolean().optional(), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(generatedTextDataSchema) },
+  'document.summarize': { description: 'Summarize documents and optionally persist one immutable summary version.', input: z.object({ documentKeys: keysSchema, topic: textSchema.max(500).optional(), style: z.enum(['brief', 'detailed', 'executive', 'bullet-points', 'technical']).default('brief'), language: textSchema.optional(), persist: z.boolean().optional(), combine: z.boolean().optional(), atomic: atomicSchema, ...idempotencyShape }).strict().superRefine((value, context) => {
+    if (value.persist && value.documentKeys.length !== 1) context.addIssue({ code: z.ZodIssueCode.custom, path: ['documentKeys'], message: 'persisted summaries accept exactly one document' });
+    if (value.persist && value.combine) context.addIssue({ code: z.ZodIssueCode.custom, path: ['combine'], message: 'combine is only available for summary previews' });
+  }), output: contentBatchOutputSchema(generatedSummaryDataSchema) },
+  'document.topics': { description: 'Generate up to ten distinct concise topics for one document.', input: z.object({ documentKey: keySchema }).strict(), output: z.object({ documentKey: keySchema, topics: z.array(textSchema.max(200)).max(10) }).strict() },
   'document.translate': { description: 'Translate documents.', input: z.object({ documentKeys: keysSchema, targetLanguage: textSchema, sourceLanguage: textSchema.optional(), preserveFormatting: z.boolean().optional(), mode: z.enum(['preview', 'replace', 'copy']).default('preview'), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(generatedTextDataSchema) },
   'document.rewrite': { description: 'Rewrite documents from an instruction.', input: z.object({ rewrites: z.array(z.object({ documentKey: keySchema, instruction: textSchema.max(8_000), tone: textSchema.optional(), audience: textSchema.optional(), length: z.enum(['shorter', 'same', 'longer']).optional(), mode: z.enum(['preview', 'replace', 'copy']).default('preview') }).strict()).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(generatedTextDataSchema) },
   'scope.document.search': { description: 'Search documents available from a scope.', input: z.object({ scopeKey: keySchema, ...searchInputShape }).strict(), output: contentSearchOutputSchema },

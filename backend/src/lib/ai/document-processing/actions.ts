@@ -224,7 +224,12 @@ export async function documentCleanup(input: { text: string }, options: { clean?
   return observed('document-cleanup', {}, options.logger ?? defaultLogger, async () => {
     try {
       const clean = options.clean;
-      if (!clean) throw new Error('The document cleanup model is unavailable.');
+      if (!clean) {
+        const content = sanitizeDocumentContent(input.text);
+        if (!content) throw new Error('The document contains no text to clean.');
+        if (content.length > maxExtractedCharacters()) throw new Error('Cleaned document content exceeds the configured limit.');
+        return { content };
+      }
       const chunks = chunkDocumentText(input.text);
       if (!chunks.length) throw new Error('The document contains no text to clean.');
       const cleaned = new Array<string>(chunks.length);

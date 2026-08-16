@@ -684,3 +684,18 @@
     transform: translateY(0.5px) scale(0.9);
   }
 }
+@keyframes vui-loading-text-pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+.vui-loading-text {
+  animation: vui-loading-text-pulse 1.8s ease-in-out infinite;
+  background: linear-gradient(90deg, #56616b, #f5f7f8, #56616b);
+  background-clip: text;
+  color: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vui-loading-text { animation: none; opacity: 0.75; }
+}

@@ -4,6 +4,7 @@ import { documentShareSchema, type DocumentShare } from './document-shares.node'
 import { shareSchema, type Share } from './shares.node';
 import { documentVersionSchema, type DocumentVersion } from './document-versions.node';
 import { documentAudioVersionSchema, type DocumentAudioVersion } from './document-audio-versions.node';
+import { documentSummarySchema, type DocumentSummary } from './document-summaries.node';
 import { newId } from '@/lib/ids';
 import { toArangoDoc, withArangoKey } from './base';
 import { db, withTransaction } from './client';
@@ -110,7 +111,7 @@ async function scopedUpdate<T>(
 
 async function scopedDelete(
   executor: ContentQueryExecutor,
-  collection: 'folders' | 'documents' | 'documentVersions' | 'documentAudioVersions' | 'documentShares' | 'shares',
+  collection: 'folders' | 'documents' | 'documentVersions' | 'documentAudioVersions' | 'documentSummaries' | 'documentShares' | 'shares',
   scopeKey: string,
   key: string,
 ): Promise<boolean> {
@@ -190,6 +191,17 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       const cursor = await executor.query('FOR audio IN documentAudioVersions FILTER audio.scopeKey == @scopeKey && audio.documentKey IN @documentKeys SORT audio.version DESC RETURN audio', { scopeKey, documentKeys });
       const values = cursor.all ? await cursor.all() : [];
       return values.map((value) => documentAudioVersionSchema.parse(withArangoKey(value as Record<string, unknown>)));
+    },
+    async getSummary(key: string): Promise<DocumentSummary | null> {
+      const cursor = await executor.query('RETURN DOCUMENT(documentSummaries, @key)', { key });
+      const value = await cursor.next();
+      return value ? documentSummarySchema.parse(withArangoKey(value as Record<string, unknown>)) : null;
+    },
+    async listSummaries(scopeKey: string, documentKeys: string[]): Promise<DocumentSummary[]> {
+      if (documentKeys.length === 0) return [];
+      const cursor = await executor.query('FOR summary IN documentSummaries FILTER summary.scopeKey == @scopeKey && summary.documentKey IN @documentKeys SORT summary.version DESC RETURN summary', { scopeKey, documentKeys });
+      const values = cursor.all ? await cursor.all() : [];
+      return values.map((value) => documentSummarySchema.parse(withArangoKey(value as Record<string, unknown>)));
     },
     async insertFolder(folder: Folder): Promise<Folder> {
       const parsed = folderSchema.parse(folder);
@@ -313,6 +325,34 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       }
       throw new Error('Audio version allocation failed.');
     },
+    async createSummary(input: Omit<DocumentSummary, 'version'>): Promise<DocumentSummary> {
+      const summary = documentSummarySchema.omit({ version: true }).parse(input);
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        try {
+          const cursor = await executor.query(`
+            LET document = DOCUMENT(documents, @documentKey)
+            FILTER document != null && document.scopeKey == @scopeKey
+            FILTER document.deletedAt == null
+            FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
+            LET nextVersion = FIRST(
+              FOR existing IN documentSummaries
+                FILTER existing.documentKey == @documentKey
+                COLLECT AGGREGATE maximum = MAX(existing.version)
+                RETURN (maximum || 0) + 1
+            )
+            INSERT MERGE(@summary, { version: nextVersion }) INTO documentSummaries
+            RETURN NEW
+          `, { documentKey: summary.documentKey, scopeKey: summary.scopeKey, summary: toArangoDoc(summary) });
+          const created = await cursor.next();
+          if (!created) throw new Error('Summary owner is pending deletion.');
+          return documentSummarySchema.parse(withArangoKey(created as Record<string, unknown>));
+        } catch (error) {
+          if ((error as { errorNum?: number }).errorNum !== 1210 || attempt === 9) throw error;
+          await new Promise((resolve) => setTimeout(resolve, (attempt + 1) * 5));
+        }
+      }
+      throw new Error('Summary version allocation failed.');
+    },
     updateFolder(scopeKey: string, key: string, patch: ScopedFolderPatch) {
       if (('name' in patch || 'description' in patch) && patch.embedding === undefined) throw new Error('Folder semantic updates require a fresh embedding.');
       if (patch.embedding !== undefined && patch.embedding.length) currentEmbeddingSchema.parse(patch.embedding);
@@ -383,6 +423,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
     deleteDocument(scopeKey: string, key: string) { return scopedDelete(executor, 'documents', scopeKey, key); },
     deleteVersion(scopeKey: string, key: string) { return scopedDelete(executor, 'documentVersions', scopeKey, key); },
     deleteAudioVersion(scopeKey: string, key: string) { return scopedDelete(executor, 'documentAudioVersions', scopeKey, key); },
+    deleteSummary(scopeKey: string, key: string) { return scopedDelete(executor, 'documentSummaries', scopeKey, key); },
     async deleteShare(scopeKey: string, key: string) {
       const mode = await shareStorageMode(executor);
       if (mode === 'global') return scopedDelete(executor, 'shares', scopeKey, key);
@@ -410,6 +451,6 @@ export function withContentPersistenceTransaction<T>(
   operation: (persistence: ReturnType<typeof createContentPersistence>) => Promise<T>,
 ): Promise<T> {
   return shareStorageMode(db as unknown as ContentQueryExecutor).then((mode) =>
-    withTransaction(['folders', 'documents', 'documentVersions', 'documentAudioVersions', 'scopes', ...(mode === 'legacy' ? ['documentShares'] : mode === 'global' ? ['shares'] : ['documentShares', 'shares'])], (transaction) =>
+    withTransaction(['folders', 'documents', 'documentVersions', 'documentAudioVersions', 'documentSummaries', 'scopes', ...(mode === 'legacy' ? ['documentShares'] : mode === 'global' ? ['shares'] : ['documentShares', 'shares'])], (transaction) =>
       operation(createContentPersistence(transaction as unknown as ContentQueryExecutor))));
 }

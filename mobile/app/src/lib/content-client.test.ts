@@ -50,12 +50,15 @@ const {
   copyContentSelection,
   downloadContentDocument,
   enhanceContent,
+  findContentDocumentSummary,
   findContentDocumentVersion,
   generateContentDocumentAudio,
   getContentContext,
+  getContentDocumentTopics,
   loadInitialContentLocation,
   listContentSearchHistory,
   listContentDocumentAudioVersions,
+  listContentDocumentSummaries,
   moveContentFolder,
   moveContentDocument,
   moveContentSelection,
@@ -185,6 +188,14 @@ test("archives notes and uploaded files through the same document lifecycle", as
 test("normalizes platform PDF MIME aliases without changing the picker filename", async () => {
   await uploadContentDocument({ name: "Quarterly Report FINAL.PDF", type: "application/x-pdf; charset=binary", size: 8, base64: "JVBERi0=" }, "folder");
   expect(calls[0]?.body.input.file).toMatchObject({ filename: "Quarterly Report FINAL.PDF", mimeType: "application/pdf" });
+});
+
+test("requests sandboxed HTML for in-app original previews", async () => {
+  responseForTool = (tool) => tool === "document.download"
+    ? { data: { success: true, data: { results: [{ success: true, data: { documentKey: "document", format: "html", fileName: "Report.html", mimeType: "text/html; charset=utf-8", encoding: "base64", content: "PGh0bWw+PC9odG1sPg==" } }] } } }
+    : undefined;
+  await expect(downloadContentDocument("document", "html")).resolves.toMatchObject({ format: "html", fileName: "Report.html" });
+  expect(calls[0]?.body.input).toEqual({ documentKeys: ["document"], format: "html" });
 });
 
 test("adds a provider-omitted extension without replacing the picker filename", async () => {
@@ -355,15 +366,31 @@ test("scopes search and replayable history to a folder", async () => {
   expect(calls[1]?.body.input).toEqual({ scopeKey: "scope-authenticated", folderKey: "folder", includeDescendants: true, limit: 8 });
 });
 
-test("runs fast combined search without summaries and summarizes on demand", async () => {
-  responseForTool = (tool) => tool === "scope.content.search"
-    ? { data: { success: true, data: { query: "roadmap", cached: false, folders: [{ key: "folder", scopeKey: "scope-authenticated", name: "Roadmaps", score: 0.8 }], documents: [{ documentKey: "document", scopeKey: "scope-authenticated", name: "Roadmap", extension: "docx", score: 0.72 }] } } }
-    : { data: { success: true, data: { results: [{ success: true, data: { text: "A concise roadmap summary." } }] } } };
+test("runs fast combined search without summaries", async () => {
+  responseForTool = () => ({ data: { success: true, data: { query: "roadmap", cached: false, folders: [{ key: "folder", scopeKey: "scope-authenticated", name: "Roadmaps", score: 0.8 }], documents: [{ documentKey: "document", scopeKey: "scope-authenticated", name: "Roadmap", extension: "docx", score: 0.72 }] } } });
 
   expect(await searchContentMatches("roadmap")).toMatchObject({ folders: [{ key: "folder" }], documents: [{ documentKey: "document", extension: "docx" }] });
-  expect(await summarizeContentDocument("document")).toBe("A concise roadmap summary.");
   expect(calls[0]?.body.input).toEqual({ scopeKey: "scope-authenticated", query: "roadmap", includeSummaries: false, minimumScore: 0.55 });
-  expect(calls[1]?.body.input).toEqual({ documentKeys: ["document"], style: "brief", persist: false });
+});
+
+test("generates topics and persists, lists, and opens summary versions", async () => {
+  const summary = { key: "summary", documentKey: "document", version: 1, summary: "A concise roadmap summary.", topic: "Launch plan", style: "brief", sourceContentHash: "a".repeat(64), sourceTitle: "Roadmap", sourceDocumentUpdatedAt: "2026-08-10T00:00:00.000Z", createdAt: "2026-08-10T00:01:00.000Z" };
+  responseForTool = (tool) => tool === "document.topics"
+    ? { data: { success: true, data: { documentKey: "document", topics: ["Launch plan", "Risks"] } } }
+    : tool === "document.summarize"
+      ? { data: { success: true, data: { results: [{ success: true, data: { text: summary.summary, summary } }] } } }
+      : tool === "document.list-summaries"
+        ? { data: { success: true, data: { results: [{ success: true, data: { summaries: [summary] } }] } } }
+        : { data: { success: true, data: { results: [{ success: true, data: { summary } }] } } };
+
+  await expect(getContentDocumentTopics("document")).resolves.toEqual(["Launch plan", "Risks"]);
+  await expect(summarizeContentDocument("document", "Launch plan")).resolves.toEqual(summary);
+  await expect(listContentDocumentSummaries("document")).resolves.toEqual([summary]);
+  await expect(findContentDocumentSummary("summary")).resolves.toEqual(summary);
+  expect(calls[0]?.body.input).toEqual({ documentKey: "document" });
+  expect(calls[1]?.body.input).toMatchObject({ documentKeys: ["document"], topic: "Launch plan", style: "brief", persist: true, idempotencyKey: expect.any(String) });
+  expect(calls[2]?.body.input).toEqual({ documentKeys: ["document"], cursor: undefined, limit: 100 });
+  expect(calls[3]?.body.input).toEqual({ summaryKeys: ["summary"] });
 });
 
 test("scopes fast semantic search to a folder and its descendants", async () => {

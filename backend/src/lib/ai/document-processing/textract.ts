@@ -157,6 +157,7 @@ export interface DocumentImageOcr {
 
 export function textractBlocksToExtractionResult(blocks: Block[]): ExtractionResult {
   const uniqueLines = [...new Map(blocks.filter((block) => block.BlockType === 'LINE' && block.Text?.trim()).map((block, index) => [block.Id ?? `anonymous-${index}`, block])).values()];
+  const confidences = uniqueLines.map((line) => line.Confidence).filter((confidence): confidence is number => Number.isFinite(confidence));
   const pages = new Map<number, Block[]>();
   for (const line of uniqueLines) {
     const pageLines = pages.get(line.Page ?? 1) ?? [];
@@ -168,7 +169,14 @@ export function textractBlocksToExtractionResult(blocks: Block[]): ExtractionRes
     .map((line) => line.Text!.trim()).join('\n')).filter(Boolean).join('\n\n');
   return {
     extractedText,
-    metadata: { provider: 'aws-textract', pages: pages.size },
+    metadata: {
+      provider: 'aws-textract',
+      pages: pages.size,
+      ...(confidences.length ? {
+        averageConfidence: confidences.reduce((sum, confidence) => sum + confidence, 0) / confidences.length,
+        minimumConfidence: Math.min(...confidences),
+      } : {}),
+    },
   };
 }
 

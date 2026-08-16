@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
-import { normalizeDocumentTranscription, scanDocumentImages } from '.';
+import { isReliableDocumentOcr, normalizeDocumentTranscription, scanDocumentImages } from '.';
 
 test('preserves ordered pages and reconciles Textract with visual transcription', async () => {
   const uploaded: string[] = [];
@@ -47,17 +47,19 @@ test('cleans retained scan objects when processing fails', async () => {
 });
 
 test('creates OCR content when the visual provider is unavailable', async () => {
+  let captionCalls = 0;
   const output = await scanDocumentImages({
     scopeKey: newId(),
     idempotencyKey: 'ocr-fallback',
     pages: [{ filename: '1.jpg', mimeType: 'image/jpeg', sizeBytes: 4, bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]) }],
   }, 'organization', {
     storage: { async upload(input) { return { storageKey: input.key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
-    ocr: { extract: async () => ({ extractedText: 'Reliable Textract text', blocks: [], metadata: {} }) },
-    signUrl: async () => 'https://images.example/page.jpg',
-    caption: async () => { throw new Error('visual provider unavailable'); },
+    ocr: { extract: async () => ({ extractedText: 'Reliable Textract text', blocks: [], metadata: { averageConfidence: 99, minimumConfidence: 98 } }) },
+    signUrl: async () => { throw new Error('high-confidence OCR should not require a URL'); },
+    caption: async () => { captionCalls += 1; throw new Error('visual provider unavailable'); },
   });
   expect(output.content).toBe('Reliable Textract text');
+  expect(captionCalls).toBe(0);
 });
 
 test('uses OCR content when visual reconciliation fails', async () => {
@@ -77,44 +79,36 @@ test('uses OCR content when visual reconciliation fails', async () => {
   expect(output.content).toBe('Primary OCR');
 });
 
-test('starts every page in both visual stages concurrently while OCR runs in parallel', async () => {
+test('finishes parallel OCR before starting visual work only for uncertain pages', async () => {
   const pageCount = 12;
   let ocrStarted = 0;
   let visualStarted = 0;
   let reconciliationStarted = 0;
   let releaseExtraction!: () => void;
-  let releaseReconciliation!: () => void;
-  let parallelStarted!: () => void;
-  let allReconciliationsStarted!: () => void;
   const extractionGate = new Promise<void>((resolve) => { releaseExtraction = resolve; });
-  const reconciliationGate = new Promise<void>((resolve) => { releaseReconciliation = resolve; });
-  const allStarted = new Promise<void>((resolve) => { parallelStarted = resolve; });
-  const reconciliationStartedSignal = new Promise<void>((resolve) => { allReconciliationsStarted = resolve; });
-  const markStarted = () => { if (ocrStarted === pageCount && visualStarted === pageCount) parallelStarted(); };
+  let allOcrStarted!: () => void;
+  const ocrStartedSignal = new Promise<void>((resolve) => { allOcrStarted = resolve; });
   const operation = scanDocumentImages({
     scopeKey: newId(),
     idempotencyKey: 'parallel-scan',
     pages: Array.from({ length: pageCount }, (_, index) => ({ filename: `${index}.jpg`, mimeType: 'image/jpeg' as const, sizeBytes: 4, bytes: new Uint8Array([0xff, 0xd8, 0xff, index]) })),
   }, 'organization', {
     storage: { async upload(input) { return { storageKey: input.key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
-    ocr: { extract: async () => { ocrStarted += 1; markStarted(); await extractionGate; return { extractedText: 'primary', blocks: [], metadata: {} }; } },
+    ocr: { extract: async () => { ocrStarted += 1; if (ocrStarted === pageCount) allOcrStarted(); await extractionGate; return { extractedText: 'primary', blocks: [], metadata: {} }; } },
     signUrl: async (key) => `https://images.example/${key}`,
     caption: async (input: any) => {
-      if (input.purpose === 'document-transcription') { visualStarted += 1; markStarted(); await extractionGate; return { captions: ['secondary'] }; }
+      if (input.purpose === 'document-transcription') { visualStarted += 1; return { captions: ['secondary'] }; }
       reconciliationStarted += 1;
-      if (reconciliationStarted === pageCount) allReconciliationsStarted();
-      await reconciliationGate;
       return { captions: ['unified'] };
     },
   });
-  await allStarted;
+  await ocrStartedSignal;
   expect(ocrStarted).toBe(pageCount);
-  expect(visualStarted).toBe(pageCount);
+  expect(visualStarted).toBe(0);
   releaseExtraction();
-  await reconciliationStartedSignal;
-  expect(reconciliationStarted).toBe(pageCount);
-  releaseReconciliation();
   const result = await operation;
+  expect(visualStarted).toBe(pageCount);
+  expect(reconciliationStarted).toBe(pageCount);
   expect(result.content.match(/Page \d+/g)).toHaveLength(pageCount);
 });
 
@@ -129,4 +123,10 @@ test('removes tabs, indentation, repeated spaces, and excessive blank lines', ()
 test('collapses Textract-style blank lines between every detected line', () => {
   expect(normalizeDocumentTranscription('Invoice\n\nNumber 42\n\nTotal $10.00\n\nPaid')).toBe('Invoice\nNumber 42\nTotal $10.00\nPaid');
   expect(normalizeDocumentTranscription('Heading\n\nFirst paragraph\nSecond line\n\nClosing paragraph')).toBe('Heading\n\nFirst paragraph\nSecond line\n\nClosing paragraph');
+});
+
+test('requires both average and minimum confidence before skipping visual reconciliation', () => {
+  expect(isReliableDocumentOcr({ extractedText: 'Reliable', metadata: { averageConfidence: 99, minimumConfidence: 95 } })).toBe(true);
+  expect(isReliableDocumentOcr({ extractedText: 'Uncertain', metadata: { averageConfidence: 99, minimumConfidence: 70 } })).toBe(false);
+  expect(isReliableDocumentOcr({ extractedText: 'Unknown', metadata: {} })).toBe(false);
 });

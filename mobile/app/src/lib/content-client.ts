@@ -72,6 +72,20 @@ export type ContentDocumentAudioVersion = {
   url: string;
 };
 
+export type ContentDocumentSummary = {
+  key: string;
+  documentKey: string;
+  version: number;
+  summary: string;
+  topic?: string;
+  style: "brief" | "detailed" | "executive" | "bullet-points" | "technical";
+  language?: string;
+  sourceContentHash: string;
+  sourceTitle: string;
+  sourceDocumentUpdatedAt: string;
+  createdAt: string;
+};
+
 export type ContentSearchDocument = {
   documentKey: string;
   name: string;
@@ -101,7 +115,7 @@ export type ContentSearchHistoryItem = {
 
 export type ContentDocumentDownload = {
   documentKey: string;
-  format: "original" | "txt";
+  format: "original" | "html" | "txt";
   fileName: string;
   mimeType: string;
   encoding: "base64";
@@ -238,7 +252,7 @@ async function callContentTool<T>(tool: string, input: Record<string, unknown>, 
       organizationKey: contentContext.organizationKey,
       agentKey: contentContext.agentKey,
       input,
-    }, { signal, timeout: tool === "document.read" && input.persistAudio === true ? 15 * 60_000 : tool === "document.parse" || tool === "document.scan" ? 5 * 60_000 : 60_000 });
+    }, { signal, timeout: tool === "document.read" && input.persistAudio === true ? 15 * 60_000 : tool === "document.parse" || tool === "document.scan" ? 5 * 60_000 : tool === "document.summarize" || tool === "document.topics" ? 4 * 60_000 : 60_000 });
     if (!response.data.success) throw new Error(response.data.error.message);
     return response.data.data;
   } catch (error) {
@@ -313,6 +327,30 @@ export async function listContentDocumentAudioVersions(documentKey: string) {
     cursor = result.data.cursor;
   } while (cursor);
   return versions;
+}
+
+export async function listContentDocumentSummaries(documentKey: string) {
+  const summaries: ContentDocumentSummary[] = [];
+  let cursor: string | undefined;
+  do {
+    const data = await callContentTool<{
+      results: { success: boolean; data?: { summaries: ContentDocumentSummary[]; cursor?: string }; error?: { message: string } }[];
+    }>("document.list-summaries", { documentKeys: [documentKey], cursor, limit: 100 });
+    const result = data.results[0];
+    if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "Summary versions could not be loaded.");
+    summaries.push(...result.data.summaries);
+    cursor = result.data.cursor;
+  } while (cursor);
+  return summaries;
+}
+
+export async function findContentDocumentSummary(summaryKey: string) {
+  const data = await callContentTool<{
+    results: { success: boolean; data?: { summary: ContentDocumentSummary }; error?: { message: string } }[];
+  }>("document.find-summary", { summaryKeys: [summaryKey] });
+  const result = data.results[0];
+  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The summary could not be loaded.");
+  return result.data.summary;
 }
 
 export async function generateContentDocumentAudio(documentKey: string) {
@@ -470,7 +508,7 @@ export async function archiveContentDocument(documentKey: string) {
   return singleBatchRecord(outcome, outcome.documents, "The document could not be deleted.");
 }
 
-export async function downloadContentDocument(documentKey: string, format: "original" | "txt" = "original") {
+export async function downloadContentDocument(documentKey: string, format: "original" | "html" | "txt" = "original") {
   const data = await callContentTool<{
     results: { success: boolean; data?: ContentDocumentDownload; error?: { message: string } }[];
   }>("document.download", { documentKeys: [documentKey], format });
@@ -606,13 +644,18 @@ export async function searchContentMatches(query: string, signal?: AbortSignal, 
   }, signal);
 }
 
-export async function summarizeContentDocument(documentKey: string, signal?: AbortSignal) {
+export async function getContentDocumentTopics(documentKey: string, signal?: AbortSignal) {
+  const data = await callContentTool<{ documentKey: string; topics: string[] }>("document.topics", { documentKey }, signal);
+  return data.topics;
+}
+
+export async function summarizeContentDocument(documentKey: string, topic: string, signal?: AbortSignal) {
   const data = await callContentTool<{
-    results: { success: boolean; data?: { text: string }; error?: { message: string } }[];
-  }>("document.summarize", { documentKeys: [documentKey], style: "brief", persist: false }, signal);
+    results: { success: boolean; data?: { text: string; summary?: ContentDocumentSummary }; error?: { message: string } }[];
+  }>("document.summarize", { documentKeys: [documentKey], topic, style: "brief", persist: true, idempotencyKey: createContentMutationKey() }, signal);
   const result = data.results[0];
-  if (!result?.success || !result.data?.text) throw new Error(result?.error?.message ?? "The document summary could not be created.");
-  return result.data.text;
+  if (!result?.success || !result.data?.summary) throw new Error(result?.error?.message ?? "The document summary could not be created.");
+  return result.data.summary;
 }
 
 export async function listContentSearchHistory(folderKey?: string, includeDescendants = false) {

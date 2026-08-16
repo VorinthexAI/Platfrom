@@ -95,6 +95,12 @@ describe('Arango migration indexes', () => {
     expect(audio?.indexes).toContainEqual({ fields: ['scopeKey', 'documentKey', 'version'], unique: true });
     expect(audio?.indexes).toContainEqual({ fields: ['storageKey'], unique: true });
   });
+  test('declares private immutable document summary indexes', () => {
+    const summaries = collections.find(({ name }) => name === 'documentSummaries');
+    expect(summaries?.skipEmbedding).toBe(true);
+    expect(summaries?.indexes).toContainEqual({ fields: ['documentKey', 'version'], unique: true });
+    expect(summaries?.indexes).toContainEqual({ fields: ['scopeKey', 'documentKey', 'createdAt'] });
+  });
   test('declares sparse direct-channel identity uniqueness and poll vote uniqueness', async () => {
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
     expect(source).toContain("{ fields: ['organizationKey', 'kind', 'name'], unique: true, sparse: true }");

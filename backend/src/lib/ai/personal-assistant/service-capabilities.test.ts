@@ -13,7 +13,7 @@ const domain = {
 } as unknown as DomainToolContext;
 
 const expected: Array<[AssistantSurface, string[]]> = [
-  ['knowledge-workspace', ['folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy', 'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.translate', 'document.list-versions', 'document.restore-version', 'document.download', 'knowledge.search', 'note.write', 'note.enhance']],
+  ['knowledge-workspace', ['folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy', 'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.translate', 'document.list-versions', 'document.restore-version', 'document.download', 'knowledge.search', 'note.write', 'note.enhance']],
   ['travel-workspace', ['place.list', 'place.create', 'place.visit.create', 'trip.create', 'trip.place.add', 'trip.place.remove']],
   ['signal-workspace', ['email.overview', 'email.sync', 'email.thread.read', 'email.thread.favorite', 'email.draft.create', 'email.draft.update', 'email.draft.send', 'email.disconnect']],
   ['book-workspace', ['book.list', 'book.detail', 'book.chapter.progress', 'book.create-context', 'book.write']],

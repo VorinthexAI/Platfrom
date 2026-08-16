@@ -108,8 +108,31 @@ describe('scoped Content persistence', () => {
     expect(source).toContain('Document destination is pending deletion.');
     expect(source).toContain('Share owner is pending deletion.');
     expect(source).toContain('Version owner is pending deletion.');
+    expect(source).toContain('Summary owner is pending deletion.');
     expect(source.match(/DOCUMENT\(folders,/g)?.length).toBeGreaterThanOrEqual(4);
     expect(source.match(/DOCUMENT\(documents,/g)?.length).toBeGreaterThanOrEqual(3);
+  });
+
+  test('allocates monotonic summary versions and supports scoped history reads', async () => {
+    const summaryKey = 'cm00000000000000000000005';
+    const documentKey = 'cm00000000000000000000003';
+    const createdByKey = 'cm00000000000000000000004';
+    const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
+    const executor: ContentQueryExecutor = {
+      async query(query, bindVars) {
+        calls.push({ query, bindVars });
+        if (query.includes('INSERT MERGE(@summary')) return { async next() { return { ...(bindVars?.summary as object), _key: summaryKey, version: 2 }; } };
+        return { async next() { return undefined; }, async all() { return []; } };
+      },
+    };
+    const persistence = createContentPersistence(executor);
+    const created = await persistence.createSummary({ key: summaryKey, scopeKey, documentKey, summary: 'Saved summary', style: 'brief', sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: timestamp, createdByKey, createdAt: timestamp });
+    expect(created.version).toBe(2);
+    expect(calls[0]?.query).toContain('MAX(existing.version)');
+    expect(calls[0]?.query).toContain('documentSummaries');
+    await persistence.listSummaries(scopeKey, [documentKey]);
+    expect(calls[1]?.query).toContain('summary.scopeKey == @scopeKey && summary.documentKey IN @documentKeys');
+    expect(calls[1]?.query).toContain('SORT summary.version DESC');
   });
 
   test('pushes share lifecycle filters into both legacy and global reads', async () => {

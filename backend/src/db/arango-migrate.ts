@@ -367,7 +367,7 @@ export async function migrateContentVersions(targetDb: Database) {
           || LENGTH(snapshot.chunkEmbeddings[* FILTER !IS_ARRAY(CURRENT) || LENGTH(CURRENT) != @dimensions]) > 0
           || LENGTH(FLATTEN(snapshot.chunkEmbeddings)[* FILTER !IS_NUMBER(CURRENT)]) > 0
           || HAS(snapshot, "embeddingProvider") || HAS(snapshot, "embeddingModel") || HAS(snapshot, "embeddingDimensions")
-          || HAS(snapshot, "embeddingState") || HAS(snapshot, "embeddedAt"))
+          || HAS(snapshot, "embeddingState") || HAS(snapshot, "embeddedAt")))
         SORT snapshot._key
         LIMIT 50
         RETURN snapshot
@@ -432,7 +432,7 @@ export async function migrateContentVersions(targetDb: Database) {
         || LENGTH(snapshot.chunkEmbeddings[* FILTER !IS_ARRAY(CURRENT) || LENGTH(CURRENT) != @dimensions]) > 0
         || LENGTH(FLATTEN(snapshot.chunkEmbeddings)[* FILTER !IS_NUMBER(CURRENT)]) > 0
         || HAS(snapshot, "embeddingProvider") || HAS(snapshot, "embeddingModel") || HAS(snapshot, "embeddingDimensions")
-        || HAS(snapshot, "embeddingState") || HAS(snapshot, "embeddedAt"))
+        || HAS(snapshot, "embeddingState") || HAS(snapshot, "embeddedAt")))
       RETURN 1)
   `, { dimensions });
   const invalid = await verification.next() ?? 0;
@@ -460,7 +460,7 @@ export async function migrateContentDocuments(targetDb: Database) {
           || LENGTH(document.chunkEmbeddings[* FILTER !IS_ARRAY(CURRENT) || LENGTH(CURRENT) != @dimensions]) > 0
           || LENGTH(FLATTEN(document.chunkEmbeddings)[* FILTER !IS_NUMBER(CURRENT)]) > 0
           || HAS(document, "embeddingProvider") || HAS(document, "embeddingModel") || HAS(document, "embeddingDimensions")
-          || HAS(document, "embeddingState") || HAS(document, "embeddedAt"))
+          || HAS(document, "embeddingState") || HAS(document, "embeddedAt")))
         SORT document._key
         LIMIT 50
         RETURN document
@@ -528,7 +528,7 @@ export async function migrateContentDocuments(targetDb: Database) {
         || LENGTH(document.chunkEmbeddings[* FILTER !IS_ARRAY(CURRENT) || LENGTH(CURRENT) != @dimensions]) > 0
         || LENGTH(FLATTEN(document.chunkEmbeddings)[* FILTER !IS_NUMBER(CURRENT)]) > 0
         || HAS(document, "embeddingProvider") || HAS(document, "embeddingModel") || HAS(document, "embeddingDimensions")
-        || HAS(document, "embeddingState") || HAS(document, "embeddedAt"))
+        || HAS(document, "embeddingState") || HAS(document, "embeddedAt")))
       RETURN 1)
   `, { dimensions });
   const invalid = await verification.next() ?? 0;
@@ -848,6 +848,8 @@ export const collections: CollectionSpec[] = [
   { name: 'documents', embedKeys: ['name', 'content'], archive: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'folderKey', 'deletedAt'] }, { fields: ['scopeKey', 'isFavorite', 'deletedAt'] }, { fields: ['storageKey'], unique: true, sparse: true }, { fields: ['folderKey', 'name'] }] },
   { name: 'documentVersions', embedKeys: ['label', 'content'], archive: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'documentKey', 'deletedAt'] }, { fields: ['documentKey', 'version'], unique: true }] },
   { name: 'documentAudioVersions', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'documentKey', 'version'], unique: true }, { fields: ['scopeKey', 'documentKey', 'createdAt'] }, { fields: ['storageKey'], unique: true }] },
+  // Private immutable generated summaries. Never expose through the generic node registry.
+  { name: 'documentSummaries', skipEmbedding: true, indexes: [{ fields: ['documentKey', 'version'], unique: true }, { fields: ['scopeKey', 'documentKey', 'createdAt'] }] },
   { name: 'shares', skipEmbedding: true, archive: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'sourceType', 'sourceKey', 'deletedAt'] }, { fields: ['scopeKey', 'sourceType', 'sourceKey', 'revokedAt'] }, { fields: ['tokenHash'], unique: true }, { fields: ['expiresAt'], sparse: true }] },
   { name: 'places', embedKeys: ['name', 'description', 'country', 'continent', 'region', 'city'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'isWishlist', 'deletedAt'] }, { fields: ['scopeKey', 'isFavorite', 'deletedAt'] }, { fields: ['scopeKey', 'countryCode'] }] },
   { name: 'trips', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'startDate'] }, { fields: ['scopeKey', 'endDate'] }, { fields: ['scopeKey', 'isFavorite', 'deletedAt'] }] },

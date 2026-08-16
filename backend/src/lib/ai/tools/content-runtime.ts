@@ -9,10 +9,12 @@ import type { DocumentObjectStorage } from '@/lib/ai/document-processing/storage
 import type { Folder } from '@/lib/db/folders.node';
 import type { Document } from '@/lib/db/documents.node';
 import type { DocumentAudioVersion } from '@/lib/db/document-audio-versions.node';
+import type { DocumentSummary } from '@/lib/db/document-summaries.node';
 import type { DocumentShare } from '@/lib/db/document-shares.node';
 import { documentVersionSchema, type DocumentVersion } from '@/lib/db/document-versions.node';
 import { DocumentProcessingError } from '@/lib/ai/document-processing/errors';
 import type { generateDocumentExport } from '@/lib/ai/document-processing/exports';
+import type { generateDocumentPreview } from '@/lib/ai/document-processing/preview';
 import type { ContentToolName, ContentToolOutput } from './content-schemas';
 import { ContentError, type ContentErrorCode } from './content-errors';
 import { contentToolInputSchemas, contentToolOutputSchemas, isContentToolName } from './content-registry';
@@ -24,7 +26,7 @@ import type { BookGenerator } from '@/lib/books/service';
 import type { DocumentScanInput } from '@/lib/ai/document-scanning';
 
 type Role = 'viewer' | 'moderator' | 'admin' | 'owner';
-type Action = 'ask' | 'enhance' | 'translate' | 'read' | 'traverse' | 'insert' | 'update' | 'delete' | 'embed' | 'speak' | 'generate-speech' | 'reason' | 'deep-reason' | 'document-cleanup' | 'document-embed';
+type Action = 'ask' | 'enhance' | 'translate' | 'read' | 'traverse' | 'insert' | 'update' | 'delete' | 'embed' | 'speak' | 'generate-speech' | 'reason' | 'deep-reason' | 'document-cleanup' | 'document-embed' | 'document-summarize' | 'document-topics';
 type SafeEvent = {
   type: 'authorization' | 'resolution' | 'action' | 'db' | 'embedding' | 'storage' | 'speech' | 'cleanup';
   status: 'started' | 'succeeded' | 'failed';
@@ -71,6 +73,10 @@ export interface ContentRepository {
   listAudioVersions?(scopeKey: string, documentKeys: string[]): Promise<DocumentAudioVersion[]>;
   createAudioVersion?(version: Omit<DocumentAudioVersion, 'version'>): Promise<DocumentAudioVersion>;
   deleteAudioVersion?(key: string): Promise<void>;
+  getSummary?(key: string): Promise<DocumentSummary | null>;
+  listSummaries?(scopeKey: string, documentKeys: string[]): Promise<DocumentSummary[]>;
+  createSummary?(summary: Omit<DocumentSummary, 'version'>): Promise<DocumentSummary>;
+  deleteSummary?(key: string): Promise<void>;
   semanticSearch(input: { embedding: number[]; authorizedScopeKeys: string[]; folderKeys?: string[]; documentKeys?: string[]; extensions?: Document['extension'][]; createdAfter?: string; createdBefore?: string; updatedAfter?: string; updatedBefore?: string; includeArchived?: boolean; minScore?: number; limit?: number }): Promise<Array<{ score: number; document: Document; matchedContent?: string }>>;
   semanticSearchFolders?(input: { embedding: number[]; authorizedScopeKeys: string[]; folderKeys?: string[]; minScore: number; limit: number }): Promise<Array<{ score: number; folder: Folder }>>;
   transaction?<T>(operation: (repository: ContentRepository) => Promise<T>): Promise<T>;
@@ -103,6 +109,7 @@ export interface ContentToolDependencies extends RouterDependencies {
   idempotency?: ContentIdempotencyStore;
   maxDownloadBytes?: number;
   generateExport?: typeof generateDocumentExport;
+  generatePreview?: typeof generateDocumentPreview;
   searchQueries?: ContentSearchQueryStore;
   searchEmbeddingTimeoutMs?: number;
   bookRuntime?: BookGenerator;
@@ -197,6 +204,11 @@ function versionView(version: DocumentVersion, include: string[] = []) {
 
 function generatedAudioVersionView(version: DocumentAudioVersion) {
   const { storageKey: _storageKey, createdByKey: _createdByKey, scopeKey: _scopeKey, ...safe } = version;
+  return safe;
+}
+
+function summaryView(summary: DocumentSummary) {
+  const { createdByKey: _createdByKey, scopeKey: _scopeKey, ...safe } = summary;
   return safe;
 }
 
@@ -327,6 +339,13 @@ async function productionRepository(): Promise<ContentRepository> {
     async deleteAudioVersion(key) {
       const current = await persistence.getAudioVersion(key);
       if (!current || !await persistence.deleteAudioVersion(current.scopeKey, key)) throw new Error('Audio version was not found for scoped deletion.');
+    },
+    getSummary: persistence.getSummary,
+    listSummaries: persistence.listSummaries,
+    createSummary: persistence.createSummary,
+    async deleteSummary(key) {
+      const current = await persistence.getSummary(key);
+      if (!current || !await persistence.deleteSummary(current.scopeKey, key)) throw new Error('Summary was not found for scoped deletion.');
     },
     semanticSearch: documents.semanticSearchDocuments,
     semanticSearchFolders: folders.semanticSearchFolders,
@@ -1227,11 +1246,13 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
               versions: await repo.listVersions(item.scopeKey, [item.key], true),
               shares: await repo.listShares(item.scopeKey, [item.key], { includeArchived: true, includeExpired: true, includeRevoked: true }),
               audioVersions: repo.listAudioVersions ? await repo.listAudioVersions(item.scopeKey, [item.key]) : [],
+              summaries: repo.listSummaries ? await repo.listSummaries(item.scopeKey, [item.key]) : [],
             })));
             for (const item of related) for (const version of item.versions) {
               if (!await canPermanentlyDelete({ kind: 'version', deletedAt: item.document.deletedAt, context })) fail('CONTENT_FORBIDDEN', 'Version retention policy denied permanent deletion.', tool, 'delete', version.key);
             }
             if (related.some((item) => item.audioVersions.length > 0) && !repo.deleteAudioVersion) fail('CONTENT_CONFLICT', 'Document audio deletion is unavailable.', tool, 'delete', key);
+            if (related.some((item) => item.summaries.length > 0) && !repo.deleteSummary) fail('CONTENT_CONFLICT', 'Document summary deletion is unavailable.', tool, 'delete', key);
             const inventoriedKeys = [...new Set(related.flatMap((item) => [item.document.storageKey, ...(item.document.speechStorageKeys ?? []), ...(item.document.sourceStorageKeys ?? []), ...item.audioVersions.map((audio) => audio.storageKey)]).filter((item): item is string => Boolean(item)))];
             const manifest = root._internalDeletion?.objectKeys ? root._internalDeletion : { ...root._internalDeletion!, objectKeys: inventoriedKeys };
             if (!root._internalDeletion?.objectKeys) {
@@ -1247,6 +1268,10 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
               for (const audio of item.audioVersions) {
                 if (!bound.deleteAudioVersion) fail('CONTENT_CONFLICT', 'Transaction-bound audio deletion is unavailable.', tool, 'transaction', audio.key);
                 await bound.deleteAudioVersion(audio.key);
+              }
+              for (const summary of item.summaries) {
+                if (!bound.deleteSummary) fail('CONTENT_CONFLICT', 'Transaction-bound summary deletion is unavailable.', tool, 'transaction', summary.key);
+                await bound.deleteSummary(summary.key);
               }
               for (const share of item.shares) await bound.deleteShare(share.key);
               await bound.deleteDocument(item.document.key);
@@ -1274,9 +1299,6 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       } : input;
       const processed = await d.parseDocument(processingInput, {
         ...dependencies.ingestion,
-        ...(!dependencies.ingestion?.cleanText ? {
-          cleanText: async (text) => z.string().trim().min(1).parse((await action('document-cleanup', { text }, undefined, input.scopeKey)).content),
-        } : {}),
         ...(!dependencies.ingestion?.embed && !dependencies.ingestion?.embedBatch ? {
           embedBatch: ({ texts, purpose = 'document' }) => d.embedBatch(texts, purpose),
         } : {}),
@@ -1298,10 +1320,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       else {
         const processed = await scan(processingInput, context.organizationKey);
         try {
-          const cleaned = await documentCleanup({ text: processed.content }, {
-            clean: async (text) => z.string().trim().min(1).parse((await action('document-cleanup', { text }, processed.documentKey, input.scopeKey)).content),
-            logger: () => undefined,
-          });
+          const cleaned = await documentCleanup({ text: processed.content }, { logger: () => undefined });
           const transformed = await representations(cleaned.content, input.name ?? `Scanned document ${d.clock().toISOString().slice(0, 10)}`, processed.documentKey, input.scopeKey);
           const timestamp = now();
           const created = await repo.insertDocument({
@@ -1710,7 +1729,9 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             const versions = await repo.listVersions(current.scopeKey, [key], true);
             const shares = await repo.listShares(current.scopeKey, [key], { includeArchived: true, includeExpired: true, includeRevoked: true });
             const audioVersions = repo.listAudioVersions ? await repo.listAudioVersions(current.scopeKey, [key]) : [];
+            const summaries = repo.listSummaries ? await repo.listSummaries(current.scopeKey, [key]) : [];
             if (audioVersions.length > 0 && !repo.deleteAudioVersion) fail('CONTENT_CONFLICT', 'Document audio deletion is unavailable.', tool, 'delete', key);
+            if (summaries.length > 0 && !repo.deleteSummary) fail('CONTENT_CONFLICT', 'Document summary deletion is unavailable.', tool, 'delete', key);
             if (versions.length > 0 && !input.deleteVersions) fail('CONTENT_CONFLICT', 'Document has retained versions.', tool, 'delete', key);
             if (shares.length > 0 && !input.deleteShares) fail('CONTENT_CONFLICT', 'Document has retained shares.', tool, 'delete', key);
             for (const version of versions) {
@@ -1730,6 +1751,10 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
               for (const audio of audioVersions) {
                 if (!bound.deleteAudioVersion) fail('CONTENT_CONFLICT', 'Transaction-bound audio deletion is unavailable.', tool, 'transaction', audio.key);
                 await bound.deleteAudioVersion(audio.key);
+              }
+              for (const summary of summaries) {
+                if (!bound.deleteSummary) fail('CONTENT_CONFLICT', 'Transaction-bound summary deletion is unavailable.', tool, 'transaction', summary.key);
+                await bound.deleteSummary(summary.key);
               }
               for (const share of shares) await bound.deleteShare(share.key);
               await bound.deleteDocument(key);
@@ -1763,6 +1788,22 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
               mimeType: object.mimeType ?? current.mimeType!,
               encoding: 'base64' as const,
               content: Buffer.from(object.bytes).toString('base64'),
+            };
+          }
+          if (item.format === 'html') {
+            if (!current.storageKey || !current.extension || current.extension === 'pdf') fail('CONTENT_NOT_FOUND', 'This document has no supported original preview.', tool, 'storage', current.key);
+            const object = await storageOperation('download', current.key, current.scopeKey, () => d.storage.download(current.storageKey!));
+            if (object.bytes.byteLength > byteBudget - downloadedBytes) fail('DOCUMENT_TOO_LARGE', 'Combined download byte budget exceeded.', tool, 'storage', current.key);
+            const preview = await (dependencies.generatePreview ?? (await import('@/lib/ai/document-processing/preview')).generateDocumentPreview)({ extension: current.extension, bytes: object.bytes });
+            downloadedBytes += preview.bytes.byteLength;
+            if (downloadedBytes > byteBudget) fail('DOCUMENT_TOO_LARGE', 'Combined preview byte budget exceeded.', tool, 'storage', current.key);
+            return {
+              documentKey: current.key,
+              format: 'html',
+              fileName: downloadFileName(current.name, preview.extension),
+              mimeType: preview.mimeType,
+              encoding: 'base64' as const,
+              content: Buffer.from(preview.bytes).toString('base64'),
             };
           }
           const exported = await d.generateExport({ format: item.format, content: current.content });
@@ -1973,41 +2014,87 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           return {};
         },
       })), input.atomic, repo);
-    } else if (tool === 'document.summarize' || tool === 'document.translate' || tool === 'document.rewrite') {
+    } else if (tool === 'document.list-summaries') {
+      result = await batch(tool, input.documentKeys.map((key: string) => ({
+        key,
+        run: async () => {
+          const current = await document(key, 'viewer');
+          if (!repo.listSummaries) fail('CONTENT_CONFLICT', 'Document summary history is unavailable.', tool, 'read', key);
+          const summaries = await repo.listSummaries(current.scopeKey, [key]);
+          const offset = input.cursor ? Number(Buffer.from(input.cursor, 'base64url').toString()) || 0 : 0;
+          const limit = input.limit ?? 50;
+          return { documentKey: key, summaries: summaries.slice(offset, offset + limit).map(summaryView), ...(offset + limit < summaries.length ? { cursor: Buffer.from(String(offset + limit)).toString('base64url') } : {}) };
+        },
+      })), false, repo);
+    } else if (tool === 'document.find-summary') {
+      result = await batch(tool, input.summaryKeys.map((key: string) => ({
+        key,
+        run: async () => {
+          if (!repo.getSummary) fail('CONTENT_CONFLICT', 'Document summary history is unavailable.', tool, 'read', key);
+          const summary = await repo.getSummary(key);
+          if (!summary) fail('CONTENT_NOT_FOUND', 'Summary was not found.', tool, 'read', key);
+          const current = await document(summary.documentKey, 'viewer');
+          if (current.scopeKey !== summary.scopeKey) fail('CONTENT_NOT_FOUND', 'Summary was not found.', tool, 'read', key);
+          return { summary: summaryView(summary) };
+        },
+      })), false, repo);
+    } else if (tool === 'document.topics') {
+      const current = await document(input.documentKey, 'viewer', false);
+      const generated = await action('document-topics', {
+        systemPrompt: 'Identify the document\'s distinct primary topics. Return strict JSON only in the form {"topics":["topic"]}. Include no more than 10 concise topic strings, with no duplicates or commentary.',
+        messages: [{ role: 'user', content: [{ type: 'text', text: `Title: ${current.name}\n\n${current.content}` }] }],
+        options: { temperature: 0.1, maxTokens: 500 },
+      }, current.key, current.scopeKey);
+      let parsed: { topics: string[] };
+      try {
+        const text = z.string().trim().min(1).parse(generated.text);
+        const fenced = /^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i.exec(text);
+        parsed = z.object({ topics: z.array(z.string().trim().min(1).max(200)).max(10) }).strict().parse(JSON.parse(fenced?.[1]?.trim() ?? text));
+      } catch (error) {
+        fail('CONTENT_INVALID_INPUT', 'The topic model returned invalid JSON.', tool, 'document-topics', current.key, error);
+      }
+      result = { documentKey: current.key, topics: [...new Set(parsed.topics)].slice(0, 10) };
+    } else if (tool === 'document.summarize') {
+      if (input.atomic && input.persist) fail('CONTENT_CONFLICT', 'Atomic persisted summaries are unavailable because generation is an external side effect.', tool, 'document-summarize');
+      const sources: Document[] = [];
+      for (const key of input.documentKeys) sources.push(await document(key, input.persist ? 'moderator' : 'viewer', false));
+      const generateSummary = async (sourceDocuments: Document[]) => {
+        const generated = await action('document-summarize', {
+          systemPrompt: `Create a ${input.style} summary${input.topic ? ` focused on ${input.topic}` : ''}${input.language ? ` in ${input.language}` : ''}. Use only the supplied document content, preserve its facts, and return only the summary without commentary.`,
+          messages: [{ role: 'user', content: [{ type: 'text', text: sourceDocuments.map((item) => `Title: ${item.name}\n\n${item.content}`).join('\n\n---\n\n') }] }],
+          options: { temperature: 0.2, maxTokens: 5_000 },
+        }, sourceDocuments[0]!.key, sourceDocuments[0]!.scopeKey);
+        return z.string().trim().min(1).parse(generated.text);
+      };
+      if (input.combine) {
+        const text = await generateSummary(sources);
+        result = { results: sources.map((source) => ({ key: source.key, success: true, data: { documentKey: source.key, text } })), summary: { requested: sources.length, succeeded: sources.length, failed: 0 } };
+      } else {
+        result = await batch(tool, sources.map((current) => ({
+          key: current.key,
+          run: async () => {
+            const text = await generateSummary([current]);
+            if (!input.persist) return { documentKey: current.key, text };
+            if (!repo.createSummary) fail('CONTENT_CONFLICT', 'Document summary persistence is unavailable.', tool, 'create', current.key);
+            const summary = await repo.createSummary({ key: d.id(), scopeKey: current.scopeKey, documentKey: current.key, summary: text, ...(input.topic ? { topic: input.topic } : {}), style: input.style, ...(input.language ? { language: input.language } : {}), sourceContentHash: documentSemanticHash(current.content), sourceTitle: current.name, sourceDocumentUpdatedAt: current.updatedAt, createdByKey: member.userOrganization.key, createdAt: now() });
+            return { documentKey: current.key, text, summary: summaryView(summary) };
+          },
+        })), false, repo);
+      }
+    } else if (tool === 'document.translate' || tool === 'document.rewrite') {
       const items = tool === 'document.rewrite'
         ? input.rewrites
         : input.documentKeys.map((documentKey: string) => ({
           documentKey,
-          mode: tool === 'document.translate' ? input.mode : input.persist ? 'copy' : 'preview',
+          mode: input.mode,
         }));
       if (input.atomic && items.some((item: any) => item.mode !== 'preview')) fail('CONTENT_CONFLICT', 'Atomic persisted AI transformations are unavailable because generation and storage cannot be rolled back.', tool, 'reason');
 
-      if (tool === 'document.summarize' && input.combine) {
-        const sourceDocuments = [];
-        for (const key of input.documentKeys) sourceDocuments.push(await document(key, input.persist ? 'moderator' : 'viewer', false));
-        const synthesis = await action('deep-reason', {
-          systemPrompt: `Synthesize one ${input.style ?? 'brief'} summary${input.language ? ` in ${input.language}` : ''} across all supplied documents. Use only their content, preserve their facts, and return only the summary without commentary.`,
-          messages: [{ role: 'user', content: [{ type: 'text', text: sourceDocuments.map((item) => `Title: ${item.name}\n\n${item.content}`).join('\n\n---\n\n') }] }],
-          options: { temperature: 0.2, maxTokens: 5_000 },
-        }, sourceDocuments[0]!.key, sourceDocuments[0]!.scopeKey);
-        const text = z.string().trim().min(1).parse(synthesis.text);
-        const persistedDocumentKey = input.persist ? await persistGenerated(sourceDocuments[0]!, text, 'copy', 'combined summary') : undefined;
-        result = {
-          results: sourceDocuments.map((item) => ({
-            key: item.key,
-            success: true,
-            data: { documentKey: item.key, text, ...(persistedDocumentKey ? { persistedDocumentKey } : {}) },
-          })),
-          summary: { requested: sourceDocuments.length, succeeded: sourceDocuments.length, failed: 0 },
-        };
-      } else {
-        result = await batch(tool, items.map((item: any) => ({
+      result = await batch(tool, items.map((item: any) => ({
           key: item.documentKey,
           run: async () => {
             const current = await document(item.documentKey, item.mode === 'preview' ? 'viewer' : 'moderator', false);
-            const instruction = tool === 'document.summarize'
-              ? `Summarize in ${input.style ?? 'brief'} style${input.language ? ` in ${input.language}` : ''}.`
-              : tool === 'document.translate'
+            const instruction = tool === 'document.translate'
                 ? `Translate to ${input.targetLanguage}${input.sourceLanguage ? ` from ${input.sourceLanguage}` : ''}. ${input.preserveFormatting ? 'Preserve headings, lists, tables, paragraph boundaries, and inline emphasis.' : 'Return clear translated prose.'}`
                 : `${item.instruction}${item.tone ? ` Tone: ${item.tone}.` : ''}${item.audience ? ` Audience: ${item.audience}.` : ''}${item.length ? ` Length: ${item.length}.` : ''}`;
             const text = tool === 'document.translate'
@@ -2030,7 +2117,6 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             };
           },
         })), false, repo);
-      }
     } else if (tool === 'scope.content.search-history') {
       await roleFor(input.scopeKey, 'viewer');
       let historyFolderKeys: Set<string> | undefined;

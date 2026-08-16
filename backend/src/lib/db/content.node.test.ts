@@ -5,6 +5,7 @@ import { documentShareSchema, documentSharesEmbeddingFields } from './document-s
 import { folderSchema, foldersEmbeddingFields } from './folders.node';
 import { documentVersionSchema, documentVersionsEmbeddingFields } from './document-versions.node';
 import { documentAudioVersionSchema } from './document-audio-versions.node';
+import { documentSummarySchema } from './document-summaries.node';
 import { EMBEDDING_DIMENSIONS } from '../embeddings';
 import { chunkDocumentContent } from '../ai/document-processing/chunking';
 
@@ -60,6 +61,18 @@ describe('Content node contracts', () => {
     expect(audio).toMatchObject({ version: 3, documentKey: 'cm00000000000000000000003' });
     expect(audio).not.toHaveProperty('documentVersionKey');
     expect(() => documentAudioVersionSchema.parse({ ...audio, durationMs: 0 })).toThrow();
+  });
+
+  test('summaries are immutable child records and strip Arango private fields', () => {
+    const summary = documentSummarySchema.parse({
+      key: 'cm00000000000000000000001', scopeKey: 'cm00000000000000000000002', documentKey: 'cm00000000000000000000003',
+      version: 1, summary: 'Concise summary.', topic: 'Launch', style: 'brief', sourceContentHash: 'a'.repeat(64), sourceTitle: 'Document',
+      sourceDocumentUpdatedAt: '2026-07-22T09:00:00.000Z', createdByKey: 'cm00000000000000000000004', createdAt: '2026-07-22T10:00:00.000Z',
+      _id: 'documentSummaries/private', _rev: 'private',
+    });
+    expect(summary).not.toHaveProperty('_id');
+    expect(summary).not.toHaveProperty('_rev');
+    expect(() => documentSummarySchema.parse({ ...summary, version: 0 })).toThrow();
   });
 
   test('version content arrays reconstruct canonical text exactly', () => {

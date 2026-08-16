@@ -41,6 +41,7 @@ test("scopes Archive cache keys by the complete content context", () => {
   expect(contentQueryKeys.document(context, "document-a")).not.toEqual(contentQueryKeys.document(otherContext, "document-a"));
   expect(contentQueryKeys.location(context)).not.toEqual(contentQueryKeys.location(context, "folder-a"));
   expect(contentQueryKeys.audioVersions(context, "document-a").slice(0, -1)).toEqual(contentQueryKeys.document(context, "document-a"));
+  expect(contentQueryKeys.summaries(context, "document-a").slice(0, -1)).toEqual(contentQueryKeys.document(context, "document-a"));
 });
 
 test("derives folder children, ancestry, and descendants from one tree", () => {
@@ -160,7 +161,7 @@ test("optimistically adds and removes documents and folders in exact locations",
   expect(client.getQueryData<any>(contentQueryKeys.folderTree(context))).toEqual([{ ...folder, parentFolderKey: "destination" }]);
 });
 
-test("removes deleted documents and evicts detail and nested audio queries", () => {
+test("removes deleted documents and evicts detail and nested generated-resource queries", () => {
   const client = new QueryClient();
   const first = contentQueryKeys.location(context, "first");
   const second = contentQueryKeys.location(context, "second");
@@ -169,11 +170,13 @@ test("removes deleted documents and evicts detail and nested audio queries", () 
   client.setQueryData(second, { folders: [], documents: [document] });
   client.setQueryData(contentQueryKeys.document(context, document.key), { ...document, content: "Body" });
   client.setQueryData(contentQueryKeys.audioVersions(context, document.key), [{ key: "audio-a" }]);
+  client.setQueryData(contentQueryKeys.summaries(context, document.key), [{ key: "summary-a" }]);
   removeCachedContentDocumentEverywhere(client, context, document.key);
   expect(client.getQueryData<any>(first).documents).toEqual([]);
   expect(client.getQueryData<any>(second).documents).toEqual([]);
   expect(client.getQueryData(contentQueryKeys.document(context, document.key))).toBeUndefined();
   expect(client.getQueryData(contentQueryKeys.audioVersions(context, document.key))).toBeUndefined();
+  expect(client.getQueryData(contentQueryKeys.summaries(context, document.key))).toBeUndefined();
 });
 
 test("evicts all scoped locations when archived folders may contain cached descendants", () => {

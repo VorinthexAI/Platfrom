@@ -11,6 +11,8 @@ import { documentCleanupAction } from './document-cleanup';
 import { documentExtractAction } from './document-extract';
 import { documentInsertAction } from './document-insert';
 import { documentValidateAction } from './document-validate';
+import { documentSummarizeAction } from './document-summarize';
+import { documentTopicsAction } from './document-topics';
 import { editImageAction } from './edit-image';
 import { editVideoAction } from './edit-video';
 import { enhanceAction } from './enhance';
@@ -48,6 +50,8 @@ export { documentCleanupAction } from './document-cleanup';
 export { documentExtractAction } from './document-extract';
 export { documentInsertAction } from './document-insert';
 export { documentValidateAction } from './document-validate';
+export { documentSummarizeAction } from './document-summarize';
+export { documentTopicsAction } from './document-topics';
 export { editImageAction } from './edit-image';
 export { editVideoAction } from './edit-video';
 export { enhanceAction } from './enhance';
@@ -89,7 +93,7 @@ export const ACTION_DEFINITIONS: readonly ActionDefinition[] = [
   generateImageAction, editImageAction, generateVideoAction, editVideoAction, extendVideoAction, analyzeVideoAction,
   generateSpeechAction, analyzeAudioAction, generateMusicAction, orchestratorChatAction,
   documentValidateAction, storageUploadAction, documentExtractAction, documentEmbedAction, documentInsertAction, enhanceAction, translateAction, captionImageAction, describeVisualIdentityAction,
-  documentCleanupAction,
+  documentCleanupAction, documentSummarizeAction, documentTopicsAction,
 ];
 export const getActionDefinition = (id: ActionId) => ACTION_DEFINITIONS.find((definition) => definition.id === id);
 
