@@ -62,6 +62,8 @@ export type ContentDocumentAudioVersion = {
   mimeType: "audio/mpeg";
   sizeBytes: number;
   durationMs: number;
+  isCurrent: boolean;
+  playbackPositionMs: number;
   voice?: string;
   language?: string;
   speakingRate?: number;
@@ -121,8 +123,11 @@ export type ContentSearchResponse = {
 export type ContentSearchHistoryItem = {
   query: string;
   normalizedQuery: string;
+  contextDomain: "content";
   searchedAt: string;
-  count: number;
+  usageCount: number;
+  folderKey?: string;
+  includeDescendants?: boolean;
   documents: ContentSearchDocument[];
 };
 
@@ -342,6 +347,21 @@ export async function listContentDocumentAudioVersions(documentKey: string) {
   return versions;
 }
 
+export async function updateContentDocumentAudioPlayback(audioVersionKey: string, playbackPositionMs: number) {
+  return callContentTool<{ audioVersionKey: string; documentKey: string; playbackPositionMs: number }>("document.audio.playback.update", {
+    audioVersionKey,
+    playbackPositionMs,
+    idempotencyKey: createContentMutationKey(),
+  });
+}
+
+export async function clearContentDocumentAudioPlayback(documentKey: string) {
+  return callContentTool<{ documentKey: string }>("document.audio.playback.clear", {
+    documentKey,
+    idempotencyKey: createContentMutationKey(),
+  });
+}
+
 export async function listContentDocumentSummaries(documentKey: string) {
   const summaries: ContentDocumentSummary[] = [];
   let cursor: string | undefined;
@@ -369,7 +389,7 @@ export async function findContentDocumentSummary(summaryKey: string) {
 export async function generateContentDocumentAudio(documentKey: string) {
   const data = await callContentTool<{
     results: { success: boolean; data?: { audioVersion: Omit<ContentDocumentAudioVersion, "current" | "url"> }; error?: { message: string } }[];
-  }>("document.read", { documentKeys: [documentKey], mode: "audio", persistAudio: true, idempotencyKey: createContentMutationKey() });
+  }>("document.read", { documentKeys: [documentKey], mode: "audio", persistAudio: true, voice: "Matthew", idempotencyKey: createContentMutationKey() });
   const result = data.results[0];
   if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "Document audio could not be generated.");
   return result.data.audioVersion;
@@ -378,7 +398,7 @@ export async function generateContentDocumentAudio(documentKey: string) {
 export async function generateContentDocumentSummaryAudio(summaryKey: string) {
   const data = await callContentTool<{
     results: { success: boolean; data?: { audio: ContentDocumentSummaryAudio }; error?: { message: string } }[];
-  }>("document.summary.audio.generate", { summaryKeys: [summaryKey], idempotencyKey: createContentMutationKey() });
+  }>("document.summary.audio.generate", { summaryKeys: [summaryKey], voice: "Matthew", idempotencyKey: createContentMutationKey() });
   const result = data.results[0];
   if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "Summary audio could not be generated.");
   return result.data.audio;
@@ -680,12 +700,22 @@ export async function summarizeContentDocument(documentKey: string, topic: strin
   return result.data.summary;
 }
 
-export async function listContentSearchHistory(folderKey?: string, includeDescendants = false) {
-  const contentContext = getContentContext();
+export async function listContentSearchHistory(folderKey?: string, includeDescendants = false, requestContext = getContentContext()) {
+  const contentContext = requestContext;
   const data = await callContentTool<{ history: ContentSearchHistoryItem[] }>("scope.content.search-history", {
     scopeKey: contentContext.scopeKey,
     ...(folderKey ? { folderKey, includeDescendants } : {}),
-    limit: 8,
-  });
+    limit: 100,
+  }, undefined, requestContext);
   return data.history;
+}
+
+export async function deleteContentSearchHistory(normalizedQuery: string, folderKey?: string, includeDescendants = false) {
+  const contentContext = getContentContext();
+  return callContentTool<{ normalizedQuery: string; deleted: boolean }>("scope.content.search-history.delete", {
+    scopeKey: contentContext.scopeKey,
+    normalizedQuery,
+    ...(folderKey ? { folderKey, includeDescendants } : {}),
+    idempotencyKey: createContentMutationKey(),
+  });
 }

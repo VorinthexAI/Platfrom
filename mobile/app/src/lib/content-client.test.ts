@@ -44,10 +44,12 @@ const {
   archiveContentDocument,
   archiveContentSelection,
   askPersonalAssistant,
+  clearContentDocumentAudioPlayback,
   createContentDocument,
   createContentFolder,
   copyContentDocument,
   copyContentSelection,
+  deleteContentSearchHistory,
   downloadContentDocument,
   enhanceContent,
   findContentDocumentSummary,
@@ -74,6 +76,7 @@ const {
   setContentDocumentFavorite,
   setContentSelectionFavorite,
   translateContentDocument,
+  updateContentDocumentAudioPlayback,
   updateContentFolder,
   setContentFolderCover,
   uploadContentDocument,
@@ -98,7 +101,7 @@ test("loads extracted text for uploaded files", async () => {
 });
 
 test("generates and lists independent full-audio versions", async () => {
-  const metadata = { key: "audio-version", documentKey: "document", version: 2, sourceContentHash: "a".repeat(64), sourceTitle: "Note", sourceDocumentUpdatedAt: "2026-08-10T00:00:00.000Z", mimeType: "audio/mpeg", sizeBytes: 1024, durationMs: 65_000, includeTitle: false, includeCode: false, createdAt: "2026-08-10T00:02:00.000Z" };
+  const metadata = { key: "audio-version", documentKey: "document", version: 2, sourceContentHash: "a".repeat(64), sourceTitle: "Note", sourceDocumentUpdatedAt: "2026-08-10T00:00:00.000Z", mimeType: "audio/mpeg", sizeBytes: 1024, durationMs: 65_000, isCurrent: false, playbackPositionMs: 0, includeTitle: false, includeCode: false, createdAt: "2026-08-10T00:02:00.000Z" };
   responseForTool = (tool) => tool === "document.read"
     ? { data: { success: true, data: { results: [{ success: true, data: { audioVersion: metadata } }] } } }
     : tool === "document.list-audio-versions"
@@ -107,9 +110,27 @@ test("generates and lists independent full-audio versions", async () => {
 
   await expect(generateContentDocumentAudio("document")).resolves.toMatchObject({ key: "audio-version", version: 2 });
   await expect(listContentDocumentAudioVersions("document")).resolves.toMatchObject([{ key: "audio-version", current: true }]);
-  expect(calls[0]?.body.input).toMatchObject({ documentKeys: ["document"], mode: "audio", persistAudio: true });
+  expect(calls[0]?.body.input).toMatchObject({ documentKeys: ["document"], mode: "audio", persistAudio: true, voice: "Matthew" });
   expect(calls[0]?.config.timeout).toBe(15 * 60_000);
   expect(calls[1]?.body.input).toEqual({ documentKeys: ["document"], cursor: undefined, limit: 100 });
+});
+
+test("updates and clears persisted document audio playback state", async () => {
+  responseForTool = (tool) => tool === "document.audio.playback.update"
+    ? { data: { success: true, data: { audioVersionKey: "audio-version", documentKey: "document", playbackPositionMs: 12_345 } } }
+    : tool === "document.audio.playback.clear"
+      ? { data: { success: true, data: { documentKey: "document" } } }
+      : undefined;
+
+  await expect(updateContentDocumentAudioPlayback("audio-version", 12_345)).resolves.toMatchObject({ playbackPositionMs: 12_345 });
+  await expect(clearContentDocumentAudioPlayback("document")).resolves.toEqual({ documentKey: "document" });
+  expect(calls.map(({ url }) => url)).toEqual([
+    "/api/v1/content/tools/document.audio.playback.update",
+    "/api/v1/content/tools/document.audio.playback.clear",
+  ]);
+  expect(calls[0]?.body.input).toMatchObject({ audioVersionKey: "audio-version", playbackPositionMs: 12_345 });
+  expect(calls[1]?.body.input).toMatchObject({ documentKey: "document" });
+  expect(calls.every(({ body }) => typeof body.input.idempotencyKey === "string")).toBe(true);
 });
 
 test("generates durable summary audio through the content tool", async () => {
@@ -119,7 +140,7 @@ test("generates durable summary audio through the content tool", async () => {
     : undefined;
 
   await expect(generateContentDocumentSummaryAudio("summary")).resolves.toEqual(audio);
-  expect(calls[0]?.body.input).toMatchObject({ summaryKeys: ["summary"] });
+  expect(calls[0]?.body.input).toMatchObject({ summaryKeys: ["summary"], voice: "Matthew" });
   expect(calls[0]?.body.input.idempotencyKey).toBeString();
   expect(calls[0]?.config.timeout).toBe(15 * 60_000);
 });
@@ -371,12 +392,20 @@ test("scopes search and replayable history to a folder", async () => {
   const documents = [{ documentKey: "document", name: "Note", score: 0.9, summary: "Relevant note", folderKey: "folder" }];
   responseForTool = (tool) => tool === "scope.content.search"
     ? { data: { success: true, data: { query: "roadmap", cached: false, folders: [], documents } } }
-    : { data: { success: true, data: { history: [{ query: "roadmap", normalizedQuery: "roadmap", searchedAt: "2026-08-10T00:00:00.000Z", count: 2, documents }] } } };
+    : { data: { success: true, data: { history: [{ query: "roadmap", normalizedQuery: "roadmap", contextDomain: "content", searchedAt: "2026-08-10T00:00:00.000Z", usageCount: 2, documents }] } } };
 
   expect((await searchContent("roadmap", "folder", true)).documents).toEqual(documents);
   expect((await listContentSearchHistory("folder", true))[0]?.documents).toEqual(documents);
   expect(calls[0]?.body.input).toEqual({ scopeKey: "scope-authenticated", query: "roadmap", minimumScore: 0.55, folderKey: "folder", includeDescendants: true });
-  expect(calls[1]?.body.input).toEqual({ scopeKey: "scope-authenticated", folderKey: "folder", includeDescendants: true, limit: 8 });
+  expect(calls[1]?.body.input).toEqual({ scopeKey: "scope-authenticated", folderKey: "folder", includeDescendants: true, limit: 100 });
+});
+
+test("deletes one folder-scoped Content search-history entry", async () => {
+  responseForTool = () => ({ data: { success: true, data: { normalizedQuery: "roadmap", deleted: true } } });
+
+  await expect(deleteContentSearchHistory("roadmap", "folder", true)).resolves.toEqual({ normalizedQuery: "roadmap", deleted: true });
+  expect(calls[0]?.body.input).toMatchObject({ scopeKey: "scope-authenticated", normalizedQuery: "roadmap", folderKey: "folder", includeDescendants: true });
+  expect(calls[0]?.body.input.idempotencyKey).toBeString();
 });
 
 test("runs fast combined search without summaries", async () => {

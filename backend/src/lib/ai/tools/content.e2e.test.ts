@@ -74,6 +74,7 @@ suite('Content live E2E', () => {
       ['documentVersions', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
       ['documents', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
       ['folders', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
+      ['contentSearchQueries', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
       ['contentIdempotency', 'row.organizationKey == @organizationKey', { organizationKey }],
       ['agentMembers', 'row.organizationKey == @organizationKey', { organizationKey }],
       ['agentSkills', 'row.agentKey IN @agentKeys', { agentKeys }],
@@ -284,6 +285,10 @@ suite('Content live E2E', () => {
     expect(audioRecord).not.toHaveProperty('documentVersionKey');
     const listedAudio = (await call('document.list-audio-versions', { documentKeys: [documentKey] })).results[0].data.audioVersions[0];
     expect(listedAudio).toMatchObject({ key: audioVersionKey, version: 1, current: true });
+    await call('document.audio.playback.update', { audioVersionKey, playbackPositionMs: 100 });
+    expect((await call('document.list-audio-versions', { documentKeys: [documentKey] })).results[0].data.audioVersions[0]).toMatchObject({ isCurrent: true, playbackPositionMs: 100 });
+    await call('document.audio.playback.clear', { documentKey });
+    expect((await call('document.list-audio-versions', { documentKeys: [documentKey] })).results[0].data.audioVersions[0].isCurrent).toBe(false);
     const signedAudio = await fetch(listedAudio.url);
     expect(signedAudio.ok).toBe(true);
     expect((await signedAudio.arrayBuffer()).byteLength).toBeGreaterThan(0);
@@ -340,6 +345,8 @@ suite('Content live E2E', () => {
     const summaryKey = persistedSummary.results[0].data.summary.key;
     expect((await call('document.list-summaries', { documentKeys: [copiedDocumentKey] })).results[0].data.summaries[0].key).toBe(summaryKey);
     expect((await call('document.find-summary', { summaryKeys: [summaryKey] })).results[0].data.summary.summary).toContain('deterministic');
+    const summaryAudio = await call('document.summary.audio.generate', { summaryKeys: [summaryKey], voice: 'Matthew' });
+    expect(summaryAudio.results[0].data.audio).toMatchObject({ summaryKey, voice: 'Matthew', mimeType: 'audio/mpeg' });
     expect((await call('document.topics', { documentKey })).topics).toEqual(['Deterministic systems', 'Archive']);
     const translationPreview = await call('document.translate', { documentKeys: [documentKey], targetLanguage: 'French', mode: 'preview' });
     expect(translationPreview.results[0].data.text).toContain('deterministic');
@@ -371,7 +378,9 @@ suite('Content live E2E', () => {
     const contentSearchReplay = await call('scope.content.search', { scopeKey, query: '  SEMANTIC   ROADMAP  ', minimumScore: 0.1 });
     expect(contentSearchReplay.cached).toBe(true);
     const contentSearchHistory = await call('scope.content.search-history', { scopeKey, limit: 8 });
-    expect(contentSearchHistory.history.some((item: any) => item.normalizedQuery === 'semantic roadmap')).toBe(true);
+    expect(contentSearchHistory.history).toContainEqual(expect.objectContaining({ normalizedQuery: 'semantic roadmap', contextDomain: 'content', usageCount: 2 }));
+    expect(await call('scope.content.search-history.delete', { scopeKey, normalizedQuery: 'semantic roadmap' })).toEqual({ normalizedQuery: 'semantic roadmap', deleted: true });
+    expect((await call('scope.content.search-history', { scopeKey, limit: 8 })).history.some((item: any) => item.normalizedQuery === 'semantic roadmap')).toBe(false);
 
     const copiedFolder = await call('folder.copy', { copies: [{ folderKey: childFolderKey, targetScopeKey: scopeKey, targetParentFolderKey: destinationFolderKey, newName: 'Copied subtree' }] });
     expect(copiedFolder.results[0].data).toMatchObject({ folder: { parentFolderKey: destinationFolderKey, name: 'Copied subtree', isFavorite: false }, folderCount: 1 });

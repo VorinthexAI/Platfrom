@@ -13,7 +13,7 @@ const domain = {
 } as unknown as DomainToolContext;
 
 const expected: Array<[AssistantSurface, string[]]> = [
-  ['knowledge-workspace', ['folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy', 'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.summary.audio.generate', 'document.translate', 'document.list-versions', 'document.restore-version', 'document.download', 'knowledge.search', 'note.write', 'note.enhance']],
+  ['knowledge-workspace', ['folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy', 'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.summary.audio.generate', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.translate', 'document.list-versions', 'document.restore-version', 'document.download', 'scope.content.search-history.delete', 'knowledge.search', 'note.write', 'note.enhance']],
   ['travel-workspace', ['place.list', 'place.create', 'place.visit.create', 'trip.create', 'trip.place.add', 'trip.place.remove']],
   ['signal-workspace', ['email.overview', 'email.sync', 'email.thread.read', 'email.thread.favorite', 'email.draft.create', 'email.draft.update', 'email.draft.send', 'email.disconnect']],
   ['book-workspace', ['book.list', 'book.detail', 'book.chapter.progress', 'book.create-context', 'book.write']],
@@ -97,17 +97,22 @@ describe('personal assistant service capabilities', () => {
     const executeContent = async (...args: unknown[]) => { calls.push(args); return {}; };
     const create = defaultAssistantCapabilityRegistry.resolve('knowledge-workspace').find(({ definition }) => definition.name === 'folder.create')!;
     const copy = defaultAssistantCapabilityRegistry.resolve('knowledge-workspace').find(({ definition }) => definition.name === 'folder.copy')!;
+    const playback = defaultAssistantCapabilityRegistry.resolve('knowledge-workspace').find(({ definition }) => definition.name === 'document.audio.playback.update')!;
     const folderKey = newId(), targetParentFolderKey = newId();
     const context: any = { domain, requestKey: 'stable-request', executeContent };
     await create.execute({ name: 'xyz' }, context);
     await create.execute({ name: 'xyz' }, context);
     await copy.execute({ copies: [{ folderKey, targetParentFolderKey }] }, context);
+    const audioVersionKey = newId();
+    await playback.execute({ audioVersionKey, playbackPositionMs: 12_345 }, context);
     expect(calls).toEqual([
       ['folder.create', { folders: [{ scopeKey, name: 'xyz' }], idempotencyKey: 'stable-request:folder.create' }, domain, undefined],
       ['folder.create', { folders: [{ scopeKey, name: 'xyz' }], idempotencyKey: 'stable-request:folder.create' }, domain, undefined],
       ['folder.copy', { copies: [{ folderKey, targetParentFolderKey, targetScopeKey: scopeKey }], idempotencyKey: 'stable-request:folder.copy' }, domain, undefined],
+      ['document.audio.playback.update', { audioVersionKey, playbackPositionMs: 12_345, idempotencyKey: 'stable-request:document.audio.playback.update' }, domain, undefined],
     ]);
     expect(copy.mutationWorkspace).toBe('archive');
+    expect(playback.mutationWorkspace).toBe('archive');
   });
 
   test('injects the trusted open document into document-specific Core actions', async () => {

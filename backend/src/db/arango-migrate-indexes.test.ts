@@ -83,7 +83,8 @@ describe('Arango migration indexes', () => {
   test('drops obsolete search uniqueness and expiry indexes', () => {
     expect(isLegacyIndex('contentSearchQueries', ['actorKey', 'scopeKey', 'normalizedQuery'])).toBe(true);
     expect(isLegacyIndex('contentSearchQueries', ['expiresAt'])).toBe(true);
-    expect(isLegacyIndex('contentSearchQueries', ['actorKey', 'scopeKey', 'normalizedQuery', 'folderKey', 'includeDescendants'])).toBe(false);
+    expect(isLegacyIndex('contentSearchQueries', ['actorKey', 'scopeKey', 'normalizedQuery', 'folderKey', 'includeDescendants'])).toBe(true);
+    expect(isLegacyIndex('contentSearchQueries', ['actorKey', 'scopeKey', 'contextDomain', 'normalizedQuery', 'folderKey', 'includeDescendants'])).toBe(false);
   });
   test('never classifies a currently desired index as legacy', () => {
     expect(isLegacyIndex('documentVersions', ['storageKey'], [['storageKey']])).toBe(false);
@@ -93,7 +94,14 @@ describe('Arango migration indexes', () => {
     const audio = collections.find(({ name }) => name === 'documentAudioVersions');
     expect(audio?.skipEmbedding).toBe(true);
     expect(audio?.indexes).toContainEqual({ fields: ['scopeKey', 'documentKey', 'version'], unique: true });
+    expect(audio?.indexes).toContainEqual({ fields: ['scopeKey', 'documentKey', 'isCurrent'] });
     expect(audio?.indexes).toContainEqual({ fields: ['storageKey'], unique: true });
+  });
+  test('backfills document audio playback state without selecting legacy versions', async () => {
+    const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    expect(source).toContain('FILTER !HAS(audio, "isCurrent") || !HAS(audio, "playbackPositionMs")');
+    expect(source).toContain('isCurrent: HAS(audio, "isCurrent") ? audio.isCurrent : false');
+    expect(source).toContain('playbackPositionMs: HAS(audio, "playbackPositionMs") ? audio.playbackPositionMs : 0');
   });
   test('declares private immutable document summary indexes', () => {
     const summaries = collections.find(({ name }) => name === 'documentSummaries');

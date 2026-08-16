@@ -10,8 +10,10 @@ import {
   readContentDocument,
   type ContentContext,
   type ContentDocument,
+  type ContentDocumentAudioVersion,
   type ContentDocumentSummary,
   type ContentFolder,
+  type ContentSearchHistoryItem,
 } from "./content-client";
 
 export type ContentLocation = { folders: ContentFolder[]; documents: ContentDocument[] };
@@ -114,6 +116,18 @@ export async function refreshContentDocumentAudioVersions(queryClient: QueryClie
   return getContentDocumentAudioVersions(queryClient, context, documentKey);
 }
 
+export function updateCachedContentDocumentAudioPlayback(queryClient: QueryClient, context: ContentContext, documentKey: string, audioVersionKey: string, playbackPositionMs: number) {
+  queryClient.setQueryData<ContentDocumentAudioVersion[]>(contentQueryKeys.audioVersions(context, documentKey), (current = []) => current.map((version) => ({
+    ...version,
+    isCurrent: version.key === audioVersionKey,
+    ...(version.key === audioVersionKey ? { playbackPositionMs } : {}),
+  })));
+}
+
+export function clearCachedContentDocumentAudioPlayback(queryClient: QueryClient, context: ContentContext, documentKey: string) {
+  queryClient.setQueryData<ContentDocumentAudioVersion[]>(contentQueryKeys.audioVersions(context, documentKey), (current = []) => current.map((version) => ({ ...version, isCurrent: false })));
+}
+
 export function getContentDocumentSummaries(queryClient: QueryClient, context: ContentContext, documentKey: string) {
   return queryClient.fetchQuery({
     queryKey: contentQueryKeys.summaries(context, documentKey),
@@ -152,13 +166,29 @@ export async function invalidateContentDocumentTopics(queryClient: QueryClient, 
 export function getContentHistory(queryClient: QueryClient, context: ContentContext, folderKey?: string) {
   return queryClient.fetchQuery({
     queryKey: contentQueryKeys.history(context, folderKey),
-    queryFn: () => listContentSearchHistory(folderKey, true),
+    queryFn: () => listContentSearchHistory(folderKey, true, context),
+    staleTime: Infinity,
   });
 }
 
 export async function refreshContentHistory(queryClient: QueryClient, context: ContentContext, folderKey?: string) {
   await queryClient.invalidateQueries({ queryKey: contentQueryKeys.history(context, folderKey), exact: true, refetchType: "none" });
   return getContentHistory(queryClient, context, folderKey);
+}
+
+export function promoteCachedContentHistory(queryClient: QueryClient, context: ContentContext, folderKey: string | undefined, item: ContentSearchHistoryItem) {
+  const key = contentQueryKeys.history(context, folderKey);
+  const previous = queryClient.getQueryData<ContentSearchHistoryItem[]>(key) ?? [];
+  const promoted = { ...item, usageCount: item.usageCount + 1, searchedAt: new Date().toISOString() };
+  queryClient.setQueryData<ContentSearchHistoryItem[]>(key, [promoted, ...previous.filter(({ normalizedQuery }) => normalizedQuery !== item.normalizedQuery)]);
+  return promoted;
+}
+
+export function removeCachedContentHistory(queryClient: QueryClient, context: ContentContext, folderKey: string | undefined, normalizedQuery: string) {
+  const key = contentQueryKeys.history(context, folderKey);
+  const previous = queryClient.getQueryData<ContentSearchHistoryItem[]>(key) ?? [];
+  queryClient.setQueryData<ContentSearchHistoryItem[]>(key, previous.filter((item) => item.normalizedQuery !== normalizedQuery));
+  return previous;
 }
 
 export function replaceCachedContentDocument(queryClient: QueryClient, context: ContentContext, updated: ContentDocument) {

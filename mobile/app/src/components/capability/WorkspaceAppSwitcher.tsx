@@ -3,7 +3,7 @@ import { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { BottomSheet, BottomSheetItem } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
-import { ChevronRightIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { ChevronLeftIcon, ChevronRightIcon } from "@vorinthex/shared/ui/icons-mobile";
 
 import { ChromeIcon } from "@/components/ChromeIcon";
 import { capabilityIconSource } from "@/data/capability-icons";
@@ -18,7 +18,7 @@ const AVAILABLE_APPS: { slug: "archive" | "gallery" | "compass" | "signal" | "as
   { slug: "ascend", name: "Ascend" },
 ];
 
-export function WorkspaceAppSwitcher({ active, onBeforeSelect }: { active: "archive" | "gallery" | "compass" | "signal" | "ascend"; onBeforeSelect?: (slug: CapabilitySlug) => boolean }) {
+export function WorkspaceAppSwitcher({ active, onBeforeSelect, trigger = "identity" }: { active: "archive" | "gallery" | "compass" | "signal" | "ascend"; onBeforeSelect?: (slug: CapabilitySlug) => boolean; trigger?: "identity" | "back" }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const selected = AVAILABLE_APPS.find(({ slug }) => slug === active)!;
@@ -30,13 +30,15 @@ export function WorkspaceAppSwitcher({ active, onBeforeSelect }: { active: "arch
 
   return (
     <>
-      <Button accessibilityLabel={`Open app selector. Current app: ${selected.name}`} contentMode="raw" onPress={() => setOpen(true)} size="md" style={styles.trigger} variant="ghost">
-        <View style={styles.identity}>
-          <ChromeIcon glow={0.55} size={36} source={capabilityIconSource[selected.slug]} />
-          <Text style={styles.title}>{selected.name.toUpperCase()}</Text>
-          <ChevronRightIcon size="sm" variant="muted" />
-        </View>
-      </Button>
+      {trigger === "back"
+        ? <Button accessibilityLabel={`Open app selector. Current app: ${selected.name}`} contentMode="raw" onPress={() => setOpen(true)} size="sm" variant="icon"><ChevronLeftIcon size="sm" /></Button>
+        : <Button accessibilityLabel={`Open app selector. Current app: ${selected.name}`} contentMode="raw" onPress={() => setOpen(true)} size="md" style={styles.trigger} variant="ghost">
+          <View style={styles.identity}>
+            <ChromeIcon glow={0.55} size={36} source={capabilityIconSource[selected.slug]} />
+            <Text style={styles.title}>{selected.name.toUpperCase()}</Text>
+            <ChevronRightIcon size="sm" variant="muted" />
+          </View>
+        </Button>}
       <BottomSheet open={open} onOpenChange={setOpen} title="Switch app" description="Choose a workspace.">
         {AVAILABLE_APPS.map((app) => (
           <BottomSheetItem

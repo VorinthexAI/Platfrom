@@ -9,9 +9,11 @@ import {
   contentFolderDescendantKeys,
   contentFolderStack,
   contentQueryKeys,
+  clearCachedContentDocumentAudioPlayback,
   invalidateContentDocumentTopics,
   invalidateContentHistories,
   invalidateContentLocations,
+  promoteCachedContentHistory,
   replaceCachedContentDocument,
   replaceCachedContentDocuments,
   replaceCachedContentDocumentDetail,
@@ -22,8 +24,10 @@ import {
   removeCachedContentDocumentsEverywhere,
   removeCachedContentFolder,
   removeCachedContentFoldersEverywhere,
+  removeCachedContentHistory,
+  updateCachedContentDocumentAudioPlayback,
 } from "./content-query-cache";
-import type { ContentContext } from "./content-client";
+import type { ContentContext, ContentSearchHistoryItem } from "./content-client";
 
 const context: ContentContext = {
   organizationKey: "organization-a",
@@ -71,6 +75,24 @@ test("stores generated summaries in the document summary query", () => {
   const summaries = client.getQueryData<any[]>(contentQueryKeys.summaries(context, "document-a"));
   expect(cached).toBe(summaries?.[0]);
   expect(summaries).toEqual([second, first]);
+});
+
+test("converges document audio selection, progress, and dismissal in cache", () => {
+  const client = new QueryClient();
+  const key = contentQueryKeys.audioVersions(context, "document-a");
+  client.setQueryData(key, [
+    { key: "audio-a", documentKey: "document-a", isCurrent: true, playbackPositionMs: 5_000 },
+    { key: "audio-b", documentKey: "document-a", isCurrent: false, playbackPositionMs: 0 },
+  ]);
+
+  updateCachedContentDocumentAudioPlayback(client, context, "document-a", "audio-b", 12_345);
+  expect(client.getQueryData<any[]>(key)).toMatchObject([
+    { key: "audio-a", isCurrent: false, playbackPositionMs: 5_000 },
+    { key: "audio-b", isCurrent: true, playbackPositionMs: 12_345 },
+  ]);
+  clearCachedContentDocumentAudioPlayback(client, context, "document-a");
+  expect(client.getQueryData<any[]>(key)?.every(({ isCurrent }) => !isCurrent)).toBe(true);
+  expect(client.getQueryData<any[]>(key)?.[1]?.playbackPositionMs).toBe(12_345);
 });
 
 test("derives folder children, ancestry, and descendants from one tree", () => {
@@ -254,4 +276,19 @@ test("invalidates affected histories and patches moved document detail without c
   expect(client.getQueryData<any>(documentKey)).toMatchObject({ folderKey: "destination", content: "Body" });
   expect(client.getQueryState(sourceHistory)?.isInvalidated).toBe(true);
   expect(client.getQueryState(destinationHistory)?.isInvalidated).toBe(true);
+});
+
+test("optimistically promotes, counts, and removes Content search history", () => {
+  const client = new QueryClient();
+  const older: ContentSearchHistoryItem = { query: "older", normalizedQuery: "older", contextDomain: "content", searchedAt: "2026-08-10T00:00:00.000Z", usageCount: 1, documents: [] };
+  const selected: ContentSearchHistoryItem = { query: "roadmap", normalizedQuery: "roadmap", contextDomain: "content", searchedAt: "2026-08-11T00:00:00.000Z", usageCount: 3, documents: [] };
+  client.setQueryData(contentQueryKeys.history(context, "folder"), [older, selected]);
+
+  const promoted = promoteCachedContentHistory(client, context, "folder", selected);
+  expect(promoted.usageCount).toBe(4);
+  expect(client.getQueryData<ContentSearchHistoryItem[]>(contentQueryKeys.history(context, "folder"))?.map(({ normalizedQuery, usageCount }) => ({ normalizedQuery, usageCount }))).toEqual([{ normalizedQuery: "roadmap", usageCount: 4 }, { normalizedQuery: "older", usageCount: 1 }]);
+
+  const previous = removeCachedContentHistory(client, context, "folder", "roadmap");
+  expect(previous).toHaveLength(2);
+  expect(client.getQueryData<ContentSearchHistoryItem[]>(contentQueryKeys.history(context, "folder"))).toEqual([older]);
 });

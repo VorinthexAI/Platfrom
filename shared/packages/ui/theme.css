@@ -144,6 +144,45 @@
   transform: none;
 }
 
+.vui-search-history-pill {
+  align-items: center;
+  background: var(--vui-color-secondary);
+  border: 1px solid var(--vui-color-border);
+  border-radius: var(--vui-radius-pill);
+  display: flex;
+  min-height: 48px;
+  padding: 3px;
+  width: 100%;
+}
+
+.vui-search-history-pill-query {
+  flex: 1;
+  justify-content: space-between;
+  min-width: 0;
+  padding-left: 6px;
+  padding-right: 8px;
+}
+
+.vui-search-history-pill-query > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vui-search-history-pill-badge {
+  align-items: center;
+  background: var(--vui-color-surface);
+  border: 1px solid var(--vui-color-border);
+  border-radius: var(--vui-radius-pill);
+  color: var(--vui-color-muted);
+  display: inline-flex;
+  font-size: 10px;
+  height: 24px;
+  justify-content: center;
+  min-width: 30px;
+  padding: 0 8px;
+}
+
 /* Loading keeps each variant recognizable while the rising melt carries
    the state. */
 .vui-button[aria-busy="true"] {
@@ -258,7 +297,7 @@
 }
 
 .vui-control {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--vui-color-secondary);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: var(--vui-radius-pill);
   color: var(--vui-color-text);

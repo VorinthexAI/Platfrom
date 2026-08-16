@@ -58,9 +58,10 @@ describe('Content node contracts', () => {
       storageKey: 'content/document/audio/version.mp3', mimeType: 'audio/mpeg', sizeBytes: 128, durationMs: 1_200,
       includeTitle: false, includeCode: false, createdByKey: 'cm00000000000000000000004', createdAt: '2026-07-22T10:00:00.000Z',
     });
-    expect(audio).toMatchObject({ version: 3, documentKey: 'cm00000000000000000000003' });
+    expect(audio).toMatchObject({ version: 3, documentKey: 'cm00000000000000000000003', isCurrent: false, playbackPositionMs: 0 });
     expect(audio).not.toHaveProperty('documentVersionKey');
     expect(() => documentAudioVersionSchema.parse({ ...audio, durationMs: 0 })).toThrow();
+    expect(() => documentAudioVersionSchema.parse({ ...audio, playbackPositionMs: -1 })).toThrow();
   });
 
   test('summaries are immutable child records and strip Arango private fields', () => {

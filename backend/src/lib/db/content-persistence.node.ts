@@ -193,6 +193,41 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       const values = cursor.all ? await cursor.all() : [];
       return values.map((value) => documentAudioVersionSchema.parse(withArangoKey(value as Record<string, unknown>)));
     },
+    async updateAudioPlayback(scopeKey: string, key: string, playbackPositionMs: number): Promise<DocumentAudioVersion | null> {
+      playbackPositionMs = z.number().int().nonnegative().parse(playbackPositionMs);
+      const cursor = await executor.query(`
+        LET target = DOCUMENT(documentAudioVersions, @key)
+        FILTER target != null && target.scopeKey == @scopeKey && @playbackPositionMs <= target.durationMs
+        LET document = DOCUMENT(documents, target.documentKey)
+        FILTER document != null && document.scopeKey == @scopeKey && document.deletedAt == null
+        FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
+        FOR audio IN documentAudioVersions
+          FILTER audio.scopeKey == @scopeKey && audio.documentKey == target.documentKey
+          FILTER audio._key == target._key || audio.isCurrent == true
+          UPDATE audio WITH MERGE(
+            { isCurrent: audio._key == target._key },
+            audio._key == target._key ? { playbackPositionMs: @playbackPositionMs } : {}
+          ) IN documentAudioVersions
+          LET updated = NEW
+          FILTER updated._key == target._key
+          RETURN updated
+      `, { key, scopeKey, playbackPositionMs });
+      const updated = await cursor.next();
+      return updated ? documentAudioVersionSchema.parse(withArangoKey(updated as Record<string, unknown>)) : null;
+    },
+    async clearCurrentAudioVersion(scopeKey: string, documentKey: string): Promise<boolean> {
+      const cursor = await executor.query(`
+        LET document = DOCUMENT(documents, @documentKey)
+        FILTER document != null && document.scopeKey == @scopeKey && document.deletedAt == null
+        FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
+        FOR audio IN documentAudioVersions
+          FILTER audio.scopeKey == @scopeKey && audio.documentKey == @documentKey && audio.isCurrent == true
+          UPDATE audio WITH { isCurrent: false } IN documentAudioVersions
+          COLLECT WITH COUNT INTO cleared
+          RETURN cleared
+      `, { documentKey, scopeKey });
+      return Number(await cursor.next() ?? 0) > 0;
+    },
     async getSummary(key: string): Promise<DocumentSummary | null> {
       const cursor = await executor.query('RETURN DOCUMENT(documentSummaries, @key)', { key });
       const value = await cursor.next();
@@ -309,7 +344,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       if (!created) throw new Error('Version owner is pending deletion.');
       return documentVersionSchema.parse(withArangoKey(created as Record<string, unknown>));
     },
-    async createAudioVersion(input: Omit<DocumentAudioVersion, 'version'>): Promise<DocumentAudioVersion> {
+    async createAudioVersion(input: Omit<DocumentAudioVersion, 'version' | 'isCurrent' | 'playbackPositionMs'> & Partial<Pick<DocumentAudioVersion, 'isCurrent' | 'playbackPositionMs'>>): Promise<DocumentAudioVersion> {
       const audio = documentAudioVersionSchema.omit({ version: true }).parse(input);
       for (let attempt = 0; attempt < 10; attempt += 1) {
         try {

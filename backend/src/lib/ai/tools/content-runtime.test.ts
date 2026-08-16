@@ -47,7 +47,10 @@ function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
     async createVersion(value) { const version = { ...value, key: newId(), version: [...versions.values()].filter((item) => item.documentKey === value.documentKey).length + 1, deletedAt: null, createdAt: now }; versions.set(version.key, version); return version; },
     async deleteVersion(key) { versions.delete(key); },
     async listAudioVersions(_scopeKey, keys) { return [...audioVersions.values()].filter((value) => keys.includes(value.documentKey)).sort((a, b) => b.version - a.version); },
-    async createAudioVersion(value) { const version = { ...value, version: [...audioVersions.values()].filter((item) => item.documentKey === value.documentKey).length + 1 }; audioVersions.set(version.key, version); return version; },
+    async getAudioVersion(key) { return audioVersions.get(key) ?? null; },
+    async createAudioVersion(value) { const version = { isCurrent: false, playbackPositionMs: 0, ...value, version: [...audioVersions.values()].filter((item) => item.documentKey === value.documentKey).length + 1 }; audioVersions.set(version.key, version); return version; },
+    async updateAudioPlayback(_scopeKey, key, playbackPositionMs) { const target = audioVersions.get(key); if (!target || playbackPositionMs > target.durationMs) return null; for (const audio of audioVersions.values()) if (audio.documentKey === target.documentKey) audio.isCurrent = audio.key === key; target.playbackPositionMs = playbackPositionMs; return target; },
+    async clearCurrentAudioVersion(_scopeKey, documentKey) { let cleared = false; for (const audio of audioVersions.values()) if (audio.documentKey === documentKey && audio.isCurrent) { audio.isCurrent = false; cleared = true; } return cleared; },
     async deleteAudioVersion(key) { audioVersions.delete(key); },
     async getSummary(key) { return summaries.get(key) ?? null; },
     async listSummaries(_scopeKey, keys) { return [...summaries.values()].filter((value) => keys.includes(value.documentKey)).sort((a, b) => b.version - a.version); },
@@ -356,6 +359,7 @@ describe('Content runtime', () => {
     expect(spoken[0]).toStartWith('Notes. Visible sentence.');
     expect(spoken.join(' ')).not.toContain('secret code');
     expect(actions).toEqual(Array(spoken.length).fill('speak'));
+    expect(speechInputs.every(({ voice }) => voice === 'Matthew')).toBe(true);
     expect(uploaded).toHaveLength(0);
     const ephemeralChunkCount = spoken.length;
     const persisted = await runContentTool('document.read', { documentKeys: [documentKey], mode: 'audio', includeCode: false, persistAudio: true, language: 'en-US' }, f.context, dependencies);
@@ -363,11 +367,12 @@ describe('Content runtime', () => {
     expect(persisted.results[0]).toMatchObject({ success: true });
     expect(speechInputs.at(-1)).not.toHaveProperty('speakingRate');
     expect(speechInputs.at(-1)?.language).toBe('en-US');
+    expect(speechInputs.at(-1)?.voice).toBe('Matthew');
     expect(uploaded).toHaveLength(1);
     expect(uploaded[0]).toEndWith('.mp3');
     expect(persisted.results[0]?.data).toMatchObject({ audioVersion: { version: 1, durationMs: 900 } });
     expect((persisted.results[0]?.data as any)?.audioVersion).not.toHaveProperty('speakingRate');
-    expect((persisted.results[0]?.data as any)?.audioVersion).toMatchObject({ language: 'en-US' });
+    expect((persisted.results[0]?.data as any)?.audioVersion).toMatchObject({ language: 'en-US', voice: 'Matthew' });
     expect(f.audioVersions.size).toBe(1);
     expect(f.documents.get(documentKey).speechStorageKeys).toBeUndefined();
     expect(f.documents.get(documentKey).updatedAt).toBe(now);
@@ -496,6 +501,24 @@ describe('Content runtime', () => {
     current.content = 'Changed source text.';
     const listed = await runContentTool('document.list-audio-versions', { documentKeys: [documentKey] }, f.context, dependencies);
     expect(listed.results[0]?.data?.audioVersions).toMatchObject([{ version: 2, current: false }, { version: 1, current: false }]);
+  });
+
+  test('persists one current audio version, its resume position, and explicit dismissal', async () => {
+    const f = fixture('moderator');
+    const documentKey = f.addDocument('Stable source text.');
+    const first = await f.repository.createAudioVersion!({ key: newId(), scopeKey: f.scopeKey, documentKey, sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: now, storageKey: 'audio/one.mp3', mimeType: 'audio/mpeg', sizeBytes: 10, durationMs: 60_000, includeTitle: true, includeCode: false, createdByKey: newId(), createdAt: now });
+    const second = await f.repository.createAudioVersion!({ key: newId(), scopeKey: f.scopeKey, documentKey, sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: now, storageKey: 'audio/two.mp3', mimeType: 'audio/mpeg', sizeBytes: 10, durationMs: 90_000, includeTitle: true, includeCode: false, createdByKey: newId(), createdAt: now });
+
+    await runContentTool('document.audio.playback.update', { audioVersionKey: first.key, playbackPositionMs: 12_345 }, f.context, { repository: f.repository });
+    await runContentTool('document.audio.playback.update', { audioVersionKey: second.key, playbackPositionMs: 23_456 }, f.context, { repository: f.repository });
+    expect([...f.audioVersions.values()].map(({ key, isCurrent, playbackPositionMs }) => ({ key, isCurrent, playbackPositionMs }))).toEqual([
+      { key: first.key, isCurrent: false, playbackPositionMs: 12_345 },
+      { key: second.key, isCurrent: true, playbackPositionMs: 23_456 },
+    ]);
+    await expect(runContentTool('document.audio.playback.update', { audioVersionKey: second.key, playbackPositionMs: 90_001 }, f.context, { repository: f.repository })).rejects.toMatchObject({ code: 'CONTENT_INVALID_INPUT' });
+    await runContentTool('document.audio.playback.clear', { documentKey }, f.context, { repository: f.repository });
+    expect([...f.audioVersions.values()].every(({ isCurrent }) => !isCurrent)).toBe(true);
+    expect(f.audioVersions.get(second.key).playbackPositionMs).toBe(23_456);
   });
 
   test('returns a specific error when audio history storage is unavailable', async () => {
@@ -636,8 +659,9 @@ describe('Content runtime', () => {
     f.repository.semanticSearch = async (input) => [...f.documents.values()].filter((document) => !input.folderKeys || input.folderKeys.includes(document.folderKey)).map((document, index) => ({ score: index === 0 ? 0.54 : 0.9, document }));
     const searchQueries = {
       async get({ actorKey, scopeKey, normalizedQuery, folderKey, includeDescendants }: any) { return rows.get(`${actorKey}:${scopeKey}:${normalizedQuery}:${folderKey ?? 'root'}:${includeDescendants}`) ?? null; },
-      async record(value: any) { const identity = `${value.actorKey}:${value.scopeKey}:${value.normalizedQuery}:${value.folderKey ?? 'root'}:${value.includeDescendants}`; const old = rows.get(identity); rows.set(identity, { output: value.output, query: value.query, normalizedQuery: value.normalizedQuery, folderKey: value.folderKey, includeDescendants: value.includeDescendants, searchedAt: value.now, count: (old?.count ?? 0) + 1 }); },
-      async list({ actorKey, scopeKey, folderKey, includeDescendants, limit }: any) { return [...rows.entries()].filter(([key]) => key.startsWith(`${actorKey}:${scopeKey}:`)).map(([, value]) => value).filter((value) => value.folderKey === folderKey && value.includeDescendants === includeDescendants).map((value) => ({ query: value.query, normalizedQuery: value.normalizedQuery, searchedAt: value.searchedAt, count: value.count, ...(value.folderKey ? { folderKey: value.folderKey, includeDescendants: value.includeDescendants } : {}), documents: value.output.result.documents })).slice(0, limit); },
+      async record(value: any) { const identity = `${value.actorKey}:${value.scopeKey}:${value.normalizedQuery}:${value.folderKey ?? 'root'}:${value.includeDescendants}`; const old = rows.get(identity); rows.set(identity, { output: value.output, query: value.query, normalizedQuery: value.normalizedQuery, contextDomain: value.contextDomain, folderKey: value.folderKey, includeDescendants: value.includeDescendants, searchedAt: value.now, usageCount: (old?.usageCount ?? 0) + 1 }); },
+      async list({ actorKey, scopeKey, folderKey, includeDescendants, limit }: any) { return [...rows.entries()].filter(([key]) => key.startsWith(`${actorKey}:${scopeKey}:`)).map(([, value]) => value).filter((value) => value.folderKey === folderKey && value.includeDescendants === includeDescendants).map((value) => ({ query: value.query, normalizedQuery: value.normalizedQuery, contextDomain: value.contextDomain, searchedAt: value.searchedAt, usageCount: value.usageCount, ...(value.folderKey ? { folderKey: value.folderKey, includeDescendants: value.includeDescendants } : {}), documents: value.output.result.documents })).slice(0, limit); },
+      async remove({ actorKey, scopeKey, normalizedQuery, folderKey, includeDescendants }: any) { return rows.delete(`${actorKey}:${scopeKey}:${normalizedQuery}:${folderKey ?? 'root'}:${includeDescendants}`); },
     };
     const dependencies: any = {
       repository: f.repository,
@@ -666,7 +690,7 @@ describe('Content runtime', () => {
     expect(embeddingCalls).toBe(1);
     expect(summaryCalls).toBe(10);
     const history = await runContentTool('scope.content.search-history', { scopeKey: f.scopeKey }, f.context, dependencies);
-    expect(history.history).toMatchObject([{ normalizedQuery: 'launch roadmap', count: 3 }]);
+    expect(history.history).toMatchObject([{ normalizedQuery: 'launch roadmap', contextDomain: 'content', usageCount: 3 }]);
     expect(history.history[0]?.documents).toEqual(first.documents);
     const archivedDocument = f.documents.get(first.documents[0]!.documentKey);
     archivedDocument.deletedAt = now;
@@ -694,6 +718,8 @@ describe('Content runtime', () => {
     const otherContext = { ...f.context, principal: { ...f.context.principal, user: { key: newId() } } };
     const isolated = await runContentTool('scope.content.search-history', { scopeKey: f.scopeKey }, otherContext, dependencies);
     expect(isolated.history).toEqual([]);
+    expect(await runContentTool('scope.content.search-history.delete', { scopeKey: f.scopeKey, normalizedQuery: 'launch roadmap' }, f.context, dependencies)).toEqual({ normalizedQuery: 'launch roadmap', deleted: true });
+    expect((await runContentTool('scope.content.search-history', { scopeKey: f.scopeKey }, f.context, dependencies)).history).toEqual([]);
     allowed = false;
     await expect(runContentTool('scope.content.search', { scopeKey: f.scopeKey, query: 'launch roadmap' }, f.context, dependencies)).rejects.toMatchObject({ code: 'CONTENT_FORBIDDEN' });
   });
@@ -1063,7 +1089,7 @@ describe('Content runtime', () => {
       storage: { async upload({ key }: any) { uploaded.push(key); return { storageKey: key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
       clock: () => new Date(now),
     };
-    const first = await runContentTool('document.summary.audio.generate', { summaryKeys: [summary.key], voice: 'Matthew', language: 'en-US' }, f.context, dependencies);
+    const first = await runContentTool('document.summary.audio.generate', { summaryKeys: [summary.key], language: 'en-US' }, f.context, dependencies);
     const second = await runContentTool('document.summary.audio.generate', { summaryKeys: [summary.key] }, f.context, dependencies);
     expect(first.results[0]).toMatchObject({ success: true, data: { audio: { summaryKey: summary.key, mimeType: 'audio/mpeg', durationMs: 800, url: expect.stringContaining('https://audio.example/') } } });
     expect(JSON.stringify(first)).not.toContain('storageKey');
@@ -1502,8 +1528,9 @@ describe('Content runtime', () => {
         },
         searchQueries: {
           async get({ actorKey, scopeKey, normalizedQuery }: any) { return searchRows.get(`${actorKey}:${scopeKey}:${normalizedQuery}`) ?? null; },
-          async record(value: any) { const identity = `${value.actorKey}:${value.scopeKey}:${value.normalizedQuery}`; const old = searchRows.get(identity); searchRows.set(identity, { output: value.output, query: value.query, normalizedQuery: value.normalizedQuery, searchedAt: value.now, count: (old?.count ?? 0) + 1 }); },
-          async list({ actorKey, scopeKey, limit }: any) { return [...searchRows.entries()].filter(([key]) => key.startsWith(`${actorKey}:${scopeKey}:`)).map(([, value]) => ({ query: value.query, normalizedQuery: value.normalizedQuery, searchedAt: value.searchedAt, count: value.count })).slice(0, limit); },
+          async record(value: any) { const identity = `${value.actorKey}:${value.scopeKey}:${value.normalizedQuery}`; const old = searchRows.get(identity); searchRows.set(identity, { output: value.output, query: value.query, normalizedQuery: value.normalizedQuery, contextDomain: value.contextDomain, searchedAt: value.now, usageCount: (old?.usageCount ?? 0) + 1 }); },
+          async list({ actorKey, scopeKey, limit }: any) { return [...searchRows.entries()].filter(([key]) => key.startsWith(`${actorKey}:${scopeKey}:`)).map(([, value]) => ({ query: value.query, normalizedQuery: value.normalizedQuery, contextDomain: value.contextDomain, searchedAt: value.searchedAt, usageCount: value.usageCount, documents: value.output?.result?.documents ?? [] })).slice(0, limit); },
+          async remove({ actorKey, scopeKey, normalizedQuery }: any) { return searchRows.delete(`${actorKey}:${scopeKey}:${normalizedQuery}`); },
         },
         mergeAudio: async () => new Uint8Array([1]),
         audioDuration: () => 100,
@@ -1530,6 +1557,10 @@ describe('Content runtime', () => {
       else if (name === 'document.list') input = { scopeKey: f.scopeKey, folderKey: f.folderKey };
        else if (name === 'document.read') input = { documentKeys: [documentKey], mode: 'content' };
        else if (name === 'document.list-audio-versions') input = { documentKeys: [documentKey] };
+       else if (name === 'document.audio.playback.update' || name === 'document.audio.playback.clear') {
+         const audio = await f.repository.createAudioVersion!({ key: newId(), scopeKey: f.scopeKey, documentKey, sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: now, storageKey: `audio/${name}.mp3`, mimeType: 'audio/mpeg', sizeBytes: 10, durationMs: 60_000, includeTitle: true, includeCode: false, createdByKey: newId(), createdAt: now });
+         input = name === 'document.audio.playback.update' ? { audioVersionKey: audio.key, playbackPositionMs: 10_000 } : { documentKey };
+       }
        else if (name === 'document.list-summaries') input = { documentKeys: [documentKey] };
         else if (name === 'document.find-summary') {
          const summary = await f.repository.createSummary!({ key: newId(), scopeKey: f.scopeKey, documentKey, summary: 'Saved', style: 'brief', sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: now, createdByKey: newId(), createdAt: now });
@@ -1569,6 +1600,7 @@ describe('Content runtime', () => {
       else if (name === 'scope.document.search') input = { scopeKey: f.scopeKey, query: 'source' };
       else if (name === 'scope.content.search') input = { scopeKey: f.scopeKey, query: 'source' };
       else if (name === 'scope.content.search-history') input = { scopeKey: f.scopeKey };
+      else if (name === 'scope.content.search-history.delete') input = { scopeKey: f.scopeKey, normalizedQuery: 'source' };
       else input = { organizationKey: f.context.organizationKey, query: 'source' };
       const output: any = await runContentTool(name, input, f.context, dependencies);
       if (output.summary) expect(output.summary.failed, name).toBe(0);

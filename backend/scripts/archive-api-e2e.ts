@@ -143,6 +143,14 @@ if (process.env.ARCHIVE_E2E_AUDIO === 'true') {
   const listedAudio = object((object(firstResultData(listedAudioResult, 'document.list-audio-versions')).audioVersions as unknown[]).map(object).find((entry) => entry.key === documentAudio.key));
   const documentAudioResponse = await fetch(string(listedAudio.url, 'document audio URL'));
   if (!documentAudioResponse.ok || !documentAudioResponse.headers.get('content-type')?.includes('audio/mpeg') || (await documentAudioResponse.arrayBuffer()).byteLength === 0) throw new Error('Persisted document audio was not playable.');
+  await tool('document.audio.playback.update', { audioVersionKey: documentAudio.key, playbackPositionMs: 1_000, idempotencyKey: `archive-e2e-audio-progress-${suffix}` });
+  const resumedAudioResult = await tool('document.list-audio-versions', { documentKeys: [documentKey] });
+  const resumedAudio = object((object(firstResultData(resumedAudioResult, 'document.list-audio-versions')).audioVersions as unknown[]).map(object).find((entry) => entry.key === documentAudio.key));
+  if (resumedAudio.isCurrent !== true || resumedAudio.playbackPositionMs !== 1_000) throw new Error('Persisted document audio did not retain its resume state.');
+  await tool('document.audio.playback.clear', { documentKey, idempotencyKey: `archive-e2e-audio-clear-${suffix}` });
+  const clearedAudioResult = await tool('document.list-audio-versions', { documentKeys: [documentKey] });
+  const clearedAudio = object((object(firstResultData(clearedAudioResult, 'document.list-audio-versions')).audioVersions as unknown[]).map(object).find((entry) => entry.key === documentAudio.key));
+  if (clearedAudio.isCurrent !== false || clearedAudio.playbackPositionMs !== 1_000) throw new Error('Dismissing document audio did not clear only its current state.');
 
   const summaryResult = await tool('document.summarize', {
     documentKeys: [documentKey],
@@ -213,7 +221,7 @@ if (!(search.documents as unknown[]).some((entry) => object(entry).documentKey =
 const replay = await tool('scope.content.search', { scopeKey, query: `  ${query.toUpperCase()}  `, minimumScore: 0 });
 if (!(replay.documents as unknown[]).some((entry) => object(entry).documentKey === documentKey)) throw new Error('Normalized semantic retrieval did not return the created document.');
 const searchHistory = await tool('scope.content.search-history', { scopeKey, limit: 8 });
-if (!(searchHistory.history as unknown[]).some((entry) => object(entry).normalizedQuery === query && Number(object(entry).count) >= 2)) throw new Error('Semantic search history was not persisted.');
+if (!(searchHistory.history as unknown[]).some((entry) => object(entry).normalizedQuery === query && Number(object(entry).usageCount) >= 2)) throw new Error('Semantic search history was not persisted.');
 
 await tool('document.archive', { documentKeys: [documentKey, uploadedDocumentKey, uploadedPdfKey], atomic: true });
 await tool('document.delete', { documentKeys: [documentKey, uploadedDocumentKey, uploadedPdfKey], deleteVersions: true, deleteShares: true });

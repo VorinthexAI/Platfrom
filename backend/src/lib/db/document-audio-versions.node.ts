@@ -14,6 +14,8 @@ export const documentAudioVersionSchema = z.object({
   mimeType: z.literal('audio/mpeg'),
   sizeBytes: z.number().int().positive(),
   durationMs: z.number().int().positive(),
+  isCurrent: z.boolean().default(false),
+  playbackPositionMs: z.number().int().nonnegative().default(0),
   voice: z.string().trim().min(1).optional(),
   language: z.string().trim().min(1).optional(),
   speakingRate: z.number().min(0.25).max(4).optional(),

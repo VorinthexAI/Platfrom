@@ -14,14 +14,14 @@ const expectedNames = [
   'enhance',
   'book.create-context', 'book.write',
   'folder.create', 'folder.find', 'folder.list', 'folder.update', 'folder.rename', 'folder.move', 'folder.copy', 'folder.archive', 'folder.restore', 'folder.delete',
-  'document.parse', 'document.scan', 'document.create', 'document.find', 'document.list', 'document.read', 'document.list-audio-versions', 'document.list-summaries', 'document.find-summary', 'document.summary.audio.generate', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.download', 'document.export', 'document.share', 'document.unshare', 'document.list-shares', 'document.create-version', 'document.find-version', 'document.list-versions', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.topics', 'document.translate', 'document.rewrite',
-  'scope.document.search', 'scope.content.search', 'scope.content.search-history', 'organization.document.search',
+  'document.parse', 'document.scan', 'document.create', 'document.find', 'document.list', 'document.read', 'document.list-audio-versions', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.list-summaries', 'document.find-summary', 'document.summary.audio.generate', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.download', 'document.export', 'document.share', 'document.unshare', 'document.list-shares', 'document.create-version', 'document.find-version', 'document.list-versions', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.topics', 'document.translate', 'document.rewrite',
+  'scope.document.search', 'scope.content.search', 'scope.content.search-history', 'scope.content.search-history.delete', 'organization.document.search',
 ] as const;
 
 describe('Content tool registry', () => {
   test('contains exactly the registered dotted names and no action-style kebab names', () => {
     expect([...CONTENT_TOOL_NAMES]).toEqual([...expectedNames]);
-    expect(CONTENT_TOOL_NAMES).toHaveLength(48);
+    expect(CONTENT_TOOL_NAMES).toHaveLength(51);
     for (const name of CONTENT_TOOL_NAMES) {
       expect(name).toMatch(/^[a-z]+(?:[.-][a-z]+)*$/);
       if (name !== 'enhance') expect(name).toContain('.');
@@ -73,6 +73,8 @@ describe('Content input contracts', () => {
     expect(() => contentToolInputSchemas['document.read'].parse({ documentKeys: [key], mode: 'audio', startOffset: 10, persistAudio: true })).toThrow();
     expect(() => contentToolInputSchemas['document.read'].parse({ documentKeys: [key, newId()], mode: 'audio', persistAudio: true })).toThrow();
     expect(() => contentToolInputSchemas['document.read'].parse({ documentKeys: [key], mode: 'content', voice: 'alloy' })).toThrow();
+    expect(() => contentToolInputSchemas['document.read'].parse({ documentKeys: [key], mode: 'audio', voice: 'Joanna' })).toThrow();
+    expect(contentToolInputSchemas['document.read'].parse({ documentKeys: [key], mode: 'audio', voice: 'Matthew' }).voice).toBe('Matthew');
     expect(() => contentToolInputSchemas['document.read'].parse({ documentKeys: [key], mode: 'audio', persistAudio: true, language: 'English' })).toThrow();
     expect(() => contentToolInputSchemas['document.read'].parse({ documentKeys: [key], mode: 'audio', persistAudio: true, speakingRate: 1.25 })).toThrow();
     expect(() => contentToolInputSchemas['document.copy'].parse({ copies: [{ documentKey: key, targetFolderKey: newId(), name: 'Wrong field' }] })).toThrow();
@@ -192,7 +194,7 @@ describe('Content output contracts', () => {
     const key = newId();
     expect(contentToolOutputSchemas['document.read'].parse({ results: [{ key, success: true, data: { documentKey: key, title: 'Notes', content: 'Text' } }], summary: { requested: 1, succeeded: 1, failed: 0 } })).toMatchObject({ results: [{ data: { content: 'Text' } }] });
     expect(contentToolOutputSchemas['document.read'].parse({ results: [{ key, success: true, data: { documentKey: key, title: 'Notes', audio: [{ index: 0, url: 'data:audio/mpeg;base64,bXAz', startCharacter: 0, endCharacter: 20 }], totalDurationMs: 900 } }], summary: { requested: 1, succeeded: 1, failed: 0 } })).toMatchObject({ results: [{ data: { audio: [{ index: 0 }] } }] });
-    const audioVersion = { key, documentKey: key, version: 1, sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: '2026-07-22T10:00:00.000Z', mimeType: 'audio/mpeg', sizeBytes: 100, durationMs: 900, includeTitle: false, includeCode: false, createdAt: '2026-07-22T10:00:00.000Z' };
+    const audioVersion = { key, documentKey: key, version: 1, sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: '2026-07-22T10:00:00.000Z', mimeType: 'audio/mpeg', sizeBytes: 100, durationMs: 900, isCurrent: false, playbackPositionMs: 0, includeTitle: false, includeCode: false, createdAt: '2026-07-22T10:00:00.000Z' };
     expect(contentToolOutputSchemas['document.read'].parse({ results: [{ key, success: true, data: { documentKey: key, title: 'Notes', audioVersion } }], summary: { requested: 1, succeeded: 1, failed: 0 } })).toMatchObject({ results: [{ data: { audioVersion: { version: 1 } } }] });
     expect(() => contentToolOutputSchemas['document.read'].parse({ results: [{ key, success: true, data: { documentKey: key, title: 'Notes', audioVersion: { ...audioVersion, storageKey: 'private.mp3' } } }], summary: { requested: 1, succeeded: 1, failed: 0 } })).toThrow();
     expect(() => contentToolOutputSchemas['document.read'].parse({ results: [{ key, success: true, data: { documentKey: key, title: 'Notes', mode: 'html', content: 'wrong' } }], summary: { requested: 1, succeeded: 1, failed: 0 } })).toThrow();

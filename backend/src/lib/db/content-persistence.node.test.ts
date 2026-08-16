@@ -160,6 +160,26 @@ describe('scoped Content persistence', () => {
     expect(calls.some((query) => query.includes('audio.summaryKey IN @summaryKeys'))).toBe(true);
   });
 
+  test('atomically selects one document audio version, saves progress, and clears selection', async () => {
+    const audioKey = 'cm00000000000000000000006';
+    const documentKey = 'cm00000000000000000000003';
+    const createdByKey = 'cm00000000000000000000004';
+    const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
+    const executor: ContentQueryExecutor = { async query(query, bindVars) {
+      calls.push({ query, bindVars });
+      if (query.includes('playbackPositionMs: @playbackPositionMs')) return { async next() { return { _key: audioKey, scopeKey, documentKey, version: 2, sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: timestamp, storageKey: 'audio/two.mp3', mimeType: 'audio/mpeg', sizeBytes: 10, durationMs: 60_000, isCurrent: true, playbackPositionMs: 12_345, includeTitle: true, includeCode: false, createdByKey, createdAt: timestamp }; } };
+      return { async next() { return 1; } };
+    } };
+    const persistence = createContentPersistence(executor);
+    expect(await persistence.updateAudioPlayback(scopeKey, audioKey, 12_345)).toMatchObject({ key: audioKey, isCurrent: true, playbackPositionMs: 12_345 });
+    expect(calls[0]?.query).toContain('audio._key == target._key || audio.isCurrent == true');
+    expect(calls[0]?.query).toContain('{ isCurrent: audio._key == target._key }');
+    expect(calls[0]?.bindVars).toEqual({ key: audioKey, scopeKey, playbackPositionMs: 12_345 });
+    expect(await persistence.clearCurrentAudioVersion(scopeKey, documentKey)).toBe(true);
+    expect(calls[1]?.query).toContain('audio.documentKey == @documentKey && audio.isCurrent == true');
+    expect(calls[1]?.query).toContain('{ isCurrent: false }');
+  });
+
   test('pushes share lifecycle filters into both legacy and global reads', async () => {
     for (const collections of [
       [{ name: 'documentShares' }],

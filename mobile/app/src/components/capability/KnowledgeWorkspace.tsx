@@ -15,6 +15,7 @@ import { Button } from "@vorinthex/shared/ui/button";
 import { CoreComposer } from "@vorinthex/shared/ui/core-composer";
 import { FileViewer } from "@vorinthex/shared/ui/file-viewer";
 import { LoadingText } from "@vorinthex/shared/ui/loading-text";
+import { SearchHistoryPill } from "@vorinthex/shared/ui/search-history-pill";
 import { highlightedSegments, searchDocumentPassagesLiteral, type DocumentPassage, type HighlightRange } from "@vorinthex/shared/ui/document-search";
 import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
@@ -53,9 +54,11 @@ import {
   archiveContentDocument,
   archiveContentSelection,
   askPersonalAssistant,
+  clearContentDocumentAudioPlayback,
   createContentDocument,
   createContentFolder,
   createContentMutationKey,
+  deleteContentSearchHistory,
   copyContentSelection,
   downloadContentDocument,
   findContentDocumentSummary,
@@ -70,13 +73,13 @@ import {
   readContentDocumentSources,
   saveContentDocument,
   scanContentDocument,
-  searchContent,
   searchContentMatches,
   setContentDocumentFavorite,
   setContentFolderFavorite,
   setContentSelectionFavorite,
   uploadContentDocument,
   updateContentFolder,
+  updateContentDocumentAudioPlayback,
   setContentFolderCover,
   summarizeContentDocument,
   type ContentDocument,
@@ -96,6 +99,7 @@ import {
   addCachedContentDocument,
   addCachedContentDocumentSummary,
   addCachedContentFolder,
+  clearCachedContentDocumentAudioPlayback,
   contentFolderChildren,
   contentFolderDescendantKeys,
   contentFolderStack,
@@ -112,7 +116,8 @@ import {
   invalidateContentDocumentTopics,
   refreshContentDocument,
   refreshContentDocumentAudioVersions,
-  refreshContentHistory,
+  promoteCachedContentHistory,
+  removeCachedContentHistory,
   refreshContentLocation,
   replaceCachedContentDocument,
   replaceCachedContentDocumentDetail,
@@ -125,6 +130,7 @@ import {
   removeCachedContentDocumentsEverywhere,
   removeCachedContentFoldersEverywhere,
   type ContentLocation,
+  updateCachedContentDocumentAudioPlayback,
 } from "@/lib/content-query-cache";
 import { invalidateAssistantChanges } from "@/lib/workspace-query-cache";
 import { saveBase64Download, saveTemporaryBase64File, saveTextDownload } from "@/lib/device-download";
@@ -137,7 +143,7 @@ import { useAuthStore } from "@/state/auth";
 type SaveState = "local" | "dirty" | "saving" | "saved" | "error";
 type WorkspaceMode = "auto" | "folders" | "folder" | "editor" | "viewer";
 type FolderContentTab = "folders" | "documents" | "files";
-type ArchiveSheet = "create" | "folder" | "library" | "documents" | "folders" | "enhance" | "summarize" | "summaryVersions" | "summaryReader" | "historyChooser" | "versions" | "audioVersions" | "documentActions" | "documentDetails" | "deleteDocument" | "scanSources" | "destination" | "destinationBrowser" | "folderActions" | "folderDetails" | "bulkActions" | "bulkDelete";
+type ArchiveSheet = "create" | "folder" | "library" | "documents" | "folders" | "searchHistory" | "enhance" | "summarize" | "summaryVersions" | "summaryReader" | "historyChooser" | "versions" | "audioVersions" | "documentActions" | "documentDetails" | "deleteDocument" | "scanSources" | "destination" | "destinationBrowser" | "folderActions" | "folderDetails" | "bulkActions" | "bulkDelete";
 type DestinationAction = "upload" | "move" | "copy";
 type UploadBatchItem = { id: string; mutationKey: string; file: File; name: string; mimeType: string; status: "pending" | "uploading" | "success" | "error"; error?: string };
 type ProcessingScanItem = { id: string; folderKey?: string; name: string };
@@ -298,11 +304,12 @@ export function KnowledgeWorkspace() {
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("folders");
   const [folderContentTab, setFolderContentTab] = useState<FolderContentTab>("folders");
   const [query, setQuery] = useState("");
-  const [searching, setSearching] = useState(false);
   const [locationLoading, setLocationLoading] = useState(true);
   const [openingDocumentKey, setOpeningDocumentKey] = useState<string>();
   const [results, setResults] = useState<ContentSearchResponse>();
   const [history, setHistory] = useState<ContentSearchHistoryItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [removingHistoryQuery, setRemovingHistoryQuery] = useState<string>();
   const [selectedSummary, setSelectedSummary] = useState<ContentDocumentSummary>();
   const [selectedDocument, setSelectedDocument] = useState<ContentDocument>();
   const [filePreviewError, setFilePreviewError] = useState<string>();
@@ -347,8 +354,10 @@ export function KnowledgeWorkspace() {
   const [rootSearchQuery, setRootSearchQuery] = useState("");
   const [rootSearchResults, setRootSearchResults] = useState<ContentSearchResponse>();
   const [rootSearching, setRootSearching] = useState(false);
+  const [rootSearchRevision, setRootSearchRevision] = useState(0);
   const [folderSearchResults, setFolderSearchResults] = useState<ContentSearchResponse>();
   const [folderSearching, setFolderSearching] = useState(false);
+  const [folderSearchRevision, setFolderSearchRevision] = useState(0);
   const [summaryTopics, setSummaryTopics] = useState<string[]>([]);
   const [loadingSummaryTopics, setLoadingSummaryTopics] = useState(false);
   const [summaries, setSummaries] = useState<ContentDocumentSummary[]>([]);
@@ -393,12 +402,17 @@ export function KnowledgeWorkspace() {
   const narrationStateRef = useRef(narrationState);
   const lastFinishedNarrationChunk = useRef(-1);
   const narrationTitleRef = useRef("");
+  const narrationDocumentKey = useRef<string | undefined>(undefined);
+  const narrationAudioVersionKey = useRef<string | undefined>(undefined);
+  const persistedNarrationPositionMs = useRef(0);
+  const audioPlaybackWrites = useRef<Promise<void>>(Promise.resolve());
   const pendingNarrationSeek = useRef<{ index: number; seconds: number; play: boolean } | undefined>(undefined);
   const summaryRequest = useRef<AbortController | undefined>(undefined);
   const summaryGeneration = useRef(0);
   const instructionGeneration = useRef(0);
   const previewFileRef = useRef<File | undefined>(undefined);
   const restoreGeneration = useRef(0);
+  const historyGeneration = useRef(0);
   const uploadGeneration = useRef(0);
   const scanGeneration = useRef(0);
   const uploadBatchRef = useRef<UploadBatchItem[]>([]);
@@ -488,6 +502,8 @@ export function KnowledgeWorkspace() {
     narrationChunks.current = [];
     narrationChunkIndex.current = -1;
     narrationTitleRef.current = "";
+    narrationDocumentKey.current = undefined;
+    narrationAudioVersionKey.current = undefined;
     pendingNarrationSeek.current = undefined;
     lastFinishedNarrationChunk.current = -1;
     narrationPlayer.pause();
@@ -502,10 +518,43 @@ export function KnowledgeWorkspace() {
     setNarrationError(undefined);
   }, [narrationPlayer]);
 
+  const queueAudioPlaybackUpdate = (audioVersionKey: string, documentKey: string, playbackPositionMs: number) => {
+    const operation = audioPlaybackWrites.current.catch(() => undefined).then(async () => {
+      await updateContentDocumentAudioPlayback(audioVersionKey, playbackPositionMs);
+      updateCachedContentDocumentAudioPlayback(queryClient, contentContext, documentKey, audioVersionKey, playbackPositionMs);
+    });
+    audioPlaybackWrites.current = operation.catch(() => undefined);
+    return operation;
+  };
+
+  const dismissNarration = () => {
+    const documentKey = narrationDocumentKey.current;
+    if (documentKey) {
+      clearCachedContentDocumentAudioPlayback(queryClient, contentContext, documentKey);
+      setAudioVersions((current) => current.map((version) => ({ ...version, isCurrent: false })));
+      const operation = audioPlaybackWrites.current.catch(() => undefined).then(async () => {
+        await clearContentDocumentAudioPlayback(documentKey);
+      });
+      audioPlaybackWrites.current = operation.catch(() => undefined);
+      void operation.catch(() => showToast({ title: "Audio resume state could not be cleared" }));
+    }
+    stopNarration();
+  };
+
+  const persistNarrationPosition = () => {
+    const audioVersionKey = narrationAudioVersionKey.current;
+    const documentKey = narrationDocumentKey.current;
+    if (!audioVersionKey || !documentKey) return;
+    const playbackPositionMs = Math.round(narrationElapsed * 1_000);
+    persistedNarrationPositionMs.current = playbackPositionMs;
+    void queueAudioPlaybackUpdate(audioVersionKey, documentKey, playbackPositionMs).catch(() => setNarrationError("Playback progress could not be saved."));
+  };
+
   const toggleNarration = () => {
     if (narrationStateRef.current === "playing") {
       narrationPlayer.pause();
       updateNarrationState("paused");
+      persistNarrationPosition();
     } else if (narrationStateRef.current === "paused") {
       narrationPlayer.play();
       updateNarrationState("playing");
@@ -519,6 +568,16 @@ export function KnowledgeWorkspace() {
       updateNarrationState("playing");
     }
   };
+
+  useEffect(() => {
+    const audioVersionKey = narrationAudioVersionKey.current;
+    const documentKey = narrationDocumentKey.current;
+    if (!narrationAudio.playing || !audioVersionKey || !documentKey) return;
+    const playbackPositionMs = Math.round(narrationElapsed * 1_000);
+    if (Math.abs(playbackPositionMs - persistedNarrationPositionMs.current) < 5_000) return;
+    persistedNarrationPositionMs.current = playbackPositionMs;
+    void queueAudioPlaybackUpdate(audioVersionKey, documentKey, playbackPositionMs).catch(() => setNarrationError("Playback progress could not be saved."));
+  }, [narrationAudio.playing, narrationElapsed]);
 
   const seekNarration = (seconds: number) => {
     if (narrationChunks.current.length === 0) return;
@@ -573,6 +632,12 @@ export function KnowledgeWorkspace() {
     if (playNarrationChunk(current + 1)) return;
     narrationPlayer.clearLockScreenControls();
     updateNarrationState("ready");
+    const audioVersionKey = narrationAudioVersionKey.current;
+    const documentKey = narrationDocumentKey.current;
+    if (audioVersionKey && documentKey) {
+      persistedNarrationPositionMs.current = 0;
+      void queueAudioPlaybackUpdate(audioVersionKey, documentKey, 0).catch(() => setNarrationError("Playback progress could not be saved."));
+    }
     // Completion is edge-triggered; queue and generation state live in refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [narrationAudio.didJustFinish]);
@@ -597,6 +662,7 @@ export function KnowledgeWorkspace() {
     if (sheetCloseTimer.current) clearTimeout(sheetCloseTimer.current);
     setSheetError(undefined);
     sheetBackStack.current = [];
+    activeSheetRef.current = sheet;
     setActiveSheet(sheet);
     setSheetOpen(true);
   };
@@ -605,22 +671,27 @@ export function KnowledgeWorkspace() {
     const current = activeSheetRef.current;
     if (current) sheetBackStack.current.push(current);
     setSheetError(undefined);
+    activeSheetRef.current = sheet;
     setActiveSheet(sheet);
   };
 
   const goBackSheet = () => {
     const previous = sheetBackStack.current.pop();
     if (!previous) return;
+    if (activeSheetRef.current === "summaryReader" && narrationStatus === "SUMMARY AUDIO") stopNarration();
     if (temporarySingleSelection && (activeSheetRef.current === "destinationBrowser" || activeSheetRef.current === "bulkDelete")) {
       clearSelection();
       setTemporarySingleSelection(false);
       setDestinationUsesDirectSelection(false);
     }
     setSheetError(undefined);
+    activeSheetRef.current = previous;
     setActiveSheet(previous);
   };
 
   const closeSheet = (preserveSelection = false) => {
+    if (activeSheetRef.current === "summaryReader" && narrationStatus === "SUMMARY AUDIO") stopNarration();
+    if (activeSheetRef.current === "searchHistory") historyGeneration.current += 1;
     if (activeSheetRef.current === "destination" || activeSheetRef.current === "destinationBrowser") {
       destinationGeneration.current += 1;
       if (!preserveSelection && destinationUsesDirectSelection) clearSelection();
@@ -645,6 +716,7 @@ export function KnowledgeWorkspace() {
       setGeneratingSummary(false);
     }
     setSheetOpen(false);
+    activeSheetRef.current = undefined;
     sheetBackStack.current = [];
     if (sheetCloseTimer.current) clearTimeout(sheetCloseTimer.current);
     sheetCloseTimer.current = setTimeout(() => setActiveSheet(undefined), 240);
@@ -858,10 +930,9 @@ export function KnowledgeWorkspace() {
       const initialFolder = root.folders.find((folder) => folder.name === "My Documents");
       const initial = { root, location: initialFolder ? await getContentLocation(queryClient, contentContext, initialFolder.key) : root, initialFolder };
       const useInitialFolder = workspaceModeRef.current !== "folders" && Boolean(initial.initialFolder);
-      const recent = await getContentHistory(queryClient, contentContext, useInitialFolder ? initial.initialFolder?.key : undefined);
-      return { initial, recent, useInitialFolder };
+      return { initial, useInitialFolder };
     })()
-      .then(({ initial, recent, useInitialFolder }) => {
+      .then(({ initial, useInitialFolder }) => {
         if (contentContextKeyRef.current !== requestContextKey) return;
         const location = useInitialFolder ? initial.location : initial.root;
         setFolders(location.folders);
@@ -874,7 +945,6 @@ export function KnowledgeWorkspace() {
           workspaceModeRef.current = nextMode;
           setWorkspaceMode(nextMode);
         }
-        setHistory(recent);
         setLocationLoading(false);
       })
       .catch((cause: unknown) => {
@@ -1214,6 +1284,7 @@ export function KnowledgeWorkspace() {
 
   const startNarrationSource = async (source: {
     audioVersionKey?: string;
+    documentKey?: string;
     durationMs: number;
     lockScreenTitle: string;
     status: string;
@@ -1224,6 +1295,9 @@ export function KnowledgeWorkspace() {
     if (generation !== narrationPlaybackGeneration.current) return;
     stopNarration(false);
     narrationTitleRef.current = source.lockScreenTitle;
+    narrationDocumentKey.current = source.documentKey;
+    narrationAudioVersionKey.current = source.audioVersionKey;
+    persistedNarrationPositionMs.current = Math.round(startSeconds * 1_000);
     setNarrationTitle(source.title);
     setNarrationStatus(source.status);
     setSelectedAudioVersionKey(source.audioVersionKey);
@@ -1248,8 +1322,13 @@ export function KnowledgeWorkspace() {
       if (generation !== narrationPlaybackGeneration.current) return;
       if (refreshUrl) setAudioVersions(history);
       const playable = history.find((item) => item.key === version.key) ?? version;
+      const playbackPositionMs = Math.round(Math.min(startSeconds, playable.durationMs / 1_000) * 1_000);
+      await queueAudioPlaybackUpdate(playable.key, document.key, playbackPositionMs);
+      if (generation !== narrationPlaybackGeneration.current) return;
+      setAudioVersions(history.map((item) => ({ ...item, isCurrent: item.key === playable.key, ...(item.key === playable.key ? { playbackPositionMs } : {}) })));
       await startNarrationSource({
         audioVersionKey: playable.key,
+        documentKey: document.key,
         durationMs: playable.durationMs,
         lockScreenTitle: document.name,
         status: "AUDIO VERSION",
@@ -1291,6 +1370,7 @@ export function KnowledgeWorkspace() {
   const generateSummaryAudio = async () => {
     const summary = selectedSummary;
     if (!summary || generatingSummaryAudio) return;
+    stopNarration();
     setGeneratingSummaryAudio(true);
     setSheetError(undefined);
     try {
@@ -1304,6 +1384,22 @@ export function KnowledgeWorkspace() {
     } finally {
       setGeneratingSummaryAudio(false);
     }
+  };
+
+  const controlSummaryAudio = () => {
+    const summary = selectedSummary;
+    if (!summary) return;
+    if (!summary.audio) {
+      void generateSummaryAudio();
+      return;
+    }
+    if (narrationStatus === "SUMMARY AUDIO" && narrationState === "playing") return;
+    if (narrationStatus === "SUMMARY AUDIO" && narrationState === "paused") {
+      narrationPlayer.play();
+      updateNarrationState("playing");
+      return;
+    }
+    void playSummaryAudio(summary);
   };
 
   const openAudioVersionHistory = async (targetDocument?: ContentDocument) => {
@@ -1332,12 +1428,17 @@ export function KnowledgeWorkspace() {
   const generateAudioVersion = async () => {
     const document = selectedDocument;
     if (!document || generatingAudioVersion) return;
+    stopNarration();
     setGeneratingAudioVersion(true);
     setSheetError(undefined);
     try {
       const generated = await generateContentDocumentAudio(document.key);
       const history = await refreshContentDocumentAudioVersions(queryClient, contentContext, document.key);
-      setAudioVersions(history);
+      setAudioVersions((current) => {
+        const versions = new Map(current.map((version) => [version.key, version]));
+        history.forEach((version) => versions.set(version.key, version));
+        return [...versions.values()].sort((left, right) => right.version - left.version);
+      });
       const playable = history.find((version) => version.key === generated.key);
       if (playable) await playAudioVersion(playable, 0, true, false);
     } catch (cause) {
@@ -1473,6 +1574,7 @@ export function KnowledgeWorkspace() {
       return false;
     }
     const generation = ++navigationGeneration.current;
+    persistNarrationPosition();
     stopNarration();
     setDocumentSearchQuery("");
     instructionGeneration.current += 1;
@@ -1493,17 +1595,34 @@ export function KnowledgeWorkspace() {
     workspaceModeRef.current = "editor";
     setWorkspaceMode("editor");
     try {
-      const opened = await getContentDocument(queryClient, contentContext, document.key);
+      await audioPlaybackWrites.current;
+      const [opened, restoredAudioVersions] = await Promise.all([
+        getContentDocument(queryClient, contentContext, document.key),
+        getContentDocumentAudioVersions(queryClient, contentContext, document.key).catch(() => []),
+      ]);
       if (generation !== navigationGeneration.current) return false;
       editorSession.current += 1;
       applyRemoteDocument(opened);
       setSelectedDocument(opened);
+      setAudioVersions(restoredAudioVersions);
       workspaceModeRef.current = "editor";
       setWorkspaceMode("editor");
       setSelectedSummary(undefined);
       if (!preserveSearch) {
         setQuery("");
         setResults(undefined);
+      }
+      const currentAudioVersion = restoredAudioVersions.find(({ isCurrent }) => isCurrent);
+      if (currentAudioVersion) {
+        await startNarrationSource({
+          audioVersionKey: currentAudioVersion.key,
+          documentKey: opened.key,
+          durationMs: currentAudioVersion.durationMs,
+          lockScreenTitle: opened.name,
+          status: "AUDIO VERSION",
+          title: `${opened.name} · Audio ${currentAudioVersion.version}`,
+          url: currentAudioVersion.url,
+        }, narrationPlaybackGeneration.current, currentAudioVersion.playbackPositionMs / 1_000, false);
       }
       return true;
     } catch (cause) {
@@ -1847,11 +1966,10 @@ export function KnowledgeWorkspace() {
     setQuery("");
     setResults(undefined);
     try {
-      const [location, recent] = await Promise.all([getContentLocation(queryClient, contentContext, folder.key), getContentHistory(queryClient, contentContext, folder.key)]);
+      const location = await getContentLocation(queryClient, contentContext, folder.key);
       if (generation !== navigationGeneration.current) return;
       setFolders(location.folders);
       setDocuments(location.documents);
-      setHistory(recent);
     } catch (cause) {
       if (generation === navigationGeneration.current) {
         setFolders(previousFolders);
@@ -1905,7 +2023,7 @@ export function KnowledgeWorkspace() {
     setQuery("");
     setResults(undefined);
     try {
-      const [location, recent] = await Promise.all([getContentLocation(queryClient, contentContext, nextFolderKey), getContentHistory(queryClient, contentContext, nextFolderKey)]);
+      const location = await getContentLocation(queryClient, contentContext, nextFolderKey);
       if (generation !== navigationGeneration.current) return;
       setFolders(location.folders);
       setDocuments(location.documents);
@@ -1913,7 +2031,6 @@ export function KnowledgeWorkspace() {
         setRootFolders(location.folders);
         setRootDocuments(location.documents);
       }
-      setHistory(recent);
     } catch (cause) {
       if (generation === navigationGeneration.current) {
         setFolders(previousFolders);
@@ -1934,6 +2051,7 @@ export function KnowledgeWorkspace() {
       return;
     }
     Keyboard.dismiss();
+    persistNarrationPosition();
     stopNarration();
     setDocumentSearchQuery("");
     const nextMode = folderStack.length ? "folder" : "folders";
@@ -1975,28 +2093,6 @@ export function KnowledgeWorkspace() {
     }).remove;
   }, [folderStack, hasContentContext, selectionActive]);
 
-  const runSearch = async (searchQuery = query) => {
-    const normalized = searchQuery.trim();
-    if (!normalized || !hasContentContext) return;
-    const generation = ++navigationGeneration.current;
-    const folderKey = currentFolder?.key;
-    setSearching(true);
-    setError(undefined);
-    try {
-      const response = await searchContent(normalized, folderKey, true);
-      if (generation !== navigationGeneration.current) return;
-      const recent = await refreshContentHistory(queryClient, contentContext, folderKey);
-      if (generation !== navigationGeneration.current) return;
-      setQuery(response.query);
-      setResults(response);
-      setHistory(recent);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Search failed.");
-    } finally {
-      if (generation === navigationGeneration.current) setSearching(false);
-    }
-  };
-
   useEffect(() => {
     const normalized = rootSearchQuery.trim();
     rootSearchRequest.current?.abort();
@@ -2012,9 +2108,15 @@ export function KnowledgeWorkspace() {
       setRootSearching(true);
       setError(undefined);
       void searchContentMatches(normalized, controller.signal).then((matches) => {
-        if (!controller.signal.aborted) setRootSearchResults(matches);
+        if (!controller.signal.aborted) {
+          setRootSearchResults(matches);
+          void invalidateContentHistories(queryClient, contentContext, [undefined]);
+        }
       }).catch((cause) => {
-        if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Search failed.");
+        if (!controller.signal.aborted) {
+          setError(cause instanceof Error ? cause.message : "Search failed.");
+          void invalidateContentHistories(queryClient, contentContext, [undefined]);
+        }
       }).finally(() => {
         if (!controller.signal.aborted) setRootSearching(false);
       });
@@ -2023,7 +2125,7 @@ export function KnowledgeWorkspace() {
       clearTimeout(timeout);
       controller.abort();
     };
-  }, [hasContentContext, rootSearchQuery]);
+  }, [hasContentContext, rootSearchQuery, rootSearchRevision]);
 
   useEffect(() => {
     const normalized = query.trim();
@@ -2041,9 +2143,15 @@ export function KnowledgeWorkspace() {
       setFolderSearching(true);
       setError(undefined);
       void searchContentMatches(normalized, controller.signal, folderKey).then((matches) => {
-        if (!controller.signal.aborted) setFolderSearchResults(matches);
+        if (!controller.signal.aborted) {
+          setFolderSearchResults(matches);
+          void invalidateContentHistories(queryClient, contentContext, [folderKey]);
+        }
       }).catch((cause) => {
-        if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Search failed.");
+        if (!controller.signal.aborted) {
+          setError(cause instanceof Error ? cause.message : "Search failed.");
+          void invalidateContentHistories(queryClient, contentContext, [folderKey]);
+        }
       }).finally(() => {
         if (!controller.signal.aborted) setFolderSearching(false);
       });
@@ -2052,7 +2160,7 @@ export function KnowledgeWorkspace() {
       clearTimeout(timeout);
       controller.abort();
     };
-  }, [currentFolder?.key, hasContentContext, query]);
+  }, [currentFolder?.key, folderSearchRevision, hasContentContext, query]);
 
   const openSearchDocument = async (document: ContentSearchMatch) => {
     setError(undefined);
@@ -2118,13 +2226,12 @@ export function KnowledgeWorkspace() {
     setSheetError(undefined);
     try {
       if (hasContentContext) {
-        const [location, recent] = await Promise.all([getContentLocation(queryClient, contentContext), getContentHistory(queryClient, contentContext)]);
+        const location = await getContentLocation(queryClient, contentContext);
         if (generation !== navigationGeneration.current) return;
         setFolders(location.folders);
         setRootFolders(location.folders);
         setDocuments(location.documents);
         setRootDocuments(location.documents);
-        setHistory(recent);
       } else {
         setFolders(rootFolders);
         setDocuments([]);
@@ -2155,11 +2262,10 @@ export function KnowledgeWorkspace() {
     setSheetError(undefined);
     try {
       if (hasContentContext) {
-        const [location, recent] = await Promise.all([getContentLocation(queryClient, contentContext, folder.key), getContentHistory(queryClient, contentContext, folder.key)]);
+        const location = await getContentLocation(queryClient, contentContext, folder.key);
         if (generation !== navigationGeneration.current) return;
         setFolders(location.folders);
         setDocuments(location.documents);
-        setHistory(recent);
       } else {
         setFolders([]);
         setDocuments([]);
@@ -2176,9 +2282,60 @@ export function KnowledgeWorkspace() {
     }
   };
 
-  const restoreHistory = (item: ContentSearchHistoryItem) => {
-    setQuery(item.query);
-    setResults({ query: item.query, cached: true, folders: [], documents: item.documents });
+  const openSearchHistory = async () => {
+    if (!hasContentContext) return;
+    const generation = ++historyGeneration.current;
+    const folderKey = currentFolder?.key;
+    const key = contentQueryKeys.history(contentContext, folderKey);
+    const cached = queryClient.getQueryData<ContentSearchHistoryItem[]>(key);
+    const invalidated = queryClient.getQueryState(key)?.isInvalidated === true;
+    setHistory((cached ?? []).filter((item) => item.contextDomain === "content"));
+    setHistoryLoading(!cached || invalidated);
+    setRemovingHistoryQuery(undefined);
+    openSheet("searchHistory");
+    if (cached && !invalidated) return;
+    try {
+      const loaded = await getContentHistory(queryClient, contentContext, folderKey);
+      if (generation === historyGeneration.current && activeSheetRef.current === "searchHistory") setHistory(loaded.filter((item) => item.contextDomain === "content"));
+    } catch (cause) {
+      if (generation === historyGeneration.current && activeSheetRef.current === "searchHistory") setSheetError(cause instanceof Error ? cause.message : "Search history could not be loaded.");
+    } finally {
+      if (generation === historyGeneration.current) setHistoryLoading(false);
+    }
+  };
+
+  const useHistoryQuery = (item: ContentSearchHistoryItem) => {
+    const folderKey = currentFolder?.key;
+    const promoted = promoteCachedContentHistory(queryClient, contentContext, folderKey, item);
+    setHistory((current) => [promoted, ...current.filter(({ normalizedQuery }) => normalizedQuery !== item.normalizedQuery)]);
+    closeSheet();
+    if (folderKey) {
+      setQuery(item.query);
+      setFolderSearchResults(undefined);
+      setFolderSearchRevision((current) => current + 1);
+    } else {
+      setRootSearchQuery(item.query);
+      setRootSearchResults(undefined);
+      setRootSearchRevision((current) => current + 1);
+    }
+  };
+
+  const removeHistoryQuery = async (item: ContentSearchHistoryItem) => {
+    if (removingHistoryQuery) return;
+    const folderKey = currentFolder?.key;
+    const previous = removeCachedContentHistory(queryClient, contentContext, folderKey, item.normalizedQuery);
+    setHistory((current) => current.filter(({ normalizedQuery }) => normalizedQuery !== item.normalizedQuery));
+    setRemovingHistoryQuery(item.normalizedQuery);
+    setSheetError(undefined);
+    try {
+      await deleteContentSearchHistory(item.normalizedQuery, folderKey, Boolean(folderKey));
+    } catch (cause) {
+      queryClient.setQueryData(contentQueryKeys.history(contentContext, folderKey), previous);
+      setHistory(previous);
+      setSheetError(cause instanceof Error ? cause.message : "The search could not be removed.");
+    } finally {
+      setRemovingHistoryQuery(undefined);
+    }
   };
 
   const openNewFolder = () => {
@@ -3143,21 +3300,34 @@ export function KnowledgeWorkspace() {
     setEditorEditing(false);
   };
 
+  const pendingAudioVersion = audioVersions.reduce((latest, version) => Math.max(latest, version.version), 0) + 1;
+
   function mutationFooter() {
     const close = (disabled: boolean) => <Button disabled={disabled} onPress={() => closeSheet()} size="lg" variant="secondary">Close</Button>;
     if (activeSheet === "summarize") return <>
       {sheetError ? <Button disabled={loadingSummaryTopics || generatingSummary} loading={loadingSummaryTopics} onPress={() => void loadSummaryTopics()} size="lg" variant="primary">Retry</Button> : null}
       {close(loadingSummaryTopics || generatingSummary)}
     </>;
-    if (activeSheet === "summaryVersions") return close(generatingSummary || loadingSummaries);
+    if (activeSheet === "summaryVersions") return <>
+      {!loadingSummaries && summaries.length === 0 ? <Button disabled={generatingSummary || saveState !== "saved"} onPress={openSummarizeSheet} size="lg" variant="primary">Create summary</Button> : null}
+      {close(generatingSummary || loadingSummaries)}
+    </>;
     if (activeSheet === "summaryReader") return <>
-      {selectedSummary ? <Button disabled={generatingSummary || generatingSummaryAudio} loading={generatingSummaryAudio} onPress={() => { if (selectedSummary.audio) void playSummaryAudio(selectedSummary); else void generateSummaryAudio(); }} size="lg" variant="primary">{selectedSummary.audio ? "Listen" : "Generate audio"}</Button> : null}
+      {summaryNarrationIsland}
+      {generatingSummary ? <LoadingText text="Generating summary..." /> : null}
+      {generatingSummaryAudio
+        ? <LoadingText text="Generating summary audio..." />
+        : selectedSummary ? <Button disabled={generatingSummary || Boolean(selectedSummary.audio && narrationStatus === "SUMMARY AUDIO" && narrationState === "playing")} onPress={controlSummaryAudio} size="lg" variant="primary">{selectedSummary.audio ? "Listen" : "Generate audio"}</Button> : null}
       {close(generatingSummary || generatingSummaryAudio)}
     </>;
     if (activeSheet === "audioVersions") return <>
-      <Button disabled={generatingAudioVersion || loadingAudioVersions} loading={generatingAudioVersion} onPress={() => void generateAudioVersion()} size="lg" variant="primary">Generate audio</Button>
+      {documentNarrationIsland}
+      {generatingAudioVersion
+        ? <LoadingText text="Generating audio. This may take a while..." />
+        : <Button disabled={loadingAudioVersions} onPress={() => void generateAudioVersion()} size="lg" variant="primary">Generate audio</Button>}
       {close(generatingAudioVersion)}
     </>;
+    if (activeSheet === "searchHistory") return close(historyLoading || Boolean(removingHistoryQuery));
     if (activeSheet === "folderDetails") return <>
       <Button disabled={!folderDetailsName.trim()} onPress={() => void submitFolderDetails()} size="lg" variant="primary">Save</Button>
       {close(false)}
@@ -3209,26 +3379,46 @@ export function KnowledgeWorkspace() {
     void playAudioVersion(version, seconds, wasPlaying);
   };
 
-  const narrationAccessory = narrationState !== "idle" ? (
+  const summaryNarrationIsland = generatingSummaryAudio || narrationStatus === "SUMMARY AUDIO" && narrationState !== "idle" ? (
     <View style={styles.narrationPlayer}>
       <View style={styles.narrationHeading}>
         <View style={styles.narrationTitleBlock}>
-          <Text numberOfLines={1} style={styles.narrationTitle}>{narrationTitle || "Document audio"}</Text>
-          <Text style={styles.narrationStatus}>{narrationStatus}</Text>
+          <Text numberOfLines={1} style={styles.narrationTitle}>{selectedSummary?.topic ?? summaryReaderTopic ?? "Summary audio"}</Text>
         </View>
-        <Button accessibilityLabel="Close audio player" contentMode="raw" onPress={() => stopNarration()} size="xs" variant="icon"><CloseIcon size="sm" /></Button>
+        <Button accessibilityLabel="Close summary audio player" contentMode="raw" disabled={generatingSummaryAudio} onPress={() => stopNarration()} size="xs" variant="icon"><CloseIcon size="sm" /></Button>
       </View>
       <View style={styles.narrationControls}>
-        <Button accessibilityLabel={narrationState === "playing" ? "Pause listening" : "Play audio"} contentMode="raw" disabled={narrationManifest.length === 0} loading={narrationManifest.length === 0 && narrationState !== "error"} onPress={controlSelectedAudioVersion} size="sm" variant="icon">{narrationState === "playing" ? <PauseIcon size="sm" /> : <PlayIcon size="sm" />}</Button>
-        <Text style={styles.narrationTime}>{formatAudioTime(narrationElapsed)}</Text>
-        <Slider accessibilityLabel="Audio progress" disabled={narrationDuration <= 0} max={Math.max(1, narrationDuration)} onSlidingComplete={(value) => { setNarrationScrubValue(undefined); scrubSelectedAudioVersion(value); }} onValueChange={setNarrationScrubValue} style={styles.narrationSlider} value={Math.min(narrationElapsed, narrationDuration)} />
-        <Text style={styles.narrationTime}>{formatAudioTime(narrationDuration)}</Text>
+        {generatingSummaryAudio
+          ? <View accessibilityLabel="Generating summary audio" accessibilityRole="progressbar" style={styles.summaryNarrationSpinner}><Spinner size="small" variant="muted" /></View>
+          : <Button accessibilityLabel={narrationState === "playing" ? "Pause summary audio" : "Play summary audio"} contentMode="raw" disabled={narrationManifest.length === 0} onPress={controlSelectedAudioVersion} size="sm" variant="icon">{narrationState === "playing" ? <PauseIcon size="sm" /> : <PlayIcon size="sm" />}</Button>}
+        <Text style={styles.narrationTime}>{formatAudioTime(generatingSummaryAudio ? 0 : narrationElapsed)}</Text>
+        <Slider accessibilityLabel="Summary audio progress" disabled={generatingSummaryAudio || narrationDuration <= 0} max={Math.max(1, generatingSummaryAudio ? 0 : narrationDuration)} onSlidingComplete={(value) => { setNarrationScrubValue(undefined); scrubSelectedAudioVersion(value); }} onValueChange={setNarrationScrubValue} style={styles.narrationSlider} value={generatingSummaryAudio ? 0 : Math.min(narrationElapsed, narrationDuration)} />
+        <Text style={styles.narrationTime}>{formatAudioTime(generatingSummaryAudio ? 0 : narrationDuration)}</Text>
       </View>
-      {narrationError ? <Text accessibilityRole="alert" numberOfLines={2} style={styles.narrationError}>{narrationError}</Text> : null}
+      {!generatingSummaryAudio && narrationError ? <Text accessibilityRole="alert" numberOfLines={2} style={styles.narrationError}>{narrationError}</Text> : null}
     </View>
-  ) : undefined;
-  const selectedAudioVersionIndex = audioVersions.findIndex((version) => version.key === selectedAudioVersionKey);
-  const selectedAudioVersion = selectedAudioVersionIndex >= 0 ? audioVersions[selectedAudioVersionIndex] : undefined;
+  ) : null;
+
+  const documentNarrationIsland = generatingAudioVersion || narrationState !== "idle" && narrationStatus !== "SUMMARY AUDIO" ? (
+    <View style={styles.narrationPlayer}>
+      <View style={styles.narrationHeading}>
+        <View style={styles.narrationTitleBlock}>
+          <Text numberOfLines={1} style={styles.narrationTitle}>{generatingAudioVersion ? `${selectedDocument?.name ?? "Document"} · Audio ${pendingAudioVersion}` : narrationTitle || "Document audio"}</Text>
+        </View>
+        <Button accessibilityLabel="Close audio player" contentMode="raw" disabled={generatingAudioVersion} onPress={dismissNarration} size="xs" variant="icon"><CloseIcon size="sm" /></Button>
+      </View>
+      <View style={styles.narrationControls}>
+        {generatingAudioVersion
+          ? <View accessibilityLabel="Generating document audio" accessibilityRole="progressbar" style={styles.summaryNarrationSpinner}><Spinner size="small" variant="muted" /></View>
+          : <Button accessibilityLabel={narrationState === "playing" ? "Pause listening" : "Play audio"} contentMode="raw" disabled={narrationManifest.length === 0} loading={narrationManifest.length === 0 && narrationState !== "error"} onPress={controlSelectedAudioVersion} size="sm" variant="icon">{narrationState === "playing" ? <PauseIcon size="sm" /> : <PlayIcon size="sm" />}</Button>}
+        <Text style={styles.narrationTime}>{formatAudioTime(generatingAudioVersion ? 0 : narrationElapsed)}</Text>
+        <Slider accessibilityLabel="Audio progress" disabled={generatingAudioVersion || narrationDuration <= 0} max={Math.max(1, generatingAudioVersion ? 0 : narrationDuration)} onSlidingComplete={(value) => { setNarrationScrubValue(undefined); scrubSelectedAudioVersion(value); }} onValueChange={setNarrationScrubValue} style={styles.narrationSlider} value={generatingAudioVersion ? 0 : Math.min(narrationElapsed, narrationDuration)} />
+        <Text style={styles.narrationTime}>{formatAudioTime(generatingAudioVersion ? 0 : narrationDuration)}</Text>
+      </View>
+      {!generatingAudioVersion && narrationError ? <Text accessibilityRole="alert" numberOfLines={2} style={styles.narrationError}>{narrationError}</Text> : null}
+    </View>
+  ) : null;
+  const narrationAccessory = activeSheet !== "audioVersions" ? documentNarrationIsland : undefined;
   const bulkToolbar = selectionActive ? <Tabs style={styles.bulkToolbar}>
     <View style={styles.bulkToolbarSelection}>
       <Button accessibilityLabel="Clear selection" contentMode="raw" onPress={clearSelection} size="xs" style={styles.bulkToolbarClose} variant="secondary"><CloseIcon size="sm" /></Button>
@@ -3240,7 +3430,11 @@ export function KnowledgeWorkspace() {
   return (
     <KeyboardAvoidingView behavior={aiInputFocused ? "height" : undefined} style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
-        <WorkspaceAppSwitcher active="archive" />
+        {workspaceMode === "auto" || workspaceMode === "folders" ? <View style={styles.rootHeaderRow}>
+          <WorkspaceAppSwitcher active="archive" trigger="back" />
+          <Text numberOfLines={1} style={styles.rootHeaderTitle}>Archive</Text>
+          <Button accessibilityLabel="Create in Archive" contentMode="raw" disabled={locationLoading} onPress={() => openSheet("create")} size="sm" variant="icon"><PlusIcon size="sm" /></Button>
+        </View> : <WorkspaceAppSwitcher active="archive" />}
       </View>
       {workspaceMode === "viewer" ? <FileViewer
         error={filePreviewError}
@@ -3261,7 +3455,7 @@ export function KnowledgeWorkspace() {
                 <TextInput accessibilityLabel="Search all Archive folders, documents, and files" onChangeText={setRootSearchQuery} placeholder="Search..." style={styles.rootSearchInput} value={rootSearchQuery} />
                 {rootSearchQuery.trim() ? <Button accessibilityLabel="Clear Archive search" contentMode="raw" onPress={() => setRootSearchQuery("")} size="xs" variant="icon"><CloseIcon size="sm" /></Button> : null}
               </View>
-              <Button accessibilityLabel="Create in Archive" contentMode="raw" disabled={locationLoading} onPress={() => openSheet("create")} size="md" style={styles.rootCreateButton} variant="icon"><PlusIcon size="sm" /></Button>
+              <Button accessibilityLabel="Open Archive search history" contentMode="raw" disabled={!hasContentContext} onPress={() => void openSearchHistory()} size="sm" style={styles.searchHistoryButton} variant="icon"><ClockIcon size="sm" /></Button>
             </View>
             {bulkToolbar}
             <View style={styles.rootContent}>
@@ -3312,10 +3506,13 @@ export function KnowledgeWorkspace() {
               </View>
             </View>
             {error ? <Text accessibilityRole="alert" style={styles.notice}>{error}</Text> : null}
-            <View style={[styles.rootSearch, styles.folderScopedSearch]}>
-              <SearchIcon size="sm" variant="muted" />
-              <TextInput accessibilityLabel={`Search ${currentFolder?.name ?? "folder"}`} onChangeText={setQuery} placeholder="Search..." style={styles.rootSearchInput} value={query} />
-              {query.trim() ? <Button accessibilityLabel="Clear folder search" contentMode="raw" onPress={() => setQuery("")} size="xs" variant="icon"><CloseIcon size="sm" /></Button> : null}
+            <View style={styles.folderSearchRow}>
+              <View style={[styles.rootSearch, styles.folderScopedSearch]}>
+                <SearchIcon size="sm" variant="muted" />
+                <TextInput accessibilityLabel={`Search ${currentFolder?.name ?? "folder"}`} onChangeText={setQuery} placeholder="Search..." style={styles.rootSearchInput} value={query} />
+                {query.trim() ? <Button accessibilityLabel="Clear folder search" contentMode="raw" onPress={() => setQuery("")} size="xs" variant="icon"><CloseIcon size="sm" /></Button> : null}
+              </View>
+              <Button accessibilityLabel={`Open search history for ${currentFolder?.name ?? "this folder"}`} contentMode="raw" disabled={!hasContentContext} onPress={() => void openSearchHistory()} size="sm" style={styles.searchHistoryButton} variant="icon"><ClockIcon size="sm" /></Button>
             </View>
             {bulkToolbar}
             <Tabs accessibilityRole="tablist" style={styles.folderTabs}>
@@ -3370,7 +3567,7 @@ export function KnowledgeWorkspace() {
           <View style={styles.editorHeaderActions}>
             {editorEditing
               ? <Button accessibilityLabel="Save and lock document" accessibilityState={{ selected: true }} contentMode="raw" onPress={finishEditing} size="sm" variant="primary"><CheckIcon size="sm" variant="inverse" /></Button>
-              : <Button accessibilityLabel="Edit document" contentMode="raw" onPress={() => { stopNarration(); setDocumentSearchQuery(""); setEditorEditing(true); }} size="sm" variant="icon"><EditIcon size="sm" /></Button>}
+              : <Button accessibilityLabel="Edit document" contentMode="raw" onPress={() => { persistNarrationPosition(); stopNarration(); setDocumentSearchQuery(""); setEditorEditing(true); }} size="sm" variant="icon"><EditIcon size="sm" /></Button>}
             <Button accessibilityLabel="AI document actions" contentMode="raw" disabled={!content.trim()} onPress={openEnhanceSheet} size="sm" variant="icon"><BrainIcon size="sm" /></Button>
             <Button accessibilityLabel="Document and audio versions" contentMode="raw" disabled={!activeDocument || saveState !== "saved"} onPress={() => { if (activeDocument) openHistoryChooser(activeDocument); }} size="sm" variant="icon"><ClockIcon size="sm" /></Button>
           </View>
@@ -3484,15 +3681,15 @@ export function KnowledgeWorkspace() {
       />
 
       <BottomSheet
-        description={activeSheet === "create" ? "Choose what to add to the current folder." : activeSheet === "versions" ? "Choose a version of this document to open or download." : activeSheet === "audioVersions" ? "Generated audio has its own history, independent from document versions." : activeSheet === "summarize" ? "Find the document's primary topics, then choose one to summarize." : activeSheet === "summaryVersions" ? "Open any generated summary for this document." : undefined}
+        description={activeSheet === "create" ? "Choose what to add to the current folder." : activeSheet === "versions" ? "Choose a version of this document to open or download." : activeSheet === "audioVersions" ? "Generated audio has its own history, independent from document versions." : activeSheet === "summarize" ? "Find the document's primary topics, then choose one to summarize." : activeSheet === "summaryVersions" ? "View saved summaries or create a new one." : undefined}
         dismissible={!versionActionKey && !generatingAudioVersion && !generatingSummary && !generatingSummaryAudio && !loadingSummaryTopics && !destinationLoading && !documentActionLoading && !bulkLoading}
         footer={mutationFooter()}
         hideHeading={activeSheet === "create" || activeSheet === "documentActions" || activeSheet === "enhance" || activeSheet === "historyChooser" || activeSheet === "bulkActions" || compactDelete}
-        mutation={activeSheet === "documents" || activeSheet === "folder" || activeSheet === "folders" || activeSheet === "versions" || activeSheet === "audioVersions" || activeSheet === "summarize" || activeSheet === "summaryVersions" || activeSheet === "summaryReader" || activeSheet === "destinationBrowser" || activeSheet === "folderDetails" || activeSheet === "documentDetails"}
+        mutation={activeSheet === "documents" || activeSheet === "folder" || activeSheet === "folders" || activeSheet === "searchHistory" || activeSheet === "versions" || activeSheet === "audioVersions" || activeSheet === "summarize" || activeSheet === "summaryVersions" || activeSheet === "summaryReader" || activeSheet === "destinationBrowser" || activeSheet === "folderDetails" || activeSheet === "documentDetails"}
         onOpenChange={(open) => { if (!open) closeSheet(); }}
         open={sheetOpen}
         tall={activeSheet === "library" || activeSheet === "documents" || activeSheet === "folders" || activeSheet === "scanSources" || activeSheet === "versions" || activeSheet === "audioVersions"}
-        title={activeSheet === "enhance" ? "AI actions" : activeSheet === "summarize" ? "Summarize document" : activeSheet === "summaryVersions" ? "Summary versions" : activeSheet === "summaryReader" ? selectedSummary?.topic ?? summaryReaderTopic ?? `Summary ${selectedSummary?.version ?? ""}` : activeSheet === "historyChooser" ? "Document history" : activeSheet === "versions" ? "Document versions" : activeSheet === "audioVersions" ? "Audio versions" : activeSheet === "scanSources" ? "Scanned pages" : activeSheet === "deleteDocument" ? `Delete ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "bulkDelete" ? "Delete selected items" : activeSheet === "folder" ? "Create folder" : activeSheet === "documents" ? "Documents and files" : activeSheet === "folders" ? "Folders" : activeSheet === "destinationBrowser" ? destinationAction === "upload" ? destinationFolder?.name ?? "Archive" : destinationAction === "move" ? "Move to folder" : "Copy to folder" : activeSheet === "library" ? "Browse Archive" : activeSheet === "documentActions" ? selectedDocument?.name ?? "Document actions" : activeSheet === "documentDetails" ? `Edit ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "destination" ? destinationAction === "upload" ? "Upload files" : "Choose destination" : activeSheet === "folderActions" ? selectedFolder?.name ?? "Folder actions" : activeSheet === "folderDetails" ? "Edit folder" : "New in Archive"}
+        title={activeSheet === "enhance" ? "AI actions" : activeSheet === "summarize" ? "Summarize document" : activeSheet === "summaryVersions" ? "Summary versions" : activeSheet === "summaryReader" ? selectedSummary?.topic ?? summaryReaderTopic ?? `Summary ${selectedSummary?.version ?? ""}` : activeSheet === "historyChooser" ? "Document history" : activeSheet === "searchHistory" ? "Search history" : activeSheet === "versions" ? "Document versions" : activeSheet === "audioVersions" ? "Audio versions" : activeSheet === "scanSources" ? "Scanned pages" : activeSheet === "deleteDocument" ? `Delete ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "bulkDelete" ? "Delete selected items" : activeSheet === "folder" ? "Create folder" : activeSheet === "documents" ? "Documents and files" : activeSheet === "folders" ? "Folders" : activeSheet === "destinationBrowser" ? destinationAction === "upload" ? destinationFolder?.name ?? "Archive" : destinationAction === "move" ? "Move to folder" : "Copy to folder" : activeSheet === "library" ? "Browse Archive" : activeSheet === "documentActions" ? selectedDocument?.name ?? "Document actions" : activeSheet === "documentDetails" ? `Edit ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "destination" ? destinationAction === "upload" ? "Upload files" : "Choose destination" : activeSheet === "folderActions" ? selectedFolder?.name ?? "Folder actions" : activeSheet === "folderDetails" ? "Edit folder" : "New in Archive"}
       >
         {sheetError ? <Text accessibilityRole="alert" style={styles.notice}>{sheetError}</Text> : null}
         {compactDelete ? <View style={styles.compactSheetActions}>
@@ -3519,6 +3716,13 @@ export function KnowledgeWorkspace() {
             <BottomSheetItem onPress={() => void openAudioVersionHistory()} style={styles.sheetAction}>Audio versions</BottomSheetItem>
             <BottomSheetItem onPress={() => void openSummaryVersionHistory()} style={styles.sheetAction}>Summary versions</BottomSheetItem>
           </View>
+        ) : null}
+        {activeSheet === "searchHistory" ? (
+          <ScrollView contentContainerStyle={styles.searchHistoryList} showsVerticalScrollIndicator={false}>
+            {historyLoading ? <View accessibilityLabel="Loading search history" accessibilityRole="progressbar" style={styles.searchHistorySkeletons}>{Array.from({ length: 3 }, (_, index) => <View key={index} style={styles.searchHistorySkeleton} />)}</View> : null}
+            {!historyLoading && history.length === 0 ? <Text style={styles.empty}>No searches saved here yet.</Text> : null}
+            {!historyLoading ? history.map((item) => <SearchHistoryPill count={item.usageCount} disabled={Boolean(removingHistoryQuery)} key={item.normalizedQuery} onPress={() => useHistoryQuery(item)} onRemove={() => void removeHistoryQuery(item)} query={item.query} removing={removingHistoryQuery === item.normalizedQuery} />) : null}
+          </ScrollView>
         ) : null}
         {activeSheet === "documentActions" && selectedDocument ? (
           <>
@@ -3584,7 +3788,7 @@ export function KnowledgeWorkspace() {
         ) : null}
         {activeSheet === "summaryVersions" ? (
           <View style={styles.summaryVersionPanel}>
-            {!loadingSummaries && summaries.length === 0 ? <Text style={styles.empty}>No summaries yet. Choose a document topic to create one.</Text> : null}
+            {!loadingSummaries && summaries.length === 0 ? <Text style={styles.empty}>No summaries yet.</Text> : null}
             <ScrollView contentContainerStyle={styles.audioVersionList} showsVerticalScrollIndicator={false}>
               {loadingSummaries ? Array.from({ length: 3 }, (_, index) => (
                 <View accessibilityLabel={generatingSummary ? "Generating document summary" : "Loading summary versions"} accessibilityRole="progressbar" key={index} style={styles.audioVersionSkeletonRow}>
@@ -3651,35 +3855,18 @@ export function KnowledgeWorkspace() {
         ) : null}
         {activeSheet === "audioVersions" ? (
           <View style={styles.audioVersionPanel}>
-            {selectedAudioVersion ? (
-              <View style={styles.audioVersionPlayer}>
-                <View style={styles.audioVersionNowPlaying}>
-                  <View style={styles.resultText}><Text style={styles.rowTitle}>Audio version {selectedAudioVersion.version}</Text><Text style={styles.rowSubtitle}>{selectedAudioVersion.current ? "Current document content" : "Earlier document content"} · {new Date(selectedAudioVersion.createdAt).toLocaleString()}</Text></View>
-                  <Button accessibilityLabel={narrationState === "playing" ? "Pause audio version" : "Play audio version"} contentMode="raw" onPress={controlSelectedAudioVersion} size="md" variant="icon">{narrationState === "playing" ? <PauseIcon size="md" /> : <PlayIcon size="md" />}</Button>
-                </View>
-                <View style={styles.narrationControls}>
-                  <Text style={styles.narrationTime}>{formatAudioTime(narrationElapsed)}</Text>
-                  <Slider accessibilityLabel="Audio version progress" max={Math.max(1, narrationDuration)} onSlidingComplete={(value) => { setNarrationScrubValue(undefined); scrubSelectedAudioVersion(value); }} onValueChange={setNarrationScrubValue} style={styles.narrationSlider} value={Math.min(narrationElapsed, narrationDuration)} />
-                  <Text style={styles.narrationTime}>{formatAudioTime(narrationDuration)}</Text>
-                </View>
-                <View style={styles.audioVersionNavigation}>
-                  <Button accessibilityLabel="Play older audio version" contentMode="raw" disabled={selectedAudioVersionIndex >= audioVersions.length - 1} onPress={() => void playAudioVersion(audioVersions[selectedAudioVersionIndex + 1]!)} size="sm" variant="icon"><ChevronLeftIcon size="sm" /></Button>
-                  <Text style={styles.audioVersionPosition}>{selectedAudioVersionIndex + 1} of {audioVersions.length}</Text>
-                  <Button accessibilityLabel="Play newer audio version" contentMode="raw" disabled={selectedAudioVersionIndex <= 0} onPress={() => void playAudioVersion(audioVersions[selectedAudioVersionIndex - 1]!)} size="sm" variant="icon"><ChevronRightIcon size="sm" /></Button>
-                </View>
-              </View>
-            ) : null}
-            {!loadingAudioVersions && audioVersions.length === 0 ? <Text style={styles.empty}>No audio versions yet. Generate one whenever you want a new recording of this document.</Text> : null}
-            <ScrollView accessibilityLabel={loadingAudioVersions ? "Loading audio versions" : undefined} accessibilityRole={loadingAudioVersions ? "progressbar" : undefined} contentContainerStyle={styles.audioVersionList} showsVerticalScrollIndicator={false}>
+            {!loadingAudioVersions && !generatingAudioVersion && audioVersions.length === 0 ? <Text style={styles.empty}>No audio versions yet. Generate one whenever you want a new recording of this document.</Text> : null}
+            <ScrollView accessibilityLabel={loadingAudioVersions ? "Loading audio versions" : generatingAudioVersion ? `Generating audio version ${pendingAudioVersion}` : undefined} accessibilityRole={loadingAudioVersions || generatingAudioVersion ? "progressbar" : undefined} contentContainerStyle={styles.audioVersionList} showsVerticalScrollIndicator={false}>
+              {generatingAudioVersion ? <View accessibilityLabel={`Generating audio version ${pendingAudioVersion}`} accessibilityRole="progressbar" style={styles.audioVersionGeneratingSkeleton} /> : null}
               {loadingAudioVersions ? Array.from({ length: 3 }, (_, index) => (
                 <View key={index} style={styles.audioVersionSkeletonRow}>
                   <View style={styles.audioVersionSkeletonIcon} />
                   <View style={styles.audioVersionSkeletonCopy}><View style={styles.audioVersionSkeletonTitle} /><View style={styles.audioVersionSkeletonSubtitle} /></View>
                 </View>
               )) : audioVersions.map((version) => (
-                <Button contentMode="raw" key={version.key} onPress={() => selectedAudioVersionKey === version.key ? controlSelectedAudioVersion() : void playAudioVersion(version)} size="lg" style={styles.versionMain} variant="secondary">
-                  {selectedAudioVersionKey === version.key && narrationState === "playing" ? <PauseIcon size="md" /> : <PlayIcon size="md" />}
-                  <View style={styles.resultText}><Text style={styles.rowTitle}>Audio version {version.version}{version.current ? " · Current" : ""}</Text><Text style={styles.rowSubtitle}>{formatAudioTime(version.durationMs / 1_000)} · {new Date(version.createdAt).toLocaleString()}</Text></View>
+                <Button contentMode="raw" key={version.key} onPress={() => void playAudioVersion(version, selectedAudioVersionKey === version.key ? narrationElapsed : version.isCurrent ? version.playbackPositionMs / 1_000 : 0)} size="lg" style={styles.versionMain} variant="secondary">
+                  <PlayIcon size="md" />
+                  <Text numberOfLines={1} style={styles.rowTitle}>Audio version {version.version}</Text>
                 </Button>
               ))}
             </ScrollView>
@@ -3701,9 +3888,12 @@ export function KnowledgeWorkspace() {
         ) : null}
         {activeSheet === "folders" ? (
           <>
-            <View style={styles.folderSearch}>
-              <SearchIcon size="sm" variant="muted" />
-              <TextInput accessibilityLabel="Search Archive folders" autoFocus onChangeText={setLibraryQuery} placeholder="Search..." style={styles.folderSearchInput} value={libraryQuery} />
+            <View style={styles.folderSearchRow}>
+              <View style={styles.folderSearch}>
+                <SearchIcon size="sm" variant="muted" />
+                <TextInput accessibilityLabel="Search Archive folders" autoFocus onChangeText={setLibraryQuery} placeholder="Search..." style={styles.folderSearchInput} value={libraryQuery} />
+              </View>
+              <Button accessibilityLabel="Open Archive search history" contentMode="raw" onPress={() => void openSearchHistory()} size="sm" style={styles.searchHistoryButton} variant="icon"><ClockIcon size="sm" /></Button>
             </View>
             <ScrollView contentContainerStyle={styles.folderGrid} keyboardShouldPersistTaps="handled" style={styles.folderList}>
               {showArchiveRoot ? <Button icon={<ArchiveIcon size="md" />} onPress={() => void selectRootFolder()} size="lg" style={styles.folderTile} variant="secondary">Archive</Button> : null}
@@ -3719,9 +3909,12 @@ export function KnowledgeWorkspace() {
         ) : null}
         {activeSheet === "documents" ? (
           <>
-            <View style={styles.folderSearch}>
-              <SearchIcon size="sm" variant="muted" />
-              <TextInput accessibilityLabel="Search Archive documents and files" autoFocus onChangeText={setLibraryQuery} placeholder="Search..." style={styles.folderSearchInput} value={libraryQuery} />
+            <View style={styles.folderSearchRow}>
+              <View style={styles.folderSearch}>
+                <SearchIcon size="sm" variant="muted" />
+                <TextInput accessibilityLabel="Search Archive documents and files" autoFocus onChangeText={setLibraryQuery} placeholder="Search..." style={styles.folderSearchInput} value={libraryQuery} />
+              </View>
+              <Button accessibilityLabel="Open Archive search history" contentMode="raw" onPress={() => void openSearchHistory()} size="sm" style={styles.searchHistoryButton} variant="icon"><ClockIcon size="sm" /></Button>
             </View>
             <ScrollView contentContainerStyle={styles.folderGrid} keyboardShouldPersistTaps="handled" style={styles.folderList}>
               {visibleDocuments.map((document) => (
@@ -3742,6 +3935,8 @@ export function KnowledgeWorkspace() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: palette.page },
   header: { minHeight: 64, paddingBottom: 8, paddingHorizontal: spacing.md, justifyContent: "center", borderBottomColor: palette.hairline, borderBottomWidth: 1 },
+  rootHeaderRow: { minHeight: 44, width: "100%", flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  rootHeaderTitle: { minWidth: 0, flex: 1, color: palette.silver50, fontFamily: fonts.medium, fontSize: 24 },
   workspaceViewport: { flex: 1, minHeight: 0 },
   scrollView: { flex: 1 },
   scroll: { flexGrow: 1, paddingHorizontal: spacing.md, paddingTop: spacing.md },
@@ -3752,18 +3947,19 @@ const styles = StyleSheet.create({
   editorHeader: { minHeight: 40, minWidth: 0, flexDirection: "row", alignItems: "center", gap: spacing.xs },
   editorHeaderTitle: { flex: 1, minWidth: 0, color: palette.silver50, fontFamily: fonts.medium, fontSize: 15, lineHeight: 20 },
   editorHeaderActions: { minHeight: 40, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 8 },
-  rootActions: { minHeight: 52, flexDirection: "row", alignItems: "center", gap: 8 },
+  rootActions: { minHeight: 52, marginTop: spacing.xxs, flexDirection: "row", alignItems: "center", gap: 8 },
   bulkToolbar: { minHeight: 40, padding: 5, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderWidth: 1, backgroundColor: palette.panel },
   bulkToolbarSelection: { flexDirection: "row", alignItems: "center", gap: 8 },
   bulkToolbarClose: { height: 28, width: 28, paddingHorizontal: 0, paddingVertical: 0 },
   bulkSelectionText: { color: palette.silver100, fontFamily: fonts.medium, fontSize: 12 },
-  rootCreateButton: { height: 44, width: 44 },
-  rootSearch: { minHeight: 44, flex: 1, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 7, borderRadius: 999, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised },
+  rootSearch: { minHeight: 44, flex: 1, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 7, borderRadius: 999, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panel },
   documentSearch: { flex: 0, width: "100%" },
   documentSearchStatus: { minHeight: 16, color: palette.silver500, fontFamily: fonts.regular, fontSize: 11, lineHeight: 16, textAlign: "right" },
   documentSearchHighlight: { color: palette.silver50, backgroundColor: "rgba(206, 170, 92, 0.36)" },
-  folderScopedSearch: { flex: 0, width: "100%" },
-  rootSearchInput: { minHeight: 40, flex: 1, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent" },
+  folderScopedSearch: { flex: 1 },
+  folderSearchRow: { minHeight: 44, marginTop: spacing.xxs, flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  searchHistoryButton: { width: 44, height: 44 },
+  rootSearchInput: { minHeight: 40, flex: 1, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", fontSize: 13 },
   rootSearchResults: { gap: 7 },
   rootContent: { gap: spacing.lg },
   rootDocuments: { gap: 7 },
@@ -3825,11 +4021,11 @@ const styles = StyleSheet.create({
   narrationHeading: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   narrationTitleBlock: { flex: 1, gap: 2 },
   narrationTitle: { color: palette.silver50, fontFamily: fonts.medium, fontSize: 13 },
-  narrationStatus: { color: palette.silver500, fontFamily: fonts.medium, fontSize: 8, letterSpacing: 1.3 },
   narrationControls: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
   narrationSlider: { flex: 1 },
   narrationTime: { minWidth: 32, color: palette.silver300, fontFamily: fonts.regular, fontSize: 10, textAlign: "center" },
   narrationError: { color: "#D98B8B", fontFamily: fonts.regular, fontSize: 10, lineHeight: 14 },
+  summaryNarrationSpinner: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
   enhancePanel: { gap: 18 },
   enhanceIdentity: { padding: 14, flexDirection: "row", alignItems: "center", gap: 12, borderRadius: radii.md, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panel },
   enhanceCopy: { flex: 1, gap: 4 },
@@ -3837,17 +4033,17 @@ const styles = StyleSheet.create({
   versionRow: { flexDirection: "row", alignItems: "stretch", gap: 8 },
   versionMain: { flex: 1, justifyContent: "flex-start", paddingHorizontal: 14 },
   historyChoices: { gap: spacing.sm },
+  searchHistoryList: { flexGrow: 1, gap: spacing.xs, paddingBottom: spacing.xl },
+  searchHistorySkeletons: { gap: spacing.xs },
+  searchHistorySkeleton: { width: "100%", minHeight: 48, borderRadius: 999, backgroundColor: palette.hairlineBright, opacity: 0.72 },
   audioVersionPanel: { flex: 1, minHeight: 0, gap: spacing.md },
-  audioVersionPlayer: { padding: spacing.md, gap: spacing.sm, borderRadius: radii.lg, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised },
-  audioVersionNowPlaying: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  audioVersionNavigation: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.md },
-  audioVersionPosition: { minWidth: 56, color: palette.silver300, fontFamily: fonts.medium, fontSize: 11, textAlign: "center" },
   audioVersionList: { gap: spacing.xs, paddingBottom: spacing.xl },
   audioVersionSkeletonRow: { minHeight: 52, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", gap: spacing.sm, borderRadius: radii.lg, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised, opacity: 0.72 },
   audioVersionSkeletonIcon: { height: 24, width: 24, borderRadius: 12, backgroundColor: palette.hairlineBright },
   audioVersionSkeletonCopy: { flex: 1, gap: 6 },
   audioVersionSkeletonTitle: { height: 12, width: "42%", borderRadius: radii.sm, backgroundColor: palette.hairlineBright },
   audioVersionSkeletonSubtitle: { height: 9, width: "68%", borderRadius: radii.sm, backgroundColor: palette.hairlineBright },
+  audioVersionGeneratingSkeleton: { width: "100%", minHeight: 52, borderRadius: radii.lg, backgroundColor: palette.hairlineBright, opacity: 0.72 },
   summaryTopicScroll: { flex: 1, minHeight: 0 },
   summaryTopicPanel: { flexGrow: 1, gap: spacing.sm, paddingBottom: spacing.xl },
   summaryVersionPanel: { flex: 1, minHeight: 0, gap: spacing.md },
@@ -3891,8 +4087,8 @@ const styles = StyleSheet.create({
   folderDescriptionInput: { minHeight: 120 },
   libraryChoices: { gap: 10 },
   libraryChoice: { minHeight: 72, width: "100%", gap: 10 },
-  folderSearch: { minHeight: 48, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", gap: 8, borderRadius: 999, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised },
-  folderSearchInput: { flex: 1, minHeight: 40, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent" },
+  folderSearch: { minHeight: 48, flex: 1, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", gap: 8, borderRadius: 999, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panel },
+  folderSearchInput: { flex: 1, minHeight: 40, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", fontSize: 13 },
   folderGrid: { paddingTop: 14, flexDirection: "row", flexWrap: "wrap", gap: 10 },
   folderList: { flex: 1 },
   folderTile: { minHeight: 86, flexBasis: "48%", flexDirection: "column", gap: 8, paddingHorizontal: 10 },

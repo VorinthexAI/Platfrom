@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { audioGenerateInputSchema, audioGenerateTool, generateAudioChunks, splitAudioText } from './audio-generate';
+import { audioGenerateInputSchema, audioGenerateTool, DEFAULT_AUDIO_GENERATION_VOICE, generateAudioChunks, splitAudioText } from './audio-generate';
 
 describe('audio.generate', () => {
   test('splits text into ordered word-bounded chunks with source offsets', () => {
@@ -31,7 +31,7 @@ describe('audio.generate', () => {
   });
 
   test('generates MP3 chunks sequentially and exposes each completion', async () => {
-    const calls: string[] = [];
+    const calls: string[] = [], voices: string[] = [];
     let active = 0;
     let maximumActive = 0;
     const chunks = [];
@@ -41,6 +41,7 @@ describe('audio.generate', () => {
         active += 1;
         maximumActive = Math.max(maximumActive, active);
         calls.push(input.text);
+        voices.push(input.voice);
         await Bun.sleep(1);
         active -= 1;
         return { audioBase64: Buffer.from(input.text).toString('base64'), mimeType: 'audio/mpeg' };
@@ -49,6 +50,7 @@ describe('audio.generate', () => {
     })) chunks.push(chunk);
     expect(chunks.map(({ index, startWord, endWord }) => [index, startWord, endWord])).toEqual([[0, 0, 20], [1, 20, 40], [2, 40, 45]]);
     expect(calls).toHaveLength(3);
+    expect(voices).toEqual(Array(3).fill(DEFAULT_AUDIO_GENERATION_VOICE));
     expect(maximumActive).toBe(1);
     expect(chunks.every(({ mimeType, audioBase64, durationMs }) => mimeType === 'audio/mpeg' && audioBase64.length > 0 && durationMs === 1_250)).toBe(true);
   });
@@ -58,5 +60,9 @@ describe('audio.generate', () => {
     expect(result).toMatchObject({ totalWords: 3, chunks: [{ index: 0, startWord: 0, endWord: 3, mimeType: 'audio/mpeg', durationMs: 400 }] });
     expect(() => audioGenerateInputSchema.parse({ text: 'hello', unexpected: true })).toThrow('Unrecognized key');
     expect(() => audioGenerateInputSchema.parse({ text: 'hello', wordsPerChunk: 19 })).toThrow();
+    expect(audioGenerateInputSchema.parse({ text: 'hello' }).voice).toBe('Matthew');
+    expect(() => audioGenerateInputSchema.parse({ text: 'hello', voice: 'Joanna' })).toThrow();
+    expect(audioGenerateTool.providerDefinition.inputSchema.properties.voice.default).toBe('Matthew');
+    expect(audioGenerateTool.providerDefinition.inputSchema.properties.voice.enum).toEqual(['Matthew']);
   });
 });

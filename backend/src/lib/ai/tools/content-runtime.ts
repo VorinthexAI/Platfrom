@@ -25,7 +25,7 @@ import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
 import { chunkDocumentContent, documentSemanticHash } from '@/lib/ai/document-processing/chunking';
 import type { BookGenerator } from '@/lib/books/service';
 import type { DocumentScanInput } from '@/lib/ai/document-scanning';
-import { generateAudioChunks as canonicalGenerateAudioChunks } from './audio-generate';
+import { DEFAULT_AUDIO_GENERATION_VOICE, generateAudioChunks as canonicalGenerateAudioChunks } from './audio-generate';
 
 type Role = 'viewer' | 'moderator' | 'admin' | 'owner';
 type Action = 'ask' | 'enhance' | 'translate' | 'read' | 'traverse' | 'insert' | 'update' | 'delete' | 'embed' | 'speak' | 'generate-speech' | 'reason' | 'deep-reason' | 'document-cleanup' | 'document-embed' | 'document-summarize' | 'document-topics';
@@ -73,7 +73,10 @@ export interface ContentRepository {
   createVersion(version: Omit<DocumentVersion, 'key' | 'version' | 'createdAt' | 'deletedAt'>): Promise<DocumentVersion>;
   deleteVersion(key: string): Promise<void>;
   listAudioVersions?(scopeKey: string, documentKeys: string[]): Promise<DocumentAudioVersion[]>;
-  createAudioVersion?(version: Omit<DocumentAudioVersion, 'version'>): Promise<DocumentAudioVersion>;
+  getAudioVersion?(key: string): Promise<DocumentAudioVersion | null>;
+  createAudioVersion?(version: Omit<DocumentAudioVersion, 'version' | 'isCurrent' | 'playbackPositionMs'> & Partial<Pick<DocumentAudioVersion, 'isCurrent' | 'playbackPositionMs'>>): Promise<DocumentAudioVersion>;
+  updateAudioPlayback?(scopeKey: string, key: string, playbackPositionMs: number): Promise<DocumentAudioVersion | null>;
+  clearCurrentAudioVersion?(scopeKey: string, documentKey: string): Promise<boolean>;
   deleteAudioVersion?(key: string): Promise<void>;
   getSummary?(key: string): Promise<DocumentSummary | null>;
   listSummaries?(scopeKey: string, documentKeys: string[]): Promise<DocumentSummary[]>;
@@ -89,9 +92,10 @@ export interface ContentRepository {
 }
 
 export interface ContentSearchQueryStore {
-  get(input: { actorKey: string; scopeKey: string; normalizedQuery: string; folderKey: string | null; includeDescendants: boolean; cacheVersion: number }): Promise<{ output: unknown } | null>;
-  record(input: { key: string; actorKey: string; scopeKey: string; query: string; normalizedQuery: string; folderKey: string | null; includeDescendants: boolean; cacheVersion: number; output: unknown; now: string }): Promise<void>;
-  list(input: { actorKey: string; scopeKey: string; folderKey: string | null; includeDescendants: boolean; limit: number }): Promise<Array<{ query: string; normalizedQuery: string; searchedAt: string; count: number; folderKey?: string; includeDescendants?: boolean; documents: Array<{ documentKey: string; scopeKey: string; folderKey?: string; name: string; extension?: string; score: number; summary?: string }> }>>;
+  get(input: { actorKey: string; scopeKey: string; contextDomain: 'content'; normalizedQuery: string; folderKey: string | null; includeDescendants: boolean; cacheVersion: number }): Promise<{ output: unknown } | null>;
+  record(input: { key: string; actorKey: string; scopeKey: string; contextDomain: 'content'; query: string; normalizedQuery: string; folderKey: string | null; includeDescendants: boolean; cacheVersion: number; output: unknown; now: string }): Promise<void>;
+  list(input: { actorKey: string; scopeKey: string; contextDomain: 'content'; folderKey: string | null; includeDescendants: boolean; limit: number }): Promise<Array<{ query: string; normalizedQuery: string; contextDomain: 'content'; searchedAt: string; usageCount: number; folderKey?: string; includeDescendants?: boolean; documents: Array<{ documentKey: string; scopeKey: string; folderKey?: string; name: string; extension?: string; score: number; summary?: string }> }>>;
+  remove?(input: { actorKey: string; scopeKey: string; contextDomain: 'content'; normalizedQuery: string; folderKey: string | null; includeDescendants: boolean }): Promise<boolean>;
 }
 
 export interface ContentActionResult { text?: string; audio?: Uint8Array; audioBase64?: string; mimeType?: string; durationMs?: number; content?: string; embedding?: number[]; contentChunks?: string[]; chunkEmbeddings?: number[][]; semanticChunkCount?: number; semanticContentHash?: string }
@@ -133,9 +137,11 @@ const rank: Record<Role, number> = { viewer: 1, moderator: 2, admin: 3, owner: 4
 const ROUTED_EMBEDDING_CONCURRENCY = 8;
 const PERSISTED_AUDIO_MAX_CHARACTERS = 120_000;
 const PERSISTED_AUDIO_MAX_BYTES = 100 * 1024 * 1024;
+const CONTENT_SEARCH_CACHE_VERSION = 3;
+const CONTENT_SEARCH_CONTEXT_DOMAIN = 'content' as const;
 const scrypt = promisify(nodeScrypt);
 const MUTATIONS = new Set<ContentToolName>([
-  'book.create-context', 'book.write', 'folder.create', 'folder.update', 'folder.rename', 'folder.move', 'folder.copy', 'folder.archive', 'folder.restore', 'folder.delete', 'document.parse', 'document.scan', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.share', 'document.unshare', 'document.create-version', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.summary.audio.generate', 'document.translate', 'document.rewrite',
+  'book.create-context', 'book.write', 'folder.create', 'folder.update', 'folder.rename', 'folder.move', 'folder.copy', 'folder.archive', 'folder.restore', 'folder.delete', 'document.parse', 'document.scan', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.share', 'document.unshare', 'document.create-version', 'document.restore-version', 'document.delete-version', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.summarize', 'document.summary.audio.generate', 'document.translate', 'document.rewrite', 'scope.content.search-history.delete',
 ]);
 
 function fail(code: ContentErrorCode, message: string, tool: ContentToolName, action?: string, resourceKey?: string, cause?: unknown, retryable = false): never {
@@ -380,7 +386,10 @@ async function productionRepository(): Promise<ContentRepository> {
       if (!current || !await persistence.deleteVersion(current.scopeKey, key)) throw new Error('Version was not found for scoped deletion.');
     },
     listAudioVersions: persistence.listAudioVersions,
+    getAudioVersion: persistence.getAudioVersion,
     createAudioVersion: persistence.createAudioVersion,
+    updateAudioPlayback: persistence.updateAudioPlayback,
+    clearCurrentAudioVersion: persistence.clearCurrentAudioVersion,
     async deleteAudioVersion(key) {
       const current = await persistence.getAudioVersion(key);
       if (!current || !await persistence.deleteAudioVersion(current.scopeKey, key)) throw new Error('Audio version was not found for scoped deletion.');
@@ -697,13 +706,13 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       catch (error) { throw new ContentError('CONTENT_CONFLICT', 'Storage deletion failed; metadata pointers were retained for retry.', tool, { action: 'storage', resourceKey, cause: error, retryable: true }); }
     }
   };
-  const generateDurableMp3 = async (text: string, resourceKey: string, voice?: string, language?: string) => {
+  const generateDurableMp3 = async (text: string, resourceKey: string, voice = DEFAULT_AUDIO_GENERATION_VOICE, language?: string) => {
     if (text.length > PERSISTED_AUDIO_MAX_CHARACTERS) fail('DOCUMENT_TOO_LARGE', `Durable audio generation supports text up to ${PERSISTED_AUDIO_MAX_CHARACTERS} characters.`, tool, 'generate-speech', resourceKey);
     const generated: Uint8Array[] = [];
     let generatedBytes = 0;
     try {
       const generate = dependencies.generateAudioChunks ?? canonicalGenerateAudioChunks;
-      for await (const chunk of generate({ text, wordsPerChunk: 1_000, ...(voice ? { voice } : {}), ...(language ? { language } : {}) }, {
+      for await (const chunk of generate({ text, wordsPerChunk: 1_000, voice, ...(language ? { language } : {}) }, {
         ...dependencies,
         organizationKey: context.organizationKey,
         duration: d.audioDuration,
@@ -1544,7 +1553,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
                  key: audioKey, scopeKey: current.scopeKey, documentKey: current.key,
                  sourceContentHash: documentSemanticHash(current.content), sourceTitle: current.name, sourceDocumentUpdatedAt: current.updatedAt,
                  storageKey, mimeType: 'audio/mpeg', sizeBytes: bytes.byteLength, durationMs,
-                 ...(input.voice ? { voice: input.voice } : {}), ...(canonicalLanguage ? { language: canonicalLanguage } : {}),
+                  voice: input.voice ?? DEFAULT_AUDIO_GENERATION_VOICE, ...(canonicalLanguage ? { language: canonicalLanguage } : {}),
                  includeTitle: input.includeTitle ?? false, includeCode: input.includeCode ?? false,
                  createdByKey: member.userOrganization.key, createdAt: now(),
                });
@@ -1574,7 +1583,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
               spoken = await action(speechAction, {
                 text: chunk.text,
                 ...(input.language ? { language: input.language } : {}),
-                 ...(input.voice ? { voice: input.voice } : {}),
+                 voice: input.voice ?? DEFAULT_AUDIO_GENERATION_VOICE,
                  ...(input.speakingRate ? { speakingRate: input.speakingRate } : {}),
                  format: 'wav',
               }, key, current.scopeKey);
@@ -1998,6 +2007,20 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           return { version: versionView(version, input.include) };
         },
       })), false, repo);
+    } else if (tool === 'document.audio.playback.update') {
+      if (!repo.getAudioVersion || !repo.updateAudioPlayback) fail('CONTENT_CONFLICT', 'Document audio playback state is unavailable.', tool, 'update', input.audioVersionKey);
+      const audio = await repo.getAudioVersion(input.audioVersionKey);
+      if (!audio) fail('CONTENT_NOT_FOUND', 'Audio version was not found.', tool, 'update', input.audioVersionKey);
+      await document(audio.documentKey, 'viewer', false);
+      if (input.playbackPositionMs > audio.durationMs) fail('CONTENT_INVALID_INPUT', 'Playback position cannot exceed audio duration.', tool, 'update', input.audioVersionKey);
+      const updated = await repo.updateAudioPlayback(audio.scopeKey, audio.key, input.playbackPositionMs);
+      if (!updated) fail('CONTENT_CONFLICT', 'Audio playback state could not be updated.', tool, 'update', input.audioVersionKey);
+      result = { audioVersionKey: updated.key, documentKey: updated.documentKey, playbackPositionMs: updated.playbackPositionMs };
+    } else if (tool === 'document.audio.playback.clear') {
+      const current = await document(input.documentKey, 'viewer', false);
+      if (!repo.clearCurrentAudioVersion) fail('CONTENT_CONFLICT', 'Document audio playback state is unavailable.', tool, 'update', input.documentKey);
+      await repo.clearCurrentAudioVersion(current.scopeKey, current.key);
+      result = { documentKey: current.key };
     } else if (tool === 'document.list-audio-versions') {
       result = await batch(tool, input.documentKeys.map((key: string) => ({
         key,
@@ -2146,7 +2169,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             saved = await repo.createSummaryAudio({
               key: audioKey, scopeKey: summary.scopeKey, documentKey: summary.documentKey, summaryKey: summary.key,
               storageKey, mimeType: 'audio/mpeg', sizeBytes: bytes.byteLength, durationMs,
-              ...(input.voice ? { voice: input.voice } : {}), ...(input.language ? { language: input.language } : {}),
+              voice: input.voice ?? DEFAULT_AUDIO_GENERATION_VOICE, ...(input.language ? { language: input.language } : {}),
               createdByKey: member.userOrganization.key, createdAt: now(),
             });
             if (!saved.created) await storageOperation('delete', key, summary.scopeKey, () => d.storage.delete(storageKey!));
@@ -2240,6 +2263,17 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             };
           },
         })), false, repo);
+    } else if (tool === 'scope.content.search-history.delete') {
+      await roleFor(input.scopeKey, 'viewer');
+      if (input.folderKey) {
+        const current = await folder(input.folderKey, 'viewer', false);
+        if (current.scopeKey !== input.scopeKey) fail('CONTENT_FORBIDDEN', 'Folder does not belong to the requested scope.', tool, 'authorization', input.folderKey);
+      }
+      const store = dependencies.searchQueries ?? (await import('@/lib/db/content-search-queries.node')).contentSearchQueries;
+      if (!store.remove) fail('CONTENT_CONFLICT', 'Search history deletion is unavailable.', tool, 'delete', input.normalizedQuery);
+      const normalizedQuery = input.normalizedQuery.normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('en-US');
+      const deleted = await store.remove({ actorKey: member.user.key, scopeKey: input.scopeKey, contextDomain: CONTENT_SEARCH_CONTEXT_DOMAIN, normalizedQuery, folderKey: input.folderKey ?? null, includeDescendants: input.folderKey ? input.includeDescendants ?? true : false });
+      result = { normalizedQuery, deleted };
     } else if (tool === 'scope.content.search-history') {
       await roleFor(input.scopeKey, 'viewer');
       let historyFolderKeys: Set<string> | undefined;
@@ -2249,7 +2283,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         historyFolderKeys = new Set([input.folderKey, ...((input.includeDescendants ?? true) ? descendants(await foldersIn(input.scopeKey), input.folderKey).map((item) => item.key) : [])]);
       }
       const store = dependencies.searchQueries ?? (await import('@/lib/db/content-search-queries.node')).contentSearchQueries;
-      const history = await store.list({ actorKey: member.user.key, scopeKey: input.scopeKey, folderKey: input.folderKey ?? null, includeDescendants: input.folderKey ? input.includeDescendants ?? true : false, limit: input.limit });
+      const history = await store.list({ actorKey: member.user.key, scopeKey: input.scopeKey, contextDomain: CONTENT_SEARCH_CONTEXT_DOMAIN, folderKey: input.folderKey ?? null, includeDescendants: input.folderKey ? input.includeDescendants ?? true : false, limit: input.limit });
       result = { history: await Promise.all(history.map(async (item) => ({
         ...item,
         documents: (await Promise.all(item.documents.map(async (stored) => {
@@ -2265,7 +2299,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       const allowed = await repo.allowedScopeKeys(context.organizationKey, member.userOrganization.key);
       if (!allowed.includes(input.scopeKey)) fail('CONTENT_FORBIDDEN', 'The principal lacks access to the requested scope.', tool, 'authorization', input.scopeKey);
       const normalizedQuery = input.query.normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('en-US');
-      const cacheVersion = 3;
+      const cacheVersion = CONTENT_SEARCH_CACHE_VERSION;
       const folderKey = input.folderKey ?? null;
       const includeDescendants = folderKey !== null && (input.includeDescendants ?? true);
       const store = dependencies.searchQueries ?? (await import('@/lib/db/content-search-queries.node')).contentSearchQueries;
@@ -2285,12 +2319,12 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       const folderRevision = revisionFolders.map((item) => `${item.key}:${item.parentFolderKey ?? ''}:${item.updatedAt}:${item.deletedAt ?? ''}:${item._internalDeletion ? 'pending' : ''}`);
       const documentRevision = revisionDocuments.map((item) => `${item.key}:${item.name}:${item.folderKey ?? ''}:${item.semanticContentHash ?? ''}:${item.deletedAt ?? ''}:${item._internalDeletion ? 'pending' : ''}`);
       const sourceRevision = createHash('sha256').update([...folderRevision, ...documentRevision].sort().join('\n')).digest('hex');
-      const cached = await store.get({ actorKey: member.user.key, scopeKey: input.scopeKey, normalizedQuery, folderKey, includeDescendants, cacheVersion });
+      const cached = await store.get({ actorKey: member.user.key, scopeKey: input.scopeKey, contextDomain: CONTENT_SEARCH_CONTEXT_DOMAIN, normalizedQuery, folderKey, includeDescendants, cacheVersion });
       const cachedValue = cached?.output as { result?: unknown; sourceRevision?: string; minimumScore?: number; includeSummaries?: boolean; replayable?: boolean } | undefined;
       const reusable = Boolean(cachedValue?.replayable && cachedValue.result && cachedValue.sourceRevision === sourceRevision && cachedValue.minimumScore === input.minimumScore && cachedValue.includeSummaries === input.includeSummaries);
       if (reusable) {
         const parsed = contentToolOutputSchemas[tool].parse({ ...(cachedValue!.result as object), query: input.query, cached: true });
-        await store.record({ key: d.id(), actorKey: member.user.key, scopeKey: input.scopeKey, query: input.query, normalizedQuery, folderKey, includeDescendants, cacheVersion, output: cachedValue, now: now() });
+        await store.record({ key: d.id(), actorKey: member.user.key, scopeKey: input.scopeKey, contextDomain: CONTENT_SEARCH_CONTEXT_DOMAIN, query: input.query, normalizedQuery, folderKey, includeDescendants, cacheVersion, output: cachedValue, now: now() });
         result = parsed;
       } else if (!input.includeSummaries) {
         const queryText = normalizedQuery;
@@ -2346,7 +2380,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         const folders = activeFolders.sort((left, right) => right.score - left.score || left.folder.key.localeCompare(right.folder.key)).slice(0, 4).map(({ folder: current, score }) => ({ key: current.key, scopeKey: current.scopeKey, ...(current.parentFolderKey ? { parentFolderKey: current.parentFolderKey } : {}), name: current.name, ...(current.description ? { description: current.description } : {}), score: Math.max(0, Math.min(1, score)) }));
         const documents = activeDocuments.sort((left, right) => right.score - left.score || left.document.key.localeCompare(right.document.key)).slice(0, 10).map(({ document: current, score }) => ({ documentKey: current.key, scopeKey: current.scopeKey, ...(current.folderKey ? { folderKey: current.folderKey } : {}), name: current.name, ...(current.extension ? { extension: current.extension } : {}), score: Math.max(0, Math.min(1, score)) }));
         const freshResult = { query: input.query, folders, documents, cached: false };
-        await store.record({ key: d.id(), actorKey: member.user.key, scopeKey: input.scopeKey, query: input.query, normalizedQuery, folderKey, includeDescendants, cacheVersion, output: { result: freshResult, sourceRevision, minimumScore: input.minimumScore, includeSummaries: false, replayable: true }, now: now() });
+        await store.record({ key: d.id(), actorKey: member.user.key, scopeKey: input.scopeKey, contextDomain: CONTENT_SEARCH_CONTEXT_DOMAIN, query: input.query, normalizedQuery, folderKey, includeDescendants, cacheVersion, output: { result: freshResult, sourceRevision, minimumScore: input.minimumScore, includeSummaries: false, replayable: true }, now: now() });
         result = freshResult;
       } else {
         let queryEmbedding: number[];
@@ -2390,7 +2424,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           documents.push(...batch.map(({ document }) => document));
         }
         const freshResult = { query: input.query, folders, documents, cached: false };
-        await store.record({ key: d.id(), actorKey: member.user.key, scopeKey: input.scopeKey, query: input.query, normalizedQuery, folderKey, includeDescendants, cacheVersion, output: { result: freshResult, sourceRevision, minimumScore: input.minimumScore, includeSummaries: true, replayable: summariesComplete }, now: now() });
+        await store.record({ key: d.id(), actorKey: member.user.key, scopeKey: input.scopeKey, contextDomain: CONTENT_SEARCH_CONTEXT_DOMAIN, query: input.query, normalizedQuery, folderKey, includeDescendants, cacheVersion, output: { result: freshResult, sourceRevision, minimumScore: input.minimumScore, includeSummaries: true, replayable: summariesComplete }, now: now() });
         result = freshResult;
       }
     } else {
