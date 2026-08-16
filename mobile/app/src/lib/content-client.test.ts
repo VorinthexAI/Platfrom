@@ -161,7 +161,7 @@ test("sends document and folder mutations with the authenticated Archive context
     scopeKey: "scope-authenticated",
     folderKey: "parent",
     name: "Plan",
-    representation: { content: "Initial plan" },
+    content: "Initial plan",
     idempotencyKey: "create-key",
   });
   expect(calls[1]?.body.input.updates[0]).toMatchObject({ documentKey: "document", content: "Updated plan", expectedUpdatedAt: "2026-08-10T00:00:00.000Z" });

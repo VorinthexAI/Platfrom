@@ -1,5 +1,5 @@
 import { useNavigation } from "expo-router";
-import { File, Paths } from "expo-file-system";
+import { File } from "expo-file-system";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import * as Haptics from "expo-haptics";
@@ -152,15 +152,6 @@ type UploadBatchItem = { id: string; mutationKey: string; file: File; name: stri
 type ProcessingScanItem = { id: string; folderKey?: string; name: string };
 type NarrationChunk = { durationMs: number; url: string };
 type PendingCreate = { name: string; content: string; folderKey?: string; mutationKey: string };
-type LocalDraft = {
-  title?: unknown;
-  content?: unknown;
-  documentKey?: unknown;
-  updatedAt?: unknown;
-  savedTitle?: unknown;
-  savedContent?: unknown;
-  pendingCreate?: unknown;
-};
 
 type NotePassage = DocumentPassage & { start?: number; end?: number };
 
@@ -224,19 +215,6 @@ function ArchiveContentViewport({ children, editor }: { children: ReactNode; edi
   >{children}</ScrollView>;
 }
 
-function draftFileFor(identity: string) {
-  const safeIdentity = identity.replace(/[^A-Za-z0-9_-]/g, "-");
-  return new File(Paths.document, `knowledge-draft-${safeIdentity}.json`);
-}
-
-function pendingCreateFrom(value: unknown): PendingCreate | undefined {
-  if (!value || typeof value !== "object") return undefined;
-  const candidate = value as Partial<PendingCreate>;
-  if (typeof candidate.name !== "string" || typeof candidate.content !== "string" || typeof candidate.mutationKey !== "string") return undefined;
-  if (candidate.folderKey !== undefined && typeof candidate.folderKey !== "string") return undefined;
-  return { name: candidate.name, content: candidate.content, folderKey: candidate.folderKey, mutationKey: candidate.mutationKey };
-}
-
 function ScannedBadge({ document }: { document: ContentDocument }) {
   return document.sourceImageCount ? <Badge accessibilityLabel={`Scanned from ${document.sourceImageCount} ${document.sourceImageCount === 1 ? "image" : "images"}`} style={styles.scannedBadge}><Text style={styles.scannedBadgeText}>Scanned</Text></Badge> : null;
 }
@@ -257,7 +235,6 @@ export function KnowledgeWorkspace() {
   const { width } = useWindowDimensions();
   const archiveCardSize = Math.floor((width - spacing.md * 2 - 20) / 3);
   const destinationCardSize = Math.floor((width - 42 - 20) / 3);
-  const userKey = useAuthStore((state) => state.user?.key ?? "");
   const organizationKey = useAuthStore((state) => typeof state.organization?.key === "string" ? state.organization.key : "");
   const scopeKey = useAuthStore((state) => typeof state.scope?.key === "string" ? state.scope.key : "");
   const agentKey = useAuthStore((state) => state.contentExecution?.agentKey ?? "");
@@ -267,8 +244,6 @@ export function KnowledgeWorkspace() {
   const contentContext = { organizationKey, scopeKey, agentKey };
   const narrationPlayer = useAudioPlayer(null, { updateInterval: 500, keepAudioSessionActive: true });
   const narrationAudio = useAudioPlayerStatus(narrationPlayer);
-  const draftIdentity = userKey && organizationKey && scopeKey ? `${userKey}:${organizationKey}:${scopeKey}` : "";
-  const localDraftFile = draftFileFor(draftIdentity || "unavailable");
   const [activeSheet, setActiveSheet] = useState<ArchiveSheet>();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetError, setSheetError] = useState<string>();
@@ -432,11 +407,9 @@ export function KnowledgeWorkspace() {
   const folderCoverRequests = useRef(new Map<string, number>());
   const longPressedItem = useRef<string | undefined>(undefined);
   const contentContextKeyRef = useRef(contentContextKey);
-  const draftIdentityRef = useRef(draftIdentity);
   const folderStackRef = useRef(folderStack);
   const workspaceModeRef = useRef(workspaceMode);
   contentContextKeyRef.current = contentContextKey;
-  draftIdentityRef.current = draftIdentity;
   folderStackRef.current = folderStack;
   workspaceModeRef.current = workspaceMode;
   const currentFolder = folderStack.at(-1);
@@ -769,53 +742,6 @@ export function KnowledgeWorkspace() {
   };
 
   useEffect(() => {
-    if (!draftIdentity || !localDraftFile.exists) return;
-    const initialRevision = revision.current;
-    const expectedDraftIdentity = draftIdentity;
-    void (async () => {
-      const value = await localDraftFile.text();
-      if (revision.current !== initialRevision || draftIdentityRef.current !== expectedDraftIdentity) return;
-      const draft = JSON.parse(value) as LocalDraft;
-      const draftDocumentKey = typeof draft.documentKey === "string" ? draft.documentKey : undefined;
-      if (hasContentContext && draftDocumentKey && !pendingCreateFrom(draft.pendingCreate)) {
-        const remote = await getContentDocument(queryClient, contentContext, draftDocumentKey);
-        if (revision.current !== initialRevision || draftIdentityRef.current !== expectedDraftIdentity) return;
-        if (remote.extension) setSelectedDocument(remote);
-      }
-      if (typeof draft.title === "string") {
-        titleRef.current = draft.title;
-        setTitle(draft.title);
-      }
-      if (typeof draft.content === "string") {
-        contentRef.current = draft.content;
-        setContent(draft.content);
-      }
-      if (draftDocumentKey || (typeof draft.content === "string" && draft.content.trim()) || (typeof draft.title === "string" && draft.title !== "Untitled document")) {
-        workspaceModeRef.current = "editor";
-        setWorkspaceMode("editor");
-      }
-      documentKeyRef.current = draftDocumentKey;
-      updatedAtRef.current = typeof draft.updatedAt === "string" ? draft.updatedAt : undefined;
-      savedTitleRef.current = typeof draft.savedTitle === "string" ? draft.savedTitle : "Untitled document";
-      savedContentRef.current = typeof draft.savedContent === "string" ? draft.savedContent : "";
-      pendingCreate.current = pendingCreateFrom(draft.pendingCreate);
-      if (typeof draft.content === "string" && draft.content.trim() && (
-        pendingCreate.current ||
-        !documentKeyRef.current ||
-        draft.content !== savedContentRef.current ||
-        draft.title !== savedTitleRef.current
-      )) {
-        dirty.current = true;
-        setSaveState("dirty");
-      } else if (!draftDocumentKey && typeof draft.title === "string" && draft.title !== savedTitleRef.current) {
-        setSaveState("local");
-      }
-    })().catch(() => {
-      if (draftIdentityRef.current === expectedDraftIdentity) setError("The local draft could not be restored.");
-    });
-  }, [draftIdentity, hasContentContext]);
-
-  useEffect(() => {
     if (selectionContentContextKey.current === contentContextKey) return;
     selectionContentContextKey.current = contentContextKey;
     destinationGeneration.current += 1;
@@ -978,7 +904,7 @@ export function KnowledgeWorkspace() {
   useEffect(() => {
     if (!hasContentContext || !dirty.current) return;
     const session = editorSession.current;
-    const delay = saveImmediately.current ? 0 : 500;
+    const delay = saveImmediately.current || !documentKeyRef.current ? 0 : 500;
     saveImmediately.current = false;
     const timeout = setTimeout(() => {
       const previous = saveInFlight.current;
@@ -997,15 +923,12 @@ export function KnowledgeWorkspace() {
             dirty.current = false;
             if (nextTitle === savedTitleRef.current) {
               setSaveState("saved");
-              if (localDraftFile.exists) localDraftFile.delete();
             } else {
               setSaveState("local");
-              persistLocalDraft(titleRef.current, contentRef.current);
             }
             return;
           }
           pendingCreate.current ??= { name: nextTitle, content: nextContent, folderKey: currentFolder?.key, mutationKey: createContentMutationKey() };
-          persistLocalDraft(titleRef.current, contentRef.current);
           const pending = pendingCreate.current;
           const created = await createContentDocument(pending.name, pending.content, pending.folderKey, pending.mutationKey);
           if (session !== editorSession.current) return;
@@ -1015,7 +938,6 @@ export function KnowledgeWorkspace() {
             setDocuments(addDocument);
             if (!pending.folderKey) setRootDocuments(addDocument);
           }
-          void invalidateContentLocations(queryClient, contentContext, [pending.folderKey]);
           pendingCreate.current = undefined;
           activeKey = created.key;
           activeUpdatedAt = created.updatedAt;
@@ -1023,7 +945,6 @@ export function KnowledgeWorkspace() {
           updatedAtRef.current = created.updatedAt;
           savedTitleRef.current = pending.name;
           savedContentRef.current = pending.content;
-          persistLocalDraft(titleRef.current, contentRef.current);
         }
         const topicSourceChanged = Boolean(activeKey && (nextContent !== savedContentRef.current || nextTitle !== savedTitleRef.current));
         if (activeKey && nextContent !== savedContentRef.current) {
@@ -1048,6 +969,7 @@ export function KnowledgeWorkspace() {
         updatedAtRef.current = activeUpdatedAt;
         savedTitleRef.current = nextTitle;
         savedContentRef.current = nextContent;
+        setError(undefined);
         if (titleRef.current.trim().length === 0) {
           titleRef.current = nextTitle;
           setTitle(nextTitle);
@@ -1055,7 +977,6 @@ export function KnowledgeWorkspace() {
         if (savingRevision === revision.current) {
           dirty.current = false;
           setSaveState("saved");
-          if (localDraftFile.exists) localDraftFile.delete();
         } else {
           setSaveState("dirty");
         }
@@ -1068,7 +989,8 @@ export function KnowledgeWorkspace() {
           updatedAt: activeUpdatedAt!,
           content: nextContent,
         }));
-        await loadLocation(currentFolder?.key, true);
+        await invalidateContentLocations(queryClient, contentContext, [currentFolder?.key]);
+        await loadLocation(currentFolder?.key);
       })().catch((cause: unknown) => {
         if (session !== editorSession.current) return;
         setSaveState("error");
@@ -1244,7 +1166,6 @@ export function KnowledgeWorkspace() {
         if (documentKey) createVersionOnNextSave.current = true;
         setContent(result.content);
         markDirty();
-        persistLocalDraft(titleRef.current, result.content);
       } else if (documentKey && result.changes?.some(({ workspace }) => workspace === "archive")) {
         await invalidateContentDocumentTopics(queryClient, contentContext, documentKey);
         const document = await refreshContentDocument(queryClient, contentContext, documentKey);
@@ -1274,7 +1195,6 @@ export function KnowledgeWorkspace() {
     setContent(document.content);
     setSaveState("saved");
     setError(undefined);
-    if (localDraftFile.exists) localDraftFile.delete();
   }
 
   const openHistoryChooser = (document: ContentDocument) => {
@@ -1490,7 +1410,6 @@ export function KnowledgeWorkspace() {
       contentRef.current = snapshot.content;
       setContent(snapshot.content);
       markDirty();
-      persistLocalDraft(titleRef.current, snapshot.content);
       closeSheet();
     } catch (cause) {
       if (generation === restoreGeneration.current) setSheetError(cause instanceof Error ? cause.message : "The version could not be loaded.");
@@ -1516,23 +1435,6 @@ export function KnowledgeWorkspace() {
       if (generation === restoreGeneration.current) setSheetError(cause instanceof Error ? cause.message : "The version could not be downloaded.");
     } finally {
       if (generation === restoreGeneration.current) setVersionActionKey(undefined);
-    }
-  };
-
-  const persistLocalDraft = (nextTitle: string, nextContent: string) => {
-    if (!draftIdentity) return;
-    try {
-      localDraftFile.write(JSON.stringify({
-        title: nextTitle,
-        content: nextContent,
-        documentKey: documentKeyRef.current,
-        updatedAt: updatedAtRef.current,
-        savedTitle: savedTitleRef.current,
-        savedContent: savedContentRef.current,
-        pendingCreate: pendingCreate.current,
-      }));
-    } catch {
-      setError("The local draft could not be saved.");
     }
   };
 
@@ -1565,7 +1467,6 @@ export function KnowledgeWorkspace() {
     setQuery("");
     setResults(undefined);
     setSaveState(hasContentContext ? "saved" : "local");
-    persistLocalDraft(nextTitle, "");
   };
 
   const startNewNote = (nextTitle = "Untitled document") => {
@@ -2548,10 +2449,8 @@ export function KnowledgeWorkspace() {
       uploadBatchRef.current = [];
       setUploadBatch([]);
       setUploadFolderKey(undefined);
-      if (batch.length === 1 && successCount === 1) {
-        const uploaded = uploadedDocuments.get(batch[0]!.id);
-        if (uploaded) await openNote(uploaded);
-      }
+      const topUploaded = batch.map(({ id }) => uploadedDocuments.get(id)).find((document): document is ContentDocument => Boolean(document));
+      if (topUploaded) await openNote(topUploaded);
     } catch (cause) {
       setSheetError(cause instanceof Error ? cause.message : "Files could not be selected.");
     } finally {
@@ -2594,6 +2493,7 @@ export function KnowledgeWorkspace() {
       }
       await invalidateContentLocations(queryClient, requestContext, [folderKey]);
       showToast({ title: "Document scanned", description: `${pages.length} ${pages.length === 1 ? "page" : "pages"} converted to an editable document.` });
+      await openNote(document);
     } catch (cause) {
       if (generation !== scanGeneration.current || contentContextKeyRef.current !== requestContextKey) return;
       const message = cause instanceof Error ? cause.message : "The document could not be scanned.";
@@ -3237,24 +3137,20 @@ export function KnowledgeWorkspace() {
     pushSheet("bulkDelete");
   };
 
-  const downloadOriginal = async () => {
-    if (!selectedDocument) return;
-    const generation = ++documentActionGeneration.current;
-    setDocumentActionLoading("download");
-    setSheetError(undefined);
-    try {
-      const download = await downloadContentDocument(selectedDocument.key, selectedDocument.extension ? "original" : "txt");
-      const location = await saveBase64Download(download.fileName, download.mimeType, download.content);
-      if (generation === documentActionGeneration.current && activeSheetRef.current === "documentActions") {
-        setDocumentActionLoading(undefined);
-        closeSheet();
-        showToast({ title: selectedDocument.extension ? "File downloaded" : "Document downloaded", description: `Saved to ${location}` });
+  const downloadOriginal = () => {
+    const document = selectedDocument;
+    if (!document) return;
+    closeSheet();
+    void (async () => {
+      try {
+        const download = await downloadContentDocument(document.key, document.extension ? "original" : "txt");
+        const location = await saveBase64Download(download.fileName, download.mimeType, download.content);
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+        showToast({ title: document.extension ? "File downloaded" : "Document downloaded", description: `Saved to ${location}` });
+      } catch (cause) {
+        showToast({ title: "Download failed", description: cause instanceof Error ? cause.message : "The original file could not be downloaded." });
       }
-    } catch (cause) {
-      if (generation === documentActionGeneration.current) setSheetError(cause instanceof Error ? cause.message : "The original file could not be downloaded.");
-    } finally {
-      if (generation === documentActionGeneration.current) setDocumentActionLoading(undefined);
-    }
+    })();
   };
 
   const showOriginal = async () => {
@@ -3629,7 +3525,7 @@ export function KnowledgeWorkspace() {
           {error ? <Text accessibilityRole="alert" style={styles.notice}>{error}</Text> : null}
           {saveState === "error" ? (
             <View style={styles.saveErrorRow}>
-              <Text style={styles.saveErrorText}>This draft is stored on this device but has not synced.</Text>
+              <Text style={styles.saveErrorText}>This document has not synced.</Text>
               <Button onPress={() => setSaveRetry((current) => current + 1)} size="xs" variant="secondary">Retry save</Button>
             </View>
           ) : null}
@@ -3650,7 +3546,6 @@ export function KnowledgeWorkspace() {
                     contentRef.current = value;
                     setContent(value);
                     markDirty();
-                    persistLocalDraft(titleRef.current, value);
                   }}
                   onContentSizeChange={(event) => setEditorContentHeight(Math.max(280, Math.ceil(event.nativeEvent.contentSize.height)))}
                   placeholder="Start writing from here..."
@@ -3730,10 +3625,10 @@ export function KnowledgeWorkspace() {
         dismissible={!versionActionKey && !destinationLoading && !documentActionLoading && !bulkLoading}
         footer={mutationFooter()}
         hideHeading={activeSheet === "create" || activeSheet === "documentActions" || activeSheet === "enhance" || activeSheet === "historyChooser" || activeSheet === "bulkActions" || compactDelete}
-        mutation={activeSheet === "documents" || activeSheet === "folder" || activeSheet === "folders" || activeSheet === "searchHistory" || activeSheet === "similar" || activeSheet === "versions" || activeSheet === "audioVersions" || activeSheet === "summarize" || activeSheet === "summaryVersions" || activeSheet === "summaryReader" || activeSheet === "destinationBrowser" || activeSheet === "folderDetails" || activeSheet === "documentDetails"}
+        mutation={activeSheet === "documents" || activeSheet === "folder" || activeSheet === "folders" || activeSheet === "similar" || activeSheet === "versions" || activeSheet === "audioVersions" || activeSheet === "summarize" || activeSheet === "summaryVersions" || activeSheet === "summaryReader" || activeSheet === "scanSources" || activeSheet === "destinationBrowser" || activeSheet === "folderDetails" || activeSheet === "documentDetails"}
         onOpenChange={(open) => { if (!open) closeSheet(); }}
         open={sheetOpen}
-        tall={activeSheet === "library" || activeSheet === "documents" || activeSheet === "folders" || activeSheet === "scanSources" || activeSheet === "versions" || activeSheet === "audioVersions"}
+        tall={activeSheet === "library" || activeSheet === "documents" || activeSheet === "folders" || activeSheet === "searchHistory" || activeSheet === "scanSources" || activeSheet === "versions" || activeSheet === "audioVersions"}
         title={activeSheet === "enhance" ? "AI actions" : activeSheet === "summarize" ? "Summarize document" : activeSheet === "summaryVersions" ? "Summary versions" : activeSheet === "summaryReader" ? selectedSummary?.topic ?? summaryReaderTopic ?? `Summary ${selectedSummary?.version ?? ""}` : activeSheet === "historyChooser" ? "Document history" : activeSheet === "searchHistory" ? "Search history" : activeSheet === "similar" ? "Archive" : activeSheet === "versions" ? "Document versions" : activeSheet === "audioVersions" ? "Audio versions" : activeSheet === "scanSources" ? "Scanned pages" : activeSheet === "deleteDocument" ? `Delete ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "bulkDelete" ? "Delete selected items" : activeSheet === "folder" ? "Create folder" : activeSheet === "documents" ? "Documents and files" : activeSheet === "folders" ? "Folders" : activeSheet === "destinationBrowser" ? destinationAction === "upload" ? destinationFolder?.name ?? "Archive" : destinationAction === "move" ? "Move to folder" : "Copy to folder" : activeSheet === "library" ? "Browse Archive" : activeSheet === "documentActions" ? selectedDocument?.name ?? "Document actions" : activeSheet === "documentDetails" ? `Edit ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "destination" ? destinationAction === "upload" ? "Upload files" : "Choose destination" : activeSheet === "folderActions" ? selectedFolder?.name ?? "Folder actions" : activeSheet === "folderDetails" ? "Edit folder" : "New in Archive"}
       >
         {sheetError ? <Text accessibilityRole="alert" style={styles.notice}>{sheetError}</Text> : null}
@@ -3782,12 +3677,12 @@ export function KnowledgeWorkspace() {
               {!similarLoading && similarContentTab === "folders" ? <View style={similarResults?.folders.length ? styles.rootFolderGrid : styles.similarEmpty}>
                 {similarResults?.folders.map((folder) => <View key={folder.key} style={[styles.rootFolderCard, { width: destinationCardSize, height: destinationCardSize }]}>
                   {folder.coverUrl ? <Image contentFit="cover" source={folder.coverUrl} style={styles.folderCover} /> : null}
-                  <Button contentMode="raw" onPress={() => { closeSheet(); void openFolder(folder); }} shape="rounded" size="xl" style={[styles.rootFolderMain, folder.coverUrl && styles.coveredFolderMain]} variant="ghost">{folder.coverUrl ? null : <FolderIcon size="lg" />}<Text numberOfLines={1} style={[styles.archiveCardLabel, folder.coverUrl && styles.coveredFolderLabel]}>{folder.name}</Text></Button>
+                  <Button contentMode="raw" onPress={() => { closeSheet(); requestAnimationFrame(() => { void openFolder(folder); }); }} shape="rounded" size="xl" style={[styles.rootFolderMain, folder.coverUrl && styles.coveredFolderMain]} variant="ghost">{folder.coverUrl ? null : <FolderIcon size="lg" />}<Text numberOfLines={1} style={[styles.archiveCardLabel, folder.coverUrl && styles.coveredFolderLabel]}>{folder.name}</Text></Button>
                 </View>)}
                 {similarResults?.folders.length === 0 ? <Text style={styles.empty}>No matching folders found.</Text> : null}
               </View> : null}
               {!similarLoading && similarContentTab !== "folders" ? <View style={similarTabDocuments.length > 0 ? styles.folderDocuments : styles.similarEmpty}>
-                {similarTabDocuments.map((document) => <Button contentMode="raw" key={document.key} onPress={() => void openArchiveDocument(document, true)} size="sm" style={styles.documentButton} variant="secondary"><FileIcon size="sm" /><Text numberOfLines={1} style={styles.documentButtonLabel}>{documentDisplayName(document)}</Text><ScannedBadge document={document} /></Button>)}
+                {similarTabDocuments.map((document) => <Button contentMode="raw" key={document.key} onPress={() => { closeSheet(); requestAnimationFrame(() => { void openArchiveDocument(document); }); }} size="sm" style={styles.documentButton} variant="secondary"><FileIcon size="sm" /><Text numberOfLines={1} style={styles.documentButtonLabel}>{documentDisplayName(document)}</Text><ScannedBadge document={document} /></Button>)}
                 {similarResults && similarTabDocuments.length === 0 ? <Text style={styles.empty}>No matching {similarContentTab} found.</Text> : null}
               </View> : null}
             </ScrollView>
@@ -3800,10 +3695,9 @@ export function KnowledgeWorkspace() {
             {selectedDocument.extension ? <BottomSheetItem disabled={Boolean(documentActionLoading)} loading={documentActionLoading === "original"} onPress={() => {
               if (workspaceModeRef.current === "viewer") { closeSheet(); leaveFileViewer(); }
               else void showOriginal();
-            }} style={styles.sheetAction}>{workspaceMode === "viewer" ? "Show text" : "Show original"}</BottomSheetItem> : null}
-            <BottomSheetItem disabled={Boolean(documentActionLoading)} loading={documentActionLoading === "download"} onPress={() => void downloadOriginal()} style={styles.sheetAction}>Download</BottomSheetItem>
+            }} style={styles.sheetAction}>{workspaceMode === "viewer" ? "Show text" : "Show original"}</BottomSheetItem> : selectedDocument.sourceImageCount ? <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void openScanSources()} style={styles.sheetAction}>Show scanned pages</BottomSheetItem> : null}
+            <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={downloadOriginal} style={styles.sheetAction}>Download</BottomSheetItem>
             <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void openSimilarContent({ documentKey: selectedDocument.key }, selectedDocument.extension ? "files" : "documents")} style={styles.sheetAction}>Find similar</BottomSheetItem>
-            {selectedDocument.sourceImageCount ? <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void openScanSources()} style={styles.sheetAction}>View scanned pages</BottomSheetItem> : null}
             <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => pushSheet("deleteDocument")} style={styles.sheetAction}>Delete {selectedDocument.extension ? "file" : "document"}</BottomSheetItem>
           </>
         ) : null}
@@ -4014,12 +3908,12 @@ const styles = StyleSheet.create({
   editorHeader: { minHeight: 40, minWidth: 0, flexDirection: "row", alignItems: "center", gap: spacing.xs },
   editorHeaderTitle: { flex: 1, minWidth: 0, color: palette.silver50, fontFamily: fonts.medium, fontSize: 15, lineHeight: 20 },
   editorHeaderActions: { minHeight: 40, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 8 },
-  rootActions: { minHeight: 52, marginTop: spacing.xxs, flexDirection: "row", alignItems: "center", gap: 8 },
+  rootActions: { minHeight: 52, marginTop: -spacing.xs, flexDirection: "row", alignItems: "center", gap: 8 },
   bulkToolbar: { minHeight: 40, padding: 5, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderWidth: 1, backgroundColor: palette.panel },
   bulkToolbarSelection: { flexDirection: "row", alignItems: "center", gap: 8 },
   bulkToolbarClose: { height: 28, width: 28, paddingHorizontal: 0, paddingVertical: 0 },
   bulkSelectionText: { color: palette.silver100, fontFamily: fonts.medium, fontSize: 12 },
-  rootSearch: { minHeight: 44, flex: 1, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 7, borderRadius: 999, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panel },
+  rootSearch: { minHeight: 44, flex: 1, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 7, borderRadius: 999, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.page },
   documentSearch: { flex: 0, width: "100%" },
   documentSearchStatus: { minHeight: 16, color: palette.silver500, fontFamily: fonts.regular, fontSize: 11, lineHeight: 16, textAlign: "right" },
   documentSearchHighlight: { color: palette.silver50, backgroundColor: "rgba(206, 170, 92, 0.36)" },
@@ -4155,7 +4049,7 @@ const styles = StyleSheet.create({
   folderDescriptionInput: { minHeight: 120 },
   libraryChoices: { gap: 10 },
   libraryChoice: { minHeight: 72, width: "100%", gap: 10 },
-  folderSearch: { minHeight: 48, flex: 1, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", gap: 8, borderRadius: 999, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panel },
+  folderSearch: { minHeight: 48, flex: 1, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", gap: 8, borderRadius: 999, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.page },
   folderSearchInput: { flex: 1, minHeight: 40, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", fontSize: 13 },
   folderGrid: { paddingTop: 14, flexDirection: "row", flexWrap: "wrap", gap: 10 },
   folderList: { flex: 1 },

@@ -504,7 +504,7 @@ export async function createContentDocument(name: string, content: string, folde
     scopeKey: contentContext.scopeKey,
     folderKey,
     name,
-    representation: { content },
+    content,
     idempotencyKey: mutationKey,
   });
   return data.document;
