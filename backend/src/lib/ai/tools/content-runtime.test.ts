@@ -13,7 +13,7 @@ const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
 
 function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
   const organizationKey = newId(), scopeKey = newId(), membershipKey = newId(), userKey = newId();
-  const folders = new Map<string, any>(), documents = new Map<string, any>(), shares = new Map<string, any>(), versions = new Map<string, any>(), audioVersions = new Map<string, any>(), summaries = new Map<string, any>();
+  const folders = new Map<string, any>(), documents = new Map<string, any>(), shares = new Map<string, any>(), versions = new Map<string, any>(), audioVersions = new Map<string, any>(), summaries = new Map<string, any>(), summaryAudio = new Map<string, any>();
   const patches: Array<Record<string, unknown>> = [];
   const repository: ContentRepository = {
     async getScope(key) { return key === scopeKey ? { key, organizationKey } : null; },
@@ -53,6 +53,10 @@ function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
     async listSummaries(_scopeKey, keys) { return [...summaries.values()].filter((value) => keys.includes(value.documentKey)).sort((a, b) => b.version - a.version); },
     async createSummary(value) { const summary = { ...value, version: [...summaries.values()].filter((item) => item.documentKey === value.documentKey).length + 1 }; summaries.set(summary.key, summary); return summary; },
     async deleteSummary(key) { summaries.delete(key); },
+    async getSummaryAudio(summaryKey) { return [...summaryAudio.values()].find((value) => value.summaryKey === summaryKey) ?? null; },
+    async listSummaryAudio(_scopeKey, keys) { return [...summaryAudio.values()].filter((value) => keys.includes(value.summaryKey)); },
+    async createSummaryAudio(value) { const existing = [...summaryAudio.values()].find((item) => item.summaryKey === value.summaryKey); if (existing) return { audio: existing, created: false }; summaryAudio.set(value.key, value); return { audio: value, created: true }; },
+    async deleteSummaryAudio(summaryKey) { const value = [...summaryAudio.values()].find((item) => item.summaryKey === summaryKey); if (value) summaryAudio.delete(value.key); },
     async semanticSearch() { return [...documents.values()].map((document) => ({ score: 0.8, document })); },
     async semanticSearchFolders() { return [...folders.values()].map((folder) => ({ score: 0.8, folder })); },
     async transaction(operation) { return operation(repository); },
@@ -60,7 +64,7 @@ function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
   const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: membershipKey, organizationId: organizationKey, status: 'active', orgRole: role } } } as any;
   const folderKey = newId(); folders.set(folderKey, { key: folderKey, scopeKey, name: 'Root', embedding, createdAt: now, updatedAt: now });
   const addDocument = (content = 'First sentence. Second sentence.') => { const key = newId(); documents.set(key, { key, scopeKey, folderKey, name: 'Notes', extension: 'txt', mimeType: 'text/plain', sizeBytes: content.length, storageKey: `docs/${key}`, content, embedding, isFavorite: false, createdAt: now, updatedAt: now }); return key; };
-  return { repository, context, folders, documents, shares, versions, audioVersions, summaries, patches, scopeKey, folderKey, addDocument };
+  return { repository, context, folders, documents, shares, versions, audioVersions, summaries, summaryAudio, patches, scopeKey, folderKey, addDocument };
 }
 
 describe('Content runtime', () => {
@@ -342,8 +346,8 @@ describe('Content runtime', () => {
   test('returns playable audio with conservative document offsets and MIME-matched persistence', async () => {
     const f = fixture('moderator');
     const documentKey = f.addDocument(`0123456789Visible sentence. ${'More words. '.repeat(30)} \`secret code\``);
-    const spoken: string[] = [], actions: string[] = [], uploaded: string[] = [];
-    const dependencies: any = { repository: f.repository, maxSpeechChunkCharacters: 200, runAction: async (action: string, input: any) => { actions.push(action); const parsed = speechInputSchema.parse(input); expect(parsed).toMatchObject({ language: 'English', speakingRate: 1.25 }); spoken.push(parsed.text); return { audioBase64: Buffer.from([spoken.length]).toString('base64'), mimeType: parsed.format === 'mp3' ? 'audio/mpeg' : 'audio/ogg', durationMs: 10 }; }, mergeAudio: async () => new Uint8Array([1, 2, 3]), audioDuration: () => 900, storage: { async upload(input: any) { uploaded.push(input.key); return { storageKey: input.key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } } };
+    const spoken: string[] = [], actions: string[] = [], uploaded: string[] = [], speechInputs: any[] = [];
+    const dependencies: any = { repository: f.repository, maxSpeechChunkCharacters: 200, runAction: async (action: string, input: any) => { actions.push(action); const parsed = speechInputSchema.parse(input); speechInputs.push(parsed); spoken.push(parsed.text); return { audioBase64: Buffer.from([spoken.length]).toString('base64'), mimeType: parsed.format === 'mp3' ? 'audio/mpeg' : 'audio/ogg', durationMs: 10 }; }, mergeAudio: async () => new Uint8Array([1, 2, 3]), audioDuration: () => 900, storage: { async upload(input: any) { uploaded.push(input.key); return { storageKey: input.key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } } };
     const ephemeral = await runContentTool('document.read', { documentKeys: [documentKey], mode: 'audio', startOffset: 10, includeTitle: true, language: 'English', speakingRate: 1.25 }, f.context, dependencies);
     const audio = (ephemeral.results[0]?.data as { audio: Array<{ index: number; url: string; startCharacter: number; endCharacter: number }> }).audio;
     expect(audio.map((item) => item.index)).toEqual([...spoken.keys()]);
@@ -354,11 +358,16 @@ describe('Content runtime', () => {
     expect(actions).toEqual(Array(spoken.length).fill('speak'));
     expect(uploaded).toHaveLength(0);
     const ephemeralChunkCount = spoken.length;
-    const persisted = await runContentTool('document.read', { documentKeys: [documentKey], mode: 'audio', includeCode: false, persistAudio: true, language: 'English', speakingRate: 1.25 }, f.context, dependencies);
-    expect(actions.slice(ephemeralChunkCount)).toEqual(Array(spoken.length - ephemeralChunkCount).fill('generate-speech'));
+    const persisted = await runContentTool('document.read', { documentKeys: [documentKey], mode: 'audio', includeCode: false, persistAudio: true, language: 'en-US' }, f.context, dependencies);
+    expect(actions.slice(ephemeralChunkCount)).toEqual(['generate-speech']);
+    expect(persisted.results[0]).toMatchObject({ success: true });
+    expect(speechInputs.at(-1)).not.toHaveProperty('speakingRate');
+    expect(speechInputs.at(-1)?.language).toBe('en-US');
     expect(uploaded).toHaveLength(1);
     expect(uploaded[0]).toEndWith('.mp3');
     expect(persisted.results[0]?.data).toMatchObject({ audioVersion: { version: 1, durationMs: 900 } });
+    expect((persisted.results[0]?.data as any)?.audioVersion).not.toHaveProperty('speakingRate');
+    expect((persisted.results[0]?.data as any)?.audioVersion).toMatchObject({ language: 'en-US' });
     expect(f.audioVersions.size).toBe(1);
     expect(f.documents.get(documentKey).speechStorageKeys).toBeUndefined();
     expect(f.documents.get(documentKey).updatedAt).toBe(now);
@@ -396,6 +405,7 @@ describe('Content runtime', () => {
       repository: f.repository,
       runAction: async () => ({ audio: new Uint8Array([1]), mimeType: 'audio/mpeg' }),
       mergeAudio: async () => { throw new Error('ffmpeg unavailable'); },
+      audioDuration: () => 100,
     });
     expect(output.results[0]).toMatchObject({ success: false, error: { code: 'DOCUMENT_SPEECH_FAILED', message: 'Generated audio segments could not be finalized.', action: 'audio-merge' } });
   });
@@ -1038,6 +1048,91 @@ describe('Content runtime', () => {
     expect(actions).toEqual(['document-summarize', 'document-summarize', 'document-summarize', 'document-topics']);
   });
 
+  test('generates, projects, and reuses durable summary audio without exposing storage keys', async () => {
+    const f = fixture('moderator');
+    const documentKey = f.addDocument('Source body');
+    const summary = await f.repository.createSummary!({ key: newId(), scopeKey: f.scopeKey, documentKey, summary: 'A durable spoken summary.', style: 'brief', sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: now, createdByKey: newId(), createdAt: now });
+    const uploaded: string[] = [];
+    let generated = 0;
+    const dependencies: any = {
+      repository: f.repository,
+      generateAudioChunks: async function* (input: any) { generated += 1; expect(input).toMatchObject({ text: summary.summary, voice: 'Matthew', language: 'en-US' }); yield { index: 0, startWord: 0, endWord: 4, startCharacter: 0, endCharacter: summary.summary.length, audioBase64: 'AQ==', mimeType: 'audio/mpeg', durationMs: 100 }; },
+      mergeAudio: async () => new Uint8Array([1, 2]),
+      audioDuration: () => 800,
+      signAudioUrl: async (key: string) => `https://audio.example/${key}`,
+      storage: { async upload({ key }: any) { uploaded.push(key); return { storageKey: key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
+      clock: () => new Date(now),
+    };
+    const first = await runContentTool('document.summary.audio.generate', { summaryKeys: [summary.key], voice: 'Matthew', language: 'en-US' }, f.context, dependencies);
+    const second = await runContentTool('document.summary.audio.generate', { summaryKeys: [summary.key] }, f.context, dependencies);
+    expect(first.results[0]).toMatchObject({ success: true, data: { audio: { summaryKey: summary.key, mimeType: 'audio/mpeg', durationMs: 800, url: expect.stringContaining('https://audio.example/') } } });
+    expect(JSON.stringify(first)).not.toContain('storageKey');
+    expect(generated).toBe(1);
+    expect(uploaded).toHaveLength(1);
+    expect(second.results[0]?.data?.audio.key).toBe(first.results[0]?.data?.audio.key);
+    const listed = await runContentTool('document.list-summaries', { documentKeys: [documentKey] }, f.context, dependencies);
+    const found = await runContentTool('document.find-summary', { summaryKeys: [summary.key] }, f.context, dependencies);
+    expect(listed.results[0]?.data?.summaries[0].audio?.url).toStartWith('https://audio.example/');
+    expect(found.results[0]?.data?.summary.audio?.summaryKey).toBe(summary.key);
+  });
+
+  test('deletes a concurrent summary-audio loser upload and returns the winner', async () => {
+    const f = fixture('moderator');
+    const documentKey = f.addDocument();
+    const summary = await f.repository.createSummary!({ key: newId(), scopeKey: f.scopeKey, documentKey, summary: 'Concurrent summary.', style: 'brief', sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: now, createdByKey: newId(), createdAt: now });
+    const winner = { key: newId(), scopeKey: f.scopeKey, documentKey, summaryKey: summary.key, storageKey: 'winner.mp3', mimeType: 'audio/mpeg' as const, sizeBytes: 2, durationMs: 500, createdByKey: newId(), createdAt: now };
+    f.repository.createSummaryAudio = async () => { f.summaryAudio.set(winner.key, winner); return { audio: winner, created: false }; };
+    const deleted: string[] = [];
+    const output = await runContentTool('document.summary.audio.generate', { summaryKeys: [summary.key] }, f.context, {
+      repository: f.repository,
+      generateAudioChunks: async function* () { yield { index: 0, startWord: 0, endWord: 2, startCharacter: 0, endCharacter: 10, audioBase64: 'AQ==', mimeType: 'audio/mpeg', durationMs: 100 }; },
+      mergeAudio: async () => new Uint8Array([1, 2]), audioDuration: () => 500,
+      signAudioUrl: async (key) => `https://audio.example/${key}`,
+      storage: { async upload({ key }) { return { storageKey: key }; }, async delete(key) { deleted.push(key); }, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
+    });
+    expect(deleted).toHaveLength(1);
+    expect(deleted[0]).not.toBe(winner.storageKey);
+    expect(output.results[0]?.data?.audio).toMatchObject({ key: winner.key, url: 'https://audio.example/winner.mp3' });
+  });
+
+  test('cleans summary audio when metadata persistence fails', async () => {
+    const f = fixture('moderator');
+    const documentKey = f.addDocument();
+    const summary = await f.repository.createSummary!({ key: newId(), scopeKey: f.scopeKey, documentKey, summary: 'Summary audio cleanup.', style: 'brief', sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: now, createdByKey: newId(), createdAt: now });
+    f.repository.createSummaryAudio = async () => { throw new Error('metadata unavailable'); };
+    const uploaded: string[] = [], deleted: string[] = [];
+    const output = await runContentTool('document.summary.audio.generate', { summaryKeys: [summary.key] }, f.context, {
+      repository: f.repository,
+      generateAudioChunks: async function* () { yield { index: 0, startWord: 0, endWord: 2, startCharacter: 0, endCharacter: 10, audioBase64: 'AQ==', mimeType: 'audio/mpeg', durationMs: 100 }; },
+      mergeAudio: async () => new Uint8Array([1, 2]), audioDuration: () => 500,
+      storage: { async upload({ key }) { uploaded.push(key); return { storageKey: key }; }, async delete(key) { deleted.push(key); }, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
+    });
+    expect(output.results[0]).toMatchObject({ success: false, error: { code: 'DOCUMENT_SPEECH_FAILED', action: 'summary-audio' } });
+    expect(uploaded).toHaveLength(1);
+    expect(deleted).toEqual(uploaded);
+  });
+
+  test('retains committed summary audio when URL signing temporarily fails', async () => {
+    const f = fixture('moderator');
+    const documentKey = f.addDocument();
+    const summary = await f.repository.createSummary!({ key: newId(), scopeKey: f.scopeKey, documentKey, summary: 'Summary audio signing.', style: 'brief', sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: now, createdByKey: newId(), createdAt: now });
+    const deleted: string[] = [];
+    const dependencies: any = {
+      repository: f.repository,
+      generateAudioChunks: async function* () { yield { index: 0, startWord: 0, endWord: 2, startCharacter: 0, endCharacter: 10, audioBase64: 'AQ==', mimeType: 'audio/mpeg', durationMs: 100 }; },
+      mergeAudio: async () => new Uint8Array([1, 2]), audioDuration: () => 500,
+      signAudioUrl: async () => { throw new Error('signing unavailable'); },
+      storage: { async upload({ key }: any) { return { storageKey: key }; }, async delete(key: string) { deleted.push(key); }, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
+    };
+    const failed = await runContentTool('document.summary.audio.generate', { summaryKeys: [summary.key] }, f.context, dependencies);
+    expect(failed.results[0]?.success).toBe(false);
+    expect(f.summaryAudio.size).toBe(1);
+    expect(deleted).toHaveLength(0);
+    dependencies.signAudioUrl = async (key: string) => `https://audio.example/${key}`;
+    const retried = await runContentTool('document.summary.audio.generate', { summaryKeys: [summary.key] }, f.context, dependencies);
+    expect(retried.results[0]?.data?.audio.url).toStartWith('https://audio.example/');
+  });
+
   test('rejects non-JSON and over-limit topic model output', async () => {
     const f = fixture('viewer');
     const documentKey = f.addDocument();
@@ -1099,6 +1194,8 @@ describe('Content runtime', () => {
     });
     const audio = await f.repository.createAudioVersion!({ key: newId(), scopeKey: f.scopeKey, documentKey, sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: now, storageKey: 'audio/version.mp3', mimeType: 'audio/mpeg', sizeBytes: 10, durationMs: 100, includeTitle: false, includeCode: false, createdByKey: newId(), createdAt: now });
     const summary = await f.repository.createSummary!({ key: newId(), scopeKey: f.scopeKey, documentKey, summary: 'Saved summary', style: 'brief', sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: now, createdByKey: newId(), createdAt: now });
+    const summaryAudio = { key: newId(), scopeKey: f.scopeKey, documentKey, summaryKey: summary.key, storageKey: 'audio/summary.mp3', mimeType: 'audio/mpeg' as const, sizeBytes: 10, durationMs: 100, createdByKey: newId(), createdAt: now };
+    f.summaryAudio.set(summaryAudio.key, summaryAudio);
     const calls: string[] = [];
     const originalDelete = f.repository.deleteDocument;
     f.repository.deleteDocument = async (key) => { calls.push('metadata'); await originalDelete(key); };
@@ -1111,11 +1208,12 @@ describe('Content runtime', () => {
     storage.delete = async () => { calls.push('storage'); };
     const deleted = await runContentTool('document.delete', { documentKeys: [documentKey], deleteVersions: true, deleteShares: true }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
     expect(deleted.results[0]?.success).toBe(true);
-    expect(calls.filter((call) => call === 'storage').length).toBe(5);
+    expect(calls.filter((call) => call === 'storage').length).toBe(6);
     expect(calls.at(-1)).toBe('metadata');
     expect(f.versions.has(version.key)).toBe(false);
     expect(f.audioVersions.has(audio.key)).toBe(false);
     expect(f.summaries.has(summary.key)).toBe(false);
+    expect(f.summaryAudio.has(summaryAudio.key)).toBe(false);
   });
 
   test('hides a pending document deletion after metadata commit failure and finishes on retry', async () => {
@@ -1172,6 +1270,9 @@ describe('Content runtime', () => {
     const doomedKey = f.addDocument('Doomed');
     f.documents.get(doomedKey).folderKey = childKey;
     f.documents.get(doomedKey).deletedAt = now;
+    const doomedSummary = await f.repository.createSummary!({ key: newId(), scopeKey: f.scopeKey, documentKey: doomedKey, summary: 'Doomed summary', style: 'brief', sourceContentHash: 'a'.repeat(64), sourceTitle: 'Doomed', sourceDocumentUpdatedAt: now, createdByKey: newId(), createdAt: now });
+    const doomedAudio = { key: newId(), scopeKey: f.scopeKey, documentKey: doomedKey, summaryKey: doomedSummary.key, storageKey: 'audio/doomed-summary.mp3', mimeType: 'audio/mpeg' as const, sizeBytes: 10, durationMs: 100, createdByKey: newId(), createdAt: now };
+    f.summaryAudio.set(doomedAudio.key, doomedAudio);
     const outsideKey = newId();
     f.folders.set(outsideKey, { key: outsideKey, scopeKey: f.scopeKey, name: 'Outside', embedding, createdAt: now, updatedAt: now });
     const movableKey = f.addDocument('Movable');
@@ -1199,6 +1300,8 @@ describe('Content runtime', () => {
     expect(attempted.every((item) => item.success === false)).toBe(true);
     expect(f.shares.size).toBe(0);
     expect(f.versions.size).toBe(0);
+    expect(f.summaries.has(doomedSummary.key)).toBe(false);
+    expect(f.summaryAudio.has(doomedAudio.key)).toBe(false);
     expect(f.documents.get(movableKey).folderKey).toBe(outsideKey);
   });
 
@@ -1392,7 +1495,7 @@ describe('Content runtime', () => {
         runAction: async (action: string, input: any) => {
           if (action === 'ask' || action === 'enhance' || action === 'translate' || action === 'reason' || action === 'deep-reason' || action === 'document-summarize') return { text: 'Generated text' };
           if (action === 'document-topics') return { text: '{"topics":["Source"]}' };
-          if (action === 'speak') return { audio: new Uint8Array([1]), mimeType: 'audio/mpeg' };
+          if (action === 'speak' || action === 'generate-speech') return { audio: new Uint8Array([1]), mimeType: 'audio/mpeg' };
           if (action === 'document-cleanup') return { content: input.text };
           if (action === 'document-embed') return documentEmbed(input, { embed: async () => embedding, dimensions: EMBEDDING_DIMENSIONS });
           throw new Error(`Unexpected action ${action}`);
@@ -1402,6 +1505,9 @@ describe('Content runtime', () => {
           async record(value: any) { const identity = `${value.actorKey}:${value.scopeKey}:${value.normalizedQuery}`; const old = searchRows.get(identity); searchRows.set(identity, { output: value.output, query: value.query, normalizedQuery: value.normalizedQuery, searchedAt: value.now, count: (old?.count ?? 0) + 1 }); },
           async list({ actorKey, scopeKey, limit }: any) { return [...searchRows.entries()].filter(([key]) => key.startsWith(`${actorKey}:${scopeKey}:`)).map(([, value]) => ({ query: value.query, normalizedQuery: value.normalizedQuery, searchedAt: value.searchedAt, count: value.count })).slice(0, limit); },
         },
+        mergeAudio: async () => new Uint8Array([1]),
+        audioDuration: () => 100,
+        signAudioUrl: async (key: string) => `https://audio.example/${key}`,
       };
       let input: any;
        if (name === 'enhance') input = { content: 'Improve teh wording.' };
@@ -1425,10 +1531,14 @@ describe('Content runtime', () => {
        else if (name === 'document.read') input = { documentKeys: [documentKey], mode: 'content' };
        else if (name === 'document.list-audio-versions') input = { documentKeys: [documentKey] };
        else if (name === 'document.list-summaries') input = { documentKeys: [documentKey] };
-       else if (name === 'document.find-summary') {
+        else if (name === 'document.find-summary') {
          const summary = await f.repository.createSummary!({ key: newId(), scopeKey: f.scopeKey, documentKey, summary: 'Saved', style: 'brief', sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: now, createdByKey: newId(), createdAt: now });
-         input = { summaryKeys: [summary.key] };
-       }
+          input = { summaryKeys: [summary.key] };
+        }
+        else if (name === 'document.summary.audio.generate') {
+          const summary = await f.repository.createSummary!({ key: newId(), scopeKey: f.scopeKey, documentKey, summary: 'Saved audio summary', style: 'brief', sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: now, createdByKey: newId(), createdAt: now });
+          input = { summaryKeys: [summary.key], language: 'en-US' };
+        }
       else if (name === 'document.update') input = { updates: [{ documentKey, content: 'Updated body' }] };
       else if (name === 'document.rename') input = { renames: [{ documentKey, name: 'Renamed' }] };
       else if (name === 'document.move') input = { moves: [{ documentKey, targetScopeKey: f.scopeKey, targetFolderKey: siblingKey }] };

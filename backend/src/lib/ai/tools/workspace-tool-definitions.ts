@@ -52,6 +52,6 @@ export const WORKSPACE_TOOL_DEFINITIONS = Object.freeze([
   ...ascendCapabilities,
 ].filter(({ definition }) => !new Set([
   'folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy',
-  'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.translate', 'document.list-versions', 'document.restore-version', 'document.download',
+  'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.summary.audio.generate', 'document.translate', 'document.list-versions', 'document.restore-version', 'document.download',
   'image.search', 'email.thread.read',
 ]).has(definition.name)).map(publicDefinition));

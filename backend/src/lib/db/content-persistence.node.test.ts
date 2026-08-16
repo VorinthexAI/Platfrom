@@ -135,6 +135,31 @@ describe('scoped Content persistence', () => {
     expect(calls[1]?.query).toContain('SORT summary.version DESC');
   });
 
+  test('creates one race-safe audio record per summary and lists by summary keys', async () => {
+    const summaryKey = 'cm00000000000000000000005';
+    const documentKey = 'cm00000000000000000000003';
+    const audioKey = 'cm00000000000000000000006';
+    const createdByKey = 'cm00000000000000000000004';
+    const audio = { key: audioKey, scopeKey, documentKey, summaryKey, storageKey: 'private/summary.mp3', mimeType: 'audio/mpeg' as const, sizeBytes: 10, durationMs: 100, createdByKey, createdAt: timestamp };
+    const calls: string[] = [];
+    let insertAttempts = 0;
+    const executor: ContentQueryExecutor = { async query(query, bindVars) {
+      calls.push(query);
+      if (query.includes('INSERT @audio')) {
+        insertAttempts += 1;
+        if (insertAttempts === 2) throw Object.assign(new Error('unique'), { errorNum: 1210 });
+        return { async next() { return { ...(bindVars?.audio as object), _key: audioKey }; } };
+      }
+      if (query.includes('summaryKey == @summaryKey')) return { async next() { return { ...audio, _key: audioKey, key: undefined }; } };
+      return { async next() { return undefined; }, async all() { return []; } };
+    } };
+    const persistence = createContentPersistence(executor);
+    expect(await persistence.createSummaryAudio(audio)).toMatchObject({ created: true, audio: { summaryKey } });
+    expect(await persistence.createSummaryAudio({ ...audio, key: 'cm00000000000000000000007', storageKey: 'private/loser.mp3' })).toMatchObject({ created: false, audio: { key: audioKey } });
+    await persistence.listSummaryAudio(scopeKey, [summaryKey]);
+    expect(calls.some((query) => query.includes('audio.summaryKey IN @summaryKeys'))).toBe(true);
+  });
+
   test('pushes share lifecycle filters into both legacy and global reads', async () => {
     for (const collections of [
       [{ name: 'documentShares' }],

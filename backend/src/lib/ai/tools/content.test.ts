@@ -14,14 +14,14 @@ const expectedNames = [
   'enhance',
   'book.create-context', 'book.write',
   'folder.create', 'folder.find', 'folder.list', 'folder.update', 'folder.rename', 'folder.move', 'folder.copy', 'folder.archive', 'folder.restore', 'folder.delete',
-  'document.parse', 'document.scan', 'document.create', 'document.find', 'document.list', 'document.read', 'document.list-audio-versions', 'document.list-summaries', 'document.find-summary', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.download', 'document.export', 'document.share', 'document.unshare', 'document.list-shares', 'document.create-version', 'document.find-version', 'document.list-versions', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.topics', 'document.translate', 'document.rewrite',
+  'document.parse', 'document.scan', 'document.create', 'document.find', 'document.list', 'document.read', 'document.list-audio-versions', 'document.list-summaries', 'document.find-summary', 'document.summary.audio.generate', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.download', 'document.export', 'document.share', 'document.unshare', 'document.list-shares', 'document.create-version', 'document.find-version', 'document.list-versions', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.topics', 'document.translate', 'document.rewrite',
   'scope.document.search', 'scope.content.search', 'scope.content.search-history', 'organization.document.search',
 ] as const;
 
 describe('Content tool registry', () => {
   test('contains exactly the registered dotted names and no action-style kebab names', () => {
     expect([...CONTENT_TOOL_NAMES]).toEqual([...expectedNames]);
-    expect(CONTENT_TOOL_NAMES).toHaveLength(47);
+    expect(CONTENT_TOOL_NAMES).toHaveLength(48);
     for (const name of CONTENT_TOOL_NAMES) {
       expect(name).toMatch(/^[a-z]+(?:[.-][a-z]+)*$/);
       if (name !== 'enhance') expect(name).toContain('.');
@@ -73,10 +73,14 @@ describe('Content input contracts', () => {
     expect(() => contentToolInputSchemas['document.read'].parse({ documentKeys: [key], mode: 'audio', startOffset: 10, persistAudio: true })).toThrow();
     expect(() => contentToolInputSchemas['document.read'].parse({ documentKeys: [key, newId()], mode: 'audio', persistAudio: true })).toThrow();
     expect(() => contentToolInputSchemas['document.read'].parse({ documentKeys: [key], mode: 'content', voice: 'alloy' })).toThrow();
+    expect(() => contentToolInputSchemas['document.read'].parse({ documentKeys: [key], mode: 'audio', persistAudio: true, language: 'English' })).toThrow();
+    expect(() => contentToolInputSchemas['document.read'].parse({ documentKeys: [key], mode: 'audio', persistAudio: true, speakingRate: 1.25 })).toThrow();
     expect(() => contentToolInputSchemas['document.copy'].parse({ copies: [{ documentKey: key, targetFolderKey: newId(), name: 'Wrong field' }] })).toThrow();
     expect(() => contentToolInputSchemas['document.summarize'].parse({ documentKeys: [key, newId()], persist: true })).toThrow();
     expect(() => contentToolInputSchemas['document.summarize'].parse({ documentKeys: [key], persist: true, combine: true })).toThrow();
     expect(() => contentToolInputSchemas['document.topics'].parse({ documentKey: key, scopeKey: newId() })).toThrow();
+    expect(contentToolInputSchemas['document.summary.audio.generate'].parse({ summaryKeys: [key], language: 'en-US' })).toMatchObject({ language: 'en-US' });
+    expect(() => contentToolInputSchemas['document.summary.audio.generate'].parse({ summaryKeys: [key], language: 'English' })).toThrow();
     expect(contentToolInputSchemas['scope.document.search'].parse({ scopeKey: key, query: 'roadmap', sources: [{ type: 'project', projectKeys: [newId()] }] })).toMatchObject({ sources: [{ type: 'project' }] });
   });
 
@@ -88,7 +92,7 @@ describe('Content input contracts', () => {
       ['document.move', { moves: [] }], ['document.copy', { copies: [] }], ['document.archive', { documentKeys: [] }], ['document.restore', { documentKeys: [] }],
       ['document.delete', { documentKeys: [] }], ['document.download', { documentKeys: [] }], ['document.export', { exports: [] }], ['document.share', { shares: [] }],
       ['document.list-shares', { documentKeys: [] }], ['document.create-version', { documentKeys: [] }], ['document.find-version', { versionKeys: [] }],
-      ['document.list-versions', { documentKeys: [] }], ['document.list-summaries', { documentKeys: [] }], ['document.find-summary', { summaryKeys: [] }], ['document.restore-version', { restores: [] }], ['document.delete-version', { versionKeys: [] }],
+      ['document.list-versions', { documentKeys: [] }], ['document.list-summaries', { documentKeys: [] }], ['document.find-summary', { summaryKeys: [] }], ['document.summary.audio.generate', { summaryKeys: [] }], ['document.restore-version', { restores: [] }], ['document.delete-version', { versionKeys: [] }],
       ['document.summarize', { documentKeys: [] }], ['document.translate', { documentKeys: [], targetLanguage: 'French' }], ['document.rewrite', { rewrites: [] }],
     ];
     for (const [name, input] of invalid) expect(contentToolInputSchemas[name].safeParse(input).success, name).toBe(false);
@@ -129,6 +133,7 @@ describe('Content input contracts', () => {
       ['document.unshare', { shareKeys: [key] }], ['document.create-version', { documentKeys: [key] }],
       ['document.restore-version', { restores: [{ documentKey: key, versionKey: newId() }] }],
       ['document.delete-version', { versionKeys: [key] }], ['document.summarize', { documentKeys: [key] }],
+      ['document.summary.audio.generate', { summaryKeys: [key] }],
       ['document.translate', { documentKeys: [key], targetLanguage: 'French' }],
       ['document.rewrite', { rewrites: [{ documentKey: key, instruction: 'Improve' }] }],
       ['document.read', { documentKeys: [key], mode: 'audio', persistAudio: true }],

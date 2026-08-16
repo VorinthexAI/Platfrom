@@ -147,7 +147,18 @@ const documentSummaryMetadataShape = {
   sourceDocumentUpdatedAt: dateTimeSchema,
   createdAt: dateTimeSchema,
 };
-export const contentDocumentSummarySchema = z.object(documentSummaryMetadataShape).strict();
+export const contentSummaryAudioSchema = z.object({
+  key: keySchema,
+  summaryKey: keySchema,
+  mimeType: z.literal('audio/mpeg'),
+  sizeBytes: z.number().int().positive(),
+  durationMs: z.number().int().positive(),
+  voice: textSchema.optional(),
+  language: textSchema.optional(),
+  createdAt: dateTimeSchema,
+  url: z.string().url(),
+}).strict();
+export const contentDocumentSummarySchema = z.object({ ...documentSummaryMetadataShape, audio: contentSummaryAudioSchema.optional() }).strict();
 const generatedSummaryDataSchema = z.object({ documentKey: keySchema, text: z.string().trim().min(1), summary: contentDocumentSummarySchema.optional() }).strict();
 const enhancedContentDataSchema = z.object({ content: z.string().trim().min(1) }).strict();
 const bookBriefShape = {
@@ -294,10 +305,13 @@ export const contentToolContracts = {
     }
     if (value.persistAudio && (value.startOffset !== undefined || value.endOffset !== undefined)) context.addIssue({ code: z.ZodIssueCode.custom, path: ['persistAudio'], message: 'persisted audio must cover the full document' });
     if (value.persistAudio && value.documentKeys.length !== 1) context.addIssue({ code: z.ZodIssueCode.custom, path: ['documentKeys'], message: 'persisted audio generation accepts exactly one document' });
+    if (value.persistAudio && value.language && !/^[a-z]{2,3}(?:-[A-Z]{2})?$/.test(value.language)) context.addIssue({ code: z.ZodIssueCode.custom, path: ['language'], message: 'persisted audio language must be a locale code such as en-US' });
+    if (value.persistAudio && value.speakingRate !== undefined) context.addIssue({ code: z.ZodIssueCode.custom, path: ['speakingRate'], message: 'speakingRate is unavailable for persisted Polly audio' });
   }), output: contentBatchOutputSchema(documentReadDataSchema) },
   'document.list-audio-versions': { description: 'List independently generated full-audio versions for documents.', input: z.object({ documentKeys: keysSchema, cursor: cursorSchema.optional(), limit: limitSchema.optional() }).strict(), output: contentBatchOutputSchema(z.object({ documentKey: keySchema, audioVersions: z.array(contentDocumentAudioVersionSchema), cursor: cursorSchema.optional() }).strict()) },
   'document.list-summaries': { description: 'List immutable generated summary history for documents.', input: z.object({ documentKeys: keysSchema, cursor: cursorSchema.optional(), limit: limitSchema.optional() }).strict(), output: contentBatchOutputSchema(z.object({ documentKey: keySchema, summaries: z.array(contentDocumentSummarySchema), cursor: cursorSchema.optional() }).strict()) },
   'document.find-summary': { description: 'Find persisted document summaries by key.', input: z.object({ summaryKeys: keysSchema }).strict(), output: contentBatchOutputSchema(z.object({ summary: contentDocumentSummarySchema }).strict()) },
+  'document.summary.audio.generate': { description: 'Generate durable MP3 audio for persisted document summaries, returning existing audio when already generated.', input: z.object({ summaryKeys: keysSchema, voice: z.string().trim().min(1).max(120).optional(), language: z.string().trim().regex(/^[a-z]{2,3}(?:-[A-Z]{2})?$/).optional(), ...idempotencyShape }).strict(), output: contentBatchOutputSchema(z.object({ audio: contentSummaryAudioSchema }).strict()) },
   'document.update': { description: 'Update document content.', input: z.object({ updates: z.array(documentUpdateSchema).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(documentDataSchema) },
   'document.rename': { description: 'Rename documents.', input: z.object({ renames: z.array(z.object({ documentKey: keySchema, name: nameSchema }).strict()).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(documentDataSchema) },
   'document.move': { description: 'Move documents to a scoped folder or the Content root.', input: z.object({ moves: z.array(z.object({ documentKey: keySchema, targetScopeKey: keySchema, targetFolderKey: keySchema.optional() }).strict()).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(documentDataSchema) },

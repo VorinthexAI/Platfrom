@@ -53,6 +53,7 @@ const {
   findContentDocumentSummary,
   findContentDocumentVersion,
   generateContentDocumentAudio,
+  generateContentDocumentSummaryAudio,
   getContentContext,
   getContentDocumentTopics,
   loadInitialContentLocation,
@@ -109,6 +110,18 @@ test("generates and lists independent full-audio versions", async () => {
   expect(calls[0]?.body.input).toMatchObject({ documentKeys: ["document"], mode: "audio", persistAudio: true });
   expect(calls[0]?.config.timeout).toBe(15 * 60_000);
   expect(calls[1]?.body.input).toEqual({ documentKeys: ["document"], cursor: undefined, limit: 100 });
+});
+
+test("generates durable summary audio through the content tool", async () => {
+  const audio = { key: "summary-audio", summaryKey: "summary", mimeType: "audio/mpeg", sizeBytes: 512, durationMs: 12_000, createdAt: "2026-08-10T00:03:00.000Z", url: "https://audio.example/summary.mp3" };
+  responseForTool = (tool) => tool === "document.summary.audio.generate"
+    ? { data: { success: true, data: { results: [{ success: true, data: { audio } }] } } }
+    : undefined;
+
+  await expect(generateContentDocumentSummaryAudio("summary")).resolves.toEqual(audio);
+  expect(calls[0]?.body.input).toMatchObject({ summaryKeys: ["summary"] });
+  expect(calls[0]?.body.input.idempotencyKey).toBeString();
+  expect(calls[0]?.config.timeout).toBe(15 * 60_000);
 });
 
 test("sends document and folder mutations with the authenticated Archive context", async () => {

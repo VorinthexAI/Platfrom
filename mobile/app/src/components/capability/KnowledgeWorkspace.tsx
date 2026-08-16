@@ -58,8 +58,10 @@ import {
   createContentMutationKey,
   copyContentSelection,
   downloadContentDocument,
+  findContentDocumentSummary,
   findContentDocumentVersion,
   generateContentDocumentAudio,
+  generateContentDocumentSummaryAudio,
   getContentContext,
   isContentContextConfigured,
   listContentDocumentVersions,
@@ -312,6 +314,7 @@ export function KnowledgeWorkspace() {
   const [narrationManifest, setNarrationManifest] = useState<NarrationChunk[]>([]);
   const [narrationActiveIndex, setNarrationActiveIndex] = useState(-1);
   const [narrationTitle, setNarrationTitle] = useState("");
+  const [narrationStatus, setNarrationStatus] = useState("AUDIO VERSION");
   const [narrationScrubValue, setNarrationScrubValue] = useState<number>();
   const [narrationError, setNarrationError] = useState<string>();
   const [selectedFolder, setSelectedFolder] = useState<ContentFolder>();
@@ -351,6 +354,7 @@ export function KnowledgeWorkspace() {
   const [summaries, setSummaries] = useState<ContentDocumentSummary[]>([]);
   const [loadingSummaries, setLoadingSummaries] = useState(false);
   const [generatingSummary, setGeneratingSummary] = useState(false);
+  const [generatingSummaryAudio, setGeneratingSummaryAudio] = useState(false);
   const [summaryReaderTopic, setSummaryReaderTopic] = useState<string>();
   const [error, setError] = useState<string>();
   const editorSession = useRef(0);
@@ -479,8 +483,8 @@ export function KnowledgeWorkspace() {
     return true;
   };
 
-  const stopNarration = useCallback(() => {
-    narrationPlaybackGeneration.current += 1;
+  const stopNarration = useCallback((invalidatePlayback = true) => {
+    if (invalidatePlayback) narrationPlaybackGeneration.current += 1;
     narrationChunks.current = [];
     narrationChunkIndex.current = -1;
     narrationTitleRef.current = "";
@@ -1208,6 +1212,33 @@ export function KnowledgeWorkspace() {
     }
   };
 
+  const startNarrationSource = async (source: {
+    audioVersionKey?: string;
+    durationMs: number;
+    lockScreenTitle: string;
+    status: string;
+    title: string;
+    url: string;
+  }, generation: number, startSeconds = 0, autoPlay = true) => {
+    await setAudioModeAsync(BOOK_AUDIO_MODE);
+    if (generation !== narrationPlaybackGeneration.current) return;
+    stopNarration(false);
+    narrationTitleRef.current = source.lockScreenTitle;
+    setNarrationTitle(source.title);
+    setNarrationStatus(source.status);
+    setSelectedAudioVersionKey(source.audioVersionKey);
+    const chunk: NarrationChunk = { durationMs: source.durationMs, url: source.url };
+    narrationChunks.current = [chunk];
+    narrationChunkIndex.current = 0;
+    setNarrationManifest([chunk]);
+    setNarrationActiveIndex(0);
+    pendingNarrationSeek.current = { index: 0, seconds: Math.min(startSeconds, source.durationMs / 1_000), play: autoPlay };
+    narrationPlayer.replace(source.url);
+    narrationPlayer.setActiveForLockScreen(true, { title: source.lockScreenTitle, artist: "Vorinthex Archive" }, { showSeekBackward: false, showSeekForward: false });
+    if (autoPlay) narrationPlayer.play();
+    updateNarrationState(autoPlay ? "playing" : "paused");
+  };
+
   const playAudioVersion = async (version: ContentDocumentAudioVersion, startSeconds = 0, autoPlay = true, refreshUrl = true) => {
     const document = selectedDocument;
     if (!document) return;
@@ -1217,27 +1248,61 @@ export function KnowledgeWorkspace() {
       if (generation !== narrationPlaybackGeneration.current) return;
       if (refreshUrl) setAudioVersions(history);
       const playable = history.find((item) => item.key === version.key) ?? version;
-      await setAudioModeAsync(BOOK_AUDIO_MODE);
-      if (generation !== narrationPlaybackGeneration.current) return;
-      stopNarration();
-      narrationTitleRef.current = document.name;
-      setNarrationTitle(`${document.name} · Audio ${playable.version}`);
-      setSelectedAudioVersionKey(playable.key);
-      const chunk: NarrationChunk = { durationMs: playable.durationMs, url: playable.url };
-      narrationChunks.current = [chunk];
-      narrationChunkIndex.current = 0;
-      setNarrationManifest([chunk]);
-      setNarrationActiveIndex(0);
-      pendingNarrationSeek.current = { index: 0, seconds: Math.min(startSeconds, playable.durationMs / 1_000), play: autoPlay };
-      narrationPlayer.replace(playable.url);
-      narrationPlayer.setActiveForLockScreen(true, { title: document.name, artist: "Vorinthex Archive" }, { showSeekBackward: false, showSeekForward: false });
-      if (autoPlay) narrationPlayer.play();
-      updateNarrationState(autoPlay ? "playing" : "paused");
+      await startNarrationSource({
+        audioVersionKey: playable.key,
+        durationMs: playable.durationMs,
+        lockScreenTitle: document.name,
+        status: "AUDIO VERSION",
+        title: `${document.name} · Audio ${playable.version}`,
+        url: playable.url,
+      }, generation, startSeconds, autoPlay);
     } catch (cause) {
       if (generation !== narrationPlaybackGeneration.current) return;
       const message = cause instanceof Error ? cause.message : "This audio version could not be played.";
       setNarrationError(message);
       updateNarrationState("error");
+    }
+  };
+
+  const playSummaryAudio = async (summary: ContentDocumentSummary) => {
+    const generation = ++narrationPlaybackGeneration.current;
+    try {
+      const refreshed = addCachedContentDocumentSummary(queryClient, contentContext, await findContentDocumentSummary(summary.key));
+      setSelectedSummary(refreshed);
+      setSummaries(queryClient.getQueryData<ContentDocumentSummary[]>(contentQueryKeys.summaries(contentContext, refreshed.documentKey)) ?? [refreshed]);
+      if (!refreshed.audio) throw new Error("Generate audio for this summary before listening.");
+      const title = refreshed.topic ?? "Document summary";
+      await startNarrationSource({
+        durationMs: refreshed.audio.durationMs,
+        lockScreenTitle: title,
+        status: "SUMMARY AUDIO",
+        title,
+        url: refreshed.audio.url,
+      }, generation);
+    } catch (cause) {
+      if (generation !== narrationPlaybackGeneration.current) return;
+      const message = cause instanceof Error ? cause.message : "This summary audio could not be played.";
+      setSheetError(message);
+      setNarrationError(message);
+      updateNarrationState("error");
+    }
+  };
+
+  const generateSummaryAudio = async () => {
+    const summary = selectedSummary;
+    if (!summary || generatingSummaryAudio) return;
+    setGeneratingSummaryAudio(true);
+    setSheetError(undefined);
+    try {
+      const audio = await generateContentDocumentSummaryAudio(summary.key);
+      const updated = addCachedContentDocumentSummary(queryClient, contentContext, { ...summary, audio });
+      setSelectedSummary(updated);
+      setSummaries(queryClient.getQueryData<ContentDocumentSummary[]>(contentQueryKeys.summaries(contentContext, updated.documentKey)) ?? [updated]);
+      await playSummaryAudio(updated);
+    } catch (cause) {
+      setSheetError(cause instanceof Error ? cause.message : "Summary audio could not be generated.");
+    } finally {
+      setGeneratingSummaryAudio(false);
     }
   };
 
@@ -3084,7 +3149,11 @@ export function KnowledgeWorkspace() {
       {sheetError ? <Button disabled={loadingSummaryTopics || generatingSummary} loading={loadingSummaryTopics} onPress={() => void loadSummaryTopics()} size="lg" variant="primary">Retry</Button> : null}
       {close(loadingSummaryTopics || generatingSummary)}
     </>;
-    if (activeSheet === "summaryVersions" || activeSheet === "summaryReader") return close(generatingSummary || loadingSummaries);
+    if (activeSheet === "summaryVersions") return close(generatingSummary || loadingSummaries);
+    if (activeSheet === "summaryReader") return <>
+      {selectedSummary ? <Button disabled={generatingSummary || generatingSummaryAudio} loading={generatingSummaryAudio} onPress={() => { if (selectedSummary.audio) void playSummaryAudio(selectedSummary); else void generateSummaryAudio(); }} size="lg" variant="primary">{selectedSummary.audio ? "Listen" : "Generate audio"}</Button> : null}
+      {close(generatingSummary || generatingSummaryAudio)}
+    </>;
     if (activeSheet === "audioVersions") return <>
       <Button disabled={generatingAudioVersion || loadingAudioVersions} loading={generatingAudioVersion} onPress={() => void generateAudioVersion()} size="lg" variant="primary">Generate audio</Button>
       {close(generatingAudioVersion)}
@@ -3145,9 +3214,9 @@ export function KnowledgeWorkspace() {
       <View style={styles.narrationHeading}>
         <View style={styles.narrationTitleBlock}>
           <Text numberOfLines={1} style={styles.narrationTitle}>{narrationTitle || "Document audio"}</Text>
-          <Text style={styles.narrationStatus}>AUDIO VERSION</Text>
+          <Text style={styles.narrationStatus}>{narrationStatus}</Text>
         </View>
-        <Button accessibilityLabel="Close audio player" contentMode="raw" onPress={stopNarration} size="xs" variant="icon"><CloseIcon size="sm" /></Button>
+        <Button accessibilityLabel="Close audio player" contentMode="raw" onPress={() => stopNarration()} size="xs" variant="icon"><CloseIcon size="sm" /></Button>
       </View>
       <View style={styles.narrationControls}>
         <Button accessibilityLabel={narrationState === "playing" ? "Pause listening" : "Play audio"} contentMode="raw" disabled={narrationManifest.length === 0} loading={narrationManifest.length === 0 && narrationState !== "error"} onPress={controlSelectedAudioVersion} size="sm" variant="icon">{narrationState === "playing" ? <PauseIcon size="sm" /> : <PlayIcon size="sm" />}</Button>
@@ -3416,7 +3485,7 @@ export function KnowledgeWorkspace() {
 
       <BottomSheet
         description={activeSheet === "create" ? "Choose what to add to the current folder." : activeSheet === "versions" ? "Choose a version of this document to open or download." : activeSheet === "audioVersions" ? "Generated audio has its own history, independent from document versions." : activeSheet === "summarize" ? "Find the document's primary topics, then choose one to summarize." : activeSheet === "summaryVersions" ? "Open any generated summary for this document." : undefined}
-        dismissible={!versionActionKey && !generatingAudioVersion && !generatingSummary && !loadingSummaryTopics && !destinationLoading && !documentActionLoading && !bulkLoading}
+        dismissible={!versionActionKey && !generatingAudioVersion && !generatingSummary && !generatingSummaryAudio && !loadingSummaryTopics && !destinationLoading && !documentActionLoading && !bulkLoading}
         footer={mutationFooter()}
         hideHeading={activeSheet === "create" || activeSheet === "documentActions" || activeSheet === "enhance" || activeSheet === "historyChooser" || activeSheet === "bulkActions" || compactDelete}
         mutation={activeSheet === "documents" || activeSheet === "folder" || activeSheet === "folders" || activeSheet === "versions" || activeSheet === "audioVersions" || activeSheet === "summarize" || activeSheet === "summaryVersions" || activeSheet === "summaryReader" || activeSheet === "destinationBrowser" || activeSheet === "folderDetails" || activeSheet === "documentDetails"}
@@ -3536,10 +3605,7 @@ export function KnowledgeWorkspace() {
             {generatingSummary ? <View accessibilityLabel="Generating document summary" accessibilityRole="progressbar" style={styles.summaryReaderSkeleton}>
               <View style={styles.summaryReaderSkeletonTitle} />
               <View style={styles.summaryReaderSkeletonText} />
-            </View> : selectedSummary ? <>
-              <Text style={styles.meta}>SUMMARY VERSION {selectedSummary.version}</Text>
-              <SummaryText value={selectedSummary.summary} />
-            </> : null}
+            </View> : selectedSummary ? <SummaryText value={selectedSummary.summary} /> : null}
           </ScrollView>
         ) : null}
         {activeSheet === "destination" ? (
@@ -3741,7 +3807,6 @@ const styles = StyleSheet.create({
   noteActions: { flexDirection: "row", gap: 8 },
   folderContext: { flexDirection: "row", alignItems: "center", gap: 6 },
   folderContextBack: { flex: 1, justifyContent: "flex-start" },
-  meta: { color: palette.silver500, fontFamily: fonts.medium, fontSize: 9, letterSpacing: 1.5 },
   notice: { marginBottom: 12, padding: 10, borderRadius: radii.sm, color: palette.silver300, backgroundColor: "rgba(120, 76, 40, 0.24)", fontFamily: fonts.regular, fontSize: 12 },
   saveErrorRow: { marginBottom: 10, padding: 10, flexDirection: "row", alignItems: "center", gap: 8, borderRadius: radii.sm, borderColor: palette.hairline, borderWidth: 1 },
   saveErrorText: { flex: 1, color: palette.silver300, fontFamily: fonts.regular, fontSize: 11, lineHeight: 16 },

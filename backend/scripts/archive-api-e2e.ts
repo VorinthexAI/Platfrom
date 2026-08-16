@@ -131,6 +131,39 @@ const update = await tool('document.update', {
 });
 firstResultData(update, 'document.update');
 
+if (process.env.ARCHIVE_E2E_AUDIO === 'true') {
+  const documentAudioResult = await tool('document.read', {
+    documentKeys: [documentKey],
+    mode: 'audio',
+    persistAudio: true,
+    idempotencyKey: `archive-e2e-document-audio-${suffix}`,
+  });
+  const documentAudio = object(firstResultData(documentAudioResult, 'document.read').audioVersion);
+  const listedAudioResult = await tool('document.list-audio-versions', { documentKeys: [documentKey] });
+  const listedAudio = object((object(firstResultData(listedAudioResult, 'document.list-audio-versions')).audioVersions as unknown[]).map(object).find((entry) => entry.key === documentAudio.key));
+  const documentAudioResponse = await fetch(string(listedAudio.url, 'document audio URL'));
+  if (!documentAudioResponse.ok || !documentAudioResponse.headers.get('content-type')?.includes('audio/mpeg') || (await documentAudioResponse.arrayBuffer()).byteLength === 0) throw new Error('Persisted document audio was not playable.');
+
+  const summaryResult = await tool('document.summarize', {
+    documentKeys: [documentKey],
+    topic: 'Archive verification',
+    persist: true,
+    idempotencyKey: `archive-e2e-summary-${suffix}`,
+  });
+  const summary = object(firstResultData(summaryResult, 'document.summarize').summary);
+  const summaryKey = string(summary.key, 'summary key');
+  const summaryAudioResult = await tool('document.summary.audio.generate', {
+    summaryKeys: [summaryKey],
+    idempotencyKey: `archive-e2e-summary-audio-${suffix}`,
+  });
+  const summaryAudio = object(firstResultData(summaryAudioResult, 'document.summary.audio.generate').audio);
+  const summaryAudioResponse = await fetch(string(summaryAudio.url, 'summary audio URL'));
+  if (!summaryAudioResponse.ok || !summaryAudioResponse.headers.get('content-type')?.includes('audio/mpeg') || (await summaryAudioResponse.arrayBuffer()).byteLength === 0) throw new Error('Persisted summary audio was not playable.');
+  const foundSummaryResult = await tool('document.find-summary', { summaryKeys: [summaryKey] });
+  const foundSummary = object(firstResultData(foundSummaryResult, 'document.find-summary').summary);
+  if (object(foundSummary.audio).key !== summaryAudio.key) throw new Error('Summary lookup did not return its persisted audio.');
+}
+
 const uploadText = `Uploaded archive document ${suffix.slice(0, 8)} contains a silver observatory.`;
 const uploaded = await tool('document.parse', {
   scopeKey,
@@ -186,4 +219,4 @@ await tool('document.archive', { documentKeys: [documentKey, uploadedDocumentKey
 await tool('document.delete', { documentKeys: [documentKey, uploadedDocumentKey, uploadedPdfKey], deleteVersions: true, deleteShares: true });
 await tool('folder.archive', { folderKeys: [folderKey], atomic: true });
 
-console.log(`Archive API E2E passed: guest auth, ${process.env.ARCHIVE_E2E_AUDIO === 'true' ? 'streamed Polly narration, ' : ''}folder/document creation, autosave, LocalStack upload, AWS PDF extraction, fast folder/file search, semantic retrieval, and history.`);
+console.log(`Archive API E2E passed: guest auth, ${process.env.ARCHIVE_E2E_AUDIO === 'true' ? 'streamed and persisted document/summary Polly narration, ' : ''}folder/document creation, autosave, LocalStack upload, AWS PDF extraction, fast folder/file search, semantic retrieval, and history.`);

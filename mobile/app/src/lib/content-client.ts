@@ -72,6 +72,18 @@ export type ContentDocumentAudioVersion = {
   url: string;
 };
 
+export type ContentDocumentSummaryAudio = {
+  key: string;
+  summaryKey: string;
+  mimeType: "audio/mpeg";
+  sizeBytes: number;
+  durationMs: number;
+  voice?: string;
+  language?: string;
+  createdAt: string;
+  url: string;
+};
+
 export type ContentDocumentSummary = {
   key: string;
   documentKey: string;
@@ -84,6 +96,7 @@ export type ContentDocumentSummary = {
   sourceTitle: string;
   sourceDocumentUpdatedAt: string;
   createdAt: string;
+  audio?: ContentDocumentSummaryAudio;
 };
 
 export type ContentSearchDocument = {
@@ -252,7 +265,7 @@ async function callContentTool<T>(tool: string, input: Record<string, unknown>, 
       organizationKey: contentContext.organizationKey,
       agentKey: contentContext.agentKey,
       input,
-    }, { signal, timeout: tool === "document.read" && input.persistAudio === true ? 15 * 60_000 : tool === "document.parse" || tool === "document.scan" ? 5 * 60_000 : tool === "document.summarize" || tool === "document.topics" ? 4 * 60_000 : 60_000 });
+    }, { signal, timeout: tool === "document.summary.audio.generate" || tool === "document.read" && input.persistAudio === true ? 15 * 60_000 : tool === "document.parse" || tool === "document.scan" ? 5 * 60_000 : tool === "document.summarize" || tool === "document.topics" ? 4 * 60_000 : 60_000 });
     if (!response.data.success) throw new Error(response.data.error.message);
     return response.data.data;
   } catch (error) {
@@ -360,6 +373,15 @@ export async function generateContentDocumentAudio(documentKey: string) {
   const result = data.results[0];
   if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "Document audio could not be generated.");
   return result.data.audioVersion;
+}
+
+export async function generateContentDocumentSummaryAudio(summaryKey: string) {
+  const data = await callContentTool<{
+    results: { success: boolean; data?: { audio: ContentDocumentSummaryAudio }; error?: { message: string } }[];
+  }>("document.summary.audio.generate", { summaryKeys: [summaryKey], idempotencyKey: createContentMutationKey() });
+  const result = data.results[0];
+  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "Summary audio could not be generated.");
+  return result.data.audio;
 }
 
 export async function findContentDocumentVersion(versionKey: string) {

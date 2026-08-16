@@ -21,7 +21,13 @@ describe('audio.generate', () => {
 
   test('rejects oversized individual words and excessive billable fan-out', () => {
     expect(() => splitAudioText({ text: 'x'.repeat(2_801), wordsPerChunk: 100 })).toThrow('Individual words cannot exceed 2800 characters');
-    expect(() => splitAudioText({ text: Array.from({ length: 820 }, () => 'x').join(' '), wordsPerChunk: 20 })).toThrow('Audio generation cannot exceed 40 chunks');
+    expect(() => splitAudioText({ text: Array.from({ length: 1_620 }, () => 'x').join(' '), wordsPerChunk: 20 })).toThrow('Audio generation cannot exceed 80 chunks');
+  });
+
+  test('supports the durable document character limit for short words', () => {
+    const text = 'x '.repeat(60_000).trim();
+    expect(text).toHaveLength(119_999);
+    expect(splitAudioText({ text, wordsPerChunk: 1_000 }).chunks).toHaveLength(60);
   });
 
   test('generates MP3 chunks sequentially and exposes each completion', async () => {

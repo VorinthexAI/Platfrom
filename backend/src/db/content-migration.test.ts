@@ -24,4 +24,10 @@ describe('Content share migration staging', () => {
     expect(source).toContain("fields: ['scopeKey', 'isFavorite', 'deletedAt']");
     expect(source).toContain('query.expiresAt <= DATE_ISO8601(DATE_NOW()) && query.output != null');
   });
+  test('creates private one-to-one summary audio storage indexes', async () => {
+    const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    expect(source).toContain("name: 'documentSummaryAudio'");
+    expect(source).toContain("fields: ['summaryKey'], unique: true");
+    expect(source).toContain("fields: ['storageKey'], unique: true");
+  });
 });
