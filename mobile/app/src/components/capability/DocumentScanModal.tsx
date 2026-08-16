@@ -82,7 +82,7 @@ export function DocumentScanModal({ busy, error, onClose, onSubmit }: Props) {
     </ScrollView>
   </View>;
 
-  return <BrandedCameraModal bottomContent={drawer} count={pages.length} disabled={busy || capturing} doneLoading={busy} externalError={error ?? captureError} hint="" maximum={MAX_DOCUMENT_SCAN_PAGES} onCapture={capture} onClose={onClose} onDone={() => onSubmit(pages)} title="Scan documents" />;
+  return <BrandedCameraModal bottomContent={drawer} count={pages.length} countUnit="pages" disabled={busy || capturing} doneLoading={busy} externalError={error ?? captureError} hint="" maximum={MAX_DOCUMENT_SCAN_PAGES} onCapture={capture} onClose={onClose} onDone={() => onSubmit(pages)} title="Scan documents" />;
 }
 
 const styles = StyleSheet.create({

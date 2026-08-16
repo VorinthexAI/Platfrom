@@ -48,6 +48,16 @@ describe('Content tool API', () => {
     expect(mismatch.status).toBe(409);
   });
 
+  test('recognizes and dispatches semantic-neighbor reads', async () => {
+    let dispatched: any;
+    const response = await request({
+      getIdentity: async () => ({ key: newId(), identityType: 'user' }),
+      run: async (input) => { dispatched = input; return { folders: [], documents: [], files: [] }; },
+    }, 'content.neighbors', { organizationKey, agentKey, input: { folderKey } });
+    expect(response.status).toBe(200);
+    expect(dispatched).toMatchObject({ organizationKey, agentKey, tool: 'content.neighbors', input: { folderKey } });
+  });
+
   test('maps structured Content failures to HTTP statuses', async () => {
     const cases = [['CONTENT_INVALID_INPUT', 400], ['CONTENT_FORBIDDEN', 403], ['CONTENT_NOT_FOUND', 404], ['CONTENT_CONFLICT', 409], ['DOCUMENT_PROCESSING_FAILED', 500]] as const;
     for (const [code, status] of cases) {

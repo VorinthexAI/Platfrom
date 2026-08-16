@@ -118,6 +118,7 @@ import {
   invalidateContentDocumentTopics,
   refreshContentDocument,
   refreshContentDocumentAudioVersions,
+  refreshContentDocumentSummaries,
   promoteCachedContentHistory,
   removeCachedContentHistory,
   refreshContentLocation,
@@ -392,6 +393,7 @@ export function KnowledgeWorkspace() {
   const activeSheetRef = useRef<ArchiveSheet | undefined>(undefined);
   const sheetBackStack = useRef<ArchiveSheet[]>([]);
   const currentFolderKeyRef = useRef<string | undefined>(undefined);
+  const selectedDocumentKeyRef = useRef<string | undefined>(undefined);
   const loadedContentContextKey = useRef<string | undefined>(undefined);
   const selectionContentContextKey = useRef(contentContextKey);
   const instructionRequest = useRef<AbortController | undefined>(undefined);
@@ -415,7 +417,8 @@ export function KnowledgeWorkspace() {
   const audioPlaybackWrites = useRef<Promise<void>>(Promise.resolve());
   const pendingNarrationSeek = useRef<{ index: number; seconds: number; play: boolean } | undefined>(undefined);
   const summaryRequest = useRef<AbortController | undefined>(undefined);
-  const summaryGeneration = useRef(0);
+  const summaryLoadGeneration = useRef(0);
+  const summaryMutationGeneration = useRef(0);
   const instructionGeneration = useRef(0);
   const previewFileRef = useRef<File | undefined>(undefined);
   const restoreGeneration = useRef(0);
@@ -666,6 +669,10 @@ export function KnowledgeWorkspace() {
     currentFolderKeyRef.current = currentFolder?.key;
   }, [currentFolder?.key]);
 
+  useEffect(() => {
+    selectedDocumentKeyRef.current = selectedDocument?.key;
+  }, [selectedDocument?.key]);
+
   const openSheet = (sheet: ArchiveSheet) => {
     if (sheetCloseTimer.current) clearTimeout(sheetCloseTimer.current);
     setSheetError(undefined);
@@ -727,14 +734,6 @@ export function KnowledgeWorkspace() {
     setTemporarySingleSelection(false);
     if (activeSheetRef.current === "documentActions" || activeSheetRef.current === "documentDetails") documentActionGeneration.current += 1;
     if (activeSheetRef.current === "folderActions" || activeSheetRef.current === "folderDetails") folderActionGeneration.current += 1;
-    if (activeSheetRef.current === "summarize" || activeSheetRef.current === "summaryVersions" || activeSheetRef.current === "summaryReader") {
-      summaryGeneration.current += 1;
-      summaryRequest.current?.abort();
-      summaryRequest.current = undefined;
-      setLoadingSummaryTopics(false);
-      setLoadingSummaries(false);
-      setGeneratingSummary(false);
-    }
     setSheetOpen(false);
     activeSheetRef.current = undefined;
     sheetBackStack.current = [];
@@ -1101,6 +1100,7 @@ export function KnowledgeWorkspace() {
       return;
     }
     setSelectedDocument(document);
+    selectedDocumentKeyRef.current = document.key;
     setSelectedSummary(undefined);
     setSummaryReaderTopic(undefined);
     setSummaryTopics([]);
@@ -1112,18 +1112,19 @@ export function KnowledgeWorkspace() {
 
   const loadSummaryTopics = async (targetDocumentKey?: string) => {
     const documentKey = targetDocumentKey ?? selectedDocument?.key ?? documentKeyRef.current;
-    if (!documentKey || loadingSummaryTopics) return;
-    const generation = ++summaryGeneration.current;
+    if (!documentKey) return;
+    const generation = ++summaryLoadGeneration.current;
     setSummaryTopics([]);
     setLoadingSummaryTopics(true);
     setSheetError(undefined);
     try {
+      await invalidateContentDocumentTopics(queryClient, contentContext, documentKey);
       const topics = await getCachedContentDocumentTopics(queryClient, contentContext, documentKey);
-      if (generation === summaryGeneration.current) setSummaryTopics(topics);
+      if (generation === summaryLoadGeneration.current && selectedDocumentKeyRef.current === documentKey) setSummaryTopics(topics);
     } catch (cause) {
-      if (generation === summaryGeneration.current) setSheetError(cause instanceof Error ? cause.message : "Document topics could not be generated.");
+      if (generation === summaryLoadGeneration.current && activeSheetRef.current === "summarize" && selectedDocumentKeyRef.current === documentKey) setSheetError(cause instanceof Error ? cause.message : "Document topics could not be generated.");
     } finally {
-      if (generation === summaryGeneration.current) setLoadingSummaryTopics(false);
+      if (generation === summaryLoadGeneration.current) setLoadingSummaryTopics(false);
     }
   };
 
@@ -1133,8 +1134,11 @@ export function KnowledgeWorkspace() {
       setSheetError("Save the document before opening summary versions.");
       return;
     }
-    if (targetDocument) setSelectedDocument(targetDocument);
-    const generation = ++summaryGeneration.current;
+    if (targetDocument) {
+      setSelectedDocument(targetDocument);
+      selectedDocumentKeyRef.current = targetDocument.key;
+    }
+    const generation = ++summaryLoadGeneration.current;
     if (targetDocument) openSheet("summaryVersions");
     else if (sheetOpen) pushSheet("summaryVersions");
     else openSheet("summaryVersions");
@@ -1143,19 +1147,19 @@ export function KnowledgeWorkspace() {
     setLoadingSummaries(true);
     setSheetError(undefined);
     try {
-      const history = await getContentDocumentSummaries(queryClient, contentContext, document.key);
-      if (generation === summaryGeneration.current) setSummaries(history);
+      const history = await refreshContentDocumentSummaries(queryClient, contentContext, document.key);
+      if (generation === summaryLoadGeneration.current && selectedDocumentKeyRef.current === document.key) setSummaries(history);
     } catch (cause) {
-      if (generation === summaryGeneration.current && activeSheetRef.current === "summaryVersions") setSheetError(cause instanceof Error ? cause.message : "Summary versions could not be loaded.");
+      if (generation === summaryLoadGeneration.current && activeSheetRef.current === "summaryVersions" && selectedDocumentKeyRef.current === document.key) setSheetError(cause instanceof Error ? cause.message : "Summary versions could not be loaded.");
     } finally {
-      if (generation === summaryGeneration.current) setLoadingSummaries(false);
+      if (generation === summaryLoadGeneration.current) setLoadingSummaries(false);
     }
   };
 
   const generateSummaryForTopic = async (topic: string) => {
     const document = selectedDocument ?? activeDocument;
     if (!document?.key || generatingSummary) return;
-    const generation = ++summaryGeneration.current;
+    const generation = ++summaryMutationGeneration.current;
     const controller = new AbortController();
     summaryRequest.current?.abort();
     summaryRequest.current = controller;
@@ -1170,15 +1174,15 @@ export function KnowledgeWorkspace() {
       const historyLoaded = await historyRequest;
       const cached = addCachedContentDocumentSummary(queryClient, contentContext, summary);
       if (!historyLoaded) void queryClient.invalidateQueries({ queryKey: contentQueryKeys.summaries(contentContext, document.key), exact: true, refetchType: "none" });
-      if (!controller.signal.aborted && generation === summaryGeneration.current) {
+      if (!controller.signal.aborted && generation === summaryMutationGeneration.current && selectedDocumentKeyRef.current === document.key) {
         setSummaries(queryClient.getQueryData<ContentDocumentSummary[]>(contentQueryKeys.summaries(contentContext, document.key)) ?? [cached]);
         setSelectedSummary(cached);
       }
     } catch (cause) {
-      if (!controller.signal.aborted && generation === summaryGeneration.current) setSheetError(cause instanceof Error ? cause.message : "The document summary could not be created.");
+      if (!controller.signal.aborted && generation === summaryMutationGeneration.current && activeSheetRef.current === "summaryReader" && selectedDocumentKeyRef.current === document.key) setSheetError(cause instanceof Error ? cause.message : "The document summary could not be created.");
     } finally {
       if (summaryRequest.current === controller) summaryRequest.current = undefined;
-      if (generation === summaryGeneration.current) {
+      if (generation === summaryMutationGeneration.current) {
         setGeneratingSummary(false);
       }
     }
@@ -1397,11 +1401,13 @@ export function KnowledgeWorkspace() {
     try {
       const audio = await generateContentDocumentSummaryAudio(summary.key);
       const updated = addCachedContentDocumentSummary(queryClient, contentContext, { ...summary, audio });
-      setSelectedSummary(updated);
-      setSummaries(queryClient.getQueryData<ContentDocumentSummary[]>(contentQueryKeys.summaries(contentContext, updated.documentKey)) ?? [updated]);
-      await playSummaryAudio(updated);
+      if (selectedDocumentKeyRef.current === updated.documentKey) {
+        setSelectedSummary(updated);
+        setSummaries(queryClient.getQueryData<ContentDocumentSummary[]>(contentQueryKeys.summaries(contentContext, updated.documentKey)) ?? [updated]);
+        if (activeSheetRef.current === "summaryReader") await playSummaryAudio(updated);
+      }
     } catch (cause) {
-      setSheetError(cause instanceof Error ? cause.message : "Summary audio could not be generated.");
+      if (activeSheetRef.current === "summaryReader" && selectedDocumentKeyRef.current === summary.documentKey) setSheetError(cause instanceof Error ? cause.message : "Summary audio could not be generated.");
     } finally {
       setGeneratingSummaryAudio(false);
     }
@@ -1429,7 +1435,10 @@ export function KnowledgeWorkspace() {
       setSheetError("Save the document before opening audio versions.");
       return;
     }
-    if (targetDocument) setSelectedDocument(targetDocument);
+    if (targetDocument) {
+      setSelectedDocument(targetDocument);
+      selectedDocumentKeyRef.current = targetDocument.key;
+    }
     const generation = ++restoreGeneration.current;
     if (targetDocument) openSheet("audioVersions");
     else if (sheetOpen) pushSheet("audioVersions");
@@ -1437,10 +1446,10 @@ export function KnowledgeWorkspace() {
     setAudioVersions([]);
     setLoadingAudioVersions(true);
     try {
-      const history = await getContentDocumentAudioVersions(queryClient, contentContext, documentKey);
-      if (generation === restoreGeneration.current) setAudioVersions(history);
+      const history = await refreshContentDocumentAudioVersions(queryClient, contentContext, documentKey);
+      if (generation === restoreGeneration.current && selectedDocumentKeyRef.current === documentKey) setAudioVersions(history);
     } catch (cause) {
-      if (generation === restoreGeneration.current && activeSheetRef.current === "audioVersions") setSheetError(cause instanceof Error ? cause.message : "Audio versions could not be loaded.");
+      if (generation === restoreGeneration.current && activeSheetRef.current === "audioVersions" && selectedDocumentKeyRef.current === documentKey) setSheetError(cause instanceof Error ? cause.message : "Audio versions could not be loaded.");
     } finally {
       if (generation === restoreGeneration.current) setLoadingAudioVersions(false);
     }
@@ -1455,15 +1464,15 @@ export function KnowledgeWorkspace() {
     try {
       const generated = await generateContentDocumentAudio(document.key);
       const history = await refreshContentDocumentAudioVersions(queryClient, contentContext, document.key);
-      setAudioVersions((current) => {
+      if (selectedDocumentKeyRef.current === document.key) setAudioVersions((current) => {
         const versions = new Map(current.map((version) => [version.key, version]));
         history.forEach((version) => versions.set(version.key, version));
         return [...versions.values()].sort((left, right) => right.version - left.version);
       });
       const playable = history.find((version) => version.key === generated.key);
-      if (playable) await playAudioVersion(playable, 0, true, false);
+      if (playable && activeSheetRef.current === "audioVersions" && selectedDocumentKeyRef.current === document.key) await playAudioVersion(playable, 0, true, false);
     } catch (cause) {
-      setSheetError(cause instanceof Error ? cause.message : "Document audio could not be generated.");
+      if (activeSheetRef.current === "audioVersions" && selectedDocumentKeyRef.current === document.key) setSheetError(cause instanceof Error ? cause.message : "Document audio could not be generated.");
     } finally {
       setGeneratingAudioVersion(false);
     }
@@ -1625,6 +1634,7 @@ export function KnowledgeWorkspace() {
       editorSession.current += 1;
       applyRemoteDocument(opened);
       setSelectedDocument(opened);
+      selectedDocumentKeyRef.current = opened.key;
       setAudioVersions(restoredAudioVersions);
       workspaceModeRef.current = "editor";
       setWorkspaceMode("editor");
@@ -1669,12 +1679,12 @@ export function KnowledgeWorkspace() {
     await openAudioVersionHistory(selectedDocument);
   };
 
-  const openSimilarContent = async (source: { folderKey: string } | { documentKey: string }) => {
+  const openSimilarContent = async (source: { folderKey: string } | { documentKey: string }, initialTab: FolderContentTab) => {
     const generation = ++similarGeneration.current;
     similarRequest.current?.abort();
     const controller = new AbortController();
     similarRequest.current = controller;
-    setSimilarContentTab("folders");
+    setSimilarContentTab(initialTab);
     setSimilarResults(undefined);
     setSimilarLoading(true);
     if (sheetOpen) pushSheet("similar");
@@ -3342,11 +3352,11 @@ export function KnowledgeWorkspace() {
     const close = (disabled: boolean) => <Button disabled={disabled} onPress={() => closeSheet()} size="lg" variant="secondary">Close</Button>;
     if (activeSheet === "summarize") return <>
       {sheetError ? <Button disabled={loadingSummaryTopics || generatingSummary} loading={loadingSummaryTopics} onPress={() => void loadSummaryTopics()} size="lg" variant="primary">Retry</Button> : null}
-      {close(loadingSummaryTopics || generatingSummary)}
+      {close(false)}
     </>;
     if (activeSheet === "summaryVersions") return <>
       {!loadingSummaries && summaries.length === 0 ? <Button disabled={generatingSummary || saveState !== "saved"} onPress={openSummarizeSheet} size="lg" variant="primary">Create summary</Button> : null}
-      {close(generatingSummary || loadingSummaries)}
+      {close(false)}
     </>;
     if (activeSheet === "summaryReader") return <>
       {summaryNarrationIsland}
@@ -3354,14 +3364,14 @@ export function KnowledgeWorkspace() {
       {generatingSummaryAudio
         ? <LoadingText text="Generating summary audio..." />
         : selectedSummary ? <Button disabled={generatingSummary || Boolean(selectedSummary.audio && narrationStatus === "SUMMARY AUDIO" && narrationState === "playing")} onPress={controlSummaryAudio} size="lg" variant="primary">{selectedSummary.audio ? "Listen" : "Generate audio"}</Button> : null}
-      {close(generatingSummary || generatingSummaryAudio)}
+      {close(false)}
     </>;
     if (activeSheet === "audioVersions") return <>
       {documentNarrationIsland}
       {generatingAudioVersion
         ? <LoadingText text="Generating audio. This may take a while..." />
         : <Button disabled={loadingAudioVersions} onPress={() => void generateAudioVersion()} size="lg" variant="primary">Generate audio</Button>}
-      {close(generatingAudioVersion)}
+      {close(false)}
     </>;
     if (activeSheet === "searchHistory") return close(historyLoading || Boolean(removingHistoryQuery));
     if (activeSheet === "folderDetails") return <>
@@ -3465,13 +3475,7 @@ export function KnowledgeWorkspace() {
 
   return (
     <KeyboardAvoidingView behavior={aiInputFocused ? "height" : undefined} style={styles.root}>
-      <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
-        {workspaceMode === "auto" || workspaceMode === "folders" ? <View style={styles.rootHeaderRow}>
-          <WorkspaceAppSwitcher active="archive" trigger="back" />
-          <Text numberOfLines={1} style={styles.rootHeaderTitle}>Archive</Text>
-          <Button accessibilityLabel="Create in Archive" contentMode="raw" disabled={locationLoading} onPress={() => openSheet("create")} size="sm" variant="icon"><PlusIcon size="sm" /></Button>
-        </View> : <WorkspaceAppSwitcher active="archive" />}
-      </View>
+      <View style={[styles.header, { paddingTop: insets.top + 6 }]}><WorkspaceAppSwitcher active="archive" /></View>
       {workspaceMode === "viewer" ? <FileViewer
         error={filePreviewError}
         loading={!filePreviewError && !filePreviewUri}
@@ -3484,6 +3488,11 @@ export function KnowledgeWorkspace() {
       /> : <View style={styles.workspaceViewport}><ArchiveContentViewport editor={workspaceMode === "editor"}>
         {workspaceMode === "auto" || workspaceMode === "folders" ? (
           <View style={styles.archiveRoot}>
+            <View style={styles.folderTitleRow}>
+              <WorkspaceAppSwitcher active="archive" trigger="back" />
+              <Text numberOfLines={1} style={styles.folderTitle}>Archive</Text>
+              <Button accessibilityLabel="Create in Archive" contentMode="raw" disabled={locationLoading} onPress={() => openSheet("create")} size="xs" variant="icon"><PlusIcon size="sm" /></Button>
+            </View>
             {error ? <Text accessibilityRole="alert" style={styles.notice}>{error}</Text> : null}
             <View style={styles.rootActions}>
               <View style={styles.rootSearch}>
@@ -3518,7 +3527,7 @@ export function KnowledgeWorkspace() {
                 </View>
               ) : (
                 <View style={styles.rootDocuments}>
-                  {folderContentTab === "files" && visibleUploadBatch.length ? <LoadingText text={`Processing ${visibleUploadBatch.length} ${visibleUploadBatch.length === 1 ? "file" : "files"}, this might take a while...`} /> : null}
+                  {folderContentTab === "files" && visibleUploadBatch.length ? <LoadingText text={`Processing ${visibleUploadBatch.length} ${visibleUploadBatch.length === 1 ? "file" : "files"}, this might take a while...`} /> : folderContentTab === "documents" && visibleProcessingScan ? <LoadingText text="Processing scanned document, this might take a while..." /> : null}
                   {folderContentTab === "files" ? visibleUploadBatch.map((item) => <ProcessingDocumentButton key={item.id} name={item.name} />) : visibleProcessingScan ? <ProcessingDocumentButton key={visibleProcessingScan.id} name={visibleProcessingScan.name} /> : null}
                   {rootTabDocuments.length ? rootTabDocuments.map((document) => (
                     <Button accessibilityState={{ selected: selectedDocuments.some(({ key }) => key === document.key) }} contentMode="raw" key={document.key} onLongPress={() => handleDocumentLongPress(document)} onPress={() => handleDocumentPress(document)} size="sm" style={[styles.documentButton, selectedDocuments.some(({ key }) => key === document.key) && styles.selectedDocumentItem]} variant={selectedDocuments.some(({ key }) => key === document.key) ? "ghost" : "secondary"}>
@@ -3581,7 +3590,7 @@ export function KnowledgeWorkspace() {
               </View>
             ) : (
               <View style={[styles.folderDocuments, styles.folderTabContent]}>
-                {folderContentTab === "files" && visibleUploadBatch.length ? <LoadingText text={`Processing ${visibleUploadBatch.length} ${visibleUploadBatch.length === 1 ? "file" : "files"}, this might take a while...`} /> : null}
+                {folderContentTab === "files" && visibleUploadBatch.length ? <LoadingText text={`Processing ${visibleUploadBatch.length} ${visibleUploadBatch.length === 1 ? "file" : "files"}, this might take a while...`} /> : folderContentTab === "documents" && visibleProcessingScan ? <LoadingText text="Processing scanned document, this might take a while..." /> : null}
                 {folderContentTab === "files" ? visibleUploadBatch.map((item) => <ProcessingDocumentButton key={item.id} name={item.name} />) : visibleProcessingScan ? <ProcessingDocumentButton key={visibleProcessingScan.id} name={visibleProcessingScan.name} /> : null}
                 {folderTabDocuments.length ? folderTabDocuments.map((document) => (
                   <Button accessibilityState={{ selected: selectedDocuments.some(({ key }) => key === document.key) }} contentMode="raw" key={document.key} onLongPress={() => handleDocumentLongPress(document)} onPress={() => handleDocumentPress(document)} size="sm" style={[styles.documentButton, selectedDocuments.some(({ key }) => key === document.key) && styles.selectedDocumentItem]} variant={selectedDocuments.some(({ key }) => key === document.key) ? "ghost" : "secondary"}>
@@ -3717,8 +3726,8 @@ export function KnowledgeWorkspace() {
       />
 
       <BottomSheet
-        description={activeSheet === "create" ? "Choose what to add to the current folder." : activeSheet === "versions" ? "Choose a version of this document to open or download." : activeSheet === "audioVersions" ? "Generated audio has its own history, independent from document versions." : activeSheet === "summarize" ? "Find the document's primary topics, then choose one to summarize." : activeSheet === "summaryVersions" ? "View saved summaries or create a new one." : undefined}
-        dismissible={!versionActionKey && !generatingAudioVersion && !generatingSummary && !generatingSummaryAudio && !loadingSummaryTopics && !destinationLoading && !documentActionLoading && !bulkLoading}
+        description={activeSheet === "create" ? "Choose what to add to the current folder." : activeSheet === "versions" ? "Choose a version of this document to open or download." : activeSheet === "audioVersions" ? "Listen to your saved recordings." : activeSheet === "summarize" ? "Find the document's primary topics, then choose one to summarize." : activeSheet === "summaryVersions" ? "View saved summaries or create a new one." : undefined}
+        dismissible={!versionActionKey && !destinationLoading && !documentActionLoading && !bulkLoading}
         footer={mutationFooter()}
         hideHeading={activeSheet === "create" || activeSheet === "documentActions" || activeSheet === "enhance" || activeSheet === "historyChooser" || activeSheet === "bulkActions" || compactDelete}
         mutation={activeSheet === "documents" || activeSheet === "folder" || activeSheet === "folders" || activeSheet === "searchHistory" || activeSheet === "similar" || activeSheet === "versions" || activeSheet === "audioVersions" || activeSheet === "summarize" || activeSheet === "summaryVersions" || activeSheet === "summaryReader" || activeSheet === "destinationBrowser" || activeSheet === "folderDetails" || activeSheet === "documentDetails"}
@@ -3755,7 +3764,7 @@ export function KnowledgeWorkspace() {
         ) : null}
         {activeSheet === "searchHistory" ? (
           <ScrollView contentContainerStyle={styles.searchHistoryList} showsVerticalScrollIndicator={false}>
-            {historyLoading ? <View accessibilityLabel="Loading search history" accessibilityRole="progressbar" style={styles.searchHistorySkeletons}>{Array.from({ length: 3 }, (_, index) => <View key={index} style={styles.searchHistorySkeleton} />)}</View> : null}
+            {historyLoading ? <View accessibilityLabel="Loading search history" accessibilityRole="progressbar" style={styles.searchHistorySkeletons}>{Array.from({ length: 3 }, (_, index) => <View key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />)}</View> : null}
             {!historyLoading && history.length === 0 ? <Text style={styles.empty}>No searches saved here yet.</Text> : null}
             {!historyLoading ? history.map((item) => <SearchHistoryPill count={item.usageCount} disabled={Boolean(removingHistoryQuery)} key={item.normalizedQuery} onPress={() => useHistoryQuery(item)} onRemove={() => void removeHistoryQuery(item)} query={item.query} removing={removingHistoryQuery === item.normalizedQuery} />) : null}
           </ScrollView>
@@ -3793,7 +3802,7 @@ export function KnowledgeWorkspace() {
               else void showOriginal();
             }} style={styles.sheetAction}>{workspaceMode === "viewer" ? "Show text" : "Show original"}</BottomSheetItem> : null}
             <BottomSheetItem disabled={Boolean(documentActionLoading)} loading={documentActionLoading === "download"} onPress={() => void downloadOriginal()} style={styles.sheetAction}>Download</BottomSheetItem>
-            <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void openSimilarContent({ documentKey: selectedDocument.key })} style={styles.sheetAction}>Find similar</BottomSheetItem>
+            <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void openSimilarContent({ documentKey: selectedDocument.key }, selectedDocument.extension ? "files" : "documents")} style={styles.sheetAction}>Find similar</BottomSheetItem>
             {selectedDocument.sourceImageCount ? <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void openScanSources()} style={styles.sheetAction}>View scanned pages</BottomSheetItem> : null}
             <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => pushSheet("deleteDocument")} style={styles.sheetAction}>Delete {selectedDocument.extension ? "file" : "document"}</BottomSheetItem>
           </>
@@ -3809,7 +3818,7 @@ export function KnowledgeWorkspace() {
             <BottomSheetItem onPress={openFolderDetails} style={styles.sheetAction}>Edit</BottomSheetItem>
             <BottomSheetItem onPress={() => void openDestinationPicker("move", { folder: selectedFolder })} style={styles.sheetAction}>Move folder</BottomSheetItem>
             <BottomSheetItem onPress={() => void openDestinationPicker("copy", { folder: selectedFolder })} style={styles.sheetAction}>Copy to folder</BottomSheetItem>
-            <BottomSheetItem onPress={() => void openSimilarContent({ folderKey: selectedFolder.key })} style={styles.sheetAction}>Find similar</BottomSheetItem>
+            <BottomSheetItem onPress={() => void openSimilarContent({ folderKey: selectedFolder.key }, "folders")} style={styles.sheetAction}>Find similar</BottomSheetItem>
             <BottomSheetItem onPress={confirmSelectedFolderDelete} style={styles.sheetAction}>Delete folder</BottomSheetItem>
           </>
         ) : null}
@@ -3920,16 +3929,13 @@ export function KnowledgeWorkspace() {
           <View style={styles.audioVersionPanel}>
             {!loadingAudioVersions && !generatingAudioVersion && audioVersions.length === 0 ? <Text style={styles.empty}>No audio versions yet. Generate one whenever you want a new recording of this document.</Text> : null}
             <ScrollView accessibilityLabel={loadingAudioVersions ? "Loading audio versions" : generatingAudioVersion ? `Generating audio version ${pendingAudioVersion}` : undefined} accessibilityRole={loadingAudioVersions || generatingAudioVersion ? "progressbar" : undefined} contentContainerStyle={styles.audioVersionList} showsVerticalScrollIndicator={false}>
-              {generatingAudioVersion ? <View accessibilityLabel={`Generating audio version ${pendingAudioVersion}`} accessibilityRole="progressbar" style={styles.audioVersionGeneratingSkeleton} /> : null}
+              {generatingAudioVersion ? <View accessibilityLabel={`Generating audio version ${pendingAudioVersion}`} accessibilityRole="progressbar" style={[styles.documentSkeleton, styles.skeletonCard]} /> : null}
               {loadingAudioVersions ? Array.from({ length: 3 }, (_, index) => (
-                <View key={index} style={styles.audioVersionSkeletonRow}>
-                  <View style={styles.audioVersionSkeletonIcon} />
-                  <View style={styles.audioVersionSkeletonCopy}><View style={styles.audioVersionSkeletonTitle} /><View style={styles.audioVersionSkeletonSubtitle} /></View>
-                </View>
+                <View key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />
               )) : audioVersions.map((version) => (
-                <Button contentMode="raw" key={version.key} onPress={() => void playAudioVersion(version, selectedAudioVersionKey === version.key ? narrationElapsed : version.isCurrent ? version.playbackPositionMs / 1_000 : 0)} size="lg" style={styles.versionMain} variant="secondary">
-                  <PlayIcon size="md" />
-                  <Text numberOfLines={1} style={styles.rowTitle}>Audio version {version.version}</Text>
+                <Button contentMode="raw" key={version.key} onPress={() => void playAudioVersion(version, selectedAudioVersionKey === version.key ? narrationElapsed : version.isCurrent ? version.playbackPositionMs / 1_000 : 0)} size="sm" style={styles.documentButton} variant="secondary">
+                  <PlayIcon size="sm" />
+                  <Text numberOfLines={1} style={styles.documentButtonLabel}>Audio version {version.version}</Text>
                 </Button>
               ))}
             </ScrollView>
@@ -3998,8 +4004,6 @@ export function KnowledgeWorkspace() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: palette.page },
   header: { minHeight: 64, paddingBottom: 8, paddingHorizontal: spacing.md, justifyContent: "center", borderBottomColor: palette.hairline, borderBottomWidth: 1 },
-  rootHeaderRow: { minHeight: 44, width: "100%", flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  rootHeaderTitle: { minWidth: 0, flex: 1, color: palette.silver50, fontFamily: fonts.medium, fontSize: 24 },
   workspaceViewport: { flex: 1, minHeight: 0 },
   scrollView: { flex: 1 },
   scroll: { flexGrow: 1, paddingHorizontal: spacing.md, paddingTop: spacing.md },
@@ -4061,7 +4065,7 @@ const styles = StyleSheet.create({
   folderEmpty: { flexGrow: 1, minHeight: 220, alignItems: "center", justifyContent: "center" },
   emptyAction: { minHeight: 34, paddingHorizontal: spacing.sm },
   emptyActionText: { color: palette.muted, letterSpacing: 0.4, textTransform: "none" },
-  noteSheet: { flex: 1, minHeight: 0, width: "100%", padding: spacing.md, borderRadius: radii.xl, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised, overflow: "hidden" },
+  noteSheet: { flex: 1, minHeight: 0, width: "100%", padding: spacing.md, borderRadius: radii.xl, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.page, overflow: "hidden" },
   editorSkeleton: { flex: 1, gap: spacing.lg },
   editorBodySkeleton: { flex: 1, minHeight: 280, borderRadius: radii.md, backgroundColor: palette.hairlineBright, opacity: 0.72 },
   noteSheetFocused: { flex: 1, minHeight: 0 },
@@ -4101,7 +4105,6 @@ const styles = StyleSheet.create({
   historyChoices: { gap: spacing.sm },
   searchHistoryList: { flexGrow: 1, gap: spacing.xs, paddingBottom: spacing.xl },
   searchHistorySkeletons: { gap: spacing.xs },
-  searchHistorySkeleton: { width: "100%", minHeight: 48, borderRadius: 999, backgroundColor: palette.hairlineBright, opacity: 0.72 },
   audioVersionPanel: { flex: 1, minHeight: 0, gap: spacing.md },
   audioVersionList: { gap: spacing.xs, paddingBottom: spacing.xl },
   audioVersionSkeletonRow: { minHeight: 52, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", gap: spacing.sm, borderRadius: radii.lg, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised, opacity: 0.72 },
@@ -4109,7 +4112,6 @@ const styles = StyleSheet.create({
   audioVersionSkeletonCopy: { flex: 1, gap: 6 },
   audioVersionSkeletonTitle: { height: 12, width: "42%", borderRadius: radii.sm, backgroundColor: palette.hairlineBright },
   audioVersionSkeletonSubtitle: { height: 9, width: "68%", borderRadius: radii.sm, backgroundColor: palette.hairlineBright },
-  audioVersionGeneratingSkeleton: { width: "100%", minHeight: 52, borderRadius: radii.lg, backgroundColor: palette.hairlineBright, opacity: 0.72 },
   summaryTopicScroll: { flex: 1, minHeight: 0 },
   summaryTopicPanel: { flexGrow: 1, gap: spacing.sm, paddingBottom: spacing.xl },
   summaryVersionPanel: { flex: 1, minHeight: 0, gap: spacing.md },

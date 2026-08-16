@@ -51,10 +51,10 @@ const styles = StyleSheet.create({
   header: { minHeight: 40, minWidth: 0, flexDirection: "row", alignItems: "center", gap: spacing.xs },
   headerTitle: { flex: 1, minWidth: 0, color: colors.text, fontFamily: "Geist_500Medium", fontSize: 15, lineHeight: 20 },
   headerActions: { minHeight: 40, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: spacing.xs },
-  documentArea: { flex: 1, minWidth: 0, minHeight: 0, borderRadius: radii.xl, borderColor: colors.hairline, borderWidth: 1, overflow: "hidden", backgroundColor: colors.panelRaised },
+  documentArea: { flex: 1, minWidth: 0, minHeight: 0, borderRadius: radii.xl, borderColor: colors.hairline, borderWidth: 1, overflow: "hidden", backgroundColor: colors.page },
   loadingSkeleton: { flex: 1, backgroundColor: colors.hairlineBright, opacity: 0.72 },
   center: { flex: 1, padding: spacing.lg, alignItems: "center", justifyContent: "center" },
   error: { color: colors.muted, fontFamily: "Geist_400Regular", fontSize: 14, lineHeight: 21, textAlign: "center" },
-  pdf: { flex: 1, width: "100%", backgroundColor: colors.panelRaised },
-  html: { flex: 1, backgroundColor: colors.panelRaised },
+  pdf: { flex: 1, width: "100%", backgroundColor: colors.page },
+  html: { flex: 1, backgroundColor: colors.page },
 });
