@@ -56,7 +56,7 @@ import {
   updateSystemOrchestrator,
   upsertCurrentMind,
 } from './system';
-import { getContentDocumentJob, invokeContentTool } from './content-tools';
+import { invokeContentTool } from './content-tools';
 import { postAudioGenerate } from './audio';
 import { communicationHandlers } from './communication';
 import { bootstrapGuestAuth, getAuthAccount, logoutAuthAccount, patchAuthAccount } from './auth-account';
@@ -448,7 +448,6 @@ export function registerRoutes(app: Hono) {
   app.post('/assistant/respond', postPersonalAssistantResponse);
   app.post('/audio/generate', (c) => postAudioGenerate(c));
   app.post('/content/tools/:tool', invokeContentTool);
-  app.post('/content/document-jobs/:jobId', getContentDocumentJob);
   app.post('/gallery/overview', galleryOverview);
   app.post('/gallery/collections', createGalleryCollection);
   app.post('/gallery/uploads/presign', presignGalleryUploads);

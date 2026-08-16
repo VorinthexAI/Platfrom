@@ -229,7 +229,6 @@ function documentFilename(name: string, mimeType: string) {
   return extension ? `${filename}.${extension}` : filename;
 }
 
-const wait = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 
 async function callContentTool<T>(tool: string, input: Record<string, unknown>, signal?: AbortSignal, requestContext = getContentContext()): Promise<T> {
   const contentContext = requestContext;
@@ -559,7 +558,7 @@ export async function uploadContentDocument(file: { name: string; type: string; 
   if (!isContentContextConfigured(contentContext)) throw new Error("Archive is unavailable for this session.");
   const mimeType = documentMimeType(file.name, file.type);
   const filename = documentFilename(file.name, mimeType);
-  let data = await callContentTool<{ document: ContentDocument } | { job: { key: string; state: string } }>("document.parse", {
+  return callContentTool<{ document: ContentDocument }>("document.parse", {
     scopeKey: contentContext.scopeKey,
     folderKey,
     file: {
@@ -571,44 +570,19 @@ export async function uploadContentDocument(file: { name: string; type: string; 
     },
     idempotencyKey,
   }, undefined, contentContext);
-  const deadline = Date.now() + 30 * 60_000;
-  let firstPoll = true;
-  while (!("document" in data)) {
-    if (Date.now() >= deadline) throw new Error("The upload is still processing. Retry the same file to reconnect.");
-    if (!firstPoll) await wait(2_000);
-    firstPoll = false;
-    const response = await apiClient.post<ToolResponse<{ document: ContentDocument } | { job: { key: string; state: string } }>>(`/api/v1/content/document-jobs/${data.job.key}`, {
-      organizationKey: contentContext.organizationKey,
-      agentKey: contentContext.agentKey,
-    }, { timeout: 30_000 });
-    if (!response.data.success) throw new Error(response.data.error.message);
-    data = response.data.data;
-  }
-  return data;
 }
 
 export async function scanContentDocument(pages: { name: string; size: number; base64: string }[], folderKey?: string, contentContext = getContentContext(), name = `Scanned document ${new Date().toISOString().slice(0, 10)}`) {
   if (!isContentContextConfigured(contentContext)) throw new Error("Archive is unavailable for this session.");
   const contentDigest = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, pages.map((page) => page.base64).join("\0"));
   const idempotencyKey = `scan-${contentDigest}-${folderKey ?? "root"}`;
-  let data = await callContentTool<{ document: ContentDocument } | { job: { key: string; state: string } }>("document.scan", {
+  return callContentTool<{ document: ContentDocument }>("document.scan", {
     scopeKey: contentContext.scopeKey,
     folderKey,
     name,
     pages: pages.map((page) => ({ filename: page.name, mimeType: "image/jpeg", sizeBytes: page.size, encoding: "base64", content: page.base64 })),
     idempotencyKey,
   }, undefined, contentContext);
-  const deadline = Date.now() + 30 * 60_000;
-  let firstPoll = true;
-  while (!("document" in data)) {
-    if (Date.now() >= deadline) throw new Error("The scan is still processing. Submit the same pages to reconnect.");
-    if (!firstPoll) await wait(2_000);
-    firstPoll = false;
-    const response = await apiClient.post<ToolResponse<{ document: ContentDocument } | { job: { key: string; state: string } }>>(`/api/v1/content/document-jobs/${data.job.key}`, { organizationKey: contentContext.organizationKey, agentKey: contentContext.agentKey, tool: "document.scan" }, { timeout: 30_000 });
-    if (!response.data.success) throw new Error(response.data.error.message);
-    data = response.data.data;
-  }
-  return data;
 }
 
 export function searchContent(query: string, folderKey?: string, includeDescendants = false) {

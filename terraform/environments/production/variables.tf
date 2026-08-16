@@ -92,36 +92,14 @@ variable "graph_db_name" {
 
 variable "document_worker_cpu" {
   type        = number
-  description = "Fargate CPU units allocated to the warm document worker task."
+  description = "Fargate CPU units allocated to transient image compute."
   default     = 2048
 }
 
 variable "document_worker_memory" {
   type        = number
-  description = "Fargate memory in MiB allocated to the warm document worker task."
+  description = "Fargate memory in MiB allocated to transient image compute."
   default     = 4096
-}
-
-variable "document_worker_desired_count" {
-  type        = number
-  description = "Desired always-warm document queue consumer count."
-  default     = 1
-
-  validation {
-    condition     = var.document_worker_desired_count >= 1
-    error_message = "document_worker_desired_count must keep at least one queue consumer warm."
-  }
-}
-
-variable "document_worker_concurrency" {
-  type        = number
-  description = "Maximum document jobs processed concurrently by each worker task."
-  default     = 2
-
-  validation {
-    condition     = var.document_worker_concurrency >= 1 && var.document_worker_concurrency <= 32
-    error_message = "document_worker_concurrency must be between 1 and 32."
-  }
 }
 
 variable "task_cpu" {

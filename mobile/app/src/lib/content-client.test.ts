@@ -7,7 +7,6 @@ let authState = {
   scope: { key: "scope-authenticated" },
   contentExecution: { agentKey: "agent-authenticated" },
 };
-let queuedUpload = false;
 let responseForTool: ((tool: string) => unknown) | undefined;
 const digestInputs: string[] = [];
 
@@ -27,12 +26,6 @@ mock.module("expo-crypto", () => ({
 testRuntime.__archiveApiPost = async (url: string, body: Record<string, any>, config: Record<string, any>) => {
   calls.push({ url, body, config });
   const tool = url.split("/").at(-1);
-  if (tool === "document.parse" && queuedUpload) {
-    return { data: { success: true, data: { job: { key: "a".repeat(64), state: "waiting" } } } };
-  }
-  if (url.includes("/content/document-jobs/")) {
-    return { data: { success: true, data: { document: { key: "document", name: "Note", isFavorite: false, updatedAt: "2026-08-10T00:00:00.000Z" } } } };
-  }
   const response = responseForTool?.(tool ?? "");
   if (response) return response;
   if (tool === "document.create" || tool === "document.parse" || tool === "document.scan") {
@@ -85,7 +78,6 @@ const {
 beforeEach(() => {
   calls.length = 0;
   digestInputs.length = 0;
-  queuedUpload = false;
   responseForTool = undefined;
   authState = {
     organization: { key: "org-authenticated" },
@@ -188,18 +180,6 @@ test("archives notes and uploaded files through the same document lifecycle", as
   await archiveContentDocument("document");
   expect(calls[0]?.url).toBe("/api/v1/content/tools/document.archive");
   expect(calls[0]?.body.input).toMatchObject({ documentKeys: ["document"], atomic: false });
-});
-
-test("polls an offloaded upload using the same authenticated Archive context", async () => {
-  queuedUpload = true;
-  const result = await uploadContentDocument({ name: "notes.txt", type: "", size: 3, base64: "YWJj" }, "folder");
-  expect(result.document.key).toBe("document");
-  expect(calls.map(({ url }) => url)).toEqual([
-    "/api/v1/content/tools/document.parse",
-    `/api/v1/content/document-jobs/${"a".repeat(64)}`,
-  ]);
-  expect(calls[0]?.body.input.file.mimeType).toBe("text/plain");
-  expect(calls[1]?.body).toEqual({ organizationKey: "org-authenticated", agentKey: "agent-authenticated" });
 });
 
 test("normalizes platform PDF MIME aliases without changing the picker filename", async () => {

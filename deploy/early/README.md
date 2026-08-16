@@ -23,9 +23,8 @@ Cloudflare (SSL = Full) ──▶ app box :443 (Caddy, self-signed internal cert
 - **graph-db box** — `vorinthex-prod-graph-db-host`, t3.small, ArangoDB in Docker
   on the `/data/arangodb` EBS volume. Unchanged from before; holds all data.
 - No ALB / NAT / ElastiCache / (our) CloudFront. Cloudflare is the CDN/edge.
-- **document worker** — one always-warm ECS/Fargate service task consumes the
-  BullMQ document queue from the app box Redis over its private IP. Image hashing
-  remains transient Fargate compute launched per queued image-hash job.
+- Image hashing remains transient Fargate compute launched per queued image-hash
+  job; document parsing and scanning run directly in the API container.
 
 ## DNS
 
@@ -52,7 +51,7 @@ Caddy, retires the old colour. Runtime secrets are pulled from SSM
 ## In Terraform
 
 The app box, its security group + rules, EIP, the Cloudflare-IP prefix list,
-the document worker ECS service, and the ArangoDB/Redis ingress rules are managed in
+and the transient-compute Redis ingress rules are managed in
 `terraform/environments/production/early_app.tf` (imported; `user_data`/`ami` are
 ignored so a plan never replaces the running box — verified 0-destroy, clean plan).
 

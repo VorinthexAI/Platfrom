@@ -75,7 +75,7 @@ resource "aws_vpc_security_group_ingress_rule" "arango_from_early_app" {
 
 resource "aws_security_group" "document_worker" {
   name        = "${var.name_prefix}-document-worker-sg"
-  description = "Warm document workers and transient image compute"
+  description = "Transient image compute"
   vpc_id      = module.network.vpc_id
   tags        = merge(local.tags, { Name = "${var.name_prefix}-document-worker-sg" })
 }
@@ -84,14 +84,6 @@ resource "aws_vpc_security_group_egress_rule" "document_worker_all" {
   security_group_id = aws_security_group.document_worker.id
   ip_protocol       = "-1"
   cidr_ipv4         = "0.0.0.0/0"
-}
-
-resource "aws_vpc_security_group_ingress_rule" "arango_from_document_worker" {
-  security_group_id            = module.network.graph_db_security_group_id
-  ip_protocol                  = "tcp"
-  from_port                    = 8529
-  to_port                      = 8529
-  referenced_security_group_id = aws_security_group.document_worker.id
 }
 
 resource "aws_vpc_security_group_ingress_rule" "job_redis_from_document_worker" {
@@ -141,7 +133,6 @@ resource "aws_iam_role_policy" "early_app_archive_processing" {
         Resource = [
           "${module.storage.s3_bucket_arn}/archive/*",
           "${module.storage.s3_bucket_arn}/content/*",
-          "${module.storage.s3_bucket_arn}/pending/document-processing/*",
           "${module.storage.s3_bucket_arn}/pending/image-hashing/*",
           "${aws_s3_bucket.textract_staging.arn}/textract/*"
         ]
@@ -224,9 +215,8 @@ resource "aws_iam_role_policy" "document_worker_runtime" {
       {
         Effect   = "Allow"
         Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
-        Resource = ["${module.storage.s3_bucket_arn}/content/*", "${module.storage.s3_bucket_arn}/pending/document-processing/*", "${module.storage.s3_bucket_arn}/pending/image-hashing/*", "${aws_s3_bucket.textract_staging.arn}/textract/*"]
-      },
-      { Effect = "Allow", Action = ["textract:StartDocumentTextDetection", "textract:GetDocumentTextDetection", "textract:DetectDocumentText"], Resource = ["*"] }
+        Resource = ["${module.storage.s3_bucket_arn}/pending/image-hashing/*"]
+      }
     ]
   })
 }
@@ -246,28 +236,18 @@ resource "aws_ecs_task_definition" "document_worker" {
   }
 
   container_definitions = jsonencode([{
-    name        = "document-worker"
-    image       = "${module.storage.ecr_repository_url}:latest"
-    essential   = true
-    command     = ["src/document-worker/index.ts"]
-    stopTimeout = 120
+    name      = "document-worker"
+    image     = "${module.storage.ecr_repository_url}:latest"
+    essential = true
+    command   = ["src/image-worker/index.ts"]
     environment = [
       { name = "NODE_ENV", value = "production" },
       { name = "AWS_REGION", value = var.aws_region },
-      { name = "ROLE", value = "document-worker" },
-      { name = "DOCUMENT_WORKER_CONCURRENCY", value = tostring(var.document_worker_concurrency) }
+      { name = "ROLE", value = "image-worker" }
     ]
     secrets = concat([
       for key in [
-        "ARANGO_DATABASE",
-        "ARANGO_ROOT_PASSWORD",
-        "ARANGO_URL",
-        "ARANGO_USERNAME",
-        "OPENROUTER_API_KEY",
-        "ORCHESTRATION_CREDENTIALS_MASTER_KEY",
-        "S3_BUCKET",
-        "CONTENT_TEXTRACT_BUCKET",
-        "CONTENT_TEXTRACT_REGION"
+        "S3_BUCKET"
       ] : { name = key, valueFrom = "${local.ssm_path}/${key}" }
       ], [
       { name = "REDIS_URL", valueFrom = "${local.ssm_path}/JOB_REDIS_URL" },
@@ -286,36 +266,6 @@ resource "aws_ecs_task_definition" "document_worker" {
   tags = local.tags
 }
 
-resource "aws_ecs_service" "document_worker" {
-  name                               = "${var.name_prefix}-document-worker"
-  cluster                            = aws_ecs_cluster.document_processing.id
-  task_definition                    = aws_ecs_task_definition.document_worker.arn
-  desired_count                      = var.document_worker_desired_count
-  launch_type                        = "FARGATE"
-  platform_version                   = "LATEST"
-  deployment_minimum_healthy_percent = 100
-  deployment_maximum_percent         = 200
-  enable_execute_command             = false
-  propagate_tags                     = "SERVICE"
-
-  deployment_circuit_breaker {
-    enable   = true
-    rollback = true
-  }
-
-  network_configuration {
-    subnets          = module.network.public_subnet_ids
-    security_groups  = [aws_security_group.document_worker.id]
-    assign_public_ip = true
-  }
-
-  lifecycle {
-    ignore_changes = [task_definition]
-  }
-
-  tags = local.tags
-}
-
 resource "aws_ssm_parameter" "document_processing_config" {
   for_each = {
     COMPUTE_ECS_CLUSTER         = aws_ecs_cluster.document_processing.name
@@ -323,7 +273,6 @@ resource "aws_ssm_parameter" "document_processing_config" {
     COMPUTE_ECS_SUBNETS         = join(",", module.network.public_subnet_ids)
     COMPUTE_ECS_SECURITY_GROUPS = aws_security_group.document_worker.id
     JOB_REDIS_URL               = "redis://${aws_instance.early_app.private_ip}:6379"
-    DOCUMENT_WORKER_ENABLED     = "true"
   }
   name        = "${local.ssm_path}/${each.key}"
   description = "Vorinthex production ${each.key}"

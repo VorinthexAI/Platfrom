@@ -677,13 +677,13 @@ jobs:
   backend-migrate:
     name: Migrate graph database
     runs-on: ubuntu-latest
-    needs: [changes, backend-image, backend-secrets, document-worker-deploy]
+    needs: [changes, backend-image, backend-secrets, early-deploy]
     if: >-
       always()
       && needs.changes.outputs.backend == 'true'
       && needs.backend-image.result == 'success'
       && needs.backend-secrets.result == 'success'
-      && needs.document-worker-deploy.result == 'success'
+      && needs.early-deploy.result == 'success'
       && (github.event.pull_request.merged == true || inputs.deploy)
     defaults:
       run:
@@ -1212,66 +1212,6 @@ jobs:
           echo "::error::Web health check failed after 4 minutes ($URL)"
           exit 1
 
-  document-worker-deploy:
-    name: Roll warm document worker
-    runs-on: ubuntu-latest
-    needs: [changes, backend-image, early-deploy]
-    if: >-
-      always()
-      && needs.changes.outputs.backend == 'true'
-      && needs.backend-image.result == 'success'
-      && needs.early-deploy.result == 'success'
-      && (github.event.pull_request.merged == true || inputs.deploy)
-    environment: production
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.COMMIT_SHA }}
-      - uses: ./.github/actions/load-environments-json
-        with:
-          git-crypt-key-b64: ${{ secrets.GIT_CRYPT_KEY }}
-      - name: Extract config
-        run: echo "AWS_DEPLOY_ROLE_ARN=$(jq -r '.vars.AWS_DEPLOY_ROLE_ARN' .github/environments.json)" >> "$GITHUB_ENV"
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-      - name: Roll worker service
-        env:
-          CLUSTER: vorinthex-prod-document-processing
-          SERVICE: vorinthex-prod-document-worker
-        run: |
-          set -euo pipefail
-          DESCRIPTION=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" --output json)
-          STATUS=$(jq -r '.services[0].status // ""' <<< "$DESCRIPTION")
-          if [ "$STATUS" != "ACTIVE" ]; then
-            REASON=$(jq -r '.failures[0].reason // "unknown"' <<< "$DESCRIPTION")
-            if [ "$REASON" = "MISSING" ]; then
-              ENABLED=$(aws ssm get-parameter --name "${SSM_PATH%/}/DOCUMENT_WORKER_ENABLED" --query 'Parameter.Value' --output text 2>/dev/null || true)
-              if [ "$ENABLED" = "true" ]; then
-                echo "::error::Document queueing is enabled but the warm worker service is missing."
-                exit 1
-              fi
-              echo "::warning::Warm document worker is not provisioned yet; document processing will remain synchronous until production infrastructure is applied."
-              exit 0
-            fi
-            echo "::error::Warm document worker is unavailable: $REASON"
-            exit 1
-          fi
-          CURRENT_TASK=$(jq -r '.services[0].taskDefinition' <<< "$DESCRIPTION")
-          aws ecs describe-task-definition --task-definition "$CURRENT_TASK" --query taskDefinition > taskdef.json
-          CURRENT_IMAGE=$(jq -r '.containerDefinitions[] | select(.name == "document-worker") | .image' taskdef.json)
-          IMAGE="${CURRENT_IMAGE%:*}:$COMMIT_SHA"
-          jq --arg image "$IMAGE" '
-            .containerDefinitions |= map(if .name == "document-worker" then .image = $image else . end)
-            | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)
-          ' taskdef.json > new-taskdef.json
-          NEW_TASK=$(aws ecs register-task-definition --cli-input-json file://new-taskdef.json --query 'taskDefinition.taskDefinitionArn' --output text)
-          aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" --task-definition "$NEW_TASK" >/dev/null
-          aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"
-          aws ssm put-parameter --name "${SSM_PATH%/}/COMPUTE_ECS_TASK_DEFINITION" --type String --value "$NEW_TASK" --overwrite >/dev/null
-
   # LATER REFERENCE ONLY: these disabled jobs document the former duplicate
   # early-infra path. They must remain disabled; `early-deploy` is the only
   # active app-box deployment.
@@ -1404,7 +1344,7 @@ jobs:
     name: Deployment summary
     runs-on: ubuntu-latest
     if: always() && (github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true)
-    needs: [changes, deploy-web, cloudflare-cache, backend-deploy, backend-render, early-deploy, document-worker-deploy, early-infra-standalone-build, early-infra-standalone-deploy]
+    needs: [changes, deploy-web, cloudflare-cache, backend-deploy, backend-render, early-deploy, early-infra-standalone-build, early-infra-standalone-deploy]
     steps:
       - name: Write deploy audit
         run: |
@@ -1417,7 +1357,6 @@ jobs:
             echo "| cloudflare cache | ${{ needs.changes.outputs.web }} | ${{ needs.cloudflare-cache.result }} |"
             echo "| api (ECS vorinthex-prod-api) | ${{ needs.changes.outputs.backend }} | ${{ needs.backend-deploy.result }} |"
             echo "| render | ${{ needs.changes.outputs.backend }} | ${{ needs.backend-render.result }} |"
-            echo "| warm document worker | ${{ needs.changes.outputs.backend }} | ${{ needs.document-worker-deploy.result }} |"
             echo "| early-infra box (SSM blue-green) | ${{ needs.changes.outputs.web == 'true' || needs.changes.outputs.backend == 'true' }} | ${{ needs.early-deploy.result }} |"
             echo "| early-infra box (standalone build+deploy) | ${{ needs.changes.outputs.web == 'true' || needs.changes.outputs.backend == 'true' }} | ${{ needs.early-infra-standalone-deploy.result }} |"
             echo ""
