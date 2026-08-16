@@ -35,7 +35,7 @@ describe('personal assistant runtime', () => {
       'folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy',
       'document.list', 'document.find', 'document.create', 'document.update',
       'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.summary.audio.generate', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.translate',
-      'document.list-versions', 'document.restore-version', 'document.download', 'scope.content.search-history.delete', 'knowledge.search', 'note.write', 'note.enhance', 'assistant.unsupported',
+      'document.list-versions', 'document.restore-version', 'document.download', 'content.neighbors', 'scope.content.search-history.delete', 'knowledge.search', 'note.write', 'note.enhance', 'assistant.unsupported',
     ]);
     expect(result).toEqual({ type: 'unsupported', message: 'This request is not supported in Archive. Core can search your documents or help write the open note.', sources: [] });
   });

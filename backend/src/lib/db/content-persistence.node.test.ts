@@ -8,6 +8,25 @@ const timestamp = '2026-07-22T10:00:00.000Z';
 const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0);
 
 describe('scoped Content persistence', () => {
+  test('ranks each semantic-neighbor category independently without a score threshold', async () => {
+    let call: { query: string; bindVars?: Record<string, unknown> } | undefined;
+    const executor: ContentQueryExecutor = {
+      async query(query, bindVars) {
+        call = { query, bindVars };
+        return { async next() { return { folders: [], documents: [], files: [] }; } };
+      },
+    };
+    const result = await createContentPersistence(executor).semanticNeighbors({ embedding, scopeKey, activeFolderKeys: [folderKey], sourceFolderKey: folderKey, limit: 20 });
+    expect(result).toEqual({ folders: [], documents: [], files: [] });
+    expect(call?.query.match(/LIMIT @limit/g)).toHaveLength(3);
+    expect(call?.query.match(/SORT score DESC/g)).toHaveLength(3);
+    expect(call?.query).toContain('document.folderKey IN @activeFolderKeys');
+    expect(call?.query).toContain('document.extension == null');
+    expect(call?.query).toContain('document.extension != null');
+    expect(call?.query).not.toMatch(/score\s*>=/);
+    expect(call?.bindVars).toMatchObject({ scopeKey, activeFolderKeys: [folderKey], sourceFolderKey: folderKey, sourceDocumentKey: null, limit: 10 });
+  });
+
   test('updates by key and scope and explicitly unsets optional fields', async () => {
     const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
     const executor: ContentQueryExecutor = {

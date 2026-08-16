@@ -153,6 +153,61 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       const values = cursor.all ? await cursor.all() : [];
       return values.map((value) => documentSchema.parse(withArangoKey(value as Record<string, unknown>)));
     },
+    async semanticNeighbors(input: { embedding: number[]; scopeKey: string; activeFolderKeys: string[]; sourceFolderKey?: string; sourceDocumentKey?: string; limit: number }) {
+      const embedding = currentEmbeddingSchema.parse(input.embedding);
+      const limit = Math.min(Math.max(z.number().int().positive().parse(input.limit), 1), 10);
+      const cursor = await executor.query(`
+        LET folderMatches = (FOR folder IN folders
+          FILTER folder.scopeKey == @scopeKey && folder.deletedAt == null
+          FILTER (!HAS(folder, "_internalDeletion") || folder._internalDeletion == null) && folder._key IN @activeFolderKeys
+          FILTER @sourceFolderKey == null || folder._key != @sourceFolderKey
+          FILTER IS_ARRAY(folder.embedding) && LENGTH(folder.embedding) == LENGTH(@embedding)
+          LET score = COSINE_SIMILARITY(folder.embedding, @embedding)
+          FILTER IS_NUMBER(score)
+          SORT score DESC, folder._key ASC
+          LIMIT @limit
+          RETURN { score, value: folder })
+        LET documentMatches = (FOR document IN documents
+          FILTER document.scopeKey == @scopeKey && document.deletedAt == null
+          FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
+          FILTER document.folderKey == null || document.folderKey IN @activeFolderKeys
+          FILTER @sourceDocumentKey == null || document._key != @sourceDocumentKey
+          FILTER !HAS(document, "extension") || document.extension == null
+          LET scores = (FOR vector IN (IS_ARRAY(document.chunkEmbeddings) && LENGTH(document.chunkEmbeddings) > 0 ? document.chunkEmbeddings : [document.embedding])
+            FILTER IS_ARRAY(vector) && LENGTH(vector) == LENGTH(@embedding)
+            LET score = COSINE_SIMILARITY(vector, @embedding)
+            FILTER IS_NUMBER(score)
+            RETURN score)
+          FILTER LENGTH(scores) > 0
+          LET score = MAX(scores)
+          SORT score DESC, document._key ASC
+          LIMIT @limit
+          RETURN { score, value: document })
+        LET fileMatches = (FOR document IN documents
+          FILTER document.scopeKey == @scopeKey && document.deletedAt == null
+          FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
+          FILTER document.folderKey == null || document.folderKey IN @activeFolderKeys
+          FILTER @sourceDocumentKey == null || document._key != @sourceDocumentKey
+          FILTER HAS(document, "extension") && document.extension != null
+          LET scores = (FOR vector IN (IS_ARRAY(document.chunkEmbeddings) && LENGTH(document.chunkEmbeddings) > 0 ? document.chunkEmbeddings : [document.embedding])
+            FILTER IS_ARRAY(vector) && LENGTH(vector) == LENGTH(@embedding)
+            LET score = COSINE_SIMILARITY(vector, @embedding)
+            FILTER IS_NUMBER(score)
+            RETURN score)
+          FILTER LENGTH(scores) > 0
+          LET score = MAX(scores)
+          SORT score DESC, document._key ASC
+          LIMIT @limit
+          RETURN { score, value: document })
+        RETURN { folders: folderMatches, documents: documentMatches, files: fileMatches }
+      `, { ...input, embedding, limit, sourceFolderKey: input.sourceFolderKey ?? null, sourceDocumentKey: input.sourceDocumentKey ?? null });
+      const result = await cursor.next() as { folders?: Array<{ score: number; value: Record<string, unknown> }>; documents?: Array<{ score: number; value: Record<string, unknown> }>; files?: Array<{ score: number; value: Record<string, unknown> }> } | undefined;
+      return {
+        folders: (result?.folders ?? []).map(({ score, value }) => ({ score, folder: folderSchema.parse(withArangoKey(value)) })),
+        documents: (result?.documents ?? []).map(({ score, value }) => ({ score, document: documentSchema.parse(withArangoKey(value)) })),
+        files: (result?.files ?? []).map(({ score, value }) => ({ score, document: documentSchema.parse(withArangoKey(value)) })),
+      };
+    },
     async getShare(key: string): Promise<DocumentShare | null> {
       const mode = await shareStorageMode(executor);
       const cursor = await executor.query(mode === 'global'

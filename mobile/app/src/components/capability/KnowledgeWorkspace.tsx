@@ -61,6 +61,7 @@ import {
   deleteContentSearchHistory,
   copyContentSelection,
   downloadContentDocument,
+  findContentNeighbors,
   findContentDocumentSummary,
   findContentDocumentVersion,
   generateContentDocumentAudio,
@@ -88,6 +89,7 @@ import {
   type ContentDocumentAudioVersion,
   type ContentDocumentSummary,
   type ContentFolder,
+  type ContentNeighbors,
   type ContentSearchHistoryItem,
   type ContentSearchDocument,
   type ContentSearchMatch,
@@ -143,7 +145,7 @@ import { useAuthStore } from "@/state/auth";
 type SaveState = "local" | "dirty" | "saving" | "saved" | "error";
 type WorkspaceMode = "auto" | "folders" | "folder" | "editor" | "viewer";
 type FolderContentTab = "folders" | "documents" | "files";
-type ArchiveSheet = "create" | "folder" | "library" | "documents" | "folders" | "searchHistory" | "enhance" | "summarize" | "summaryVersions" | "summaryReader" | "historyChooser" | "versions" | "audioVersions" | "documentActions" | "documentDetails" | "deleteDocument" | "scanSources" | "destination" | "destinationBrowser" | "folderActions" | "folderDetails" | "bulkActions" | "bulkDelete";
+type ArchiveSheet = "create" | "folder" | "library" | "documents" | "folders" | "searchHistory" | "similar" | "enhance" | "summarize" | "summaryVersions" | "summaryReader" | "historyChooser" | "versions" | "audioVersions" | "documentActions" | "documentDetails" | "deleteDocument" | "scanSources" | "destination" | "destinationBrowser" | "folderActions" | "folderDetails" | "bulkActions" | "bulkDelete";
 type DestinationAction = "upload" | "move" | "copy";
 type UploadBatchItem = { id: string; mutationKey: string; file: File; name: string; mimeType: string; status: "pending" | "uploading" | "success" | "error"; error?: string };
 type ProcessingScanItem = { id: string; folderKey?: string; name: string };
@@ -303,6 +305,9 @@ export function KnowledgeWorkspace() {
   const [folderStack, setFolderStack] = useState<ContentFolder[]>([]);
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("folders");
   const [folderContentTab, setFolderContentTab] = useState<FolderContentTab>("folders");
+  const [similarContentTab, setSimilarContentTab] = useState<FolderContentTab>("folders");
+  const [similarResults, setSimilarResults] = useState<ContentNeighbors>();
+  const [similarLoading, setSimilarLoading] = useState(false);
   const [query, setQuery] = useState("");
   const [locationLoading, setLocationLoading] = useState(true);
   const [openingDocumentKey, setOpeningDocumentKey] = useState<string>();
@@ -392,6 +397,8 @@ export function KnowledgeWorkspace() {
   const instructionRequest = useRef<AbortController | undefined>(undefined);
   const rootSearchRequest = useRef<AbortController | undefined>(undefined);
   const folderSearchRequest = useRef<AbortController | undefined>(undefined);
+  const similarRequest = useRef<AbortController | undefined>(undefined);
+  const similarGeneration = useRef(0);
   const editorDocumentScroll = useRef<ScrollView | null>(null);
   const editorDocumentViewportHeight = useRef(0);
   const documentPassageOffsets = useRef(new Map<string, { y: number; height: number }>());
@@ -465,6 +472,7 @@ export function KnowledgeWorkspace() {
   const folderSearchDocuments = (folderSearchResults?.documents ?? []).filter((document) => folderContentTab === "files" ? Boolean(document.extension) : !document.extension);
   const rootSearchFolders = rootSearchResults?.folders ?? [];
   const rootSearchDocuments = (rootSearchResults?.documents ?? []).filter((document) => folderContentTab === "files" ? Boolean(document.extension) : !document.extension);
+  const similarTabDocuments = similarContentTab === "files" ? similarResults?.files ?? [] : similarResults?.documents ?? [];
   const currentNotePassages = useMemo(() => notePassages(content), [content]);
   const documentSearchMatches = useMemo(() => editorEditing ? [] : searchDocumentPassagesLiteral(currentNotePassages, documentSearchQuery), [currentNotePassages, documentSearchQuery, editorEditing]);
   const documentSearchMatchesById = useMemo(() => new Map(documentSearchMatches.map((match) => [match.id, match])), [documentSearchMatches]);
@@ -679,6 +687,12 @@ export function KnowledgeWorkspace() {
     const previous = sheetBackStack.current.pop();
     if (!previous) return;
     if (activeSheetRef.current === "summaryReader" && narrationStatus === "SUMMARY AUDIO") stopNarration();
+    if (activeSheetRef.current === "similar") {
+      similarGeneration.current += 1;
+      similarRequest.current?.abort();
+      similarRequest.current = undefined;
+      setSimilarLoading(false);
+    }
     if (temporarySingleSelection && (activeSheetRef.current === "destinationBrowser" || activeSheetRef.current === "bulkDelete")) {
       clearSelection();
       setTemporarySingleSelection(false);
@@ -692,6 +706,12 @@ export function KnowledgeWorkspace() {
   const closeSheet = (preserveSelection = false) => {
     if (activeSheetRef.current === "summaryReader" && narrationStatus === "SUMMARY AUDIO") stopNarration();
     if (activeSheetRef.current === "searchHistory") historyGeneration.current += 1;
+    if (activeSheetRef.current === "similar") {
+      similarGeneration.current += 1;
+      similarRequest.current?.abort();
+      similarRequest.current = undefined;
+      setSimilarLoading(false);
+    }
     if (activeSheetRef.current === "destination" || activeSheetRef.current === "destinationBrowser") {
       destinationGeneration.current += 1;
       if (!preserveSelection && destinationUsesDirectSelection) clearSelection();
@@ -727,6 +747,7 @@ export function KnowledgeWorkspace() {
     if (coreOpenTimer.current) clearTimeout(coreOpenTimer.current);
     instructionRequest.current?.abort();
     summaryRequest.current?.abort();
+    similarRequest.current?.abort();
     previewFileRef.current?.delete();
   }, []);
 
@@ -1645,14 +1666,29 @@ export function KnowledgeWorkspace() {
 
   const listenToSelectedDocument = async () => {
     if (!selectedDocument) return;
-    const target = selectedDocument;
-    setDocumentActionLoading("listen");
+    await openAudioVersionHistory(selectedDocument);
+  };
+
+  const openSimilarContent = async (source: { folderKey: string } | { documentKey: string }) => {
+    const generation = ++similarGeneration.current;
+    similarRequest.current?.abort();
+    const controller = new AbortController();
+    similarRequest.current = controller;
+    setSimilarContentTab("folders");
+    setSimilarResults(undefined);
+    setSimilarLoading(true);
+    if (sheetOpen) pushSheet("similar");
+    else openSheet("similar");
     try {
-      if (await openArchiveDocument(target, true)) await openAudioVersionHistory(target);
+      const next = await findContentNeighbors(source, controller.signal);
+      if (generation === similarGeneration.current) setSimilarResults(next);
     } catch (cause) {
-      setSheetError(cause instanceof Error ? cause.message : "The document could not be opened for listening.");
+      if (generation === similarGeneration.current && !(cause instanceof Error && cause.name === "AbortError")) setSheetError(cause instanceof Error ? cause.message : "Similar Archive content could not be loaded.");
     } finally {
-      setDocumentActionLoading(undefined);
+      if (generation === similarGeneration.current) {
+        similarRequest.current = undefined;
+        setSimilarLoading(false);
+      }
     }
   };
 
@@ -3685,11 +3721,11 @@ export function KnowledgeWorkspace() {
         dismissible={!versionActionKey && !generatingAudioVersion && !generatingSummary && !generatingSummaryAudio && !loadingSummaryTopics && !destinationLoading && !documentActionLoading && !bulkLoading}
         footer={mutationFooter()}
         hideHeading={activeSheet === "create" || activeSheet === "documentActions" || activeSheet === "enhance" || activeSheet === "historyChooser" || activeSheet === "bulkActions" || compactDelete}
-        mutation={activeSheet === "documents" || activeSheet === "folder" || activeSheet === "folders" || activeSheet === "searchHistory" || activeSheet === "versions" || activeSheet === "audioVersions" || activeSheet === "summarize" || activeSheet === "summaryVersions" || activeSheet === "summaryReader" || activeSheet === "destinationBrowser" || activeSheet === "folderDetails" || activeSheet === "documentDetails"}
+        mutation={activeSheet === "documents" || activeSheet === "folder" || activeSheet === "folders" || activeSheet === "searchHistory" || activeSheet === "similar" || activeSheet === "versions" || activeSheet === "audioVersions" || activeSheet === "summarize" || activeSheet === "summaryVersions" || activeSheet === "summaryReader" || activeSheet === "destinationBrowser" || activeSheet === "folderDetails" || activeSheet === "documentDetails"}
         onOpenChange={(open) => { if (!open) closeSheet(); }}
         open={sheetOpen}
         tall={activeSheet === "library" || activeSheet === "documents" || activeSheet === "folders" || activeSheet === "scanSources" || activeSheet === "versions" || activeSheet === "audioVersions"}
-        title={activeSheet === "enhance" ? "AI actions" : activeSheet === "summarize" ? "Summarize document" : activeSheet === "summaryVersions" ? "Summary versions" : activeSheet === "summaryReader" ? selectedSummary?.topic ?? summaryReaderTopic ?? `Summary ${selectedSummary?.version ?? ""}` : activeSheet === "historyChooser" ? "Document history" : activeSheet === "searchHistory" ? "Search history" : activeSheet === "versions" ? "Document versions" : activeSheet === "audioVersions" ? "Audio versions" : activeSheet === "scanSources" ? "Scanned pages" : activeSheet === "deleteDocument" ? `Delete ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "bulkDelete" ? "Delete selected items" : activeSheet === "folder" ? "Create folder" : activeSheet === "documents" ? "Documents and files" : activeSheet === "folders" ? "Folders" : activeSheet === "destinationBrowser" ? destinationAction === "upload" ? destinationFolder?.name ?? "Archive" : destinationAction === "move" ? "Move to folder" : "Copy to folder" : activeSheet === "library" ? "Browse Archive" : activeSheet === "documentActions" ? selectedDocument?.name ?? "Document actions" : activeSheet === "documentDetails" ? `Edit ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "destination" ? destinationAction === "upload" ? "Upload files" : "Choose destination" : activeSheet === "folderActions" ? selectedFolder?.name ?? "Folder actions" : activeSheet === "folderDetails" ? "Edit folder" : "New in Archive"}
+        title={activeSheet === "enhance" ? "AI actions" : activeSheet === "summarize" ? "Summarize document" : activeSheet === "summaryVersions" ? "Summary versions" : activeSheet === "summaryReader" ? selectedSummary?.topic ?? summaryReaderTopic ?? `Summary ${selectedSummary?.version ?? ""}` : activeSheet === "historyChooser" ? "Document history" : activeSheet === "searchHistory" ? "Search history" : activeSheet === "similar" ? "Archive" : activeSheet === "versions" ? "Document versions" : activeSheet === "audioVersions" ? "Audio versions" : activeSheet === "scanSources" ? "Scanned pages" : activeSheet === "deleteDocument" ? `Delete ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "bulkDelete" ? "Delete selected items" : activeSheet === "folder" ? "Create folder" : activeSheet === "documents" ? "Documents and files" : activeSheet === "folders" ? "Folders" : activeSheet === "destinationBrowser" ? destinationAction === "upload" ? destinationFolder?.name ?? "Archive" : destinationAction === "move" ? "Move to folder" : "Copy to folder" : activeSheet === "library" ? "Browse Archive" : activeSheet === "documentActions" ? selectedDocument?.name ?? "Document actions" : activeSheet === "documentDetails" ? `Edit ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "destination" ? destinationAction === "upload" ? "Upload files" : "Choose destination" : activeSheet === "folderActions" ? selectedFolder?.name ?? "Folder actions" : activeSheet === "folderDetails" ? "Edit folder" : "New in Archive"}
       >
         {sheetError ? <Text accessibilityRole="alert" style={styles.notice}>{sheetError}</Text> : null}
         {compactDelete ? <View style={styles.compactSheetActions}>
@@ -3724,15 +3760,40 @@ export function KnowledgeWorkspace() {
             {!historyLoading ? history.map((item) => <SearchHistoryPill count={item.usageCount} disabled={Boolean(removingHistoryQuery)} key={item.normalizedQuery} onPress={() => useHistoryQuery(item)} onRemove={() => void removeHistoryQuery(item)} query={item.query} removing={removingHistoryQuery === item.normalizedQuery} />) : null}
           </ScrollView>
         ) : null}
+        {activeSheet === "similar" ? (
+          <View style={styles.similarPanel}>
+            <Tabs accessibilityRole="tablist" style={styles.folderTabs}>
+              <Button accessibilityRole="tab" accessibilityState={{ selected: similarContentTab === "folders" }} onPress={() => setSimilarContentTab("folders")} size="xs" style={styles.folderTab} variant={similarContentTab === "folders" ? "secondary" : "ghost"}>Folders</Button>
+              <Button accessibilityRole="tab" accessibilityState={{ selected: similarContentTab === "documents" }} onPress={() => setSimilarContentTab("documents")} size="xs" style={styles.folderTab} variant={similarContentTab === "documents" ? "secondary" : "ghost"}>Documents</Button>
+              <Button accessibilityRole="tab" accessibilityState={{ selected: similarContentTab === "files" }} onPress={() => setSimilarContentTab("files")} size="xs" style={styles.folderTab} variant={similarContentTab === "files" ? "secondary" : "ghost"}>Files</Button>
+            </Tabs>
+            <ScrollView contentContainerStyle={styles.similarResults} showsVerticalScrollIndicator={false}>
+              {similarLoading && similarContentTab === "folders" ? <View accessibilityLabel="Loading similar folders" accessibilityRole="progressbar" style={styles.rootFolderGrid}>{Array.from({ length: 3 }, (_, index) => <View key={index} style={[styles.rootFolderCard, styles.skeletonCard, { width: destinationCardSize, height: destinationCardSize }]} />)}</View> : null}
+              {similarLoading && similarContentTab !== "folders" ? <View accessibilityLabel={`Loading similar ${similarContentTab}`} accessibilityRole="progressbar" style={styles.folderDocuments}>{Array.from({ length: 3 }, (_, index) => <View key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />)}</View> : null}
+              {!similarLoading && similarContentTab === "folders" ? <View style={similarResults?.folders.length ? styles.rootFolderGrid : styles.similarEmpty}>
+                {similarResults?.folders.map((folder) => <View key={folder.key} style={[styles.rootFolderCard, { width: destinationCardSize, height: destinationCardSize }]}>
+                  {folder.coverUrl ? <Image contentFit="cover" source={folder.coverUrl} style={styles.folderCover} /> : null}
+                  <Button contentMode="raw" onPress={() => { closeSheet(); void openFolder(folder); }} shape="rounded" size="xl" style={[styles.rootFolderMain, folder.coverUrl && styles.coveredFolderMain]} variant="ghost">{folder.coverUrl ? null : <FolderIcon size="lg" />}<Text numberOfLines={1} style={[styles.archiveCardLabel, folder.coverUrl && styles.coveredFolderLabel]}>{folder.name}</Text></Button>
+                </View>)}
+                {similarResults?.folders.length === 0 ? <Text style={styles.empty}>No matching folders found.</Text> : null}
+              </View> : null}
+              {!similarLoading && similarContentTab !== "folders" ? <View style={similarTabDocuments.length > 0 ? styles.folderDocuments : styles.similarEmpty}>
+                {similarTabDocuments.map((document) => <Button contentMode="raw" key={document.key} onPress={() => void openArchiveDocument(document, true)} size="sm" style={styles.documentButton} variant="secondary"><FileIcon size="sm" /><Text numberOfLines={1} style={styles.documentButtonLabel}>{documentDisplayName(document)}</Text><ScannedBadge document={document} /></Button>)}
+                {similarResults && similarTabDocuments.length === 0 ? <Text style={styles.empty}>No matching {similarContentTab} found.</Text> : null}
+              </View> : null}
+            </ScrollView>
+          </View>
+        ) : null}
         {activeSheet === "documentActions" && selectedDocument ? (
           <>
             <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={openDocumentDetails} style={styles.sheetAction}>Edit</BottomSheetItem>
-            <BottomSheetItem disabled={Boolean(documentActionLoading)} loading={documentActionLoading === "listen"} onPress={() => void listenToSelectedDocument()} style={styles.sheetAction}>Listen</BottomSheetItem>
+            <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void listenToSelectedDocument()} style={styles.sheetAction}>Listen</BottomSheetItem>
             {selectedDocument.extension ? <BottomSheetItem disabled={Boolean(documentActionLoading)} loading={documentActionLoading === "original"} onPress={() => {
               if (workspaceModeRef.current === "viewer") { closeSheet(); leaveFileViewer(); }
               else void showOriginal();
             }} style={styles.sheetAction}>{workspaceMode === "viewer" ? "Show text" : "Show original"}</BottomSheetItem> : null}
             <BottomSheetItem disabled={Boolean(documentActionLoading)} loading={documentActionLoading === "download"} onPress={() => void downloadOriginal()} style={styles.sheetAction}>Download</BottomSheetItem>
+            <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void openSimilarContent({ documentKey: selectedDocument.key })} style={styles.sheetAction}>Find similar</BottomSheetItem>
             {selectedDocument.sourceImageCount ? <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void openScanSources()} style={styles.sheetAction}>View scanned pages</BottomSheetItem> : null}
             <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => pushSheet("deleteDocument")} style={styles.sheetAction}>Delete {selectedDocument.extension ? "file" : "document"}</BottomSheetItem>
           </>
@@ -3748,12 +3809,14 @@ export function KnowledgeWorkspace() {
             <BottomSheetItem onPress={openFolderDetails} style={styles.sheetAction}>Edit</BottomSheetItem>
             <BottomSheetItem onPress={() => void openDestinationPicker("move", { folder: selectedFolder })} style={styles.sheetAction}>Move folder</BottomSheetItem>
             <BottomSheetItem onPress={() => void openDestinationPicker("copy", { folder: selectedFolder })} style={styles.sheetAction}>Copy to folder</BottomSheetItem>
+            <BottomSheetItem onPress={() => void openSimilarContent({ folderKey: selectedFolder.key })} style={styles.sheetAction}>Find similar</BottomSheetItem>
             <BottomSheetItem onPress={confirmSelectedFolderDelete} style={styles.sheetAction}>Delete folder</BottomSheetItem>
           </>
         ) : null}
         {activeSheet === "folderDetails" && selectedFolder ? (
           <View style={styles.folderDetailsForm}>
             <TextInput accessibilityLabel="Folder name" maxLength={255} onChangeText={setFolderDetailsName} placeholder="Folder name" value={folderDetailsName} />
+            <Text style={styles.inputLabel}>Description (Optional)</Text>
             <TextInput accessibilityLabel="Folder description" maxLength={2000} multiline onChangeText={setFolderDetailsDescription} placeholder="What belongs in this folder?" style={styles.folderDescriptionInput} textAlignVertical="top" value={folderDetailsDescription} />
             <View style={styles.folderDetailsCoverControl}>
               <Button accessibilityLabel={(folderDetailsCoverAsset === undefined ? selectedFolder.coverUrl : folderDetailsCoverAsset?.uri) ? "Change folder cover" : "Set folder cover"} contentMode="raw" onPress={() => void chooseFolderCover()} shape="rounded" size="xl" style={styles.folderDetailsCoverButton} variant="secondary">
@@ -3876,7 +3939,7 @@ export function KnowledgeWorkspace() {
           <View style={styles.namingForm}>
             <Text style={styles.inputLabel}>Folder name</Text>
             <TextInput accessibilityLabel="New folder name" autoFocus maxLength={255} onChangeText={setFolderName} placeholder="Folder name" value={folderName} />
-            <Text style={styles.inputLabel}>Description</Text>
+            <Text style={styles.inputLabel}>Description (Optional)</Text>
             <TextInput accessibilityLabel="New folder description" maxLength={2000} multiline onChangeText={setFolderDescription} placeholder="What belongs in this folder?" style={styles.folderDescriptionInput} textAlignVertical="top" value={folderDescription} />
           </View>
         ) : null}
@@ -3984,6 +4047,9 @@ const styles = StyleSheet.create({
   folderTab: { flex: 1 },
   folderDocuments: { gap: 7 },
   folderTabContent: { flexGrow: 1 },
+  similarPanel: { flex: 1, minHeight: 0, gap: spacing.md },
+  similarResults: { flexGrow: 1, paddingBottom: spacing.lg },
+  similarEmpty: { flexGrow: 1, minHeight: 320, alignItems: "center", justifyContent: "center" },
   folderEmptyState: { flex: 1, minHeight: 360, alignItems: "center", justifyContent: "center", gap: 14 },
   emptyPlusButton: { height: 44, width: 44 },
   documentButton: { width: "100%", minHeight: 38, justifyContent: "flex-start", paddingHorizontal: 14 },

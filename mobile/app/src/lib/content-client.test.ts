@@ -54,6 +54,7 @@ const {
   enhanceContent,
   findContentDocumentSummary,
   findContentDocumentVersion,
+  findContentNeighbors,
   generateContentDocumentAudio,
   generateContentDocumentSummaryAudio,
   getContentContext,
@@ -413,6 +414,15 @@ test("runs fast combined search without summaries", async () => {
 
   expect(await searchContentMatches("roadmap")).toMatchObject({ folders: [{ key: "folder" }], documents: [{ documentKey: "document", extension: "docx" }] });
   expect(calls[0]?.body.input).toEqual({ scopeKey: "scope-authenticated", query: "roadmap", includeSummaries: false, minimumScore: 0.55 });
+});
+
+test("finds semantic neighbors from exactly one Content source", async () => {
+  const neighbors = { folders: [{ key: "folder", name: "Related" }], documents: [], files: [] };
+  responseForTool = (tool) => tool === "content.neighbors" ? { data: { success: true, data: neighbors } } : undefined;
+
+  await expect(findContentNeighbors({ documentKey: "document" })).resolves.toEqual(neighbors);
+  expect(calls[0]?.url).toContain("/content.neighbors");
+  expect(calls[0]?.body.input).toEqual({ documentKey: "document" });
 });
 
 test("generates topics and persists, lists, and opens summary versions", async () => {

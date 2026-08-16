@@ -121,6 +121,7 @@ import { scopeContentTool } from './scope-content';
 import { scopeContentSearchToolDefinition } from './scope-content-search';
 import { scopeContentSearchHistoryToolDefinition } from './scope-content-search-history';
 import { scopeContentSearchHistoryDeleteToolDefinition } from './scope-content-search-history-delete';
+import { contentNeighborsToolDefinition } from './content-neighbors';
 import { scopeCreateTool } from './scope-create';
 import { scopeDocumentSearchToolDefinition } from './scope-document-search';
 import { scopeListTool } from './scope-list';
@@ -164,6 +165,7 @@ export const PUBLIC_TOOL_DEFINITIONS = Object.freeze([
   imageCreateVisualIdentityTool,
   imageSearchTool,
   enhanceToolDefinition,
+  contentNeighborsToolDefinition,
   bookCreateContextToolDefinition,
   bookWriteToolDefinition,
   emailThreadListTool, emailThreadReadTool, emailReadTool, emailReplyDraftTool,

@@ -15,13 +15,13 @@ const expectedNames = [
   'book.create-context', 'book.write',
   'folder.create', 'folder.find', 'folder.list', 'folder.update', 'folder.rename', 'folder.move', 'folder.copy', 'folder.archive', 'folder.restore', 'folder.delete',
   'document.parse', 'document.scan', 'document.create', 'document.find', 'document.list', 'document.read', 'document.list-audio-versions', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.list-summaries', 'document.find-summary', 'document.summary.audio.generate', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.download', 'document.export', 'document.share', 'document.unshare', 'document.list-shares', 'document.create-version', 'document.find-version', 'document.list-versions', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.topics', 'document.translate', 'document.rewrite',
-  'scope.document.search', 'scope.content.search', 'scope.content.search-history', 'scope.content.search-history.delete', 'organization.document.search',
+  'scope.document.search', 'scope.content.search', 'scope.content.search-history', 'scope.content.search-history.delete', 'content.neighbors', 'organization.document.search',
 ] as const;
 
 describe('Content tool registry', () => {
   test('contains exactly the registered dotted names and no action-style kebab names', () => {
     expect([...CONTENT_TOOL_NAMES]).toEqual([...expectedNames]);
-    expect(CONTENT_TOOL_NAMES).toHaveLength(51);
+    expect(CONTENT_TOOL_NAMES).toHaveLength(52);
     for (const name of CONTENT_TOOL_NAMES) {
       expect(name).toMatch(/^[a-z]+(?:[.-][a-z]+)*$/);
       if (name !== 'enhance') expect(name).toContain('.');
@@ -41,6 +41,13 @@ describe('Content tool registry', () => {
 
 describe('Content input contracts', () => {
   const key = newId();
+
+  test('requires exactly one semantic-neighbor source', () => {
+    expect(contentToolInputSchemas['content.neighbors'].safeParse({ folderKey: key }).success).toBe(true);
+    expect(contentToolInputSchemas['content.neighbors'].safeParse({ documentKey: key }).success).toBe(true);
+    expect(contentToolInputSchemas['content.neighbors'].safeParse({}).success).toBe(false);
+    expect(contentToolInputSchemas['content.neighbors'].safeParse({ folderKey: key, documentKey: key }).success).toBe(false);
+  });
 
   test('applies atomic and mode defaults, including nested restore defaults', () => {
     expect(contentToolInputSchemas['folder.update'].parse({ updates: [{ folderKey: key, name: 'Renamed' }] }).atomic).toBe(false);

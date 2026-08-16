@@ -41,6 +41,12 @@ export type ContentDocument = {
   updatedAt: string;
 };
 
+export type ContentNeighbors = {
+  folders: ContentFolder[];
+  documents: ContentDocument[];
+  files: ContentDocument[];
+};
+
 export type ContentDocumentSourceImage = { page: number; url: string };
 
 export type ContentDocumentVersion = {
@@ -684,6 +690,10 @@ export async function searchContentMatches(query: string, signal?: AbortSignal, 
     minimumScore: 0.55,
     ...(folderKey ? { folderKey, includeDescendants: true } : {}),
   }, signal);
+}
+
+export function findContentNeighbors(source: { folderKey: string } | { documentKey: string }, signal?: AbortSignal) {
+  return callContentTool<ContentNeighbors>("content.neighbors", source, signal);
 }
 
 export async function getContentDocumentTopics(documentKey: string, signal?: AbortSignal) {

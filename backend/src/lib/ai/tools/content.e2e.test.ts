@@ -382,6 +382,14 @@ suite('Content live E2E', () => {
     expect(await call('scope.content.search-history.delete', { scopeKey, normalizedQuery: 'semantic roadmap' })).toEqual({ normalizedQuery: 'semantic roadmap', deleted: true });
     expect((await call('scope.content.search-history', { scopeKey, limit: 8 })).history.some((item: any) => item.normalizedQuery === 'semantic roadmap')).toBe(false);
 
+    const neighbors = await call('content.neighbors', { documentKey });
+    expect(neighbors.folders.length).toBeLessThanOrEqual(10);
+    expect(neighbors.documents.length).toBeLessThanOrEqual(10);
+    expect(neighbors.files.length).toBeLessThanOrEqual(10);
+    expect(neighbors.documents.every((item: any) => item.scopeKey === scopeKey && item.extension === undefined && item.key !== documentKey)).toBe(true);
+    expect(neighbors.files.every((item: any) => item.scopeKey === scopeKey && item.extension && item.key !== documentKey)).toBe(true);
+    expect(neighbors.folders.every((item: any) => item.scopeKey === scopeKey)).toBe(true);
+
     const copiedFolder = await call('folder.copy', { copies: [{ folderKey: childFolderKey, targetScopeKey: scopeKey, targetParentFolderKey: destinationFolderKey, newName: 'Copied subtree' }] });
     expect(copiedFolder.results[0].data).toMatchObject({ folder: { parentFolderKey: destinationFolderKey, name: 'Copied subtree', isFavorite: false }, folderCount: 1 });
     const copiedFolderDocuments = await call('document.list', { scopeKey, folderKey: copiedFolder.results[0].data.folder.key });

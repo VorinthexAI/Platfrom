@@ -62,6 +62,14 @@ function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
     async deleteSummaryAudio(summaryKey) { const value = [...summaryAudio.values()].find((item) => item.summaryKey === summaryKey); if (value) summaryAudio.delete(value.key); },
     async semanticSearch() { return [...documents.values()].map((document) => ({ score: 0.8, document })); },
     async semanticSearchFolders() { return [...folders.values()].map((folder) => ({ score: 0.8, folder })); },
+    async semanticNeighbors(input) {
+      const candidates = [...documents.values()].filter((document) => document.scopeKey === input.scopeKey && document.key !== input.sourceDocumentKey && (!document.folderKey || input.activeFolderKeys.includes(document.folderKey)));
+      return {
+        folders: [...folders.values()].filter((folder) => folder.scopeKey === input.scopeKey && folder.key !== input.sourceFolderKey && input.activeFolderKeys.includes(folder.key)).map((folder) => ({ score: 0.8, folder })),
+        documents: candidates.filter((document) => !document.extension).map((document) => ({ score: 0.8, document })),
+        files: candidates.filter((document) => document.extension).map((document) => ({ score: 0.8, document })),
+      };
+    },
     async transaction(operation) { return operation(repository); },
   };
   const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: membershipKey, organizationId: organizationKey, status: 'active', orgRole: role } } } as any;
@@ -640,6 +648,44 @@ describe('Content runtime', () => {
     expect(chunkEmbeddings.length).toBeGreaterThan(8);
     expect(maximumActiveEmbeddings).toBe(8);
     expect(chunkEmbeddings.map((value) => value[0])).toEqual([...chunkEmbeddings.keys()]);
+  });
+
+  test('finds independently capped semantic neighbors and excludes inactive hierarchy and the source', async () => {
+    const f = fixture('viewer');
+    const activeFolderKey = newId();
+    const archivedParentKey = newId();
+    const inactiveChildKey = newId();
+    f.folders.set(activeFolderKey, { key: activeFolderKey, scopeKey: f.scopeKey, name: 'Related', embedding, createdAt: now, updatedAt: now });
+    f.folders.set(archivedParentKey, { key: archivedParentKey, scopeKey: f.scopeKey, name: 'Archived', embedding, deletedAt: now, createdAt: now, updatedAt: now });
+    f.folders.set(inactiveChildKey, { key: inactiveChildKey, scopeKey: f.scopeKey, parentFolderKey: archivedParentKey, name: 'Hidden child', embedding, createdAt: now, updatedAt: now });
+    const documentKey = f.addDocument('Related note');
+    delete f.documents.get(documentKey).extension;
+    const fileKey = f.addDocument('Related file');
+    const inactiveDocumentKey = f.addDocument('Hidden file');
+    f.documents.get(inactiveDocumentKey).folderKey = inactiveChildKey;
+    let semanticInput: any;
+    f.repository.semanticNeighbors = async (input) => {
+      semanticInput = input;
+      return {
+        folders: [...f.folders.values()].map((folder) => ({ score: 0.8, folder })),
+        documents: [{ score: 0.8, document: f.documents.get(documentKey) }],
+        files: [fileKey, inactiveDocumentKey].map((key) => ({ score: 0.8, document: f.documents.get(key) })),
+      };
+    };
+
+    const result = await runContentTool('content.neighbors', { folderKey: f.folderKey }, f.context, { repository: f.repository });
+    expect(result.folders.map((folder) => folder.key)).toEqual([activeFolderKey]);
+    expect(result.documents.map((document) => document.key)).toEqual([documentKey]);
+    expect(result.files.map((document) => document.key)).toEqual([fileKey]);
+    expect(semanticInput).toMatchObject({ scopeKey: f.scopeKey, sourceFolderKey: f.folderKey, limit: 10 });
+    expect(semanticInput.activeFolderKeys).toContain(activeFolderKey);
+    expect(semanticInput.activeFolderKeys).not.toContain(archivedParentKey);
+    expect(semanticInput.activeFolderKeys).not.toContain(inactiveChildKey);
+
+    f.documents.get(fileKey).embedding = undefined;
+    await expect(runContentTool('content.neighbors', { documentKey: fileKey }, f.context, { repository: f.repository })).rejects.toMatchObject({ code: 'CONTENT_CONFLICT' });
+    f.folders.get(f.folderKey).deletedAt = now;
+    await expect(runContentTool('content.neighbors', { folderKey: f.folderKey }, f.context, { repository: f.repository })).rejects.toMatchObject({ code: 'FOLDER_ARCHIVED' });
   });
 
   test('searches folders and chunk-aware documents with caps, summaries, cache, auth, and isolated history', async () => {
@@ -1601,6 +1647,7 @@ describe('Content runtime', () => {
       else if (name === 'scope.content.search') input = { scopeKey: f.scopeKey, query: 'source' };
       else if (name === 'scope.content.search-history') input = { scopeKey: f.scopeKey };
       else if (name === 'scope.content.search-history.delete') input = { scopeKey: f.scopeKey, normalizedQuery: 'source' };
+      else if (name === 'content.neighbors') input = { documentKey };
       else input = { organizationKey: f.context.organizationKey, query: 'source' };
       const output: any = await runContentTool(name, input, f.context, dependencies);
       if (output.summary) expect(output.summary.failed, name).toBe(0);

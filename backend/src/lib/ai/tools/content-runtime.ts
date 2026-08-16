@@ -88,6 +88,7 @@ export interface ContentRepository {
   deleteSummaryAudio?(summaryKey: string): Promise<void>;
   semanticSearch(input: { embedding: number[]; authorizedScopeKeys: string[]; folderKeys?: string[]; documentKeys?: string[]; extensions?: Document['extension'][]; createdAfter?: string; createdBefore?: string; updatedAfter?: string; updatedBefore?: string; includeArchived?: boolean; minScore?: number; limit?: number }): Promise<Array<{ score: number; document: Document; matchedContent?: string }>>;
   semanticSearchFolders?(input: { embedding: number[]; authorizedScopeKeys: string[]; folderKeys?: string[]; minScore: number; limit: number }): Promise<Array<{ score: number; folder: Folder }>>;
+  semanticNeighbors?(input: { embedding: number[]; scopeKey: string; activeFolderKeys: string[]; sourceFolderKey?: string; sourceDocumentKey?: string; limit: number }): Promise<{ folders: Array<{ score: number; folder: Folder }>; documents: Array<{ score: number; document: Document }>; files: Array<{ score: number; document: Document }> }>;
   transaction?<T>(operation: (repository: ContentRepository) => Promise<T>): Promise<T>;
 }
 
@@ -410,6 +411,7 @@ async function productionRepository(): Promise<ContentRepository> {
     },
     semanticSearch: documents.semanticSearchDocuments,
     semanticSearchFolders: folders.semanticSearchFolders,
+    semanticNeighbors: persistence.semanticNeighbors,
     transaction: (operation) => content.withContentPersistenceTransaction((bound) => operation(makeRepository(bound))),
   });
   return makeRepository(content.contentPersistence);
@@ -2263,6 +2265,50 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             };
           },
         })), false, repo);
+    } else if (tool === 'content.neighbors') {
+      const source = input.folderKey
+        ? await folder(input.folderKey, 'viewer', false)
+        : await document(input.documentKey!, 'viewer', false);
+      if (!await activeFolderHierarchy(input.folderKey ? source.key : (source as Document).folderKey, source.scopeKey)) {
+        fail('FOLDER_ARCHIVED', 'The source folder hierarchy is archived.', tool, 'read', source.key);
+      }
+      const parsedEmbedding = z.array(z.number().finite()).length(EMBEDDING_DIMENSIONS).safeParse(source.embedding);
+      if (!parsedEmbedding.success) fail('CONTENT_CONFLICT', 'Semantic similarity is not ready for this resource.', tool, 'semantic-neighbors', source.key);
+      if (!repo.semanticNeighbors) fail('CONTENT_CONFLICT', 'Semantic similarity is unavailable.', tool, 'semantic-neighbors', source.key);
+
+      const allFolders = await repo.listFolders(source.scopeKey, true, true);
+      const foldersByKey = new Map(allFolders.map((current) => [current.key, current]));
+      const hierarchyIsActive = (folderKey: string) => {
+        const visited = new Set<string>();
+        let currentKey: string | undefined = folderKey;
+        while (currentKey) {
+          if (visited.has(currentKey)) return false;
+          visited.add(currentKey);
+          const current = foldersByKey.get(currentKey);
+          if (!current || current.deletedAt || current._internalDeletion) return false;
+          currentKey = current.parentFolderKey;
+        }
+        return true;
+      };
+      const activeFolderKeys = allFolders.filter((current) => hierarchyIsActive(current.key)).map((current) => current.key);
+      const matches = await repo.semanticNeighbors({
+        embedding: parsedEmbedding.data,
+        scopeKey: source.scopeKey,
+        activeFolderKeys,
+        ...(input.folderKey ? { sourceFolderKey: input.folderKey } : { sourceDocumentKey: input.documentKey }),
+        limit: 10,
+      });
+      const folders = matches.folders
+        .filter(({ folder: current }) => current.scopeKey === source.scopeKey && current.key !== input.folderKey && activeFolderKeys.includes(current.key) && !current.deletedAt && !current._internalDeletion)
+        .slice(0, 10);
+      const activeDocument = (current: Document) => current.scopeKey === source.scopeKey && current.key !== input.documentKey && !current.deletedAt && !current._internalDeletion && (!current.folderKey || activeFolderKeys.includes(current.folderKey));
+      const documents = matches.documents.filter(({ document: current }) => activeDocument(current) && !current.extension).slice(0, 10);
+      const files = matches.files.filter(({ document: current }) => activeDocument(current) && Boolean(current.extension)).slice(0, 10);
+      result = {
+        folders: await Promise.all(folders.map(({ folder: current }) => folderView(current, d))),
+        documents: documents.map(({ document: current }) => documentView(current)),
+        files: files.map(({ document: current }) => documentView(current)),
+      };
     } else if (tool === 'scope.content.search-history.delete') {
       await roleFor(input.scopeKey, 'viewer');
       if (input.folderKey) {
