@@ -17,7 +17,7 @@ function completion(content: string) {
 }
 
 describe('OpenRouter image captions', () => {
-  test('cleans extracted document text with Qwen, strict output, and private routing', async () => {
+  test('cleans extracted document text with Gemini, strict output, and private routing', async () => {
     let body: Record<string, any> = {};
     globalThis.fetch = (async (_input, init) => {
       body = JSON.parse(String(init?.body));
@@ -39,7 +39,7 @@ describe('OpenRouter image captions', () => {
     expect(body.messages[0].content).toContain('decorative symbol-only fragments');
     expect(body.messages[1]).toEqual({ role: 'user', content: 'Fakturans   total ar 42 € . ###' });
     expect(body.response_format.json_schema.name).toBe('document_cleanup');
-    expect(body.provider).toEqual({ data_collection: 'deny' });
+    expect(body.provider).toEqual({ data_collection: 'deny', sort: 'throughput', require_parameters: true });
     expect(result.output).toEqual({ content: 'Faktura\n\nFakturans total är 42 €.' });
   });
 
@@ -65,8 +65,8 @@ describe('OpenRouter image captions', () => {
     expect(body.model).toBe(IMAGE_CAPTION_EXTERNAL_MODEL_ID);
     expect(body.messages).toHaveLength(1);
     expect(body.messages[0].content.filter((part: { type: string }) => part.type === 'image_url')).toEqual([
-      { type: 'image_url', image_url: { url: inlineImage, detail: 'high' } },
-      { type: 'image_url', image_url: { url: 'https://cdn.example.com/two.jpg', detail: 'high' } },
+      { type: 'image_url', image_url: { url: inlineImage, detail: 'auto' } },
+      { type: 'image_url', image_url: { url: 'https://cdn.example.com/two.jpg', detail: 'auto' } },
     ]);
     expect(body.messages[0].content[0].text).toContain('resolution, focus and clarity, lighting and exposure, visible detail, composition, and artifacts');
     expect(body.response_format.json_schema.name).toBe('image_caption_results');
@@ -81,7 +81,7 @@ describe('OpenRouter image captions', () => {
         properties: { score: { type: 'integer', minimum: 1, maximum: 100 } },
       },
     });
-    expect(body.provider).toEqual({ data_collection: 'deny' });
+    expect(body.provider).toEqual({ data_collection: 'deny', sort: 'throughput', require_parameters: true });
     expect(body.provider).not.toHaveProperty('zdr');
     expect(result.output).toEqual({ results: [
       { caption: 'A detailed first scene.', score: 91 },
@@ -108,7 +108,7 @@ describe('OpenRouter image captions', () => {
     expect(body.messages[0].content.filter((part: { type: string }) => part.type === 'image_url')).toHaveLength(2);
     expect(body.messages[0].content[0].text).toContain('stable visible identifier');
     expect(body.response_format.json_schema.name).toBe('visual_identity_description');
-    expect(body.provider).toEqual({ data_collection: 'deny' });
+    expect(body.provider).toEqual({ data_collection: 'deny', sort: 'throughput', require_parameters: true });
     expect(body.provider).not.toHaveProperty('zdr');
     expect(result.output).toEqual({ description: 'A black dog with a white chest blaze and a notch in the left ear.' });
   });

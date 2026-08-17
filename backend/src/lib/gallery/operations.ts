@@ -20,7 +20,7 @@ import { signedImageUrl } from './image-url';
 import { getDefaultUserSearchService } from '@/lib/user-searches/service';
 import { enqueueGalleryUploadBatch } from './upload-queue';
 import { reverseGeocodeImage } from './image-location';
-import { storedImageDataUrl } from './image-reference';
+import { storedImageAnalysisDataUrl } from './image-reference';
 import { cursorPaginationInputShape } from '@/lib/cursor-pagination';
 
 const overviewSchema = strictObject({ collectionKey: z.string().cuid().optional(), ...cursorPaginationInputShape });
@@ -329,7 +329,7 @@ async function createSubject(rawInput: unknown, context: GalleryOperationContext
       if (!image || image.scopeKey !== input.scopeKey || image.deletedAt) throw new GalleryOperationError(404, 'GALLERY_IMAGE_NOT_FOUND', 'Reference image not found.');
       return image;
     }));
-    const profile = await imageCreateVisualIdentityTool.execute({ imageUrls: await Promise.all(references.map(({ storageKey, mimeType }) => storedImageDataUrl(storageKey, mimeType))) }, { organizationKey: input.organizationKey, signal: context.signal });
+    const profile = await imageCreateVisualIdentityTool.execute({ imageUrls: await Promise.all(references.map(({ storageKey }) => storedImageAnalysisDataUrl(storageKey, 1024))) }, { organizationKey: input.organizationKey, signal: context.signal });
     const now = new Date().toISOString();
     const embedding = currentEmbeddingSchema.parse(await embedText({ text: `${input.name}\n\n${profile.description}` }));
     const identity = visualIdentitySchema.parse({ key: newId(), scopeKey: input.scopeKey, name: input.name, description: profile.description, referenceImageKey: references[0]!.key, embedding, deletedAt: null, createdAt: now, updatedAt: now });

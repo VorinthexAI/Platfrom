@@ -671,11 +671,11 @@ export const SEEDED_MODELS = [
     enabled: true,
   },
   {
-    key: 'cmqwen3vl32bmodel0000001',
-    slug: 'qwen.qwen3-vl-32b-instruct',
-    name: 'Qwen3-VL 32B Instruct',
-    description: 'Qwen multimodal instruction model for detailed, factual image captioning through OpenRouter.',
-    supportedUseCases: 'Rich image captions, visual scene understanding, object recognition, and optical character recognition.',
+    key: 'cmgemini25flashlitemod01',
+    slug: 'google.gemini-2.5-flash-lite',
+    name: 'Google Gemini 2.5 Flash-Lite',
+    description: 'Google low-latency multimodal model for efficient image understanding through OpenRouter.',
+    supportedUseCases: 'Rich image captions, visual scene understanding, object recognition, optical character recognition, and visual identity descriptions.',
     enabled: true,
   },
 ] as const;
@@ -781,10 +781,10 @@ export const SEEDED_MODEL_PROVIDERS = [
     enabled: true,
   },
   {
-    key: 'cmqwen3vl32broute0000001',
-    modelSlug: 'qwen.qwen3-vl-32b-instruct',
+    key: 'cmgemini25flashliteroute1',
+    modelSlug: 'google.gemini-2.5-flash-lite',
     providerSlug: 'openrouter',
-    providerModelId: 'qwen/qwen3-vl-32b-instruct',
+    providerModelId: 'google/gemini-2.5-flash-lite',
     enabled: true,
   },
 ] as const;
@@ -1234,6 +1234,25 @@ export async function reconcileObsoleteSeededModelActions(store: ObsoleteModelAc
     if (legacyRoute?.enabled && store.updateModelProvider) {
       await store.updateModelProvider(legacyRoute.key, { enabled: false });
       results.push({ collection: 'modelProviders', key: legacyRoute.key, status: 'updated' });
+    }
+  }
+
+  const legacyVision = await store.getModelBySlug('qwen.qwen3-vl-32b-instruct');
+  if (legacyVision) {
+    await store.updateModel(legacyVision.key, { enabled: false });
+    results.push({ collection: 'models', key: legacyVision.key, status: 'updated' });
+    for (const actionDefinition of ACTION_DEFINITIONS) {
+      const action = await store.getActionBySlug(actionDefinition.id);
+      const binding = action ? await store.getModelActionByPair(legacyVision.key, action.key) : null;
+      if (!binding?.enabled) continue;
+      await store.updateModelAction(binding.key, { enabled: false });
+      results.push({ collection: 'modelActions', key: binding.key, status: 'updated' });
+    }
+    const openrouter = await store.getProviderBySlug?.('openrouter');
+    const route = openrouter ? await store.getModelProviderByPair?.(legacyVision.key, openrouter.key) : null;
+    if (route?.enabled && store.updateModelProvider) {
+      await store.updateModelProvider(route.key, { enabled: false });
+      results.push({ collection: 'modelProviders', key: route.key, status: 'updated' });
     }
   }
 

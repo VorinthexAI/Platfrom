@@ -43,15 +43,15 @@ describe('action registry', () => {
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'translate')?.models)
       .toEqual([{ provider: 'aws-bedrock', model: 'amazon.nova-lite', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'caption-image')?.models)
-      .toEqual([{ provider: 'openrouter', model: 'qwen.qwen3-vl-32b-instruct', priority: 100 }]);
+      .toEqual([{ provider: 'openrouter', model: 'google.gemini-2.5-flash-lite', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'document-cleanup')?.models)
-      .toEqual([{ provider: 'openrouter', model: 'qwen.qwen3-vl-32b-instruct', priority: 100 }]);
+      .toEqual([{ provider: 'openrouter', model: 'google.gemini-2.5-flash-lite', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'document-summarize')?.models)
       .toEqual([{ provider: 'aws-bedrock', model: 'amazon.nova-lite', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'document-topics')?.models)
       .toEqual([{ provider: 'aws-bedrock', model: 'amazon.nova-lite', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'describe-visual-identity')?.models)
-      .toEqual([{ provider: 'openrouter', model: 'qwen.qwen3-vl-32b-instruct', priority: 100 }]);
+      .toEqual([{ provider: 'openrouter', model: 'google.gemini-2.5-flash-lite', priority: 100 }]);
   });
 
   test('delegates generic data primitives to the node helper implementation', async () => {

@@ -9,6 +9,7 @@ describe('Gallery caption backfill safety', () => {
     expect(source).toContain('caption._rev == @revision');
     expect(source).toContain('computePerceptualHashBatch');
     expect(source).toContain('imageCaptionTool.execute');
+    expect(source).toContain('imageAnalysisDataUrl(bytes, 768)');
     expect(source).toContain('scoreVersion: 1');
     expect(source).not.toMatch(/documentStorage\.(?:delete|upload|copy)/);
     expect(source).not.toContain('REMOVE ');

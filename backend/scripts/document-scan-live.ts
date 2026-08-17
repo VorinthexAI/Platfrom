@@ -62,7 +62,7 @@ try {
     const response = await provider.execute<{ imageUrls: string[]; purpose: 'document-transcription' }, { results: { caption: string; score: number }[] }>({ actionId: 'caption-image', modelId: captionConstants.IMAGE_CAPTION_MODEL, externalModelId: captionConstants.IMAGE_CAPTION_EXTERNAL_MODEL_ID, input: { imageUrls: urls, purpose: 'document-transcription' }, organizationKey: 'nexus' });
     const visual = response.output;
     visual.results.forEach(({ caption }, index) => console.log(`\n===== PAGE ${index + 1}: VISUAL AI =====\n${caption}`));
-    console.log(`\nVerified Qwen transcription for ${visual.results.length} real image page(s).`);
+    console.log(`\nVerified visual transcription for ${visual.results.length} real image page(s).`);
   } else {
     const result = await scanDocumentImages({ scopeKey: newId(), name: 'Live scan verification', pages, idempotencyKey: `live-${Date.now()}` }, `live-${environment}`, {
       onPageResults(values) { diagnostics = values; },

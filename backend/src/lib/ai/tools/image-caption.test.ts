@@ -34,7 +34,7 @@ describe('image.caption tool', () => {
     })).rejects.toThrow();
   });
 
-  test('pins default execution to the static OpenRouter Qwen vision route', async () => {
+  test('pins default execution to the static OpenRouter Gemini vision route', async () => {
     const source = await Bun.file(new URL('./image-caption.ts', import.meta.url)).text();
     expect(imageCaptionTool.name).toBe('image.caption');
     expect(imageCaptionTool.providerDefinition.description).toContain('integer quality score from 1 to 100');
@@ -42,7 +42,7 @@ describe('image.caption tool', () => {
     expect(source).toContain("mode: 'fixed'");
     expect(source).toContain("actionSlug: 'caption-image'");
     expect(source).toContain("providerSlug: 'openrouter'");
-    expect(IMAGE_CAPTION_MODEL).toBe('qwen.qwen3-vl-32b-instruct');
+    expect(IMAGE_CAPTION_MODEL).toBe('google.gemini-2.5-flash-lite');
   });
 
   test('rejects malformed executor output', async () => {

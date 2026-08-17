@@ -8,6 +8,7 @@ import { perceptualHashDistance, PERCEPTUAL_HASH_DUPLICATE_DISTANCE } from '@/li
 import type { GalleryRepository } from './repository';
 import { processGalleryUploadBatch } from './upload-processing';
 import { sanitizeGalleryImage } from './image-location';
+import { imageDataUrl } from './image-reference';
 
 const now = '2026-08-17T12:00:00.000Z';
 const keys = ['cmrnlzf650002qc7k4p5zem5w', 'cmrnlzf650002qc7k4p5zem5x', 'cmrnlzf650002qc7k4p5zem5y'];
@@ -53,6 +54,7 @@ describe('Gallery upload batch processing', () => {
     const result = await processGalleryUploadBatch(keys, {
       repository: f.repository,
       storage: f.storage,
+      resolveImageReference: async (bytes) => imageDataUrl(bytes, 'image/jpeg'),
       sanitizeImage: async (bytes) => ({ bytes: new Uint8Array(bytes), coordinates: sanitized++ === 0 ? { latitude: 59.3293, longitude: 18.0686 } : undefined }),
       reverseGeocode: async (coordinates) => { expect(coordinates).toEqual({ latitude: 59.3293, longitude: 18.0686 }); return { city: 'Stockholm', country: 'Sweden', countryCode: 'SE' }; },
       captionBatch: async (_organizationKey, urls) => { captionRequests.push(urls); return urls.map((_, index) => ({ caption: `Caption ${index + 1}`, score: 90 - index })); },
@@ -136,9 +138,9 @@ describe('Gallery upload batch processing', () => {
       async delete(key: string) { objects.delete(key); },
       async copy({ sourceKey, destinationKey }: { sourceKey: string; destinationKey: string }) { objects.set(destinationKey, objects.get(sourceKey)!); return { storageKey: destinationKey }; },
     };
-    let requestedCaptions = 0;
+    let requestedCaptions = 0, resolvedCaptions = 0;
     await processGalleryUploadBatch(keys, {
-      repository, storage, resolveImageReference: async () => 'https://images.example/image.jpg',
+      repository, storage, resolveImageReference: async () => { resolvedCaptions += 1; return 'https://images.example/image.jpg'; },
       captionBatch: async (_organization, urls) => { requestedCaptions += urls.length; return urls.map((_, index) => ({ caption: `Canonical ${index + 1}`, score: index === 0 ? 96 : 81 })); },
       processBatch: (inputs, dependencies) => processImages(inputs, {
         ...dependencies,
@@ -150,6 +152,7 @@ describe('Gallery upload batch processing', () => {
       }),
     });
     expect(requestedCaptions).toBe(2);
+    expect(resolvedCaptions).toBe(2);
     expect(captions.map(({ score }) => score)).toEqual([96, 81]);
     expect(images[0].imageCaptionKey).toBe(images[1].imageCaptionKey);
     expect(images[2].imageCaptionKey).not.toBe(images[0].imageCaptionKey);

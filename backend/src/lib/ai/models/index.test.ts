@@ -14,7 +14,7 @@ describe('logical model slugs', () => {
       'amazon.polly-generative',
       'qwen.qwen3-embedding-8b',
       'aws.transcribe-standard',
-      'qwen.qwen3-vl-32b-instruct',
+      'google.gemini-2.5-flash-lite',
     ]);
     for (const slug of MODEL_SLUGS) expect(modelSlugSchema.parse(slug)).toBe(slug);
   });

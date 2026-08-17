@@ -24,6 +24,8 @@ export const openRouterCredentialsSchema = openRouterProviderConfigSchema;
 export type OpenRouterCredentials = OpenRouterProviderConfig;
 
 const PROVIDER_ID = 'openrouter' as const;
+const privateThroughputRoute = { data_collection: 'deny', sort: 'throughput', require_parameters: true } as const;
+type PrivateThroughputRoute = typeof privateThroughputRoute;
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_ATTEMPTS = 3;
 const MAX_RETRY_DELAY_MS = 5_000;
@@ -148,18 +150,18 @@ async function captionImages<TInput, TOutput>(
     content.push({ type: 'text', text: `Image ${index + 1}:` });
     const references = input.referenceTexts?.[index];
     if (references) content.push({ type: 'text', text: `Primary AWS Textract text:\n${references.primary}\n\nSecondary visual transcription:\n${references.secondary}` });
-    content.push({ type: 'image_url', image_url: { url, detail: 'high' } });
+    content.push({ type: 'image_url', image_url: { url, detail: input.purpose === 'caption' ? 'auto' : 'high' } });
   });
 
   try {
     const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming & {
-      provider: { data_collection: 'deny' };
+      provider: PrivateThroughputRoute;
     } = {
       model: request.externalModelId,
       messages: [{ role: 'user', content }],
       temperature: 0.2,
       max_tokens: Math.min(input.imageUrls.length * (input.purpose === 'caption' ? 300 : 1_500), 16_000),
-      provider: { data_collection: 'deny' },
+      provider: privateThroughputRoute,
       response_format: {
         type: 'json_schema',
         json_schema: {
@@ -227,12 +229,11 @@ async function cleanupDocument<TInput, TOutput>(
       messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: input.text }],
       temperature: 0.1,
       max_tokens: Math.min(8_000, Math.max(512, Math.ceil(input.text.length / 2))),
-      // Qwen's text endpoint currently has no ZDR route; keep provider training/data collection disabled.
-      provider: { data_collection: 'deny' },
+      provider: privateThroughputRoute,
       response_format: { type: 'json_schema', json_schema: { name: 'document_cleanup', strict: true, schema: {
         type: 'object', additionalProperties: false, required: ['content'], properties: { content: { type: 'string', minLength: 1, maxLength: 50_000 } },
       } } },
-    } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming & { provider: { data_collection: 'deny' } }, { signal: resolveRequestSignal(request) });
+    } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming & { provider: PrivateThroughputRoute }, { signal: resolveRequestSignal(request) });
     const rawContent = completion.choices[0]?.message.content;
     if (!rawContent) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter document cleanup returned no content');
     let output: DocumentCleanupOutput;
@@ -267,11 +268,11 @@ async function describeVisualIdentity<TInput, TOutput>(
       messages: [{ role: 'user', content }],
       temperature: 0.1,
       max_tokens: 2_000,
-      provider: { data_collection: 'deny' },
+      provider: privateThroughputRoute,
       response_format: { type: 'json_schema', json_schema: { name: 'visual_identity_description', strict: true, schema: {
         type: 'object', additionalProperties: false, required: ['description'], properties: { description: { type: 'string', minLength: 1, maxLength: 12_000 } },
       } } },
-    } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming & { provider: { data_collection: 'deny' } }, { signal: resolveRequestSignal(request) });
+    } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming & { provider: PrivateThroughputRoute }, { signal: resolveRequestSignal(request) });
     const rawContent = completion.choices[0]?.message.content;
     if (!rawContent) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter visual identity description returned no content');
     let output: VisualIdentityDescriptionOutput;

@@ -8,7 +8,7 @@ import { EMBEDDING_DIMENSIONS, embedText } from '@/lib/embeddings';
 import { newId } from '@/lib/ids';
 import { computePerceptualHashBatch } from '@/lib/perceptual-hash';
 import { getDefaultGalleryRepository, type GalleryRepository } from './repository';
-import { imageDataUrl } from './image-reference';
+import { imageAnalysisDataUrl } from './image-reference';
 import { reverseGeocodeImage, sanitizeGalleryImage, type ImageCoordinates, type ImageLocation } from './image-location';
 
 export type GalleryUploadBatchMetrics = ImageProcessingMetrics & {
@@ -39,7 +39,7 @@ export async function processGalleryUploadBatch(uploadKeys: readonly string[], d
   const repository = dependencies.repository ?? getDefaultGalleryRepository();
   const storage = dependencies.storage ?? documentStorage;
   const processBatch = dependencies.processBatch ?? processImages;
-  const resolveImageReference = dependencies.resolveImageReference ?? (async (bytes: Uint8Array) => imageDataUrl(bytes, 'image/jpeg'));
+  const resolveImageReference = dependencies.resolveImageReference ?? (async (bytes: Uint8Array) => imageAnalysisDataUrl(bytes, 768));
   const sanitizeImage = dependencies.sanitizeImage ?? sanitizeGalleryImage;
   const reverseGeocode = dependencies.reverseGeocode ?? reverseGeocodeImage;
   const failureStatus = dependencies.failureStatus ?? 'failed';
@@ -72,10 +72,7 @@ export async function processGalleryUploadBatch(uploadKeys: readonly string[], d
     if (preparationFailure) throw preparationFailure.reason;
     const stored = prepared.map((result) => (result as PromiseFulfilledResult<{ bytes: Uint8Array; stagingKey: string; location?: ImageLocation }>).value);
     const downloadDurationMs = performance.now() - downloadStartedAt;
-    const sourceUrls = new Map<Uint8Array, string>();
-    await Promise.all(uploads.map(async (upload, index) => {
-      if (upload.processingMode === 'library') sourceUrls.set(stored[index]!.bytes, await resolveImageReference(stored[index]!.bytes));
-    }));
+    const captionableBytes = new Set(uploads.flatMap((upload, index) => upload.processingMode === 'library' ? [stored[index]!.bytes] : []));
     const organizationKey = uploads[0]!.organizationKey;
     if (uploads.some((upload) => upload.organizationKey !== organizationKey)) throw new Error('Gallery upload batches must belong to one organization.');
     const captionBatch = dependencies.captionBatch ?? (async (organization, imageUrls) => (await imageCaptionTool.execute({ imageUrls }, { organizationKey: organization })).results);
@@ -90,9 +87,9 @@ export async function processGalleryUploadBatch(uploadKeys: readonly string[], d
       hashBatch: computePerceptualHashBatch,
       captionBatch: async (values) => {
         const results: Array<GeneratedImageCaption | undefined> = Array(values.length);
-        const libraryIndices = values.map((value, index) => sourceUrls.has(value.bytes) ? index : -1).filter((index) => index >= 0);
+        const libraryIndices = values.map((value, index) => captionableBytes.has(value.bytes) ? index : -1).filter((index) => index >= 0);
         if (libraryIndices.length > 0) {
-          const generated = await captionBatch(organizationKey, libraryIndices.map((index) => sourceUrls.get(values[index]!.bytes)!));
+          const generated = await captionBatch(organizationKey, await Promise.all(libraryIndices.map((index) => resolveImageReference(values[index]!.bytes))));
           if (generated.length !== libraryIndices.length) throw new Error('Gallery caption count did not match the unmatched image count.');
           libraryIndices.forEach((index, position) => { results[index] = generated[position]; });
         }

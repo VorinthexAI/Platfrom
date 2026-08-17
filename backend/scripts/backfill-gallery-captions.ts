@@ -7,7 +7,7 @@ import { getPersonalAuthContext } from '@/lib/db/personal-auth-context.node';
 import { getUserByEmailHash } from '@/lib/db/users.node';
 import { currentEmbeddingSchema, embedText } from '@/lib/embeddings';
 import { computePerceptualHashBatch, perceptualHashSegments } from '@/lib/perceptual-hash';
-import { signedImageUrl } from '@/lib/gallery/image-url';
+import { imageAnalysisDataUrl } from '@/lib/gallery/image-reference';
 
 const BATCH_SIZE = 20;
 const execute = process.argv.includes('--execute');
@@ -63,7 +63,7 @@ while (true) {
   const hashStartedAt = performance.now();
   const hashes = await computePerceptualHashBatch(objects.map(({ bytes }) => bytes));
   const hashDurationMs = performance.now() - hashStartedAt;
-  const urls = await Promise.all(rows.map(({ storageKey }) => signedImageUrl(storageKey)));
+  const urls = await Promise.all(objects.map(({ bytes }) => imageAnalysisDataUrl(bytes, 768)));
   const captionStartedAt = performance.now();
   const generated: Array<{ caption: string; score: number }> = Array(rows.length);
   const organizations = new Map<string, number[]>();
