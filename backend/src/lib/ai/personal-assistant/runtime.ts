@@ -7,6 +7,7 @@ import { imageSearchTool } from '@/lib/ai/tools/image-search';
 import type { TravelService } from '@/lib/travel/service';
 import type { EmailService } from '@/lib/email-inbox/service';
 import type { BookService } from '@/lib/books/service';
+import type { UserSettingsService } from '@/lib/user-settings/service';
 import { executeAction, type ExecuteActionOptions } from '@/lib/ai/router';
 import type { RouteRequestInput } from '@/lib/ai/router/route-request';
 import { assistantSourceSchema, assistantSurfaceSchema, defaultAssistantCapabilityRegistry, type AssistantCapability, type AssistantCapabilityContext, type AssistantCapabilityRegistry } from './capabilities';
@@ -51,6 +52,7 @@ export interface PersonalAssistantDependencies {
   travel?: TravelService;
   email?: EmailService;
   books?: BookService;
+  userSettings?: UserSettingsService;
   gallery?: AssistantCapabilityContext['gallery'];
 }
 
@@ -221,6 +223,7 @@ export async function runPersonalAssistant(
       travel: dependencies.travel,
       email: dependencies.email,
       books: dependencies.books,
+      userSettings: dependencies.userSettings,
       gallery: dependencies.gallery,
     });
     domainToolExecuted = true;

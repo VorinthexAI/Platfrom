@@ -4,7 +4,9 @@ export type AuthUser = {
   name?: string;
   firstName?: string;
   alias?: string;
+  countryCode?: string;
   isOnboarded: boolean;
+  settings: { archive: { showOnlyFavorites: boolean } };
 };
 
 export type AuthContext = {
@@ -80,13 +82,17 @@ export function extractSessionTokens(
 export function normalizeAuthContext(value: unknown): AuthContext {
   const body = record(value);
   const rawUser = record(body?.user) ?? record(body?.identity);
+  const settings = record(rawUser?.settings);
+  const archiveSettings = record(settings?.archive);
   const user = rawUser ? {
     ...rawUser,
     email: stringValue(rawUser, "email"),
     name: stringValue(rawUser, "name", "display_name"),
     firstName: stringValue(rawUser, "firstName", "first_name"),
     alias: stringValue(rawUser, "alias"),
+    countryCode: stringValue(rawUser, "countryCode", "country_code"),
     isOnboarded: booleanValue(rawUser, "isOnboarded", "is_onboarded"),
+    settings: { archive: { showOnlyFavorites: booleanValue(archiveSettings, "showOnlyFavorites", "show_only_favorites") } },
   } : null;
   return {
     user,
@@ -112,4 +118,14 @@ export function hasCompleteAuthContext(context: AuthContext | null) {
 export function firstNameFor(user: AuthUser | null) {
   const candidate = user?.firstName ?? user?.name ?? user?.alias ?? user?.email?.split("@")[0];
   return candidate?.trim().split(/\s+/)[0] || "there";
+}
+
+export function languageForCountryCode(countryCode?: string) {
+  if (!countryCode) return "English";
+  try {
+    const languageCode = new Intl.Locale(`und-${countryCode.toUpperCase()}`).maximize().language;
+    return new Intl.DisplayNames(["en"], { type: "language" }).of(languageCode) ?? "English";
+  } catch {
+    return "English";
+  }
 }

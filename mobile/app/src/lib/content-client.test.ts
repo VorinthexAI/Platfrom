@@ -70,6 +70,7 @@ const {
   readContentDocument,
   readContentDocumentSources,
   renameContentDocument,
+  restoreContentDocumentVersion,
   saveContentDocument,
   scanContentDocument,
   searchContent,
@@ -356,12 +357,20 @@ test("runs note enhancement, translation, and rename through document tools", as
 
   expect((await enhanceContentDocument("document", "Improve clarity")).text).toBe("Improved note");
   expect((await translateContentDocument("document", "Spanish")).persistedDocumentKey).toBe("document");
-  expect((await createContentDocumentVersion("document", "Enhanced version")).label).toBe("Enhanced version");
+  expect((await createContentDocumentVersion("document", "Enhanced version", "Generated copy", "enhancement")).label).toBe("Enhanced version");
   expect((await renameContentDocument("document", "Renamed note")).name).toBe("Renamed note");
   expect(calls[0]?.body.input).toEqual({ documentKeys: ["document"], instruction: "Improve clarity", mode: "preview" });
   expect(calls[1]?.body.input).toMatchObject({ documentKeys: ["document"], targetLanguage: "Spanish", preserveFormatting: true, mode: "replace" });
-  expect(calls[2]?.body.input).toMatchObject({ documentKeys: ["document"], labels: { document: "Enhanced version" } });
+  expect(calls[2]?.body.input).toMatchObject({ documentKeys: ["document"], labels: { document: "Enhanced version" }, contents: { document: "Generated copy" }, types: { document: "enhancement" } });
   expect(calls[3]?.body.input).toMatchObject({ renames: [{ documentKey: "document", name: "Renamed note" }], atomic: false });
+});
+
+test("restores a document version without a backup when requested", async () => {
+  responseForTool = () => ({ data: { success: true, data: { results: [{ success: true, data: { document: { key: "document", name: "Note", content: "Version content", isFavorite: false, updatedAt: "2026-08-10T00:04:00.000Z" } } }] } } });
+
+  await restoreContentDocumentVersion("document", "version", false);
+
+  expect(calls[0]?.body.input).toMatchObject({ restores: [{ documentKey: "document", versionKey: "version", createBackupVersion: false }] });
 });
 
 test("sends Archive requests to the personal assistant surface", async () => {

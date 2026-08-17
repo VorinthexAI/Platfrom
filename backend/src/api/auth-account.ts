@@ -24,6 +24,7 @@ export function buildAuthAccountResponse(
       alias_slug: user.alias_slug,
       country_code: user.countryCode,
       is_onboarded: user.isOnboarded,
+      settings: user.settings,
     },
     organization: {
       key: context.organization.key,

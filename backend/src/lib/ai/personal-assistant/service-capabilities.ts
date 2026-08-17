@@ -6,6 +6,8 @@ import type { ContentToolName } from '@/lib/ai/tools/content-schemas';
 import { createTravelService } from '@/lib/travel/service';
 import { createEmailService, type EmailActor } from '@/lib/email-inbox/service';
 import { createBookService } from '@/lib/books/service';
+import { createUserSettingsService } from '@/lib/user-settings/service';
+import { userSettingsSchema } from '@/lib/db/users.node';
 import type { AssistantCapability, AssistantCapabilityContext } from './capabilities';
 
 const key = z.string().cuid();
@@ -62,6 +64,8 @@ function currentDocumentKey(documentKey: string | undefined, context: AssistantC
 }
 
 export const archiveCapabilities = [
+  capability('user.settings.read', 'Read the current user\'s Archive display settings.', z.object({}).strict(), async (_input, context) => (context.userSettings ?? createUserSettingsService()).read(identity(context).userKey)),
+  capability('user.settings.update', 'Update the current user\'s Archive display settings.', userSettingsSchema, async (input, context) => (context.userSettings ?? createUserSettingsService()).update(identity(context).userKey, input), 'archive'),
   archive('archive_folder_list', 'List direct Archive folders or all descendants under the root or a parent folder.', z.object({ parentFolderKey: key.optional(), includeDescendants: z.boolean().optional(), includeArchived: z.boolean().optional(), includeDocuments: z.boolean().optional(), cursor: z.string().optional(), limit: z.number().int().min(1).max(100).optional() }).strict(), 'folder.list', (input, context) => ({ scopeKey: context.domain.runtimeScopeKey, ...input })),
   archive('archive_folder_create', 'Create a folder in Archive. Use this whenever the user asks to create or add a folder.', z.object({ name, parentFolderKey: key.optional(), description: z.string().trim().min(1).max(10_000).optional() }).strict(), 'folder.create', (input, context) => ({ folders: [{ scopeKey: context.domain.runtimeScopeKey, ...input }] }), true),
   archive('archive_folder_update', 'Update the metadata or favorite state of an Archive folder.', z.object({ folderKey: key, name: name.optional(), description: z.string().trim().min(1).max(10_000).nullable().optional(), isFavorite: z.boolean().optional() }).strict().refine(({ name, description, isFavorite }) => name !== undefined || description !== undefined || isFavorite !== undefined), 'folder.update', (input) => ({ updates: [input] }), true),

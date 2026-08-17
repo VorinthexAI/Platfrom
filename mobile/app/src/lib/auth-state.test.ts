@@ -1,7 +1,7 @@
 import { beforeEach, expect, mock, test } from "bun:test";
 
 const realContext = {
-  user: { key: "user", email: "user@example.com", is_onboarded: true },
+  user: { key: "user", email: "user@example.com", country_code: "SE", is_onboarded: true, settings: { archive: { showOnlyFavorites: false } } },
   organization: { key: "org" },
   main_scope: { key: "scope" },
   content_execution: { agent_key: "agent" },
@@ -23,6 +23,7 @@ let getCalls = 0;
 let clearContextCalls = 0;
 let clearTokenCalls = 0;
 let revokeCalls = 0;
+const patchCalls: unknown[] = [];
 let unauthorizedListener: (() => void) | undefined;
 
 mock.module("@/lib/api-client", () => ({
@@ -46,7 +47,7 @@ mock.module("@/lib/api-client", () => ({
     unauthorizedListener = listener;
     return () => undefined;
   },
-  patchJson: async () => realContext,
+  patchJson: async (path: string, input: unknown) => { patchCalls.push({ path, input }); return realContext; },
   revokeRemoteSession: async () => { revokeCalls += 1; },
 }));
 mock.module("@/lib/auth-context-vault", () => ({
@@ -75,6 +76,7 @@ beforeEach(() => {
   clearContextCalls = 0;
   clearTokenCalls = 0;
   revokeCalls = 0;
+  patchCalls.length = 0;
   useAuthStore.setState({ status: "bootstrapping", user: null, organization: null, scope: null, contentExecution: null });
 });
 
@@ -127,4 +129,14 @@ test("does not clear a session for a non-bearer 401", async () => {
 
   expect(clearTokenCalls).toBe(0);
   expect(session).toEqual(storedSession);
+});
+
+test("optimistically updates and persists Archive favorite filtering", async () => {
+  session = storedSession;
+  await useAuthStore.getState().bootstrap();
+
+  useAuthStore.getState().setArchiveShowOnlyFavorites(true);
+  expect(useAuthStore.getState().user?.settings.archive.showOnlyFavorites).toBe(true);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(patchCalls).toContainEqual({ path: "/auth/me/settings", input: { archive: { showOnlyFavorites: true } } });
 });

@@ -27,6 +27,7 @@ export const documentSchema = z.object({
   _semanticChunkingSkipped: z.boolean().optional(),
   speechStorageKeys: z.array(z.string().trim().min(1)).optional(),
   sourceStorageKeys: z.array(z.string().trim().min(1)).max(12).optional(),
+  currentVersionKey: z.string().cuid().nullable().optional(),
   isFavorite: z.boolean().default(false),
   deletedAt: z.string().datetime().nullable().default(null),
   _internalDeletion: z.object({

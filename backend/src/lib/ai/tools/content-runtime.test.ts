@@ -295,8 +295,16 @@ describe('Content runtime', () => {
 
     const shared = await runContentTool('document.share', { shares: [{ documentKey: rootKey, permission: 'read' }] }, f.context, { repository: f.repository, random: (size) => new Uint8Array(size).fill(3) });
     expect(shared.results[0]?.success).toBe(true);
-    const versioned = await runContentTool('document.create-version', { documentKeys: [rootKey] }, f.context, { repository: f.repository, embed: async () => embedding });
+    const versioned = await runContentTool('document.create-version', { documentKeys: [rootKey], contents: { [rootKey]: 'Generated version' }, types: { [rootKey]: 'enhancement' } }, f.context, { repository: f.repository, embed: async () => embedding });
     expect(versioned.results[0]?.success).toBe(true);
+    expect([...f.versions.values()].at(-1)?.content).toBe('Generated version');
+    expect([...f.versions.values()].at(-1)?.type).toBe('enhancement');
+    expect(f.documents.get(rootKey).currentVersionKey).toBeUndefined();
+
+    const currentVersion = await runContentTool('document.create-version', { documentKeys: [rootKey] }, f.context, { repository: f.repository, embed: async () => embedding });
+    expect(f.documents.get(rootKey).currentVersionKey).toBe(currentVersion.results[0]?.data?.version.key);
+    await runContentTool('document.restore-version', { restores: [{ documentKey: rootKey, versionKey: versioned.results[0]?.data?.version.key, createBackupVersion: false }] }, f.context, { repository: f.repository, embed: async () => embedding });
+    expect(f.documents.get(rootKey).currentVersionKey).toBe(versioned.results[0]?.data?.version.key);
   });
 
   test('rejects cross-scope document moves instead of performing a partial transfer', async () => {
@@ -732,12 +740,13 @@ describe('Content runtime', () => {
     favoriteOnlyDocument.isFavorite = true;
     favoriteOnlyDocument.updatedAt = '2026-07-23T11:00:00.000Z';
     const metadataReplay = await runContentTool('scope.content.search', { scopeKey: f.scopeKey, query: 'launch roadmap' }, f.context, dependencies);
-    expect(metadataReplay.cached).toBe(true);
-    expect(embeddingCalls).toBe(1);
-    expect(summaryCalls).toBe(10);
+    expect(metadataReplay.cached).toBe(false);
+    expect(metadataReplay.documents.find((document) => document.documentKey === favoriteOnlyDocument.key)?.isFavorite).toBe(true);
+    expect(embeddingCalls).toBe(2);
+    expect(summaryCalls).toBe(20);
     const history = await runContentTool('scope.content.search-history', { scopeKey: f.scopeKey }, f.context, dependencies);
     expect(history.history).toMatchObject([{ normalizedQuery: 'launch roadmap', contextDomain: 'content', usageCount: 3 }]);
-    expect(history.history[0]?.documents).toEqual(first.documents);
+    expect(history.history[0]?.documents).toEqual(metadataReplay.documents);
     const archivedDocument = f.documents.get(first.documents[0]!.documentKey);
     archivedDocument.deletedAt = now;
     const prunedHistory = await runContentTool('scope.content.search-history', { scopeKey: f.scopeKey }, f.context, dependencies);
@@ -748,7 +757,7 @@ describe('Content runtime', () => {
     const nestedDocumentKey = [...f.documents.keys()][1]!;
     f.documents.get(nestedDocumentKey).folderKey = childKey;
     const folderReplay = await runContentTool('scope.content.search', { scopeKey: f.scopeKey, folderKey: f.folderKey, query: 'launch roadmap' }, f.context, dependencies);
-    expect(folderReplay.folders).toEqual([{ key: childKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', score: 0.9 }]);
+    expect(folderReplay.folders).toEqual([{ key: childKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', isFavorite: false, score: 0.9 }]);
     expect(folderReplay.cached).toBe(false);
     expect(rows).toHaveLength(2);
     expect(folderReplay.documents.some((document) => document.documentKey === nestedDocumentKey)).toBe(true);
@@ -760,7 +769,7 @@ describe('Content runtime', () => {
     f.documents.get(first.documents[0]!.documentKey).semanticContentHash = 'a'.repeat(64);
     const invalidated = await runContentTool('scope.content.search', { scopeKey: f.scopeKey, query: 'launch roadmap' }, f.context, dependencies);
     expect(invalidated.cached).toBe(false);
-    expect(embeddingCalls).toBe(4);
+    expect(embeddingCalls).toBe(5);
     const otherContext = { ...f.context, principal: { ...f.context.principal, user: { key: newId() } } };
     const isolated = await runContentTool('scope.content.search-history', { scopeKey: f.scopeKey }, otherContext, dependencies);
     expect(isolated.history).toEqual([]);
@@ -874,12 +883,14 @@ describe('Content runtime', () => {
     expect(embeddedTexts).toContain('Notes\n\nHistorical exact body');
 
     f.documents.get(documentKey).embedding = legacy;
-    const generated = await runContentTool('document.translate', { documentKeys: [documentKey], targetLanguage: 'French', mode: 'replace' }, f.context, {
+    const generated = await runContentTool('document.translate', { documentKeys: [documentKey], targetLanguage: 'Swedish', instruction: 'Use concise headings.', mode: 'replace' }, f.context, {
       ...dependencies,
       runAction: async (action: string, input: any) => {
         if (action === 'translate') {
           expect(input.systemPrompt).toContain('collapse excessive blank lines');
           expect(input.systemPrompt).toContain('readable sections');
+          expect(input.systemPrompt).toContain('into Swedish');
+          expect(input.systemPrompt).toContain('Additional direction: Use concise headings.');
           return { text: '  Titre  \r\n\r\n\r\nCorps traduit  \r\n ' };
         }
         if (action === 'document-embed') return documentEmbed(input, { embed: async ({ text }) => { embeddedTexts.push(text); return embedding; }, dimensions: EMBEDDING_DIMENSIONS });

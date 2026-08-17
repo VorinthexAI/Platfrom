@@ -1,6 +1,7 @@
 import type { BookService } from '@/lib/books/service';
 import type { EmailService } from '@/lib/email-inbox/service';
 import type { TravelService } from '@/lib/travel/service';
+import type { UserSettingsService } from '@/lib/user-settings/service';
 import {
   archiveCapabilities,
   ascendCapabilities,
@@ -20,6 +21,7 @@ export interface WorkspaceToolDependencies {
   travel?: TravelService;
   email?: EmailService;
   books?: BookService;
+  userSettings?: UserSettingsService;
 }
 
 function publicDefinition(capability: AssistantCapability) {
@@ -36,6 +38,7 @@ function publicDefinition(capability: AssistantCapability) {
         travel: dependencies.travel,
         email: dependencies.email,
         books: dependencies.books,
+        userSettings: dependencies.userSettings,
       };
       const result = await capability.execute(rawInput, context);
       if (result.kind !== 'continue') throw new Error(`Public workspace tool ${capability.definition.name} returned a UI-only result.`);

@@ -66,6 +66,7 @@ import { completeGalleryUploads, createGalleryCollection, createGallerySubject, 
 import { travelHandlers } from './travel';
 import { emailHandlers } from './email-inbox';
 import { bookHandlers } from './books';
+import { userSettingsHandlers } from './user-settings';
 
 const challengeHash = z.string().regex(/^[a-f0-9]{64}$/);
 const tokenHashBodyBase = strictObject({ token_hash: challengeHash });
@@ -406,6 +407,8 @@ export function registerRoutes(app: Hono) {
   app.post('/auth/guest', bootstrapGuestAuth);
   app.get('/auth/me', getAuthAccount);
   app.patch('/auth/me', patchAuthAccount);
+  app.get('/auth/me/settings', userSettingsHandlers.read);
+  app.patch('/auth/me/settings', userSettingsHandlers.update);
   app.post('/auth/logout', logoutAuthAccount);
 
   app.post('/app/events', recordPlatformEvent);

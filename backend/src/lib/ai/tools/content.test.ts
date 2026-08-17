@@ -120,8 +120,10 @@ describe('Content input contracts', () => {
   });
 
   test('validates version label keys and lengths at the contract boundary', () => {
-    expect(contentToolInputSchemas['document.create-version'].parse({ documentKeys: [key], labels: { [key]: 'Release' } })).toMatchObject({ labels: { [key]: 'Release' } });
+    expect(contentToolInputSchemas['document.create-version'].parse({ documentKeys: [key], labels: { [key]: 'Release' }, contents: { [key]: 'Generated copy' }, types: { [key]: 'enhancement' } })).toMatchObject({ labels: { [key]: 'Release' }, contents: { [key]: 'Generated copy' }, types: { [key]: 'enhancement' } });
     expect(() => contentToolInputSchemas['document.create-version'].parse({ documentKeys: [key], labels: { [newId()]: 'Wrong document' } })).toThrow();
+    expect(() => contentToolInputSchemas['document.create-version'].parse({ documentKeys: [key], contents: { [newId()]: 'Wrong document' } })).toThrow();
+    expect(() => contentToolInputSchemas['document.create-version'].parse({ documentKeys: [key], types: { [newId()]: 'translation' } })).toThrow();
     expect(() => contentToolInputSchemas['document.create-version'].parse({ documentKeys: [key], labels: { [key]: 'x'.repeat(121) } })).toThrow();
   });
 

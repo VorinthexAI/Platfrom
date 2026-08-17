@@ -37,6 +37,7 @@ export type ContentDocument = {
   mimeType?: string;
   sizeBytes?: number;
   sourceImageCount?: number;
+  currentVersionKey?: string | null;
   isFavorite: boolean;
   updatedAt: string;
 };
@@ -53,6 +54,7 @@ export type ContentDocumentVersion = {
   key: string;
   documentKey: string;
   version: number;
+  type?: "enhancement" | "translation";
   label?: string;
   createdAt: string;
   content?: string;
@@ -111,6 +113,7 @@ export type ContentSearchDocument = {
   documentKey: string;
   name: string;
   extension?: ContentDocument["extension"];
+  isFavorite: boolean;
   score: number;
   summary?: string;
   scopeKey?: string;
@@ -334,10 +337,10 @@ export async function translateContentDocument(documentKey: string, targetLangua
   return result.data;
 }
 
-export async function createContentDocumentVersion(documentKey: string, label: string) {
+export async function createContentDocumentVersion(documentKey: string, label: string, content?: string, type?: ContentDocumentVersion["type"]) {
   const data = await callContentTool<{
     results: { success: boolean; data?: { version: ContentDocumentVersion }; error?: { message: string } }[];
-  }>("document.create-version", { documentKeys: [documentKey], labels: { [documentKey]: label }, idempotencyKey: createContentMutationKey() });
+  }>("document.create-version", { documentKeys: [documentKey], labels: { [documentKey]: label }, ...(content ? { contents: { [documentKey]: content } } : {}), ...(type ? { types: { [documentKey]: type } } : {}), idempotencyKey: createContentMutationKey() });
   const result = data.results[0];
   if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The document version could not be created.");
   return result.data.version;
@@ -439,11 +442,11 @@ export async function findContentDocumentVersion(versionKey: string) {
   return result.data.version;
 }
 
-export async function restoreContentDocumentVersion(documentKey: string, versionKey: string) {
+export async function restoreContentDocumentVersion(documentKey: string, versionKey: string, createBackupVersion = true) {
   const data = await callContentTool<{
     results: { success: boolean; data?: { document: ContentDocument }; error?: { message: string } }[];
   }>("document.restore-version", {
-    restores: [{ documentKey, versionKey, createBackupVersion: true }],
+    restores: [{ documentKey, versionKey, createBackupVersion }],
     idempotencyKey: createContentMutationKey(),
   });
   const result = data.results[0];

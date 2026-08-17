@@ -7,6 +7,7 @@ import { imageSearchTool } from '@/lib/ai/tools/image-search';
 import type { TravelService } from '@/lib/travel/service';
 import type { EmailService } from '@/lib/email-inbox/service';
 import type { BookService } from '@/lib/books/service';
+import type { UserSettingsService } from '@/lib/user-settings/service';
 import type { GalleryOperationContext, GalleryOperationName } from '@/lib/gallery/operations';
 import { archiveCapabilities, ascendCapabilities, compassCapabilities, signalCapabilities } from './service-capabilities';
 import { galleryAssistantCapabilities, galleryAssistantCapabilityNames } from './gallery-capabilities';
@@ -36,6 +37,7 @@ export interface AssistantCapabilityContext {
   travel?: TravelService;
   email?: EmailService;
   books?: BookService;
+  userSettings?: UserSettingsService;
   gallery?: Partial<Record<GalleryOperationName, (input: unknown, context: GalleryOperationContext) => Promise<unknown>>>;
 }
 

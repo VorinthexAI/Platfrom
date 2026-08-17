@@ -138,7 +138,7 @@ const rank: Record<Role, number> = { viewer: 1, moderator: 2, admin: 3, owner: 4
 const ROUTED_EMBEDDING_CONCURRENCY = 8;
 const PERSISTED_AUDIO_MAX_CHARACTERS = 120_000;
 const PERSISTED_AUDIO_MAX_BYTES = 100 * 1024 * 1024;
-const CONTENT_SEARCH_CACHE_VERSION = 3;
+const CONTENT_SEARCH_CACHE_VERSION = 4;
 const CONTENT_SEARCH_CONTEXT_DOMAIN = 'content' as const;
 const scrypt = promisify(nodeScrypt);
 const MUTATIONS = new Set<ContentToolName>([
@@ -916,7 +916,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         ...await currentVersionSemantics(source),
       });
       try {
-        await repo.updateDocument(source.key, { ...transformed, updatedAt: now() });
+        await repo.updateDocument(source.key, { ...transformed, currentVersionKey: null, updatedAt: now() });
       } catch (error) {
         try { await repo.deleteVersion(backup.key); }
         catch (cleanupError) { throw new ContentError('CONTENT_CONFLICT', 'AI replacement failed and backup compensation requires retry.', tool, { action: 'cleanup', resourceKey: source.key, cause: new AggregateError([error, cleanupError]), retryable: true }); }
@@ -1645,6 +1645,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           try {
             const updated = await mutationRepository.updateDocument(current.key, {
               ...(transformed ?? {}),
+              ...(hasRepresentation ? { currentVersionKey: null } : {}),
               ...(item.isFavorite !== undefined ? { isFavorite: item.isFavorite } : {}),
               updatedAt: nextUpdatedAt(current.updatedAt),
             }, { expectedUpdatedAt: item.expectedUpdatedAt });
@@ -1994,13 +1995,16 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         preflight: async () => { await document(key, 'moderator', false); },
         run: async (mutationRepository: ContentRepository) => {
           const current = await document(key, 'moderator', false);
+          const content = input.contents?.[key] ?? current.content;
           const version = await mutationRepository.createVersion({
             scopeKey: current.scopeKey,
             documentKey: key,
+            type: input.types?.[key],
             label: input.labels?.[key],
-            content: current.content,
-            ...await currentVersionSemantics(current, input.labels?.[key]),
+            content,
+            ...await currentVersionSemantics({ ...current, content }, input.labels?.[key]),
           });
+          if (content === current.content) await mutationRepository.updateDocument(current.key, { currentVersionKey: version.key });
           return { version: versionView(version) };
         },
       })), input.atomic, repo);
@@ -2091,6 +2095,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           try {
             const restored = await mutationRepository.updateDocument(current.key, {
               content: version.content,
+              currentVersionKey: version.key,
               ...await generatedSemantics(current.name, version.content, current.key, current.scopeKey),
               updatedAt: now(),
             });
@@ -2353,7 +2358,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         historyFolderKeys = new Set([input.folderKey, ...((input.includeDescendants ?? true) ? descendants(await foldersIn(input.scopeKey), input.folderKey).map((item) => item.key) : [])]);
       }
       const store = dependencies.searchQueries ?? (await import('@/lib/db/content-search-queries.node')).contentSearchQueries;
-      const history = await store.list({ actorKey: member.user.key, scopeKey: input.scopeKey, contextDomain: CONTENT_SEARCH_CONTEXT_DOMAIN, folderKey: input.folderKey ?? null, includeDescendants: input.folderKey ? input.includeDescendants ?? true : false, limit: input.limit });
+      const history = await store.list({ actorKey: member.user.key, scopeKey: input.scopeKey, contextDomain: CONTENT_SEARCH_CONTEXT_DOMAIN, folderKey: input.folderKey ?? null, includeDescendants: input.folderKey ? input.includeDescendants ?? true : false, cacheVersion: CONTENT_SEARCH_CACHE_VERSION, limit: input.limit });
       result = { history: await Promise.all(history.map(async (item) => ({
         ...item,
         documents: (await Promise.all(item.documents.map(async (stored) => {
@@ -2386,8 +2391,8 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         revisionFolders = allFolders.filter((item) => relevant.has(item.key));
       }
       const revisionDocuments = folderKeys ? allDocuments.filter((item) => item.folderKey && folderKeys!.includes(item.folderKey)) : allDocuments;
-      const folderRevision = revisionFolders.map((item) => `${item.key}:${item.parentFolderKey ?? ''}:${item.updatedAt}:${item.deletedAt ?? ''}:${item._internalDeletion ? 'pending' : ''}`);
-      const documentRevision = revisionDocuments.map((item) => `${item.key}:${item.name}:${item.folderKey ?? ''}:${item.semanticContentHash ?? ''}:${item.deletedAt ?? ''}:${item._internalDeletion ? 'pending' : ''}`);
+      const folderRevision = revisionFolders.map((item) => `${item.key}:${item.parentFolderKey ?? ''}:${item.updatedAt}:${item.isFavorite ? 'favorite' : ''}:${item.deletedAt ?? ''}:${item._internalDeletion ? 'pending' : ''}`);
+      const documentRevision = revisionDocuments.map((item) => `${item.key}:${item.name}:${item.folderKey ?? ''}:${item.semanticContentHash ?? ''}:${item.isFavorite ? 'favorite' : ''}:${item.deletedAt ?? ''}:${item._internalDeletion ? 'pending' : ''}`);
       const sourceRevision = createHash('sha256').update([...folderRevision, ...documentRevision].sort().join('\n')).digest('hex');
       const cached = await store.get({ actorKey: member.user.key, scopeKey: input.scopeKey, contextDomain: CONTENT_SEARCH_CONTEXT_DOMAIN, normalizedQuery, folderKey, includeDescendants, cacheVersion });
       const cachedValue = cached?.output as { result?: unknown; sourceRevision?: string; minimumScore?: number; includeSummaries?: boolean; replayable?: boolean } | undefined;
@@ -2447,8 +2452,8 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             }
           }
         }
-        const folders = activeFolders.sort((left, right) => right.score - left.score || left.folder.key.localeCompare(right.folder.key)).slice(0, 4).map(({ folder: current, score }) => ({ key: current.key, scopeKey: current.scopeKey, ...(current.parentFolderKey ? { parentFolderKey: current.parentFolderKey } : {}), name: current.name, ...(current.description ? { description: current.description } : {}), score: Math.max(0, Math.min(1, score)) }));
-        const documents = activeDocuments.sort((left, right) => right.score - left.score || left.document.key.localeCompare(right.document.key)).slice(0, 10).map(({ document: current, score }) => ({ documentKey: current.key, scopeKey: current.scopeKey, ...(current.folderKey ? { folderKey: current.folderKey } : {}), name: current.name, ...(current.extension ? { extension: current.extension } : {}), score: Math.max(0, Math.min(1, score)) }));
+        const folders = activeFolders.sort((left, right) => right.score - left.score || left.folder.key.localeCompare(right.folder.key)).slice(0, 4).map(({ folder: current, score }) => ({ key: current.key, scopeKey: current.scopeKey, ...(current.parentFolderKey ? { parentFolderKey: current.parentFolderKey } : {}), name: current.name, ...(current.description ? { description: current.description } : {}), isFavorite: Boolean(current.isFavorite), score: Math.max(0, Math.min(1, score)) }));
+        const documents = activeDocuments.sort((left, right) => right.score - left.score || left.document.key.localeCompare(right.document.key)).slice(0, 10).map(({ document: current, score }) => ({ documentKey: current.key, scopeKey: current.scopeKey, ...(current.folderKey ? { folderKey: current.folderKey } : {}), name: current.name, ...(current.extension ? { extension: current.extension } : {}), isFavorite: Boolean(current.isFavorite), score: Math.max(0, Math.min(1, score)) }));
         const freshResult = { query: input.query, folders, documents, cached: false };
         await store.record({ key: d.id(), actorKey: member.user.key, scopeKey: input.scopeKey, contextDomain: CONTENT_SEARCH_CONTEXT_DOMAIN, query: input.query, normalizedQuery, folderKey, includeDescendants, cacheVersion, output: { result: freshResult, sourceRevision, minimumScore: input.minimumScore, includeSummaries: false, replayable: true }, now: now() });
         result = freshResult;
@@ -2463,7 +2468,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         const folders = [];
         for (const match of folderMatches) {
           if (match.score < input.minimumScore || match.folder.scopeKey !== input.scopeKey || folderKeys && !folderKeys.includes(match.folder.key) || match.folder.deletedAt || match.folder._internalDeletion || !await activeFolderHierarchy(match.folder.key, match.folder.scopeKey)) continue;
-          folders.push({ key: match.folder.key, scopeKey: match.folder.scopeKey, ...(match.folder.parentFolderKey ? { parentFolderKey: match.folder.parentFolderKey } : {}), name: match.folder.name, ...(match.folder.description ? { description: match.folder.description } : {}), score: Math.max(0, Math.min(1, match.score)) });
+          folders.push({ key: match.folder.key, scopeKey: match.folder.scopeKey, ...(match.folder.parentFolderKey ? { parentFolderKey: match.folder.parentFolderKey } : {}), name: match.folder.name, ...(match.folder.description ? { description: match.folder.description } : {}), isFavorite: Boolean(match.folder.isFavorite), score: Math.max(0, Math.min(1, match.score)) });
           if (folders.length === 4) break;
         }
         const selectedDocuments = [];
@@ -2488,7 +2493,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
               complete = false;
               summary = `This document contains semantically relevant information for "${input.query}".`;
             }
-            return { complete, document: { documentKey: current.key, scopeKey: current.scopeKey, ...(current.folderKey ? { folderKey: current.folderKey } : {}), name: current.name, ...(current.extension ? { extension: current.extension } : {}), score: Math.max(0, Math.min(1, score)), summary } };
+            return { complete, document: { documentKey: current.key, scopeKey: current.scopeKey, ...(current.folderKey ? { folderKey: current.folderKey } : {}), name: current.name, ...(current.extension ? { extension: current.extension } : {}), isFavorite: Boolean(current.isFavorite), score: Math.max(0, Math.min(1, score)), summary } };
           }));
           summariesComplete &&= batch.every(({ complete }) => complete);
           documents.push(...batch.map(({ document }) => document));

@@ -3,7 +3,7 @@ import { db } from './client';
 import { toArangoDoc, withArangoKey } from './base';
 
 export const CONTENT_SEARCH_QUERIES_COLLECTION = 'contentSearchQueries';
-export const CONTENT_SEARCH_CACHE_VERSION = 3;
+export const CONTENT_SEARCH_CACHE_VERSION = 4;
 export const CONTENT_SEARCH_CONTEXT_DOMAIN = 'content' as const;
 
 export const contentSearchQuerySchema = z.object({
@@ -21,7 +21,7 @@ export const contentSearchQuerySchema = z.object({
   searchedAt: z.string().datetime(),
 }).strict();
 
-const storedDocumentSchema = z.object({ documentKey: z.string().cuid(), scopeKey: z.string().cuid(), folderKey: z.string().cuid().optional(), name: z.string().trim().min(1), extension: z.string().trim().min(1).optional(), score: z.number().min(0).max(1), summary: z.string().trim().min(1).optional() }).strict();
+const storedDocumentSchema = z.object({ documentKey: z.string().cuid(), scopeKey: z.string().cuid(), folderKey: z.string().cuid().optional(), name: z.string().trim().min(1), extension: z.string().trim().min(1).optional(), isFavorite: z.boolean(), score: z.number().min(0).max(1), summary: z.string().trim().min(1).optional() }).strict();
 
 export const contentSearchQueries = {
   async get(input: { actorKey: string; scopeKey: string; contextDomain: typeof CONTENT_SEARCH_CONTEXT_DOMAIN; normalizedQuery: string; folderKey: string | null; includeDescendants: boolean; cacheVersion: number }) {
@@ -69,10 +69,11 @@ export const contentSearchQueries = {
         REMOVE query IN @@collection
     `, { '@collection': CONTENT_SEARCH_QUERIES_COLLECTION, actorKey: input.actorKey, scopeKey: input.scopeKey });
   },
-  async list(input: { actorKey: string; scopeKey: string; contextDomain: typeof CONTENT_SEARCH_CONTEXT_DOMAIN; folderKey: string | null; includeDescendants: boolean; limit: number }) {
+  async list(input: { actorKey: string; scopeKey: string; contextDomain: typeof CONTENT_SEARCH_CONTEXT_DOMAIN; folderKey: string | null; includeDescendants: boolean; cacheVersion: number; limit: number }) {
     const cursor = await db.query(`
       FOR query IN @@collection
         FILTER query.actorKey == @actorKey && query.scopeKey == @scopeKey && query.contextDomain == @contextDomain
+        FILTER query.cacheVersion == @cacheVersion
         FILTER query.folderKey == @folderKey && query.includeDescendants == @includeDescendants
         SORT query.searchedAt DESC
         LIMIT @limit
