@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { isLegacyIndex, normalizeLegacyDocumentSharePermission } from './arango-migrate-indexes';
-import { legacyContentRepresentations, stageLegacyDocumentShares } from './content-migration';
+import { stageLegacyDocumentShares } from './content-migration';
 import { collections, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateEmailReplyMetadata, migrateImageCaptions, retireRemovedActions } from './arango-migrate';
 import { EMBEDDING_DIMENSIONS, embeddingMetadata } from '../lib/embeddings';
 import { DOCUMENT_CHUNK_MAX_WORDS, DOCUMENT_MAX_CHUNKS, documentSemanticHash } from '../lib/ai/document-processing/chunking';
@@ -83,7 +83,8 @@ describe('Arango migration indexes', () => {
   test('drops obsolete search uniqueness and expiry indexes', () => {
     expect(isLegacyIndex('contentSearchQueries', ['actorKey', 'scopeKey', 'normalizedQuery'])).toBe(true);
     expect(isLegacyIndex('contentSearchQueries', ['expiresAt'])).toBe(true);
-    expect(isLegacyIndex('contentSearchQueries', ['actorKey', 'scopeKey', 'normalizedQuery', 'folderKey', 'includeDescendants'])).toBe(false);
+    expect(isLegacyIndex('contentSearchQueries', ['actorKey', 'scopeKey', 'normalizedQuery', 'folderKey', 'includeDescendants'])).toBe(true);
+    expect(isLegacyIndex('contentSearchQueries', ['actorKey', 'scopeKey', 'contextDomain', 'normalizedQuery', 'folderKey', 'includeDescendants'])).toBe(false);
   });
   test('never classifies a currently desired index as legacy', () => {
     expect(isLegacyIndex('documentVersions', ['storageKey'], [['storageKey']])).toBe(false);
@@ -93,7 +94,20 @@ describe('Arango migration indexes', () => {
     const audio = collections.find(({ name }) => name === 'documentAudioVersions');
     expect(audio?.skipEmbedding).toBe(true);
     expect(audio?.indexes).toContainEqual({ fields: ['scopeKey', 'documentKey', 'version'], unique: true });
+    expect(audio?.indexes).toContainEqual({ fields: ['scopeKey', 'documentKey', 'isCurrent'] });
     expect(audio?.indexes).toContainEqual({ fields: ['storageKey'], unique: true });
+  });
+  test('backfills document audio playback state without selecting legacy versions', async () => {
+    const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    expect(source).toContain('FILTER !HAS(audio, "isCurrent") || !HAS(audio, "playbackPositionMs")');
+    expect(source).toContain('isCurrent: HAS(audio, "isCurrent") ? audio.isCurrent : false');
+    expect(source).toContain('playbackPositionMs: HAS(audio, "playbackPositionMs") ? audio.playbackPositionMs : 0');
+  });
+  test('declares private immutable document summary indexes', () => {
+    const summaries = collections.find(({ name }) => name === 'documentSummaries');
+    expect(summaries?.skipEmbedding).toBe(true);
+    expect(summaries?.indexes).toContainEqual({ fields: ['documentKey', 'version'], unique: true });
+    expect(summaries?.indexes).toContainEqual({ fields: ['scopeKey', 'documentKey', 'createdAt'] });
   });
   test('declares sparse direct-channel identity uniqueness and poll vote uniqueness', async () => {
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
@@ -107,6 +121,12 @@ describe('Arango migration indexes', () => {
     const backfill = await Bun.file(new URL('../../scripts/backfill-semantic-embeddings.ts', import.meta.url)).text();
     expect(backfill).toContain('spec.includeMetadata ? { ...values, provider: EMBEDDING_PROVIDER_ID, model: EMBEDDING_MODEL } : values');
     expect(backfill).toContain('...(spec.includeMetadata ? { embedKeys: spec.embedKeys } : {})');
+  });
+  test('allows sibling folders to share names', async () => {
+    const folderNameIndex = collections.find(({ name }) => name === 'folders')?.indexes?.find(({ fields }) => fields.join('.') === 'scopeKey.parentFolderKey.name');
+    expect(folderNameIndex?.unique).not.toBe(true);
+    const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    expect(source).toContain('Dropped obsolete unique folder-name index');
   });
   test('declares travel and book-generation collection indexes', () => {
     expect(collections.filter(({ name }) => ['places', 'trips', 'tripPlaces', 'placeVisits'].includes(name)).map(({ name }) => name)).toEqual(['places', 'trips', 'tripPlaces', 'placeVisits']);
@@ -125,12 +145,6 @@ describe('Arango migration indexes', () => {
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
     expect(source).toContain('FILTER !HAS(progress, "userKey") REMOVE progress IN bookProgress');
     expect(source).toContain('Dropped obsolete scope-shared book progress index');
-  });
-  test('derives deterministic historical representations from version content', () => {
-    expect(legacyContentRepresentations('First <line>\n\nSecond')).toEqual({
-      html: '<p>First &lt;line&gt;</p><p>Second</p>',
-    });
-    expect(() => legacyContentRepresentations('   ')).toThrow('must not be blank');
   });
   test('migration never hashes missing data or borrows current documents for version history', async () => {
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
@@ -153,27 +167,44 @@ describe('Arango migration indexes', () => {
     expect(source.indexOf('await migrateGenericContentContracts(targetDb)')).toBeLessThan(source.indexOf('for (const spec of collections)'));
   });
   test('repairs recoverable document and version representations without borrowing data', async () => {
-    const previousContentArray = process.env.CONTENT_VERSION_CONTENT_ARRAY_ENABLED;
-    process.env.CONTENT_VERSION_CONTENT_ARRAY_ENABLED = 'true';
-    try {
     const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
     const documentMigration = migrationDatabase('documents', { _key: 'document-1', _rev: 'document-rev', name: 'Current', html: '   ', content: 'Current body', embedding, ...embeddingMetadata(), json: {} });
     await migrateContentDocuments(documentMigration.database);
-    expect(documentMigration.update?.bindVars?.updates).toEqual([{ _key: 'document-1', _rev: 'document-rev', source: { name: 'Current', html: '   ', content: 'Current body' }, html: '<p>Current body</p>', content: 'Current body', contentChunks: ['Current body'], embedding, chunkEmbeddings: [embedding], semanticChunkCount: 1, semanticContentHash: documentSemanticHash('Current body') }]);
+    expect(documentMigration.update?.bindVars?.updates).toEqual([{ _key: 'document-1', _rev: 'document-rev', source: { name: 'Current', html: '   ', content: 'Current body' }, content: 'Current body', contentChunks: ['Current body'], embedding, chunkEmbeddings: [embedding], semanticChunkCount: 1, semanticContentHash: documentSemanticHash('Current body') }]);
     expect(documentMigration.update?.query).toContain('UNSET(MERGE(document');
     expect(documentMigration.update?.query).toContain('document._rev == patch._rev');
     expect(documentMigration.update?.query).toContain('UNSET(patch, "_key", "_rev", "source")');
+    expect(documentMigration.update?.query).toContain('UNSET(replacement, "html"');
     expect(documentMigration.update?.query).not.toContain('"storageKey", "sizeBytes"');
 
     const versionMigration = migrationDatabase('documentVersions', { _key: 'version-1', _rev: 'version-rev', html: '\n\t', content: 'Historical body', embedding, ...embeddingMetadata(), json: {}, storageKey: 'legacy', sizeBytes: 12, updatedAt: '2026-01-01T00:00:00.000Z' });
     await migrateContentVersions(versionMigration.database);
-    expect(versionMigration.update?.bindVars?.updates).toEqual([{ _key: 'version-1', _rev: 'version-rev', source: { html: '\n\t', content: 'Historical body' }, html: '<p>Historical body</p>', content: ['Historical body'], embedding, chunkEmbeddings: [embedding], semanticChunkCount: 1, semanticContentHash: documentSemanticHash('Historical body') }]);
+    expect(versionMigration.update?.bindVars?.updates).toEqual([{ _key: 'version-1', _rev: 'version-rev', source: { html: '\n\t', content: 'Historical body' }, content: 'Historical body', embedding, chunkEmbeddings: [embedding], semanticChunkCount: 1, semanticContentHash: documentSemanticHash('Historical body') }]);
     expect(versionMigration.update?.query).toContain('snapshot._rev == patch._rev');
     expect(versionMigration.update?.query).toContain('"json", "storageKey", "sizeBytes", "updatedAt"');
+    expect(versionMigration.update?.query).toContain('UNSET(replacement, "html"');
     expect(versionMigration.update?.query).toContain('migration must not infer deletion ownership');
+  });
+  test('recovers content from each HTML-only row before removing HTML', async () => {
+    const previous = process.env.CONTENT_E2E;
+    process.env.CONTENT_E2E = 'true';
+    try {
+      const documentMigration = migrationDatabase('documents', { _key: 'html-only-document', _rev: 'document-rev', name: 'Legacy', html: '<h1>Recovered</h1><p>Body &amp; details.</p>', embedding: [] });
+      await migrateContentDocuments(documentMigration.database);
+      expect((documentMigration.update?.bindVars?.updates as Array<Record<string, unknown>>)[0]).toMatchObject({ content: 'Recovered\n\nBody & details.' });
+
+      const versionMigration = migrationDatabase('documentVersions', { _key: 'html-only-version', _rev: 'version-rev', html: '<p>Historical only</p>', embedding: [] });
+      await migrateContentVersions(versionMigration.database);
+      expect((versionMigration.update?.bindVars?.updates as Array<Record<string, unknown>>)[0]).toMatchObject({ content: 'Historical only' });
+      const structuredMigration = migrationDatabase('documents', { _key: 'structured-html-document', _rev: 'structured-rev', name: 'Structured', html: '<table><tr><td>Alpha</td><td>Beta</td></tr></table><img alt="Revenue Q4"><p>2 &lt; 3 and 5 &gt; 4</p>', embedding: [] });
+      await migrateContentDocuments(structuredMigration.database);
+      expect((structuredMigration.update?.bindVars?.updates as Array<Record<string, unknown>>)[0]).toMatchObject({ content: 'Alpha\tBeta\n\nRevenue Q4\n\n2 < 3 and 5 > 4' });
+      const staleContentMigration = migrationDatabase('documents', { _key: 'stale-content-document', _rev: 'stale-rev', name: 'Canonical', html: '<p>Complete canonical body</p>', content: 'Truncated', embedding: [] });
+      await migrateContentDocuments(staleContentMigration.database);
+      expect((staleContentMigration.update?.bindVars?.updates as Array<Record<string, unknown>>)[0]).toMatchObject({ content: 'Complete canonical body' });
     } finally {
-      if (previousContentArray === undefined) delete process.env.CONTENT_VERSION_CONTENT_ARRAY_ENABLED;
-      else process.env.CONTENT_VERSION_CONTENT_ARRAY_ENABLED = previousContentArray;
+      if (previous === undefined) delete process.env.CONTENT_E2E;
+      else process.env.CONTENT_E2E = previous;
     }
   });
   test('regenerates legacy 1536 embeddings without allowing a concurrent replacement', async () => {
@@ -192,20 +223,13 @@ describe('Arango migration indexes', () => {
       else process.env.CONTENT_E2E = previous;
     }
   });
-  test('keeps version content strings during the compatibility rollout phase', async () => {
-    const previous = process.env.CONTENT_VERSION_CONTENT_ARRAY_ENABLED;
-    process.env.CONTENT_VERSION_CONTENT_ARRAY_ENABLED = 'false';
-    try {
+  test('keeps version content as a string', async () => {
       const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
       const migration = migrationDatabase('documentVersions', { _key: 'version-rollout', _rev: 'version-rev', html: '<p>Historical body</p>', content: 'Historical body', embedding });
       await migrateContentVersions(migration.database);
       const [patch] = migration.update?.bindVars?.updates as Array<Record<string, unknown>>;
       expect(patch.content).toBe('Historical body');
       expect(patch.chunkEmbeddings).toEqual([embedding]);
-    } finally {
-      if (previous === undefined) delete process.env.CONTENT_VERSION_CONTENT_ARRAY_ENABLED;
-      else process.env.CONTENT_VERSION_CONTENT_ARRAY_ENABLED = previous;
-    }
   });
   test('marks oversized legacy content for flat-vector fallback without blocking migration', async () => {
     const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);

@@ -7,15 +7,16 @@ describe('unified tool registry', () => {
   test('has one unique definition for every public tool name', () => {
     expect(new Set(TOOL_NAMES).size).toBe(TOOL_NAMES.length);
     expect(new Set(TOOL_DEFINITIONS.map(({ name }) => name)).size).toBe(TOOL_DEFINITIONS.length);
-    expect(TOOL_NAMES).toHaveLength(179);
-    expect(TOOL_DEFINITIONS).toHaveLength(179);
-    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 135);
+    expect(TOOL_NAMES).toHaveLength(189);
+    expect(TOOL_DEFINITIONS).toHaveLength(189);
+    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 137);
     expect(TOOL_DEFINITIONS.map(({ name }) => name)).toEqual([...TOOL_NAMES]);
     expect(TOOL_NAMES.filter((name) => name === 'chat')).toHaveLength(1);
     expect(TOOL_NAMES).not.toContain('orchestrator.chat');
     expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'chat')).toHaveLength(1);
     expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'transcribe')).toHaveLength(1);
     expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'audio.generate')).toHaveLength(1);
+    expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'document.summary.audio.generate')).toHaveLength(1);
     expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'image.caption')).toHaveLength(1);
     expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'image.create-visual-identity')).toHaveLength(1);
     expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'image.search')).toHaveLength(1);
@@ -32,6 +33,8 @@ describe('unified tool registry', () => {
     expect(TOOL_NAMES).toContain('trip.create');
     expect(TOOL_NAMES).toContain('email.draft.send');
     expect(TOOL_NAMES).toContain('book.chapter.progress');
+    expect(TOOL_NAMES).toContain('user.settings.read');
+    expect(TOOL_NAMES).toContain('user.settings.update');
     expect(TOOL_NAMES.every((name) => !name.includes('_'))).toBe(true);
   });
 
@@ -63,5 +66,14 @@ describe('unified tool registry', () => {
   test('keeps canonical Content mutations in dot notation', async () => {
     expect(TOOL_NAMES.filter((name) => name === 'folder.create')).toHaveLength(1);
     expect(TOOL_NAMES).not.toContain('archive_folder_create');
+  });
+
+  test('executes user settings through the injected canonical service', async () => {
+    const organizationKey = newId(), scopeKey = newId(), userKey = newId();
+    const contentContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, status: 'active' } } } as unknown as DomainToolContext;
+    const calls: unknown[] = [];
+    const userSettingsService = { read: async (key: string) => { calls.push(key); return { archive: { showOnlyFavorites: false } }; } } as any;
+    await runTool('user.settings.read', '', {}, { contentContext, userSettingsService });
+    expect(calls).toEqual([userKey]);
   });
 });

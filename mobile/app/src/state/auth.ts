@@ -8,6 +8,7 @@ import { tokenVault } from "@/lib/token-vault";
 import { useOnboardingStore } from "@/state/onboarding";
 
 let authOperation = 0;
+let settingsWrite: Promise<unknown> = Promise.resolve();
 
 export type AuthStatus = "bootstrapping" | "authenticated" | "unauthenticated";
 
@@ -20,6 +21,7 @@ type AuthState = {
   bootstrap: () => Promise<void>;
   hydrate: () => Promise<void>;
   reconnectContentContext: () => Promise<void>;
+  setArchiveShowOnlyFavorites: (showOnlyFavorites: boolean) => void;
   completeOnboarding: () => Promise<void>;
   signOut: () => Promise<void>;
 };
@@ -40,7 +42,7 @@ function isGuest(user: AuthUser | null) {
   return user?.email?.endsWith("@guest.vorinthex.com") ?? false;
 }
 
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthState>((set, get) => ({
   status: "bootstrapping",
   user: null,
   organization: null,
@@ -103,6 +105,31 @@ export const useAuthStore = create<AuthState>((set) => ({
       await writeAuthContext(context);
       if (operation === authOperation) set({ status: "authenticated", ...context });
     }
+  },
+  setArchiveShowOnlyFavorites: (showOnlyFavorites) => {
+    const state = get();
+    if (!state.user) return;
+    const user = { ...state.user, settings: { ...state.user.settings, archive: { ...state.user.settings.archive, showOnlyFavorites } } };
+    const context = { user, organization: state.organization, scope: state.scope, contentExecution: state.contentExecution };
+    set({ user });
+    void writeAuthContext(context);
+    const userKey = user.key;
+    if (!userKey) return;
+    settingsWrite = settingsWrite.catch(() => undefined).then(() => {
+      if (get().user?.key !== userKey) return;
+      return patchJson("/auth/me/settings", { archive: { showOnlyFavorites } });
+    }).catch(async () => {
+      const currentUser = get().user;
+      if (!currentUser || currentUser.key !== userKey || currentUser.settings.archive.showOnlyFavorites !== showOnlyFavorites) return;
+      try {
+        const context = await loadContext();
+        if (get().user?.key !== userKey || context.user?.key !== userKey) return;
+        await writeAuthContext(context);
+        if (get().user?.key === userKey) set({ status: "authenticated", ...context });
+      } catch {
+        // The next authenticated refresh reconciles an offline preference write.
+      }
+    });
   },
   completeOnboarding: async () => {
     const operation = ++authOperation;

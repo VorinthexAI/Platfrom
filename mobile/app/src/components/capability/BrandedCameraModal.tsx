@@ -10,6 +10,7 @@ type Props = {
   title: string;
   hint?: string;
   count?: number;
+  countUnit?: string;
   maximum?: number;
   bottomContent?: ReactNode;
   disabled?: boolean;
@@ -20,7 +21,7 @@ type Props = {
   onDone?: () => void;
 };
 
-export function BrandedCameraModal({ title, hint = "Keep the page flat and fill the frame", count = 0, maximum = 1, bottomContent, disabled = false, doneLoading = false, externalError, onCapture, onClose, onDone }: Props) {
+export function BrandedCameraModal({ title, hint = "Keep the page flat and fill the frame", count = 0, countUnit, maximum = 1, bottomContent, disabled = false, doneLoading = false, externalError, onCapture, onClose, onDone }: Props) {
   const insets = useSafeAreaInsets();
   const camera = useRef<CameraView>(null);
   const [permission, requestPermission] = useCameraPermissions();
@@ -52,7 +53,7 @@ export function BrandedCameraModal({ title, hint = "Keep the page flat and fill 
         <View pointerEvents="box-none" style={[styles.overlay, { paddingTop: insets.top + spacing.sm, paddingBottom: insets.bottom + spacing.lg }]}>
           <View style={styles.topBar}>
             <Button accessibilityLabel="Close camera" contentMode="raw" disabled={capturing || disabled} onPress={onClose} size="sm" variant="icon"><CloseIcon size="sm" /></Button>
-            <View style={styles.heading}><Text style={styles.title}>{title}</Text><Text accessibilityLiveRegion="polite" style={styles.count}>{count} of {maximum}</Text></View>
+            <View style={styles.heading}><Text style={styles.title}>{title}</Text><Text accessibilityLiveRegion="polite" style={styles.count}>{count} of {maximum}{countUnit ? ` ${countUnit}` : ""}</Text></View>
             <View style={styles.headerSide} />
           </View>
           <View style={styles.guide}><View style={styles.guideCornerTopLeft} /><View style={styles.guideCornerTopRight} /><View style={styles.guideCornerBottomLeft} /><View style={styles.guideCornerBottomRight} /></View>
@@ -96,7 +97,7 @@ const styles = StyleSheet.create({
   hint: { color: palette.muted, fontFamily: fonts.regular, fontSize: 12, textAlign: "center" },
   controls: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   controlSide: { alignItems: "center", minWidth: 82 },
-  shutter: { borderRadius: 36, height: 72, overflow: "hidden", paddingHorizontal: 0, paddingVertical: 0, width: 72 },
+  shutter: { height: 83, overflow: "hidden", paddingHorizontal: 0, paddingVertical: 0, width: 80 },
   error: { color: palette.danger, fontFamily: fonts.regular, fontSize: 12, textAlign: "center" },
   permission: { alignItems: "center", flex: 1, gap: spacing.md, justifyContent: "center", paddingHorizontal: spacing.xl },
   permissionTitle: { color: palette.text, fontFamily: fonts.semibold, fontSize: 22 },

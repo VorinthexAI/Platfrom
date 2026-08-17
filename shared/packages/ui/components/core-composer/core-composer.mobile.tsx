@@ -9,10 +9,7 @@ import {
 import {
   AccessibilityInfo,
   Animated,
-  BackHandler,
   Keyboard,
-  PanResponder,
-  Platform,
   StyleSheet,
   Text,
   TextInput as NativeTextInput,
@@ -21,11 +18,13 @@ import {
   type ViewStyle,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Reanimated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import Svg, { Defs, LinearGradient, Stop, Text as SvgText } from "react-native-svg";
 
 import { Button } from "../button/button.mobile";
+import { BottomSheet } from "../bottom-sheet/bottom-sheet.mobile";
 import { TextInput } from "../text-input/text-input.mobile";
-import { CloseIcon } from "../../icons/close/close.mobile";
+import { useKeyboard } from "../../hooks/use-keyboard.mobile";
 import { colors, spacing } from "../../tokens";
 
 export type CoreComposerProps = {
@@ -143,7 +142,7 @@ function RotatingPrompt({ prompts }: { prompts: readonly string[] }) {
           fontFamily="Geist_400Regular"
           fontSize="13"
           x="0"
-          y="26"
+          y="25"
         >
           {prompt}
         </SvgText>
@@ -175,257 +174,189 @@ export function CoreComposer({
   value,
 }: CoreComposerProps) {
   const insets = useSafeAreaInsets();
+  const keyboardVisible = useKeyboard();
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [inputHeight, setInputHeight] = useState(COLLAPSED_INPUT_HEIGHT);
-  const [sheetTranslateY] = useState(() => new Animated.Value(0));
+  const [inputSelection, setInputSelection] = useState<{ start: number; end: number }>();
   const inputRef = useRef<NativeTextInput>(null);
+  const intentionalFocus = useRef(false);
   const onFocusChangeRef = useRef(onFocusChange);
   onFocusChangeRef.current = onFocusChange;
   const showPrompt = value.length === 0;
+  const keyboardSpacerHeight = useSharedValue(0);
+  const keyboardSpacerStyle = useAnimatedStyle(() => ({ height: keyboardSpacerHeight.value }));
+
+  useEffect(() => {
+    keyboardSpacerHeight.value = withTiming(keyboardVisible ? 300 : 0, { duration: 300 });
+  }, [keyboardSpacerHeight, keyboardVisible]);
 
   const closeSheet = useCallback(() => {
     Keyboard.dismiss();
     inputRef.current?.blur();
+    intentionalFocus.current = false;
     setSheetOpen(false);
+    setInputHeight(COLLAPSED_INPUT_HEIGHT);
+    setInputSelection(undefined);
     onFocusChange?.(false);
-  }, [onFocusChange, sheetTranslateY]);
-
-  useEffect(() => {
-    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
-    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
-    const showSubscription = Keyboard.addListener(showEvent, () => setKeyboardVisible(true));
-    const hideSubscription = Keyboard.addListener(hideEvent, () => setKeyboardVisible(false));
-    return () => {
-      showSubscription.remove();
-      hideSubscription.remove();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!sheetOpen || Platform.OS !== "android") return;
-    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (keyboardVisible) Keyboard.dismiss();
-      else closeSheet();
-      return true;
-    });
-    return () => subscription.remove();
-  }, [closeSheet, keyboardVisible, sheetOpen]);
+  }, [onFocusChange]);
 
   function openSheet() {
     if (sheetOpen) return;
-    sheetTranslateY.setValue(0);
-    setSheetOpen(true);
+    setInputHeight(COLLAPSED_INPUT_HEIGHT);
+    setInputSelection({ start: 0, end: 0 });
     onFocusChangeRef.current?.(true);
+    setSheetOpen(true);
   }
 
   useEffect(() => {
     if (openRequest <= 0) return;
-    sheetTranslateY.setValue(0);
-    setSheetOpen(true);
+    setInputHeight(COLLAPSED_INPUT_HEIGHT);
+    setInputSelection({ start: 0, end: 0 });
     onFocusChange?.(true);
-    const frame = requestAnimationFrame(() => inputRef.current?.focus());
-    return () => cancelAnimationFrame(frame);
+    setSheetOpen(true);
   }, [openRequest]);
 
-  // Responder callbacks run only after gestures; the compiler otherwise treats the captured input ref as a render read.
-  // eslint-disable-next-line react-hooks/refs
-  const [panResponder] = useState(() => PanResponder.create({
-    onMoveShouldSetPanResponder: (_, gesture) => gesture.dy > 8 && Math.abs(gesture.dy) > Math.abs(gesture.dx) * 1.2,
-    onMoveShouldSetPanResponderCapture: (_, gesture) => gesture.dy > 8 && Math.abs(gesture.dy) > Math.abs(gesture.dx) * 1.2,
-    onPanResponderMove: (_, gesture) => sheetTranslateY.setValue(Math.max(0, gesture.dy)),
-    onPanResponderRelease: (_, gesture) => {
-      const projectedDistance = gesture.dy + Math.max(0, gesture.vy) * 140;
-      if (projectedDistance >= 88) closeSheet();
-      else Animated.spring(sheetTranslateY, { toValue: 0, useNativeDriver: true }).start();
-    },
-    onPanResponderTerminate: () => Animated.spring(sheetTranslateY, { toValue: 0, useNativeDriver: true }).start(),
-  }));
+  useEffect(() => {
+    if (!sheetOpen) return;
+    let selectionReleaseTimeout: ReturnType<typeof setTimeout> | undefined;
+    const focusTimeout = setTimeout(() => {
+      inputRef.current?.focus();
+      selectionReleaseTimeout = setTimeout(() => setInputSelection(undefined), 300);
+    }, 300);
+    return () => {
+      clearTimeout(focusTimeout);
+      if (selectionReleaseTimeout) clearTimeout(selectionReleaseTimeout);
+    };
+  }, [sheetOpen]);
+
+  useEffect(() => {
+    if (value.length !== 0) return;
+    const timeout = setTimeout(() => setInputHeight(COLLAPSED_INPUT_HEIGHT), 0);
+    return () => clearTimeout(timeout);
+  }, [value]);
 
   function submit() {
     if (!disabled && editable && value.trim()) onSubmit();
   }
 
-  return (
-    <View pointerEvents="box-none" style={styles.layer}>
-      {sheetOpen ? <View onStartShouldSetResponder={() => true} style={styles.backdrop} /> : null}
-      <Animated.View
-        pointerEvents="box-none"
-        style={[
-          styles.wrap,
-          style,
-          sheetOpen && styles.sheet,
-          {
-            bottom: keyboardVisible ? 0 : insets.bottom + 12,
-            ...(sheetOpen ? { top: insets.top, transform: [{ translateY: sheetTranslateY }] } : {}),
-          },
-        ]}
+  const composer = (expanded: boolean) => {
+    const multiline = expanded && inputHeight > COLLAPSED_INPUT_HEIGHT;
+    return <View style={[styles.composer, expanded && styles.composerOpen]}>
+    {onLeadingPress ? (
+      <Button
+        accessibilityLabel={leadingAccessibilityLabel ?? "Core actions"}
+        contentMode="raw"
+        disabled={leadingDisabled}
+        onPress={onLeadingPress}
+        size="sm"
+        style={multiline ? styles.leadingTop : undefined}
+        variant="icon"
       >
-        {!sheetOpen ? accessory : null}
-        {sheetOpen ? (
-          <View style={styles.sheetHeader} {...panResponder.panHandlers}>
-            <View style={styles.dragTarget}>
-              <View style={styles.dragHandle} />
-            </View>
-            <Text accessibilityRole="header" style={styles.sheetTitle}>Core</Text>
-            <Button
-              accessibilityLabel="Close Core"
-              contentMode="raw"
-              onPress={closeSheet}
-              size="sm"
-              style={styles.closeButton}
-              variant="icon"
-            >
-              <CloseIcon size="sm" />
-            </Button>
-          </View>
-        ) : null}
-        <View onStartShouldSetResponder={() => sheetOpen} style={styles.sheetBody}>
-          {sheetOpen ? message : null}
-          <View style={[styles.composer, sheetOpen && styles.composerOpen]}>
-          {onLeadingPress ? (
-            <Button
-              accessibilityLabel={leadingAccessibilityLabel ?? "Core actions"}
-              contentMode="raw"
-              disabled={leadingDisabled}
-              onPress={onLeadingPress}
-              size="sm"
-              variant="icon"
-            >
-              {leading}
-            </Button>
-          ) : (
-            <View style={styles.leading}>{leading}</View>
-          )}
-          <View style={styles.inputArea}>
-            {showPrompt ? (
-              <View
-                accessibilityElementsHidden
-                importantForAccessibility="no-hide-descendants"
-                pointerEvents="none"
-                style={styles.prompt}
-              >
-                <RotatingPrompt prompts={prompts} />
-              </View>
-            ) : null}
-            <TextInput
-              accessibilityHint={accessibilityHint}
-              accessibilityLabel={accessibilityLabel}
-              editable={editable}
-              maxLength={maxLength}
-              multiline={sheetOpen}
-              numberOfLines={sheetOpen ? 6 : 1}
-              onChangeText={onChangeText}
-              onContentSizeChange={({ nativeEvent }) => {
-                if (sheetOpen) setInputHeight(Math.min(MAX_INPUT_HEIGHT, Math.max(COLLAPSED_INPUT_HEIGHT, nativeEvent.contentSize.height)));
-              }}
-              onFocus={openSheet}
-              onSubmitEditing={submit}
-              placeholder=""
-              ref={inputRef}
-              returnKeyType={sheetOpen ? "default" : "send"}
-              scrollEnabled={sheetOpen && inputHeight >= MAX_INPUT_HEIGHT}
-              style={[styles.input, { height: sheetOpen ? inputHeight : COLLAPSED_INPUT_HEIGHT }]}
-              textAlignVertical="top"
-              value={value}
-            />
-          </View>
-          <Button
-            accessibilityLabel="Send to Core"
-            contentMode="raw"
-            disabled={disabled || !value.trim()}
-            loading={loading}
-            onPress={submit}
-            size="sm"
-            variant="primary"
-          >
-            {sendIcon}
-          </Button>
-          </View>
-          {sheetOpen ? <View style={styles.sheetFooter}>
-            <Button onPress={closeSheet} size="lg" variant="secondary">Close</Button>
-          </View> : null}
+        {leading}
+      </Button>
+    ) : (
+      <View style={[styles.leading, multiline && styles.leadingTop]}>{leading}</View>
+    )}
+    <View style={[styles.inputArea, { height: expanded ? inputHeight : COLLAPSED_INPUT_HEIGHT }]}>
+      {expanded && value.length > 0 ? <Text
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+        onTextLayout={({ nativeEvent }) => {
+          const lineCount = Math.min(6, Math.max(1, nativeEvent.lines.length));
+          const nextHeight = INPUT_VERTICAL_PADDING * 2 + INPUT_LINE_HEIGHT * lineCount;
+          setInputHeight((current) => current === nextHeight ? current : nextHeight);
+        }}
+        pointerEvents="none"
+        style={styles.inputMeasure}
+      >{`${value}\u200b`}</Text> : null}
+      {showPrompt ? (
+        <View
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+          pointerEvents="none"
+          style={styles.prompt}
+        >
+          <RotatingPrompt prompts={prompts} />
         </View>
-      </Animated.View>
+      ) : null}
+      <TextInput
+        accessibilityHint={accessibilityHint}
+        accessibilityLabel={accessibilityLabel}
+        editable={editable}
+        maxLength={maxLength}
+        multiline={expanded}
+        numberOfLines={expanded ? undefined : 1}
+        onChangeText={(nextValue) => {
+          if (expanded && nextValue.length === 0) setInputHeight(COLLAPSED_INPUT_HEIGHT);
+          onChangeText(nextValue);
+        }}
+        onFocus={() => {
+          if (expanded) return;
+          if (intentionalFocus.current) {
+            intentionalFocus.current = false;
+            openSheet();
+            return;
+          }
+          inputRef.current?.blur();
+          Keyboard.dismiss();
+        }}
+        onPressIn={() => { if (!expanded) intentionalFocus.current = true; }}
+        onSubmitEditing={submit}
+        placeholder=""
+        ref={inputRef}
+        returnKeyType={expanded ? "default" : "send"}
+        scrollEnabled={expanded && inputHeight >= MAX_INPUT_HEIGHT - 1}
+        selection={expanded ? inputSelection : undefined}
+        style={[styles.input, !multiline && styles.inputSingleLine]}
+        textAlignVertical={multiline ? "top" : "center"}
+        value={value}
+      />
     </View>
+    <Button
+      accessibilityLabel="Send to Core"
+      contentMode="raw"
+      disabled={disabled || !value.trim()}
+      loading={loading}
+      onPress={submit}
+      size="sm"
+      style={multiline ? styles.sendBottom : undefined}
+      variant="primary"
+    >
+      {sendIcon}
+    </Button>
+  </View>;
+  };
+
+  return (
+    <>
+      <View pointerEvents="box-none" style={[styles.layer, {
+        marginTop: spacing.sm,
+        paddingBottom: Math.max(insets.bottom, spacing.sm),
+        paddingLeft: Math.max(insets.left, spacing.md),
+        paddingRight: Math.max(insets.right, spacing.md),
+      }]}>
+        {!sheetOpen ? <>{accessory}{composer(false)}</> : null}
+      </View>
+      <BottomSheet mutation onOpenChange={(open) => { if (!open) closeSheet(); }} open={sheetOpen} title="Core">
+        {sheetOpen ? <View style={[styles.sheetBodyOpen, style]}>
+          {message}
+          {composer(true)}
+          <Reanimated.View pointerEvents="none" style={keyboardSpacerStyle} />
+        </View> : null}
+      </BottomSheet>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
   layer: {
-    bottom: 0,
-    left: 0,
-    position: "absolute",
-    right: 0,
-    top: 0,
+    gap: 6,
     zIndex: 20,
   },
-  backdrop: {
-    bottom: 0,
-    backgroundColor: "rgba(3, 5, 7, 0.72)",
-    borderRadius: 0,
-    left: 0,
-    position: "absolute",
-    right: 0,
-    top: 0,
-  },
-  wrap: {
-    gap: 6,
-    left: spacing.md,
-    position: "absolute",
-    right: spacing.md,
-  },
-  sheet: {
-    backgroundColor: colors.page,
-    borderColor: colors.border,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    borderWidth: 1,
-    borderBottomWidth: 0,
-    left: 0,
-    paddingBottom: spacing.md,
-    paddingHorizontal: spacing.md,
-    right: 0,
-  },
-  sheetHeader: {
-    minHeight: 86,
-    marginHorizontal: -spacing.md,
-    paddingHorizontal: 20,
-    position: "relative",
-  },
-  dragTarget: {
-    alignItems: "center",
-    minHeight: 36,
-    paddingBottom: 14,
-    paddingTop: 12,
-  },
-  dragHandle: {
-    backgroundColor: colors.muted,
-    borderRadius: 999,
-    height: 4,
-    opacity: 0.75,
-    width: 42,
-  },
-  sheetTitle: {
-    color: colors.text,
-    fontFamily: "Geist_600SemiBold",
-    fontSize: 20,
-    lineHeight: 26,
-    paddingHorizontal: 4,
-  },
-  closeButton: {
-    position: "absolute",
-    right: 20,
-    top: 20,
-    zIndex: 1,
-  },
-  sheetBody: {
+  sheetBodyOpen: {
     flex: 1,
     gap: 6,
     justifyContent: "flex-end",
-  },
-  sheetFooter: {
-    paddingTop: spacing.sm,
   },
   composer: {
     alignItems: "center",
@@ -454,10 +385,13 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     width: 34,
   },
+  leadingTop: { alignSelf: "flex-start" },
+  sendBottom: { alignSelf: "flex-end" },
   inputArea: {
     flex: 1,
     justifyContent: "center",
-    minHeight: 38,
+    maxHeight: MAX_INPUT_HEIGHT,
+    minHeight: COLLAPSED_INPUT_HEIGHT,
   },
   prompt: {
     bottom: 0,
@@ -469,11 +403,24 @@ const styles = StyleSheet.create({
   input: {
     backgroundColor: "transparent",
     borderWidth: 0,
-    flex: 1,
     fontSize: 13,
+    height: "100%",
     lineHeight: INPUT_LINE_HEIGHT,
-    minHeight: 38,
+    minHeight: 0,
     paddingHorizontal: 0,
     paddingVertical: INPUT_VERTICAL_PADDING,
+    width: "100%",
+  },
+  inputSingleLine: { paddingVertical: 0 },
+  inputMeasure: {
+    fontFamily: "Geist_400Regular",
+    fontSize: 13,
+    left: 0,
+    lineHeight: INPUT_LINE_HEIGHT,
+    opacity: 0,
+    paddingHorizontal: 0,
+    paddingVertical: INPUT_VERTICAL_PADDING,
+    position: "absolute",
+    right: 0,
   },
 });

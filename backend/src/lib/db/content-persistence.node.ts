@@ -4,10 +4,11 @@ import { documentShareSchema, type DocumentShare } from './document-shares.node'
 import { shareSchema, type Share } from './shares.node';
 import { documentVersionSchema, type DocumentVersion } from './document-versions.node';
 import { documentAudioVersionSchema, type DocumentAudioVersion } from './document-audio-versions.node';
+import { documentSummarySchema, type DocumentSummary } from './document-summaries.node';
+import { documentSummaryAudioSchema, type DocumentSummaryAudio } from './document-summary-audio.node';
 import { newId } from '@/lib/ids';
 import { toArangoDoc, withArangoKey } from './base';
 import { db, withTransaction } from './client';
-import { canonicalDocumentRepresentations } from '@/lib/ai/document-processing/representation';
 import { currentEmbeddingBatchSchema, currentEmbeddingSchema } from '@/lib/embeddings';
 import { chunkDocumentContent, documentSemanticHash } from '@/lib/ai/document-processing/chunking';
 import { z } from 'zod';
@@ -42,15 +43,9 @@ function toGlobalDocumentShare(share: DocumentShare): Share {
 }
 
 type MutableFolderField = 'parentFolderKey' | 'name' | 'description' | 'coverImageKey' | 'isFavorite' | 'deletedAt' | 'updatedAt' | 'embedding' | '_internalDeletion';
-type MutableDocumentField = 'folderKey' | 'name' | 'html' | 'content' | 'embedding' | 'contentChunks' | 'chunkEmbeddings' | 'semanticChunkCount' | 'semanticContentHash' | '_semanticChunkingSkipped' | 'speechStorageKeys' | 'isFavorite' | 'deletedAt' | 'updatedAt' | '_internalDeletion';
+type MutableDocumentField = 'folderKey' | 'name' | 'content' | 'embedding' | 'contentChunks' | 'chunkEmbeddings' | 'semanticChunkCount' | 'semanticContentHash' | '_semanticChunkingSkipped' | 'speechStorageKeys' | 'isFavorite' | 'deletedAt' | 'updatedAt' | '_internalDeletion';
 export type ScopedFolderPatch = Partial<Pick<Folder, MutableFolderField>>;
 export type ScopedDocumentPatch = Partial<Pick<Document, MutableDocumentField>>;
-
-function canonicalRepresentations(html: string, content: string) {
-  const canonical = canonicalDocumentRepresentations(html);
-  if (html !== canonical.html || content !== canonical.content) throw new Error('Document representations must be canonical and agreeing.');
-  return canonical;
-}
 
 function splitPatch(patch: Record<string, unknown>) {
   const set: Record<string, unknown> = {};
@@ -117,7 +112,7 @@ async function scopedUpdate<T>(
 
 async function scopedDelete(
   executor: ContentQueryExecutor,
-  collection: 'folders' | 'documents' | 'documentVersions' | 'documentAudioVersions' | 'documentShares' | 'shares',
+  collection: 'folders' | 'documents' | 'documentVersions' | 'documentAudioVersions' | 'documentSummaries' | 'documentSummaryAudio' | 'documentShares' | 'shares',
   scopeKey: string,
   key: string,
 ): Promise<boolean> {
@@ -157,6 +152,61 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       const cursor = await executor.query(`FOR document IN documents FILTER document.scopeKey == @scopeKey FILTER @includeArchived || document.deletedAt == null FILTER @includePending || !HAS(document, "_internalDeletion") || document._internalDeletion == null RETURN document`, { scopeKey, includeArchived, includePending: includePendingDeletion });
       const values = cursor.all ? await cursor.all() : [];
       return values.map((value) => documentSchema.parse(withArangoKey(value as Record<string, unknown>)));
+    },
+    async semanticNeighbors(input: { embedding: number[]; scopeKey: string; activeFolderKeys: string[]; sourceFolderKey?: string; sourceDocumentKey?: string; limit: number }) {
+      const embedding = currentEmbeddingSchema.parse(input.embedding);
+      const limit = Math.min(Math.max(z.number().int().positive().parse(input.limit), 1), 10);
+      const cursor = await executor.query(`
+        LET folderMatches = (FOR folder IN folders
+          FILTER folder.scopeKey == @scopeKey && folder.deletedAt == null
+          FILTER (!HAS(folder, "_internalDeletion") || folder._internalDeletion == null) && folder._key IN @activeFolderKeys
+          FILTER @sourceFolderKey == null || folder._key != @sourceFolderKey
+          FILTER IS_ARRAY(folder.embedding) && LENGTH(folder.embedding) == LENGTH(@embedding)
+          LET score = COSINE_SIMILARITY(folder.embedding, @embedding)
+          FILTER IS_NUMBER(score)
+          SORT score DESC, folder._key ASC
+          LIMIT @limit
+          RETURN { score, value: folder })
+        LET documentMatches = (FOR document IN documents
+          FILTER document.scopeKey == @scopeKey && document.deletedAt == null
+          FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
+          FILTER document.folderKey == null || document.folderKey IN @activeFolderKeys
+          FILTER @sourceDocumentKey == null || document._key != @sourceDocumentKey
+          FILTER !HAS(document, "extension") || document.extension == null
+          LET scores = (FOR vector IN (IS_ARRAY(document.chunkEmbeddings) && LENGTH(document.chunkEmbeddings) > 0 ? document.chunkEmbeddings : [document.embedding])
+            FILTER IS_ARRAY(vector) && LENGTH(vector) == LENGTH(@embedding)
+            LET score = COSINE_SIMILARITY(vector, @embedding)
+            FILTER IS_NUMBER(score)
+            RETURN score)
+          FILTER LENGTH(scores) > 0
+          LET score = MAX(scores)
+          SORT score DESC, document._key ASC
+          LIMIT @limit
+          RETURN { score, value: document })
+        LET fileMatches = (FOR document IN documents
+          FILTER document.scopeKey == @scopeKey && document.deletedAt == null
+          FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
+          FILTER document.folderKey == null || document.folderKey IN @activeFolderKeys
+          FILTER @sourceDocumentKey == null || document._key != @sourceDocumentKey
+          FILTER HAS(document, "extension") && document.extension != null
+          LET scores = (FOR vector IN (IS_ARRAY(document.chunkEmbeddings) && LENGTH(document.chunkEmbeddings) > 0 ? document.chunkEmbeddings : [document.embedding])
+            FILTER IS_ARRAY(vector) && LENGTH(vector) == LENGTH(@embedding)
+            LET score = COSINE_SIMILARITY(vector, @embedding)
+            FILTER IS_NUMBER(score)
+            RETURN score)
+          FILTER LENGTH(scores) > 0
+          LET score = MAX(scores)
+          SORT score DESC, document._key ASC
+          LIMIT @limit
+          RETURN { score, value: document })
+        RETURN { folders: folderMatches, documents: documentMatches, files: fileMatches }
+      `, { ...input, embedding, limit, sourceFolderKey: input.sourceFolderKey ?? null, sourceDocumentKey: input.sourceDocumentKey ?? null });
+      const result = await cursor.next() as { folders?: Array<{ score: number; value: Record<string, unknown> }>; documents?: Array<{ score: number; value: Record<string, unknown> }>; files?: Array<{ score: number; value: Record<string, unknown> }> } | undefined;
+      return {
+        folders: (result?.folders ?? []).map(({ score, value }) => ({ score, folder: folderSchema.parse(withArangoKey(value)) })),
+        documents: (result?.documents ?? []).map(({ score, value }) => ({ score, document: documentSchema.parse(withArangoKey(value)) })),
+        files: (result?.files ?? []).map(({ score, value }) => ({ score, document: documentSchema.parse(withArangoKey(value)) })),
+      };
     },
     async getShare(key: string): Promise<DocumentShare | null> {
       const mode = await shareStorageMode(executor);
@@ -198,6 +248,63 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       const values = cursor.all ? await cursor.all() : [];
       return values.map((value) => documentAudioVersionSchema.parse(withArangoKey(value as Record<string, unknown>)));
     },
+    async updateAudioPlayback(scopeKey: string, key: string, playbackPositionMs: number): Promise<DocumentAudioVersion | null> {
+      playbackPositionMs = z.number().int().nonnegative().parse(playbackPositionMs);
+      const cursor = await executor.query(`
+        LET target = DOCUMENT(documentAudioVersions, @key)
+        FILTER target != null && target.scopeKey == @scopeKey && @playbackPositionMs <= target.durationMs
+        LET document = DOCUMENT(documents, target.documentKey)
+        FILTER document != null && document.scopeKey == @scopeKey && document.deletedAt == null
+        FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
+        FOR audio IN documentAudioVersions
+          FILTER audio.scopeKey == @scopeKey && audio.documentKey == target.documentKey
+          FILTER audio._key == target._key || audio.isCurrent == true
+          UPDATE audio WITH MERGE(
+            { isCurrent: audio._key == target._key },
+            audio._key == target._key ? { playbackPositionMs: @playbackPositionMs } : {}
+          ) IN documentAudioVersions
+          LET updated = NEW
+          FILTER updated._key == target._key
+          RETURN updated
+      `, { key, scopeKey, playbackPositionMs });
+      const updated = await cursor.next();
+      return updated ? documentAudioVersionSchema.parse(withArangoKey(updated as Record<string, unknown>)) : null;
+    },
+    async clearCurrentAudioVersion(scopeKey: string, documentKey: string): Promise<boolean> {
+      const cursor = await executor.query(`
+        LET document = DOCUMENT(documents, @documentKey)
+        FILTER document != null && document.scopeKey == @scopeKey && document.deletedAt == null
+        FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
+        FOR audio IN documentAudioVersions
+          FILTER audio.scopeKey == @scopeKey && audio.documentKey == @documentKey && audio.isCurrent == true
+          UPDATE audio WITH { isCurrent: false } IN documentAudioVersions
+          COLLECT WITH COUNT INTO cleared
+          RETURN cleared
+      `, { documentKey, scopeKey });
+      return Number(await cursor.next() ?? 0) > 0;
+    },
+    async getSummary(key: string): Promise<DocumentSummary | null> {
+      const cursor = await executor.query('RETURN DOCUMENT(documentSummaries, @key)', { key });
+      const value = await cursor.next();
+      return value ? documentSummarySchema.parse(withArangoKey(value as Record<string, unknown>)) : null;
+    },
+    async listSummaries(scopeKey: string, documentKeys: string[]): Promise<DocumentSummary[]> {
+      if (documentKeys.length === 0) return [];
+      const cursor = await executor.query('FOR summary IN documentSummaries FILTER summary.scopeKey == @scopeKey && summary.documentKey IN @documentKeys SORT summary.version DESC RETURN summary', { scopeKey, documentKeys });
+      const values = cursor.all ? await cursor.all() : [];
+      return values.map((value) => documentSummarySchema.parse(withArangoKey(value as Record<string, unknown>)));
+    },
+    async getSummaryAudio(summaryKey: string): Promise<DocumentSummaryAudio | null> {
+      const cursor = await executor.query('FOR audio IN documentSummaryAudio FILTER audio.summaryKey == @summaryKey LIMIT 1 RETURN audio', { summaryKey });
+      const value = await cursor.next();
+      return value ? documentSummaryAudioSchema.parse(withArangoKey(value as Record<string, unknown>)) : null;
+    },
+    async listSummaryAudio(scopeKey: string, summaryKeys: string[]): Promise<DocumentSummaryAudio[]> {
+      if (summaryKeys.length === 0) return [];
+      const cursor = await executor.query('FOR audio IN documentSummaryAudio FILTER audio.scopeKey == @scopeKey && audio.summaryKey IN @summaryKeys RETURN audio', { scopeKey, summaryKeys });
+      const values = cursor.all ? await cursor.all() : [];
+      return values.map((value) => documentSummaryAudioSchema.parse(withArangoKey(value as Record<string, unknown>)));
+    },
     async insertFolder(folder: Folder): Promise<Folder> {
       const parsed = folderSchema.parse(folder);
       if (parsed.embedding.length) currentEmbeddingSchema.parse(parsed.embedding);
@@ -219,7 +326,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       const chunkEmbeddings = document.chunkEmbeddings ?? (contentChunks.length === 1 ? [document.embedding] : undefined);
       if (!chunkEmbeddings || contentChunks.length !== chunkEmbeddings.length) throw new Error('Documents require aligned semantic chunks and embeddings.');
       currentEmbeddingBatchSchema.parse(chunkEmbeddings);
-      const parsed = documentSchema.parse({ ...document, contentChunks, chunkEmbeddings, semanticChunkCount: contentChunks.length, semanticContentHash: documentSemanticHash(document.content), _semanticChunkingSkipped: undefined, ...canonicalRepresentations(document.html, document.content) });
+      const parsed = documentSchema.parse({ ...document, contentChunks, chunkEmbeddings, semanticChunkCount: contentChunks.length, semanticContentHash: documentSemanticHash(document.content), _semanticChunkingSkipped: undefined });
       const cursor = await executor.query(
         `LET folder = @folderKey == null ? null : DOCUMENT(folders, @folderKey)
          FILTER @folderKey == null || (folder != null && folder.scopeKey == @scopeKey)
@@ -265,7 +372,6 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
         semanticChunkCount: contentChunks.length,
         semanticContentHash: documentSemanticHash(version.content),
         _semanticChunkingSkipped: undefined,
-        ...canonicalRepresentations(version.html, version.content),
         key: newId(),
         createdAt: new Date().toISOString(),
       });
@@ -287,13 +393,13 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       `, {
         documentKey: version.documentKey,
         scopeKey: version.scopeKey,
-        snapshot: toArangoDoc({ ...snapshot, content: process.env.CONTENT_VERSION_CONTENT_ARRAY_ENABLED !== 'false' ? contentChunks : snapshot.content }),
+        snapshot: toArangoDoc(snapshot),
       });
       const created = await cursor.next();
       if (!created) throw new Error('Version owner is pending deletion.');
       return documentVersionSchema.parse(withArangoKey(created as Record<string, unknown>));
     },
-    async createAudioVersion(input: Omit<DocumentAudioVersion, 'version'>): Promise<DocumentAudioVersion> {
+    async createAudioVersion(input: Omit<DocumentAudioVersion, 'version' | 'isCurrent' | 'playbackPositionMs'> & Partial<Pick<DocumentAudioVersion, 'isCurrent' | 'playbackPositionMs'>>): Promise<DocumentAudioVersion> {
       const audio = documentAudioVersionSchema.omit({ version: true }).parse(input);
       for (let attempt = 0; attempt < 10; attempt += 1) {
         try {
@@ -321,25 +427,74 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       }
       throw new Error('Audio version allocation failed.');
     },
+    async createSummary(input: Omit<DocumentSummary, 'version'>): Promise<DocumentSummary> {
+      const summary = documentSummarySchema.omit({ version: true }).parse(input);
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        try {
+          const cursor = await executor.query(`
+            LET document = DOCUMENT(documents, @documentKey)
+            FILTER document != null && document.scopeKey == @scopeKey
+            FILTER document.deletedAt == null
+            FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
+            LET nextVersion = FIRST(
+              FOR existing IN documentSummaries
+                FILTER existing.documentKey == @documentKey
+                COLLECT AGGREGATE maximum = MAX(existing.version)
+                RETURN (maximum || 0) + 1
+            )
+            INSERT MERGE(@summary, { version: nextVersion }) INTO documentSummaries
+            RETURN NEW
+          `, { documentKey: summary.documentKey, scopeKey: summary.scopeKey, summary: toArangoDoc(summary) });
+          const created = await cursor.next();
+          if (!created) throw new Error('Summary owner is pending deletion.');
+          return documentSummarySchema.parse(withArangoKey(created as Record<string, unknown>));
+        } catch (error) {
+          if ((error as { errorNum?: number }).errorNum !== 1210 || attempt === 9) throw error;
+          await new Promise((resolve) => setTimeout(resolve, (attempt + 1) * 5));
+        }
+      }
+      throw new Error('Summary version allocation failed.');
+    },
+    async createSummaryAudio(input: DocumentSummaryAudio): Promise<{ audio: DocumentSummaryAudio; created: boolean }> {
+      const audio = documentSummaryAudioSchema.parse(input);
+      try {
+        const cursor = await executor.query(`
+          LET summary = DOCUMENT(documentSummaries, @summaryKey)
+          LET document = summary == null ? null : DOCUMENT(documents, summary.documentKey)
+          FILTER summary != null && summary.scopeKey == @scopeKey && summary.documentKey == @documentKey
+          FILTER document != null && document.scopeKey == @scopeKey && document.deletedAt == null
+          FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
+          INSERT @audio INTO documentSummaryAudio RETURN NEW
+        `, { summaryKey: audio.summaryKey, documentKey: audio.documentKey, scopeKey: audio.scopeKey, audio: toArangoDoc(audio) });
+        const created = await cursor.next();
+        if (!created) throw new Error('Summary audio owner is pending deletion.');
+        return { audio: documentSummaryAudioSchema.parse(withArangoKey(created as Record<string, unknown>)), created: true };
+      } catch (error) {
+        if ((error as { errorNum?: number }).errorNum !== 1210) throw error;
+        const cursor = await executor.query('FOR winner IN documentSummaryAudio FILTER winner.summaryKey == @summaryKey LIMIT 1 RETURN winner', { summaryKey: audio.summaryKey });
+        const value = await cursor.next();
+        const winner = value ? documentSummaryAudioSchema.parse(withArangoKey(value as Record<string, unknown>)) : null;
+        if (!winner) throw error;
+        return { audio: winner, created: false };
+      }
+    },
     updateFolder(scopeKey: string, key: string, patch: ScopedFolderPatch) {
       if (('name' in patch || 'description' in patch) && patch.embedding === undefined) throw new Error('Folder semantic updates require a fresh embedding.');
       if (patch.embedding !== undefined && patch.embedding.length) currentEmbeddingSchema.parse(patch.embedding);
       return scopedUpdate(executor, 'folders', scopeKey, key, patch, (value) => folderSchema.parse(value));
     },
     updateDocument(scopeKey: string, key: string, patch: ScopedDocumentPatch, options?: { expectedUpdatedAt?: string }) {
-      if (patch.content !== undefined && patch.html === undefined) throw new Error('Document content must be updated through HTML.');
-      if (patch.html !== undefined && patch.embedding === undefined) throw new Error('Document HTML updates require a fresh embedding.');
-      if (patch.html !== undefined && patch.content === undefined) throw new Error('Document HTML updates require derived content.');
-      const contentChunks = patch.html !== undefined ? patch.contentChunks ?? chunkDocumentContent(patch.content!) : patch.contentChunks;
-      if (patch.html !== undefined && patch.contentChunks) {
+      if (patch.content !== undefined && patch.embedding === undefined) throw new Error('Document content updates require a fresh embedding.');
+      const contentChunks = patch.content !== undefined ? patch.contentChunks ?? chunkDocumentContent(patch.content) : patch.contentChunks;
+      if (patch.content !== undefined && patch.contentChunks) {
         const expectedChunks = chunkDocumentContent(patch.content!);
         if (patch.contentChunks.length !== expectedChunks.length || patch.contentChunks.some((chunk, index) => chunk !== expectedChunks[index])) throw new Error('Document chunks must be derived from canonical content.');
       }
-      const chunkEmbeddings = patch.html !== undefined ? patch.chunkEmbeddings ?? (contentChunks?.length === 1 ? [patch.embedding!] : undefined) : patch.chunkEmbeddings;
-      if (patch.html !== undefined && (!contentChunks || !chunkEmbeddings || contentChunks.length !== chunkEmbeddings.length)) throw new Error('Document HTML updates require aligned semantic chunks and embeddings.');
+      const chunkEmbeddings = patch.content !== undefined ? patch.chunkEmbeddings ?? (contentChunks?.length === 1 ? [patch.embedding!] : undefined) : patch.chunkEmbeddings;
+      if (patch.content !== undefined && (!contentChunks || !chunkEmbeddings || contentChunks.length !== chunkEmbeddings.length)) throw new Error('Document content updates require aligned semantic chunks and embeddings.');
       if (patch.embedding !== undefined) currentEmbeddingSchema.parse(patch.embedding);
       if (chunkEmbeddings !== undefined) currentEmbeddingBatchSchema.parse(chunkEmbeddings);
-      const preparedPatch = patch.html === undefined ? patch : { ...patch, contentChunks, chunkEmbeddings, semanticChunkCount: contentChunks!.length, semanticContentHash: documentSemanticHash(patch.content!), _semanticChunkingSkipped: undefined, ...canonicalRepresentations(patch.html, patch.content!) };
+      const preparedPatch = patch.content === undefined ? patch : { ...patch, contentChunks, chunkEmbeddings, semanticChunkCount: contentChunks!.length, semanticContentHash: documentSemanticHash(patch.content), _semanticChunkingSkipped: undefined };
       return scopedUpdate(executor, 'documents', scopeKey, key, preparedPatch, (value) => documentSchema.parse(value), options?.expectedUpdatedAt);
     },
     updateShare(scopeKey: string, key: string, patch: Partial<Pick<DocumentShare, 'revokedAt' | 'deletedAt' | 'updatedAt'>>) {
@@ -393,6 +548,8 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
     deleteDocument(scopeKey: string, key: string) { return scopedDelete(executor, 'documents', scopeKey, key); },
     deleteVersion(scopeKey: string, key: string) { return scopedDelete(executor, 'documentVersions', scopeKey, key); },
     deleteAudioVersion(scopeKey: string, key: string) { return scopedDelete(executor, 'documentAudioVersions', scopeKey, key); },
+    deleteSummary(scopeKey: string, key: string) { return scopedDelete(executor, 'documentSummaries', scopeKey, key); },
+    deleteSummaryAudio(scopeKey: string, key: string) { return scopedDelete(executor, 'documentSummaryAudio', scopeKey, key); },
     async deleteShare(scopeKey: string, key: string) {
       const mode = await shareStorageMode(executor);
       if (mode === 'global') return scopedDelete(executor, 'shares', scopeKey, key);
@@ -420,6 +577,6 @@ export function withContentPersistenceTransaction<T>(
   operation: (persistence: ReturnType<typeof createContentPersistence>) => Promise<T>,
 ): Promise<T> {
   return shareStorageMode(db as unknown as ContentQueryExecutor).then((mode) =>
-    withTransaction(['folders', 'documents', 'documentVersions', 'documentAudioVersions', 'scopes', ...(mode === 'legacy' ? ['documentShares'] : mode === 'global' ? ['shares'] : ['documentShares', 'shares'])], (transaction) =>
+    withTransaction(['folders', 'documents', 'documentVersions', 'documentAudioVersions', 'documentSummaries', 'documentSummaryAudio', 'scopes', ...(mode === 'legacy' ? ['documentShares'] : mode === 'global' ? ['shares'] : ['documentShares', 'shares'])], (transaction) =>
       operation(createContentPersistence(transaction as unknown as ContentQueryExecutor))));
 }

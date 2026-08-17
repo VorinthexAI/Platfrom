@@ -15,6 +15,7 @@ import {
   type ViewStyle,
 } from "react-native";
 import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
+import { radii } from "../../tokens";
 
 export type ButtonVariant =
   | "primary"
@@ -25,6 +26,7 @@ export type ButtonVariant =
   | "icon";
 
 export type ButtonSize = "xs" | "sm" | "md" | "lg" | "xl";
+export type ButtonShape = "pill" | "rounded";
 
 export type ButtonProps = PressableProps & {
   children?: ReactNode;
@@ -32,6 +34,7 @@ export type ButtonProps = PressableProps & {
   icon?: ReactNode;
   loading?: boolean;
   pressFeedback?: "opacity" | "none";
+  shape?: ButtonShape;
   size?: ButtonSize;
   style?: PressableProps["style"];
   textStyle?: StyleProp<TextStyle>;
@@ -88,7 +91,7 @@ function ChromeGradient({ muted = false }: { muted?: boolean }) {
               {stops}
             </LinearGradient>
           </Defs>
-          <Rect fill={`url(#${gradientId})`} height={size.height} width={size.width} />
+          <Rect fill={`url(#${gradientId})`} height={size.height} rx={size.height / 2} ry={size.height / 2} width={size.width} />
         </Svg>
       ) : null}
     </View>
@@ -132,6 +135,7 @@ export function Button({
   icon,
   loading = false,
   pressFeedback = "opacity",
+  shape = "pill",
   size = "md",
   style,
   textStyle,
@@ -171,7 +175,7 @@ export function Button({
           showPress && pressedVariantStyles[variant],
           showPress && !["primary", "secondary", "outline"].includes(variant) && styles.pressed,
           resolveStyle(state),
-          styles.radius,
+          shape === "rounded" ? styles.roundedRadius : styles.radius,
         ];
       }}
       {...props}
@@ -278,6 +282,9 @@ const pressedTextVariantStyles: Record<ButtonVariant, TextStyle> = {
 const styles = StyleSheet.create({
   radius: {
     borderRadius: BUTTON_RADIUS,
+  },
+  roundedRadius: {
+    borderRadius: radii.sm,
   },
   root: {
     alignItems: "center",

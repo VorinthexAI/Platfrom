@@ -9,6 +9,7 @@ export function resolveS3ClientConfig(env: NodeJS.ProcessEnv = process.env): S3C
     region: env.S3_REGION ?? env.AWS_REGION ?? env.BEDROCK_REGION ?? 'eu-north-1',
     endpoint,
     forcePathStyle: Boolean(endpoint),
+    requestChecksumCalculation: 'WHEN_REQUIRED',
     credentials: accessKeyId && secretAccessKey
       ? {
           accessKeyId,

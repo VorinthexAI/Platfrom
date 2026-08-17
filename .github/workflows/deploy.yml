@@ -485,13 +485,13 @@ jobs:
     name: Deploy graph database
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    needs: [changes, backend-secrets, early-deploy]
+    needs: [changes, backend-secrets, backend-migrate]
     if: >-
       always()
       && needs.changes.outputs.backend == 'true'
       && (github.event.pull_request.merged == true || inputs.deploy)
       && needs.backend-secrets.result == 'success'
-      && needs.early-deploy.result == 'success'
+      && needs.backend-migrate.result == 'success'
     environment: production
     env:
       EC2_HOST: ${{ secrets.GRAPH_DB_EC2_HOST }}
@@ -677,8 +677,14 @@ jobs:
   backend-migrate:
     name: Migrate graph database
     runs-on: ubuntu-latest
-    needs: [changes, backend-image, backend-secrets]
-    if: needs.changes.outputs.backend == 'true' && (github.event.pull_request.merged == true || inputs.deploy)
+    needs: [changes, backend-image, backend-secrets, early-deploy]
+    if: >-
+      always()
+      && needs.changes.outputs.backend == 'true'
+      && needs.backend-image.result == 'success'
+      && needs.backend-secrets.result == 'success'
+      && needs.early-deploy.result == 'success'
+      && (github.event.pull_request.merged == true || inputs.deploy)
     defaults:
       run:
         working-directory: backend
@@ -1100,18 +1106,18 @@ jobs:
   # ---------------------------------------------------------------------------
   # EARLY-INFRA: the active production deployment. It performs one SSM
   # blue-green swap on the single app box before graph migration. This first
-  # deploys the API version that can read both legacy and current vectors.
+  # deploys code that can read both the legacy and migrated data shape.
   # ---------------------------------------------------------------------------
   early-deploy:
     name: Blue-green deploy to early-infra box
     runs-on: ubuntu-latest
-    needs: [changes, deploy-web, backend-image, backend-secrets, backend-migrate]
+    needs: [changes, deploy-web, backend-image, backend-secrets]
     if: >-
       always()
       && (needs.changes.outputs.web == 'true' || needs.changes.outputs.backend == 'true')
       && (github.event.pull_request.merged == true || inputs.deploy)
       && (needs.changes.outputs.web != 'true' || needs.deploy-web.result == 'success')
-      && (needs.changes.outputs.backend != 'true' || (needs.backend-image.result == 'success' && needs.backend-secrets.result == 'success' && needs.backend-migrate.result == 'success'))
+      && (needs.changes.outputs.backend != 'true' || (needs.backend-image.result == 'success' && needs.backend-secrets.result == 'success'))
     environment: production
     env:
       APP_INSTANCE_TAG: vorinthex-early-app

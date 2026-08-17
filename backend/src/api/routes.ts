@@ -56,7 +56,7 @@ import {
   updateSystemOrchestrator,
   upsertCurrentMind,
 } from './system';
-import { getContentDocumentJob, invokeContentTool } from './content-tools';
+import { invokeContentTool } from './content-tools';
 import { postAudioGenerate } from './audio';
 import { communicationHandlers } from './communication';
 import { bootstrapGuestAuth, getAuthAccount, logoutAuthAccount, patchAuthAccount } from './auth-account';
@@ -66,6 +66,7 @@ import { completeGalleryUploads, createGalleryCollection, createGallerySubject, 
 import { travelHandlers } from './travel';
 import { emailHandlers } from './email-inbox';
 import { bookHandlers } from './books';
+import { userSettingsHandlers } from './user-settings';
 
 const challengeHash = z.string().regex(/^[a-f0-9]{64}$/);
 const tokenHashBodyBase = strictObject({ token_hash: challengeHash });
@@ -406,6 +407,8 @@ export function registerRoutes(app: Hono) {
   app.post('/auth/guest', bootstrapGuestAuth);
   app.get('/auth/me', getAuthAccount);
   app.patch('/auth/me', patchAuthAccount);
+  app.get('/auth/me/settings', userSettingsHandlers.read);
+  app.patch('/auth/me/settings', userSettingsHandlers.update);
   app.post('/auth/logout', logoutAuthAccount);
 
   app.post('/app/events', recordPlatformEvent);
@@ -448,7 +451,6 @@ export function registerRoutes(app: Hono) {
   app.post('/assistant/respond', postPersonalAssistantResponse);
   app.post('/audio/generate', (c) => postAudioGenerate(c));
   app.post('/content/tools/:tool', invokeContentTool);
-  app.post('/content/document-jobs/:jobId', getContentDocumentJob);
   app.post('/gallery/overview', galleryOverview);
   app.post('/gallery/collections', createGalleryCollection);
   app.post('/gallery/uploads/presign', presignGalleryUploads);

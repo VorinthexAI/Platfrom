@@ -119,6 +119,7 @@ export type PreparedGalleryUpload = {
   filename: string;
   uri: string;
   sizeBytes: number;
+  processingMode?: "library" | "cover";
 };
 
 export async function uploadGalleryImages(files: PreparedGalleryUpload[], collectionKey?: string) {
@@ -126,15 +127,15 @@ export async function uploadGalleryImages(files: PreparedGalleryUpload[], collec
     uploads: { clientKey: string; uploadKey: string; imageKey: string; url: string; headers: Record<string, string> }[];
   }>("/gallery/uploads/presign", {
     collectionKey: collectionKey ?? null,
-    files: files.map(({ clientKey, filename, sizeBytes }) => ({ clientKey, filename, sizeBytes })),
+    files: files.map(({ clientKey, filename, sizeBytes, processingMode }) => ({ clientKey, filename, sizeBytes, ...(processingMode ? { processingMode } : {}) })),
   });
 
   for (let index = 0; index < reservation.uploads.length; index += 3) {
     await Promise.all(reservation.uploads.slice(index, index + 3).map(async (upload) => {
       const file = files.find((candidate) => candidate.clientKey === upload.clientKey);
       if (!file) throw new Error("An upload reservation could not be matched.");
-      const blob = await (await fetchWithTimeout(file.uri, undefined, 30_000)).blob();
-      const response = await fetchWithTimeout(upload.url, { method: "PUT", headers: upload.headers, body: blob }, 2 * 60_000);
+      const bytes = await (await fetchWithTimeout(file.uri, undefined, 30_000)).arrayBuffer();
+      const response = await fetchWithTimeout(upload.url, { method: "PUT", headers: upload.headers, body: bytes }, 2 * 60_000);
       if (!response.ok) throw new Error(`Image upload failed (${response.status}).`);
     }));
   }

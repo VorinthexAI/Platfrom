@@ -14,17 +14,22 @@ import { audioGenerateTool } from './audio-generate';
 import { bookCreateContextToolDefinition } from './book-create-context';
 import { bookWriteToolDefinition } from './book-write';
 import { documentContentToolDefinition } from './document-content';
+import { documentAudioPlaybackClearToolDefinition } from './document-audio-playback-clear';
+import { documentAudioPlaybackUpdateToolDefinition } from './document-audio-playback-update';
 import { documentCreateToolDefinition } from './document-create';
 import { documentCopyToolDefinition } from './document-copy';
 import { documentCreateVersionToolDefinition } from './document-create-version';
 import { documentDeleteToolDefinition } from './document-delete';
 import { documentDeleteVersionToolDefinition } from './document-delete-version';
+import { documentEnhanceToolDefinition } from './document-enhance';
 import { documentDownloadToolDefinition } from './document-download';
 import { documentExportToolDefinition } from './document-export';
 import { documentFindToolDefinition } from './document-find';
 import { documentFindVersionToolDefinition } from './document-find-version';
+import { documentFindSummaryToolDefinition } from './document-find-summary';
 import { documentListToolDefinition } from './document-list';
 import { documentListAudioVersionsToolDefinition } from './document-list-audio-versions';
+import { documentListSummariesToolDefinition } from './document-list-summaries';
 import { documentListSharesToolDefinition } from './document-list-shares';
 import { documentListVersionsToolDefinition } from './document-list-versions';
 import { documentMoveToolDefinition } from './document-move';
@@ -39,12 +44,13 @@ import { documentShareToolDefinition } from './document-share';
 import { documentShareContentTool } from './document-share-content';
 import { documentShareRestoreTool } from './document-share-restore';
 import { documentSummarizeToolDefinition } from './document-summarize';
+import { documentSummaryAudioGenerateToolDefinition } from './document-summary-audio-generate';
 import { documentTranslateToolDefinition } from './document-translate';
+import { documentTopicsToolDefinition } from './document-topics';
 import { documentUnshareToolDefinition } from './document-unshare';
 import { documentUpdateToolDefinition } from './document-update';
 import { documentVersionContentTool } from './document-version-content';
 import { documentVersionRestoreTool } from './document-version-restore';
-import { enhanceToolDefinition } from './enhance';
 import { emailReplyDraftTool } from './email-reply-draft';
 import { emailReadTool } from './email-read';
 import { emailThreadListTool } from './email-thread-list';
@@ -114,6 +120,8 @@ import { scopeAgentRestoreTool } from './scope-agent-restore';
 import { scopeContentTool } from './scope-content';
 import { scopeContentSearchToolDefinition } from './scope-content-search';
 import { scopeContentSearchHistoryToolDefinition } from './scope-content-search-history';
+import { scopeContentSearchHistoryDeleteToolDefinition } from './scope-content-search-history-delete';
+import { contentNeighborsToolDefinition } from './content-neighbors';
 import { scopeCreateTool } from './scope-create';
 import { scopeDocumentSearchToolDefinition } from './scope-document-search';
 import { scopeListTool } from './scope-list';
@@ -156,18 +164,18 @@ export const PUBLIC_TOOL_DEFINITIONS = Object.freeze([
   imageCaptionTool,
   imageCreateVisualIdentityTool,
   imageSearchTool,
-  enhanceToolDefinition,
+  contentNeighborsToolDefinition,
   bookCreateContextToolDefinition,
   bookWriteToolDefinition,
   emailThreadListTool, emailThreadReadTool, emailReadTool, emailReplyDraftTool,
   accessAgentEvaluateTool, accessAgentExplainTool, accessOrganizationEvaluateTool, accessOrganizationExplainTool, accessScopeEvaluateTool, accessScopeExplainTool,
   agentMemberGrantTool, agentMemberListTool, agentMemberReadTool, agentMemberRevokeTool, agentMemberSyncTool, artifactCreateTool,
-  documentContentToolDefinition, documentCreateToolDefinition, documentCopyToolDefinition, documentCreateVersionToolDefinition, documentDeleteToolDefinition, documentDeleteVersionToolDefinition, documentDownloadToolDefinition, documentExportToolDefinition, documentFindToolDefinition, documentFindVersionToolDefinition, documentListToolDefinition, documentListAudioVersionsToolDefinition, documentListSharesToolDefinition, documentListVersionsToolDefinition, documentMoveToolDefinition, documentParseToolDefinition, documentReadToolDefinition, documentRenameToolDefinition, documentScanToolDefinition, documentRestoreToolDefinition, documentRestoreVersionToolDefinition, documentRewriteToolDefinition, documentShareToolDefinition, documentShareContentTool, documentShareRestoreTool, documentSummarizeToolDefinition, documentTranslateToolDefinition, documentUnshareToolDefinition, documentUpdateToolDefinition, documentVersionContentTool, documentVersionRestoreTool,
+  documentAudioPlaybackClearToolDefinition, documentAudioPlaybackUpdateToolDefinition, documentContentToolDefinition, documentCreateToolDefinition, documentCopyToolDefinition, documentCreateVersionToolDefinition, documentDeleteToolDefinition, documentDeleteVersionToolDefinition, documentDownloadToolDefinition, documentEnhanceToolDefinition, documentExportToolDefinition, documentFindToolDefinition, documentFindSummaryToolDefinition, documentFindVersionToolDefinition, documentListToolDefinition, documentListAudioVersionsToolDefinition, documentListSummariesToolDefinition, documentListSharesToolDefinition, documentListVersionsToolDefinition, documentMoveToolDefinition, documentParseToolDefinition, documentReadToolDefinition, documentRenameToolDefinition, documentScanToolDefinition, documentRestoreToolDefinition, documentRestoreVersionToolDefinition, documentRewriteToolDefinition, documentShareToolDefinition, documentShareContentTool, documentShareRestoreTool, documentSummarizeToolDefinition, documentSummaryAudioGenerateToolDefinition, documentTopicsToolDefinition, documentTranslateToolDefinition, documentUnshareToolDefinition, documentUpdateToolDefinition, documentVersionContentTool, documentVersionRestoreTool,
   folderContentToolDefinition, folderCopyToolDefinition, folderCreateToolDefinition, folderDeleteToolDefinition, folderFindToolDefinition, folderListToolDefinition, folderMoveToolDefinition, folderRenameToolDefinition, folderRestoreToolDefinition, folderUpdateToolDefinition,
   milestoneContentTool, milestoneChangeStatusTool, milestoneCompleteTool, milestoneCreateTool, milestoneDeleteTool, milestoneFindTool, milestoneListTool, milestoneMoveTool, milestoneRenameTool, milestoneReopenTool, milestoneRestoreTool, milestoneScheduleTool, milestoneUpdateTool,
   organizationContentTool, organizationDocumentSearchToolDefinition, organizationMemberActivateTool, organizationMemberAddTool, organizationMemberListTool, organizationMemberReadTool, organizationMemberRemoveTool, organizationMemberRoleUpdateTool, organizationMemberSuspendTool, organizationProjectSearchTool, organizationProviderDisableTool, organizationProviderEnableTool, organizationProviderListTool, organizationProviderReadTool, organizationProviderTestTool, organizationReadTool, organizationRestoreTool, organizationUpdateTool,
   projectContentTool, projectCreateTool, projectDeleteTool, projectFindTool, projectListTool, projectMoveTool, projectRenameTool, projectRestoreTool, projectUpdateTool,
-  scopeAgentAccessThresholdUpdateTool, scopeAgentAddTool, scopeAgentContentTool, scopeAgentListTool, scopeAgentMoveTool, scopeAgentReadTool, scopeAgentRemoveTool, scopeAgentRestoreTool, scopeContentTool, scopeContentSearchToolDefinition, scopeContentSearchHistoryToolDefinition, scopeCreateTool, scopeDocumentSearchToolDefinition, scopeListTool, scopeMemberActivateTool, scopeMemberAddTool, scopeMemberListTool, scopeMemberReadTool, scopeMemberRemoveTool, scopeMemberRoleUpdateTool, scopeMemberSuspendTool, scopeMoveTool, scopeProjectSearchTool, scopeReadTool, scopeRemoveTool, scopeRestoreTool, scopeUpdateTool,
+  scopeAgentAccessThresholdUpdateTool, scopeAgentAddTool, scopeAgentContentTool, scopeAgentListTool, scopeAgentMoveTool, scopeAgentReadTool, scopeAgentRemoveTool, scopeAgentRestoreTool, scopeContentTool, scopeContentSearchToolDefinition, scopeContentSearchHistoryToolDefinition, scopeContentSearchHistoryDeleteToolDefinition, scopeCreateTool, scopeDocumentSearchToolDefinition, scopeListTool, scopeMemberActivateTool, scopeMemberAddTool, scopeMemberListTool, scopeMemberReadTool, scopeMemberRemoveTool, scopeMemberRoleUpdateTool, scopeMemberSuspendTool, scopeMoveTool, scopeProjectSearchTool, scopeReadTool, scopeRemoveTool, scopeRestoreTool, scopeUpdateTool,
   taskContentTool, taskChangeStatusTool, taskCompleteTool, taskCreateTool, taskDeleteTool, taskFindTool, taskListTool, taskMoveTool, taskReopenTool, taskReorderTool, taskRenameTool, taskRestoreTool, taskRewriteTool, taskSummarizeTool, taskTranslateTool, taskUpdateTool,
   ...WORKSPACE_TOOL_DEFINITIONS,
 ] as const);

@@ -22,7 +22,8 @@ const validUpload = {
 
 describe('Gallery upload reservations', () => {
   test('accepts a server-owned JPEG reservation', () => {
-    expect(galleryUploadSchema.parse(validUpload)).toEqual(validUpload);
+    expect(galleryUploadSchema.parse(validUpload)).toEqual({ ...validUpload, processingMode: 'library' });
+    expect(galleryUploadSchema.parse({ ...validUpload, processingMode: 'cover' })).toMatchObject({ processingMode: 'cover' });
   });
 
   test('rejects oversized files and unsupported media types', () => {

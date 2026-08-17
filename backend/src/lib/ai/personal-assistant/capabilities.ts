@@ -7,6 +7,7 @@ import { imageSearchTool } from '@/lib/ai/tools/image-search';
 import type { TravelService } from '@/lib/travel/service';
 import type { EmailService } from '@/lib/email-inbox/service';
 import type { BookService } from '@/lib/books/service';
+import type { UserSettingsService } from '@/lib/user-settings/service';
 import type { GalleryOperationContext, GalleryOperationName } from '@/lib/gallery/operations';
 import { archiveCapabilities, ascendCapabilities, compassCapabilities, signalCapabilities } from './service-capabilities';
 import { galleryAssistantCapabilities, galleryAssistantCapabilityNames } from './gallery-capabilities';
@@ -36,6 +37,7 @@ export interface AssistantCapabilityContext {
   travel?: TravelService;
   email?: EmailService;
   books?: BookService;
+  userSettings?: UserSettingsService;
   gallery?: Partial<Record<GalleryOperationName, (input: unknown, context: GalleryOperationContext) => Promise<unknown>>>;
 }
 
@@ -132,29 +134,6 @@ const writeNoteCapability: AssistantCapability = {
   },
 };
 
-const enhanceNoteInputSchema = z.object({ target: z.enum(['document', 'selection']) }).strict();
-const enhanceNoteCapability: AssistantCapability = {
-  inputSchema: enhanceNoteInputSchema,
-  definition: {
-    name: 'note.enhance',
-    description: 'Proofread and enhance the open note or its trusted selected text. Correct wording, grammar, punctuation, and spelling mistakes while preserving meaning, facts, tone, formatting, and all unselected text.',
-    inputSchema: contentZodToJsonSchema(enhanceNoteInputSchema),
-  },
-  async execute(rawInput, context) {
-    const input = enhanceNoteInputSchema.parse(rawInput);
-    const note = context.currentNote;
-    if (!note?.content.trim()) throw new Error('Open a non-empty note before enhancing it.');
-    const selection = input.target === 'selection' ? note.selection : undefined;
-    if (input.target === 'selection' && (!selection || selection.start === selection.end)) throw new Error('Select text in the open note before enhancing the selection.');
-    const source = selection ? note.content.slice(selection.start, selection.end) : note.content;
-    const result = await (context.executeContent ?? runContentTool)('enhance', { content: source }, context.domain, context.contentDependencies);
-    const content = selection
-      ? `${note.content.slice(0, selection.start)}${result.content}${note.content.slice(selection.end)}`
-      : result.content;
-    return { kind: 'note', content, message: selection ? 'Enhanced the selected text.' : 'Enhanced the document.' };
-  },
-};
-
 const searchImagesCapability: AssistantCapability = {
   inputSchema: searchInputSchema,
   definition: {
@@ -207,10 +186,9 @@ for (const item of [...archiveCapabilities, ...galleryAssistantCapabilities, ...
 defaultAssistantCapabilityRegistry
   .register(searchKnowledgeCapability)
   .register(writeNoteCapability)
-  .register(enhanceNoteCapability)
   .register(createBookContextCapability)
   .register(writeBookCapability)
-  .registerSurface('knowledge-workspace', [...archiveCapabilities.map(({ definition }) => definition.name), 'knowledge.search', 'note.write', 'note.enhance'])
+  .registerSurface('knowledge-workspace', [...archiveCapabilities.map(({ definition }) => definition.name), 'knowledge.search', 'note.write'])
   .registerSurface('media-workspace', galleryAssistantCapabilityNames)
   .registerSurface('book-workspace', [...ascendCapabilities.map(({ definition }) => definition.name), 'book.create-context', 'book.write'])
   .registerSurface('travel-workspace', compassCapabilities.map(({ definition }) => definition.name))

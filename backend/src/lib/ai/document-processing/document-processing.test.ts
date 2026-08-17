@@ -1,16 +1,14 @@
 import { describe, expect, test } from 'bun:test';
+import { DeleteObjectCommand, PutObjectCommand, type S3Client } from '@aws-sdk/client-s3';
+import { GetDocumentTextDetectionCommand, StartDocumentTextDetectionCommand, type Block, type TextractClient } from '@aws-sdk/client-textract';
 import { parseDocument } from '.';
-import { generateDocumentExport } from './exports';
 import type { Document } from '@/lib/db/documents.node';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
 import {
-  canonicalDocumentRepresentations,
+  createAwsTextractDocumentOcr,
+  documentCleanup,
   documentEmbed,
   documentExtract,
-  documentGenerateContent,
-  documentGenerateHtml,
-  htmlToDocumentPreviewBlocks,
-  htmlToExtractedBlocks,
   documentInsert,
   documentKeyForRequest,
   documentSemanticHash,
@@ -20,7 +18,6 @@ import {
   type DocumentPipelineActions,
   type DocumentParseResult,
   type DocumentStorage,
-  type ExtractedBlock,
   type NormalizedDocument,
 } from '.';
 
@@ -76,7 +73,7 @@ const normalized = (extension: 'txt' | 'md' | 'doc' | 'docx' | 'pdf', fileInput 
 const completeDocument = (overrides: Partial<Document> = {}): Document => ({
   key: documentKey, scopeKey, folderKey, name: 'Report', extension: 'txt', mimeType: 'text/plain',
   storageKey: `content/${scopeKey}/${folderKey}/${documentKey}/original.txt`, sizeBytes: 10,
-  html: '<h1>Report</h1><p>Body</p>', content: 'Report\n\nBody', embedding,
+  content: 'Report\n\nBody', embedding,
   isFavorite: false, deletedAt: null, createdAt: timestamp, updatedAt: timestamp, ...overrides,
 });
 
@@ -110,97 +107,59 @@ describe('document-validate action', () => {
   });
 });
 
+describe('document-cleanup action', () => {
+  test('cleans chunks in source order and normalizes extraction whitespace without stripping meaningful symbols', async () => {
+    const source = `${'First section has value €42 and café. '.repeat(500)}\n\n###\nSecond\tsection.\u0000\n||||`;
+    const chunks: string[] = [];
+    const result = await documentCleanup({ text: source }, {
+      logger: quiet,
+      clean: async (text) => { chunks.push(text); return text.includes('Second') ? 'Second section.' : 'First section has value €42 and café.'; },
+    });
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(result.content).toContain('€42 and café.');
+    expect(result.content).toEndWith('Second section.');
+    expect(result.content).not.toContain('\t');
+    expect(result.content).not.toContain('\u0000');
+    expect(result.content).not.toContain('###');
+    expect(result.content).not.toContain('||||');
+  });
+
+  test('uses deterministic cleanup without a model and rejects empty model output', async () => {
+    await expect(documentCleanup({ text: 'Body\r\n\r\n\tSecond  line' }, { logger: quiet })).resolves.toEqual({ content: 'Body\n\n\tSecond  line' });
+    await expect(documentCleanup({ text: 'Body' }, { logger: quiet, clean: async () => '   ' })).rejects.toMatchObject({ code: 'DOCUMENT_TEXT_CLEANUP_FAILED', action: 'document-cleanup' });
+  });
+
+  test('keeps chunk output ordered when concurrent model calls finish out of order', async () => {
+    const source = ['FIRST', 'SECOND', 'THIRD'].map((label) => `${label} ${'word '.repeat(800)}`).join('\n\n');
+    let active = 0;
+    let maximumActive = 0;
+    const result = await documentCleanup({ text: source }, {
+      logger: quiet,
+      clean: async (text) => {
+        active += 1;
+        maximumActive = Math.max(maximumActive, active);
+        const label = text.trimStart().split(' ')[0]!;
+        await new Promise((resolve) => setTimeout(resolve, label === 'FIRST' ? 20 : label === 'SECOND' ? 10 : 1));
+        active -= 1;
+        return label;
+      },
+    });
+    expect(result.content).toBe('FIRST\n\nSECOND\n\nTHIRD');
+    expect(maximumActive).toBe(3);
+  });
+});
+
 describe('document-extract action', () => {
-  test('extracts TXT and Markdown into normalized blocks', async () => {
+  test('extracts TXT and Markdown as plain text', async () => {
     const txt = await documentExtract({ ...normalized('txt', bytes('First\n\nSecond')), storageKey: 'txt' }, { logger: quiet });
-    expect(txt.blocks.map(({ type }) => type)).toEqual(['paragraph', 'paragraph']);
+    expect(txt.extractedText).toBe('First\n\nSecond');
     const md = await documentExtract({ ...normalized('md', bytes('# Title\n- One\n- Two')), storageKey: 'md' }, { logger: quiet });
-    expect(md.blocks.map(({ type }) => type)).toEqual(['heading', 'bulletList']);
-  });
-
-  test('preserves literal TXT whitespace in canonical HTML', async () => {
-    const source = 'Name\tScore\nAda \t  10\n\nIndented:\n    value';
-    const extracted = await documentExtract({ ...normalized('txt', bytes(source)), storageKey: 'txt' }, { logger: quiet });
-    const { html } = await documentGenerateHtml(extracted, { logger: quiet });
-    const { content } = await documentGenerateContent({ html }, { logger: quiet });
-    expect(html).toBe('<pre><code>Name\tScore\nAda \t  10\n\nIndented:\n    value</code></pre>');
-    expect(content).toBe(source);
-  });
-
-  test('preserves common Markdown inline semantics and joins paragraph lines', async () => {
-    const source = '# **Core**\nFirst line with [Archive](https://vorinthex.com/archive)\ncontinues with `**literal**` and *emphasis*.';
-    const extracted = await documentExtract({ ...normalized('md', bytes(source)), storageKey: 'md' }, { logger: quiet });
-    const { html } = await documentGenerateHtml(extracted, { logger: quiet });
-    expect(html).toBe('<h1><strong>Core</strong></h1><p>First line with <a href="https://vorinthex.com/archive">Archive</a> continues with <code>**literal**</code> and <em>emphasis</em>.</p>');
-  });
-
-  test('preserves sanitized inline semantics from DOCX-style HTML blocks', async () => {
-    const blocks = htmlToExtractedBlocks('<p><strong>Bold</strong> and <em>italic</em> with <a href="https://example.com">link</a>.</p>');
-    const { html } = await documentGenerateHtml({ extractedText: 'Bold and italic with link.', blocks }, { logger: quiet });
-    expect(html).toBe('<p><strong>Bold</strong> and <em>italic</em> with <a href="https://example.com">link</a>.</p>');
-  });
-
-  test('projects canonical HTML into strict native preview blocks', () => {
-    expect(htmlToDocumentPreviewBlocks('<h2><strong>Native</strong> preview</h2><ol start="3"><li>First<ul><li><code>Nested</code></li></ul></li></ol><table><thead><tr><th colspan="2">Header</th></tr></thead><tbody><tr><td><a href="https://example.com">Link</a></td><td>Value</td></tr></tbody></table><section class="doc-page" data-page="2"><p>Page body</p></section>')).toEqual([
-      { type: 'heading', level: 2, content: [{ text: 'Native', bold: true }, { text: ' preview' }] },
-      { type: 'orderedList', start: 3, items: [{ content: [{ text: 'First' }], children: [{ type: 'bulletList', items: [{ content: [{ text: 'Nested', code: true }], children: [] }] }] }] },
-      { type: 'table', rows: [{ cells: [{ header: true, colSpan: 2, rowSpan: 1, content: [{ text: 'Header' }] }] }, { cells: [{ header: false, colSpan: 1, rowSpan: 1, content: [{ text: 'Link', href: 'https://example.com' }] }, { header: false, colSpan: 1, rowSpan: 1, content: [{ text: 'Value' }] }] }] },
-      { type: 'page', page: 2, children: [{ type: 'paragraph', content: [{ text: 'Page body' }] }] },
-    ]);
-  });
-
-  test('creates native previews for every supported uploaded file format', async () => {
-    const cases = [
-      ['txt', { logger: quiet }, 'codeBlock'],
-      ['md', { logger: quiet }, 'heading'],
-      ['doc', { logger: quiet, extractDoc: async () => 'Legacy Word body' }, 'paragraph'],
-      ['docx', { logger: quiet, extractDocx: async () => 'Modern Word body' }, 'paragraph'],
-      ['pdf', { logger: quiet, ocr: { extract: async () => ({ extractedText: 'PDF body', blocks: [{ type: 'paragraph' as const, text: 'PDF body' }] }) } }, 'paragraph'],
-    ] as const;
-    for (const [extension, options, expectedType] of cases) {
-      const extracted = await documentExtract({ ...normalized(extension), storageKey: extension }, options);
-      const { html } = await documentGenerateHtml(extracted, { logger: quiet });
-      expect(htmlToDocumentPreviewBlocks(html)[0]?.type).toBe(expectedType);
-    }
-  });
-
-  test('sanitizes unsafe preview input and tolerates layout edge cases', () => {
-    const longToken = 'x'.repeat(20_000);
-    const blocks = htmlToDocumentPreviewBlocks(`<script><p>hidden</p></script><p><a href="javascript:alert(1)">Unsafe</a> <a href="https://example.com/path">Safe</a> ${longToken}</p><ol start="99"><li>Deep<ul><li>Nested<ul><li>Again</li></ul></li></ul></li></ol><table><tr><td colspan="999">Wide</td>${Array.from({ length: 20 }, (_, index) => `<td>C${index}</td>`).join('')}</tr></table><hr>`);
-    expect(blocks[0]).toMatchObject({ type: 'paragraph' });
-    if (blocks[0]?.type !== 'paragraph') throw new Error('Expected a paragraph preview.');
-    expect(blocks[0].content.slice(0, 2)).toEqual([{ text: 'Unsafe ' }, { text: 'Safe', href: 'https://example.com/path' }]);
-    expect(JSON.stringify(blocks)).not.toContain('hidden');
-    expect(JSON.stringify(blocks)).not.toContain('javascript:');
-    expect(JSON.stringify(blocks)).toContain(longToken);
-    expect(blocks).toContainEqual(expect.objectContaining({ type: 'orderedList', start: 99 }));
-    expect(blocks).toContainEqual(expect.objectContaining({ type: 'table' }));
-    expect(blocks.at(-1)).toEqual({ type: 'horizontalRule' });
-    const table = blocks.find((block) => block.type === 'table');
-    expect(table?.rows[0]?.cells).toHaveLength(21);
-    expect(table?.rows[0]?.cells[0]?.colSpan).toBe(1);
-  });
-
-  test('returns an empty preview for empty content and rejects malformed HTML', () => {
-    expect(htmlToDocumentPreviewBlocks('')).toEqual([]);
-    expect(() => htmlToDocumentPreviewBlocks('<p>Unclosed')).toThrow('unclosed');
-    expect(() => htmlToDocumentPreviewBlocks('<p>Wrong</div>')).toThrow('closing div');
+    expect(md.extractedText).toBe('# Title\n- One\n- Two');
   });
 
   test('rejects empty and invalid UTF-8 text files during extraction', async () => {
     await expect(documentExtract({ ...normalized('txt', bytes('   ')), storageKey: 'txt' }, { logger: quiet })).rejects.toMatchObject({ code: 'DOCUMENT_EXTRACTION_FAILED' });
     await expect(documentExtract({ ...normalized('md', new Uint8Array([0xff, 0xfe])), storageKey: 'md' }, { logger: quiet })).rejects.toMatchObject({ code: 'DOCUMENT_EXTRACTION_FAILED' });
-  });
-
-  test('uses extracted DOCX HTML without flattening table layout', async () => {
-    const extracted = {
-      extractedText: 'Quarter\tRevenue',
-      extractedHtml: '<table><tr><th colspan="2">Quarter</th></tr><tr><td>Q1</td><td>Revenue</td></tr></table>',
-      blocks: [],
-      metadata: { format: 'docx' },
-    };
-    const { html } = await documentGenerateHtml(extracted, { logger: quiet });
-    expect(html).toBe('<table><tr><th colspan="2">Quarter</th></tr><tr><td>Q1</td><td>Revenue</td></tr></table>');
   });
 
   test('uses format adapters for DOC and DOCX', async () => {
@@ -210,49 +169,127 @@ describe('document-extract action', () => {
     expect(docx.extractedText).toBe('Modern Word');
   });
 
-  test('validates and extracts a real DOCX archive through Mammoth', async () => {
-    const exported = await generateDocumentExport({ format: 'docx', html: '<h1>Quarterly report</h1><p>Revenue increased.</p>' });
-    const validated = await documentValidate({
-      file: { filename: 'report.docx', mimeType: exported.mimeType, sizeBytes: exported.bytes.byteLength, bytes: exported.bytes },
-      scopeKey,
-      folderKey,
-    }, { logger: quiet });
-    const result = await documentExtract({ ...validated, storageKey: 'unused-for-docx' }, { logger: quiet });
-    expect(result.extractedText).toBe('Quarterly report\n\nRevenue increased.');
-    expect(result.blocks.map(({ type }) => type)).toEqual(['paragraph', 'paragraph']);
-  });
-
   test('normalizes text-based and scanned PDFs through OCR', async () => {
     for (const text of ['Selectable PDF', 'Scanned OCR']) {
-      const result = await documentExtract({ ...normalized('pdf'), storageKey: 'pdf' }, { logger: quiet, ocr: { extract: async () => ({ extractedText: text, blocks: [{ type: 'paragraph', text }], metadata: { provider: 'aws-textract' } }) } });
+      const result = await documentExtract({ ...normalized('pdf'), storageKey: 'pdf' }, { logger: quiet, ocr: { extract: async () => ({ extractedText: text, metadata: { provider: 'aws-textract' } }) } });
       expect(result.extractedText).toBe(text);
     }
   });
 
-  test('reconstructs PDF pages, headings, and merged table cells from Textract layout blocks', () => {
-    const result = textractBlocksToExtractionResult([
-      { Id: 'title', BlockType: 'LAYOUT_TITLE', Page: 1, Text: 'Annual report', Geometry: { BoundingBox: { Top: 0.05, Left: 0.1 } } },
-      { Id: 'layout-table', BlockType: 'LAYOUT_TABLE', Page: 1, Relationships: [{ Type: 'CHILD', Ids: ['table'] }], Geometry: { BoundingBox: { Top: 0.2, Left: 0.1 } } },
-      { Id: 'table', BlockType: 'TABLE', Page: 1, Relationships: [{ Type: 'CHILD', Ids: ['header', 'value'] }] },
-      { Id: 'header', BlockType: 'CELL', Page: 1, RowIndex: 1, ColumnIndex: 1, ColumnSpan: 2, EntityTypes: ['COLUMN_HEADER'], Relationships: [{ Type: 'CHILD', Ids: ['header-word'] }] },
-      { Id: 'header-word', BlockType: 'WORD', Page: 1, Text: 'Revenue' },
-      { Id: 'value', BlockType: 'CELL', Page: 1, RowIndex: 2, ColumnIndex: 1, Relationships: [{ Type: 'CHILD', Ids: ['value-word'] }] },
-      { Id: 'value-word', BlockType: 'WORD', Page: 1, Text: '$10M' },
-      { Id: 'second-page', BlockType: 'LAYOUT_SECTION_HEADER', Page: 2, Text: 'Appendix', Geometry: { BoundingBox: { Top: 0.05, Left: 0.1 } } },
-    ]);
-    expect(result.extractedHtml).toBe('<section class="doc-page" data-page="1"><h1>Annual report</h1><table><tbody><tr><th colspan="2">Revenue</th></tr><tr><td>$10M</td></tr></tbody></table></section><section class="doc-page" data-page="2"><h2>Appendix</h2></section>');
-    expect(result.extractedText).toBe('Annual report\n\nRevenue\n$10M\n\nAppendix');
-    expect(result.metadata).toMatchObject({ provider: 'aws-textract', layout: 'semantic', pages: 2 });
+  test('stages and extracts selectable, scanned, and multi-page dummy PDFs through Textract', async () => {
+    const fixtures: Array<{ name: string; pdf: Uint8Array; blocks: Block[]; text: string; pages: number }> = [
+      {
+        name: 'selectable',
+        pdf: bytes('%PDF-1.7\n1 0 obj<</Type/Page/Contents 2 0 R>>endobj\n2 0 obj<</Length 36>>stream\nBT (Selectable quarterly report) Tj ET\nendstream\nendobj\n%%EOF'),
+        blocks: [{ Id: 'selectable', BlockType: 'LINE', Page: 1, Text: 'Selectable quarterly report' }],
+        text: 'Selectable quarterly report',
+        pages: 1,
+      },
+      {
+        name: 'scanned',
+        pdf: bytes('%PDF-1.7\n1 0 obj<</Type/Page/Resources<</XObject<</Scan 2 0 R>>>>>>endobj\n2 0 obj<</Subtype/Image/Width 1200/Height 1600/BitsPerComponent 8>>stream\nDUMMY-SCANNED-PIXELS\nendstream\nendobj\n%%EOF'),
+        blocks: [{ Id: 'scan-line', BlockType: 'LINE', Page: 1, Text: 'OCR from scanned invoice' }],
+        text: 'OCR from scanned invoice',
+        pages: 1,
+      },
+      {
+        name: 'multi-page-table',
+        pdf: bytes('%PDF-1.7\n1 0 obj<</Type/Pages/Count 2/Kids[2 0 R 3 0 R]>>endobj\n2 0 obj<</Type/Page/Parent 1 0 R>>endobj\n3 0 obj<</Type/Page/Parent 1 0 R>>endobj\n%%EOF'),
+        blocks: [
+          { Id: 'page-one', BlockType: 'LINE', Page: 1, Text: 'Annual results' },
+          { Id: 'page-two', BlockType: 'LINE', Page: 2, Text: 'Revenue' },
+        ],
+        text: 'Annual results\n\nRevenue',
+        pages: 2,
+      },
+    ];
+
+    for (const fixture of fixtures) {
+      const storageCommands: Array<PutObjectCommand | DeleteObjectCommand> = [];
+      const textractCommands: Array<StartDocumentTextDetectionCommand | GetDocumentTextDetectionCommand> = [];
+      const storageClient = {
+        send: async (command: PutObjectCommand | DeleteObjectCommand) => {
+          storageCommands.push(command);
+          return {};
+        },
+      } as unknown as Pick<S3Client, 'send'>;
+      const textractClient = {
+        send: async (command: StartDocumentTextDetectionCommand | GetDocumentTextDetectionCommand) => {
+          textractCommands.push(command);
+          return command instanceof StartDocumentTextDetectionCommand
+            ? { JobId: `job-${fixture.name}` }
+            : { JobStatus: 'SUCCEEDED', Blocks: fixture.blocks };
+        },
+      } as unknown as Pick<TextractClient, 'send'>;
+      const ocr = createAwsTextractDocumentOcr({
+        stagingBucket: 'dummy-textract-eu-west-1',
+        sourceBucket: 'dummy-source-eu-north-1',
+        storageClient,
+        textractClient,
+      });
+
+      const validated = await documentValidate({
+        file: { filename: `${fixture.name}.pdf`, mimeType: 'application/pdf', sizeBytes: fixture.pdf.byteLength, bytes: fixture.pdf },
+        scopeKey,
+        folderKey,
+      }, { logger: quiet });
+      const result = await documentExtract({ ...validated, storageKey: `content/${fixture.name}.pdf` }, { logger: quiet, ocr });
+
+      expect(storageCommands).toHaveLength(2);
+      expect(storageCommands[0]).toBeInstanceOf(PutObjectCommand);
+      expect(storageCommands[0]!.input).toMatchObject({ Bucket: 'dummy-textract-eu-west-1', Body: fixture.pdf, ContentType: 'application/pdf' });
+      expect(storageCommands[1]).toBeInstanceOf(DeleteObjectCommand);
+      expect(storageCommands[1]!.input).toMatchObject({ Bucket: 'dummy-textract-eu-west-1', Key: storageCommands[0]!.input.Key });
+      expect(textractCommands[0]).toBeInstanceOf(StartDocumentTextDetectionCommand);
+      expect(textractCommands[0]!.input).toMatchObject({
+        DocumentLocation: { S3Object: { Bucket: 'dummy-textract-eu-west-1', Name: storageCommands[0]!.input.Key } },
+      });
+      expect(textractCommands[1]).toBeInstanceOf(GetDocumentTextDetectionCommand);
+      expect(result.extractedText).toBe(fixture.text);
+      expect(result.metadata).toMatchObject({ provider: 'aws-textract', pages: fixture.pages });
+    }
   });
 
-  test('deduplicates Textract blocks and safely stops cyclic relationships', () => {
-    const title = { Id: 'title', BlockType: 'LAYOUT_TITLE' as const, Page: 1, Text: 'Unique title' };
+  test('removes a staged PDF when Textract rejects it', async () => {
+    const storageCommands: Array<PutObjectCommand | DeleteObjectCommand> = [];
+    const ocr = createAwsTextractDocumentOcr({
+      stagingBucket: 'dummy-textract-eu-west-1',
+      storageClient: {
+        send: async (command: PutObjectCommand | DeleteObjectCommand) => {
+          storageCommands.push(command);
+          return {};
+        },
+      } as unknown as Pick<S3Client, 'send'>,
+      textractClient: {
+        send: async (command: StartDocumentTextDetectionCommand | GetDocumentTextDetectionCommand) => command instanceof StartDocumentTextDetectionCommand
+          ? { JobId: 'failed-job' }
+          : { JobStatus: 'FAILED' },
+      } as unknown as Pick<TextractClient, 'send'>,
+    });
+
+    await expect(ocr.extract('content/rejected.pdf', fileFor('pdf').bytes)).rejects.toThrow('could not extract');
+    expect(storageCommands.map((command) => command.constructor)).toEqual([PutObjectCommand, DeleteObjectCommand]);
+    expect(storageCommands[1]!.input.Key).toBe(storageCommands[0]!.input.Key);
+  });
+
+  test('orders detected lines by page and position', () => {
+    const result = textractBlocksToExtractionResult([
+      { Id: 'value', BlockType: 'LINE', Page: 1, Text: '$10M', Confidence: 96, Geometry: { BoundingBox: { Top: 0.2, Left: 0.1 } } },
+      { Id: 'title', BlockType: 'LINE', Page: 1, Text: 'Annual report', Confidence: 99, Geometry: { BoundingBox: { Top: 0.05, Left: 0.1 } } },
+      { Id: 'second-page', BlockType: 'LINE', Page: 2, Text: 'Appendix', Confidence: 93, Geometry: { BoundingBox: { Top: 0.05, Left: 0.1 } } },
+    ]);
+    expect(result.extractedText).toBe('Annual report\n$10M\n\nAppendix');
+    expect(result.metadata).toMatchObject({ averageConfidence: 96, minimumConfidence: 93 });
+    expect(result.metadata).toMatchObject({ provider: 'aws-textract', pages: 2 });
+  });
+
+  test('deduplicates detected lines', () => {
+    const title = { Id: 'title', BlockType: 'LINE' as const, Page: 1, Text: 'Unique title' };
     const result = textractBlocksToExtractionResult([
       title,
       { ...title },
-      { Id: 'cycle', BlockType: 'LAYOUT_TEXT', Page: 1, Relationships: [{ Type: 'CHILD', Ids: ['cycle'] }] },
     ]);
-    expect(result.extractedHtml).toBe('<section class="doc-page" data-page="1"><h1>Unique title</h1></section>');
+    expect(result.extractedText).toBe('Unique title');
   });
 
   test('returns a structured extraction failure', async () => {
@@ -275,48 +312,6 @@ describe('storage-upload action', () => {
     await expect(storageUpload({ ...normalized('txt'), documentKey }, { logger: quiet, storage: {
       upload: async () => { throw new Error('S3 internals'); }, delete: async () => undefined,
     } })).rejects.toMatchObject({ code: 'DOCUMENT_UPLOAD_FAILED', action: 'storage-upload', retryable: true });
-  });
-});
-
-describe('document generation actions', () => {
-  test('generates deterministic sanitized semantic HTML', async () => {
-    const blocks: ExtractedBlock[] = [
-      { type: 'heading', level: 2, text: 'Title <script>alert(1)</script>' },
-      { type: 'bulletList', children: [{ type: 'listItem', text: 'One' }] },
-      { type: 'table', children: [{ type: 'tableRow', children: [{ type: 'tableCell', text: 'Cell' }] }] },
-    ];
-    const { html } = await documentGenerateHtml({ extractedText: 'safe', blocks }, { logger: quiet });
-    expect(html).toBe('<h2>Title &lt;script&gt;alert(1)&lt;/script&gt;</h2><ul><li>One</li></ul><table><tbody><tr><td>Cell</td></tr></tbody></table>');
-    expect(html).not.toContain('<script>');
-  });
-
-  test('generates normalized plain text with block separation and no tags', async () => {
-    const { content } = await documentGenerateContent({ html: '<h1>Report</h1><p>Body</p>' }, { logger: quiet });
-    expect(content).toBe('Report\n\nBody');
-    expect(content).not.toMatch(/<[^>]+>/);
-  });
-
-  test('sanitizes the editor subset and derives list and table text from canonical HTML', () => {
-    const result = canonicalDocumentRepresentations(`
-      <div><h1 onclick="bad()">Vorinthex Core</h1><script>alert(1)</script>
-      <p>Core has <b>five</b> apps.</p><ul><li>Archive</li><li>Gallery</li></ul>
-      <table><tr><th>App</th><th>Status</th></tr><tr><td>Core</td><td>Ready</td></tr></table>
-      <img src="/core.png" alt="Core map" onerror="bad()"></div>
-    `);
-    expect(result.html).toBe('<h1>Vorinthex Core</h1><p>Core has <strong>five</strong> apps.</p><ul><li>Archive</li><li>Gallery</li></ul><table><tr><th>App</th><th>Status</th></tr><tr><td>Core</td><td>Ready</td></tr></table><img src="/core.png" alt="Core map">');
-    expect(result.content).toBe('Vorinthex Core\n\nCore has five apps.\n\nArchive\nGallery\n\nApp\tStatus\nCore\tReady\n\nCore map');
-  });
-
-  test('preserves only canonical page and table layout attributes', () => {
-    const result = canonicalDocumentRepresentations('<section class="doc-page" data-page="12" style="position:fixed"><table><tr><td colspan="3" rowspan="2" style="color:red">Cell</td></tr></table></section>');
-    expect(result.html).toBe('<section class="doc-page" data-page="12"><table><tr><td colspan="3" rowspan="2">Cell</td></tr></table></section>');
-    expect(canonicalDocumentRepresentations(result.html)).toEqual(result);
-  });
-
-  test('removes unsafe links and rejects malformed allowed HTML', async () => {
-    const { html } = await documentGenerateHtml({ html: '<p><a href="javascript:alert(1)" style="color:red">Unsafe</a> <u>underline</u> <s>old</s></p>' }, { logger: quiet });
-    expect(html).toBe('<p><a>Unsafe</a> <u>underline</u> <s>old</s></p>');
-    await expect(documentGenerateHtml({ html: '<p>broken</strong>' }, { logger: quiet })).rejects.toMatchObject({ code: 'DOCUMENT_HTML_GENERATION_FAILED' });
   });
 });
 
@@ -385,9 +380,8 @@ describe('document.parse tool', () => {
     const actions: DocumentPipelineActions = {
       validate: async (input) => { calls.push('document-validate'); fail('validate'); return normalized('txt', (input.file as ReturnType<typeof fileFor>).bytes); },
       upload: async (input, options) => options!.storage!.upload({ key: `content/${input.documentKey}`, bytes: input.fileInput, mimeType: input.mimeType }),
-      extract: async () => { calls.push('document-extract'); fail('extract'); return { extractedText: 'Body', blocks: [{ type: 'paragraph', text: 'Body' }] }; },
-      generateHtml: async () => { calls.push('document-generate-html'); fail('generateHtml'); return { html: '<p>Body</p>' }; },
-      generateContent: async () => { calls.push('document-generate-content'); fail('generateContent'); return { content: 'Body' }; },
+      extract: async () => { calls.push('document-extract'); fail('extract'); return { extractedText: 'Body' }; },
+      cleanup: async () => { calls.push('document-cleanup'); fail('cleanup'); return { content: 'Body' }; },
       embed: async () => { calls.push('document-embed'); fail('embed'); return { embedding: [1, 2], contentChunks: ['Body'], chunkEmbeddings: [[1, 2]], semanticChunkCount: 1, semanticContentHash: documentSemanticHash('Body') }; },
       insert: async (document) => { calls.push('document-insert'); fail('insert'); persisted = document; return { document }; },
     };
@@ -401,15 +395,19 @@ describe('document.parse tool', () => {
     const result = await parseDocument(input, { ...context, logger: quiet }) as DocumentParseResult;
     expect(result.document.content).toBe('Body');
     expect(result.document.isFavorite).toBe(false);
-    expect(context.calls).toEqual(['document-validate', 'storage-upload', 'document-extract', 'document-generate-html', 'document-generate-content', 'document-embed', 'document-insert']);
+    expect(context.calls).toEqual(['document-validate', 'storage-upload', 'document-extract', 'document-cleanup', 'document-embed', 'document-insert']);
     expect(context.calls.indexOf('document-embed')).toBeLessThan(context.calls.indexOf('document-insert'));
   });
 
-  test('rejects action output when content drifts from generated HTML', async () => {
+  test('embeds and persists cleaned plain text', async () => {
     const context = harness();
-    context.actions.generateContent = async () => ({ content: 'Drifted' });
-    await expect(parseDocument(input, { ...context, logger: quiet })).rejects.toMatchObject({ code: 'DOCUMENT_CONTENT_GENERATION_FAILED' });
-    expect(context.calls.at(-1)).toBe('storage-delete');
+    context.actions.cleanup = async ({ text }) => { expect(text).toBe('Body'); return { content: 'Cleaned\n\nFirst item' }; };
+    context.actions.embed = async ({ content }) => {
+      expect(content).toBe('Cleaned\n\nFirst item');
+      return { embedding: [1, 2], contentChunks: ['Cleaned\n\nFirst item'], chunkEmbeddings: [[1, 2]], semanticChunkCount: 1, semanticContentHash: documentSemanticHash(content) };
+    };
+    const result = await parseDocument(input, { ...context, logger: quiet });
+    expect(result.document).toMatchObject({ content: 'Cleaned\n\nFirst item' });
   });
 
   test('stops on validation and upload failures without inserting', async () => {
@@ -421,20 +419,24 @@ describe('document.parse tool', () => {
     }
   });
 
-  test('preserves PDFs when text extraction fails', async () => {
+  test('rejects PDFs when text extraction fails', async () => {
     const context = harness('extract');
     context.actions.validate = async (value) => normalized('pdf', (value.file as ReturnType<typeof fileFor>).bytes);
-    context.actions.generateHtml = async () => ({ html: '<p>Text extraction is unavailable for this PDF file.</p>' });
-    context.actions.generateContent = async ({ html }) => ({ content: html.replace(/<[^>]+>/g, '') });
-    context.actions.embed = async ({ content }) => ({ embedding: [1, 2], contentChunks: [content], chunkEmbeddings: [[1, 2]], semanticChunkCount: 1, semanticContentHash: documentSemanticHash(content) });
-    const result = await parseDocument({ ...input, file: fileFor('pdf') }, { ...context, logger: quiet }) as DocumentParseResult;
-    expect(result.document).toMatchObject({ extension: 'pdf', content: 'Text extraction is unavailable for this PDF file.' });
-    expect(context.calls).not.toContain('storage-delete');
-    expect(context.calls.at(-1)).toBe('document-insert');
+    await expect(parseDocument({ ...input, file: fileFor('pdf') }, { ...context, logger: quiet })).rejects.toThrow();
+    expect(context.calls).not.toContain('document-insert');
+    expect(context.calls.at(-1)).toBe('storage-delete');
+  });
+
+  test('rejects documents when extraction completes without text', async () => {
+    const context = harness();
+    context.actions.extract = async () => ({ extractedText: '' });
+    await expect(parseDocument(input, { ...context, logger: quiet })).rejects.toMatchObject({ code: 'DOCUMENT_EXTRACTION_FAILED' });
+    expect(context.calls).not.toContain('document-insert');
+    expect(context.calls.at(-1)).toBe('storage-delete');
   });
 
   test('cleans S3 after non-recoverable post-upload stage failures', async () => {
-    for (const step of ['generateHtml', 'generateContent', 'embed', 'insert'] as const) {
+    for (const step of ['cleanup', 'embed', 'insert'] as const) {
       const context = harness(step);
       await expect(parseDocument(input, { ...context, logger: quiet })).rejects.toThrow();
       expect(context.calls.at(-1)).toBe('storage-delete');
@@ -501,7 +503,7 @@ describe('document.parse tool', () => {
   });
 
   test('returns a structured error when compensating cleanup cannot complete', async () => {
-    const context = harness('generateHtml');
+    const context = harness('cleanup');
     context.storage.delete = async () => { throw new Error('delete failed'); };
     await expect(parseDocument(input, { ...context, logger: quiet })).rejects.toMatchObject({ code: 'DOCUMENT_CLEANUP_FAILED', action: 'document.parse', retryable: true });
   });

@@ -11,20 +11,19 @@ import {
 } from './index';
 
 const expectedNames = [
-  'enhance',
   'book.create-context', 'book.write',
   'folder.create', 'folder.find', 'folder.list', 'folder.update', 'folder.rename', 'folder.move', 'folder.copy', 'folder.archive', 'folder.restore', 'folder.delete',
-  'document.parse', 'document.scan', 'document.create', 'document.find', 'document.list', 'document.read', 'document.list-audio-versions', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.download', 'document.export', 'document.share', 'document.unshare', 'document.list-shares', 'document.create-version', 'document.find-version', 'document.list-versions', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.translate', 'document.rewrite',
-  'scope.document.search', 'scope.content.search', 'scope.content.search-history', 'organization.document.search',
+  'document.parse', 'document.scan', 'document.create', 'document.find', 'document.list', 'document.read', 'document.list-audio-versions', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.list-summaries', 'document.find-summary', 'document.summary.audio.generate', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.download', 'document.export', 'document.share', 'document.unshare', 'document.list-shares', 'document.create-version', 'document.find-version', 'document.list-versions', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.topics', 'document.enhance', 'document.translate', 'document.rewrite',
+  'scope.document.search', 'scope.content.search', 'scope.content.search-history', 'scope.content.search-history.delete', 'content.neighbors', 'organization.document.search',
 ] as const;
 
 describe('Content tool registry', () => {
   test('contains exactly the registered dotted names and no action-style kebab names', () => {
     expect([...CONTENT_TOOL_NAMES]).toEqual([...expectedNames]);
-    expect(CONTENT_TOOL_NAMES).toHaveLength(44);
+    expect(CONTENT_TOOL_NAMES).toHaveLength(52);
     for (const name of CONTENT_TOOL_NAMES) {
       expect(name).toMatch(/^[a-z]+(?:[.-][a-z]+)*$/);
-      if (name !== 'enhance') expect(name).toContain('.');
+      expect(name).toContain('.');
       expect(isContentToolName(name)).toBe(true);
     }
     expect(isContentToolName('document-create-version')).toBe(false);
@@ -42,11 +41,20 @@ describe('Content tool registry', () => {
 describe('Content input contracts', () => {
   const key = newId();
 
+  test('requires exactly one semantic-neighbor source', () => {
+    expect(contentToolInputSchemas['content.neighbors'].safeParse({ folderKey: key }).success).toBe(true);
+    expect(contentToolInputSchemas['content.neighbors'].safeParse({ documentKey: key }).success).toBe(true);
+    expect(contentToolInputSchemas['content.neighbors'].safeParse({}).success).toBe(false);
+    expect(contentToolInputSchemas['content.neighbors'].safeParse({ folderKey: key, documentKey: key }).success).toBe(false);
+  });
+
   test('applies atomic and mode defaults, including nested restore defaults', () => {
     expect(contentToolInputSchemas['folder.update'].parse({ updates: [{ folderKey: key, name: 'Renamed' }] }).atomic).toBe(false);
     expect(contentToolInputSchemas['document.read'].parse({ documentKeys: [key] })).toMatchObject({ mode: 'content', atomic: false });
     expect(contentToolInputSchemas['document.download'].parse({ documentKeys: [key] }).format).toBe('original');
+    expect(contentToolInputSchemas['document.download'].parse({ documentKeys: [key], format: 'html' }).format).toBe('html');
     expect(contentToolInputSchemas['document.translate'].parse({ documentKeys: [key], targetLanguage: 'French' })).toMatchObject({ mode: 'preview', atomic: false });
+    expect(contentToolInputSchemas['document.enhance'].parse({ documentKeys: [key] })).toMatchObject({ mode: 'preview', atomic: false });
     expect(contentToolInputSchemas['document.rewrite'].parse({ rewrites: [{ documentKey: key, instruction: 'Clarify' }] })).toMatchObject({ atomic: false, rewrites: [{ mode: 'preview' }] });
     expect(contentToolInputSchemas['document.restore-version'].parse({ restores: [{ documentKey: key, versionKey: newId() }] })).toMatchObject({ atomic: false, restores: [{ createBackupVersion: true }] });
     expect(contentToolInputSchemas['document.copy'].parse({ copies: [{ documentKey: key, targetScopeKey: newId(), targetFolderKey: newId() }] })).toMatchObject({ atomic: false, copies: [{ includeVersions: false, includeShares: false }] });
@@ -57,13 +65,14 @@ describe('Content input contracts', () => {
     expect(contentToolInputSchemas['folder.restore'].parse({ folderKeys: [key], restoreAncestors: true })).toMatchObject({ restoreAncestors: true });
     expect(contentToolInputSchemas['document.read'].parse({ documentKeys: [key], mode: 'audio', includeCode: true, persistAudio: true })).toMatchObject({ includeCode: true, persistAudio: true });
     expect(contentToolInputSchemas['document.summarize'].parse({ documentKeys: [key], combine: true })).toMatchObject({ combine: true });
+    expect(contentToolInputSchemas['document.summarize'].parse({ documentKeys: [key], topic: 'Launch' })).toMatchObject({ topic: 'Launch', style: 'brief' });
     expect(contentToolInputSchemas['folder.update'].parse({ updates: [{ folderKey: key, description: null }] })).toMatchObject({ updates: [{ description: null }] });
     expect(contentToolInputSchemas['document.delete'].parse({ documentKeys: [key], deleteVersions: true, deleteShares: true })).toMatchObject({ deleteVersions: true, deleteShares: true });
   });
 
   test('rejects unknown properties and invalid enum, score, and range values', () => {
-    expect(contentToolInputSchemas.enhance.parse({ content: 'Fix teh wording.' })).toEqual({ content: 'Fix teh wording.' });
-    expect(() => contentToolInputSchemas.enhance.parse({ content: 'Text', instruction: 'Change meaning' })).toThrow();
+    expect(contentToolInputSchemas['document.enhance'].parse({ documentKeys: [key] })).toMatchObject({ documentKeys: [key], mode: 'preview' });
+    expect(() => contentToolInputSchemas['document.enhance'].parse({ documentKeys: [key], surprise: true })).toThrow();
     expect(() => contentToolInputSchemas['folder.find'].parse({ folderKeys: [key], surprise: true })).toThrow();
     expect(() => contentToolInputSchemas['document.download'].parse({ documentKeys: [key], format: 'pdf' })).toThrow();
     expect(() => contentToolInputSchemas['scope.document.search'].parse({ scopeKey: key, query: 'roadmap', minimumScore: 1.1 })).toThrow();
@@ -71,7 +80,16 @@ describe('Content input contracts', () => {
     expect(() => contentToolInputSchemas['document.read'].parse({ documentKeys: [key], mode: 'audio', startOffset: 10, persistAudio: true })).toThrow();
     expect(() => contentToolInputSchemas['document.read'].parse({ documentKeys: [key, newId()], mode: 'audio', persistAudio: true })).toThrow();
     expect(() => contentToolInputSchemas['document.read'].parse({ documentKeys: [key], mode: 'content', voice: 'alloy' })).toThrow();
+    expect(() => contentToolInputSchemas['document.read'].parse({ documentKeys: [key], mode: 'audio', voice: 'Joanna' })).toThrow();
+    expect(contentToolInputSchemas['document.read'].parse({ documentKeys: [key], mode: 'audio', voice: 'Matthew' }).voice).toBe('Matthew');
+    expect(() => contentToolInputSchemas['document.read'].parse({ documentKeys: [key], mode: 'audio', persistAudio: true, language: 'English' })).toThrow();
+    expect(() => contentToolInputSchemas['document.read'].parse({ documentKeys: [key], mode: 'audio', persistAudio: true, speakingRate: 1.25 })).toThrow();
     expect(() => contentToolInputSchemas['document.copy'].parse({ copies: [{ documentKey: key, targetFolderKey: newId(), name: 'Wrong field' }] })).toThrow();
+    expect(() => contentToolInputSchemas['document.summarize'].parse({ documentKeys: [key, newId()], persist: true })).toThrow();
+    expect(() => contentToolInputSchemas['document.summarize'].parse({ documentKeys: [key], persist: true, combine: true })).toThrow();
+    expect(() => contentToolInputSchemas['document.topics'].parse({ documentKey: key, scopeKey: newId() })).toThrow();
+    expect(contentToolInputSchemas['document.summary.audio.generate'].parse({ summaryKeys: [key], language: 'en-US' })).toMatchObject({ language: 'en-US' });
+    expect(() => contentToolInputSchemas['document.summary.audio.generate'].parse({ summaryKeys: [key], language: 'English' })).toThrow();
     expect(contentToolInputSchemas['scope.document.search'].parse({ scopeKey: key, query: 'roadmap', sources: [{ type: 'project', projectKeys: [newId()] }] })).toMatchObject({ sources: [{ type: 'project' }] });
   });
 
@@ -83,8 +101,8 @@ describe('Content input contracts', () => {
       ['document.move', { moves: [] }], ['document.copy', { copies: [] }], ['document.archive', { documentKeys: [] }], ['document.restore', { documentKeys: [] }],
       ['document.delete', { documentKeys: [] }], ['document.download', { documentKeys: [] }], ['document.export', { exports: [] }], ['document.share', { shares: [] }],
       ['document.list-shares', { documentKeys: [] }], ['document.create-version', { documentKeys: [] }], ['document.find-version', { versionKeys: [] }],
-      ['document.list-versions', { documentKeys: [] }], ['document.restore-version', { restores: [] }], ['document.delete-version', { versionKeys: [] }],
-      ['document.summarize', { documentKeys: [] }], ['document.translate', { documentKeys: [], targetLanguage: 'French' }], ['document.rewrite', { rewrites: [] }],
+      ['document.list-versions', { documentKeys: [] }], ['document.list-summaries', { documentKeys: [] }], ['document.find-summary', { summaryKeys: [] }], ['document.summary.audio.generate', { summaryKeys: [] }], ['document.restore-version', { restores: [] }], ['document.delete-version', { versionKeys: [] }],
+      ['document.summarize', { documentKeys: [] }], ['document.enhance', { documentKeys: [] }], ['document.translate', { documentKeys: [], targetLanguage: 'French' }], ['document.rewrite', { rewrites: [] }],
     ];
     for (const [name, input] of invalid) expect(contentToolInputSchemas[name].safeParse(input).success, name).toBe(false);
   });
@@ -102,8 +120,10 @@ describe('Content input contracts', () => {
   });
 
   test('validates version label keys and lengths at the contract boundary', () => {
-    expect(contentToolInputSchemas['document.create-version'].parse({ documentKeys: [key], labels: { [key]: 'Release' } })).toMatchObject({ labels: { [key]: 'Release' } });
+    expect(contentToolInputSchemas['document.create-version'].parse({ documentKeys: [key], labels: { [key]: 'Release' }, contents: { [key]: 'Generated copy' }, types: { [key]: 'enhancement' } })).toMatchObject({ labels: { [key]: 'Release' }, contents: { [key]: 'Generated copy' }, types: { [key]: 'enhancement' } });
     expect(() => contentToolInputSchemas['document.create-version'].parse({ documentKeys: [key], labels: { [newId()]: 'Wrong document' } })).toThrow();
+    expect(() => contentToolInputSchemas['document.create-version'].parse({ documentKeys: [key], contents: { [newId()]: 'Wrong document' } })).toThrow();
+    expect(() => contentToolInputSchemas['document.create-version'].parse({ documentKeys: [key], types: { [newId()]: 'translation' } })).toThrow();
     expect(() => contentToolInputSchemas['document.create-version'].parse({ documentKeys: [key], labels: { [key]: 'x'.repeat(121) } })).toThrow();
   });
 
@@ -124,7 +144,8 @@ describe('Content input contracts', () => {
       ['document.unshare', { shareKeys: [key] }], ['document.create-version', { documentKeys: [key] }],
       ['document.restore-version', { restores: [{ documentKey: key, versionKey: newId() }] }],
       ['document.delete-version', { versionKeys: [key] }], ['document.summarize', { documentKeys: [key] }],
-      ['document.translate', { documentKeys: [key], targetLanguage: 'French' }],
+      ['document.summary.audio.generate', { summaryKeys: [key] }],
+      ['document.enhance', { documentKeys: [key] }], ['document.translate', { documentKeys: [key], targetLanguage: 'French' }],
       ['document.rewrite', { rewrites: [{ documentKey: key, instruction: 'Improve' }] }],
       ['document.read', { documentKeys: [key], mode: 'audio', persistAudio: true }],
     ];
@@ -138,7 +159,7 @@ describe('Content input contracts', () => {
     const definitions = Object.fromEntries(CONTENT_TOOL_DEFINITIONS.map((definition) => [definition.name, definition.inputSchema])) as Record<string, any>;
     expect(definitions['document.parse'].properties.file).toMatchObject({ type: 'object' });
     expect(definitions['document.unshare'].oneOf).toHaveLength(2);
-    expect(definitions['document.update'].properties.updates.items.oneOf).toHaveLength(3);
+    expect(definitions['document.update'].properties.updates.items.oneOf).toHaveLength(2);
     expect(definitions['document.read'].description).toContain('endOffset');
   });
 });
@@ -182,7 +203,7 @@ describe('Content output contracts', () => {
     const key = newId();
     expect(contentToolOutputSchemas['document.read'].parse({ results: [{ key, success: true, data: { documentKey: key, title: 'Notes', content: 'Text' } }], summary: { requested: 1, succeeded: 1, failed: 0 } })).toMatchObject({ results: [{ data: { content: 'Text' } }] });
     expect(contentToolOutputSchemas['document.read'].parse({ results: [{ key, success: true, data: { documentKey: key, title: 'Notes', audio: [{ index: 0, url: 'data:audio/mpeg;base64,bXAz', startCharacter: 0, endCharacter: 20 }], totalDurationMs: 900 } }], summary: { requested: 1, succeeded: 1, failed: 0 } })).toMatchObject({ results: [{ data: { audio: [{ index: 0 }] } }] });
-    const audioVersion = { key, documentKey: key, version: 1, sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: '2026-07-22T10:00:00.000Z', mimeType: 'audio/mpeg', sizeBytes: 100, durationMs: 900, includeTitle: false, includeCode: false, createdAt: '2026-07-22T10:00:00.000Z' };
+    const audioVersion = { key, documentKey: key, version: 1, sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: '2026-07-22T10:00:00.000Z', mimeType: 'audio/mpeg', sizeBytes: 100, durationMs: 900, isCurrent: false, playbackPositionMs: 0, includeTitle: false, includeCode: false, createdAt: '2026-07-22T10:00:00.000Z' };
     expect(contentToolOutputSchemas['document.read'].parse({ results: [{ key, success: true, data: { documentKey: key, title: 'Notes', audioVersion } }], summary: { requested: 1, succeeded: 1, failed: 0 } })).toMatchObject({ results: [{ data: { audioVersion: { version: 1 } } }] });
     expect(() => contentToolOutputSchemas['document.read'].parse({ results: [{ key, success: true, data: { documentKey: key, title: 'Notes', audioVersion: { ...audioVersion, storageKey: 'private.mp3' } } }], summary: { requested: 1, succeeded: 1, failed: 0 } })).toThrow();
     expect(() => contentToolOutputSchemas['document.read'].parse({ results: [{ key, success: true, data: { documentKey: key, title: 'Notes', mode: 'html', content: 'wrong' } }], summary: { requested: 1, succeeded: 1, failed: 0 } })).toThrow();

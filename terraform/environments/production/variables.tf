@@ -92,13 +92,13 @@ variable "graph_db_name" {
 
 variable "document_worker_cpu" {
   type        = number
-  description = "Fargate CPU units allocated to each document processing job."
+  description = "Fargate CPU units allocated to transient image compute."
   default     = 2048
 }
 
 variable "document_worker_memory" {
   type        = number
-  description = "Fargate memory in MiB allocated to each document processing job."
+  description = "Fargate memory in MiB allocated to transient image compute."
   default     = 4096
 }
 

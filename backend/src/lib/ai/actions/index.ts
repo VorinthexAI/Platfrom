@@ -7,11 +7,12 @@ import { deepReasonAction } from './deep-reason';
 import { describeVisualIdentityAction } from './describe-visual-identity';
 import { deleteActionDefinition } from './delete';
 import { documentEmbedAction } from './document-embed';
+import { documentCleanupAction } from './document-cleanup';
 import { documentExtractAction } from './document-extract';
-import { documentGenerateContentAction } from './document-generate-content';
-import { documentGenerateHtmlAction } from './document-generate-html';
 import { documentInsertAction } from './document-insert';
 import { documentValidateAction } from './document-validate';
+import { documentSummarizeAction } from './document-summarize';
+import { documentTopicsAction } from './document-topics';
 import { editImageAction } from './edit-image';
 import { editVideoAction } from './edit-video';
 import { enhanceAction } from './enhance';
@@ -45,11 +46,12 @@ export { deepReasonAction } from './deep-reason';
 export { describeVisualIdentityAction } from './describe-visual-identity';
 export { deleteActionDefinition } from './delete';
 export { documentEmbedAction } from './document-embed';
+export { documentCleanupAction } from './document-cleanup';
 export { documentExtractAction } from './document-extract';
-export { documentGenerateContentAction } from './document-generate-content';
-export { documentGenerateHtmlAction } from './document-generate-html';
 export { documentInsertAction } from './document-insert';
 export { documentValidateAction } from './document-validate';
+export { documentSummarizeAction } from './document-summarize';
+export { documentTopicsAction } from './document-topics';
 export { editImageAction } from './edit-image';
 export { editVideoAction } from './edit-video';
 export { enhanceAction } from './enhance';
@@ -90,8 +92,8 @@ export const ACTION_DEFINITIONS: readonly ActionDefinition[] = [
   traverseAction, readAction, insertActionDefinition, upsertAction, updateActionDefinition, deleteActionDefinition,
   generateImageAction, editImageAction, generateVideoAction, editVideoAction, extendVideoAction, analyzeVideoAction,
   generateSpeechAction, analyzeAudioAction, generateMusicAction, orchestratorChatAction,
-  documentValidateAction, storageUploadAction, documentExtractAction, documentGenerateHtmlAction,
-  documentGenerateContentAction, documentEmbedAction, documentInsertAction, enhanceAction, translateAction, captionImageAction, describeVisualIdentityAction,
+  documentValidateAction, storageUploadAction, documentExtractAction, documentEmbedAction, documentInsertAction, enhanceAction, translateAction, captionImageAction, describeVisualIdentityAction,
+  documentCleanupAction, documentSummarizeAction, documentTopicsAction,
 ];
 export const getActionDefinition = (id: ActionId) => ACTION_DEFINITIONS.find((definition) => definition.id === id);
 

@@ -63,13 +63,20 @@ describe('batch embeddings', () => {
   test('splits large requests into bounded provider batches while preserving order', async () => {
     process.env.OPENROUTER_API_KEY = 'test-key';
     const sizes: number[] = [];
+    let active = 0;
+    let maxActive = 0;
     globalThis.fetch = (async (_url, init) => {
       const input = JSON.parse(String(init?.body)).input as string[];
       sizes.push(input.length);
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active -= 1;
       return Response.json({ provider: 'DeepInfra', data: input.map((text, index) => ({ index, embedding: vector(Number(text.slice(1))) })) });
     }) as typeof fetch;
     const result = await embedTexts({ texts: Array.from({ length: 33 }, (_, index) => `v${index}`) });
     expect(sizes).toEqual([16, 16, 1]);
+    expect(maxActive).toBe(3);
     expect(result.map((embedding) => embedding[0])).toEqual(Array.from({ length: 33 }, (_, index) => index));
   });
 });

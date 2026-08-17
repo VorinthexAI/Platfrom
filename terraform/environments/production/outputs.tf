@@ -66,5 +66,3 @@ output "ssm_parameter_prefix" {
 
 
 
-
-

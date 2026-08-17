@@ -22,8 +22,8 @@ import { organizationProviderSchema } from '../lib/ai/organization-providers/sch
 import { buildEmbeddingText } from '../lib/db/base';
 import { NEXUS_SCOPE_KEY, SEEDED_SCOPES } from '../lib/db/seed';
 import { isLegacyIndex, LEGACY_INDEX_FIELDS } from './arango-migrate-indexes';
-import { legacyContentRepresentations, stageLegacyDocumentShares } from './content-migration';
-import { canonicalDocumentRepresentations } from '../lib/ai/document-processing/representation';
+import { stageLegacyDocumentShares } from './content-migration';
+import { htmlToPlainText } from '../lib/ai/document-processing/representation';
 import { chunkDocumentContent, chunkDocumentText, documentEmbeddingTexts, documentSemanticHash } from '../lib/ai/document-processing/chunking';
 import { z } from 'zod';
 
@@ -214,6 +214,22 @@ function migrationFallbackChunk(content: string): string {
   return chunk;
 }
 
+function recoverLegacyHtmlContent(html: string): string {
+  try {
+    return htmlToPlainText(html);
+  } catch {
+    return html
+      .replace(/<(script|style|iframe|object|svg)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
+      .replace(/<br\s*\/?\s*>/gi, '\n')
+      .replace(/<\/?(?:h[1-6]|p|div|section|blockquote|pre|li|tr|table|ul|ol)\b[^>]*>/gi, '\n')
+      .replace(/<[^>]*>/g, '')
+      .replace(/&(amp|lt|gt|quot|#39);/g, (_, entity: string) => ({ amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'" })[entity]!)
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+}
+
 async function runMigrationTransaction(targetDb: Database, collectionName: string, query: string, bindVars: Record<string, unknown>) {
   const transaction = await targetDb.beginTransaction({ write: [collectionName], exclusive: [collectionName] });
   try {
@@ -335,55 +351,48 @@ export async function migrateExactSemanticRecords(targetDb: Database, collection
 
 export async function migrateContentVersions(targetDb: Database) {
   const dimensions = EMBEDDING_DIMENSIONS;
-  const storeContentArray = process.env.CONTENT_VERSION_CONTENT_ARRAY_ENABLED !== 'false';
   let after = '';
   while (true) {
     const cursor = await targetDb.query<Record<string, unknown>>(`
       FOR snapshot IN documentVersions
         FILTER snapshot._key > @after
-        FILTER !HAS(snapshot, "_internalDeletion") || snapshot._internalDeletion == null
-        FILTER snapshot._semanticChunkingSkipped != true
-        FILTER HAS(snapshot, "json") || HAS(snapshot, "storageKey") || HAS(snapshot, "sizeBytes") || HAS(snapshot, "updatedAt")
-          || !IS_STRING(snapshot.html) || LENGTH(TRIM(snapshot.html)) == 0
-          || (@storeContentArray && (!IS_ARRAY(snapshot.content) || LENGTH(snapshot.content) == 0 || LENGTH(snapshot.content[* FILTER !IS_STRING(CURRENT) || LENGTH(TRIM(CURRENT)) == 0]) > 0))
-          || (!@storeContentArray && (!IS_STRING(snapshot.content) || LENGTH(TRIM(snapshot.content)) == 0))
+        FILTER HAS(snapshot, "html") || (snapshot._semanticChunkingSkipped != true && (HAS(snapshot, "json") || HAS(snapshot, "storageKey") || HAS(snapshot, "sizeBytes") || HAS(snapshot, "updatedAt")
+          || !IS_STRING(snapshot.content) || LENGTH(TRIM(snapshot.content)) == 0
           || !IS_ARRAY(snapshot.embedding) || LENGTH(snapshot.embedding) == 0
           || LENGTH(snapshot.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
           || (@dimensions > 0 && LENGTH(snapshot.embedding) != @dimensions)
-          || !IS_ARRAY(snapshot.chunkEmbeddings) || (@storeContentArray && LENGTH(snapshot.chunkEmbeddings) != LENGTH(snapshot.content))
+          || !IS_ARRAY(snapshot.chunkEmbeddings)
           || snapshot.semanticChunkCount != LENGTH(snapshot.chunkEmbeddings)
-          || snapshot.semanticContentHash != SHA256(@storeContentArray ? CONCAT_SEPARATOR("", snapshot.content) : snapshot.content)
+          || snapshot.semanticContentHash != SHA256(snapshot.content)
           || LENGTH(snapshot.chunkEmbeddings[* FILTER !IS_ARRAY(CURRENT) || LENGTH(CURRENT) != @dimensions]) > 0
           || LENGTH(FLATTEN(snapshot.chunkEmbeddings)[* FILTER !IS_NUMBER(CURRENT)]) > 0
           || HAS(snapshot, "embeddingProvider") || HAS(snapshot, "embeddingModel") || HAS(snapshot, "embeddingDimensions")
-          || HAS(snapshot, "embeddingState") || HAS(snapshot, "embeddedAt")
+          || HAS(snapshot, "embeddingState") || HAS(snapshot, "embeddedAt")))
         SORT snapshot._key
         LIMIT 50
         RETURN snapshot
-    `, { after, dimensions, storeContentArray });
+    `, { after, dimensions });
     const snapshots = await cursor.all();
     if (snapshots.length === 0) break;
     const updates: Array<Record<string, unknown>> = [];
     for (const snapshot of snapshots) {
       const historicalContent = nonEmptyString(snapshot.content) ?? (Array.isArray(snapshot.content) ? snapshot.content.filter((value): value is string => typeof value === 'string').join('') : null);
-      const sourceHtml = nonEmptyString(snapshot.html) ?? (historicalContent ? legacyContentRepresentations(historicalContent).html : null);
-      if (!sourceHtml) throw new Error(`Cannot migrate documentVersions: ${String(snapshot._key)} has no nonempty historical representation.`);
-      const representations = canonicalDocumentRepresentations(sourceHtml);
-      if (!representations.html.trim() || !representations.content.trim()) throw new Error(`Cannot migrate documentVersions: ${String(snapshot._key)} canonicalized to an empty representation.`);
-      const contentChunks = migrationContentChunks(representations.content);
+      const sourceHtml = nonEmptyString(snapshot.html);
+      const content = sourceHtml ? recoverLegacyHtmlContent(sourceHtml) : historicalContent ?? '';
+      if (!content.trim()) throw new Error(`Cannot migrate documentVersions: ${String(snapshot._key)} has no recoverable content.`);
+      const contentChunks = migrationContentChunks(content);
       if (!contentChunks) {
-        const fallbackChunk = migrationFallbackChunk(representations.content);
+        const fallbackChunk = migrationFallbackChunk(content);
         const fallbackEmbedding = isCurrentVector(snapshot.embedding) ? snapshot.embedding : (await generateEmbeddings([[nonEmptyString(snapshot.label), fallbackChunk].filter(Boolean).join('\n\n')]))[0]!;
         updates.push({
           _key: snapshot._key, _rev: snapshot._rev, source: { html: snapshot.html, content: snapshot.content },
-          html: representations.html, content: representations.content, embedding: fallbackEmbedding,
-          semanticChunkCount: 1, semanticContentHash: documentSemanticHash(representations.content), _semanticChunkingSkipped: true,
+          content, embedding: fallbackEmbedding,
+          semanticChunkCount: 1, semanticContentHash: documentSemanticHash(content), _semanticChunkingSkipped: true,
         });
         continue;
       }
       const metadataCurrent = snapshot.embeddingProvider === undefined || (snapshot.embeddingProvider === EMBEDDING_PROVIDER_ID && snapshot.embeddingModel === EMBEDDING_MODEL && snapshot.embeddingDimensions === dimensions);
-      const storedChunksCurrent = Array.isArray(snapshot.content) && snapshot.content.length === contentChunks.length && snapshot.content.every((chunk, index) => chunk === contentChunks[index]);
-      const reusable = metadataCurrent && historicalContent === representations.content && (storedChunksCurrent || typeof snapshot.content === 'string')
+      const reusable = metadataCurrent && historicalContent === content
         ? currentChunkEmbeddings(snapshot.chunkEmbeddings, contentChunks.length) ?? (contentChunks.length === 1 && isCurrentVector(snapshot.embedding) ? [snapshot.embedding] : null)
         : null;
       const chunkEmbeddings = reusable ?? await generateEmbeddings(documentEmbeddingTexts(nonEmptyString(snapshot.label) ?? '', contentChunks));
@@ -392,12 +401,11 @@ export async function migrateContentVersions(targetDb: Database) {
         _key: snapshot._key,
         _rev: snapshot._rev,
         source: { html: snapshot.html, content: snapshot.content },
-        html: representations.html,
-        content: storeContentArray ? contentChunks : representations.content,
+        content,
         embedding,
         chunkEmbeddings,
         semanticChunkCount: contentChunks.length,
-        semanticContentHash: documentSemanticHash(representations.content),
+        semanticContentHash: documentSemanticHash(content),
       });
     }
     await runMigrationTransaction(targetDb, 'documentVersions', `
@@ -407,30 +415,26 @@ export async function migrateContentVersions(targetDb: Database) {
         LET replacement = patch._semanticChunkingSkipped == true ? UNSET(MERGE(snapshot, UNSET(patch, "_key", "_rev", "source")), "chunkEmbeddings") : MERGE(snapshot, UNSET(patch, "_key", "_rev", "source"))
         /* Legacy version objects are intentionally retired as metadata-only orphans here.
            Object lifecycle reconciliation is external; migration must not infer deletion ownership. */
-        REPLACE snapshot WITH UNSET(replacement, "json", "storageKey", "sizeBytes", "updatedAt", "embeddingProvider", "embeddingModel", "embeddingDimensions", "embeddingState", "embeddedAt") IN documentVersions
+        REPLACE snapshot WITH UNSET(replacement, "html", "json", "storageKey", "sizeBytes", "updatedAt", "embeddingProvider", "embeddingModel", "embeddingDimensions", "embeddingState", "embeddedAt") IN documentVersions
     `, { updates });
     after = String(snapshots.at(-1)!._key);
   }
   const verification = await targetDb.query<number>(`
     RETURN LENGTH(FOR snapshot IN documentVersions
-      FILTER !HAS(snapshot, "_internalDeletion") || snapshot._internalDeletion == null
-      FILTER snapshot._semanticChunkingSkipped != true
-      FILTER HAS(snapshot, "json") || HAS(snapshot, "storageKey") || HAS(snapshot, "sizeBytes") || HAS(snapshot, "updatedAt")
-        || !IS_STRING(snapshot.html) || LENGTH(TRIM(snapshot.html)) == 0
-        || (@storeContentArray && (!IS_ARRAY(snapshot.content) || LENGTH(snapshot.content) == 0 || LENGTH(snapshot.content[* FILTER !IS_STRING(CURRENT) || LENGTH(TRIM(CURRENT)) == 0]) > 0))
-        || (!@storeContentArray && (!IS_STRING(snapshot.content) || LENGTH(TRIM(snapshot.content)) == 0))
+      FILTER HAS(snapshot, "html") || (snapshot._semanticChunkingSkipped != true && (HAS(snapshot, "json") || HAS(snapshot, "storageKey") || HAS(snapshot, "sizeBytes") || HAS(snapshot, "updatedAt")
+        || !IS_STRING(snapshot.content) || LENGTH(TRIM(snapshot.content)) == 0
         || !IS_ARRAY(snapshot.embedding) || LENGTH(snapshot.embedding) == 0
         || LENGTH(snapshot.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
         || (@dimensions > 0 && LENGTH(snapshot.embedding) != @dimensions)
-        || !IS_ARRAY(snapshot.chunkEmbeddings) || (@storeContentArray && LENGTH(snapshot.chunkEmbeddings) != LENGTH(snapshot.content))
+        || !IS_ARRAY(snapshot.chunkEmbeddings)
         || snapshot.semanticChunkCount != LENGTH(snapshot.chunkEmbeddings)
-        || snapshot.semanticContentHash != SHA256(@storeContentArray ? CONCAT_SEPARATOR("", snapshot.content) : snapshot.content)
+        || snapshot.semanticContentHash != SHA256(snapshot.content)
         || LENGTH(snapshot.chunkEmbeddings[* FILTER !IS_ARRAY(CURRENT) || LENGTH(CURRENT) != @dimensions]) > 0
         || LENGTH(FLATTEN(snapshot.chunkEmbeddings)[* FILTER !IS_NUMBER(CURRENT)]) > 0
         || HAS(snapshot, "embeddingProvider") || HAS(snapshot, "embeddingModel") || HAS(snapshot, "embeddingDimensions")
-        || HAS(snapshot, "embeddingState") || HAS(snapshot, "embeddedAt")
+        || HAS(snapshot, "embeddingState") || HAS(snapshot, "embeddedAt")))
       RETURN 1)
-  `, { dimensions, storeContentArray });
+  `, { dimensions });
   const invalid = await verification.next() ?? 0;
   if (invalid > 0) throw new Error(`documentVersions migration verification failed for ${invalid} stale row(s), including any concurrent edit conflicts; rerun the migration.`);
 }
@@ -442,10 +446,7 @@ export async function migrateContentDocuments(targetDb: Database) {
     const cursor = await targetDb.query<Record<string, unknown>>(`
       FOR document IN documents
         FILTER document._key > @after
-        FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
-        FILTER document._semanticChunkingSkipped != true
-        FILTER HAS(document, "json")
-          || !IS_STRING(document.html) || LENGTH(TRIM(document.html)) == 0
+        FILTER HAS(document, "html") || (document._semanticChunkingSkipped != true && (HAS(document, "json")
           || !IS_STRING(document.content) || LENGTH(TRIM(document.content)) == 0
           || !IS_ARRAY(document.embedding) || LENGTH(document.embedding) == 0
           || LENGTH(document.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
@@ -459,7 +460,7 @@ export async function migrateContentDocuments(targetDb: Database) {
           || LENGTH(document.chunkEmbeddings[* FILTER !IS_ARRAY(CURRENT) || LENGTH(CURRENT) != @dimensions]) > 0
           || LENGTH(FLATTEN(document.chunkEmbeddings)[* FILTER !IS_NUMBER(CURRENT)]) > 0
           || HAS(document, "embeddingProvider") || HAS(document, "embeddingModel") || HAS(document, "embeddingDimensions")
-          || HAS(document, "embeddingState") || HAS(document, "embeddedAt")
+          || HAS(document, "embeddingState") || HAS(document, "embeddedAt")))
         SORT document._key
         LIMIT 50
         RETURN document
@@ -469,24 +470,23 @@ export async function migrateContentDocuments(targetDb: Database) {
     const updates: Array<Record<string, unknown>> = [];
     for (const document of documents) {
       const historicalContent = nonEmptyString(document.content);
-      const sourceHtml = nonEmptyString(document.html) ?? (historicalContent ? legacyContentRepresentations(historicalContent).html : null);
-      if (!sourceHtml) throw new Error(`Cannot migrate documents: ${String(document._key)} has no nonempty representation.`);
-      const representations = canonicalDocumentRepresentations(sourceHtml);
-      if (!representations.html.trim() || !representations.content.trim()) throw new Error(`Cannot migrate documents: ${String(document._key)} canonicalized to an empty representation.`);
-      const contentChunks = migrationContentChunks(representations.content);
+      const sourceHtml = nonEmptyString(document.html);
+      const content = sourceHtml ? recoverLegacyHtmlContent(sourceHtml) : historicalContent ?? '';
+      if (!content.trim()) throw new Error(`Cannot migrate documents: ${String(document._key)} has no recoverable content.`);
+      const contentChunks = migrationContentChunks(content);
       if (!contentChunks) {
-        const fallbackChunk = migrationFallbackChunk(representations.content);
+        const fallbackChunk = migrationFallbackChunk(content);
         const fallbackEmbedding = isCurrentVector(document.embedding) ? document.embedding : (await generateEmbeddings([`${String(document.name ?? '').trim()}\n\n${fallbackChunk}`.trim()]))[0]!;
         updates.push({
           _key: document._key, _rev: document._rev, source: { name: document.name, html: document.html, content: document.content },
-          ...representations, embedding: fallbackEmbedding, semanticChunkCount: 1,
-          semanticContentHash: documentSemanticHash(representations.content), _semanticChunkingSkipped: true,
+          content, embedding: fallbackEmbedding, semanticChunkCount: 1,
+          semanticContentHash: documentSemanticHash(content), _semanticChunkingSkipped: true,
         });
         continue;
       }
       const metadataCurrent = document.embeddingProvider === undefined || (document.embeddingProvider === EMBEDDING_PROVIDER_ID && document.embeddingModel === EMBEDDING_MODEL && document.embeddingDimensions === dimensions);
       const storedChunksCurrent = Array.isArray(document.contentChunks) && document.contentChunks.length === contentChunks.length && document.contentChunks.every((chunk, index) => chunk === contentChunks[index]);
-      const reusable = metadataCurrent && historicalContent === representations.content && (storedChunksCurrent || document.contentChunks === undefined)
+      const reusable = metadataCurrent && historicalContent === content && (storedChunksCurrent || document.contentChunks === undefined)
         ? currentChunkEmbeddings(document.chunkEmbeddings, contentChunks.length) ?? (contentChunks.length === 1 && isCurrentVector(document.embedding) ? [document.embedding] : null)
         : null;
       const chunkEmbeddings = reusable ?? await generateEmbeddings(documentEmbeddingTexts(String(document.name ?? ''), contentChunks));
@@ -495,12 +495,12 @@ export async function migrateContentDocuments(targetDb: Database) {
         _key: document._key,
         _rev: document._rev,
         source: { name: document.name, html: document.html, content: document.content },
-        ...representations,
+        content,
         contentChunks,
         embedding,
         chunkEmbeddings,
         semanticChunkCount: contentChunks.length,
-        semanticContentHash: documentSemanticHash(representations.content),
+        semanticContentHash: documentSemanticHash(content),
       });
     }
     await runMigrationTransaction(targetDb, 'documents', `
@@ -508,16 +508,13 @@ export async function migrateContentDocuments(targetDb: Database) {
         LET document = DOCUMENT(documents, patch._key)
         FILTER document != null && document._rev == patch._rev
         LET replacement = patch._semanticChunkingSkipped == true ? UNSET(MERGE(document, UNSET(patch, "_key", "_rev", "source")), "contentChunks", "chunkEmbeddings") : MERGE(document, UNSET(patch, "_key", "_rev", "source"))
-        REPLACE document WITH UNSET(replacement, "json", "embeddingProvider", "embeddingModel", "embeddingDimensions", "embeddingState", "embeddedAt") IN documents
+        REPLACE document WITH UNSET(replacement, "html", "json", "embeddingProvider", "embeddingModel", "embeddingDimensions", "embeddingState", "embeddedAt") IN documents
     `, { updates });
     after = String(documents.at(-1)!._key);
   }
   const verification = await targetDb.query<number>(`
     RETURN LENGTH(FOR document IN documents
-      FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
-      FILTER document._semanticChunkingSkipped != true
-      FILTER HAS(document, "json")
-        || !IS_STRING(document.html) || LENGTH(TRIM(document.html)) == 0
+      FILTER HAS(document, "html") || (document._semanticChunkingSkipped != true && (HAS(document, "json")
         || !IS_STRING(document.content) || LENGTH(TRIM(document.content)) == 0
         || !IS_ARRAY(document.embedding) || LENGTH(document.embedding) == 0
         || LENGTH(document.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
@@ -531,7 +528,7 @@ export async function migrateContentDocuments(targetDb: Database) {
         || LENGTH(document.chunkEmbeddings[* FILTER !IS_ARRAY(CURRENT) || LENGTH(CURRENT) != @dimensions]) > 0
         || LENGTH(FLATTEN(document.chunkEmbeddings)[* FILTER !IS_NUMBER(CURRENT)]) > 0
         || HAS(document, "embeddingProvider") || HAS(document, "embeddingModel") || HAS(document, "embeddingDimensions")
-        || HAS(document, "embeddingState") || HAS(document, "embeddedAt")
+        || HAS(document, "embeddingState") || HAS(document, "embeddedAt")))
       RETURN 1)
   `, { dimensions });
   const invalid = await verification.next() ?? 0;
@@ -836,7 +833,7 @@ export const collections: CollectionSpec[] = [
   { name: 'polls', embedKeys: ['question'], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['messageKey'], unique: true }, { fields: ['channelKey', 'status'] }] },
   { name: 'pollOptions', embedKeys: ['text'], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['pollKey'] }, { fields: ['pollKey', 'position'], unique: true }] },
   { name: 'pollVotes', embedKeys: [], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['pollKey'] }, { fields: ['optionKey'] }, { fields: ['participantKey'] }, { fields: ['pollKey', 'optionKey', 'participantKey'], unique: true }] },
-  { name: 'folders', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'parentFolderKey'] }, { fields: ['scopeKey', 'isFavorite', 'deletedAt'] }, { fields: ['scopeKey', 'parentFolderKey', 'name'], unique: true }] },
+  { name: 'folders', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'parentFolderKey'] }, { fields: ['scopeKey', 'isFavorite', 'deletedAt'] }, { fields: ['scopeKey', 'parentFolderKey', 'name'] }] },
   { name: 'images', embedKeys: ['filename', 'caption'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['imageCaptionKey'], sparse: true }, { fields: ['storageKey'], unique: true }] },
   { name: 'imageCaptions', skipEmbedding: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'hashAlgorithm', 'perceptualHash'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment0'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment1'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment2'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment3'], sparse: true }] },
   { name: 'visualIdentities', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'name'] }, { fields: ['scopeKey', 'referenceImageKey'] }] },
@@ -850,7 +847,11 @@ export const collections: CollectionSpec[] = [
   { name: 'tagAssignments', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'tagKey', 'sourceType', 'sourceKey'], unique: true }, { fields: ['scopeKey', 'sourceType', 'sourceKey'] }, { fields: ['scopeKey', 'tagKey'] }] },
   { name: 'documents', embedKeys: ['name', 'content'], archive: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'folderKey', 'deletedAt'] }, { fields: ['scopeKey', 'isFavorite', 'deletedAt'] }, { fields: ['storageKey'], unique: true, sparse: true }, { fields: ['folderKey', 'name'] }] },
   { name: 'documentVersions', embedKeys: ['label', 'content'], archive: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'documentKey', 'deletedAt'] }, { fields: ['documentKey', 'version'], unique: true }] },
-  { name: 'documentAudioVersions', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'documentKey', 'version'], unique: true }, { fields: ['scopeKey', 'documentKey', 'createdAt'] }, { fields: ['storageKey'], unique: true }] },
+  { name: 'documentAudioVersions', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'documentKey', 'version'], unique: true }, { fields: ['scopeKey', 'documentKey', 'createdAt'] }, { fields: ['scopeKey', 'documentKey', 'isCurrent'] }, { fields: ['storageKey'], unique: true }] },
+  // Private immutable generated summaries. Never expose through the generic node registry.
+  { name: 'documentSummaries', skipEmbedding: true, indexes: [{ fields: ['documentKey', 'version'], unique: true }, { fields: ['scopeKey', 'documentKey', 'createdAt'] }] },
+  // Private one-to-one durable audio for generated summaries.
+  { name: 'documentSummaryAudio', skipEmbedding: true, indexes: [{ fields: ['summaryKey'], unique: true }, { fields: ['scopeKey', 'documentKey', 'createdAt'] }, { fields: ['storageKey'], unique: true }] },
   { name: 'shares', skipEmbedding: true, archive: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'sourceType', 'sourceKey', 'deletedAt'] }, { fields: ['scopeKey', 'sourceType', 'sourceKey', 'revokedAt'] }, { fields: ['tokenHash'], unique: true }, { fields: ['expiresAt'], sparse: true }] },
   { name: 'places', embedKeys: ['name', 'description', 'country', 'continent', 'region', 'city'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'isWishlist', 'deletedAt'] }, { fields: ['scopeKey', 'isFavorite', 'deletedAt'] }, { fields: ['scopeKey', 'countryCode'] }] },
   { name: 'trips', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'startDate'] }, { fields: ['scopeKey', 'endDate'] }, { fields: ['scopeKey', 'isFavorite', 'deletedAt'] }] },
@@ -875,7 +876,7 @@ export const collections: CollectionSpec[] = [
   // collection is deliberately not registered as a generic application node.
   { name: 'contentIdempotency', skipEmbedding: true, indexes: [{ fields: ['organizationKey', 'actorKey', 'tool', 'idempotencyKey'], unique: true }, { fields: ['leaseExpiresAt'], sparse: true }, { fields: ['expiresAt'], sparse: true }] },
   // Private per-user search history and replay cache. Never expose through the generic node registry.
-  { name: 'contentSearchQueries', skipEmbedding: true, indexes: [{ fields: ['actorKey', 'scopeKey', 'normalizedQuery', 'folderKey', 'includeDescendants'], unique: true }, { fields: ['actorKey', 'scopeKey', 'searchedAt'] }] },
+  { name: 'contentSearchQueries', skipEmbedding: true, indexes: [{ fields: ['actorKey', 'scopeKey', 'contextDomain', 'normalizedQuery', 'folderKey', 'includeDescendants'], unique: true }, { fields: ['actorKey', 'scopeKey', 'contextDomain', 'searchedAt'] }] },
   { name: 'projects', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['contentFolderKey'], unique: true }, { fields: ['scopeKey', 'name'] }] },
   { name: 'milestones', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['projectKey', 'deletedAt'] }, { fields: ['projectKey', 'order'] }, { fields: ['projectKey', 'status'] }] },
   { name: 'tasks', embedKeys: ['title', 'description'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['projectKey', 'deletedAt'] }, { fields: ['milestoneKey', 'deletedAt'] }, { fields: ['milestoneKey', 'position'] }, { fields: ['projectKey', 'status'] }, { fields: ['priority'] }] },
@@ -1146,6 +1147,9 @@ async function main() {
     if (spec.name === 'contentSearchQueries') {
       await targetDb.query('FOR query IN contentSearchQueries FILTER IS_STRING(query.expiresAt) && query.expiresAt <= DATE_ISO8601(DATE_NOW()) && query.output != null UPDATE query WITH { output: null } IN contentSearchQueries');
       await targetDb.query('FOR query IN contentSearchQueries FILTER !HAS(query, "folderKey") || !HAS(query, "includeDescendants") UPDATE query WITH { folderKey: null, includeDescendants: false } IN contentSearchQueries');
+      await targetDb.query('FOR query IN contentSearchQueries FILTER !HAS(query, "contextDomain") UPDATE query WITH { contextDomain: "content" } IN contentSearchQueries');
+      await targetDb.query('FOR query IN contentSearchQueries FILTER !HAS(query, "usageCount") UPDATE query WITH { usageCount: HAS(query, "count") ? query.count : 1 } IN contentSearchQueries');
+      await targetDb.query('FOR query IN contentSearchQueries FILTER HAS(query, "count") UPDATE query WITH { count: null } IN contentSearchQueries OPTIONS { keepNull: false }');
       await targetDb.query('FOR query IN contentSearchQueries FILTER HAS(query, "expiresAt") UPDATE query WITH { expiresAt: null } IN contentSearchQueries OPTIONS { keepNull: false }');
     }
     if (spec.name === 'folders') await migrateExactSemanticRecords(targetDb, 'folders', ['name', 'description']);
@@ -1221,8 +1225,8 @@ async function main() {
         RETURN LENGTH(
           FOR document IN documents
             FILTER !HAS(document, "scopeKey")
-              || ((!HAS(document, "html") || !IS_STRING(document.html) || LENGTH(TRIM(document.html)) == 0)
-                && (!HAS(document, "content") || !IS_STRING(document.content) || LENGTH(TRIM(document.content)) == 0))
+              || ((!HAS(document, "content") || !IS_STRING(document.content) || LENGTH(TRIM(document.content)) == 0)
+                && (!HAS(document, "html") || !IS_STRING(document.html) || LENGTH(TRIM(document.html)) == 0))
             RETURN 1
         )
       `);
@@ -1271,6 +1275,15 @@ async function main() {
         }
       }
     }
+    if (spec.name === 'folders') {
+      for (const index of await collection.indexes()) {
+        const fields = 'fields' in index && Array.isArray(index.fields) ? index.fields.map(String) : [];
+        if (fields.join('\0') === ['scopeKey', 'parentFolderKey', 'name'].join('\0') && 'unique' in index && index.unique === true) {
+          await collection.dropIndex(index.id);
+          console.log(`Dropped obsolete unique folder-name index ${index.id}`);
+        }
+      }
+    }
     if (spec.name === 'imageCaptions') {
       for (const index of await collection.indexes()) {
         const fields = 'fields' in index && Array.isArray(index.fields) ? index.fields.map(String) : [];
@@ -1289,6 +1302,15 @@ async function main() {
       });
     }
   }
+
+  await targetDb.query(`
+    FOR audio IN documentAudioVersions
+      FILTER !HAS(audio, "isCurrent") || !HAS(audio, "playbackPositionMs")
+      UPDATE audio WITH {
+        isCurrent: HAS(audio, "isCurrent") ? audio.isCurrent : false,
+        playbackPositionMs: HAS(audio, "playbackPositionMs") ? audio.playbackPositionMs : 0
+      } IN documentAudioVersions
+  `);
 
   // Removed action slugs can occupy fixed seed keys. Retire them before the
   // strict seed reader resolves those keys into current action definitions.

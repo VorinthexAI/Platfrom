@@ -82,6 +82,10 @@
     transform 400ms var(--vui-ease-luxury);
 }
 
+.vui-button-rounded {
+  border-radius: var(--vui-radius-sm) !important;
+}
+
 .vui-button-xs {
   font-size: 10px;
   gap: 4px;
@@ -138,6 +142,45 @@
   cursor: not-allowed;
   opacity: 0.8;
   transform: none;
+}
+
+.vui-search-history-pill {
+  align-items: center;
+  background: var(--vui-color-secondary);
+  border: 1px solid var(--vui-color-border);
+  border-radius: var(--vui-radius-pill);
+  display: flex;
+  min-height: 48px;
+  padding: 3px;
+  width: 100%;
+}
+
+.vui-search-history-pill-query {
+  flex: 1;
+  justify-content: space-between;
+  min-width: 0;
+  padding-left: 6px;
+  padding-right: 8px;
+}
+
+.vui-search-history-pill-query > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vui-search-history-pill-badge {
+  align-items: center;
+  background: var(--vui-color-surface);
+  border: 1px solid var(--vui-color-border);
+  border-radius: var(--vui-radius-pill);
+  color: var(--vui-color-muted);
+  display: inline-flex;
+  font-size: 10px;
+  height: 24px;
+  justify-content: center;
+  min-width: 30px;
+  padding: 0 8px;
 }
 
 /* Loading keeps each variant recognizable while the rising melt carries
@@ -254,7 +297,7 @@
 }
 
 .vui-control {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--vui-color-secondary);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: var(--vui-radius-pill);
   color: var(--vui-color-text);
@@ -679,4 +722,19 @@
     opacity: 0.55;
     transform: translateY(0.5px) scale(0.9);
   }
+}
+@keyframes vui-loading-text-pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+.vui-loading-text {
+  animation: vui-loading-text-pulse 1.8s ease-in-out infinite;
+  background: linear-gradient(90deg, #56616b, #f5f7f8, #56616b);
+  background-clip: text;
+  color: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vui-loading-text { animation: none; opacity: 0.75; }
 }

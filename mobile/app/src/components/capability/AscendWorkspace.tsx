@@ -586,9 +586,10 @@ export function AscendWorkspace() {
       <ScrollView
         contentContainerStyle={[
           styles.scroll,
-          { width: availableWidth, paddingBottom: insets.bottom + 126 },
+          { width: availableWidth, paddingBottom: spacing.md },
         ]}
         showsVerticalScrollIndicator={false}
+        style={styles.scrollView}
       >
         <View style={styles.heading}>
           <View>
@@ -694,7 +695,6 @@ export function AscendWorkspace() {
         onSubmit={() => void askAssistant()}
         prompts={CORE_PROMPTS}
         sendIcon={<SendIcon size="sm" variant="inverse" />}
-        style={{ left: Math.max(insets.left, spacing.md), right: Math.max(insets.right, spacing.md) }}
         value={assistantInput}
       />
       <BottomSheet
@@ -954,6 +954,7 @@ const styles = StyleSheet.create({
     backgroundColor: palette.page,
     zIndex: 4,
   },
+  scrollView: { flex: 1 },
   scroll: { alignSelf: "center" },
   heading: {
     paddingTop: spacing.lg,

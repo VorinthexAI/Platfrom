@@ -37,13 +37,15 @@ export type ContentDocument = {
   mimeType?: string;
   sizeBytes?: number;
   sourceImageCount?: number;
+  currentVersionKey?: string | null;
   isFavorite: boolean;
   updatedAt: string;
 };
 
-export type ContentDocumentPreview = ContentDocument & {
-  extension: string;
-  blocks: import("@vorinthex/shared/ui/file-viewer").FileViewerBlock[];
+export type ContentNeighbors = {
+  folders: ContentFolder[];
+  documents: ContentDocument[];
+  files: ContentDocument[];
 };
 
 export type ContentDocumentSourceImage = { page: number; url: string };
@@ -52,6 +54,7 @@ export type ContentDocumentVersion = {
   key: string;
   documentKey: string;
   version: number;
+  type?: "enhancement" | "translation";
   label?: string;
   createdAt: string;
   content?: string;
@@ -67,6 +70,8 @@ export type ContentDocumentAudioVersion = {
   mimeType: "audio/mpeg";
   sizeBytes: number;
   durationMs: number;
+  isCurrent: boolean;
+  playbackPositionMs: number;
   voice?: string;
   language?: string;
   speakingRate?: number;
@@ -77,10 +82,38 @@ export type ContentDocumentAudioVersion = {
   url: string;
 };
 
+export type ContentDocumentSummaryAudio = {
+  key: string;
+  summaryKey: string;
+  mimeType: "audio/mpeg";
+  sizeBytes: number;
+  durationMs: number;
+  voice?: string;
+  language?: string;
+  createdAt: string;
+  url: string;
+};
+
+export type ContentDocumentSummary = {
+  key: string;
+  documentKey: string;
+  version: number;
+  summary: string;
+  topic?: string;
+  style: "brief" | "detailed" | "executive" | "bullet-points" | "technical";
+  language?: string;
+  sourceContentHash: string;
+  sourceTitle: string;
+  sourceDocumentUpdatedAt: string;
+  createdAt: string;
+  audio?: ContentDocumentSummaryAudio;
+};
+
 export type ContentSearchDocument = {
   documentKey: string;
   name: string;
   extension?: ContentDocument["extension"];
+  isFavorite: boolean;
   score: number;
   summary?: string;
   scopeKey?: string;
@@ -99,14 +132,17 @@ export type ContentSearchResponse = {
 export type ContentSearchHistoryItem = {
   query: string;
   normalizedQuery: string;
+  contextDomain: "content";
   searchedAt: string;
-  count: number;
+  usageCount: number;
+  folderKey?: string;
+  includeDescendants?: boolean;
   documents: ContentSearchDocument[];
 };
 
 export type ContentDocumentDownload = {
   documentKey: string;
-  format: "original" | "txt";
+  format: "original" | "html" | "txt";
   fileName: string;
   mimeType: string;
   encoding: "base64";
@@ -223,18 +259,17 @@ function documentMimeType(name: string, reported: string) {
 }
 
 function documentFilename(name: string, mimeType: string) {
-  const normalized = name.trim() || "Document";
-  if (/\.(?:txt|md|pdf|doc|docx)$/i.test(normalized)) return normalized;
-  const extension = mimeType === "application/pdf" ? "pdf"
-    : mimeType === "text/plain" ? "txt"
-      : mimeType === "text/markdown" ? "md"
+  const filename = name.trim() || "Document";
+  if (/\.(?:txt|md|pdf|doc|docx)$/i.test(filename)) return filename;
+  const extension = mimeType === "text/plain" ? "txt"
+    : mimeType === "text/markdown" ? "md"
+      : mimeType === "application/pdf" ? "pdf"
         : mimeType === "application/msword" ? "doc"
           : mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ? "docx"
             : undefined;
-  return extension ? `${normalized}.${extension}` : normalized;
+  return extension ? `${filename}.${extension}` : filename;
 }
 
-const wait = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 
 async function callContentTool<T>(tool: string, input: Record<string, unknown>, signal?: AbortSignal, requestContext = getContentContext()): Promise<T> {
   const contentContext = requestContext;
@@ -244,7 +279,7 @@ async function callContentTool<T>(tool: string, input: Record<string, unknown>, 
       organizationKey: contentContext.organizationKey,
       agentKey: contentContext.agentKey,
       input,
-    }, { signal, timeout: tool === "document.read" && input.persistAudio === true ? 15 * 60_000 : tool === "document.parse" || tool === "document.scan" ? 5 * 60_000 : 60_000 });
+    }, { signal, timeout: tool === "document.summary.audio.generate" || tool === "document.read" && input.persistAudio === true ? 15 * 60_000 : tool === "document.parse" || tool === "document.scan" ? 5 * 60_000 : tool === "document.summarize" || tool === "document.topics" ? 4 * 60_000 : 60_000 });
     if (!response.data.success) throw new Error(response.data.error.message);
     return response.data.data;
   } catch (error) {
@@ -254,8 +289,18 @@ async function callContentTool<T>(tool: string, input: Record<string, unknown>, 
   }
 }
 
-export function enhanceContent(content: string, signal?: AbortSignal) {
-  return callContentTool<{ content: string }>("enhance", { content }, signal);
+export async function enhanceContentDocument(documentKey: string, instruction?: string, mode: "preview" | "replace" = "preview") {
+  const data = await callContentTool<{
+    results: { success: boolean; data?: { text: string; persistedDocumentKey?: string }; error?: { message: string } }[];
+  }>("document.enhance", {
+    documentKeys: [documentKey],
+    instruction,
+    mode,
+    ...(mode === "replace" ? { idempotencyKey: createContentMutationKey() } : {}),
+  });
+  const result = data.results[0];
+  if (!result?.success || !result.data || mode === "replace" && result.data.persistedDocumentKey !== documentKey) throw new Error(result?.error?.message ?? "The document could not be enhanced.");
+  return result.data;
 }
 
 export async function askPersonalAssistant(message: string, currentNote: { documentKey?: string; title: string; content: string; selection?: { start: number; end: number } }, folderKey?: string, signal?: AbortSignal) {
@@ -276,19 +321,29 @@ export async function askPersonalAssistant(message: string, currentNote: { docum
   }
 }
 
-export async function translateContentDocument(documentKey: string, targetLanguage: string) {
+export async function translateContentDocument(documentKey: string, targetLanguage: string, instruction?: string, mode: "preview" | "replace" = "replace") {
   const data = await callContentTool<{
     results: { success: boolean; data?: { text: string; persistedDocumentKey?: string }; error?: { message: string } }[];
   }>("document.translate", {
     documentKeys: [documentKey],
     targetLanguage,
+    instruction,
     preserveFormatting: true,
-    mode: "replace",
-    idempotencyKey: createContentMutationKey(),
+    mode,
+    ...(mode === "replace" ? { idempotencyKey: createContentMutationKey() } : {}),
   });
   const result = data.results[0];
-  if (!result?.success || result.data?.persistedDocumentKey !== documentKey) throw new Error(result?.error?.message ?? "The note could not be translated.");
+  if (!result?.success || !result.data || mode === "replace" && result.data.persistedDocumentKey !== documentKey) throw new Error(result?.error?.message ?? "The note could not be translated.");
   return result.data;
+}
+
+export async function createContentDocumentVersion(documentKey: string, label: string, content?: string, type?: ContentDocumentVersion["type"]) {
+  const data = await callContentTool<{
+    results: { success: boolean; data?: { version: ContentDocumentVersion }; error?: { message: string } }[];
+  }>("document.create-version", { documentKeys: [documentKey], labels: { [documentKey]: label }, ...(content ? { contents: { [documentKey]: content } } : {}), ...(type ? { types: { [documentKey]: type } } : {}), idempotencyKey: createContentMutationKey() });
+  const result = data.results[0];
+  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The document version could not be created.");
+  return result.data.version;
 }
 
 export async function listContentDocumentVersions(documentKey: string) {
@@ -321,13 +376,61 @@ export async function listContentDocumentAudioVersions(documentKey: string) {
   return versions;
 }
 
+export async function updateContentDocumentAudioPlayback(audioVersionKey: string, playbackPositionMs: number) {
+  return callContentTool<{ audioVersionKey: string; documentKey: string; playbackPositionMs: number }>("document.audio.playback.update", {
+    audioVersionKey,
+    playbackPositionMs,
+    idempotencyKey: createContentMutationKey(),
+  });
+}
+
+export async function clearContentDocumentAudioPlayback(documentKey: string) {
+  return callContentTool<{ documentKey: string }>("document.audio.playback.clear", {
+    documentKey,
+    idempotencyKey: createContentMutationKey(),
+  });
+}
+
+export async function listContentDocumentSummaries(documentKey: string) {
+  const summaries: ContentDocumentSummary[] = [];
+  let cursor: string | undefined;
+  do {
+    const data = await callContentTool<{
+      results: { success: boolean; data?: { summaries: ContentDocumentSummary[]; cursor?: string }; error?: { message: string } }[];
+    }>("document.list-summaries", { documentKeys: [documentKey], cursor, limit: 100 });
+    const result = data.results[0];
+    if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "Summary versions could not be loaded.");
+    summaries.push(...result.data.summaries);
+    cursor = result.data.cursor;
+  } while (cursor);
+  return summaries;
+}
+
+export async function findContentDocumentSummary(summaryKey: string) {
+  const data = await callContentTool<{
+    results: { success: boolean; data?: { summary: ContentDocumentSummary }; error?: { message: string } }[];
+  }>("document.find-summary", { summaryKeys: [summaryKey] });
+  const result = data.results[0];
+  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The summary could not be loaded.");
+  return result.data.summary;
+}
+
 export async function generateContentDocumentAudio(documentKey: string) {
   const data = await callContentTool<{
     results: { success: boolean; data?: { audioVersion: Omit<ContentDocumentAudioVersion, "current" | "url"> }; error?: { message: string } }[];
-  }>("document.read", { documentKeys: [documentKey], mode: "audio", persistAudio: true, idempotencyKey: createContentMutationKey() });
+  }>("document.read", { documentKeys: [documentKey], mode: "audio", persistAudio: true, voice: "Matthew", idempotencyKey: createContentMutationKey() });
   const result = data.results[0];
   if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "Document audio could not be generated.");
   return result.data.audioVersion;
+}
+
+export async function generateContentDocumentSummaryAudio(summaryKey: string) {
+  const data = await callContentTool<{
+    results: { success: boolean; data?: { audio: ContentDocumentSummaryAudio }; error?: { message: string } }[];
+  }>("document.summary.audio.generate", { summaryKeys: [summaryKey], voice: "Matthew", idempotencyKey: createContentMutationKey() });
+  const result = data.results[0];
+  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "Summary audio could not be generated.");
+  return result.data.audio;
 }
 
 export async function findContentDocumentVersion(versionKey: string) {
@@ -339,11 +442,11 @@ export async function findContentDocumentVersion(versionKey: string) {
   return result.data.version;
 }
 
-export async function restoreContentDocumentVersion(documentKey: string, versionKey: string) {
+export async function restoreContentDocumentVersion(documentKey: string, versionKey: string, createBackupVersion = true) {
   const data = await callContentTool<{
     results: { success: boolean; data?: { document: ContentDocument }; error?: { message: string } }[];
   }>("document.restore-version", {
-    restores: [{ documentKey, versionKey, createBackupVersion: true }],
+    restores: [{ documentKey, versionKey, createBackupVersion }],
     idempotencyKey: createContentMutationKey(),
   });
   const result = data.results[0];
@@ -351,71 +454,62 @@ export async function restoreContentDocumentVersion(documentKey: string, version
   return result.data.document;
 }
 
+export async function listContentFolderTree(signal?: AbortSignal, contentContext = getContentContext()) {
+  const folders: ContentFolder[] = [];
+  let cursor: string | undefined;
+  do {
+    const data: { folders: ContentFolder[]; cursor?: string } = await callContentTool("folder.list", {
+      scopeKey: contentContext.scopeKey,
+      includeDescendants: true,
+      cursor,
+      limit: 100,
+      sort: { field: "name", direction: "asc" },
+    }, signal, contentContext);
+    folders.push(...data.folders);
+    cursor = data.cursor;
+  } while (cursor);
+  return folders;
+}
+
+export async function listContentDocumentsAtLocation(folderKey?: string, signal?: AbortSignal, contentContext = getContentContext()) {
+  const documents: ContentDocument[] = [];
+  let cursor: string | undefined;
+  do {
+    const data: { documents: ContentDocument[]; cursor?: string } = await callContentTool("document.list", {
+      scopeKey: contentContext.scopeKey,
+      ...(folderKey ? { folderKey } : {}),
+      cursor,
+      limit: 100,
+      sort: { field: "updatedAt", direction: "desc" },
+    }, signal, contentContext);
+    documents.push(...data.documents);
+    cursor = data.cursor;
+  } while (cursor);
+  return documents;
+}
+
 export async function listContentLocation(folderKey?: string) {
-  const contentContext = getContentContext();
-  const location = folderKey ? { folderKey } : {};
-  const listFolders = async () => {
-    const folders: ContentFolder[] = [];
-    let cursor: string | undefined;
-    do {
-      const data: { folders: ContentFolder[]; cursor?: string } = await callContentTool("folder.list", {
-        scopeKey: contentContext.scopeKey,
-        parentFolderKey: folderKey,
-        cursor,
-        limit: 100,
-        sort: { field: "name", direction: "asc" },
-      });
-      folders.push(...data.folders);
-      cursor = data.cursor;
-    } while (cursor);
-    return folders;
-  };
-  const listDocuments = async () => {
-    const documents: ContentDocument[] = [];
-    let cursor: string | undefined;
-    do {
-      const data: { documents: ContentDocument[]; cursor?: string } = await callContentTool("document.list", {
-        scopeKey: contentContext.scopeKey,
-        ...location,
-        cursor,
-        limit: 100,
-        sort: { field: "updatedAt", direction: "desc" },
-      });
-      documents.push(...data.documents);
-      cursor = data.cursor;
-    } while (cursor);
-    return documents;
-  };
-  const [folders, documents] = await Promise.all([listFolders(), listDocuments()]);
-  return { folders, documents };
+  const [tree, documents] = await Promise.all([listContentFolderTree(), listContentDocumentsAtLocation(folderKey)]);
+  return { folders: tree.filter((folder) => folder.parentFolderKey === folderKey), documents };
 }
 
 export async function loadInitialContentLocation() {
-  const root = await listContentLocation();
+  const [tree, rootDocuments] = await Promise.all([listContentFolderTree(), listContentDocumentsAtLocation()]);
+  const root = { folders: tree.filter((folder) => !folder.parentFolderKey), documents: rootDocuments };
   const initialFolder = root.folders.find((folder) => folder.name === "My Documents");
   if (!initialFolder) return { root, location: root };
-  return { root, location: await listContentLocation(initialFolder.key), initialFolder };
+  const documents = await listContentDocumentsAtLocation(initialFolder.key);
+  return { root, location: { folders: tree.filter((folder) => folder.parentFolderKey === initialFolder.key), documents }, initialFolder };
 }
 
-export async function readContentDocument(documentKey: string) {
+export async function readContentDocument(documentKey: string, contentContext = getContentContext()) {
   const data = await callContentTool<{
     results: { success: boolean; data?: { document: ContentDocument & { content?: string } }; error?: { message: string } }[];
-  }>("document.find", { documentKeys: [documentKey], include: ["content"] });
+  }>("document.find", { documentKeys: [documentKey], include: ["content"] }, undefined, contentContext);
   const result = data.results[0];
   const document = result?.data?.document;
   if (!result?.success || !document || document.content === undefined) throw new Error(result?.error?.message ?? "The document could not be opened.");
   return { ...document, content: document.content };
-}
-
-export async function readContentDocumentPreview(documentKey: string) {
-  const data = await callContentTool<{
-    results: { success: boolean; data?: { document: ContentDocument & { blocks?: ContentDocumentPreview["blocks"] } }; error?: { message: string } }[];
-  }>("document.find", { documentKeys: [documentKey], include: ["blocks"] });
-  const result = data.results[0];
-  const document = result?.data?.document;
-  if (!result?.success || !document || document.blocks === undefined) throw new Error(result?.error?.message ?? "The file could not be opened.");
-  if (!document.extension) throw new Error("Notes open in the document editor, not the file viewer.");
-  return { ...document, extension: document.extension, blocks: document.blocks };
 }
 
 export async function readContentDocumentSources(documentKey: string) {
@@ -433,7 +527,7 @@ export async function createContentDocument(name: string, content: string, folde
     scopeKey: contentContext.scopeKey,
     folderKey,
     name,
-    representation: { content },
+    content,
     idempotencyKey: mutationKey,
   });
   return data.document;
@@ -485,7 +579,7 @@ export async function archiveContentDocument(documentKey: string) {
   return singleBatchRecord(outcome, outcome.documents, "The document could not be deleted.");
 }
 
-export async function downloadContentDocument(documentKey: string, format: "original" | "txt" = "original") {
+export async function downloadContentDocument(documentKey: string, format: "original" | "html" | "txt" = "original") {
   const data = await callContentTool<{
     results: { success: boolean; data?: ContentDocumentDownload; error?: { message: string } }[];
   }>("document.download", { documentKeys: [documentKey], format });
@@ -569,16 +663,11 @@ export async function archiveContentFolder(folderKey: string) {
   return singleBatchRecord(outcome, outcome.folders, "The folder could not be deleted.");
 }
 
-export async function uploadContentDocument(file: { name: string; type: string; size: number; base64: string }, folderKey?: string, contentContext = getContentContext()) {
+export async function uploadContentDocument(file: { name: string; type: string; size: number; base64: string }, folderKey?: string, contentContext = getContentContext(), idempotencyKey = createContentMutationKey()) {
   if (!isContentContextConfigured(contentContext)) throw new Error("Archive is unavailable for this session.");
   const mimeType = documentMimeType(file.name, file.type);
   const filename = documentFilename(file.name, mimeType);
-  const [contentDigest, identityDigest] = await Promise.all([
-    Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, file.base64),
-    Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${filename}\0${mimeType}`),
-  ]);
-  const idempotencyKey = `upload-${contentDigest}-${identityDigest}-${folderKey ?? "root"}`;
-  let data = await callContentTool<{ document: ContentDocument } | { job: { key: string; state: string } }>("document.parse", {
+  return callContentTool<{ document: ContentDocument }>("document.parse", {
     scopeKey: contentContext.scopeKey,
     folderKey,
     file: {
@@ -590,44 +679,19 @@ export async function uploadContentDocument(file: { name: string; type: string; 
     },
     idempotencyKey,
   }, undefined, contentContext);
-  const deadline = Date.now() + 30 * 60_000;
-  let firstPoll = true;
-  while (!("document" in data)) {
-    if (Date.now() >= deadline) throw new Error("The upload is still processing. Retry the same file to reconnect.");
-    if (!firstPoll) await wait(2_000);
-    firstPoll = false;
-    const response = await apiClient.post<ToolResponse<{ document: ContentDocument } | { job: { key: string; state: string } }>>(`/api/v1/content/document-jobs/${data.job.key}`, {
-      organizationKey: contentContext.organizationKey,
-      agentKey: contentContext.agentKey,
-    }, { timeout: 30_000 });
-    if (!response.data.success) throw new Error(response.data.error.message);
-    data = response.data.data;
-  }
-  return data;
 }
 
-export async function scanContentDocument(pages: { name: string; size: number; base64: string }[], folderKey?: string, contentContext = getContentContext()) {
+export async function scanContentDocument(pages: { name: string; size: number; base64: string }[], folderKey?: string, contentContext = getContentContext(), name = `Scanned document ${new Date().toISOString().slice(0, 10)}`) {
   if (!isContentContextConfigured(contentContext)) throw new Error("Archive is unavailable for this session.");
   const contentDigest = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, pages.map((page) => page.base64).join("\0"));
   const idempotencyKey = `scan-${contentDigest}-${folderKey ?? "root"}`;
-  let data = await callContentTool<{ document: ContentDocument } | { job: { key: string; state: string } }>("document.scan", {
+  return callContentTool<{ document: ContentDocument }>("document.scan", {
     scopeKey: contentContext.scopeKey,
     folderKey,
-    name: `Scanned document ${new Date().toISOString().slice(0, 10)}`,
+    name,
     pages: pages.map((page) => ({ filename: page.name, mimeType: "image/jpeg", sizeBytes: page.size, encoding: "base64", content: page.base64 })),
     idempotencyKey,
   }, undefined, contentContext);
-  const deadline = Date.now() + 30 * 60_000;
-  let firstPoll = true;
-  while (!("document" in data)) {
-    if (Date.now() >= deadline) throw new Error("The scan is still processing. Submit the same pages to reconnect.");
-    if (!firstPoll) await wait(2_000);
-    firstPoll = false;
-    const response = await apiClient.post<ToolResponse<{ document: ContentDocument } | { job: { key: string; state: string } }>>(`/api/v1/content/document-jobs/${data.job.key}`, { organizationKey: contentContext.organizationKey, agentKey: contentContext.agentKey, tool: "document.scan" }, { timeout: 30_000 });
-    if (!response.data.success) throw new Error(response.data.error.message);
-    data = response.data.data;
-  }
-  return data;
 }
 
 export function searchContent(query: string, folderKey?: string, includeDescendants = false) {
@@ -651,21 +715,40 @@ export async function searchContentMatches(query: string, signal?: AbortSignal, 
   }, signal);
 }
 
-export async function summarizeContentDocument(documentKey: string, signal?: AbortSignal) {
-  const data = await callContentTool<{
-    results: { success: boolean; data?: { text: string }; error?: { message: string } }[];
-  }>("document.summarize", { documentKeys: [documentKey], style: "brief", persist: false }, signal);
-  const result = data.results[0];
-  if (!result?.success || !result.data?.text) throw new Error(result?.error?.message ?? "The document summary could not be created.");
-  return result.data.text;
+export function findContentNeighbors(source: { folderKey: string } | { documentKey: string }, signal?: AbortSignal) {
+  return callContentTool<ContentNeighbors>("content.neighbors", source, signal);
 }
 
-export async function listContentSearchHistory(folderKey?: string, includeDescendants = false) {
-  const contentContext = getContentContext();
+export async function getContentDocumentTopics(documentKey: string, signal?: AbortSignal) {
+  const data = await callContentTool<{ documentKey: string; topics: string[] }>("document.topics", { documentKey }, signal);
+  return data.topics;
+}
+
+export async function summarizeContentDocument(documentKey: string, topic: string, signal?: AbortSignal) {
+  const data = await callContentTool<{
+    results: { success: boolean; data?: { text: string; summary?: ContentDocumentSummary }; error?: { message: string } }[];
+  }>("document.summarize", { documentKeys: [documentKey], topic, style: "brief", persist: true, idempotencyKey: createContentMutationKey() }, signal);
+  const result = data.results[0];
+  if (!result?.success || !result.data?.summary) throw new Error(result?.error?.message ?? "The document summary could not be created.");
+  return result.data.summary;
+}
+
+export async function listContentSearchHistory(folderKey?: string, includeDescendants = false, requestContext = getContentContext()) {
+  const contentContext = requestContext;
   const data = await callContentTool<{ history: ContentSearchHistoryItem[] }>("scope.content.search-history", {
     scopeKey: contentContext.scopeKey,
     ...(folderKey ? { folderKey, includeDescendants } : {}),
-    limit: 8,
-  });
+    limit: 100,
+  }, undefined, requestContext);
   return data.history;
+}
+
+export async function deleteContentSearchHistory(normalizedQuery: string, folderKey?: string, includeDescendants = false) {
+  const contentContext = getContentContext();
+  return callContentTool<{ normalizedQuery: string; deleted: boolean }>("scope.content.search-history.delete", {
+    scopeKey: contentContext.scopeKey,
+    normalizedQuery,
+    ...(folderKey ? { folderKey, includeDescendants } : {}),
+    idempotencyKey: createContentMutationKey(),
+  });
 }

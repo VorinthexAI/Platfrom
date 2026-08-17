@@ -5,6 +5,7 @@ import { documentShareSchema, documentSharesEmbeddingFields } from './document-s
 import { folderSchema, foldersEmbeddingFields } from './folders.node';
 import { documentVersionSchema, documentVersionsEmbeddingFields } from './document-versions.node';
 import { documentAudioVersionSchema } from './document-audio-versions.node';
+import { documentSummarySchema } from './document-summaries.node';
 import { EMBEDDING_DIMENSIONS } from '../embeddings';
 import { chunkDocumentContent } from '../ai/document-processing/chunking';
 
@@ -21,7 +22,7 @@ describe('Content node contracts', () => {
     expect(documentsEmbeddingFields).toEqual(['name', 'content']);
     expect(documentVersionsEmbeddingFields).toEqual(['label', 'content']);
     expect(documentSharesEmbeddingFields).toEqual([]);
-    expect(buildEmbeddingText(documentsEmbeddingFields, { name: 'Roadmap', content: 'Ship Content V1', html: '<p>Ship Content V1</p>' })).toBe('Roadmap\n\nShip Content V1');
+    expect(buildEmbeddingText(documentsEmbeddingFields, { name: 'Roadmap', content: 'Ship Content V1' })).toBe('Roadmap\n\nShip Content V1');
     expect(buildEmbeddingText(documentSharesEmbeddingFields, { token: 'not-embedded' })).toBeNull();
   });
 
@@ -35,10 +36,10 @@ describe('Content node contracts', () => {
     expect(documentSchema.shape.isFavorite.parse(undefined)).toBe(false);
   });
 
-  test('versions contain complete immutable HTML snapshots', () => {
+  test('versions contain complete immutable plain-text snapshots', () => {
     const snapshot = documentVersionSchema.parse({
       key: 'cm00000000000000000000001', scopeKey: 'cm00000000000000000000002', documentKey: 'cm00000000000000000000003',
-      version: 2, label: 'Before launch', html: '<p>Launch</p>',
+      version: 2, label: 'Before launch',
       content: ['Launch'], embedding, chunkEmbeddings: [embedding], createdAt: '2026-07-22T10:00:00.000Z',
     });
     expect(snapshot).toMatchObject({ version: 2, label: 'Before launch', content: 'Launch' });
@@ -46,7 +47,7 @@ describe('Content node contracts', () => {
     expect(snapshot.chunkEmbeddings).toEqual([embedding]);
     expect(snapshot).not.toHaveProperty('storageKey');
     expect(snapshot).not.toHaveProperty('sizeBytes');
-    expect(() => documentVersionSchema.parse({ ...snapshot, html: '   ' })).toThrow();
+    expect(documentVersionSchema.parse({ ...snapshot, html: '<p>ignored</p>' })).not.toHaveProperty('html');
     expect(() => documentVersionSchema.parse({ ...snapshot, content: '   ' })).toThrow();
   });
 
@@ -57,9 +58,22 @@ describe('Content node contracts', () => {
       storageKey: 'content/document/audio/version.mp3', mimeType: 'audio/mpeg', sizeBytes: 128, durationMs: 1_200,
       includeTitle: false, includeCode: false, createdByKey: 'cm00000000000000000000004', createdAt: '2026-07-22T10:00:00.000Z',
     });
-    expect(audio).toMatchObject({ version: 3, documentKey: 'cm00000000000000000000003' });
+    expect(audio).toMatchObject({ version: 3, documentKey: 'cm00000000000000000000003', isCurrent: false, playbackPositionMs: 0 });
     expect(audio).not.toHaveProperty('documentVersionKey');
     expect(() => documentAudioVersionSchema.parse({ ...audio, durationMs: 0 })).toThrow();
+    expect(() => documentAudioVersionSchema.parse({ ...audio, playbackPositionMs: -1 })).toThrow();
+  });
+
+  test('summaries are immutable child records and strip Arango private fields', () => {
+    const summary = documentSummarySchema.parse({
+      key: 'cm00000000000000000000001', scopeKey: 'cm00000000000000000000002', documentKey: 'cm00000000000000000000003',
+      version: 1, summary: 'Concise summary.', topic: 'Launch', style: 'brief', sourceContentHash: 'a'.repeat(64), sourceTitle: 'Document',
+      sourceDocumentUpdatedAt: '2026-07-22T09:00:00.000Z', createdByKey: 'cm00000000000000000000004', createdAt: '2026-07-22T10:00:00.000Z',
+      _id: 'documentSummaries/private', _rev: 'private',
+    });
+    expect(summary).not.toHaveProperty('_id');
+    expect(summary).not.toHaveProperty('_rev');
+    expect(() => documentSummarySchema.parse({ ...summary, version: 0 })).toThrow();
   });
 
   test('version content arrays reconstruct canonical text exactly', () => {
@@ -67,7 +81,7 @@ describe('Content node contracts', () => {
     const chunks = chunkDocumentContent(content);
     const snapshot = documentVersionSchema.parse({
       key: 'cm00000000000000000000001', scopeKey: 'cm00000000000000000000002', documentKey: 'cm00000000000000000000003',
-      version: 1, html: '<p>placeholder</p>', content: chunks, embedding, chunkEmbeddings: chunks.map(() => embedding), createdAt: '2026-07-22T10:00:00.000Z',
+      version: 1, content: chunks, embedding, chunkEmbeddings: chunks.map(() => embedding), createdAt: '2026-07-22T10:00:00.000Z',
     });
     expect(snapshot.content).toBe(content);
   });
@@ -90,7 +104,7 @@ describe('Content node contracts', () => {
   test('requires nonempty finite embeddings for persisted document snapshots', () => {
     const snapshot = {
       key: 'cm00000000000000000000001', scopeKey: 'cm00000000000000000000002', documentKey: 'cm00000000000000000000003',
-      version: 1, html: '<p>Text</p>', content: 'Text', createdAt: '2026-07-22T10:00:00.000Z',
+      version: 1, content: 'Text', createdAt: '2026-07-22T10:00:00.000Z',
     };
     expect(() => documentVersionSchema.parse({ ...snapshot, embedding: [] })).toThrow();
     expect(() => documentVersionSchema.parse({ ...snapshot, embedding: [Number.NaN] })).toThrow();

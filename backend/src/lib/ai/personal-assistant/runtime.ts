@@ -7,6 +7,7 @@ import { imageSearchTool } from '@/lib/ai/tools/image-search';
 import type { TravelService } from '@/lib/travel/service';
 import type { EmailService } from '@/lib/email-inbox/service';
 import type { BookService } from '@/lib/books/service';
+import type { UserSettingsService } from '@/lib/user-settings/service';
 import { executeAction, type ExecuteActionOptions } from '@/lib/ai/router';
 import type { RouteRequestInput } from '@/lib/ai/router/route-request';
 import { assistantSourceSchema, assistantSurfaceSchema, defaultAssistantCapabilityRegistry, type AssistantCapability, type AssistantCapabilityContext, type AssistantCapabilityRegistry } from './capabilities';
@@ -51,6 +52,7 @@ export interface PersonalAssistantDependencies {
   travel?: TravelService;
   email?: EmailService;
   books?: BookService;
+  userSettings?: UserSettingsService;
   gallery?: AssistantCapabilityContext['gallery'];
 }
 
@@ -127,7 +129,7 @@ function systemPrompt(surface: z.infer<typeof assistantSurfaceSchema>) {
   return `${BASE_SYSTEM_PROMPT}
 - Use Archive folder and document tools for requested CRUD operations. Search knowledge when the request depends on stored information.
 - To create or edit the open note, call note.write with the complete final note. Never describe a note edit without calling note.write.
-- For proofreading, grammar, spelling, punctuation, wording, or clarity improvements, call note.enhance. Use target selection only when openNote.selection is present and the request refers to selected or marked text; otherwise use target document.
+- For proofreading, grammar, spelling, punctuation, wording, or clarity improvements to a saved document, call document.enhance.
 - For translation of a saved open document, call document.translate with the exact target language requested by the user. Never substitute English or a different language.
 - Preserve useful existing note content unless the user asks to replace or remove it.
 - After search, answer only from returned evidence or call note.write if the user requested a note change.`;
@@ -221,6 +223,7 @@ export async function runPersonalAssistant(
       travel: dependencies.travel,
       email: dependencies.email,
       books: dependencies.books,
+      userSettings: dependencies.userSettings,
       gallery: dependencies.gallery,
     });
     domainToolExecuted = true;

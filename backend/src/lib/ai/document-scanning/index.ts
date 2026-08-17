@@ -6,6 +6,9 @@ import { awsTextractImageOcr, type DocumentImageOcr } from '@/lib/ai/document-pr
 import { signedImageUrl } from '@/lib/gallery/image-url';
 import type { DocumentScanInput } from './schemas';
 
+const RELIABLE_AVERAGE_CONFIDENCE = 95;
+const RELIABLE_MINIMUM_CONFIDENCE = 80;
+
 export interface DocumentScanDependencies {
   storage?: DocumentObjectStorage;
   ocr?: DocumentImageOcr;
@@ -28,6 +31,12 @@ export function normalizeDocumentTranscription(value: string) {
   return lines.join('\n').replace(textractLineSpacing ? /\n{2,}/g : /\n{3,}/g, textractLineSpacing ? '\n' : '\n\n').trim();
 }
 
+export function isReliableDocumentOcr(result: { extractedText: string; metadata?: Record<string, unknown> }) {
+  const average = Number(result.metadata?.averageConfidence);
+  const minimum = Number(result.metadata?.minimumConfidence);
+  return Boolean(result.extractedText.trim()) && Number.isFinite(average) && average >= RELIABLE_AVERAGE_CONFIDENCE && Number.isFinite(minimum) && minimum >= RELIABLE_MINIMUM_CONFIDENCE;
+}
+
 export async function scanDocumentImages(input: DocumentScanInput, organizationKey: string, dependencies: DocumentScanDependencies = {}) {
   const storage = dependencies.storage ?? documentStorage;
   const ocr = dependencies.ocr ?? awsTextractImageOcr;
@@ -41,22 +50,25 @@ export async function scanDocumentImages(input: DocumentScanInput, organizationK
       await storage.upload({ key: storageKeys[index]!, bytes: page.bytes, mimeType: page.mimeType });
       uploaded.push(storageKeys[index]!);
     }));
-    const urls = await Promise.all(storageKeys.map(signUrl));
-    const [textractPages, visualPages] = await Promise.all([
-      Promise.all(storageKeys.map(async (key, index) => (await ocr.extract(key, input.pages[index]!.bytes)).extractedText)),
-      Promise.all(urls.map(async (url) => {
-        try { return (await caption({ imageUrls: [url], purpose: 'document-transcription' }, { organizationKey })).captions[0]?.trim() ?? ''; }
-        catch { return ''; }
-      })),
-    ]);
-    const unifiedPages = await Promise.all(urls.map(async (url, index) => {
-      const primary = normalizeDocumentTranscription(textractPages[index]!);
-      const secondary = normalizeDocumentTranscription(visualPages[index]!);
-      if (!secondary) return primary;
+    const textractResults = await Promise.all(storageKeys.map((key, index) => ocr.extract(key, input.pages[index]!.bytes)));
+    const textractPages = textractResults.map((result) => result.extractedText);
+    const visualPages = textractPages.map(() => '');
+    const unifiedPages = textractPages.map(normalizeDocumentTranscription);
+    await Promise.all(textractResults.map(async (result, index) => {
+      if (isReliableDocumentOcr(result)) return;
+      const url = await signUrl(storageKeys[index]!);
       try {
-        return normalizeDocumentTranscription((await caption({ imageUrls: [url], purpose: 'document-reconciliation', referenceTexts: [{ primary, secondary }] }, { organizationKey })).captions[0] ?? '') || primary || secondary;
+        visualPages[index] = (await caption({ imageUrls: [url], purpose: 'document-transcription' }, { organizationKey })).captions[0]?.trim() ?? '';
       } catch {
-        return primary || secondary;
+        return;
+      }
+      const primary = unifiedPages[index]!;
+      const secondary = normalizeDocumentTranscription(visualPages[index]!);
+      if (!secondary) return;
+      try {
+        unifiedPages[index] = normalizeDocumentTranscription((await caption({ imageUrls: [url], purpose: 'document-reconciliation', referenceTexts: [{ primary, secondary }] }, { organizationKey })).captions[0] ?? '') || primary || secondary;
+      } catch {
+        unifiedPages[index] = primary || secondary;
       }
     }));
     await dependencies.onPageResults?.(textractPages.map((textract, index) => ({ textract, visual: visualPages[index]!, unified: unifiedPages[index]! })));

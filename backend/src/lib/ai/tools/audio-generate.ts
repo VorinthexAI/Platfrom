@@ -4,8 +4,9 @@ import { speechInputSchema, type SpeechOutput } from '@/lib/ai/providers';
 import { mp3DurationMs } from '@/lib/ai/audio/mp3-duration';
 
 export const AUDIO_GENERATE_MAX_TEXT_CHARACTERS = 120_000;
+export const DEFAULT_AUDIO_GENERATION_VOICE = 'Matthew';
 const MAX_POLLY_CHUNK_CHARACTERS = 2_800;
-const MAX_AUDIO_CHUNKS = 40;
+const MAX_AUDIO_CHUNKS = 80;
 
 function planAudioChunks(text: string, wordsPerChunk: number) {
   const words = [...text.matchAll(/\S+/gu)].map((match) => ({ start: match.index, end: match.index + match[0].length }));
@@ -24,8 +25,8 @@ function planAudioChunks(text: string, wordsPerChunk: number) {
 
 export const audioGenerateInputSchema = z.object({
   text: z.string().trim().min(1).max(AUDIO_GENERATE_MAX_TEXT_CHARACTERS),
-  wordsPerChunk: z.number().int().min(20).max(200).default(100),
-  voice: z.string().trim().min(1).max(120).default('Joanna'),
+  wordsPerChunk: z.number().int().min(20).max(1_000).default(100),
+  voice: z.literal(DEFAULT_AUDIO_GENERATION_VOICE).default(DEFAULT_AUDIO_GENERATION_VOICE),
   language: z.string().trim().regex(/^[a-z]{2,3}(?:-[A-Z]{2})?$/).optional(),
 }).strict().superRefine((input, context) => {
   const plan = planAudioChunks(input.text, input.wordsPerChunk);
@@ -99,8 +100,8 @@ export const audioGenerateTool = {
       additionalProperties: false,
       properties: {
         text: { type: 'string', minLength: 1, maxLength: AUDIO_GENERATE_MAX_TEXT_CHARACTERS },
-        wordsPerChunk: { type: 'integer', minimum: 20, maximum: 200, default: 100 },
-        voice: { type: 'string', minLength: 1, maxLength: 120, default: 'Joanna' },
+        wordsPerChunk: { type: 'integer', minimum: 20, maximum: 1000, default: 100 },
+        voice: { type: 'string', enum: [DEFAULT_AUDIO_GENERATION_VOICE], default: DEFAULT_AUDIO_GENERATION_VOICE },
         language: { type: 'string', pattern: '^[a-z]{2,3}(?:-[A-Z]{2})?$' },
       },
     },

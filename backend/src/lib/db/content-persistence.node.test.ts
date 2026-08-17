@@ -8,6 +8,25 @@ const timestamp = '2026-07-22T10:00:00.000Z';
 const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0);
 
 describe('scoped Content persistence', () => {
+  test('ranks each semantic-neighbor category independently without a score threshold', async () => {
+    let call: { query: string; bindVars?: Record<string, unknown> } | undefined;
+    const executor: ContentQueryExecutor = {
+      async query(query, bindVars) {
+        call = { query, bindVars };
+        return { async next() { return { folders: [], documents: [], files: [] }; } };
+      },
+    };
+    const result = await createContentPersistence(executor).semanticNeighbors({ embedding, scopeKey, activeFolderKeys: [folderKey], sourceFolderKey: folderKey, limit: 20 });
+    expect(result).toEqual({ folders: [], documents: [], files: [] });
+    expect(call?.query.match(/LIMIT @limit/g)).toHaveLength(3);
+    expect(call?.query.match(/SORT score DESC/g)).toHaveLength(3);
+    expect(call?.query).toContain('document.folderKey IN @activeFolderKeys');
+    expect(call?.query).toContain('document.extension == null');
+    expect(call?.query).toContain('document.extension != null');
+    expect(call?.query).not.toMatch(/score\s*>=/);
+    expect(call?.bindVars).toMatchObject({ scopeKey, activeFolderKeys: [folderKey], sourceFolderKey: folderKey, sourceDocumentKey: null, limit: 10 });
+  });
+
   test('updates by key and scope and explicitly unsets optional fields', async () => {
     const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
     const executor: ContentQueryExecutor = {
@@ -52,7 +71,6 @@ describe('scoped Content persistence', () => {
       key: documentKey,
       scopeKey,
       name: 'Root note',
-      html: '<p>Body</p>',
       content: 'Body',
       embedding,
       isFavorite: false,
@@ -64,7 +82,7 @@ describe('scoped Content persistence', () => {
     expect(bindVars).toMatchObject({ folderKey: null, scopeKey });
   });
 
-  test('canonicalizes HTML and derives content at the document write boundary', async () => {
+  test('derives semantic fields at the plain-text document write boundary', async () => {
     const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
     const executor: ContentQueryExecutor = {
       async query(query, bindVars) {
@@ -73,16 +91,13 @@ describe('scoped Content persistence', () => {
       },
     };
     await createContentPersistence(executor).updateDocument(scopeKey, folderKey, {
-      html: '<p>Hello <strong>Core</strong></p>',
       content: 'Hello Core',
       embedding: Array(EMBEDDING_DIMENSIONS).fill(1),
     });
-    expect(calls[0]?.bindVars?.patch).toMatchObject({ html: '<p>Hello <strong>Core</strong></p>', content: 'Hello Core' });
+    expect(calls[0]?.bindVars?.patch).toMatchObject({ content: 'Hello Core' });
     expect(calls[0]?.bindVars).toMatchObject({ changesLocation: false });
     expect(calls[0]?.query).toContain('current.updatedAt == @expectedUpdatedAt');
-    expect(() => createContentPersistence(executor).updateDocument(scopeKey, folderKey, { content: 'detached' })).toThrow('Document content must be updated through HTML.');
-    expect(() => createContentPersistence(executor).updateDocument(scopeKey, folderKey, { html: '<p>Detached</p>' })).toThrow('Document HTML updates require a fresh embedding.');
-    expect(() => createContentPersistence(executor).updateDocument(scopeKey, folderKey, { html: '<p onclick="bad()">Detached</p>', content: 'Detached', embedding: Array(EMBEDDING_DIMENSIONS).fill(1) })).toThrow('Document representations must be canonical and agreeing.');
+    expect(() => createContentPersistence(executor).updateDocument(scopeKey, folderKey, { content: 'detached' })).toThrow('Document content updates require a fresh embedding.');
   });
 
   test('persists favorite-only document patches without representation fields', async () => {
@@ -112,8 +127,76 @@ describe('scoped Content persistence', () => {
     expect(source).toContain('Document destination is pending deletion.');
     expect(source).toContain('Share owner is pending deletion.');
     expect(source).toContain('Version owner is pending deletion.');
+    expect(source).toContain('Summary owner is pending deletion.');
     expect(source.match(/DOCUMENT\(folders,/g)?.length).toBeGreaterThanOrEqual(4);
     expect(source.match(/DOCUMENT\(documents,/g)?.length).toBeGreaterThanOrEqual(3);
+  });
+
+  test('allocates monotonic summary versions and supports scoped history reads', async () => {
+    const summaryKey = 'cm00000000000000000000005';
+    const documentKey = 'cm00000000000000000000003';
+    const createdByKey = 'cm00000000000000000000004';
+    const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
+    const executor: ContentQueryExecutor = {
+      async query(query, bindVars) {
+        calls.push({ query, bindVars });
+        if (query.includes('INSERT MERGE(@summary')) return { async next() { return { ...(bindVars?.summary as object), _key: summaryKey, version: 2 }; } };
+        return { async next() { return undefined; }, async all() { return []; } };
+      },
+    };
+    const persistence = createContentPersistence(executor);
+    const created = await persistence.createSummary({ key: summaryKey, scopeKey, documentKey, summary: 'Saved summary', style: 'brief', sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: timestamp, createdByKey, createdAt: timestamp });
+    expect(created.version).toBe(2);
+    expect(calls[0]?.query).toContain('MAX(existing.version)');
+    expect(calls[0]?.query).toContain('documentSummaries');
+    await persistence.listSummaries(scopeKey, [documentKey]);
+    expect(calls[1]?.query).toContain('summary.scopeKey == @scopeKey && summary.documentKey IN @documentKeys');
+    expect(calls[1]?.query).toContain('SORT summary.version DESC');
+  });
+
+  test('creates one race-safe audio record per summary and lists by summary keys', async () => {
+    const summaryKey = 'cm00000000000000000000005';
+    const documentKey = 'cm00000000000000000000003';
+    const audioKey = 'cm00000000000000000000006';
+    const createdByKey = 'cm00000000000000000000004';
+    const audio = { key: audioKey, scopeKey, documentKey, summaryKey, storageKey: 'private/summary.mp3', mimeType: 'audio/mpeg' as const, sizeBytes: 10, durationMs: 100, createdByKey, createdAt: timestamp };
+    const calls: string[] = [];
+    let insertAttempts = 0;
+    const executor: ContentQueryExecutor = { async query(query, bindVars) {
+      calls.push(query);
+      if (query.includes('INSERT @audio')) {
+        insertAttempts += 1;
+        if (insertAttempts === 2) throw Object.assign(new Error('unique'), { errorNum: 1210 });
+        return { async next() { return { ...(bindVars?.audio as object), _key: audioKey }; } };
+      }
+      if (query.includes('summaryKey == @summaryKey')) return { async next() { return { ...audio, _key: audioKey, key: undefined }; } };
+      return { async next() { return undefined; }, async all() { return []; } };
+    } };
+    const persistence = createContentPersistence(executor);
+    expect(await persistence.createSummaryAudio(audio)).toMatchObject({ created: true, audio: { summaryKey } });
+    expect(await persistence.createSummaryAudio({ ...audio, key: 'cm00000000000000000000007', storageKey: 'private/loser.mp3' })).toMatchObject({ created: false, audio: { key: audioKey } });
+    await persistence.listSummaryAudio(scopeKey, [summaryKey]);
+    expect(calls.some((query) => query.includes('audio.summaryKey IN @summaryKeys'))).toBe(true);
+  });
+
+  test('atomically selects one document audio version, saves progress, and clears selection', async () => {
+    const audioKey = 'cm00000000000000000000006';
+    const documentKey = 'cm00000000000000000000003';
+    const createdByKey = 'cm00000000000000000000004';
+    const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
+    const executor: ContentQueryExecutor = { async query(query, bindVars) {
+      calls.push({ query, bindVars });
+      if (query.includes('playbackPositionMs: @playbackPositionMs')) return { async next() { return { _key: audioKey, scopeKey, documentKey, version: 2, sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: timestamp, storageKey: 'audio/two.mp3', mimeType: 'audio/mpeg', sizeBytes: 10, durationMs: 60_000, isCurrent: true, playbackPositionMs: 12_345, includeTitle: true, includeCode: false, createdByKey, createdAt: timestamp }; } };
+      return { async next() { return 1; } };
+    } };
+    const persistence = createContentPersistence(executor);
+    expect(await persistence.updateAudioPlayback(scopeKey, audioKey, 12_345)).toMatchObject({ key: audioKey, isCurrent: true, playbackPositionMs: 12_345 });
+    expect(calls[0]?.query).toContain('audio._key == target._key || audio.isCurrent == true');
+    expect(calls[0]?.query).toContain('{ isCurrent: audio._key == target._key }');
+    expect(calls[0]?.bindVars).toEqual({ key: audioKey, scopeKey, playbackPositionMs: 12_345 });
+    expect(await persistence.clearCurrentAudioVersion(scopeKey, documentKey)).toBe(true);
+    expect(calls[1]?.query).toContain('audio.documentKey == @documentKey && audio.isCurrent == true');
+    expect(calls[1]?.query).toContain('{ isCurrent: false }');
   });
 
   test('pushes share lifecycle filters into both legacy and global reads', async () => {

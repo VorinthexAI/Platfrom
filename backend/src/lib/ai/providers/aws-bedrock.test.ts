@@ -73,7 +73,7 @@ describe('AWS Bedrock provider', () => {
     }) as typeof fetch;
 
     const response = await provider().execute({
-      actionId: 'ask',
+      actionId: 'document-topics',
       modelId: 'amazon.nova-lite',
       externalModelId: 'us.amazon.nova-lite-v1:0',
       input: { messages: [{ role: 'user', content: [{ type: 'text', text: 'Continue' }] }] },

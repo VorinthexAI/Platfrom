@@ -36,11 +36,21 @@ if (!existsSync(ENVIRONMENTS_JSON_PATH)) {
 const parsed = JSON.parse(readFileSync(ENVIRONMENTS_JSON_PATH, "utf8"));
 // secrets.prod.backend doesn't exist as its own key — the backend's prod env
 // lives at the top-level secrets.prod.env (see .github/environments.json).
-const values = mode === "dev"
+const sourceValues = mode === "dev"
   ? parsed?.secrets?.dev?.[section]
   : section === "backend"
     ? parsed?.secrets?.prod?.env
     : parsed?.secrets?.prod?.[section]?.env;
+
+const productionBackend = parsed?.secrets?.prod?.env;
+const values = mode === "dev" && section === "backend" && sourceValues && productionBackend
+  ? {
+      ...sourceValues,
+      CONTENT_TEXTRACT_AWS_ACCESS_KEY_ID: productionBackend.BEDROCK_AWS_ACCESS_KEY_ID,
+      CONTENT_TEXTRACT_AWS_SECRET_ACCESS_KEY: productionBackend.BEDROCK_AWS_SECRET_ACCESS_KEY,
+      ...(productionBackend.BEDROCK_AWS_SESSION_TOKEN ? { CONTENT_TEXTRACT_AWS_SESSION_TOKEN: productionBackend.BEDROCK_AWS_SESSION_TOKEN } : {}),
+    }
+  : sourceValues;
 
 if (!values || typeof values !== "object") {
   console.error(`::error::secrets.${mode}.${section} not found in ${ENVIRONMENTS_JSON_PATH}.`);

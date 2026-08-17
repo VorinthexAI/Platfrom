@@ -55,21 +55,28 @@ export async function embedTexts(input: EmbedTextsInput): Promise<number[][]> {
   const { createOpenRouterProvider, resolveOpenRouterEnvironment } = await import('@/lib/ai/providers/openrouter');
   const adapter = createOpenRouterProvider(resolveOpenRouterEnvironment(process.env));
   const prepared = parsed.texts.map((text) => prepareEmbeddingText(text, parsed.purpose));
-  const embeddings: number[][] = [];
-  for (let start = 0; start < prepared.length; start += 16) {
-    const batch = prepared.slice(start, start + 16);
-    const response = await adapter.embed!({
-      externalModelId: EXTERNAL_EMBEDDING_MODEL_ID,
-      input: batch,
-      dimensions: EMBEDDING_DIMENSIONS,
-      signal: parsed.signal,
-      timeoutMs: parsed.timeoutMs,
-    });
-    if (response.embeddings.length !== batch.length) {
-      throw new Error(`Embedding provider returned ${response.embeddings.length} vectors for ${batch.length} texts.`);
+  const batches = Array.from({ length: Math.ceil(prepared.length / 16) }, (_, index) => prepared.slice(index * 16, (index + 1) * 16));
+  const batchEmbeddings = new Array<number[][]>(batches.length);
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < batches.length) {
+      const index = cursor++;
+      const batch = batches[index]!;
+      const response = await adapter.embed!({
+        externalModelId: EXTERNAL_EMBEDDING_MODEL_ID,
+        input: batch,
+        dimensions: EMBEDDING_DIMENSIONS,
+        signal: parsed.signal,
+        timeoutMs: parsed.timeoutMs,
+      });
+      if (response.embeddings.length !== batch.length) {
+        throw new Error(`Embedding provider returned ${response.embeddings.length} vectors for ${batch.length} texts.`);
+      }
+      batchEmbeddings[index] = response.embeddings.map((embedding) => currentEmbeddingSchema.parse(embedding));
     }
-    embeddings.push(...response.embeddings.map((embedding) => currentEmbeddingSchema.parse(embedding)));
-  }
+  };
+  await Promise.all(Array.from({ length: Math.min(4, batches.length) }, () => worker()));
+  const embeddings = batchEmbeddings.flat();
   return currentEmbeddingBatchSchema.parse(embeddings);
 }
 

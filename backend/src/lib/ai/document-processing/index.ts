@@ -2,9 +2,8 @@ import type { Document } from '@/lib/db/documents.node';
 import { documentParseInputSchema, type DocumentParseInput } from './schemas';
 import {
   documentEmbed,
+  documentCleanup,
   documentExtract,
-  documentGenerateContent,
-  documentGenerateHtml,
   documentInsert,
   documentKeyForRequest,
   documentValidate,
@@ -17,7 +16,6 @@ import { documentStorage, type DocumentStorage } from './storage';
 import type { DocumentOcr } from './textract';
 import type { embedText } from '@/lib/embeddings';
 import type { embedTexts } from '@/lib/embeddings';
-import { htmlToPlainText, sanitizeDocumentHtml } from './representation';
 
 export interface DocumentParseDependencies extends DocumentInsertDependencies {
   storage?: DocumentStorage;
@@ -27,6 +25,7 @@ export interface DocumentParseDependencies extends DocumentInsertDependencies {
   embeddingDimensions?: number;
   maxBytes?: number;
   logger?: DocumentActionLogger;
+  cleanText?: (text: string) => Promise<string>;
   actions?: Partial<DocumentPipelineActions>;
 }
 
@@ -38,8 +37,7 @@ export interface DocumentPipelineActions {
   validate: typeof documentValidate;
   upload: typeof storageUpload;
   extract: typeof documentExtract;
-  generateHtml: typeof documentGenerateHtml;
-  generateContent: typeof documentGenerateContent;
+  cleanup: typeof documentCleanup;
   embed: typeof documentEmbed;
   insert: typeof documentInsert;
 }
@@ -67,8 +65,7 @@ export async function parseDocument(rawInput: DocumentParseInput, dependencies: 
     validate: dependencies.actions?.validate ?? documentValidate,
     upload: dependencies.actions?.upload ?? storageUpload,
     extract: dependencies.actions?.extract ?? documentExtract,
-    generateHtml: dependencies.actions?.generateHtml ?? documentGenerateHtml,
-    generateContent: dependencies.actions?.generateContent ?? documentGenerateContent,
+    cleanup: dependencies.actions?.cleanup ?? documentCleanup,
     embed: dependencies.actions?.embed ?? documentEmbed,
     insert: dependencies.actions?.insert ?? documentInsert,
   };
@@ -99,23 +96,9 @@ export async function parseDocument(rawInput: DocumentParseInput, dependencies: 
   const storage = dependencies.storage ?? documentStorage;
   const uploaded = await actions.upload({ ...normalized, documentKey }, { storage, logger });
   try {
-    let extraction;
-    try {
-      extraction = await actions.extract({ ...normalized, storageKey: uploaded.storageKey }, { ocr: dependencies.ocr, logger });
-    } catch (error) {
-      if (normalized.extension !== 'pdf') throw error;
-      logger({ action: 'document-extract', status: 'failed', documentKey, scopeKey: input.scopeKey, folderKey: input.folderKey, extension: normalized.extension, retained: true });
-      extraction = {
-        extractedText: 'Text extraction is unavailable for this PDF file.',
-        blocks: [{ type: 'paragraph' as const, text: 'Text extraction is unavailable for this PDF file.' }],
-        metadata: { extractionStatus: 'unavailable' },
-      };
-    }
-    const generated = await actions.generateHtml(extraction, { logger });
-    const html = sanitizeDocumentHtml(generated.html);
-    const canonicalContent = htmlToPlainText(html);
-    const { content } = await actions.generateContent({ html }, { logger });
-    if (content !== canonicalContent) throw new DocumentProcessingError('DOCUMENT_CONTENT_GENERATION_FAILED', 'Document content must be derived from canonical HTML.', 'document-generate-content');
+    const extraction = await actions.extract({ ...normalized, storageKey: uploaded.storageKey }, { ocr: dependencies.ocr, logger });
+    if (!extraction.extractedText.trim()) throw new DocumentProcessingError('DOCUMENT_EXTRACTION_FAILED', 'No text could be extracted from the document.', 'document-extract');
+    const { content } = await actions.cleanup({ text: extraction.extractedText }, { clean: dependencies.cleanText, logger });
     const semantics = await actions.embed({ name: normalized.name, content }, { embed: dependencies.embed, embedBatch: dependencies.embedBatch, dimensions: dependencies.embeddingDimensions, logger });
     const timestamp = new Date().toISOString();
     const result = await actions.insert({
@@ -127,7 +110,6 @@ export async function parseDocument(rawInput: DocumentParseInput, dependencies: 
       mimeType: normalized.mimeType,
       storageKey: uploaded.storageKey,
       sizeBytes: normalized.sizeBytes,
-      html,
       content,
       isFavorite: false,
       ...semantics,
@@ -180,7 +162,7 @@ export * from './actions';
 export * from './chunking';
 export * from './errors';
 export * from './exports';
-export * from './representation';
+export * from './preview';
 export * from './schemas';
 export * from './storage';
 export * from './textract';

@@ -12,7 +12,6 @@
     "start:server": "bun run load-local-env && bun --env-file=.env.local run src/api/index.ts",
     "start:app": "bun run load-local-env && bun --env-file=.env.local run src/api/index.ts",
     "start:render": "bun run load-local-env && bun --env-file=.env.local run src/render-worker/index.ts",
-    "start:document-worker": "bun run load-local-env && bun --env-file=.env.local run src/document-worker/index.ts",
     "reset": "bun run scripts/reset.ts",
     "create:super-admin": "bun run scripts/create-super-admin.ts",
     "delete:account": "bun run scripts/delete-account.ts",
@@ -51,7 +50,6 @@
     "@otplib/totp": "^13.4.1",
     "@paralleldrive/cuid2": "^2.2.2",
     "@smithy/node-http-handler": "4.9.8",
-    "@sparticuz/chromium": "^149.0.0",
     "arangojs": "^9.3.0",
     "bullmq": "^6.0.10",
     "cuid": "^3.0.0",
@@ -59,12 +57,13 @@
     "hono": "^4.12.18",
     "ioredis": "^5.4.0",
     "mammoth": "^1.12.0",
+    "marked": "^16.4.1",
     "nodemailer": "^9.0.3",
     "openai": "^6.44.0",
     "otplib": "^13.4.1",
-    "puppeteer-core": "^25.2.1",
     "qrcode": "^1.5.4",
     "sharp": "^0.34.5",
+    "sanitize-html": "^2.17.0",
     "svix": "^1.96.1",
     "word-extractor": "^1.0.4",
     "zod": "^3.24.0"
@@ -73,6 +72,7 @@
     "@types/bun": "^1.2.0",
     "@types/nodemailer": "^8.0.1",
     "@types/qrcode": "^1.5.6",
+    "@types/sanitize-html": "^2.16.0",
     "@types/word-extractor": "^1.0.6",
     "typescript": "^5.7.0"
   }

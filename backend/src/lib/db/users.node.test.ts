@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { countryCodeSchema, userSchema } from './users.node';
+import { countryCodeSchema, userSchema, userSettingsSchema } from './users.node';
 
 const baseUser = {
   key: 'usr_test',
@@ -24,6 +24,7 @@ describe('user node schema', () => {
     expect(user.refreshFounderMembershipKey).toBeNull();
     expect(user.refreshFounderMfaVersion).toBeNull();
     expect(user.isOnboarded).toBe(false);
+    expect(user.settings).toEqual({ archive: { showOnlyFavorites: false } });
 
     expect('organization_role' in user).toBe(false);
     expect('organization_title' in user).toBe(false);
@@ -53,5 +54,12 @@ describe('user node schema', () => {
     expect('lastTotpTimeStep' in user).toBe(false);
     expect('is_platform_member' in user).toBe(false);
     expect('is_platform_owner' in user).toBe(false);
+  });
+
+  test('keeps the persisted settings blob closed and typed', () => {
+    expect(userSettingsSchema.parse({ archive: { showOnlyFavorites: true } })).toEqual({ archive: { showOnlyFavorites: true } });
+    expect(() => userSettingsSchema.parse({ archive: { showOnlyFavorites: true, unknown: true } })).toThrow();
+    expect(() => userSettingsSchema.parse({ archive: { showOnlyFavorites: 'yes' } })).toThrow();
+    expect(() => userSettingsSchema.parse({ archive: { showOnlyFavorites: false }, unknown: true })).toThrow();
   });
 });

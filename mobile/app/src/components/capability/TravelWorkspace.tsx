@@ -300,13 +300,13 @@ export function TravelWorkspace() {
           <Button accessibilityLabel="Choose a country or saved place" contentMode="raw" disabled={loading} onPress={() => openSheet("explore")} size="md" variant="icon"><SearchIcon size="sm" /></Button>
           <Button accessibilityLabel="Show trips" contentMode="raw" disabled={loading} onPress={() => { setSelectedTrip(undefined); openSheet("trips"); }} size="md" variant="icon"><CalendarIcon size="sm" /></Button>
         </View> : null}
-        {loading ? <View accessibilityLabel="Loading places" accessibilityRole="progressbar" style={[styles.selectionSkeleton, { bottom: insets.bottom + 86, left: (width - panelWidth) / 2, width: panelWidth }]} /> : null}
+        {loading ? <View accessibilityLabel="Loading places" accessibilityRole="progressbar" style={[styles.selectionSkeleton, { bottom: 0, left: (width - panelWidth) / 2, width: panelWidth }]} /> : null}
         {loadError && !loading ? <View style={styles.loadFailure}><GlobeIcon size="lg" variant="muted" /><Text style={styles.loadFailureText}>{loadError}</Text><Button onPress={() => void loadOverview()} size="sm" variant="secondary">Retry</Button></View> : null}
       </View>
 
       {error && !sheetOpen && !loadError ? <View accessibilityLiveRegion="polite" style={[styles.inlineError, styles.workspaceError]}><Text style={styles.errorText}>{error}</Text></View> : null}
 
-      {!loading && panelTitle && !loadError ? <View style={[styles.selectionPanel, { bottom: insets.bottom + 86, left: (width - panelWidth) / 2, width: panelWidth }]}>
+      {!loading && panelTitle && !loadError ? <View style={[styles.selectionPanel, { bottom: 0, left: (width - panelWidth) / 2, width: panelWidth }]}>
         <View style={styles.panelIcon}><LocationPinIcon size="md" /></View>
         <View style={styles.panelCopy}>
           <Text numberOfLines={1} style={styles.panelTitle}>{panelTitle}</Text>
@@ -314,7 +314,7 @@ export function TravelWorkspace() {
         </View>
         {selectedPlace?.visited ? <View style={styles.visited}><CheckIcon size="sm" variant="inverse" /></View> : null}
         <Button accessibilityLabel={`Actions for ${panelTitle}`} contentMode="raw" onPress={() => openSheet("actions")} size="md" variant="icon"><PlusIcon size="sm" /></Button>
-      </View> : !loading && !loadError ? <View pointerEvents="none" style={[styles.hint, { bottom: insets.bottom + 94 }]}><GlobeIcon size="sm" variant="muted" /><Text style={styles.hintText}>Rotate freely or search for a place</Text></View> : null}
+      </View> : !loading && !loadError ? <View pointerEvents="none" style={[styles.hint, { bottom: 0 }]}><GlobeIcon size="sm" variant="muted" /><Text style={styles.hintText}>Rotate freely or search for a place</Text></View> : null}
 
       {!loadError ? <CoreComposer
         accessibilityLabel="Ask Core about travel"
@@ -333,7 +333,6 @@ export function TravelWorkspace() {
         onSubmit={() => void askAssistant()}
         prompts={CORE_PROMPTS}
         sendIcon={<SendIcon size="sm" variant="inverse" />}
-        style={{ left: Math.max(insets.left, spacing.md), right: Math.max(insets.right, spacing.md) }}
         value={assistantInput}
       /> : null}
 

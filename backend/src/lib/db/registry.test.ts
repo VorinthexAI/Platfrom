@@ -112,7 +112,7 @@ describe('node registry schema contracts', () => {
       expect(object.shape).toHaveProperty('updatedAt');
       expect(object.shape).toHaveProperty('embedding');
     }
-    expect(documentSchema.shape).toHaveProperty('html');
+    expect(documentSchema.shape).not.toHaveProperty('html');
     expect(documentSchema.shape).not.toHaveProperty('json');
     expect(documentSchema.shape).toHaveProperty('content');
     expect(documentSchema.shape).toHaveProperty('scopeKey');

@@ -12,6 +12,10 @@
       "supportsTablet": false,
       "bundleIdentifier": "app.vorinthex.com",
       "usesAppleSignIn": true,
+      "infoPlist": {
+        "UIFileSharingEnabled": true,
+        "LSSupportsOpeningDocumentsInPlace": true
+      },
       "associatedDomains": [
         "applinks:vorinthex.com"
       ]

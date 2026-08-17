@@ -24,6 +24,27 @@ function firstResultData(value: Record<string, unknown>, label: string) {
   return object(result.data);
 }
 
+function minimalPdf(text: string) {
+  const escaped = text.replace(/[\\()]/g, (character) => `\\${character}`);
+  const stream = `BT /F1 12 Tf 72 720 Td (${escaped}) Tj ET`;
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+  ];
+  let source = '%PDF-1.4\n';
+  const offsets = [0];
+  objects.forEach((objectValue, index) => {
+    offsets.push(source.length);
+    source += `${index + 1} 0 obj\n${objectValue}\nendobj\n`;
+  });
+  const xref = source.length;
+  source += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.slice(1).map((offset) => `${String(offset).padStart(10, '0')} 00000 n `).join('\n')}\ntrailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return new TextEncoder().encode(source);
+}
+
 const suffix = crypto.randomUUID().replaceAll('-', '');
 const guestResponse = await fetch(`${apiBase}/api/v1/auth/guest`, {
   method: 'POST',
@@ -76,32 +97,7 @@ async function tool(name: string, input: Record<string, unknown>) {
   accessToken = response.headers.get('x-access-token') ?? accessToken;
   refreshToken = response.headers.get('x-refresh-token') ?? refreshToken;
   if (!response.ok || body.success !== true) throw new Error(`${name} failed with ${response.status}: ${JSON.stringify(body)}`);
-  let data = object(body.data);
-  if (name === 'document.parse' && data.job) {
-    const jobKey = string(object(data.job).key, 'document job key');
-    const deadline = Date.now() + 30 * 60_000;
-    while (data.job) {
-      if (Date.now() >= deadline) throw new Error(`document.parse job ${jobKey} timed out.`);
-      await new Promise((resolve) => setTimeout(resolve, 1_000));
-      const status = await fetch(`${apiBase}/api/v1/content/document-jobs/${jobKey}`, {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${accessToken}`,
-          'content-type': 'application/json',
-          'x-refresh-token': refreshToken,
-          'x-vorinthex-api-key': process.env.API_KEY ?? '',
-          'x-vorinthex-session-transport': 'header',
-        },
-        body: JSON.stringify({ organizationKey, agentKey }),
-      });
-      const statusBody = object(await status.json());
-      accessToken = status.headers.get('x-access-token') ?? accessToken;
-      refreshToken = status.headers.get('x-refresh-token') ?? refreshToken;
-      if (statusBody.success !== true) throw new Error(`document.parse status failed with ${status.status}: ${JSON.stringify(statusBody)}`);
-      data = object(statusBody.data);
-    }
-  }
-  return data;
+  return object(body.data);
 }
 
 const folderName = `Archive E2E ${suffix.slice(0, 8)}`;
@@ -117,7 +113,7 @@ const documentResult = await tool('document.create', {
   scopeKey,
   folderKey,
   name: 'Archive verification note',
-  representation: { content: phrase },
+  content: phrase,
   idempotencyKey: `archive-e2e-document-${suffix}`,
 });
 const documentRecord = object(documentResult.document);
@@ -135,6 +131,47 @@ const update = await tool('document.update', {
 });
 firstResultData(update, 'document.update');
 
+if (process.env.ARCHIVE_E2E_AUDIO === 'true') {
+  const documentAudioResult = await tool('document.read', {
+    documentKeys: [documentKey],
+    mode: 'audio',
+    persistAudio: true,
+    idempotencyKey: `archive-e2e-document-audio-${suffix}`,
+  });
+  const documentAudio = object(firstResultData(documentAudioResult, 'document.read').audioVersion);
+  const listedAudioResult = await tool('document.list-audio-versions', { documentKeys: [documentKey] });
+  const listedAudio = object((object(firstResultData(listedAudioResult, 'document.list-audio-versions')).audioVersions as unknown[]).map(object).find((entry) => entry.key === documentAudio.key));
+  const documentAudioResponse = await fetch(string(listedAudio.url, 'document audio URL'));
+  if (!documentAudioResponse.ok || !documentAudioResponse.headers.get('content-type')?.includes('audio/mpeg') || (await documentAudioResponse.arrayBuffer()).byteLength === 0) throw new Error('Persisted document audio was not playable.');
+  await tool('document.audio.playback.update', { audioVersionKey: documentAudio.key, playbackPositionMs: 1_000, idempotencyKey: `archive-e2e-audio-progress-${suffix}` });
+  const resumedAudioResult = await tool('document.list-audio-versions', { documentKeys: [documentKey] });
+  const resumedAudio = object((object(firstResultData(resumedAudioResult, 'document.list-audio-versions')).audioVersions as unknown[]).map(object).find((entry) => entry.key === documentAudio.key));
+  if (resumedAudio.isCurrent !== true || resumedAudio.playbackPositionMs !== 1_000) throw new Error('Persisted document audio did not retain its resume state.');
+  await tool('document.audio.playback.clear', { documentKey, idempotencyKey: `archive-e2e-audio-clear-${suffix}` });
+  const clearedAudioResult = await tool('document.list-audio-versions', { documentKeys: [documentKey] });
+  const clearedAudio = object((object(firstResultData(clearedAudioResult, 'document.list-audio-versions')).audioVersions as unknown[]).map(object).find((entry) => entry.key === documentAudio.key));
+  if (clearedAudio.isCurrent !== false || clearedAudio.playbackPositionMs !== 1_000) throw new Error('Dismissing document audio did not clear only its current state.');
+
+  const summaryResult = await tool('document.summarize', {
+    documentKeys: [documentKey],
+    topic: 'Archive verification',
+    persist: true,
+    idempotencyKey: `archive-e2e-summary-${suffix}`,
+  });
+  const summary = object(firstResultData(summaryResult, 'document.summarize').summary);
+  const summaryKey = string(summary.key, 'summary key');
+  const summaryAudioResult = await tool('document.summary.audio.generate', {
+    summaryKeys: [summaryKey],
+    idempotencyKey: `archive-e2e-summary-audio-${suffix}`,
+  });
+  const summaryAudio = object(firstResultData(summaryAudioResult, 'document.summary.audio.generate').audio);
+  const summaryAudioResponse = await fetch(string(summaryAudio.url, 'summary audio URL'));
+  if (!summaryAudioResponse.ok || !summaryAudioResponse.headers.get('content-type')?.includes('audio/mpeg') || (await summaryAudioResponse.arrayBuffer()).byteLength === 0) throw new Error('Persisted summary audio was not playable.');
+  const foundSummaryResult = await tool('document.find-summary', { summaryKeys: [summaryKey] });
+  const foundSummary = object(firstResultData(foundSummaryResult, 'document.find-summary').summary);
+  if (object(foundSummary.audio).key !== summaryAudio.key) throw new Error('Summary lookup did not return its persisted audio.');
+}
+
 const uploadText = `Uploaded archive document ${suffix.slice(0, 8)} contains a silver observatory.`;
 const uploaded = await tool('document.parse', {
   scopeKey,
@@ -149,6 +186,25 @@ const uploaded = await tool('document.parse', {
   idempotencyKey: `archive-e2e-upload-${suffix}`,
 });
 const uploadedDocumentKey = string(object(uploaded.document).key, 'uploaded document key');
+
+const pdfPhrase = `PDF extraction verification ${suffix.slice(0, 8)} succeeded through AWS Textract.`;
+const pdfBytes = minimalPdf(pdfPhrase);
+const uploadedPdf = await tool('document.parse', {
+  scopeKey,
+  folderKey,
+  file: {
+    filename: 'archive-upload.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: pdfBytes.byteLength,
+    encoding: 'base64',
+    content: Buffer.from(pdfBytes).toString('base64'),
+  },
+  idempotencyKey: `archive-e2e-pdf-${suffix}`,
+});
+const uploadedPdfKey = string(object(uploadedPdf.document).key, 'uploaded PDF key');
+const foundPdf = await tool('document.find', { documentKeys: [uploadedPdfKey], include: ['content'] });
+const foundPdfDocument = object(object(object((foundPdf.results as unknown[])[0]).data).document);
+if (typeof foundPdfDocument.content !== 'string' || !foundPdfDocument.content.includes(pdfPhrase)) throw new Error(`Uploaded PDF text was not persisted: ${JSON.stringify(foundPdfDocument)}`);
 
 const fastFolderSearch = await tool('scope.content.search', { scopeKey, query: folderName, includeSummaries: false });
 if (!(fastFolderSearch.folders as unknown[]).some((entry) => object(entry).key === folderKey)) throw new Error('Fast search did not return the matching folder.');
@@ -165,10 +221,10 @@ if (!(search.documents as unknown[]).some((entry) => object(entry).documentKey =
 const replay = await tool('scope.content.search', { scopeKey, query: `  ${query.toUpperCase()}  `, minimumScore: 0 });
 if (!(replay.documents as unknown[]).some((entry) => object(entry).documentKey === documentKey)) throw new Error('Normalized semantic retrieval did not return the created document.');
 const searchHistory = await tool('scope.content.search-history', { scopeKey, limit: 8 });
-if (!(searchHistory.history as unknown[]).some((entry) => object(entry).normalizedQuery === query && Number(object(entry).count) >= 2)) throw new Error('Semantic search history was not persisted.');
+if (!(searchHistory.history as unknown[]).some((entry) => object(entry).normalizedQuery === query && Number(object(entry).usageCount) >= 2)) throw new Error('Semantic search history was not persisted.');
 
-await tool('document.archive', { documentKeys: [documentKey, uploadedDocumentKey], atomic: true });
-await tool('document.delete', { documentKeys: [documentKey, uploadedDocumentKey], deleteVersions: true, deleteShares: true });
+await tool('document.archive', { documentKeys: [documentKey, uploadedDocumentKey, uploadedPdfKey], atomic: true });
+await tool('document.delete', { documentKeys: [documentKey, uploadedDocumentKey, uploadedPdfKey], deleteVersions: true, deleteShares: true });
 await tool('folder.archive', { folderKeys: [folderKey], atomic: true });
 
-console.log(`Archive API E2E passed: guest auth, ${process.env.ARCHIVE_E2E_AUDIO === 'true' ? 'streamed Polly narration, ' : ''}folder/document creation, autosave, upload, fast folder/file search, semantic retrieval, and history.`);
+console.log(`Archive API E2E passed: guest auth, ${process.env.ARCHIVE_E2E_AUDIO === 'true' ? 'streamed and persisted document/summary Polly narration, ' : ''}folder/document creation, autosave, LocalStack upload, AWS PDF extraction, fast folder/file search, semantic retrieval, and history.`);

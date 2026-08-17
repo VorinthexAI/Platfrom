@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { aql } from 'arangojs';
 import { db } from './client';
-import { createNodeHelpers, withArangoKey } from './base';
+import { createNodeHelpers, isArangoNotFoundError, withArangoKey } from './base';
 
 export const USERS_COLLECTION = 'users';
 
@@ -22,6 +22,17 @@ export const countryCodeSchema = z.enum([
   'VA', 'VC', 'VE', 'VG', 'VI', 'VN', 'VU', 'WF', 'WS', 'YE', 'YT', 'ZA', 'ZM', 'ZW',
 ]);
 
+export const userSettingsSchema = z.object({
+  archive: z.object({
+    showOnlyFavorites: z.boolean(),
+  }).strict(),
+}).strict();
+export type UserSettings = z.infer<typeof userSettingsSchema>;
+
+export const DEFAULT_USER_SETTINGS = Object.freeze({
+  archive: Object.freeze({ showOnlyFavorites: false }),
+});
+
 export const userSchema = z.object({
   key: z.string(),
   organizationId: z.string(),
@@ -35,6 +46,7 @@ export const userSchema = z.object({
   isVerified: z.boolean().default(false),
   isOnboarded: z.boolean().default(false),
   guestBootstrapSecretHash: z.string().nullable().default(null),
+  settings: userSettingsSchema.default(DEFAULT_USER_SETTINGS),
   is_subscribed_to_updates: z.boolean().default(true),
   is_subscribed_to_updates_unsubscribe_token_hash: z.string().nullable().default(null),
   is_subscribed_to_updates_unsubscribe_requested_at: z.string().nullable().default(null),
@@ -63,6 +75,16 @@ export const deleteUser = helpers.deleteById;
 export const upsertUserByKey = helpers.upsertByKey;
 export const getAllUsersChunked = helpers.getAllChunked;
 export const listUsersPage = helpers.listPage;
+
+export async function updateUserSettings(userKey: string, settings: UserSettings, updatedAt: string): Promise<User | null> {
+  try {
+    const result = await db.collection(USERS_COLLECTION).update(userKey, { settings, updatedAt }, { returnNew: true, mergeObjects: false });
+    return userSchema.parse(withArangoKey(result.new as Record<string, unknown>));
+  } catch (error) {
+    if (isArangoNotFoundError(error)) return null;
+    throw error;
+  }
+}
 
 export async function getUserByEmail(email: string): Promise<User | null> {
   const cursor = await db.query(aql`

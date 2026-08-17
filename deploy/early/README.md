@@ -22,7 +22,9 @@ Cloudflare (SSL = Full) ──▶ app box :443 (Caddy, self-signed internal cert
   admits Cloudflare's IP ranges (managed prefix list) on :80/:443.
 - **graph-db box** — `vorinthex-prod-graph-db-host`, t3.small, ArangoDB in Docker
   on the `/data/arangodb` EBS volume. Unchanged from before; holds all data.
-- No ALB / NAT / ElastiCache / ECS / (our) CloudFront. Cloudflare is the CDN/edge.
+- No ALB / NAT / ElastiCache / (our) CloudFront. Cloudflare is the CDN/edge.
+- Image hashing remains transient Fargate compute launched per queued image-hash
+  job; document parsing and scanning run directly in the API container.
 
 ## DNS
 
@@ -48,8 +50,8 @@ Caddy, retires the old colour. Runtime secrets are pulled from SSM
 
 ## In Terraform
 
-The app box, its security group + rules, EIP, the Cloudflare-IP prefix list, and
-the arango-SG ingress rule are now managed in
+The app box, its security group + rules, EIP, the Cloudflare-IP prefix list,
+and the transient-compute Redis ingress rules are managed in
 `terraform/environments/production/early_app.tf` (imported; `user_data`/`ami` are
 ignored so a plan never replaces the running box — verified 0-destroy, clean plan).
 

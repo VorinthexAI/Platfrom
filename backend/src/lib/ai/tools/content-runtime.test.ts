@@ -3,7 +3,7 @@ import { newId } from '@/lib/ids';
 import type { ContentRepository } from './content-runtime';
 import { authorizeDocumentParseLocation, CONTENT_TOOL_NAMES, ContentError, runContentTool, type ContentIdempotencyStore } from '.';
 import { documentKeyForRequest, DocumentProcessingError } from '@/lib/ai/document-processing';
-import { documentEmbed, documentGenerateContent, documentGenerateHtml } from '@/lib/ai/document-processing';
+import { documentEmbed } from '@/lib/ai/document-processing';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
 import { chatInputSchema, speechInputSchema } from '@/lib/ai/providers/types';
 import { ProviderExecutionError } from '@/lib/ai/router/errors';
@@ -13,7 +13,7 @@ const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
 
 function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
   const organizationKey = newId(), scopeKey = newId(), membershipKey = newId(), userKey = newId();
-  const folders = new Map<string, any>(), documents = new Map<string, any>(), shares = new Map<string, any>(), versions = new Map<string, any>(), audioVersions = new Map<string, any>();
+  const folders = new Map<string, any>(), documents = new Map<string, any>(), shares = new Map<string, any>(), versions = new Map<string, any>(), audioVersions = new Map<string, any>(), summaries = new Map<string, any>(), summaryAudio = new Map<string, any>();
   const patches: Array<Record<string, unknown>> = [];
   const repository: ContentRepository = {
     async getScope(key) { return key === scopeKey ? { key, organizationKey } : null; },
@@ -47,16 +47,35 @@ function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
     async createVersion(value) { const version = { ...value, key: newId(), version: [...versions.values()].filter((item) => item.documentKey === value.documentKey).length + 1, deletedAt: null, createdAt: now }; versions.set(version.key, version); return version; },
     async deleteVersion(key) { versions.delete(key); },
     async listAudioVersions(_scopeKey, keys) { return [...audioVersions.values()].filter((value) => keys.includes(value.documentKey)).sort((a, b) => b.version - a.version); },
-    async createAudioVersion(value) { const version = { ...value, version: [...audioVersions.values()].filter((item) => item.documentKey === value.documentKey).length + 1 }; audioVersions.set(version.key, version); return version; },
+    async getAudioVersion(key) { return audioVersions.get(key) ?? null; },
+    async createAudioVersion(value) { const version = { isCurrent: false, playbackPositionMs: 0, ...value, version: [...audioVersions.values()].filter((item) => item.documentKey === value.documentKey).length + 1 }; audioVersions.set(version.key, version); return version; },
+    async updateAudioPlayback(_scopeKey, key, playbackPositionMs) { const target = audioVersions.get(key); if (!target || playbackPositionMs > target.durationMs) return null; for (const audio of audioVersions.values()) if (audio.documentKey === target.documentKey) audio.isCurrent = audio.key === key; target.playbackPositionMs = playbackPositionMs; return target; },
+    async clearCurrentAudioVersion(_scopeKey, documentKey) { let cleared = false; for (const audio of audioVersions.values()) if (audio.documentKey === documentKey && audio.isCurrent) { audio.isCurrent = false; cleared = true; } return cleared; },
     async deleteAudioVersion(key) { audioVersions.delete(key); },
+    async getSummary(key) { return summaries.get(key) ?? null; },
+    async listSummaries(_scopeKey, keys) { return [...summaries.values()].filter((value) => keys.includes(value.documentKey)).sort((a, b) => b.version - a.version); },
+    async createSummary(value) { const summary = { ...value, version: [...summaries.values()].filter((item) => item.documentKey === value.documentKey).length + 1 }; summaries.set(summary.key, summary); return summary; },
+    async deleteSummary(key) { summaries.delete(key); },
+    async getSummaryAudio(summaryKey) { return [...summaryAudio.values()].find((value) => value.summaryKey === summaryKey) ?? null; },
+    async listSummaryAudio(_scopeKey, keys) { return [...summaryAudio.values()].filter((value) => keys.includes(value.summaryKey)); },
+    async createSummaryAudio(value) { const existing = [...summaryAudio.values()].find((item) => item.summaryKey === value.summaryKey); if (existing) return { audio: existing, created: false }; summaryAudio.set(value.key, value); return { audio: value, created: true }; },
+    async deleteSummaryAudio(summaryKey) { const value = [...summaryAudio.values()].find((item) => item.summaryKey === summaryKey); if (value) summaryAudio.delete(value.key); },
     async semanticSearch() { return [...documents.values()].map((document) => ({ score: 0.8, document })); },
     async semanticSearchFolders() { return [...folders.values()].map((folder) => ({ score: 0.8, folder })); },
+    async semanticNeighbors(input) {
+      const candidates = [...documents.values()].filter((document) => document.scopeKey === input.scopeKey && document.key !== input.sourceDocumentKey && (!document.folderKey || input.activeFolderKeys.includes(document.folderKey)));
+      return {
+        folders: [...folders.values()].filter((folder) => folder.scopeKey === input.scopeKey && folder.key !== input.sourceFolderKey && input.activeFolderKeys.includes(folder.key)).map((folder) => ({ score: 0.8, folder })),
+        documents: candidates.filter((document) => !document.extension).map((document) => ({ score: 0.8, document })),
+        files: candidates.filter((document) => document.extension).map((document) => ({ score: 0.8, document })),
+      };
+    },
     async transaction(operation) { return operation(repository); },
   };
   const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: membershipKey, organizationId: organizationKey, status: 'active', orgRole: role } } } as any;
   const folderKey = newId(); folders.set(folderKey, { key: folderKey, scopeKey, name: 'Root', embedding, createdAt: now, updatedAt: now });
-  const addDocument = (content = 'First sentence. Second sentence.') => { const key = newId(); documents.set(key, { key, scopeKey, folderKey, name: 'Notes', extension: 'txt', mimeType: 'text/plain', sizeBytes: content.length, storageKey: `docs/${key}`, html: `<p>${content}</p>`, content, embedding, isFavorite: false, createdAt: now, updatedAt: now }); return key; };
-  return { repository, context, folders, documents, shares, versions, audioVersions, patches, scopeKey, folderKey, addDocument };
+  const addDocument = (content = 'First sentence. Second sentence.') => { const key = newId(); documents.set(key, { key, scopeKey, folderKey, name: 'Notes', extension: 'txt', mimeType: 'text/plain', sizeBytes: content.length, storageKey: `docs/${key}`, content, embedding, isFavorite: false, createdAt: now, updatedAt: now }); return key; };
+  return { repository, context, folders, documents, shares, versions, audioVersions, summaries, summaryAudio, patches, scopeKey, folderKey, addDocument };
 }
 
 describe('Content runtime', () => {
@@ -100,8 +119,7 @@ describe('Content runtime', () => {
         return { documentKey: documentKeyForRequest(scanInput.scopeKey, scanInput.folderKey, scanInput.idempotencyKey), content: '## Page 1\n\nStore receipt\n\n## Page 2\n\nTotal: $42.00', storageKeys: ['scan/page-01.jpg', 'scan/page-02.jpg'] };
       },
       runAction: async (action: string, actionInput: any) => {
-        if (action === 'document-generate-html') return documentGenerateHtml(actionInput);
-        if (action === 'document-generate-content') return documentGenerateContent(actionInput);
+        if (action === 'document-cleanup') return { content: actionInput.text.replace('## Page 1', 'Page 1').replace('## Page 2', 'Page 2') };
         if (action === 'document-embed') return documentEmbed(actionInput, { embed: async () => embedding, dimensions: EMBEDDING_DIMENSIONS });
         throw new Error(`Unexpected action ${action}`);
       },
@@ -115,7 +133,7 @@ describe('Content runtime', () => {
     expect(first.document).toMatchObject({ name: 'Scanned receipt', folderKey: f.folderKey });
     const stored = f.documents.get(first.document.key);
     expect(stored.content).toContain('Store receipt');
-    expect(stored.html).toContain('Total: $42.00');
+    expect(stored.content).toContain('Total: $42.00');
     expect(stored.sourceStorageKeys).toEqual(['scan/page-01.jpg', 'scan/page-02.jpg']);
     expect(stored.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
     expect(first.document.sourceImageCount).toBe(2);
@@ -125,6 +143,51 @@ describe('Content runtime', () => {
       { page: 2, url: 'https://images.example/scan/page-02.jpg' },
     ] } } });
     expect(sources.results[0]?.data?.document).not.toHaveProperty('sourceStorageKeys');
+  });
+
+  test('reports a retryable cleanup failure when scan processing and source deletion both fail', async () => {
+    const f = fixture('moderator');
+    const documentKey = newId();
+    const deleted: string[] = [];
+    await expect(runContentTool('document.scan', {
+      scopeKey: f.scopeKey,
+      folderKey: f.folderKey,
+      pages: [{ filename: 'page.jpg', mimeType: 'image/jpeg', sizeBytes: 4, bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]) }],
+    }, f.context, {
+      repository: f.repository,
+      storage: {
+        async upload() { return { storageKey: '' }; },
+        async delete(key: string) { deleted.push(key); throw new Error('storage unavailable'); },
+        async download() { return { bytes: new Uint8Array() }; },
+        async copy() { return { storageKey: '' }; },
+      },
+      scanDocument: async () => ({ documentKey, content: 'Scanned body', storageKeys: ['scan/page-01.jpg'] }),
+      runAction: async (action: string) => { if (action === 'document-cleanup') throw new Error('cleanup unavailable'); throw new Error(`Unexpected action ${action}`); },
+    })).rejects.toMatchObject({ code: 'CONTENT_CONFLICT', action: 'cleanup', resourceKey: documentKey, retryable: true });
+    expect(deleted).toEqual(['scan/page-01.jpg']);
+  });
+
+  test('retains scan sources when ownership cannot be verified after processing fails', async () => {
+    const f = fixture('moderator');
+    const documentKey = newId();
+    const deleted: string[] = [];
+    const repository = { ...f.repository, async getDocument(key: string) { if (key === documentKey) throw new Error('database unavailable'); return f.repository.getDocument(key); } };
+    await expect(runContentTool('document.scan', {
+      scopeKey: f.scopeKey,
+      folderKey: f.folderKey,
+      pages: [{ filename: 'page.jpg', mimeType: 'image/jpeg', sizeBytes: 4, bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]) }],
+    }, f.context, {
+      repository,
+      storage: {
+        async upload() { return { storageKey: '' }; },
+        async delete(key: string) { deleted.push(key); },
+        async download() { return { bytes: new Uint8Array() }; },
+        async copy() { return { storageKey: '' }; },
+      },
+      scanDocument: async () => ({ documentKey, content: 'Scanned body', storageKeys: ['scan/page-01.jpg'] }),
+      runAction: async (action: string) => { if (action === 'document-cleanup') throw new Error('cleanup unavailable'); throw new Error(`Unexpected action ${action}`); },
+    })).rejects.toMatchObject({ code: 'CONTENT_CONFLICT', action: 'cleanup', resourceKey: documentKey, retryable: true });
+    expect(deleted).toEqual([]);
   });
 
   test('requires a resolved human principal for every registered tool', async () => {
@@ -165,17 +228,28 @@ describe('Content runtime', () => {
     expect(f.patches.at(-1)).not.toHaveProperty('embedding');
   });
 
-  test('projects native document blocks only when requested', async () => {
+  test('lists the complete active folder tree when descendants are requested', async () => {
+    const f = fixture('viewer');
+    const child = newId(), leaf = newId(), archived = newId(), hidden = newId();
+    f.folders.set(child, { key: child, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', embedding, createdAt: now, updatedAt: now });
+    f.folders.set(leaf, { key: leaf, scopeKey: f.scopeKey, parentFolderKey: child, name: 'Leaf', embedding, createdAt: now, updatedAt: now });
+    f.folders.set(archived, { key: archived, scopeKey: f.scopeKey, name: 'Archived', embedding, deletedAt: now, createdAt: now, updatedAt: now });
+    f.folders.set(hidden, { key: hidden, scopeKey: f.scopeKey, parentFolderKey: archived, name: 'Hidden', embedding, createdAt: now, updatedAt: now });
+
+    const direct = await runContentTool('folder.list', { scopeKey: f.scopeKey }, f.context, { repository: f.repository });
+    const tree = await runContentTool('folder.list', { scopeKey: f.scopeKey, includeDescendants: true }, f.context, { repository: f.repository });
+
+    expect(direct.folders.map((folder: any) => folder.key)).toEqual([f.folderKey]);
+    expect(tree.folders.map((folder: any) => folder.key).sort()).toEqual([f.folderKey, child, leaf].sort());
+  });
+
+  test('projects only plain document content when requested', async () => {
     const f = fixture('viewer');
     const documentKey = f.addDocument();
-    f.documents.get(documentKey).html = '<h1><strong>Preview</strong></h1><p>Native body</p>';
-    const projected = await runContentTool('document.find', { documentKeys: [documentKey], include: ['blocks'] }, f.context, { repository: f.repository });
-    expect(projected.results[0]).toMatchObject({ success: true, data: { document: { blocks: [
-      { type: 'heading', level: 1, content: [{ text: 'Preview', bold: true }] },
-      { type: 'paragraph', content: [{ text: 'Native body' }] },
-    ] } } });
+    const projected = await runContentTool('document.find', { documentKeys: [documentKey], include: ['content'] }, f.context, { repository: f.repository });
+    expect(projected.results[0]).toMatchObject({ success: true, data: { document: { content: 'First sentence. Second sentence.' } } });
     const summary = await runContentTool('document.find', { documentKeys: [documentKey] }, f.context, { repository: f.repository });
-    expect(summary.results[0]?.data?.document).not.toHaveProperty('blocks');
+    expect(summary.results[0]?.data?.document).not.toHaveProperty('content');
     expect(projected.results[0]?.data?.document).not.toHaveProperty('html');
   });
 
@@ -221,8 +295,16 @@ describe('Content runtime', () => {
 
     const shared = await runContentTool('document.share', { shares: [{ documentKey: rootKey, permission: 'read' }] }, f.context, { repository: f.repository, random: (size) => new Uint8Array(size).fill(3) });
     expect(shared.results[0]?.success).toBe(true);
-    const versioned = await runContentTool('document.create-version', { documentKeys: [rootKey] }, f.context, { repository: f.repository, embed: async () => embedding });
+    const versioned = await runContentTool('document.create-version', { documentKeys: [rootKey], contents: { [rootKey]: 'Generated version' }, types: { [rootKey]: 'enhancement' } }, f.context, { repository: f.repository, embed: async () => embedding });
     expect(versioned.results[0]?.success).toBe(true);
+    expect([...f.versions.values()].at(-1)?.content).toBe('Generated version');
+    expect([...f.versions.values()].at(-1)?.type).toBe('enhancement');
+    expect(f.documents.get(rootKey).currentVersionKey).toBeUndefined();
+
+    const currentVersion = await runContentTool('document.create-version', { documentKeys: [rootKey] }, f.context, { repository: f.repository, embed: async () => embedding });
+    expect(f.documents.get(rootKey).currentVersionKey).toBe(currentVersion.results[0]?.data?.version.key);
+    await runContentTool('document.restore-version', { restores: [{ documentKey: rootKey, versionKey: versioned.results[0]?.data?.version.key, createBackupVersion: false }] }, f.context, { repository: f.repository, embed: async () => embedding });
+    expect(f.documents.get(rootKey).currentVersionKey).toBe(versioned.results[0]?.data?.version.key);
   });
 
   test('rejects cross-scope document moves instead of performing a partial transfer', async () => {
@@ -283,8 +365,8 @@ describe('Content runtime', () => {
   test('returns playable audio with conservative document offsets and MIME-matched persistence', async () => {
     const f = fixture('moderator');
     const documentKey = f.addDocument(`0123456789Visible sentence. ${'More words. '.repeat(30)} \`secret code\``);
-    const spoken: string[] = [], actions: string[] = [], uploaded: string[] = [];
-    const dependencies: any = { repository: f.repository, maxSpeechChunkCharacters: 200, runAction: async (action: string, input: any) => { actions.push(action); const parsed = speechInputSchema.parse(input); expect(parsed).toMatchObject({ language: 'English', speakingRate: 1.25 }); spoken.push(parsed.text); return { audioBase64: Buffer.from([spoken.length]).toString('base64'), mimeType: parsed.format === 'mp3' ? 'audio/mpeg' : 'audio/ogg', durationMs: 10 }; }, mergeAudio: async () => new Uint8Array([1, 2, 3]), audioDuration: () => 900, storage: { async upload(input: any) { uploaded.push(input.key); return { storageKey: input.key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } } };
+    const spoken: string[] = [], actions: string[] = [], uploaded: string[] = [], speechInputs: any[] = [];
+    const dependencies: any = { repository: f.repository, maxSpeechChunkCharacters: 200, runAction: async (action: string, input: any) => { actions.push(action); const parsed = speechInputSchema.parse(input); speechInputs.push(parsed); spoken.push(parsed.text); return { audioBase64: Buffer.from([spoken.length]).toString('base64'), mimeType: parsed.format === 'mp3' ? 'audio/mpeg' : 'audio/ogg', durationMs: 10 }; }, mergeAudio: async () => new Uint8Array([1, 2, 3]), audioDuration: () => 900, storage: { async upload(input: any) { uploaded.push(input.key); return { storageKey: input.key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } } };
     const ephemeral = await runContentTool('document.read', { documentKeys: [documentKey], mode: 'audio', startOffset: 10, includeTitle: true, language: 'English', speakingRate: 1.25 }, f.context, dependencies);
     const audio = (ephemeral.results[0]?.data as { audio: Array<{ index: number; url: string; startCharacter: number; endCharacter: number }> }).audio;
     expect(audio.map((item) => item.index)).toEqual([...spoken.keys()]);
@@ -293,13 +375,20 @@ describe('Content runtime', () => {
     expect(spoken[0]).toStartWith('Notes. Visible sentence.');
     expect(spoken.join(' ')).not.toContain('secret code');
     expect(actions).toEqual(Array(spoken.length).fill('speak'));
+    expect(speechInputs.every(({ voice }) => voice === 'Matthew')).toBe(true);
     expect(uploaded).toHaveLength(0);
     const ephemeralChunkCount = spoken.length;
-    const persisted = await runContentTool('document.read', { documentKeys: [documentKey], mode: 'audio', includeCode: false, persistAudio: true, language: 'English', speakingRate: 1.25 }, f.context, dependencies);
-    expect(actions.slice(ephemeralChunkCount)).toEqual(Array(spoken.length - ephemeralChunkCount).fill('generate-speech'));
+    const persisted = await runContentTool('document.read', { documentKeys: [documentKey], mode: 'audio', includeCode: false, persistAudio: true, language: 'en-US' }, f.context, dependencies);
+    expect(actions.slice(ephemeralChunkCount)).toEqual(['generate-speech']);
+    expect(persisted.results[0]).toMatchObject({ success: true });
+    expect(speechInputs.at(-1)).not.toHaveProperty('speakingRate');
+    expect(speechInputs.at(-1)?.language).toBe('en-US');
+    expect(speechInputs.at(-1)?.voice).toBe('Matthew');
     expect(uploaded).toHaveLength(1);
     expect(uploaded[0]).toEndWith('.mp3');
     expect(persisted.results[0]?.data).toMatchObject({ audioVersion: { version: 1, durationMs: 900 } });
+    expect((persisted.results[0]?.data as any)?.audioVersion).not.toHaveProperty('speakingRate');
+    expect((persisted.results[0]?.data as any)?.audioVersion).toMatchObject({ language: 'en-US', voice: 'Matthew' });
     expect(f.audioVersions.size).toBe(1);
     expect(f.documents.get(documentKey).speechStorageKeys).toBeUndefined();
     expect(f.documents.get(documentKey).updatedAt).toBe(now);
@@ -337,6 +426,7 @@ describe('Content runtime', () => {
       repository: f.repository,
       runAction: async () => ({ audio: new Uint8Array([1]), mimeType: 'audio/mpeg' }),
       mergeAudio: async () => { throw new Error('ffmpeg unavailable'); },
+      audioDuration: () => 100,
     });
     expect(output.results[0]).toMatchObject({ success: false, error: { code: 'DOCUMENT_SPEECH_FAILED', message: 'Generated audio segments could not be finalized.', action: 'audio-merge' } });
   });
@@ -425,9 +515,26 @@ describe('Content runtime', () => {
 
     const current = f.documents.get(documentKey);
     current.content = 'Changed source text.';
-    current.html = '<p>Changed source text.</p>';
     const listed = await runContentTool('document.list-audio-versions', { documentKeys: [documentKey] }, f.context, dependencies);
     expect(listed.results[0]?.data?.audioVersions).toMatchObject([{ version: 2, current: false }, { version: 1, current: false }]);
+  });
+
+  test('persists one current audio version, its resume position, and explicit dismissal', async () => {
+    const f = fixture('moderator');
+    const documentKey = f.addDocument('Stable source text.');
+    const first = await f.repository.createAudioVersion!({ key: newId(), scopeKey: f.scopeKey, documentKey, sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: now, storageKey: 'audio/one.mp3', mimeType: 'audio/mpeg', sizeBytes: 10, durationMs: 60_000, includeTitle: true, includeCode: false, createdByKey: newId(), createdAt: now });
+    const second = await f.repository.createAudioVersion!({ key: newId(), scopeKey: f.scopeKey, documentKey, sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: now, storageKey: 'audio/two.mp3', mimeType: 'audio/mpeg', sizeBytes: 10, durationMs: 90_000, includeTitle: true, includeCode: false, createdByKey: newId(), createdAt: now });
+
+    await runContentTool('document.audio.playback.update', { audioVersionKey: first.key, playbackPositionMs: 12_345 }, f.context, { repository: f.repository });
+    await runContentTool('document.audio.playback.update', { audioVersionKey: second.key, playbackPositionMs: 23_456 }, f.context, { repository: f.repository });
+    expect([...f.audioVersions.values()].map(({ key, isCurrent, playbackPositionMs }) => ({ key, isCurrent, playbackPositionMs }))).toEqual([
+      { key: first.key, isCurrent: false, playbackPositionMs: 12_345 },
+      { key: second.key, isCurrent: true, playbackPositionMs: 23_456 },
+    ]);
+    await expect(runContentTool('document.audio.playback.update', { audioVersionKey: second.key, playbackPositionMs: 90_001 }, f.context, { repository: f.repository })).rejects.toMatchObject({ code: 'CONTENT_INVALID_INPUT' });
+    await runContentTool('document.audio.playback.clear', { documentKey }, f.context, { repository: f.repository });
+    expect([...f.audioVersions.values()].every(({ isCurrent }) => !isCurrent)).toBe(true);
+    expect(f.audioVersions.get(second.key).playbackPositionMs).toBe(23_456);
   });
 
   test('returns a specific error when audio history storage is unavailable', async () => {
@@ -473,7 +580,7 @@ describe('Content runtime', () => {
     expect(archived.results.map((item) => item.documentKey)).toEqual([documentKey]);
   });
 
-  test('runs real representation actions in canonical order before document update', async () => {
+  test('embeds plain content before document update', async () => {
     const f = fixture('moderator');
     const documentKey = f.addDocument('Old body');
     const actions: string[] = [];
@@ -488,14 +595,15 @@ describe('Content runtime', () => {
       },
     });
     expect(output.results[0]?.success).toBe(true);
-    expect(actions).toEqual(['document-generate-html', 'document-generate-content', 'document-embed']);
-    expect(f.documents.get(documentKey)).toMatchObject({ html: '<p>New body</p>', content: 'New body', embedding });
+    expect(actions).toEqual(['document-embed']);
+    expect(f.documents.get(documentKey)).toMatchObject({ content: 'New body', embedding });
+    expect(f.documents.get(documentKey)).not.toHaveProperty('html');
   });
 
   test('creates and autosaves live documents without versions', async () => {
     const f = fixture('moderator');
     const dependencies = { repository: f.repository, embed: async () => embedding, ingestion: { embeddingDimensions: EMBEDDING_DIMENSIONS } };
-    const created = await runContentTool('document.create', { scopeKey: f.scopeKey, folderKey: f.folderKey, name: 'Plan', representation: { content: 'Initial plan' } }, f.context, dependencies);
+    const created = await runContentTool('document.create', { scopeKey: f.scopeKey, folderKey: f.folderKey, name: 'Plan', content: 'Initial plan' }, f.context, dependencies);
     expect(created.document.name).toBe('Plan');
     expect(f.versions.size).toBe(0);
     const autosaved = await runContentTool('document.update', { updates: [{ documentKey: created.document.key, content: 'Autosaved plan', createVersion: false, expectedUpdatedAt: created.document.updatedAt }] }, f.context, dependencies);
@@ -535,7 +643,7 @@ describe('Content runtime', () => {
     };
     const dependencies = { repository: f.repository, executeAction };
     expect((await runContentTool('folder.create', { folders: [{ scopeKey: f.scopeKey, name: 'Routed folder' }] }, f.context, dependencies)).summary.failed).toBe(0);
-    expect((await runContentTool('document.create', { scopeKey: f.scopeKey, name: 'Routed note', representation: { content: 'Routed body' } }, f.context, dependencies)).document.name).toBe('Routed note');
+    expect((await runContentTool('document.create', { scopeKey: f.scopeKey, name: 'Routed note', content: 'Routed body' }, f.context, dependencies)).document.name).toBe('Routed note');
     expect(calls.map(({ actionSlug }) => actionSlug)).toEqual(['embed', 'embed']);
     expect(calls.filter(({ actionSlug }) => actionSlug === 'embed').every(({ input }) => typeof (input as { text?: unknown }).text === 'string')).toBe(true);
 
@@ -543,11 +651,49 @@ describe('Content runtime', () => {
     nextEmbedding = 0;
     maximumActiveEmbeddings = 0;
     const longContent = Array.from({ length: 10_500 }, () => 'word').join(' ');
-    const created = await runContentTool('document.create', { scopeKey: f.scopeKey, name: 'Chunked note', representation: { content: longContent } }, f.context, dependencies);
+    const created = await runContentTool('document.create', { scopeKey: f.scopeKey, name: 'Chunked note', content: longContent }, f.context, dependencies);
     const chunkEmbeddings = f.documents.get(created.document.key).chunkEmbeddings as number[][];
     expect(chunkEmbeddings.length).toBeGreaterThan(8);
     expect(maximumActiveEmbeddings).toBe(8);
     expect(chunkEmbeddings.map((value) => value[0])).toEqual([...chunkEmbeddings.keys()]);
+  });
+
+  test('finds independently capped semantic neighbors and excludes inactive hierarchy and the source', async () => {
+    const f = fixture('viewer');
+    const activeFolderKey = newId();
+    const archivedParentKey = newId();
+    const inactiveChildKey = newId();
+    f.folders.set(activeFolderKey, { key: activeFolderKey, scopeKey: f.scopeKey, name: 'Related', embedding, createdAt: now, updatedAt: now });
+    f.folders.set(archivedParentKey, { key: archivedParentKey, scopeKey: f.scopeKey, name: 'Archived', embedding, deletedAt: now, createdAt: now, updatedAt: now });
+    f.folders.set(inactiveChildKey, { key: inactiveChildKey, scopeKey: f.scopeKey, parentFolderKey: archivedParentKey, name: 'Hidden child', embedding, createdAt: now, updatedAt: now });
+    const documentKey = f.addDocument('Related note');
+    delete f.documents.get(documentKey).extension;
+    const fileKey = f.addDocument('Related file');
+    const inactiveDocumentKey = f.addDocument('Hidden file');
+    f.documents.get(inactiveDocumentKey).folderKey = inactiveChildKey;
+    let semanticInput: any;
+    f.repository.semanticNeighbors = async (input) => {
+      semanticInput = input;
+      return {
+        folders: [...f.folders.values()].map((folder) => ({ score: 0.8, folder })),
+        documents: [{ score: 0.8, document: f.documents.get(documentKey) }],
+        files: [fileKey, inactiveDocumentKey].map((key) => ({ score: 0.8, document: f.documents.get(key) })),
+      };
+    };
+
+    const result = await runContentTool('content.neighbors', { folderKey: f.folderKey }, f.context, { repository: f.repository });
+    expect(result.folders.map((folder) => folder.key)).toEqual([activeFolderKey]);
+    expect(result.documents.map((document) => document.key)).toEqual([documentKey]);
+    expect(result.files.map((document) => document.key)).toEqual([fileKey]);
+    expect(semanticInput).toMatchObject({ scopeKey: f.scopeKey, sourceFolderKey: f.folderKey, limit: 10 });
+    expect(semanticInput.activeFolderKeys).toContain(activeFolderKey);
+    expect(semanticInput.activeFolderKeys).not.toContain(archivedParentKey);
+    expect(semanticInput.activeFolderKeys).not.toContain(inactiveChildKey);
+
+    f.documents.get(fileKey).embedding = undefined;
+    await expect(runContentTool('content.neighbors', { documentKey: fileKey }, f.context, { repository: f.repository })).rejects.toMatchObject({ code: 'CONTENT_CONFLICT' });
+    f.folders.get(f.folderKey).deletedAt = now;
+    await expect(runContentTool('content.neighbors', { folderKey: f.folderKey }, f.context, { repository: f.repository })).rejects.toMatchObject({ code: 'FOLDER_ARCHIVED' });
   });
 
   test('searches folders and chunk-aware documents with caps, summaries, cache, auth, and isolated history', async () => {
@@ -567,8 +713,9 @@ describe('Content runtime', () => {
     f.repository.semanticSearch = async (input) => [...f.documents.values()].filter((document) => !input.folderKeys || input.folderKeys.includes(document.folderKey)).map((document, index) => ({ score: index === 0 ? 0.54 : 0.9, document }));
     const searchQueries = {
       async get({ actorKey, scopeKey, normalizedQuery, folderKey, includeDescendants }: any) { return rows.get(`${actorKey}:${scopeKey}:${normalizedQuery}:${folderKey ?? 'root'}:${includeDescendants}`) ?? null; },
-      async record(value: any) { const identity = `${value.actorKey}:${value.scopeKey}:${value.normalizedQuery}:${value.folderKey ?? 'root'}:${value.includeDescendants}`; const old = rows.get(identity); rows.set(identity, { output: value.output, query: value.query, normalizedQuery: value.normalizedQuery, folderKey: value.folderKey, includeDescendants: value.includeDescendants, searchedAt: value.now, count: (old?.count ?? 0) + 1 }); },
-      async list({ actorKey, scopeKey, folderKey, includeDescendants, limit }: any) { return [...rows.entries()].filter(([key]) => key.startsWith(`${actorKey}:${scopeKey}:`)).map(([, value]) => value).filter((value) => value.folderKey === folderKey && value.includeDescendants === includeDescendants).map((value) => ({ query: value.query, normalizedQuery: value.normalizedQuery, searchedAt: value.searchedAt, count: value.count, ...(value.folderKey ? { folderKey: value.folderKey, includeDescendants: value.includeDescendants } : {}), documents: value.output.result.documents })).slice(0, limit); },
+      async record(value: any) { const identity = `${value.actorKey}:${value.scopeKey}:${value.normalizedQuery}:${value.folderKey ?? 'root'}:${value.includeDescendants}`; const old = rows.get(identity); rows.set(identity, { output: value.output, query: value.query, normalizedQuery: value.normalizedQuery, contextDomain: value.contextDomain, folderKey: value.folderKey, includeDescendants: value.includeDescendants, searchedAt: value.now, usageCount: (old?.usageCount ?? 0) + 1 }); },
+      async list({ actorKey, scopeKey, folderKey, includeDescendants, limit }: any) { return [...rows.entries()].filter(([key]) => key.startsWith(`${actorKey}:${scopeKey}:`)).map(([, value]) => value).filter((value) => value.folderKey === folderKey && value.includeDescendants === includeDescendants).map((value) => ({ query: value.query, normalizedQuery: value.normalizedQuery, contextDomain: value.contextDomain, searchedAt: value.searchedAt, usageCount: value.usageCount, ...(value.folderKey ? { folderKey: value.folderKey, includeDescendants: value.includeDescendants } : {}), documents: value.output.result.documents })).slice(0, limit); },
+      async remove({ actorKey, scopeKey, normalizedQuery, folderKey, includeDescendants }: any) { return rows.delete(`${actorKey}:${scopeKey}:${normalizedQuery}:${folderKey ?? 'root'}:${includeDescendants}`); },
     };
     const dependencies: any = {
       repository: f.repository,
@@ -593,12 +740,13 @@ describe('Content runtime', () => {
     favoriteOnlyDocument.isFavorite = true;
     favoriteOnlyDocument.updatedAt = '2026-07-23T11:00:00.000Z';
     const metadataReplay = await runContentTool('scope.content.search', { scopeKey: f.scopeKey, query: 'launch roadmap' }, f.context, dependencies);
-    expect(metadataReplay.cached).toBe(true);
-    expect(embeddingCalls).toBe(1);
-    expect(summaryCalls).toBe(10);
+    expect(metadataReplay.cached).toBe(false);
+    expect(metadataReplay.documents.find((document) => document.documentKey === favoriteOnlyDocument.key)?.isFavorite).toBe(true);
+    expect(embeddingCalls).toBe(2);
+    expect(summaryCalls).toBe(20);
     const history = await runContentTool('scope.content.search-history', { scopeKey: f.scopeKey }, f.context, dependencies);
-    expect(history.history).toMatchObject([{ normalizedQuery: 'launch roadmap', count: 3 }]);
-    expect(history.history[0]?.documents).toEqual(first.documents);
+    expect(history.history).toMatchObject([{ normalizedQuery: 'launch roadmap', contextDomain: 'content', usageCount: 3 }]);
+    expect(history.history[0]?.documents).toEqual(metadataReplay.documents);
     const archivedDocument = f.documents.get(first.documents[0]!.documentKey);
     archivedDocument.deletedAt = now;
     const prunedHistory = await runContentTool('scope.content.search-history', { scopeKey: f.scopeKey }, f.context, dependencies);
@@ -609,7 +757,7 @@ describe('Content runtime', () => {
     const nestedDocumentKey = [...f.documents.keys()][1]!;
     f.documents.get(nestedDocumentKey).folderKey = childKey;
     const folderReplay = await runContentTool('scope.content.search', { scopeKey: f.scopeKey, folderKey: f.folderKey, query: 'launch roadmap' }, f.context, dependencies);
-    expect(folderReplay.folders).toEqual([{ key: childKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', score: 0.9 }]);
+    expect(folderReplay.folders).toEqual([{ key: childKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', isFavorite: false, score: 0.9 }]);
     expect(folderReplay.cached).toBe(false);
     expect(rows).toHaveLength(2);
     expect(folderReplay.documents.some((document) => document.documentKey === nestedDocumentKey)).toBe(true);
@@ -621,10 +769,12 @@ describe('Content runtime', () => {
     f.documents.get(first.documents[0]!.documentKey).semanticContentHash = 'a'.repeat(64);
     const invalidated = await runContentTool('scope.content.search', { scopeKey: f.scopeKey, query: 'launch roadmap' }, f.context, dependencies);
     expect(invalidated.cached).toBe(false);
-    expect(embeddingCalls).toBe(4);
+    expect(embeddingCalls).toBe(5);
     const otherContext = { ...f.context, principal: { ...f.context.principal, user: { key: newId() } } };
     const isolated = await runContentTool('scope.content.search-history', { scopeKey: f.scopeKey }, otherContext, dependencies);
     expect(isolated.history).toEqual([]);
+    expect(await runContentTool('scope.content.search-history.delete', { scopeKey: f.scopeKey, normalizedQuery: 'launch roadmap' }, f.context, dependencies)).toEqual({ normalizedQuery: 'launch roadmap', deleted: true });
+    expect((await runContentTool('scope.content.search-history', { scopeKey: f.scopeKey }, f.context, dependencies)).history).toEqual([]);
     allowed = false;
     await expect(runContentTool('scope.content.search', { scopeKey: f.scopeKey, query: 'launch roadmap' }, f.context, dependencies)).rejects.toMatchObject({ code: 'CONTENT_FORBIDDEN' });
   });
@@ -717,7 +867,7 @@ describe('Content runtime', () => {
     expect(updated.results[0]?.success).toBe(true);
     expect([...f.versions.values()].at(-1)?.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
 
-    const legacyVersion = await f.repository.createVersion({ scopeKey: f.scopeKey, documentKey, html: '<p>Historical exact body</p>', content: 'Historical exact body', embedding });
+    const legacyVersion = await f.repository.createVersion({ scopeKey: f.scopeKey, documentKey, content: 'Historical exact body', embedding });
     f.documents.get(documentKey).embedding = embedding;
     const copied = await runContentTool('document.copy', { copies: [{ documentKey, targetScopeKey: f.scopeKey, targetFolderKey: f.folderKey, includeVersions: true }] }, f.context, dependencies);
     expect(copied.results[0]?.success).toBe(true);
@@ -733,17 +883,22 @@ describe('Content runtime', () => {
     expect(embeddedTexts).toContain('Notes\n\nHistorical exact body');
 
     f.documents.get(documentKey).embedding = legacy;
-    const generated = await runContentTool('document.translate', { documentKeys: [documentKey], targetLanguage: 'French', mode: 'replace' }, f.context, {
+    const generated = await runContentTool('document.translate', { documentKeys: [documentKey], targetLanguage: 'Swedish', instruction: 'Use concise headings.', mode: 'replace' }, f.context, {
       ...dependencies,
       runAction: async (action: string, input: any) => {
-        if (action === 'translate') return { text: 'Corps traduit' };
-        if (action === 'document-generate-html') return documentGenerateHtml(input);
-        if (action === 'document-generate-content') return documentGenerateContent(input);
+        if (action === 'translate') {
+          expect(input.systemPrompt).toContain('collapse excessive blank lines');
+          expect(input.systemPrompt).toContain('readable sections');
+          expect(input.systemPrompt).toContain('into Swedish');
+          expect(input.systemPrompt).toContain('Additional direction: Use concise headings.');
+          return { text: '  Titre  \r\n\r\n\r\nCorps traduit  \r\n ' };
+        }
         if (action === 'document-embed') return documentEmbed(input, { embed: async ({ text }) => { embeddedTexts.push(text); return embedding; }, dimensions: EMBEDDING_DIMENSIONS });
         throw new Error(`Unexpected action ${action}`);
       },
     });
     expect(generated.results[0]?.success).toBe(true);
+    expect(generated.results[0]?.data?.text).toBe('Titre\n\nCorps traduit');
     expect([...f.versions.values()].at(-1)?.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
   });
 
@@ -813,7 +968,7 @@ describe('Content runtime', () => {
     expect(deletedObjects.length).toBeGreaterThan(0);
   });
 
-  test('allocates deterministic collision-safe copied root names', async () => {
+  test('preserves copied root names when sibling names match', async () => {
     const f = fixture('moderator');
     const targetKey = newId(), firstParentKey = newId(), secondParentKey = newId(), firstKey = newId(), secondKey = newId();
     f.folders.set(targetKey, { key: targetKey, scopeKey: f.scopeKey, name: 'Target', embedding, isFavorite: false, createdAt: now, updatedAt: now });
@@ -824,10 +979,10 @@ describe('Content runtime', () => {
     const dependencies = { repository: f.repository, embed: async () => embedding };
 
     const sameParent = await runContentTool('folder.copy', { copies: [{ folderKey: f.folderKey, targetScopeKey: f.scopeKey }] }, f.context, dependencies);
-    expect(sameParent.results[0]?.data?.folder.name).toBe('Root (copy)');
+    expect(sameParent.results[0]?.data?.folder.name).toBe('Root');
 
     const sameNames = await runContentTool('folder.copy', { copies: [{ folderKey: firstKey, targetScopeKey: f.scopeKey, targetParentFolderKey: targetKey }, { folderKey: secondKey, targetScopeKey: f.scopeKey, targetParentFolderKey: targetKey }] }, f.context, dependencies);
-    expect(sameNames.results.map((result) => result.data?.folder.name)).toEqual(['Report', 'Report (copy)']);
+    expect(sameNames.results.map((result) => result.data?.folder.name)).toEqual(['Report', 'Report']);
   });
 
   test('retains copied folders and referenced storage when document compensation deletion fails', async () => {
@@ -898,20 +1053,35 @@ describe('Content runtime', () => {
     expect(fileName?.endsWith('.txt')).toBe(true);
   });
 
-  test('sanitizes HTML updates and persists canonical agreeing representations', async () => {
+  test('generates an HTML preview from authorized original bytes', async () => {
+    const f = fixture('viewer');
+    const documentKey = f.addDocument('Preview body');
+    const output = await runContentTool('document.download', { documentKeys: [documentKey], format: 'html' }, f.context, {
+      repository: f.repository,
+      storage: {
+        async download() { return { bytes: new TextEncoder().encode('Original body'), mimeType: 'text/plain' }; },
+        async copy(input) { return { storageKey: input.destinationKey }; },
+        async upload(input) { return { storageKey: input.key }; },
+        async delete() {},
+      },
+      generatePreview: async () => ({ bytes: new TextEncoder().encode('<html>Original body</html>'), mimeType: 'text/html; charset=utf-8', extension: 'html' }),
+    });
+    expect(output.results[0]?.data).toMatchObject({ format: 'html', fileName: 'Notes.html', mimeType: 'text/html; charset=utf-8' });
+    expect(Buffer.from(output.results[0]?.data?.content ?? '', 'base64').toString()).toBe('<html>Original body</html>');
+  });
+
+  test('sanitizes plain-text updates', async () => {
     const f = fixture('moderator');
     const documentKey = f.addDocument('Old body');
     const output = await runContentTool('document.update', {
-      updates: [{ documentKey, html: '<p onclick="steal()">Safe <span>text</span></p><script>alert(1)</script><custom>drop</custom>', isFavorite: true }],
+      updates: [{ documentKey, content: 'Safe text\r\n\r\n\r\ndrop\u0000', isFavorite: true }],
     }, f.context, { repository: f.repository, embed: async () => embedding, ingestion: { embeddingDimensions: EMBEDDING_DIMENSIONS } });
     expect(output.results[0]?.success).toBe(true);
     const stored = f.documents.get(documentKey);
-    expect(stored.html).toBe('<p>Safe text</p>drop');
     expect(stored.content).toBe('Safe text\n\ndrop');
     expect(stored.isFavorite).toBe(true);
     expect(stored).not.toHaveProperty('json');
-    expect(stored.html).not.toContain('onclick');
-    expect(stored.html).not.toContain('custom');
+    expect(stored).not.toHaveProperty('html');
 
     const favoriteOnly = await runContentTool('document.update', { updates: [{ documentKey, isFavorite: false }] }, f.context, { repository: f.repository });
     expect(favoriteOnly.results[0]?.data?.document.isFavorite).toBe(false);
@@ -928,8 +1098,6 @@ describe('Content runtime', () => {
       storage,
       runAction: async (action, input) => {
         if (action === 'translate') return { text: 'Texte traduit' };
-        if (action === 'document-generate-html') return documentGenerateHtml(input as never);
-        if (action === 'document-generate-content') return documentGenerateContent(input as never);
         if (action === 'document-embed') {
           embeddedNames.push(String(input.name));
           return documentEmbed(input as never, { embed: async () => embedding, dimensions: EMBEDDING_DIMENSIONS });
@@ -943,8 +1111,8 @@ describe('Content runtime', () => {
     expect(persistedDocumentKey && f.documents.get(persistedDocumentKey)?.isFavorite).toBe(false);
   });
 
-  test('sends summaries and rewrites through provider-valid chat action inputs', async () => {
-    const f = fixture('viewer');
+  test('routes summaries and topics through dedicated actions and persists summary history', async () => {
+    const f = fixture('moderator');
     const first = f.addDocument('First source body');
     const second = f.addDocument('Second source body');
     const actions: string[] = [];
@@ -953,13 +1121,112 @@ describe('Content runtime', () => {
       const parsed = chatInputSchema.parse(input);
       expect(parsed.systemPrompt).toBeString();
       expect(parsed.messages[0]?.content[0]).toMatchObject({ type: 'text' });
-      return { text: 'Generated text' };
+      return { text: action === 'document-topics' ? '```json\n{"topics":["Launch","Launch","Risk"]}\n```' : action === 'document-summarize' ? '<thinking>Private model planning.</thinking>\nHere is the requested summary.\n```json\n{"sections":[{"heading":"Overview","body":"Generated text"},{"heading":"Details","body":"Additional context"}]}\n```\nNo further commentary.' : 'Generated text' };
     };
     const dependencies = { repository: f.repository, runAction };
     expect((await runContentTool('document.summarize', { documentKeys: [first] }, f.context, dependencies)).results[0]?.success).toBe(true);
     expect((await runContentTool('document.summarize', { documentKeys: [first, second], combine: true }, f.context, dependencies)).summary.failed).toBe(0);
-    expect((await runContentTool('document.rewrite', { rewrites: [{ documentKey: first, instruction: 'Improve clarity' }] }, f.context, dependencies)).results[0]?.success).toBe(true);
-    expect(actions).toEqual(['reason', 'deep-reason', 'deep-reason']);
+    const persisted = await runContentTool('document.summarize', { documentKeys: [first], topic: 'Launch', style: 'executive', persist: true }, f.context, dependencies);
+    const summaryKey = persisted.results[0]?.data?.summary?.key;
+    expect(persisted.results[0]?.data).toMatchObject({ text: 'Overview\nGenerated text\n\nDetails\nAdditional context', summary: { version: 1, topic: 'Launch', style: 'executive', summary: 'Overview\nGenerated text\n\nDetails\nAdditional context' } });
+    expect(f.documents.size).toBe(2);
+    expect((await runContentTool('document.list-summaries', { documentKeys: [first] }, f.context, dependencies)).results[0]?.data?.summaries).toHaveLength(1);
+    expect((await runContentTool('document.find-summary', { summaryKeys: [summaryKey] }, f.context, dependencies)).results[0]?.data?.summary.key).toBe(summaryKey);
+    expect(await runContentTool('document.topics', { documentKey: first }, f.context, dependencies)).toEqual({ documentKey: first, topics: ['Launch', 'Risk'] });
+    expect(actions).toEqual(['document-summarize', 'document-summarize', 'document-summarize', 'document-topics']);
+  });
+
+  test('generates, projects, and reuses durable summary audio without exposing storage keys', async () => {
+    const f = fixture('moderator');
+    const documentKey = f.addDocument('Source body');
+    const summary = await f.repository.createSummary!({ key: newId(), scopeKey: f.scopeKey, documentKey, summary: 'A durable spoken summary.', style: 'brief', sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: now, createdByKey: newId(), createdAt: now });
+    const uploaded: string[] = [];
+    let generated = 0;
+    const dependencies: any = {
+      repository: f.repository,
+      generateAudioChunks: async function* (input: any) { generated += 1; expect(input).toMatchObject({ text: summary.summary, voice: 'Matthew', language: 'en-US' }); yield { index: 0, startWord: 0, endWord: 4, startCharacter: 0, endCharacter: summary.summary.length, audioBase64: 'AQ==', mimeType: 'audio/mpeg', durationMs: 100 }; },
+      mergeAudio: async () => new Uint8Array([1, 2]),
+      audioDuration: () => 800,
+      signAudioUrl: async (key: string) => `https://audio.example/${key}`,
+      storage: { async upload({ key }: any) { uploaded.push(key); return { storageKey: key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
+      clock: () => new Date(now),
+    };
+    const first = await runContentTool('document.summary.audio.generate', { summaryKeys: [summary.key], language: 'en-US' }, f.context, dependencies);
+    const second = await runContentTool('document.summary.audio.generate', { summaryKeys: [summary.key] }, f.context, dependencies);
+    expect(first.results[0]).toMatchObject({ success: true, data: { audio: { summaryKey: summary.key, mimeType: 'audio/mpeg', durationMs: 800, url: expect.stringContaining('https://audio.example/') } } });
+    expect(JSON.stringify(first)).not.toContain('storageKey');
+    expect(generated).toBe(1);
+    expect(uploaded).toHaveLength(1);
+    expect(second.results[0]?.data?.audio.key).toBe(first.results[0]?.data?.audio.key);
+    const listed = await runContentTool('document.list-summaries', { documentKeys: [documentKey] }, f.context, dependencies);
+    const found = await runContentTool('document.find-summary', { summaryKeys: [summary.key] }, f.context, dependencies);
+    expect(listed.results[0]?.data?.summaries[0].audio?.url).toStartWith('https://audio.example/');
+    expect(found.results[0]?.data?.summary.audio?.summaryKey).toBe(summary.key);
+  });
+
+  test('deletes a concurrent summary-audio loser upload and returns the winner', async () => {
+    const f = fixture('moderator');
+    const documentKey = f.addDocument();
+    const summary = await f.repository.createSummary!({ key: newId(), scopeKey: f.scopeKey, documentKey, summary: 'Concurrent summary.', style: 'brief', sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: now, createdByKey: newId(), createdAt: now });
+    const winner = { key: newId(), scopeKey: f.scopeKey, documentKey, summaryKey: summary.key, storageKey: 'winner.mp3', mimeType: 'audio/mpeg' as const, sizeBytes: 2, durationMs: 500, createdByKey: newId(), createdAt: now };
+    f.repository.createSummaryAudio = async () => { f.summaryAudio.set(winner.key, winner); return { audio: winner, created: false }; };
+    const deleted: string[] = [];
+    const output = await runContentTool('document.summary.audio.generate', { summaryKeys: [summary.key] }, f.context, {
+      repository: f.repository,
+      generateAudioChunks: async function* () { yield { index: 0, startWord: 0, endWord: 2, startCharacter: 0, endCharacter: 10, audioBase64: 'AQ==', mimeType: 'audio/mpeg', durationMs: 100 }; },
+      mergeAudio: async () => new Uint8Array([1, 2]), audioDuration: () => 500,
+      signAudioUrl: async (key) => `https://audio.example/${key}`,
+      storage: { async upload({ key }) { return { storageKey: key }; }, async delete(key) { deleted.push(key); }, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
+    });
+    expect(deleted).toHaveLength(1);
+    expect(deleted[0]).not.toBe(winner.storageKey);
+    expect(output.results[0]?.data?.audio).toMatchObject({ key: winner.key, url: 'https://audio.example/winner.mp3' });
+  });
+
+  test('cleans summary audio when metadata persistence fails', async () => {
+    const f = fixture('moderator');
+    const documentKey = f.addDocument();
+    const summary = await f.repository.createSummary!({ key: newId(), scopeKey: f.scopeKey, documentKey, summary: 'Summary audio cleanup.', style: 'brief', sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: now, createdByKey: newId(), createdAt: now });
+    f.repository.createSummaryAudio = async () => { throw new Error('metadata unavailable'); };
+    const uploaded: string[] = [], deleted: string[] = [];
+    const output = await runContentTool('document.summary.audio.generate', { summaryKeys: [summary.key] }, f.context, {
+      repository: f.repository,
+      generateAudioChunks: async function* () { yield { index: 0, startWord: 0, endWord: 2, startCharacter: 0, endCharacter: 10, audioBase64: 'AQ==', mimeType: 'audio/mpeg', durationMs: 100 }; },
+      mergeAudio: async () => new Uint8Array([1, 2]), audioDuration: () => 500,
+      storage: { async upload({ key }) { uploaded.push(key); return { storageKey: key }; }, async delete(key) { deleted.push(key); }, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
+    });
+    expect(output.results[0]).toMatchObject({ success: false, error: { code: 'DOCUMENT_SPEECH_FAILED', action: 'summary-audio' } });
+    expect(uploaded).toHaveLength(1);
+    expect(deleted).toEqual(uploaded);
+  });
+
+  test('retains committed summary audio when URL signing temporarily fails', async () => {
+    const f = fixture('moderator');
+    const documentKey = f.addDocument();
+    const summary = await f.repository.createSummary!({ key: newId(), scopeKey: f.scopeKey, documentKey, summary: 'Summary audio signing.', style: 'brief', sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: now, createdByKey: newId(), createdAt: now });
+    const deleted: string[] = [];
+    const dependencies: any = {
+      repository: f.repository,
+      generateAudioChunks: async function* () { yield { index: 0, startWord: 0, endWord: 2, startCharacter: 0, endCharacter: 10, audioBase64: 'AQ==', mimeType: 'audio/mpeg', durationMs: 100 }; },
+      mergeAudio: async () => new Uint8Array([1, 2]), audioDuration: () => 500,
+      signAudioUrl: async () => { throw new Error('signing unavailable'); },
+      storage: { async upload({ key }: any) { return { storageKey: key }; }, async delete(key: string) { deleted.push(key); }, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
+    };
+    const failed = await runContentTool('document.summary.audio.generate', { summaryKeys: [summary.key] }, f.context, dependencies);
+    expect(failed.results[0]?.success).toBe(false);
+    expect(f.summaryAudio.size).toBe(1);
+    expect(deleted).toHaveLength(0);
+    dependencies.signAudioUrl = async (key: string) => `https://audio.example/${key}`;
+    const retried = await runContentTool('document.summary.audio.generate', { summaryKeys: [summary.key] }, f.context, dependencies);
+    expect(retried.results[0]?.data?.audio.url).toStartWith('https://audio.example/');
+  });
+
+  test('rejects non-JSON and over-limit topic model output', async () => {
+    const f = fixture('viewer');
+    const documentKey = f.addDocument();
+    for (const text of ['topics: launch', JSON.stringify({ topics: Array.from({ length: 11 }, (_, index) => `Topic ${index}`) }), JSON.stringify({ topics: ['Launch'], extra: true })]) {
+      await expect(runContentTool('document.topics', { documentKey }, f.context, { repository: f.repository, runAction: async () => ({ text }) })).rejects.toMatchObject({ code: 'CONTENT_INVALID_INPUT' });
+    }
   });
 
   test('precomputes atomic exports and throws without returning partial success', async () => {
@@ -970,11 +1237,11 @@ describe('Content runtime', () => {
     const generateExport: any = async () => {
       calls += 1;
       if (calls === 2) throw new Error('renderer failed');
-      return { bytes: new TextEncoder().encode('<p>ok</p>'), mimeType: 'text/html', extension: 'html' };
+      return { bytes: new TextEncoder().encode('ok'), mimeType: 'text/plain', extension: 'txt' };
     };
-    await expect(runContentTool('document.export', { exports: [{ documentKey: first, format: 'html' }, { documentKey: second, format: 'html' }], atomic: true }, f.context, { repository: f.repository, generateExport })).rejects.toMatchObject({ action: 'export', resourceKey: second });
+    await expect(runContentTool('document.export', { exports: [{ documentKey: first, format: 'txt' }, { documentKey: second, format: 'txt' }], atomic: true }, f.context, { repository: f.repository, generateExport })).rejects.toMatchObject({ action: 'export', resourceKey: second });
     calls = 0;
-    const output = await runContentTool('document.export', { exports: [{ documentKey: first, format: 'html' }, { documentKey: second, format: 'html' }], atomic: true }, f.context, { repository: f.repository, generateExport: async () => ({ bytes: new Uint8Array([1]), mimeType: 'text/html', extension: 'html' }) });
+    const output = await runContentTool('document.export', { exports: [{ documentKey: first, format: 'txt' }, { documentKey: second, format: 'txt' }], atomic: true }, f.context, { repository: f.repository, generateExport: async () => ({ bytes: new Uint8Array([1]), mimeType: 'text/plain', extension: 'txt' }) });
     expect(output.summary).toEqual({ requested: 2, succeeded: 2, failed: 0 });
   });
 
@@ -1011,9 +1278,12 @@ describe('Content runtime', () => {
     f.documents.get(documentKey).deletedAt = now;
     f.documents.get(documentKey).speechStorageKeys = ['speech/shared', 'speech/second'];
     const version = await f.repository.createVersion({
-      scopeKey: f.scopeKey, documentKey, html: '<p>old</p>', content: 'old', embedding,
+      scopeKey: f.scopeKey, documentKey, content: 'old', embedding,
     });
     const audio = await f.repository.createAudioVersion!({ key: newId(), scopeKey: f.scopeKey, documentKey, sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: now, storageKey: 'audio/version.mp3', mimeType: 'audio/mpeg', sizeBytes: 10, durationMs: 100, includeTitle: false, includeCode: false, createdByKey: newId(), createdAt: now });
+    const summary = await f.repository.createSummary!({ key: newId(), scopeKey: f.scopeKey, documentKey, summary: 'Saved summary', style: 'brief', sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: now, createdByKey: newId(), createdAt: now });
+    const summaryAudio = { key: newId(), scopeKey: f.scopeKey, documentKey, summaryKey: summary.key, storageKey: 'audio/summary.mp3', mimeType: 'audio/mpeg' as const, sizeBytes: 10, durationMs: 100, createdByKey: newId(), createdAt: now };
+    f.summaryAudio.set(summaryAudio.key, summaryAudio);
     const calls: string[] = [];
     const originalDelete = f.repository.deleteDocument;
     f.repository.deleteDocument = async (key) => { calls.push('metadata'); await originalDelete(key); };
@@ -1026,10 +1296,12 @@ describe('Content runtime', () => {
     storage.delete = async () => { calls.push('storage'); };
     const deleted = await runContentTool('document.delete', { documentKeys: [documentKey], deleteVersions: true, deleteShares: true }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
     expect(deleted.results[0]?.success).toBe(true);
-    expect(calls.filter((call) => call === 'storage').length).toBe(5);
+    expect(calls.filter((call) => call === 'storage').length).toBe(6);
     expect(calls.at(-1)).toBe('metadata');
     expect(f.versions.has(version.key)).toBe(false);
     expect(f.audioVersions.has(audio.key)).toBe(false);
+    expect(f.summaries.has(summary.key)).toBe(false);
+    expect(f.summaryAudio.has(summaryAudio.key)).toBe(false);
   });
 
   test('hides a pending document deletion after metadata commit failure and finishes on retry', async () => {
@@ -1068,7 +1340,7 @@ describe('Content runtime', () => {
     const f = fixture('owner');
     const documentKey = f.addDocument();
     f.documents.get(documentKey).deletedAt = now;
-    const version = await f.repository.createVersion({ scopeKey: f.scopeKey, documentKey, html: '<p>old</p>', content: 'old', embedding });
+    const version = await f.repository.createVersion({ scopeKey: f.scopeKey, documentKey, content: 'old', embedding });
     let storageDeletes = 0;
     const storage: any = { async upload() { return { storageKey: '' }; }, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; }, async delete() { storageDeletes += 1; } };
     const deleted = await runContentTool('document.delete-version', { versionKeys: [version.key] }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
@@ -1086,6 +1358,9 @@ describe('Content runtime', () => {
     const doomedKey = f.addDocument('Doomed');
     f.documents.get(doomedKey).folderKey = childKey;
     f.documents.get(doomedKey).deletedAt = now;
+    const doomedSummary = await f.repository.createSummary!({ key: newId(), scopeKey: f.scopeKey, documentKey: doomedKey, summary: 'Doomed summary', style: 'brief', sourceContentHash: 'a'.repeat(64), sourceTitle: 'Doomed', sourceDocumentUpdatedAt: now, createdByKey: newId(), createdAt: now });
+    const doomedAudio = { key: newId(), scopeKey: f.scopeKey, documentKey: doomedKey, summaryKey: doomedSummary.key, storageKey: 'audio/doomed-summary.mp3', mimeType: 'audio/mpeg' as const, sizeBytes: 10, durationMs: 100, createdByKey: newId(), createdAt: now };
+    f.summaryAudio.set(doomedAudio.key, doomedAudio);
     const outsideKey = newId();
     f.folders.set(outsideKey, { key: outsideKey, scopeKey: f.scopeKey, name: 'Outside', embedding, createdAt: now, updatedAt: now });
     const movableKey = f.addDocument('Movable');
@@ -1113,6 +1388,8 @@ describe('Content runtime', () => {
     expect(attempted.every((item) => item.success === false)).toBe(true);
     expect(f.shares.size).toBe(0);
     expect(f.versions.size).toBe(0);
+    expect(f.summaries.has(doomedSummary.key)).toBe(false);
+    expect(f.summaryAudio.has(doomedAudio.key)).toBe(false);
     expect(f.documents.get(movableKey).folderKey).toBe(outsideKey);
   });
 
@@ -1261,20 +1538,24 @@ describe('Content runtime', () => {
     expect(events.every((event: any) => typeof event.invocationKey === 'string')).toBe(true);
   });
 
-  test('enhances supplied text without persistence', async () => {
-    const f = fixture('viewer');
+  test('enhances a document through Nova Lite and persists replacement content', async () => {
+    const f = fixture('moderator');
+    const documentKey = f.addDocument('This are teh text.');
     let call: { action?: string; input?: any } = {};
-    const output = await runContentTool('enhance', { content: 'This are teh text.' }, f.context, {
+    const output = await runContentTool('document.enhance', { documentKeys: [documentKey], mode: 'replace' }, f.context, {
       repository: f.repository,
       runAction: async (action, input) => {
+        if (action === 'document-embed') return documentEmbed(input as { name: string; content: string }, { embed: async () => embedding, dimensions: EMBEDDING_DIMENSIONS });
         call = { action, input };
         return { text: '```text\nThis is the text.\n```' };
       },
     });
-    expect(output).toEqual({ content: 'This is the text.' });
+    expect(output.results[0]).toMatchObject({ success: true, data: { documentKey, text: 'This is the text.', persistedDocumentKey: documentKey } });
     expect(call.action).toBe('enhance');
+    expect(call.input.systemPrompt).toContain('collapse excessive blank lines');
+    expect(call.input.systemPrompt).toContain('readable sections');
     expect(call.input.options).toMatchObject({ temperature: 0.1, maxTokens: 256 });
-    expect(f.patches).toHaveLength(0);
+    expect(f.documents.get(documentKey).content).toBe('This is the text.');
   });
 
   test('executes one authorized valid behavior path for every registered tool', async () => {
@@ -1304,22 +1585,25 @@ describe('Content runtime', () => {
         scanDocument: async () => ({ documentKey: newId(), content: 'Scanned body', storageKeys: ['scan/page-01.jpg'] }),
         bookRuntime: { create: async () => newId(), write: async () => {} },
         runAction: async (action: string, input: any) => {
-          if (action === 'ask' || action === 'enhance' || action === 'translate' || action === 'reason' || action === 'deep-reason') return { text: 'Generated text' };
-          if (action === 'speak') return { audio: new Uint8Array([1]), mimeType: 'audio/mpeg' };
-          if (action === 'document-generate-html') return documentGenerateHtml(input);
-          if (action === 'document-generate-content') return documentGenerateContent(input);
+          if (action === 'ask' || action === 'enhance' || action === 'translate' || action === 'reason' || action === 'deep-reason' || action === 'document-summarize') return { text: 'Generated text' };
+          if (action === 'document-topics') return { text: '{"topics":["Source"]}' };
+          if (action === 'speak' || action === 'generate-speech') return { audio: new Uint8Array([1]), mimeType: 'audio/mpeg' };
+          if (action === 'document-cleanup') return { content: input.text };
           if (action === 'document-embed') return documentEmbed(input, { embed: async () => embedding, dimensions: EMBEDDING_DIMENSIONS });
           throw new Error(`Unexpected action ${action}`);
         },
         searchQueries: {
           async get({ actorKey, scopeKey, normalizedQuery }: any) { return searchRows.get(`${actorKey}:${scopeKey}:${normalizedQuery}`) ?? null; },
-          async record(value: any) { const identity = `${value.actorKey}:${value.scopeKey}:${value.normalizedQuery}`; const old = searchRows.get(identity); searchRows.set(identity, { output: value.output, query: value.query, normalizedQuery: value.normalizedQuery, searchedAt: value.now, count: (old?.count ?? 0) + 1 }); },
-          async list({ actorKey, scopeKey, limit }: any) { return [...searchRows.entries()].filter(([key]) => key.startsWith(`${actorKey}:${scopeKey}:`)).map(([, value]) => ({ query: value.query, normalizedQuery: value.normalizedQuery, searchedAt: value.searchedAt, count: value.count })).slice(0, limit); },
+          async record(value: any) { const identity = `${value.actorKey}:${value.scopeKey}:${value.normalizedQuery}`; const old = searchRows.get(identity); searchRows.set(identity, { output: value.output, query: value.query, normalizedQuery: value.normalizedQuery, contextDomain: value.contextDomain, searchedAt: value.now, usageCount: (old?.usageCount ?? 0) + 1 }); },
+          async list({ actorKey, scopeKey, limit }: any) { return [...searchRows.entries()].filter(([key]) => key.startsWith(`${actorKey}:${scopeKey}:`)).map(([, value]) => ({ query: value.query, normalizedQuery: value.normalizedQuery, contextDomain: value.contextDomain, searchedAt: value.searchedAt, usageCount: value.usageCount, documents: value.output?.result?.documents ?? [] })).slice(0, limit); },
+          async remove({ actorKey, scopeKey, normalizedQuery }: any) { return searchRows.delete(`${actorKey}:${scopeKey}:${normalizedQuery}`); },
         },
+        mergeAudio: async () => new Uint8Array([1]),
+        audioDuration: () => 100,
+        signAudioUrl: async (key: string) => `https://audio.example/${key}`,
       };
       let input: any;
-       if (name === 'enhance') input = { content: 'Improve teh wording.' };
-       else if (name === 'book.create-context') input = { scopeKey: f.scopeKey, topic: 'Useful systems', goal: 'Build a durable practice', audience: 'Curious beginners', tone: 'Warm and direct', length: 'short', language: 'English' };
+       if (name === 'book.create-context') input = { scopeKey: f.scopeKey, topic: 'Useful systems', goal: 'Build a durable practice', audience: 'Curious beginners', tone: 'Warm and direct', length: 'short', language: 'English' };
        else if (name === 'book.write') input = { bookKey: newId(), scopeKey: f.scopeKey, topic: 'Useful systems', goal: 'Build a durable practice', audience: 'Curious beginners', tone: 'Warm and direct', length: 'short', language: 'English' };
       else if (name === 'folder.create') input = { folders: [{ scopeKey: f.scopeKey, name: 'Created' }] };
       else if (name === 'folder.find') input = { folderKeys: [f.folderKey] };
@@ -1333,11 +1617,24 @@ describe('Content runtime', () => {
       else if (name === 'folder.delete') { f.folders.get(childKey).deletedAt = now; input = { folderKeys: [childKey] }; }
       else if (name === 'document.parse') input = { file: { filename: 'notes.txt', mimeType: 'text/plain', sizeBytes: 4, bytes: new Uint8Array([1, 2, 3, 4]) }, scopeKey: f.scopeKey, folderKey: f.folderKey };
       else if (name === 'document.scan') input = { pages: [{ filename: 'page.jpg', mimeType: 'image/jpeg', sizeBytes: 4, bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]) }], scopeKey: f.scopeKey, folderKey: f.folderKey };
-      else if (name === 'document.create') input = { scopeKey: f.scopeKey, folderKey: f.folderKey, name: 'Created document', representation: { content: 'Created body' } };
+      else if (name === 'document.create') input = { scopeKey: f.scopeKey, folderKey: f.folderKey, name: 'Created document', content: 'Created body' };
       else if (name === 'document.find') input = { documentKeys: [documentKey], include: ['content'] };
       else if (name === 'document.list') input = { scopeKey: f.scopeKey, folderKey: f.folderKey };
        else if (name === 'document.read') input = { documentKeys: [documentKey], mode: 'content' };
        else if (name === 'document.list-audio-versions') input = { documentKeys: [documentKey] };
+       else if (name === 'document.audio.playback.update' || name === 'document.audio.playback.clear') {
+         const audio = await f.repository.createAudioVersion!({ key: newId(), scopeKey: f.scopeKey, documentKey, sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: now, storageKey: `audio/${name}.mp3`, mimeType: 'audio/mpeg', sizeBytes: 10, durationMs: 60_000, includeTitle: true, includeCode: false, createdByKey: newId(), createdAt: now });
+         input = name === 'document.audio.playback.update' ? { audioVersionKey: audio.key, playbackPositionMs: 10_000 } : { documentKey };
+       }
+       else if (name === 'document.list-summaries') input = { documentKeys: [documentKey] };
+        else if (name === 'document.find-summary') {
+         const summary = await f.repository.createSummary!({ key: newId(), scopeKey: f.scopeKey, documentKey, summary: 'Saved', style: 'brief', sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: now, createdByKey: newId(), createdAt: now });
+          input = { summaryKeys: [summary.key] };
+        }
+        else if (name === 'document.summary.audio.generate') {
+          const summary = await f.repository.createSummary!({ key: newId(), scopeKey: f.scopeKey, documentKey, summary: 'Saved audio summary', style: 'brief', sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: now, createdByKey: newId(), createdAt: now });
+          input = { summaryKeys: [summary.key], language: 'en-US' };
+        }
       else if (name === 'document.update') input = { updates: [{ documentKey, content: 'Updated body' }] };
       else if (name === 'document.rename') input = { renames: [{ documentKey, name: 'Renamed' }] };
       else if (name === 'document.move') input = { moves: [{ documentKey, targetScopeKey: f.scopeKey, targetFolderKey: siblingKey }] };
@@ -1356,17 +1653,21 @@ describe('Content runtime', () => {
       else if (name === 'document.create-version') input = { documentKeys: [documentKey], labels: { [documentKey]: 'Release' } };
       else if (name === 'document.find-version' || name === 'document.list-versions' || name === 'document.restore-version' || name === 'document.delete-version') {
         const current = f.documents.get(documentKey);
-        const version = await f.repository.createVersion({ scopeKey: f.scopeKey, documentKey, html: current.html, content: current.content, embedding: current.embedding });
+        const version = await f.repository.createVersion({ scopeKey: f.scopeKey, documentKey, content: current.content, embedding: current.embedding });
         if (name === 'document.find-version') input = { versionKeys: [version.key] };
         else if (name === 'document.list-versions') input = { documentKeys: [documentKey] };
         else if (name === 'document.restore-version') input = { restores: [{ documentKey, versionKey: version.key }] };
         else { current.deletedAt = now; input = { versionKeys: [version.key] }; }
       } else if (name === 'document.summarize') input = { documentKeys: [documentKey] };
+      else if (name === 'document.topics') input = { documentKey };
+      else if (name === 'document.enhance') input = { documentKeys: [documentKey] };
       else if (name === 'document.translate') input = { documentKeys: [documentKey], targetLanguage: 'French' };
       else if (name === 'document.rewrite') input = { rewrites: [{ documentKey, instruction: 'Improve clarity' }] };
       else if (name === 'scope.document.search') input = { scopeKey: f.scopeKey, query: 'source' };
       else if (name === 'scope.content.search') input = { scopeKey: f.scopeKey, query: 'source' };
       else if (name === 'scope.content.search-history') input = { scopeKey: f.scopeKey };
+      else if (name === 'scope.content.search-history.delete') input = { scopeKey: f.scopeKey, normalizedQuery: 'source' };
+      else if (name === 'content.neighbors') input = { documentKey };
       else input = { organizationKey: f.context.organizationKey, query: 'source' };
       const output: any = await runContentTool(name, input, f.context, dependencies);
       if (output.summary) expect(output.summary.failed, name).toBe(0);

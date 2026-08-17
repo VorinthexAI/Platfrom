@@ -1,6 +1,7 @@
 import type { BookService } from '@/lib/books/service';
 import type { EmailService } from '@/lib/email-inbox/service';
 import type { TravelService } from '@/lib/travel/service';
+import type { UserSettingsService } from '@/lib/user-settings/service';
 import {
   archiveCapabilities,
   ascendCapabilities,
@@ -20,6 +21,7 @@ export interface WorkspaceToolDependencies {
   travel?: TravelService;
   email?: EmailService;
   books?: BookService;
+  userSettings?: UserSettingsService;
 }
 
 function publicDefinition(capability: AssistantCapability) {
@@ -36,6 +38,7 @@ function publicDefinition(capability: AssistantCapability) {
         travel: dependencies.travel,
         email: dependencies.email,
         books: dependencies.books,
+        userSettings: dependencies.userSettings,
       };
       const result = await capability.execute(rawInput, context);
       if (result.kind !== 'continue') throw new Error(`Public workspace tool ${capability.definition.name} returned a UI-only result.`);
@@ -52,6 +55,6 @@ export const WORKSPACE_TOOL_DEFINITIONS = Object.freeze([
   ...ascendCapabilities,
 ].filter(({ definition }) => !new Set([
   'folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy',
-  'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.translate', 'document.list-versions', 'document.restore-version', 'document.download',
-  'image.search', 'email.thread.read',
+  'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.summary.audio.generate', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.enhance', 'document.translate', 'document.list-versions', 'document.restore-version', 'document.download',
+  'content.neighbors', 'scope.content.search-history.delete', 'image.search', 'email.thread.read',
 ]).has(definition.name)).map(publicDefinition));

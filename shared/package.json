@@ -43,9 +43,21 @@
       "react-native": "./packages/ui/components/file-viewer/file-viewer.mobile.tsx",
       "default": "./packages/ui/components/file-viewer/file-viewer.web.tsx"
     },
+    "./ui/loading-text": {
+      "react-native": "./packages/ui/components/loading-text/loading-text.mobile.tsx",
+      "default": "./packages/ui/components/loading-text/loading-text.web.tsx"
+    },
+    "./ui/search-history-pill": {
+      "react-native": "./packages/ui/components/search-history-pill/search-history-pill.mobile.tsx",
+      "default": "./packages/ui/components/search-history-pill/search-history-pill.web.tsx"
+    },
     "./ui/slider": {
       "react-native": "./packages/ui/components/slider/slider.mobile.tsx",
       "default": "./packages/ui/components/slider/slider.web.tsx"
+    },
+    "./ui/switch": {
+      "react-native": "./packages/ui/components/switch/switch.mobile.tsx",
+      "default": "./packages/ui/components/switch/switch.web.tsx"
     },
     "./ui/document-search": "./packages/ui/document-search.ts",
     "./ui/components": "./packages/ui/components.ts",
@@ -80,7 +92,9 @@
     "react": "19.2.3",
     "react-native": ">=0.86",
     "react-native-pdf": ">=7",
-    "react-native-safe-area-context": ">=5.7"
+    "react-native-reanimated": ">=4",
+    "react-native-safe-area-context": ">=5.7",
+    "react-native-webview": ">=13.16"
   },
   "devDependencies": {
     "typescript": "^5.9.3"

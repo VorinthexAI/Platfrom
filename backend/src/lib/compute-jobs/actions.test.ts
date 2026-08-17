@@ -28,14 +28,14 @@ describe('compute-dispatch action', () => {
     process.env.COMPUTE_ECS_SUBNETS = 'subnet-a,subnet-b';
     process.env.COMPUTE_ECS_SECURITY_GROUPS = 'sg-worker';
     let command: RunTaskCommand | undefined;
-    const result = await computeDispatch({ jobType: 'document-processing', jobKey: 'a'.repeat(64) }, {
+    const result = await computeDispatch({ jobType: 'image-hashing', jobKey: 'a'.repeat(64) }, {
       ecs: { async send(value) { command = value; return { tasks: [{ taskArn: 'task-arn' }], $metadata: {} }; } },
     });
     expect(result).toEqual({ taskArn: 'task-arn' });
     expect(command?.input).toMatchObject({
       cluster: 'cluster', taskDefinition: 'task-definition', launchType: 'FARGATE', count: 1,
       networkConfiguration: { awsvpcConfiguration: { subnets: ['subnet-a', 'subnet-b'], securityGroups: ['sg-worker'], assignPublicIp: 'ENABLED' } },
-      overrides: { containerOverrides: [{ name: 'document-worker', command: ['src/document-worker/index.ts'], environment: [{ name: 'DOCUMENT_PROCESSING_JOB_ID', value: 'a'.repeat(64) }] }] },
+      overrides: { containerOverrides: [{ name: 'document-worker', command: ['src/image-worker/index.ts'], environment: [{ name: 'IMAGE_HASHING_JOB_ID', value: 'a'.repeat(64) }] }] },
     });
     await computeDispatch({ jobType: 'image-hashing', jobKey: 'b'.repeat(64) }, {
       ecs: { async send(value) { command = value; return { tasks: [{ taskArn: 'image-task-arn' }], $metadata: {} }; } },
@@ -45,6 +45,6 @@ describe('compute-dispatch action', () => {
 
   test('rejects unregistered job types and arbitrary keys', async () => {
     await expect(computeDispatch({ jobType: 'arbitrary', jobKey: 'safe' } as never)).rejects.toThrow();
-    await expect(computeDispatch({ jobType: 'document-processing', jobKey: '../unsafe' })).rejects.toThrow();
+    await expect(computeDispatch({ jobType: 'image-hashing', jobKey: '../unsafe' })).rejects.toThrow();
   });
 });

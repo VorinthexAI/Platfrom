@@ -1,10 +1,11 @@
 import { aql } from 'arangojs';
+import { ZodError } from 'zod';
 import { closeDb, db } from './client';
 import { newId } from '@/lib/ids';
-import { getActionById, getActionBySlug, insertAction, updateAction, type Action } from './actions.node';
+import { getActionById, getActionBySlug, insertAction, updateAction, upsertActionByKey, type Action } from './actions.node';
 import { getProviderBySlug, insertProvider, updateProvider, type Provider } from './providers.node';
 import { getModelBySlug, insertModel, updateModel as updatePersistedModel, type Model } from './models.node';
-import { getModelActionById, getModelActionByPair, insertModelAction, modelActionSeedSchema, updateModelAction } from './model-actions.node';
+import { getModelActionById, getModelActionByPair, insertModelAction, listEnabledModelActionsByActionKey, modelActionSeedSchema, updateModelAction } from './model-actions.node';
 import { isArangoUniqueConstraintError } from './base';
 import { getModelProviderById, getModelProviderByPair, insertModelProvider, modelProviderSeedSchema, updateModelProvider, type ModelProvider } from './model-providers.node';
 import { getRootOrganization, insertOrganization, updateOrganization, type Organization } from './organizations.node';
@@ -1053,9 +1054,22 @@ async function migrateRetiredNovaSonicModel(): Promise<void> {
 
 async function upsertSeedAction(seed: (typeof SEEDED_ACTIONS)[number]): Promise<SeedResult> {
   const existingBySlug = await getActionBySlug(seed.slug);
-  const existingByKey = await getActionById(seed.key);
-  const existing = existingBySlug ?? existingByKey;
-  if (!existing) {
+  let existingByKey: Action | null = null;
+  let retiredKeyOwner = false;
+  try {
+    existingByKey = await getActionById(seed.key);
+  } catch (error) {
+    if (!(error instanceof ZodError)) throw error;
+    retiredKeyOwner = true;
+  }
+  if (!existingBySlug) {
+    if (retiredKeyOwner) {
+      await upsertActionByKey(seed);
+      for (const relation of await listEnabledModelActionsByActionKey(seed.key)) {
+        await updateModelAction(relation.key, { enabled: false });
+      }
+      return { collection: 'actions', key: seed.key, status: 'updated' };
+    }
     let key = existingByKey ? newId() : seed.key;
     try {
       await insertAction({ ...seed, key });
@@ -1077,8 +1091,8 @@ async function upsertSeedAction(seed: (typeof SEEDED_ACTIONS)[number]): Promise<
     handlerKey: seed.handlerKey,
     enabled: seed.enabled,
   };
-  await updateAction(existing.key, patch);
-  return { collection: 'actions', key: existing.key, status: 'updated' };
+  await updateAction(existingBySlug.key, patch);
+  return { collection: 'actions', key: existingBySlug.key, status: 'updated' };
 }
 
 async function upsertSeedProvider(seed: (typeof SEEDED_PROVIDERS)[number]): Promise<SeedResult> {

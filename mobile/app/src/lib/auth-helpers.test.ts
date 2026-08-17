@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { extractSessionTokens, firstNameFor, hasCompleteAuthContext, normalizeApiPath, normalizeAuthContext } from "./auth-helpers";
+import { extractSessionTokens, firstNameFor, hasCompleteAuthContext, languageForCountryCode, normalizeApiPath, normalizeAuthContext } from "./auth-helpers";
 
 describe("mobile auth helpers", () => {
   test("normalizes every request beneath the API version", () => {
@@ -32,7 +32,7 @@ describe("mobile auth helpers", () => {
 
   test("normalizes the me boundary and derives a greeting name", () => {
     const context = normalizeAuthContext({
-      user: { display_name: "Ada Lovelace" },
+      user: { display_name: "Ada Lovelace", country_code: "SE", settings: { archive: { showOnlyFavorites: true } } },
       org: { key: "org" },
       main_scope: { key: "scope" },
       content_execution: { agent_key: "agent" },
@@ -40,8 +40,20 @@ describe("mobile auth helpers", () => {
     expect(context.organization).toEqual({ key: "org" });
     expect(context.scope).toEqual({ key: "scope" });
     expect(context.contentExecution).toEqual({ agentKey: "agent" });
+    expect(context.user?.countryCode).toBe("SE");
+    expect(context.user?.settings.archive.showOnlyFavorites).toBe(true);
     expect(hasCompleteAuthContext(context)).toBe(true);
     expect(hasCompleteAuthContext({ ...context, contentExecution: null })).toBe(false);
     expect(firstNameFor(context.user)).toBe("Ada");
+  });
+
+  test("defaults missing Archive settings to showing all content", () => {
+    expect(normalizeAuthContext({ user: {} }).user?.settings.archive.showOnlyFavorites).toBe(false);
+  });
+
+  test("derives the user's likely language from their country code", () => {
+    expect(languageForCountryCode("SE")).toBe("Swedish");
+    expect(languageForCountryCode("ES")).toBe("Spanish");
+    expect(languageForCountryCode()).toBe("English");
   });
 });

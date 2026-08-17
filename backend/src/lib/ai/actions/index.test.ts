@@ -21,14 +21,13 @@ describe('action registry', () => {
       'traverse', 'read', 'insert', 'upsert', 'update', 'delete',
       'generate-image', 'edit-image', 'generate-video', 'edit-video', 'extend-video', 'analyze-video',
       'generate-speech', 'analyze-audio', 'generate-music', 'orchestrator-chat',
-      'document-validate', 'storage-upload', 'document-extract', 'document-generate-html',
-      'document-generate-content', 'document-embed', 'document-insert', 'enhance', 'translate', 'caption-image', 'describe-visual-identity',
+      'document-validate', 'storage-upload', 'document-extract', 'document-embed', 'document-insert', 'enhance', 'translate', 'caption-image', 'describe-visual-identity',
+      'document-cleanup', 'document-summarize', 'document-topics',
     ]);
     expect(ACTION_DEFINITIONS.filter((action) => action.modelPolicy === 'none').map((action) => action.id))
       .toEqual([
         'traverse', 'read', 'insert', 'upsert', 'update', 'delete',
-        'document-validate', 'storage-upload', 'document-extract', 'document-generate-html',
-        'document-generate-content', 'document-embed', 'document-insert',
+        'document-validate', 'storage-upload', 'document-extract', 'document-embed', 'document-insert',
       ]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'chat')?.models.map(({ model }) => model))
       .toEqual(['amazon.nova-pro', 'amazon.nova-lite']);
@@ -45,6 +44,12 @@ describe('action registry', () => {
       .toEqual([{ provider: 'aws-bedrock', model: 'amazon.nova-lite', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'caption-image')?.models)
       .toEqual([{ provider: 'openrouter', model: 'qwen.qwen3-vl-32b-instruct', priority: 100 }]);
+    expect(ACTION_DEFINITIONS.find((action) => action.id === 'document-cleanup')?.models)
+      .toEqual([{ provider: 'openrouter', model: 'qwen.qwen3-vl-32b-instruct', priority: 100 }]);
+    expect(ACTION_DEFINITIONS.find((action) => action.id === 'document-summarize')?.models)
+      .toEqual([{ provider: 'aws-bedrock', model: 'amazon.nova-lite', priority: 100 }]);
+    expect(ACTION_DEFINITIONS.find((action) => action.id === 'document-topics')?.models)
+      .toEqual([{ provider: 'aws-bedrock', model: 'amazon.nova-lite', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'describe-visual-identity')?.models)
       .toEqual([{ provider: 'openrouter', model: 'qwen.qwen3-vl-32b-instruct', priority: 100 }]);
   });

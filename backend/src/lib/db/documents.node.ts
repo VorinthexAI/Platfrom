@@ -4,7 +4,6 @@ import { db } from './client';
 import { createNodeHelpers, toArangoDoc, withArangoKey } from './base';
 import { documentExtensionSchema } from '@/lib/ai/document-processing/schemas';
 import { EMBEDDING_DIMENSIONS, currentEmbeddingBatchSchema, currentEmbeddingSchema, embedTexts } from '@/lib/embeddings';
-import { canonicalDocumentRepresentations } from '@/lib/ai/document-processing/representation';
 import { chunkDocumentContent, documentContentChunksSchema, documentEmbeddingTexts, documentSemanticHash } from '@/lib/ai/document-processing/chunking';
 
 export const DOCUMENTS_COLLECTION = 'documents';
@@ -17,7 +16,6 @@ export const documentSchema = z.object({
   name: z.string().trim().min(1),
   extension: documentExtensionSchema.optional(),
   mimeType: z.string().trim().min(1).optional(),
-  html: z.string().min(1).refine((value) => value.trim().length > 0, 'HTML must not be blank.'),
   storageKey: z.string().trim().min(1).optional(),
   sizeBytes: z.number().int().positive().optional(),
   content: z.string().trim().min(1),
@@ -29,6 +27,7 @@ export const documentSchema = z.object({
   _semanticChunkingSkipped: z.boolean().optional(),
   speechStorageKeys: z.array(z.string().trim().min(1)).optional(),
   sourceStorageKeys: z.array(z.string().trim().min(1)).max(12).optional(),
+  currentVersionKey: z.string().cuid().nullable().optional(),
   isFavorite: z.boolean().default(false),
   deletedAt: z.string().datetime().nullable().default(null),
   _internalDeletion: z.object({
@@ -51,10 +50,10 @@ export async function insertDocument(document: Document): Promise<Document> {
 }
 export const getDocumentById = helpers.getById;
 export async function upsertDocumentByKey(input: Omit<z.input<typeof documentSchema>, 'embedding' | 'contentChunks' | 'chunkEmbeddings'>): Promise<Document> {
-  const representations = canonicalDocumentRepresentations(input.html);
-  const contentChunks = chunkDocumentContent(representations.content);
+  const content = input.content.trim();
+  const contentChunks = chunkDocumentContent(content);
   const chunkEmbeddings = await embedTexts({ texts: documentEmbeddingTexts(input.name, contentChunks) });
-  const document = documentSchema.parse({ ...input, ...representations, contentChunks, embedding: chunkEmbeddings[0], chunkEmbeddings, semanticChunkCount: contentChunks.length, semanticContentHash: documentSemanticHash(representations.content) });
+  const document = documentSchema.parse({ ...input, content, contentChunks, embedding: chunkEmbeddings[0], chunkEmbeddings, semanticChunkCount: contentChunks.length, semanticContentHash: documentSemanticHash(content) });
   const result = await db.collection(DOCUMENTS_COLLECTION).save(toArangoDoc(document), { returnNew: true, overwriteMode: 'replace' });
   return documentSchema.parse(withArangoKey(result.new as Record<string, unknown>));
 }

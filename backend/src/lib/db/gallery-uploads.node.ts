@@ -14,6 +14,7 @@ export const galleryUploadSchema = z.object({
   mimeType: z.literal('image/jpeg'),
   sizeBytes: z.number().int().positive().max(20 * 1024 * 1024),
   storageKey: z.string().min(1),
+  processingMode: z.enum(['library', 'cover']).default('library'),
   status: galleryUploadStatusSchema,
   errorCode: z.string().nullable(),
   createdAt: z.string().datetime(),

@@ -13,8 +13,6 @@ suite('Content live E2E', () => {
   let toolNames: readonly string[];
   let outputSchemas: Record<string, { parse(value: unknown): unknown }>;
   let generateDocumentExport: any;
-  let documentGenerateHtml: any;
-  let documentGenerateContent: any;
   let documentEmbed: any;
   let ListObjectsV2Command: any;
   let DeleteObjectsCommand: any;
@@ -45,8 +43,6 @@ suite('Content live E2E', () => {
     runContentAgentTool = content.runContentAgentTool;
     toolNames = content.CONTENT_TOOL_NAMES;
     outputSchemas = content.contentToolOutputSchemas;
-    documentGenerateHtml = processing.documentGenerateHtml;
-    documentGenerateContent = processing.documentGenerateContent;
     documentEmbed = processing.documentEmbed;
     generateDocumentExport = exports.generateDocumentExport;
     s3 = s3Module.s3;
@@ -73,9 +69,12 @@ suite('Content live E2E', () => {
     const skillKeys = await (await db.query('FOR row IN agentSkills FILTER row.agentKey IN @agentKeys RETURN DISTINCT row.skillKey', { agentKeys })).all();
     const removals: Array<[string, string, Record<string, unknown>]> = [
       ['shares', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
+      ['documentSummaries', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
+      ['documentAudioVersions', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
       ['documentVersions', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
       ['documents', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
       ['folders', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
+      ['contentSearchQueries', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
       ['contentIdempotency', 'row.organizationKey == @organizationKey', { organizationKey }],
       ['agentMembers', 'row.organizationKey == @organizationKey', { organizationKey }],
       ['agentSkills', 'row.agentKey IN @agentKeys', { agentKeys }],
@@ -150,10 +149,10 @@ suite('Content live E2E', () => {
         },
       },
       runAction: async (action: string, input: any) => {
-        if (action === 'ask' || action === 'enhance' || action === 'translate' || action === 'reason' || action === 'deep-reason') return { text: `Generated ${action}: deterministic archive result.` };
+        if (action === 'ask' || action === 'enhance' || action === 'translate' || action === 'reason' || action === 'deep-reason' || action === 'document-summarize') return { text: `Generated ${action}: deterministic archive result.` };
+        if (action === 'document-topics') return { text: '{"topics":["Deterministic systems","Archive"]}' };
         if (action === 'speak' || action === 'generate-speech') return { audio: new TextEncoder().encode('deterministic audio'), mimeType: 'audio/mpeg', durationMs: 250 };
-        if (action === 'document-generate-html') return documentGenerateHtml(input, { logger: () => undefined });
-        if (action === 'document-generate-content') return documentGenerateContent(input, { logger: () => undefined });
+        if (action === 'document-cleanup') return { content: input.text };
         if (action === 'document-embed') return documentEmbed(input, { embed: async () => embedding, dimensions: 4096, logger: () => undefined });
         throw new Error(`Unexpected provider action: ${action}`);
       },
@@ -196,7 +195,6 @@ suite('Content live E2E', () => {
     outputSchemas['folder.list']!.parse(agentList);
     covered.add('folder.list');
 
-    expect((await call('enhance', { content: 'Improve teh note.' })).content).toContain('enhance');
     const bookInput = { scopeKey, topic: 'Deterministic systems', goal: 'Test the complete runtime', audience: 'Engineers', tone: 'Direct', length: 'short', language: 'English' } as const;
     const book = await call('book.create-context', bookInput);
     await call('book.write', { ...bookInput, bookKey: book.bookKey });
@@ -232,12 +230,12 @@ suite('Content live E2E', () => {
       scopeKey, folderKey: childFolderKey, idempotencyKey: `processing-${organizationKey}`,
     });
     const documentKey = processed.document.key;
-    expect(processingOrder).toEqual(['document.parse', 'document-validate', 'storage-upload', 'document-extract', 'document-generate-html', 'document-generate-content', 'document-embed', 'document-insert']);
+    expect(processingOrder).toEqual(['document.parse', 'document-validate', 'storage-upload', 'document-extract', 'document-cleanup', 'document-embed', 'document-insert']);
     const createdDocument = await call('document.create', {
-      scopeKey, folderKey: childFolderKey, name: 'Created note', representation: { content: 'Created directly through Content.' }, idempotencyKey: `created-${organizationKey}`,
+      scopeKey, folderKey: childFolderKey, name: 'Created note', content: 'Created directly through Content.', idempotencyKey: `created-${organizationKey}`,
     });
     expect(createdDocument.document.key).toBeString();
-    expect((await call('document.find', { documentKeys: [documentKey], include: ['html', 'content', 'embedding', 'folder', 'shares'] })).results[0].data.document.embedding).toHaveLength(4096);
+    expect((await call('document.find', { documentKeys: [documentKey], include: ['content', 'embedding', 'folder', 'shares'] })).results[0].data.document.embedding).toHaveLength(4096);
     expect((await call('document.list', { scopeKey, folderKey: childFolderKey, extensions: ['md'] })).documents.map((item: any) => item.key)).toContain(documentKey);
 
     const [{ Hono }, { createContentToolHandler }] = await Promise.all([import('hono'), import('@/api/content-tools')]);
@@ -273,7 +271,7 @@ suite('Content live E2E', () => {
     const apiObject = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: apiDocument.storageKey }));
     expect(Buffer.from(await apiObject.Body.transformToByteArray()).toString()).toBe(apiText);
 
-    for (const mode of ['content', 'html'] as const) expect((await call('document.read', { documentKeys: [documentKey], mode })).summary.failed).toBe(0);
+    expect((await call('document.read', { documentKeys: [documentKey], mode: 'content' })).summary.failed).toBe(0);
     const ephemeralAudio = await call('document.read', { documentKeys: [documentKey], mode: 'audio', startOffset: 2, includeTitle: true, includeCode: false });
     expect(ephemeralAudio.results[0].data.audio[0].url).toStartWith('data:audio/mpeg;base64,');
     const persistedAudio = await call('document.read', { documentKeys: [documentKey], mode: 'audio', persistAudio: true, idempotencyKey: `audio-${organizationKey}` });
@@ -286,14 +284,17 @@ suite('Content live E2E', () => {
     expect(audioRecord).not.toHaveProperty('documentVersionKey');
     const listedAudio = (await call('document.list-audio-versions', { documentKeys: [documentKey] })).results[0].data.audioVersions[0];
     expect(listedAudio).toMatchObject({ key: audioVersionKey, version: 1, current: true });
+    await call('document.audio.playback.update', { audioVersionKey, playbackPositionMs: 100 });
+    expect((await call('document.list-audio-versions', { documentKeys: [documentKey] })).results[0].data.audioVersions[0]).toMatchObject({ isCurrent: true, playbackPositionMs: 100 });
+    await call('document.audio.playback.clear', { documentKey });
+    expect((await call('document.list-audio-versions', { documentKeys: [documentKey] })).results[0].data.audioVersions[0].isCurrent).toBe(false);
     const signedAudio = await fetch(listedAudio.url);
     expect(signedAudio.ok).toBe(true);
     expect((await signedAudio.arrayBuffer()).byteLength).toBeGreaterThan(0);
 
     await call('document.update', { updates: [{ documentKey, content: 'Canonical updated body with semantic roadmap.', createVersion: true }] });
-    const canonical = (await call('document.find', { documentKeys: [documentKey], include: ['html', 'content', 'embedding'] })).results[0].data.document;
+    const canonical = (await call('document.find', { documentKeys: [documentKey], include: ['content', 'embedding'] })).results[0].data.document;
     expect(canonical.content).toContain('Canonical updated body');
-    expect(canonical.html).toContain('Canonical updated body');
     expect(canonical.embedding).toHaveLength(4096);
     expect((await call('document.list-audio-versions', { documentKeys: [documentKey] })).results[0].data.audioVersions[0].current).toBe(false);
     const updatedAudio = await call('document.read', { documentKeys: [documentKey], mode: 'audio', persistAudio: true, idempotencyKey: `audio-updated-${organizationKey}` });
@@ -315,10 +316,10 @@ suite('Content live E2E', () => {
     expect(JSON.stringify(listedShares)).not.toContain('tokenHash');
 
     const versionOne = (await call('document.create-version', { documentKeys: [documentKey], labels: { [documentKey]: 'Release one' } })).results[0].data.version;
-    expect(Array.isArray((await db.collection('documentVersions').document(versionOne.key)).content)).toBe(true);
+    expect(typeof (await db.collection('documentVersions').document(versionOne.key)).content).toBe('string');
     const versionTwo = (await call('document.create-version', { documentKeys: [documentKey], labels: { [documentKey]: 'Release two' }, atomic: true })).results[0].data.version;
     expect(versionTwo.version).toBeGreaterThan(versionOne.version);
-    expect((await call('document.find-version', { versionKeys: [versionOne.key], include: ['html', 'content', 'embedding'] })).results[0].data.version.embedding).toHaveLength(4096);
+    expect((await call('document.find-version', { versionKeys: [versionOne.key], include: ['content', 'embedding'] })).results[0].data.version.embedding).toHaveLength(4096);
     expect((await call('document.list-versions', { documentKeys: [documentKey], limit: 1 })).results[0].data.versions).toHaveLength(1);
     const restoredVersion = await call('document.restore-version', { restores: [{ documentKey, versionKey: versionOne.key, createBackupVersion: true }], atomic: true });
     expect(restoredVersion.results[0].data.document.key).toBe(documentKey);
@@ -331,16 +332,25 @@ suite('Content live E2E', () => {
     const copiedAudio = await call('document.read', { documentKeys: [copiedDocumentKey], mode: 'audio', persistAudio: true, idempotencyKey: `audio-copy-${organizationKey}` });
     const copiedAudioRecord = await db.collection('documentAudioVersions').document(copiedAudio.results[0].data.audioVersion.key);
 
-    for (const format of ['original', 'html', 'txt', 'md'] as const) {
+    for (const format of ['original', 'html', 'txt'] as const) {
       const download = await call('document.download', { documentKeys: [documentKey], format });
       expect(Buffer.from(download.results[0].data.content, 'base64').byteLength).toBeGreaterThan(0);
     }
-    const exports = await call('document.export', { exports: ['html', 'txt', 'md', 'pdf', 'docx'].map((format) => ({ documentKey, format })), atomic: true });
-    expect(exports.summary).toEqual({ requested: 5, succeeded: 5, failed: 0 });
-    expect(Buffer.from(exports.results[4].data.content, 'base64').subarray(0, 2).toString()).toBe('PK');
+    const exports = await call('document.export', { exports: [{ documentKey, format: 'txt' }], atomic: true });
+    expect(exports.summary).toEqual({ requested: 1, succeeded: 1, failed: 0 });
 
     expect((await call('document.summarize', { documentKeys: [documentKey, copiedDocumentKey], combine: true })).results[0].data.text).toContain('deterministic');
-    await call('document.summarize', { documentKeys: [documentKey], persist: true, idempotencyKey: `summary-${organizationKey}` });
+    const persistedSummary = await call('document.summarize', { documentKeys: [copiedDocumentKey], topic: 'systems', persist: true, idempotencyKey: `summary-${organizationKey}` });
+    const summaryKey = persistedSummary.results[0].data.summary.key;
+    expect((await call('document.list-summaries', { documentKeys: [copiedDocumentKey] })).results[0].data.summaries[0].key).toBe(summaryKey);
+    expect((await call('document.find-summary', { summaryKeys: [summaryKey] })).results[0].data.summary.summary).toContain('deterministic');
+    const summaryAudio = await call('document.summary.audio.generate', { summaryKeys: [summaryKey], voice: 'Matthew' });
+    expect(summaryAudio.results[0].data.audio).toMatchObject({ summaryKey, voice: 'Matthew', mimeType: 'audio/mpeg' });
+    expect((await call('document.topics', { documentKey })).topics).toEqual(['Deterministic systems', 'Archive']);
+    const enhancementPreview = await call('document.enhance', { documentKeys: [documentKey], mode: 'preview' });
+    expect(enhancementPreview.results[0].data.text).toContain('enhance');
+    const enhancementReplace = await call('document.enhance', { documentKeys: [documentKey], mode: 'replace', idempotencyKey: `enhance-replace-${organizationKey}` });
+    expect(enhancementReplace.results[0].data.persistedDocumentKey).toBe(documentKey);
     const translationPreview = await call('document.translate', { documentKeys: [documentKey], targetLanguage: 'French', mode: 'preview' });
     expect(translationPreview.results[0].data.text).toContain('deterministic');
     const translationCopy = await call('document.translate', { documentKeys: [documentKey], targetLanguage: 'French', mode: 'copy', idempotencyKey: `translate-copy-${organizationKey}` });
@@ -360,8 +370,8 @@ suite('Content live E2E', () => {
     const outsiderFolderKey = newId();
     const outsiderDocumentKey = newId();
     await save('folders', { _key: outsiderFolderKey, scopeKey: outsiderScopeKey, name: 'Private outsider', embedding, createdAt: now, updatedAt: now });
-    await save('documents', { _key: outsiderDocumentKey, scopeKey: outsiderScopeKey, folderKey: outsiderFolderKey, name: 'Forbidden source', extension: 'txt', mimeType: 'text/plain', storageKey: `content/${outsiderOrganizationKey}/${outsiderScopeKey}/${outsiderDocumentKey}/original.txt`, sizeBytes: 8, html: '<p>roadmap</p>', content: 'roadmap', embedding, createdAt: now, updatedAt: now });
-    const scopedSearch = await call('scope.document.search', { scopeKey, query: 'roadmap', sources: [{ type: 'scope', scopeKeys: [scopeKey] }, { type: 'project', projectKeys: [secondScopeKey] }, { type: 'folder', folderKeys: [rootFolderKey], includeDescendants: true }], include: ['snippet', 'content', 'html', 'folder', 'scoreBreakdown'] });
+    await save('documents', { _key: outsiderDocumentKey, scopeKey: outsiderScopeKey, folderKey: outsiderFolderKey, name: 'Forbidden source', extension: 'txt', mimeType: 'text/plain', storageKey: `content/${outsiderOrganizationKey}/${outsiderScopeKey}/${outsiderDocumentKey}/original.txt`, sizeBytes: 8, content: 'roadmap', embedding, createdAt: now, updatedAt: now });
+    const scopedSearch = await call('scope.document.search', { scopeKey, query: 'roadmap', sources: [{ type: 'scope', scopeKeys: [scopeKey] }, { type: 'project', projectKeys: [secondScopeKey] }, { type: 'folder', folderKeys: [rootFolderKey], includeDescendants: true }], include: ['snippet', 'content', 'folder', 'scoreBreakdown'] });
     expect(scopedSearch.results.some((item: any) => item.documentKey === documentKey)).toBe(true);
     const organizationSearch = await call('organization.document.search', { organizationKey, query: 'roadmap', sources: [{ type: 'scope', scopeKeys: [scopeKey, secondScopeKey, outsiderScopeKey] }], include: ['snippet', 'scope', 'scoreBreakdown'] });
     expect(organizationSearch.results.map((item: any) => item.documentKey)).toContain(secondDocument.document.key);
@@ -371,7 +381,17 @@ suite('Content live E2E', () => {
     const contentSearchReplay = await call('scope.content.search', { scopeKey, query: '  SEMANTIC   ROADMAP  ', minimumScore: 0.1 });
     expect(contentSearchReplay.cached).toBe(true);
     const contentSearchHistory = await call('scope.content.search-history', { scopeKey, limit: 8 });
-    expect(contentSearchHistory.history.some((item: any) => item.normalizedQuery === 'semantic roadmap')).toBe(true);
+    expect(contentSearchHistory.history).toContainEqual(expect.objectContaining({ normalizedQuery: 'semantic roadmap', contextDomain: 'content', usageCount: 2 }));
+    expect(await call('scope.content.search-history.delete', { scopeKey, normalizedQuery: 'semantic roadmap' })).toEqual({ normalizedQuery: 'semantic roadmap', deleted: true });
+    expect((await call('scope.content.search-history', { scopeKey, limit: 8 })).history.some((item: any) => item.normalizedQuery === 'semantic roadmap')).toBe(false);
+
+    const neighbors = await call('content.neighbors', { documentKey });
+    expect(neighbors.folders.length).toBeLessThanOrEqual(10);
+    expect(neighbors.documents.length).toBeLessThanOrEqual(10);
+    expect(neighbors.files.length).toBeLessThanOrEqual(10);
+    expect(neighbors.documents.every((item: any) => item.scopeKey === scopeKey && item.extension === undefined && item.key !== documentKey)).toBe(true);
+    expect(neighbors.files.every((item: any) => item.scopeKey === scopeKey && item.extension && item.key !== documentKey)).toBe(true);
+    expect(neighbors.folders.every((item: any) => item.scopeKey === scopeKey)).toBe(true);
 
     const copiedFolder = await call('folder.copy', { copies: [{ folderKey: childFolderKey, targetScopeKey: scopeKey, targetParentFolderKey: destinationFolderKey, newName: 'Copied subtree' }] });
     expect(copiedFolder.results[0].data).toMatchObject({ folder: { parentFolderKey: destinationFolderKey, name: 'Copied subtree', isFavorite: false }, folderCount: 1 });
@@ -399,6 +419,7 @@ suite('Content live E2E', () => {
     expect((await call('document.delete', { documentKeys: [copiedDocumentKey], deleteVersions: true, deleteShares: true })).summary.failed).toBe(0);
     expect(await (await db.query('RETURN DOCUMENT(documents, @key) == null', { key: copiedDocumentKey })).next()).toBe(true);
     expect(await (await db.query('RETURN DOCUMENT(documentAudioVersions, @key) == null', { key: copiedAudio.results[0].data.audioVersion.key })).next()).toBe(true);
+    expect(await (await db.query('RETURN DOCUMENT(documentSummaries, @key) == null', { key: summaryKey })).next()).toBe(true);
     await expect(s3.send(new GetObjectCommand({ Bucket: bucket, Key: copiedStorageKey }))).rejects.toBeDefined();
     await expect(s3.send(new GetObjectCommand({ Bucket: bucket, Key: copiedAudioRecord.storageKey }))).rejects.toBeDefined();
 
@@ -458,7 +479,7 @@ suite('Content live E2E', () => {
       expect(await temporary.collection('documentShares').exists()).toBe(false);
       const versions = await (await temporary.query('FOR version IN documentVersions SORT version._key RETURN version')).all();
       expect(versions).toHaveLength(55);
-      expect(versions.every((version: any) => version.html.includes('<p>') && !('json' in version) && version.embedding.length === 4096)).toBe(true);
+      expect(versions.every((version: any) => !('html' in version) && !('json' in version) && version.embedding.length === 4096)).toBe(true);
       const shareIndexes = await temporary.collection('shares').indexes();
       const versionIndexes = await temporary.collection('documentVersions').indexes();
       expect(shareIndexes.some((index: any) => index.unique && index.fields?.join(',') === 'tokenHash')).toBe(true);

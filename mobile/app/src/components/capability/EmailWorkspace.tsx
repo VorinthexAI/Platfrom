@@ -359,7 +359,7 @@ export function EmailWorkspace() {
         {permissions.canMutate ? <View style={[styles.replyDock, { paddingBottom: Math.max(insets.bottom, 12) }]}><Button disabled={Boolean(busy)} icon={<SendIcon size="sm" variant="inverse" />} onPress={openReply} size="lg" variant="primary">Draft reply</Button></View> : null}
       </View> : null}
 
-      {!loading && !loadError && connected ? <View style={[styles.assistantDock, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+      {!loading && !loadError && connected ? <View style={styles.assistantDock}>
         <CoreComposer
           accessibilityLabel="Ask Core about Signal"
           disabled={assistantBusy || workspaceBusy}
@@ -412,7 +412,7 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: palette.voidBlack },
   header: { minHeight: 64, paddingBottom: 8, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomWidth: 1, borderBottomColor: palette.hairline, backgroundColor: palette.page, zIndex: 4 },
   headerActions: { flexDirection: "row", alignItems: "center", gap: 8 },
-  assistantDock: { paddingHorizontal: spacing.md, paddingTop: 8, borderTopWidth: 1, borderTopColor: palette.hairline, backgroundColor: palette.page },
+  assistantDock: { backgroundColor: palette.page },
   assistantMessage: { color: palette.silver300, fontFamily: fonts.regular, fontSize: 12, lineHeight: 18 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 14, paddingHorizontal: spacing.xl },
   centerText: { maxWidth: 320, color: palette.silver300, fontFamily: fonts.regular, fontSize: 13, lineHeight: 20, textAlign: "center" },

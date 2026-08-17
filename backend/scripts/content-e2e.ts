@@ -3,7 +3,6 @@ import { connect } from 'node:net';
 
 const defaults: Record<string, string> = {
   CONTENT_E2E: 'true',
-  CONTENT_VERSION_CONTENT_ARRAY_ENABLED: 'true',
   ARANGO_URL: 'http://127.0.0.1:8529',
   ARANGO_DATABASE: 'content_e2e',
   ARANGO_USERNAME: 'root',

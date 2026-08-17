@@ -29,7 +29,7 @@ export const TextInput = forwardRef<NativeTextInput, TextInputProps>(function Te
 
 const styles = StyleSheet.create({
   input: {
-    backgroundColor: colors.page,
+    backgroundColor: colors.panel,
     borderColor: colors.border,
     borderRadius: radii.md,
     borderWidth: 1,

@@ -75,7 +75,7 @@ resource "aws_vpc_security_group_ingress_rule" "arango_from_early_app" {
 
 resource "aws_security_group" "document_worker" {
   name        = "${var.name_prefix}-document-worker-sg"
-  description = "Transient Fargate document processing tasks"
+  description = "Transient image compute"
   vpc_id      = module.network.vpc_id
   tags        = merge(local.tags, { Name = "${var.name_prefix}-document-worker-sg" })
 }
@@ -84,14 +84,6 @@ resource "aws_vpc_security_group_egress_rule" "document_worker_all" {
   security_group_id = aws_security_group.document_worker.id
   ip_protocol       = "-1"
   cidr_ipv4         = "0.0.0.0/0"
-}
-
-resource "aws_vpc_security_group_ingress_rule" "arango_from_document_worker" {
-  security_group_id            = module.network.graph_db_security_group_id
-  ip_protocol                  = "tcp"
-  from_port                    = 8529
-  to_port                      = 8529
-  referenced_security_group_id = aws_security_group.document_worker.id
 }
 
 resource "aws_vpc_security_group_ingress_rule" "job_redis_from_document_worker" {
@@ -141,12 +133,13 @@ resource "aws_iam_role_policy" "early_app_archive_processing" {
         Resource = [
           "${module.storage.s3_bucket_arn}/archive/*",
           "${module.storage.s3_bucket_arn}/content/*",
-          "${module.storage.s3_bucket_arn}/pending/document-processing/*"
+          "${module.storage.s3_bucket_arn}/pending/image-hashing/*",
+          "${aws_s3_bucket.textract_staging.arn}/textract/*"
         ]
       },
       {
         Effect   = "Allow"
-        Action   = ["textract:StartDocumentAnalysis", "textract:GetDocumentAnalysis", "textract:AnalyzeDocument"]
+        Action   = ["textract:StartDocumentTextDetection", "textract:GetDocumentTextDetection", "textract:DetectDocumentText"]
         Resource = ["*"]
       },
       {
@@ -222,9 +215,8 @@ resource "aws_iam_role_policy" "document_worker_runtime" {
       {
         Effect   = "Allow"
         Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
-        Resource = ["${module.storage.s3_bucket_arn}/content/*", "${module.storage.s3_bucket_arn}/pending/document-processing/*"]
-      },
-      { Effect = "Allow", Action = ["textract:StartDocumentAnalysis", "textract:GetDocumentAnalysis", "textract:AnalyzeDocument"], Resource = ["*"] }
+        Resource = ["${module.storage.s3_bucket_arn}/pending/image-hashing/*"]
+      }
     ]
   })
 }
@@ -247,27 +239,14 @@ resource "aws_ecs_task_definition" "document_worker" {
     name      = "document-worker"
     image     = "${module.storage.ecr_repository_url}:latest"
     essential = true
-    command   = ["src/document-worker/index.ts"]
+    command   = ["src/image-worker/index.ts"]
     environment = [
       { name = "NODE_ENV", value = "production" },
       { name = "AWS_REGION", value = var.aws_region },
-      { name = "ROLE", value = "document-worker" }
+      { name = "ROLE", value = "image-worker" }
     ]
-    healthCheck = {
-      command     = ["CMD-SHELL", "exit 0"]
-      interval    = 30
-      timeout     = 5
-      retries     = 3
-      startPeriod = 10
-    }
     secrets = concat([
       for key in [
-        "ARANGO_DATABASE",
-        "ARANGO_ROOT_PASSWORD",
-        "ARANGO_URL",
-        "ARANGO_USERNAME",
-        "OPENROUTER_API_KEY",
-        "ORCHESTRATION_CREDENTIALS_MASTER_KEY",
         "S3_BUCKET"
       ] : { name = key, valueFrom = "${local.ssm_path}/${key}" }
       ], [
@@ -310,4 +289,53 @@ resource "aws_eip" "early_app" {
 resource "aws_eip_association" "early_app" {
   allocation_id = aws_eip.early_app.id
   instance_id   = aws_instance.early_app.id
+}
+resource "aws_s3_bucket" "textract_staging" {
+  provider = aws.eu_west_1
+  bucket   = "${var.s3_bucket_name}-textract-eu-west-1"
+
+  tags = merge(local.tags, { Name = "${var.name_prefix}-textract-staging" })
+}
+
+resource "aws_s3_bucket_public_access_block" "textract_staging" {
+  provider = aws.eu_west_1
+  bucket   = aws_s3_bucket.textract_staging.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "textract_staging" {
+  provider = aws.eu_west_1
+  bucket   = aws_s3_bucket.textract_staging.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "textract_staging" {
+  provider = aws.eu_west_1
+  bucket   = aws_s3_bucket.textract_staging.id
+
+  rule {
+    id     = "expire-textract-inputs"
+    status = "Enabled"
+
+    filter {
+      prefix = "textract/"
+    }
+
+    expiration {
+      days = 1
+    }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 1
+    }
+  }
 }

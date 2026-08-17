@@ -11,8 +11,8 @@ const timestamp = '2026-07-22T00:00:00.000Z';
 
 function harness() {
   const folder = { key: folderKey, scopeKey, name: 'Folder', embedding: [], deletedAt: null as string | null, createdAt: timestamp, updatedAt: timestamp };
-  const document = { key: documentKey, scopeKey, folderKey, name: 'Doc', extension: 'txt' as const, mimeType: 'text/plain', html: '<p>x</p>', storageKey: 'x', sizeBytes: 1, content: 'x', embedding: [1], deletedAt: null as string | null, createdAt: timestamp, updatedAt: timestamp };
-  const version = { key: versionKey, scopeKey, documentKey, version: 1, html: '<p>x</p>', content: 'x', embedding: [1], deletedAt: null as string | null, createdAt: timestamp };
+  const document = { key: documentKey, scopeKey, folderKey, name: 'Doc', extension: 'txt' as const, mimeType: 'text/plain', storageKey: 'x', sizeBytes: 1, content: 'x', embedding: [1], deletedAt: null as string | null, createdAt: timestamp, updatedAt: timestamp };
+  const version = { key: versionKey, scopeKey, documentKey, version: 1, content: 'x', embedding: [1], deletedAt: null as string | null, createdAt: timestamp };
   const share = { key: shareKey, scopeKey, documentKey, permission: 'read' as const, tokenHash: 'a'.repeat(64), deletedAt: null as string | null, createdAt: timestamp, updatedAt: timestamp };
   const mutate = <T extends { deletedAt: string | null }>(node: T, deletedAt: string | null) => async () => Object.assign(node, { deletedAt });
   const dependencies = {
