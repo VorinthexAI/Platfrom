@@ -1462,7 +1462,6 @@ export function GalleryWorkspace() {
         </> : null}
         {activeSheet === "imageActions" && selectedImage ? <View style={styles.actionMenu}>
           <BottomSheetItem onPress={openImageEdit} style={styles.sheetAction} variant="secondary">Edit</BottomSheetItem>
-          <BottomSheetItem onPress={() => void openVisualIdentities("browse")} style={styles.sheetAction} variant="secondary">Visual identities</BottomSheetItem>
           {activeCollection ? <BottomSheetItem onPress={() => void findSimilar()} style={styles.sheetAction} variant="secondary">Find similar image</BottomSheetItem> : null}
           <BottomSheetItem onPress={() => pushSheet("confirmDeleteImage")} style={styles.sheetAction} variant="secondary">Delete image</BottomSheetItem>
         </View> : null}
@@ -1672,7 +1671,7 @@ const styles = StyleSheet.create({
   formInput: { minHeight: 42, fontSize: 14 },
   detail: { flex: 1, gap: 8 },
   detailMenuRow: { minHeight: 40, flexDirection: "row", alignItems: "center", justifyContent: "flex-end" },
-  detailImage: { flex: 1, width: "100%", borderRadius: radii.lg, backgroundColor: palette.voidBlack },
+  detailImage: { flex: 1, width: "100%", overflow: "hidden", borderRadius: radii.lg, backgroundColor: palette.voidBlack },
   detailActions: { flexDirection: "row", gap: 8 },
   detailActionsCompact: { flexDirection: "column" },
   detailAction: { flex: 1 },

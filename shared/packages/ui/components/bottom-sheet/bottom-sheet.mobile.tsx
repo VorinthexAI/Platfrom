@@ -257,8 +257,6 @@ export function BottomSheet({
             mutation && styles.mutationSheet,
             Platform.OS === "android" && styles.androidSheet,
             {
-              bottom: mutation ? androidBottomInset : undefined,
-              height: mutation ? windowHeight - insets.top - androidBottomInset : undefined,
               top: mutation ? insets.top : undefined,
               paddingBottom: Platform.OS === "android" ? 16 : Math.max(insets.bottom, 16),
               transform: [{ translateY }],

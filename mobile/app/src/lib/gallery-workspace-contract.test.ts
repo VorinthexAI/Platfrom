@@ -3,6 +3,7 @@ import { expect, test } from "bun:test";
 const source = await Bun.file(new URL("../components/capability/GalleryWorkspace.tsx", import.meta.url)).text();
 const captureSource = await Bun.file(new URL("../components/capability/GalleryCaptureModal.tsx", import.meta.url)).text();
 const cameraSource = await Bun.file(new URL("../components/capability/BrandedCameraModal.tsx", import.meta.url)).text();
+const bottomSheetSource = await Bun.file(new URL("../../../../shared/packages/ui/components/bottom-sheet/bottom-sheet.mobile.tsx", import.meta.url)).text();
 
 test("keeps image similarity collection-scoped and outside the image footer", () => {
   const footer = source.slice(source.indexOf('const sheetFooter ='), source.indexOf('return (', source.indexOf('const sheetFooter =')));
@@ -37,6 +38,7 @@ test("provides edit and confirmed delete flows for images and collections", () =
   const imageMenuStart = source.indexOf('activeSheet === "imageActions" && selectedImage');
   const imageMenu = source.slice(imageMenuStart, source.indexOf('activeSheet === "imageEdit"', imageMenuStart));
   expect(imageMenu).not.toContain('toggleFavorite');
+  expect(imageMenu).not.toContain('openVisualIdentities');
 });
 
 test("uses a singleton collection cache without root search or filtering", () => {
@@ -59,6 +61,10 @@ test("only lifts Core for its own focus and uses distinct image sheet presentati
   expect(source).toContain('accessibilityLabel="Open image actions"');
   expect(source).toContain('footer={<Button onPress={closeSheet} size="lg" variant="secondary">Close</Button>}');
   expect(source).toContain('if (activeSheetRef.current === "imageActions") goBackSheet(); else closeSheet();');
+  expect(source).toContain('detailImage: { flex: 1, width: "100%", overflow: "hidden", borderRadius: radii.lg');
+  expect(bottomSheetSource).toContain('mutationSheet: {\n    bottom: 0');
+  expect(bottomSheetSource).not.toContain('bottom: mutation ? androidBottomInset');
+  expect(bottomSheetSource).not.toContain('height: mutation ? windowHeight - insets.top - androidBottomInset');
 });
 
 test("keeps collection forms to name and favorite state", () => {
