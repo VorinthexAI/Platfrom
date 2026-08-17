@@ -3432,7 +3432,7 @@ export function KnowledgeWorkspace() {
         : <Button disabled={loadingAudioVersions} onPress={() => void generateAudioVersion()} size="lg" variant="primary">Generate audio</Button>}
       {close(false)}
     </>;
-    if (activeSheet === "searchHistory") return close(historyLoading || Boolean(removingHistoryQuery));
+    if (activeSheet === "searchHistory") return close(historyLoading);
     if (activeSheet === "folderDetails") return <>
       <Button disabled={!folderDetailsName.trim()} onPress={() => void submitFolderDetails()} size="lg" variant="primary">Save</Button>
       {close(false)}
