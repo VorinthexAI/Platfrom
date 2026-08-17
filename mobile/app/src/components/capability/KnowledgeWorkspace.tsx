@@ -65,6 +65,7 @@ import {
   enhanceContentDocument,
   findContentNeighbors,
   findContentDocumentSummary,
+  findContentDocumentVersion,
   generateContentDocumentAudio,
   generateContentDocumentSummaryAudio,
   getContentContext,
@@ -1285,6 +1286,7 @@ export function KnowledgeWorkspace() {
       const version = await createContentDocumentVersion(documentKey, action === "enhance" ? "Enhanced version" : `${targetLanguage} translation`, generated.text, action === "enhance" ? "enhancement" : "translation");
       setPendingDocumentVersionLabel(undefined);
       setVersions((history) => [version, ...history.filter(({ key }) => key !== version.key)]);
+      await openDocumentVersion(version, generated.text);
       showToast({ title: action === "enhance" ? "Enhanced version ready" : "Translated version ready" });
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : action === "enhance" ? "The document could not be enhanced." : "The document could not be translated.";
@@ -1535,19 +1537,33 @@ export function KnowledgeWorkspace() {
     }
   };
 
-  const openDocumentVersion = async (version: ContentDocumentVersion) => {
-    if (dirty.current || saveInFlight.current || saveState !== "saved") return;
+  const openDocumentVersion = async (version: ContentDocumentVersion, generatedContent?: string) => {
+    if (dirty.current || saveInFlight.current || saveState !== "saved") return false;
     setOpeningDocumentKey(version.documentKey);
     setError(undefined);
     closeSheet();
+    persistNarrationPosition();
+    stopNarration();
     try {
-      const restored = await restoreContentDocumentVersion(version.documentKey, version.key, false);
-      replaceDocument(restored);
-      replaceCachedContentDocumentDetail(queryClient, contentContext, restored);
-      await invalidateContentDocumentTopics(queryClient, contentContext, restored.key);
-      await openArchiveDocument(restored);
+      const [restored, content] = await Promise.all([
+        restoreContentDocumentVersion(version.documentKey, version.key, false),
+        generatedContent ? Promise.resolve(generatedContent) : findContentDocumentVersion(version.key).then((selected) => selected.content!),
+      ]);
+      const opened = { ...restored, content };
+      editorSession.current += 1;
+      replaceDocument(opened);
+      replaceCachedContentDocumentDetail(queryClient, contentContext, opened);
+      applyRemoteDocument(opened);
+      setSelectedDocument(opened);
+      selectedDocumentKeyRef.current = opened.key;
+      setSelectedSummary(undefined);
+      setDocumentSearchQuery("");
+      setEditorEditing(false);
+      void invalidateContentDocumentTopics(queryClient, contentContext, opened.key);
+      return true;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The version could not be opened.");
+      return false;
     } finally {
       setOpeningDocumentKey(undefined);
     }

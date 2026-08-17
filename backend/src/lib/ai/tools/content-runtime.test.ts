@@ -303,8 +303,9 @@ describe('Content runtime', () => {
 
     const currentVersion = await runContentTool('document.create-version', { documentKeys: [rootKey] }, f.context, { repository: f.repository, embed: async () => embedding });
     expect(f.documents.get(rootKey).currentVersionKey).toBe(currentVersion.results[0]?.data?.version.key);
-    await runContentTool('document.restore-version', { restores: [{ documentKey: rootKey, versionKey: versioned.results[0]?.data?.version.key, createBackupVersion: false }] }, f.context, { repository: f.repository, embed: async () => embedding });
+    await runContentTool('document.restore-version', { restores: [{ documentKey: rootKey, versionKey: versioned.results[0]?.data?.version.key, createBackupVersion: false }] }, f.context, { repository: f.repository, embed: async () => { throw new Error('restore should reuse version semantics'); } });
     expect(f.documents.get(rootKey).currentVersionKey).toBe(versioned.results[0]?.data?.version.key);
+    expect(f.documents.get(rootKey).content).toBe('Generated version');
   });
 
   test('rejects cross-scope document moves instead of performing a partial transfer', async () => {
@@ -860,7 +861,7 @@ describe('Content runtime', () => {
     const created = await runContentTool('document.create-version', { documentKeys: [documentKey] }, f.context, dependencies);
     expect(created.results[0]?.success).toBe(true);
     expect([...f.versions.values()].at(-1)?.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
-    expect(embeddedTexts).toContain('Legacy body');
+    expect(embeddedTexts).toContain('Notes\n\nLegacy body');
 
     f.documents.get(documentKey).embedding = legacy;
     const updated = await runContentTool('document.update', { updates: [{ documentKey, content: 'Updated body', createVersion: true }] }, f.context, dependencies);

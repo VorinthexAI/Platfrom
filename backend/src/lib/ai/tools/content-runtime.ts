@@ -901,9 +901,25 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
     name === source.name && hasCurrentSemantics(source)
       ? Promise.resolve({ embedding: source.embedding, contentChunks: source.contentChunks!, chunkEmbeddings: source.chunkEmbeddings!, semanticChunkCount: source.contentChunks!.length, semanticContentHash: createHash('sha256').update(source.content).digest('hex') })
       : generatedSemantics(name, source.content, source.key, source.scopeKey);
-  const currentVersionSemantics = async (source: Pick<DocumentVersion, 'content' | 'key' | 'scopeKey'> | Pick<Document, 'content' | 'key' | 'scopeKey'>, label?: string) => {
-    const { embedding, chunkEmbeddings, semanticChunkCount, semanticContentHash } = await generatedSemantics(label ?? '', source.content, source.key, source.scopeKey);
+  const currentVersionSemantics = async (source: Pick<DocumentVersion, 'content' | 'key' | 'scopeKey'> | Pick<Document, 'content' | 'key' | 'scopeKey'>, documentName: string) => {
+    const { embedding, chunkEmbeddings, semanticChunkCount, semanticContentHash } = await generatedSemantics(documentName, source.content, source.key, source.scopeKey);
     return { embedding, chunkEmbeddings, semanticChunkCount, semanticContentHash };
+  };
+  // Version snapshots already carry aligned semantics, so restoring one should not repeat a model call.
+  const restoredVersionSemantics = (version: DocumentVersion, documentName: string) => {
+    const contentChunks = chunkDocumentContent(version.content);
+    if (!isCurrentEmbedding(version.embedding)
+      || version.chunkEmbeddings?.length !== contentChunks.length
+      || !version.chunkEmbeddings.every(isCurrentEmbedding)) {
+      return generatedSemantics(documentName, version.content, version.key, version.scopeKey);
+    }
+    return Promise.resolve({
+      embedding: version.embedding,
+      contentChunks,
+      chunkEmbeddings: version.chunkEmbeddings,
+      semanticChunkCount: contentChunks.length,
+      semanticContentHash: createHash('sha256').update(version.content).digest('hex'),
+    });
   };
   const persistGenerated = async (source: Document, text: string, mode: 'copy' | 'replace', suffix: string) => {
     const finalName = mode === 'copy' ? `${source.name} (${suffix})` : source.name;
@@ -913,7 +929,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         scopeKey: source.scopeKey,
         documentKey: source.key,
         content: source.content,
-        ...await currentVersionSemantics(source),
+        ...await currentVersionSemantics(source, source.name),
       });
       try {
         await repo.updateDocument(source.key, { ...transformed, currentVersionKey: null, updatedAt: now() });
@@ -1639,7 +1655,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
               scopeKey: current.scopeKey,
               documentKey: current.key,
               content: current.content,
-              ...await currentVersionSemantics(current),
+              ...await currentVersionSemantics(current, current.name),
             });
           }
           try {
@@ -1729,7 +1745,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
                   documentKey: key,
                   label: version.label,
                    content: version.content,
-                  ...await currentVersionSemantics(version, version.label),
+                  ...await currentVersionSemantics(version, name),
                 });
                 insertedVersionKeys.push(created.key);
               }
@@ -2002,7 +2018,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             type: input.types?.[key],
             label: input.labels?.[key],
             content,
-            ...await currentVersionSemantics({ ...current, content }, input.labels?.[key]),
+            ...await currentVersionSemantics({ ...current, content }, current.name),
           });
           if (content === current.content) await mutationRepository.updateDocument(current.key, { currentVersionKey: version.key });
           return { version: versionView(version) };
@@ -2089,14 +2105,14 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
               scopeKey: current.scopeKey,
               documentKey: current.key,
               content: current.content,
-              ...await currentVersionSemantics(current),
+              ...await currentVersionSemantics(current, current.name),
             });
           }
           try {
             const restored = await mutationRepository.updateDocument(current.key, {
               content: version.content,
               currentVersionKey: version.key,
-              ...await generatedSemantics(current.name, version.content, current.key, current.scopeKey),
+              ...await restoredVersionSemantics(version, current.name),
               updatedAt: now(),
             });
             return { document: documentView(restored) };
