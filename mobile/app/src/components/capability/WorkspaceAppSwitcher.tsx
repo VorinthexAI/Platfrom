@@ -31,7 +31,7 @@ export function WorkspaceAppSwitcher({ active, onBeforeSelect, trigger = "identi
   return (
     <>
       {trigger === "back"
-        ? <Button accessibilityLabel={`Open app selector. Current app: ${selected.name}`} contentMode="raw" onPress={() => setOpen(true)} size="sm" variant="icon"><ChevronLeftIcon size="sm" /></Button>
+        ? <Button accessibilityLabel={`Open app selector. Current app: ${selected.name}`} contentMode="raw" onPress={() => setOpen(true)} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button>
         : <Button accessibilityLabel={`Open app selector. Current app: ${selected.name}`} contentMode="raw" onPress={() => setOpen(true)} size="md" style={styles.trigger} variant="ghost">
           <View style={styles.identity}>
             <ChromeIcon glow={0.55} size={36} source={capabilityIconSource[selected.slug]} />
