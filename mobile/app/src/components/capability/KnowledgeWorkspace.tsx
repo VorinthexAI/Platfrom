@@ -1453,7 +1453,7 @@ export function KnowledgeWorkspace() {
       setSelectedSummary(refreshed);
       setSummaries(queryClient.getQueryData<ContentDocumentSummary[]>(contentQueryKeys.summaries(contentContext, refreshed.documentKey)) ?? [refreshed]);
       if (!refreshed.audio) throw new Error("Generate audio for this summary before listening.");
-      const title = refreshed.topic ?? "Document summary";
+      const title = capitalizeLabel(refreshed.topic ?? "Document summary");
       await startNarrationSource({
         durationMs: refreshed.audio.durationMs,
         lockScreenTitle: title,
@@ -3488,7 +3488,7 @@ export function KnowledgeWorkspace() {
     <View style={styles.narrationPlayer}>
       <View style={styles.narrationHeading}>
         <View style={styles.narrationTitleBlock}>
-          <Text numberOfLines={1} style={styles.narrationTitle}>{selectedSummary?.topic ?? summaryReaderTopic ?? "Summary audio"}</Text>
+          <Text numberOfLines={1} style={styles.narrationTitle}>{capitalizeLabel(selectedSummary?.topic ?? summaryReaderTopic ?? "Summary audio")}</Text>
         </View>
         <Button accessibilityLabel="Close summary audio player" contentMode="raw" disabled={generatingSummaryAudio} onPress={() => stopNarration()} size="xs" variant="icon"><CloseIcon size="sm" /></Button>
       </View>
@@ -3802,7 +3802,7 @@ export function KnowledgeWorkspace() {
         onOpenChange={(open) => { if (!open) closeSheet(); }}
         open={sheetOpen}
         tall={activeSheet === "library" || activeSheet === "documents" || activeSheet === "folders" || activeSheet === "searchHistory" || activeSheet === "scanSources" || activeSheet === "documentVersions" || activeSheet === "versions" || activeSheet === "audioVersions"}
-        title={activeSheet === "enhance" ? "AI actions" : activeSheet === "transform" ? documentTransformation === "enhance" ? "Enhance document" : "Translate document" : activeSheet === "summarize" ? "Summarize document" : activeSheet === "summaryVersions" ? "Summary versions" : activeSheet === "summaryReader" ? selectedSummary?.topic ?? summaryReaderTopic ?? `Summary ${selectedSummary?.version ?? ""}` : activeSheet === "historyChooser" ? "Document history" : activeSheet === "searchHistory" ? "Search history" : activeSheet === "similar" ? "Archive" : activeSheet === "documentVersions" ? "Document versions" : activeSheet === "versions" ? documentTransformation === "enhance" ? "Enhancements" : "Translations" : activeSheet === "audioVersions" ? "Audio versions" : activeSheet === "scanSources" ? "Scanned pages" : activeSheet === "deleteDocument" ? `Delete ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "bulkDelete" ? "Delete selected items" : activeSheet === "folder" ? "Create folder" : activeSheet === "documents" ? "Documents and files" : activeSheet === "folders" ? "Folders" : activeSheet === "destinationBrowser" ? destinationAction === "upload" ? destinationFolder?.name ?? "Archive" : destinationAction === "move" ? "Move to folder" : "Copy to folder" : activeSheet === "library" ? "Browse Archive" : activeSheet === "documentActions" ? selectedDocument?.name ?? "Document actions" : activeSheet === "documentDetails" ? `Edit ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "destination" ? destinationAction === "upload" ? "Upload files" : "Choose destination" : activeSheet === "folderActions" ? selectedFolder?.name ?? "Folder actions" : activeSheet === "folderDetails" ? "Edit folder" : "New in Archive"}
+        title={activeSheet === "enhance" ? "AI actions" : activeSheet === "transform" ? documentTransformation === "enhance" ? "Enhance document" : "Translate document" : activeSheet === "summarize" ? "Summarize document" : activeSheet === "summaryVersions" ? "Summary versions" : activeSheet === "summaryReader" ? capitalizeLabel(selectedSummary?.topic ?? summaryReaderTopic ?? `Summary ${selectedSummary?.version ?? ""}`) : activeSheet === "historyChooser" ? "Document history" : activeSheet === "searchHistory" ? "Search history" : activeSheet === "similar" ? "Archive" : activeSheet === "documentVersions" ? "Document versions" : activeSheet === "versions" ? documentTransformation === "enhance" ? "Enhancements" : "Translations" : activeSheet === "audioVersions" ? "Audio versions" : activeSheet === "scanSources" ? "Scanned pages" : activeSheet === "deleteDocument" ? `Delete ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "bulkDelete" ? "Delete selected items" : activeSheet === "folder" ? "Create folder" : activeSheet === "documents" ? "Documents and files" : activeSheet === "folders" ? "Folders" : activeSheet === "destinationBrowser" ? destinationAction === "upload" ? destinationFolder?.name ?? "Archive" : destinationAction === "move" ? "Move to folder" : "Copy to folder" : activeSheet === "library" ? "Browse Archive" : activeSheet === "documentActions" ? selectedDocument?.name ?? "Document actions" : activeSheet === "documentDetails" ? `Edit ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "destination" ? destinationAction === "upload" ? "Upload files" : "Choose destination" : activeSheet === "folderActions" ? selectedFolder?.name ?? "Folder actions" : activeSheet === "folderDetails" ? "Edit folder" : "New in Archive"}
       >
         {sheetError ? <Text accessibilityRole="alert" style={styles.notice}>{sheetError}</Text> : null}
         {compactDelete ? <View style={styles.compactSheetActions}>
@@ -3944,7 +3944,7 @@ export function KnowledgeWorkspace() {
               )) : summaries.map((summary) => (
                 <Button contentMode="raw" key={summary.key} onPress={() => openSummaryReader(summary)} size="lg" style={styles.versionMain} variant="secondary">
                   <FileIcon size="md" />
-                  <View style={styles.resultText}><Text numberOfLines={1} style={styles.rowTitle}>{summary.topic ?? `Summary ${summary.version}`}</Text><Text style={styles.rowSubtitle}>Version {summary.version} · {new Date(summary.createdAt).toLocaleString()}</Text></View>
+                  <View style={styles.resultText}><Text numberOfLines={1} style={styles.rowTitle}>{capitalizeLabel(summary.topic ?? `Summary ${summary.version}`)}</Text><Text style={styles.rowSubtitle}>Version {summary.version} · {new Date(summary.createdAt).toLocaleString()}</Text></View>
                 </Button>
               ))}
             </ScrollView>
