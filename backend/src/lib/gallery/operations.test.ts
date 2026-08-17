@@ -45,6 +45,8 @@ describe('Gallery operation boundaries', () => {
     expect(galleryOperationInputSchemas.search.parse({ query: 'mountains', collectionKey })).toEqual({ query: 'mountains', collectionKey, recordHistory: true, limit: 50 });
     expect(galleryOperationInputSchemas.search.parse({ query: 'mountains', recordHistory: false })).toMatchObject({ recordHistory: false });
     expect(galleryOperationInputSchemas.search.parse({ duplicates: true, collectionKey })).toEqual({ duplicates: true, collectionKey });
+    const identityKey = key();
+    expect(galleryOperationInputSchemas.search.parse({ identityKey, collectionKey })).toEqual({ identityKey, collectionKey });
   });
 
   test('enforces reusable overview pagination boundaries', () => {
@@ -61,6 +63,10 @@ describe('Gallery operation boundaries', () => {
     expect(() => galleryOperationInputSchemas.search.parse({ imageKey: key(), recordHistory: false })).toThrow();
     expect(() => galleryOperationInputSchemas.search.parse({ duplicates: true, collectionKey: key(), threshold: 0.9 })).toThrow();
     expect(() => galleryOperationInputSchemas.search.parse({ duplicates: true, collectionKey: key(), recordHistory: false })).toThrow();
+    expect(() => galleryOperationInputSchemas.search.parse({ identityKey: key(), query: 'dog' })).toThrow();
+    expect(() => galleryOperationInputSchemas.search.parse({ identityKey: key(), imageKey: key() })).toThrow();
+    expect(() => galleryOperationInputSchemas.search.parse({ identityKey: key(), threshold: 0.9 })).toThrow();
+    expect(() => galleryOperationInputSchemas.search.parse({ identityKey: key(), limit: 10 })).toThrow();
   });
 
   test('enforces transfer and subject uniqueness invariants', () => {

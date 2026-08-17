@@ -110,6 +110,13 @@ test("sends similarity and duplicate discovery through image search", async () =
   ]);
 });
 
+test("sends visual identity search without a threshold or caller limit", async () => {
+  await searchGalleryImages({ identityKey: "identity", collectionKey: "collection" });
+  expect(calls[0]).toMatchObject({ path: "/gallery/images/search", body: { organizationKey: "organization", scopeKey: "scope", identityKey: "identity", collectionKey: "collection" } });
+  expect(calls[0]?.body).not.toHaveProperty("threshold");
+  expect(calls[0]?.body).not.toHaveProperty("limit");
+});
+
 test("sends favorite, delete, and many-to-many transfer through canonical mutations", async () => {
   await setGalleryImageFavorite("image", true);
   await deleteGalleryImages(["image-a", "image-b"]);

@@ -4,6 +4,22 @@ import { createGalleryRepository } from './repository';
 import type { MediaLibraryDatabase } from '@/lib/media-library';
 
 describe('Gallery repository transactions', () => {
+  test('returns only an authorized live visual identity in the requested scope', async () => {
+    const scopeKey = newId(), identityKey = newId(), actorKey = newId();
+    const identity = { _key: identityKey, scopeKey, name: 'Alex', description: 'A person.', referenceImageKey: newId(), embedding: Array(4_096).fill(0), deletedAt: null, createdAt: '2026-08-17T12:00:00.000Z', updatedAt: '2026-08-17T12:00:00.000Z' };
+    let authorized = false;
+    const database: MediaLibraryDatabase = { async query(query, bindVars) { return { async all() {
+      if (query.includes('LET actorMembership')) return authorized ? [true] : [];
+      expect(bindVars).toEqual({ scopeKey, identityKey });
+      expect(query).toContain('identity.deletedAt == null');
+      return [identity];
+    } }; } };
+    const repository = createGalleryRepository(database);
+    expect(await repository.getVisualIdentity(scopeKey, identityKey, actorKey)).toBeNull();
+    authorized = true;
+    expect(await repository.getVisualIdentity(scopeKey, identityKey, actorKey)).toMatchObject({ key: identityKey, scopeKey, deletedAt: null });
+  });
+
   test('returns collection images as bound keyset cursor pages of at most one hundred', async () => {
     const scopeKey = newId(), collectionKey = newId();
     const rows = ['2026-08-17T12:00:03.000Z', '2026-08-17T12:00:02.000Z', '2026-08-17T12:00:01.000Z'].map((createdAt, index) => ({

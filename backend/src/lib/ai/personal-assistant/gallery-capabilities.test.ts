@@ -12,7 +12,11 @@ describe('Gallery assistant capabilities', () => {
     expect(galleryAssistantCapabilityNames).toHaveLength(18);
     expect(new Set(galleryAssistantCapabilityNames).size).toBe(18);
     expect(galleryAssistantCapabilityNames).not.toContain('collection.duplicates.find');
-    expect(createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'image.search')?.definition.inputSchema).toMatchObject({ type: 'object', oneOf: expect.any(Array) });
+    const search = createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'image.search')!;
+    expect(search.definition.inputSchema.type).toBe('object');
+    expect(Array.isArray(search.definition.inputSchema.oneOf)).toBe(true);
+    expect(search.inputSchema.parse({ identityKey: newId() })).toEqual({ identityKey: expect.any(String) });
+    expect((search.definition.inputSchema.oneOf as any[]).find(({ required }) => required.includes('identityKey'))).toMatchObject({ additionalProperties: false, properties: { identityKey: { type: 'string' } } });
     for (const capability of createGalleryAssistantCapabilities()) {
       const schema = JSON.stringify(capability.definition.inputSchema);
       expect(schema).not.toContain('organizationKey');
@@ -49,12 +53,13 @@ describe('Gallery assistant capabilities', () => {
     expect(called).toBe(false);
   });
 
-  test('routes similarity and duplicate discovery through image.search', async () => {
+  test('routes similarity, identity, and duplicate discovery through image.search', async () => {
     const inputs: unknown[] = [];
     const capability = createGalleryAssistantCapabilities({ search: async (input) => { inputs.push(input); return { images: [] }; } }).find(({ definition }) => definition.name === 'image.search')!;
-    const imageKey = newId(), collectionKey = newId();
+    const imageKey = newId(), identityKey = newId(), collectionKey = newId();
     await capability.execute({ imageKey }, context);
+    await capability.execute({ identityKey, collectionKey }, context);
     await capability.execute({ duplicates: true, collectionKey }, context);
-    expect(inputs).toEqual([{ imageKey, limit: 50 }, { duplicates: true, collectionKey }]);
+    expect(inputs).toEqual([{ imageKey, limit: 50 }, { identityKey, collectionKey }, { duplicates: true, collectionKey }]);
   });
 });

@@ -23,6 +23,7 @@ export interface GalleryRepository {
   ownsImage(scopeKey: string, imageKey: string, actorKey: string): Promise<boolean>;
   getCollection(scopeKey: string, collectionKey: string): Promise<Collection | null>;
   getImage(imageKey: string): Promise<Image | null>;
+  getVisualIdentity(scopeKey: string, identityKey: string, actorKey: string): Promise<VisualIdentity | null>;
   addImageToCollection(relation: CollectionImage): Promise<CollectionImage>;
   createCollection(collection: Collection, member: CollectionMember): Promise<void>;
   listOverview(input: { scopeKey: string; collectionKey?: string; cursor?: string; limit: number }): Promise<{ collections: GalleryCollectionRow[]; images: CursorPage<Image> }>;
@@ -36,7 +37,6 @@ export interface GalleryRepository {
   updateUpload(uploadKey: string, patch: Partial<Omit<GalleryUpload, 'key'>>): Promise<GalleryUpload>;
   searchAccessibleImages(input: AccessibleImageSearchInput): Promise<AccessibleImageSearchResult[]>;
   listMatchingIdentityNames(scopeKey: string, query: string): Promise<VisualIdentity[]>;
-  listImagesForMatchingIdentityNames(scopeKey: string, query: string, collectionKey?: string): Promise<Array<{ image: Image; score: number }>>;
   listIdentityMatches(scopeKey: string, embedding: number[]): Promise<Array<{ identityKey: string; confidence: number }>>;
   persistIdentityMatches(scopeKey: string, identityKey: string, matches: Array<{ imageKey: string; confidence: number }>): Promise<void>;
   setImageFavorite(scopeKey: string, imageKey: string, isFavorite: boolean, now: string): Promise<Image | null>;
@@ -77,6 +77,7 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
     ownsImage: media.ownsImage,
     getCollection: media.getCollection,
     getImage: getImageById,
+    async getVisualIdentity(scopeKey, identityKey, actorKey) { if (!await media.canManageScope(scopeKey, actorKey)) return null; const value = (await all(database, 'FOR identity IN visualIdentities FILTER identity._key == @identityKey && identity.scopeKey == @scopeKey && identity.deletedAt == null LIMIT 1 RETURN identity', { scopeKey, identityKey }))[0]; return value ? parse(visualIdentitySchema, value) : null; },
     addImageToCollection: media.addImageToCollection,
     createCollection(collection, member) { return transaction(['collections', 'collectionMembers'], async (tx) => { await tx.query('INSERT @collection INTO collections', { collection: toArangoDoc(collection) }); await tx.query('INSERT @member INTO collectionMembers', { member: toArangoDoc(member) }); }); },
     async listOverview({ scopeKey, collectionKey, cursor, limit }) {
@@ -129,7 +130,6 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
     updateUpload: updateGalleryUpload,
     searchAccessibleImages: (input) => searchAccessibleImages(input, database),
     async listMatchingIdentityNames(scopeKey, query) { return (await all(database, 'FOR identity IN visualIdentities FILTER identity.scopeKey == @scopeKey && identity.deletedAt == null FILTER CONTAINS(LOWER(@query), LOWER(identity.name)) RETURN identity', { scopeKey, query })).map((value) => parse(visualIdentitySchema, value)); },
-    async listImagesForMatchingIdentityNames(scopeKey, query, collectionKey) { return (await all(database, 'FOR identity IN visualIdentities FILTER identity.scopeKey == @scopeKey && identity.deletedAt == null FILTER CONTAINS(LOWER(@query), LOWER(identity.name)) FOR relation IN imageIdentities FILTER relation.scopeKey == @scopeKey && relation.identityKey == identity._key LET image = DOCUMENT(images, relation.imageKey) FILTER image != null && image.scopeKey == @scopeKey && image.deletedAt == null FILTER @collectionKey == null || LENGTH(FOR collectionImage IN collectionImages FILTER collectionImage.scopeKey == @scopeKey && collectionImage.collectionKey == @collectionKey && collectionImage.imageKey == image._key LIMIT 1 RETURN 1) > 0 SORT relation.confidence DESC, image.createdAt DESC RETURN { image, score: relation.confidence }', { scopeKey, query, collectionKey: collectionKey ?? null }) as Array<{ image: unknown; score: number }>).map((row) => ({ image: parse(imageSchema, row.image), score: row.score })); },
     async listIdentityMatches(scopeKey, embedding) { return await all(database, 'FOR identity IN visualIdentities FILTER identity.scopeKey == @scopeKey && identity.deletedAt == null FILTER IS_ARRAY(identity.embedding) && LENGTH(identity.embedding) == @dimensions LET confidence = COSINE_SIMILARITY(identity.embedding, @embedding) FILTER IS_NUMBER(confidence) && confidence >= 0.82 RETURN { identityKey: identity._key, confidence }', { scopeKey, embedding, dimensions: embedding.length }) as Array<{ identityKey: string; confidence: number }>; },
     async persistIdentityMatches(scopeKey, identityKey, matches) { if (!matches.length) return; const now = new Date().toISOString(); await transaction(['imageIdentities'], async (tx) => { for (const match of matches) { const relation = imageIdentitySchema.parse({ key: newId(), scopeKey, imageKey: match.imageKey, identityKey, confidence: match.confidence, isReference: false, createdAt: now }); await tx.query('UPSERT { scopeKey: @scopeKey, identityKey: @identityKey, imageKey: @imageKey } INSERT @relation UPDATE { confidence: MAX([OLD.confidence, @confidence]) } IN imageIdentities', { scopeKey, identityKey, imageKey: match.imageKey, confidence: match.confidence, relation: toArangoDoc(relation) }); } }); },
     async setImageFavorite(scopeKey, imageKey, isFavorite, now) { const image = await getImageById(imageKey); if (!image || image.scopeKey !== scopeKey || image.deletedAt) return null; return updateImage(imageKey, { isFavorite, updatedAt: now }); },

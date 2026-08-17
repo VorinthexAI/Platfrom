@@ -4,7 +4,7 @@ import type { Book, BookDetail } from "./books-client";
 import type { ContentContext } from "./content-client";
 import { contentQueryKeys } from "./content-query-cache";
 import type { EmailFilter, EmailOverview, EmailThread } from "./email-client";
-import type { GalleryImage, GalleryOverview } from "./gallery-client";
+import type { GalleryCollection, GalleryImage, GalleryOverview } from "./gallery-client";
 import type { Place, Trip } from "./travel-client";
 
 export type WorkspaceContext = { organizationKey: string; scopeKey: string };
@@ -13,9 +13,18 @@ const contextKey = (context: WorkspaceContext) => [context.organizationKey, cont
 
 export const galleryQueryKeys = {
   all: (context: WorkspaceContext) => ["gallery", ...contextKey(context)] as const,
+  collections: (context: WorkspaceContext) => [...galleryQueryKeys.all(context), "collections"] as const,
   overviews: (context: WorkspaceContext) => [...galleryQueryKeys.all(context), "overviews"] as const,
   overview: (context: WorkspaceContext, collectionKey?: string) => [...galleryQueryKeys.overviews(context), collectionKey ?? null] as const,
 };
+
+export async function getGalleryCollections(queryClient: QueryClient, context: WorkspaceContext, queryFn: () => Promise<GalleryCollection[]>) {
+  return queryClient.fetchQuery({ queryKey: galleryQueryKeys.collections(context), queryFn, staleTime: Infinity });
+}
+
+export function setCachedGalleryCollections(queryClient: QueryClient, context: WorkspaceContext, collections: GalleryCollection[]) {
+  queryClient.setQueryData(galleryQueryKeys.collections(context), collections);
+}
 
 export const compassQueryKeys = {
   all: (context: WorkspaceContext) => ["compass", ...contextKey(context)] as const,

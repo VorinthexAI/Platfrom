@@ -215,9 +215,14 @@ async function search(rawInput: unknown, context: GalleryOperationContext) {
     const collection = input.collectionKey ? await repository.getCollection(input.scopeKey, input.collectionKey) : undefined;
     if (input.collectionKey && !collection) throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.');
     let sourceImage: z.infer<typeof imageSchema> | undefined;
+    let sourceIdentity: z.infer<typeof visualIdentitySchema> | undefined;
     if ('imageKey' in input) {
       sourceImage = await repository.getImage(input.imageKey) ?? undefined;
       if (!sourceImage || sourceImage.scopeKey !== input.scopeKey || !await repository.canAccessImage(input.scopeKey, sourceImage.key, membership.key)) throw new GalleryOperationError(404, 'GALLERY_IMAGE_NOT_FOUND', 'Image not found.');
+    }
+    if ('identityKey' in input) {
+      sourceIdentity = await repository.getVisualIdentity(input.scopeKey, input.identityKey, membership.key) ?? undefined;
+      if (!sourceIdentity) throw new GalleryOperationError(404, 'GALLERY_SUBJECT_NOT_FOUND', 'Visual identity not found.');
     }
     const toolInput = searchSchema.parse(rawInput);
     const resolvedImages = new Map<string, z.infer<typeof imageSchema>>();
@@ -229,7 +234,9 @@ async function search(rawInput: unknown, context: GalleryOperationContext) {
         for (const result of results) resolvedImages.set(result.image.key, result.image);
         return results;
       },
+      listMatchingVisualIdentities: (scopeKey, query) => repository.listMatchingIdentityNames(scopeKey, query),
       getImage: async (key) => resolvedImages.get(key) ?? repository.getImage(key),
+      getVisualIdentity: async () => sourceIdentity ?? null,
       canAccessImage: async () => true,
       canAccessCollection: async () => true,
       getCollection: async () => collection ?? null,
@@ -244,14 +251,6 @@ async function search(rawInput: unknown, context: GalleryOperationContext) {
       if (!image) throw new GalleryOperationError(404, 'GALLERY_IMAGE_NOT_FOUND', 'Image not found.');
       return { image, score };
     }));
-    if ('query' in input) {
-      const namedIdentities = await repository.listMatchingIdentityNames(input.scopeKey, input.query);
-      await Promise.all(namedIdentities.map((identity) => reconcileVisualIdentity(identity, input.organizationKey, membership.key)));
-      const named = await repository.listImagesForMatchingIdentityNames(input.scopeKey, input.query, input.collectionKey);
-      const unique = new Map<string, { image: z.infer<typeof imageSchema>; score?: number }>(named.map((match) => [match.image.key, match]));
-      for (const match of matches) if (!unique.has(match.image.key)) unique.set(match.image.key, match);
-      matches = [...unique.values()].slice(0, input.limit);
-    }
     const images = await Promise.all(matches.map(({ image, score }) => safeImage(image, score)));
     if ('query' in input && input.recordHistory) await (context.recordUserSearch ?? getDefaultUserSearchService().record)(membership.userId, input.query);
     return { images };

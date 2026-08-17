@@ -7,15 +7,17 @@ import {
   ascendQueryKeys,
   compassQueryKeys,
   galleryQueryKeys,
+  getGalleryCollections,
   invalidateAssistantChanges,
   patchGalleryImage,
   removeCachedGalleryImages,
   restoreGalleryOverviews,
   snapshotGalleryOverviews,
   signalQueryKeys,
+  setCachedGalleryCollections,
   transferCachedGalleryImages,
 } from "./workspace-query-cache";
-import type { GalleryImage, GalleryOverview } from "./gallery-client";
+import type { GalleryCollection, GalleryImage, GalleryOverview } from "./gallery-client";
 
 const context: ContentContext = { organizationKey: "org-a", scopeKey: "scope-a", agentKey: "agent-a" };
 const otherContext: ContentContext = { organizationKey: "org-b", scopeKey: "scope-b", agentKey: "agent-b" };
@@ -26,6 +28,21 @@ test("isolates every routed workspace key by context and resource", () => {
   expect(signalQueryKeys.overview(context, "all")).not.toEqual(signalQueryKeys.overview(context, "favorite"));
   expect(signalQueryKeys.detail(context, "thread-a")).not.toEqual(signalQueryKeys.detail(context, "thread-b"));
   expect(ascendQueryKeys.detail(context, "book-a")).not.toEqual(ascendQueryKeys.detail(otherContext, "book-a"));
+});
+
+test("loads Gallery collections once per context and permits explicit singleton updates", async () => {
+  const client = new QueryClient();
+  const collections: GalleryCollection[] = [{ key: "collection", name: "Collection", description: null, isFavorite: false, count: 1, coverUrl: null }];
+  let loads = 0;
+  const load = () => { loads += 1; return Promise.resolve(collections); };
+
+  expect(await getGalleryCollections(client, context, load)).toEqual(collections);
+  expect(await getGalleryCollections(client, context, load)).toEqual(collections);
+  expect(loads).toBe(1);
+
+  const updated = [{ ...collections[0]!, count: 2 }];
+  setCachedGalleryCollections(client, context, updated);
+  expect(client.getQueryData(galleryQueryKeys.collections(context))).toEqual(updated);
 });
 
 test("assistant changes invalidate exact workspace prefixes without crossing contexts", async () => {

@@ -24,3 +24,19 @@ test("provides edit and confirmed delete flows for images and collections", () =
   expect(source).toContain('activeSheet === "collectionEdit"');
   expect(source).toContain('activeSheet === "duplicates"');
 });
+
+test("uses a singleton collection cache and removes root Gallery search", () => {
+  expect(source).toContain("getGalleryCollections(queryClient");
+  expect(source).toContain("setCachedGalleryCollections");
+  expect(source).not.toContain('accessibilityLabel="Search Gallery collections and images"');
+});
+
+test("provides the full visual identity library and image picker workflow", () => {
+  expect(source).toContain('activeSheet === "visualIdentities"');
+  expect(source).toContain('activeSheet === "identityPicker"');
+  expect(source).toContain("Choose an image to create a visual identity from.");
+  expect(source).toContain("Visual identities</Button>");
+  expect(source).toContain("createGallerySubject(name, [image.key])");
+  expect(source).toContain("identityKey: identity.key");
+  expect(source).toContain("creatingIdentityKeys.includes(identity.key)");
+});

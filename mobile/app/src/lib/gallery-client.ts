@@ -171,7 +171,7 @@ export function fetchGalleryUploadStatus(uploadKeys: string[], timeout = 60_000)
   );
 }
 
-export function searchGalleryImages(input: { query?: string; imageKey?: string; duplicates?: true; collectionKey?: string; recordHistory?: boolean; limit?: number }) {
+export function searchGalleryImages(input: { query?: string; imageKey?: string; identityKey?: string; duplicates?: true; collectionKey?: string; recordHistory?: boolean; limit?: number }) {
   return postGallery<{ images: GalleryImage[] }>("/gallery/images/search", input, 4 * 60_000);
 }
 
