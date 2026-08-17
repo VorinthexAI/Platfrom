@@ -20,6 +20,9 @@ export type GalleryImage = {
   sizeBytes: number;
   width: number;
   height: number;
+  city?: string | null;
+  country?: string | null;
+  countryCode?: string | null;
   isFavorite: boolean;
   createdAt: string;
   updatedAt: string;
@@ -42,8 +45,8 @@ export function filterCollections(collections: GalleryCollection[], query: strin
 export function filterMediaItems(items: GalleryImage[], query: string) {
   const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
   if (terms.length === 0) return items;
-  return items.filter(({ caption, filename }) => {
-    const searchable = `${caption}\n${filename}`.toLocaleLowerCase();
+  return items.filter(({ caption, filename, city, country, countryCode }) => {
+    const searchable = `${caption}\n${filename}\n${city ?? ""}\n${country ?? ""}\n${countryCode ?? ""}`.toLocaleLowerCase();
     return terms.every((term) => searchable.includes(term));
   });
 }
@@ -52,6 +55,19 @@ export function mergeMediaItems(primary: GalleryImage[], secondary: GalleryImage
   const unique = new Map(primary.map((item) => [item.key, item]));
   for (const item of secondary) if (!unique.has(item.key)) unique.set(item.key, item);
   return [...unique.values()];
+}
+
+const galleryDateFormatter = new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+
+export function groupGalleryImagesByCreatedDate<T extends { createdAt: string }>(images: T[]) {
+  const groups = new Map<string, T[]>();
+  for (const image of images) {
+    const label = galleryDateFormatter.format(new Date(image.createdAt));
+    const group = groups.get(label);
+    if (group) group.push(image);
+    else groups.set(label, [image]);
+  }
+  return [...groups].map(([label, groupedImages]) => ({ label, images: groupedImages }));
 }
 
 export type GallerySubject = {
@@ -129,6 +145,8 @@ export type PreparedGalleryUpload = {
   filename: string;
   uri: string;
   sizeBytes: number;
+  latitude?: number;
+  longitude?: number;
   processingMode?: "library" | "cover";
 };
 
@@ -137,7 +155,7 @@ export async function uploadGalleryImages(files: PreparedGalleryUpload[], collec
     uploads: { clientKey: string; uploadKey: string; imageKey: string; url: string; headers: Record<string, string> }[];
   }>("/gallery/uploads/presign", {
     collectionKey: collectionKey ?? null,
-    files: files.map(({ clientKey, filename, sizeBytes, processingMode }) => ({ clientKey, filename, sizeBytes, ...(processingMode ? { processingMode } : {}) })),
+    files: files.map(({ clientKey, filename, sizeBytes, processingMode, latitude, longitude }) => ({ clientKey, filename, sizeBytes, ...(processingMode ? { processingMode } : {}), ...(latitude !== undefined && longitude !== undefined ? { latitude, longitude } : {}) })),
   });
 
   for (let index = 0; index < reservation.uploads.length; index += 3) {

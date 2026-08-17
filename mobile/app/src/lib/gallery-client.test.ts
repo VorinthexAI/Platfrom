@@ -14,7 +14,7 @@ mock.module("./api-client", () => ({
   } },
 }));
 
-const { createGalleryCollection, deleteGalleryCollection, deleteGalleryImages, deleteGallerySubject, fetchGalleryOverview, filterCollections, filterMediaItems, findGalleryCollectionDuplicates, mergeMediaItems, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryImage, uploadGalleryImages } = await import("./gallery-client");
+const { createGalleryCollection, deleteGalleryCollection, deleteGalleryImages, deleteGallerySubject, fetchGalleryOverview, filterCollections, filterMediaItems, findGalleryCollectionDuplicates, groupGalleryImagesByCreatedDate, mergeMediaItems, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryImage, uploadGalleryImages } = await import("./gallery-client");
 
 beforeEach(() => calls.splice(0));
 
@@ -83,6 +83,17 @@ test("merges immediate and semantic matches without changing immediate order", (
   const semantic = image("semantic", "semantic.jpg", "Related match");
 
   expect(mergeMediaItems([exact], [exact, semantic])).toEqual([exact, semantic]);
+});
+
+test("groups collection images by created date without changing image order", () => {
+  const first = { ...image("first", "first.jpg", "First"), createdAt: "2025-01-12T12:00:00.000Z" };
+  const second = { ...image("second", "second.jpg", "Second"), createdAt: "2025-01-12T15:00:00.000Z" };
+  const third = { ...image("third", "third.jpg", "Third"), createdAt: "2025-01-11T12:00:00.000Z" };
+
+  expect(groupGalleryImagesByCreatedDate([first, second, third])).toEqual([
+    { label: "12 Jan 2025", images: [first, second] },
+    { label: "11 Jan 2025", images: [third] },
+  ]);
 });
 
 test("sends collection-scoped semantic searches through the canonical endpoint", async () => {
@@ -162,11 +173,12 @@ test("maps accepted upload jobs back to optimistic client images", async () => {
   }) as typeof fetch;
 
   try {
-    const result = await uploadGalleryImages([{ clientKey: "local-image", filename: "image.jpg", uri: "file://image", sizeBytes: 4 }], "collection");
+    const result = await uploadGalleryImages([{ clientKey: "local-image", filename: "image.jpg", uri: "file://image", sizeBytes: 4, latitude: 59.3293, longitude: 18.0686 }], "collection");
 
     expect(result.jobs).toEqual([{ key: "upload", imageKey: "image", status: "queued", clientKey: "local-image" }]);
     expect(uploads).toEqual([{ url: "https://uploads.example/image", method: "PUT" }]);
     expect(calls.map(({ path }) => path)).toEqual(["/gallery/uploads/presign", "/gallery/uploads/complete"]);
+    expect(calls[0]?.body).toMatchObject({ files: [{ clientKey: "local-image", filename: "image.jpg", sizeBytes: 4, latitude: 59.3293, longitude: 18.0686 }] });
   } finally {
     globalThis.fetch = originalFetch;
   }

@@ -9,14 +9,19 @@ function input(bytes = png()) { return { scopeKey: 'c123456789', ownerKey: 'c987
 describe('MediaLibrary image processing', () => {
   test('stores captions with current Qwen vectors', async () => {
     let stored: Record<string, unknown> | undefined;
-    const result = await processImage(input(), {
-      storage: { async upload({ key }) { return { storageKey: key }; }, async delete() {} }, hashBatch: async () => ['0123456789abcdef'], findCaption: async () => null, caption: async () => ({ caption: 'A blue square.', score: 84 }), embed: async () => Array(EMBEDDING_DIMENSIONS).fill(0.25), getImage: async () => null,
+    const embeddingTexts: string[] = [];
+    const result = await processImage({ ...input(), location: { city: 'Stockholm', country: 'Sweden', countryCode: 'SE' } }, {
+      storage: { async upload({ key }) { return { storageKey: key }; }, async delete() {} }, hashBatch: async () => ['0123456789abcdef'], findCaption: async () => null, caption: async () => ({ caption: 'A blue square.', score: 84 }), embed: async (text) => { embeddingTexts.push(text); return Array(EMBEDDING_DIMENSIONS).fill(0.25); }, getImage: async () => null,
       persistImage: async ({ image, caption }) => { stored = { image, caption }; return image; }, createKey: () => 'cmrnlzf650002qc7k4p5zem5w', createCaptionKey: () => 'cmrnlzf650002qc7k4p5zem5x',
     });
     expect(result.embedding).toHaveLength(4096);
-    expect(stored).toMatchObject({ image: { width: 2, height: 3, imageCaptionKey: 'cmrnlzf650002qc7k4p5zem5x' }, caption: { perceptualHash: '0123456789abcdef', caption: 'A blue square.', score: 84 } });
+    expect(stored).toMatchObject({ image: { width: 2, height: 3, sizeBytes: 24, city: 'Stockholm', country: 'Sweden', countryCode: 'SE', imageCaptionKey: 'cmrnlzf650002qc7k4p5zem5x' }, caption: { perceptualHash: '0123456789abcdef', caption: 'A blue square.', score: 84 } });
     expect(stored?.image).not.toHaveProperty('ownerKey');
     expect(stored?.image).not.toHaveProperty('embeddingProvider');
+    expect(embeddingTexts).toEqual([
+      'photo.png\n\nA blue square.',
+      'photo.png\n\nA blue square.\n\nCountry: Sweden\n\nCity: Stockholm\n\nCountry code: SE',
+    ]);
   });
   test('cleans uploaded data when embedding dimensions are stale', async () => {
     const deleted: string[] = [];
@@ -45,6 +50,22 @@ describe('MediaLibrary image processing', () => {
     expect(persisted.caption).toBeUndefined();
     expect(persisted.image).toMatchObject({ caption: 'Canonical caption.', imageCaptionKey: canonical.key });
     expect(persisted.image.embedding[0]).toBe(0.75);
+  });
+  test('adds image-specific location when reusing a canonical duplicate caption', async () => {
+    const canonical = {
+      key: 'cmrnlzf650002qc7k4p5zem5x', scopeKey: 'c123456789', sourceImageKey: 'cmrnlzf650002qc7k4p5zem5y', caption: 'A sunny plaza.',
+      score: 91, scoreVersion: 1, embedding: Array(EMBEDDING_DIMENSIONS).fill(0.75), perceptualHash: '0123456789abcdee', hashAlgorithm: 'phash-64-dct-v1' as const,
+      hashSegment0: '0123', hashSegment1: '4567', hashSegment2: '89ab', hashSegment3: 'cdee', createdAt: '2026-08-11T12:00:00.000Z', updatedAt: '2026-08-11T12:00:00.000Z',
+    };
+    let embeddingText = '';
+    const result = await processImage({ ...input(), location: { city: 'Madrid', country: 'Spain', countryCode: 'ES' } }, {
+      storage: { async upload({ key }) { return { storageKey: key }; }, async delete() {} },
+      hashBatch: async () => ['0123456789abcdef'], findCaption: async () => canonical,
+      embed: async (text) => { embeddingText = text; return Array(EMBEDDING_DIMENSIONS).fill(0.5); },
+      getImage: async () => null, persistImage: async ({ image }) => image, createKey: () => 'cmrnlzf650002qc7k4p5zem5w',
+    });
+    expect(embeddingText).toBe('photo.png\n\nA sunny plaza.\n\nCountry: Spain\n\nCity: Madrid\n\nCountry code: ES');
+    expect(result.embedding[0]).toBe(0.5);
   });
   test('hashes uploads in one batch and captions one representative per duplicate group', async () => {
     let canonical: any;

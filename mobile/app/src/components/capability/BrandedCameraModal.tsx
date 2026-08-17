@@ -37,7 +37,7 @@ export function BrandedCameraModal({ title, hint = "Keep the page flat and fill 
     setCapturing(true);
     setError(undefined);
     try {
-      const picture = await camera.current.takePictureAsync({ quality: 1, shutterSound: false, skipProcessing: false });
+      const picture = await camera.current.takePictureAsync({ quality: 1, exif: true, shutterSound: false, skipProcessing: false });
       await onCapture(picture);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The photo could not be captured.");

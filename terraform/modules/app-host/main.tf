@@ -62,6 +62,20 @@ resource "aws_iam_role_policy_attachment" "ssm_managed_instance_core" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
+resource "aws_iam_role_policy" "image_reverse_geocoding" {
+  name = "${var.name_prefix}-image-reverse-geocoding"
+  role = aws_iam_role.this.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["geo-places:ReverseGeocode"]
+      Resource = ["*"]
+    }]
+  })
+}
+
 resource "aws_iam_role_policy" "ssm_read" {
   count = var.allow_instance_ssm_read ? 1 : 0
   name  = "${var.name_prefix}-app-host-ssm-read"

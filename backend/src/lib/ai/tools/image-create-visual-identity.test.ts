@@ -14,6 +14,8 @@ describe('image.create-visual-identity tool', () => {
     });
     expect(received).toEqual({ organizationKey: 'organization-key', input: { imageUrls: ['https://cdn.example.com/viggo-1.jpg', 'https://cdn.example.com/viggo-2.jpg'] } });
     expect(output.description).toContain('white chest blaze');
+    const inline = 'data:image/jpeg;base64,/9j/2Q==';
+    await expect(imageCreateVisualIdentityTool.execute({ imageUrls: [inline] }, { organizationKey: 'organization-key', executeDescription: async (_organizationKey, input) => ({ output: { description: input.imageUrls[0] } }) as never })).resolves.toEqual({ description: inline });
     await expect(imageCreateVisualIdentityTool.execute({ imageUrls: ['file:///viggo.jpg'] }, { executeDescription: async () => ({}) as never })).rejects.toThrow('HTTP or HTTPS');
     await expect(imageCreateVisualIdentityTool.execute({ imageUrls: ['https://cdn.example.com/viggo.jpg'] }, { executeDescription: async () => ({}) as never })).rejects.toThrow('authorized organization');
   });

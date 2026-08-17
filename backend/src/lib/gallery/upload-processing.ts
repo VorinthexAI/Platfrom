@@ -8,7 +8,8 @@ import { EMBEDDING_DIMENSIONS, embedText } from '@/lib/embeddings';
 import { newId } from '@/lib/ids';
 import { computePerceptualHashBatch } from '@/lib/perceptual-hash';
 import { getDefaultGalleryRepository, type GalleryRepository } from './repository';
-import { signedImageUrl } from './image-url';
+import { imageDataUrl } from './image-reference';
+import { reverseGeocodeImage, sanitizeGalleryImage, type ImageCoordinates, type ImageLocation } from './image-location';
 
 export type GalleryUploadBatchMetrics = ImageProcessingMetrics & {
   downloadDurationMs: number;
@@ -20,7 +21,9 @@ export interface GalleryUploadProcessingDependencies {
   storage?: DocumentObjectStorage;
   processBatch?: typeof processImages;
   captionBatch?: (organizationKey: string, imageUrls: string[]) => Promise<GeneratedImageCaption[]>;
-  signImageUrl?: typeof signedImageUrl;
+  resolveImageReference?: (bytes: Uint8Array) => Promise<string>;
+  sanitizeImage?: typeof sanitizeGalleryImage;
+  reverseGeocode?: (coordinates: ImageCoordinates) => Promise<ImageLocation | undefined>;
   now?: () => Date;
   onMetrics?: (metrics: GalleryUploadBatchMetrics) => void;
   failureStatus?: 'queued' | 'failed';
@@ -36,7 +39,10 @@ export async function processGalleryUploadBatch(uploadKeys: readonly string[], d
   const repository = dependencies.repository ?? getDefaultGalleryRepository();
   const storage = dependencies.storage ?? documentStorage;
   const processBatch = dependencies.processBatch ?? processImages;
-  const signImageUrl = dependencies.signImageUrl ?? signedImageUrl;
+  const resolveImageReference = dependencies.resolveImageReference ?? (async (bytes: Uint8Array) => imageDataUrl(bytes, 'image/jpeg'));
+  const sanitizeImage = dependencies.sanitizeImage ?? sanitizeGalleryImage;
+  const reverseGeocode = dependencies.reverseGeocode ?? reverseGeocodeImage;
+  const failureStatus = dependencies.failureStatus ?? 'failed';
   const now = dependencies.now ?? (() => new Date());
   const startedAt = performance.now();
   const records = await Promise.all(uploadKeys.map((key) => repository.getUpload(key)));
@@ -45,19 +51,30 @@ export async function processGalleryUploadBatch(uploadKeys: readonly string[], d
   if (uploads.length === 0) return { processed: 0 };
 
   let processingMetrics: ImageProcessingMetrics | undefined;
+  const stagedKeys: string[] = [];
   try {
     const processingAt = now().toISOString();
     await Promise.all(uploads.map((upload) => repository.updateUpload(upload.key, { status: 'processing', errorCode: null, updatedAt: processingAt })));
     const downloadStartedAt = performance.now();
-    const stored = await Promise.all(uploads.map(async (upload) => {
+    const prepared = await Promise.allSettled(uploads.map(async (upload) => {
       const object = await storage.download(upload.storageKey);
       if (object.bytes.byteLength !== upload.sizeBytes) throw new Error(`Uploaded image size changed for ${upload.key}.`);
-      return object;
+      const sanitized = await sanitizeImage(object.bytes);
+      const stagingKey = `${upload.storageKey}.sanitized.jpg`;
+      await storage.upload({ key: stagingKey, bytes: sanitized.bytes, mimeType: 'image/jpeg' });
+      stagedKeys.push(stagingKey);
+      let location = upload.city || upload.country || upload.countryCode ? { ...(upload.city ? { city: upload.city } : {}), ...(upload.country ? { country: upload.country } : {}), ...(upload.countryCode ? { countryCode: upload.countryCode } : {}) } : undefined;
+      if (sanitized.coordinates) location = await reverseGeocode(sanitized.coordinates);
+      if (sanitized.coordinates) await repository.updateUpload(upload.key, { city: location?.city ?? null, country: location?.country ?? null, countryCode: location?.countryCode ?? null, updatedAt: now().toISOString() });
+      return { bytes: sanitized.bytes, stagingKey, location };
     }));
+    const preparationFailure = prepared.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+    if (preparationFailure) throw preparationFailure.reason;
+    const stored = prepared.map((result) => (result as PromiseFulfilledResult<{ bytes: Uint8Array; stagingKey: string; location?: ImageLocation }>).value);
     const downloadDurationMs = performance.now() - downloadStartedAt;
     const sourceUrls = new Map<Uint8Array, string>();
     await Promise.all(uploads.map(async (upload, index) => {
-      if (upload.processingMode === 'library') sourceUrls.set(stored[index]!.bytes, await signImageUrl(upload.storageKey));
+      if (upload.processingMode === 'library') sourceUrls.set(stored[index]!.bytes, await resolveImageReference(stored[index]!.bytes));
     }));
     const organizationKey = uploads[0]!.organizationKey;
     if (uploads.some((upload) => upload.organizationKey !== organizationKey)) throw new Error('Gallery upload batches must belong to one organization.');
@@ -66,7 +83,8 @@ export async function processGalleryUploadBatch(uploadKeys: readonly string[], d
       scopeKey: upload.scopeKey,
       ownerKey: upload.actorKey,
       imageKey: upload.imageKey,
-      file: { filename: upload.filename, mimeType: upload.mimeType, sizeBytes: upload.sizeBytes, bytes: stored[index]!.bytes },
+      file: { filename: upload.filename, mimeType: upload.mimeType, sizeBytes: stored[index]!.bytes.byteLength, bytes: stored[index]!.bytes },
+      ...(stored[index]!.location ? { location: stored[index]!.location } : {}),
     })), {
       storage,
       hashBatch: computePerceptualHashBatch,
@@ -90,7 +108,7 @@ export async function processGalleryUploadBatch(uploadKeys: readonly string[], d
       await classifyImageSubjects(repository, image).catch(() => undefined);
       if (upload.collectionKey) await repository.addImageToCollection(collectionImageSchema.parse({ key: newId(), scopeKey: upload.scopeKey, collectionKey: upload.collectionKey, imageKey: image.key, addedByKey: upload.actorKey, createdAt: now().toISOString() }));
       await repository.updateUpload(upload.key, { status: 'completed', errorCode: null, updatedAt: now().toISOString() });
-      await storage.delete(upload.storageKey).catch(() => undefined);
+      await Promise.all([storage.delete(upload.storageKey), storage.delete(stored[index]!.stagingKey)].map((cleanup) => cleanup.catch(() => undefined)));
     }));
     const finalizationErrors = finalized.filter((result): result is PromiseRejectedResult => result.status === 'rejected').map(({ reason }) => reason);
     if (finalizationErrors.length > 0) throw new AggregateError(finalizationErrors, 'Gallery upload batch finalization failed.');
@@ -104,11 +122,18 @@ export async function processGalleryUploadBatch(uploadKeys: readonly string[], d
   } catch (error) {
     const errorCode = error instanceof ImageProcessingError ? error.code : 'IMAGE_PROCESSING_FAILED';
     console.error('gallery upload batch processing failed', { uploadKeys, errorCode, durationMs: Math.round(performance.now() - startedAt), error });
-    await Promise.all(uploads.map(async (upload) => {
+    const terminalCleanupKeys = (await Promise.all(uploads.map(async (upload) => {
       const current = await repository.getUpload(upload.key).catch(() => null);
-      if (current?.status === 'completed') return;
-      await repository.updateUpload(upload.key, { status: dependencies.failureStatus ?? 'failed', errorCode, updatedAt: now().toISOString() });
-    }).map((update) => update.catch(() => undefined)));
+      if (current?.status === 'completed') return [];
+      if (failureStatus === 'failed') {
+        const failed = await repository.failUpload(upload.key, upload.scopeKey, errorCode, now().toISOString());
+        return failed ? [upload.storageKey] : [];
+      }
+      await repository.updateUpload(upload.key, { status: failureStatus, errorCode, updatedAt: now().toISOString() });
+      return [];
+    }).map((update) => update.catch(() => [])))).flat();
+    await Promise.all(stagedKeys.map((key) => storage.delete(key).catch(() => undefined)));
+    await Promise.all(terminalCleanupKeys.map((key) => storage.delete(key).catch(() => undefined)));
     throw error;
   }
 }

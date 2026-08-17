@@ -46,6 +46,7 @@ export function GalleryCaptureModal({ onClose, onSubmit }: Props) {
         filename: `gallery-${timestamp}.jpg`,
         uri: normalized.uri,
         sizeBytes: normalized.sizeBytes,
+        ...(normalized.latitude !== undefined && normalized.longitude !== undefined ? { latitude: normalized.latitude, longitude: normalized.longitude } : {}),
       };
       setFiles((current) => {
         const next = [...current, file].slice(0, MAX_GALLERY_CAPTURES);

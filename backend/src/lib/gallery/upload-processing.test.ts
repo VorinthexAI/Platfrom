@@ -7,9 +7,11 @@ import { processImages } from '@/lib/ai/image-processing';
 import { perceptualHashDistance, PERCEPTUAL_HASH_DUPLICATE_DISTANCE } from '@/lib/perceptual-hash';
 import type { GalleryRepository } from './repository';
 import { processGalleryUploadBatch } from './upload-processing';
+import { sanitizeGalleryImage } from './image-location';
 
 const now = '2026-08-17T12:00:00.000Z';
 const keys = ['cmrnlzf650002qc7k4p5zem5w', 'cmrnlzf650002qc7k4p5zem5x', 'cmrnlzf650002qc7k4p5zem5y'];
+const passthroughSanitizer: typeof sanitizeGalleryImage = async (bytes) => ({ bytes: new Uint8Array(bytes), coordinates: undefined });
 
 function upload(index: number): GalleryUpload {
   return galleryUploadSchema.parse({
@@ -24,12 +26,14 @@ function fixture() {
   const updates: Array<{ key: string; status?: string }> = [];
   const relations: string[] = [];
   const deleted: string[] = [];
+  const compensated: string[] = [];
   const repository = {
     async getUpload(key: string) { return uploads.get(key) ?? null; },
     async updateUpload(key: string, patch: Partial<GalleryUpload>) { const updated = galleryUploadSchema.parse({ ...uploads.get(key)!, ...patch }); uploads.set(key, updated); updates.push({ key, status: patch.status }); return updated; },
     async addImageToCollection(relation: { imageKey: string }) { relations.push(relation.imageKey); return relation; },
     async listIdentityMatches() { return []; },
     async persistIdentityMatches() {},
+    async failUpload(key: string, _scopeKey: string, errorCode: string, updatedAt: string) { const imageKey = uploads.get(key)!.imageKey; compensated.push(imageKey); await repository.updateUpload(key, { status: 'failed', errorCode, updatedAt }); return true; },
   } as unknown as GalleryRepository;
   const storage = {
     async upload({ key }: { key: string }) { return { storageKey: key }; },
@@ -37,20 +41,23 @@ function fixture() {
     async delete(key: string) { deleted.push(key); },
     async copy({ destinationKey }: { destinationKey: string }) { return { storageKey: destinationKey }; },
   };
-  return { uploads, updates, relations, deleted, repository, storage };
+  return { uploads, updates, relations, deleted, compensated, repository, storage };
 }
 
 describe('Gallery upload batch processing', () => {
   test('downloads one batch, captions unmatched images together, persists, and reports timing', async () => {
     const f = fixture();
     const captionRequests: string[][] = [];
+    let sanitized = 0;
     let measured = 0;
     const result = await processGalleryUploadBatch(keys, {
       repository: f.repository,
       storage: f.storage,
-      signImageUrl: async (key) => `https://images.example/${key}`,
+      sanitizeImage: async (bytes) => ({ bytes: new Uint8Array(bytes), coordinates: sanitized++ === 0 ? { latitude: 59.3293, longitude: 18.0686 } : undefined }),
+      reverseGeocode: async (coordinates) => { expect(coordinates).toEqual({ latitude: 59.3293, longitude: 18.0686 }); return { city: 'Stockholm', country: 'Sweden', countryCode: 'SE' }; },
       captionBatch: async (_organizationKey, urls) => { captionRequests.push(urls); return urls.map((_, index) => ({ caption: `Caption ${index + 1}`, score: 90 - index })); },
       processBatch: async (inputs, dependencies) => {
+        expect(inputs[0]?.location).toEqual({ city: 'Stockholm', country: 'Sweden', countryCode: 'SE' });
         const generated = await dependencies!.captionBatch!([inputs[0]!.file as any, inputs[2]!.file as any]);
         expect(generated.map(({ score }) => score)).toEqual([90, 89]);
         dependencies!.onMetrics?.({ count: 3, generated: 2, reused: 1, hashDurationMs: 4, captionDurationMs: 8, durationMs: 15 });
@@ -63,19 +70,23 @@ describe('Gallery upload batch processing', () => {
       onMetrics(metrics) { measured = metrics.durationMs; expect(metrics).toMatchObject({ count: 3, generated: 2, reused: 1, downloadDurationMs: expect.any(Number), persistDurationMs: expect.any(Number) }); },
     });
     expect(result).toEqual({ processed: 3 });
-    expect(captionRequests).toEqual([['https://images.example/pending/0.jpg', 'https://images.example/pending/2.jpg']]);
+    expect(captionRequests).toHaveLength(1);
+    expect(captionRequests[0]).toHaveLength(2);
+    expect(captionRequests[0]?.every((reference) => reference.startsWith('data:image/jpeg;base64,'))).toBe(true);
     expect(f.updates.filter(({ status }) => status === 'processing')).toHaveLength(3);
     expect(f.updates.filter(({ status }) => status === 'completed')).toHaveLength(3);
+    expect(f.uploads.get(keys[0]!)!).toMatchObject({ city: 'Stockholm', country: 'Sweden', countryCode: 'SE' });
     expect(f.relations).toHaveLength(3);
-    expect(f.deleted).toHaveLength(3);
+    expect(f.deleted).toHaveLength(6);
     expect(measured).toBeGreaterThan(0);
     expect(measured).toBeLessThan(1_000);
   });
 
   test('marks the whole retryable batch failed when processing fails', async () => {
     const f = fixture();
-    await expect(processGalleryUploadBatch(keys, { repository: f.repository, storage: f.storage, signImageUrl: async (key) => `https://images.example/${key}`, processBatch: async () => { throw new Error('temporary model failure'); } })).rejects.toThrow('temporary model failure');
+    await expect(processGalleryUploadBatch(keys, { repository: f.repository, storage: f.storage, resolveImageReference: async () => 'https://images.example/image.jpg', sanitizeImage: passthroughSanitizer, processBatch: async () => { throw new Error('temporary model failure'); } })).rejects.toThrow('temporary model failure');
     expect(f.updates.filter(({ status }) => status === 'failed')).toHaveLength(3);
+    expect(f.compensated).toHaveLength(3);
   });
 
   test('keeps completed siblings replayable when one upload fails finalization', async () => {
@@ -88,13 +99,14 @@ describe('Gallery upload batch processing', () => {
       return relation;
     };
     await expect(processGalleryUploadBatch(keys, {
-      repository: f.repository, storage: f.storage, signImageUrl: async (key) => `https://images.example/${key}`,
+      repository: f.repository, storage: f.storage, resolveImageReference: async () => 'https://images.example/image.jpg', sanitizeImage: passthroughSanitizer,
       processBatch: async () => imageKeys.map((key, index) => imageSchema.parse({ key, scopeKey, filename: `${index}.jpg`, caption: 'caption', imageCaptionKey: captionKeys[index], storageKey: `media/${index}`, mimeType: 'image/jpeg', sizeBytes: 4, width: 1, height: 1, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now })),
     })).rejects.toThrow('Gallery upload batch finalization failed');
     expect((await f.repository.getUpload(keys[0]))?.status).toBe('completed');
     expect((await f.repository.getUpload(keys[1]))?.status).toBe('failed');
     expect((await f.repository.getUpload(keys[2]))?.status).toBe('completed');
-    expect(f.deleted.sort()).toEqual(['pending/0.jpg', 'pending/2.jpg']);
+    expect(f.compensated).toEqual([imageKeys[1]]);
+    expect([...new Set(f.deleted)].sort()).toEqual(['pending/0.jpg', 'pending/0.jpg.sanitized.jpg', 'pending/1.jpg', 'pending/1.jpg.sanitized.jpg', 'pending/2.jpg', 'pending/2.jpg.sanitized.jpg']);
   });
 
   test('processes exact, near, and distinct S3 uploads with canonical scored-caption reuse', async () => {
@@ -126,7 +138,7 @@ describe('Gallery upload batch processing', () => {
     };
     let requestedCaptions = 0;
     await processGalleryUploadBatch(keys, {
-      repository, storage, signImageUrl: async (key) => `https://images.example/${key}`,
+      repository, storage, resolveImageReference: async () => 'https://images.example/image.jpg',
       captionBatch: async (_organization, urls) => { requestedCaptions += urls.length; return urls.map((_, index) => ({ caption: `Canonical ${index + 1}`, score: index === 0 ? 96 : 81 })); },
       processBatch: (inputs, dependencies) => processImages(inputs, {
         ...dependencies,
@@ -141,6 +153,11 @@ describe('Gallery upload batch processing', () => {
     expect(captions.map(({ score }) => score)).toEqual([96, 81]);
     expect(images[0].imageCaptionKey).toBe(images[1].imageCaptionKey);
     expect(images[2].imageCaptionKey).not.toBe(images[0].imageCaptionKey);
+    for (const image of images) {
+      const storedBytes = objects.get(image.storageKey)!;
+      expect(image.sizeBytes).toBe(storedBytes.byteLength);
+      expect((await sharp(storedBytes).metadata()).exif).toBeUndefined();
+    }
     expect([...uploads.values()].every(({ status }) => status === 'completed')).toBe(true);
     expect([...objects.keys()].filter((key) => key.startsWith('pending/'))).toEqual([]);
     expect([...objects.keys()].filter((key) => key.startsWith('media/'))).toHaveLength(3);

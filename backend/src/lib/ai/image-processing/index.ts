@@ -8,6 +8,8 @@ import { findReusableImageCaption, imageCaptionRecordSchema, PERCEPTUAL_HASH_ALG
 import { perceptualHashDistance, perceptualHashSegments, PERCEPTUAL_HASH_DUPLICATE_DISTANCE } from '@/lib/perceptual-hash';
 import { computePerceptualHashBatchDispatched } from './perceptual-hash-queue';
 import { newId } from '@/lib/ids';
+import type { ImageLocation } from '@/lib/gallery/image-location';
+import { buildImageEmbeddingText } from '@/lib/image-embedding';
 
 export const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 export const MAX_IMAGE_DIMENSION = 16_384;
@@ -16,7 +18,7 @@ export const OPENAI_VISION_MODEL = 'gpt-4.1-mini';
 const formats = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' } as const;
 type Extension = keyof typeof formats;
 export type UploadedImageFile = File | { filename: string; mimeType: string; sizeBytes: number; bytes: Uint8Array };
-export interface ProcessImageInput { scopeKey: string; ownerKey: string; file: UploadedImageFile; imageKey?: string; idempotencyKey?: string; signal?: AbortSignal; }
+export interface ProcessImageInput { scopeKey: string; ownerKey: string; file: UploadedImageFile; imageKey?: string; idempotencyKey?: string; location?: ImageLocation; signal?: AbortSignal; }
 export const generatedImageCaptionSchema = z.object({ caption: z.string().trim().min(1).max(20_000), score: z.number().int().min(1).max(100) }).strict();
 export type GeneratedImageCaption = z.infer<typeof generatedImageCaptionSchema>;
 export interface ImageProcessingMetrics { count: number; generated: number; reused: number; hashDurationMs: number; captionDurationMs: number; durationMs: number; }
@@ -136,7 +138,8 @@ async function execute(input: ProcessImageInput, image: ValidatedImage, perceptu
       try { generated = prepared?.generated ?? generatedImageCaptionSchema.parse(await (dependencies.caption ?? ((value) => captionImageWithOpenAI(value, dependencies.openAI)))({ filename: image.filename, mimeType: image.mimeType, bytes: image.bytes, signal: input.signal })); } catch (error) { throw new ImageProcessingError('IMAGE_CAPTION_FAILED', 'The image caption and score could not be generated.', { cause: error }); }
       caption = generated.caption;
       if (!caption) throw new ImageProcessingError('IMAGE_CAPTION_FAILED', 'The image caption must not be blank.');
-      try { embedding = prepared?.generated?.embedding ?? (dependencies.embed ? await dependencies.embed(`${image.filename}\n\n${caption}`, input.signal) : await embedText({ text: `${image.filename}\n\n${caption}`, signal: input.signal })); currentEmbeddingSchema.parse(embedding); } catch (error) { throw new ImageProcessingError('IMAGE_EMBEDDING_FAILED', `The image embedding must contain exactly ${EMBEDDING_DIMENSIONS} finite values.`, { cause: error }); }
+      const embeddingText = buildImageEmbeddingText({ filename: image.filename, caption });
+      try { embedding = prepared?.generated?.embedding ?? (dependencies.embed ? await dependencies.embed(embeddingText, input.signal) : await embedText({ text: embeddingText, signal: input.signal })); currentEmbeddingSchema.parse(embedding); } catch (error) { throw new ImageProcessingError('IMAGE_EMBEDDING_FAILED', `The image embedding must contain exactly ${EMBEDDING_DIMENSIONS} finite values.`, { cause: error }); }
       const now = new Date().toISOString();
       const segments = perceptualHashSegments(perceptualHash);
       captionRecord = imageCaptionRecordSchema.parse({
@@ -158,8 +161,12 @@ async function execute(input: ProcessImageInput, image: ValidatedImage, perceptu
       });
       canonical = captionRecord;
     }
+    if (input.location?.city || input.location?.country || input.location?.countryCode) {
+      const embeddingText = buildImageEmbeddingText({ filename: image.filename, caption, ...input.location });
+      try { embedding = dependencies.embed ? await dependencies.embed(embeddingText, input.signal) : await embedText({ text: embeddingText, signal: input.signal }); currentEmbeddingSchema.parse(embedding); } catch (error) { throw new ImageProcessingError('IMAGE_EMBEDDING_FAILED', `The image embedding must contain exactly ${EMBEDDING_DIMENSIONS} finite values.`, { cause: error }); }
+    }
     const now = new Date().toISOString();
-    try { return await persistImage({ image: { key, scopeKey: input.scopeKey, filename: image.filename, caption, imageCaptionKey: canonical.key, storageKey, mimeType: image.mimeType, sizeBytes: image.sizeBytes, width: image.width, height: image.height, embedding, isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now }, caption: captionRecord, actorKey: input.ownerKey }); } catch (error) { throw new ImageProcessingError('IMAGE_INSERT_FAILED', 'The prepared image could not be persisted.', { cause: error }); }
+    try { return await persistImage({ image: { key, scopeKey: input.scopeKey, filename: image.filename, caption, imageCaptionKey: canonical.key, storageKey, mimeType: image.mimeType, sizeBytes: image.sizeBytes, width: image.width, height: image.height, ...(input.location?.city ? { city: input.location.city } : {}), ...(input.location?.country ? { country: input.location.country } : {}), ...(input.location?.countryCode ? { countryCode: input.location.countryCode } : {}), embedding, isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now }, caption: captionRecord, actorKey: input.ownerKey }); } catch (error) { throw new ImageProcessingError('IMAGE_INSERT_FAILED', 'The prepared image could not be persisted.', { cause: error }); }
   } catch (error) {
     let owner: Image | null; try { owner = await getImage(key); } catch (ownershipError) { throw new ImageProcessingError('IMAGE_CLEANUP_FAILED', 'Image ownership could not be verified; the uploaded object was retained.', { cause: new AggregateError([error, ownershipError]) }); }
     if (owner?.storageKey === storageKey) { if (owner.scopeKey === input.scopeKey && owner.deletedAt === null) return owner; throw error; }
@@ -234,7 +241,8 @@ export async function processImages(inputs: readonly ProcessImageInput[], depend
     const generated = generatedCaptions[position]!;
     let embedding: number[];
     try {
-      embedding = dependencies.embed ? await dependencies.embed(`${validated[index]!.filename}\n\n${generated.caption}`, inputs[index]!.signal) : await embedText({ text: `${validated[index]!.filename}\n\n${generated.caption}`, signal: inputs[index]!.signal });
+      const embeddingText = buildImageEmbeddingText({ filename: validated[index]!.filename, caption: generated.caption });
+      embedding = dependencies.embed ? await dependencies.embed(embeddingText, inputs[index]!.signal) : await embedText({ text: embeddingText, signal: inputs[index]!.signal });
       currentEmbeddingSchema.parse(embedding);
     } catch (error) {
       throw new ImageProcessingError('IMAGE_EMBEDDING_FAILED', `The image embedding must contain exactly ${EMBEDDING_DIMENSIONS} finite values.`, { cause: error });

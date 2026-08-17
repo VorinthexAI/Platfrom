@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
-import { insertPreparedImageWithCaption, type Image } from './images.node';
+import { imageSchema, insertPreparedImageWithCaption, type Image } from './images.node';
 import type { ImageCaptionRecord } from './image-captions.node';
 
 const scopeKey = 'cmrnlzf640001qc7kazsr96k5';
@@ -40,6 +40,11 @@ function transactionRunner(queries: string[], existing?: ImageCaptionRecord) {
 }
 
 describe('prepared image caption transaction', () => {
+  test('accepts optional derived city and country without coordinates', () => {
+    expect(imageSchema.parse(image({ city: 'Stockholm', country: 'Sweden', countryCode: 'se' }))).toMatchObject({ city: 'Stockholm', country: 'Sweden', countryCode: 'SE' });
+    expect(() => imageSchema.parse(image({ countryCode: 'SWE' }))).toThrow();
+  });
+
   test('rechecks and converges on a canonical winner before inserting the image', async () => {
     const queries: string[] = [];
     const winner = caption({ key: 'cmrnlzf650002qc7k4p5zem5z', caption: 'Canonical winner.', embedding: embedding(0.9) });

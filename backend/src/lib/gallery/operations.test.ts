@@ -57,6 +57,12 @@ describe('Gallery operation boundaries', () => {
     expect(galleryOperationInputSchemas.overview.parse({ cursor: 'opaque', limit: 20 })).toEqual({ cursor: 'opaque', limit: 20 });
   });
 
+  test('accepts only complete image coordinate pairs', () => {
+    const file = { clientKey: 'local-1', filename: 'photo.jpg', sizeBytes: 1_024 };
+    expect(galleryOperationInputSchemas.reserveUploads.parse({ files: [{ ...file, latitude: 59.3293, longitude: 18.0686 }] })).toMatchObject({ files: [{ latitude: 59.3293, longitude: 18.0686 }] });
+    expect(() => galleryOperationInputSchemas.reserveUploads.parse({ files: [{ ...file, latitude: 59.3293 }] })).toThrow('both latitude and longitude');
+  });
+
   test('enforces mutually exclusive search sources', () => {
     expect(() => galleryOperationInputSchemas.search.parse({})).toThrow();
     expect(() => galleryOperationInputSchemas.search.parse({ query: 'dog', imageKey: key() })).toThrow();

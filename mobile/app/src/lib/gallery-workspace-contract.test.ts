@@ -2,11 +2,13 @@ import { expect, test } from "bun:test";
 
 const source = await Bun.file(new URL("../components/capability/GalleryWorkspace.tsx", import.meta.url)).text();
 const captureSource = await Bun.file(new URL("../components/capability/GalleryCaptureModal.tsx", import.meta.url)).text();
+const cameraSource = await Bun.file(new URL("../components/capability/BrandedCameraModal.tsx", import.meta.url)).text();
 
 test("keeps image similarity collection-scoped and outside the image footer", () => {
   const footer = source.slice(source.indexOf('const sheetFooter ='), source.indexOf('return (', source.indexOf('const sheetFooter =')));
   expect(footer).not.toContain("Find similar");
   expect(source).toContain("imageKey: source.key, collectionKey: collection.key");
+  expect(source).toContain("Image.prefetch(url)");
   expect(source).toContain("Similar to {similarSource.filename}");
   expect(source.indexOf(">Find similar image<")).toBeLessThan(source.indexOf(">Delete image<"));
 });
@@ -15,7 +17,15 @@ test("uses four-column cursor grids and one skeleton row for initial and append 
   expect(source).toContain("const IMAGE_COLUMNS = 4");
   expect(source).toContain("fetchGalleryOverview(collectionKey, cursor)");
   expect(source).toContain("Array.from({ length: IMAGE_COLUMNS }");
-  expect(source).toContain("loadingMore ? Array.from({ length: IMAGE_COLUMNS }");
+  expect(source).toContain("loadingMore ? <View style={styles.grid}>{Array.from({ length: IMAGE_COLUMNS }");
+});
+
+test("groups collection images by created date", () => {
+  expect(source).toContain("groupGalleryImagesByCreatedDate<GalleryGridItem>");
+  expect(source).toContain("createdAt: item.createdAt");
+  expect(source).toContain('entry.kind === "optimistic"');
+  expect(source).toContain("visibleImageGroups.map((group)");
+  expect(source).toContain("styles.dateHeading");
 });
 
 test("provides edit and confirmed delete flows for images and collections", () => {
@@ -24,14 +34,31 @@ test("provides edit and confirmed delete flows for images and collections", () =
   expect(source).toContain('activeSheet === "imageEdit"');
   expect(source).toContain('activeSheet === "collectionEdit"');
   expect(source).toContain('activeSheet === "duplicates"');
+  const imageMenuStart = source.indexOf('activeSheet === "imageActions" && selectedImage');
+  const imageMenu = source.slice(imageMenuStart, source.indexOf('activeSheet === "imageEdit"', imageMenuStart));
+  expect(imageMenu).not.toContain('toggleFavorite');
 });
 
-test("uses a singleton collection cache and Archive-style root Gallery search", () => {
+test("uses a singleton collection cache without root search or filtering", () => {
   expect(source).toContain("getGalleryCollections(queryClient");
   expect(source).toContain("setCachedGalleryCollections");
-  expect(source).toContain('accessibilityLabel="Search Gallery collections and images"');
-  expect(source).toContain('accessibilityLabel="Filter Gallery"');
+  expect(source).not.toContain('accessibilityLabel="Search Gallery collections and images"');
+  expect(source).not.toContain('accessibilityLabel="Filter Gallery"');
   expect(source).toContain('accessibilityLabel="Create in Gallery"');
+});
+
+test("only lifts Core for its own focus and uses distinct image sheet presentations", () => {
+  expect(source).toContain('behavior={aiInputFocused ? "height" : undefined}');
+  expect(source).toContain("setAiInputFocused(focused)");
+  expect(source).toContain('hideHeading={activeSheet === "imageActions" || activeSheet === "bulkActions"}');
+  expect(source).toContain('open={sheetOpen && (activeSheet === "image" || activeSheet === "imageActions") && Boolean(selectedImage)}');
+  expect(source).toContain("        mutation\n        onOpenChange");
+  expect(source).toContain('mutation={activeSheet === "imageEdit"');
+  expect(source).not.toContain('activeSheet === "imageActions" || activeSheet === "imageEdit"');
+  expect(source).not.toContain("detailCaption");
+  expect(source).toContain('accessibilityLabel="Open image actions"');
+  expect(source).toContain('footer={<Button onPress={closeSheet} size="lg" variant="secondary">Close</Button>}');
+  expect(source).toContain('if (activeSheetRef.current === "imageActions") goBackSheet(); else closeSheet();');
 });
 
 test("keeps collection forms to name and favorite state", () => {
@@ -48,6 +75,21 @@ test("provides the full visual identity library and image picker workflow", () =
   expect(source).toContain("createGallerySubject(name, [image.key])");
   expect(source).toContain("identityKey: identity.key");
   expect(source).toContain("creatingIdentityKeys.includes(identity.key)");
+  expect(source).toContain("setIdentityError(errorMessage(error))");
+  expect(source).toContain("identitiesLoading || creatingIdentityKeys.length > 0");
+  expect(source).toContain("Array.from({ length: COLLECTION_COLUMNS }");
+});
+
+test("uses separate image-selection and naming steps for visual identities", () => {
+  expect(source).toContain('activeSheet === "identityName"');
+  expect(source).toContain('onPress={() => pushSheet("identityName")}');
+  expect(source).toContain('placeholder="Name"');
+  expect(source).not.toContain("Name, for example Hugo");
+  expect(source).toContain('accessibilityLabel="Choose a different visual identity image"');
+  expect(source).toContain("returnToIdentityLibrary();");
+  expect(source).toContain("width: 88, height: 88");
+  expect(source).toContain('activeSheet === "identityName" && styles.fullSheetScroll');
+  expect(source.indexOf('accessibilityLabel="Back to collections"')).toBeLessThan(source.indexOf('accessibilityLabel="Search images for visual identity"'));
 });
 
 test("supports direct empty-state upload and twelve removable camera captures", () => {
@@ -56,7 +98,9 @@ test("supports direct empty-state upload and twelve removable camera captures", 
   expect(source).toContain('refetchType: "none"');
   expect(captureSource).toContain("MAX_GALLERY_CAPTURES = 12");
   expect(captureSource).toContain("normalizeCapturedJpeg");
+  expect(captureSource).toContain("normalized.latitude");
   expect(captureSource).toContain("Remove image");
+  expect(cameraSource).toContain("exif: true");
 });
 
 test("allows duplicate exclusions and optimistic visual identity deletion", () => {
@@ -64,4 +108,17 @@ test("allows duplicate exclusions and optimistic visual identity deletion", () =
   expect(source).toContain('pushSheet("confirmDeleteIdentity")');
   expect(source).toContain("deleteGallerySubject(identity.key)");
   expect(source.indexOf("setSubjects((current) => current.filter")).toBeLessThan(source.indexOf("deleteGallerySubject(identity.key)"));
+});
+
+test("uses standard right-side close controls and only hides the compact image action heading", () => {
+  const previewStart = source.indexOf("<BottomSheet");
+  const preview = source.slice(previewStart, source.indexOf("\n      >", previewStart));
+  const sheetStart = source.indexOf("<BottomSheet", previewStart + preview.length);
+  const sheet = source.slice(sheetStart, source.indexOf("\n      >", sheetStart));
+  expect(preview).toContain('title={selectedImage?.filename ?? "Image"}');
+  expect(sheet).toContain("title={sheetTitle}");
+  expect(`${preview}${sheet}`).not.toContain("headerLeading");
+  expect(`${preview}${sheet}`).not.toContain("headerTrailing");
+  expect(`${preview}${sheet}`).not.toContain("hideCloseButton");
+  expect(sheet).toContain('hideHeading={activeSheet === "imageActions" || activeSheet === "bulkActions"}');
 });

@@ -19,10 +19,9 @@ test('preserves ordered pages and reconciles Textract with visual transcription'
   }, 'organization', {
     storage,
     ocr: { extract: async (key) => ({ extractedText: `textract:${key.at(-5)}`, blocks: [], metadata: {} }) },
-    signUrl: async (key) => `https://images.example/${key}`,
     caption: async (input: any) => {
       captionInputs.push(input);
-      const first = input.imageUrls[0].includes('page-01');
+      const first = Buffer.from(input.imageUrls[0].split(',')[1], 'base64').at(-1) === 1;
       return { results: [{ caption: input.purpose === 'document-transcription' ? first ? 'visual one' : 'visual two' : first ? 'final one' : 'final two', score: 80 }] };
     },
   });
@@ -30,7 +29,8 @@ test('preserves ordered pages and reconciles Textract with visual transcription'
   expect(uploaded[0]).toContain('/scan/page-01.jpg');
   expect(captionInputs.filter(({ purpose }) => purpose === 'document-transcription')).toHaveLength(2);
   expect(captionInputs.filter(({ purpose }) => purpose === 'document-reconciliation')).toHaveLength(2);
-  expect(captionInputs.find((input) => input.purpose === 'document-reconciliation' && input.imageUrls[0].includes('page-01')).referenceTexts[0]).toMatchObject({ secondary: 'visual one' });
+  expect(captionInputs.find((input) => input.purpose === 'document-reconciliation' && Buffer.from(input.imageUrls[0].split(',')[1], 'base64').at(-1) === 1).referenceTexts[0]).toMatchObject({ secondary: 'visual one' });
+  expect(captionInputs.every((input) => input.imageUrls[0].startsWith('data:image/jpeg;base64,'))).toBe(true);
   expect(output.content).toBe('Page 1\n\nfinal one\n\nPage 2\n\nfinal two');
   expect(output.storageKeys).toEqual(uploaded);
 });
@@ -40,7 +40,6 @@ test('cleans retained scan objects when processing fails', async () => {
   await expect(scanDocumentImages({ scopeKey: newId(), pages: [{ filename: '1.jpg', mimeType: 'image/jpeg', sizeBytes: 4, bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]) }], idempotencyKey: 'failed' }, 'organization', {
     storage: { async upload(input) { return { storageKey: input.key }; }, async delete(key) { deleted.push(key); }, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
     ocr: { extract: async () => { throw new Error('offline'); } },
-    signUrl: async () => 'https://images.example/page.jpg',
     caption: async () => ({ results: [{ caption: 'visual', score: 80 }] }),
   })).rejects.toThrow('offline');
   expect(deleted).toHaveLength(1);
@@ -55,7 +54,6 @@ test('creates OCR content when the visual provider is unavailable', async () => 
   }, 'organization', {
     storage: { async upload(input) { return { storageKey: input.key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
     ocr: { extract: async () => ({ extractedText: 'Reliable Textract text', blocks: [], metadata: { averageConfidence: 99, minimumConfidence: 98 } }) },
-    signUrl: async () => { throw new Error('high-confidence OCR should not require a URL'); },
     caption: async () => { captionCalls += 1; throw new Error('visual provider unavailable'); },
   });
   expect(output.content).toBe('Reliable Textract text');
@@ -70,7 +68,6 @@ test('uses OCR content when visual reconciliation fails', async () => {
   }, 'organization', {
     storage: { async upload(input) { return { storageKey: input.key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
     ocr: { extract: async () => ({ extractedText: 'Primary OCR', blocks: [], metadata: {} }) },
-    signUrl: async () => 'https://images.example/page.jpg',
     caption: async (input: any) => {
       if (input.purpose === 'document-transcription') return { results: [{ caption: 'Visual OCR', score: 80 }] };
       throw new Error('reconciliation unavailable');
@@ -95,7 +92,6 @@ test('finishes parallel OCR before starting visual work only for uncertain pages
   }, 'organization', {
     storage: { async upload(input) { return { storageKey: input.key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
     ocr: { extract: async () => { ocrStarted += 1; if (ocrStarted === pageCount) allOcrStarted(); await extractionGate; return { extractedText: 'primary', blocks: [], metadata: {} }; } },
-    signUrl: async (key) => `https://images.example/${key}`,
     caption: async (input: any) => {
       if (input.purpose === 'document-transcription') { visualStarted += 1; return { results: [{ caption: 'secondary', score: 80 }] }; }
       reconciliationStarted += 1;

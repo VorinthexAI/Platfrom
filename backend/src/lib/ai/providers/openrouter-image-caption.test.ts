@@ -45,6 +45,7 @@ describe('OpenRouter image captions', () => {
 
   test('sends all images in one ordered multimodal request and returns scored results', async () => {
     let body: Record<string, any> = {};
+    const inlineImage = 'data:image/jpeg;base64,/9j/2Q==';
     globalThis.fetch = (async (_input, init) => {
       body = JSON.parse(String(init?.body));
       return Response.json(completion(JSON.stringify({ results: [
@@ -57,14 +58,14 @@ describe('OpenRouter image captions', () => {
       actionId: 'caption-image',
       modelId: IMAGE_CAPTION_MODEL,
       externalModelId: IMAGE_CAPTION_EXTERNAL_MODEL_ID,
-      input: { imageUrls: ['https://cdn.example.com/one.jpg', 'https://cdn.example.com/two.jpg'] },
+      input: { imageUrls: [inlineImage, 'https://cdn.example.com/two.jpg'] },
       organizationKey: 'organization-key',
     });
 
     expect(body.model).toBe(IMAGE_CAPTION_EXTERNAL_MODEL_ID);
     expect(body.messages).toHaveLength(1);
     expect(body.messages[0].content.filter((part: { type: string }) => part.type === 'image_url')).toEqual([
-      { type: 'image_url', image_url: { url: 'https://cdn.example.com/one.jpg', detail: 'high' } },
+      { type: 'image_url', image_url: { url: inlineImage, detail: 'high' } },
       { type: 'image_url', image_url: { url: 'https://cdn.example.com/two.jpg', detail: 'high' } },
     ]);
     expect(body.messages[0].content[0].text).toContain('resolution, focus and clarity, lighting and exposure, visible detail, composition, and artifacts');
@@ -80,7 +81,8 @@ describe('OpenRouter image captions', () => {
         properties: { score: { type: 'integer', minimum: 1, maximum: 100 } },
       },
     });
-    expect(body.provider).toEqual({ data_collection: 'deny', zdr: true });
+    expect(body.provider).toEqual({ data_collection: 'deny' });
+    expect(body.provider).not.toHaveProperty('zdr');
     expect(result.output).toEqual({ results: [
       { caption: 'A detailed first scene.', score: 91 },
       { caption: 'A detailed second scene.', score: 74 },
@@ -106,7 +108,8 @@ describe('OpenRouter image captions', () => {
     expect(body.messages[0].content.filter((part: { type: string }) => part.type === 'image_url')).toHaveLength(2);
     expect(body.messages[0].content[0].text).toContain('stable visible identifier');
     expect(body.response_format.json_schema.name).toBe('visual_identity_description');
-    expect(body.provider).toEqual({ data_collection: 'deny', zdr: true });
+    expect(body.provider).toEqual({ data_collection: 'deny' });
+    expect(body.provider).not.toHaveProperty('zdr');
     expect(result.output).toEqual({ description: 'A black dog with a white chest blaze and a notch in the left ear.' });
   });
 

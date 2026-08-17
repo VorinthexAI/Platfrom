@@ -11,6 +11,7 @@ import type { getUserOrganizationByOrganizationAndUser } from '@/lib/db/user-org
 import { imageSearchInputSchema, imageSearchTool } from '@/lib/ai/tools/image-search';
 import { imageCreateVisualIdentityTool } from '@/lib/ai/tools/image-create-visual-identity';
 import { currentEmbeddingSchema, embedText } from '@/lib/embeddings';
+import { buildImageEmbeddingText } from '@/lib/image-embedding';
 import { newId } from '@/lib/ids';
 import { getDefaultGalleryRepository } from './repository';
 import { createPublicS3Client, s3, S3_BUCKET } from '@/lib/s3';
@@ -18,6 +19,8 @@ import { strictObject } from '@/api/validation';
 import { signedImageUrl } from './image-url';
 import { getDefaultUserSearchService } from '@/lib/user-searches/service';
 import { enqueueGalleryUploadBatch } from './upload-queue';
+import { reverseGeocodeImage } from './image-location';
+import { storedImageDataUrl } from './image-reference';
 import { cursorPaginationInputShape } from '@/lib/cursor-pagination';
 
 const overviewSchema = strictObject({ collectionKey: z.string().cuid().optional(), ...cursorPaginationInputShape });
@@ -25,7 +28,9 @@ const collectionCreateSchema = strictObject({ name: z.string().trim().min(1).max
 const collectionUpdateSchema = strictObject({ collectionKey: z.string().cuid(), name: z.string().trim().min(1).max(120), isFavorite: z.boolean() });
 const collectionDeleteSchema = strictObject({ collectionKey: z.string().cuid() });
 const imageUpdateSchema = strictObject({ imageKey: z.string().cuid(), name: z.string().trim().min(1).max(255).refine((name) => !name.includes('/') && !name.includes('\\'), 'Image name cannot contain path separators.'), isFavorite: z.boolean() });
-const uploadFileSchema = strictObject({ clientKey: z.string().min(1).max(120), filename: z.string().trim().regex(/^[^/\\]+\.jpe?g$/i), sizeBytes: z.number().int().positive().max(20 * 1024 * 1024), processingMode: z.enum(['library', 'cover']).default('library') });
+const uploadFileSchema = strictObject({ clientKey: z.string().min(1).max(120), filename: z.string().trim().regex(/^[^/\\]+\.jpe?g$/i), sizeBytes: z.number().int().positive().max(20 * 1024 * 1024), processingMode: z.enum(['library', 'cover']).default('library'), latitude: z.number().finite().min(-90).max(90).optional(), longitude: z.number().finite().min(-180).max(180).optional() }).superRefine((value, context) => {
+  if ((value.latitude === undefined) !== (value.longitude === undefined)) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Image coordinates require both latitude and longitude.' });
+});
 const presignSchema = strictObject({ collectionKey: z.string().cuid().nullable().optional(), files: z.array(uploadFileSchema).min(1).max(20) });
 const completeSchema = strictObject({ uploadKeys: z.array(z.string().cuid()).min(1).max(20) });
 const searchSchema = imageSearchInputSchema;
@@ -88,6 +93,7 @@ async function safeImage(image: z.infer<typeof imageSchema>, score?: number) {
   return {
     key: image.key, filename: image.filename, caption: image.caption, imageCaptionKey: image.imageCaptionKey ?? null,
     mimeType: image.mimeType, sizeBytes: image.sizeBytes, width: image.width, height: image.height,
+    city: image.city ?? null, country: image.country ?? null, countryCode: image.countryCode ?? null,
     isFavorite: image.isFavorite, createdAt: image.createdAt, updatedAt: image.updatedAt,
     url: await imageUrl(image.storageKey), ...(score === undefined ? {} : { score }),
   };
@@ -163,7 +169,8 @@ async function updateImageDetails(rawInput: unknown, context: GalleryOperationCo
     if (!await repository.ownsImage(input.scopeKey, input.imageKey, membership.key)) throw new GalleryOperationError(404, 'GALLERY_IMAGE_NOT_FOUND', 'Image not found.');
     const previous = await repository.getImage(input.imageKey);
     if (!previous || previous.scopeKey !== input.scopeKey || previous.deletedAt) throw new GalleryOperationError(404, 'GALLERY_IMAGE_NOT_FOUND', 'Image not found.');
-    const image = await repository.updateImageDetails(input.scopeKey, input.imageKey, input.name, input.isFavorite, currentEmbeddingSchema.parse(await embedText({ text: `${input.name}\n\n${previous.caption}` })), new Date().toISOString());
+    const embeddingText = buildImageEmbeddingText({ filename: input.name, caption: previous.caption, city: previous.city, country: previous.country, countryCode: previous.countryCode });
+    const image = await repository.updateImageDetails(input.scopeKey, input.imageKey, input.name, input.isFavorite, currentEmbeddingSchema.parse(await embedText({ text: embeddingText })), new Date().toISOString());
     if (!image) throw new GalleryOperationError(404, 'GALLERY_IMAGE_NOT_FOUND', 'Image not found.');
     return { image: await safeImage(image) };
 }
@@ -173,10 +180,12 @@ async function reserveUploads(rawInput: unknown, context: GalleryOperationContex
     const membership = await authorize(context);
     if (input.collectionKey) { const collection = await repository.getCollection(input.scopeKey, input.collectionKey); if (!collection) throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.'); }
     const now = new Date();
-    const uploads = await Promise.all(input.files.map(async (file) => {
+    const locations = await Promise.all(input.files.map((file) => file.latitude === undefined || file.longitude === undefined ? undefined : reverseGeocodeImage({ latitude: file.latitude, longitude: file.longitude })));
+    const uploads = await Promise.all(input.files.map(async (file, index) => {
       const key = newId(), imageKey = newId();
       const storageKey = `pending/gallery/${input.scopeKey}/${key}/original.jpg`;
-      const record = galleryUploadSchema.parse({ key, organizationKey: input.organizationKey, scopeKey: input.scopeKey, actorKey: membership.key, imageKey, collectionKey: input.collectionKey ?? null, filename: file.filename.replace(/\.jpeg$/i, '.jpg'), mimeType: 'image/jpeg', sizeBytes: file.sizeBytes, storageKey, processingMode: file.processingMode, status: 'reserved', errorCode: null, createdAt: now.toISOString(), updatedAt: now.toISOString(), expiresAt: new Date(now.getTime() + 15 * 60_000).toISOString() });
+      const location = locations[index];
+      const record = galleryUploadSchema.parse({ key, organizationKey: input.organizationKey, scopeKey: input.scopeKey, actorKey: membership.key, imageKey, collectionKey: input.collectionKey ?? null, filename: file.filename.replace(/\.jpeg$/i, '.jpg'), mimeType: 'image/jpeg', sizeBytes: file.sizeBytes, storageKey, processingMode: file.processingMode, city: location?.city ?? null, country: location?.country ?? null, countryCode: location?.countryCode ?? null, status: 'reserved', errorCode: null, createdAt: now.toISOString(), updatedAt: now.toISOString(), expiresAt: new Date(now.getTime() + 15 * 60_000).toISOString() });
       await repository.insertUpload(record);
       const url = await signUrl(publicS3, new PutObjectCommand({ Bucket: S3_BUCKET, Key: storageKey, ContentType: 'image/jpeg' }), { expiresIn: 10 * 60 });
       return { clientKey: file.clientKey, uploadKey: key, imageKey, url, headers: { 'Content-Type': 'image/jpeg' } };
@@ -223,6 +232,7 @@ async function search(rawInput: unknown, context: GalleryOperationContext) {
     if ('identityKey' in input) {
       sourceIdentity = await repository.getVisualIdentity(input.scopeKey, input.identityKey, membership.key) ?? undefined;
       if (!sourceIdentity) throw new GalleryOperationError(404, 'GALLERY_SUBJECT_NOT_FOUND', 'Visual identity not found.');
+      await reconcileVisualIdentity(sourceIdentity, input.organizationKey, membership.key);
     }
     const toolInput = searchSchema.parse(rawInput);
     const resolvedImages = new Map<string, z.infer<typeof imageSchema>>();
@@ -244,6 +254,11 @@ async function search(rawInput: unknown, context: GalleryOperationContext) {
         const images = await repository.listRedundantCollectionImages(scopeKey, collectionKey);
         for (const image of images) resolvedImages.set(image.key, image);
         return images;
+      },
+      listVisualIdentityImages: async (scopeKey, identityKey, collectionKey) => {
+        const rows = await repository.listSubjectImages(scopeKey, identityKey, collectionKey);
+        for (const row of rows) resolvedImages.set(row.image.key, row.image);
+        return rows;
       },
     });
     let matches: Array<{ image: z.infer<typeof imageSchema>; score?: number }> = await Promise.all(output.images.map(async ({ key, score }) => {
@@ -314,7 +329,7 @@ async function createSubject(rawInput: unknown, context: GalleryOperationContext
       if (!image || image.scopeKey !== input.scopeKey || image.deletedAt) throw new GalleryOperationError(404, 'GALLERY_IMAGE_NOT_FOUND', 'Reference image not found.');
       return image;
     }));
-    const profile = await imageCreateVisualIdentityTool.execute({ imageUrls: await Promise.all(references.map(({ storageKey }) => imageUrl(storageKey))) }, { organizationKey: input.organizationKey, signal: context.signal });
+    const profile = await imageCreateVisualIdentityTool.execute({ imageUrls: await Promise.all(references.map(({ storageKey, mimeType }) => storedImageDataUrl(storageKey, mimeType))) }, { organizationKey: input.organizationKey, signal: context.signal });
     const now = new Date().toISOString();
     const embedding = currentEmbeddingSchema.parse(await embedText({ text: `${input.name}\n\n${profile.description}` }));
     const identity = visualIdentitySchema.parse({ key: newId(), scopeKey: input.scopeKey, name: input.name, description: profile.description, referenceImageKey: references[0]!.key, embedding, deletedAt: null, createdAt: now, updatedAt: now });

@@ -173,16 +173,16 @@ describe('image.search tool', () => {
     await expect(imageSearchTool.execute({ imageKey: sourceKey }, { context: toolContext, getImage: async () => source, canAccessImage: async () => false })).rejects.toThrow('not found');
   });
 
-  test('finds images ordered against an authorized visual identity without a caller threshold or limit', async () => {
+  test('finds persisted images for an authorized visual identity within the requested collection', async () => {
     const toolContext = context();
     const identityKey = newId(), collectionKey = newId();
-    let searched: any;
+    let listed: any;
     let metrics: { mode: string; resultCount: number; durationMs: number } | undefined;
     const identity = {
       key: identityKey, scopeKey: toolContext.runtimeScopeKey, name: 'Alex', description: 'A person wearing a blue coat.',
       referenceImageKey: newId(), embedding, deletedAt: null, createdAt: now, updatedAt: now,
     };
-    const first = result(toolContext.runtimeScopeKey), second = { ...result(toolContext.runtimeScopeKey), score: 0.81 };
+    const first = { image: result(toolContext.runtimeScopeKey).image, confidence: 1 }, second = { image: result(toolContext.runtimeScopeKey).image, confidence: 0.81 };
     const output = await imageSearchTool.execute({ identityKey, collectionKey }, {
       context: toolContext,
       canAccessCollection: async () => true,
@@ -191,18 +191,14 @@ describe('image.search tool', () => {
         expect({ scopeKey, key, actorKey }).toEqual({ scopeKey: toolContext.runtimeScopeKey, key: identityKey, actorKey: (toolContext.principal as any).userOrganization.key });
         return identity;
       },
-      async searchImages(input) { searched = input; return [first, second]; },
+      async listVisualIdentityImages(scopeKey, key, requestedCollectionKey) { listed = { scopeKey, key, collectionKey: requestedCollectionKey }; return [first, second]; },
       onMetrics(value) { metrics = value; },
     });
-    expect(searched).toEqual({
-      organizationKey: toolContext.organizationKey,
+    expect(listed).toEqual({
       scopeKey: toolContext.runtimeScopeKey,
-      actorKey: (toolContext.principal as any).userOrganization.key,
       collectionKey,
-      embedding,
-      limit: 500,
+      key: identityKey,
     });
-    expect(searched).not.toHaveProperty('threshold');
     expect(output.images.map(({ key }) => key)).toEqual([first.image.key, second.image.key]);
     expect(metrics).toMatchObject({ mode: 'identity', resultCount: 2 });
     expect(metrics!.durationMs).toBeLessThan(1_000);

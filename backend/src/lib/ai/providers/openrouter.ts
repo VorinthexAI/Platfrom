@@ -153,13 +153,13 @@ async function captionImages<TInput, TOutput>(
 
   try {
     const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming & {
-      provider: { data_collection: 'deny'; zdr: true };
+      provider: { data_collection: 'deny' };
     } = {
       model: request.externalModelId,
       messages: [{ role: 'user', content }],
       temperature: 0.2,
       max_tokens: Math.min(input.imageUrls.length * (input.purpose === 'caption' ? 300 : 1_500), 16_000),
-      provider: { data_collection: 'deny', zdr: true },
+      provider: { data_collection: 'deny' },
       response_format: {
         type: 'json_schema',
         json_schema: {
@@ -267,11 +267,11 @@ async function describeVisualIdentity<TInput, TOutput>(
       messages: [{ role: 'user', content }],
       temperature: 0.1,
       max_tokens: 2_000,
-      provider: { data_collection: 'deny', zdr: true },
+      provider: { data_collection: 'deny' },
       response_format: { type: 'json_schema', json_schema: { name: 'visual_identity_description', strict: true, schema: {
         type: 'object', additionalProperties: false, required: ['description'], properties: { description: { type: 'string', minLength: 1, maxLength: 12_000 } },
       } } },
-    } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming & { provider: { data_collection: 'deny'; zdr: true } }, { signal: resolveRequestSignal(request) });
+    } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming & { provider: { data_collection: 'deny' } }, { signal: resolveRequestSignal(request) });
     const rawContent = completion.choices[0]?.message.content;
     if (!rawContent) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter visual identity description returned no content');
     let output: VisualIdentityDescriptionOutput;

@@ -43,6 +43,7 @@ export interface ImageSearchToolDependencies extends ExecuteActionOptions {
   canAccessCollection?: GalleryRepository['canAccessCollection'];
   getCollection?: GalleryRepository['getCollection'];
   findDuplicateImages?: GalleryRepository['listRedundantCollectionImages'];
+  listVisualIdentityImages?: GalleryRepository['listSubjectImages'];
   onMetrics?: (metrics: { mode: 'text' | 'similar' | 'identity' | 'duplicates'; resultCount: number; durationMs: number }) => void;
 }
 
@@ -88,15 +89,8 @@ export const imageSearchTool = {
     if ('identityKey' in input) {
       const identity = await (dependencies.getVisualIdentity ?? repository.getVisualIdentity)(scopeKey, input.identityKey, actorKey);
       if (!identity) throw new Error('Visual identity not found.');
-      const results = await (dependencies.searchImages ?? repository.searchAccessibleImages)({
-        organizationKey,
-        scopeKey,
-        actorKey,
-        embedding: identity.embedding,
-        ...(input.collectionKey ? { collectionKey: input.collectionKey } : {}),
-        limit: 500,
-      });
-      return finish('identity', imageSimilarityOutput(results));
+      const matches = await (dependencies.listVisualIdentityImages ?? repository.listSubjectImages)(scopeKey, identity.key, input.collectionKey);
+      return finish('identity', imageSimilarityOutput(matches.map(({ image, confidence }) => ({ image, score: confidence }))));
     }
     if ('imageKey' in input) {
       const source = await (dependencies.getImage ?? repository.getImage)(input.imageKey);
