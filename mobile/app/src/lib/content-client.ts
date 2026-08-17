@@ -704,13 +704,14 @@ export function searchContent(query: string, folderKey?: string, includeDescenda
   });
 }
 
-export async function searchContentMatches(query: string, signal?: AbortSignal, folderKey?: string) {
+export async function searchContentMatches(query: string, signal?: AbortSignal, folderKey?: string, recordHistory = true) {
   const contentContext = getContentContext();
   return callContentTool<ContentSearchResponse>("scope.content.search", {
     scopeKey: contentContext.scopeKey,
     query,
     includeSummaries: false,
     minimumScore: 0.55,
+    ...(!recordHistory ? { recordHistory: false } : {}),
     ...(folderKey ? { folderKey, includeDescendants: true } : {}),
   }, signal);
 }

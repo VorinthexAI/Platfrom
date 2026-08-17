@@ -2200,22 +2200,26 @@ export function KnowledgeWorkspace() {
     const timeout = setTimeout(() => {
       setRootSearching(true);
       setError(undefined);
-      void searchContentMatches(normalized, controller.signal).then((matches) => {
+      void searchContentMatches(normalized, controller.signal, undefined, false).then((matches) => {
         if (!controller.signal.aborted) {
           setRootSearchResults(matches);
-          void invalidateContentHistories(queryClient, contentContext, [undefined]);
         }
       }).catch((cause) => {
         if (!controller.signal.aborted) {
           setError(cause instanceof Error ? cause.message : "Search failed.");
-          void invalidateContentHistories(queryClient, contentContext, [undefined]);
         }
       }).finally(() => {
         if (!controller.signal.aborted) setRootSearching(false);
       });
     }, 300);
+    const historyTimeout = setTimeout(() => {
+      void searchContentMatches(normalized, controller.signal).then(() => {
+        if (!controller.signal.aborted) void invalidateContentHistories(queryClient, contentContext, [undefined]);
+      }).catch(() => undefined);
+    }, 800);
     return () => {
       clearTimeout(timeout);
+      clearTimeout(historyTimeout);
       controller.abort();
     };
   }, [hasContentContext, rootSearchQuery, rootSearchRevision]);
@@ -2235,22 +2239,26 @@ export function KnowledgeWorkspace() {
     const timeout = setTimeout(() => {
       setFolderSearching(true);
       setError(undefined);
-      void searchContentMatches(normalized, controller.signal, folderKey).then((matches) => {
+      void searchContentMatches(normalized, controller.signal, folderKey, false).then((matches) => {
         if (!controller.signal.aborted) {
           setFolderSearchResults(matches);
-          void invalidateContentHistories(queryClient, contentContext, [folderKey]);
         }
       }).catch((cause) => {
         if (!controller.signal.aborted) {
           setError(cause instanceof Error ? cause.message : "Search failed.");
-          void invalidateContentHistories(queryClient, contentContext, [folderKey]);
         }
       }).finally(() => {
         if (!controller.signal.aborted) setFolderSearching(false);
       });
     }, 300);
+    const historyTimeout = setTimeout(() => {
+      void searchContentMatches(normalized, controller.signal, folderKey).then(() => {
+        if (!controller.signal.aborted) void invalidateContentHistories(queryClient, contentContext, [folderKey]);
+      }).catch(() => undefined);
+    }, 800);
     return () => {
       clearTimeout(timeout);
+      clearTimeout(historyTimeout);
       controller.abort();
     };
   }, [currentFolder?.key, folderSearchRevision, hasContentContext, query]);

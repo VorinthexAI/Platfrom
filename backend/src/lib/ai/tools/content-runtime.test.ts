@@ -725,6 +725,8 @@ describe('Content runtime', () => {
       embed: async () => { embeddingCalls += 1; return embedding; },
       runAction: async (action: string, input: any) => { summaryCalls += 1; expect(action).toBe('reason'); const parsed = chatInputSchema.parse(input); const text = parsed.messages[0]?.content[0]?.type === 'text' ? parsed.messages[0].content[0].text : ''; expect(text).toContain('Launch Roadmap'); return { text: 'Relevant to Launch Roadmap' }; },
     };
+    await runContentTool('scope.content.search', { scopeKey: f.scopeKey, query: 'Roadmap content', includeSummaries: false, recordHistory: false }, f.context, dependencies);
+    expect(rows).toHaveLength(0);
     const first = await runContentTool('scope.content.search', { scopeKey: f.scopeKey, query: 'Launch Roadmap' }, f.context, dependencies);
     expect(first.folders).toHaveLength(4);
     expect(first.folders.every((item) => item.score >= 0.55)).toBe(true);

@@ -429,6 +429,13 @@ test("runs fast combined search without summaries", async () => {
   expect(calls[0]?.body.input).toEqual({ scopeKey: "scope-authenticated", query: "roadmap", includeSummaries: false, minimumScore: 0.55 });
 });
 
+test("can search without recording history", async () => {
+  responseForTool = () => ({ data: { success: true, data: { query: "roadmap", cached: false, folders: [], documents: [] } } });
+
+  await searchContentMatches("roadmap", undefined, undefined, false);
+  expect(calls[0]?.body.input).toMatchObject({ query: "roadmap", recordHistory: false });
+});
+
 test("finds semantic neighbors from exactly one Content source", async () => {
   const neighbors = { folders: [{ key: "folder", name: "Related" }], documents: [], files: [] };
   responseForTool = (tool) => tool === "content.neighbors" ? { data: { success: true, data: neighbors } } : undefined;
