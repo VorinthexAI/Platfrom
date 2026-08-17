@@ -185,10 +185,6 @@ function documentDisplayName(document: Pick<ContentDocument, "name" | "extension
   return `${document.name}.${document.extension}`;
 }
 
-function translationTargetFromPrompt(prompt: string, fallback: string) {
-  return /\bto\s+(.+?)(?=\s+while\b|\s+and\s+preserv|[.,]|$)/i.exec(prompt)?.[1]?.trim().slice(0, 100) || fallback;
-}
-
 function generatedVersionType(version: ContentDocumentVersion): ContentDocumentVersion["type"] {
   if (version.type) return version.type;
   if (/enhanc/i.test(version.label ?? "")) return "enhancement";
@@ -1266,15 +1262,11 @@ export function KnowledgeWorkspace() {
 
   const updateDocumentTransformationPrompt = (prompt: string) => {
     setDocumentTransformationPrompt(prompt);
-    if (documentTransformation !== "translate") return;
-    const target = translationTargetFromPrompt(prompt, "");
-    if (target) setTranslationTargetLanguage(target);
   };
 
   const updateTranslationTargetLanguage = (language: string) => {
     setTranslationTargetLanguage(language);
-    if (!language.trim()) return;
-    setDocumentTransformationPrompt((prompt) => prompt.replace(/\bto\s+(.+?)(?=\s+while\b|\s+and\s+preserv|[.,]|$)/i, `to ${language}`));
+    setDocumentTransformationPrompt(`Translate this document to ${language.trim()} while preserving its meaning, facts, tone, and structure.`);
   };
 
   const generateDocumentTransformation = async () => {
@@ -3376,8 +3368,7 @@ export function KnowledgeWorkspace() {
   function mutationFooter() {
     const close = (disabled: boolean) => <Button disabled={disabled} onPress={() => closeSheet()} size="lg" variant="secondary">Close</Button>;
     if (activeSheet === "transform") return <>
-      <Text style={styles.footerHint}>You can change the prompt{documentTransformation === "translate" ? " or adjust the language" : ""} to your preferences.</Text>
-      <Button disabled={!documentTransformationPrompt.trim() || documentTransformation === "translate" && !translationTargetLanguage.trim() || !documentKeyRef.current || saveState !== "saved"} onPress={() => void generateDocumentTransformation()} size="lg" variant="primary">Generate</Button>
+      <Button disabled={!documentKeyRef.current || saveState !== "saved" || (documentTransformation === "enhance" ? !documentTransformationPrompt.trim() : !translationTargetLanguage.trim())} onPress={() => void generateDocumentTransformation()} size="lg" variant="primary">Generate</Button>
       {close(false)}
     </>;
     if (activeSheet === "versions") return <>
@@ -3964,19 +3955,18 @@ export function KnowledgeWorkspace() {
         ) : null}
         {activeSheet === "transform" ? <View style={styles.transformationForm}>
           {documentTransformation === "translate" ? <><Text style={styles.inputLabel}>Language</Text><TextInput accessibilityLabel="Translation language" maxLength={100} onChangeText={updateTranslationTargetLanguage} placeholder="Language" value={translationTargetLanguage} /></> : null}
-          <Text style={styles.inputLabel}>Prompt</Text>
-          <TextInput accessibilityLabel={`${documentTransformation === "enhance" ? "Enhancement" : "Translation"} prompt`} maxLength={8_000} multiline onChangeText={updateDocumentTransformationPrompt} style={styles.transformationPrompt} textAlignVertical="top" value={documentTransformationPrompt} />
+          {documentTransformation === "enhance" ? <><Text style={styles.inputLabel}>Prompt</Text><TextInput accessibilityLabel="Enhancement prompt" maxLength={8_000} multiline onChangeText={updateDocumentTransformationPrompt} style={styles.transformationPrompt} textAlignVertical="top" value={documentTransformationPrompt} /></> : null}
         </View> : null}
         {activeSheet === "versions" ? (
           <View style={styles.versionPanel}>
-            {loadingVersions && !pendingDocumentVersionLabel ? <Text style={styles.empty}>Loading version history...</Text> : null}
+            {loadingVersions && !pendingDocumentVersionLabel ? Array.from({ length: 3 }, (_, index) => <View accessibilityLabel="Loading version history" accessibilityRole="progressbar" key={index} style={[styles.versionSkeleton, styles.skeletonCard]} />) : null}
             {!loadingVersions && !pendingDocumentVersionLabel && versions.length === 0 ? <Text style={styles.empty}>No {documentTransformation === "enhance" ? "enhancements" : "translations"} yet.</Text> : null}
-            {pendingDocumentVersionLabel ? <Button accessibilityLabel={pendingDocumentVersionLabel} accessibilityState={{ busy: true }} contentMode="raw" disabled size="lg" style={styles.versionMain} variant="secondary"><ClockIcon size="md" variant="accent" /><View style={styles.resultText}><Text style={styles.rowTitle}>{pendingDocumentVersionLabel}</Text></View><Spinner size="small" variant="muted" /></Button> : null}
+            {pendingDocumentVersionLabel ? <Button accessibilityLabel={pendingDocumentVersionLabel} accessibilityState={{ busy: true }} contentMode="raw" disabled size="sm" style={styles.versionMain} variant="secondary"><ClockIcon size="sm" variant="accent" /><View style={styles.resultText}><Text style={styles.rowTitle}>{pendingDocumentVersionLabel}</Text></View><Spinner size="small" variant="muted" /></Button> : null}
             {versions.map((version) => {
               const document = activeDocument?.key === version.documentKey ? activeDocument : selectedDocument?.key === version.documentKey ? selectedDocument : undefined;
               const isCurrentVersion = document?.currentVersionKey === version.key;
               return <View key={version.key} style={styles.versionRow}>
-                <Button accessibilityState={{ selected: isCurrentVersion }} contentMode="raw" disabled={Boolean(versionActionKey)} loading={versionActionKey === version.key} onPress={() => void openDocumentVersion(version)} size="lg" style={[styles.versionMain, isCurrentVersion && styles.selectedDocumentItem]} variant="secondary"><ClockIcon size="md" variant="accent" /><View style={styles.resultText}><Text style={styles.rowTitle}>Version {version.version}</Text></View></Button>
+                <Button accessibilityState={{ selected: isCurrentVersion }} contentMode="raw" disabled={Boolean(versionActionKey)} loading={versionActionKey === version.key} onPress={() => void openDocumentVersion(version)} size="sm" style={[styles.versionMain, isCurrentVersion && styles.selectedDocumentItem]} variant="secondary"><ClockIcon size="sm" variant="accent" /><View style={styles.resultText}><Text style={styles.rowTitle}>Version {version.version}</Text></View></Button>
               </View>;
             })}
           </View>
@@ -4160,6 +4150,7 @@ const styles = StyleSheet.create({
   enhanceIdentity: { padding: 14, flexDirection: "row", alignItems: "center", gap: 12, borderRadius: radii.md, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panel },
   enhanceCopy: { flex: 1, gap: 4 },
   versionPanel: { gap: 6 },
+  versionSkeleton: { width: "100%", height: 34, borderRadius: 999 },
   versionRow: { flexDirection: "row", alignItems: "stretch", gap: 6 },
   versionMain: { flex: 1, justifyContent: "flex-start", paddingHorizontal: 14 },
   historyChoices: { gap: 6 },
