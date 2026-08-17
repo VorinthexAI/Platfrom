@@ -637,9 +637,9 @@ describe('Content runtime', () => {
       return {
         output,
         usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-        providerId: request.actionSlug === 'embed' ? 'openrouter' : 'aws-bedrock',
-        modelId: request.actionSlug === 'embed' ? 'qwen.qwen3-embedding-8b' : 'amazon.nova-lite',
-        externalModelId: request.actionSlug === 'embed' ? 'qwen/qwen3-embedding-8b' : 'us.amazon.nova-lite-v1:0',
+        providerId: 'openrouter',
+        modelId: request.actionSlug === 'embed' ? 'qwen.qwen3-embedding-8b' : 'google.gemini-2.5-flash-lite',
+        externalModelId: request.actionSlug === 'embed' ? 'qwen/qwen3-embedding-8b' : 'google/gemini-2.5-flash-lite',
       };
     };
     const dependencies = { repository: f.repository, executeAction };
@@ -1546,7 +1546,7 @@ describe('Content runtime', () => {
     expect(events.every((event: any) => typeof event.invocationKey === 'string')).toBe(true);
   });
 
-  test('enhances a document through Nova Lite and persists replacement content', async () => {
+  test('enhances a document through Gemini Flash-Lite and persists replacement content', async () => {
     const f = fixture('moderator');
     const documentKey = f.addDocument('This are teh text.');
     let call: { action?: string; input?: any } = {};

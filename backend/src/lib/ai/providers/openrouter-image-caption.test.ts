@@ -17,6 +17,24 @@ function completion(content: string) {
 }
 
 describe('OpenRouter image captions', () => {
+  test('routes generic Gemini chat privately and by throughput', async () => {
+    let body: Record<string, any> = {};
+    globalThis.fetch = (async (_input, init) => {
+      body = JSON.parse(String(init?.body));
+      return Response.json(completion('Fast answer'));
+    }) as typeof fetch;
+
+    await createOpenRouterProvider({ apiKey: 'test-key' }).execute({
+      actionId: 'ask',
+      modelId: IMAGE_CAPTION_MODEL,
+      externalModelId: IMAGE_CAPTION_EXTERNAL_MODEL_ID,
+      input: { messages: [{ role: 'user', content: [{ type: 'text', text: 'Answer briefly.' }] }] },
+      organizationKey: 'organization-key',
+    });
+
+    expect(body.provider).toEqual({ data_collection: 'deny', sort: 'throughput', require_parameters: true });
+  });
+
   test('cleans extracted document text with Gemini, strict output, and private routing', async () => {
     let body: Record<string, any> = {};
     globalThis.fetch = (async (_input, init) => {

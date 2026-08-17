@@ -623,14 +623,6 @@ export const SEEDED_MODELS = [
     enabled: true,
   },
   {
-    key: 'cmnovalitemodel000000001',
-    slug: 'amazon.nova-lite',
-    name: 'Amazon Nova Lite',
-    description: 'Temporary replacement for GPT-5.6 Luna while Mantle access is pending.',
-    supportedUseCases: 'Fast agent steps, routing, classification, extraction, and lightweight task execution.',
-    enabled: true,
-  },
-  {
     key: 'cmgptrealtime2model0000001',
     slug: 'openai.gpt-realtime-2',
     name: 'OpenAI GPT Realtime 2',
@@ -674,8 +666,8 @@ export const SEEDED_MODELS = [
     key: 'cmgemini25flashlitemod01',
     slug: 'google.gemini-2.5-flash-lite',
     name: 'Google Gemini 2.5 Flash-Lite',
-    description: 'Google low-latency multimodal model for efficient image understanding through OpenRouter.',
-    supportedUseCases: 'Rich image captions, visual scene understanding, object recognition, optical character recognition, and visual identity descriptions.',
+    description: 'Google low-latency multimodal model for fast general-purpose and visual tasks through OpenRouter.',
+    supportedUseCases: 'Chat, tool use, summarization, translation, extraction, classification, image captions, visual understanding, optical character recognition, and visual identity descriptions.',
     enabled: true,
   },
 ] as const;
@@ -736,13 +728,6 @@ export const SEEDED_MODEL_PROVIDERS = [
     modelSlug: 'amazon.nova-pro',
     providerSlug: 'aws-bedrock',
     providerModelId: 'us.amazon.nova-pro-v1:0',
-    enabled: true,
-  },
-  {
-    key: 'cmnovaliteroute000000001',
-    modelSlug: 'amazon.nova-lite',
-    providerSlug: 'aws-bedrock',
-    providerModelId: 'us.amazon.nova-lite-v1:0',
     enabled: true,
   },
   {
@@ -1237,19 +1222,23 @@ export async function reconcileObsoleteSeededModelActions(store: ObsoleteModelAc
     }
   }
 
-  const legacyVision = await store.getModelBySlug('qwen.qwen3-vl-32b-instruct');
-  if (legacyVision) {
-    await store.updateModel(legacyVision.key, { enabled: false });
-    results.push({ collection: 'models', key: legacyVision.key, status: 'updated' });
+  for (const { modelSlug, providerSlug } of [
+    { modelSlug: 'qwen.qwen3-vl-32b-instruct', providerSlug: 'openrouter' },
+    { modelSlug: 'amazon.nova-lite', providerSlug: 'aws-bedrock' },
+  ]) {
+    const legacyModel = await store.getModelBySlug(modelSlug);
+    if (!legacyModel) continue;
+    await store.updateModel(legacyModel.key, { enabled: false });
+    results.push({ collection: 'models', key: legacyModel.key, status: 'updated' });
     for (const actionDefinition of ACTION_DEFINITIONS) {
       const action = await store.getActionBySlug(actionDefinition.id);
-      const binding = action ? await store.getModelActionByPair(legacyVision.key, action.key) : null;
+      const binding = action ? await store.getModelActionByPair(legacyModel.key, action.key) : null;
       if (!binding?.enabled) continue;
       await store.updateModelAction(binding.key, { enabled: false });
       results.push({ collection: 'modelActions', key: binding.key, status: 'updated' });
     }
-    const openrouter = await store.getProviderBySlug?.('openrouter');
-    const route = openrouter ? await store.getModelProviderByPair?.(legacyVision.key, openrouter.key) : null;
+    const provider = await store.getProviderBySlug?.(providerSlug);
+    const route = provider ? await store.getModelProviderByPair?.(legacyModel.key, provider.key) : null;
     if (route?.enabled && store.updateModelProvider) {
       await store.updateModelProvider(route.key, { enabled: false });
       results.push({ collection: 'modelProviders', key: route.key, status: 'updated' });

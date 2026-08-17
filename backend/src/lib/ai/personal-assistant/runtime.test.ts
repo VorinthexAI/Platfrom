@@ -30,7 +30,7 @@ describe('personal assistant runtime', () => {
       },
     });
 
-    expect(request).toEqual({ mode: 'model', organizationKey, actionSlug: 'orchestrator-chat', modelSlug: 'amazon.nova-lite' });
+    expect(request).toEqual({ mode: 'model', organizationKey, actionSlug: 'orchestrator-chat', modelSlug: 'google.gemini-2.5-flash-lite' });
     expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual([
       'user.settings.read', 'user.settings.update',
       'folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy',

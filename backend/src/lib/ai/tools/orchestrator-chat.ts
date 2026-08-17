@@ -59,18 +59,22 @@ export const orchestratorChatTool = {
     const chatInput = await prepareChatInput(skill, rawInput, dependencies);
     const organizationKey = dependencies.organizationKey ?? 'nexus';
     if (dependencies.stream) {
-      yield* validateStream(dependencies.stream(organizationKey, chatInput), 'amazon.nova-lite');
+      yield* validateStream(dependencies.stream(organizationKey, chatInput), 'google.gemini-2.5-flash-lite', 'openrouter');
       return;
     }
     const select = dependencies.selectRoute ?? selectRoute;
     const stream = dependencies.streamRoute ?? streamRoute;
-    const models = ['amazon.nova-lite', 'amazon.nova-lite', 'amazon.nova-pro'] as const;
+    const routes = [
+      { modelSlug: 'google.gemini-2.5-flash-lite', providerSlug: 'openrouter' },
+      { modelSlug: 'google.gemini-2.5-flash-lite', providerSlug: 'openrouter' },
+      { modelSlug: 'amazon.nova-pro', providerSlug: 'aws-bedrock' },
+    ] as const;
     let lastError: unknown;
-    for (const modelSlug of models) {
+    for (const { modelSlug, providerSlug } of routes) {
       if (dependencies.signal?.aborted) throw dependencies.signal.reason ?? new DOMException('The operation was aborted', 'AbortError');
       let emittedText = false;
       try {
-        const decision = await select({ mode: 'fixed', organizationKey, actionSlug: 'orchestrator-chat', modelSlug, providerSlug: 'aws-bedrock' }, dependencies);
+        const decision = await select({ mode: 'fixed', organizationKey, actionSlug: 'orchestrator-chat', modelSlug, providerSlug }, dependencies);
         const chunks = validateStream(stream({
           decision,
           input: chatInput,
@@ -78,7 +82,7 @@ export const orchestratorChatTool = {
           credentials: dependencies.credentials,
           timeoutMs: 300_000,
           signal: dependencies.signal,
-        }), modelSlug, () => { emittedText = true; });
+        }), modelSlug, providerSlug, () => { emittedText = true; });
         yield* chunks;
         return;
       } catch (error) {
@@ -91,7 +95,7 @@ export const orchestratorChatTool = {
   },
 } as const;
 
-async function* validateStream(chunks: AsyncIterable<ProviderStreamChunk>, modelSlug: string, onText?: () => void): AsyncIterable<ProviderStreamChunk> {
+async function* validateStream(chunks: AsyncIterable<ProviderStreamChunk>, modelSlug: string, providerSlug: string, onText?: () => void): AsyncIterable<ProviderStreamChunk> {
   let text = '';
   let done = false;
   for await (const chunk of chunks) {
@@ -105,7 +109,7 @@ async function* validateStream(chunks: AsyncIterable<ProviderStreamChunk>, model
   if (!done || !text.trim()) {
     const error = new ProviderExecutionError('orchestrator-chat', [{
       modelId: modelSlug,
-      providerId: 'aws-bedrock',
+      providerId: providerSlug,
       externalModelId: modelSlug,
       code: 'response_invalid',
       message: 'provider stream ended without completed text',

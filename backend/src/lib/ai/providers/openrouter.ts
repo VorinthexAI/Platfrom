@@ -308,12 +308,12 @@ export function createOpenRouterProvider(config: OpenRouterProviderConfigInput):
       if (request.actionId === 'document-cleanup') return cleanupDocument(client, request);
       if (request.actionId === 'describe-visual-identity') return describeVisualIdentity(client, request);
       if (!CHAT_ACTION_IDS.has(request.actionId)) throw unsupportedAction(PROVIDER_ID, request.actionId);
-      return executeOpenAICompatibleChat(PROVIDER_ID, client, request, { maxTokensParam: 'max_tokens' });
+      return executeOpenAICompatibleChat(PROVIDER_ID, client, request, { maxTokensParam: 'max_tokens', extraBody: { provider: privateThroughputRoute } });
     },
 
     stream(request) {
       if (!CHAT_ACTION_IDS.has(request.actionId)) throw unsupportedAction(PROVIDER_ID, request.actionId);
-      return streamOpenAICompatibleChat(PROVIDER_ID, client, request, { maxTokensParam: 'max_tokens' });
+      return streamOpenAICompatibleChat(PROVIDER_ID, client, request, { maxTokensParam: 'max_tokens', extraBody: { provider: privateThroughputRoute } });
     },
 
     embed(request) {

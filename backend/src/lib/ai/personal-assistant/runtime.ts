@@ -186,7 +186,7 @@ export async function runPersonalAssistant(
       mode: 'model',
       organizationKey: domain.organizationKey,
       actionSlug: 'orchestrator-chat',
-      modelSlug: 'amazon.nova-lite',
+      modelSlug: 'google.gemini-2.5-flash-lite',
     }, chatInput, { ...dependencies.router, timeoutMs: dependencies.router?.timeoutMs ?? 45_000 });
     const output = chatOutputSchema.parse(response.output);
     if (output.toolCalls.length === 0) {

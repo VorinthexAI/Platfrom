@@ -109,7 +109,6 @@ describe('model and routing relation seeds', () => {
       'openai.gpt-5.6-luna',
       'amazon.nova-premier',
       'amazon.nova-pro',
-      'amazon.nova-lite',
       'openai.gpt-realtime-2',
       'openai.gpt-4o-mini-transcribe',
       'amazon.polly-generative',
@@ -118,13 +117,13 @@ describe('model and routing relation seeds', () => {
       'google.gemini-2.5-flash-lite',
     ]);
     expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'orchestrator-chat').map(({ modelSlug }) => modelSlug))
-      .toEqual(['amazon.nova-lite', 'amazon.nova-pro']);
+      .toEqual(['google.gemini-2.5-flash-lite', 'amazon.nova-pro']);
     expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'transcribe').map(({ modelSlug }) => modelSlug))
       .toEqual(['openai.gpt-realtime-2']);
     expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'enhance').map(({ modelSlug }) => modelSlug))
-      .toEqual(['amazon.nova-lite']);
+      .toEqual(['google.gemini-2.5-flash-lite']);
     expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'translate').map(({ modelSlug }) => modelSlug))
-      .toEqual(['amazon.nova-lite']);
+      .toEqual(['google.gemini-2.5-flash-lite']);
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'embed')?.modelSlug).toBe('qwen.qwen3-embedding-8b');
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'generate-speech')?.modelSlug).toBe('amazon.polly-generative');
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'caption-image')?.modelSlug).toBe('google.gemini-2.5-flash-lite');
@@ -136,7 +135,6 @@ describe('model and routing relation seeds', () => {
       'openai.gpt-5.6-luna:aws-bedrock-mantle:openai.gpt-5.6-luna:false',
       'amazon.nova-premier:aws-bedrock:us.amazon.nova-premier-v1:0:false',
       'amazon.nova-pro:aws-bedrock:us.amazon.nova-pro-v1:0:true',
-      'amazon.nova-lite:aws-bedrock:us.amazon.nova-lite-v1:0:true',
       'openai.gpt-realtime-2:openai:gpt-realtime-2:true',
       'openai.gpt-4o-mini-transcribe:openai:gpt-4o-mini-transcribe:true',
       'qwen.qwen3-embedding-8b:openrouter:qwen/qwen3-embedding-8b:true',
@@ -160,9 +158,9 @@ describe('model and routing relation seeds', () => {
 
   test('pins the complete Archive provider chain', () => {
     const archiveRoutes = [
-      ['ask', 'amazon.nova-lite', 'aws-bedrock', 'us.amazon.nova-lite-v1:0'],
-      ['enhance', 'amazon.nova-lite', 'aws-bedrock', 'us.amazon.nova-lite-v1:0'],
-      ['translate', 'amazon.nova-lite', 'aws-bedrock', 'us.amazon.nova-lite-v1:0'],
+      ['ask', 'google.gemini-2.5-flash-lite', 'openrouter', 'google/gemini-2.5-flash-lite'],
+      ['enhance', 'google.gemini-2.5-flash-lite', 'openrouter', 'google/gemini-2.5-flash-lite'],
+      ['translate', 'google.gemini-2.5-flash-lite', 'openrouter', 'google/gemini-2.5-flash-lite'],
       ['reason', 'amazon.nova-pro', 'aws-bedrock', 'us.amazon.nova-pro-v1:0'],
       ['deep-reason', 'amazon.nova-pro', 'aws-bedrock', 'us.amazon.nova-pro-v1:0'],
       ['speak', 'openai.gpt-realtime-2', 'openai', 'gpt-realtime-2'],
@@ -257,12 +255,12 @@ describe('AI runtime seed orchestration', () => {
     const routes = new Map([
       ['sonic-key:chat-key', { key: 'stale-binding-key', priority: 100, enabled: true }],
       ['nova-pro-key:chat-key', { key: 'nova-pro-chat-key', priority: 100, enabled: true }],
-      ['nova-lite-key:chat-key', { key: 'nova-lite-chat-key', priority: 90, enabled: true }],
+      ['gemini-key:chat-key', { key: 'gemini-chat-key', priority: 90, enabled: true }],
       ['sonic-key:speak-key', { key: 'sonic-speak-key', priority: 100, enabled: true }],
       ['sonic-key:transcribe-key', { key: 'sonic-transcribe-key', priority: 100, enabled: true }],
       ['custom-key:chat-key', { key: 'custom-chat-key', priority: 80, enabled: true }],
     ]);
-    const modelKeys = new Map([['openai.gpt-realtime-2', 'sonic-key'], ['openai.gpt-5.6-terra', 'terra-key'], ['openai.gpt-5.6-luna', 'luna-key'], ['amazon.nova-pro', 'nova-pro-key'], ['amazon.nova-lite', 'nova-lite-key'], ['custom.model', 'custom-key']]);
+    const modelKeys = new Map([['openai.gpt-realtime-2', 'sonic-key'], ['openai.gpt-5.6-terra', 'terra-key'], ['openai.gpt-5.6-luna', 'luna-key'], ['amazon.nova-pro', 'nova-pro-key'], ['google.gemini-2.5-flash-lite', 'gemini-key'], ['custom.model', 'custom-key']]);
     const actionKeys = new Map([['orchestrator-chat', 'chat-key'], ['speak', 'speak-key'], ['transcribe', 'transcribe-key']]);
     let reconciliationUpdates = 0;
     const noop = (collection: string) => async (seed: { key: string }): Promise<SeedResult> => ({ collection, key: seed.key, status: 'updated' });
@@ -295,7 +293,7 @@ describe('AI runtime seed orchestration', () => {
 
     expect(routes.get('sonic-key:chat-key')?.enabled).toBe(false);
     expect(routes.get('nova-pro-key:chat-key')?.enabled).toBe(true);
-    expect(routes.get('nova-lite-key:chat-key')?.enabled).toBe(true);
+    expect(routes.get('gemini-key:chat-key')?.enabled).toBe(true);
     expect(routes.get('sonic-key:speak-key')?.enabled).toBe(true);
     expect(routes.get('sonic-key:transcribe-key')?.enabled).toBe(true);
     expect(routes.get('custom-key:chat-key')?.enabled).toBe(true);
@@ -373,6 +371,28 @@ describe('AI runtime seed orchestration', () => {
     expect([...bindings.values()].every(({ enabled }) => !enabled)).toBe(true);
     expect(route.enabled).toBe(false);
     expect(results.map(({ collection }) => collection)).toEqual(['models', 'modelActions', 'modelActions', 'modelActions', 'modelProviders']);
+  });
+
+  test('retires the persisted Nova Lite model, bindings, and Bedrock route', async () => {
+    const model = { key: 'legacy-fast-model', enabled: true };
+    const actions = new Map(['ask', 'enhance', 'orchestrator-chat'].map((slug) => [slug, { key: `${slug}-action` }]));
+    const bindings = new Map([...actions].map(([slug, action]) => [`${model.key}:${action.key}`, { key: `${slug}-binding`, enabled: true }]));
+    const route = { key: 'legacy-fast-route', enabled: true };
+
+    await reconcileObsoleteSeededModelActions({
+      getModelBySlug: async (slug) => slug === 'amazon.nova-lite' ? model : null,
+      updateModel: async (_key, patch) => { model.enabled = patch.enabled; },
+      getActionBySlug: async (slug) => actions.get(slug) ?? null,
+      getModelActionByPair: async (modelKey, actionKey) => bindings.get(`${modelKey}:${actionKey}`) ?? null,
+      updateModelAction: async (key, patch) => { [...bindings.values()].find((binding) => binding.key === key)!.enabled = patch.enabled; },
+      getProviderBySlug: async (slug) => slug === 'aws-bedrock' ? { key: 'bedrock-provider' } : null,
+      getModelProviderByPair: async () => route,
+      updateModelProvider: async (_key, patch) => { route.enabled = patch.enabled; },
+    });
+
+    expect(model.enabled).toBe(false);
+    expect([...bindings.values()].every(({ enabled }) => !enabled)).toBe(true);
+    expect(route.enabled).toBe(false);
   });
 
   test('retires the persisted OpenAI embedding model, binding, and route while Qwen remains seeded', async () => {
