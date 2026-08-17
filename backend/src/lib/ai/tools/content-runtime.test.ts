@@ -883,13 +883,15 @@ describe('Content runtime', () => {
     expect(embeddedTexts).toContain('Notes\n\nHistorical exact body');
 
     f.documents.get(documentKey).embedding = legacy;
-    const generated = await runContentTool('document.translate', { documentKeys: [documentKey], targetLanguage: 'Swedish', instruction: 'Use concise headings.', mode: 'replace' }, f.context, {
+    const generated = await runContentTool('document.translate', { documentKeys: [documentKey], targetLanguage: 'engleksa', instruction: 'Use concise headings.', mode: 'replace' }, f.context, {
       ...dependencies,
       runAction: async (action: string, input: any) => {
         if (action === 'translate') {
           expect(input.systemPrompt).toContain('collapse excessive blank lines');
           expect(input.systemPrompt).toContain('readable sections');
-          expect(input.systemPrompt).toContain('into Swedish');
+          expect(input.systemPrompt).toContain('into engleksa');
+          expect(input.systemPrompt).toContain('native name or endonym');
+          expect(input.systemPrompt).toContain('mildly misspelled');
           expect(input.systemPrompt).toContain('Additional direction: Use concise headings.');
           return { text: '  Titre  \r\n\r\n\r\nCorps traduit  \r\n ' };
         }

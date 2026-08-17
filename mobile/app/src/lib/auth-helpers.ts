@@ -122,8 +122,10 @@ export function firstNameFor(user: AuthUser | null) {
 
 export function languageForCountryCode(countryCode?: string) {
   if (!countryCode) return "English";
+  const normalizedCountryCode = countryCode.toUpperCase();
+  if (normalizedCountryCode === "SE") return "Swedish";
   try {
-    const languageCode = new Intl.Locale(`und-${countryCode.toUpperCase()}`).maximize().language;
+    const languageCode = new Intl.Locale(`und-${normalizedCountryCode}`).maximize().language;
     return new Intl.DisplayNames(["en"], { type: "language" }).of(languageCode) ?? "English";
   } catch {
     return "English";

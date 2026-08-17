@@ -53,6 +53,7 @@ describe("mobile auth helpers", () => {
 
   test("derives the user's likely language from their country code", () => {
     expect(languageForCountryCode("SE")).toBe("Swedish");
+    expect(languageForCountryCode("se")).toBe("Swedish");
     expect(languageForCountryCode("ES")).toBe("Spanish");
     expect(languageForCountryCode()).toBe("English");
   });
