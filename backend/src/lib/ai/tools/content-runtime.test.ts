@@ -715,8 +715,22 @@ describe('Content runtime', () => {
     const searchQueries = {
       async get({ actorKey, scopeKey, normalizedQuery, folderKey, includeDescendants }: any) { return rows.get(`${actorKey}:${scopeKey}:${normalizedQuery}:${folderKey ?? 'root'}:${includeDescendants}`) ?? null; },
       async record(value: any) { const identity = `${value.actorKey}:${value.scopeKey}:${value.normalizedQuery}:${value.folderKey ?? 'root'}:${value.includeDescendants}`; const old = rows.get(identity); rows.set(identity, { output: value.output, query: value.query, normalizedQuery: value.normalizedQuery, contextDomain: value.contextDomain, folderKey: value.folderKey, includeDescendants: value.includeDescendants, searchedAt: value.now, usageCount: (old?.usageCount ?? 0) + 1 }); },
-      async list({ actorKey, scopeKey, folderKey, includeDescendants, limit }: any) { return [...rows.entries()].filter(([key]) => key.startsWith(`${actorKey}:${scopeKey}:`)).map(([, value]) => value).filter((value) => value.folderKey === folderKey && value.includeDescendants === includeDescendants).map((value) => ({ query: value.query, normalizedQuery: value.normalizedQuery, contextDomain: value.contextDomain, searchedAt: value.searchedAt, usageCount: value.usageCount, ...(value.folderKey ? { folderKey: value.folderKey, includeDescendants: value.includeDescendants } : {}), documents: value.output.result.documents })).slice(0, limit); },
-      async remove({ actorKey, scopeKey, normalizedQuery, folderKey, includeDescendants }: any) { return rows.delete(`${actorKey}:${scopeKey}:${normalizedQuery}:${folderKey ?? 'root'}:${includeDescendants}`); },
+      async list({ actorKey, scopeKey, folderKey, includeDescendants, allLocations, limit }: any) {
+        const matching = [...rows.entries()].filter(([key]) => key.startsWith(`${actorKey}:${scopeKey}:`)).map(([, value]) => value).filter((value) => allLocations || value.folderKey === folderKey && value.includeDescendants === includeDescendants);
+        const merged = new Map<string, any>();
+        for (const value of matching) {
+          const current = merged.get(value.normalizedQuery);
+          if (allLocations && current) current.usageCount += value.usageCount;
+          else merged.set(value.normalizedQuery, { query: value.query, normalizedQuery: value.normalizedQuery, contextDomain: value.contextDomain, searchedAt: value.searchedAt, usageCount: value.usageCount, ...(!allLocations && value.folderKey ? { folderKey: value.folderKey, includeDescendants: value.includeDescendants } : {}), documents: value.output.result.documents });
+        }
+        return [...merged.values()].slice(0, limit);
+      },
+      async remove({ actorKey, scopeKey, normalizedQuery, folderKey, includeDescendants, allLocations }: any) {
+        if (!allLocations) return rows.delete(`${actorKey}:${scopeKey}:${normalizedQuery}:${folderKey ?? 'root'}:${includeDescendants}`);
+        let deleted = false;
+        for (const key of rows.keys()) if (key.startsWith(`${actorKey}:${scopeKey}:${normalizedQuery}:`)) deleted = rows.delete(key) || deleted;
+        return deleted;
+      },
     };
     const dependencies: any = {
       repository: f.repository,
@@ -769,6 +783,8 @@ describe('Content runtime', () => {
     expect(rows).toHaveLength(3);
     const folderHistory = await runContentTool('scope.content.search-history', { scopeKey: f.scopeKey, folderKey: f.folderKey }, f.context, dependencies);
     expect(folderHistory.history[0]).toMatchObject({ folderKey: f.folderKey, includeDescendants: true, documents: folderReplay.documents });
+    const globalHistory = await runContentTool('scope.content.search-history', { scopeKey: f.scopeKey, allLocations: true }, f.context, dependencies);
+    expect(globalHistory.history).toMatchObject([{ normalizedQuery: 'launch roadmap', usageCount: 5 }]);
     f.documents.get(first.documents[0]!.documentKey).semanticContentHash = 'a'.repeat(64);
     const invalidated = await runContentTool('scope.content.search', { scopeKey: f.scopeKey, query: 'launch roadmap' }, f.context, dependencies);
     expect(invalidated.cached).toBe(false);
@@ -776,8 +792,8 @@ describe('Content runtime', () => {
     const otherContext = { ...f.context, principal: { ...f.context.principal, user: { key: newId() } } };
     const isolated = await runContentTool('scope.content.search-history', { scopeKey: f.scopeKey }, otherContext, dependencies);
     expect(isolated.history).toEqual([]);
-    expect(await runContentTool('scope.content.search-history.delete', { scopeKey: f.scopeKey, normalizedQuery: 'launch roadmap' }, f.context, dependencies)).toEqual({ normalizedQuery: 'launch roadmap', deleted: true });
-    expect((await runContentTool('scope.content.search-history', { scopeKey: f.scopeKey }, f.context, dependencies)).history).toEqual([]);
+    expect(await runContentTool('scope.content.search-history.delete', { scopeKey: f.scopeKey, normalizedQuery: 'launch roadmap', allLocations: true }, f.context, dependencies)).toEqual({ normalizedQuery: 'launch roadmap', deleted: true });
+    expect((await runContentTool('scope.content.search-history', { scopeKey: f.scopeKey, allLocations: true }, f.context, dependencies)).history).toEqual([]);
     allowed = false;
     await expect(runContentTool('scope.content.search', { scopeKey: f.scopeKey, query: 'launch roadmap' }, f.context, dependencies)).rejects.toMatchObject({ code: 'CONTENT_FORBIDDEN' });
   });

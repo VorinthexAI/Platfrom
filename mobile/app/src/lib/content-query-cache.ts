@@ -26,7 +26,7 @@ export const contentQueryKeys = {
   locations: (context: ContentContext) => [...contentQueryKeys.all(context), "locations"] as const,
   location: (context: ContentContext, folderKey?: string) => [...contentQueryKeys.locations(context), folderKey ?? null] as const,
   document: (context: ContentContext, documentKey: string) => [...contentQueryKeys.all(context), "documents", documentKey] as const,
-  history: (context: ContentContext, folderKey?: string) => [...contentQueryKeys.all(context), "history", folderKey ?? null] as const,
+  history: (context: ContentContext, folderKey?: string) => [...contentQueryKeys.all(context), "history", folderKey ?? "all-locations"] as const,
   audioVersions: (context: ContentContext, documentKey: string) => [...contentQueryKeys.document(context, documentKey), "audio-versions"] as const,
   summaries: (context: ContentContext, documentKey: string) => [...contentQueryKeys.document(context, documentKey), "summaries"] as const,
   topics: (context: ContentContext, documentKey: string) => [...contentQueryKeys.document(context, documentKey), "topics"] as const,
@@ -166,7 +166,7 @@ export async function invalidateContentDocumentTopics(queryClient: QueryClient, 
 export function getContentHistory(queryClient: QueryClient, context: ContentContext, folderKey?: string) {
   return queryClient.fetchQuery({
     queryKey: contentQueryKeys.history(context, folderKey),
-    queryFn: () => listContentSearchHistory(folderKey, true, context),
+    queryFn: () => listContentSearchHistory(folderKey, true, context, folderKey === undefined),
     staleTime: Infinity,
   });
 }

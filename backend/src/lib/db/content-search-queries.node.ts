@@ -69,29 +69,48 @@ export const contentSearchQueries = {
         REMOVE query IN @@collection
     `, { '@collection': CONTENT_SEARCH_QUERIES_COLLECTION, actorKey: input.actorKey, scopeKey: input.scopeKey });
   },
-  async list(input: { actorKey: string; scopeKey: string; contextDomain: typeof CONTENT_SEARCH_CONTEXT_DOMAIN; folderKey: string | null; includeDescendants: boolean; cacheVersion: number; limit: number }) {
+  async list(input: { actorKey: string; scopeKey: string; contextDomain: typeof CONTENT_SEARCH_CONTEXT_DOMAIN; folderKey: string | null; includeDescendants: boolean; allLocations?: boolean; cacheVersion: number; limit: number }) {
     const cursor = await db.query(`
       FOR query IN @@collection
         FILTER query.actorKey == @actorKey && query.scopeKey == @scopeKey && query.contextDomain == @contextDomain
         FILTER query.cacheVersion == @cacheVersion
-        FILTER query.folderKey == @folderKey && query.includeDescendants == @includeDescendants
+        FILTER @allLocations || (query.folderKey == @folderKey && query.includeDescendants == @includeDescendants)
         SORT query.searchedAt DESC
-        LIMIT @limit
+        LIMIT @queryLimit
         LET result = query.output.result
         RETURN MERGE(KEEP(query, "query", "normalizedQuery", "contextDomain", "searchedAt", "usageCount"), query.folderKey == null ? {} : { folderKey: query.folderKey, includeDescendants: query.includeDescendants }, { documents: IS_ARRAY(result.documents) ? result.documents : [] })
-    `, { '@collection': CONTENT_SEARCH_QUERIES_COLLECTION, ...input });
-    return z.array(z.object({ query: z.string(), normalizedQuery: z.string(), contextDomain: z.literal(CONTENT_SEARCH_CONTEXT_DOMAIN), searchedAt: z.string().datetime(), usageCount: z.number().int().positive(), folderKey: z.string().cuid().optional(), includeDescendants: z.boolean().optional(), documents: z.array(storedDocumentSchema).max(10) }).strict()).parse(await cursor.all());
+    `, {
+      '@collection': CONTENT_SEARCH_QUERIES_COLLECTION,
+      actorKey: input.actorKey,
+      scopeKey: input.scopeKey,
+      contextDomain: input.contextDomain,
+      folderKey: input.folderKey,
+      includeDescendants: input.includeDescendants,
+      cacheVersion: input.cacheVersion,
+      allLocations: input.allLocations ?? false,
+      queryLimit: input.allLocations ? 100 : input.limit,
+    });
+    const rows = z.array(z.object({ query: z.string(), normalizedQuery: z.string(), contextDomain: z.literal(CONTENT_SEARCH_CONTEXT_DOMAIN), searchedAt: z.string().datetime(), usageCount: z.number().int().positive(), folderKey: z.string().cuid().optional(), includeDescendants: z.boolean().optional(), documents: z.array(storedDocumentSchema).max(10) }).strict()).parse(await cursor.all());
+    if (!input.allLocations) return rows;
+    const merged = new Map<string, (typeof rows)[number]>();
+    for (const row of rows) {
+      const current = merged.get(row.normalizedQuery);
+      if (current) current.usageCount += row.usageCount;
+      else merged.set(row.normalizedQuery, { ...row, folderKey: undefined, includeDescendants: undefined });
+    }
+    return [...merged.values()].slice(0, input.limit);
   },
-  async remove(input: { actorKey: string; scopeKey: string; contextDomain: typeof CONTENT_SEARCH_CONTEXT_DOMAIN; normalizedQuery: string; folderKey: string | null; includeDescendants: boolean }) {
+  async remove(input: { actorKey: string; scopeKey: string; contextDomain: typeof CONTENT_SEARCH_CONTEXT_DOMAIN; normalizedQuery: string; folderKey: string | null; includeDescendants: boolean; allLocations?: boolean }) {
     const cursor = await db.query(`
       LET keys = (FOR query IN @@collection
           FILTER query.actorKey == @actorKey && query.scopeKey == @scopeKey && query.contextDomain == @contextDomain
-          FILTER query.normalizedQuery == @normalizedQuery && query.folderKey == @folderKey && query.includeDescendants == @includeDescendants
+          FILTER query.normalizedQuery == @normalizedQuery
+          FILTER @allLocations || (query.folderKey == @folderKey && query.includeDescendants == @includeDescendants)
           RETURN query._key)
       FOR key IN keys
         REMOVE key IN @@collection
         RETURN true
-    `, { '@collection': CONTENT_SEARCH_QUERIES_COLLECTION, ...input });
+    `, { '@collection': CONTENT_SEARCH_QUERIES_COLLECTION, ...input, allLocations: input.allLocations ?? false });
     return Boolean(await cursor.next());
   },
 };

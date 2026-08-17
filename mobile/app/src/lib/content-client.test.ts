@@ -414,6 +414,17 @@ test("scopes search and replayable history to a folder", async () => {
   expect(calls[1]?.body.input).toEqual({ scopeKey: "scope-authenticated", folderKey: "folder", includeDescendants: true, limit: 100 });
 });
 
+test("lists and deletes search history across all Archive locations", async () => {
+  responseForTool = (tool) => tool === "scope.content.search-history"
+    ? { data: { success: true, data: { history: [] } } }
+    : { data: { success: true, data: { normalizedQuery: "roadmap", deleted: true } } };
+
+  await listContentSearchHistory(undefined, false, undefined, true);
+  await deleteContentSearchHistory("roadmap", undefined, false, true);
+  expect(calls[0]?.body.input).toEqual({ scopeKey: "scope-authenticated", allLocations: true, limit: 100 });
+  expect(calls[1]?.body.input).toMatchObject({ scopeKey: "scope-authenticated", normalizedQuery: "roadmap", allLocations: true });
+});
+
 test("deletes one folder-scoped Content search-history entry", async () => {
   responseForTool = () => ({ data: { success: true, data: { normalizedQuery: "roadmap", deleted: true } } });
 

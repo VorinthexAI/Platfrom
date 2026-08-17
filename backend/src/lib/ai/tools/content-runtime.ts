@@ -95,8 +95,8 @@ export interface ContentRepository {
 export interface ContentSearchQueryStore {
   get(input: { actorKey: string; scopeKey: string; contextDomain: 'content'; normalizedQuery: string; folderKey: string | null; includeDescendants: boolean; cacheVersion: number }): Promise<{ output: unknown } | null>;
   record(input: { key: string; actorKey: string; scopeKey: string; contextDomain: 'content'; query: string; normalizedQuery: string; folderKey: string | null; includeDescendants: boolean; cacheVersion: number; output: unknown; now: string }): Promise<void>;
-  list(input: { actorKey: string; scopeKey: string; contextDomain: 'content'; folderKey: string | null; includeDescendants: boolean; limit: number }): Promise<Array<{ query: string; normalizedQuery: string; contextDomain: 'content'; searchedAt: string; usageCount: number; folderKey?: string; includeDescendants?: boolean; documents: Array<{ documentKey: string; scopeKey: string; folderKey?: string; name: string; extension?: string; score: number; summary?: string }> }>>;
-  remove?(input: { actorKey: string; scopeKey: string; contextDomain: 'content'; normalizedQuery: string; folderKey: string | null; includeDescendants: boolean }): Promise<boolean>;
+  list(input: { actorKey: string; scopeKey: string; contextDomain: 'content'; folderKey: string | null; includeDescendants: boolean; allLocations?: boolean; cacheVersion: number; limit: number }): Promise<Array<{ query: string; normalizedQuery: string; contextDomain: 'content'; searchedAt: string; usageCount: number; folderKey?: string; includeDescendants?: boolean; documents: Array<{ documentKey: string; scopeKey: string; folderKey?: string; name: string; extension?: string; score: number; summary?: string }> }>>;
+  remove?(input: { actorKey: string; scopeKey: string; contextDomain: 'content'; normalizedQuery: string; folderKey: string | null; includeDescendants: boolean; allLocations?: boolean }): Promise<boolean>;
 }
 
 export interface ContentActionResult { text?: string; audio?: Uint8Array; audioBase64?: string; mimeType?: string; durationMs?: number; content?: string; embedding?: number[]; contentChunks?: string[]; chunkEmbeddings?: number[][]; semanticChunkCount?: number; semanticContentHash?: string }
@@ -2363,7 +2363,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       const store = dependencies.searchQueries ?? (await import('@/lib/db/content-search-queries.node')).contentSearchQueries;
       if (!store.remove) fail('CONTENT_CONFLICT', 'Search history deletion is unavailable.', tool, 'delete', input.normalizedQuery);
       const normalizedQuery = input.normalizedQuery.normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('en-US');
-      const deleted = await store.remove({ actorKey: member.user.key, scopeKey: input.scopeKey, contextDomain: CONTENT_SEARCH_CONTEXT_DOMAIN, normalizedQuery, folderKey: input.folderKey ?? null, includeDescendants: input.folderKey ? input.includeDescendants ?? true : false });
+      const deleted = await store.remove({ actorKey: member.user.key, scopeKey: input.scopeKey, contextDomain: CONTENT_SEARCH_CONTEXT_DOMAIN, normalizedQuery, folderKey: input.folderKey ?? null, includeDescendants: input.folderKey ? input.includeDescendants ?? true : false, allLocations: input.allLocations });
       result = { normalizedQuery, deleted };
     } else if (tool === 'scope.content.search-history') {
       await roleFor(input.scopeKey, 'viewer');
@@ -2374,7 +2374,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         historyFolderKeys = new Set([input.folderKey, ...((input.includeDescendants ?? true) ? descendants(await foldersIn(input.scopeKey), input.folderKey).map((item) => item.key) : [])]);
       }
       const store = dependencies.searchQueries ?? (await import('@/lib/db/content-search-queries.node')).contentSearchQueries;
-      const history = await store.list({ actorKey: member.user.key, scopeKey: input.scopeKey, contextDomain: CONTENT_SEARCH_CONTEXT_DOMAIN, folderKey: input.folderKey ?? null, includeDescendants: input.folderKey ? input.includeDescendants ?? true : false, cacheVersion: CONTENT_SEARCH_CACHE_VERSION, limit: input.limit });
+      const history = await store.list({ actorKey: member.user.key, scopeKey: input.scopeKey, contextDomain: CONTENT_SEARCH_CONTEXT_DOMAIN, folderKey: input.folderKey ?? null, includeDescendants: input.folderKey ? input.includeDescendants ?? true : false, allLocations: input.allLocations, cacheVersion: CONTENT_SEARCH_CACHE_VERSION, limit: input.limit });
       result = { history: await Promise.all(history.map(async (item) => ({
         ...item,
         documents: (await Promise.all(item.documents.map(async (stored) => {

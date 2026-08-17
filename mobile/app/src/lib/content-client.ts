@@ -734,22 +734,24 @@ export async function summarizeContentDocument(documentKey: string, topic: strin
   return result.data.summary;
 }
 
-export async function listContentSearchHistory(folderKey?: string, includeDescendants = false, requestContext = getContentContext()) {
+export async function listContentSearchHistory(folderKey?: string, includeDescendants = false, requestContext = getContentContext(), allLocations = false) {
   const contentContext = requestContext;
   const data = await callContentTool<{ history: ContentSearchHistoryItem[] }>("scope.content.search-history", {
     scopeKey: contentContext.scopeKey,
     ...(folderKey ? { folderKey, includeDescendants } : {}),
+    ...(allLocations ? { allLocations: true } : {}),
     limit: 100,
   }, undefined, requestContext);
   return data.history;
 }
 
-export async function deleteContentSearchHistory(normalizedQuery: string, folderKey?: string, includeDescendants = false) {
+export async function deleteContentSearchHistory(normalizedQuery: string, folderKey?: string, includeDescendants = false, allLocations = false) {
   const contentContext = getContentContext();
   return callContentTool<{ normalizedQuery: string; deleted: boolean }>("scope.content.search-history.delete", {
     scopeKey: contentContext.scopeKey,
     normalizedQuery,
     ...(folderKey ? { folderKey, includeDescendants } : {}),
+    ...(allLocations ? { allLocations: true } : {}),
     idempotencyKey: createContentMutationKey(),
   });
 }

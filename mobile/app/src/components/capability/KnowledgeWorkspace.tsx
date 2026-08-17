@@ -2253,7 +2253,7 @@ export function KnowledgeWorkspace() {
     }, 300);
     const historyTimeout = setTimeout(() => {
       void searchContentMatches(normalized, controller.signal, folderKey).then(() => {
-        if (!controller.signal.aborted) void invalidateContentHistories(queryClient, contentContext, [folderKey]);
+        if (!controller.signal.aborted) void invalidateContentHistories(queryClient, contentContext, [undefined]);
       }).catch(() => undefined);
     }, 800);
     return () => {
@@ -2386,7 +2386,7 @@ export function KnowledgeWorkspace() {
   const openSearchHistory = async () => {
     if (!hasContentContext) return;
     const generation = ++historyGeneration.current;
-    const folderKey = currentFolder?.key;
+    const folderKey = undefined;
     const key = contentQueryKeys.history(contentContext, folderKey);
     const cached = queryClient.getQueryData<ContentSearchHistoryItem[]>(key);
     const invalidated = queryClient.getQueryState(key)?.isInvalidated === true;
@@ -2407,7 +2407,7 @@ export function KnowledgeWorkspace() {
 
   const useHistoryQuery = (item: ContentSearchHistoryItem) => {
     const folderKey = currentFolder?.key;
-    const promoted = promoteCachedContentHistory(queryClient, contentContext, folderKey, item);
+    const promoted = promoteCachedContentHistory(queryClient, contentContext, undefined, item);
     setHistory((current) => [promoted, ...current.filter(({ normalizedQuery }) => normalizedQuery !== item.normalizedQuery)]);
     closeSheet();
     if (folderKey) {
@@ -2423,13 +2423,13 @@ export function KnowledgeWorkspace() {
 
   const removeHistoryQuery = async (item: ContentSearchHistoryItem) => {
     if (removingHistoryQuery) return;
-    const folderKey = currentFolder?.key;
+    const folderKey = undefined;
     const previous = removeCachedContentHistory(queryClient, contentContext, folderKey, item.normalizedQuery);
     setHistory((current) => current.filter(({ normalizedQuery }) => normalizedQuery !== item.normalizedQuery));
     setRemovingHistoryQuery(item.normalizedQuery);
     setSheetError(undefined);
     try {
-      await deleteContentSearchHistory(item.normalizedQuery, folderKey, Boolean(folderKey));
+      await deleteContentSearchHistory(item.normalizedQuery, undefined, false, true);
     } catch (cause) {
       queryClient.setQueryData(contentQueryKeys.history(contentContext, folderKey), previous);
       setHistory(previous);
