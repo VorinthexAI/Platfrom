@@ -13,6 +13,9 @@ describe('Gallery assistant capabilities', () => {
     expect(new Set(galleryAssistantCapabilityNames).size).toBe(18);
     expect(galleryAssistantCapabilityNames).not.toContain('collection.duplicates.find');
     const search = createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'image.search')!;
+    const createCollection = createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'collection.create')!;
+    expect(createCollection.inputSchema.parse({ name: 'Favorites' })).toEqual({ name: 'Favorites', isFavorite: false });
+    expect(() => createCollection.inputSchema.parse({ name: 'Favorites', description: 'Photos' })).toThrow();
     expect(search.definition.inputSchema.type).toBe('object');
     expect(Array.isArray(search.definition.inputSchema.oneOf)).toBe(true);
     expect(search.inputSchema.parse({ identityKey: newId() })).toEqual({ identityKey: expect.any(String) });

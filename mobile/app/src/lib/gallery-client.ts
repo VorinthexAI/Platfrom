@@ -112,8 +112,8 @@ export function fetchGalleryOverview(collectionKey?: string, cursor?: string, li
   return postGallery<GalleryOverview>("/gallery/overview", { ...(collectionKey ? { collectionKey } : {}), ...(cursor ? { cursor } : {}), limit });
 }
 
-export function createGalleryCollection(name: string) {
-  return postGallery<GalleryCollection>("/gallery/collections", { name });
+export function createGalleryCollection(name: string, isFavorite: boolean) {
+  return postGallery<GalleryCollection>("/gallery/collections", { name, isFavorite });
 }
 
 export function updateGalleryCollection(collectionKey: string, name: string, isFavorite: boolean) {

@@ -5,7 +5,7 @@ import { galleryOperationInputSchemas, GalleryOperationError, normalizeGalleryOp
 const key = () => newId();
 const validInputs = {
   overview: {},
-  createCollection: { name: 'Summer', description: 'Summer memories' },
+  createCollection: { name: 'Summer', isFavorite: true },
   updateCollection: { collectionKey: key(), name: 'Favorites', isFavorite: true },
   deleteCollection: { collectionKey: key() },
   reserveUploads: { files: [{ clientKey: 'local-1', filename: 'photo.jpeg', sizeBytes: 1_024 }] },
@@ -36,6 +36,8 @@ describe('Gallery operation boundaries', () => {
 
   test('normalizes defaults at the shared boundary', () => {
     expect(galleryOperationInputSchemas.overview.parse({})).toEqual({ limit: 100 });
+    expect(galleryOperationInputSchemas.createCollection.parse({ name: 'Summer' })).toEqual({ name: 'Summer', isFavorite: false });
+    expect(() => galleryOperationInputSchemas.createCollection.parse({ name: 'Summer', description: 'Memories' })).toThrow();
     expect(galleryOperationInputSchemas.listSubjects.parse({})).toEqual({ includeDeleted: false });
     expect(galleryOperationInputSchemas.search.parse({ query: 'mountains' })).toEqual({ query: 'mountains', recordHistory: true, limit: 50 });
   });

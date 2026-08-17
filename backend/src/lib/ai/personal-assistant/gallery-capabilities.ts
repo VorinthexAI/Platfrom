@@ -24,7 +24,7 @@ const definitions: Array<{
   mutation?: boolean;
 }> = [
   { operation: 'overview', name: 'gallery_overview', description: 'List Gallery collections and a cursor page of recent images, optionally within one collection.', schema: z.object({ collectionKey: key.optional(), cursor: z.string().trim().min(1).max(2_000).optional(), limit: z.number().int().min(1).max(100).default(100) }).strict() },
-  { operation: 'createCollection', name: 'gallery_collection_create', description: 'Create a Gallery collection.', schema: z.object({ name: z.string().trim().min(1).max(120), description: z.string().trim().min(1).max(1_000).optional() }).strict(), mutation: true },
+  { operation: 'createCollection', name: 'gallery_collection_create', description: 'Create a Gallery collection.', schema: z.object({ name: z.string().trim().min(1).max(120), isFavorite: z.boolean().default(false) }).strict(), mutation: true },
   { operation: 'updateCollection', name: 'gallery_collection_update', description: 'Update a Gallery collection name and favorite state.', schema: z.object({ collectionKey: key, name: z.string().trim().min(1).max(120), isFavorite: z.boolean() }).strict(), mutation: true },
   { operation: 'deleteCollection', name: 'gallery_collection_delete', description: 'Delete a Gallery collection without deleting images that remain in Gallery.', schema: z.object({ collectionKey: key }).strict(), mutation: true },
   { operation: 'search', name: 'search_images', description: 'Search Gallery by visible content, a source image, or a saved visual identity, or find duplicates in a collection.', schema: imageSearchInputSchema },

@@ -1,6 +1,6 @@
 import { beforeEach, expect, mock, test } from "bun:test";
 
-const calls: Array<{ path: string; body: Record<string, unknown>; timeout?: number }> = [];
+const calls: { path: string; body: Record<string, unknown>; timeout?: number }[] = [];
 
 mock.module("@/state/auth", () => ({
   useAuthStore: { getState: () => ({ organization: { key: "organization" }, scope: { key: "scope" } }) },
@@ -14,7 +14,7 @@ mock.module("./api-client", () => ({
   } },
 }));
 
-const { deleteGalleryCollection, deleteGalleryImages, fetchGalleryOverview, filterCollections, filterMediaItems, findGalleryCollectionDuplicates, mergeMediaItems, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryImage, uploadGalleryImages } = await import("./gallery-client");
+const { createGalleryCollection, deleteGalleryCollection, deleteGalleryImages, deleteGallerySubject, fetchGalleryOverview, filterCollections, filterMediaItems, findGalleryCollectionDuplicates, mergeMediaItems, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryImage, uploadGalleryImages } = await import("./gallery-client");
 
 beforeEach(() => calls.splice(0));
 
@@ -140,9 +140,20 @@ test("sends image and collection edits and collection deletion through canonical
   ]);
 });
 
+test("creates collections with only a name and favorite state", async () => {
+  await createGalleryCollection("Portraits", true);
+  expect(calls[0]).toMatchObject({ path: "/gallery/collections", body: { organizationKey: "organization", scopeKey: "scope", name: "Portraits", isFavorite: true } });
+  expect(calls[0]?.body).not.toHaveProperty("description");
+});
+
+test("deletes visual identities through the canonical Gallery mutation", async () => {
+  await deleteGallerySubject("identity");
+  expect(calls[0]).toMatchObject({ path: "/gallery/subjects/delete", body: { organizationKey: "organization", scopeKey: "scope", identityKey: "identity" } });
+});
+
 test("maps accepted upload jobs back to optimistic client images", async () => {
   const originalFetch = globalThis.fetch;
-  const uploads: Array<{ url: string; method?: string }> = [];
+  const uploads: { url: string; method?: string }[] = [];
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     if (url === "file://image") return new Response(new Blob(["jpeg"]), { status: 200 });

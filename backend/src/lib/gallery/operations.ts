@@ -21,7 +21,7 @@ import { enqueueGalleryUploadBatch } from './upload-queue';
 import { cursorPaginationInputShape } from '@/lib/cursor-pagination';
 
 const overviewSchema = strictObject({ collectionKey: z.string().cuid().optional(), ...cursorPaginationInputShape });
-const collectionCreateSchema = strictObject({ name: z.string().trim().min(1).max(120), description: z.string().trim().min(1).max(1_000).optional() });
+const collectionCreateSchema = strictObject({ name: z.string().trim().min(1).max(120), isFavorite: z.boolean().default(false) });
 const collectionUpdateSchema = strictObject({ collectionKey: z.string().cuid(), name: z.string().trim().min(1).max(120), isFavorite: z.boolean() });
 const collectionDeleteSchema = strictObject({ collectionKey: z.string().cuid() });
 const imageUpdateSchema = strictObject({ imageKey: z.string().cuid(), name: z.string().trim().min(1).max(255).refine((name) => !name.includes('/') && !name.includes('\\'), 'Image name cannot contain path separators.'), isFavorite: z.boolean() });
@@ -130,7 +130,7 @@ async function createCollection(rawInput: unknown, context: GalleryOperationCont
     const input = { ...collectionCreateSchema.parse(rawInput), ...context };
     const membership = await authorize(context);
     const now = new Date().toISOString();
-    const collection = collectionSchema.parse({ key: newId(), scopeKey: input.scopeKey, name: input.name, ...(input.description ? { description: input.description } : {}), embedding: currentEmbeddingSchema.parse(await embedText({ text: `${input.name}\n\n${input.description ?? ''}` })), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now });
+    const collection = collectionSchema.parse({ key: newId(), scopeKey: input.scopeKey, name: input.name, embedding: currentEmbeddingSchema.parse(await embedText({ text: input.name })), isFavorite: input.isFavorite, deletedAt: null, createdAt: now, updatedAt: now });
     const member = collectionMemberSchema.parse({ key: newId(), scopeKey: input.scopeKey, collectionKey: collection.key, memberKey: membership.key, role: 'owner', createdAt: now });
     await repository.createCollection(collection, member);
     return safeCollection(collection, 0, null);
