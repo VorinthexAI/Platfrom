@@ -1419,7 +1419,9 @@ export function KnowledgeWorkspace() {
     if (!document) return;
     const generation = ++narrationPlaybackGeneration.current;
     try {
-      const history = refreshUrl ? await refreshContentDocumentAudioVersions(queryClient, contentContext, document.key) : audioVersions;
+      const history = refreshUrl
+        ? await refreshContentDocumentAudioVersions(queryClient, contentContext, document.key)
+        : queryClient.getQueryData<ContentDocumentAudioVersion[]>(contentQueryKeys.audioVersions(contentContext, document.key)) ?? audioVersions;
       if (generation !== narrationPlaybackGeneration.current) return;
       if (refreshUrl) setAudioVersions(history);
       const playable = history.find((item) => item.key === version.key) ?? version;
