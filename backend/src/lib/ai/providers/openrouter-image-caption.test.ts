@@ -43,11 +43,14 @@ describe('OpenRouter image captions', () => {
     expect(result.output).toEqual({ content: 'Faktura\n\nFakturans total är 42 €.' });
   });
 
-  test('sends all images in one ordered multimodal request and returns captions only', async () => {
+  test('sends all images in one ordered multimodal request and returns scored results', async () => {
     let body: Record<string, any> = {};
     globalThis.fetch = (async (_input, init) => {
       body = JSON.parse(String(init?.body));
-      return Response.json(completion(JSON.stringify({ captions: ['A detailed first scene.', 'A detailed second scene.'] })));
+      return Response.json(completion(JSON.stringify({ results: [
+        { caption: 'A detailed first scene.', score: 91 },
+        { caption: 'A detailed second scene.', score: 74 },
+      ] })));
     }) as typeof fetch;
 
     const result = await createOpenRouterProvider({ apiKey: 'test-key' }).execute({
@@ -64,9 +67,24 @@ describe('OpenRouter image captions', () => {
       { type: 'image_url', image_url: { url: 'https://cdn.example.com/one.jpg', detail: 'high' } },
       { type: 'image_url', image_url: { url: 'https://cdn.example.com/two.jpg', detail: 'high' } },
     ]);
-    expect(body.response_format.json_schema.schema.properties.captions).toMatchObject({ minItems: 2, maxItems: 2 });
+    expect(body.messages[0].content[0].text).toContain('resolution, focus and clarity, lighting and exposure, visible detail, composition, and artifacts');
+    expect(body.response_format.json_schema.name).toBe('image_caption_results');
+    expect(body.response_format.json_schema.schema).toMatchObject({ required: ['results'], additionalProperties: false });
+    expect(body.response_format.json_schema.schema.properties.results).toMatchObject({
+      minItems: 2,
+      maxItems: 2,
+      items: {
+        type: 'object',
+        required: ['caption', 'score'],
+        additionalProperties: false,
+        properties: { score: { type: 'integer', minimum: 1, maximum: 100 } },
+      },
+    });
     expect(body.provider).toEqual({ data_collection: 'deny', zdr: true });
-    expect(result.output).toEqual({ captions: ['A detailed first scene.', 'A detailed second scene.'] });
+    expect(result.output).toEqual({ results: [
+      { caption: 'A detailed first scene.', score: 91 },
+      { caption: 'A detailed second scene.', score: 74 },
+    ] });
     expect(result.usage).toEqual({ inputTokens: 120, outputTokens: 80, totalTokens: 200 });
   });
 
@@ -102,9 +120,38 @@ describe('OpenRouter image captions', () => {
     };
     globalThis.fetch = (async () => Response.json(completion('{not-json'))) as unknown as typeof fetch;
     await expect(createOpenRouterProvider({ apiKey: 'test-key' }).execute(request)).rejects.toMatchObject({ code: 'response_invalid' });
-    globalThis.fetch = (async () => Response.json(completion(JSON.stringify({ captions: ['one', 'two'] })))) as unknown as typeof fetch;
+    globalThis.fetch = (async () => Response.json(completion(JSON.stringify({ results: [
+      { caption: 'one', score: 80 },
+      { caption: 'two', score: 70 },
+    ] })))) as unknown as typeof fetch;
+    await expect(createOpenRouterProvider({ apiKey: 'test-key' }).execute(request)).rejects.toMatchObject({ code: 'response_invalid' });
+    globalThis.fetch = (async () => Response.json(completion(JSON.stringify({ results: [{ caption: 'one', score: 80.5 }] })))) as unknown as typeof fetch;
+    await expect(createOpenRouterProvider({ apiKey: 'test-key' }).execute(request)).rejects.toMatchObject({ code: 'response_invalid' });
+    globalThis.fetch = (async () => Response.json(completion(JSON.stringify({ results: [{ caption: 'one', score: 101 }] })))) as unknown as typeof fetch;
+    await expect(createOpenRouterProvider({ apiKey: 'test-key' }).execute(request)).rejects.toMatchObject({ code: 'response_invalid' });
+    globalThis.fetch = (async () => Response.json(completion(JSON.stringify({ results: [{ caption: 'one', score: 80, extra: true }] })))) as unknown as typeof fetch;
     await expect(createOpenRouterProvider({ apiKey: 'test-key' }).execute(request)).rejects.toMatchObject({ code: 'response_invalid' });
     await expect(createOpenRouterProvider({ apiKey: 'test-key' }).execute({ ...request, externalModelId: 'other/model' })).rejects.toMatchObject({ code: 'unsupported_action' });
+  });
+
+  test('returns scored document transcription text in the unified result shape', async () => {
+    let body: Record<string, any> = {};
+    globalThis.fetch = (async (_input, init) => {
+      body = JSON.parse(String(init?.body));
+      return Response.json(completion(JSON.stringify({ results: [{ caption: 'Invoice total: 42 EUR', score: 83 }] })));
+    }) as typeof fetch;
+
+    const result = await createOpenRouterProvider({ apiKey: 'test-key' }).execute({
+      actionId: 'caption-image',
+      modelId: IMAGE_CAPTION_MODEL,
+      externalModelId: IMAGE_CAPTION_EXTERNAL_MODEL_ID,
+      input: { imageUrls: ['https://cdn.example.com/document.jpg'], purpose: 'document-transcription' },
+      organizationKey: 'organization-key',
+    });
+
+    expect(body.messages[0].content[0].text).toContain("caption field");
+    expect(body.messages[0].content[0].text).toContain('legibility and quality');
+    expect(result.output).toEqual({ results: [{ caption: 'Invoice total: 42 EUR', score: 83 }] });
   });
 
   test('rejects malformed document cleanup output and the wrong model', async () => {

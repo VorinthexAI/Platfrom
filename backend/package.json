@@ -29,6 +29,8 @@
     "db:migrate:ci": "bun run src/db/arango-migrate.ts",
     "db:backfill-semantic-embeddings": "bun run load-local-env && bun --env-file=.env.local scripts/backfill-semantic-embeddings.ts",
     "db:backfill-semantic-embeddings:ci": "bun run scripts/backfill-semantic-embeddings.ts",
+    "db:backfill-gallery-captions": "bun run load-local-env && bun --env-file=.env.local scripts/backfill-gallery-captions.ts",
+    "db:backfill-gallery-captions:ci": "bun run scripts/backfill-gallery-captions.ts --all --execute",
     "seed.ts": "bun run load-local-env && bun --env-file=.env.local src/lib/db/seed.ts",
     "db:seed:ci": "bun run src/lib/db/seed.ts",
     "db:seed": "bun run load-local-env && bun --env-file=.env.local src/db/seed-all.ts",

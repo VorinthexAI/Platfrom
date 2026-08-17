@@ -110,14 +110,18 @@ describe('image.search tool', () => {
     const sourceKey = newId(), targetKey = newId();
     const source = result(toolContext.runtimeScopeKey, sourceKey).image;
     let searched: any;
+    let metrics: { mode: string; resultCount: number; durationMs: number } | undefined;
     const output = await imageSearchTool.execute({ imageKey: sourceKey, threshold: 0.8, limit: 12 }, {
       context: toolContext,
       getImage: async () => source,
       canAccessImage: async () => true,
       searchImages: async (input) => { searched = input; return [result(toolContext.runtimeScopeKey, sourceKey), result(toolContext.runtimeScopeKey, targetKey)]; },
+      onMetrics(value) { metrics = value; },
     });
     expect(searched).toMatchObject({ embedding: source.embedding, threshold: 0.8, limit: 13 });
     expect(output.images.map(({ key }) => key)).toEqual([targetKey]);
+    expect(metrics).toMatchObject({ mode: 'similar', resultCount: 1 });
+    expect(metrics!.durationMs).toBeLessThan(1_000);
     await expect(imageSearchTool.execute({ imageKey: sourceKey }, { context: toolContext, getImage: async () => source, canAccessImage: async () => false })).rejects.toThrow('not found');
   });
 

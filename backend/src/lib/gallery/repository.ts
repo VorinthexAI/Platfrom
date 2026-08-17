@@ -28,6 +28,7 @@ export interface GalleryRepository {
   transferCollectionImages(input: { scopeKey: string; actorKey: string; sourceCollectionKey: string; destinationCollectionKeys: string[]; imageKeys: string[]; mode: 'copy' | 'move'; now: string }): Promise<{ status: 'ok'; createdRelationCount: number } | { status: 'selection-changed' | 'destination-forbidden' }>;
   insertUpload(upload: GalleryUpload): Promise<GalleryUpload>;
   getUpload(uploadKey: string): Promise<GalleryUpload | null>;
+  listRecoverableUploads(): Promise<GalleryUpload[]>;
   updateUpload(uploadKey: string, patch: Partial<Omit<GalleryUpload, 'key'>>): Promise<GalleryUpload>;
   searchAccessibleImages(input: AccessibleImageSearchInput): Promise<AccessibleImageSearchResult[]>;
   listMatchingIdentityNames(scopeKey: string, query: string): Promise<VisualIdentity[]>;
@@ -105,6 +106,7 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
     }); },
     insertUpload: insertGalleryUpload,
     getUpload: getGalleryUploadById,
+    async listRecoverableUploads() { return (await all(database, 'FOR upload IN galleryUploads FILTER upload.status IN ["queued", "processing"] SORT upload.updatedAt ASC, upload._key ASC RETURN upload', {})).map((value) => parse(galleryUploadSchema, value)); },
     updateUpload: updateGalleryUpload,
     searchAccessibleImages: (input) => searchAccessibleImages(input, database),
     async listMatchingIdentityNames(scopeKey, query) { return (await all(database, 'FOR identity IN visualIdentities FILTER identity.scopeKey == @scopeKey && identity.deletedAt == null FILTER CONTAINS(LOWER(@query), LOWER(identity.name)) RETURN identity', { scopeKey, query })).map((value) => parse(visualIdentitySchema, value)); },

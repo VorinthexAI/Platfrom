@@ -377,12 +377,23 @@ export function GalleryWorkspace() {
 
   async function uploadTo(collectionKey: string) {
     if (pendingFiles.length === 0) return;
+    const files = [...pendingFiles];
+    const targetCollection = collections.find(({ key }) => key === collectionKey);
+    const batchKey = `upload-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setOptimisticMediaItems((current) => [...files.map((file) => ({ ...file, batchKey, collectionKey })), ...current]);
+    if (targetCollection) setCollections((current) => current.map((collection) => collection.key === collectionKey ? { ...collection, count: collection.count + files.length, coverUrl: collection.coverUrl ?? files[0]?.uri ?? null } : collection));
     setBusy(true);
     closeSheet();
     try {
-      await completeUpload(pendingFiles, collectionKey);
+      await completeUpload(files, collectionKey, batchKey);
       setBusy(false);
     } catch (error) {
+      setOptimisticMediaItems((current) => current.filter((item) => item.batchKey !== batchKey));
+      if (targetCollection) setCollections((current) => current.map((collection) => collection.key === collectionKey ? {
+        ...collection,
+        count: Math.max(0, collection.count - files.length),
+        coverUrl: collection.coverUrl === files[0]?.uri ? targetCollection.coverUrl : collection.coverUrl,
+      } : collection));
       setStatus(errorMessage(error));
     } finally {
       setBusy(false);

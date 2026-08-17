@@ -37,6 +37,7 @@ export interface ImageSearchToolDependencies extends ExecuteActionOptions {
   canAccessCollection?: GalleryRepository['canAccessCollection'];
   getCollection?: GalleryRepository['getCollection'];
   findDuplicateImages?: GalleryRepository['listRedundantCollectionImages'];
+  onMetrics?: (metrics: { mode: 'text' | 'similar' | 'duplicates'; resultCount: number; durationMs: number }) => void;
 }
 
 const repository = getDefaultGalleryRepository();
@@ -57,7 +58,14 @@ export const imageSearchTool = {
     },
   },
   async execute(rawInput: unknown, dependencies: ImageSearchToolDependencies): Promise<ImageSimilarityOutput> {
+    const startedAt = performance.now();
     const input = imageSearchInputSchema.parse(rawInput);
+    const finish = (mode: 'text' | 'similar' | 'duplicates', output: ImageSimilarityOutput) => {
+      const metrics = { mode, resultCount: output.images.length, durationMs: performance.now() - startedAt };
+      console.info('image search completed', metrics);
+      dependencies.onMetrics?.(metrics);
+      return output;
+    };
     const actorKey = imageSearchActor(dependencies.context);
     const scopeKey = dependencies.context.runtimeScopeKey;
     const organizationKey = dependencies.context.organizationKey;
@@ -68,7 +76,7 @@ export const imageSearchTool = {
     }
     if ('duplicates' in input) {
       const duplicates = await (dependencies.findDuplicateImages ?? repository.listRedundantCollectionImages)(scopeKey, input.collectionKey);
-      return imageSimilarityOutput(duplicates.slice(0, 500).map((image) => ({ image })));
+      return finish('duplicates', imageSimilarityOutput(duplicates.slice(0, 500).map((image) => ({ image }))));
     }
     if ('imageKey' in input) {
       const source = await (dependencies.getImage ?? repository.getImage)(input.imageKey);
@@ -82,7 +90,7 @@ export const imageSearchTool = {
         threshold: input.threshold,
         limit: input.limit + 1,
       });
-      return imageSimilarityOutput(results.filter(({ image }) => image.key !== source.key).slice(0, input.limit));
+      return finish('similar', imageSimilarityOutput(results.filter(({ image }) => image.key !== source.key).slice(0, input.limit)));
     }
     const embeddingInput = { text: prepareEmbeddingText(input.query, 'query') };
     const response = dependencies.executeEmbedding
@@ -102,6 +110,6 @@ export const imageSearchTool = {
       threshold: input.threshold,
       limit: input.limit,
     });
-    return imageSimilarityOutput(results);
+    return finish('text', imageSimilarityOutput(results));
   },
 } as const;

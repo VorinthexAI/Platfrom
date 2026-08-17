@@ -3,24 +3,21 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { z, ZodError } from 'zod';
 import { collectionSchema } from '@/lib/db/collections.node';
 import { collectionMemberSchema } from '@/lib/db/collection-members.node';
-import { collectionImageSchema } from '@/lib/db/collection-images.node';
-import { galleryUploadSchema, type GalleryUpload } from '@/lib/db/gallery-uploads.node';
+import { galleryUploadSchema } from '@/lib/db/gallery-uploads.node';
 import { imageSchema } from '@/lib/db/images.node';
 import { visualIdentitySchema } from '@/lib/db/visual-identities.node';
 import { imageIdentitySchema } from '@/lib/db/image-identities.node';
 import type { getUserOrganizationByOrganizationAndUser } from '@/lib/db/user-organization.node';
-import { ImageProcessingError, processImage } from '@/lib/ai/image-processing';
-import { imageCaptionTool } from '@/lib/ai/tools/image-caption';
 import { imageSearchInputSchema, imageSearchTool } from '@/lib/ai/tools/image-search';
 import { imageCreateVisualIdentityTool } from '@/lib/ai/tools/image-create-visual-identity';
-import { documentStorage } from '@/lib/ai/document-processing/storage';
-import { EMBEDDING_DIMENSIONS, currentEmbeddingSchema, embedText } from '@/lib/embeddings';
+import { currentEmbeddingSchema, embedText } from '@/lib/embeddings';
 import { newId } from '@/lib/ids';
 import { getDefaultGalleryRepository } from './repository';
 import { createPublicS3Client, s3, S3_BUCKET } from '@/lib/s3';
 import { strictObject } from '@/api/validation';
 import { signedImageUrl } from './image-url';
 import { getDefaultUserSearchService } from '@/lib/user-searches/service';
+import { enqueueGalleryUploadBatch } from './upload-queue';
 
 const overviewSchema = strictObject({ collectionKey: z.string().cuid().optional() });
 const collectionCreateSchema = strictObject({ name: z.string().trim().min(1).max(120), description: z.string().trim().min(1).max(1_000).optional() });
@@ -63,6 +60,7 @@ export interface GalleryOperationContext {
   membership: GalleryMembership;
   signal?: AbortSignal;
   recordUserSearch?: (userKey: string, query: string) => Promise<unknown>;
+  enqueueUploadBatch?: (uploadKeys: readonly string[]) => Promise<unknown>;
 }
 
 async function authorize(context: GalleryOperationContext) {
@@ -100,11 +98,6 @@ async function reconcileVisualIdentity(identity: z.infer<typeof visualIdentitySc
   await persistIdentityMatches(identity.scopeKey, identity.key, matches.map(({ image, score }) => ({ imageKey: image.key, confidence: score })));
 }
 
-async function classifyImageSubjects(image: z.infer<typeof imageSchema>) {
-  const matches = await repository.listIdentityMatches(image.scopeKey, image.embedding);
-  for (const match of matches) await persistIdentityMatches(image.scopeKey, match.identityKey, [{ imageKey: image.key, confidence: match.confidence }]);
-}
-
 async function safeSubject(row: { identity: z.infer<typeof visualIdentitySchema>; reference: z.infer<typeof imageSchema>; imageCount: number }) {
   const { identity, reference } = row;
   return {
@@ -112,31 +105,6 @@ async function safeSubject(row: { identity: z.infer<typeof visualIdentitySchema>
     referenceUrl: await imageUrl(reference.storageKey), imageCount: row.imageCount, deletedAt: identity.deletedAt,
     createdAt: identity.createdAt, updatedAt: identity.updatedAt,
   };
-}
-
-async function processReservedUpload(upload: GalleryUpload) {
-  try {
-    await repository.updateUpload(upload.key, { status: 'processing', updatedAt: new Date().toISOString() });
-    const stored = await documentStorage.download(upload.storageKey);
-    if (stored.bytes.byteLength !== upload.sizeBytes) throw new Error('Uploaded image size changed.');
-    const sourceUrl = upload.processingMode === 'library' ? await imageUrl(upload.storageKey) : undefined;
-    const image = await processImage({ scopeKey: upload.scopeKey, ownerKey: upload.actorKey, file: { filename: upload.filename, mimeType: upload.mimeType, sizeBytes: upload.sizeBytes, bytes: stored.bytes } }, {
-      createKey: () => upload.imageKey,
-      caption: upload.processingMode === 'cover'
-        ? async () => 'Folder cover image.'
-        : async () => (await imageCaptionTool.execute({ imageUrls: [sourceUrl!] }, { organizationKey: upload.organizationKey })).captions[0]!,
-      ...(upload.processingMode === 'cover' ? { embed: async () => Array(EMBEDDING_DIMENSIONS).fill(0) } : {}),
-    });
-    // Subject reads reconcile again, so a transient classification failure does not fail an otherwise valid upload.
-    await classifyImageSubjects(image).catch(() => undefined);
-    if (upload.collectionKey) await repository.addImageToCollection(collectionImageSchema.parse({ key: newId(), scopeKey: upload.scopeKey, collectionKey: upload.collectionKey, imageKey: image.key, addedByKey: upload.actorKey, createdAt: new Date().toISOString() }));
-    await documentStorage.delete(upload.storageKey).catch(() => undefined);
-    await repository.updateUpload(upload.key, { status: 'completed', updatedAt: new Date().toISOString(), errorCode: null });
-  } catch (error) {
-    const errorCode = error instanceof ImageProcessingError ? error.code : 'IMAGE_PROCESSING_FAILED';
-    console.error('gallery upload processing failed', { uploadKey: upload.key, imageKey: upload.imageKey, errorCode, error });
-    await repository.updateUpload(upload.key, { status: 'failed', errorCode, updatedAt: new Date().toISOString() }).catch(() => undefined);
-  }
 }
 
 async function overview(rawInput: unknown, context: GalleryOperationContext) {
@@ -187,7 +155,8 @@ async function completeUploads(rawInput: unknown, context: GalleryOperationConte
       if (head.ContentLength !== upload.sizeBytes || head.ContentType !== 'image/jpeg') throw new GalleryOperationError(409, 'GALLERY_UPLOAD_MISMATCH', 'Uploaded image does not match its reservation.');
       return repository.updateUpload(upload.key, { status: 'queued', updatedAt: new Date().toISOString(), errorCode: null });
     }));
-    for (const upload of uploads) if (upload.status === 'queued') void processReservedUpload(upload);
+    const queuedKeys = uploads.filter(({ status }) => status === 'queued').map(({ key }) => key);
+    if (queuedKeys.length > 0) await (context.enqueueUploadBatch ?? enqueueGalleryUploadBatch)(queuedKeys);
     return { jobs: uploads.map(({ key, imageKey, status }) => ({ key, imageKey, status })) };
 }
 

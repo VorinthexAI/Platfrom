@@ -23,7 +23,7 @@ test('preserves ordered pages and reconciles Textract with visual transcription'
     caption: async (input: any) => {
       captionInputs.push(input);
       const first = input.imageUrls[0].includes('page-01');
-      return { captions: [input.purpose === 'document-transcription' ? first ? 'visual one' : 'visual two' : first ? 'final one' : 'final two'] };
+      return { results: [{ caption: input.purpose === 'document-transcription' ? first ? 'visual one' : 'visual two' : first ? 'final one' : 'final two', score: 80 }] };
     },
   });
   expect(uploaded).toHaveLength(2);
@@ -41,7 +41,7 @@ test('cleans retained scan objects when processing fails', async () => {
     storage: { async upload(input) { return { storageKey: input.key }; }, async delete(key) { deleted.push(key); }, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
     ocr: { extract: async () => { throw new Error('offline'); } },
     signUrl: async () => 'https://images.example/page.jpg',
-    caption: async () => ({ captions: ['visual'] }),
+    caption: async () => ({ results: [{ caption: 'visual', score: 80 }] }),
   })).rejects.toThrow('offline');
   expect(deleted).toHaveLength(1);
 });
@@ -72,7 +72,7 @@ test('uses OCR content when visual reconciliation fails', async () => {
     ocr: { extract: async () => ({ extractedText: 'Primary OCR', blocks: [], metadata: {} }) },
     signUrl: async () => 'https://images.example/page.jpg',
     caption: async (input: any) => {
-      if (input.purpose === 'document-transcription') return { captions: ['Visual OCR'] };
+      if (input.purpose === 'document-transcription') return { results: [{ caption: 'Visual OCR', score: 80 }] };
       throw new Error('reconciliation unavailable');
     },
   });
@@ -97,9 +97,9 @@ test('finishes parallel OCR before starting visual work only for uncertain pages
     ocr: { extract: async () => { ocrStarted += 1; if (ocrStarted === pageCount) allOcrStarted(); await extractionGate; return { extractedText: 'primary', blocks: [], metadata: {} }; } },
     signUrl: async (key) => `https://images.example/${key}`,
     caption: async (input: any) => {
-      if (input.purpose === 'document-transcription') { visualStarted += 1; return { captions: ['secondary'] }; }
+      if (input.purpose === 'document-transcription') { visualStarted += 1; return { results: [{ caption: 'secondary', score: 80 }] }; }
       reconciliationStarted += 1;
-      return { captions: ['unified'] };
+      return { results: [{ caption: 'unified', score: 80 }] };
     },
   });
   await ocrStartedSignal;

@@ -71,6 +71,8 @@ export async function migrateImageCaptions(targetDb: Database): Promise<void> {
         scopeKey: image.scopeKey,
         sourceImageKey: image._key,
         caption: image.caption,
+        score: 1,
+        scoreVersion: 0,
         embedding: image.embedding,
         perceptualHash: null,
         hashAlgorithm: null,
@@ -82,6 +84,7 @@ export async function migrateImageCaptions(targetDb: Database): Promise<void> {
         updatedAt: image.updatedAt
       } INTO imageCaptions OPTIONS { overwriteMode: "ignore" }
   `);
+  await targetDb.query('FOR caption IN imageCaptions FILTER !HAS(caption, "score") || !HAS(caption, "scoreVersion") UPDATE caption WITH { score: HAS(caption, "score") ? caption.score : 1, scoreVersion: HAS(caption, "scoreVersion") ? caption.scoreVersion : 0 } IN imageCaptions');
   await targetDb.query(`
     FOR image IN images
       FILTER image.imageCaptionKey == null
@@ -94,6 +97,7 @@ export async function migrateImageCaptions(targetDb: Database): Promise<void> {
         FILTER caption == null
           || caption.scopeKey != image.scopeKey
           || caption.caption != image.caption
+          || !IS_NUMBER(caption.score) || caption.score < 1 || caption.score > 100
           || caption.embedding != image.embedding
         RETURN 1
     )

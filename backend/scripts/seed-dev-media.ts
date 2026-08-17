@@ -120,6 +120,8 @@ async function main() {
         scopeKey,
         sourceImageKey: imageKey,
         caption,
+        score: 80,
+        scoreVersion: 1,
         embedding: imageEmbedding,
         perceptualHash,
         hashAlgorithm: PERCEPTUAL_HASH_ALGORITHM,

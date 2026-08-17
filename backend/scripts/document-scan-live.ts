@@ -59,10 +59,10 @@ try {
     }));
     const urls = await Promise.all(storageKeys.map(signedImageUrl));
     const provider = openrouter.createOpenRouterProvider(openrouter.resolveOpenRouterEnvironment(process.env));
-    const response = await provider.execute<{ imageUrls: string[]; purpose: 'document-transcription' }, { captions: string[] }>({ actionId: 'caption-image', modelId: captionConstants.IMAGE_CAPTION_MODEL, externalModelId: captionConstants.IMAGE_CAPTION_EXTERNAL_MODEL_ID, input: { imageUrls: urls, purpose: 'document-transcription' }, organizationKey: 'nexus' });
+    const response = await provider.execute<{ imageUrls: string[]; purpose: 'document-transcription' }, { results: { caption: string; score: number }[] }>({ actionId: 'caption-image', modelId: captionConstants.IMAGE_CAPTION_MODEL, externalModelId: captionConstants.IMAGE_CAPTION_EXTERNAL_MODEL_ID, input: { imageUrls: urls, purpose: 'document-transcription' }, organizationKey: 'nexus' });
     const visual = response.output;
-    visual.captions.forEach((text, index) => console.log(`\n===== PAGE ${index + 1}: VISUAL AI =====\n${text}`));
-    console.log(`\nVerified Qwen transcription for ${visual.captions.length} real image page(s).`);
+    visual.results.forEach(({ caption }, index) => console.log(`\n===== PAGE ${index + 1}: VISUAL AI =====\n${caption}`));
+    console.log(`\nVerified Qwen transcription for ${visual.results.length} real image page(s).`);
   } else {
     const result = await scanDocumentImages({ scopeKey: newId(), name: 'Live scan verification', pages, idempotencyKey: `live-${Date.now()}` }, `live-${environment}`, {
       onPageResults(values) { diagnostics = values; },

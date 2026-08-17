@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { findRedundantGalleryImageKeys } from './gallery-duplicates';
 
 const at = (key: string, createdAt: string, perceptualHash: string) => ({ key, createdAt, perceptualHash });
@@ -47,5 +48,12 @@ describe('Gallery duplicate clustering', () => {
       at('bridge', '2026-08-11T11:00:00.000Z', '0000000000000007'),
       at('edge', '2026-08-11T12:00:00.000Z', '0000000000000037'),
     ])).toEqual(['bridge', 'edge']);
+  });
+
+  test('clusters five hundred exact-image entries within the duplicate-search budget', () => {
+    const images = Array.from({ length: 500 }, (_, index) => at(`image-${index.toString().padStart(3, '0')}`, new Date(Date.UTC(2026, 7, 17, 0, 0, index)).toISOString(), createHash('sha256').update(String(Math.floor(index / 2))).digest('hex').slice(0, 16)));
+    const startedAt = performance.now();
+    expect(findRedundantGalleryImageKeys(images)).toHaveLength(250);
+    expect(performance.now() - startedAt).toBeLessThan(1_000);
   });
 });

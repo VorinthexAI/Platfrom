@@ -21,7 +21,7 @@ function image(overrides: Partial<Image> = {}): Image {
 
 function caption(overrides: Partial<ImageCaptionRecord> = {}): ImageCaptionRecord {
   return {
-    key: captionKey, scopeKey, sourceImageKey: imageKey, caption: 'Generated caption.', embedding: embedding(0.1),
+    key: captionKey, scopeKey, sourceImageKey: imageKey, caption: 'Generated caption.', score: 80, scoreVersion: 1, embedding: embedding(0.1),
     perceptualHash: '0123456789abcdef', hashAlgorithm: 'phash-64-dct-v1',
     hashSegment0: '0123', hashSegment1: '4567', hashSegment2: '89ab', hashSegment3: 'cdef',
     createdAt: now, updatedAt: now, ...overrides,

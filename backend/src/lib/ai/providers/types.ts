@@ -190,7 +190,10 @@ export const imageCaptionInputSchema = z.object({
 export type ImageCaptionInput = z.infer<typeof imageCaptionInputSchema>;
 
 export const imageCaptionOutputSchema = z.object({
-  captions: z.array(z.string().trim().min(1).max(20_000)).min(1).max(MAX_IMAGE_CAPTION_URLS),
+  results: z.array(z.object({
+    caption: z.string().trim().min(1).max(20_000),
+    score: z.number().int().min(1).max(100),
+  }).strict()).min(1).max(MAX_IMAGE_CAPTION_URLS),
 }).strict();
 export type ImageCaptionOutput = z.infer<typeof imageCaptionOutputSchema>;
 

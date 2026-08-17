@@ -58,7 +58,7 @@ export async function scanDocumentImages(input: DocumentScanInput, organizationK
       if (isReliableDocumentOcr(result)) return;
       const url = await signUrl(storageKeys[index]!);
       try {
-        visualPages[index] = (await caption({ imageUrls: [url], purpose: 'document-transcription' }, { organizationKey })).captions[0]?.trim() ?? '';
+        visualPages[index] = (await caption({ imageUrls: [url], purpose: 'document-transcription' }, { organizationKey })).results[0]?.caption.trim() ?? '';
       } catch {
         return;
       }
@@ -66,7 +66,7 @@ export async function scanDocumentImages(input: DocumentScanInput, organizationK
       const secondary = normalizeDocumentTranscription(visualPages[index]!);
       if (!secondary) return;
       try {
-        unifiedPages[index] = normalizeDocumentTranscription((await caption({ imageUrls: [url], purpose: 'document-reconciliation', referenceTexts: [{ primary, secondary }] }, { organizationKey })).captions[0] ?? '') || primary || secondary;
+        unifiedPages[index] = normalizeDocumentTranscription((await caption({ imageUrls: [url], purpose: 'document-reconciliation', referenceTexts: [{ primary, secondary }] }, { organizationKey })).results[0]?.caption ?? '') || primary || secondary;
       } catch {
         unifiedPages[index] = primary || secondary;
       }
