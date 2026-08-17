@@ -6,6 +6,7 @@ export type GalleryCollection = {
   key: string;
   name: string;
   description: string | null;
+  isFavorite: boolean;
   count: number;
   coverUrl: string | null;
 };
@@ -19,6 +20,9 @@ export type GalleryImage = {
   sizeBytes: number;
   width: number;
   height: number;
+  city?: string | null;
+  country?: string | null;
+  countryCode?: string | null;
   isFavorite: boolean;
   createdAt: string;
   updatedAt: string;
@@ -29,6 +33,7 @@ export type GalleryImage = {
 export type GalleryOverview = {
   collections: GalleryCollection[];
   images: GalleryImage[];
+  nextCursor: string | null;
 };
 
 export function filterCollections(collections: GalleryCollection[], query: string) {
@@ -40,8 +45,8 @@ export function filterCollections(collections: GalleryCollection[], query: strin
 export function filterMediaItems(items: GalleryImage[], query: string) {
   const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
   if (terms.length === 0) return items;
-  return items.filter(({ caption, filename }) => {
-    const searchable = `${caption}\n${filename}`.toLocaleLowerCase();
+  return items.filter(({ caption, filename, city, country, countryCode }) => {
+    const searchable = `${caption}\n${filename}\n${city ?? ""}\n${country ?? ""}\n${countryCode ?? ""}`.toLocaleLowerCase();
     return terms.every((term) => searchable.includes(term));
   });
 }
@@ -50,6 +55,19 @@ export function mergeMediaItems(primary: GalleryImage[], secondary: GalleryImage
   const unique = new Map(primary.map((item) => [item.key, item]));
   for (const item of secondary) if (!unique.has(item.key)) unique.set(item.key, item);
   return [...unique.values()];
+}
+
+const galleryDateFormatter = new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+
+export function groupGalleryImagesByCreatedDate<T extends { createdAt: string }>(images: T[]) {
+  const groups = new Map<string, T[]>();
+  for (const image of images) {
+    const label = galleryDateFormatter.format(new Date(image.createdAt));
+    const group = groups.get(label);
+    if (group) group.push(image);
+    else groups.set(label, [image]);
+  }
+  return [...groups].map(([label, groupedImages]) => ({ label, images: groupedImages }));
 }
 
 export type GallerySubject = {
@@ -106,12 +124,20 @@ async function fetchWithTimeout(input: string, init: RequestInit | undefined, ti
   }
 }
 
-export function fetchGalleryOverview(collectionKey?: string) {
-  return postGallery<GalleryOverview>("/gallery/overview", collectionKey ? { collectionKey } : {});
+export function fetchGalleryOverview(collectionKey?: string, cursor?: string, limit = 100) {
+  return postGallery<GalleryOverview>("/gallery/overview", { ...(collectionKey ? { collectionKey } : {}), ...(cursor ? { cursor } : {}), limit });
 }
 
-export function createGalleryCollection(name: string) {
-  return postGallery<GalleryCollection>("/gallery/collections", { name });
+export function createGalleryCollection(name: string, isFavorite: boolean) {
+  return postGallery<GalleryCollection>("/gallery/collections", { name, isFavorite });
+}
+
+export function updateGalleryCollection(collectionKey: string, name: string, isFavorite: boolean) {
+  return postGallery<{ collection: GalleryCollection }>("/gallery/collections/update", { collectionKey, name, isFavorite });
+}
+
+export function deleteGalleryCollection(collectionKey: string) {
+  return postGallery<{ collectionKey: string }>("/gallery/collections/delete", { collectionKey });
 }
 
 export type PreparedGalleryUpload = {
@@ -119,6 +145,8 @@ export type PreparedGalleryUpload = {
   filename: string;
   uri: string;
   sizeBytes: number;
+  latitude?: number;
+  longitude?: number;
   processingMode?: "library" | "cover";
 };
 
@@ -127,7 +155,7 @@ export async function uploadGalleryImages(files: PreparedGalleryUpload[], collec
     uploads: { clientKey: string; uploadKey: string; imageKey: string; url: string; headers: Record<string, string> }[];
   }>("/gallery/uploads/presign", {
     collectionKey: collectionKey ?? null,
-    files: files.map(({ clientKey, filename, sizeBytes, processingMode }) => ({ clientKey, filename, sizeBytes, ...(processingMode ? { processingMode } : {}) })),
+    files: files.map(({ clientKey, filename, sizeBytes, processingMode, latitude, longitude }) => ({ clientKey, filename, sizeBytes, ...(processingMode ? { processingMode } : {}), ...(latitude !== undefined && longitude !== undefined ? { latitude, longitude } : {}) })),
   });
 
   for (let index = 0; index < reservation.uploads.length; index += 3) {
@@ -161,12 +189,16 @@ export function fetchGalleryUploadStatus(uploadKeys: string[], timeout = 60_000)
   );
 }
 
-export function searchGalleryImages(input: { query?: string; imageKey?: string; duplicates?: true; collectionKey?: string; limit?: number }) {
+export function searchGalleryImages(input: { query?: string; imageKey?: string; identityKey?: string; duplicates?: true; collectionKey?: string; recordHistory?: boolean; limit?: number }) {
   return postGallery<{ images: GalleryImage[] }>("/gallery/images/search", input, 4 * 60_000);
 }
 
 export function setGalleryImageFavorite(imageKey: string, isFavorite: boolean) {
   return postGallery<{ image: GalleryImage }>("/gallery/images/favorite", { imageKey, isFavorite });
+}
+
+export function updateGalleryImage(imageKey: string, name: string, isFavorite: boolean) {
+  return postGallery<{ image: GalleryImage }>("/gallery/images/update", { imageKey, name, isFavorite });
 }
 
 export function deleteGalleryImages(imageKeys: string[]) {

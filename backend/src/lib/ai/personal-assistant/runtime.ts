@@ -110,7 +110,7 @@ function canonicalJson(value: unknown): string {
 function systemPrompt(surface: z.infer<typeof assistantSurfaceSchema>) {
   if (surface === 'media-workspace') return `${BASE_SYSTEM_PROMPT}
 - You are operating inside Gallery. Call image.search whenever the user asks to find, show, locate, filter, compare, count, find visually similar images, or detect duplicates.
-- Use image.search with imageKey for visual similarity and with duplicates true plus collectionKey for duplicate detection.
+- Use image.search with imageKey for source-image similarity, identityKey for a saved visual identity, and duplicates true plus collectionKey for duplicate detection.
 - Convert conversational wording into a concise visual retrieval query while preserving named Subjects, visible traits, setting, colors, style, actions, and readable text.
 - After image.search, summarize what was found. Never claim that no image exists without searching first.`;
   const bookRules = `
@@ -186,7 +186,7 @@ export async function runPersonalAssistant(
       mode: 'model',
       organizationKey: domain.organizationKey,
       actionSlug: 'orchestrator-chat',
-      modelSlug: 'amazon.nova-lite',
+      modelSlug: 'google.gemini-2.5-flash-lite',
     }, chatInput, { ...dependencies.router, timeoutMs: dependencies.router?.timeoutMs ?? 45_000 });
     const output = chatOutputSchema.parse(response.output);
     if (output.toolCalls.length === 0) {

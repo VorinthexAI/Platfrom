@@ -126,8 +126,9 @@ describe('personal assistant service capabilities', () => {
     const update = capabilities.find(({ definition }) => definition.name === 'user.settings.update')!;
     await expect(read.execute({ userKey }, { domain, userSettings } as any)).rejects.toThrow('Unrecognized key');
     await read.execute({}, { domain, userSettings } as any);
-    await update.execute({ archive: { showOnlyFavorites: true } }, { domain, userSettings } as any);
-    expect(calls).toEqual([['read', userKey], ['update', userKey, { archive: { showOnlyFavorites: true } }]]);
+    await update.execute({ archive: { showOnlyFavorites: true }, gallery: { showOnlyFavorites: false } }, { domain, userSettings } as any);
+    expect(calls).toEqual([['read', userKey], ['update', userKey, { archive: { showOnlyFavorites: true }, gallery: { showOnlyFavorites: false } }]]);
+    expect(update.definition.description).toContain('Archive and Gallery');
     expect(update.mutationWorkspace).toBe('archive');
   });
 

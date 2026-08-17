@@ -24,7 +24,7 @@ describe('user node schema', () => {
     expect(user.refreshFounderMembershipKey).toBeNull();
     expect(user.refreshFounderMfaVersion).toBeNull();
     expect(user.isOnboarded).toBe(false);
-    expect(user.settings).toEqual({ archive: { showOnlyFavorites: false } });
+    expect(user.settings).toEqual({ archive: { showOnlyFavorites: false }, gallery: { showOnlyFavorites: false } });
 
     expect('organization_role' in user).toBe(false);
     expect('organization_title' in user).toBe(false);
@@ -57,9 +57,12 @@ describe('user node schema', () => {
   });
 
   test('keeps the persisted settings blob closed and typed', () => {
-    expect(userSettingsSchema.parse({ archive: { showOnlyFavorites: true } })).toEqual({ archive: { showOnlyFavorites: true } });
+    expect(() => userSettingsSchema.parse({ archive: { showOnlyFavorites: true } })).toThrow();
+    expect(userSettingsSchema.parse({ archive: { showOnlyFavorites: false }, gallery: { showOnlyFavorites: true } })).toEqual({ archive: { showOnlyFavorites: false }, gallery: { showOnlyFavorites: true } });
+    expect(userSchema.parse({ ...baseUser, settings: { archive: { showOnlyFavorites: true } } }).settings).toEqual({ archive: { showOnlyFavorites: true }, gallery: { showOnlyFavorites: false } });
     expect(() => userSettingsSchema.parse({ archive: { showOnlyFavorites: true, unknown: true } })).toThrow();
     expect(() => userSettingsSchema.parse({ archive: { showOnlyFavorites: 'yes' } })).toThrow();
+    expect(() => userSettingsSchema.parse({ archive: { showOnlyFavorites: false }, gallery: { showOnlyFavorites: false, unknown: true } })).toThrow();
     expect(() => userSettingsSchema.parse({ archive: { showOnlyFavorites: false }, unknown: true })).toThrow();
   });
 });

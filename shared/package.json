@@ -6,6 +6,7 @@
   "exports": {
     "./lib": "./lib/index.ts",
     "./lib/api-client": "./lib/api-client.ts",
+    "./lib/pagination": "./lib/pagination.ts",
     "./ui": "./packages/ui/index.ts",
     "./ui/button": {
       "react-native": "./packages/ui/components/button/button.mobile.tsx",
@@ -18,6 +19,10 @@
     "./ui/spinner": {
       "react-native": "./packages/ui/components/spinner/spinner.mobile.tsx",
       "default": "./packages/ui/components/spinner/spinner.web.tsx"
+    },
+    "./ui/skeleton": {
+      "react-native": "./packages/ui/components/skeleton/skeleton.mobile.tsx",
+      "default": "./packages/ui/components/skeleton/skeleton.web.tsx"
     },
     "./ui/badge": {
       "react-native": "./packages/ui/components/badge/badge.mobile.tsx",

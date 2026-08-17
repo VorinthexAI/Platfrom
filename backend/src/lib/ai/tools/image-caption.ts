@@ -21,7 +21,7 @@ export const imageCaptionTool = {
   inputSchema: imageCaptionInputSchema,
   providerDefinition: {
     name: 'image.caption',
-    description: 'Generate one rich, detailed caption for each supplied image URL.',
+    description: 'Generate one ordered result per supplied image URL with a rich caption and an integer quality score from 1 to 100. For document purposes, the caption contains the transcription and the score assesses source legibility and quality.',
     inputSchema: {
       type: 'object',
       required: ['imageUrls'],
@@ -54,8 +54,8 @@ export const imageCaptionTool = {
           providerSlug: 'openrouter',
         }, input, dependencies);
     const output = imageCaptionOutputSchema.parse(response.output);
-    if (output.captions.length !== input.imageUrls.length) {
-      throw new Error('Image caption count must match the supplied image count.');
+    if (output.results.length !== input.imageUrls.length) {
+      throw new Error('Image result count must match the supplied image count.');
     }
     return output;
   },

@@ -1,12 +1,15 @@
 import { createHash } from 'node:crypto';
 import OpenAI from 'openai';
+import { z } from 'zod';
 import { documentStorage, type DocumentStorage } from '@/lib/ai/document-processing/storage';
 import { EMBEDDING_DIMENSIONS, currentEmbeddingSchema, embedText } from '@/lib/embeddings';
 import { type Image, getImageById, insertPreparedImageWithCaption } from '@/lib/db/images.node';
 import { findReusableImageCaption, imageCaptionRecordSchema, PERCEPTUAL_HASH_ALGORITHM, type ImageCaptionRecord } from '@/lib/db/image-captions.node';
-import { perceptualHashSegments } from '@/lib/perceptual-hash';
+import { perceptualHashDistance, perceptualHashSegments, PERCEPTUAL_HASH_DUPLICATE_DISTANCE } from '@/lib/perceptual-hash';
 import { computePerceptualHashBatchDispatched } from './perceptual-hash-queue';
 import { newId } from '@/lib/ids';
+import type { ImageLocation } from '@/lib/gallery/image-location';
+import { buildImageEmbeddingText } from '@/lib/image-embedding';
 
 export const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 export const MAX_IMAGE_DIMENSION = 16_384;
@@ -15,16 +18,21 @@ export const OPENAI_VISION_MODEL = 'gpt-4.1-mini';
 const formats = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' } as const;
 type Extension = keyof typeof formats;
 export type UploadedImageFile = File | { filename: string; mimeType: string; sizeBytes: number; bytes: Uint8Array };
-export interface ProcessImageInput { scopeKey: string; ownerKey: string; file: UploadedImageFile; idempotencyKey?: string; signal?: AbortSignal; }
+export interface ProcessImageInput { scopeKey: string; ownerKey: string; file: UploadedImageFile; imageKey?: string; idempotencyKey?: string; location?: ImageLocation; signal?: AbortSignal; }
+export const generatedImageCaptionSchema = z.object({ caption: z.string().trim().min(1).max(20_000), score: z.number().int().min(1).max(100) }).strict();
+export type GeneratedImageCaption = z.infer<typeof generatedImageCaptionSchema>;
+export interface ImageProcessingMetrics { count: number; generated: number; reused: number; hashDurationMs: number; captionDurationMs: number; durationMs: number; }
 interface ResponsesClient { responses: { create(input: Record<string, unknown>, options?: { signal?: AbortSignal }): Promise<{ output_text?: string | null }> } }
 export interface ImageProcessingDependencies {
   storage?: DocumentStorage; getImage?: typeof getImageById;
   persistImage?: (input: { image: Image; caption?: ImageCaptionRecord; actorKey: string }) => Promise<Image>;
   findCaption?: typeof findReusableImageCaption;
   hashBatch?: (images: readonly Uint8Array[]) => Promise<string[]>;
-  caption?: (input: { filename: string; mimeType: string; bytes: Uint8Array; signal?: AbortSignal }) => Promise<string>;
+  caption?: (input: { filename: string; mimeType: string; bytes: Uint8Array; signal?: AbortSignal }) => Promise<GeneratedImageCaption>;
+  captionBatch?: (inputs: readonly { filename: string; mimeType: string; bytes: Uint8Array; signal?: AbortSignal }[]) => Promise<GeneratedImageCaption[]>;
   embed?: (text: string, signal?: AbortSignal) => Promise<number[]>; openAI?: ResponsesClient;
   maxBytes?: number; maxDimension?: number; maxPixels?: number; createKey?: () => string; createCaptionKey?: () => string;
+  onMetrics?: (metrics: ImageProcessingMetrics) => void;
 }
 export class ImageProcessingError extends Error {
   constructor(public readonly code: 'IMAGE_INVALID_INPUT' | 'IMAGE_TOO_LARGE' | 'IMAGE_DIMENSIONS_INVALID' | 'IMAGE_CAPTION_FAILED' | 'IMAGE_EMBEDDING_FAILED' | 'IMAGE_UPLOAD_FAILED' | 'IMAGE_INSERT_FAILED' | 'IMAGE_CLEANUP_FAILED' | 'IMAGE_IDEMPOTENCY_CONFLICT', message: string, options?: ErrorOptions) { super(message, options); this.name = 'ImageProcessingError'; }
@@ -73,6 +81,7 @@ function signature(extension: Extension, bytes: Uint8Array): boolean {
 async function validate(input: ProcessImageInput, dependencies: ImageProcessingDependencies) {
   if (!/^c[a-z0-9]{8,127}$/.test(input.scopeKey)) throw new ImageProcessingError('IMAGE_INVALID_INPUT', 'The image scope key is invalid.');
   if (!/^c[a-z0-9]{8,127}$/.test(input.ownerKey)) throw new ImageProcessingError('IMAGE_INVALID_INPUT', 'The image owner key is invalid.');
+  if (input.imageKey !== undefined && !/^c[a-z0-9]{8,127}$/.test(input.imageKey)) throw new ImageProcessingError('IMAGE_INVALID_INPUT', 'The image key is invalid.');
   if (input.idempotencyKey !== undefined && (input.idempotencyKey.trim() !== input.idempotencyKey || !input.idempotencyKey || input.idempotencyKey.length > 256)) throw new ImageProcessingError('IMAGE_INVALID_INPUT', 'The image idempotency key is invalid.');
   const file = input.file; const filename = file instanceof File ? file.name : file.filename; const mimeType = (file instanceof File ? file.type : file.mimeType).trim().toLowerCase(); const sizeBytes = file instanceof File ? file.size : file.sizeBytes;
   if (!filename || filename.trim() !== filename || filename.includes('/') || filename.includes('\\')) throw new ImageProcessingError('IMAGE_INVALID_INPUT', 'The image filename is invalid.');
@@ -93,13 +102,13 @@ function imageRequestHash(scopeKey: string, ownerKey: string, image: ValidatedIm
 
 export async function captionImageWithOpenAI(input: { filename: string; mimeType: string; bytes: Uint8Array; signal?: AbortSignal }, client: ResponsesClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, baseURL: process.env.OPENAI_BASE_URL || undefined })) {
   const response = await client.responses.create({ model: OPENAI_VISION_MODEL, max_output_tokens: 1_500, input: [{ role: 'user', content: [{ type: 'input_text', text: `Describe this image accurately for a searchable media library. Include visible subjects, setting, composition, colors, style, and readable text. The filename is ${JSON.stringify(input.filename)}.` }, { type: 'input_image', image_url: `data:${input.mimeType};base64,${Buffer.from(input.bytes).toString('base64')}`, detail: 'high' }] }] }, input.signal ? { signal: input.signal } : undefined);
-  return response.output_text?.trim() ?? '';
+  return generatedImageCaptionSchema.parse({ caption: response.output_text?.trim() ?? '', score: 1 });
 }
 
 async function removeWithRetry(storage: DocumentStorage, key: string) { let last: unknown; for (let attempt = 0; attempt < 3; attempt += 1) try { await storage.delete(key); return; } catch (error) { last = error; if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 25 * 2 ** attempt)); } throw last; }
 async function replayPersistedImage(input: ProcessImageInput, image: ValidatedImage, dependencies: ImageProcessingDependencies): Promise<Image | null> {
-  if (!input.idempotencyKey) return null;
-  const key = `c${hash(`${input.scopeKey}\0${input.idempotencyKey}`).slice(0, 24)}`;
+  if (!input.idempotencyKey && !input.imageKey) return null;
+  const key = input.imageKey ?? `c${hash(`${input.scopeKey}\0${input.idempotencyKey}`).slice(0, 24)}`;
   const requestedKey = `media/${input.scopeKey}/${key}/${hash(image.bytes)}/original.${image.extension}`;
   const existing = await (dependencies.getImage ?? getImageById)(key);
   if (!existing) return null;
@@ -107,16 +116,16 @@ async function replayPersistedImage(input: ProcessImageInput, image: ValidatedIm
   if (existing.filename !== image.filename || existing.mimeType !== image.mimeType || existing.sizeBytes !== image.sizeBytes || existing.width !== image.width || existing.height !== image.height || existing.storageKey !== requestedKey) throw new ImageProcessingError('IMAGE_IDEMPOTENCY_CONFLICT', 'The image idempotency key belongs to a different request.');
   return existing;
 }
-async function execute(input: ProcessImageInput, image: ValidatedImage, perceptualHash: string, dependencies: ImageProcessingDependencies): Promise<Image> {
+async function execute(input: ProcessImageInput, image: ValidatedImage, perceptualHash: string, dependencies: ImageProcessingDependencies, prepared?: { canonical?: ImageCaptionRecord; generated?: GeneratedImageCaption & { embedding: number[] } }): Promise<Image> {
   const getImage = dependencies.getImage ?? getImageById;
   const persistImage = dependencies.persistImage ?? insertPreparedImageWithCaption;
-  const key = input.idempotencyKey ? `c${hash(`${input.scopeKey}\0${input.idempotencyKey}`).slice(0, 24)}` : (dependencies.createKey ?? newId)();
+  const key = input.imageKey ?? (input.idempotencyKey ? `c${hash(`${input.scopeKey}\0${input.idempotencyKey}`).slice(0, 24)}` : (dependencies.createKey ?? newId)());
   const requestedKey = `media/${input.scopeKey}/${key}/${hash(image.bytes)}/original.${image.extension}`;
   if (input.idempotencyKey) { const existing = await getImage(key); if (existing) { if (existing.scopeKey !== input.scopeKey || existing.deletedAt !== null) throw new ImageProcessingError('IMAGE_INSERT_FAILED', 'The idempotent image is unavailable.'); if (existing.filename !== image.filename || existing.mimeType !== image.mimeType || existing.sizeBytes !== image.sizeBytes || existing.width !== image.width || existing.height !== image.height || existing.storageKey !== requestedKey) throw new ImageProcessingError('IMAGE_IDEMPOTENCY_CONFLICT', 'The image idempotency key belongs to a different request.'); return existing; } }
   const storage = dependencies.storage ?? documentStorage; let storageKey: string;
   try { storageKey = (await storage.upload({ key: requestedKey, bytes: image.bytes, mimeType: image.mimeType })).storageKey; } catch (error) { throw new ImageProcessingError('IMAGE_UPLOAD_FAILED', 'The original image could not be uploaded.', { cause: error }); }
   try {
-    let canonical = await (dependencies.findCaption ?? findReusableImageCaption)(input.scopeKey, perceptualHash, input.ownerKey);
+    let canonical = prepared?.canonical ?? await (dependencies.findCaption ?? findReusableImageCaption)(input.scopeKey, perceptualHash, input.ownerKey);
     let captionRecord: ImageCaptionRecord | undefined;
     let caption: string;
     let embedding: number[];
@@ -125,9 +134,12 @@ async function execute(input: ProcessImageInput, image: ValidatedImage, perceptu
       perceptualHash = canonical.perceptualHash ?? perceptualHash;
       embedding = canonical.embedding;
     } else {
-      try { caption = (await (dependencies.caption ?? ((value) => captionImageWithOpenAI(value, dependencies.openAI)))({ filename: image.filename, mimeType: image.mimeType, bytes: image.bytes, signal: input.signal })).trim(); } catch (error) { throw new ImageProcessingError('IMAGE_CAPTION_FAILED', 'The image caption could not be generated.', { cause: error }); }
+      let generated: GeneratedImageCaption;
+      try { generated = prepared?.generated ?? generatedImageCaptionSchema.parse(await (dependencies.caption ?? ((value) => captionImageWithOpenAI(value, dependencies.openAI)))({ filename: image.filename, mimeType: image.mimeType, bytes: image.bytes, signal: input.signal })); } catch (error) { throw new ImageProcessingError('IMAGE_CAPTION_FAILED', 'The image caption and score could not be generated.', { cause: error }); }
+      caption = generated.caption;
       if (!caption) throw new ImageProcessingError('IMAGE_CAPTION_FAILED', 'The image caption must not be blank.');
-      try { embedding = dependencies.embed ? await dependencies.embed(`${image.filename}\n\n${caption}`, input.signal) : await embedText({ text: `${image.filename}\n\n${caption}`, signal: input.signal }); currentEmbeddingSchema.parse(embedding); } catch (error) { throw new ImageProcessingError('IMAGE_EMBEDDING_FAILED', `The image embedding must contain exactly ${EMBEDDING_DIMENSIONS} finite values.`, { cause: error }); }
+      const embeddingText = buildImageEmbeddingText({ filename: image.filename, caption });
+      try { embedding = prepared?.generated?.embedding ?? (dependencies.embed ? await dependencies.embed(embeddingText, input.signal) : await embedText({ text: embeddingText, signal: input.signal })); currentEmbeddingSchema.parse(embedding); } catch (error) { throw new ImageProcessingError('IMAGE_EMBEDDING_FAILED', `The image embedding must contain exactly ${EMBEDDING_DIMENSIONS} finite values.`, { cause: error }); }
       const now = new Date().toISOString();
       const segments = perceptualHashSegments(perceptualHash);
       captionRecord = imageCaptionRecordSchema.parse({
@@ -135,6 +147,8 @@ async function execute(input: ProcessImageInput, image: ValidatedImage, perceptu
         scopeKey: input.scopeKey,
         sourceImageKey: key,
         caption,
+        score: generated.score,
+        scoreVersion: 1,
         embedding,
         perceptualHash,
         hashAlgorithm: PERCEPTUAL_HASH_ALGORITHM,
@@ -147,8 +161,12 @@ async function execute(input: ProcessImageInput, image: ValidatedImage, perceptu
       });
       canonical = captionRecord;
     }
+    if (input.location?.city || input.location?.country || input.location?.countryCode) {
+      const embeddingText = buildImageEmbeddingText({ filename: image.filename, caption, ...input.location });
+      try { embedding = dependencies.embed ? await dependencies.embed(embeddingText, input.signal) : await embedText({ text: embeddingText, signal: input.signal }); currentEmbeddingSchema.parse(embedding); } catch (error) { throw new ImageProcessingError('IMAGE_EMBEDDING_FAILED', `The image embedding must contain exactly ${EMBEDDING_DIMENSIONS} finite values.`, { cause: error }); }
+    }
     const now = new Date().toISOString();
-    try { return await persistImage({ image: { key, scopeKey: input.scopeKey, filename: image.filename, caption, imageCaptionKey: canonical.key, storageKey, mimeType: image.mimeType, sizeBytes: image.sizeBytes, width: image.width, height: image.height, embedding, isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now }, caption: captionRecord, actorKey: input.ownerKey }); } catch (error) { throw new ImageProcessingError('IMAGE_INSERT_FAILED', 'The prepared image could not be persisted.', { cause: error }); }
+    try { return await persistImage({ image: { key, scopeKey: input.scopeKey, filename: image.filename, caption, imageCaptionKey: canonical.key, storageKey, mimeType: image.mimeType, sizeBytes: image.sizeBytes, width: image.width, height: image.height, ...(input.location?.city ? { city: input.location.city } : {}), ...(input.location?.country ? { country: input.location.country } : {}), ...(input.location?.countryCode ? { countryCode: input.location.countryCode } : {}), embedding, isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now }, caption: captionRecord, actorKey: input.ownerKey }); } catch (error) { throw new ImageProcessingError('IMAGE_INSERT_FAILED', 'The prepared image could not be persisted.', { cause: error }); }
   } catch (error) {
     let owner: Image | null; try { owner = await getImage(key); } catch (ownershipError) { throw new ImageProcessingError('IMAGE_CLEANUP_FAILED', 'Image ownership could not be verified; the uploaded object was retained.', { cause: new AggregateError([error, ownershipError]) }); }
     if (owner?.storageKey === storageKey) { if (owner.scopeKey === input.scopeKey && owner.deletedAt === null) return owner; throw error; }
@@ -180,21 +198,71 @@ export async function processImage(input: ProcessImageInput, dependencies: Image
 }
 
 export async function processImages(inputs: readonly ProcessImageInput[], dependencies: ImageProcessingDependencies = {}): Promise<Image[]> {
+  const startedAt = performance.now();
   if (inputs.length === 0 || inputs.length > 20) throw new ImageProcessingError('IMAGE_INVALID_INPUT', 'Image batches must contain between 1 and 20 images.');
   const validated = await Promise.all(inputs.map((input) => validate(input, dependencies)));
   const replays = await Promise.all(inputs.map((input, index) => replayPersistedImage(input, validated[index]!, dependencies)));
   const pendingIndices = inputs.map((_, index) => index).filter((index) => !replays[index]);
   if (pendingIndices.length === 0) return replays as Image[];
   let hashes: string[];
+  const hashStartedAt = performance.now();
   try { hashes = await (dependencies.hashBatch ?? computePerceptualHashBatchDispatched)(pendingIndices.map((index) => validated[index]!.bytes)); } catch (error) { throw new ImageProcessingError('IMAGE_INVALID_INPUT', 'The image batch could not be decoded for perceptual hashing.', { cause: error }); }
+  const hashDurationMs = performance.now() - hashStartedAt;
   if (hashes.length !== pendingIndices.length) throw new ImageProcessingError('IMAGE_INVALID_INPUT', 'The image perceptual hash batch returned the wrong number of hashes.');
+  const canonicalByIndex = new Map<number, ImageCaptionRecord>();
+  await Promise.all(pendingIndices.map(async (index, position) => {
+    const canonical = await (dependencies.findCaption ?? findReusableImageCaption)(inputs[index]!.scopeKey, hashes[position]!, inputs[index]!.ownerKey);
+    if (canonical) canonicalByIndex.set(index, canonical);
+  }));
+  const representatives: Array<{ index: number; hash: string }> = [];
+  const representativeFor = new Map<number, number>();
+  pendingIndices.forEach((index, position) => {
+    if (canonicalByIndex.has(index)) return;
+    const perceptualHash = hashes[position]!;
+    const representative = representatives.find((candidate) => perceptualHashDistance(candidate.hash, perceptualHash) <= PERCEPTUAL_HASH_DUPLICATE_DISTANCE);
+    if (representative) representativeFor.set(index, representative.index);
+    else { representatives.push({ index, hash: perceptualHash }); representativeFor.set(index, index); }
+  });
+  const captionStartedAt = performance.now();
+  const captionInputs = representatives.map(({ index }) => ({ filename: validated[index]!.filename, mimeType: validated[index]!.mimeType, bytes: validated[index]!.bytes, signal: inputs[index]!.signal }));
+  let generatedCaptions: GeneratedImageCaption[] = [];
+  if (captionInputs.length > 0) {
+    try {
+      generatedCaptions = dependencies.captionBatch
+        ? (await dependencies.captionBatch(captionInputs)).map((result) => generatedImageCaptionSchema.parse(result))
+        : await Promise.all(captionInputs.map((value) => (dependencies.caption ?? ((input) => captionImageWithOpenAI(input, dependencies.openAI)))(value).then((result) => generatedImageCaptionSchema.parse(result))));
+    } catch (error) {
+      throw new ImageProcessingError('IMAGE_CAPTION_FAILED', 'The image caption batch could not be generated.', { cause: error });
+    }
+    if (generatedCaptions.length !== captionInputs.length) throw new ImageProcessingError('IMAGE_CAPTION_FAILED', 'The image caption batch returned the wrong number of results.');
+  }
+  const generatedByIndex = new Map<number, GeneratedImageCaption & { embedding: number[] }>();
+  await Promise.all(representatives.map(async ({ index }, position) => {
+    const generated = generatedCaptions[position]!;
+    let embedding: number[];
+    try {
+      const embeddingText = buildImageEmbeddingText({ filename: validated[index]!.filename, caption: generated.caption });
+      embedding = dependencies.embed ? await dependencies.embed(embeddingText, inputs[index]!.signal) : await embedText({ text: embeddingText, signal: inputs[index]!.signal });
+      currentEmbeddingSchema.parse(embedding);
+    } catch (error) {
+      throw new ImageProcessingError('IMAGE_EMBEDDING_FAILED', `The image embedding must contain exactly ${EMBEDDING_DIMENSIONS} finite values.`, { cause: error });
+    }
+    generatedByIndex.set(index, { ...generated, embedding });
+  }));
+  const captionDurationMs = performance.now() - captionStartedAt;
   const results = replays.slice() as Array<Image | null>;
   for (let position = 0; position < pendingIndices.length; position += 1) {
     const index = pendingIndices[position]!;
     const input = inputs[index]!;
     const image = validated[index]!;
     const perceptualHash = hashes[position]!;
-    results[index] = await execute(input, image, perceptualHash, dependencies);
+    const canonical = canonicalByIndex.get(index);
+    const representative = representativeFor.get(index);
+    results[index] = await execute(input, image, perceptualHash, dependencies, {
+      ...(canonical ? { canonical } : {}),
+      ...(representative === index ? { generated: generatedByIndex.get(index)! } : {}),
+    });
   }
+  dependencies.onMetrics?.({ count: inputs.length, generated: representatives.length, reused: pendingIndices.length - representatives.length, hashDurationMs, captionDurationMs, durationMs: performance.now() - startedAt });
   return results as Image[];
 }

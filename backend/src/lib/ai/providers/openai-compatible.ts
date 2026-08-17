@@ -29,6 +29,7 @@ export const CHAT_ACTION_IDS = new Set(['ask', 'chat', 'enhance', 'orchestrator-
 export interface OpenAICompatibleOptions {
   /** gpt-5-era OpenAI/Azure endpoints require `max_completion_tokens`; other compatible providers use `max_tokens`. */
   maxTokensParam: 'max_tokens' | 'max_completion_tokens';
+  extraBody?: Record<string, unknown>;
 }
 
 export function buildChatCompletionParams(
@@ -68,7 +69,7 @@ export function buildChatCompletionParams(
       },
     }));
   }
-  return params;
+  return Object.assign(params, options.extraBody);
 }
 
 function parseToolArguments(raw: string): unknown {

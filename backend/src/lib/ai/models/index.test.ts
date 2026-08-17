@@ -8,13 +8,12 @@ describe('logical model slugs', () => {
       'openai.gpt-5.6-luna',
       'amazon.nova-premier',
       'amazon.nova-pro',
-      'amazon.nova-lite',
       'openai.gpt-realtime-2',
       'openai.gpt-4o-mini-transcribe',
       'amazon.polly-generative',
       'qwen.qwen3-embedding-8b',
       'aws.transcribe-standard',
-      'qwen.qwen3-vl-32b-instruct',
+      'google.gemini-2.5-flash-lite',
     ]);
     for (const slug of MODEL_SLUGS) expect(modelSlugSchema.parse(slug)).toBe(slug);
   });

@@ -8,6 +8,8 @@ const record = (key: string, perceptualHash: string, createdAt = now) => ({
   scopeKey,
   sourceImageKey: key,
   caption: key,
+  score: 80,
+  scoreVersion: 1,
   embedding: Array(4_096).fill(0.1),
   perceptualHash,
   hashAlgorithm: 'phash-64-dct-v1',

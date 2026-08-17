@@ -75,6 +75,7 @@ suite('Content live E2E', () => {
       ['documents', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
       ['folders', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
       ['contentSearchQueries', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
+      ['userSearches', 'row.userKey IN (FOR user IN users FILTER user.organizationId == @organizationKey RETURN user._key)', { organizationKey }],
       ['contentIdempotency', 'row.organizationKey == @organizationKey', { organizationKey }],
       ['agentMembers', 'row.organizationKey == @organizationKey', { organizationKey }],
       ['agentSkills', 'row.agentKey IN @agentKeys', { agentKeys }],
@@ -381,7 +382,7 @@ suite('Content live E2E', () => {
     const contentSearchReplay = await call('scope.content.search', { scopeKey, query: '  SEMANTIC   ROADMAP  ', minimumScore: 0.1 });
     expect(contentSearchReplay.cached).toBe(true);
     const contentSearchHistory = await call('scope.content.search-history', { scopeKey, limit: 8 });
-    expect(contentSearchHistory.history).toContainEqual(expect.objectContaining({ normalizedQuery: 'semantic roadmap', contextDomain: 'content', usageCount: 2 }));
+    expect(contentSearchHistory.history).toContainEqual({ query: expect.any(String), normalizedQuery: 'semantic roadmap', searchedAt: expect.any(String), usageCount: 2 });
     expect(await call('scope.content.search-history.delete', { scopeKey, normalizedQuery: 'semantic roadmap' })).toEqual({ normalizedQuery: 'semantic roadmap', deleted: true });
     expect((await call('scope.content.search-history', { scopeKey, limit: 8 })).history.some((item: any) => item.normalizedQuery === 'semantic roadmap')).toBe(false);
 

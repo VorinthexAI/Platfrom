@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import { z } from 'zod';
 import { EMBEDDING_DIMENSIONS, EMBEDDING_ROUTE, EXTERNAL_EMBEDDING_MODEL_ID } from '@/lib/embedding-constants';
-import { IMAGE_CAPTION_EXTERNAL_MODEL_ID, MAX_IMAGE_CAPTION_URLS } from '@/lib/image-caption-constants';
+import { IMAGE_CAPTION_EXTERNAL_MODEL_ID } from '@/lib/image-caption-constants';
 import { tokenUsage } from '@/lib/ai/shared/usage';
 import { normalizeProviderError, ProviderError, providerErrorCodeForStatus } from './errors';
 import { CHAT_ACTION_IDS, executeOpenAICompatibleChat, streamOpenAICompatibleChat, unsupportedAction } from './openai-compatible';
@@ -24,6 +24,8 @@ export const openRouterCredentialsSchema = openRouterProviderConfigSchema;
 export type OpenRouterCredentials = OpenRouterProviderConfig;
 
 const PROVIDER_ID = 'openrouter' as const;
+const privateThroughputRoute = { data_collection: 'deny', sort: 'throughput', require_parameters: true } as const;
+type PrivateThroughputRoute = typeof privateThroughputRoute;
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_ATTEMPTS = 3;
 const MAX_RETRY_DELAY_MS = 5_000;
@@ -136,10 +138,10 @@ async function captionImages<TInput, TOutput>(
   }
   const input = imageCaptionInputSchema.parse(request.input);
   const instruction = input.purpose === 'document-transcription'
-    ? `Transcribe all visible text from each of the ${input.imageUrls.length} document images below as clean plain text. Preserve order, paragraphs, headings, lists, tables, punctuation, and meaningful line relationships. Normalize the layout: use no tabs or indentation, no leading or trailing whitespace, single spaces between words, no empty lines within one paragraph, and at most one empty line between distinct sections. Do not reproduce blank page areas with whitespace. Return only the transcription: no Markdown syntax, code fences, labels, preamble, or commentary. Do not summarize, correct, infer, or omit uncertain text; mark genuinely unreadable fragments as [unreadable].`
+    ? `Transcribe all visible text from each of the ${input.imageUrls.length} document images below as clean plain text, returning exactly one result per image in supplied order. Preserve paragraphs, headings, lists, tables, punctuation, and meaningful line relationships. Normalize the layout: use no tabs or indentation, no leading or trailing whitespace, single spaces between words, no empty lines within one paragraph, and at most one empty line between distinct sections. Do not reproduce blank page areas with whitespace. Put only the transcription in each result's caption field: no Markdown syntax, code fences, labels, preamble, or commentary. Do not summarize, correct, infer, or omit uncertain text; mark genuinely unreadable fragments as [unreadable]. Score each source image's overall legibility and quality from 1 to 100 as an integer, considering resolution, focus and clarity, lighting and exposure, visible detail, composition, and artifacts.`
     : input.purpose === 'document-reconciliation'
-      ? `Produce the best faithful plain-text transcription for each of the ${input.imageUrls.length} document images below. Compare the primary AWS Textract text with the secondary visual-model text against the image itself. Treat the primary text as authoritative when sources conflict, but repair clear OCR mistakes and restore layout or text the primary source missed when the image supports it. Normalize the layout: use no tabs or indentation, no leading or trailing whitespace, single spaces between words, no empty lines within one paragraph, and at most one empty line between distinct sections. Do not reproduce blank page areas with whitespace. Return only the final transcription: no Markdown syntax, code fences, labels, preamble, or commentary.`
-      : `Write one rich, factual caption for each of the ${input.imageUrls.length} images below, preserving their order. Each caption must be a detailed paragraph that clearly describes visible people, objects, actions, setting, composition, colors, lighting, visual style, and readable text when present. Describe only clearly visible content, do not speculate about identity, intent, location, or events, and do not add metadata or commentary.`;
+      ? `Produce the best faithful plain-text transcription for each of the ${input.imageUrls.length} document images below, returning exactly one result per image in supplied order. Compare the primary AWS Textract text with the secondary visual-model text against the image itself. Treat the primary text as authoritative when sources conflict, but repair clear OCR mistakes and restore layout or text the primary source missed when the image supports it. Normalize the layout: use no tabs or indentation, no leading or trailing whitespace, single spaces between words, no empty lines within one paragraph, and at most one empty line between distinct sections. Do not reproduce blank page areas with whitespace. Put only the final transcription in each result's caption field: no Markdown syntax, code fences, labels, preamble, or commentary. Score each source image's overall legibility and quality from 1 to 100 as an integer, considering resolution, focus and clarity, lighting and exposure, visible detail, composition, and artifacts.`
+      : `Write one rich, factual caption for each of the ${input.imageUrls.length} images below, preserving their order. Each caption must be a detailed paragraph that clearly describes visible people, objects, actions, setting, composition, colors, lighting, visual style, and readable text when present. Describe only clearly visible content, do not speculate about identity, intent, location, or events, and do not add metadata or commentary. Score each image's overall quality from 1 to 100 as an integer, considering resolution, focus and clarity, lighting and exposure, visible detail, composition, and artifacts.`;
   const content: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [{
     type: 'text',
     text: instruction,
@@ -148,33 +150,41 @@ async function captionImages<TInput, TOutput>(
     content.push({ type: 'text', text: `Image ${index + 1}:` });
     const references = input.referenceTexts?.[index];
     if (references) content.push({ type: 'text', text: `Primary AWS Textract text:\n${references.primary}\n\nSecondary visual transcription:\n${references.secondary}` });
-    content.push({ type: 'image_url', image_url: { url, detail: 'high' } });
+    content.push({ type: 'image_url', image_url: { url, detail: input.purpose === 'caption' ? 'auto' : 'high' } });
   });
 
   try {
     const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming & {
-      provider: { data_collection: 'deny'; zdr: true };
+      provider: PrivateThroughputRoute;
     } = {
       model: request.externalModelId,
       messages: [{ role: 'user', content }],
       temperature: 0.2,
       max_tokens: Math.min(input.imageUrls.length * (input.purpose === 'caption' ? 300 : 1_500), 16_000),
-      provider: { data_collection: 'deny', zdr: true },
+      provider: privateThroughputRoute,
       response_format: {
         type: 'json_schema',
         json_schema: {
-          name: 'image_captions',
+          name: 'image_caption_results',
           strict: true,
           schema: {
             type: 'object',
             additionalProperties: false,
-            required: ['captions'],
+            required: ['results'],
             properties: {
-              captions: {
+              results: {
                 type: 'array',
                 minItems: input.imageUrls.length,
                 maxItems: input.imageUrls.length,
-                items: { type: 'string', minLength: 1, maxLength: 20_000 },
+                items: {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['caption', 'score'],
+                  properties: {
+                    caption: { type: 'string', minLength: 1, maxLength: 20_000 },
+                    score: { type: 'integer', minimum: 1, maximum: 100 },
+                  },
+                },
               },
             },
           },
@@ -190,8 +200,8 @@ async function captionImages<TInput, TOutput>(
     } catch (error) {
       throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter image captions returned invalid JSON', { cause: error });
     }
-    if (output.captions.length !== input.imageUrls.length) {
-      throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter image caption count did not match the supplied image count');
+    if (output.results.length !== input.imageUrls.length) {
+      throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter image result count did not match the supplied image count');
     }
     return {
       output: output as TOutput & ImageCaptionOutput,
@@ -219,12 +229,11 @@ async function cleanupDocument<TInput, TOutput>(
       messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: input.text }],
       temperature: 0.1,
       max_tokens: Math.min(8_000, Math.max(512, Math.ceil(input.text.length / 2))),
-      // Qwen's text endpoint currently has no ZDR route; keep provider training/data collection disabled.
-      provider: { data_collection: 'deny' },
+      provider: privateThroughputRoute,
       response_format: { type: 'json_schema', json_schema: { name: 'document_cleanup', strict: true, schema: {
         type: 'object', additionalProperties: false, required: ['content'], properties: { content: { type: 'string', minLength: 1, maxLength: 50_000 } },
       } } },
-    } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming & { provider: { data_collection: 'deny' } }, { signal: resolveRequestSignal(request) });
+    } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming & { provider: PrivateThroughputRoute }, { signal: resolveRequestSignal(request) });
     const rawContent = completion.choices[0]?.message.content;
     if (!rawContent) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter document cleanup returned no content');
     let output: DocumentCleanupOutput;
@@ -259,11 +268,11 @@ async function describeVisualIdentity<TInput, TOutput>(
       messages: [{ role: 'user', content }],
       temperature: 0.1,
       max_tokens: 2_000,
-      provider: { data_collection: 'deny', zdr: true },
+      provider: privateThroughputRoute,
       response_format: { type: 'json_schema', json_schema: { name: 'visual_identity_description', strict: true, schema: {
         type: 'object', additionalProperties: false, required: ['description'], properties: { description: { type: 'string', minLength: 1, maxLength: 12_000 } },
       } } },
-    } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming & { provider: { data_collection: 'deny'; zdr: true } }, { signal: resolveRequestSignal(request) });
+    } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming & { provider: PrivateThroughputRoute }, { signal: resolveRequestSignal(request) });
     const rawContent = completion.choices[0]?.message.content;
     if (!rawContent) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter visual identity description returned no content');
     let output: VisualIdentityDescriptionOutput;
@@ -299,12 +308,12 @@ export function createOpenRouterProvider(config: OpenRouterProviderConfigInput):
       if (request.actionId === 'document-cleanup') return cleanupDocument(client, request);
       if (request.actionId === 'describe-visual-identity') return describeVisualIdentity(client, request);
       if (!CHAT_ACTION_IDS.has(request.actionId)) throw unsupportedAction(PROVIDER_ID, request.actionId);
-      return executeOpenAICompatibleChat(PROVIDER_ID, client, request, { maxTokensParam: 'max_tokens' });
+      return executeOpenAICompatibleChat(PROVIDER_ID, client, request, { maxTokensParam: 'max_tokens', extraBody: { provider: privateThroughputRoute } });
     },
 
     stream(request) {
       if (!CHAT_ACTION_IDS.has(request.actionId)) throw unsupportedAction(PROVIDER_ID, request.actionId);
-      return streamOpenAICompatibleChat(PROVIDER_ID, client, request, { maxTokensParam: 'max_tokens' });
+      return streamOpenAICompatibleChat(PROVIDER_ID, client, request, { maxTokensParam: 'max_tokens', extraBody: { provider: privateThroughputRoute } });
     },
 
     embed(request) {

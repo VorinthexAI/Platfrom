@@ -4,6 +4,53 @@ import { createGalleryRepository } from './repository';
 import type { MediaLibraryDatabase } from '@/lib/media-library';
 
 describe('Gallery repository transactions', () => {
+  test('returns only an authorized live visual identity in the requested scope', async () => {
+    const scopeKey = newId(), identityKey = newId(), actorKey = newId();
+    const identity = { _key: identityKey, scopeKey, name: 'Alex', description: 'A person.', referenceImageKey: newId(), embedding: Array(4_096).fill(0), deletedAt: null, createdAt: '2026-08-17T12:00:00.000Z', updatedAt: '2026-08-17T12:00:00.000Z' };
+    let authorized = false;
+    const database: MediaLibraryDatabase = { async query(query, bindVars) { return { async all() {
+      if (query.includes('LET actorMembership')) return authorized ? [true] : [];
+      expect(bindVars).toEqual({ scopeKey, identityKey });
+      expect(query).toContain('identity.deletedAt == null');
+      return [identity];
+    } }; } };
+    const repository = createGalleryRepository(database);
+    expect(await repository.getVisualIdentity(scopeKey, identityKey, actorKey)).toBeNull();
+    authorized = true;
+    expect(await repository.getVisualIdentity(scopeKey, identityKey, actorKey)).toMatchObject({ key: identityKey, scopeKey, deletedAt: null });
+  });
+
+  test('returns collection images as bound keyset cursor pages of at most one hundred', async () => {
+    const scopeKey = newId(), collectionKey = newId();
+    const rows = ['2026-08-17T12:00:03.000Z', '2026-08-17T12:00:02.000Z', '2026-08-17T12:00:01.000Z'].map((createdAt, index) => ({
+      _key: newId(), scopeKey, filename: `${index}.jpg`, caption: `Image ${index}`, imageCaptionKey: null, storageKey: `media/${index}`, mimeType: 'image/jpeg', sizeBytes: 100, width: 10, height: 10, embedding: Array(4_096).fill(0), isFavorite: false, deletedAt: null, createdAt, updatedAt: createdAt,
+    }));
+    const imageBinds: Record<string, unknown>[] = [];
+    const database: MediaLibraryDatabase = { async query(query, bindVars) { return { async all() {
+      if (query.includes('FOR collection IN collections')) return [];
+      imageBinds.push(bindVars ?? {});
+      return rows;
+    } }; } };
+    const repository = createGalleryRepository(database);
+    const first = await repository.listOverview({ scopeKey, collectionKey, limit: 2 });
+    expect(first.images.items.map(({ key }) => key)).toEqual(rows.slice(0, 2).map(({ _key }) => _key));
+    expect(first.images.nextCursor).toBeString();
+    await repository.listOverview({ scopeKey, collectionKey, limit: 2, cursor: first.images.nextCursor! });
+    expect(imageBinds[1]).toMatchObject({ afterCreatedAt: rows[1]!.createdAt, afterImageKey: rows[1]!._key, queryLimit: 3 });
+    await expect(repository.listOverview({ scopeKey, collectionKey: newId(), limit: 2, cursor: first.images.nextCursor! })).rejects.toThrow('Cursor does not belong');
+  });
+
+  test('lists persisted visual identity matches within an optional collection', async () => {
+    const scopeKey = newId(), identityKey = newId(), collectionKey = newId(), imageKey = newId();
+    const image = { _key: imageKey, scopeKey, filename: 'reference.jpg', caption: 'Reference', imageCaptionKey: null, storageKey: 'media/reference', mimeType: 'image/jpeg', sizeBytes: 100, width: 10, height: 10, embedding: Array(4_096).fill(0), isFavorite: false, deletedAt: null, createdAt: '2026-08-17T12:00:00.000Z', updatedAt: '2026-08-17T12:00:00.000Z' };
+    const database: MediaLibraryDatabase = { async query(query, bindVars) { return { async all() {
+      expect(query).toContain('collectionImage.collectionKey == @collectionKey');
+      expect(bindVars).toEqual({ scopeKey, identityKey, collectionKey });
+      return [{ image, confidence: 1 }];
+    } }; } };
+    await expect(createGalleryRepository(database).listSubjectImages(scopeKey, identityKey, collectionKey)).resolves.toEqual([{ image: expect.objectContaining({ key: imageKey }), confidence: 1 }]);
+  });
+
   test('rejects duplicate deletion when the protected duplicate set changes', async () => {
     const database: MediaLibraryDatabase = { async query() { return { async all() { return []; } }; } };
     const repository = createGalleryRepository(database, async (_collections, operation) => operation(database));
@@ -57,6 +104,28 @@ describe('Gallery repository transactions', () => {
     expect(queries.some((query) => query.includes('REMOVE relation IN imageIdentities'))).toBe(true);
     expect(queries.some((query) => query.includes('LET replacement = FIRST') && query.includes('referenceImageKey: replacement'))).toBe(true);
     expect(queries.some((query) => query.includes('UPDATE image WITH { deletedAt: @now'))).toBe(true);
+  });
+
+  test('atomically fails an upload and compensates its persisted image', async () => {
+    const uploadKey = newId(), scopeKey = newId(), imageKey = newId();
+    const queries: string[] = [];
+    let transactionCollections: unknown;
+    const database: MediaLibraryDatabase = { async query(query) { queries.push(query); return { async all() { return query.includes('FOR upload IN galleryUploads') ? [imageKey] : []; } }; } };
+    const repository = createGalleryRepository(database, async (collections, operation) => { transactionCollections = collections; return operation(database); });
+    await expect(repository.failUpload(uploadKey, scopeKey, 'IMAGE_PROCESSING_FAILED', '2026-08-17T12:00:00.000Z')).resolves.toBe(true);
+    expect(transactionCollections).toEqual({ read: ['images'], write: ['galleryUploads', 'images', 'collectionImages', 'collections', 'imageIdentities', 'visualIdentities'] });
+    expect(queries.some((query) => query.includes('status: "failed"'))).toBe(true);
+    expect(queries[0]).toContain('upload.status != "completed"');
+    expect(queries.some((query) => query.includes('REMOVE relation IN collectionImages'))).toBe(true);
+    expect(queries.some((query) => query.includes('UPDATE image WITH { deletedAt: @now'))).toBe(true);
+  });
+
+  test('does not compensate an upload that completed before failure handling', async () => {
+    const queries: string[] = [];
+    const database: MediaLibraryDatabase = { async query(query) { queries.push(query); return { async all() { return []; } }; } };
+    const repository = createGalleryRepository(database, async (_collections, operation) => operation(database));
+    await expect(repository.failUpload(newId(), newId(), 'IMAGE_PROCESSING_FAILED', '2026-08-17T12:00:00.000Z')).resolves.toBe(false);
+    expect(queries).toHaveLength(1);
   });
 
   test('keeps operation persistence behind the repository boundary', async () => {

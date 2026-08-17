@@ -1,6 +1,6 @@
 import { beforeEach, expect, mock, test } from "bun:test";
 
-const calls: Array<{ path: string; body: Record<string, unknown>; timeout?: number }> = [];
+const calls: { path: string; body: Record<string, unknown>; timeout?: number }[] = [];
 
 mock.module("@/state/auth", () => ({
   useAuthStore: { getState: () => ({ organization: { key: "organization" }, scope: { key: "scope" } }) },
@@ -14,7 +14,7 @@ mock.module("./api-client", () => ({
   } },
 }));
 
-const { deleteGalleryImages, filterCollections, filterMediaItems, findGalleryCollectionDuplicates, mergeMediaItems, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, uploadGalleryImages } = await import("./gallery-client");
+const { createGalleryCollection, deleteGalleryCollection, deleteGalleryImages, deleteGallerySubject, fetchGalleryOverview, filterCollections, filterMediaItems, findGalleryCollectionDuplicates, groupGalleryImagesByCreatedDate, mergeMediaItems, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryImage, uploadGalleryImages } = await import("./gallery-client");
 
 beforeEach(() => calls.splice(0));
 
@@ -22,6 +22,7 @@ const collection = (name: string, key: string) => ({
   key,
   name,
   description: null,
+  isFavorite: false,
   count: 0,
   coverUrl: null,
 });
@@ -84,14 +85,30 @@ test("merges immediate and semantic matches without changing immediate order", (
   expect(mergeMediaItems([exact], [exact, semantic])).toEqual([exact, semantic]);
 });
 
+test("groups collection images by created date without changing image order", () => {
+  const first = { ...image("first", "first.jpg", "First"), createdAt: "2025-01-12T12:00:00.000Z" };
+  const second = { ...image("second", "second.jpg", "Second"), createdAt: "2025-01-12T15:00:00.000Z" };
+  const third = { ...image("third", "third.jpg", "Third"), createdAt: "2025-01-11T12:00:00.000Z" };
+
+  expect(groupGalleryImagesByCreatedDate([first, second, third])).toEqual([
+    { label: "12 Jan 2025", images: [first, second] },
+    { label: "11 Jan 2025", images: [third] },
+  ]);
+});
+
 test("sends collection-scoped semantic searches through the canonical endpoint", async () => {
-  await searchGalleryImages({ query: "rain", collectionKey: "collection", limit: 50 });
+  await searchGalleryImages({ query: "rain", collectionKey: "collection", recordHistory: false, limit: 50 });
 
   expect(calls).toEqual([{
     path: "/gallery/images/search",
-    body: { organizationKey: "organization", scopeKey: "scope", query: "rain", collectionKey: "collection", limit: 50 },
+    body: { organizationKey: "organization", scopeKey: "scope", query: "rain", collectionKey: "collection", recordHistory: false, limit: 50 },
     timeout: 240_000,
   }]);
+});
+
+test("requests cursor pages of one hundred collection images", async () => {
+  await fetchGalleryOverview("collection", "next-page");
+  expect(calls[0]).toMatchObject({ path: "/gallery/overview", body: { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection", cursor: "next-page", limit: 100 } });
 });
 
 test("sends similarity and duplicate discovery through image search", async () => {
@@ -104,21 +121,50 @@ test("sends similarity and duplicate discovery through image search", async () =
   ]);
 });
 
+test("sends visual identity search without a threshold or caller limit", async () => {
+  await searchGalleryImages({ identityKey: "identity", collectionKey: "collection" });
+  expect(calls[0]).toMatchObject({ path: "/gallery/images/search", body: { organizationKey: "organization", scopeKey: "scope", identityKey: "identity", collectionKey: "collection" } });
+  expect(calls[0]?.body).not.toHaveProperty("threshold");
+  expect(calls[0]?.body).not.toHaveProperty("limit");
+});
+
 test("sends favorite, delete, and many-to-many transfer through canonical mutations", async () => {
   await setGalleryImageFavorite("image", true);
   await deleteGalleryImages(["image-a", "image-b"]);
-  await transferGalleryCollectionImages({ sourceCollectionKey: "source", destinationCollectionKeys: ["one", "two"], imageKeys: ["image-a", "image-b"], mode: "copy" });
+  await transferGalleryCollectionImages({ sourceCollectionKey: "source", destinationCollectionKeys: ["one"], imageKeys: ["image-a", "image-b"], mode: "copy" });
 
   expect(calls.map(({ path, body }) => ({ path, body }))).toEqual([
     { path: "/gallery/images/favorite", body: { organizationKey: "organization", scopeKey: "scope", imageKey: "image", isFavorite: true } },
     { path: "/gallery/images/delete", body: { organizationKey: "organization", scopeKey: "scope", imageKeys: ["image-a", "image-b"] } },
-    { path: "/gallery/collections/images/transfer", body: { organizationKey: "organization", scopeKey: "scope", sourceCollectionKey: "source", destinationCollectionKeys: ["one", "two"], imageKeys: ["image-a", "image-b"], mode: "copy" } },
+    { path: "/gallery/collections/images/transfer", body: { organizationKey: "organization", scopeKey: "scope", sourceCollectionKey: "source", destinationCollectionKeys: ["one"], imageKeys: ["image-a", "image-b"], mode: "copy" } },
   ]);
+});
+
+test("sends image and collection edits and collection deletion through canonical mutations", async () => {
+  await updateGalleryImage("image", "portrait.jpg", true);
+  await updateGalleryCollection("collection", "Portraits", true);
+  await deleteGalleryCollection("collection");
+  expect(calls.map(({ path, body }) => ({ path, body }))).toEqual([
+    { path: "/gallery/images/update", body: { organizationKey: "organization", scopeKey: "scope", imageKey: "image", name: "portrait.jpg", isFavorite: true } },
+    { path: "/gallery/collections/update", body: { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection", name: "Portraits", isFavorite: true } },
+    { path: "/gallery/collections/delete", body: { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection" } },
+  ]);
+});
+
+test("creates collections with only a name and favorite state", async () => {
+  await createGalleryCollection("Portraits", true);
+  expect(calls[0]).toMatchObject({ path: "/gallery/collections", body: { organizationKey: "organization", scopeKey: "scope", name: "Portraits", isFavorite: true } });
+  expect(calls[0]?.body).not.toHaveProperty("description");
+});
+
+test("deletes visual identities through the canonical Gallery mutation", async () => {
+  await deleteGallerySubject("identity");
+  expect(calls[0]).toMatchObject({ path: "/gallery/subjects/delete", body: { organizationKey: "organization", scopeKey: "scope", identityKey: "identity" } });
 });
 
 test("maps accepted upload jobs back to optimistic client images", async () => {
   const originalFetch = globalThis.fetch;
-  const uploads: Array<{ url: string; method?: string }> = [];
+  const uploads: { url: string; method?: string }[] = [];
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     if (url === "file://image") return new Response(new Blob(["jpeg"]), { status: 200 });
@@ -127,11 +173,12 @@ test("maps accepted upload jobs back to optimistic client images", async () => {
   }) as typeof fetch;
 
   try {
-    const result = await uploadGalleryImages([{ clientKey: "local-image", filename: "image.jpg", uri: "file://image", sizeBytes: 4 }], "collection");
+    const result = await uploadGalleryImages([{ clientKey: "local-image", filename: "image.jpg", uri: "file://image", sizeBytes: 4, latitude: 59.3293, longitude: 18.0686 }], "collection");
 
     expect(result.jobs).toEqual([{ key: "upload", imageKey: "image", status: "queued", clientKey: "local-image" }]);
     expect(uploads).toEqual([{ url: "https://uploads.example/image", method: "PUT" }]);
     expect(calls.map(({ path }) => path)).toEqual(["/gallery/uploads/presign", "/gallery/uploads/complete"]);
+    expect(calls[0]?.body).toMatchObject({ files: [{ clientKey: "local-image", filename: "image.jpg", sizeBytes: 4, latitude: 59.3293, longitude: 18.0686 }] });
   } finally {
     globalThis.fetch = originalFetch;
   }

@@ -22,6 +22,7 @@ type AuthState = {
   hydrate: () => Promise<void>;
   reconnectContentContext: () => Promise<void>;
   setArchiveShowOnlyFavorites: (showOnlyFavorites: boolean) => void;
+  setGalleryShowOnlyFavorites: (showOnlyFavorites: boolean) => void;
   completeOnboarding: () => Promise<void>;
   signOut: () => Promise<void>;
 };
@@ -109,7 +110,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   setArchiveShowOnlyFavorites: (showOnlyFavorites) => {
     const state = get();
     if (!state.user) return;
-    const user = { ...state.user, settings: { ...state.user.settings, archive: { ...state.user.settings.archive, showOnlyFavorites } } };
+    const settings = { ...state.user.settings, archive: { ...state.user.settings.archive, showOnlyFavorites } };
+    const user = { ...state.user, settings };
     const context = { user, organization: state.organization, scope: state.scope, contentExecution: state.contentExecution };
     set({ user });
     void writeAuthContext(context);
@@ -117,10 +119,36 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (!userKey) return;
     settingsWrite = settingsWrite.catch(() => undefined).then(() => {
       if (get().user?.key !== userKey) return;
-      return patchJson("/auth/me/settings", { archive: { showOnlyFavorites } });
+      return patchJson("/auth/me/settings", settings);
     }).catch(async () => {
       const currentUser = get().user;
       if (!currentUser || currentUser.key !== userKey || currentUser.settings.archive.showOnlyFavorites !== showOnlyFavorites) return;
+      try {
+        const context = await loadContext();
+        if (get().user?.key !== userKey || context.user?.key !== userKey) return;
+        await writeAuthContext(context);
+        if (get().user?.key === userKey) set({ status: "authenticated", ...context });
+      } catch {
+        // The next authenticated refresh reconciles an offline preference write.
+      }
+    });
+  },
+  setGalleryShowOnlyFavorites: (showOnlyFavorites) => {
+    const state = get();
+    if (!state.user) return;
+    const settings = { ...state.user.settings, gallery: { ...state.user.settings.gallery, showOnlyFavorites } };
+    const user = { ...state.user, settings };
+    const context = { user, organization: state.organization, scope: state.scope, contentExecution: state.contentExecution };
+    set({ user });
+    void writeAuthContext(context);
+    const userKey = user.key;
+    if (!userKey) return;
+    settingsWrite = settingsWrite.catch(() => undefined).then(() => {
+      if (get().user?.key !== userKey) return;
+      return patchJson("/auth/me/settings", settings);
+    }).catch(async () => {
+      const currentUser = get().user;
+      if (!currentUser || currentUser.key !== userKey || currentUser.settings.gallery.showOnlyFavorites !== showOnlyFavorites) return;
       try {
         const context = await loadContext();
         if (get().user?.key !== userKey || context.user?.key !== userKey) return;

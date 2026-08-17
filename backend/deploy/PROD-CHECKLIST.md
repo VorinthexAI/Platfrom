@@ -39,7 +39,7 @@ Expected parameters include:
 - `REDIS_URL` for the app and render service to reach the production Redis endpoint
 - `ANTHROPIC_API_KEY`
 - `OPENAI_API_KEY`
-- `OPENROUTER_API_KEY` (required for Qwen embeddings; production routes strictly to DeepInfra)
+- `OPENROUTER_API_KEY` (required for Gemini runtime routes and Qwen embeddings; embeddings route strictly to DeepInfra)
 - Optional `OPENROUTER_BASE_URL`, `OPENROUTER_SITE_URL`, and `OPENROUTER_APP_NAME`
 - `GROK_API_KEY`
 - `PERPLEXITY_API_KEY`

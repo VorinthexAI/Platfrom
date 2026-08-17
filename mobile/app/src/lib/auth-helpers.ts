@@ -6,7 +6,10 @@ export type AuthUser = {
   alias?: string;
   countryCode?: string;
   isOnboarded: boolean;
-  settings: { archive: { showOnlyFavorites: boolean } };
+  settings: {
+    archive: { showOnlyFavorites: boolean };
+    gallery: { showOnlyFavorites: boolean };
+  };
 };
 
 export type AuthContext = {
@@ -84,6 +87,7 @@ export function normalizeAuthContext(value: unknown): AuthContext {
   const rawUser = record(body?.user) ?? record(body?.identity);
   const settings = record(rawUser?.settings);
   const archiveSettings = record(settings?.archive);
+  const gallerySettings = record(settings?.gallery);
   const user = rawUser ? {
     ...rawUser,
     email: stringValue(rawUser, "email"),
@@ -92,7 +96,10 @@ export function normalizeAuthContext(value: unknown): AuthContext {
     alias: stringValue(rawUser, "alias"),
     countryCode: stringValue(rawUser, "countryCode", "country_code"),
     isOnboarded: booleanValue(rawUser, "isOnboarded", "is_onboarded"),
-    settings: { archive: { showOnlyFavorites: booleanValue(archiveSettings, "showOnlyFavorites", "show_only_favorites") } },
+    settings: {
+      archive: { showOnlyFavorites: booleanValue(archiveSettings, "showOnlyFavorites", "show_only_favorites") },
+      gallery: { showOnlyFavorites: booleanValue(gallerySettings, "showOnlyFavorites", "show_only_favorites") },
+    },
   } : null;
   return {
     user,
@@ -122,8 +129,10 @@ export function firstNameFor(user: AuthUser | null) {
 
 export function languageForCountryCode(countryCode?: string) {
   if (!countryCode) return "English";
+  const normalizedCountryCode = countryCode.toUpperCase();
+  if (normalizedCountryCode === "SE") return "Swedish";
   try {
-    const languageCode = new Intl.Locale(`und-${countryCode.toUpperCase()}`).maximize().language;
+    const languageCode = new Intl.Locale(`und-${normalizedCountryCode}`).maximize().language;
     return new Intl.DisplayNames(["en"], { type: "language" }).of(languageCode) ?? "English";
   } catch {
     return "English";

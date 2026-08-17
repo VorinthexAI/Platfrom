@@ -30,7 +30,7 @@ describe('personal assistant runtime', () => {
       },
     });
 
-    expect(request).toEqual({ mode: 'model', organizationKey, actionSlug: 'orchestrator-chat', modelSlug: 'amazon.nova-lite' });
+    expect(request).toEqual({ mode: 'model', organizationKey, actionSlug: 'orchestrator-chat', modelSlug: 'google.gemini-2.5-flash-lite' });
     expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual([
       'user.settings.read', 'user.settings.update',
       'folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy',
@@ -60,7 +60,7 @@ describe('personal assistant runtime', () => {
     expect(result).toMatchObject({ type: 'answer', changes: [{ workspace: 'archive' }] });
   });
 
-  test('exposes only image search on the media workspace', async () => {
+  test('exposes canonical Gallery capabilities on the media workspace', async () => {
     let chatInput: any;
     const result = await runPersonalAssistant({ ...input, surface: 'media-workspace' }, domain, {
       execute: async (_request, nextInput) => {
@@ -70,7 +70,7 @@ describe('personal assistant runtime', () => {
     });
 
     expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual([
-      'collection.list', 'collection.create', 'image.search', 'image.favorite', 'image.delete',
+      'collection.list', 'collection.create', 'collection.update', 'collection.delete', 'image.search', 'image.favorite', 'image.update', 'image.delete',
       'collection.duplicates.delete', 'collection.image.transfer', 'subject.list', 'subject.create',
       'subject.image.list', 'subject.delete', 'subject.restore', 'image.upload.reserve',
       'image.upload.status', 'image.upload.complete', 'assistant.unsupported',
@@ -112,7 +112,7 @@ describe('personal assistant runtime', () => {
       } },
     });
 
-    expect(searchInput).toEqual({ query: 'red dog in snow', limit: 50 });
+    expect(searchInput).toEqual({ query: 'red dog in snow', recordHistory: true, limit: 50 });
     expect(modelCalls).toBe(2);
     expect(result).toEqual({ type: 'answer', message: 'I found one matching image of a red dog in snow.', sources: [] });
   });

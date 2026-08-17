@@ -6,13 +6,12 @@ export const MODEL_SLUGS = [
   'openai.gpt-5.6-luna',
   'amazon.nova-premier',
   'amazon.nova-pro',
-  'amazon.nova-lite',
   'openai.gpt-realtime-2',
   'openai.gpt-4o-mini-transcribe',
   'amazon.polly-generative',
   'qwen.qwen3-embedding-8b',
   'aws.transcribe-standard',
-  'qwen.qwen3-vl-32b-instruct',
+  'google.gemini-2.5-flash-lite',
 ] as const;
 export const modelSlugSchema = z.string().trim().min(1).max(200).regex(/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/, 'Model slug must use lowercase dot or hyphen notation');
 export type ModelSlug = z.infer<typeof modelSlugSchema>;

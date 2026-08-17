@@ -26,6 +26,7 @@ import { chunkDocumentContent, documentSemanticHash } from '@/lib/ai/document-pr
 import type { BookGenerator } from '@/lib/books/service';
 import type { DocumentScanInput } from '@/lib/ai/document-scanning';
 import { DEFAULT_AUDIO_GENERATION_VOICE, generateAudioChunks as canonicalGenerateAudioChunks } from './audio-generate';
+import type { UserSearchService } from '@/lib/user-searches/service';
 
 type Role = 'viewer' | 'moderator' | 'admin' | 'owner';
 type Action = 'ask' | 'enhance' | 'translate' | 'read' | 'traverse' | 'insert' | 'update' | 'delete' | 'embed' | 'speak' | 'generate-speech' | 'reason' | 'deep-reason' | 'document-cleanup' | 'document-embed' | 'document-summarize' | 'document-topics';
@@ -93,10 +94,8 @@ export interface ContentRepository {
 }
 
 export interface ContentSearchQueryStore {
-  get(input: { actorKey: string; scopeKey: string; contextDomain: 'content'; normalizedQuery: string; folderKey: string | null; includeDescendants: boolean; cacheVersion: number }): Promise<{ output: unknown } | null>;
-  record(input: { key: string; actorKey: string; scopeKey: string; contextDomain: 'content'; query: string; normalizedQuery: string; folderKey: string | null; includeDescendants: boolean; cacheVersion: number; output: unknown; now: string }): Promise<void>;
-  list(input: { actorKey: string; scopeKey: string; contextDomain: 'content'; folderKey: string | null; includeDescendants: boolean; limit: number }): Promise<Array<{ query: string; normalizedQuery: string; contextDomain: 'content'; searchedAt: string; usageCount: number; folderKey?: string; includeDescendants?: boolean; documents: Array<{ documentKey: string; scopeKey: string; folderKey?: string; name: string; extension?: string; score: number; summary?: string }> }>>;
-  remove?(input: { actorKey: string; scopeKey: string; contextDomain: 'content'; normalizedQuery: string; folderKey: string | null; includeDescendants: boolean }): Promise<boolean>;
+  get(input: { actorKey: string; scopeKey: string; normalizedQuery: string; folderKey: string | null; includeDescendants: boolean; cacheVersion: number }): Promise<{ output: unknown } | null>;
+  record(input: { key: string; actorKey: string; scopeKey: string; query: string; normalizedQuery: string; folderKey: string | null; includeDescendants: boolean; cacheVersion: number; output: unknown; now: string }): Promise<void>;
 }
 
 export interface ContentActionResult { text?: string; audio?: Uint8Array; audioBase64?: string; mimeType?: string; durationMs?: number; content?: string; embedding?: number[]; contentChunks?: string[]; chunkEmbeddings?: number[][]; semanticChunkCount?: number; semanticContentHash?: string }
@@ -122,6 +121,7 @@ export interface ContentToolDependencies extends RouterDependencies {
   generateExport?: typeof generateDocumentExport;
   generatePreview?: typeof generateDocumentPreview;
   searchQueries?: ContentSearchQueryStore;
+  userSearches?: UserSearchService;
   searchEmbeddingTimeoutMs?: number;
   bookRuntime?: BookGenerator;
   scanDocument?: (input: DocumentScanInput, organizationKey: string) => Promise<{ documentKey: string; content: string; storageKeys: string[] }>;
@@ -139,7 +139,6 @@ const ROUTED_EMBEDDING_CONCURRENCY = 8;
 const PERSISTED_AUDIO_MAX_CHARACTERS = 120_000;
 const PERSISTED_AUDIO_MAX_BYTES = 100 * 1024 * 1024;
 const CONTENT_SEARCH_CACHE_VERSION = 4;
-const CONTENT_SEARCH_CONTEXT_DOMAIN = 'content' as const;
 const scrypt = promisify(nodeScrypt);
 const MUTATIONS = new Set<ContentToolName>([
   'book.create-context', 'book.write', 'folder.create', 'folder.update', 'folder.rename', 'folder.move', 'folder.copy', 'folder.archive', 'folder.restore', 'folder.delete', 'document.parse', 'document.scan', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.share', 'document.unshare', 'document.create-version', 'document.restore-version', 'document.delete-version', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.summarize', 'document.summary.audio.generate', 'document.translate', 'document.rewrite', 'scope.content.search-history.delete',
@@ -901,9 +900,25 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
     name === source.name && hasCurrentSemantics(source)
       ? Promise.resolve({ embedding: source.embedding, contentChunks: source.contentChunks!, chunkEmbeddings: source.chunkEmbeddings!, semanticChunkCount: source.contentChunks!.length, semanticContentHash: createHash('sha256').update(source.content).digest('hex') })
       : generatedSemantics(name, source.content, source.key, source.scopeKey);
-  const currentVersionSemantics = async (source: Pick<DocumentVersion, 'content' | 'key' | 'scopeKey'> | Pick<Document, 'content' | 'key' | 'scopeKey'>, label?: string) => {
-    const { embedding, chunkEmbeddings, semanticChunkCount, semanticContentHash } = await generatedSemantics(label ?? '', source.content, source.key, source.scopeKey);
+  const currentVersionSemantics = async (source: Pick<DocumentVersion, 'content' | 'key' | 'scopeKey'> | Pick<Document, 'content' | 'key' | 'scopeKey'>, documentName: string) => {
+    const { embedding, chunkEmbeddings, semanticChunkCount, semanticContentHash } = await generatedSemantics(documentName, source.content, source.key, source.scopeKey);
     return { embedding, chunkEmbeddings, semanticChunkCount, semanticContentHash };
+  };
+  // Version snapshots already carry aligned semantics, so restoring one should not repeat a model call.
+  const restoredVersionSemantics = (version: DocumentVersion, documentName: string) => {
+    const contentChunks = chunkDocumentContent(version.content);
+    if (!isCurrentEmbedding(version.embedding)
+      || version.chunkEmbeddings?.length !== contentChunks.length
+      || !version.chunkEmbeddings.every(isCurrentEmbedding)) {
+      return generatedSemantics(documentName, version.content, version.key, version.scopeKey);
+    }
+    return Promise.resolve({
+      embedding: version.embedding,
+      contentChunks,
+      chunkEmbeddings: version.chunkEmbeddings,
+      semanticChunkCount: contentChunks.length,
+      semanticContentHash: createHash('sha256').update(version.content).digest('hex'),
+    });
   };
   const persistGenerated = async (source: Document, text: string, mode: 'copy' | 'replace', suffix: string) => {
     const finalName = mode === 'copy' ? `${source.name} (${suffix})` : source.name;
@@ -913,7 +928,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         scopeKey: source.scopeKey,
         documentKey: source.key,
         content: source.content,
-        ...await currentVersionSemantics(source),
+        ...await currentVersionSemantics(source, source.name),
       });
       try {
         await repo.updateDocument(source.key, { ...transformed, currentVersionKey: null, updatedAt: now() });
@@ -1639,7 +1654,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
               scopeKey: current.scopeKey,
               documentKey: current.key,
               content: current.content,
-              ...await currentVersionSemantics(current),
+              ...await currentVersionSemantics(current, current.name),
             });
           }
           try {
@@ -1729,7 +1744,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
                   documentKey: key,
                   label: version.label,
                    content: version.content,
-                  ...await currentVersionSemantics(version, version.label),
+                  ...await currentVersionSemantics(version, name),
                 });
                 insertedVersionKeys.push(created.key);
               }
@@ -2002,7 +2017,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             type: input.types?.[key],
             label: input.labels?.[key],
             content,
-            ...await currentVersionSemantics({ ...current, content }, input.labels?.[key]),
+            ...await currentVersionSemantics({ ...current, content }, current.name),
           });
           if (content === current.content) await mutationRepository.updateDocument(current.key, { currentVersionKey: version.key });
           return { version: versionView(version) };
@@ -2089,14 +2104,14 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
               scopeKey: current.scopeKey,
               documentKey: current.key,
               content: current.content,
-              ...await currentVersionSemantics(current),
+              ...await currentVersionSemantics(current, current.name),
             });
           }
           try {
             const restored = await mutationRepository.updateDocument(current.key, {
               content: version.content,
               currentVersionKey: version.key,
-              ...await generatedSemantics(current.name, version.content, current.key, current.scopeKey),
+              ...await restoredVersionSemantics(version, current.name),
               updatedAt: now(),
             });
             return { document: documentView(restored) };
@@ -2258,7 +2273,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
                 : `${item.instruction}${item.tone ? ` Tone: ${item.tone}.` : ''}${item.audience ? ` Audience: ${item.audience}.` : ''}${item.length ? ` Length: ${item.length}.` : ''}`;
             const text = tool === 'document.enhance'
               ? z.string().trim().min(1).parse((await action('enhance', {
-                systemPrompt: `Correct spelling, grammar, awkward wording, and unclear phrasing. Preserve the original meaning, facts, tone, and useful structure. Trim leading and trailing whitespace, remove trailing spaces, collapse excessive blank lines, and organize longer content into readable sections with concise plain-text headings when the material supports them. Do not force headings into short content. Do not add new claims, Markdown decoration, or commentary. ${input.instruction ? `Additional direction: ${input.instruction} ` : ''}Return only the revised text.`,
+                systemPrompt: `Correct spelling, grammar, awkward wording, and unclear phrasing. Repair or remove nonsensical words, isolated stray characters, corrupted fragments, and OCR artifacts when their intended meaning can be inferred from context. Reconstruct words, sentences, and paragraphs broken by artificial hard line wraps, including input with only a few characters per line. Join those artificial breaks so prose uses normal line width, while preserving intentional headings, lists, and paragraph boundaries. Preserve the original meaning, facts, tone, and useful structure. Trim leading and trailing whitespace, remove trailing spaces, collapse excessive blank lines, and organize longer content into readable sections with concise plain-text headings when the material supports them. Do not force headings into short content. Do not add new claims, Markdown decoration, or commentary. ${input.instruction ? `Additional direction: ${input.instruction} ` : ''}Return only the revised text.`,
                 messages: [{ role: 'user', content: [{ type: 'text', text: current.content }] }],
                 options: { temperature: 0.1, maxTokens: Math.min(5_000, Math.max(256, Math.ceil(current.content.length / 3))) },
               }, current.key, current.scopeKey)).text)
@@ -2270,7 +2285,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
                 .trim()
               : tool === 'document.translate'
               ? z.string().trim().min(1).parse((await action('translate', {
-                systemPrompt: `Translate the supplied text${input.sourceLanguage ? ` from ${input.sourceLanguage}` : ''} into ${input.targetLanguage} using fluent, idiomatic target-language grammar. Preserve meaning, facts, tone, and useful structure. Trim leading and trailing whitespace, remove trailing spaces, collapse excessive blank lines, and organize longer content into readable sections with concise plain-text headings when the material supports them. Do not force headings into short content. ${input.preserveFormatting ? 'Preserve meaningful paragraph boundaries and formatting.' : 'Use clear, natural prose.'} Do not add Markdown decoration or commentary. ${input.instruction ? `Additional direction: ${input.instruction} ` : ''}Return only the translated text.`,
+                systemPrompt: `Translate the supplied text${input.sourceLanguage ? ` from ${input.sourceLanguage}` : ''} into ${input.targetLanguage} using fluent, idiomatic target-language grammar. The target language label may be an English name, a native name or endonym, an ISO language code, or mildly misspelled; infer the intended language before translating. Preserve meaning, facts, tone, and useful structure. Trim leading and trailing whitespace, remove trailing spaces, collapse excessive blank lines, and organize longer content into readable sections with concise plain-text headings when the material supports them. Do not force headings into short content. ${input.preserveFormatting ? 'Preserve meaningful paragraph boundaries and formatting.' : 'Use clear, natural prose.'} Do not add Markdown decoration or commentary. ${input.instruction ? `Additional direction: ${input.instruction} ` : ''}Return only the translated text.`,
                 messages: [{ role: 'user', content: [{ type: 'text', text: current.content }] }],
                 options: { temperature: 0.1, maxTokens: Math.min(5_000, Math.max(256, Math.ceil(current.content.length / 3))) },
               }, current.key, current.scopeKey)).text)
@@ -2340,35 +2355,12 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       };
     } else if (tool === 'scope.content.search-history.delete') {
       await roleFor(input.scopeKey, 'viewer');
-      if (input.folderKey) {
-        const current = await folder(input.folderKey, 'viewer', false);
-        if (current.scopeKey !== input.scopeKey) fail('CONTENT_FORBIDDEN', 'Folder does not belong to the requested scope.', tool, 'authorization', input.folderKey);
-      }
-      const store = dependencies.searchQueries ?? (await import('@/lib/db/content-search-queries.node')).contentSearchQueries;
-      if (!store.remove) fail('CONTENT_CONFLICT', 'Search history deletion is unavailable.', tool, 'delete', input.normalizedQuery);
-      const normalizedQuery = input.normalizedQuery.normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('en-US');
-      const deleted = await store.remove({ actorKey: member.user.key, scopeKey: input.scopeKey, contextDomain: CONTENT_SEARCH_CONTEXT_DOMAIN, normalizedQuery, folderKey: input.folderKey ?? null, includeDescendants: input.folderKey ? input.includeDescendants ?? true : false });
-      result = { normalizedQuery, deleted };
+      const history = dependencies.userSearches ?? (await import('@/lib/user-searches/service')).getDefaultUserSearchService();
+      result = await history.remove(member.user.key, input.normalizedQuery);
     } else if (tool === 'scope.content.search-history') {
       await roleFor(input.scopeKey, 'viewer');
-      let historyFolderKeys: Set<string> | undefined;
-      if (input.folderKey) {
-        const current = await folder(input.folderKey, 'viewer', false);
-        if (current.scopeKey !== input.scopeKey) fail('CONTENT_FORBIDDEN', 'Folder does not belong to the requested scope.', tool, 'authorization', input.folderKey);
-        historyFolderKeys = new Set([input.folderKey, ...((input.includeDescendants ?? true) ? descendants(await foldersIn(input.scopeKey), input.folderKey).map((item) => item.key) : [])]);
-      }
-      const store = dependencies.searchQueries ?? (await import('@/lib/db/content-search-queries.node')).contentSearchQueries;
-      const history = await store.list({ actorKey: member.user.key, scopeKey: input.scopeKey, contextDomain: CONTENT_SEARCH_CONTEXT_DOMAIN, folderKey: input.folderKey ?? null, includeDescendants: input.folderKey ? input.includeDescendants ?? true : false, cacheVersion: CONTENT_SEARCH_CACHE_VERSION, limit: input.limit });
-      result = { history: await Promise.all(history.map(async (item) => ({
-        ...item,
-        documents: (await Promise.all(item.documents.map(async (stored) => {
-          const current = await repo.getDocument(stored.documentKey);
-          if (!current || current.scopeKey !== input.scopeKey || current.deletedAt || current._internalDeletion) return null;
-          if (historyFolderKeys && (!current.folderKey || !historyFolderKeys.has(current.folderKey))) return null;
-          if (!await activeFolderHierarchy(current.folderKey, current.scopeKey)) return null;
-          return stored;
-        }))).filter((item): item is NonNullable<typeof item> => item !== null),
-      }))) };
+      const history = dependencies.userSearches ?? (await import('@/lib/user-searches/service')).getDefaultUserSearchService();
+      result = { history: await history.list(member.user.key, input.limit) };
     } else if (tool === 'scope.content.search') {
       await roleFor(input.scopeKey, 'viewer');
       const allowed = await repo.allowedScopeKeys(context.organizationKey, member.userOrganization.key);
@@ -2378,6 +2370,11 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       const folderKey = input.folderKey ?? null;
       const includeDescendants = folderKey !== null && (input.includeDescendants ?? true);
       const store = dependencies.searchQueries ?? (await import('@/lib/db/content-search-queries.node')).contentSearchQueries;
+      const history = dependencies.userSearches ?? (await import('@/lib/user-searches/service')).getDefaultUserSearchService();
+      const recordSearch = async (output: unknown) => {
+        await store.record({ key: d.id(), actorKey: member.user.key, scopeKey: input.scopeKey, query: input.query, normalizedQuery, folderKey, includeDescendants, cacheVersion, output, now: now() });
+        if (input.recordHistory) await history.record(member.user.key, input.query);
+      };
       const [allFolders, allDocuments] = await Promise.all([repo.listFolders(input.scopeKey, true), repo.listDocuments(input.scopeKey, true)]);
       let folderKeys: string[] | undefined;
       let revisionFolders = allFolders;
@@ -2394,12 +2391,12 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       const folderRevision = revisionFolders.map((item) => `${item.key}:${item.parentFolderKey ?? ''}:${item.updatedAt}:${item.isFavorite ? 'favorite' : ''}:${item.deletedAt ?? ''}:${item._internalDeletion ? 'pending' : ''}`);
       const documentRevision = revisionDocuments.map((item) => `${item.key}:${item.name}:${item.folderKey ?? ''}:${item.semanticContentHash ?? ''}:${item.isFavorite ? 'favorite' : ''}:${item.deletedAt ?? ''}:${item._internalDeletion ? 'pending' : ''}`);
       const sourceRevision = createHash('sha256').update([...folderRevision, ...documentRevision].sort().join('\n')).digest('hex');
-      const cached = await store.get({ actorKey: member.user.key, scopeKey: input.scopeKey, contextDomain: CONTENT_SEARCH_CONTEXT_DOMAIN, normalizedQuery, folderKey, includeDescendants, cacheVersion });
+      const cached = await store.get({ actorKey: member.user.key, scopeKey: input.scopeKey, normalizedQuery, folderKey, includeDescendants, cacheVersion });
       const cachedValue = cached?.output as { result?: unknown; sourceRevision?: string; minimumScore?: number; includeSummaries?: boolean; replayable?: boolean } | undefined;
       const reusable = Boolean(cachedValue?.replayable && cachedValue.result && cachedValue.sourceRevision === sourceRevision && cachedValue.minimumScore === input.minimumScore && cachedValue.includeSummaries === input.includeSummaries);
       if (reusable) {
         const parsed = contentToolOutputSchemas[tool].parse({ ...(cachedValue!.result as object), query: input.query, cached: true });
-        await store.record({ key: d.id(), actorKey: member.user.key, scopeKey: input.scopeKey, contextDomain: CONTENT_SEARCH_CONTEXT_DOMAIN, query: input.query, normalizedQuery, folderKey, includeDescendants, cacheVersion, output: cachedValue, now: now() });
+        await recordSearch(cachedValue);
         result = parsed;
       } else if (!input.includeSummaries) {
         const queryText = normalizedQuery;
@@ -2455,7 +2452,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         const folders = activeFolders.sort((left, right) => right.score - left.score || left.folder.key.localeCompare(right.folder.key)).slice(0, 4).map(({ folder: current, score }) => ({ key: current.key, scopeKey: current.scopeKey, ...(current.parentFolderKey ? { parentFolderKey: current.parentFolderKey } : {}), name: current.name, ...(current.description ? { description: current.description } : {}), isFavorite: Boolean(current.isFavorite), score: Math.max(0, Math.min(1, score)) }));
         const documents = activeDocuments.sort((left, right) => right.score - left.score || left.document.key.localeCompare(right.document.key)).slice(0, 10).map(({ document: current, score }) => ({ documentKey: current.key, scopeKey: current.scopeKey, ...(current.folderKey ? { folderKey: current.folderKey } : {}), name: current.name, ...(current.extension ? { extension: current.extension } : {}), isFavorite: Boolean(current.isFavorite), score: Math.max(0, Math.min(1, score)) }));
         const freshResult = { query: input.query, folders, documents, cached: false };
-        await store.record({ key: d.id(), actorKey: member.user.key, scopeKey: input.scopeKey, contextDomain: CONTENT_SEARCH_CONTEXT_DOMAIN, query: input.query, normalizedQuery, folderKey, includeDescendants, cacheVersion, output: { result: freshResult, sourceRevision, minimumScore: input.minimumScore, includeSummaries: false, replayable: true }, now: now() });
+        await recordSearch({ result: freshResult, sourceRevision, minimumScore: input.minimumScore, includeSummaries: false, replayable: true });
         result = freshResult;
       } else {
         let queryEmbedding: number[];
@@ -2499,7 +2496,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           documents.push(...batch.map(({ document }) => document));
         }
         const freshResult = { query: input.query, folders, documents, cached: false };
-        await store.record({ key: d.id(), actorKey: member.user.key, scopeKey: input.scopeKey, contextDomain: CONTENT_SEARCH_CONTEXT_DOMAIN, query: input.query, normalizedQuery, folderKey, includeDescendants, cacheVersion, output: { result: freshResult, sourceRevision, minimumScore: input.minimumScore, includeSummaries: true, replayable: summariesComplete }, now: now() });
+        await recordSearch({ result: freshResult, sourceRevision, minimumScore: input.minimumScore, includeSummaries: true, replayable: summariesComplete });
         result = freshResult;
       }
     } else {

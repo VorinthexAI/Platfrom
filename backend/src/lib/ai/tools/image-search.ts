@@ -15,6 +15,7 @@ const searchOptions = {
 const textSearchSchema = z.object({
   query: z.string().trim().min(1).max(12_000),
   collectionKey: z.string().cuid().optional(),
+  recordHistory: z.boolean().default(true),
   ...searchOptions,
 }).strict();
 const similarImageSearchSchema = z.object({
@@ -22,20 +23,28 @@ const similarImageSearchSchema = z.object({
   collectionKey: z.string().cuid().optional(),
   ...searchOptions,
 }).strict();
+const identitySearchSchema = z.object({
+  identityKey: z.string().cuid(),
+  collectionKey: z.string().cuid().optional(),
+}).strict();
 const duplicateImageSearchSchema = z.object({ duplicates: z.literal(true), collectionKey: z.string().cuid() }).strict();
 
-export const imageSearchInputSchema = z.union([textSearchSchema, similarImageSearchSchema, duplicateImageSearchSchema]);
+export const imageSearchInputSchema = z.union([textSearchSchema, similarImageSearchSchema, identitySearchSchema, duplicateImageSearchSchema]);
 export type ImageSearchInput = z.infer<typeof imageSearchInputSchema>;
 
 export interface ImageSearchToolDependencies extends ExecuteActionOptions {
   context: DomainToolContext;
   executeEmbedding?: (organizationKey: string, input: EmbeddingInput) => Promise<ProviderExecuteResponse<EmbeddingOutput>>;
   searchImages?: (input: AccessibleImageSearchInput) => Promise<AccessibleImageSearchResult[]>;
+  listMatchingVisualIdentities?: GalleryRepository['listMatchingIdentityNames'];
   getImage?: GalleryRepository['getImage'];
+  getVisualIdentity?: GalleryRepository['getVisualIdentity'];
   canAccessImage?: GalleryRepository['canAccessImage'];
   canAccessCollection?: GalleryRepository['canAccessCollection'];
   getCollection?: GalleryRepository['getCollection'];
   findDuplicateImages?: GalleryRepository['listRedundantCollectionImages'];
+  listVisualIdentityImages?: GalleryRepository['listSubjectImages'];
+  onMetrics?: (metrics: { mode: 'text' | 'similar' | 'identity' | 'duplicates'; resultCount: number; durationMs: number }) => void;
 }
 
 const repository = getDefaultGalleryRepository();
@@ -45,18 +54,26 @@ export const imageSearchTool = {
   inputSchema: imageSearchInputSchema,
   providerDefinition: {
     name: 'image.search',
-    description: 'Search accessible images by text, find images similar to a source image, or find deterministic duplicates within a collection.',
+    description: 'Search accessible images by text, a source image, or a saved visual identity, or find deterministic duplicates within a collection.',
     inputSchema: {
       type: 'object',
       oneOf: [
-        { type: 'object', required: ['query'], additionalProperties: false, properties: { query: { type: 'string', minLength: 1, maxLength: 12_000 }, collectionKey: { type: 'string' }, threshold: { type: 'number', minimum: -1, maximum: 1 }, limit: { type: 'integer', minimum: 1, maximum: 50, default: 50 } } },
+        { type: 'object', required: ['query'], additionalProperties: false, properties: { query: { type: 'string', minLength: 1, maxLength: 12_000 }, collectionKey: { type: 'string' }, recordHistory: { type: 'boolean', default: true }, threshold: { type: 'number', minimum: -1, maximum: 1 }, limit: { type: 'integer', minimum: 1, maximum: 50, default: 50 } } },
         { type: 'object', required: ['imageKey'], additionalProperties: false, properties: { imageKey: { type: 'string' }, collectionKey: { type: 'string' }, threshold: { type: 'number', minimum: -1, maximum: 1 }, limit: { type: 'integer', minimum: 1, maximum: 50, default: 50 } } },
+        { type: 'object', required: ['identityKey'], additionalProperties: false, properties: { identityKey: { type: 'string' }, collectionKey: { type: 'string' } } },
         { type: 'object', required: ['duplicates', 'collectionKey'], additionalProperties: false, properties: { duplicates: { type: 'boolean', const: true }, collectionKey: { type: 'string' } } },
       ],
     },
   },
   async execute(rawInput: unknown, dependencies: ImageSearchToolDependencies): Promise<ImageSimilarityOutput> {
+    const startedAt = performance.now();
     const input = imageSearchInputSchema.parse(rawInput);
+    const finish = (mode: 'text' | 'similar' | 'identity' | 'duplicates', output: ImageSimilarityOutput) => {
+      const metrics = { mode, resultCount: output.images.length, durationMs: performance.now() - startedAt };
+      console.info('image search completed', metrics);
+      dependencies.onMetrics?.(metrics);
+      return output;
+    };
     const actorKey = imageSearchActor(dependencies.context);
     const scopeKey = dependencies.context.runtimeScopeKey;
     const organizationKey = dependencies.context.organizationKey;
@@ -67,7 +84,13 @@ export const imageSearchTool = {
     }
     if ('duplicates' in input) {
       const duplicates = await (dependencies.findDuplicateImages ?? repository.listRedundantCollectionImages)(scopeKey, input.collectionKey);
-      return imageSimilarityOutput(duplicates.slice(0, 500).map((image) => ({ image })));
+      return finish('duplicates', imageSimilarityOutput(duplicates.slice(0, 500).map((image) => ({ image }))));
+    }
+    if ('identityKey' in input) {
+      const identity = await (dependencies.getVisualIdentity ?? repository.getVisualIdentity)(scopeKey, input.identityKey, actorKey);
+      if (!identity) throw new Error('Visual identity not found.');
+      const matches = await (dependencies.listVisualIdentityImages ?? repository.listSubjectImages)(scopeKey, identity.key, input.collectionKey);
+      return finish('identity', imageSimilarityOutput(matches.map(({ image, confidence }) => ({ image, score: confidence }))));
     }
     if ('imageKey' in input) {
       const source = await (dependencies.getImage ?? repository.getImage)(input.imageKey);
@@ -81,26 +104,44 @@ export const imageSearchTool = {
         threshold: input.threshold,
         limit: input.limit + 1,
       });
-      return imageSimilarityOutput(results.filter(({ image }) => image.key !== source.key).slice(0, input.limit));
+      return finish('similar', imageSimilarityOutput(results.filter(({ image }) => image.key !== source.key).slice(0, input.limit)));
     }
     const embeddingInput = { text: prepareEmbeddingText(input.query, 'query') };
-    const response = dependencies.executeEmbedding
-      ? await dependencies.executeEmbedding(organizationKey, embeddingInput)
-      : await executeAction<EmbeddingInput, EmbeddingOutput>({
+    const embeddingPromise = dependencies.executeEmbedding
+      ? dependencies.executeEmbedding(organizationKey, embeddingInput)
+      : executeAction<EmbeddingInput, EmbeddingOutput>({
           mode: 'auto',
           organizationKey,
           actionSlug: 'embed',
         }, embeddingInput, dependencies);
+    const [response, identities] = await Promise.all([
+      embeddingPromise,
+      (dependencies.listMatchingVisualIdentities ?? repository.listMatchingIdentityNames)(scopeKey, input.query),
+    ]);
     const embedding = currentEmbeddingSchema.parse(response.output.embedding);
-    const results = await (dependencies.searchImages ?? searchAccessibleImages)({
-      organizationKey,
-      scopeKey,
-      actorKey,
-      embedding,
-      ...(input.collectionKey ? { collectionKey: input.collectionKey } : {}),
-      threshold: input.threshold,
-      limit: input.limit,
-    });
-    return imageSimilarityOutput(results);
+    const search = dependencies.searchImages ?? searchAccessibleImages;
+    const [semanticResults, ...identityResults] = await Promise.all([
+      search({
+        organizationKey,
+        scopeKey,
+        actorKey,
+        embedding,
+        ...(input.collectionKey ? { collectionKey: input.collectionKey } : {}),
+        threshold: input.threshold,
+        limit: input.limit,
+      }),
+      ...identities.map((identity) => search({
+        organizationKey,
+        scopeKey,
+        actorKey,
+        embedding: identity.embedding,
+        ...(input.collectionKey ? { collectionKey: input.collectionKey } : {}),
+        limit: input.limit,
+      })),
+    ]);
+    const merged = new Map<string, AccessibleImageSearchResult>();
+    for (const result of identityResults.flat()) if (!merged.has(result.image.key)) merged.set(result.image.key, result);
+    for (const result of semanticResults) if (!merged.has(result.image.key)) merged.set(result.image.key, result);
+    return finish('text', imageSimilarityOutput([...merged.values()].slice(0, input.limit)));
   },
 } as const;

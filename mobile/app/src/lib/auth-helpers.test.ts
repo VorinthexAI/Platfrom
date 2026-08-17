@@ -32,7 +32,7 @@ describe("mobile auth helpers", () => {
 
   test("normalizes the me boundary and derives a greeting name", () => {
     const context = normalizeAuthContext({
-      user: { display_name: "Ada Lovelace", country_code: "SE", settings: { archive: { showOnlyFavorites: true } } },
+      user: { display_name: "Ada Lovelace", country_code: "SE", settings: { archive: { showOnlyFavorites: true }, gallery: { show_only_favorites: true } } },
       org: { key: "org" },
       main_scope: { key: "scope" },
       content_execution: { agent_key: "agent" },
@@ -42,17 +42,20 @@ describe("mobile auth helpers", () => {
     expect(context.contentExecution).toEqual({ agentKey: "agent" });
     expect(context.user?.countryCode).toBe("SE");
     expect(context.user?.settings.archive.showOnlyFavorites).toBe(true);
+    expect(context.user?.settings.gallery.showOnlyFavorites).toBe(true);
     expect(hasCompleteAuthContext(context)).toBe(true);
     expect(hasCompleteAuthContext({ ...context, contentExecution: null })).toBe(false);
     expect(firstNameFor(context.user)).toBe("Ada");
   });
 
-  test("defaults missing Archive settings to showing all content", () => {
+  test("defaults missing Archive and Gallery settings to showing all content", () => {
     expect(normalizeAuthContext({ user: {} }).user?.settings.archive.showOnlyFavorites).toBe(false);
+    expect(normalizeAuthContext({ user: { settings: { archive: { showOnlyFavorites: true } } } }).user?.settings.gallery.showOnlyFavorites).toBe(false);
   });
 
   test("derives the user's likely language from their country code", () => {
     expect(languageForCountryCode("SE")).toBe("Swedish");
+    expect(languageForCountryCode("se")).toBe("Swedish");
     expect(languageForCountryCode("ES")).toBe("Spanish");
     expect(languageForCountryCode()).toBe("English");
   });

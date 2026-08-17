@@ -178,9 +178,10 @@ const httpImageUrlSchema = z.string().url().refine((value) => {
   const protocol = new URL(value).protocol;
   return protocol === 'http:' || protocol === 'https:';
 }, 'Image URL must use HTTP or HTTPS');
+const inlineImageUrlSchema = z.string().max(28 * 1024 * 1024).regex(/^data:image\/(?:gif|jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/, 'Inline image URL is invalid');
 
 export const imageCaptionInputSchema = z.object({
-  imageUrls: z.array(httpImageUrlSchema).min(1).max(MAX_IMAGE_CAPTION_URLS),
+  imageUrls: z.array(z.union([httpImageUrlSchema, inlineImageUrlSchema])).min(1).max(MAX_IMAGE_CAPTION_URLS),
   purpose: z.enum(['caption', 'document-transcription', 'document-reconciliation']).default('caption'),
   referenceTexts: z.array(z.object({ primary: z.string().max(40_000), secondary: z.string().max(40_000) }).strict()).min(1).max(MAX_IMAGE_CAPTION_URLS).optional(),
 }).strict().superRefine((input, context) => {
@@ -190,7 +191,10 @@ export const imageCaptionInputSchema = z.object({
 export type ImageCaptionInput = z.infer<typeof imageCaptionInputSchema>;
 
 export const imageCaptionOutputSchema = z.object({
-  captions: z.array(z.string().trim().min(1).max(20_000)).min(1).max(MAX_IMAGE_CAPTION_URLS),
+  results: z.array(z.object({
+    caption: z.string().trim().min(1).max(20_000),
+    score: z.number().int().min(1).max(100),
+  }).strict()).min(1).max(MAX_IMAGE_CAPTION_URLS),
 }).strict();
 export type ImageCaptionOutput = z.infer<typeof imageCaptionOutputSchema>;
 
@@ -205,7 +209,7 @@ export const documentCleanupOutputSchema = z.object({
 export type DocumentCleanupOutput = z.infer<typeof documentCleanupOutputSchema>;
 
 export const visualIdentityDescriptionInputSchema = z.object({
-  imageUrls: z.array(httpImageUrlSchema).min(1).max(8),
+  imageUrls: z.array(z.union([httpImageUrlSchema, inlineImageUrlSchema])).min(1).max(8),
 }).strict();
 export type VisualIdentityDescriptionInput = z.infer<typeof visualIdentityDescriptionInputSchema>;
 

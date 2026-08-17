@@ -303,8 +303,9 @@ describe('Content runtime', () => {
 
     const currentVersion = await runContentTool('document.create-version', { documentKeys: [rootKey] }, f.context, { repository: f.repository, embed: async () => embedding });
     expect(f.documents.get(rootKey).currentVersionKey).toBe(currentVersion.results[0]?.data?.version.key);
-    await runContentTool('document.restore-version', { restores: [{ documentKey: rootKey, versionKey: versioned.results[0]?.data?.version.key, createBackupVersion: false }] }, f.context, { repository: f.repository, embed: async () => embedding });
+    await runContentTool('document.restore-version', { restores: [{ documentKey: rootKey, versionKey: versioned.results[0]?.data?.version.key, createBackupVersion: false }] }, f.context, { repository: f.repository, embed: async () => { throw new Error('restore should reuse version semantics'); } });
     expect(f.documents.get(rootKey).currentVersionKey).toBe(versioned.results[0]?.data?.version.key);
+    expect(f.documents.get(rootKey).content).toBe('Generated version');
   });
 
   test('rejects cross-scope document moves instead of performing a partial transfer', async () => {
@@ -636,9 +637,9 @@ describe('Content runtime', () => {
       return {
         output,
         usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-        providerId: request.actionSlug === 'embed' ? 'openrouter' : 'aws-bedrock',
-        modelId: request.actionSlug === 'embed' ? 'qwen.qwen3-embedding-8b' : 'amazon.nova-lite',
-        externalModelId: request.actionSlug === 'embed' ? 'qwen/qwen3-embedding-8b' : 'us.amazon.nova-lite-v1:0',
+        providerId: 'openrouter',
+        modelId: request.actionSlug === 'embed' ? 'qwen.qwen3-embedding-8b' : 'google.gemini-2.5-flash-lite',
+        externalModelId: request.actionSlug === 'embed' ? 'qwen/qwen3-embedding-8b' : 'google/gemini-2.5-flash-lite',
       };
     };
     const dependencies = { repository: f.repository, executeAction };
@@ -696,7 +697,7 @@ describe('Content runtime', () => {
     await expect(runContentTool('content.neighbors', { folderKey: f.folderKey }, f.context, { repository: f.repository })).rejects.toMatchObject({ code: 'FOLDER_ARCHIVED' });
   });
 
-  test('searches folders and chunk-aware documents with caps, summaries, cache, auth, and isolated history', async () => {
+  test('searches folders and chunk-aware documents with caps, summaries, cache, auth, and global user history', async () => {
     const f = fixture('viewer');
     for (let index = 0; index < 6; index += 1) {
       const key = newId();
@@ -708,22 +709,30 @@ describe('Content runtime', () => {
     let allowed = true;
     let clock = new Date(now);
     const rows = new Map<string, any>();
+    const historyRows = new Map<string, any>();
     f.repository.allowedScopeKeys = async () => allowed ? [f.scopeKey] : [];
     f.repository.semanticSearchFolders = async (input) => [...f.folders.values()].filter((folder) => !input.folderKeys || input.folderKeys.includes(folder.key)).map((folder, index) => ({ score: index === 0 ? 0.54 : 0.9, folder }));
     f.repository.semanticSearch = async (input) => [...f.documents.values()].filter((document) => !input.folderKeys || input.folderKeys.includes(document.folderKey)).map((document, index) => ({ score: index === 0 ? 0.54 : 0.9, document }));
     const searchQueries = {
       async get({ actorKey, scopeKey, normalizedQuery, folderKey, includeDescendants }: any) { return rows.get(`${actorKey}:${scopeKey}:${normalizedQuery}:${folderKey ?? 'root'}:${includeDescendants}`) ?? null; },
-      async record(value: any) { const identity = `${value.actorKey}:${value.scopeKey}:${value.normalizedQuery}:${value.folderKey ?? 'root'}:${value.includeDescendants}`; const old = rows.get(identity); rows.set(identity, { output: value.output, query: value.query, normalizedQuery: value.normalizedQuery, contextDomain: value.contextDomain, folderKey: value.folderKey, includeDescendants: value.includeDescendants, searchedAt: value.now, usageCount: (old?.usageCount ?? 0) + 1 }); },
-      async list({ actorKey, scopeKey, folderKey, includeDescendants, limit }: any) { return [...rows.entries()].filter(([key]) => key.startsWith(`${actorKey}:${scopeKey}:`)).map(([, value]) => value).filter((value) => value.folderKey === folderKey && value.includeDescendants === includeDescendants).map((value) => ({ query: value.query, normalizedQuery: value.normalizedQuery, contextDomain: value.contextDomain, searchedAt: value.searchedAt, usageCount: value.usageCount, ...(value.folderKey ? { folderKey: value.folderKey, includeDescendants: value.includeDescendants } : {}), documents: value.output.result.documents })).slice(0, limit); },
-      async remove({ actorKey, scopeKey, normalizedQuery, folderKey, includeDescendants }: any) { return rows.delete(`${actorKey}:${scopeKey}:${normalizedQuery}:${folderKey ?? 'root'}:${includeDescendants}`); },
+      async record(value: any) { const identity = `${value.actorKey}:${value.scopeKey}:${value.normalizedQuery}:${value.folderKey ?? 'root'}:${value.includeDescendants}`; rows.set(identity, { output: value.output }); },
+    };
+    const userSearches = {
+      async record(userKey: string, query: string) { const normalizedQuery = query.normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase(); const identity = `${userKey}:${normalizedQuery}`; const old = historyRows.get(identity); const value = { query: query.trim(), normalizedQuery, searchedAt: clock.toISOString(), usageCount: (old?.usageCount ?? 0) + 1 }; historyRows.set(identity, value); return value; },
+      async list(userKey: string, limit: number) { return [...historyRows.entries()].filter(([identity]) => identity.startsWith(`${userKey}:`)).map(([, value]) => value).slice(0, limit); },
+      async remove(userKey: string, query: string) { const normalizedQuery = query.normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase(); return { normalizedQuery, deleted: historyRows.delete(`${userKey}:${normalizedQuery}`) }; },
     };
     const dependencies: any = {
       repository: f.repository,
       searchQueries,
+      userSearches,
       clock: () => clock,
       embed: async () => { embeddingCalls += 1; return embedding; },
       runAction: async (action: string, input: any) => { summaryCalls += 1; expect(action).toBe('reason'); const parsed = chatInputSchema.parse(input); const text = parsed.messages[0]?.content[0]?.type === 'text' ? parsed.messages[0].content[0].text : ''; expect(text).toContain('Launch Roadmap'); return { text: 'Relevant to Launch Roadmap' }; },
     };
+    await runContentTool('scope.content.search', { scopeKey: f.scopeKey, query: 'Roadmap content', includeSummaries: false, recordHistory: false }, f.context, dependencies);
+    expect(rows).toHaveLength(1);
+    expect(historyRows).toHaveLength(0);
     const first = await runContentTool('scope.content.search', { scopeKey: f.scopeKey, query: 'Launch Roadmap' }, f.context, dependencies);
     expect(first.folders).toHaveLength(4);
     expect(first.folders.every((item) => item.score >= 0.55)).toBe(true);
@@ -745,13 +754,7 @@ describe('Content runtime', () => {
     expect(embeddingCalls).toBe(2);
     expect(summaryCalls).toBe(20);
     const history = await runContentTool('scope.content.search-history', { scopeKey: f.scopeKey }, f.context, dependencies);
-    expect(history.history).toMatchObject([{ normalizedQuery: 'launch roadmap', contextDomain: 'content', usageCount: 3 }]);
-    expect(history.history[0]?.documents).toEqual(metadataReplay.documents);
-    const archivedDocument = f.documents.get(first.documents[0]!.documentKey);
-    archivedDocument.deletedAt = now;
-    const prunedHistory = await runContentTool('scope.content.search-history', { scopeKey: f.scopeKey }, f.context, dependencies);
-    expect(prunedHistory.history[0]?.documents.some((item) => item.documentKey === archivedDocument.key)).toBe(false);
-    archivedDocument.deletedAt = null;
+    expect(history.history).toEqual([{ query: 'launch roadmap', normalizedQuery: 'launch roadmap', searchedAt: clock.toISOString(), usageCount: 3 }]);
     const childKey = newId();
     f.folders.set(childKey, { key: childKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', embedding, createdAt: now, updatedAt: now });
     const nestedDocumentKey = [...f.documents.keys()][1]!;
@@ -759,13 +762,15 @@ describe('Content runtime', () => {
     const folderReplay = await runContentTool('scope.content.search', { scopeKey: f.scopeKey, folderKey: f.folderKey, query: 'launch roadmap' }, f.context, dependencies);
     expect(folderReplay.folders).toEqual([{ key: childKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', isFavorite: false, score: 0.9 }]);
     expect(folderReplay.cached).toBe(false);
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(3);
     expect(folderReplay.documents.some((document) => document.documentKey === nestedDocumentKey)).toBe(true);
     const directFolderSearch = await runContentTool('scope.content.search', { scopeKey: f.scopeKey, folderKey: f.folderKey, includeDescendants: false, query: 'launch roadmap' }, f.context, dependencies);
     expect(directFolderSearch.documents.some((document) => document.documentKey === nestedDocumentKey)).toBe(false);
-    expect(rows).toHaveLength(3);
+    expect(rows).toHaveLength(4);
     const folderHistory = await runContentTool('scope.content.search-history', { scopeKey: f.scopeKey, folderKey: f.folderKey }, f.context, dependencies);
-    expect(folderHistory.history[0]).toMatchObject({ folderKey: f.folderKey, includeDescendants: true, documents: folderReplay.documents });
+    expect(folderHistory.history[0]).not.toHaveProperty('folderKey');
+    const globalHistory = await runContentTool('scope.content.search-history', { scopeKey: f.scopeKey, allLocations: true }, f.context, dependencies);
+    expect(globalHistory.history).toMatchObject([{ normalizedQuery: 'launch roadmap', usageCount: 5 }]);
     f.documents.get(first.documents[0]!.documentKey).semanticContentHash = 'a'.repeat(64);
     const invalidated = await runContentTool('scope.content.search', { scopeKey: f.scopeKey, query: 'launch roadmap' }, f.context, dependencies);
     expect(invalidated.cached).toBe(false);
@@ -773,8 +778,8 @@ describe('Content runtime', () => {
     const otherContext = { ...f.context, principal: { ...f.context.principal, user: { key: newId() } } };
     const isolated = await runContentTool('scope.content.search-history', { scopeKey: f.scopeKey }, otherContext, dependencies);
     expect(isolated.history).toEqual([]);
-    expect(await runContentTool('scope.content.search-history.delete', { scopeKey: f.scopeKey, normalizedQuery: 'launch roadmap' }, f.context, dependencies)).toEqual({ normalizedQuery: 'launch roadmap', deleted: true });
-    expect((await runContentTool('scope.content.search-history', { scopeKey: f.scopeKey }, f.context, dependencies)).history).toEqual([]);
+    expect(await runContentTool('scope.content.search-history.delete', { scopeKey: f.scopeKey, normalizedQuery: 'launch roadmap', allLocations: true }, f.context, dependencies)).toEqual({ normalizedQuery: 'launch roadmap', deleted: true });
+    expect((await runContentTool('scope.content.search-history', { scopeKey: f.scopeKey, allLocations: true }, f.context, dependencies)).history).toEqual([]);
     allowed = false;
     await expect(runContentTool('scope.content.search', { scopeKey: f.scopeKey, query: 'launch roadmap' }, f.context, dependencies)).rejects.toMatchObject({ code: 'CONTENT_FORBIDDEN' });
   });
@@ -801,8 +806,8 @@ describe('Content runtime', () => {
       searchQueries: {
         async get(input: any) { const output = cachedSearches.get(cacheKey(input)); return output ? { output } : null; },
         async record(input: any) { cachedSearches.set(cacheKey(input), input.output); },
-        async list() { return []; },
       },
+      userSearches: { async record() { return {} as any; }, async list() { return []; }, async remove(_userKey: string, query: string) { return { normalizedQuery: query, deleted: false }; } },
     };
 
     const root = await runContentTool('scope.content.search', { scopeKey: f.scopeKey, query: 'launch', includeSummaries: false }, f.context, dependencies);
@@ -836,7 +841,8 @@ describe('Content runtime', () => {
       repository: f.repository,
       embed: async () => embedding,
       runAction: async () => { summaryCalls += 1; return { text: 'Should not run' }; },
-      searchQueries: { async get() { return null; }, async record() {}, async list() { return []; } },
+      searchQueries: { async get() { return null; }, async record() {} },
+      userSearches: { async record() { return {} as any; }, async list() { return []; }, async remove(_userKey: string, query: string) { return { normalizedQuery: query, deleted: false }; } },
     });
     expect(result.folders).toEqual([]);
     expect(result.documents).toEqual([]);
@@ -860,7 +866,7 @@ describe('Content runtime', () => {
     const created = await runContentTool('document.create-version', { documentKeys: [documentKey] }, f.context, dependencies);
     expect(created.results[0]?.success).toBe(true);
     expect([...f.versions.values()].at(-1)?.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
-    expect(embeddedTexts).toContain('Legacy body');
+    expect(embeddedTexts).toContain('Notes\n\nLegacy body');
 
     f.documents.get(documentKey).embedding = legacy;
     const updated = await runContentTool('document.update', { updates: [{ documentKey, content: 'Updated body', createVersion: true }] }, f.context, dependencies);
@@ -883,13 +889,15 @@ describe('Content runtime', () => {
     expect(embeddedTexts).toContain('Notes\n\nHistorical exact body');
 
     f.documents.get(documentKey).embedding = legacy;
-    const generated = await runContentTool('document.translate', { documentKeys: [documentKey], targetLanguage: 'Swedish', instruction: 'Use concise headings.', mode: 'replace' }, f.context, {
+    const generated = await runContentTool('document.translate', { documentKeys: [documentKey], targetLanguage: 'engleksa', instruction: 'Use concise headings.', mode: 'replace' }, f.context, {
       ...dependencies,
       runAction: async (action: string, input: any) => {
         if (action === 'translate') {
           expect(input.systemPrompt).toContain('collapse excessive blank lines');
           expect(input.systemPrompt).toContain('readable sections');
-          expect(input.systemPrompt).toContain('into Swedish');
+          expect(input.systemPrompt).toContain('into engleksa');
+          expect(input.systemPrompt).toContain('native name or endonym');
+          expect(input.systemPrompt).toContain('mildly misspelled');
           expect(input.systemPrompt).toContain('Additional direction: Use concise headings.');
           return { text: '  Titre  \r\n\r\n\r\nCorps traduit  \r\n ' };
         }
@@ -1538,7 +1546,7 @@ describe('Content runtime', () => {
     expect(events.every((event: any) => typeof event.invocationKey === 'string')).toBe(true);
   });
 
-  test('enhances a document through Nova Lite and persists replacement content', async () => {
+  test('enhances a document through Gemini Flash-Lite and persists replacement content', async () => {
     const f = fixture('moderator');
     const documentKey = f.addDocument('This are teh text.');
     let call: { action?: string; input?: any } = {};
@@ -1554,6 +1562,9 @@ describe('Content runtime', () => {
     expect(call.action).toBe('enhance');
     expect(call.input.systemPrompt).toContain('collapse excessive blank lines');
     expect(call.input.systemPrompt).toContain('readable sections');
+    expect(call.input.systemPrompt).toContain('nonsensical words');
+    expect(call.input.systemPrompt).toContain('only a few characters per line');
+    expect(call.input.systemPrompt).toContain('normal line width');
     expect(call.input.options).toMatchObject({ temperature: 0.1, maxTokens: 256 });
     expect(f.documents.get(documentKey).content).toBe('This is the text.');
   });
@@ -1594,9 +1605,12 @@ describe('Content runtime', () => {
         },
         searchQueries: {
           async get({ actorKey, scopeKey, normalizedQuery }: any) { return searchRows.get(`${actorKey}:${scopeKey}:${normalizedQuery}`) ?? null; },
-          async record(value: any) { const identity = `${value.actorKey}:${value.scopeKey}:${value.normalizedQuery}`; const old = searchRows.get(identity); searchRows.set(identity, { output: value.output, query: value.query, normalizedQuery: value.normalizedQuery, contextDomain: value.contextDomain, searchedAt: value.now, usageCount: (old?.usageCount ?? 0) + 1 }); },
-          async list({ actorKey, scopeKey, limit }: any) { return [...searchRows.entries()].filter(([key]) => key.startsWith(`${actorKey}:${scopeKey}:`)).map(([, value]) => ({ query: value.query, normalizedQuery: value.normalizedQuery, contextDomain: value.contextDomain, searchedAt: value.searchedAt, usageCount: value.usageCount, documents: value.output?.result?.documents ?? [] })).slice(0, limit); },
-          async remove({ actorKey, scopeKey, normalizedQuery }: any) { return searchRows.delete(`${actorKey}:${scopeKey}:${normalizedQuery}`); },
+          async record(value: any) { const identity = `${value.actorKey}:${value.scopeKey}:${value.normalizedQuery}`; searchRows.set(identity, { output: value.output }); },
+        },
+        userSearches: {
+          async record(_userKey: string, query: string) { return { query, normalizedQuery: query.toLowerCase(), searchedAt: now, usageCount: 1 }; },
+          async list() { return []; },
+          async remove(_userKey: string, query: string) { return { normalizedQuery: query.toLowerCase(), deleted: true }; },
         },
         mergeAudio: async () => new Uint8Array([1]),
         audioDuration: () => 100,

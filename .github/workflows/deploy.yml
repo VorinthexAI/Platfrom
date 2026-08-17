@@ -439,11 +439,11 @@ jobs:
         with:
           git-crypt-key-b64: ${{ secrets.GIT_CRYPT_KEY }}
       - name: Extract config
-        run: echo "AWS_DEPLOY_ROLE_ARN=$(jq -r '.vars.AWS_DEPLOY_ROLE_ARN' .github/environments.json)" >> "$GITHUB_ENV"
+        run: echo "AWS_INFRA_ROLE_ARN=$(jq -r '.vars.AWS_INFRA_ROLE_ARN' .github/environments.json)" >> "$GITHUB_ENV"
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ env.AWS_INFRA_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
       - name: Login to Amazon ECR
         id: ecr-login
@@ -636,7 +636,7 @@ jobs:
           test -n "$bedrock_aws_access_key_id" || { echo "::error::BEDROCK_AWS_ACCESS_KEY_ID not found under $SSM_PATH"; exit 1; }
           test -n "$bedrock_aws_secret_access_key" || { echo "::error::BEDROCK_AWS_SECRET_ACCESS_KEY not found under $SSM_PATH"; exit 1; }
           test -n "$openai_api_key" || { echo "::error::OPENAI_API_KEY not found under $SSM_PATH; non-embedding OpenAI functions cannot run"; exit 1; }
-          test -n "$openrouter_api_key" || { echo "::error::OPENROUTER_API_KEY not found under $SSM_PATH; Qwen embeddings cannot run"; exit 1; }
+          test -n "$openrouter_api_key" || { echo "::error::OPENROUTER_API_KEY not found under $SSM_PATH; Gemini runtime routes and Qwen embeddings cannot run"; exit 1; }
           echo "::add-mask::$arango_password"
           echo "::add-mask::$bedrock_aws_access_key_id"
           echo "::add-mask::$bedrock_aws_secret_access_key"
@@ -935,7 +935,7 @@ jobs:
           test -n "$bedrock_aws_access_key_id" || { echo "::error::BEDROCK_AWS_ACCESS_KEY_ID not found under $SSM_PATH; Bedrock models cannot run"; exit 1; }
           test -n "$bedrock_aws_secret_access_key" || { echo "::error::BEDROCK_AWS_SECRET_ACCESS_KEY not found under $SSM_PATH; Bedrock models cannot run"; exit 1; }
           test -n "$openai_api_key" || { echo "::error::OPENAI_API_KEY not found under $SSM_PATH; non-embedding OpenAI functions cannot run"; exit 1; }
-          test -n "$openrouter_api_key" || { echo "::error::OPENROUTER_API_KEY not found under $SSM_PATH; Qwen embeddings cannot run"; exit 1; }
+          test -n "$openrouter_api_key" || { echo "::error::OPENROUTER_API_KEY not found under $SSM_PATH; Gemini runtime routes and Qwen embeddings cannot run"; exit 1; }
           echo "::add-mask::$arango_password"
           echo "::add-mask::$bedrock_aws_access_key_id"
           echo "::add-mask::$bedrock_aws_secret_access_key"

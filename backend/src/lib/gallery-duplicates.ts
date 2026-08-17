@@ -29,7 +29,9 @@ export function findRedundantGalleryImageKeys(images: readonly HashedGalleryImag
   const buckets = new Map<string, number[]>();
   for (const [hash, index] of representatives) perceptualHashSegments(hash).forEach((segment, position) => {
     const bucket = `${position}:${segment}`;
-    buckets.set(bucket, [...(buckets.get(bucket) ?? []), index]);
+    const indices = buckets.get(bucket);
+    if (indices) indices.push(index);
+    else buckets.set(bucket, [index]);
   });
   const compared = new Set<string>();
   for (const bucket of buckets.values()) {
@@ -48,7 +50,9 @@ export function findRedundantGalleryImageKeys(images: readonly HashedGalleryImag
   const clusters = new Map<number, typeof valid>();
   valid.forEach((image, index) => {
     const key = root(index);
-    clusters.set(key, [...(clusters.get(key) ?? []), image]);
+    const cluster = clusters.get(key);
+    if (cluster) cluster.push(image);
+    else clusters.set(key, [image]);
   });
   return [...clusters.values()].flatMap((cluster) => {
     if (cluster.length < 2) return [];

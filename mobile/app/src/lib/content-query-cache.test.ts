@@ -30,12 +30,14 @@ import {
 import type { ContentContext, ContentSearchHistoryItem } from "./content-client";
 
 const context: ContentContext = {
+  userKey: "user-a",
   organizationKey: "organization-a",
   scopeKey: "scope-a",
   agentKey: "agent-a",
 };
 
 const otherContext: ContentContext = {
+  userKey: "user-b",
   organizationKey: "organization-b",
   scopeKey: "scope-b",
   agentKey: "agent-b",
@@ -49,6 +51,12 @@ test("scopes Archive cache keys by the complete content context", () => {
   expect(contentQueryKeys.audioVersions(context, "document-a").slice(0, -1)).toEqual(contentQueryKeys.document(context, "document-a"));
   expect(contentQueryKeys.summaries(context, "document-a").slice(0, -1)).toEqual(contentQueryKeys.document(context, "document-a"));
   expect(contentQueryKeys.topics(context, "document-a").slice(0, -1)).toEqual(contentQueryKeys.document(context, "document-a"));
+});
+
+test("shares global history across scopes for one user and isolates other users", () => {
+  const anotherScope = { ...otherContext, userKey: context.userKey };
+  expect(contentQueryKeys.history(context)).toEqual(contentQueryKeys.history(anotherScope));
+  expect(contentQueryKeys.history(context)).not.toEqual(contentQueryKeys.history(otherContext));
 });
 
 test("invalidates only the edited document topic cache", async () => {
@@ -280,8 +288,8 @@ test("invalidates affected histories and patches moved document detail without c
 
 test("optimistically promotes, counts, and removes Content search history", () => {
   const client = new QueryClient();
-  const older: ContentSearchHistoryItem = { query: "older", normalizedQuery: "older", contextDomain: "content", searchedAt: "2026-08-10T00:00:00.000Z", usageCount: 1, documents: [] };
-  const selected: ContentSearchHistoryItem = { query: "roadmap", normalizedQuery: "roadmap", contextDomain: "content", searchedAt: "2026-08-11T00:00:00.000Z", usageCount: 3, documents: [] };
+  const older: ContentSearchHistoryItem = { query: "older", normalizedQuery: "older", searchedAt: "2026-08-10T00:00:00.000Z", usageCount: 1 };
+  const selected: ContentSearchHistoryItem = { query: "roadmap", normalizedQuery: "roadmap", searchedAt: "2026-08-11T00:00:00.000Z", usageCount: 3 };
   client.setQueryData(contentQueryKeys.history(context, "folder"), [older, selected]);
 
   const promoted = promoteCachedContentHistory(client, context, "folder", selected);

@@ -83,8 +83,8 @@ describe('Arango migration indexes', () => {
   test('drops obsolete search uniqueness and expiry indexes', () => {
     expect(isLegacyIndex('contentSearchQueries', ['actorKey', 'scopeKey', 'normalizedQuery'])).toBe(true);
     expect(isLegacyIndex('contentSearchQueries', ['expiresAt'])).toBe(true);
-    expect(isLegacyIndex('contentSearchQueries', ['actorKey', 'scopeKey', 'normalizedQuery', 'folderKey', 'includeDescendants'])).toBe(true);
-    expect(isLegacyIndex('contentSearchQueries', ['actorKey', 'scopeKey', 'contextDomain', 'normalizedQuery', 'folderKey', 'includeDescendants'])).toBe(false);
+    expect(isLegacyIndex('contentSearchQueries', ['actorKey', 'scopeKey', 'normalizedQuery', 'folderKey', 'includeDescendants'])).toBe(false);
+    expect(isLegacyIndex('contentSearchQueries', ['actorKey', 'scopeKey', 'contextDomain', 'normalizedQuery', 'folderKey', 'includeDescendants'])).toBe(true);
   });
   test('never classifies a currently desired index as legacy', () => {
     expect(isLegacyIndex('documentVersions', ['storageKey'], [['storageKey']])).toBe(false);

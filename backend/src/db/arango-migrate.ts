@@ -71,6 +71,8 @@ export async function migrateImageCaptions(targetDb: Database): Promise<void> {
         scopeKey: image.scopeKey,
         sourceImageKey: image._key,
         caption: image.caption,
+        score: 1,
+        scoreVersion: 0,
         embedding: image.embedding,
         perceptualHash: null,
         hashAlgorithm: null,
@@ -82,6 +84,7 @@ export async function migrateImageCaptions(targetDb: Database): Promise<void> {
         updatedAt: image.updatedAt
       } INTO imageCaptions OPTIONS { overwriteMode: "ignore" }
   `);
+  await targetDb.query('FOR caption IN imageCaptions FILTER !HAS(caption, "score") || !HAS(caption, "scoreVersion") UPDATE caption WITH { score: HAS(caption, "score") ? caption.score : 1, scoreVersion: HAS(caption, "scoreVersion") ? caption.scoreVersion : 0 } IN imageCaptions');
   await targetDb.query(`
     FOR image IN images
       FILTER image.imageCaptionKey == null
@@ -94,6 +97,7 @@ export async function migrateImageCaptions(targetDb: Database): Promise<void> {
         FILTER caption == null
           || caption.scopeKey != image.scopeKey
           || caption.caption != image.caption
+          || !IS_NUMBER(caption.score) || caption.score < 1 || caption.score > 100
           || caption.embedding != image.embedding
         RETURN 1
     )
@@ -834,7 +838,7 @@ export const collections: CollectionSpec[] = [
   { name: 'pollOptions', embedKeys: ['text'], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['pollKey'] }, { fields: ['pollKey', 'position'], unique: true }] },
   { name: 'pollVotes', embedKeys: [], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['pollKey'] }, { fields: ['optionKey'] }, { fields: ['participantKey'] }, { fields: ['pollKey', 'optionKey', 'participantKey'], unique: true }] },
   { name: 'folders', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'parentFolderKey'] }, { fields: ['scopeKey', 'isFavorite', 'deletedAt'] }, { fields: ['scopeKey', 'parentFolderKey', 'name'] }] },
-  { name: 'images', embedKeys: ['filename', 'caption'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['imageCaptionKey'], sparse: true }, { fields: ['storageKey'], unique: true }] },
+  { name: 'images', embedKeys: ['filename', 'caption', 'country', 'city', 'countryCode'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'deletedAt', 'createdAt'] }, { fields: ['imageCaptionKey'], sparse: true }, { fields: ['storageKey'], unique: true }] },
   { name: 'imageCaptions', skipEmbedding: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'hashAlgorithm', 'perceptualHash'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment0'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment1'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment2'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment3'], sparse: true }] },
   { name: 'visualIdentities', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'name'] }, { fields: ['scopeKey', 'referenceImageKey'] }] },
   { name: 'imageIdentities', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'identityKey', 'imageKey'], unique: true }, { fields: ['scopeKey', 'identityKey', 'confidence'] }, { fields: ['scopeKey', 'imageKey'] }, { fields: ['scopeKey', 'imageKey', 'isReference'], sparse: true }] },
@@ -875,8 +879,10 @@ export const collections: CollectionSpec[] = [
   // Private replay ledger. Responses may contain one-time share tokens, so this
   // collection is deliberately not registered as a generic application node.
   { name: 'contentIdempotency', skipEmbedding: true, indexes: [{ fields: ['organizationKey', 'actorKey', 'tool', 'idempotencyKey'], unique: true }, { fields: ['leaseExpiresAt'], sparse: true }, { fields: ['expiresAt'], sparse: true }] },
-  // Private per-user search history and replay cache. Never expose through the generic node registry.
-  { name: 'contentSearchQueries', skipEmbedding: true, indexes: [{ fields: ['actorKey', 'scopeKey', 'contextDomain', 'normalizedQuery', 'folderKey', 'includeDescendants'], unique: true }, { fields: ['actorKey', 'scopeKey', 'contextDomain', 'searchedAt'] }] },
+  // Private global user history. Identity is deliberately independent of every product and scope.
+  { name: 'userSearches', skipEmbedding: true, indexes: [{ fields: ['userKey', 'normalizedQuery'], unique: true }, { fields: ['userKey', 'searchedAt'] }] },
+  // Private Archive contextual replay cache. The collection itself identifies the context.
+  { name: 'contentSearchQueries', skipEmbedding: true, indexes: [{ fields: ['actorKey', 'scopeKey', 'normalizedQuery', 'folderKey', 'includeDescendants'], unique: true }, { fields: ['actorKey', 'scopeKey', 'searchedAt'] }] },
   { name: 'projects', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['contentFolderKey'], unique: true }, { fields: ['scopeKey', 'name'] }] },
   { name: 'milestones', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['projectKey', 'deletedAt'] }, { fields: ['projectKey', 'order'] }, { fields: ['projectKey', 'status'] }] },
   { name: 'tasks', embedKeys: ['title', 'description'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['projectKey', 'deletedAt'] }, { fields: ['milestoneKey', 'deletedAt'] }, { fields: ['milestoneKey', 'position'] }, { fields: ['projectKey', 'status'] }, { fields: ['priority'] }] },
@@ -1147,10 +1153,40 @@ async function main() {
     if (spec.name === 'contentSearchQueries') {
       await targetDb.query('FOR query IN contentSearchQueries FILTER IS_STRING(query.expiresAt) && query.expiresAt <= DATE_ISO8601(DATE_NOW()) && query.output != null UPDATE query WITH { output: null } IN contentSearchQueries');
       await targetDb.query('FOR query IN contentSearchQueries FILTER !HAS(query, "folderKey") || !HAS(query, "includeDescendants") UPDATE query WITH { folderKey: null, includeDescendants: false } IN contentSearchQueries');
-      await targetDb.query('FOR query IN contentSearchQueries FILTER !HAS(query, "contextDomain") UPDATE query WITH { contextDomain: "content" } IN contentSearchQueries');
       await targetDb.query('FOR query IN contentSearchQueries FILTER !HAS(query, "usageCount") UPDATE query WITH { usageCount: HAS(query, "count") ? query.count : 1 } IN contentSearchQueries');
+      const backfill = await targetDb.query<{ userKey: string; query: string; normalizedQuery: string; usageCount: number; searchedAt: string }>(`
+        FOR cached IN contentSearchQueries
+          FILTER IS_STRING(cached.actorKey) && IS_STRING(cached.query) && IS_STRING(cached.normalizedQuery) && IS_STRING(cached.searchedAt)
+          COLLECT userKey = cached.actorKey, normalizedQuery = cached.normalizedQuery
+            AGGREGATE usageCount = SUM(cached.usageCount), searchedAt = MAX(cached.searchedAt)
+          LET latest = FIRST(FOR candidate IN contentSearchQueries FILTER candidate.actorKey == userKey && candidate.normalizedQuery == normalizedQuery SORT candidate.searchedAt DESC LIMIT 1 RETURN candidate.query)
+          RETURN { userKey, query: latest, normalizedQuery, usageCount, searchedAt }
+      `);
+      for (const search of await backfill.all()) {
+        await targetDb.query(`
+          UPSERT { userKey: @userKey, normalizedQuery: @normalizedQuery }
+            INSERT MERGE(@search, { _key: @key })
+            UPDATE {
+              query: OLD.searchedAt < @searchedAt ? @query : OLD.query,
+              searchedAt: OLD.searchedAt < @searchedAt ? @searchedAt : OLD.searchedAt,
+              usageCount: MAX([OLD.usageCount, @usageCount])
+            } IN userSearches
+        `, { ...search, search, key: newId() });
+      }
+      for (const index of await collection.indexes()) {
+        const fields = 'fields' in index && Array.isArray(index.fields) ? index.fields.map(String) : [];
+        if (fields.includes('contextDomain')) await collection.dropIndex(index.id);
+      }
+      await targetDb.query(`
+        FOR query IN contentSearchQueries
+          SORT query.searchedAt DESC
+          COLLECT actorKey = query.actorKey, scopeKey = query.scopeKey, normalizedQuery = query.normalizedQuery, folderKey = query.folderKey, includeDescendants = query.includeDescendants INTO duplicates = query
+          FOR duplicate IN SLICE(duplicates, 1)
+            REMOVE duplicate IN contentSearchQueries
+      `);
       await targetDb.query('FOR query IN contentSearchQueries FILTER HAS(query, "count") UPDATE query WITH { count: null } IN contentSearchQueries OPTIONS { keepNull: false }');
       await targetDb.query('FOR query IN contentSearchQueries FILTER HAS(query, "expiresAt") UPDATE query WITH { expiresAt: null } IN contentSearchQueries OPTIONS { keepNull: false }');
+      await targetDb.query('FOR query IN contentSearchQueries UPDATE query WITH { contextDomain: null, usageCount: null } IN contentSearchQueries OPTIONS { keepNull: false }');
     }
     if (spec.name === 'folders') await migrateExactSemanticRecords(targetDb, 'folders', ['name', 'description']);
     if (spec.name === 'images') await migrateExactSemanticRecords(targetDb, 'images', ['filename', 'caption']);

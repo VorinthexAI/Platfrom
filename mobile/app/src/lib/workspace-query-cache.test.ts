@@ -7,15 +7,17 @@ import {
   ascendQueryKeys,
   compassQueryKeys,
   galleryQueryKeys,
+  getGalleryCollections,
   invalidateAssistantChanges,
   patchGalleryImage,
   removeCachedGalleryImages,
   restoreGalleryOverviews,
   snapshotGalleryOverviews,
   signalQueryKeys,
+  setCachedGalleryCollections,
   transferCachedGalleryImages,
 } from "./workspace-query-cache";
-import type { GalleryImage, GalleryOverview } from "./gallery-client";
+import type { GalleryCollection, GalleryImage, GalleryOverview } from "./gallery-client";
 
 const context: ContentContext = { organizationKey: "org-a", scopeKey: "scope-a", agentKey: "agent-a" };
 const otherContext: ContentContext = { organizationKey: "org-b", scopeKey: "scope-b", agentKey: "agent-b" };
@@ -26,6 +28,21 @@ test("isolates every routed workspace key by context and resource", () => {
   expect(signalQueryKeys.overview(context, "all")).not.toEqual(signalQueryKeys.overview(context, "favorite"));
   expect(signalQueryKeys.detail(context, "thread-a")).not.toEqual(signalQueryKeys.detail(context, "thread-b"));
   expect(ascendQueryKeys.detail(context, "book-a")).not.toEqual(ascendQueryKeys.detail(otherContext, "book-a"));
+});
+
+test("loads Gallery collections once per context and permits explicit singleton updates", async () => {
+  const client = new QueryClient();
+  const collections: GalleryCollection[] = [{ key: "collection", name: "Collection", description: null, isFavorite: false, count: 1, coverUrl: null }];
+  let loads = 0;
+  const load = () => { loads += 1; return Promise.resolve(collections); };
+
+  expect(await getGalleryCollections(client, context, load)).toEqual(collections);
+  expect(await getGalleryCollections(client, context, load)).toEqual(collections);
+  expect(loads).toBe(1);
+
+  const updated = [{ ...collections[0]!, count: 2 }];
+  setCachedGalleryCollections(client, context, updated);
+  expect(client.getQueryData(galleryQueryKeys.collections(context))).toEqual(updated);
 });
 
 test("assistant changes invalidate exact workspace prefixes without crossing contexts", async () => {
@@ -51,7 +68,7 @@ const image = (key: string, isFavorite = false): GalleryImage => ({ key, filenam
 test("optimistically patches favorites across every Gallery overview", () => {
   const client = new QueryClient();
   const original = image("image");
-  const overview: GalleryOverview = { collections: [], images: [original] };
+  const overview: GalleryOverview = { collections: [], images: [original], nextCursor: null };
   client.setQueryData(galleryQueryKeys.overview(context), overview);
   client.setQueryData(galleryQueryKeys.overview(context, "collection"), overview);
 
@@ -65,14 +82,14 @@ test("optimistically copies and moves many images to many collection caches", ()
   const client = new QueryClient();
   const first = image("first"), second = image("second");
   const collections = [
-    { key: "source", name: "Source", description: null, count: 2, coverUrl: first.url },
-    { key: "one", name: "One", description: null, count: 0, coverUrl: null },
-    { key: "two", name: "Two", description: null, count: 0, coverUrl: null },
+    { key: "source", name: "Source", description: null, isFavorite: false, count: 2, coverUrl: first.url },
+    { key: "one", name: "One", description: null, isFavorite: false, count: 0, coverUrl: null },
+    { key: "two", name: "Two", description: null, isFavorite: false, count: 0, coverUrl: null },
   ];
-  client.setQueryData(galleryQueryKeys.overview(context), { collections, images: [first, second] });
-  client.setQueryData(galleryQueryKeys.overview(context, "source"), { collections, images: [first, second] });
-  client.setQueryData(galleryQueryKeys.overview(context, "one"), { collections, images: [] });
-  client.setQueryData(galleryQueryKeys.overview(context, "two"), { collections, images: [] });
+  client.setQueryData(galleryQueryKeys.overview(context), { collections, images: [first, second], nextCursor: null });
+  client.setQueryData(galleryQueryKeys.overview(context, "source"), { collections, images: [first, second], nextCursor: null });
+  client.setQueryData(galleryQueryKeys.overview(context, "one"), { collections, images: [], nextCursor: null });
+  client.setQueryData(galleryQueryKeys.overview(context, "two"), { collections, images: [], nextCursor: null });
 
   transferCachedGalleryImages(client, context, { sourceCollectionKey: "source", destinationCollectionKeys: ["one", "two"], images: [first, second], mode: "move" });
 
@@ -85,7 +102,7 @@ test("removes deleted images everywhere and restores exact optimistic snapshots"
   const client = new QueryClient();
   const deleted = image("deleted"), retained = image("retained");
   const key = galleryQueryKeys.overview(context, "collection");
-  client.setQueryData(key, { collections: [{ key: "collection", name: "Collection", description: null, count: 2, coverUrl: deleted.url }], images: [deleted, retained] });
+  client.setQueryData(key, { collections: [{ key: "collection", name: "Collection", description: null, isFavorite: false, count: 2, coverUrl: deleted.url }], images: [deleted, retained], nextCursor: null });
   const snapshot = snapshotGalleryOverviews(client, context);
 
   removeCachedGalleryImages(client, context, [deleted]);

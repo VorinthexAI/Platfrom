@@ -17,11 +17,15 @@ describe('Content share migration staging', () => {
     expect(source).toContain("const fields = ['scopeKey', 'sourceType', 'sourceKey', 'permission', 'tokenHash', 'passwordHash', 'expiresAt', 'revokedAt', 'deletedAt', 'createdAt', 'updatedAt']");
     expect(source).toContain('if (!copied || !equal(copied, prepared))');
   });
-  test('creates private indexed search history and cache storage', async () => {
+  test('creates global search history and a separate contextual replay cache', async () => {
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    expect(source).toContain("name: 'userSearches'");
+    expect(source).toContain("fields: ['userKey', 'normalizedQuery'], unique: true");
     expect(source).toContain("name: 'contentSearchQueries'");
-    expect(source).toContain("fields: ['actorKey', 'scopeKey', 'contextDomain', 'normalizedQuery', 'folderKey', 'includeDescendants'], unique: true");
-    expect(source).toContain('UPDATE query WITH { contextDomain: "content" }');
+    expect(source).toContain("fields: ['actorKey', 'scopeKey', 'normalizedQuery', 'folderKey', 'includeDescendants'], unique: true");
+    expect(source).toContain('COLLECT userKey = cached.actorKey, normalizedQuery = cached.normalizedQuery');
+    expect(source).toContain('usageCount: MAX([OLD.usageCount, @usageCount])');
+    expect(source).toContain('contextDomain: null, usageCount: null');
     expect(source).toContain('usageCount: HAS(query, "count") ? query.count : 1');
     expect(source).toContain("fields: ['scopeKey', 'isFavorite', 'deletedAt']");
     expect(source).toContain('query.expiresAt <= DATE_ISO8601(DATE_NOW()) && query.output != null');

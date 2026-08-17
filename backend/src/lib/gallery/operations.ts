@@ -3,27 +3,34 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { z, ZodError } from 'zod';
 import { collectionSchema } from '@/lib/db/collections.node';
 import { collectionMemberSchema } from '@/lib/db/collection-members.node';
-import { collectionImageSchema } from '@/lib/db/collection-images.node';
-import { galleryUploadSchema, type GalleryUpload } from '@/lib/db/gallery-uploads.node';
+import { galleryUploadSchema } from '@/lib/db/gallery-uploads.node';
 import { imageSchema } from '@/lib/db/images.node';
 import { visualIdentitySchema } from '@/lib/db/visual-identities.node';
 import { imageIdentitySchema } from '@/lib/db/image-identities.node';
 import type { getUserOrganizationByOrganizationAndUser } from '@/lib/db/user-organization.node';
-import { ImageProcessingError, processImage } from '@/lib/ai/image-processing';
-import { imageCaptionTool } from '@/lib/ai/tools/image-caption';
 import { imageSearchInputSchema, imageSearchTool } from '@/lib/ai/tools/image-search';
 import { imageCreateVisualIdentityTool } from '@/lib/ai/tools/image-create-visual-identity';
-import { documentStorage } from '@/lib/ai/document-processing/storage';
-import { EMBEDDING_DIMENSIONS, currentEmbeddingSchema, embedText } from '@/lib/embeddings';
+import { currentEmbeddingSchema, embedText } from '@/lib/embeddings';
+import { buildImageEmbeddingText } from '@/lib/image-embedding';
 import { newId } from '@/lib/ids';
 import { getDefaultGalleryRepository } from './repository';
 import { createPublicS3Client, s3, S3_BUCKET } from '@/lib/s3';
 import { strictObject } from '@/api/validation';
 import { signedImageUrl } from './image-url';
+import { getDefaultUserSearchService } from '@/lib/user-searches/service';
+import { enqueueGalleryUploadBatch } from './upload-queue';
+import { reverseGeocodeImage } from './image-location';
+import { storedImageAnalysisDataUrl } from './image-reference';
+import { cursorPaginationInputShape } from '@/lib/cursor-pagination';
 
-const overviewSchema = strictObject({ collectionKey: z.string().cuid().optional() });
-const collectionCreateSchema = strictObject({ name: z.string().trim().min(1).max(120), description: z.string().trim().min(1).max(1_000).optional() });
-const uploadFileSchema = strictObject({ clientKey: z.string().min(1).max(120), filename: z.string().trim().regex(/^[^/\\]+\.jpe?g$/i), sizeBytes: z.number().int().positive().max(20 * 1024 * 1024), processingMode: z.enum(['library', 'cover']).default('library') });
+const overviewSchema = strictObject({ collectionKey: z.string().cuid().optional(), ...cursorPaginationInputShape });
+const collectionCreateSchema = strictObject({ name: z.string().trim().min(1).max(120), isFavorite: z.boolean().default(false) });
+const collectionUpdateSchema = strictObject({ collectionKey: z.string().cuid(), name: z.string().trim().min(1).max(120), isFavorite: z.boolean() });
+const collectionDeleteSchema = strictObject({ collectionKey: z.string().cuid() });
+const imageUpdateSchema = strictObject({ imageKey: z.string().cuid(), name: z.string().trim().min(1).max(255).refine((name) => !name.includes('/') && !name.includes('\\'), 'Image name cannot contain path separators.'), isFavorite: z.boolean() });
+const uploadFileSchema = strictObject({ clientKey: z.string().min(1).max(120), filename: z.string().trim().regex(/^[^/\\]+\.jpe?g$/i), sizeBytes: z.number().int().positive().max(20 * 1024 * 1024), processingMode: z.enum(['library', 'cover']).default('library'), latitude: z.number().finite().min(-90).max(90).optional(), longitude: z.number().finite().min(-180).max(180).optional() }).superRefine((value, context) => {
+  if ((value.latitude === undefined) !== (value.longitude === undefined)) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Image coordinates require both latitude and longitude.' });
+});
 const presignSchema = strictObject({ collectionKey: z.string().cuid().nullable().optional(), files: z.array(uploadFileSchema).min(1).max(20) });
 const completeSchema = strictObject({ uploadKeys: z.array(z.string().cuid()).min(1).max(20) });
 const searchSchema = imageSearchInputSchema;
@@ -31,17 +38,16 @@ const statusSchema = strictObject({ uploadKeys: z.array(z.string().cuid()).min(1
 const favoriteSchema = strictObject({ imageKey: z.string().cuid(), isFavorite: z.boolean() });
 const deleteImagesSchema = strictObject({ imageKeys: z.array(z.string().cuid()).min(1).max(100) }).refine(({ imageKeys }) => new Set(imageKeys).size === imageKeys.length, 'Image keys must be unique');
 const duplicatesSchema = strictObject({ collectionKey: z.string().cuid() });
-const deleteDuplicatesSchema = strictObject({ collectionKey: z.string().cuid(), imageKeys: z.array(z.string().cuid()).min(1).max(500) });
+const deleteDuplicatesSchema = strictObject({ collectionKey: z.string().cuid(), imageKeys: z.array(z.string().cuid()).min(1).max(500) }).refine(({ imageKeys }) => new Set(imageKeys).size === imageKeys.length, 'Image keys must be unique');
 const subjectListSchema = strictObject({ includeDeleted: z.boolean().default(false) });
 const subjectCreateSchema = strictObject({ name: z.string().trim().min(1).max(120), imageKeys: z.array(z.string().cuid()).min(1).max(8) }).refine(({ imageKeys }) => new Set(imageKeys).size === imageKeys.length, 'Reference image keys must be unique');
 const subjectKeySchema = strictObject({ identityKey: z.string().cuid() });
 const collectionTransferSchema = strictObject({
   sourceCollectionKey: z.string().cuid(),
-  destinationCollectionKeys: z.array(z.string().cuid()).min(1).max(20),
+  destinationCollectionKeys: z.array(z.string().cuid()).length(1),
   imageKeys: z.array(z.string().cuid()).min(1).max(100),
   mode: z.enum(['copy', 'move']),
 }).superRefine((value, context) => {
-  if (new Set(value.destinationCollectionKeys).size !== value.destinationCollectionKeys.length) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Destination collection keys must be unique.', path: ['destinationCollectionKeys'] });
   if (new Set(value.imageKeys).size !== value.imageKeys.length) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Image keys must be unique.', path: ['imageKeys'] });
   if (value.destinationCollectionKeys.includes(value.sourceCollectionKey)) context.addIssue({ code: z.ZodIssueCode.custom, message: 'The source collection cannot be a destination.', path: ['destinationCollectionKeys'] });
 });
@@ -62,6 +68,8 @@ export interface GalleryOperationContext {
   scopeKey: string;
   membership: GalleryMembership;
   signal?: AbortSignal;
+  recordUserSearch?: (userKey: string, query: string) => Promise<unknown>;
+  enqueueUploadBatch?: (uploadKeys: readonly string[]) => Promise<unknown>;
 }
 
 async function authorize(context: GalleryOperationContext) {
@@ -85,9 +93,14 @@ async function safeImage(image: z.infer<typeof imageSchema>, score?: number) {
   return {
     key: image.key, filename: image.filename, caption: image.caption, imageCaptionKey: image.imageCaptionKey ?? null,
     mimeType: image.mimeType, sizeBytes: image.sizeBytes, width: image.width, height: image.height,
+    city: image.city ?? null, country: image.country ?? null, countryCode: image.countryCode ?? null,
     isFavorite: image.isFavorite, createdAt: image.createdAt, updatedAt: image.updatedAt,
     url: await imageUrl(image.storageKey), ...(score === undefined ? {} : { score }),
   };
+}
+
+async function safeCollection(collection: z.infer<typeof collectionSchema>, count: number, coverUrl: string | null) {
+  return { key: collection.key, name: collection.name, description: collection.description ?? null, isFavorite: collection.isFavorite, count, coverUrl };
 }
 
 async function persistIdentityMatches(scopeKey: string, identityKey: string, matches: Array<{ imageKey: string; confidence: number }>) {
@@ -99,11 +112,6 @@ async function reconcileVisualIdentity(identity: z.infer<typeof visualIdentitySc
   await persistIdentityMatches(identity.scopeKey, identity.key, matches.map(({ image, score }) => ({ imageKey: image.key, confidence: score })));
 }
 
-async function classifyImageSubjects(image: z.infer<typeof imageSchema>) {
-  const matches = await repository.listIdentityMatches(image.scopeKey, image.embedding);
-  for (const match of matches) await persistIdentityMatches(image.scopeKey, match.identityKey, [{ imageKey: image.key, confidence: match.confidence }]);
-}
-
 async function safeSubject(row: { identity: z.infer<typeof visualIdentitySchema>; reference: z.infer<typeof imageSchema>; imageCount: number }) {
   const { identity, reference } = row;
   return {
@@ -113,38 +121,14 @@ async function safeSubject(row: { identity: z.infer<typeof visualIdentitySchema>
   };
 }
 
-async function processReservedUpload(upload: GalleryUpload) {
-  try {
-    await repository.updateUpload(upload.key, { status: 'processing', updatedAt: new Date().toISOString() });
-    const stored = await documentStorage.download(upload.storageKey);
-    if (stored.bytes.byteLength !== upload.sizeBytes) throw new Error('Uploaded image size changed.');
-    const sourceUrl = upload.processingMode === 'library' ? await imageUrl(upload.storageKey) : undefined;
-    const image = await processImage({ scopeKey: upload.scopeKey, ownerKey: upload.actorKey, file: { filename: upload.filename, mimeType: upload.mimeType, sizeBytes: upload.sizeBytes, bytes: stored.bytes } }, {
-      createKey: () => upload.imageKey,
-      caption: upload.processingMode === 'cover'
-        ? async () => 'Folder cover image.'
-        : async () => (await imageCaptionTool.execute({ imageUrls: [sourceUrl!] }, { organizationKey: upload.organizationKey })).captions[0]!,
-      ...(upload.processingMode === 'cover' ? { embed: async () => Array(EMBEDDING_DIMENSIONS).fill(0) } : {}),
-    });
-    // Subject reads reconcile again, so a transient classification failure does not fail an otherwise valid upload.
-    await classifyImageSubjects(image).catch(() => undefined);
-    if (upload.collectionKey) await repository.addImageToCollection(collectionImageSchema.parse({ key: newId(), scopeKey: upload.scopeKey, collectionKey: upload.collectionKey, imageKey: image.key, addedByKey: upload.actorKey, createdAt: new Date().toISOString() }));
-    await documentStorage.delete(upload.storageKey).catch(() => undefined);
-    await repository.updateUpload(upload.key, { status: 'completed', updatedAt: new Date().toISOString(), errorCode: null });
-  } catch (error) {
-    const errorCode = error instanceof ImageProcessingError ? error.code : 'IMAGE_PROCESSING_FAILED';
-    console.error('gallery upload processing failed', { uploadKey: upload.key, imageKey: upload.imageKey, errorCode, error });
-    await repository.updateUpload(upload.key, { status: 'failed', errorCode, updatedAt: new Date().toISOString() }).catch(() => undefined);
-  }
-}
-
 async function overview(rawInput: unknown, context: GalleryOperationContext) {
     const input = { ...overviewSchema.parse(rawInput), ...context };
     await authorize(context);
-    const { collections, images } = await repository.listOverview(input.scopeKey, input.collectionKey);
+    const { collections, images } = await repository.listOverview({ scopeKey: input.scopeKey, collectionKey: input.collectionKey, cursor: input.cursor, limit: input.limit });
     return {
-      collections: await Promise.all(collections.map(async ({ collection, count, cover }) => ({ key: collection.key, name: collection.name, description: collection.description ?? null, count, coverUrl: cover ? await imageUrl(cover.storageKey) : null }))),
-      images: await Promise.all(images.map((image) => safeImage(image))),
+      collections: await Promise.all(collections.map(async ({ collection, count, cover }) => safeCollection(collection, count, cover ? await imageUrl(cover.storageKey) : null))),
+      images: await Promise.all(images.items.map((image) => safeImage(image)),),
+      nextCursor: images.nextCursor,
     };
 }
 
@@ -152,10 +136,43 @@ async function createCollection(rawInput: unknown, context: GalleryOperationCont
     const input = { ...collectionCreateSchema.parse(rawInput), ...context };
     const membership = await authorize(context);
     const now = new Date().toISOString();
-    const collection = collectionSchema.parse({ key: newId(), scopeKey: input.scopeKey, name: input.name, ...(input.description ? { description: input.description } : {}), embedding: currentEmbeddingSchema.parse(await embedText({ text: `${input.name}\n\n${input.description ?? ''}` })), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now });
+    const collection = collectionSchema.parse({ key: newId(), scopeKey: input.scopeKey, name: input.name, embedding: currentEmbeddingSchema.parse(await embedText({ text: input.name })), isFavorite: input.isFavorite, deletedAt: null, createdAt: now, updatedAt: now });
     const member = collectionMemberSchema.parse({ key: newId(), scopeKey: input.scopeKey, collectionKey: collection.key, memberKey: membership.key, role: 'owner', createdAt: now });
     await repository.createCollection(collection, member);
-    return { key: collection.key, name: collection.name, description: collection.description ?? null, count: 0, coverUrl: null };
+    return safeCollection(collection, 0, null);
+}
+
+async function updateCollection(rawInput: unknown, context: GalleryOperationContext) {
+    const input = { ...collectionUpdateSchema.parse(rawInput), ...context };
+    const membership = await authorize(context);
+    if (!await repository.ownsCollection(input.scopeKey, input.collectionKey, membership.key)) throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.');
+    const previous = await repository.getCollection(input.scopeKey, input.collectionKey);
+    if (!previous) throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.');
+    const collection = await repository.updateCollectionDetails(input.scopeKey, input.collectionKey, input.name, input.isFavorite, currentEmbeddingSchema.parse(await embedText({ text: `${input.name}\n\n${previous.description ?? ''}` })), new Date().toISOString());
+    if (!collection) throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.');
+    const overview = await repository.listOverview({ scopeKey: input.scopeKey, collectionKey: collection.key, limit: 1 });
+    const row = overview.collections.find(({ collection: candidate }) => candidate.key === collection.key);
+    return { collection: await safeCollection(collection, row?.count ?? 0, row?.cover ? await imageUrl(row.cover.storageKey) : null) };
+}
+
+async function deleteCollection(rawInput: unknown, context: GalleryOperationContext) {
+    const input = { ...collectionDeleteSchema.parse(rawInput), ...context };
+    const membership = await authorize(context);
+    if (!await repository.ownsCollection(input.scopeKey, input.collectionKey, membership.key)) throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.');
+    if (!await repository.deleteCollection(input.scopeKey, input.collectionKey, new Date().toISOString())) throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.');
+    return { collectionKey: input.collectionKey };
+}
+
+async function updateImageDetails(rawInput: unknown, context: GalleryOperationContext) {
+    const input = { ...imageUpdateSchema.parse(rawInput), ...context };
+    const membership = await authorize(context);
+    if (!await repository.ownsImage(input.scopeKey, input.imageKey, membership.key)) throw new GalleryOperationError(404, 'GALLERY_IMAGE_NOT_FOUND', 'Image not found.');
+    const previous = await repository.getImage(input.imageKey);
+    if (!previous || previous.scopeKey !== input.scopeKey || previous.deletedAt) throw new GalleryOperationError(404, 'GALLERY_IMAGE_NOT_FOUND', 'Image not found.');
+    const embeddingText = buildImageEmbeddingText({ filename: input.name, caption: previous.caption, city: previous.city, country: previous.country, countryCode: previous.countryCode });
+    const image = await repository.updateImageDetails(input.scopeKey, input.imageKey, input.name, input.isFavorite, currentEmbeddingSchema.parse(await embedText({ text: embeddingText })), new Date().toISOString());
+    if (!image) throw new GalleryOperationError(404, 'GALLERY_IMAGE_NOT_FOUND', 'Image not found.');
+    return { image: await safeImage(image) };
 }
 
 async function reserveUploads(rawInput: unknown, context: GalleryOperationContext) {
@@ -163,10 +180,12 @@ async function reserveUploads(rawInput: unknown, context: GalleryOperationContex
     const membership = await authorize(context);
     if (input.collectionKey) { const collection = await repository.getCollection(input.scopeKey, input.collectionKey); if (!collection) throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.'); }
     const now = new Date();
-    const uploads = await Promise.all(input.files.map(async (file) => {
+    const locations = await Promise.all(input.files.map((file) => file.latitude === undefined || file.longitude === undefined ? undefined : reverseGeocodeImage({ latitude: file.latitude, longitude: file.longitude })));
+    const uploads = await Promise.all(input.files.map(async (file, index) => {
       const key = newId(), imageKey = newId();
       const storageKey = `pending/gallery/${input.scopeKey}/${key}/original.jpg`;
-      const record = galleryUploadSchema.parse({ key, organizationKey: input.organizationKey, scopeKey: input.scopeKey, actorKey: membership.key, imageKey, collectionKey: input.collectionKey ?? null, filename: file.filename.replace(/\.jpeg$/i, '.jpg'), mimeType: 'image/jpeg', sizeBytes: file.sizeBytes, storageKey, processingMode: file.processingMode, status: 'reserved', errorCode: null, createdAt: now.toISOString(), updatedAt: now.toISOString(), expiresAt: new Date(now.getTime() + 15 * 60_000).toISOString() });
+      const location = locations[index];
+      const record = galleryUploadSchema.parse({ key, organizationKey: input.organizationKey, scopeKey: input.scopeKey, actorKey: membership.key, imageKey, collectionKey: input.collectionKey ?? null, filename: file.filename.replace(/\.jpeg$/i, '.jpg'), mimeType: 'image/jpeg', sizeBytes: file.sizeBytes, storageKey, processingMode: file.processingMode, city: location?.city ?? null, country: location?.country ?? null, countryCode: location?.countryCode ?? null, status: 'reserved', errorCode: null, createdAt: now.toISOString(), updatedAt: now.toISOString(), expiresAt: new Date(now.getTime() + 15 * 60_000).toISOString() });
       await repository.insertUpload(record);
       const url = await signUrl(publicS3, new PutObjectCommand({ Bucket: S3_BUCKET, Key: storageKey, ContentType: 'image/jpeg' }), { expiresIn: 10 * 60 });
       return { clientKey: file.clientKey, uploadKey: key, imageKey, url, headers: { 'Content-Type': 'image/jpeg' } };
@@ -186,7 +205,8 @@ async function completeUploads(rawInput: unknown, context: GalleryOperationConte
       if (head.ContentLength !== upload.sizeBytes || head.ContentType !== 'image/jpeg') throw new GalleryOperationError(409, 'GALLERY_UPLOAD_MISMATCH', 'Uploaded image does not match its reservation.');
       return repository.updateUpload(upload.key, { status: 'queued', updatedAt: new Date().toISOString(), errorCode: null });
     }));
-    for (const upload of uploads) if (upload.status === 'queued') void processReservedUpload(upload);
+    const queuedKeys = uploads.filter(({ status }) => status === 'queued').map(({ key }) => key);
+    if (queuedKeys.length > 0) await (context.enqueueUploadBatch ?? enqueueGalleryUploadBatch)(queuedKeys);
     return { jobs: uploads.map(({ key, imageKey, status }) => ({ key, imageKey, status })) };
 }
 
@@ -204,9 +224,15 @@ async function search(rawInput: unknown, context: GalleryOperationContext) {
     const collection = input.collectionKey ? await repository.getCollection(input.scopeKey, input.collectionKey) : undefined;
     if (input.collectionKey && !collection) throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.');
     let sourceImage: z.infer<typeof imageSchema> | undefined;
+    let sourceIdentity: z.infer<typeof visualIdentitySchema> | undefined;
     if ('imageKey' in input) {
       sourceImage = await repository.getImage(input.imageKey) ?? undefined;
       if (!sourceImage || sourceImage.scopeKey !== input.scopeKey || !await repository.canAccessImage(input.scopeKey, sourceImage.key, membership.key)) throw new GalleryOperationError(404, 'GALLERY_IMAGE_NOT_FOUND', 'Image not found.');
+    }
+    if ('identityKey' in input) {
+      sourceIdentity = await repository.getVisualIdentity(input.scopeKey, input.identityKey, membership.key) ?? undefined;
+      if (!sourceIdentity) throw new GalleryOperationError(404, 'GALLERY_SUBJECT_NOT_FOUND', 'Visual identity not found.');
+      await reconcileVisualIdentity(sourceIdentity, input.organizationKey, membership.key);
     }
     const toolInput = searchSchema.parse(rawInput);
     const resolvedImages = new Map<string, z.infer<typeof imageSchema>>();
@@ -218,7 +244,9 @@ async function search(rawInput: unknown, context: GalleryOperationContext) {
         for (const result of results) resolvedImages.set(result.image.key, result.image);
         return results;
       },
+      listMatchingVisualIdentities: (scopeKey, query) => repository.listMatchingIdentityNames(scopeKey, query),
       getImage: async (key) => resolvedImages.get(key) ?? repository.getImage(key),
+      getVisualIdentity: async () => sourceIdentity ?? null,
       canAccessImage: async () => true,
       canAccessCollection: async () => true,
       getCollection: async () => collection ?? null,
@@ -227,21 +255,20 @@ async function search(rawInput: unknown, context: GalleryOperationContext) {
         for (const image of images) resolvedImages.set(image.key, image);
         return images;
       },
+      listVisualIdentityImages: async (scopeKey, identityKey, collectionKey) => {
+        const rows = await repository.listSubjectImages(scopeKey, identityKey, collectionKey);
+        for (const row of rows) resolvedImages.set(row.image.key, row.image);
+        return rows;
+      },
     });
     let matches: Array<{ image: z.infer<typeof imageSchema>; score?: number }> = await Promise.all(output.images.map(async ({ key, score }) => {
       const image = resolvedImages.get(key) ?? await repository.getImage(key);
       if (!image) throw new GalleryOperationError(404, 'GALLERY_IMAGE_NOT_FOUND', 'Image not found.');
       return { image, score };
     }));
-    if ('query' in input) {
-      const namedIdentities = await repository.listMatchingIdentityNames(input.scopeKey, input.query);
-      await Promise.all(namedIdentities.map((identity) => reconcileVisualIdentity(identity, input.organizationKey, membership.key)));
-      const named = await repository.listImagesForMatchingIdentityNames(input.scopeKey, input.query, input.collectionKey);
-      const unique = new Map<string, { image: z.infer<typeof imageSchema>; score?: number }>(named.map((match) => [match.image.key, match]));
-      for (const match of matches) if (!unique.has(match.image.key)) unique.set(match.image.key, match);
-      matches = [...unique.values()].slice(0, input.limit);
-    }
-    return { images: await Promise.all(matches.map(({ image, score }) => safeImage(image, score))) };
+    const images = await Promise.all(matches.map(({ image, score }) => safeImage(image, score)));
+    if ('query' in input && input.recordHistory) await (context.recordUserSearch ?? getDefaultUserSearchService().record)(membership.userId, input.query);
+    return { images };
 }
 
 async function setFavorite(rawInput: unknown, context: GalleryOperationContext) {
@@ -254,7 +281,8 @@ async function setFavorite(rawInput: unknown, context: GalleryOperationContext) 
 
 async function deleteImages(rawInput: unknown, context: GalleryOperationContext) {
     const input = { ...deleteImagesSchema.parse(rawInput), ...context };
-    await authorize(context);
+    const membership = await authorize(context);
+    if ((await Promise.all(input.imageKeys.map((imageKey) => repository.ownsImage(input.scopeKey, imageKey, membership.key)))).some((owns) => !owns)) throw new GalleryOperationError(404, 'GALLERY_IMAGE_NOT_FOUND', 'One or more images were not found.');
     const deletion = await repository.deleteImages(input.scopeKey, input.imageKeys, new Date().toISOString());
     if (!deletion) throw new GalleryOperationError(404, 'GALLERY_IMAGE_NOT_FOUND', 'One or more images were not found.');
     return deletion;
@@ -267,8 +295,8 @@ async function findDuplicates(rawInput: unknown, context: GalleryOperationContex
 
 async function deleteDuplicates(rawInput: unknown, context: GalleryOperationContext) {
     const input = { ...deleteDuplicatesSchema.parse(rawInput), ...context };
-    await authorize(context);
-    if (!await repository.getCollection(input.scopeKey, input.collectionKey)) throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.');
+    const membership = await authorize(context);
+    if (!await repository.ownsCollection(input.scopeKey, input.collectionKey, membership.key)) throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.');
     const now = new Date().toISOString();
     const deletion = await repository.deleteDuplicateImages(input.scopeKey, input.collectionKey, input.imageKeys, now);
     if (!deletion) throw new GalleryOperationError(409, 'GALLERY_DUPLICATES_CHANGED', 'The duplicate set changed. Find duplicates again before deleting.');
@@ -301,7 +329,7 @@ async function createSubject(rawInput: unknown, context: GalleryOperationContext
       if (!image || image.scopeKey !== input.scopeKey || image.deletedAt) throw new GalleryOperationError(404, 'GALLERY_IMAGE_NOT_FOUND', 'Reference image not found.');
       return image;
     }));
-    const profile = await imageCreateVisualIdentityTool.execute({ imageUrls: await Promise.all(references.map(({ storageKey }) => imageUrl(storageKey))) }, { organizationKey: input.organizationKey, signal: context.signal });
+    const profile = await imageCreateVisualIdentityTool.execute({ imageUrls: await Promise.all(references.map(({ storageKey }) => storedImageAnalysisDataUrl(storageKey, 1024))) }, { organizationKey: input.organizationKey, signal: context.signal });
     const now = new Date().toISOString();
     const embedding = currentEmbeddingSchema.parse(await embedText({ text: `${input.name}\n\n${profile.description}` }));
     const identity = visualIdentitySchema.parse({ key: newId(), scopeKey: input.scopeKey, name: input.name, description: profile.description, referenceImageKey: references[0]!.key, embedding, deletedAt: null, createdAt: now, updatedAt: now });
@@ -343,11 +371,14 @@ const restoreSubject = (input: unknown, context: GalleryOperationContext) => set
 export const galleryOperationInputSchemas = {
   overview: overviewSchema,
   createCollection: collectionCreateSchema,
+  updateCollection: collectionUpdateSchema,
+  deleteCollection: collectionDeleteSchema,
   reserveUploads: presignSchema,
   completeUploads: completeSchema,
   uploadStatus: statusSchema,
   search: searchSchema,
   setFavorite: favoriteSchema,
+  updateImage: imageUpdateSchema,
   deleteImages: deleteImagesSchema,
   findDuplicates: duplicatesSchema,
   deleteDuplicates: deleteDuplicatesSchema,
@@ -362,11 +393,14 @@ export const galleryOperationInputSchemas = {
 export const galleryOperations = {
   overview,
   createCollection,
+  updateCollection,
+  deleteCollection,
   reserveUploads,
   completeUploads,
   uploadStatus,
   search,
   setFavorite,
+  updateImage: updateImageDetails,
   deleteImages,
   findDuplicates,
   deleteDuplicates,

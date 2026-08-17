@@ -61,7 +61,7 @@ try {
   const getProcessedImage = async (key: string) => { const raw = await database.collection('images').document(key).catch(() => null); return raw ? imageSchema.parse({ ...raw, key: (raw as { _key: string })._key }) : null; };
   const insertProcessedImage = async (image: ReturnType<typeof imageSchema.parse>) => { const { key, ...document } = image; await database.collection('images').save({ _key: key, ...document }); return image; };
   const processingInput = { scopeKey, ownerKey: actorKey, file: { filename: 'processed.png', mimeType: 'image/png', sizeBytes: 24, bytes: png(8, 6) }, idempotencyKey: 'processed-e2e' };
-  const processingDependencies = { storage, caption: async () => 'A deterministic processed image.', embed: async () => Array(4096).fill(0.125), getImage: getProcessedImage, insertImage: insertProcessedImage };
+  const processingDependencies = { storage, caption: async () => ({ caption: 'A deterministic processed image.', score: 80 }), embed: async () => Array(4096).fill(0.125), getImage: getProcessedImage, persistImage: async ({ image, caption }: any) => { if (caption) { const { key, ...document } = caption; await database.collection('imageCaptions').save({ _key: key, ...document }); } return insertProcessedImage(image); } };
   const processed = await processImage(processingInput, processingDependencies);
   const processedReplay = await processImage(processingInput, processingDependencies);
   if (processed.key !== processedReplay.key || processed.embedding.length !== 4096 || uploads !== 1) throw new Error('Image processing validation/idempotency contract failed.');

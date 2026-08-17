@@ -7,6 +7,7 @@ import { autoRefreshAuthTokens, rateLimitByIp, requestLogger, requireEnvApiKey, 
 import { handleResendWebhook, RESEND_WEBHOOK_V1_PATH } from './resend';
 import { GMAIL_WEBHOOK_V1_PATH, handleGmailWebhook } from './email-webhook';
 import { closeEmailSyncQueue, enqueueEmailWatchRenewal, startEmailSyncWorker } from '@/lib/email-inbox/sync-queue';
+import { closeGalleryUploadQueue, recoverGalleryUploadQueue, startGalleryUploadWorker } from '@/lib/gallery/upload-queue';
 import { registerRoutes } from './routes';
 
 export const app = new Hono();
@@ -64,13 +65,17 @@ if (import.meta.main) {
   });
   console.log(`vorinthex app listening on ${port}`);
   const emailWorker = startEmailSyncWorker();
+  const galleryWorker = startGalleryUploadWorker();
+  void recoverGalleryUploadQueue().catch((error) => console.error('gallery upload queue recovery failed', { error }));
   void enqueueEmailWatchRenewal().catch((error) => console.error('email watch renewal enqueue failed', { error }));
   const renewalTimer = setInterval(() => { void enqueueEmailWatchRenewal().catch((error) => console.error('email watch renewal enqueue failed', { error })); }, 6 * 60 * 60_000);
 
   const shutdown = async () => {
     clearInterval(renewalTimer);
     await emailWorker.close();
+    await galleryWorker.close();
     await closeEmailSyncQueue();
+    await closeGalleryUploadQueue();
     server.stop();
     process.exit(0);
   };

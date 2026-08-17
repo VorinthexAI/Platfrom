@@ -26,11 +26,15 @@ export const userSettingsSchema = z.object({
   archive: z.object({
     showOnlyFavorites: z.boolean(),
   }).strict(),
+  gallery: z.object({
+    showOnlyFavorites: z.boolean(),
+  }).strict(),
 }).strict();
 export type UserSettings = z.infer<typeof userSettingsSchema>;
 
 export const DEFAULT_USER_SETTINGS = Object.freeze({
   archive: Object.freeze({ showOnlyFavorites: false }),
+  gallery: Object.freeze({ showOnlyFavorites: false }),
 });
 
 export const userSchema = z.object({
@@ -46,7 +50,9 @@ export const userSchema = z.object({
   isVerified: z.boolean().default(false),
   isOnboarded: z.boolean().default(false),
   guestBootstrapSecretHash: z.string().nullable().default(null),
-  settings: userSettingsSchema.default(DEFAULT_USER_SETTINGS),
+  settings: z.preprocess((value) => value && typeof value === 'object' && !Array.isArray(value) && !('gallery' in value)
+    ? { ...value, gallery: DEFAULT_USER_SETTINGS.gallery }
+    : value, userSettingsSchema).default(DEFAULT_USER_SETTINGS),
   is_subscribed_to_updates: z.boolean().default(true),
   is_subscribed_to_updates_unsubscribe_token_hash: z.string().nullable().default(null),
   is_subscribed_to_updates_unsubscribe_requested_at: z.string().nullable().default(null),

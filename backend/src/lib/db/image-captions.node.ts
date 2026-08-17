@@ -12,6 +12,8 @@ export const imageCaptionRecordSchema = z.object({
   scopeKey: z.string().cuid(),
   sourceImageKey: z.string().cuid(),
   caption: z.string().trim().min(1),
+  score: z.number().int().min(1).max(100).default(1),
+  scoreVersion: z.number().int().min(0).max(1).default(0),
   embedding: currentEmbeddingSchema,
   perceptualHash: z.string().regex(/^[a-f0-9]{16}$/).nullable(),
   hashAlgorithm: z.literal(PERCEPTUAL_HASH_ALGORITHM).nullable(),

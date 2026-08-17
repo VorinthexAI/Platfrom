@@ -37,11 +37,14 @@ function handler(name: GalleryOperationName, successStatus = 200) {
 
 export const galleryOverview = handler('overview');
 export const createGalleryCollection = handler('createCollection', 201);
+export const updateGalleryCollection = handler('updateCollection');
+export const deleteGalleryCollection = handler('deleteCollection');
 export const presignGalleryUploads = handler('reserveUploads', 201);
 export const completeGalleryUploads = handler('completeUploads', 202);
 export const galleryUploadStatus = handler('uploadStatus');
 export const searchGalleryImages = handler('search');
 export const setGalleryImageFavorite = handler('setFavorite');
+export const updateGalleryImage = handler('updateImage');
 export const deleteGalleryImages = handler('deleteImages');
 export const findGalleryCollectionDuplicates = handler('findDuplicates');
 export const deleteGalleryCollectionDuplicates = handler('deleteDuplicates');

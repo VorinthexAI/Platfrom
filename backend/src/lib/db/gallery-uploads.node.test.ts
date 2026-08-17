@@ -22,7 +22,7 @@ const validUpload = {
 
 describe('Gallery upload reservations', () => {
   test('accepts a server-owned JPEG reservation', () => {
-    expect(galleryUploadSchema.parse(validUpload)).toEqual({ ...validUpload, processingMode: 'library' });
+    expect(galleryUploadSchema.parse(validUpload)).toEqual({ ...validUpload, city: null, country: null, countryCode: null, processingMode: 'library' });
     expect(galleryUploadSchema.parse({ ...validUpload, processingMode: 'cover' })).toMatchObject({ processingMode: 'cover' });
   });
 
@@ -32,9 +32,11 @@ describe('Gallery upload reservations', () => {
   });
 
   test('strips Arango metadata from reads', () => {
-    const parsed = galleryUploadSchema.parse({ ...validUpload, _key: validUpload.key, _id: `galleryUploads/${validUpload.key}`, unexpected: true });
+    const parsed = galleryUploadSchema.parse({ ...validUpload, latitude: 59.3293, longitude: 18.0686, _key: validUpload.key, _id: `galleryUploads/${validUpload.key}`, unexpected: true });
     expect(parsed).not.toHaveProperty('_key');
     expect(parsed).not.toHaveProperty('_id');
     expect(parsed).not.toHaveProperty('unexpected');
+    expect(parsed).not.toHaveProperty('latitude');
+    expect(parsed).not.toHaveProperty('longitude');
   });
 });

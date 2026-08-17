@@ -19,13 +19,13 @@ function failed(code: ProviderErrorCode, partialText?: string): () => AsyncItera
 }
 
 function routes(outcomes: Array<() => AsyncIterable<ProviderStreamChunk>>) {
-  const models: string[] = [];
+  const selections: Array<{ modelSlug: string; providerSlug: string }> = [];
   let streamIndex = 0;
   return {
-    models,
+    selections,
     dependencies: {
-      selectRoute: async (request: { modelSlug: string }) => {
-        models.push(request.modelSlug);
+      selectRoute: async (request: { modelSlug: string; providerSlug: string }) => {
+        selections.push({ modelSlug: request.modelSlug, providerSlug: request.providerSlug });
         return { modelSlug: request.modelSlug } as never;
       },
       streamRoute: () => outcomes[streamIndex++]!(),
@@ -79,7 +79,7 @@ describe('orchestrator chat tool', () => {
     });
   });
 
-  test('continues to Nova chat when retrieval exceeds its deadline', async () => {
+  test('continues to model chat when retrieval exceeds its deadline', async () => {
     await expect(orchestratorChatTool.execute('Atlas skill', { message: 'hello' }, {
       organizationKey: 'org',
       retrievalContext: { organizationKey: 'org', membershipKey: 'membership' },
@@ -107,22 +107,29 @@ describe('orchestrator chat tool', () => {
     expect(sawAbortedSignal).toBe(true);
   });
 
-  test('streams the first successful Nova Lite attempt', async () => {
+  test('streams the first successful Gemini attempt', async () => {
     const route = routes([completed('first')]);
     await expect(collect(route.dependencies)).resolves.toEqual([{ type: 'text-delta', text: 'first' }, { type: 'done' }]);
-    expect(route.models).toEqual(['amazon.nova-lite']);
+    expect(route.selections).toEqual([{ modelSlug: 'google.gemini-2.5-flash-lite', providerSlug: 'openrouter' }]);
   });
 
-  test('retries Nova Lite once and streams the successful retry', async () => {
+  test('retries Gemini once and streams the successful retry', async () => {
     const route = routes([failed('provider_unavailable'), completed('retry')]);
     await expect(collect(route.dependencies)).resolves.toEqual([{ type: 'text-delta', text: 'retry' }, { type: 'done' }]);
-    expect(route.models).toEqual(['amazon.nova-lite', 'amazon.nova-lite']);
+    expect(route.selections).toEqual([
+      { modelSlug: 'google.gemini-2.5-flash-lite', providerSlug: 'openrouter' },
+      { modelSlug: 'google.gemini-2.5-flash-lite', providerSlug: 'openrouter' },
+    ]);
   });
 
-  test('falls back once to Nova Pro after both Nova Lite attempts fail', async () => {
+  test('falls back once to Nova Pro after both Gemini attempts fail', async () => {
     const route = routes([failed('rate_limited'), failed('timeout'), completed('fallback')]);
     await expect(collect(route.dependencies)).resolves.toEqual([{ type: 'text-delta', text: 'fallback' }, { type: 'done' }]);
-    expect(route.models).toEqual(['amazon.nova-lite', 'amazon.nova-lite', 'amazon.nova-pro']);
+    expect(route.selections).toEqual([
+      { modelSlug: 'google.gemini-2.5-flash-lite', providerSlug: 'openrouter' },
+      { modelSlug: 'google.gemini-2.5-flash-lite', providerSlug: 'openrouter' },
+      { modelSlug: 'amazon.nova-pro', providerSlug: 'aws-bedrock' },
+    ]);
   });
 
   test('streams immediately and does not retry after exposing partial output', async () => {
@@ -132,12 +139,12 @@ describe('orchestrator chat tool', () => {
       for await (const chunk of orchestratorChatTool.stream('Atlas', { message: 'hello' }, route.dependencies as never)) chunks.push(chunk);
     })()).rejects.toBeInstanceOf(ProviderExecutionError);
     expect(chunks).toEqual([{ type: 'text-delta', text: 'discard me' }]);
-    expect(route.models).toEqual(['amazon.nova-lite']);
+    expect(route.selections).toEqual([{ modelSlug: 'google.gemini-2.5-flash-lite', providerSlug: 'openrouter' }]);
   });
 
   test('does not retry or fall back after an abort', async () => {
     const route = routes([failed('aborted'), completed('must not run')]);
     await expect(collect(route.dependencies)).rejects.toMatchObject({ attempts: [{ code: 'aborted' }] });
-    expect(route.models).toEqual(['amazon.nova-lite']);
+    expect(route.selections).toEqual([{ modelSlug: 'google.gemini-2.5-flash-lite', providerSlug: 'openrouter' }]);
   });
 });

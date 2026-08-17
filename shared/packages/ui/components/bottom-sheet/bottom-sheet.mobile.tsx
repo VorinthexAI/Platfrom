@@ -257,8 +257,6 @@ export function BottomSheet({
             mutation && styles.mutationSheet,
             Platform.OS === "android" && styles.androidSheet,
             {
-              bottom: mutation ? androidBottomInset : undefined,
-              height: mutation ? windowHeight - insets.top - androidBottomInset : undefined,
               top: mutation ? insets.top : undefined,
               paddingBottom: Platform.OS === "android" ? 16 : Math.max(insets.bottom, 16),
               transform: [{ translateY }],
@@ -269,8 +267,8 @@ export function BottomSheet({
             <View collapsable={false} style={styles.dragTarget} {...panResponder.panHandlers}>
               <View style={styles.dragHandle} />
             </View>
-            <View style={[styles.header, hideHeading && styles.headerWithoutHeading]}>
-              {!hideHeading ? <Text accessibilityRole="header" style={styles.title}>{title}</Text> : null}
+            <View style={[styles.header, Boolean(headerLeading) && !hideHeading && styles.headerWithLeading, hideHeading && styles.headerWithoutHeading]}>
+              {!hideHeading ? <Text accessibilityRole="header" numberOfLines={1} style={styles.title}>{title}</Text> : null}
               {!hideHeading && description ? <Text style={styles.description}>{description}</Text> : null}
             </View>
             {headerLeading ? <View style={[styles.headerSlot, styles.headerLeading]}>{headerLeading}</View> : null}
@@ -358,6 +356,7 @@ const styles = StyleSheet.create({
     width: 42,
   },
   header: { gap: 6, paddingBottom: 18, paddingHorizontal: 4, paddingRight: 48 },
+  headerWithLeading: { paddingLeft: 68 },
   headerWithoutHeading: { minHeight: 42 },
   closeButton: { position: "absolute", right: 20, top: 20, zIndex: 1 },
   headerSlot: { position: "absolute", top: 20, zIndex: 1 },

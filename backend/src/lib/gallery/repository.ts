@@ -10,6 +10,8 @@ import { imageIdentitySchema, type ImageIdentity } from '@/lib/db/image-identiti
 import { createMediaLibraryRepository, searchAccessibleImages, type AccessibleImageSearchInput, type AccessibleImageSearchResult, type MediaLibraryDatabase } from '@/lib/media-library';
 import { findRedundantGalleryImageKeys } from '@/lib/gallery-duplicates';
 import { newId } from '@/lib/ids';
+import { cursorPage, decodeCursor, encodeCursor, type CursorPage } from '@/lib/cursor-pagination';
+import { z } from 'zod';
 
 export interface GallerySubjectRow { identity: VisualIdentity; reference: Image; imageCount: number; }
 export interface GalleryCollectionRow { collection: Collection; count: number; cover: Image | null; }
@@ -17,28 +19,35 @@ export interface GalleryRepository {
   canManageScope(scopeKey: string, actorKey: string): Promise<boolean>;
   canAccessImage(scopeKey: string, imageKey: string, actorKey: string): Promise<boolean>;
   canAccessCollection(scopeKey: string, collectionKey: string, actorKey: string): Promise<boolean>;
+  ownsCollection(scopeKey: string, collectionKey: string, actorKey: string): Promise<boolean>;
+  ownsImage(scopeKey: string, imageKey: string, actorKey: string): Promise<boolean>;
   getCollection(scopeKey: string, collectionKey: string): Promise<Collection | null>;
   getImage(imageKey: string): Promise<Image | null>;
+  getVisualIdentity(scopeKey: string, identityKey: string, actorKey: string): Promise<VisualIdentity | null>;
   addImageToCollection(relation: CollectionImage): Promise<CollectionImage>;
   createCollection(collection: Collection, member: CollectionMember): Promise<void>;
-  listOverview(scopeKey: string, collectionKey?: string): Promise<{ collections: GalleryCollectionRow[]; images: Image[] }>;
+  listOverview(input: { scopeKey: string; collectionKey?: string; cursor?: string; limit: number }): Promise<{ collections: GalleryCollectionRow[]; images: CursorPage<Image> }>;
   listRedundantCollectionImages(scopeKey: string, collectionKey: string): Promise<Image[]>;
   deleteDuplicateImages(scopeKey: string, collectionKey: string, imageKeys: string[], now: string): Promise<{ removedImageKeys: string[]; deletedImageKeys: string[] } | null>;
   deleteImages(scopeKey: string, imageKeys: string[], now: string): Promise<{ deletedImageKeys: string[] } | null>;
   transferCollectionImages(input: { scopeKey: string; actorKey: string; sourceCollectionKey: string; destinationCollectionKeys: string[]; imageKeys: string[]; mode: 'copy' | 'move'; now: string }): Promise<{ status: 'ok'; createdRelationCount: number } | { status: 'selection-changed' | 'destination-forbidden' }>;
   insertUpload(upload: GalleryUpload): Promise<GalleryUpload>;
   getUpload(uploadKey: string): Promise<GalleryUpload | null>;
+  listRecoverableUploads(): Promise<GalleryUpload[]>;
   updateUpload(uploadKey: string, patch: Partial<Omit<GalleryUpload, 'key'>>): Promise<GalleryUpload>;
+  failUpload(uploadKey: string, scopeKey: string, errorCode: string, now: string): Promise<boolean>;
   searchAccessibleImages(input: AccessibleImageSearchInput): Promise<AccessibleImageSearchResult[]>;
   listMatchingIdentityNames(scopeKey: string, query: string): Promise<VisualIdentity[]>;
-  listImagesForMatchingIdentityNames(scopeKey: string, query: string, collectionKey?: string): Promise<Array<{ image: Image; score: number }>>;
   listIdentityMatches(scopeKey: string, embedding: number[]): Promise<Array<{ identityKey: string; confidence: number }>>;
   persistIdentityMatches(scopeKey: string, identityKey: string, matches: Array<{ imageKey: string; confidence: number }>): Promise<void>;
   setImageFavorite(scopeKey: string, imageKey: string, isFavorite: boolean, now: string): Promise<Image | null>;
+  updateImageDetails(scopeKey: string, imageKey: string, filename: string, isFavorite: boolean, embedding: number[], now: string): Promise<Image | null>;
+  updateCollectionDetails(scopeKey: string, collectionKey: string, name: string, isFavorite: boolean, embedding: number[], now: string): Promise<Collection | null>;
+  deleteCollection(scopeKey: string, collectionKey: string, now: string): Promise<boolean>;
   listSubjects(scopeKey: string, includeDeleted: boolean): Promise<GallerySubjectRow[]>;
   getSubject(scopeKey: string, identityKey: string, includeDeleted: boolean): Promise<GallerySubjectRow | null>;
   createSubject(identity: VisualIdentity, relations: ImageIdentity[], referenceImageKeys: string[]): Promise<boolean>;
-  listSubjectImages(scopeKey: string, identityKey: string): Promise<Array<{ image: Image; confidence: number }>>;
+  listSubjectImages(scopeKey: string, identityKey: string, collectionKey?: string): Promise<Array<{ image: Image; confidence: number }>>;
   setSubjectDeleted(scopeKey: string, identityKey: string, deleted: boolean, now: string): Promise<boolean>;
 }
 
@@ -54,6 +63,10 @@ async function redundantCollectionImages(database: MediaLibraryDatabase, scopeKe
   return parsed.map(({ image }) => image).filter(({ key }) => redundantKeys.has(key));
 }
 
+const overviewCursorSchema = z.object({
+  version: z.literal(1), scopeKey: z.string().cuid(), collectionKey: z.string().cuid().nullable(), createdAt: z.string().datetime(), imageKey: z.string().cuid(),
+}).strict();
+
 export function createGalleryRepository(database: MediaLibraryDatabase = db, transaction: TransactionRunner = runTransaction): GalleryRepository {
   const media = createMediaLibraryRepository(database);
   const subjectRows = async (query: string, bindVars: Record<string, unknown>) => (await all(database, query, bindVars) as Array<{ identity: unknown; reference: unknown; imageCount: number }>).map((row) => ({ identity: parse(visualIdentitySchema, row.identity), reference: parse(imageSchema, row.reference), imageCount: row.imageCount }));
@@ -61,14 +74,23 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
     canManageScope: media.canManageScope,
     canAccessImage: media.canAccessImage,
     canAccessCollection: media.canAccessCollection,
+    ownsCollection: media.ownsCollection,
+    ownsImage: media.ownsImage,
     getCollection: media.getCollection,
     getImage: getImageById,
+    async getVisualIdentity(scopeKey, identityKey, actorKey) { if (!await media.canManageScope(scopeKey, actorKey)) return null; const value = (await all(database, 'FOR identity IN visualIdentities FILTER identity._key == @identityKey && identity.scopeKey == @scopeKey && identity.deletedAt == null LIMIT 1 RETURN identity', { scopeKey, identityKey }))[0]; return value ? parse(visualIdentitySchema, value) : null; },
     addImageToCollection: media.addImageToCollection,
     createCollection(collection, member) { return transaction(['collections', 'collectionMembers'], async (tx) => { await tx.query('INSERT @collection INTO collections', { collection: toArangoDoc(collection) }); await tx.query('INSERT @member INTO collectionMembers', { member: toArangoDoc(member) }); }); },
-    async listOverview(scopeKey, collectionKey) {
+    async listOverview({ scopeKey, collectionKey, cursor, limit }) {
+      const after = decodeCursor(cursor, overviewCursorSchema);
+      if (after && (after.scopeKey !== scopeKey || after.collectionKey !== (collectionKey ?? null))) throw new z.ZodError([{ code: 'custom', path: ['cursor'], message: 'Cursor does not belong to this Gallery location.' }]);
       const collectionRows = await all(database, 'FOR collection IN collections FILTER collection.scopeKey == @scopeKey && collection.deletedAt == null LET imageKeys = (FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.collectionKey == collection._key RETURN relation.imageKey) LET cover = collection.coverImageKey == null ? (LENGTH(imageKeys) == 0 ? null : DOCUMENT(images, imageKeys[0])) : DOCUMENT(images, collection.coverImageKey) SORT collection.name ASC RETURN { collection, count: LENGTH(imageKeys), cover }', { scopeKey }) as Array<{ collection: unknown; count: number; cover: unknown | null }>;
-      const imageRows = await all(database, 'FOR image IN images FILTER image.scopeKey == @scopeKey && image.deletedAt == null FILTER @collectionKey == null || LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.collectionKey == @collectionKey && relation.imageKey == image._key LIMIT 1 RETURN 1) > 0 SORT image.createdAt DESC, image._key ASC LIMIT 500 RETURN image', { scopeKey, collectionKey: collectionKey ?? null });
-      return { collections: collectionRows.map((row) => ({ collection: parse(collectionSchema, row.collection), count: row.count, cover: row.cover ? parse(imageSchema, row.cover) : null })), images: imageRows.map((value) => parse(imageSchema, value)) };
+      const imageRows = await all(database, 'FOR image IN images FILTER image.scopeKey == @scopeKey && image.deletedAt == null FILTER @collectionKey == null || LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.collectionKey == @collectionKey && relation.imageKey == image._key LIMIT 1 RETURN 1) > 0 FILTER @afterCreatedAt == null || image.createdAt < @afterCreatedAt || (image.createdAt == @afterCreatedAt && image._key > @afterImageKey) SORT image.createdAt DESC, image._key ASC LIMIT @queryLimit RETURN image', { scopeKey, collectionKey: collectionKey ?? null, afterCreatedAt: after?.createdAt ?? null, afterImageKey: after?.imageKey ?? '', queryLimit: limit + 1 });
+      const parsedImages = imageRows.map((value) => parse(imageSchema, value));
+      return {
+        collections: collectionRows.map((row) => ({ collection: parse(collectionSchema, row.collection), count: row.count, cover: row.cover ? parse(imageSchema, row.cover) : null })),
+        images: cursorPage(parsedImages, limit, (image) => encodeCursor({ version: 1, scopeKey, collectionKey: collectionKey ?? null, createdAt: image.createdAt, imageKey: image.key })),
+      };
     },
     listRedundantCollectionImages: (scopeKey, collectionKey) => redundantCollectionImages(database, scopeKey, collectionKey),
     deleteDuplicateImages(scopeKey, collectionKey, imageKeys, now) { return transaction({ read: ['imageCaptions', 'visualIdentities'], write: ['images', 'collectionImages', 'collections', 'imageIdentities'] }, async (tx) => {
@@ -105,17 +127,33 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
     }); },
     insertUpload: insertGalleryUpload,
     getUpload: getGalleryUploadById,
+    async listRecoverableUploads() { return (await all(database, 'FOR upload IN galleryUploads FILTER upload.status IN ["queued", "processing"] SORT upload.updatedAt ASC, upload._key ASC RETURN upload', {})).map((value) => parse(galleryUploadSchema, value)); },
     updateUpload: updateGalleryUpload,
+    failUpload(uploadKey, scopeKey, errorCode, now) { return transaction({ read: ['images'], write: ['galleryUploads', 'images', 'collectionImages', 'collections', 'imageIdentities', 'visualIdentities'] }, async (tx) => {
+      const updated = await all(tx, 'FOR upload IN galleryUploads FILTER upload._key == @uploadKey && upload.scopeKey == @scopeKey && upload.status != "completed" LIMIT 1 UPDATE upload WITH { status: "failed", errorCode: @errorCode, updatedAt: @now } IN galleryUploads RETURN OLD.imageKey', { uploadKey, scopeKey, errorCode, now }) as string[];
+      if (!updated.length) return false;
+      const imageKey = updated[0]!;
+      await tx.query('FOR collection IN collections FILTER collection.scopeKey == @scopeKey && collection.deletedAt == null && collection.coverImageKey == @imageKey UPDATE collection WITH { coverImageKey: null, updatedAt: @now } IN collections', { scopeKey, imageKey, now });
+      await tx.query('FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == @imageKey REMOVE relation IN collectionImages', { scopeKey, imageKey });
+      await tx.query('FOR relation IN imageIdentities FILTER relation.scopeKey == @scopeKey && relation.imageKey == @imageKey REMOVE relation IN imageIdentities', { scopeKey, imageKey });
+      await tx.query('FOR identity IN visualIdentities FILTER identity.scopeKey == @scopeKey && identity.referenceImageKey == @imageKey LET replacement = FIRST(FOR relation IN imageIdentities FILTER relation.scopeKey == @scopeKey && relation.identityKey == identity._key && relation.imageKey != @imageKey LET image = DOCUMENT(images, relation.imageKey) FILTER image != null && image.scopeKey == @scopeKey && image.deletedAt == null SORT relation.isReference DESC, relation.confidence DESC, relation.createdAt ASC RETURN relation.imageKey) LET patch = replacement == null ? { deletedAt: @now, updatedAt: @now } : { referenceImageKey: replacement, updatedAt: @now } UPDATE identity WITH patch IN visualIdentities', { scopeKey, imageKey, now });
+      await tx.query('FOR image IN images FILTER image._key == @imageKey && image.scopeKey == @scopeKey && image.deletedAt == null UPDATE image WITH { deletedAt: @now, updatedAt: @now } IN images', { scopeKey, imageKey, now });
+      // Normal image deletion retains sanitized media behind the soft-deleted
+      // record so future trash/recovery behavior can restore it.
+      return true;
+    }); },
     searchAccessibleImages: (input) => searchAccessibleImages(input, database),
     async listMatchingIdentityNames(scopeKey, query) { return (await all(database, 'FOR identity IN visualIdentities FILTER identity.scopeKey == @scopeKey && identity.deletedAt == null FILTER CONTAINS(LOWER(@query), LOWER(identity.name)) RETURN identity', { scopeKey, query })).map((value) => parse(visualIdentitySchema, value)); },
-    async listImagesForMatchingIdentityNames(scopeKey, query, collectionKey) { return (await all(database, 'FOR identity IN visualIdentities FILTER identity.scopeKey == @scopeKey && identity.deletedAt == null FILTER CONTAINS(LOWER(@query), LOWER(identity.name)) FOR relation IN imageIdentities FILTER relation.scopeKey == @scopeKey && relation.identityKey == identity._key LET image = DOCUMENT(images, relation.imageKey) FILTER image != null && image.scopeKey == @scopeKey && image.deletedAt == null FILTER @collectionKey == null || LENGTH(FOR collectionImage IN collectionImages FILTER collectionImage.scopeKey == @scopeKey && collectionImage.collectionKey == @collectionKey && collectionImage.imageKey == image._key LIMIT 1 RETURN 1) > 0 SORT relation.confidence DESC, image.createdAt DESC RETURN { image, score: relation.confidence }', { scopeKey, query, collectionKey: collectionKey ?? null }) as Array<{ image: unknown; score: number }>).map((row) => ({ image: parse(imageSchema, row.image), score: row.score })); },
     async listIdentityMatches(scopeKey, embedding) { return await all(database, 'FOR identity IN visualIdentities FILTER identity.scopeKey == @scopeKey && identity.deletedAt == null FILTER IS_ARRAY(identity.embedding) && LENGTH(identity.embedding) == @dimensions LET confidence = COSINE_SIMILARITY(identity.embedding, @embedding) FILTER IS_NUMBER(confidence) && confidence >= 0.82 RETURN { identityKey: identity._key, confidence }', { scopeKey, embedding, dimensions: embedding.length }) as Array<{ identityKey: string; confidence: number }>; },
     async persistIdentityMatches(scopeKey, identityKey, matches) { if (!matches.length) return; const now = new Date().toISOString(); await transaction(['imageIdentities'], async (tx) => { for (const match of matches) { const relation = imageIdentitySchema.parse({ key: newId(), scopeKey, imageKey: match.imageKey, identityKey, confidence: match.confidence, isReference: false, createdAt: now }); await tx.query('UPSERT { scopeKey: @scopeKey, identityKey: @identityKey, imageKey: @imageKey } INSERT @relation UPDATE { confidence: MAX([OLD.confidence, @confidence]) } IN imageIdentities', { scopeKey, identityKey, imageKey: match.imageKey, confidence: match.confidence, relation: toArangoDoc(relation) }); } }); },
     async setImageFavorite(scopeKey, imageKey, isFavorite, now) { const image = await getImageById(imageKey); if (!image || image.scopeKey !== scopeKey || image.deletedAt) return null; return updateImage(imageKey, { isFavorite, updatedAt: now }); },
+    async updateImageDetails(scopeKey, imageKey, filename, isFavorite, embedding, now) { const value = await all(database, 'FOR image IN images FILTER image._key == @imageKey && image.scopeKey == @scopeKey && image.deletedAt == null LIMIT 1 UPDATE image WITH { filename: @filename, isFavorite: @isFavorite, embedding: @embedding, updatedAt: @now } IN images RETURN NEW', { scopeKey, imageKey, filename, isFavorite, embedding, now }); return value[0] ? parse(imageSchema, value[0]) : null; },
+    async updateCollectionDetails(scopeKey, collectionKey, name, isFavorite, embedding, now) { const value = await all(database, 'FOR collection IN collections FILTER collection._key == @collectionKey && collection.scopeKey == @scopeKey && collection.deletedAt == null LIMIT 1 UPDATE collection WITH { name: @name, isFavorite: @isFavorite, embedding: @embedding, updatedAt: @now } IN collections RETURN NEW', { scopeKey, collectionKey, name, isFavorite, embedding, now }); return value[0] ? parse(collectionSchema, value[0]) : null; },
+    deleteCollection(scopeKey, collectionKey, now) { return transaction({ read: ['collections'], write: ['collections', 'collectionImages', 'collectionMembers'] }, async (tx) => Boolean((await all(tx, 'FOR collection IN collections FILTER collection._key == @collectionKey && collection.scopeKey == @scopeKey && collection.deletedAt == null LIMIT 1 UPDATE collection WITH { deletedAt: @now, updatedAt: @now } IN collections LET removed = (FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.collectionKey == @collectionKey REMOVE relation IN collectionImages RETURN 1) LET members = (FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == @collectionKey REMOVE member IN collectionMembers RETURN 1) RETURN NEW._key', { scopeKey, collectionKey, now }))[0])); },
     listSubjects: (scopeKey, includeDeleted) => subjectRows('FOR identity IN visualIdentities FILTER identity.scopeKey == @scopeKey FILTER @includeDeleted || identity.deletedAt == null LET reference = DOCUMENT(images, identity.referenceImageKey) FILTER reference != null && reference.scopeKey == @scopeKey && reference.deletedAt == null LET imageCount = LENGTH(FOR relation IN imageIdentities FILTER relation.scopeKey == @scopeKey && relation.identityKey == identity._key LET image = DOCUMENT(images, relation.imageKey) FILTER image != null && image.deletedAt == null RETURN 1) SORT identity.deletedAt == null DESC, identity.name ASC, identity._key ASC RETURN { identity, reference, imageCount }', { scopeKey, includeDeleted }),
     async getSubject(scopeKey, identityKey, includeDeleted) { return (await subjectRows('FOR identity IN visualIdentities FILTER identity._key == @identityKey && identity.scopeKey == @scopeKey FILTER @includeDeleted || identity.deletedAt == null LET reference = DOCUMENT(images, identity.referenceImageKey) FILTER reference != null && reference.scopeKey == @scopeKey && reference.deletedAt == null LET imageCount = LENGTH(FOR relation IN imageIdentities FILTER relation.scopeKey == @scopeKey && relation.identityKey == identity._key LET image = DOCUMENT(images, relation.imageKey) FILTER image != null && image.deletedAt == null RETURN 1) LIMIT 1 RETURN { identity, reference, imageCount }', { scopeKey, identityKey, includeDeleted }))[0] ?? null; },
     createSubject(identity, relations, referenceImageKeys) { return transaction({ read: ['images'], write: ['visualIdentities', 'imageIdentities'] }, async (tx) => { const references = await all(tx, 'FOR image IN images FILTER image._key IN @imageKeys && image.scopeKey == @scopeKey && image.deletedAt == null RETURN image._key', { imageKeys: referenceImageKeys, scopeKey: identity.scopeKey }); if (references.length !== referenceImageKeys.length) return false; await tx.query('INSERT @identity INTO visualIdentities', { identity: toArangoDoc(identity) }); for (const relation of relations) await tx.query('INSERT @relation INTO imageIdentities', { relation: toArangoDoc(relation) }); return true; }); },
-    async listSubjectImages(scopeKey, identityKey) { return (await all(database, 'FOR relation IN imageIdentities FILTER relation.scopeKey == @scopeKey && relation.identityKey == @identityKey LET image = DOCUMENT(images, relation.imageKey) FILTER image != null && image.scopeKey == @scopeKey && image.deletedAt == null SORT relation.confidence DESC, image.createdAt DESC RETURN { image, confidence: relation.confidence }', { scopeKey, identityKey }) as Array<{ image: unknown; confidence: number }>).map((row) => ({ image: parse(imageSchema, row.image), confidence: row.confidence })); },
+    async listSubjectImages(scopeKey, identityKey, collectionKey) { return (await all(database, 'FOR relation IN imageIdentities FILTER relation.scopeKey == @scopeKey && relation.identityKey == @identityKey LET image = DOCUMENT(images, relation.imageKey) FILTER image != null && image.scopeKey == @scopeKey && image.deletedAt == null FILTER @collectionKey == null || LENGTH(FOR collectionImage IN collectionImages FILTER collectionImage.scopeKey == @scopeKey && collectionImage.collectionKey == @collectionKey && collectionImage.imageKey == image._key LIMIT 1 RETURN 1) > 0 SORT relation.confidence DESC, image.createdAt DESC RETURN { image, confidence: relation.confidence }', { scopeKey, identityKey, collectionKey: collectionKey ?? null }) as Array<{ image: unknown; confidence: number }>).map((row) => ({ image: parse(imageSchema, row.image), confidence: row.confidence })); },
     setSubjectDeleted(scopeKey, identityKey, deleted, now) { return transaction({ read: ['images'], write: ['visualIdentities'] }, async (tx) => Boolean((await all(tx, 'FOR identity IN visualIdentities FILTER identity._key == @identityKey && identity.scopeKey == @scopeKey LET reference = DOCUMENT(images, identity.referenceImageKey) FILTER @deleted || (reference != null && reference.scopeKey == @scopeKey && reference.deletedAt == null) LIMIT 1 UPDATE identity WITH { deletedAt: @deletedAt, updatedAt: @now } IN visualIdentities RETURN NEW', { identityKey, scopeKey, deleted, deletedAt: deleted ? now : null, now }))[0])); },
   };
 }

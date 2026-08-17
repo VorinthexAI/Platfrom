@@ -30,28 +30,28 @@ describe('action registry', () => {
         'document-validate', 'storage-upload', 'document-extract', 'document-embed', 'document-insert',
       ]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'chat')?.models.map(({ model }) => model))
-      .toEqual(['amazon.nova-pro', 'amazon.nova-lite']);
+      .toEqual(['amazon.nova-pro', 'google.gemini-2.5-flash-lite']);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'orchestrator-chat')?.models)
       .toEqual([
-        { provider: 'aws-bedrock', model: 'amazon.nova-lite', priority: 100 },
+        { provider: 'openrouter', model: 'google.gemini-2.5-flash-lite', priority: 100 },
         { provider: 'aws-bedrock', model: 'amazon.nova-pro', priority: 90 },
       ]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'transcribe')?.models)
       .toEqual([{ provider: 'openai', model: 'openai.gpt-realtime-2', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'enhance')?.models)
-      .toEqual([{ provider: 'aws-bedrock', model: 'amazon.nova-lite', priority: 100 }]);
+      .toEqual([{ provider: 'openrouter', model: 'google.gemini-2.5-flash-lite', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'translate')?.models)
-      .toEqual([{ provider: 'aws-bedrock', model: 'amazon.nova-lite', priority: 100 }]);
+      .toEqual([{ provider: 'openrouter', model: 'google.gemini-2.5-flash-lite', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'caption-image')?.models)
-      .toEqual([{ provider: 'openrouter', model: 'qwen.qwen3-vl-32b-instruct', priority: 100 }]);
+      .toEqual([{ provider: 'openrouter', model: 'google.gemini-2.5-flash-lite', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'document-cleanup')?.models)
-      .toEqual([{ provider: 'openrouter', model: 'qwen.qwen3-vl-32b-instruct', priority: 100 }]);
+      .toEqual([{ provider: 'openrouter', model: 'google.gemini-2.5-flash-lite', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'document-summarize')?.models)
-      .toEqual([{ provider: 'aws-bedrock', model: 'amazon.nova-lite', priority: 100 }]);
+      .toEqual([{ provider: 'openrouter', model: 'google.gemini-2.5-flash-lite', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'document-topics')?.models)
-      .toEqual([{ provider: 'aws-bedrock', model: 'amazon.nova-lite', priority: 100 }]);
+      .toEqual([{ provider: 'openrouter', model: 'google.gemini-2.5-flash-lite', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'describe-visual-identity')?.models)
-      .toEqual([{ provider: 'openrouter', model: 'qwen.qwen3-vl-32b-instruct', priority: 100 }]);
+      .toEqual([{ provider: 'openrouter', model: 'google.gemini-2.5-flash-lite', priority: 100 }]);
   });
 
   test('delegates generic data primitives to the node helper implementation', async () => {

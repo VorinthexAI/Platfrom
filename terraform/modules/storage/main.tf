@@ -134,4 +134,21 @@ resource "aws_s3_bucket_lifecycle_configuration" "runtime" {
       days_after_initiation = 7
     }
   }
+
+  rule {
+    id     = "expire-gallery-upload-staging"
+    status = "Enabled"
+
+    filter {
+      prefix = "pending/gallery/"
+    }
+
+    expiration {
+      days = 1
+    }
+
+    noncurrent_version_expiration {
+      noncurrent_days = 1
+    }
+  }
 }

@@ -74,13 +74,13 @@ describe('AWS Bedrock provider', () => {
 
     const response = await provider().execute({
       actionId: 'document-topics',
-      modelId: 'amazon.nova-lite',
-      externalModelId: 'us.amazon.nova-lite-v1:0',
+      modelId: 'amazon.nova-pro',
+      externalModelId: 'us.amazon.nova-pro-v1:0',
       input: { messages: [{ role: 'user', content: [{ type: 'text', text: 'Continue' }] }] },
       organizationKey: 'organization',
     });
 
-    expect(url).toEndWith('/model/us.amazon.nova-lite-v1:0/converse');
+    expect(url).toEndWith('/model/us.amazon.nova-pro-v1:0/converse');
     expect(url).not.toContain('%253A');
     expect(response.output).toEqual({ text: 'continued thought', toolCalls: [], stopReason: 'end_turn' });
   });
@@ -97,8 +97,8 @@ describe('AWS Bedrock provider', () => {
 
     const response = await provider().execute({
       actionId: 'orchestrator-chat',
-      modelId: 'amazon.nova-lite',
-      externalModelId: 'us.amazon.nova-lite-v1:0',
+      modelId: 'amazon.nova-pro',
+      externalModelId: 'us.amazon.nova-pro-v1:0',
       organizationKey: 'organization',
       input: {
         messages: [{ role: 'user', content: [{ type: 'text', text: 'Find the roadmap' }] }],
@@ -127,7 +127,7 @@ describe('AWS Bedrock provider', () => {
     }) as typeof fetch;
 
     await provider().execute({
-      actionId: 'orchestrator-chat', modelId: 'amazon.nova-lite', externalModelId: 'us.amazon.nova-lite-v1:0', organizationKey: 'organization',
+      actionId: 'orchestrator-chat', modelId: 'amazon.nova-pro', externalModelId: 'us.amazon.nova-pro-v1:0', organizationKey: 'organization',
       input: { messages: [
         { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'call-1', name: 'search_knowledge', arguments: { query: 'roadmap' } }] },
         { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'call-1', result: { documents: [] } }] },
