@@ -108,7 +108,7 @@ export function transferCachedGalleryImages(queryClient: QueryClient, context: W
   for (const collectionKey of input.destinationCollectionKeys) {
     const queryKey = galleryQueryKeys.overview(context, collectionKey);
     if (queryClient.getQueryData(queryKey)) continue;
-    queryClient.setQueryData<GalleryOverview>(queryKey, { collections: root.collections.map((collection) => collection.key === collectionKey ? { ...collection, count: collection.count + input.images.length, coverUrl: collection.coverUrl ?? input.images[0]?.url ?? null } : collection), images: input.images });
+    queryClient.setQueryData<GalleryOverview>(queryKey, { collections: root.collections.map((collection) => collection.key === collectionKey ? { ...collection, count: collection.count + input.images.length, coverUrl: collection.coverUrl ?? input.images[0]?.url ?? null } : collection), images: input.images, nextCursor: null });
   }
 }
 

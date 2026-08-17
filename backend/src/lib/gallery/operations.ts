@@ -18,9 +18,13 @@ import { strictObject } from '@/api/validation';
 import { signedImageUrl } from './image-url';
 import { getDefaultUserSearchService } from '@/lib/user-searches/service';
 import { enqueueGalleryUploadBatch } from './upload-queue';
+import { cursorPaginationInputShape } from '@/lib/cursor-pagination';
 
-const overviewSchema = strictObject({ collectionKey: z.string().cuid().optional() });
+const overviewSchema = strictObject({ collectionKey: z.string().cuid().optional(), ...cursorPaginationInputShape });
 const collectionCreateSchema = strictObject({ name: z.string().trim().min(1).max(120), description: z.string().trim().min(1).max(1_000).optional() });
+const collectionUpdateSchema = strictObject({ collectionKey: z.string().cuid(), name: z.string().trim().min(1).max(120), isFavorite: z.boolean() });
+const collectionDeleteSchema = strictObject({ collectionKey: z.string().cuid() });
+const imageUpdateSchema = strictObject({ imageKey: z.string().cuid(), name: z.string().trim().min(1).max(255).refine((name) => !name.includes('/') && !name.includes('\\'), 'Image name cannot contain path separators.'), isFavorite: z.boolean() });
 const uploadFileSchema = strictObject({ clientKey: z.string().min(1).max(120), filename: z.string().trim().regex(/^[^/\\]+\.jpe?g$/i), sizeBytes: z.number().int().positive().max(20 * 1024 * 1024), processingMode: z.enum(['library', 'cover']).default('library') });
 const presignSchema = strictObject({ collectionKey: z.string().cuid().nullable().optional(), files: z.array(uploadFileSchema).min(1).max(20) });
 const completeSchema = strictObject({ uploadKeys: z.array(z.string().cuid()).min(1).max(20) });
@@ -29,7 +33,7 @@ const statusSchema = strictObject({ uploadKeys: z.array(z.string().cuid()).min(1
 const favoriteSchema = strictObject({ imageKey: z.string().cuid(), isFavorite: z.boolean() });
 const deleteImagesSchema = strictObject({ imageKeys: z.array(z.string().cuid()).min(1).max(100) }).refine(({ imageKeys }) => new Set(imageKeys).size === imageKeys.length, 'Image keys must be unique');
 const duplicatesSchema = strictObject({ collectionKey: z.string().cuid() });
-const deleteDuplicatesSchema = strictObject({ collectionKey: z.string().cuid(), imageKeys: z.array(z.string().cuid()).min(1).max(500) });
+const deleteDuplicatesSchema = strictObject({ collectionKey: z.string().cuid(), imageKeys: z.array(z.string().cuid()).min(1).max(500) }).refine(({ imageKeys }) => new Set(imageKeys).size === imageKeys.length, 'Image keys must be unique');
 const subjectListSchema = strictObject({ includeDeleted: z.boolean().default(false) });
 const subjectCreateSchema = strictObject({ name: z.string().trim().min(1).max(120), imageKeys: z.array(z.string().cuid()).min(1).max(8) }).refine(({ imageKeys }) => new Set(imageKeys).size === imageKeys.length, 'Reference image keys must be unique');
 const subjectKeySchema = strictObject({ identityKey: z.string().cuid() });
@@ -89,6 +93,10 @@ async function safeImage(image: z.infer<typeof imageSchema>, score?: number) {
   };
 }
 
+async function safeCollection(collection: z.infer<typeof collectionSchema>, count: number, coverUrl: string | null) {
+  return { key: collection.key, name: collection.name, description: collection.description ?? null, isFavorite: collection.isFavorite, count, coverUrl };
+}
+
 async function persistIdentityMatches(scopeKey: string, identityKey: string, matches: Array<{ imageKey: string; confidence: number }>) {
   await repository.persistIdentityMatches(scopeKey, identityKey, matches);
 }
@@ -110,10 +118,11 @@ async function safeSubject(row: { identity: z.infer<typeof visualIdentitySchema>
 async function overview(rawInput: unknown, context: GalleryOperationContext) {
     const input = { ...overviewSchema.parse(rawInput), ...context };
     await authorize(context);
-    const { collections, images } = await repository.listOverview(input.scopeKey, input.collectionKey);
+    const { collections, images } = await repository.listOverview({ scopeKey: input.scopeKey, collectionKey: input.collectionKey, cursor: input.cursor, limit: input.limit });
     return {
-      collections: await Promise.all(collections.map(async ({ collection, count, cover }) => ({ key: collection.key, name: collection.name, description: collection.description ?? null, count, coverUrl: cover ? await imageUrl(cover.storageKey) : null }))),
-      images: await Promise.all(images.map((image) => safeImage(image))),
+      collections: await Promise.all(collections.map(async ({ collection, count, cover }) => safeCollection(collection, count, cover ? await imageUrl(cover.storageKey) : null))),
+      images: await Promise.all(images.items.map((image) => safeImage(image)),),
+      nextCursor: images.nextCursor,
     };
 }
 
@@ -124,7 +133,39 @@ async function createCollection(rawInput: unknown, context: GalleryOperationCont
     const collection = collectionSchema.parse({ key: newId(), scopeKey: input.scopeKey, name: input.name, ...(input.description ? { description: input.description } : {}), embedding: currentEmbeddingSchema.parse(await embedText({ text: `${input.name}\n\n${input.description ?? ''}` })), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now });
     const member = collectionMemberSchema.parse({ key: newId(), scopeKey: input.scopeKey, collectionKey: collection.key, memberKey: membership.key, role: 'owner', createdAt: now });
     await repository.createCollection(collection, member);
-    return { key: collection.key, name: collection.name, description: collection.description ?? null, count: 0, coverUrl: null };
+    return safeCollection(collection, 0, null);
+}
+
+async function updateCollection(rawInput: unknown, context: GalleryOperationContext) {
+    const input = { ...collectionUpdateSchema.parse(rawInput), ...context };
+    const membership = await authorize(context);
+    if (!await repository.ownsCollection(input.scopeKey, input.collectionKey, membership.key)) throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.');
+    const previous = await repository.getCollection(input.scopeKey, input.collectionKey);
+    if (!previous) throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.');
+    const collection = await repository.updateCollectionDetails(input.scopeKey, input.collectionKey, input.name, input.isFavorite, currentEmbeddingSchema.parse(await embedText({ text: `${input.name}\n\n${previous.description ?? ''}` })), new Date().toISOString());
+    if (!collection) throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.');
+    const overview = await repository.listOverview({ scopeKey: input.scopeKey, collectionKey: collection.key, limit: 1 });
+    const row = overview.collections.find(({ collection: candidate }) => candidate.key === collection.key);
+    return { collection: await safeCollection(collection, row?.count ?? 0, row?.cover ? await imageUrl(row.cover.storageKey) : null) };
+}
+
+async function deleteCollection(rawInput: unknown, context: GalleryOperationContext) {
+    const input = { ...collectionDeleteSchema.parse(rawInput), ...context };
+    const membership = await authorize(context);
+    if (!await repository.ownsCollection(input.scopeKey, input.collectionKey, membership.key)) throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.');
+    if (!await repository.deleteCollection(input.scopeKey, input.collectionKey, new Date().toISOString())) throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.');
+    return { collectionKey: input.collectionKey };
+}
+
+async function updateImageDetails(rawInput: unknown, context: GalleryOperationContext) {
+    const input = { ...imageUpdateSchema.parse(rawInput), ...context };
+    const membership = await authorize(context);
+    if (!await repository.ownsImage(input.scopeKey, input.imageKey, membership.key)) throw new GalleryOperationError(404, 'GALLERY_IMAGE_NOT_FOUND', 'Image not found.');
+    const previous = await repository.getImage(input.imageKey);
+    if (!previous || previous.scopeKey !== input.scopeKey || previous.deletedAt) throw new GalleryOperationError(404, 'GALLERY_IMAGE_NOT_FOUND', 'Image not found.');
+    const image = await repository.updateImageDetails(input.scopeKey, input.imageKey, input.name, input.isFavorite, currentEmbeddingSchema.parse(await embedText({ text: `${input.name}\n\n${previous.caption}` })), new Date().toISOString());
+    if (!image) throw new GalleryOperationError(404, 'GALLERY_IMAGE_NOT_FOUND', 'Image not found.');
+    return { image: await safeImage(image) };
 }
 
 async function reserveUploads(rawInput: unknown, context: GalleryOperationContext) {
@@ -226,7 +267,8 @@ async function setFavorite(rawInput: unknown, context: GalleryOperationContext) 
 
 async function deleteImages(rawInput: unknown, context: GalleryOperationContext) {
     const input = { ...deleteImagesSchema.parse(rawInput), ...context };
-    await authorize(context);
+    const membership = await authorize(context);
+    if ((await Promise.all(input.imageKeys.map((imageKey) => repository.ownsImage(input.scopeKey, imageKey, membership.key)))).some((owns) => !owns)) throw new GalleryOperationError(404, 'GALLERY_IMAGE_NOT_FOUND', 'One or more images were not found.');
     const deletion = await repository.deleteImages(input.scopeKey, input.imageKeys, new Date().toISOString());
     if (!deletion) throw new GalleryOperationError(404, 'GALLERY_IMAGE_NOT_FOUND', 'One or more images were not found.');
     return deletion;
@@ -239,8 +281,8 @@ async function findDuplicates(rawInput: unknown, context: GalleryOperationContex
 
 async function deleteDuplicates(rawInput: unknown, context: GalleryOperationContext) {
     const input = { ...deleteDuplicatesSchema.parse(rawInput), ...context };
-    await authorize(context);
-    if (!await repository.getCollection(input.scopeKey, input.collectionKey)) throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.');
+    const membership = await authorize(context);
+    if (!await repository.ownsCollection(input.scopeKey, input.collectionKey, membership.key)) throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.');
     const now = new Date().toISOString();
     const deletion = await repository.deleteDuplicateImages(input.scopeKey, input.collectionKey, input.imageKeys, now);
     if (!deletion) throw new GalleryOperationError(409, 'GALLERY_DUPLICATES_CHANGED', 'The duplicate set changed. Find duplicates again before deleting.');
@@ -315,11 +357,14 @@ const restoreSubject = (input: unknown, context: GalleryOperationContext) => set
 export const galleryOperationInputSchemas = {
   overview: overviewSchema,
   createCollection: collectionCreateSchema,
+  updateCollection: collectionUpdateSchema,
+  deleteCollection: collectionDeleteSchema,
   reserveUploads: presignSchema,
   completeUploads: completeSchema,
   uploadStatus: statusSchema,
   search: searchSchema,
   setFavorite: favoriteSchema,
+  updateImage: imageUpdateSchema,
   deleteImages: deleteImagesSchema,
   findDuplicates: duplicatesSchema,
   deleteDuplicates: deleteDuplicatesSchema,
@@ -334,11 +379,14 @@ export const galleryOperationInputSchemas = {
 export const galleryOperations = {
   overview,
   createCollection,
+  updateCollection,
+  deleteCollection,
   reserveUploads,
   completeUploads,
   uploadStatus,
   search,
   setFavorite,
+  updateImage: updateImageDetails,
   deleteImages,
   findDuplicates,
   deleteDuplicates,

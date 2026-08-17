@@ -9,8 +9,8 @@ const context = { domain: { organizationKey, runtimeScopeKey: scopeKey, principa
 
 describe('Gallery assistant capabilities', () => {
   test('covers every canonical operation and exposes no trusted context fields', () => {
-    expect(galleryAssistantCapabilityNames).toHaveLength(15);
-    expect(new Set(galleryAssistantCapabilityNames).size).toBe(15);
+    expect(galleryAssistantCapabilityNames).toHaveLength(18);
+    expect(new Set(galleryAssistantCapabilityNames).size).toBe(18);
     expect(galleryAssistantCapabilityNames).not.toContain('collection.duplicates.find');
     expect(createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'image.search')?.definition.inputSchema).toMatchObject({ type: 'object', oneOf: expect.any(Array) });
     for (const capability of createGalleryAssistantCapabilities()) {
@@ -25,18 +25,18 @@ describe('Gallery assistant capabilities', () => {
   test('routes every tool to its canonical operation with trusted context injected', async () => {
     const calls: Array<{ operation: GalleryOperationName; input: unknown; context: GalleryOperationContext }> = [];
     const operations = Object.fromEntries([
-      'overview', 'createCollection', 'search', 'setFavorite', 'deleteImages', 'deleteDuplicates', 'transferCollectionImages', 'listSubjects', 'createSubject', 'listSubjectImages', 'deleteSubject', 'restoreSubject', 'reserveUploads', 'uploadStatus', 'completeUploads',
+      'overview', 'createCollection', 'updateCollection', 'deleteCollection', 'search', 'setFavorite', 'updateImage', 'deleteImages', 'deleteDuplicates', 'transferCollectionImages', 'listSubjects', 'createSubject', 'listSubjectImages', 'deleteSubject', 'restoreSubject', 'reserveUploads', 'uploadStatus', 'completeUploads',
     ].map((operation) => [operation, async (input: unknown, trusted: GalleryOperationContext) => { calls.push({ operation: operation as GalleryOperationName, input, context: trusted }); return { operation }; }])) as any;
     const capabilities = createGalleryAssistantCapabilities(operations);
     const imageKey = newId(), collectionKey = newId(), destinationCollectionKey = newId(), identityKey = newId(), uploadKey = newId();
     const inputs = [
-      {}, { name: 'Favorites' }, { query: 'mountains' }, { imageKey, isFavorite: true }, { imageKeys: [imageKey] },
+      {}, { name: 'Favorites' }, { collectionKey, name: 'Trips', isFavorite: true }, { collectionKey }, { query: 'mountains' }, { imageKey, isFavorite: true }, { imageKey, name: 'mountain.jpg', isFavorite: true }, { imageKeys: [imageKey] },
       { collectionKey, imageKeys: [imageKey] }, { sourceCollectionKey: collectionKey, destinationCollectionKeys: [destinationCollectionKey], imageKeys: [imageKey], mode: 'copy' },
       {}, { name: 'Oscar', imageKeys: [imageKey] }, { identityKey }, { identityKey }, { identityKey },
       { files: [{ clientKey: 'upload-1', filename: 'photo.jpg', sizeBytes: 100 }] }, { uploadKeys: [uploadKey] }, { uploadKeys: [uploadKey] },
     ];
     for (const [index, capability] of capabilities.entries()) expect(await capability.execute(inputs[index], context)).toEqual({ kind: 'continue', result: { operation: calls.at(-1)!.operation } });
-    expect(calls.map(({ operation }) => operation)).toEqual(['overview', 'createCollection', 'search', 'setFavorite', 'deleteImages', 'deleteDuplicates', 'transferCollectionImages', 'listSubjects', 'createSubject', 'listSubjectImages', 'deleteSubject', 'restoreSubject', 'reserveUploads', 'uploadStatus', 'completeUploads']);
+    expect(calls.map(({ operation }) => operation)).toEqual(['overview', 'createCollection', 'updateCollection', 'deleteCollection', 'search', 'setFavorite', 'updateImage', 'deleteImages', 'deleteDuplicates', 'transferCollectionImages', 'listSubjects', 'createSubject', 'listSubjectImages', 'deleteSubject', 'restoreSubject', 'reserveUploads', 'uploadStatus', 'completeUploads']);
     for (const call of calls) {
       expect(call.context).toEqual({ organizationKey, scopeKey, membership });
     }

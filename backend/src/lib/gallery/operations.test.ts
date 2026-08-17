@@ -6,11 +6,14 @@ const key = () => newId();
 const validInputs = {
   overview: {},
   createCollection: { name: 'Summer', description: 'Summer memories' },
+  updateCollection: { collectionKey: key(), name: 'Favorites', isFavorite: true },
+  deleteCollection: { collectionKey: key() },
   reserveUploads: { files: [{ clientKey: 'local-1', filename: 'photo.jpeg', sizeBytes: 1_024 }] },
   completeUploads: { uploadKeys: [key()] },
   uploadStatus: { uploadKeys: [key()] },
   search: { query: 'red dog', limit: 25 },
   setFavorite: { imageKey: key(), isFavorite: true },
+  updateImage: { imageKey: key(), name: 'portrait.jpg', isFavorite: true },
   deleteImages: { imageKeys: [key()] },
   findDuplicates: { collectionKey: key() },
   deleteDuplicates: { collectionKey: key(), imageKeys: [key()] },
@@ -32,7 +35,7 @@ describe('Gallery operation boundaries', () => {
   });
 
   test('normalizes defaults at the shared boundary', () => {
-    expect(galleryOperationInputSchemas.overview.parse({})).toEqual({});
+    expect(galleryOperationInputSchemas.overview.parse({})).toEqual({ limit: 100 });
     expect(galleryOperationInputSchemas.listSubjects.parse({})).toEqual({ includeDeleted: false });
     expect(galleryOperationInputSchemas.search.parse({ query: 'mountains' })).toEqual({ query: 'mountains', recordHistory: true, limit: 50 });
   });
@@ -42,6 +45,12 @@ describe('Gallery operation boundaries', () => {
     expect(galleryOperationInputSchemas.search.parse({ query: 'mountains', collectionKey })).toEqual({ query: 'mountains', collectionKey, recordHistory: true, limit: 50 });
     expect(galleryOperationInputSchemas.search.parse({ query: 'mountains', recordHistory: false })).toMatchObject({ recordHistory: false });
     expect(galleryOperationInputSchemas.search.parse({ duplicates: true, collectionKey })).toEqual({ duplicates: true, collectionKey });
+  });
+
+  test('enforces reusable overview pagination boundaries', () => {
+    expect(galleryOperationInputSchemas.overview.parse({ limit: 100 })).toEqual({ limit: 100 });
+    expect(() => galleryOperationInputSchemas.overview.parse({ limit: 101 })).toThrow();
+    expect(galleryOperationInputSchemas.overview.parse({ cursor: 'opaque', limit: 20 })).toEqual({ cursor: 'opaque', limit: 20 });
   });
 
   test('enforces mutually exclusive search sources', () => {
@@ -60,6 +69,7 @@ describe('Gallery operation boundaries', () => {
     expect(() => galleryOperationInputSchemas.transferCollectionImages.parse({ sourceCollectionKey, destinationCollectionKeys: [destination, key()], imageKeys: [image], mode: 'copy' })).toThrow();
     expect(() => galleryOperationInputSchemas.createSubject.parse({ name: 'Alex', imageKeys: [image, image] })).toThrow('unique');
     expect(() => galleryOperationInputSchemas.deleteImages.parse({ imageKeys: [image, image] })).toThrow('unique');
+    expect(() => galleryOperationInputSchemas.deleteDuplicates.parse({ collectionKey: sourceCollectionKey, imageKeys: [image, image] })).toThrow('unique');
   });
 
   test('preserves operation errors and sanitizes validation and unknown failures', () => {

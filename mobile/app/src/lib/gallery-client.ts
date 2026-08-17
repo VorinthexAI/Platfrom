@@ -6,6 +6,7 @@ export type GalleryCollection = {
   key: string;
   name: string;
   description: string | null;
+  isFavorite: boolean;
   count: number;
   coverUrl: string | null;
 };
@@ -29,6 +30,7 @@ export type GalleryImage = {
 export type GalleryOverview = {
   collections: GalleryCollection[];
   images: GalleryImage[];
+  nextCursor: string | null;
 };
 
 export function filterCollections(collections: GalleryCollection[], query: string) {
@@ -106,12 +108,20 @@ async function fetchWithTimeout(input: string, init: RequestInit | undefined, ti
   }
 }
 
-export function fetchGalleryOverview(collectionKey?: string) {
-  return postGallery<GalleryOverview>("/gallery/overview", collectionKey ? { collectionKey } : {});
+export function fetchGalleryOverview(collectionKey?: string, cursor?: string, limit = 100) {
+  return postGallery<GalleryOverview>("/gallery/overview", { ...(collectionKey ? { collectionKey } : {}), ...(cursor ? { cursor } : {}), limit });
 }
 
 export function createGalleryCollection(name: string) {
   return postGallery<GalleryCollection>("/gallery/collections", { name });
+}
+
+export function updateGalleryCollection(collectionKey: string, name: string, isFavorite: boolean) {
+  return postGallery<{ collection: GalleryCollection }>("/gallery/collections/update", { collectionKey, name, isFavorite });
+}
+
+export function deleteGalleryCollection(collectionKey: string) {
+  return postGallery<{ collectionKey: string }>("/gallery/collections/delete", { collectionKey });
 }
 
 export type PreparedGalleryUpload = {
@@ -167,6 +177,10 @@ export function searchGalleryImages(input: { query?: string; imageKey?: string; 
 
 export function setGalleryImageFavorite(imageKey: string, isFavorite: boolean) {
   return postGallery<{ image: GalleryImage }>("/gallery/images/favorite", { imageKey, isFavorite });
+}
+
+export function updateGalleryImage(imageKey: string, name: string, isFavorite: boolean) {
+  return postGallery<{ image: GalleryImage }>("/gallery/images/update", { imageKey, name, isFavorite });
 }
 
 export function deleteGalleryImages(imageKeys: string[]) {

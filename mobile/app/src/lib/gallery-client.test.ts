@@ -14,7 +14,7 @@ mock.module("./api-client", () => ({
   } },
 }));
 
-const { deleteGalleryImages, filterCollections, filterMediaItems, findGalleryCollectionDuplicates, mergeMediaItems, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, uploadGalleryImages } = await import("./gallery-client");
+const { deleteGalleryCollection, deleteGalleryImages, fetchGalleryOverview, filterCollections, filterMediaItems, findGalleryCollectionDuplicates, mergeMediaItems, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryImage, uploadGalleryImages } = await import("./gallery-client");
 
 beforeEach(() => calls.splice(0));
 
@@ -22,6 +22,7 @@ const collection = (name: string, key: string) => ({
   key,
   name,
   description: null,
+  isFavorite: false,
   count: 0,
   coverUrl: null,
 });
@@ -94,6 +95,11 @@ test("sends collection-scoped semantic searches through the canonical endpoint",
   }]);
 });
 
+test("requests cursor pages of one hundred collection images", async () => {
+  await fetchGalleryOverview("collection", "next-page");
+  expect(calls[0]).toMatchObject({ path: "/gallery/overview", body: { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection", cursor: "next-page", limit: 100 } });
+});
+
 test("sends similarity and duplicate discovery through image search", async () => {
   await searchGalleryImages({ imageKey: "source-image", limit: 15 });
   await findGalleryCollectionDuplicates("collection");
@@ -113,6 +119,17 @@ test("sends favorite, delete, and many-to-many transfer through canonical mutati
     { path: "/gallery/images/favorite", body: { organizationKey: "organization", scopeKey: "scope", imageKey: "image", isFavorite: true } },
     { path: "/gallery/images/delete", body: { organizationKey: "organization", scopeKey: "scope", imageKeys: ["image-a", "image-b"] } },
     { path: "/gallery/collections/images/transfer", body: { organizationKey: "organization", scopeKey: "scope", sourceCollectionKey: "source", destinationCollectionKeys: ["one"], imageKeys: ["image-a", "image-b"], mode: "copy" } },
+  ]);
+});
+
+test("sends image and collection edits and collection deletion through canonical mutations", async () => {
+  await updateGalleryImage("image", "portrait.jpg", true);
+  await updateGalleryCollection("collection", "Portraits", true);
+  await deleteGalleryCollection("collection");
+  expect(calls.map(({ path, body }) => ({ path, body }))).toEqual([
+    { path: "/gallery/images/update", body: { organizationKey: "organization", scopeKey: "scope", imageKey: "image", name: "portrait.jpg", isFavorite: true } },
+    { path: "/gallery/collections/update", body: { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection", name: "Portraits", isFavorite: true } },
+    { path: "/gallery/collections/delete", body: { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection" } },
   ]);
 });
 

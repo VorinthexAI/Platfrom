@@ -4,6 +4,26 @@ import { createGalleryRepository } from './repository';
 import type { MediaLibraryDatabase } from '@/lib/media-library';
 
 describe('Gallery repository transactions', () => {
+  test('returns collection images as bound keyset cursor pages of at most one hundred', async () => {
+    const scopeKey = newId(), collectionKey = newId();
+    const rows = ['2026-08-17T12:00:03.000Z', '2026-08-17T12:00:02.000Z', '2026-08-17T12:00:01.000Z'].map((createdAt, index) => ({
+      _key: newId(), scopeKey, filename: `${index}.jpg`, caption: `Image ${index}`, imageCaptionKey: null, storageKey: `media/${index}`, mimeType: 'image/jpeg', sizeBytes: 100, width: 10, height: 10, embedding: Array(4_096).fill(0), isFavorite: false, deletedAt: null, createdAt, updatedAt: createdAt,
+    }));
+    const imageBinds: Record<string, unknown>[] = [];
+    const database: MediaLibraryDatabase = { async query(query, bindVars) { return { async all() {
+      if (query.includes('FOR collection IN collections')) return [];
+      imageBinds.push(bindVars ?? {});
+      return rows;
+    } }; } };
+    const repository = createGalleryRepository(database);
+    const first = await repository.listOverview({ scopeKey, collectionKey, limit: 2 });
+    expect(first.images.items.map(({ key }) => key)).toEqual(rows.slice(0, 2).map(({ _key }) => _key));
+    expect(first.images.nextCursor).toBeString();
+    await repository.listOverview({ scopeKey, collectionKey, limit: 2, cursor: first.images.nextCursor! });
+    expect(imageBinds[1]).toMatchObject({ afterCreatedAt: rows[1]!.createdAt, afterImageKey: rows[1]!._key, queryLimit: 3 });
+    await expect(repository.listOverview({ scopeKey, collectionKey: newId(), limit: 2, cursor: first.images.nextCursor! })).rejects.toThrow('Cursor does not belong');
+  });
+
   test('rejects duplicate deletion when the protected duplicate set changes', async () => {
     const database: MediaLibraryDatabase = { async query() { return { async all() { return []; } }; } };
     const repository = createGalleryRepository(database, async (_collections, operation) => operation(database));
