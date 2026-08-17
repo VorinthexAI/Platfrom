@@ -112,7 +112,7 @@ describe('personal assistant runtime', () => {
       } },
     });
 
-    expect(searchInput).toEqual({ query: 'red dog in snow', limit: 50 });
+    expect(searchInput).toEqual({ query: 'red dog in snow', recordHistory: true, limit: 50 });
     expect(modelCalls).toBe(2);
     expect(result).toEqual({ type: 'answer', message: 'I found one matching image of a red dog in snow.', sources: [] });
   });

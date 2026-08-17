@@ -53,14 +53,27 @@ async function main() {
   if (!fixture || fixture.imageKeys.length < 2 || fixture.destinationCollectionKeys.length !== 2 || fixture.actionImages.length !== 2) throw new Error('Seeded Gallery fixtures are unavailable. Run seed:dev-media first.');
 
   const context = { organizationKey: auth.organization.key, scopeKey: auth.scope.key, membership: auth.membership };
-  const similar = await galleryOperations.search({ imageKey: fixture.imageKeys[0], collectionKey: fixture.collectionKey, threshold: 0.8, limit: 20 }, context);
-  if (similar.images.length !== fixture.imageKeys.length - 1 || similar.images.some((image) => image.key === fixture.imageKeys[0] || image.score === undefined || image.score < 0.8)) {
-    throw new Error('Source-image similarity did not return the expected scoped, score-bearing results.');
-  }
+  const query = `gallery live e2e ${Date.now()}`;
+  await galleryOperations.search({ query, limit: 5 }, context);
+  const normalizedQuery = query.toLowerCase();
+  const history = await (await db.query('FOR search IN userSearches FILTER search.userKey == @userKey && search.normalizedQuery == @normalizedQuery RETURN search', { userKey: auth.membership.userId, normalizedQuery })).all();
+  if (history.length !== 1 || history[0]?.usageCount !== 1) throw new Error('Gallery text search did not record global user history exactly once.');
+  let similar: Awaited<ReturnType<typeof galleryOperations.search>>;
+  let duplicates: Awaited<ReturnType<typeof galleryOperations.search>>;
+  try {
+    similar = await galleryOperations.search({ imageKey: fixture.imageKeys[0], collectionKey: fixture.collectionKey, threshold: 0.8, limit: 20 }, context);
+    if (similar.images.length !== fixture.imageKeys.length - 1 || similar.images.some((image) => image.key === fixture.imageKeys[0] || image.score === undefined || image.score < 0.8)) {
+      throw new Error('Source-image similarity did not return the expected scoped, score-bearing results.');
+    }
 
-  const duplicates = await galleryOperations.search({ duplicates: true, collectionKey: fixture.collectionKey }, context);
-  if (duplicates.images.length !== 1 || duplicates.images[0]?.score !== undefined || !fixture.imageKeys.slice(0, 2).includes(duplicates.images[0]!.key)) {
-    throw new Error('Duplicate discovery did not return the deterministic seeded duplicate.');
+    duplicates = await galleryOperations.search({ duplicates: true, collectionKey: fixture.collectionKey }, context);
+    if (duplicates.images.length !== 1 || duplicates.images[0]?.score !== undefined || !fixture.imageKeys.slice(0, 2).includes(duplicates.images[0]!.key)) {
+      throw new Error('Duplicate discovery did not return the deterministic seeded duplicate.');
+    }
+    const usageAfterNonTextSearches = await (await db.query('RETURN DOCUMENT(userSearches, @key).usageCount', { key: history[0]!._key })).next();
+    if (usageAfterNonTextSearches !== 1) throw new Error('Similarity or duplicate search changed global text-search history.');
+  } finally {
+    await db.query('REMOVE @key IN userSearches OPTIONS { ignoreErrors: true }', { key: history[0]!._key });
   }
 
   const actionImageKeys = fixture.actionImages.map(({ key }) => key);

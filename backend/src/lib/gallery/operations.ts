@@ -20,6 +20,7 @@ import { getDefaultGalleryRepository } from './repository';
 import { createPublicS3Client, s3, S3_BUCKET } from '@/lib/s3';
 import { strictObject } from '@/api/validation';
 import { signedImageUrl } from './image-url';
+import { getDefaultUserSearchService } from '@/lib/user-searches/service';
 
 const overviewSchema = strictObject({ collectionKey: z.string().cuid().optional() });
 const collectionCreateSchema = strictObject({ name: z.string().trim().min(1).max(120), description: z.string().trim().min(1).max(1_000).optional() });
@@ -62,6 +63,7 @@ export interface GalleryOperationContext {
   scopeKey: string;
   membership: GalleryMembership;
   signal?: AbortSignal;
+  recordUserSearch?: (userKey: string, query: string) => Promise<unknown>;
 }
 
 async function authorize(context: GalleryOperationContext) {
@@ -241,7 +243,9 @@ async function search(rawInput: unknown, context: GalleryOperationContext) {
       for (const match of matches) if (!unique.has(match.image.key)) unique.set(match.image.key, match);
       matches = [...unique.values()].slice(0, input.limit);
     }
-    return { images: await Promise.all(matches.map(({ image, score }) => safeImage(image, score))) };
+    const images = await Promise.all(matches.map(({ image, score }) => safeImage(image, score)));
+    if ('query' in input && input.recordHistory) await (context.recordUserSearch ?? getDefaultUserSearchService().record)(membership.userId, input.query);
+    return { images };
 }
 
 async function setFavorite(rawInput: unknown, context: GalleryOperationContext) {

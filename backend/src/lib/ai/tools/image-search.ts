@@ -15,6 +15,7 @@ const searchOptions = {
 const textSearchSchema = z.object({
   query: z.string().trim().min(1).max(12_000),
   collectionKey: z.string().cuid().optional(),
+  recordHistory: z.boolean().default(true),
   ...searchOptions,
 }).strict();
 const similarImageSearchSchema = z.object({
@@ -49,7 +50,7 @@ export const imageSearchTool = {
     inputSchema: {
       type: 'object',
       oneOf: [
-        { type: 'object', required: ['query'], additionalProperties: false, properties: { query: { type: 'string', minLength: 1, maxLength: 12_000 }, collectionKey: { type: 'string' }, threshold: { type: 'number', minimum: -1, maximum: 1 }, limit: { type: 'integer', minimum: 1, maximum: 50, default: 50 } } },
+        { type: 'object', required: ['query'], additionalProperties: false, properties: { query: { type: 'string', minLength: 1, maxLength: 12_000 }, collectionKey: { type: 'string' }, recordHistory: { type: 'boolean', default: true }, threshold: { type: 'number', minimum: -1, maximum: 1 }, limit: { type: 'integer', minimum: 1, maximum: 50, default: 50 } } },
         { type: 'object', required: ['imageKey'], additionalProperties: false, properties: { imageKey: { type: 'string' }, collectionKey: { type: 'string' }, threshold: { type: 'number', minimum: -1, maximum: 1 }, limit: { type: 'integer', minimum: 1, maximum: 50, default: 50 } } },
         { type: 'object', required: ['duplicates', 'collectionKey'], additionalProperties: false, properties: { duplicates: { type: 'boolean', const: true }, collectionKey: { type: 'string' } } },
       ],

@@ -85,11 +85,11 @@ test("merges immediate and semantic matches without changing immediate order", (
 });
 
 test("sends collection-scoped semantic searches through the canonical endpoint", async () => {
-  await searchGalleryImages({ query: "rain", collectionKey: "collection", limit: 50 });
+  await searchGalleryImages({ query: "rain", collectionKey: "collection", recordHistory: false, limit: 50 });
 
   expect(calls).toEqual([{
     path: "/gallery/images/search",
-    body: { organizationKey: "organization", scopeKey: "scope", query: "rain", collectionKey: "collection", limit: 50 },
+    body: { organizationKey: "organization", scopeKey: "scope", query: "rain", collectionKey: "collection", recordHistory: false, limit: 50 },
     timeout: 240_000,
   }]);
 });

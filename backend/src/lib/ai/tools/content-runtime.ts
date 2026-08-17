@@ -26,6 +26,7 @@ import { chunkDocumentContent, documentSemanticHash } from '@/lib/ai/document-pr
 import type { BookGenerator } from '@/lib/books/service';
 import type { DocumentScanInput } from '@/lib/ai/document-scanning';
 import { DEFAULT_AUDIO_GENERATION_VOICE, generateAudioChunks as canonicalGenerateAudioChunks } from './audio-generate';
+import type { UserSearchService } from '@/lib/user-searches/service';
 
 type Role = 'viewer' | 'moderator' | 'admin' | 'owner';
 type Action = 'ask' | 'enhance' | 'translate' | 'read' | 'traverse' | 'insert' | 'update' | 'delete' | 'embed' | 'speak' | 'generate-speech' | 'reason' | 'deep-reason' | 'document-cleanup' | 'document-embed' | 'document-summarize' | 'document-topics';
@@ -93,10 +94,8 @@ export interface ContentRepository {
 }
 
 export interface ContentSearchQueryStore {
-  get(input: { actorKey: string; scopeKey: string; contextDomain: 'content'; normalizedQuery: string; folderKey: string | null; includeDescendants: boolean; cacheVersion: number }): Promise<{ output: unknown } | null>;
-  record(input: { key: string; actorKey: string; scopeKey: string; contextDomain: 'content'; query: string; normalizedQuery: string; folderKey: string | null; includeDescendants: boolean; cacheVersion: number; output: unknown; now: string }): Promise<void>;
-  list(input: { actorKey: string; scopeKey: string; contextDomain: 'content'; folderKey: string | null; includeDescendants: boolean; allLocations?: boolean; cacheVersion: number; limit: number }): Promise<Array<{ query: string; normalizedQuery: string; contextDomain: 'content'; searchedAt: string; usageCount: number; folderKey?: string; includeDescendants?: boolean; documents: Array<{ documentKey: string; scopeKey: string; folderKey?: string; name: string; extension?: string; score: number; summary?: string }> }>>;
-  remove?(input: { actorKey: string; scopeKey: string; contextDomain: 'content'; normalizedQuery: string; folderKey: string | null; includeDescendants: boolean; allLocations?: boolean }): Promise<boolean>;
+  get(input: { actorKey: string; scopeKey: string; normalizedQuery: string; folderKey: string | null; includeDescendants: boolean; cacheVersion: number }): Promise<{ output: unknown } | null>;
+  record(input: { key: string; actorKey: string; scopeKey: string; query: string; normalizedQuery: string; folderKey: string | null; includeDescendants: boolean; cacheVersion: number; output: unknown; now: string }): Promise<void>;
 }
 
 export interface ContentActionResult { text?: string; audio?: Uint8Array; audioBase64?: string; mimeType?: string; durationMs?: number; content?: string; embedding?: number[]; contentChunks?: string[]; chunkEmbeddings?: number[][]; semanticChunkCount?: number; semanticContentHash?: string }
@@ -122,6 +121,7 @@ export interface ContentToolDependencies extends RouterDependencies {
   generateExport?: typeof generateDocumentExport;
   generatePreview?: typeof generateDocumentPreview;
   searchQueries?: ContentSearchQueryStore;
+  userSearches?: UserSearchService;
   searchEmbeddingTimeoutMs?: number;
   bookRuntime?: BookGenerator;
   scanDocument?: (input: DocumentScanInput, organizationKey: string) => Promise<{ documentKey: string; content: string; storageKeys: string[] }>;
@@ -139,7 +139,6 @@ const ROUTED_EMBEDDING_CONCURRENCY = 8;
 const PERSISTED_AUDIO_MAX_CHARACTERS = 120_000;
 const PERSISTED_AUDIO_MAX_BYTES = 100 * 1024 * 1024;
 const CONTENT_SEARCH_CACHE_VERSION = 4;
-const CONTENT_SEARCH_CONTEXT_DOMAIN = 'content' as const;
 const scrypt = promisify(nodeScrypt);
 const MUTATIONS = new Set<ContentToolName>([
   'book.create-context', 'book.write', 'folder.create', 'folder.update', 'folder.rename', 'folder.move', 'folder.copy', 'folder.archive', 'folder.restore', 'folder.delete', 'document.parse', 'document.scan', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.share', 'document.unshare', 'document.create-version', 'document.restore-version', 'document.delete-version', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.summarize', 'document.summary.audio.generate', 'document.translate', 'document.rewrite', 'scope.content.search-history.delete',
@@ -2356,35 +2355,12 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       };
     } else if (tool === 'scope.content.search-history.delete') {
       await roleFor(input.scopeKey, 'viewer');
-      if (input.folderKey) {
-        const current = await folder(input.folderKey, 'viewer', false);
-        if (current.scopeKey !== input.scopeKey) fail('CONTENT_FORBIDDEN', 'Folder does not belong to the requested scope.', tool, 'authorization', input.folderKey);
-      }
-      const store = dependencies.searchQueries ?? (await import('@/lib/db/content-search-queries.node')).contentSearchQueries;
-      if (!store.remove) fail('CONTENT_CONFLICT', 'Search history deletion is unavailable.', tool, 'delete', input.normalizedQuery);
-      const normalizedQuery = input.normalizedQuery.normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('en-US');
-      const deleted = await store.remove({ actorKey: member.user.key, scopeKey: input.scopeKey, contextDomain: CONTENT_SEARCH_CONTEXT_DOMAIN, normalizedQuery, folderKey: input.folderKey ?? null, includeDescendants: input.folderKey ? input.includeDescendants ?? true : false, allLocations: input.allLocations });
-      result = { normalizedQuery, deleted };
+      const history = dependencies.userSearches ?? (await import('@/lib/user-searches/service')).getDefaultUserSearchService();
+      result = await history.remove(member.user.key, input.normalizedQuery);
     } else if (tool === 'scope.content.search-history') {
       await roleFor(input.scopeKey, 'viewer');
-      let historyFolderKeys: Set<string> | undefined;
-      if (input.folderKey) {
-        const current = await folder(input.folderKey, 'viewer', false);
-        if (current.scopeKey !== input.scopeKey) fail('CONTENT_FORBIDDEN', 'Folder does not belong to the requested scope.', tool, 'authorization', input.folderKey);
-        historyFolderKeys = new Set([input.folderKey, ...((input.includeDescendants ?? true) ? descendants(await foldersIn(input.scopeKey), input.folderKey).map((item) => item.key) : [])]);
-      }
-      const store = dependencies.searchQueries ?? (await import('@/lib/db/content-search-queries.node')).contentSearchQueries;
-      const history = await store.list({ actorKey: member.user.key, scopeKey: input.scopeKey, contextDomain: CONTENT_SEARCH_CONTEXT_DOMAIN, folderKey: input.folderKey ?? null, includeDescendants: input.folderKey ? input.includeDescendants ?? true : false, allLocations: input.allLocations, cacheVersion: CONTENT_SEARCH_CACHE_VERSION, limit: input.limit });
-      result = { history: await Promise.all(history.map(async (item) => ({
-        ...item,
-        documents: (await Promise.all(item.documents.map(async (stored) => {
-          const current = await repo.getDocument(stored.documentKey);
-          if (!current || current.scopeKey !== input.scopeKey || current.deletedAt || current._internalDeletion) return null;
-          if (historyFolderKeys && (!current.folderKey || !historyFolderKeys.has(current.folderKey))) return null;
-          if (!await activeFolderHierarchy(current.folderKey, current.scopeKey)) return null;
-          return stored;
-        }))).filter((item): item is NonNullable<typeof item> => item !== null),
-      }))) };
+      const history = dependencies.userSearches ?? (await import('@/lib/user-searches/service')).getDefaultUserSearchService();
+      result = { history: await history.list(member.user.key, input.limit) };
     } else if (tool === 'scope.content.search') {
       await roleFor(input.scopeKey, 'viewer');
       const allowed = await repo.allowedScopeKeys(context.organizationKey, member.userOrganization.key);
@@ -2394,6 +2370,11 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       const folderKey = input.folderKey ?? null;
       const includeDescendants = folderKey !== null && (input.includeDescendants ?? true);
       const store = dependencies.searchQueries ?? (await import('@/lib/db/content-search-queries.node')).contentSearchQueries;
+      const history = dependencies.userSearches ?? (await import('@/lib/user-searches/service')).getDefaultUserSearchService();
+      const recordSearch = async (output: unknown) => {
+        await store.record({ key: d.id(), actorKey: member.user.key, scopeKey: input.scopeKey, query: input.query, normalizedQuery, folderKey, includeDescendants, cacheVersion, output, now: now() });
+        if (input.recordHistory) await history.record(member.user.key, input.query);
+      };
       const [allFolders, allDocuments] = await Promise.all([repo.listFolders(input.scopeKey, true), repo.listDocuments(input.scopeKey, true)]);
       let folderKeys: string[] | undefined;
       let revisionFolders = allFolders;
@@ -2410,12 +2391,12 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       const folderRevision = revisionFolders.map((item) => `${item.key}:${item.parentFolderKey ?? ''}:${item.updatedAt}:${item.isFavorite ? 'favorite' : ''}:${item.deletedAt ?? ''}:${item._internalDeletion ? 'pending' : ''}`);
       const documentRevision = revisionDocuments.map((item) => `${item.key}:${item.name}:${item.folderKey ?? ''}:${item.semanticContentHash ?? ''}:${item.isFavorite ? 'favorite' : ''}:${item.deletedAt ?? ''}:${item._internalDeletion ? 'pending' : ''}`);
       const sourceRevision = createHash('sha256').update([...folderRevision, ...documentRevision].sort().join('\n')).digest('hex');
-      const cached = await store.get({ actorKey: member.user.key, scopeKey: input.scopeKey, contextDomain: CONTENT_SEARCH_CONTEXT_DOMAIN, normalizedQuery, folderKey, includeDescendants, cacheVersion });
+      const cached = await store.get({ actorKey: member.user.key, scopeKey: input.scopeKey, normalizedQuery, folderKey, includeDescendants, cacheVersion });
       const cachedValue = cached?.output as { result?: unknown; sourceRevision?: string; minimumScore?: number; includeSummaries?: boolean; replayable?: boolean } | undefined;
       const reusable = Boolean(cachedValue?.replayable && cachedValue.result && cachedValue.sourceRevision === sourceRevision && cachedValue.minimumScore === input.minimumScore && cachedValue.includeSummaries === input.includeSummaries);
       if (reusable) {
         const parsed = contentToolOutputSchemas[tool].parse({ ...(cachedValue!.result as object), query: input.query, cached: true });
-        if (input.recordHistory) await store.record({ key: d.id(), actorKey: member.user.key, scopeKey: input.scopeKey, contextDomain: CONTENT_SEARCH_CONTEXT_DOMAIN, query: input.query, normalizedQuery, folderKey, includeDescendants, cacheVersion, output: cachedValue, now: now() });
+        await recordSearch(cachedValue);
         result = parsed;
       } else if (!input.includeSummaries) {
         const queryText = normalizedQuery;
@@ -2471,7 +2452,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         const folders = activeFolders.sort((left, right) => right.score - left.score || left.folder.key.localeCompare(right.folder.key)).slice(0, 4).map(({ folder: current, score }) => ({ key: current.key, scopeKey: current.scopeKey, ...(current.parentFolderKey ? { parentFolderKey: current.parentFolderKey } : {}), name: current.name, ...(current.description ? { description: current.description } : {}), isFavorite: Boolean(current.isFavorite), score: Math.max(0, Math.min(1, score)) }));
         const documents = activeDocuments.sort((left, right) => right.score - left.score || left.document.key.localeCompare(right.document.key)).slice(0, 10).map(({ document: current, score }) => ({ documentKey: current.key, scopeKey: current.scopeKey, ...(current.folderKey ? { folderKey: current.folderKey } : {}), name: current.name, ...(current.extension ? { extension: current.extension } : {}), isFavorite: Boolean(current.isFavorite), score: Math.max(0, Math.min(1, score)) }));
         const freshResult = { query: input.query, folders, documents, cached: false };
-        if (input.recordHistory) await store.record({ key: d.id(), actorKey: member.user.key, scopeKey: input.scopeKey, contextDomain: CONTENT_SEARCH_CONTEXT_DOMAIN, query: input.query, normalizedQuery, folderKey, includeDescendants, cacheVersion, output: { result: freshResult, sourceRevision, minimumScore: input.minimumScore, includeSummaries: false, replayable: true }, now: now() });
+        await recordSearch({ result: freshResult, sourceRevision, minimumScore: input.minimumScore, includeSummaries: false, replayable: true });
         result = freshResult;
       } else {
         let queryEmbedding: number[];
@@ -2515,7 +2496,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           documents.push(...batch.map(({ document }) => document));
         }
         const freshResult = { query: input.query, folders, documents, cached: false };
-        if (input.recordHistory) await store.record({ key: d.id(), actorKey: member.user.key, scopeKey: input.scopeKey, contextDomain: CONTENT_SEARCH_CONTEXT_DOMAIN, query: input.query, normalizedQuery, folderKey, includeDescendants, cacheVersion, output: { result: freshResult, sourceRevision, minimumScore: input.minimumScore, includeSummaries: true, replayable: summariesComplete }, now: now() });
+        await recordSearch({ result: freshResult, sourceRevision, minimumScore: input.minimumScore, includeSummaries: true, replayable: summariesComplete });
         result = freshResult;
       }
     } else {

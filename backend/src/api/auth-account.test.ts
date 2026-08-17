@@ -9,7 +9,7 @@ describe('GET /auth/me response contract', () => {
       is_subscribed_to_updates: true, is_subscribed_to_updates_unsubscribe_token_hash: 'unsubscribe-secret',
       is_subscribed_to_updates_unsubscribe_requested_at: null, refreshTokenHash: 'refresh-secret', refreshTokenExpiresAt: null,
       refreshFounderMembershipKey: null, refreshFounderMfaVersion: null, lastLoginAt: null,
-      settings: { archive: { showOnlyFavorites: false } },
+      settings: { archive: { showOnlyFavorites: false }, gallery: { showOnlyFavorites: false } },
       createdAt: '2026-08-08T00:00:00.000Z', updatedAt: '2026-08-08T00:00:00.000Z', embedding: [],
     }, {
       organization: { key: 'org-1', name: "Person's Organization", is_root: false, slug: 'personal-user-1', description: null, isActive: true, mfa_enabled: false, metadata: {}, createdAt: '', updatedAt: '', embedding: [] },
@@ -22,7 +22,7 @@ describe('GET /auth/me response contract', () => {
     expect(response.organization.role).toBe('owner');
     expect(response.main_scope).toMatchObject({ name: 'Main', slug: 'main', role: 'owner' });
     expect(response.user.is_onboarded).toBe(false);
-    expect(response.user.settings).toEqual({ archive: { showOnlyFavorites: false } });
+    expect(response.user.settings).toEqual({ archive: { showOnlyFavorites: false }, gallery: { showOnlyFavorites: false } });
     expect(response.content_execution.agent_key).toBe('cmrnlzf640000qc7k4p5zem5y');
     expect(JSON.stringify(response)).not.toContain('refresh-secret');
     expect(JSON.stringify(response)).not.toContain('emailHash');

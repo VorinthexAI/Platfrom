@@ -88,7 +88,7 @@ describe('Content input contracts', () => {
     expect(() => contentToolInputSchemas['document.copy'].parse({ copies: [{ documentKey: key, targetFolderKey: newId(), name: 'Wrong field' }] })).toThrow();
     expect(() => contentToolInputSchemas['document.summarize'].parse({ documentKeys: [key, newId()], persist: true })).toThrow();
     expect(() => contentToolInputSchemas['document.summarize'].parse({ documentKeys: [key], persist: true, combine: true })).toThrow();
-    expect(() => contentToolInputSchemas['scope.content.search-history'].parse({ scopeKey: key, folderKey: newId(), allLocations: true })).toThrow();
+    expect(contentToolInputSchemas['scope.content.search-history'].parse({ scopeKey: key, folderKey: newId(), allLocations: true })).toMatchObject({ allLocations: true });
     expect(() => contentToolInputSchemas['document.topics'].parse({ documentKey: key, scopeKey: newId() })).toThrow();
     expect(contentToolInputSchemas['document.summary.audio.generate'].parse({ summaryKeys: [key], language: 'en-US' })).toMatchObject({ language: 'en-US' });
     expect(() => contentToolInputSchemas['document.summary.audio.generate'].parse({ summaryKeys: [key], language: 'English' })).toThrow();

@@ -18,6 +18,7 @@ export type ContentContext = {
   organizationKey: string;
   agentKey: string;
   scopeKey: string;
+  userKey?: string;
 };
 
 export type ContentFolder = {
@@ -132,12 +133,8 @@ export type ContentSearchResponse = {
 export type ContentSearchHistoryItem = {
   query: string;
   normalizedQuery: string;
-  contextDomain: "content";
   searchedAt: string;
   usageCount: number;
-  folderKey?: string;
-  includeDescendants?: boolean;
-  documents: ContentSearchDocument[];
 };
 
 export type ContentDocumentDownload = {
@@ -233,11 +230,12 @@ export function getContentContext(): ContentContext {
     organizationKey: recordKey(state.organization),
     agentKey: state.contentExecution?.agentKey ?? "",
     scopeKey: recordKey(state.scope),
+    userKey: state.user?.key ?? "",
   };
 }
 
 export function isContentContextConfigured(context: ContentContext) {
-  return Object.values(context).every((value) => value.trim().length > 0);
+  return [context.organizationKey, context.agentKey, context.scopeKey].every((value) => value.trim().length > 0);
 }
 
 export function createContentMutationKey() {
@@ -734,24 +732,22 @@ export async function summarizeContentDocument(documentKey: string, topic: strin
   return result.data.summary;
 }
 
-export async function listContentSearchHistory(folderKey?: string, includeDescendants = false, requestContext = getContentContext(), allLocations = false) {
+export async function listContentSearchHistory(requestContext = getContentContext()) {
   const contentContext = requestContext;
   const data = await callContentTool<{ history: ContentSearchHistoryItem[] }>("scope.content.search-history", {
     scopeKey: contentContext.scopeKey,
-    ...(folderKey ? { folderKey, includeDescendants } : {}),
-    ...(allLocations ? { allLocations: true } : {}),
+    allLocations: true,
     limit: 100,
   }, undefined, requestContext);
   return data.history;
 }
 
-export async function deleteContentSearchHistory(normalizedQuery: string, folderKey?: string, includeDescendants = false, allLocations = false) {
+export async function deleteContentSearchHistory(normalizedQuery: string) {
   const contentContext = getContentContext();
   return callContentTool<{ normalizedQuery: string; deleted: boolean }>("scope.content.search-history.delete", {
     scopeKey: contentContext.scopeKey,
     normalizedQuery,
-    ...(folderKey ? { folderKey, includeDescendants } : {}),
-    ...(allLocations ? { allLocations: true } : {}),
+    allLocations: true,
     idempotencyKey: createContentMutationKey(),
   });
 }

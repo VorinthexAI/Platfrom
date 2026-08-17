@@ -19,9 +19,9 @@ describe('user settings HTTP handlers', () => {
     const app = appWith(createUserSettingsHandlers({ service, getIdentity: async () => ({ key: 'user-1', identityType: 'user' }) }));
     expect(await (await app.request('/auth/me/settings')).json()).toEqual({ archive: { showOnlyFavorites: false } });
     expect((await app.request('/auth/me/settings?unexpected=true')).status).toBe(400);
-    const response = await app.request('/auth/me/settings', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ archive: { showOnlyFavorites: true } }) });
+    const response = await app.request('/auth/me/settings', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ archive: { showOnlyFavorites: true }, gallery: { showOnlyFavorites: true } }) });
     expect(response.status).toBe(200);
-    expect(calls).toEqual([['read', 'user-1'], ['update', 'user-1', { archive: { showOnlyFavorites: true } }]]);
+    expect(calls).toEqual([['read', 'user-1'], ['update', 'user-1', { archive: { showOnlyFavorites: true }, gallery: { showOnlyFavorites: true } }]]);
   });
 
   test('requires a user session and rejects unknown patch fields', async () => {

@@ -34,12 +34,13 @@ describe('Gallery operation boundaries', () => {
   test('normalizes defaults at the shared boundary', () => {
     expect(galleryOperationInputSchemas.overview.parse({})).toEqual({});
     expect(galleryOperationInputSchemas.listSubjects.parse({})).toEqual({ includeDeleted: false });
-    expect(galleryOperationInputSchemas.search.parse({ query: 'mountains' })).toEqual({ query: 'mountains', limit: 50 });
+    expect(galleryOperationInputSchemas.search.parse({ query: 'mountains' })).toEqual({ query: 'mountains', recordHistory: true, limit: 50 });
   });
 
   test('accepts an optional collection search boundary', () => {
     const collectionKey = key();
-    expect(galleryOperationInputSchemas.search.parse({ query: 'mountains', collectionKey })).toEqual({ query: 'mountains', collectionKey, limit: 50 });
+    expect(galleryOperationInputSchemas.search.parse({ query: 'mountains', collectionKey })).toEqual({ query: 'mountains', collectionKey, recordHistory: true, limit: 50 });
+    expect(galleryOperationInputSchemas.search.parse({ query: 'mountains', recordHistory: false })).toMatchObject({ recordHistory: false });
     expect(galleryOperationInputSchemas.search.parse({ duplicates: true, collectionKey })).toEqual({ duplicates: true, collectionKey });
   });
 
@@ -48,7 +49,9 @@ describe('Gallery operation boundaries', () => {
     expect(() => galleryOperationInputSchemas.search.parse({ query: 'dog', imageKey: key() })).toThrow();
     expect(galleryOperationInputSchemas.search.parse({ imageKey: key() })).toEqual(expect.objectContaining({ limit: 50 }));
     expect(galleryOperationInputSchemas.search.parse({ imageKey: key(), collectionKey: key() })).toEqual(expect.objectContaining({ limit: 50 }));
+    expect(() => galleryOperationInputSchemas.search.parse({ imageKey: key(), recordHistory: false })).toThrow();
     expect(() => galleryOperationInputSchemas.search.parse({ duplicates: true, collectionKey: key(), threshold: 0.9 })).toThrow();
+    expect(() => galleryOperationInputSchemas.search.parse({ duplicates: true, collectionKey: key(), recordHistory: false })).toThrow();
   });
 
   test('enforces transfer and subject uniqueness invariants', () => {

@@ -291,7 +291,7 @@ export function KnowledgeWorkspace() {
   const reconnectContentContext = useAuthStore((state) => state.reconnectContentContext);
   const hasContentContext = isContentContextConfigured({ organizationKey, scopeKey, agentKey });
   const contentContextKey = hasContentContext ? `${organizationKey}:${scopeKey}:${agentKey}` : "";
-  const contentContext = { organizationKey, scopeKey, agentKey };
+  const contentContext = { organizationKey, scopeKey, agentKey, userKey: user?.key ?? "" };
   const narrationPlayer = useAudioPlayer(null, { updateInterval: 500, keepAudioSessionActive: true });
   const narrationAudio = useAudioPlayerStatus(narrationPlayer);
   const [activeSheet, setActiveSheet] = useState<ArchiveSheet>();
@@ -2390,14 +2390,14 @@ export function KnowledgeWorkspace() {
     const key = contentQueryKeys.history(contentContext, folderKey);
     const cached = queryClient.getQueryData<ContentSearchHistoryItem[]>(key);
     const invalidated = queryClient.getQueryState(key)?.isInvalidated === true;
-    setHistory((cached ?? []).filter((item) => item.contextDomain === "content"));
+    setHistory(cached ?? []);
     setHistoryLoading(!cached || invalidated);
     setRemovingHistoryQuery(undefined);
     openSheet("searchHistory");
     if (cached && !invalidated) return;
     try {
       const loaded = await getContentHistory(queryClient, contentContext, folderKey);
-      if (generation === historyGeneration.current && activeSheetRef.current === "searchHistory") setHistory(loaded.filter((item) => item.contextDomain === "content"));
+      if (generation === historyGeneration.current && activeSheetRef.current === "searchHistory") setHistory(loaded);
     } catch (cause) {
       if (generation === historyGeneration.current && activeSheetRef.current === "searchHistory") setSheetError(cause instanceof Error ? cause.message : "Search history could not be loaded.");
     } finally {
@@ -2429,7 +2429,7 @@ export function KnowledgeWorkspace() {
     setRemovingHistoryQuery(item.normalizedQuery);
     setSheetError(undefined);
     try {
-      await deleteContentSearchHistory(item.normalizedQuery, undefined, false, true);
+      await deleteContentSearchHistory(item.normalizedQuery);
     } catch (cause) {
       queryClient.setQueryData(contentQueryKeys.history(contentContext, folderKey), previous);
       setHistory(previous);
@@ -3833,7 +3833,7 @@ export function KnowledgeWorkspace() {
         {activeSheet === "searchHistory" ? (
           <ScrollView contentContainerStyle={styles.searchHistoryList} showsVerticalScrollIndicator={false}>
             {historyLoading ? <View accessibilityLabel="Loading search history" accessibilityRole="progressbar" style={styles.searchHistorySkeletons}>{Array.from({ length: 3 }, (_, index) => <View key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />)}</View> : null}
-            {!historyLoading && history.length === 0 ? <Text style={styles.empty}>No searches saved here yet.</Text> : null}
+            {!historyLoading && history.length === 0 ? <Text style={styles.empty}>No searches saved yet.</Text> : null}
             {!historyLoading ? history.map((item) => <SearchHistoryPill count={item.usageCount} disabled={Boolean(removingHistoryQuery)} key={item.normalizedQuery} onPress={() => useHistoryQuery(item)} onRemove={() => void removeHistoryQuery(item)} query={item.query} removing={removingHistoryQuery === item.normalizedQuery} />) : null}
           </ScrollView>
         ) : null}
