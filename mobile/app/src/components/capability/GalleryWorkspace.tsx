@@ -107,7 +107,7 @@ export function GalleryWorkspace() {
   const [subjectReferenceKeys, setSubjectReferenceKeys] = useState<string[]>([]);
   const [selectedImageKeys, setSelectedImageKeys] = useState<string[]>([]);
   const [transferMode, setTransferMode] = useState<CollectionTransferMode>();
-  const [destinationCollectionKeys, setDestinationCollectionKeys] = useState<string[]>([]);
+  const [destinationCollectionKey, setDestinationCollectionKey] = useState<string>();
   const [aiInput, setAiInput] = useState("");
   const [aiResponse, setAiResponse] = useState<string>();
   const [status, setStatus] = useState<string>();
@@ -746,11 +746,10 @@ export function GalleryWorkspace() {
     else void showImage(image);
   }
 
-  function openTransfer(mode: CollectionTransferMode, imageKeys = selectedImageKeys) {
-    if (!imageKeys.length || !activeCollection) return;
-    setSelectedImageKeys(imageKeys);
+  function openTransfer(mode: CollectionTransferMode) {
+    if (!selectedImageKeys.length || !activeCollection) return;
     setTransferMode(mode);
-    setDestinationCollectionKeys([]);
+    setDestinationCollectionKey(undefined);
     if (sheetOpen) pushSheet("transferDestination");
     else openSheet("transferDestination");
   }
@@ -826,12 +825,12 @@ export function GalleryWorkspace() {
   }
 
   function completeTransfer() {
-    if (!activeCollection || !transferMode || !selectedImageKeys.length || !destinationCollectionKeys.length) return;
+    if (!activeCollection || !transferMode || !selectedImageKeys.length || !destinationCollectionKey) return;
     const sourceCollection = activeCollection;
     const mode = transferMode;
     const imageKeys = [...selectedImageKeys];
-    const destinationKeys = [...destinationCollectionKeys];
-    const destination = collections.find(({ key }) => key === destinationKeys[0]);
+    const destinationKeys = [destinationCollectionKey];
+    const destination = collections.find(({ key }) => key === destinationCollectionKey);
     if (!destination) return;
     const selected = imageKeys.map((key) => images.find((image) => image.key === key) ?? collectionSearchResults?.find((image) => image.key === key) ?? (selectedImage?.key === key ? selectedImage : undefined)).filter((image): image is GalleryImage => Boolean(image));
     if (selected.length !== imageKeys.length) return;
@@ -852,14 +851,14 @@ export function GalleryWorkspace() {
     setImages(destinationOverview?.images ?? selected);
     setSelectedImage(undefined);
     setSelectedImageKeys([]);
-    setDestinationCollectionKeys([]);
+    setDestinationCollectionKey(undefined);
     setQuery("");
     setCollectionSearchResults(undefined);
     setShowingCollectionOverview(false);
     setShowingDuplicates(false);
     setShowingSearchResults(false);
     closeSheet();
-    setStatus(`${selected.length} image${selected.length === 1 ? "" : "s"} ${mode === "move" ? "moved" : "copied"} to ${destinationKeys.length} collection${destinationKeys.length === 1 ? "" : "s"}.`);
+    setStatus(`${selected.length} image${selected.length === 1 ? "" : "s"} ${mode === "move" ? "moved" : "copied"} to ${destination.name}.`);
     void transferGalleryCollectionImages({ sourceCollectionKey: sourceCollection.key, destinationCollectionKeys: destinationKeys, imageKeys, mode }).then(() => {
       void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
       void load(nextDestination, true).then((refreshed) => { if (!refreshed) showToast({ title: "Gallery refresh failed", description: "The transfer completed, but the destination could not be refreshed yet." }); });
@@ -958,7 +957,7 @@ export function GalleryWorkspace() {
     <Button onPress={() => void findSimilar()} size="lg" variant="primary">Find similar</Button>
     <Button onPress={closeSheet} size="lg" variant="secondary">Close</Button>
   </View> : activeSheet === "transferDestination" ? <View style={styles.sheetFooter}>
-    <Button disabled={destinationCollectionKeys.length === 0} onPress={completeTransfer} size="md" style={styles.sheetFooterAction} variant="primary">{transferMode === "move" ? "Move" : "Copy"} {selectedImageKeys.length} image{selectedImageKeys.length === 1 ? "" : "s"}</Button>
+    <Button disabled={!destinationCollectionKey} onPress={completeTransfer} size="md" style={styles.sheetFooterAction} variant="primary">{transferMode === "move" ? "Move" : "Copy"} {selectedImageKeys.length} image{selectedImageKeys.length === 1 ? "" : "s"}</Button>
     <Button onPress={closeSheet} size="md" style={styles.sheetFooterAction} variant="secondary">Close</Button>
   </View> : activeSheet === "searchHistory" ? <Button disabled={historyLoading} onPress={closeSheet} size="lg" variant="secondary">Close</Button> : undefined;
 
@@ -1070,7 +1069,7 @@ export function GalleryWorkspace() {
       />
 
       <BottomSheet
-        description={activeSheet === "destination" ? `${pendingFiles.length} image${pendingFiles.length === 1 ? "" : "s"} ready to upload.` : activeSheet === "confirmDeleteDuplicates" ? `This removes ${images.length} redundant image${images.length === 1 ? "" : "s"} from this collection while keeping one original from each group. Images still used elsewhere remain available there.` : activeSheet === "createSubject" ? "Gallery learns the stable visual details that distinguish this specific subject." : activeSheet === "transferDestination" ? "Choose up to 20 destination collections." : undefined}
+        description={activeSheet === "destination" ? `${pendingFiles.length} image${pendingFiles.length === 1 ? "" : "s"} ready to upload.` : activeSheet === "confirmDeleteDuplicates" ? `This removes ${images.length} redundant image${images.length === 1 ? "" : "s"} from this collection while keeping one original from each group. Images still used elsewhere remain available there.` : activeSheet === "createSubject" ? "Gallery learns the stable visual details that distinguish this specific subject." : activeSheet === "transferDestination" ? "Choose one destination collection." : undefined}
         dismissible={!busy}
         footer={sheetFooter}
         headerLeading={activeSheet === "image" ? <Button accessibilityLabel="Close image" contentMode="raw" onPress={closeSheet} size="sm" variant="icon"><ChevronLeftIcon size="sm" /></Button> : canGoBackSheet ? <Button accessibilityLabel="Back" contentMode="raw" onPress={goBackSheet} size="sm" variant="icon"><ChevronLeftIcon size="sm" /></Button> : undefined}
@@ -1107,8 +1106,6 @@ export function GalleryWorkspace() {
         </> : null}
         {activeSheet === "imageActions" && selectedImage ? <View style={styles.actionMenu}>
           <BottomSheetItem onPress={toggleFavorite} style={styles.sheetAction} variant="secondary">{selectedImage.isFavorite ? "Unfavorite" : "Favorite"}</BottomSheetItem>
-          <BottomSheetItem disabled={!activeCollection} onPress={() => openTransfer("move", [selectedImage.key])} style={styles.sheetAction} variant="secondary">Move to collections</BottomSheetItem>
-          <BottomSheetItem disabled={!activeCollection} onPress={() => openTransfer("copy", [selectedImage.key])} style={styles.sheetAction} variant="secondary">Copy to collections</BottomSheetItem>
           <BottomSheetItem onPress={() => { setSubjectName(""); setSubjectReferenceKeys([selectedImage.key]); pushSheet("createSubject"); }} style={styles.sheetAction} variant="secondary">Create subject</BottomSheetItem>
           <BottomSheetItem onPress={deleteSelectedImage} style={styles.sheetAction} variant="secondary">Delete image</BottomSheetItem>
         </View> : null}
@@ -1126,20 +1123,21 @@ export function GalleryWorkspace() {
         </ScrollView> : null}
         {activeSheet === "bulkActions" ? <View style={styles.actionMenu}>
           <Button disabled={busy} loading={busy} onPress={() => void updateSelectedFavorites()} size="lg" variant="secondary">{allSelectedFavorite ? "Unfavorite" : "Favorite"}</Button>
-          <Button disabled={busy || !activeCollection} onPress={() => openTransfer("move")} size="lg" variant="secondary">Move to collections</Button>
-          <Button disabled={busy || !activeCollection} onPress={() => openTransfer("copy")} size="lg" variant="secondary">Copy to collections</Button>
+          <Button disabled={busy || !activeCollection} onPress={() => openTransfer("move")} size="lg" variant="secondary">Move to collection</Button>
+          <Button disabled={busy || !activeCollection} onPress={() => openTransfer("copy")} size="lg" variant="secondary">Copy to collection</Button>
           <Button disabled={busy} onPress={() => pushSheet("bulkDelete")} size="lg" variant="secondary">Delete</Button>
         </View> : null}
         {activeSheet === "bulkDelete" ? <View style={styles.compactSheetActions}>
           <Button disabled={busy} loading={busy} onPress={deleteSelectedImages} size="lg" variant="primary">Delete</Button>
           <Button disabled={busy} onPress={goBackSheet} size="lg" variant="secondary">Close</Button>
         </View> : null}
-        {activeSheet === "transferDestination" ? <View style={styles.destinationGrid}>
-          {collections.filter(({ key }) => key !== activeCollection?.key).map((collection) => {
-            const selected = destinationCollectionKeys.includes(collection.key);
+        {activeSheet === "transferDestination" ? <View style={styles.destinationBrowser}>
+          <View style={styles.destinationLocationLane}><Text numberOfLines={1} style={styles.destinationLocationTitle}>Gallery</Text></View>
+          <View style={styles.destinationGrid}>{collections.filter(({ key }) => key !== activeCollection?.key).map((collection) => {
+            const selected = destinationCollectionKey === collection.key;
             return <View key={collection.key} style={[styles.destinationCard, selected && styles.destinationCardSelected, { width: destinationCollectionSize, height: destinationCollectionSize }]}>
               {collection.coverUrl ? <Image source={collection.coverUrl} contentFit="cover" style={styles.collectionCover} /> : null}
-              <Button accessibilityLabel={`${selected ? "Remove" : "Select"} ${collection.name}`} accessibilityState={{ selected }} contentMode="raw" onPress={() => setDestinationCollectionKeys((current) => selected ? current.filter((key) => key !== collection.key) : current.length >= 20 ? current : [...current, collection.key])} size="xl" style={[styles.collectionMain, collection.coverUrl && styles.coveredCollectionMain]} variant="ghost">
+              <Button accessibilityLabel={`${selected ? "Remove" : "Select"} ${collection.name}`} accessibilityState={{ selected }} contentMode="raw" onPress={() => setDestinationCollectionKey(selected ? undefined : collection.key)} shape="rounded" size="xl" style={[styles.collectionMain, collection.coverUrl && styles.coveredCollectionMain]} variant="ghost">
                 {collection.coverUrl ? null : <FolderIcon size="lg" />}
                 <Text numberOfLines={1} style={[styles.collectionName, collection.coverUrl && styles.coveredCollectionName]}>{collection.name}</Text>
                 {selected ? <View style={styles.destinationBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}
@@ -1147,6 +1145,7 @@ export function GalleryWorkspace() {
             </View>;
           })}
           {collections.filter(({ key }) => key !== activeCollection?.key).length === 0 ? <Text style={styles.emptyText}>Create another collection before moving or copying images.</Text> : null}
+          </View>
         </View> : null}
         {activeSheet === "confirmDeleteDuplicates" ? <View style={styles.form}>
           <Button disabled={busy} onPress={closeSheet} size="md" variant="secondary">Cancel</Button>
@@ -1237,7 +1236,10 @@ const styles = StyleSheet.create({
   sheetSubtitle: { marginTop: 3, color: palette.silver500, fontFamily: fonts.regular, fontSize: 11 },
   actionMenu: { gap: 8 },
   sheetAction: { justifyContent: "center" },
-  destinationGrid: { flexDirection: "row", flexWrap: "wrap", alignContent: "flex-start", gap: COLLECTION_GAP },
+  destinationBrowser: { flex: 1, minHeight: 0, gap: spacing.sm },
+  destinationLocationLane: { minHeight: 40, flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  destinationLocationTitle: { flex: 1, color: palette.silver100, fontFamily: fonts.medium, fontSize: 14 },
+  destinationGrid: { flexDirection: "row", flexWrap: "wrap", alignContent: "flex-start", gap: COLLECTION_GAP, paddingVertical: 4 },
   destinationCard: { position: "relative", overflow: "hidden", borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.md, backgroundColor: palette.panelRaised },
   destinationCardSelected: { borderColor: palette.silver50, borderWidth: 2 },
   destinationBadge: { position: "absolute", top: 6, right: 6, width: 22, height: 22, alignItems: "center", justifyContent: "center", borderRadius: 11, backgroundColor: palette.silver50 },

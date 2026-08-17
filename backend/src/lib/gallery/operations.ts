@@ -38,11 +38,10 @@ const subjectCreateSchema = strictObject({ name: z.string().trim().min(1).max(12
 const subjectKeySchema = strictObject({ identityKey: z.string().cuid() });
 const collectionTransferSchema = strictObject({
   sourceCollectionKey: z.string().cuid(),
-  destinationCollectionKeys: z.array(z.string().cuid()).min(1).max(20),
+  destinationCollectionKeys: z.array(z.string().cuid()).length(1),
   imageKeys: z.array(z.string().cuid()).min(1).max(100),
   mode: z.enum(['copy', 'move']),
 }).superRefine((value, context) => {
-  if (new Set(value.destinationCollectionKeys).size !== value.destinationCollectionKeys.length) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Destination collection keys must be unique.', path: ['destinationCollectionKeys'] });
   if (new Set(value.imageKeys).size !== value.imageKeys.length) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Image keys must be unique.', path: ['imageKeys'] });
   if (value.destinationCollectionKeys.includes(value.sourceCollectionKey)) context.addIssue({ code: z.ZodIssueCode.custom, message: 'The source collection cannot be a destination.', path: ['destinationCollectionKeys'] });
 });

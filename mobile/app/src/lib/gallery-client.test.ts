@@ -107,12 +107,12 @@ test("sends similarity and duplicate discovery through image search", async () =
 test("sends favorite, delete, and many-to-many transfer through canonical mutations", async () => {
   await setGalleryImageFavorite("image", true);
   await deleteGalleryImages(["image-a", "image-b"]);
-  await transferGalleryCollectionImages({ sourceCollectionKey: "source", destinationCollectionKeys: ["one", "two"], imageKeys: ["image-a", "image-b"], mode: "copy" });
+  await transferGalleryCollectionImages({ sourceCollectionKey: "source", destinationCollectionKeys: ["one"], imageKeys: ["image-a", "image-b"], mode: "copy" });
 
   expect(calls.map(({ path, body }) => ({ path, body }))).toEqual([
     { path: "/gallery/images/favorite", body: { organizationKey: "organization", scopeKey: "scope", imageKey: "image", isFavorite: true } },
     { path: "/gallery/images/delete", body: { organizationKey: "organization", scopeKey: "scope", imageKeys: ["image-a", "image-b"] } },
-    { path: "/gallery/collections/images/transfer", body: { organizationKey: "organization", scopeKey: "scope", sourceCollectionKey: "source", destinationCollectionKeys: ["one", "two"], imageKeys: ["image-a", "image-b"], mode: "copy" } },
+    { path: "/gallery/collections/images/transfer", body: { organizationKey: "organization", scopeKey: "scope", sourceCollectionKey: "source", destinationCollectionKeys: ["one"], imageKeys: ["image-a", "image-b"], mode: "copy" } },
   ]);
 });
 

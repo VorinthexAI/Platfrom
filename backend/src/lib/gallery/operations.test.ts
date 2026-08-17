@@ -57,7 +57,7 @@ describe('Gallery operation boundaries', () => {
   test('enforces transfer and subject uniqueness invariants', () => {
     const sourceCollectionKey = key(), destination = key(), image = key();
     expect(() => galleryOperationInputSchemas.transferCollectionImages.parse({ sourceCollectionKey, destinationCollectionKeys: [sourceCollectionKey], imageKeys: [image], mode: 'move' })).toThrow('source collection');
-    expect(() => galleryOperationInputSchemas.transferCollectionImages.parse({ sourceCollectionKey, destinationCollectionKeys: [destination, destination], imageKeys: [image], mode: 'copy' })).toThrow('unique');
+    expect(() => galleryOperationInputSchemas.transferCollectionImages.parse({ sourceCollectionKey, destinationCollectionKeys: [destination, key()], imageKeys: [image], mode: 'copy' })).toThrow();
     expect(() => galleryOperationInputSchemas.createSubject.parse({ name: 'Alex', imageKeys: [image, image] })).toThrow('unique');
     expect(() => galleryOperationInputSchemas.deleteImages.parse({ imageKeys: [image, image] })).toThrow('unique');
   });
