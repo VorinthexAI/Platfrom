@@ -185,6 +185,10 @@ function documentDisplayName(document: Pick<ContentDocument, "name" | "extension
   return `${document.name}.${document.extension}`;
 }
 
+function capitalizeLabel(value: string) {
+  return value ? `${value.charAt(0).toLocaleUpperCase()}${value.slice(1)}` : value;
+}
+
 function generatedVersionType(version: ContentDocumentVersion): ContentDocumentVersion["type"] {
   if (version.type) return version.type;
   if (/enhanc/i.test(version.label ?? "")) return "enhancement";
@@ -316,8 +320,6 @@ export function KnowledgeWorkspace() {
   const [translationTargetLanguage, setTranslationTargetLanguage] = useState("English");
   const [pendingDocumentVersionLabel, setPendingDocumentVersionLabel] = useState<string>();
   const [loadingVersions, setLoadingVersions] = useState(false);
-  const [versionActionKey, setVersionActionKey] = useState<string>();
-  const [versionFooterHint, setVersionFooterHint] = useState<string>();
   const [audioVersions, setAudioVersions] = useState<ContentDocumentAudioVersion[]>([]);
   const [loadingAudioVersions, setLoadingAudioVersions] = useState(false);
   const [generatingAudioVersion, setGeneratingAudioVersion] = useState(false);
@@ -925,8 +927,6 @@ export function KnowledgeWorkspace() {
       setAiResponse(undefined);
       setVersions([]);
       setLoadingVersions(false);
-      setVersionActionKey(undefined);
-      setVersionFooterHint(undefined);
       setUploading(false);
       uploadBatchRef.current = [];
       setUploadBatch([]);
@@ -1244,9 +1244,8 @@ export function KnowledgeWorkspace() {
     setDocumentTransformation(action);
     setTranslationTargetLanguage(language);
     setDocumentTransformationPrompt(action === "enhance"
-      ? "Correct wording, grammar, punctuation, and spelling while preserving the document's meaning, facts, tone, and structure."
+      ? "Correct wording, grammar, punctuation, and spelling. Repair or remove nonsensical words, stray characters, and OCR artifacts. Reflow artificial short lines into natural sentences and paragraphs while preserving intentional headings, lists, meaning, facts, and tone."
       : `Translate this document to ${language} while preserving its meaning, facts, tone, and structure.`);
-    setVersionFooterHint(undefined);
     setVersions([]);
     setLoadingVersions(true);
     pushSheet("versions");
@@ -1258,10 +1257,6 @@ export function KnowledgeWorkspace() {
     } finally {
       if (generation === transformationVersionLoadGeneration.current && documentKeyRef.current === documentKey) setLoadingVersions(false);
     }
-  };
-
-  const updateDocumentTransformationPrompt = (prompt: string) => {
-    setDocumentTransformationPrompt(prompt);
   };
 
   const updateTranslationTargetLanguage = (language: string) => {
@@ -1279,9 +1274,8 @@ export function KnowledgeWorkspace() {
     const pendingLabel = action === "enhance" ? "Enhancing version..." : "Translating version...";
     setDocumentActionLoading(action);
     setPendingDocumentVersionLabel(pendingLabel);
-    setVersionFooterHint(`Open the latest version when it is ready to view the ${action === "enhance" ? "enhancement" : "translation"}.`);
     setSheetError(undefined);
-    goBackSheet();
+    if (activeSheetRef.current === "transform") goBackSheet();
     try {
       const targetLanguage = action === "translate" ? translationTargetLanguage.trim() || languageForCountryCode(user?.countryCode) : undefined;
       const generated = action === "enhance"
@@ -1291,7 +1285,6 @@ export function KnowledgeWorkspace() {
       const version = await createContentDocumentVersion(documentKey, action === "enhance" ? "Enhanced version" : `${targetLanguage} translation`, generated.text, action === "enhance" ? "enhancement" : "translation");
       setPendingDocumentVersionLabel(undefined);
       setVersions((history) => [version, ...history.filter(({ key }) => key !== version.key)]);
-      setVersionFooterHint(`Open the latest version to view the ${action === "enhance" ? "enhancement" : "translation"}.`);
       showToast({ title: action === "enhance" ? "Enhanced version ready" : "Translated version ready" });
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : action === "enhance" ? "The document could not be enhanced." : "The document could not be translated.";
@@ -1544,19 +1537,19 @@ export function KnowledgeWorkspace() {
 
   const openDocumentVersion = async (version: ContentDocumentVersion) => {
     if (dirty.current || saveInFlight.current || saveState !== "saved") return;
-    setVersionActionKey(version.key);
-    setSheetError(undefined);
+    setOpeningDocumentKey(version.documentKey);
+    setError(undefined);
+    closeSheet();
     try {
       const restored = await restoreContentDocumentVersion(version.documentKey, version.key, false);
       replaceDocument(restored);
       replaceCachedContentDocumentDetail(queryClient, contentContext, restored);
       await invalidateContentDocumentTopics(queryClient, contentContext, restored.key);
-      setVersionActionKey(undefined);
-      await openArchiveDocument(restored, true);
+      await openArchiveDocument(restored);
     } catch (cause) {
-      setSheetError(cause instanceof Error ? cause.message : "The version could not be opened.");
+      setError(cause instanceof Error ? cause.message : "The version could not be opened.");
     } finally {
-      setVersionActionKey(undefined);
+      setOpeningDocumentKey(undefined);
     }
   };
 
@@ -1569,8 +1562,6 @@ export function KnowledgeWorkspace() {
     setAiInstruction("");
     setAiResponse(undefined);
     setAiInstructionError(undefined);
-    setVersionActionKey(undefined);
-    setVersionFooterHint(undefined);
     setVersions([]);
     editorSession.current += 1;
     revision.current = 0;
@@ -1638,7 +1629,6 @@ export function KnowledgeWorkspace() {
     setInstructing(false);
     setAiInstructionError(undefined);
     setAiResponse(undefined);
-    setVersionActionKey(undefined);
     setOpeningDocumentKey(document.key);
     setEditorEditing(false);
     setEditorContentHeight(280);
@@ -3372,8 +3362,7 @@ export function KnowledgeWorkspace() {
       {close(false)}
     </>;
     if (activeSheet === "versions") return <>
-      {versionFooterHint ? <Text style={styles.footerHint}>{versionFooterHint}</Text> : null}
-      {!documentActionLoading ? <Button disabled={loadingVersions} onPress={() => pushSheet("transform")} size="lg" variant="primary">{documentTransformation === "enhance" ? "Enhance" : "Translate"}</Button> : null}
+      {!documentActionLoading ? <Button disabled={loadingVersions} onPress={() => { if (documentTransformation === "enhance") void generateDocumentTransformation(); else pushSheet("transform"); }} size="lg" variant="primary">{documentTransformation === "enhance" ? "Enhance" : "Translate"}</Button> : null}
       {close(Boolean(documentActionLoading))}
     </>;
     if (activeSheet === "summarize") return <>
@@ -3762,7 +3751,7 @@ export function KnowledgeWorkspace() {
 
       <BottomSheet
         description={activeSheet === "create" ? "Choose what to add to the current folder." : activeSheet === "transform" ? documentTransformation === "enhance" ? "Review or adjust how this document should be enhanced." : "Review or adjust how this document should be translated." : activeSheet === "versions" ? `Choose an ${documentTransformation === "enhance" ? "enhancement" : "translation"} to open.` : activeSheet === "audioVersions" ? "Listen to your saved recordings." : activeSheet === "summarize" ? `Choose one of the ${selectedDocument?.extension ? "file's" : "document's"} primary topics to summarize.` : activeSheet === "summaryVersions" ? "View saved summaries or create a new one." : undefined}
-        dismissible={!versionActionKey && !destinationLoading && !documentActionLoading && !bulkLoading}
+        dismissible={!destinationLoading && !documentActionLoading && !bulkLoading}
         footer={mutationFooter()}
         hideHeading={activeSheet === "create" || activeSheet === "documentActions" || activeSheet === "enhance" || activeSheet === "historyChooser" || activeSheet === "filter" || activeSheet === "bulkActions" || compactDelete}
         mutation={activeSheet === "documents" || activeSheet === "folder" || activeSheet === "folders" || activeSheet === "similar" || activeSheet === "transform" || activeSheet === "versions" || activeSheet === "audioVersions" || activeSheet === "summarize" || activeSheet === "summaryVersions" || activeSheet === "summaryReader" || activeSheet === "scanSources" || activeSheet === "destinationBrowser" || activeSheet === "folderDetails" || activeSheet === "documentDetails"}
@@ -3895,7 +3884,7 @@ export function KnowledgeWorkspace() {
             {!loadingSummaryTopics && !sheetError && summaryTopics.length === 0 ? <Text style={styles.empty}>No topics were found in this document.</Text> : null}
             {loadingSummaryTopics ? Array.from({ length: 3 }, (_, index) => (
               <View accessibilityLabel="Generating document topics" accessibilityRole="progressbar" key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />
-            )) : summaryTopics.map((topic) => <Button contentMode="raw" disabled={generatingSummary} key={topic} onPress={() => void generateSummaryForTopic(topic)} size="sm" style={styles.documentButton} variant="secondary"><FileIcon size="sm" /><Text numberOfLines={1} style={styles.documentButtonLabel}>{topic}</Text></Button>)}
+            )) : summaryTopics.map((topic) => <Button contentMode="raw" disabled={generatingSummary} key={topic} onPress={() => void generateSummaryForTopic(topic)} size="sm" style={styles.documentButton} variant="secondary"><FileIcon size="sm" /><Text numberOfLines={1} style={styles.documentButtonLabel}>{capitalizeLabel(topic)}</Text></Button>)}
           </ScrollView>
         ) : null}
         {activeSheet === "summaryVersions" ? (
@@ -3954,19 +3943,18 @@ export function KnowledgeWorkspace() {
           </View>
         ) : null}
         {activeSheet === "transform" ? <View style={styles.transformationForm}>
-          {documentTransformation === "translate" ? <><Text style={styles.inputLabel}>Language</Text><TextInput accessibilityLabel="Translation language" maxLength={100} onChangeText={updateTranslationTargetLanguage} placeholder="Language" value={translationTargetLanguage} /></> : null}
-          {documentTransformation === "enhance" ? <><Text style={styles.inputLabel}>Prompt</Text><TextInput accessibilityLabel="Enhancement prompt" maxLength={8_000} multiline onChangeText={updateDocumentTransformationPrompt} style={styles.transformationPrompt} textAlignVertical="top" value={documentTransformationPrompt} /></> : null}
+          <Text style={styles.inputLabel}>Language</Text><TextInput accessibilityLabel="Translation language" maxLength={100} onChangeText={updateTranslationTargetLanguage} placeholder="Language" value={translationTargetLanguage} />
         </View> : null}
         {activeSheet === "versions" ? (
           <View style={styles.versionPanel}>
             {loadingVersions && !pendingDocumentVersionLabel ? Array.from({ length: 3 }, (_, index) => <View accessibilityLabel="Loading version history" accessibilityRole="progressbar" key={index} style={[styles.versionSkeleton, styles.skeletonCard]} />) : null}
             {!loadingVersions && !pendingDocumentVersionLabel && versions.length === 0 ? <Text style={styles.empty}>No {documentTransformation === "enhance" ? "enhancements" : "translations"} yet.</Text> : null}
-            {pendingDocumentVersionLabel ? <Button accessibilityLabel={pendingDocumentVersionLabel} accessibilityState={{ busy: true }} contentMode="raw" disabled size="sm" style={styles.versionMain} variant="secondary"><ClockIcon size="sm" variant="accent" /><View style={styles.resultText}><Text style={styles.rowTitle}>{pendingDocumentVersionLabel}</Text></View><Spinner size="small" variant="muted" /></Button> : null}
+            {pendingDocumentVersionLabel ? <Button accessibilityLabel={pendingDocumentVersionLabel} accessibilityState={{ busy: true }} contentMode="raw" disabled size="sm" style={styles.versionMain} variant="secondary"><ClockIcon size="sm" variant="accent" /><Text numberOfLines={1} style={styles.documentButtonLabel}>{pendingDocumentVersionLabel}</Text><Spinner size="small" variant="muted" /></Button> : null}
             {versions.map((version) => {
               const document = activeDocument?.key === version.documentKey ? activeDocument : selectedDocument?.key === version.documentKey ? selectedDocument : undefined;
               const isCurrentVersion = document?.currentVersionKey === version.key;
               return <View key={version.key} style={styles.versionRow}>
-                <Button accessibilityState={{ selected: isCurrentVersion }} contentMode="raw" disabled={Boolean(versionActionKey)} loading={versionActionKey === version.key} onPress={() => void openDocumentVersion(version)} size="sm" style={[styles.versionMain, isCurrentVersion && styles.selectedDocumentItem]} variant="secondary"><ClockIcon size="sm" variant="accent" /><View style={styles.resultText}><Text style={styles.rowTitle}>Version {version.version}</Text></View></Button>
+                <Button accessibilityState={{ selected: isCurrentVersion }} contentMode="raw" onPress={() => void openDocumentVersion(version)} size="sm" style={[styles.versionMain, isCurrentVersion && styles.selectedDocumentItem]} variant="secondary"><ClockIcon size="sm" variant="accent" /><Text numberOfLines={1} style={styles.documentButtonLabel}>Version {version.version}</Text></Button>
               </View>;
             })}
           </View>
@@ -4144,8 +4132,6 @@ const styles = StyleSheet.create({
   summaryNarrationSpinner: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
   enhancePanel: { gap: 6 },
   transformationForm: { flex: 1, gap: spacing.sm },
-  transformationPrompt: { flex: 1, minHeight: 220 },
-  footerHint: { color: palette.muted, fontFamily: fonts.regular, fontSize: 12, lineHeight: 17, textAlign: "center" },
   filterPanel: { gap: 6 },
   enhanceIdentity: { padding: 14, flexDirection: "row", alignItems: "center", gap: 12, borderRadius: radii.md, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panel },
   enhanceCopy: { flex: 1, gap: 4 },

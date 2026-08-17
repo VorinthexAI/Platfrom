@@ -1556,6 +1556,9 @@ describe('Content runtime', () => {
     expect(call.action).toBe('enhance');
     expect(call.input.systemPrompt).toContain('collapse excessive blank lines');
     expect(call.input.systemPrompt).toContain('readable sections');
+    expect(call.input.systemPrompt).toContain('nonsensical words');
+    expect(call.input.systemPrompt).toContain('only a few characters per line');
+    expect(call.input.systemPrompt).toContain('normal line width');
     expect(call.input.options).toMatchObject({ temperature: 0.1, maxTokens: 256 });
     expect(f.documents.get(documentKey).content).toBe('This is the text.');
   });
