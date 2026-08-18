@@ -13,6 +13,7 @@ describe('Gallery assistant capabilities', () => {
     expect(new Set(galleryAssistantCapabilityNames).size).toBe(32);
     expect(galleryAssistantCapabilityNames).not.toContain('collection.duplicates.find');
     const search = createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'image.search')!;
+    const listCollections = createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'collection.list')!;
     const createCollection = createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'collection.create')!;
     const updateCollection = createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'collection.update')!;
     expect(createCollection.inputSchema.parse({ name: 'Favorites' })).toEqual({ name: 'Favorites', isFavorite: false });
@@ -24,6 +25,10 @@ describe('Gallery assistant capabilities', () => {
     expect(search.definition.inputSchema.type).toBe('object');
     expect(Array.isArray(search.definition.inputSchema.oneOf)).toBe(true);
     expect(search.inputSchema.parse({ identityKey: newId() })).toEqual({ identityKey: expect.any(String) });
+    expect(listCollections.inputSchema.parse({ maxCaptionScore: 40 })).toEqual({ maxCaptionScore: 40, limit: 100 });
+    expect(listCollections.definition.description).toContain('maximum current caption score');
+    expect(listCollections.definition.description).toContain('legacy placeholder scores are excluded');
+    expect(listCollections.definition.inputSchema).toMatchObject({ properties: { maxCaptionScore: { type: 'integer', minimum: 1, maximum: 100 } } });
     expect((search.definition.inputSchema.oneOf as any[]).find(({ required }) => required.includes('identityKey'))).toMatchObject({ additionalProperties: false, properties: { identityKey: { type: 'string' } } });
     for (const capability of createGalleryAssistantCapabilities()) {
       const schema = JSON.stringify(capability.definition.inputSchema);

@@ -113,8 +113,17 @@ describe('Gallery operation boundaries', () => {
 
   test('enforces reusable overview pagination boundaries', () => {
     expect(galleryOperationInputSchemas.overview.parse({ limit: 100 })).toEqual({ limit: 100 });
+    expect(galleryOperationInputSchemas.overview.parse({ maxCaptionScore: 40 })).toEqual({ maxCaptionScore: 40, limit: 100 });
+    expect(() => galleryOperationInputSchemas.overview.parse({ maxCaptionScore: 0 })).toThrow();
+    expect(() => galleryOperationInputSchemas.overview.parse({ maxCaptionScore: 101 })).toThrow();
+    expect(() => galleryOperationInputSchemas.overview.parse({ maxCaptionScore: 40.5 })).toThrow();
     expect(() => galleryOperationInputSchemas.overview.parse({ limit: 101 })).toThrow();
     expect(galleryOperationInputSchemas.overview.parse({ cursor: 'opaque', limit: 20 })).toEqual({ cursor: 'opaque', limit: 20 });
+  });
+
+  test('passes the normalized caption threshold through the overview operation', async () => {
+    const source = await Bun.file(new URL('./operations.ts', import.meta.url)).text();
+    expect(source).toContain('maxCaptionScore: input.maxCaptionScore');
   });
 
   test('overview DTO exposes server-derived collection creation capability', async () => {

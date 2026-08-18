@@ -29,7 +29,7 @@ import { decryptAuthenticatedJson, encryptAuthenticatedJson } from '@/lib/authen
 import { publishCollectionEvent, publishUserEvent } from '@/api/events';
 import { mutationEventTargets, publishGalleryEvents, type GalleryMutationEventName } from './mutation-events';
 
-const overviewSchema = strictObject({ collectionKey: z.string().cuid().optional(), ...cursorPaginationInputShape });
+const overviewSchema = strictObject({ collectionKey: z.string().cuid().optional(), maxCaptionScore: z.number().int().min(1).max(100).optional(), ...cursorPaginationInputShape });
 const collectionCreateSchema = strictObject({ name: z.string().trim().min(1).max(120), isFavorite: z.boolean().default(false) });
 const collectionUpdateSchema = strictObject({ collectionKey: z.string().cuid(), name: z.string().trim().min(1).max(120), isFavorite: z.boolean(), coverImageKey: z.string().cuid().nullable().optional() });
 const collectionDeleteSchema = strictObject({ collectionKey: z.string().cuid() });
@@ -202,7 +202,7 @@ async function overview(rawInput: unknown, context: GalleryOperationContext) {
     const input = { ...overviewSchema.parse(rawInput), ...context };
     const membership = await authorize(context);
     if (input.collectionKey && !await repository.getCollectionRole(input.scopeKey, input.collectionKey, membership.key)) throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.');
-    const { collections, images } = await repository.listOverview({ scopeKey: input.scopeKey, actorKey: membership.key, collectionKey: input.collectionKey, cursor: input.cursor, limit: input.limit });
+    const { collections, images } = await repository.listOverview({ scopeKey: input.scopeKey, actorKey: membership.key, collectionKey: input.collectionKey, maxCaptionScore: input.maxCaptionScore, cursor: input.cursor, limit: input.limit });
     const canCreateCollections = await repository.canManageScope(input.scopeKey, membership.key);
     return {
       collections: await Promise.all(collections.map(async ({ collection, count, cover, role, isOwned }) => projectGalleryCollection(collection, count, cover ? await imageUrl(cover.storageKey) : null, membership.key, role, isOwned))),

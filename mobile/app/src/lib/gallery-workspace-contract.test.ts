@@ -57,7 +57,7 @@ test("uses a singleton collection cache without root search or filtering", () =>
 test("only lifts Core for its own focus and uses distinct image sheet presentations", () => {
   expect(source).toContain('behavior={aiInputFocused ? "height" : undefined}');
   expect(source).toContain("setAiInputFocused(focused)");
-  expect(source).toContain('hideHeading={activeSheet === "rootActions" || activeSheet === "actions" || activeSheet === "collectionMenu" || activeSheet === "filter" || activeSheet === "imageActions" || activeSheet === "bulkActions"}');
+  expect(source).toContain('hideHeading={activeSheet === "rootActions" || activeSheet === "actions" || activeSheet === "collectionMenu" || activeSheet === "filter" || activeSheet === "imageActions" || activeSheet === "bulkActions" || activeSheet === "cleanupMenu" || activeSheet === "confirmCleanupDelete"}');
   expect(source).toContain('open={!sharingOpen && sheetOpen && (activeSheet === "image" || activeSheet === "imageActions") && Boolean(selectedImage || selectedOptimisticItem)}');
   expect(source).toContain("        mutation\n        onOpenChange");
   expect(source).toContain('mutation={activeSheet === "imageEdit"');
@@ -143,7 +143,85 @@ test("uses standard right-side close controls and hides collection menu headings
   expect(`${preview}${sheet}`).not.toContain("headerLeading");
   expect(`${preview}${sheet}`).not.toContain("headerTrailing");
   expect(`${preview}${sheet}`).not.toContain("hideCloseButton");
-  expect(sheet).toContain('hideHeading={activeSheet === "rootActions" || activeSheet === "actions" || activeSheet === "collectionMenu" || activeSheet === "filter" || activeSheet === "imageActions" || activeSheet === "bulkActions"}');
+  expect(sheet).toContain('hideHeading={activeSheet === "rootActions" || activeSheet === "actions" || activeSheet === "collectionMenu" || activeSheet === "filter" || activeSheet === "imageActions" || activeSheet === "bulkActions" || activeSheet === "cleanupMenu" || activeSheet === "confirmCleanupDelete"}');
+});
+
+test("provides collection cleanup discovery, pagination, exclusion, and confirmed canonical deletion", () => {
+  const cleanupIcon = source.indexOf('<BrainIcon size="sm"');
+  const sharingIcon = source.indexOf('<MemberIcon size="sm"');
+  expect(cleanupIcon).toBeGreaterThan(-1);
+  expect(cleanupIcon).toBeLessThan(sharingIcon);
+  expect(source).toContain('{isCollectionOwner ? <Button accessibilityLabel={`Clean up ${activeCollection.name}`}');
+  expect(source).toContain('activeSheet === "cleanupMenu" ? <BottomSheetItem');
+  expect(source).toContain('>Clean up</BottomSheetItem>');
+  expect(source).toContain('activeSheet === "cleanup" ? "Clean up"');
+  expect(source).toContain('Choose a quality threshold to find and remove lower-quality images. Images are scored from 1 to 100.');
+  expect(source).toContain('const CLEANUP_THRESHOLDS = [10, 25, 50, 75, 90] as const');
+  expect(source).toContain('fetchGalleryOverview(collection.key, cursor, 100, threshold)');
+  expect(source).toContain('appendCursorItems(current, result.images.filter');
+  expect(source).toContain('accessibilityLabel={`Exclude ${image.filename} from cleanup`}');
+  expect(source).toContain('setCleanupImages((current) => current.filter');
+  expect(source).toContain('for (let index = 0; index < targets.length; index += DELETE_IMAGE_CHUNK_SIZE)');
+  expect(source).toContain('await deleteGalleryImages(chunk.map(({ key }) => key))');
+  expect(source).toContain('activeSheet === "cleanupMenu" || activeSheet === "confirmCleanupDelete"');
+  expect(source).toContain('mutation={activeSheet === "imageEdit" || activeSheet === "newCollection" || activeSheet === "collectionEdit" || activeSheet === "duplicates" || activeSheet === "cleanup"');
+  expect(source).toContain('collection?.role !== "owner"');
+  expect(source).not.toContain('cleanupScore');
+});
+
+test("keeps cleanup exclusions and cursor state safe across thresholds, pagination, and refreshes", () => {
+  expect(source).toContain('const cleanupExcludedKeys = useRef(new Set<string>())');
+  expect(source).toContain('cleanupExcludedKeys.current.add(imageKey)');
+  expect(source).toContain('!cleanupExcludedKeys.current.has(image.key)');
+  expect(source).toContain('result.images.filter(({ key }) => !cleanupExcludedKeys.current.has(key))');
+  expect(source.match(/cleanupExcludedKeys\.current\.clear\(\)/g)).toHaveLength(3);
+  expect(source).toContain('const cleanupCursorRef = useRef<string | null>(null)');
+  expect(source).toContain('const cleanupLoadingRef = useRef(false)');
+  expect(source).toContain('cleanupCursorRef.current = null;\n    cleanupLoadingRef.current = true;');
+  expect(source).toContain('const cursor = cleanupCursorRef.current');
+  expect(source).toContain('if (collection?.role !== "owner" || !cursor || cleanupLoadingRef.current || cleanupLoadingMoreRef.current');
+});
+
+test("traverses empty cleanup pages and binds convergence to the source collection", () => {
+  expect(source).toContain('const traversedCursors = new Set<string | undefined>()');
+  expect(source).toContain('while (!traversedCursors.has(cursor))');
+  expect(source).toContain('if (mutableImages.length > 0 || !page.nextCursor)');
+  expect(source).toContain('cursor = page.nextCursor');
+  expect(source).toContain('const sourceCollectionKey = cleanupCollectionKeyRef.current');
+  expect(source).toContain('applyDeletedCleanupImages(deletedTargets, sourceCollectionKey)');
+  expect(source).toContain('collection.key === sourceCollectionKey');
+  expect(source).not.toContain('const collectionKey = activeCollectionKey.current;\n    updateCollectionSingleton');
+});
+
+test("invalidates and authoritatively reloads cleanup for permission and external changes", () => {
+  expect(source).toContain('if (!busyRef.current && (plan.has("access") || plan.has("cleanup"))');
+  expect(source).toContain('if (cleanupWasOpen && (plan.has("access") || plan.has("cleanup"))) invalidateCleanupLoad()');
+  expect(source).toContain('const needsCleanup = cleanupWasOpen && (plan.has("access") || plan.has("cleanup"))');
+  expect(source).toContain('await loadCleanupImages(cleanupThresholdRef.current, currentCollection)');
+  expect(source).toContain('request === cleanupRequest.current');
+  expect(source).toContain('cleanupCollectionKeyRef.current === collectionKey');
+});
+
+test("virtualizes cleanup directly and keeps later pages reachable after exclusions", () => {
+  expect(source).toContain('activeSheet === "cleanup" ? <FlatList');
+  expect(source).toContain('numColumns={IMAGE_COLUMNS}');
+  expect(source).toContain('keyExtractor={({ key }) => key}');
+  expect(source).toContain('onEndReached={() => void loadMoreCleanupImages()}');
+  expect(source).toContain('ListHeaderComponent={<View style={styles.cleanupHeader}>');
+  expect(source).toContain('ListEmptyComponent={cleanupLoading ?');
+  expect(source).toContain('ListFooterComponent={cleanupLoadingMore ?');
+  expect(source).toContain('remainingCount <= IMAGE_COLUMNS && cleanupCursorRef.current');
+  expect(source).toContain('setTimeout(() => { void loadMoreCleanupImages(); }, 0)');
+  const cleanupListStart = source.indexOf('activeSheet === "cleanup" ? <FlatList');
+  const normalSheetScroll = source.indexOf(': <ScrollView', cleanupListStart);
+  expect(cleanupListStart).toBeGreaterThan(-1);
+  expect(normalSheetScroll).toBeGreaterThan(cleanupListStart);
+});
+
+test("shows the selected cleanup count inside the hidden confirmation sheet", () => {
+  expect(source).toContain('activeSheet === "confirmCleanupDelete" ? <View');
+  expect(source).toContain('Delete {cleanupImages.length} selected image{cleanupImages.length === 1 ? "" : "s"}?');
+  expect(source).toContain('activeSheet === "cleanupMenu" || activeSheet === "confirmCleanupDelete"');
 });
 
 test("gates collection search focus while the Core sheet closes", () => {
@@ -154,8 +232,8 @@ test("gates collection search focus while the Core sheet closes", () => {
 });
 
 test("provides collection sharing navigation and permission gates", () => {
-  expect(source).toContain(">My</Button>");
-  expect(source).toContain(">Shared</Button>");
+  expect(source).toContain(">My collections</Button>");
+  expect(source).toContain(">Shared collections</Button>");
   expect(source).toContain("<MemberIcon size=\"sm\"");
   expect(source).toContain('collectionRole === "collaborator" && image.createdByKey === activeCollection.memberKey');
   expect(source).toContain('pushSheet("confirmLeaveCollection")');
@@ -165,7 +243,7 @@ test("provides collection sharing navigation and permission gates", () => {
   expect(sharingSource).toContain('successTitle = "Share link copied to clipboard"');
   expect(sharingSource).toContain("showToast({ title, duration: 2_000 })");
   expect(sharingSource).toContain('setCachedGalleryShareLinks');
-  expect(sharingSource).toContain('galleryQueryKeys.members(context, collection.key), refetchType: "none"');
+  expect(sharingSource).toContain('galleryQueryKeys.members(context, collection.key), exact: true, refetchType: "none"');
   expect(sharingSource).toContain('view === "memberRemoveConfirm"');
   expect(sharingSource).toContain('active === selectedLink.active');
   expect(source).toContain('open={!sharingOpen && sheetOpen');
@@ -188,8 +266,8 @@ test("restores the root create action and Archive-style ownership tabs", () => {
   expect(source).toContain('<PlusIcon size="sm" />');
   expect(source).toContain('<Tabs accessibilityRole="tablist" style={styles.collectionTabs}>');
   expect(source).toContain('<Button accessibilityRole="tab" accessibilityState={{ selected: collectionTab === "mine" }}');
-  expect(source).toContain('size="xs" style={styles.collectionTab} variant={collectionTab === "mine" ? "secondary" : "ghost"}>My</Button>');
-  expect(source).toContain('size="xs" style={styles.collectionTab} variant={collectionTab === "shared" ? "secondary" : "ghost"}>Shared</Button>');
+  expect(source).toContain('size="xs" style={styles.collectionTab} variant={collectionTab === "mine" ? "secondary" : "ghost"}>My collections</Button>');
+  expect(source).toContain('size="xs" style={styles.collectionTab} variant={collectionTab === "shared" ? "secondary" : "ghost"}>Shared collections</Button>');
   expect(source).toContain('collectionTabs: { flexDirection: "row", gap: 4, padding: 3, borderWidth: 1, backgroundColor: palette.panel }');
 });
 
@@ -240,7 +318,7 @@ test("generation-guards context changes and gates event network work", () => {
   expect(source).toContain("refreshCoalescer.current.reset()");
   expect(source).toContain("if (!isCurrent()) return");
   expect(source).toContain('const needsIndex = plan.has("root") || plan.has("access")');
-  expect(source).toContain('if (!needsIndex && !needsOverview && !needsSubjects) return');
+  expect(source).toContain('if (!needsIndex && !needsOverview && !needsSubjects && !needsCleanup) return');
   expect(source).toContain("await replayOverviewWindow(activeCollection?.key, images.length, generation)");
 });
 
@@ -325,6 +403,20 @@ test("filters share links with shared active and inactive tabs", () => {
   expect(sharingSource).toContain('Array.from({ length: 3 }');
   expect(sharingSource).toContain("No {linkTab} share links.");
   expect(sharingSource).toContain('setLinkTab(result.link.active ? "active" : "inactive")');
+});
+
+test("uses Archive-style mutation lists for collection collaboration", () => {
+  expect(sharingSource).toContain('mutation = view === "members" || view === "invites"');
+  expect(sharingSource).toContain('dismissible={!busy}');
+  expect(sharingSource).not.toContain('tall={tall}');
+  expect(sharingSource).toContain('if (navigate) { setInvites([]); setView("invites"); }');
+  expect(sharingSource).toContain('queryKey: incomingInvitesQueryKey, exact: true, refetchType: "none"');
+  expect(sharingSource).toContain('if (navigate) { setLinks([]); setLinkTab("active"); setView("links"); }');
+  expect(sharingSource).toContain('size="sm" style={styles.pillButton} variant="secondary"');
+  expect(sharingSource).toContain('pillSkeleton: { width: "100%", minHeight: 38, borderRadius: 999, backgroundColor: palette.hairlineBright, opacity: 0.72 }');
+  expect(sharingSource).toContain('list: { gap: 6, paddingBottom: spacing.xl }');
+  expect(sharingSource).not.toContain('rowSkeleton');
+  expect(sharingSource).not.toContain('variant="ghost"><View><Text numberOfLines={1} style={styles.name}>{link.url}');
 });
 
 test("shares secure links through the native OS chooser", () => {

@@ -26,7 +26,7 @@ const definitions: Array<{
   schema: z.ZodTypeAny;
   mutation?: boolean;
 }> = [
-  { operation: 'overview', name: 'gallery_overview', description: 'List Gallery collections and a cursor page of recent images, optionally within one collection.', schema: galleryOperationInputSchemas.overview },
+  { operation: 'overview', name: 'gallery_overview', description: 'List Gallery collections and a cursor page of recent images, optionally within one collection and filtered by maximum current caption score; legacy placeholder scores are excluded.', schema: galleryOperationInputSchemas.overview },
   { operation: 'createCollection', name: 'gallery_collection_create', description: 'Create a Gallery collection.', schema: galleryOperationInputSchemas.createCollection, mutation: true },
   { operation: 'updateCollection', name: 'gallery_collection_update', description: 'Update a Gallery collection name, favorite state, and optional custom cover.', schema: galleryOperationInputSchemas.updateCollection, mutation: true },
   { operation: 'deleteCollection', name: 'gallery_collection_delete', description: 'Delete a Gallery collection without deleting images that remain in Gallery.', schema: galleryOperationInputSchemas.deleteCollection, mutation: true },

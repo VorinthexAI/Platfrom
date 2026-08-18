@@ -241,8 +241,8 @@ async function fetchWithTimeout(input: string, init: RequestInit | undefined, ti
   }
 }
 
-export function fetchGalleryOverview(collectionKey?: string, cursor?: string, limit = 100) {
-  return postGallery<Omit<GalleryOverview, "collections"> & { collections: GalleryCollectionProjection[] }>("/gallery/overview", { ...(collectionKey ? { collectionKey } : {}), ...(cursor ? { cursor } : {}), limit })
+export function fetchGalleryOverview(collectionKey?: string, cursor?: string, limit = 100, maxCaptionScore?: number) {
+  return postGallery<Omit<GalleryOverview, "collections"> & { collections: GalleryCollectionProjection[] }>("/gallery/overview", { ...(collectionKey ? { collectionKey } : {}), ...(cursor ? { cursor } : {}), limit, ...(maxCaptionScore !== undefined ? { maxCaptionScore } : {}) })
     .then((overview) => ({ ...overview, collections: overview.collections.map(normalizeCollection) }));
 }
 

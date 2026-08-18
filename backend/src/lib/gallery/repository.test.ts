@@ -191,9 +191,56 @@ describe('Gallery repository transactions', () => {
     const first = await repository.listOverview({ scopeKey, actorKey, collectionKey, limit: 2 });
     expect(first.images.items.map(({ key }) => key)).toEqual(rows.slice(0, 2).map(({ _key }) => _key));
     expect(first.images.nextCursor).toBeString();
+    expect(JSON.parse(Buffer.from(first.images.nextCursor!, 'base64url').toString('utf8'))).toEqual({ version: 1, scopeKey, collectionKey, createdAt: rows[1]!.createdAt, imageKey: rows[1]!._key });
     await repository.listOverview({ scopeKey, actorKey, collectionKey, limit: 2, cursor: first.images.nextCursor! });
     expect(imageBinds[1]).toMatchObject({ afterCreatedAt: rows[1]!.createdAt, afterImageKey: rows[1]!._key, queryLimit: 3 });
     await expect(repository.listOverview({ scopeKey, actorKey, collectionKey: newId(), limit: 2, cursor: first.images.nextCursor! })).rejects.toThrow('Cursor does not belong');
+  });
+
+  test('filters caption scores before stable keyset pagination and binds the threshold into cursors', async () => {
+    const scopeKey = newId(), collectionKey = newId(), actorKey = newId();
+    const createdAt = '2026-08-17T12:00:00.000Z';
+    const rows = [0, 1, 2].map((index) => ({
+      _key: newId(), scopeKey, filename: `${index}.jpg`, caption: `Image ${index}`, imageCaptionKey: newId(), storageKey: `media/${index}`, mimeType: 'image/jpeg', sizeBytes: 100, width: 10, height: 10, embedding: Array(4_096).fill(0), isFavorite: false, deletedAt: null, createdAt, updatedAt: createdAt,
+    }));
+    let imageQuery = '', imageBinds: Record<string, unknown> = {};
+    const database: MediaLibraryDatabase = { async query(query, bindVars) { return { async all() {
+      if (query.includes('FOR collection IN collections')) return [];
+      imageQuery = query;
+      imageBinds = bindVars ?? {};
+      return rows;
+    } }; } };
+    const repository = createGalleryRepository(database);
+    const first = await repository.listOverview({ scopeKey, actorKey, collectionKey, maxCaptionScore: 40, limit: 2 });
+    expect(imageQuery).toContain('LET caption = DOCUMENT(imageCaptions, image.imageCaptionKey)');
+    expect(imageQuery).toContain('caption.scopeKey == @scopeKey');
+    expect(imageQuery).toContain('caption.scoreVersion == 1 && IS_NUMBER(caption.score) && caption.score <= @maxCaptionScore');
+    expect(imageQuery.indexOf('LET caption = DOCUMENT(imageCaptions, image.imageCaptionKey)')).toBeGreaterThan(imageQuery.indexOf('FILTER @collectionKey == null ?'));
+    expect(imageQuery.indexOf('caption.score <= @maxCaptionScore')).toBeLessThan(imageQuery.indexOf('FILTER @afterCreatedAt'));
+    expect(imageQuery).toContain('SORT image.createdAt DESC, image._key ASC LIMIT @queryLimit');
+    expect(imageBinds).toMatchObject({ maxCaptionScore: 40, queryLimit: 3 });
+    expect(JSON.parse(Buffer.from(first.images.nextCursor!, 'base64url').toString('utf8'))).toMatchObject({ version: 2, maxCaptionScore: 40 });
+    await expect(repository.listOverview({ scopeKey, actorKey, collectionKey, maxCaptionScore: 40, limit: 2, cursor: first.images.nextCursor! })).resolves.toBeDefined();
+    await expect(repository.listOverview({ scopeKey, actorKey, collectionKey, maxCaptionScore: 41, limit: 2, cursor: first.images.nextCursor! })).rejects.toThrow('Cursor does not belong');
+    await expect(repository.listOverview({ scopeKey, actorKey, collectionKey, limit: 2, cursor: first.images.nextCursor! })).rejects.toThrow('Cursor does not belong');
+  });
+
+  test('accepts legacy overview cursors only for unfiltered requests and omits caption AQL when unfiltered', async () => {
+    const scopeKey = newId(), collectionKey = newId(), actorKey = newId(), imageKey = newId(), createdAt = '2026-08-17T12:00:00.000Z';
+    const cursor = Buffer.from(JSON.stringify({ version: 1, scopeKey, collectionKey, createdAt, imageKey }), 'utf8').toString('base64url');
+    let imageQuery = '', imageBinds: Record<string, unknown> = {};
+    const database: MediaLibraryDatabase = { async query(query, bindVars) { return { async all() {
+      if (query.includes('FOR collection IN collections')) return [];
+      imageQuery = query;
+      imageBinds = bindVars ?? {};
+      return [];
+    } }; } };
+    const repository = createGalleryRepository(database);
+    await repository.listOverview({ scopeKey, actorKey, collectionKey, limit: 2, cursor });
+    expect(imageQuery).not.toContain('imageCaptions');
+    expect(imageBinds).not.toHaveProperty('maxCaptionScore');
+    expect(imageBinds).toMatchObject({ afterCreatedAt: createdAt, afterImageKey: imageKey });
+    await expect(repository.listOverview({ scopeKey, actorKey, collectionKey, maxCaptionScore: 40, limit: 2, cursor })).rejects.toThrow('Cursor does not belong');
   });
 
   test('lists persisted visual identity matches within an optional collection', async () => {

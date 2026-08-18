@@ -134,6 +134,17 @@ test("sends collection-scoped semantic searches through the canonical endpoint",
 test("requests cursor pages of one hundred collection images", async () => {
   await fetchGalleryOverview("collection", "next-page");
   expect(calls[0]).toMatchObject({ path: "/gallery/overview", body: { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection", cursor: "next-page", limit: 100 } });
+  expect(calls[0]?.body).not.toHaveProperty("maxCaptionScore");
+});
+
+test("sends an inclusive caption score threshold on initial and cursor overview calls", async () => {
+  await fetchGalleryOverview("collection", undefined, 100, 50);
+  await fetchGalleryOverview("collection", "next-page", 100, 50);
+
+  expect(calls.map(({ body }) => body)).toEqual([
+    { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection", limit: 100, maxCaptionScore: 50 },
+    { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection", cursor: "next-page", limit: 100, maxCaptionScore: 50 },
+  ]);
 });
 
 test("normalizes legacy overview collection roles and capabilities without granting viewer writes", async () => {
