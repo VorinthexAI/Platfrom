@@ -9,6 +9,39 @@ export type GalleryCollection = {
   isFavorite: boolean;
   count: number;
   coverUrl: string | null;
+  memberKey: string;
+  role: GalleryCollectionRole;
+  access: { canRead: boolean; canContribute: boolean; canManage: boolean };
+};
+
+export type GalleryCollectionRole = "owner" | "collaborator" | "viewer";
+
+export type GalleryCollectionMember = {
+  key: string;
+  memberKey: string;
+  name: string;
+  email: string | null;
+  role: GalleryCollectionRole;
+  joinedAt: string;
+};
+
+export type GalleryCollectionInvite = {
+  key: string;
+  recipient: string;
+  role: Exclude<GalleryCollectionRole, "owner">;
+  createdAt: string;
+  collection: { key: string; name: string };
+  inviterDisplayName: string;
+  email?: string;
+  inviteeKey?: string;
+};
+
+export type GalleryCollectionShareLink = {
+  key: string;
+  url: string;
+  role: Exclude<GalleryCollectionRole, "owner">;
+  active: boolean;
+  createdAt: string;
 };
 
 export type GalleryImage = {
@@ -28,12 +61,14 @@ export type GalleryImage = {
   updatedAt: string;
   url: string;
   score?: number;
+  createdByKey?: string | null;
 };
 
 export type GalleryOverview = {
   collections: GalleryCollection[];
   images: GalleryImage[];
   nextCursor: string | null;
+  canCreateCollections: boolean;
 };
 
 export function filterCollections(collections: GalleryCollection[], query: string) {
@@ -102,6 +137,12 @@ export function getGalleryContext(): GalleryContext {
   return context;
 }
 
+export function getGalleryMemberKey() {
+  const organization = useAuthStore.getState().organization;
+  const value = organization?.membership_key ?? organization?.membershipKey;
+  return typeof value === "string" ? value : "";
+}
+
 async function postGallery<T>(path: string, input: Record<string, unknown>, timeout = 60_000) {
   try {
     const response = await apiClient.post<ApiResponse<T>>(path, { ...getGalleryContext(), ...input }, { timeout });
@@ -112,6 +153,66 @@ async function postGallery<T>(path: string, input: Record<string, unknown>, time
     if (failure && !failure.success) throw new Error(failure.error.message);
     throw error;
   }
+}
+
+export const GALLERY_COLLECTION_SHARING_ENDPOINTS = {
+  members: "/gallery/collections/members",
+  updateMember: "/gallery/collections/members/role",
+  removeMember: "/gallery/collections/members/remove",
+  invites: "/gallery/invites/pending",
+  acceptInvite: "/gallery/invites/accept",
+  rejectInvite: "/gallery/invites/reject",
+  shareLinks: "/gallery/collections/shares/list",
+  createShareLink: "/gallery/collections/shares",
+  updateShareLink: "/gallery/collections/shares/update",
+  leave: "/gallery/collections/leave",
+  activateShare: "/gallery/shares/activate",
+} as const;
+
+export function listGalleryCollectionMembers(collectionKey: string) {
+  type ProjectedMember = Omit<GalleryCollectionMember, "name" | "email"> & { displayName: string };
+  return postGallery<{ owners: ProjectedMember[]; collaborators: ProjectedMember[]; viewers: ProjectedMember[] }>(GALLERY_COLLECTION_SHARING_ENDPOINTS.members, { collectionKey }).then(({ owners, collaborators, viewers }) => ({ members: [...owners, ...collaborators, ...viewers].map(({ displayName, ...member }) => ({ ...member, name: displayName, email: null })) }));
+}
+
+export function updateGalleryCollectionMember(collectionKey: string, memberKey: string, role: Exclude<GalleryCollectionRole, "owner">) {
+  return postGallery<{ memberKey: string; role: Exclude<GalleryCollectionRole, "owner">; joinedAt: string }>(GALLERY_COLLECTION_SHARING_ENDPOINTS.updateMember, { collectionKey, memberKey, role });
+}
+
+export function removeGalleryCollectionMember(collectionKey: string, memberKey: string) {
+  return postGallery<{ memberKey: string }>(GALLERY_COLLECTION_SHARING_ENDPOINTS.removeMember, { collectionKey, memberKey });
+}
+
+export function listGalleryCollectionInvites(memberKeys: string[] = []) {
+  type PendingInvite = Omit<GalleryCollectionInvite, "recipient"> & { email?: string; inviteeKey?: string };
+  const email = useAuthStore.getState().user?.email?.trim().toLocaleLowerCase();
+  const memberships = new Set([getGalleryMemberKey(), ...memberKeys].filter(Boolean));
+  return postGallery<{ invites: PendingInvite[] }>(GALLERY_COLLECTION_SHARING_ENDPOINTS.invites, {}).then(({ invites }) => ({ invites: invites
+    .filter((invite) => Boolean(email && invite.email?.toLocaleLowerCase() === email) || Boolean(invite.inviteeKey && memberships.has(invite.inviteeKey)))
+    .map((invite) => ({ ...invite, recipient: invite.email ?? invite.inviteeKey ?? "Pending recipient" })) }));
+}
+
+export function respondToGalleryCollectionInvite(inviteKey: string, response: "accept" | "reject") {
+  return postGallery<{ inviteKey: string }>(response === "accept" ? GALLERY_COLLECTION_SHARING_ENDPOINTS.acceptInvite : GALLERY_COLLECTION_SHARING_ENDPOINTS.rejectInvite, { inviteKey });
+}
+
+export function listGalleryCollectionShareLinks(collectionKey: string) {
+  return postGallery<{ shares: GalleryCollectionShareLink[] }>(GALLERY_COLLECTION_SHARING_ENDPOINTS.shareLinks, { collectionKey }).then(({ shares }) => ({ links: shares }));
+}
+
+export function createGalleryCollectionShareLink(collectionKey: string, role: Exclude<GalleryCollectionRole, "owner">, active: boolean) {
+  return postGallery<{ share: GalleryCollectionShareLink }>(GALLERY_COLLECTION_SHARING_ENDPOINTS.createShareLink, { collectionKey, role, active }).then(({ share }) => ({ link: share }));
+}
+
+export function updateGalleryCollectionShareLink(collectionKey: string, shareKey: string, active: boolean) {
+  return postGallery<{ share: GalleryCollectionShareLink }>(GALLERY_COLLECTION_SHARING_ENDPOINTS.updateShareLink, { collectionKey, shareKey, active }).then(({ share }) => ({ link: share }));
+}
+
+export function leaveGalleryCollection(collectionKey: string) {
+  return postGallery<{ collectionKey: string }>(GALLERY_COLLECTION_SHARING_ENDPOINTS.leave, { collectionKey });
+}
+
+export function activateGalleryShare(token: string) {
+  return postGallery<{ scopeKey: string; collectionKey: string; role: GalleryCollectionRole }>(GALLERY_COLLECTION_SHARING_ENDPOINTS.activateShare, { token });
 }
 
 async function fetchWithTimeout(input: string, init: RequestInit | undefined, timeout: number) {

@@ -5,7 +5,7 @@ import { createMediaLibraryService, mediaLibraryRequestFingerprint, hashMediaLib
 
 const now = '2026-08-07T12:00:00.000Z'; const later = '2026-08-08T12:00:00.000Z';
 function repository(overrides: Partial<MediaLibraryRepository> = {}): MediaLibraryRepository {
-  return { getImage: async () => null, getCollection: async () => null, ownsImage: async () => true, canAccessImage: async () => true, canAccessCollection: async () => true, canManageScope: async () => true, ownsCollection: async () => true, addImageToCollection: async (value) => value, copyImageToCollection: async (value) => value, moveImageBetweenCollections: async (_source, value) => value, leaveCollection: async () => true, createCollectionInvite: async (value, replay) => ({ invite: value, ...replay }), getAcceptedCollectionInviteMembership: async () => null, acceptCollectionInvite: async () => null, createTagAssignment: async (value) => value, setCollectionCoverImage: async () => null, createGlobalShare: async (value, _owner, replay) => ({ share: value, ...replay }), getActiveGlobalShareByTokenHash: async () => null, getTag: async () => null, ...overrides };
+  return { getImage: async () => null, getCollection: async () => null, ownsImage: async () => true, canAccessImage: async () => true, canAccessCollection: async () => true, canManageScope: async () => true, ownsCollection: async () => true, addImageToCollection: async (value) => value, copyImageToCollection: async (value) => value, moveImageBetweenCollections: async (_source, value) => value, leaveCollection: async () => true, createCollectionInvite: async (value, replay) => ({ invite: value, ...replay }), getAcceptedCollectionInviteMembership: async () => null, acceptCollectionInvite: async () => null, acceptCollectionInviteAtomic: async () => null, updateAcceptedCollectionInviteRole: async () => null, createTagAssignment: async (value) => value, setCollectionCoverImage: async () => null, createGlobalShare: async (value, _owner, replay) => ({ share: value, ...replay }), getActiveGlobalShareByTokenHash: async () => null, getTag: async () => null, ...overrides };
 }
 const requestFingerprint = (value: string) => mediaLibraryRequestFingerprint(value, Buffer.alloc(32, 9));
 describe('MediaLibrary service boundaries', () => {
@@ -58,7 +58,7 @@ describe('MediaLibrary service boundaries', () => {
     const shareInput = { scopeKey, sourceType: 'collection' as const, sourceKey: collectionKey, ownerKey: actorKey, password: 'secret', now, idempotencyKey: 'same-share' };
     const firstShare = await service.createGlobalShare(shareInput);
     expect(await service.createGlobalShare(shareInput)).toEqual(firstShare);
-    await expect(service.createGlobalShare({ ...shareInput, permission: 'comment' as const })).rejects.toThrow('different share');
+    await expect(service.createGlobalShare({ ...shareInput, permission: 'collaborator' as const })).rejects.toThrow('different share');
     await expect(service.createGlobalShare({ ...shareInput, password: 'different secret' })).rejects.toThrow('different share');
     const storedRequestHash = shares.values().next().value.requestHash as string;
     expect(storedRequestHash).not.toBe(createHash('sha256').update('secret').digest('hex'));
@@ -66,11 +66,20 @@ describe('MediaLibrary service boundaries', () => {
   });
 
   test('returns an existing accepted membership without accepting twice', async () => {
-    const membership = { key: newId(), scopeKey: newId(), collectionKey: newId(), memberKey: newId(), role: 'member' as const, createdAt: now };
+    const membership = { key: newId(), scopeKey: newId(), collectionKey: newId(), memberKey: newId(), role: 'collaborator' as const, createdAt: now };
     let acceptanceCalls = 0;
     const service = createMediaLibraryService({ repository: repository({ getAcceptedCollectionInviteMembership: async () => membership, acceptCollectionInvite: async () => { acceptanceCalls += 1; return null; } }) });
     expect(await service.acceptCollectionInvite({ token: 'x'.repeat(32), recipientKey: membership.memberKey, now })).toEqual(membership);
     expect(acceptanceCalls).toBe(0);
+  });
+
+  test('accepts viewer invites directly through the atomic repository path', async () => {
+    const viewer = { key: newId(), scopeKey: newId(), collectionKey: newId(), memberKey: newId(), role: 'viewer' as const, createdAt: now };
+    let legacyCalls = 0, repairCalls = 0;
+    const service = createMediaLibraryService({ repository: repository({ acceptCollectionInvite: async () => { legacyCalls += 1; return null; }, updateAcceptedCollectionInviteRole: async () => { repairCalls += 1; return null; }, acceptCollectionInviteAtomic: async () => viewer }) });
+    await expect(service.acceptCollectionInvite({ token: 'x'.repeat(32), recipientKey: viewer.memberKey, now })).resolves.toEqual(viewer);
+    expect(legacyCalls).toBe(0);
+    expect(repairCalls).toBe(0);
   });
 
   test('requires source image access before add, copy, or move', async () => {

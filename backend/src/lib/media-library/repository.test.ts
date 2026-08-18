@@ -66,7 +66,7 @@ describe('MediaLibrary image similarity search', () => {
     expect(query).toContain('actorMembership.status == "active"');
     expect(query).toContain('actorMembership.organizationId == @organizationKey');
     expect(query).toContain('actorScope.organizationKey == @organizationKey');
-    expect(query).toContain('FILTER elevated || scoped || collectionAccess');
+    expect(query).toContain('FILTER privileged || (image.createdByKey == @actorKey && relationCount == 0) || collectionAccess');
     expect(query).toContain('collectionImage.collectionKey == @collectionKey');
     expect(query).toContain('collection.deletedAt == null');
     expect(query).toContain('LENGTH(image.embedding) == @dimensions');

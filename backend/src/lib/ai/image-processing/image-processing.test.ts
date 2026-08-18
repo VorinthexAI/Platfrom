@@ -15,7 +15,7 @@ describe('MediaLibrary image processing', () => {
       persistImage: async ({ image, caption }) => { stored = { image, caption }; return image; }, createKey: () => 'cmrnlzf650002qc7k4p5zem5w', createCaptionKey: () => 'cmrnlzf650002qc7k4p5zem5x',
     });
     expect(result.embedding).toHaveLength(4096);
-    expect(stored).toMatchObject({ image: { width: 2, height: 3, sizeBytes: 24, city: 'Stockholm', country: 'Sweden', countryCode: 'SE', imageCaptionKey: 'cmrnlzf650002qc7k4p5zem5x' }, caption: { perceptualHash: '0123456789abcdef', caption: 'A blue square.', score: 84 } });
+    expect(stored).toMatchObject({ image: { width: 2, height: 3, sizeBytes: 24, city: 'Stockholm', country: 'Sweden', countryCode: 'SE', imageCaptionKey: 'cmrnlzf650002qc7k4p5zem5x', createdByKey: 'c987654321' }, caption: { perceptualHash: '0123456789abcdef', caption: 'A blue square.', score: 84 } });
     expect(stored?.image).not.toHaveProperty('ownerKey');
     expect(stored?.image).not.toHaveProperty('embeddingProvider');
     expect(embeddingTexts).toEqual([

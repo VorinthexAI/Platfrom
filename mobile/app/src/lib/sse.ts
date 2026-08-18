@@ -26,3 +26,15 @@ export function consumeServerSentEvents(buffer: string, emit: (event: ServerSent
   }
   return remainder;
 }
+
+export const INVALIDATING_EVENT_SLUGS = ["collection.changed"] as const;
+
+export function invalidatesGalleryQueries(event: string) {
+  return (INVALIDATING_EVENT_SLUGS as readonly string[]).includes(event);
+}
+
+export function eventStreamRetryDelay(attempt: number, random = Math.random) {
+  const boundedAttempt = Math.max(0, Math.min(attempt, 5));
+  const base = Math.min(30_000, 1_000 * 2 ** boundedAttempt);
+  return Math.round(base * (0.75 + random() * 0.5));
+}

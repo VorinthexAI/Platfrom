@@ -62,11 +62,12 @@ import { communicationHandlers } from './communication';
 import { bootstrapGuestAuth, getAuthAccount, logoutAuthAccount, patchAuthAccount } from './auth-account';
 import { recordPlatformEvent } from './platform-events';
 import { postPersonalAssistantResponse } from './personal-assistant';
-import { completeGalleryUploads, createGalleryCollection, createGallerySubject, deleteGalleryCollection, deleteGalleryCollectionDuplicates, deleteGalleryImages, deleteGallerySubject, findGalleryCollectionDuplicates, galleryOverview, galleryUploadStatus, listGallerySubjectImages, listGallerySubjects, presignGalleryUploads, restoreGallerySubject, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryImage } from './gallery';
+import { acceptGalleryCollectionInvite, activateGalleryCollectionShare, completeGalleryUploads, createGalleryCollection, createGalleryCollectionInvite, createGalleryCollectionShare, createGallerySubject, deleteGalleryCollection, deleteGalleryCollectionDuplicates, deleteGalleryImages, deleteGallerySubject, findGalleryCollectionDuplicates, galleryOverview, galleryUploadStatus, leaveGalleryCollection, listGalleryCollectionMembers, listGalleryCollectionShares, listGalleryPendingInvites, listGallerySubjectImages, listGallerySubjects, presignGalleryUploads, rejectGalleryCollectionInvite, removeGalleryCollectionMember, restoreGallerySubject, revokeGalleryCollectionInvite, revokeGalleryCollectionShare, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryCollectionMemberRole, updateGalleryCollectionShare, updateGalleryImage } from './gallery';
 import { travelHandlers } from './travel';
 import { emailHandlers } from './email-inbox';
 import { bookHandlers } from './books';
 import { userSettingsHandlers } from './user-settings';
+import { streamEvents } from './events';
 
 const challengeHash = z.string().regex(/^[a-f0-9]{64}$/);
 const tokenHashBodyBase = strictObject({ token_hash: challengeHash });
@@ -412,6 +413,7 @@ export function registerRoutes(app: Hono) {
   app.post('/auth/logout', logoutAuthAccount);
 
   app.post('/app/events', recordPlatformEvent);
+  app.get('/events/stream', streamEvents);
 
   app.post('/presence/join', joinPresence);
   app.post('/presence/beat', presenceBeat);
@@ -455,6 +457,20 @@ export function registerRoutes(app: Hono) {
   app.post('/gallery/collections', createGalleryCollection);
   app.post('/gallery/collections/update', updateGalleryCollection);
   app.post('/gallery/collections/delete', deleteGalleryCollection);
+  app.post('/gallery/collections/members', listGalleryCollectionMembers);
+  app.post('/gallery/collections/members/role', updateGalleryCollectionMemberRole);
+  app.post('/gallery/collections/members/remove', removeGalleryCollectionMember);
+  app.post('/gallery/collections/leave', leaveGalleryCollection);
+  app.post('/gallery/invites/pending', listGalleryPendingInvites);
+  app.post('/gallery/invites', createGalleryCollectionInvite);
+  app.post('/gallery/invites/accept', acceptGalleryCollectionInvite);
+  app.post('/gallery/invites/reject', rejectGalleryCollectionInvite);
+  app.post('/gallery/invites/revoke', revokeGalleryCollectionInvite);
+  app.post('/gallery/collections/shares/list', listGalleryCollectionShares);
+  app.post('/gallery/collections/shares', createGalleryCollectionShare);
+  app.post('/gallery/collections/shares/update', updateGalleryCollectionShare);
+  app.post('/gallery/collections/shares/revoke', revokeGalleryCollectionShare);
+  app.post('/gallery/shares/activate', activateGalleryCollectionShare);
   app.post('/gallery/uploads/presign', presignGalleryUploads);
   app.post('/gallery/uploads/complete', completeGalleryUploads);
   app.post('/gallery/uploads/status', galleryUploadStatus);

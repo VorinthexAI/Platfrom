@@ -10,6 +10,7 @@ import { computePerceptualHashBatch } from '@/lib/perceptual-hash';
 import { getDefaultGalleryRepository, type GalleryRepository } from './repository';
 import { imageAnalysisDataUrl } from './image-reference';
 import { reverseGeocodeImage, sanitizeGalleryImage, type ImageCoordinates, type ImageLocation } from './image-location';
+import { publishCollectionEvent, publishUserEvent } from '@/api/events';
 
 export type GalleryUploadBatchMetrics = ImageProcessingMetrics & {
   downloadDurationMs: number;
@@ -27,6 +28,8 @@ export interface GalleryUploadProcessingDependencies {
   now?: () => Date;
   onMetrics?: (metrics: GalleryUploadBatchMetrics) => void;
   failureStatus?: 'queued' | 'failed';
+  publishCollectionEvent?: typeof publishCollectionEvent;
+  publishUserEvent?: typeof publishUserEvent;
 }
 
 async function classifyImageSubjects(repository: GalleryRepository, image: Awaited<ReturnType<typeof processImages>>[number]) {
@@ -105,6 +108,12 @@ export async function processGalleryUploadBatch(uploadKeys: readonly string[], d
       await classifyImageSubjects(repository, image).catch(() => undefined);
       if (upload.collectionKey) await repository.addImageToCollection(collectionImageSchema.parse({ key: newId(), scopeKey: upload.scopeKey, collectionKey: upload.collectionKey, imageKey: image.key, addedByKey: upload.actorKey, createdAt: now().toISOString() }));
       await repository.updateUpload(upload.key, { status: 'completed', errorCode: null, updatedAt: now().toISOString() });
+      const userKey = repository.getUserKeyByMemberKey ? await repository.getUserKeyByMemberKey(upload.actorKey).catch(() => null) : null;
+      const publications: Array<() => Promise<unknown> | unknown> = [
+        ...(upload.collectionKey ? [() => (dependencies.publishCollectionEvent ?? publishCollectionEvent)(upload.collectionKey!, 'collection.changed')] : []),
+        ...(userKey ? [() => (dependencies.publishUserEvent ?? publishUserEvent)(userKey, 'collection.changed')] : []),
+      ];
+      await Promise.all(publications.map((publication) => Promise.resolve().then(publication).catch(() => undefined)));
       await Promise.all([storage.delete(upload.storageKey), storage.delete(stored[index]!.stagingKey)].map((cleanup) => cleanup.catch(() => undefined)));
     }));
     const finalizationErrors = finalized.filter((result): result is PromiseRejectedResult => result.status === 'rejected').map(({ reason }) => reason);

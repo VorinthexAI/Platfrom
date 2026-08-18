@@ -20,6 +20,7 @@ import { trackAppOpened } from "@/lib/analytics";
 import { useAuthStore } from "@/state/auth";
 import { useOnboardingStore } from "@/state/onboarding";
 import { palette } from "@/theme/tokens";
+import { readPendingReturnRoute, savePendingReturnRoute } from "@/lib/pending-return-route";
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 let appOpenedTracked = false;
@@ -63,12 +64,18 @@ export default function RootLayout() {
     const root = segments[0] as string | undefined;
     const isPublic = root === "auth" || root === "public" || root === undefined;
     const isOnboarded = useAuthStore.getState().user?.isOnboarded === true;
+    if (status === "unauthenticated" && root === "share") {
+      void savePendingReturnRoute(pathname).finally(() => router.replace({ pathname: "/auth", params: { returnTo: pathname } } as Href));
+      return;
+    }
     if (status === "unauthenticated" && !isPublic) router.replace("/auth" as Href);
-    if (status === "authenticated" && root === "auth") router.replace(isOnboarded ? "/capability/archive" : "/onboarding");
-    if (status === "authenticated" && root === "public") router.replace(isOnboarded ? "/capability/archive" : "/onboarding");
+    if (status === "authenticated" && (root === "auth" || root === "public")) {
+      if (!isOnboarded) router.replace("/onboarding");
+      else void readPendingReturnRoute().then((returnTo) => router.replace((returnTo ?? "/capability/archive") as Href)).catch(() => router.replace("/capability/archive"));
+    }
     if (status === "authenticated" && !isOnboarded && !isPublic && root !== "onboarding") router.replace("/onboarding");
     if (status === "authenticated" && isOnboarded && root === "onboarding") router.replace("/capability/archive");
-  }, [router, segments, status]);
+  }, [pathname, router, segments, status]);
 
   useEffect(() => {
     if (Platform.OS !== "android" || !pathname.startsWith("/capability/")) return;

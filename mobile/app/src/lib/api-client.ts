@@ -73,7 +73,14 @@ export async function patchJson<TBody, TResponse>(path: string, body: TBody): Pr
   return (await apiClient.patch<TResponse>(path, body)).data;
 }
 
-export async function postEventStream(path: string, body: unknown, onEvent: (event: ServerSentEvent) => void, signal?: AbortSignal) {
+async function authenticatedEventStream(
+  method: "GET" | "POST",
+  path: string,
+  body: unknown,
+  onEvent: (event: ServerSentEvent) => void,
+  signal?: AbortSignal,
+  onOpen?: () => void,
+) {
   const { session, generation, invalidated } = await tokenVault.snapshot();
   if (invalidated) unauthorizedListener?.();
   const headers: Record<string, string> = {
@@ -89,6 +96,7 @@ export async function postEventStream(path: string, body: unknown, onEvent: (eve
     let processed = 0;
     let buffer = "";
     let processingError: unknown;
+    let headersHandled = false;
     const abort = () => request.abort();
     const processAvailable = () => {
       if (processingError) return;
@@ -102,9 +110,17 @@ export async function postEventStream(path: string, body: unknown, onEvent: (eve
       }
     };
     const cleanup = () => signal?.removeEventListener("abort", abort);
-    request.open("POST", `${API_BASE_URL.replace(/\/$/, "")}/api/v1${normalizeApiPath(path)}`, true);
+    const processHeaders = () => {
+      if (headersHandled || request.readyState < 2) return;
+      headersHandled = true;
+      const tokens = extractSessionTokens(undefined, (name) => request.getResponseHeader(name));
+      if (tokens) void tokenVault.writeIfCurrent(tokens, generation);
+      if (request.status >= 200 && request.status < 300) onOpen?.();
+    };
+    request.open(method, `${API_BASE_URL.replace(/\/$/, "")}/api/v1${normalizeApiPath(path)}`, true);
     request.withCredentials = true;
     for (const [name, value] of Object.entries(headers)) request.setRequestHeader(name, value);
+    request.onreadystatechange = processHeaders;
     request.onprogress = processAvailable;
     request.onerror = () => { cleanup(); reject(processingError ?? new Error("Streaming request failed.")); };
     request.onabort = () => { cleanup(); reject(processingError ?? new DOMException("Aborted", "AbortError")); };
@@ -123,8 +139,16 @@ export async function postEventStream(path: string, body: unknown, onEvent: (eve
       resolve();
     })().catch((error) => { cleanup(); reject(error); }); };
     signal?.addEventListener("abort", abort, { once: true });
-    request.send(JSON.stringify(body));
+    request.send(method === "POST" ? JSON.stringify(body) : null);
   });
+}
+
+export function getEventStream(path: string, onEvent: (event: ServerSentEvent) => void, signal?: AbortSignal, onOpen?: () => void) {
+  return authenticatedEventStream("GET", path, undefined, onEvent, signal, onOpen);
+}
+
+export function postEventStream(path: string, body: unknown, onEvent: (event: ServerSentEvent) => void, signal?: AbortSignal) {
+  return authenticatedEventStream("POST", path, body, onEvent, signal);
 }
 
 export async function revokeRemoteSession(session: { accessToken: string; refreshToken: string }) {
