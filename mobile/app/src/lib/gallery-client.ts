@@ -44,6 +44,10 @@ export type GalleryCollectionShareLink = {
   createdAt: string;
 };
 
+export function filterGalleryShareLinks(links: GalleryCollectionShareLink[], active: boolean) {
+  return links.filter((link) => link.active === active);
+}
+
 export type GalleryImage = {
   key: string;
   filename: string;
@@ -233,8 +237,8 @@ export function createGalleryCollection(name: string, isFavorite: boolean) {
   return postGallery<GalleryCollection>("/gallery/collections", { name, isFavorite });
 }
 
-export function updateGalleryCollection(collectionKey: string, name: string, isFavorite: boolean) {
-  return postGallery<{ collection: GalleryCollection }>("/gallery/collections/update", { collectionKey, name, isFavorite });
+export function updateGalleryCollection(collectionKey: string, name: string, isFavorite: boolean, coverImageKey?: string | null) {
+  return postGallery<{ collection: GalleryCollection }>("/gallery/collections/update", { collectionKey, name, isFavorite, ...(coverImageKey !== undefined ? { coverImageKey } : {}) });
 }
 
 export function deleteGalleryCollection(collectionKey: string) {

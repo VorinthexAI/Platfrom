@@ -92,7 +92,7 @@ test("provides the full visual identity library and image picker workflow", () =
 
 test("uses separate image-selection and naming steps for visual identities", () => {
   expect(source).toContain('activeSheet === "identityName"');
-  expect(source).toContain('onPress={() => pushSheet("identityName")}');
+  expect(source).toContain('imagePickerPurpose === "cover" ? chooseCollectionCover() : pushSheet("identityName")');
   expect(source).toContain('placeholder="Name"');
   expect(source).not.toContain("Name, for example Hugo");
   expect(source).toContain('accessibilityLabel="Choose a different visual identity image"');
@@ -167,11 +167,174 @@ test("provides collection sharing navigation and permission gates", () => {
   expect(source).toContain('open={!sharingOpen && !pendingInvitesOpen && sheetOpen');
   expect(source).toContain('access.canContribute && role !== "viewer"');
   expect(source).toContain('accessibilityLabel="Pending Gallery invites"');
-  expect(sharingSource).toContain('event.type === "collection.changed"');
+  expect(sharingSource).toContain('event.slug === "collection.access.changed"');
   expect(sharingSource).toContain('accessibilityLabel={`Remove ${selectedMember?.name ?? "member"} from collection`}');
   expect(sharingSource).not.toContain('<View accessible accessibilityHint=');
   expect(source).toContain('const [canCreateCollections, setCanCreateCollections] = useState(false)');
   expect(source).toContain('setCanCreateCollections(overview.canCreateCollections)');
   expect(source).toContain('collectionTab === "mine" && canCreateCollections');
   expect(source).toContain('activeCollection\n    ? isCollectionOwner');
+});
+
+test("edits owner collection covers from existing images with tri-state changes", () => {
+  expect(source).toContain('const [editCoverImageKey, setEditCoverImageKey] = useState<string | null>()');
+  expect(source).toContain('updateGalleryCollection(previous.key, editName.trim(), editFavorite, editCoverImageKey)');
+  expect(source).toContain('setEditCoverImageKey(identityPickerSelected.key)');
+  expect(source).toContain('setEditCoverImageKey(null)');
+  expect(source).toContain('if (!activeCollection || !isCollectionOwner) return');
+  expect(source).toContain('openIdentityPickerCollection(activeCollection)');
+  expect(source).toContain('accessibilityLabel="Clear collection cover"');
+});
+
+test("uses covered collection cards in every collection browser and destination picker", () => {
+  expect(source.match(/collection\.coverUrl \? <Image source=\{collection\.coverUrl\}/g)?.length).toBeGreaterThanOrEqual(4);
+  expect(source.match(/collection\.coverUrl && styles\.coveredCollectionMain/g)?.length).toBeGreaterThanOrEqual(4);
+  expect(source).toContain('accessibilityLabel={`Upload to ${collection.name}`}');
+  expect(source).toContain('accessibilityLabel={`${selected ? "Remove" : "Select"} ${collection.name}`}');
+  expect(source).toContain('openIdentityPickerCollection(collection)');
+});
+
+test("defers workspace and open sharing refreshes while mutations are busy", () => {
+  expect(source).toContain('refreshCoalescer.current.takeIfReady(busyRef.current)');
+  expect(source).toContain('if (!busy && refreshCoalescer.current.hasPending)');
+  expect(sharingSource).toContain('deferredRefresh.current = true');
+  expect(sharingSource).toContain('if (!rebound) setView("members")');
+  expect(sharingSource).toContain('if (!rebound) setView("invites")');
+  expect(sharingSource).toContain('if (!rebound) setView("links")');
+});
+
+test("generation-guards context changes and gates event network work", () => {
+  expect(source).toContain("refreshContextGeneration.current += 1");
+  expect(source).toContain("refreshCoalescer.current.reset()");
+  expect(source).toContain("if (!isCurrent()) return");
+  expect(source).toContain('const needsIndex = plan.has("root") || plan.has("access")');
+  expect(source).toContain('if (!needsIndex && !needsOverview && !needsSubjects) return');
+  expect(source).toContain("await replayOverviewWindow(activeCollection?.key, images.length, generation)");
+});
+
+test("reconciles permission downgrades and authoritatively guards submissions", () => {
+  expect(source).toContain("reconcileGalleryPermissions");
+  expect(source).toContain("if (permissions.closeSheet) closeSheet()");
+  expect(source).toContain('latest?.role !== "owner" || !latest.access.canManage');
+  expect(source).toContain('!destination.access.canContribute || destination.role === "viewer"');
+  expect(source).toContain("selected.every((image) => canMutateInCollection(image, sourceCollection))");
+});
+
+test("recovers assistant mode and preserves incomplete paginated entities", () => {
+  expect(source).toContain("setAssistantSearchSource(message)");
+  expect(source).toContain("recoverAssistantSearchMode(assistantSearchSource)");
+  expect(source).toContain("replayOverviewWindow(collectionKey, images.length, generation)");
+  expect(source).toContain("reconcilePaginatedSelected(current, refreshedImages, imagesComplete)");
+});
+
+test("silently refreshes picker searches without history or selection loss", () => {
+  const silentStart = source.indexOf("async function refreshIdentityPickerSearchSilently");
+  const silentEnd = source.indexOf("function returnToIdentityPicker", silentStart);
+  const silentRefresh = source.slice(silentStart, silentEnd);
+  expect(silentRefresh).toContain("recordHistory: false");
+  expect(silentRefresh).toContain("reconcilePaginatedSelected(selected, result.images, false)");
+  expect(silentRefresh).not.toContain("identityPickerHistoryTimer");
+  expect(source).toContain("await refreshIdentityPickerSearchSilently(identityPickerQuery, pickerCollection, generation)");
+});
+
+test("coalesces and generation-checks sharing refreshes and uses one incoming key", () => {
+  expect(sharingSource).toContain("refreshInFlight.current");
+  expect(sharingSource).toContain("request !== requestGeneration.current");
+  expect(sharingSource).toContain("scheduleSharingRefresh()");
+  expect(sharingSource).toContain("galleryQueryKeys.incomingInvites(context)");
+  expect(sharingSource).not.toContain('setCachedGalleryInvites(queryClient, context, "incoming"');
+  expect(sharingSource).toContain('if (view === "invites" || view === "inviteConfirm"');
+});
+
+test("generation-guards native selection, capture, upload, and polling paths", () => {
+  expect(source).toContain("cameraContextGeneration.current = refreshContextGeneration.current");
+  expect(source).toContain("const generation = cameraContextGeneration.current");
+  expect(source).toContain("if (!isCurrent()) { deletePreparedFiles(files); return; }");
+  expect(source).toContain("await wait(3_000);\n        if (!isCurrent())");
+  expect(source).toContain("await prepareAssets(result.assets, generation)");
+  expect(source).toContain("completeUpload(files, targetCollection.key, batchKey, generation)");
+  expect(source).toContain("setPendingFiles((current) => { deletePreparedFiles(current); return []; })");
+  expect(captureSource).toContain("if (!active.current) { deleteCapturedFile(normalized.uri); return; }");
+});
+
+test("closes upload surfaces on contributor loss and rechecks destinations", () => {
+  expect(source).toContain("canAddImages = Boolean(activeCollection?.access.canContribute");
+  expect(source).toContain('!targetCollection?.access.canContribute || targetCollection.role === "viewer"');
+  expect(source).toContain('!currentCollection?.access.canContribute || currentCollection.role === "viewer"');
+  expect(source).toContain("setCameraOpen(false)");
+});
+
+test("replays media and picker windows and recovers contextual failures", () => {
+  expect(source).toContain("replayPaginatedWindow({");
+  expect(source).toContain("replayOverviewWindow(pickerCollection.key, identityPickerImages.length, generation)");
+  expect(source).toContain('recoverContextualSearchFailure("similar")');
+  expect(source).toContain('recoverContextualSearchFailure("identity")');
+  expect(source).toContain("await replayOverviewWindow(activeCollection?.key, images.length, generation)");
+});
+
+test("orders owner sharing routes and reuses the share-link loader", () => {
+  const accessStart = sharingSource.indexOf('view === "access"');
+  const accessEnd = sharingSource.indexOf('view === "members"', accessStart);
+  const accessMenu = sharingSource.slice(accessStart, accessEnd);
+  expect(accessMenu.indexOf(">Members</BottomSheetItem>")).toBeLessThan(accessMenu.indexOf(">Share links</BottomSheetItem>"));
+  expect(accessMenu.indexOf(">Share links</BottomSheetItem>")).toBeLessThan(accessMenu.indexOf(">Pending invites</BottomSheetItem>"));
+  expect(accessMenu).toContain("{owner ? <>");
+  expect(sharingSource).toContain('view === "members" && owner ?');
+  expect(sharingSource.match(/onPress=\{\(\) => void loadLinks\(\)\}/g)?.length).toBeGreaterThanOrEqual(2);
+});
+
+test("filters share links with shared active and inactive tabs", () => {
+  expect(sharingSource).toContain('accessibilityLabel="Share link status"');
+  expect(sharingSource).toContain(">Active links</Button>");
+  expect(sharingSource).toContain(">Inactive links</Button>");
+  expect(sharingSource).toContain('filterGalleryShareLinks(links, linkTab === "active")');
+  expect(sharingSource).toContain('Array.from({ length: 3 }');
+  expect(sharingSource).toContain("No {linkTab} share links.");
+  expect(sharingSource).toContain('setLinkTab(result.link.active ? "active" : "inactive")');
+});
+
+test("shares secure links through the native OS chooser", () => {
+  expect(sharingSource).toContain('Share as NativeShare');
+  expect(sharingSource).toContain('await NativeShare.share({');
+  expect(sharingSource).toContain('url: link.url');
+  expect(sharingSource).toContain('message: `Open ${collection.name} with this secure link: ${link.url}`');
+  expect(sharingSource).toContain('result.action === NativeShare.dismissedAction');
+  expect(sharingSource).toContain("if (shareWasCancelled(error)) return");
+  expect(sharingSource).toContain('variant="primary">Share</Button>');
+  expect(sharingSource).not.toContain('variant="primary">Copy</Button>');
+  expect(sharingSource).toContain('if (!selectedLink || !owner) return');
+  expect(sharingSource).toContain('view === "links" || view === "link" || view === "createLink"');
+});
+
+test("generation-guards all Gallery mutation results and rollback paths", () => {
+  expect(source).toContain("const captureGalleryContextGuard = () =>");
+  expect(source).toContain("const { isCurrent } = captureGalleryContextGuard()");
+  expect(source).toContain('if (!isCurrent()) throw new Error("Gallery context changed.")');
+  expect(source).toContain("if (!isCurrent() || request !== viewRequest.current) return");
+  expect(source).toContain("invalidateAssistantChanges(queryClient, contentContext, assistantResult.changes)");
+  expect(source).not.toContain("invalidateAssistantChanges(queryClient, getContentContext()");
+  expect(source).toContain("setBusy(false);\n    setAssistantBusy(false)");
+});
+
+test("promotes late authoritative uploads and honors replay end proof", () => {
+  expect(source).toContain("promoteAuthoritativeUploads(fetchedOverview.images)");
+  expect(source).toContain("reconcileOptimisticUploads(current, authoritativeImages).remaining");
+  expect(source).toContain("imagesComplete = fetchedOverview.replayReachedEnd === true");
+  expect(source).toContain("pickerOverview.replayReachedEnd === true");
+  expect(source).toContain('notify("Some images could not be uploaded")');
+  expect(source).toContain("unresolvedUploadJobs.current.set(job.key");
+  expect(source).toContain('if (plan.has("upload")) await refreshUnresolvedUploadJobs(generation)');
+  expect(source).toContain("reconcileUploadJobRegistry([...unresolvedUploadJobs.current.values()], statuses)");
+  expect(source).toContain("unresolvedUploadJobs.current.clear()");
+  expect(source).toContain("imagesComplete = contextualReplayReachedEnd");
+  expect(source).toContain("imagesComplete = normalOverview.replayReachedEnd === true");
+});
+
+test("owner pending invites remain recipient-filtered incoming actions", () => {
+  expect(sharingSource).toContain("galleryQueryKeys.incomingInvites(context)");
+  expect(sharingSource).toContain("listGalleryCollectionInvites(memberKeys)");
+  expect(sharingSource).not.toContain("listGalleryCollectionInvites([collection.memberKey])");
+  expect(sharingSource).toContain('setInviteResponse("accept")');
+  expect(sharingSource).toContain('setInviteResponse("reject")');
+  expect(sharingSource).not.toContain("outgoing");
 });

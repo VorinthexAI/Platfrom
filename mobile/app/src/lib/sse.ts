@@ -1,3 +1,5 @@
+import { GALLERY_EVENT_SLUGS, isGalleryEventSlug, type GalleryEventSlug } from "./gallery-convergence";
+
 export type ServerSentEvent = { event: string; data: string; id?: string };
 
 export function parseServerSentEvent(frame: string): ServerSentEvent | undefined {
@@ -27,10 +29,10 @@ export function consumeServerSentEvents(buffer: string, emit: (event: ServerSent
   return remainder;
 }
 
-export const INVALIDATING_EVENT_SLUGS = ["collection.changed"] as const;
+export const INVALIDATING_EVENT_SLUGS = GALLERY_EVENT_SLUGS;
 
-export function invalidatesGalleryQueries(event: string) {
-  return (INVALIDATING_EVENT_SLUGS as readonly string[]).includes(event);
+export function invalidatesGalleryQueries(event: string): event is GalleryEventSlug {
+  return isGalleryEventSlug(event);
 }
 
 export function eventStreamRetryDelay(attempt: number, random = Math.random) {

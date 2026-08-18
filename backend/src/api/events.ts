@@ -54,7 +54,8 @@ export function publishCollectionEvent(collectionKey: string, event: AppEventSlu
   return publishEvent({ route: 'collection', collectionKey, event });
 }
 
-async function hasCollectionMembership(userKey: string, collectionKey: string) {
+export async function hasCollectionEventAccess(userKey: string, collectionKey: string, event: AppEventSlug) {
+  const ownerOnly = event === 'collection.invites.changed' || event === 'collection.shares.changed';
   const cursor = await db.query(aql`
     RETURN LENGTH(
       FOR collection IN collections
@@ -64,12 +65,27 @@ async function hasCollectionMembership(userKey: string, collectionKey: string) {
       FOR membership IN userOrganizations
         FILTER membership.userId == ${userKey} AND membership.status == "active"
           AND membership.organizationId == scope.organizationKey
-        FOR collectionMembership IN collectionMembers
-          FILTER collectionMembership.memberKey == membership._key
-            AND collectionMembership.collectionKey == ${collectionKey}
-            AND collectionMembership.scopeKey == collection.scopeKey
-          LIMIT 1
-          RETURN 1
+        LET scopeRole = FIRST(
+          FOR member IN scopeMembers
+            FILTER member.scopeKey == collection.scopeKey
+              AND member.userOrganizationKey == membership._key
+              AND member.status == "active"
+            LIMIT 1
+            RETURN member.role
+        )
+        LET collectionMembership = FIRST(
+          FOR member IN collectionMembers
+            FILTER member.memberKey == membership._key
+              AND member.collectionKey == ${collectionKey}
+              AND member.scopeKey == collection.scopeKey
+            LIMIT 1
+            RETURN member
+        )
+        LET manager = membership.orgRole IN ["owner", "admin"]
+          OR scopeRole IN ["owner", "admin", "moderator"]
+          OR collectionMembership.role == "owner"
+        FILTER ${ownerOnly} ? manager : (manager OR collectionMembership != null)
+        RETURN 1
     ) > 0
   `);
   return Boolean(await cursor.next());
@@ -88,7 +104,7 @@ export async function streamEvents(c: Context) {
     const onEvent = (message: string) => {
       const envelope = parseEventEnvelope(message);
       if (!envelope) return;
-      void shouldDeliverEvent(envelope, identity.key, hasCollectionMembership).then((deliver) => {
+      void shouldDeliverEvent(envelope, identity.key, hasCollectionEventAccess).then((deliver) => {
         if (active && deliver) return stream.writeSSE({ event: envelope.event, data: '' });
       }).catch((error) => {
         console.warn('event routing failed', error instanceof Error ? error.message : String(error));

@@ -4,6 +4,7 @@ import { createGalleryRepository } from './repository';
 import type { MediaLibraryDatabase } from '@/lib/media-library';
 import { collectionInviteSchema } from '@/lib/db/collection-invites.node';
 import { shareSchema } from '@/lib/db/shares.node';
+import { galleryUploadSchema } from '@/lib/db/gallery-uploads.node';
 
 describe('Gallery repository transactions', () => {
   test('accepts an invite with separate valid transaction queries and returns the upserted membership', async () => {
@@ -76,6 +77,42 @@ describe('Gallery repository transactions', () => {
     }
   });
 
+  test('atomically authorizes collection updates and validates custom cover membership', async () => {
+    const queries: string[] = [];
+    const binds: Record<string, unknown>[] = [];
+    const database: MediaLibraryDatabase = { async query(query, bindVars) { queries.push(query); binds.push(bindVars ?? {}); return { async all() { return []; } }; } };
+    const repository = createGalleryRepository(database);
+    const coverImageKey = newId();
+    await repository.updateCollectionDetails(newId(), newId(), newId(), 'Summer', false, coverImageKey, Array(4_096).fill(0), '2026-08-18T12:00:00.000Z');
+    await repository.updateCollectionDetails(newId(), newId(), newId(), 'Summer', false, null, Array(4_096).fill(0), '2026-08-18T12:00:00.000Z');
+    await repository.updateCollectionDetails(newId(), newId(), newId(), 'Summer', false, undefined, Array(4_096).fill(0), '2026-08-18T12:00:00.000Z');
+    const query = queries[0]!;
+    expect(query).toContain('actor.status == "active"');
+    expect(query).toContain('actor.orgRole IN ["owner", "admin"]');
+    expect(query).toContain('scopeRole IN ["owner", "admin", "moderator"]');
+    expect(query).toContain('owner != null');
+    expect(query).toContain('cover.deletedAt == null');
+    expect(query).toContain('related != null');
+    expect(query).toContain('cover.scopeKey == @scopeKey');
+    expect(query).toContain('relation.collectionKey == @collectionKey');
+    expect(query).toContain('OPTIONS { keepNull: false }');
+    expect(binds[0]).toMatchObject({ coverImageKey, setCover: true });
+    expect(binds[1]).toMatchObject({ coverImageKey: null, setCover: true });
+    expect(binds[2]).toMatchObject({ coverImageKey: null, setCover: false });
+  });
+
+  test('guards collection create/delete and subject writes at write time', async () => {
+    const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
+    for (const marker of ['createCollection(collection, member)', 'deleteCollection(scopeKey, collectionKey, actorKey', 'createSubject(identity, relations, referenceImageKeys, actorKey)', 'setSubjectDeleted(scopeKey, identityKey, actorKey']) {
+      const section = source.slice(source.indexOf(marker), source.indexOf(marker) + 2_500);
+      expect(section).toContain('actor.status ==');
+      expect(section).toContain('scope.deletedAt ==');
+      expect(section).toContain('actor.orgRole IN');
+      expect(section).toMatch(/scope(?:Member|Role).*IN/);
+    }
+    expect(source).toContain('RETURN formerUserKeys');
+  });
+
   test('encodes the owner, collaborator, and viewer mutation matrix without post-membership creator access', async () => {
     const queries: string[] = [];
     const database: MediaLibraryDatabase = { async query(query) { queries.push(query); return { async all() { return []; } }; } };
@@ -94,9 +131,19 @@ describe('Gallery repository transactions', () => {
     const database: MediaLibraryDatabase = { async query(query) { queries.push(query); return { async all() { return []; } }; } };
     await createGalleryRepository(database).listOverview({ scopeKey: newId(), actorKey: newId(), limit: 10 });
     expect(queries[0]).toContain('item.memberKey == @actorKey');
-    expect(queries[0]).toContain('scopeRole IN ["owner", "admin"]');
+    expect(queries[0]).toContain('scopeRole IN ["owner", "admin", "moderator"]');
+    expect(queries[0]).toContain('SORT relation.createdAt ASC, relation._key ASC');
     expect(queries[1]).toContain('LENGTH(accessibleCollections) > 0');
     expect(queries[1]).toContain('image.createdByKey == @actorKey && relationCount == 0');
+  });
+
+  test('includes active scope moderators in manager-only subject event audiences', async () => {
+    let query = '';
+    const database: MediaLibraryDatabase = { async query(value) { query = value; return { async all() { return []; } }; } };
+    await createGalleryRepository(database).listScopeManagerUserKeys(newId());
+    expect(query).toContain('membership.status == "active"');
+    expect(query).toContain('member.status == "active"');
+    expect(query).toContain('scopeRole IN ["owner", "admin", "moderator"]');
   });
 
   test('returns only an authorized live visual identity in the requested scope', async () => {
@@ -178,7 +225,7 @@ describe('Gallery repository transactions', () => {
     } };
     const repository = createGalleryRepository(database, async (_collections, operation) => operation(database));
     const result = await repository.transferCollectionImages({ scopeKey: newId(), actorKey: newId(), sourceCollectionKey: newId(), destinationCollectionKeys, imageKeys, mode: 'copy', now: '2026-08-13T12:00:00.000Z' });
-    expect(result).toEqual({ status: 'ok', createdRelationCount: 4 });
+    expect(result).toEqual({ status: 'ok', createdRelationCount: 4, collectionKeys: [expect.any(String), ...destinationCollectionKeys] });
     expect(queries.filter((query) => query.includes('UPSERT'))).toHaveLength(4);
     expect(queryBindVars[0]).toEqual({ imageKeys, scopeKey: expect.any(String), sourceCollectionKey: expect.any(String), actorKey: expect.any(String) });
     for (const query of queries.slice(0, 2)) {
@@ -186,7 +233,7 @@ describe('Gallery repository transactions', () => {
       expect(query).toContain('actor.organizationId == scope.organizationKey');
       expect(query).toContain('scope.deletedAt == null');
       expect(query).toContain('actor.orgRole IN ["owner", "admin"]');
-      expect(query).toContain('scopeRole IN ["owner", "admin"]');
+      expect(query).toContain('scopeRole IN ["owner", "admin", "moderator"]');
     }
     expect(queries[0]).toContain('member.role == "owner"');
     expect(queries[0]).toContain('image.createdByKey == @actorKey');
@@ -202,34 +249,151 @@ describe('Gallery repository transactions', () => {
       return { async all() { return query.includes('LET image = DOCUMENT') ? imageKeys : []; } };
     } };
     const repository = createGalleryRepository(database, async (collections, operation) => { transactionCollections = collections; return operation(database); });
-    await expect(repository.deleteImages(newId(), imageKeys, newId(), '2026-08-13T12:00:00.000Z')).resolves.toEqual({ deletedImageKeys: imageKeys });
+    await expect(repository.deleteImages(newId(), imageKeys, newId(), '2026-08-13T12:00:00.000Z')).resolves.toEqual({ deletedImageKeys: imageKeys, collectionKeys: [], subjectChanged: false, hadUnfiledImages: false });
     expect(transactionCollections).toEqual({ read: ['images', 'userOrganizations', 'scopes', 'scopeMembers', 'collectionMembers'], write: ['images', 'collectionImages', 'collections', 'imageIdentities', 'visualIdentities'] });
-    expect(queries).toHaveLength(6);
+    expect(queries).toHaveLength(9);
     expect(queries.some((query) => query.includes('REMOVE relation IN collectionImages'))).toBe(true);
     expect(queries.some((query) => query.includes('REMOVE relation IN imageIdentities'))).toBe(true);
     expect(queries.some((query) => query.includes('LET replacement = FIRST') && query.includes('referenceImageKey: replacement'))).toBe(true);
     expect(queries.some((query) => query.includes('UPDATE image WITH { deletedAt: @now'))).toBe(true);
   });
 
-  test('atomically fails an upload and compensates its persisted image', async () => {
+  test('atomically compensates only a processing upload and transitions it to failed', async () => {
     const uploadKey = newId(), scopeKey = newId(), imageKey = newId();
     const queries: string[] = [];
     let transactionCollections: unknown;
     const database: MediaLibraryDatabase = { async query(query) { queries.push(query); return { async all() { return query.includes('FOR upload IN galleryUploads') ? [imageKey] : []; } }; } };
     const repository = createGalleryRepository(database, async (collections, operation) => { transactionCollections = collections; return operation(database); });
-    await expect(repository.failUpload(uploadKey, scopeKey, 'IMAGE_PROCESSING_FAILED', '2026-08-17T12:00:00.000Z')).resolves.toBe(true);
-    expect(transactionCollections).toEqual({ read: ['images'], write: ['galleryUploads', 'images', 'collectionImages', 'collections', 'imageIdentities', 'visualIdentities'] });
-    expect(queries.some((query) => query.includes('status: "failed"'))).toBe(true);
-    expect(queries[0]).toContain('upload.status != "completed"');
+    await expect(repository.compensateUpload(uploadKey, scopeKey, newId(), 'IMAGE_PROCESSING_FAILED', 'failed', '2026-08-17T12:00:00.000Z')).resolves.toEqual({ collectionKeys: [], subjectChanged: false, imageChanged: false, storageKeys: [] });
+    expect(transactionCollections).toEqual({ read: ['images', 'visualIdentities'], write: ['galleryUploads', 'images', 'collectionImages', 'collections', 'imageIdentities', 'visualIdentities'] });
+    expect(queries.some((query) => query.includes('status: @status'))).toBe(true);
+    expect(queries[0]).toContain('upload.status == "processing"');
+    expect(queries[0]).toContain('upload.processingLeaseId == @leaseId');
     expect(queries.some((query) => query.includes('REMOVE relation IN collectionImages'))).toBe(true);
-    expect(queries.some((query) => query.includes('UPDATE image WITH { deletedAt: @now'))).toBe(true);
+    expect(queries.some((query) => query.includes('REMOVE image IN images'))).toBe(true);
   });
 
-  test('does not compensate an upload that completed before failure handling', async () => {
+  test('claims only queued siblings with one compare-and-set query', async () => {
+    const uploadKeys = [newId(), newId()], leaseId = newId(), now = '2026-08-18T12:00:00.000Z';
+    const rows = uploadKeys.map((key) => ({ _key: key, organizationKey: 'organization', scopeKey: newId(), actorKey: newId(), imageKey: newId(), collectionKey: null, filename: 'photo.jpg', mimeType: 'image/jpeg', sizeBytes: 10, storageKey: `pending/${key}`, processingMode: 'library', status: 'processing', errorCode: null, createdAt: now, updatedAt: now, expiresAt: '2026-08-18T12:15:00.000Z' }));
+    const queries: string[] = [];
+    const database: MediaLibraryDatabase = { async query(query) { queries.push(query); return { async all() { return rows; } }; } };
+    const repository = createGalleryRepository(database, async (_collections, operation) => operation(database));
+    await expect(repository.claimUploads(uploadKeys, leaseId, now)).resolves.toHaveLength(2);
+    expect(queries).toHaveLength(1);
+    expect(queries.every((query) => query.includes('upload.status == "queued"'))).toBe(true);
+    expect(queries[0]).toContain('status: "processing"');
+    expect(queries[0]).toContain('processingLeaseId: @leaseId');
+
+    const deniedQueries: string[] = [];
+    const deniedDatabase: MediaLibraryDatabase = { async query(query) { deniedQueries.push(query); return { async all() { return [rows[0]]; } }; } };
+    const denied = createGalleryRepository(deniedDatabase, async (_collections, operation) => operation(deniedDatabase));
+    await expect(denied.claimUploads(uploadKeys, leaseId, now)).resolves.toHaveLength(1);
+    expect(deniedQueries).toHaveLength(1);
+    expect(deniedQueries[0]).toContain('upload.status == "queued"');
+  });
+
+  test('renews only processing uploads owned by the current lease', async () => {
+    const queries: string[] = [];
+    const database: MediaLibraryDatabase = { async query(query) { queries.push(query); return { async all() { return [true, true]; } }; } };
+    const repository = createGalleryRepository(database);
+    await expect(repository.renewUploadLease([newId(), newId()], newId(), '2026-08-18T12:05:00.000Z')).resolves.toBe(2);
+    expect(queries).toHaveLength(1);
+    expect(queries[0]).toContain('upload.status == "processing" && upload.processingLeaseId == @leaseId');
+    expect(queries[0]).toContain('updatedAt: @now');
+  });
+
+  test('queues an entire validated upload set in one transaction or none', async () => {
+    const scopeKey = newId(), actorKey = newId(), uploadKeys = [newId(), newId()], now = '2026-08-18T12:00:00.000Z';
+    const rows = uploadKeys.map((key) => ({ _key: key, organizationKey: 'organization', scopeKey, actorKey, imageKey: newId(), collectionKey: null, filename: 'photo.jpg', mimeType: 'image/jpeg', sizeBytes: 10, storageKey: `pending/${key}`, processingMode: 'library', status: 'reserved', errorCode: null, createdAt: now, updatedAt: now, expiresAt: '2026-08-18T12:15:00.000Z' }));
+    const queries: string[] = [];
+    const database: MediaLibraryDatabase = { async query(query) { queries.push(query); return { async all() { return query.includes('RETURN upload') ? rows : rows.map((row) => ({ ...row, status: 'queued' })); } }; } };
+    let collections: unknown;
+    const repository = createGalleryRepository(database, async (value, operation) => { collections = value; return operation(database); });
+    await expect(repository.queueUploads({ uploadKeys, organizationKey: 'organization', scopeKey, actorKey, now })).resolves.toHaveLength(2);
+    expect(collections).toEqual({ read: [], write: ['galleryUploads'] });
+    expect(queries).toHaveLength(2);
+    expect(queries[0]).toContain('upload.status == "reserved"');
+    expect(queries[1]).toContain('status: "queued"');
+
+    const changedDatabase: MediaLibraryDatabase = { async query() { return { async all() { return [rows[0]]; } }; } };
+    const changed = createGalleryRepository(changedDatabase, async (_value, operation) => operation(changedDatabase));
+    await expect(changed.queueUploads({ uploadKeys, organizationKey: 'organization', scopeKey, actorKey, now })).resolves.toBeNull();
+  });
+
+  test('inserts upload reservations as one transactional batch', async () => {
+    const now = '2026-08-18T12:00:00.000Z', scopeKey = newId(), actorKey = newId();
+    const uploads = [newId(), newId()].map((key) => galleryUploadSchema.parse({ key, organizationKey: 'organization', scopeKey, actorKey, imageKey: newId(), collectionKey: null, filename: 'photo.jpg', mimeType: 'image/jpeg', sizeBytes: 10, storageKey: `pending/${key}`, processingMode: 'library', status: 'reserved', errorCode: null, createdAt: now, updatedAt: now, expiresAt: '2026-08-18T12:15:00.000Z' }));
+    const queries: string[] = [];
+    let collections: unknown;
+    const database: MediaLibraryDatabase = { async query(query) { queries.push(query); return { async all() { return []; } }; } };
+    const repository = createGalleryRepository(database, async (value, operation) => { collections = value; return operation(database); });
+    await expect(repository.insertUploads(uploads)).resolves.toEqual(uploads);
+    expect(collections).toEqual({ read: [], write: ['galleryUploads'] });
+    expect(queries).toEqual(['INSERT @upload INTO galleryUploads', 'INSERT @upload INTO galleryUploads']);
+  });
+
+  test('requeues only stale processing uploads while preserving active and completed rows', async () => {
+    const scopeKey = newId(), actorKey = newId(), now = '2026-08-18T13:00:00.000Z', staleBefore = '2026-08-18T12:30:00.000Z';
+    const make = (status: 'queued' | 'processing' | 'completed', updatedAt: string) => ({ _key: newId(), organizationKey: 'organization', scopeKey, actorKey, imageKey: newId(), collectionKey: null, filename: 'photo.jpg', mimeType: 'image/jpeg', sizeBytes: 10, storageKey: `pending/${status}-${updatedAt}`, processingMode: 'library', status, errorCode: null, createdAt: updatedAt, updatedAt, expiresAt: '2026-08-18T14:00:00.000Z' });
+    const queued = make('queued', '2026-08-18T12:50:00.000Z'), stale = make('processing', '2026-08-18T12:00:00.000Z'), active = make('processing', '2026-08-18T12:45:00.000Z'), completed = make('completed', '2026-08-18T12:10:00.000Z');
+    const rows = new Map([queued, stale, active, completed].map((row) => [row._key, row]));
+    const queries: string[] = [];
+    const database: MediaLibraryDatabase = { async query(query, bindVars = {}) { queries.push(query); return { async all() {
+      if (query.includes('upload.updatedAt < @staleBefore')) return [...rows.values()].filter((row) => row.status === 'processing' && row.updatedAt < String(bindVars.staleBefore)).map((row) => ({ key: row._key, scopeKey: row.scopeKey, leaseId: null }));
+      if (query.includes('RETURN upload.imageKey')) { const row = rows.get(String(bindVars.uploadKey)); return row?.status === 'processing' ? [row.imageKey] : []; }
+      if (query.includes('status: @status')) { const row = rows.get(String(bindVars.uploadKey)); if (!row || row.status !== 'processing') return []; row.status = 'queued'; row.updatedAt = String(bindVars.now); return [true]; }
+      if (query.includes('upload.status == "queued"')) return [...rows.values()].filter((row) => row.status === 'queued');
+      return [];
+    } }; } };
+    const repository = createGalleryRepository(database, async (_collections, operation) => operation(database));
+    const recovered = await repository.recoverUploadQueue(staleBefore, now);
+    expect(recovered.uploads.map(({ key }) => key).sort()).toEqual([queued._key, stale._key].sort());
+    expect(rows.get(active._key)?.status).toBe('processing');
+    expect(rows.get(completed._key)?.status).toBe('completed');
+    expect(queries[0]).toContain('upload.status == "processing" && upload.updatedAt < @staleBefore');
+  });
+
+  test('lists pending invites for elevated organization and scope managers', async () => {
+    let query = '';
+    const database: MediaLibraryDatabase = { async query(value) { query = value; return { async all() { return []; } }; } };
+    await createGalleryRepository(database).listPendingInvites(newId(), newId(), '2026-08-18T12:00:00.000Z');
+    expect(query).toContain('membership.organizationId == scope.organizationKey');
+    expect(query).toContain('membership.orgRole IN ["owner", "admin"]');
+    expect(query).toContain('scopeRole IN ["owner", "admin", "moderator"]');
+    expect(query).toContain('FILTER manager || ownsCollection || invite.inviteeKey == @actorKey');
+  });
+
+  test('atomically revalidates upload contribution while attaching and completing', async () => {
+    const now = '2026-08-18T12:00:00.000Z', scopeKey = newId(), actorKey = newId(), collectionKey = newId();
+    const leaseId = newId();
+    const upload = galleryUploadSchema.parse({ key: newId(), organizationKey: 'organization', scopeKey, actorKey, imageKey: newId(), collectionKey, filename: 'photo.jpg', mimeType: 'image/jpeg', sizeBytes: 10, storageKey: 'pending/photo', processingMode: 'library', status: 'processing', processingLeaseId: leaseId, errorCode: null, createdAt: now, updatedAt: now, expiresAt: '2026-08-18T12:15:00.000Z' });
+    const relation = { key: newId(), scopeKey, collectionKey, imageKey: upload.imageKey, addedByKey: actorKey, createdAt: now };
+    const queries: string[] = [];
+    const database: MediaLibraryDatabase = { async query(query) { queries.push(query); return { async all() { if (query.includes('LET current = DOCUMENT')) return [true]; if (query.includes('UPDATE current')) return [true]; return []; } }; } };
+    let collections: unknown;
+    const repository = createGalleryRepository(database, async (value, operation) => { collections = value; return operation(database); });
+    await expect(repository.finalizeUpload(upload, relation, leaseId, now, 'failed', 'UPLOAD_ACCESS_REVOKED')).resolves.toEqual({ status: 'completed' });
+    expect(collections).toEqual({ read: ['images', 'scopes', 'userOrganizations', 'scopeMembers', 'collections', 'collectionMembers', 'visualIdentities'], write: ['galleryUploads', 'images', 'collectionImages', 'collections', 'imageIdentities', 'visualIdentities'] });
+    expect(queries[0]).toContain('scopeRole IN ["owner", "admin", "moderator"]');
+    expect(queries[0]).toContain('member.role IN ["owner", "collaborator", "member"]');
+    expect(queries.some((query) => query.includes('UPSERT'))).toBe(true);
+    expect(queries.some((query) => query.includes('status: "completed"'))).toBe(true);
+    expect(queries[0]).toContain('current.processingLeaseId == @leaseId');
+
+    const deniedQueries: string[] = [];
+    const deniedDatabase: MediaLibraryDatabase = { async query(query) { deniedQueries.push(query); return { async all() { if (query.includes('LET current = DOCUMENT')) return []; if (query.includes('RETURN upload.imageKey')) return [upload.imageKey]; if (query.includes('status: @status')) return [true]; return []; } }; } };
+    const denied = createGalleryRepository(deniedDatabase, async (_value, operation) => operation(deniedDatabase));
+    await expect(denied.finalizeUpload(upload, relation, leaseId, now, 'queued', 'UPLOAD_ACCESS_REVOKED')).resolves.toMatchObject({ status: 'compensated', effects: { imageChanged: false } });
+    expect(deniedQueries.some((query) => query.includes('UPSERT'))).toBe(false);
+    expect(deniedQueries.some((query) => query.includes('UPDATE current'))).toBe(false);
+  });
+
+  test('does not compensate or requeue an upload that already completed or failed', async () => {
     const queries: string[] = [];
     const database: MediaLibraryDatabase = { async query(query) { queries.push(query); return { async all() { return []; } }; } };
     const repository = createGalleryRepository(database, async (_collections, operation) => operation(database));
-    await expect(repository.failUpload(newId(), newId(), 'IMAGE_PROCESSING_FAILED', '2026-08-17T12:00:00.000Z')).resolves.toBe(false);
+    await expect(repository.compensateUpload(newId(), newId(), newId(), 'IMAGE_PROCESSING_FAILED', 'queued', '2026-08-17T12:00:00.000Z')).resolves.toBeNull();
     expect(queries).toHaveLength(1);
   });
 

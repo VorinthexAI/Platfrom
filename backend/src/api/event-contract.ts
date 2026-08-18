@@ -1,4 +1,13 @@
-export const APP_EVENT_SLUGS = ['collection.changed'] as const;
+export const APP_EVENT_SLUGS = [
+  'collection.index.changed',
+  'collection.content.changed',
+  'collection.access.changed',
+  'collection.invites.changed',
+  'collection.shares.changed',
+  'image.changed',
+  'upload.changed',
+  'subject.changed',
+] as const;
 export type AppEventSlug = (typeof APP_EVENT_SLUGS)[number];
 export type EventEnvelope =
   | { route: 'user'; userKey: string; event: AppEventSlug }
@@ -36,8 +45,8 @@ export function parseEventEnvelope(message: string): EventEnvelope | null {
 export async function shouldDeliverEvent(
   envelope: EventEnvelope,
   userKey: string,
-  collectionMembership: (userKey: string, collectionKey: string) => Promise<boolean>,
+  collectionAccess: (userKey: string, collectionKey: string, event: AppEventSlug) => Promise<boolean>,
 ) {
   if (envelope.route === 'user') return envelope.userKey === userKey;
-  return collectionMembership(userKey, envelope.collectionKey);
+  return collectionAccess(userKey, envelope.collectionKey, envelope.event);
 }

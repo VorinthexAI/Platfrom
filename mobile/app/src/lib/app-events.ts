@@ -1,5 +1,7 @@
+import type { GalleryEventSlug } from "./gallery-convergence";
+
 export type AppEvent =
-  | { type: "collection.changed"; data: string }
+  | { type: "gallery.changed"; slug: GalleryEventSlug }
   | { type: "event-stream.connected" };
 
 const listeners = new Set<(event: AppEvent) => void>();

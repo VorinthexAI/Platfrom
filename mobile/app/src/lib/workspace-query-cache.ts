@@ -18,7 +18,12 @@ export const galleryQueryKeys = {
   overview: (context: WorkspaceContext, collectionKey?: string) => [...galleryQueryKeys.overviews(context), collectionKey ?? null] as const,
   members: (context: WorkspaceContext, collectionKey: string) => [...galleryQueryKeys.all(context), "sharing", collectionKey, "members"] as const,
   invites: (context: WorkspaceContext, collectionKey: string) => [...galleryQueryKeys.all(context), "sharing", collectionKey, "invites"] as const,
+  incomingInvites: (context: WorkspaceContext) => [...galleryQueryKeys.all(context), "sharing", "incoming-invites"] as const,
   shareLinks: (context: WorkspaceContext, collectionKey: string) => [...galleryQueryKeys.all(context), "sharing", collectionKey, "share-links"] as const,
+  subjects: (context: WorkspaceContext) => [...galleryQueryKeys.all(context), "subjects"] as const,
+  search: (context: WorkspaceContext, mode: "text" | "similar" | "identity", collectionKey: string | undefined, value: string) => [...galleryQueryKeys.all(context), "search", mode, collectionKey ?? null, value] as const,
+  duplicates: (context: WorkspaceContext, collectionKey: string) => [...galleryQueryKeys.all(context), "duplicates", collectionKey] as const,
+  uploads: (context: WorkspaceContext) => [...galleryQueryKeys.all(context), "uploads"] as const,
 };
 
 export function setCachedGalleryMembers(queryClient: QueryClient, context: WorkspaceContext, collectionKey: string, members: GalleryCollectionMember[]) {
