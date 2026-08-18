@@ -117,6 +117,7 @@ async function scopedDelete(
   scopeKey: string,
   key: string,
 ): Promise<boolean> {
+  const hiddenSource = collection === 'folders' ? 'folder' : collection === 'documents' ? 'document' : null;
   const cursor = await executor.query(`
     FOR current IN @@collection
       FILTER current._key == @key && current.scopeKey == @scopeKey
@@ -124,7 +125,12 @@ async function scopedDelete(
       REMOVE current IN @@collection
       RETURN OLD._key
   `, { '@collection': collection, key, scopeKey });
-  return (await cursor.next()) !== undefined;
+  const removedKey = await cursor.next();
+  if (removedKey === undefined) return false;
+  if (hiddenSource) {
+    await executor.query('FOR hidden IN userHiddens FILTER hidden.source == @hiddenSource && hidden.sourceKey == @removedKey REMOVE hidden IN userHiddens', { hiddenSource, removedKey });
+  }
+  return true;
 }
 
 /** Query-bound mutations can use either the global database or a streaming transaction executor. */
@@ -578,6 +584,6 @@ export function withContentPersistenceTransaction<T>(
   operation: (persistence: ReturnType<typeof createContentPersistence>) => Promise<T>,
 ): Promise<T> {
   return shareStorageMode(db as unknown as ContentQueryExecutor).then((mode) =>
-    withTransaction(['folders', 'documents', 'documentVersions', 'documentAudioVersions', 'documentSummaries', 'documentSummaryAudio', 'scopes', ...(mode === 'legacy' ? ['documentShares'] : mode === 'global' ? ['shares'] : ['documentShares', 'shares'])], (transaction) =>
+    withTransaction(['folders', 'documents', 'documentVersions', 'documentAudioVersions', 'documentSummaries', 'documentSummaryAudio', 'userHiddens', 'scopes', ...(mode === 'legacy' ? ['documentShares'] : mode === 'global' ? ['shares'] : ['documentShares', 'shares'])], (transaction) =>
       operation(createContentPersistence(transaction as unknown as ContentQueryExecutor))));
 }

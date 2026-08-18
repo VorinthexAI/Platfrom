@@ -66,7 +66,7 @@ import { acceptGalleryCollectionInvite, activateGalleryCollectionShare, complete
 import { travelHandlers } from './travel';
 import { emailHandlers } from './email-inbox';
 import { bookHandlers } from './books';
-import { userSettingsHandlers } from './user-settings';
+import { userHiddenHandlers } from './user-hiddens';
 import { streamEvents } from './events';
 
 const challengeHash = z.string().regex(/^[a-f0-9]{64}$/);
@@ -408,8 +408,9 @@ export function registerRoutes(app: Hono) {
   app.post('/auth/guest', bootstrapGuestAuth);
   app.get('/auth/me', getAuthAccount);
   app.patch('/auth/me', patchAuthAccount);
-  app.get('/auth/me/settings', userSettingsHandlers.read);
-  app.patch('/auth/me/settings', userSettingsHandlers.update);
+  app.get('/auth/me/hiddens', userHiddenHandlers.list);
+  app.post('/auth/me/hiddens', userHiddenHandlers.hide);
+  app.delete('/auth/me/hiddens', userHiddenHandlers.reveal);
   app.post('/auth/logout', logoutAuthAccount);
 
   app.post('/app/events', recordPlatformEvent);

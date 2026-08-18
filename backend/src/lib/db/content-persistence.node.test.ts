@@ -58,6 +58,25 @@ describe('scoped Content persistence', () => {
     expect(await createContentPersistence(executor).deleteDocument(scopeKey, folderKey)).toBe(false);
   });
 
+  test('cleans every user overlay only on permanent folder and document deletion', async () => {
+    const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
+    const executor: ContentQueryExecutor = { async query(query, bindVars) { calls.push({ query, bindVars }); return { async next() { return folderKey; } }; } };
+    expect(await createContentPersistence(executor).deleteFolder(scopeKey, folderKey)).toBe(true);
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.query).toContain('RETURN OLD._key');
+    expect(calls[1]?.query).toContain('FOR hidden IN userHiddens');
+    expect(calls[1]?.query).toContain('hidden.sourceKey == @removedKey');
+    expect(calls[1]?.bindVars).toEqual({ hiddenSource: 'folder', removedKey: folderKey });
+  });
+
+  test('does not clean hidden overlays when permanent source deletion matches nothing', async () => {
+    const calls: string[] = [];
+    const executor: ContentQueryExecutor = { async query(query) { calls.push(query); return { async next() { return undefined; } }; } };
+    expect(await createContentPersistence(executor).deleteFolder(scopeKey, folderKey)).toBe(false);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).not.toContain('userHiddens');
+  });
+
   test('binds a null folder for root document inserts', async () => {
     let bindVars: Record<string, unknown> | undefined;
     const executor: ContentQueryExecutor = {

@@ -6,10 +6,6 @@ export type AuthUser = {
   alias?: string;
   countryCode?: string;
   isOnboarded: boolean;
-  settings: {
-    archive: { showOnlyFavorites: boolean };
-    gallery: { showOnlyFavorites: boolean };
-  };
 };
 
 export type AuthContext = {
@@ -85,21 +81,15 @@ export function extractSessionTokens(
 export function normalizeAuthContext(value: unknown): AuthContext {
   const body = record(value);
   const rawUser = record(body?.user) ?? record(body?.identity);
-  const settings = record(rawUser?.settings);
-  const archiveSettings = record(settings?.archive);
-  const gallerySettings = record(settings?.gallery);
+  const userFields = rawUser ? Object.fromEntries(Object.entries(rawUser).filter(([key]) => key !== "settings")) : null;
   const user = rawUser ? {
-    ...rawUser,
+    ...userFields,
     email: stringValue(rawUser, "email"),
     name: stringValue(rawUser, "name", "display_name"),
     firstName: stringValue(rawUser, "firstName", "first_name"),
     alias: stringValue(rawUser, "alias"),
     countryCode: stringValue(rawUser, "countryCode", "country_code"),
     isOnboarded: booleanValue(rawUser, "isOnboarded", "is_onboarded"),
-    settings: {
-      archive: { showOnlyFavorites: booleanValue(archiveSettings, "showOnlyFavorites", "show_only_favorites") },
-      gallery: { showOnlyFavorites: booleanValue(gallerySettings, "showOnlyFavorites", "show_only_favorites") },
-    },
   } : null;
   return {
     user,

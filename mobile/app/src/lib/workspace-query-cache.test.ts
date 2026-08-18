@@ -22,6 +22,7 @@ const {
   getGalleryCollections,
   invalidateAssistantChanges,
   patchGalleryImage,
+  patchGalleryUserHiddens,
   removeCachedGalleryImages,
   restoreGalleryOverviews,
   snapshotGalleryOverviews,
@@ -41,10 +42,19 @@ test("isolates every routed workspace key by context and resource", () => {
   expect(galleryQueryKeys.cleanup(context, "collection", 25)).not.toEqual(galleryQueryKeys.cleanup(context, "collection", 50));
   expect(galleryQueryKeys.cleanup(context, "collection", 25)).not.toEqual(galleryQueryKeys.cleanup(context, "other", 25));
   expect(galleryQueryKeys.highlight(context, "collection", "one")).not.toEqual(galleryQueryKeys.highlight(context, "collection", "two"));
+  expect(galleryQueryKeys.userHiddens(context)).not.toEqual(galleryQueryKeys.userHiddens(otherContext));
   expect(compassQueryKeys.overview(context)).not.toEqual(compassQueryKeys.overview(otherContext));
   expect(signalQueryKeys.overview(context, "all")).not.toEqual(signalQueryKeys.overview(context, "favorite"));
   expect(signalQueryKeys.detail(context, "thread-a")).not.toEqual(signalQueryKeys.detail(context, "thread-b"));
   expect(ascendQueryKeys.detail(context, "book-a")).not.toEqual(ascendQueryKeys.detail(otherContext, "book-a"));
+});
+
+test("optimistically patches and snapshots Gallery hidden overlays", () => {
+  const client = new QueryClient();
+  const hidden = { key: "hidden", userKey: "user", source: "image" as const, sourceKey: "image", createdAt: "2026-08-18T00:00:00.000Z" };
+  expect(patchGalleryUserHiddens(client, context, (current) => [...current, hidden])).toEqual([]);
+  expect(client.getQueryData(galleryQueryKeys.userHiddens(context))).toEqual([hidden]);
+  expect(patchGalleryUserHiddens(client, context, () => [])).toEqual([hidden]);
 });
 
 test("invalidates a collection highlight list and every cached detail together", async () => {

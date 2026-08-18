@@ -384,8 +384,9 @@ describe('Gallery repository transactions', () => {
     } };
     const repository = createGalleryRepository(database, async (collections, operation) => { transactionCollections = collections; return operation(database); });
     await expect(repository.deleteImages(newId(), imageKeys, newId(), '2026-08-13T12:00:00.000Z')).resolves.toEqual({ deletedImageKeys: imageKeys, favoriteImageKeys: [], collectionKeys: [], subjectChanged: false, hadUnfiledImages: false });
-    expect(transactionCollections).toEqual({ read: ['images', 'userOrganizations', 'scopes', 'scopeMembers', 'collectionMembers'], write: ['images', 'collectionImages', 'collections', 'imageIdentities', 'visualIdentities'] });
-    expect(queries).toHaveLength(9);
+    expect(transactionCollections).toEqual({ read: ['images', 'userOrganizations', 'scopes', 'scopeMembers', 'collectionMembers'], write: ['images', 'collectionImages', 'collections', 'imageIdentities', 'visualIdentities', 'userHiddens'] });
+    expect(queries).toHaveLength(10);
+    expect(queries.at(-1)).toContain('hidden.source == "image"');
     expect(queries.some((query) => query.includes('REMOVE relation IN collectionImages'))).toBe(true);
     expect(queries.some((query) => query.includes('REMOVE relation IN imageIdentities'))).toBe(true);
     expect(queries.some((query) => query.includes('LET replacement = FIRST') && query.includes('referenceImageKey: replacement'))).toBe(true);

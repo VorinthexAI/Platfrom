@@ -9,10 +9,11 @@ const context = { domain: { organizationKey, runtimeScopeKey: scopeKey, principa
 
 describe('Gallery assistant capabilities', () => {
   test('covers every canonical operation and exposes no trusted context fields', () => {
-    expect(galleryAssistantCapabilityNames).toHaveLength(36);
-    expect(new Set(galleryAssistantCapabilityNames).size).toBe(36);
+    expect(galleryAssistantCapabilityNames).toHaveLength(40);
+    expect(new Set(galleryAssistantCapabilityNames).size).toBe(40);
     expect(galleryAssistantCapabilityNames).not.toContain('collection.duplicates.find');
     expect(galleryAssistantCapabilityNames).toEqual(expect.arrayContaining(['highlight.create', 'highlight.list', 'highlight.read', 'highlight.delete']));
+    expect(galleryAssistantCapabilityNames).toEqual(expect.arrayContaining(['collection.hide', 'collection.reveal', 'image.hide', 'image.reveal']));
     const search = createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'image.search')!;
     const listCollections = createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'collection.list')!;
     const createCollection = createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'collection.create')!;
@@ -61,7 +62,7 @@ describe('Gallery assistant capabilities', () => {
       { files: [{ clientKey: 'upload-1', filename: 'photo.jpg', sizeBytes: 100 }] }, { uploadKeys: [uploadKey] }, { uploadKeys: [uploadKey] },
       { collectionKey }, {}, { highlightKey }, { highlightKey },
     ];
-    for (const [index, capability] of capabilities.entries()) expect(await capability.execute(inputs[index], context)).toEqual({ kind: 'continue', result: { operation: calls.at(-1)!.operation } });
+    for (const [index, capability] of capabilities.slice(0, inputs.length).entries()) expect(await capability.execute(inputs[index], context)).toEqual({ kind: 'continue', result: { operation: calls.at(-1)!.operation } });
     expect(calls.map(({ operation }) => operation)).toEqual(['overview', 'createCollection', 'updateCollection', 'deleteCollection', 'listMembers', 'listPendingInvites', 'createInvite', 'acceptInvite', 'rejectInvite', 'revokeInvite', 'updateMemberRole', 'removeMember', 'leaveCollection', 'listShares', 'createShare', 'updateShare', 'revokeShare', 'activateShare', 'search', 'setFavorite', 'updateImage', 'deleteImages', 'deleteDuplicates', 'transferCollectionImages', 'listSubjects', 'createSubject', 'listSubjectImages', 'deleteSubject', 'restoreSubject', 'reserveUploads', 'uploadStatus', 'completeUploads', 'createHighlight', 'listHighlights', 'readHighlight', 'deleteHighlight']);
     for (const call of calls) {
       expect(call.context).toEqual({ organizationKey, scopeKey, membership, modelVisible: true });

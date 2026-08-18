@@ -53,7 +53,7 @@ export interface ToolDependencies extends RouterDependencies, DocumentParseDepen
   travelService?: WorkspaceToolDependencies['travel'];
   emailService?: WorkspaceToolDependencies['email'];
   bookService?: WorkspaceToolDependencies['books'];
-  userSettingsService?: WorkspaceToolDependencies['userSettings'];
+  userHiddenService?: WorkspaceToolDependencies['userHiddens'];
   executeWorkspaceContent?: WorkspaceToolDependencies['executeContent'];
 }
 
@@ -92,7 +92,7 @@ export async function runTool(name: string, skill: string, rawInput: unknown, de
     travel: dependencies.travelService,
     email: dependencies.emailService,
     books: dependencies.bookService,
-    userSettings: dependencies.userSettingsService,
+    userHiddens: dependencies.userHiddenService,
     content: {
       adapters: dependencies.adapters,
       credentials: dependencies.credentials,

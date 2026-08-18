@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { isLegacyIndex, normalizeLegacyDocumentSharePermission } from './arango-migrate-indexes';
 import { stageLegacyDocumentShares } from './content-migration';
-import { collections, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateEmailReplyMetadata, migrateImageCaptions, retireRemovedActions } from './arango-migrate';
+import { collections, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateEmailReplyMetadata, migrateImageCaptions, retireRemovedActions, retireUserSettings } from './arango-migrate';
 import { EMBEDDING_DIMENSIONS, embeddingMetadata } from '../lib/embeddings';
 import { DOCUMENT_CHUNK_MAX_WORDS, DOCUMENT_MAX_CHUNKS, documentSemanticHash } from '../lib/ai/document-processing/chunking';
 
@@ -36,6 +36,27 @@ describe('Arango migration indexes', () => {
       expect.objectContaining({ fields: ['scopeKey', 'collectionKey', 'deletedAt', 'createdAt'] }),
       expect.objectContaining({ fields: ['scopeKey', 'createdByKey', 'deletedAt'] }),
     ]));
+  });
+  test('creates the private user hidden overlay with unique and cleanup indexes', async () => {
+    const spec = collections.find(({ name }) => name === 'userHiddens');
+    expect(spec).toEqual(expect.objectContaining({ name: 'userHiddens', skipEmbedding: true }));
+    expect(spec?.indexes).toEqual(expect.arrayContaining([
+      { fields: ['userKey', 'source', 'sourceKey'], unique: true },
+      { fields: ['userKey', 'createdAt'] },
+      { fields: ['source', 'sourceKey'] },
+    ]));
+    const registry = await Bun.file(new URL('../lib/db/registry.ts', import.meta.url)).text();
+    expect(registry).not.toContain('userHiddens:');
+  });
+  test('physically retires the legacy settings blob when users already exist', async () => {
+    const calls: string[] = [];
+    const database = {
+      collection() { return { async exists() { return true; } }; },
+      async query(query: string) { calls.push(query); return { async all() { return []; }, async next() { return undefined; } }; },
+    };
+    await retireUserSettings(database as never);
+    expect(calls).toEqual([expect.stringContaining('UPDATE user WITH { settings: null }')]);
+    expect(calls[0]).toContain('OPTIONS { keepNull: false }');
   });
   test('additively backfills canonical image captions and image references', async () => {
     const calls: string[] = [];
