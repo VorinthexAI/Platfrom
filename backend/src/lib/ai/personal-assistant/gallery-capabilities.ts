@@ -26,10 +26,10 @@ const definitions: Array<{
   schema: z.ZodTypeAny;
   mutation?: boolean;
 }> = [
-  { operation: 'overview', name: 'gallery_overview', description: 'List Gallery collections and a cursor page of recent images, optionally within one collection and filtered by maximum current caption score; legacy placeholder scores are excluded.', schema: galleryOperationInputSchemas.overview },
+  { operation: 'overview', name: 'gallery_overview', description: 'List Gallery collections and a cursor page of recent images, optionally within one collection and filtered by maximum compatible caption score; legacy migration placeholder scores are excluded.', schema: galleryOperationInputSchemas.overview },
   { operation: 'createCollection', name: 'gallery_collection_create', description: 'Create a Gallery collection.', schema: galleryOperationInputSchemas.createCollection, mutation: true },
   { operation: 'updateCollection', name: 'gallery_collection_update', description: 'Update a Gallery collection name, favorite state, and optional custom cover.', schema: galleryOperationInputSchemas.updateCollection, mutation: true },
-  { operation: 'deleteCollection', name: 'gallery_collection_delete', description: 'Delete a Gallery collection without deleting images that remain in Gallery.', schema: galleryOperationInputSchemas.deleteCollection, mutation: true },
+  { operation: 'deleteCollection', name: 'gallery_collection_delete', description: 'Delete a non-favorite Gallery collection without deleting images that remain in Gallery. Favorite collections must be unfavorited first.', schema: galleryOperationInputSchemas.deleteCollection, mutation: true },
   { operation: 'listMembers', name: 'collection_member_list', description: 'List collection members grouped by owner, collaborator, and viewer role.', schema: galleryOperationInputSchemas.listMembers },
   { operation: 'listPendingInvites', name: 'collection_invite_pending_list', description: 'List pending collection invitations relevant to the authenticated user.', schema: galleryOperationInputSchemas.listPendingInvites },
   { operation: 'createInvite', name: 'collection_invite_create', description: 'Invite a collaborator or viewer to a collection.', schema: galleryOperationInputSchemas.createInvite, mutation: true },
@@ -47,8 +47,8 @@ const definitions: Array<{
   { operation: 'search', name: 'search_images', description: 'Search Gallery by visible content, a source image, or a saved visual identity, or find duplicates in a collection.', schema: imageSearchInputSchema },
   { operation: 'setFavorite', name: 'gallery_image_favorite', description: 'Set or clear an image favorite.', schema: galleryOperationInputSchemas.setFavorite, mutation: true },
   { operation: 'updateImage', name: 'gallery_image_update', description: 'Update an image name and favorite state.', schema: galleryOperationInputSchemas.updateImage, mutation: true },
-  { operation: 'deleteImages', name: 'image_delete', description: 'Move Gallery images to trash and remove them from collections and subjects.', schema: galleryOperationInputSchemas.deleteImages, mutation: true },
-  { operation: 'deleteDuplicates', name: 'gallery_duplicates_delete', description: 'Delete images returned by the latest duplicate check.', schema: galleryOperationInputSchemas.deleteDuplicates, mutation: true },
+  { operation: 'deleteImages', name: 'image_delete', description: 'Move non-favorite Gallery images to trash and remove them from collections and subjects. Favorite images are reported and left untouched.', schema: galleryOperationInputSchemas.deleteImages, mutation: true },
+  { operation: 'deleteDuplicates', name: 'gallery_duplicates_delete', description: 'Delete non-favorite images returned by the latest duplicate check. Favorite images are reported and left in the collection.', schema: galleryOperationInputSchemas.deleteDuplicates, mutation: true },
   { operation: 'transferCollectionImages', name: 'gallery_collection_transfer', description: 'Copy or move selected images from one collection to one destination collection.', schema: galleryOperationInputSchemas.transferCollectionImages, mutation: true },
   { operation: 'listSubjects', name: 'gallery_subject_list', description: 'List Gallery subjects, optionally including deleted subjects.', schema: galleryOperationInputSchemas.listSubjects },
   { operation: 'createSubject', name: 'gallery_subject_create', description: 'Create a named subject from reference images.', schema: galleryOperationInputSchemas.createSubject, mutation: true },

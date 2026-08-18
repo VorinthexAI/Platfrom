@@ -94,6 +94,12 @@ export interface GalleryOperationContext {
   insertUploads?: typeof repository.insertUploads;
   signUpload?: (upload: z.infer<typeof galleryUploadSchema>) => Promise<string>;
   canManageScope?: typeof repository.canManageScope;
+  canMutateImage?: typeof repository.canMutateImage;
+  getCollectionRole?: typeof repository.getCollectionRole;
+  deleteCollection?: typeof repository.deleteCollection;
+  deleteImages?: typeof repository.deleteImages;
+  deleteDuplicateImages?: typeof repository.deleteDuplicateImages;
+  listScopeManagerUserKeys?: typeof repository.listScopeManagerUserKeys;
   publishCollectionEvent?: typeof publishCollectionEvent;
   publishUserEvent?: typeof publishUserEvent;
 }
@@ -105,7 +111,7 @@ async function authorize(context: GalleryOperationContext) {
 
 async function collectionRole(context: GalleryOperationContext, collectionKey: string) {
   const membership = await authorize(context);
-  const role = await repository.getCollectionRole(context.scopeKey, collectionKey, membership.key);
+  const role = await (context.getCollectionRole ?? repository.getCollectionRole)(context.scopeKey, collectionKey, membership.key);
   if (!role) throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.');
   return { membership, role };
 }
@@ -238,9 +244,10 @@ async function updateCollection(rawInput: unknown, context: GalleryOperationCont
 
 async function deleteCollection(rawInput: unknown, context: GalleryOperationContext) {
     const input = { ...collectionDeleteSchema.parse(rawInput), ...context };
-    const formerUsers = await repository.deleteCollection(input.scopeKey, input.collectionKey, context.membership.key, new Date().toISOString());
-    if (!formerUsers) throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.');
-    await publish(context, 'deleteCollection', { users: formerUsers });
+    const deletion = await (context.deleteCollection ?? repository.deleteCollection)(input.scopeKey, input.collectionKey, context.membership.key, new Date().toISOString());
+    if (!deletion) throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.');
+    if (deletion.status === 'favorite') throw new GalleryOperationError(409, 'GALLERY_COLLECTION_FAVORITE', 'Unfavorite the collection before deleting it.');
+    await publish(context, 'deleteCollection', { users: deletion.formerUserKeys });
     return { collectionKey: input.collectionKey };
 }
 
@@ -376,12 +383,14 @@ async function setFavorite(rawInput: unknown, context: GalleryOperationContext) 
 async function deleteImages(rawInput: unknown, context: GalleryOperationContext) {
     const input = { ...deleteImagesSchema.parse(rawInput), ...context };
     const membership = await authorize(context);
-    if ((await Promise.all(input.imageKeys.map((imageKey) => repository.canMutateImage(input.scopeKey, imageKey, membership.key)))).some((owns) => !owns)) throw new GalleryOperationError(403, 'GALLERY_IMAGE_READ_ONLY', 'One or more images are read-only.');
-    const deletion = await repository.deleteImages(input.scopeKey, input.imageKeys, membership.key, new Date().toISOString());
+    if ((await Promise.all(input.imageKeys.map((imageKey) => (context.canMutateImage ?? repository.canMutateImage)(input.scopeKey, imageKey, membership.key)))).some((owns) => !owns)) throw new GalleryOperationError(403, 'GALLERY_IMAGE_READ_ONLY', 'One or more images are read-only.');
+    const deletion = await (context.deleteImages ?? repository.deleteImages)(input.scopeKey, input.imageKeys, membership.key, new Date().toISOString());
     if (!deletion) throw new GalleryOperationError(404, 'GALLERY_IMAGE_NOT_FOUND', 'One or more images were not found.');
-    await publish(context, 'deleteImages', { collections: deletion.collectionKeys });
-    if (deletion.hadUnfiledImages) await publish(context, 'unfiledImageChanged', { users: [membership.userId] });
-    if (deletion.subjectChanged) await publish(context, 'reconcileSubject', { users: await repository.listScopeManagerUserKeys(input.scopeKey) });
+    if (deletion.deletedImageKeys.length > 0) {
+      await publish(context, 'deleteImages', { collections: deletion.collectionKeys });
+      if (deletion.hadUnfiledImages) await publish(context, 'unfiledImageChanged', { users: [membership.userId] });
+      if (deletion.subjectChanged) await publish(context, 'reconcileSubject', { users: await (context.listScopeManagerUserKeys ?? repository.listScopeManagerUserKeys)(input.scopeKey) });
+    }
     return deletion;
 }
 
@@ -394,9 +403,9 @@ async function deleteDuplicates(rawInput: unknown, context: GalleryOperationCont
     const input = { ...deleteDuplicatesSchema.parse(rawInput), ...context };
     const membership = await requireOwner(context, input.collectionKey);
     const now = new Date().toISOString();
-    const deletion = await repository.deleteDuplicateImages(input.scopeKey, input.collectionKey, input.imageKeys, membership.key, now);
+    const deletion = await (context.deleteDuplicateImages ?? repository.deleteDuplicateImages)(input.scopeKey, input.collectionKey, input.imageKeys, membership.key, now);
     if (!deletion) throw new GalleryOperationError(409, 'GALLERY_DUPLICATES_CHANGED', 'The duplicate set changed. Find duplicates again before deleting.');
-    await publish(context, 'deleteDuplicates', { collections: deletion.collectionKeys });
+    if (deletion.removedImageKeys.length > 0) await publish(context, 'deleteDuplicates', { collections: deletion.collectionKeys });
     return deletion;
 }
 

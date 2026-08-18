@@ -1,4 +1,8 @@
-import { perceptualHashDistance, perceptualHashSegments, PERCEPTUAL_HASH_DUPLICATE_DISTANCE, perceptualHashSchema } from './perceptual-hash';
+import { perceptualHashDistance, perceptualHashSchema } from './perceptual-hash';
+
+/** Gallery discovery accepts 60/64 matching pHash bits (93.75% similarity). */
+export const GALLERY_PERCEPTUAL_HASH_DUPLICATE_DISTANCE = 4;
+const GALLERY_HASH_SEGMENT_WIDTHS = [13n, 13n, 13n, 13n, 12n] as const;
 
 export interface HashedGalleryImage {
   key: string;
@@ -25,26 +29,30 @@ export function findRedundantGalleryImageKeys(images: readonly HashedGalleryImag
     else join(representative, index);
   });
 
-  // A <=3-bit difference across four 16-bit segments must leave one segment equal.
+  // With five partitions, at most four changed bits must leave one complete partition equal.
   const buckets = new Map<string, number[]>();
-  for (const [hash, index] of representatives) perceptualHashSegments(hash).forEach((segment, position) => {
-    const bucket = `${position}:${segment}`;
-    const indices = buckets.get(bucket);
-    if (indices) indices.push(index);
-    else buckets.set(bucket, [index]);
-  });
   const compared = new Set<string>();
-  for (const bucket of buckets.values()) {
-    for (let left = 0; left < bucket.length; left += 1) {
-      for (let right = left + 1; right < bucket.length; right += 1) {
-        const leftIndex = bucket[left]!;
-        const rightIndex = bucket[right]!;
-        const pair = leftIndex < rightIndex ? `${leftIndex}:${rightIndex}` : `${rightIndex}:${leftIndex}`;
+  for (const [hash, index] of representatives) {
+    let value = BigInt(`0x${hash}`);
+    GALLERY_HASH_SEGMENT_WIDTHS.forEach((width, position) => {
+      const segment = value & ((1n << width) - 1n);
+      value >>= width;
+      const bucketKey = `${position}:${segment.toString(16)}`;
+      const candidates = buckets.get(bucketKey);
+      if (!candidates) {
+        buckets.set(bucketKey, [index]);
+        return;
+      }
+      for (const candidateIndex of candidates) {
+        const pair = candidateIndex < index ? `${candidateIndex}:${index}` : `${index}:${candidateIndex}`;
         if (compared.has(pair)) continue;
         compared.add(pair);
-        if (perceptualHashDistance(valid[leftIndex]!.perceptualHash, valid[rightIndex]!.perceptualHash) <= PERCEPTUAL_HASH_DUPLICATE_DISTANCE) join(leftIndex, rightIndex);
+        if (perceptualHashDistance(valid[candidateIndex]!.perceptualHash, hash) <= GALLERY_PERCEPTUAL_HASH_DUPLICATE_DISTANCE) {
+          join(candidateIndex, index);
+        }
       }
-    }
+      candidates.push(index);
+    });
   }
 
   const clusters = new Map<number, typeof valid>();

@@ -2,6 +2,7 @@ import { beforeEach, expect, mock, test } from "bun:test";
 
 const calls: { path: string; body: Record<string, unknown>; timeout?: number }[] = [];
 const responses = new Map<string, unknown>();
+const failures = new Map<string, { message: string; code?: string; transport?: boolean }>();
 
 mock.module("@/state/auth", () => ({
   useAuthStore: { getState: () => ({ user: { email: "recipient@example.com" }, organization: { key: "organization", membership_key: "membership" }, scope: { key: "scope" } }) },
@@ -9,6 +10,9 @@ mock.module("@/state/auth", () => ({
 mock.module("./api-client", () => ({
   apiClient: { post: async (path: string, body: Record<string, unknown>, options?: { timeout?: number }) => {
     calls.push({ path, body, timeout: options?.timeout });
+    const failure = failures.get(path);
+    if (failure?.transport) throw { response: { data: { success: false, error: { message: failure.message, code: failure.code } } } };
+    if (failure) return { data: { success: false, error: { message: failure.message, code: failure.code } } };
     if (responses.has(path)) return { data: { success: true, data: responses.get(path) } };
     if (path === "/gallery/uploads/presign") return { data: { success: true, data: { uploads: [{ clientKey: "local-image", uploadKey: "upload", imageKey: "image", url: "https://uploads.example/image", headers: { "Content-Type": "image/jpeg" } }] } } };
     if (path === "/gallery/uploads/complete") return { data: { success: true, data: { jobs: [{ key: "upload", imageKey: "image", status: "queued" }] } } };
@@ -29,9 +33,9 @@ mock.module("./api-client", () => ({
   } },
 }));
 
-const { activateGalleryShare, createGalleryCollection, createGalleryCollectionShareLink, deleteGalleryCollection, deleteGalleryImages, deleteGallerySubject, fetchGalleryOverview, filterCollections, filterGalleryShareLinks, filterMediaItems, findGalleryCollectionDuplicates, groupGalleryImagesByCreatedDate, isGalleryCollectionOwned, leaveGalleryCollection, listGalleryCollectionInvites, listGalleryCollectionMembers, listGalleryCollectionShareLinks, mergeMediaItems, removeGalleryCollectionMember, respondToGalleryCollectionInvite, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryCollectionMember, updateGalleryCollectionShareLink, updateGalleryImage, uploadGalleryImages } = await import("./gallery-client");
+const { activateGalleryShare, createGalleryCollection, createGalleryCollectionShareLink, deleteGalleryCollection, deleteGalleryCollectionDuplicates, deleteGalleryImages, deleteGallerySubject, fetchGalleryOverview, filterCollections, filterGalleryShareLinks, filterMediaItems, findGalleryCollectionDuplicates, groupGalleryImagesByCreatedDate, isGalleryClientErrorCode, isGalleryCollectionOwned, leaveGalleryCollection, listGalleryCollectionInvites, listGalleryCollectionMembers, listGalleryCollectionShareLinks, mergeMediaItems, partitionFavoriteGalleryImages, reconcileGalleryDuplicateDeletion, reconcileGalleryImageDeletion, removeGalleryCollectionMember, respondToGalleryCollectionInvite, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryCollectionMember, updateGalleryCollectionShareLink, updateGalleryImage, uploadGalleryImages } = await import("./gallery-client");
 
-beforeEach(() => { calls.splice(0); responses.clear(); });
+beforeEach(() => { calls.splice(0); responses.clear(); failures.clear(); });
 
 const collection = (name: string, key: string) => ({
   key,
@@ -196,6 +200,54 @@ test("sends favorite, delete, and many-to-many transfer through canonical mutati
     { path: "/gallery/images/delete", body: { organizationKey: "organization", scopeKey: "scope", imageKeys: ["image-a", "image-b"] } },
     { path: "/gallery/collections/images/transfer", body: { organizationKey: "organization", scopeKey: "scope", sourceCollectionKey: "source", destinationCollectionKeys: ["one"], imageKeys: ["image-a", "image-b"], mode: "copy" } },
   ]);
+});
+
+test("preserves Gallery server error codes for direct and transport failures", async () => {
+  failures.set("/gallery/collections/delete", { message: "raw server message", code: "GALLERY_COLLECTION_FAVORITE" });
+  const direct = await deleteGalleryCollection("collection").catch((error: unknown) => error);
+  expect(isGalleryClientErrorCode(direct, "GALLERY_COLLECTION_FAVORITE")).toBe(true);
+  expect((direct as Error).message).toBe("raw server message");
+
+  failures.set("/gallery/collections/delete", { message: "transport message", code: "GALLERY_COLLECTION_FAVORITE", transport: true });
+  const transport = await deleteGalleryCollection("collection").catch((error: unknown) => error);
+  expect(isGalleryClientErrorCode(transport, "GALLERY_COLLECTION_FAVORITE")).toBe(true);
+});
+
+test("returns authoritative favorite keys from image and duplicate deletion", async () => {
+  responses.set("/gallery/images/delete", { deletedImageKeys: ["deleted"], favoriteImageKeys: ["favorite"] });
+  responses.set("/gallery/collections/duplicates/delete", { removedImageKeys: ["removed"], deletedImageKeys: ["removed"], favoriteImageKeys: ["favorite"] });
+
+  expect(await deleteGalleryImages(["deleted", "favorite"])).toEqual({ deletedImageKeys: ["deleted"], favoriteImageKeys: ["favorite"] });
+  expect(await deleteGalleryCollectionDuplicates("collection", ["removed", "favorite"])).toEqual({ removedImageKeys: ["removed"], deletedImageKeys: ["removed"], favoriteImageKeys: ["favorite"] });
+});
+
+test("partitions local favorites and reconciles deleted, stale-favorite, and unknown image keys", () => {
+  const favorite = { ...image("favorite", "favorite.jpg", "Favorite"), isFavorite: true };
+  const deleted = image("deleted", "deleted.jpg", "Deleted");
+  const staleFavorite = image("stale", "stale.jpg", "Stale favorite");
+  const unknown = image("unknown", "unknown.jpg", "Unknown");
+
+  expect(partitionFavoriteGalleryImages([favorite, deleted, staleFavorite, unknown])).toEqual({
+    favoriteImages: [favorite],
+    eligibleImages: [deleted, staleFavorite, unknown],
+  });
+  expect(reconcileGalleryImageDeletion([deleted, staleFavorite, unknown], { deletedImageKeys: ["deleted", "outside"], favoriteImageKeys: ["stale"] })).toEqual({
+    deletedImages: [deleted],
+    favoriteImages: [{ ...staleFavorite, isFavorite: true }],
+    unknownImages: [unknown],
+  });
+});
+
+test("reconciles duplicate removal independently from trash deletion semantics", () => {
+  const removed = image("removed", "removed.jpg", "Removed");
+  const staleFavorite = image("stale", "stale.jpg", "Stale favorite");
+  const unknown = image("unknown", "unknown.jpg", "Unknown");
+
+  expect(reconcileGalleryDuplicateDeletion([removed, staleFavorite, unknown], {
+    removedImageKeys: ["removed"],
+    deletedImageKeys: [],
+    favoriteImageKeys: ["stale"],
+  })).toEqual({ removedImages: [removed], favoriteImages: [{ ...staleFavorite, isFavorite: true }], unknownImages: [unknown] });
 });
 
 test("sends image and collection edits and collection deletion through canonical mutations", async () => {

@@ -240,4 +240,48 @@ describe('Gallery operation boundaries', () => {
     expect(normalizeGalleryOperationError(new SyntaxError())).toMatchObject({ status: 400, code: 'GALLERY_INVALID_INPUT' });
     expect(normalizeGalleryOperationError(new Error('database secret'))).toMatchObject({ status: 500, code: 'GALLERY_FAILED', message: 'Gallery request failed.' });
   });
+
+  test('maps favorite collection deletion to a stable conflict without events', async () => {
+    const organizationKey = 'organization', scopeKey = key(), actorKey = key(), collectionKey = key();
+    let events = 0;
+    const context = {
+      organizationKey, scopeKey, membership: { key: actorKey, organizationId: organizationKey, userId: key(), status: 'active' },
+      deleteCollection: async () => ({ status: 'favorite' }),
+      publishUserEvent: async () => { events += 1; },
+    } as any;
+    await expect(galleryOperations.deleteCollection({ collectionKey }, context)).rejects.toMatchObject({ status: 409, code: 'GALLERY_COLLECTION_FAVORITE', message: 'Unfavorite the collection before deleting it.' });
+    expect(events).toBe(0);
+  });
+
+  test('publishes image deletion events only when the repository actually deletes images', async () => {
+    const organizationKey = 'organization', scopeKey = key(), actorKey = key(), userId = key(), imageKeys = [key(), key()];
+    const events: string[] = [];
+    const context = {
+      organizationKey, scopeKey, membership: { key: actorKey, organizationId: organizationKey, userId, status: 'active' },
+      canMutateImage: async () => true,
+      publishCollectionEvent: async (_collectionKey: string, slug: string) => { events.push(slug); },
+      deleteImages: async () => ({ deletedImageKeys: [], favoriteImageKeys: imageKeys, collectionKeys: [], subjectChanged: false, hadUnfiledImages: false }),
+    } as any;
+    await expect(galleryOperations.deleteImages({ imageKeys }, context)).resolves.toMatchObject({ deletedImageKeys: [], favoriteImageKeys: imageKeys });
+    expect(events).toEqual([]);
+    context.deleteImages = async () => ({ deletedImageKeys: [imageKeys[1]], favoriteImageKeys: [imageKeys[0]], collectionKeys: [key()], subjectChanged: false, hadUnfiledImages: false });
+    await expect(galleryOperations.deleteImages({ imageKeys }, context)).resolves.toMatchObject({ deletedImageKeys: [imageKeys[1]], favoriteImageKeys: [imageKeys[0]] });
+    expect(events).toEqual(['image.changed', 'collection.content.changed', 'collection.index.changed']);
+  });
+
+  test('publishes duplicate deletion events only for actual collection removals', async () => {
+    const organizationKey = 'organization', scopeKey = key(), actorKey = key(), collectionKey = key(), imageKey = key();
+    const events: string[] = [];
+    const context = {
+      organizationKey, scopeKey, membership: { key: actorKey, organizationId: organizationKey, userId: key(), status: 'active' },
+      getCollectionRole: async () => 'owner',
+      publishCollectionEvent: async (_collectionKey: string, slug: string) => { events.push(slug); },
+      deleteDuplicateImages: async () => ({ removedImageKeys: [], deletedImageKeys: [], favoriteImageKeys: [imageKey], collectionKeys: [], subjectChanged: false }),
+    } as any;
+    await expect(galleryOperations.deleteDuplicates({ collectionKey, imageKeys: [imageKey] }, context)).resolves.toMatchObject({ removedImageKeys: [], favoriteImageKeys: [imageKey] });
+    expect(events).toEqual([]);
+    context.deleteDuplicateImages = async () => ({ removedImageKeys: [imageKey], deletedImageKeys: [], favoriteImageKeys: [], collectionKeys: [collectionKey], subjectChanged: false });
+    await galleryOperations.deleteDuplicates({ collectionKey, imageKeys: [imageKey] }, context);
+    expect(events).toEqual(['image.changed', 'collection.content.changed', 'collection.index.changed']);
+  });
 });

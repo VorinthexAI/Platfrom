@@ -26,8 +26,11 @@ describe('Gallery assistant capabilities', () => {
     expect(Array.isArray(search.definition.inputSchema.oneOf)).toBe(true);
     expect(search.inputSchema.parse({ identityKey: newId() })).toEqual({ identityKey: expect.any(String) });
     expect(listCollections.inputSchema.parse({ maxCaptionScore: 40 })).toEqual({ maxCaptionScore: 40, limit: 100 });
-    expect(listCollections.definition.description).toContain('maximum current caption score');
-    expect(listCollections.definition.description).toContain('legacy placeholder scores are excluded');
+    expect(listCollections.definition.description).toContain('maximum compatible caption score');
+    expect(listCollections.definition.description).toContain('legacy migration placeholder scores are excluded');
+    for (const name of ['collection.delete', 'image.delete', 'collection.duplicates.delete']) {
+      expect(createGalleryAssistantCapabilities().find(({ definition }) => definition.name === name)!.definition.description.toLowerCase()).toContain('favorite');
+    }
     expect(listCollections.definition.inputSchema).toMatchObject({ properties: { maxCaptionScore: { type: 'integer', minimum: 1, maximum: 100 } } });
     expect((search.definition.inputSchema.oneOf as any[]).find(({ required }) => required.includes('identityKey'))).toMatchObject({ additionalProperties: false, properties: { identityKey: { type: 'string' } } });
     for (const capability of createGalleryAssistantCapabilities()) {
