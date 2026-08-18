@@ -52,7 +52,7 @@ test("uses a singleton collection cache without root search or filtering", () =>
 test("only lifts Core for its own focus and uses distinct image sheet presentations", () => {
   expect(source).toContain('behavior={aiInputFocused ? "height" : undefined}');
   expect(source).toContain("setAiInputFocused(focused)");
-  expect(source).toContain('hideHeading={activeSheet === "actions" || activeSheet === "collectionMenu" || activeSheet === "filter" || activeSheet === "imageActions" || activeSheet === "bulkActions"}');
+  expect(source).toContain('hideHeading={activeSheet === "rootActions" || activeSheet === "actions" || activeSheet === "collectionMenu" || activeSheet === "filter" || activeSheet === "imageActions" || activeSheet === "bulkActions"}');
   expect(source).toContain('open={sheetOpen && (activeSheet === "image" || activeSheet === "imageActions") && Boolean(selectedImage || selectedOptimisticItem)}');
   expect(source).toContain("        mutation\n        onOpenChange");
   expect(source).toContain('mutation={activeSheet === "imageEdit"');
@@ -138,7 +138,7 @@ test("uses standard right-side close controls and hides collection menu headings
   expect(`${preview}${sheet}`).not.toContain("headerLeading");
   expect(`${preview}${sheet}`).not.toContain("headerTrailing");
   expect(`${preview}${sheet}`).not.toContain("hideCloseButton");
-  expect(sheet).toContain('hideHeading={activeSheet === "actions" || activeSheet === "collectionMenu" || activeSheet === "filter" || activeSheet === "imageActions" || activeSheet === "bulkActions"}');
+  expect(sheet).toContain('hideHeading={activeSheet === "rootActions" || activeSheet === "actions" || activeSheet === "collectionMenu" || activeSheet === "filter" || activeSheet === "imageActions" || activeSheet === "bulkActions"}');
 });
 
 test("gates collection search focus while the Core sheet closes", () => {
