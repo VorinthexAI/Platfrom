@@ -58,7 +58,7 @@ test("uses a singleton collection cache without root search or filtering", () =>
 test("only lifts Core for its own focus and uses distinct image sheet presentations", () => {
   expect(source).toContain('behavior={aiInputFocused ? "height" : undefined}');
   expect(source).toContain("setAiInputFocused(focused)");
-  expect(source).toContain('hideHeading={activeSheet === "rootActions" || activeSheet === "actions" || activeSheet === "collectionMenu" || activeSheet === "filter" || activeSheet === "imageActions" || activeSheet === "bulkActions" || activeSheet === "cleanupMenu" || activeSheet === "confirmCleanupDelete" || activeSheet === "confirmLeaveCollection"}');
+  expect(source).toContain('hideHeading={activeSheet === "rootActions" || activeSheet === "actions" || activeSheet === "collectionMenu" || activeSheet === "filter" || activeSheet === "imageActions" || activeSheet === "bulkActions" || activeSheet === "cleanupMenu" || activeSheet === "confirmCleanupDelete" || activeSheet === "confirmDeleteIdentity" || activeSheet === "confirmLeaveCollection"}');
   expect(source).toContain('open={!sharingOpen && sheetOpen && (activeSheet === "image" || activeSheet === "imageActions") && Boolean(selectedImage || selectedOptimisticItem)}');
   expect(source).toContain("        mutation\n        onOpenChange");
   expect(source).toContain('mutation={activeSheet === "imageEdit"');
@@ -93,6 +93,24 @@ test("provides the full visual identity library and image picker workflow", () =
   expect(source).toContain("setIdentityError(errorMessage(error))");
   expect(source).toContain("identitiesLoading || creatingIdentityKeys.length > 0");
   expect(source).toContain("Array.from({ length: COLLECTION_COLUMNS }");
+  expect(source).toContain('<Button disabled={identitiesLoading} onPress={() => void openIdentityPicker()} size="lg" variant="primary">Create</Button>');
+  expect(source).not.toContain('identityLibraryMode === "browse" ? <Button');
+  expect(source.match(/onPress=\{\(\) => void openVisualIdentities\(\)\} size="lg" variant="secondary">Visual identities<\/Button>/g)).toHaveLength(2);
+});
+
+test("keeps similar-image and visual-identity pills mutually exclusive", () => {
+  const similar = source.slice(source.indexOf("async function findSimilar"), source.indexOf("function clearSimilarImages"));
+  const identity = source.slice(source.indexOf("async function filterByVisualIdentity"), source.indexOf("function clearIdentityFilter"));
+  const leave = source.slice(source.indexOf("async function leaveActiveCollection"), source.indexOf("function replaceVisibleImages"));
+  expect(similar).toContain("identityFilterRequest.current += 1");
+  expect(similar).toContain("setActiveIdentityFilter(undefined)");
+  expect(identity).toContain("imageSheetRequest.current += 1");
+  expect(identity).toContain("setSimilarSource(undefined)");
+  expect(identity).toContain("setSimilarImages([])");
+  expect(leave).toContain("setActiveIdentityFilter(undefined)");
+  expect(leave).toContain("setSimilarSource(undefined)");
+  expect(source).toContain('accessibilityLabel="Close similar image filter"');
+  expect(source).toContain('accessibilityLabel="Close visual identity filter"');
 });
 
 test("uses separate image-selection and naming steps for visual identities", () => {
@@ -144,7 +162,7 @@ test("uses standard right-side close controls and hides collection menu headings
   expect(`${preview}${sheet}`).not.toContain("headerLeading");
   expect(`${preview}${sheet}`).not.toContain("headerTrailing");
   expect(`${preview}${sheet}`).not.toContain("hideCloseButton");
-  expect(sheet).toContain('hideHeading={activeSheet === "rootActions" || activeSheet === "actions" || activeSheet === "collectionMenu" || activeSheet === "filter" || activeSheet === "imageActions" || activeSheet === "bulkActions" || activeSheet === "cleanupMenu" || activeSheet === "confirmCleanupDelete" || activeSheet === "confirmLeaveCollection"}');
+  expect(sheet).toContain('hideHeading={activeSheet === "rootActions" || activeSheet === "actions" || activeSheet === "collectionMenu" || activeSheet === "filter" || activeSheet === "imageActions" || activeSheet === "bulkActions" || activeSheet === "cleanupMenu" || activeSheet === "confirmCleanupDelete" || activeSheet === "confirmDeleteIdentity" || activeSheet === "confirmLeaveCollection"}');
 });
 
 test("provides collection cleanup discovery, pagination, exclusion, and confirmed canonical deletion", () => {
@@ -159,7 +177,7 @@ test("provides collection cleanup discovery, pagination, exclusion, and confirme
   expect(source).toContain('Choose a quality threshold to find and remove lower-quality images. Images are scored from 1 to 100.');
   expect(source).toContain('const CLEANUP_THRESHOLDS = [10, 25, 50, 75, 90] as const');
   expect(source).toContain('fetchGalleryOverview(collection.key, cursor, 100, threshold)');
-  expect(source).toContain('appendCursorItems(current, result.images.filter');
+  expect(source).toContain('appendCursorItems(cached?.images ?? [], result.images');
   expect(source).toContain('accessibilityLabel={`Exclude ${image.filename} from cleanup`}');
   expect(source).toContain('setCleanupImages((current) => current.filter');
   expect(source).toContain('for (let index = 0; index < targets.length; index += DELETE_IMAGE_CHUNK_SIZE)');
@@ -253,10 +271,9 @@ test("reloads the guarded collection singleton after confirmed global image dele
   expect(source.match(/refreshCollectionSingletonAfterImageDeletion\(generation\)/g)?.length).toBeGreaterThanOrEqual(4);
 });
 
-test("keeps cleanup exclusions and cursor state safe across thresholds, pagination, and refreshes", () => {
+test("caches cleanup thresholds for one sheet session while keeping exclusions and cursors safe", () => {
   expect(source).toContain('const cleanupExcludedKeys = useRef(new Set<string>())');
   expect(source).toContain('cleanupExcludedKeys.current.add(imageKey)');
-  expect(source).toContain('!cleanupExcludedKeys.current.has(image.key)');
   expect(source).toContain('result.images.filter(({ key }) => !cleanupExcludedKeys.current.has(key))');
   expect(source.match(/cleanupExcludedKeys\.current\.clear\(\)/g)).toHaveLength(3);
   expect(source).toContain('const cleanupCursorRef = useRef<string | null>(null)');
@@ -264,6 +281,11 @@ test("keeps cleanup exclusions and cursor state safe across thresholds, paginati
   expect(source).toContain('cleanupCursorRef.current = null;\n    cleanupLoadingRef.current = true;');
   expect(source).toContain('const cursor = cleanupCursorRef.current');
   expect(source).toContain('if (!collection || !isGalleryCollectionOwned(collection) || !cursor || cleanupLoadingRef.current || cleanupLoadingMoreRef.current');
+  expect(source).toContain('galleryQueryKeys.cleanup(galleryContext, collection.key, threshold)');
+  expect(source).toContain('staleTime: Infinity');
+  expect(source).toContain('queryClient.getQueryState(queryKey)?.isInvalidated !== true');
+  expect(source).toContain('queryClient.getQueryData<CleanupPage>(queryKey)');
+  expect(source).toContain('queryClient.setQueryData(queryKey, next)');
 });
 
 test("traverses empty cleanup pages and binds convergence to the source collection", () => {
@@ -278,6 +300,8 @@ test("traverses empty cleanup pages and binds convergence to the source collecti
 });
 
 test("invalidates and authoritatively reloads cleanup for permission and external changes", () => {
+  expect(source).toContain('galleryQueryKeys.cleanups(galleryContext, collectionKey), refetchType: "none"');
+  expect(source).toContain('await invalidation;\n    if (activeSheetRef.current === "cleanup"');
   expect(source).toContain('if (!busyRef.current && (plan.has("access") || plan.has("cleanup"))');
   expect(source).toContain('if (cleanupWasOpen && (plan.has("access") || plan.has("cleanup"))) invalidateCleanupLoad()');
   expect(source).toContain('const needsCleanup = cleanupWasOpen && (plan.has("access") || plan.has("cleanup"))');

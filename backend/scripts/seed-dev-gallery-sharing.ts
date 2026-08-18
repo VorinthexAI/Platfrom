@@ -3,6 +3,7 @@ import { hashUserEmail } from '@/api/users';
 import { decryptAuthenticatedJson, encryptAuthenticatedJson } from '@/lib/authenticated-encryption';
 import { toArangoDoc, withArangoKey } from '@/lib/db/base';
 import { closeDb, db, withTransaction } from '@/lib/db/client';
+import { collectionImageSchema } from '@/lib/db/collection-images.node';
 import { collectionInviteSchema, type CollectionInvite } from '@/lib/db/collection-invites.node';
 import { collectionMemberSchema, type CollectionMember } from '@/lib/db/collection-members.node';
 import { collectionSchema, type Collection } from '@/lib/db/collections.node';
@@ -14,6 +15,7 @@ import {
   assertDevLocalArango,
   buildGallerySharingFixturePlan,
   buildOwnedCollectionFixturePlan,
+  buildSharedCollectionPlacementPlan,
   deterministicGalleryEmbedding,
   deterministicGalleryFixtureKey,
   deterministicGalleryToken,
@@ -90,7 +92,7 @@ async function main() {
     updatedAt: NOW,
   }));
 
-  const ownedRows = await withTransaction({ read: [], write: ['users', 'userOrganizations', 'collections', 'collectionMembers', 'collectionInvites', 'shares'] }, async (transaction) => {
+  const seeded = await withTransaction({ read: ['images'], write: ['users', 'userOrganizations', 'collections', 'collectionMembers', 'collectionImages', 'collectionInvites', 'shares'] }, async (transaction) => {
     for (const user of fakeUsers) await upsert(transaction, 'users', user);
     for (const membership of fakeMemberships) await upsert(transaction, 'userOrganizations', membership);
     for (const collection of sharedCollections) await upsert(transaction, 'collections', collection);
@@ -110,6 +112,36 @@ async function main() {
         requestHash: requestHash({ collectionKey: invite.collectionKey, inviteeKey: invite.inviteeKey, role: invite.role }),
         responseCiphertext,
       });
+    }
+
+    const candidateCursor = await transaction.query(`
+      FOR image IN images
+        FILTER image.scopeKey == @scopeKey && image.deletedAt == null
+        LET sourceCollectionKey = FIRST(
+          FOR relation IN collectionImages
+            FILTER relation.scopeKey == @scopeKey && relation.imageKey == image._key && relation.collectionKey NOT IN @sharedCollectionKeys
+            LET source = DOCUMENT(collections, relation.collectionKey)
+            FILTER source != null && source.scopeKey == @scopeKey && source.deletedAt == null
+            SORT source._key ASC
+            RETURN source._key
+        )
+        SORT sourceCollectionKey == null ASC, sourceCollectionKey ASC, image._key ASC
+        RETURN { imageKey: image._key, sourceCollectionKey }
+    `, { scopeKey, sharedCollectionKeys: plan.collections.map(({ collectionKey }) => collectionKey) });
+    const placementPlan = buildSharedCollectionPlacementPlan(
+      scopeKey,
+      plan.collections.map(({ collectionKey, ownerMembershipKey }) => ({ collectionKey, ownerMembershipKey })),
+      await candidateCursor.all() as Array<{ imageKey: string; sourceCollectionKey: string | null }>,
+    );
+    for (const target of placementPlan) {
+      for (const placement of target.placements) {
+        const relation = collectionImageSchema.parse({ key: placement.key, scopeKey, collectionKey: target.collectionKey, imageKey: placement.imageKey, addedByKey: target.ownerMembershipKey, createdAt: NOW });
+        await transaction.query('UPSERT { scopeKey: @scopeKey, collectionKey: @collectionKey, imageKey: @imageKey } INSERT @document UPDATE {} IN collectionImages', { scopeKey, collectionKey: relation.collectionKey, imageKey: relation.imageKey, document: document(relation) });
+      }
+      const firstImageKey = target.placements[0]?.imageKey;
+      if (firstImageKey) {
+        await transaction.query('FOR collection IN collections FILTER collection._key == @collectionKey && collection.scopeKey == @scopeKey LET validCover = collection.coverImageKey != null && LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.collectionKey == collection._key && relation.imageKey == collection.coverImageKey LIMIT 1 RETURN 1) == 1 UPDATE collection WITH { coverImageKey: validCover ? collection.coverImageKey : @coverImageKey } IN collections RETURN NEW', { scopeKey, collectionKey: target.collectionKey, coverImageKey: firstImageKey });
+      }
     }
 
     const ownerlessCursor = await transaction.query('FOR collection IN collections FILTER collection.scopeKey == @scopeKey && collection.deletedAt == null LET ownerCount = LENGTH(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == collection._key && member.role == "owner" RETURN 1) FILTER ownerCount == 0 RETURN { key: collection._key, name: collection.name }', { scopeKey });
@@ -143,21 +175,25 @@ async function main() {
         });
       }
     }
-    return owned;
+    return { owned, placementPlan };
   });
+  const ownedRows = seeded.owned;
+  const placementKeys = seeded.placementPlan.flatMap(({ placements }) => placements.map(({ key }) => key));
 
   const verificationCursor = await db.query(`
     LET ownerless = LENGTH(FOR collection IN collections FILTER collection.scopeKey == @scopeKey && collection.deletedAt == null FILTER LENGTH(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == collection._key && member.role == "owner" RETURN 1) == 0 RETURN 1)
     LET badReferences = LENGTH(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member._key IN @fixtureMemberKeys LET collection = DOCUMENT(collections, member.collectionKey) LET membership = DOCUMENT(userOrganizations, member.memberKey) FILTER collection == null || collection.scopeKey != @scopeKey || collection.deletedAt != null || membership == null || membership.organizationId != @organizationKey || membership.status != "active" RETURN 1)
-    LET shared = (FOR collectionKey IN @sharedCollectionKeys LET collection = DOCUMENT(collections, collectionKey) LET owners = (FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == collectionKey && member.role == "owner" RETURN member.memberKey) LET oscarRole = FIRST(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == collectionKey && member.memberKey == @oscarMembershipKey RETURN member.role) RETURN { key: collectionKey, name: collection.name, ownerCount: LENGTH(owners), oscarRole, oscarIsOwner: @oscarMembershipKey IN owners })
+    LET badPlacements = LENGTH(FOR relation IN collectionImages FILTER relation._key IN @placementKeys LET image = DOCUMENT(images, relation.imageKey) LET collection = DOCUMENT(collections, relation.collectionKey) LET addedBy = DOCUMENT(userOrganizations, relation.addedByKey) FILTER relation.scopeKey != @scopeKey || image == null || image.scopeKey != @scopeKey || image.deletedAt != null || collection == null || collection.scopeKey != @scopeKey || collection.deletedAt != null || addedBy == null || addedBy.organizationId != @organizationKey || addedBy.status != "active" RETURN 1)
+    LET shared = (FOR collectionKey IN @sharedCollectionKeys LET collection = DOCUMENT(collections, collectionKey) LET owners = (FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == collectionKey && member.role == "owner" RETURN member.memberKey) LET oscarRole = FIRST(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == collectionKey && member.memberKey == @oscarMembershipKey RETURN member.role) LET seededPlacementCount = LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.collectionKey == collectionKey && relation._key IN @placementKeys RETURN 1) LET placementCount = LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.collectionKey == collectionKey RETURN 1) LET coverValid = collection.coverImageKey != null && LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.collectionKey == collectionKey && relation.imageKey == collection.coverImageKey LET image = DOCUMENT(images, relation.imageKey) FILTER image != null && image.scopeKey == @scopeKey && image.deletedAt == null LIMIT 1 RETURN 1) == 1 RETURN { key: collectionKey, name: collection.name, ownerCount: LENGTH(owners), oscarRole, oscarIsOwner: @oscarMembershipKey IN owners, seededPlacementCount, placementCount, coverImageKey: collection.coverImageKey, coverValid })
     LET shares = (FOR key IN @shareKeys LET share = DOCUMENT(shares, key) RETURN share)
     LET invites = (FOR key IN @inviteKeys LET invite = DOCUMENT(collectionInvites, key) RETURN invite)
-    RETURN { ownerless, badReferences, shared, shares, invites }
+    RETURN { ownerless, badReferences, badPlacements, shared, shares, invites }
   `, {
     scopeKey,
     organizationKey,
     oscarMembershipKey,
     sharedCollectionKeys: plan.collections.map(({ collectionKey }) => collectionKey),
+    placementKeys,
     fixtureMemberKeys: [
       ...plan.collections.flatMap(({ ownerMemberKey, oscarMemberKey }) => [ownerMemberKey, oscarMemberKey]),
       ...ownedRows.flatMap(({ key }) => { const fixture = buildOwnedCollectionFixturePlan(scopeKey, key); return [fixture.collaboratorMemberKey, fixture.viewerMemberKey]; }),
@@ -165,9 +201,12 @@ async function main() {
     shareKeys: ownedRows.flatMap(({ key }) => { const fixture = buildOwnedCollectionFixturePlan(scopeKey, key); return [fixture.viewerShareKey, fixture.collaboratorShareKey]; }),
     inviteKeys: plan.collections.map(({ inviteKey }) => inviteKey),
   });
-  const verification = await verificationCursor.next() as { ownerless: number; badReferences: number; shared: Array<{ key: string; name: string; ownerCount: number; oscarRole: string; oscarIsOwner: boolean }>; shares: unknown[]; invites: unknown[] };
-  if (verification.ownerless !== 0 || verification.badReferences !== 0) throw new Error('Gallery sharing fixture referential integrity verification failed.');
-  if (verification.shared.length !== plan.collections.length || verification.shared.some((row, index) => row.ownerCount !== 1 || row.oscarIsOwner || row.oscarRole !== plan.collections[index]!.oscarRole)) throw new Error('Shared collection ownership or role verification failed.');
+  const verification = await verificationCursor.next() as { ownerless: number; badReferences: number; badPlacements: number; shared: Array<{ key: string; name: string; ownerCount: number; oscarRole: string; oscarIsOwner: boolean; seededPlacementCount: number; placementCount: number; coverImageKey: string | null; coverValid: boolean }>; shares: unknown[]; invites: unknown[] };
+  if (verification.ownerless !== 0 || verification.badReferences !== 0 || verification.badPlacements !== 0) throw new Error('Gallery sharing fixture referential integrity verification failed.');
+  if (verification.shared.length !== plan.collections.length || verification.shared.some((row, index) => {
+    const expectedPlacements = seeded.placementPlan[index]!.placements.length;
+    return row.ownerCount !== 1 || row.oscarIsOwner || row.oscarRole !== plan.collections[index]!.oscarRole || row.seededPlacementCount !== expectedPlacements || row.placementCount < expectedPlacements || (expectedPlacements > 0 && (!row.coverImageKey || !row.coverValid));
+  })) throw new Error('Shared collection ownership, role, placement, or cover verification failed.');
   if (verification.shares.length !== ownedRows.length * 2 || verification.invites.length !== plan.collections.length) throw new Error('Gallery sharing fixture counts are incorrect.');
 
   for (const raw of verification.shares) {
@@ -189,7 +228,7 @@ async function main() {
   console.log(`Gallery collaboration fixtures verified for ${EMAIL} in scope ${scopeKey}.`);
   console.table([
     ...ownedRows.map((collection) => ({ collection: collection.name, tab: 'My', oscarRole: 'owner', collaborators: 1, viewers: 1, activeLinks: 1, inactiveLinks: 1 })),
-    ...verification.shared.map((collection) => ({ collection: collection.name, tab: 'Shared', oscarRole: collection.oscarRole, collaborators: collection.oscarRole === 'collaborator' ? 1 : 0, viewers: collection.oscarRole === 'viewer' ? 1 : 0, activeLinks: 0, inactiveLinks: 0 })),
+    ...verification.shared.map((collection) => ({ collection: collection.name, tab: 'Shared', oscarRole: collection.oscarRole, images: collection.placementCount, collaborators: collection.oscarRole === 'collaborator' ? 1 : 0, viewers: collection.oscarRole === 'viewer' ? 1 : 0, activeLinks: 0, inactiveLinks: 0 })),
   ]);
 }
 
