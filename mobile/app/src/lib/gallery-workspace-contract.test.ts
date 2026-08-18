@@ -154,8 +154,8 @@ test("gates collection search focus while the Core sheet closes", () => {
 });
 
 test("provides collection sharing navigation and permission gates", () => {
-  expect(source).toContain(">My</Button>");
-  expect(source).toContain(">Shared</Button>");
+  expect(source).toContain(">My collections</Button>");
+  expect(source).toContain(">Shared collections</Button>");
   expect(source).toContain("<MemberIcon size=\"sm\"");
   expect(source).toContain('collectionRole === "collaborator" && image.createdByKey === activeCollection.memberKey');
   expect(source).toContain('pushSheet("confirmLeaveCollection")');
@@ -188,8 +188,8 @@ test("restores the root create action and Archive-style ownership tabs", () => {
   expect(source).toContain('<PlusIcon size="sm" />');
   expect(source).toContain('<Tabs accessibilityRole="tablist" style={styles.collectionTabs}>');
   expect(source).toContain('<Button accessibilityRole="tab" accessibilityState={{ selected: collectionTab === "mine" }}');
-  expect(source).toContain('size="xs" style={styles.collectionTab} variant={collectionTab === "mine" ? "secondary" : "ghost"}>My</Button>');
-  expect(source).toContain('size="xs" style={styles.collectionTab} variant={collectionTab === "shared" ? "secondary" : "ghost"}>Shared</Button>');
+  expect(source).toContain('size="xs" style={styles.collectionTab} variant={collectionTab === "mine" ? "secondary" : "ghost"}>My collections</Button>');
+  expect(source).toContain('size="xs" style={styles.collectionTab} variant={collectionTab === "shared" ? "secondary" : "ghost"}>Shared collections</Button>');
   expect(source).toContain('collectionTabs: { flexDirection: "row", gap: 4, padding: 3, borderWidth: 1, backgroundColor: palette.panel }');
 });
 

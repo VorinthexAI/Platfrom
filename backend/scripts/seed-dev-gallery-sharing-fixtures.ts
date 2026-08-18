@@ -6,6 +6,8 @@ export const DEV_GALLERY_SHARING_NOW = '2026-08-18T12:00:00.000Z';
 
 const identitySchema = z.object({ slug: z.string().regex(/^[a-z-]+$/), name: z.string().min(1), email: z.string().email() }).strict();
 const collectionFixtureSchema = z.object({ slug: z.string().regex(/^[a-z-]+$/), name: z.string().min(1), description: z.string().min(1), ownerSlug: z.string(), oscarRole: z.enum(['collaborator', 'viewer']) }).strict();
+const placementCandidateSchema = z.object({ imageKey: z.string().cuid(), sourceCollectionKey: z.string().cuid().nullable() }).strict();
+const placementTargetSchema = z.object({ collectionKey: z.string().cuid(), ownerMembershipKey: z.string().cuid() }).strict();
 
 export const FAKE_IDENTITIES = z.array(identitySchema).parse([
   { slug: 'avery-stone', name: 'Avery Stone', email: 'avery.stone.gallery@example.test' },
@@ -71,4 +73,42 @@ export function buildOwnedCollectionFixturePlan(scopeKey: string, collectionKey:
     viewerToken: deterministicGalleryToken(scopeKey, 'collection-share', `${collectionKey}:viewer-active`),
     collaboratorToken: deterministicGalleryToken(scopeKey, 'collection-share', `${collectionKey}:collaborator-inactive`),
   };
+}
+
+export function buildSharedCollectionPlacementPlan(
+  scopeKey: string,
+  rawTargets: Array<{ collectionKey: string; ownerMembershipKey: string }>,
+  rawCandidates: Array<{ imageKey: string; sourceCollectionKey: string | null }>,
+  imagesPerCollection = 4,
+) {
+  const targets = rawTargets.map((target) => placementTargetSchema.parse(target));
+  const uniqueCandidates = [...new Map(rawCandidates.map((candidate) => {
+    const parsed = placementCandidateSchema.parse(candidate);
+    return [parsed.imageKey, parsed] as const;
+  })).values()];
+  const sourceQueues = new Map<string, typeof uniqueCandidates>();
+  for (const candidate of uniqueCandidates) {
+    const sourceKey = candidate.sourceCollectionKey ?? '';
+    sourceQueues.set(sourceKey, [...(sourceQueues.get(sourceKey) ?? []), candidate]);
+  }
+  const sourceKeys = [...sourceQueues.keys()].sort((left, right) => left === '' ? 1 : right === '' ? -1 : left.localeCompare(right));
+  for (const queue of sourceQueues.values()) queue.sort((left, right) => left.imageKey.localeCompare(right.imageKey));
+  const distributedCandidates: typeof uniqueCandidates = [];
+  while (distributedCandidates.length < uniqueCandidates.length) {
+    for (const sourceKey of sourceKeys) {
+      const candidate = sourceQueues.get(sourceKey)?.shift();
+      if (candidate) distributedCandidates.push(candidate);
+    }
+  }
+  const placements = targets.map((target) => ({ ...target, placements: [] as Array<{ key: string; imageKey: string; sourceCollectionKey: string | null }> }));
+  for (const [index, candidate] of distributedCandidates.slice(0, targets.length * imagesPerCollection).entries()) {
+    const round = Math.floor(index / targets.length);
+    const target = placements[(index % targets.length + round) % targets.length]!;
+    target.placements.push({
+      key: deterministicGalleryFixtureKey(scopeKey, 'collection-image', `${target.collectionKey}:${candidate.imageKey}`),
+      imageKey: candidate.imageKey,
+      sourceCollectionKey: candidate.sourceCollectionKey,
+    });
+  }
+  return placements;
 }
