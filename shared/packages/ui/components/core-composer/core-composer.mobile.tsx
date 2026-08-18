@@ -337,7 +337,7 @@ export function CoreComposer({
       }]}>
         {!sheetOpen ? <>{accessory}{composer(false)}</> : null}
       </View>
-      <BottomSheet mutation onOpenChange={(open) => { if (!open) closeSheet(); }} open={sheetOpen} title="Core">
+      <BottomSheet height="full" onOpenChange={(open) => { if (!open) closeSheet(); }} open={sheetOpen} title="Core">
         {sheetOpen ? <View style={[styles.sheetBodyOpen, style]}>
           {message}
           {composer(true)}

@@ -27,6 +27,8 @@ export const galleryQueryKeys = {
   cleanups: (context: WorkspaceContext, collectionKey: string) => [...galleryQueryKeys.all(context), "cleanup", collectionKey] as const,
   cleanup: (context: WorkspaceContext, collectionKey: string, threshold: number) => [...galleryQueryKeys.cleanups(context, collectionKey), threshold] as const,
   uploads: (context: WorkspaceContext) => [...galleryQueryKeys.all(context), "uploads"] as const,
+  highlights: (context: WorkspaceContext, collectionKey: string) => [...galleryQueryKeys.all(context), "highlights", collectionKey] as const,
+  highlight: (context: WorkspaceContext, collectionKey: string, highlightKey: string) => [...galleryQueryKeys.highlights(context, collectionKey), highlightKey] as const,
 };
 
 export function setCachedGalleryMembers(queryClient: QueryClient, context: WorkspaceContext, collectionKey: string, members: GalleryCollectionMember[]) {

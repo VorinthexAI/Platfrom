@@ -7,10 +7,11 @@ export const GALLERY_EVENT_SLUGS = [
   "image.changed",
   "upload.changed",
   "subject.changed",
+  "highlight.changed",
 ] as const;
 
 export type GalleryEventSlug = typeof GALLERY_EVENT_SLUGS[number];
-export type GalleryRefreshFamily = "root" | "current" | "access" | "members" | "collectionInvites" | "incomingInvites" | "shares" | "subjects" | "search" | "duplicates" | "cleanup" | "upload";
+export type GalleryRefreshFamily = "root" | "current" | "access" | "members" | "collectionInvites" | "incomingInvites" | "shares" | "subjects" | "search" | "duplicates" | "cleanup" | "upload" | "highlights";
 export type GalleryRefreshPlan = ReadonlySet<GalleryRefreshFamily>;
 
 export function isCurrentContextGeneration(expected: number, current: number) {
@@ -19,16 +20,17 @@ export function isCurrentContextGeneration(expected: number, current: number) {
 
 const plans: Record<GalleryEventSlug, readonly GalleryRefreshFamily[]> = {
   "collection.index.changed": ["root", "access"],
-  "collection.content.changed": ["current", "search", "duplicates", "cleanup"],
+  "collection.content.changed": ["current", "search", "duplicates", "cleanup", "highlights"],
   "collection.access.changed": ["root", "access", "members", "cleanup"],
   "collection.invites.changed": ["collectionInvites", "incomingInvites"],
   "collection.shares.changed": ["shares"],
-  "image.changed": ["current", "search", "duplicates", "cleanup", "subjects", "upload"],
+  "image.changed": ["current", "search", "duplicates", "cleanup", "subjects", "upload", "highlights"],
   "upload.changed": ["current", "search", "duplicates", "cleanup", "upload", "subjects"],
   "subject.changed": ["subjects", "search"],
+  "highlight.changed": ["highlights"],
 };
 
-const recoveryPlan: readonly GalleryRefreshFamily[] = ["root", "current", "access", "members", "collectionInvites", "incomingInvites", "shares", "subjects", "search", "duplicates", "cleanup", "upload"];
+const recoveryPlan: readonly GalleryRefreshFamily[] = ["root", "current", "access", "members", "collectionInvites", "incomingInvites", "shares", "subjects", "search", "duplicates", "cleanup", "upload", "highlights"];
 
 export function isGalleryEventSlug(value: string): value is GalleryEventSlug {
   return (GALLERY_EVENT_SLUGS as readonly string[]).includes(value);
@@ -84,7 +86,7 @@ export function reconcileGalleryState<TMode, TCollection extends { key: string; 
   };
 }
 
-export const OWNER_ONLY_GALLERY_SHEETS = new Set(["collectionEdit", "confirmDeleteCollection", "duplicates", "confirmDeleteDuplicates", "cleanupMenu", "cleanup", "confirmCleanupDelete", "visualIdentities", "confirmDeleteIdentity", "identityPicker", "identityName"]);
+export const OWNER_ONLY_GALLERY_SHEETS = new Set(["collectionEdit", "confirmDeleteCollection", "duplicates", "confirmDeleteDuplicates", "cleanup", "confirmCleanupDelete", "visualIdentities", "confirmDeleteIdentity", "identityPicker", "identityName"]);
 export const MUTATION_GALLERY_SHEETS = new Set(["imageEdit", "confirmDeleteImage", "bulkActions", "bulkDelete", "transferDestination"]);
 export const CONTRIBUTOR_GALLERY_SHEETS = new Set(["actions", "destination"]);
 
@@ -117,6 +119,10 @@ export function reconcileGalleryPermissions(input: {
 
 export function recoverAssistantSearchMode(source: string | undefined) {
   return source?.trim() ? { action: "rerun" as const, query: source.trim() } : { action: "exit" as const };
+}
+
+export function shouldRunGalleryAssistantTextSearch(result: { type: string; changes?: Array<{ workspace: string }> }) {
+  return result.type !== "unsupported" && !result.changes?.some(({ workspace }) => workspace === "gallery");
 }
 
 export function recoverContextualSearchFailure(mode: "similar" | "identity") {

@@ -7,9 +7,9 @@ describe('unified tool registry', () => {
   test('has one unique definition for every public tool name', () => {
     expect(new Set(TOOL_NAMES).size).toBe(TOOL_NAMES.length);
     expect(new Set(TOOL_DEFINITIONS.map(({ name }) => name)).size).toBe(TOOL_DEFINITIONS.length);
-    expect(TOOL_NAMES).toHaveLength(206);
-    expect(TOOL_DEFINITIONS).toHaveLength(206);
-    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 154);
+    expect(TOOL_NAMES).toHaveLength(210);
+    expect(TOOL_DEFINITIONS).toHaveLength(210);
+    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 158);
     expect(TOOL_DEFINITIONS.map(({ name }) => name)).toEqual([...TOOL_NAMES]);
     expect(TOOL_NAMES.filter((name) => name === 'chat')).toHaveLength(1);
     expect(TOOL_NAMES).not.toContain('orchestrator.chat');
@@ -30,6 +30,7 @@ describe('unified tool registry', () => {
     expect(TOOL_NAMES).toContain('folder.create');
     expect(TOOL_NAMES).toContain('folder.copy');
     expect(TOOL_NAMES).toContain('collection.create');
+    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['highlight.create', 'highlight.list', 'highlight.read', 'highlight.delete']));
     expect(TOOL_NAMES).toContain('trip.create');
     expect(TOOL_NAMES).toContain('email.draft.send');
     expect(TOOL_NAMES).toContain('book.chapter.progress');

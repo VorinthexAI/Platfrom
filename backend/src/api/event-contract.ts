@@ -7,6 +7,7 @@ export const APP_EVENT_SLUGS = [
   'image.changed',
   'upload.changed',
   'subject.changed',
+  'highlight.changed',
 ] as const;
 export type AppEventSlug = (typeof APP_EVENT_SLUGS)[number];
 export type EventEnvelope =

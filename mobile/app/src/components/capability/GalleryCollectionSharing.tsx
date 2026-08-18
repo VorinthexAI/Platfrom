@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { ScrollView, Share as NativeShare, StyleSheet, Text, View } from "react-native";
 import { useQueryClient } from "@tanstack/react-query";
 import { BottomSheet, BottomSheetItem } from "@vorinthex/shared/ui/bottom-sheet";
+import { ActionPill } from "@vorinthex/shared/ui/action-pill";
 import { Button } from "@vorinthex/shared/ui/button";
-import { copyToClipboard } from "@vorinthex/shared/ui/clipboard";
 import { Switch } from "@vorinthex/shared/ui/switch";
 import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { useToast } from "@vorinthex/shared/ui/toast";
@@ -12,6 +12,7 @@ import { CloseIcon } from "@vorinthex/shared/ui/icons-mobile";
 import {
   createGalleryCollectionShareLink,
   filterGalleryShareLinks,
+  isGalleryCollectionOwned,
   listGalleryCollectionInvites,
   listGalleryCollectionMembers,
   listGalleryCollectionShareLinks,
@@ -52,7 +53,7 @@ export function GalleryCollectionSharing({ collection, context, memberKeys, onCl
 }) {
   const queryClient = useQueryClient();
   const notify = useNotice();
-  const owner = collection.role === "owner" || !collection.role;
+  const owner = isGalleryCollectionOwned(collection);
   const [view, setView] = useState<SharingView>("access");
   const [tab, setTab] = useState<GalleryCollectionRole>("owner");
   const [members, setMembers] = useState<GalleryCollectionMember[]>([]);
@@ -89,7 +90,7 @@ export function GalleryCollectionSharing({ collection, context, memberKeys, onCl
 
   useEffect(() => {
     if (owner) return;
-    if (view === "invites" || view === "inviteConfirm" || view === "memberRemoveConfirm" || view === "links" || view === "link" || view === "createLink") {
+    if (view === "invites" || view === "inviteConfirm" || view === "member" || view === "memberRemoveConfirm" || view === "links" || view === "link" || view === "createLink") {
       contextGeneration.current += 1;
       requestGeneration.current += 1;
       deferredRefresh.current = false;
@@ -170,12 +171,12 @@ export function GalleryCollectionSharing({ collection, context, memberKeys, onCl
     finally { finishLoad(generation, request); }
   }
 
-  function openMember(member: GalleryCollectionMember) { setSelectedMember(member); setRole(member.role === "owner" ? "viewer" : member.role); setView("member"); }
+  function openMember(member: GalleryCollectionMember) { if (!owner || member.role === "owner") return; setSelectedMember(member); setRole(member.role); setView("member"); }
   function openLink(link: GalleryCollectionShareLink) { setSelectedLink(link); setRole(link.role); setActive(link.active); setView("link"); }
   function newLink() { setSelectedLink(undefined); setRole("viewer"); setActive(true); setView("createLink"); }
 
   async function saveMember() {
-    if (!selectedMember || !owner) return;
+    if (!selectedMember || !owner || selectedMember.role === "owner") return;
     const generation = contextGeneration.current;
     setBusy(true);
     try {
@@ -189,7 +190,7 @@ export function GalleryCollectionSharing({ collection, context, memberKeys, onCl
   }
 
   async function removeMember() {
-    if (!selectedMember || !owner) return;
+    if (!selectedMember || !owner || selectedMember.role === "owner") return;
     const generation = contextGeneration.current;
     setBusy(true);
     const previous = members;
@@ -209,14 +210,9 @@ export function GalleryCollectionSharing({ collection, context, memberKeys, onCl
       if (generation !== contextGeneration.current) return;
       const next = invites.filter(({ key }) => key !== selectedInvite.key);
       setInvites(next); queryClient.setQueryData(incomingInvitesQueryKey, { invites: next }); setView("invites");
-      notify(inviteResponse === "accept" ? "Invite accepted" : "Invite rejected");
+      notify(inviteResponse === "accept" ? "Invite accepted" : "Invite removed");
     } catch { if (generation === contextGeneration.current) reportFailure("Invite response failed"); }
     finally { if (generation === contextGeneration.current) setBusy(false); }
-  }
-
-  async function copy(url: string, successTitle = "Share link copied to clipboard", failureTitle = "Clipboard unavailable", generation = contextGeneration.current) {
-    try { await copyToClipboard(url); if (generation === contextGeneration.current) notify(successTitle); }
-    catch { if (generation === contextGeneration.current) notify(failureTitle); }
   }
 
   async function saveLink() {
@@ -235,11 +231,8 @@ export function GalleryCollectionSharing({ collection, context, memberKeys, onCl
     finally { if (generation === contextGeneration.current) setBusy(false); }
   }
 
-  async function shareSelectedLink() {
-    if (!selectedLink || !owner) return;
-    const generation = contextGeneration.current;
-    const link = await saveLink();
-    if (!link || generation !== contextGeneration.current) return;
+  async function openNativeShare(link: GalleryCollectionShareLink, generation: number) {
+    if (generation !== contextGeneration.current) return;
     try {
       const result = await NativeShare.share({
         title: `Share ${collection.name}`,
@@ -254,6 +247,14 @@ export function GalleryCollectionSharing({ collection, context, memberKeys, onCl
     }
   }
 
+  async function shareSelectedLink() {
+    if (!selectedLink || !owner) return;
+    const generation = contextGeneration.current;
+    const link = await saveLink();
+    if (!link || generation !== contextGeneration.current) return;
+    await openNativeShare(link, generation);
+  }
+
   async function createLink() {
     if (!owner) return;
     const generation = contextGeneration.current;
@@ -265,7 +266,7 @@ export function GalleryCollectionSharing({ collection, context, memberKeys, onCl
       const result = await createGalleryCollectionShareLink(collection.key, role, active);
       if (generation !== contextGeneration.current) return;
       const next = [result.link, ...previous];
-      setLinks(next); setCachedGalleryShareLinks(queryClient, context, collection.key, next); setSelectedLink(result.link); setLinkTab(result.link.active ? "active" : "inactive"); setView("link"); await copy(result.link.url, "Share link created and copied", "Share link created; clipboard unavailable", generation);
+      setLinks(next); setCachedGalleryShareLinks(queryClient, context, collection.key, next); setSelectedLink(result.link); setLinkTab(result.link.active ? "active" : "inactive"); setView("link"); if (result.token) await openNativeShare(result.link, generation);
     } catch {
       if (generation === contextGeneration.current) { setLinks(previous); setCachedGalleryShareLinks(queryClient, context, collection.key, previous); reportFailure("Share link creation failed"); }
     } finally { if (generation === contextGeneration.current) setBusy(false); }
@@ -298,7 +299,7 @@ export function GalleryCollectionSharing({ collection, context, memberKeys, onCl
   }, [busy, loading, open]);
 
   const title = view === "members" ? "Members" : view === "invites" ? "Pending invites" : view === "member" ? selectedMember?.name ?? "Member" : view === "links" ? "Share links" : view === "link" ? "Share link" : view === "createLink" ? "Create share link" : "";
-  const mutation = view === "members" || view === "invites" || view === "member" || view === "links" || view === "link" || view === "createLink";
+  const fullHeight = view === "members" || view === "invites" || view === "member" || view === "links" || view === "link" || view === "createLink";
   const confirmation = view === "inviteConfirm" || view === "memberRemoveConfirm";
   const footer = view === "members" && owner ? <><Button onPress={() => void loadLinks()} size="lg" variant="primary">Invite</Button><Button onPress={onClose} size="lg" variant="secondary">Close</Button></>
     : view === "links" && owner ? <><Button disabled={busy} onPress={newLink} size="lg" variant="primary">Create</Button><Button disabled={busy} onPress={onClose} size="lg" variant="secondary">Close</Button></>
@@ -308,37 +309,37 @@ export function GalleryCollectionSharing({ collection, context, memberKeys, onCl
           : view === "createLink" ? <><Button disabled={busy} loading={busy} onPress={() => void createLink()} size="lg" variant="primary">Create</Button><Button disabled={busy} onPress={() => setView("links")} size="lg" variant="secondary">Close</Button></>
             : undefined;
 
-  return <BottomSheet dismissible={!busy} footer={footer} hideHeading={view === "access" || confirmation} mutation={mutation} onOpenChange={(next) => { if (!next) onClose(); }} open={open} title={title}>
+  return <BottomSheet dismissible={!busy} footer={footer} height={fullHeight ? "full" : undefined} hideHeading={view === "access" || confirmation} onOpenChange={(next) => { if (!next) onClose(); }} open={open} title={title}>
     {loadError ? <Text accessibilityRole="alert" style={styles.error}>{loadError}</Text> : null}
-    {view === "access" ? <View style={styles.menu}><BottomSheetItem onPress={() => void loadMembers()} size="lg" variant="secondary">Members</BottomSheetItem>{owner ? <><BottomSheetItem onPress={() => void loadLinks()} size="lg" variant="secondary">Share links</BottomSheetItem><BottomSheetItem onPress={() => void loadInvites()} size="lg" variant="secondary">Pending invites</BottomSheetItem></> : null}</View> : null}
+    {view === "access" ? <View style={styles.menu}><BottomSheetItem onPress={() => void loadMembers()} size="lg" style={styles.menuItem} variant="secondary">Members</BottomSheetItem>{owner ? <><BottomSheetItem onPress={() => void loadLinks()} size="lg" style={styles.menuItem} variant="secondary">Share links</BottomSheetItem><BottomSheetItem onPress={() => void loadInvites()} size="lg" style={styles.menuItem} variant="secondary">Pending invites</BottomSheetItem></> : null}</View> : null}
     {view === "members" ? <View style={styles.full}>
       <Tabs accessibilityLabel="Member roles" accessibilityRole="tablist" style={styles.tabs}>{(["owner", "collaborator", "viewer"] as const).map((item) => <Button accessibilityRole="tab" key={item} accessibilityState={{ selected: tab === item }} onPress={() => setTab(item)} size="xs" style={styles.tab} variant={tab === item ? "secondary" : "ghost"}>{item === "owner" ? "Owner" : item === "collaborator" ? "Collaborator" : "Viewer"}</Button>)}</Tabs>
-      <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false} style={styles.sheetList}>{loading ? <View accessibilityLabel="Loading members" accessibilityRole="progressbar" style={styles.skeletonList}>{Array.from({ length: 3 }, (_, index) => <View key={index} style={styles.pillSkeleton} />)}</View> : members.filter((member) => member.role === tab).map((member) => <View key={member.key} style={styles.pillRow}><Button contentMode="raw" onPress={() => openMember(member)} size="sm" style={styles.pillButton} variant="secondary"><View style={styles.pillCopy}><Text style={styles.name}>{member.name}</Text><Text style={styles.meta}>{member.email ?? member.role}</Text></View></Button>{owner && member.role !== "owner" ? <Button accessibilityLabel={`Remove ${member.name}`} contentMode="raw" disabled={busy} onPress={() => { setSelectedMember(member); setView("memberRemoveConfirm"); }} size="xs" variant="icon"><CloseIcon size="sm" /></Button> : null}</View>)}</ScrollView>
+      <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false} style={styles.sheetList}>{loading ? <View accessibilityLabel="Loading members" accessibilityRole="progressbar" style={styles.skeletonList}>{Array.from({ length: 3 }, (_, index) => <View key={index} style={styles.pillSkeleton} />)}</View> : members.filter((member) => member.role === tab).map((member) => { const editable = owner && member.role !== "owner"; return <ActionPill action={editable ? <CloseIcon size="sm" /> : undefined} actionLabel={editable ? `Remove ${member.name}` : undefined} disabled={busy} key={member.key} onAction={editable ? () => { setSelectedMember(member); setView("memberRemoveConfirm"); } : undefined} onPress={editable ? () => openMember(member) : undefined} pressLabel={editable ? `Edit ${member.name}` : undefined}><View style={styles.pillCopy}><Text numberOfLines={1} style={styles.name}>{member.name}</Text><Text numberOfLines={1} style={styles.meta}>{member.email ?? member.role}</Text></View></ActionPill>; })}</ScrollView>
     </View> : null}
     {view === "memberRemoveConfirm" ? <View style={styles.footer}><Button accessibilityHint="Removes this person from the collection." accessibilityLabel={`Remove ${selectedMember?.name ?? "member"} from collection`} disabled={busy} loading={busy} onPress={() => void removeMember()} size="lg" variant="primary">Remove</Button><Button accessibilityHint="Returns to collection members without removing anyone." accessibilityLabel="Close member removal confirmation" disabled={busy} onPress={() => setView("members")} size="lg" variant="secondary">Close</Button></View> : null}
-    {view === "member" && selectedMember ? <View style={styles.form}><Text style={styles.name}>{selectedMember.name}</Text><Text style={styles.meta}>Joined {dateTime(selectedMember.joinedAt)}</Text>{owner && selectedMember.role !== "owner" ? <RoleButtons role={role} setRole={setRole} /> : null}</View> : null}
-    {view === "invites" ? <View style={styles.full}><ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false} style={styles.sheetList}>{loading ? <View accessibilityLabel="Loading pending invites" accessibilityRole="progressbar" style={styles.skeletonList}>{Array.from({ length: 3 }, (_, index) => <View key={index} style={styles.pillSkeleton} />)}</View> : invites.map((invite) => <View key={invite.key} style={styles.pillRow}><Button accessibilityLabel={`Accept invite to ${invite.collection.name}`} contentMode="raw" onPress={() => { setSelectedInvite(invite); setInviteResponse("accept"); setView("inviteConfirm"); }} size="sm" style={styles.pillButton} variant="secondary"><View style={styles.pillCopy}><Text style={styles.name}>{invite.collection.name}</Text><Text style={styles.meta}>From {invite.inviterDisplayName} · {invite.role}</Text></View></Button><Button accessibilityLabel={`Reject invite to ${invite.collection.name}`} contentMode="raw" onPress={() => { setSelectedInvite(invite); setInviteResponse("reject"); setView("inviteConfirm"); }} size="xs" variant="icon"><CloseIcon size="sm" /></Button></View>)}</ScrollView></View> : null}
-    {view === "inviteConfirm" ? <View style={styles.footer}><Button accessibilityHint={`${inviteResponse === "accept" ? "Adds" : "Does not add"} this shared collection to Gallery.`} accessibilityLabel={`${inviteResponse === "accept" ? "Accept" : "Reject"} invite to ${selectedInvite?.collection.name ?? "collection"}`} disabled={busy} loading={busy} onPress={() => void respondInvite()} size="lg" variant="primary">{inviteResponse === "accept" ? "Accept" : "Reject"}</Button><Button accessibilityHint="Returns to pending invites without responding." accessibilityLabel="Close invite confirmation" disabled={busy} onPress={() => setView("invites")} size="lg" variant="secondary">Close</Button></View> : null}
+    {view === "member" && selectedMember && owner && selectedMember.role !== "owner" ? <View style={styles.form}><Text style={styles.meta}>Joined {dateTime(selectedMember.joinedAt)}</Text><RoleTabs role={role} setRole={setRole} /></View> : null}
+    {view === "invites" ? <View style={styles.full}><ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false} style={styles.sheetList}>{loading ? <View accessibilityLabel="Loading pending invites" accessibilityRole="progressbar" style={styles.skeletonList}>{Array.from({ length: 3 }, (_, index) => <View key={index} style={styles.pillSkeleton} />)}</View> : invites.map((invite) => <ActionPill action={<CloseIcon size="sm" />} actionLabel={`Reject invite to ${invite.collection.name}`} disabled={busy} key={invite.key} onAction={() => { setSelectedInvite(invite); setInviteResponse("reject"); setView("inviteConfirm"); }} onPress={() => { setSelectedInvite(invite); setInviteResponse("accept"); setView("inviteConfirm"); }} pressLabel={`Accept invite to ${invite.collection.name}`}><View style={styles.pillCopy}><Text numberOfLines={1} style={styles.name}>{invite.collection.name}</Text><Text numberOfLines={1} style={styles.meta}>From {invite.inviterDisplayName} · {invite.role}</Text></View></ActionPill>)}</ScrollView></View> : null}
+    {view === "inviteConfirm" ? <View style={styles.footer}><Button accessibilityHint={inviteResponse === "accept" ? "Adds this shared collection to Gallery." : "Removes this pending invitation."} accessibilityLabel={`${inviteResponse === "accept" ? "Accept" : "Remove"} invite to ${selectedInvite?.collection.name ?? "collection"}`} disabled={busy} loading={busy} onPress={() => void respondInvite()} size="lg" variant="primary">{inviteResponse === "accept" ? "Accept" : "Remove"}</Button><Button accessibilityHint="Returns to pending invites without responding." accessibilityLabel="Close invite confirmation" disabled={busy} onPress={() => setView("invites")} size="lg" variant="secondary">Close</Button></View> : null}
     {view === "links" ? <View style={styles.full}>
       <Tabs accessibilityLabel="Share link status" accessibilityRole="tablist" style={styles.tabs}><Button accessibilityRole="tab" accessibilityState={{ selected: linkTab === "active" }} onPress={() => setLinkTab("active")} size="xs" style={styles.tab} variant={linkTab === "active" ? "secondary" : "ghost"}>Active links</Button><Button accessibilityRole="tab" accessibilityState={{ selected: linkTab === "inactive" }} onPress={() => setLinkTab("inactive")} size="xs" style={styles.tab} variant={linkTab === "inactive" ? "secondary" : "ghost"}>Inactive links</Button></Tabs>
       <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false} style={styles.sheetList}>{loading ? <View accessibilityLabel="Loading share links" accessibilityRole="progressbar" style={styles.skeletonList}>{Array.from({ length: 3 }, (_, index) => <View key={index} style={styles.pillSkeleton} />)}</View> : <>{filterGalleryShareLinks(links, linkTab === "active").map((link) => <Button contentMode="raw" key={link.key} onPress={() => openLink(link)} size="sm" style={styles.pillButton} variant="secondary"><View style={styles.pillCopy}><Text numberOfLines={1} style={styles.name}>{link.url}</Text><Text style={styles.meta}>{link.role} · {link.active ? "Active" : "Inactive"}</Text></View></Button>)}{filterGalleryShareLinks(links, linkTab === "active").length === 0 ? <Text style={styles.emptyText}>No {linkTab} share links.</Text> : null}</>}</ScrollView>
     </View> : null}
     {view === "link" && selectedLink ? <View style={styles.form}><Text style={styles.meta}>Created {dateTime(selectedLink.createdAt)}</Text><Text style={styles.name}>{selectedLink.role === "viewer" ? "Viewer" : "Collaborator"}</Text><View style={styles.switchRow}><Switch accessibilityLabel="Share link active" checked={active} onCheckedChange={setActive} /><Text style={styles.meta}>Active</Text></View></View> : null}
-    {view === "createLink" ? <View style={styles.form}><RoleButtons role={role} setRole={setRole} /><View style={styles.switchRow}><Switch accessibilityLabel="New share link active" checked={active} onCheckedChange={setActive} /><Text style={styles.meta}>Active</Text></View></View> : null}
+    {view === "createLink" ? <View style={styles.form}><RoleTabs role={role} setRole={setRole} /><View style={styles.switchRow}><Switch accessibilityLabel="New share link active" checked={active} onCheckedChange={setActive} /><Text style={styles.meta}>Active</Text></View></View> : null}
   </BottomSheet>;
 }
 
-function RoleButtons({ role, setRole }: { role: ShareRole; setRole: (role: ShareRole) => void }) {
-  return <View accessibilityLabel="Access role" style={styles.roles}><Button accessibilityState={{ selected: role === "viewer" }} onPress={() => setRole("viewer")} size="sm" variant={role === "viewer" ? "primary" : "secondary"}>Viewer</Button><Button accessibilityState={{ selected: role === "collaborator" }} onPress={() => setRole("collaborator")} size="sm" variant={role === "collaborator" ? "primary" : "secondary"}>Collaborator</Button></View>;
+function RoleTabs({ role, setRole }: { role: ShareRole; setRole: (role: ShareRole) => void }) {
+  return <Tabs accessibilityLabel="Access role" accessibilityRole="tablist" style={styles.tabs}><Button accessibilityRole="tab" accessibilityState={{ selected: role === "viewer" }} onPress={() => setRole("viewer")} size="xs" style={styles.tab} variant={role === "viewer" ? "secondary" : "ghost"}>Viewer</Button><Button accessibilityRole="tab" accessibilityState={{ selected: role === "collaborator" }} onPress={() => setRole("collaborator")} size="xs" style={styles.tab} variant={role === "collaborator" ? "secondary" : "ghost"}>Collaborator</Button></Tabs>;
 }
 
 const styles = StyleSheet.create({
-  menu: { gap: spacing.xs }, full: { flex: 1, minHeight: 0, gap: spacing.md }, footer: { gap: spacing.sm }, form: { minHeight: 300, gap: spacing.md },
+  menu: { gap: spacing.xs }, menuItem: { justifyContent: "center" }, full: { flex: 1, minHeight: 0, gap: spacing.md }, footer: { gap: spacing.sm }, form: { minHeight: 300, gap: spacing.md },
   tabs: { flexDirection: "row", gap: 4, padding: 3, borderWidth: 1, backgroundColor: palette.panel }, tab: { flex: 1 },
   sheetList: { flex: 1 }, list: { gap: 6, paddingBottom: spacing.xl }, skeletonList: { gap: 6 }, pillSkeleton: { width: "100%", minHeight: 38, borderRadius: 999, backgroundColor: palette.hairlineBright, opacity: 0.72 },
-  pillRow: { width: "100%", flexDirection: "row", alignItems: "center", gap: 6 }, pillButton: { flex: 1, minHeight: 38, justifyContent: "flex-start", paddingHorizontal: 14 }, pillCopy: { flex: 1, alignItems: "flex-start", gap: 2 },
+  pillButton: { flex: 1, minHeight: 38, justifyContent: "flex-start", paddingHorizontal: 14 }, pillCopy: { flex: 1, alignItems: "flex-start", gap: 2 },
   name: { color: palette.silver100, fontFamily: fonts.medium, fontSize: 13 }, meta: { color: palette.muted, fontFamily: fonts.regular, fontSize: 11 },
   error: { color: palette.danger, fontFamily: fonts.medium, fontSize: 12 },
   emptyText: { paddingVertical: spacing.lg, color: palette.muted, fontFamily: fonts.regular, fontSize: 12, textAlign: "center" },
-  roles: { flexDirection: "row", gap: spacing.xs }, switchRow: { minHeight: 36, flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  switchRow: { minHeight: 36, flexDirection: "row", alignItems: "center", gap: spacing.sm },
 });

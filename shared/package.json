@@ -56,6 +56,10 @@
       "react-native": "./packages/ui/components/search-history-pill/search-history-pill.mobile.tsx",
       "default": "./packages/ui/components/search-history-pill/search-history-pill.web.tsx"
     },
+    "./ui/action-pill": {
+      "react-native": "./packages/ui/components/action-pill/action-pill.mobile.tsx",
+      "default": "./packages/ui/components/action-pill/action-pill.web.tsx"
+    },
     "./ui/slider": {
       "react-native": "./packages/ui/components/slider/slider.mobile.tsx",
       "default": "./packages/ui/components/slider/slider.web.tsx"

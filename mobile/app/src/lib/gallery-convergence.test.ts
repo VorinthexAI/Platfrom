@@ -1,17 +1,18 @@
 import { expect, test } from "bun:test";
-import { GalleryRefreshCoalescer, galleryRefreshPlan, isCurrentContextGeneration, mergeGalleryRefreshPlans, reconcileDestination, reconcileGalleryPermissions, reconcileGalleryState, reconcileKeys, reconcileOptimisticUploads, reconcilePaginatedKeys, reconcilePaginatedSelected, reconcileSelected, reconcileUploadJobRegistry, recoverAssistantSearchMode, recoverContextualSearchFailure, replayPaginatedWindow } from "./gallery-convergence";
+import { GalleryRefreshCoalescer, galleryRefreshPlan, isCurrentContextGeneration, mergeGalleryRefreshPlans, reconcileDestination, reconcileGalleryPermissions, reconcileGalleryState, reconcileKeys, reconcileOptimisticUploads, reconcilePaginatedKeys, reconcilePaginatedSelected, reconcileSelected, reconcileUploadJobRegistry, recoverAssistantSearchMode, recoverContextualSearchFailure, replayPaginatedWindow, shouldRunGalleryAssistantTextSearch } from "./gallery-convergence";
 
 test("maps audited slugs to precise cache and mode families", () => {
   expect([...galleryRefreshPlan("collection.invites.changed")]).toEqual(["collectionInvites", "incomingInvites"]);
   expect([...galleryRefreshPlan("collection.shares.changed")]).toEqual(["shares"]);
   expect([...galleryRefreshPlan("subject.changed")]).toEqual(["subjects", "search"]);
-  expect(galleryRefreshPlan("image.changed")).toEqual(new Set(["current", "search", "duplicates", "cleanup", "subjects", "upload"]));
+  expect(galleryRefreshPlan("image.changed")).toEqual(new Set(["current", "search", "duplicates", "cleanup", "subjects", "upload", "highlights"]));
   expect(galleryRefreshPlan("upload.changed")).toEqual(new Set(["current", "search", "duplicates", "cleanup", "upload", "subjects"]));
+  expect(galleryRefreshPlan("highlight.changed")).toEqual(new Set(["highlights"]));
 });
 
 test("gates network families precisely by slug", () => {
   expect([...galleryRefreshPlan("collection.index.changed")]).toEqual(["root", "access"]);
-  expect([...galleryRefreshPlan("collection.content.changed")]).toEqual(["current", "search", "duplicates", "cleanup"]);
+  expect([...galleryRefreshPlan("collection.content.changed")]).toEqual(["current", "search", "duplicates", "cleanup", "highlights"]);
   expect([...galleryRefreshPlan("collection.access.changed")]).toEqual(["root", "access", "members", "cleanup"]);
   expect([...galleryRefreshPlan("collection.invites.changed")]).not.toContain("root");
   expect([...galleryRefreshPlan("collection.shares.changed")]).not.toContain("current");
@@ -19,7 +20,7 @@ test("gates network families precisely by slug", () => {
 
 test("reconnect is a complete recovery plan", () => {
   const recovery = galleryRefreshPlan("reconnect");
-  for (const family of ["root", "current", "access", "members", "collectionInvites", "incomingInvites", "shares", "subjects", "search", "duplicates", "cleanup", "upload"] as const) expect(recovery.has(family)).toBe(true);
+  for (const family of ["root", "current", "access", "members", "collectionInvites", "incomingInvites", "shares", "subjects", "search", "duplicates", "cleanup", "upload", "highlights"] as const) expect(recovery.has(family)).toBe(true);
 });
 
 test("coalesces bursts and keeps one deferred refresh while busy", () => {
@@ -87,7 +88,7 @@ test("cleans restricted state after owner and contributor downgrades", () => {
   expect(reconcileGalleryPermissions({ role: "collaborator", canContribute: false, activeSheet: "actions", selectedImageKeys: [], mutableImageKeys: [] })).toEqual({ activeSheet: undefined, selectedImageKeys: [], destinationCollectionKey: undefined, closeSheet: true });
   expect(reconcileGalleryPermissions({ role: "viewer", activeSheet: "cleanup", selectedImageKeys: [], mutableImageKeys: [] })).toMatchObject({ activeSheet: undefined, closeSheet: true });
   expect(reconcileGalleryPermissions({ role: "collaborator", activeSheet: "cleanup", selectedImageKeys: [], mutableImageKeys: [] })).toMatchObject({ activeSheet: undefined, closeSheet: true });
-  expect(reconcileGalleryPermissions({ role: "collaborator", activeSheet: "cleanupMenu", selectedImageKeys: [], mutableImageKeys: [] })).toMatchObject({ activeSheet: undefined, closeSheet: true });
+  expect(reconcileGalleryPermissions({ role: "collaborator", activeSheet: "cleanupMenu", selectedImageKeys: [], mutableImageKeys: [] })).toMatchObject({ activeSheet: "cleanupMenu", closeSheet: false });
   expect(reconcileGalleryPermissions({ role: "collaborator", activeSheet: "confirmCleanupDelete", selectedImageKeys: [], mutableImageKeys: [] })).toMatchObject({ activeSheet: undefined, closeSheet: true });
   expect(reconcileGalleryPermissions({ role: "owner", activeSheet: "cleanup", selectedImageKeys: [], mutableImageKeys: [] })).toMatchObject({ activeSheet: "cleanup", closeSheet: false });
 });
@@ -141,4 +142,10 @@ test("settles upload jobs once and retains only unresolved identities", () => {
 test("reruns sourced assistant searches and exits unsourced legacy results", () => {
   expect(recoverAssistantSearchMode(" rainy streets ")).toEqual({ action: "rerun", query: "rainy streets" });
   expect(recoverAssistantSearchMode(undefined)).toEqual({ action: "exit" });
+});
+
+test("keeps Gallery assistant mutations out of text-search handling", () => {
+  expect(shouldRunGalleryAssistantTextSearch({ type: "answer" })).toBe(true);
+  expect(shouldRunGalleryAssistantTextSearch({ type: "answer", changes: [{ workspace: "gallery" }] })).toBe(false);
+  expect(shouldRunGalleryAssistantTextSearch({ type: "unsupported" })).toBe(false);
 });

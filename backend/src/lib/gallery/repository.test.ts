@@ -563,4 +563,63 @@ describe('Gallery repository transactions', () => {
     const source = await Bun.file(new URL('./operations.ts', import.meta.url)).text();
     expect(source).not.toMatch(/\bdb\.query\b|\bwithTransaction\b|\btoArangoDoc\b/);
   });
+
+  test('loads every live collection image as a highlight candidate without deduplication', async () => {
+    const scopeKey = newId(), collectionKey = newId(), actorKey = newId(), now = '2026-08-18T12:00:00.000Z';
+    const image = { _key: newId(), scopeKey, filename: 'same.jpg', caption: 'Same image', storageKey: newId(), mimeType: 'image/jpeg', sizeBytes: 1, width: 1, height: 1, embedding: Array(4096).fill(0), createdByKey: actorKey, isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now };
+    let query = '';
+    const database: MediaLibraryDatabase = { async query(value) { query = value; return { async all() { return [[{ image, qualityScore: 90 }, { image: { ...image, _key: newId(), storageKey: newId() }, qualityScore: 90 }]]; } }; } };
+    const rows = await createGalleryRepository(database).listHighlightCandidates(scopeKey, collectionKey, actorKey);
+    expect(rows).toHaveLength(2);
+    expect(query).toContain('LET qualityScore');
+    expect(query).toContain('caption.score >= 1 && caption.score <= 100');
+    expect(query).not.toContain('DISTINCT');
+    expect(query).not.toContain('perceptualHash');
+  });
+
+  test('atomically persists an empty highlight after access revalidation', async () => {
+    const scopeKey = newId(), collectionKey = newId(), actorKey = newId(), now = '2026-08-18T12:00:00.000Z';
+    const highlight = { key: newId(), scopeKey, collectionKey, imageKeys: [], createdByKey: actorKey, deletedAt: null, createdAt: now, updatedAt: now };
+    const queries: string[] = [];
+    let transactionCollections: unknown;
+    const database: MediaLibraryDatabase = { async query(query) { queries.push(query); return { async all() { return query.includes('UPSERT') ? [{ ...highlight, _key: highlight.key }] : [{ selected: [] }]; } }; } };
+    const repository = createGalleryRepository(database, async (collections, operation) => { transactionCollections = collections; return operation(database); });
+    await expect(repository.createHighlight(highlight, actorKey)).resolves.toMatchObject({ key: highlight.key, imageKeys: [] });
+    expect(transactionCollections).toEqual(expect.objectContaining({ write: ['imageCollecitionHightlights'] }));
+    expect(queries[0]).toContain('RETURN { selected }');
+    expect(queries[1]).toContain('UPSERT { _key: @highlightKey }');
+  });
+
+  test('silently drops image pointers that disappear while a highlight is being created', async () => {
+    const scopeKey = newId(), collectionKey = newId(), actorKey = newId(), now = '2026-08-18T12:00:00.000Z';
+    const retained = newId(), removed = newId();
+    const highlight = { key: newId(), scopeKey, collectionKey, imageKeys: [retained, removed], createdByKey: actorKey, deletedAt: null, createdAt: now, updatedAt: now };
+    const database: MediaLibraryDatabase = { async query(query, bindVars) { return { async all() {
+      if (!query.includes('UPSERT')) return [{ selected: [retained] }];
+      const persisted = (bindVars as { highlight: Omit<typeof highlight, "key"> & { _key: string } }).highlight;
+      return [{ ...persisted, key: persisted._key }];
+    } }; } };
+
+    const persisted = await createGalleryRepository(database, async (_collections, operation) => operation(database)).createHighlight(highlight, actorKey);
+    expect(persisted).toMatchObject({ imageKeys: [retained] });
+  });
+
+  test('hydrates ordered keys only through current live collection relations and soft-deletes only the highlight', async () => {
+    const queries: string[] = [];
+    const scopeKey = newId(), actorKey = newId(), highlightKey = newId();
+    const database: MediaLibraryDatabase = { async query(query) { queries.push(query); return { async all() { return []; } }; } };
+    const repository = createGalleryRepository(database);
+    await repository.listHighlights(scopeKey, undefined, actorKey);
+    await repository.getHighlight(scopeKey, highlightKey, actorKey);
+    await repository.deleteHighlight(scopeKey, highlightKey, actorKey, '2026-08-18T12:00:00.000Z');
+    for (const query of queries.slice(0, 2)) {
+      expect(query).toContain('FOR imageKey IN highlight.imageKeys');
+      expect(query).toContain('image.deletedAt == null');
+      expect(query).toContain('relation.collectionKey == highlight.collectionKey');
+      expect(query).toContain('collection.deletedAt == null');
+    }
+    expect(queries[2]).toContain('UPDATE highlight WITH { deletedAt: @now, updatedAt: @now }');
+    expect(queries[2]).not.toContain('UPDATE image');
+    expect(queries[2]).not.toContain('REMOVE');
+  });
 });

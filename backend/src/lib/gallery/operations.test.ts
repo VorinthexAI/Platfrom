@@ -43,6 +43,10 @@ const validInputs = {
   listSubjectImages: { identityKey: key() },
   deleteSubject: { identityKey: key() },
   restoreSubject: { identityKey: key() },
+  createHighlight: { collectionKey: key() },
+  listHighlights: {},
+  readHighlight: { highlightKey: key() },
+  deleteHighlight: { highlightKey: key() },
 } as const;
 
 describe('Gallery operation boundaries', () => {
@@ -251,6 +255,43 @@ describe('Gallery operation boundaries', () => {
     } as any;
     await expect(galleryOperations.deleteCollection({ collectionKey }, context)).rejects.toMatchObject({ status: 409, code: 'GALLERY_COLLECTION_FAVORITE', message: 'Unfavorite the collection before deleting it.' });
     expect(events).toBe(0);
+  });
+
+  test('creates and returns a persistent empty highlight for an empty collection', async () => {
+    const organizationKey = 'organization', scopeKey = key(), actorKey = key(), collectionKey = key(), userId = key();
+    let persistedImageKeys: string[] | undefined;
+    const context = {
+      organizationKey, scopeKey, membership: { key: actorKey, organizationId: organizationKey, userId, status: 'active' },
+      listHighlightCandidates: async () => [],
+      createHighlight: async (highlight: any) => { persistedImageKeys = highlight.imageKeys; return highlight; },
+      getHighlight: async () => undefined,
+      publishCollectionEvent: async () => undefined,
+    } as any;
+    const result = await galleryOperations.createHighlight({ collectionKey }, context);
+    expect(persistedImageKeys).toEqual([]);
+    expect(result.highlight).toMatchObject({ collectionKey, imageKeys: [], images: [], createdByKey: actorKey });
+  });
+
+  test('projects only fresh visible images without persistence internals', async () => {
+    process.env.AWS_ACCESS_KEY_ID ??= 'test';
+    process.env.AWS_SECRET_ACCESS_KEY ??= 'test';
+    const organizationKey = 'organization', scopeKey = key(), actorKey = key(), collectionKey = key(), highlightKey = key(), userId = key(), now = new Date().toISOString();
+    const visible = imageSchema.parse({ key: key(), scopeKey, filename: 'visible.jpg', caption: 'Visible', storageKey: 'private/visible.jpg', mimeType: 'image/jpeg', sizeBytes: 1, width: 1, height: 1, embedding: Array(4096).fill(0), createdByKey: actorKey, isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now });
+    const highlight = { key: highlightKey, scopeKey, collectionKey, imageKeys: [key(), visible.key, key()], createdByKey: actorKey, deletedAt: null, createdAt: now, updatedAt: now };
+    const context = { organizationKey, scopeKey, membership: { key: actorKey, organizationId: organizationKey, userId, status: 'active' }, getHighlight: async () => ({ highlight, images: [visible] }) } as any;
+    const output = await galleryOperations.readHighlight({ highlightKey }, context);
+    expect(output.highlight.imageKeys).toEqual([visible.key]);
+    expect(output.highlight.images[0]).toHaveProperty('url');
+    expect(output.highlight.images[0]).not.toHaveProperty('storageKey');
+    expect(output.highlight.images[0]).not.toHaveProperty('embedding');
+  });
+
+  test('soft-deletes only the highlight and publishes its collection invalidation', async () => {
+    const organizationKey = 'organization', scopeKey = key(), actorKey = key(), collectionKey = key(), highlightKey = key(), userId = key(), now = new Date().toISOString();
+    const events: string[] = [];
+    const context = { organizationKey, scopeKey, membership: { key: actorKey, organizationId: organizationKey, userId, status: 'active' }, deleteHighlight: async () => ({ key: highlightKey, scopeKey, collectionKey, imageKeys: [key()], createdByKey: actorKey, deletedAt: now, createdAt: now, updatedAt: now }), publishCollectionEvent: async (_key: string, event: string) => { events.push(event); } } as any;
+    await expect(galleryOperations.deleteHighlight({ highlightKey }, context)).resolves.toEqual({ highlightKey });
+    expect(events).toEqual(['highlight.changed']);
   });
 
   test('publishes image deletion events only when the repository actually deletes images', async () => {

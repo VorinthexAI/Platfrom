@@ -1,9 +1,21 @@
-import { expect, test } from "bun:test";
-import { QueryClient } from "@tanstack/react-query";
+import { expect, mock, test } from "bun:test";
+import { QueryClient } from "@tanstack/query-core";
 
 import type { ContentContext } from "./content-client";
-import { contentQueryKeys } from "./content-query-cache";
-import {
+import type { GalleryCollection, GalleryImage, GalleryOverview } from "./gallery-client";
+
+mock.module("./content-client", () => ({
+  getContentDocumentTopics: () => undefined,
+  listContentDocumentAudioVersions: () => undefined,
+  listContentDocumentSummaries: () => undefined,
+  listContentDocumentsAtLocation: () => undefined,
+  listContentFolderTree: () => undefined,
+  listContentSearchHistory: () => undefined,
+  readContentDocument: () => undefined,
+}));
+
+const { contentQueryKeys } = await import("./content-query-cache");
+const {
   ascendQueryKeys,
   compassQueryKeys,
   galleryQueryKeys,
@@ -19,8 +31,7 @@ import {
   setCachedGalleryMembers,
   setCachedGalleryShareLinks,
   transferCachedGalleryImages,
-} from "./workspace-query-cache";
-import type { GalleryCollection, GalleryImage, GalleryOverview } from "./gallery-client";
+} = await import("./workspace-query-cache");
 
 const context: ContentContext = { organizationKey: "org-a", scopeKey: "scope-a", agentKey: "agent-a" };
 const otherContext: ContentContext = { organizationKey: "org-b", scopeKey: "scope-b", agentKey: "agent-b" };
@@ -29,10 +40,25 @@ test("isolates every routed workspace key by context and resource", () => {
   expect(galleryQueryKeys.overview(context, "collection")).not.toEqual(galleryQueryKeys.overview(otherContext, "collection"));
   expect(galleryQueryKeys.cleanup(context, "collection", 25)).not.toEqual(galleryQueryKeys.cleanup(context, "collection", 50));
   expect(galleryQueryKeys.cleanup(context, "collection", 25)).not.toEqual(galleryQueryKeys.cleanup(context, "other", 25));
+  expect(galleryQueryKeys.highlight(context, "collection", "one")).not.toEqual(galleryQueryKeys.highlight(context, "collection", "two"));
   expect(compassQueryKeys.overview(context)).not.toEqual(compassQueryKeys.overview(otherContext));
   expect(signalQueryKeys.overview(context, "all")).not.toEqual(signalQueryKeys.overview(context, "favorite"));
   expect(signalQueryKeys.detail(context, "thread-a")).not.toEqual(signalQueryKeys.detail(context, "thread-b"));
   expect(ascendQueryKeys.detail(context, "book-a")).not.toEqual(ascendQueryKeys.detail(otherContext, "book-a"));
+});
+
+test("invalidates a collection highlight list and every cached detail together", async () => {
+  const client = new QueryClient();
+  const list = galleryQueryKeys.highlights(context, "collection");
+  const first = galleryQueryKeys.highlight(context, "collection", "first");
+  const second = galleryQueryKeys.highlight(context, "collection", "second");
+  const other = galleryQueryKeys.highlight(context, "other", "first");
+  for (const key of [list, first, second, other]) client.setQueryData(key, {});
+  await client.invalidateQueries({ queryKey: list, refetchType: "none" });
+  expect(client.getQueryState(list)?.isInvalidated).toBe(true);
+  expect(client.getQueryState(first)?.isInvalidated).toBe(true);
+  expect(client.getQueryState(second)?.isInvalidated).toBe(true);
+  expect(client.getQueryState(other)?.isInvalidated).toBe(false);
 });
 
 test("invalidates every cached cleanup threshold for one collection", async () => {

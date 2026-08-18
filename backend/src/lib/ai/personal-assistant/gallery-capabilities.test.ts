@@ -9,9 +9,10 @@ const context = { domain: { organizationKey, runtimeScopeKey: scopeKey, principa
 
 describe('Gallery assistant capabilities', () => {
   test('covers every canonical operation and exposes no trusted context fields', () => {
-    expect(galleryAssistantCapabilityNames).toHaveLength(32);
-    expect(new Set(galleryAssistantCapabilityNames).size).toBe(32);
+    expect(galleryAssistantCapabilityNames).toHaveLength(36);
+    expect(new Set(galleryAssistantCapabilityNames).size).toBe(36);
     expect(galleryAssistantCapabilityNames).not.toContain('collection.duplicates.find');
+    expect(galleryAssistantCapabilityNames).toEqual(expect.arrayContaining(['highlight.create', 'highlight.list', 'highlight.read', 'highlight.delete']));
     const search = createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'image.search')!;
     const listCollections = createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'collection.list')!;
     const createCollection = createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'collection.create')!;
@@ -40,15 +41,17 @@ describe('Gallery assistant capabilities', () => {
       expect(schema).not.toContain('actorKey');
       expect(schema).not.toContain('userKey');
     }
+    expect(createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'highlight.create')?.mutationWorkspace).toBe('gallery');
+    expect(createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'highlight.delete')?.mutationWorkspace).toBe('gallery');
   });
 
   test('routes every tool to its canonical operation with trusted context injected', async () => {
     const calls: Array<{ operation: GalleryOperationName; input: unknown; context: GalleryOperationContext }> = [];
     const operations = Object.fromEntries([
-      'overview', 'createCollection', 'updateCollection', 'deleteCollection', 'listMembers', 'listPendingInvites', 'createInvite', 'acceptInvite', 'rejectInvite', 'revokeInvite', 'updateMemberRole', 'removeMember', 'leaveCollection', 'listShares', 'createShare', 'updateShare', 'revokeShare', 'activateShare', 'search', 'setFavorite', 'updateImage', 'deleteImages', 'deleteDuplicates', 'transferCollectionImages', 'listSubjects', 'createSubject', 'listSubjectImages', 'deleteSubject', 'restoreSubject', 'reserveUploads', 'uploadStatus', 'completeUploads',
+      'overview', 'createCollection', 'updateCollection', 'deleteCollection', 'listMembers', 'listPendingInvites', 'createInvite', 'acceptInvite', 'rejectInvite', 'revokeInvite', 'updateMemberRole', 'removeMember', 'leaveCollection', 'listShares', 'createShare', 'updateShare', 'revokeShare', 'activateShare', 'search', 'setFavorite', 'updateImage', 'deleteImages', 'deleteDuplicates', 'transferCollectionImages', 'listSubjects', 'createSubject', 'listSubjectImages', 'deleteSubject', 'restoreSubject', 'reserveUploads', 'uploadStatus', 'completeUploads', 'createHighlight', 'listHighlights', 'readHighlight', 'deleteHighlight',
     ].map((operation) => [operation, async (input: unknown, trusted: GalleryOperationContext) => { calls.push({ operation: operation as GalleryOperationName, input, context: trusted }); return { operation }; }])) as any;
     const capabilities = createGalleryAssistantCapabilities(operations);
-    const imageKey = newId(), collectionKey = newId(), destinationCollectionKey = newId(), identityKey = newId(), uploadKey = newId(), inviteKey = newId(), memberKey = newId(), shareKey = newId();
+    const imageKey = newId(), collectionKey = newId(), destinationCollectionKey = newId(), identityKey = newId(), uploadKey = newId(), inviteKey = newId(), memberKey = newId(), shareKey = newId(), highlightKey = newId();
     const inputs = [
       {}, { name: 'Favorites' }, { collectionKey, name: 'Trips', isFavorite: true }, { collectionKey },
       { collectionKey }, {}, { collectionKey, inviteeKey: memberKey, role: 'collaborator' }, { inviteKey }, { inviteKey }, { collectionKey, inviteKey }, { collectionKey, memberKey, role: 'viewer' }, { collectionKey, memberKey }, { collectionKey }, { collectionKey }, { collectionKey, role: 'viewer' }, { collectionKey, shareKey, active: true }, { collectionKey, shareKey }, { token: 'x'.repeat(32) },
@@ -56,9 +59,10 @@ describe('Gallery assistant capabilities', () => {
       { collectionKey, imageKeys: [imageKey] }, { sourceCollectionKey: collectionKey, destinationCollectionKeys: [destinationCollectionKey], imageKeys: [imageKey], mode: 'copy' },
       {}, { name: 'Oscar', imageKeys: [imageKey] }, { identityKey }, { identityKey }, { identityKey },
       { files: [{ clientKey: 'upload-1', filename: 'photo.jpg', sizeBytes: 100 }] }, { uploadKeys: [uploadKey] }, { uploadKeys: [uploadKey] },
+      { collectionKey }, {}, { highlightKey }, { highlightKey },
     ];
     for (const [index, capability] of capabilities.entries()) expect(await capability.execute(inputs[index], context)).toEqual({ kind: 'continue', result: { operation: calls.at(-1)!.operation } });
-    expect(calls.map(({ operation }) => operation)).toEqual(['overview', 'createCollection', 'updateCollection', 'deleteCollection', 'listMembers', 'listPendingInvites', 'createInvite', 'acceptInvite', 'rejectInvite', 'revokeInvite', 'updateMemberRole', 'removeMember', 'leaveCollection', 'listShares', 'createShare', 'updateShare', 'revokeShare', 'activateShare', 'search', 'setFavorite', 'updateImage', 'deleteImages', 'deleteDuplicates', 'transferCollectionImages', 'listSubjects', 'createSubject', 'listSubjectImages', 'deleteSubject', 'restoreSubject', 'reserveUploads', 'uploadStatus', 'completeUploads']);
+    expect(calls.map(({ operation }) => operation)).toEqual(['overview', 'createCollection', 'updateCollection', 'deleteCollection', 'listMembers', 'listPendingInvites', 'createInvite', 'acceptInvite', 'rejectInvite', 'revokeInvite', 'updateMemberRole', 'removeMember', 'leaveCollection', 'listShares', 'createShare', 'updateShare', 'revokeShare', 'activateShare', 'search', 'setFavorite', 'updateImage', 'deleteImages', 'deleteDuplicates', 'transferCollectionImages', 'listSubjects', 'createSubject', 'listSubjectImages', 'deleteSubject', 'restoreSubject', 'reserveUploads', 'uploadStatus', 'completeUploads', 'createHighlight', 'listHighlights', 'readHighlight', 'deleteHighlight']);
     for (const call of calls) {
       expect(call.context).toEqual({ organizationKey, scopeKey, membership, modelVisible: true });
     }

@@ -22,7 +22,7 @@ mock.module("./api-client", () => ({
       { key: "sent", email: "someone@example.com", role: "viewer", createdAt: "2026-08-18T00:00:00.000Z", collection: { key: "owned", name: "Owned" }, inviterDisplayName: "You" },
     ] } } };
     if (path === "/gallery/collections/shares/list") return { data: { success: true, data: { shares: [{ key: "listed", url: "https://vorinthex.com/share/secure-listed-token", role: "viewer", active: true, createdAt: "2026-08-18T00:00:00.000Z" }] } } };
-    if (path === "/gallery/collections/shares") return { data: { success: true, data: { share: { key: "link", url: "https://vorinthex.com/share/secure-created-token", role: "viewer", active: true, createdAt: "2026-08-18T00:00:00.000Z" } } } };
+    if (path === "/gallery/collections/shares") return { data: { success: true, data: { share: { key: "link", url: "https://vorinthex.com/share/secure-created-token", role: "viewer", active: true, createdAt: "2026-08-18T00:00:00.000Z" }, token: "secure-created-token" } } };
     if (path === "/gallery/collections/shares/update") return { data: { success: true, data: { share: { key: "link", url: "https://vorinthex.com/share/secure-created-token", role: "viewer", active: false, createdAt: "2026-08-18T00:00:00.000Z" } } } };
     if (path === "/gallery/shares/activate") return { data: { success: true, data: { scopeKey: "scope", collectionKey: "shared", role: "viewer" } } };
     const collection = { key: "collection", name: "Collection", description: null, isFavorite: false, count: 0, coverUrl: null, memberKey: "membership" };
@@ -33,7 +33,7 @@ mock.module("./api-client", () => ({
   } },
 }));
 
-const { activateGalleryShare, createGalleryCollection, createGalleryCollectionShareLink, deleteGalleryCollection, deleteGalleryCollectionDuplicates, deleteGalleryImages, deleteGallerySubject, fetchGalleryOverview, filterCollections, filterGalleryShareLinks, filterMediaItems, findGalleryCollectionDuplicates, groupGalleryImagesByCreatedDate, isGalleryClientErrorCode, isGalleryCollectionOwned, leaveGalleryCollection, listGalleryCollectionInvites, listGalleryCollectionMembers, listGalleryCollectionShareLinks, mergeMediaItems, partitionFavoriteGalleryImages, reconcileGalleryDuplicateDeletion, reconcileGalleryImageDeletion, removeGalleryCollectionMember, respondToGalleryCollectionInvite, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryCollectionMember, updateGalleryCollectionShareLink, updateGalleryImage, uploadGalleryImages } = await import("./gallery-client");
+const { activateGalleryShare, createGalleryCollection, createGalleryCollectionHighlight, createGalleryCollectionShareLink, deleteGalleryCollection, deleteGalleryCollectionDuplicates, deleteGalleryImages, deleteGallerySubject, fetchGalleryCollectionHighlight, fetchGalleryOverview, filterCollections, filterGalleryShareLinks, filterMediaItems, findGalleryCollectionDuplicates, groupGalleryImagesByCreatedDate, isGalleryClientErrorCode, isGalleryCollectionOwned, leaveGalleryCollection, listGalleryCollectionHighlights, listGalleryCollectionInvites, listGalleryCollectionMembers, listGalleryCollectionShareLinks, mergeMediaItems, partitionFavoriteGalleryImages, reconcileGalleryDuplicateDeletion, reconcileGalleryImageDeletion, removeGalleryCollectionMember, resolveGalleryHighlightSlides, respondToGalleryCollectionInvite, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryCollectionMember, updateGalleryCollectionShareLink, updateGalleryImage, uploadGalleryImages } = await import("./gallery-client");
 
 beforeEach(() => { calls.splice(0); responses.clear(); failures.clear(); });
 
@@ -296,6 +296,7 @@ test("uses explicit strict POST contracts for collection sharing", async () => {
   await respondToGalleryCollectionInvite("invite", "reject");
   const listed = await listGalleryCollectionShareLinks("collection");
   const created = await createGalleryCollectionShareLink("collection", "viewer", true);
+  expect(created.token).toBe("secure-created-token");
   const updated = await updateGalleryCollectionShareLink("collection", "link", false);
   await leaveGalleryCollection("collection");
   expect(calls.map(({ path }) => path)).toEqual([
@@ -323,6 +324,27 @@ test("activates a secure collection share token with returned scope context", as
 test("deletes visual identities through the canonical Gallery mutation", async () => {
   await deleteGallerySubject("identity");
   expect(calls[0]).toMatchObject({ path: "/gallery/subjects/delete", body: { organizationKey: "organization", scopeKey: "scope", identityKey: "identity" } });
+});
+
+test("creates, lists, and reads collection highlights through canonical operation routes", async () => {
+  const projection = { key: "highlight", collectionKey: "collection", imageKeys: [], images: [], createdByKey: "membership", createdAt: "2026-08-18T00:00:00.000Z", updatedAt: "2026-08-18T00:00:00.000Z" };
+  responses.set("/gallery/highlights", { highlight: projection });
+  responses.set("/gallery/highlights/list", { highlights: [projection] });
+  responses.set("/gallery/highlights/read", { highlight: projection });
+
+  expect((await createGalleryCollectionHighlight("collection")).highlight).toMatchObject({ imageKeys: [], images: [], slideCount: 0, coverUrl: null });
+  expect((await listGalleryCollectionHighlights("collection")).highlights[0]).toMatchObject({ key: "highlight", slideCount: 0 });
+  expect((await fetchGalleryCollectionHighlight("highlight")).highlight.key).toBe("highlight");
+  expect(calls.map(({ path, body, timeout }) => ({ path, body, timeout }))).toEqual([
+    { path: "/gallery/highlights", body: { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection" }, timeout: 60_000 },
+    { path: "/gallery/highlights/list", body: { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection" }, timeout: 60_000 },
+    { path: "/gallery/highlights/read", body: { organizationKey: "organization", scopeKey: "scope", highlightKey: "highlight" }, timeout: 60_000 },
+  ]);
+});
+
+test("silently removes highlight slides whose direct image pointer no longer resolves", () => {
+  const base = { key: "highlight", collectionKey: "collection", imageKeys: ["image", "gone"], images: [image("image", "image.jpg", "Image")], createdByKey: "membership", title: "Highlight", slideCount: 2, coverUrl: null, createdAt: "2026-08-18T00:00:00.000Z", updatedAt: "2026-08-18T00:00:00.000Z" };
+  expect(resolveGalleryHighlightSlides(base)).toEqual([{ key: "highlight:0", imageKey: "image", url: "https://images.example/image" }]);
 });
 
 test("maps accepted upload jobs back to optimistic client images", async () => {

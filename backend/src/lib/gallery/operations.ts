@@ -28,6 +28,8 @@ import { shareSchema } from '@/lib/db/shares.node';
 import { decryptAuthenticatedJson, encryptAuthenticatedJson } from '@/lib/authenticated-encryption';
 import { publishCollectionEvent, publishUserEvent } from '@/api/events';
 import { mutationEventTargets, publishGalleryEvents, type GalleryMutationEventName } from './mutation-events';
+import { imageCollectionHighlightSchema, type ImageCollectionHighlight } from '@/lib/db/image-collection-highlights.node';
+import { selectHighlightCandidates } from './highlight-selection';
 
 const overviewSchema = strictObject({ collectionKey: z.string().cuid().optional(), maxCaptionScore: z.number().int().min(1).max(100).optional(), ...cursorPaginationInputShape });
 const collectionCreateSchema = strictObject({ name: z.string().trim().min(1).max(120), isFavorite: z.boolean().default(false) });
@@ -67,6 +69,9 @@ const collectionTransferSchema = strictObject({
   if (new Set(value.imageKeys).size !== value.imageKeys.length) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Image keys must be unique.', path: ['imageKeys'] });
   if (value.destinationCollectionKeys.includes(value.sourceCollectionKey)) context.addIssue({ code: z.ZodIssueCode.custom, message: 'The source collection cannot be a destination.', path: ['destinationCollectionKeys'] });
 });
+const highlightCreateSchema = strictObject({ collectionKey: z.string().cuid() });
+const highlightListSchema = strictObject({ collectionKey: z.string().cuid().optional() });
+const highlightKeySchema = strictObject({ highlightKey: z.string().cuid() });
 
 type GalleryMembership = NonNullable<Awaited<ReturnType<typeof getUserOrganizationByOrganizationAndUser>>>;
 const repository = getDefaultGalleryRepository();
@@ -102,6 +107,12 @@ export interface GalleryOperationContext {
   listScopeManagerUserKeys?: typeof repository.listScopeManagerUserKeys;
   publishCollectionEvent?: typeof publishCollectionEvent;
   publishUserEvent?: typeof publishUserEvent;
+  random?: () => number;
+  listHighlightCandidates?: typeof repository.listHighlightCandidates;
+  createHighlight?: typeof repository.createHighlight;
+  listHighlights?: typeof repository.listHighlights;
+  getHighlight?: typeof repository.getHighlight;
+  deleteHighlight?: typeof repository.deleteHighlight;
 }
 
 async function authorize(context: GalleryOperationContext) {
@@ -201,6 +212,18 @@ async function safeSubject(row: { identity: z.infer<typeof visualIdentitySchema>
     key: identity.key, name: identity.name, description: identity.description, referenceImageKey: identity.referenceImageKey,
     referenceUrl: await imageUrl(reference.storageKey), imageCount: row.imageCount, deletedAt: identity.deletedAt,
     createdAt: identity.createdAt, updatedAt: identity.updatedAt,
+  };
+}
+
+async function safeHighlight(highlight: ImageCollectionHighlight, images: Array<z.infer<typeof imageSchema>>) {
+  return {
+    key: highlight.key,
+    collectionKey: highlight.collectionKey,
+    imageKeys: images.map(({ key }) => key),
+    images: await Promise.all(images.map((image) => safeImage(image))),
+    createdByKey: highlight.createdByKey,
+    createdAt: highlight.createdAt,
+    updatedAt: highlight.updatedAt,
   };
 }
 
@@ -619,6 +642,45 @@ async function setSubjectDeleted(rawInput: unknown, context: GalleryOperationCon
 const deleteSubject = (input: unknown, context: GalleryOperationContext) => setSubjectDeleted(input, context, true);
 const restoreSubject = (input: unknown, context: GalleryOperationContext) => setSubjectDeleted(input, context, false);
 
+async function createHighlight(rawInput: unknown, context: GalleryOperationContext) {
+  const input = { ...highlightCreateSchema.parse(rawInput), ...context };
+  const membership = await authorize(context);
+  const candidates = await (context.listHighlightCandidates ?? repository.listHighlightCandidates)(input.scopeKey, input.collectionKey, membership.key);
+  if (!candidates) throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.');
+  const selected = selectHighlightCandidates(candidates, context.random);
+  const now = new Date().toISOString();
+  const highlight = imageCollectionHighlightSchema.parse({ key: requestIdentity('highlight-create', context), scopeKey: input.scopeKey, collectionKey: input.collectionKey, imageKeys: selected.map(({ image }) => image.key), createdByKey: membership.key, deletedAt: null, createdAt: now, updatedAt: now });
+  const saved = await (context.createHighlight ?? repository.createHighlight)(highlight, membership.key);
+  if (!saved) throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.');
+  const row = await (context.getHighlight ?? repository.getHighlight)(input.scopeKey, saved.key, membership.key);
+  await publish(context, 'highlightChanged', { collections: [input.collectionKey] });
+  return { highlight: await safeHighlight(row?.highlight ?? saved, row?.images ?? []) };
+}
+
+async function listHighlights(rawInput: unknown, context: GalleryOperationContext) {
+  const input = { ...highlightListSchema.parse(rawInput), ...context };
+  const membership = await authorize(context);
+  const rows = await (context.listHighlights ?? repository.listHighlights)(input.scopeKey, input.collectionKey, membership.key);
+  return { highlights: await Promise.all(rows.map((row) => safeHighlight(row.highlight, row.images))) };
+}
+
+async function readHighlight(rawInput: unknown, context: GalleryOperationContext) {
+  const input = { ...highlightKeySchema.parse(rawInput), ...context };
+  const membership = await authorize(context);
+  const row = await (context.getHighlight ?? repository.getHighlight)(input.scopeKey, input.highlightKey, membership.key);
+  if (!row) throw new GalleryOperationError(404, 'GALLERY_HIGHLIGHT_NOT_FOUND', 'Highlight not found.');
+  return { highlight: await safeHighlight(row.highlight, row.images) };
+}
+
+async function deleteHighlight(rawInput: unknown, context: GalleryOperationContext) {
+  const input = { ...highlightKeySchema.parse(rawInput), ...context };
+  const membership = await authorize(context);
+  const highlight = await (context.deleteHighlight ?? repository.deleteHighlight)(input.scopeKey, input.highlightKey, membership.key, new Date().toISOString());
+  if (!highlight) throw new GalleryOperationError(404, 'GALLERY_HIGHLIGHT_NOT_FOUND', 'Highlight not found.');
+  await publish(context, 'highlightChanged', { collections: [highlight.collectionKey] });
+  return { highlightKey: highlight.key };
+}
+
 export const galleryOperationInputSchemas = {
   overview: overviewSchema,
   createCollection: collectionCreateSchema,
@@ -653,6 +715,10 @@ export const galleryOperationInputSchemas = {
   listSubjectImages: subjectKeySchema,
   deleteSubject: subjectKeySchema,
   restoreSubject: subjectKeySchema,
+  createHighlight: highlightCreateSchema,
+  listHighlights: highlightListSchema,
+  readHighlight: highlightKeySchema,
+  deleteHighlight: highlightKeySchema,
 } as const;
 
 export const galleryOperations = {
@@ -689,6 +755,10 @@ export const galleryOperations = {
   listSubjectImages,
   deleteSubject,
   restoreSubject,
+  createHighlight,
+  listHighlights,
+  readHighlight,
+  deleteHighlight,
 } as const;
 
 export type GalleryOperationName = keyof typeof galleryOperations;

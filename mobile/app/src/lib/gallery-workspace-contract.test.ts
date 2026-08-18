@@ -60,20 +60,23 @@ test("only lifts Core for its own focus and uses distinct image sheet presentati
   expect(source).toContain("setAiInputFocused(focused)");
   expect(source).toContain('hideHeading={activeSheet === "rootActions" || activeSheet === "actions" || activeSheet === "collectionMenu" || activeSheet === "filter" || activeSheet === "imageActions" || activeSheet === "bulkActions" || activeSheet === "cleanupMenu" || activeSheet === "confirmCleanupDelete" || activeSheet === "confirmDeleteIdentity" || activeSheet === "confirmLeaveCollection"}');
   expect(source).toContain('open={!sharingOpen && sheetOpen && (activeSheet === "image" || activeSheet === "imageActions") && Boolean(selectedImage || selectedOptimisticItem)}');
-  expect(source).toContain("        mutation\n        onOpenChange");
-  expect(source).toContain('mutation={activeSheet === "imageEdit"');
+  expect(source).toContain('height="full"\n        onOpenChange');
+  expect(source).toContain('height={activeSheet === "destination" || activeSheet === "imageEdit"');
   expect(source).not.toContain('activeSheet === "imageActions" || activeSheet === "imageEdit"');
   expect(source).not.toContain("detailCaption");
   expect(source).toContain('accessibilityLabel="Open image actions"');
   expect(source).toContain('footer={<Button onPress={closeSheet} size="lg" variant="secondary">Close</Button>}');
   expect(source).toContain('if (activeSheetRef.current === "imageActions") goBackSheet(); else closeSheet();');
   expect(source).toContain('detailImageFrame: { flex: 1, width: "100%", overflow: "hidden", borderRadius: radii.lg');
-  expect(bottomSheetSource).toContain('mutationSheet: {\n    bottom: 0');
+  expect(bottomSheetSource).toContain('height?: "full"');
+  expect(bottomSheetSource).not.toContain("mutation?: boolean");
+  expect(bottomSheetSource).not.toContain("tall?: boolean");
+  expect(bottomSheetSource).toContain('fullSheet: {\n    bottom: 0');
   expect(bottomSheetSource).toContain('Platform.OS === "android" ? insets.bottom : 0');
-  expect(bottomSheetSource).toContain('bottom: mutation ? androidBottomInset');
+  expect(bottomSheetSource).toContain('bottom: fullHeight ? androidBottomInset');
   expect(bottomSheetSource).toContain('borderBottomLeftRadius: 24');
   expect(bottomSheetSource).toContain('borderBottomRightRadius: 24');
-  expect(bottomSheetSource).not.toContain('height: mutation ? windowHeight - insets.top - androidBottomInset');
+  expect(bottomSheetSource).not.toContain('height: fullHeight ? windowHeight - insets.top - androidBottomInset');
 });
 
 test("keeps collection forms to name and favorite state", () => {
@@ -121,7 +124,7 @@ test("uses separate image-selection and naming steps for visual identities", () 
   expect(source).toContain('accessibilityLabel="Choose a different visual identity image"');
   expect(source).toContain("returnToIdentityLibrary();");
   expect(source).toContain("width: 88, height: 88");
-  expect(source).toContain('(activeSheet === "identityName" || activeSheet === "transferDestination") && styles.fullSheetScroll');
+  expect(source).toContain('(activeSheet === "destination" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory") && styles.fullSheetScroll');
   expect(source.indexOf('accessibilityLabel="Back to collections"')).toBeLessThan(source.indexOf('accessibilityLabel="Search images for visual identity"'));
 });
 
@@ -170,8 +173,9 @@ test("provides collection cleanup discovery, pagination, exclusion, and confirme
   const sharingIcon = source.indexOf('<MemberIcon size="sm"');
   expect(cleanupIcon).toBeGreaterThan(-1);
   expect(cleanupIcon).toBeLessThan(sharingIcon);
-  expect(source).toContain('{isCollectionOwner ? <Button accessibilityLabel={`Clean up ${activeCollection.name}`}');
-  expect(source).toContain('activeSheet === "cleanupMenu" ? <BottomSheetItem');
+  expect(source).toContain('<Button accessibilityLabel={`AI actions for ${activeCollection.name}`}');
+  expect(source).toContain('{isCollectionOwner ? <BottomSheetItem onPress={() => void showCleanup()}');
+  expect(source).toContain('activeSheet === "cleanupMenu" ? <>');
   expect(source).toContain('>Clean up</BottomSheetItem>');
   expect(source).toContain('activeSheet === "cleanup" ? "Clean up"');
   expect(source).toContain('Choose a quality threshold to find and remove lower-quality images. Images are scored from 1 to 100.');
@@ -183,7 +187,7 @@ test("provides collection cleanup discovery, pagination, exclusion, and confirme
   expect(source).toContain('for (let index = 0; index < targets.length; index += DELETE_IMAGE_CHUNK_SIZE)');
   expect(source).toContain('await deleteGalleryImages(eligibleChunk.map(({ key }) => key))');
   expect(source).toContain('activeSheet === "cleanupMenu" || activeSheet === "confirmCleanupDelete"');
-  expect(source).toContain('mutation={activeSheet === "imageEdit" || activeSheet === "newCollection" || activeSheet === "collectionEdit" || activeSheet === "duplicates" || activeSheet === "cleanup"');
+  expect(source).toContain('height={activeSheet === "destination" || activeSheet === "imageEdit" || activeSheet === "newCollection" || activeSheet === "collectionEdit" || activeSheet === "duplicates" || activeSheet === "cleanup"');
   expect(source).toContain('!collection || !isGalleryCollectionOwned(collection)');
   expect(source).not.toContain('cleanupScore');
 });
@@ -337,16 +341,23 @@ test("renders cleanup loading states as one horizontal four-card row", () => {
   expect(source).toContain("No scored images found at this threshold.");
 });
 
-test("uses a full mutation body without tall presentation for transfer destinations", () => {
+test("uses full-height destination browsers without legacy sizing props", () => {
   const sheetStart = source.indexOf('<BottomSheet', source.indexOf('<BottomSheet') + 1);
   const sheetEnd = source.indexOf('\n      >', sheetStart);
   const sheet = source.slice(sheetStart, sheetEnd);
   expect(sheet).toContain('activeSheet === "transferDestination"');
-  expect(sheet).toContain('mutation={');
-  expect(sheet).toContain('tall={activeSheet === "destination" || activeSheet === "searchHistory"}');
-  expect(sheet.slice(sheet.indexOf('tall={'))).not.toContain('transferDestination');
-  expect(source).toContain('(activeSheet === "identityName" || activeSheet === "transferDestination") && styles.fullSheetContent');
-  expect(source).toContain('(activeSheet === "identityName" || activeSheet === "transferDestination") && styles.fullSheetScroll');
+  expect(sheet).toContain('height={activeSheet === "destination"');
+  expect(sheet).toContain('? "full" : undefined}');
+  expect(sheet).not.toContain('mutation=');
+  expect(sheet).not.toContain('tall=');
+  expect(source).toContain('(activeSheet === "destination" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory") && styles.fullSheetContent');
+  expect(source).toContain('(activeSheet === "destination" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory") && styles.fullSheetScroll');
+});
+
+test("fills the mutation body for Gallery search history", () => {
+  expect(source).toContain('(activeSheet === "destination" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory") && styles.fullSheetContent');
+  expect(source).toContain('(activeSheet === "destination" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory") && styles.fullSheetScroll');
+  expect(source).toContain('activeSheet === "identityName" || activeSheet === "searchHistory" ? undefined : height * 0.6');
 });
 
 test("opens duplicates with exact invalidation, a direct request, cache write, and stale guards", () => {
@@ -392,7 +403,7 @@ test("provides collection sharing navigation and permission gates", () => {
   expect(sharingSource).toContain('>Members</BottomSheetItem>');
   expect(sharingSource).toContain('>Pending invites</BottomSheetItem>');
   expect(sharingSource).toContain('Array.from({ length: 3 }');
-  expect(sharingSource).toContain('successTitle = "Share link copied to clipboard"');
+  expect(sharingSource).toContain("async function openNativeShare");
   expect(sharingSource).toContain("showToast({ title, duration: 2_000 })");
   expect(sharingSource).toContain('setCachedGalleryShareLinks');
   expect(sharingSource).toContain('galleryQueryKeys.members(context, collection.key), exact: true, refetchType: "none"');
@@ -557,10 +568,12 @@ test("filters share links with shared active and inactive tabs", () => {
   expect(sharingSource).toContain('setLinkTab(result.link.active ? "active" : "inactive")');
 });
 
-test("uses Archive-style mutation lists for collection collaboration", () => {
-  expect(sharingSource).toContain('mutation = view === "members" || view === "invites"');
+test("uses full-height lists for collection collaboration", () => {
+  expect(sharingSource).toContain('fullHeight = view === "members" || view === "invites"');
+  expect(sharingSource).toContain('height={fullHeight ? "full" : undefined}');
   expect(sharingSource).toContain('dismissible={!busy}');
-  expect(sharingSource).not.toContain('tall={tall}');
+  expect(sharingSource).not.toContain('mutation=');
+  expect(sharingSource).not.toContain('tall=');
   expect(sharingSource).toContain('if (navigate) { setInvites([]); setView("invites"); }');
   expect(sharingSource).toContain('queryKey: incomingInvitesQueryKey, exact: true, refetchType: "none"');
   expect(sharingSource).toContain('if (navigate) { setLinks([]); setLinkTab("active"); setView("links"); }');
@@ -615,7 +628,7 @@ test("keeps non-owner leave at the end of the collection menu with compact confi
   expect(menu).toContain('isCollectionOwner ? <BottomSheetItem');
   expect(menu).toContain('pushSheet("confirmLeaveCollection")');
   expect(menu).toContain('>Leave</BottomSheetItem>');
-  expect(source).toContain('activeSheet === "confirmCleanupDelete" || activeSheet === "confirmLeaveCollection"');
+  expect(source).toContain('activeSheet === "confirmCleanupDelete" || activeSheet === "confirmDeleteIdentity" || activeSheet === "confirmLeaveCollection"');
   expect(source).toContain('onPress={() => void leaveActiveCollection()} size="lg" variant="primary">Leave</Button>');
 });
 
@@ -626,6 +639,10 @@ test("shares secure links through the native OS chooser", () => {
   expect(sharingSource).toContain('message: `Open ${collection.name} with this secure link: ${link.url}`');
   expect(sharingSource).toContain('result.action === NativeShare.dismissedAction');
   expect(sharingSource).toContain("if (shareWasCancelled(error)) return");
+  expect(sharingSource).toContain("await openNativeShare(result.link, generation)");
+  expect(sharingSource).toContain("if (result.token) await openNativeShare(result.link, generation)");
+  expect(sharingSource).toContain("await openNativeShare(link, generation)");
+  expect(sharingSource).not.toContain("copyToClipboard");
   expect(sharingSource).toContain('variant="primary">Share</Button>');
   expect(sharingSource).not.toContain('variant="primary">Copy</Button>');
   expect(sharingSource).toContain('if (!selectedLink || !owner) return');

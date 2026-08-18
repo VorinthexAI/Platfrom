@@ -83,6 +83,42 @@ export type GalleryOverview = {
   canCreateCollections: boolean;
 };
 
+export type GalleryHighlight = {
+  key: string;
+  collectionKey: string;
+  imageKeys: string[];
+  images: GalleryImage[];
+  createdByKey: string;
+  title: string;
+  slideCount: number;
+  coverUrl: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type GalleryHighlightProjection = Omit<GalleryHighlight, "title" | "slideCount" | "coverUrl">;
+export type GalleryHighlightSlide = { key: string; imageKey: string; url: string };
+export type GalleryHighlightDetail = GalleryHighlight;
+
+const galleryHighlightDateFormatter = new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+
+function normalizeGalleryHighlight(highlight: GalleryHighlightProjection): GalleryHighlight {
+  return {
+    ...highlight,
+    title: `Highlight ${galleryHighlightDateFormatter.format(new Date(highlight.createdAt))}`,
+    slideCount: highlight.imageKeys.length,
+    coverUrl: highlight.images[0]?.url ?? null,
+  };
+}
+
+export function resolveGalleryHighlightSlides(highlight: GalleryHighlightDetail) {
+  const images = new Map(highlight.images.map((image) => [image.key, image]));
+  return highlight.imageKeys.flatMap((imageKey, index) => {
+    const image = images.get(imageKey);
+    return image ? [{ key: `${highlight.key}:${index}`, imageKey, url: image.url }] : [];
+  });
+}
+
 export function filterCollections(collections: GalleryCollection[], query: string) {
   const normalized = query.trim().toLocaleLowerCase();
   if (!normalized) return collections;
@@ -203,6 +239,27 @@ export const GALLERY_COLLECTION_SHARING_ENDPOINTS = {
   activateShare: "/gallery/shares/activate",
 } as const;
 
+export const GALLERY_COLLECTION_HIGHLIGHT_ENDPOINTS = {
+  create: "/gallery/highlights",
+  list: "/gallery/highlights/list",
+  detail: "/gallery/highlights/read",
+} as const;
+
+export function createGalleryCollectionHighlight(collectionKey: string) {
+  return postGallery<{ highlight: GalleryHighlightProjection }>(GALLERY_COLLECTION_HIGHLIGHT_ENDPOINTS.create, { collectionKey })
+    .then(({ highlight }) => ({ highlight: normalizeGalleryHighlight(highlight) }));
+}
+
+export function listGalleryCollectionHighlights(collectionKey: string) {
+  return postGallery<{ highlights: GalleryHighlightProjection[] }>(GALLERY_COLLECTION_HIGHLIGHT_ENDPOINTS.list, { collectionKey })
+    .then(({ highlights }) => ({ highlights: highlights.map(normalizeGalleryHighlight) }));
+}
+
+export function fetchGalleryCollectionHighlight(highlightKey: string) {
+  return postGallery<{ highlight: GalleryHighlightProjection }>(GALLERY_COLLECTION_HIGHLIGHT_ENDPOINTS.detail, { highlightKey })
+    .then(({ highlight }) => ({ highlight: normalizeGalleryHighlight(highlight) }));
+}
+
 export function listGalleryCollectionMembers(collectionKey: string) {
   type ProjectedMember = Omit<GalleryCollectionMember, "name" | "email"> & { displayName: string };
   return postGallery<{ owners: ProjectedMember[]; collaborators: ProjectedMember[]; viewers: ProjectedMember[] }>(GALLERY_COLLECTION_SHARING_ENDPOINTS.members, { collectionKey }).then(({ owners, collaborators, viewers }) => ({ members: [...owners, ...collaborators, ...viewers].map(({ displayName, ...member }) => ({ ...member, name: displayName, email: null })) }));
@@ -234,7 +291,7 @@ export function listGalleryCollectionShareLinks(collectionKey: string) {
 }
 
 export function createGalleryCollectionShareLink(collectionKey: string, role: Exclude<GalleryCollectionRole, "owner">, active: boolean) {
-  return postGallery<{ share: GalleryCollectionShareLink }>(GALLERY_COLLECTION_SHARING_ENDPOINTS.createShareLink, { collectionKey, role, active }).then(({ share }) => ({ link: share }));
+  return postGallery<{ share: GalleryCollectionShareLink; token?: string }>(GALLERY_COLLECTION_SHARING_ENDPOINTS.createShareLink, { collectionKey, role, active }).then(({ share, token }) => ({ link: share, token }));
 }
 
 export function updateGalleryCollectionShareLink(collectionKey: string, shareKey: string, active: boolean) {

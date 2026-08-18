@@ -33,6 +33,7 @@ export const GALLERY_MUTATION_EVENTS = {
   deleteSubject: { collection: [], user: ['subject.changed'] },
   restoreSubject: { collection: [], user: ['subject.changed'] },
   reconcileSubject: { collection: [], user: ['subject.changed'] },
+  highlightChanged: { collection: ['highlight.changed'], user: [] },
 } as const satisfies Record<string, { collection: readonly AppEventSlug[]; user: readonly AppEventSlug[] }>;
 
 export type GalleryMutationEventName = keyof typeof GALLERY_MUTATION_EVENTS;
@@ -62,6 +63,8 @@ export const GALLERY_CANONICAL_MUTATION_PUBLICATIONS = {
   createSubject: { events: ['createSubject'] },
   deleteSubject: { events: ['deleteSubject'] },
   restoreSubject: { events: ['restoreSubject'] },
+  createHighlight: { events: ['highlightChanged'] },
+  deleteHighlight: { events: ['highlightChanged'] },
 } as const satisfies Partial<Record<GalleryOperationName, { events: readonly GalleryMutationEventName[]; deferredEvents?: readonly GalleryMutationEventName[] }>>;
 export type GalleryEventTarget = { route: 'collection' | 'user'; key: string; event: AppEventSlug };
 

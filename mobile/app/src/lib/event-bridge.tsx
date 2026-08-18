@@ -47,6 +47,7 @@ export function AuthenticatedEventBridge() {
       if (families.has("search")) void queryClient.invalidateQueries({ queryKey: [...root, "search"], refetchType: "none" });
       if (families.has("duplicates")) void queryClient.invalidateQueries({ queryKey: [...root, "duplicates"], refetchType: "none" });
       if (families.has("upload")) void queryClient.invalidateQueries({ queryKey: [...root, "uploads"], refetchType: "none" });
+      if (families.has("highlights")) void queryClient.invalidateQueries({ queryKey: [...root, "highlights"], refetchType: "none" });
     };
     const connect = () => {
       if (!active || controller) return;

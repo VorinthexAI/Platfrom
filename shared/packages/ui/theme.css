@@ -183,6 +183,36 @@
   padding: 0 8px;
 }
 
+.vui-action-pill {
+  align-items: center;
+  background: var(--vui-color-secondary);
+  border: 1px solid var(--vui-color-border);
+  border-radius: var(--vui-radius-pill);
+  display: flex;
+  min-height: 48px;
+  padding: 2px;
+  width: 100%;
+}
+
+.vui-action-pill-main {
+  align-items: flex-start;
+  flex: 1;
+  justify-content: center;
+  min-height: 42px;
+  min-width: 0;
+  overflow: hidden;
+  padding-left: 14px;
+  padding-right: 14px;
+}
+
+.vui-action-pill-action {
+  flex: 0 0 32px;
+  height: 32px;
+  margin-right: 6px;
+  padding: 0;
+  width: 32px;
+}
+
 /* Loading keeps each variant recognizable while the rising melt carries
    the state. */
 .vui-button[aria-busy="true"] {
@@ -373,14 +403,19 @@
   outline: none;
 }
 
-.vui-bottom-sheet-tall {
-  height: min(72dvh, 680px);
-}
-
-.vui-bottom-sheet-mutation {
+.vui-bottom-sheet-full {
   border-radius: var(--vui-radius-lg) var(--vui-radius-lg) 0 0;
+  display: flex;
+  flex-direction: column;
   height: calc(100dvh - env(safe-area-inset-top));
   max-height: calc(100dvh - env(safe-area-inset-top));
+  overflow: hidden;
+}
+
+.vui-bottom-sheet-full .vui-bottom-sheet-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .vui-bottom-sheet-drag-handle {

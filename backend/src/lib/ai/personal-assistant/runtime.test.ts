@@ -76,7 +76,8 @@ describe('personal assistant runtime', () => {
       'image.search', 'image.favorite', 'image.update', 'image.delete',
       'collection.duplicates.delete', 'collection.image.transfer', 'subject.list', 'subject.create',
       'subject.image.list', 'subject.delete', 'subject.restore', 'image.upload.reserve',
-      'image.upload.status', 'image.upload.complete', 'assistant.unsupported',
+      'image.upload.status', 'image.upload.complete', 'highlight.create', 'highlight.list',
+      'highlight.read', 'highlight.delete', 'assistant.unsupported',
     ]);
     expect(chatInput.systemPrompt).toContain('Call image.search whenever');
     expect(chatInput.systemPrompt).toContain('duplicates true plus collectionKey');

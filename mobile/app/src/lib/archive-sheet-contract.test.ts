@@ -20,6 +20,16 @@ test("provides messages for previously blank Archive sheet states", () => {
   expect(source).toContain("No summary available.");
 });
 
+test("uses only intrinsic and full-height Archive sheets", () => {
+  const sheetStart = source.indexOf("<BottomSheet");
+  const sheetEnd = source.indexOf("\n      >", sheetStart);
+  const sheet = source.slice(sheetStart, sheetEnd);
+  expect(sheet).toContain('height={activeSheet === "documents"');
+  expect(sheet).toContain('? "full" : undefined}');
+  expect(sheet).not.toContain("mutation=");
+  expect(sheet).not.toContain("tall=");
+});
+
 test("shows a top-right check badge on selected Archive folders", () => {
   expect(source.match(/selected \? <View pointerEvents="none" style=\{styles\.selectionBadge\}/g)).toHaveLength(4);
   expect(source).toContain('selectionBadge: { position: "absolute", top: 4, right: 4');

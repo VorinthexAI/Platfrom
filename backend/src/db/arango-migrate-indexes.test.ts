@@ -29,6 +29,14 @@ function migrationDatabase(collection: 'documents' | 'documentVersions', row: Re
 }
 
 describe('Arango migration indexes', () => {
+  test('creates persistent highlights under the exact required collection name with read indexes', () => {
+    const spec = collections.find(({ name }) => name === 'imageCollecitionHightlights');
+    expect(spec).toEqual(expect.objectContaining({ name: 'imageCollecitionHightlights', skipEmbedding: true }));
+    expect(spec?.indexes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ fields: ['scopeKey', 'collectionKey', 'deletedAt', 'createdAt'] }),
+      expect.objectContaining({ fields: ['scopeKey', 'createdByKey', 'deletedAt'] }),
+    ]));
+  });
   test('additively backfills canonical image captions and image references', async () => {
     const calls: string[] = [];
     const database = {

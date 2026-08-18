@@ -21,6 +21,7 @@ import { appendCursorItems, isNearScrollEnd } from "@vorinthex/shared/lib/pagina
 import { WorkspaceAppSwitcher } from "@/components/capability/WorkspaceAppSwitcher";
 import { GalleryCaptureModal } from "@/components/capability/GalleryCaptureModal";
 import { GalleryCollectionSharing } from "@/components/capability/GalleryCollectionSharing";
+import { GalleryHighlights } from "@/components/capability/GalleryHighlights";
 import { ChromeIcon } from "@/components/ChromeIcon";
 import { assistantIconSource } from "@/data/capability-icons";
 import {
@@ -65,7 +66,7 @@ import { useAuthStore } from "@/state/auth";
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
 import { normalizeCapturedJpeg, type CapturedImage } from "@/lib/captured-image";
 import { subscribeAppEvent } from "@/lib/app-events";
-import { GalleryRefreshCoalescer, galleryRefreshPlan, isCurrentContextGeneration, reconcileGalleryPermissions, reconcileGalleryState, reconcileOptimisticUploads, reconcilePaginatedSelected, reconcileSelected, reconcileUploadJobRegistry, recoverAssistantSearchMode, recoverContextualSearchFailure, replayPaginatedWindow, type GalleryRefreshPlan } from "@/lib/gallery-convergence";
+import { GalleryRefreshCoalescer, galleryRefreshPlan, isCurrentContextGeneration, reconcileGalleryPermissions, reconcileGalleryState, reconcileOptimisticUploads, reconcilePaginatedSelected, reconcileSelected, reconcileUploadJobRegistry, recoverAssistantSearchMode, recoverContextualSearchFailure, replayPaginatedWindow, shouldRunGalleryAssistantTextSearch, type GalleryRefreshPlan } from "@/lib/gallery-convergence";
 
 type GallerySheet = "rootActions" | "actions" | "destination" | "newCollection" | "image" | "imageActions" | "imageEdit" | "confirmDeleteImage" | "collectionMenu" | "collectionEdit" | "confirmDeleteCollection" | "confirmLeaveCollection" | "duplicates" | "confirmDeleteDuplicates" | "cleanupMenu" | "cleanup" | "confirmCleanupDelete" | "visualIdentities" | "confirmDeleteIdentity" | "identityPicker" | "identityName" | "identityPickerFilter" | "transferDestination" | "filter" | "searchHistory" | "bulkActions" | "bulkDelete";
 type ImagePickerPurpose = "identity" | "cover";
@@ -118,6 +119,7 @@ export function GalleryWorkspace() {
   const [canCreateCollections, setCanCreateCollections] = useState(false);
   const [collectionTab, setCollectionTab] = useState<"mine" | "shared">("mine");
   const [sharingOpen, setSharingOpen] = useState(false);
+  const [highlightMode, setHighlightMode] = useState<"create" | "list">();
   const [images, setImages] = useState<GalleryImage[]>([]);
   const [activeCollection, setActiveCollection] = useState<GalleryCollection>();
   const [showingCollectionOverview, setShowingCollectionOverview] = useState(true);
@@ -319,6 +321,7 @@ export function GalleryWorkspace() {
     deletedIdentityKeys.current.clear();
     closeSheet();
     setSharingOpen(false);
+    setHighlightMode(undefined);
     setCameraOpen(false);
     setPendingFiles((current) => { deletePreparedFiles(current); return []; });
     setOptimisticMediaItems((current) => { deletePreparedFiles(current); return []; });
@@ -2044,6 +2047,10 @@ export function GalleryWorkspace() {
         setAiResponse(assistantResult.message);
         return;
       }
+      if (!shouldRunGalleryAssistantTextSearch(assistantResult)) {
+        setAiResponse(assistantResult.message);
+        return;
+      }
       const searchResult = await searchGalleryImages({ query: message, limit: 50 });
       if (!isCurrent() || request !== viewRequest.current) return;
       setActiveCollection(undefined);
@@ -2315,7 +2322,7 @@ export function GalleryWorkspace() {
               : activeSheet === "imageEdit" ? "Edit image"
               : activeSheet === "duplicates" ? "Duplicates"
                : activeSheet === "confirmDeleteDuplicates" ? "Delete duplicates?"
-                  : activeSheet === "cleanupMenu" ? "Collection cleanup"
+                     : activeSheet === "cleanupMenu" ? "Collection intelligence"
                     : activeSheet === "cleanup" ? "Clean up"
                       : activeSheet === "confirmCleanupDelete" ? "Delete images?"
                   : activeSheet === "visualIdentities" ? "Visual identities"
@@ -2440,7 +2447,7 @@ export function GalleryWorkspace() {
               {canAddImages ? <Button accessibilityLabel={`Add images to ${activeCollection.name}`} contentMode="raw" disabled={busy} hitSlop={5} onPress={() => openSheet("actions")} size="sm" variant="icon"><PlusIcon size="sm" /></Button> : null}
             </View>
           </View>
-          <View style={styles.sharingRow}>{isCollectionOwner ? <Button accessibilityLabel={`Clean up ${activeCollection.name}`} contentMode="raw" onPress={() => openSheet("cleanupMenu")} size="sm" variant="icon"><BrainIcon size="sm" /></Button> : null}<Button accessibilityLabel={`Sharing and access for ${activeCollection.name}`} contentMode="raw" onPress={() => { closeSheet(); setSharingOpen(true); }} size="sm" variant="icon"><MemberIcon size="sm" /></Button></View>
+          <View style={styles.sharingRow}><Button accessibilityLabel={`AI actions for ${activeCollection.name}`} contentMode="raw" onPress={() => openSheet("cleanupMenu")} size="sm" variant="icon"><BrainIcon size="sm" /></Button><Button accessibilityLabel={`Sharing and access for ${activeCollection.name}`} contentMode="raw" onPress={() => { closeSheet(); setSharingOpen(true); }} size="sm" variant="icon"><MemberIcon size="sm" /></Button></View>
           {normalCollectionView ? <View style={styles.rootActions}>
             <View style={styles.collectionSearch}>
               <SearchIcon size="sm" variant="muted" />
@@ -2509,9 +2516,11 @@ export function GalleryWorkspace() {
         value={aiInput}
       />
 
+      {activeCollection ? <GalleryHighlights collection={activeCollection} mode={highlightMode ?? "list"} onClose={() => setHighlightMode(undefined)} open={Boolean(highlightMode)} /> : null}
+
       <BottomSheet
         footer={<Button onPress={closeSheet} size="lg" variant="secondary">Close</Button>}
-        mutation
+        height="full"
         onOpenChange={(open) => { if (!open) closeSheet(); }}
         open={!sharingOpen && sheetOpen && (activeSheet === "image" || activeSheet === "imageActions") && Boolean(selectedImage || selectedOptimisticItem)}
         title={selectedImage?.filename ?? selectedOptimisticItem?.filename ?? "Image"}
@@ -2529,10 +2538,9 @@ export function GalleryWorkspace() {
         dismissible={!busy}
         footer={sheetFooter}
         hideHeading={activeSheet === "rootActions" || activeSheet === "actions" || activeSheet === "collectionMenu" || activeSheet === "filter" || activeSheet === "imageActions" || activeSheet === "bulkActions" || activeSheet === "cleanupMenu" || activeSheet === "confirmCleanupDelete" || activeSheet === "confirmDeleteIdentity" || activeSheet === "confirmLeaveCollection"}
-        mutation={activeSheet === "imageEdit" || activeSheet === "newCollection" || activeSheet === "collectionEdit" || activeSheet === "duplicates" || activeSheet === "cleanup" || activeSheet === "visualIdentities" || activeSheet === "identityPicker" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory"}
+        height={activeSheet === "destination" || activeSheet === "imageEdit" || activeSheet === "newCollection" || activeSheet === "collectionEdit" || activeSheet === "duplicates" || activeSheet === "cleanup" || activeSheet === "visualIdentities" || activeSheet === "identityPicker" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory" ? "full" : undefined}
         onOpenChange={(open) => { if (!open) { if (activeSheetRef.current === "imageActions") goBackSheet(); else closeSheet(); } }}
         open={!sharingOpen && sheetOpen && activeSheet !== "image"}
-        tall={activeSheet === "destination" || activeSheet === "searchHistory"}
         title={sheetTitle}
       >
         {activeSheet === "cleanup" ? <FlatList
@@ -2549,7 +2557,7 @@ export function GalleryWorkspace() {
           renderItem={({ item: image }) => <View style={[styles.duplicateCard, styles.cleanupCard, { width: sheetImageSize, height: sheetImageSize }]}><View style={styles.imageFrame}><Image source={image.url} contentFit="cover" style={styles.image} /></View><Button accessibilityLabel={`Exclude ${image.filename} from cleanup`} contentMode="raw" disabled={busy} onPress={() => excludeCleanupImage(image.key)} size="xs" style={styles.thumbnailRemove} variant="icon"><CloseIcon size="sm" /></Button></View>}
           showsVerticalScrollIndicator={false}
           style={styles.fullSheetScroll}
-        /> : <ScrollView contentContainerStyle={[styles.sheetContent, (activeSheet === "identityName" || activeSheet === "transferDestination") && styles.fullSheetContent]} keyboardShouldPersistTaps="handled" onScroll={({ nativeEvent }) => { if (activeSheet === "identityPicker" && isNearScrollEnd({ offset: nativeEvent.contentOffset.y, viewport: nativeEvent.layoutMeasurement.height, content: nativeEvent.contentSize.height })) void loadMoreIdentityPickerImages(); }} scrollEventThrottle={120} showsVerticalScrollIndicator={false} style={[styles.sheetScroll, (activeSheet === "identityName" || activeSheet === "transferDestination") && styles.fullSheetScroll, { maxHeight: activeSheet === "transferDestination" || activeSheet === "duplicates" || activeSheet === "imageEdit" || activeSheet === "visualIdentities" || activeSheet === "identityPicker" || activeSheet === "identityName" ? undefined : height * 0.6 }]}>
+        /> : <ScrollView contentContainerStyle={[styles.sheetContent, (activeSheet === "destination" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory") && styles.fullSheetContent]} keyboardShouldPersistTaps="handled" onScroll={({ nativeEvent }) => { if (activeSheet === "identityPicker" && isNearScrollEnd({ offset: nativeEvent.contentOffset.y, viewport: nativeEvent.layoutMeasurement.height, content: nativeEvent.contentSize.height })) void loadMoreIdentityPickerImages(); }} scrollEventThrottle={120} showsVerticalScrollIndicator={false} style={[styles.sheetScroll, (activeSheet === "destination" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory") && styles.fullSheetScroll, { maxHeight: activeSheet === "destination" || activeSheet === "transferDestination" || activeSheet === "duplicates" || activeSheet === "imageEdit" || activeSheet === "visualIdentities" || activeSheet === "identityPicker" || activeSheet === "identityName" || activeSheet === "searchHistory" ? undefined : height * 0.6 }]}>
         {activeSheet === "rootActions" ? <>
           {canCreateCollections ? <BottomSheetItem onPress={() => { setPendingFiles([]); setNewCollectionName(""); setNewCollectionFavorite(false); pushSheet("newCollection"); }} size="lg" style={styles.sheetAction} variant="secondary">Create collection</BottomSheetItem> : null}
           {canManageAnyCollection ? <BottomSheetItem onPress={() => void openVisualIdentities()} size="lg" style={styles.sheetAction} variant="secondary">Create visual identity</BottomSheetItem> : null}
@@ -2580,7 +2588,11 @@ export function GalleryWorkspace() {
           {isCollectionOwner ? <BottomSheetItem disabled={busy} onPress={() => void openVisualIdentities()} size="lg" style={styles.sheetAction} variant="secondary">Visual identities</BottomSheetItem> : null}
           {isCollectionOwner ? <BottomSheetItem disabled={busy} onPress={() => pushSheet("confirmDeleteCollection")} size="lg" style={styles.sheetAction} variant="secondary">Delete collection</BottomSheetItem> : <BottomSheetItem disabled={busy} onPress={() => pushSheet("confirmLeaveCollection")} size="lg" style={styles.sheetAction} variant="secondary">Leave</BottomSheetItem>}
         </> : null}
-        {activeSheet === "cleanupMenu" ? <BottomSheetItem onPress={() => void showCleanup()} size="lg" style={styles.sheetAction} variant="secondary">Clean up</BottomSheetItem> : null}
+        {activeSheet === "cleanupMenu" ? <>
+          <BottomSheetItem disabled={busy} onPress={() => { closeSheet(); setHighlightMode("create"); }} size="lg" style={styles.sheetAction} variant="secondary">Create highlight</BottomSheetItem>
+          <BottomSheetItem disabled={busy} onPress={() => { closeSheet(); setHighlightMode("list"); }} size="lg" style={styles.sheetAction} variant="secondary">Highlights</BottomSheetItem>
+          {isCollectionOwner ? <BottomSheetItem onPress={() => void showCleanup()} size="lg" style={styles.sheetAction} variant="secondary">Clean up</BottomSheetItem> : null}
+        </> : null}
         {activeSheet === "imageActions" && selectedImage ? <View style={styles.actionMenu}>
           {canMutateImage(selectedImage) ? <BottomSheetItem onPress={openImageEdit} style={styles.sheetAction} variant="secondary">Edit</BottomSheetItem> : null}
           {activeCollection ? <BottomSheetItem onPress={() => void findSimilar()} style={styles.sheetAction} variant="secondary">Find similar image</BottomSheetItem> : null}

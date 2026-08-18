@@ -22,7 +22,7 @@ test("parses invalidation events with an empty data payload", () => {
 });
 
 test("maps every audited Gallery slug to invalidation", () => {
-  for (const slug of ["collection.index.changed", "collection.content.changed", "collection.access.changed", "collection.invites.changed", "collection.shares.changed", "image.changed", "upload.changed", "subject.changed"]) expect(invalidatesGalleryQueries(slug)).toBe(true);
+  for (const slug of ["collection.index.changed", "collection.content.changed", "collection.access.changed", "collection.invites.changed", "collection.shares.changed", "image.changed", "upload.changed", "subject.changed", "highlight.changed"]) expect(invalidatesGalleryQueries(slug)).toBe(true);
   expect(invalidatesGalleryQueries("unknown")).toBe(false);
 });
 
