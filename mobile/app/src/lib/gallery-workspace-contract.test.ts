@@ -158,7 +158,8 @@ test("provides collection sharing navigation and permission gates", () => {
   expect(sharingSource).toContain('>Members</BottomSheetItem>');
   expect(sharingSource).toContain('>Pending invites</BottomSheetItem>');
   expect(sharingSource).toContain('Array.from({ length: 3 }');
-  expect(sharingSource).toContain('title: "Share link copied to clipboard"');
+  expect(sharingSource).toContain('successTitle = "Share link copied to clipboard"');
+  expect(sharingSource).toContain("showToast({ title, duration: 2_000 })");
   expect(sharingSource).toContain('setCachedGalleryShareLinks');
   expect(sharingSource).toContain('galleryQueryKeys.members(context, collection.key), refetchType: "none"');
   expect(sharingSource).toContain('view === "memberRemoveConfirm"');

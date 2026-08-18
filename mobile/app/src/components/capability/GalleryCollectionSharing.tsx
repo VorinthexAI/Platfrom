@@ -34,6 +34,11 @@ type ShareRole = Exclude<GalleryCollectionRole, "owner">;
 
 const dateTime = (value: string) => new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 
+function useNotice() {
+  const { showToast } = useToast();
+  return (title: string) => showToast({ title, duration: 2_000 });
+}
+
 export function GalleryCollectionSharing({ collection, context, onClose, open }: {
   collection: GalleryCollection;
   context: { organizationKey: string; scopeKey: string };
@@ -41,7 +46,7 @@ export function GalleryCollectionSharing({ collection, context, onClose, open }:
   open: boolean;
 }) {
   const queryClient = useQueryClient();
-  const { showToast } = useToast();
+  const notify = useNotice();
   const owner = collection.role === "owner" || !collection.role;
   const [view, setView] = useState<SharingView>("access");
   const [tab, setTab] = useState<GalleryCollectionRole>("owner");
@@ -56,39 +61,40 @@ export function GalleryCollectionSharing({ collection, context, onClose, open }:
   const [active, setActive] = useState(true);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
-  const reportFailure = (title: string, error: unknown) => showToast({ title, description: error instanceof Error ? error.message : "Try again." });
+  const [loadError, setLoadError] = useState<string>();
+  const reportFailure = (title: string) => notify(title);
 
   useEffect(() => {
     if (open) setView("access");
   }, [open]);
 
   async function loadMembers() {
-    setView("members"); setLoading(true);
+    setView("members"); setLoading(true); setLoadError(undefined);
     try {
       await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.members(context, collection.key), refetchType: "none" });
       const result = await queryClient.fetchQuery({ queryKey: galleryQueryKeys.members(context, collection.key), queryFn: () => listGalleryCollectionMembers(collection.key), staleTime: 0 });
       setMembers(result.members); setCachedGalleryMembers(queryClient, context, collection.key, result.members);
-    } catch (error) { reportFailure("Members could not be loaded", error); }
+    } catch { setLoadError("Members could not be loaded."); }
     finally { setLoading(false); }
   }
 
   async function loadInvites() {
-    setView("invites"); setLoading(true);
+    setView("invites"); setLoading(true); setLoadError(undefined);
     await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.invites(context, collection.key), refetchType: "none" });
     try {
       const result = await queryClient.fetchQuery({ queryKey: galleryQueryKeys.invites(context, collection.key), queryFn: () => listGalleryCollectionInvites([collection.memberKey]), staleTime: 0 });
       setInvites(result.invites); setCachedGalleryInvites(queryClient, context, collection.key, result.invites);
-    } catch (error) { reportFailure("Invites could not be loaded", error); }
+    } catch { setLoadError("Invites could not be loaded."); }
     finally { setLoading(false); }
   }
 
   async function loadLinks() {
-    setView("links"); setLoading(true);
+    setView("links"); setLoading(true); setLoadError(undefined);
     await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.shareLinks(context, collection.key), refetchType: "none" });
     try {
       const result = await queryClient.fetchQuery({ queryKey: galleryQueryKeys.shareLinks(context, collection.key), queryFn: () => listGalleryCollectionShareLinks(collection.key), staleTime: 0 });
       setLinks(result.links); setCachedGalleryShareLinks(queryClient, context, collection.key, result.links);
-    } catch (error) { reportFailure("Share links could not be loaded", error); }
+    } catch { setLoadError("Share links could not be loaded."); }
     finally { setLoading(false); }
   }
 
@@ -103,7 +109,8 @@ export function GalleryCollectionSharing({ collection, context, onClose, open }:
       const result = await updateGalleryCollectionMember(collection.key, selectedMember.memberKey, role);
       const next = members.map((member) => member.memberKey === result.memberKey ? { ...member, role: result.role, joinedAt: result.joinedAt } : member);
       setMembers(next); setCachedGalleryMembers(queryClient, context, collection.key, next); setView("members");
-    } catch (error) { reportFailure("Member update failed", error); }
+      notify("Member updated");
+    } catch { reportFailure("Member update failed"); }
     finally { setBusy(false); }
   }
 
@@ -113,8 +120,8 @@ export function GalleryCollectionSharing({ collection, context, onClose, open }:
     const previous = members;
     const next = members.filter(({ key }) => key !== selectedMember.key);
     setMembers(next); setCachedGalleryMembers(queryClient, context, collection.key, next);
-    try { await removeGalleryCollectionMember(collection.key, selectedMember.memberKey); setView("members"); }
-    catch (error) { setMembers(previous); setCachedGalleryMembers(queryClient, context, collection.key, previous); showToast({ title: "Member removal failed", description: error instanceof Error ? error.message : "Try again." }); }
+    try { await removeGalleryCollectionMember(collection.key, selectedMember.memberKey); setView("members"); notify("Member removed"); }
+    catch { setMembers(previous); setCachedGalleryMembers(queryClient, context, collection.key, previous); notify("Member removal failed"); }
     finally { setBusy(false); }
   }
 
@@ -125,25 +132,26 @@ export function GalleryCollectionSharing({ collection, context, onClose, open }:
       await respondToGalleryCollectionInvite(selectedInvite.key, inviteResponse);
       const next = invites.filter(({ key }) => key !== selectedInvite.key);
       setInvites(next); setCachedGalleryInvites(queryClient, context, collection.key, next); setView("invites");
-    } catch (error) { reportFailure("Invite response failed", error); }
+      notify(inviteResponse === "accept" ? "Invite accepted" : "Invite rejected");
+    } catch { reportFailure("Invite response failed"); }
     finally { setBusy(false); }
   }
 
-  async function copy(url: string) {
-    try { await copyToClipboard(url); showToast({ title: "Share link copied to clipboard" }); }
-    catch (error) { showToast({ title: "Clipboard unavailable", description: error instanceof Error ? error.message : "Try again." }); }
+  async function copy(url: string, successTitle = "Share link copied to clipboard", failureTitle = "Clipboard unavailable") {
+    try { await copyToClipboard(url); notify(successTitle); }
+    catch { notify(failureTitle); }
   }
 
   async function saveLink() {
     if (!selectedLink) return undefined;
-    if (active === selectedLink.active) return selectedLink;
+    if (active === selectedLink.active) return { link: selectedLink, updated: false };
     setBusy(true);
     try {
       const result = await updateGalleryCollectionShareLink(collection.key, selectedLink.key, active);
       const next = links.map((link) => link.key === result.link.key ? result.link : link);
       setLinks(next); setCachedGalleryShareLinks(queryClient, context, collection.key, next); setSelectedLink(result.link);
-      return result.link;
-    } catch (error) { reportFailure("Share link update failed", error); return undefined; }
+      return { link: result.link, updated: true };
+    } catch { reportFailure("Share link update failed"); return undefined; }
     finally { setBusy(false); }
   }
 
@@ -155,9 +163,9 @@ export function GalleryCollectionSharing({ collection, context, onClose, open }:
     try {
       const result = await createGalleryCollectionShareLink(collection.key, role, active);
       const next = [result.link, ...previous];
-      setLinks(next); setCachedGalleryShareLinks(queryClient, context, collection.key, next); setSelectedLink(result.link); setView("link"); await copy(result.link.url);
-    } catch (error) {
-      setLinks(previous); setCachedGalleryShareLinks(queryClient, context, collection.key, previous); reportFailure("Share link creation failed", error);
+      setLinks(next); setCachedGalleryShareLinks(queryClient, context, collection.key, next); setSelectedLink(result.link); setView("link"); await copy(result.link.url, "Share link created and copied", "Share link created; clipboard unavailable");
+    } catch {
+      setLinks(previous); setCachedGalleryShareLinks(queryClient, context, collection.key, previous); reportFailure("Share link creation failed");
     } finally { setBusy(false); }
   }
 
@@ -175,11 +183,12 @@ export function GalleryCollectionSharing({ collection, context, onClose, open }:
   const footer = view === "members" && owner ? <View style={styles.footer}><Button onPress={() => void loadLinks()} size="lg" variant="primary">Invite</Button><Button onPress={onClose} size="lg" variant="secondary">Close</Button></View>
     : view === "members" || view === "invites" || view === "links" ? <Button onPress={onClose} size="lg" variant="secondary">Close</Button>
       : view === "member" ? <View style={styles.footer}>{owner ? <Button disabled={busy || selectedMember?.role === "owner"} loading={busy} onPress={() => void saveMember()} size="lg" variant="primary">Save</Button> : null}<Button disabled={busy} onPress={() => setView("members")} size="lg" variant="secondary">Close</Button></View>
-        : view === "link" ? <View style={styles.footer}><Button disabled={busy} loading={busy} onPress={() => void saveLink().then((link) => { if (link) void copy(link.url); })} size="lg" variant="primary">Copy</Button><Button disabled={busy} onPress={() => setView("links")} size="lg" variant="secondary">Close</Button></View>
+          : view === "link" ? <View style={styles.footer}><Button disabled={busy} loading={busy} onPress={() => void saveLink().then((result) => { if (result) void copy(result.link.url, result.updated ? "Share link updated and copied" : undefined, result.updated ? "Share link updated; clipboard unavailable" : undefined); })} size="lg" variant="primary">Copy</Button><Button disabled={busy} onPress={() => setView("links")} size="lg" variant="secondary">Close</Button></View>
           : view === "createLink" ? <View style={styles.footer}><Button disabled={busy} loading={busy} onPress={() => void createLink()} size="lg" variant="primary">Create</Button><Button disabled={busy} onPress={() => setView("links")} size="lg" variant="secondary">Close</Button></View>
             : undefined;
 
   return <BottomSheet dismissible={!busy && !mutation && !confirmation} footer={footer} hideHeading={view === "access" || confirmation} mutation={mutation} onOpenChange={(next) => { if (!next) onClose(); }} open={open} tall={tall} title={title}>
+    {loadError ? <Text accessibilityRole="alert" style={styles.error}>{loadError}</Text> : null}
     {view === "access" ? <View style={styles.menu}><BottomSheetItem onPress={() => void loadMembers()} size="lg" variant="secondary">Members</BottomSheetItem>{owner ? <BottomSheetItem onPress={() => void loadInvites()} size="lg" variant="secondary">Pending invites</BottomSheetItem> : null}</View> : null}
     {view === "members" ? <View style={styles.full}>
       <Tabs accessibilityLabel="Member roles" style={styles.tabs}>{(["owner", "collaborator", "viewer"] as const).map((item) => <Button key={item} accessibilityState={{ selected: tab === item }} onPress={() => setTab(item)} size="sm" style={styles.tab} variant={tab === item ? "primary" : "ghost"}>{item === "owner" ? "Owner" : item === "collaborator" ? "Collaborators" : "Viewers"}</Button>)}</Tabs>
@@ -207,25 +216,25 @@ export function GalleryPendingInvites({ context, memberKeys, onAccepted, onClose
   open: boolean;
 }) {
   const queryClient = useQueryClient();
-  const { showToast } = useToast();
+  const notify = useNotice();
   const [invites, setInvites] = useState<GalleryCollectionInvite[]>([]);
   const [selected, setSelected] = useState<GalleryCollectionInvite>();
   const [response, setResponse] = useState<"accept" | "reject">("accept");
   const [confirming, setConfirming] = useState(false);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [loadError, setLoadError] = useState<string>();
   const queryKey = galleryQueryKeys.invites(context, "incoming");
 
   async function load() {
-    setLoading(true);
+    setLoading(true); setLoadError(undefined);
     try {
       await queryClient.invalidateQueries({ queryKey, refetchType: "none" });
       const result = await queryClient.fetchQuery({ queryKey, queryFn: () => listGalleryCollectionInvites(memberKeys), staleTime: 0 });
       setInvites(result.invites);
       setCachedGalleryInvites(queryClient, context, "incoming", result.invites);
-    } catch (error) {
-      showToast({ title: "Invites could not be loaded", description: error instanceof Error ? error.message : "Try again." });
-    } finally { setLoading(false); }
+    } catch { setLoadError("Invites could not be loaded."); }
+    finally { setLoading(false); }
   }
 
   useEffect(() => { if (open) { setConfirming(false); void load(); } }, [open]);
@@ -238,13 +247,15 @@ export function GalleryPendingInvites({ context, memberKeys, onAccepted, onClose
       await respondToGalleryCollectionInvite(selected.key, response);
       if (response === "accept") onAccepted();
       setConfirming(false);
+      notify(response === "accept" ? "Invite accepted" : "Invite rejected");
       await load();
-    } catch (error) {
-      showToast({ title: "Invite response failed", description: error instanceof Error ? error.message : "Try again." });
+    } catch {
+      notify("Invite response failed");
     } finally { setBusy(false); }
   }
 
   return <BottomSheet dismissible={!busy && !confirming} footer={!confirming ? <Button disabled={busy} onPress={onClose} size="lg" variant="secondary">Close</Button> : undefined} hideHeading={confirming} onOpenChange={(next) => { if (!next) onClose(); }} open={open} tall={!confirming} title={confirming ? "" : "Pending invites"}>
+    {loadError ? <Text accessibilityRole="alert" style={styles.error}>{loadError}</Text> : null}
     {confirming ? <View style={styles.footer}><Button accessibilityHint={`${response === "accept" ? "Adds" : "Does not add"} this shared collection to Gallery.`} accessibilityLabel={`${response === "accept" ? "Accept" : "Reject"} invite to ${selected?.collection.name ?? "collection"}`} disabled={busy} loading={busy} onPress={() => void respond()} size="lg" variant="primary">{response === "accept" ? "Accept" : "Reject"}</Button><Button accessibilityHint="Returns to pending invites without responding." accessibilityLabel="Close invite confirmation" disabled={busy} onPress={() => setConfirming(false)} size="lg" variant="secondary">Close</Button></View> : <View style={styles.full}>{loading ? <View accessibilityLabel="Loading pending invites" accessibilityRole="progressbar" style={styles.list}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={styles.rowSkeleton} />)}</View> : <ScrollView contentContainerStyle={styles.list}>{invites.map((invite) => <View key={invite.key} style={styles.row}><Button accessibilityLabel={`Accept invite to ${invite.collection.name}`} contentMode="raw" onPress={() => { setSelected(invite); setResponse("accept"); setConfirming(true); }} size="lg" style={styles.rowMain} variant="ghost"><View><Text style={styles.name}>{invite.collection.name}</Text><Text style={styles.meta}>From {invite.inviterDisplayName} · {invite.role}</Text></View></Button><Button accessibilityLabel={`Reject invite to ${invite.collection.name}`} contentMode="raw" onPress={() => { setSelected(invite); setResponse("reject"); setConfirming(true); }} size="xs" variant="icon"><CloseIcon size="sm" /></Button></View>)}</ScrollView>}</View>}
   </BottomSheet>;
 }
@@ -254,6 +265,6 @@ const styles = StyleSheet.create({
   tabs: { padding: 4, flexDirection: "row", borderWidth: 1, backgroundColor: palette.panel }, tab: { flex: 1, paddingHorizontal: 6 },
   list: { gap: 3, paddingBottom: spacing.lg }, pillSkeleton: { height: 34, borderRadius: 999 }, rowSkeleton: { height: 48, borderRadius: radii.md },
   row: { minHeight: 48, paddingLeft: 4, flexDirection: "row", alignItems: "center", borderBottomWidth: 1, borderBottomColor: palette.hairline }, rowMain: { flex: 1, alignItems: "flex-start", paddingHorizontal: 6 },
-  name: { color: palette.silver100, fontFamily: fonts.medium, fontSize: 13 }, meta: { color: palette.muted, fontFamily: fonts.regular, fontSize: 11 },
+  name: { color: palette.silver100, fontFamily: fonts.medium, fontSize: 13 }, meta: { color: palette.muted, fontFamily: fonts.regular, fontSize: 11 }, error: { color: palette.danger, fontFamily: fonts.medium, fontSize: 12 },
   roles: { flexDirection: "row", gap: spacing.xs }, switchRow: { minHeight: 36, flexDirection: "row", alignItems: "center", gap: spacing.sm },
 });

@@ -277,6 +277,7 @@ function ProcessingDocumentButton({ name }: { name: string }) {
 export function KnowledgeWorkspace() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
+  const notify = (title: string) => showToast({ title, duration: 2_000 });
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
@@ -583,7 +584,7 @@ export function KnowledgeWorkspace() {
         await clearContentDocumentAudioPlayback(documentKey);
       });
       audioPlaybackWrites.current = operation.catch(() => undefined);
-      void operation.catch(() => showToast({ title: "Audio resume state could not be cleared" }));
+      void operation.catch(() => notify("Audio resume state could not be cleared"));
     }
     stopNarration();
   };
@@ -1287,7 +1288,7 @@ export function KnowledgeWorkspace() {
       setPendingDocumentVersionLabel(undefined);
       setVersions((history) => [version, ...history.filter(({ key }) => key !== version.key)]);
       await openDocumentVersion(version, generated.text);
-      showToast({ title: action === "enhance" ? "Enhanced version ready" : "Translated version ready" });
+      notify(action === "enhance" ? "Enhanced version ready" : "Translated version ready");
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : action === "enhance" ? "The document could not be enhanced." : "The document could not be translated.";
       if (activeSheetRef.current === "versions") setSheetError(message);
@@ -1758,7 +1759,7 @@ export function KnowledgeWorkspace() {
     setHydratingDocumentKeys([]);
   };
 
-  const showSelectionLimit = () => showToast({ title: "Selection limit reached", description: `Select no more than ${MAX_SELECTED_CONTENT_RESOURCES} folders, documents, and files at once.` });
+  const showSelectionLimit = () => notify("Selection limit reached");
 
   const toggleFolderSelection = (folder: ContentFolder) => {
     setSelectedFolders((current) => {
@@ -2019,14 +2020,14 @@ export function KnowledgeWorkspace() {
       if (coverRequest !== undefined && coverRequest !== folderCoverRequests.current.get(previous.key)) return;
       replaceFolder(updated, false);
       void invalidateContentLocations(queryClient, contentContext, [previous.parentFolderKey]);
-    })().catch(async (cause: unknown) => {
+    })().catch(async () => {
       try {
         const location = await refreshContentLocation(queryClient, contentContext, previous.parentFolderKey);
         replaceFolder(location.folders.find(({ key }) => key === previous.key) ?? previous, false);
       } catch {
         replaceFolder(previous, false);
       }
-      showToast({ title: "Folder update failed", description: cause instanceof Error ? cause.message : "The folder could not be updated." });
+      notify("Folder update failed");
     });
   };
 
@@ -2302,7 +2303,7 @@ export function KnowledgeWorkspace() {
       removeCachedContentFolder(queryClient, contentContext, parentFolderKey, temporaryKey);
       setFolders((current) => current.filter(({ key }) => key !== temporaryKey));
       if (!parentFolderKey) setRootFolders((current) => current.filter(({ key }) => key !== temporaryKey));
-      showToast({ title: "Folder creation failed", description: cause instanceof Error ? cause.message : "The folder could not be created." });
+      notify("Folder creation failed");
     }
   };
 
@@ -2596,10 +2597,9 @@ export function KnowledgeWorkspace() {
           setRootDocuments(location.documents);
         }
       }
-      showToast({
-        title: successCount > 0 ? `Uploaded ${successCount} ${successCount === 1 ? "file" : "files"}` : "Files could not be uploaded",
-        ...(failureCount > 0 ? { description: `${failureCount} ${failureCount === 1 ? "file" : "files"} failed.` } : {}),
-      });
+      notify(failureCount > 0
+        ? successCount > 0 ? `${successCount} uploaded, ${failureCount} failed` : "Files could not be uploaded"
+        : `Uploaded ${successCount} ${successCount === 1 ? "file" : "files"}`);
       uploadBatchRef.current = [];
       setUploadBatch([]);
       setUploadFolderKey(undefined);
@@ -2646,12 +2646,12 @@ export function KnowledgeWorkspace() {
         if (!folderKey) setRootDocuments(addDocument);
       }
       await invalidateContentLocations(queryClient, requestContext, [folderKey]);
-      showToast({ title: "Document scanned", description: `${pages.length} ${pages.length === 1 ? "page" : "pages"} converted to an editable document.` });
+      notify("Document scanned");
       await openNote(document);
     } catch (cause) {
       if (generation !== scanGeneration.current || contentContextKeyRef.current !== requestContextKey) return;
       const message = cause instanceof Error ? cause.message : "The document could not be scanned.";
-      if (processingStarted) showToast({ title: "Document could not be scanned", description: message });
+      if (processingStarted) notify("Document could not be scanned");
       else setScanError(message);
     } finally {
       if (generation === scanGeneration.current) {
@@ -2746,10 +2746,10 @@ export function KnowledgeWorkspace() {
         }
         await invalidateContentLocations(queryClient, contentContext, [sourceKey, targetKey]);
         await invalidateContentHistories(queryClient, contentContext, [sourceKey, targetKey, undefined]);
-        if (isCurrent()) showToast({ title: `${directDocument.extension ? "File" : "Document"} ${action === "move" ? "moved" : "copied"}` });
-      }).catch((cause: unknown) => {
+        if (isCurrent()) notify(`${directDocument.extension ? "File" : "Document"} ${action === "move" ? "moved" : "copied"}`);
+      }).catch(() => {
         if (committed) {
-          if (isCurrent()) showToast({ title: `${directDocument.extension ? "File" : "Document"} ${action === "move" ? "moved" : "copied"}`, description: "The change completed, but Archive could not refresh yet." });
+          if (isCurrent()) notify(`${directDocument.extension ? "File" : "Document"} ${action === "move" ? "moved" : "copied"}`);
           return;
         }
         if (sourceLocation) queryClient.setQueryData(contentQueryKeys.location(contentContext, sourceKey), sourceLocation);
@@ -2769,7 +2769,7 @@ export function KnowledgeWorkspace() {
         setQuery(previousQuery);
         setResults(previousResults);
         setFolderSearchResults(previousFolderSearchResults);
-        showToast({ title: `${directDocument.extension ? "File" : "Document"} ${action} failed`, description: cause instanceof Error ? cause.message : `The item could not be ${action === "move" ? "moved" : "copied"}.` });
+        notify(`${directDocument.extension ? "File" : "Document"} ${action} failed`);
       });
       return;
     }
@@ -2847,13 +2847,12 @@ export function KnowledgeWorkspace() {
         }
         await invalidateContentLocations(queryClient, contentContext, [sourceKey, ...destinationKeys]);
         await invalidateContentHistories(queryClient, contentContext, [sourceKey, ...destinationKeys, undefined]);
-        if (isCurrent()) showToast({
-          title: `${outcome.succeeded} ${outcome.succeeded === 1 ? "folder" : "folders"} ${action === "move" ? "moved" : "copied"}`,
-          ...(outcome.failed ? { description: `${outcome.failed} operations failed. ${outcome.failures[0]?.message ?? "Try again."}` } : {}),
-        });
-      })().catch((cause: unknown) => {
+        if (isCurrent()) notify(outcome.failed
+          ? `${outcome.succeeded} ${action === "move" ? "moved" : "copied"}, ${outcome.failed} failed`
+          : `${outcome.succeeded} ${outcome.succeeded === 1 ? "folder" : "folders"} ${action === "move" ? "moved" : "copied"}`);
+      })().catch(() => {
         if (committed) {
-          if (isCurrent()) showToast({ title: `Folder ${action === "move" ? "moved" : "copied"}`, description: "The change completed, but Archive could not refresh yet." });
+          if (isCurrent()) notify(`Folder ${action === "move" ? "moved" : "copied"}`);
           return;
         }
         if (sourceLocation) queryClient.setQueryData(contentQueryKeys.location(contentContext, sourceKey), sourceLocation);
@@ -2875,7 +2874,7 @@ export function KnowledgeWorkspace() {
         setQuery(previousQuery);
         setResults(previousResults);
         setFolderSearchResults(previousFolderSearchResults);
-        showToast({ title: `Folder ${action} failed`, description: cause instanceof Error ? cause.message : `The folder could not be ${action === "move" ? "moved" : "copied"}.` });
+        notify(`Folder ${action} failed`);
       });
       return;
     }
@@ -3024,18 +3023,12 @@ export function KnowledgeWorkspace() {
         setResults(undefined);
         setFolderSearchResults(undefined);
       }
-      const resourceNames = new Map<string, string>([...operationFolders, ...operationDocuments].map((item) => [item.key, item.name]));
-      const destinationNames = new Map(choices.map((choice) => [choice.folder?.key, choice.folder?.name ?? "Archive"]));
-      const copyFailureDetails = action === "copy" && outcome.failed
-        ? [...new Set(outcome.failures.map((failure) => `${resourceNames.get(failure.key) ?? failure.key} to ${destinationNames.get(failure.destinationFolderKey) ?? "Archive"}`))].join(", ")
-        : undefined;
-      if (transferIsCurrent()) showToast({
-        title: `${outcome.succeeded} ${outcome.succeeded === 1 ? "item" : "items"} ${action === "move" ? "moved" : "copied"}`,
-        ...(outcome.failed ? { description: `${outcome.failed} of ${outcome.requested} operations failed${copyFailureDetails ? `: ${copyFailureDetails}` : ""}. ${outcome.failures[0]?.message ?? "Try those items again."}` } : {}),
-      });
-    } catch (cause) {
+      if (transferIsCurrent()) notify(outcome.failed
+        ? `${outcome.succeeded} ${action === "move" ? "moved" : "copied"}, ${outcome.failed} failed`
+        : `${outcome.succeeded} ${outcome.succeeded === 1 ? "item" : "items"} ${action === "move" ? "moved" : "copied"}`);
+    } catch {
       if (transferCommitted) {
-        if (transferIsCurrent()) showToast({ title: `${action === "move" ? "Move" : "Copy"} completed`, description: "The change completed, but Archive could not refresh yet." });
+        if (transferIsCurrent()) notify(`${action === "move" ? "Move" : "Copy"} completed`);
         return;
       }
       locationSnapshots.forEach((location, key) => {
@@ -3057,7 +3050,7 @@ export function KnowledgeWorkspace() {
         setQuery(previousQuery);
         setResults(previousResults);
         setFolderSearchResults(previousFolderSearchResults);
-        showToast({ title: `${action === "move" ? "Move" : "Copy"} failed`, description: cause instanceof Error ? cause.message : `The items could not be ${action === "move" ? "moved" : "copied"}.` });
+        notify(`${action === "move" ? "Move" : "Copy"} failed`);
       }
     } finally {
       bulkMutationLocked.current = false;
@@ -3089,10 +3082,9 @@ export function KnowledgeWorkspace() {
       if (outcome.succeeded) {
         closeSheet(outcome.failed > 0);
       }
-      showToast({
-        title: outcome.succeeded ? `${outcome.succeeded} ${outcome.succeeded === 1 ? "item" : "items"} ${nextFavorite ? "favorited" : "unfavorited"}` : "Favorites could not be updated",
-        ...(outcome.failed ? { description: `${outcome.failed} ${outcome.failed === 1 ? "item" : "items"} failed. ${outcome.failures[0]?.message ?? "Try again."}` } : {}),
-      });
+      notify(outcome.failed
+        ? outcome.succeeded ? `${outcome.succeeded} updated, ${outcome.failed} failed` : "Favorites could not be updated"
+        : `${outcome.succeeded} ${outcome.succeeded === 1 ? "item" : "items"} ${nextFavorite ? "favorited" : "unfavorited"}`);
     } catch (cause) {
       setSheetError(cause instanceof Error ? cause.message : "Favorites could not be updated.");
     } finally {
@@ -3165,10 +3157,10 @@ export function KnowledgeWorkspace() {
         removeCachedContentFoldersEverywhere(queryClient, contentContext, [directFolder.key]);
         await invalidateContentLocations(queryClient, contentContext, [parentKey]);
         await invalidateContentHistories(queryClient, contentContext, [parentKey, undefined]);
-        showToast({ title: "1 item deleted" });
-      }).catch((cause: unknown) => {
+        notify("1 item deleted");
+      }).catch(() => {
         if (committed) {
-          if (isCurrent()) showToast({ title: "1 item deleted" });
+          if (isCurrent()) notify("1 item deleted");
           return;
         }
         if (!isCurrent()) return;
@@ -3182,7 +3174,7 @@ export function KnowledgeWorkspace() {
         setWorkspaceMode(previousWorkspaceMode);
         setRootSearchResults(previousRootSearchResults);
         setFolderSearchResults(previousFolderSearchResults);
-        showToast({ title: "Folder deletion failed", description: cause instanceof Error ? cause.message : "The folder could not be deleted." });
+        notify("Folder deletion failed");
       });
       return;
     }
@@ -3213,12 +3205,9 @@ export function KnowledgeWorkspace() {
       if (outcome.succeeded) {
         closeSheet(outcome.failed > 0);
       }
-      showToast({
-        title: outcome.succeeded
-          ? `${outcome.succeeded} ${outcome.succeeded === 1 ? "item" : "items"} deleted`
-          : "Items could not be deleted",
-        ...(outcome.failed ? { description: `${outcome.failed} ${outcome.failed === 1 ? "item" : "items"} failed. ${outcome.failures[0]?.message ?? "Try again."}` } : {}),
-      });
+      notify(outcome.failed
+        ? outcome.succeeded ? `${outcome.succeeded} deleted, ${outcome.failed} failed` : "Items could not be deleted"
+        : `${outcome.succeeded} ${outcome.succeeded === 1 ? "item" : "items"} deleted`);
     } catch (cause) {
       setSheetError(cause instanceof Error ? cause.message : "The selected items could not be deleted.");
     } finally {
@@ -3280,7 +3269,7 @@ export function KnowledgeWorkspace() {
         savedTitleRef.current = restored.name;
         setTitle(restored.name);
       }
-      showToast({ title: "Update failed", description: cause instanceof Error ? cause.message : "The item could not be updated." });
+      notify("Update failed");
     }
   };
 
@@ -3298,11 +3287,11 @@ export function KnowledgeWorkspace() {
     void (async () => {
       try {
         const download = await downloadContentDocument(document.key, document.extension ? "original" : "txt");
-        const location = await saveBase64Download(download.fileName, download.mimeType, download.content);
+        await saveBase64Download(download.fileName, download.mimeType, download.content);
         await new Promise((resolve) => setTimeout(resolve, 1_000));
-        showToast({ title: document.extension ? "File downloaded" : "Document downloaded", description: `Saved to ${location}` });
-      } catch (cause) {
-        showToast({ title: "Download failed", description: cause instanceof Error ? cause.message : "The original file could not be downloaded." });
+        notify(document.extension ? "File downloaded" : "Document downloaded");
+      } catch {
+        notify("Download failed");
       }
     })();
   };
@@ -3378,7 +3367,7 @@ export function KnowledgeWorkspace() {
       setSelectedDocument(undefined);
       void invalidateContentLocations(queryClient, contentContext, [target.folderKey]);
       void invalidateContentHistories(queryClient, contentContext, [target.folderKey, undefined]);
-      showToast({ title: "1 item deleted" });
+      notify("1 item deleted");
     } catch (cause) {
       setSheetError(cause instanceof Error ? cause.message : "The item could not be deleted.");
     } finally {

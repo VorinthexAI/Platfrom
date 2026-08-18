@@ -96,6 +96,7 @@ function errorMessage(error: unknown) {
 export function GalleryWorkspace() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
+  const notify = (title: string) => showToast({ title, duration: 2_000 });
   const galleryContext = getGalleryContext();
   const contentContext = getContentContext();
   const showOnlyFavorites = useAuthStore((state) => state.user?.settings.gallery.showOnlyFavorites ?? false);
@@ -455,9 +456,10 @@ export function GalleryWorkspace() {
         setSelectedImage((current) => current?.key === selected.clientKey && updated.imageKey ? { ...current, key: updated.imageKey } : current);
       }
     }
-    await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
+    await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) }).catch((error: unknown) => setStatus(errorMessage(error)));
     void (async () => {
       const settledKeys = new Set<string>();
+      const failedKeys = new Set<string>();
       let allSettled = false;
       const refreshVisibleOverview = async () => {
         if (activeCollectionKey.current === uploadLocation && visibleGalleryView.current === uploadView) return { attempted: true, overview: await load(uploadCollection, true) };
@@ -470,6 +472,7 @@ export function GalleryWorkspace() {
           const current = await fetchGalleryUploadStatus(uploadKeys, 5_000);
           const terminalJobs = current.jobs.filter(({ key, status: jobStatus }) => !settledKeys.has(key) && (jobStatus === "completed" || jobStatus === "failed"));
           if (terminalJobs.length > 0) {
+            for (const job of terminalJobs) if (job.status === "failed") failedKeys.add(job.key);
             await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
             const refresh = await refreshVisibleOverview();
             if (optimisticBatchKey) {
@@ -502,9 +505,10 @@ export function GalleryWorkspace() {
           if (allSettled) break;
         } catch {}
       }
-      await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
+      await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) }).catch((error: unknown) => setStatus(errorMessage(error)));
       await refreshVisibleOverview();
       await loadSubjects(true);
+      if (failedKeys.size > 0) notify(failedKeys.size === uploadKeys.length ? "Upload failed" : "Some uploads failed");
     })().catch(() => undefined);
   }
 
@@ -531,11 +535,12 @@ export function GalleryWorkspace() {
         setOptimisticMediaItems((current) => [...files.map((file) => ({ ...file, batchKey, collectionKey: targetCollection.key, createdAt })), ...current]);
         updateCollectionSingleton((current) => current.map((collection) => collection.key === targetCollection.key ? { ...collection, count: collection.count + files.length } : collection));
         setActiveCollection((current) => current?.key === targetCollection.key ? { ...current, count: current.count + files.length } : current);
-        void completeUpload(files, targetCollection.key, batchKey).catch(() => {
+        void completeUpload(files, targetCollection.key, batchKey).then(() => notify("Upload started")).catch(() => {
           setOptimisticMediaItems((current) => current.filter((item) => item.batchKey !== batchKey));
           updateCollectionSingleton((current) => current.map((collection) => collection.key === targetCollection.key ? { ...collection, count: Math.max(0, collection.count - files.length) } : collection));
           setActiveCollection((current) => current?.key === targetCollection.key ? { ...current, count: Math.max(0, current.count - files.length) } : current);
           deletePreparedFiles(files);
+          notify("Upload failed");
         });
         closeSheet();
       } else {
@@ -544,6 +549,7 @@ export function GalleryWorkspace() {
       }
     } catch {
       setPendingFiles([]);
+      notify("Upload preparation failed");
     } finally {
       setBusy(false);
     }
@@ -572,16 +578,17 @@ export function GalleryWorkspace() {
     updateCollectionSingleton((current) => current.map((collection) => collection.key === targetCollection.key ? { ...collection, count: collection.count + files.length } : collection));
     setActiveCollection((current) => current?.key === targetCollection.key ? { ...current, count: current.count + files.length } : current);
     void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext), refetchType: "none" });
-    void completeUpload(files, targetCollection.key, batchKey).catch(() => {
+    void completeUpload(files, targetCollection.key, batchKey).then(() => notify("Upload started")).catch(() => {
       setOptimisticMediaItems((current) => current.filter((item) => item.batchKey !== batchKey));
       updateCollectionSingleton((current) => current.map((collection) => collection.key === targetCollection.key ? { ...collection, count: Math.max(0, collection.count - files.length) } : collection));
       setActiveCollection((current) => current?.key === targetCollection.key ? { ...current, count: Math.max(0, current.count - files.length) } : current);
       deletePreparedFiles(files);
+      notify("Upload failed");
     });
   }
 
-  async function uploadTo(collectionKey: string) {
-    if (pendingFiles.length === 0) return;
+  async function uploadTo(collectionKey: string, showFeedback = true) {
+    if (pendingFiles.length === 0) return false;
     const files = [...pendingFiles];
     const targetCollection = collections.find(({ key }) => key === collectionKey);
     const batchKey = `upload-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -592,7 +599,9 @@ export function GalleryWorkspace() {
     closeSheet();
     try {
       await completeUpload(files, collectionKey, batchKey);
+      if (showFeedback) notify("Upload started");
       setBusy(false);
+      return true;
     } catch {
       setOptimisticMediaItems((current) => current.filter((item) => item.batchKey !== batchKey));
       deletePreparedFiles(files);
@@ -601,6 +610,8 @@ export function GalleryWorkspace() {
         count: Math.max(0, collection.count - files.length),
         coverUrl: collection.coverUrl === files[0]?.uri ? targetCollection.coverUrl : collection.coverUrl,
       } : collection));
+      if (showFeedback) notify("Upload failed");
+      return false;
     } finally {
       setBusy(false);
     }
@@ -609,17 +620,24 @@ export function GalleryWorkspace() {
   async function createCollectionAndUpload() {
     const name = newCollectionName.trim();
     if (!canCreateCollections || !name) return;
+    const hasUpload = pendingFiles.length > 0;
     setBusy(true);
     try {
       const collection = await createGalleryCollection(name, newCollectionFavorite);
-      await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
+      await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) }).catch((error: unknown) => setStatus(errorMessage(error)));
       updateCollectionSingleton((current) => [...current, collection]);
       setNewCollectionName("");
       setNewCollectionFavorite(false);
-      if (pendingFiles.length) await uploadTo(collection.key);
-      else { closeSheet(); setBusy(false); await load(); }
+      if (hasUpload) {
+        const uploadStarted = await uploadTo(collection.key, false);
+        notify(uploadStarted ? "Collection created and upload started" : "Upload failed; collection created");
+      } else {
+        notify("Collection created");
+        closeSheet(); setBusy(false); await load();
+      }
     } catch (error) {
       setStatus(errorMessage(error));
+      notify("Collection creation failed");
       setBusy(false);
     }
   }
@@ -721,10 +739,12 @@ export function GalleryWorkspace() {
     setRemovingHistoryQuery(item.normalizedQuery);
     try {
       await deleteContentSearchHistory(item.normalizedQuery);
+      notify("Search removed");
     } catch (error) {
       queryClient.setQueryData(contentQueryKeys.history(contentContext, undefined), previous);
       setHistory(previous);
       setStatus(errorMessage(error));
+      notify("Search removal failed");
     } finally {
       setRemovingHistoryQuery(undefined);
     }
@@ -811,8 +831,9 @@ export function GalleryWorkspace() {
       replaceVisibleImages([image]);
       patchGalleryImage(queryClient, galleryContext, image);
       closeSheet();
-    } catch (error) {
-      showToast({ title: "Image update failed", description: errorMessage(error) });
+      notify("Image updated");
+    } catch {
+      notify("Image update failed");
     } finally {
       setBusy(false);
     }
@@ -832,10 +853,12 @@ export function GalleryWorkspace() {
       const { collection } = await updateGalleryCollection(activeCollection.key, editName.trim(), editFavorite);
       updateCollectionSingleton((current) => current.map((candidate) => candidate.key === collection.key ? collection : candidate));
       setActiveCollection(collection);
-      await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
+      await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) }).catch((error: unknown) => setStatus(errorMessage(error)));
       closeSheet();
+      notify("Collection updated");
     } catch (error) {
       setStatus(errorMessage(error));
+      notify("Collection update failed");
     } finally {
       setBusy(false);
     }
@@ -847,15 +870,17 @@ export function GalleryWorkspace() {
     setBusy(true);
     try {
       await deleteGalleryCollection(collection.key);
-      await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
+      await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) }).catch((error: unknown) => setStatus(errorMessage(error)));
       closeSheet();
       setActiveCollection(undefined);
       setShowingCollectionOverview(true);
       updateCollectionSingleton((current) => current.filter(({ key }) => key !== collection.key));
       setImages([]);
       setStatus(`${collection.name} was deleted.`);
+      notify("Collection deleted");
     } catch (error) {
       setStatus(errorMessage(error));
+      notify("Collection deletion failed");
     } finally {
       setBusy(false);
     }
@@ -873,8 +898,9 @@ export function GalleryWorkspace() {
       updateCollectionSingleton((current) => current.filter(({ key }) => key !== collection.key));
       setImages([]);
       setStatus(`You left ${collection.name}.`);
-      await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.all(galleryContext) });
-    } catch (error) { setStatus(errorMessage(error)); }
+      await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.all(galleryContext) }).catch((error: unknown) => setStatus(errorMessage(error)));
+      notify("Collection left");
+    } catch (error) { setStatus(errorMessage(error)); notify("Leaving collection failed"); }
     finally { setBusy(false); }
   }
 
@@ -907,13 +933,14 @@ export function GalleryWorkspace() {
     setSelectedImage(undefined);
     closeSheet();
     void deleteGalleryImages([target.key]).then(() => {
+      notify("Image deleted");
       void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
       void queryClient.fetchQuery({ queryKey: galleryQueryKeys.overview(galleryContext), queryFn: () => fetchGalleryOverview() }).then((overview) => {
         setCanCreateCollections(overview.canCreateCollections);
         setCachedGalleryCollections(queryClient, galleryContext, overview.collections);
         setCollections(overview.collections);
         setActiveCollection((current) => current ? overview.collections.find(({ key }) => key === current.key) ?? current : current);
-      }).catch((error: unknown) => showToast({ title: "Gallery refresh failed", description: errorMessage(error) }));
+      }).catch((error: unknown) => setStatus(errorMessage(error)));
       void loadSubjects();
     }).catch((error: unknown) => {
       restoreGalleryOverviews(queryClient, cacheSnapshot);
@@ -924,7 +951,7 @@ export function GalleryWorkspace() {
       setCollections(previousCollections);
       setActiveCollection(previousActiveCollection);
       setSelectedImage(target);
-      showToast({ title: "Image deletion failed", description: errorMessage(error) });
+      notify("Image deletion failed");
     });
   }
 
@@ -951,7 +978,7 @@ export function GalleryWorkspace() {
     setBusy(true);
     try {
       const deleted = await deleteGalleryCollectionDuplicates(activeCollection.key, duplicateImages.map(({ key }) => key));
-      await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
+      await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) }).catch((error: unknown) => setStatus(errorMessage(error)));
       updateCollectionSingleton((current) => current.map((collection) => collection.key === activeCollection.key
         ? { ...collection, count: Math.max(0, collection.count - deleted.removedImageKeys.length) }
         : collection));
@@ -960,8 +987,10 @@ export function GalleryWorkspace() {
       setDuplicateImages([]);
       closeSheet();
       setStatus(`${deleted.removedImageKeys.length} duplicate image${deleted.removedImageKeys.length === 1 ? "" : "s"} removed from this collection. ${deleted.deletedImageKeys.length} moved to trash.`);
+      notify("Duplicates deleted");
     } catch (error) {
       setStatus(errorMessage(error));
+      notify("Duplicate deletion failed");
     } finally {
       setBusy(false);
     }
@@ -1095,10 +1124,11 @@ export function GalleryWorkspace() {
     void createGallerySubject(name, [image.key]).then(({ subject }) => {
       setSubjects((current) => current.map((candidate) => candidate.key === optimisticKey ? subject : candidate));
       void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.all(galleryContext) });
+      notify("Visual identity created");
     }).catch((error: unknown) => {
       setSubjects((current) => current.filter(({ key }) => key !== optimisticKey));
       setIdentityError(errorMessage(error));
-      showToast({ title: "Visual identity creation failed", description: errorMessage(error) });
+      notify("Visual identity creation failed");
     }).finally(() => setCreatingIdentityKeys((current) => current.filter((key) => key !== optimisticKey)));
   }
 
@@ -1131,10 +1161,11 @@ export function GalleryWorkspace() {
     goBackSheet();
     void deleteGallerySubject(identity.key).then(() => {
       void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.all(galleryContext) });
+      notify("Visual identity deleted");
     }).catch((error: unknown) => {
       deletedIdentityKeys.current.delete(identity.key);
       setSubjects((current) => current.some(({ key }) => key === identity.key) ? current : [...current, identity]);
-      showToast({ title: "Visual identity deletion failed", description: errorMessage(error) });
+      notify("Visual identity deletion failed");
     }).finally(() => deletingIdentityKeys.current.delete(identity.key));
   }
 
@@ -1248,7 +1279,8 @@ export function GalleryWorkspace() {
     setBusy(false);
     closeSheet();
     void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
-    if (failed.length) showToast({ title: "Some favorites were not updated", description: `${failed.length} image${failed.length === 1 ? "" : "s"} remain selected.` });
+    if (failed.length) notify(failed.length === previous.length ? "Favorite update failed" : "Some favorites were not updated");
+    else notify(nextFavorite ? "Images favorited" : "Images unfavorited");
   }
 
   function deleteSelectedImages() {
@@ -1273,6 +1305,7 @@ export function GalleryWorkspace() {
     void deleteGalleryImages(keys).then(() => {
       setSelectedImageKeys([]);
       closeSheet();
+      notify(targets.length === 1 ? "Image deleted" : "Images deleted");
       void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
       void loadSubjects();
     }).catch((error: unknown) => {
@@ -1283,7 +1316,7 @@ export function GalleryWorkspace() {
       setCachedGalleryCollections(queryClient, galleryContext, previousCollections);
       setCollections(previousCollections);
       setActiveCollection(previousActiveCollection);
-      showToast({ title: "Image deletion failed", description: errorMessage(error) });
+      notify("Image deletion failed");
     }).finally(() => setBusy(false));
   }
 
@@ -1323,8 +1356,9 @@ export function GalleryWorkspace() {
     closeSheet();
     setStatus(`${selected.length} image${selected.length === 1 ? "" : "s"} ${mode === "move" ? "moved" : "copied"} to ${destination.name}.`);
     void transferGalleryCollectionImages({ sourceCollectionKey: sourceCollection.key, destinationCollectionKeys: destinationKeys, imageKeys, mode }).then(() => {
+      notify(mode === "move" ? "Images moved" : "Images copied");
       void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
-      void load(nextDestination, true).then((refreshed) => { if (!refreshed) showToast({ title: "Gallery refresh failed", description: "The transfer completed, but the destination could not be refreshed yet." }); });
+      void load(nextDestination, true);
     }).catch((error: unknown) => {
       restoreGalleryOverviews(queryClient, cacheSnapshot);
       for (const collectionKey of createdDestinationCaches) queryClient.removeQueries({ queryKey: galleryQueryKeys.overview(galleryContext, collectionKey), exact: true });
@@ -1333,7 +1367,7 @@ export function GalleryWorkspace() {
       setActiveCollection(sourceCollection);
       setImages(previousImages);
       setStatus(undefined);
-      showToast({ title: mode === "move" ? "Image move failed" : "Image copy failed", description: errorMessage(error) });
+      notify(mode === "move" ? "Image move failed" : "Image copy failed");
     });
   }
 
@@ -1653,7 +1687,7 @@ export function GalleryWorkspace() {
         </View> : null}
         {activeSheet === "filter" ? <View style={styles.filterPanel}>
           <View style={styles.favoriteSwitchRow}>
-            <Switch accessibilityLabel={showOnlyFavorites ? "Show all Gallery images" : "Show only favorite Gallery images"} checked={showOnlyFavorites} onCheckedChange={(checked) => { setGalleryShowOnlyFavorites(checked); closeSheet(); }} />
+            <Switch accessibilityLabel={showOnlyFavorites ? "Show all Gallery images" : "Show only favorite Gallery images"} checked={showOnlyFavorites} onCheckedChange={(checked) => { setGalleryShowOnlyFavorites(checked); notify("Filter updated"); closeSheet(); }} />
             <Text style={styles.favoriteSwitchLabel}>{showOnlyFavorites ? "Showing only favorites" : "Showing all"}</Text>
           </View>
           <Button onPress={() => void openVisualIdentities("filter")} size="lg" variant="secondary">Visual identities</Button>
@@ -1661,7 +1695,7 @@ export function GalleryWorkspace() {
         </View> : null}
         {activeSheet === "identityPickerFilter" ? <View style={styles.filterPanel}>
           <View style={styles.favoriteSwitchRow}>
-            <Switch accessibilityLabel={showOnlyFavorites ? "Show all picker images" : "Show only favorite picker images"} checked={showOnlyFavorites} onCheckedChange={setGalleryShowOnlyFavorites} />
+            <Switch accessibilityLabel={showOnlyFavorites ? "Show all picker images" : "Show only favorite picker images"} checked={showOnlyFavorites} onCheckedChange={(checked) => { setGalleryShowOnlyFavorites(checked); notify("Filter updated"); }} />
             <Text style={styles.favoriteSwitchLabel}>{showOnlyFavorites ? "Showing only favorites" : "Showing all"}</Text>
           </View>
           <Button onPress={() => void openSearchHistory("identityPicker")} size="lg" variant="secondary">Search history</Button>
