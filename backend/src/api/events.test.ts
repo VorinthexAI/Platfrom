@@ -29,6 +29,12 @@ describe('app event routing', () => {
     expect(checks).toBe(2);
   });
 
+  test('delivers highlight changes to current collaborators', async () => {
+    const envelope = parseEventEnvelope('{"route":"collection","collectionKey":"collection-1","event":"highlight.changed"}')!;
+    const collaborator = async () => true;
+    expect(await shouldDeliverEvent(envelope, 'collaborator', collaborator)).toBe(true);
+  });
+
   test('passes the slug to authorization so owner-only cache families deny readers', async () => {
     const viewer = async (_userKey: string, _collectionKey: string, event: string) => !event.endsWith('invites.changed') && !event.endsWith('shares.changed');
     const content = parseEventEnvelope('{"route":"collection","collectionKey":"collection-1","event":"collection.content.changed"}')!;

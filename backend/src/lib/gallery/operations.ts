@@ -644,7 +644,7 @@ const restoreSubject = (input: unknown, context: GalleryOperationContext) => set
 
 async function createHighlight(rawInput: unknown, context: GalleryOperationContext) {
   const input = { ...highlightCreateSchema.parse(rawInput), ...context };
-  const membership = await authorize(context);
+  const membership = await requireOwner(context, input.collectionKey);
   const candidates = await (context.listHighlightCandidates ?? repository.listHighlightCandidates)(input.scopeKey, input.collectionKey, membership.key);
   if (!candidates) throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.');
   const selected = selectHighlightCandidates(candidates, context.random);
@@ -675,6 +675,9 @@ async function readHighlight(rawInput: unknown, context: GalleryOperationContext
 async function deleteHighlight(rawInput: unknown, context: GalleryOperationContext) {
   const input = { ...highlightKeySchema.parse(rawInput), ...context };
   const membership = await authorize(context);
+  const row = await (context.getHighlight ?? repository.getHighlight)(input.scopeKey, input.highlightKey, membership.key);
+  if (!row) throw new GalleryOperationError(404, 'GALLERY_HIGHLIGHT_NOT_FOUND', 'Highlight not found.');
+  await requireOwner(context, row.highlight.collectionKey);
   const highlight = await (context.deleteHighlight ?? repository.deleteHighlight)(input.scopeKey, input.highlightKey, membership.key, new Date().toISOString());
   if (!highlight) throw new GalleryOperationError(404, 'GALLERY_HIGHLIGHT_NOT_FOUND', 'Highlight not found.');
   await publish(context, 'highlightChanged', { collections: [highlight.collectionKey] });

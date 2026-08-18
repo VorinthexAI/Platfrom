@@ -1,6 +1,10 @@
 import { expect, test } from "bun:test";
 import { HIGHLIGHT_SLIDE_DURATION_MS, initialHighlightPlaybackState, reduceHighlightPlayback } from "./gallery-highlight-playback";
 
+test("shows each highlight slide for three seconds", () => {
+  expect(HIGHLIGHT_SLIDE_DURATION_MS).toBe(3_000);
+});
+
 test("autoplays loaded slides and advances while retaining overflow time", () => {
   const loaded = reduceHighlightPlayback(initialHighlightPlaybackState, { type: "load", slideCount: 3, autoplay: true });
   expect(loaded).toEqual({ index: 0, playing: true, progressMs: 0 });

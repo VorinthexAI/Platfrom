@@ -59,10 +59,10 @@ const definitions: Array<{
   { operation: 'reserveUploads', name: 'gallery_upload_reserve', description: 'Reserve JPEG uploads and return signed destinations. The user or client must upload the raw bytes.', schema: galleryOperationInputSchemas.reserveUploads, mutation: true },
   { operation: 'uploadStatus', name: 'gallery_upload_status', description: 'Read Gallery upload processing status.', schema: z.object({ uploadKeys: keys(20) }).strict() },
   { operation: 'completeUploads', name: 'gallery_upload_complete', description: 'Confirm user-mediated JPEG uploads and start processing.', schema: galleryOperationInputSchemas.completeUploads, mutation: true },
-  { operation: 'createHighlight', name: 'highlight_create', description: 'Create a persistent randomized image highlight for a collection, including an empty highlight when the collection has no images.', schema: galleryOperationInputSchemas.createHighlight, mutation: true },
+  { operation: 'createHighlight', name: 'highlight_create', description: 'Create an owner-managed persistent randomized image highlight for a collection, including an empty highlight when the collection has no images.', schema: galleryOperationInputSchemas.createHighlight, mutation: true },
   { operation: 'listHighlights', name: 'highlight_list', description: 'List accessible persistent image highlights with currently visible collection images.', schema: galleryOperationInputSchemas.listHighlights },
   { operation: 'readHighlight', name: 'highlight_read', description: 'Read one accessible persistent image highlight with currently visible collection images.', schema: galleryOperationInputSchemas.readHighlight },
-  { operation: 'deleteHighlight', name: 'highlight_delete', description: 'Delete a persistent image highlight without deleting its images.', schema: galleryOperationInputSchemas.deleteHighlight, mutation: true },
+  { operation: 'deleteHighlight', name: 'highlight_delete', description: 'Delete an owner-managed persistent image highlight without deleting its images.', schema: galleryOperationInputSchemas.deleteHighlight, mutation: true },
 ];
 
 export const galleryAssistantMutationOperations = definitions.filter(({ mutation }) => mutation).map(({ operation }) => operation);

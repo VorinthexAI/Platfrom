@@ -260,16 +260,25 @@ describe('Gallery operation boundaries', () => {
   test('creates and returns a persistent empty highlight for an empty collection', async () => {
     const organizationKey = 'organization', scopeKey = key(), actorKey = key(), collectionKey = key(), userId = key();
     let persistedImageKeys: string[] | undefined;
+    const events: string[] = [];
     const context = {
       organizationKey, scopeKey, membership: { key: actorKey, organizationId: organizationKey, userId, status: 'active' },
+      getCollectionRole: async () => 'owner',
       listHighlightCandidates: async () => [],
       createHighlight: async (highlight: any) => { persistedImageKeys = highlight.imageKeys; return highlight; },
       getHighlight: async () => undefined,
-      publishCollectionEvent: async () => undefined,
+      publishCollectionEvent: async (_key: string, event: string) => { events.push(event); },
     } as any;
     const result = await galleryOperations.createHighlight({ collectionKey }, context);
     expect(persistedImageKeys).toEqual([]);
     expect(result.highlight).toMatchObject({ collectionKey, imageKeys: [], images: [], createdByKey: actorKey });
+    expect(events).toEqual(['highlight.changed']);
+  });
+
+  test('requires collection ownership to create highlights', async () => {
+    const organizationKey = 'organization', scopeKey = key(), actorKey = key(), collectionKey = key();
+    const context = { organizationKey, scopeKey, membership: { key: actorKey, organizationId: organizationKey, userId: key(), status: 'active' }, getCollectionRole: async () => 'collaborator' } as any;
+    await expect(galleryOperations.createHighlight({ collectionKey }, context)).rejects.toMatchObject({ status: 403, code: 'GALLERY_OWNER_REQUIRED' });
   });
 
   test('projects only fresh visible images without persistence internals', async () => {
@@ -289,9 +298,17 @@ describe('Gallery operation boundaries', () => {
   test('soft-deletes only the highlight and publishes its collection invalidation', async () => {
     const organizationKey = 'organization', scopeKey = key(), actorKey = key(), collectionKey = key(), highlightKey = key(), userId = key(), now = new Date().toISOString();
     const events: string[] = [];
-    const context = { organizationKey, scopeKey, membership: { key: actorKey, organizationId: organizationKey, userId, status: 'active' }, deleteHighlight: async () => ({ key: highlightKey, scopeKey, collectionKey, imageKeys: [key()], createdByKey: actorKey, deletedAt: now, createdAt: now, updatedAt: now }), publishCollectionEvent: async (_key: string, event: string) => { events.push(event); } } as any;
+    const highlight = { key: highlightKey, scopeKey, collectionKey, imageKeys: [key()], createdByKey: actorKey, deletedAt: null, createdAt: now, updatedAt: now };
+    const context = { organizationKey, scopeKey, membership: { key: actorKey, organizationId: organizationKey, userId, status: 'active' }, getCollectionRole: async () => 'owner', getHighlight: async () => ({ highlight, images: [] }), deleteHighlight: async () => ({ ...highlight, deletedAt: now, updatedAt: now }), publishCollectionEvent: async (_key: string, event: string) => { events.push(event); } } as any;
     await expect(galleryOperations.deleteHighlight({ highlightKey }, context)).resolves.toEqual({ highlightKey });
     expect(events).toEqual(['highlight.changed']);
+  });
+
+  test('requires collection ownership to delete highlights', async () => {
+    const organizationKey = 'organization', scopeKey = key(), actorKey = key(), collectionKey = key(), highlightKey = key(), now = new Date().toISOString();
+    const highlight = { key: highlightKey, scopeKey, collectionKey, imageKeys: [], createdByKey: actorKey, deletedAt: null, createdAt: now, updatedAt: now };
+    const context = { organizationKey, scopeKey, membership: { key: actorKey, organizationId: organizationKey, userId: key(), status: 'active' }, getCollectionRole: async () => 'collaborator', getHighlight: async () => ({ highlight, images: [] }) } as any;
+    await expect(galleryOperations.deleteHighlight({ highlightKey }, context)).rejects.toMatchObject({ status: 403, code: 'GALLERY_OWNER_REQUIRED' });
   });
 
   test('publishes image deletion events only when the repository actually deletes images', async () => {

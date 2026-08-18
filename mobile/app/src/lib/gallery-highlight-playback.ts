@@ -1,4 +1,4 @@
-export const HIGHLIGHT_SLIDE_DURATION_MS = 5_000;
+export const HIGHLIGHT_SLIDE_DURATION_MS = 3_000;
 
 export type HighlightPlaybackState = {
   index: number;

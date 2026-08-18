@@ -33,7 +33,7 @@ mock.module("./api-client", () => ({
   } },
 }));
 
-const { activateGalleryShare, createGalleryCollection, createGalleryCollectionHighlight, createGalleryCollectionShareLink, deleteGalleryCollection, deleteGalleryCollectionDuplicates, deleteGalleryImages, deleteGallerySubject, fetchGalleryCollectionHighlight, fetchGalleryOverview, filterCollections, filterGalleryShareLinks, filterMediaItems, findGalleryCollectionDuplicates, groupGalleryImagesByCreatedDate, isGalleryClientErrorCode, isGalleryCollectionOwned, leaveGalleryCollection, listGalleryCollectionHighlights, listGalleryCollectionInvites, listGalleryCollectionMembers, listGalleryCollectionShareLinks, mergeMediaItems, partitionFavoriteGalleryImages, reconcileGalleryDuplicateDeletion, reconcileGalleryImageDeletion, removeGalleryCollectionMember, resolveGalleryHighlightSlides, respondToGalleryCollectionInvite, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryCollectionMember, updateGalleryCollectionShareLink, updateGalleryImage, uploadGalleryImages } = await import("./gallery-client");
+const { activateGalleryShare, createGalleryCollection, createGalleryCollectionHighlight, createGalleryCollectionShareLink, deleteGalleryCollection, deleteGalleryCollectionDuplicates, deleteGalleryCollectionHighlight, deleteGalleryImages, deleteGallerySubject, fetchGalleryCollectionHighlight, fetchGalleryOverview, filterCollections, filterGalleryShareLinks, filterMediaItems, findGalleryCollectionDuplicates, groupGalleryImagesByCreatedDate, isGalleryClientErrorCode, isGalleryCollectionOwned, leaveGalleryCollection, listGalleryCollectionHighlights, listGalleryCollectionInvites, listGalleryCollectionMembers, listGalleryCollectionShareLinks, mergeMediaItems, partitionFavoriteGalleryImages, reconcileGalleryDuplicateDeletion, reconcileGalleryImageDeletion, removeGalleryCollectionMember, resolveGalleryHighlightSlides, respondToGalleryCollectionInvite, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryCollectionMember, updateGalleryCollectionShareLink, updateGalleryImage, uploadGalleryImages } = await import("./gallery-client");
 
 beforeEach(() => { calls.splice(0); responses.clear(); failures.clear(); });
 
@@ -331,14 +331,17 @@ test("creates, lists, and reads collection highlights through canonical operatio
   responses.set("/gallery/highlights", { highlight: projection });
   responses.set("/gallery/highlights/list", { highlights: [projection] });
   responses.set("/gallery/highlights/read", { highlight: projection });
+  responses.set("/gallery/highlights/delete", { highlightKey: "highlight" });
 
   expect((await createGalleryCollectionHighlight("collection")).highlight).toMatchObject({ imageKeys: [], images: [], slideCount: 0, coverUrl: null });
   expect((await listGalleryCollectionHighlights("collection")).highlights[0]).toMatchObject({ key: "highlight", slideCount: 0 });
   expect((await fetchGalleryCollectionHighlight("highlight")).highlight.key).toBe("highlight");
+  expect(await deleteGalleryCollectionHighlight("highlight")).toEqual({ highlightKey: "highlight" });
   expect(calls.map(({ path, body, timeout }) => ({ path, body, timeout }))).toEqual([
     { path: "/gallery/highlights", body: { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection" }, timeout: 60_000 },
     { path: "/gallery/highlights/list", body: { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection" }, timeout: 60_000 },
     { path: "/gallery/highlights/read", body: { organizationKey: "organization", scopeKey: "scope", highlightKey: "highlight" }, timeout: 60_000 },
+    { path: "/gallery/highlights/delete", body: { organizationKey: "organization", scopeKey: "scope", highlightKey: "highlight" }, timeout: 60_000 },
   ]);
 });
 

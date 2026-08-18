@@ -573,6 +573,7 @@ describe('Gallery repository transactions', () => {
     expect(rows).toHaveLength(2);
     expect(query).toContain('LET qualityScore');
     expect(query).toContain('caption.score >= 1 && caption.score <= 100');
+    expect(query).toContain('collectionMember.role == "owner"');
     expect(query).not.toContain('DISTINCT');
     expect(query).not.toContain('perceptualHash');
   });
@@ -587,6 +588,7 @@ describe('Gallery repository transactions', () => {
     await expect(repository.createHighlight(highlight, actorKey)).resolves.toMatchObject({ key: highlight.key, imageKeys: [] });
     expect(transactionCollections).toEqual(expect.objectContaining({ write: ['imageCollecitionHightlights'] }));
     expect(queries[0]).toContain('RETURN { selected }');
+    expect(queries[0]).toContain('collectionMember.role == "owner"');
     expect(queries[1]).toContain('UPSERT { _key: @highlightKey }');
   });
 
@@ -619,6 +621,7 @@ describe('Gallery repository transactions', () => {
       expect(query).toContain('collection.deletedAt == null');
     }
     expect(queries[2]).toContain('UPDATE highlight WITH { deletedAt: @now, updatedAt: @now }');
+    expect(queries[2]).not.toContain('highlight.createdByKey == @actorKey');
     expect(queries[2]).not.toContain('UPDATE image');
     expect(queries[2]).not.toContain('REMOVE');
   });

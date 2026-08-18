@@ -243,6 +243,7 @@ export const GALLERY_COLLECTION_HIGHLIGHT_ENDPOINTS = {
   create: "/gallery/highlights",
   list: "/gallery/highlights/list",
   detail: "/gallery/highlights/read",
+  delete: "/gallery/highlights/delete",
 } as const;
 
 export function createGalleryCollectionHighlight(collectionKey: string) {
@@ -258,6 +259,10 @@ export function listGalleryCollectionHighlights(collectionKey: string) {
 export function fetchGalleryCollectionHighlight(highlightKey: string) {
   return postGallery<{ highlight: GalleryHighlightProjection }>(GALLERY_COLLECTION_HIGHLIGHT_ENDPOINTS.detail, { highlightKey })
     .then(({ highlight }) => ({ highlight: normalizeGalleryHighlight(highlight) }));
+}
+
+export function deleteGalleryCollectionHighlight(highlightKey: string) {
+  return postGallery<{ highlightKey: string }>(GALLERY_COLLECTION_HIGHLIGHT_ENDPOINTS.delete, { highlightKey });
 }
 
 export function listGalleryCollectionMembers(collectionKey: string) {

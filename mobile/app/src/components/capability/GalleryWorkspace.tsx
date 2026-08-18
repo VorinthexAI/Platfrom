@@ -119,7 +119,7 @@ export function GalleryWorkspace() {
   const [canCreateCollections, setCanCreateCollections] = useState(false);
   const [collectionTab, setCollectionTab] = useState<"mine" | "shared">("mine");
   const [sharingOpen, setSharingOpen] = useState(false);
-  const [highlightMode, setHighlightMode] = useState<"create" | "list">();
+  const [highlightsOpen, setHighlightsOpen] = useState(false);
   const [images, setImages] = useState<GalleryImage[]>([]);
   const [activeCollection, setActiveCollection] = useState<GalleryCollection>();
   const [showingCollectionOverview, setShowingCollectionOverview] = useState(true);
@@ -321,7 +321,7 @@ export function GalleryWorkspace() {
     deletedIdentityKeys.current.clear();
     closeSheet();
     setSharingOpen(false);
-    setHighlightMode(undefined);
+    setHighlightsOpen(false);
     setCameraOpen(false);
     setPendingFiles((current) => { deletePreparedFiles(current); return []; });
     setOptimisticMediaItems((current) => { deletePreparedFiles(current); return []; });
@@ -2516,7 +2516,7 @@ export function GalleryWorkspace() {
         value={aiInput}
       />
 
-      {activeCollection ? <GalleryHighlights collection={activeCollection} mode={highlightMode ?? "list"} onClose={() => setHighlightMode(undefined)} open={Boolean(highlightMode)} /> : null}
+      {activeCollection ? <GalleryHighlights collection={activeCollection} key={activeCollection.key} onClose={() => setHighlightsOpen(false)} open={highlightsOpen} /> : null}
 
       <BottomSheet
         footer={<Button onPress={closeSheet} size="lg" variant="secondary">Close</Button>}
@@ -2589,8 +2589,7 @@ export function GalleryWorkspace() {
           {isCollectionOwner ? <BottomSheetItem disabled={busy} onPress={() => pushSheet("confirmDeleteCollection")} size="lg" style={styles.sheetAction} variant="secondary">Delete collection</BottomSheetItem> : <BottomSheetItem disabled={busy} onPress={() => pushSheet("confirmLeaveCollection")} size="lg" style={styles.sheetAction} variant="secondary">Leave</BottomSheetItem>}
         </> : null}
         {activeSheet === "cleanupMenu" ? <>
-          <BottomSheetItem disabled={busy} onPress={() => { closeSheet(); setHighlightMode("create"); }} size="lg" style={styles.sheetAction} variant="secondary">Create highlight</BottomSheetItem>
-          <BottomSheetItem disabled={busy} onPress={() => { closeSheet(); setHighlightMode("list"); }} size="lg" style={styles.sheetAction} variant="secondary">Highlights</BottomSheetItem>
+          <BottomSheetItem disabled={busy} onPress={() => { closeSheet(); setHighlightsOpen(true); }} size="lg" style={styles.sheetAction} variant="secondary">Highlights</BottomSheetItem>
           {isCollectionOwner ? <BottomSheetItem onPress={() => void showCleanup()} size="lg" style={styles.sheetAction} variant="secondary">Clean up</BottomSheetItem> : null}
         </> : null}
         {activeSheet === "imageActions" && selectedImage ? <View style={styles.actionMenu}>
