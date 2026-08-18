@@ -4,7 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { useEffect, useRef, useState } from "react";
-import { KeyboardAvoidingView, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { Keyboard, KeyboardAvoidingView, ScrollView, StyleSheet, Text, View, useWindowDimensions, type TextInput as NativeTextInput } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomSheet, BottomSheetItem } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
@@ -153,11 +153,14 @@ export function GalleryWorkspace() {
   const [cameraOpen, setCameraOpen] = useState(false);
   const [assistantBusy, setAssistantBusy] = useState(false);
   const [aiInputFocused, setAiInputFocused] = useState(false);
+  const [collectionSearchFocusBlocked, setCollectionSearchFocusBlocked] = useState(false);
   const [searching, setSearching] = useState(false);
   const viewRequest = useRef(0);
   const backgroundLoadRequest = useRef(0);
   const searchRequest = useRef(0);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const searchFocusReleaseTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const collectionSearchInput = useRef<NativeTextInput>(null);
   const historyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const activeSearch = useRef<string | undefined>(undefined);
   const activeSheetRef = useRef<GallerySheet | undefined>(undefined);
@@ -309,6 +312,23 @@ export function GalleryWorkspace() {
     if (identityPickerSearchTimer.current) clearTimeout(identityPickerSearchTimer.current);
     if (identityPickerHistoryTimer.current) clearTimeout(identityPickerHistoryTimer.current);
   }, []);
+
+  useEffect(() => () => {
+    if (searchFocusReleaseTimer.current) clearTimeout(searchFocusReleaseTimer.current);
+  }, []);
+
+  function handleCoreFocusChange(focused: boolean) {
+    if (searchFocusReleaseTimer.current) clearTimeout(searchFocusReleaseTimer.current);
+    setAiInputFocused(focused);
+    if (focused) {
+      setCollectionSearchFocusBlocked(true);
+      collectionSearchInput.current?.blur();
+      Keyboard.dismiss();
+    } else {
+      setAiResponse(undefined);
+      searchFocusReleaseTimer.current = setTimeout(() => setCollectionSearchFocusBlocked(false), 350);
+    }
+  }
 
   function openSheet(sheet: GallerySheet) {
     sheetStack.current = [];
@@ -1408,7 +1428,7 @@ export function GalleryWorkspace() {
           {normalCollectionView ? <View style={styles.rootActions}>
             <View style={styles.collectionSearch}>
               <SearchIcon size="sm" variant="muted" />
-              <TextInput accessibilityLabel={`Search images in ${activeCollection.name}`} onChangeText={updateCollectionSearch} onSubmitEditing={() => { if (searchTimer.current) clearTimeout(searchTimer.current); void search(); }} placeholder="Search..." returnKeyType="search" style={styles.rootSearchInput} value={query} />
+              <TextInput accessibilityLabel={`Search images in ${activeCollection.name}`} editable={!collectionSearchFocusBlocked} onChangeText={updateCollectionSearch} onFocus={() => { if (collectionSearchFocusBlocked) { collectionSearchInput.current?.blur(); Keyboard.dismiss(); } }} onSubmitEditing={() => { if (searchTimer.current) clearTimeout(searchTimer.current); void search(); }} placeholder="Search..." ref={collectionSearchInput} returnKeyType="search" style={styles.rootSearchInput} value={query} />
               {query.trim() ? <Button accessibilityLabel="Clear image search" contentMode="raw" hitSlop={8} onPress={() => clearCollectionSearch()} size="xs" variant="icon"><CloseIcon size="sm" /></Button> : null}
             </View>
             <Button accessibilityLabel={`Filter ${activeCollection.name}`} contentMode="raw" onPress={() => openSheet("filter")} size="sm" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={showOnlyFavorites ? "accent" : "default"} /></Button>
@@ -1466,7 +1486,7 @@ export function GalleryWorkspace() {
         loading={assistantBusy}
         message={aiResponse ? <Text numberOfLines={3} style={styles.aiResponse}>{aiResponse}</Text> : null}
         onChangeText={setAiInput}
-        onFocusChange={(focused) => { setAiInputFocused(focused); if (!focused) setAiResponse(undefined); }}
+        onFocusChange={handleCoreFocusChange}
         onSubmit={() => void askAssistant()}
         prompts={CORE_PROMPTS}
         sendIcon={<SendIcon size="sm" variant="inverse" />}
@@ -1492,7 +1512,7 @@ export function GalleryWorkspace() {
         description={activeSheet === "destination" ? `${pendingFiles.length} image${pendingFiles.length === 1 ? "" : "s"} ready to upload.` : activeSheet === "transferDestination" ? "Choose one destination collection." : undefined}
         dismissible={!busy}
         footer={sheetFooter}
-        hideHeading={activeSheet === "imageActions" || activeSheet === "bulkActions"}
+        hideHeading={activeSheet === "actions" || activeSheet === "collectionMenu" || activeSheet === "filter" || activeSheet === "imageActions" || activeSheet === "bulkActions"}
         mutation={activeSheet === "imageEdit" || activeSheet === "newCollection" || activeSheet === "collectionEdit" || activeSheet === "duplicates" || activeSheet === "visualIdentities" || activeSheet === "identityPicker" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory"}
         onOpenChange={(open) => { if (!open) { if (activeSheetRef.current === "imageActions") goBackSheet(); else closeSheet(); } }}
         open={sheetOpen && activeSheet !== "image"}

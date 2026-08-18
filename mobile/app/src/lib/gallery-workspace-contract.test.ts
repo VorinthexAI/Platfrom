@@ -52,7 +52,7 @@ test("uses a singleton collection cache without root search or filtering", () =>
 test("only lifts Core for its own focus and uses distinct image sheet presentations", () => {
   expect(source).toContain('behavior={aiInputFocused ? "height" : undefined}');
   expect(source).toContain("setAiInputFocused(focused)");
-  expect(source).toContain('hideHeading={activeSheet === "imageActions" || activeSheet === "bulkActions"}');
+  expect(source).toContain('hideHeading={activeSheet === "actions" || activeSheet === "collectionMenu" || activeSheet === "filter" || activeSheet === "imageActions" || activeSheet === "bulkActions"}');
   expect(source).toContain('open={sheetOpen && (activeSheet === "image" || activeSheet === "imageActions") && Boolean(selectedImage || selectedOptimisticItem)}');
   expect(source).toContain("        mutation\n        onOpenChange");
   expect(source).toContain('mutation={activeSheet === "imageEdit"');
@@ -128,7 +128,7 @@ test("allows duplicate exclusions and optimistic visual identity deletion", () =
   expect(source.indexOf("setSubjects((current) => current.filter")).toBeLessThan(source.indexOf("deleteGallerySubject(identity.key)"));
 });
 
-test("uses standard right-side close controls and only hides the compact image action heading", () => {
+test("uses standard right-side close controls and hides collection menu headings", () => {
   const previewStart = source.indexOf("<BottomSheet");
   const preview = source.slice(previewStart, source.indexOf("\n      >", previewStart));
   const sheetStart = source.indexOf("<BottomSheet", previewStart + preview.length);
@@ -138,5 +138,12 @@ test("uses standard right-side close controls and only hides the compact image a
   expect(`${preview}${sheet}`).not.toContain("headerLeading");
   expect(`${preview}${sheet}`).not.toContain("headerTrailing");
   expect(`${preview}${sheet}`).not.toContain("hideCloseButton");
-  expect(sheet).toContain('hideHeading={activeSheet === "imageActions" || activeSheet === "bulkActions"}');
+  expect(sheet).toContain('hideHeading={activeSheet === "actions" || activeSheet === "collectionMenu" || activeSheet === "filter" || activeSheet === "imageActions" || activeSheet === "bulkActions"}');
+});
+
+test("gates collection search focus while the Core sheet closes", () => {
+  expect(source).toContain("editable={!collectionSearchFocusBlocked}");
+  expect(source).toContain("collectionSearchInput.current?.blur()");
+  expect(source).toContain("onFocusChange={handleCoreFocusChange}");
+  expect(source).toContain("setTimeout(() => setCollectionSearchFocusBlocked(false), 350)");
 });
