@@ -115,6 +115,10 @@ test("supports direct empty-state upload and twelve removable camera captures", 
   expect(source).toContain("showOptimisticImage(entry.item)");
   expect(source).toContain("Image.prefetch(image.url)");
   expect(source).toContain("!optimisticImageKeys.has(key)");
+  expect(source).toContain("key: item.imageKey ?? item.clientKey");
+  expect(source).toContain("current?.key === selected.clientKey && updated.imageKey");
+  expect(source).not.toContain('accessibilityLabel="Processing image"');
+  expect(source).not.toContain('`${matches.length} image${matches.length === 1 ? "" : "s"}${collection ? ` in ${collection.name}` : ""}.`');
 });
 
 test("allows duplicate exclusions and optimistic visual identity deletion", () => {

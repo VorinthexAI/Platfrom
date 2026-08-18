@@ -384,6 +384,7 @@ export function GalleryWorkspace() {
         const updated = { ...selected, imageKey: imageKeysByClientKey.get(selected.clientKey) };
         selectedOptimisticItemRef.current = updated;
         setSelectedOptimisticItem(updated);
+        setSelectedImage((current) => current?.key === selected.clientKey && updated.imageKey ? { ...current, key: updated.imageKey } : current);
       }
     }
     await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
@@ -583,7 +584,7 @@ export function GalleryWorkspace() {
       setSelectedImageKeys([]);
       const matches = mergeMediaItems(immediateMatches, result.images);
       setCollectionSearchResults(matches);
-      setStatus(`${matches.length} image${matches.length === 1 ? "" : "s"}${collection ? ` in ${collection.name}` : ""}.`);
+      setStatus(undefined);
     } catch (error) {
       const expectedView = collection ? "search" : "root";
       if (request === searchRequest.current && activeCollectionKey.current === collection?.key && visibleGalleryView.current === expectedView) setStatus(errorMessage(error));
@@ -673,7 +674,20 @@ export function GalleryWorkspace() {
     imageSheetRequest.current += 1;
     selectedOptimisticItemRef.current = item;
     setSelectedOptimisticItem(item);
-    setSelectedImage(undefined);
+    setSelectedImage({
+      key: item.imageKey ?? item.clientKey,
+      filename: item.filename,
+      caption: "",
+      imageCaptionKey: null,
+      mimeType: "image/jpeg",
+      sizeBytes: item.sizeBytes,
+      width: 0,
+      height: 0,
+      isFavorite: false,
+      createdAt: item.createdAt,
+      updatedAt: item.createdAt,
+      url: item.uri,
+    });
     openSheet("image");
   }
 
