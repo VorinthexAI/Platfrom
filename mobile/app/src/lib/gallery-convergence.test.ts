@@ -5,21 +5,21 @@ test("maps audited slugs to precise cache and mode families", () => {
   expect([...galleryRefreshPlan("collection.invites.changed")]).toEqual(["collectionInvites", "incomingInvites"]);
   expect([...galleryRefreshPlan("collection.shares.changed")]).toEqual(["shares"]);
   expect([...galleryRefreshPlan("subject.changed")]).toEqual(["subjects", "search"]);
-  expect(galleryRefreshPlan("image.changed")).toEqual(new Set(["current", "search", "duplicates", "subjects", "upload"]));
-  expect(galleryRefreshPlan("upload.changed")).toEqual(new Set(["current", "search", "duplicates", "upload", "subjects"]));
+  expect(galleryRefreshPlan("image.changed")).toEqual(new Set(["current", "search", "duplicates", "cleanup", "subjects", "upload"]));
+  expect(galleryRefreshPlan("upload.changed")).toEqual(new Set(["current", "search", "duplicates", "cleanup", "upload", "subjects"]));
 });
 
 test("gates network families precisely by slug", () => {
   expect([...galleryRefreshPlan("collection.index.changed")]).toEqual(["root", "access"]);
-  expect([...galleryRefreshPlan("collection.content.changed")]).toEqual(["current", "search", "duplicates"]);
-  expect([...galleryRefreshPlan("collection.access.changed")]).toEqual(["root", "access", "members"]);
+  expect([...galleryRefreshPlan("collection.content.changed")]).toEqual(["current", "search", "duplicates", "cleanup"]);
+  expect([...galleryRefreshPlan("collection.access.changed")]).toEqual(["root", "access", "members", "cleanup"]);
   expect([...galleryRefreshPlan("collection.invites.changed")]).not.toContain("root");
   expect([...galleryRefreshPlan("collection.shares.changed")]).not.toContain("current");
 });
 
 test("reconnect is a complete recovery plan", () => {
   const recovery = galleryRefreshPlan("reconnect");
-  for (const family of ["root", "current", "access", "members", "collectionInvites", "incomingInvites", "shares", "subjects", "search", "duplicates", "upload"] as const) expect(recovery.has(family)).toBe(true);
+  for (const family of ["root", "current", "access", "members", "collectionInvites", "incomingInvites", "shares", "subjects", "search", "duplicates", "cleanup", "upload"] as const) expect(recovery.has(family)).toBe(true);
 });
 
 test("coalesces bursts and keeps one deferred refresh while busy", () => {
@@ -85,6 +85,11 @@ test("cleans restricted state after owner and contributor downgrades", () => {
   expect(reconcileGalleryPermissions({ role: "collaborator", activeSheet: "duplicates", selectedImageKeys: ["own", "other"], mutableImageKeys: ["own"], destinationCollectionKey: "target" })).toMatchObject({ activeSheet: undefined, selectedImageKeys: ["own"], closeSheet: true });
   expect(reconcileGalleryPermissions({ role: "viewer", activeSheet: "transferDestination", selectedImageKeys: ["image"], mutableImageKeys: [], destinationCollectionKey: "target" })).toEqual({ activeSheet: undefined, selectedImageKeys: [], destinationCollectionKey: undefined, closeSheet: true });
   expect(reconcileGalleryPermissions({ role: "collaborator", canContribute: false, activeSheet: "actions", selectedImageKeys: [], mutableImageKeys: [] })).toEqual({ activeSheet: undefined, selectedImageKeys: [], destinationCollectionKey: undefined, closeSheet: true });
+  expect(reconcileGalleryPermissions({ role: "viewer", activeSheet: "cleanup", selectedImageKeys: [], mutableImageKeys: [] })).toMatchObject({ activeSheet: undefined, closeSheet: true });
+  expect(reconcileGalleryPermissions({ role: "collaborator", activeSheet: "cleanup", selectedImageKeys: [], mutableImageKeys: [] })).toMatchObject({ activeSheet: undefined, closeSheet: true });
+  expect(reconcileGalleryPermissions({ role: "collaborator", activeSheet: "cleanupMenu", selectedImageKeys: [], mutableImageKeys: [] })).toMatchObject({ activeSheet: undefined, closeSheet: true });
+  expect(reconcileGalleryPermissions({ role: "collaborator", activeSheet: "confirmCleanupDelete", selectedImageKeys: [], mutableImageKeys: [] })).toMatchObject({ activeSheet: undefined, closeSheet: true });
+  expect(reconcileGalleryPermissions({ role: "owner", activeSheet: "cleanup", selectedImageKeys: [], mutableImageKeys: [] })).toMatchObject({ activeSheet: "cleanup", closeSheet: false });
 });
 
 test("describes clean recovery for deleted identity and similar sources", () => {

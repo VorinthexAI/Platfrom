@@ -27,10 +27,26 @@ const otherContext: ContentContext = { organizationKey: "org-b", scopeKey: "scop
 
 test("isolates every routed workspace key by context and resource", () => {
   expect(galleryQueryKeys.overview(context, "collection")).not.toEqual(galleryQueryKeys.overview(otherContext, "collection"));
+  expect(galleryQueryKeys.cleanup(context, "collection", 25)).not.toEqual(galleryQueryKeys.cleanup(context, "collection", 50));
+  expect(galleryQueryKeys.cleanup(context, "collection", 25)).not.toEqual(galleryQueryKeys.cleanup(context, "other", 25));
   expect(compassQueryKeys.overview(context)).not.toEqual(compassQueryKeys.overview(otherContext));
   expect(signalQueryKeys.overview(context, "all")).not.toEqual(signalQueryKeys.overview(context, "favorite"));
   expect(signalQueryKeys.detail(context, "thread-a")).not.toEqual(signalQueryKeys.detail(context, "thread-b"));
   expect(ascendQueryKeys.detail(context, "book-a")).not.toEqual(ascendQueryKeys.detail(otherContext, "book-a"));
+});
+
+test("invalidates every cached cleanup threshold for one collection", async () => {
+  const client = new QueryClient();
+  const first = galleryQueryKeys.cleanup(context, "collection", 25);
+  const second = galleryQueryKeys.cleanup(context, "collection", 50);
+  const other = galleryQueryKeys.cleanup(context, "other", 25);
+  for (const key of [first, second, other]) client.setQueryData(key, {});
+
+  await client.invalidateQueries({ queryKey: galleryQueryKeys.cleanups(context, "collection"), refetchType: "none" });
+
+  expect(client.getQueryState(first)?.isInvalidated).toBe(true);
+  expect(client.getQueryState(second)?.isInvalidated).toBe(true);
+  expect(client.getQueryState(other)?.isInvalidated).toBe(false);
 });
 
 test("loads Gallery collections once per context and permits explicit singleton updates", async () => {

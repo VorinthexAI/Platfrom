@@ -135,7 +135,25 @@ export type GallerySubject = {
 
 type ApiResponse<T> =
   | { success: true; data: T }
-  | { success: false; error: { message: string } };
+  | { success: false; error: { message: string; code?: string } };
+
+export class GalleryClientError extends Error {
+  code?: string;
+
+  constructor(message: string, code?: string) {
+    super(message);
+    this.name = "GalleryClientError";
+    this.code = code;
+  }
+}
+
+export function isGalleryClientErrorCode(error: unknown, code: string) {
+  return error instanceof GalleryClientError && error.code === code;
+}
+
+function galleryClientError(error: { message: string; code?: string }) {
+  return new GalleryClientError(error.message, error.code);
+}
 
 type GalleryContext = { organizationKey: string; scopeKey: string };
 
@@ -162,11 +180,11 @@ export function getGalleryMemberKey() {
 async function postGallery<T>(path: string, input: Record<string, unknown>, timeout = 60_000) {
   try {
     const response = await apiClient.post<ApiResponse<T>>(path, { ...getGalleryContext(), ...input }, { timeout });
-    if (!response.data.success) throw new Error(response.data.error.message);
+    if (!response.data.success) throw galleryClientError(response.data.error);
     return response.data.data;
   } catch (error) {
     const failure = (error as { response?: { data?: ApiResponse<T> } }).response?.data;
-    if (failure && !failure.success) throw new Error(failure.error.message);
+    if (failure && !failure.success) throw galleryClientError(failure.error);
     throw error;
   }
 }
@@ -241,8 +259,8 @@ async function fetchWithTimeout(input: string, init: RequestInit | undefined, ti
   }
 }
 
-export function fetchGalleryOverview(collectionKey?: string, cursor?: string, limit = 100) {
-  return postGallery<Omit<GalleryOverview, "collections"> & { collections: GalleryCollectionProjection[] }>("/gallery/overview", { ...(collectionKey ? { collectionKey } : {}), ...(cursor ? { cursor } : {}), limit })
+export function fetchGalleryOverview(collectionKey?: string, cursor?: string, limit = 100, maxCaptionScore?: number) {
+  return postGallery<Omit<GalleryOverview, "collections"> & { collections: GalleryCollectionProjection[] }>("/gallery/overview", { ...(collectionKey ? { collectionKey } : {}), ...(cursor ? { cursor } : {}), limit, ...(maxCaptionScore !== undefined ? { maxCaptionScore } : {}) })
     .then((overview) => ({ ...overview, collections: overview.collections.map(normalizeCollection) }));
 }
 
@@ -320,8 +338,40 @@ export function updateGalleryImage(imageKey: string, name: string, isFavorite: b
   return postGallery<{ image: GalleryImage }>("/gallery/images/update", { imageKey, name, isFavorite });
 }
 
+export type GalleryImageDeleteResult = { deletedImageKeys: string[]; favoriteImageKeys: string[] };
+export type GalleryDuplicateDeleteResult = { removedImageKeys: string[]; deletedImageKeys: string[]; favoriteImageKeys: string[] };
+
+export function partitionFavoriteGalleryImages(images: GalleryImage[]) {
+  return {
+    favoriteImages: images.filter(({ isFavorite }) => isFavorite),
+    eligibleImages: images.filter(({ isFavorite }) => !isFavorite),
+  };
+}
+
+export function reconcileGalleryImageDeletion(images: GalleryImage[], result: GalleryImageDeleteResult) {
+  const requestedKeys = new Set(images.map(({ key }) => key));
+  const favoriteKeys = new Set(result.favoriteImageKeys.filter((key) => requestedKeys.has(key)));
+  const deletedKeys = new Set(result.deletedImageKeys.filter((key) => requestedKeys.has(key) && !favoriteKeys.has(key)));
+  return {
+    deletedImages: images.filter(({ key }) => deletedKeys.has(key)),
+    favoriteImages: images.filter(({ key }) => favoriteKeys.has(key)).map((image) => ({ ...image, isFavorite: true })),
+    unknownImages: images.filter(({ key }) => !deletedKeys.has(key) && !favoriteKeys.has(key)),
+  };
+}
+
+export function reconcileGalleryDuplicateDeletion(images: GalleryImage[], result: GalleryDuplicateDeleteResult) {
+  const requestedKeys = new Set(images.map(({ key }) => key));
+  const favoriteKeys = new Set(result.favoriteImageKeys.filter((key) => requestedKeys.has(key)));
+  const removedKeys = new Set(result.removedImageKeys.filter((key) => requestedKeys.has(key) && !favoriteKeys.has(key)));
+  return {
+    removedImages: images.filter(({ key }) => removedKeys.has(key)),
+    favoriteImages: images.filter(({ key }) => favoriteKeys.has(key)).map((image) => ({ ...image, isFavorite: true })),
+    unknownImages: images.filter(({ key }) => !removedKeys.has(key) && !favoriteKeys.has(key)),
+  };
+}
+
 export function deleteGalleryImages(imageKeys: string[]) {
-  return postGallery<{ deletedImageKeys: string[] }>("/gallery/images/delete", { imageKeys });
+  return postGallery<GalleryImageDeleteResult>("/gallery/images/delete", { imageKeys });
 }
 
 export function findGalleryCollectionDuplicates(collectionKey: string) {
@@ -329,7 +379,7 @@ export function findGalleryCollectionDuplicates(collectionKey: string) {
 }
 
 export function deleteGalleryCollectionDuplicates(collectionKey: string, imageKeys: string[]) {
-  return postGallery<{ removedImageKeys: string[]; deletedImageKeys: string[] }>("/gallery/collections/duplicates/delete", { collectionKey, imageKeys });
+  return postGallery<GalleryDuplicateDeleteResult>("/gallery/collections/duplicates/delete", { collectionKey, imageKeys });
 }
 
 export function transferGalleryCollectionImages(input: { sourceCollectionKey: string; destinationCollectionKeys: string[]; imageKeys: string[]; mode: "copy" | "move" }) {

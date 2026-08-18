@@ -24,6 +24,8 @@ export const galleryQueryKeys = {
   subjects: (context: WorkspaceContext) => [...galleryQueryKeys.all(context), "subjects"] as const,
   search: (context: WorkspaceContext, mode: "text" | "similar" | "identity", collectionKey: string | undefined, value: string) => [...galleryQueryKeys.all(context), "search", mode, collectionKey ?? null, value] as const,
   duplicates: (context: WorkspaceContext, collectionKey: string) => [...galleryQueryKeys.all(context), "duplicates", collectionKey] as const,
+  cleanups: (context: WorkspaceContext, collectionKey: string) => [...galleryQueryKeys.all(context), "cleanup", collectionKey] as const,
+  cleanup: (context: WorkspaceContext, collectionKey: string, threshold: number) => [...galleryQueryKeys.cleanups(context, collectionKey), threshold] as const,
   uploads: (context: WorkspaceContext) => [...galleryQueryKeys.all(context), "uploads"] as const,
 };
 

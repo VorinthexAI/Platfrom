@@ -16,7 +16,8 @@ test("uses one SSE bridge while notifying the visible Gallery workspace", () => 
   expect(bridge).toContain("if (!isCurrent()) return");
   expect(workspace).toContain("subscribeAppEvent((event)");
   expect(workspace).toContain("queryClient.fetchQuery({ queryKey: galleryQueryKeys.overview(galleryContext)");
-  expect(workspace).toContain("scheduleGalleryRefresh(galleryRefreshPlan");
+  expect(workspace).toContain("const plan = galleryRefreshPlan");
+  expect(workspace).toContain("scheduleGalleryRefresh(plan)");
   expect(workspace).toContain("resetAfterCollectionAccessLoss(fetchedRoot)");
 });
 

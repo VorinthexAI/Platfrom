@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { findReusableImageCaption } from './image-captions.node';
+import { PERCEPTUAL_HASH_DUPLICATE_DISTANCE } from '@/lib/perceptual-hash';
 
 const scopeKey = 'cmrnlzf640001qc7kazsr96k5';
 const now = '2026-08-11T12:00:00.000Z';
@@ -44,6 +45,7 @@ describe('image caption pHash lookup', () => {
   });
 
   test('rejects candidates below 95 percent similarity', async () => {
+    expect(PERCEPTUAL_HASH_DUPLICATE_DISTANCE).toBe(3);
     const database = { async query() { return { async all() { return [record('cmrnlzf650002qc7k4p5zem5w', '000000000000000f')]; } }; } };
     await expect(findReusableImageCaption(scopeKey, '0000000000000000', 'cmrnlzf640001qc7kazsr96k6', database)).resolves.toBeNull();
   });

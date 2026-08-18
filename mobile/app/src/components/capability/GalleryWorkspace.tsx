@@ -4,7 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { useEffect, useRef, useState } from "react";
-import { Keyboard, KeyboardAvoidingView, ScrollView, StyleSheet, Text, View, useWindowDimensions, type TextInput as NativeTextInput } from "react-native";
+import { FlatList, Keyboard, KeyboardAvoidingView, ScrollView, StyleSheet, Text, View, useWindowDimensions, type TextInput as NativeTextInput } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomSheet, BottomSheetItem } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
@@ -15,7 +15,7 @@ import { Switch } from "@vorinthex/shared/ui/switch";
 import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 import { useToast } from "@vorinthex/shared/ui/toast";
-import { CheckIcon, ChevronLeftIcon, CloseIcon, FilterIcon, FolderIcon, MemberIcon, MoreHorizontalIcon, PlusIcon, SearchIcon, SendIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { BrainIcon, CheckIcon, ChevronLeftIcon, CloseIcon, FilterIcon, FolderIcon, MemberIcon, MoreHorizontalIcon, PlusIcon, SearchIcon, SendIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { appendCursorItems, isNearScrollEnd } from "@vorinthex/shared/lib/pagination";
 
 import { WorkspaceAppSwitcher } from "@/components/capability/WorkspaceAppSwitcher";
@@ -38,10 +38,14 @@ import {
   getGalleryContext,
   getGalleryMemberKey,
   groupGalleryImagesByCreatedDate,
+  isGalleryClientErrorCode,
   isGalleryCollectionOwned,
   leaveGalleryCollection,
   listGallerySubjects,
   mergeMediaItems,
+  partitionFavoriteGalleryImages,
+  reconcileGalleryDuplicateDeletion,
+  reconcileGalleryImageDeletion,
   searchGalleryImages,
   setGalleryImageFavorite,
   transferGalleryCollectionImages,
@@ -63,8 +67,7 @@ import { normalizeCapturedJpeg, type CapturedImage } from "@/lib/captured-image"
 import { subscribeAppEvent } from "@/lib/app-events";
 import { GalleryRefreshCoalescer, galleryRefreshPlan, isCurrentContextGeneration, reconcileGalleryPermissions, reconcileGalleryState, reconcileOptimisticUploads, reconcilePaginatedSelected, reconcileSelected, reconcileUploadJobRegistry, recoverAssistantSearchMode, recoverContextualSearchFailure, replayPaginatedWindow, type GalleryRefreshPlan } from "@/lib/gallery-convergence";
 
-type GallerySheet = "rootActions" | "actions" | "destination" | "newCollection" | "image" | "imageActions" | "imageEdit" | "confirmDeleteImage" | "collectionMenu" | "collectionEdit" | "confirmDeleteCollection" | "confirmLeaveCollection" | "duplicates" | "confirmDeleteDuplicates" | "visualIdentities" | "confirmDeleteIdentity" | "identityPicker" | "identityName" | "identityPickerFilter" | "transferDestination" | "filter" | "searchHistory" | "bulkActions" | "bulkDelete";
-type IdentityLibraryMode = "browse" | "filter";
+type GallerySheet = "rootActions" | "actions" | "destination" | "newCollection" | "image" | "imageActions" | "imageEdit" | "confirmDeleteImage" | "collectionMenu" | "collectionEdit" | "confirmDeleteCollection" | "confirmLeaveCollection" | "duplicates" | "confirmDeleteDuplicates" | "cleanupMenu" | "cleanup" | "confirmCleanupDelete" | "visualIdentities" | "confirmDeleteIdentity" | "identityPicker" | "identityName" | "identityPickerFilter" | "transferDestination" | "filter" | "searchHistory" | "bulkActions" | "bulkDelete";
 type ImagePickerPurpose = "identity" | "cover";
 type CollectionTransferMode = "copy" | "move";
 type OptimisticMediaItem = PreparedGalleryUpload & { batchKey: string; collectionKey: string; createdAt: string; imageKey?: string };
@@ -72,10 +75,14 @@ type UnresolvedUploadJob = { uploadKey: string; imageKey: string; clientKey: str
 type GalleryGridItem =
   | { kind: "optimistic"; key: string; createdAt: string; item: OptimisticMediaItem }
   | { kind: "persisted"; key: string; createdAt: string; image: GalleryImage };
+type CleanupPage = { images: GalleryImage[]; nextCursor: string | null };
 const COLLECTION_COLUMNS = 3;
 const IMAGE_COLUMNS = 4;
 const GRID_GAP = 5;
 const COLLECTION_GAP = 10;
+const CLEANUP_THRESHOLDS = [10, 25, 50, 75, 90] as const;
+const DELETE_IMAGE_CHUNK_SIZE = 100;
+const collectionMembershipRole = (collection: GalleryCollection) => isGalleryCollectionOwned(collection) ? "owner" : collection.role === "owner" ? collection.access.canContribute ? "collaborator" : "viewer" : collection.role;
 const wait = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 const deletePreparedFiles = (files: PreparedGalleryUpload[]) => {
   for (const file of files) {
@@ -116,7 +123,6 @@ export function GalleryWorkspace() {
   const [showingCollectionOverview, setShowingCollectionOverview] = useState(true);
   const [subjects, setSubjects] = useState<GallerySubject[]>([]);
   const [identitiesLoading, setIdentitiesLoading] = useState(true);
-  const [identityLibraryMode, setIdentityLibraryMode] = useState<IdentityLibraryMode>("browse");
   const [imagePickerPurpose, setImagePickerPurpose] = useState<ImagePickerPurpose>("identity");
   const [identityPickerCollection, setIdentityPickerCollection] = useState<GalleryCollection>();
   const [identityPickerImages, setIdentityPickerImages] = useState<GalleryImage[]>([]);
@@ -139,6 +145,11 @@ export function GalleryWorkspace() {
   const [duplicateImages, setDuplicateImages] = useState<GalleryImage[]>([]);
   const [duplicatesLoading, setDuplicatesLoading] = useState(false);
   const [duplicatesError, setDuplicatesError] = useState<string>();
+  const [cleanupThreshold, setCleanupThreshold] = useState<(typeof CLEANUP_THRESHOLDS)[number]>(50);
+  const [cleanupImages, setCleanupImages] = useState<GalleryImage[]>([]);
+  const [cleanupLoading, setCleanupLoading] = useState(false);
+  const [cleanupLoadingMore, setCleanupLoadingMore] = useState(false);
+  const [cleanupError, setCleanupError] = useState<string>();
   const [pendingFiles, setPendingFiles] = useState<PreparedGalleryUpload[]>([]);
   const [activeSheet, setActiveSheet] = useState<GallerySheet>();
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -191,6 +202,14 @@ export function GalleryWorkspace() {
   const identityPickerSearchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const identityPickerHistoryTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const imageSheetRequest = useRef(0);
+  const duplicatesRequest = useRef(0);
+  const cleanupRequest = useRef(0);
+  const cleanupCollectionKeyRef = useRef<string | undefined>(undefined);
+  const cleanupExcludedKeys = useRef(new Set<string>());
+  const cleanupThresholdRef = useRef<(typeof CLEANUP_THRESHOLDS)[number]>(50);
+  const cleanupCursorRef = useRef<string | null>(null);
+  const cleanupLoadingRef = useRef(false);
+  const cleanupLoadingMoreRef = useRef(false);
   const selectedOptimisticItemRef = useRef<OptimisticMediaItem | undefined>(undefined);
   const favoriteRequests = useRef(new Map<string, number>());
   const favoriteWrites = useRef(new Map<string, Promise<{ image: GalleryImage }>>());
@@ -202,6 +221,7 @@ export function GalleryWorkspace() {
   const refreshCoalescer = useRef(new GalleryRefreshCoalescer());
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const refreshRunning = useRef(false);
+  const collectionDeletionRefresh = useRef<Promise<void>>(Promise.resolve());
   const refreshContextGeneration = useRef(0);
   const refreshContextKey = useRef(`${galleryContext.organizationKey}:${galleryContext.scopeKey}`);
   const busyRef = useRef(busy);
@@ -217,15 +237,15 @@ export function GalleryWorkspace() {
   const destinationCollectionSize = Math.floor((width - 42 - COLLECTION_GAP * (COLLECTION_COLUMNS - 1)) / COLLECTION_COLUMNS);
   const imageSize = Math.floor((contentWidth - GRID_GAP * (IMAGE_COLUMNS - 1)) / IMAGE_COLUMNS);
   const sheetImageSize = Math.floor((width - 42 - GRID_GAP * (IMAGE_COLUMNS - 1)) / IMAGE_COLUMNS);
-  const collectionRole = activeCollection?.role;
-  const isCollectionOwner = collectionRole === "owner";
+  const collectionRole = activeCollection ? collectionMembershipRole(activeCollection) : undefined;
+  const isCollectionOwner = Boolean(activeCollection && isGalleryCollectionOwned(activeCollection));
   const canAddImages = Boolean(activeCollection?.access?.canContribute && collectionRole !== "viewer");
   const memberKeys = [...new Set([getGalleryMemberKey(), ...collections.map(({ memberKey }) => memberKey)].filter(Boolean))];
   const canMutateImage = (image: GalleryImage | undefined) => Boolean(image && (activeCollection
     ? isCollectionOwner || collectionRole === "collaborator" && image.createdByKey === activeCollection.memberKey
     : false));
   const latestActiveCollection = () => activeCollection ? collections.find(({ key }) => key === activeCollection.key) : undefined;
-  const canMutateInCollection = (image: GalleryImage | undefined, collection: GalleryCollection | undefined) => Boolean(image && collection && (collection.role === "owner" || collection.role === "collaborator" && image.createdByKey === collection.memberKey));
+  const canMutateInCollection = (image: GalleryImage | undefined, collection: GalleryCollection | undefined) => Boolean(image && collection && (isGalleryCollectionOwned(collection) || collectionMembershipRole(collection) === "collaborator" && image.createdByKey === collection.memberKey));
   const captureGalleryContextGuard = () => {
     const generation = refreshContextGeneration.current;
     return { generation, isCurrent: () => isCurrentContextGeneration(generation, refreshContextGeneration.current) };
@@ -250,6 +270,19 @@ export function GalleryWorkspace() {
     return loaded;
   }
 
+  function refreshCollectionSingletonAfterImageDeletion(generation: number) {
+    const refresh = collectionDeletionRefresh.current.catch(() => undefined).then(async () => {
+      if (!isCurrentContextGeneration(generation, refreshContextGeneration.current)) return;
+      await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.collections(galleryContext), exact: true, refetchType: "none" });
+      if (!isCurrentContextGeneration(generation, refreshContextGeneration.current)) return;
+      const loaded = await loadCollectionSingleton(generation);
+      if (!isCurrentContextGeneration(generation, refreshContextGeneration.current)) return;
+      setActiveCollection((current) => current ? loaded.find(({ key }) => key === current.key) ?? current : current);
+    });
+    collectionDeletionRefresh.current = refresh;
+    return refresh;
+  }
+
   function updateCollectionSingleton(update: (current: GalleryCollection[]) => GalleryCollection[]) {
     setCollections((current) => {
       const next = update(current);
@@ -272,6 +305,13 @@ export function GalleryWorkspace() {
     searchRequest.current += 1;
     identityPickerRequest.current += 1;
     subjectsRequest.current += 1;
+    duplicatesRequest.current += 1;
+    cleanupRequest.current += 1;
+    cleanupCollectionKeyRef.current = undefined;
+    cleanupExcludedKeys.current.clear();
+    cleanupCursorRef.current = null;
+    cleanupLoadingRef.current = false;
+    cleanupLoadingMoreRef.current = false;
     favoriteRequests.current.clear();
     favoriteWrites.current.clear();
     unresolvedUploadJobs.current.clear();
@@ -293,6 +333,10 @@ export function GalleryWorkspace() {
     setAssistantSearchSource(undefined);
     setSelectedImage(undefined);
     setSelectedImageKeys([]);
+    setCleanupImages([]);
+    setCleanupLoading(false);
+    setCleanupLoadingMore(false);
+    setCleanupError(undefined);
     setDestinationCollectionKey(undefined);
     setBusy(false);
     setAssistantBusy(false);
@@ -355,8 +399,25 @@ export function GalleryWorkspace() {
     }, 75);
   }
 
+  function invalidateCleanupLoad(clearImages = true) {
+    const collectionKey = cleanupCollectionKeyRef.current;
+    const invalidation = collectionKey
+      ? queryClient.invalidateQueries({ queryKey: galleryQueryKeys.cleanups(galleryContext, collectionKey), refetchType: "none" })
+      : Promise.resolve();
+    cleanupRequest.current += 1;
+    cleanupCursorRef.current = null;
+    cleanupLoadingRef.current = false;
+    cleanupLoadingMoreRef.current = false;
+    setCleanupLoading(false);
+    setCleanupLoadingMore(false);
+    if (clearImages) setCleanupImages([]);
+    return invalidation;
+  }
+
   useEffect(() => subscribeAppEvent((event) => {
-    scheduleGalleryRefresh(galleryRefreshPlan(event.type === "event-stream.connected" ? "reconnect" : event.slug));
+    const plan = galleryRefreshPlan(event.type === "event-stream.connected" ? "reconnect" : event.slug);
+    if (!busyRef.current && (plan.has("access") || plan.has("cleanup")) && (activeSheetRef.current === "cleanup" || activeSheetRef.current === "confirmCleanupDelete")) invalidateCleanupLoad();
+    scheduleGalleryRefresh(plan);
   }), []);
 
   useEffect(() => {
@@ -958,6 +1019,9 @@ export function GalleryWorkspace() {
     const source = selectedImage;
     const collection = activeCollection;
     closeSheet();
+    identityFilterRequest.current += 1;
+    setActiveIdentityFilter(undefined);
+    setCollectionSearchResults(undefined);
     setSimilarSource(source);
     setSimilarImages([]);
     setSelectedImage(undefined);
@@ -1044,7 +1108,7 @@ export function GalleryWorkspace() {
 
   async function submitCollectionEdit() {
     const latest = latestActiveCollection();
-    if (!activeCollection || latest?.role !== "owner" || !latest.access?.canManage || !editName.trim()) return;
+    if (!activeCollection || !latest || !isGalleryCollectionOwned(latest) || !latest.access?.canManage || !editName.trim()) return;
     const previous = activeCollection;
     const { isCurrent } = captureGalleryContextGuard();
     const optimistic = { ...previous, name: editName.trim(), isFavorite: editFavorite, ...(editCoverImageKey !== undefined ? { coverUrl: editCoverPreviewUrl ?? null } : {}) };
@@ -1069,15 +1133,24 @@ export function GalleryWorkspace() {
 
   async function removeActiveCollection() {
     const latest = latestActiveCollection();
-    if (!activeCollection || latest?.role !== "owner" || !latest.access?.canManage) return;
+    if (!activeCollection || !latest || !isGalleryCollectionOwned(latest) || !latest.access?.canManage) return;
+    if (latest.isFavorite) {
+      closeSheet();
+      notify("Can't delete favorite collection");
+      return;
+    }
     const collection = activeCollection;
     const { isCurrent } = captureGalleryContextGuard();
     setBusy(true);
     try {
       await deleteGalleryCollection(collection.key);
-      await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) }).catch((error: unknown) => { if (isCurrent()) setStatus(errorMessage(error)); });
+      await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) }).catch(() => { if (isCurrent()) setStatus("Collection refresh failed."); });
       if (!isCurrent()) return;
       closeSheet();
+      identityFilterRequest.current += 1;
+      setActiveIdentityFilter(undefined);
+      setSimilarSource(undefined);
+      setSimilarImages([]);
       setActiveCollection(undefined);
       setShowingCollectionOverview(true);
       updateCollectionSingleton((current) => current.filter(({ key }) => key !== collection.key));
@@ -1085,7 +1158,12 @@ export function GalleryWorkspace() {
       setStatus(`${collection.name} was deleted.`);
       notify("Collection deleted");
     } catch (error) {
-      if (isCurrent()) { setStatus(errorMessage(error)); notify("Collection deletion failed"); }
+      if (isCurrent()) {
+        const favoriteConflict = isGalleryClientErrorCode(error, "GALLERY_COLLECTION_FAVORITE");
+        if (favoriteConflict) closeSheet();
+        setStatus(favoriteConflict ? undefined : "Collection deletion failed.");
+        notify(favoriteConflict ? "Can't delete favorite collection" : "Collection deletion failed");
+      }
     } finally {
       if (isCurrent()) setBusy(false);
     }
@@ -1093,7 +1171,7 @@ export function GalleryWorkspace() {
 
   async function leaveActiveCollection() {
     const latest = latestActiveCollection();
-    if (!activeCollection || !latest || latest.role === "owner" || !latest.access?.canRead) return;
+    if (!activeCollection || !latest || isGalleryCollectionOwned(latest) || !latest.access?.canRead) return;
     const collection = activeCollection;
     const { isCurrent } = captureGalleryContextGuard();
     setBusy(true);
@@ -1101,6 +1179,10 @@ export function GalleryWorkspace() {
       await leaveGalleryCollection(collection.key);
       if (!isCurrent()) return;
       closeSheet();
+      identityFilterRequest.current += 1;
+      setActiveIdentityFilter(undefined);
+      setSimilarSource(undefined);
+      setSimilarImages([]);
       setActiveCollection(undefined);
       setShowingCollectionOverview(true);
       updateCollectionSingleton((current) => current.filter(({ key }) => key !== collection.key));
@@ -1121,17 +1203,45 @@ export function GalleryWorkspace() {
     setCollectionSearchResults((current) => current ? replace(current) : current);
   }
 
+  function applyAuthoritativeFavoriteImages(favorites: GalleryImage[]) {
+    if (favorites.length === 0) return;
+    const byKey = new Map(favorites.map((image) => [image.key, image]));
+    const patch = (current: GalleryImage[]) => current.map((image) => byKey.get(image.key) ?? image);
+    favorites.forEach((image) => patchGalleryImage(queryClient, galleryContext, image));
+    const patchResult = (current: { images: GalleryImage[] } | undefined) => current ? { ...current, images: patch(current.images) } : current;
+    queryClient.setQueriesData({ queryKey: [...galleryQueryKeys.all(galleryContext), "search"] }, patchResult);
+    queryClient.setQueriesData({ queryKey: [...galleryQueryKeys.all(galleryContext), "duplicates"] }, patchResult);
+    setImages(patch);
+    setSimilarImages(patch);
+    setCollectionSearchResults((current) => current ? patch(current) : current);
+    setCleanupImages(patch);
+    setDuplicateImages(patch);
+    setIdentityPickerImages(patch);
+    setIdentityPickerResults((current) => current ? patch(current) : current);
+    setSelectedImage((current) => current ? byKey.get(current.key) ?? current : current);
+    setIdentityPickerSelected((current) => current ? byKey.get(current.key) ?? current : current);
+  }
+
   function deleteSelectedImage() {
-    if (!selectedImage || !canMutateInCollection(selectedImage, latestActiveCollection())) return;
+    if (!selectedImage || !canMutateInCollection(selectedImage, latestActiveCollection()) || busyRef.current) return;
     const target = selectedImage;
-    const { isCurrent } = captureGalleryContextGuard();
+    if (target.isFavorite) {
+      closeSheet();
+      notify("Can't delete favorite image");
+      return;
+    }
+    const { generation, isCurrent } = captureGalleryContextGuard();
     const cacheSnapshot = snapshotGalleryOverviews(queryClient, galleryContext);
     const previousImages = images;
     const previousSimilarImages = similarImages;
     const previousSearchResults = collectionSearchResults;
     const previousCollections = collections;
     const previousActiveCollection = activeCollection;
+    const previousViewRequest = viewRequest.current;
+    const previousSearchRequest = searchRequest.current;
     const removedFromActive = Boolean(activeCollection);
+    busyRef.current = true;
+    setBusy(true);
     removeCachedGalleryImages(queryClient, galleryContext, [target]);
     setImages((current) => current.filter(({ key }) => key !== target.key));
     setSimilarImages((current) => current.filter(({ key }) => key !== target.key));
@@ -1142,20 +1252,12 @@ export function GalleryWorkspace() {
     }
     setSelectedImage(undefined);
     closeSheet();
-    void deleteGalleryImages([target.key]).then(() => {
-      if (!isCurrent()) return;
-      notify("Image deleted");
-      void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
-      void queryClient.fetchQuery({ queryKey: galleryQueryKeys.overview(galleryContext), queryFn: () => fetchGalleryOverview() }).then((overview) => {
-        if (!isCurrent()) return;
-        setCanCreateCollections(overview.canCreateCollections);
-        setCachedGalleryCollections(queryClient, galleryContext, overview.collections);
-        setCollections(overview.collections);
-        setActiveCollection((current) => current ? overview.collections.find(({ key }) => key === current.key) ?? current : current);
-      }).catch((error: unknown) => { if (isCurrent()) setStatus(errorMessage(error)); });
-      if (isCurrent()) void loadSubjects();
-    }).catch((error: unknown) => {
-      if (!isCurrent()) return;
+    const restore = () => {
+      if (activeCollectionKey.current !== previousActiveCollection?.key || viewRequest.current !== previousViewRequest || searchRequest.current !== previousSearchRequest) {
+        void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
+        void refreshCollectionSingletonAfterImageDeletion(generation).catch(() => undefined);
+        return;
+      }
       restoreGalleryOverviews(queryClient, cacheSnapshot);
       setImages(previousImages);
       setSimilarImages(previousSimilarImages);
@@ -1164,55 +1266,317 @@ export function GalleryWorkspace() {
       setCollections(previousCollections);
       setActiveCollection(previousActiveCollection);
       setSelectedImage(target);
+    };
+    void deleteGalleryImages([target.key]).then((result) => {
+      if (!isCurrent()) return;
+      const reconciled = reconcileGalleryImageDeletion([target], result);
+      if (reconciled.favoriteImages.length) {
+        restore();
+        applyAuthoritativeFavoriteImages(reconciled.favoriteImages);
+        notify("Can't delete favorite image");
+        return;
+      }
+      if (reconciled.deletedImages.length !== 1) {
+        restore();
+        notify("Image deletion failed");
+        return;
+      }
+      notify("Image deleted");
+      void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
+      void refreshCollectionSingletonAfterImageDeletion(generation).catch(() => { if (isCurrent()) setStatus("Gallery refresh failed."); });
+      if (isCurrent()) void loadSubjects();
+    }).catch(() => {
+      if (!isCurrent()) return;
+      restore();
       notify("Image deletion failed");
+    }).finally(() => {
+      if (!isCurrent()) return;
+      busyRef.current = false;
+      setBusy(false);
     });
   }
 
   async function showDuplicates() {
     if (!activeCollection || !isCollectionOwner) return;
-    const request = ++viewRequest.current;
+    const collectionKey = activeCollection.key;
+    const queryKey = galleryQueryKeys.duplicates(galleryContext, collectionKey);
+    const { isCurrent: isCurrentContext } = captureGalleryContextGuard();
+    const request = ++duplicatesRequest.current;
+    const isCurrent = () => isCurrentContext() && request === duplicatesRequest.current && activeSheetRef.current === "duplicates" && activeCollectionKey.current === collectionKey;
     setDuplicateImages([]);
     setDuplicatesError(undefined);
     setDuplicatesLoading(true);
     openSheet("duplicates");
     try {
-      const result = await findGalleryCollectionDuplicates(activeCollection.key);
-      if (request !== viewRequest.current || activeSheetRef.current !== "duplicates") return;
+      await queryClient.invalidateQueries({ queryKey, exact: true, refetchType: "none" }).catch(() => undefined);
+      const result = await findGalleryCollectionDuplicates(collectionKey);
+      if (!isCurrent()) return;
+      queryClient.setQueryData(queryKey, result);
       setDuplicateImages(result.images);
     } catch (error) {
-      if (request === viewRequest.current) setDuplicatesError(errorMessage(error));
+      if (isCurrent()) setDuplicatesError(errorMessage(error));
     } finally {
-      if (request === viewRequest.current) setDuplicatesLoading(false);
+      if (isCurrent()) setDuplicatesLoading(false);
     }
   }
 
   async function deleteDuplicates() {
     const latest = latestActiveCollection();
-    if (!activeCollection || latest?.role !== "owner" || !latest.access?.canManage || duplicateImages.length === 0) return;
+    if (!activeCollection || !latest || !isGalleryCollectionOwned(latest) || !latest.access?.canManage || duplicateImages.length === 0) return;
+    const targets = [...duplicateImages];
+    const { favoriteImages: localFavorites, eligibleImages } = partitionFavoriteGalleryImages(targets);
+    if (eligibleImages.length === 0) {
+      goBackSheet();
+      notify(`Can't delete ${localFavorites.length} favorite item${localFavorites.length === 1 ? "" : "s"}`);
+      return;
+    }
     const { isCurrent } = captureGalleryContextGuard();
+    const collectionKey = activeCollection.key;
+    const queryKey = galleryQueryKeys.duplicates(galleryContext, collectionKey);
     setBusy(true);
     try {
-      const deleted = await deleteGalleryCollectionDuplicates(activeCollection.key, duplicateImages.map(({ key }) => key));
-      await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) }).catch((error: unknown) => { if (isCurrent()) setStatus(errorMessage(error)); });
+      const deleted = await deleteGalleryCollectionDuplicates(collectionKey, eligibleImages.map(({ key }) => key));
+      await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) }).catch(() => { if (isCurrent()) setStatus("Gallery refresh failed."); });
       if (!isCurrent()) return;
-      updateCollectionSingleton((current) => current.map((collection) => collection.key === activeCollection.key
-        ? { ...collection, count: Math.max(0, collection.count - deleted.removedImageKeys.length) }
+      const reconciled = reconcileGalleryDuplicateDeletion(eligibleImages, deleted);
+      const removedKeys = new Set(reconciled.removedImages.map(({ key }) => key));
+      const favoriteCount = localFavorites.length + reconciled.favoriteImages.length;
+      const deletedCount = deleted.deletedImageKeys.filter((key) => removedKeys.has(key)).length;
+      const favoriteByKey = new Map(reconciled.favoriteImages.map((image) => [image.key, image]));
+      const remainingDuplicates = targets.filter(({ key }) => !removedKeys.has(key)).map((image) => favoriteByKey.get(image.key) ?? image);
+      applyAuthoritativeFavoriteImages(reconciled.favoriteImages);
+      updateCollectionSingleton((current) => current.map((collection) => collection.key === collectionKey
+        ? { ...collection, count: Math.max(0, collection.count - reconciled.removedImages.length) }
         : collection));
-      setActiveCollection((current) => current ? { ...current, count: Math.max(0, current.count - deleted.removedImageKeys.length) } : current);
-      setImages((current) => current.filter(({ key }) => !deleted.removedImageKeys.includes(key)));
-      setDuplicateImages([]);
-      closeSheet();
-      setStatus(`${deleted.removedImageKeys.length} duplicate image${deleted.removedImageKeys.length === 1 ? "" : "s"} removed from this collection. ${deleted.deletedImageKeys.length} moved to trash.`);
-      notify("Duplicates deleted");
-    } catch (error) {
-      if (isCurrent()) { setStatus(errorMessage(error)); notify("Duplicate deletion failed"); }
+      setActiveCollection((current) => current ? { ...current, count: Math.max(0, current.count - reconciled.removedImages.length) } : current);
+      setImages((current) => current.filter(({ key }) => !removedKeys.has(key)));
+      setDuplicateImages(remainingDuplicates);
+      queryClient.setQueryData(queryKey, { images: remainingDuplicates });
+      void queryClient.invalidateQueries({ queryKey, exact: true, refetchType: "none" });
+      if (favoriteCount || reconciled.unknownImages.length) goBackSheet(); else closeSheet();
+      setStatus(reconciled.unknownImages.length
+        ? "Some images were not deleted."
+        : `${reconciled.removedImages.length} duplicate image${reconciled.removedImages.length === 1 ? "" : "s"} removed from this collection. ${deletedCount} moved to trash.`);
+      notify(reconciled.unknownImages.length
+        ? "Some images were not deleted"
+        : favoriteCount ? `Can't delete ${favoriteCount} favorite item${favoriteCount === 1 ? "" : "s"}` : "Duplicates deleted");
+    } catch {
+      if (isCurrent()) {
+        setStatus("Duplicate deletion failed.");
+        notify("Duplicate deletion failed");
+      }
     } finally {
       if (isCurrent()) setBusy(false);
     }
   }
 
-  async function openVisualIdentities(mode: IdentityLibraryMode) {
-    setIdentityLibraryMode(mode);
+  const isCurrentCleanupRequest = (request: number, generation: number, collectionKey: string, threshold: (typeof CLEANUP_THRESHOLDS)[number]) => request === cleanupRequest.current
+    && generation === refreshContextGeneration.current
+    && activeSheetRef.current === "cleanup"
+    && cleanupCollectionKeyRef.current === collectionKey
+    && activeCollectionKey.current === collectionKey
+    && cleanupThresholdRef.current === threshold;
+
+  async function fetchMutableCleanupPage(collection: GalleryCollection, threshold: (typeof CLEANUP_THRESHOLDS)[number], initialCursor?: string): Promise<CleanupPage> {
+    let cursor = initialCursor;
+    const traversedCursors = new Set<string | undefined>();
+    while (!traversedCursors.has(cursor)) {
+      traversedCursors.add(cursor);
+      const page = await fetchGalleryOverview(collection.key, cursor, 100, threshold);
+      const mutableImages = page.images.filter((image) => canMutateInCollection(image, collection));
+      if (mutableImages.length > 0 || !page.nextCursor) return { images: mutableImages, nextCursor: page.nextCursor };
+      cursor = page.nextCursor;
+    }
+    return { images: [] as GalleryImage[], nextCursor: null };
+  }
+
+  async function loadCleanupImages(threshold: (typeof CLEANUP_THRESHOLDS)[number], collectionOverride?: GalleryCollection) {
+    const collection = collectionOverride ?? latestActiveCollection();
+    if (!collection || !isGalleryCollectionOwned(collection) || cleanupCollectionKeyRef.current !== collection.key) return;
+    const request = ++cleanupRequest.current;
+    const generation = refreshContextGeneration.current;
+    cleanupThresholdRef.current = threshold;
+    cleanupCursorRef.current = null;
+    cleanupLoadingRef.current = true;
+    cleanupLoadingMoreRef.current = false;
+    setCleanupThreshold(threshold);
+    setCleanupError(undefined);
+    setCleanupLoadingMore(false);
+    const queryKey = galleryQueryKeys.cleanup(galleryContext, collection.key, threshold);
+    const cached = queryClient.getQueryData<CleanupPage>(queryKey);
+    if (cached && queryClient.getQueryState(queryKey)?.isInvalidated !== true) {
+      cleanupCursorRef.current = cached.nextCursor;
+      cleanupLoadingRef.current = false;
+      setCleanupImages(cached.images.filter(({ key }) => !cleanupExcludedKeys.current.has(key)));
+      setCleanupLoading(false);
+      return;
+    }
+    setCleanupImages([]);
+    setCleanupLoading(true);
+    try {
+      const result = await queryClient.fetchQuery({
+        queryKey,
+        queryFn: () => fetchMutableCleanupPage(collection, threshold),
+        staleTime: Infinity,
+      });
+      if (!isCurrentCleanupRequest(request, generation, collection.key, threshold)) return;
+      cleanupCursorRef.current = result.nextCursor;
+      setCleanupImages(result.images.filter(({ key }) => !cleanupExcludedKeys.current.has(key)));
+    } catch (error) {
+      if (isCurrentCleanupRequest(request, generation, collection.key, threshold)) setCleanupError(errorMessage(error));
+    } finally {
+      if (request === cleanupRequest.current && generation === refreshContextGeneration.current) {
+        cleanupLoadingRef.current = false;
+        setCleanupLoading(false);
+      }
+    }
+  }
+
+  async function showCleanup() {
+    const collection = latestActiveCollection();
+    if (!collection || !isGalleryCollectionOwned(collection)) return;
+    cleanupCollectionKeyRef.current = collection.key;
+    cleanupExcludedKeys.current.clear();
+    const invalidation = invalidateCleanupLoad();
+    openSheet("cleanup");
+    await invalidation;
+    if (activeSheetRef.current === "cleanup" && cleanupCollectionKeyRef.current === collection.key) await loadCleanupImages(cleanupThresholdRef.current, collection);
+  }
+
+  async function loadMoreCleanupImages() {
+    const collectionKey = cleanupCollectionKeyRef.current;
+    const collection = collections.find(({ key }) => key === collectionKey);
+    const cursor = cleanupCursorRef.current;
+    const threshold = cleanupThresholdRef.current;
+    if (!collection || !isGalleryCollectionOwned(collection) || !cursor || cleanupLoadingRef.current || cleanupLoadingMoreRef.current || activeSheetRef.current !== "cleanup") return;
+    const request = cleanupRequest.current;
+    const generation = refreshContextGeneration.current;
+    cleanupLoadingMoreRef.current = true;
+    setCleanupLoadingMore(true);
+    try {
+      const result = await fetchMutableCleanupPage(collection, threshold, cursor);
+      if (!isCurrentCleanupRequest(request, generation, collection.key, threshold)) return;
+      const queryKey = galleryQueryKeys.cleanup(galleryContext, collection.key, threshold);
+      const cached = queryClient.getQueryData<CleanupPage>(queryKey);
+      const next = {
+        images: appendCursorItems(cached?.images ?? [], result.images, ({ key }) => key),
+        nextCursor: result.nextCursor,
+      };
+      queryClient.setQueryData(queryKey, next);
+      cleanupCursorRef.current = next.nextCursor;
+      setCleanupImages(next.images.filter(({ key }) => !cleanupExcludedKeys.current.has(key)));
+    } catch (error) {
+      if (request === cleanupRequest.current && generation === refreshContextGeneration.current && activeSheetRef.current === "cleanup") setCleanupError(errorMessage(error));
+    } finally {
+      if (request === cleanupRequest.current && generation === refreshContextGeneration.current) {
+        cleanupLoadingMoreRef.current = false;
+        setCleanupLoadingMore(false);
+      }
+    }
+  }
+
+  function excludeCleanupImage(imageKey: string) {
+    cleanupExcludedKeys.current.add(imageKey);
+    setCleanupImages((current) => current.filter(({ key }) => key !== imageKey));
+    const remainingCount = cleanupImages.filter(({ key }) => !cleanupExcludedKeys.current.has(key)).length;
+    if (remainingCount <= IMAGE_COLUMNS && cleanupCursorRef.current) setTimeout(() => { void loadMoreCleanupImages(); }, 0);
+  }
+
+  function applyDeletedGalleryImages(targets: GalleryImage[], sourceCollectionKey: string) {
+    if (targets.length === 0) return;
+    const removedKeys = new Set(targets.map(({ key }) => key));
+    const removedUrls = new Set(targets.map(({ url }) => url));
+    removeCachedGalleryImages(queryClient, galleryContext, targets);
+    setImages((current) => current.filter(({ key }) => !removedKeys.has(key)));
+    setSimilarImages((current) => current.filter(({ key }) => !removedKeys.has(key)));
+    setCollectionSearchResults((current) => current?.filter(({ key }) => !removedKeys.has(key)));
+    setSelectedImageKeys((current) => current.filter((key) => !removedKeys.has(key)));
+    setSelectedImage((current) => current && removedKeys.has(current.key) ? undefined : current);
+    updateCollectionSingleton((current) => current.map((collection) => collection.key === sourceCollectionKey ? { ...collection, count: Math.max(0, collection.count - targets.length), coverUrl: collection.coverUrl && removedUrls.has(collection.coverUrl) ? null : collection.coverUrl } : collection));
+    setActiveCollection((current) => current && current.key === sourceCollectionKey ? { ...current, count: Math.max(0, current.count - targets.length), coverUrl: current.coverUrl && removedUrls.has(current.coverUrl) ? null : current.coverUrl } : current);
+  }
+
+  function applyDeletedCleanupImages(targets: GalleryImage[], sourceCollectionKey: string) {
+    const removedKeys = new Set(targets.map(({ key }) => key));
+    for (const key of removedKeys) cleanupExcludedKeys.current.delete(key);
+    queryClient.setQueriesData<CleanupPage>({ queryKey: galleryQueryKeys.cleanups(galleryContext, sourceCollectionKey) }, (page) => page ? {
+      ...page,
+      images: page.images.filter(({ key }) => !removedKeys.has(key)),
+    } : page);
+    setCleanupImages((current) => current.filter(({ key }) => !removedKeys.has(key)));
+    applyDeletedGalleryImages(targets, sourceCollectionKey);
+  }
+
+  async function deleteCleanupImages() {
+    const sourceCollectionKey = cleanupCollectionKeyRef.current;
+    const collection = collections.find(({ key }) => key === sourceCollectionKey);
+    const targets = [...cleanupImages];
+    if (!sourceCollectionKey || !collection || !isGalleryCollectionOwned(collection) || targets.length === 0 || busy || !targets.every((image) => canMutateInCollection(image, collection))) return;
+    const { favoriteImages: localFavorites, eligibleImages } = partitionFavoriteGalleryImages(targets);
+    if (eligibleImages.length === 0) {
+      goBackSheet();
+      notify(`Can't delete ${localFavorites.length} favorite item${localFavorites.length === 1 ? "" : "s"}`);
+      return;
+    }
+    const { generation, isCurrent } = captureGalleryContextGuard();
+    const deletedKeys = new Set<string>();
+    const serverFavoriteKeys = new Set<string>();
+    const unknownKeys = new Set<string>();
+    setBusy(true);
+    setCleanupError(undefined);
+    try {
+      for (let index = 0; index < targets.length; index += DELETE_IMAGE_CHUNK_SIZE) {
+        const chunk = targets.slice(index, index + DELETE_IMAGE_CHUNK_SIZE);
+        const { eligibleImages: eligibleChunk } = partitionFavoriteGalleryImages(chunk);
+        if (eligibleChunk.length === 0) continue;
+        const result = await deleteGalleryImages(eligibleChunk.map(({ key }) => key));
+        if (!isCurrent()) return;
+        const reconciled = reconcileGalleryImageDeletion(eligibleChunk, result);
+        applyAuthoritativeFavoriteImages(reconciled.favoriteImages);
+        for (const { key } of reconciled.deletedImages) deletedKeys.add(key);
+        for (const { key } of reconciled.favoriteImages) serverFavoriteKeys.add(key);
+        for (const { key } of reconciled.unknownImages) unknownKeys.add(key);
+      }
+      const deletedTargets = eligibleImages.filter(({ key }) => deletedKeys.has(key));
+      applyDeletedCleanupImages(deletedTargets, sourceCollectionKey);
+      const favoriteCount = localFavorites.length + serverFavoriteKeys.size;
+      if (favoriteCount || unknownKeys.size) {
+        goBackSheet();
+      } else {
+        cleanupExcludedKeys.current.clear();
+        cleanupCollectionKeyRef.current = undefined;
+        invalidateCleanupLoad();
+        closeSheet();
+      }
+      setCleanupError(unknownKeys.size ? "Some images could not be deleted." : undefined);
+      setStatus(unknownKeys.size ? "Some images could not be deleted." : `${deletedTargets.length} image${deletedTargets.length === 1 ? "" : "s"} deleted.`);
+      notify(unknownKeys.size
+        ? "Some images were not deleted"
+        : favoriteCount ? `Can't delete ${favoriteCount} favorite item${favoriteCount === 1 ? "" : "s"}` : deletedTargets.length === 1 ? "Image deleted" : "Images deleted");
+      if (deletedTargets.length) {
+        void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
+        void refreshCollectionSingletonAfterImageDeletion(generation).catch(() => { if (isCurrent()) setStatus("Gallery refresh failed."); });
+        void loadSubjects();
+      }
+    } catch {
+      if (!isCurrent()) return;
+      const deletedTargets = eligibleImages.filter(({ key }) => deletedKeys.has(key));
+      applyDeletedCleanupImages(deletedTargets, sourceCollectionKey);
+      setCleanupError("Some images could not be deleted.");
+      if (deletedTargets.length && activeSheetRef.current === "confirmCleanupDelete") goBackSheet();
+      setStatus("Some images could not be deleted.");
+      notify(deletedTargets.length ? "Some images were not deleted" : "Image deletion failed");
+      if (deletedTargets.length) {
+        void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
+        void refreshCollectionSingletonAfterImageDeletion(generation).catch(() => { if (isCurrent()) setStatus("Gallery refresh failed."); });
+        void loadSubjects();
+      }
+    } finally {
+      if (isCurrent()) setBusy(false);
+    }
+  }
+
+  async function openVisualIdentities() {
     setIdentityError(undefined);
     if (activeSheetRef.current) pushSheet("visualIdentities");
     else openSheet("visualIdentities");
@@ -1424,6 +1788,9 @@ export function GalleryWorkspace() {
     const request = ++identityFilterRequest.current;
     const collection = activeCollection;
     closeSheet();
+    imageSheetRequest.current += 1;
+    setSimilarSource(undefined);
+    setSimilarImages([]);
     setLoading(true);
     setActiveIdentityFilter(identity);
     if (collection) setCollectionSearchResults(undefined);
@@ -1543,32 +1910,56 @@ export function GalleryWorkspace() {
   function deleteSelectedImages() {
     const latest = latestActiveCollection();
     if (!selectedImages.length || !selectedImages.every((image) => canMutateInCollection(image, latest)) || busy) return;
-    const { isCurrent } = captureGalleryContextGuard();
     const targets = [...selectedImages];
-    const keys = targets.map(({ key }) => key);
+    const { favoriteImages: localFavorites, eligibleImages } = partitionFavoriteGalleryImages(targets);
+    if (eligibleImages.length === 0) {
+      closeSheet();
+      notify(`Can't delete ${localFavorites.length} favorite item${localFavorites.length === 1 ? "" : "s"}`);
+      return;
+    }
+    const { generation, isCurrent } = captureGalleryContextGuard();
+    const keys = eligibleImages.map(({ key }) => key);
     const cacheSnapshot = snapshotGalleryOverviews(queryClient, galleryContext);
     const previousImages = images;
     const previousSimilarImages = similarImages;
     const previousSearchResults = collectionSearchResults;
     const previousCollections = collections;
     const previousActiveCollection = activeCollection;
-    removeCachedGalleryImages(queryClient, galleryContext, targets);
+    removeCachedGalleryImages(queryClient, galleryContext, eligibleImages);
     setImages((current) => current.filter(({ key }) => !keys.includes(key)));
     setSimilarImages((current) => current.filter(({ key }) => !keys.includes(key)));
     setCollectionSearchResults((current) => current?.filter(({ key }) => !keys.includes(key)));
     if (activeCollection) {
-      updateCollectionSingleton((current) => current.map((collection) => collection.key === activeCollection.key ? { ...collection, count: Math.max(0, collection.count - targets.length) } : collection));
-      setActiveCollection((current) => current ? { ...current, count: Math.max(0, current.count - targets.length) } : current);
+      updateCollectionSingleton((current) => current.map((collection) => collection.key === activeCollection.key ? { ...collection, count: Math.max(0, collection.count - eligibleImages.length) } : collection));
+      setActiveCollection((current) => current ? { ...current, count: Math.max(0, current.count - eligibleImages.length) } : current);
     }
     setBusy(true);
-    void deleteGalleryImages(keys).then(() => {
+    void deleteGalleryImages(keys).then((result) => {
       if (!isCurrent()) return;
-      setSelectedImageKeys([]);
+      const reconciled = reconcileGalleryImageDeletion(eligibleImages, result);
+      restoreGalleryOverviews(queryClient, cacheSnapshot);
+      setImages(previousImages);
+      setSimilarImages(previousSimilarImages);
+      setCollectionSearchResults(previousSearchResults);
+      setCachedGalleryCollections(queryClient, galleryContext, previousCollections);
+      setCollections(previousCollections);
+      setActiveCollection(previousActiveCollection);
+      applyDeletedGalleryImages(reconciled.deletedImages, previousActiveCollection?.key ?? "");
+      applyAuthoritativeFavoriteImages(reconciled.favoriteImages);
+      const deletedKeys = new Set(reconciled.deletedImages.map(({ key }) => key));
+      setSelectedImageKeys(targets.filter(({ key }) => !deletedKeys.has(key)).map(({ key }) => key));
       closeSheet();
-      notify(targets.length === 1 ? "Image deleted" : "Images deleted");
-      void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
-      void loadSubjects();
-    }).catch((error: unknown) => {
+      const favoriteCount = localFavorites.length + reconciled.favoriteImages.length;
+      if (reconciled.unknownImages.length) setStatus("Some images were not deleted.");
+      notify(reconciled.unknownImages.length
+        ? "Some images were not deleted"
+        : favoriteCount ? `Can't delete ${favoriteCount} favorite item${favoriteCount === 1 ? "" : "s"}` : reconciled.deletedImages.length === 1 ? "Image deleted" : "Images deleted");
+      if (reconciled.deletedImages.length) {
+        void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
+        void refreshCollectionSingletonAfterImageDeletion(generation).catch(() => { if (isCurrent()) setStatus("Gallery refresh failed."); });
+        void loadSubjects();
+      }
+    }).catch(() => {
       if (!isCurrent()) return;
       restoreGalleryOverviews(queryClient, cacheSnapshot);
       setImages(previousImages);
@@ -1577,6 +1968,7 @@ export function GalleryWorkspace() {
       setCachedGalleryCollections(queryClient, galleryContext, previousCollections);
       setCollections(previousCollections);
       setActiveCollection(previousActiveCollection);
+      setStatus("Image deletion failed.");
       notify("Image deletion failed");
     }).finally(() => { if (isCurrent()) setBusy(false); });
   }
@@ -1697,13 +2089,16 @@ export function GalleryWorkspace() {
 
   refreshRunner.current = async (plan, generation) => {
     const isCurrent = () => isCurrentContextGeneration(generation, refreshContextGeneration.current);
+    const cleanupWasOpen = activeSheetRef.current === "cleanup" || activeSheetRef.current === "confirmCleanupDelete";
+    if (cleanupWasOpen && (plan.has("access") || plan.has("cleanup"))) invalidateCleanupLoad();
     try {
       if (plan.has("upload")) await refreshUnresolvedUploadJobs(generation).catch(() => undefined);
       if (!isCurrent()) return;
       const needsIndex = plan.has("root") || plan.has("access");
       const needsOverview = plan.has("current");
       const needsSubjects = plan.has("subjects");
-      if (!needsIndex && !needsOverview && !needsSubjects) return;
+      const needsCleanup = cleanupWasOpen && (plan.has("access") || plan.has("cleanup"));
+      if (!needsIndex && !needsOverview && !needsSubjects && !needsCleanup) return;
 
       let authoritativeCollections = collections;
       let currentCollection = activeCollection;
@@ -1752,11 +2147,16 @@ export function GalleryWorkspace() {
 
       const mutableImageKeys = new Set<string>();
       const permissionImages = mergeMediaItems(images, mergeMediaItems(collectionSearchResults ?? [], similarImages));
-      if (currentCollection?.role === "owner") for (const key of selectedImageKeys) mutableImageKeys.add(key);
-      for (const image of permissionImages) if (currentCollection && (currentCollection.role === "owner" || currentCollection.role === "collaborator" && image.createdByKey === currentCollection.memberKey)) mutableImageKeys.add(image.key);
-      const detailMutable = Boolean(selectedImage && currentCollection && (currentCollection.role === "owner" || currentCollection.role === "collaborator" && selectedImage.createdByKey === currentCollection.memberKey));
-      const permissions = reconcileGalleryPermissions({ role: currentCollection?.role, canContribute: currentCollection?.access?.canContribute, activeSheet: activeSheetRef.current, selectedImageKeys, mutableImageKeys, destinationCollectionKey, ownerCapability: !currentCollection && authoritativeCollections.some(({ role, access }) => role === "owner" && access?.canManage), detailMutable });
+      if (currentCollection && isGalleryCollectionOwned(currentCollection)) for (const key of selectedImageKeys) mutableImageKeys.add(key);
+      for (const image of permissionImages) if (currentCollection && (isGalleryCollectionOwned(currentCollection) || collectionMembershipRole(currentCollection) === "collaborator" && image.createdByKey === currentCollection.memberKey)) mutableImageKeys.add(image.key);
+      const detailMutable = Boolean(selectedImage && currentCollection && (isGalleryCollectionOwned(currentCollection) || collectionMembershipRole(currentCollection) === "collaborator" && selectedImage.createdByKey === currentCollection.memberKey));
+      const permissions = reconcileGalleryPermissions({ role: currentCollection ? collectionMembershipRole(currentCollection) : undefined, canContribute: currentCollection?.access?.canContribute, activeSheet: activeSheetRef.current, selectedImageKeys, mutableImageKeys, destinationCollectionKey, ownerCapability: !currentCollection && authoritativeCollections.some((collection) => isGalleryCollectionOwned(collection) && collection.access?.canManage), detailMutable });
       if (permissions.closeSheet) closeSheet();
+      if (needsCleanup && !permissions.closeSheet && currentCollection && isGalleryCollectionOwned(currentCollection) && currentCollection.key === cleanupCollectionKeyRef.current) {
+        if (activeSheetRef.current === "confirmCleanupDelete") goBackSheet();
+        await loadCleanupImages(cleanupThresholdRef.current, currentCollection);
+        if (!isCurrent()) return;
+      }
       if (activeCollection && (!currentCollection?.access?.canContribute || currentCollection.role === "viewer")) {
         setCameraOpen(false);
         setPendingFiles((current) => { deletePreparedFiles(current); return []; });
@@ -1860,8 +2260,12 @@ export function GalleryWorkspace() {
       }
 
       if (activeSheetRef.current === "duplicates" && currentCollection && plan.has("duplicates")) {
-        const result = await queryClient.fetchQuery({ queryKey: galleryQueryKeys.duplicates(galleryContext, currentCollection.key), queryFn: () => findGalleryCollectionDuplicates(currentCollection.key), staleTime: 0 });
-        if (!isCurrent()) return;
+        const request = ++duplicatesRequest.current;
+        const collectionKey = currentCollection.key;
+        const queryKey = galleryQueryKeys.duplicates(galleryContext, collectionKey);
+        const result = await findGalleryCollectionDuplicates(collectionKey);
+        if (!isCurrent() || request !== duplicatesRequest.current || activeSheetRef.current !== "duplicates" || activeCollectionKey.current !== collectionKey) return;
+        queryClient.setQueryData(queryKey, result);
         setDuplicateImages(result.images);
       }
 
@@ -1910,7 +2314,10 @@ export function GalleryWorkspace() {
               : activeSheet === "confirmLeaveCollection" ? "Leave collection?"
               : activeSheet === "imageEdit" ? "Edit image"
               : activeSheet === "duplicates" ? "Duplicates"
-                : activeSheet === "confirmDeleteDuplicates" ? "Delete duplicates?"
+               : activeSheet === "confirmDeleteDuplicates" ? "Delete duplicates?"
+                  : activeSheet === "cleanupMenu" ? "Collection cleanup"
+                    : activeSheet === "cleanup" ? "Clean up"
+                      : activeSheet === "confirmCleanupDelete" ? "Delete images?"
                   : activeSheet === "visualIdentities" ? "Visual identities"
                     : activeSheet === "confirmDeleteIdentity" ? "Delete visual identity?"
                        : activeSheet === "identityPicker" ? imagePickerPurpose === "cover" ? "Choose collection cover" : "Create visual identity"
@@ -1946,7 +2353,7 @@ export function GalleryWorkspace() {
   const normalCollectionView = Boolean(activeCollection && !activeSubject);
   const visibleCollections = collections.filter((collection) => collectionTab === "mine" ? isGalleryCollectionOwned(collection) : !isGalleryCollectionOwned(collection));
   const writableCollections = collections.filter(({ access, role }) => access?.canContribute && role !== "viewer");
-  const canManageAnyCollection = collections.some(({ access, role }) => access?.canManage && role === "owner");
+  const canManageAnyCollection = collections.some((collection) => collection.access?.canManage && isGalleryCollectionOwned(collection));
   const identityPickerVisibleCollections = collections.filter(({ isFavorite }) => !showOnlyFavorites || isFavorite);
   const identityPickerVisibleImages = (identityPickerResults ?? identityPickerImages).filter(({ isFavorite }) => !showOnlyFavorites || isFavorite);
   const selectableImages = mergeMediaItems(images, mergeMediaItems(collectionSearchResults ?? [], similarImages));
@@ -1973,8 +2380,11 @@ export function GalleryWorkspace() {
     : activeSheet === "duplicates" ? <View style={styles.compactSheetActions}>
       <Button disabled={duplicatesLoading || duplicateImages.length === 0} onPress={() => pushSheet("confirmDeleteDuplicates")} size="lg" variant="primary">Delete duplicates</Button>
       <Button disabled={duplicatesLoading} onPress={closeSheet} size="lg" variant="secondary">Close</Button>
+    </View> : activeSheet === "cleanup" ? <View style={styles.compactSheetActions}>
+      <Button disabled={busy || cleanupLoading || cleanupLoadingMore || cleanupImages.length === 0} onPress={() => pushSheet("confirmCleanupDelete")} size="lg" variant="primary">Delete</Button>
+      <Button disabled={busy} onPress={closeSheet} size="lg" variant="secondary">Close</Button>
     </View> : activeSheet === "visualIdentities" ? <View style={styles.compactSheetActions}>
-      {identityLibraryMode === "browse" ? <Button disabled={identitiesLoading} onPress={() => void openIdentityPicker()} size="lg" variant="primary">Create new</Button> : null}
+      <Button disabled={identitiesLoading} onPress={() => void openIdentityPicker()} size="lg" variant="primary">Create</Button>
       <Button onPress={closeSheet} size="lg" variant="secondary">Close</Button>
     </View> : activeSheet === "identityPicker" ? <View style={styles.compactSheetActions}>
       <Button disabled={!identityPickerSelected} onPress={() => imagePickerPurpose === "cover" ? chooseCollectionCover() : pushSheet("identityName")} size="lg" variant="primary">{imagePickerPurpose === "cover" ? "Choose" : "Next"}</Button>
@@ -2030,7 +2440,7 @@ export function GalleryWorkspace() {
               {canAddImages ? <Button accessibilityLabel={`Add images to ${activeCollection.name}`} contentMode="raw" disabled={busy} hitSlop={5} onPress={() => openSheet("actions")} size="sm" variant="icon"><PlusIcon size="sm" /></Button> : null}
             </View>
           </View>
-          <View style={styles.sharingRow}><Button accessibilityLabel={`Sharing and access for ${activeCollection.name}`} contentMode="raw" onPress={() => { closeSheet(); setSharingOpen(true); }} size="sm" variant="icon"><MemberIcon size="sm" /></Button></View>
+          <View style={styles.sharingRow}>{isCollectionOwner ? <Button accessibilityLabel={`Clean up ${activeCollection.name}`} contentMode="raw" onPress={() => openSheet("cleanupMenu")} size="sm" variant="icon"><BrainIcon size="sm" /></Button> : null}<Button accessibilityLabel={`Sharing and access for ${activeCollection.name}`} contentMode="raw" onPress={() => { closeSheet(); setSharingOpen(true); }} size="sm" variant="icon"><MemberIcon size="sm" /></Button></View>
           {normalCollectionView ? <View style={styles.rootActions}>
             <View style={styles.collectionSearch}>
               <SearchIcon size="sm" variant="muted" />
@@ -2115,25 +2525,39 @@ export function GalleryWorkspace() {
       </BottomSheet>
 
       <BottomSheet
-        description={activeSheet === "destination" ? `${pendingFiles.length} image${pendingFiles.length === 1 ? "" : "s"} ready to upload.` : activeSheet === "transferDestination" ? "Choose one destination collection." : undefined}
+        description={activeSheet === "destination" ? `${pendingFiles.length} image${pendingFiles.length === 1 ? "" : "s"} ready to upload.` : activeSheet === "transferDestination" ? "Choose one destination collection." : activeSheet === "cleanup" ? "Choose a quality threshold to find and remove lower-quality images. Images are scored from 1 to 100." : undefined}
         dismissible={!busy}
         footer={sheetFooter}
-        hideHeading={activeSheet === "rootActions" || activeSheet === "actions" || activeSheet === "collectionMenu" || activeSheet === "filter" || activeSheet === "imageActions" || activeSheet === "bulkActions"}
-        mutation={activeSheet === "imageEdit" || activeSheet === "newCollection" || activeSheet === "collectionEdit" || activeSheet === "duplicates" || activeSheet === "visualIdentities" || activeSheet === "identityPicker" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory"}
+        hideHeading={activeSheet === "rootActions" || activeSheet === "actions" || activeSheet === "collectionMenu" || activeSheet === "filter" || activeSheet === "imageActions" || activeSheet === "bulkActions" || activeSheet === "cleanupMenu" || activeSheet === "confirmCleanupDelete" || activeSheet === "confirmDeleteIdentity" || activeSheet === "confirmLeaveCollection"}
+        mutation={activeSheet === "imageEdit" || activeSheet === "newCollection" || activeSheet === "collectionEdit" || activeSheet === "duplicates" || activeSheet === "cleanup" || activeSheet === "visualIdentities" || activeSheet === "identityPicker" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory"}
         onOpenChange={(open) => { if (!open) { if (activeSheetRef.current === "imageActions") goBackSheet(); else closeSheet(); } }}
         open={!sharingOpen && sheetOpen && activeSheet !== "image"}
-        tall={activeSheet === "transferDestination" || activeSheet === "destination" || activeSheet === "searchHistory"}
+        tall={activeSheet === "destination" || activeSheet === "searchHistory"}
         title={sheetTitle}
       >
-        <ScrollView contentContainerStyle={[styles.sheetContent, activeSheet === "identityName" && styles.fullSheetContent]} keyboardShouldPersistTaps="handled" onScroll={({ nativeEvent }) => { if (activeSheet === "identityPicker" && isNearScrollEnd({ offset: nativeEvent.contentOffset.y, viewport: nativeEvent.layoutMeasurement.height, content: nativeEvent.contentSize.height })) void loadMoreIdentityPickerImages(); }} scrollEventThrottle={120} showsVerticalScrollIndicator={false} style={[styles.sheetScroll, activeSheet === "identityName" && styles.fullSheetScroll, { maxHeight: activeSheet === "transferDestination" || activeSheet === "duplicates" || activeSheet === "imageEdit" || activeSheet === "visualIdentities" || activeSheet === "identityPicker" || activeSheet === "identityName" ? undefined : height * 0.6 }]}>
+        {activeSheet === "cleanup" ? <FlatList
+          columnWrapperStyle={styles.cleanupGridRow}
+          contentContainerStyle={styles.cleanupListContent}
+          data={cleanupImages}
+          keyExtractor={({ key }) => key}
+          ListEmptyComponent={cleanupLoading ? <View accessibilityLabel="Loading cleanup images" accessibilityRole="progressbar" style={styles.cleanupGridRow}>{Array.from({ length: IMAGE_COLUMNS }, (_, index) => <Skeleton key={index} style={[styles.imageSkeleton, { width: sheetImageSize, height: sheetImageSize }]} />)}</View> : <View style={styles.cleanupEmpty}><Text style={styles.emptyText}>No scored images found at this threshold.</Text></View>}
+          ListFooterComponent={cleanupLoadingMore ? <View accessibilityLabel="Loading more cleanup images" accessibilityRole="progressbar" style={styles.cleanupGridRow}>{Array.from({ length: IMAGE_COLUMNS }, (_, index) => <Skeleton key={`cleanup-more-${index}`} style={[styles.imageSkeleton, { width: sheetImageSize, height: sheetImageSize }]} />)}</View> : null}
+          ListHeaderComponent={<View style={styles.cleanupHeader}><Tabs accessibilityRole="tablist" style={styles.cleanupTabs}>{CLEANUP_THRESHOLDS.map((threshold) => <Button key={threshold} accessibilityLabel={`Quality threshold ${threshold}`} accessibilityRole="tab" accessibilityState={{ selected: cleanupThreshold === threshold }} disabled={busy} onPress={() => void loadCleanupImages(threshold)} size="xs" style={styles.cleanupTab} variant={cleanupThreshold === threshold ? "secondary" : "ghost"}>{threshold}</Button>)}</Tabs>{cleanupError ? <View accessibilityLiveRegion="polite" style={styles.inlineError}><Text style={styles.inlineErrorText}>{cleanupError}</Text></View> : null}</View>}
+          numColumns={IMAGE_COLUMNS}
+          onEndReached={() => void loadMoreCleanupImages()}
+          onEndReachedThreshold={0.4}
+          renderItem={({ item: image }) => <View style={[styles.duplicateCard, styles.cleanupCard, { width: sheetImageSize, height: sheetImageSize }]}><View style={styles.imageFrame}><Image source={image.url} contentFit="cover" style={styles.image} /></View><Button accessibilityLabel={`Exclude ${image.filename} from cleanup`} contentMode="raw" disabled={busy} onPress={() => excludeCleanupImage(image.key)} size="xs" style={styles.thumbnailRemove} variant="icon"><CloseIcon size="sm" /></Button></View>}
+          showsVerticalScrollIndicator={false}
+          style={styles.fullSheetScroll}
+        /> : <ScrollView contentContainerStyle={[styles.sheetContent, (activeSheet === "identityName" || activeSheet === "transferDestination") && styles.fullSheetContent]} keyboardShouldPersistTaps="handled" onScroll={({ nativeEvent }) => { if (activeSheet === "identityPicker" && isNearScrollEnd({ offset: nativeEvent.contentOffset.y, viewport: nativeEvent.layoutMeasurement.height, content: nativeEvent.contentSize.height })) void loadMoreIdentityPickerImages(); }} scrollEventThrottle={120} showsVerticalScrollIndicator={false} style={[styles.sheetScroll, (activeSheet === "identityName" || activeSheet === "transferDestination") && styles.fullSheetScroll, { maxHeight: activeSheet === "transferDestination" || activeSheet === "duplicates" || activeSheet === "imageEdit" || activeSheet === "visualIdentities" || activeSheet === "identityPicker" || activeSheet === "identityName" ? undefined : height * 0.6 }]}>
         {activeSheet === "rootActions" ? <>
           {canCreateCollections ? <BottomSheetItem onPress={() => { setPendingFiles([]); setNewCollectionName(""); setNewCollectionFavorite(false); pushSheet("newCollection"); }} size="lg" style={styles.sheetAction} variant="secondary">Create collection</BottomSheetItem> : null}
-          {canManageAnyCollection ? <BottomSheetItem onPress={() => void openVisualIdentities("browse")} size="lg" style={styles.sheetAction} variant="secondary">Create visual identity</BottomSheetItem> : null}
+          {canManageAnyCollection ? <BottomSheetItem onPress={() => void openVisualIdentities()} size="lg" style={styles.sheetAction} variant="secondary">Create visual identity</BottomSheetItem> : null}
         </> : null}
         {activeSheet === "actions" ? <>
           <BottomSheetItem disabled={busy} loading={busy} onPress={() => void choosePhotos()} size="lg" style={styles.sheetAction} variant="secondary">Upload images</BottomSheetItem>
           <BottomSheetItem disabled={busy} loading={busy} onPress={() => void takePhoto()} size="lg" style={styles.sheetAction} variant="secondary">Capture images</BottomSheetItem>
-          {isCollectionOwner ? <BottomSheetItem disabled={busy} onPress={() => void openVisualIdentities("browse")} size="lg" style={styles.sheetAction} variant="secondary">Create visual identity</BottomSheetItem> : null}
+          {isCollectionOwner ? <BottomSheetItem disabled={busy} onPress={() => void openVisualIdentities()} size="lg" style={styles.sheetAction} variant="secondary">Create visual identity</BottomSheetItem> : null}
         </> : null}
         {activeSheet === "destination" ? <>
           <View style={styles.destinationGrid}>{writableCollections.map((collection) => <View key={collection.key} style={[styles.destinationCard, { width: destinationCollectionSize, height: destinationCollectionSize }]}>
@@ -2153,9 +2577,10 @@ export function GalleryWorkspace() {
           {isCollectionOwner ? <BottomSheetItem disabled={busy} onPress={openCollectionEdit} size="lg" style={styles.sheetAction} variant="secondary">Edit</BottomSheetItem> : null}
           {collectionRole !== "viewer" ? <BottomSheetItem disabled={busy} onPress={() => { closeSheet(); setStatus("Long press one of your images to begin selecting, then tap to add more."); }} size="lg" style={styles.sheetAction} variant="secondary">Select images</BottomSheetItem> : null}
           {isCollectionOwner ? <BottomSheetItem disabled={busy} onPress={() => void showDuplicates()} size="lg" style={styles.sheetAction} variant="secondary">Find duplicates</BottomSheetItem> : null}
-          {isCollectionOwner ? <BottomSheetItem disabled={busy} onPress={() => void openVisualIdentities("browse")} size="lg" style={styles.sheetAction} variant="secondary">Visual identities</BottomSheetItem> : null}
+          {isCollectionOwner ? <BottomSheetItem disabled={busy} onPress={() => void openVisualIdentities()} size="lg" style={styles.sheetAction} variant="secondary">Visual identities</BottomSheetItem> : null}
           {isCollectionOwner ? <BottomSheetItem disabled={busy} onPress={() => pushSheet("confirmDeleteCollection")} size="lg" style={styles.sheetAction} variant="secondary">Delete collection</BottomSheetItem> : <BottomSheetItem disabled={busy} onPress={() => pushSheet("confirmLeaveCollection")} size="lg" style={styles.sheetAction} variant="secondary">Leave</BottomSheetItem>}
         </> : null}
+        {activeSheet === "cleanupMenu" ? <BottomSheetItem onPress={() => void showCleanup()} size="lg" style={styles.sheetAction} variant="secondary">Clean up</BottomSheetItem> : null}
         {activeSheet === "imageActions" && selectedImage ? <View style={styles.actionMenu}>
           {canMutateImage(selectedImage) ? <BottomSheetItem onPress={openImageEdit} style={styles.sheetAction} variant="secondary">Edit</BottomSheetItem> : null}
           {activeCollection ? <BottomSheetItem onPress={() => void findSimilar()} style={styles.sheetAction} variant="secondary">Find similar image</BottomSheetItem> : null}
@@ -2185,7 +2610,7 @@ export function GalleryWorkspace() {
           <Button disabled={busy} onPress={goBackSheet} size="lg" variant="secondary">Close</Button>
         </View> : null}
         {activeSheet === "confirmLeaveCollection" ? <View style={styles.compactSheetActions}>
-          <Button disabled={busy} loading={busy} onPress={() => void leaveActiveCollection()} size="lg" variant="primary">Confirm</Button>
+          <Button disabled={busy} loading={busy} onPress={() => void leaveActiveCollection()} size="lg" variant="primary">Leave</Button>
           <Button disabled={busy} onPress={goBackSheet} size="lg" variant="secondary">Close</Button>
         </View> : null}
         {activeSheet === "duplicates" ? <View style={styles.duplicatePanel}>
@@ -2198,7 +2623,7 @@ export function GalleryWorkspace() {
             <Switch accessibilityLabel={showOnlyFavorites ? "Show all Gallery images" : "Show only favorite Gallery images"} checked={showOnlyFavorites} onCheckedChange={(checked) => { setGalleryShowOnlyFavorites(checked); notify("Filter updated"); closeSheet(); }} />
             <Text style={styles.favoriteSwitchLabel}>{showOnlyFavorites ? "Showing only favorites" : "Showing all"}</Text>
           </View>
-          <Button onPress={() => void openVisualIdentities("filter")} size="lg" variant="secondary">Visual identities</Button>
+          <Button onPress={() => void openVisualIdentities()} size="lg" variant="secondary">Visual identities</Button>
           <Button onPress={() => void openSearchHistory()} size="lg" variant="secondary">Search history</Button>
         </View> : null}
         {activeSheet === "identityPickerFilter" ? <View style={styles.filterPanel}>
@@ -2206,6 +2631,7 @@ export function GalleryWorkspace() {
             <Switch accessibilityLabel={showOnlyFavorites ? "Show all picker images" : "Show only favorite picker images"} checked={showOnlyFavorites} onCheckedChange={(checked) => { setGalleryShowOnlyFavorites(checked); notify("Filter updated"); }} />
             <Text style={styles.favoriteSwitchLabel}>{showOnlyFavorites ? "Showing only favorites" : "Showing all"}</Text>
           </View>
+          <Button onPress={() => void openVisualIdentities()} size="lg" variant="secondary">Visual identities</Button>
           <Button onPress={() => void openSearchHistory("identityPicker")} size="lg" variant="secondary">Search history</Button>
         </View> : null}
         {activeSheet === "visualIdentities" ? <View style={styles.identityLibrary}>
@@ -2277,7 +2703,12 @@ export function GalleryWorkspace() {
           <Button disabled={busy || duplicateImages.length === 0} loading={busy} onPress={() => void deleteDuplicates()} size="lg" variant="primary">Delete</Button>
           <Button disabled={busy} onPress={goBackSheet} size="lg" variant="secondary">Close</Button>
         </View> : null}
-        </ScrollView>
+        {activeSheet === "confirmCleanupDelete" ? <View style={styles.compactSheetActions}>
+          <Text style={styles.confirmationText}>Delete {cleanupImages.length} selected image{cleanupImages.length === 1 ? "" : "s"}?</Text>
+          <Button disabled={busy || cleanupImages.length === 0} loading={busy} onPress={() => void deleteCleanupImages()} size="lg" variant="primary">Delete</Button>
+          <Button disabled={busy} onPress={goBackSheet} size="lg" variant="secondary">Close</Button>
+        </View> : null}
+        </ScrollView>}
       </BottomSheet>
       {activeCollection ? <GalleryCollectionSharing collection={activeCollection} context={galleryContext} memberKeys={memberKeys} onClose={() => setSharingOpen(false)} open={sharingOpen} /> : null}
       {cameraOpen ? <GalleryCaptureModal onClose={() => setCameraOpen(false)} onSubmit={uploadCapturedPhotos} /> : null}
@@ -2302,7 +2733,7 @@ const styles = StyleSheet.create({
   collectionTitleActions: { flexDirection: "row", alignItems: "center", gap: 10 },
   collectionTabs: { flexDirection: "row", gap: 4, padding: 3, borderWidth: 1, backgroundColor: palette.panel },
   collectionTab: { flex: 1 },
-  sharingRow: { minHeight: 34, flexDirection: "row", alignItems: "center", justifyContent: "flex-end" },
+  sharingRow: { minHeight: 34, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 8 },
   collectionSearch: { minHeight: 44, flex: 1, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 7, borderRadius: 999, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.page },
   bulkToolbar: { minHeight: 40, padding: 5, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderWidth: 1, backgroundColor: palette.panel },
   bulkToolbarSelection: { flexDirection: "row", alignItems: "center", gap: 8 },
@@ -2347,6 +2778,13 @@ const styles = StyleSheet.create({
   actionMenu: { gap: 8 },
   duplicatePanel: { flexGrow: 1, minHeight: 320 },
   duplicateEmpty: { minHeight: 320, alignItems: "center", justifyContent: "center" },
+  cleanupListContent: { flexGrow: 1, paddingBottom: 4 },
+  cleanupHeader: { gap: spacing.sm, marginBottom: spacing.sm },
+  cleanupGridRow: { flexDirection: "row", gap: GRID_GAP },
+  cleanupCard: { marginBottom: GRID_GAP },
+  cleanupTabs: { flexDirection: "row", gap: 3, padding: 3, borderWidth: 1, backgroundColor: palette.panel },
+  cleanupTab: { flex: 1 },
+  cleanupEmpty: { flexGrow: 1, minHeight: 320, alignItems: "center", justifyContent: "center" },
   identityLibrary: { flexGrow: 1, minHeight: 360 },
   identityPicker: { flexGrow: 1, minHeight: 480, gap: spacing.sm },
   identityNameForm: { flexGrow: 1, gap: spacing.lg },
@@ -2363,6 +2801,7 @@ const styles = StyleSheet.create({
   sheetFooter: { gap: 8 },
   sheetFooterAction: { width: "100%" },
   compactSheetActions: { width: "100%", gap: spacing.sm, padding: 2 },
+  confirmationText: { color: palette.silver300, fontFamily: fonts.regular, fontSize: 13, lineHeight: 18, textAlign: "center" },
   filterPanel: { gap: 6 },
   favoriteSwitchRow: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: spacing.xs },
   favoriteSwitchLabel: { color: palette.muted, fontFamily: fonts.regular, fontSize: 12 },
