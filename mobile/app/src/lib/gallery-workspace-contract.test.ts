@@ -5,6 +5,10 @@ const captureSource = await Bun.file(new URL("../components/capability/GalleryCa
 const cameraSource = await Bun.file(new URL("../components/capability/BrandedCameraModal.tsx", import.meta.url)).text();
 const bottomSheetSource = await Bun.file(new URL("../../../../shared/packages/ui/components/bottom-sheet/bottom-sheet.mobile.tsx", import.meta.url)).text();
 const sharingSource = await Bun.file(new URL("../components/capability/GalleryCollectionSharing.tsx", import.meta.url)).text();
+const memberWebSource = await Bun.file(new URL("../../../../shared/packages/ui/icons/member/member.web.tsx", import.meta.url)).text();
+const memberMobileSource = await Bun.file(new URL("../../../../shared/packages/ui/icons/member/member.mobile.tsx", import.meta.url)).text();
+const webIconsSource = await Bun.file(new URL("../../../../shared/packages/ui/icons.ts", import.meta.url)).text();
+const mobileIconsSource = await Bun.file(new URL("../../../../shared/packages/ui/icons-mobile.ts", import.meta.url)).text();
 
 test("keeps image similarity collection-scoped and outside the image footer", () => {
   const footer = source.slice(source.indexOf('const sheetFooter ='), source.indexOf('return (', source.indexOf('const sheetFooter =')));
@@ -54,7 +58,7 @@ test("only lifts Core for its own focus and uses distinct image sheet presentati
   expect(source).toContain('behavior={aiInputFocused ? "height" : undefined}');
   expect(source).toContain("setAiInputFocused(focused)");
   expect(source).toContain('hideHeading={activeSheet === "rootActions" || activeSheet === "actions" || activeSheet === "collectionMenu" || activeSheet === "filter" || activeSheet === "imageActions" || activeSheet === "bulkActions"}');
-  expect(source).toContain('open={!sharingOpen && !pendingInvitesOpen && sheetOpen && (activeSheet === "image" || activeSheet === "imageActions") && Boolean(selectedImage || selectedOptimisticItem)}');
+  expect(source).toContain('open={!sharingOpen && sheetOpen && (activeSheet === "image" || activeSheet === "imageActions") && Boolean(selectedImage || selectedOptimisticItem)}');
   expect(source).toContain("        mutation\n        onOpenChange");
   expect(source).toContain('mutation={activeSheet === "imageEdit"');
   expect(source).not.toContain('activeSheet === "imageActions" || activeSheet === "imageEdit"');
@@ -150,9 +154,9 @@ test("gates collection search focus while the Core sheet closes", () => {
 });
 
 test("provides collection sharing navigation and permission gates", () => {
-  expect(source).toContain(">My collections</Button>");
-  expect(source).toContain(">Shared collections</Button>");
-  expect(source).toContain("<UsersIcon size=\"sm\"");
+  expect(source).toContain(">My</Button>");
+  expect(source).toContain(">Shared</Button>");
+  expect(source).toContain("<MemberIcon size=\"sm\"");
   expect(source).toContain('collectionRole === "collaborator" && image.createdByKey === activeCollection.memberKey');
   expect(source).toContain('pushSheet("confirmLeaveCollection")');
   expect(sharingSource).toContain('>Members</BottomSheetItem>');
@@ -164,9 +168,12 @@ test("provides collection sharing navigation and permission gates", () => {
   expect(sharingSource).toContain('galleryQueryKeys.members(context, collection.key), refetchType: "none"');
   expect(sharingSource).toContain('view === "memberRemoveConfirm"');
   expect(sharingSource).toContain('active === selectedLink.active');
-  expect(source).toContain('open={!sharingOpen && !pendingInvitesOpen && sheetOpen');
+  expect(source).toContain('open={!sharingOpen && sheetOpen');
   expect(source).toContain('access?.canContribute && role !== "viewer"');
-  expect(source).toContain('accessibilityLabel="Pending Gallery invites"');
+  expect(source).not.toContain("GalleryPendingInvites");
+  expect(source).not.toContain("pendingInvitesOpen");
+  expect(source).not.toContain('accessibilityLabel="Pending Gallery invites"');
+  expect(sharingSource).not.toContain("export function GalleryPendingInvites");
   expect(sharingSource).toContain('event.slug === "collection.access.changed"');
   expect(sharingSource).toContain('accessibilityLabel={`Remove ${selectedMember?.name ?? "member"} from collection`}');
   expect(sharingSource).not.toContain('<View accessible accessibilityHint=');
@@ -174,6 +181,31 @@ test("provides collection sharing navigation and permission gates", () => {
   expect(source).toContain('setCanCreateCollections(overview.canCreateCollections)');
   expect(source).toContain('collectionTab === "mine" && canCreateCollections');
   expect(source).toContain('activeCollection\n    ? isCollectionOwner');
+});
+
+test("restores the root create action and Archive-style ownership tabs", () => {
+  expect(source).toContain('<Button accessibilityLabel="Create in Gallery" contentMode="raw" disabled={loading}');
+  expect(source).toContain('<PlusIcon size="sm" />');
+  expect(source).toContain('<Tabs accessibilityRole="tablist" style={styles.collectionTabs}>');
+  expect(source).toContain('<Button accessibilityRole="tab" accessibilityState={{ selected: collectionTab === "mine" }}');
+  expect(source).toContain('size="xs" style={styles.collectionTab} variant={collectionTab === "mine" ? "secondary" : "ghost"}>My</Button>');
+  expect(source).toContain('size="xs" style={styles.collectionTab} variant={collectionTab === "shared" ? "secondary" : "ghost"}>Shared</Button>');
+  expect(source).toContain('collectionTabs: { flexDirection: "row", gap: 4, padding: 3, borderWidth: 1, backgroundColor: palette.panel }');
+});
+
+test("exports a distinct person-outline member icon for collection access", () => {
+  expect(webIconsSource).toContain("export * from './icons/member';");
+  expect(mobileIconsSource).toContain('export * from "./icons/member/member.mobile";');
+  for (const iconSource of [memberWebSource, memberMobileSource]) {
+    expect(iconSource).toContain('M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z');
+    expect(iconSource).toContain('M4 21a8 8 0 0 1 16 0');
+    expect(iconSource).not.toContain('M5 12h14');
+    expect(iconSource).not.toContain('M12 5v14');
+  }
+});
+
+test("filters root collections by authoritative ownership with a legacy fallback", () => {
+  expect(source).toContain('collectionTab === "mine" ? isGalleryCollectionOwned(collection) : !isGalleryCollectionOwned(collection)');
 });
 
 test("edits owner collection covers from existing images with tri-state changes", () => {
@@ -285,6 +317,8 @@ test("orders owner sharing routes and reuses the share-link loader", () => {
 
 test("filters share links with shared active and inactive tabs", () => {
   expect(sharingSource).toContain('accessibilityLabel="Share link status"');
+  expect(sharingSource).toContain('accessibilityRole="tablist"');
+  expect(sharingSource).toContain('size="xs" style={styles.tab} variant={linkTab === "active" ? "secondary" : "ghost"}');
   expect(sharingSource).toContain(">Active links</Button>");
   expect(sharingSource).toContain(">Inactive links</Button>");
   expect(sharingSource).toContain('filterGalleryShareLinks(links, linkTab === "active")');

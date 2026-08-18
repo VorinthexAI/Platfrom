@@ -1,6 +1,7 @@
 ﻿export * from './icons/home';
 export * from './icons/search';
 export * from './icons/menu';
+export * from './icons/member';
 export * from './icons/close';
 export * from './icons/arrow-left';
 export * from './icons/arrow-right';

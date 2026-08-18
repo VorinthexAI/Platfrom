@@ -321,7 +321,7 @@ export function GalleryCollectionSharing({ collection, context, memberKeys, onCl
     {view === "invites" ? <View style={styles.full}>{loading ? <View accessibilityLabel="Loading pending invites" accessibilityRole="progressbar" style={styles.list}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={styles.rowSkeleton} />)}</View> : <ScrollView contentContainerStyle={styles.list}>{invites.map((invite) => <View key={invite.key} style={styles.row}><Button contentMode="raw" onPress={() => { setSelectedInvite(invite); setInviteResponse("accept"); setView("inviteConfirm"); }} size="lg" style={styles.rowMain} variant="ghost"><View><Text style={styles.name}>{invite.recipient}</Text><Text style={styles.meta}>{invite.role}</Text></View></Button><Button accessibilityLabel={`Reject invite for ${invite.recipient}`} contentMode="raw" onPress={() => { setSelectedInvite(invite); setInviteResponse("reject"); setView("inviteConfirm"); }} size="xs" variant="icon"><CloseIcon size="sm" /></Button></View>)}</ScrollView>}</View> : null}
     {view === "inviteConfirm" ? <View style={styles.footer}><Button accessibilityHint={`${inviteResponse === "accept" ? "Adds" : "Does not add"} this shared collection to Gallery.`} accessibilityLabel={`${inviteResponse === "accept" ? "Accept" : "Reject"} invite to ${selectedInvite?.collection.name ?? "collection"}`} disabled={busy} loading={busy} onPress={() => void respondInvite()} size="lg" variant="primary">{inviteResponse === "accept" ? "Accept" : "Reject"}</Button><Button accessibilityHint="Returns to pending invites without responding." accessibilityLabel="Close invite confirmation" disabled={busy} onPress={() => setView("invites")} size="lg" variant="secondary">Close</Button></View> : null}
     {view === "links" ? <View style={styles.full}>
-      <Tabs accessibilityLabel="Share link status" style={styles.tabs}><Button accessibilityState={{ selected: linkTab === "active" }} onPress={() => setLinkTab("active")} size="sm" style={styles.tab} variant={linkTab === "active" ? "primary" : "ghost"}>Active links</Button><Button accessibilityState={{ selected: linkTab === "inactive" }} onPress={() => setLinkTab("inactive")} size="sm" style={styles.tab} variant={linkTab === "inactive" ? "primary" : "ghost"}>Inactive links</Button></Tabs>
+      <Tabs accessibilityLabel="Share link status" accessibilityRole="tablist" style={styles.tabs}><Button accessibilityRole="tab" accessibilityState={{ selected: linkTab === "active" }} onPress={() => setLinkTab("active")} size="xs" style={styles.tab} variant={linkTab === "active" ? "secondary" : "ghost"}>Active links</Button><Button accessibilityRole="tab" accessibilityState={{ selected: linkTab === "inactive" }} onPress={() => setLinkTab("inactive")} size="xs" style={styles.tab} variant={linkTab === "inactive" ? "secondary" : "ghost"}>Inactive links</Button></Tabs>
       {loading ? <View accessibilityLabel="Loading share links" accessibilityRole="progressbar" style={styles.list}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={styles.rowSkeleton} />)}</View> : <ScrollView contentContainerStyle={styles.list}>{filterGalleryShareLinks(links, linkTab === "active").map((link) => <BottomSheetItem key={link.key} contentMode="raw" onPress={() => openLink(link)} size="lg" variant="ghost"><View><Text numberOfLines={1} style={styles.name}>{link.url}</Text><Text style={styles.meta}>{link.role} · {link.active ? "Active" : "Inactive"}</Text></View></BottomSheetItem>)}{filterGalleryShareLinks(links, linkTab === "active").length === 0 ? <Text style={styles.emptyText}>No {linkTab} share links.</Text> : null}{owner ? <Button icon={<PlusIcon size="sm" />} onPress={newLink} size="lg" variant="secondary">Create new</Button> : null}</ScrollView>}
     </View> : null}
     {view === "link" && selectedLink ? <View style={styles.form}><Text style={styles.meta}>Created {dateTime(selectedLink.createdAt)}</Text><Text style={styles.name}>{selectedLink.role === "viewer" ? "Viewer" : "Collaborator"}</Text><View style={styles.switchRow}><Switch accessibilityLabel="Share link active" checked={active} onCheckedChange={setActive} /><Text style={styles.meta}>Active</Text></View></View> : null}
@@ -333,97 +333,9 @@ function RoleButtons({ role, setRole }: { role: ShareRole; setRole: (role: Share
   return <View accessibilityLabel="Access role" style={styles.roles}><Button accessibilityState={{ selected: role === "viewer" }} onPress={() => setRole("viewer")} size="sm" variant={role === "viewer" ? "primary" : "secondary"}>Viewer</Button><Button accessibilityState={{ selected: role === "collaborator" }} onPress={() => setRole("collaborator")} size="sm" variant={role === "collaborator" ? "primary" : "secondary"}>Collaborator</Button></View>;
 }
 
-export function GalleryPendingInvites({ context, memberKeys, onAccepted, onClose, open }: {
-  context: { organizationKey: string; scopeKey: string };
-  memberKeys: string[];
-  onAccepted: () => void;
-  onClose: () => void;
-  open: boolean;
-}) {
-  const queryClient = useQueryClient();
-  const notify = useNotice();
-  const [invites, setInvites] = useState<GalleryCollectionInvite[]>([]);
-  const [selected, setSelected] = useState<GalleryCollectionInvite>();
-  const [response, setResponse] = useState<"accept" | "reject">("accept");
-  const [confirming, setConfirming] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [loadError, setLoadError] = useState<string>();
-  const queryKey = galleryQueryKeys.incomingInvites(context);
-  const deferredRefresh = useRef(false);
-  const refreshInFlight = useRef(false);
-  const contextGeneration = useRef(0);
-  const requestGeneration = useRef(0);
-  const busyRef = useRef(busy);
-  busyRef.current = busy;
-
-  async function load() {
-    const generation = contextGeneration.current;
-    const request = ++requestGeneration.current;
-    refreshInFlight.current = true;
-    setLoading(true); setLoadError(undefined);
-    try {
-      await queryClient.invalidateQueries({ queryKey, refetchType: "none" });
-      const result = await queryClient.fetchQuery({ queryKey, queryFn: () => listGalleryCollectionInvites(memberKeys), staleTime: 0 });
-      if (generation !== contextGeneration.current || request !== requestGeneration.current) return;
-      setInvites(result.invites);
-      if (selected) {
-        const rebound = result.invites.find(({ key }) => key === selected.key);
-        setSelected(rebound);
-        if (!rebound) setConfirming(false);
-      }
-    } catch {
-      if (generation !== contextGeneration.current || request !== requestGeneration.current) return;
-      setLoadError("Invites could not be loaded.");
-    } finally {
-      if (generation === contextGeneration.current && request === requestGeneration.current) {
-        refreshInFlight.current = false;
-        setLoading(false);
-        if (deferredRefresh.current && !busyRef.current) { deferredRefresh.current = false; setTimeout(() => { void load(); }, 0); }
-      }
-    }
-  }
-
-  useEffect(() => {
-    contextGeneration.current += 1;
-    requestGeneration.current += 1;
-    refreshInFlight.current = false;
-    deferredRefresh.current = false;
-    setBusy(false);
-    if (open) { setConfirming(false); void load(); }
-  }, [open, context.organizationKey, context.scopeKey, memberKeys.join("|")]);
-  useEffect(() => subscribeAppEvent((event) => {
-    if (!open || event.type === "gallery.changed" && event.slug !== "collection.invites.changed") return;
-    if (busyRef.current || refreshInFlight.current) { deferredRefresh.current = true; return; }
-    void load();
-  }), [busy, open, memberKeys.join("|"), selected?.key]);
-  useEffect(() => { if (!busy && !loading && open && deferredRefresh.current && !refreshInFlight.current) { deferredRefresh.current = false; void load(); } }, [busy, loading, open]);
-
-  async function respond() {
-    if (!selected) return;
-    const generation = contextGeneration.current;
-    setBusy(true);
-    try {
-      await respondToGalleryCollectionInvite(selected.key, response);
-      if (generation !== contextGeneration.current) return;
-      if (response === "accept") onAccepted();
-      setConfirming(false);
-      notify(response === "accept" ? "Invite accepted" : "Invite rejected");
-      await load();
-    } catch {
-      if (generation === contextGeneration.current) notify("Invite response failed");
-    } finally { if (generation === contextGeneration.current) setBusy(false); }
-  }
-
-  return <BottomSheet dismissible={!busy && !confirming} footer={!confirming ? <Button disabled={busy} onPress={onClose} size="lg" variant="secondary">Close</Button> : undefined} hideHeading={confirming} onOpenChange={(next) => { if (!next) onClose(); }} open={open} tall={!confirming} title={confirming ? "" : "Pending invites"}>
-    {loadError ? <Text accessibilityRole="alert" style={styles.error}>{loadError}</Text> : null}
-    {confirming ? <View style={styles.footer}><Button accessibilityHint={`${response === "accept" ? "Adds" : "Does not add"} this shared collection to Gallery.`} accessibilityLabel={`${response === "accept" ? "Accept" : "Reject"} invite to ${selected?.collection.name ?? "collection"}`} disabled={busy} loading={busy} onPress={() => void respond()} size="lg" variant="primary">{response === "accept" ? "Accept" : "Reject"}</Button><Button accessibilityHint="Returns to pending invites without responding." accessibilityLabel="Close invite confirmation" disabled={busy} onPress={() => setConfirming(false)} size="lg" variant="secondary">Close</Button></View> : <View style={styles.full}>{loading ? <View accessibilityLabel="Loading pending invites" accessibilityRole="progressbar" style={styles.list}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={styles.rowSkeleton} />)}</View> : <ScrollView contentContainerStyle={styles.list}>{invites.map((invite) => <View key={invite.key} style={styles.row}><Button accessibilityLabel={`Accept invite to ${invite.collection.name}`} contentMode="raw" onPress={() => { setSelected(invite); setResponse("accept"); setConfirming(true); }} size="lg" style={styles.rowMain} variant="ghost"><View><Text style={styles.name}>{invite.collection.name}</Text><Text style={styles.meta}>From {invite.inviterDisplayName} · {invite.role}</Text></View></Button><Button accessibilityLabel={`Reject invite to ${invite.collection.name}`} contentMode="raw" onPress={() => { setSelected(invite); setResponse("reject"); setConfirming(true); }} size="xs" variant="icon"><CloseIcon size="sm" /></Button></View>)}</ScrollView>}</View>}
-  </BottomSheet>;
-}
-
 const styles = StyleSheet.create({
   menu: { gap: spacing.xs }, full: { minHeight: 430, gap: spacing.sm }, footer: { gap: spacing.sm }, form: { minHeight: 300, gap: spacing.md },
-  tabs: { padding: 4, flexDirection: "row", borderWidth: 1, backgroundColor: palette.panel }, tab: { flex: 1, paddingHorizontal: 6 },
+  tabs: { flexDirection: "row", gap: 4, padding: 3, borderWidth: 1, backgroundColor: palette.panel }, tab: { flex: 1 },
   list: { gap: 3, paddingBottom: spacing.lg }, pillSkeleton: { height: 34, borderRadius: 999 }, rowSkeleton: { height: 48, borderRadius: radii.md },
   row: { minHeight: 48, paddingLeft: 4, flexDirection: "row", alignItems: "center", borderBottomWidth: 1, borderBottomColor: palette.hairline }, rowMain: { flex: 1, alignItems: "flex-start", paddingHorizontal: 6 },
   name: { color: palette.silver100, fontFamily: fonts.medium, fontSize: 13 }, meta: { color: palette.muted, fontFamily: fonts.regular, fontSize: 11 },

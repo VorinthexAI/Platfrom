@@ -11,6 +11,7 @@ export type GalleryCollection = {
   count: number;
   coverUrl: string | null;
   memberKey: string;
+  isOwned?: boolean;
   role: GalleryCollectionRole;
   access: { canRead: boolean; canContribute: boolean; canManage: boolean };
 };
@@ -86,6 +87,10 @@ export function filterCollections(collections: GalleryCollection[], query: strin
   const normalized = query.trim().toLocaleLowerCase();
   if (!normalized) return collections;
   return collections.filter(({ name, description }) => `${name}\n${description ?? ""}`.toLocaleLowerCase().includes(normalized));
+}
+
+export function isGalleryCollectionOwned(collection: Pick<GalleryCollection, "isOwned" | "role">) {
+  return collection.isOwned ?? (collection.role === "owner");
 }
 
 export function filterMediaItems(items: GalleryImage[], query: string) {

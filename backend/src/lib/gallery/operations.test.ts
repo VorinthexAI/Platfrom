@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
-import { galleryOperationInputSchemas, galleryOperations, GalleryOperationError, normalizeGalleryOperationError, projectCollectionShare, projectCollectionShares, safeImage } from './operations';
+import { galleryOperationInputSchemas, galleryOperations, GalleryOperationError, normalizeGalleryOperationError, projectCollectionShare, projectCollectionShares, projectGalleryCollection, safeImage } from './operations';
 import { collectionMemberSchema } from '@/lib/db/collection-members.node';
 import { collectionInviteSchema } from '@/lib/db/collection-invites.node';
 import { galleryUploadSchema } from '@/lib/db/gallery-uploads.node';
@@ -121,6 +121,10 @@ describe('Gallery operation boundaries', () => {
     const source = await Bun.file(new URL('./operations.ts', import.meta.url)).text();
     expect(source).toContain('const canCreateCollections = await repository.canManageScope(input.scopeKey, membership.key)');
     expect(source).toContain('canCreateCollections,');
+    expect(source).toContain('role, isOwned');
+    const now = '2026-08-18T12:00:00.000Z';
+    const collection = { key: key(), scopeKey: key(), name: 'Shared', embedding: Array(4_096).fill(0), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now };
+    expect(projectGalleryCollection(collection, 0, null, key(), 'owner', false)).toMatchObject({ role: 'owner', isOwned: false, access: { canManage: true } });
   });
 
   test('accepts only complete image coordinate pairs', () => {

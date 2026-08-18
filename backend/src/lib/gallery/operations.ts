@@ -178,8 +178,8 @@ export async function safeImage(image: z.infer<typeof imageSchema>, score?: numb
   };
 }
 
-async function safeCollection(collection: z.infer<typeof collectionSchema>, count: number, coverUrl: string | null, memberKey: string, role: 'owner' | 'collaborator' | 'viewer' = 'owner') {
-  return { key: collection.key, name: collection.name, description: collection.description ?? null, isFavorite: collection.isFavorite, count, coverUrl, memberKey, role, access: { canRead: true, canContribute: role !== 'viewer', canManage: role === 'owner' }, createdAt: collection.createdAt, updatedAt: collection.updatedAt };
+export function projectGalleryCollection(collection: z.infer<typeof collectionSchema>, count: number, coverUrl: string | null, memberKey: string, role: 'owner' | 'collaborator' | 'viewer' = 'owner', isOwned = true) {
+  return { key: collection.key, name: collection.name, description: collection.description ?? null, isFavorite: collection.isFavorite, count, coverUrl, memberKey, role, isOwned, access: { canRead: true, canContribute: role !== 'viewer', canManage: role === 'owner' }, createdAt: collection.createdAt, updatedAt: collection.updatedAt };
 }
 
 async function reconcileVisualIdentity(identity: z.infer<typeof visualIdentitySchema>, organizationKey: string, actorKey: string, context: GalleryOperationContext) {
@@ -205,7 +205,7 @@ async function overview(rawInput: unknown, context: GalleryOperationContext) {
     const { collections, images } = await repository.listOverview({ scopeKey: input.scopeKey, actorKey: membership.key, collectionKey: input.collectionKey, cursor: input.cursor, limit: input.limit });
     const canCreateCollections = await repository.canManageScope(input.scopeKey, membership.key);
     return {
-      collections: await Promise.all(collections.map(async ({ collection, count, cover, role }) => safeCollection(collection, count, cover ? await imageUrl(cover.storageKey) : null, membership.key, role))),
+      collections: await Promise.all(collections.map(async ({ collection, count, cover, role, isOwned }) => projectGalleryCollection(collection, count, cover ? await imageUrl(cover.storageKey) : null, membership.key, role, isOwned))),
       images: await Promise.all(images.items.map((image) => safeImage(image)),),
       nextCursor: images.nextCursor,
       canCreateCollections,
@@ -221,7 +221,7 @@ async function createCollection(rawInput: unknown, context: GalleryOperationCont
     const member = collectionMemberSchema.parse({ key: newId(), scopeKey: input.scopeKey, collectionKey: collection.key, memberKey: membership.key, role: 'owner', createdAt: now });
     if (!await repository.createCollection(collection, member)) throw new GalleryOperationError(403, 'GALLERY_FORBIDDEN', 'Gallery collection creation denied.');
     await publish(context, 'createCollection', { collections: [collection.key] });
-    return safeCollection(collection, 0, null, membership.key);
+    return projectGalleryCollection(collection, 0, null, membership.key);
 }
 
 async function updateCollection(rawInput: unknown, context: GalleryOperationContext) {
@@ -233,7 +233,7 @@ async function updateCollection(rawInput: unknown, context: GalleryOperationCont
     await publish(context, input.coverImageKey === undefined ? 'updateCollection' : 'updateCollectionCover', { collections: [collection.key] });
     const overview = await repository.listOverview({ scopeKey: input.scopeKey, actorKey: context.membership.key, collectionKey: collection.key, limit: 1 });
     const row = overview.collections.find(({ collection: candidate }) => candidate.key === collection.key);
-    return { collection: await safeCollection(collection, row?.count ?? 0, row?.cover ? await imageUrl(row.cover.storageKey) : null, context.membership.key) };
+    return { collection: projectGalleryCollection(collection, row?.count ?? 0, row?.cover ? await imageUrl(row.cover.storageKey) : null, context.membership.key) };
 }
 
 async function deleteCollection(rawInput: unknown, context: GalleryOperationContext) {

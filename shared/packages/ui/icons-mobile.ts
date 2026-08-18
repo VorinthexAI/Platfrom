@@ -43,6 +43,7 @@ export * from "./icons/location-pin/location-pin.mobile";
 export * from "./icons/lock/lock.mobile";
 export * from "./icons/log-out/log-out.mobile";
 export * from "./icons/mail/mail.mobile";
+export * from "./icons/member/member.mobile";
 export * from "./icons/menu/menu.mobile";
 export * from "./icons/minus/minus.mobile";
 export * from "./icons/more-horizontal/more-horizontal.mobile";

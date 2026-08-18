@@ -29,7 +29,7 @@ mock.module("./api-client", () => ({
   } },
 }));
 
-const { activateGalleryShare, createGalleryCollection, createGalleryCollectionShareLink, deleteGalleryCollection, deleteGalleryImages, deleteGallerySubject, fetchGalleryOverview, filterCollections, filterGalleryShareLinks, filterMediaItems, findGalleryCollectionDuplicates, groupGalleryImagesByCreatedDate, leaveGalleryCollection, listGalleryCollectionInvites, listGalleryCollectionMembers, listGalleryCollectionShareLinks, mergeMediaItems, removeGalleryCollectionMember, respondToGalleryCollectionInvite, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryCollectionMember, updateGalleryCollectionShareLink, updateGalleryImage, uploadGalleryImages } = await import("./gallery-client");
+const { activateGalleryShare, createGalleryCollection, createGalleryCollectionShareLink, deleteGalleryCollection, deleteGalleryImages, deleteGallerySubject, fetchGalleryOverview, filterCollections, filterGalleryShareLinks, filterMediaItems, findGalleryCollectionDuplicates, groupGalleryImagesByCreatedDate, isGalleryCollectionOwned, leaveGalleryCollection, listGalleryCollectionInvites, listGalleryCollectionMembers, listGalleryCollectionShareLinks, mergeMediaItems, removeGalleryCollectionMember, respondToGalleryCollectionInvite, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryCollectionMember, updateGalleryCollectionShareLink, updateGalleryImage, uploadGalleryImages } = await import("./gallery-client");
 
 beforeEach(() => { calls.splice(0); responses.clear(); });
 
@@ -55,6 +55,13 @@ test("returns every collection for an empty search", () => {
   const collections = [collection("Trips", "trips"), collection("My Images", "default")];
 
   expect(filterCollections(collections, "  ")).toEqual(collections);
+});
+
+test("uses authoritative ownership with a legacy role fallback", () => {
+  expect(isGalleryCollectionOwned({ isOwned: false, role: "owner" })).toBe(false);
+  expect(isGalleryCollectionOwned({ isOwned: true, role: "collaborator" })).toBe(true);
+  expect(isGalleryCollectionOwned({ role: "owner" })).toBe(true);
+  expect(isGalleryCollectionOwned({ role: "viewer" })).toBe(false);
 });
 
 const image = (key: string, filename: string, caption: string) => ({

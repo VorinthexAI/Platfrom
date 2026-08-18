@@ -132,9 +132,23 @@ describe('Gallery repository transactions', () => {
     await createGalleryRepository(database).listOverview({ scopeKey: newId(), actorKey: newId(), limit: 10 });
     expect(queries[0]).toContain('item.memberKey == @actorKey');
     expect(queries[0]).toContain('scopeRole IN ["owner", "admin", "moderator"]');
+    expect(queries[0]).toContain('explicitOwnerCount == 0');
+    expect(queries[0]).toContain('member.role == "owner"');
+    expect(queries[0]).toContain('isOwned');
     expect(queries[0]).toContain('SORT relation.createdAt ASC, relation._key ASC');
     expect(queries[1]).toContain('LENGTH(accessibleCollections) > 0');
     expect(queries[1]).toContain('image.createdByKey == @actorKey && relationCount == 0');
+  });
+
+  test('projects explicit ownership independently from elevated effective access', async () => {
+    const scopeKey = newId(), actorKey = newId(), now = '2026-08-18T12:00:00.000Z';
+    const rows = [true, false].map((isOwned, index) => ({
+      collection: { _key: newId(), scopeKey, name: isOwned ? 'Mine' : 'Shared', embedding: Array(4_096).fill(0), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now },
+      count: 0, cover: null, role: 'owner', isOwned,
+    }));
+    const database: MediaLibraryDatabase = { async query(query) { return { async all() { return query.includes('FOR collection IN collections') ? rows : []; } }; } };
+    const result = await createGalleryRepository(database).listOverview({ scopeKey, actorKey, limit: 10 });
+    expect(result.collections.map(({ role, isOwned }) => ({ role, isOwned }))).toEqual([{ role: 'owner', isOwned: true }, { role: 'owner', isOwned: false }]);
   });
 
   test('includes active scope moderators in manager-only subject event audiences', async () => {

@@ -15,12 +15,12 @@ import { Switch } from "@vorinthex/shared/ui/switch";
 import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 import { useToast } from "@vorinthex/shared/ui/toast";
-import { CheckIcon, ChevronLeftIcon, CloseIcon, FilterIcon, FolderIcon, MailIcon, MoreHorizontalIcon, PlusIcon, SearchIcon, SendIcon, UsersIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { CheckIcon, ChevronLeftIcon, CloseIcon, FilterIcon, FolderIcon, MemberIcon, MoreHorizontalIcon, PlusIcon, SearchIcon, SendIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { appendCursorItems, isNearScrollEnd } from "@vorinthex/shared/lib/pagination";
 
 import { WorkspaceAppSwitcher } from "@/components/capability/WorkspaceAppSwitcher";
 import { GalleryCaptureModal } from "@/components/capability/GalleryCaptureModal";
-import { GalleryCollectionSharing, GalleryPendingInvites } from "@/components/capability/GalleryCollectionSharing";
+import { GalleryCollectionSharing } from "@/components/capability/GalleryCollectionSharing";
 import { ChromeIcon } from "@/components/ChromeIcon";
 import { assistantIconSource } from "@/data/capability-icons";
 import {
@@ -38,6 +38,7 @@ import {
   getGalleryContext,
   getGalleryMemberKey,
   groupGalleryImagesByCreatedDate,
+  isGalleryCollectionOwned,
   leaveGalleryCollection,
   listGallerySubjects,
   mergeMediaItems,
@@ -110,7 +111,6 @@ export function GalleryWorkspace() {
   const [canCreateCollections, setCanCreateCollections] = useState(false);
   const [collectionTab, setCollectionTab] = useState<"mine" | "shared">("mine");
   const [sharingOpen, setSharingOpen] = useState(false);
-  const [pendingInvitesOpen, setPendingInvitesOpen] = useState(false);
   const [images, setImages] = useState<GalleryImage[]>([]);
   const [activeCollection, setActiveCollection] = useState<GalleryCollection>();
   const [showingCollectionOverview, setShowingCollectionOverview] = useState(true);
@@ -279,7 +279,6 @@ export function GalleryWorkspace() {
     deletedIdentityKeys.current.clear();
     closeSheet();
     setSharingOpen(false);
-    setPendingInvitesOpen(false);
     setCameraOpen(false);
     setPendingFiles((current) => { deletePreparedFiles(current); return []; });
     setOptimisticMediaItems((current) => { deletePreparedFiles(current); return []; });
@@ -1676,7 +1675,6 @@ export function GalleryWorkspace() {
     identityFilterRequest.current += 1;
     closeSheet();
     setSharingOpen(false);
-    setPendingInvitesOpen(false);
     setCameraOpen(false);
     setPendingFiles((current) => { deletePreparedFiles(current); return []; });
     setActiveCollection(undefined);
@@ -1946,7 +1944,7 @@ export function GalleryWorkspace() {
           : "Your visual memory starts with the first image.";
   const contextualView = Boolean(activeCollection || activeSubject || showingSearchResults);
   const normalCollectionView = Boolean(activeCollection && !activeSubject);
-  const visibleCollections = collections.filter((collection) => collectionTab === "mine" ? collection.role === "owner" : collection.role !== "owner");
+  const visibleCollections = collections.filter((collection) => collectionTab === "mine" ? isGalleryCollectionOwned(collection) : !isGalleryCollectionOwned(collection));
   const writableCollections = collections.filter(({ access, role }) => access?.canContribute && role !== "viewer");
   const canManageAnyCollection = collections.some(({ access, role }) => access?.canManage && role === "owner");
   const identityPickerVisibleCollections = collections.filter(({ isFavorite }) => !showOnlyFavorites || isFavorite);
@@ -2001,12 +1999,12 @@ export function GalleryWorkspace() {
             <View style={styles.collectionTitleRow}>
               <WorkspaceAppSwitcher active="gallery" trigger="back" />
               <Text numberOfLines={1} style={styles.collectionTitle}>Gallery</Text>
-              <View style={styles.collectionTitleActions}><Button accessibilityLabel="Pending Gallery invites" contentMode="raw" disabled={loading} onPress={() => { closeSheet(); setPendingInvitesOpen(true); }} size="xs" variant="icon"><MailIcon size="sm" /></Button>{canCreateCollections ? <Button accessibilityLabel="Create in Gallery" contentMode="raw" disabled={loading} onPress={() => openSheet("rootActions")} size="xs" variant="icon"><PlusIcon size="sm" /></Button> : null}</View>
+              <Button accessibilityLabel="Create in Gallery" contentMode="raw" disabled={loading} onPress={() => openSheet("rootActions")} size="xs" variant="icon"><PlusIcon size="sm" /></Button>
             </View>
             {status ? <View accessibilityLiveRegion="polite" style={styles.statusCard}><Text style={styles.status}>{status}</Text></View> : null}
-            <Tabs accessibilityLabel="Collection ownership" style={styles.collectionTabs}>
-              <Button accessibilityState={{ selected: collectionTab === "mine" }} onPress={() => setCollectionTab("mine")} size="sm" style={styles.collectionTab} variant={collectionTab === "mine" ? "primary" : "ghost"}>My collections</Button>
-              <Button accessibilityState={{ selected: collectionTab === "shared" }} onPress={() => setCollectionTab("shared")} size="sm" style={styles.collectionTab} variant={collectionTab === "shared" ? "primary" : "ghost"}>Shared collections</Button>
+            <Tabs accessibilityRole="tablist" style={styles.collectionTabs}>
+              <Button accessibilityRole="tab" accessibilityState={{ selected: collectionTab === "mine" }} onPress={() => setCollectionTab("mine")} size="xs" style={styles.collectionTab} variant={collectionTab === "mine" ? "secondary" : "ghost"}>My</Button>
+              <Button accessibilityRole="tab" accessibilityState={{ selected: collectionTab === "shared" }} onPress={() => setCollectionTab("shared")} size="xs" style={styles.collectionTab} variant={collectionTab === "shared" ? "secondary" : "ghost"}>Shared</Button>
             </Tabs>
             <View style={styles.collectionGrid}>
               {loading ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.collectionCard, styles.collectionSkeleton, { width: collectionSize, height: collectionSize }]} />) : visibleCollections.map((collection) => (
@@ -2032,7 +2030,7 @@ export function GalleryWorkspace() {
               {canAddImages ? <Button accessibilityLabel={`Add images to ${activeCollection.name}`} contentMode="raw" disabled={busy} hitSlop={5} onPress={() => openSheet("actions")} size="sm" variant="icon"><PlusIcon size="sm" /></Button> : null}
             </View>
           </View>
-          <View style={styles.sharingRow}><Button accessibilityLabel={`Sharing and access for ${activeCollection.name}`} contentMode="raw" onPress={() => { closeSheet(); setSharingOpen(true); }} size="sm" variant="icon"><UsersIcon size="sm" /></Button></View>
+          <View style={styles.sharingRow}><Button accessibilityLabel={`Sharing and access for ${activeCollection.name}`} contentMode="raw" onPress={() => { closeSheet(); setSharingOpen(true); }} size="sm" variant="icon"><MemberIcon size="sm" /></Button></View>
           {normalCollectionView ? <View style={styles.rootActions}>
             <View style={styles.collectionSearch}>
               <SearchIcon size="sm" variant="muted" />
@@ -2105,7 +2103,7 @@ export function GalleryWorkspace() {
         footer={<Button onPress={closeSheet} size="lg" variant="secondary">Close</Button>}
         mutation
         onOpenChange={(open) => { if (!open) closeSheet(); }}
-        open={!sharingOpen && !pendingInvitesOpen && sheetOpen && (activeSheet === "image" || activeSheet === "imageActions") && Boolean(selectedImage || selectedOptimisticItem)}
+        open={!sharingOpen && sheetOpen && (activeSheet === "image" || activeSheet === "imageActions") && Boolean(selectedImage || selectedOptimisticItem)}
         title={selectedImage?.filename ?? selectedOptimisticItem?.filename ?? "Image"}
       >
         {selectedImage || selectedOptimisticItem ? <View style={styles.detail}>
@@ -2123,7 +2121,7 @@ export function GalleryWorkspace() {
         hideHeading={activeSheet === "rootActions" || activeSheet === "actions" || activeSheet === "collectionMenu" || activeSheet === "filter" || activeSheet === "imageActions" || activeSheet === "bulkActions"}
         mutation={activeSheet === "imageEdit" || activeSheet === "newCollection" || activeSheet === "collectionEdit" || activeSheet === "duplicates" || activeSheet === "visualIdentities" || activeSheet === "identityPicker" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory"}
         onOpenChange={(open) => { if (!open) { if (activeSheetRef.current === "imageActions") goBackSheet(); else closeSheet(); } }}
-        open={!sharingOpen && !pendingInvitesOpen && sheetOpen && activeSheet !== "image"}
+        open={!sharingOpen && sheetOpen && activeSheet !== "image"}
         tall={activeSheet === "transferDestination" || activeSheet === "destination" || activeSheet === "searchHistory"}
         title={sheetTitle}
       >
@@ -2282,7 +2280,6 @@ export function GalleryWorkspace() {
         </ScrollView>
       </BottomSheet>
       {activeCollection ? <GalleryCollectionSharing collection={activeCollection} context={galleryContext} memberKeys={memberKeys} onClose={() => setSharingOpen(false)} open={sharingOpen} /> : null}
-      {!activeCollection ? <GalleryPendingInvites context={galleryContext} memberKeys={memberKeys} onAccepted={() => { void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.all(galleryContext) }); void load(undefined, true); }} onClose={() => setPendingInvitesOpen(false)} open={pendingInvitesOpen} /> : null}
       {cameraOpen ? <GalleryCaptureModal onClose={() => setCameraOpen(false)} onSubmit={uploadCapturedPhotos} /> : null}
     </KeyboardAvoidingView>
   );
@@ -2303,7 +2300,7 @@ const styles = StyleSheet.create({
   collectionTitleRow: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: 8 },
   collectionTitle: { flex: 1, color: palette.silver50, fontFamily: fonts.medium, fontSize: 24 },
   collectionTitleActions: { flexDirection: "row", alignItems: "center", gap: 10 },
-  collectionTabs: { padding: 4, flexDirection: "row", borderWidth: 1, backgroundColor: palette.panel },
+  collectionTabs: { flexDirection: "row", gap: 4, padding: 3, borderWidth: 1, backgroundColor: palette.panel },
   collectionTab: { flex: 1 },
   sharingRow: { minHeight: 34, flexDirection: "row", alignItems: "center", justifyContent: "flex-end" },
   collectionSearch: { minHeight: 44, flex: 1, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 7, borderRadius: 999, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.page },
