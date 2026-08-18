@@ -65,6 +65,8 @@ test("only lifts Core for its own focus and uses distinct image sheet presentati
   expect(bottomSheetSource).toContain('mutationSheet: {\n    bottom: 0');
   expect(bottomSheetSource).toContain('Platform.OS === "android" ? insets.bottom : 0');
   expect(bottomSheetSource).toContain('bottom: mutation ? androidBottomInset');
+  expect(bottomSheetSource).toContain('borderBottomLeftRadius: 24');
+  expect(bottomSheetSource).toContain('borderBottomRightRadius: 24');
   expect(bottomSheetSource).not.toContain('height: mutation ? windowHeight - insets.top - androidBottomInset');
 });
 

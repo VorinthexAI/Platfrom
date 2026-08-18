@@ -328,6 +328,8 @@ const styles = StyleSheet.create({
   sheet: {
     backgroundColor: colors.page,
     borderColor: "rgba(221, 226, 229, 0.14)",
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     borderWidth: 1,
