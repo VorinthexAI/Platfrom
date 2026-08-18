@@ -49,6 +49,7 @@ export * from './icons/image';
 export * from './icons/file';
 export * from './icons/folder';
 export * from './icons/camera';
+export * from './icons/camera-rotate';
 export * from './icons/location-pin';
 export * from './icons/log-out';
 export * from './icons/calendar';

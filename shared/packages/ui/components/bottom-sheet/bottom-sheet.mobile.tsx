@@ -114,7 +114,6 @@ export function BottomSheet({
 }: BottomSheetProps) {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
-  const androidBottomInset = Platform.OS === "android" ? Math.max(insets.bottom, 12) : 0;
   const setSceneSheetOpen = useContext(BottomSheetSceneContext);
   const [visible, setVisible] = useState(open);
   const [reducedMotion, setReducedMotion] = useState(false);
@@ -237,7 +236,7 @@ export function BottomSheet({
       transparent
       visible
     >
-      <View style={[styles.root, { paddingBottom: androidBottomInset }]}>
+      <View style={styles.root}>
         <Animated.View style={[styles.overlay, { opacity: overlayOpacity }]}>
           <Button
             accessibilityLabel="Close bottom sheet"
@@ -255,7 +254,6 @@ export function BottomSheet({
             styles.sheet,
             tall && styles.tallSheet,
             mutation && styles.mutationSheet,
-            Platform.OS === "android" && styles.androidSheet,
             {
               top: mutation ? insets.top : undefined,
               paddingBottom: Platform.OS === "android" ? 16 : Math.max(insets.bottom, 16),
@@ -333,10 +331,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     maxHeight: "90%",
     paddingHorizontal: 20,
-  },
-  androidSheet: {
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
   },
   tallSheet: { height: "72%" },
   mutationSheet: {

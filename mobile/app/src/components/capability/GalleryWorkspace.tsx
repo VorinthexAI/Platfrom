@@ -60,7 +60,7 @@ import { normalizeCapturedJpeg, type CapturedImage } from "@/lib/captured-image"
 type GallerySheet = "rootActions" | "actions" | "destination" | "newCollection" | "image" | "imageActions" | "imageEdit" | "confirmDeleteImage" | "collectionMenu" | "collectionEdit" | "confirmDeleteCollection" | "duplicates" | "confirmDeleteDuplicates" | "visualIdentities" | "confirmDeleteIdentity" | "identityPicker" | "identityName" | "identityPickerFilter" | "transferDestination" | "filter" | "searchHistory" | "bulkActions" | "bulkDelete";
 type IdentityLibraryMode = "browse" | "filter";
 type CollectionTransferMode = "copy" | "move";
-type OptimisticMediaItem = PreparedGalleryUpload & { batchKey: string; collectionKey: string; createdAt: string };
+type OptimisticMediaItem = PreparedGalleryUpload & { batchKey: string; collectionKey: string; createdAt: string; imageKey?: string };
 type GalleryGridItem =
   | { kind: "optimistic"; key: string; createdAt: string; item: OptimisticMediaItem }
   | { kind: "persisted"; key: string; createdAt: string; image: GalleryImage };
@@ -120,6 +120,7 @@ export function GalleryWorkspace() {
   const [activeSubject, setActiveSubject] = useState<GallerySubject>();
   const [activeIdentityFilter, setActiveIdentityFilter] = useState<GallerySubject>();
   const [selectedImage, setSelectedImage] = useState<GalleryImage>();
+  const [selectedOptimisticItem, setSelectedOptimisticItem] = useState<OptimisticMediaItem>();
   const [similarImages, setSimilarImages] = useState<GalleryImage[]>([]);
   const [similarSource, setSimilarSource] = useState<GalleryImage>();
   const [duplicateImages, setDuplicateImages] = useState<GalleryImage[]>([]);
@@ -171,6 +172,7 @@ export function GalleryWorkspace() {
   const identityPickerSearchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const identityPickerHistoryTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const imageSheetRequest = useRef(0);
+  const selectedOptimisticItemRef = useRef<OptimisticMediaItem | undefined>(undefined);
   const favoriteRequests = useRef(new Map<string, number>());
   const favoriteWrites = useRef(new Map<string, Promise<{ image: GalleryImage }>>());
   const activeCollectionKey = useRef<string | undefined>(undefined);
@@ -222,7 +224,7 @@ export function GalleryWorkspace() {
       setNextCursor(overview.nextCursor);
       setCollectionSearchResults(undefined);
       if (!silent) setStatus(undefined);
-      return true;
+      return overview;
     } catch (error) {
       if (isCurrent() && !silent) setStatus(errorMessage(error));
       return false;
@@ -340,6 +342,8 @@ export function GalleryWorkspace() {
     if (identityPickerHistoryTimer.current) clearTimeout(identityPickerHistoryTimer.current);
     sheetStack.current = [];
     activeSheetRef.current = undefined;
+    selectedOptimisticItemRef.current = undefined;
+    setSelectedOptimisticItem(undefined);
     setSheetOpen(false);
     setActiveSheet(undefined);
   }
@@ -370,36 +374,67 @@ export function GalleryWorkspace() {
     setPendingFiles([]);
     const uploadKeys = result.jobs.map(({ key }) => key);
     const jobsByKey = new Map(result.jobs.map((job) => [job.key, job]));
+    if (optimisticBatchKey) {
+      const imageKeysByClientKey = new Map(result.jobs.map(({ clientKey, imageKey }) => [clientKey, imageKey]));
+      setOptimisticMediaItems((currentItems) => currentItems.map((item) => item.batchKey === optimisticBatchKey
+        ? { ...item, imageKey: imageKeysByClientKey.get(item.clientKey) }
+        : item));
+      if (selectedOptimisticItemRef.current?.batchKey === optimisticBatchKey) {
+        const selected = selectedOptimisticItemRef.current;
+        const updated = { ...selected, imageKey: imageKeysByClientKey.get(selected.clientKey) };
+        selectedOptimisticItemRef.current = updated;
+        setSelectedOptimisticItem(updated);
+      }
+    }
     await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
     void (async () => {
       const settledKeys = new Set<string>();
       let allSettled = false;
       const refreshVisibleOverview = async () => {
-        if (activeCollectionKey.current === uploadLocation && visibleGalleryView.current === uploadView) return { attempted: true, success: await load(uploadCollection, true) };
-        if (!activeCollectionKey.current && visibleGalleryView.current === "root") return { attempted: true, success: await load(undefined, true) };
-        return { attempted: false, success: true };
+        if (activeCollectionKey.current === uploadLocation && visibleGalleryView.current === uploadView) return { attempted: true, overview: await load(uploadCollection, true) };
+        if (!activeCollectionKey.current && visibleGalleryView.current === "root") return { attempted: true, overview: await load(undefined, true) };
+        return { attempted: false, overview: undefined };
       };
       for (let attempt = 0; attempt < 40; attempt += 1) {
         await wait(3_000);
         try {
           const current = await fetchGalleryUploadStatus(uploadKeys, 5_000);
-          const newlySettled = current.jobs.filter(({ key, status: jobStatus }) => !settledKeys.has(key) && (jobStatus === "completed" || jobStatus === "failed"));
-          for (const job of newlySettled) settledKeys.add(job.key);
-          if (newlySettled.length > 0) {
+          const terminalJobs = current.jobs.filter(({ key, status: jobStatus }) => !settledKeys.has(key) && (jobStatus === "completed" || jobStatus === "failed"));
+          if (terminalJobs.length > 0) {
             await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
             const refresh = await refreshVisibleOverview();
-            if (optimisticBatchKey && refresh.success) {
-              const clientKeys = new Set(newlySettled.map(({ key }) => jobsByKey.get(key)?.clientKey).filter((key): key is string => Boolean(key)));
-              setOptimisticMediaItems((currentItems) => currentItems.filter((item) => item.batchKey !== optimisticBatchKey || !clientKeys.has(item.clientKey)));
-            }
+            if (optimisticBatchKey) {
+              const visibleOverview: GalleryOverview | undefined = refresh.overview && typeof refresh.overview !== "boolean" ? refresh.overview : undefined;
+              const targetOverview: GalleryOverview | undefined = uploadCollection && visibleOverview
+                ? visibleOverview
+                : await queryClient.fetchQuery({ queryKey: galleryQueryKeys.overview(galleryContext, collectionKey), queryFn: () => fetchGalleryOverview(collectionKey) }).catch(() => undefined);
+              const persistedByKey = new Map(targetOverview?.images.map((image) => [image.key, image]));
+              const persistedJobs = terminalJobs.filter(({ imageKey, status: jobStatus }) => jobStatus === "failed" || (jobStatus === "completed" && persistedByKey.has(imageKey)));
+              const prefetchResults = await Promise.allSettled(persistedJobs.map(({ imageKey, status: jobStatus }) => {
+                const image = jobStatus === "completed" ? persistedByKey.get(imageKey) : undefined;
+                return image ? Image.prefetch(image.url) : Promise.resolve(true);
+              }));
+              const readyJobs = persistedJobs.filter((_, index) => prefetchResults[index]?.status === "fulfilled");
+              for (const job of readyJobs) settledKeys.add(job.key);
+              const readyClientKeys = new Set(readyJobs.map(({ key }) => jobsByKey.get(key)?.clientKey).filter((key): key is string => Boolean(key)));
+              const selected = selectedOptimisticItemRef.current;
+              if (selected && readyClientKeys.has(selected.clientKey)) {
+                const persisted = selected.imageKey ? persistedByKey.get(selected.imageKey) : undefined;
+                selectedOptimisticItemRef.current = undefined;
+                setSelectedOptimisticItem(undefined);
+                if (persisted) setSelectedImage(persisted);
+                else closeSheet();
+              }
+              setOptimisticMediaItems((currentItems) => currentItems.filter((item) => item.batchKey !== optimisticBatchKey || !readyClientKeys.has(item.clientKey)));
+              deletePreparedFiles(files.filter(({ clientKey }) => readyClientKeys.has(clientKey)));
+            } else for (const job of terminalJobs) settledKeys.add(job.key);
           }
-          allSettled = current.jobs.every(({ status: jobStatus }) => jobStatus === "completed" || jobStatus === "failed");
+          allSettled = settledKeys.size === uploadKeys.length;
           if (allSettled) break;
         } catch {}
       }
       await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
-      const finalRefresh = await refreshVisibleOverview();
-      if (optimisticBatchKey && allSettled && finalRefresh.success) setOptimisticMediaItems((currentItems) => currentItems.filter(({ batchKey }) => batchKey !== optimisticBatchKey));
+      await refreshVisibleOverview();
       await loadSubjects(true);
     })().catch(() => undefined);
   }
@@ -431,7 +466,8 @@ export function GalleryWorkspace() {
           setOptimisticMediaItems((current) => current.filter((item) => item.batchKey !== batchKey));
           updateCollectionSingleton((current) => current.map((collection) => collection.key === targetCollection.key ? { ...collection, count: Math.max(0, collection.count - files.length) } : collection));
           setActiveCollection((current) => current?.key === targetCollection.key ? { ...current, count: Math.max(0, current.count - files.length) } : current);
-        }).finally(() => deletePreparedFiles(files));
+          deletePreparedFiles(files);
+        });
         closeSheet();
       } else {
         setPendingFiles(files);
@@ -471,7 +507,8 @@ export function GalleryWorkspace() {
       setOptimisticMediaItems((current) => current.filter((item) => item.batchKey !== batchKey));
       updateCollectionSingleton((current) => current.map((collection) => collection.key === targetCollection.key ? { ...collection, count: Math.max(0, collection.count - files.length) } : collection));
       setActiveCollection((current) => current?.key === targetCollection.key ? { ...current, count: Math.max(0, current.count - files.length) } : current);
-    }).finally(() => deletePreparedFiles(files));
+      deletePreparedFiles(files);
+    });
   }
 
   async function uploadTo(collectionKey: string) {
@@ -489,6 +526,7 @@ export function GalleryWorkspace() {
       setBusy(false);
     } catch {
       setOptimisticMediaItems((current) => current.filter((item) => item.batchKey !== batchKey));
+      deletePreparedFiles(files);
       if (targetCollection) updateCollectionSingleton((current) => current.map((collection) => collection.key === collectionKey ? {
         ...collection,
         count: Math.max(0, collection.count - files.length),
@@ -625,7 +663,17 @@ export function GalleryWorkspace() {
 
   async function showImage(image: GalleryImage) {
     imageSheetRequest.current += 1;
+    selectedOptimisticItemRef.current = undefined;
+    setSelectedOptimisticItem(undefined);
     setSelectedImage(image);
+    openSheet("image");
+  }
+
+  function showOptimisticImage(item: OptimisticMediaItem) {
+    imageSheetRequest.current += 1;
+    selectedOptimisticItemRef.current = item;
+    setSelectedOptimisticItem(item);
+    setSelectedImage(undefined);
     openSheet("image");
   }
 
@@ -1221,7 +1269,7 @@ export function GalleryWorkspace() {
     : activeSheet === "actions" ? `Add to ${activeCollection?.name ?? "Gallery"}`
     : activeSheet === "destination" ? "Choose destination"
       : activeSheet === "newCollection" ? "New collection"
-        : activeSheet === "image" ? selectedImage?.filename ?? "Image"
+        : activeSheet === "image" ? selectedImage?.filename ?? selectedOptimisticItem?.filename ?? "Image"
           : activeSheet === "imageActions" ? "Image actions"
             : activeSheet === "confirmDeleteImage" ? "Delete image?"
         : activeSheet === "collectionMenu" ? "Collection actions"
@@ -1244,7 +1292,9 @@ export function GalleryWorkspace() {
   const collectionSearchActive = Boolean(activeCollection && query.trim());
   const immediateSearchResults = collectionSearchActive ? filterMediaItems(images, query) : images;
   const unfilteredVisibleImages = similarSource ? similarImages : activeIdentityFilter && activeCollection ? collectionSearchResults ?? [] : collectionSearchActive && collectionSearchResults ? collectionSearchResults : immediateSearchResults;
-  const visibleImages = showOnlyFavorites ? unfilteredVisibleImages.filter(({ isFavorite }) => isFavorite) : unfilteredVisibleImages;
+  const optimisticImageKeys = new Set(optimisticMediaItems.map(({ imageKey }) => imageKey).filter((key): key is string => Boolean(key)));
+  const reconciledVisibleImages = unfilteredVisibleImages.filter(({ key }) => !optimisticImageKeys.has(key));
+  const visibleImages = showOnlyFavorites ? reconciledVisibleImages.filter(({ isFavorite }) => isFavorite) : reconciledVisibleImages;
   const visibleOptimisticItems = activeCollection && !collectionSearchActive && !similarSource && !showOnlyFavorites
     ? optimisticMediaItems.filter(({ collectionKey }) => collectionKey === activeCollection.key)
     : [];
@@ -1366,11 +1416,11 @@ export function GalleryWorkspace() {
               {visibleImageGroups.map((group) => <View key={group.label} style={styles.dateGroup}>
                 <Text style={styles.dateHeading}>{group.label}</Text>
                 <View style={styles.grid}>{group.images.map((entry) => entry.kind === "optimistic" ? (
-                  <View key={entry.key} accessibilityLabel={entry.item.filename} style={[styles.imageButton, { width: imageSize, height: imageSize }]}>
+                  <Button key={entry.key} accessibilityLabel={entry.item.filename} contentMode="raw" onPress={() => showOptimisticImage(entry.item)} size="xl" style={[styles.imageButton, { width: imageSize, height: imageSize }]} variant="ghost">
                     <View style={styles.imageFrame}>
                       <Image source={entry.item.uri} contentFit="cover" style={styles.image} />
                     </View>
-                  </View>
+                  </Button>
                 ) : (
                   <Button key={entry.key} accessibilityLabel={entry.image.caption || entry.image.filename} accessibilityState={{ selected: selectedImageKeys.includes(entry.image.key) }} contentMode="raw" onLongPress={activeCollection ? () => handleImageLongPress(entry.image.key) : undefined} onPress={() => handleImagePress(entry.image)} size="xl" style={[styles.imageButton, { width: imageSize, height: imageSize }]} variant="ghost">
                     <View style={[styles.imageFrame, selectedImageKeys.includes(entry.image.key) && styles.imageFrameSelected]}>
@@ -1413,14 +1463,14 @@ export function GalleryWorkspace() {
         footer={<Button onPress={closeSheet} size="lg" variant="secondary">Close</Button>}
         mutation
         onOpenChange={(open) => { if (!open) closeSheet(); }}
-        open={sheetOpen && (activeSheet === "image" || activeSheet === "imageActions") && Boolean(selectedImage)}
-        title={selectedImage?.filename ?? "Image"}
+        open={sheetOpen && (activeSheet === "image" || activeSheet === "imageActions") && Boolean(selectedImage || selectedOptimisticItem)}
+        title={selectedImage?.filename ?? selectedOptimisticItem?.filename ?? "Image"}
       >
-        {selectedImage ? <View style={styles.detail}>
+        {selectedImage || selectedOptimisticItem ? <View style={styles.detail}>
           <View style={styles.detailMenuRow}>
-            <Button accessibilityLabel="Open image actions" contentMode="raw" onPress={() => pushSheet("imageActions")} size="sm" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
+            {selectedImage ? <Button accessibilityLabel="Open image actions" contentMode="raw" onPress={() => pushSheet("imageActions")} size="sm" variant="icon"><MoreHorizontalIcon size="sm" /></Button> : null}
           </View>
-          <Image source={selectedImage.url} contentFit="contain" style={styles.detailImage} />
+          <View style={styles.detailImageFrame}><Image source={selectedImage?.url ?? selectedOptimisticItem?.uri} contentFit="contain" style={styles.detailImage} /></View>
         </View> : null}
       </BottomSheet>
 
@@ -1671,7 +1721,8 @@ const styles = StyleSheet.create({
   formInput: { minHeight: 42, fontSize: 14 },
   detail: { flex: 1, gap: 8 },
   detailMenuRow: { minHeight: 40, flexDirection: "row", alignItems: "center", justifyContent: "flex-end" },
-  detailImage: { flex: 1, width: "100%", overflow: "hidden", borderRadius: radii.lg, backgroundColor: palette.voidBlack },
+  detailImageFrame: { flex: 1, width: "100%", overflow: "hidden", borderRadius: radii.lg, backgroundColor: palette.voidBlack },
+  detailImage: { width: "100%", height: "100%", borderRadius: radii.lg },
   detailActions: { flexDirection: "row", gap: 8 },
   detailActionsCompact: { flexDirection: "column" },
   detailAction: { flex: 1 },

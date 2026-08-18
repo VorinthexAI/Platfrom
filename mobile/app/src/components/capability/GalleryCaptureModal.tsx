@@ -94,7 +94,7 @@ export function GalleryCaptureModal({ onClose, onSubmit }: Props) {
     </ScrollView>
   </View>;
 
-  return <BrandedCameraModal bottomContent={drawer} count={files.length} countUnit="images" disabled={capturing} externalError={error} hint="Frame the moment and hold steady" maximum={MAX_GALLERY_CAPTURES} onCapture={capture} onClose={onClose} onDone={submit} title="Capture for Gallery" />;
+  return <BrandedCameraModal bottomContent={drawer} count={files.length} countUnit="images" disabled={capturing} externalError={error} hint="" maximum={MAX_GALLERY_CAPTURES} onCapture={capture} onClose={onClose} onDone={submit} title="Capture for Gallery" />;
 }
 
 const styles = StyleSheet.create({

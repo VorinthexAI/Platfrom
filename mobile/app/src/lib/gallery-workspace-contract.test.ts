@@ -53,7 +53,7 @@ test("only lifts Core for its own focus and uses distinct image sheet presentati
   expect(source).toContain('behavior={aiInputFocused ? "height" : undefined}');
   expect(source).toContain("setAiInputFocused(focused)");
   expect(source).toContain('hideHeading={activeSheet === "imageActions" || activeSheet === "bulkActions"}');
-  expect(source).toContain('open={sheetOpen && (activeSheet === "image" || activeSheet === "imageActions") && Boolean(selectedImage)}');
+  expect(source).toContain('open={sheetOpen && (activeSheet === "image" || activeSheet === "imageActions") && Boolean(selectedImage || selectedOptimisticItem)}');
   expect(source).toContain("        mutation\n        onOpenChange");
   expect(source).toContain('mutation={activeSheet === "imageEdit"');
   expect(source).not.toContain('activeSheet === "imageActions" || activeSheet === "imageEdit"');
@@ -61,7 +61,7 @@ test("only lifts Core for its own focus and uses distinct image sheet presentati
   expect(source).toContain('accessibilityLabel="Open image actions"');
   expect(source).toContain('footer={<Button onPress={closeSheet} size="lg" variant="secondary">Close</Button>}');
   expect(source).toContain('if (activeSheetRef.current === "imageActions") goBackSheet(); else closeSheet();');
-  expect(source).toContain('detailImage: { flex: 1, width: "100%", overflow: "hidden", borderRadius: radii.lg');
+  expect(source).toContain('detailImageFrame: { flex: 1, width: "100%", overflow: "hidden", borderRadius: radii.lg');
   expect(bottomSheetSource).toContain('mutationSheet: {\n    bottom: 0');
   expect(bottomSheetSource).not.toContain('bottom: mutation ? androidBottomInset');
   expect(bottomSheetSource).not.toContain('height: mutation ? windowHeight - insets.top - androidBottomInset');
@@ -107,6 +107,11 @@ test("supports direct empty-state upload and twelve removable camera captures", 
   expect(captureSource).toContain("normalized.latitude");
   expect(captureSource).toContain("Remove image");
   expect(cameraSource).toContain("exif: true");
+  expect(cameraSource).toContain('setFacing((current) => current === "back" ? "front" : "back")');
+  expect(captureSource).toContain('hint=""');
+  expect(source).toContain("showOptimisticImage(entry.item)");
+  expect(source).toContain("Image.prefetch(image.url)");
+  expect(source).toContain("!optimisticImageKeys.has(key)");
 });
 
 test("allows duplicate exclusions and optimistic visual identity deletion", () => {
@@ -121,7 +126,7 @@ test("uses standard right-side close controls and only hides the compact image a
   const preview = source.slice(previewStart, source.indexOf("\n      >", previewStart));
   const sheetStart = source.indexOf("<BottomSheet", previewStart + preview.length);
   const sheet = source.slice(sheetStart, source.indexOf("\n      >", sheetStart));
-  expect(preview).toContain('title={selectedImage?.filename ?? "Image"}');
+  expect(preview).toContain('title={selectedImage?.filename ?? selectedOptimisticItem?.filename ?? "Image"}');
   expect(sheet).toContain("title={sheetTitle}");
   expect(`${preview}${sheet}`).not.toContain("headerLeading");
   expect(`${preview}${sheet}`).not.toContain("headerTrailing");

@@ -10,6 +10,7 @@ export * from "./icons/bookmark/bookmark.mobile";
 export * from "./icons/brain/brain.mobile";
 export * from "./icons/calendar/calendar.mobile";
 export * from "./icons/camera/camera.mobile";
+export * from "./icons/camera-rotate/camera-rotate.mobile";
 export * from "./icons/chat-bubble/chat-bubble.mobile";
 export * from "./icons/check/check.mobile";
 export * from "./icons/checkbox/checkbox.mobile";
