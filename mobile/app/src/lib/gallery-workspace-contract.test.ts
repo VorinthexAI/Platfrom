@@ -330,6 +330,7 @@ test("filters share links with shared active and inactive tabs", () => {
 test("uses Archive-style mutation lists for collection collaboration", () => {
   expect(sharingSource).toContain('mutation = view === "members" || view === "invites"');
   expect(sharingSource).toContain('dismissible={!busy}');
+  expect(sharingSource).not.toContain('tall={tall}');
   expect(sharingSource).toContain('if (navigate) { setInvites([]); setView("invites"); }');
   expect(sharingSource).toContain('queryKey: incomingInvitesQueryKey, exact: true, refetchType: "none"');
   expect(sharingSource).toContain('if (navigate) { setLinks([]); setLinkTab("active"); setView("links"); }');
