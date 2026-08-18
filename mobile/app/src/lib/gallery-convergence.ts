@@ -61,12 +61,12 @@ export function reconcilePaginatedSelected<T extends { key: string }>(selected: 
   return records.find(({ key }) => key === selected.key) ?? (complete ? undefined : selected);
 }
 
-export function reconcileDestination(destinationKey: string | undefined, collections: Array<{ key: string; access: { canContribute: boolean }; role: string }>, excludedKey?: string) {
+export function reconcileDestination(destinationKey: string | undefined, collections: Array<{ key: string; access?: { canContribute?: boolean }; role?: string }>, excludedKey?: string) {
   if (!destinationKey) return undefined;
-  return collections.some(({ key, access, role }) => key === destinationKey && key !== excludedKey && access.canContribute && role !== "viewer") ? destinationKey : undefined;
+  return collections.some(({ key, access, role }) => key === destinationKey && key !== excludedKey && access?.canContribute === true && role !== "viewer") ? destinationKey : undefined;
 }
 
-export function reconcileGalleryState<TMode, TCollection extends { key: string; access: { canRead: boolean; canContribute: boolean }; role: string }>(input: {
+export function reconcileGalleryState<TMode, TCollection extends { key: string; access?: { canRead?: boolean; canContribute?: boolean }; role?: string }>(input: {
   mode: TMode;
   activeCollectionKey?: string;
   selectedImageKeys: string[];
@@ -74,7 +74,7 @@ export function reconcileGalleryState<TMode, TCollection extends { key: string; 
   authoritativeImagesComplete?: boolean;
   clearSelection?: boolean;
 }, collections: TCollection[], availableImageKeys: Iterable<string>) {
-  const activeCollection = input.activeCollectionKey ? collections.find(({ key, access }) => key === input.activeCollectionKey && access.canRead) : undefined;
+  const activeCollection = input.activeCollectionKey ? collections.find(({ key, access }) => key === input.activeCollectionKey && access?.canRead === true) : undefined;
   return {
     mode: input.mode,
     activeCollection,

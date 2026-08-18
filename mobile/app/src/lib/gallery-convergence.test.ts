@@ -42,6 +42,11 @@ test("reconciles selected images, detail records, and writable destinations", ()
   expect(reconcileDestination("target", collections)).toBe("target");
 });
 
+test("rejects stale destination arrays whose capabilities are missing", () => {
+  expect(reconcileDestination("stale", [{ key: "stale", role: "collaborator" }])).toBeUndefined();
+  expect(reconcileDestination("viewer", [{ key: "viewer", role: "viewer", access: { canContribute: true } }])).toBeUndefined();
+});
+
 test("preserves contextual mode while reconciling authoritative collection state", () => {
   const collections = [{ key: "active", role: "owner", access: { canRead: true, canContribute: true } }, { key: "target", role: "collaborator", access: { canRead: true, canContribute: true } }];
   expect(reconcileGalleryState({ mode: { kind: "similar", sourceKey: "source" }, activeCollectionKey: "active", selectedImageKeys: ["kept", "gone"], destinationCollectionKey: "target" }, collections, ["kept"])).toEqual({
@@ -53,6 +58,13 @@ test("reports access loss and clears invalid state immediately", () => {
   const collections = [{ key: "viewer", role: "viewer", access: { canRead: true, canContribute: false } }];
   expect(reconcileGalleryState({ mode: "duplicates", activeCollectionKey: "removed", selectedImageKeys: ["gone"], destinationCollectionKey: "viewer" }, collections, [])).toEqual({
     mode: "duplicates", activeCollection: undefined, accessLost: true, selectedImageKeys: [], destinationCollectionKey: undefined,
+  });
+});
+
+test("does not crash while reconciling an active legacy collection without access", () => {
+  const legacy = { key: "active", role: "owner" };
+  expect(reconcileGalleryState({ mode: "collection", activeCollectionKey: "active", selectedImageKeys: [], destinationCollectionKey: "active" }, [legacy], [])).toEqual({
+    mode: "collection", activeCollection: undefined, accessLost: true, selectedImageKeys: [], destinationCollectionKey: undefined,
   });
 });
 

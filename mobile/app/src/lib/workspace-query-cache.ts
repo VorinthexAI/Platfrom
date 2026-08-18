@@ -4,6 +4,7 @@ import type { Book, BookDetail } from "./books-client";
 import type { ContentContext } from "./content-client";
 import { contentQueryKeys } from "./content-query-cache";
 import type { EmailFilter, EmailOverview, EmailThread } from "./email-client";
+import { normalizeCollection } from "./collection-access";
 import type { GalleryCollection, GalleryCollectionInvite, GalleryCollectionMember, GalleryCollectionShareLink, GalleryImage, GalleryOverview } from "./gallery-client";
 import type { Place, Trip } from "./travel-client";
 
@@ -39,11 +40,14 @@ export function setCachedGalleryShareLinks(queryClient: QueryClient, context: Wo
 }
 
 export async function getGalleryCollections(queryClient: QueryClient, context: WorkspaceContext, queryFn: () => Promise<GalleryCollection[]>) {
-  return queryClient.fetchQuery({ queryKey: galleryQueryKeys.collections(context), queryFn, staleTime: Infinity });
+  const collections = await queryClient.fetchQuery({ queryKey: galleryQueryKeys.collections(context), queryFn, staleTime: Infinity });
+  const normalized = collections.map(normalizeCollection);
+  queryClient.setQueryData(galleryQueryKeys.collections(context), normalized);
+  return normalized;
 }
 
 export function setCachedGalleryCollections(queryClient: QueryClient, context: WorkspaceContext, collections: GalleryCollection[]) {
-  queryClient.setQueryData(galleryQueryKeys.collections(context), collections);
+  queryClient.setQueryData(galleryQueryKeys.collections(context), collections.map(normalizeCollection));
 }
 
 export const compassQueryKeys = {

@@ -48,6 +48,17 @@ test("loads Gallery collections once per context and permits explicit singleton 
   expect(client.getQueryData(galleryQueryKeys.collections(context))).toEqual(updated);
 });
 
+test("repairs legacy Gallery collections already retained in the singleton cache", async () => {
+  const client = new QueryClient();
+  const legacy = { key: "legacy", name: "Legacy", description: null, isFavorite: false, count: 0, coverUrl: null, memberKey: "membership", role: "viewer" };
+  client.setQueryData(galleryQueryKeys.collections(context), [legacy]);
+
+  const collections = await getGalleryCollections(client, context, async () => { throw new Error("stale cache should be used"); });
+
+  expect(collections[0]).toMatchObject({ role: "viewer", access: { canRead: true, canContribute: false, canManage: false } });
+  expect(client.getQueryData(galleryQueryKeys.collections(context))).toEqual(collections);
+});
+
 test("assistant changes invalidate exact workspace prefixes without crossing contexts", async () => {
   const client = new QueryClient();
   const galleryOverview = galleryQueryKeys.overview(context);

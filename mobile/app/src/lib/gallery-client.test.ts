@@ -1,6 +1,7 @@
 import { beforeEach, expect, mock, test } from "bun:test";
 
 const calls: { path: string; body: Record<string, unknown>; timeout?: number }[] = [];
+const responses = new Map<string, unknown>();
 
 mock.module("@/state/auth", () => ({
   useAuthStore: { getState: () => ({ user: { email: "recipient@example.com" }, organization: { key: "organization", membership_key: "membership" }, scope: { key: "scope" } }) },
@@ -8,6 +9,7 @@ mock.module("@/state/auth", () => ({
 mock.module("./api-client", () => ({
   apiClient: { post: async (path: string, body: Record<string, unknown>, options?: { timeout?: number }) => {
     calls.push({ path, body, timeout: options?.timeout });
+    if (responses.has(path)) return { data: { success: true, data: responses.get(path) } };
     if (path === "/gallery/uploads/presign") return { data: { success: true, data: { uploads: [{ clientKey: "local-image", uploadKey: "upload", imageKey: "image", url: "https://uploads.example/image", headers: { "Content-Type": "image/jpeg" } }] } } };
     if (path === "/gallery/uploads/complete") return { data: { success: true, data: { jobs: [{ key: "upload", imageKey: "image", status: "queued" }] } } };
     if (path === "/gallery/collections/members") return { data: { success: true, data: { owners: [], collaborators: [], viewers: [] } } };
@@ -19,13 +21,17 @@ mock.module("./api-client", () => ({
     if (path === "/gallery/collections/shares") return { data: { success: true, data: { share: { key: "link", url: "https://vorinthex.com/share/secure-created-token", role: "viewer", active: true, createdAt: "2026-08-18T00:00:00.000Z" } } } };
     if (path === "/gallery/collections/shares/update") return { data: { success: true, data: { share: { key: "link", url: "https://vorinthex.com/share/secure-created-token", role: "viewer", active: false, createdAt: "2026-08-18T00:00:00.000Z" } } } };
     if (path === "/gallery/shares/activate") return { data: { success: true, data: { scopeKey: "scope", collectionKey: "shared", role: "viewer" } } };
+    const collection = { key: "collection", name: "Collection", description: null, isFavorite: false, count: 0, coverUrl: null, memberKey: "membership" };
+    if (path === "/gallery/overview") return { data: { success: true, data: { collections: [], images: [], nextCursor: null, canCreateCollections: true } } };
+    if (path === "/gallery/collections") return { data: { success: true, data: collection } };
+    if (path === "/gallery/collections/update") return { data: { success: true, data: { collection } } };
     return { data: { success: true, data: { images: [] } } };
   } },
 }));
 
 const { activateGalleryShare, createGalleryCollection, createGalleryCollectionShareLink, deleteGalleryCollection, deleteGalleryImages, deleteGallerySubject, fetchGalleryOverview, filterCollections, filterGalleryShareLinks, filterMediaItems, findGalleryCollectionDuplicates, groupGalleryImagesByCreatedDate, leaveGalleryCollection, listGalleryCollectionInvites, listGalleryCollectionMembers, listGalleryCollectionShareLinks, mergeMediaItems, removeGalleryCollectionMember, respondToGalleryCollectionInvite, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryCollectionMember, updateGalleryCollectionShareLink, updateGalleryImage, uploadGalleryImages } = await import("./gallery-client");
 
-beforeEach(() => calls.splice(0));
+beforeEach(() => { calls.splice(0); responses.clear(); });
 
 const collection = (name: string, key: string) => ({
   key,
@@ -121,6 +127,28 @@ test("sends collection-scoped semantic searches through the canonical endpoint",
 test("requests cursor pages of one hundred collection images", async () => {
   await fetchGalleryOverview("collection", "next-page");
   expect(calls[0]).toMatchObject({ path: "/gallery/overview", body: { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection", cursor: "next-page", limit: 100 } });
+});
+
+test("normalizes legacy overview collection roles and capabilities without granting viewer writes", async () => {
+  const base = { key: "legacy", name: "Legacy", description: null, isFavorite: false, count: 0, coverUrl: null, memberKey: "membership" };
+  responses.set("/gallery/overview", { collections: [base, { ...base, key: "viewer", role: "viewer" }, { ...base, key: "collaborator", role: "collaborator" }], images: [], nextCursor: null, canCreateCollections: true });
+
+  const overview = await fetchGalleryOverview();
+
+  expect(overview.collections.map(({ role, access }) => ({ role, access }))).toEqual([
+    { role: "owner", access: { canRead: true, canContribute: true, canManage: true } },
+    { role: "viewer", access: { canRead: true, canContribute: false, canManage: false } },
+    { role: "collaborator", access: { canRead: true, canContribute: true, canManage: false } },
+  ]);
+});
+
+test("normalizes create and update responses while preserving authoritative false capabilities", async () => {
+  const base = { key: "collection", name: "Collection", description: null, isFavorite: false, count: 0, coverUrl: null, memberKey: "membership" };
+  responses.set("/gallery/collections", base);
+  responses.set("/gallery/collections/update", { collection: { ...base, role: "owner", access: { canRead: true, canContribute: false, canManage: false } } });
+
+  expect(await createGalleryCollection("Collection", false)).toMatchObject({ role: "owner", access: { canRead: true, canContribute: true, canManage: true } });
+  expect((await updateGalleryCollection("collection", "Collection", false)).collection.access).toEqual({ canRead: true, canContribute: false, canManage: false });
 });
 
 test("sends similarity and duplicate discovery through image search", async () => {

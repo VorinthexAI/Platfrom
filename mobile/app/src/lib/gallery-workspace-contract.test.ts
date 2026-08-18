@@ -165,7 +165,7 @@ test("provides collection sharing navigation and permission gates", () => {
   expect(sharingSource).toContain('view === "memberRemoveConfirm"');
   expect(sharingSource).toContain('active === selectedLink.active');
   expect(source).toContain('open={!sharingOpen && !pendingInvitesOpen && sheetOpen');
-  expect(source).toContain('access.canContribute && role !== "viewer"');
+  expect(source).toContain('access?.canContribute && role !== "viewer"');
   expect(source).toContain('accessibilityLabel="Pending Gallery invites"');
   expect(sharingSource).toContain('event.slug === "collection.access.changed"');
   expect(sharingSource).toContain('accessibilityLabel={`Remove ${selectedMember?.name ?? "member"} from collection`}');
@@ -215,8 +215,8 @@ test("generation-guards context changes and gates event network work", () => {
 test("reconciles permission downgrades and authoritatively guards submissions", () => {
   expect(source).toContain("reconcileGalleryPermissions");
   expect(source).toContain("if (permissions.closeSheet) closeSheet()");
-  expect(source).toContain('latest?.role !== "owner" || !latest.access.canManage');
-  expect(source).toContain('!destination.access.canContribute || destination.role === "viewer"');
+  expect(source).toContain('latest?.role !== "owner" || !latest.access?.canManage');
+  expect(source).toContain('!destination.access?.canContribute || destination.role === "viewer"');
   expect(source).toContain("selected.every((image) => canMutateInCollection(image, sourceCollection))");
 });
 
@@ -258,9 +258,9 @@ test("generation-guards native selection, capture, upload, and polling paths", (
 });
 
 test("closes upload surfaces on contributor loss and rechecks destinations", () => {
-  expect(source).toContain("canAddImages = Boolean(activeCollection?.access.canContribute");
-  expect(source).toContain('!targetCollection?.access.canContribute || targetCollection.role === "viewer"');
-  expect(source).toContain('!currentCollection?.access.canContribute || currentCollection.role === "viewer"');
+  expect(source).toContain("canAddImages = Boolean(activeCollection?.access?.canContribute");
+  expect(source).toContain('!targetCollection?.access?.canContribute || targetCollection.role === "viewer"');
+  expect(source).toContain('!currentCollection?.access?.canContribute || currentCollection.role === "viewer"');
   expect(source).toContain("setCameraOpen(false)");
 });
 

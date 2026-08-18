@@ -1,5 +1,6 @@
 import { apiClient } from "@/lib/api-client";
 import type { AssistantChange } from "@/lib/assistant-changes";
+import { normalizeCollection, type CollectionRole } from "@/lib/collection-access";
 import { useAuthStore } from "@/state/auth";
 
 export type GalleryCollection = {
@@ -14,7 +15,13 @@ export type GalleryCollection = {
   access: { canRead: boolean; canContribute: boolean; canManage: boolean };
 };
 
-export type GalleryCollectionRole = "owner" | "collaborator" | "viewer";
+export type GalleryCollectionRole = CollectionRole;
+
+type GalleryCollectionAccess = GalleryCollection["access"];
+type GalleryCollectionProjection = Omit<GalleryCollection, "role" | "access"> & {
+  role?: GalleryCollectionRole;
+  access?: Partial<GalleryCollectionAccess>;
+};
 
 export type GalleryCollectionMember = {
   key: string;
@@ -230,15 +237,17 @@ async function fetchWithTimeout(input: string, init: RequestInit | undefined, ti
 }
 
 export function fetchGalleryOverview(collectionKey?: string, cursor?: string, limit = 100) {
-  return postGallery<GalleryOverview>("/gallery/overview", { ...(collectionKey ? { collectionKey } : {}), ...(cursor ? { cursor } : {}), limit });
+  return postGallery<Omit<GalleryOverview, "collections"> & { collections: GalleryCollectionProjection[] }>("/gallery/overview", { ...(collectionKey ? { collectionKey } : {}), ...(cursor ? { cursor } : {}), limit })
+    .then((overview) => ({ ...overview, collections: overview.collections.map(normalizeCollection) }));
 }
 
 export function createGalleryCollection(name: string, isFavorite: boolean) {
-  return postGallery<GalleryCollection>("/gallery/collections", { name, isFavorite });
+  return postGallery<GalleryCollectionProjection>("/gallery/collections", { name, isFavorite }).then(normalizeCollection);
 }
 
 export function updateGalleryCollection(collectionKey: string, name: string, isFavorite: boolean, coverImageKey?: string | null) {
-  return postGallery<{ collection: GalleryCollection }>("/gallery/collections/update", { collectionKey, name, isFavorite, ...(coverImageKey !== undefined ? { coverImageKey } : {}) });
+  return postGallery<{ collection: GalleryCollectionProjection }>("/gallery/collections/update", { collectionKey, name, isFavorite, ...(coverImageKey !== undefined ? { coverImageKey } : {}) })
+    .then(({ collection }) => ({ collection: normalizeCollection(collection) }));
 }
 
 export function deleteGalleryCollection(collectionKey: string) {

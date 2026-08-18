@@ -219,7 +219,7 @@ export function GalleryWorkspace() {
   const sheetImageSize = Math.floor((width - 42 - GRID_GAP * (IMAGE_COLUMNS - 1)) / IMAGE_COLUMNS);
   const collectionRole = activeCollection?.role;
   const isCollectionOwner = collectionRole === "owner";
-  const canAddImages = Boolean(activeCollection?.access.canContribute && collectionRole !== "viewer");
+  const canAddImages = Boolean(activeCollection?.access?.canContribute && collectionRole !== "viewer");
   const memberKeys = [...new Set([getGalleryMemberKey(), ...collections.map(({ memberKey }) => memberKey)].filter(Boolean))];
   const canMutateImage = (image: GalleryImage | undefined) => Boolean(image && (activeCollection
     ? isCollectionOwner || collectionRole === "collaborator" && image.createdByKey === activeCollection.memberKey
@@ -663,7 +663,7 @@ export function GalleryWorkspace() {
   async function prepareAssets(assets: CapturedImage[], generation = refreshContextGeneration.current) {
     const isCurrent = () => isCurrentContextGeneration(generation, refreshContextGeneration.current);
     const initialTarget = latestActiveCollection();
-    if (activeCollection && (!initialTarget?.access.canContribute || initialTarget.role === "viewer")) return;
+    if (activeCollection && (!initialTarget?.access?.canContribute || initialTarget.role === "viewer")) return;
     setBusy(true);
     closeSheet();
     setStatus(undefined);
@@ -681,7 +681,7 @@ export function GalleryWorkspace() {
       if (!isCurrent()) { deletePreparedFiles(files); return; }
       if (activeCollection) {
         const targetCollection = latestActiveCollection();
-        if (!targetCollection?.access.canContribute || targetCollection.role === "viewer") { deletePreparedFiles(files); return; }
+        if (!targetCollection?.access?.canContribute || targetCollection.role === "viewer") { deletePreparedFiles(files); return; }
         clearCollectionSearch(false);
         const batchKey = `upload-${Date.now()}-${Math.random().toString(36).slice(2)}`;
         const createdAt = new Date().toISOString();
@@ -713,7 +713,7 @@ export function GalleryWorkspace() {
     const generation = refreshContextGeneration.current;
     const isCurrent = () => isCurrentContextGeneration(generation, refreshContextGeneration.current);
     const target = latestActiveCollection();
-    if (activeCollection && (!target?.access.canContribute || target.role === "viewer")) return;
+    if (activeCollection && (!target?.access?.canContribute || target.role === "viewer")) return;
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!isCurrent()) return;
     if (!permission.granted) { closeSheet(); return; }
@@ -724,7 +724,7 @@ export function GalleryWorkspace() {
 
   async function takePhoto() {
     const target = latestActiveCollection();
-    if (!target?.access.canContribute || target.role === "viewer") return;
+    if (!target?.access?.canContribute || target.role === "viewer") return;
     closeSheet();
     cameraContextGeneration.current = refreshContextGeneration.current;
     setCameraOpen(true);
@@ -735,7 +735,7 @@ export function GalleryWorkspace() {
     const isCurrent = () => isCurrentContextGeneration(generation, refreshContextGeneration.current);
     const targetCollection = latestActiveCollection();
     setCameraOpen(false);
-    if (!isCurrent() || !targetCollection || !targetCollection.access.canContribute || targetCollection.role === "viewer" || files.length === 0) { deletePreparedFiles(files); return; }
+    if (!isCurrent() || !targetCollection || !targetCollection.access?.canContribute || targetCollection.role === "viewer" || files.length === 0) { deletePreparedFiles(files); return; }
     clearCollectionSearch(false);
     const batchKey = `upload-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const createdAt = new Date().toISOString();
@@ -759,7 +759,7 @@ export function GalleryWorkspace() {
     const isCurrent = () => isCurrentContextGeneration(generation, refreshContextGeneration.current);
     const files = [...pendingFiles];
     const targetCollection = collectionOverride ?? collections.find(({ key }) => key === collectionKey);
-    if (!targetCollection?.access.canContribute || targetCollection.role === "viewer") { deletePreparedFiles(files); setPendingFiles([]); closeSheet(); return; }
+    if (!targetCollection?.access?.canContribute || targetCollection.role === "viewer") { deletePreparedFiles(files); setPendingFiles([]); closeSheet(); return; }
     const batchKey = `upload-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const createdAt = new Date().toISOString();
     setOptimisticMediaItems((current) => [...files.map((file) => ({ ...file, batchKey, collectionKey, createdAt })), ...current]);
@@ -1045,7 +1045,7 @@ export function GalleryWorkspace() {
 
   async function submitCollectionEdit() {
     const latest = latestActiveCollection();
-    if (!activeCollection || latest?.role !== "owner" || !latest.access.canManage || !editName.trim()) return;
+    if (!activeCollection || latest?.role !== "owner" || !latest.access?.canManage || !editName.trim()) return;
     const previous = activeCollection;
     const { isCurrent } = captureGalleryContextGuard();
     const optimistic = { ...previous, name: editName.trim(), isFavorite: editFavorite, ...(editCoverImageKey !== undefined ? { coverUrl: editCoverPreviewUrl ?? null } : {}) };
@@ -1070,7 +1070,7 @@ export function GalleryWorkspace() {
 
   async function removeActiveCollection() {
     const latest = latestActiveCollection();
-    if (!activeCollection || latest?.role !== "owner" || !latest.access.canManage) return;
+    if (!activeCollection || latest?.role !== "owner" || !latest.access?.canManage) return;
     const collection = activeCollection;
     const { isCurrent } = captureGalleryContextGuard();
     setBusy(true);
@@ -1094,7 +1094,7 @@ export function GalleryWorkspace() {
 
   async function leaveActiveCollection() {
     const latest = latestActiveCollection();
-    if (!activeCollection || !latest || latest.role === "owner" || !latest.access.canRead) return;
+    if (!activeCollection || !latest || latest.role === "owner" || !latest.access?.canRead) return;
     const collection = activeCollection;
     const { isCurrent } = captureGalleryContextGuard();
     setBusy(true);
@@ -1189,7 +1189,7 @@ export function GalleryWorkspace() {
 
   async function deleteDuplicates() {
     const latest = latestActiveCollection();
-    if (!activeCollection || latest?.role !== "owner" || !latest.access.canManage || duplicateImages.length === 0) return;
+    if (!activeCollection || latest?.role !== "owner" || !latest.access?.canManage || duplicateImages.length === 0) return;
     const { isCurrent } = captureGalleryContextGuard();
     setBusy(true);
     try {
@@ -1591,7 +1591,7 @@ export function GalleryWorkspace() {
     const imageKeys = [...selectedImageKeys];
     const destinationKeys = [destinationCollectionKey];
     const destination = collections.find(({ key }) => key === destinationCollectionKey);
-    if (!destination || !sourceCollection.access.canContribute || sourceCollection.role === "viewer" || !destination.access.canContribute || destination.role === "viewer") return;
+    if (!destination || !sourceCollection.access?.canContribute || sourceCollection.role === "viewer" || !destination.access?.canContribute || destination.role === "viewer") return;
     const selected = imageKeys.map((key) => images.find((image) => image.key === key) ?? collectionSearchResults?.find((image) => image.key === key) ?? (selectedImage?.key === key ? selectedImage : undefined)).filter((image): image is GalleryImage => Boolean(image));
     if (selected.length !== imageKeys.length || !selected.every((image) => canMutateInCollection(image, sourceCollection))) return;
     const cacheSnapshot = snapshotGalleryOverviews(queryClient, galleryContext);
@@ -1738,7 +1738,7 @@ export function GalleryWorkspace() {
         authoritativeCollections = fetchedOverview.collections;
         applyCollectionSingleton(authoritativeCollections);
         setCanCreateCollections(fetchedOverview.canCreateCollections);
-        currentCollection = activeCollection ? authoritativeCollections.find(({ key, access }) => key === activeCollection.key && access.canRead) : undefined;
+        currentCollection = activeCollection ? authoritativeCollections.find(({ key, access }) => key === activeCollection.key && access?.canRead) : undefined;
         if (activeCollection && !currentCollection) {
           const recoveryRoot = collectionKey ? await queryClient.fetchQuery({ queryKey: galleryQueryKeys.overview(galleryContext), queryFn: () => fetchGalleryOverview(), staleTime: 0 }) : fetchedOverview;
           if (!isCurrent()) return;
@@ -1757,9 +1757,9 @@ export function GalleryWorkspace() {
       if (currentCollection?.role === "owner") for (const key of selectedImageKeys) mutableImageKeys.add(key);
       for (const image of permissionImages) if (currentCollection && (currentCollection.role === "owner" || currentCollection.role === "collaborator" && image.createdByKey === currentCollection.memberKey)) mutableImageKeys.add(image.key);
       const detailMutable = Boolean(selectedImage && currentCollection && (currentCollection.role === "owner" || currentCollection.role === "collaborator" && selectedImage.createdByKey === currentCollection.memberKey));
-      const permissions = reconcileGalleryPermissions({ role: currentCollection?.role, canContribute: currentCollection?.access.canContribute, activeSheet: activeSheetRef.current, selectedImageKeys, mutableImageKeys, destinationCollectionKey, ownerCapability: !currentCollection && authoritativeCollections.some(({ role, access }) => role === "owner" && access.canManage), detailMutable });
+      const permissions = reconcileGalleryPermissions({ role: currentCollection?.role, canContribute: currentCollection?.access?.canContribute, activeSheet: activeSheetRef.current, selectedImageKeys, mutableImageKeys, destinationCollectionKey, ownerCapability: !currentCollection && authoritativeCollections.some(({ role, access }) => role === "owner" && access?.canManage), detailMutable });
       if (permissions.closeSheet) closeSheet();
-      if (activeCollection && (!currentCollection?.access.canContribute || currentCollection.role === "viewer")) {
+      if (activeCollection && (!currentCollection?.access?.canContribute || currentCollection.role === "viewer")) {
         setCameraOpen(false);
         setPendingFiles((current) => { deletePreparedFiles(current); return []; });
       }
@@ -1868,7 +1868,7 @@ export function GalleryWorkspace() {
       }
 
       if (needsOverview && activeSheetRef.current === "identityPicker" && identityPickerCollection) {
-        const pickerCollection = authoritativeCollections.find((collection) => collection.key === identityPickerCollection.key && collection.access.canRead);
+        const pickerCollection = authoritativeCollections.find((collection) => collection.key === identityPickerCollection.key && collection.access?.canRead);
         if (!pickerCollection) backIdentityPicker();
         else {
           setIdentityPickerCollection(pickerCollection);
@@ -1947,8 +1947,8 @@ export function GalleryWorkspace() {
   const contextualView = Boolean(activeCollection || activeSubject || showingSearchResults);
   const normalCollectionView = Boolean(activeCollection && !activeSubject);
   const visibleCollections = collections.filter((collection) => collectionTab === "mine" ? collection.role === "owner" : collection.role !== "owner");
-  const writableCollections = collections.filter(({ access, role }) => access.canContribute && role !== "viewer");
-  const canManageAnyCollection = collections.some(({ access, role }) => access.canManage && role === "owner");
+  const writableCollections = collections.filter(({ access, role }) => access?.canContribute && role !== "viewer");
+  const canManageAnyCollection = collections.some(({ access, role }) => access?.canManage && role === "owner");
   const identityPickerVisibleCollections = collections.filter(({ isFavorite }) => !showOnlyFavorites || isFavorite);
   const identityPickerVisibleImages = (identityPickerResults ?? identityPickerImages).filter(({ isFavorite }) => !showOnlyFavorites || isFavorite);
   const selectableImages = mergeMediaItems(images, mergeMediaItems(collectionSearchResults ?? [], similarImages));
