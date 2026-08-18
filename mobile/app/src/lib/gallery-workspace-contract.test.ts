@@ -165,7 +165,7 @@ test("provides collection sharing navigation and permission gates", () => {
   expect(sharingSource).toContain('successTitle = "Share link copied to clipboard"');
   expect(sharingSource).toContain("showToast({ title, duration: 2_000 })");
   expect(sharingSource).toContain('setCachedGalleryShareLinks');
-  expect(sharingSource).toContain('galleryQueryKeys.members(context, collection.key), refetchType: "none"');
+  expect(sharingSource).toContain('galleryQueryKeys.members(context, collection.key), exact: true, refetchType: "none"');
   expect(sharingSource).toContain('view === "memberRemoveConfirm"');
   expect(sharingSource).toContain('active === selectedLink.active');
   expect(source).toContain('open={!sharingOpen && sheetOpen');
@@ -325,6 +325,19 @@ test("filters share links with shared active and inactive tabs", () => {
   expect(sharingSource).toContain('Array.from({ length: 3 }');
   expect(sharingSource).toContain("No {linkTab} share links.");
   expect(sharingSource).toContain('setLinkTab(result.link.active ? "active" : "inactive")');
+});
+
+test("uses Archive-style mutation lists for collection collaboration", () => {
+  expect(sharingSource).toContain('mutation = view === "members" || view === "invites"');
+  expect(sharingSource).toContain('dismissible={!busy}');
+  expect(sharingSource).toContain('if (navigate) { setInvites([]); setView("invites"); }');
+  expect(sharingSource).toContain('queryKey: incomingInvitesQueryKey, exact: true, refetchType: "none"');
+  expect(sharingSource).toContain('if (navigate) { setLinks([]); setLinkTab("active"); setView("links"); }');
+  expect(sharingSource).toContain('size="sm" style={styles.pillButton} variant="secondary"');
+  expect(sharingSource).toContain('pillSkeleton: { width: "100%", minHeight: 38, borderRadius: 999, backgroundColor: palette.hairlineBright, opacity: 0.72 }');
+  expect(sharingSource).toContain('list: { gap: 6, paddingBottom: spacing.xl }');
+  expect(sharingSource).not.toContain('rowSkeleton');
+  expect(sharingSource).not.toContain('variant="ghost"><View><Text numberOfLines={1} style={styles.name}>{link.url}');
 });
 
 test("shares secure links through the native OS chooser", () => {
