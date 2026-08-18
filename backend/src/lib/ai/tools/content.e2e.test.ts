@@ -409,6 +409,8 @@ suite('Content live E2E', () => {
     const restoredDocument = await call('document.restore', { documentKeys: [documentKey], atomic: true });
     expect(restoredDocument.results[0].data.document.deletedAt).toBeNull();
 
+    await expect(call('folder.archive', { folderKeys: [rootFolderKey], includeDescendants: true, atomic: true })).rejects.toMatchObject({ code: 'CONTENT_CONFLICT' });
+    await call('folder.update', { updates: [{ folderKey: rootFolderKey, isFavorite: false }] });
     await call('folder.archive', { folderKeys: [rootFolderKey], includeDescendants: true, atomic: true });
     expect((await db.collection('documents').document(documentKey)).deletedAt).toBe(now);
     await call('folder.restore', { folderKeys: [rootFolderKey], includeDescendants: true, atomic: true });

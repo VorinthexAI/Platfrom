@@ -1280,6 +1280,109 @@ describe('Content runtime', () => {
     expect(updates).toEqual([`folder:${f.folderKey}`, `folder:${child}`, `document:${documentKey}`]);
   });
 
+  test('protects favorite folders and documents from archive without partial subtree mutation', async () => {
+    const rootFavorite = fixture('moderator');
+    rootFavorite.folders.get(rootFavorite.folderKey).isFavorite = true;
+    const rootResult = await runContentTool('folder.archive', { folderKeys: [rootFavorite.folderKey], includeDescendants: true }, rootFavorite.context, { repository: rootFavorite.repository, clock: () => new Date(now) });
+    expect(rootResult.results[0]).toMatchObject({ success: false, error: { code: 'CONTENT_CONFLICT' } });
+    expect(rootFavorite.folders.get(rootFavorite.folderKey).deletedAt).toBeUndefined();
+
+    for (const favoriteKind of ['folder', 'document'] as const) {
+      const subtree = fixture('moderator');
+      const childKey = newId();
+      subtree.folders.set(childKey, { key: childKey, scopeKey: subtree.scopeKey, parentFolderKey: subtree.folderKey, name: 'Child', embedding, isFavorite: favoriteKind === 'folder', createdAt: now, updatedAt: now });
+      const documentKey = subtree.addDocument();
+      subtree.documents.get(documentKey).folderKey = childKey;
+      subtree.documents.get(documentKey).isFavorite = favoriteKind === 'document';
+      const result = await runContentTool('folder.archive', { folderKeys: [subtree.folderKey], includeDescendants: true }, subtree.context, { repository: subtree.repository, clock: () => new Date(now) });
+      expect(result.results[0]).toMatchObject({ success: false, error: { code: 'CONTENT_CONFLICT' } });
+      expect(subtree.folders.get(subtree.folderKey).deletedAt).toBeUndefined();
+      expect(subtree.folders.get(childKey).deletedAt).toBeUndefined();
+      expect(subtree.documents.get(documentKey).deletedAt).toBeUndefined();
+    }
+
+    const favoriteDocument = fixture('moderator');
+    const documentKey = favoriteDocument.addDocument();
+    favoriteDocument.documents.get(documentKey).isFavorite = true;
+    const documentResult = await runContentTool('document.archive', { documentKeys: [documentKey] }, favoriteDocument.context, { repository: favoriteDocument.repository, clock: () => new Date(now) });
+    expect(documentResult.results[0]).toMatchObject({ success: false, error: { code: 'CONTENT_CONFLICT' } });
+    expect(favoriteDocument.documents.get(documentKey).deletedAt).toBeUndefined();
+  });
+
+  test('partially archives separate non-favorite roots and allows favorite restores', async () => {
+    const f = fixture('moderator');
+    const otherKey = newId();
+    f.folders.get(f.folderKey).isFavorite = true;
+    f.folders.set(otherKey, { key: otherKey, scopeKey: f.scopeKey, name: 'Other', embedding, isFavorite: false, createdAt: now, updatedAt: now });
+    const result = await runContentTool('folder.archive', { folderKeys: [f.folderKey, otherKey] }, f.context, { repository: f.repository, clock: () => new Date(now) });
+    expect(result.results.map((item) => item.success)).toEqual([false, true]);
+    expect(f.folders.get(f.folderKey).deletedAt).toBeUndefined();
+    expect(f.folders.get(otherKey).deletedAt).toBe(now);
+
+    const documentKey = f.addDocument();
+    f.documents.get(documentKey).isFavorite = true;
+    f.documents.get(documentKey).deletedAt = now;
+    const restored = await runContentTool('document.restore', { documentKeys: [documentKey] }, f.context, { repository: f.repository, clock: () => new Date(now) });
+    expect(restored.results[0]).toMatchObject({ success: true, data: { document: { isFavorite: true, deletedAt: null } } });
+  });
+
+  test('rolls back one non-atomic archive root when a subtree update fails', async () => {
+    const f = fixture('moderator');
+    const childKey = newId();
+    f.folders.set(childKey, { key: childKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', embedding, isFavorite: false, createdAt: now, updatedAt: now });
+    const documentKey = f.addDocument();
+    f.documents.get(documentKey).folderKey = childKey;
+    const updateFolder = f.repository.updateFolder.bind(f.repository);
+    f.repository.updateFolder = async (key, patch) => {
+      const updated = await updateFolder(key, patch);
+      if (key === childKey) throw new Error('injected subtree failure');
+      return updated;
+    };
+    f.repository.transaction = async (operation) => {
+      const folderSnapshot = new Map([...f.folders].map(([key, value]) => [key, { ...value }]));
+      const documentSnapshot = new Map([...f.documents].map(([key, value]) => [key, { ...value }]));
+      try {
+        return await operation(f.repository);
+      } catch (error) {
+        f.folders.clear();
+        f.documents.clear();
+        for (const [key, value] of folderSnapshot) f.folders.set(key, value);
+        for (const [key, value] of documentSnapshot) f.documents.set(key, value);
+        throw error;
+      }
+    };
+    const result = await runContentTool('folder.archive', { folderKeys: [f.folderKey], includeDescendants: true }, f.context, { repository: f.repository, clock: () => new Date(now) });
+    expect(result.results[0]?.success).toBe(false);
+    expect(f.folders.get(f.folderKey).deletedAt).toBeUndefined();
+    expect(f.folders.get(childKey).deletedAt).toBeUndefined();
+    expect(f.documents.get(documentKey).deletedAt).toBeUndefined();
+  });
+
+  test('rechecks favorites after entering each non-atomic archive transaction', async () => {
+    const f = fixture('moderator');
+    const childKey = newId();
+    f.folders.set(childKey, { key: childKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', embedding, isFavorite: false, createdAt: now, updatedAt: now });
+    f.repository.transaction = async (operation) => {
+      f.folders.get(childKey).isFavorite = true;
+      return operation(f.repository);
+    };
+    const result = await runContentTool('folder.archive', { folderKeys: [f.folderKey], includeDescendants: true }, f.context, { repository: f.repository, clock: () => new Date(now) });
+    expect(result.results[0]).toMatchObject({ success: false, error: { code: 'CONTENT_CONFLICT' } });
+    expect(f.folders.get(f.folderKey).deletedAt).toBeUndefined();
+    expect(f.folders.get(childKey).isFavorite).toBe(true);
+    expect(f.folders.get(childKey).deletedAt).toBeUndefined();
+
+    const documentFixture = fixture('moderator');
+    const documentKey = documentFixture.addDocument();
+    documentFixture.repository.transaction = async (operation) => {
+      documentFixture.documents.get(documentKey).isFavorite = true;
+      return operation(documentFixture.repository);
+    };
+    const documentResult = await runContentTool('document.archive', { documentKeys: [documentKey] }, documentFixture.context, { repository: documentFixture.repository, clock: () => new Date(now) });
+    expect(documentResult.results[0]).toMatchObject({ success: false, error: { code: 'CONTENT_CONFLICT' } });
+    expect(documentFixture.documents.get(documentKey).deletedAt).toBeUndefined();
+  });
+
   test('deletes storage before transaction-bound document metadata and retains pointers on failure', async () => {
     const f = fixture('owner');
     const documentKey = f.addDocument();

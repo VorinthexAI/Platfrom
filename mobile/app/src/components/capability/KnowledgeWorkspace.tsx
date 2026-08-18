@@ -47,11 +47,10 @@ import { WorkspaceAppSwitcher } from "@/components/capability/WorkspaceAppSwitch
 import { DocumentScanModal, type DocumentScanPage } from "@/components/capability/DocumentScanModal";
 import { MAX_DOCUMENT_SCAN_BYTES, scanSessionSize } from "@/lib/document-scan-session";
 import { normalizeCapturedJpeg } from "@/lib/captured-image";
-import { normalizeStructurallyCoveredResources } from "@/lib/content-selection-ancestry";
+import { normalizeStructurallyCoveredResources, partitionFavoriteContentSelection } from "@/lib/content-selection-ancestry";
 import { ChromeIcon } from "@/components/ChromeIcon";
 import { assistantIconSource } from "@/data/capability-icons";
 import {
-  archiveContentDocument,
   archiveContentSelection,
   askPersonalAssistant,
   clearContentDocumentAudioPlayback,
@@ -180,6 +179,11 @@ const CORE_PROMPTS = [
 ] as const;
 const wait = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 const MAX_SELECTED_CONTENT_RESOURCES = 100;
+const CONTENT_CONFLICT = "CONTENT_CONFLICT";
+
+function isFavoriteContentConflict(value: unknown): value is { code: typeof CONTENT_CONFLICT; action: "update" } {
+  return typeof value === "object" && value !== null && "code" in value && value.code === CONTENT_CONFLICT && "action" in value && value.action === "update";
+}
 
 function documentDisplayName(document: Pick<ContentDocument, "name" | "extension">): string {
   if (!document.extension || document.name.toLowerCase().endsWith(`.${document.extension.toLowerCase()}`)) return document.name;
@@ -1824,7 +1828,7 @@ export function KnowledgeWorkspace() {
   };
 
   const handleSearchDocumentLongPress = (document: ContentSearchDocument) => {
-    const provisional: ContentDocument = { key: document.documentKey, name: document.name, folderKey: document.folderKey, extension: document.extension, isFavorite: false, updatedAt: "" };
+    const provisional: ContentDocument = { key: document.documentKey, name: document.name, folderKey: document.folderKey, extension: document.extension, isFavorite: document.isFavorite, updatedAt: "" };
     const selecting = !selectedDocuments.some(({ key }) => key === document.documentKey);
     handleDocumentLongPress(provisional);
     if (!selecting || selectedCount >= MAX_SELECTED_CONTENT_RESOURCES) return;
@@ -1846,7 +1850,7 @@ export function KnowledgeWorkspace() {
     if (consumeLongPress(id)) return;
     if (selectionActive) {
       const existing = selectedDocuments.find(({ key }) => key === document.documentKey);
-      toggleDocumentSelection(existing ?? { key: document.documentKey, name: document.name, folderKey: document.folderKey, extension: document.extension, isFavorite: false, updatedAt: "" });
+      toggleDocumentSelection(existing ?? { key: document.documentKey, name: document.name, folderKey: document.folderKey, extension: document.extension, isFavorite: document.isFavorite, updatedAt: "" });
       if (!existing && selectedCount < MAX_SELECTED_CONTENT_RESOURCES) {
         setHydratingDocumentKeys((current) => [...current.filter((key) => key !== document.documentKey), document.documentKey]);
         void getContentDocument(queryClient, contentContext, document.documentKey).then((resolved) => {
@@ -3100,6 +3104,11 @@ export function KnowledgeWorkspace() {
       ? selectedFoldersSnapshot[0]
       : undefined;
     if (directFolder) {
+      if (directFolder.isFavorite) {
+        closeSheet();
+        notify("Can't delete favorite folder");
+        return;
+      }
       const previousFolders = folders;
       const previousDocuments = documents;
       const previousRootFolders = rootFolders;
@@ -3131,7 +3140,7 @@ export function KnowledgeWorkspace() {
           setWorkspaceMode("folders");
         }
       }
-      void invalidateContentLocations(queryClient, contentContext, [parentKey]);
+      void invalidateContentLocations(queryClient, contentContext, [parentKey]).catch(() => undefined);
       closeSheet();
       const generation = ++folderActionGeneration.current;
       const navigationRequest = navigationGeneration.current;
@@ -3151,14 +3160,14 @@ export function KnowledgeWorkspace() {
         }).catch(() => undefined);
       }
       let committed = false;
-      void archiveContentSelection({ folderKeys: [directFolder.key], documentKeys: [] }).then(async (outcome) => {
-        if (outcome.succeeded === 0) throw new Error(outcome.failures[0]?.message ?? "The folder could not be deleted.");
+      void archiveContentSelection({ folderKeys: [directFolder.key], documentKeys: [] }).then((outcome) => {
+        if (outcome.succeeded === 0) throw outcome.failures[0] ?? new Error("The folder could not be deleted.");
         committed = true;
         removeCachedContentFoldersEverywhere(queryClient, contentContext, [directFolder.key]);
-        await invalidateContentLocations(queryClient, contentContext, [parentKey]);
-        await invalidateContentHistories(queryClient, contentContext, [parentKey, undefined]);
+        void invalidateContentLocations(queryClient, contentContext, [parentKey]).catch(() => undefined);
+        void invalidateContentHistories(queryClient, contentContext, [parentKey, undefined]).catch(() => undefined);
         notify("1 item deleted");
-      }).catch(() => {
+      }).catch((cause: unknown) => {
         if (committed) {
           if (isCurrent()) notify("1 item deleted");
           return;
@@ -3174,22 +3183,31 @@ export function KnowledgeWorkspace() {
         setWorkspaceMode(previousWorkspaceMode);
         setRootSearchResults(previousRootSearchResults);
         setFolderSearchResults(previousFolderSearchResults);
-        notify("Folder deletion failed");
+        notify(isFavoriteContentConflict(cause) ? "Can't delete favorite folder" : "Folder deletion failed");
       });
       return;
     }
     if (bulkMutationLocked.current) return;
+    const { favoriteFolders, favoriteDocuments, eligibleFolders, eligibleDocuments } = partitionFavoriteContentSelection(selectedFoldersSnapshot, selectedDocumentsSnapshot);
+    const localFavoriteCount = favoriteFolders.length + favoriteDocuments.length;
+    if (localFavoriteCount > 0 && eligibleFolders.length === 0 && eligibleDocuments.length === 0) {
+      closeSheet(true);
+      notify(`Can't delete ${localFavoriteCount} favorite item${localFavoriteCount === 1 ? "" : "s"}`);
+      return;
+    }
     bulkMutationLocked.current = true;
     setBulkLoading(true);
     setSheetError(undefined);
     try {
-      const { folders: operationFolders, documents: operationDocuments } = await resolveStructuralResources(selectedFoldersSnapshot, selectedDocumentsSnapshot);
+      const { folders: operationFolders, documents: operationDocuments } = await resolveStructuralResources(eligibleFolders, eligibleDocuments);
       const operationSelection: ContentSelection = { folderKeys: operationFolders.map(({ key }) => key), documentKeys: operationDocuments.map(({ key }) => key) };
-      setSelectedFolders(operationFolders);
-      setSelectedDocuments(operationDocuments);
+      setSelectedFolders([...favoriteFolders, ...operationFolders]);
+      setSelectedDocuments([...favoriteDocuments, ...operationDocuments]);
       const outcome = await archiveContentSelection(operationSelection);
       const failedFolders = new Set(outcome.failures.filter(({ kind }) => kind === "folder").map(({ key }) => key));
       const failedDocuments = new Set(outcome.failures.filter(({ kind }) => kind === "document").map(({ key }) => key));
+      const serverFavoriteFailures = new Set(outcome.failures.filter(isFavoriteContentConflict).map(({ kind, key }) => `${kind}:${key}`));
+      const favoriteCount = localFavoriteCount > 0 ? localFavoriteCount : serverFavoriteFailures.size;
       const archivedFolderKeys = operationFolders.map(({ key }) => key).filter((key) => !failedFolders.has(key));
       const archivedDocumentKeys = operationDocuments.map(({ key }) => key).filter((key) => !failedDocuments.has(key));
       removeCachedContentFoldersEverywhere(queryClient, contentContext, archivedFolderKeys);
@@ -3198,18 +3216,22 @@ export function KnowledgeWorkspace() {
       setRootFolders((current) => current.filter(({ key }) => !archivedFolderKeys.includes(key)));
       setDocuments((current) => current.filter(({ key }) => !archivedDocumentKeys.includes(key)));
       setRootDocuments((current) => current.filter(({ key }) => !archivedDocumentKeys.includes(key)));
-      await queryClient.invalidateQueries({ queryKey: contentQueryKeys.locations(contentContext), refetchType: "none" });
-      await invalidateContentHistories(queryClient, contentContext, [currentFolder?.key, undefined]);
-      setSelectedFolders(operationFolders.filter(({ key }) => failedFolders.has(key)));
-      setSelectedDocuments(operationDocuments.filter(({ key }) => failedDocuments.has(key)));
-      if (outcome.succeeded) {
+      setSelectedFolders([...favoriteFolders, ...operationFolders.filter(({ key }) => failedFolders.has(key))]);
+      setSelectedDocuments([...favoriteDocuments, ...operationDocuments.filter(({ key }) => failedDocuments.has(key))]);
+      void queryClient.invalidateQueries({ queryKey: contentQueryKeys.locations(contentContext), refetchType: "none" }).catch(() => undefined);
+      void invalidateContentHistories(queryClient, contentContext, [currentFolder?.key, undefined]).catch(() => undefined);
+      if (favoriteCount > 0) {
+        closeSheet(true);
+      } else if (outcome.succeeded) {
         closeSheet(outcome.failed > 0);
       }
-      notify(outcome.failed
-        ? outcome.succeeded ? `${outcome.succeeded} deleted, ${outcome.failed} failed` : "Items could not be deleted"
-        : `${outcome.succeeded} ${outcome.succeeded === 1 ? "item" : "items"} deleted`);
-    } catch (cause) {
-      setSheetError(cause instanceof Error ? cause.message : "The selected items could not be deleted.");
+      notify(favoriteCount > 0
+        ? `Can't delete ${favoriteCount} favorite item${favoriteCount === 1 ? "" : "s"}`
+        : outcome.failed
+          ? outcome.succeeded ? `${outcome.succeeded} deleted, ${outcome.failed} failed` : "Items could not be deleted"
+          : `${outcome.succeeded} ${outcome.succeeded === 1 ? "item" : "items"} deleted`);
+    } catch {
+      setSheetError("The selected items could not be deleted.");
     } finally {
       bulkMutationLocked.current = false;
       setBulkLoading(false);
@@ -3347,10 +3369,24 @@ export function KnowledgeWorkspace() {
   const deleteSelectedDocument = async () => {
     if (!selectedDocument) return;
     const target = selectedDocument;
+    if (target.isFavorite) {
+      closeSheet();
+      notify(`Can't delete favorite ${target.extension ? "file" : "document"}`);
+      return;
+    }
     setDocumentActionLoading("delete");
     setSheetError(undefined);
     try {
-      await archiveContentDocument(target.key);
+      const outcome = await archiveContentSelection({ folderKeys: [], documentKeys: [target.key] });
+      if (outcome.succeeded === 0) {
+        if (outcome.failures.some(isFavoriteContentConflict)) {
+          closeSheet();
+          notify(`Can't delete favorite ${target.extension ? "file" : "document"}`);
+        } else {
+          setSheetError("The item could not be deleted.");
+        }
+        return;
+      }
       removeCachedContentDocumentEverywhere(queryClient, contentContext, target.key);
       setDocuments((current) => current.filter(({ key }) => key !== target.key));
       setRootDocuments((current) => current.filter(({ key }) => key !== target.key));
@@ -3365,11 +3401,11 @@ export function KnowledgeWorkspace() {
         setWorkspaceMode(workspaceModeRef.current);
       }
       setSelectedDocument(undefined);
-      void invalidateContentLocations(queryClient, contentContext, [target.folderKey]);
-      void invalidateContentHistories(queryClient, contentContext, [target.folderKey, undefined]);
+      void invalidateContentLocations(queryClient, contentContext, [target.folderKey]).catch(() => undefined);
+      void invalidateContentHistories(queryClient, contentContext, [target.folderKey, undefined]).catch(() => undefined);
       notify("1 item deleted");
-    } catch (cause) {
-      setSheetError(cause instanceof Error ? cause.message : "The item could not be deleted.");
+    } catch {
+      setSheetError("The item could not be deleted.");
     } finally {
       setDocumentActionLoading(undefined);
     }

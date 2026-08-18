@@ -322,6 +322,20 @@ test("returns copied records and surfaces item and tool partial failures", async
   expect(calls[1]?.body.input.idempotencyKey).toBe("stable-copy:document.copy");
 });
 
+test("preserves structured item and tool error codes in batch failures", async () => {
+  responseForTool = (tool) => tool === "folder.archive"
+    ? { data: { success: true, data: { results: [{ success: false, error: { message: "Hidden favorite detail", code: "CONTENT_CONFLICT", action: "update" } }] } } }
+    : { data: { success: false, error: { message: "Hidden service detail", code: "CONTENT_UNAVAILABLE", action: "request" } } };
+
+  const result = await archiveContentSelection({ folderKeys: ["folder-a"], documentKeys: ["document-a"] }, "coded-archive");
+
+  expect(result).toMatchObject({ requested: 2, succeeded: 0, failed: 2 });
+  expect(result.failures).toEqual([
+    { kind: "folder", key: "folder-a", tool: "folder.archive", message: "Hidden favorite detail", code: "CONTENT_CONFLICT", action: "update" },
+    { kind: "document", key: "document-a", tool: "document.archive", message: "Hidden service detail", code: "CONTENT_UNAVAILABLE", action: "request" },
+  ]);
+});
+
 test("moves and archives mixed selections through separate canonical tools", async () => {
   responseForTool = (tool) => ({ data: { success: true, data: { results: [{ success: true, data: tool.startsWith("folder.")
     ? { folder: { key: "folder-a", name: "Folder" } }

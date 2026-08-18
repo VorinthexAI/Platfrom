@@ -1,8 +1,8 @@
 import {
-  archiveFolder as contentFolder, getFolderById, restoreFolder, type Folder,
+  archiveFolder as contentFolder, getFolderById, listFolderDescendants as defaultListFolderDescendants, restoreFolder, type Folder,
 } from '@/lib/db/folders.node';
 import {
-  archiveDocument as contentDocument, getDocumentById, restoreDocument, type Document,
+  archiveDocument as contentDocument, getDocumentById, listDocumentsByScope as defaultListDocumentsByScope, restoreDocument, type Document,
 } from '@/lib/db/documents.node';
 import {
   archiveDocumentVersion as contentDocumentVersion, getDocumentVersionById, restoreDocumentVersion, type DocumentVersion,
@@ -28,6 +28,8 @@ export interface ContentExecutionDependencies {
   getDocument?: typeof getDocumentById;
   getDocumentVersion?: typeof getDocumentVersionById;
   getDocumentShare?: typeof getDocumentShareById;
+  listFolderDescendants?: typeof defaultListFolderDescendants;
+  listDocumentsByScope?: typeof defaultListDocumentsByScope;
   contentFolder?: typeof contentFolder;
   restoreFolder?: typeof restoreFolder;
   contentDocument?: typeof contentDocument;
@@ -64,17 +66,45 @@ async function defaultAtomicMutate(resource: 'folders' | 'documents' | 'document
   const schema = resource === 'folders' ? folderSchema : resource === 'documents' ? documentSchema : resource === 'documentVersions' ? documentVersionSchema : documentShareSchema;
   const parentCollections = resource === 'folders' ? ['projects'] : resource === 'documents' ? ['folders'] : ['documents'];
   const guard = resource === 'folders'
-    ? 'LET parent = node.parentFolderKey != null ? DOCUMENT("folders", node.parentFolderKey) : null LET project = FIRST(FOR candidate IN projects FILTER candidate.contentFolderKey == node._key LIMIT 1 RETURN candidate) FILTER project == null FILTER !@restoring || parent == null || parent.deletedAt == null'
+    ? 'LET parent = node.parentFolderKey != null ? DOCUMENT("folders", node.parentFolderKey) : null LET project = FIRST(FOR candidate IN projects FILTER candidate.contentFolderKey == node._key LIMIT 1 RETURN candidate) FILTER project == null FILTER @restoring || node.isFavorite != true FILTER !@restoring || parent == null || parent.deletedAt == null'
     : resource === 'documents'
-      ? 'LET parent = HAS(node, "folderKey") && node.folderKey != null ? DOCUMENT("folders", node.folderKey) : null FILTER !@restoring || parent == null || parent.deletedAt == null'
+      ? 'LET parent = HAS(node, "folderKey") && node.folderKey != null ? DOCUMENT("folders", node.folderKey) : null FILTER @restoring || node.isFavorite != true FILTER !@restoring || parent == null || parent.deletedAt == null'
       : 'LET parent = DOCUMENT("documents", node.documentKey) FILTER !@restoring || (parent != null && parent.deletedAt == null)';
-  return withTransaction([resource, ...parentCollections, 'scopes'], async (transaction) => {
+  return withTransaction([resource, ...parentCollections, 'scopes', ...(resource === 'folders' ? ['documents'] : [])], async (transaction) => {
+    if (resource === 'folders' && deletedAt !== null) {
+      const subtreeCursor = await transaction.query<{
+        rootKey: string;
+        folders: Array<{ key: string; parentFolderKey?: string; isFavorite?: boolean }>;
+        documents: Array<{ folderKey?: string; isFavorite?: boolean }>;
+      }>(
+        'FOR root IN folders FILTER root._key IN @keys RETURN { rootKey: root._key, folders: (FOR folder IN folders FILTER folder.scopeKey == root.scopeKey && folder.deletedAt == null RETURN { key: folder._key, parentFolderKey: folder.parentFolderKey, isFavorite: folder.isFavorite }), documents: (FOR document IN documents FILTER document.scopeKey == root.scopeKey && document.deletedAt == null RETURN { folderKey: document.folderKey, isFavorite: document.isFavorite }) }',
+        { keys },
+      );
+      for (const subtree of await subtreeCursor.all()) {
+        const affected = new Set([subtree.rootKey]);
+        let changed = true;
+        while (changed) {
+          changed = false;
+          for (const folder of subtree.folders) if (folder.parentFolderKey && affected.has(folder.parentFolderKey) && !affected.has(folder.key)) {
+            affected.add(folder.key);
+            changed = true;
+          }
+        }
+        if (subtree.folders.some((folder) => affected.has(folder.key) && folder.isFavorite)
+          || subtree.documents.some((document) => document.folderKey && affected.has(document.folderKey) && document.isFavorite)) {
+          throw new ContentLifecycleError('CONTENT_CONFLICT', 'Unfavorite the folder subtree and its documents before archiving.');
+        }
+      }
+    }
     const cursor = await transaction.query<Record<string, unknown>>(
       `FOR node IN @@collection FILTER node._key IN @keys FILTER @restoring ? node.deletedAt != null : node.deletedAt == null LET scope = DOCUMENT("scopes", node.scopeKey) FILTER scope != null && scope.organizationKey == @organizationKey && scope.deletedAt == null ${guard} UPDATE node WITH (@hasUpdatedAt ? { deletedAt: @deletedAt, updatedAt: @timestamp } : { deletedAt: @deletedAt }) IN @@collection RETURN NEW`,
       { keys, deletedAt, timestamp, restoring: deletedAt === null, hasUpdatedAt: resource !== 'documentVersions', organizationKey: context.organizationKey, '@collection': resource },
     );
     const values = (await cursor.all()).map((node) => schema.parse(withArangoKey(node)) as ContentNode);
-    if (values.length !== keys.length) throw new ContentLifecycleError('content_state_changed', 'Content lifecycle state changed before the transaction committed.');
+    if (values.length !== keys.length) {
+      if (deletedAt !== null && (resource === 'folders' || resource === 'documents')) throw new ContentLifecycleError('CONTENT_CONFLICT', 'Content could not be archived because its state or favorite status changed.');
+      throw new ContentLifecycleError('content_state_changed', 'Content lifecycle state changed before the transaction committed.');
+    }
     return values;
   });
 }
@@ -103,6 +133,8 @@ export async function executeContentLifecycleTool(
   const getDocument = dependencies.getDocument ?? getDocumentById;
   const getVersion = dependencies.getDocumentVersion ?? getDocumentVersionById;
   const getShare = dependencies.getDocumentShare ?? getDocumentShareById;
+  const listFolderDescendants = dependencies.listFolderDescendants ?? defaultListFolderDescendants;
+  const listDocumentsByScope = dependencies.listDocumentsByScope ?? defaultListDocumentsByScope;
 
   const load = async (key: string): Promise<ContentNode | null> => {
     if (resource.type === 'folders') return getFolder(key);
@@ -121,6 +153,20 @@ export async function executeContentLifecycleTool(
     }
     if (restoring && node.deletedAt === null) throw new ContentLifecycleError('content_node_active', `${key} is already active.`);
     if (!restoring && node.deletedAt !== null) throw new ContentLifecycleError('content_node_archived', `${key} is already archived.`);
+    if (!restoring && (resource.type === 'folders' || resource.type === 'documents') && 'isFavorite' in node && node.isFavorite) {
+      throw new ContentLifecycleError('CONTENT_CONFLICT', `Unfavorite the ${resource.type === 'folders' ? 'folder' : 'document'} before archiving.`);
+    }
+    if (!restoring && resource.type === 'folders') {
+      const childFolders = await listFolderDescendants(node.scopeKey, key, false);
+      if (childFolders.some((folder) => folder.deletedAt === null && folder.isFavorite)) {
+        throw new ContentLifecycleError('CONTENT_CONFLICT', 'Unfavorite all descendant folders before archiving.');
+      }
+      const affectedFolderKeys = new Set([key, ...childFolders.filter((folder) => folder.deletedAt === null).map((folder) => folder.key)]);
+      const containedDocuments = await listDocumentsByScope(node.scopeKey, { includeArchived: false });
+      if (containedDocuments.some((document) => document.deletedAt === null && document.folderKey && affectedFolderKeys.has(document.folderKey) && document.isFavorite)) {
+        throw new ContentLifecycleError('CONTENT_CONFLICT', 'Unfavorite all documents in the folder subtree before archiving.');
+      }
+    }
     if (restoring && resource.type === 'folders' && 'parentFolderKey' in node && node.parentFolderKey) {
       const parent = await getFolder(node.parentFolderKey);
       if (!parent || parent.deletedAt !== null) throw new ContentLifecycleError('content_parent_archived', 'The parent folder must be active before restore.');

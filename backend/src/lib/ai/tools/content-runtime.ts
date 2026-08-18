@@ -546,14 +546,14 @@ function principal(context: DomainToolContext, tool: ContentToolName) {
 
 async function observe(deps: ContentToolDependencies, event: SafeEvent) { try { await deps.observer?.(event); } catch { /* Telemetry cannot alter behavior. */ } }
 
-async function batch<T>(tool: ContentToolName, items: Array<{ key: string; run: (repository: ContentRepository) => Promise<T>; preflight?: () => Promise<void> }>, atomic: boolean, initialRepository: ContentRepository) {
+async function batch<T>(tool: ContentToolName, items: Array<{ key: string; run: (repository: ContentRepository, transactionBound: boolean) => Promise<T>; preflight?: () => Promise<void> }>, atomic: boolean, initialRepository: ContentRepository) {
   let repo = initialRepository;
   if (atomic && !repo.transaction) fail('CONTENT_CONFLICT', 'Atomic mode is unavailable for this operation.', tool, 'transaction');
   if (atomic) for (const item of items) await item.preflight?.();
   const execute = async () => {
     const results: unknown[] = [];
     for (const item of items) {
-      try { if (!atomic) await item.preflight?.(); results.push({ key: item.key, success: true, data: await item.run(repo) }); }
+      try { if (!atomic) await item.preflight?.(); results.push({ key: item.key, success: true, data: await item.run(repo, atomic) }); }
       catch (error) {
         const mapped = mappedError(error, tool, undefined, item.key);
         if (atomic) throw mapped;
@@ -1244,6 +1244,26 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       })), false, repo);
     } else if (tool === 'folder.archive' || tool === 'folder.restore') {
       const restore = tool === 'folder.restore';
+      const archiveCandidates = async (repository: ContentRepository, key: string) => {
+        const root = await repository.getFolder(key);
+        if (!root) fail('CONTENT_NOT_FOUND', 'Folder was not found.', tool, 'read', key);
+        const allFolders = await repository.listFolders(root.scopeKey, true);
+        const children = descendants(allFolders, key);
+        if (!restore && !input.includeDescendants && children.some((child) => !child.deletedAt)) {
+          fail('FOLDER_NOT_EMPTY', 'Folder has active descendants.', tool, 'update', key);
+        }
+        const affectedFolders = [root, ...(input.includeDescendants ? children : [])];
+        const affectedFolderKeys = new Set(affectedFolders.map((item) => item.key));
+        const affectedDocuments = (await repository.listDocuments(root.scopeKey, true))
+          .filter((item) => item.folderKey !== undefined && affectedFolderKeys.has(item.folderKey));
+        if (!restore && affectedFolders.some((item) => item.isFavorite)) {
+          fail('CONTENT_CONFLICT', 'Unfavorite the folder and its descendants before archiving.', tool, 'update', key);
+        }
+        if (!restore && affectedDocuments.some((item) => item.isFavorite)) {
+          fail('CONTENT_CONFLICT', 'Unfavorite all documents in the folder before archiving.', tool, 'update', key);
+        }
+        return { root, affectedFolders, affectedDocuments };
+      };
       const lifecycleItems = input.folderKeys.map((key: string) => ({
         key,
         preflight: async () => {
@@ -1252,30 +1272,28 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             const ancestors = await folderAncestors(root.parentFolderKey, root.scopeKey, 'moderator');
             if (!input.restoreAncestors && ancestors.some((ancestor) => ancestor.deletedAt)) fail('FOLDER_ARCHIVED', 'Restore the archived ancestor hierarchy first.', tool, 'update', key);
           }
+          await archiveCandidates(repo, key);
         },
-        run: async (mutationRepository: ContentRepository) => {
-          const root = await folder(key, 'moderator');
-          const allFolders = await foldersIn(root.scopeKey);
-          const children = descendants(allFolders, key);
-          if (!restore && !input.includeDescendants && children.some((child) => !child.deletedAt)) {
-            fail('FOLDER_NOT_EMPTY', 'Folder has active descendants.', tool, 'update', key);
-          }
-          const ancestors = restore ? await folderAncestors(root.parentFolderKey, root.scopeKey, 'moderator') : [];
-          if (restore && !input.restoreAncestors && ancestors.some((ancestor) => ancestor.deletedAt)) fail('FOLDER_ARCHIVED', 'Restore the archived ancestor hierarchy first.', tool, 'update', key);
-          const affectedFolders = [root, ...(input.includeDescendants ? children : [])];
-          const affectedFolderKeys = new Set(affectedFolders.map((item) => item.key));
-          const affectedDocuments = (await repo.listDocuments(root.scopeKey, true))
-            .filter((item) => item.folderKey !== undefined && affectedFolderKeys.has(item.folderKey));
-          const timestamp = now();
-          const updateFolders = async () => { for (const item of affectedFolders) await mutationRepository.updateFolder(item.key, { deletedAt: restore ? null : timestamp, updatedAt: timestamp }); };
-          const updateDocuments = async () => { for (const item of affectedDocuments) await mutationRepository.updateDocument(item.key, { deletedAt: restore ? null : timestamp, updatedAt: timestamp }); };
-          // Document destination guards require active folders in both directions.
-          if (restore) { await updateFolders(); await updateDocuments(); }
-          else { await updateDocuments(); await updateFolders(); }
-          if (restore && input.restoreAncestors) for (const ancestor of ancestors) {
-            await mutationRepository.updateFolder(ancestor.key, { deletedAt: null, updatedAt: timestamp });
-          }
-          return { folder: await folderView({ ...root, deletedAt: restore ? null : timestamp, updatedAt: timestamp }, d) };
+        run: async (mutationRepository: ContentRepository, transactionBound: boolean) => {
+          await folder(key, 'moderator');
+          const mutate = async (repository: ContentRepository) => {
+            const { root, affectedFolders, affectedDocuments } = await archiveCandidates(repository, key);
+            const ancestors = restore ? await folderAncestors(root.parentFolderKey, root.scopeKey, 'moderator') : [];
+            if (restore && !input.restoreAncestors && ancestors.some((ancestor) => ancestor.deletedAt)) fail('FOLDER_ARCHIVED', 'Restore the archived ancestor hierarchy first.', tool, 'update', key);
+            const timestamp = now();
+            const updateFolders = async () => { for (const item of affectedFolders) await repository.updateFolder(item.key, { deletedAt: restore ? null : timestamp, updatedAt: timestamp }); };
+            const updateDocuments = async () => { for (const item of affectedDocuments) await repository.updateDocument(item.key, { deletedAt: restore ? null : timestamp, updatedAt: timestamp }); };
+            // Document destination guards require active folders in both directions.
+            if (restore) { await updateFolders(); await updateDocuments(); }
+            else { await updateDocuments(); await updateFolders(); }
+            if (restore && input.restoreAncestors) for (const ancestor of ancestors) {
+              await repository.updateFolder(ancestor.key, { deletedAt: null, updatedAt: timestamp });
+            }
+            return { folder: await folderView({ ...root, deletedAt: restore ? null : timestamp, updatedAt: timestamp }, d) };
+          };
+          if (restore || transactionBound) return mutate(mutationRepository);
+          if (!mutationRepository.transaction) fail('CONTENT_CONFLICT', 'Transactional folder archive is unavailable.', tool, 'transaction', key);
+          return mutationRepository.transaction(mutate);
         },
       }));
       result = await batch(tool, lifecycleItems, input.atomic, repo);
@@ -1788,20 +1806,29 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         key,
         preflight: async () => {
           const current = await document(key, 'moderator');
+          if (!restore && current.isFavorite) fail('CONTENT_CONFLICT', 'Unfavorite the document before archiving.', tool, 'update', key);
           if (restore) {
             const ancestors = await folderAncestors(current.folderKey, current.scopeKey, 'moderator');
             if (!input.restoreAncestors && ancestors.some((ancestor) => ancestor.deletedAt)) fail('FOLDER_ARCHIVED', 'Restore the archived containing hierarchy first.', tool, 'update', key);
           }
         },
-        run: async (mutationRepository: ContentRepository) => {
-          const currentDocument = await document(key, 'moderator');
-          const ancestors = restore ? await folderAncestors(currentDocument.folderKey, currentDocument.scopeKey, 'moderator') : [];
-          if (restore && !input.restoreAncestors && ancestors.some((ancestor) => ancestor.deletedAt)) fail('FOLDER_ARCHIVED', 'Restore the archived containing hierarchy first.', tool, 'update', key);
-          if (restore && input.restoreAncestors) for (const ancestor of ancestors) {
-            await mutationRepository.updateFolder(ancestor.key, { deletedAt: null, updatedAt: now() });
-          }
-          const updated = await mutationRepository.updateDocument(key, { deletedAt: restore ? null : now(), updatedAt: now() });
-          return { document: documentView(updated) };
+        run: async (mutationRepository: ContentRepository, transactionBound: boolean) => {
+          await document(key, 'moderator');
+          const mutate = async (repository: ContentRepository) => {
+            const currentDocument = await repository.getDocument(key);
+            if (!currentDocument) fail('CONTENT_NOT_FOUND', 'Document was not found.', tool, 'read', key);
+            if (!restore && currentDocument.isFavorite) fail('CONTENT_CONFLICT', 'Unfavorite the document before archiving.', tool, 'update', key);
+            const ancestors = restore ? await folderAncestors(currentDocument.folderKey, currentDocument.scopeKey, 'moderator') : [];
+            if (restore && !input.restoreAncestors && ancestors.some((ancestor) => ancestor.deletedAt)) fail('FOLDER_ARCHIVED', 'Restore the archived containing hierarchy first.', tool, 'update', key);
+            if (restore && input.restoreAncestors) for (const ancestor of ancestors) {
+              await repository.updateFolder(ancestor.key, { deletedAt: null, updatedAt: now() });
+            }
+            const updated = await repository.updateDocument(key, { deletedAt: restore ? null : now(), updatedAt: now() });
+            return { document: documentView(updated) };
+          };
+          if (restore || transactionBound) return mutate(mutationRepository);
+          if (!mutationRepository.transaction) fail('CONTENT_CONFLICT', 'Transactional document archive is unavailable.', tool, 'transaction', key);
+          return mutationRepository.transaction(mutate);
         },
       })), input.atomic, repo);
     } else if (tool === 'document.delete') {
