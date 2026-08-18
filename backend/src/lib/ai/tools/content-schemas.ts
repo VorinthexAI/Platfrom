@@ -189,7 +189,6 @@ const documentUpdateSchema = z.object({
 
 export const contentSearchSourceSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('scope'), scopeKeys: keysSchema }).strict(),
-  z.object({ type: z.literal('project'), projectKeys: keysSchema }).strict(),
   z.object({ type: z.literal('folder'), folderKeys: keysSchema, includeDescendants: z.boolean().optional() }).strict(),
 ]);
 
@@ -206,7 +205,6 @@ export const contentSearchFiltersSchema = z.object(commonSearchFilterShape).stri
 export const organizationContentSearchFiltersSchema = z.object({
   ...commonSearchFilterShape,
   scopeKeys: keysSchema.optional(),
-  projectKeys: keysSchema.optional(),
   folderKeys: keysSchema.optional(),
 }).strict();
 const searchIncludeSchema = z.array(z.enum(['snippet', 'content', 'folder', 'scoreBreakdown'])).min(1);
@@ -233,7 +231,7 @@ export const contentSearchResultSchema = z.object({
   content: z.string().optional(),
   folder: contentFolderSchema.optional(),
   scope: z.object({ key: keySchema }).strict().optional(),
-  matchedSource: z.object({ type: z.enum(['scope', 'project', 'folder']), key: keySchema }).strict().optional(),
+  matchedSource: z.object({ type: z.enum(['scope', 'folder']), key: keySchema }).strict().optional(),
   scoreBreakdown: searchScoreBreakdownSchema.optional(),
 }).strict();
 export const contentSearchOutputSchema = z.object({ query: textSchema, results: z.array(contentSearchResultSchema), totalCandidates: z.number().int().nonnegative().optional() }).strict();

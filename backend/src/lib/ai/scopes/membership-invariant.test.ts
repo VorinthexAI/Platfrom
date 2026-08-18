@@ -50,25 +50,19 @@ function fakeDatabase(input: {
 }
 
 describe('organization scope membership invariant', () => {
-  test('wires targeted reconciliation before inherited grant synchronization in domain mutations', async () => {
+  test('does not expose removed organization and scope mutation handlers', async () => {
     const source = await Bun.file(new URL('../tools/domain-execute.ts', import.meta.url)).text();
-    const add = source.indexOf('userOrganizationKeys: [key]');
-    const activate = source.indexOf('userOrganizationKeys: keys');
-    const create = source.indexOf('scopeKeys: [key]');
-    expect(add).toBeGreaterThan(-1);
-    expect(source.indexOf('syncOrganizationAgentMembers(context)', add)).toBeGreaterThan(add);
-    expect(activate).toBeGreaterThan(add);
-    expect(source.indexOf('syncOrganizationAgentMembers(context)', activate)).toBeGreaterThan(activate);
-    expect(create).toBeGreaterThan(activate);
-    expect(source.indexOf('syncOrganizationAgentMembers(context)', create)).toBeGreaterThan(create);
+    expect(source).not.toContain('organization.member.');
+    expect(source).not.toContain("action === 'scope.create'");
+    expect(source).not.toContain('executeAccessDomainTool');
   });
 
-  test('scope member mutations preserve provenance and the organization baseline', async () => {
+  test('retains inherited agent grant reconciliation as internal infrastructure', async () => {
     const source = await Bun.file(new URL('../tools/domain-execute-access-domains.ts', import.meta.url)).text();
-    expect(source).toContain('member.source == "explicit" || !HAS(member, "source")');
-    expect(source).toContain('source: \'explicit\'');
-    expect(source).toContain('source: "organization"');
-    expect(source).toContain('UPDATE document.key WITH { role: document.role, status: "active", source: "organization" }');
+    expect(source).toContain('export async function syncOrganizationAgentMembers');
+    expect(source).toContain('inheritedGrantPlan');
+    expect(source).toContain("source: 'inherited'");
+    expect(source).not.toContain('executeAccessDomainTool');
   });
 
   test('maps every organization role to the required scope role', () => {

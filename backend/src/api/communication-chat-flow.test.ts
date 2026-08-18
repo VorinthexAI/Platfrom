@@ -65,7 +65,6 @@ describe('Communication orchestrator chat flow', () => {
         stream: async function* (_key, chatInput) { novaInputs.push(chatInput); yield { type: 'text-delta', text: 'Atlas response' }; yield { type: 'done' }; },
       }),
       listScopes: async (actor) => { expect(actor).toEqual({ organizationKey, membershipKey }); return []; },
-      transcribe: async () => ({ text: '@Atlas hello' }),
       speak: async () => ({ audioBase64: 'UklGRg==', mimeType: 'audio/wav' }),
       channelLease: {
         acquire: async () => true,

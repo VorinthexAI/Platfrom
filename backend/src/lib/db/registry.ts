@@ -54,9 +54,6 @@ import { getAllBookPartsChunked, listBookPartsPage, upsertBookPartByKey } from '
 import { getAllBookChaptersChunked, listBookChaptersPage, upsertBookChapterByKey } from './book-chapters.node';
 import { getAllChapterContextsChunked, listChapterContextsPage, upsertChapterContextByKey } from './chapter-contexts.node';
 import { getAllBookProgressChunked, listBookProgressPage, upsertBookProgressByKey } from './book-progress.node';
-import { getAllProjectsChunked, listProjectsPage, upsertProjectByKey } from './projects.node';
-import { getAllMilestonesChunked, listMilestonesPage, upsertMilestoneByKey } from './milestones.node';
-import { getAllTasksChunked, listTasksPage, upsertTaskByKey } from './tasks.node';
 
 export interface NodeAccessors {
   /** One resumable page — for stateless HTTP pagination (GET /api/v1/nodes). */
@@ -118,9 +115,6 @@ export const NODE_REGISTRY: Record<string, NodeAccessors> = {
   bookChapters: { listPage: listBookChaptersPage, getAllChunked: getAllBookChaptersChunked, upsertByKey: upsertBookChapterByKey },
   chapterContexts: { listPage: listChapterContextsPage, getAllChunked: getAllChapterContextsChunked, upsertByKey: upsertChapterContextByKey },
   bookProgress: { listPage: listBookProgressPage, getAllChunked: getAllBookProgressChunked, upsertByKey: upsertBookProgressByKey },
-  projects: { listPage: listProjectsPage, getAllChunked: getAllProjectsChunked, upsertByKey: upsertProjectByKey },
-  milestones: { listPage: listMilestonesPage, getAllChunked: getAllMilestonesChunked, upsertByKey: upsertMilestoneByKey },
-  tasks: { listPage: listTasksPage, getAllChunked: getAllTasksChunked, upsertByKey: upsertTaskByKey },
   mindCapabilities: { listPage: listMindCapabilitiesPage, getAllChunked: getAllMindCapabilitiesChunked, upsertByKey: upsertMindCapabilityByKey },
   minds: { listPage: listMindsPage, getAllChunked: getAllMindsChunked, upsertByKey: upsertMindByKey },
   modelActions: { listPage: listModelActionsPage, getAllChunked: getAllModelActionsChunked, upsertByKey: upsertModelActionByKey },

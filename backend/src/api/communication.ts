@@ -1,9 +1,9 @@
 import type { Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
-import { streamTool, transcribeTool, sanitizedAgentMessageSchema, type ToolDependencies } from '@/lib/ai/tools';
+import { streamTool, sanitizedAgentMessageSchema, type ToolDependencies } from '@/lib/ai/tools';
 import { executeAction } from '@/lib/ai/router';
-import type { SpeechOutput, TranscriptionOutput } from '@/lib/ai/providers';
+import type { SpeechOutput } from '@/lib/ai/providers';
 import { dedupeMentionCandidates } from '@/lib/communication/mention-candidates';
 import { getDefaultScopeRepository } from '@/lib/ai/scopes';
 import { listAccessibleScopes, requireOrganizationAccess, FoundersAccessError } from '@/lib/founders/access';
@@ -29,13 +29,6 @@ const pollBody = strictObject({ messageKey: key, question: z.string().trim().min
   if (new Set(normalized).size !== normalized.length) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['options'], message: 'Poll options must be unique' });
 });
 const voteBody = strictObject({ optionKey: key });
-const transcriptionBody = strictObject({
-  audioBase64: z.string().min(1).max(4_000_000).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
-  mimeType: z.literal('audio/pcm'),
-}).superRefine((input, ctx) => {
-  const bytes = Buffer.from(input.audioBase64, 'base64').byteLength;
-  if (bytes < 960 || bytes > 2_880_000) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['audioBase64'], message: 'Audio must be between 20ms and 60 seconds' });
-});
 const speechBody = strictObject({ text: z.string().trim().min(1).max(8_000) });
 const COMMUNICATION_RESPONSE_INSTRUCTION = `Reply directly to the user with a detailed, self-contained plain-text answer. Other orchestrator mentions only select independent recipients: do not address, converse with, or refer to other mentioned orchestrators or their responses. Explain the relevant reasoning, assumptions, tradeoffs, and practical next steps when useful. Use no Markdown, headings, bullets, numbering, emphasis markers, or preamble. Keep the complete response under 500 words.`;
 const COMMUNICATION_PROVIDER_FALLBACK = 'I could not generate a response right now. Please try again.';
@@ -51,7 +44,6 @@ export interface CommunicationApiDependencies {
   listScopes(actor: CommunicationActor): Promise<readonly { name: string; description: string | null }[]>;
   publishTyping?(event: CommunicationTypingEvent): Promise<void>;
   subscribeTyping?(listener: (event: CommunicationTypingEvent) => void): () => void;
-  transcribe(organizationKey: string, audioBase64: string, prompt: string, signal: AbortSignal): Promise<TranscriptionOutput>;
   speak(organizationKey: string, text: string, signal: AbortSignal): Promise<SpeechOutput>;
   channelLease?: CommunicationChannelLease;
 }
@@ -106,10 +98,6 @@ const defaultDependencies: CommunicationApiDependencies = {
   },
   publishTyping: publishCommunicationTyping,
   subscribeTyping: subscribeCommunicationTyping,
-  transcribe: (organizationKey, audioBase64, prompt, signal) => transcribeTool.execute(
-    { audioBase64, mimeType: 'audio/pcm', prompt },
-    { organizationKey, signal, timeoutMs: 90_000 },
-  ),
   speak: async (organizationKey, text, signal) => (await executeAction<unknown, SpeechOutput>({ mode: 'fixed', organizationKey, actionSlug: 'speak', modelSlug: 'openai.gpt-realtime-2', providerSlug: 'openai' }, { text, voice: 'ash', format: 'wav' }, { signal, timeoutMs: 90_000 })).output,
 };
 
@@ -197,13 +185,6 @@ export function createCommunicationHandlers(dependencies: CommunicationApiDepend
       const roster = buildMentionRoster(access.mentions);
       const project = ({ participantKey, type, key: mentionKey, name, role, mentionCount }: MentionCandidate) => ({ participantKey, type, key: mentionKey, name, role, mentionCount });
       return { channels: [channelSummary(access.channel)], mentionRoster: { orchestrators: roster.orchestrators.map(project), everyone: project(roster.everyone), members: roster.members.map(project) } };
-    }),
-    transcribe: (c: Context) => run(c, async (resolved) => {
-      const body = await parseJson(c, transcriptionBody);
-      const access = await dependencies.service.generalChannel(resolved);
-      const memberNames = access.mentions.filter((mention) => mention.type === 'user').map((mention) => `@${mention.name}`);
-      const names = ['@everyone', ...CANONICAL_ORCHESTRATOR_NAMES.map((name) => `@${name}`), ...memberNames].join(', ').slice(0, 1_000);
-      return dependencies.transcribe(resolved.organizationKey, body.audioBase64, `Valid mention names are: ${names}.`, c.req.raw.signal);
     }),
     speak: (c: Context) => run(c, async (resolved) => {
       const body = await parseJson(c, speechBody);

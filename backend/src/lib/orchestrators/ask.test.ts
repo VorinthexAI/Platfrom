@@ -14,9 +14,10 @@ const response: ProviderExecuteResponse<ChatOutput> = {
 describe('orchestrator chat tool', () => {
   test('exposes the unified registered tools', () => {
     expect(TOOL_NAMES).toContain('chat');
-    expect(TOOL_NAMES).toContain('transcribe');
+    expect(TOOL_NAMES).not.toContain('transcribe');
     expect(TOOL_NAMES).toEqual(expect.arrayContaining(CONTENT_TOOL_NAMES));
-    expect(TOOL_NAMES).toContain('scope.list');
+    expect(TOOL_NAMES).toContain('scope.document.search');
+    expect(TOOL_NAMES).not.toContain('scope.list');
   });
 
   test('sanitizes input and invokes the shared chat action', async () => {

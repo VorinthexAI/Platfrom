@@ -11,7 +11,7 @@ import {
   archiveDocumentShare as contentDocumentShare, getDocumentShareById, restoreDocumentShare, type DocumentShare,
 } from '@/lib/db/document-shares.node';
 import type { ContentActionSlug } from './domain-content-schemas';
-import { db, withTransaction } from '@/lib/db/client';
+import { withTransaction } from '@/lib/db/client';
 import { withContentPersistenceTransaction } from '@/lib/db/content-persistence.node';
 import { withArangoKey } from '@/lib/db/base';
 import { folderSchema } from '@/lib/db/folders.node';
@@ -39,7 +39,6 @@ export interface ContentExecutionDependencies {
   contentDocumentShare?: typeof contentDocumentShare;
   restoreDocumentShare?: typeof restoreDocumentShare;
   atomicMutate?: (resource: 'folders' | 'documents' | 'documentVersions' | 'documentShares', keys: string[], deletedAt: string | null, context: ContentContext) => Promise<ContentNode[]>;
-  isProjectFolder?: (folderKey: string) => Promise<boolean>;
 }
 
 export class ContentLifecycleError extends Error {
@@ -64,9 +63,9 @@ async function defaultAtomicMutate(resource: 'folders' | 'documents' | 'document
     });
   }
   const schema = resource === 'folders' ? folderSchema : resource === 'documents' ? documentSchema : resource === 'documentVersions' ? documentVersionSchema : documentShareSchema;
-  const parentCollections = resource === 'folders' ? ['projects'] : resource === 'documents' ? ['folders'] : ['documents'];
+  const parentCollections = resource === 'folders' ? [] : resource === 'documents' ? ['folders'] : ['documents'];
   const guard = resource === 'folders'
-    ? 'LET parent = node.parentFolderKey != null ? DOCUMENT("folders", node.parentFolderKey) : null LET project = FIRST(FOR candidate IN projects FILTER candidate.contentFolderKey == node._key LIMIT 1 RETURN candidate) FILTER project == null FILTER @restoring || node.isFavorite != true FILTER !@restoring || parent == null || parent.deletedAt == null'
+    ? 'LET parent = node.parentFolderKey != null ? DOCUMENT("folders", node.parentFolderKey) : null FILTER @restoring || node.isFavorite != true FILTER !@restoring || parent == null || parent.deletedAt == null'
     : resource === 'documents'
       ? 'LET parent = HAS(node, "folderKey") && node.folderKey != null ? DOCUMENT("folders", node.folderKey) : null FILTER @restoring || node.isFavorite != true FILTER !@restoring || parent == null || parent.deletedAt == null'
       : 'LET parent = DOCUMENT("documents", node.documentKey) FILTER !@restoring || (parent != null && parent.deletedAt == null)';
@@ -109,11 +108,6 @@ async function defaultAtomicMutate(resource: 'folders' | 'documents' | 'document
   });
 }
 
-async function defaultIsProjectFolder(folderKey: string): Promise<boolean> {
-  const cursor = await db.query<number>('RETURN LENGTH(FOR project IN projects FILTER project.contentFolderKey == @folderKey LIMIT 1 RETURN 1)', { folderKey });
-  return (await cursor.next() ?? 0) > 0;
-}
-
 function resourceFor(action: ContentActionSlug) {
   if (action.startsWith('folder.')) return { field: 'folderKey', type: 'folders' } as const;
   if (action.startsWith('document-version.')) return { field: 'documentVersionKey', type: 'documentVersions' } as const;
@@ -148,9 +142,6 @@ export async function executeContentLifecycleTool(
     const node = await load(key);
     if (!node) throw new ContentLifecycleError('content_node_not_found', `${resource.type} node ${key} was not found.`);
     await dependencies.authorize(node.scopeKey, ['owner', 'admin']);
-    if (resource.type === 'folders' && await (dependencies.isProjectFolder ?? defaultIsProjectFolder)(key)) {
-      throw new ContentLifecycleError('project_folder_lifecycle_managed', 'Project Content folders must be archived or restored through the project lifecycle tool.');
-    }
     if (restoring && node.deletedAt === null) throw new ContentLifecycleError('content_node_active', `${key} is already active.`);
     if (!restoring && node.deletedAt !== null) throw new ContentLifecycleError('content_node_archived', `${key} is already archived.`);
     if (!restoring && (resource.type === 'folders' || resource.type === 'documents') && 'isFavorite' in node && node.isFavorite) {

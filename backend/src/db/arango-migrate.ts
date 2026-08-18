@@ -12,8 +12,6 @@ import { ensureAgentRunsCollection } from '../lib/ai/agent-runs/indexes';
 import { ensureAgentRunStepsCollection } from '../lib/ai/agent-run-steps/indexes';
 import { ensureAgentRunCallsCollection } from '../lib/ai/agent-run-calls/indexes';
 import { ensureAgentArtifactsCollection } from '../lib/ai/agent-artifacts/indexes';
-import { ensureArtifactCollections } from '../lib/artifacts/indexes';
-import { seedNexusOrganizationArtifact } from '../lib/artifacts/seed';
 import { ensureAgentMemoriesCollection } from '../lib/ai/agent-memories/indexes';
 import { ensureAgentRunSourcesCollection } from '../lib/ai/agent-run-sources/indexes';
 import { ensureAgentArtifactChecksCollection } from '../lib/ai/agent-artifact-checks/indexes';
@@ -128,27 +126,6 @@ export async function migrateGenericContentContracts(targetDb: Database): Promis
     if (ledgerAlreadyExisted) await legacyLedger.drop();
   }
 
-  const projects = targetDb.collection('projects');
-  if (await projects.exists()) {
-    const conflicts = await targetDb.query<number>(`
-      RETURN LENGTH(
-        FOR project IN projects
-          FILTER HAS(project, "archiveFolderKey") && project.contentFolderKey != null
-            && project.archiveFolderKey != project.contentFolderKey
-          RETURN 1
-      )
-    `);
-    if ((await conflicts.next() ?? 0) > 0) throw new Error('Project folder contract migration found conflicting records.');
-    await targetDb.query(`
-      FOR project IN projects
-        FILTER HAS(project, "archiveFolderKey")
-        UPDATE project WITH {
-          contentFolderKey: project.contentFolderKey != null ? project.contentFolderKey : project.archiveFolderKey,
-          archiveFolderKey: null
-        } IN projects OPTIONS { keepNull: false }
-    `);
-  }
-
   const shares = targetDb.collection('shares');
   if (await shares.exists()) {
     const legacyKey = 'archive-document-shares-cutover';
@@ -249,7 +226,17 @@ async function runMigrationTransaction(targetDb: Database, collectionName: strin
 }
 
 export async function retireRemovedActions(targetDb: Database): Promise<void> {
-  const slugs = ['document-generate-json'];
+  const slugs = [
+    'document-generate-json', 'core.transcribe', 'audio.transcribe', 'transcribe', 'email.read',
+    'access.agent.evaluate', 'access.agent.explain', 'access.organization.evaluate', 'access.organization.explain', 'access.scope.evaluate', 'access.scope.explain',
+    'agent.member.grant', 'agent.member.list', 'agent.member.read', 'agent.member.revoke', 'agent.member.sync',
+    'artifact.create',
+    'project.archive', 'project.create', 'project.delete', 'project.find', 'project.list', 'project.move', 'project.rename', 'project.restore', 'project.update',
+    'milestone.archive', 'milestone.change-status', 'milestone.complete', 'milestone.create', 'milestone.delete', 'milestone.find', 'milestone.list', 'milestone.move', 'milestone.rename', 'milestone.reopen', 'milestone.restore', 'milestone.schedule', 'milestone.update',
+    'task.archive', 'task.change-status', 'task.complete', 'task.create', 'task.delete', 'task.find', 'task.list', 'task.move', 'task.reopen', 'task.reorder', 'task.rename', 'task.restore', 'task.rewrite', 'task.summarize', 'task.translate', 'task.update',
+    'organization.archive', 'organization.member.activate', 'organization.member.add', 'organization.member.list', 'organization.member.read', 'organization.member.remove', 'organization.member.role.update', 'organization.member.suspend', 'organization.project.search', 'organization.provider.disable', 'organization.provider.enable', 'organization.provider.list', 'organization.provider.read', 'organization.provider.test', 'organization.read', 'organization.restore', 'organization.update',
+    'scope.agent.access-threshold.update', 'scope.agent.add', 'scope.agent.archive', 'scope.agent.list', 'scope.agent.move', 'scope.agent.read', 'scope.agent.remove', 'scope.agent.restore', 'scope.archive', 'scope.create', 'scope.list', 'scope.member.activate', 'scope.member.add', 'scope.member.list', 'scope.member.read', 'scope.member.remove', 'scope.member.role.update', 'scope.member.suspend', 'scope.move', 'scope.project.search', 'scope.read', 'scope.remove', 'scope.restore', 'scope.update',
+  ];
   await targetDb.query(`
     FOR relation IN modelActions
       LET action = DOCUMENT(actions, relation.actionKey)
@@ -261,6 +248,114 @@ export async function retireRemovedActions(targetDb: Database): Promise<void> {
       FILTER action.slug IN @slugs
       REMOVE action IN actions
   `, { slugs });
+}
+
+export async function retireTranscriptionDomain(targetDb: Database): Promise<void> {
+  const modelSlugs = ['openai.gpt-4o-mini-transcribe', 'aws.transcribe-standard'];
+  const providerSlugs = ['aws-transcribe'];
+  await targetDb.query(`
+    LET modelKeys = (FOR model IN models FILTER model.slug IN @modelSlugs RETURN model._key)
+    FOR relation IN modelActions
+      FILTER relation.modelKey IN modelKeys
+      REMOVE relation IN modelActions
+  `, { modelSlugs });
+  await targetDb.query(`
+    LET modelKeys = (FOR model IN models FILTER model.slug IN @modelSlugs RETURN model._key)
+    LET providerKeys = (FOR provider IN providers FILTER provider.slug IN @providerSlugs RETURN provider._key)
+    FOR relation IN modelProviders
+      FILTER relation.modelKey IN modelKeys || relation.providerKey IN providerKeys
+      REMOVE relation IN modelProviders
+  `, { modelSlugs, providerSlugs });
+  for (const collection of ['organizationProviders', 'orgCredentials']) {
+    await targetDb.query(`
+      LET providerKeys = (FOR provider IN providers FILTER provider.slug IN @providerSlugs RETURN provider._key)
+      FOR relation IN @@collection
+        FILTER relation.providerKey IN providerKeys
+        REMOVE relation IN @@collection
+    `, { '@collection': collection, providerSlugs });
+  }
+  await targetDb.query('FOR model IN models FILTER model.slug IN @modelSlugs REMOVE model IN models', { modelSlugs });
+  await targetDb.query('FOR provider IN providers FILTER provider.slug IN @providerSlugs REMOVE provider IN providers', { providerSlugs });
+}
+
+export async function retireMomentumScope(targetDb: Database, organizationKey: string, archiveScopeKey: string): Promise<void> {
+  const retired = await targetDb.query<string>(`
+    FOR scope IN scopes
+      FILTER scope._key == "cmrnlzf650028qc7k4p5zem5w" || (scope.organizationKey == @organizationKey && scope.slug == "momentum")
+      RETURN scope._key
+  `, { organizationKey });
+  const scopeKeys = await retired.all();
+  if (scopeKeys.length === 0) return;
+  for (const collection of ['folders', 'tags', 'tagAssignments', 'documents', 'documentVersions', 'documentAudioVersions', 'documentSummaries', 'documentSummaryAudio', 'shares', 'agents', 'agentRuns', 'agentMemories']) {
+    await targetDb.query(`
+      FOR resource IN @@collection
+        FILTER resource.scopeKey IN @scopeKeys
+        UPDATE resource WITH { scopeKey: @archiveScopeKey } IN @@collection
+    `, { '@collection': collection, scopeKeys, archiveScopeKey });
+  }
+  await targetDb.query(`
+    FOR variable IN runtimeVariables
+      FILTER variable.scopeKey IN @scopeKeys
+      LET duplicate = FIRST(
+        FOR candidate IN runtimeVariables
+          FILTER candidate.organizationKey == variable.organizationKey
+            && candidate.agentKey == variable.agentKey
+            && candidate.name == variable.name
+            && (candidate.scopeKey == @archiveScopeKey || (candidate.scopeKey IN @scopeKeys && candidate._key < variable._key))
+          SORT candidate.scopeKey == @archiveScopeKey DESC, candidate._key ASC
+          RETURN candidate
+      )
+      FILTER duplicate != null
+      REMOVE variable IN runtimeVariables
+  `, { scopeKeys, archiveScopeKey });
+  await targetDb.query('FOR variable IN runtimeVariables FILTER variable.scopeKey IN @scopeKeys UPDATE variable WITH { scopeKey: @archiveScopeKey } IN runtimeVariables', { scopeKeys, archiveScopeKey });
+  await targetDb.query(`
+    FOR member IN agentMembers
+      FILTER member.scopeKey IN @scopeKeys
+      LET retiredLink = DOCUMENT(scopeAgents, member.scopeAgentKey)
+      LET canonicalMember = FIRST(
+        FOR candidate IN agentMembers
+          LET candidateLink = DOCUMENT(scopeAgents, candidate.scopeAgentKey)
+          FILTER candidateLink.agentKey == retiredLink.agentKey
+            && (candidateLink.scopeKey == @archiveScopeKey || candidateLink.scopeKey IN @scopeKeys)
+            && candidate.userOrganizationKey == member.userOrganizationKey
+            && candidate.source == member.source
+          SORT candidateLink.scopeKey == @archiveScopeKey DESC, candidate._key ASC
+          RETURN candidate
+      )
+      FILTER canonicalMember != null && canonicalMember._key != member._key
+      REMOVE member IN agentMembers
+  `, { scopeKeys, archiveScopeKey });
+  await targetDb.query(`
+    FOR member IN agentMembers
+      FILTER member.scopeKey IN @scopeKeys
+      LET retiredLink = DOCUMENT(scopeAgents, member.scopeAgentKey)
+      LET targetLink = FIRST(
+        FOR link IN scopeAgents
+          FILTER link.agentKey == retiredLink.agentKey
+            && (link.scopeKey == @archiveScopeKey || (link.scopeKey IN @scopeKeys && link._key <= retiredLink._key))
+          SORT link.scopeKey == @archiveScopeKey DESC, link._key ASC
+          RETURN link
+      )
+      UPDATE member WITH { scopeKey: @archiveScopeKey, scopeAgentKey: targetLink == null ? member.scopeAgentKey : targetLink._key } IN agentMembers
+  `, { scopeKeys, archiveScopeKey });
+  await targetDb.query(`
+    FOR link IN scopeAgents
+      FILTER link.scopeKey IN @scopeKeys
+      LET targetLink = FIRST(
+        FOR candidate IN scopeAgents
+          FILTER candidate.agentKey == link.agentKey
+            && (candidate.scopeKey == @archiveScopeKey || (candidate.scopeKey IN @scopeKeys && candidate._key < link._key))
+          SORT candidate.scopeKey == @archiveScopeKey DESC, candidate._key ASC
+          RETURN candidate
+      )
+      FILTER targetLink != null
+      REMOVE link IN scopeAgents
+  `, { scopeKeys, archiveScopeKey });
+  await targetDb.query('FOR link IN scopeAgents FILTER link.scopeKey IN @scopeKeys UPDATE link WITH { scopeKey: @archiveScopeKey } IN scopeAgents', { scopeKeys, archiveScopeKey });
+  await targetDb.query('FOR relation IN scopeScopes FILTER relation.parentKey IN @scopeKeys || relation.childKey IN @scopeKeys REMOVE relation IN scopeScopes', { scopeKeys });
+  await targetDb.query('FOR relation IN scopeMembers FILTER relation.scopeKey IN @scopeKeys REMOVE relation IN scopeMembers', { scopeKeys });
+  await targetDb.query('FOR scope IN scopes FILTER scope._key IN @scopeKeys REMOVE scope IN scopes', { scopeKeys });
 }
 
 export async function migrateContentFavorites(targetDb: Database, collectionName: 'folders' | 'documents' | 'images' | 'collections' | 'emailThreads') {
@@ -884,13 +979,16 @@ export const collections: CollectionSpec[] = [
   { name: 'userSearches', skipEmbedding: true, indexes: [{ fields: ['userKey', 'normalizedQuery'], unique: true }, { fields: ['userKey', 'searchedAt'] }] },
   // Private Archive contextual replay cache. The collection itself identifies the context.
   { name: 'contentSearchQueries', skipEmbedding: true, indexes: [{ fields: ['actorKey', 'scopeKey', 'normalizedQuery', 'folderKey', 'includeDescendants'], unique: true }, { fields: ['actorKey', 'scopeKey', 'searchedAt'] }] },
-  { name: 'projects', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['contentFolderKey'], unique: true }, { fields: ['scopeKey', 'name'] }] },
-  { name: 'milestones', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['projectKey', 'deletedAt'] }, { fields: ['projectKey', 'order'] }, { fields: ['projectKey', 'status'] }] },
-  { name: 'tasks', embedKeys: ['title', 'description'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['projectKey', 'deletedAt'] }, { fields: ['milestoneKey', 'deletedAt'] }, { fields: ['milestoneKey', 'position'] }, { fields: ['projectKey', 'status'] }, { fields: ['priority'] }] },
   // Pure link nodes (scope tree edges, scope memberships) — ids only, so
 ];
 
 const droppedCollections = [
+  'tasks',
+  'milestones',
+  'projects',
+  'artifactDependencies',
+  'artifactSnapshots',
+  'artifacts',
   'companies',
   'companyApiKeys',
   'companyApps',
@@ -1494,6 +1592,7 @@ async function main() {
   await ensureOrganizationProvidersCollection(targetDb);
   await ensureOrganizationCredentialsCollection(targetDb);
   await ensureOrganizationConnectorsCollection(targetDb);
+  await retireTranscriptionDomain(targetDb);
 
   // The call-level ledger cannot safely infer DB keys or provider-reported
   // usage for runs written with the retired slug-based shape. Preserve
@@ -1553,7 +1652,6 @@ async function main() {
     }
   }
   await ensureAgentArtifactsCollection(targetDb);
-  await ensureArtifactCollections(targetDb);
   await ensureAgentRunSourcesCollection(targetDb);
   await ensureAgentArtifactChecksCollection(targetDb);
   await ensureRuntimeVariablesCollection(targetDb);
@@ -1662,7 +1760,6 @@ async function main() {
       UPDATE organization WITH { mfa_enabled: true } IN organizations
   `);
 
-  // Production deploys run this migration rather than db:seed. Apply the
   // canonical scope seed here as well so Nexus and every direct child exist
   // with the same fixed CUID references and exact descriptions.
   const existingScopesCursor = await targetDb.query<{
@@ -1727,6 +1824,9 @@ async function main() {
   }
   const nexusScopeId = actualScopeKeys.get(NEXUS_SCOPE_KEY);
   if (!nexusScopeId) throw new Error('Cannot resolve canonical Nexus scope');
+  const archiveScopeId = actualScopeKeys.get('cmrnlzf650001qc7k4p5zem5w');
+  if (!archiveScopeId) throw new Error('Cannot resolve canonical Archive scope');
+  await retireMomentumScope(targetDb, rootOrganizationId, archiveScopeId);
 
   for (const seed of SEEDED_SCOPES.filter((scope) => scope.parentKey !== null)) {
     const parentKey = actualScopeKeys.get(seed.parentKey!);
@@ -2501,9 +2601,6 @@ async function main() {
       FILTER scope != null
       UPDATE channel WITH { organizationKey: scope.organizationKey } IN channels
   `);
-
-  await seedNexusOrganizationArtifact(targetDb, rootOrganizationId, nexusScopeId);
-  console.log('Seeded the Nexus spatial organization artifact');
 
   // Retire collections whose data is no longer part of the platform. The
   // organization-era collections below have already been copied above.

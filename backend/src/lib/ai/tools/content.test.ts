@@ -92,7 +92,7 @@ describe('Content input contracts', () => {
     expect(() => contentToolInputSchemas['document.topics'].parse({ documentKey: key, scopeKey: newId() })).toThrow();
     expect(contentToolInputSchemas['document.summary.audio.generate'].parse({ summaryKeys: [key], language: 'en-US' })).toMatchObject({ language: 'en-US' });
     expect(() => contentToolInputSchemas['document.summary.audio.generate'].parse({ summaryKeys: [key], language: 'English' })).toThrow();
-    expect(contentToolInputSchemas['scope.document.search'].parse({ scopeKey: key, query: 'roadmap', sources: [{ type: 'project', projectKeys: [newId()] }] })).toMatchObject({ sources: [{ type: 'project' }] });
+    expect(contentToolInputSchemas['scope.document.search'].parse({ scopeKey: key, query: 'roadmap', sources: [{ type: 'scope', scopeKeys: [newId()] }] })).toMatchObject({ sources: [{ type: 'scope' }] });
   });
 
   test('enforces non-empty arrays for every batch-first contract', () => {
@@ -173,7 +173,7 @@ describe('Content output contracts', () => {
     const folderKey = newId();
     const output = contentToolOutputSchemas['scope.document.search'].parse({
       query: 'roadmap',
-      results: [{ documentKey, name: 'Roadmap', extension: 'md', scopeKey, folderKey, score: 0.9, matchedSource: { type: 'project', key: scopeKey }, scoreBreakdown: { vector: 0.9, lexical: 0.5, final: 0.8 } }],
+      results: [{ documentKey, name: 'Roadmap', extension: 'md', scopeKey, folderKey, score: 0.9, matchedSource: { type: 'scope', key: scopeKey }, scoreBreakdown: { vector: 0.9, lexical: 0.5, final: 0.8 } }],
       totalCandidates: 12,
     });
     expect(output).toMatchObject({ query: 'roadmap', results: [{ documentKey, extension: 'md', scoreBreakdown: { vector: 0.9 } }], totalCandidates: 12 });

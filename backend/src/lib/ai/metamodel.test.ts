@@ -30,7 +30,6 @@ import { RUNTIME_VARIABLES_COLLECTION } from './runtime-variables';
 import { AGENT_ARCHITECTURE, AGENT_EXECUTION_SEQUENCE } from './architecture';
 import { SCOPE_AGENTS_COLLECTION, scopeAgentSchema } from '@/lib/db/scope-agents.node';
 import { AGENT_MEMBERS_COLLECTION, agentMemberSchema } from '@/lib/db/agent-members.node';
-import { ARTIFACTS_COLLECTION, ARTIFACT_DEPENDENCIES_COLLECTION, ARTIFACT_SNAPSHOTS_COLLECTION } from '@/lib/artifacts';
 
 describe('AI metadata model contract', () => {
   test('uses the canonical collection names', () => {
@@ -45,7 +44,6 @@ describe('AI metadata model contract', () => {
       AGENT_ARTIFACTS_COLLECTION, AGENT_RUN_SOURCES_COLLECTION,
       AGENT_ARTIFACT_CHECKS_COLLECTION, AGENT_MEMORIES_COLLECTION,
       RUNTIME_VARIABLES_COLLECTION,
-      ARTIFACTS_COLLECTION, ARTIFACT_SNAPSHOTS_COLLECTION, ARTIFACT_DEPENDENCIES_COLLECTION,
     ]).toEqual([
       'users', 'organizations', 'userOrganizations',
       'scopes', 'scopeScopes', 'scopeMembers', 'scopeAgents', 'agentMembers',
@@ -55,7 +53,6 @@ describe('AI metadata model contract', () => {
        'agentRuns',
       'agentRunSteps', 'agentRunCalls', 'agentArtifacts', 'agentRunSources',
       'agentArtifactChecks', 'agentMemories', 'runtimeVariables',
-      'artifacts', 'artifactSnapshots', 'artifactDependencies',
     ]);
   });
 
@@ -84,7 +81,6 @@ describe('AI metadata model contract', () => {
     expect(AGENT_ARCHITECTURE.runtime.agentContext).toEqual(['organization', 'scope', 'agent', 'skills', 'knowledge', 'guardrails', 'currentTask']);
     expect(AGENT_ARCHITECTURE.execution).toEqual(['action', 'router', 'model', 'provider']);
     expect(AGENT_ARCHITECTURE.response).toBe('response');
-    expect(AGENT_ARCHITECTURE.artifactViews).toEqual({ definitions: 'artifacts', snapshots: 'artifactSnapshots', dependencies: 'artifactDependencies' });
     expect(AGENT_ARCHITECTURE.executionHistory).toEqual({ agentRun: 'agentRuns', agentRunSteps: 'agentRunSteps', agentRunCalls: 'agentRunCalls', agentArtifacts: 'agentArtifacts', agentArtifactChecks: 'agentArtifactChecks', agentMemories: 'agentMemories' });
     expect(AGENT_EXECUTION_SEQUENCE).toEqual(['agentContext', 'action', 'router', 'model', 'provider', 'response', 'agentRun', 'agentRunSteps', 'agentRunCalls']);
   });

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { CoreChatInput } from '@/lib/ai/actions';
 import type { RouterDependencies } from '@/lib/ai/router';
-import type { ChatOutput, ImageCaptionInput, ImageCaptionOutput, ProviderExecuteResponse, ProviderStreamChunk, TranscribeInput, TranscriptionOutput } from '@/lib/ai/providers';
+import type { ChatOutput, ImageCaptionInput, ImageCaptionOutput, ProviderExecuteResponse, ProviderStreamChunk } from '@/lib/ai/providers';
 import { sanitizedAgentMessageSchema } from './input-sanitizer';
 import type { DocumentParseDependencies } from '@/lib/ai/document-processing';
 import type { ContentToolDependencies } from './content-runtime';
@@ -9,7 +9,6 @@ import type { ContentToolInput, ContentToolName, ContentToolOutput } from './con
 import type { DomainActionSlug } from './domain-schemas';
 import type { DomainToolContext, DomainToolExecutionOptions } from './domain-execute';
 import { orchestratorChatTool, orchestratorChatToolInputSchema } from './orchestrator-chat';
-import { transcribeTool, type TranscribeToolDependencies } from './transcribe';
 import { audioGenerateTool, type AudioGenerateDependencies, type AudioGenerateInput, type AudioGenerateOutput } from './audio-generate';
 import { imageCaptionTool, type ImageCaptionToolDependencies } from './image-caption';
 import { imageCreateVisualIdentityTool, type ImageCreateVisualIdentityToolDependencies } from './image-create-visual-identity';
@@ -37,7 +36,7 @@ export const toolInputSchemas: Record<string, z.ZodTypeAny> = Object.fromEntries
 export const TOOL_DEFINITIONS = PUBLIC_TOOL_DEFINITIONS.map(({ providerDefinition }) => providerDefinition);
 export { orchestratorChatToolInputSchema };
 
-export interface ToolDependencies extends RouterDependencies, DocumentParseDependencies, RetrievalDependencies, Pick<TranscribeToolDependencies, 'executeTranscription'>, Pick<AudioGenerateDependencies, 'synthesize'>, Pick<ImageCaptionToolDependencies, 'executeImageCaption'>, Pick<ImageCreateVisualIdentityToolDependencies, 'executeDescription'>, Pick<ImageSearchToolDependencies, 'executeEmbedding' | 'searchImages'> {
+export interface ToolDependencies extends RouterDependencies, DocumentParseDependencies, RetrievalDependencies, Pick<AudioGenerateDependencies, 'synthesize'>, Pick<ImageCaptionToolDependencies, 'executeImageCaption'>, Pick<ImageCreateVisualIdentityToolDependencies, 'executeDescription'>, Pick<ImageSearchToolDependencies, 'executeEmbedding' | 'searchImages'> {
   execute?: (organizationKey: string, input: CoreChatInput) => Promise<ProviderExecuteResponse<ChatOutput>>;
   stream?: (organizationKey: string, input: CoreChatInput) => AsyncIterable<ProviderStreamChunk>;
   signal?: AbortSignal;
@@ -65,7 +64,6 @@ const chatOutputSchema = z.object({
 
 /** Executes one of the capabilities exposed by the unified tool registry. */
 export function runTool(name: 'chat', skill: string, rawInput: unknown, dependencies?: ToolDependencies): Promise<string>;
-export function runTool(name: 'transcribe', skill: string, rawInput: TranscribeInput, dependencies?: ToolDependencies): Promise<TranscriptionOutput>;
 export function runTool(name: 'audio.generate', skill: string, rawInput: AudioGenerateInput, dependencies?: ToolDependencies): Promise<AudioGenerateOutput>;
 export function runTool(name: 'image.caption', skill: string, rawInput: ImageCaptionInput, dependencies?: ToolDependencies): Promise<ImageCaptionOutput>;
 export function runTool(name: 'image.search', skill: string, rawInput: ImageSearchInput, dependencies: ToolDependencies & { contentContext: DomainToolContext }): Promise<ImageSimilarityOutput>;
@@ -75,7 +73,6 @@ export function runTool(name: string, skill: string, rawInput: unknown, dependen
 export async function runTool(name: string, skill: string, rawInput: unknown, dependencies: ToolDependencies = {}): Promise<unknown> {
   const toolName = toolNameSchema.parse(name);
   if (toolName === orchestratorChatTool.name) return orchestratorChatTool.execute(skill, rawInput, dependencies);
-  if (toolName === transcribeTool.name) return transcribeTool.execute(rawInput, dependencies);
   if (toolName === audioGenerateTool.name) return audioGenerateTool.execute(rawInput, { ...dependencies, organizationKey: dependencies.organizationKey ?? dependencies.contentContext?.organizationKey });
   if (toolName === imageCaptionTool.name) return imageCaptionTool.execute(rawInput, dependencies);
   if (toolName === imageCreateVisualIdentityTool.name) return imageCreateVisualIdentityTool.execute(rawInput, dependencies);
@@ -100,7 +97,7 @@ export async function runTool(name: string, skill: string, rawInput: unknown, de
       ingestion: { ...dependencies, ...dependencies.contentDependencies?.ingestion },
     },
   });
-  const definition = publicToolDefinitionsByName.get(toolName) as Exclude<(typeof PUBLIC_TOOL_DEFINITIONS)[number], typeof orchestratorChatTool | typeof transcribeTool>;
+  const definition = publicToolDefinitionsByName.get(toolName) as Exclude<(typeof PUBLIC_TOOL_DEFINITIONS)[number], typeof orchestratorChatTool>;
   return (definition.execute as (input: unknown, dependencies: PublicToolDependencies) => Promise<unknown>)(rawInput, {
     context: dependencies.contentContext,
     domain: dependencies.domainDependencies,
@@ -121,7 +118,7 @@ export async function* streamTool(name: string, skill: string, rawInput: unknown
 
 export { sanitizeAgentInput, sanitizedAgentMessageSchema } from './input-sanitizer';
 export { retrievalTool, retrievalInputSchema, retrievalFiltersSchema, retrieveNodeDocuments } from './retrieval';
-export { audioGenerateTool, imageCaptionTool, imageCreateVisualIdentityTool, imageSearchTool, transcribeTool };
+export { audioGenerateTool, imageCaptionTool, imageCreateVisualIdentityTool, imageSearchTool };
 export * from './audio-generate';
 export { imageSearchInputSchema } from './image-search';
 export { imageSimilarityOutputSchema } from './image-similarity';

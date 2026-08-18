@@ -19,7 +19,6 @@ export const PROVIDER_SLUGS = [
   'aws-bedrock',
   'aws-bedrock-mantle',
   'aws-polly',
-  'aws-transcribe',
   'openrouter',
 ] as const;
 
@@ -43,7 +42,6 @@ export const PROVIDER_NAMES: Record<ProviderId, string> = {
   'aws-bedrock': 'AWS Bedrock',
   'aws-bedrock-mantle': 'AWS Bedrock Mantle',
   'aws-polly': 'AWS Polly',
-  'aws-transcribe': 'AWS Transcribe',
   openrouter: 'OpenRouter',
 };
 
@@ -217,21 +215,6 @@ export const visualIdentityDescriptionOutputSchema = z.object({
   description: z.string().trim().min(1).max(12_000),
 }).strict();
 export type VisualIdentityDescriptionOutput = z.infer<typeof visualIdentityDescriptionOutputSchema>;
-
-export const transcribeInputSchema = z
-  .object({
-    audioBase64: z.string().min(1),
-    mimeType: z.string().min(1),
-    language: z.string().optional(),
-    prompt: z.string().max(4_000).optional(),
-  })
-  .strict();
-
-export type TranscribeInput = z.infer<typeof transcribeInputSchema>;
-
-export interface TranscriptionOutput {
-  text: string;
-}
 
 export const speechInputSchema = z
   .object({

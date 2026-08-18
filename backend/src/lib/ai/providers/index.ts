@@ -2,7 +2,6 @@ import { anthropicProviderFactory } from './anthropic';
 import { awsBedrockProviderFactory } from './aws-bedrock';
 import { awsBedrockMantleProviderFactory } from './aws-bedrock-mantle';
 import { awsPollyProviderFactory } from './aws-polly';
-import { awsTranscribeProviderFactory } from './aws-transcribe';
 import { azureAIFoundryProviderFactory } from './azure-ai-foundry';
 import { googleVertexProviderFactory } from './google-vertex';
 import { openAIProviderFactory } from './openai';
@@ -12,7 +11,6 @@ import type { AnthropicCredentials } from './anthropic';
 import type { AwsBedrockCredentials } from './aws-bedrock';
 import type { AwsBedrockMantleCredentials } from './aws-bedrock-mantle';
 import type { AwsPollyCredentials } from './aws-polly';
-import type { AwsTranscribeCredentials } from './aws-transcribe';
 import type { AzureAIFoundryCredentials } from './azure-ai-foundry';
 import type { GoogleVertexCredentials } from './google-vertex';
 import type { OpenAICredentials } from './openai';
@@ -33,7 +31,6 @@ export {
   imageCaptionOutputSchema,
   visualIdentityDescriptionInputSchema,
   visualIdentityDescriptionOutputSchema,
-  transcribeInputSchema,
   speechInputSchema,
   embeddingInputSchema,
   resolveRequestSignal,
@@ -58,8 +55,6 @@ export {
   type ImageCaptionOutput,
   type VisualIdentityDescriptionInput,
   type VisualIdentityDescriptionOutput,
-  type TranscribeInput,
-  type TranscriptionOutput,
   type SpeechInput,
   type SpeechOutput,
   type EmbeddingInput,
@@ -96,7 +91,6 @@ export {
 export { createAwsBedrockProvider, awsBedrockCredentialsSchema, awsBedrockProviderConfigSchema, awsBedrockProviderFactory, type AwsBedrockCredentials, type AwsBedrockProviderConfig } from './aws-bedrock';
 export { createAwsBedrockMantleProvider, awsBedrockMantleCredentialsSchema, awsBedrockMantleProviderConfigSchema, awsBedrockMantleProviderFactory, type AwsBedrockMantleCredentials, type AwsBedrockMantleProviderConfig } from './aws-bedrock-mantle';
 export { createAwsPollyProvider, awsPollyCredentialsSchema, awsPollyProviderConfigSchema, awsPollyProviderFactory, type AwsPollyCredentials, type AwsPollyProviderConfig } from './aws-polly';
-export { createAwsTranscribeProvider, awsTranscribeCredentialsSchema, awsTranscribeProviderConfigSchema, awsTranscribeProviderFactory, type AwsTranscribeCredentials, type AwsTranscribeProviderConfig } from './aws-transcribe';
 export { createOpenRouterProvider, openRouterCredentialsSchema, openRouterProviderConfigSchema, openRouterProviderFactory, type OpenRouterCredentials, type OpenRouterProviderConfig } from './openrouter';
 export {
   providerSchema,
@@ -122,7 +116,6 @@ export const PROVIDER_REGISTRY: Record<ProviderId, ProviderFactory> = {
   'aws-bedrock': awsBedrockProviderFactory,
   'aws-bedrock-mantle': awsBedrockMantleProviderFactory,
   'aws-polly': awsPollyProviderFactory,
-  'aws-transcribe': awsTranscribeProviderFactory,
   openrouter: openRouterProviderFactory,
 };
 
@@ -135,7 +128,6 @@ export type ProviderCredentials = {
   'aws-bedrock': AwsBedrockCredentials;
   'aws-bedrock-mantle': AwsBedrockMantleCredentials;
   'aws-polly': AwsPollyCredentials;
-  'aws-transcribe': AwsTranscribeCredentials;
   openrouter: OpenRouterCredentials;
 };
 

@@ -30,15 +30,6 @@ import {
   listFoundersOrganizations,
   upsertFoundersOrganizationProvider,
 } from './founders';
-import {
-  createFounderArtifact,
-  deleteFounderArtifact,
-  getFounderArtifact,
-  listFounderArtifacts,
-  resolveFounderArtifact,
-  readFounderArtifactNode,
-  updateFounderArtifact,
-} from './founder-artifacts';
 import { joinPresence, leavePresence, presenceBeat, streamPresence } from './presence';
 import { unsubscribeFromUpdates } from './updates';
 import { listNodes } from './nodes';
@@ -518,7 +509,6 @@ export function registerRoutes(app: Hono) {
   app.get('/founders/organizations/:organizationKey/providers', listFoundersOrganizationProviders);
   app.put('/founders/organizations/:organizationKey/providers/:provider', upsertFoundersOrganizationProvider);
   app.get('/founders/organizations/:organizationKey/communication/channels', communicationHandlers.listChannels);
-  app.post('/founders/organizations/:organizationKey/communication/transcriptions', communicationHandlers.transcribe);
   app.post('/founders/organizations/:organizationKey/communication/speech', communicationHandlers.speak);
   app.get('/founders/organizations/:organizationKey/communication/channels/:channelKey/messages', communicationHandlers.listMessages);
   app.get('/founders/organizations/:organizationKey/communication/channels/:channelKey/typing', communicationHandlers.typingStream);
@@ -533,13 +523,6 @@ export function registerRoutes(app: Hono) {
   app.get('/founders/organizations/:organizationKey/communication/channels/:channelKey/polls/:pollKey', communicationHandlers.readPoll);
   app.post('/founders/organizations/:organizationKey/communication/channels/:channelKey/polls/:pollKey/votes', communicationHandlers.votePoll);
   app.post('/founders/organizations/:organizationKey/communication/channels/:channelKey/polls/:pollKey/close', communicationHandlers.closePoll);
-  app.get('/founders/artifacts', listFounderArtifacts);
-  app.post('/founders/artifacts', createFounderArtifact);
-  app.get('/founders/artifacts/:artifactKey', getFounderArtifact);
-  app.patch('/founders/artifacts/:artifactKey', updateFounderArtifact);
-  app.delete('/founders/artifacts/:artifactKey', deleteFounderArtifact);
-  app.post('/founders/artifacts/:artifactKey/resolve', resolveFounderArtifact);
-  app.post('/founders/artifacts/:artifactKey/nodes/read', readFounderArtifactNode);
 
   app.get('/system/orchestrators', listSystemOrchestrators);
   app.post('/system/orchestrators', createSystemOrchestrator);

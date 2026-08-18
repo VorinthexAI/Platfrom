@@ -25,7 +25,6 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
   const streamSkills: string[] = [];
   const streamInputs: unknown[] = [];
   const streamDependencies: unknown[] = [];
-  const transcriptionCalls: unknown[][] = [];
   const speechCalls: unknown[][] = [];
   const retrievalQueries: Array<{ query: string; bindVars: Record<string, unknown> }> = [];
   const novaInputs: unknown[] = [];
@@ -69,7 +68,6 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
       return [{ name: 'HQ', description: 'The organization workspace.' }, { name: 'Ignored', description: null }];
     },
     publishTyping: async (event) => { typingEvents.push(event); },
-    transcribe: async (...args) => { transcriptionCalls.push(args); return { text: '@Atlas hello' }; },
     speak: async (...args) => { speechCalls.push(args); return { audioBase64: 'UklGRg==', mimeType: 'audio/wav' }; },
     channelLease: {
       async acquire() { leaseEvents.push('acquire'); return !options.leaseUnavailable; },
@@ -80,13 +78,12 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
   const app = new Hono();
   app.onError((_error, c) => c.json({ error: 'invalid request' }, 400));
   app.post('/founders/organizations/:organizationKey/communication/channels/:channelKey/messages', handlers.postMessage);
-  app.post('/founders/organizations/:organizationKey/communication/transcriptions', handlers.transcribe);
   app.post('/founders/organizations/:organizationKey/communication/speech', handlers.speak);
   app.get('/founders/organizations/:organizationKey/communication/reactions', handlers.frequentReactions);
   app.post('/founders/organizations/:organizationKey/communication/channels/:channelKey/typing', handlers.typing);
   app.get('/founders/organizations/:organizationKey/communication/channels/:channelKey/messages/:messageKey/replies', handlers.readReplies);
   app.patch('/founders/organizations/:organizationKey/communication/channels/:channelKey/messages/:messageKey', handlers.editMessage);
-  return { app, persisted, assistantCalls, streamSkills, streamInputs, streamDependencies, transcriptionCalls, speechCalls, orchestrators, retrievalQueries, novaInputs, typingEvents, replyReads, edits, leaseEvents };
+  return { app, persisted, assistantCalls, streamSkills, streamInputs, streamDependencies, speechCalls, orchestrators, retrievalQueries, novaInputs, typingEvents, replyReads, edits, leaseEvents };
 }
 
 describe('Communication SSE API', () => {
@@ -426,15 +423,6 @@ describe('Communication SSE API', () => {
     expect(source).not.toContain("identity.identityType !== 'user'");
   });
 
-  test('transcribes PCM with organization mention context', async () => {
-    const { app, transcriptionCalls } = appFor();
-    const audioBase64 = Buffer.alloc(960).toString('base64');
-    const response = await app.request(`/founders/organizations/${organizationKey}/communication/transcriptions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ audioBase64, mimeType: 'audio/pcm' }) });
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ text: '@Atlas hello' });
-    expect(transcriptionCalls[0]?.slice(0, 3)).toEqual([organizationKey, audioBase64, `Valid mention names are: @everyone, ${CANONICAL_ORCHESTRATOR_NAMES.map((name) => `@${name}`).join(', ')}.`]);
-  });
-
   test('reads messages with the fixed speech service', async () => {
     const { app, speechCalls } = appFor();
     const response = await app.request(`/founders/organizations/${organizationKey}/communication/speech`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: 'Read this.' }) });
@@ -443,9 +431,8 @@ describe('Communication SSE API', () => {
     expect(speechCalls[0]?.slice(0, 2)).toEqual([organizationKey, 'Read this.']);
   });
 
-  test('routes transcription through its tool and pins speech to Realtime 2 with Ash', async () => {
+  test('pins speech to Realtime 2 with Ash', async () => {
     const source = await Bun.file(new URL('./communication.ts', import.meta.url)).text();
-    expect(source).toContain('transcribeTool.execute');
     expect(source.match(/modelSlug: 'openai\.gpt-realtime-2', providerSlug: 'openai'/g)).toHaveLength(1);
     expect(source).toContain("{ text, voice: 'ash', format: 'wav' }");
   });

@@ -1034,19 +1034,6 @@ Paths:
 - transparent: assets/capability/capability-cadence/v1/transparent-1024.png
 - solid svg: assets/capability/capability-cadence/v1/solid-1024.svg
 - transparent svg: assets/capability/capability-cadence/v1/transparent-1024.svg
-## 2026-07-21 21:47
-Asset: Momentum
-Action: Created asset
-Notes: Momentum is an AI native execution workspace for projects, milestones, roadmaps, epics, tasks, tickets, objectives, dependencies, sprints, and execution status. It understands how work progresses, detects bottlenecks, suggests priorities, estimates complexity, generates implementation plans, and keeps outcomes moving from strategy into action. Momentum gives personal and professional work a clear structure without reducing progress to a static task list.
-## 2026-07-21 21:48
-Asset: Momentum
-Action: Generated v1
-Notes: Generated from galaxy registry entity capability.momentum
-Paths:
-- solid: assets/capability/capability-momentum/v1/solid-1024.png
-- transparent: assets/capability/capability-momentum/v1/transparent-1024.png
-- solid svg: assets/capability/capability-momentum/v1/solid-1024.svg
-- transparent svg: assets/capability/capability-momentum/v1/transparent-1024.svg
 ## 2026-07-21 21:48
 Asset: Prism
 Action: Created asset
@@ -1076,14 +1063,6 @@ Notes: Open Graph and Twitter preview cards for cadence.vorinthex.com.
 Asset: Cadence Social Cards
 Action: Generated v1
 Notes: Generated Open Graph and Twitter cards for cadence.vorinthex.com.
-## 2026-07-21 22:04
-Asset: Momentum Social Cards
-Action: Created asset
-Notes: Open Graph and Twitter preview cards for momentum.vorinthex.com.
-## 2026-07-21 22:04
-Asset: Momentum Social Cards
-Action: Generated v1
-Notes: Generated Open Graph and Twitter cards for momentum.vorinthex.com.
 ## 2026-07-21 22:05
 Asset: Prism Social Cards
 Action: Created asset

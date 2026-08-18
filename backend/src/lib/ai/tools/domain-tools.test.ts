@@ -15,25 +15,9 @@ import { modelProviderSchema } from '@/lib/db/model-providers.node';
 import { scopeAgentSchema } from '@/lib/db/scope-agents.node';
 import { agentMemberSchema } from '@/lib/db/agent-members.node';
 import { tokenUsage } from '@/lib/ai/shared';
-import { artifactSchema } from '@/lib/artifacts/schema';
-import { DOMAIN_ACTION_SLUGS, domainToolInputSchemas, domainToolJsonSchemas, executeDomainTool, interpretAndRunDomainTool, runDomainAgentTool } from '.';
+import { DOMAIN_ACTION_SLUGS, domainToolInputSchemas, interpretAndRunDomainTool, runDomainAgentTool } from '.';
 
 const now = '2026-07-18T00:00:00.000Z';
-const organizationArtifactDefinition = {
-  version: 1 as const,
-  mode: 'live' as const,
-  root: 'organization',
-  nodes: { organization: { binding: 'organizationCurrent', kind: 'organization' as const } },
-  edges: [],
-  bindings: {
-    organizationCurrent: {
-      kind: 'query' as const,
-      queryId: 'organization.current',
-      variables: { organizationKey: { kind: 'context' as const, value: 'organizationKey' as const } },
-    },
-  },
-  view: { layout: 'tree' as const, theme: 'obsidian' as const },
-};
 
 function fixture() {
   const organization = organizationSchema.parse({ key: newId(), name: 'Acme', createdAt: now, updatedAt: now });
@@ -43,7 +27,7 @@ function fixture() {
   const scopeMember = scopeMemberSchema.parse({ key: newId(), scopeKey: scope.key, userOrganizationKey: membership.key, role: 'owner' });
   const agent = agentSchema.parse({ key: newId(), slug: 'organization-operator', name: 'Organization Operator', title: 'Operator', scopeKey: scope.key });
   const skill = skillSchema.parse({ key: newId(), slug: 'organization-operations', name: 'Organization Operations', title: 'Operator', definition: 'Manage authorized organization resources.' });
-  const action = actionSchema.parse({ key: newId(), slug: 'scope.list', name: 'List Scopes', description: 'List', objective: 'List', inputDescription: 'Filters', outputDescription: 'Scopes', handlerKey: 'scope.list' });
+  const action = actionSchema.parse({ key: newId(), slug: 'scope.document.search', name: 'Search Documents', description: 'Search', objective: 'Search', inputDescription: 'Query', outputDescription: 'Documents', handlerKey: 'scope.document.search' });
   const agentSkill = agentSkillSchema.parse({ key: newId(), agentKey: agent.key, skillKey: skill.key, priority: 100 });
   const scopeAgent = scopeAgentSchema.parse({ key: newId(), organizationKey: organization.key, scopeKey: scope.key, agentKey: agent.key, position: 1, minimumAccessRole: 'owner', createdAt: now, updatedAt: now });
   const agentMember = agentMemberSchema.parse({ key: newId(), organizationKey: organization.key, scopeKey: scope.key, agentKey: agent.key, scopeAgentKey: scopeAgent.key, userOrganizationKey: membership.key, source: 'inherited', createdAt: now });
@@ -57,46 +41,24 @@ function fixture() {
 
 describe('domain tool schemas', () => {
   test('registers strict input schemas for every local domain action', () => {
-    expect(DOMAIN_ACTION_SLUGS).toHaveLength(103);
-    expect(domainToolJsonSchemas['artifact.create']).toMatchObject({ type: 'object', required: ['name', 'definition'], properties: { definition: { type: 'object' } } });
-    expect(domainToolInputSchemas['artifact.create'].parse({ name: 'Organization', definition: organizationArtifactDefinition })).toMatchObject({ name: 'Organization', definition: { root: 'organization' } });
-    expect(() => domainToolInputSchemas['artifact.create'].parse({ name: 'Organization', definition: organizationArtifactDefinition, organizationKey: newId() })).toThrow();
-    expect(domainToolInputSchemas['scope.list'].parse({})).toEqual({ includeDescendants: false, limit: 50 });
-    expect(() => domainToolInputSchemas['scope.list'].parse({ unexpected: true })).toThrow();
-    expect(() => domainToolInputSchemas['organization.member.add'].parse({ member: 'user@example.com', role: 'member' })).toThrow();
-    expect(domainToolInputSchemas['scope.member.add'].parse({ scope: 'Finance', members: ['alice@example.com'], role: 'moderator' })).toMatchObject({ role: 'moderator' });
+    expect(DOMAIN_ACTION_SLUGS).toHaveLength(11);
+    expect(domainToolInputSchemas['email.thread.read'].parse({ threadKey: newId() })).toHaveProperty('threadKey');
+    expect(() => domainToolInputSchemas['email.thread.read'].parse({ threadKey: newId(), unexpected: true })).toThrow();
+    expect(domainToolInputSchemas).not.toHaveProperty('scope.list');
+    expect(domainToolInputSchemas).not.toHaveProperty('organization.member.add');
     for (const schema of Object.values(domainToolInputSchemas)) expect(schema.safeParse({ unexpected: true }).success).toBe(false);
   });
 });
 
 describe('local domain tool boundary', () => {
-  test('creates a semantic artifact in the authenticated runtime scope without granting an agent', async () => {
-    const f = fixture(); let receivedInput: unknown = null;
-    const artifactKey = newId();
-    const output = await executeDomainTool('artifact.create', { name: 'Organization', definition: organizationArtifactDefinition }, {
-      organizationKey: f.organization.key,
-      runtimeScopeKey: f.scope.key,
-      principal: { kind: 'member', user: f.user, userOrganization: f.membership, scopeMember: null },
-    }, {
-      artifacts: {
-        async create(input) {
-          receivedInput = input;
-          return artifactSchema.parse({ key: artifactKey, organizationKey: input.organizationKey, scopeKey: input.scopeKey, name: input.name, definition: input.definition, schemaVersion: 1, snapshotKey: null, createdByAgentRunKey: null, createdByUserOrganizationKey: input.createdByUserOrganizationKey, createdAt: now, updatedAt: now });
-        },
-      },
-    });
-
-    expect(receivedInput).toMatchObject({ organizationKey: f.organization.key, scopeKey: f.scope.key, organizationWide: true, allowedScopeKeys: [f.scope.key], createdByUserOrganizationKey: f.membership.key });
-    expect(output).toEqual({ action: 'artifact.create', status: 'completed', data: { artifact: { key: artifactKey, name: 'Organization', mode: 'live', root: 'organization', layout: 'tree', theme: 'obsidian' } } });
-  });
-
   test('authorizes a direct action and executes locally without a model route', async () => {
     const f = fixture(); let receivedContext: unknown;
-    const output = await runDomainAgentTool({ organizationKey: f.organization.key, agentKey: f.agent.key, actionSlug: 'scope.list', principal: { kind: 'member', userOrganizationKey: f.membership.key }, input: { query: 'ops' } }, {
+    const input = { threadKey: newId() };
+    const output = await runDomainAgentTool({ organizationKey: f.organization.key, agentKey: f.agent.key, actionSlug: 'email.thread.read', principal: { kind: 'member', userOrganizationKey: f.membership.key }, input }, {
       runtimeData: f.runtimeData, accessData: f.accessData,
       execute: async (action, input, context) => { receivedContext = context; return { action, status: 'completed', data: { input } }; },
     });
-    expect(output).toEqual({ action: 'scope.list', status: 'completed', data: { input: { query: 'ops' } } });
+    expect(output).toEqual({ action: 'email.thread.read', status: 'completed', data: { input } });
     expect(receivedContext).toMatchObject({ organizationKey: f.organization.key, runtimeScopeKey: f.scope.key, principal: { kind: 'member' } });
   });
 
@@ -112,13 +74,14 @@ describe('local domain tool boundary', () => {
     const provider = providerSchema.parse({ key: newId(), slug: 'openai', name: 'OpenAI', description: 'Provider', supportedUseCases: 'AI', handlerKey: 'openai' });
     const route = modelActionSchema.parse({ key: newId(), modelKey: model.key, actionKey: reason.key, priority: 100 });
     const providerRoute = modelProviderSchema.parse({ key: newId(), modelKey: model.key, providerKey: provider.key, providerModelId: 'gpt-5.4-mini' });
-    const output = await interpretAndRunDomainTool({ organizationKey: f.organization.key, agentKey: f.agent.key, principal: { kind: 'member', userOrganizationKey: f.membership.key }, request: 'List scopes matching operations' }, {
+    const threadKey = newId();
+    const output = await interpretAndRunDomainTool({ organizationKey: f.organization.key, agentKey: f.agent.key, principal: { kind: 'member', userOrganizationKey: f.membership.key }, request: 'Read this email thread' }, {
       runtimeData: f.runtimeData, accessData: f.accessData,
       data: { async getActionBySlug(slug) { return slug === 'reason' ? reason : null; }, async getModelBySlug(slug) { return slug === model.slug ? model : null; }, async getModelByKey() { return model; }, async getProviderBySlug() { return provider; }, async getProviderByKey() { return provider; }, async listModelActions() { return [route]; }, async listModelProviders() { return [providerRoute]; }, async listOrganizationProviderKeys() { return [provider.key]; } },
-      adapters: { openai: { id: 'openai', name: 'OpenAI', async execute<TInput, TOutput>() { return { output: { text: '', stopReason: 'tool_calls', toolCalls: [{ id: 'call-1', name: 'scope__list', arguments: { query: 'operations' } }] } as TOutput, usage: tokenUsage(10, 4), providerId: 'openai' as const, modelId: model.slug, externalModelId: 'gpt-5.4-mini' }; } } },
+      adapters: { openai: { id: 'openai', name: 'OpenAI', async execute<TInput, TOutput>() { return { output: { text: '', stopReason: 'tool_calls', toolCalls: [{ id: 'call-1', name: 'email__thread__read', arguments: { threadKey } }] } as TOutput, usage: tokenUsage(10, 4), providerId: 'openai' as const, modelId: model.slug, externalModelId: 'gpt-5.4-mini' }; } } },
       execute: async (action, input) => ({ action, status: 'completed', data: input }),
     });
     expect(output.model).toMatchObject({ actionSlug: 'reason', modelSlug: 'openai.gpt-5.4-mini', providerSlug: 'openai' });
-    expect(output.output).toEqual({ action: 'scope.list', status: 'completed', data: { query: 'operations' } });
+    expect(output.output).toEqual({ action: 'email.thread.read', status: 'completed', data: { threadKey } });
   });
 });

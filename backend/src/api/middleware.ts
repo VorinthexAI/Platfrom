@@ -154,9 +154,6 @@ function querySchemaForPath(path: string) {
   if (apiPath === '/email/connectors/gmail/callback') {
     return strictObject({ code: z.string().min(1).optional(), state: z.string().min(1), error: z.string().optional(), scope: z.string().optional(), authuser: z.string().optional(), prompt: z.string().optional(), hd: z.string().optional(), error_description: z.string().optional(), error_subtype: z.string().optional() });
   }
-  if (apiPath === '/founders/artifacts' || apiPath === '/founders/artifacts/stream' || /^\/founders\/artifacts\/[^/]+$/.test(apiPath)) {
-    return strictObject({ organizationKey: z.string().trim().min(1).optional(), scopeKey: z.string().cuid().optional() });
-  }
   if (apiPath === '/orchestrators/chat') {
     return strictObject({
       orchestrator_id: z.string().cuid().optional(),

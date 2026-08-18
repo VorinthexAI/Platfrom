@@ -546,12 +546,11 @@ describe('Content runtime', () => {
     expect(output.results[0]).toMatchObject({ success: false, error: { code: 'DOCUMENT_SPEECH_FAILED', message: 'Audio version history could not be loaded.', action: 'audio-history' } });
   });
 
-  test('filters semantic search to authorized scopes and rejects unresolved projects', async () => {
+  test('filters semantic search to authorized scopes', async () => {
     const f = fixture('viewer'); f.addDocument('Roadmap launch'); let authorized: string[] = [];
     f.repository.semanticSearch = async (input) => { authorized = input.authorizedScopeKeys; return [...f.documents.values()].map((document) => ({ score: 0.8, document, matchedContent: 'Matched passage later in the document.' })); };
     const output = await runContentTool('scope.document.search', { scopeKey: f.scopeKey, query: 'roadmap', include: ['snippet'] }, f.context, { repository: f.repository, embed: async () => embedding });
     expect(authorized).toEqual([f.scopeKey]); expect(output.results[0]).toMatchObject({ score: 0.8, snippet: 'Matched passage later in the document.' });
-    await expect(runContentTool('scope.document.search', { scopeKey: f.scopeKey, query: 'roadmap', sources: [{ type: 'project', projectKeys: [newId()] }] }, f.context, { repository: f.repository, embed: async () => embedding })).rejects.toMatchObject({ code: 'CONTENT_SEARCH_INVALID_SOURCE' });
   });
 
   test('returns exact lexical folder matches without waiting for query embedding', async () => {

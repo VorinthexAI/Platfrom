@@ -24,7 +24,7 @@ export async function runDomainAgentTool(rawInput: z.input<typeof runDomainAgent
   const runtime = await loadAgentRuntime(input.agentKey, options.runtimeData);
   if (runtime.organization.key !== input.organizationKey) throw new Error('agent belongs to another organization');
   if (!isDomainActionSlug(input.actionSlug)) throw new Error(`unknown domain action ${input.actionSlug}`);
-  const principal = await authorizeAgentExecution(runtime, input.principal, options.accessData, { allowArchivedOrganization: input.actionSlug === 'organization.restore' });
+  const principal = await authorizeAgentExecution(runtime, input.principal, options.accessData);
   const context: DomainToolContext = { organizationKey: input.organizationKey, runtimeScopeKey: runtime.scope.key, principal };
   return domainToolResultSchema.parse(await (options.execute ?? executeDomainTool)(input.actionSlug, input.input, context));
 }

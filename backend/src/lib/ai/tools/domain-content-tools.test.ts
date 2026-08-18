@@ -27,7 +27,6 @@ function harness() {
     contentDocument: mutate(document, timestamp), restoreDocument: mutate(document, null),
     contentDocumentVersion: mutate(version, timestamp), restoreDocumentVersion: mutate(version, null),
     contentDocumentShare: mutate(share, timestamp), restoreDocumentShare: mutate(share, null),
-    isProjectFolder: async () => false,
     atomicMutate: async (resource: string, _keys: string[], deletedAt: string | null) => {
       const node = resource === 'folders' ? folder : resource === 'documents' ? document : resource === 'documentVersions' ? version : share;
       Object.assign(node, { deletedAt, updatedAt: timestamp });
@@ -185,13 +184,7 @@ describe('Content lifecycle domain tools', () => {
     expect(parent.document.deletedAt).toBe(timestamp);
   });
 
-  test('protects canonical project folders and delegates atomic writes as one operation', async () => {
-    const projectFolder = harness();
-    projectFolder.dependencies.isProjectFolder = async () => true;
-    const blocked = await executeContentLifecycleTool('folder.archive', { items: [{ folderKey }], atomic: false }, { organizationKey: 'org' }, projectFolder.dependencies as never);
-    expect(blocked.items[0]).toMatchObject({ success: false });
-    expect(projectFolder.folder.deletedAt).toBeNull();
-
+  test('delegates atomic writes as one operation', async () => {
     const atomic = harness();
     let calls = 0;
     atomic.dependencies.atomicMutate = async () => { calls += 1; throw new Error('transaction rolled back'); };

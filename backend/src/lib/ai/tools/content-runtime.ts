@@ -113,7 +113,6 @@ export interface ContentToolDependencies extends RouterDependencies {
   id?: () => string;
   random?: (size: number) => Uint8Array;
   canPermanentlyDelete?: (input: { kind: 'folder' | 'document' | 'version'; deletedAt?: string | null; context: DomainToolContext }) => boolean | Promise<boolean>;
-  projectScopeKeys?: (projectKeys: string[], organizationKey: string) => Promise<Record<string, string>>;
   maxSpeechChunkCharacters?: number;
   ingestion?: DocumentParseDependencies;
   idempotency?: ContentIdempotencyStore;
@@ -2533,34 +2532,16 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       const allowed = await repo.allowedScopeKeys(context.organizationKey, member.userOrganization.key);
       if (!organizationSearch) await roleFor(input.scopeKey, 'viewer');
 
-      const mapProjects = async (projectKeys: string[]) => {
-        if (dependencies.projectScopeKeys) return dependencies.projectScopeKeys(projectKeys, context.organizationKey);
-        const mapping: Record<string, string> = {};
-        for (const key of projectKeys) {
-          const scope = await repo.getScope(key);
-          if (!scope || scope.organizationKey !== context.organizationKey) fail('CONTENT_SEARCH_INVALID_SOURCE', 'Project key does not identify a scope in this organization.', tool, 'resolution', key);
-          mapping[key] = key;
-        }
-        return mapping;
-      };
       const filterScopeKeys = new Set<string>(input.filters?.scopeKeys ?? allowed);
-      if (input.filters?.projectKeys) {
-        const mapped = await mapProjects(input.filters.projectKeys);
-        const projectScopes = new Set(Object.values(mapped));
-        for (const key of [...filterScopeKeys]) if (!projectScopes.has(key)) filterScopeKeys.delete(key);
-      }
       const filterFolderKeys: string[] | undefined = input.filters?.folderKeys;
       if (filterFolderKeys) {
         for (const key of filterFolderKeys) await folder(key, 'viewer', includeArchived);
       }
       const sourceInputs = input.sources ?? [{ type: 'scope', scopeKeys: organizationSearch ? allowed : [input.scopeKey] }];
-      const resolvedSources: Array<{ type: 'scope' | 'project' | 'folder'; key: string; scopeKeys: string[]; folderKeys?: string[] }> = [];
+      const resolvedSources: Array<{ type: 'scope' | 'folder'; key: string; scopeKeys: string[]; folderKeys?: string[] }> = [];
       for (const source of sourceInputs) {
         if (source.type === 'scope') {
           for (const key of source.scopeKeys) resolvedSources.push({ type: 'scope', key, scopeKeys: [key] });
-        } else if (source.type === 'project') {
-          const mapped = await mapProjects(source.projectKeys);
-          for (const key of source.projectKeys) resolvedSources.push({ type: 'project', key, scopeKeys: [mapped[key]!] });
         } else {
           for (const key of source.folderKeys) {
             const current = await folder(key, 'viewer', includeArchived);
@@ -2605,7 +2586,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           return [{ score, document, matchedContent: document.content.slice(matchAt, matchAt + 300) }];
         });
       };
-      const candidates = new Map<string, { score: number; document: Document; matchedContent?: string; source: { type: 'scope' | 'project' | 'folder'; key: string } }>();
+      const candidates = new Map<string, { score: number; document: Document; matchedContent?: string; source: { type: 'scope' | 'folder'; key: string } }>();
       const searchableSources: Array<{ source: (typeof resolvedSources)[number]; scopeKeys: string[]; folderKeys?: string[] }> = [];
       for (const source of resolvedSources) {
         const scopeKeys = source.scopeKeys.filter((key) => allowed.includes(key) && filterScopeKeys.has(key));

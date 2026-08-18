@@ -124,7 +124,7 @@ suite('Content live E2E', () => {
     const save = (collection: string, value: Record<string, unknown>) => db.collection(collection).save(value);
     await save('organizations', { _key: organizationKey, name: 'Content E2E', is_root: false, slug: `archive-${organizationKey}`, description: null, isActive: true, mfa_enabled: false, metadata: {}, createdAt: now, updatedAt: now, embedding: [] });
     await save('organizations', { _key: outsiderOrganizationKey, name: 'Content outsider', is_root: false, slug: `outside-${outsiderOrganizationKey}`, description: null, isActive: true, mfa_enabled: false, metadata: {}, createdAt: now, updatedAt: now, embedding: [] });
-    for (const [key, organization, slug] of [[scopeKey, organizationKey, 'primary'], [secondScopeKey, organizationKey, 'project'], [outsiderScopeKey, outsiderOrganizationKey, 'outsider']] as const) {
+    for (const [key, organization, slug] of [[scopeKey, organizationKey, 'primary'], [secondScopeKey, organizationKey, 'secondary'], [outsiderScopeKey, outsiderOrganizationKey, 'outsider']] as const) {
       await save('scopes', { _key: key, organizationKey: organization, slug: `${slug}-${key}`, name: slug, summary: `${slug} archive scope`, description: `${slug} documents`, position: 1, level: 1, deletedAt: null, embedding: [] });
     }
     await save('users', { _key: userKey, organizationId: organizationKey, email: `${userKey}@example.test`, emailHash: userKey, countryCode: 'SE', name: 'Content Owner', createdAt: now, updatedAt: now, embedding: [] });
@@ -366,13 +366,13 @@ suite('Content live E2E', () => {
 
     const secondFolders = await call('folder.create', { folders: [{ scopeKey: secondScopeKey, name: 'Project Documents' }] });
     const secondFolderKey = secondFolders.results[0].data.folder.key;
-    const secondText = 'Semantic roadmap from the project scope.';
-    const secondDocument = await call('document.parse', { file: { filename: 'project.txt', mimeType: 'text/plain', sizeBytes: secondText.length, bytes: new TextEncoder().encode(secondText) }, scopeKey: secondScopeKey, folderKey: secondFolderKey });
+    const secondText = 'Semantic roadmap from the secondary scope.';
+    const secondDocument = await call('document.parse', { file: { filename: 'secondary.txt', mimeType: 'text/plain', sizeBytes: secondText.length, bytes: new TextEncoder().encode(secondText) }, scopeKey: secondScopeKey, folderKey: secondFolderKey });
     const outsiderFolderKey = newId();
     const outsiderDocumentKey = newId();
     await save('folders', { _key: outsiderFolderKey, scopeKey: outsiderScopeKey, name: 'Private outsider', embedding, createdAt: now, updatedAt: now });
     await save('documents', { _key: outsiderDocumentKey, scopeKey: outsiderScopeKey, folderKey: outsiderFolderKey, name: 'Forbidden source', extension: 'txt', mimeType: 'text/plain', storageKey: `content/${outsiderOrganizationKey}/${outsiderScopeKey}/${outsiderDocumentKey}/original.txt`, sizeBytes: 8, content: 'roadmap', embedding, createdAt: now, updatedAt: now });
-    const scopedSearch = await call('scope.document.search', { scopeKey, query: 'roadmap', sources: [{ type: 'scope', scopeKeys: [scopeKey] }, { type: 'project', projectKeys: [secondScopeKey] }, { type: 'folder', folderKeys: [rootFolderKey], includeDescendants: true }], include: ['snippet', 'content', 'folder', 'scoreBreakdown'] });
+    const scopedSearch = await call('scope.document.search', { scopeKey, query: 'roadmap', sources: [{ type: 'scope', scopeKeys: [scopeKey, secondScopeKey] }, { type: 'folder', folderKeys: [rootFolderKey], includeDescendants: true }], include: ['snippet', 'content', 'folder', 'scoreBreakdown'] });
     expect(scopedSearch.results.some((item: any) => item.documentKey === documentKey)).toBe(true);
     const organizationSearch = await call('organization.document.search', { organizationKey, query: 'roadmap', sources: [{ type: 'scope', scopeKeys: [scopeKey, secondScopeKey, outsiderScopeKey] }], include: ['snippet', 'scope', 'scoreBreakdown'] });
     expect(organizationSearch.results.map((item: any) => item.documentKey)).toContain(secondDocument.document.key);

@@ -140,35 +140,3 @@ export async function evaluateAgentAccess(context: DomainToolContext, input: { s
   if (!sources.includes('explicit') && rankAccessRole(scopeDecision.effectiveRole) < rankAccessRole(scopeAgent.minimumAccessRole)) return { ...base, allowed: false, reason: 'AGENT_MEMBER_NOT_FOUND', agentAccessSources: [], scopeAgent, agent };
   return { ...base, allowed: true, reason: 'ALLOWED', agentAccessSources: sources, scopeAgent, agent };
 }
-
-export function explainOrganizationDecision(decision: OrganizationAccessDecision) {
-  const member = decision.membership?.user.name ?? decision.membership?.user.email ?? 'Användaren';
-  const messages: Record<OrganizationDecisionReason, string> = {
-    ALLOWED: `${member} har aktivt medlemskap som ${decision.effectiveRole} och får utföra åtgärden.`,
-    UNAUTHENTICATED: 'Ingen autentiserad organisationsmedlem kunde identifieras.',
-    MEMBERSHIP_NOT_FOUND: 'Användaren är inte medlem i den aktiva organisationen.',
-    MEMBERSHIP_SUSPENDED: `${member} är medlem men medlemskapet är ${decision.membership?.status}; aktivera medlemskapet för att återställa åtkomst.`,
-    ORGANIZATION_ARCHIVED: `${decision.organization.name} är arkiverad och blockerar operativ åtkomst.`,
-    INSUFFICIENT_ROLE: `${member} saknar en giltig organisationsroll.`,
-    ACTION_DENIED: `${member} har rollen ${decision.effectiveRole}, som inte tillåter den begärda åtgärden.`,
-  };
-  return messages[decision.reason];
-}
-
-export function explainScopeDecision(decision: ScopeAccessDecision) {
-  if (!decision.organizationDecision.allowed) return explainOrganizationDecision(decision.organizationDecision);
-  if (decision.reason === 'SCOPE_ARCHIVED') return `${decision.scope.name} är arkiverat och kan därför inte användas operativt.`;
-  if (!decision.effectiveRole) return `Medlemmen saknar direkt eller ärvd access till ${decision.scope.name}.`;
-  const source = decision.accessSources.join(' och ') || 'okänd källa';
-  return decision.allowed ? `Medlemmen har ${decision.effectiveRole}-access till ${decision.scope.name} genom ${source}.` : `Medlemmen har ${decision.effectiveRole}-access genom ${source}, men rollen tillåter inte den begärda åtgärden.`;
-}
-
-export function explainAgentDecision(decision: AgentAccessDecision) {
-  if (decision.reason === 'ORGANIZATION_ACCESS_DENIED' || decision.reason === 'SCOPE_ACCESS_DENIED') return explainScopeDecision(decision.scopeDecision);
-  if (decision.reason === 'AGENT_NOT_IN_SCOPE') return 'Agenten är inte kopplad till det valda scopet.';
-  if (decision.reason === 'SCOPE_AGENT_ARCHIVED') return 'Relationen mellan scopet och agenten är arkiverad, så körning och delegation är blockerad.';
-  if (decision.reason === 'AGENT_MEMBER_NOT_FOUND') return `Medlemmen har ${decision.effectiveScopeRole ?? 'ingen'} scope-roll, agenten kräver minst ${decision.scopeAgent?.minimumAccessRole ?? 'en giltig roll'} för inherited access och ingen giltig explicit grant finns.`;
-  if (decision.reason === 'SYSTEM_AGENT_POLICY_DENIED') return 'Agenten omfattas av systemagent-policy och kräver owner-access.';
-  if (decision.reason === 'ACTION_DENIED') return `Medlemmen har ${decision.effectiveScopeRole ?? 'ingen'} scope-roll men får inte administrera agenten.`;
-  return `Agentåtkomst är tillåten genom ${decision.agentAccessSources.join(' och ')} access.`;
-}

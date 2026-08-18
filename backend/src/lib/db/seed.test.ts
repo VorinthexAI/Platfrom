@@ -40,7 +40,7 @@ describe('scope seeds', () => {
     expect(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === NEXUS_SCOPE_KEY).every(({ level }) => level === 2)).toBe(true);
     const core = SEEDED_SCOPES.find(({ slug }) => slug === 'core')!;
     const command = SEEDED_SCOPES.find(({ slug }) => slug === 'command')!;
-    expect(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === core.key).sort((left, right) => left.position - right.position).map(({ slug }) => slug)).toEqual(['archive', 'gallery', 'signal', 'compass', 'ascend', 'chorus', 'cadence', 'momentum', 'prism']);
+    expect(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === core.key).sort((left, right) => left.position - right.position).map(({ slug }) => slug)).toEqual(['archive', 'gallery', 'signal', 'compass', 'ascend', 'chorus', 'cadence', 'prism']);
     expect(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === command.key).sort((left, right) => left.position - right.position).map(({ slug }) => slug)).toEqual(['atlas', 'hermes', 'metis', 'phoenix', 'apollo', 'iris', 'echo', 'matrix', 'harmony', 'ledger', 'orbit', 'mercury', 'sentinel', 'athena', 'forge', 'aura', 'pillar', 'helios', 'vulcan', 'themis']);
     expect(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === core.key || parentKey === command.key).every(({ level }) => level === 3)).toBe(true);
     expect(SEEDED_SCOPES.find(({ slug }) => slug === 'hq')).toMatchObject({ name: 'HQ', key: 'cmrnlzf640005qc7kefvra0bn' });
@@ -85,7 +85,7 @@ describe('provider seeds', () => {
   test('seed every supported provider while keeping its slug registered', () => {
     const slugs = SEEDED_PROVIDERS.map((provider) => provider.slug);
 
-    expect(slugs).toEqual(['openai', 'openrouter', 'anthropic', 'aws-bedrock', 'aws-bedrock-mantle', 'aws-polly', 'aws-transcribe', 'google-vertex', 'azure-ai-foundry', 'xai']);
+    expect(slugs).toEqual(['openai', 'openrouter', 'anthropic', 'aws-bedrock', 'aws-bedrock-mantle', 'aws-polly', 'google-vertex', 'azure-ai-foundry', 'xai']);
     expect(slugs.every((slug) => PROVIDER_SLUGS.includes(slug))).toBe(true);
     expect(new Set(slugs).size).toBe(slugs.length);
     expect(new Set(SEEDED_PROVIDERS.map((provider) => provider.key)).size).toBe(SEEDED_PROVIDERS.length);
@@ -110,16 +110,13 @@ describe('model and routing relation seeds', () => {
       'amazon.nova-premier',
       'amazon.nova-pro',
       'openai.gpt-realtime-2',
-      'openai.gpt-4o-mini-transcribe',
       'amazon.polly-generative',
       'qwen.qwen3-embedding-8b',
-      'aws.transcribe-standard',
       'google.gemini-2.5-flash-lite',
     ]);
     expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'orchestrator-chat').map(({ modelSlug }) => modelSlug))
       .toEqual(['google.gemini-2.5-flash-lite', 'amazon.nova-pro']);
-    expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'transcribe').map(({ modelSlug }) => modelSlug))
-      .toEqual(['openai.gpt-realtime-2']);
+    expect(SEEDED_MODEL_ACTIONS.some(({ actionSlug }) => actionSlug === 'transcribe')).toBe(false);
     expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'enhance').map(({ modelSlug }) => modelSlug))
       .toEqual(['google.gemini-2.5-flash-lite']);
     expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'translate').map(({ modelSlug }) => modelSlug))
@@ -136,10 +133,8 @@ describe('model and routing relation seeds', () => {
       'amazon.nova-premier:aws-bedrock:us.amazon.nova-premier-v1:0:false',
       'amazon.nova-pro:aws-bedrock:us.amazon.nova-pro-v1:0:true',
       'openai.gpt-realtime-2:openai:gpt-realtime-2:true',
-      'openai.gpt-4o-mini-transcribe:openai:gpt-4o-mini-transcribe:true',
       'qwen.qwen3-embedding-8b:openrouter:qwen/qwen3-embedding-8b:true',
       'amazon.polly-generative:aws-polly:generative:true',
-      'aws.transcribe-standard:aws-transcribe:standard:true',
       'google.gemini-2.5-flash-lite:openrouter:google/gemini-2.5-flash-lite:true',
     ]);
     expect(SEEDED_MODEL_PROVIDERS.filter((route) => route.modelSlug.includes('embedding')).map((route) => route.modelSlug)).toEqual(['qwen.qwen3-embedding-8b']);
@@ -257,11 +252,10 @@ describe('AI runtime seed orchestration', () => {
       ['nova-pro-key:chat-key', { key: 'nova-pro-chat-key', priority: 100, enabled: true }],
       ['gemini-key:chat-key', { key: 'gemini-chat-key', priority: 90, enabled: true }],
       ['sonic-key:speak-key', { key: 'sonic-speak-key', priority: 100, enabled: true }],
-      ['sonic-key:transcribe-key', { key: 'sonic-transcribe-key', priority: 100, enabled: true }],
       ['custom-key:chat-key', { key: 'custom-chat-key', priority: 80, enabled: true }],
     ]);
     const modelKeys = new Map([['openai.gpt-realtime-2', 'sonic-key'], ['openai.gpt-5.6-terra', 'terra-key'], ['openai.gpt-5.6-luna', 'luna-key'], ['amazon.nova-pro', 'nova-pro-key'], ['google.gemini-2.5-flash-lite', 'gemini-key'], ['custom.model', 'custom-key']]);
-    const actionKeys = new Map([['orchestrator-chat', 'chat-key'], ['speak', 'speak-key'], ['transcribe', 'transcribe-key']]);
+    const actionKeys = new Map([['orchestrator-chat', 'chat-key'], ['speak', 'speak-key']]);
     let reconciliationUpdates = 0;
     const noop = (collection: string) => async (seed: { key: string }): Promise<SeedResult> => ({ collection, key: seed.key, status: 'updated' });
     const upserters: AiRuntimeSeedUpserters = {
@@ -295,7 +289,6 @@ describe('AI runtime seed orchestration', () => {
     expect(routes.get('nova-pro-key:chat-key')?.enabled).toBe(true);
     expect(routes.get('gemini-key:chat-key')?.enabled).toBe(true);
     expect(routes.get('sonic-key:speak-key')?.enabled).toBe(true);
-    expect(routes.get('sonic-key:transcribe-key')?.enabled).toBe(true);
     expect(routes.get('custom-key:chat-key')?.enabled).toBe(true);
     expect(reconciliationUpdates).toBe(1);
   });
