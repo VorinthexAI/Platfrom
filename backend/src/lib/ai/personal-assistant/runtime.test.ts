@@ -70,7 +70,10 @@ describe('personal assistant runtime', () => {
     });
 
     expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual([
-      'collection.list', 'collection.create', 'collection.update', 'collection.delete', 'image.search', 'image.favorite', 'image.update', 'image.delete',
+      'collection.list', 'collection.create', 'collection.update', 'collection.delete',
+      'collection.member.list', 'collection.invite.pending.list', 'collection.invite.create', 'collection.invite.accept', 'collection.invite.reject', 'collection.invite.revoke',
+      'collection.member.role.update', 'collection.member.remove', 'collection.leave', 'collection.share.list', 'collection.share.create', 'collection.share.update', 'collection.share.revoke', 'collection.share.activate',
+      'image.search', 'image.favorite', 'image.update', 'image.delete',
       'collection.duplicates.delete', 'collection.image.transfer', 'subject.list', 'subject.create',
       'subject.image.list', 'subject.delete', 'subject.restore', 'image.upload.reserve',
       'image.upload.status', 'image.upload.complete', 'assistant.unsupported',

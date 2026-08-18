@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useState } from "react";
+import { AuthenticatedEventBridge } from "./event-bridge";
 
 function createQueryClient(): QueryClient {
   return new QueryClient({
@@ -18,5 +19,5 @@ function createQueryClient(): QueryClient {
 
 export function AppQueryProvider({ children }: { children: ReactNode }) {
   const [client] = useState(createQueryClient);
-  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  return <QueryClientProvider client={client}><AuthenticatedEventBridge />{children}</QueryClientProvider>;
 }

@@ -4,6 +4,7 @@ const source = await Bun.file(new URL("../components/capability/GalleryWorkspace
 const captureSource = await Bun.file(new URL("../components/capability/GalleryCaptureModal.tsx", import.meta.url)).text();
 const cameraSource = await Bun.file(new URL("../components/capability/BrandedCameraModal.tsx", import.meta.url)).text();
 const bottomSheetSource = await Bun.file(new URL("../../../../shared/packages/ui/components/bottom-sheet/bottom-sheet.mobile.tsx", import.meta.url)).text();
+const sharingSource = await Bun.file(new URL("../components/capability/GalleryCollectionSharing.tsx", import.meta.url)).text();
 
 test("keeps image similarity collection-scoped and outside the image footer", () => {
   const footer = source.slice(source.indexOf('const sheetFooter ='), source.indexOf('return (', source.indexOf('const sheetFooter =')));
@@ -53,7 +54,7 @@ test("only lifts Core for its own focus and uses distinct image sheet presentati
   expect(source).toContain('behavior={aiInputFocused ? "height" : undefined}');
   expect(source).toContain("setAiInputFocused(focused)");
   expect(source).toContain('hideHeading={activeSheet === "rootActions" || activeSheet === "actions" || activeSheet === "collectionMenu" || activeSheet === "filter" || activeSheet === "imageActions" || activeSheet === "bulkActions"}');
-  expect(source).toContain('open={sheetOpen && (activeSheet === "image" || activeSheet === "imageActions") && Boolean(selectedImage || selectedOptimisticItem)}');
+  expect(source).toContain('open={!sharingOpen && !pendingInvitesOpen && sheetOpen && (activeSheet === "image" || activeSheet === "imageActions") && Boolean(selectedImage || selectedOptimisticItem)}');
   expect(source).toContain("        mutation\n        onOpenChange");
   expect(source).toContain('mutation={activeSheet === "imageEdit"');
   expect(source).not.toContain('activeSheet === "imageActions" || activeSheet === "imageEdit"');
@@ -146,4 +147,30 @@ test("gates collection search focus while the Core sheet closes", () => {
   expect(source).toContain("collectionSearchInput.current?.blur()");
   expect(source).toContain("onFocusChange={handleCoreFocusChange}");
   expect(source).toContain("setTimeout(() => setCollectionSearchFocusBlocked(false), 350)");
+});
+
+test("provides collection sharing navigation and permission gates", () => {
+  expect(source).toContain(">My collections</Button>");
+  expect(source).toContain(">Shared collections</Button>");
+  expect(source).toContain("<UsersIcon size=\"sm\"");
+  expect(source).toContain('collectionRole === "collaborator" && image.createdByKey === activeCollection.memberKey');
+  expect(source).toContain('pushSheet("confirmLeaveCollection")');
+  expect(sharingSource).toContain('>Members</BottomSheetItem>');
+  expect(sharingSource).toContain('>Pending invites</BottomSheetItem>');
+  expect(sharingSource).toContain('Array.from({ length: 3 }');
+  expect(sharingSource).toContain('title: "Share link copied to clipboard"');
+  expect(sharingSource).toContain('setCachedGalleryShareLinks');
+  expect(sharingSource).toContain('galleryQueryKeys.members(context, collection.key), refetchType: "none"');
+  expect(sharingSource).toContain('view === "memberRemoveConfirm"');
+  expect(sharingSource).toContain('active === selectedLink.active');
+  expect(source).toContain('open={!sharingOpen && !pendingInvitesOpen && sheetOpen');
+  expect(source).toContain('access.canContribute && role !== "viewer"');
+  expect(source).toContain('accessibilityLabel="Pending Gallery invites"');
+  expect(sharingSource).toContain('event.type === "collection.changed"');
+  expect(sharingSource).toContain('accessibilityLabel={`Remove ${selectedMember?.name ?? "member"} from collection`}');
+  expect(sharingSource).not.toContain('<View accessible accessibilityHint=');
+  expect(source).toContain('const [canCreateCollections, setCanCreateCollections] = useState(false)');
+  expect(source).toContain('setCanCreateCollections(overview.canCreateCollections)');
+  expect(source).toContain('collectionTab === "mine" && canCreateCollections');
+  expect(source).toContain('activeCollection\n    ? isCollectionOwner');
 });

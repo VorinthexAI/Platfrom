@@ -1,4 +1,4 @@
-import { useRouter } from "expo-router";
+import { useRouter, type Href } from "expo-router";
 import { useCallback, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -7,6 +7,7 @@ import { Button } from "@vorinthex/shared/ui/button";
 import { CardStack } from "@/components/onboarding/CardStack";
 import { palette } from "@/theme/tokens";
 import { useAuthStore } from "@/state/auth";
+import { readPendingReturnRoute } from "@/lib/pending-return-route";
 
 /** Five-card gesture-led onboarding: Archive, Gallery, Signal, Compass, Ascend. */
 export default function OnboardingRoute() {
@@ -22,7 +23,7 @@ export default function OnboardingRoute() {
     setCompletionError(undefined);
     try {
       await completeOnboarding();
-      router.replace("/capability/archive");
+      router.replace((await readPendingReturnRoute().catch(() => undefined) ?? "/capability/archive") as Href);
     } catch (error) {
       setCompletionError(error instanceof Error ? error.message : "Onboarding could not be completed.");
     } finally {

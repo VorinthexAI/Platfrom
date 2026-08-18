@@ -4,7 +4,7 @@ import type { Book, BookDetail } from "./books-client";
 import type { ContentContext } from "./content-client";
 import { contentQueryKeys } from "./content-query-cache";
 import type { EmailFilter, EmailOverview, EmailThread } from "./email-client";
-import type { GalleryCollection, GalleryImage, GalleryOverview } from "./gallery-client";
+import type { GalleryCollection, GalleryCollectionInvite, GalleryCollectionMember, GalleryCollectionShareLink, GalleryImage, GalleryOverview } from "./gallery-client";
 import type { Place, Trip } from "./travel-client";
 
 export type WorkspaceContext = { organizationKey: string; scopeKey: string };
@@ -16,7 +16,22 @@ export const galleryQueryKeys = {
   collections: (context: WorkspaceContext) => [...galleryQueryKeys.all(context), "collections"] as const,
   overviews: (context: WorkspaceContext) => [...galleryQueryKeys.all(context), "overviews"] as const,
   overview: (context: WorkspaceContext, collectionKey?: string) => [...galleryQueryKeys.overviews(context), collectionKey ?? null] as const,
+  members: (context: WorkspaceContext, collectionKey: string) => [...galleryQueryKeys.all(context), "sharing", collectionKey, "members"] as const,
+  invites: (context: WorkspaceContext, collectionKey: string) => [...galleryQueryKeys.all(context), "sharing", collectionKey, "invites"] as const,
+  shareLinks: (context: WorkspaceContext, collectionKey: string) => [...galleryQueryKeys.all(context), "sharing", collectionKey, "share-links"] as const,
 };
+
+export function setCachedGalleryMembers(queryClient: QueryClient, context: WorkspaceContext, collectionKey: string, members: GalleryCollectionMember[]) {
+  queryClient.setQueryData(galleryQueryKeys.members(context, collectionKey), members);
+}
+
+export function setCachedGalleryInvites(queryClient: QueryClient, context: WorkspaceContext, collectionKey: string, invites: GalleryCollectionInvite[]) {
+  queryClient.setQueryData(galleryQueryKeys.invites(context, collectionKey), invites);
+}
+
+export function setCachedGalleryShareLinks(queryClient: QueryClient, context: WorkspaceContext, collectionKey: string, links: GalleryCollectionShareLink[]) {
+  queryClient.setQueryData(galleryQueryKeys.shareLinks(context, collectionKey), links);
+}
 
 export async function getGalleryCollections(queryClient: QueryClient, context: WorkspaceContext, queryFn: () => Promise<GalleryCollection[]>) {
   return queryClient.fetchQuery({ queryKey: galleryQueryKeys.collections(context), queryFn, staleTime: Infinity });
@@ -117,7 +132,7 @@ export function transferCachedGalleryImages(queryClient: QueryClient, context: W
   for (const collectionKey of input.destinationCollectionKeys) {
     const queryKey = galleryQueryKeys.overview(context, collectionKey);
     if (queryClient.getQueryData(queryKey)) continue;
-    queryClient.setQueryData<GalleryOverview>(queryKey, { collections: root.collections.map((collection) => collection.key === collectionKey ? { ...collection, count: collection.count + input.images.length, coverUrl: collection.coverUrl ?? input.images[0]?.url ?? null } : collection), images: input.images, nextCursor: null });
+    queryClient.setQueryData<GalleryOverview>(queryKey, { collections: root.collections.map((collection) => collection.key === collectionKey ? { ...collection, count: collection.count + input.images.length, coverUrl: collection.coverUrl ?? input.images[0]?.url ?? null } : collection), images: input.images, nextCursor: null, canCreateCollections: root.canCreateCollections });
   }
 }
 

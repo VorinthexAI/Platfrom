@@ -38,6 +38,11 @@
               "scheme": "https",
               "host": "vorinthex.com",
               "path": "/public/auth/token"
+            },
+            {
+              "scheme": "https",
+              "host": "vorinthex.com",
+              "pathPrefix": "/share/"
             }
           ],
           "category": [

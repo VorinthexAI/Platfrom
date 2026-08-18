@@ -33,8 +33,9 @@ async function shareStorageMode(executor: ContentQueryExecutor): Promise<ShareSt
 function globalDocumentShare(value: Record<string, unknown>): DocumentShare {
   const share = shareSchema.parse(typeof value.key === 'string' ? value : withArangoKey(value));
   if (share.sourceType !== 'document') throw new Error('Expected a document share.');
+  if (share.permission !== 'read' && share.permission !== 'comment') throw new Error('Document shares require document permissions.');
   const { sourceType: _sourceType, sourceKey: documentKey, ...projected } = share;
-  return { ...projected, documentKey };
+  return { ...projected, permission: share.permission, documentKey };
 }
 
 function toGlobalDocumentShare(share: DocumentShare): Share {

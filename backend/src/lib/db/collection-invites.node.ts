@@ -2,12 +2,13 @@ import { aql } from 'arangojs';
 import { z } from 'zod';
 import { createNodeHelpers, withArangoKey } from './base';
 import { db } from './client';
+import { collectionMemberRoleSchema } from './collection-members.node';
 
 export const COLLECTION_INVITES_COLLECTION = 'collectionInvites';
 export const collectionInviteSchema = z.object({
-  key: z.string().cuid(), scopeKey: z.string().cuid(), collectionKey: z.string().cuid(), invitedByKey: z.string().cuid(), inviteeKey: z.string().cuid().optional(),
+  key: z.string().cuid(), scopeKey: z.string().cuid(), collectionKey: z.string().cuid(), invitedByKey: z.string().cuid(), inviteeKey: z.string().cuid().optional(), role: collectionMemberRoleSchema.refine((role) => role !== 'owner').default('collaborator'),
   email: z.string().trim().toLowerCase().email().optional(), tokenHash: z.string().regex(/^[a-f0-9]{64}$/), expiresAt: z.string().datetime().optional(), acceptedAt: z.string().datetime().optional(),
-  revokedAt: z.string().datetime().optional(), createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
+  revokedAt: z.string().datetime().optional(), rejectedAt: z.string().datetime().optional(), createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
 }).superRefine((invite, context) => {
   if ((invite.inviteeKey === undefined) === (invite.email === undefined)) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Exactly one of inviteeKey or email is required.' });
 });

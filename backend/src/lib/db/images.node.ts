@@ -11,7 +11,7 @@ export const imageSchema = z.object({
   key: z.string().cuid(), scopeKey: z.string().cuid(), filename: z.string().trim().min(1), caption: z.string().trim().min(1),
   storageKey: z.string().trim().min(1), mimeType: z.string().trim().min(1), sizeBytes: z.number().int().positive(),
   width: z.number().int().positive(), height: z.number().int().positive(), embedding: currentEmbeddingSchema,
-  imageCaptionKey: z.string().cuid().nullable().optional(),
+  imageCaptionKey: z.string().cuid().nullable().optional(), createdByKey: z.string().cuid().nullable().default(null),
   city: z.string().trim().min(1).max(200).nullable().optional(), country: z.string().trim().min(1).max(200).nullable().optional(), countryCode: z.string().trim().length(2).toUpperCase().nullable().optional(),
   isFavorite: z.boolean().default(false), deletedAt: z.string().datetime().nullable().default(null), createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
 });

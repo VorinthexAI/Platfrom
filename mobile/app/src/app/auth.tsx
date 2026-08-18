@@ -4,6 +4,7 @@ import { Spinner } from "@vorinthex/shared/ui/spinner";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 import { isAxiosError } from "axios";
 import * as Linking from "expo-linking";
+import { useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
 import { AccessibilityInfo, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -16,6 +17,7 @@ import { getJson, postJson } from "@/lib/api-client";
 import { launchOAuthProvider, type OAuthProvider } from "@/lib/oauth";
 import { useAuthStore } from "@/state/auth";
 import { fonts, palette, spacing, tracking } from "@/theme/tokens";
+import { savePendingReturnRoute } from "@/lib/pending-return-route";
 
 type LoginResponse = {
   handoff_token_hash?: string;
@@ -33,6 +35,7 @@ function messageFor(error: unknown) {
 }
 
 export default function AuthRoute() {
+  const { returnTo } = useLocalSearchParams<{ returnTo?: string }>();
   const insets = useSafeAreaInsets();
   const { height, width } = useWindowDimensions();
   const hydrate = useAuthStore((state) => state.hydrate);
@@ -45,6 +48,10 @@ export default function AuthRoute() {
   const [error, setError] = useState<string | null>(null);
   const busy = loading !== null;
   const emailInvalid = error === "Enter a valid email address.";
+
+  useEffect(() => {
+    if (returnTo) void savePendingReturnRoute(returnTo).catch(() => undefined);
+  }, [returnTo]);
 
   useEffect(() => {
     if (!handoff) return;

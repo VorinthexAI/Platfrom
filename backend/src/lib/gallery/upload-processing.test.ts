@@ -34,6 +34,7 @@ function fixture() {
     async addImageToCollection(relation: { imageKey: string }) { relations.push(relation.imageKey); return relation; },
     async listIdentityMatches() { return []; },
     async persistIdentityMatches() {},
+    async getUserKeyByMemberKey() { return 'user-1'; },
     async failUpload(key: string, _scopeKey: string, errorCode: string, updatedAt: string) { const imageKey = uploads.get(key)!.imageKey; compensated.push(imageKey); await repository.updateUpload(key, { status: 'failed', errorCode, updatedAt }); return true; },
   } as unknown as GalleryRepository;
   const storage = {
@@ -51,6 +52,7 @@ describe('Gallery upload batch processing', () => {
     const captionRequests: string[][] = [];
     let sanitized = 0;
     let measured = 0;
+    const collectionEvents: string[] = [], userEvents: string[] = [];
     const result = await processGalleryUploadBatch(keys, {
       repository: f.repository,
       storage: f.storage,
@@ -70,6 +72,8 @@ describe('Gallery upload batch processing', () => {
         }));
       },
       onMetrics(metrics) { measured = metrics.durationMs; expect(metrics).toMatchObject({ count: 3, generated: 2, reused: 1, downloadDurationMs: expect.any(Number), persistDurationMs: expect.any(Number) }); },
+      publishCollectionEvent: async (collectionKey) => { collectionEvents.push(collectionKey); },
+      publishUserEvent: async (userKey) => { userEvents.push(userKey); },
     });
     expect(result).toEqual({ processed: 3 });
     expect(captionRequests).toHaveLength(1);
@@ -79,16 +83,33 @@ describe('Gallery upload batch processing', () => {
     expect(f.updates.filter(({ status }) => status === 'completed')).toHaveLength(3);
     expect(f.uploads.get(keys[0]!)!).toMatchObject({ city: 'Stockholm', country: 'Sweden', countryCode: 'SE' });
     expect(f.relations).toHaveLength(3);
+    expect(collectionEvents).toEqual(Array(3).fill(upload(0).collectionKey));
+    expect(userEvents).toEqual(Array(3).fill('user-1'));
     expect(f.deleted).toHaveLength(6);
     expect(measured).toBeGreaterThan(0);
     expect(measured).toBeLessThan(1_000);
   });
 
+  test('publishes only after completion and ignores publisher failures', async () => {
+    const f = fixture();
+    const publications: string[] = [];
+    const result = await processGalleryUploadBatch([keys[0]!], {
+      repository: f.repository, storage: f.storage, resolveImageReference: async () => 'data:image/jpeg;base64,/9j/2Q==', sanitizeImage: passthroughSanitizer,
+      processBatch: async ([input]) => [imageSchema.parse({ key: input!.imageKey, scopeKey: input!.scopeKey, filename: 'image.jpg', caption: 'Caption.', imageCaptionKey: 'cmrnlzf650002qc7k4p5zemc0', createdByKey: input!.ownerKey, storageKey: 'media/image.jpg', mimeType: 'image/jpeg', sizeBytes: 4, width: 10, height: 10, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now })],
+      publishCollectionEvent: async () => { publications.push(f.uploads.get(keys[0]!)!.status); throw new Error('redis unavailable'); },
+      publishUserEvent: async () => { publications.push(f.uploads.get(keys[0]!)!.status); },
+    });
+    expect(result).toEqual({ processed: 1 });
+    expect(publications).toEqual(['completed', 'completed']);
+  });
+
   test('marks the whole retryable batch failed when processing fails', async () => {
     const f = fixture();
-    await expect(processGalleryUploadBatch(keys, { repository: f.repository, storage: f.storage, resolveImageReference: async () => 'https://images.example/image.jpg', sanitizeImage: passthroughSanitizer, processBatch: async () => { throw new Error('temporary model failure'); } })).rejects.toThrow('temporary model failure');
+    const publications: string[] = [];
+    await expect(processGalleryUploadBatch(keys, { repository: f.repository, storage: f.storage, resolveImageReference: async () => 'https://images.example/image.jpg', sanitizeImage: passthroughSanitizer, processBatch: async () => { throw new Error('temporary model failure'); }, publishCollectionEvent: async () => { publications.push('collection'); }, publishUserEvent: async () => { publications.push('user'); } })).rejects.toThrow('temporary model failure');
     expect(f.updates.filter(({ status }) => status === 'failed')).toHaveLength(3);
     expect(f.compensated).toHaveLength(3);
+    expect(publications).toEqual([]);
   });
 
   test('keeps completed siblings replayable when one upload fails finalization', async () => {

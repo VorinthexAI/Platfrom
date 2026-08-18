@@ -64,6 +64,10 @@
       "react-native": "./packages/ui/components/switch/switch.mobile.tsx",
       "default": "./packages/ui/components/switch/switch.web.tsx"
     },
+    "./ui/clipboard": {
+      "react-native": "./packages/ui/clipboard.mobile.ts",
+      "default": "./packages/ui/clipboard.web.ts"
+    },
     "./ui/document-search": "./packages/ui/document-search.ts",
     "./ui/components": "./packages/ui/components.ts",
     "./ui/icons": "./packages/ui/icons.ts",

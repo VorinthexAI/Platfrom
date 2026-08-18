@@ -11,6 +11,7 @@ import { getAuthIdentity } from './security';
 import { z } from 'zod';
 
 const trustedContextSchema = z.object({ organizationKey: z.string().trim().min(1), scopeKey: z.string().cuid() }).passthrough();
+const idempotencyKeySchema = z.string().trim().min(1).max(200);
 
 async function context(c: Context, organizationKey: string, scopeKey: string): Promise<GalleryOperationContext> {
   const identity = await getAuthIdentity(c);
@@ -18,7 +19,9 @@ async function context(c: Context, organizationKey: string, scopeKey: string): P
   if (identity.identityType !== 'user') throw new GalleryOperationError(403, 'GALLERY_FORBIDDEN', 'A user session is required.');
   const membership = await getUserOrganizationByOrganizationAndUser(organizationKey, identity.key);
   if (!membership) throw new GalleryOperationError(403, 'GALLERY_FORBIDDEN', 'Gallery scope access denied.');
-  return { organizationKey, scopeKey, membership, signal: c.req.raw.signal };
+  const rawIdempotencyKey = c.req.header('idempotency-key')?.trim();
+  const idempotencyKey = rawIdempotencyKey ? idempotencyKeySchema.parse(rawIdempotencyKey) : undefined;
+  return { organizationKey, scopeKey, membership, ...(idempotencyKey ? { idempotencyKey } : {}), signal: c.req.raw.signal };
 }
 
 function handler(name: GalleryOperationName, successStatus = 200) {
@@ -39,6 +42,20 @@ export const galleryOverview = handler('overview');
 export const createGalleryCollection = handler('createCollection', 201);
 export const updateGalleryCollection = handler('updateCollection');
 export const deleteGalleryCollection = handler('deleteCollection');
+export const listGalleryCollectionMembers = handler('listMembers');
+export const listGalleryPendingInvites = handler('listPendingInvites');
+export const createGalleryCollectionInvite = handler('createInvite', 201);
+export const acceptGalleryCollectionInvite = handler('acceptInvite');
+export const rejectGalleryCollectionInvite = handler('rejectInvite');
+export const revokeGalleryCollectionInvite = handler('revokeInvite');
+export const updateGalleryCollectionMemberRole = handler('updateMemberRole');
+export const removeGalleryCollectionMember = handler('removeMember');
+export const leaveGalleryCollection = handler('leaveCollection');
+export const listGalleryCollectionShares = handler('listShares');
+export const createGalleryCollectionShare = handler('createShare', 201);
+export const updateGalleryCollectionShare = handler('updateShare');
+export const revokeGalleryCollectionShare = handler('revokeShare');
+export const activateGalleryCollectionShare = handler('activateShare');
 export const presignGalleryUploads = handler('reserveUploads', 201);
 export const completeGalleryUploads = handler('completeUploads', 202);
 export const galleryUploadStatus = handler('uploadStatus');

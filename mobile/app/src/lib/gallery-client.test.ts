@@ -3,18 +3,27 @@ import { beforeEach, expect, mock, test } from "bun:test";
 const calls: { path: string; body: Record<string, unknown>; timeout?: number }[] = [];
 
 mock.module("@/state/auth", () => ({
-  useAuthStore: { getState: () => ({ organization: { key: "organization" }, scope: { key: "scope" } }) },
+  useAuthStore: { getState: () => ({ user: { email: "recipient@example.com" }, organization: { key: "organization", membership_key: "membership" }, scope: { key: "scope" } }) },
 }));
 mock.module("./api-client", () => ({
   apiClient: { post: async (path: string, body: Record<string, unknown>, options?: { timeout?: number }) => {
     calls.push({ path, body, timeout: options?.timeout });
     if (path === "/gallery/uploads/presign") return { data: { success: true, data: { uploads: [{ clientKey: "local-image", uploadKey: "upload", imageKey: "image", url: "https://uploads.example/image", headers: { "Content-Type": "image/jpeg" } }] } } };
     if (path === "/gallery/uploads/complete") return { data: { success: true, data: { jobs: [{ key: "upload", imageKey: "image", status: "queued" }] } } };
+    if (path === "/gallery/collections/members") return { data: { success: true, data: { owners: [], collaborators: [], viewers: [] } } };
+    if (path === "/gallery/invites/pending") return { data: { success: true, data: { invites: [
+      { key: "incoming", inviteeKey: "membership", role: "viewer", createdAt: "2026-08-18T00:00:00.000Z", collection: { key: "shared", name: "Shared" }, inviterDisplayName: "Ada" },
+      { key: "sent", email: "someone@example.com", role: "viewer", createdAt: "2026-08-18T00:00:00.000Z", collection: { key: "owned", name: "Owned" }, inviterDisplayName: "You" },
+    ] } } };
+    if (path === "/gallery/collections/shares/list") return { data: { success: true, data: { shares: [{ key: "listed", url: "https://vorinthex.com/share/secure-listed-token", role: "viewer", active: true, createdAt: "2026-08-18T00:00:00.000Z" }] } } };
+    if (path === "/gallery/collections/shares") return { data: { success: true, data: { share: { key: "link", url: "https://vorinthex.com/share/secure-created-token", role: "viewer", active: true, createdAt: "2026-08-18T00:00:00.000Z" } } } };
+    if (path === "/gallery/collections/shares/update") return { data: { success: true, data: { share: { key: "link", url: "https://vorinthex.com/share/secure-created-token", role: "viewer", active: false, createdAt: "2026-08-18T00:00:00.000Z" } } } };
+    if (path === "/gallery/shares/activate") return { data: { success: true, data: { scopeKey: "scope", collectionKey: "shared", role: "viewer" } } };
     return { data: { success: true, data: { images: [] } } };
   } },
 }));
 
-const { createGalleryCollection, deleteGalleryCollection, deleteGalleryImages, deleteGallerySubject, fetchGalleryOverview, filterCollections, filterMediaItems, findGalleryCollectionDuplicates, groupGalleryImagesByCreatedDate, mergeMediaItems, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryImage, uploadGalleryImages } = await import("./gallery-client");
+const { activateGalleryShare, createGalleryCollection, createGalleryCollectionShareLink, deleteGalleryCollection, deleteGalleryImages, deleteGallerySubject, fetchGalleryOverview, filterCollections, filterMediaItems, findGalleryCollectionDuplicates, groupGalleryImagesByCreatedDate, leaveGalleryCollection, listGalleryCollectionInvites, listGalleryCollectionMembers, listGalleryCollectionShareLinks, mergeMediaItems, removeGalleryCollectionMember, respondToGalleryCollectionInvite, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryCollectionMember, updateGalleryCollectionShareLink, updateGalleryImage, uploadGalleryImages } = await import("./gallery-client");
 
 beforeEach(() => calls.splice(0));
 
@@ -25,6 +34,9 @@ const collection = (name: string, key: string) => ({
   isFavorite: false,
   count: 0,
   coverUrl: null,
+  memberKey: "membership",
+  role: "owner" as const,
+  access: { canRead: true, canContribute: true, canManage: true },
 });
 
 test("filters collections by name without changing their hierarchy", () => {
@@ -155,6 +167,39 @@ test("creates collections with only a name and favorite state", async () => {
   await createGalleryCollection("Portraits", true);
   expect(calls[0]).toMatchObject({ path: "/gallery/collections", body: { organizationKey: "organization", scopeKey: "scope", name: "Portraits", isFavorite: true } });
   expect(calls[0]?.body).not.toHaveProperty("description");
+});
+
+test("uses explicit strict POST contracts for collection sharing", async () => {
+  await listGalleryCollectionMembers("collection");
+  await updateGalleryCollectionMember("collection", "member", "collaborator");
+  await removeGalleryCollectionMember("collection", "member");
+  const pending = await listGalleryCollectionInvites();
+  await respondToGalleryCollectionInvite("invite", "accept");
+  await respondToGalleryCollectionInvite("invite", "reject");
+  const listed = await listGalleryCollectionShareLinks("collection");
+  const created = await createGalleryCollectionShareLink("collection", "viewer", true);
+  const updated = await updateGalleryCollectionShareLink("collection", "link", false);
+  await leaveGalleryCollection("collection");
+  expect(calls.map(({ path }) => path)).toEqual([
+    "/gallery/collections/members", "/gallery/collections/members/role", "/gallery/collections/members/remove",
+    "/gallery/invites/pending", "/gallery/invites/accept", "/gallery/invites/reject",
+    "/gallery/collections/shares/list", "/gallery/collections/shares", "/gallery/collections/shares/update", "/gallery/collections/leave",
+  ]);
+  expect(calls.every(({ body }) => body.organizationKey === "organization" && body.scopeKey === "scope")).toBe(true);
+  expect(calls[3]?.body).toEqual({ organizationKey: "organization", scopeKey: "scope" });
+  expect(calls[4]?.body).not.toHaveProperty("collectionKey");
+  expect(pending.invites.map(({ key }) => key)).toEqual(["incoming"]);
+  expect(listed.links[0]?.url).toBe("https://vorinthex.com/share/secure-listed-token");
+  expect(created.link.url).toBe("https://vorinthex.com/share/secure-created-token");
+  expect(updated.link.url).toBe("https://vorinthex.com/share/secure-created-token");
+  expect(calls[8]?.body).toMatchObject({ shareKey: "link", active: false });
+  expect(calls[8]?.body).not.toHaveProperty("role");
+  expect(calls[7]?.body).toMatchObject({ role: "viewer", active: true });
+});
+
+test("activates a secure collection share token with returned scope context", async () => {
+  expect(await activateGalleryShare("secure-token")).toEqual({ scopeKey: "scope", collectionKey: "shared", role: "viewer" });
+  expect(calls).toEqual([{ path: "/gallery/shares/activate", body: { organizationKey: "organization", scopeKey: "scope", token: "secure-token" }, timeout: 60_000 }]);
 });
 
 test("deletes visual identities through the canonical Gallery mutation", async () => {
