@@ -23,7 +23,7 @@ mock.module("./api-client", () => ({
   } },
 }));
 
-const { activateGalleryShare, createGalleryCollection, createGalleryCollectionShareLink, deleteGalleryCollection, deleteGalleryImages, deleteGallerySubject, fetchGalleryOverview, filterCollections, filterMediaItems, findGalleryCollectionDuplicates, groupGalleryImagesByCreatedDate, leaveGalleryCollection, listGalleryCollectionInvites, listGalleryCollectionMembers, listGalleryCollectionShareLinks, mergeMediaItems, removeGalleryCollectionMember, respondToGalleryCollectionInvite, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryCollectionMember, updateGalleryCollectionShareLink, updateGalleryImage, uploadGalleryImages } = await import("./gallery-client");
+const { activateGalleryShare, createGalleryCollection, createGalleryCollectionShareLink, deleteGalleryCollection, deleteGalleryImages, deleteGallerySubject, fetchGalleryOverview, filterCollections, filterGalleryShareLinks, filterMediaItems, findGalleryCollectionDuplicates, groupGalleryImagesByCreatedDate, leaveGalleryCollection, listGalleryCollectionInvites, listGalleryCollectionMembers, listGalleryCollectionShareLinks, mergeMediaItems, removeGalleryCollectionMember, respondToGalleryCollectionInvite, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryCollectionMember, updateGalleryCollectionShareLink, updateGalleryImage, uploadGalleryImages } = await import("./gallery-client");
 
 beforeEach(() => calls.splice(0));
 
@@ -161,6 +161,26 @@ test("sends image and collection edits and collection deletion through canonical
     { path: "/gallery/collections/update", body: { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection", name: "Portraits", isFavorite: true } },
     { path: "/gallery/collections/delete", body: { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection" } },
   ]);
+});
+
+test("distinguishes selected, cleared, and omitted collection covers", async () => {
+  await updateGalleryCollection("collection", "Selected", false, "image-key");
+  await updateGalleryCollection("collection", "Cleared", false, null);
+  await updateGalleryCollection("collection", "Untouched", false);
+  expect(calls.map(({ body }) => body)).toEqual([
+    { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection", name: "Selected", isFavorite: false, coverImageKey: "image-key" },
+    { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection", name: "Cleared", isFavorite: false, coverImageKey: null },
+    { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection", name: "Untouched", isFavorite: false },
+  ]);
+});
+
+test("filters share links into active and inactive tabs", () => {
+  const links = [
+    { key: "active", url: "https://vorinthex.com/share/active", role: "viewer" as const, active: true, createdAt: "2026-01-01T00:00:00.000Z" },
+    { key: "inactive", url: "https://vorinthex.com/share/inactive", role: "collaborator" as const, active: false, createdAt: "2026-01-02T00:00:00.000Z" },
+  ];
+  expect(filterGalleryShareLinks(links, true).map(({ key }) => key)).toEqual(["active"]);
+  expect(filterGalleryShareLinks(links, false).map(({ key }) => key)).toEqual(["inactive"]);
 });
 
 test("creates collections with only a name and favorite state", async () => {

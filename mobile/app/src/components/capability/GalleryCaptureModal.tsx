@@ -33,6 +33,7 @@ export function GalleryCaptureModal({ onClose, onSubmit }: Props) {
   const [error, setError] = useState<string>();
   const filesRef = useRef<PreparedGalleryUpload[]>([]);
   const submitted = useRef(false);
+  const active = useRef(true);
 
   const capture = async (picture: CameraCapturedPicture) => {
     if (capturing || files.length >= MAX_GALLERY_CAPTURES) return;
@@ -40,6 +41,7 @@ export function GalleryCaptureModal({ onClose, onSubmit }: Props) {
     setError(undefined);
     try {
       const normalized = await normalizeCapturedJpeg(picture, { maxSide: 2400, compress: 0.88 });
+      if (!active.current) { deleteCapturedFile(normalized.uri); return; }
       const timestamp = Date.now();
       const file: PreparedGalleryUpload = {
         clientKey: `${timestamp}-${Math.random().toString(36).slice(2)}`,
@@ -54,13 +56,14 @@ export function GalleryCaptureModal({ onClose, onSubmit }: Props) {
         return next;
       });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "The image could not be captured.");
+      if (active.current) setError(cause instanceof Error ? cause.message : "The image could not be captured.");
     } finally {
-      setCapturing(false);
+      if (active.current) setCapturing(false);
     }
   };
 
   useEffect(() => () => {
+    active.current = false;
     if (!submitted.current) for (const file of filesRef.current) deleteCapturedFile(file.uri);
   }, []);
 

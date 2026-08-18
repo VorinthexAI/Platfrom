@@ -22,7 +22,7 @@ const validUpload = {
 
 describe('Gallery upload reservations', () => {
   test('accepts a server-owned JPEG reservation', () => {
-    expect(galleryUploadSchema.parse(validUpload)).toEqual({ ...validUpload, city: null, country: null, countryCode: null, processingMode: 'library' });
+    expect(galleryUploadSchema.parse(validUpload)).toEqual({ ...validUpload, city: null, country: null, countryCode: null, processingMode: 'library', processingLeaseId: null });
     expect(galleryUploadSchema.parse({ ...validUpload, processingMode: 'cover' })).toMatchObject({ processingMode: 'cover' });
   });
 

@@ -60,11 +60,14 @@ import { useAuthStore } from "@/state/auth";
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
 import { normalizeCapturedJpeg, type CapturedImage } from "@/lib/captured-image";
 import { subscribeAppEvent } from "@/lib/app-events";
+import { GalleryRefreshCoalescer, galleryRefreshPlan, isCurrentContextGeneration, reconcileGalleryPermissions, reconcileGalleryState, reconcileOptimisticUploads, reconcilePaginatedSelected, reconcileSelected, reconcileUploadJobRegistry, recoverAssistantSearchMode, recoverContextualSearchFailure, replayPaginatedWindow, type GalleryRefreshPlan } from "@/lib/gallery-convergence";
 
 type GallerySheet = "rootActions" | "actions" | "destination" | "newCollection" | "image" | "imageActions" | "imageEdit" | "confirmDeleteImage" | "collectionMenu" | "collectionEdit" | "confirmDeleteCollection" | "confirmLeaveCollection" | "duplicates" | "confirmDeleteDuplicates" | "visualIdentities" | "confirmDeleteIdentity" | "identityPicker" | "identityName" | "identityPickerFilter" | "transferDestination" | "filter" | "searchHistory" | "bulkActions" | "bulkDelete";
 type IdentityLibraryMode = "browse" | "filter";
+type ImagePickerPurpose = "identity" | "cover";
 type CollectionTransferMode = "copy" | "move";
 type OptimisticMediaItem = PreparedGalleryUpload & { batchKey: string; collectionKey: string; createdAt: string; imageKey?: string };
+type UnresolvedUploadJob = { uploadKey: string; imageKey: string; clientKey: string; collectionKey: string; batchKey?: string; file: PreparedGalleryUpload };
 type GalleryGridItem =
   | { kind: "optimistic"; key: string; createdAt: string; item: OptimisticMediaItem }
   | { kind: "persisted"; key: string; createdAt: string; image: GalleryImage };
@@ -113,6 +116,7 @@ export function GalleryWorkspace() {
   const [subjects, setSubjects] = useState<GallerySubject[]>([]);
   const [identitiesLoading, setIdentitiesLoading] = useState(true);
   const [identityLibraryMode, setIdentityLibraryMode] = useState<IdentityLibraryMode>("browse");
+  const [imagePickerPurpose, setImagePickerPurpose] = useState<ImagePickerPurpose>("identity");
   const [identityPickerCollection, setIdentityPickerCollection] = useState<GalleryCollection>();
   const [identityPickerImages, setIdentityPickerImages] = useState<GalleryImage[]>([]);
   const [identityPickerResults, setIdentityPickerResults] = useState<GalleryImage[]>();
@@ -148,11 +152,14 @@ export function GalleryWorkspace() {
   const [newCollectionFavorite, setNewCollectionFavorite] = useState(false);
   const [editName, setEditName] = useState("");
   const [editFavorite, setEditFavorite] = useState(false);
+  const [editCoverImageKey, setEditCoverImageKey] = useState<string | null>();
+  const [editCoverPreviewUrl, setEditCoverPreviewUrl] = useState<string | null>();
   const [selectedImageKeys, setSelectedImageKeys] = useState<string[]>([]);
   const [transferMode, setTransferMode] = useState<CollectionTransferMode>();
   const [destinationCollectionKey, setDestinationCollectionKey] = useState<string>();
   const [aiInput, setAiInput] = useState("");
   const [aiResponse, setAiResponse] = useState<string>();
+  const [assistantSearchSource, setAssistantSearchSource] = useState<string>();
   const [status, setStatus] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -189,6 +196,16 @@ export function GalleryWorkspace() {
   const activeCollectionKey = useRef<string | undefined>(undefined);
   const visibleGalleryView = useRef<"root" | "collection" | "search" | "duplicates" | "contextual">("root");
   const longPressedImage = useRef<{ key: string; at: number } | undefined>(undefined);
+  const cameraContextGeneration = useRef(0);
+  const unresolvedUploadJobs = useRef(new Map<string, UnresolvedUploadJob>());
+  const refreshCoalescer = useRef(new GalleryRefreshCoalescer());
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const refreshRunning = useRef(false);
+  const refreshContextGeneration = useRef(0);
+  const refreshContextKey = useRef(`${galleryContext.organizationKey}:${galleryContext.scopeKey}`);
+  const busyRef = useRef(busy);
+  const refreshRunner = useRef<(plan: GalleryRefreshPlan, generation: number) => Promise<void>>(async () => undefined);
+  busyRef.current = busy;
   activeCollectionKey.current = activeCollection?.key;
   visibleGalleryView.current = activeCollection
     ? query.trim() ? "search" : "collection"
@@ -201,11 +218,17 @@ export function GalleryWorkspace() {
   const sheetImageSize = Math.floor((width - 42 - GRID_GAP * (IMAGE_COLUMNS - 1)) / IMAGE_COLUMNS);
   const collectionRole = activeCollection?.role;
   const isCollectionOwner = collectionRole === "owner";
-  const canAddImages = Boolean(activeCollection && collectionRole !== "viewer");
+  const canAddImages = Boolean(activeCollection?.access.canContribute && collectionRole !== "viewer");
   const memberKeys = [...new Set([getGalleryMemberKey(), ...collections.map(({ memberKey }) => memberKey)].filter(Boolean))];
   const canMutateImage = (image: GalleryImage | undefined) => Boolean(image && (activeCollection
     ? isCollectionOwner || collectionRole === "collaborator" && image.createdByKey === activeCollection.memberKey
     : false));
+  const latestActiveCollection = () => activeCollection ? collections.find(({ key }) => key === activeCollection.key) : undefined;
+  const canMutateInCollection = (image: GalleryImage | undefined, collection: GalleryCollection | undefined) => Boolean(image && collection && (collection.role === "owner" || collection.role === "collaborator" && image.createdByKey === collection.memberKey));
+  const captureGalleryContextGuard = () => {
+    const generation = refreshContextGeneration.current;
+    return { generation, isCurrent: () => isCurrentContextGeneration(generation, refreshContextGeneration.current) };
+  };
 
   function applyCollectionSingleton(fallback: GalleryCollection[]) {
     setCachedGalleryCollections(queryClient, galleryContext, fallback);
@@ -213,13 +236,14 @@ export function GalleryWorkspace() {
     return fallback;
   }
 
-  async function loadCollectionSingleton() {
+  async function loadCollectionSingleton(generation = refreshContextGeneration.current) {
     let loadedPermission: boolean | undefined;
     const loaded = await getGalleryCollections(queryClient, galleryContext, async () => {
       const overview = await fetchGalleryOverview(undefined, undefined, 1);
       loadedPermission = overview.canCreateCollections;
       return overview.collections;
     });
+    if (!isCurrentContextGeneration(generation, refreshContextGeneration.current)) return [];
     if (loadedPermission !== undefined) setCanCreateCollections(loadedPermission);
     setCollections(loaded);
     return loaded;
@@ -232,6 +256,48 @@ export function GalleryWorkspace() {
       return next;
     });
   }
+
+  useEffect(() => {
+    const contextKey = `${galleryContext.organizationKey}:${galleryContext.scopeKey}`;
+    if (refreshContextKey.current === contextKey) return;
+    refreshContextKey.current = contextKey;
+    refreshContextGeneration.current += 1;
+    refreshCoalescer.current.reset();
+    if (refreshTimer.current) clearTimeout(refreshTimer.current);
+    refreshTimer.current = undefined;
+    refreshRunning.current = false;
+    viewRequest.current += 1;
+    backgroundLoadRequest.current += 1;
+    searchRequest.current += 1;
+    identityPickerRequest.current += 1;
+    subjectsRequest.current += 1;
+    favoriteRequests.current.clear();
+    favoriteWrites.current.clear();
+    unresolvedUploadJobs.current.clear();
+    deletingIdentityKeys.current.clear();
+    deletedIdentityKeys.current.clear();
+    closeSheet();
+    setSharingOpen(false);
+    setPendingInvitesOpen(false);
+    setCameraOpen(false);
+    setPendingFiles((current) => { deletePreparedFiles(current); return []; });
+    setOptimisticMediaItems((current) => { deletePreparedFiles(current); return []; });
+    setCollections([]);
+    setImages([]);
+    setSubjects([]);
+    setCreatingIdentityKeys([]);
+    setActiveCollection(undefined);
+    setActiveSubject(undefined);
+    setActiveIdentityFilter(undefined);
+    setShowingSearchResults(false);
+    setAssistantSearchSource(undefined);
+    setSelectedImage(undefined);
+    setSelectedImageKeys([]);
+    setDestinationCollectionKey(undefined);
+    setBusy(false);
+    setAssistantBusy(false);
+    setLoading(true);
+  }, [galleryContext.organizationKey, galleryContext.scopeKey]);
 
   async function load(collection = activeCollection, silent = false) {
     const request = silent ? ++backgroundLoadRequest.current : ++viewRequest.current;
@@ -272,29 +338,32 @@ export function GalleryWorkspace() {
     }).catch((error: unknown) => { if (request === viewRequest.current) setStatus(errorMessage(error)); }).finally(() => { if (request === viewRequest.current) setLoading(false); });
   }, [activeCollection?.key, activeSubject?.key, showingSearchResults, galleryContext.organizationKey, galleryContext.scopeKey, queryClient]);
 
+  function scheduleGalleryRefresh(plan: GalleryRefreshPlan) {
+    refreshCoalescer.current.add(plan);
+    if (refreshTimer.current || refreshRunning.current || busyRef.current) return;
+    refreshTimer.current = setTimeout(() => {
+      refreshTimer.current = undefined;
+      const next = refreshCoalescer.current.takeIfReady(busyRef.current);
+      if (!next) return;
+      const generation = refreshContextGeneration.current;
+      refreshRunning.current = true;
+      void refreshRunner.current(next, generation).finally(() => {
+        if (generation !== refreshContextGeneration.current) return;
+        refreshRunning.current = false;
+        if (refreshCoalescer.current.hasPending) scheduleGalleryRefresh(new Set());
+      });
+    }, 75);
+  }
+
   useEffect(() => subscribeAppEvent((event) => {
-    if (event.type !== "collection.changed" && event.type !== "event-stream.connected") return;
-    void queryClient.fetchQuery({ queryKey: galleryQueryKeys.overview(galleryContext), queryFn: () => fetchGalleryOverview(), staleTime: 0 }).then((overview) => {
-      applyCollectionSingleton(overview.collections);
-      setCanCreateCollections(overview.canCreateCollections);
-      if (!activeCollection) {
-        setImages(overview.images);
-        setNextCursor(overview.nextCursor);
-        return;
-      }
-      const refreshedCollection = overview.collections.find(({ key }) => key === activeCollection.key);
-      if (refreshedCollection) {
-        setActiveCollection(refreshedCollection);
-        void load(refreshedCollection, true);
-        return;
-      }
-      setActiveCollection(undefined);
-      setShowingCollectionOverview(true);
-      setImages(overview.images);
-      setNextCursor(overview.nextCursor);
-      setSelectedImageKeys([]);
-    }).catch(() => undefined);
-  }), [activeCollection?.key, galleryContext.organizationKey, galleryContext.scopeKey, queryClient]);
+    scheduleGalleryRefresh(galleryRefreshPlan(event.type === "event-stream.connected" ? "reconnect" : event.slug));
+  }), []);
+
+  useEffect(() => {
+    if (!busy && refreshCoalescer.current.hasPending) scheduleGalleryRefresh(new Set());
+  }, [busy]);
+
+  useEffect(() => () => { if (refreshTimer.current) clearTimeout(refreshTimer.current); }, []);
 
   async function loadMoreImages() {
     if (!activeCollection || !nextCursor || loading || loadingMore || query.trim() || similarSource) return;
@@ -432,16 +501,78 @@ export function GalleryWorkspace() {
     setActiveCollection(undefined);
     setActiveSubject(undefined);
     setShowingSearchResults(false);
+    setAssistantSearchSource(undefined);
   }
 
-  async function completeUpload(files: PreparedGalleryUpload[], collectionKey: string, optimisticBatchKey?: string) {
+  async function replayOverviewWindow(collectionKey: string | undefined, targetCount: number, generation: number) {
+    const isCurrent = () => isCurrentContextGeneration(generation, refreshContextGeneration.current);
+    const replay = await replayPaginatedWindow({
+      targetCount,
+      getKey: ({ key }: GalleryImage) => key,
+      isCurrent,
+      fetchPage: async (cursor?: string) => {
+        const page = cursor
+          ? await fetchGalleryOverview(collectionKey, cursor)
+          : await queryClient.fetchQuery({ queryKey: galleryQueryKeys.overview(galleryContext, collectionKey), queryFn: () => fetchGalleryOverview(collectionKey), staleTime: 0 });
+        return { page, items: page.images, nextCursor: page.nextCursor };
+      },
+    });
+    if (replay.cancelled || !replay.firstPage || !isCurrent()) return undefined;
+    const overview = { ...replay.firstPage, images: replay.items, nextCursor: replay.nextCursor, replayReachedEnd: replay.reachedEnd };
+    queryClient.setQueryData(galleryQueryKeys.overview(galleryContext, collectionKey), overview);
+    return overview;
+  }
+
+  function promoteAuthoritativeUploads(authoritativeImages: GalleryImage[]) {
+    const reconciliation = reconcileOptimisticUploads(optimisticMediaItems, authoritativeImages);
+    if (reconciliation.promoted.length === 0) return;
+    deletePreparedFiles(reconciliation.promoted.map(({ item }) => item));
+    setOptimisticMediaItems((current) => reconcileOptimisticUploads(current, authoritativeImages).remaining);
+    const selected = selectedOptimisticItemRef.current;
+    const promotedSelected = selected ? reconciliation.promoted.find(({ item }) => item.clientKey === selected.clientKey)?.image : undefined;
+    if (promotedSelected) {
+      selectedOptimisticItemRef.current = undefined;
+      setSelectedOptimisticItem(undefined);
+      setSelectedImage(promotedSelected);
+    }
+  }
+
+  function settleUploadJobs(statuses: Array<{ key: string; imageKey: string; status: string }>, generation: number) {
+    if (!isCurrentContextGeneration(generation, refreshContextGeneration.current)) return;
+    const reconciliation = reconcileUploadJobRegistry([...unresolvedUploadJobs.current.values()], statuses);
+    for (const { job } of [...reconciliation.completed, ...reconciliation.failed]) unresolvedUploadJobs.current.delete(job.uploadKey);
+    if (reconciliation.failed.length === 0) return;
+    const failedClients = new Set(reconciliation.failed.map(({ job }) => job.clientKey));
+    deletePreparedFiles(reconciliation.failed.map(({ job }) => job.file));
+    setOptimisticMediaItems((current) => current.filter(({ clientKey }) => !failedClients.has(clientKey)));
+    const selected = selectedOptimisticItemRef.current;
+    if (selected && failedClients.has(selected.clientKey)) closeSheet();
+    showToast({ title: "Some images could not be uploaded", description: `${reconciliation.failed.length} image${reconciliation.failed.length === 1 ? "" : "s"} failed processing.` });
+  }
+
+  async function refreshUnresolvedUploadJobs(generation: number) {
+    const uploadKeys = [...unresolvedUploadJobs.current.keys()];
+    if (uploadKeys.length === 0 || !isCurrentContextGeneration(generation, refreshContextGeneration.current)) return;
+    const result = await fetchGalleryUploadStatus(uploadKeys, 5_000);
+    if (!isCurrentContextGeneration(generation, refreshContextGeneration.current)) return;
+    settleUploadJobs(result.jobs, generation);
+  }
+
+  async function completeUpload(files: PreparedGalleryUpload[], collectionKey: string, optimisticBatchKey?: string, generation = refreshContextGeneration.current) {
+    const isCurrent = () => isCurrentContextGeneration(generation, refreshContextGeneration.current);
     const uploadLocation = activeCollection?.key;
     const uploadCollection = activeCollection?.key === collectionKey ? activeCollection : undefined;
     const uploadView = uploadCollection ? "collection" : "root";
     const result = await uploadGalleryImages(files, collectionKey);
+    if (!isCurrent()) { deletePreparedFiles(files); return; }
     setPendingFiles([]);
     const uploadKeys = result.jobs.map(({ key }) => key);
     const jobsByKey = new Map(result.jobs.map((job) => [job.key, job]));
+    for (const job of result.jobs) {
+      const file = files.find(({ clientKey }) => clientKey === job.clientKey);
+      if (file) unresolvedUploadJobs.current.set(job.key, { uploadKey: job.key, imageKey: job.imageKey, clientKey: job.clientKey, collectionKey, batchKey: optimisticBatchKey, file });
+    }
+    settleUploadJobs(result.jobs, generation);
     if (optimisticBatchKey) {
       const imageKeysByClientKey = new Map(result.jobs.map(({ clientKey, imageKey }) => [clientKey, imageKey]));
       setOptimisticMediaItems((currentItems) => currentItems.map((item) => item.batchKey === optimisticBatchKey
@@ -456,33 +587,49 @@ export function GalleryWorkspace() {
       }
     }
     await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
+    if (!isCurrent()) { deletePreparedFiles(files); return; }
     void (async () => {
       const settledKeys = new Set<string>();
       let allSettled = false;
       const refreshVisibleOverview = async () => {
-        if (activeCollectionKey.current === uploadLocation && visibleGalleryView.current === uploadView) return { attempted: true, overview: await load(uploadCollection, true) };
-        if (!activeCollectionKey.current && visibleGalleryView.current === "root") return { attempted: true, overview: await load(undefined, true) };
+        if (!isCurrent()) return { attempted: false, overview: undefined };
+        if (activeCollectionKey.current === uploadLocation && visibleGalleryView.current === uploadView || !activeCollectionKey.current && visibleGalleryView.current === "root") {
+          const targetCount = uploadCollection ? images.length : images.length;
+          const overview = await replayOverviewWindow(uploadCollection?.key, targetCount, generation);
+          if (!overview || !isCurrent()) return { attempted: false, overview: undefined };
+          applyCollectionSingleton(overview.collections);
+          setCanCreateCollections(overview.canCreateCollections);
+          setImages(overview.images);
+          setNextCursor(overview.nextCursor);
+          return { attempted: true, overview };
+        }
         return { attempted: false, overview: undefined };
       };
       for (let attempt = 0; attempt < 40; attempt += 1) {
         await wait(3_000);
+        if (!isCurrent()) { deletePreparedFiles(files); return; }
         try {
           const current = await fetchGalleryUploadStatus(uploadKeys, 5_000);
+          if (!isCurrent()) { deletePreparedFiles(files); return; }
+          settleUploadJobs(current.jobs, generation);
           const terminalJobs = current.jobs.filter(({ key, status: jobStatus }) => !settledKeys.has(key) && (jobStatus === "completed" || jobStatus === "failed"));
           if (terminalJobs.length > 0) {
             await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
+            if (!isCurrent()) { deletePreparedFiles(files); return; }
             const refresh = await refreshVisibleOverview();
             if (optimisticBatchKey) {
               const visibleOverview: GalleryOverview | undefined = refresh.overview && typeof refresh.overview !== "boolean" ? refresh.overview : undefined;
               const targetOverview: GalleryOverview | undefined = uploadCollection && visibleOverview
                 ? visibleOverview
-                : await queryClient.fetchQuery({ queryKey: galleryQueryKeys.overview(galleryContext, collectionKey), queryFn: () => fetchGalleryOverview(collectionKey) }).catch(() => undefined);
+                : await replayOverviewWindow(collectionKey, queryClient.getQueryData<GalleryOverview>(galleryQueryKeys.overview(galleryContext, collectionKey))?.images.length ?? files.length, generation).catch(() => undefined);
+              if (!isCurrent()) { deletePreparedFiles(files); return; }
               const persistedByKey = new Map(targetOverview?.images.map((image) => [image.key, image]));
               const persistedJobs = terminalJobs.filter(({ imageKey, status: jobStatus }) => jobStatus === "failed" || (jobStatus === "completed" && persistedByKey.has(imageKey)));
               const prefetchResults = await Promise.allSettled(persistedJobs.map(({ imageKey, status: jobStatus }) => {
                 const image = jobStatus === "completed" ? persistedByKey.get(imageKey) : undefined;
                 return image ? Image.prefetch(image.url) : Promise.resolve(true);
               }));
+              if (!isCurrent()) { deletePreparedFiles(files); return; }
               const readyJobs = persistedJobs.filter((_, index) => prefetchResults[index]?.status === "fulfilled");
               for (const job of readyJobs) settledKeys.add(job.key);
               const readyClientKeys = new Set(readyJobs.map(({ key }) => jobsByKey.get(key)?.clientKey).filter((key): key is string => Boolean(key)));
@@ -502,13 +649,18 @@ export function GalleryWorkspace() {
           if (allSettled) break;
         } catch {}
       }
+      if (!isCurrent()) { deletePreparedFiles(files); return; }
       await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
+      if (!isCurrent()) { deletePreparedFiles(files); return; }
       await refreshVisibleOverview();
-      await loadSubjects(true);
+      if (isCurrent()) await loadSubjects(true);
     })().catch(() => undefined);
   }
 
-  async function prepareAssets(assets: CapturedImage[]) {
+  async function prepareAssets(assets: CapturedImage[], generation = refreshContextGeneration.current) {
+    const isCurrent = () => isCurrentContextGeneration(generation, refreshContextGeneration.current);
+    const initialTarget = latestActiveCollection();
+    if (activeCollection && (!initialTarget?.access.canContribute || initialTarget.role === "viewer")) return;
     setBusy(true);
     closeSheet();
     setStatus(undefined);
@@ -523,15 +675,18 @@ export function GalleryWorkspace() {
           ...(output.latitude !== undefined && output.longitude !== undefined ? { latitude: output.latitude, longitude: output.longitude } : {}),
         };
       }));
+      if (!isCurrent()) { deletePreparedFiles(files); return; }
       if (activeCollection) {
-        const targetCollection = activeCollection;
+        const targetCollection = latestActiveCollection();
+        if (!targetCollection?.access.canContribute || targetCollection.role === "viewer") { deletePreparedFiles(files); return; }
         clearCollectionSearch(false);
         const batchKey = `upload-${Date.now()}-${Math.random().toString(36).slice(2)}`;
         const createdAt = new Date().toISOString();
         setOptimisticMediaItems((current) => [...files.map((file) => ({ ...file, batchKey, collectionKey: targetCollection.key, createdAt })), ...current]);
         updateCollectionSingleton((current) => current.map((collection) => collection.key === targetCollection.key ? { ...collection, count: collection.count + files.length } : collection));
         setActiveCollection((current) => current?.key === targetCollection.key ? { ...current, count: current.count + files.length } : current);
-        void completeUpload(files, targetCollection.key, batchKey).catch(() => {
+        void completeUpload(files, targetCollection.key, batchKey, generation).catch(() => {
+          if (!isCurrent()) { deletePreparedFiles(files); return; }
           setOptimisticMediaItems((current) => current.filter((item) => item.batchKey !== batchKey));
           updateCollectionSingleton((current) => current.map((collection) => collection.key === targetCollection.key ? { ...collection, count: Math.max(0, collection.count - files.length) } : collection));
           setActiveCollection((current) => current?.key === targetCollection.key ? { ...current, count: Math.max(0, current.count - files.length) } : current);
@@ -539,32 +694,44 @@ export function GalleryWorkspace() {
         });
         closeSheet();
       } else {
+        if (!isCurrent()) { deletePreparedFiles(files); return; }
         setPendingFiles(files);
         openSheet("destination");
       }
     } catch {
-      setPendingFiles([]);
+      if (isCurrent()) setPendingFiles([]);
     } finally {
-      setBusy(false);
+      if (isCurrent()) setBusy(false);
     }
   }
 
   async function choosePhotos() {
+    const generation = refreshContextGeneration.current;
+    const isCurrent = () => isCurrentContextGeneration(generation, refreshContextGeneration.current);
+    const target = latestActiveCollection();
+    if (activeCollection && (!target?.access.canContribute || target.role === "viewer")) return;
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!isCurrent()) return;
     if (!permission.granted) { closeSheet(); return; }
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsMultipleSelection: true, selectionLimit: 20, quality: 1, exif: true });
-    if (!result.canceled) await prepareAssets(result.assets);
+    if (!isCurrent()) return;
+    if (!result.canceled) await prepareAssets(result.assets, generation);
   }
 
   async function takePhoto() {
+    const target = latestActiveCollection();
+    if (!target?.access.canContribute || target.role === "viewer") return;
     closeSheet();
+    cameraContextGeneration.current = refreshContextGeneration.current;
     setCameraOpen(true);
   }
 
   function uploadCapturedPhotos(files: PreparedGalleryUpload[]) {
-    const targetCollection = activeCollection;
+    const generation = cameraContextGeneration.current;
+    const isCurrent = () => isCurrentContextGeneration(generation, refreshContextGeneration.current);
+    const targetCollection = latestActiveCollection();
     setCameraOpen(false);
-    if (!targetCollection || files.length === 0) return;
+    if (!isCurrent() || !targetCollection || !targetCollection.access.canContribute || targetCollection.role === "viewer" || files.length === 0) { deletePreparedFiles(files); return; }
     clearCollectionSearch(false);
     const batchKey = `upload-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const createdAt = new Date().toISOString();
@@ -572,7 +739,8 @@ export function GalleryWorkspace() {
     updateCollectionSingleton((current) => current.map((collection) => collection.key === targetCollection.key ? { ...collection, count: collection.count + files.length } : collection));
     setActiveCollection((current) => current?.key === targetCollection.key ? { ...current, count: current.count + files.length } : current);
     void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext), refetchType: "none" });
-    void completeUpload(files, targetCollection.key, batchKey).catch(() => {
+    void completeUpload(files, targetCollection.key, batchKey, generation).catch(() => {
+      if (!isCurrent()) { deletePreparedFiles(files); return; }
       setOptimisticMediaItems((current) => current.filter((item) => item.batchKey !== batchKey));
       updateCollectionSingleton((current) => current.map((collection) => collection.key === targetCollection.key ? { ...collection, count: Math.max(0, collection.count - files.length) } : collection));
       setActiveCollection((current) => current?.key === targetCollection.key ? { ...current, count: Math.max(0, current.count - files.length) } : current);
@@ -582,8 +750,11 @@ export function GalleryWorkspace() {
 
   async function uploadTo(collectionKey: string) {
     if (pendingFiles.length === 0) return;
+    const generation = refreshContextGeneration.current;
+    const isCurrent = () => isCurrentContextGeneration(generation, refreshContextGeneration.current);
     const files = [...pendingFiles];
     const targetCollection = collections.find(({ key }) => key === collectionKey);
+    if (!targetCollection?.access.canContribute || targetCollection.role === "viewer") { deletePreparedFiles(files); setPendingFiles([]); closeSheet(); return; }
     const batchKey = `upload-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const createdAt = new Date().toISOString();
     setOptimisticMediaItems((current) => [...files.map((file) => ({ ...file, batchKey, collectionKey, createdAt })), ...current]);
@@ -591,9 +762,10 @@ export function GalleryWorkspace() {
     setBusy(true);
     closeSheet();
     try {
-      await completeUpload(files, collectionKey, batchKey);
-      setBusy(false);
+      await completeUpload(files, collectionKey, batchKey, generation);
+      if (isCurrent()) setBusy(false);
     } catch {
+      if (!isCurrent()) { deletePreparedFiles(files); return; }
       setOptimisticMediaItems((current) => current.filter((item) => item.batchKey !== batchKey));
       deletePreparedFiles(files);
       if (targetCollection) updateCollectionSingleton((current) => current.map((collection) => collection.key === collectionKey ? {
@@ -602,25 +774,30 @@ export function GalleryWorkspace() {
         coverUrl: collection.coverUrl === files[0]?.uri ? targetCollection.coverUrl : collection.coverUrl,
       } : collection));
     } finally {
-      setBusy(false);
+      if (isCurrent()) setBusy(false);
     }
   }
 
   async function createCollectionAndUpload() {
+    const generation = refreshContextGeneration.current;
+    const isCurrent = () => isCurrentContextGeneration(generation, refreshContextGeneration.current);
     const name = newCollectionName.trim();
     if (!canCreateCollections || !name) return;
     setBusy(true);
     try {
       const collection = await createGalleryCollection(name, newCollectionFavorite);
+      if (!isCurrent()) return;
       await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
+      if (!isCurrent()) return;
       updateCollectionSingleton((current) => [...current, collection]);
       setNewCollectionName("");
       setNewCollectionFavorite(false);
       if (pendingFiles.length) await uploadTo(collection.key);
       else { closeSheet(); setBusy(false); await load(); }
     } catch (error) {
-      setStatus(errorMessage(error));
-      setBusy(false);
+      if (isCurrent()) { setStatus(errorMessage(error)); setBusy(false); }
+    } finally {
+      if (isCurrent()) setBusy(false);
     }
   }
 
@@ -802,52 +979,88 @@ export function GalleryWorkspace() {
   }
 
   async function submitImageEdit() {
-    if (!selectedImage || !editName.trim()) return;
+    if (!selectedImage || !canMutateInCollection(selectedImage, latestActiveCollection()) || !editName.trim()) return;
     const previous = selectedImage;
+    const { isCurrent } = captureGalleryContextGuard();
     setBusy(true);
     try {
       const { image } = await updateGalleryImage(previous.key, editName.trim(), editFavorite);
+      if (!isCurrent()) return;
       setSelectedImage(image);
       replaceVisibleImages([image]);
       patchGalleryImage(queryClient, galleryContext, image);
       closeSheet();
     } catch (error) {
-      showToast({ title: "Image update failed", description: errorMessage(error) });
+      if (isCurrent()) showToast({ title: "Image update failed", description: errorMessage(error) });
     } finally {
-      setBusy(false);
+      if (isCurrent()) setBusy(false);
     }
   }
 
   function openCollectionEdit() {
-    if (!activeCollection) return;
+    if (!activeCollection || !isCollectionOwner) return;
     setEditName(activeCollection.name);
     setEditFavorite(activeCollection.isFavorite);
+    setEditCoverImageKey(undefined);
+    setEditCoverPreviewUrl(activeCollection.coverUrl);
     pushSheet("collectionEdit");
   }
 
+  async function openCollectionCoverPicker() {
+    if (!activeCollection || !isCollectionOwner) return;
+    setImagePickerPurpose("cover");
+    identityPickerRequest.current += 1;
+    setIdentityPickerImages([]);
+    setIdentityPickerResults(undefined);
+    setIdentityPickerQuery("");
+    setIdentityPickerSelected(undefined);
+    setIdentityPickerNextCursor(null);
+    pushSheet("identityPicker");
+    await openIdentityPickerCollection(activeCollection);
+  }
+
+  function chooseCollectionCover() {
+    if (!identityPickerSelected) return;
+    setEditCoverImageKey(identityPickerSelected.key);
+    setEditCoverPreviewUrl(identityPickerSelected.url);
+    goBackSheet();
+  }
+
   async function submitCollectionEdit() {
-    if (!activeCollection || !isCollectionOwner || !editName.trim()) return;
+    const latest = latestActiveCollection();
+    if (!activeCollection || latest?.role !== "owner" || !latest.access.canManage || !editName.trim()) return;
+    const previous = activeCollection;
+    const { isCurrent } = captureGalleryContextGuard();
+    const optimistic = { ...previous, name: editName.trim(), isFavorite: editFavorite, ...(editCoverImageKey !== undefined ? { coverUrl: editCoverPreviewUrl ?? null } : {}) };
     setBusy(true);
+    updateCollectionSingleton((current) => current.map((candidate) => candidate.key === previous.key ? optimistic : candidate));
+    setActiveCollection(optimistic);
     try {
-      const { collection } = await updateGalleryCollection(activeCollection.key, editName.trim(), editFavorite);
+      const { collection } = await updateGalleryCollection(previous.key, editName.trim(), editFavorite, editCoverImageKey);
+      if (!isCurrent()) return;
       updateCollectionSingleton((current) => current.map((candidate) => candidate.key === collection.key ? collection : candidate));
       setActiveCollection(collection);
       await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
+      if (!isCurrent()) return;
       closeSheet();
     } catch (error) {
-      setStatus(errorMessage(error));
+      if (isCurrent()) { updateCollectionSingleton((current) => current.map((candidate) => candidate.key === previous.key ? previous : candidate)); setActiveCollection(previous); setStatus(errorMessage(error)); }
     } finally {
-      setBusy(false);
+      if (isCurrent()) setBusy(false);
     }
   }
 
   async function removeActiveCollection() {
-    if (!activeCollection || !isCollectionOwner) return;
+    const latest = latestActiveCollection();
+    if (!activeCollection || latest?.role !== "owner" || !latest.access.canManage) return;
     const collection = activeCollection;
+    const { isCurrent } = captureGalleryContextGuard();
     setBusy(true);
     try {
       await deleteGalleryCollection(collection.key);
+      if (!isCurrent()) return;
       await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
+      if (!isCurrent()) return;
       closeSheet();
       setActiveCollection(undefined);
       setShowingCollectionOverview(true);
@@ -855,18 +1068,21 @@ export function GalleryWorkspace() {
       setImages([]);
       setStatus(`${collection.name} was deleted.`);
     } catch (error) {
-      setStatus(errorMessage(error));
+      if (isCurrent()) setStatus(errorMessage(error));
     } finally {
-      setBusy(false);
+      if (isCurrent()) setBusy(false);
     }
   }
 
   async function leaveActiveCollection() {
-    if (!activeCollection || isCollectionOwner) return;
+    const latest = latestActiveCollection();
+    if (!activeCollection || !latest || latest.role === "owner" || !latest.access.canRead) return;
     const collection = activeCollection;
+    const { isCurrent } = captureGalleryContextGuard();
     setBusy(true);
     try {
       await leaveGalleryCollection(collection.key);
+      if (!isCurrent()) return;
       closeSheet();
       setActiveCollection(undefined);
       setShowingCollectionOverview(true);
@@ -874,8 +1090,8 @@ export function GalleryWorkspace() {
       setImages([]);
       setStatus(`You left ${collection.name}.`);
       await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.all(galleryContext) });
-    } catch (error) { setStatus(errorMessage(error)); }
-    finally { setBusy(false); }
+    } catch (error) { if (isCurrent()) setStatus(errorMessage(error)); }
+    finally { if (isCurrent()) setBusy(false); }
   }
 
   function replaceVisibleImages(updated: GalleryImage[]) {
@@ -887,8 +1103,9 @@ export function GalleryWorkspace() {
   }
 
   function deleteSelectedImage() {
-    if (!selectedImage || !canMutateImage(selectedImage)) return;
+    if (!selectedImage || !canMutateInCollection(selectedImage, latestActiveCollection())) return;
     const target = selectedImage;
+    const { isCurrent } = captureGalleryContextGuard();
     const cacheSnapshot = snapshotGalleryOverviews(queryClient, galleryContext);
     const previousImages = images;
     const previousSimilarImages = similarImages;
@@ -907,15 +1124,18 @@ export function GalleryWorkspace() {
     setSelectedImage(undefined);
     closeSheet();
     void deleteGalleryImages([target.key]).then(() => {
+      if (!isCurrent()) return;
       void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
       void queryClient.fetchQuery({ queryKey: galleryQueryKeys.overview(galleryContext), queryFn: () => fetchGalleryOverview() }).then((overview) => {
+        if (!isCurrent()) return;
         setCanCreateCollections(overview.canCreateCollections);
         setCachedGalleryCollections(queryClient, galleryContext, overview.collections);
         setCollections(overview.collections);
         setActiveCollection((current) => current ? overview.collections.find(({ key }) => key === current.key) ?? current : current);
-      }).catch((error: unknown) => showToast({ title: "Gallery refresh failed", description: errorMessage(error) }));
-      void loadSubjects();
+      }).catch((error: unknown) => { if (isCurrent()) showToast({ title: "Gallery refresh failed", description: errorMessage(error) }); });
+      if (isCurrent()) void loadSubjects();
     }).catch((error: unknown) => {
+      if (!isCurrent()) return;
       restoreGalleryOverviews(queryClient, cacheSnapshot);
       setImages(previousImages);
       setSimilarImages(previousSimilarImages);
@@ -929,7 +1149,7 @@ export function GalleryWorkspace() {
   }
 
   async function showDuplicates() {
-    if (!activeCollection) return;
+    if (!activeCollection || !isCollectionOwner) return;
     const request = ++viewRequest.current;
     setDuplicateImages([]);
     setDuplicatesError(undefined);
@@ -947,11 +1167,15 @@ export function GalleryWorkspace() {
   }
 
   async function deleteDuplicates() {
-    if (!activeCollection || duplicateImages.length === 0) return;
+    const latest = latestActiveCollection();
+    if (!activeCollection || latest?.role !== "owner" || !latest.access.canManage || duplicateImages.length === 0) return;
+    const { isCurrent } = captureGalleryContextGuard();
     setBusy(true);
     try {
       const deleted = await deleteGalleryCollectionDuplicates(activeCollection.key, duplicateImages.map(({ key }) => key));
+      if (!isCurrent()) return;
       await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
+      if (!isCurrent()) return;
       updateCollectionSingleton((current) => current.map((collection) => collection.key === activeCollection.key
         ? { ...collection, count: Math.max(0, collection.count - deleted.removedImageKeys.length) }
         : collection));
@@ -961,9 +1185,9 @@ export function GalleryWorkspace() {
       closeSheet();
       setStatus(`${deleted.removedImageKeys.length} duplicate image${deleted.removedImageKeys.length === 1 ? "" : "s"} removed from this collection. ${deleted.deletedImageKeys.length} moved to trash.`);
     } catch (error) {
-      setStatus(errorMessage(error));
+      if (isCurrent()) setStatus(errorMessage(error));
     } finally {
-      setBusy(false);
+      if (isCurrent()) setBusy(false);
     }
   }
 
@@ -976,6 +1200,8 @@ export function GalleryWorkspace() {
   }
 
   async function openIdentityPicker() {
+    const generation = refreshContextGeneration.current;
+    setImagePickerPurpose("identity");
     identityPickerRequest.current += 1;
     setIdentityPickerCollection(undefined);
     setIdentityPickerImages([]);
@@ -987,15 +1213,17 @@ export function GalleryWorkspace() {
     setIdentityPickerLoading(true);
     pushSheet("identityPicker");
     try {
-      await loadCollectionSingleton();
+      await loadCollectionSingleton(generation);
+      if (!isCurrentContextGeneration(generation, refreshContextGeneration.current)) return;
     } catch (error) {
-      setStatus(errorMessage(error));
+      if (isCurrentContextGeneration(generation, refreshContextGeneration.current)) setStatus(errorMessage(error));
     } finally {
-      setIdentityPickerLoading(false);
+      if (isCurrentContextGeneration(generation, refreshContextGeneration.current)) setIdentityPickerLoading(false);
     }
   }
 
   async function openIdentityPickerCollection(collection: GalleryCollection) {
+    const generation = refreshContextGeneration.current;
     const request = ++identityPickerRequest.current;
     setIdentityPickerCollection(collection);
     setIdentityPickerQuery("");
@@ -1004,19 +1232,20 @@ export function GalleryWorkspace() {
     setIdentityPickerLoading(true);
     try {
       const overview = await queryClient.fetchQuery({ queryKey: galleryQueryKeys.overview(galleryContext, collection.key), queryFn: () => fetchGalleryOverview(collection.key) });
-      if (request !== identityPickerRequest.current) return;
+      if (!isCurrentContextGeneration(generation, refreshContextGeneration.current) || request !== identityPickerRequest.current) return;
       setIdentityPickerImages(overview.images);
       setCanCreateCollections(overview.canCreateCollections);
       setIdentityPickerNextCursor(overview.nextCursor);
     } catch (error) {
-      if (request === identityPickerRequest.current) setStatus(errorMessage(error));
+      if (isCurrentContextGeneration(generation, refreshContextGeneration.current) && request === identityPickerRequest.current) setStatus(errorMessage(error));
     } finally {
-      if (request === identityPickerRequest.current) setIdentityPickerLoading(false);
+      if (isCurrentContextGeneration(generation, refreshContextGeneration.current) && request === identityPickerRequest.current) setIdentityPickerLoading(false);
     }
   }
 
   function backIdentityPicker() {
     identityPickerRequest.current += 1;
+    if (imagePickerPurpose === "cover") { goBackSheet(); return; }
     if (!identityPickerCollection) { goBackSheet(); return; }
     setIdentityPickerCollection(undefined);
     setIdentityPickerImages([]);
@@ -1030,18 +1259,19 @@ export function GalleryWorkspace() {
   async function loadMoreIdentityPickerImages() {
     if (!identityPickerCollection || !identityPickerNextCursor || identityPickerLoading || identityPickerSearching || identityPickerQuery.trim()) return;
     const request = identityPickerRequest.current;
+    const generation = refreshContextGeneration.current;
     const collection = identityPickerCollection;
     setIdentityPickerLoading(true);
     try {
       const page = await fetchGalleryOverview(collection.key, identityPickerNextCursor);
-      if (request !== identityPickerRequest.current) return;
+      if (!isCurrentContextGeneration(generation, refreshContextGeneration.current) || request !== identityPickerRequest.current) return;
       setIdentityPickerImages((current) => appendCursorItems(current, page.images, ({ key }) => key));
       setCanCreateCollections(page.canCreateCollections);
       setIdentityPickerNextCursor(page.nextCursor);
     } catch (error) {
-      if (request === identityPickerRequest.current) setStatus(errorMessage(error));
+      if (isCurrentContextGeneration(generation, refreshContextGeneration.current) && request === identityPickerRequest.current) setStatus(errorMessage(error));
     } finally {
-      if (request === identityPickerRequest.current) setIdentityPickerLoading(false);
+      if (isCurrentContextGeneration(generation, refreshContextGeneration.current) && request === identityPickerRequest.current) setIdentityPickerLoading(false);
     }
   }
 
@@ -1054,16 +1284,34 @@ export function GalleryWorkspace() {
     setIdentityPickerSelected(undefined);
     setIdentityPickerSearching(Boolean(normalized));
     const request = ++identityPickerRequest.current;
+    const generation = refreshContextGeneration.current;
     if (!normalized) return;
     const collection = identityPickerCollection;
     identityPickerSearchTimer.current = setTimeout(() => {
       void searchGalleryImages({ query: normalized, ...(collection ? { collectionKey: collection.key } : {}), recordHistory: false, limit: 50 }).then(({ images: results }) => {
-        if (request === identityPickerRequest.current) setIdentityPickerResults(results);
-      }).catch((error: unknown) => { if (request === identityPickerRequest.current) setStatus(errorMessage(error)); }).finally(() => { if (request === identityPickerRequest.current) setIdentityPickerSearching(false); });
+        if (isCurrentContextGeneration(generation, refreshContextGeneration.current) && request === identityPickerRequest.current) setIdentityPickerResults(results);
+      }).catch((error: unknown) => { if (isCurrentContextGeneration(generation, refreshContextGeneration.current) && request === identityPickerRequest.current) setStatus(errorMessage(error)); }).finally(() => { if (isCurrentContextGeneration(generation, refreshContextGeneration.current) && request === identityPickerRequest.current) setIdentityPickerSearching(false); });
     }, 300);
     identityPickerHistoryTimer.current = setTimeout(() => {
-      void searchGalleryImages({ query: normalized, ...(collection ? { collectionKey: collection.key } : {}), recordHistory: true, limit: 1 }).then(() => queryClient.invalidateQueries({ queryKey: contentQueryKeys.history(contentContext, undefined), exact: true, refetchType: "none" })).catch(() => undefined);
+      void searchGalleryImages({ query: normalized, ...(collection ? { collectionKey: collection.key } : {}), recordHistory: true, limit: 1 }).then(() => isCurrentContextGeneration(generation, refreshContextGeneration.current) ? queryClient.invalidateQueries({ queryKey: contentQueryKeys.history(contentContext, undefined), exact: true, refetchType: "none" }) : undefined).catch(() => undefined);
     }, 800);
+  }
+
+  async function refreshIdentityPickerSearchSilently(value: string, collection: GalleryCollection | undefined, contextGeneration = refreshContextGeneration.current) {
+    const normalized = value.trim();
+    if (!normalized) return;
+    const request = ++identityPickerRequest.current;
+    setIdentityPickerSearching(true);
+    try {
+      const result = await queryClient.fetchQuery({ queryKey: galleryQueryKeys.search(galleryContext, "text", collection?.key, normalized.toLocaleLowerCase()), queryFn: () => searchGalleryImages({ query: normalized, ...(collection ? { collectionKey: collection.key } : {}), recordHistory: false, limit: 50 }), staleTime: 0 });
+      if (contextGeneration !== refreshContextGeneration.current || request !== identityPickerRequest.current || activeSheetRef.current !== "identityPicker") return;
+      setIdentityPickerResults(result.images);
+      setIdentityPickerSelected((selected) => reconcilePaginatedSelected(selected, result.images, false));
+    } catch (error) {
+      if (contextGeneration === refreshContextGeneration.current && request === identityPickerRequest.current) setStatus(errorMessage(error));
+    } finally {
+      if (contextGeneration === refreshContextGeneration.current && request === identityPickerRequest.current) setIdentityPickerSearching(false);
+    }
   }
 
   function returnToIdentityPicker(queryValue?: string) {
@@ -1080,9 +1328,10 @@ export function GalleryWorkspace() {
   }
 
   async function createVisualIdentity() {
+    const generation = refreshContextGeneration.current;
     const image = identityPickerSelected;
     const name = identityPickerName.trim();
-    if (!image || !name) return;
+    if (!image || !name || !canManageAnyCollection) return;
     const optimisticKey = `optimistic-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const now = new Date().toISOString();
     setIdentityError(undefined);
@@ -1093,13 +1342,15 @@ export function GalleryWorkspace() {
     setCreatingIdentityKeys((current) => [...current, optimisticKey]);
     returnToIdentityLibrary();
     void createGallerySubject(name, [image.key]).then(({ subject }) => {
+      if (!isCurrentContextGeneration(generation, refreshContextGeneration.current)) return;
       setSubjects((current) => current.map((candidate) => candidate.key === optimisticKey ? subject : candidate));
       void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.all(galleryContext) });
     }).catch((error: unknown) => {
+      if (!isCurrentContextGeneration(generation, refreshContextGeneration.current)) return;
       setSubjects((current) => current.filter(({ key }) => key !== optimisticKey));
       setIdentityError(errorMessage(error));
       showToast({ title: "Visual identity creation failed", description: errorMessage(error) });
-    }).finally(() => setCreatingIdentityKeys((current) => current.filter((key) => key !== optimisticKey)));
+    }).finally(() => { if (isCurrentContextGeneration(generation, refreshContextGeneration.current)) setCreatingIdentityKeys((current) => current.filter((key) => key !== optimisticKey)); });
   }
 
   function confirmDeleteVisualIdentity(identity: GallerySubject) {
@@ -1108,8 +1359,9 @@ export function GalleryWorkspace() {
   }
 
   function deleteVisualIdentity() {
+    const generation = refreshContextGeneration.current;
     const identity = identityPendingDelete;
-    if (!identity || deletingIdentityKeys.current.has(identity.key)) return;
+    if (!identity || !canManageAnyCollection || deletingIdentityKeys.current.has(identity.key)) return;
     deletingIdentityKeys.current.add(identity.key);
     deletedIdentityKeys.current.add(identity.key);
     subjectsRequest.current += 1;
@@ -1121,21 +1373,29 @@ export function GalleryWorkspace() {
       if (activeSubject?.key === identity.key) {
         setActiveSubject(undefined);
         setShowingSearchResults(false);
-        setTimeout(() => { void load(undefined); }, 0);
+        void replayOverviewWindow(undefined, images.length, generation).then((overview) => {
+          if (!overview || !isCurrentContextGeneration(generation, refreshContextGeneration.current)) return;
+          applyCollectionSingleton(overview.collections); setCanCreateCollections(overview.canCreateCollections); setImages(overview.images); setNextCursor(overview.nextCursor);
+        });
       } else if (activeCollection) {
         setCollectionSearchResults(undefined);
-        void load(activeCollection, true);
+        void replayOverviewWindow(activeCollection.key, images.length, generation).then((overview) => {
+          if (!overview || !isCurrentContextGeneration(generation, refreshContextGeneration.current)) return;
+          applyCollectionSingleton(overview.collections); setCanCreateCollections(overview.canCreateCollections); setImages(overview.images); setNextCursor(overview.nextCursor);
+        });
       }
     }
     setIdentityPendingDelete(undefined);
     goBackSheet();
     void deleteGallerySubject(identity.key).then(() => {
+      if (!isCurrentContextGeneration(generation, refreshContextGeneration.current)) return;
       void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.all(galleryContext) });
     }).catch((error: unknown) => {
+      if (!isCurrentContextGeneration(generation, refreshContextGeneration.current)) return;
       deletedIdentityKeys.current.delete(identity.key);
       setSubjects((current) => current.some(({ key }) => key === identity.key) ? current : [...current, identity]);
       showToast({ title: "Visual identity deletion failed", description: errorMessage(error) });
-    }).finally(() => deletingIdentityKeys.current.delete(identity.key));
+    }).finally(() => { if (isCurrentContextGeneration(generation, refreshContextGeneration.current)) deletingIdentityKeys.current.delete(identity.key); });
   }
 
   async function filterByVisualIdentity(identity: GallerySubject) {
@@ -1217,7 +1477,9 @@ export function GalleryWorkspace() {
   }
 
   async function updateSelectedFavorites() {
-    if (!selectedImages.length || !selectedImages.every(canMutateImage)) return;
+    const latest = latestActiveCollection();
+    if (!selectedImages.length || !selectedImages.every((image) => canMutateInCollection(image, latest))) return;
+    const { isCurrent } = captureGalleryContextGuard();
     const nextFavorite = !selectedImages.every(({ isFavorite }) => isFavorite);
     const previous = [...selectedImages];
     const optimistic = previous.map((image) => ({ ...image, isFavorite: nextFavorite, updatedAt: new Date().toISOString() }));
@@ -1227,12 +1489,16 @@ export function GalleryWorkspace() {
     const outcomes = await Promise.allSettled(previous.map((image) => {
       const request = (favoriteRequests.current.get(image.key) ?? 0) + 1;
       favoriteRequests.current.set(image.key, request);
-      const write = (favoriteWrites.current.get(image.key) ?? Promise.resolve()).catch(() => undefined).then(() => setGalleryImageFavorite(image.key, nextFavorite));
+      const write = (favoriteWrites.current.get(image.key) ?? Promise.resolve()).catch(() => undefined).then(() => {
+        if (!isCurrent()) throw new Error("Gallery context changed.");
+        return setGalleryImageFavorite(image.key, nextFavorite);
+      });
       favoriteWrites.current.set(image.key, write);
       return write.finally(() => {
         if (favoriteWrites.current.get(image.key) === write) favoriteWrites.current.delete(image.key);
       });
     }));
+    if (!isCurrent()) return;
     const failed: GalleryImage[] = [];
     const saved: GalleryImage[] = [];
     outcomes.forEach((outcome, index) => {
@@ -1252,7 +1518,9 @@ export function GalleryWorkspace() {
   }
 
   function deleteSelectedImages() {
-    if (!selectedImages.length || !selectedImages.every(canMutateImage) || busy) return;
+    const latest = latestActiveCollection();
+    if (!selectedImages.length || !selectedImages.every((image) => canMutateInCollection(image, latest)) || busy) return;
+    const { isCurrent } = captureGalleryContextGuard();
     const targets = [...selectedImages];
     const keys = targets.map(({ key }) => key);
     const cacheSnapshot = snapshotGalleryOverviews(queryClient, galleryContext);
@@ -1271,11 +1539,13 @@ export function GalleryWorkspace() {
     }
     setBusy(true);
     void deleteGalleryImages(keys).then(() => {
+      if (!isCurrent()) return;
       setSelectedImageKeys([]);
       closeSheet();
       void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
       void loadSubjects();
     }).catch((error: unknown) => {
+      if (!isCurrent()) return;
       restoreGalleryOverviews(queryClient, cacheSnapshot);
       setImages(previousImages);
       setSimilarImages(previousSimilarImages);
@@ -1284,19 +1554,21 @@ export function GalleryWorkspace() {
       setCollections(previousCollections);
       setActiveCollection(previousActiveCollection);
       showToast({ title: "Image deletion failed", description: errorMessage(error) });
-    }).finally(() => setBusy(false));
+    }).finally(() => { if (isCurrent()) setBusy(false); });
   }
 
   function completeTransfer() {
     if (!activeCollection || !transferMode || !selectedImageKeys.length || !destinationCollectionKey) return;
-    const sourceCollection = activeCollection;
+    const sourceCollection = latestActiveCollection();
+    if (!sourceCollection) return;
+    const { isCurrent } = captureGalleryContextGuard();
     const mode = transferMode;
     const imageKeys = [...selectedImageKeys];
     const destinationKeys = [destinationCollectionKey];
     const destination = collections.find(({ key }) => key === destinationCollectionKey);
-    if (!destination) return;
+    if (!destination || !sourceCollection.access.canContribute || sourceCollection.role === "viewer" || !destination.access.canContribute || destination.role === "viewer") return;
     const selected = imageKeys.map((key) => images.find((image) => image.key === key) ?? collectionSearchResults?.find((image) => image.key === key) ?? (selectedImage?.key === key ? selectedImage : undefined)).filter((image): image is GalleryImage => Boolean(image));
-    if (selected.length !== imageKeys.length) return;
+    if (selected.length !== imageKeys.length || !selected.every((image) => canMutateInCollection(image, sourceCollection))) return;
     const cacheSnapshot = snapshotGalleryOverviews(queryClient, galleryContext);
     const createdDestinationCaches = destinationKeys.filter((key) => queryClient.getQueryData(galleryQueryKeys.overview(galleryContext, key)) === undefined);
     const previousCollections = collections;
@@ -1323,9 +1595,11 @@ export function GalleryWorkspace() {
     closeSheet();
     setStatus(`${selected.length} image${selected.length === 1 ? "" : "s"} ${mode === "move" ? "moved" : "copied"} to ${destination.name}.`);
     void transferGalleryCollectionImages({ sourceCollectionKey: sourceCollection.key, destinationCollectionKeys: destinationKeys, imageKeys, mode }).then(() => {
+      if (!isCurrent()) return;
       void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
-      void load(nextDestination, true).then((refreshed) => { if (!refreshed) showToast({ title: "Gallery refresh failed", description: "The transfer completed, but the destination could not be refreshed yet." }); });
+      void load(nextDestination, true).then((refreshed) => { if (isCurrent() && !refreshed) showToast({ title: "Gallery refresh failed", description: "The transfer completed, but the destination could not be refreshed yet." }); });
     }).catch((error: unknown) => {
+      if (!isCurrent()) return;
       restoreGalleryOverviews(queryClient, cacheSnapshot);
       for (const collectionKey of createdDestinationCaches) queryClient.removeQueries({ queryKey: galleryQueryKeys.overview(galleryContext, collectionKey), exact: true });
       setCachedGalleryCollections(queryClient, galleryContext, previousCollections);
@@ -1341,31 +1615,262 @@ export function GalleryWorkspace() {
     const message = aiInput.trim();
     if (!message) return;
     const request = ++viewRequest.current;
+    const { isCurrent } = captureGalleryContextGuard();
     setAssistantBusy(true);
     setAiInput("");
     try {
       const assistantResult = await askGalleryAssistant(message);
-      await invalidateAssistantChanges(queryClient, getContentContext(), assistantResult.changes);
-      if (request !== viewRequest.current) return;
+      if (!isCurrent()) return;
+      await invalidateAssistantChanges(queryClient, contentContext, assistantResult.changes);
+      if (!isCurrent() || request !== viewRequest.current) return;
       if (assistantResult.type === "unsupported") {
         setAiResponse(assistantResult.message);
         return;
       }
       const searchResult = await searchGalleryImages({ query: message, limit: 50 });
-      if (request !== viewRequest.current) return;
+      if (!isCurrent() || request !== viewRequest.current) return;
       setActiveCollection(undefined);
       setActiveSubject(undefined);
       setShowingSearchResults(true);
+      setAssistantSearchSource(message);
       setSelectedImageKeys([]);
       setImages(searchResult.images);
       setStatus(`${searchResult.images.length} image${searchResult.images.length === 1 ? "" : "s"} found by your Gallery assistant.`);
       setAiResponse(searchResult.images.length > 0 ? `I found ${searchResult.images.length} matching image${searchResult.images.length === 1 ? "" : "s"}.` : assistantResult.message);
     } catch (error) {
-      if (request === viewRequest.current) setAiResponse(errorMessage(error));
+      if (isCurrent() && request === viewRequest.current) setAiResponse(errorMessage(error));
     } finally {
-      setAssistantBusy(false);
+      if (isCurrent()) setAssistantBusy(false);
     }
   }
+
+  function resetAfterCollectionAccessLoss(rootOverview: GalleryOverview) {
+    viewRequest.current += 1;
+    searchRequest.current += 1;
+    identityFilterRequest.current += 1;
+    closeSheet();
+    setSharingOpen(false);
+    setPendingInvitesOpen(false);
+    setCameraOpen(false);
+    setPendingFiles((current) => { deletePreparedFiles(current); return []; });
+    setActiveCollection(undefined);
+    setActiveSubject(undefined);
+    setActiveIdentityFilter(undefined);
+    setShowingCollectionOverview(true);
+    setShowingSearchResults(false);
+    setAssistantSearchSource(undefined);
+    setQuery("");
+    setSimilarSource(undefined);
+    setSimilarImages([]);
+    setDuplicateImages([]);
+    setCollectionSearchResults(undefined);
+    setSelectedImage(undefined);
+    setSelectedImageKeys([]);
+    setDestinationCollectionKey(undefined);
+    setImages(rootOverview.images);
+    setNextCursor(rootOverview.nextCursor);
+  }
+
+  refreshRunner.current = async (plan, generation) => {
+    const isCurrent = () => isCurrentContextGeneration(generation, refreshContextGeneration.current);
+    try {
+      if (plan.has("upload")) await refreshUnresolvedUploadJobs(generation).catch(() => undefined);
+      if (!isCurrent()) return;
+      const needsIndex = plan.has("root") || plan.has("access");
+      const needsOverview = plan.has("current");
+      const needsSubjects = plan.has("subjects");
+      if (!needsIndex && !needsOverview && !needsSubjects) return;
+
+      let authoritativeCollections = collections;
+      let currentCollection = activeCollection;
+      let rootOverview: GalleryOverview | undefined;
+      if (needsIndex) {
+        await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.collections(galleryContext), exact: true, refetchType: "none" });
+        const fetchedRoot = await queryClient.fetchQuery({ queryKey: galleryQueryKeys.overview(galleryContext), queryFn: () => fetchGalleryOverview(), staleTime: 0 });
+        if (!isCurrent()) return;
+        rootOverview = fetchedRoot;
+        authoritativeCollections = fetchedRoot.collections;
+        applyCollectionSingleton(authoritativeCollections);
+        setCanCreateCollections(fetchedRoot.canCreateCollections);
+        const indexState = reconcileGalleryState({ mode: visibleGalleryView.current, activeCollectionKey: activeCollection?.key, selectedImageKeys, destinationCollectionKey, authoritativeImagesComplete: false }, authoritativeCollections, images.map(({ key }) => key));
+        currentCollection = indexState.activeCollection;
+        if (indexState.accessLost) {
+          resetAfterCollectionAccessLoss(fetchedRoot);
+          return;
+        }
+        if (currentCollection) setActiveCollection(currentCollection);
+      }
+
+      let refreshedImages = images;
+      let currentOverview: (GalleryOverview & { replayReachedEnd?: boolean }) | undefined;
+      let imagesComplete = false;
+      if (needsOverview) {
+        const collectionKey = currentCollection?.key ?? activeCollection?.key;
+        const fetchedOverview = await replayOverviewWindow(collectionKey, images.length, generation);
+        if (!fetchedOverview || !isCurrent()) return;
+        currentOverview = fetchedOverview;
+        authoritativeCollections = fetchedOverview.collections;
+        applyCollectionSingleton(authoritativeCollections);
+        setCanCreateCollections(fetchedOverview.canCreateCollections);
+        currentCollection = activeCollection ? authoritativeCollections.find(({ key, access }) => key === activeCollection.key && access.canRead) : undefined;
+        if (activeCollection && !currentCollection) {
+          const recoveryRoot = collectionKey ? await queryClient.fetchQuery({ queryKey: galleryQueryKeys.overview(galleryContext), queryFn: () => fetchGalleryOverview(), staleTime: 0 }) : fetchedOverview;
+          if (!isCurrent()) return;
+          resetAfterCollectionAccessLoss(recoveryRoot);
+          return;
+        }
+        if (currentCollection) setActiveCollection(currentCollection);
+        imagesComplete = fetchedOverview.replayReachedEnd === true;
+        refreshedImages = fetchedOverview.images;
+        promoteAuthoritativeUploads(fetchedOverview.images);
+        setNextCursor(fetchedOverview.nextCursor);
+      }
+
+      const mutableImageKeys = new Set<string>();
+      const permissionImages = mergeMediaItems(images, mergeMediaItems(collectionSearchResults ?? [], similarImages));
+      if (currentCollection?.role === "owner") for (const key of selectedImageKeys) mutableImageKeys.add(key);
+      for (const image of permissionImages) if (currentCollection && (currentCollection.role === "owner" || currentCollection.role === "collaborator" && image.createdByKey === currentCollection.memberKey)) mutableImageKeys.add(image.key);
+      const detailMutable = Boolean(selectedImage && currentCollection && (currentCollection.role === "owner" || currentCollection.role === "collaborator" && selectedImage.createdByKey === currentCollection.memberKey));
+      const permissions = reconcileGalleryPermissions({ role: currentCollection?.role, canContribute: currentCollection?.access.canContribute, activeSheet: activeSheetRef.current, selectedImageKeys, mutableImageKeys, destinationCollectionKey, ownerCapability: !currentCollection && authoritativeCollections.some(({ role, access }) => role === "owner" && access.canManage), detailMutable });
+      if (permissions.closeSheet) closeSheet();
+      if (activeCollection && (!currentCollection?.access.canContribute || currentCollection.role === "viewer")) {
+        setCameraOpen(false);
+        setPendingFiles((current) => { deletePreparedFiles(current); return []; });
+      }
+      setSelectedImageKeys(permissions.selectedImageKeys);
+      setDestinationCollectionKey(reconcileGalleryState({ mode: visibleGalleryView.current, activeCollectionKey: currentCollection?.key, selectedImageKeys: [], destinationCollectionKey: permissions.destinationCollectionKey, authoritativeImagesComplete: false }, authoritativeCollections, []).destinationCollectionKey);
+
+      let refreshedSubjects = subjects;
+      if (needsSubjects) {
+        const result = await queryClient.fetchQuery({ queryKey: galleryQueryKeys.subjects(galleryContext), queryFn: () => listGallerySubjects(true), staleTime: 0 });
+        if (!isCurrent()) return;
+        refreshedSubjects = result.subjects;
+        setSubjects(refreshedSubjects);
+      }
+      const refreshedIdentity = activeIdentityFilter ? reconcileSelected(activeIdentityFilter, refreshedSubjects) : undefined;
+      const refreshedSubject = activeSubject ? reconcileSelected(activeSubject, refreshedSubjects) : undefined;
+      setActiveIdentityFilter(refreshedIdentity);
+      setActiveSubject(refreshedSubject);
+      if (activeSubject && !refreshedSubject) {
+        const normalOverview = await replayOverviewWindow(activeCollection?.key, images.length, generation);
+        if (!normalOverview || !isCurrent()) return;
+        applyCollectionSingleton(normalOverview.collections);
+        setCanCreateCollections(normalOverview.canCreateCollections);
+        setShowingSearchResults(false);
+        setShowingCollectionOverview(true);
+        setAssistantSearchSource(undefined);
+        setImages(normalOverview.images);
+        setNextCursor(normalOverview.nextCursor);
+        setCollectionSearchResults(undefined);
+        setStatus("That visual identity is no longer available.");
+        return;
+      }
+      const contextualReplayReachedEnd = currentOverview?.replayReachedEnd === true;
+
+      if (plan.has("search") && similarSource && currentCollection) {
+        try {
+          const result = await queryClient.fetchQuery({ queryKey: galleryQueryKeys.search(galleryContext, "similar", currentCollection.key, similarSource.key), queryFn: () => searchGalleryImages({ imageKey: similarSource.key, collectionKey: currentCollection.key, limit: 50 }), staleTime: 0 });
+          if (!isCurrent()) return;
+          refreshedImages = result.images;
+          imagesComplete = contextualReplayReachedEnd;
+          setSimilarImages(result.images);
+        } catch {
+          const recovery = recoverContextualSearchFailure("similar");
+          if (!isCurrent() || !recovery.loadNormalView) return;
+          setSimilarSource(undefined);
+          setSimilarImages([]);
+          refreshedImages = currentOverview?.images ?? [];
+          imagesComplete = contextualReplayReachedEnd;
+          setImages(refreshedImages);
+          setStatus("The similar-image source is no longer available.");
+        }
+      } else if (plan.has("search") && refreshedIdentity) {
+        try {
+          const result = await queryClient.fetchQuery({ queryKey: galleryQueryKeys.search(galleryContext, "identity", currentCollection?.key, refreshedIdentity.key), queryFn: () => searchGalleryImages({ identityKey: refreshedIdentity.key, ...(currentCollection ? { collectionKey: currentCollection.key } : {}) }), staleTime: 0 });
+          if (!isCurrent()) return;
+          refreshedImages = result.images;
+          imagesComplete = contextualReplayReachedEnd;
+          if (currentCollection) setCollectionSearchResults(result.images);
+          else setImages(result.images);
+        } catch {
+          const recovery = recoverContextualSearchFailure("identity");
+          if (!isCurrent() || !recovery.loadNormalView) return;
+          setActiveIdentityFilter(undefined);
+          setActiveSubject(undefined);
+          setShowingSearchResults(false);
+          const normalOverview = currentOverview ?? await replayOverviewWindow(currentCollection?.key, images.length, generation);
+          if (!normalOverview || !isCurrent()) return;
+          refreshedImages = normalOverview.images;
+          imagesComplete = normalOverview.replayReachedEnd === true;
+          setImages(normalOverview.images);
+          setCollectionSearchResults(undefined);
+          setNextCursor(normalOverview.nextCursor);
+          setStatus("That visual identity is no longer available.");
+        }
+      } else if (plan.has("search") && query.trim()) {
+        const value = query.trim();
+        const result = await queryClient.fetchQuery({ queryKey: galleryQueryKeys.search(galleryContext, "text", currentCollection?.key, value.toLocaleLowerCase()), queryFn: () => searchGalleryImages({ query: value, ...(currentCollection ? { collectionKey: currentCollection.key } : {}), recordHistory: false, limit: 50 }), staleTime: 0 });
+        if (!isCurrent()) return;
+        refreshedImages = result.images;
+        imagesComplete = contextualReplayReachedEnd;
+        if (currentCollection) setCollectionSearchResults(result.images);
+        else setImages(result.images);
+      } else if (plan.has("search") && showingSearchResults && !activeSubject) {
+        const recovery = recoverAssistantSearchMode(assistantSearchSource);
+        if (recovery.action === "rerun") {
+          const result = await queryClient.fetchQuery({ queryKey: galleryQueryKeys.search(galleryContext, "text", undefined, recovery.query.toLocaleLowerCase()), queryFn: () => searchGalleryImages({ query: recovery.query, recordHistory: false, limit: 50 }), staleTime: 0 });
+          if (!isCurrent()) return;
+          refreshedImages = result.images;
+          imagesComplete = contextualReplayReachedEnd;
+          setImages(result.images);
+          setStatus(`${result.images.length} image${result.images.length === 1 ? "" : "s"} found by your Gallery assistant.`);
+        } else {
+          setShowingSearchResults(false);
+          setAssistantSearchSource(undefined);
+          setImages(currentOverview?.images ?? rootOverview?.images ?? []);
+          setStatus(undefined);
+        }
+      } else if (needsOverview && (!showingSearchResults || currentCollection)) {
+        setImages(refreshedImages);
+        setCollectionSearchResults(undefined);
+      }
+
+      if (activeSheetRef.current === "duplicates" && currentCollection && plan.has("duplicates")) {
+        const result = await queryClient.fetchQuery({ queryKey: galleryQueryKeys.duplicates(galleryContext, currentCollection.key), queryFn: () => findGalleryCollectionDuplicates(currentCollection.key), staleTime: 0 });
+        if (!isCurrent()) return;
+        setDuplicateImages(result.images);
+      }
+
+      if (needsOverview && activeSheetRef.current === "identityPicker" && identityPickerCollection) {
+        const pickerCollection = authoritativeCollections.find((collection) => collection.key === identityPickerCollection.key && collection.access.canRead);
+        if (!pickerCollection) backIdentityPicker();
+        else {
+          setIdentityPickerCollection(pickerCollection);
+          const pickerOverview = pickerCollection.key === currentCollection?.key && currentOverview && currentOverview.images.length >= identityPickerImages.length
+            ? currentOverview
+            : await replayOverviewWindow(pickerCollection.key, identityPickerImages.length, generation);
+          if (!pickerOverview) return;
+          if (!isCurrent()) return;
+          setIdentityPickerImages(pickerOverview.images);
+          setIdentityPickerNextCursor(pickerOverview.nextCursor);
+          if (identityPickerQuery.trim()) await refreshIdentityPickerSearchSilently(identityPickerQuery, pickerCollection, generation);
+          else setIdentityPickerSelected((selected) => reconcilePaginatedSelected(selected, pickerOverview.images, pickerOverview.replayReachedEnd === true));
+        }
+      }
+
+      if (!isCurrent() || !needsOverview) return;
+      const availableKeys = refreshedImages.map(({ key }) => key);
+      setSelectedImageKeys((current) => reconcileGalleryState({ mode: visibleGalleryView.current, activeCollectionKey: currentCollection?.key, selectedImageKeys: current, authoritativeImagesComplete: imagesComplete }, authoritativeCollections, availableKeys).selectedImageKeys);
+      setDestinationCollectionKey((current) => reconcileGalleryState({ mode: visibleGalleryView.current, activeCollectionKey: currentCollection?.key, selectedImageKeys: [], destinationCollectionKey: current, authoritativeImagesComplete: false }, authoritativeCollections, availableKeys).destinationCollectionKey);
+      setSelectedImage((current) => {
+        const rebound = reconcilePaginatedSelected(current, refreshedImages, imagesComplete);
+        if (current && !rebound && (activeSheetRef.current === "image" || activeSheetRef.current === "imageActions" || activeSheetRef.current === "imageEdit" || activeSheetRef.current === "confirmDeleteImage")) closeSheet();
+        return rebound;
+      });
+    } catch {
+      // A later stream event or reconnect retries authoritative convergence.
+    }
+  };
 
   const activeSubjects = subjects.filter(({ deletedAt }) => deletedAt === null);
   const sheetTitle = activeSheet === "rootActions" ? "New in Gallery"
@@ -1384,7 +1889,7 @@ export function GalleryWorkspace() {
                 : activeSheet === "confirmDeleteDuplicates" ? "Delete duplicates?"
                   : activeSheet === "visualIdentities" ? "Visual identities"
                     : activeSheet === "confirmDeleteIdentity" ? "Delete visual identity?"
-                      : activeSheet === "identityPicker" ? "Create visual identity"
+                       : activeSheet === "identityPicker" ? imagePickerPurpose === "cover" ? "Choose collection cover" : "Create visual identity"
                         : activeSheet === "identityName" ? "Name visual identity"
                           : activeSheet === "identityPickerFilter" ? "Filter images"
                           : activeSheet === "filter" ? "Filter images"
@@ -1448,8 +1953,8 @@ export function GalleryWorkspace() {
       {identityLibraryMode === "browse" ? <Button disabled={identitiesLoading} onPress={() => void openIdentityPicker()} size="lg" variant="primary">Create new</Button> : null}
       <Button onPress={closeSheet} size="lg" variant="secondary">Close</Button>
     </View> : activeSheet === "identityPicker" ? <View style={styles.compactSheetActions}>
-      <Button disabled={!identityPickerSelected} onPress={() => pushSheet("identityName")} size="lg" variant="primary">Next</Button>
-      <Button onPress={closeSheet} size="lg" variant="secondary">Close</Button>
+      <Button disabled={!identityPickerSelected} onPress={() => imagePickerPurpose === "cover" ? chooseCollectionCover() : pushSheet("identityName")} size="lg" variant="primary">{imagePickerPurpose === "cover" ? "Choose" : "Next"}</Button>
+      <Button onPress={imagePickerPurpose === "cover" ? goBackSheet : closeSheet} size="lg" variant="secondary">Close</Button>
     </View> : activeSheet === "identityName" ? <View style={styles.compactSheetActions}>
       <Button disabled={!identityPickerSelected || !identityPickerName.trim()} onPress={() => void createVisualIdentity()} size="lg" variant="primary">Create</Button>
       <Button onPress={closeSheet} size="lg" variant="secondary">Close</Button>
@@ -1607,7 +2112,13 @@ export function GalleryWorkspace() {
           {isCollectionOwner ? <BottomSheetItem disabled={busy} onPress={() => void openVisualIdentities("browse")} size="lg" style={styles.sheetAction} variant="secondary">Create visual identity</BottomSheetItem> : null}
         </> : null}
         {activeSheet === "destination" ? <>
-          {writableCollections.map((collection) => <BottomSheetItem key={collection.key} contentMode="raw" disabled={busy} onPress={() => void uploadTo(collection.key)} size="lg" variant="ghost"><View style={styles.sheetItem}><FolderIcon size="md" /><Text style={styles.sheetText}>{collection.name}</Text></View></BottomSheetItem>)}
+          <View style={styles.destinationGrid}>{writableCollections.map((collection) => <View key={collection.key} style={[styles.destinationCard, { width: destinationCollectionSize, height: destinationCollectionSize }]}>
+            {collection.coverUrl ? <Image source={collection.coverUrl} contentFit="cover" style={styles.collectionCover} /> : null}
+            <Button accessibilityLabel={`Upload to ${collection.name}`} contentMode="raw" disabled={busy} onPress={() => void uploadTo(collection.key)} shape="rounded" size="xl" style={[styles.collectionMain, collection.coverUrl && styles.coveredCollectionMain]} variant="ghost">
+              {collection.coverUrl ? null : <FolderIcon size="lg" />}
+              <Text numberOfLines={1} style={[styles.collectionName, collection.coverUrl && styles.coveredCollectionName]}>{collection.name}</Text>
+            </Button>
+          </View>)}</View>
           {canCreateCollections ? <BottomSheetItem contentMode="raw" onPress={() => { setNewCollectionName(""); setNewCollectionFavorite(false); openSheet("newCollection"); }} size="lg" variant="ghost"><View style={styles.sheetItem}><PlusIcon size="md" /><Text style={styles.sheetText}>New collection</Text></View></BottomSheetItem> : null}
         </> : null}
         {activeSheet === "newCollection" ? <View style={styles.form}>
@@ -1633,6 +2144,13 @@ export function GalleryWorkspace() {
         {activeSheet === "collectionEdit" && activeCollection ? <View style={styles.form}>
           <TextInput accessibilityLabel="Collection name" editable={!busy} maxLength={120} onChangeText={setEditName} placeholder="Collection name" style={styles.formInput} value={editName} />
           <View style={styles.favoriteSwitchRow}><Switch accessibilityLabel="Favorite collection" checked={editFavorite} onCheckedChange={setEditFavorite} /><Text style={styles.favoriteSwitchLabel}>Favorite</Text></View>
+          <View style={styles.collectionCoverField}>
+            <Text style={styles.sheetSubtitle}>Cover</Text>
+            <Button accessibilityLabel={editCoverPreviewUrl ? "Change collection cover" : "Choose collection cover"} contentMode="raw" disabled={busy} onPress={() => void openCollectionCoverPicker()} shape="rounded" size="xl" style={styles.collectionCoverButton} variant="secondary">
+              {editCoverPreviewUrl ? <Image contentFit="cover" source={editCoverPreviewUrl} style={styles.collectionCover} /> : <FolderIcon size="lg" />}
+            </Button>
+            {editCoverPreviewUrl ? <Button accessibilityLabel="Clear collection cover" disabled={busy} onPress={() => { setEditCoverImageKey(null); setEditCoverPreviewUrl(null); }} size="sm" variant="secondary">Clear cover</Button> : null}
+          </View>
         </View> : null}
         {activeSheet === "confirmDeleteImage" ? <View style={styles.compactSheetActions}>
           <Button disabled={busy} loading={busy} onPress={deleteSelectedImage} size="lg" variant="primary">Delete</Button>
@@ -1682,7 +2200,7 @@ export function GalleryWorkspace() {
           <Button onPress={goBackSheet} size="lg" variant="secondary">Close</Button>
         </View> : null}
         {activeSheet === "identityPicker" ? <View style={styles.identityPicker}>
-          <Text style={styles.sheetSubtitle}>Choose an image to create a visual identity from.</Text>
+          <Text style={styles.sheetSubtitle}>{imagePickerPurpose === "cover" ? `Choose an existing image from ${activeCollection?.name ?? "this collection"}.` : "Choose an image to create a visual identity from."}</Text>
           {identityPickerCollection ? <View style={styles.destinationLocationLane}><Button accessibilityLabel="Back to collections" contentMode="raw" onPress={backIdentityPicker} size="sm" variant="icon"><ChevronLeftIcon size="sm" /></Button><Text numberOfLines={1} style={styles.destinationLocationTitle}>{identityPickerCollection.name}</Text></View> : null}
           <View style={styles.rootActions}>
             <View style={styles.collectionSearch}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel="Search images for visual identity" onChangeText={updateIdentityPickerSearch} placeholder="Search images..." style={styles.rootSearchInput} value={identityPickerQuery} />{identityPickerQuery.trim() ? <Button accessibilityLabel="Clear image search" contentMode="raw" onPress={() => updateIdentityPickerSearch("")} size="xs" variant="icon"><CloseIcon size="sm" /></Button> : null}</View>
@@ -1737,7 +2255,7 @@ export function GalleryWorkspace() {
         </View> : null}
         </ScrollView>
       </BottomSheet>
-      {activeCollection ? <GalleryCollectionSharing collection={activeCollection} context={galleryContext} onClose={() => setSharingOpen(false)} open={sharingOpen} /> : null}
+      {activeCollection ? <GalleryCollectionSharing collection={activeCollection} context={galleryContext} memberKeys={memberKeys} onClose={() => setSharingOpen(false)} open={sharingOpen} /> : null}
       {!activeCollection ? <GalleryPendingInvites context={galleryContext} memberKeys={memberKeys} onAccepted={() => { void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.all(galleryContext) }); void load(undefined, true); }} onClose={() => setPendingInvitesOpen(false)} open={pendingInvitesOpen} /> : null}
       {cameraOpen ? <GalleryCaptureModal onClose={() => setCameraOpen(false)} onSubmit={uploadCapturedPhotos} /> : null}
     </KeyboardAvoidingView>
@@ -1839,6 +2357,8 @@ const styles = StyleSheet.create({
   referenceOptionMuted: { opacity: 0.42 },
   form: { gap: 14 },
   formInput: { minHeight: 42, fontSize: 14 },
+  collectionCoverField: { gap: spacing.xs },
+  collectionCoverButton: { width: 96, height: 96, overflow: "hidden", paddingHorizontal: 0, paddingVertical: 0 },
   detail: { flex: 1, gap: 8 },
   detailMenuRow: { minHeight: 40, flexDirection: "row", alignItems: "center", justifyContent: "flex-end" },
   detailImageFrame: { flex: 1, width: "100%", overflow: "hidden", borderRadius: radii.lg, backgroundColor: palette.voidBlack },

@@ -10,11 +10,14 @@ const appConfig = await Bun.file(new URL("../../app.json", import.meta.url)).tex
 
 test("uses one SSE bridge while notifying the visible Gallery workspace", () => {
   expect(bridge.match(/getEventStream\(/g)).toHaveLength(1);
-  expect(bridge).toContain('publishAppEvent({ type: "collection.changed", data: event.data })');
+  expect(bridge).toContain('publishAppEvent({ type: "gallery.changed", slug })');
   expect(bridge).toContain('publishAppEvent({ type: "event-stream.connected" })');
+  expect(bridge).toContain("const generation = ++streamGeneration.current");
+  expect(bridge).toContain("if (!isCurrent()) return");
   expect(workspace).toContain("subscribeAppEvent((event)");
   expect(workspace).toContain("queryClient.fetchQuery({ queryKey: galleryQueryKeys.overview(galleryContext)");
-  expect(workspace).toContain("void load(refreshedCollection, true)");
+  expect(workspace).toContain("scheduleGalleryRefresh(galleryRefreshPlan");
+  expect(workspace).toContain("resetAfterCollectionAccessLoss(fetchedRoot)");
 });
 
 test("preserves and activates authenticated share links", () => {

@@ -14,8 +14,13 @@ describe('Gallery assistant capabilities', () => {
     expect(galleryAssistantCapabilityNames).not.toContain('collection.duplicates.find');
     const search = createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'image.search')!;
     const createCollection = createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'collection.create')!;
+    const updateCollection = createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'collection.update')!;
     expect(createCollection.inputSchema.parse({ name: 'Favorites' })).toEqual({ name: 'Favorites', isFavorite: false });
     expect(() => createCollection.inputSchema.parse({ name: 'Favorites', description: 'Photos' })).toThrow();
+    const collectionKey = newId(), coverImageKey = newId();
+    expect(updateCollection.inputSchema.parse({ collectionKey, name: 'Favorites', isFavorite: false, coverImageKey })).toMatchObject({ coverImageKey });
+    expect(updateCollection.inputSchema.parse({ collectionKey, name: 'Favorites', isFavorite: false, coverImageKey: null })).toMatchObject({ coverImageKey: null });
+    expect(() => updateCollection.inputSchema.parse({ collectionKey, name: 'Favorites', isFavorite: false, coverImageKey, forged: true })).toThrow();
     expect(search.definition.inputSchema.type).toBe('object');
     expect(Array.isArray(search.definition.inputSchema.oneOf)).toBe(true);
     expect(search.inputSchema.parse({ identityKey: newId() })).toEqual({ identityKey: expect.any(String) });

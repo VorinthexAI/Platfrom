@@ -18,11 +18,11 @@ test("ignores comments and frames without data", () => {
 });
 
 test("parses invalidation events with an empty data payload", () => {
-  expect(parseServerSentEvent("event: collection.changed\ndata:\n")).toEqual({ event: "collection.changed", data: "" });
+  expect(parseServerSentEvent("event: collection.index.changed\ndata:\n")).toEqual({ event: "collection.index.changed", data: "" });
 });
 
-test("maps registered collection events to broad gallery invalidation", () => {
-  expect(invalidatesGalleryQueries("collection.changed")).toBe(true);
+test("maps every audited Gallery slug to invalidation", () => {
+  for (const slug of ["collection.index.changed", "collection.content.changed", "collection.access.changed", "collection.invites.changed", "collection.shares.changed", "image.changed", "upload.changed", "subject.changed"]) expect(invalidatesGalleryQueries(slug)).toBe(true);
   expect(invalidatesGalleryQueries("unknown")).toBe(false);
 });
 
@@ -34,8 +34,8 @@ test("bounds reconnect backoff and jitter", () => {
 test("delivers app events to active subscribers only", () => {
   const events: string[] = [];
   const unsubscribe = subscribeAppEvent((event) => events.push(event.type));
-  publishAppEvent({ type: "collection.changed", data: "{}" });
+  publishAppEvent({ type: "gallery.changed", slug: "collection.index.changed" });
   unsubscribe();
   publishAppEvent({ type: "event-stream.connected" });
-  expect(events).toEqual(["collection.changed"]);
+  expect(events).toEqual(["gallery.changed"]);
 });
