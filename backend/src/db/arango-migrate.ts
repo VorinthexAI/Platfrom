@@ -155,6 +155,11 @@ export async function migrateGenericContentContracts(targetDb: Database): Promis
   }
 }
 
+export async function retireUserSettings(targetDb: Database): Promise<void> {
+  if (!await targetDb.collection('users').exists()) return;
+  await targetDb.query('FOR user IN users FILTER HAS(user, "settings") UPDATE user WITH { settings: null } IN users OPTIONS { keepNull: false }');
+}
+
 function buildNodeEmbedText(_collectionName: string, _key: string, embedKeys: readonly string[], doc: Record<string, unknown>): string | null {
   return buildEmbeddingText(embedKeys, doc);
 }
@@ -787,6 +792,8 @@ export const collections: CollectionSpec[] = [
       { fields: ['refreshTokenHash'], unique: true, sparse: true },
     ],
   },
+  // Private per-user visibility overlay. Never expose through the generic node registry.
+  { name: 'userHiddens', skipEmbedding: true, indexes: [{ fields: ['userKey', 'source', 'sourceKey'], unique: true }, { fields: ['userKey', 'createdAt'] }, { fields: ['source', 'sourceKey'] }] },
   {
     name: 'authSessions',
     skipEmbedding: true,
@@ -1026,6 +1033,7 @@ async function main() {
   const targetDb = systemDb.database(databaseName);
 
   await migrateGenericContentContracts(targetDb);
+  await retireUserSettings(targetDb);
 
   for (const name of droppedCollections) {
     const collection = targetDb.collection(name);

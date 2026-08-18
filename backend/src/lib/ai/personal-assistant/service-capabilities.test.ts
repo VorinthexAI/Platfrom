@@ -13,7 +13,7 @@ const domain = {
 } as unknown as DomainToolContext;
 
 const expected: Array<[AssistantSurface, string[]]> = [
-  ['knowledge-workspace', ['user.settings.read', 'user.settings.update', 'folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy', 'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.summary.audio.generate', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.enhance', 'document.translate', 'document.list-versions', 'document.restore-version', 'document.download', 'content.neighbors', 'scope.content.search-history.delete', 'knowledge.search', 'note.write']],
+  ['knowledge-workspace', ['folder.hide', 'folder.reveal', 'document.hide', 'document.reveal', 'folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy', 'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.summary.audio.generate', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.enhance', 'document.translate', 'document.list-versions', 'document.restore-version', 'document.download', 'content.neighbors', 'scope.content.search-history.delete', 'knowledge.search', 'note.write']],
   ['travel-workspace', ['place.list', 'place.create', 'place.visit.create', 'trip.create', 'trip.place.add', 'trip.place.remove']],
   ['signal-workspace', ['email.overview', 'email.sync', 'email.thread.read', 'email.thread.favorite', 'email.draft.create', 'email.draft.update', 'email.draft.send', 'email.disconnect']],
   ['book-workspace', ['book.list', 'book.detail', 'book.chapter.progress', 'book.create-context', 'book.write']],
@@ -115,21 +115,18 @@ describe('personal assistant service capabilities', () => {
     expect(playback.mutationWorkspace).toBe('archive');
   });
 
-  test('injects trusted user identity into settings tools and marks updates as Archive mutations', async () => {
+  test('injects trusted identity into Archive hidden-content tools', async () => {
     const calls: unknown[] = [];
-    const userSettings: any = {
-      read: async (...args: unknown[]) => { calls.push(['read', ...args]); return { archive: { showOnlyFavorites: false } }; },
-      update: async (...args: unknown[]) => { calls.push(['update', ...args]); return args[1]; },
+    const userHiddens: any = {
+      hide: async (...args: unknown[]) => { calls.push(args); return {}; },
     };
     const capabilities = defaultAssistantCapabilityRegistry.resolve('knowledge-workspace');
-    const read = capabilities.find(({ definition }) => definition.name === 'user.settings.read')!;
-    const update = capabilities.find(({ definition }) => definition.name === 'user.settings.update')!;
-    await expect(read.execute({ userKey }, { domain, userSettings } as any)).rejects.toThrow('Unrecognized key');
-    await read.execute({}, { domain, userSettings } as any);
-    await update.execute({ archive: { showOnlyFavorites: true }, gallery: { showOnlyFavorites: false } }, { domain, userSettings } as any);
-    expect(calls).toEqual([['read', userKey], ['update', userKey, { archive: { showOnlyFavorites: true }, gallery: { showOnlyFavorites: false } }]]);
-    expect(update.definition.description).toContain('Archive and Gallery');
-    expect(update.mutationWorkspace).toBe('archive');
+    const hide = capabilities.find(({ definition }) => definition.name === 'folder.hide')!;
+    const sourceKey = newId();
+    await expect(hide.execute({ sourceKey, userKey }, { domain, userHiddens } as any)).rejects.toThrow('Unrecognized key');
+    await hide.execute({ sourceKey }, { domain, userHiddens } as any);
+    expect(calls).toEqual([[{ userKey, organizationKey, membershipKey: (domain.principal as any).userOrganization.key, service: userHiddens }, { source: 'folder', sourceKey }]]);
+    expect(hide.mutationWorkspace).toBe('archive');
   });
 
   test('injects the trusted open document into document-specific Core actions', async () => {

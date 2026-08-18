@@ -1,7 +1,17 @@
-import { expect, test } from "bun:test";
+import { expect, mock, test } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 
-import {
+mock.module("./content-client", () => ({
+  getContentDocumentTopics: () => undefined,
+  listContentDocumentAudioVersions: () => undefined,
+  listContentDocumentSummaries: () => undefined,
+  listContentDocumentsAtLocation: () => undefined,
+  listContentFolderTree: () => undefined,
+  listContentSearchHistory: () => undefined,
+  readContentDocument: () => undefined,
+}));
+
+const {
   addCachedContentDocument,
   addCachedContentDocumentSummary,
   addCachedContentFolder,
@@ -14,6 +24,7 @@ import {
   invalidateContentHistories,
   invalidateContentLocations,
   promoteCachedContentHistory,
+  patchContentUserHiddens,
   replaceCachedContentDocument,
   replaceCachedContentDocuments,
   replaceCachedContentDocumentDetail,
@@ -26,7 +37,7 @@ import {
   removeCachedContentFoldersEverywhere,
   removeCachedContentHistory,
   updateCachedContentDocumentAudioPlayback,
-} from "./content-query-cache";
+} = await import("./content-query-cache");
 import type { ContentContext, ContentSearchHistoryItem } from "./content-client";
 
 const context: ContentContext = {
@@ -51,6 +62,15 @@ test("scopes Archive cache keys by the complete content context", () => {
   expect(contentQueryKeys.audioVersions(context, "document-a").slice(0, -1)).toEqual(contentQueryKeys.document(context, "document-a"));
   expect(contentQueryKeys.summaries(context, "document-a").slice(0, -1)).toEqual(contentQueryKeys.document(context, "document-a"));
   expect(contentQueryKeys.topics(context, "document-a").slice(0, -1)).toEqual(contentQueryKeys.document(context, "document-a"));
+  expect(contentQueryKeys.userHiddens(context)).not.toEqual(contentQueryKeys.userHiddens(otherContext));
+});
+
+test("optimistically patches and snapshots Archive hidden overlays", () => {
+  const client = new QueryClient();
+  const hidden = { key: "hidden", userKey: "user", source: "folder" as const, sourceKey: "folder", createdAt: "2026-08-18T00:00:00.000Z" };
+  expect(patchContentUserHiddens(client, context, (current) => [...current, hidden])).toEqual([]);
+  expect(client.getQueryData(contentQueryKeys.userHiddens(context))).toEqual([hidden]);
+  expect(patchContentUserHiddens(client, context, () => [])).toEqual([hidden]);
 });
 
 test("shares global history across scopes for one user and isolates other users", () => {

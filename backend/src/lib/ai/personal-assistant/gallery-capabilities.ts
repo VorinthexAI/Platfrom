@@ -3,6 +3,7 @@ import { contentZodToJsonSchema } from '@/lib/ai/tools/content-json-schema';
 import type { AssistantCapability, AssistantCapabilityContext } from './capabilities';
 import { GalleryOperationError, galleryOperationInputSchemas, galleryOperations, redactCollectionShareOutput, type GalleryOperationContext, type GalleryOperationName } from '@/lib/gallery/operations';
 import { imageSearchInputSchema, imageSearchTool } from '@/lib/ai/tools/image-search';
+import { userHiddenOperations } from '@/lib/user-hiddens/operations';
 
 type GalleryExecutor = (input: unknown, context: GalleryOperationContext) => Promise<unknown>;
 
@@ -80,20 +81,33 @@ function trustedContext(context: AssistantCapabilityContext): GalleryOperationCo
 }
 
 export function createGalleryAssistantCapabilities(operations: Partial<Record<GalleryOperationName, GalleryExecutor>> = galleryOperations): AssistantCapability[] {
-  return definitions.map(({ operation, name: configuredName, description, schema, mutation }) => {
+  const gallery: AssistantCapability[] = definitions.map(({ operation, name: configuredName, description, schema, mutation }) => {
     const name = toolNames[configuredName] ?? configuredName;
     return ({
     inputSchema: schema,
     ...(mutation ? { mutationWorkspace: 'gallery' as const } : {}),
     definition: { name, description, inputSchema: name === imageSearchTool.name ? imageSearchTool.providerDefinition.inputSchema : contentZodToJsonSchema(schema) },
-    async execute(input, context) {
+    async execute(input: unknown, context: AssistantCapabilityContext) {
       const execute = context.gallery?.[operation] ?? operations[operation];
       if (!execute) throw new Error(`Gallery operation is unavailable: ${operation}`);
       const result = await execute(schema.parse(input), trustedContext(context));
-      return { kind: 'continue', result: ['listShares', 'createShare', 'updateShare', 'revokeShare'].includes(operation) ? redactCollectionShareOutput(result) : result };
+      return { kind: 'continue' as const, result: ['listShares', 'createShare', 'updateShare', 'revokeShare'].includes(operation) ? redactCollectionShareOutput(result) : result };
     },
     });
   });
+  const hidden = (['collection', 'image'] as const).flatMap((source) => (['hide', 'reveal'] as const).map((operation): AssistantCapability => ({
+    inputSchema: z.object({ sourceKey: key }).strict(),
+    mutationWorkspace: 'gallery',
+    definition: { name: `${source}.${operation}`, description: `${operation === 'hide' ? 'Hide' : 'Reveal'} an accessible Gallery ${source} for the current user.`, inputSchema: contentZodToJsonSchema(z.object({ sourceKey: key }).strict()) },
+    async execute(input, context) {
+      const parsed = z.object({ sourceKey: key }).strict().parse(input);
+      const principal = context.domain.principal;
+      if (principal.kind !== 'member') throw new GalleryOperationError(403, 'GALLERY_FORBIDDEN', 'A user session is required.');
+      const result = await userHiddenOperations[operation]({ source, sourceKey: parsed.sourceKey }, { userKey: principal.user.key, organizationKey: context.domain.organizationKey, membershipKey: principal.userOrganization.key, service: context.userHiddens });
+      return { kind: 'continue', result };
+    },
+  })));
+  return [...gallery, ...hidden];
 }
 
 export const galleryAssistantCapabilities = createGalleryAssistantCapabilities();

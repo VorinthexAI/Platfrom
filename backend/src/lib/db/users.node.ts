@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { aql } from 'arangojs';
-import { db } from './client';
-import { createNodeHelpers, isArangoNotFoundError, withArangoKey } from './base';
+import { db, withTransaction } from './client';
+import { createNodeHelpers, withArangoKey } from './base';
 
 export const USERS_COLLECTION = 'users';
 
@@ -22,21 +22,6 @@ export const countryCodeSchema = z.enum([
   'VA', 'VC', 'VE', 'VG', 'VI', 'VN', 'VU', 'WF', 'WS', 'YE', 'YT', 'ZA', 'ZM', 'ZW',
 ]);
 
-export const userSettingsSchema = z.object({
-  archive: z.object({
-    showOnlyFavorites: z.boolean(),
-  }).strict(),
-  gallery: z.object({
-    showOnlyFavorites: z.boolean(),
-  }).strict(),
-}).strict();
-export type UserSettings = z.infer<typeof userSettingsSchema>;
-
-export const DEFAULT_USER_SETTINGS = Object.freeze({
-  archive: Object.freeze({ showOnlyFavorites: false }),
-  gallery: Object.freeze({ showOnlyFavorites: false }),
-});
-
 export const userSchema = z.object({
   key: z.string(),
   organizationId: z.string(),
@@ -50,9 +35,6 @@ export const userSchema = z.object({
   isVerified: z.boolean().default(false),
   isOnboarded: z.boolean().default(false),
   guestBootstrapSecretHash: z.string().nullable().default(null),
-  settings: z.preprocess((value) => value && typeof value === 'object' && !Array.isArray(value) && !('gallery' in value)
-    ? { ...value, gallery: DEFAULT_USER_SETTINGS.gallery }
-    : value, userSettingsSchema).default(DEFAULT_USER_SETTINGS),
   is_subscribed_to_updates: z.boolean().default(true),
   is_subscribed_to_updates_unsubscribe_token_hash: z.string().nullable().default(null),
   is_subscribed_to_updates_unsubscribe_requested_at: z.string().nullable().default(null),
@@ -77,20 +59,16 @@ const helpers = createNodeHelpers(USERS_COLLECTION, userSchema, usersEmbedKeys.o
 export const insertUser = helpers.insert;
 export const getUserById = helpers.getById;
 export const updateUser = helpers.updateById;
-export const deleteUser = helpers.deleteById;
+export async function deleteUser(userKey: string): Promise<void> {
+  await withTransaction(['users', 'userHiddens'], async (transaction) => {
+    await transaction.query('FOR hidden IN userHiddens FILTER hidden.userKey == @userKey REMOVE hidden IN userHiddens', { userKey });
+    const cursor = await transaction.query('REMOVE @userKey IN users RETURN OLD._key', { userKey });
+    if (await cursor.next() === undefined) throw new Error(`User ${userKey} was not found.`);
+  });
+}
 export const upsertUserByKey = helpers.upsertByKey;
 export const getAllUsersChunked = helpers.getAllChunked;
 export const listUsersPage = helpers.listPage;
-
-export async function updateUserSettings(userKey: string, settings: UserSettings, updatedAt: string): Promise<User | null> {
-  try {
-    const result = await db.collection(USERS_COLLECTION).update(userKey, { settings, updatedAt }, { returnNew: true, mergeObjects: false });
-    return userSchema.parse(withArangoKey(result.new as Record<string, unknown>));
-  } catch (error) {
-    if (isArangoNotFoundError(error)) return null;
-    throw error;
-  }
-}
 
 export async function getUserByEmail(email: string): Promise<User | null> {
   const cursor = await db.query(aql`

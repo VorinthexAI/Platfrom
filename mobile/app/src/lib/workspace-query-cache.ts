@@ -7,6 +7,7 @@ import type { EmailFilter, EmailOverview, EmailThread } from "./email-client";
 import { normalizeCollection } from "./collection-access";
 import type { GalleryCollection, GalleryCollectionInvite, GalleryCollectionMember, GalleryCollectionShareLink, GalleryImage, GalleryOverview } from "./gallery-client";
 import type { Place, Trip } from "./travel-client";
+import type { UserHiddenRecord } from "./user-hidden-client";
 
 export type WorkspaceContext = { organizationKey: string; scopeKey: string };
 
@@ -15,6 +16,7 @@ const contextKey = (context: WorkspaceContext) => [context.organizationKey, cont
 export const galleryQueryKeys = {
   all: (context: WorkspaceContext) => ["gallery", ...contextKey(context)] as const,
   collections: (context: WorkspaceContext) => [...galleryQueryKeys.all(context), "collections"] as const,
+  userHiddens: (context: WorkspaceContext) => [...galleryQueryKeys.all(context), "user-hiddens"] as const,
   overviews: (context: WorkspaceContext) => [...galleryQueryKeys.all(context), "overviews"] as const,
   overview: (context: WorkspaceContext, collectionKey?: string) => [...galleryQueryKeys.overviews(context), collectionKey ?? null] as const,
   members: (context: WorkspaceContext, collectionKey: string) => [...galleryQueryKeys.all(context), "sharing", collectionKey, "members"] as const,
@@ -30,6 +32,13 @@ export const galleryQueryKeys = {
   highlights: (context: WorkspaceContext, collectionKey: string) => [...galleryQueryKeys.all(context), "highlights", collectionKey] as const,
   highlight: (context: WorkspaceContext, collectionKey: string, highlightKey: string) => [...galleryQueryKeys.highlights(context, collectionKey), highlightKey] as const,
 };
+
+export function patchGalleryUserHiddens(queryClient: QueryClient, context: WorkspaceContext, update: (current: UserHiddenRecord[]) => UserHiddenRecord[]) {
+  const key = galleryQueryKeys.userHiddens(context);
+  const previous = queryClient.getQueryData<UserHiddenRecord[]>(key) ?? [];
+  queryClient.setQueryData(key, update(previous));
+  return previous;
+}
 
 export function setCachedGalleryMembers(queryClient: QueryClient, context: WorkspaceContext, collectionKey: string, members: GalleryCollectionMember[]) {
   queryClient.setQueryData(galleryQueryKeys.members(context, collectionKey), members);

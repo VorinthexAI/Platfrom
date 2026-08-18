@@ -32,7 +32,7 @@ describe('personal assistant runtime', () => {
 
     expect(request).toEqual({ mode: 'model', organizationKey, actionSlug: 'orchestrator-chat', modelSlug: 'google.gemini-2.5-flash-lite' });
     expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual([
-      'user.settings.read', 'user.settings.update',
+      'folder.hide', 'folder.reveal', 'document.hide', 'document.reveal',
       'folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy',
       'document.list', 'document.find', 'document.create', 'document.update',
       'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.summary.audio.generate', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.enhance', 'document.translate',
@@ -77,7 +77,8 @@ describe('personal assistant runtime', () => {
       'collection.duplicates.delete', 'collection.image.transfer', 'subject.list', 'subject.create',
       'subject.image.list', 'subject.delete', 'subject.restore', 'image.upload.reserve',
       'image.upload.status', 'image.upload.complete', 'highlight.create', 'highlight.list',
-      'highlight.read', 'highlight.delete', 'assistant.unsupported',
+      'highlight.read', 'highlight.delete', 'collection.hide', 'collection.reveal',
+      'image.hide', 'image.reveal', 'assistant.unsupported',
     ]);
     expect(chatInput.systemPrompt).toContain('Call image.search whenever');
     expect(chatInput.systemPrompt).toContain('duplicates true plus collectionKey');

@@ -1,4 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
+import type { UserHiddenRecord } from "./user-hidden-client";
 
 import {
   listContentDocumentsAtLocation,
@@ -23,6 +24,7 @@ const contextKey = (context: ContentContext) => [context.userKey ?? "", context.
 export const contentQueryKeys = {
   all: (context: ContentContext) => ["archive", ...contextKey(context)] as const,
   folderTree: (context: ContentContext) => [...contentQueryKeys.all(context), "folder-tree"] as const,
+  userHiddens: (context: ContentContext) => [...contentQueryKeys.all(context), "user-hiddens"] as const,
   locations: (context: ContentContext) => [...contentQueryKeys.all(context), "locations"] as const,
   location: (context: ContentContext, folderKey?: string) => [...contentQueryKeys.locations(context), folderKey ?? null] as const,
   document: (context: ContentContext, documentKey: string) => [...contentQueryKeys.all(context), "documents", documentKey] as const,
@@ -31,6 +33,13 @@ export const contentQueryKeys = {
   summaries: (context: ContentContext, documentKey: string) => [...contentQueryKeys.document(context, documentKey), "summaries"] as const,
   topics: (context: ContentContext, documentKey: string) => [...contentQueryKeys.document(context, documentKey), "topics"] as const,
 };
+
+export function patchContentUserHiddens(queryClient: QueryClient, context: ContentContext, update: (current: UserHiddenRecord[]) => UserHiddenRecord[]) {
+  const key = contentQueryKeys.userHiddens(context);
+  const previous = queryClient.getQueryData<UserHiddenRecord[]>(key) ?? [];
+  queryClient.setQueryData(key, update(previous));
+  return previous;
+}
 
 export function contentFolderChildren(tree: readonly ContentFolder[], parentFolderKey?: string) {
   return tree.filter((folder) => folder.parentFolderKey === parentFolderKey)

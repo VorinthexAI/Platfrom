@@ -14,6 +14,7 @@ export function AuthenticatedEventBridge() {
   const userKey = useAuthStore((state) => state.user?.key);
   const organizationKey = useAuthStore((state) => typeof state.organization?.key === "string" ? state.organization.key : "");
   const scopeKey = useAuthStore((state) => typeof state.scope?.key === "string" ? state.scope.key : "");
+  const agentKey = useAuthStore((state) => state.contentExecution?.agentKey ?? "");
   const previousIdentity = useRef<string | null | undefined>(undefined);
   const streamGeneration = useRef(0);
 
@@ -49,12 +50,16 @@ export function AuthenticatedEventBridge() {
       if (families.has("upload")) void queryClient.invalidateQueries({ queryKey: [...root, "uploads"], refetchType: "none" });
       if (families.has("highlights")) void queryClient.invalidateQueries({ queryKey: [...root, "highlights"], refetchType: "none" });
     };
+    const invalidateUserHiddens = () => {
+      void queryClient.invalidateQueries({ predicate: ({ queryKey }) => queryKey.at(-1) === "user-hiddens" && (queryKey[0] === "gallery" || queryKey[0] === "archive"), refetchType: "active" });
+    };
     const connect = () => {
       if (!active || controller) return;
       controller = new AbortController();
       const currentController = controller;
       void getEventStream("/events/stream", (event) => {
         if (!isCurrent()) return;
+        invalidateUserHiddens();
         if (invalidatesGalleryQueries(event.event)) {
           const slug = event.event;
           invalidateGallery(galleryRefreshPlan(slug));
@@ -63,6 +68,7 @@ export function AuthenticatedEventBridge() {
       }, currentController.signal, () => {
         if (!isCurrent()) return;
         attempt = 0;
+        invalidateUserHiddens();
         invalidateGallery(galleryRefreshPlan("reconnect"));
         publishAppEvent({ type: "event-stream.connected" });
       }).catch((error: unknown) => {
@@ -102,7 +108,7 @@ export function AuthenticatedEventBridge() {
       currentController?.abort();
       subscription.remove();
     };
-  }, [organizationKey, queryClient, scopeKey, status, userKey]);
+  }, [agentKey, organizationKey, queryClient, scopeKey, status, userKey]);
 
   return null;
 }

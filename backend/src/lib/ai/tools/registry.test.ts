@@ -7,9 +7,9 @@ describe('unified tool registry', () => {
   test('has one unique definition for every public tool name', () => {
     expect(new Set(TOOL_NAMES).size).toBe(TOOL_NAMES.length);
     expect(new Set(TOOL_DEFINITIONS.map(({ name }) => name)).size).toBe(TOOL_DEFINITIONS.length);
-    expect(TOOL_NAMES).toHaveLength(117);
-    expect(TOOL_DEFINITIONS).toHaveLength(117);
-    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 65);
+    expect(TOOL_NAMES).toHaveLength(123);
+    expect(TOOL_DEFINITIONS).toHaveLength(123);
+    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 71);
     expect(TOOL_DEFINITIONS.map(({ name }) => name)).toEqual([...TOOL_NAMES]);
     expect(TOOL_NAMES.filter((name) => name === 'chat')).toHaveLength(1);
     expect(TOOL_NAMES).not.toContain('orchestrator.chat');
@@ -34,8 +34,9 @@ describe('unified tool registry', () => {
     expect(TOOL_NAMES).toContain('trip.create');
     expect(TOOL_NAMES).toContain('email.draft.send');
     expect(TOOL_NAMES).toContain('book.chapter.progress');
-    expect(TOOL_NAMES).toContain('user.settings.read');
-    expect(TOOL_NAMES).toContain('user.settings.update');
+    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['folder.hide', 'folder.reveal', 'document.hide', 'document.reveal', 'collection.hide', 'collection.reveal', 'image.hide', 'image.reveal']));
+    expect(TOOL_NAMES).not.toContain('user.settings.read');
+    expect(TOOL_NAMES).not.toContain('user.settings.update');
     for (const name of ['access.agent.evaluate', 'agent.member.list', 'artifact.create', 'project.create', 'milestone.create', 'task.create', 'organization.member.list', 'scope.list']) expect(TOOL_NAMES).not.toContain(name);
     expect(TOOL_NAMES.every((name) => !name.includes('_'))).toBe(true);
   });
@@ -88,12 +89,13 @@ describe('unified tool registry', () => {
     expect(TOOL_NAMES).not.toContain('archive_folder_create');
   });
 
-  test('executes user settings through the injected canonical service', async () => {
+  test('executes hidden-content tools through the injected canonical service', async () => {
     const organizationKey = newId(), scopeKey = newId(), userKey = newId();
     const contentContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, status: 'active' } } } as unknown as DomainToolContext;
     const calls: unknown[] = [];
-    const userSettingsService = { read: async (key: string) => { calls.push(key); return { archive: { showOnlyFavorites: false } }; } } as any;
-    await runTool('user.settings.read', '', {}, { contentContext, userSettingsService });
-    expect(calls).toEqual([userKey]);
+    const sourceKey = newId();
+    const userHiddenService = { hide: async (...args: unknown[]) => { calls.push(args); return {}; } } as any;
+    await runTool('document.hide', '', { sourceKey }, { contentContext, userHiddenService });
+    expect(calls).toEqual([[{ userKey, organizationKey, membershipKey: (contentContext.principal as any).userOrganization.key, service: userHiddenService }, { source: 'document', sourceKey }]]);
   });
 });
