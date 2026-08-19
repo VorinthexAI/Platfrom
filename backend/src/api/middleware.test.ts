@@ -193,6 +193,23 @@ describe('validateQueryParams', () => {
     expect(nextCalls).toBe(2);
   });
 
+  test('allows hidden-content selectors only on reveal requests', async () => {
+    let nextCalls = 0;
+    await validateQueryParams(
+      middlewareContext('/api/v1/auth/me/hiddens', {}, '?source=image&sourceKey=cm0000000000000000000000', 'DELETE'),
+      async () => { nextCalls += 1; },
+    );
+    await validateQueryParams(
+      middlewareContext('/api/v1/auth/me/hiddens', {}, '', 'GET'),
+      async () => { nextCalls += 1; },
+    );
+    await expect(validateQueryParams(
+      middlewareContext('/api/v1/auth/me/hiddens', {}, '?source=image&sourceKey=cm0000000000000000000000', 'GET'),
+      async () => { nextCalls += 1; },
+    )).rejects.toThrow();
+    expect(nextCalls).toBe(2);
+  });
+
   test('does not retain a query whitelist for the removed orchestrator chat route', async () => {
     let nextCalls = 0;
 

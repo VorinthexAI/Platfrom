@@ -38,6 +38,7 @@ describe('Arango migration indexes', () => {
   test('migrates legacy model routes to strict action slugs and safely removes invalid routes', async () => {
     const updates: Array<Record<string, unknown>> = [];
     const removals: string[] = [];
+    const droppedIndexes: string[] = [];
     const updateQueries: string[] = [];
     const relations = [
       { _key: 'current', modelKey: 'model-a', actionSlug: 'chat', enabled: false, priority: 7 },
@@ -46,7 +47,11 @@ describe('Arango migration indexes', () => {
       { _key: 'duplicate', modelKey: 'model-a', actionKey: 'action-chat', enabled: true, priority: 9 },
     ];
     const database = {
-      collection(name: string) { return { async exists() { return name === 'modelActions' || name === 'actions'; } }; },
+      collection(name: string) { return {
+        async exists() { return name === 'modelActions' || name === 'actions'; },
+        async indexes() { return name === 'modelActions' ? [{ id: 'legacy-unique', fields: ['modelKey', 'actionKey'] }, { id: 'current', fields: ['modelKey', 'actionSlug'] }] : []; },
+        async dropIndex(id: string) { droppedIndexes.push(id); },
+      }; },
       async query(query: string, bindVars: Record<string, unknown> = {}) {
         if (query.includes('FOR action IN actions')) return { async all() { return [{ key: 'action-ask', slug: 'ask' }, { key: 'action-chat', slug: 'chat' }, { key: 'action-invalid', slug: 'not.current' }]; } };
         if (query.includes('FOR relation IN modelActions')) return { async all() { return relations; } };
@@ -64,12 +69,13 @@ describe('Arango migration indexes', () => {
     ]);
     expect(updateQueries.every((query) => query.includes('actionKey: null') && query.includes('keepNull: false'))).toBe(true);
     expect(removals).toEqual(['invalid', 'current']);
+    expect(droppedIndexes).toEqual(['legacy-unique']);
     expect(relations[3]).toMatchObject({ enabled: true, priority: 9, modelKey: 'model-a' });
   });
   test('model route migration works when actions are absent and routes already use slugs', async () => {
     const calls: string[] = [];
     const database = {
-      collection(name: string) { return { async exists() { return name === 'modelActions'; } }; },
+      collection(name: string) { return { async exists() { return name === 'modelActions'; }, async indexes() { return []; }, async dropIndex() {} }; },
       async query(query: string) {
         calls.push(query);
         if (query.includes('FOR relation IN modelActions')) return { async all() { return [{ _key: 'route', modelKey: 'model', actionSlug: 'reason', enabled: true, priority: 100 }]; } };

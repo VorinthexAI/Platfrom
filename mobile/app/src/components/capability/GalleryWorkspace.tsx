@@ -2307,10 +2307,17 @@ export function GalleryWorkspace() {
         const request = ++duplicatesRequest.current;
         const collectionKey = currentCollection.key;
         const queryKey = galleryQueryKeys.duplicates(galleryContext, collectionKey);
-        const result = await findGalleryCollectionDuplicates(collectionKey);
-        if (!isCurrent() || request !== duplicatesRequest.current || activeSheetRef.current !== "duplicates" || activeCollectionKey.current !== collectionKey) return;
-        queryClient.setQueryData(queryKey, result);
-        setDuplicateImages(result.images);
+        try {
+          const result = await findGalleryCollectionDuplicates(collectionKey);
+          if (!isCurrent() || request !== duplicatesRequest.current || activeSheetRef.current !== "duplicates" || activeCollectionKey.current !== collectionKey) return;
+          queryClient.setQueryData(queryKey, result);
+          setDuplicateImages(result.images);
+          setDuplicatesError(undefined);
+        } catch (error) {
+          if (isCurrent() && request === duplicatesRequest.current && activeSheetRef.current === "duplicates" && activeCollectionKey.current === collectionKey) setDuplicatesError(errorMessage(error));
+        } finally {
+          if (isCurrent() && request === duplicatesRequest.current && activeSheetRef.current === "duplicates" && activeCollectionKey.current === collectionKey) setDuplicatesLoading(false);
+        }
       }
 
       if (activeSheetRef.current === "similar" && currentCollection && similarSource && plan.has("search")) {
@@ -2318,11 +2325,17 @@ export function GalleryWorkspace() {
         const collectionKey = currentCollection.key;
         const sourceKey = similarSource.key;
         const queryKey = galleryQueryKeys.search(galleryContext, "similar", collectionKey, sourceKey);
-        const result = await searchGalleryImages({ imageKey: sourceKey, collectionKey, limit: 50 });
-        if (!isCurrent() || request !== similarRequest.current || activeSheetRef.current !== "similar" || activeCollectionKey.current !== collectionKey) return;
-        queryClient.setQueryData(queryKey, result);
-        setSimilarImages(result.images);
-        setSimilarError(undefined);
+        try {
+          const result = await searchGalleryImages({ imageKey: sourceKey, collectionKey, limit: 50 });
+          if (!isCurrent() || request !== similarRequest.current || activeSheetRef.current !== "similar" || activeCollectionKey.current !== collectionKey) return;
+          queryClient.setQueryData(queryKey, result);
+          setSimilarImages(result.images);
+          setSimilarError(undefined);
+        } catch (error) {
+          if (isCurrent() && request === similarRequest.current && activeSheetRef.current === "similar" && activeCollectionKey.current === collectionKey) setSimilarError(errorMessage(error));
+        } finally {
+          if (isCurrent() && request === similarRequest.current && activeSheetRef.current === "similar" && activeCollectionKey.current === collectionKey) setSimilarLoading(false);
+        }
       }
 
       if (needsOverview && activeSheetRef.current === "identityPicker" && identityPickerCollection) {
@@ -2371,10 +2384,10 @@ export function GalleryWorkspace() {
               : activeSheet === "imageEdit" ? "Edit image"
               : activeSheet === "similar" ? "Similar images"
               : activeSheet === "duplicates" ? "Duplicates"
-               : activeSheet === "confirmDeleteDuplicates" ? "Delete duplicates?"
+               : activeSheet === "confirmDeleteDuplicates" ? `Delete ${duplicateImages.length === 1 ? "duplicate" : `${duplicateImages.length} duplicates`}?`
                      : activeSheet === "cleanupMenu" ? "Collection intelligence"
                     : activeSheet === "cleanup" ? "Clean up"
-                      : activeSheet === "confirmCleanupDelete" ? "Delete images?"
+                       : activeSheet === "confirmCleanupDelete" ? `Delete ${cleanupImages.length === 1 ? "image" : `${cleanupImages.length} images`}?`
                   : activeSheet === "visualIdentities" ? "Visual identities"
                     : activeSheet === "confirmDeleteIdentity" ? "Delete visual identity?"
                        : activeSheet === "identityPicker" ? imagePickerPurpose === "cover" ? "Choose collection cover" : "Create visual identity"
@@ -2383,7 +2396,7 @@ export function GalleryWorkspace() {
                           : activeSheet === "filter" ? "Filter images"
                             : activeSheet === "searchHistory" ? "Search history"
                               : activeSheet === "bulkActions" ? "Selected image actions"
-                                : activeSheet === "bulkDelete" ? "Delete selected images?"
+                                 : activeSheet === "bulkDelete" ? `Delete ${selectedImageKeys.length === 1 ? "image" : `${selectedImageKeys.length} images`}?`
                                   : activeSheet === "transferDestination" ? `${transferMode === "move" ? "Move" : "Copy"} to collection`
                                     : "Gallery";
   const collectionSearchActive = Boolean(activeCollection && query.trim());
@@ -2565,8 +2578,8 @@ export function GalleryWorkspace() {
         value={aiInput}
       />
 
-      {activeCollection ? <GalleryHighlights collection={activeCollection} key={activeCollection.key} onClose={() => setHighlightsOpen(false)} open={highlightsOpen} /> : null}
-      {activeCollection ? <GalleryMemories collection={activeCollection} key={activeCollection.key} onClose={() => setMemoriesOpen(false)} open={memoriesOpen} /> : null}
+      {activeCollection ? <GalleryHighlights collection={activeCollection} key={`highlights:${activeCollection.key}`} onClose={() => setHighlightsOpen(false)} open={highlightsOpen} /> : null}
+      {activeCollection ? <GalleryMemories collection={activeCollection} key={`memories:${activeCollection.key}`} onClose={() => setMemoriesOpen(false)} open={memoriesOpen} /> : null}
 
       <BottomSheet
         footer={<Button onPress={closeSheet} size="md" variant="secondary">Close</Button>}
@@ -2587,7 +2600,7 @@ export function GalleryWorkspace() {
         description={activeSheet === "destination" ? `${pendingFiles.length} image${pendingFiles.length === 1 ? "" : "s"} ready to upload.` : activeSheet === "transferDestination" ? "Choose one destination collection." : activeSheet === "similar" && similarSource ? `Similar to ${similarSource.filename}.` : activeSheet === "cleanup" ? "Choose a quality threshold to find and remove lower-quality images. Images are scored from 1 to 100." : undefined}
         dismissible={!busy}
         footer={sheetFooter}
-        hideHeading={activeSheet === "rootActions" || activeSheet === "actions" || activeSheet === "collectionMenu" || activeSheet === "filter" || activeSheet === "imageActions" || activeSheet === "bulkActions" || activeSheet === "cleanupMenu" || activeSheet === "confirmCleanupDelete" || activeSheet === "confirmDeleteIdentity" || activeSheet === "confirmLeaveCollection"}
+        hideHeading={activeSheet === "rootActions" || activeSheet === "actions" || activeSheet === "collectionMenu" || activeSheet === "filter" || activeSheet === "imageActions" || activeSheet === "bulkActions" || activeSheet === "cleanupMenu"}
         height={activeSheet === "destination" || activeSheet === "imageEdit" || activeSheet === "newCollection" || activeSheet === "collectionEdit" || activeSheet === "similar" || activeSheet === "duplicates" || activeSheet === "cleanup" || activeSheet === "visualIdentities" || activeSheet === "identityPicker" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory" ? "full" : undefined}
         onOpenChange={(open) => { if (!open) { if (activeSheetRef.current === "imageActions") goBackSheet(); else closeSheet(); } }}
         open={!sharingOpen && sheetOpen && activeSheet !== "image"}
@@ -2779,7 +2792,6 @@ export function GalleryWorkspace() {
           <Button disabled={busy} onPress={goBackSheet} size="md" variant="secondary">Close</Button>
         </View> : null}
         {activeSheet === "confirmCleanupDelete" ? <View style={styles.compactSheetActions}>
-          <Text style={styles.confirmationText}>Delete {cleanupImages.length} selected image{cleanupImages.length === 1 ? "" : "s"}?</Text>
           <Button disabled={busy || cleanupImages.length === 0} loading={busy} onPress={() => void deleteCleanupImages()} size="md" variant="primary">Delete</Button>
           <Button disabled={busy} onPress={goBackSheet} size="md" variant="secondary">Close</Button>
         </View> : null}

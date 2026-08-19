@@ -68,9 +68,14 @@ test("uses owner-only creation and long-press bulk deletion from the grid", () =
   expect(highlights).not.toContain('activeSheet === "actions"');
   expect(highlights).not.toContain('BottomSheetItem');
   expect(highlights).toContain('activeSheet === "confirmDelete"');
-  expect(highlights).toContain('title="Delete selected highlights?"');
-  expect(highlights).toContain("hideHeading");
+  expect(highlights).toContain('title={`Delete ${selectedHighlightKeys.length === 1 ? "highlight" : `${selectedHighlightKeys.length} highlights`}?`}');
+  expect(highlights).not.toContain('dismissible={!deleting} hideHeading');
   expect(highlights).toContain('size="md" variant="primary">Delete</Button>');
+  expect(highlights).toContain("finally {\n      if (generation === createRequest.current) setCreating(false);");
+  expect(highlights).toContain("createRequest.current += 1; setCreating(false);");
+  expect(highlights).toContain("if (!open || creating || deleting || opening) return;");
+  expect(highlights).toContain("const listRequest = useRef(0);");
+  expect(highlights).toContain("const detailRequest = useRef(0);");
   expect(highlights).toContain('Promise.allSettled(highlightKeys.map((highlightKey) => deleteGalleryCollectionHighlight(highlightKey)))');
   expect(highlights).toContain('size="md" variant="secondary">Close</Button>');
 });

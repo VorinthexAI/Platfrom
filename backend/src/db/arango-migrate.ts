@@ -224,7 +224,12 @@ async function runMigrationTransaction(targetDb: Database, collectionName: strin
 }
 
 export async function migrateModelActionSlugs(targetDb: Database): Promise<void> {
-  if (!await targetDb.collection('modelActions').exists()) return;
+  const modelActions = targetDb.collection('modelActions');
+  if (!await modelActions.exists()) return;
+  for (const index of await modelActions.indexes()) {
+    const fields = 'fields' in index && Array.isArray(index.fields) ? index.fields.map(String) : [];
+    if (fields.includes('actionKey')) await modelActions.dropIndex(index.id);
+  }
   const actions = new Map<string, unknown>();
   if (await targetDb.collection('actions').exists()) {
     const cursor = await targetDb.query<{ key: string; slug: unknown }>('FOR action IN actions RETURN { key: action._key, slug: action.slug }');

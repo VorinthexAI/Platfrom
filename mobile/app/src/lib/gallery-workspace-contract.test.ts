@@ -72,7 +72,7 @@ test("keeps the Gallery filter sheet limited to favorite and hidden toggles", ()
 test("only lifts Core for its own focus and uses distinct image sheet presentations", () => {
   expect(source).toContain('behavior={aiInputFocused ? "height" : undefined}');
   expect(source).toContain("setAiInputFocused(focused)");
-  expect(source).toContain('hideHeading={activeSheet === "rootActions" || activeSheet === "actions" || activeSheet === "collectionMenu" || activeSheet === "filter" || activeSheet === "imageActions" || activeSheet === "bulkActions" || activeSheet === "cleanupMenu" || activeSheet === "confirmCleanupDelete" || activeSheet === "confirmDeleteIdentity" || activeSheet === "confirmLeaveCollection"}');
+  expect(source).toContain('hideHeading={activeSheet === "rootActions" || activeSheet === "actions" || activeSheet === "collectionMenu" || activeSheet === "filter" || activeSheet === "imageActions" || activeSheet === "bulkActions" || activeSheet === "cleanupMenu"}');
   expect(source).toContain('open={!sharingOpen && sheetOpen && (activeSheet === "image" || activeSheet === "imageActions") && Boolean(selectedImage || selectedOptimisticItem)}');
   expect(source).toContain('height="full"\n        onOpenChange');
   expect(source).toContain('height={activeSheet === "destination" || activeSheet === "imageEdit"');
@@ -202,7 +202,7 @@ test("uses standard right-side close controls and hides collection menu headings
   expect(`${preview}${sheet}`).not.toContain("headerLeading");
   expect(`${preview}${sheet}`).not.toContain("headerTrailing");
   expect(`${preview}${sheet}`).not.toContain("hideCloseButton");
-  expect(sheet).toContain('hideHeading={activeSheet === "rootActions" || activeSheet === "actions" || activeSheet === "collectionMenu" || activeSheet === "filter" || activeSheet === "imageActions" || activeSheet === "bulkActions" || activeSheet === "cleanupMenu" || activeSheet === "confirmCleanupDelete" || activeSheet === "confirmDeleteIdentity" || activeSheet === "confirmLeaveCollection"}');
+  expect(sheet).toContain('hideHeading={activeSheet === "rootActions" || activeSheet === "actions" || activeSheet === "collectionMenu" || activeSheet === "filter" || activeSheet === "imageActions" || activeSheet === "bulkActions" || activeSheet === "cleanupMenu"}');
 });
 
 test("provides collection cleanup discovery, pagination, exclusion, and confirmed canonical deletion", () => {
@@ -223,7 +223,7 @@ test("provides collection cleanup discovery, pagination, exclusion, and confirme
   expect(source).toContain('setCleanupImages((current) => current.filter');
   expect(source).toContain('for (let index = 0; index < targets.length; index += DELETE_IMAGE_CHUNK_SIZE)');
   expect(source).toContain('await deleteGalleryImages(eligibleChunk.map(({ key }) => key))');
-  expect(source).toContain('activeSheet === "cleanupMenu" || activeSheet === "confirmCleanupDelete"');
+  expect(source).toContain('activeSheet === "confirmCleanupDelete" ? `Delete ${cleanupImages.length === 1 ? "image" : `${cleanupImages.length} images`}?`');
   expect(source).toContain('height={activeSheet === "destination" || activeSheet === "imageEdit" || activeSheet === "newCollection" || activeSheet === "collectionEdit" || activeSheet === "similar" || activeSheet === "duplicates" || activeSheet === "cleanup"');
   expect(source).toContain('!collection || !isGalleryCollectionOwned(collection)');
   expect(source).not.toContain('cleanupScore');
@@ -310,6 +310,21 @@ test("reloads the guarded collection singleton after confirmed global image dele
   expect(helper).toContain("loadCollectionSingleton(generation)");
   expect(helper).toContain("isCurrentContextGeneration(generation, refreshContextGeneration.current)");
   expect(source.match(/refreshCollectionSingletonAfterImageDeletion\(generation\)/g)?.length).toBeGreaterThanOrEqual(4);
+});
+
+test("remounts collection feature sheets with distinct keys", () => {
+  expect(source).toContain('key={`highlights:${activeCollection.key}`}');
+  expect(source).toContain('key={`memories:${activeCollection.key}`}');
+});
+
+test("settles duplicate and similar loading when event refresh supersedes the opening request", () => {
+  const refreshStart = source.indexOf('if (activeSheetRef.current === "duplicates"');
+  const refreshEnd = source.indexOf("if (needsOverview && activeSheetRef.current", refreshStart);
+  const refresh = source.slice(refreshStart, refreshEnd);
+  expect(refresh).toContain('setDuplicatesError(errorMessage(error))');
+  expect(refresh).toContain('setDuplicatesLoading(false)');
+  expect(refresh).toContain('setSimilarError(errorMessage(error))');
+  expect(refresh).toContain('setSimilarLoading(false)');
 });
 
 test("caches cleanup thresholds for one sheet session while keeping exclusions and cursors safe", () => {
@@ -418,10 +433,11 @@ test("opens duplicates with exact invalidation, a direct request, cache write, a
   expect(refresh).not.toContain("queryClient.fetchQuery");
 });
 
-test("shows the selected cleanup count inside the hidden confirmation sheet", () => {
+test("shows the selected cleanup count in the visible confirmation question", () => {
   expect(source).toContain('activeSheet === "confirmCleanupDelete" ? <View');
-  expect(source).toContain('Delete {cleanupImages.length} selected image{cleanupImages.length === 1 ? "" : "s"}?');
-  expect(source).toContain('activeSheet === "cleanupMenu" || activeSheet === "confirmCleanupDelete"');
+  expect(source).toContain('activeSheet === "confirmCleanupDelete" ? `Delete ${cleanupImages.length === 1 ? "image" : `${cleanupImages.length} images`}?`');
+  expect(source).not.toContain('Delete {cleanupImages.length} selected image{cleanupImages.length === 1 ? "" : "s"}?');
+  expect(source).not.toContain('hideHeading={activeSheet === "confirmCleanupDelete"');
 });
 
 test("gates collection search focus while the Core sheet closes", () => {
@@ -636,6 +652,9 @@ test("uses standard-sized compact confirmations and collaboration notices", () =
   expect(sharingSource).toContain('notify("Share link shared")');
   expect(sharingSource).toContain('onPress={() => void removeMember()} size="md"');
   expect(sharingSource).toContain('onPress={() => void respondInvite()} size="md"');
+  expect(sharingSource).toContain('view === "memberRemoveConfirm" ? "Remove member?"');
+  expect(sharingSource).toContain('`${inviteResponse === "accept" ? "Accept" : "Reject"} invite?`');
+  expect(sharingSource).toContain('hideHeading={view === "access"}');
 });
 
 test("gates member editing to owners and keeps removal inside one shared pill", () => {
@@ -682,7 +701,7 @@ test("keeps non-owner leave at the end of the collection menu with compact confi
   expect(menu).toContain('isCollectionOwner ? <BottomSheetItem');
   expect(menu).toContain('pushSheet("confirmLeaveCollection")');
   expect(menu).toContain('>Leave</BottomSheetItem>');
-  expect(source).toContain('activeSheet === "confirmCleanupDelete" || activeSheet === "confirmDeleteIdentity" || activeSheet === "confirmLeaveCollection"');
+  expect(source).toContain('activeSheet === "confirmLeaveCollection" ? "Leave collection?"');
   expect(source).toContain('onPress={() => void leaveActiveCollection()} size="md" variant="primary">Leave</Button>');
 });
 

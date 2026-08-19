@@ -43,7 +43,8 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
   const [selectedHighlightKeys, setSelectedHighlightKeys] = useState<string[]>([]);
   const [activeSheet, setActiveSheet] = useState<HighlightSheet>("player");
   const [playback, dispatch] = useReducer(reduceHighlightPlayback, initialHighlightPlaybackState);
-  const request = useRef(0);
+  const listRequest = useRef(0);
+  const detailRequest = useRef(0);
   const createRequest = useRef(0);
   const listLoaded = useRef(false);
   const previousSlideIndex = useRef(0);
@@ -60,41 +61,41 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
   listSheetOpen.current = open && !detail && !opening && activeSheet === "player";
 
   async function loadList(invalidate = false) {
-    const generation = ++request.current;
+    const generation = ++listRequest.current;
     if (!listLoaded.current) setListLoading(true);
     try {
       if (invalidate) await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.highlights(galleryContext, collection.key), exact: true, refetchType: "none" });
       const result = await queryClient.fetchQuery({ queryKey: galleryQueryKeys.highlights(galleryContext, collection.key), queryFn: () => listGalleryCollectionHighlights(collection.key), staleTime: 0 });
-      if (generation === request.current) {
+      if (generation === listRequest.current) {
         setHighlights(result.highlights);
         setSelectedHighlightKeys((current) => current.filter((key) => result.highlights.some((highlight) => highlight.key === key)));
       }
     } catch {
-      if (generation === request.current) notify("Highlights could not be loaded");
+      if (generation === listRequest.current) notify("Highlights could not be loaded");
     } finally {
-      if (generation === request.current) { listLoaded.current = true; setListLoading(false); }
+      if (generation === listRequest.current) { listLoaded.current = true; setListLoading(false); }
     }
   }
 
   async function openHighlight(highlight: GalleryHighlight) {
     listSheetOpen.current = false;
-    const generation = ++request.current;
+    const generation = ++detailRequest.current;
     setOpening(true);
     try {
       const result = await queryClient.fetchQuery({ queryKey: galleryQueryKeys.highlight(galleryContext, collection.key, highlight.key), queryFn: () => fetchGalleryCollectionHighlight(highlight.key), staleTime: 0 });
-      if (generation !== request.current) return;
+      if (generation !== detailRequest.current) return;
       setDetail(result.highlight);
       setActiveSheet("player");
       dispatch({ type: "load", slideCount: resolveGalleryHighlightSlides(result.highlight).length, autoplay: true });
     } catch (failure) {
-      if (generation === request.current && isGalleryClientErrorCode(failure, "GALLERY_HIGHLIGHT_NOT_FOUND")) {
+      if (generation === detailRequest.current && isGalleryClientErrorCode(failure, "GALLERY_HIGHLIGHT_NOT_FOUND")) {
         setDetail(undefined);
         setActiveSheet("player");
         dispatch({ type: "pause" });
         void loadList();
-      } else if (generation === request.current) notify("Highlight could not be opened");
+      } else if (generation === detailRequest.current) notify("Highlight could not be opened");
     } finally {
-      if (generation === request.current) setOpening(false);
+      if (generation === detailRequest.current) setOpening(false);
     }
   }
 
@@ -107,15 +108,13 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
       if (generation !== createRequest.current) return;
       queryClient.setQueryData(galleryQueryKeys.highlight(galleryContext, collection.key, highlight.key), { highlight });
       setHighlights((current) => [highlight, ...current.filter(({ key }) => key !== highlight.key)]);
-      setCreating(false);
       notify("Highlight created");
       void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.highlights(galleryContext, collection.key), exact: true, refetchType: "none" }).catch(() => undefined);
       if (listSheetOpen.current) void openHighlight(highlight);
     } catch {
-      if (generation === createRequest.current) {
-        setCreating(false);
-        notify("Highlight could not be created");
-      }
+      if (generation === createRequest.current) notify("Highlight could not be created");
+    } finally {
+      if (generation === createRequest.current) setCreating(false);
     }
   }
 
@@ -162,7 +161,7 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
   }
 
   useEffect(() => {
-    if (!open) { request.current += 1; return; }
+    if (!open) { listRequest.current += 1; detailRequest.current += 1; createRequest.current += 1; setCreating(false); return; }
     const timer = setTimeout(() => void loadList(true), 0);
     return () => clearTimeout(timer);
     // Opening or changing collections is the operation boundary; queryClient is stable.
@@ -188,13 +187,13 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
   }, [open]);
 
   useEffect(() => subscribeAppEvent((event) => {
-    if (!open || deleting) return;
+    if (!open || creating || deleting || opening) return;
     if (event.type !== "event-stream.connected" && (event.type !== "gallery.changed" || !["highlight.changed", "image.changed", "collection.content.changed"].includes(event.slug))) return;
     if (detail) void openHighlight(detail);
     else void loadList();
     // Event handlers intentionally reopen the latest key; operation functions are render-local.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [collection.key, deleting, detail?.key, open]);
+  }), [collection.key, creating, deleting, detail?.key, open, opening]);
 
   useEffect(() => {
     if (!open) return;
@@ -218,7 +217,7 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
     };
   });
 
-  const close = () => { listSheetOpen.current = false; request.current += 1; createRequest.current += 1; setDetail(undefined); setCreating(false); setDeleting(false); setSelectedHighlightKeys([]); setActiveSheet("player"); dispatch({ type: "pause" }); onClose(); };
+  const close = () => { listSheetOpen.current = false; listRequest.current += 1; detailRequest.current += 1; createRequest.current += 1; setDetail(undefined); setCreating(false); setDeleting(false); setSelectedHighlightKeys([]); setActiveSheet("player"); dispatch({ type: "pause" }); onClose(); };
   const listFooter = <>{owner ? <Button disabled={creating || listLoading || opening} onPress={() => void createHighlight()} size="md" variant="primary">Create</Button> : null}<Button disabled={creating} onPress={close} size="md" variant="secondary">Close</Button></>;
   const playerFooter = <Button onPress={close} size="md" variant="secondary">Close</Button>;
 
@@ -253,7 +252,7 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
       </View>
     </BottomSheet>
 
-    <BottomSheet dismissible={!deleting} hideHeading onOpenChange={(next) => { if (!next) setActiveSheet("player"); }} open={open && !detail && selectedHighlightKeys.length > 0 && activeSheet === "confirmDelete"} title="Delete selected highlights?">
+    <BottomSheet dismissible={!deleting} onOpenChange={(next) => { if (!next) setActiveSheet("player"); }} open={open && !detail && selectedHighlightKeys.length > 0 && activeSheet === "confirmDelete"} title={`Delete ${selectedHighlightKeys.length === 1 ? "highlight" : `${selectedHighlightKeys.length} highlights`}?`}>
       <View style={styles.compactActions}><Button disabled={deleting} loading={deleting} onPress={() => void deleteSelectedHighlights()} size="md" variant="primary">Delete</Button><Button disabled={deleting} onPress={() => setActiveSheet("player")} size="md" variant="secondary">Close</Button></View>
     </BottomSheet>
   </>;

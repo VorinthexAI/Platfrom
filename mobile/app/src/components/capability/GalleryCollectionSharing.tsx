@@ -299,9 +299,8 @@ export function GalleryCollectionSharing({ collection, context, memberKeys, onCl
     if (!busy && open && deferredRefresh.current && !refreshInFlight.current) scheduleSharingRefresh();
   }, [busy, loading, open]);
 
-  const title = view === "members" ? "Members" : view === "invites" ? "Pending invites" : view === "member" ? selectedMember?.name ?? "Member" : view === "links" ? "Share links" : view === "link" ? "Share link" : view === "createLink" ? "Create share link" : "";
+  const title = view === "members" ? "Members" : view === "invites" ? "Pending invites" : view === "member" ? selectedMember?.name ?? "Member" : view === "memberRemoveConfirm" ? "Remove member?" : view === "inviteConfirm" ? `${inviteResponse === "accept" ? "Accept" : "Reject"} invite?` : view === "links" ? "Share links" : view === "link" ? "Share link" : view === "createLink" ? "Create share link" : "";
   const fullHeight = view === "members" || view === "invites" || view === "member" || view === "links" || view === "link" || view === "createLink";
-  const confirmation = view === "inviteConfirm" || view === "memberRemoveConfirm";
   const footer = view === "members" && owner ? <><Button onPress={() => void loadLinks()} size="md" variant="primary">Invite</Button><Button onPress={onClose} size="md" variant="secondary">Close</Button></>
     : view === "links" && owner ? <><Button disabled={busy} onPress={newLink} size="md" variant="primary">Create</Button><Button disabled={busy} onPress={onClose} size="md" variant="secondary">Close</Button></>
       : view === "members" || view === "invites" || view === "links" ? <Button onPress={onClose} size="md" variant="secondary">Close</Button>
@@ -310,7 +309,7 @@ export function GalleryCollectionSharing({ collection, context, memberKeys, onCl
           : view === "createLink" ? <><Button disabled={busy} loading={busy} onPress={() => void createLink()} size="md" variant="primary">Create</Button><Button disabled={busy} onPress={() => setView("links")} size="md" variant="secondary">Close</Button></>
             : undefined;
 
-  return <BottomSheet dismissible={!busy} footer={footer} height={fullHeight ? "full" : undefined} hideHeading={view === "access" || confirmation} onOpenChange={(next) => { if (!next) onClose(); }} open={open} title={title}>
+  return <BottomSheet dismissible={!busy} footer={footer} height={fullHeight ? "full" : undefined} hideHeading={view === "access"} onOpenChange={(next) => { if (!next) onClose(); }} open={open} title={title}>
     {loadError ? <Text accessibilityRole="alert" style={styles.error}>{loadError}</Text> : null}
     {view === "access" ? <View style={styles.menu}><BottomSheetItem onPress={() => void loadMembers()} style={styles.menuItem} variant="secondary">Members</BottomSheetItem>{owner ? <><BottomSheetItem onPress={() => void loadLinks()} style={styles.menuItem} variant="secondary">Share links</BottomSheetItem><BottomSheetItem onPress={() => void loadInvites()} style={styles.menuItem} variant="secondary">Pending invites</BottomSheetItem></> : null}</View> : null}
     {view === "members" ? <View style={styles.full}>

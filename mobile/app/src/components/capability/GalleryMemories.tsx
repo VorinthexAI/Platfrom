@@ -41,7 +41,8 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
   const [deleting, setDeleting] = useState(false);
   const [selectedMemoryKeys, setSelectedMemoryKeys] = useState<string[]>([]);
   const [activeSheet, setActiveSheet] = useState<MemorySheet>("list");
-  const request = useRef(0);
+  const listRequest = useRef(0);
+  const detailRequest = useRef(0);
   const createRequest = useRef(0);
   const listLoaded = useRef(false);
   const listSheetOpen = useRef(open && !detail && !opening && activeSheet === "list");
@@ -54,19 +55,19 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
   const notify = (title: string) => showToast({ title, duration: 2_000 });
 
   async function loadList(invalidate = false) {
-    const generation = ++request.current;
+    const generation = ++listRequest.current;
     if (!listLoaded.current) setListLoading(true);
     try {
       const queryKey = galleryQueryKeys.memories(galleryContext, collection.key);
       if (invalidate) await queryClient.invalidateQueries({ queryKey, exact: true, refetchType: "none" });
       const result = await queryClient.fetchQuery({ queryKey, queryFn: () => listGalleryCollectionMemories(collection.key), staleTime: 0 });
-      if (generation !== request.current || !open) return;
+      if (generation !== listRequest.current || !open) return;
       setMemories(result.memories);
       setSelectedMemoryKeys((current) => current.filter((key) => result.memories.some((memory) => memory.key === key)));
     } catch {
-      if (generation === request.current && open) notify("Memories could not be loaded");
+      if (generation === listRequest.current && open) notify("Memories could not be loaded");
     } finally {
-      if (generation === request.current) { listLoaded.current = true; setListLoading(false); }
+      if (generation === listRequest.current) { listLoaded.current = true; setListLoading(false); }
     }
   }
 
@@ -78,29 +79,29 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
 
   async function openMemory(memory: Pick<GalleryMemory, "key">) {
     listSheetOpen.current = false;
-    const generation = ++request.current;
+    const generation = ++detailRequest.current;
     setOpening(true);
     try {
       const result = await queryClient.fetchQuery({ queryKey: galleryQueryKeys.memory(galleryContext, collection.key, memory.key), queryFn: () => fetchGalleryCollectionMemory(memory.key), staleTime: 0 });
-      if (generation !== request.current || !open) return;
+      if (generation !== detailRequest.current || !open) return;
       setDetail(result.memory);
       setShowImage(false);
       restartTyping(result.memory.text);
     } catch (failure) {
-      if (generation === request.current && open && isGalleryClientErrorCode(failure, "GALLERY_MEMORY_NOT_FOUND")) { setDetail(undefined); void loadList(); }
-      else if (generation === request.current && open) notify("Memory could not be opened");
+      if (generation === detailRequest.current && open && isGalleryClientErrorCode(failure, "GALLERY_MEMORY_NOT_FOUND")) { setDetail(undefined); void loadList(); }
+      else if (generation === detailRequest.current && open) notify("Memory could not be opened");
     } finally {
-      if (generation === request.current) setOpening(false);
+      if (generation === detailRequest.current) setOpening(false);
     }
   }
 
   async function refreshDetail(memoryKey: string) {
-    const generation = ++request.current;
+    const generation = ++detailRequest.current;
     try {
       const result = await queryClient.fetchQuery({ queryKey: galleryQueryKeys.memory(galleryContext, collection.key, memoryKey), queryFn: () => fetchGalleryCollectionMemory(memoryKey), staleTime: 0 });
-      if (generation === request.current && open) setDetail(result.memory);
+      if (generation === detailRequest.current && open) setDetail(result.memory);
     } catch (failure) {
-      if (generation === request.current && open && isGalleryClientErrorCode(failure, "GALLERY_MEMORY_NOT_FOUND")) { setDetail(undefined); void loadList(); }
+      if (generation === detailRequest.current && open && isGalleryClientErrorCode(failure, "GALLERY_MEMORY_NOT_FOUND")) { setDetail(undefined); void loadList(); }
     }
   }
 
@@ -113,15 +114,13 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
       if (generation !== createRequest.current || !open) return;
       queryClient.setQueryData(galleryQueryKeys.memory(galleryContext, collection.key, memory.key), { memory });
       setMemories((current) => [memory, ...current.filter(({ key }) => key !== memory.key)]);
-      setCreating(false);
       notify("Memory created");
       void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.memories(galleryContext, collection.key), exact: true, refetchType: "none" }).catch(() => undefined);
       if (listSheetOpen.current) void openMemory(memory);
     } catch (failure) {
-      if (generation === createRequest.current && open) {
-        setCreating(false);
-        notify(isGalleryMemoryExhaustion(failure) && failure instanceof Error ? failure.message : "Memory could not be created");
-      }
+      if (generation === createRequest.current && open) notify(isGalleryMemoryExhaustion(failure) && failure instanceof Error ? failure.message : "Memory could not be created");
+    } finally {
+      if (generation === createRequest.current) setCreating(false);
     }
   }
 
@@ -168,7 +167,7 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
   }
 
   useEffect(() => {
-    if (!open) { request.current += 1; createRequest.current += 1; return; }
+    if (!open) { listRequest.current += 1; detailRequest.current += 1; createRequest.current += 1; setCreating(false); return; }
     const timer = setTimeout(() => void loadList(true), 0);
     return () => clearTimeout(timer);
     // Opening the feature is the list freshness boundary.
@@ -194,15 +193,15 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
   }, [reducedMotion, typingRun, typingText]);
 
   useEffect(() => subscribeAppEvent((event) => {
-    if (!open || deleting) return;
+    if (!open || creating || deleting || opening) return;
     if (event.type !== "event-stream.connected" && (event.type !== "gallery.changed" || !["memory.created", "memory.deleted", "image.changed", "collection.content.changed"].includes(event.slug))) return;
     if (detail) void refreshDetail(detail.key);
     else void loadList();
     // Refreshing detail deliberately does not call restartTyping.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [collection.key, deleting, detail?.key, open]);
+  }), [collection.key, creating, deleting, detail?.key, open, opening]);
 
-  const close = () => { listSheetOpen.current = false; request.current += 1; createRequest.current += 1; setDetail(undefined); setCreating(false); setDeleting(false); setSelectedMemoryKeys([]); setActiveSheet("list"); onClose(); };
+  const close = () => { listSheetOpen.current = false; listRequest.current += 1; detailRequest.current += 1; createRequest.current += 1; setDetail(undefined); setCreating(false); setDeleting(false); setSelectedMemoryKeys([]); setActiveSheet("list"); onClose(); };
   const listFooter = <>{owner ? <Button disabled={creating || listLoading || opening} loading={creating} onPress={() => void createMemory()} size="md" variant="primary">Create</Button> : null}<Button disabled={creating} onPress={close} size="md" variant="secondary">Close</Button></>;
   const detailFooter = <><Button onPress={() => setShowImage((current) => !current)} size="md" variant="primary">{showImage ? "Read memory" : "Show image"}</Button><Button onPress={close} size="md" variant="secondary">Close</Button></>;
 
@@ -220,7 +219,7 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
       {detail ? <ScrollView contentContainerStyle={styles.detail} showsVerticalScrollIndicator={false}><View style={[styles.detailImageFrame, showImage && styles.detailImageFrameZoom]}><Image contentFit={showImage ? "contain" : "cover"} source={detail.image.url} style={styles.detailImage} transition={180} /></View><View style={styles.memoryCopy}>{splitGalleryMemoryText(typedText).map((section, index) => <Text key={`${index}:${section.length}`} style={styles.memoryText}>{section}</Text>)}</View></ScrollView> : null}
     </BottomSheet>
 
-    <BottomSheet dismissible={!deleting} hideHeading onOpenChange={(next) => { if (!next) setActiveSheet("list"); }} open={open && !detail && selectedMemoryKeys.length > 0 && activeSheet === "confirmDelete"} title="Delete selected memories?">
+    <BottomSheet dismissible={!deleting} onOpenChange={(next) => { if (!next) setActiveSheet("list"); }} open={open && !detail && selectedMemoryKeys.length > 0 && activeSheet === "confirmDelete"} title={`Delete ${selectedMemoryKeys.length === 1 ? "memory" : `${selectedMemoryKeys.length} memories`}?`}>
       <View style={styles.confirmActions}><Button disabled={deleting} loading={deleting} onPress={() => void deleteSelectedMemories()} size="md" variant="primary">Delete</Button><Button disabled={deleting} onPress={() => setActiveSheet("list")} size="md" variant="secondary">Close</Button></View>
     </BottomSheet>
   </>;

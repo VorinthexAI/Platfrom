@@ -38,6 +38,14 @@ test("uses standard-sized actions in compact Archive confirmations", () => {
   expect(compactDelete).not.toContain('size="lg"');
 });
 
+test("shows concise count-aware question titles for Archive confirmations", () => {
+  expect(source).toContain('const deleteConfirmationTitle = activeSheet === "deleteDocument"');
+  expect(source).toContain('`Delete ${selectedDocument?.extension ? "file" : "document"}?`');
+  expect(source).toContain('`Delete ${selectedCount} ${bulkDeleteNoun}${selectedCount === 1 ? "" : "s"}?`');
+  expect(source).toContain("title={compactDelete ? deleteConfirmationTitle");
+  expect(source).not.toContain('|| compactDelete}');
+});
+
 test("offers folder-first creation from the Archive root and current folder", () => {
   expect(source.match(/openSheet\("create"\)/g)).toHaveLength(2);
   const start = source.indexOf('{activeSheet === "create" ? (');

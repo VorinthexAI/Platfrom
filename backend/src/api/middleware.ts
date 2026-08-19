@@ -157,6 +157,7 @@ function querySchemaForPath(path: string, method: string) {
   if (/^\/founders\/organizations\/[^/]+\/communication\/channels\/[^/]+\/messages$/.test(apiPath)) {
     return strictObject({ limit: z.string().regex(/^\d+$/).optional() });
   }
+  if (method === 'DELETE' && apiPath === '/auth/me/hiddens') return strictObject({ source: z.enum(['collection', 'document', 'image', 'folder']), sourceKey: z.string().cuid() });
   if (method === 'GET' && apiPath === '/gallery/highlights') return strictObject({ organizationKey: z.string(), scopeKey: z.string(), collectionKey: z.string() });
   if (method === 'GET' && apiPath === '/gallery/memories') return strictObject({ organizationKey: z.string(), scopeKey: z.string(), collectionKey: z.string() });
   if (/^\/content\/tools\/[^/]+$/.test(apiPath)) return strictObject({});

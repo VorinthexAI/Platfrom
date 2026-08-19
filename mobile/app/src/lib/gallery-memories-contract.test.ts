@@ -43,7 +43,12 @@ test("matches bulk partial deletion and hard-removes detail caches", () => {
   expect(memories).toContain('disabled={creating || opening || deleting}');
   expect(memories).toContain('onPress={() => { listSheetOpen.current = false; setActiveSheet("confirmDelete"); }}');
   expect(memories).toContain("queryClient.removeQueries({ queryKey: galleryQueryKeys.memory");
-  expect(memories).toContain('title="Delete selected memories?"');
+  expect(memories).toContain('title={`Delete ${selectedMemoryKeys.length === 1 ? "memory" : `${selectedMemoryKeys.length} memories`}?`}');
+  expect(memories).toContain("finally {\n      if (generation === createRequest.current) setCreating(false);");
+  expect(memories).toContain("createRequest.current += 1; setCreating(false);");
+  expect(memories).toContain("if (!open || creating || deleting || opening) return;");
+  expect(memories).toContain("const listRequest = useRef(0);");
+  expect(memories).toContain("const detailRequest = useRef(0);");
   expect(memories).not.toContain("<Pressable");
 });
 
