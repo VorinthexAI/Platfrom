@@ -7,13 +7,18 @@ import { processImages } from '@/lib/ai/image-processing';
 import { perceptualHashDistance, PERCEPTUAL_HASH_DUPLICATE_DISTANCE } from '@/lib/perceptual-hash';
 import { newId } from '@/lib/ids';
 import type { GalleryRepository } from './repository';
-import { processGalleryUploadBatch } from './upload-processing';
+import { processGalleryUploadBatch as executeGalleryUploadBatch, type GalleryUploadProcessingDependencies } from './upload-processing';
 import { sanitizeGalleryImage } from './image-location';
 import { imageDataUrl } from './image-reference';
 
 const now = '2026-08-17T12:00:00.000Z';
 const keys = ['cmrnlzf650002qc7k4p5zem5w', 'cmrnlzf650002qc7k4p5zem5x', 'cmrnlzf650002qc7k4p5zem5y'];
 const passthroughSanitizer: typeof sanitizeGalleryImage = async (bytes) => ({ bytes: new Uint8Array(bytes), coordinates: undefined });
+const processGalleryUploadBatch = (uploadKeys: readonly string[], dependencies: GalleryUploadProcessingDependencies) => executeGalleryUploadBatch(uploadKeys, {
+  publishCollectionEvent: async () => undefined,
+  publishUserEvent: async () => undefined,
+  ...dependencies,
+});
 
 function upload(index: number): GalleryUpload {
   return galleryUploadSchema.parse({
