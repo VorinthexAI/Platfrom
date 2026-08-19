@@ -401,7 +401,6 @@ export function TravelWorkspace() {
           </View> : countryDetail ? <View style={styles.countryDetail}>
             <View style={styles.countryHero}>
               <Text style={styles.countryEyebrow}>{countryDetail.location.countryCode} · {countryDetail.location.continent}</Text>
-              <Text style={styles.countryTitle}>{countryDetail.title}</Text>
               <Text style={styles.countrySummary}>{countryDetail.summary}</Text>
             </View>
             <Text style={styles.detailSectionLabel}>AT A GLANCE</Text>
@@ -517,7 +516,6 @@ const styles = StyleSheet.create({
   countryDetail: { gap: spacing.md, paddingTop: spacing.md, paddingBottom: spacing.xl },
   countryHero: { paddingVertical: spacing.md, gap: spacing.sm },
   countryEyebrow: { color: palette.silver500, fontFamily: fonts.medium, fontSize: 11, letterSpacing: tracking.micro, textTransform: "uppercase" },
-  countryTitle: { color: palette.silver50, fontFamily: fonts.medium, fontSize: 32, lineHeight: 37 },
   countrySummary: { color: palette.silver300, fontFamily: fonts.regular, fontSize: 16, lineHeight: 25 },
   detailSectionLabel: { marginTop: spacing.sm, color: palette.silver500, fontFamily: fonts.medium, fontSize: 10, letterSpacing: tracking.micro },
   factGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },

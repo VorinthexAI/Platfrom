@@ -16,10 +16,12 @@ test("renders Natural Earth country boundaries on the interactive Three.js globe
 
 test("opens a full country detail sheet while place.find loads", () => {
   expect(workspace).toContain('activeSheet === "countryDetail"');
+  expect(workspace).toContain('activeSheet === "countryDetail" ? selectedCountry?.name ?? "Country"');
   expect(workspace).toContain("countryDetailLoading");
   expect(workspace).toContain("<Skeleton");
   expect(workspace).toContain("await findPlace(");
   expect(workspace).toContain("onCountryPress=");
   expect(workspace).toContain("selectedCountryCode=");
+  expect(workspace).not.toContain("{countryDetail.title}");
   expect(workspace).not.toContain(">Try again</Button>");
 });
