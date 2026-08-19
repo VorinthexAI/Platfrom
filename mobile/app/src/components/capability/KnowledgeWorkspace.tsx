@@ -3883,8 +3883,8 @@ export function KnowledgeWorkspace() {
         </View> : null}
         {activeSheet === "create" ? (
           <>
-            <BottomSheetItem onPress={() => { void startNewNote(); }} style={styles.sheetAction} variant="secondary">New document</BottomSheetItem>
-            <BottomSheetItem onPress={openNewFolder} style={styles.sheetAction} variant="secondary">New folder</BottomSheetItem>
+            <BottomSheetItem onPress={openNewFolder} style={styles.sheetAction} variant="secondary">Create folder</BottomSheetItem>
+            <BottomSheetItem onPress={() => { void startNewNote(); }} style={styles.sheetAction} variant="secondary">Create document</BottomSheetItem>
             <BottomSheetItem disabled={uploading} loading={uploading} onPress={() => void pickAndUpload(currentFolder?.key)} style={styles.sheetAction} variant="secondary">Upload files</BottomSheetItem>
             <BottomSheetItem disabled={uploading || scanBusy} onPress={startDocumentScan} style={styles.sheetAction} variant="secondary">Scan documents</BottomSheetItem>
           </>

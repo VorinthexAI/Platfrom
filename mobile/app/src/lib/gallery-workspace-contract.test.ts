@@ -93,13 +93,26 @@ test("only lifts Core for its own focus and uses distinct image sheet presentati
   expect(bottomSheetSource).not.toContain('height: fullHeight ? windowHeight - insets.top - androidBottomInset');
 });
 
-test("keeps collection forms to name and favorite state", () => {
-  expect(source).toContain('accessibilityLabel="Collection name"');
-  expect(source).toContain('accessibilityLabel="Favorite collection"');
+test("keeps new collection creation to a required name", () => {
+  const start = source.indexOf('{activeSheet === "newCollection" ? <View');
+  const form = source.slice(start, source.indexOf('activeSheet === "collectionMenu"', start));
+  expect(form).toContain('accessibilityLabel="Collection name"');
+  expect(form).toContain('placeholder="Name"');
+  expect(form).not.toContain('Favorite collection');
+  expect(source).not.toContain('newCollectionFavorite');
+  expect(source).toContain('createGalleryCollection(name, false)');
   expect(source).not.toContain('accessibilityLabel="Collection description"');
 });
 
 test("provides the full visual identity library and image picker workflow", () => {
+  const rootActionsStart = source.indexOf('{activeSheet === "rootActions" ? <>');
+  const rootActions = source.slice(rootActionsStart, source.indexOf('activeSheet === "actions"', rootActionsStart));
+  const collectionActionsStart = source.indexOf('{activeSheet === "actions" ? <>');
+  const collectionActions = source.slice(collectionActionsStart, source.indexOf('activeSheet === "destination"', collectionActionsStart));
+  expect(rootActions).toContain('onPress={() => void openIdentityPicker()}');
+  expect(rootActions).not.toContain('openVisualIdentities()');
+  expect(collectionActions).toContain('onPress={() => void openIdentityPicker()}');
+  expect(collectionActions).not.toContain('openVisualIdentities()');
   expect(source).toContain('activeSheet === "visualIdentities"');
   expect(source).toContain('activeSheet === "identityPicker"');
   expect(source).toContain("Choose an image to create a visual identity from.");

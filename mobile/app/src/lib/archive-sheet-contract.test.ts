@@ -38,6 +38,15 @@ test("uses standard-sized actions in compact Archive confirmations", () => {
   expect(compactDelete).not.toContain('size="lg"');
 });
 
+test("offers folder-first creation from the Archive root and current folder", () => {
+  expect(source.match(/openSheet\("create"\)/g)).toHaveLength(2);
+  const start = source.indexOf('{activeSheet === "create" ? (');
+  const menu = source.slice(start, source.indexOf('activeSheet === "bulkActions"', start));
+  expect(menu).toContain('>Create folder</BottomSheetItem>');
+  expect(menu).toContain('>Create document</BottomSheetItem>');
+  expect(menu.indexOf('>Create folder</BottomSheetItem>')).toBeLessThan(menu.indexOf('>Create document</BottomSheetItem>'));
+});
+
 test("shows a top-right check badge on selected Archive folders", () => {
   expect(source.match(/selected \? <View pointerEvents="none" style=\{styles\.selectionBadge\}/g)).toHaveLength(4);
   expect(source).toContain('selectionBadge: { position: "absolute", top: 4, right: 4');
