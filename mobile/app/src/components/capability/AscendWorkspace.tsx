@@ -532,7 +532,7 @@ export function AscendWorkspace() {
   async function submit() {
     setBusy(true);
     setMessage(
-      "Your book is being planned, written, and narrated. Keep this screen open while generation completes.",
+      "Your book is being planned and written. Keep this screen open while generation completes.",
     );
     try {
       generationRequestKey.current ??= randomUUID();
@@ -913,7 +913,7 @@ export function AscendWorkspace() {
             </View>
             {busy ? (
               <Text accessibilityLiveRegion="polite" style={styles.generating}>
-                Planning, writing, and narrating your book. Keep this screen
+                Planning and writing your book. Keep this screen
                 open until it finishes.
               </Text>
             ) : null}

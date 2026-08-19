@@ -2,10 +2,10 @@ import { z } from 'zod';
 import { DOT_NOTATION_PATTERN } from '@/lib/ai/shared/ids';
 
 export const ACTION_SLUGS = [
-  'ask', 'chat', 'reason', 'deep-reason', 'embed', 'speak', 'web-search',
+  'ask', 'chat', 'reason', 'deep-reason', 'embed', 'web-search',
   'traverse', 'read', 'insert', 'upsert', 'update', 'delete',
   'generate-image', 'edit-image', 'generate-video', 'edit-video', 'extend-video', 'analyze-video',
-  'generate-speech', 'analyze-audio', 'generate-music', 'orchestrator-chat',
+  'analyze-audio', 'generate-music', 'orchestrator-chat',
   'document-validate', 'storage-upload', 'document-extract', 'document-embed', 'document-insert', 'enhance', 'translate', 'caption-image', 'describe-visual-identity',
   'document-cleanup', 'document-summarize', 'document-topics',
 ] as const;

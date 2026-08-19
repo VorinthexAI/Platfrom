@@ -63,5 +63,6 @@ describe('book generation node contracts', () => {
     expect(bookSourceSchema.safeParse({ ...common, sourceType: 'document' }).success).toBe(false);
     expect(bookSourceSchema.safeParse({ ...common, sourceType: 'web', url: 'https://example.com/research' }).success).toBe(true);
     expect(bookSourceSchema.safeParse({ ...common, sourceType: 'web', sourceKey: otherKey }).success).toBe(false);
+    expect(bookSourceSchema.safeParse({ ...common, sourceType: 'trip', sourceKey: otherKey }).success).toBe(false);
   });
 });

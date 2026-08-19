@@ -51,7 +51,7 @@ export const imageCaptionTool = {
           organizationKey,
           actionSlug: 'caption-image',
           modelSlug: IMAGE_CAPTION_MODEL,
-          providerSlug: 'openrouter',
+          providerSlug: 'openai',
         }, input, dependencies);
     const output = imageCaptionOutputSchema.parse(response.output);
     if (output.results.length !== input.imageUrls.length) {

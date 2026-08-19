@@ -34,9 +34,6 @@ import { getAllCollectionMembersChunked, listCollectionMembersPage, upsertCollec
 import { getAllTagsChunked, listTagsPage, upsertTagByKey } from './tags.node';
 import { getAllTagAssignmentsChunked, listTagAssignmentsPage, upsertTagAssignmentByKey } from './tag-assignments.node';
 import { getAllPlacesChunked, listPlacesPage, upsertPlaceByKey } from './places.node';
-import { getAllTripsChunked, listTripsPage, upsertTripByKey } from './trips.node';
-import { getAllTripPlacesChunked, listTripPlacesPage, upsertTripPlaceByKey } from './trip-places.node';
-import { getAllPlaceVisitsChunked, listPlaceVisitsPage, upsertPlaceVisitByKey } from './place-visits.node';
 import { getAllBooksChunked, listBooksPage, upsertBookByKey } from './books.node';
 import { getAllBookContextsChunked, listBookContextsPage, upsertBookContextByKey } from './book-contexts.node';
 import { getAllBookThemesChunked, listBookThemesPage, upsertBookThemeByKey } from './book-themes.node';
@@ -90,9 +87,6 @@ export const NODE_REGISTRY: Record<string, NodeAccessors> = {
   tags: { listPage: listTagsPage, getAllChunked: getAllTagsChunked, upsertByKey: upsertTagByKey },
   tagAssignments: { listPage: listTagAssignmentsPage, getAllChunked: getAllTagAssignmentsChunked, upsertByKey: upsertTagAssignmentByKey },
   places: { listPage: listPlacesPage, getAllChunked: getAllPlacesChunked, upsertByKey: upsertPlaceByKey },
-  trips: { listPage: listTripsPage, getAllChunked: getAllTripsChunked, upsertByKey: upsertTripByKey },
-  tripPlaces: { listPage: listTripPlacesPage, getAllChunked: getAllTripPlacesChunked, upsertByKey: upsertTripPlaceByKey },
-  placeVisits: { listPage: listPlaceVisitsPage, getAllChunked: getAllPlaceVisitsChunked, upsertByKey: upsertPlaceVisitByKey },
   books: { listPage: listBooksPage, getAllChunked: getAllBooksChunked, upsertByKey: upsertBookByKey },
   bookContexts: { listPage: listBookContextsPage, getAllChunked: getAllBookContextsChunked, upsertByKey: upsertBookContextByKey },
   bookThemes: { listPage: listBookThemesPage, getAllChunked: getAllBookThemesChunked, upsertByKey: upsertBookThemeByKey },

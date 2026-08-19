@@ -16,7 +16,7 @@ import {
 
 /**
  * INTERNAL helper for the OpenAI-compatible chat surface shared by the
- * openai, xai, openrouter, and azure-ai-foundry adapters. Each of those
+ * openai, xai, and azure-ai-foundry adapters. Each of those
  * provider modules still owns its configuration schema, client
  * construction, and any provider-specific behavior — this module only
  * removes the duplication in request transformation and response

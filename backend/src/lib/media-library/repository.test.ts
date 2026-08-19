@@ -4,6 +4,16 @@ import { EMBEDDING_DIMENSIONS, currentEmbeddingSchema } from '@/lib/embeddings';
 import { createMediaLibraryRepository, searchAccessibleImages, type MediaLibraryDatabase } from './repository';
 
 describe('MediaLibrary repository transactions', () => {
+  test('routes surviving place polymorphism without referencing retired trips', async () => {
+    const queries: string[] = [];
+    const database: MediaLibraryDatabase = { async query(value) { queries.push(value); return { async all() { return []; } }; } };
+    const repository = createMediaLibraryRepository(database, async (operation) => operation(database));
+    await repository.createTagAssignment({ key: newId(), scopeKey: newId(), tagKey: newId(), sourceType: 'place', sourceKey: newId(), source: 'user', createdAt: '2026-08-08T12:00:00.000Z' }, newId());
+    await repository.getActiveGlobalShareByTokenHash('a'.repeat(64), '2026-08-08T12:00:00.000Z');
+    expect(queries.join('\n')).toContain('DOCUMENT(places');
+    expect(queries.join('\n')).not.toContain('DOCUMENT(trips');
+    expect(queries.join('\n')).not.toContain('"trip"');
+  });
   test('requires existing source-image access in the add query', async () => {
     let query = '';
     const database: MediaLibraryDatabase = { async query(value) { query = value; return { async all() { return []; } }; } };

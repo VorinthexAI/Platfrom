@@ -1,2 +1,2 @@
 import type { ActionDefinition } from './types';
-export const documentTopicsAction: ActionDefinition = { id: 'document-topics', modelPolicy: 'required', models: [{ provider: 'openrouter', model: 'google.gemini-2.5-flash-lite', priority: 100 }] };
+export const documentTopicsAction: ActionDefinition = { id: 'document-topics', modelPolicy: 'required', models: [{ provider: 'openai', model: 'openai.gpt-5.6-luna', priority: 100 }] };

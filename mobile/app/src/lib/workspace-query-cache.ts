@@ -5,7 +5,6 @@ import { contentQueryKeys } from "./content-query-cache";
 import type { EmailFilter, EmailOverview, EmailThread } from "./email-client";
 import { normalizeCollection } from "./collection-access";
 import type { GalleryCollection, GalleryCollectionInvite, GalleryCollectionMember, GalleryCollectionShareLink, GalleryImage, GalleryOverview } from "./gallery-client";
-import type { Place, Trip } from "./travel-client";
 import type { UserHiddenRecord } from "./user-hidden-client";
 
 export type WorkspaceContext = { organizationKey: string; scopeKey: string };
@@ -177,14 +176,6 @@ export function removeCachedGalleryImages(queryClient: QueryClient, context: Wor
       images: overview.images.filter(({ key }) => !removed.has(key)),
     });
   }
-}
-
-export function patchCompassOverview(queryClient: QueryClient, context: WorkspaceContext, update: Place | Trip) {
-  queryClient.setQueryData<{ places: Place[]; trips: Trip[] }>(compassQueryKeys.overview(context), (overview) => {
-    if (!overview) return overview;
-    if ("itinerary" in update) return { ...overview, trips: [...overview.trips.filter(({ key }) => key !== update.key), update] };
-    return { ...overview, places: [...overview.places.filter(({ key }) => key !== update.key), update] };
-  });
 }
 
 export function patchSignalThread(queryClient: QueryClient, context: WorkspaceContext, thread: EmailThread) {

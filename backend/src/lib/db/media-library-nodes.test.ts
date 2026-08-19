@@ -6,8 +6,8 @@ import { COLLECTION_IMAGES_COLLECTION } from './collection-images.node';
 import { COLLECTION_MEMBERS_COLLECTION } from './collection-members.node';
 import { collectionInviteSchema, COLLECTION_INVITES_COLLECTION } from './collection-invites.node';
 import { tagSchema, tagsEmbeddingFields, TAGS_COLLECTION } from './tags.node';
-import { TAG_ASSIGNMENTS_COLLECTION } from './tag-assignments.node';
-import { shareSchema, SHARES_COLLECTION } from './shares.node';
+import { sourceTypeSchema, TAG_ASSIGNMENTS_COLLECTION } from './tag-assignments.node';
+import { shareSchema, shareSourceTypeSchema, SHARES_COLLECTION } from './shares.node';
 import { imageCaptionRecordSchema, IMAGE_CAPTIONS_COLLECTION } from './image-captions.node';
 
 const key = 'cmrnlzf650002qc7k4p5zem5w'; const scopeKey = 'cmrnlzf640001qc7kazsr96k5'; const now = '2026-08-07T12:00:00.000Z'; const embedding = Array(EMBEDDING_DIMENSIONS).fill(0.1);
@@ -34,5 +34,7 @@ describe('MediaLibrary node contracts', () => {
     expect(collectionInviteSchema.safeParse(invite).success).toBe(false);
     const share = shareSchema.parse({ key, scopeKey, sourceType: 'image', sourceKey: key, permission: 'read', tokenHash: 'b'.repeat(64), token: 'plaintext', createdAt: now, updatedAt: now });
     expect(share).not.toHaveProperty('token'); expect(share).not.toHaveProperty('embedding');
+    expect(sourceTypeSchema.safeParse('place').success).toBe(true); expect(sourceTypeSchema.safeParse('trip').success).toBe(false);
+    expect(shareSourceTypeSchema.safeParse('place').success).toBe(true); expect(shareSourceTypeSchema.safeParse('trip').success).toBe(false);
   });
 });

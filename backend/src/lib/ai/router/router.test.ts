@@ -66,21 +66,21 @@ describe('priority-only persisted router', () => {
 
   test('routes every action supported by a static provider without an organization provider', async () => {
     const embeddingModel = model('openai.text-embedding-3-small');
-    const openrouter = providerSchema.parse({ key: newId(), slug: 'openrouter', name: 'OpenRouter', description: 'Provider', supportedUseCases: 'AI', handlerKey: 'openrouter', enabled: true });
+    const openai = providerSchema.parse({ key: newId(), slug: 'openai', name: 'OpenAI', description: 'Provider', supportedUseCases: 'AI', handlerKey: 'openai', enabled: true });
     const modelActions = ['embed', 'reason'].map((actionSlug) => modelActionSchema.parse({ key: newId(), modelKey: embeddingModel.key, actionSlug, priority: 100, enabled: true }));
-    const modelProvider = modelProviderSchema.parse({ key: newId(), modelKey: embeddingModel.key, providerKey: openrouter.key, providerModelId: 'openai/text-embedding-3-small', enabled: true });
+    const modelProvider = modelProviderSchema.parse({ key: newId(), modelKey: embeddingModel.key, providerKey: openai.key, providerModelId: 'text-embedding-3-small', enabled: true });
     const data: RouterDataSource = {
       async getModelBySlug(slug) { return slug === embeddingModel.slug ? embeddingModel : null; },
       async getModelByKey(key) { return key === embeddingModel.key ? embeddingModel : null; },
-      async getProviderBySlug(slug) { return slug === openrouter.slug ? openrouter : null; },
-      async getProviderByKey(key) { return key === openrouter.key ? openrouter : null; },
+      async getProviderBySlug(slug) { return slug === openai.slug ? openai : null; },
+      async getProviderByKey(key) { return key === openai.key ? openai : null; },
       async listModelActions(actionSlug) { return modelActions.filter((entry) => entry.actionSlug === actionSlug); },
       async listModelProviders(modelKey) { return modelKey === embeddingModel.key ? [modelProvider] : []; },
       async listOrganizationProviderKeys() { return []; },
     };
 
     await expect(selectRoute({ mode: 'auto', organizationKey, actionSlug: 'reason' }, { data })).resolves.toMatchObject({
-      actionSlug: 'reason', modelSlug: 'openai.text-embedding-3-small', providerSlug: 'openrouter', credentialSource: 'environment',
+      actionSlug: 'reason', modelSlug: 'openai.text-embedding-3-small', providerSlug: 'openai', credentialSource: 'environment',
     });
   });
 

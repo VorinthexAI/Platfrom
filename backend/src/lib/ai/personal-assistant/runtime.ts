@@ -119,7 +119,7 @@ function systemPrompt(surface: z.infer<typeof assistantSurfaceSchema>) {
   if (surface === 'book-workspace') return `${BASE_SYSTEM_PROMPT}
 - You are operating inside the user's book library.${bookRules}`;
   if (surface === 'travel-workspace') return `${BASE_SYSTEM_PROMPT}
-- You are operating inside Compass. Use Compass tools for saved places, visits, trips, and itineraries.
+- You are operating inside Compass. Use Compass tools to list saved cities.
 - Do not answer live weather, current conditions, or general destination facts.`;
   if (surface === 'signal-workspace') return `${BASE_SYSTEM_PROMPT}
 - You are operating inside Signal. Use Signal tools for inbox overview, synchronization, threads, favorites, reply drafts, and explicit disconnect requests.
@@ -180,10 +180,11 @@ export async function runPersonalAssistant(
       options: { temperature: 0.2, maxTokens: 4_096 },
     });
     const response = await (dependencies.execute ?? executeAction)({
-      mode: 'model',
+      mode: 'fixed',
       organizationKey: domain.organizationKey,
       actionSlug: 'orchestrator-chat',
-      modelSlug: 'google.gemini-2.5-flash-lite',
+      modelSlug: 'openai.gpt-5.6-luna',
+      providerSlug: 'openai',
     }, chatInput, { ...dependencies.router, timeoutMs: dependencies.router?.timeoutMs ?? 45_000 });
     const output = chatOutputSchema.parse(response.output);
     if (output.toolCalls.length === 0) {

@@ -39,7 +39,6 @@ import {
   updateSystemOrchestrator,
 } from './system';
 import { invokeContentTool } from './content-tools';
-import { postAudioGenerate } from './audio';
 import { communicationHandlers } from './communication';
 import { bootstrapGuestAuth, getAuthAccount, logoutAuthAccount, patchAuthAccount } from './auth-account';
 import { recordPlatformEvent } from './platform-events';
@@ -426,7 +425,6 @@ export function registerRoutes(app: Hono) {
   app.get('/nodes', listNodes);
 
   app.post('/assistant/respond', postPersonalAssistantResponse);
-  app.post('/audio/generate', (c) => postAudioGenerate(c));
   app.post('/content/tools/:tool', invokeContentTool);
   app.post('/gallery/overview', galleryOverview);
   app.post('/gallery/collections', createGalleryCollection);
@@ -469,11 +467,6 @@ export function registerRoutes(app: Hono) {
   app.post('/gallery/memories/read', readGalleryMemory);
   app.post('/gallery/memories/delete', deleteGalleryMemory);
   app.post('/travel/overview', travelHandlers.overview);
-  app.post('/travel/places', travelHandlers.createPlace);
-  app.post('/travel/places/:placeKey/visits', travelHandlers.createVisit);
-  app.post('/travel/trips', travelHandlers.createTrip);
-  app.post('/travel/trips/:tripKey/places', travelHandlers.appendPlace);
-  app.delete('/travel/trips/:tripKey/places/:placeKey', travelHandlers.removePlace);
   app.post('/email/overview', emailHandlers.overview);
   app.post('/email/connect', emailHandlers.startConnect);
   app.get('/email/connectors/gmail/callback', emailHandlers.callback);
@@ -496,7 +489,6 @@ export function registerRoutes(app: Hono) {
   app.get('/founders/organizations/:organizationKey/providers', listFoundersOrganizationProviders);
   app.put('/founders/organizations/:organizationKey/providers/:provider', upsertFoundersOrganizationProvider);
   app.get('/founders/organizations/:organizationKey/communication/channels', communicationHandlers.listChannels);
-  app.post('/founders/organizations/:organizationKey/communication/speech', communicationHandlers.speak);
   app.get('/founders/organizations/:organizationKey/communication/channels/:channelKey/messages', communicationHandlers.listMessages);
   app.get('/founders/organizations/:organizationKey/communication/channels/:channelKey/typing', communicationHandlers.typingStream);
   app.post('/founders/organizations/:organizationKey/communication/channels/:channelKey/typing', communicationHandlers.typing);

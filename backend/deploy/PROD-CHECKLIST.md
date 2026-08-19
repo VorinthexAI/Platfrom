@@ -39,8 +39,6 @@ Expected parameters include:
 - `REDIS_URL` for the app and render service to reach the production Redis endpoint
 - `ANTHROPIC_API_KEY`
 - `OPENAI_API_KEY`
-- `OPENROUTER_API_KEY` (required for Gemini runtime routes and OpenAI embeddings; embeddings route strictly to Azure)
-- Optional `OPENROUTER_BASE_URL`, `OPENROUTER_SITE_URL`, and `OPENROUTER_APP_NAME`
 - `GROK_API_KEY`
 - `PERPLEXITY_API_KEY`
 - `GOOGLE_API_KEY`
@@ -50,7 +48,7 @@ Expected parameters include:
 
 - Merges to `main` through a closed pull request trigger the production workflow.
 - Manual `workflow_dispatch` can build-only or build-and-deploy.
-- Embedding requests use `openai/text-embedding-3-small` at 1536 dimensions through OpenRouter's Azure upstream. The migration and semantic backfill re-embed existing 4096-dimension vectors before the application rollout.
+- Embedding requests use `text-embedding-3-small` at 1536 dimensions through OpenAI. The migration and semantic backfill re-embed existing 4096-dimension vectors before the application rollout.
 - The graph-db host receives `deploy/docker-compose.db.yml` and is brought up with `docker compose up -d` before migrations run.
 - The app host receives `deploy/docker-compose.app.yml` and `deploy/deploy-app.sh`.
 - App deploy starts the idle color, waits for health, flips Caddy, then stops the old color.

@@ -14,13 +14,13 @@ await system.createDatabase(databaseName);
 const database = system.database(databaseName);
 
 try {
-  const names = ['images', 'collections', 'collectionImages', 'collectionMembers', 'collectionInvites', 'tags', 'tagAssignments', 'shares', 'folders', 'documents', 'places', 'trips', 'scopes', 'scopeMembers', 'userOrganizations', 'users', 'documentShares'];
+  const names = ['images', 'collections', 'collectionImages', 'collectionMembers', 'collectionInvites', 'tags', 'tagAssignments', 'shares', 'folders', 'documents', 'places', 'scopes', 'scopeMembers', 'userOrganizations', 'users', 'documentShares'];
   await Promise.all(names.map((name) => database.createCollection(name)));
   for (const spec of collectionSpecs.filter(({ name }) => names.includes(name))) for (const index of spec.indexes ?? []) await database.collection(spec.name).ensureIndex({ type: 'persistent', sparse: false, unique: false, ...index });
   const [{ createMediaLibraryRepository }, { createMediaLibraryService }, { processImage }, { imageSchema }] = await Promise.all([
     import('../src/lib/media-library/repository'), import('../src/lib/media-library/service'), import('../src/lib/ai/image-processing'), import('../src/lib/db/images.node'),
   ]);
-  const transactionCollections = ['images', 'collections', 'collectionImages', 'collectionMembers', 'collectionInvites', 'tags', 'tagAssignments', 'shares', 'documents', 'places', 'trips', 'scopes', 'scopeMembers', 'userOrganizations', 'users'];
+  const transactionCollections = ['images', 'collections', 'collectionImages', 'collectionMembers', 'collectionInvites', 'tags', 'tagAssignments', 'shares', 'documents', 'places', 'scopes', 'scopeMembers', 'userOrganizations', 'users'];
   const repository = createMediaLibraryRepository(database, (operation) => withDatabaseTransaction(database, transactionCollections, (transaction) => operation(transaction)));
   let tokenSequence = 0;
   const service = createMediaLibraryService({ repository, token: () => `media-library-e2e-token-${String(++tokenSequence).padStart(32, '0')}` });

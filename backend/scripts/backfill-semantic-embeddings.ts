@@ -10,7 +10,7 @@ const MAX_CATCHUP_PASSES = 5;
 export const SEMANTIC_COLLECTION_ALLOWLIST = [
   'providers', 'models', 'users', 'orchestrators', 'voices',
   'organizations', 'scopes', 'channels', 'threads', 'messages', 'messageReactions', 'polls', 'pollOptions', 'folders',
-  'documents', 'documentVersions', 'places', 'trips', 'emailThreads', 'emailMessages',
+  'documents', 'documentVersions', 'places', 'emailThreads', 'emailMessages',
 ] as const;
 
 type SemanticSpec = { name: string; embedKeys: string[]; includeMetadata: boolean };
@@ -18,7 +18,7 @@ const authoritative = new Map(collections.map((spec) => [spec.name, spec]));
 const semanticCollections: SemanticSpec[] = SEMANTIC_COLLECTION_ALLOWLIST.filter((name) => name !== 'documents' && name !== 'documentVersions').map((name) => {
   const spec = authoritative.get(name);
   if (!spec || spec.skipEmbedding || !spec.embedKeys?.length) throw new Error(`Semantic allowlist entry ${name} is not an embedding collection in authoritative specs.`);
-  return { name, embedKeys: [...spec.embedKeys], includeMetadata: !['folders', 'documents', 'documentVersions', 'places', 'trips', 'emailThreads', 'emailMessages'].includes(name) };
+  return { name, embedKeys: [...spec.embedKeys], includeMetadata: !['folders', 'documents', 'documentVersions', 'places', 'emailThreads', 'emailMessages'].includes(name) };
 });
 await migrateContentDocuments(db);
 await migrateContentVersions(db);

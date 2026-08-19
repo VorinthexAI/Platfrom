@@ -5,8 +5,7 @@ import { authorizeDocumentParseLocation, CONTENT_TOOL_NAMES, ContentError, runCo
 import { documentKeyForRequest, DocumentProcessingError } from '@/lib/ai/document-processing';
 import { documentEmbed } from '@/lib/ai/document-processing';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
-import { chatInputSchema, speechInputSchema } from '@/lib/ai/providers/types';
-import { ProviderExecutionError } from '@/lib/ai/router/errors';
+import { chatInputSchema } from '@/lib/ai/providers/types';
 
 const now = '2026-07-22T12:00:00.000Z';
 const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
@@ -359,163 +358,6 @@ describe('Content runtime', () => {
     })).rejects.toMatchObject({ code: 'DOCUMENT_EMBEDDING_FAILED', action: 'document-embed', retryable: true });
   });
 
-  test('returns playable audio with conservative document offsets and MIME-matched persistence', async () => {
-    const f = fixture('moderator');
-    const documentKey = f.addDocument(`0123456789Visible sentence. ${'More words. '.repeat(30)} \`secret code\``);
-    const spoken: string[] = [], actions: string[] = [], uploaded: string[] = [], speechInputs: any[] = [];
-    const dependencies: any = { repository: f.repository, maxSpeechChunkCharacters: 200, runAction: async (action: string, input: any) => { actions.push(action); const parsed = speechInputSchema.parse(input); speechInputs.push(parsed); spoken.push(parsed.text); return { audioBase64: Buffer.from([spoken.length]).toString('base64'), mimeType: parsed.format === 'mp3' ? 'audio/mpeg' : 'audio/ogg', durationMs: 10 }; }, mergeAudio: async () => new Uint8Array([1, 2, 3]), audioDuration: () => 900, storage: { async upload(input: any) { uploaded.push(input.key); return { storageKey: input.key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } } };
-    const ephemeral = await runContentTool('document.read', { documentKeys: [documentKey], mode: 'audio', startOffset: 10, includeTitle: true, language: 'English', speakingRate: 1.25 }, f.context, dependencies);
-    const audio = (ephemeral.results[0]?.data as { audio: Array<{ index: number; url: string; startCharacter: number; endCharacter: number }> }).audio;
-    expect(audio.map((item) => item.index)).toEqual([...spoken.keys()]);
-    expect(audio.every((item) => item.url.startsWith('data:audio/ogg;base64,'))).toBe(true);
-    expect(audio.every((item) => item.startCharacter >= 10 && item.endCharacter > item.startCharacter)).toBe(true);
-    expect(spoken[0]).toStartWith('Notes. Visible sentence.');
-    expect(spoken.join(' ')).not.toContain('secret code');
-    expect(actions).toEqual(Array(spoken.length).fill('speak'));
-    expect(speechInputs.every(({ voice }) => voice === 'Matthew')).toBe(true);
-    expect(uploaded).toHaveLength(0);
-    const ephemeralChunkCount = spoken.length;
-    const persisted = await runContentTool('document.read', { documentKeys: [documentKey], mode: 'audio', includeCode: false, persistAudio: true, language: 'en-US' }, f.context, dependencies);
-    expect(actions.slice(ephemeralChunkCount)).toEqual(['generate-speech']);
-    expect(persisted.results[0]).toMatchObject({ success: true });
-    expect(speechInputs.at(-1)).not.toHaveProperty('speakingRate');
-    expect(speechInputs.at(-1)?.language).toBe('en-US');
-    expect(speechInputs.at(-1)?.voice).toBe('Matthew');
-    expect(uploaded).toHaveLength(1);
-    expect(uploaded[0]).toEndWith('.mp3');
-    expect(persisted.results[0]?.data).toMatchObject({ audioVersion: { version: 1, durationMs: 900 } });
-    expect((persisted.results[0]?.data as any)?.audioVersion).not.toHaveProperty('speakingRate');
-    expect((persisted.results[0]?.data as any)?.audioVersion).toMatchObject({ language: 'en-US', voice: 'Matthew' });
-    expect(f.audioVersions.size).toBe(1);
-    expect(f.documents.get(documentKey).speechStorageKeys).toBeUndefined();
-    expect(f.documents.get(documentKey).updatedAt).toBe(now);
-  });
-
-  test('cleans a persisted full-audio object when version metadata fails', async () => {
-    const f = fixture('moderator');
-    const documentKey = f.addDocument('Long sentence. '.repeat(80));
-    const uploaded: string[] = [], deleted: string[] = [];
-    f.repository.createAudioVersion = async () => { throw new Error('metadata failed'); };
-    const output = await runContentTool('document.read', { documentKeys: [documentKey], mode: 'audio', persistAudio: true }, f.context, {
-      repository: f.repository,
-      maxSpeechChunkCharacters: 200,
-      runAction: async () => ({ audio: new Uint8Array([1]), mimeType: 'audio/mpeg' }),
-      mergeAudio: async () => new Uint8Array([1]),
-      audioDuration: () => 100,
-      storage: {
-        async upload(input) { uploaded.push(input.key); return { storageKey: input.key }; },
-        async delete(key) { deleted.push(key); },
-        async download() { return { bytes: new Uint8Array() }; },
-        async copy() { return { storageKey: '' }; },
-      },
-    });
-    expect(output.results[0]?.success).toBe(false);
-    expect(output.results[0]?.error).toMatchObject({ code: 'DOCUMENT_SPEECH_FAILED', message: 'The generated audio version could not be saved.', action: 'audio-version' });
-    expect(uploaded).toHaveLength(1);
-    expect(uploaded[0]).toEndWith('.mp3');
-    expect(deleted).toEqual(uploaded);
-  });
-
-  test('returns a specific error when persisted audio merging fails', async () => {
-    const f = fixture('moderator');
-    const documentKey = f.addDocument('Narrate this document.');
-    const output = await runContentTool('document.read', { documentKeys: [documentKey], mode: 'audio', persistAudio: true }, f.context, {
-      repository: f.repository,
-      runAction: async () => ({ audio: new Uint8Array([1]), mimeType: 'audio/mpeg' }),
-      mergeAudio: async () => { throw new Error('ffmpeg unavailable'); },
-      audioDuration: () => 100,
-    });
-    expect(output.results[0]).toMatchObject({ success: false, error: { code: 'DOCUMENT_SPEECH_FAILED', message: 'Generated audio segments could not be finalized.', action: 'audio-merge' } });
-  });
-
-  test('stops persisted audio generation when its request is aborted', async () => {
-    const f = fixture('moderator');
-    const documentKey = f.addDocument('Long sentence. '.repeat(80));
-    const controller = new AbortController();
-    let uploads = 0;
-    const output = await runContentTool('document.read', { documentKeys: [documentKey], mode: 'audio', persistAudio: true }, f.context, {
-      repository: f.repository,
-      signal: controller.signal,
-      maxSpeechChunkCharacters: 200,
-      runAction: async () => { controller.abort(); return { audio: new Uint8Array([1]), mimeType: 'audio/mpeg' }; },
-      mergeAudio: async () => { throw new Error('merge should not run'); },
-      audioDuration: () => 100,
-      storage: { async upload({ key }) { uploads += 1; return { storageKey: key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
-    });
-    expect(output.results[0]?.success).toBe(false);
-    expect(uploads).toBe(0);
-    expect(f.audioVersions.size).toBe(0);
-  });
-
-  test('cleans uploaded audio when its request is aborted after storage succeeds', async () => {
-    const f = fixture('moderator');
-    const documentKey = f.addDocument('Narrate this document.');
-    const controller = new AbortController();
-    const uploaded: string[] = [], deleted: string[] = [];
-    const output = await runContentTool('document.read', { documentKeys: [documentKey], mode: 'audio', persistAudio: true }, f.context, {
-      repository: f.repository,
-      signal: controller.signal,
-      runAction: async () => ({ audio: new Uint8Array([1]), mimeType: 'audio/mpeg' }),
-      mergeAudio: async () => new Uint8Array([1]),
-      audioDuration: () => 100,
-      storage: {
-        async upload({ key }) { uploaded.push(key); controller.abort(); return { storageKey: key }; },
-        async delete(key) { deleted.push(key); },
-        async download() { return { bytes: new Uint8Array() }; },
-        async copy() { return { storageKey: '' }; },
-      },
-    });
-    expect(output.results[0]?.success).toBe(false);
-    expect(uploaded).toHaveLength(1);
-    expect(deleted).toEqual(uploaded);
-    expect(f.audioVersions.size).toBe(0);
-  });
-
-  test('rejects oversized persisted narration before spending speech capacity', async () => {
-    const f = fixture('moderator');
-    const documentKey = f.addDocument('x'.repeat(120_001));
-    let speechCalls = 0;
-    const output = await runContentTool('document.read', { documentKeys: [documentKey], mode: 'audio', persistAudio: true }, f.context, {
-      repository: f.repository,
-      runAction: async () => { speechCalls += 1; return { audio: new Uint8Array([1]), mimeType: 'audio/mpeg' }; },
-    });
-    expect(output.results[0]).toMatchObject({ success: false, error: { code: 'DOCUMENT_TOO_LARGE' } });
-    expect(speechCalls).toBe(0);
-  });
-
-  test('returns a specific error when persisted speech credentials are rejected', async () => {
-    const f = fixture('moderator');
-    const documentKey = f.addDocument('Narrate this document.');
-    const output = await runContentTool('document.read', { documentKeys: [documentKey], mode: 'audio', persistAudio: true }, f.context, {
-      repository: f.repository,
-      runAction: async () => { throw new ProviderExecutionError('generate-speech', [{ modelId: 'amazon.polly-generative', providerId: 'aws-polly', externalModelId: 'generative', code: 'authentication_failed', message: 'rejected' }]); },
-    });
-    expect(output.results[0]).toMatchObject({ success: false, error: { code: 'DOCUMENT_SPEECH_FAILED', message: 'Audio generation is unavailable because the speech provider is not configured.', action: 'generate-speech' } });
-  });
-
-  test('versions audio independently from document snapshots and marks stale content', async () => {
-    const f = fixture('moderator');
-    const documentKey = f.addDocument('Stable source text.');
-    const dependencies: any = {
-      repository: f.repository,
-      runAction: async () => ({ audio: new Uint8Array([1]), mimeType: 'audio/mpeg' }),
-      mergeAudio: async () => new Uint8Array([1, 2]),
-      audioDuration: () => 1_200,
-      signAudioUrl: async (key: string) => `https://audio.example/${key}`,
-      storage: { async upload({ key }: any) { return { storageKey: key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
-      clock: () => new Date(now),
-    };
-    await runContentTool('document.read', { documentKeys: [documentKey], mode: 'audio', persistAudio: true }, f.context, dependencies);
-    await runContentTool('document.read', { documentKeys: [documentKey], mode: 'audio', persistAudio: true }, f.context, dependencies);
-    expect(f.versions.size).toBe(0);
-    expect([...f.audioVersions.values()].map(({ version }) => version)).toEqual([1, 2]);
-
-    const current = f.documents.get(documentKey);
-    current.content = 'Changed source text.';
-    const listed = await runContentTool('document.list-audio-versions', { documentKeys: [documentKey] }, f.context, dependencies);
-    expect(listed.results[0]?.data?.audioVersions).toMatchObject([{ version: 2, current: false }, { version: 1, current: false }]);
-  });
-
   test('persists one current audio version, its resume position, and explicit dismissal', async () => {
     const f = fixture('moderator');
     const documentKey = f.addDocument('Stable source text.');
@@ -620,9 +462,9 @@ describe('Content runtime', () => {
       return {
         output,
         usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-        providerId: 'openrouter',
-        modelId: request.actionSlug === 'embed' ? 'openai.text-embedding-3-small' : 'google.gemini-2.5-flash-lite',
-        externalModelId: request.actionSlug === 'embed' ? 'openai/text-embedding-3-small' : 'google/gemini-2.5-flash-lite',
+        providerId: 'openai',
+        modelId: request.actionSlug === 'embed' ? 'openai.text-embedding-3-small' : 'openai.gpt-5.6-luna',
+        externalModelId: request.actionSlug === 'embed' ? 'text-embedding-3-small' : 'gpt-5.6-luna',
       };
     };
     const dependencies = { repository: f.repository, executeAction };
@@ -1127,89 +969,18 @@ describe('Content runtime', () => {
     expect(actions).toEqual(['document-summarize', 'document-summarize', 'document-summarize', 'document-topics']);
   });
 
-  test('generates, projects, and reuses durable summary audio without exposing storage keys', async () => {
+  test('projects already persisted summary audio without exposing storage keys', async () => {
     const f = fixture('moderator');
     const documentKey = f.addDocument('Source body');
     const summary = await f.repository.createSummary!({ key: newId(), scopeKey: f.scopeKey, documentKey, summary: 'A durable spoken summary.', style: 'brief', sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: now, createdByKey: newId(), createdAt: now });
-    const uploaded: string[] = [];
-    let generated = 0;
-    const dependencies: any = {
-      repository: f.repository,
-      generateAudioChunks: async function* (input: any) { generated += 1; expect(input).toMatchObject({ text: summary.summary, voice: 'Matthew', language: 'en-US' }); yield { index: 0, startWord: 0, endWord: 4, startCharacter: 0, endCharacter: summary.summary.length, audioBase64: 'AQ==', mimeType: 'audio/mpeg', durationMs: 100 }; },
-      mergeAudio: async () => new Uint8Array([1, 2]),
-      audioDuration: () => 800,
-      signAudioUrl: async (key: string) => `https://audio.example/${key}`,
-      storage: { async upload({ key }: any) { uploaded.push(key); return { storageKey: key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
-      clock: () => new Date(now),
-    };
-    const first = await runContentTool('document.summary.audio.generate', { summaryKeys: [summary.key], language: 'en-US' }, f.context, dependencies);
-    const second = await runContentTool('document.summary.audio.generate', { summaryKeys: [summary.key] }, f.context, dependencies);
-    expect(first.results[0]).toMatchObject({ success: true, data: { audio: { summaryKey: summary.key, mimeType: 'audio/mpeg', durationMs: 800, url: expect.stringContaining('https://audio.example/') } } });
-    expect(JSON.stringify(first)).not.toContain('storageKey');
-    expect(generated).toBe(1);
-    expect(uploaded).toHaveLength(1);
-    expect(second.results[0]?.data?.audio.key).toBe(first.results[0]?.data?.audio.key);
+    const audio = { key: newId(), scopeKey: f.scopeKey, documentKey, summaryKey: summary.key, storageKey: 'summary.mp3', mimeType: 'audio/mpeg' as const, sizeBytes: 2, durationMs: 800, createdByKey: newId(), createdAt: now };
+    f.summaryAudio.set(audio.key, audio);
+    const dependencies = { repository: f.repository, signAudioUrl: async (key: string) => `https://audio.example/${key}` };
     const listed = await runContentTool('document.list-summaries', { documentKeys: [documentKey] }, f.context, dependencies);
     const found = await runContentTool('document.find-summary', { summaryKeys: [summary.key] }, f.context, dependencies);
     expect(listed.results[0]?.data?.summaries[0].audio?.url).toStartWith('https://audio.example/');
     expect(found.results[0]?.data?.summary.audio?.summaryKey).toBe(summary.key);
-  });
-
-  test('deletes a concurrent summary-audio loser upload and returns the winner', async () => {
-    const f = fixture('moderator');
-    const documentKey = f.addDocument();
-    const summary = await f.repository.createSummary!({ key: newId(), scopeKey: f.scopeKey, documentKey, summary: 'Concurrent summary.', style: 'brief', sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: now, createdByKey: newId(), createdAt: now });
-    const winner = { key: newId(), scopeKey: f.scopeKey, documentKey, summaryKey: summary.key, storageKey: 'winner.mp3', mimeType: 'audio/mpeg' as const, sizeBytes: 2, durationMs: 500, createdByKey: newId(), createdAt: now };
-    f.repository.createSummaryAudio = async () => { f.summaryAudio.set(winner.key, winner); return { audio: winner, created: false }; };
-    const deleted: string[] = [];
-    const output = await runContentTool('document.summary.audio.generate', { summaryKeys: [summary.key] }, f.context, {
-      repository: f.repository,
-      generateAudioChunks: async function* () { yield { index: 0, startWord: 0, endWord: 2, startCharacter: 0, endCharacter: 10, audioBase64: 'AQ==', mimeType: 'audio/mpeg', durationMs: 100 }; },
-      mergeAudio: async () => new Uint8Array([1, 2]), audioDuration: () => 500,
-      signAudioUrl: async (key) => `https://audio.example/${key}`,
-      storage: { async upload({ key }) { return { storageKey: key }; }, async delete(key) { deleted.push(key); }, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
-    });
-    expect(deleted).toHaveLength(1);
-    expect(deleted[0]).not.toBe(winner.storageKey);
-    expect(output.results[0]?.data?.audio).toMatchObject({ key: winner.key, url: 'https://audio.example/winner.mp3' });
-  });
-
-  test('cleans summary audio when metadata persistence fails', async () => {
-    const f = fixture('moderator');
-    const documentKey = f.addDocument();
-    const summary = await f.repository.createSummary!({ key: newId(), scopeKey: f.scopeKey, documentKey, summary: 'Summary audio cleanup.', style: 'brief', sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: now, createdByKey: newId(), createdAt: now });
-    f.repository.createSummaryAudio = async () => { throw new Error('metadata unavailable'); };
-    const uploaded: string[] = [], deleted: string[] = [];
-    const output = await runContentTool('document.summary.audio.generate', { summaryKeys: [summary.key] }, f.context, {
-      repository: f.repository,
-      generateAudioChunks: async function* () { yield { index: 0, startWord: 0, endWord: 2, startCharacter: 0, endCharacter: 10, audioBase64: 'AQ==', mimeType: 'audio/mpeg', durationMs: 100 }; },
-      mergeAudio: async () => new Uint8Array([1, 2]), audioDuration: () => 500,
-      storage: { async upload({ key }) { uploaded.push(key); return { storageKey: key }; }, async delete(key) { deleted.push(key); }, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
-    });
-    expect(output.results[0]).toMatchObject({ success: false, error: { code: 'DOCUMENT_SPEECH_FAILED', action: 'summary-audio' } });
-    expect(uploaded).toHaveLength(1);
-    expect(deleted).toEqual(uploaded);
-  });
-
-  test('retains committed summary audio when URL signing temporarily fails', async () => {
-    const f = fixture('moderator');
-    const documentKey = f.addDocument();
-    const summary = await f.repository.createSummary!({ key: newId(), scopeKey: f.scopeKey, documentKey, summary: 'Summary audio signing.', style: 'brief', sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: now, createdByKey: newId(), createdAt: now });
-    const deleted: string[] = [];
-    const dependencies: any = {
-      repository: f.repository,
-      generateAudioChunks: async function* () { yield { index: 0, startWord: 0, endWord: 2, startCharacter: 0, endCharacter: 10, audioBase64: 'AQ==', mimeType: 'audio/mpeg', durationMs: 100 }; },
-      mergeAudio: async () => new Uint8Array([1, 2]), audioDuration: () => 500,
-      signAudioUrl: async () => { throw new Error('signing unavailable'); },
-      storage: { async upload({ key }: any) { return { storageKey: key }; }, async delete(key: string) { deleted.push(key); }, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
-    };
-    const failed = await runContentTool('document.summary.audio.generate', { summaryKeys: [summary.key] }, f.context, dependencies);
-    expect(failed.results[0]?.success).toBe(false);
-    expect(f.summaryAudio.size).toBe(1);
-    expect(deleted).toHaveLength(0);
-    dependencies.signAudioUrl = async (key: string) => `https://audio.example/${key}`;
-    const retried = await runContentTool('document.summary.audio.generate', { summaryKeys: [summary.key] }, f.context, dependencies);
-    expect(retried.results[0]?.data?.audio.url).toStartWith('https://audio.example/');
+    expect(JSON.stringify(found)).not.toContain('storageKey');
   });
 
   test('rejects non-JSON and over-limit topic model output', async () => {
@@ -1502,7 +1273,7 @@ describe('Content runtime', () => {
     expect(events.every((event: any) => typeof event.invocationKey === 'string')).toBe(true);
   });
 
-  test('enhances a document through Gemini Flash-Lite and persists replacement content', async () => {
+  test('enhances a document through the configured model and persists replacement content', async () => {
     const f = fixture('moderator');
     const documentKey = f.addDocument('This are teh text.');
     let call: { action?: string; input?: any } = {};
@@ -1552,7 +1323,6 @@ describe('Content runtime', () => {
         runAction: async (action: string, input: any) => {
           if (action === 'ask' || action === 'enhance' || action === 'translate' || action === 'reason' || action === 'deep-reason' || action === 'document-summarize') return { text: 'Generated text' };
           if (action === 'document-topics') return { text: '{"topics":["Source"]}' };
-          if (action === 'speak' || action === 'generate-speech') return { audio: new Uint8Array([1]), mimeType: 'audio/mpeg' };
           if (action === 'document-cleanup') return { content: input.text };
           if (action === 'document-embed') return documentEmbed(input, { embed: async () => embedding, dimensions: EMBEDDING_DIMENSIONS });
           throw new Error(`Unexpected action ${action}`);
@@ -1566,8 +1336,6 @@ describe('Content runtime', () => {
           async list() { return []; },
           async remove(_userKey: string, query: string) { return { normalizedQuery: query.toLowerCase(), deleted: true }; },
         },
-        mergeAudio: async () => new Uint8Array([1]),
-        audioDuration: () => 100,
         signAudioUrl: async (key: string) => `https://audio.example/${key}`,
       };
       let input: any;
@@ -1584,7 +1352,7 @@ describe('Content runtime', () => {
       else if (name === 'document.create') input = { scopeKey: f.scopeKey, folderKey: f.folderKey, name: 'Created document', content: 'Created body' };
       else if (name === 'document.find') input = { documentKeys: [documentKey], include: ['content'] };
       else if (name === 'document.list') input = { scopeKey: f.scopeKey, folderKey: f.folderKey };
-       else if (name === 'document.read') input = { documentKeys: [documentKey], mode: 'content' };
+       else if (name === 'document.read') input = { documentKeys: [documentKey] };
        else if (name === 'document.list-audio-versions') input = { documentKeys: [documentKey] };
        else if (name === 'document.audio.playback.update' || name === 'document.audio.playback.clear') {
          const audio = await f.repository.createAudioVersion!({ key: newId(), scopeKey: f.scopeKey, documentKey, sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: now, storageKey: `audio/${name}.mp3`, mimeType: 'audio/mpeg', sizeBytes: 10, durationMs: 60_000, includeTitle: true, includeCode: false, createdByKey: newId(), createdAt: now });
@@ -1594,10 +1362,6 @@ describe('Content runtime', () => {
         else if (name === 'document.find-summary') {
          const summary = await f.repository.createSummary!({ key: newId(), scopeKey: f.scopeKey, documentKey, summary: 'Saved', style: 'brief', sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: now, createdByKey: newId(), createdAt: now });
           input = { summaryKeys: [summary.key] };
-        }
-        else if (name === 'document.summary.audio.generate') {
-          const summary = await f.repository.createSummary!({ key: newId(), scopeKey: f.scopeKey, documentKey, summary: 'Saved audio summary', style: 'brief', sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: now, createdByKey: newId(), createdAt: now });
-          input = { summaryKeys: [summary.key], language: 'en-US' };
         }
       else if (name === 'document.update') input = { updates: [{ documentKey, content: 'Updated body' }] };
       else if (name === 'document.rename') input = { renames: [{ documentKey, name: 'Renamed' }] };

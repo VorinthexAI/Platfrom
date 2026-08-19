@@ -1,4 +1,3 @@
-import { audioGenerateTool } from './audio-generate';
 import { documentAudioPlaybackClearToolDefinition } from './document-audio-playback-clear';
 import { documentAudioPlaybackUpdateToolDefinition } from './document-audio-playback-update';
 import { documentCreateToolDefinition } from './document-create';
@@ -26,7 +25,6 @@ import { documentRestoreVersionToolDefinition } from './document-restore-version
 import { documentRewriteToolDefinition } from './document-rewrite';
 import { documentShareToolDefinition } from './document-share';
 import { documentSummarizeToolDefinition } from './document-summarize';
-import { documentSummaryAudioGenerateToolDefinition } from './document-summary-audio-generate';
 import { documentTranslateToolDefinition } from './document-translate';
 import { documentTopicsToolDefinition } from './document-topics';
 import { documentUnshareToolDefinition } from './document-unshare';
@@ -50,11 +48,10 @@ import { documentSearchToolDefinition } from './document-search';
 import { WORKSPACE_TOOL_DEFINITIONS } from './workspace-tool-definitions';
 
 export const PUBLIC_TOOL_DEFINITIONS = Object.freeze([
-  audioGenerateTool,
   imageCaptionTool,
   imageCreateVisualIdentityTool,
   contentNeighborsToolDefinition,
-  documentAudioPlaybackClearToolDefinition, documentAudioPlaybackUpdateToolDefinition, documentCreateToolDefinition, documentCopyToolDefinition, documentCreateVersionToolDefinition, documentDeleteToolDefinition, documentDeleteVersionToolDefinition, documentDownloadToolDefinition, documentEnhanceToolDefinition, documentExportToolDefinition, documentFindToolDefinition, documentFindSummaryToolDefinition, documentFindVersionToolDefinition, documentListToolDefinition, documentListAudioVersionsToolDefinition, documentListSummariesToolDefinition, documentListSharesToolDefinition, documentListVersionsToolDefinition, documentMoveToolDefinition, documentParseToolDefinition, documentReadToolDefinition, documentRenameToolDefinition, documentScanToolDefinition, documentRestoreVersionToolDefinition, documentRewriteToolDefinition, documentShareToolDefinition, documentSummarizeToolDefinition, documentSummaryAudioGenerateToolDefinition, documentTopicsToolDefinition, documentTranslateToolDefinition, documentUnshareToolDefinition, documentUpdateToolDefinition,
+  documentAudioPlaybackClearToolDefinition, documentAudioPlaybackUpdateToolDefinition, documentCreateToolDefinition, documentCopyToolDefinition, documentCreateVersionToolDefinition, documentDeleteToolDefinition, documentDeleteVersionToolDefinition, documentDownloadToolDefinition, documentEnhanceToolDefinition, documentExportToolDefinition, documentFindToolDefinition, documentFindSummaryToolDefinition, documentFindVersionToolDefinition, documentListToolDefinition, documentListAudioVersionsToolDefinition, documentListSummariesToolDefinition, documentListSharesToolDefinition, documentListVersionsToolDefinition, documentMoveToolDefinition, documentParseToolDefinition, documentReadToolDefinition, documentRenameToolDefinition, documentScanToolDefinition, documentRestoreVersionToolDefinition, documentRewriteToolDefinition, documentShareToolDefinition, documentSummarizeToolDefinition, documentTopicsToolDefinition, documentTranslateToolDefinition, documentUnshareToolDefinition, documentUpdateToolDefinition,
   folderCopyToolDefinition, folderCreateToolDefinition, folderDeleteToolDefinition, folderFindToolDefinition, folderListToolDefinition, folderMoveToolDefinition, folderRenameToolDefinition, folderUpdateToolDefinition,
   documentSearchAllToolDefinition,
   contentSearchToolDefinition, contentSearchHistoryListToolDefinition, contentSearchHistoryDeleteToolDefinition, documentSearchToolDefinition,

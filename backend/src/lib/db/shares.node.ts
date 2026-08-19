@@ -4,7 +4,7 @@ import { createNodeHelpers, withArangoKey } from './base';
 import { db } from './client';
 
 export const SHARES_COLLECTION = 'shares';
-export const shareSourceTypeSchema = z.enum(['document', 'image', 'collection', 'place', 'trip']);
+export const shareSourceTypeSchema = z.enum(['document', 'image', 'collection', 'place']);
 export const sharePermissionSchema = z.enum(['read', 'comment', 'viewer', 'collaborator']);
 export const shareSchema = z.object({
   key: z.string().cuid(), scopeKey: z.string().cuid(), sourceType: shareSourceTypeSchema, sourceKey: z.string().cuid(), permission: sharePermissionSchema,
@@ -37,8 +37,7 @@ export async function getActiveShareByTokenHash(tokenHash: string, at = new Date
       LET source = share.sourceType == "document" ? DOCUMENT(${db.collection('documents')}, share.sourceKey)
         : share.sourceType == "image" ? DOCUMENT(${db.collection('images')}, share.sourceKey)
         : share.sourceType == "collection" ? DOCUMENT(${db.collection('collections')}, share.sourceKey)
-        : share.sourceType == "place" ? DOCUMENT(${db.collection('places')}, share.sourceKey)
-        : DOCUMENT(${db.collection('trips')}, share.sourceKey)
+        : DOCUMENT(${db.collection('places')}, share.sourceKey)
       FILTER scope != null
       FILTER source != null && source.scopeKey == share.scopeKey
       LIMIT 1

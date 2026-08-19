@@ -2,20 +2,20 @@ import { aql } from 'arangojs';
 import { closeDb, db } from './client';
 import { newId } from '@/lib/ids';
 import { getProviderBySlug, insertProvider, updateProvider, type Provider } from './providers.node';
-import { getModelById, getModelBySlug, insertModel, updateModel as updatePersistedModel, type Model } from './models.node';
-import { getModelActionById, getModelActionByPair, insertModelAction, listEnabledModelActionsByActionSlug, modelActionSeedSchema, updateModelAction } from './model-actions.node';
+import { getModelBySlug, insertModel, updateModel as updatePersistedModel, type Model } from './models.node';
+import { getModelActionById, getModelActionByPair, insertModelAction, modelActionSeedSchema, updateModelAction } from './model-actions.node';
 import { isArangoUniqueConstraintError } from './base';
 import { getModelProviderById, getModelProviderByPair, insertModelProvider, modelProviderSeedSchema, updateModelProvider, type ModelProvider } from './model-providers.node';
 import { getRootOrganization, insertOrganization, updateOrganization, type Organization } from './organizations.node';
 import { getUserOrganizationByOrganizationAndUser, updateUserOrganization } from './user-organization.node';
 import { getUserByEmail } from './users.node';
-import { getVoiceByProviderModelVoice, insertVoice, updateVoice, type Voice } from './voices.node';
 import { getOrchestratorByName, insertOrchestrator, updateOrchestrator, type Orchestrator } from './orchestrators.node';
 import { getDefaultScopeRepository, NEXUS_SCOPE_KEY } from '@/lib/ai/scopes';
 import { reconcileOrganizationScopeMemberships } from '@/lib/ai/scopes/membership-invariant';
 import { SEEDED_ORCHESTRATOR_SKILLS } from '@/lib/orchestrators/seeded-skills';
 import { CANONICAL_ORCHESTRATOR_NAMES } from '@/lib/orchestrators/roster';
-import { ACTION_DEFINITIONS, type ActionId } from '@/lib/ai/actions';
+import { retireAiPersistence } from '@/db/retire-ai-persistence';
+import { ACTION_DEFINITIONS } from '@/lib/ai/actions';
 
 export type SeedResult = {
   collection: string;
@@ -33,21 +33,8 @@ export class SeedReferenceError extends Error {
 export interface AiRuntimeSeedUpserters {
   provider(seed: (typeof SEEDED_PROVIDERS)[number]): Promise<SeedResult>;
   model(seed: (typeof SEEDED_MODELS)[number]): Promise<SeedResult>;
-  reconcileObsoleteModelActions(): Promise<SeedResult[]>;
   modelAction(seed: (typeof SEEDED_MODEL_ACTIONS)[number]): Promise<SeedResult>;
   modelProvider(seed: (typeof SEEDED_MODEL_PROVIDERS)[number]): Promise<SeedResult>;
-}
-
-export interface ObsoleteModelActionReconciliationStore {
-  getModelBySlug(slug: string): Promise<{ key: string } | null>;
-  getModelById?(key: string): Promise<{ key: string; enabled: boolean } | null>;
-  updateModel(key: string, patch: { enabled: boolean }): Promise<unknown>;
-  getModelActionByPair(modelKey: string, actionSlug: ActionId): Promise<{ key: string; enabled: boolean } | null>;
-  listEnabledModelActionsByActionSlug?(actionSlug: ActionId): Promise<Array<{ key: string; modelKey: string; enabled: boolean }>>;
-  updateModelAction(key: string, patch: { enabled: boolean }): Promise<unknown>;
-  getProviderBySlug?(slug: string): Promise<{ key: string } | null>;
-  getModelProviderByPair?(modelKey: string, providerKey: string): Promise<{ key: string; enabled: boolean } | null>;
-  updateModelProvider?(key: string, patch: { enabled: boolean }): Promise<unknown>;
 }
 
 const now = () => new Date().toISOString();
@@ -58,12 +45,6 @@ export const SEEDED_PROVIDERS = [
     slug: 'openai',
     name: 'OpenAI',
     handlerKey: 'openai',
-  },
-  {
-    key: 'cmrl6mtn60006a1b23aushlt0',
-    slug: 'openrouter',
-    name: 'OpenRouter',
-    handlerKey: 'openrouter',
   },
   {
     key: 'cmrl6mtn60007a1b23aushlt0',
@@ -82,12 +63,6 @@ export const SEEDED_PROVIDERS = [
     slug: 'aws-bedrock-mantle',
     name: 'AWS Bedrock Mantle',
     handlerKey: 'aws-bedrock-mantle',
-  },
-  {
-    key: 'cmrl6mtn60012a1b23aushlt0',
-    slug: 'aws-polly',
-    name: 'AWS Polly',
-    handlerKey: 'aws-polly',
   },
   {
     key: 'cmrl6mtn60009a1b23aushlt0',
@@ -110,84 +85,37 @@ export const SEEDED_PROVIDERS = [
 ] as const;
 
 export const SEEDED_MODELS = [
-  // Keep GPT-5.6 registered but disabled until AWS grants this account Mantle inference access.
-  {
-    key: 'cmgpt56solmodel0000001',
-    slug: 'openai.gpt-5.6-sol',
-    name: 'OpenAI GPT-5.6 Sol',
-    description: 'OpenAI frontier reasoning model for deepest analysis, final reviews, and high-risk decisions through Bedrock Mantle.',
-    supportedUseCases: 'Deep analysis, final review, high-risk decisions, strategic reasoning, and complex agent execution.',
-    enabled: false,
-  },
-  {
-    key: 'cmgpt56terramodel00001',
-    slug: 'openai.gpt-5.6-terra',
-    name: 'OpenAI GPT-5.6 Terra',
-    description: 'OpenAI balanced production model for feature development, coding, tool use, and iterative execution through Bedrock Mantle.',
-    supportedUseCases: 'Feature development, coding, tool use, iterative workflows, and general-purpose agent execution.',
-    enabled: false,
-  },
   {
     key: 'cmgpt56lunamodel0000001',
     slug: 'openai.gpt-5.6-luna',
     name: 'OpenAI GPT-5.6 Luna',
-    description: 'OpenAI fast, economical model for agent steps, routing, classification, and simpler tasks through Bedrock Mantle.',
-    supportedUseCases: 'Fast agent steps, routing, classification, extraction, and lightweight task execution.',
-    enabled: false,
-  },
-  {
-    key: 'cmnovapremiermodel0000001',
-    slug: 'amazon.nova-premier',
-    name: 'Amazon Nova Premier',
-    description: 'Intended temporary replacement for GPT-5.6 Sol once AWS restores access to this legacy model.',
-    supportedUseCases: 'Deep analysis, final review, high-risk decisions, strategic reasoning, and complex agent execution.',
-    enabled: false,
-  },
-  {
-    key: 'cmnovapromodel00000000001',
-    slug: 'amazon.nova-pro',
-    name: 'Amazon Nova Pro',
-    description: 'Temporary replacement for GPT-5.6 Terra and Sol-class work while Mantle access is pending.',
-    supportedUseCases: 'Feature development, coding, tool use, iterative workflows, general-purpose agent execution, and deep reasoning.',
+    description: 'OpenAI general-purpose reasoning model for agent execution, analysis, and multimodal understanding.',
+    supportedUseCases: 'Agent execution, reasoning, coding, tool use, classification, extraction, and visual understanding.',
     enabled: true,
   },
   {
-    key: 'cmgptrealtime2model0000001',
-    slug: 'openai.gpt-realtime-2',
-    name: 'OpenAI GPT Realtime 2',
-    description: 'OpenAI realtime model for natural speech-to-speech conversations, orchestrator dialogue, and low-latency calls.',
-    supportedUseCases: 'Real-time text and voice chat, orchestrator dialogue, speech synthesis, transcription, and low-latency conversational AI.',
-    enabled: true,
-  },
-  {
-    key: 'cmpollygenerativemodel0001',
-    slug: 'amazon.polly-generative',
-    name: 'Amazon Polly Generative Engine',
-    description: 'Amazon Polly generative speech engine for longer narrations and saved audio files.',
-    supportedUseCases: 'Long-form narration, saved audio files, voice synthesis, and speech generation.',
+    key: 'cmgptimage2model000000001',
+    slug: 'openai.gpt-image-2',
+    name: 'OpenAI GPT Image 2',
+    description: 'OpenAI image generation and editing model.',
+    supportedUseCases: 'Image generation, image editing, and visual asset creation.',
     enabled: true,
   },
   {
     key: 'cmopenai3smallembed00001',
     slug: 'openai.text-embedding-3-small',
     name: 'OpenAI Text Embedding 3 Small',
-    description: 'OpenAI embedding model at 1536 dimensions, strictly routed through OpenRouter to Azure.',
+    description: 'OpenAI embedding model at 1536 dimensions.',
     supportedUseCases: 'Retrieval-augmented generation, semantic search, vector retrieval, classification, and document similarity.',
-    enabled: true,
-  },
-  {
-    key: 'cmgemini25flashlitemod01',
-    slug: 'google.gemini-2.5-flash-lite',
-    name: 'Google Gemini 2.5 Flash-Lite',
-    description: 'Google low-latency multimodal model for fast general-purpose and visual tasks through OpenRouter.',
-    supportedUseCases: 'Chat, tool use, summarization, translation, extraction, classification, image captions, visual understanding, optical character recognition, and visual identity descriptions.',
     enabled: true,
   },
 ] as const;
 
-/** Model bindings are owned by actions and selected by descending priority. */
+const SEEDED_MODEL_SLUGS = new Set<string>(SEEDED_MODELS.map(({ slug }) => slug));
+
+/** Persist only runtime bindings backed by the retained model catalog. */
 export const SEEDED_MODEL_ACTIONS = ACTION_DEFINITIONS.flatMap((definition, actionIndex) =>
-  definition.models.map((binding, modelIndex) => ({
+  definition.models.filter(({ model }) => SEEDED_MODEL_SLUGS.has(model)).map((binding, modelIndex) => ({
     key: `cmmodelaction${String(actionIndex * 10 + modelIndex + 1).padStart(11, '0')}`,
     modelSlug: binding.model,
     actionSlug: definition.id,
@@ -197,68 +125,25 @@ export const SEEDED_MODEL_ACTIONS = ACTION_DEFINITIONS.flatMap((definition, acti
 );
 
 export const SEEDED_MODEL_PROVIDERS = [
-  // Preserve the intended Mantle routes so they can be re-enabled after AWS grants GPT-5.6 access.
-  {
-    key: 'cmgpt56solroute00000001',
-    modelSlug: 'openai.gpt-5.6-sol',
-    providerSlug: 'aws-bedrock-mantle',
-    providerModelId: 'openai.gpt-5.6-sol',
-    enabled: false,
-  },
-  {
-    key: 'cmgpt56terraroute000001',
-    modelSlug: 'openai.gpt-5.6-terra',
-    providerSlug: 'aws-bedrock-mantle',
-    providerModelId: 'openai.gpt-5.6-terra',
-    enabled: false,
-  },
   {
     key: 'cmgpt56lunaroute0000001',
     modelSlug: 'openai.gpt-5.6-luna',
-    providerSlug: 'aws-bedrock-mantle',
-    providerModelId: 'openai.gpt-5.6-luna',
-    enabled: false,
-  },
-  {
-    key: 'cmnovapremierroute0000001',
-    modelSlug: 'amazon.nova-premier',
-    providerSlug: 'aws-bedrock',
-    providerModelId: 'us.amazon.nova-premier-v1:0',
-    enabled: false,
-  },
-  {
-    key: 'cmnovaproroute0000000001',
-    modelSlug: 'amazon.nova-pro',
-    providerSlug: 'aws-bedrock',
-    providerModelId: 'us.amazon.nova-pro-v1:0',
+    providerSlug: 'openai',
+    providerModelId: 'gpt-5.6-luna',
     enabled: true,
   },
   {
-    key: 'cmgptrealtime2route0000001',
-    modelSlug: 'openai.gpt-realtime-2',
+    key: 'cmgptimage2route000000001',
+    modelSlug: 'openai.gpt-image-2',
     providerSlug: 'openai',
-    providerModelId: 'gpt-realtime-2',
+    providerModelId: 'gpt-image-2',
     enabled: true,
   },
   {
     key: 'cmopenai3smallembedroute1',
     modelSlug: 'openai.text-embedding-3-small',
-    providerSlug: 'openrouter',
-    providerModelId: 'openai/text-embedding-3-small',
-    enabled: true,
-  },
-  {
-    key: 'cmpollygenerativeroute0001',
-    modelSlug: 'amazon.polly-generative',
-    providerSlug: 'aws-polly',
-    providerModelId: 'generative',
-    enabled: true,
-  },
-  {
-    key: 'cmgemini25flashliteroute1',
-    modelSlug: 'google.gemini-2.5-flash-lite',
-    providerSlug: 'openrouter',
-    providerModelId: 'google/gemini-2.5-flash-lite',
+    providerSlug: 'openai',
+    providerModelId: 'text-embedding-3-small',
     enabled: true,
   },
 ] as const;
@@ -365,8 +250,8 @@ The long term vision is to create a new way of interacting with software. Rather
   { key: 'cmrnlzf650001qc7k4p5zem5w', slug: 'archive', name: 'Archive', summary: 'Capture notes, ideas, research, labels, folders, semantic search, and knowledge graph connections.', description: 'Archive lets you capture, organize, semantically search, and connect your notes through folders, labels, backlinks, and graph traversal.', position: 1, level: 3, parentKey: 'cmrnlzf640001qc7kazsr96k5' },
   { key: 'cmrnlzf650002qc7k4p5zem5w', slug: 'gallery', name: 'Gallery', summary: 'A smart image and memory library with albums, clusters, sharing links, QR invites, and AI powered discovery.', description: 'Gallery organizes memories and images into smart albums, clusters, shared links, QR invites, and AI powered discovery.', position: 2, level: 3, parentKey: 'cmrnlzf640001qc7kazsr96k5' },
   { key: 'cmrnlzf650003qc7k4p5zem5w', slug: 'signal', name: 'Signal', summary: 'An AI inbox guard across email and messages that filters noise, prioritizes what matters, and can reply in your tone.', description: 'Signal is an AI inbox guard that filters noise across connected inboxes, prioritizes important messages, and can reply in your tone when approved.', position: 3, level: 3, parentKey: 'cmrnlzf640001qc7kazsr96k5' },
-  { key: 'cmrnlzf650004qc7k4p5zem5w', slug: 'compass', name: 'Compass', summary: 'A 3D life map for memories, places visited, cities to visit, countries planned, and journeys rendered as a globe.', description: 'Compass maps visited places, future destinations, travel memories, and plans on an interactive 3D globe.', position: 4, level: 3, parentKey: 'cmrnlzf640001qc7kazsr96k5' },
-  { key: 'cmrnlzf650005qc7k4p5zem5w', slug: 'ascend', name: 'Ascend', summary: 'A personal AI coach for mental goals, habits, health, routines, finance, and custom AI generated audio books.', description: 'Ascend is a personal AI coach for goals, habits, health, routines, finance, and custom AI generated audio books and learning journeys.', position: 5, level: 3, parentKey: 'cmrnlzf640001qc7kazsr96k5' },
+  { key: 'cmrnlzf650004qc7k4p5zem5w', slug: 'compass', name: 'Compass', summary: 'An interactive 3D globe for exploring countries and viewing available cities.', description: 'Compass turns country discovery into a clear map of available destination cities.', position: 4, level: 3, parentKey: 'cmrnlzf640001qc7kazsr96k5' },
+  { key: 'cmrnlzf650005qc7k4p5zem5w', slug: 'ascend', name: 'Ascend', summary: 'A personal AI coach for mental goals, habits, health, routines, finance, and custom learning books.', description: 'Ascend is a personal AI coach for goals, habits, health, routines, finance, and custom books and learning journeys.', position: 5, level: 3, parentKey: 'cmrnlzf640001qc7kazsr96k5' },
   { key: 'cmrnlzf650026qc7k4p5zem5w', slug: 'chorus', name: 'Chorus', summary: 'Communication intelligence for messaging, channels, threads, and real time collaboration between people and AI.', description: 'Chorus is an AI native communication workspace for messaging, channels, threads, announcements, direct messages, and real time collaboration. It understands conversations semantically so people can search by meaning, summarize discussions, identify action items, translate messages, and recover important context without manual organization. Chorus supports reactions, mentions, attachments, presence, and persistent conversation history.', position: 6, level: 3, parentKey: 'cmrnlzf640001qc7kazsr96k5' },
   { key: 'cmrnlzf650027qc7k4p5zem5w', slug: 'cadence', name: 'Cadence', summary: 'Temporal intelligence for calendars, schedules, meetings, availability, reminders, and recurring events.', description: 'Cadence is an intelligent planning system for calendars, events, meetings, reminders, availability, deadlines, recurring schedules, reservations, and planning windows. It understands relationships between commitments, priorities, people, and resources, then helps resolve conflicts, suggest useful times, prepare agendas, protect focus time, and maintain clear follow through. Cadence treats time as structured information rather than a simple chronological list.', position: 7, level: 3, parentKey: 'cmrnlzf640001qc7kazsr96k5' },
   { key: 'cmrnlzf650029qc7k4p5zem5w', slug: 'prism', name: 'Prism', summary: 'Meeting and presence intelligence for voice, video, screen sharing, recordings, transcription, and collaborative sessions.', description: 'Prism is a real time meeting workspace for voice calls, video sessions, screen sharing, recordings, live transcription, captions, and AI assistance. It understands conversations as they happen, making discussions searchable and turning decisions, follow up items, and important context into durable knowledge. Prism preserves the full meeting experience through participants, recordings, transcripts, summaries, and collaborative session metadata.', position: 8, level: 3, parentKey: 'cmrnlzf640001qc7kazsr96k5' },
@@ -395,41 +280,17 @@ The long term vision is to create a new way of interacting with software. Rather
 type SeededOrchestratorSource = {
   name: string;
   role: string;
-  provider: string;
-  model: string;
-  voice: string;
   skill: string;
 };
 
-type SeededVoice = Pick<Voice, 'provider' | 'model' | 'modelLabel' | 'voice' | 'label' | 'language' | 'format'>;
-
 export const SEEDED_ORCHESTRATOR_SOURCES: SeededOrchestratorSource[] = [
-  ['Atlas', 'CEO', 'cedar'],
-  ['Metis', 'CIO', 'cedar'],
-  ['Echo', 'CKO', 'cedar'],
-  ['Matrix', 'CDO', 'cedar'],
-  ['Hermes', 'COO', 'cedar'],
-  ['Harmony', 'CHRO', 'marin'],
-  ['Phoenix', 'CGO', 'cedar'],
-  ['Iris', 'CCO', 'marin'],
-  ['Orbit', 'CMO', 'marin'],
-  ['Apollo', 'CSO', 'cedar'],
-  ['Athena', 'CPO', 'marin'],
-  ['Forge', 'CTO', 'cedar'],
-  ['Aura', 'CXO', 'marin'],
-  ['Pillar', 'CQO', 'cedar'],
-  ['Helios', 'CAIO', 'cedar'],
-  ['Vulcan', 'CAO', 'cedar'],
-  ['Ledger', 'CFO', 'cedar'],
-  ['Mercury', 'CRO', 'cedar'],
-  ['Sentinel', 'CISO', 'cedar'],
-  ['Themis', 'CLO', 'marin'],
-].map(([name, role, voice]) => ({
+  ['Atlas', 'CEO'], ['Metis', 'CIO'], ['Echo', 'CKO'], ['Matrix', 'CDO'], ['Hermes', 'COO'],
+  ['Harmony', 'CHRO'], ['Phoenix', 'CGO'], ['Iris', 'CCO'], ['Orbit', 'CMO'], ['Apollo', 'CSO'],
+  ['Athena', 'CPO'], ['Forge', 'CTO'], ['Aura', 'CXO'], ['Pillar', 'CQO'], ['Helios', 'CAIO'],
+  ['Vulcan', 'CAO'], ['Ledger', 'CFO'], ['Mercury', 'CRO'], ['Sentinel', 'CISO'], ['Themis', 'CLO'],
+].map(([name, role]) => ({
   name,
   role,
-  provider: 'openai',
-  model: 'gpt-realtime-2',
-  voice,
   skill: SEEDED_ORCHESTRATOR_SKILLS[name as keyof typeof SEEDED_ORCHESTRATOR_SKILLS],
 }));
 
@@ -440,81 +301,6 @@ const SEEDED_FOUNDER_ORCHESTRATORS = {
   'vincent@vorinthex.com': 'Iris',
   'anton@vorinthex.com': 'Apollo',
 } as const;
-
-export const SEEDED_VOICES: SeededVoice[] = [
-  {
-    provider: 'openai',
-    model: 'gpt-realtime-2',
-    modelLabel: 'OpenAI GPT Realtime 2',
-    voice: 'marin',
-    label: 'Marin',
-    language: 'en-US',
-    format: 'mp3',
-  },
-  {
-    provider: 'openai',
-    model: 'gpt-realtime-2',
-    modelLabel: 'OpenAI GPT Realtime 2',
-    voice: 'cedar',
-    label: 'Cedar',
-    language: 'en-US',
-    format: 'mp3',
-  },
-  {
-    provider: 'openai',
-    model: 'gpt-realtime-2',
-    modelLabel: 'OpenAI GPT Realtime 2',
-    voice: 'ash',
-    label: 'Ash',
-    language: 'en-US',
-    format: 'mp3',
-  },
-];
-
-/** Rewrites the previously seeded Sonic graph in place so production keeps stable references. */
-async function migrateRetiredNovaSonicModel(): Promise<void> {
-  await db.query(aql`
-    FOR model IN ${db.collection('models')}
-      FILTER model.slug == ${'amazon.nova-2-sonic'}
-      UPDATE model WITH {
-        slug: ${'openai.gpt-realtime-2'},
-        name: ${'OpenAI GPT Realtime 2'},
-        description: ${'OpenAI realtime model for natural speech-to-speech conversations, orchestrator dialogue, and low-latency calls.'},
-        supportedUseCases: ${'Real-time text and voice chat, orchestrator dialogue, speech synthesis, transcription, and low-latency conversational AI.'}
-      } IN ${db.collection('models')}
-  `);
-  await db.query(aql`
-    LET openAi = FIRST(
-      FOR provider IN ${db.collection('providers')}
-        FILTER provider.slug == ${'openai'}
-        RETURN provider
-    )
-    LET bedrock = FIRST(
-      FOR provider IN ${db.collection('providers')}
-        FILTER provider.slug == ${'aws-bedrock'}
-        RETURN provider
-    )
-    FOR model IN ${db.collection('models')}
-      FILTER model.slug == ${'openai.gpt-realtime-2'}
-      FOR route IN ${db.collection('modelProviders')}
-        FILTER openAi != null AND bedrock != null AND route.modelKey == model.key AND route.providerKey == bedrock.key
-        UPDATE route WITH { providerKey: openAi.key, providerModelId: ${'gpt-realtime-2'}, enabled: true } IN ${db.collection('modelProviders')}
-  `);
-  await db.query(aql`
-    FOR voice IN ${db.collection('voices')}
-      FILTER voice.provider == ${'aws-bedrock'} AND voice.model == ${'amazon.nova-2-sonic-v1:0'}
-      LET replacement = voice.voice == ${'Tiffany'} ? { voice: ${'marin'}, label: ${'Marin'} } : voice.voice == ${'Matthew'} ? { voice: ${'cedar'}, label: ${'Cedar'} } : null
-      FILTER replacement != null
-      UPDATE voice WITH {
-        provider: ${'openai'},
-        model: ${'gpt-realtime-2'},
-        modelLabel: ${'OpenAI GPT Realtime 2'},
-        voice: replacement.voice,
-        label: replacement.label,
-        updatedAt: ${now()}
-      } IN ${db.collection('voices')}
-  `);
-}
 
 async function upsertSeedProvider(seed: (typeof SEEDED_PROVIDERS)[number]): Promise<SeedResult> {
   const existing = await getProviderBySlug(seed.slug);
@@ -583,113 +369,6 @@ async function upsertSeedModelAction(seed: (typeof SEEDED_MODEL_ACTIONS)[number]
   return { collection: 'modelActions', key: existing.key, status: 'updated' };
 }
 
-/** Retires models and relations previously owned by the seed without touching custom routes. */
-export async function reconcileObsoleteSeededModelActions(store: ObsoleteModelActionReconciliationStore = {
-  getModelBySlug,
-  getModelById,
-  updateModel: updatePersistedModel,
-  getModelActionByPair,
-  listEnabledModelActionsByActionSlug,
-  updateModelAction,
-  getProviderBySlug,
-  getModelProviderByPair,
-  updateModelProvider,
-}): Promise<SeedResult[]> {
-  const results: SeedResult[] = [];
-  for (const modelSlug of ['openai.gpt-5.6-sol', 'openai.gpt-5.6-terra', 'openai.gpt-5.6-luna']) {
-    const model = await store.getModelBySlug(modelSlug);
-    if (!model) continue;
-    await store.updateModel(model.key, { enabled: false });
-    results.push({ collection: 'models', key: model.key, status: 'updated' });
-    for (const actionDefinition of ACTION_DEFINITIONS) {
-      const existing = await store.getModelActionByPair(model.key, actionDefinition.id);
-      if (!existing?.enabled) continue;
-      await store.updateModelAction(existing.key, { enabled: false });
-      results.push({ collection: 'modelActions', key: existing.key, status: 'updated' });
-    }
-  }
-
-  const realtime = await store.getModelBySlug('openai.gpt-realtime-2');
-  if (realtime) {
-    const existing = await store.getModelActionByPair(realtime.key, 'orchestrator-chat');
-    if (existing?.enabled) {
-      await store.updateModelAction(existing.key, { enabled: false });
-      results.push({ collection: 'modelActions', key: existing.key, status: 'updated' });
-    }
-  }
-
-  const titan = await store.getModelBySlug('amazon.titan-embed-text-v2');
-  if (titan) {
-    await store.updateModel(titan.key, { enabled: false });
-    results.push({ collection: 'models', key: titan.key, status: 'updated' });
-    const legacyAction = await store.getModelActionByPair(titan.key, 'embed');
-    if (legacyAction?.enabled) {
-      await store.updateModelAction(legacyAction.key, { enabled: false });
-      results.push({ collection: 'modelActions', key: legacyAction.key, status: 'updated' });
-    }
-    const bedrock = await store.getProviderBySlug?.('aws-bedrock');
-    const legacyRoute = bedrock ? await store.getModelProviderByPair?.(titan.key, bedrock.key) : null;
-    if (legacyRoute?.enabled && store.updateModelProvider) {
-      await store.updateModelProvider(legacyRoute.key, { enabled: false });
-      results.push({ collection: 'modelProviders', key: legacyRoute.key, status: 'updated' });
-    }
-  }
-
-  const currentEmbedding = await store.getModelBySlug('openai.text-embedding-3-small');
-  if (currentEmbedding) {
-    const openai = await store.getProviderBySlug?.('openai');
-    const directRoute = openai ? await store.getModelProviderByPair?.(currentEmbedding.key, openai.key) : null;
-    if (directRoute?.enabled && store.updateModelProvider) {
-      await store.updateModelProvider(directRoute.key, { enabled: false });
-      results.push({ collection: 'modelProviders', key: directRoute.key, status: 'updated' });
-    }
-  }
-
-  if (currentEmbedding && store.listEnabledModelActionsByActionSlug && store.getModelById) {
-    const openrouter = await store.getProviderBySlug?.('openrouter');
-    const obsoleteBindings = (await store.listEnabledModelActionsByActionSlug('embed'))
-      .filter(({ modelKey }) => modelKey !== currentEmbedding.key);
-    for (const binding of obsoleteBindings) {
-      const model = await store.getModelById(binding.modelKey);
-      if (model?.enabled) {
-        await store.updateModel(model.key, { enabled: false });
-        results.push({ collection: 'models', key: model.key, status: 'updated' });
-      }
-      await store.updateModelAction(binding.key, { enabled: false });
-      results.push({ collection: 'modelActions', key: binding.key, status: 'updated' });
-      const route = openrouter ? await store.getModelProviderByPair?.(binding.modelKey, openrouter.key) : null;
-      if (route?.enabled && store.updateModelProvider) {
-        await store.updateModelProvider(route.key, { enabled: false });
-        results.push({ collection: 'modelProviders', key: route.key, status: 'updated' });
-      }
-    }
-  }
-
-  for (const { modelSlug, providerSlug } of [
-    { modelSlug: 'qwen.qwen3-vl-32b-instruct', providerSlug: 'openrouter' },
-    { modelSlug: 'amazon.nova-lite', providerSlug: 'aws-bedrock' },
-  ]) {
-    const legacyModel = await store.getModelBySlug(modelSlug);
-    if (!legacyModel) continue;
-    await store.updateModel(legacyModel.key, { enabled: false });
-    results.push({ collection: 'models', key: legacyModel.key, status: 'updated' });
-    for (const actionDefinition of ACTION_DEFINITIONS) {
-      const binding = await store.getModelActionByPair(legacyModel.key, actionDefinition.id);
-      if (!binding?.enabled) continue;
-      await store.updateModelAction(binding.key, { enabled: false });
-      results.push({ collection: 'modelActions', key: binding.key, status: 'updated' });
-    }
-    const provider = await store.getProviderBySlug?.(providerSlug);
-    const route = provider ? await store.getModelProviderByPair?.(legacyModel.key, provider.key) : null;
-    if (route?.enabled && store.updateModelProvider) {
-      await store.updateModelProvider(route.key, { enabled: false });
-      results.push({ collection: 'modelProviders', key: route.key, status: 'updated' });
-    }
-  }
-
-  return results;
-}
-
 async function upsertSeedModelProvider(seed: (typeof SEEDED_MODEL_PROVIDERS)[number]): Promise<SeedResult> {
   const parsed = modelProviderSeedSchema.parse(seed);
   const model = await getModelBySlug(parsed.modelSlug);
@@ -743,35 +422,7 @@ async function upsertSeedOrganization(seed: typeof SEEDED_ORGANIZATION): Promise
   return { collection: 'organizations', key: existing.key, status: 'updated' };
 }
 
-async function upsertSeedVoice(seed: (typeof SEEDED_VOICES)[number]): Promise<SeedResult> {
-  const existing = await getVoiceByProviderModelVoice(seed.provider, seed.model, seed.voice);
-  if (!existing) {
-    const key = newId();
-    await insertVoice({
-      ...seed,
-      key,
-      createdAt: now(),
-      updatedAt: now(),
-    });
-    return { collection: 'voices', key, status: 'created' };
-  }
-
-  const patch: Partial<Omit<Voice, 'key' | 'embedding'>> = {
-    modelLabel: seed.modelLabel,
-    label: seed.label,
-    language: seed.language,
-    format: seed.format,
-    updatedAt: now(),
-  };
-  await updateVoice(existing.key, patch);
-  return { collection: 'voices', key: existing.key, status: 'updated' };
-}
-
 async function upsertSeedOrchestrator(seed: (typeof SEEDED_ORCHESTRATOR_SOURCES)[number]): Promise<SeedResult> {
-  const voice = await getVoiceByProviderModelVoice(seed.provider, seed.model, seed.voice);
-  if (!voice) {
-    throw new Error(`Seed voice not found for orchestrator "${seed.name}": ${seed.provider}/${seed.model}/${seed.voice}`);
-  }
   const existing = await getOrchestratorByName(seed.name);
   if (!existing) {
     const key = newId();
@@ -779,7 +430,6 @@ async function upsertSeedOrchestrator(seed: (typeof SEEDED_ORCHESTRATOR_SOURCES)
       key,
       name: seed.name,
       role: seed.role,
-      voiceId: voice.key,
       skill: seed.skill,
       createdAt: now(),
       updatedAt: now(),
@@ -789,7 +439,6 @@ async function upsertSeedOrchestrator(seed: (typeof SEEDED_ORCHESTRATOR_SOURCES)
 
   const patch: Partial<Omit<Orchestrator, 'key' | 'embedding'>> = {
     role: seed.role,
-    voiceId: voice.key,
     skill: seed.skill,
     updatedAt: now(),
   };
@@ -816,21 +465,19 @@ async function assignSeededFounderOrchestrators(rootOrganizationKey: string): Pr
 export async function seedAiRuntimeNodes(upserters: AiRuntimeSeedUpserters = {
   provider: upsertSeedProvider,
   model: upsertSeedModel,
-  reconcileObsoleteModelActions: reconcileObsoleteSeededModelActions,
   modelAction: upsertSeedModelAction,
   modelProvider: upsertSeedModelProvider,
 }): Promise<SeedResult[]> {
   const results: SeedResult[] = [];
   for (const seed of SEEDED_PROVIDERS) results.push(await upserters.provider(seed));
   for (const seed of SEEDED_MODELS) results.push(await upserters.model(seed));
-  results.push(...await upserters.reconcileObsoleteModelActions());
   for (const seed of SEEDED_MODEL_ACTIONS) results.push(await upserters.modelAction(seed));
   for (const seed of SEEDED_MODEL_PROVIDERS) results.push(await upserters.modelProvider(seed));
   return results;
 }
 
 export async function seedCoreDbNodes(): Promise<SeedResult[]> {
-  await migrateRetiredNovaSonicModel();
+  await retireAiPersistence(db);
   const results = await seedAiRuntimeNodes();
 
   results.push(await upsertSeedOrganization(SEEDED_ORGANIZATION));
@@ -909,10 +556,6 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
 
   const membershipReconciliation = await reconcileOrganizationScopeMemberships(rootOrganization.key);
   results.push(...membershipReconciliation.created.map(({ key }) => ({ collection: 'scopeMembers', key, status: 'created' as const })));
-
-  for (const voice of SEEDED_VOICES) {
-    results.push(await upsertSeedVoice(voice));
-  }
 
   for (const orchestrator of SEEDED_ORCHESTRATOR_SOURCES) {
     results.push(await upsertSeedOrchestrator(orchestrator));

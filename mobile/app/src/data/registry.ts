@@ -58,10 +58,10 @@ export const CAPABILITIES: readonly Capability[] = registrySchema.parse([
     slug: "compass",
     name: "Compass",
     onboardingDescription:
-      "Navigate decisions with clarity and directional guidance.",
-    tagline: "Your places, memories and\njourneys, mapped with clarity.",
-    searchPlaceholder: "Search compass...",
-    sectionLabel: "Places & journeys",
+      "See your cities clearly on an interactive map.",
+    tagline: "Your saved cities,\nmapped with clarity.",
+    searchPlaceholder: "Search countries...",
+    sectionLabel: "Saved cities",
   },
   {
     slug: "ascend",

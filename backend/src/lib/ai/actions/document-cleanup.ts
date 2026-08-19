@@ -4,5 +4,5 @@ import type { ActionDefinition } from './types';
 export const documentCleanupAction: ActionDefinition = {
   id: 'document-cleanup',
   modelPolicy: 'required',
-  models: [{ provider: 'openrouter', model: IMAGE_CAPTION_MODEL, priority: 100 }],
+  models: [{ provider: 'openai', model: IMAGE_CAPTION_MODEL, priority: 100 }],
 };

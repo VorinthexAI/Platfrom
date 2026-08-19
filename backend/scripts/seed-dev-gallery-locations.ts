@@ -8,9 +8,10 @@ import { collectionMemberSchema } from '@/lib/db/collection-members.node';
 import { collectionSchema } from '@/lib/db/collections.node';
 import { getPersonalAuthContext } from '@/lib/db/personal-auth-context.node';
 import { getUserByEmailHash } from '@/lib/db/users.node';
-import { currentEmbeddingSchema, embedText } from '@/lib/embeddings';
+import { currentEmbeddingSchema, embedTexts } from '@/lib/embeddings';
 import { galleryOperations } from '@/lib/gallery/operations';
 import { getDefaultGalleryRepository } from '@/lib/gallery/repository';
+import { buildImageEmbeddingText } from '@/lib/image-embedding';
 import { s3, S3_BUCKET } from '@/lib/s3';
 import {
   assertGalleryLocationFixtureEnvironment, buildGalleryLocationFixturePlan, GALLERY_LOCATION_FIXTURE_EMAIL,
@@ -19,6 +20,7 @@ import {
 
 const options = parseGalleryLocationFixtureArgs(process.argv.slice(2));
 assertGalleryLocationFixtureEnvironment(process.env);
+const fixtureCaption = (city: string, country: string) => `Synthetic Gallery QA image for ${city}, ${country}. Abstract city scene used only for local development testing.`;
 
 async function main() {
   const user = await getUserByEmailHash(await hashUserEmail(GALLERY_LOCATION_FIXTURE_EMAIL));
@@ -96,11 +98,22 @@ async function main() {
   console.log(JSON.stringify({ ...manifest, storageKeys, preflight: 'clear' }, null, 2));
   if (options.mode === 'dry-run') return;
 
+  const collectionEmbeddingText = `${plan.collection.name}\n\n${plan.collection.description}`;
+  const imageEmbeddingTexts = plan.images.flatMap((fixture) => {
+    const caption = fixtureCaption(fixture.city, fixture.country);
+    return [
+      buildImageEmbeddingText({ filename: fixture.filename, caption }),
+      buildImageEmbeddingText({ filename: fixture.filename, caption, city: fixture.city, country: fixture.country, countryCode: fixture.countryCode }),
+    ];
+  });
+  const fixtureEmbeddings = await embedTexts({ texts: [collectionEmbeddingText, ...imageEmbeddingTexts] });
+  const collectionEmbedding = currentEmbeddingSchema.parse(fixtureEmbeddings[0]);
+  const imageEmbeddingByText = new Map(imageEmbeddingTexts.map((text, index) => [text, currentEmbeddingSchema.parse(fixtureEmbeddings[index + 1])]));
   const createdImageKeys: string[] = [];
   let collectionCreated = false;
   try {
     const now = new Date().toISOString();
-    const collection = collectionSchema.parse({ key: plan.collection.key, scopeKey: auth.scope.key, name: plan.collection.name, description: plan.collection.description, embedding: currentEmbeddingSchema.parse(await embedText({ text: `${plan.collection.name}\n\n${plan.collection.description}` })), isFavorite: false, createdAt: now, updatedAt: now });
+    const collection = collectionSchema.parse({ key: plan.collection.key, scopeKey: auth.scope.key, name: plan.collection.name, description: plan.collection.description, embedding: collectionEmbedding, isFavorite: false, createdAt: now, updatedAt: now });
     const member = collectionMemberSchema.parse({ key: plan.collection.memberKey, scopeKey: auth.scope.key, collectionKey: collection.key, memberKey: auth.membership.key, role: 'owner', createdAt: now });
     if (!await repository.createCollection(collection, member)) throw new Error('Canonical Gallery collection creation was denied.');
     collectionCreated = true;
@@ -114,7 +127,12 @@ async function main() {
         location: { city: fixture.city, country: fixture.country, countryCode: fixture.countryCode },
       }, {
         createCaptionKey: () => fixture.captionKey,
-        caption: async () => ({ caption: `Synthetic Gallery QA image for ${fixture.city}, ${fixture.country}. Abstract city scene used only for local development testing.`, score: fixture.captionScore }),
+        caption: async () => ({ caption: fixtureCaption(fixture.city, fixture.country), score: fixture.captionScore }),
+        embed: async (text) => {
+          const embedding = imageEmbeddingByText.get(text);
+          if (!embedding) throw new Error(`No deterministic fixture embedding was prepared for ${fixture.key}.`);
+          return embedding;
+        },
       });
       createdImageKeys.push(image.key);
       const relation = collectionImageSchema.parse({ key: fixture.placementKey, scopeKey: auth.scope.key, collectionKey: collection.key, imageKey: image.key, addedByKey: auth.membership.key, createdAt: new Date().toISOString() });

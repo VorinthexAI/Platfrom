@@ -13,8 +13,8 @@ const domain = {
 } as unknown as ToolContext;
 
 const expected: Array<[AssistantSurface, string[]]> = [
-  ['knowledge-workspace', ['content.hidden.list', 'folder.hide', 'folder.reveal', 'document.hide', 'document.reveal', 'folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy', 'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.summary.audio.generate', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.enhance', 'document.translate', 'document.list-versions', 'document.restore-version', 'document.download', 'content.neighbors', 'content.search-history.delete', 'knowledge.search', 'note.write']],
-  ['travel-workspace', ['place.list', 'place.create', 'place.visit.create', 'trip.create', 'trip.place.add', 'trip.place.remove']],
+  ['knowledge-workspace', ['content.hidden.list', 'folder.hide', 'folder.reveal', 'document.hide', 'document.reveal', 'folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy', 'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.enhance', 'document.translate', 'document.list-versions', 'document.restore-version', 'document.download', 'content.neighbors', 'content.search-history.delete', 'knowledge.search', 'note.write']],
+  ['travel-workspace', ['place.list']],
   ['signal-workspace', ['email.overview', 'email.sync', 'email.thread.read', 'email.thread.mark-read', 'email.thread.favorite', 'email.draft.create', 'email.draft.update', 'email.draft.send', 'email.disconnect']],
   ['book-workspace', ['book.list', 'book.detail', 'book.chapter.progress', 'book.create']],
 ];
@@ -33,8 +33,6 @@ describe('personal assistant service capabilities', () => {
   });
 
   test('executes canonical services with identity derived only from the member principal', async () => {
-    const placeKey = newId();
-    const tripKey = newId();
     const threadKey = newId();
     const draftKey = newId();
     const bookKey = newId();
@@ -42,11 +40,6 @@ describe('personal assistant service capabilities', () => {
     const calls: unknown[] = [];
     const travel: any = {
       overview: async (...args: unknown[]) => { calls.push(['travel.overview', ...args]); return {}; },
-      createPlace: async (...args: unknown[]) => { calls.push(['travel.createPlace', ...args]); return {}; },
-      createVisit: async (...args: unknown[]) => { calls.push(['travel.createVisit', ...args]); return {}; },
-      createTrip: async (...args: unknown[]) => { calls.push(['travel.createTrip', ...args]); return {}; },
-      appendPlace: async (...args: unknown[]) => { calls.push(['travel.appendPlace', ...args]); return {}; },
-      removePlace: async (...args: unknown[]) => { calls.push(['travel.removePlace', ...args]); return {}; },
     };
     const email: any = {
       overview: async (...args: unknown[]) => { calls.push(['email.overview', ...args]); return {}; },
@@ -68,11 +61,6 @@ describe('personal assistant service capabilities', () => {
     const context: any = { domain, requestKey: 'request-1', travel, email, books };
     const cases: Array<[AssistantSurface, string, unknown]> = [
       ['travel-workspace', 'place.list', {}],
-      ['travel-workspace', 'place.create', { name: 'Lisbon', latitude: 38.72, longitude: -9.14, countryCode: 'PT' }],
-      ['travel-workspace', 'place.visit.create', { placeKey }],
-      ['travel-workspace', 'trip.create', { name: 'Portugal' }],
-      ['travel-workspace', 'trip.place.add', { tripKey, placeKey }],
-      ['travel-workspace', 'trip.place.remove', { tripKey, placeKey }],
       ['signal-workspace', 'email.overview', {}],
       ['signal-workspace', 'email.sync', {}],
       ['signal-workspace', 'email.thread.read', { threadKey }],

@@ -5,7 +5,6 @@ import type { ActionId } from '@/lib/ai/actions';
 import type { ToolContext } from './tool-context';
 import type { DocumentParseDependencies, DocumentParseInput } from '@/lib/ai/document-processing';
 import type { RouterDependencies } from '@/lib/ai/router';
-import { NoEligibleRouteError, ProviderExecutionError } from '@/lib/ai/router/errors';
 import type { DocumentObjectStorage } from '@/lib/ai/document-processing/storage';
 import type { Folder } from '@/lib/db/folders.node';
 import type { Document } from '@/lib/db/documents.node';
@@ -25,7 +24,6 @@ import { sanitizeDocumentContent } from '@/lib/ai/document-processing/actions';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
 import { chunkDocumentContent, documentSemanticHash } from '@/lib/ai/document-processing/chunking';
 import type { DocumentScanInput } from '@/lib/ai/document-scanning';
-import { DEFAULT_AUDIO_GENERATION_VOICE, generateAudioChunks as canonicalGenerateAudioChunks } from './audio-generate';
 import type { UserSearchService } from '@/lib/user-searches/service';
 
 type Role = 'viewer' | 'moderator' | 'admin' | 'owner';
@@ -97,7 +95,7 @@ export interface ContentSearchQueryStore {
   record(input: { key: string; actorKey: string; scopeKey: string; query: string; normalizedQuery: string; folderKey: string | null; includeDescendants: boolean; cacheVersion: number; output: unknown; now: string }): Promise<void>;
 }
 
-export interface ContentActionResult { text?: string; audio?: Uint8Array; audioBase64?: string; mimeType?: string; durationMs?: number; content?: string; embedding?: number[]; contentChunks?: string[]; chunkEmbeddings?: number[][]; semanticChunkCount?: number; semanticContentHash?: string }
+export interface ContentActionResult { text?: string; content?: string; embedding?: number[]; contentChunks?: string[]; chunkEmbeddings?: number[][]; semanticChunkCount?: number; semanticContentHash?: string }
 export interface ContentToolDependencies extends RouterDependencies {
   signal?: AbortSignal;
   repository?: ContentRepository;
@@ -111,7 +109,6 @@ export interface ContentToolDependencies extends RouterDependencies {
   clock?: () => Date;
   id?: () => string;
   random?: (size: number) => Uint8Array;
-  maxSpeechChunkCharacters?: number;
   ingestion?: DocumentParseDependencies;
   idempotency?: ContentIdempotencyStore;
   maxDownloadBytes?: number;
@@ -125,19 +122,14 @@ export interface ContentToolDependencies extends RouterDependencies {
   signFolderCoverUrl?: (storageKey: string) => Promise<string>;
   signDocumentSourceUrl?: (storageKey: string) => Promise<string>;
   signAudioUrl?: (storageKey: string) => Promise<string>;
-  mergeAudio?: (chunks: Uint8Array[], signal?: AbortSignal) => Promise<Uint8Array>;
-  audioDuration?: (bytes: Uint8Array) => number;
-  generateAudioChunks?: typeof canonicalGenerateAudioChunks;
 }
 
 const rank: Record<Role, number> = { viewer: 1, moderator: 2, admin: 3, owner: 4 };
 const ROUTED_EMBEDDING_CONCURRENCY = 8;
-const PERSISTED_AUDIO_MAX_CHARACTERS = 120_000;
-const PERSISTED_AUDIO_MAX_BYTES = 100 * 1024 * 1024;
 const CONTENT_SEARCH_CACHE_VERSION = 4;
 const scrypt = promisify(nodeScrypt);
 const MUTATIONS = new Set<ContentToolName>([
-  'folder.create', 'folder.update', 'folder.rename', 'folder.move', 'folder.copy', 'folder.delete', 'document.parse', 'document.scan', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.delete', 'document.share', 'document.unshare', 'document.create-version', 'document.restore-version', 'document.delete-version', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.summarize', 'document.summary.audio.generate', 'document.translate', 'document.rewrite', 'content.search-history.delete',
+  'folder.create', 'folder.update', 'folder.rename', 'folder.move', 'folder.copy', 'folder.delete', 'document.parse', 'document.scan', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.delete', 'document.share', 'document.unshare', 'document.create-version', 'document.restore-version', 'document.delete-version', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.summarize', 'document.translate', 'document.rewrite', 'content.search-history.delete',
 ]);
 
 function fail(code: ContentErrorCode, message: string, tool: ContentToolName, action?: string, resourceKey?: string, cause?: unknown, retryable = false): never {
@@ -161,26 +153,6 @@ function mappedError(error: unknown, tool: ContentToolName, action?: string, res
   }
   const validation = error && typeof error === 'object' && ('issues' in error || ('name' in error && error.name === 'ZodError'));
   return new ContentError(validation ? 'CONTENT_INVALID_INPUT' : 'CONTENT_CONFLICT', validation ? 'Content tool input or output was invalid.' : 'Content operation failed.', tool, { action, resourceKey, cause: error, retryable: !validation });
-}
-
-function speechError(error: unknown, tool: ContentToolName, action: string, resourceKey: string): ContentError {
-  if (error instanceof ProviderExecutionError) {
-    const codes = new Set(error.attempts.map(({ code }) => code));
-    if (codes.has('authentication_failed') || codes.has('not_configured') || codes.has('adapter_unavailable')) {
-      return new ContentError('DOCUMENT_SPEECH_FAILED', 'Audio generation is unavailable because the speech provider is not configured.', tool, { action, resourceKey, cause: error });
-    }
-    if (codes.has('invalid_input') || codes.has('unsupported_action')) {
-      return new ContentError('DOCUMENT_SPEECH_FAILED', 'The selected language or voice is not supported for audio generation.', tool, { action, resourceKey, cause: error });
-    }
-    if (codes.has('rate_limited')) {
-      return new ContentError('DOCUMENT_SPEECH_FAILED', 'Audio generation is busy. Try again shortly.', tool, { action, resourceKey, cause: error, retryable: true });
-    }
-    if (codes.has('provider_unavailable') || codes.has('timeout')) {
-      return new ContentError('DOCUMENT_SPEECH_FAILED', 'Audio generation is temporarily unavailable. Try again.', tool, { action, resourceKey, cause: error, retryable: true });
-    }
-  }
-  if (error instanceof NoEligibleRouteError) return new ContentError('DOCUMENT_SPEECH_FAILED', 'Audio generation is not configured.', tool, { action, resourceKey, cause: error });
-  return new ContentError('DOCUMENT_SPEECH_FAILED', 'Document audio could not be generated.', tool, { action, resourceKey, cause: error, retryable: true });
 }
 
 async function folderView(folder: Folder, dependencies: Pick<RuntimeDefaults, 'getFolderCoverImage' | 'signFolderCoverUrl'>) {
@@ -449,12 +421,10 @@ interface RuntimeDefaults {
   signFolderCoverUrl: NonNullable<ContentToolDependencies['signFolderCoverUrl']>;
   signDocumentSourceUrl: NonNullable<ContentToolDependencies['signDocumentSourceUrl']>;
   signAudioUrl: NonNullable<ContentToolDependencies['signAudioUrl']>;
-  mergeAudio: NonNullable<ContentToolDependencies['mergeAudio']>;
-  audioDuration: NonNullable<ContentToolDependencies['audioDuration']>;
 }
 
 async function defaults(deps: ContentToolDependencies, context: ToolContext): Promise<RuntimeDefaults> {
-  const [{ newId }, storage, processing, embeddings, router, ledger, exports, images, imageUrl, audioUrl, audio, duration] = await Promise.all([
+  const [{ newId }, storage, processing, embeddings, router, ledger, exports, images, imageUrl, audioUrl] = await Promise.all([
     import('@/lib/ids'),
     import('@/lib/ai/document-processing/storage'),
     import('@/lib/ai/document-processing'),
@@ -465,8 +435,6 @@ async function defaults(deps: ContentToolDependencies, context: ToolContext): Pr
     import('@/lib/db/images.node'),
     import('@/lib/gallery/image-url'),
     import('@/lib/ai/audio/audio-url'),
-    import('@/lib/ai/audio/merge-mp3'),
-    import('@/lib/ai/audio/mp3-duration'),
   ]);
   const executeAction = deps.executeAction ?? router.executeAction;
   const embedding = deps.embed ? (text: string) => deps.embed!(text) : async (text: string, purpose: 'document' | 'query' = 'document') => {
@@ -509,8 +477,6 @@ async function defaults(deps: ContentToolDependencies, context: ToolContext): Pr
     signFolderCoverUrl: deps.signFolderCoverUrl ?? imageUrl.signedImageUrl,
     signDocumentSourceUrl: deps.signDocumentSourceUrl ?? imageUrl.signedImageUrl,
     signAudioUrl: deps.signAudioUrl ?? audioUrl.signedAudioUrl,
-    mergeAudio: deps.mergeAudio ?? audio.mergeMp3Chunks,
-    audioDuration: deps.audioDuration ?? duration.mp3DurationMs,
   };
 }
 
@@ -582,44 +548,11 @@ async function fingerprintInput(input: unknown): Promise<string> {
 }
 
 export function isContentMutation(tool: ContentToolName, input: any): boolean {
-  if (tool === 'document.read') return input.mode === 'audio' && input.persistAudio === true;
   if (tool === 'document.summarize') return input.persist === true;
   if (tool === 'document.enhance') return input.mode !== 'preview';
   if (tool === 'document.translate') return input.mode !== 'preview';
   if (tool === 'document.rewrite') return Array.isArray(input?.rewrites) && input.rewrites.some((item: any) => item?.mode !== 'preview');
   return MUTATIONS.has(tool);
-}
-
-function speechChunks(raw: string, includeCode: boolean, maximum: number) {
-  const masked = includeCode ? raw : raw
-    .replace(/```[\s\S]*?```/g, (value) => ' '.repeat(value.length))
-    .replace(/`[^`]+`/g, (value) => ' '.repeat(value.length));
-  const chunks: Array<{ text: string; start: number; end: number }> = [];
-  for (const match of masked.matchAll(/\S[\s\S]*?(?=\n{2,}|$)/g)) {
-    const block = match[0];
-    const blockStart = match.index;
-    let offset = 0;
-    while (offset < block.length) {
-      const remaining = block.slice(offset);
-      if (!remaining.trim()) break;
-      let length = Math.min(maximum, remaining.length);
-      if (length < remaining.length) {
-        const boundary = remaining.slice(0, length + 1).search(/(?<=[.!?])\s+(?=[A-Z#*-])|\n|\s(?=\S+$)/);
-        if (boundary > maximum / 2) length = boundary + 1;
-        else {
-          const whitespace = remaining.slice(0, length).lastIndexOf(' ');
-          if (whitespace > maximum / 2) length = whitespace + 1;
-        }
-      }
-      const piece = remaining.slice(0, length);
-      const leading = piece.length - piece.trimStart().length;
-      const trailing = piece.length - piece.trimEnd().length;
-      const text = piece.trim();
-      if (text) chunks.push({ text, start: blockStart + offset + leading, end: blockStart + offset + piece.length - trailing });
-      offset += Math.max(length, 1);
-    }
-  }
-  return chunks;
 }
 
 async function hashPassword(password: string, random: (size: number) => Uint8Array) { const salt = Buffer.from(random(16)); const hash = await scrypt(password, salt, 32) as Buffer; return `scrypt:${salt.toString('hex')}:${hash.toString('hex')}`; }
@@ -700,47 +633,6 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
     for (const storageKey of new Set(keys.filter((key): key is string => typeof key === 'string' && key.length > 0))) {
       try { await storageOperation('delete', resourceKey, scopeKey, () => d.storage.delete(storageKey)); }
       catch (error) { throw new ContentError('CONTENT_CONFLICT', 'Storage deletion failed; metadata pointers were retained for retry.', tool, { action: 'storage', resourceKey, cause: error, retryable: true }); }
-    }
-  };
-  const generateDurableMp3 = async (text: string, resourceKey: string, voice = DEFAULT_AUDIO_GENERATION_VOICE, language?: string) => {
-    if (text.length > PERSISTED_AUDIO_MAX_CHARACTERS) fail('DOCUMENT_TOO_LARGE', `Durable audio generation supports text up to ${PERSISTED_AUDIO_MAX_CHARACTERS} characters.`, tool, 'generate-speech', resourceKey);
-    const generated: Uint8Array[] = [];
-    let generatedBytes = 0;
-    try {
-      const generate = dependencies.generateAudioChunks ?? canonicalGenerateAudioChunks;
-      for await (const chunk of generate({ text, wordsPerChunk: 1_000, voice, ...(language ? { language } : {}) }, {
-        ...dependencies,
-        organizationKey: context.organizationKey,
-        duration: d.audioDuration,
-        ...(dependencies.runAction ? { synthesize: async (input: any) => {
-          const output = await action('generate-speech', input, resourceKey);
-          const audioBase64 = output.audioBase64 ?? (output.audio ? Buffer.from(output.audio).toString('base64') : undefined);
-          return { audioBase64: z.string().min(1).parse(audioBase64), mimeType: z.string().min(1).parse(output.mimeType ?? 'audio/mpeg') };
-        } } : {}),
-      })) {
-        dependencies.signal?.throwIfAborted();
-        const bytes = new Uint8Array(Buffer.from(chunk.audioBase64, 'base64'));
-        if (bytes.byteLength === 0) throw new Error('Speech output was empty.');
-        generatedBytes += bytes.byteLength;
-        if (generatedBytes > PERSISTED_AUDIO_MAX_BYTES) fail('DOCUMENT_TOO_LARGE', 'Generated speech segments exceed the 100 MiB processing limit.', tool, 'generate-speech', resourceKey);
-        generated.push(bytes);
-      }
-    } catch (error) {
-      if (error instanceof ContentError) throw error;
-      throw speechError(error, tool, 'generate-speech', resourceKey);
-    }
-    if (generated.length === 0) fail('DOCUMENT_SPEECH_FAILED', 'This content has no text that can be narrated.', tool, 'generate-speech', resourceKey);
-    let bytes: Uint8Array;
-    try { bytes = await d.mergeAudio(generated, dependencies.signal); }
-    catch (error) { throw new ContentError('DOCUMENT_SPEECH_FAILED', 'Generated audio segments could not be finalized.', tool, { action: 'audio-merge', resourceKey, cause: error, retryable: true }); }
-    dependencies.signal?.throwIfAborted();
-    if (bytes.byteLength > PERSISTED_AUDIO_MAX_BYTES) fail('DOCUMENT_TOO_LARGE', 'Generated audio exceeds the 100 MiB storage limit.', tool, 'storage', resourceKey);
-    try {
-      const durationMs = d.audioDuration(bytes);
-      if (!Number.isFinite(durationMs) || durationMs <= 0) throw new Error('Audio duration must be positive.');
-      return { bytes, durationMs };
-    } catch (error) {
-      throw new ContentError('DOCUMENT_SPEECH_FAILED', 'Generated audio could not be validated.', tool, { action: 'audio-validate', resourceKey, cause: error, retryable: true });
     }
   };
   const roleFor = async (scopeKey: string, minimum: Role, resourceKey?: string, repository = repo) => {
@@ -1467,94 +1359,13 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         ...(offset + limit < values.length ? { cursor: Buffer.from(String(offset + limit)).toString('base64url') } : {}),
       };
     } else if (tool === 'document.read') {
-      if (input.atomic && input.mode === 'audio') fail('CONTENT_CONFLICT', 'Atomic audio generation is impossible because speech is an external side effect.', tool, 'speak');
       result = await batch(tool, input.documentKeys.map((key: string) => ({
         key,
         run: async () => {
-           const current = await document(key, input.mode === 'audio' && input.persistAudio ? 'moderator' : 'viewer', false);
-           if (input.mode === 'content') return { documentKey: key, title: current.name, content: current.content };
-           if (input.persistAudio && current.content.length > PERSISTED_AUDIO_MAX_CHARACTERS) fail('DOCUMENT_TOO_LARGE', `Full audio generation supports documents up to ${PERSISTED_AUDIO_MAX_CHARACTERS} characters.`, tool, 'generate-speech', key);
-           if (input.persistAudio) {
-             if (!repo.createAudioVersion) fail('CONTENT_CONFLICT', 'Document audio persistence is unavailable.', tool, 'storage', key);
-             const spokenContent = speechChunks(current.content, input.includeCode ?? false, PERSISTED_AUDIO_MAX_CHARACTERS).map(({ text }) => text).join('\n\n');
-             const narration = input.includeTitle ? `${current.name}. ${spokenContent}` : spokenContent;
-             const canonicalLanguage = typeof input.language === 'string' && /^[a-z]{2,3}(?:-[A-Z]{2})?$/.test(input.language) ? input.language : undefined;
-             const { bytes, durationMs } = await generateDurableMp3(narration, key, input.voice, canonicalLanguage);
-             const audioKey = d.id();
-             const requestedStorageKey = `content/${context.organizationKey}/${current.scopeKey}/${key}/audio/${audioKey}.mp3`;
-             let storageKey: string | undefined;
-             try {
-               storageKey = (await storageOperation('upload', key, current.scopeKey, () => d.storage.upload({ key: requestedStorageKey, bytes, mimeType: 'audio/mpeg' }))).storageKey;
-             } catch (error) {
-               throw new ContentError('DOCUMENT_SPEECH_FAILED', 'Generated audio could not be stored.', tool, { action: 'storage', resourceKey: key, cause: error, retryable: true });
-             }
-             try {
-               dependencies.signal?.throwIfAborted();
-               const created = await repo.createAudioVersion({
-                 key: audioKey, scopeKey: current.scopeKey, documentKey: current.key,
-                 sourceContentHash: documentSemanticHash(current.content), sourceTitle: current.name, sourceDocumentUpdatedAt: current.updatedAt,
-                 storageKey, mimeType: 'audio/mpeg', sizeBytes: bytes.byteLength, durationMs,
-                  voice: input.voice ?? DEFAULT_AUDIO_GENERATION_VOICE, ...(canonicalLanguage ? { language: canonicalLanguage } : {}),
-                 includeTitle: input.includeTitle ?? false, includeCode: input.includeCode ?? false,
-                 createdByKey: member.userOrganization.key, createdAt: now(),
-               });
-               return { documentKey: key, title: current.name, audioVersion: generatedAudioVersionView(created) };
-             } catch (error) {
-               try { await storageOperation('delete', key, current.scopeKey, () => d.storage.delete(storageKey!)); }
-               catch (cleanupError) { throw new ContentError('DOCUMENT_SPEECH_FAILED', 'Audio version creation failed and uploaded audio cleanup requires retry.', tool, { action: 'cleanup', resourceKey: key, cause: new AggregateError([error, cleanupError]), retryable: true }); }
-               throw new ContentError('DOCUMENT_SPEECH_FAILED', 'The generated audio version could not be saved.', tool, { action: 'audio-version', resourceKey: key, cause: error, retryable: true });
-             }
-           }
-           const start = input.startOffset ?? 0;
-          const end = Math.min(input.endOffset ?? current.content.length, current.content.length);
-           const maximum = Math.min(Math.max(dependencies.maxSpeechChunkCharacters ?? 1800, 200), 4000);
-          const documentChunks = speechChunks(current.content.slice(start, end), input.includeCode ?? false, maximum)
-            .map((chunk) => ({ ...chunk, start: start + chunk.start, end: start + chunk.end }));
-          if (input.includeTitle && documentChunks[0]) documentChunks[0] = { ...documentChunks[0], text: `${current.name}. ${documentChunks[0].text}` };
-          const chunks = documentChunks;
-           if (chunks.length === 0) fail('DOCUMENT_SPEECH_FAILED', 'This document has no text that can be narrated.', tool, 'speak', key);
-           const audio: Array<{ index: number; url: string; durationMs?: number; startCharacter: number; endCharacter: number }> = [];
-           let duration = 0;
-          for (let index = 0; index < chunks.length; index += 1) {
-            dependencies.signal?.throwIfAborted();
-            const chunk = chunks[index]!;
-             const speechAction = 'speak';
-            let spoken: ContentActionResult;
-            try {
-              spoken = await action(speechAction, {
-                text: chunk.text,
-                ...(input.language ? { language: input.language } : {}),
-                 voice: input.voice ?? DEFAULT_AUDIO_GENERATION_VOICE,
-                 ...(input.speakingRate ? { speakingRate: input.speakingRate } : {}),
-                 format: 'wav',
-              }, key, current.scopeKey);
-            } catch (error) {
-              throw speechError(error, tool, speechAction, key);
-            }
-            let bytes: Uint8Array;
-            let mimeType: string;
-            try {
-              bytes = spoken.audio
-                ? z.instanceof(Uint8Array).parse(spoken.audio)
-                : new Uint8Array(Buffer.from(z.string().min(1).parse(spoken.audioBase64), 'base64'));
-              if (bytes.byteLength === 0) throw new Error('Speech output was empty.');
-              mimeType = z.string().min(1).parse(spoken.mimeType ?? 'audio/mpeg');
-            } catch (error) {
-              throw new ContentError('DOCUMENT_SPEECH_FAILED', 'The speech provider returned invalid audio.', tool, { action: speechAction, resourceKey: key, cause: error, retryable: true });
-            }
-            dependencies.signal?.throwIfAborted();
-            const item = {
-              index,
-              startCharacter: chunk.start,
-              endCharacter: chunk.end,
-              ...(spoken.durationMs !== undefined ? { durationMs: spoken.durationMs } : {}),
-            };
-             audio.push({ ...item, url: `data:${mimeType};base64,${Buffer.from(bytes).toString('base64')}` });
-             duration += spoken.durationMs ?? 0;
-           }
-           return { documentKey: key, title: current.name, audio, ...(duration ? { totalDurationMs: duration } : {}) };
+          const current = await document(key, 'viewer', false);
+          return { documentKey: key, title: current.name, content: current.content };
         },
-      })), input.atomic, repo);
+      })), false, repo);
     } else if (tool === 'document.update') {
       const hasRepresentationUpdates = input.updates.some((item: any) => item.content !== undefined);
       if (input.atomic && hasRepresentationUpdates) fail('CONTENT_CONFLICT', 'Atomic document updates are unavailable because transformation and embedding actions are external side effects.', tool, 'document-embed');
@@ -2058,46 +1869,6 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
            return { summary: await projectedSummaryView(summary, audio ?? undefined, d.signAudioUrl) };
          },
        })), false, repo);
-    } else if (tool === 'document.summary.audio.generate') {
-      result = await batch(tool, input.summaryKeys.map((key: string) => ({
-        key,
-        run: async () => {
-          if (!repo.getSummary || !repo.getSummaryAudio || !repo.createSummaryAudio) fail('CONTENT_CONFLICT', 'Document summary audio persistence is unavailable.', tool, 'read', key);
-          const summary = await repo.getSummary(key);
-          if (!summary) fail('CONTENT_NOT_FOUND', 'Summary was not found.', tool, 'read', key);
-          const current = await document(summary.documentKey, 'moderator', false);
-          if (current.scopeKey !== summary.scopeKey) fail('CONTENT_NOT_FOUND', 'Summary was not found.', tool, 'read', key);
-          const existing = await repo.getSummaryAudio(key);
-          if (existing) return { audio: await summaryAudioView(existing, d.signAudioUrl) };
-          const { bytes, durationMs } = await generateDurableMp3(summary.summary, key, input.voice, input.language);
-          const audioKey = d.id();
-          const requestedStorageKey = `content/${context.organizationKey}/${summary.scopeKey}/${summary.documentKey}/summaries/${summary.key}/audio/${audioKey}.mp3`;
-          let storageKey: string | undefined;
-          try {
-            storageKey = (await storageOperation('upload', key, summary.scopeKey, () => d.storage.upload({ key: requestedStorageKey, bytes, mimeType: 'audio/mpeg' }))).storageKey;
-          } catch (error) {
-            throw new ContentError('DOCUMENT_SPEECH_FAILED', 'Generated audio could not be stored.', tool, { action: 'storage', resourceKey: key, cause: error, retryable: true });
-          }
-          let saved: { audio: DocumentSummaryAudio; created: boolean };
-          try {
-            dependencies.signal?.throwIfAborted();
-            saved = await repo.createSummaryAudio({
-              key: audioKey, scopeKey: summary.scopeKey, documentKey: summary.documentKey, summaryKey: summary.key,
-              storageKey, mimeType: 'audio/mpeg', sizeBytes: bytes.byteLength, durationMs,
-              voice: input.voice ?? DEFAULT_AUDIO_GENERATION_VOICE, ...(input.language ? { language: input.language } : {}),
-              createdByKey: member.userOrganization.key, createdAt: now(),
-            });
-            if (!saved.created) await storageOperation('delete', key, summary.scopeKey, () => d.storage.delete(storageKey!));
-          } catch (error) {
-            if (storageKey) {
-              try { await storageOperation('delete', key, summary.scopeKey, () => d.storage.delete(storageKey!)); }
-              catch (cleanupError) { throw new ContentError('DOCUMENT_SPEECH_FAILED', 'Summary audio creation failed and uploaded audio cleanup requires retry.', tool, { action: 'cleanup', resourceKey: key, cause: new AggregateError([error, cleanupError]), retryable: true }); }
-            }
-            throw new ContentError('DOCUMENT_SPEECH_FAILED', 'The generated summary audio could not be saved.', tool, { action: 'summary-audio', resourceKey: key, cause: error, retryable: true });
-          }
-          return { audio: await summaryAudioView(saved.audio, d.signAudioUrl) };
-        },
-      })), false, repo);
     } else if (tool === 'document.topics') {
       const current = await document(input.documentKey, 'viewer', false);
       const generated = await action('document-topics', {

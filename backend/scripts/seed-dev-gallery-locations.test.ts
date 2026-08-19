@@ -30,6 +30,8 @@ describe('dev Gallery location fixtures', () => {
     expect(first).toEqual(buildGalleryLocationFixturePlan(scopeKey, 'map-check', true));
     expect(first.email).toBe(GALLERY_LOCATION_FIXTURE_EMAIL);
     expect(first.collection.description).toContain('Development Gallery location fixture:map-check');
+    expect(first.images).toHaveLength(21);
+    expect(new Set(first.images.map(({ countryCode }) => countryCode)).size).toBe(20);
     expect(new Set(first.images.map(({ key }) => key)).size).toBe(first.images.length);
     expect(new Set(first.images.map(({ placementKey }) => placementKey)).size).toBe(first.images.length);
     expect(new Set(first.images.map(({ captionScore }) => captionScore)).size).toBeGreaterThan(3);

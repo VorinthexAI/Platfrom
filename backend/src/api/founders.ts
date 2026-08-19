@@ -17,11 +17,9 @@ import {
   anthropicCredentialsSchema,
   awsBedrockCredentialsSchema,
   awsBedrockMantleCredentialsSchema,
-  awsPollyCredentialsSchema,
   azureAIFoundryCredentialsSchema,
   googleVertexCredentialsSchema,
   openAICredentialsSchema,
-  openRouterCredentialsSchema,
   providerSlugSchema,
   xaiCredentialsSchema,
   type ProviderSlug,
@@ -51,8 +49,6 @@ export const foundersProviderCredentialsSchemas: Record<ProviderSlug, z.ZodTypeA
   'azure-ai-foundry': azureAIFoundryCredentialsSchema,
   'aws-bedrock': awsBedrockCredentialsSchema,
   'aws-bedrock-mantle': awsBedrockMantleCredentialsSchema,
-  'aws-polly': awsPollyCredentialsSchema,
-  openrouter: openRouterCredentialsSchema,
 };
 
 function parseFounderProviderCredentials(provider: ProviderSlug, credentials: unknown) {

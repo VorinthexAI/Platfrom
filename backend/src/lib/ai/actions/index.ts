@@ -20,13 +20,11 @@ import { embedAction } from './embed';
 import { extendVideoAction } from './extend-video';
 import { generateImageAction } from './generate-image';
 import { generateMusicAction } from './generate-music';
-import { generateSpeechAction } from './generate-speech';
 import { generateVideoAction } from './generate-video';
 import { insertActionDefinition } from './insert';
 import { orchestratorChatAction } from './orchestrator-chat';
 import { readAction } from './read';
 import { reasonAction } from './reason';
-import { speakAction } from './speak';
 import { storageUploadAction } from './storage-upload';
 import { translateAction } from './translate';
 import { traverseAction } from './traverse';
@@ -58,13 +56,11 @@ export { embedAction } from './embed';
 export { extendVideoAction } from './extend-video';
 export { generateImageAction } from './generate-image';
 export { generateMusicAction } from './generate-music';
-export { generateSpeechAction } from './generate-speech';
 export { generateVideoAction } from './generate-video';
 export { insertActionDefinition } from './insert';
 export { orchestratorChatAction } from './orchestrator-chat';
 export { readAction } from './read';
 export { reasonAction } from './reason';
-export { speakAction } from './speak';
 export { storageUploadAction } from './storage-upload';
 export { translateAction } from './translate';
 export { traverseAction } from './traverse';
@@ -77,10 +73,10 @@ export { coreChatContentSchema, coreChatMessageSchema, coreChatToolDefinitionSch
 
 /** Stable, provider- and domain-neutral runtime primitives. */
 export const ACTION_DEFINITIONS: readonly ActionDefinition[] = [
-  askAction, chatAction, reasonAction, deepReasonAction, embedAction, speakAction, webSearchAction,
+  askAction, chatAction, reasonAction, deepReasonAction, embedAction, webSearchAction,
   traverseAction, readAction, insertActionDefinition, upsertAction, updateActionDefinition, deleteActionDefinition,
   generateImageAction, editImageAction, generateVideoAction, editVideoAction, extendVideoAction, analyzeVideoAction,
-  generateSpeechAction, analyzeAudioAction, generateMusicAction, orchestratorChatAction,
+  analyzeAudioAction, generateMusicAction, orchestratorChatAction,
   documentValidateAction, storageUploadAction, documentExtractAction, documentEmbedAction, documentInsertAction, enhanceAction, translateAction, captionImageAction, describeVisualIdentityAction,
   documentCleanupAction, documentSummarizeAction, documentTopicsAction,
 ];

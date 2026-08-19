@@ -6,7 +6,6 @@ import type { DocumentParseDependencies } from '@/lib/ai/document-processing';
 import type { ContentToolDependencies } from './content-runtime';
 import type { ContentToolInput, ContentToolName, ContentToolOutput } from './content-schemas';
 import type { ToolContext } from './tool-context';
-import { audioGenerateTool, type AudioGenerateDependencies, type AudioGenerateInput, type AudioGenerateOutput } from './audio-generate';
 import { imageCaptionTool, type ImageCaptionToolDependencies } from './image-caption';
 import { imageCreateVisualIdentityTool, type ImageCreateVisualIdentityToolDependencies } from './image-create-visual-identity';
 import type { ImageSearchInput } from './image-search';
@@ -27,7 +26,7 @@ export const toolInputSchemas: Record<string, z.ZodTypeAny> = Object.fromEntries
 );
 
 export const TOOL_DEFINITIONS = PUBLIC_TOOL_DEFINITIONS.map(({ providerDefinition }) => providerDefinition);
-export interface ToolDependencies extends RouterDependencies, DocumentParseDependencies, Pick<AudioGenerateDependencies, 'synthesize'>, Pick<ImageCaptionToolDependencies, 'executeImageCaption'>, Pick<ImageCreateVisualIdentityToolDependencies, 'executeDescription'> {
+export interface ToolDependencies extends RouterDependencies, DocumentParseDependencies, Pick<ImageCaptionToolDependencies, 'executeImageCaption'>, Pick<ImageCreateVisualIdentityToolDependencies, 'executeDescription'> {
   signal?: AbortSignal;
   organizationKey?: string;
   contentContext?: ToolContext;
@@ -43,14 +42,12 @@ export interface ToolDependencies extends RouterDependencies, DocumentParseDepen
 }
 
 /** Executes one of the capabilities exposed by the unified tool registry. */
-export function runTool(name: 'audio.generate', skill: string, rawInput: AudioGenerateInput, dependencies?: ToolDependencies): Promise<AudioGenerateOutput>;
 export function runTool(name: 'image.caption', skill: string, rawInput: ImageCaptionInput, dependencies?: ToolDependencies): Promise<ImageCaptionOutput>;
 export function runTool(name: 'image.search', skill: string, rawInput: ImageSearchInput, dependencies: ToolDependencies & { contentContext: ToolContext }): ReturnType<typeof galleryOperations.search>;
 export function runTool<Name extends ContentToolName>(name: Name, skill: string, rawInput: ContentToolInput<Name>, dependencies: ToolDependencies & { contentContext: ToolContext }): Promise<ContentToolOutput<Name>>;
 export function runTool(name: string, skill: string, rawInput: unknown, dependencies?: ToolDependencies): Promise<unknown>;
 export async function runTool(name: string, skill: string, rawInput: unknown, dependencies: ToolDependencies = {}): Promise<unknown> {
   const toolName = toolNameSchema.parse(name);
-  if (toolName === audioGenerateTool.name) return audioGenerateTool.execute(rawInput, { ...dependencies, organizationKey: dependencies.organizationKey ?? dependencies.contentContext?.organizationKey });
   if (toolName === imageCaptionTool.name) return imageCaptionTool.execute(rawInput, dependencies);
   if (toolName === imageCreateVisualIdentityTool.name) return imageCreateVisualIdentityTool.execute(rawInput, dependencies);
   if (!dependencies.contentContext) throw new Error(`Tool ${toolName} requires contentContext.`);
@@ -86,9 +83,8 @@ export async function runTool(name: string, skill: string, rawInput: unknown, de
 
 export { sanitizeAgentInput, sanitizedAgentMessageSchema } from './input-sanitizer';
 export { retrievalTool, retrievalInputSchema, retrievalFiltersSchema, retrieveNodeDocuments } from './retrieval';
-export { audioGenerateTool, imageCaptionTool, imageCreateVisualIdentityTool };
+export { imageCaptionTool, imageCreateVisualIdentityTool };
 export { imageSearchTool } from './image-search';
-export * from './audio-generate';
 export { imageSearchInputSchema } from './image-search';
 export { imageSimilarityOutputSchema } from './image-similarity';
 export type { RetrievalContext, RetrievalDependencies, RetrievalDocument, RetrievalFilters, RetrievalNodeResult } from './retrieval';

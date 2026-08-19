@@ -1,20 +1,16 @@
 import { anthropicProviderFactory } from './anthropic';
 import { awsBedrockProviderFactory } from './aws-bedrock';
 import { awsBedrockMantleProviderFactory } from './aws-bedrock-mantle';
-import { awsPollyProviderFactory } from './aws-polly';
 import { azureAIFoundryProviderFactory } from './azure-ai-foundry';
 import { googleVertexProviderFactory } from './google-vertex';
 import { openAIProviderFactory } from './openai';
-import { openRouterProviderFactory } from './openrouter';
 import { xaiProviderFactory } from './xai';
 import type { AnthropicCredentials } from './anthropic';
 import type { AwsBedrockCredentials } from './aws-bedrock';
 import type { AwsBedrockMantleCredentials } from './aws-bedrock-mantle';
-import type { AwsPollyCredentials } from './aws-polly';
 import type { AzureAIFoundryCredentials } from './azure-ai-foundry';
 import type { GoogleVertexCredentials } from './google-vertex';
 import type { OpenAICredentials } from './openai';
-import type { OpenRouterCredentials } from './openrouter';
 import type { XaiCredentials } from './xai';
 import type { ProviderAdapter, ProviderFactory, ProviderId } from './types';
 
@@ -31,7 +27,6 @@ export {
   imageCaptionOutputSchema,
   visualIdentityDescriptionInputSchema,
   visualIdentityDescriptionOutputSchema,
-  speechInputSchema,
   embeddingInputSchema,
   resolveRequestSignal,
   type ProviderId,
@@ -55,8 +50,6 @@ export {
   type ImageCaptionOutput,
   type VisualIdentityDescriptionInput,
   type VisualIdentityDescriptionOutput,
-  type SpeechInput,
-  type SpeechOutput,
   type EmbeddingInput,
   type EmbeddingOutput,
 } from './types';
@@ -90,8 +83,6 @@ export {
 } from './azure-ai-foundry';
 export { createAwsBedrockProvider, awsBedrockCredentialsSchema, awsBedrockProviderConfigSchema, awsBedrockProviderFactory, type AwsBedrockCredentials, type AwsBedrockProviderConfig } from './aws-bedrock';
 export { createAwsBedrockMantleProvider, awsBedrockMantleCredentialsSchema, awsBedrockMantleProviderConfigSchema, awsBedrockMantleProviderFactory, type AwsBedrockMantleCredentials, type AwsBedrockMantleProviderConfig } from './aws-bedrock-mantle';
-export { createAwsPollyProvider, awsPollyCredentialsSchema, awsPollyProviderConfigSchema, awsPollyProviderFactory, type AwsPollyCredentials, type AwsPollyProviderConfig } from './aws-polly';
-export { createOpenRouterProvider, openRouterCredentialsSchema, openRouterProviderConfigSchema, openRouterProviderFactory, type OpenRouterCredentials, type OpenRouterProviderConfig } from './openrouter';
 export {
   providerSchema,
   getProviderById,
@@ -115,8 +106,6 @@ export const PROVIDER_REGISTRY: Record<ProviderId, ProviderFactory> = {
   'azure-ai-foundry': azureAIFoundryProviderFactory,
   'aws-bedrock': awsBedrockProviderFactory,
   'aws-bedrock-mantle': awsBedrockMantleProviderFactory,
-  'aws-polly': awsPollyProviderFactory,
-  openrouter: openRouterProviderFactory,
 };
 
 export type ProviderCredentials = {
@@ -127,8 +116,6 @@ export type ProviderCredentials = {
   'azure-ai-foundry': AzureAIFoundryCredentials;
   'aws-bedrock': AwsBedrockCredentials;
   'aws-bedrock-mantle': AwsBedrockMantleCredentials;
-  'aws-polly': AwsPollyCredentials;
-  openrouter: OpenRouterCredentials;
 };
 
 /** A future provider call always receives model, prompt, and credentials explicitly. */

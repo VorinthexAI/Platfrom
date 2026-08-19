@@ -22,7 +22,7 @@ function leaseRepository(chapters: any[]) {
   return { repository, attempts, successfulBookStatuses, takeOver: () => { activeToken = 'new-owner'; } };
 }
 
-const dependencies = { embed: async () => Array(EMBEDDING_DIMENSIONS).fill(0), speak: async () => ({ bytes: new Uint8Array([1]), mimeType: 'audio/mpeg' }), storage: { upload: async ({ key }: { key: string }) => ({ storageKey: key }), download: async () => new Uint8Array(), delete: async () => {} } as any, id: newId, now: () => timestamp };
+const dependencies = { embed: async () => Array(EMBEDDING_DIMENSIONS).fill(0), storage: { upload: async ({ key }: { key: string }) => ({ storageKey: key }), download: async () => new Uint8Array(), delete: async () => {} } as any, id: newId, now: () => timestamp };
 
 describe('book runtime generation lease fencing', () => {
   test('requires a generation lease token before runtime writes', async () => {
@@ -55,7 +55,7 @@ describe('book runtime generation lease fencing', () => {
     expect(lease.attempts).toEqual(['book:generating', 'book:ready', 'book:failed']); expect(lease.successfulBookStatuses).toEqual(['generating']);
   });
 
-  test('uses an attempt-specific audio key and deletes it when its fenced chapter update fails', async () => {
+  test('does not upload narration when its fenced chapter update fails', async () => {
     const lease = leaseRepository([plannedChapter]); const uploaded: string[] = []; const deleted: string[] = [];
     let chapterUpdates = 0;
     lease.repository.updateChapter = async (access: BookAccessContext, _key: string, patch: { status?: string }) => {
@@ -67,11 +67,11 @@ describe('book runtime generation lease fencing', () => {
     const storage = { ...dependencies.storage, upload: async ({ key }: { key: string }) => { uploaded.push(key); return { storageKey: key }; }, delete: async (key: string) => { deleted.push(key); } } as any;
     const runtime = createBookRuntime({ ...dependencies, storage, repository: lease.repository, ask: async () => 'Finished prose.', cover: async () => null });
     await expect(runtime.write(bookKey, input, context)).rejects.toMatchObject({ reason: 'conflict' });
-    expect(uploaded).toEqual([`books/${scopeKey}/${bookKey}/attempts/owner/chapters/${chapterKey}.mp3`]);
-    expect(deleted).toEqual(uploaded);
+    expect(uploaded).toEqual([]);
+    expect(deleted).toEqual([]);
   });
 
-  test('keeps committed audio but deletes an uncommitted cover after stale finalization', async () => {
+  test('deletes an uncommitted cover after stale finalization', async () => {
     const lease = leaseRepository([plannedChapter]); const uploaded: string[] = []; const deleted: string[] = [];
     const updateBook = lease.repository.updateBook;
     lease.repository.updateBook = async (access: BookAccessContext, key: string, patch: { status?: string }) => {
@@ -81,9 +81,8 @@ describe('book runtime generation lease fencing', () => {
     const storage = { ...dependencies.storage, upload: async ({ key }: { key: string }) => { uploaded.push(key); return { storageKey: key }; }, delete: async (key: string) => { deleted.push(key); } } as any;
     const runtime = createBookRuntime({ ...dependencies, storage, repository: lease.repository, ask: async () => 'Finished prose.', cover: async () => ({ bytes: new Uint8Array([2]), mimeType: 'image/png' }) });
     await expect(runtime.write(bookKey, input, context)).rejects.toMatchObject({ reason: 'conflict' });
-    const audioKey = `books/${scopeKey}/${bookKey}/attempts/owner/chapters/${chapterKey}.mp3`;
     const coverKey = `books/${scopeKey}/${bookKey}/attempts/owner/cover.png`;
-    expect(uploaded).toEqual([audioKey, coverKey]);
+    expect(uploaded).toEqual([coverKey]);
     expect(deleted).toEqual([coverKey]);
   });
 });

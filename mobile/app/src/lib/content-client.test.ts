@@ -55,8 +55,6 @@ const {
   findContentDocumentSummary,
   findContentDocumentVersion,
   findContentNeighbors,
-  generateContentDocumentAudio,
-  generateContentDocumentSummaryAudio,
   getContentContext,
   getContentDocumentTopics,
   loadInitialContentLocation,
@@ -101,19 +99,14 @@ test("loads extracted text for uploaded files", async () => {
   expect(calls[0]?.body.input).toEqual({ documentKeys: ["document"], include: ["content"] });
 });
 
-test("generates and lists independent full-audio versions", async () => {
+test("lists independent persisted full-audio versions", async () => {
   const metadata = { key: "audio-version", documentKey: "document", version: 2, sourceContentHash: "a".repeat(64), sourceTitle: "Note", sourceDocumentUpdatedAt: "2026-08-10T00:00:00.000Z", mimeType: "audio/mpeg", sizeBytes: 1024, durationMs: 65_000, isCurrent: false, playbackPositionMs: 0, includeTitle: false, includeCode: false, createdAt: "2026-08-10T00:02:00.000Z" };
-  responseForTool = (tool) => tool === "document.read"
-    ? { data: { success: true, data: { results: [{ success: true, data: { audioVersion: metadata } }] } } }
-    : tool === "document.list-audio-versions"
-      ? { data: { success: true, data: { results: [{ success: true, data: { audioVersions: [{ ...metadata, current: true, url: "https://audio.example/version.mp3" }] } }] } } }
-      : undefined;
+  responseForTool = (tool) => tool === "document.list-audio-versions"
+    ? { data: { success: true, data: { results: [{ success: true, data: { audioVersions: [{ ...metadata, current: true, url: "https://audio.example/version.mp3" }] } }] } } }
+    : undefined;
 
-  await expect(generateContentDocumentAudio("document")).resolves.toMatchObject({ key: "audio-version", version: 2 });
   await expect(listContentDocumentAudioVersions("document")).resolves.toMatchObject([{ key: "audio-version", current: true }]);
-  expect(calls[0]?.body.input).toMatchObject({ documentKeys: ["document"], mode: "audio", persistAudio: true, voice: "Matthew" });
-  expect(calls[0]?.config.timeout).toBe(15 * 60_000);
-  expect(calls[1]?.body.input).toEqual({ documentKeys: ["document"], cursor: undefined, limit: 100 });
+  expect(calls[0]?.body.input).toEqual({ documentKeys: ["document"], cursor: undefined, limit: 100 });
 });
 
 test("updates and clears persisted document audio playback state", async () => {
@@ -132,18 +125,6 @@ test("updates and clears persisted document audio playback state", async () => {
   expect(calls[0]?.body.input).toMatchObject({ audioVersionKey: "audio-version", playbackPositionMs: 12_345 });
   expect(calls[1]?.body.input).toMatchObject({ documentKey: "document" });
   expect(calls.every(({ body }) => typeof body.input.idempotencyKey === "string")).toBe(true);
-});
-
-test("generates durable summary audio through the content tool", async () => {
-  const audio = { key: "summary-audio", summaryKey: "summary", mimeType: "audio/mpeg", sizeBytes: 512, durationMs: 12_000, createdAt: "2026-08-10T00:03:00.000Z", url: "https://audio.example/summary.mp3" };
-  responseForTool = (tool) => tool === "document.summary.audio.generate"
-    ? { data: { success: true, data: { results: [{ success: true, data: { audio } }] } } }
-    : undefined;
-
-  await expect(generateContentDocumentSummaryAudio("summary")).resolves.toEqual(audio);
-  expect(calls[0]?.body.input).toMatchObject({ summaryKeys: ["summary"], voice: "Matthew" });
-  expect(calls[0]?.body.input.idempotencyKey).toBeString();
-  expect(calls[0]?.config.timeout).toBe(15 * 60_000);
 });
 
 test("sends document and folder mutations with the authenticated Archive context", async () => {

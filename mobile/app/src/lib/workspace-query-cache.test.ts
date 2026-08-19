@@ -122,10 +122,11 @@ test("assistant changes invalidate exact workspace prefixes without crossing con
   const signalOverview = signalQueryKeys.overview(context);
   const signalDetail = signalQueryKeys.detail(context, "thread");
   const ascendOverview = ascendQueryKeys.overview(context);
+  const compassOverview = compassQueryKeys.overview(context);
   const archiveLocation = contentQueryKeys.location(context);
-  for (const key of [galleryOverview, galleryDetail, otherGallery, signalOverview, signalDetail, ascendOverview, archiveLocation]) client.setQueryData(key, {});
+  for (const key of [galleryOverview, galleryDetail, otherGallery, signalOverview, signalDetail, ascendOverview, compassOverview, archiveLocation]) client.setQueryData(key, {});
 
-  await invalidateAssistantChanges(client, context, [{ workspace: "gallery" }, { workspace: "gallery" }, { workspace: "archive" }, { workspace: "signal" }, { workspace: "ascend" }]);
+  await invalidateAssistantChanges(client, context, [{ workspace: "gallery" }, { workspace: "gallery" }, { workspace: "archive" }, { workspace: "signal" }, { workspace: "compass" }, { workspace: "ascend" }]);
 
   expect(client.getQueryState(galleryOverview)?.isInvalidated).toBe(true);
   expect(client.getQueryState(galleryDetail)?.isInvalidated).toBe(true);
@@ -133,6 +134,7 @@ test("assistant changes invalidate exact workspace prefixes without crossing con
   expect(client.getQueryState(otherGallery)?.isInvalidated).toBe(false);
   expect(client.getQueryState(signalOverview)?.isInvalidated).toBe(true);
   expect(client.getQueryState(signalDetail)?.isInvalidated).toBe(true);
+  expect(client.getQueryState(compassOverview)?.isInvalidated).toBe(true);
   expect(client.getQueryState(ascendOverview)?.isInvalidated).toBe(true);
 });
 

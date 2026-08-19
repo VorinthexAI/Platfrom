@@ -65,8 +65,6 @@ import {
   findContentNeighbors,
   findContentDocumentSummary,
   findContentDocumentVersion,
-  generateContentDocumentAudio,
-  generateContentDocumentSummaryAudio,
   getContentContext,
   isContentContextConfigured,
   listContentDocumentVersions,
@@ -330,7 +328,6 @@ export function KnowledgeWorkspace() {
   const [loadingVersions, setLoadingVersions] = useState(false);
   const [audioVersions, setAudioVersions] = useState<ContentDocumentAudioVersion[]>([]);
   const [loadingAudioVersions, setLoadingAudioVersions] = useState(false);
-  const [generatingAudioVersion, setGeneratingAudioVersion] = useState(false);
   const [selectedAudioVersionKey, setSelectedAudioVersionKey] = useState<string>();
   const [saveState, setSaveState] = useState<SaveState>(hasContentContext ? "saved" : "local");
   const [folders, setFolders] = useState<ContentFolder[]>([]);
@@ -404,7 +401,6 @@ export function KnowledgeWorkspace() {
   const [summaries, setSummaries] = useState<ContentDocumentSummary[]>([]);
   const [loadingSummaries, setLoadingSummaries] = useState(false);
   const [generatingSummary, setGeneratingSummary] = useState(false);
-  const [generatingSummaryAudio, setGeneratingSummaryAudio] = useState(false);
   const [summaryReaderTopic, setSummaryReaderTopic] = useState<string>();
   const [error, setError] = useState<string>();
   const editorSession = useRef(0);
@@ -1500,7 +1496,7 @@ export function KnowledgeWorkspace() {
       const refreshed = addCachedContentDocumentSummary(queryClient, contentContext, await findContentDocumentSummary(summary.key));
       setSelectedSummary(refreshed);
       setSummaries(queryClient.getQueryData<ContentDocumentSummary[]>(contentQueryKeys.summaries(contentContext, refreshed.documentKey)) ?? [refreshed]);
-      if (!refreshed.audio) throw new Error("Generate audio for this summary before listening.");
+      if (!refreshed.audio) throw new Error("This summary has no saved audio.");
       const title = capitalizeLabel(refreshed.topic ?? "Document summary");
       await startNarrationSource({
         durationMs: refreshed.audio.durationMs,
@@ -1518,34 +1514,9 @@ export function KnowledgeWorkspace() {
     }
   };
 
-  const generateSummaryAudio = async () => {
-    const summary = selectedSummary;
-    if (!summary || generatingSummaryAudio) return;
-    stopNarration();
-    setGeneratingSummaryAudio(true);
-    setSheetError(undefined);
-    try {
-      const audio = await generateContentDocumentSummaryAudio(summary.key);
-      const updated = addCachedContentDocumentSummary(queryClient, contentContext, { ...summary, audio });
-      if (selectedDocumentKeyRef.current === updated.documentKey) {
-        setSelectedSummary(updated);
-        setSummaries(queryClient.getQueryData<ContentDocumentSummary[]>(contentQueryKeys.summaries(contentContext, updated.documentKey)) ?? [updated]);
-        if (activeSheetRef.current === "summaryReader") await playSummaryAudio(updated);
-      }
-    } catch (cause) {
-      if (activeSheetRef.current === "summaryReader" && selectedDocumentKeyRef.current === summary.documentKey) setSheetError(cause instanceof Error ? cause.message : "Summary audio could not be generated.");
-    } finally {
-      setGeneratingSummaryAudio(false);
-    }
-  };
-
   const controlSummaryAudio = () => {
     const summary = selectedSummary;
-    if (!summary) return;
-    if (!summary.audio) {
-      void generateSummaryAudio();
-      return;
-    }
+    if (!summary?.audio) return;
     if (narrationStatus === "SUMMARY AUDIO" && narrationState === "playing") return;
     if (narrationStatus === "SUMMARY AUDIO" && narrationState === "paused") {
       narrationPlayer.play();
@@ -1578,29 +1549,6 @@ export function KnowledgeWorkspace() {
       if (generation === restoreGeneration.current && activeSheetRef.current === "audioVersions" && selectedDocumentKeyRef.current === documentKey) setSheetError(cause instanceof Error ? cause.message : "Audio versions could not be loaded.");
     } finally {
       if (generation === restoreGeneration.current) setLoadingAudioVersions(false);
-    }
-  };
-
-  const generateAudioVersion = async () => {
-    const document = selectedDocument;
-    if (!document || generatingAudioVersion) return;
-    stopNarration();
-    setGeneratingAudioVersion(true);
-    setSheetError(undefined);
-    try {
-      const generated = await generateContentDocumentAudio(document.key);
-      const history = await refreshContentDocumentAudioVersions(queryClient, contentContext, document.key);
-      if (selectedDocumentKeyRef.current === document.key) setAudioVersions((current) => {
-        const versions = new Map(current.map((version) => [version.key, version]));
-        history.forEach((version) => versions.set(version.key, version));
-        return [...versions.values()].sort((left, right) => right.version - left.version);
-      });
-      const playable = history.find((version) => version.key === generated.key);
-      if (playable && activeSheetRef.current === "audioVersions" && selectedDocumentKeyRef.current === document.key) await playAudioVersion(playable, 0, true, false);
-    } catch (cause) {
-      if (activeSheetRef.current === "audioVersions" && selectedDocumentKeyRef.current === document.key) setSheetError(cause instanceof Error ? cause.message : "Document audio could not be generated.");
-    } finally {
-      setGeneratingAudioVersion(false);
     }
   };
 
@@ -3464,8 +3412,6 @@ export function KnowledgeWorkspace() {
     setEditorEditing(false);
   };
 
-  const pendingAudioVersion = audioVersions.reduce((latest, version) => Math.max(latest, version.version), 0) + 1;
-
   function mutationFooter() {
     const close = (disabled: boolean) => <Button disabled={disabled} onPress={() => closeSheet()} size="md" variant="secondary">Close</Button>;
     if (activeSheet === "transform") return <>
@@ -3488,16 +3434,11 @@ export function KnowledgeWorkspace() {
     if (activeSheet === "summaryReader") return <>
       {summaryNarrationIsland}
       {generatingSummary ? <LoadingText text="Generating summary..." /> : null}
-      {generatingSummaryAudio
-        ? <LoadingText text="Generating summary audio..." />
-        : selectedSummary ? <Button disabled={generatingSummary || Boolean(selectedSummary.audio && narrationStatus === "SUMMARY AUDIO" && narrationState === "playing")} onPress={controlSummaryAudio} size="md" variant="primary">{selectedSummary.audio ? "Listen" : "Generate audio"}</Button> : null}
+      {selectedSummary?.audio ? <Button disabled={generatingSummary || narrationStatus === "SUMMARY AUDIO" && narrationState === "playing"} onPress={controlSummaryAudio} size="md" variant="primary">Listen</Button> : null}
       {close(false)}
     </>;
     if (activeSheet === "audioVersions") return <>
       {documentNarrationIsland}
-      {generatingAudioVersion
-        ? <LoadingText text="Generating audio. This may take a while..." />
-        : <Button disabled={loadingAudioVersions} onPress={() => void generateAudioVersion()} size="md" variant="primary">Generate audio</Button>}
       {close(false)}
     </>;
     if (activeSheet === "searchHistory") return close(historyLoading);
@@ -3552,43 +3493,39 @@ export function KnowledgeWorkspace() {
     void playAudioVersion(version, seconds, wasPlaying);
   };
 
-  const summaryNarrationIsland = generatingSummaryAudio || narrationStatus === "SUMMARY AUDIO" && narrationState !== "idle" ? (
+  const summaryNarrationIsland = narrationStatus === "SUMMARY AUDIO" && narrationState !== "idle" ? (
     <View style={styles.narrationPlayer}>
       <View style={styles.narrationHeading}>
         <View style={styles.narrationTitleBlock}>
           <Text numberOfLines={1} style={styles.narrationTitle}>{capitalizeLabel(selectedSummary?.topic ?? summaryReaderTopic ?? "Summary audio")}</Text>
         </View>
-        <Button accessibilityLabel="Close summary audio player" contentMode="raw" disabled={generatingSummaryAudio} onPress={() => stopNarration()} size="xs" variant="icon"><CloseIcon size="sm" /></Button>
+        <Button accessibilityLabel="Close summary audio player" contentMode="raw" onPress={() => stopNarration()} size="xs" variant="icon"><CloseIcon size="sm" /></Button>
       </View>
       <View style={styles.narrationControls}>
-        {generatingSummaryAudio
-          ? <View accessibilityLabel="Generating summary audio" accessibilityRole="progressbar" style={styles.summaryNarrationSpinner}><Spinner size="small" variant="muted" /></View>
-          : <Button accessibilityLabel={narrationState === "playing" ? "Pause summary audio" : "Play summary audio"} contentMode="raw" disabled={narrationManifest.length === 0} onPress={controlSelectedAudioVersion} size="sm" variant="icon">{narrationState === "playing" ? <PauseIcon size="sm" /> : <PlayIcon size="sm" />}</Button>}
-        <Text style={styles.narrationTime}>{formatAudioTime(generatingSummaryAudio ? 0 : narrationElapsed)}</Text>
-        <Slider accessibilityLabel="Summary audio progress" disabled={generatingSummaryAudio || narrationDuration <= 0} max={Math.max(1, generatingSummaryAudio ? 0 : narrationDuration)} onSlidingComplete={(value) => { setNarrationScrubValue(value); scrubSelectedAudioVersion(value); }} onValueChange={setNarrationScrubValue} style={styles.narrationSlider} value={generatingSummaryAudio ? 0 : Math.min(narrationElapsed, narrationDuration)} />
-        <Text style={styles.narrationTime}>{formatAudioTime(generatingSummaryAudio ? 0 : narrationDuration)}</Text>
+        <Button accessibilityLabel={narrationState === "playing" ? "Pause summary audio" : "Play summary audio"} contentMode="raw" disabled={narrationManifest.length === 0} onPress={controlSelectedAudioVersion} size="sm" variant="icon">{narrationState === "playing" ? <PauseIcon size="sm" /> : <PlayIcon size="sm" />}</Button>
+        <Text style={styles.narrationTime}>{formatAudioTime(narrationElapsed)}</Text>
+        <Slider accessibilityLabel="Summary audio progress" disabled={narrationDuration <= 0} max={Math.max(1, narrationDuration)} onSlidingComplete={(value) => { setNarrationScrubValue(value); scrubSelectedAudioVersion(value); }} onValueChange={setNarrationScrubValue} style={styles.narrationSlider} value={Math.min(narrationElapsed, narrationDuration)} />
+        <Text style={styles.narrationTime}>{formatAudioTime(narrationDuration)}</Text>
       </View>
-      {!generatingSummaryAudio && narrationError ? <Text accessibilityRole="alert" numberOfLines={2} style={styles.narrationError}>{narrationError}</Text> : null}
+      {narrationError ? <Text accessibilityRole="alert" numberOfLines={2} style={styles.narrationError}>{narrationError}</Text> : null}
     </View>
   ) : null;
 
-  const documentNarrationIsland = generatingAudioVersion || narrationState !== "idle" && narrationStatus !== "SUMMARY AUDIO" ? (
+  const documentNarrationIsland = narrationState !== "idle" && narrationStatus !== "SUMMARY AUDIO" ? (
     <View style={styles.narrationPlayer}>
       <View style={styles.narrationHeading}>
         <View style={styles.narrationTitleBlock}>
-          <Text numberOfLines={1} style={styles.narrationTitle}>{generatingAudioVersion ? `${selectedDocument?.name ?? "Document"} · Audio ${pendingAudioVersion}` : narrationTitle || "Document audio"}</Text>
+          <Text numberOfLines={1} style={styles.narrationTitle}>{narrationTitle || "Document audio"}</Text>
         </View>
-        <Button accessibilityLabel="Close audio player" contentMode="raw" disabled={generatingAudioVersion} onPress={dismissNarration} size="xs" variant="icon"><CloseIcon size="sm" /></Button>
+        <Button accessibilityLabel="Close audio player" contentMode="raw" onPress={dismissNarration} size="xs" variant="icon"><CloseIcon size="sm" /></Button>
       </View>
       <View style={styles.narrationControls}>
-        {generatingAudioVersion
-          ? <View accessibilityLabel="Generating document audio" accessibilityRole="progressbar" style={styles.summaryNarrationSpinner}><Spinner size="small" variant="muted" /></View>
-          : <Button accessibilityLabel={narrationState === "playing" ? "Pause listening" : "Play audio"} contentMode="raw" disabled={narrationManifest.length === 0} loading={narrationManifest.length === 0 && narrationState !== "error"} onPress={controlSelectedAudioVersion} size="sm" variant="icon">{narrationState === "playing" ? <PauseIcon size="sm" /> : <PlayIcon size="sm" />}</Button>}
-        <Text style={styles.narrationTime}>{formatAudioTime(generatingAudioVersion ? 0 : narrationElapsed)}</Text>
-        <Slider accessibilityLabel="Audio progress" disabled={generatingAudioVersion || narrationDuration <= 0} max={Math.max(1, generatingAudioVersion ? 0 : narrationDuration)} onSlidingComplete={(value) => { setNarrationScrubValue(value); scrubSelectedAudioVersion(value); }} onValueChange={setNarrationScrubValue} style={styles.narrationSlider} value={generatingAudioVersion ? 0 : Math.min(narrationElapsed, narrationDuration)} />
-        <Text style={styles.narrationTime}>{formatAudioTime(generatingAudioVersion ? 0 : narrationDuration)}</Text>
+        <Button accessibilityLabel={narrationState === "playing" ? "Pause listening" : "Play audio"} contentMode="raw" disabled={narrationManifest.length === 0} loading={narrationManifest.length === 0 && narrationState !== "error"} onPress={controlSelectedAudioVersion} size="sm" variant="icon">{narrationState === "playing" ? <PauseIcon size="sm" /> : <PlayIcon size="sm" />}</Button>
+        <Text style={styles.narrationTime}>{formatAudioTime(narrationElapsed)}</Text>
+        <Slider accessibilityLabel="Audio progress" disabled={narrationDuration <= 0} max={Math.max(1, narrationDuration)} onSlidingComplete={(value) => { setNarrationScrubValue(value); scrubSelectedAudioVersion(value); }} onValueChange={setNarrationScrubValue} style={styles.narrationSlider} value={Math.min(narrationElapsed, narrationDuration)} />
+        <Text style={styles.narrationTime}>{formatAudioTime(narrationDuration)}</Text>
       </View>
-      {!generatingAudioVersion && narrationError ? <Text accessibilityRole="alert" numberOfLines={2} style={styles.narrationError}>{narrationError}</Text> : null}
+      {narrationError ? <Text accessibilityRole="alert" numberOfLines={2} style={styles.narrationError}>{narrationError}</Text> : null}
     </View>
   ) : null;
   const narrationAccessory = activeSheet !== "audioVersions" ? documentNarrationIsland : undefined;
@@ -4091,9 +4028,8 @@ export function KnowledgeWorkspace() {
         ) : null}
         {activeSheet === "audioVersions" ? (
           <View style={styles.audioVersionPanel}>
-            <ScrollView accessibilityLabel={loadingAudioVersions ? "Loading audio versions" : generatingAudioVersion ? `Generating audio version ${pendingAudioVersion}` : undefined} accessibilityRole={loadingAudioVersions || generatingAudioVersion ? "progressbar" : undefined} contentContainerStyle={[styles.audioVersionList, !loadingAudioVersions && !generatingAudioVersion && audioVersions.length === 0 && styles.sheetEmptyContent]} showsVerticalScrollIndicator={false} style={styles.sheetList}>
-              {!loadingAudioVersions && !generatingAudioVersion && audioVersions.length === 0 ? <Text style={styles.empty}>No audio versions yet. Generate one whenever you want a new recording of this document.</Text> : null}
-              {generatingAudioVersion ? <View accessibilityLabel={`Generating audio version ${pendingAudioVersion}`} accessibilityRole="progressbar" style={[styles.documentSkeleton, styles.skeletonCard]} /> : null}
+            <ScrollView accessibilityLabel={loadingAudioVersions ? "Loading audio versions" : undefined} accessibilityRole={loadingAudioVersions ? "progressbar" : undefined} contentContainerStyle={[styles.audioVersionList, !loadingAudioVersions && audioVersions.length === 0 && styles.sheetEmptyContent]} showsVerticalScrollIndicator={false} style={styles.sheetList}>
+              {!loadingAudioVersions && audioVersions.length === 0 ? <Text style={styles.empty}>No saved audio versions.</Text> : null}
               {loadingAudioVersions ? Array.from({ length: 3 }, (_, index) => (
                 <View key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />
               )) : audioVersions.map((version) => (

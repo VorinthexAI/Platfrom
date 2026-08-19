@@ -12,7 +12,7 @@ function appWith(handler: ReturnType<typeof createTravelHandlers>['overview']) {
 
 describe('travel HTTP handlers', () => {
   test('requires authentication and a user identity', async () => {
-    const service = { overview: async () => ({ places: [], trips: [] }) } as never;
+    const service = { overview: async () => ({ places: [] }) } as never;
     const unauthenticated = appWith(createTravelHandlers({ service, getIdentity: async () => null }).overview);
     expect((await unauthenticated.request('/travel/overview', { method: 'POST', body: '{}' })).status).toBe(401);
     const guest = appWith(createTravelHandlers({ service, getIdentity: async () => ({ key: newId(), identityType: 'member' }) }).overview);
@@ -27,15 +27,12 @@ describe('travel HTTP handlers', () => {
     expect(await response.json()).toMatchObject({ success: false, error: { code: 'TRAVEL_INVALID_INPUT' } });
   });
 
-  test('registers every travel route', async () => {
+  test('registers only the read-only overview', async () => {
     const app = new Hono();
     registerRoutes(app);
-    const requests: Array<[string, string]> = [
-      ['POST', '/travel/overview'], ['POST', '/travel/places'], ['POST', `/travel/places/${newId()}/visits`], ['POST', '/travel/trips'], ['POST', `/travel/trips/${newId()}/places`], ['DELETE', `/travel/trips/${newId()}/places/${newId()}`],
-    ];
-    for (const [method, path] of requests) {
-      const response = await app.request(path, { method, headers: { 'content-type': 'application/json' }, body: '{}' });
-      expect(response.status).toBe(401);
-    }
+    const overview = await app.request('/travel/overview', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    expect(overview.status).toBe(401);
+    const creation = await app.request('/travel/places', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    expect(creation.status).toBe(404);
   });
 });

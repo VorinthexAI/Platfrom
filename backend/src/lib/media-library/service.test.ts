@@ -10,6 +10,11 @@ function repository(overrides: Partial<MediaLibraryRepository> = {}): MediaLibra
 const requestFingerprint = (value: string) => mediaLibraryRequestFingerprint(value, Buffer.alloc(32, 9));
 describe('MediaLibrary service boundaries', () => {
   test('strictly rejects unknown fields', async () => { await expect(createMediaLibraryService({ repository: repository() }).leaveCollection({ scopeKey: newId(), collectionKey: newId(), actorKey: newId(), forged: true })).rejects.toThrow(); });
+  test('rejects retired trip polymorphism', async () => {
+    const service = createMediaLibraryService({ repository: repository() });
+    await expect(service.assignTag({ scopeKey: newId(), tagKey: newId(), sourceType: 'trip', sourceKey: newId(), actorKey: newId(), source: 'user', now })).rejects.toThrow();
+    await expect(service.createGlobalShare({ scopeKey: newId(), sourceType: 'trip', sourceKey: newId(), ownerKey: newId(), now, idempotencyKey: 'trip-share' })).rejects.toThrow();
+  });
   test('returns one-time tokens while removing persisted hashes', async () => {
     const replay = { encryptReplay: JSON.stringify, decryptReplay: JSON.parse, requestFingerprint };
     const service = createMediaLibraryService({ repository: repository(), token: () => 'one-time-mediaLibrary-token-that-is-long-enough', hashPassword: async () => 'scrypt:long-enough-password-hash', ...replay });

@@ -372,7 +372,7 @@ describe('Gallery operation boundaries', () => {
     const low = { captionScore: 1, value: 'low' }, high = { captionScore: 100, value: 'high' };
     expect(selectMemoryCandidate([low, high], () => 0.5)).toBe(high);
     const source = await Bun.file(new URL('./operations.ts', import.meta.url)).text();
-    expect(source).toContain("mode: 'model', organizationKey: input.organizationKey, actionSlug: 'ask', modelSlug: 'google.gemini-2.5-flash-lite'");
+    expect(source).toContain("mode: 'fixed', organizationKey: input.organizationKey, actionSlug: 'ask', modelSlug: 'openai.gpt-5.6-luna', providerSlug: 'openai'");
     expect(source).toContain('maxTokens: 220');
     expect(source).toContain('timeoutMs: 15_000');
   });

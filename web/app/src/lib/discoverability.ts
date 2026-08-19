@@ -1,5 +1,5 @@
 export const CANONICAL_ORIGIN = "https://vorinthex.com" as const;
-export const CONTENT_LAST_REVIEWED = "2026-08-08" as const;
+export const CONTENT_LAST_REVIEWED = "2026-08-19" as const;
 export const CONTACT_EMAIL = "contact@vorinthex.com" as const;
 
 export type PublicRoutePath =
@@ -83,28 +83,28 @@ export const CORE_CAPABILITIES = [
     id: "compass",
     name: "Compass",
     icon: "/logos/entities/capability-compass.png",
-    description: "Map past journeys, future trips, and dream destinations.",
-    promise: "Your life across the world, mapped around you.",
+    description: "Explore the world and view cities on an interactive globe.",
+    promise: "Your available destinations, mapped around you.",
     details: [
-      "Explore a 3D globe filled with places you have visited, trips you are planning, and destinations you want to experience. Save wish-list places, mark favorites, and build journeys across multiple stops.",
-      "Over time, Compass becomes a visual record of where you have been, where you are going, and what remains to be discovered.",
+      "Explore countries on a 3D globe and browse the destination cities available to you.",
+      "Compass provides a simple map of your available cities and the world that remains to be discovered.",
     ],
     connection:
       "Compass connects discoveries to Archive knowledge, Gallery memories and goals developed in Ascend.",
     features: [
-      "Map places, memories, and plans",
-      "Keep visited and future destinations together",
-      "Turn context into useful itineraries",
+      "Explore countries on an interactive globe",
+      "Browse available destination cities",
+      "Connect places with your wider context",
     ],
   },
   {
     id: "ascend",
     name: "Ascend",
     icon: "/logos/entities/capability-ascend.png",
-    description: "Personalized audiobooks researched and created around your goals.",
+    description: "Personalized books researched and created around your goals.",
     promise: "A learning experience written specifically for you.",
     details: [
-      "Tell Ascend what you want to learn or improve. It researches the subject, understands your goals, builds a unique structure, writes every chapter, creates a cover, and turns the finished book into immersive audio.",
+      "Tell Ascend what you want to learn or improve. It researches the subject, understands your goals, builds a unique structure, writes every chapter, and creates a cover.",
       "Each new book can build on what you have already explored, avoiding repetition and taking your learning deeper over time.",
     ],
     connection:
