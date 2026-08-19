@@ -1,14 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { z } from 'zod';
-import { actionSchema } from './actions.node';
 import { organizationSchema } from './organizations.node';
-import { skillSchema } from './skills.node';
-import { agentSchema } from './agents.node';
-import { agentSkillSchema } from './agent-skills.node';
 import { authChallengeSchema } from './auth-challenges.node';
-import { capabilitySchema } from './capabilities.node';
-import { mindCapabilitySchema } from './mind-capabilities.node';
-import { mindSchema } from './minds.node';
 import { modelSchema } from './models.node';
 import { modelActionSchema } from './model-actions.node';
 import { modelProviderSchema } from './model-providers.node';
@@ -81,13 +74,7 @@ describe('organization node schema', () => {
  * platform- or team-era field. */
 describe('no node field mentions the retired platform or team nodes', () => {
   const nodeSchemas: Record<string, z.ZodTypeAny> = {
-    actions: actionSchema,
-    agents: agentSchema,
-    agentSkills: agentSkillSchema,
     authChallenges: authChallengeSchema,
-    capabilities: capabilitySchema,
-    mindCapabilities: mindCapabilitySchema,
-    minds: mindSchema,
     modelActions: modelActionSchema,
     modelProviders: modelProviderSchema,
     models: modelSchema,
@@ -95,7 +82,6 @@ describe('no node field mentions the retired platform or team nodes', () => {
     organizations: organizationSchema,
     processedWebhookEvents: processedWebhookEventSchema,
     providers: providerObjectSchema,
-    skills: skillSchema,
     userOrganizations: userOrganizationSchema,
     userSessions: userSessionSchema,
     users: userSchema,

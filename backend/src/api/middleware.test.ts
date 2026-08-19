@@ -5,9 +5,10 @@ import { isResendWebhookPath } from './resend';
 import { isGmailWebhookPath } from './email-webhook';
 import { createAutoRefreshAuthTokens, isPublicFounderAuthPath, rateLimitByIp, requireEnvApiKey, sessionTokenPayload, setSessionCookies, setSessionForRequest, setSessionTokenHeaders, validateQueryParams } from './middleware';
 
-function middlewareContext(path: string, headers: Record<string, string> = {}, search = '') {
+function middlewareContext(path: string, headers: Record<string, string> = {}, search = '', method = 'GET') {
   return {
     req: {
+      method,
       path,
       header(name: string) {
         return headers[name.toLowerCase()];
@@ -177,6 +178,36 @@ describe('validateQueryParams', () => {
       ),
     ).rejects.toThrow();
     expect(nextCalls).toBe(0);
+  });
+
+  test('applies highlight selectors only to GET requests', async () => {
+    let nextCalls = 0;
+    await validateQueryParams(
+      middlewareContext('/api/v1/gallery/highlights', {}, '?organizationKey=organization&scopeKey=scope&collectionKey=collection'),
+      async () => { nextCalls += 1; },
+    );
+    await validateQueryParams(
+      middlewareContext('/api/v1/gallery/highlights', {}, '', 'POST'),
+      async () => { nextCalls += 1; },
+    );
+    expect(nextCalls).toBe(2);
+  });
+
+  test('allows hidden-content selectors only on reveal requests', async () => {
+    let nextCalls = 0;
+    await validateQueryParams(
+      middlewareContext('/api/v1/auth/me/hiddens', {}, '?source=image&sourceKey=cm0000000000000000000000', 'DELETE'),
+      async () => { nextCalls += 1; },
+    );
+    await validateQueryParams(
+      middlewareContext('/api/v1/auth/me/hiddens', {}, '', 'GET'),
+      async () => { nextCalls += 1; },
+    );
+    await expect(validateQueryParams(
+      middlewareContext('/api/v1/auth/me/hiddens', {}, '?source=image&sourceKey=cm0000000000000000000000', 'GET'),
+      async () => { nextCalls += 1; },
+    )).rejects.toThrow();
+    expect(nextCalls).toBe(2);
   });
 
   test('does not retain a query whitelist for the removed orchestrator chat route', async () => {

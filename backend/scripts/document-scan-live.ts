@@ -23,13 +23,13 @@ const defaultImages = [
   '../../mobile/scripts/assets/screenshots/google/phone/02.png',
 ];
 const imagePaths = (process.argv.slice(3).length ? process.argv.slice(3) : defaultImages).map((path) => resolve(import.meta.dir, path));
-const [{ scanDocumentImages }, { documentStorage }, { awsTextractImageOcr }, { newId }, { signedImageUrl }, openrouter, captionConstants] = await Promise.all([
+const [{ scanDocumentImages }, { documentStorage }, { awsTextractImageOcr }, { newId }, { signedImageUrl }, openai, captionConstants] = await Promise.all([
   import('../src/lib/ai/document-scanning'),
   import('../src/lib/ai/document-processing/storage'),
   import('../src/lib/ai/document-processing/textract'),
   import('../src/lib/ids'),
   import('../src/lib/gallery/image-url'),
-  import('../src/lib/ai/providers/openrouter'),
+  import('../src/lib/ai/providers/openai'),
   import('../src/lib/image-caption-constants'),
 ]);
 const pages = await Promise.all(imagePaths.map(async (path) => {
@@ -58,7 +58,12 @@ try {
       return key;
     }));
     const urls = await Promise.all(storageKeys.map(signedImageUrl));
-    const provider = openrouter.createOpenRouterProvider(openrouter.resolveOpenRouterEnvironment(process.env));
+    const provider = openai.createOpenAIProvider({
+      apiKey: process.env.OPENAI_API_KEY ?? '',
+      ...(process.env.OPENAI_BASE_URL ? { baseUrl: process.env.OPENAI_BASE_URL } : {}),
+      ...(process.env.OPENAI_ORGANIZATION ? { organization: process.env.OPENAI_ORGANIZATION } : {}),
+      ...(process.env.OPENAI_PROJECT ? { project: process.env.OPENAI_PROJECT } : {}),
+    });
     const response = await provider.execute<{ imageUrls: string[]; purpose: 'document-transcription' }, { results: { caption: string; score: number }[] }>({ actionId: 'caption-image', modelId: captionConstants.IMAGE_CAPTION_MODEL, externalModelId: captionConstants.IMAGE_CAPTION_EXTERNAL_MODEL_ID, input: { imageUrls: urls, purpose: 'document-transcription' }, organizationKey: 'nexus' });
     const visual = response.output;
     visual.results.forEach(({ caption }, index) => console.log(`\n===== PAGE ${index + 1}: VISUAL AI =====\n${caption}`));

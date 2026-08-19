@@ -3,15 +3,9 @@ import { MODEL_SLUGS, modelSlugSchema } from './index';
 describe('logical model slugs', () => {
   test('declares the supported model components', () => {
     expect(MODEL_SLUGS).toEqual([
-      'openai.gpt-5.6-sol',
-      'openai.gpt-5.6-terra',
       'openai.gpt-5.6-luna',
-      'amazon.nova-premier',
-      'amazon.nova-pro',
-      'openai.gpt-realtime-2',
-      'amazon.polly-generative',
-      'qwen.qwen3-embedding-8b',
-      'google.gemini-2.5-flash-lite',
+      'openai.gpt-image-2',
+      'openai.text-embedding-3-small',
     ]);
     for (const slug of MODEL_SLUGS) expect(modelSlugSchema.parse(slug)).toBe(slug);
   });

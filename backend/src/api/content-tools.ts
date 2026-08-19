@@ -1,20 +1,18 @@
 import type { Context } from 'hono';
 import { z, ZodError } from 'zod';
-import { AgentExecutionAccessError } from '@/lib/ai/agents/access';
-import { AgentRuntimeNotFoundError } from '@/lib/ai/agents/runtime';
 import { DEFAULT_MAX_DOCUMENT_BYTES, positiveDocumentLimit } from '@/lib/ai/document-processing/actions';
 import { MAX_DOCUMENT_SCAN_PAGE_BYTES } from '@/lib/ai/document-scanning';
-import { ContentError, contentToolInputSchemas, contentToolNameSchema, isContentMutation, runContentAgentTool, type ContentErrorCode, type RunContentAgentToolOptions } from '@/lib/ai/tools';
+import { ContentError, contentToolInputSchemas, contentToolNameSchema, isContentMutation, runAuthenticatedContentTool, type ContentErrorCode, type RunAuthenticatedContentToolOptions } from '@/lib/ai/tools';
 import { getAuthIdentity } from './security';
 import { strictObject } from './validation';
 
-const bodySchema = strictObject({ organizationKey: z.string().trim().min(1), agentKey: z.string().cuid(), input: z.unknown() });
+const bodySchema = strictObject({ organizationKey: z.string().trim().min(1), scopeKey: z.string().cuid(), input: z.unknown() });
 const delayedDevTools = new Set(['folder.list', 'document.list', 'content.search-history.list']);
-type ContentToolRunner = (input: Parameters<typeof runContentAgentTool>[0], options: RunContentAgentToolOptions) => Promise<unknown>;
+type ContentToolRunner = (input: Parameters<typeof runAuthenticatedContentTool>[0], options: RunAuthenticatedContentToolOptions) => Promise<unknown>;
 export interface ContentToolHandlerDependencies {
   getIdentity?: typeof getAuthIdentity;
   run?: ContentToolRunner;
-  serviceOptions?: Omit<RunContentAgentToolOptions, 'authenticatedUserKey'>;
+  serviceOptions?: Omit<RunAuthenticatedContentToolOptions, 'authenticatedUserKey'>;
   maxDocumentBytes?: number;
 }
 
@@ -108,12 +106,10 @@ export function createContentToolHandler(dependencies: ContentToolHandlerDepende
         ? Number(process.env.CONTENT_DEV_READ_DELAY_MS ?? 0)
         : 0;
       if (Number.isFinite(devDelayMs) && devDelayMs > 0) await Bun.sleep(Math.min(devDelayMs, 5_000));
-      const output = await (dependencies.run ?? runContentAgentTool)({ organizationKey: body.organizationKey, agentKey: body.agentKey, tool, input }, { ...dependencies.serviceOptions, authenticatedUserKey: identity.key, contentDependencies: { ...dependencies.serviceOptions?.contentDependencies, signal: c.req.raw.signal } });
+      const output = await (dependencies.run ?? runAuthenticatedContentTool)({ organizationKey: body.organizationKey, scopeKey: body.scopeKey, tool, input }, { ...dependencies.serviceOptions, authenticatedUserKey: identity.key, contentDependencies: { ...dependencies.serviceOptions?.contentDependencies, signal: c.req.raw.signal } });
       return c.json({ success: true, data: output });
     } catch (error) {
       if (error instanceof ContentError) return c.json(responseError(error), contentStatus(error.code));
-      if (error instanceof AgentExecutionAccessError) return c.json(responseError(new ContentError('CONTENT_FORBIDDEN', 'Agent execution access denied.', tool, { action: 'authorization' })), 403);
-      if (error instanceof AgentRuntimeNotFoundError) return c.json(responseError(new ContentError('CONTENT_NOT_FOUND', 'Agent runtime was not found.', tool, { action: 'authorization' })), 404);
       if (error instanceof ZodError) return c.json(responseError(new ContentError('CONTENT_INVALID_INPUT', 'Content request input was invalid.', tool, { action: 'parse' })), 400);
       if (error instanceof SyntaxError) return c.json(responseError(new ContentError('CONTENT_INVALID_INPUT', 'Request body must be valid JSON.', tool, { action: 'parse' })), 400);
       return c.json(responseError(new ContentError('DOCUMENT_PROCESSING_FAILED', 'Content tool invocation failed.', tool, { action: 'execute' })), 500);

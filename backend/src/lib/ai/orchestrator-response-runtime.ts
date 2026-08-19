@@ -46,16 +46,12 @@ export const orchestratorResponseRuntime = {
     const chatInput = await prepareChatInput(skill, rawInput, dependencies);
     const organizationKey = dependencies.organizationKey ?? 'nexus';
     if (dependencies.stream) {
-      yield* validateStream(dependencies.stream(organizationKey, chatInput), 'google.gemini-2.5-flash-lite', 'openrouter');
+      yield* validateStream(dependencies.stream(organizationKey, chatInput), 'openai.gpt-5.6-luna', 'openai');
       return;
     }
     const select = dependencies.selectRoute ?? selectRoute;
     const stream = dependencies.streamRoute ?? streamRoute;
-    const routes = [
-      { modelSlug: 'google.gemini-2.5-flash-lite', providerSlug: 'openrouter' },
-      { modelSlug: 'google.gemini-2.5-flash-lite', providerSlug: 'openrouter' },
-      { modelSlug: 'amazon.nova-pro', providerSlug: 'aws-bedrock' },
-    ] as const;
+    const routes = [{ modelSlug: 'openai.gpt-5.6-luna', providerSlug: 'openai' }] as const;
     let lastError: unknown;
     for (const { modelSlug, providerSlug } of routes) {
       if (dependencies.signal?.aborted) throw dependencies.signal.reason ?? new DOMException('The operation was aborted', 'AbortError');

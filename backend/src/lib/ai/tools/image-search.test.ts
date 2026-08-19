@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { currentEmbeddingSchema, QWEN_RETRIEVAL_INSTRUCTION } from '@/lib/embeddings';
+import { EMBEDDING_DIMENSIONS, currentEmbeddingSchema, prepareEmbeddingText } from '@/lib/embeddings';
 import { newId } from '@/lib/ids';
 import type { ToolContext } from './tool-context';
 import { imageSearchInputSchema, imageSearchTool } from './image-search';
 
-const embedding = currentEmbeddingSchema.parse(Array.from({ length: 4_096 }, () => 0.25));
+const embedding = currentEmbeddingSchema.parse(Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.25));
 const now = '2026-08-11T12:00:00.000Z';
 
 function context(): ToolContext {
@@ -26,7 +26,7 @@ function result(scopeKey: string, key = newId()) {
       image: {
       key, scopeKey, filename: 'mountain.jpg', caption: 'Snow-covered mountains beneath a blue sky.',
       storageKey: 'private/mountain.jpg', mimeType: 'image/jpeg', sizeBytes: 100, width: 1_200, height: 800,
-      embedding, imageCaptionKey: null, createdByKey: null, isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now,
+      embedding, imageCaptionKey: null, createdByKey: null, isFavorite: false, createdAt: now, updatedAt: now,
     },
     score: 0.92,
   };
@@ -52,7 +52,7 @@ describe('image.search tool', () => {
 
     expect(embedded).toEqual({
       organizationKey: toolContext.organizationKey,
-      input: { text: `${QWEN_RETRIEVAL_INSTRUCTION}snowy mountain` },
+      input: { text: prepareEmbeddingText('snowy mountain', 'query') },
     });
     expect(searched).toMatchObject({
       organizationKey: toolContext.organizationKey,
@@ -78,9 +78,10 @@ describe('image.search tool', () => {
       async searchImages(input) { searched = input; return []; },
     });
     expect(searched).toMatchObject({ threshold: 0.7, limit: 12 });
-    await imageSearchTool.execute({ query: `  ${QWEN_RETRIEVAL_INSTRUCTION}city  `, threshold: 0 }, {
+    const preparedQuery = prepareEmbeddingText('city', 'query');
+    await imageSearchTool.execute({ query: `  ${preparedQuery}  `, threshold: 0 }, {
       context: toolContext,
-      executeEmbedding: async (_organizationKey, input) => { expect(input.text).toBe(`${QWEN_RETRIEVAL_INSTRUCTION}city`); return { output: { embedding } } as never; },
+      executeEmbedding: async (_organizationKey, input) => { expect(input.text).toBe(preparedQuery); return { output: { embedding } } as never; },
       listMatchingVisualIdentities: async () => [],
       async searchImages(input) { expect(input.threshold).toBe(0); return []; },
     });
@@ -112,7 +113,7 @@ describe('image.search tool', () => {
   test('ranks direct saved-identity matches ahead of semantic text results', async () => {
     const toolContext = context();
     const collectionKey = newId(), identityKey = newId();
-    const identityEmbedding = currentEmbeddingSchema.parse(Array.from({ length: 4_096 }, () => 0.5));
+    const identityEmbedding = currentEmbeddingSchema.parse(Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.5));
     const identityFirst = result(toolContext.runtimeScopeKey), identitySecond = { ...result(toolContext.runtimeScopeKey), score: 0.88 };
     const semanticOnly = { ...result(toolContext.runtimeScopeKey), score: 0.79 };
     const searches: any[] = [];
@@ -126,7 +127,7 @@ describe('image.search tool', () => {
       async listMatchingVisualIdentities(scopeKey, query) {
         identityLookups += 1;
         expect({ scopeKey, query }).toEqual({ scopeKey: toolContext.runtimeScopeKey, query: 'photos of Hugo' });
-        return [{ key: identityKey, scopeKey: toolContext.runtimeScopeKey, name: 'Hugo', description: 'A saved identity.', referenceImageKey: newId(), embedding: identityEmbedding, deletedAt: null, createdAt: now, updatedAt: now }];
+        return [{ key: identityKey, scopeKey: toolContext.runtimeScopeKey, createdByKey: (toolContext.principal as any).userOrganization.key, name: 'Hugo', description: 'A saved identity.', referenceImageKey: newId(), embedding: identityEmbedding, createdAt: now, updatedAt: now }];
       },
       async searchImages(input) {
         searches.push(input);
@@ -179,8 +180,8 @@ describe('image.search tool', () => {
     let listed: any;
     let metrics: { mode: string; resultCount: number; durationMs: number } | undefined;
     const identity = {
-      key: identityKey, scopeKey: toolContext.runtimeScopeKey, name: 'Alex', description: 'A person wearing a blue coat.',
-      referenceImageKey: newId(), embedding, deletedAt: null, createdAt: now, updatedAt: now,
+      key: identityKey, scopeKey: toolContext.runtimeScopeKey, createdByKey: (toolContext.principal as any).userOrganization.key, name: 'Alex', description: 'A person wearing a blue coat.',
+      referenceImageKey: newId(), embedding, createdAt: now, updatedAt: now,
     };
     const first = { image: result(toolContext.runtimeScopeKey).image, confidence: 1 }, second = { image: result(toolContext.runtimeScopeKey).image, confidence: 0.81 };
     const output = await imageSearchTool.execute({ identityKey, collectionKey }, {

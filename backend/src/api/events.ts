@@ -59,9 +59,9 @@ export async function hasCollectionEventAccess(userKey: string, collectionKey: s
   const cursor = await db.query(aql`
     RETURN LENGTH(
       FOR collection IN collections
-        FILTER collection._key == ${collectionKey} AND collection.deletedAt == null
+        FILTER collection._key == ${collectionKey}
         LET scope = DOCUMENT(scopes, collection.scopeKey)
-        FILTER scope != null AND scope.deletedAt == null AND collection.scopeKey == scope._key
+        FILTER scope != null AND collection.scopeKey == scope._key
       FOR membership IN userOrganizations
         FILTER membership.userId == ${userKey} AND membership.status == "active"
           AND membership.organizationId == scope.organizationKey

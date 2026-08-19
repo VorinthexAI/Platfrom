@@ -40,7 +40,6 @@ describe('scoped Content persistence', () => {
       description: undefined,
       coverImageKey: undefined,
       embedding,
-      deletedAt: null,
       updatedAt: timestamp,
     });
     expect(result).toMatchObject({ key: folderKey, scopeKey, name: 'Root' });
@@ -48,7 +47,7 @@ describe('scoped Content persistence', () => {
     expect(calls[0]?.query).toContain('current._internalDeletion');
     expect(calls[0]?.query).toContain('DOCUMENT(folders, destinationKey)');
     expect(calls[0]?.query).toContain('REPLACE current WITH UNSET');
-    expect(calls[0]?.bindVars).toMatchObject({ key: folderKey, scopeKey, unset: ['parentFolderKey', 'description', 'coverImageKey'], patch: { embedding, deletedAt: null, updatedAt: timestamp } });
+    expect(calls[0]?.bindVars).toMatchObject({ key: folderKey, scopeKey, unset: ['parentFolderKey', 'description', 'coverImageKey'], patch: { embedding, updatedAt: timestamp } });
     expect(calls[0]?.bindVars).toMatchObject({ changesLocation: true, destinationKey: null });
     expect(() => createContentPersistence(executor).updateFolder(scopeKey, folderKey, { name: 'Renamed' })).toThrow('Folder semantic updates require a fresh embedding.');
   });
@@ -67,6 +66,18 @@ describe('scoped Content persistence', () => {
     expect(calls[1]?.query).toContain('FOR hidden IN userHiddens');
     expect(calls[1]?.query).toContain('hidden.sourceKey == @removedKey');
     expect(calls[1]?.bindVars).toEqual({ hiddenSource: 'folder', removedKey: folderKey });
+  });
+
+  test('cleans typed document overlays and tag assignments after source removal', async () => {
+    const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
+    const executor: ContentQueryExecutor = { async query(query, bindVars) { calls.push({ query, bindVars }); return { async next() { return folderKey; } }; } };
+    expect(await createContentPersistence(executor).deleteDocument(scopeKey, folderKey)).toBe(true);
+    expect(calls).toHaveLength(3);
+    expect(calls[1]?.query).toContain('hidden.source == @hiddenSource');
+    expect(calls[1]?.bindVars).toEqual({ hiddenSource: 'document', removedKey: folderKey });
+    expect(calls[2]?.query).toContain('assignment.scopeKey == @scopeKey');
+    expect(calls[2]?.query).toContain('assignment.sourceType == "document"');
+    expect(calls[2]?.bindVars).toEqual({ scopeKey, removedKey: folderKey });
   });
 
   test('does not clean hidden overlays when permanent source deletion matches nothing', async () => {
@@ -93,7 +104,6 @@ describe('scoped Content persistence', () => {
       content: 'Body',
       embedding,
       isFavorite: false,
-      deletedAt: null,
       createdAt: timestamp,
       updatedAt: timestamp,
     });
@@ -218,7 +228,7 @@ describe('scoped Content persistence', () => {
     expect(calls[1]?.query).toContain('{ isCurrent: false }');
   });
 
-  test('pushes share lifecycle filters into both legacy and global reads', async () => {
+  test('pushes share revocation and expiry filters into both legacy and global reads', async () => {
     for (const collections of [
       [{ name: 'documentShares' }],
       [{ name: 'documentShares' }, { name: 'shares' }],
@@ -232,13 +242,12 @@ describe('scoped Content persistence', () => {
           return { async next() { return undefined; } };
         },
       };
-      await createContentPersistence(executor).listShares(scopeKey, [folderKey], { includeArchived: true, includeExpired: true, includeRevoked: true, at: timestamp });
+      await createContentPersistence(executor).listShares(scopeKey, [folderKey], { includeExpired: true, includeRevoked: true, at: timestamp });
       const read = calls.at(-1)!;
       expect(read.query).toContain(collections.length === 2 ? 'FOR share IN shares' : 'FOR share IN documentShares');
-      expect(read.query).toContain('@includeArchived');
       expect(read.query).toContain('@includeRevoked');
       expect(read.query).toContain('@includeExpired');
-      expect(read.bindVars).toMatchObject({ includeArchived: true, includeExpired: true, includeRevoked: true, at: timestamp });
+      expect(read.bindVars).toMatchObject({ includeExpired: true, includeRevoked: true, at: timestamp });
     }
   });
 
@@ -250,41 +259,6 @@ describe('scoped Content persistence', () => {
     expect(source).toContain('REMOVE global IN shares');
     expect(source).toContain('REMOVE legacy IN documentShares');
     expect(source).not.toContain('Legacy share mirror failed after the durable global write.');
-  });
-
-  test('requires an active owner in the same persistence query that restores child state', async () => {
-    const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
-    const executor: ContentQueryExecutor = {
-      async query(query, bindVars) {
-        calls.push({ query, bindVars });
-        if (query.includes('COLLECTIONS()')) return { async next() { return { legacy: true, global: true }; } };
-        if (query.includes('RETURN DOCUMENT(shares, @key)')) return { async next() { return null; } };
-        return { async next() { return undefined; } };
-      },
-    };
-    const persistence = createContentPersistence(executor);
-
-    expect(await persistence.updateVersion(scopeKey, folderKey, { deletedAt: null })).toBeNull();
-    const versionUpdate = calls.at(-1)!;
-    expect(versionUpdate.query).toContain('LET owner = DOCUMENT(documents, current.documentKey)');
-    expect(versionUpdate.query).toContain('FILTER !@requireActiveOwner || owner.deletedAt == null');
-    expect(versionUpdate.bindVars).toMatchObject({ requireActiveOwner: true });
-
-    expect(await persistence.updateShare(scopeKey, folderKey, { deletedAt: null, updatedAt: timestamp })).toBeNull();
-    const shareUpdate = calls.at(-1)!;
-    expect(shareUpdate.query).toContain('LET owner = legacy == null ? null : DOCUMENT(documents, legacy.documentKey)');
-    expect(shareUpdate.query).toContain('FILTER !HAS(owner, "_internalDeletion") || owner._internalDeletion == null');
-    expect(shareUpdate.query).toContain('FILTER !@requireActiveOwner || owner.deletedAt == null');
-    expect(shareUpdate.bindVars).toMatchObject({ requireActiveOwner: true });
-  });
-
-  test('resolves an existing folder parent and requires it active when restoring', async () => {
-    let call: { query: string; bindVars?: Record<string, unknown> } | undefined;
-    const executor: ContentQueryExecutor = { async query(query, bindVars) { call = { query, bindVars }; return { async next() { return undefined; } }; } };
-    expect(await createContentPersistence(executor).updateFolder(scopeKey, folderKey, { deletedAt: null, updatedAt: timestamp })).toBeNull();
-    expect(call?.query).toContain('LET destinationKey = @changesLocation ? @destinationKey : (HAS(current, "parentFolderKey") ? current.parentFolderKey : null)');
-    expect(call?.query).toContain('FILTER !@requireActiveOwner || destinationKey == null || destination.deletedAt == null');
-    expect(call?.bindVars).toMatchObject({ changesLocation: false, requireActiveOwner: true });
   });
 
   test('keeps global token revocation authoritative after cutover', async () => {

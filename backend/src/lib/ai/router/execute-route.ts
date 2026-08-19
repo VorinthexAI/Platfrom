@@ -1,4 +1,5 @@
 import { normalizeProviderError } from '@/lib/ai/providers/errors';
+import type { ActionId } from '@/lib/ai/actions';
 import type { ProviderAdapter, ProviderExecuteResponse, ProviderId } from '@/lib/ai/providers/types';
 import { PROVIDER_REGISTRY } from '@/lib/ai/providers';
 import { getDefaultOrganizationCredentialsRepository } from '@/lib/ai/organization-credentials';
@@ -31,16 +32,14 @@ async function resolveAdapter(decision: RouteDecision, adapters: ExecuteRouteOpt
   return PROVIDER_REGISTRY[decision.providerSlug].create(organizationCredentials);
 }
 export interface RouteAttemptStartTelemetry {
-  actionKey: string;
-  actionSlug: string;
+  actionSlug: ActionId;
   modelKey: string;
   providerKey: string;
   startedAt: string;
 }
 export interface RouteAttemptTelemetry {
   callKey?: string;
-  actionKey: string;
-  actionSlug: string;
+  actionSlug: ActionId;
   modelKey: string;
   providerKey: string;
   status: 'completed' | 'failed';
@@ -49,6 +48,7 @@ export interface RouteAttemptTelemetry {
   endedAt: string;
   elapsedMs: number;
   errorCode?: string;
+  costUsd?: number;
 }
 
 /** V1 executes exactly the selected deterministic route; there are no scored fallbacks. */
@@ -58,7 +58,7 @@ export async function executeRoute<TInput, TOutput>(options: ExecuteRouteOptions
   if (!adapter) throw new ProviderExecutionError(decision.actionSlug, [{ modelId: decision.modelSlug, providerId: decision.providerSlug, externalModelId: decision.providerModelId, code: 'adapter_unavailable', message: 'provider adapter is unavailable' }]);
   const startedAtMs = Date.now();
   const startedAt = new Date(startedAtMs).toISOString();
-  const attemptBase = { actionKey: decision.actionKey, actionSlug: decision.actionSlug, modelKey: decision.modelKey, providerKey: decision.providerKey, startedAt };
+  const attemptBase = { actionSlug: decision.actionSlug, modelKey: decision.modelKey, providerKey: decision.providerKey, startedAt };
   const callKey = await options.onAttemptStart?.(attemptBase);
   try {
     const response = await adapter.execute<TInput, TOutput>({
@@ -71,7 +71,7 @@ export async function executeRoute<TInput, TOutput>(options: ExecuteRouteOptions
       signal: options.signal,
     });
     const endedAtMs = Date.now();
-    await options.onAttempt?.({ ...attemptBase, callKey, status: 'completed', usage: response.usage, endedAt: new Date(endedAtMs).toISOString(), elapsedMs: endedAtMs - startedAtMs });
+    await options.onAttempt?.({ ...attemptBase, callKey, status: 'completed', usage: response.usage, ...(response.costUsd !== undefined ? { costUsd: response.costUsd } : {}), endedAt: new Date(endedAtMs).toISOString(), elapsedMs: endedAtMs - startedAtMs });
     return response;
   } catch (error) {
     const endedAtMs = Date.now();

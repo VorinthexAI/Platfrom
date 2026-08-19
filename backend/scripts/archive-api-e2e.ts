@@ -58,28 +58,8 @@ if (!guestResponse.ok) throw new Error(`Guest bootstrap failed with ${guestRespo
 const guest = object(await guestResponse.json());
 const organizationKey = string(object(guest.organization).key, 'organization key');
 const scopeKey = string(object(guest.main_scope).key, 'scope key');
-const agentKey = string(object(guest.content_execution).agent_key, 'content execution agent key');
 let accessToken = string(guestResponse.headers.get('x-access-token'), 'access token');
 let refreshToken = string(guestResponse.headers.get('x-refresh-token'), 'refresh token');
-
-if (process.env.ARCHIVE_E2E_AUDIO === 'true') {
-  const audioResponse = await fetch(`${apiBase}/api/v1/audio/generate`, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${accessToken}`,
-      'content-type': 'application/json',
-      'x-refresh-token': refreshToken,
-      'x-vorinthex-api-key': process.env.API_KEY ?? '',
-      'x-vorinthex-session-transport': 'header',
-    },
-    body: JSON.stringify({ organizationKey, agentKey, input: { text: Array.from({ length: 25 }, (_, index) => `narration${index}`).join(' '), wordsPerChunk: 20 } }),
-  });
-  const audioStream = await audioResponse.text();
-  if (!audioResponse.ok || audioResponse.headers.get('content-type')?.includes('text/event-stream') !== true) throw new Error(`Audio generation failed with ${audioResponse.status}: ${audioStream}`);
-  if ((audioStream.match(/event: chunk/g) ?? []).length !== 2 || !audioStream.includes('"mimeType":"audio/mpeg"') || !audioStream.includes('event: done')) throw new Error(`Audio generation did not stream two ordered MP3 chunks: ${(audioStream.match(/^event: .+|^data: \{"error".+$/gm) ?? []).join(' | ')}`);
-  accessToken = audioResponse.headers.get('x-access-token') ?? accessToken;
-  refreshToken = audioResponse.headers.get('x-refresh-token') ?? refreshToken;
-}
 
 async function tool(name: string, input: Record<string, unknown>) {
   const response = await fetch(`${apiBase}/api/v1/content/tools/${name}`, {
@@ -91,7 +71,7 @@ async function tool(name: string, input: Record<string, unknown>) {
       'x-vorinthex-api-key': process.env.API_KEY ?? '',
       'x-vorinthex-session-transport': 'header',
     },
-    body: JSON.stringify({ organizationKey, agentKey, input }),
+    body: JSON.stringify({ organizationKey, scopeKey, input }),
   });
   const body = object(await response.json());
   accessToken = response.headers.get('x-access-token') ?? accessToken;
@@ -130,47 +110,6 @@ const update = await tool('document.update', {
   idempotencyKey: `archive-e2e-update-${suffix}`,
 });
 firstResultData(update, 'document.update');
-
-if (process.env.ARCHIVE_E2E_AUDIO === 'true') {
-  const documentAudioResult = await tool('document.read', {
-    documentKeys: [documentKey],
-    mode: 'audio',
-    persistAudio: true,
-    idempotencyKey: `archive-e2e-document-audio-${suffix}`,
-  });
-  const documentAudio = object(firstResultData(documentAudioResult, 'document.read').audioVersion);
-  const listedAudioResult = await tool('document.list-audio-versions', { documentKeys: [documentKey] });
-  const listedAudio = object((object(firstResultData(listedAudioResult, 'document.list-audio-versions')).audioVersions as unknown[]).map(object).find((entry) => entry.key === documentAudio.key));
-  const documentAudioResponse = await fetch(string(listedAudio.url, 'document audio URL'));
-  if (!documentAudioResponse.ok || !documentAudioResponse.headers.get('content-type')?.includes('audio/mpeg') || (await documentAudioResponse.arrayBuffer()).byteLength === 0) throw new Error('Persisted document audio was not playable.');
-  await tool('document.audio.playback.update', { audioVersionKey: documentAudio.key, playbackPositionMs: 1_000, idempotencyKey: `archive-e2e-audio-progress-${suffix}` });
-  const resumedAudioResult = await tool('document.list-audio-versions', { documentKeys: [documentKey] });
-  const resumedAudio = object((object(firstResultData(resumedAudioResult, 'document.list-audio-versions')).audioVersions as unknown[]).map(object).find((entry) => entry.key === documentAudio.key));
-  if (resumedAudio.isCurrent !== true || resumedAudio.playbackPositionMs !== 1_000) throw new Error('Persisted document audio did not retain its resume state.');
-  await tool('document.audio.playback.clear', { documentKey, idempotencyKey: `archive-e2e-audio-clear-${suffix}` });
-  const clearedAudioResult = await tool('document.list-audio-versions', { documentKeys: [documentKey] });
-  const clearedAudio = object((object(firstResultData(clearedAudioResult, 'document.list-audio-versions')).audioVersions as unknown[]).map(object).find((entry) => entry.key === documentAudio.key));
-  if (clearedAudio.isCurrent !== false || clearedAudio.playbackPositionMs !== 1_000) throw new Error('Dismissing document audio did not clear only its current state.');
-
-  const summaryResult = await tool('document.summarize', {
-    documentKeys: [documentKey],
-    topic: 'Archive verification',
-    persist: true,
-    idempotencyKey: `archive-e2e-summary-${suffix}`,
-  });
-  const summary = object(firstResultData(summaryResult, 'document.summarize').summary);
-  const summaryKey = string(summary.key, 'summary key');
-  const summaryAudioResult = await tool('document.summary.audio.generate', {
-    summaryKeys: [summaryKey],
-    idempotencyKey: `archive-e2e-summary-audio-${suffix}`,
-  });
-  const summaryAudio = object(firstResultData(summaryAudioResult, 'document.summary.audio.generate').audio);
-  const summaryAudioResponse = await fetch(string(summaryAudio.url, 'summary audio URL'));
-  if (!summaryAudioResponse.ok || !summaryAudioResponse.headers.get('content-type')?.includes('audio/mpeg') || (await summaryAudioResponse.arrayBuffer()).byteLength === 0) throw new Error('Persisted summary audio was not playable.');
-  const foundSummaryResult = await tool('document.find-summary', { summaryKeys: [summaryKey] });
-  const foundSummary = object(firstResultData(foundSummaryResult, 'document.find-summary').summary);
-  if (object(foundSummary.audio).key !== summaryAudio.key) throw new Error('Summary lookup did not return its persisted audio.');
-}
 
 const uploadText = `Uploaded archive document ${suffix.slice(0, 8)} contains a silver observatory.`;
 const uploaded = await tool('document.parse', {
@@ -225,8 +164,8 @@ const historyEntry = (searchHistory.history as unknown[]).map(object).find((entr
 if (!historyEntry) throw new Error('Semantic search history was not persisted.');
 if (['contextDomain', 'documents', 'folderKey', 'includeDescendants', 'scopeKey'].some((field) => field in historyEntry)) throw new Error('Global search history exposed Archive context.');
 
-await tool('document.archive', { documentKeys: [documentKey, uploadedDocumentKey, uploadedPdfKey], atomic: true });
+await tool('document.delete', { documentKeys: [documentKey, uploadedDocumentKey, uploadedPdfKey], atomic: true });
 await tool('document.delete', { documentKeys: [documentKey, uploadedDocumentKey, uploadedPdfKey], deleteVersions: true, deleteShares: true });
-await tool('folder.archive', { folderKeys: [folderKey], atomic: true });
+await tool('folder.delete', { folderKeys: [folderKey], recursive: true, atomic: true });
 
-console.log(`Archive API E2E passed: guest auth, ${process.env.ARCHIVE_E2E_AUDIO === 'true' ? 'streamed and persisted document/summary Polly narration, ' : ''}folder/document creation, autosave, LocalStack upload, AWS PDF extraction, fast folder/file search, semantic retrieval, and history.`);
+console.log('Archive API E2E passed: guest auth, folder/document creation, autosave, LocalStack upload, AWS PDF extraction, fast folder/file search, semantic retrieval, and history.');

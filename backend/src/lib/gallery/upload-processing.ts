@@ -36,7 +36,8 @@ export interface GalleryUploadProcessingDependencies {
 }
 
 async function classifyImageSubjects(repository: GalleryRepository, image: Awaited<ReturnType<typeof processImages>>[number]) {
-  const matches = await repository.listIdentityMatches(image.scopeKey, image.embedding);
+  if (!image.createdByKey) return false;
+  const matches = await repository.listIdentityMatches(image.scopeKey, image.embedding, image.createdByKey);
   const changes = await Promise.all(matches.map((match) => repository.persistIdentityMatches(image.scopeKey, match.identityKey, [{ imageKey: image.key, confidence: match.confidence }])));
   return changes.some(Boolean);
 }
@@ -128,7 +129,7 @@ export async function processGalleryUploadBatch(uploadKeys: readonly string[], d
       embed: async (text, signal) => text.endsWith('\n\nFolder cover image.') ? Array(EMBEDDING_DIMENSIONS).fill(0) : embedText({ text, signal }),
       persistImage: async ({ image, caption, actorKey }) => {
         await renewLease();
-        return insertPreparedImageWithCaption({ image: { ...image, deletedAt: now().toISOString() }, ...(caption ? { caption } : {}), actorKey });
+        return insertPreparedImageWithCaption({ image, ...(caption ? { caption } : {}), actorKey });
       },
       onMetrics(metrics) { processingMetrics = metrics; },
     });

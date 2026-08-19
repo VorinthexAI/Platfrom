@@ -26,7 +26,7 @@ describe('model graph node schemas', () => {
 
   test('relation nodes store keys and never semantic embeddings', () => {
     const modelKey = newId();
-    const modelAction = modelActionSchema.parse({ key: newId(), modelKey, actionKey: newId() });
+    const modelAction = modelActionSchema.parse({ key: newId(), modelKey, actionSlug: 'chat' });
     const modelProvider = modelProviderSchema.parse({
       key: newId(),
       modelKey,
@@ -38,5 +38,12 @@ describe('model graph node schemas', () => {
     expect(modelProvider).toMatchObject({ enabled: true });
     expect(modelAction).not.toHaveProperty('embedding');
     expect(modelProvider).not.toHaveProperty('embedding');
+  });
+
+  test('model action relations require only a registered action slug', () => {
+    const input = { key: newId(), modelKey: newId(), actionSlug: 'chat' };
+    expect(modelActionSchema.parse(input).actionSlug).toBe('chat');
+    expect(() => modelActionSchema.parse({ ...input, actionSlug: 'unknown-action' })).toThrow();
+    expect(() => modelActionSchema.parse({ ...input, actionKey: newId() })).toThrow();
   });
 });

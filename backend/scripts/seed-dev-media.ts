@@ -145,7 +145,6 @@ async function main() {
         embedding: imageEmbedding,
         imageCaptionKey: captionKey,
         isFavorite: imageIndex % 11 === 0,
-        deletedAt: null,
         createdAt: NOW,
         updatedAt: NOW,
       }));
@@ -161,7 +160,6 @@ async function main() {
       coverImageKey: collectionImages[0],
       embedding: collectionEmbedding,
       isFavorite: fixtureCollection.slug === 'nordic-light',
-      deletedAt: null,
       createdAt: NOW,
       updatedAt: NOW,
     }));

@@ -29,6 +29,29 @@ export function vectorToLatLon(vector: GlobeVector): { latitude: number; longitu
   };
 }
 
+export function projectToTrackball(x: number, y: number): GlobeVector {
+  const lengthSquared = x * x + y * y;
+  if (lengthSquared <= 1) return { x, y, z: Math.sqrt(1 - lengthSquared) };
+
+  const inverseLength = 1 / Math.sqrt(lengthSquared);
+  return { x: x * inverseLength, y: y * inverseLength, z: 0 };
+}
+
+export function exceedsGlobeDragThreshold(
+  startX: number,
+  startY: number,
+  currentX: number,
+  currentY: number,
+  threshold: number,
+): boolean {
+  return Math.hypot(currentX - startX, currentY - startY) > Math.max(0, threshold);
+}
+
+export function clampGlobeZoom(distance: number, minimum: number, maximum: number): number {
+  if (!Number.isFinite(distance)) return minimum;
+  return Math.min(Math.max(distance, minimum), maximum);
+}
+
 function wrappedDelta(longitude: number, previousLongitude: number): number {
   return ((longitude - previousLongitude + 540) % 360) - 180;
 }

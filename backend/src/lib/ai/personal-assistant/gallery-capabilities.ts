@@ -4,6 +4,7 @@ import type { AssistantCapability, AssistantCapabilityContext } from './capabili
 import { GalleryOperationError, galleryOperationInputSchemas, galleryOperations, redactCollectionShareOutput, type GalleryOperationContext, type GalleryOperationName } from '@/lib/gallery/operations';
 import { imageSearchInputSchema, imageSearchProviderInputSchema } from '@/lib/ai/tools/image-search';
 import { userHiddenOperations } from '@/lib/user-hiddens/operations';
+import { createImageGenerationService, imageGenerateModelInputSchema, imageIdeasInputSchema, type ImageGenerationService } from '@/lib/image-generation/service';
 
 type GalleryExecutor = (input: unknown, context: GalleryOperationContext) => Promise<unknown>;
 
@@ -37,18 +38,21 @@ const definitions: Array<{
   { operation: 'search', name: 'image.search', description: 'Search Gallery by visible content, a source image, or a saved visual identity, or find duplicates in a collection.', schema: imageSearchInputSchema },
   { operation: 'setFavorite', name: 'image.favorite', description: 'Set or clear an image favorite.', schema: galleryOperationInputSchemas.setFavorite, mutation: true },
   { operation: 'updateImage', name: 'image.update', description: 'Update an image name and favorite state.', schema: galleryOperationInputSchemas.updateImage, mutation: true },
-  { operation: 'deleteImages', name: 'image.delete', description: 'Move non-favorite Gallery images to trash and remove them from collections and subjects. Favorite images are reported and left untouched.', schema: galleryOperationInputSchemas.deleteImages, mutation: true },
+  { operation: 'deleteImages', name: 'image.delete', description: 'Permanently delete non-favorite Gallery images and their dependent records. Favorite images are reported and left untouched.', schema: galleryOperationInputSchemas.deleteImages, mutation: true },
   { operation: 'deleteDuplicates', name: 'collection.duplicates.delete', description: 'Delete non-favorite images returned by the latest duplicate check. Favorite images are reported and left in the collection.', schema: galleryOperationInputSchemas.deleteDuplicates, mutation: true },
   { operation: 'transferCollectionImages', name: 'collection.image.transfer', description: 'Copy or move selected images from one collection to one destination collection.', schema: galleryOperationInputSchemas.transferCollectionImages, mutation: true },
-  { operation: 'listSubjects', name: 'subject.list', description: 'List Gallery subjects, optionally including deleted subjects.', schema: galleryOperationInputSchemas.listSubjects },
+  { operation: 'listSubjects', name: 'subject.list', description: 'List Gallery subjects.', schema: galleryOperationInputSchemas.listSubjects },
   { operation: 'createSubject', name: 'subject.create', description: 'Create a named subject from reference images.', schema: galleryOperationInputSchemas.createSubject, mutation: true },
   { operation: 'listSubjectImages', name: 'subject.image.list', description: 'List images associated with a Gallery subject.', schema: galleryOperationInputSchemas.listSubjectImages },
   { operation: 'deleteSubject', name: 'subject.delete', description: 'Delete a Gallery subject.', schema: galleryOperationInputSchemas.deleteSubject, mutation: true },
-  { operation: 'restoreSubject', name: 'subject.restore', description: 'Restore a deleted Gallery subject.', schema: galleryOperationInputSchemas.restoreSubject, mutation: true },
   { operation: 'createHighlight', name: 'highlight.create', description: 'Create an owner-managed persistent randomized image highlight for a collection, including an empty highlight when the collection has no images.', schema: galleryOperationInputSchemas.createHighlight, mutation: true },
   { operation: 'listHighlights', name: 'highlight.list', description: 'List accessible persistent image highlights with currently visible collection images.', schema: galleryOperationInputSchemas.listHighlights },
   { operation: 'readHighlight', name: 'highlight.read', description: 'Read one accessible persistent image highlight with currently visible collection images.', schema: galleryOperationInputSchemas.readHighlight },
   { operation: 'deleteHighlight', name: 'highlight.delete', description: 'Delete an owner-managed persistent image highlight without deleting its images.', schema: galleryOperationInputSchemas.deleteHighlight, mutation: true },
+  { operation: 'createMemory', name: 'image.create-memory', description: 'Create a generated memory for one unused image in an owned collection.', schema: galleryOperationInputSchemas.createMemory, mutation: true },
+  { operation: 'listMemories', name: 'image.memory.list', description: 'List image memories in an accessible collection.', schema: galleryOperationInputSchemas.listMemories },
+  { operation: 'readMemory', name: 'image.memory.read', description: 'Read an accessible image memory.', schema: galleryOperationInputSchemas.readMemory },
+  { operation: 'deleteMemory', name: 'image.memory.delete', description: 'Delete an image memory from an owned collection.', schema: galleryOperationInputSchemas.deleteMemory, mutation: true },
 ];
 
 export const galleryAssistantMutationOperations = definitions.filter(({ mutation }) => mutation).map(({ operation }) => operation);
@@ -65,7 +69,7 @@ function trustedContext(context: AssistantCapabilityContext): GalleryOperationCo
   };
 }
 
-export function createGalleryAssistantCapabilities(operations: Partial<Record<GalleryOperationName, GalleryExecutor>> = galleryOperations): AssistantCapability[] {
+export function createGalleryAssistantCapabilities(operations: Partial<Record<GalleryOperationName, GalleryExecutor>> = galleryOperations, imageService: ImageGenerationService = createImageGenerationService()): AssistantCapability[] {
   const gallery: AssistantCapability[] = definitions.map(({ operation, name, description, schema, mutation }) => {
     return ({
     inputSchema: schema,
@@ -91,7 +95,20 @@ export function createGalleryAssistantCapabilities(operations: Partial<Record<Ga
       return { kind: 'continue', result };
     },
   })));
-  return [...gallery, ...hidden];
+  const generated: AssistantCapability[] = [
+    {
+      inputSchema: imageIdeasInputSchema,
+      definition: { name: 'image.ideas.create', description: 'Create distinct, production-ready image concepts and complete generation prompts from a creative brief.', inputSchema: contentZodToJsonSchema(imageIdeasInputSchema) },
+      async execute(input, context) { return { kind: 'continue', result: await (context.images ?? imageService).createIdeas(imageIdeasInputSchema.parse(input), context.domain) }; },
+    },
+    {
+      inputSchema: imageGenerateModelInputSchema,
+      mutationWorkspace: 'gallery',
+      definition: { name: 'image.generate', description: 'Generate images and save them into the current user Gallery scope.', inputSchema: contentZodToJsonSchema(imageGenerateModelInputSchema) },
+      async execute(input, context) { return { kind: 'continue', result: await (context.images ?? imageService).generate(imageGenerateModelInputSchema.parse(input), context.domain, context.requestKey) }; },
+    },
+  ];
+  return [...gallery, ...hidden, ...generated];
 }
 
 export const galleryAssistantCapabilities = createGalleryAssistantCapabilities();

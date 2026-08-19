@@ -25,7 +25,6 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
   const streamSkills: string[] = [];
   const streamInputs: unknown[] = [];
   const streamDependencies: unknown[] = [];
-  const speechCalls: unknown[][] = [];
   const retrievalQueries: Array<{ query: string; bindVars: Record<string, unknown> }> = [];
   const novaInputs: unknown[] = [];
   const typingEvents: unknown[] = [];
@@ -68,7 +67,6 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
       return [{ name: 'HQ', description: 'The organization workspace.' }, { name: 'Ignored', description: null }];
     },
     publishTyping: async (event) => { typingEvents.push(event); },
-    speak: async (...args) => { speechCalls.push(args); return { audioBase64: 'UklGRg==', mimeType: 'audio/wav' }; },
     channelLease: {
       async acquire() { leaseEvents.push('acquire'); return !options.leaseUnavailable; },
       async refresh() { leaseEvents.push('refresh'); return options.leaseRefreshResults?.shift() ?? !options.leaseRefreshFails; },
@@ -78,12 +76,11 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
   const app = new Hono();
   app.onError((_error, c) => c.json({ error: 'invalid request' }, 400));
   app.post('/founders/organizations/:organizationKey/communication/channels/:channelKey/messages', handlers.postMessage);
-  app.post('/founders/organizations/:organizationKey/communication/speech', handlers.speak);
   app.get('/founders/organizations/:organizationKey/communication/reactions', handlers.frequentReactions);
   app.post('/founders/organizations/:organizationKey/communication/channels/:channelKey/typing', handlers.typing);
   app.get('/founders/organizations/:organizationKey/communication/channels/:channelKey/messages/:messageKey/replies', handlers.readReplies);
   app.patch('/founders/organizations/:organizationKey/communication/channels/:channelKey/messages/:messageKey', handlers.editMessage);
-  return { app, persisted, assistantCalls, streamSkills, streamInputs, streamDependencies, speechCalls, orchestrators, retrievalQueries, novaInputs, typingEvents, replyReads, edits, leaseEvents };
+  return { app, persisted, assistantCalls, streamSkills, streamInputs, streamDependencies, orchestrators, retrievalQueries, novaInputs, typingEvents, replyReads, edits, leaseEvents };
 }
 
 describe('Communication SSE API', () => {
@@ -423,17 +420,4 @@ describe('Communication SSE API', () => {
     expect(source).not.toContain("identity.identityType !== 'user'");
   });
 
-  test('reads messages with the fixed speech service', async () => {
-    const { app, speechCalls } = appFor();
-    const response = await app.request(`/founders/organizations/${organizationKey}/communication/speech`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: 'Read this.' }) });
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ audioBase64: 'UklGRg==', mimeType: 'audio/wav' });
-    expect(speechCalls[0]?.slice(0, 2)).toEqual([organizationKey, 'Read this.']);
-  });
-
-  test('pins speech to Realtime 2 with Ash', async () => {
-    const source = await Bun.file(new URL('./communication.ts', import.meta.url)).text();
-    expect(source.match(/modelSlug: 'openai\.gpt-realtime-2', providerSlug: 'openai'/g)).toHaveLength(1);
-    expect(source).toContain("{ text, voice: 'ash', format: 'wav' }");
-  });
 });

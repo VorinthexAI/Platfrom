@@ -1,5 +1,7 @@
+"use client";
+
 import { Slot } from "@radix-ui/react-slot";
-import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { createContext, forwardRef, useContext, type ButtonHTMLAttributes, type ReactNode } from "react";
 
 import { cn } from "../../utils";
 
@@ -23,6 +25,12 @@ export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: ButtonVariant;
 };
 
+const ButtonSizeContext = createContext<ButtonSize | undefined>(undefined);
+
+export function ButtonSizeProvider({ children, size }: { children: ReactNode; size: ButtonSize }) {
+  return <ButtonSizeContext.Provider value={size}>{children}</ButtonSizeContext.Provider>;
+}
+
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
   {
     asChild = false,
@@ -32,13 +40,14 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
     icon,
     loading = false,
     shape = "pill",
-    size = "md",
+    size: requestedSize = "md",
     type = "button",
     variant = "secondary",
     ...props
   },
   ref,
 ) {
+  const size = useContext(ButtonSizeContext) ?? requestedSize;
   const classes = cn(
     "vui-button",
     `vui-button-${variant}`,

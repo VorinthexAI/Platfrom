@@ -6,7 +6,7 @@ test("centers confirmed empty states across Archive sheets", () => {
   expect(source).toContain('styles.searchHistoryList, !historyLoading && history.length === 0 && styles.sheetEmptyContent');
   expect(source).toContain('styles.summaryTopicPanel, !loadingSummaryTopics && !sheetError && summaryTopics.length === 0 && styles.sheetEmptyContent');
   expect(source).toContain('styles.versionPanel, !loadingVersions && !pendingDocumentVersionLabel && versions.length === 0 && styles.sheetEmptyContent');
-  expect(source).toContain('styles.audioVersionList, !loadingAudioVersions && !generatingAudioVersion && audioVersions.length === 0 && styles.sheetEmptyContent');
+  expect(source).toContain('styles.audioVersionList, !loadingAudioVersions && audioVersions.length === 0 && styles.sheetEmptyContent');
   expect(source).toContain('styles.audioVersionList, !loadingSummaries && summaries.length === 0 && styles.sheetEmptyContent');
   expect(source).toContain('styles.sourceGrid, !sourceImagesLoading && !sheetError && sourceImages.length === 0 && styles.sheetEmptyContent');
   expect(source).toContain('styles.destinationFolderGrid, !destinationLoading && !sheetError && destinationFolders.length === 0 && styles.sheetEmptyContent');
@@ -30,6 +30,31 @@ test("uses only intrinsic and full-height Archive sheets", () => {
   expect(sheet).not.toContain("tall=");
 });
 
+test("uses standard-sized actions in compact Archive confirmations", () => {
+  const compactDeleteStart = source.indexOf("{compactDelete ?");
+  const compactDeleteEnd = source.indexOf("{activeSheet === \"create\"", compactDeleteStart);
+  const compactDelete = source.slice(compactDeleteStart, compactDeleteEnd);
+  expect(compactDelete.match(/size="md"/g)).toHaveLength(2);
+  expect(compactDelete).not.toContain('size="lg"');
+});
+
+test("shows concise count-aware question titles for Archive confirmations", () => {
+  expect(source).toContain('const deleteConfirmationTitle = activeSheet === "deleteDocument"');
+  expect(source).toContain('`Delete ${selectedDocument?.extension ? "file" : "document"}?`');
+  expect(source).toContain('`Delete ${selectedCount} ${bulkDeleteNoun}${selectedCount === 1 ? "" : "s"}?`');
+  expect(source).toContain("title={compactDelete ? deleteConfirmationTitle");
+  expect(source).not.toContain('|| compactDelete}');
+});
+
+test("offers folder-first creation from the Archive root and current folder", () => {
+  expect(source.match(/openSheet\("create"\)/g)).toHaveLength(2);
+  const start = source.indexOf('{activeSheet === "create" ? (');
+  const menu = source.slice(start, source.indexOf('activeSheet === "bulkActions"', start));
+  expect(menu).toContain('>Create folder</BottomSheetItem>');
+  expect(menu).toContain('>Create document</BottomSheetItem>');
+  expect(menu.indexOf('>Create folder</BottomSheetItem>')).toBeLessThan(menu.indexOf('>Create document</BottomSheetItem>'));
+});
+
 test("shows a top-right check badge on selected Archive folders", () => {
   expect(source.match(/selected \? <View pointerEvents="none" style=\{styles\.selectionBadge\}/g)).toHaveLength(4);
   expect(source).toContain('selectionBadge: { position: "absolute", top: 4, right: 4');
@@ -39,7 +64,7 @@ test("guards confirmed favorite folder, document, and file deletion with title-o
   expect(source).toContain('notify("Can\'t delete favorite folder")');
   expect(source).toContain('notify(`Can\'t delete favorite ${target.extension ? "file" : "document"}`)');
   expect(source.indexOf("if (directFolder.isFavorite)")).toBeLessThan(source.indexOf("removeCachedContentFolder(queryClient, contentContext, parentKey, directFolder.key)"));
-  expect(source.indexOf("if (target.isFavorite)")).toBeLessThan(source.indexOf("await archiveContentSelection({ folderKeys: [], documentKeys: [target.key] })"));
+  expect(source.indexOf("if (target.isFavorite)")).toBeLessThan(source.indexOf("await hardDeleteContentSelection({ folderKeys: [], documentKeys: [target.key] })"));
   expect(source).not.toContain('showToast({ title, description:');
   expect(source).not.toContain('message.startsWith("Unfavorite")');
 });
@@ -47,7 +72,7 @@ test("guards confirmed favorite folder, document, and file deletion with title-o
 test("partitions bulk favorites before normalization and mutation while retaining them", () => {
   const partition = source.indexOf("partitionFavoriteContentSelection(selectedFoldersSnapshot, selectedDocumentsSnapshot)");
   const normalize = source.indexOf("resolveStructuralResources(eligibleFolders, eligibleDocuments)");
-  const mutation = source.indexOf("archiveContentSelection(operationSelection)");
+  const mutation = source.indexOf("hardDeleteContentSelection(operationSelection)");
   expect(partition).toBeGreaterThan(-1);
   expect(partition).toBeLessThan(normalize);
   expect(normalize).toBeLessThan(mutation);

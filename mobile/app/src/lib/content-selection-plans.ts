@@ -12,7 +12,7 @@ export type ContentSelectionOperation = {
 };
 
 export type ContentSelectionPlanCall = {
-  tool: "folder.update" | "document.update" | "folder.move" | "document.move" | "folder.copy" | "document.copy" | "folder.archive" | "document.archive";
+  tool: "folder.update" | "document.update" | "folder.move" | "document.move" | "folder.copy" | "document.copy" | "folder.delete" | "document.delete";
   input: Record<string, unknown>;
   operations: ContentSelectionOperation[];
 };
@@ -116,19 +116,19 @@ export function planContentSelectionCopy(selection: ContentSelection, targetScop
   return plan(calls);
 }
 
-export function planContentSelectionArchive(selection: ContentSelection, idempotencyKey: string): ContentSelectionPlan {
+export function planContentSelectionDelete(selection: ContentSelection, idempotencyKey: string): ContentSelectionPlan {
   const { folderKeys, documentKeys } = normalizedSelection(selection);
-  assertBatchSize(folderKeys.length, "folder.archive");
-  assertBatchSize(documentKeys.length, "document.archive");
+  assertBatchSize(folderKeys.length, "folder.delete");
+  assertBatchSize(documentKeys.length, "document.delete");
   const calls: ContentSelectionPlanCall[] = [];
   if (folderKeys.length) calls.push({
-    tool: "folder.archive",
-    input: { folderKeys, includeDescendants: true, atomic: false, idempotencyKey: operationKey(idempotencyKey, "folder.archive") },
+    tool: "folder.delete",
+    input: { folderKeys, recursive: true, atomic: false, idempotencyKey: operationKey(idempotencyKey, "folder.delete") },
     operations: folderKeys.map((key) => ({ kind: "folder", key })),
   });
   if (documentKeys.length) calls.push({
-    tool: "document.archive",
-    input: { documentKeys, atomic: false, idempotencyKey: operationKey(idempotencyKey, "document.archive") },
+    tool: "document.delete",
+    input: { documentKeys, atomic: false, idempotencyKey: operationKey(idempotencyKey, "document.delete") },
     operations: documentKeys.map((key) => ({ kind: "document", key })),
   });
   return plan(calls);

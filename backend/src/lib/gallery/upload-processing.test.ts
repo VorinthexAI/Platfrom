@@ -79,7 +79,7 @@ describe('Gallery upload batch processing', () => {
         return inputs.map((input, index) => imageSchema.parse({
           key: input.imageKey, scopeKey: input.scopeKey, filename: (input.file as any).filename, caption: index === 1 ? generated[0]!.caption : generated[index === 0 ? 0 : 1]!.caption,
           imageCaptionKey: index === 1 ? 'cmrnlzf650002qc7k4p5zemc0' : `cmrnlzf650002qc7k4p5zemc${index}`, storageKey: `media/${index}.jpg`, mimeType: 'image/jpeg', sizeBytes: 4, width: 10, height: 10,
-          embedding: Array(EMBEDDING_DIMENSIONS).fill(0.1), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now,
+          embedding: Array(EMBEDDING_DIMENSIONS).fill(0.1), isFavorite: false, createdAt: now, updatedAt: now,
         }));
       },
       onMetrics(metrics) { measured = metrics.durationMs; expect(metrics).toMatchObject({ count: 3, generated: 2, reused: 1, downloadDurationMs: expect.any(Number), persistDurationMs: expect.any(Number) }); },
@@ -106,7 +106,7 @@ describe('Gallery upload batch processing', () => {
     const publications: string[] = [];
     const result = await processGalleryUploadBatch([keys[0]!], {
       repository: f.repository, storage: f.storage, resolveImageReference: async () => 'data:image/jpeg;base64,/9j/2Q==', sanitizeImage: passthroughSanitizer,
-      processBatch: async ([input]) => [imageSchema.parse({ key: input!.imageKey, scopeKey: input!.scopeKey, filename: 'image.jpg', caption: 'Caption.', imageCaptionKey: 'cmrnlzf650002qc7k4p5zemc0', createdByKey: input!.ownerKey, storageKey: 'media/image.jpg', mimeType: 'image/jpeg', sizeBytes: 4, width: 10, height: 10, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now })],
+      processBatch: async ([input]) => [imageSchema.parse({ key: input!.imageKey, scopeKey: input!.scopeKey, filename: 'image.jpg', caption: 'Caption.', imageCaptionKey: 'cmrnlzf650002qc7k4p5zemc0', createdByKey: input!.ownerKey, storageKey: 'media/image.jpg', mimeType: 'image/jpeg', sizeBytes: 4, width: 10, height: 10, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), isFavorite: false, createdAt: now, updatedAt: now })],
       publishCollectionEvent: async () => { publications.push(f.uploads.get(keys[0]!)!.status); throw new Error('redis unavailable'); },
       publishUserEvent: async () => { publications.push(f.uploads.get(keys[0]!)!.status); },
     });
@@ -136,7 +136,7 @@ describe('Gallery upload batch processing', () => {
     };
     await expect(processGalleryUploadBatch(keys, {
       repository: f.repository, storage: f.storage, resolveImageReference: async () => 'https://images.example/image.jpg', sanitizeImage: passthroughSanitizer,
-      processBatch: async () => imageKeys.map((key, index) => imageSchema.parse({ key, scopeKey, filename: `${index}.jpg`, caption: 'caption', imageCaptionKey: captionKeys[index], storageKey: `media/${index}`, mimeType: 'image/jpeg', sizeBytes: 4, width: 1, height: 1, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now })),
+      processBatch: async () => imageKeys.map((key, index) => imageSchema.parse({ key, scopeKey, filename: `${index}.jpg`, caption: 'caption', imageCaptionKey: captionKeys[index], storageKey: `media/${index}`, mimeType: 'image/jpeg', sizeBytes: 4, width: 1, height: 1, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), isFavorite: false, createdAt: now, updatedAt: now })),
     })).rejects.toThrow('Gallery upload batch finalization failed');
     expect((await f.repository.getUpload(keys[0]))?.status).toBe('completed');
     expect((await f.repository.getUpload(keys[1]))?.status).toBe('failed');
@@ -162,7 +162,7 @@ describe('Gallery upload batch processing', () => {
     active.repository.renewUploadLease = async (...args) => { renewals += 1; return renew(...args); };
     await processGalleryUploadBatch([keys[0]!], {
       repository: active.repository, storage: active.storage, resolveImageReference: async () => 'data:image/jpeg;base64,/9j/2Q==', sanitizeImage: passthroughSanitizer,
-      processBatch: async ([input]) => [imageSchema.parse({ key: input!.imageKey, scopeKey: input!.scopeKey, filename: 'image.jpg', caption: 'Caption.', imageCaptionKey: keys[2], createdByKey: input!.ownerKey, storageKey: 'media/image.jpg', mimeType: 'image/jpeg', sizeBytes: 4, width: 10, height: 10, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now })],
+      processBatch: async ([input]) => [imageSchema.parse({ key: input!.imageKey, scopeKey: input!.scopeKey, filename: 'image.jpg', caption: 'Caption.', imageCaptionKey: keys[2], createdByKey: input!.ownerKey, storageKey: 'media/image.jpg', mimeType: 'image/jpeg', sizeBytes: 4, width: 10, height: 10, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), isFavorite: false, createdAt: now, updatedAt: now })],
     });
     expect(renewals).toBe(2);
     expect(active.uploads.get(keys[0]!)?.status).toBe('completed');
@@ -175,7 +175,7 @@ describe('Gallery upload batch processing', () => {
     fenced.repository.finalizeUpload = async (...args) => { finalized = true; return finalize(...args); };
     await expect(processGalleryUploadBatch([keys[0]!], {
       repository: fenced.repository, storage: fenced.storage, resolveImageReference: async () => 'data:image/jpeg;base64,/9j/2Q==', sanitizeImage: passthroughSanitizer,
-      processBatch: async ([input]) => { await fenced.repository.updateUpload(keys[0]!, { processingLeaseId: newId() }); return [imageSchema.parse({ key: input!.imageKey, scopeKey: input!.scopeKey, filename: 'image.jpg', caption: 'Caption.', imageCaptionKey: keys[2], createdByKey: input!.ownerKey, storageKey: 'media/image.jpg', mimeType: 'image/jpeg', sizeBytes: 4, width: 10, height: 10, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now })]; },
+      processBatch: async ([input]) => { await fenced.repository.updateUpload(keys[0]!, { processingLeaseId: newId() }); return [imageSchema.parse({ key: input!.imageKey, scopeKey: input!.scopeKey, filename: 'image.jpg', caption: 'Caption.', imageCaptionKey: keys[2], createdByKey: input!.ownerKey, storageKey: 'media/image.jpg', mimeType: 'image/jpeg', sizeBytes: 4, width: 10, height: 10, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), isFavorite: false, createdAt: now, updatedAt: now })]; },
     })).rejects.toThrow('processing lease was lost');
     expect(finalized).toBe(false);
     expect(fenced.uploads.get(keys[0]!)?.status).toBe('processing');
@@ -188,7 +188,7 @@ describe('Gallery upload batch processing', () => {
     const processedKeys: string[] = [];
     const result = await processGalleryUploadBatch(keys, {
       repository: f.repository, storage: f.storage, resolveImageReference: async () => 'data:image/jpeg;base64,/9j/2Q==', sanitizeImage: passthroughSanitizer,
-      processBatch: async (inputs) => inputs.map((input) => { processedKeys.push(input.imageKey!); return imageSchema.parse({ key: input.imageKey!, scopeKey: input.scopeKey, filename: 'image.jpg', caption: 'Caption.', imageCaptionKey: keys[2], createdByKey: input.ownerKey, storageKey: `media/${input.imageKey}`, mimeType: 'image/jpeg', sizeBytes: 4, width: 10, height: 10, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now }); }),
+      processBatch: async (inputs) => inputs.map((input) => { processedKeys.push(input.imageKey!); return imageSchema.parse({ key: input.imageKey!, scopeKey: input.scopeKey, filename: 'image.jpg', caption: 'Caption.', imageCaptionKey: keys[2], createdByKey: input.ownerKey, storageKey: `media/${input.imageKey}`, mimeType: 'image/jpeg', sizeBytes: 4, width: 10, height: 10, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), isFavorite: false, createdAt: now, updatedAt: now }); }),
     });
     expect(result).toEqual({ processed: 1 });
     expect(processedKeys).toEqual([upload(2).imageKey]);
@@ -208,7 +208,7 @@ describe('Gallery upload batch processing', () => {
     };
     await expect(processGalleryUploadBatch([keys[0]!], {
       repository: f.repository, storage: f.storage, failureStatus: 'queued', resolveImageReference: async () => 'data:image/jpeg;base64,/9j/2Q==', sanitizeImage: passthroughSanitizer,
-      processBatch: async ([input]) => [imageSchema.parse({ key: input!.imageKey, scopeKey: input!.scopeKey, filename: 'image.jpg', caption: 'Caption.', imageCaptionKey: keys[2], createdByKey: input!.ownerKey, storageKey: `media/${input!.imageKey}`, mimeType: 'image/jpeg', sizeBytes: 4, width: 10, height: 10, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now })],
+      processBatch: async ([input]) => [imageSchema.parse({ key: input!.imageKey, scopeKey: input!.scopeKey, filename: 'image.jpg', caption: 'Caption.', imageCaptionKey: keys[2], createdByKey: input!.ownerKey, storageKey: `media/${input!.imageKey}`, mimeType: 'image/jpeg', sizeBytes: 4, width: 10, height: 10, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), isFavorite: false, createdAt: now, updatedAt: now })],
     })).rejects.toThrow('finalization failed');
     expect(f.uploads.get(keys[0]!)?.status).toBe('queued');
     expect(f.relations).toEqual([]);
@@ -246,7 +246,7 @@ describe('Gallery upload batch processing', () => {
     f.repository.listIdentityMatches = async () => { classifications += 1; return [{ identityKey: keys[2]!, confidence: 0.9 }]; };
     await expect(processGalleryUploadBatch([keys[0]!], {
       repository: f.repository, storage: f.storage, resolveImageReference: async () => 'data:image/jpeg;base64,/9j/2Q==', sanitizeImage: passthroughSanitizer,
-      processBatch: async ([input]) => [imageSchema.parse({ key: input!.imageKey, scopeKey: input!.scopeKey, filename: 'image.jpg', caption: 'Caption.', imageCaptionKey: keys[2], createdByKey: input!.ownerKey, storageKey: 'media/image.jpg', mimeType: 'image/jpeg', sizeBytes: 4, width: 10, height: 10, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now })],
+      processBatch: async ([input]) => [imageSchema.parse({ key: input!.imageKey, scopeKey: input!.scopeKey, filename: 'image.jpg', caption: 'Caption.', imageCaptionKey: keys[2], createdByKey: input!.ownerKey, storageKey: 'media/image.jpg', mimeType: 'image/jpeg', sizeBytes: 4, width: 10, height: 10, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), isFavorite: false, createdAt: now, updatedAt: now })],
     })).rejects.toThrow('finalization failed');
     expect(classifications).toBe(0);
     expect(f.relations).toEqual([]);

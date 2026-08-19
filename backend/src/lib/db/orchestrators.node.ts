@@ -9,7 +9,6 @@ export const orchestratorSchema = z.object({
   key: z.string(),
   name: z.string(),
   role: z.string(),
-  voiceId: z.string(),
   skill: z.string(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -18,8 +17,7 @@ export const orchestratorSchema = z.object({
 
 export type Orchestrator = z.infer<typeof orchestratorSchema>;
 
-// voiceId is an opaque foreign key into voices; skill is unbounded free text
-// (a longer capability writeup), neither is search text.
+// Skill is unbounded free text (a longer capability writeup), not search text.
 export const orchestratorsEmbedKeys = z.enum(['name', 'role']);
 
 const helpers = createNodeHelpers(ORCHESTRATORS_COLLECTION, orchestratorSchema, orchestratorsEmbedKeys.options);

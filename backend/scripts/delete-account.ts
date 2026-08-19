@@ -125,17 +125,11 @@ async function main() {
       FILTER scope.organizationKey IN ${organizationKeys}
       RETURN scope._key
   `)).all() as string[] : [];
-  const agentKeys = await (await db.query(aql`
-    FOR agent IN agents
-      FILTER agent.personalOwnerUserId == ${user.key} || agent.scopeKey IN ${scopeKeys}
-      RETURN agent._key
-  `)).all() as string[];
-
   const collections = (await db.listCollections())
     .map(({ name }) => name)
     .filter((name) => !name.startsWith('_'))
     .sort();
-  const targetKeys = new Set([user.key, emailHash, ...organizationKeys, ...membershipKeys, ...scopeKeys, ...agentKeys]);
+  const targetKeys = new Set([user.key, emailHash, ...organizationKeys, ...membershipKeys, ...scopeKeys]);
   const matched = new Map<string, Map<string, MatchedDocument>>();
 
   let discovered = true;
@@ -174,7 +168,6 @@ async function main() {
     userKey: user.key,
     memberships: memberships.map(({ key, organizationKey, organizationName, otherMembers }) => ({ key, organizationKey, organizationName, otherMembers })),
     scopeKeys: [...scopeKeys].sort(),
-    agentKeys: [...agentKeys].sort(),
     affectedCollections,
     storageKeys,
   };

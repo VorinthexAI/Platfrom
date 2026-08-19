@@ -38,6 +38,7 @@
     "seed:dev-archive": "bun run load-local-env && bun --env-file=.env.local run scripts/seed-dev-archive.ts",
     "seed:dev-media": "bun run load-local-env && bun --env-file=.env.local run scripts/seed-dev-media.ts",
     "seed:dev-gallery-sharing": "bun run load-local-env && bun --env-file=.env.local run scripts/seed-dev-gallery-sharing.ts",
+    "seed:dev-gallery-locations": "bun run load-local-env && bun --env-file=.env.local run scripts/seed-dev-gallery-locations.ts",
     "test:e2e:gallery-search": "bun run load-local-env && bun --env-file=.env.local run scripts/gallery-search-live-e2e.ts"
   },
   "dependencies": {

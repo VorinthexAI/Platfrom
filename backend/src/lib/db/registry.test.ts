@@ -21,20 +21,19 @@ import { imageSchema } from './images.node';
 import { collectionSchema } from './collections.node';
 import { shareSchema } from './shares.node';
 import { placeSchema } from './places.node';
-import { tripSchema } from './trips.node';
 
 describe('node registry schema contracts', () => {
   test('registry serves organizations and user links, never the retired team/platform nodes', () => {
-    expect(NODE_NAMES).toContain('actions');
+    expect(NODE_NAMES).not.toContain('actions');
     expect(NODE_NAMES).toContain('providers');
     expect(NODE_NAMES).toContain('models');
     expect(NODE_NAMES).toContain('modelActions');
     expect(NODE_NAMES).toContain('modelProviders');
-    expect(NODE_NAMES).toContain('agents');
-    expect(NODE_NAMES).toContain('agentSkills');
-    expect(NODE_NAMES).toContain('scopeAgents');
-    expect(NODE_NAMES).toContain('agentMembers');
-    expect(NODE_NAMES).toContain('skills');
+    expect(NODE_NAMES).not.toContain('agents');
+    expect(NODE_NAMES).not.toContain('agentSkills');
+    expect(NODE_NAMES).not.toContain('scopeAgents');
+    expect(NODE_NAMES).not.toContain('agentMembers');
+    expect(NODE_NAMES).not.toContain('skills');
     expect(NODE_NAMES).toEqual(expect.arrayContaining([
       'channels',
       'channelParticipants',
@@ -55,9 +54,6 @@ describe('node registry schema contracts', () => {
       'tags',
       'tagAssignments',
       'places',
-      'trips',
-      'tripPlaces',
-      'placeVisits',
       'books',
       'bookContexts',
       'bookThemes',
@@ -121,7 +117,9 @@ describe('node registry schema contracts', () => {
     expect(imageSchema.shape).toHaveProperty('embedding');
     expect(collectionSchema.shape).toHaveProperty('embedding');
     expect(placeSchema.shape).toHaveProperty('embedding');
-    expect(tripSchema.innerType().shape).toHaveProperty('embedding');
+    expect(NODE_NAMES).not.toContain('trips');
+    expect(NODE_NAMES).not.toContain('tripPlaces');
+    expect(NODE_NAMES).not.toContain('placeVisits');
     expect(NODE_NAMES).not.toContain('shares');
     expect(NODE_NAMES).not.toContain('collectionInvites');
     expect(NODE_NAMES).not.toContain('documentShares');
@@ -130,10 +128,7 @@ describe('node registry schema contracts', () => {
     expect(shareSchema.shape).toHaveProperty('sourceType');
     expect(shareSchema.shape).toHaveProperty('sourceKey');
     expect(shareSchema.shape).not.toHaveProperty('embedding');
-    for (const schema of [folderSchema, documentSchema, documentVersionSchema, documentShareSchema, imageSchema, collectionSchema, shareSchema]) {
-      expect(schema.shape).toHaveProperty('deletedAt');
-      expect(schema.shape.deletedAt.parse(undefined)).toBeNull();
-    }
+    for (const schema of [imageSchema, collectionSchema, folderSchema, documentSchema, documentVersionSchema, documentShareSchema, shareSchema]) expect(schema.safeParse({}).success).toBe(false);
   });
 
   test('requires exactly one channel participant identity', () => {

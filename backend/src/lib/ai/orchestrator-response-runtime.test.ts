@@ -108,29 +108,16 @@ describe('orchestrator response runtime', () => {
     expect(sawAbortedSignal).toBe(true);
   });
 
-  test('streams the first successful Gemini attempt', async () => {
+  test('streams the direct OpenAI route', async () => {
     const route = routes([completed('first')]);
     await expect(collect(route.dependencies)).resolves.toEqual([{ type: 'text-delta', text: 'first' }, { type: 'done' }]);
-    expect(route.selections).toEqual([{ modelSlug: 'google.gemini-2.5-flash-lite', providerSlug: 'openrouter' }]);
+    expect(route.selections).toEqual([{ modelSlug: 'openai.gpt-5.6-luna', providerSlug: 'openai' }]);
   });
 
-  test('retries Gemini once and streams the successful retry', async () => {
-    const route = routes([failed('provider_unavailable'), completed('retry')]);
-    await expect(collect(route.dependencies)).resolves.toEqual([{ type: 'text-delta', text: 'retry' }, { type: 'done' }]);
-    expect(route.selections).toEqual([
-      { modelSlug: 'google.gemini-2.5-flash-lite', providerSlug: 'openrouter' },
-      { modelSlug: 'google.gemini-2.5-flash-lite', providerSlug: 'openrouter' },
-    ]);
-  });
-
-  test('falls back once to Nova Pro after both Gemini attempts fail', async () => {
-    const route = routes([failed('rate_limited'), failed('timeout'), completed('fallback')]);
-    await expect(collect(route.dependencies)).resolves.toEqual([{ type: 'text-delta', text: 'fallback' }, { type: 'done' }]);
-    expect(route.selections).toEqual([
-      { modelSlug: 'google.gemini-2.5-flash-lite', providerSlug: 'openrouter' },
-      { modelSlug: 'google.gemini-2.5-flash-lite', providerSlug: 'openrouter' },
-      { modelSlug: 'amazon.nova-pro', providerSlug: 'aws-bedrock' },
-    ]);
+  test('does not fall back to another provider when direct OpenAI fails', async () => {
+    const route = routes([failed('provider_unavailable'), completed('must not run')]);
+    await expect(collect(route.dependencies)).rejects.toMatchObject({ attempts: [{ code: 'provider_unavailable' }] });
+    expect(route.selections).toEqual([{ modelSlug: 'openai.gpt-5.6-luna', providerSlug: 'openai' }]);
   });
 
   test('streams immediately and does not retry after exposing partial output', async () => {
@@ -140,12 +127,12 @@ describe('orchestrator response runtime', () => {
       for await (const chunk of orchestratorResponseRuntime.stream('Atlas', { message: 'hello' }, route.dependencies as never)) chunks.push(chunk);
     })()).rejects.toBeInstanceOf(ProviderExecutionError);
     expect(chunks).toEqual([{ type: 'text-delta', text: 'discard me' }]);
-    expect(route.selections).toEqual([{ modelSlug: 'google.gemini-2.5-flash-lite', providerSlug: 'openrouter' }]);
+    expect(route.selections).toEqual([{ modelSlug: 'openai.gpt-5.6-luna', providerSlug: 'openai' }]);
   });
 
   test('does not retry or fall back after an abort', async () => {
     const route = routes([failed('aborted'), completed('must not run')]);
     await expect(collect(route.dependencies)).rejects.toMatchObject({ attempts: [{ code: 'aborted' }] });
-    expect(route.selections).toEqual([{ modelSlug: 'google.gemini-2.5-flash-lite', providerSlug: 'openrouter' }]);
+    expect(route.selections).toEqual([{ modelSlug: 'openai.gpt-5.6-luna', providerSlug: 'openai' }]);
   });
 });

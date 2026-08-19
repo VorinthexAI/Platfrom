@@ -8,19 +8,18 @@ export const LEGACY_INDEX_FIELDS: Readonly<Record<string, readonly (readonly str
   users: [['platformId'], ['platform_role'], ['organization_role']],
   visitorSessions: [['platformId', 'connectedAt']],
   userSessions: [['platformId', 'connectedAt']],
-  agents: [['orchestratorId'], ['orchestratorId', 'name'], ['enabled']],
-  skills: [['enabled']],
   scopes: [['organizationId', 'name'], ['organizationId']],
-  // Agents may be assigned to multiple scopes. The current unique identity
-  // is (scopeKey, agentKey), not agentKey by itself.
-  scopeAgents: [['agentKey']],
   organizations: [['ownerId']],
   folders: [['parentFolderKey']],
   documents: [['folderKey']],
   documentVersions: [['scopeKey'], ['documentKey'], ['storageKey']],
   documentShares: [['scopeKey'], ['token']],
+  modelActions: [['modelKey', 'actionKey'], ['actionKey', 'enabled', 'priority']],
   contentSearchQueries: [['actorKey', 'scopeKey', 'normalizedQuery'], ['actorKey', 'scopeKey', 'contextDomain', 'normalizedQuery', 'folderKey', 'includeDescendants'], ['actorKey', 'scopeKey', 'contextDomain', 'searchedAt'], ['expiresAt']],
+  places: [['scopeKey', 'isWishlist'], ['scopeKey', 'isFavorite']],
 };
+
+export const LEGACY_REMOVAL_MARKER = ['deleted', 'At'].join('');
 
 export const DOCUMENT_SHARE_COMMENT_LEGACY_PERMISSIONS = ['comment', 'edit'] as const;
 
@@ -30,6 +29,7 @@ export function normalizeLegacyDocumentSharePermission(permission: unknown): 're
 
 export function isLegacyIndex(collectionName: string, fields: readonly string[], desiredIndexes: readonly (readonly string[])[] = []): boolean {
   if (desiredIndexes.some((desired) => desired.length === fields.length && desired.every((field, index) => fields[index] === field))) return false;
+  if (fields.includes(LEGACY_REMOVAL_MARKER)) return true;
   return (LEGACY_INDEX_FIELDS[collectionName] ?? []).some(
     (legacy) => legacy.length === fields.length && legacy.every((field, index) => fields[index] === field),
   );

@@ -41,7 +41,7 @@ describe('default personal containers', () => {
       collectionKey: newId(),
       collectionMembershipKey: newId(),
       folderKey: newId(),
-      collectionEmbedding: Array(1_536).fill(0.25),
+      collectionEmbedding: Array(EMBEDDING_DIMENSIONS - 1).fill(0.25),
       folderEmbedding: Array(EMBEDDING_DIMENSIONS).fill(0.25),
       now: '2026-08-11T12:00:00.000Z',
     })).toThrow();

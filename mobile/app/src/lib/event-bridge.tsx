@@ -14,7 +14,6 @@ export function AuthenticatedEventBridge() {
   const userKey = useAuthStore((state) => state.user?.key);
   const organizationKey = useAuthStore((state) => typeof state.organization?.key === "string" ? state.organization.key : "");
   const scopeKey = useAuthStore((state) => typeof state.scope?.key === "string" ? state.scope.key : "");
-  const agentKey = useAuthStore((state) => state.contentExecution?.agentKey ?? "");
   const previousIdentity = useRef<string | null | undefined>(undefined);
   const streamGeneration = useRef(0);
 
@@ -49,6 +48,7 @@ export function AuthenticatedEventBridge() {
       if (families.has("duplicates")) void queryClient.invalidateQueries({ queryKey: [...root, "duplicates"], refetchType: "none" });
       if (families.has("upload")) void queryClient.invalidateQueries({ queryKey: [...root, "uploads"], refetchType: "none" });
       if (families.has("highlights")) void queryClient.invalidateQueries({ queryKey: [...root, "highlights"], refetchType: "none" });
+      if (families.has("memories")) void queryClient.invalidateQueries({ queryKey: [...root, "memories"], refetchType: "none" });
     };
     const invalidateUserHiddens = () => {
       void queryClient.invalidateQueries({ predicate: ({ queryKey }) => queryKey.at(-1) === "user-hiddens" && (queryKey[0] === "gallery" || queryKey[0] === "archive"), refetchType: "active" });
@@ -108,7 +108,7 @@ export function AuthenticatedEventBridge() {
       currentController?.abort();
       subscription.remove();
     };
-  }, [agentKey, organizationKey, queryClient, scopeKey, status, userKey]);
+  }, [organizationKey, queryClient, scopeKey, status, userKey]);
 
   return null;
 }

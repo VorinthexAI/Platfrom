@@ -29,7 +29,7 @@ export const emailThreadSchema = z.object({
   priority: z.enum(["low", "normal", "high", "urgent"]), state: z.enum(["needs_action", "waiting", "informational", "filtered", "done"]), lastMessageAt: dateSchema,
   snippet: z.string().optional(), category: z.enum(["primary", "updates", "promotions", "social", "forums", "other"]).optional(), unread: z.boolean().optional(), starred: z.boolean().optional(), labels: z.array(z.string()).optional(),
   latestFrom: z.string().email().optional(), inInbox: z.boolean().optional(), isFavorite: z.boolean(),
-  deletedAt: dateSchema.nullable(), createdAt: dateSchema, updatedAt: dateSchema,
+  createdAt: dateSchema, updatedAt: dateSchema,
 });
 export const emailMessageSchema = z.object({
   key: keySchema, scopeKey: keySchema, accountKey: keySchema, threadKey: keySchema, providerMessageId: z.string().min(1), from: z.string().email(), to: z.array(z.string().email()), cc: z.array(z.string().email()).optional(), bcc: z.array(z.string().email()).optional(),
@@ -104,14 +104,11 @@ export function updateEmailDraft(draftKey: string, finalContent: string) { retur
 export function sendEmailDraft(draftKey: string) { return request("post", `/email/drafts/${keySchema.parse(draftKey)}/send`, {}, z.object({ sent: z.literal(true), providerMessageId: z.string().min(1), threadKey: keySchema })); }
 export function disconnectEmail() { return request("post", "/email/disconnect", {}, z.object({ disconnected: z.literal(true) })); }
 export async function askEmailAssistant(message: string, requestKey: string) {
-  const state = useAuthStore.getState();
-  const { organizationKey } = getEmailContext();
-  const agentKey = typeof state.contentExecution?.agentKey === "string" ? state.contentExecution.agentKey : "";
-  if (!agentKey) throw new Error("Your personal assistant is unavailable for this session.");
+  const { organizationKey, scopeKey } = getEmailContext();
   try {
     const response = await apiClient.post("/assistant/respond", {
       organizationKey,
-      agentKey,
+      scopeKey,
       input: { surface: "signal-workspace", requestKey: z.string().trim().min(1).max(180).parse(requestKey), message: z.string().trim().min(1).max(8_000).parse(message), currentNote: { title: "", content: "" } },
     }, { timeout: 4 * 60_000 });
     return unwrap(response.data, assistantResponseSchema);

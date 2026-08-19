@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
   AccessibilityInfo,
   Animated,
@@ -40,6 +40,12 @@ export type ButtonProps = PressableProps & {
   textStyle?: StyleProp<TextStyle>;
   variant?: ButtonVariant;
 };
+
+const ButtonSizeContext = createContext<ButtonSize | undefined>(undefined);
+
+export function ButtonSizeProvider({ children, size }: { children: ReactNode; size: ButtonSize }) {
+  return <ButtonSizeContext.Provider value={size}>{children}</ButtonSizeContext.Provider>;
+}
 
 function useReducedMotion() {
   const [reducedMotion, setReducedMotion] = useState(true);
@@ -136,12 +142,13 @@ export function Button({
   loading = false,
   pressFeedback = "opacity",
   shape = "pill",
-  size = "md",
+  size: requestedSize = "md",
   style,
   textStyle,
   variant = "secondary",
   ...props
 }: ButtonProps) {
+  const size = useContext(ButtonSizeContext) ?? requestedSize;
   const inactive = disabled || loading;
   const reducedMotion = useReducedMotion();
   const resolveStyle = (state: PressableStateCallbackType) =>

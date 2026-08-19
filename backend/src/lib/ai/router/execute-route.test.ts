@@ -5,7 +5,7 @@ import type { ProviderExecuteRequest } from '@/lib/ai/providers';
 import { executeRoute, type RouteAttemptTelemetry } from './execute-route';
 import type { RouteDecision } from './types';
 
-const decision: RouteDecision = { organizationKey: newId(), actionKey: newId(), actionSlug: 'chat', modelKey: newId(), modelSlug: 'openai.gpt-5.4-nano', providerKey: newId(), orgProviderKey: newId(), providerSlug: 'openai', providerModelId: 'gpt-5.4-nano', credentialSource: 'organization' };
+const decision: RouteDecision = { organizationKey: newId(), actionSlug: 'chat', modelKey: newId(), modelSlug: 'openai.gpt-5.4-nano', providerKey: newId(), orgProviderKey: newId(), providerSlug: 'openai', providerModelId: 'gpt-5.4-nano', credentialSource: 'organization' };
 describe('route execution', () => {
   test('executes exactly one route and reports provider token usage', async () => {
     const calls: ProviderExecuteRequest[] = [];
@@ -14,5 +14,17 @@ describe('route execution', () => {
     expect(calls).toHaveLength(1);
     expect(response.usage.totalTokens).toBe(5);
     expect(telemetry[0]).toMatchObject({ modelKey: decision.modelKey, providerKey: decision.providerKey, status: 'completed', usage: { totalTokens: 5 } });
+  });
+
+  test('passes optional provider cost through to attempt telemetry', async () => {
+    const telemetry: RouteAttemptTelemetry[] = [];
+    const response = await executeRoute({
+      decision,
+      input: { prompt: 'hello' },
+      adapters: { openai: { id: 'openai', name: 'OpenAI', async execute<TInput, TOutput>(request: ProviderExecuteRequest<TInput>) { return { output: {} as TOutput, usage: tokenUsage(1, 2), costUsd: 0.13, providerId: 'openai', modelId: request.modelId, externalModelId: request.externalModelId }; } } },
+      onAttempt: (attempt) => { telemetry.push(attempt); },
+    });
+    expect(response.costUsd).toBe(0.13);
+    expect(telemetry[0]).toMatchObject({ status: 'completed', usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 }, costUsd: 0.13 });
   });
 });

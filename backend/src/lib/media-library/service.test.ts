@@ -10,6 +10,11 @@ function repository(overrides: Partial<MediaLibraryRepository> = {}): MediaLibra
 const requestFingerprint = (value: string) => mediaLibraryRequestFingerprint(value, Buffer.alloc(32, 9));
 describe('MediaLibrary service boundaries', () => {
   test('strictly rejects unknown fields', async () => { await expect(createMediaLibraryService({ repository: repository() }).leaveCollection({ scopeKey: newId(), collectionKey: newId(), actorKey: newId(), forged: true })).rejects.toThrow(); });
+  test('rejects retired trip polymorphism', async () => {
+    const service = createMediaLibraryService({ repository: repository() });
+    await expect(service.assignTag({ scopeKey: newId(), tagKey: newId(), sourceType: 'trip', sourceKey: newId(), actorKey: newId(), source: 'user', now })).rejects.toThrow();
+    await expect(service.createGlobalShare({ scopeKey: newId(), sourceType: 'trip', sourceKey: newId(), ownerKey: newId(), now, idempotencyKey: 'trip-share' })).rejects.toThrow();
+  });
   test('returns one-time tokens while removing persisted hashes', async () => {
     const replay = { encryptReplay: JSON.stringify, decryptReplay: JSON.parse, requestFingerprint };
     const service = createMediaLibraryService({ repository: repository(), token: () => 'one-time-mediaLibrary-token-that-is-long-enough', hashPassword: async () => 'scrypt:long-enough-password-hash', ...replay });
@@ -32,7 +37,7 @@ describe('MediaLibrary service boundaries', () => {
     const passwordHash = await hashMediaLibrarySharePassword('correct password');
     expect(await verifyMediaLibrarySharePassword('correct password', passwordHash)).toBe(true);
     expect(await verifyMediaLibrarySharePassword('wrong password', passwordHash)).toBe(false);
-    const active = { key: newId(), scopeKey: newId(), sourceType: 'image' as const, sourceKey: newId(), permission: 'read' as const, tokenHash: 'a'.repeat(64), passwordHash, deletedAt: null, createdAt: now, updatedAt: now };
+    const active = { key: newId(), scopeKey: newId(), sourceType: 'image' as const, sourceKey: newId(), permission: 'read' as const, tokenHash: 'a'.repeat(64), passwordHash, createdAt: now, updatedAt: now };
     const service = createMediaLibraryService({ repository: repository({ getActiveGlobalShareByTokenHash: async () => active }) });
     await expect(service.accessGlobalShare({ token: 'a'.repeat(32), password: 'wrong password', at: now })).rejects.toThrow('unavailable');
     const result = await service.accessGlobalShare({ token: 'a'.repeat(32), password: 'correct password', at: now });

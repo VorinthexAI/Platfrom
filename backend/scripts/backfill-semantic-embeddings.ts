@@ -8,9 +8,9 @@ const MAX_CATCHUP_PASSES = 5;
 
 // These are the existing semantic collections intentionally approved for external embedding.
 export const SEMANTIC_COLLECTION_ALLOWLIST = [
-  'actions', 'providers', 'models', 'users', 'minds', 'orchestrators', 'voices', 'agents', 'skills', 'capabilities',
+  'providers', 'models', 'users', 'orchestrators', 'voices',
   'organizations', 'scopes', 'channels', 'threads', 'messages', 'messageReactions', 'polls', 'pollOptions', 'folders',
-  'documents', 'documentVersions', 'places', 'trips', 'emailThreads', 'emailMessages',
+  'documents', 'documentVersions', 'places', 'emailThreads', 'emailMessages',
 ] as const;
 
 type SemanticSpec = { name: string; embedKeys: string[]; includeMetadata: boolean };
@@ -18,18 +18,14 @@ const authoritative = new Map(collections.map((spec) => [spec.name, spec]));
 const semanticCollections: SemanticSpec[] = SEMANTIC_COLLECTION_ALLOWLIST.filter((name) => name !== 'documents' && name !== 'documentVersions').map((name) => {
   const spec = authoritative.get(name);
   if (!spec || spec.skipEmbedding || !spec.embedKeys?.length) throw new Error(`Semantic allowlist entry ${name} is not an embedding collection in authoritative specs.`);
-  return { name, embedKeys: [...spec.embedKeys], includeMetadata: !['folders', 'documents', 'documentVersions', 'places', 'trips', 'emailThreads', 'emailMessages'].includes(name) };
+  return { name, embedKeys: [...spec.embedKeys], includeMetadata: !['folders', 'documents', 'documentVersions', 'places', 'emailThreads', 'emailMessages'].includes(name) };
 });
-semanticCollections.push({ name: 'agentMemories', embedKeys: ['content'], includeMetadata: true });
-
 await migrateContentDocuments(db);
 await migrateContentVersions(db);
 
-function inclusionFilter(name: string): string {
+function inclusionFilter(_name: string): string {
   const active = 'FILTER !HAS(doc, "_internalDeletion") || doc._internalDeletion == null';
-  // Recoverable Content documents and versions deliberately remain eligible for includeArchived retrieval.
-  if (name === 'documents' || name === 'documentVersions') return active;
-  return `${active}\nFILTER !HAS(doc, "deletedAt") || doc.deletedAt == null`;
+  return active;
 }
 
 function sourcePresentFilter(): string {

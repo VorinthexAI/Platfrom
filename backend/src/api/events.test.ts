@@ -29,10 +29,14 @@ describe('app event routing', () => {
     expect(checks).toBe(2);
   });
 
-  test('delivers highlight changes to current collaborators', async () => {
+  test('delivers highlight changes to current collection members until access is revoked', async () => {
     const envelope = parseEventEnvelope('{"route":"collection","collectionKey":"collection-1","event":"highlight.changed"}')!;
-    const collaborator = async () => true;
-    expect(await shouldDeliverEvent(envelope, 'collaborator', collaborator)).toBe(true);
+    let active = true;
+    const member = async () => active;
+    expect(await shouldDeliverEvent(envelope, 'collaborator', member)).toBe(true);
+    expect(await shouldDeliverEvent(envelope, 'viewer', member)).toBe(true);
+    active = false;
+    expect(await shouldDeliverEvent(envelope, 'former-member', member)).toBe(false);
   });
 
   test('passes the slug to authorization so owner-only cache families deny readers', async () => {
@@ -49,7 +53,6 @@ describe('app event routing', () => {
     const source = await Bun.file(new URL('./events.ts', import.meta.url)).text();
     expect(source).toContain('membership.organizationId == scope.organizationKey');
     expect(source).toContain('member.scopeKey == collection.scopeKey');
-    expect(source).toContain('collection.deletedAt == null');
     expect(source).toContain('membership.orgRole IN ["owner", "admin"]');
     expect(source).toContain('scopeRole IN ["owner", "admin", "moderator"]');
     expect(source).toContain('member.status == "active"');

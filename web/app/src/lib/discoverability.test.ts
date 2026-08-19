@@ -54,7 +54,7 @@ describe("public discoverability registry", () => {
     expect(sitemap().map(({ url }) => url).sort()).toEqual(
       PUBLIC_ROUTES.map(({ path }) => canonicalUrl(path)).sort(),
     );
-    expect(sitemap().every(({ lastModified }) => lastModified === "2026-08-08")).toBe(
+    expect(sitemap().every(({ lastModified }) => lastModified === "2026-08-19")).toBe(
       true,
     );
   });
@@ -123,7 +123,7 @@ describe("generated answer-engine content", () => {
     for (const output of outputs) {
       expect(output).toContain("# Vorinthex AI");
       expect(output).toContain("> ");
-      expect(output).toContain("Last reviewed: 2026-08-08");
+      expect(output).toContain("Last reviewed: 2026-08-19");
       expect(output).toContain("personal AI");
       expect(output).toContain("Local taxes may be added where required");
       expect(output).toContain(canonicalUrl("/terms"));

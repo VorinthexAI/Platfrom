@@ -34,16 +34,22 @@ const {
   transferCachedGalleryImages,
 } = await import("./workspace-query-cache");
 
-const context: ContentContext = { organizationKey: "org-a", scopeKey: "scope-a", agentKey: "agent-a" };
-const otherContext: ContentContext = { organizationKey: "org-b", scopeKey: "scope-b", agentKey: "agent-b" };
+const context: ContentContext = { organizationKey: "org-a", scopeKey: "scope-a" };
+const otherContext: ContentContext = { organizationKey: "org-b", scopeKey: "scope-b" };
 
 test("isolates every routed workspace key by context and resource", () => {
   expect(galleryQueryKeys.overview(context, "collection")).not.toEqual(galleryQueryKeys.overview(otherContext, "collection"));
   expect(galleryQueryKeys.cleanup(context, "collection", 25)).not.toEqual(galleryQueryKeys.cleanup(context, "collection", 50));
   expect(galleryQueryKeys.cleanup(context, "collection", 25)).not.toEqual(galleryQueryKeys.cleanup(context, "other", 25));
   expect(galleryQueryKeys.highlight(context, "collection", "one")).not.toEqual(galleryQueryKeys.highlight(context, "collection", "two"));
+  expect(galleryQueryKeys.memories(context, "collection")).toEqual(["gallery", "org-a", "scope-a", "memories", "collection"]);
+  expect(galleryQueryKeys.memory(context, "collection", "one")).toEqual(["gallery", "org-a", "scope-a", "memories", "collection", "one"]);
+  expect(galleryQueryKeys.memory(context, "collection", "one")).not.toEqual(galleryQueryKeys.memory(context, "collection", "two"));
   expect(galleryQueryKeys.userHiddens(context)).not.toEqual(galleryQueryKeys.userHiddens(otherContext));
   expect(compassQueryKeys.overview(context)).not.toEqual(compassQueryKeys.overview(otherContext));
+  expect(compassQueryKeys.countryDetail(context, "IS")).toEqual(["compass", "org-a", "scope-a", "country-details", "IS"]);
+  expect(compassQueryKeys.countryDetail(context, "IS")).not.toEqual(compassQueryKeys.countryDetail(otherContext, "IS"));
+  expect(compassQueryKeys.countryImages(context, "token-a")).not.toEqual(compassQueryKeys.countryImages(context, "token-b"));
   expect(signalQueryKeys.overview(context, "all")).not.toEqual(signalQueryKeys.overview(context, "favorite"));
   expect(signalQueryKeys.detail(context, "thread-a")).not.toEqual(signalQueryKeys.detail(context, "thread-b"));
   expect(ascendQueryKeys.detail(context, "book-a")).not.toEqual(ascendQueryKeys.detail(otherContext, "book-a"));
@@ -119,10 +125,11 @@ test("assistant changes invalidate exact workspace prefixes without crossing con
   const signalOverview = signalQueryKeys.overview(context);
   const signalDetail = signalQueryKeys.detail(context, "thread");
   const ascendOverview = ascendQueryKeys.overview(context);
+  const compassOverview = compassQueryKeys.overview(context);
   const archiveLocation = contentQueryKeys.location(context);
-  for (const key of [galleryOverview, galleryDetail, otherGallery, signalOverview, signalDetail, ascendOverview, archiveLocation]) client.setQueryData(key, {});
+  for (const key of [galleryOverview, galleryDetail, otherGallery, signalOverview, signalDetail, ascendOverview, compassOverview, archiveLocation]) client.setQueryData(key, {});
 
-  await invalidateAssistantChanges(client, context, [{ workspace: "gallery" }, { workspace: "gallery" }, { workspace: "archive" }, { workspace: "signal" }, { workspace: "ascend" }]);
+  await invalidateAssistantChanges(client, context, [{ workspace: "gallery" }, { workspace: "gallery" }, { workspace: "archive" }, { workspace: "signal" }, { workspace: "compass" }, { workspace: "ascend" }]);
 
   expect(client.getQueryState(galleryOverview)?.isInvalidated).toBe(true);
   expect(client.getQueryState(galleryDetail)?.isInvalidated).toBe(true);
@@ -130,6 +137,7 @@ test("assistant changes invalidate exact workspace prefixes without crossing con
   expect(client.getQueryState(otherGallery)?.isInvalidated).toBe(false);
   expect(client.getQueryState(signalOverview)?.isInvalidated).toBe(true);
   expect(client.getQueryState(signalDetail)?.isInvalidated).toBe(true);
+  expect(client.getQueryState(compassOverview)?.isInvalidated).toBe(true);
   expect(client.getQueryState(ascendOverview)?.isInvalidated).toBe(true);
 });
 

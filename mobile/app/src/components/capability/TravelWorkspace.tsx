@@ -1,251 +1,150 @@
 import { randomUUID } from "expo-crypto";
+import { Image } from "expo-image";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { KeyboardAvoidingView, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomSheet, BottomSheetItem } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
 import { CoreComposer } from "@vorinthex/shared/ui/core-composer";
-import { CalendarIcon, CheckIcon, GlobeIcon, LocationPinIcon, PlusIcon, SearchIcon, SendIcon, TrashIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { GlobeIcon, LocationPinIcon, SearchIcon, SendIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { Skeleton } from "@vorinthex/shared/ui/skeleton";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 
-import { WorkspaceAppSwitcher } from "@/components/capability/WorkspaceAppSwitcher";
 import { ChromeIcon } from "@/components/ChromeIcon";
+import { WorkspaceAppSwitcher } from "@/components/capability/WorkspaceAppSwitcher";
 import { InteractiveGlobe } from "@/components/three/InteractiveGlobe";
 import { assistantIconSource } from "@/data/capability-icons";
-import { COUNTRIES, type CountryFeature } from "@/lib/globe-data";
+import { COUNTRIES, type CountryFeature, type CountryProperties } from "@/lib/globe-data";
 import {
-  addPlaceToTrip,
   askTravelAssistant,
-  createPlace,
-  createTrip,
   fetchTravelOverview,
+  findPlace,
+  generatePlaceImages,
   getTravelContext,
-  markPlaceVisited,
-  removePlaceFromTrip,
-  tripContainsPlace,
   type Place,
-  type Trip,
+  type PlaceImagesResponse,
 } from "@/lib/travel-client";
-import { getContentContext } from "@/lib/content-client";
-import { compassQueryKeys, invalidateAssistantChanges, patchCompassOverview } from "@/lib/workspace-query-cache";
+import { compassQueryKeys, invalidateAssistantChanges } from "@/lib/workspace-query-cache";
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
 
-export type CountrySelection = {
-  countryCode: string;
-  name: string;
-  continent: string;
-  latitude: number;
-  longitude: number;
-};
-
-type WorkspaceSheet = "actions" | "explore" | "newTrip" | "chooseTrip" | "trips" | "confirmRemove";
 const CORE_PROMPTS = [
-  "Plan a quiet week in Kyoto",
-  "Build a route through Portugal",
-  "What should I see in Copenhagen?",
+  "List my saved cities",
+  "Which cities have I saved in Portugal?",
+  "Show my saved cities in Europe",
 ] as const;
 
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "That change could not be completed.";
-}
+type SheetView = "browse" | "countryDetail";
 
-function dateRange(trip: Trip) {
-  if (!trip.startDate && !trip.endDate) return "Dates not set";
-  return [trip.startDate, trip.endDate].filter(Boolean).join(" to ");
+export const COUNTRY_SHEET_CACHE_MS = 60 * 60_000;
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Compass could not complete that request.";
 }
 
 export function TravelWorkspace() {
   const queryClient = useQueryClient();
   const travelContext = getTravelContext();
   const insets = useSafeAreaInsets();
-  const { height, width } = useWindowDimensions();
-  const [places, setPlaces] = useState<Place[]>([]);
-  const [trips, setTrips] = useState<Trip[]>([]);
-  const [selectedCountry, setSelectedCountry] = useState<CountrySelection>();
-  const [selectedPlace, setSelectedPlace] = useState<Place>();
-  const [selectedTrip, setSelectedTrip] = useState<Trip>();
-  const [activeSheet, setActiveSheet] = useState<WorkspaceSheet>("actions");
+  const { width } = useWindowDimensions();
+  const [selectedCountry, setSelectedCountry] = useState<CountryProperties>();
+  const [selectedPlaceKey, setSelectedPlaceKey] = useState<string>();
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [tripName, setTripName] = useState("");
+  const [sheetView, setSheetView] = useState<SheetView>("browse");
   const [countryQuery, setCountryQuery] = useState("");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
-  const [loadError, setLoadError] = useState<string>();
-  const [pendingRemoval, setPendingRemoval] = useState<{ trip: Trip; place: Place }>();
   const [assistantInput, setAssistantInput] = useState("");
   const [assistantBusy, setAssistantBusy] = useState(false);
   const [assistantMessage, setAssistantMessage] = useState<string>();
   const [assistantFailed, setAssistantFailed] = useState(false);
   const assistantRequestKey = useRef<string | undefined>(undefined);
   const overviewQuery = useQuery({ queryKey: compassQueryKeys.overview(travelContext), queryFn: fetchTravelOverview });
+  const places = useMemo(() => overviewQuery.data?.places ?? [], [overviewQuery.data]);
+  const selectedPlace = places.find(({ key }) => key === selectedPlaceKey);
+  const countryDetailEnabled = sheetOpen && sheetView === "countryDetail" && Boolean(selectedCountry);
+  const countryDetailQuery = useQuery({
+    queryKey: compassQueryKeys.countryDetail(travelContext, selectedCountry?.countryCode ?? ""),
+    queryFn: ({ signal }) => {
+      if (!selectedCountry) throw new Error("Select a country to continue.");
+      return findPlace(`${selectedCountry.name} (${selectedCountry.countryCode}), ${selectedCountry.continent}`, {
+        name: selectedCountry.name,
+        code: selectedCountry.countryCode,
+        continent: selectedCountry.continent,
+        lat: selectedCountry.latitude,
+        lon: selectedCountry.longitude,
+      }, signal);
+    },
+    enabled: countryDetailEnabled,
+    staleTime: COUNTRY_SHEET_CACHE_MS,
+    gcTime: COUNTRY_SHEET_CACHE_MS,
+  });
+  const countryImagesQuery = useQuery({
+    queryKey: compassQueryKeys.countryImages(travelContext, countryDetailQuery.data?.imageRequestToken ?? ""),
+    queryFn: ({ signal }) => {
+      if (!countryDetailQuery.data) throw new Error("Country details are unavailable.");
+      return generatePlaceImages({ imageRequestToken: countryDetailQuery.data.imageRequestToken }, signal);
+    },
+    enabled: countryDetailEnabled && !countryDetailQuery.isFetching && !countryDetailQuery.isError && Boolean(countryDetailQuery.data?.imageRequestToken),
+    staleTime: COUNTRY_SHEET_CACHE_MS,
+    gcTime: COUNTRY_SHEET_CACHE_MS,
+    retry: false,
+  });
+  const countryDetail = countryDetailQuery.isFetching || countryDetailQuery.isError ? undefined : countryDetailQuery.data;
+  const countryDetailLoading = countryDetailEnabled && countryDetailQuery.isFetching;
+  const countryDetailError = countryDetailQuery.error ? errorMessage(countryDetailQuery.error) : undefined;
+  const countryImages = countryDetail ? countryImagesQuery.data : undefined;
+  const countryImagesUnavailable = countryDetailQuery.isError || countryImagesQuery.isError;
 
-  const loadOverview = useCallback(async () => {
-    setLoading(true);
-    setLoadError(undefined);
-    try {
-      const overview = await queryClient.fetchQuery({ queryKey: compassQueryKeys.overview(travelContext), queryFn: fetchTravelOverview });
-      setPlaces(overview.places);
-      setTrips(overview.trips);
-      setError(undefined);
-    } catch (failure) {
-      setLoadError(errorMessage(failure));
-    } finally {
-      setLoading(false);
+  const countryByCode = useMemo(() => new Map(COUNTRIES.features.map(({ properties }) => [properties.countryCode, properties])), []);
+  const citiesByCountry = useMemo(() => {
+    const groups = new Map<string, Place[]>();
+    for (const place of [...places].sort((left, right) => left.name.localeCompare(right.name))) {
+      const group = groups.get(place.countryCode) ?? [];
+      group.push(place);
+      groups.set(place.countryCode, group);
     }
-  }, [queryClient, travelContext.organizationKey, travelContext.scopeKey]);
+    return groups;
+  }, [places]);
+  const selectedCountryCities = selectedCountry ? citiesByCountry.get(selectedCountry.countryCode) ?? [] : undefined;
+  const visibleCountries = useMemo(() => {
+    const normalized = countryQuery.trim().toLowerCase();
+    return COUNTRIES.features
+      .filter(({ properties }) => !normalized || properties.name.toLowerCase().includes(normalized) || properties.countryCode.toLowerCase().includes(normalized))
+      .sort((left, right) => left.properties.name.localeCompare(right.properties.name));
+  }, [countryQuery]);
+  const globePlaces = useMemo(() => places.map((place) => ({
+    id: place.key,
+    latitude: place.latitude,
+    longitude: place.longitude,
+    status: "planned" as const,
+  })), [places]);
 
-  useEffect(() => {
-    const overview = overviewQuery.data;
-    if (overview) {
-      setPlaces(overview.places);
-      setTrips(overview.trips);
-      setError(undefined);
-      setLoadError(undefined);
-      setLoading(false);
-    } else if (overviewQuery.error) {
-      setLoadError(errorMessage(overviewQuery.error));
-      setLoading(false);
-    }
-  }, [overviewQuery.data, overviewQuery.error]);
-
-  function openSheet(sheet: WorkspaceSheet) {
-    if (!loadError) setError(undefined);
-    setActiveSheet(sheet);
+  function openBrowse() {
+    setSheetView("browse");
     setSheetOpen(true);
   }
 
-  function selectCountry(country: CountrySelection | null) {
-    setSelectedCountry(country ?? undefined);
-    setSelectedPlace(country ? places.find((place) => place.kind === "country" && place.countryCode === country.countryCode) : undefined);
-    setError(undefined);
+  function openCountryDetail(country: CountryProperties) {
+    setSelectedCountry(country);
+    setSelectedPlaceKey(undefined);
+    setSheetView("countryDetail");
+    setSheetOpen(true);
   }
 
-  function selectPlace(place: Place | null) {
-    setSelectedPlace(place ?? undefined);
-    if (place) {
-      setSelectedCountry({
-        countryCode: place.countryCode ?? "--",
-        name: place.country ?? place.name,
-        continent: place.continent ?? "Saved place",
-        latitude: place.latitude,
-        longitude: place.longitude,
-      });
-    }
-    setError(undefined);
+  function closeCountryDetail() {
+    // Keep an already-paid image request alive so its transient result can enter the one-hour query cache.
+    setSheetOpen(false);
   }
 
-  async function pinCountry() {
-    if (!selectedCountry) return;
-    setBusy(true);
-    setError(undefined);
-    try {
-      const place = await createPlace({
-        kind: "country",
-        name: selectedCountry.name,
-        latitude: selectedCountry.latitude,
-        longitude: selectedCountry.longitude,
-        countryCode: selectedCountry.countryCode,
-        country: selectedCountry.name,
-        continent: selectedCountry.continent,
-        wishlist: true,
-      });
-      setPlaces((current) => [...current.filter(({ key }) => key !== place.key), place]);
-      patchCompassOverview(queryClient, travelContext, place);
-      setSelectedPlace(place);
-      setSheetOpen(false);
-    } catch (failure) {
-      setError(errorMessage(failure));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function visitPlace() {
-    if (!selectedPlace) return;
-    setBusy(true);
-    setError(undefined);
-    try {
-      const place = await markPlaceVisited(selectedPlace.key);
-      setPlaces((current) => current.map((item) => item.key === place.key ? place : item));
-      patchCompassOverview(queryClient, travelContext, place);
-      setSelectedPlace(place);
-      setSheetOpen(false);
-    } catch (failure) {
-      setError(errorMessage(failure));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function submitTrip() {
-    setBusy(true);
-    setError(undefined);
-    try {
-      const trip = await createTrip({
-        name: tripName,
-        startDate: startDate || undefined,
-        endDate: endDate || undefined,
-      });
-      setTrips((current) => [...current.filter(({ key }) => key !== trip.key), trip]);
-      setSelectedTrip(trip);
-      const savedTrip = selectedPlace ? await addPlaceToTrip(trip.key, { placeKey: selectedPlace.key }) : trip;
-      setTrips((current) => [...current.filter(({ key }) => key !== savedTrip.key), savedTrip]);
-      patchCompassOverview(queryClient, travelContext, savedTrip);
-      setSelectedTrip(savedTrip);
-      setTripName("");
-      setStartDate("");
-      setEndDate("");
-      setActiveSheet("trips");
-    } catch (failure) {
-      setError(errorMessage(failure));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function addToTrip(trip: Trip) {
-    if (!selectedPlace) return;
-    setBusy(true);
-    setError(undefined);
-    try {
-      const updated = await addPlaceToTrip(trip.key, {
-        placeKey: selectedPlace.key,
-      });
-      setTrips((current) => current.map((item) => item.key === updated.key ? updated : item));
-      patchCompassOverview(queryClient, travelContext, updated);
-      setSelectedTrip(updated);
-      setActiveSheet("trips");
-    } catch (failure) {
-      setError(errorMessage(failure));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function removeFromTrip(trip: Trip, placeKey: string) {
-    setBusy(true);
-    setError(undefined);
-    try {
-      const updated = await removePlaceFromTrip(trip.key, placeKey);
-      setTrips((current) => current.map((item) => item.key === updated.key ? updated : item));
-      patchCompassOverview(queryClient, travelContext, updated);
-      setSelectedTrip(updated);
-      return true;
-    } catch (failure) {
-      setError(errorMessage(failure));
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function requestRemoveFromTrip(trip: Trip, place: Place) {
-    setPendingRemoval({ trip, place });
-    openSheet("confirmRemove");
+  function selectPlace(place: Place) {
+    setSelectedPlaceKey(place.key);
+    setSelectedCountry(countryByCode.get(place.countryCode) ?? {
+      countryCode: place.countryCode,
+      name: place.countryCode,
+      continent: "Saved cities",
+      latitude: place.latitude,
+      longitude: place.longitude,
+    });
+    setSheetOpen(false);
   }
 
   async function askAssistant() {
@@ -260,7 +159,7 @@ export function TravelWorkspace() {
       setAssistantInput("");
       assistantRequestKey.current = undefined;
       setAssistantMessage(response.message);
-      await invalidateAssistantChanges(queryClient, getContentContext(), response.changes);
+      await invalidateAssistantChanges(queryClient, travelContext, response.changes);
     } catch (failure) {
       setAssistantMessage(errorMessage(failure));
       setAssistantFailed(true);
@@ -269,25 +168,13 @@ export function TravelWorkspace() {
     }
   }
 
+  const loading = overviewQuery.isPending;
+  const loadError = overviewQuery.error ? errorMessage(overviewQuery.error) : undefined;
   const panelTitle = selectedPlace?.name ?? selectedCountry?.name;
-  const panelMeta = selectedPlace
-    ? [selectedPlace.city, selectedPlace.continent, selectedPlace.country].filter(Boolean).join(" · ")
-    : selectedCountry ? `${selectedCountry.continent} · ${selectedCountry.countryCode}` : undefined;
-  const itinerary = selectedTrip?.itinerary ?? [];
-  const visibleCountries = useMemo(() => {
-    const normalized = countryQuery.trim().toLowerCase();
-    return COUNTRIES.features
-      .filter(({ properties }) => !normalized || properties.name.toLowerCase().includes(normalized) || properties.countryCode.toLowerCase().includes(normalized))
-      .sort((left, right) => left.properties.name.localeCompare(right.properties.name));
-  }, [countryQuery]);
+  const panelMeta = selectedPlace && selectedCountry
+    ? `${selectedCountry.name} · ${selectedPlace.countryCode}`
+    : selectedCountry ? `${selectedCountry.continent} · ${selectedCountryCities?.length ?? 0} saved ${(selectedCountryCities?.length ?? 0) === 1 ? "city" : "cities"}` : undefined;
   const panelWidth = Math.min(width - Math.max(insets.left, spacing.md) - Math.max(insets.right, spacing.md), 600);
-  const sheetTitle = activeSheet === "actions" ? "Place actions"
-    : activeSheet === "newTrip" ? "Create trip"
-      : activeSheet === "chooseTrip" ? "Choose a trip"
-        : activeSheet === "explore" ? "Explore places"
-          : activeSheet === "confirmRemove" ? "Remove stop?"
-            : selectedTrip ? selectedTrip.name : "Trips";
-  const fullHeightSheet = activeSheet === "explore" || activeSheet === "newTrip" || activeSheet === "chooseTrip" || activeSheet === "trips";
 
   return (
     <KeyboardAvoidingView behavior="height" style={styles.root}>
@@ -296,16 +183,19 @@ export function TravelWorkspace() {
       </View>
 
       <View style={styles.globe}>
-        <InteractiveGlobe />
+        <InteractiveGlobe
+          onCountryPress={(country) => { if (country) openCountryDetail(country.properties); }}
+          onPlacePress={(marker) => { const place = places.find(({ key }) => key === marker.id); if (place) selectPlace(place); }}
+          places={globePlaces}
+          selectedCountryCode={selectedCountry?.countryCode}
+          selectedPlaceId={selectedPlace?.key}
+        />
         {!loadError ? <View style={[styles.globeActions, { right: Math.max(insets.right, spacing.md) }]}>
-          <Button accessibilityLabel="Choose a country or saved place" contentMode="raw" disabled={loading} onPress={() => openSheet("explore")} size="md" variant="icon"><SearchIcon size="sm" /></Button>
-          <Button accessibilityLabel="Show trips" contentMode="raw" disabled={loading} onPress={() => { setSelectedTrip(undefined); openSheet("trips"); }} size="md" variant="icon"><CalendarIcon size="sm" /></Button>
+          <Button accessibilityLabel="Browse countries and saved cities" contentMode="raw" disabled={loading} onPress={openBrowse} size="md" variant="icon"><SearchIcon size="sm" /></Button>
         </View> : null}
-        {loading ? <View accessibilityLabel="Loading places" accessibilityRole="progressbar" style={[styles.selectionSkeleton, { bottom: 0, left: (width - panelWidth) / 2, width: panelWidth }]} /> : null}
-        {loadError && !loading ? <View style={styles.loadFailure}><GlobeIcon size="lg" variant="muted" /><Text style={styles.loadFailureText}>{loadError}</Text><Button onPress={() => void loadOverview()} size="sm" variant="secondary">Retry</Button></View> : null}
+        {loading ? <View accessibilityLabel="Loading saved cities" accessibilityRole="progressbar" style={[styles.selectionSkeleton, { bottom: 0, left: (width - panelWidth) / 2, width: panelWidth }]} /> : null}
+        {loadError && !loading ? <View style={styles.loadFailure}><GlobeIcon size="lg" variant="muted" /><Text style={styles.loadFailureText}>{loadError}</Text><Button onPress={() => void overviewQuery.refetch()} size="sm" variant="secondary">Retry</Button></View> : null}
       </View>
-
-      {error && !sheetOpen && !loadError ? <View accessibilityLiveRegion="polite" style={[styles.inlineError, styles.workspaceError]}><Text style={styles.errorText}>{error}</Text></View> : null}
 
       {!loading && panelTitle && !loadError ? <View style={[styles.selectionPanel, { bottom: 0, left: (width - panelWidth) / 2, width: panelWidth }]}>
         <View style={styles.panelIcon}><LocationPinIcon size="md" /></View>
@@ -313,17 +203,16 @@ export function TravelWorkspace() {
           <Text numberOfLines={1} style={styles.panelTitle}>{panelTitle}</Text>
           <Text numberOfLines={1} style={styles.panelMeta}>{panelMeta}</Text>
         </View>
-        {selectedPlace?.visited ? <View style={styles.visited}><CheckIcon size="sm" variant="inverse" /></View> : null}
-        <Button accessibilityLabel={`Actions for ${panelTitle}`} contentMode="raw" onPress={() => openSheet("actions")} size="md" variant="icon"><PlusIcon size="sm" /></Button>
-      </View> : !loading && !loadError ? <View pointerEvents="none" style={[styles.hint, { bottom: 0 }]}><GlobeIcon size="sm" variant="muted" /><Text style={styles.hintText}>Rotate freely or search for a place</Text></View> : null}
+        <Button accessibilityLabel={`Browse saved cities in ${selectedCountry?.name ?? panelTitle}`} contentMode="raw" onPress={openBrowse} size="md" variant="icon"><SearchIcon size="sm" /></Button>
+      </View> : !loading && !loadError ? <View pointerEvents="none" style={[styles.hint, { bottom: 0 }]}><GlobeIcon size="sm" variant="muted" /><Text style={styles.hintText}>Rotate freely or browse countries</Text></View> : null}
 
       {!loadError ? <CoreComposer
-        accessibilityLabel="Ask Core about travel"
+        accessibilityLabel="Ask Core about saved cities"
         disabled={assistantBusy}
         editable={!assistantBusy}
         leading={<ChromeIcon glow={0.35} size={24} source={assistantIconSource} />}
         loading={assistantBusy}
-        message={assistantMessage ? <View style={assistantFailed ? styles.inlineError : styles.inlineNotice}><Text style={styles.errorText}>{assistantMessage}</Text></View> : null}
+        message={assistantMessage ? <View style={assistantFailed ? styles.inlineError : styles.inlineNotice}><Text style={styles.messageText}>{assistantMessage}</Text></View> : null}
         onChangeText={(value) => { setAssistantInput(value); assistantRequestKey.current = undefined; }}
         onFocusChange={(focused) => {
           if (!focused) {
@@ -337,70 +226,86 @@ export function TravelWorkspace() {
         value={assistantInput}
       /> : null}
 
-      <BottomSheet description={activeSheet === "newTrip" ? "Use ISO dates in YYYY-MM-DD format." : undefined} dismissible={!busy} height={fullHeightSheet ? "full" : undefined} onOpenChange={setSheetOpen} open={sheetOpen} title={sheetTitle}>
-        <ScrollView contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={[fullHeightSheet && styles.fullSheetScroll, { maxHeight: fullHeightSheet ? undefined : height * 0.58 }]}>
-          {error ? <View accessibilityLiveRegion="assertive" style={styles.inlineError}><Text style={styles.errorText}>{error}</Text></View> : null}
-
-          {activeSheet === "explore" ? <>
-            <View style={styles.countrySearch}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel="Search countries" onChangeText={setCountryQuery} placeholder="Search countries" style={styles.countrySearchInput} value={countryQuery} /></View>
-            {places.length ? <><Text style={styles.listLabel}>SAVED PLACES</Text>{places.map((place) => <BottomSheetItem key={place.key} disabled={busy} icon={<LocationPinIcon size="md" />} onPress={() => { selectPlace(place); setSheetOpen(false); }}>{place.name}</BottomSheetItem>)}</> : null}
-            <Text style={styles.listLabel}>COUNTRIES</Text>
-            {visibleCountries.map((country: CountryFeature) => <BottomSheetItem key={country.properties.countryCode} disabled={busy} icon={<GlobeIcon size="md" />} onPress={() => { selectCountry(country.properties); setSheetOpen(false); }}>{country.properties.name}</BottomSheetItem>)}
-          </> : null}
-
-          {activeSheet === "actions" ? <>
-            <BottomSheetItem disabled={busy || !selectedCountry || Boolean(selectedPlace)} icon={<LocationPinIcon size="md" />} loading={busy && !selectedPlace} onPress={() => void pinCountry()}>Pin selected country</BottomSheetItem>
-            <BottomSheetItem disabled={busy || !selectedPlace || selectedPlace.visited} icon={<CheckIcon size="md" />} loading={busy && Boolean(selectedPlace)} onPress={() => void visitPlace()}>Mark place visited</BottomSheetItem>
-            <BottomSheetItem disabled={busy || !selectedPlace} icon={<PlusIcon size="md" />} onPress={() => openSheet("chooseTrip")}>Add selected place to trip</BottomSheetItem>
-            <BottomSheetItem disabled={busy} icon={<CalendarIcon size="md" />} onPress={() => openSheet("newTrip")}>Create trip</BottomSheetItem>
-            <BottomSheetItem disabled={busy} icon={<GlobeIcon size="md" />} onPress={() => openSheet("explore")}>Browse countries and saved places</BottomSheetItem>
-            <BottomSheetItem disabled={busy} icon={<CalendarIcon size="md" />} onPress={() => { setSelectedTrip(undefined); openSheet("trips"); }}>View trips and itineraries</BottomSheetItem>
-          </> : null}
-
-          {activeSheet === "newTrip" ? <View style={styles.form}>
-            <TextInput accessibilityLabel="Trip name" autoFocus editable={!busy} onChangeText={setTripName} placeholder="Trip name" value={tripName} />
-            <View style={[styles.dateRow, width < 380 && styles.dateRowCompact]}>
-              <TextInput accessibilityLabel="Trip start date" editable={!busy} onChangeText={setStartDate} placeholder="Start YYYY-MM-DD" style={styles.dateInput} value={startDate} />
-              <TextInput accessibilityLabel="Trip end date" editable={!busy} onChangeText={setEndDate} placeholder="End YYYY-MM-DD" style={styles.dateInput} value={endDate} />
+      <BottomSheet
+        description={sheetView === "countryDetail" ? "A concise guide generated for the selected country." : undefined}
+        footer={sheetView === "countryDetail" ? <Button onPress={closeCountryDetail} size="md" variant="secondary">Close</Button> : undefined}
+        height="full"
+        onOpenChange={(next) => { if (!next && sheetView === "countryDetail") closeCountryDetail(); else setSheetOpen(next); }}
+        open={sheetOpen}
+        title={sheetView === "countryDetail" ? selectedCountry?.name ?? "Country" : selectedCountry ? `${selectedCountry.name} cities` : "Saved cities"}
+      >
+        <ScrollView contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={styles.fullSheetScroll}>
+          {sheetView === "countryDetail" ? <View style={styles.countryDetail}>
+            <View accessibilityLabel={countryImages ? "AI-generated interpretation" : countryImagesUnavailable ? "Image unavailable" : "Loading AI-generated interpretation"} accessibilityRole={!countryImages && !countryImagesUnavailable ? "progressbar" : undefined} style={styles.placeMedia}>
+              <PlaceImageFrame conceptTitle={countryDetail?.assetConcepts[0].title} image={countryImages?.images[0]} unavailable={countryImagesUnavailable} wide={width >= 600} />
+              <View style={styles.supportingMedia}>
+                {[0, 1, 2].map((index) => <PlaceImageFrame conceptTitle={countryDetail?.assetConcepts[index + 1]?.title} image={countryImages?.images[index + 1]} key={index} supporting unavailable={countryImagesUnavailable} />)}
+              </View>
+              {countryImages ? <Text style={styles.mediaDisclosure}>AI-generated interpretation</Text> : null}
             </View>
-            <Button disabled={busy || !tripName.trim()} loading={busy} onPress={() => void submitTrip()} size="md" variant="primary">Create trip</Button>
-          </View> : null}
 
-          {activeSheet === "chooseTrip" ? <>
-            {trips.map((trip) => <BottomSheetItem key={trip.key} disabled={busy || Boolean(selectedPlace && tripContainsPlace(trip, selectedPlace.key))} icon={<CalendarIcon size="md" />} loading={busy} onPress={() => void addToTrip(trip)}>{trip.name}</BottomSheetItem>)}
-            {trips.length === 0 ? <Text style={styles.emptyText}>Create a trip before adding this place.</Text> : null}
-            <BottomSheetItem disabled={busy} icon={<PlusIcon size="md" />} onPress={() => openSheet("newTrip")}>Create a new trip</BottomSheetItem>
-          </> : null}
-
-          {activeSheet === "trips" && !selectedTrip ? <>
-            {trips.map((trip) => <BottomSheetItem key={trip.key} contentMode="raw" disabled={busy} icon={<CalendarIcon size="md" />} onPress={() => setSelectedTrip(trip)}><View style={styles.tripCopy}><Text style={styles.tripName}>{trip.name}</Text><Text style={styles.tripMeta}>{dateRange(trip)} · {trip.itinerary.length} stops</Text></View></BottomSheetItem>)}
-            {trips.length === 0 ? <Text style={styles.emptyText}>Your first itinerary starts with a new trip.</Text> : null}
-            <BottomSheetItem disabled={busy} icon={<PlusIcon size="md" />} onPress={() => openSheet("newTrip")}>Create trip</BottomSheetItem>
-          </> : null}
-
-          {activeSheet === "trips" && selectedTrip ? <View style={styles.itinerary}>
-            <Button disabled={busy} onPress={() => setSelectedTrip(undefined)} size="sm" variant="ghost">All trips</Button>
-            <Text style={styles.tripMeta}>{dateRange(selectedTrip)}</Text>
-            {itinerary.map((item) => {
-              const place = item.place;
-              return <View key={item.key} style={styles.stop}>
-                <View style={styles.stopIndex}><Text style={styles.stopIndexText}>{item.position}</Text></View>
-                <View style={styles.tripCopy}><Text style={styles.tripName}>{place?.name ?? "Saved place"}</Text><Text style={styles.tripMeta}>{[item.arrivalDate, item.departureDate].filter(Boolean).join(" to ") || place?.country || "Dates not set"}</Text></View>
-                <Button accessibilityLabel={`Remove ${place.name} from trip`} contentMode="raw" disabled={busy} onPress={() => requestRemoveFromTrip(selectedTrip, place)} size="md" variant="icon"><TrashIcon size="sm" variant="danger" /></Button>
-              </View>;
-            })}
-            {itinerary.length === 0 ? <Text style={styles.emptyText}>No places have been added to this itinerary.</Text> : null}
-          </View> : null}
-
-          {activeSheet === "confirmRemove" && pendingRemoval ? <View style={styles.form}>
-            <Text style={styles.confirmText}>Remove {pendingRemoval.place.name} from {pendingRemoval.trip.name}?</Text>
-            <Button disabled={busy} onPress={() => { setPendingRemoval(undefined); setActiveSheet("trips"); }} size="md" variant="secondary">Cancel</Button>
-            <Button disabled={busy} icon={<TrashIcon size="sm" variant="inverse" />} loading={busy} onPress={() => void removeFromTrip(pendingRemoval.trip, pendingRemoval.place.key).then((removed) => { if (removed) { setPendingRemoval(undefined); setActiveSheet("trips"); } })} size="md" variant="danger">Remove stop</Button>
-          </View> : null}
+            {countryDetailLoading ? <View accessibilityLabel={`Loading information about ${selectedCountry?.name ?? "country"}`} accessibilityRole="progressbar" style={styles.countryDetailSkeleton}>
+              <Skeleton style={[styles.skeletonBlock, styles.skeletonSummary]} />
+              <View style={styles.factGrid}>{Array.from({ length: 4 }, (_, index) => <Skeleton key={index} style={[styles.skeletonBlock, styles.skeletonFact]} />)}</View>
+              {Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.skeletonBlock, styles.skeletonHighlight]} />)}
+            </View> : countryDetailError ? <View style={styles.countryDetailFailure}>
+              <GlobeIcon size="lg" variant="muted" />
+              <Text style={styles.loadFailureText}>{countryDetailError}</Text>
+            </View> : countryDetail ? <>
+              <View style={styles.countryHero}>
+                <Text style={styles.countryEyebrow}>{countryDetail.location.countryCode} · {countryDetail.location.continent}</Text>
+                <Text style={styles.countrySummary}>{countryDetail.summary}</Text>
+              </View>
+              <Text style={styles.detailSectionLabel}>AT A GLANCE</Text>
+              <View style={styles.factGrid}>{countryDetail.facts.map((fact) => <View key={`${fact.label}:${fact.value}`} style={styles.factCard}><Text style={styles.factLabel}>{fact.label}</Text><Text style={styles.factValue}>{fact.value}</Text></View>)}</View>
+              <Text style={styles.detailSectionLabel}>HIGHLIGHTS</Text>
+              <View style={styles.detailList}>{countryDetail.highlights.map((highlight) => <View key={highlight.title} style={styles.highlightCard}><Text style={styles.highlightTitle}>{highlight.title}</Text><Text style={styles.highlightDescription}>{highlight.description}</Text></View>)}</View>
+              <Text style={styles.detailSectionLabel}>PRACTICAL</Text>
+              <View style={styles.practicalCard}>
+                <Text style={styles.factLabel}>Best time to visit</Text><Text style={styles.practicalValue}>{countryDetail.practicalInfo.bestTimeToVisit}</Text>
+                <Text style={styles.factLabel}>Languages</Text><Text style={styles.practicalValue}>{countryDetail.practicalInfo.languages.join(", ")}</Text>
+                <Text style={styles.factLabel}>Currency</Text><Text style={styles.practicalValue}>{countryDetail.practicalInfo.currency}</Text>
+                <Text style={styles.factLabel}>Time zone</Text><Text style={styles.practicalValue}>{countryDetail.practicalInfo.timeZone}</Text>
+                <Text style={styles.factLabel}>Safety</Text><Text style={styles.practicalValue}>{countryDetail.practicalInfo.safety}</Text>
+                <Text style={styles.factLabel}>Entry requirements</Text><Text style={styles.practicalValue}>{countryDetail.practicalInfo.entryRequirements}</Text>
+              </View>
+              <Text style={styles.detailSectionLabel}>VISUAL CONCEPTS</Text>
+              <View style={styles.conceptList}>{countryDetail.assetConcepts.map((concept) => <Text key={concept.title} style={styles.conceptTitle}>{concept.title}</Text>)}</View>
+              <Text style={styles.verificationNote}>Verify safety and entry requirements with official sources before travel.</Text>
+            </> : null}
+          </View> : <>
+            <View style={styles.countrySearch}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel="Search countries" onChangeText={setCountryQuery} placeholder="Search countries" style={styles.countrySearchInput} value={countryQuery} /></View>
+            {selectedCountry ? <>
+              <BottomSheetItem icon={<GlobeIcon size="md" />} onPress={() => { setSelectedCountry(undefined); setSelectedPlaceKey(undefined); }}>Show all saved cities</BottomSheetItem>
+              <Text style={styles.listLabel}>SAVED CITIES IN {selectedCountry.countryCode}</Text>
+              {selectedCountryCities?.map((place) => <BottomSheetItem key={place.key} icon={<LocationPinIcon size="md" />} onPress={() => selectPlace(place)}>{place.name}</BottomSheetItem>)}
+              {selectedCountryCities?.length === 0 ? <Text style={styles.emptyText}>No saved cities in {selectedCountry.name}.</Text> : null}
+            </> : <>
+              <Text style={styles.listLabel}>SAVED CITIES</Text>
+              {[...citiesByCountry.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([countryCode, countryPlaces]) => <Fragment key={countryCode}>
+                <Text style={styles.countryLabel}>{countryByCode.get(countryCode)?.name ?? countryCode} · {countryCode}</Text>
+                {countryPlaces.map((place) => <BottomSheetItem key={place.key} icon={<LocationPinIcon size="md" />} onPress={() => selectPlace(place)}>{place.name}</BottomSheetItem>)}
+              </Fragment>)}
+              {places.length === 0 ? <Text style={styles.emptyText}>No saved cities are available.</Text> : null}
+            </>}
+            <Text style={styles.listLabel}>COUNTRIES</Text>
+            {visibleCountries.map((country: CountryFeature) => <BottomSheetItem key={country.properties.countryCode} icon={<GlobeIcon size="md" />} onPress={() => openCountryDetail(country.properties)}>{country.properties.name}</BottomSheetItem>)}
+          </>}
         </ScrollView>
       </BottomSheet>
     </KeyboardAvoidingView>
   );
+}
+
+function PlaceImageFrame({ conceptTitle, image, supporting = false, unavailable, wide = false }: { conceptTitle?: string; image?: PlaceImagesResponse["images"][number]; supporting?: boolean; unavailable: boolean; wide?: boolean }) {
+  const [loadState, setLoadState] = useState<"loading" | "loaded" | "error">("loading");
+  useEffect(() => setLoadState("loading"), [image?.url]);
+  const failed = unavailable || loadState === "error";
+  return <View style={[styles.imageFrame, supporting ? styles.supportingImageFrame : styles.heroImageFrame, wide && !supporting && styles.heroImageFrameWide, failed && styles.imageUnavailable]}>
+    {image && !failed ? <Image accessibilityLabel={image.title} contentFit="cover" onError={() => setLoadState("error")} onLoad={() => setLoadState("loaded")} source={{ uri: image.url }} style={styles.placeImage} transition={250} /> : null}
+    {failed ? <Text style={styles.imageUnavailableText}>Image unavailable</Text> : loadState !== "loaded" ? <Skeleton style={styles.imageSkeleton} /> : null}
+    {conceptTitle && loadState === "loaded" && !failed ? <View style={styles.imageCaption}><Text numberOfLines={1} style={styles.imageCaptionText}>{conceptTitle}</Text></View> : null}
+  </View>;
 }
 
 const styles = StyleSheet.create({
@@ -416,29 +321,53 @@ const styles = StyleSheet.create({
   panelCopy: { minWidth: 0, flex: 1 },
   panelTitle: { color: palette.silver50, fontFamily: fonts.medium, fontSize: 17 },
   panelMeta: { marginTop: 3, color: palette.silver500, fontFamily: fonts.regular, fontSize: 11 },
-  visited: { width: 22, height: 22, alignItems: "center", justifyContent: "center", borderRadius: 11, backgroundColor: palette.silver100 },
   hint: { position: "absolute", alignSelf: "center", paddingHorizontal: 14, paddingVertical: 9, flexDirection: "row", alignItems: "center", gap: 8, borderRadius: 999, backgroundColor: "rgba(10,14,19,0.86)" },
   hintText: { color: palette.silver500, fontFamily: fonts.medium, fontSize: 11, letterSpacing: tracking.micro },
-  workspaceError: { position: "absolute", top: 92, left: spacing.md, right: spacing.md, zIndex: 3 },
   inlineError: { paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: "rgba(176,74,74,0.45)", borderRadius: radii.md, backgroundColor: "rgba(64,20,20,0.9)" },
   inlineNotice: { paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: palette.hairlineBright, borderRadius: radii.md, backgroundColor: palette.panelRaised },
-  errorText: { color: palette.silver100, fontFamily: fonts.regular, fontSize: 12, lineHeight: 18 },
+  messageText: { color: palette.silver100, fontFamily: fonts.regular, fontSize: 12, lineHeight: 18 },
   sheetContent: { gap: 6, paddingBottom: 6 },
   fullSheetScroll: { flex: 1 },
   countrySearch: { minHeight: 48, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.lg, backgroundColor: palette.panelRaised },
   countrySearchInput: { minHeight: 40, flex: 1, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent" },
   listLabel: { marginTop: 10, marginBottom: 2, color: palette.silver500, fontFamily: fonts.medium, fontSize: 10, letterSpacing: tracking.micro },
-  form: { gap: 14 },
-  dateRow: { flexDirection: "row", gap: 8 },
-  dateRowCompact: { flexDirection: "column" },
-  dateInput: { minWidth: 0, flex: 1, fontSize: 13 },
+  countryLabel: { marginTop: 8, paddingHorizontal: 6, color: palette.silver300, fontFamily: fonts.medium, fontSize: 11 },
+  countryDetailSkeleton: { gap: spacing.md, paddingVertical: spacing.md },
+  skeletonBlock: { backgroundColor: palette.hairlineBright, opacity: 0.72 },
+  skeletonSummary: { width: "100%", height: 112 },
+  skeletonFact: { minWidth: 130, flexBasis: "47%", height: 86 },
+  skeletonHighlight: { width: "100%", height: 104 },
+  countryDetailFailure: { flex: 1, minHeight: 360, alignItems: "center", justifyContent: "center", gap: spacing.md },
+  countryDetail: { gap: spacing.md, paddingTop: spacing.md, paddingBottom: spacing.xl },
+  placeMedia: { gap: spacing.sm },
+  supportingMedia: { width: "100%", flexDirection: "row", gap: spacing.sm },
+  imageFrame: { minWidth: 0, aspectRatio: 9 / 16, overflow: "hidden", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.lg, backgroundColor: palette.panelRaised },
+  heroImageFrame: { width: "100%" },
+  heroImageFrameWide: { width: "56%", maxWidth: 315, alignSelf: "center" },
+  supportingImageFrame: { flex: 1 },
+  imageUnavailable: { borderColor: palette.hairline, backgroundColor: palette.page, opacity: 0.72 },
+  imageUnavailableText: { paddingHorizontal: 4, color: palette.silver500, fontFamily: fonts.regular, fontSize: 9, lineHeight: 13, textAlign: "center" },
+  imageSkeleton: { position: "absolute", width: "100%", height: "100%", backgroundColor: palette.hairlineBright, opacity: 0.72 },
+  placeImage: { width: "100%", height: "100%" },
+  imageCaption: { position: "absolute", right: 6, bottom: 6, left: 6, paddingHorizontal: 7, paddingVertical: 5, borderRadius: radii.sm, backgroundColor: "rgba(2,6,9,0.74)" },
+  imageCaptionText: { color: palette.silver100, fontFamily: fonts.medium, fontSize: 9 },
+  mediaDisclosure: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 10, lineHeight: 15, textAlign: "right" },
+  countryHero: { paddingVertical: spacing.md, gap: spacing.sm },
+  countryEyebrow: { color: palette.silver500, fontFamily: fonts.medium, fontSize: 11, letterSpacing: tracking.micro, textTransform: "uppercase" },
+  countrySummary: { color: palette.silver300, fontFamily: fonts.regular, fontSize: 16, lineHeight: 25 },
+  detailSectionLabel: { marginTop: spacing.sm, color: palette.silver500, fontFamily: fonts.medium, fontSize: 10, letterSpacing: tracking.micro },
+  factGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
+  factCard: { minWidth: 130, flexGrow: 1, flexBasis: "47%", padding: spacing.md, gap: 5, borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.lg, backgroundColor: palette.panelRaised },
+  factLabel: { color: palette.silver500, fontFamily: fonts.medium, fontSize: 10, letterSpacing: tracking.micro, textTransform: "uppercase" },
+  factValue: { color: palette.silver100, fontFamily: fonts.medium, fontSize: 15, lineHeight: 20 },
+  detailList: { gap: spacing.sm },
+  highlightCard: { padding: spacing.md, gap: 6, borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.lg, backgroundColor: palette.panelRaised },
+  highlightTitle: { color: palette.silver50, fontFamily: fonts.medium, fontSize: 16 },
+  highlightDescription: { color: palette.silver300, fontFamily: fonts.regular, fontSize: 13, lineHeight: 20 },
+  practicalCard: { padding: spacing.md, gap: 7, borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.lg, backgroundColor: palette.panelRaised },
+  practicalValue: { marginBottom: spacing.sm, color: palette.silver300, fontFamily: fonts.regular, fontSize: 14, lineHeight: 21 },
+  conceptList: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
+  conceptTitle: { paddingHorizontal: 10, paddingVertical: 7, borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.md, color: palette.silver300, fontFamily: fonts.medium, fontSize: 11, backgroundColor: palette.panelRaised },
+  verificationNote: { paddingBottom: spacing.md, color: palette.silver500, fontFamily: fonts.regular, fontSize: 11, lineHeight: 17, textAlign: "center" },
   emptyText: { paddingVertical: 18, color: palette.silver500, fontFamily: fonts.regular, fontSize: 13, textAlign: "center" },
-  tripCopy: { minWidth: 0, flex: 1 },
-  tripName: { color: palette.silver100, fontFamily: fonts.medium, fontSize: 15 },
-  tripMeta: { marginTop: 3, color: palette.silver500, fontFamily: fonts.regular, fontSize: 11 },
-  itinerary: { gap: 10 },
-  stop: { minHeight: 56, paddingVertical: 5, flexDirection: "row", alignItems: "center", gap: 10, borderBottomWidth: 1, borderBottomColor: palette.hairline },
-  stopIndex: { width: 28, height: 28, alignItems: "center", justifyContent: "center", borderRadius: 14, backgroundColor: palette.panelRaised },
-  stopIndexText: { color: palette.silver300, fontFamily: fonts.medium, fontSize: 11 },
-  confirmText: { paddingVertical: 8, color: palette.silver100, fontFamily: fonts.regular, fontSize: 15, lineHeight: 22, textAlign: "center" },
 });

@@ -9,7 +9,7 @@ export type UserHiddenRecord = {
   sourceKey: string;
   createdAt: string;
 };
-export type HiddenViewMode = "normal" | "favorites" | "hidden";
+export type HiddenViewFilters = { favoritesOnly: boolean; showHidden: boolean };
 
 export async function listUserHiddens() {
   return (await apiClient.get<UserHiddenRecord[]>("/auth/me/hiddens")).data;
@@ -36,13 +36,12 @@ export function filterByHiddenView<T extends { isFavorite?: boolean }>(
   items: readonly T[],
   records: readonly UserHiddenRecord[],
   source: UserHiddenSource | "file",
-  mode: HiddenViewMode,
+  filters: HiddenViewFilters,
   keyOf: (item: T) => string = (item) => (item as T & { key: string }).key,
 ) {
   return items.filter((item) => {
     const hidden = isUserHidden(records, source, keyOf(item));
-    if (mode === "hidden") return hidden;
-    if (hidden) return false;
-    return mode !== "favorites" || item.isFavorite === true;
+    if (!filters.showHidden && hidden) return false;
+    return !filters.favoritesOnly || item.isFavorite === true;
   });
 }

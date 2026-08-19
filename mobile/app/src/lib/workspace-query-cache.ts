@@ -1,12 +1,10 @@
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import type { AssistantChange } from "./assistant-changes";
 import type { Book, BookDetail } from "./books-client";
-import type { ContentContext } from "./content-client";
 import { contentQueryKeys } from "./content-query-cache";
 import type { EmailFilter, EmailOverview, EmailThread } from "./email-client";
 import { normalizeCollection } from "./collection-access";
 import type { GalleryCollection, GalleryCollectionInvite, GalleryCollectionMember, GalleryCollectionShareLink, GalleryImage, GalleryOverview } from "./gallery-client";
-import type { Place, Trip } from "./travel-client";
 import type { UserHiddenRecord } from "./user-hidden-client";
 
 export type WorkspaceContext = { organizationKey: string; scopeKey: string };
@@ -31,6 +29,8 @@ export const galleryQueryKeys = {
   uploads: (context: WorkspaceContext) => [...galleryQueryKeys.all(context), "uploads"] as const,
   highlights: (context: WorkspaceContext, collectionKey: string) => [...galleryQueryKeys.all(context), "highlights", collectionKey] as const,
   highlight: (context: WorkspaceContext, collectionKey: string, highlightKey: string) => [...galleryQueryKeys.highlights(context, collectionKey), highlightKey] as const,
+  memories: (context: WorkspaceContext, collectionKey: string) => [...galleryQueryKeys.all(context), "memories", collectionKey] as const,
+  memory: (context: WorkspaceContext, collectionKey: string, memoryKey: string) => [...galleryQueryKeys.memories(context, collectionKey), memoryKey] as const,
 };
 
 export function patchGalleryUserHiddens(queryClient: QueryClient, context: WorkspaceContext, update: (current: UserHiddenRecord[]) => UserHiddenRecord[]) {
@@ -66,6 +66,9 @@ export function setCachedGalleryCollections(queryClient: QueryClient, context: W
 export const compassQueryKeys = {
   all: (context: WorkspaceContext) => ["compass", ...contextKey(context)] as const,
   overview: (context: WorkspaceContext) => [...compassQueryKeys.all(context), "overview"] as const,
+  countryDetails: (context: WorkspaceContext) => [...compassQueryKeys.all(context), "country-details"] as const,
+  countryDetail: (context: WorkspaceContext, countryCode: string) => [...compassQueryKeys.countryDetails(context), countryCode] as const,
+  countryImages: (context: WorkspaceContext, imageRequestToken: string) => [...compassQueryKeys.all(context), "country-images", imageRequestToken] as const,
 };
 
 export const signalQueryKeys = {
@@ -85,11 +88,11 @@ export const ascendQueryKeys = {
 
 export async function invalidateAssistantChanges(
   queryClient: QueryClient,
-  context: WorkspaceContext & Partial<Pick<ContentContext, "agentKey">>,
+  context: WorkspaceContext,
   changes: AssistantChange[] | undefined,
 ) {
   const prefixes = {
-    archive: contentQueryKeys.all({ ...context, agentKey: context.agentKey ?? "" }),
+    archive: contentQueryKeys.all(context),
     gallery: galleryQueryKeys.all(context),
     signal: signalQueryKeys.all(context),
     compass: compassQueryKeys.all(context),
@@ -176,14 +179,6 @@ export function removeCachedGalleryImages(queryClient: QueryClient, context: Wor
       images: overview.images.filter(({ key }) => !removed.has(key)),
     });
   }
-}
-
-export function patchCompassOverview(queryClient: QueryClient, context: WorkspaceContext, update: Place | Trip) {
-  queryClient.setQueryData<{ places: Place[]; trips: Trip[] }>(compassQueryKeys.overview(context), (overview) => {
-    if (!overview) return overview;
-    if ("itinerary" in update) return { ...overview, trips: [...overview.trips.filter(({ key }) => key !== update.key), update] };
-    return { ...overview, places: [...overview.places.filter(({ key }) => key !== update.key), update] };
-  });
 }
 
 export function patchSignalThread(queryClient: QueryClient, context: WorkspaceContext, thread: EmailThread) {

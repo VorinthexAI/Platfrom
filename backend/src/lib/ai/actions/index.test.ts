@@ -17,10 +17,10 @@ describe('action registry', () => {
 
   test('contains only generic runtime primitives with explicit model policies', () => {
     expect(ACTION_SLUGS).toEqual([
-      'ask', 'chat', 'reason', 'deep-reason', 'embed', 'speak', 'web-search',
+      'ask', 'chat', 'reason', 'deep-reason', 'embed', 'web-search',
       'traverse', 'read', 'insert', 'upsert', 'update', 'delete',
       'generate-image', 'edit-image', 'generate-video', 'edit-video', 'extend-video', 'analyze-video',
-      'generate-speech', 'analyze-audio', 'generate-music', 'orchestrator-chat',
+      'analyze-audio', 'generate-music', 'orchestrator-chat',
       'document-validate', 'storage-upload', 'document-extract', 'document-embed', 'document-insert', 'enhance', 'translate', 'caption-image', 'describe-visual-identity',
       'document-cleanup', 'document-summarize', 'document-topics',
     ]);
@@ -30,26 +30,27 @@ describe('action registry', () => {
         'document-validate', 'storage-upload', 'document-extract', 'document-embed', 'document-insert',
       ]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'chat')?.models.map(({ model }) => model))
-      .toEqual(['amazon.nova-pro', 'google.gemini-2.5-flash-lite']);
+      .toEqual(['openai.gpt-5.6-luna']);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'orchestrator-chat')?.models)
-      .toEqual([
-        { provider: 'openrouter', model: 'google.gemini-2.5-flash-lite', priority: 100 },
-        { provider: 'aws-bedrock', model: 'amazon.nova-pro', priority: 90 },
-      ]);
+      .toEqual([{ provider: 'openai', model: 'openai.gpt-5.6-luna', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'enhance')?.models)
-      .toEqual([{ provider: 'openrouter', model: 'google.gemini-2.5-flash-lite', priority: 100 }]);
+      .toEqual([{ provider: 'openai', model: 'openai.gpt-5.6-luna', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'translate')?.models)
-      .toEqual([{ provider: 'openrouter', model: 'google.gemini-2.5-flash-lite', priority: 100 }]);
+      .toEqual([{ provider: 'openai', model: 'openai.gpt-5.6-luna', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'caption-image')?.models)
-      .toEqual([{ provider: 'openrouter', model: 'google.gemini-2.5-flash-lite', priority: 100 }]);
+      .toEqual([{ provider: 'openai', model: 'openai.gpt-5.6-luna', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'document-cleanup')?.models)
-      .toEqual([{ provider: 'openrouter', model: 'google.gemini-2.5-flash-lite', priority: 100 }]);
+      .toEqual([{ provider: 'openai', model: 'openai.gpt-5.6-luna', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'document-summarize')?.models)
-      .toEqual([{ provider: 'openrouter', model: 'google.gemini-2.5-flash-lite', priority: 100 }]);
+      .toEqual([{ provider: 'openai', model: 'openai.gpt-5.6-luna', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'document-topics')?.models)
-      .toEqual([{ provider: 'openrouter', model: 'google.gemini-2.5-flash-lite', priority: 100 }]);
+      .toEqual([{ provider: 'openai', model: 'openai.gpt-5.6-luna', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'describe-visual-identity')?.models)
-      .toEqual([{ provider: 'openrouter', model: 'google.gemini-2.5-flash-lite', priority: 100 }]);
+      .toEqual([{ provider: 'openai', model: 'openai.gpt-5.6-luna', priority: 100 }]);
+    expect(ACTION_DEFINITIONS.find((action) => action.id === 'generate-image')?.models)
+      .toEqual([{ provider: 'openai', model: 'openai.gpt-image-2', priority: 100 }]);
+    expect(ACTION_DEFINITIONS.find((action) => action.id === 'embed')?.models)
+      .toEqual([{ provider: 'openai', model: 'openai.text-embedding-3-small', priority: 100 }]);
   });
 
   test('delegates generic data primitives to the node helper implementation', async () => {

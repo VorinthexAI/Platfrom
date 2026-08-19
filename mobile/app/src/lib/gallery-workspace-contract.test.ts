@@ -11,12 +11,17 @@ const memberMobileSource = await Bun.file(new URL("../../../../shared/packages/u
 const webIconsSource = await Bun.file(new URL("../../../../shared/packages/ui/icons.ts", import.meta.url)).text();
 const mobileIconsSource = await Bun.file(new URL("../../../../shared/packages/ui/icons-mobile.ts", import.meta.url)).text();
 
-test("keeps image similarity collection-scoped and outside the image footer", () => {
+test("opens collection-scoped image similarity in an invalidated full-screen sheet", () => {
   const footer = source.slice(source.indexOf('const sheetFooter ='), source.indexOf('return (', source.indexOf('const sheetFooter =')));
   expect(footer).not.toContain("Find similar");
   expect(source).toContain("imageKey: source.key, collectionKey: collection.key");
   expect(source).toContain("Image.prefetch(url)");
-  expect(source).toContain("Similar to {similarSource.filename}");
+  expect(source).toContain('galleryQueryKeys.search(galleryContext, "similar", collection.key, source.key)');
+  expect(source).toContain('invalidateQueries({ queryKey, exact: true, refetchType: "none" })');
+  expect(source).toContain('activeSheetRef.current === "similar"');
+  expect(source).toContain('openSheet("similar")');
+  expect(source).toContain('height={activeSheet === "destination" || activeSheet === "imageEdit" || activeSheet === "newCollection" || activeSheet === "collectionEdit" || activeSheet === "similar"');
+  expect(source).toContain('activeSheet === "similar" ? "Similar images"');
   expect(source.indexOf(">Find similar image<")).toBeLessThan(source.indexOf(">Delete image<"));
 });
 
@@ -55,19 +60,30 @@ test("uses a singleton collection cache without root search or filtering", () =>
   expect(source).toContain('accessibilityLabel="Create in Gallery"');
 });
 
+test("keeps the Gallery filter sheet limited to favorite and hidden toggles", () => {
+  const start = source.indexOf('activeSheet === "filter" ?');
+  const filterSheet = source.slice(start, source.indexOf('activeSheet === "identityPickerFilter"', start));
+  expect(filterSheet).toContain('>Favorites</Text>');
+  expect(filterSheet).toContain('>Show hidden</Text>');
+  expect(filterSheet).not.toContain('>Visual identities</Button>');
+  expect(filterSheet).not.toContain('>Search history</Button>');
+});
+
 test("only lifts Core for its own focus and uses distinct image sheet presentations", () => {
   expect(source).toContain('behavior={aiInputFocused ? "height" : undefined}');
   expect(source).toContain("setAiInputFocused(focused)");
-  expect(source).toContain('hideHeading={activeSheet === "rootActions" || activeSheet === "actions" || activeSheet === "collectionMenu" || activeSheet === "filter" || activeSheet === "imageActions" || activeSheet === "bulkActions" || activeSheet === "cleanupMenu" || activeSheet === "confirmCleanupDelete" || activeSheet === "confirmDeleteIdentity" || activeSheet === "confirmLeaveCollection"}');
+  expect(source).toContain('hideHeading={activeSheet === "rootActions" || activeSheet === "actions" || activeSheet === "collectionMenu" || activeSheet === "filter" || activeSheet === "imageActions" || activeSheet === "bulkActions" || activeSheet === "cleanupMenu"}');
   expect(source).toContain('open={!sharingOpen && sheetOpen && (activeSheet === "image" || activeSheet === "imageActions") && Boolean(selectedImage || selectedOptimisticItem)}');
   expect(source).toContain('height="full"\n        onOpenChange');
   expect(source).toContain('height={activeSheet === "destination" || activeSheet === "imageEdit"');
   expect(source).not.toContain('activeSheet === "imageActions" || activeSheet === "imageEdit"');
   expect(source).not.toContain("detailCaption");
   expect(source).toContain('accessibilityLabel="Open image actions"');
-  expect(source).toContain('footer={<Button onPress={closeSheet} size="lg" variant="secondary">Close</Button>}');
+  expect(source).toContain('<View style={styles.detailImageFrame}>');
+  expect(source).toContain('footer={<Button onPress={closeSheet} size="md" variant="secondary">Close</Button>}');
   expect(source).toContain('if (activeSheetRef.current === "imageActions") goBackSheet(); else closeSheet();');
-  expect(source).toContain('detailImageFrame: { flex: 1, width: "100%", overflow: "hidden", borderRadius: radii.lg');
+  expect(source).toContain('mergeMediaItems([], unfilteredVisibleImages).filter');
+  expect(source).toContain('detailImageFrame: { flex: 1, width: "100%" }');
   expect(bottomSheetSource).toContain('height?: "full"');
   expect(bottomSheetSource).not.toContain("mutation?: boolean");
   expect(bottomSheetSource).not.toContain("tall?: boolean");
@@ -79,13 +95,26 @@ test("only lifts Core for its own focus and uses distinct image sheet presentati
   expect(bottomSheetSource).not.toContain('height: fullHeight ? windowHeight - insets.top - androidBottomInset');
 });
 
-test("keeps collection forms to name and favorite state", () => {
-  expect(source).toContain('accessibilityLabel="Collection name"');
-  expect(source).toContain('accessibilityLabel="Favorite collection"');
+test("keeps new collection creation to a required name", () => {
+  const start = source.indexOf('{activeSheet === "newCollection" ? <View');
+  const form = source.slice(start, source.indexOf('activeSheet === "collectionMenu"', start));
+  expect(form).toContain('accessibilityLabel="Collection name"');
+  expect(form).toContain('placeholder="Name"');
+  expect(form).not.toContain('Favorite collection');
+  expect(source).not.toContain('newCollectionFavorite');
+  expect(source).toContain('createGalleryCollection(name, false)');
   expect(source).not.toContain('accessibilityLabel="Collection description"');
 });
 
 test("provides the full visual identity library and image picker workflow", () => {
+  const rootActionsStart = source.indexOf('{activeSheet === "rootActions" ? <>');
+  const rootActions = source.slice(rootActionsStart, source.indexOf('activeSheet === "actions"', rootActionsStart));
+  const collectionActionsStart = source.indexOf('{activeSheet === "actions" ? <>');
+  const collectionActions = source.slice(collectionActionsStart, source.indexOf('activeSheet === "destination"', collectionActionsStart));
+  expect(rootActions).toContain('onPress={() => void openIdentityPicker()}');
+  expect(rootActions).not.toContain('openVisualIdentities()');
+  expect(collectionActions).toContain('onPress={() => void openIdentityPicker()}');
+  expect(collectionActions).not.toContain('openVisualIdentities()');
   expect(source).toContain('activeSheet === "visualIdentities"');
   expect(source).toContain('activeSheet === "identityPicker"');
   expect(source).toContain("Choose an image to create a visual identity from.");
@@ -96,24 +125,34 @@ test("provides the full visual identity library and image picker workflow", () =
   expect(source).toContain("setIdentityError(errorMessage(error))");
   expect(source).toContain("identitiesLoading || creatingIdentityKeys.length > 0");
   expect(source).toContain("Array.from({ length: COLLECTION_COLUMNS }");
-  expect(source).toContain('<Button disabled={identitiesLoading} onPress={() => void openIdentityPicker()} size="lg" variant="primary">Create</Button>');
+  expect(source).toContain('<Button disabled={identitiesLoading} onPress={() => void openIdentityPicker()} size="md" variant="primary">Create</Button>');
   expect(source).not.toContain('identityLibraryMode === "browse" ? <Button');
-  expect(source.match(/onPress=\{\(\) => void openVisualIdentities\(\)\} size="lg" variant="secondary">Visual identities<\/Button>/g)).toHaveLength(2);
+  expect(source.match(/onPress=\{\(\) => void openVisualIdentities\(\)\} size="md" variant="secondary">Visual identities<\/Button>/g)).toHaveLength(1);
 });
 
-test("keeps similar-image and visual-identity pills mutually exclusive", () => {
-  const similar = source.slice(source.indexOf("async function findSimilar"), source.indexOf("function clearSimilarImages"));
-  const identity = source.slice(source.indexOf("async function filterByVisualIdentity"), source.indexOf("function clearIdentityFilter"));
+test("keeps similar-image results sheet-local without replacing the collection grid", () => {
+  const similar = source.slice(source.indexOf("async function findSimilar"), source.indexOf("function showSimilarImage"));
   const leave = source.slice(source.indexOf("async function leaveActiveCollection"), source.indexOf("function replaceVisibleImages"));
-  expect(similar).toContain("identityFilterRequest.current += 1");
-  expect(similar).toContain("setActiveIdentityFilter(undefined)");
-  expect(identity).toContain("imageSheetRequest.current += 1");
-  expect(identity).toContain("setSimilarSource(undefined)");
-  expect(identity).toContain("setSimilarImages([])");
+  expect(similar).not.toContain("setActiveIdentityFilter(undefined)");
+  expect(source).toContain("const unfilteredVisibleImages = activeIdentityFilter && activeCollection");
+  expect(source).not.toContain("const unfilteredVisibleImages = similarSource");
+  expect(source).not.toContain("Similar to {similarSource.filename}");
+  expect(source).not.toContain('accessibilityLabel="Close similar image filter"');
   expect(leave).toContain("setActiveIdentityFilter(undefined)");
   expect(leave).toContain("setSimilarSource(undefined)");
-  expect(source).toContain('accessibilityLabel="Close similar image filter"');
   expect(source).toContain('accessibilityLabel="Close visual identity filter"');
+});
+
+test("renders one four-card skeleton row and guarded results in the similar-images sheet", () => {
+  const start = source.indexOf('activeSheet === "similar" ? <View style={styles.duplicatePanel}');
+  const end = source.indexOf('activeSheet === "duplicates"', start);
+  const sheet = source.slice(start, end);
+  expect(sheet).toContain('accessibilityLabel="Loading similar images"');
+  expect(sheet).toContain('Array.from({ length: IMAGE_COLUMNS }');
+  expect(sheet).toContain('width: sheetImageSize, height: sheetImageSize');
+  expect(sheet).toContain('similarImages.map((image)');
+  expect(sheet).toContain('onPress={() => showSimilarImage(image)}');
+  expect(sheet).toContain('No similar images found in this collection.');
 });
 
 test("uses separate image-selection and naming steps for visual identities", () => {
@@ -165,7 +204,7 @@ test("uses standard right-side close controls and hides collection menu headings
   expect(`${preview}${sheet}`).not.toContain("headerLeading");
   expect(`${preview}${sheet}`).not.toContain("headerTrailing");
   expect(`${preview}${sheet}`).not.toContain("hideCloseButton");
-  expect(sheet).toContain('hideHeading={activeSheet === "rootActions" || activeSheet === "actions" || activeSheet === "collectionMenu" || activeSheet === "filter" || activeSheet === "imageActions" || activeSheet === "bulkActions" || activeSheet === "cleanupMenu" || activeSheet === "confirmCleanupDelete" || activeSheet === "confirmDeleteIdentity" || activeSheet === "confirmLeaveCollection"}');
+  expect(sheet).toContain('hideHeading={activeSheet === "rootActions" || activeSheet === "actions" || activeSheet === "collectionMenu" || activeSheet === "filter" || activeSheet === "imageActions" || activeSheet === "bulkActions" || activeSheet === "cleanupMenu"}');
 });
 
 test("provides collection cleanup discovery, pagination, exclusion, and confirmed canonical deletion", () => {
@@ -186,8 +225,8 @@ test("provides collection cleanup discovery, pagination, exclusion, and confirme
   expect(source).toContain('setCleanupImages((current) => current.filter');
   expect(source).toContain('for (let index = 0; index < targets.length; index += DELETE_IMAGE_CHUNK_SIZE)');
   expect(source).toContain('await deleteGalleryImages(eligibleChunk.map(({ key }) => key))');
-  expect(source).toContain('activeSheet === "cleanupMenu" || activeSheet === "confirmCleanupDelete"');
-  expect(source).toContain('height={activeSheet === "destination" || activeSheet === "imageEdit" || activeSheet === "newCollection" || activeSheet === "collectionEdit" || activeSheet === "duplicates" || activeSheet === "cleanup"');
+  expect(source).toContain('activeSheet === "confirmCleanupDelete" ? `Delete ${cleanupImages.length === 1 ? "image" : `${cleanupImages.length} images`}?`');
+  expect(source).toContain('height={activeSheet === "destination" || activeSheet === "imageEdit" || activeSheet === "newCollection" || activeSheet === "collectionEdit" || activeSheet === "similar" || activeSheet === "duplicates" || activeSheet === "cleanup"');
   expect(source).toContain('!collection || !isGalleryCollectionOwned(collection)');
   expect(source).not.toContain('cleanupScore');
 });
@@ -273,6 +312,21 @@ test("reloads the guarded collection singleton after confirmed global image dele
   expect(helper).toContain("loadCollectionSingleton(generation)");
   expect(helper).toContain("isCurrentContextGeneration(generation, refreshContextGeneration.current)");
   expect(source.match(/refreshCollectionSingletonAfterImageDeletion\(generation\)/g)?.length).toBeGreaterThanOrEqual(4);
+});
+
+test("remounts collection feature sheets with distinct keys", () => {
+  expect(source).toContain('key={`highlights:${activeCollection.key}`}');
+  expect(source).toContain('key={`memories:${activeCollection.key}`}');
+});
+
+test("settles duplicate and similar loading when event refresh supersedes the opening request", () => {
+  const refreshStart = source.indexOf('if (activeSheetRef.current === "duplicates"');
+  const refreshEnd = source.indexOf("if (needsOverview && activeSheetRef.current", refreshStart);
+  const refresh = source.slice(refreshStart, refreshEnd);
+  expect(refresh).toContain('setDuplicatesError(errorMessage(error))');
+  expect(refresh).toContain('setDuplicatesLoading(false)');
+  expect(refresh).toContain('setSimilarError(errorMessage(error))');
+  expect(refresh).toContain('setSimilarLoading(false)');
 });
 
 test("caches cleanup thresholds for one sheet session while keeping exclusions and cursors safe", () => {
@@ -381,10 +435,11 @@ test("opens duplicates with exact invalidation, a direct request, cache write, a
   expect(refresh).not.toContain("queryClient.fetchQuery");
 });
 
-test("shows the selected cleanup count inside the hidden confirmation sheet", () => {
+test("shows the selected cleanup count in the visible confirmation question", () => {
   expect(source).toContain('activeSheet === "confirmCleanupDelete" ? <View');
-  expect(source).toContain('Delete {cleanupImages.length} selected image{cleanupImages.length === 1 ? "" : "s"}?');
-  expect(source).toContain('activeSheet === "cleanupMenu" || activeSheet === "confirmCleanupDelete"');
+  expect(source).toContain('activeSheet === "confirmCleanupDelete" ? `Delete ${cleanupImages.length === 1 ? "image" : `${cleanupImages.length} images`}?`');
+  expect(source).not.toContain('Delete {cleanupImages.length} selected image{cleanupImages.length === 1 ? "" : "s"}?');
+  expect(source).not.toContain('hideHeading={activeSheet === "confirmCleanupDelete"');
 });
 
 test("gates collection search focus while the Core sheet closes", () => {
@@ -510,6 +565,21 @@ test("silently refreshes picker searches without history or selection loss", () 
   expect(source).toContain("await refreshIdentityPickerSearchSilently(identityPickerQuery, pickerCollection, generation)");
 });
 
+test("uses semantic-only collection search with loading skeletons and no inline errors", () => {
+  const start = source.indexOf("async function search(value = query.trim()");
+  const end = source.indexOf("function clearCollectionSearch", start);
+  const search = source.slice(start, end);
+  expect(search).toContain("recordHistory: true");
+  expect(search).toContain("setCollectionSearchResults(result.images)");
+  expect(search).toContain("setCollectionSearchResults([])");
+  expect(search).toContain("setStatus(undefined)");
+  expect(search).not.toContain("setStatus(errorMessage(error))");
+  expect(search).not.toContain("immediateMatches");
+  expect(source).not.toContain("historyTimer");
+  expect(source).toContain('searching && visibleImages.length === 0');
+  expect(source).toContain('collectionSearchActive ? collectionSearchResults ?? [] : images');
+});
+
 test("coalesces and generation-checks sharing refreshes and uses one incoming key", () => {
   expect(sharingSource).toContain("refreshInFlight.current");
   expect(sharingSource).toContain("request !== requestGeneration.current");
@@ -540,7 +610,6 @@ test("closes upload surfaces on contributor loss and rechecks destinations", () 
 test("replays media and picker windows and recovers contextual failures", () => {
   expect(source).toContain("replayPaginatedWindow({");
   expect(source).toContain("replayOverviewWindow(pickerCollection.key, identityPickerImages.length, generation)");
-  expect(source).toContain('recoverContextualSearchFailure("similar")');
   expect(source).toContain('recoverContextualSearchFailure("identity")');
   expect(source).toContain("await replayOverviewWindow(activeCollection?.key, images.length, generation)");
 });
@@ -559,7 +628,7 @@ test("orders owner sharing routes and reuses the share-link loader", () => {
 test("filters share links with shared active and inactive tabs", () => {
   expect(sharingSource).toContain('accessibilityLabel="Share link status"');
   expect(sharingSource).toContain('accessibilityRole="tablist"');
-  expect(sharingSource).toContain('size="xs" style={styles.tab} variant={linkTab === "active" ? "secondary" : "ghost"}');
+  expect(sharingSource).toContain('size="md" style={styles.tab} variant={linkTab === "active" ? "secondary" : "ghost"}');
   expect(sharingSource).toContain(">Active links</Button>");
   expect(sharingSource).toContain(">Inactive links</Button>");
   expect(sharingSource).toContain('filterGalleryShareLinks(links, linkTab === "active")');
@@ -577,11 +646,32 @@ test("uses full-height lists for collection collaboration", () => {
   expect(sharingSource).toContain('if (navigate) { setInvites([]); setView("invites"); }');
   expect(sharingSource).toContain('queryKey: incomingInvitesQueryKey, exact: true, refetchType: "none"');
   expect(sharingSource).toContain('if (navigate) { setLinks([]); setLinkTab("active"); setView("links"); }');
-  expect(sharingSource).toContain('size="sm" style={styles.pillButton} variant="secondary"');
+  expect(sharingSource).toContain('size="md" style={styles.pillButton} variant="secondary"');
   expect(sharingSource).toContain('pillSkeleton: { width: "100%", minHeight: 38, borderRadius: 999, backgroundColor: palette.hairlineBright, opacity: 0.72 }');
   expect(sharingSource).toContain('list: { gap: 6, paddingBottom: spacing.xl }');
   expect(sharingSource).not.toContain('rowSkeleton');
   expect(sharingSource).not.toContain('variant="ghost"><View><Text numberOfLines={1} style={styles.name}>{link.url}');
+});
+
+test("uses standard-sized compact confirmations and collaboration notices", () => {
+  for (const sheet of ["confirmDeleteImage", "confirmDeleteCollection", "confirmLeaveCollection", "confirmDeleteIdentity", "bulkDelete", "confirmDeleteDuplicates", "confirmCleanupDelete"]) {
+    const start = source.indexOf(`activeSheet === "${sheet}" ? <View`);
+    const end = source.indexOf("</View> : null}", start);
+    const confirmation = source.slice(start, end);
+    expect(confirmation.match(/size="md"/g)).toHaveLength(2);
+    expect(confirmation).not.toContain('size="lg"');
+  }
+  expect(sharingSource).toContain('notify("Member updated")');
+  expect(sharingSource).toContain('notify("Member removed")');
+  expect(sharingSource).toContain('"Invite accepted" : "Invite rejected"');
+  expect(sharingSource).toContain('notify("Share link created")');
+  expect(sharingSource).toContain('notify("Share link updated")');
+  expect(sharingSource).toContain('notify("Share link shared")');
+  expect(sharingSource).toContain('onPress={() => void removeMember()} size="md"');
+  expect(sharingSource).toContain('onPress={() => void respondInvite()} size="md"');
+  expect(sharingSource).toContain('view === "memberRemoveConfirm" ? "Remove member?"');
+  expect(sharingSource).toContain('`${inviteResponse === "accept" ? "Accept" : "Reject"} invite?`');
+  expect(sharingSource).toContain('hideHeading={view === "access"}');
 });
 
 test("gates member editing to owners and keeps removal inside one shared pill", () => {
@@ -603,8 +693,8 @@ test("keeps pending-invite rejection inside the shared pill", () => {
   expect(sharingSource).toContain('<ActionPill action={<CloseIcon size="sm" />} actionLabel={`Reject invite to ${invite.collection.name}`}');
   expect(sharingSource).toContain('onAction={() => { setSelectedInvite(invite); setInviteResponse("reject"); setView("inviteConfirm"); }}');
   expect(sharingSource).toContain('pressLabel={`Accept invite to ${invite.collection.name}`}');
-  expect(sharingSource).toContain('{inviteResponse === "accept" ? "Accept" : "Remove"}</Button>');
-  expect(sharingSource).toContain('inviteResponse === "accept" ? "Invite accepted" : "Invite removed"');
+  expect(sharingSource).toContain('{inviteResponse === "accept" ? "Accept" : "Reject"}</Button>');
+  expect(sharingSource).toContain('inviteResponse === "accept" ? "Invite accepted" : "Invite rejected"');
 });
 
 test("uses shared tabs for editable member and share-link roles", () => {
@@ -628,8 +718,8 @@ test("keeps non-owner leave at the end of the collection menu with compact confi
   expect(menu).toContain('isCollectionOwner ? <BottomSheetItem');
   expect(menu).toContain('pushSheet("confirmLeaveCollection")');
   expect(menu).toContain('>Leave</BottomSheetItem>');
-  expect(source).toContain('activeSheet === "confirmCleanupDelete" || activeSheet === "confirmDeleteIdentity" || activeSheet === "confirmLeaveCollection"');
-  expect(source).toContain('onPress={() => void leaveActiveCollection()} size="lg" variant="primary">Leave</Button>');
+  expect(source).toContain('activeSheet === "confirmLeaveCollection" ? "Leave collection?"');
+  expect(source).toContain('onPress={() => void leaveActiveCollection()} size="md" variant="primary">Leave</Button>');
 });
 
 test("shares secure links through the native OS chooser", () => {

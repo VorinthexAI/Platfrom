@@ -112,7 +112,7 @@ async function replayPersistedImage(input: ProcessImageInput, image: ValidatedIm
   const requestedKey = `media/${input.scopeKey}/${key}/${hash(image.bytes)}/original.${image.extension}`;
   const existing = await (dependencies.getImage ?? getImageById)(key);
   if (!existing) return null;
-  if (existing.scopeKey !== input.scopeKey || existing.deletedAt !== null) throw new ImageProcessingError('IMAGE_INSERT_FAILED', 'The idempotent image is unavailable.');
+  if (existing.scopeKey !== input.scopeKey) throw new ImageProcessingError('IMAGE_INSERT_FAILED', 'The idempotent image is unavailable.');
   if (existing.filename !== image.filename || existing.mimeType !== image.mimeType || existing.sizeBytes !== image.sizeBytes || existing.width !== image.width || existing.height !== image.height || existing.storageKey !== requestedKey) throw new ImageProcessingError('IMAGE_IDEMPOTENCY_CONFLICT', 'The image idempotency key belongs to a different request.');
   return existing;
 }
@@ -121,7 +121,7 @@ async function execute(input: ProcessImageInput, image: ValidatedImage, perceptu
   const persistImage = dependencies.persistImage ?? insertPreparedImageWithCaption;
   const key = input.imageKey ?? (input.idempotencyKey ? `c${hash(`${input.scopeKey}\0${input.idempotencyKey}`).slice(0, 24)}` : (dependencies.createKey ?? newId)());
   const requestedKey = `media/${input.scopeKey}/${key}/${hash(image.bytes)}/original.${image.extension}`;
-  if (input.idempotencyKey) { const existing = await getImage(key); if (existing) { if (existing.scopeKey !== input.scopeKey || existing.deletedAt !== null) throw new ImageProcessingError('IMAGE_INSERT_FAILED', 'The idempotent image is unavailable.'); if (existing.filename !== image.filename || existing.mimeType !== image.mimeType || existing.sizeBytes !== image.sizeBytes || existing.width !== image.width || existing.height !== image.height || existing.storageKey !== requestedKey) throw new ImageProcessingError('IMAGE_IDEMPOTENCY_CONFLICT', 'The image idempotency key belongs to a different request.'); return existing; } }
+  if (input.idempotencyKey) { const existing = await getImage(key); if (existing) { if (existing.scopeKey !== input.scopeKey) throw new ImageProcessingError('IMAGE_INSERT_FAILED', 'The idempotent image is unavailable.'); if (existing.filename !== image.filename || existing.mimeType !== image.mimeType || existing.sizeBytes !== image.sizeBytes || existing.width !== image.width || existing.height !== image.height || existing.storageKey !== requestedKey) throw new ImageProcessingError('IMAGE_IDEMPOTENCY_CONFLICT', 'The image idempotency key belongs to a different request.'); return existing; } }
   const storage = dependencies.storage ?? documentStorage; let storageKey: string;
   try { storageKey = (await storage.upload({ key: requestedKey, bytes: image.bytes, mimeType: image.mimeType })).storageKey; } catch (error) { throw new ImageProcessingError('IMAGE_UPLOAD_FAILED', 'The original image could not be uploaded.', { cause: error }); }
   try {
@@ -166,10 +166,10 @@ async function execute(input: ProcessImageInput, image: ValidatedImage, perceptu
       try { embedding = dependencies.embed ? await dependencies.embed(embeddingText, input.signal) : await embedText({ text: embeddingText, signal: input.signal }); currentEmbeddingSchema.parse(embedding); } catch (error) { throw new ImageProcessingError('IMAGE_EMBEDDING_FAILED', `The image embedding must contain exactly ${EMBEDDING_DIMENSIONS} finite values.`, { cause: error }); }
     }
     const now = new Date().toISOString();
-    try { return await persistImage({ image: { key, scopeKey: input.scopeKey, filename: image.filename, caption, imageCaptionKey: canonical.key, createdByKey: input.ownerKey, storageKey, mimeType: image.mimeType, sizeBytes: image.sizeBytes, width: image.width, height: image.height, ...(input.location?.city ? { city: input.location.city } : {}), ...(input.location?.country ? { country: input.location.country } : {}), ...(input.location?.countryCode ? { countryCode: input.location.countryCode } : {}), embedding, isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now }, caption: captionRecord, actorKey: input.ownerKey }); } catch (error) { throw new ImageProcessingError('IMAGE_INSERT_FAILED', 'The prepared image could not be persisted.', { cause: error }); }
+    try { return await persistImage({ image: { key, scopeKey: input.scopeKey, filename: image.filename, caption, imageCaptionKey: canonical.key, createdByKey: input.ownerKey, storageKey, mimeType: image.mimeType, sizeBytes: image.sizeBytes, width: image.width, height: image.height, ...(input.location?.city ? { city: input.location.city } : {}), ...(input.location?.country ? { country: input.location.country } : {}), ...(input.location?.countryCode ? { countryCode: input.location.countryCode } : {}), embedding, isFavorite: false, createdAt: now, updatedAt: now }, caption: captionRecord, actorKey: input.ownerKey }); } catch (error) { throw new ImageProcessingError('IMAGE_INSERT_FAILED', 'The prepared image could not be persisted.', { cause: error }); }
   } catch (error) {
     let owner: Image | null; try { owner = await getImage(key); } catch (ownershipError) { throw new ImageProcessingError('IMAGE_CLEANUP_FAILED', 'Image ownership could not be verified; the uploaded object was retained.', { cause: new AggregateError([error, ownershipError]) }); }
-    if (owner?.storageKey === storageKey) { if (owner.scopeKey === input.scopeKey && owner.deletedAt === null) return owner; throw error; }
+    if (owner?.storageKey === storageKey) { if (owner.scopeKey === input.scopeKey) return owner; throw error; }
     try { await removeWithRetry(storage, storageKey); } catch (cleanupError) { throw new ImageProcessingError('IMAGE_CLEANUP_FAILED', 'Image processing failed and the uploaded object could not be removed.', { cause: new AggregateError([error, cleanupError]) }); }
     throw error;
   }

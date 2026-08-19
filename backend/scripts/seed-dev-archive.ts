@@ -133,7 +133,7 @@ async function main() {
   ];
   const folderEmbeddings = await embedTexts({ texts: folders.map((folder) => buildEmbeddingText(foldersEmbeddingFields, folder)!) });
   for (const [index, folder] of folders.entries()) {
-    await upsert(FOLDERS_COLLECTION, folderSchema.parse({ ...folder, scopeKey, embedding: folderEmbeddings[index], deletedAt: null, createdAt: now, updatedAt: now }));
+    await upsert(FOLDERS_COLLECTION, folderSchema.parse({ ...folder, scopeKey, embedding: folderEmbeddings[index], createdAt: now, updatedAt: now }));
   }
 
   const pdfBytes = minimalPdf('Vorinthex Archive reference: calm systems for focused work.');
@@ -224,7 +224,6 @@ async function main() {
       semanticChunkCount: contentChunks.length,
       semanticContentHash: documentSemanticHash(document.content),
       isFavorite: document.key === KEYS.researchNote,
-      deletedAt: null,
       createdAt: now,
       updatedAt: now,
     }));

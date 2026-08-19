@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
+import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
 import { createScopeRepository } from './repository';
 import { ensureScopeMembersCollection, ensureScopesCollection, ensureScopeScopesCollection } from './indexes';
 import { SCOPE_MEMBERS_COLLECTION, SCOPES_COLLECTION, SCOPE_SCOPES_COLLECTION, scopeSchema, scopesEmbedKeys, scopeScopeSchema } from './schema';
@@ -116,7 +117,6 @@ describe('scope schemas', () => {
       description: 'The conversational intelligence scope.',
       position: 2,
       level: 1,
-      deletedAt: null,
       embedding: [],
     });
     expect(scopesEmbedKeys.options).toEqual(['summary']);
@@ -134,7 +134,6 @@ describe('scope schemas', () => {
       parentKey,
       childKey,
       level: 2,
-      deletedAt: null,
     });
     expect(() => scopeScopeSchema.parse({ key: newId(), parentKey, childKey: parentKey })).toThrow();
   });
@@ -143,7 +142,7 @@ describe('scope schemas', () => {
 describe('scope repository', () => {
   const organizationKey = newId();
   const generateEmbedding = async (text: string) => {
-    const vector = Array.from({ length: 4096 }, () => 0);
+    const vector = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0);
     vector[0] = [...text].reduce((hash, character) => Math.imul(hash ^ character.charCodeAt(0), 16_777_619), 2_166_136_261);
     return vector;
   };
@@ -161,7 +160,7 @@ describe('scope repository', () => {
     const { fake, stores } = createFakeDb();
     const repository = createScopeRepository(fake, generateEmbedding);
     const core = await repository.createScope(input());
-    expect(core.embedding).toHaveLength(4096);
+    expect(core.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
     const updated = await repository.updateScope(core.key, { name: 'Core Intelligence', description: 'Updated scope description.' });
     expect(updated).toMatchObject({ key: core.key, name: 'Core Intelligence', description: 'Updated scope description.' });
     expect(updated.embedding).toEqual(core.embedding);

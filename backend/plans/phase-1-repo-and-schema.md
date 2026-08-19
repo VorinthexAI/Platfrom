@@ -386,7 +386,7 @@ export const perplexity = new OpenAI({
   baseURL: 'https://api.perplexity.ai',
 });
 
-// Google (Gemini) — separate SDK shape
+// Google generative API - separate SDK shape
 import { GoogleGenerativeAI } from '@google/generative-ai';
 export const google = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY ?? '');
 

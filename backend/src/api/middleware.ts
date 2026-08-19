@@ -122,7 +122,7 @@ export function clearSessionCookies(c: Context) {
   deleteCookie(c, REFRESH_COOKIE, options);
 }
 
-function querySchemaForPath(path: string) {
+function querySchemaForPath(path: string, method: string) {
   const apiPath = path.replace(/^\/api\/v1(?=\/|$)/, '');
   if (apiPath === '/nodes') {
     return strictObject({
@@ -157,6 +157,9 @@ function querySchemaForPath(path: string) {
   if (/^\/founders\/organizations\/[^/]+\/communication\/channels\/[^/]+\/messages$/.test(apiPath)) {
     return strictObject({ limit: z.string().regex(/^\d+$/).optional() });
   }
+  if (method === 'DELETE' && apiPath === '/auth/me/hiddens') return strictObject({ source: z.enum(['collection', 'document', 'image', 'folder']), sourceKey: z.string().cuid() });
+  if (method === 'GET' && apiPath === '/gallery/highlights') return strictObject({ organizationKey: z.string(), scopeKey: z.string(), collectionKey: z.string() });
+  if (method === 'GET' && apiPath === '/gallery/memories') return strictObject({ organizationKey: z.string(), scopeKey: z.string(), collectionKey: z.string() });
   if (/^\/content\/tools\/[^/]+$/.test(apiPath)) return strictObject({});
   if (apiPath === '/books' || apiPath === '/books/overview' || /^\/books\/[^/]+\/detail$/.test(apiPath) || /^\/books\/[^/]+\/chapters\/[^/]+\/progress$/.test(apiPath)) return strictObject({});
   return strictObject({});
@@ -164,7 +167,7 @@ function querySchemaForPath(path: string) {
 
 export const validateQueryParams: MiddlewareHandler = async (c, next) => {
   const query = Object.fromEntries(new URL(c.req.url).searchParams);
-  querySchemaForPath(c.req.path).parse(query);
+  querySchemaForPath(c.req.path, c.req.method).parse(query);
   return next();
 };
 

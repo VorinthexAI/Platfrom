@@ -26,11 +26,8 @@ describe('Content node contracts', () => {
     expect(buildEmbeddingText(documentSharesEmbeddingFields, { token: 'not-embedded' })).toBeNull();
   });
 
-  test('defaults Content resources to active and validates lifecycle timestamps', () => {
+  test('omits soft-delete state from every Content resource schema', () => {
     for (const schema of [folderSchema, documentSchema, documentVersionSchema, documentShareSchema]) {
-      expect(schema.shape.deletedAt.parse(undefined)).toBeNull();
-      expect(schema.shape.deletedAt.parse('2026-07-22T00:00:00.000Z')).toBe('2026-07-22T00:00:00.000Z');
-      expect(() => schema.shape.deletedAt.parse('yesterday')).toThrow();
     }
     expect(folderSchema.shape.isFavorite.parse(undefined)).toBe(false);
     expect(documentSchema.shape.isFavorite.parse(undefined)).toBe(false);

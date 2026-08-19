@@ -9,12 +9,14 @@ const context = { domain: { organizationKey, runtimeScopeKey: scopeKey, principa
 
 describe('Gallery assistant capabilities', () => {
   test('covers every canonical operation and exposes no trusted context fields', () => {
-    expect(galleryAssistantCapabilityNames).toHaveLength(37);
-    expect(new Set(galleryAssistantCapabilityNames).size).toBe(37);
+    expect(galleryAssistantCapabilityNames).toHaveLength(42);
+    expect(new Set(galleryAssistantCapabilityNames).size).toBe(42);
     expect(galleryAssistantCapabilityNames).not.toContain('collection.duplicates.find');
     expect(galleryAssistantCapabilityNames).not.toEqual(expect.arrayContaining(['image.upload.reserve', 'image.upload.status', 'image.upload.complete']));
     expect(galleryAssistantCapabilityNames).toEqual(expect.arrayContaining(['highlight.create', 'highlight.list', 'highlight.read', 'highlight.delete']));
+    expect(galleryAssistantCapabilityNames).toEqual(expect.arrayContaining(['image.create-memory', 'image.memory.list', 'image.memory.read', 'image.memory.delete']));
     expect(galleryAssistantCapabilityNames).toEqual(expect.arrayContaining(['collection.hide', 'collection.reveal', 'image.hide', 'image.reveal']));
+    expect(galleryAssistantCapabilityNames).toEqual(expect.arrayContaining(['image.ideas.create', 'image.generate']));
     const search = createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'image.search')!;
     const listCollections = createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'collection.list')!;
     const createCollection = createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'collection.create')!;
@@ -45,25 +47,31 @@ describe('Gallery assistant capabilities', () => {
     }
     expect(createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'highlight.create')?.mutationWorkspace).toBe('gallery');
     expect(createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'highlight.delete')?.mutationWorkspace).toBe('gallery');
+    expect(createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'image.create-memory')?.mutationWorkspace).toBe('gallery');
+    expect(createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'image.generate')?.mutationWorkspace).toBe('gallery');
+    const deleteMemory = createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'image.memory.delete')!;
+    expect(deleteMemory.inputSchema.parse({ memoryKey: newId(), collectionKey: newId() })).toEqual({ memoryKey: expect.any(String), collectionKey: expect.any(String) });
+    expect(() => deleteMemory.inputSchema.parse({ memoryKey: newId() })).toThrow();
   });
 
   test('routes every tool to its canonical operation with trusted context injected', async () => {
     const calls: Array<{ operation: GalleryOperationName; input: unknown; context: GalleryOperationContext }> = [];
     const operations = Object.fromEntries([
-      'overview', 'createCollection', 'updateCollection', 'deleteCollection', 'listMembers', 'listPendingInvites', 'createInvite', 'acceptInvite', 'rejectInvite', 'revokeInvite', 'updateMemberRole', 'removeMember', 'leaveCollection', 'listShares', 'createShare', 'updateShare', 'revokeShare', 'activateShare', 'search', 'setFavorite', 'updateImage', 'deleteImages', 'deleteDuplicates', 'transferCollectionImages', 'listSubjects', 'createSubject', 'listSubjectImages', 'deleteSubject', 'restoreSubject', 'createHighlight', 'listHighlights', 'readHighlight', 'deleteHighlight',
+      'overview', 'createCollection', 'updateCollection', 'deleteCollection', 'listMembers', 'listPendingInvites', 'createInvite', 'acceptInvite', 'rejectInvite', 'revokeInvite', 'updateMemberRole', 'removeMember', 'leaveCollection', 'listShares', 'createShare', 'updateShare', 'revokeShare', 'activateShare', 'search', 'setFavorite', 'updateImage', 'deleteImages', 'deleteDuplicates', 'transferCollectionImages', 'listSubjects', 'createSubject', 'listSubjectImages', 'deleteSubject', 'createHighlight', 'listHighlights', 'readHighlight', 'deleteHighlight', 'createMemory', 'listMemories', 'readMemory', 'deleteMemory',
     ].map((operation) => [operation, async (input: unknown, trusted: GalleryOperationContext) => { calls.push({ operation: operation as GalleryOperationName, input, context: trusted }); return { operation }; }])) as any;
     const capabilities = createGalleryAssistantCapabilities(operations);
-    const imageKey = newId(), collectionKey = newId(), destinationCollectionKey = newId(), identityKey = newId(), inviteKey = newId(), memberKey = newId(), shareKey = newId(), highlightKey = newId();
+    const imageKey = newId(), collectionKey = newId(), destinationCollectionKey = newId(), identityKey = newId(), inviteKey = newId(), memberKey = newId(), shareKey = newId(), highlightKey = newId(), memoryKey = newId();
     const inputs = [
       {}, { name: 'Favorites' }, { collectionKey, name: 'Trips', isFavorite: true }, { collectionKey },
       { collectionKey }, {}, { collectionKey, inviteeKey: memberKey, role: 'collaborator' }, { inviteKey }, { inviteKey }, { collectionKey, inviteKey }, { collectionKey, memberKey, role: 'viewer' }, { collectionKey, memberKey }, { collectionKey }, { collectionKey }, { collectionKey, role: 'viewer' }, { collectionKey, shareKey, active: true }, { collectionKey, shareKey }, { token: 'x'.repeat(32) },
       { query: 'mountains' }, { imageKey, isFavorite: true }, { imageKey, name: 'mountain.jpg', isFavorite: true }, { imageKeys: [imageKey] },
       { collectionKey, imageKeys: [imageKey] }, { sourceCollectionKey: collectionKey, destinationCollectionKeys: [destinationCollectionKey], imageKeys: [imageKey], mode: 'copy' },
-      {}, { name: 'Oscar', imageKeys: [imageKey] }, { identityKey }, { identityKey }, { identityKey },
+      {}, { name: 'Oscar', imageKeys: [imageKey] }, { identityKey }, { identityKey },
       { collectionKey }, {}, { highlightKey }, { highlightKey },
+      { collectionKey }, { collectionKey }, { memoryKey }, { memoryKey, collectionKey },
     ];
     for (const [index, capability] of capabilities.slice(0, inputs.length).entries()) expect(await capability.execute(inputs[index], context)).toEqual({ kind: 'continue', result: { operation: calls.at(-1)!.operation } });
-    expect(calls.map(({ operation }) => operation)).toEqual(['overview', 'createCollection', 'updateCollection', 'deleteCollection', 'listMembers', 'listPendingInvites', 'createInvite', 'acceptInvite', 'rejectInvite', 'revokeInvite', 'updateMemberRole', 'removeMember', 'leaveCollection', 'listShares', 'createShare', 'updateShare', 'revokeShare', 'activateShare', 'search', 'setFavorite', 'updateImage', 'deleteImages', 'deleteDuplicates', 'transferCollectionImages', 'listSubjects', 'createSubject', 'listSubjectImages', 'deleteSubject', 'restoreSubject', 'createHighlight', 'listHighlights', 'readHighlight', 'deleteHighlight']);
+    expect(calls.map(({ operation }) => operation)).toEqual(['overview', 'createCollection', 'updateCollection', 'deleteCollection', 'listMembers', 'listPendingInvites', 'createInvite', 'acceptInvite', 'rejectInvite', 'revokeInvite', 'updateMemberRole', 'removeMember', 'leaveCollection', 'listShares', 'createShare', 'updateShare', 'revokeShare', 'activateShare', 'search', 'setFavorite', 'updateImage', 'deleteImages', 'deleteDuplicates', 'transferCollectionImages', 'listSubjects', 'createSubject', 'listSubjectImages', 'deleteSubject', 'createHighlight', 'listHighlights', 'readHighlight', 'deleteHighlight', 'createMemory', 'listMemories', 'readMemory', 'deleteMemory']);
     for (const call of calls) {
       expect(call.context).toEqual({ organizationKey, scopeKey, membership, modelVisible: true });
     }
@@ -82,6 +90,32 @@ describe('Gallery assistant capabilities', () => {
     await capability.execute({ collectionKey: newId(), role: 'viewer' }, { ...context, requestKey: 'request-1' });
     expect(trusted?.idempotencyKey).toBe('request-1');
     expect(JSON.stringify(capability.definition.inputSchema)).not.toContain('idempotency');
+  });
+
+  test('injects trusted image context and keeps generation fields model-invisible', async () => {
+    const calls: unknown[][] = [];
+    const images = {
+      createIdeas: async (...args: unknown[]) => { calls.push(['ideas', ...args]); return { concepts: [] }; },
+      generate: async (...args: unknown[]) => { calls.push(['generate', ...args]); return { images: [], provider: {} }; },
+    } as any;
+    const capabilities = createGalleryAssistantCapabilities({}, images);
+    const ideas = capabilities.find(({ definition }) => definition.name === 'image.ideas.create')!;
+    const generate = capabilities.find(({ definition }) => definition.name === 'image.generate')!;
+    await expect(ideas.execute({ prompt: 'Earth', requestedCount: 1, scopeKey }, context)).rejects.toThrow('Unrecognized key');
+    await ideas.execute({ prompt: 'Earth', requestedCount: 1 }, context);
+    await generate.execute({ prompt: 'Earth', count: 1, size: '1024x1024', quality: 'high' }, { ...context, requestKey: 'request-1' });
+    expect(calls).toEqual([
+      ['ideas', { prompt: 'Earth', requestedCount: 1 }, context.domain],
+      ['generate', { prompt: 'Earth', count: 1, size: '1024x1024', quality: 'high' }, context.domain, 'request-1'],
+    ]);
+    for (const capability of [ideas, generate]) {
+      const schema = JSON.stringify(capability.definition.inputSchema);
+      expect(schema).not.toContain('organizationKey');
+      expect(schema).not.toContain('scopeKey');
+      expect(schema).not.toContain('member');
+      expect(schema).not.toContain('requestKey');
+      expect(schema).not.toContain('idempotency');
+    }
   });
 
   test('redacts bearer material from every model-visible collection share output', async () => {

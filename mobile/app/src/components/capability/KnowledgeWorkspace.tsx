@@ -51,7 +51,7 @@ import { normalizeStructurallyCoveredResources, partitionFavoriteContentSelectio
 import { ChromeIcon } from "@/components/ChromeIcon";
 import { assistantIconSource } from "@/data/capability-icons";
 import {
-  archiveContentSelection,
+  hardDeleteContentSelection,
   askPersonalAssistant,
   clearContentDocumentAudioPlayback,
   createContentDocument,
@@ -65,8 +65,6 @@ import {
   findContentNeighbors,
   findContentDocumentSummary,
   findContentDocumentVersion,
-  generateContentDocumentAudio,
-  generateContentDocumentSummaryAudio,
   getContentContext,
   isContentContextConfigured,
   listContentDocumentVersions,
@@ -147,7 +145,7 @@ import { audioTimelineDuration, audioTimelinePosition, formatAudioTime, resolveA
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
 import { useAuthStore } from "@/state/auth";
 import { languageForCountryCode } from "@/lib/auth-helpers";
-import { filterByHiddenView, hideUserSource, isUserHidden, listUserHiddens, revealUserSource, type HiddenViewMode, type UserHiddenRecord, type UserHiddenSource } from "@/lib/user-hidden-client";
+import { filterByHiddenView, hideUserSource, isUserHidden, listUserHiddens, revealUserSource, type HiddenViewFilters, type UserHiddenRecord, type UserHiddenSource } from "@/lib/user-hidden-client";
 
 type SaveState = "local" | "dirty" | "saving" | "saved" | "error";
 type WorkspaceMode = "auto" | "folders" | "folder" | "editor" | "viewer";
@@ -291,17 +289,16 @@ export function KnowledgeWorkspace() {
   const destinationCardSize = Math.floor((width - 42 - 20) / 3);
   const organizationKey = useAuthStore((state) => typeof state.organization?.key === "string" ? state.organization.key : "");
   const scopeKey = useAuthStore((state) => typeof state.scope?.key === "string" ? state.scope.key : "");
-  const agentKey = useAuthStore((state) => state.contentExecution?.agentKey ?? "");
   const user = useAuthStore((state) => state.user);
   const reconnectContentContext = useAuthStore((state) => state.reconnectContentContext);
-  const hasContentContext = isContentContextConfigured({ organizationKey, scopeKey, agentKey });
-  const contentContextKey = hasContentContext ? `${organizationKey}:${scopeKey}:${agentKey}` : "";
-  const contentContext = { organizationKey, scopeKey, agentKey, userKey: user?.key ?? "" };
+  const hasContentContext = isContentContextConfigured({ organizationKey, scopeKey });
+  const contentContextKey = hasContentContext ? `${organizationKey}:${scopeKey}` : "";
+  const contentContext = { organizationKey, scopeKey, userKey: user?.key ?? "" };
   const userHiddensQuery = useQuery({ queryKey: contentQueryKeys.userHiddens(contentContext), queryFn: listUserHiddens, enabled: hasContentContext, staleTime: 0 });
   const narrationPlayer = useAudioPlayer(null, { updateInterval: 500, keepAudioSessionActive: true });
   const narrationAudio = useAudioPlayerStatus(narrationPlayer);
   const [activeSheet, setActiveSheet] = useState<ArchiveSheet>();
-  const [viewMode, setViewMode] = useState<HiddenViewMode>("normal");
+  const [viewFilters, setViewFilters] = useState<HiddenViewFilters>({ favoritesOnly: false, showHidden: false });
   const [userHiddens, setUserHiddens] = useState<UserHiddenRecord[]>([]);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetError, setSheetError] = useState<string>();
@@ -331,7 +328,6 @@ export function KnowledgeWorkspace() {
   const [loadingVersions, setLoadingVersions] = useState(false);
   const [audioVersions, setAudioVersions] = useState<ContentDocumentAudioVersion[]>([]);
   const [loadingAudioVersions, setLoadingAudioVersions] = useState(false);
-  const [generatingAudioVersion, setGeneratingAudioVersion] = useState(false);
   const [selectedAudioVersionKey, setSelectedAudioVersionKey] = useState<string>();
   const [saveState, setSaveState] = useState<SaveState>(hasContentContext ? "saved" : "local");
   const [folders, setFolders] = useState<ContentFolder[]>([]);
@@ -405,7 +401,6 @@ export function KnowledgeWorkspace() {
   const [summaries, setSummaries] = useState<ContentDocumentSummary[]>([]);
   const [loadingSummaries, setLoadingSummaries] = useState(false);
   const [generatingSummary, setGeneratingSummary] = useState(false);
-  const [generatingSummaryAudio, setGeneratingSummaryAudio] = useState(false);
   const [summaryReaderTopic, setSummaryReaderTopic] = useState<string>();
   const [error, setError] = useState<string>();
   const editorSession = useRef(0);
@@ -479,14 +474,19 @@ export function KnowledgeWorkspace() {
   folderStackRef.current = folderStack;
   workspaceModeRef.current = workspaceMode;
   const currentFolder = folderStack.at(-1);
-  const showOnlyFavorites = viewMode === "favorites";
-  const showHidden = viewMode === "hidden";
+  const showOnlyFavorites = viewFilters.favoritesOnly;
+  const showHidden = viewFilters.showHidden;
+  const filtersActive = showOnlyFavorites || showHidden;
   const hidden = (source: UserHiddenSource | "file", sourceKey: string) => isUserHidden(userHiddens, source, sourceKey);
   const destinationFolder = destinationStack.at(-1);
   const contentSelection: ContentSelection = { folderKeys: selectedFolders.map(({ key }) => key), documentKeys: selectedDocuments.map(({ key }) => key) };
   const selectedCount = selectedFolders.length + selectedDocuments.length;
   const selectionActive = selectedCount > 0;
   const compactDelete = activeSheet === "bulkDelete" || activeSheet === "deleteDocument";
+  const bulkDeleteNoun = selectedFolders.length === selectedCount ? "folder" : selectedDocuments.length === selectedCount && selectedDocuments.every(({ extension }) => extension) ? "file" : selectedDocuments.length === selectedCount && selectedDocuments.every(({ extension }) => !extension) ? "document" : "item";
+  const deleteConfirmationTitle = activeSheet === "deleteDocument"
+    ? `Delete ${selectedDocument?.extension ? "file" : "document"}?`
+    : `Delete ${selectedCount} ${bulkDeleteNoun}${selectedCount === 1 ? "" : "s"}?`;
   const allSelectedFavorite = selectionActive && [...selectedFolders, ...selectedDocuments].every((item) => Boolean(item.isFavorite));
   const selectionMetadataLoading = hydratingFolderKeys.length > 0 || hydratingDocumentKeys.length > 0;
   const activeDocument = documentKeyRef.current
@@ -500,10 +500,10 @@ export function KnowledgeWorkspace() {
     : undefined;
   const archiveLocationLoading = locationLoading;
   const archiveFolderTreeReady = Boolean(queryClient.getQueryData<ContentFolder[]>(contentQueryKeys.folderTree(contentContext)));
-  const filteredRootFolders = filterByHiddenView(rootFolders, userHiddens, "folder", viewMode);
-  const filteredFolders = filterByHiddenView(folders, userHiddens, "folder", viewMode);
-  const filteredRootDocuments = filterByHiddenView(rootDocuments, userHiddens, "document", viewMode);
-  const filteredDocuments = filterByHiddenView(documents, userHiddens, "document", viewMode);
+  const filteredRootFolders = filterByHiddenView(rootFolders, userHiddens, "folder", viewFilters);
+  const filteredFolders = filterByHiddenView(folders, userHiddens, "folder", viewFilters);
+  const filteredRootDocuments = filterByHiddenView(rootDocuments, userHiddens, "document", viewFilters);
+  const filteredDocuments = filterByHiddenView(documents, userHiddens, "document", viewFilters);
   const visibleFolders = filteredRootFolders.filter((folder) => {
     const normalized = libraryQuery.trim().toLowerCase();
     return !normalized || folder.name.toLowerCase().includes(normalized) || folder.description?.toLowerCase().includes(normalized);
@@ -517,12 +517,12 @@ export function KnowledgeWorkspace() {
   const folderFiles = filteredDocuments.filter((document) => Boolean(document.extension));
   const rootTabDocuments = folderContentTab === "files" ? rootFiles : rootNotes;
   const folderTabDocuments = folderContentTab === "files" ? folderFiles : folderNotes;
-  const folderSearchFolders = filterByHiddenView(folderSearchResults?.folders ?? [], userHiddens, "folder", viewMode);
-  const folderSearchDocuments = filterByHiddenView(folderSearchResults?.documents ?? [], userHiddens, "document", viewMode, ({ documentKey }) => documentKey).filter((document) => folderContentTab === "files" ? Boolean(document.extension) : !document.extension);
-  const rootSearchFolders = filterByHiddenView(rootSearchResults?.folders ?? [], userHiddens, "folder", viewMode);
-  const rootSearchDocuments = filterByHiddenView(rootSearchResults?.documents ?? [], userHiddens, "document", viewMode, ({ documentKey }) => documentKey).filter((document) => folderContentTab === "files" ? Boolean(document.extension) : !document.extension);
-  const similarFolders = filterByHiddenView(similarResults?.folders ?? [], userHiddens, "folder", viewMode);
-  const similarTabDocuments = filterByHiddenView(similarContentTab === "files" ? similarResults?.files ?? [] : similarResults?.documents ?? [], userHiddens, "document", viewMode);
+  const folderSearchFolders = filterByHiddenView(folderSearchResults?.folders ?? [], userHiddens, "folder", viewFilters);
+  const folderSearchDocuments = filterByHiddenView(folderSearchResults?.documents ?? [], userHiddens, "document", viewFilters, ({ documentKey }) => documentKey).filter((document) => folderContentTab === "files" ? Boolean(document.extension) : !document.extension);
+  const rootSearchFolders = filterByHiddenView(rootSearchResults?.folders ?? [], userHiddens, "folder", viewFilters);
+  const rootSearchDocuments = filterByHiddenView(rootSearchResults?.documents ?? [], userHiddens, "document", viewFilters, ({ documentKey }) => documentKey).filter((document) => folderContentTab === "files" ? Boolean(document.extension) : !document.extension);
+  const similarFolders = filterByHiddenView(similarResults?.folders ?? [], userHiddens, "folder", viewFilters);
+  const similarTabDocuments = filterByHiddenView(similarContentTab === "files" ? similarResults?.files ?? [] : similarResults?.documents ?? [], userHiddens, "document", viewFilters);
   const currentNotePassages = useMemo(() => notePassages(content), [content]);
   const documentSearchMatches = useMemo(() => editorEditing ? [] : searchDocumentPassagesLiteral(currentNotePassages, documentSearchQuery), [currentNotePassages, documentSearchQuery, editorEditing]);
   const documentSearchMatchesById = useMemo(() => new Map(documentSearchMatches.map((match) => [match.id, match])), [documentSearchMatches]);
@@ -534,7 +534,7 @@ export function KnowledgeWorkspace() {
   const destinationTargetKey = destinationFolder?.key ?? null;
   const destinationAtInitialLocation = destinationInitialFolderKey !== undefined && destinationTargetKey === destinationInitialFolderKey;
   const destinationIsBlocked = typeof destinationTargetKey === "string" && destinationBlockedFolderKeys.includes(destinationTargetKey);
-  const showArchiveRoot = !libraryQuery.trim() || "archive".includes(libraryQuery.trim().toLowerCase());
+  const showArchiveRoot = !libraryQuery.trim() || "delete".includes(libraryQuery.trim().toLowerCase());
   const narrationDuration = audioTimelineDuration(narrationManifest);
   const narrationPlayerElapsed = audioTimelinePosition(narrationManifest, narrationActiveIndex, narrationAudio.currentTime);
   const narrationElapsed = narrationScrubValue ?? narrationPlayerElapsed;
@@ -915,7 +915,7 @@ export function KnowledgeWorkspace() {
     setDestinationUsesDirectSelection(false);
     setTemporarySingleSelection(false);
     setBulkLoading(false);
-    setViewMode("normal");
+    setViewFilters({ favoritesOnly: false, showHidden: false });
     setUserHiddens([]);
     longPressedItem.current = undefined;
   }, [contentContextKey]);
@@ -1496,7 +1496,7 @@ export function KnowledgeWorkspace() {
       const refreshed = addCachedContentDocumentSummary(queryClient, contentContext, await findContentDocumentSummary(summary.key));
       setSelectedSummary(refreshed);
       setSummaries(queryClient.getQueryData<ContentDocumentSummary[]>(contentQueryKeys.summaries(contentContext, refreshed.documentKey)) ?? [refreshed]);
-      if (!refreshed.audio) throw new Error("Generate audio for this summary before listening.");
+      if (!refreshed.audio) throw new Error("This summary has no saved audio.");
       const title = capitalizeLabel(refreshed.topic ?? "Document summary");
       await startNarrationSource({
         durationMs: refreshed.audio.durationMs,
@@ -1514,34 +1514,9 @@ export function KnowledgeWorkspace() {
     }
   };
 
-  const generateSummaryAudio = async () => {
-    const summary = selectedSummary;
-    if (!summary || generatingSummaryAudio) return;
-    stopNarration();
-    setGeneratingSummaryAudio(true);
-    setSheetError(undefined);
-    try {
-      const audio = await generateContentDocumentSummaryAudio(summary.key);
-      const updated = addCachedContentDocumentSummary(queryClient, contentContext, { ...summary, audio });
-      if (selectedDocumentKeyRef.current === updated.documentKey) {
-        setSelectedSummary(updated);
-        setSummaries(queryClient.getQueryData<ContentDocumentSummary[]>(contentQueryKeys.summaries(contentContext, updated.documentKey)) ?? [updated]);
-        if (activeSheetRef.current === "summaryReader") await playSummaryAudio(updated);
-      }
-    } catch (cause) {
-      if (activeSheetRef.current === "summaryReader" && selectedDocumentKeyRef.current === summary.documentKey) setSheetError(cause instanceof Error ? cause.message : "Summary audio could not be generated.");
-    } finally {
-      setGeneratingSummaryAudio(false);
-    }
-  };
-
   const controlSummaryAudio = () => {
     const summary = selectedSummary;
-    if (!summary) return;
-    if (!summary.audio) {
-      void generateSummaryAudio();
-      return;
-    }
+    if (!summary?.audio) return;
     if (narrationStatus === "SUMMARY AUDIO" && narrationState === "playing") return;
     if (narrationStatus === "SUMMARY AUDIO" && narrationState === "paused") {
       narrationPlayer.play();
@@ -1574,29 +1549,6 @@ export function KnowledgeWorkspace() {
       if (generation === restoreGeneration.current && activeSheetRef.current === "audioVersions" && selectedDocumentKeyRef.current === documentKey) setSheetError(cause instanceof Error ? cause.message : "Audio versions could not be loaded.");
     } finally {
       if (generation === restoreGeneration.current) setLoadingAudioVersions(false);
-    }
-  };
-
-  const generateAudioVersion = async () => {
-    const document = selectedDocument;
-    if (!document || generatingAudioVersion) return;
-    stopNarration();
-    setGeneratingAudioVersion(true);
-    setSheetError(undefined);
-    try {
-      const generated = await generateContentDocumentAudio(document.key);
-      const history = await refreshContentDocumentAudioVersions(queryClient, contentContext, document.key);
-      if (selectedDocumentKeyRef.current === document.key) setAudioVersions((current) => {
-        const versions = new Map(current.map((version) => [version.key, version]));
-        history.forEach((version) => versions.set(version.key, version));
-        return [...versions.values()].sort((left, right) => right.version - left.version);
-      });
-      const playable = history.find((version) => version.key === generated.key);
-      if (playable && activeSheetRef.current === "audioVersions" && selectedDocumentKeyRef.current === document.key) await playAudioVersion(playable, 0, true, false);
-    } catch (cause) {
-      if (activeSheetRef.current === "audioVersions" && selectedDocumentKeyRef.current === document.key) setSheetError(cause instanceof Error ? cause.message : "Document audio could not be generated.");
-    } finally {
-      setGeneratingAudioVersion(false);
     }
   };
 
@@ -2577,7 +2529,7 @@ export function KnowledgeWorkspace() {
 
   const pickAndUpload = async (folderKey?: string) => {
     const requestContext = getContentContext();
-    const requestContextKey = `${requestContext.organizationKey}:${requestContext.scopeKey}:${requestContext.agentKey}`;
+    const requestContextKey = `${requestContext.organizationKey}:${requestContext.scopeKey}`;
     const generation = ++uploadGeneration.current;
     setSheetError(undefined);
     try {
@@ -2665,7 +2617,7 @@ export function KnowledgeWorkspace() {
 
   const submitDocumentScan = async (pages: DocumentScanPage[]) => {
     const requestContext = getContentContext();
-    const requestContextKey = `${requestContext.organizationKey}:${requestContext.scopeKey}:${requestContext.agentKey}`;
+    const requestContextKey = `${requestContext.organizationKey}:${requestContext.scopeKey}`;
     const folderKey = scanFolderKey;
     const generation = ++scanGeneration.current;
     const name = `Scanned document ${new Date().toISOString().slice(0, 10)}`;
@@ -3199,7 +3151,7 @@ export function KnowledgeWorkspace() {
         }).catch(() => undefined);
       }
       let committed = false;
-      void archiveContentSelection({ folderKeys: [directFolder.key], documentKeys: [] }).then((outcome) => {
+      void hardDeleteContentSelection({ folderKeys: [directFolder.key], documentKeys: [] }).then((outcome) => {
         if (outcome.succeeded === 0) throw outcome.failures[0] ?? new Error("The folder could not be deleted.");
         committed = true;
         removeCachedContentFoldersEverywhere(queryClient, contentContext, [directFolder.key]);
@@ -3242,7 +3194,7 @@ export function KnowledgeWorkspace() {
       const operationSelection: ContentSelection = { folderKeys: operationFolders.map(({ key }) => key), documentKeys: operationDocuments.map(({ key }) => key) };
       setSelectedFolders([...favoriteFolders, ...operationFolders]);
       setSelectedDocuments([...favoriteDocuments, ...operationDocuments]);
-      const outcome = await archiveContentSelection(operationSelection);
+      const outcome = await hardDeleteContentSelection(operationSelection);
       const failedFolders = new Set(outcome.failures.filter(({ kind }) => kind === "folder").map(({ key }) => key));
       const failedDocuments = new Set(outcome.failures.filter(({ kind }) => kind === "document").map(({ key }) => key));
       const serverFavoriteFailures = new Set(outcome.failures.filter(isFavoriteContentConflict).map(({ kind, key }) => `${kind}:${key}`));
@@ -3416,7 +3368,7 @@ export function KnowledgeWorkspace() {
     setDocumentActionLoading("delete");
     setSheetError(undefined);
     try {
-      const outcome = await archiveContentSelection({ folderKeys: [], documentKeys: [target.key] });
+      const outcome = await hardDeleteContentSelection({ folderKeys: [], documentKeys: [target.key] });
       if (outcome.succeeded === 0) {
         if (outcome.failures.some(isFavoriteContentConflict)) {
           closeSheet();
@@ -3460,49 +3412,42 @@ export function KnowledgeWorkspace() {
     setEditorEditing(false);
   };
 
-  const pendingAudioVersion = audioVersions.reduce((latest, version) => Math.max(latest, version.version), 0) + 1;
-
   function mutationFooter() {
-    const close = (disabled: boolean) => <Button disabled={disabled} onPress={() => closeSheet()} size="lg" variant="secondary">Close</Button>;
+    const close = (disabled: boolean) => <Button disabled={disabled} onPress={() => closeSheet()} size="md" variant="secondary">Close</Button>;
     if (activeSheet === "transform") return <>
-      <Button disabled={!documentKeyRef.current || saveState !== "saved" || (documentTransformation === "enhance" ? !documentTransformationPrompt.trim() : !translationTargetLanguage.trim())} onPress={() => void generateDocumentTransformation()} size="lg" variant="primary">Generate</Button>
+      <Button disabled={!documentKeyRef.current || saveState !== "saved" || (documentTransformation === "enhance" ? !documentTransformationPrompt.trim() : !translationTargetLanguage.trim())} onPress={() => void generateDocumentTransformation()} size="md" variant="primary">Generate</Button>
       {close(false)}
     </>;
     if (activeSheet === "versions") return <>
-      {!documentActionLoading ? <Button disabled={loadingVersions} onPress={() => { if (documentTransformation === "enhance") void generateDocumentTransformation(); else pushSheet("transform"); }} size="lg" variant="primary">{documentTransformation === "enhance" ? "Enhance" : "Translate"}</Button> : null}
+      {!documentActionLoading ? <Button disabled={loadingVersions} onPress={() => { if (documentTransformation === "enhance") void generateDocumentTransformation(); else pushSheet("transform"); }} size="md" variant="primary">{documentTransformation === "enhance" ? "Enhance" : "Translate"}</Button> : null}
       {close(Boolean(documentActionLoading))}
     </>;
     if (activeSheet === "documentVersions") return close(loadingVersions);
     if (activeSheet === "summarize") return <>
-      {sheetError ? <Button disabled={loadingSummaryTopics || generatingSummary} loading={loadingSummaryTopics} onPress={() => void loadSummaryTopics()} size="lg" variant="primary">Retry</Button> : null}
+      {sheetError ? <Button disabled={loadingSummaryTopics || generatingSummary} loading={loadingSummaryTopics} onPress={() => void loadSummaryTopics()} size="md" variant="primary">Retry</Button> : null}
       {close(false)}
     </>;
     if (activeSheet === "summaryVersions") return <>
-      {!loadingSummaries && summaries.length === 0 ? <Button disabled={generatingSummary || saveState !== "saved"} onPress={openSummarizeSheet} size="lg" variant="primary">Create summary</Button> : null}
+      {!loadingSummaries && summaries.length === 0 ? <Button disabled={generatingSummary || saveState !== "saved"} onPress={openSummarizeSheet} size="md" variant="primary">Create summary</Button> : null}
       {close(false)}
     </>;
     if (activeSheet === "summaryReader") return <>
       {summaryNarrationIsland}
       {generatingSummary ? <LoadingText text="Generating summary..." /> : null}
-      {generatingSummaryAudio
-        ? <LoadingText text="Generating summary audio..." />
-        : selectedSummary ? <Button disabled={generatingSummary || Boolean(selectedSummary.audio && narrationStatus === "SUMMARY AUDIO" && narrationState === "playing")} onPress={controlSummaryAudio} size="lg" variant="primary">{selectedSummary.audio ? "Listen" : "Generate audio"}</Button> : null}
+      {selectedSummary?.audio ? <Button disabled={generatingSummary || narrationStatus === "SUMMARY AUDIO" && narrationState === "playing"} onPress={controlSummaryAudio} size="md" variant="primary">Listen</Button> : null}
       {close(false)}
     </>;
     if (activeSheet === "audioVersions") return <>
       {documentNarrationIsland}
-      {generatingAudioVersion
-        ? <LoadingText text="Generating audio. This may take a while..." />
-        : <Button disabled={loadingAudioVersions} onPress={() => void generateAudioVersion()} size="lg" variant="primary">Generate audio</Button>}
       {close(false)}
     </>;
     if (activeSheet === "searchHistory") return close(historyLoading);
     if (activeSheet === "folderDetails") return <>
-      <Button disabled={!folderDetailsName.trim()} onPress={() => void submitFolderDetails()} size="lg" variant="primary">Save</Button>
+      <Button disabled={!folderDetailsName.trim()} onPress={() => void submitFolderDetails()} size="md" variant="primary">Save</Button>
       {close(false)}
     </>;
     if (activeSheet === "documentDetails") return <>
-      <Button disabled={!documentDetailsName.trim()} onPress={() => void submitDocumentDetails()} size="lg" variant="primary">Save</Button>
+      <Button disabled={!documentDetailsName.trim()} onPress={() => void submitDocumentDetails()} size="md" variant="primary">Save</Button>
       {close(false)}
     </>;
     if (activeSheet === "deleteDocument") return null;
@@ -3510,15 +3455,15 @@ export function KnowledgeWorkspace() {
     if (activeSheet === "destinationBrowser") return <>
       {destinationAction !== "upload" && (destinationAtInitialLocation || destinationIsBlocked)
         ? <Text style={styles.invalidDestinationHelp}>Invalid destination. Choose another folder to {destinationAction} to.</Text>
-        : <Button disabled={bulkLoading} loading={bulkLoading} onPress={() => { if (destinationAction === "upload") goBackSheet(); else void selectDestination(); }} size="lg" variant="primary">{destinationAction === "upload" ? "Choose folder" : destinationAction === "move" ? "Move here" : "Copy here"}</Button>}
+        : <Button disabled={bulkLoading} loading={bulkLoading} onPress={() => { if (destinationAction === "upload") goBackSheet(); else void selectDestination(); }} size="md" variant="primary">{destinationAction === "upload" ? "Choose folder" : destinationAction === "move" ? "Move here" : "Copy here"}</Button>}
       {close(bulkLoading)}
     </>;
     if (activeSheet === "destination" && destinationAction === "upload") return <>
-      <Button disabled={destinationLoading} loading={destinationLoading} onPress={() => void selectDestination()} size="lg" variant="primary">Choose files for this folder</Button>
+      <Button disabled={destinationLoading} loading={destinationLoading} onPress={() => void selectDestination()} size="md" variant="primary">Choose files for this folder</Button>
       {close(destinationLoading)}
     </>;
     if (activeSheet === "folder") return <>
-      <Button disabled={!folderName.trim()} onPress={() => void submitFolder()} size="lg" variant="primary">Create folder</Button>
+      <Button disabled={!folderName.trim()} onPress={() => void submitFolder()} size="md" variant="primary">Create folder</Button>
       {close(false)}
     </>;
     return null;
@@ -3548,43 +3493,39 @@ export function KnowledgeWorkspace() {
     void playAudioVersion(version, seconds, wasPlaying);
   };
 
-  const summaryNarrationIsland = generatingSummaryAudio || narrationStatus === "SUMMARY AUDIO" && narrationState !== "idle" ? (
+  const summaryNarrationIsland = narrationStatus === "SUMMARY AUDIO" && narrationState !== "idle" ? (
     <View style={styles.narrationPlayer}>
       <View style={styles.narrationHeading}>
         <View style={styles.narrationTitleBlock}>
           <Text numberOfLines={1} style={styles.narrationTitle}>{capitalizeLabel(selectedSummary?.topic ?? summaryReaderTopic ?? "Summary audio")}</Text>
         </View>
-        <Button accessibilityLabel="Close summary audio player" contentMode="raw" disabled={generatingSummaryAudio} onPress={() => stopNarration()} size="xs" variant="icon"><CloseIcon size="sm" /></Button>
+        <Button accessibilityLabel="Close summary audio player" contentMode="raw" onPress={() => stopNarration()} size="xs" variant="icon"><CloseIcon size="sm" /></Button>
       </View>
       <View style={styles.narrationControls}>
-        {generatingSummaryAudio
-          ? <View accessibilityLabel="Generating summary audio" accessibilityRole="progressbar" style={styles.summaryNarrationSpinner}><Spinner size="small" variant="muted" /></View>
-          : <Button accessibilityLabel={narrationState === "playing" ? "Pause summary audio" : "Play summary audio"} contentMode="raw" disabled={narrationManifest.length === 0} onPress={controlSelectedAudioVersion} size="sm" variant="icon">{narrationState === "playing" ? <PauseIcon size="sm" /> : <PlayIcon size="sm" />}</Button>}
-        <Text style={styles.narrationTime}>{formatAudioTime(generatingSummaryAudio ? 0 : narrationElapsed)}</Text>
-        <Slider accessibilityLabel="Summary audio progress" disabled={generatingSummaryAudio || narrationDuration <= 0} max={Math.max(1, generatingSummaryAudio ? 0 : narrationDuration)} onSlidingComplete={(value) => { setNarrationScrubValue(value); scrubSelectedAudioVersion(value); }} onValueChange={setNarrationScrubValue} style={styles.narrationSlider} value={generatingSummaryAudio ? 0 : Math.min(narrationElapsed, narrationDuration)} />
-        <Text style={styles.narrationTime}>{formatAudioTime(generatingSummaryAudio ? 0 : narrationDuration)}</Text>
+        <Button accessibilityLabel={narrationState === "playing" ? "Pause summary audio" : "Play summary audio"} contentMode="raw" disabled={narrationManifest.length === 0} onPress={controlSelectedAudioVersion} size="sm" variant="icon">{narrationState === "playing" ? <PauseIcon size="sm" /> : <PlayIcon size="sm" />}</Button>
+        <Text style={styles.narrationTime}>{formatAudioTime(narrationElapsed)}</Text>
+        <Slider accessibilityLabel="Summary audio progress" disabled={narrationDuration <= 0} max={Math.max(1, narrationDuration)} onSlidingComplete={(value) => { setNarrationScrubValue(value); scrubSelectedAudioVersion(value); }} onValueChange={setNarrationScrubValue} style={styles.narrationSlider} value={Math.min(narrationElapsed, narrationDuration)} />
+        <Text style={styles.narrationTime}>{formatAudioTime(narrationDuration)}</Text>
       </View>
-      {!generatingSummaryAudio && narrationError ? <Text accessibilityRole="alert" numberOfLines={2} style={styles.narrationError}>{narrationError}</Text> : null}
+      {narrationError ? <Text accessibilityRole="alert" numberOfLines={2} style={styles.narrationError}>{narrationError}</Text> : null}
     </View>
   ) : null;
 
-  const documentNarrationIsland = generatingAudioVersion || narrationState !== "idle" && narrationStatus !== "SUMMARY AUDIO" ? (
+  const documentNarrationIsland = narrationState !== "idle" && narrationStatus !== "SUMMARY AUDIO" ? (
     <View style={styles.narrationPlayer}>
       <View style={styles.narrationHeading}>
         <View style={styles.narrationTitleBlock}>
-          <Text numberOfLines={1} style={styles.narrationTitle}>{generatingAudioVersion ? `${selectedDocument?.name ?? "Document"} · Audio ${pendingAudioVersion}` : narrationTitle || "Document audio"}</Text>
+          <Text numberOfLines={1} style={styles.narrationTitle}>{narrationTitle || "Document audio"}</Text>
         </View>
-        <Button accessibilityLabel="Close audio player" contentMode="raw" disabled={generatingAudioVersion} onPress={dismissNarration} size="xs" variant="icon"><CloseIcon size="sm" /></Button>
+        <Button accessibilityLabel="Close audio player" contentMode="raw" onPress={dismissNarration} size="xs" variant="icon"><CloseIcon size="sm" /></Button>
       </View>
       <View style={styles.narrationControls}>
-        {generatingAudioVersion
-          ? <View accessibilityLabel="Generating document audio" accessibilityRole="progressbar" style={styles.summaryNarrationSpinner}><Spinner size="small" variant="muted" /></View>
-          : <Button accessibilityLabel={narrationState === "playing" ? "Pause listening" : "Play audio"} contentMode="raw" disabled={narrationManifest.length === 0} loading={narrationManifest.length === 0 && narrationState !== "error"} onPress={controlSelectedAudioVersion} size="sm" variant="icon">{narrationState === "playing" ? <PauseIcon size="sm" /> : <PlayIcon size="sm" />}</Button>}
-        <Text style={styles.narrationTime}>{formatAudioTime(generatingAudioVersion ? 0 : narrationElapsed)}</Text>
-        <Slider accessibilityLabel="Audio progress" disabled={generatingAudioVersion || narrationDuration <= 0} max={Math.max(1, generatingAudioVersion ? 0 : narrationDuration)} onSlidingComplete={(value) => { setNarrationScrubValue(value); scrubSelectedAudioVersion(value); }} onValueChange={setNarrationScrubValue} style={styles.narrationSlider} value={generatingAudioVersion ? 0 : Math.min(narrationElapsed, narrationDuration)} />
-        <Text style={styles.narrationTime}>{formatAudioTime(generatingAudioVersion ? 0 : narrationDuration)}</Text>
+        <Button accessibilityLabel={narrationState === "playing" ? "Pause listening" : "Play audio"} contentMode="raw" disabled={narrationManifest.length === 0} loading={narrationManifest.length === 0 && narrationState !== "error"} onPress={controlSelectedAudioVersion} size="sm" variant="icon">{narrationState === "playing" ? <PauseIcon size="sm" /> : <PlayIcon size="sm" />}</Button>
+        <Text style={styles.narrationTime}>{formatAudioTime(narrationElapsed)}</Text>
+        <Slider accessibilityLabel="Audio progress" disabled={narrationDuration <= 0} max={Math.max(1, narrationDuration)} onSlidingComplete={(value) => { setNarrationScrubValue(value); scrubSelectedAudioVersion(value); }} onValueChange={setNarrationScrubValue} style={styles.narrationSlider} value={Math.min(narrationElapsed, narrationDuration)} />
+        <Text style={styles.narrationTime}>{formatAudioTime(narrationDuration)}</Text>
       </View>
-      {!generatingAudioVersion && narrationError ? <Text accessibilityRole="alert" numberOfLines={2} style={styles.narrationError}>{narrationError}</Text> : null}
+      {narrationError ? <Text accessibilityRole="alert" numberOfLines={2} style={styles.narrationError}>{narrationError}</Text> : null}
     </View>
   ) : null;
   const narrationAccessory = activeSheet !== "audioVersions" ? documentNarrationIsland : undefined;
@@ -3595,9 +3536,9 @@ export function KnowledgeWorkspace() {
     </View>
     <Button accessibilityLabel="Selected item actions" contentMode="raw" disabled={selectionMetadataLoading} loading={selectionMetadataLoading} onPress={() => openSheet("bulkActions")} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
   </Tabs> : null;
-  const filterBadges = viewMode === "normal" ? null : <View style={styles.filterBadgeRow}>
-    {showOnlyFavorites ? <View style={styles.similarPill}><Text numberOfLines={1} style={styles.similarPillText}>Favorites</Text><Button accessibilityLabel="Close Favorites filter" contentMode="raw" onPress={() => setViewMode("normal")} size="xs" variant="icon"><CloseIcon size="sm" /></Button></View> : null}
-    {showHidden ? <View style={styles.similarPill}><Text numberOfLines={1} style={styles.similarPillText}>Show hidden</Text><Button accessibilityLabel="Close Show hidden filter" contentMode="raw" onPress={() => setViewMode("normal")} size="xs" variant="icon"><CloseIcon size="sm" /></Button></View> : null}
+  const filterBadges = !filtersActive ? null : <View style={styles.filterBadgeRow}>
+    {showOnlyFavorites ? <View style={styles.similarPill}><Text numberOfLines={1} style={styles.similarPillText}>Favorites</Text><Button accessibilityLabel="Close Favorites filter" contentMode="raw" onPress={() => setViewFilters((current) => ({ ...current, favoritesOnly: false }))} size="xs" variant="icon"><CloseIcon size="sm" /></Button></View> : null}
+    {showHidden ? <View style={styles.similarPill}><Text numberOfLines={1} style={styles.similarPillText}>Show hidden</Text><Button accessibilityLabel="Close Show hidden filter" contentMode="raw" onPress={() => setViewFilters((current) => ({ ...current, showHidden: false }))} size="xs" variant="icon"><CloseIcon size="sm" /></Button></View> : null}
   </View>;
 
   return (
@@ -3627,7 +3568,7 @@ export function KnowledgeWorkspace() {
                 <TextInput accessibilityLabel="Search all Archive folders, documents, and files" editable={rootSearchFocusable} focusable={rootSearchFocusable} onChangeText={setRootSearchQuery} placeholder="Search..." ref={rootSearchInputRef} style={styles.rootSearchInput} value={rootSearchQuery} />
                 {rootSearchQuery.trim() ? <Button accessibilityLabel="Clear Archive search" contentMode="raw" onPress={() => setRootSearchQuery("")} size="xs" variant="icon"><CloseIcon size="sm" /></Button> : null}
               </View>
-              <Button accessibilityLabel="Filter Archive" contentMode="raw" disabled={!hasContentContext} onPress={() => openSheet("filter")} size="sm" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={viewMode !== "normal" ? "accent" : "default"} /></Button>
+              <Button accessibilityLabel="Filter Archive" contentMode="raw" disabled={!hasContentContext} onPress={() => openSheet("filter")} size="sm" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={filtersActive ? "accent" : "default"} /></Button>
             </View>
             {bulkToolbar}
             {filterBadges}
@@ -3686,7 +3627,7 @@ export function KnowledgeWorkspace() {
                 <TextInput accessibilityLabel={`Search ${currentFolder?.name ?? "folder"}`} onChangeText={setQuery} placeholder="Search..." style={styles.rootSearchInput} value={query} />
                 {query.trim() ? <Button accessibilityLabel="Clear folder search" contentMode="raw" onPress={() => setQuery("")} size="xs" variant="icon"><CloseIcon size="sm" /></Button> : null}
               </View>
-              <Button accessibilityLabel={`Filter ${currentFolder?.name ?? "this folder"}`} contentMode="raw" disabled={!hasContentContext} onPress={() => openSheet("filter")} size="sm" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={viewMode !== "normal" ? "accent" : "default"} /></Button>
+              <Button accessibilityLabel={`Filter ${currentFolder?.name ?? "this folder"}`} contentMode="raw" disabled={!hasContentContext} onPress={() => openSheet("filter")} size="sm" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={filtersActive ? "accent" : "default"} /></Button>
             </View>
             {bulkToolbar}
             {filterBadges}
@@ -3870,30 +3811,30 @@ export function KnowledgeWorkspace() {
         description={activeSheet === "create" ? "Choose what to add to the current folder." : activeSheet === "transform" ? documentTransformation === "enhance" ? "Review or adjust how this document should be enhanced." : "Review or adjust how this document should be translated." : activeSheet === "documentVersions" ? "Choose a document version to open." : activeSheet === "versions" ? `Choose an ${documentTransformation === "enhance" ? "enhancement" : "translation"} to open.` : activeSheet === "audioVersions" ? "Listen to your saved recordings." : activeSheet === "summarize" ? `Choose one of the ${selectedDocument?.extension ? "file's" : "document's"} primary topics to summarize.` : activeSheet === "summaryVersions" ? "View saved summaries or create a new one." : undefined}
         dismissible={!destinationLoading && !documentActionLoading && !bulkLoading}
         footer={mutationFooter()}
-        hideHeading={activeSheet === "create" || activeSheet === "documentActions" || activeSheet === "enhance" || activeSheet === "historyChooser" || activeSheet === "filter" || activeSheet === "bulkActions" || compactDelete}
+        hideHeading={activeSheet === "create" || activeSheet === "documentActions" || activeSheet === "enhance" || activeSheet === "historyChooser" || activeSheet === "filter" || activeSheet === "bulkActions"}
         height={activeSheet === "documents" || activeSheet === "folder" || activeSheet === "folders" || activeSheet === "searchHistory" || activeSheet === "similar" || activeSheet === "transform" || activeSheet === "documentVersions" || activeSheet === "versions" || activeSheet === "audioVersions" || activeSheet === "summarize" || activeSheet === "summaryVersions" || activeSheet === "summaryReader" || activeSheet === "scanSources" || activeSheet === "destinationBrowser" || activeSheet === "folderDetails" || activeSheet === "documentDetails" ? "full" : undefined}
         onOpenChange={(open) => { if (!open) closeSheet(); }}
         open={sheetOpen}
-        title={activeSheet === "enhance" ? "AI actions" : activeSheet === "transform" ? documentTransformation === "enhance" ? "Enhance document" : "Translate document" : activeSheet === "summarize" ? "Summarize document" : activeSheet === "summaryVersions" ? "Summary versions" : activeSheet === "summaryReader" ? capitalizeLabel(selectedSummary?.topic ?? summaryReaderTopic ?? `Summary ${selectedSummary?.version ?? ""}`) : activeSheet === "historyChooser" ? "Document history" : activeSheet === "searchHistory" ? "Search history" : activeSheet === "similar" ? "Archive" : activeSheet === "documentVersions" ? "Document versions" : activeSheet === "versions" ? documentTransformation === "enhance" ? "Enhancements" : "Translations" : activeSheet === "audioVersions" ? "Audio versions" : activeSheet === "scanSources" ? "Scanned pages" : activeSheet === "deleteDocument" ? `Delete ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "bulkDelete" ? "Delete selected items" : activeSheet === "folder" ? "Create folder" : activeSheet === "documents" ? "Documents and files" : activeSheet === "folders" ? "Folders" : activeSheet === "destinationBrowser" ? destinationAction === "upload" ? destinationFolder?.name ?? "Archive" : destinationAction === "move" ? "Move to folder" : "Copy to folder" : activeSheet === "library" ? "Browse Archive" : activeSheet === "documentActions" ? selectedDocument?.name ?? "Document actions" : activeSheet === "documentDetails" ? `Edit ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "destination" ? destinationAction === "upload" ? "Upload files" : "Choose destination" : activeSheet === "folderActions" ? selectedFolder?.name ?? "Folder actions" : activeSheet === "folderDetails" ? "Edit folder" : "New in Archive"}
+        title={compactDelete ? deleteConfirmationTitle : activeSheet === "enhance" ? "AI actions" : activeSheet === "transform" ? documentTransformation === "enhance" ? "Enhance document" : "Translate document" : activeSheet === "summarize" ? "Summarize document" : activeSheet === "summaryVersions" ? "Summary versions" : activeSheet === "summaryReader" ? capitalizeLabel(selectedSummary?.topic ?? summaryReaderTopic ?? `Summary ${selectedSummary?.version ?? ""}`) : activeSheet === "historyChooser" ? "Document history" : activeSheet === "searchHistory" ? "Search history" : activeSheet === "similar" ? "Archive" : activeSheet === "documentVersions" ? "Document versions" : activeSheet === "versions" ? documentTransformation === "enhance" ? "Enhancements" : "Translations" : activeSheet === "audioVersions" ? "Audio versions" : activeSheet === "scanSources" ? "Scanned pages" : activeSheet === "folder" ? "Create folder" : activeSheet === "documents" ? "Documents and files" : activeSheet === "folders" ? "Folders" : activeSheet === "destinationBrowser" ? destinationAction === "upload" ? destinationFolder?.name ?? "Archive" : destinationAction === "move" ? "Move to folder" : "Copy to folder" : activeSheet === "library" ? "Browse Archive" : activeSheet === "documentActions" ? selectedDocument?.name ?? "Document actions" : activeSheet === "documentDetails" ? `Edit ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "destination" ? destinationAction === "upload" ? "Upload files" : "Choose destination" : activeSheet === "folderActions" ? selectedFolder?.name ?? "Folder actions" : activeSheet === "folderDetails" ? "Edit folder" : "New in Archive"}
       >
         {sheetError ? <Text accessibilityRole="alert" style={styles.notice}>{sheetError}</Text> : null}
         {compactDelete ? <View style={styles.compactSheetActions}>
-          <Button disabled={activeSheet === "deleteDocument" ? Boolean(documentActionLoading) : bulkLoading} loading={activeSheet === "deleteDocument" ? documentActionLoading === "delete" : bulkLoading} onPress={() => void (activeSheet === "deleteDocument" ? deleteSelectedDocument() : deleteContentSelection())} size="lg" variant="primary">Delete</Button>
-          <Button disabled={activeSheet === "deleteDocument" ? Boolean(documentActionLoading) : bulkLoading} onPress={() => closeSheet()} size="lg" variant="secondary">Close</Button>
+          <Button disabled={activeSheet === "deleteDocument" ? Boolean(documentActionLoading) : bulkLoading} loading={activeSheet === "deleteDocument" ? documentActionLoading === "delete" : bulkLoading} onPress={() => void (activeSheet === "deleteDocument" ? deleteSelectedDocument() : deleteContentSelection())} size="md" variant="primary">Delete</Button>
+          <Button disabled={activeSheet === "deleteDocument" ? Boolean(documentActionLoading) : bulkLoading} onPress={() => closeSheet()} size="md" variant="secondary">Close</Button>
         </View> : null}
         {activeSheet === "create" ? (
           <>
-            <BottomSheetItem onPress={() => { void startNewNote(); }} style={styles.sheetAction} variant="secondary">New document</BottomSheetItem>
-            <BottomSheetItem onPress={openNewFolder} style={styles.sheetAction} variant="secondary">New folder</BottomSheetItem>
+            <BottomSheetItem onPress={openNewFolder} style={styles.sheetAction} variant="secondary">Create folder</BottomSheetItem>
+            <BottomSheetItem onPress={() => { void startNewNote(); }} style={styles.sheetAction} variant="secondary">Create document</BottomSheetItem>
             <BottomSheetItem disabled={uploading} loading={uploading} onPress={() => void pickAndUpload(currentFolder?.key)} style={styles.sheetAction} variant="secondary">Upload files</BottomSheetItem>
             <BottomSheetItem disabled={uploading || scanBusy} onPress={startDocumentScan} style={styles.sheetAction} variant="secondary">Scan documents</BottomSheetItem>
           </>
         ) : null}
         {activeSheet === "bulkActions" ? <View style={styles.bulkActionList}>
-          <Button disabled={bulkLoading} loading={bulkLoading} onPress={() => void updateSelectionFavorite()} size="lg" variant="secondary">{allSelectedFavorite ? "Unfavorite" : "Favorite"}</Button>
-          <Button disabled={bulkLoading} onPress={() => void openDestinationPicker("move")} size="lg" variant="secondary">Move to folder</Button>
-          <Button disabled={bulkLoading} onPress={() => void openDestinationPicker("copy")} size="lg" variant="secondary">Copy to folder</Button>
-          <Button disabled={bulkLoading} onPress={() => pushSheet("bulkDelete")} size="lg" variant="secondary">Delete</Button>
+          <Button disabled={bulkLoading} loading={bulkLoading} onPress={() => void updateSelectionFavorite()} size="md" variant="secondary">{allSelectedFavorite ? "Unfavorite" : "Favorite"}</Button>
+          <Button disabled={bulkLoading} onPress={() => void openDestinationPicker("move")} size="md" variant="secondary">Move to folder</Button>
+          <Button disabled={bulkLoading} onPress={() => void openDestinationPicker("copy")} size="md" variant="secondary">Copy to folder</Button>
+          <Button disabled={bulkLoading} onPress={() => pushSheet("bulkDelete")} size="md" variant="secondary">Delete</Button>
         </View> : null}
         {activeSheet === "historyChooser" ? (
           <View style={styles.historyChoices}>
@@ -3911,21 +3852,21 @@ export function KnowledgeWorkspace() {
         ) : null}
         {activeSheet === "filter" ? <View style={styles.filterPanel}>
           <View style={styles.favoriteSwitchRow}>
-            <Switch accessibilityLabel="Show only Archive favorites" checked={showOnlyFavorites} onCheckedChange={(checked) => { setViewMode(checked ? "favorites" : "normal"); closeSheet(); }} />
+            <Switch accessibilityLabel="Show only Archive favorites" checked={showOnlyFavorites} onCheckedChange={(checked) => { setViewFilters((current) => ({ ...current, favoritesOnly: checked })); closeSheet(); }} />
             <Text style={styles.favoriteSwitchLabel}>Favorites</Text>
           </View>
           <View style={styles.favoriteSwitchRow}>
-            <Switch accessibilityLabel="Show hidden Archive items" checked={showHidden} onCheckedChange={(checked) => { setViewMode(checked ? "hidden" : "normal"); closeSheet(); }} />
+            <Switch accessibilityLabel="Show hidden Archive items" checked={showHidden} onCheckedChange={(checked) => { setViewFilters((current) => ({ ...current, showHidden: checked })); closeSheet(); }} />
             <Text style={styles.favoriteSwitchLabel}>Show hidden</Text>
           </View>
-          <Button onPress={() => void openSearchHistory()} size="lg" variant="secondary">Search history</Button>
+          <Button onPress={() => void openSearchHistory()} size="md" variant="secondary">Search history</Button>
         </View> : null}
         {activeSheet === "similar" ? (
           <View style={styles.similarPanel}>
             <Tabs accessibilityRole="tablist" style={styles.folderTabs}>
-              <Button accessibilityRole="tab" accessibilityState={{ selected: similarContentTab === "folders" }} onPress={() => setSimilarContentTab("folders")} size="xs" style={styles.folderTab} variant={similarContentTab === "folders" ? "secondary" : "ghost"}>Folders</Button>
-              <Button accessibilityRole="tab" accessibilityState={{ selected: similarContentTab === "documents" }} onPress={() => setSimilarContentTab("documents")} size="xs" style={styles.folderTab} variant={similarContentTab === "documents" ? "secondary" : "ghost"}>Documents</Button>
-              <Button accessibilityRole="tab" accessibilityState={{ selected: similarContentTab === "files" }} onPress={() => setSimilarContentTab("files")} size="xs" style={styles.folderTab} variant={similarContentTab === "files" ? "secondary" : "ghost"}>Files</Button>
+              <Button accessibilityRole="tab" accessibilityState={{ selected: similarContentTab === "folders" }} onPress={() => setSimilarContentTab("folders")} size="md" style={styles.folderTab} variant={similarContentTab === "folders" ? "secondary" : "ghost"}>Folders</Button>
+              <Button accessibilityRole="tab" accessibilityState={{ selected: similarContentTab === "documents" }} onPress={() => setSimilarContentTab("documents")} size="md" style={styles.folderTab} variant={similarContentTab === "documents" ? "secondary" : "ghost"}>Documents</Button>
+              <Button accessibilityRole="tab" accessibilityState={{ selected: similarContentTab === "files" }} onPress={() => setSimilarContentTab("files")} size="md" style={styles.folderTab} variant={similarContentTab === "files" ? "secondary" : "ghost"}>Files</Button>
             </Tabs>
             {filterBadges}
             <ScrollView contentContainerStyle={styles.similarResults} showsVerticalScrollIndicator={false}>
@@ -3934,12 +3875,12 @@ export function KnowledgeWorkspace() {
               {!similarLoading && similarContentTab === "folders" ? <View style={similarResults?.folders.length ? styles.rootFolderGrid : styles.similarEmpty}>
                 {similarFolders.map((folder) => <View key={folder.key} style={[styles.rootFolderCard, { width: destinationCardSize, height: destinationCardSize }]}>
                   {folder.coverUrl ? <Image contentFit="cover" source={folder.coverUrl} style={styles.folderCover} /> : null}
-                  <Button contentMode="raw" onPress={() => { closeSheet(); requestAnimationFrame(() => { void openFolder(folder); }); }} shape="rounded" size="xl" style={[styles.rootFolderMain, folder.coverUrl && styles.coveredFolderMain]} variant="ghost">{folder.coverUrl ? null : <FolderIcon size="lg" />}<Text numberOfLines={1} style={[styles.archiveCardLabel, folder.coverUrl && styles.coveredFolderLabel]}>{folder.name}</Text></Button>
+                  <Button contentMode="raw" onPress={() => { closeSheet(); requestAnimationFrame(() => { void openFolder(folder); }); }} shape="rounded" size="md" style={[styles.rootFolderMain, folder.coverUrl && styles.coveredFolderMain]} variant="ghost">{folder.coverUrl ? null : <FolderIcon size="lg" />}<Text numberOfLines={1} style={[styles.archiveCardLabel, folder.coverUrl && styles.coveredFolderLabel]}>{folder.name}</Text></Button>
                 </View>)}
                 {similarFolders.length === 0 ? <Text style={styles.empty}>No matching folders found.</Text> : null}
               </View> : null}
               {!similarLoading && similarContentTab !== "folders" ? <View style={similarTabDocuments.length > 0 ? styles.folderDocuments : styles.similarEmpty}>
-                {similarTabDocuments.map((document) => <Button contentMode="raw" key={document.key} onPress={() => { closeSheet(); requestAnimationFrame(() => { void openArchiveDocument(document); }); }} size="sm" style={styles.documentButton} variant="secondary"><FileIcon size="sm" /><Text numberOfLines={1} style={styles.documentButtonLabel}>{documentDisplayName(document)}</Text><ScannedBadge document={document} /></Button>)}
+                {similarTabDocuments.map((document) => <Button contentMode="raw" key={document.key} onPress={() => { closeSheet(); requestAnimationFrame(() => { void openArchiveDocument(document); }); }} size="md" style={styles.documentButton} variant="secondary"><FileIcon size="sm" /><Text numberOfLines={1} style={styles.documentButtonLabel}>{documentDisplayName(document)}</Text><ScannedBadge document={document} /></Button>)}
                 {similarResults && similarTabDocuments.length === 0 ? <Text style={styles.empty}>No matching {similarContentTab} found.</Text> : null}
               </View> : null}
             </ScrollView>
@@ -3982,12 +3923,12 @@ export function KnowledgeWorkspace() {
             <Text style={styles.inputLabel}>Description (Optional)</Text>
             <TextInput accessibilityLabel="Folder description" maxLength={2000} multiline onChangeText={setFolderDetailsDescription} placeholder="What belongs in this folder?" style={styles.folderDescriptionInput} textAlignVertical="top" value={folderDetailsDescription} />
             <View style={styles.folderDetailsCoverControl}>
-              <Button accessibilityLabel={(folderDetailsCoverAsset === undefined ? selectedFolder.coverUrl : folderDetailsCoverAsset?.uri) ? "Change folder cover" : "Set folder cover"} contentMode="raw" onPress={() => void chooseFolderCover()} shape="rounded" size="xl" style={styles.folderDetailsCoverButton} variant="secondary">
+              <Button accessibilityLabel={(folderDetailsCoverAsset === undefined ? selectedFolder.coverUrl : folderDetailsCoverAsset?.uri) ? "Change folder cover" : "Set folder cover"} contentMode="raw" onPress={() => void chooseFolderCover()} shape="rounded" size="md" style={styles.folderDetailsCoverButton} variant="secondary">
                 {(folderDetailsCoverAsset === undefined ? selectedFolder.coverUrl : folderDetailsCoverAsset?.uri)
                   ? <Image contentFit="cover" source={folderDetailsCoverAsset === undefined ? selectedFolder.coverUrl : folderDetailsCoverAsset?.uri} style={styles.folderCover} />
                   : <FolderIcon size="lg" />}
               </Button>
-              {(folderDetailsCoverAsset === undefined ? selectedFolder.coverUrl : folderDetailsCoverAsset?.uri) ? <Button accessibilityLabel="Remove folder cover" contentMode="raw" onPress={clearFolderCover} size="xs" style={styles.folderDetailsCoverRemove} variant="secondary"><CloseIcon size="sm" /></Button> : null}
+              {(folderDetailsCoverAsset === undefined ? selectedFolder.coverUrl : folderDetailsCoverAsset?.uri) ? <Button accessibilityLabel="Remove folder cover" contentMode="raw" onPress={clearFolderCover} size="md" style={styles.folderDetailsCoverRemove} variant="secondary"><CloseIcon size="sm" /></Button> : null}
             </View>
             <View style={styles.favoriteSwitchRow}>
               <Switch accessibilityLabel="Favorite folder" checked={folderDetailsFavorite} onCheckedChange={setFolderDetailsFavorite} />
@@ -4009,7 +3950,7 @@ export function KnowledgeWorkspace() {
             {!loadingSummaryTopics && !sheetError && summaryTopics.length === 0 ? <Text style={styles.empty}>No topics were found in this document.</Text> : null}
             {loadingSummaryTopics ? Array.from({ length: 3 }, (_, index) => (
               <View accessibilityLabel="Generating document topics" accessibilityRole="progressbar" key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />
-            )) : summaryTopics.map((topic) => <Button contentMode="raw" disabled={generatingSummary} key={topic} onPress={() => void generateSummaryForTopic(topic)} size="sm" style={styles.documentButton} variant="secondary"><FileIcon size="sm" /><Text numberOfLines={1} style={styles.documentButtonLabel}>{capitalizeLabel(topic)}</Text></Button>)}
+            )) : summaryTopics.map((topic) => <Button contentMode="raw" disabled={generatingSummary} key={topic} onPress={() => void generateSummaryForTopic(topic)} size="md" style={styles.documentButton} variant="secondary"><FileIcon size="sm" /><Text numberOfLines={1} style={styles.documentButtonLabel}>{capitalizeLabel(topic)}</Text></Button>)}
           </ScrollView>
         ) : null}
         {activeSheet === "summaryVersions" ? (
@@ -4022,7 +3963,7 @@ export function KnowledgeWorkspace() {
                   <View style={styles.audioVersionSkeletonCopy}><View style={styles.audioVersionSkeletonTitle} /><View style={styles.audioVersionSkeletonSubtitle} /></View>
                 </View>
               )) : summaries.map((summary) => (
-                <Button contentMode="raw" key={summary.key} onPress={() => openSummaryReader(summary)} size="lg" style={styles.versionMain} variant="secondary">
+                <Button contentMode="raw" key={summary.key} onPress={() => openSummaryReader(summary)} size="md" style={styles.versionMain} variant="secondary">
                   <FileIcon size="md" />
                   <View style={styles.resultText}><Text numberOfLines={1} style={styles.rowTitle}>{capitalizeLabel(summary.topic ?? `Summary ${summary.version}`)}</Text><Text style={styles.rowSubtitle}>Version {summary.version} · {new Date(summary.createdAt).toLocaleString()}</Text></View>
                 </Button>
@@ -4046,7 +3987,7 @@ export function KnowledgeWorkspace() {
         {activeSheet === "destinationBrowser" ? (
           <View style={styles.destinationBrowser}>
             <View style={styles.destinationLocationLane}>
-              {destinationStack.length > 0 ? <Button accessibilityLabel={`Back to ${destinationStack.at(-2)?.name ?? "Archive"}`} contentMode="raw" onPress={() => void browseDestination(undefined, true)} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button> : null}
+              {destinationStack.length > 0 ? <Button accessibilityLabel={`Back to ${destinationStack.at(-2)?.name ?? "Archive"}`} contentMode="raw" onPress={() => void browseDestination(undefined, true)} size="md" variant="icon"><ChevronLeftIcon size="sm" /></Button> : null}
               <Text numberOfLines={1} style={styles.destinationLocationTitle}>{destinationFolder?.name ?? "Archive"}</Text>
             </View>
             <ScrollView contentContainerStyle={[styles.destinationFolderGrid, !destinationLoading && !sheetError && destinationFolders.length === 0 && styles.sheetEmptyContent]} keyboardShouldPersistTaps="handled" style={styles.folderList}>
@@ -4055,7 +3996,7 @@ export function KnowledgeWorkspace() {
               {destinationFolders.map((folder) => {
                 return <View key={folder.key} style={[styles.rootFolderCard, { width: destinationCardSize, height: destinationCardSize }]}>
                   {folder.coverUrl ? <Image contentFit="cover" source={folder.coverUrl} style={styles.folderCover} /> : null}
-                  <Button accessibilityLabel={`Open ${folder.name}`} contentMode="raw" onPress={() => void browseDestination(folder)} shape="rounded" size="xl" style={[styles.rootFolderMain, folder.coverUrl && styles.coveredFolderMain]} variant="ghost">{folder.coverUrl ? null : <FolderIcon size="lg" />}<Text numberOfLines={1} style={[styles.archiveCardLabel, folder.coverUrl && styles.coveredFolderLabel]}>{folder.name}</Text></Button>
+                  <Button accessibilityLabel={`Open ${folder.name}`} contentMode="raw" onPress={() => void browseDestination(folder)} shape="rounded" size="md" style={[styles.rootFolderMain, folder.coverUrl && styles.coveredFolderMain]} variant="ghost">{folder.coverUrl ? null : <FolderIcon size="lg" />}<Text numberOfLines={1} style={[styles.archiveCardLabel, folder.coverUrl && styles.coveredFolderLabel]}>{folder.name}</Text></Button>
                 </View>;
               })}
             </ScrollView>
@@ -4063,9 +4004,9 @@ export function KnowledgeWorkspace() {
         ) : null}
         {activeSheet === "enhance" ? (
           <View style={styles.enhancePanel}>
-            <Button disabled={!documentKeyRef.current || saveState !== "saved"} onPress={openSummarizeSheet} size="lg" variant="secondary">Summarize document</Button>
-            <Button disabled={!documentKeyRef.current || saveState !== "saved"} onPress={() => void openDocumentTransformation("enhance")} size="lg" variant="secondary">Enhance document</Button>
-            <Button disabled={!documentKeyRef.current || saveState !== "saved"} onPress={() => void openDocumentTransformation("translate")} size="lg" variant="secondary">Translate document</Button>
+            <Button disabled={!documentKeyRef.current || saveState !== "saved"} onPress={openSummarizeSheet} size="md" variant="secondary">Summarize document</Button>
+            <Button disabled={!documentKeyRef.current || saveState !== "saved"} onPress={() => void openDocumentTransformation("enhance")} size="md" variant="secondary">Enhance document</Button>
+            <Button disabled={!documentKeyRef.current || saveState !== "saved"} onPress={() => void openDocumentTransformation("translate")} size="md" variant="secondary">Translate document</Button>
           </View>
         ) : null}
         {activeSheet === "transform" ? <View style={styles.transformationForm}>
@@ -4075,25 +4016,24 @@ export function KnowledgeWorkspace() {
           <View style={[styles.versionPanel, !loadingVersions && !pendingDocumentVersionLabel && versions.length === 0 && styles.sheetEmptyContent]}>
             {loadingVersions && !pendingDocumentVersionLabel ? Array.from({ length: 3 }, (_, index) => <View accessibilityLabel="Loading version history" accessibilityRole="progressbar" key={index} style={[styles.versionSkeleton, styles.skeletonCard]} />) : null}
             {!loadingVersions && !pendingDocumentVersionLabel && versions.length === 0 ? <Text style={styles.empty}>{activeSheet === "documentVersions" ? "No document versions yet." : `No ${documentTransformation === "enhance" ? "enhancements" : "translations"} yet.`}</Text> : null}
-            {activeSheet === "versions" && pendingDocumentVersionLabel ? <Button accessibilityLabel={pendingDocumentVersionLabel} accessibilityState={{ busy: true }} contentMode="raw" disabled size="sm" style={styles.versionMain} variant="secondary"><ClockIcon size="sm" variant="accent" /><Text numberOfLines={1} style={styles.documentButtonLabel}>{pendingDocumentVersionLabel}</Text><Spinner size="small" variant="muted" /></Button> : null}
+            {activeSheet === "versions" && pendingDocumentVersionLabel ? <Button accessibilityLabel={pendingDocumentVersionLabel} accessibilityState={{ busy: true }} contentMode="raw" disabled size="md" style={styles.versionMain} variant="secondary"><ClockIcon size="sm" variant="accent" /><Text numberOfLines={1} style={styles.documentButtonLabel}>{pendingDocumentVersionLabel}</Text><Spinner size="small" variant="muted" /></Button> : null}
             {versions.map((version) => {
               const document = activeDocument?.key === version.documentKey ? activeDocument : selectedDocument?.key === version.documentKey ? selectedDocument : undefined;
               const isCurrentVersion = document?.currentVersionKey === version.key;
               return <View key={version.key} style={styles.versionRow}>
-                <Button accessibilityState={{ selected: isCurrentVersion }} contentMode="raw" onPress={() => void openDocumentVersion(version)} size="sm" style={[styles.versionMain, isCurrentVersion && styles.selectedDocumentItem]} variant="secondary"><ClockIcon size="sm" variant="accent" /><Text numberOfLines={1} style={styles.documentButtonLabel}>Version {version.version}</Text></Button>
+                <Button accessibilityState={{ selected: isCurrentVersion }} contentMode="raw" onPress={() => void openDocumentVersion(version)} size="md" style={[styles.versionMain, isCurrentVersion && styles.selectedDocumentItem]} variant="secondary"><ClockIcon size="sm" variant="accent" /><Text numberOfLines={1} style={styles.documentButtonLabel}>Version {version.version}</Text></Button>
               </View>;
             })}
           </View>
         ) : null}
         {activeSheet === "audioVersions" ? (
           <View style={styles.audioVersionPanel}>
-            <ScrollView accessibilityLabel={loadingAudioVersions ? "Loading audio versions" : generatingAudioVersion ? `Generating audio version ${pendingAudioVersion}` : undefined} accessibilityRole={loadingAudioVersions || generatingAudioVersion ? "progressbar" : undefined} contentContainerStyle={[styles.audioVersionList, !loadingAudioVersions && !generatingAudioVersion && audioVersions.length === 0 && styles.sheetEmptyContent]} showsVerticalScrollIndicator={false} style={styles.sheetList}>
-              {!loadingAudioVersions && !generatingAudioVersion && audioVersions.length === 0 ? <Text style={styles.empty}>No audio versions yet. Generate one whenever you want a new recording of this document.</Text> : null}
-              {generatingAudioVersion ? <View accessibilityLabel={`Generating audio version ${pendingAudioVersion}`} accessibilityRole="progressbar" style={[styles.documentSkeleton, styles.skeletonCard]} /> : null}
+            <ScrollView accessibilityLabel={loadingAudioVersions ? "Loading audio versions" : undefined} accessibilityRole={loadingAudioVersions ? "progressbar" : undefined} contentContainerStyle={[styles.audioVersionList, !loadingAudioVersions && audioVersions.length === 0 && styles.sheetEmptyContent]} showsVerticalScrollIndicator={false} style={styles.sheetList}>
+              {!loadingAudioVersions && audioVersions.length === 0 ? <Text style={styles.empty}>No saved audio versions.</Text> : null}
               {loadingAudioVersions ? Array.from({ length: 3 }, (_, index) => (
                 <View key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />
               )) : audioVersions.map((version) => (
-                <Button contentMode="raw" key={version.key} onPress={() => void playAudioVersion(version, selectedAudioVersionKey === version.key ? narrationElapsed : version.isCurrent ? version.playbackPositionMs / 1_000 : 0)} size="sm" style={styles.documentButton} variant="secondary">
+                <Button contentMode="raw" key={version.key} onPress={() => void playAudioVersion(version, selectedAudioVersionKey === version.key ? narrationElapsed : version.isCurrent ? version.playbackPositionMs / 1_000 : 0)} size="md" style={styles.documentButton} variant="secondary">
                   <PlayIcon size="sm" />
                   <Text numberOfLines={1} style={styles.documentButtonLabel}>Audio version {version.version}</Text>
                 </Button>
@@ -4111,8 +4051,8 @@ export function KnowledgeWorkspace() {
         ) : null}
         {activeSheet === "library" ? (
           <View style={styles.libraryChoices}>
-            <Button icon={<FileIcon size="lg" />} onPress={() => { setLibraryQuery(""); pushSheet("documents"); }} size="lg" style={styles.libraryChoice} variant="secondary">Documents</Button>
-            <Button icon={<FolderIcon size="lg" />} onPress={() => { setLibraryQuery(""); pushSheet("folders"); }} size="lg" style={styles.libraryChoice} variant="secondary">Folders</Button>
+            <Button icon={<FileIcon size="lg" />} onPress={() => { setLibraryQuery(""); pushSheet("documents"); }} size="md" style={styles.libraryChoice} variant="secondary">Documents</Button>
+            <Button icon={<FolderIcon size="lg" />} onPress={() => { setLibraryQuery(""); pushSheet("folders"); }} size="md" style={styles.libraryChoice} variant="secondary">Folders</Button>
           </View>
         ) : null}
         {activeSheet === "folders" ? (
@@ -4122,15 +4062,15 @@ export function KnowledgeWorkspace() {
                 <SearchIcon size="sm" variant="muted" />
                 <TextInput accessibilityLabel="Search Archive folders" autoFocus onChangeText={setLibraryQuery} placeholder="Search..." style={styles.folderSearchInput} value={libraryQuery} />
               </View>
-              <Button accessibilityLabel="Filter Archive folders" contentMode="raw" onPress={() => openSheet("filter")} size="sm" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={viewMode !== "normal" ? "accent" : "default"} /></Button>
+              <Button accessibilityLabel="Filter Archive folders" contentMode="raw" onPress={() => openSheet("filter")} size="md" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={filtersActive ? "accent" : "default"} /></Button>
             </View>
             {filterBadges}
             <ScrollView contentContainerStyle={[styles.folderGrid, !showArchiveRoot && visibleFolders.length === 0 && styles.sheetEmptyContent]} keyboardShouldPersistTaps="handled" style={styles.folderList}>
-              {showArchiveRoot ? <Button icon={<ArchiveIcon size="md" />} onPress={() => void selectRootFolder()} size="lg" style={styles.folderTile} variant="secondary">Archive</Button> : null}
+              {showArchiveRoot ? <Button icon={<ArchiveIcon size="md" />} onPress={() => void selectRootFolder()} size="md" style={styles.folderTile} variant="secondary">Archive</Button> : null}
               {visibleFolders.map((folder) => (
                 <View key={folder.key} style={styles.managedTile}>
-                  <Button icon={<FolderIcon size="md" />} onPress={() => void selectFolder(folder)} size="lg" style={styles.managedTileMain} variant="secondary">{folder.name}</Button>
-                  <Button accessibilityLabel={`Manage ${folder.name}`} contentMode="raw" onPress={() => showFolderActions(folder)} size="xs" style={styles.managedTileAction} variant="icon"><MoreHorizontalIcon size="sm" /></Button>
+                  <Button icon={<FolderIcon size="md" />} onPress={() => void selectFolder(folder)} size="md" style={styles.managedTileMain} variant="secondary">{folder.name}</Button>
+                  <Button accessibilityLabel={`Manage ${folder.name}`} contentMode="raw" onPress={() => showFolderActions(folder)} size="md" style={styles.managedTileAction} variant="icon"><MoreHorizontalIcon size="sm" /></Button>
                 </View>
               ))}
               {!showArchiveRoot && visibleFolders.length === 0 ? <Text style={styles.empty}>No folders match this search.</Text> : null}
@@ -4144,12 +4084,12 @@ export function KnowledgeWorkspace() {
                 <SearchIcon size="sm" variant="muted" />
                 <TextInput accessibilityLabel="Search Archive documents and files" autoFocus onChangeText={setLibraryQuery} placeholder="Search..." style={styles.folderSearchInput} value={libraryQuery} />
               </View>
-              <Button accessibilityLabel="Filter Archive documents and files" contentMode="raw" onPress={() => openSheet("filter")} size="sm" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={viewMode !== "normal" ? "accent" : "default"} /></Button>
+              <Button accessibilityLabel="Filter Archive documents and files" contentMode="raw" onPress={() => openSheet("filter")} size="md" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={filtersActive ? "accent" : "default"} /></Button>
             </View>
             {filterBadges}
             <ScrollView contentContainerStyle={[styles.folderGrid, visibleDocuments.length === 0 && styles.sheetEmptyContent]} keyboardShouldPersistTaps="handled" style={styles.folderList}>
               {visibleDocuments.map((document) => (
-                <Button contentMode="raw" key={document.key} onPress={() => void openArchiveDocument(document, true)} size="lg" style={styles.folderTile} variant="secondary">
+                <Button contentMode="raw" key={document.key} onPress={() => void openArchiveDocument(document, true)} size="md" style={styles.folderTile} variant="secondary">
                   <FileIcon size="md" /><Text numberOfLines={1} style={styles.folderTileLabel}>{documentDisplayName(document)}</Text><ScannedBadge document={document} />
                 </Button>
               ))}

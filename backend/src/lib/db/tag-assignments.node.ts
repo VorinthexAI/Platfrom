@@ -4,7 +4,7 @@ import { createNodeHelpers, withArangoKey } from './base';
 import { db } from './client';
 
 export const TAG_ASSIGNMENTS_COLLECTION = 'tagAssignments';
-export const sourceTypeSchema = z.enum(['document', 'image', 'collection', 'place', 'trip']);
+export const sourceTypeSchema = z.enum(['document', 'image', 'collection', 'place']);
 export const tagAssignmentSourceSchema = z.enum(['user', 'ai']);
 export const tagAssignmentSchema = z.object({ key: z.string().cuid(), scopeKey: z.string().cuid(), tagKey: z.string().cuid(), sourceType: sourceTypeSchema, sourceKey: z.string().cuid(), source: tagAssignmentSourceSchema, createdAt: z.string().datetime() });
 export type TagAssignment = z.infer<typeof tagAssignmentSchema>;

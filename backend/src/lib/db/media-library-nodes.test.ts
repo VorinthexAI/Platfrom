@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'bun:test';
-import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, EMBEDDING_PROVIDER_ID, currentEmbeddingSchema } from '@/lib/embeddings';
+import { EMBEDDING_DIMENSIONS, currentEmbeddingSchema } from '@/lib/embeddings';
 import { imageSchema, imagesEmbeddingFields, IMAGES_COLLECTION } from './images.node';
 import { collectionSchema, collectionsEmbeddingFields, COLLECTIONS_COLLECTION } from './collections.node';
 import { COLLECTION_IMAGES_COLLECTION } from './collection-images.node';
 import { COLLECTION_MEMBERS_COLLECTION } from './collection-members.node';
 import { collectionInviteSchema, COLLECTION_INVITES_COLLECTION } from './collection-invites.node';
 import { tagSchema, tagsEmbeddingFields, TAGS_COLLECTION } from './tags.node';
-import { TAG_ASSIGNMENTS_COLLECTION } from './tag-assignments.node';
-import { shareSchema, SHARES_COLLECTION } from './shares.node';
+import { sourceTypeSchema, TAG_ASSIGNMENTS_COLLECTION } from './tag-assignments.node';
+import { shareSchema, shareSourceTypeSchema, SHARES_COLLECTION } from './shares.node';
 import { imageCaptionRecordSchema, IMAGE_CAPTIONS_COLLECTION } from './image-captions.node';
 
 const key = 'cmrnlzf650002qc7k4p5zem5w'; const scopeKey = 'cmrnlzf640001qc7kazsr96k5'; const now = '2026-08-07T12:00:00.000Z'; const embedding = Array(EMBEDDING_DIMENSIONS).fill(0.1);
@@ -15,8 +15,8 @@ describe('MediaLibrary node contracts', () => {
   test('declares the Gallery physical collections and keeps secrets private', () => {
     expect([IMAGES_COLLECTION, IMAGE_CAPTIONS_COLLECTION, COLLECTIONS_COLLECTION, COLLECTION_IMAGES_COLLECTION, COLLECTION_MEMBERS_COLLECTION, COLLECTION_INVITES_COLLECTION, TAGS_COLLECTION, TAG_ASSIGNMENTS_COLLECTION, SHARES_COLLECTION]).toEqual(['images', 'imageCaptions', 'collections', 'collectionImages', 'collectionMembers', 'collectionInvites', 'tags', 'tagAssignments', 'shares']);
   });
-  test('uses the global current Qwen embedding contract', () => {
-    expect(EMBEDDING_DIMENSIONS).toBe(4096); expect(EMBEDDING_MODEL).toBe('qwen.qwen3-embedding-8b'); expect(EMBEDDING_PROVIDER_ID).toBe('openrouter');
+  test('uses the global current embedding contract', () => {
+    expect(EMBEDDING_DIMENSIONS).toBe(1_536);
     expect(currentEmbeddingSchema.safeParse(embedding).success).toBe(true); expect(currentEmbeddingSchema.safeParse(embedding.slice(1)).success).toBe(false);
     expect(imagesEmbeddingFields).toEqual(['filename', 'caption']); expect(collectionsEmbeddingFields).toEqual(['name', 'description']); expect(tagsEmbeddingFields).toEqual(['name', 'description']);
   });
@@ -34,5 +34,7 @@ describe('MediaLibrary node contracts', () => {
     expect(collectionInviteSchema.safeParse(invite).success).toBe(false);
     const share = shareSchema.parse({ key, scopeKey, sourceType: 'image', sourceKey: key, permission: 'read', tokenHash: 'b'.repeat(64), token: 'plaintext', createdAt: now, updatedAt: now });
     expect(share).not.toHaveProperty('token'); expect(share).not.toHaveProperty('embedding');
+    expect(sourceTypeSchema.safeParse('place').success).toBe(true); expect(sourceTypeSchema.safeParse('trip').success).toBe(false);
+    expect(shareSourceTypeSchema.safeParse('place').success).toBe(true); expect(shareSourceTypeSchema.safeParse('trip').success).toBe(false);
   });
 });

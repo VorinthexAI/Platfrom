@@ -228,7 +228,7 @@ variable "kms_key_arns" {
 
 variable "api_secret_keys" {
   type        = list(string)
-  description = "SSM keys (/vorinthex/prod/*) injected into the API task as container secrets. OpenRouter is required for current embeddings; other provider credentials remain managed separately."
+  description = "SSM keys (/vorinthex/prod/*) injected into the API task as container secrets."
   default = [
     "ACCESS_TOKEN_SECRET",
     "ADMIN_EMAIL",
@@ -246,7 +246,7 @@ variable "api_secret_keys" {
     "GOOGLE_OAUTH_CLIENT_ID",
     "GOOGLE_OAUTH_CLIENT_SECRET",
     "NO_REPLY_EMAIL",
-    "OPENROUTER_API_KEY",
+    "OPENAI_API_KEY",
     "RATE_LIMIT_ENABLED",
     "RATE_LIMIT_REQ_PER_MIN",
     "REDIS_URL",

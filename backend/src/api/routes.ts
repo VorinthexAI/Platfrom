@@ -34,25 +34,16 @@ import { joinPresence, leavePresence, presenceBeat, streamPresence } from './pre
 import { unsubscribeFromUpdates } from './updates';
 import { listNodes } from './nodes';
 import {
-  attachCurrentMindCapability,
-  createSystemCapability,
   createSystemOrchestrator,
-  detachCurrentMindCapability,
-  getCurrentMind,
-  listCurrentMindCapabilities,
-  listSystemCapabilities,
   listSystemOrchestrators,
-  updateSystemCapability,
   updateSystemOrchestrator,
-  upsertCurrentMind,
 } from './system';
 import { invokeContentTool } from './content-tools';
-import { postAudioGenerate } from './audio';
 import { communicationHandlers } from './communication';
 import { bootstrapGuestAuth, getAuthAccount, logoutAuthAccount, patchAuthAccount } from './auth-account';
 import { recordPlatformEvent } from './platform-events';
 import { postPersonalAssistantResponse } from './personal-assistant';
-import { acceptGalleryCollectionInvite, activateGalleryCollectionShare, completeGalleryUploads, createGalleryCollection, createGalleryCollectionInvite, createGalleryCollectionShare, createGalleryHighlight, createGallerySubject, deleteGalleryCollection, deleteGalleryCollectionDuplicates, deleteGalleryHighlight, deleteGalleryImages, deleteGallerySubject, findGalleryCollectionDuplicates, galleryOverview, galleryUploadStatus, leaveGalleryCollection, listGalleryCollectionMembers, listGalleryCollectionShares, listGalleryHighlights, listGalleryPendingInvites, listGallerySubjectImages, listGallerySubjects, presignGalleryUploads, readGalleryHighlight, rejectGalleryCollectionInvite, removeGalleryCollectionMember, restoreGallerySubject, revokeGalleryCollectionInvite, revokeGalleryCollectionShare, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryCollectionMemberRole, updateGalleryCollectionShare, updateGalleryImage } from './gallery';
+import { acceptGalleryCollectionInvite, activateGalleryCollectionShare, completeGalleryUploads, createGalleryCollection, createGalleryCollectionInvite, createGalleryCollectionShare, createGalleryHighlight, createGalleryMemory, createGallerySubject, deleteGalleryCollection, deleteGalleryCollectionDuplicates, deleteGalleryHighlight, deleteGalleryImages, deleteGalleryMemory, deleteGallerySubject, findGalleryCollectionDuplicates, galleryOverview, galleryUploadStatus, leaveGalleryCollection, listGalleryCollectionMembers, listGalleryCollectionShares, listGalleryHighlights, listGalleryMemories, listGalleryPendingInvites, listGallerySubjectImages, listGallerySubjects, presignGalleryUploads, readGalleryHighlight, readGalleryMemory, rejectGalleryCollectionInvite, removeGalleryCollectionMember, revokeGalleryCollectionInvite, revokeGalleryCollectionShare, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryCollectionMemberRole, updateGalleryCollectionShare, updateGalleryImage } from './gallery';
 import { travelHandlers } from './travel';
 import { emailHandlers } from './email-inbox';
 import { bookHandlers } from './books';
@@ -433,15 +424,7 @@ export function registerRoutes(app: Hono) {
 
   app.get('/nodes', listNodes);
 
-  app.get('/mind', getCurrentMind);
-  app.post('/mind', upsertCurrentMind);
-  app.put('/mind', upsertCurrentMind);
-  app.get('/mind/capabilities', listCurrentMindCapabilities);
-  app.post('/mind/capabilities', attachCurrentMindCapability);
-  app.delete('/mind/capabilities/:capabilityId', detachCurrentMindCapability);
-
   app.post('/assistant/respond', postPersonalAssistantResponse);
-  app.post('/audio/generate', (c) => postAudioGenerate(c));
   app.post('/content/tools/:tool', invokeContentTool);
   app.post('/gallery/overview', galleryOverview);
   app.post('/gallery/collections', createGalleryCollection);
@@ -475,17 +458,17 @@ export function registerRoutes(app: Hono) {
   app.post('/gallery/subjects', createGallerySubject);
   app.post('/gallery/subjects/images', listGallerySubjectImages);
   app.post('/gallery/subjects/delete', deleteGallerySubject);
-  app.post('/gallery/subjects/restore', restoreGallerySubject);
   app.post('/gallery/highlights', createGalleryHighlight);
-  app.post('/gallery/highlights/list', listGalleryHighlights);
+  app.get('/gallery/highlights', listGalleryHighlights);
   app.post('/gallery/highlights/read', readGalleryHighlight);
   app.post('/gallery/highlights/delete', deleteGalleryHighlight);
+  app.post('/gallery/memories', createGalleryMemory);
+  app.get('/gallery/memories', listGalleryMemories);
+  app.post('/gallery/memories/read', readGalleryMemory);
+  app.post('/gallery/memories/delete', deleteGalleryMemory);
   app.post('/travel/overview', travelHandlers.overview);
-  app.post('/travel/places', travelHandlers.createPlace);
-  app.post('/travel/places/:placeKey/visits', travelHandlers.createVisit);
-  app.post('/travel/trips', travelHandlers.createTrip);
-  app.post('/travel/trips/:tripKey/places', travelHandlers.appendPlace);
-  app.delete('/travel/trips/:tripKey/places/:placeKey', travelHandlers.removePlace);
+  app.post('/travel/places/find', travelHandlers.findPlace);
+  app.post('/travel/places/images', travelHandlers.generatePlaceImages);
   app.post('/email/overview', emailHandlers.overview);
   app.post('/email/connect', emailHandlers.startConnect);
   app.get('/email/connectors/gmail/callback', emailHandlers.callback);
@@ -508,7 +491,6 @@ export function registerRoutes(app: Hono) {
   app.get('/founders/organizations/:organizationKey/providers', listFoundersOrganizationProviders);
   app.put('/founders/organizations/:organizationKey/providers/:provider', upsertFoundersOrganizationProvider);
   app.get('/founders/organizations/:organizationKey/communication/channels', communicationHandlers.listChannels);
-  app.post('/founders/organizations/:organizationKey/communication/speech', communicationHandlers.speak);
   app.get('/founders/organizations/:organizationKey/communication/channels/:channelKey/messages', communicationHandlers.listMessages);
   app.get('/founders/organizations/:organizationKey/communication/channels/:channelKey/typing', communicationHandlers.typingStream);
   app.post('/founders/organizations/:organizationKey/communication/channels/:channelKey/typing', communicationHandlers.typing);
@@ -526,8 +508,5 @@ export function registerRoutes(app: Hono) {
   app.get('/system/orchestrators', listSystemOrchestrators);
   app.post('/system/orchestrators', createSystemOrchestrator);
   app.patch('/system/orchestrators/:orchestratorId', updateSystemOrchestrator);
-  app.get('/system/capabilities', listSystemCapabilities);
-  app.post('/system/capabilities', createSystemCapability);
-  app.patch('/system/capabilities/:capabilityId', updateSystemCapability);
 
 }

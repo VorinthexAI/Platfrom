@@ -16,8 +16,8 @@ const now = '2026-08-08T12:00:00.000Z';
 const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
 
 describe('book generation node contracts', () => {
-  test('requires exact 4096-dimensional vectors on every semantic record', () => {
-    expect(EMBEDDING_DIMENSIONS).toBe(4096);
+  test('requires exact current-dimensional vectors on every semantic record', () => {
+    expect(EMBEDDING_DIMENSIONS).toBe(1_536);
     const semanticSchemas = [bookSchema, bookContextSchema, bookThemeSchema, bookSourceSchema, bookPartSchema, bookChapterSchema, chapterContextSchema];
     for (const schema of semanticSchemas) {
       const object = 'innerType' in schema ? schema.innerType() : schema;
@@ -40,7 +40,7 @@ describe('book generation node contracts', () => {
 
   test('validates book metadata and progress defaults', () => {
     const book = bookSchema.parse({ key, scopeKey: otherKey, title: 'Leadership', description: 'A personal guide', goal: 'Lead better', audience: 'Managers', outcome: 'Build leaders', language: 'en', status: 'planning', embedding, createdAt: now, updatedAt: now });
-    expect(book).toMatchObject({ isFavorite: false, deletedAt: null, status: 'planning' });
+    expect(book).toMatchObject({ isFavorite: false, status: 'planning' });
     expect(book).toMatchObject({ chapterCount: 0, estimatedMinutes: 0 });
     const chapter = bookChapterSchema.parse({ key, scopeKey: otherKey, bookKey: key, title: 'Start', description: 'Opening', objective: 'Orient the reader', embedding, position: 1, createdAt: now, updatedAt: now });
     expect(chapter).toMatchObject({ status: 'planned', topics: [], estimatedMinutes: 0 });
@@ -63,5 +63,6 @@ describe('book generation node contracts', () => {
     expect(bookSourceSchema.safeParse({ ...common, sourceType: 'document' }).success).toBe(false);
     expect(bookSourceSchema.safeParse({ ...common, sourceType: 'web', url: 'https://example.com/research' }).success).toBe(true);
     expect(bookSourceSchema.safeParse({ ...common, sourceType: 'web', sourceKey: otherKey }).success).toBe(false);
+    expect(bookSourceSchema.safeParse({ ...common, sourceType: 'trip', sourceKey: otherKey }).success).toBe(false);
   });
 });

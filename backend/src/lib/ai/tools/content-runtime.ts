@@ -1,10 +1,10 @@
 import { createHash, randomBytes, scrypt as nodeScrypt } from 'node:crypto';
 import { promisify } from 'node:util';
 import { z } from 'zod';
+import type { ActionId } from '@/lib/ai/actions';
 import type { ToolContext } from './tool-context';
 import type { DocumentParseDependencies, DocumentParseInput } from '@/lib/ai/document-processing';
 import type { RouterDependencies } from '@/lib/ai/router';
-import { NoEligibleRouteError, ProviderExecutionError } from '@/lib/ai/router/errors';
 import type { DocumentObjectStorage } from '@/lib/ai/document-processing/storage';
 import type { Folder } from '@/lib/db/folders.node';
 import type { Document } from '@/lib/db/documents.node';
@@ -24,11 +24,9 @@ import { sanitizeDocumentContent } from '@/lib/ai/document-processing/actions';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
 import { chunkDocumentContent, documentSemanticHash } from '@/lib/ai/document-processing/chunking';
 import type { DocumentScanInput } from '@/lib/ai/document-scanning';
-import { DEFAULT_AUDIO_GENERATION_VOICE, generateAudioChunks as canonicalGenerateAudioChunks } from './audio-generate';
 import type { UserSearchService } from '@/lib/user-searches/service';
 
 type Role = 'viewer' | 'moderator' | 'admin' | 'owner';
-type Action = 'ask' | 'enhance' | 'translate' | 'read' | 'traverse' | 'insert' | 'update' | 'delete' | 'embed' | 'speak' | 'generate-speech' | 'reason' | 'deep-reason' | 'document-cleanup' | 'document-embed' | 'document-summarize' | 'document-topics';
 type SafeEvent = {
   type: 'authorization' | 'resolution' | 'action' | 'db' | 'embedding' | 'storage' | 'speech' | 'cleanup';
   status: 'started' | 'succeeded' | 'failed';
@@ -48,30 +46,29 @@ export interface ContentIdempotencyStore {
 }
 
 export interface ContentRepository {
-  getScope(scopeKey: string): Promise<{ key: string; organizationKey: string; deletedAt?: string | null } | null>;
+  getScope(scopeKey: string): Promise<{ key: string; organizationKey: string } | null>;
   role(scopeKey: string, membershipKey: string): Promise<Role | null>;
   allowedScopeKeys(organizationKey: string, membershipKey: string): Promise<string[]>;
   getFolder(key: string): Promise<Folder | null>;
-  listFolders(scopeKey: string, includeArchived?: boolean, includePendingDeletion?: boolean): Promise<Folder[]>;
+  listFolders(scopeKey: string, includePendingDeletion?: boolean): Promise<Folder[]>;
   insertFolder(folder: Folder): Promise<Folder>;
   updateFolder(key: string, patch: Partial<Folder>): Promise<Folder>;
   setFolderDeletion(key: string, marker: Folder['_internalDeletion'] | undefined, owner?: string): Promise<Folder | null>;
   deleteFolder(key: string): Promise<void>;
   getDocument(key: string): Promise<Document | null>;
-  listDocuments(scopeKey: string, includeArchived?: boolean, includePendingDeletion?: boolean): Promise<Document[]>;
+  listDocuments(scopeKey: string, includePendingDeletion?: boolean): Promise<Document[]>;
   insertDocument(document: Document): Promise<Document>;
   updateDocument(key: string, patch: Partial<Document>, options?: { expectedUpdatedAt?: string }): Promise<Document>;
   setDocumentDeletion(key: string, marker: Document['_internalDeletion'] | undefined, owner?: string): Promise<Document | null>;
   deleteDocument(key: string): Promise<void>;
   getShare(key: string): Promise<DocumentShare | null>;
-  listShares(scopeKey: string, documentKeys: string[], options?: { includeArchived?: boolean; includeExpired?: boolean; includeRevoked?: boolean; at?: string }): Promise<DocumentShare[]>;
-  insertShare(share: Omit<DocumentShare, 'deletedAt'>): Promise<DocumentShare>;
+  listShares(scopeKey: string, documentKeys: string[], options?: { includeExpired?: boolean; includeRevoked?: boolean; at?: string }): Promise<DocumentShare[]>;
+  insertShare(share: DocumentShare): Promise<DocumentShare>;
   updateShare(key: string, patch: Partial<DocumentShare>): Promise<DocumentShare>;
   deleteShare(key: string): Promise<void>;
   getVersion(key: string): Promise<DocumentVersion | null>;
-  listVersions(scopeKey: string, documentKeys: string[], includeArchived?: boolean): Promise<DocumentVersion[]>;
-  createVersion(version: Omit<DocumentVersion, 'key' | 'version' | 'createdAt' | 'deletedAt'>): Promise<DocumentVersion>;
-  updateVersion(key: string, patch: Pick<DocumentVersion, 'deletedAt'>): Promise<DocumentVersion>;
+  listVersions(scopeKey: string, documentKeys: string[]): Promise<DocumentVersion[]>;
+  createVersion(version: Omit<DocumentVersion, 'key' | 'version' | 'createdAt'>): Promise<DocumentVersion>;
   deleteVersion(key: string): Promise<void>;
   listAudioVersions?(scopeKey: string, documentKeys: string[]): Promise<DocumentAudioVersion[]>;
   getAudioVersion?(key: string): Promise<DocumentAudioVersion | null>;
@@ -87,7 +84,7 @@ export interface ContentRepository {
   listSummaryAudio?(scopeKey: string, summaryKeys: string[]): Promise<DocumentSummaryAudio[]>;
   createSummaryAudio?(audio: DocumentSummaryAudio): Promise<{ audio: DocumentSummaryAudio; created: boolean }>;
   deleteSummaryAudio?(summaryKey: string): Promise<void>;
-  semanticSearch(input: { embedding: number[]; authorizedScopeKeys: string[]; folderKeys?: string[]; documentKeys?: string[]; extensions?: Document['extension'][]; createdAfter?: string; createdBefore?: string; updatedAfter?: string; updatedBefore?: string; includeArchived?: boolean; minScore?: number; limit?: number }): Promise<Array<{ score: number; document: Document; matchedContent?: string }>>;
+  semanticSearch(input: { embedding: number[]; authorizedScopeKeys: string[]; folderKeys?: string[]; documentKeys?: string[]; extensions?: Document['extension'][]; createdAfter?: string; createdBefore?: string; updatedAfter?: string; updatedBefore?: string; minScore?: number; limit?: number }): Promise<Array<{ score: number; document: Document; matchedContent?: string }>>;
   semanticSearchFolders?(input: { embedding: number[]; authorizedScopeKeys: string[]; folderKeys?: string[]; minScore: number; limit: number }): Promise<Array<{ score: number; folder: Folder }>>;
   semanticNeighbors?(input: { embedding: number[]; scopeKey: string; activeFolderKeys: string[]; sourceFolderKey?: string; sourceDocumentKey?: string; limit: number }): Promise<{ folders: Array<{ score: number; folder: Folder }>; documents: Array<{ score: number; document: Document }>; files: Array<{ score: number; document: Document }> }>;
   transaction?<T>(operation: (repository: ContentRepository) => Promise<T>): Promise<T>;
@@ -98,13 +95,13 @@ export interface ContentSearchQueryStore {
   record(input: { key: string; actorKey: string; scopeKey: string; query: string; normalizedQuery: string; folderKey: string | null; includeDescendants: boolean; cacheVersion: number; output: unknown; now: string }): Promise<void>;
 }
 
-export interface ContentActionResult { text?: string; audio?: Uint8Array; audioBase64?: string; mimeType?: string; durationMs?: number; content?: string; embedding?: number[]; contentChunks?: string[]; chunkEmbeddings?: number[][]; semanticChunkCount?: number; semanticContentHash?: string }
+export interface ContentActionResult { text?: string; content?: string; embedding?: number[]; contentChunks?: string[]; chunkEmbeddings?: number[][]; semanticChunkCount?: number; semanticContentHash?: string }
 export interface ContentToolDependencies extends RouterDependencies {
   signal?: AbortSignal;
   repository?: ContentRepository;
   storage?: DocumentObjectStorage;
   parseDocument?: (input: DocumentParseInput, dependencies?: DocumentParseDependencies) => Promise<{ document: Document }>;
-  runAction?: (action: Action, input: Record<string, unknown>, context: ToolContext) => Promise<ContentActionResult>;
+  runAction?: (action: ActionId, input: Record<string, unknown>, context: ToolContext) => Promise<ContentActionResult>;
   executeAction?: typeof import('@/lib/ai/router').executeAction;
   embed?: (text: string) => Promise<number[]>;
   embedBatch?: (texts: string[]) => Promise<number[][]>;
@@ -112,8 +109,6 @@ export interface ContentToolDependencies extends RouterDependencies {
   clock?: () => Date;
   id?: () => string;
   random?: (size: number) => Uint8Array;
-  canPermanentlyDelete?: (input: { kind: 'folder' | 'document' | 'version'; deletedAt?: string | null; context: ToolContext }) => boolean | Promise<boolean>;
-  maxSpeechChunkCharacters?: number;
   ingestion?: DocumentParseDependencies;
   idempotency?: ContentIdempotencyStore;
   maxDownloadBytes?: number;
@@ -127,19 +122,14 @@ export interface ContentToolDependencies extends RouterDependencies {
   signFolderCoverUrl?: (storageKey: string) => Promise<string>;
   signDocumentSourceUrl?: (storageKey: string) => Promise<string>;
   signAudioUrl?: (storageKey: string) => Promise<string>;
-  mergeAudio?: (chunks: Uint8Array[], signal?: AbortSignal) => Promise<Uint8Array>;
-  audioDuration?: (bytes: Uint8Array) => number;
-  generateAudioChunks?: typeof canonicalGenerateAudioChunks;
 }
 
 const rank: Record<Role, number> = { viewer: 1, moderator: 2, admin: 3, owner: 4 };
 const ROUTED_EMBEDDING_CONCURRENCY = 8;
-const PERSISTED_AUDIO_MAX_CHARACTERS = 120_000;
-const PERSISTED_AUDIO_MAX_BYTES = 100 * 1024 * 1024;
 const CONTENT_SEARCH_CACHE_VERSION = 4;
 const scrypt = promisify(nodeScrypt);
 const MUTATIONS = new Set<ContentToolName>([
-  'folder.create', 'folder.update', 'folder.rename', 'folder.move', 'folder.copy', 'folder.archive', 'folder.restore', 'folder.delete', 'document.parse', 'document.scan', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.share', 'document.unshare', 'document-share.archive', 'document-share.restore', 'document.create-version', 'document.restore-version', 'document-version.archive', 'document-version.restore', 'document.delete-version', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.summarize', 'document.summary.audio.generate', 'document.translate', 'document.rewrite', 'content.search-history.delete',
+  'folder.create', 'folder.update', 'folder.rename', 'folder.move', 'folder.copy', 'folder.delete', 'document.parse', 'document.scan', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.delete', 'document.share', 'document.unshare', 'document.create-version', 'document.restore-version', 'document.delete-version', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.summarize', 'document.translate', 'document.rewrite', 'content.search-history.delete',
 ]);
 
 function fail(code: ContentErrorCode, message: string, tool: ContentToolName, action?: string, resourceKey?: string, cause?: unknown, retryable = false): never {
@@ -163,26 +153,6 @@ function mappedError(error: unknown, tool: ContentToolName, action?: string, res
   }
   const validation = error && typeof error === 'object' && ('issues' in error || ('name' in error && error.name === 'ZodError'));
   return new ContentError(validation ? 'CONTENT_INVALID_INPUT' : 'CONTENT_CONFLICT', validation ? 'Content tool input or output was invalid.' : 'Content operation failed.', tool, { action, resourceKey, cause: error, retryable: !validation });
-}
-
-function speechError(error: unknown, tool: ContentToolName, action: string, resourceKey: string): ContentError {
-  if (error instanceof ProviderExecutionError) {
-    const codes = new Set(error.attempts.map(({ code }) => code));
-    if (codes.has('authentication_failed') || codes.has('not_configured') || codes.has('adapter_unavailable')) {
-      return new ContentError('DOCUMENT_SPEECH_FAILED', 'Audio generation is unavailable because the speech provider is not configured.', tool, { action, resourceKey, cause: error });
-    }
-    if (codes.has('invalid_input') || codes.has('unsupported_action')) {
-      return new ContentError('DOCUMENT_SPEECH_FAILED', 'The selected language or voice is not supported for audio generation.', tool, { action, resourceKey, cause: error });
-    }
-    if (codes.has('rate_limited')) {
-      return new ContentError('DOCUMENT_SPEECH_FAILED', 'Audio generation is busy. Try again shortly.', tool, { action, resourceKey, cause: error, retryable: true });
-    }
-    if (codes.has('provider_unavailable') || codes.has('timeout')) {
-      return new ContentError('DOCUMENT_SPEECH_FAILED', 'Audio generation is temporarily unavailable. Try again.', tool, { action, resourceKey, cause: error, retryable: true });
-    }
-  }
-  if (error instanceof NoEligibleRouteError) return new ContentError('DOCUMENT_SPEECH_FAILED', 'Audio generation is not configured.', tool, { action, resourceKey, cause: error });
-  return new ContentError('DOCUMENT_SPEECH_FAILED', 'Document audio could not be generated.', tool, { action, resourceKey, cause: error, retryable: true });
 }
 
 async function folderView(folder: Folder, dependencies: Pick<RuntimeDefaults, 'getFolderCoverImage' | 'signFolderCoverUrl'>) {
@@ -294,7 +264,7 @@ async function productionRepository(): Promise<ContentRepository> {
   ]);
   const allowedScopeKeys = async (organizationKey: string, membershipKey: string): Promise<string[]> => {
     const cursor = await client.db.query<{ orgRole?: string; scopes: string[]; members: string[]; relations: Array<{ parentKey: string; childKey: string }> }>(
-      'LET membership = DOCUMENT(userOrganizations, @membershipKey) RETURN { orgRole: membership.orgRole, scopes: (FOR scope IN scopes FILTER scope.organizationKey == @organizationKey && scope.deletedAt == null RETURN scope._key), members: (FOR member IN scopeMembers FILTER member.userOrganizationKey == @membershipKey && member.status == "active" RETURN member.scopeKey), relations: (FOR relation IN scopeScopes FILTER relation.deletedAt == null RETURN { parentKey: relation.parentKey, childKey: relation.childKey }) }',
+      'LET membership = DOCUMENT(userOrganizations, @membershipKey) RETURN { orgRole: membership.orgRole, scopes: (FOR scope IN scopes FILTER scope.organizationKey == @organizationKey RETURN scope._key), members: (FOR member IN scopeMembers FILTER member.userOrganizationKey == @membershipKey && member.status == "active" RETURN member.scopeKey), relations: (FOR relation IN scopeScopes RETURN { parentKey: relation.parentKey, childKey: relation.childKey }) }',
       { organizationKey, membershipKey },
     );
     const data = await cursor.next();
@@ -320,7 +290,7 @@ async function productionRepository(): Promise<ContentRepository> {
     role: persistence.role,
     allowedScopeKeys,
     getFolder: persistence.getFolder,
-    async listFolders(scopeKey, includeArchived, includePendingDeletion) { return persistence.listFolders(scopeKey, includeArchived, includePendingDeletion); },
+    async listFolders(scopeKey, includePendingDeletion) { return persistence.listFolders(scopeKey, includePendingDeletion); },
     insertFolder: persistence.insertFolder,
     async updateFolder(key, patch) {
       const current = await persistence.getFolder(key);
@@ -339,7 +309,7 @@ async function productionRepository(): Promise<ContentRepository> {
       if (!current || !await persistence.deleteFolder(current.scopeKey, key)) throw new Error('Folder was not found for scoped deletion.');
     },
     getDocument: persistence.getDocument,
-    async listDocuments(scopeKey, includeArchived, includePendingDeletion) { return persistence.listDocuments(scopeKey, includeArchived, includePendingDeletion); },
+    async listDocuments(scopeKey, includePendingDeletion) { return persistence.listDocuments(scopeKey, includePendingDeletion); },
     insertDocument: persistence.insertDocument,
     async updateDocument(key, patch, options) {
       const current = await persistence.getDocument(key);
@@ -361,7 +331,7 @@ async function productionRepository(): Promise<ContentRepository> {
     async listShares(scopeKey, documentKeys, options) {
       const values = await persistence.listShares(scopeKey, documentKeys, options);
       const at = options?.at ?? new Date().toISOString();
-      return values.filter((share) => (options?.includeArchived || !share.deletedAt) && (options?.includeRevoked || !share.revokedAt) && (options?.includeExpired || !share.expiresAt || share.expiresAt > at));
+      return values.filter((share) => (options?.includeRevoked || !share.revokedAt) && (options?.includeExpired || !share.expiresAt || share.expiresAt > at));
     },
     insertShare: persistence.insertShare,
     async updateShare(key, patch) {
@@ -376,18 +346,8 @@ async function productionRepository(): Promise<ContentRepository> {
       if (!current || !await persistence.deleteShare(current.scopeKey, key)) throw new Error('Share was not found for scoped deletion.');
     },
     getVersion: persistence.getVersion,
-    async listVersions(scopeKey, documentKeys, includeArchived) {
-      const values = await persistence.listVersions(scopeKey, documentKeys);
-      return values.filter((version) => includeArchived || !version.deletedAt);
-    },
+    listVersions: persistence.listVersions,
     createVersion: persistence.createVersion,
-    async updateVersion(key, patch) {
-      const current = await persistence.getVersion(key);
-      if (!current) throw new Error('Version was not found for scoped update.');
-      const updated = await persistence.updateVersion(current.scopeKey, key, patch);
-      if (!updated) throw new Error('Version scope changed during update.');
-      return updated;
-    },
     async deleteVersion(key) {
       const current = await persistence.getVersion(key);
       if (!current || !await persistence.deleteVersion(current.scopeKey, key)) throw new Error('Version was not found for scoped deletion.');
@@ -429,7 +389,6 @@ export async function authorizeDocumentParseLocation(input: { scopeKey: string; 
   const repo = repository ?? await productionRepository();
   const scope = await repo.getScope(input.scopeKey);
   if (!scope || scope.organizationKey !== context.organizationKey) throw new ContentError('CONTENT_NOT_FOUND', 'Scope was not found in this organization.', 'document.parse', { action: 'resolution' });
-  if (scope.deletedAt) throw new ContentError('CONTENT_FORBIDDEN', 'Archived scopes cannot be mutated.', 'document.parse', { action: 'authorization' });
   const organizationRole = context.principal.userOrganization.orgRole;
   const role: Role | null = organizationRole === 'owner' || organizationRole === 'admin' ? organizationRole : await repo.role(input.scopeKey, context.principal.userOrganization.key);
   if (!role || rank[role] < rank.moderator) throw new ContentError('CONTENT_FORBIDDEN', 'The principal lacks the required scope role.', 'document.parse', { action: 'authorization' });
@@ -441,7 +400,6 @@ export async function authorizeDocumentParseLocation(input: { scopeKey: string; 
     const folder = await repo.getFolder(folderKey);
     if (!folder) throw new ContentError('CONTENT_NOT_FOUND', 'Folder was not found.', 'document.parse', { action: 'read', resourceKey: folderKey });
     if (folder.scopeKey !== input.scopeKey) throw new ContentError('CONTENT_FORBIDDEN', 'Folder does not belong to the requested scope.', 'document.parse', { action: 'authorization', resourceKey: folderKey });
-    if (folder.deletedAt) throw new ContentError('FOLDER_ARCHIVED', 'Folder is archived.', 'document.parse', { action: 'read', resourceKey: folderKey });
     if (folder._internalDeletion) throw new ContentError('CONTENT_NOT_FOUND', 'Folder was not found.', 'document.parse', { action: 'read', resourceKey: folderKey });
     folderKey = folder.parentFolderKey;
   }
@@ -463,12 +421,10 @@ interface RuntimeDefaults {
   signFolderCoverUrl: NonNullable<ContentToolDependencies['signFolderCoverUrl']>;
   signDocumentSourceUrl: NonNullable<ContentToolDependencies['signDocumentSourceUrl']>;
   signAudioUrl: NonNullable<ContentToolDependencies['signAudioUrl']>;
-  mergeAudio: NonNullable<ContentToolDependencies['mergeAudio']>;
-  audioDuration: NonNullable<ContentToolDependencies['audioDuration']>;
 }
 
 async function defaults(deps: ContentToolDependencies, context: ToolContext): Promise<RuntimeDefaults> {
-  const [{ newId }, storage, processing, embeddings, router, ledger, exports, images, imageUrl, audioUrl, audio, duration] = await Promise.all([
+  const [{ newId }, storage, processing, embeddings, router, ledger, exports, images, imageUrl, audioUrl] = await Promise.all([
     import('@/lib/ids'),
     import('@/lib/ai/document-processing/storage'),
     import('@/lib/ai/document-processing'),
@@ -479,8 +435,6 @@ async function defaults(deps: ContentToolDependencies, context: ToolContext): Pr
     import('@/lib/db/images.node'),
     import('@/lib/gallery/image-url'),
     import('@/lib/ai/audio/audio-url'),
-    import('@/lib/ai/audio/merge-mp3'),
-    import('@/lib/ai/audio/mp3-duration'),
   ]);
   const executeAction = deps.executeAction ?? router.executeAction;
   const embedding = deps.embed ? (text: string) => deps.embed!(text) : async (text: string, purpose: 'document' | 'query' = 'document') => {
@@ -507,7 +461,7 @@ async function defaults(deps: ContentToolDependencies, context: ToolContext): Pr
     parseDocument: deps.parseDocument ?? processing.parseDocument, id: deps.id ?? newId, clock: deps.clock ?? (() => new Date()), random: deps.random ?? randomBytes,
     embed: embedding,
     embedBatch: embeddingBatch,
-    runAction: deps.runAction ?? (async (action: Action, input: Record<string, unknown>): Promise<ContentActionResult> => {
+    runAction: deps.runAction ?? (async (action: ActionId, input: Record<string, unknown>): Promise<ContentActionResult> => {
       if (action === 'document-embed') return processing.documentEmbed(input as never, { embedBatch: ({ texts }) => embeddingBatch(texts), dimensions: deps.ingestion?.embeddingDimensions }) as Promise<ContentActionResult>;
       const request = { mode: 'auto' as const, organizationKey: context.organizationKey, actionSlug: action };
       const response = await executeAction<Record<string, unknown>, ContentActionResult>(request, input, deps);
@@ -523,8 +477,6 @@ async function defaults(deps: ContentToolDependencies, context: ToolContext): Pr
     signFolderCoverUrl: deps.signFolderCoverUrl ?? imageUrl.signedImageUrl,
     signDocumentSourceUrl: deps.signDocumentSourceUrl ?? imageUrl.signedImageUrl,
     signAudioUrl: deps.signAudioUrl ?? audioUrl.signedAudioUrl,
-    mergeAudio: deps.mergeAudio ?? audio.mergeMp3Chunks,
-    audioDuration: deps.audioDuration ?? duration.mp3DurationMs,
   };
 }
 
@@ -596,44 +548,11 @@ async function fingerprintInput(input: unknown): Promise<string> {
 }
 
 export function isContentMutation(tool: ContentToolName, input: any): boolean {
-  if (tool === 'document.read') return input.mode === 'audio' && input.persistAudio === true;
   if (tool === 'document.summarize') return input.persist === true;
   if (tool === 'document.enhance') return input.mode !== 'preview';
   if (tool === 'document.translate') return input.mode !== 'preview';
   if (tool === 'document.rewrite') return Array.isArray(input?.rewrites) && input.rewrites.some((item: any) => item?.mode !== 'preview');
   return MUTATIONS.has(tool);
-}
-
-function speechChunks(raw: string, includeCode: boolean, maximum: number) {
-  const masked = includeCode ? raw : raw
-    .replace(/```[\s\S]*?```/g, (value) => ' '.repeat(value.length))
-    .replace(/`[^`]+`/g, (value) => ' '.repeat(value.length));
-  const chunks: Array<{ text: string; start: number; end: number }> = [];
-  for (const match of masked.matchAll(/\S[\s\S]*?(?=\n{2,}|$)/g)) {
-    const block = match[0];
-    const blockStart = match.index;
-    let offset = 0;
-    while (offset < block.length) {
-      const remaining = block.slice(offset);
-      if (!remaining.trim()) break;
-      let length = Math.min(maximum, remaining.length);
-      if (length < remaining.length) {
-        const boundary = remaining.slice(0, length + 1).search(/(?<=[.!?])\s+(?=[A-Z#*-])|\n|\s(?=\S+$)/);
-        if (boundary > maximum / 2) length = boundary + 1;
-        else {
-          const whitespace = remaining.slice(0, length).lastIndexOf(' ');
-          if (whitespace > maximum / 2) length = whitespace + 1;
-        }
-      }
-      const piece = remaining.slice(0, length);
-      const leading = piece.length - piece.trimStart().length;
-      const trailing = piece.length - piece.trimEnd().length;
-      const text = piece.trim();
-      if (text) chunks.push({ text, start: blockStart + offset + leading, end: blockStart + offset + piece.length - trailing });
-      offset += Math.max(length, 1);
-    }
-  }
-  return chunks;
 }
 
 async function hashPassword(password: string, random: (size: number) => Uint8Array) { const salt = Buffer.from(random(16)); const hash = await scrypt(password, salt, 32) as Buffer; return `scrypt:${salt.toString('hex')}:${hash.toString('hex')}`; }
@@ -643,12 +562,6 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
   const tool = name; const member = principal(context, tool); let input: any;
   try { input = contentToolInputSchemas[tool].parse(rawInput); } catch (error) { throw mappedError(error, tool, 'parse'); }
   const d = await defaults(dependencies, context);
-  const canPermanentlyDelete = dependencies.canPermanentlyDelete ?? ((candidate: { deletedAt?: string | null }) => {
-    if (process.env.CONTENT_PERMANENT_DELETE_ENABLED !== 'true' || !candidate.deletedAt) return false;
-    const configuredDays = Number(process.env.CONTENT_RETENTION_DAYS ?? 30);
-    const retentionDays = Number.isFinite(configuredDays) && configuredDays >= 0 ? configuredDays : 30;
-    return d.clock().getTime() - new Date(candidate.deletedAt).getTime() >= retentionDays * 86_400_000;
-  });
   const invocationKey = d.id();
   const invocationStarted = performance.now();
   const now = () => d.clock().toISOString();
@@ -680,7 +593,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
     },
   });
   const repo = observeRepository(d.repository);
-  const action = async (slug: Action, actionInput: Record<string, unknown>, resourceKey?: string, scopeKey?: string) => {
+  const action = async (slug: ActionId, actionInput: Record<string, unknown>, resourceKey?: string, scopeKey?: string) => {
     const started = performance.now();
     await event('action', 'started', slug, resourceKey, scopeKey);
     try {
@@ -722,54 +635,12 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       catch (error) { throw new ContentError('CONTENT_CONFLICT', 'Storage deletion failed; metadata pointers were retained for retry.', tool, { action: 'storage', resourceKey, cause: error, retryable: true }); }
     }
   };
-  const generateDurableMp3 = async (text: string, resourceKey: string, voice = DEFAULT_AUDIO_GENERATION_VOICE, language?: string) => {
-    if (text.length > PERSISTED_AUDIO_MAX_CHARACTERS) fail('DOCUMENT_TOO_LARGE', `Durable audio generation supports text up to ${PERSISTED_AUDIO_MAX_CHARACTERS} characters.`, tool, 'generate-speech', resourceKey);
-    const generated: Uint8Array[] = [];
-    let generatedBytes = 0;
-    try {
-      const generate = dependencies.generateAudioChunks ?? canonicalGenerateAudioChunks;
-      for await (const chunk of generate({ text, wordsPerChunk: 1_000, voice, ...(language ? { language } : {}) }, {
-        ...dependencies,
-        organizationKey: context.organizationKey,
-        duration: d.audioDuration,
-        ...(dependencies.runAction ? { synthesize: async (input: any) => {
-          const output = await action('generate-speech', input, resourceKey);
-          const audioBase64 = output.audioBase64 ?? (output.audio ? Buffer.from(output.audio).toString('base64') : undefined);
-          return { audioBase64: z.string().min(1).parse(audioBase64), mimeType: z.string().min(1).parse(output.mimeType ?? 'audio/mpeg') };
-        } } : {}),
-      })) {
-        dependencies.signal?.throwIfAborted();
-        const bytes = new Uint8Array(Buffer.from(chunk.audioBase64, 'base64'));
-        if (bytes.byteLength === 0) throw new Error('Speech output was empty.');
-        generatedBytes += bytes.byteLength;
-        if (generatedBytes > PERSISTED_AUDIO_MAX_BYTES) fail('DOCUMENT_TOO_LARGE', 'Generated speech segments exceed the 100 MiB processing limit.', tool, 'generate-speech', resourceKey);
-        generated.push(bytes);
-      }
-    } catch (error) {
-      if (error instanceof ContentError) throw error;
-      throw speechError(error, tool, 'generate-speech', resourceKey);
-    }
-    if (generated.length === 0) fail('DOCUMENT_SPEECH_FAILED', 'This content has no text that can be narrated.', tool, 'generate-speech', resourceKey);
-    let bytes: Uint8Array;
-    try { bytes = await d.mergeAudio(generated, dependencies.signal); }
-    catch (error) { throw new ContentError('DOCUMENT_SPEECH_FAILED', 'Generated audio segments could not be finalized.', tool, { action: 'audio-merge', resourceKey, cause: error, retryable: true }); }
-    dependencies.signal?.throwIfAborted();
-    if (bytes.byteLength > PERSISTED_AUDIO_MAX_BYTES) fail('DOCUMENT_TOO_LARGE', 'Generated audio exceeds the 100 MiB storage limit.', tool, 'storage', resourceKey);
-    try {
-      const durationMs = d.audioDuration(bytes);
-      if (!Number.isFinite(durationMs) || durationMs <= 0) throw new Error('Audio duration must be positive.');
-      return { bytes, durationMs };
-    } catch (error) {
-      throw new ContentError('DOCUMENT_SPEECH_FAILED', 'Generated audio could not be validated.', tool, { action: 'audio-validate', resourceKey, cause: error, retryable: true });
-    }
-  };
   const roleFor = async (scopeKey: string, minimum: Role, resourceKey?: string, repository = repo) => {
     const started = performance.now();
     await event('authorization', 'started', minimum, resourceKey, scopeKey);
     try {
       const scope = await repository.getScope(scopeKey);
       if (!scope || scope.organizationKey !== context.organizationKey) fail('CONTENT_NOT_FOUND', 'Scope was not found in this organization.', tool, 'resolution', resourceKey);
-      if (scope.deletedAt) fail('CONTENT_FORBIDDEN', 'Archived scopes cannot be mutated or searched.', tool, 'authorization', resourceKey);
       const role: Role | null = member.userOrganization.orgRole === 'owner' || member.userOrganization.orgRole === 'admin' ? member.userOrganization.orgRole : await repository.role(scopeKey, member.userOrganization.key);
       if (!role || rank[role] < rank[minimum]) fail('CONTENT_FORBIDDEN', 'The principal lacks the required scope role.', tool, 'authorization', resourceKey);
       await event('authorization', 'succeeded', minimum, resourceKey, scopeKey, Math.round(performance.now() - started));
@@ -779,12 +650,11 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       throw error;
     }
   };
-  const folder = async (key: string, minimum: Role = 'viewer', archived = true, pendingDeletion = false, repository = repo) => {
+  const folder = async (key: string, minimum: Role = 'viewer', pendingDeletion = false, repository = repo) => {
     const value = await repository.getFolder(key);
     if (!value) fail('CONTENT_NOT_FOUND', 'Folder was not found.', tool, 'read', key);
     await roleFor(value.scopeKey, minimum, key, repository);
     if (!pendingDeletion && value._internalDeletion) fail('CONTENT_NOT_FOUND', 'Folder was not found.', tool, 'read', key);
-    if (!archived && value.deletedAt) fail('FOLDER_ARCHIVED', 'Folder is archived.', tool, 'read', key);
     return value;
   };
   const folderAncestors = async (parentKey: string | undefined, scopeKey: string, minimum: Role, repository = repo): Promise<Folder[]> => {
@@ -803,12 +673,11 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
     }
     return ancestors;
   };
-  const document = async (key: string, minimum: Role = 'viewer', archived = true, pendingDeletion = false, repository = repo) => {
+  const document = async (key: string, minimum: Role = 'viewer', pendingDeletion = false, repository = repo) => {
     const value = await repository.getDocument(key);
     if (!value) fail('CONTENT_NOT_FOUND', 'Document was not found.', tool, 'read', key);
     await roleFor(value.scopeKey, minimum, key, repository);
     if (!pendingDeletion && value._internalDeletion) fail('CONTENT_NOT_FOUND', 'Document was not found.', tool, 'read', key);
-    if (!archived && value.deletedAt) fail('DOCUMENT_ARCHIVED', 'Document is archived.', tool, 'read', key);
     let parentKey: string | undefined = value.folderKey;
     const visited = new Set<string>();
     while (parentKey) {
@@ -817,12 +686,11 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       const parent = await repository.getFolder(parentKey);
       if (!parent || parent.scopeKey !== value.scopeKey) fail('CONTENT_CONFLICT', 'Document folder resolution failed.', tool, 'resolution', key);
       if (!pendingDeletion && parent._internalDeletion) fail('CONTENT_NOT_FOUND', 'Document was not found.', tool, 'read', key);
-      if (!archived && parent.deletedAt) fail('FOLDER_ARCHIVED', 'The containing folder hierarchy is archived.', tool, 'read', parent.key);
       parentKey = parent.parentFolderKey;
     }
     return value;
   };
-  const foldersIn = async (scopeKey: string, includePendingDeletion = false) => (await repo.listFolders(scopeKey, true, includePendingDeletion))
+  const foldersIn = async (scopeKey: string, includePendingDeletion = false) => (await repo.listFolders(scopeKey, includePendingDeletion))
     .filter((item) => includePendingDeletion || !item._internalDeletion);
   const descendants = (all: Folder[], key: string) => { const out: Folder[] = []; const pending = [key]; const seen = new Set(pending); while (pending.length) { const parentKey = pending.shift()!; for (const child of all.filter((f) => f.parentFolderKey === parentKey)) if (!seen.has(child.key)) { seen.add(child.key); out.push(child); pending.push(child.key); } } return out; };
   const activeFolderHierarchy = async (key: string | undefined, scopeKey: string) => {
@@ -832,7 +700,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       if (visited.has(currentKey)) return false;
       visited.add(currentKey);
       const current = await repo.getFolder(currentKey);
-      if (!current || current.scopeKey !== scopeKey || current.deletedAt || current._internalDeletion) return false;
+      if (!current || current.scopeKey !== scopeKey || current._internalDeletion) return false;
       currentKey = current.parentFolderKey;
     }
     return true;
@@ -840,7 +708,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
   const location = async (scopeKey: string, folderKey: string | undefined, minimum: Role) => {
     await roleFor(scopeKey, minimum, folderKey);
     if (!folderKey) return undefined;
-    const target = await folder(folderKey, minimum, false);
+    const target = await folder(folderKey, minimum);
     if (target.scopeKey !== scopeKey) fail('CONTENT_FORBIDDEN', 'Folder does not belong to the requested scope.', tool, 'authorization', folderKey);
     return target;
   };
@@ -946,7 +814,6 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       name: finalName,
       isFavorite: false,
       ...transformed,
-      deletedAt: null,
       createdAt: timestamp,
       updatedAt: timestamp,
     });
@@ -993,7 +860,6 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             ...(item.coverImageKey ? { coverImageKey: item.coverImageKey } : {}),
             embedding,
             isFavorite: false,
-            deletedAt: null,
             createdAt: timestamp,
             updatedAt: timestamp,
           });
@@ -1005,7 +871,6 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         key,
         run: async () => {
           const current = await folder(key);
-          if (current.deletedAt && !input.includeArchived) fail('CONTENT_NOT_FOUND', 'Folder was not found.', tool, 'read', key);
           const allFolders = await foldersIn(current.scopeKey);
           const allDocuments = await repo.listDocuments(current.scopeKey, true);
           return {
@@ -1020,19 +885,18 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
     } else if (tool === 'folder.list') {
       await roleFor(input.scopeKey, 'viewer');
       if (input.parentFolderKey) {
-        const parent = await folder(input.parentFolderKey, 'viewer', input.includeArchived ?? false);
+        const parent = await folder(input.parentFolderKey, 'viewer');
         if (parent.scopeKey !== input.scopeKey) fail('CONTENT_NOT_FOUND', 'Folder was not found in this scope.', tool, 'read', input.parentFolderKey);
-        if (!input.includeArchived && !await activeFolderHierarchy(input.parentFolderKey, input.scopeKey)) fail('FOLDER_ARCHIVED', 'Folder hierarchy is archived.', tool, 'read', input.parentFolderKey);
       }
       const allFolders = await foldersIn(input.scopeKey);
       const folderByKey = new Map(allFolders.map((item) => [item.key, item]));
       const isVisible = (item: Folder) => {
-        if (input.includeArchived) return true;
         let current: Folder | undefined = item;
         const visited = new Set<string>();
         while (current) {
-          if (current.deletedAt || visited.has(current.key)) return false;
+          if (visited.has(current.key)) return false;
           visited.add(current.key);
+          if (current.parentFolderKey && !folderByKey.has(current.parentFolderKey)) return false;
           current = current.parentFolderKey ? folderByKey.get(current.parentFolderKey) : undefined;
         }
         return true;
@@ -1114,7 +978,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         run: async () => {
           const source = await folder(item.folderKey, 'viewer', false);
           const target = await location(item.targetScopeKey, item.targetParentFolderKey, 'moderator');
-          const sourceScopeFolders = (await foldersIn(source.scopeKey)).filter((candidate) => !candidate.deletedAt);
+          const sourceScopeFolders = await foldersIn(source.scopeKey);
           const sourceFolders = [source, ...descendants(sourceScopeFolders, source.key)];
           const rootName = item.newName ?? source.name;
           const sourceFolderKeys = new Set(sourceFolders.map((candidate) => candidate.key));
@@ -1147,7 +1011,6 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
                 embedding,
                 ...(source.scopeKey === item.targetScopeKey ? {} : { coverImageKey: undefined }),
                 isFavorite: false,
-                deletedAt: null,
                 _internalDeletion: undefined,
                 createdAt: timestamp,
                 updatedAt: timestamp,
@@ -1181,7 +1044,6 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
                 ...(sourceStorageKeys.length ? { sourceStorageKeys } : { sourceStorageKeys: undefined }),
                 ...(speechStorageKeys.length ? { speechStorageKeys } : { speechStorageKeys: undefined }),
                 isFavorite: false,
-                deletedAt: null,
                 _internalDeletion: undefined,
                 createdAt: timestamp,
                 updatedAt: timestamp,
@@ -1237,91 +1099,35 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           }
         },
       })), false, repo);
-    } else if (tool === 'folder.archive' || tool === 'folder.restore') {
-      const restore = tool === 'folder.restore';
-      const archiveCandidates = async (repository: ContentRepository, key: string) => {
-        const root = await repository.getFolder(key);
-        if (!root) fail('CONTENT_NOT_FOUND', 'Folder was not found.', tool, 'read', key);
-        const allFolders = await repository.listFolders(root.scopeKey, true);
-        const children = descendants(allFolders, key);
-        if (!restore && !input.includeDescendants && children.some((child) => !child.deletedAt)) {
-          fail('FOLDER_NOT_EMPTY', 'Folder has active descendants.', tool, 'update', key);
-        }
-        const affectedFolders = [root, ...(input.includeDescendants ? children : [])];
-        const affectedFolderKeys = new Set(affectedFolders.map((item) => item.key));
-        const affectedDocuments = (await repository.listDocuments(root.scopeKey, true))
-          .filter((item) => item.folderKey !== undefined && affectedFolderKeys.has(item.folderKey));
-        if (!restore && affectedFolders.some((item) => item.isFavorite)) {
-          fail('CONTENT_CONFLICT', 'Unfavorite the folder and its descendants before archiving.', tool, 'update', key);
-        }
-        if (!restore && affectedDocuments.some((item) => item.isFavorite)) {
-          fail('CONTENT_CONFLICT', 'Unfavorite all documents in the folder before archiving.', tool, 'update', key);
-        }
-        return { root, affectedFolders, affectedDocuments };
-      };
-      const lifecycleItems = input.folderKeys.map((key: string) => ({
-        key,
-        preflight: async () => {
-          const root = await folder(key, 'moderator');
-          if (restore) {
-            const ancestors = await folderAncestors(root.parentFolderKey, root.scopeKey, 'moderator');
-            if (!input.restoreAncestors && ancestors.some((ancestor) => ancestor.deletedAt)) fail('FOLDER_ARCHIVED', 'Restore the archived ancestor hierarchy first.', tool, 'update', key);
-          }
-          await archiveCandidates(repo, key);
-        },
-        run: async (mutationRepository: ContentRepository, transactionBound: boolean) => {
-          await folder(key, 'moderator');
-          const mutate = async (repository: ContentRepository) => {
-            const { root, affectedFolders, affectedDocuments } = await archiveCandidates(repository, key);
-            const ancestors = restore ? await folderAncestors(root.parentFolderKey, root.scopeKey, 'moderator', repository) : [];
-            if (restore && !input.restoreAncestors && ancestors.some((ancestor) => ancestor.deletedAt)) fail('FOLDER_ARCHIVED', 'Restore the archived ancestor hierarchy first.', tool, 'update', key);
-            const timestamp = now();
-            if (restore && input.restoreAncestors) for (const ancestor of [...ancestors].reverse()) {
-              await repository.updateFolder(ancestor.key, { deletedAt: null, updatedAt: timestamp });
-            }
-            const updateFolders = async () => { for (const item of affectedFolders) await repository.updateFolder(item.key, { deletedAt: restore ? null : timestamp, updatedAt: timestamp }); };
-            const updateDocuments = async () => { for (const item of affectedDocuments) await repository.updateDocument(item.key, { deletedAt: restore ? null : timestamp, updatedAt: timestamp }); };
-            // Document destination guards require active folders in both directions.
-            if (restore) { await updateFolders(); await updateDocuments(); }
-            else { await updateDocuments(); await updateFolders(); }
-            return { folder: await folderView({ ...root, deletedAt: restore ? null : timestamp, updatedAt: timestamp }, d) };
-          };
-          if (restore || transactionBound) return mutate(mutationRepository);
-          if (!mutationRepository.transaction) fail('CONTENT_CONFLICT', 'Transactional folder archive is unavailable.', tool, 'transaction', key);
-          return mutationRepository.transaction(mutate);
-        },
-      }));
-      result = await batch(tool, lifecycleItems, input.atomic, repo);
     } else if (tool === 'folder.delete') {
       result = await batch(tool, input.folderKeys.map((key: string) => ({
         key,
         preflight: async () => {
-          const root = await folder(key, 'owner', true, true);
+          const root = await folder(key, 'owner', true);
           if (root._internalDeletion) {
             const manifest = root._internalDeletion;
             if (input.atomic) fail('CONTENT_CONFLICT', 'Atomic folder deletion cannot resume an existing deletion manifest.', tool, 'transaction', key);
             if (manifest.kind !== 'folder' || !manifest.folderKeys || !manifest.documentKeys || !manifest.folderKeys.includes(key)) fail('CONTENT_CONFLICT', 'Folder deletion manifest is incomplete.', tool, 'delete', key);
             return;
           }
-          if (!root.deletedAt) fail('CONTENT_CONFLICT', 'Folder must be archived before permanent deletion.', tool, 'delete', key);
-          if (!await canPermanentlyDelete({ kind: 'folder', deletedAt: root.deletedAt, context })) fail('CONTENT_FORBIDDEN', 'Folder retention policy denied permanent deletion.', tool, 'delete', key);
+          if (root.isFavorite) fail('CONTENT_CONFLICT', 'Unfavorite the folder before deleting it.', tool, 'delete', key);
         },
         run: async (mutationRepository: ContentRepository) => {
           if (input.atomic) {
             const candidate = await mutationRepository.getFolder(key);
             if (!candidate) fail('CONTENT_NOT_FOUND', 'Folder was not found.', tool, 'read', key);
-            const all = await mutationRepository.listFolders(candidate.scopeKey, true, true);
+            const all = await mutationRepository.listFolders(candidate.scopeKey, true);
             const children = descendants(all, key);
             const affected = input.recursive ? [candidate, ...children] : [candidate];
             const affectedKeys = new Set(affected.map((item) => item.key));
-            const documents = (await mutationRepository.listDocuments(candidate.scopeKey, true, true)).filter((item) => item.folderKey !== undefined && affectedKeys.has(item.folderKey));
+            const documents = (await mutationRepository.listDocuments(candidate.scopeKey, true)).filter((item) => item.folderKey !== undefined && affectedKeys.has(item.folderKey));
             if (!input.recursive && children.length > 0) fail('FOLDER_NOT_EMPTY', 'Folder is not empty.', tool, 'delete', key);
             if (documents.length > 0) fail('CONTENT_CONFLICT', 'Atomic folder deletion is unavailable when storage objects are involved.', tool, 'storage', key);
             for (const item of affected) {
               if (item._internalDeletion) fail('CONTENT_CONFLICT', 'A folder deletion is already pending.', tool, 'delete', item.key);
-              if (!item.deletedAt) fail('CONTENT_CONFLICT', 'Every recursively deleted folder must be archived.', tool, 'delete', item.key);
-              if (!await canPermanentlyDelete({ kind: 'folder', deletedAt: item.deletedAt, context })) fail('CONTENT_FORBIDDEN', 'Folder retention policy denied permanent deletion.', tool, 'delete', item.key);
+              if (item.isFavorite) fail('CONTENT_CONFLICT', 'Unfavorite every recursively deleted folder before deleting it.', tool, 'delete', item.key);
             }
+            if (documents.some((item) => item.isFavorite)) fail('CONTENT_CONFLICT', 'Unfavorite every document in the folder before deleting it.', tool, 'delete', key);
             const marker = { kind: 'folder' as const, owner: invocationKey, startedAt: now(), folderKeys: affected.map((item) => item.key), documentKeys: [], objectKeys: [] };
             for (const item of [...affected].reverse()) if (!await mutationRepository.setFolderDeletion(item.key, marker)) fail('CONTENT_CONFLICT', 'Folder could not be frozen for deletion.', tool, 'transaction', item.key);
             for (const item of [...affected].reverse()) await mutationRepository.deleteFolder(item.key);
@@ -1340,7 +1146,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
               if (candidate._internalDeletion) {
                 if (candidate._internalDeletion.kind !== 'folder') fail('CONTENT_CONFLICT', 'A different deletion is already pending.', tool, 'delete', key);
                 if (!candidate._internalDeletion.folderKeys || !candidate._internalDeletion.documentKeys) fail('CONTENT_CONFLICT', 'Folder deletion manifest is incomplete.', tool, 'delete', key);
-                const all = await bound.listFolders(candidate.scopeKey, true, true);
+                const all = await bound.listFolders(candidate.scopeKey, true);
                 const intendedFolderKeys = candidate._internalDeletion.folderKeys;
                 const frozen = all.filter((item) => intendedFolderKeys.includes(item.key));
                 if (frozen.length !== intendedFolderKeys.length || frozen.some((item) => item._internalDeletion?.kind !== 'folder' || item._internalDeletion.owner !== candidate._internalDeletion!.owner)) {
@@ -1348,28 +1154,26 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
                 }
                 const frozenKeys = new Set(frozen.map((item) => item.key));
                 const intendedDocumentKeys = candidate._internalDeletion.documentKeys;
-                const frozenDocuments = (await bound.listDocuments(candidate.scopeKey, true, true)).filter((item) => intendedDocumentKeys.includes(item.key));
+                const frozenDocuments = (await bound.listDocuments(candidate.scopeKey, true)).filter((item) => intendedDocumentKeys.includes(item.key));
                 if (frozenDocuments.length !== intendedDocumentKeys.length || frozenDocuments.some((item) => item._internalDeletion?.kind !== 'document' || item._internalDeletion.owner !== candidate._internalDeletion!.owner || item.folderKey === undefined || !frozenKeys.has(item.folderKey))) {
                   fail('CONTENT_CONFLICT', 'Document deletion manifest ownership changed.', tool, 'delete', key);
                 }
                 return { root: candidate, affected: frozen, documents: frozenDocuments };
               }
-              const all = await bound.listFolders(candidate.scopeKey, true, true);
+              const all = await bound.listFolders(candidate.scopeKey, true);
               const children = descendants(all, key);
               const frozen = input.recursive ? [candidate, ...children] : [candidate];
               const frozenKeys = new Set(frozen.map((item) => item.key));
-              const ownedDocuments = (await bound.listDocuments(candidate.scopeKey, true, true)).filter((item) => item.folderKey !== undefined && frozenKeys.has(item.folderKey));
+              const ownedDocuments = (await bound.listDocuments(candidate.scopeKey, true)).filter((item) => item.folderKey !== undefined && frozenKeys.has(item.folderKey));
               if (!input.recursive && (children.length > 0 || ownedDocuments.length > 0)) fail('FOLDER_NOT_EMPTY', 'Folder is not empty.', tool, 'delete', key);
               if (ownedDocuments.length > 0 && input.atomic) fail('CONTENT_CONFLICT', 'Atomic folder deletion is unavailable when storage objects are involved.', tool, 'storage', key);
               for (const item of frozen) {
                 if (item._internalDeletion) fail('CONTENT_CONFLICT', 'A descendant folder deletion is already pending.', tool, 'delete', item.key);
-                if (!item.deletedAt) fail('CONTENT_CONFLICT', 'Every recursively deleted folder must be archived.', tool, 'delete', item.key);
-                if (!await canPermanentlyDelete({ kind: 'folder', deletedAt: item.deletedAt, context })) fail('CONTENT_FORBIDDEN', 'Folder retention policy denied permanent deletion.', tool, 'delete', item.key);
+                if (item.isFavorite) fail('CONTENT_CONFLICT', 'Unfavorite every recursively deleted folder before deleting it.', tool, 'delete', item.key);
               }
               for (const item of ownedDocuments) {
                 if (item._internalDeletion) fail('CONTENT_CONFLICT', 'A descendant document deletion is already pending.', tool, 'delete', item.key);
-                if (!item.deletedAt) fail('CONTENT_CONFLICT', 'Every recursively deleted document must be archived.', tool, 'delete', item.key);
-                if (!await canPermanentlyDelete({ kind: 'document', deletedAt: item.deletedAt, context })) fail('CONTENT_FORBIDDEN', 'Document retention policy denied permanent deletion.', tool, 'delete', item.key);
+                if (item.isFavorite) fail('CONTENT_CONFLICT', 'Unfavorite every document in the folder before deleting it.', tool, 'delete', item.key);
               }
               const startedAt = now();
               const documentMarker = { kind: 'document' as const, owner: invocationKey, startedAt };
@@ -1383,16 +1187,13 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
               const summaries = repo.listSummaries ? await repo.listSummaries(item.scopeKey, [item.key]) : [];
               return {
                 document: item,
-                versions: await repo.listVersions(item.scopeKey, [item.key], true),
-                shares: await repo.listShares(item.scopeKey, [item.key], { includeArchived: true, includeExpired: true, includeRevoked: true }),
+                versions: await repo.listVersions(item.scopeKey, [item.key]),
+                shares: await repo.listShares(item.scopeKey, [item.key], { includeExpired: true, includeRevoked: true }),
                 audioVersions: repo.listAudioVersions ? await repo.listAudioVersions(item.scopeKey, [item.key]) : [],
                 summaries,
                 summaryAudio: repo.listSummaryAudio ? await repo.listSummaryAudio(item.scopeKey, summaries.map((summary) => summary.key)) : [],
               };
             }));
-            for (const item of related) for (const version of item.versions) {
-              if (!await canPermanentlyDelete({ kind: 'version', deletedAt: item.document.deletedAt, context })) fail('CONTENT_FORBIDDEN', 'Version retention policy denied permanent deletion.', tool, 'delete', version.key);
-            }
             if (related.some((item) => item.audioVersions.length > 0) && !repo.deleteAudioVersion) fail('CONTENT_CONFLICT', 'Document audio deletion is unavailable.', tool, 'delete', key);
             if (related.some((item) => item.summaries.length > 0) && !repo.deleteSummary) fail('CONTENT_CONFLICT', 'Document summary deletion is unavailable.', tool, 'delete', key);
             if (related.some((item) => item.summaryAudio.length > 0) && !repo.deleteSummaryAudio) fail('CONTENT_CONFLICT', 'Document summary audio deletion is unavailable.', tool, 'delete', key);
@@ -1478,7 +1279,6 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             isFavorite: false,
             sourceStorageKeys: processed.storageKeys,
             ...transformed,
-            deletedAt: null,
             createdAt: timestamp,
             updatedAt: timestamp,
           });
@@ -1521,7 +1321,6 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         name: input.name,
         isFavorite: false,
         ...transformed,
-        deletedAt: null,
         createdAt: timestamp,
         updatedAt: timestamp,
       });
@@ -1531,7 +1330,6 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         key,
         run: async () => {
           const current = await document(key);
-          if (current.deletedAt && !input.includeArchived) fail('CONTENT_NOT_FOUND', 'Document was not found.', tool, 'read', key);
           const include: string[] = input.include ?? [];
           const latest = include.includes('latestVersion') ? (await repo.listVersions(current.scopeKey, [current.key]))[0] : undefined;
           const parent = include.includes('folder') && current.folderKey ? await repo.getFolder(current.folderKey) : undefined;
@@ -1550,8 +1348,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       })), false, repo);
     } else if (tool === 'document.list') {
       const parent = await location(input.scopeKey, input.folderKey, 'viewer');
-      if (!input.includeArchived && !await activeFolderHierarchy(parent?.key, input.scopeKey)) fail('FOLDER_ARCHIVED', 'Folder hierarchy is archived.', tool, 'read', parent?.key);
-      const values = (await repo.listDocuments(input.scopeKey, input.includeArchived))
+      const values = (await repo.listDocuments(input.scopeKey))
         .filter((item) => !item._internalDeletion && item.folderKey === parent?.key && (!input.extensions || item.extension !== undefined && input.extensions.includes(item.extension)));
       const sort = input.sort ?? { field: 'name', direction: 'asc' };
       values.sort((left: any, right: any) => String(left[sort.field]).localeCompare(String(right[sort.field])) * (sort.direction === 'asc' ? 1 : -1));
@@ -1562,94 +1359,13 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         ...(offset + limit < values.length ? { cursor: Buffer.from(String(offset + limit)).toString('base64url') } : {}),
       };
     } else if (tool === 'document.read') {
-      if (input.atomic && input.mode === 'audio') fail('CONTENT_CONFLICT', 'Atomic audio generation is impossible because speech is an external side effect.', tool, 'speak');
       result = await batch(tool, input.documentKeys.map((key: string) => ({
         key,
         run: async () => {
-           const current = await document(key, input.mode === 'audio' && input.persistAudio ? 'moderator' : 'viewer', false);
-           if (input.mode === 'content') return { documentKey: key, title: current.name, content: current.content };
-           if (input.persistAudio && current.content.length > PERSISTED_AUDIO_MAX_CHARACTERS) fail('DOCUMENT_TOO_LARGE', `Full audio generation supports documents up to ${PERSISTED_AUDIO_MAX_CHARACTERS} characters.`, tool, 'generate-speech', key);
-           if (input.persistAudio) {
-             if (!repo.createAudioVersion) fail('CONTENT_CONFLICT', 'Document audio persistence is unavailable.', tool, 'storage', key);
-             const spokenContent = speechChunks(current.content, input.includeCode ?? false, PERSISTED_AUDIO_MAX_CHARACTERS).map(({ text }) => text).join('\n\n');
-             const narration = input.includeTitle ? `${current.name}. ${spokenContent}` : spokenContent;
-             const canonicalLanguage = typeof input.language === 'string' && /^[a-z]{2,3}(?:-[A-Z]{2})?$/.test(input.language) ? input.language : undefined;
-             const { bytes, durationMs } = await generateDurableMp3(narration, key, input.voice, canonicalLanguage);
-             const audioKey = d.id();
-             const requestedStorageKey = `content/${context.organizationKey}/${current.scopeKey}/${key}/audio/${audioKey}.mp3`;
-             let storageKey: string | undefined;
-             try {
-               storageKey = (await storageOperation('upload', key, current.scopeKey, () => d.storage.upload({ key: requestedStorageKey, bytes, mimeType: 'audio/mpeg' }))).storageKey;
-             } catch (error) {
-               throw new ContentError('DOCUMENT_SPEECH_FAILED', 'Generated audio could not be stored.', tool, { action: 'storage', resourceKey: key, cause: error, retryable: true });
-             }
-             try {
-               dependencies.signal?.throwIfAborted();
-               const created = await repo.createAudioVersion({
-                 key: audioKey, scopeKey: current.scopeKey, documentKey: current.key,
-                 sourceContentHash: documentSemanticHash(current.content), sourceTitle: current.name, sourceDocumentUpdatedAt: current.updatedAt,
-                 storageKey, mimeType: 'audio/mpeg', sizeBytes: bytes.byteLength, durationMs,
-                  voice: input.voice ?? DEFAULT_AUDIO_GENERATION_VOICE, ...(canonicalLanguage ? { language: canonicalLanguage } : {}),
-                 includeTitle: input.includeTitle ?? false, includeCode: input.includeCode ?? false,
-                 createdByKey: member.userOrganization.key, createdAt: now(),
-               });
-               return { documentKey: key, title: current.name, audioVersion: generatedAudioVersionView(created) };
-             } catch (error) {
-               try { await storageOperation('delete', key, current.scopeKey, () => d.storage.delete(storageKey!)); }
-               catch (cleanupError) { throw new ContentError('DOCUMENT_SPEECH_FAILED', 'Audio version creation failed and uploaded audio cleanup requires retry.', tool, { action: 'cleanup', resourceKey: key, cause: new AggregateError([error, cleanupError]), retryable: true }); }
-               throw new ContentError('DOCUMENT_SPEECH_FAILED', 'The generated audio version could not be saved.', tool, { action: 'audio-version', resourceKey: key, cause: error, retryable: true });
-             }
-           }
-           const start = input.startOffset ?? 0;
-          const end = Math.min(input.endOffset ?? current.content.length, current.content.length);
-           const maximum = Math.min(Math.max(dependencies.maxSpeechChunkCharacters ?? 1800, 200), 4000);
-          const documentChunks = speechChunks(current.content.slice(start, end), input.includeCode ?? false, maximum)
-            .map((chunk) => ({ ...chunk, start: start + chunk.start, end: start + chunk.end }));
-          if (input.includeTitle && documentChunks[0]) documentChunks[0] = { ...documentChunks[0], text: `${current.name}. ${documentChunks[0].text}` };
-          const chunks = documentChunks;
-           if (chunks.length === 0) fail('DOCUMENT_SPEECH_FAILED', 'This document has no text that can be narrated.', tool, 'speak', key);
-           const audio: Array<{ index: number; url: string; durationMs?: number; startCharacter: number; endCharacter: number }> = [];
-           let duration = 0;
-          for (let index = 0; index < chunks.length; index += 1) {
-            dependencies.signal?.throwIfAborted();
-            const chunk = chunks[index]!;
-             const speechAction = 'speak';
-            let spoken: ContentActionResult;
-            try {
-              spoken = await action(speechAction, {
-                text: chunk.text,
-                ...(input.language ? { language: input.language } : {}),
-                 voice: input.voice ?? DEFAULT_AUDIO_GENERATION_VOICE,
-                 ...(input.speakingRate ? { speakingRate: input.speakingRate } : {}),
-                 format: 'wav',
-              }, key, current.scopeKey);
-            } catch (error) {
-              throw speechError(error, tool, speechAction, key);
-            }
-            let bytes: Uint8Array;
-            let mimeType: string;
-            try {
-              bytes = spoken.audio
-                ? z.instanceof(Uint8Array).parse(spoken.audio)
-                : new Uint8Array(Buffer.from(z.string().min(1).parse(spoken.audioBase64), 'base64'));
-              if (bytes.byteLength === 0) throw new Error('Speech output was empty.');
-              mimeType = z.string().min(1).parse(spoken.mimeType ?? 'audio/mpeg');
-            } catch (error) {
-              throw new ContentError('DOCUMENT_SPEECH_FAILED', 'The speech provider returned invalid audio.', tool, { action: speechAction, resourceKey: key, cause: error, retryable: true });
-            }
-            dependencies.signal?.throwIfAborted();
-            const item = {
-              index,
-              startCharacter: chunk.start,
-              endCharacter: chunk.end,
-              ...(spoken.durationMs !== undefined ? { durationMs: spoken.durationMs } : {}),
-            };
-             audio.push({ ...item, url: `data:${mimeType};base64,${Buffer.from(bytes).toString('base64')}` });
-             duration += spoken.durationMs ?? 0;
-           }
-           return { documentKey: key, title: current.name, audio, ...(duration ? { totalDurationMs: duration } : {}) };
+          const current = await document(key, 'viewer', false);
+          return { documentKey: key, title: current.name, content: current.content };
         },
-      })), input.atomic, repo);
+      })), false, repo);
     } else if (tool === 'document.update') {
       const hasRepresentationUpdates = input.updates.some((item: any) => item.content !== undefined);
       if (input.atomic && hasRepresentationUpdates) fail('CONTENT_CONFLICT', 'Atomic document updates are unavailable because transformation and embedding actions are external side effects.', tool, 'document-embed');
@@ -1744,7 +1460,6 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
               ...semantics,
                ...(storageKey ? { storageKey } : {}),
               sourceStorageKeys: undefined,
-              deletedAt: null,
               createdAt: timestamp,
               updatedAt: timestamp,
             });
@@ -1795,45 +1510,13 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           }
         },
       })), false, repo);
-    } else if (tool === 'document.archive' || tool === 'document.restore') {
-      const restore = tool === 'document.restore';
-      result = await batch(tool, input.documentKeys.map((key: string) => ({
-        key,
-        preflight: async () => {
-          const current = await document(key, 'moderator');
-          if (!restore && current.isFavorite) fail('CONTENT_CONFLICT', 'Unfavorite the document before archiving.', tool, 'update', key);
-          if (restore) {
-            const ancestors = await folderAncestors(current.folderKey, current.scopeKey, 'moderator');
-            if (!input.restoreAncestors && ancestors.some((ancestor) => ancestor.deletedAt)) fail('FOLDER_ARCHIVED', 'Restore the archived containing hierarchy first.', tool, 'update', key);
-          }
-        },
-        run: async (mutationRepository: ContentRepository, transactionBound: boolean) => {
-          await document(key, 'moderator');
-          const mutate = async (repository: ContentRepository) => {
-            const currentDocument = await repository.getDocument(key);
-            if (!currentDocument) fail('CONTENT_NOT_FOUND', 'Document was not found.', tool, 'read', key);
-            if (!restore && currentDocument.isFavorite) fail('CONTENT_CONFLICT', 'Unfavorite the document before archiving.', tool, 'update', key);
-            const ancestors = restore ? await folderAncestors(currentDocument.folderKey, currentDocument.scopeKey, 'moderator', repository) : [];
-            if (restore && !input.restoreAncestors && ancestors.some((ancestor) => ancestor.deletedAt)) fail('FOLDER_ARCHIVED', 'Restore the archived containing hierarchy first.', tool, 'update', key);
-            if (restore && input.restoreAncestors) for (const ancestor of [...ancestors].reverse()) {
-              await repository.updateFolder(ancestor.key, { deletedAt: null, updatedAt: now() });
-            }
-            const updated = await repository.updateDocument(key, { deletedAt: restore ? null : now(), updatedAt: now() });
-            return { document: documentView(updated) };
-          };
-          if (restore || transactionBound) return mutate(mutationRepository);
-          if (!mutationRepository.transaction) fail('CONTENT_CONFLICT', 'Transactional document archive is unavailable.', tool, 'transaction', key);
-          return mutationRepository.transaction(mutate);
-        },
-      })), input.atomic, repo);
     } else if (tool === 'document.delete') {
       if (input.atomic) fail('CONTENT_CONFLICT', 'Atomic deletion is unavailable because storage deletion cannot be rolled back.', tool, 'storage');
       result = await batch(tool, input.documentKeys.map((key: string) => ({
         key,
         preflight: async () => {
-          const current = await document(key, 'owner', true, true);
-          if (!current.deletedAt) fail('CONTENT_CONFLICT', 'Document must be archived before permanent deletion.', tool, 'delete', key);
-          if (!await canPermanentlyDelete({ kind: 'document', deletedAt: current.deletedAt, context })) fail('CONTENT_FORBIDDEN', 'Document retention policy denied permanent deletion.', tool, 'delete', key);
+          const current = await document(key, 'owner', true);
+          if (current.isFavorite) fail('CONTENT_CONFLICT', 'Unfavorite the document before deleting it.', tool, 'delete', key);
         },
         run: async () => {
           if (!repo.transaction) fail('CONTENT_CONFLICT', 'Transaction-bound metadata deletion is unavailable.', tool, 'transaction', key);
@@ -1853,19 +1536,14 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             return frozen;
           });
           try {
-            const versions = await repo.listVersions(current.scopeKey, [key], true);
-            const shares = await repo.listShares(current.scopeKey, [key], { includeArchived: true, includeExpired: true, includeRevoked: true });
+            const versions = await repo.listVersions(current.scopeKey, [key]);
+            const shares = await repo.listShares(current.scopeKey, [key], { includeExpired: true, includeRevoked: true });
             const audioVersions = repo.listAudioVersions ? await repo.listAudioVersions(current.scopeKey, [key]) : [];
             const summaries = repo.listSummaries ? await repo.listSummaries(current.scopeKey, [key]) : [];
             const summaryAudio = repo.listSummaryAudio ? await repo.listSummaryAudio(current.scopeKey, summaries.map((summary) => summary.key)) : [];
             if (audioVersions.length > 0 && !repo.deleteAudioVersion) fail('CONTENT_CONFLICT', 'Document audio deletion is unavailable.', tool, 'delete', key);
             if (summaries.length > 0 && !repo.deleteSummary) fail('CONTENT_CONFLICT', 'Document summary deletion is unavailable.', tool, 'delete', key);
             if (summaryAudio.length > 0 && !repo.deleteSummaryAudio) fail('CONTENT_CONFLICT', 'Document summary audio deletion is unavailable.', tool, 'delete', key);
-            if (versions.length > 0 && !input.deleteVersions) fail('CONTENT_CONFLICT', 'Document has retained versions.', tool, 'delete', key);
-            if (shares.length > 0 && !input.deleteShares) fail('CONTENT_CONFLICT', 'Document has retained shares.', tool, 'delete', key);
-            for (const version of versions) {
-              if (!await canPermanentlyDelete({ kind: 'version', deletedAt: current.deletedAt, context })) fail('CONTENT_FORBIDDEN', 'Version retention policy denied permanent deletion.', tool, 'delete', version.key);
-            }
             const inventoriedKeys = [...new Set([current.storageKey, ...(current.speechStorageKeys ?? []), ...(current.sourceStorageKeys ?? []), ...audioVersions.map((audio) => audio.storageKey), ...summaryAudio.map((audio) => audio.storageKey)].filter((item): item is string => Boolean(item)))];
             const deletion = current._internalDeletion?.objectKeys ? current._internalDeletion : { ...current._internalDeletion!, objectKeys: inventoriedKeys };
             if (!current._internalDeletion?.objectKeys) {
@@ -2017,26 +1695,6 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           return { documentKey: key, shares: revoked };
         },
       })), input.atomic, repo);
-    } else if (tool === 'document-share.archive' || tool === 'document-share.restore') {
-      const restore = tool === 'document-share.restore';
-      const lifecycleShare = async (repository: ContentRepository, key: string, checkParent: boolean) => {
-        const share = await repository.getShare(key);
-        if (!share) fail('CONTENT_NOT_FOUND', 'Share was not found.', tool, 'read', key);
-        await roleFor(share.scopeKey, 'admin', key, repository);
-        if (restore && checkParent) await document(share.documentKey, 'admin', false, false, repository);
-        if (restore ? !share.deletedAt : Boolean(share.deletedAt)) fail('CONTENT_CONFLICT', `Share is already ${restore ? 'active' : 'archived'}.`, tool, 'update', key);
-        return share;
-      };
-      result = await batch(tool, input.shareKeys.map((key: string) => ({
-        key,
-        transactional: true,
-        preflight: async () => { await lifecycleShare(repo, key, true); },
-        run: async (mutationRepository: ContentRepository) => {
-          await lifecycleShare(mutationRepository, key, true);
-          const timestamp = now();
-          return { share: shareView(await mutationRepository.updateShare(key, { deletedAt: restore ? null : timestamp, updatedAt: timestamp })) };
-        },
-      })), input.atomic, repo);
     } else if (tool === 'document.list-shares') {
       result = await batch(tool, input.documentKeys.map((key: string) => ({
         key,
@@ -2070,7 +1728,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         key,
         run: async () => {
           const version = await repo.getVersion(key);
-          if (!version || version.deletedAt) fail('CONTENT_NOT_FOUND', 'Version was not found.', tool, 'read', key);
+          if (!version) fail('CONTENT_NOT_FOUND', 'Version was not found.', tool, 'read', key);
           await document(version.documentKey, 'viewer');
           await roleFor(version.scopeKey, 'viewer', key);
           return { version: versionView(version, input.include) };
@@ -2133,7 +1791,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           const current = await document(item.documentKey, 'moderator', false);
           const rawVersion = await repo.getVersion(item.versionKey);
           const version = rawVersion ? documentVersionSchema.safeParse(rawVersion) : null;
-          if (!version?.success || version.data.deletedAt || version.data.documentKey !== current.key || version.data.scopeKey !== current.scopeKey) {
+          if (!version?.success || version.data.documentKey !== current.key || version.data.scopeKey !== current.scopeKey) {
             fail('DOCUMENT_VERSION_CONFLICT', 'A complete version belonging to the document is required.', tool, 'read', item.versionKey);
           }
         },
@@ -2163,35 +1821,14 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           }
         },
       })), input.atomic, repo);
-    } else if (tool === 'document-version.archive' || tool === 'document-version.restore') {
-      const restore = tool === 'document-version.restore';
-      const lifecycleVersion = async (repository: ContentRepository, key: string, checkParent: boolean) => {
-        const version = await repository.getVersion(key);
-        if (!version) fail('CONTENT_NOT_FOUND', 'Version was not found.', tool, 'read', key);
-        await roleFor(version.scopeKey, 'admin', key, repository);
-        if (restore && checkParent) await document(version.documentKey, 'admin', false, false, repository);
-        if (restore ? !version.deletedAt : Boolean(version.deletedAt)) fail('CONTENT_CONFLICT', `Version is already ${restore ? 'active' : 'archived'}.`, tool, 'update', key);
-        return version;
-      };
-      result = await batch(tool, input.versionKeys.map((key: string) => ({
-        key,
-        transactional: true,
-        preflight: async () => { await lifecycleVersion(repo, key, true); },
-        run: async (mutationRepository: ContentRepository) => {
-          await lifecycleVersion(mutationRepository, key, true);
-          return { version: versionView(await mutationRepository.updateVersion(key, { deletedAt: restore ? null : now() })) };
-        },
-      })), input.atomic, repo);
     } else if (tool === 'document.delete-version') {
       result = await batch(tool, input.versionKeys.map((key: string) => ({
         key,
         preflight: async () => {
           const version = await repo.getVersion(key);
           if (!version) fail('CONTENT_NOT_FOUND', 'Version was not found.', tool, 'read', key);
-          const current = await document(version.documentKey, 'owner', true, true);
+          const current = await document(version.documentKey, 'owner', true);
           if (current._internalDeletion) fail('CONTENT_CONFLICT', 'Document deletion is already pending.', tool, 'delete', key);
-          if (!current.deletedAt) fail('CONTENT_CONFLICT', 'The document must be archived before deleting a version.', tool, 'delete', key);
-          if (!await canPermanentlyDelete({ kind: 'version', deletedAt: current.deletedAt, context })) fail('CONTENT_FORBIDDEN', 'Version deletion is disabled by retention policy.', tool, 'delete', key);
         },
         run: async (mutationRepository: ContentRepository) => {
           const selected = await repo.getVersion(key);
@@ -2232,46 +1869,6 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
            return { summary: await projectedSummaryView(summary, audio ?? undefined, d.signAudioUrl) };
          },
        })), false, repo);
-    } else if (tool === 'document.summary.audio.generate') {
-      result = await batch(tool, input.summaryKeys.map((key: string) => ({
-        key,
-        run: async () => {
-          if (!repo.getSummary || !repo.getSummaryAudio || !repo.createSummaryAudio) fail('CONTENT_CONFLICT', 'Document summary audio persistence is unavailable.', tool, 'read', key);
-          const summary = await repo.getSummary(key);
-          if (!summary) fail('CONTENT_NOT_FOUND', 'Summary was not found.', tool, 'read', key);
-          const current = await document(summary.documentKey, 'moderator', false);
-          if (current.scopeKey !== summary.scopeKey) fail('CONTENT_NOT_FOUND', 'Summary was not found.', tool, 'read', key);
-          const existing = await repo.getSummaryAudio(key);
-          if (existing) return { audio: await summaryAudioView(existing, d.signAudioUrl) };
-          const { bytes, durationMs } = await generateDurableMp3(summary.summary, key, input.voice, input.language);
-          const audioKey = d.id();
-          const requestedStorageKey = `content/${context.organizationKey}/${summary.scopeKey}/${summary.documentKey}/summaries/${summary.key}/audio/${audioKey}.mp3`;
-          let storageKey: string | undefined;
-          try {
-            storageKey = (await storageOperation('upload', key, summary.scopeKey, () => d.storage.upload({ key: requestedStorageKey, bytes, mimeType: 'audio/mpeg' }))).storageKey;
-          } catch (error) {
-            throw new ContentError('DOCUMENT_SPEECH_FAILED', 'Generated audio could not be stored.', tool, { action: 'storage', resourceKey: key, cause: error, retryable: true });
-          }
-          let saved: { audio: DocumentSummaryAudio; created: boolean };
-          try {
-            dependencies.signal?.throwIfAborted();
-            saved = await repo.createSummaryAudio({
-              key: audioKey, scopeKey: summary.scopeKey, documentKey: summary.documentKey, summaryKey: summary.key,
-              storageKey, mimeType: 'audio/mpeg', sizeBytes: bytes.byteLength, durationMs,
-              voice: input.voice ?? DEFAULT_AUDIO_GENERATION_VOICE, ...(input.language ? { language: input.language } : {}),
-              createdByKey: member.userOrganization.key, createdAt: now(),
-            });
-            if (!saved.created) await storageOperation('delete', key, summary.scopeKey, () => d.storage.delete(storageKey!));
-          } catch (error) {
-            if (storageKey) {
-              try { await storageOperation('delete', key, summary.scopeKey, () => d.storage.delete(storageKey!)); }
-              catch (cleanupError) { throw new ContentError('DOCUMENT_SPEECH_FAILED', 'Summary audio creation failed and uploaded audio cleanup requires retry.', tool, { action: 'cleanup', resourceKey: key, cause: new AggregateError([error, cleanupError]), retryable: true }); }
-            }
-            throw new ContentError('DOCUMENT_SPEECH_FAILED', 'The generated summary audio could not be saved.', tool, { action: 'summary-audio', resourceKey: key, cause: error, retryable: true });
-          }
-          return { audio: await summaryAudioView(saved.audio, d.signAudioUrl) };
-        },
-      })), false, repo);
     } else if (tool === 'document.topics') {
       const current = await document(input.documentKey, 'viewer', false);
       const generated = await action('document-topics', {
@@ -2375,13 +1972,13 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         ? await folder(input.folderKey, 'viewer', false)
         : await document(input.documentKey!, 'viewer', false);
       if (!await activeFolderHierarchy(input.folderKey ? source.key : (source as Document).folderKey, source.scopeKey)) {
-        fail('FOLDER_ARCHIVED', 'The source folder hierarchy is archived.', tool, 'read', source.key);
+        fail('CONTENT_NOT_FOUND', 'The source folder hierarchy was not found.', tool, 'read', source.key);
       }
       const parsedEmbedding = z.array(z.number().finite()).length(EMBEDDING_DIMENSIONS).safeParse(source.embedding);
       if (!parsedEmbedding.success) fail('CONTENT_CONFLICT', 'Semantic similarity is not ready for this resource.', tool, 'semantic-neighbors', source.key);
       if (!repo.semanticNeighbors) fail('CONTENT_CONFLICT', 'Semantic similarity is unavailable.', tool, 'semantic-neighbors', source.key);
 
-      const allFolders = await repo.listFolders(source.scopeKey, true, true);
+      const allFolders = await repo.listFolders(source.scopeKey, true);
       const foldersByKey = new Map(allFolders.map((current) => [current.key, current]));
       const hierarchyIsActive = (folderKey: string) => {
         const visited = new Set<string>();
@@ -2390,7 +1987,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           if (visited.has(currentKey)) return false;
           visited.add(currentKey);
           const current = foldersByKey.get(currentKey);
-          if (!current || current.deletedAt || current._internalDeletion) return false;
+          if (!current || current._internalDeletion) return false;
           currentKey = current.parentFolderKey;
         }
         return true;
@@ -2404,9 +2001,9 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         limit: 10,
       });
       const folders = matches.folders
-        .filter(({ folder: current }) => current.scopeKey === source.scopeKey && current.key !== input.folderKey && activeFolderKeys.includes(current.key) && !current.deletedAt && !current._internalDeletion)
+        .filter(({ folder: current }) => current.scopeKey === source.scopeKey && current.key !== input.folderKey && activeFolderKeys.includes(current.key) && !current._internalDeletion)
         .slice(0, 10);
-      const activeDocument = (current: Document) => current.scopeKey === source.scopeKey && current.key !== input.documentKey && !current.deletedAt && !current._internalDeletion && (!current.folderKey || activeFolderKeys.includes(current.folderKey));
+      const activeDocument = (current: Document) => current.scopeKey === source.scopeKey && current.key !== input.documentKey && !current._internalDeletion && (!current.folderKey || activeFolderKeys.includes(current.folderKey));
       const documents = matches.documents.filter(({ document: current }) => activeDocument(current) && !current.extension).slice(0, 10);
       const files = matches.files.filter(({ document: current }) => activeDocument(current) && Boolean(current.extension)).slice(0, 10);
       result = {
@@ -2436,7 +2033,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         await store.record({ key: d.id(), actorKey: member.user.key, scopeKey: input.scopeKey, query: input.query, normalizedQuery, folderKey, includeDescendants, cacheVersion, output, now: now() });
         if (input.recordHistory) await history.record(member.user.key, input.query);
       };
-      const [allFolders, allDocuments] = await Promise.all([repo.listFolders(input.scopeKey, true), repo.listDocuments(input.scopeKey, true)]);
+      const [allFolders, allDocuments] = await Promise.all([repo.listFolders(input.scopeKey), repo.listDocuments(input.scopeKey)]);
       let folderKeys: string[] | undefined;
       let revisionFolders = allFolders;
       if (folderKey) {
@@ -2449,8 +2046,8 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         revisionFolders = allFolders.filter((item) => relevant.has(item.key));
       }
       const revisionDocuments = folderKeys ? allDocuments.filter((item) => item.folderKey && folderKeys!.includes(item.folderKey)) : allDocuments;
-      const folderRevision = revisionFolders.map((item) => `${item.key}:${item.parentFolderKey ?? ''}:${item.updatedAt}:${item.isFavorite ? 'favorite' : ''}:${item.deletedAt ?? ''}:${item._internalDeletion ? 'pending' : ''}`);
-      const documentRevision = revisionDocuments.map((item) => `${item.key}:${item.name}:${item.folderKey ?? ''}:${item.semanticContentHash ?? ''}:${item.isFavorite ? 'favorite' : ''}:${item.deletedAt ?? ''}:${item._internalDeletion ? 'pending' : ''}`);
+      const folderRevision = revisionFolders.map((item) => `${item.key}:${item.parentFolderKey ?? ''}:${item.updatedAt}:${item.isFavorite ? 'favorite' : ''}:${item._internalDeletion ? 'pending' : ''}`);
+      const documentRevision = revisionDocuments.map((item) => `${item.key}:${item.name}:${item.folderKey ?? ''}:${item.semanticContentHash ?? ''}:${item.isFavorite ? 'favorite' : ''}:${item._internalDeletion ? 'pending' : ''}`);
       const sourceRevision = createHash('sha256').update([...folderRevision, ...documentRevision].sort().join('\n')).digest('hex');
       const cached = await store.get({ actorKey: member.user.key, scopeKey: input.scopeKey, normalizedQuery, folderKey, includeDescendants, cacheVersion });
       const cachedValue = cached?.output as { result?: unknown; sourceRevision?: string; minimumScore?: number; includeSummaries?: boolean; replayable?: boolean } | undefined;
@@ -2472,14 +2069,14 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         const activeFolders = [];
         for (const current of allFolders) {
           if (folderKeys && !folderKeys.includes(current.key)) continue;
-          if (current.deletedAt || current._internalDeletion || !await activeFolderHierarchy(current.key, current.scopeKey)) continue;
+          if (current._internalDeletion || !await activeFolderHierarchy(current.key, current.scopeKey)) continue;
           const score = scoreText(`${current.name}\n${current.description ?? ''}`);
           if (score >= input.minimumScore) activeFolders.push({ folder: current, score });
         }
         const activeDocuments = [];
         for (const current of allDocuments) {
           if (folderKeys && (!current.folderKey || !folderKeys.includes(current.folderKey))) continue;
-          if (current.deletedAt || current._internalDeletion || !await activeFolderHierarchy(current.folderKey, current.scopeKey)) continue;
+          if (current._internalDeletion || !await activeFolderHierarchy(current.folderKey, current.scopeKey)) continue;
           const score = scoreText(`${current.name}\n${current.content}`);
           if (score >= input.minimumScore) activeDocuments.push({ document: current, score });
         }
@@ -2497,13 +2094,13 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
               repo.semanticSearchFolders?.({ embedding: queryEmbedding, authorizedScopeKeys: [input.scopeKey], ...(folderKeys ? { folderKeys } : {}), minScore: input.minimumScore, limit: 20 }) ?? [],
             ]);
             for (const match of folderMatches) {
-              if (match.folder.scopeKey !== input.scopeKey || folderKeys && !folderKeys.includes(match.folder.key) || match.folder.deletedAt || match.folder._internalDeletion || !await activeFolderHierarchy(match.folder.key, match.folder.scopeKey)) continue;
+              if (match.folder.scopeKey !== input.scopeKey || folderKeys && !folderKeys.includes(match.folder.key) || match.folder._internalDeletion || !await activeFolderHierarchy(match.folder.key, match.folder.scopeKey)) continue;
               const previous = activeFolders.find(({ folder: current }) => current.key === match.folder.key);
               if (previous) previous.score = Math.max(previous.score, match.score);
               else activeFolders.push(match);
             }
             for (const match of documentMatches) {
-              if (match.document.scopeKey !== input.scopeKey || folderKeys && (!match.document.folderKey || !folderKeys.includes(match.document.folderKey)) || match.document.deletedAt || match.document._internalDeletion || !await activeFolderHierarchy(match.document.folderKey, match.document.scopeKey)) continue;
+              if (match.document.scopeKey !== input.scopeKey || folderKeys && (!match.document.folderKey || !folderKeys.includes(match.document.folderKey)) || match.document._internalDeletion || !await activeFolderHierarchy(match.document.folderKey, match.document.scopeKey)) continue;
               const previous = activeDocuments.find(({ document: current }) => current.key === match.document.key);
               if (previous) previous.score = Math.max(previous.score, match.score);
               else activeDocuments.push(match);
@@ -2525,13 +2122,13 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         ]);
         const folders = [];
         for (const match of folderMatches) {
-          if (match.score < input.minimumScore || match.folder.scopeKey !== input.scopeKey || folderKeys && !folderKeys.includes(match.folder.key) || match.folder.deletedAt || match.folder._internalDeletion || !await activeFolderHierarchy(match.folder.key, match.folder.scopeKey)) continue;
+          if (match.score < input.minimumScore || match.folder.scopeKey !== input.scopeKey || folderKeys && !folderKeys.includes(match.folder.key) || match.folder._internalDeletion || !await activeFolderHierarchy(match.folder.key, match.folder.scopeKey)) continue;
           folders.push({ key: match.folder.key, scopeKey: match.folder.scopeKey, ...(match.folder.parentFolderKey ? { parentFolderKey: match.folder.parentFolderKey } : {}), name: match.folder.name, ...(match.folder.description ? { description: match.folder.description } : {}), isFavorite: Boolean(match.folder.isFavorite), score: Math.max(0, Math.min(1, match.score)) });
           if (folders.length === 4) break;
         }
         const selectedDocuments = [];
         for (const match of documentMatches) {
-          if (match.score >= input.minimumScore && match.document.scopeKey === input.scopeKey && (!folderKeys || match.document.folderKey !== undefined && folderKeys.includes(match.document.folderKey)) && !match.document.deletedAt && !match.document._internalDeletion && await activeFolderHierarchy(match.document.folderKey, match.document.scopeKey)) selectedDocuments.push(match);
+          if (match.score >= input.minimumScore && match.document.scopeKey === input.scopeKey && (!folderKeys || match.document.folderKey !== undefined && folderKeys.includes(match.document.folderKey)) && !match.document._internalDeletion && await activeFolderHierarchy(match.document.folderKey, match.document.scopeKey)) selectedDocuments.push(match);
           if (selectedDocuments.length === 10) break;
         }
         const documents = [];
@@ -2563,14 +2160,13 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
     } else {
       const organizationSearch = tool === 'document.search-all';
       if (organizationSearch && input.organizationKey !== context.organizationKey) fail('CONTENT_FORBIDDEN', 'Organization key does not match the execution context.', tool, 'authorization');
-      const includeArchived = input.filters?.includeArchived === true;
       const allowed = await repo.allowedScopeKeys(context.organizationKey, member.userOrganization.key);
       if (!organizationSearch) await roleFor(input.scopeKey, 'viewer');
 
       const filterScopeKeys = new Set<string>(input.filters?.scopeKeys ?? allowed);
       const filterFolderKeys: string[] | undefined = input.filters?.folderKeys;
       if (filterFolderKeys) {
-        for (const key of filterFolderKeys) await folder(key, 'viewer', includeArchived);
+        for (const key of filterFolderKeys) await folder(key, 'viewer');
       }
       const sourceInputs = input.sources ?? [{ type: 'scope', scopeKeys: organizationSearch ? allowed : [input.scopeKey] }];
       const resolvedSources: Array<{ type: 'scope' | 'folder'; key: string; scopeKeys: string[]; folderKeys?: string[] }> = [];
@@ -2579,10 +2175,10 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           for (const key of source.scopeKeys) resolvedSources.push({ type: 'scope', key, scopeKeys: [key] });
         } else {
           for (const key of source.folderKeys) {
-            const current = await folder(key, 'viewer', includeArchived);
-            if (!includeArchived && !await activeFolderHierarchy(key, current.scopeKey)) fail('FOLDER_ARCHIVED', 'Search folder hierarchy is archived.', tool, 'resolution', key);
+            const current = await folder(key, 'viewer');
+            if (!await activeFolderHierarchy(key, current.scopeKey)) fail('CONTENT_NOT_FOUND', 'Search folder hierarchy was not found.', tool, 'resolution', key);
             const children = source.includeDescendants ? descendants(await foldersIn(current.scopeKey), key) : [];
-            const folderKeys = [key, ...children.filter((item) => includeArchived || !item.deletedAt).map((item) => item.key)];
+            const folderKeys = [key, ...children.map((item) => item.key)];
             resolvedSources.push({ type: 'folder', key, scopeKeys: [current.scopeKey], folderKeys });
           }
         }
@@ -2594,13 +2190,13 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         const documents = (await Promise.all(scopeKeys.map(async (scopeKey) => {
           let values = documentsByScope.get(scopeKey);
           if (!values) {
-            values = await repo.listDocuments(scopeKey, includeArchived);
+            values = await repo.listDocuments(scopeKey);
             documentsByScope.set(scopeKey, values);
           }
           return values;
         }))).flat();
         return documents.flatMap((document) => {
-          if (document._internalDeletion || !includeArchived && document.deletedAt) return [];
+          if (document._internalDeletion) return [];
           if (folderKeys && (!document.folderKey || !folderKeys.includes(document.folderKey))) return [];
           if (input.filters?.documentKeys && !input.filters.documentKeys.includes(document.key)) return [];
           if (input.filters?.extensions && (!document.extension || !input.filters.extensions.includes(document.extension))) return [];
@@ -2634,8 +2230,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       const collectMatches = async (matches: Array<{ score: number; document: Document; matchedContent?: string }>, source: (typeof resolvedSources)[number]) => {
         for (const match of matches) {
           if (match.document._internalDeletion) continue;
-          if (!includeArchived && !await activeFolderHierarchy(match.document.folderKey, match.document.scopeKey)) continue;
-          if (!includeArchived && match.document.deletedAt) continue;
+          if (!await activeFolderHierarchy(match.document.folderKey, match.document.scopeKey)) continue;
           const previous = candidates.get(match.document.key);
           if (!previous || match.score > previous.score) candidates.set(match.document.key, { ...match, source: { type: source.type, key: source.key } });
         }
@@ -2664,7 +2259,6 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             createdBefore: input.filters?.createdBefore,
             updatedAfter: input.filters?.updatedAfter,
             updatedBefore: input.filters?.updatedBefore,
-            includeArchived,
             minScore: input.minimumScore,
             limit: input.topK ?? 20,
           }), source);

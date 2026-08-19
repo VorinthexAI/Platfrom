@@ -3,7 +3,7 @@ import { currentEmbeddingSchema } from '@/lib/embeddings';
 import { createNodeHelpers } from './base';
 
 export const BOOK_SOURCES_COLLECTION = 'bookSources';
-export const bookSourceTypeSchema = z.enum(['document', 'image', 'collection', 'place', 'trip', 'book', 'web']);
+export const bookSourceTypeSchema = z.enum(['document', 'image', 'collection', 'place', 'book', 'web']);
 export const bookSourceSchema = z.object({
   key: z.string().cuid(), scopeKey: z.string().cuid(), bookKey: z.string().cuid(), sourceType: bookSourceTypeSchema,
   sourceKey: z.string().cuid().optional(), url: z.string().url().optional(), title: z.string().trim().min(1), content: z.string().trim().min(1),

@@ -248,7 +248,7 @@ export function CoreComposer({
         contentMode="raw"
         disabled={leadingDisabled}
         onPress={onLeadingPress}
-        size="sm"
+        size={expanded ? "md" : "sm"}
         style={multiline ? styles.leadingTop : undefined}
         variant="icon"
       >
@@ -318,7 +318,7 @@ export function CoreComposer({
       disabled={disabled || !value.trim()}
       loading={loading}
       onPress={submit}
-      size="sm"
+      size={expanded ? "md" : "sm"}
       style={multiline ? styles.sendBottom : undefined}
       variant="primary"
     >

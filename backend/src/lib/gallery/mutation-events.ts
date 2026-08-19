@@ -31,9 +31,10 @@ export const GALLERY_MUTATION_EVENTS = {
   uploadCompensated: { collection: ['image.changed', 'collection.content.changed', 'collection.index.changed'], user: ['image.changed'] },
   createSubject: { collection: [], user: ['subject.changed'] },
   deleteSubject: { collection: [], user: ['subject.changed'] },
-  restoreSubject: { collection: [], user: ['subject.changed'] },
   reconcileSubject: { collection: [], user: ['subject.changed'] },
   highlightChanged: { collection: ['highlight.changed'], user: [] },
+  memoryCreated: { collection: ['memory.created'], user: [] },
+  memoryDeleted: { collection: ['memory.deleted'], user: [] },
 } as const satisfies Record<string, { collection: readonly AppEventSlug[]; user: readonly AppEventSlug[] }>;
 
 export type GalleryMutationEventName = keyof typeof GALLERY_MUTATION_EVENTS;
@@ -62,9 +63,10 @@ export const GALLERY_CANONICAL_MUTATION_PUBLICATIONS = {
   transferCollectionImages: { events: ['transferCollectionImages'] },
   createSubject: { events: ['createSubject'] },
   deleteSubject: { events: ['deleteSubject'] },
-  restoreSubject: { events: ['restoreSubject'] },
   createHighlight: { events: ['highlightChanged'] },
   deleteHighlight: { events: ['highlightChanged'] },
+  createMemory: { events: ['memoryCreated'] },
+  deleteMemory: { events: ['memoryDeleted'] },
 } as const satisfies Partial<Record<GalleryOperationName, { events: readonly GalleryMutationEventName[]; deferredEvents?: readonly GalleryMutationEventName[] }>>;
 export type GalleryEventTarget = { route: 'collection' | 'user'; key: string; event: AppEventSlug };
 

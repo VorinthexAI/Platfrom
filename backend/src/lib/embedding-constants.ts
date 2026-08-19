@@ -1,9 +1,5 @@
-export const EMBEDDING_PROVIDER_ID = 'openrouter' as const;
-export const EMBEDDING_MODEL = 'qwen.qwen3-embedding-8b';
-export const EXTERNAL_EMBEDDING_MODEL_ID = 'qwen/qwen3-embedding-8b';
-export const EMBEDDING_DIMENSIONS = 4_096;
-export const EMBEDDING_ROUTE = 'deepinfra' as const;
-export const LEGACY_EMBEDDING_MODEL = 'openai.text-embedding-3-small';
-export const LEGACY_EXTERNAL_EMBEDDING_MODEL_ID = 'text-embedding-3-small';
-export const LEGACY_EMBEDDING_DIMENSIONS = 1_536;
-export const QWEN_RETRIEVAL_INSTRUCTION = 'Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: ';
+export const EMBEDDING_PROVIDER_ID = 'openai' as const;
+export const EMBEDDING_MODEL = 'openai.text-embedding-3-small';
+export const EXTERNAL_EMBEDDING_MODEL_ID = 'text-embedding-3-small';
+export const EMBEDDING_DIMENSIONS = 1_536;
+export const LEGACY_EMBEDDING_DIMENSIONS = 4_096;

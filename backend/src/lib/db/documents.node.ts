@@ -29,7 +29,6 @@ export const documentSchema = z.object({
   sourceStorageKeys: z.array(z.string().trim().min(1)).max(12).optional(),
   currentVersionKey: z.string().cuid().nullable().optional(),
   isFavorite: z.boolean().default(false),
-  deletedAt: z.string().datetime().nullable().default(null),
   _internalDeletion: z.object({
     kind: z.literal('document'),
     owner: z.string().trim().min(1),
@@ -89,16 +88,6 @@ function assertConfiguredEmbeddingDimensions(embedding: number[]): void {
   }
 }
 
-export async function archiveDocument(key: string): Promise<Document> {
-  const timestamp = new Date().toISOString();
-  return updateDocument(key, { deletedAt: timestamp, updatedAt: timestamp });
-}
-
-export async function restoreDocument(key: string): Promise<Document> {
-  const timestamp = new Date().toISOString();
-  return updateDocument(key, { deletedAt: null, updatedAt: timestamp });
-}
-
 /** Inserts an already embedded document without invoking the generic auto-embed path. */
 export async function insertPreparedDocument(input: Document): Promise<Document> {
   const expectedChunks = chunkDocumentContent(input.content);
@@ -112,12 +101,11 @@ export async function insertPreparedDocument(input: Document): Promise<Document>
   return contentPersistence.insertDocument(document);
 }
 
-export async function getDocumentInScope(scopeKey: string, documentKey: string, includeArchived = false): Promise<Document | null> {
+export async function getDocumentInScope(scopeKey: string, documentKey: string): Promise<Document | null> {
   const cursor = await db.query(aql`
     FOR document IN ${db.collection(DOCUMENTS_COLLECTION)}
       FILTER document._key == ${documentKey} && document.scopeKey == ${scopeKey}
       FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
-      FILTER ${includeArchived} || document.deletedAt == null
       LIMIT 1
       RETURN document
   `);
@@ -127,7 +115,7 @@ export async function getDocumentInScope(scopeKey: string, documentKey: string, 
 
 export async function listDocumentsByScope(
   scopeKey: string,
-  options: { folderKey?: string | null; includeArchived?: boolean; includePendingDeletion?: boolean } = {},
+  options: { folderKey?: string | null; includePendingDeletion?: boolean } = {},
 ): Promise<Document[]> {
   const hasFolderBoundary = Object.prototype.hasOwnProperty.call(options, 'folderKey');
   const cursor = await db.query(aql`
@@ -137,28 +125,25 @@ export async function listDocumentsByScope(
       FILTER !${hasFolderBoundary} || (${options.folderKey ?? null} == null
         ? (!HAS(document, "folderKey") || document.folderKey == null)
         : document.folderKey == ${options.folderKey ?? null})
-      FILTER ${options.includeArchived ?? false} || document.deletedAt == null
       SORT document.name ASC, document._key ASC
       RETURN document
   `);
   return (await cursor.all()).map((document) => documentSchema.parse(withArangoKey(document)));
 }
 
-export function listDocumentsByFolder(scopeKey: string, folderKey: string | null, includeArchived = false): Promise<Document[]> {
-  return listDocumentsByScope(scopeKey, { folderKey, includeArchived });
+export function listDocumentsByFolder(scopeKey: string, folderKey: string | null): Promise<Document[]> {
+  return listDocumentsByScope(scopeKey, { folderKey });
 }
 
 export async function listDocumentsByKeysInScope(
   scopeKey: string,
   documentKeys: string[],
-  includeArchived = false,
 ): Promise<Document[]> {
   if (documentKeys.length === 0) return [];
   const cursor = await db.query(aql`
     FOR document IN ${db.collection(DOCUMENTS_COLLECTION)}
       FILTER document.scopeKey == ${scopeKey} && document._key IN ${documentKeys}
       FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
-      FILTER ${includeArchived} || document.deletedAt == null
       SORT POSITION(${documentKeys}, document._key) ASC
       RETURN document
   `);
@@ -179,7 +164,6 @@ export interface ContentSemanticSearchInput {
   createdBefore?: string;
   updatedAfter?: string;
   updatedBefore?: string;
-  includeArchived?: boolean;
   minScore?: number;
   limit?: number;
 }
@@ -214,8 +198,6 @@ export async function semanticSearchContent(input: ContentSemanticSearchInput): 
         LET folder = HAS(document, "folderKey") && document.folderKey != null ? DOCUMENT(${db.collection('folders')}, document.folderKey) : null
         FILTER folder == null || folder.scopeKey == document.scopeKey
         FILTER folder == null || !HAS(folder, "_internalDeletion") || folder._internalDeletion == null
-        FILTER ${input.includeArchived ?? false} || document.deletedAt == null
-        FILTER ${input.includeArchived ?? false} || folder == null || folder.deletedAt == null
         FILTER ${folderKeys} == null || document.folderKey IN ${folderKeys ?? []}
         FILTER ${documentKeys} == null || document._key IN ${documentKeys ?? []}
         FILTER ${extensions} == null || document.extension IN ${extensions ?? []}
@@ -236,7 +218,6 @@ export async function semanticSearchContent(input: ContentSemanticSearchInput): 
     LET versionMatches = ${sources.includes('version')} ? (
       FOR version IN ${db.collection('documentVersions')}
         FILTER version.scopeKey IN ${input.authorizedScopeKeys}
-        FILTER ${input.includeArchived ?? false} || version.deletedAt == null
         FILTER ${documentKeys} == null || version.documentKey IN ${documentKeys ?? []}
         FILTER ${createdAfter ?? null} == null || version.createdAt >= ${createdAfter ?? null}
         FILTER ${createdBefore ?? null} == null || version.createdAt <= ${createdBefore ?? null}
@@ -251,8 +232,6 @@ export async function semanticSearchContent(input: ContentSemanticSearchInput): 
         FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
         LET folder = HAS(document, "folderKey") && document.folderKey != null ? DOCUMENT(${db.collection('folders')}, document.folderKey) : null
         FILTER folder == null || folder.scopeKey == document.scopeKey
-        FILTER ${input.includeArchived ?? false} || document.deletedAt == null
-        FILTER ${input.includeArchived ?? false} || folder == null || folder.deletedAt == null
         FILTER ${folderKeys} == null || document.folderKey IN ${folderKeys ?? []}
         FILTER ${extensions} == null || document.extension IN ${extensions ?? []}
         FILTER ${mimeTypes} == null || document.mimeType IN ${mimeTypes ?? []}

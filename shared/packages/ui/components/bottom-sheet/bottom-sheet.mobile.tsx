@@ -21,7 +21,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { Button, type ButtonProps } from "../button/button.mobile";
+import { Button, ButtonSizeProvider, type ButtonProps } from "../button/button.mobile";
 import { CloseIcon } from "../../icons/close/close.mobile";
 import { colors } from "../../tokens";
 
@@ -247,61 +247,62 @@ export function BottomSheet({
             variant="ghost"
           />
         </Animated.View>
-        <Animated.View
-          accessibilityLabel={[title, description].filter(Boolean).join(". ")}
-          accessibilityRole="summary"
-          style={[
-            styles.sheet,
-            fullHeight && styles.fullSheet,
-            {
-              bottom: fullHeight ? androidBottomInset : undefined,
-              top: fullHeight ? insets.top : undefined,
-              paddingBottom: Platform.OS === "android" ? 16 : Math.max(insets.bottom, 16),
-              transform: [{ translateY }],
-            },
-          ]}
-        >
-          <View style={styles.headerDragTarget}>
-            <View collapsable={false} style={styles.dragTarget} {...panResponder.panHandlers}>
-              <View style={styles.dragHandle} />
+        <ButtonSizeProvider size="md">
+          <Animated.View
+            accessibilityLabel={[title, description].filter(Boolean).join(". ")}
+            accessibilityRole="summary"
+            style={[
+              styles.sheet,
+              fullHeight && styles.fullSheet,
+              {
+                bottom: fullHeight ? androidBottomInset : undefined,
+                top: fullHeight ? insets.top : undefined,
+                paddingBottom: Platform.OS === "android" ? 16 : Math.max(insets.bottom, 16),
+                transform: [{ translateY }],
+              },
+            ]}
+          >
+            <View style={styles.headerDragTarget}>
+              <View collapsable={false} style={styles.dragTarget} {...panResponder.panHandlers}>
+                <View style={styles.dragHandle} />
+              </View>
+              <View style={[styles.header, Boolean(headerLeading) && !hideHeading && styles.headerWithLeading, hideHeading && styles.headerWithoutHeading]}>
+                {!hideHeading ? <Text accessibilityRole="header" numberOfLines={1} style={styles.title}>{title}</Text> : null}
+                {!hideHeading && description ? <Text style={styles.description}>{description}</Text> : null}
+              </View>
+              {headerLeading ? <View style={[styles.headerSlot, styles.headerLeading]}>{headerLeading}</View> : null}
+              {headerTrailing ? <View style={[styles.headerSlot, styles.headerTrailing]}>{headerTrailing}</View> : null}
+              {!hideCloseButton && !headerTrailing ? <Button
+                accessibilityLabel="Close bottom sheet"
+                contentMode="raw"
+                disabled={!dismissible}
+                onPress={dismiss}
+                size="md"
+                style={styles.closeButton}
+                variant="icon"
+              >
+                <CloseIcon size="sm" />
+              </Button> : null}
             </View>
-            <View style={[styles.header, Boolean(headerLeading) && !hideHeading && styles.headerWithLeading, hideHeading && styles.headerWithoutHeading]}>
-              {!hideHeading ? <Text accessibilityRole="header" numberOfLines={1} style={styles.title}>{title}</Text> : null}
-              {!hideHeading && description ? <Text style={styles.description}>{description}</Text> : null}
-            </View>
-            {headerLeading ? <View style={[styles.headerSlot, styles.headerLeading]}>{headerLeading}</View> : null}
-            {headerTrailing ? <View style={[styles.headerSlot, styles.headerTrailing]}>{headerTrailing}</View> : null}
-            {!hideCloseButton && !headerTrailing ? <Button
-              accessibilityLabel="Close bottom sheet"
-              contentMode="raw"
-              disabled={!dismissible}
-              onPress={dismiss}
-              size="sm"
-              style={styles.closeButton}
-              variant="icon"
-            >
-              <CloseIcon size="sm" />
-            </Button> : null}
-          </View>
-          <View style={[styles.content, fullHeight && styles.flexContent]}>{children}</View>
-          {footer ? <View style={styles.footer}>{footer}</View> : null}
-        </Animated.View>
+            <View style={[styles.content, fullHeight && styles.flexContent]}>{children}</View>
+            {footer ? <View style={styles.footer}>{footer}</View> : null}
+          </Animated.View>
+        </ButtonSizeProvider>
       </View>
     </Modal>
   );
 }
 
-export type BottomSheetItemProps = ButtonProps;
+export type BottomSheetItemProps = Omit<ButtonProps, "size">;
 
 export function BottomSheetItem({
-  size = "lg",
   style,
   variant = "secondary",
   ...props
 }: BottomSheetItemProps) {
   return (
     <Button
-      size={size}
+      size="md"
       style={(state) => [
         styles.item,
         typeof style === "function" ? style(state) : style,

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Button } from "@vorinthex/shared/ui/button";
 import { Spinner } from "@vorinthex/shared/ui/spinner";
+import { useToast } from "@vorinthex/shared/ui/toast";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { activateGalleryShare, fetchGalleryOverview, getGalleryContext } from "@/lib/gallery-client";
@@ -15,6 +16,7 @@ export default function GalleryShareActivationRoute() {
   const { token } = useLocalSearchParams<{ token?: string }>();
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
   const status = useAuthStore((state) => state.status);
   const isOnboarded = useAuthStore((state) => state.user?.isOnboarded === true);
   const processing = useRef<string | undefined>(undefined);
@@ -31,6 +33,7 @@ export default function GalleryShareActivationRoute() {
       const overview = await queryClient.fetchQuery({ queryKey: galleryQueryKeys.overview(context), queryFn: () => fetchGalleryOverview(), staleTime: 0 });
       setCachedGalleryCollections(queryClient, context, overview.collections);
       await clearPendingReturnRoute().catch(() => undefined);
+      showToast({ title: "Shared collection added", duration: 2_000 });
       router.replace({ pathname: "/capability/[slug]", params: { slug: "gallery" } });
     }).catch((failure: unknown) => {
       processing.current = undefined;

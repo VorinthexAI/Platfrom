@@ -3,8 +3,6 @@ import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
 import { sanitizedAgentMessageSchema } from '@/lib/ai/tools';
 import { orchestratorResponseRuntime, type OrchestratorResponseDependencies } from '@/lib/ai/orchestrator-response-runtime';
-import { executeAction } from '@/lib/ai/router';
-import type { SpeechOutput } from '@/lib/ai/providers';
 import { dedupeMentionCandidates } from '@/lib/communication/mention-candidates';
 import { getDefaultScopeRepository } from '@/lib/ai/scopes';
 import { listAccessibleScopes, requireOrganizationAccess, FoundersAccessError } from '@/lib/founders/access';
@@ -30,7 +28,6 @@ const pollBody = strictObject({ messageKey: key, question: z.string().trim().min
   if (new Set(normalized).size !== normalized.length) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['options'], message: 'Poll options must be unique' });
 });
 const voteBody = strictObject({ optionKey: key });
-const speechBody = strictObject({ text: z.string().trim().min(1).max(8_000) });
 const COMMUNICATION_RESPONSE_INSTRUCTION = `Reply directly to the user with a detailed, self-contained plain-text answer. Other orchestrator mentions only select independent recipients: do not address, converse with, or refer to other mentioned orchestrators or their responses. Explain the relevant reasoning, assumptions, tradeoffs, and practical next steps when useful. Use no Markdown, headings, bullets, numbering, emphasis markers, or preamble. Keep the complete response under 500 words.`;
 const COMMUNICATION_PROVIDER_FALLBACK = 'I could not generate a response right now. Please try again.';
 const COMMUNICATION_PARTIAL_FALLBACK = '\n\nI could not complete this response. Please try again.';
@@ -45,7 +42,6 @@ export interface CommunicationApiDependencies {
   listScopes(actor: CommunicationActor): Promise<readonly { name: string; description: string | null }[]>;
   publishTyping?(event: CommunicationTypingEvent): Promise<void>;
   subscribeTyping?(listener: (event: CommunicationTypingEvent) => void): () => void;
-  speak(organizationKey: string, text: string, signal: AbortSignal): Promise<SpeechOutput>;
   channelLease?: CommunicationChannelLease;
 }
 
@@ -99,7 +95,6 @@ const defaultDependencies: CommunicationApiDependencies = {
   },
   publishTyping: publishCommunicationTyping,
   subscribeTyping: subscribeCommunicationTyping,
-  speak: async (organizationKey, text, signal) => (await executeAction<unknown, SpeechOutput>({ mode: 'fixed', organizationKey, actionSlug: 'speak', modelSlug: 'openai.gpt-realtime-2', providerSlug: 'openai' }, { text, voice: 'ash', format: 'wav' }, { signal, timeoutMs: 90_000 })).output,
 };
 
 function statusFor(error: CommunicationError): 403 | 404 | 409 {
@@ -186,10 +181,6 @@ export function createCommunicationHandlers(dependencies: CommunicationApiDepend
       const roster = buildMentionRoster(access.mentions);
       const project = ({ participantKey, type, key: mentionKey, name, role, mentionCount }: MentionCandidate) => ({ participantKey, type, key: mentionKey, name, role, mentionCount });
       return { channels: [channelSummary(access.channel)], mentionRoster: { orchestrators: roster.orchestrators.map(project), everyone: project(roster.everyone), members: roster.members.map(project) } };
-    }),
-    speak: (c: Context) => run(c, async (resolved) => {
-      const body = await parseJson(c, speechBody);
-      return dependencies.speak(resolved.organizationKey, body.text, c.req.raw.signal);
     }),
     listMessages: (c: Context) => run(c, async (resolved) => ({ messages: await dependencies.service.listMessages(resolved, key.parse(c.req.param('channelKey')), parseQuery(c, communicationMessageListQuerySchema).limit) })),
     typing: (c: Context) => run(c, async (resolved) => {

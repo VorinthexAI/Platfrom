@@ -12,15 +12,15 @@ import {
 } from './index';
 
 const expectedNames = [
-  'folder.create', 'folder.find', 'folder.list', 'folder.update', 'folder.rename', 'folder.move', 'folder.copy', 'folder.archive', 'folder.restore', 'folder.delete',
-  'document.parse', 'document.scan', 'document.create', 'document.find', 'document.list', 'document.read', 'document.list-audio-versions', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.list-summaries', 'document.find-summary', 'document.summary.audio.generate', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.download', 'document.export', 'document.share', 'document.unshare', 'document-share.archive', 'document-share.restore', 'document.list-shares', 'document.create-version', 'document.find-version', 'document.list-versions', 'document.restore-version', 'document-version.archive', 'document-version.restore', 'document.delete-version', 'document.summarize', 'document.topics', 'document.enhance', 'document.translate', 'document.rewrite',
+  'folder.create', 'folder.find', 'folder.list', 'folder.update', 'folder.rename', 'folder.move', 'folder.copy', 'folder.delete',
+  'document.parse', 'document.scan', 'document.create', 'document.find', 'document.list', 'document.read', 'document.list-audio-versions', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.list-summaries', 'document.find-summary', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.delete', 'document.download', 'document.export', 'document.share', 'document.unshare', 'document.list-shares', 'document.create-version', 'document.find-version', 'document.list-versions', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.topics', 'document.enhance', 'document.translate', 'document.rewrite',
   'document.search', 'content.search', 'content.search-history.list', 'content.search-history.delete', 'content.neighbors', 'document.search-all',
 ] as const;
 
 describe('Content tool registry', () => {
   test('contains exactly the registered dotted names and no action-style kebab names', () => {
     expect([...CONTENT_TOOL_NAMES]).toEqual([...expectedNames]);
-    expect(CONTENT_TOOL_NAMES).toHaveLength(54);
+    expect(CONTENT_TOOL_NAMES).toHaveLength(45);
     for (const name of CONTENT_TOOL_NAMES) {
       expect(name).toMatch(/^[a-z]+(?:[.-][a-z]+)*$/);
       expect(name).toContain('.');
@@ -68,9 +68,9 @@ describe('Content input contracts', () => {
     expect(contentToolInputSchemas['content.neighbors'].safeParse({ folderKey: key, documentKey: key }).success).toBe(false);
   });
 
-  test('applies atomic and mode defaults, including nested restore defaults', () => {
+  test('applies atomic and mode defaults, including version rollback defaults', () => {
     expect(contentToolInputSchemas['folder.update'].parse({ updates: [{ folderKey: key, name: 'Renamed' }] }).atomic).toBe(false);
-    expect(contentToolInputSchemas['document.read'].parse({ documentKeys: [key] })).toMatchObject({ mode: 'content', atomic: false });
+    expect(contentToolInputSchemas['document.read'].parse({ documentKeys: [key] })).toEqual({ documentKeys: [key] });
     expect(contentToolInputSchemas['document.download'].parse({ documentKeys: [key] }).format).toBe('original');
     expect(contentToolInputSchemas['document.download'].parse({ documentKeys: [key], format: 'html' }).format).toBe('html');
     expect(contentToolInputSchemas['document.translate'].parse({ documentKeys: [key], targetLanguage: 'French' })).toMatchObject({ mode: 'preview', atomic: false });
@@ -82,12 +82,9 @@ describe('Content input contracts', () => {
   });
 
   test('preserves specified optional controls', () => {
-    expect(contentToolInputSchemas['folder.restore'].parse({ folderKeys: [key], restoreAncestors: true })).toMatchObject({ restoreAncestors: true });
-    expect(contentToolInputSchemas['document.read'].parse({ documentKeys: [key], mode: 'audio', includeCode: true, persistAudio: true })).toMatchObject({ includeCode: true, persistAudio: true });
     expect(contentToolInputSchemas['document.summarize'].parse({ documentKeys: [key], combine: true })).toMatchObject({ combine: true });
     expect(contentToolInputSchemas['document.summarize'].parse({ documentKeys: [key], topic: 'Launch' })).toMatchObject({ topic: 'Launch', style: 'brief' });
     expect(contentToolInputSchemas['folder.update'].parse({ updates: [{ folderKey: key, description: null }] })).toMatchObject({ updates: [{ description: null }] });
-    expect(contentToolInputSchemas['document.delete'].parse({ documentKeys: [key], deleteVersions: true, deleteShares: true })).toMatchObject({ deleteVersions: true, deleteShares: true });
     expect(contentToolInputSchemas['content.search-history.list'].parse({ scopeKey: key, allLocations: true })).toMatchObject({ allLocations: true });
   });
 
@@ -97,33 +94,28 @@ describe('Content input contracts', () => {
     expect(() => contentToolInputSchemas['folder.find'].parse({ folderKeys: [key], surprise: true })).toThrow();
     expect(() => contentToolInputSchemas['document.download'].parse({ documentKeys: [key], format: 'pdf' })).toThrow();
     expect(() => contentToolInputSchemas['document.search'].parse({ scopeKey: key, query: 'roadmap', minimumScore: 1.1 })).toThrow();
-    expect(() => contentToolInputSchemas['document.read'].parse({ documentKeys: [key], startOffset: 10, endOffset: 5 })).toThrow();
-    expect(() => contentToolInputSchemas['document.read'].parse({ documentKeys: [key], mode: 'audio', startOffset: 10, persistAudio: true })).toThrow();
-    expect(() => contentToolInputSchemas['document.read'].parse({ documentKeys: [key, newId()], mode: 'audio', persistAudio: true })).toThrow();
-    expect(() => contentToolInputSchemas['document.read'].parse({ documentKeys: [key], mode: 'content', voice: 'alloy' })).toThrow();
-    expect(() => contentToolInputSchemas['document.read'].parse({ documentKeys: [key], mode: 'audio', voice: 'Joanna' })).toThrow();
-    expect(contentToolInputSchemas['document.read'].parse({ documentKeys: [key], mode: 'audio', voice: 'Matthew' }).voice).toBe('Matthew');
-    expect(() => contentToolInputSchemas['document.read'].parse({ documentKeys: [key], mode: 'audio', persistAudio: true, language: 'English' })).toThrow();
-    expect(() => contentToolInputSchemas['document.read'].parse({ documentKeys: [key], mode: 'audio', persistAudio: true, speakingRate: 1.25 })).toThrow();
+    expect(() => contentToolInputSchemas['document.read'].parse({ documentKeys: [key], mode: 'audio' })).toThrow();
     expect(() => contentToolInputSchemas['document.copy'].parse({ copies: [{ documentKey: key, targetFolderKey: newId(), name: 'Wrong field' }] })).toThrow();
     expect(() => contentToolInputSchemas['document.summarize'].parse({ documentKeys: [key, newId()], persist: true })).toThrow();
     expect(() => contentToolInputSchemas['document.summarize'].parse({ documentKeys: [key], persist: true, combine: true })).toThrow();
     expect(contentToolInputSchemas['content.search-history.list'].parse({ scopeKey: key, folderKey: newId(), allLocations: true })).toMatchObject({ allLocations: true });
     expect(() => contentToolInputSchemas['document.topics'].parse({ documentKey: key, scopeKey: newId() })).toThrow();
-    expect(contentToolInputSchemas['document.summary.audio.generate'].parse({ summaryKeys: [key], language: 'en-US' })).toMatchObject({ language: 'en-US' });
-    expect(() => contentToolInputSchemas['document.summary.audio.generate'].parse({ summaryKeys: [key], language: 'English' })).toThrow();
     expect(contentToolInputSchemas['document.search'].parse({ scopeKey: key, query: 'roadmap', sources: [{ type: 'scope', scopeKeys: [newId()] }] })).toMatchObject({ sources: [{ type: 'scope' }] });
+    expect(() => contentToolInputSchemas['folder.find'].parse({ folderKeys: [key], unexpected: true })).toThrow();
+    expect(() => contentToolInputSchemas['document.find'].parse({ documentKeys: [key], unexpected: true })).toThrow();
+    expect(() => contentToolInputSchemas['document.search'].parse({ scopeKey: key, query: 'roadmap', filters: { unexpected: true } })).toThrow();
+    expect(() => contentToolInputSchemas['document.delete'].parse({ documentKeys: [key], deleteVersions: true })).toThrow();
   });
 
   test('enforces non-empty arrays for every batch-first contract', () => {
     const invalid: Array<[keyof typeof contentToolInputSchemas, object]> = [
       ['folder.create', { folders: [] }], ['folder.update', { updates: [] }], ['folder.rename', { renames: [] }], ['folder.move', { moves: [] }], ['folder.copy', { copies: [] }],
-      ['folder.archive', { folderKeys: [] }], ['folder.restore', { folderKeys: [] }], ['folder.delete', { folderKeys: [] }],
+      ['folder.delete', { folderKeys: [] }],
       ['document.find', { documentKeys: [] }], ['document.read', { documentKeys: [] }], ['document.update', { updates: [] }], ['document.rename', { renames: [] }],
-      ['document.move', { moves: [] }], ['document.copy', { copies: [] }], ['document.archive', { documentKeys: [] }], ['document.restore', { documentKeys: [] }],
+      ['document.move', { moves: [] }], ['document.copy', { copies: [] }],
       ['document.delete', { documentKeys: [] }], ['document.download', { documentKeys: [] }], ['document.export', { exports: [] }], ['document.share', { shares: [] }],
       ['document.list-shares', { documentKeys: [] }], ['document.create-version', { documentKeys: [] }], ['document.find-version', { versionKeys: [] }],
-      ['document.list-versions', { documentKeys: [] }], ['document.list-summaries', { documentKeys: [] }], ['document.find-summary', { summaryKeys: [] }], ['document.summary.audio.generate', { summaryKeys: [] }], ['document.restore-version', { restores: [] }], ['document.delete-version', { versionKeys: [] }],
+      ['document.list-versions', { documentKeys: [] }], ['document.list-summaries', { documentKeys: [] }], ['document.find-summary', { summaryKeys: [] }], ['document.restore-version', { restores: [] }], ['document.delete-version', { versionKeys: [] }],
       ['document.summarize', { documentKeys: [] }], ['document.enhance', { documentKeys: [] }], ['document.translate', { documentKeys: [], targetLanguage: 'French' }], ['document.rewrite', { rewrites: [] }],
     ];
     for (const [name, input] of invalid) expect(contentToolInputSchemas[name].safeParse(input).success, name).toBe(false);
@@ -156,20 +148,18 @@ describe('Content input contracts', () => {
       ['folder.rename', { renames: [{ folderKey: key, name: 'Folder' }] }],
       ['folder.move', { moves: [{ folderKey: key }] }],
       ['folder.copy', { copies: [{ folderKey: key, targetScopeKey: newId() }] }],
-      ['folder.archive', { folderKeys: [key] }], ['folder.restore', { folderKeys: [key] }], ['folder.delete', { folderKeys: [key] }],
+      ['folder.delete', { folderKeys: [key] }],
       ['document.update', { updates: [{ documentKey: key, content: 'text' }] }],
       ['document.rename', { renames: [{ documentKey: key, name: 'Name' }] }],
       ['document.move', { moves: [{ documentKey: key, targetScopeKey: newId(), targetFolderKey: newId() }] }],
       ['document.copy', { copies: [{ documentKey: key, targetScopeKey: newId(), targetFolderKey: newId() }] }],
-      ['document.archive', { documentKeys: [key] }], ['document.restore', { documentKeys: [key] }], ['document.delete', { documentKeys: [key] }],
+      ['document.delete', { documentKeys: [key] }],
       ['document.share', { shares: [{ documentKey: key, permission: 'read' }] }],
       ['document.unshare', { shareKeys: [key] }], ['document.create-version', { documentKeys: [key] }],
       ['document.restore-version', { restores: [{ documentKey: key, versionKey: newId() }] }],
       ['document.delete-version', { versionKeys: [key] }], ['document.summarize', { documentKeys: [key] }],
-      ['document.summary.audio.generate', { summaryKeys: [key] }],
       ['document.enhance', { documentKeys: [key] }], ['document.translate', { documentKeys: [key], targetLanguage: 'French' }],
       ['document.rewrite', { rewrites: [{ documentKey: key, instruction: 'Improve' }] }],
-      ['document.read', { documentKeys: [key], mode: 'audio', persistAudio: true }],
     ];
     for (const [name, value] of cases) {
       expect(contentToolInputSchemas[name].parse({ ...value, idempotencyKey: 'request-1' })).toMatchObject({ idempotencyKey: 'request-1' });
@@ -224,10 +214,7 @@ describe('Content output contracts', () => {
   test('represents exact read payloads in one batch wrapper', () => {
     const key = newId();
     expect(contentToolOutputSchemas['document.read'].parse({ results: [{ key, success: true, data: { documentKey: key, title: 'Notes', content: 'Text' } }], summary: { requested: 1, succeeded: 1, failed: 0 } })).toMatchObject({ results: [{ data: { content: 'Text' } }] });
-    expect(contentToolOutputSchemas['document.read'].parse({ results: [{ key, success: true, data: { documentKey: key, title: 'Notes', audio: [{ index: 0, url: 'data:audio/mpeg;base64,bXAz', startCharacter: 0, endCharacter: 20 }], totalDurationMs: 900 } }], summary: { requested: 1, succeeded: 1, failed: 0 } })).toMatchObject({ results: [{ data: { audio: [{ index: 0 }] } }] });
-    const audioVersion = { key, documentKey: key, version: 1, sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: '2026-07-22T10:00:00.000Z', mimeType: 'audio/mpeg', sizeBytes: 100, durationMs: 900, isCurrent: false, playbackPositionMs: 0, includeTitle: false, includeCode: false, createdAt: '2026-07-22T10:00:00.000Z' };
-    expect(contentToolOutputSchemas['document.read'].parse({ results: [{ key, success: true, data: { documentKey: key, title: 'Notes', audioVersion } }], summary: { requested: 1, succeeded: 1, failed: 0 } })).toMatchObject({ results: [{ data: { audioVersion: { version: 1 } } }] });
-    expect(() => contentToolOutputSchemas['document.read'].parse({ results: [{ key, success: true, data: { documentKey: key, title: 'Notes', audioVersion: { ...audioVersion, storageKey: 'private.mp3' } } }], summary: { requested: 1, succeeded: 1, failed: 0 } })).toThrow();
+    expect(() => contentToolOutputSchemas['document.read'].parse({ results: [{ key, success: true, data: { documentKey: key, title: 'Notes', audio: [] } }], summary: { requested: 1, succeeded: 1, failed: 0 } })).toThrow();
     expect(() => contentToolOutputSchemas['document.read'].parse({ results: [{ key, success: true, data: { documentKey: key, title: 'Notes', mode: 'html', content: 'wrong' } }], summary: { requested: 1, succeeded: 1, failed: 0 } })).toThrow();
   });
 

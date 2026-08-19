@@ -1,15 +1,13 @@
 import type { Context } from 'hono';
 import { z, ZodError } from 'zod';
-import { AgentExecutionAccessError } from '@/lib/ai/agents/access';
-import { AgentRuntimeNotFoundError } from '@/lib/ai/agents/runtime';
 import { personalAssistantInputSchema, runPersonalAssistant, type PersonalAssistantDependencies } from '@/lib/ai/personal-assistant';
-import { authorizeContentAgentExecution, ContentError, type RunContentAgentToolOptions } from '@/lib/ai/tools';
+import { authorizeContentExecution, ContentError, type RunAuthenticatedContentToolOptions } from '@/lib/ai/tools';
 import { getAuthIdentity } from './security';
 import { strictObject } from './validation';
 
 const requestSchema = strictObject({
   organizationKey: z.string().trim().min(1),
-  agentKey: z.string().cuid(),
+  scopeKey: z.string().cuid(),
   input: personalAssistantInputSchema,
 });
 const MAX_ASSISTANT_REQUEST_BYTES = 128 * 1024;
@@ -38,8 +36,8 @@ async function parseRequest(c: Context) {
 
 export interface PersonalAssistantHandlerDependencies {
   getIdentity?: typeof getAuthIdentity;
-  authorize?: typeof authorizeContentAgentExecution;
-  authorizationOptions?: Omit<RunContentAgentToolOptions, 'authenticatedUserKey' | 'execute'>;
+  authorize?: typeof authorizeContentExecution;
+  authorizationOptions?: Omit<RunAuthenticatedContentToolOptions, 'authenticatedUserKey' | 'execute'>;
   run?: typeof runPersonalAssistant;
   runtime?: PersonalAssistantDependencies;
 }
@@ -57,9 +55,9 @@ export function createPersonalAssistantHandler(dependencies: PersonalAssistantHa
       throw error;
     }
     try {
-      const { context } = await (dependencies.authorize ?? authorizeContentAgentExecution)({
+      const { context } = await (dependencies.authorize ?? authorizeContentExecution)({
         organizationKey: body.organizationKey,
-        agentKey: body.agentKey,
+        scopeKey: body.scopeKey,
       }, { ...dependencies.authorizationOptions, authenticatedUserKey: identity.key });
       const output = await (dependencies.run ?? runPersonalAssistant)(body.input, context, {
         ...dependencies.runtime,
@@ -67,13 +65,12 @@ export function createPersonalAssistantHandler(dependencies: PersonalAssistantHa
       });
       return c.json({ success: true, data: output });
     } catch (error) {
-      if (error instanceof AgentExecutionAccessError || error instanceof ContentError && error.code === 'CONTENT_FORBIDDEN') {
+      if (error instanceof ContentError && error.code === 'CONTENT_FORBIDDEN') {
         return c.json({ success: false, error: { code: 'ASSISTANT_FORBIDDEN', message: 'Assistant execution access denied.' } }, 403);
       }
-      if (error instanceof AgentRuntimeNotFoundError) return c.json({ success: false, error: { code: 'ASSISTANT_NOT_FOUND', message: 'Assistant runtime was not found.' } }, 404);
       console.error('personal assistant execution failed', {
         organizationKey: body.organizationKey,
-        agentKey: body.agentKey,
+        scopeKey: body.scopeKey,
         surface: body.input.surface,
         error,
       });

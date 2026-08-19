@@ -7,24 +7,24 @@ describe('unified tool registry', () => {
   test('has one unique definition for every public tool name', () => {
     expect(new Set(TOOL_NAMES).size).toBe(TOOL_NAMES.length);
     expect(new Set(TOOL_DEFINITIONS.map(({ name }) => name)).size).toBe(TOOL_DEFINITIONS.length);
-    expect(TOOL_NAMES).toHaveLength(118);
-    expect(TOOL_DEFINITIONS).toHaveLength(118);
-    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 64);
+    expect(TOOL_NAMES).toHaveLength(108);
+    expect(TOOL_DEFINITIONS).toHaveLength(108);
+    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 63);
     expect(TOOL_DEFINITIONS.map(({ name }) => name)).toEqual([...TOOL_NAMES]);
     expect(TOOL_NAMES).not.toContain('chat');
     expect(TOOL_NAMES).not.toContain('orchestrator.chat');
     expect(TOOL_DEFINITIONS.some(({ name }) => name === 'chat')).toBe(false);
     expect(TOOL_NAMES).not.toContain('transcribe');
-    expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'audio.generate')).toHaveLength(1);
-    expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'document.summary.audio.generate')).toHaveLength(1);
+    expect(TOOL_NAMES).not.toContain('audio.generate');
+    expect(TOOL_NAMES).not.toContain('document.summary.audio.generate');
     expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'image.caption')).toHaveLength(1);
     expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'image.create-visual-identity')).toHaveLength(1);
     expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'image.search')).toHaveLength(1);
+    expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'image.ideas.create')).toHaveLength(1);
+    expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'image.generate')).toHaveLength(1);
     expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'image.delete')).toHaveLength(1);
     expect(TOOL_NAMES).not.toContain('collection.duplicates.find');
     expect(TOOL_DEFINITIONS.some(({ name }) => name === 'orchestrator.chat')).toBe(false);
-    expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'folder.archive')).toHaveLength(1);
-    expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'document.restore')).toHaveLength(1);
     expect(TOOL_NAMES).not.toContain('email.read');
     expect(TOOL_NAMES).not.toContain('email.thread.list');
     expect(TOOL_NAMES).not.toContain('email.reply.draft');
@@ -43,7 +43,9 @@ describe('unified tool registry', () => {
       expect(TOOL_NAMES).not.toContain(name);
       expect(toolInputSchemas).not.toHaveProperty(name);
     }
-    expect(TOOL_NAMES).toContain('trip.create');
+    expect(TOOL_NAMES).toContain('place.list');
+    for (const name of ['place.create', 'place.visit.create', 'trip.create', 'trip.place.add', 'trip.place.remove']) expect(TOOL_NAMES).not.toContain(name);
+    expect(TOOL_NAMES).not.toContain('place.images.generate');
     expect(TOOL_NAMES).toContain('email.draft.send');
     expect(TOOL_NAMES).toEqual(expect.arrayContaining(['content.hidden.list', 'book.create', 'email.thread.read', 'email.thread.mark-read']));
     expect(TOOL_NAMES).not.toContain('book.create-context');
@@ -76,40 +78,16 @@ describe('unified tool registry', () => {
     }
   });
 
-  test('rejects historical lifecycle inputs and retains canonical strict schemas', () => {
-    const folderKey = newId();
-    const documentKey = newId();
-    const historicalInputs = {
-      'folder.archive': { folderKey },
-      'folder.restore': { folderKey },
-      'document.archive': { documentKey },
-      'document.restore': { documentKey },
-      'document-version.archive': { documentVersionKey: newId() },
-      'document-version.restore': { documentVersionKey: newId() },
-      'document-share.archive': { documentShareKey: newId() },
-      'document-share.restore': { documentShareKey: newId() },
-    };
-    for (const [name, item] of Object.entries(historicalInputs)) {
-      expect(toolInputSchemas[name].safeParse({ items: [item], atomic: true }).success, name).toBe(false);
-    }
-    expect(toolInputSchemas['folder.archive'].parse({ folderKeys: [folderKey] })).toEqual({ folderKeys: [folderKey], atomic: false });
-    expect(toolInputSchemas['document.restore'].parse({ documentKeys: [documentKey] })).toEqual({ documentKeys: [documentKey], atomic: false });
-    expect(toolInputSchemas['document-version.archive'].parse({ versionKeys: [documentKey] })).toEqual({ versionKeys: [documentKey], atomic: false });
-    expect(toolInputSchemas['document-share.restore'].parse({ shareKeys: [documentKey] })).toEqual({ shareKeys: [documentKey], atomic: false });
-    expect(toolInputSchemas['folder.archive'].safeParse({ folderKeys: [folderKey], unexpected: true }).success).toBe(false);
-    expect(TOOL_DEFINITIONS.find(({ name }) => name === 'folder.archive')?.inputSchema).not.toHaveProperty('oneOf');
-  });
-
   test('executes workspace tools with strict input and trusted context', async () => {
     const organizationKey = newId(), scopeKey = newId(), userKey = newId();
     const membership = { key: newId(), organizationId: organizationKey, userId: newId(), status: 'active' };
     const contentContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: membership } } as unknown as ToolContext;
     const calls: unknown[][] = [];
-    const travelService = { createTrip: async (...args: unknown[]) => { calls.push(args); return { key: newId() }; } } as any;
+    const travelService = { overview: async (...args: unknown[]) => { calls.push(args); return { places: [] }; } } as any;
 
-    await expect(runTool('trip.create', '', { name: 'Portugal', scopeKey: newId() }, { contentContext, travelService })).rejects.toThrow('Unrecognized key');
-    await runTool('trip.create', '', { name: 'Portugal' }, { contentContext, travelService });
-    expect(calls).toEqual([[{ organizationKey, scopeKey, name: 'Portugal' }, userKey]]);
+    await expect(runTool('place.list', '', { scopeKey: newId() }, { contentContext, travelService })).rejects.toThrow('Unrecognized key');
+    await runTool('place.list', '', {}, { contentContext, travelService });
+    expect(calls).toEqual([[{ organizationKey, scopeKey }, userKey]]);
     expect(() => toolInputSchemas['collection.create'].parse({ name: 'Favorites', organizationKey })).toThrow('Unrecognized key');
   });
 
@@ -150,6 +128,23 @@ describe('unified tool registry', () => {
     ]]);
     expect(result).toEqual({ images });
     await expect(runTool('image.search', '', { query: 'red dog', organizationKey }, { contentContext, gallery: {} })).rejects.toThrow('Unrecognized key');
+  });
+
+  test('executes canonical image tools with trusted context and request idempotency', async () => {
+    const organizationKey = newId(), scopeKey = newId(), userKey = newId();
+    const contentContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const calls: unknown[][] = [];
+    const images = {
+      createIdeas: async (...args: unknown[]) => { calls.push(['ideas', ...args]); return { concepts: [] }; },
+      generate: async (...args: unknown[]) => { calls.push(['generate', ...args]); return { images: [], provider: {} }; },
+    } as any;
+    await runTool('image.ideas.create', '', { prompt: 'Earth', requestedCount: 2 }, { contentContext, images });
+    await runTool('image.generate', '', { prompt: 'Earth', count: 1, size: '1024x1024', quality: 'high' }, { contentContext, requestKey: 'request-1', images });
+    expect(calls).toEqual([
+      ['ideas', { prompt: 'Earth', requestedCount: 2 }, contentContext],
+      ['generate', { prompt: 'Earth', count: 1, size: '1024x1024', quality: 'high' }, contentContext, 'request-1'],
+    ]);
+    await expect(runTool('image.generate', '', { prompt: 'Earth', count: 1, size: '1024x1024', quality: 'high', scopeKey }, { contentContext, images })).rejects.toThrow('Unrecognized key');
   });
 
   test('keeps canonical Content mutations in dot notation', async () => {

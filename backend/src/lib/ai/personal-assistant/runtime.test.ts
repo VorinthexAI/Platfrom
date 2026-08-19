@@ -30,13 +30,13 @@ describe('personal assistant runtime', () => {
       },
     });
 
-    expect(request).toEqual({ mode: 'model', organizationKey, actionSlug: 'orchestrator-chat', modelSlug: 'google.gemini-2.5-flash-lite' });
+    expect(request).toEqual({ mode: 'fixed', organizationKey, actionSlug: 'orchestrator-chat', modelSlug: 'openai.gpt-5.6-luna', providerSlug: 'openai' });
     expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual([
       'content.hidden.list',
       'folder.hide', 'folder.reveal', 'document.hide', 'document.reveal',
       'folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy',
       'document.list', 'document.find', 'document.create', 'document.update',
-      'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.summary.audio.generate', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.enhance', 'document.translate',
+      'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.enhance', 'document.translate',
       'document.list-versions', 'document.restore-version', 'document.download', 'content.neighbors', 'content.search-history.delete', 'knowledge.search', 'note.write', 'assistant.unsupported',
     ]);
     expect(result).toEqual({ type: 'unsupported', message: 'This request is not supported in Archive. Core can search your documents or help write the open note.', sources: [] });
@@ -77,14 +77,31 @@ describe('personal assistant runtime', () => {
       'collection.member.role.update', 'collection.member.remove', 'collection.leave', 'collection.share.list', 'collection.share.create', 'collection.share.update', 'collection.share.revoke', 'collection.share.activate',
       'image.search', 'image.favorite', 'image.update', 'image.delete',
       'collection.duplicates.delete', 'collection.image.transfer', 'subject.list', 'subject.create',
-      'subject.image.list', 'subject.delete', 'subject.restore', 'highlight.create', 'highlight.list',
-      'highlight.read', 'highlight.delete', 'collection.hide', 'collection.reveal',
-      'image.hide', 'image.reveal', 'assistant.unsupported',
+      'subject.image.list', 'subject.delete', 'highlight.create', 'highlight.list',
+      'highlight.read', 'highlight.delete', 'image.create-memory', 'image.memory.list',
+      'image.memory.read', 'image.memory.delete', 'collection.hide', 'collection.reveal',
+      'image.hide', 'image.reveal', 'image.ideas.create', 'image.generate', 'assistant.unsupported',
     ]);
     expect(chatInput.systemPrompt).toContain('Call image.search whenever');
     expect(chatInput.systemPrompt).toContain('duplicates true plus collectionKey');
     expect(chatInput.messages[0].content[0].text).toContain('"workspace":"Gallery"');
     expect(result).toEqual({ type: 'unsupported', message: 'This request is not supported in Gallery. Core can search your images.', sources: [] });
+  });
+
+  test('executes image generation with trusted Core context and reports a Gallery mutation', async () => {
+    let modelCalls = 0;
+    const calls: unknown[][] = [];
+    const result = await runPersonalAssistant({ ...input, surface: 'media-workspace', message: 'Generate an image of Earth', requestKey: 'request-1' }, domain, {
+      execute: async () => {
+        modelCalls += 1;
+        if (modelCalls === 1) return response({ text: '', toolCalls: [{ id: 'generate-1', name: 'image.generate', arguments: { prompt: 'Earth from orbit', count: 1, size: '1024x1024', quality: 'high' } }], stopReason: 'tool_use' });
+        return response({ text: 'Generated and saved the image.', toolCalls: [], stopReason: 'end_turn' });
+      },
+      images: { generate: async (...args: unknown[]) => { calls.push(args); return { images: [{ key: newId(), url: 'https://images.example/signed.png' }], provider: { durationMs: 10, costUsd: 0.1 } }; } } as any,
+    });
+    expect(calls).toEqual([[{ prompt: 'Earth from orbit', count: 1, size: '1024x1024', quality: 'high' }, domain, expect.stringMatching(/^[a-f0-9]{64}$/)]]);
+    expect(calls[0]?.[2]).not.toBe('request-1');
+    expect(result).toEqual({ type: 'answer', message: 'Generated and saved the image.', sources: [], changes: [{ workspace: 'gallery' }] });
   });
 
   test('exposes canonical Compass capabilities', async () => {
@@ -96,7 +113,7 @@ describe('personal assistant runtime', () => {
       },
     });
 
-    expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual(['place.list', 'place.create', 'place.visit.create', 'trip.create', 'trip.place.add', 'trip.place.remove', 'assistant.unsupported']);
+    expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual(['place.list', 'assistant.unsupported']);
     expect(chatInput.systemPrompt).toContain('operating inside Compass');
     expect(chatInput.messages[0].content[0].text).toContain('"workspace":"Compass"');
     expect(result).toEqual({ type: 'unsupported', message: 'This request is not supported in Compass. Core can search your saved knowledge for travel context.', sources: [] });

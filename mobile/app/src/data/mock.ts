@@ -1,7 +1,5 @@
 import { z } from "zod";
 
-import type { CapabilitySlug } from "./registry";
-
 /**
  * Local mock data only — no backend, no network. Everything is validated
  * with Zod at module load so the shapes stay honest as the mockup evolves.
@@ -41,14 +39,6 @@ const signalItemSchema = z.strictObject({
   strength: z.number().min(0).max(1),
 });
 export type SignalItem = z.infer<typeof signalItemSchema>;
-
-const compassItemSchema = z.strictObject({
-  id: z.string(),
-  place: z.string(),
-  note: z.string(),
-  kind: z.enum(["visited", "planned", "memory"]),
-});
-export type CompassItem = z.infer<typeof compassItemSchema>;
 
 const ascendItemSchema = z.strictObject({
   id: z.string(),
@@ -108,15 +98,6 @@ export const SIGNAL_ITEMS: readonly SignalItem[] = z
 /** Everything Signal held back today — surfaced as a single quiet line. */
 export const SIGNAL_FILTERED_COUNT = 47;
 
-export const COMPASS_ITEMS: readonly CompassItem[] = z
-  .array(compassItemSchema)
-  .parse([
-    { id: "c1", place: "Kyoto, Japan", note: "Visited — April 2025", kind: "visited" },
-    { id: "c2", place: "Reykjavík, Iceland", note: "Planned — December 2026", kind: "planned" },
-    { id: "c3", place: "Lisbon, Portugal", note: "Memory — 12 photos", kind: "memory" },
-    { id: "c4", place: "Patagonia, Chile", note: "Planned — next journey", kind: "planned" },
-  ]);
-
 export const ASCEND_ITEMS: readonly AscendItem[] = z
   .array(ascendItemSchema)
   .parse([
@@ -130,7 +111,6 @@ export type CapabilityContent = {
   archive: readonly ArchiveItem[];
   gallery: readonly GalleryItem[];
   signal: readonly SignalItem[];
-  compass: readonly CompassItem[];
   ascend: readonly AscendItem[];
 };
 
@@ -138,7 +118,6 @@ const CONTENT: CapabilityContent = {
   archive: ARCHIVE_ITEMS,
   gallery: GALLERY_ITEMS,
   signal: SIGNAL_ITEMS,
-  compass: COMPASS_ITEMS,
   ascend: ASCEND_ITEMS,
 };
 
@@ -147,7 +126,7 @@ const CONTENT: CapabilityContent = {
  * TanStack Query, but the "fetch" resolves locally. When the real API
  * exists, this swaps for the Axios client without touching the screens.
  */
-export function fetchCapabilityContent<S extends CapabilitySlug>(
+export function fetchCapabilityContent<S extends keyof CapabilityContent>(
   slug: S,
 ): Promise<CapabilityContent[S]> {
   return Promise.resolve(CONTENT[slug]);

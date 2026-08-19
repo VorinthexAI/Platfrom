@@ -5,7 +5,6 @@ import {
   EMBEDDING_PROVIDER_ID,
   EXTERNAL_EMBEDDING_MODEL_ID,
   LEGACY_EMBEDDING_DIMENSIONS,
-  QWEN_RETRIEVAL_INSTRUCTION,
 } from './embedding-constants';
 
 export * from './embedding-constants';
@@ -44,16 +43,20 @@ export function embeddingMetadata() {
   } as const;
 }
 
-export function prepareEmbeddingText(text: string, purpose: EmbeddingPurpose): string {
-  const value = text.trim();
-  if (purpose === 'query' && !value.startsWith(QWEN_RETRIEVAL_INSTRUCTION)) return `${QWEN_RETRIEVAL_INSTRUCTION}${value}`;
-  return value;
+export function prepareEmbeddingText(text: string, _purpose: EmbeddingPurpose): string {
+  return text.trim();
 }
 
 export async function embedTexts(input: EmbedTextsInput): Promise<number[][]> {
   const parsed = batchInputSchema.parse(input);
-  const { createOpenRouterProvider, resolveOpenRouterEnvironment } = await import('@/lib/ai/providers/openrouter');
-  const adapter = createOpenRouterProvider(resolveOpenRouterEnvironment(process.env));
+  const { createOpenAIProvider } = await import('@/lib/ai/providers/openai');
+  const { resolveStaticOpenAIConfig } = await import('@/lib/ai/router/static-routes');
+  const adapter = createOpenAIProvider(resolveStaticOpenAIConfig({
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+    OPENAI_BASE_URL: process.env.OPENAI_BASE_URL,
+    OPENAI_ORGANIZATION: process.env.OPENAI_ORGANIZATION,
+    OPENAI_PROJECT: process.env.OPENAI_PROJECT,
+  }));
   const prepared = parsed.texts.map((text) => prepareEmbeddingText(text, parsed.purpose));
   const batches = Array.from({ length: Math.ceil(prepared.length / 16) }, (_, index) => prepared.slice(index * 16, (index + 1) * 16));
   const batchEmbeddings = new Array<number[][]>(batches.length);

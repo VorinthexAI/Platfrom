@@ -5,14 +5,16 @@ test("maps audited slugs to precise cache and mode families", () => {
   expect([...galleryRefreshPlan("collection.invites.changed")]).toEqual(["collectionInvites", "incomingInvites"]);
   expect([...galleryRefreshPlan("collection.shares.changed")]).toEqual(["shares"]);
   expect([...galleryRefreshPlan("subject.changed")]).toEqual(["subjects", "search"]);
-  expect(galleryRefreshPlan("image.changed")).toEqual(new Set(["current", "search", "duplicates", "cleanup", "subjects", "upload", "highlights"]));
+  expect(galleryRefreshPlan("image.changed")).toEqual(new Set(["current", "search", "duplicates", "cleanup", "subjects", "upload", "highlights", "memories"]));
   expect(galleryRefreshPlan("upload.changed")).toEqual(new Set(["current", "search", "duplicates", "cleanup", "upload", "subjects"]));
   expect(galleryRefreshPlan("highlight.changed")).toEqual(new Set(["highlights"]));
+  expect(galleryRefreshPlan("memory.created")).toEqual(new Set(["memories"]));
+  expect(galleryRefreshPlan("memory.deleted")).toEqual(new Set(["memories"]));
 });
 
 test("gates network families precisely by slug", () => {
   expect([...galleryRefreshPlan("collection.index.changed")]).toEqual(["root", "access"]);
-  expect([...galleryRefreshPlan("collection.content.changed")]).toEqual(["current", "search", "duplicates", "cleanup", "highlights"]);
+  expect([...galleryRefreshPlan("collection.content.changed")]).toEqual(["current", "search", "duplicates", "cleanup", "highlights", "memories"]);
   expect([...galleryRefreshPlan("collection.access.changed")]).toEqual(["root", "access", "members", "cleanup"]);
   expect([...galleryRefreshPlan("collection.invites.changed")]).not.toContain("root");
   expect([...galleryRefreshPlan("collection.shares.changed")]).not.toContain("current");
@@ -20,7 +22,7 @@ test("gates network families precisely by slug", () => {
 
 test("reconnect is a complete recovery plan", () => {
   const recovery = galleryRefreshPlan("reconnect");
-  for (const family of ["root", "current", "access", "members", "collectionInvites", "incomingInvites", "shares", "subjects", "search", "duplicates", "cleanup", "upload", "highlights"] as const) expect(recovery.has(family)).toBe(true);
+  for (const family of ["root", "current", "access", "members", "collectionInvites", "incomingInvites", "shares", "subjects", "search", "duplicates", "cleanup", "upload", "highlights", "memories"] as const) expect(recovery.has(family)).toBe(true);
 });
 
 test("coalesces bursts and keeps one deferred refresh while busy", () => {

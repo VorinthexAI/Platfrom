@@ -100,6 +100,22 @@ type GalleryHighlightProjection = Omit<GalleryHighlight, "title" | "slideCount" 
 export type GalleryHighlightSlide = { key: string; imageKey: string; url: string };
 export type GalleryHighlightDetail = GalleryHighlight;
 
+export type GalleryMemory = {
+  key: string;
+  imageKey: string;
+  text: string;
+  image: { key: string; url: string };
+  createdByKey: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type GalleryMemoryDetail = GalleryMemory;
+
+export function normalizeGalleryMemory(memory: GalleryMemory): GalleryMemory {
+  return { ...memory, image: { ...memory.image } };
+}
+
 const galleryHighlightDateFormatter = new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 
 function normalizeGalleryHighlight(highlight: GalleryHighlightProjection): GalleryHighlight {
@@ -164,7 +180,6 @@ export type GallerySubject = {
   referenceImageKey: string;
   referenceUrl: string;
   imageCount: number;
-  deletedAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -175,11 +190,13 @@ type ApiResponse<T> =
 
 export class GalleryClientError extends Error {
   code?: string;
+  status?: number;
 
-  constructor(message: string, code?: string) {
+  constructor(message: string, code?: string, status?: number) {
     super(message);
     this.name = "GalleryClientError";
     this.code = code;
+    this.status = status;
   }
 }
 
@@ -187,8 +204,14 @@ export function isGalleryClientErrorCode(error: unknown, code: string) {
   return error instanceof GalleryClientError && error.code === code;
 }
 
-function galleryClientError(error: { message: string; code?: string }) {
-  return new GalleryClientError(error.message, error.code);
+function galleryClientError(error: unknown, status?: number) {
+  const value = error && typeof error === "object" ? error as { message?: unknown; code?: unknown } : undefined;
+  const message = typeof value?.message === "string" && value.message.trim() ? value.message : "Gallery request failed.";
+  return new GalleryClientError(message, typeof value?.code === "string" ? value.code : undefined, status);
+}
+
+export function isGalleryMemoryExhaustion(error: unknown) {
+  return error instanceof GalleryClientError && (error.status === 409 || error.code?.includes("EXHAUST") === true);
 }
 
 type GalleryContext = { organizationKey: string; scopeKey: string };
@@ -216,11 +239,13 @@ export function getGalleryMemberKey() {
 async function postGallery<T>(path: string, input: Record<string, unknown>, timeout = 60_000) {
   try {
     const response = await apiClient.post<ApiResponse<T>>(path, { ...getGalleryContext(), ...input }, { timeout });
-    if (!response.data.success) throw galleryClientError(response.data.error);
-    return response.data.data;
+    const payload = response.data as ApiResponse<T> | undefined;
+    if (!payload || typeof payload !== "object" || payload.success !== true) throw galleryClientError(payload && "error" in payload ? payload.error : undefined);
+    if (!("data" in payload)) throw galleryClientError(undefined);
+    return payload.data;
   } catch (error) {
-    const failure = (error as { response?: { data?: ApiResponse<T> } }).response?.data;
-    if (failure && !failure.success) throw galleryClientError(failure.error);
+    const failure = (error as { response?: { data?: unknown } }).response?.data;
+    if (failure && typeof failure === "object" && "success" in failure && failure.success === false) throw galleryClientError("error" in failure ? failure.error : undefined, (error as { response?: { status?: number } }).response?.status);
     throw error;
   }
 }
@@ -241,9 +266,16 @@ export const GALLERY_COLLECTION_SHARING_ENDPOINTS = {
 
 export const GALLERY_COLLECTION_HIGHLIGHT_ENDPOINTS = {
   create: "/gallery/highlights",
-  list: "/gallery/highlights/list",
+  list: "/gallery/highlights",
   detail: "/gallery/highlights/read",
   delete: "/gallery/highlights/delete",
+} as const;
+
+export const GALLERY_COLLECTION_MEMORY_ENDPOINTS = {
+  create: "/gallery/memories",
+  list: "/gallery/memories",
+  detail: "/gallery/memories/read",
+  delete: "/gallery/memories/delete",
 } as const;
 
 export function createGalleryCollectionHighlight(collectionKey: string) {
@@ -252,7 +284,11 @@ export function createGalleryCollectionHighlight(collectionKey: string) {
 }
 
 export function listGalleryCollectionHighlights(collectionKey: string) {
-  return postGallery<{ highlights: GalleryHighlightProjection[] }>(GALLERY_COLLECTION_HIGHLIGHT_ENDPOINTS.list, { collectionKey })
+  return apiClient.get<ApiResponse<{ highlights: GalleryHighlightProjection[] }>>(GALLERY_COLLECTION_HIGHLIGHT_ENDPOINTS.list, { params: { ...getGalleryContext(), collectionKey }, timeout: 60_000 })
+    .then(({ data }) => {
+      if (!data || data.success !== true || !("data" in data)) throw galleryClientError(data && "error" in data ? data.error : undefined);
+      return data.data;
+    })
     .then(({ highlights }) => ({ highlights: highlights.map(normalizeGalleryHighlight) }));
 }
 
@@ -263,6 +299,28 @@ export function fetchGalleryCollectionHighlight(highlightKey: string) {
 
 export function deleteGalleryCollectionHighlight(highlightKey: string) {
   return postGallery<{ highlightKey: string }>(GALLERY_COLLECTION_HIGHLIGHT_ENDPOINTS.delete, { highlightKey });
+}
+
+export function createGalleryCollectionMemory(collectionKey: string) {
+  return postGallery<{ memory: GalleryMemory }>(GALLERY_COLLECTION_MEMORY_ENDPOINTS.create, { collectionKey })
+    .then(({ memory }) => ({ memory: normalizeGalleryMemory(memory) }));
+}
+
+export function listGalleryCollectionMemories(collectionKey: string) {
+  return apiClient.get<ApiResponse<{ memories: GalleryMemory[] }>>(GALLERY_COLLECTION_MEMORY_ENDPOINTS.list, { params: { ...getGalleryContext(), collectionKey }, timeout: 60_000 })
+    .then(({ data }) => {
+      if (!data || data.success !== true || !("data" in data)) throw galleryClientError(data && "error" in data ? data.error : undefined);
+      return { memories: data.data.memories.map(normalizeGalleryMemory) };
+    });
+}
+
+export function fetchGalleryCollectionMemory(memoryKey: string) {
+  return postGallery<{ memory: GalleryMemory }>(GALLERY_COLLECTION_MEMORY_ENDPOINTS.detail, { memoryKey })
+    .then(({ memory }) => ({ memory: normalizeGalleryMemory(memory) }));
+}
+
+export function deleteGalleryCollectionMemory(memoryKey: string, collectionKey: string) {
+  return postGallery<{ memoryKey: string }>(GALLERY_COLLECTION_MEMORY_ENDPOINTS.delete, { memoryKey, collectionKey });
 }
 
 export function listGalleryCollectionMembers(collectionKey: string) {
@@ -448,8 +506,8 @@ export function transferGalleryCollectionImages(input: { sourceCollectionKey: st
   return postGallery<{ mode: "copy" | "move"; imageKeys: string[]; destinationCollectionKeys: string[]; createdRelationCount: number }>("/gallery/collections/images/transfer", input);
 }
 
-export function listGallerySubjects(includeDeleted = false) {
-  return postGallery<{ subjects: GallerySubject[] }>("/gallery/subjects/list", { includeDeleted });
+export function listGallerySubjects() {
+  return postGallery<{ subjects: GallerySubject[] }>("/gallery/subjects/list", {});
 }
 
 export function createGallerySubject(name: string, imageKeys: string[]) {
@@ -461,21 +519,14 @@ export function listGallerySubjectImages(identityKey: string) {
 }
 
 export function deleteGallerySubject(identityKey: string) {
-  return postGallery<{ subject: GallerySubject }>("/gallery/subjects/delete", { identityKey });
-}
-
-export function restoreGallerySubject(identityKey: string) {
-  return postGallery<{ subject: GallerySubject }>("/gallery/subjects/restore", { identityKey });
+  return postGallery<{ identityKey: string }>("/gallery/subjects/delete", { identityKey });
 }
 
 export async function askGalleryAssistant(message: string) {
-  const state = useAuthStore.getState();
-  const { organizationKey } = getGalleryContext();
-  const agentKey = state.contentExecution?.agentKey ?? "";
-  if (!agentKey) throw new Error("Your personal assistant is unavailable for this session.");
+  const { organizationKey, scopeKey } = getGalleryContext();
   const response = await apiClient.post<ApiResponse<{ type: "answer" | "note" | "unsupported"; message: string; changes?: AssistantChange[] }>>(
     "/assistant/respond",
-    { organizationKey, agentKey, input: { surface: "media-workspace", message, currentNote: { title: "", content: "" } } },
+    { organizationKey, scopeKey, input: { surface: "media-workspace", message, currentNote: { title: "", content: "" } } },
     { timeout: 4 * 60_000 },
   );
   if (!response.data.success) throw new Error(response.data.error.message);

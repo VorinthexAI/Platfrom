@@ -24,6 +24,9 @@ export interface WorkspaceToolDependencies {
   books?: BookService;
   userHiddens?: UserHiddenService;
   gallery?: AssistantCapabilityContext['gallery'];
+  images?: AssistantCapabilityContext['images'];
+  signal?: AbortSignal;
+  timeoutMs?: number;
 }
 
 function publicDefinition(capability: AssistantCapability) {
@@ -43,6 +46,9 @@ function publicDefinition(capability: AssistantCapability) {
         books: dependencies.books,
         userHiddens: dependencies.userHiddens,
         gallery: dependencies.gallery,
+        images: dependencies.images,
+        signal: dependencies.signal,
+        timeoutMs: dependencies.timeoutMs,
       };
       const result = await capability.execute(rawInput, context);
       if (result.kind !== 'continue') throw new Error(`Public workspace tool ${capability.definition.name} returned a UI-only result.`);
@@ -61,7 +67,7 @@ export const WORKSPACE_TOOL_DEFINITIONS = Object.freeze([
     ...ascendCapabilities,
   ].filter(({ definition }) => !new Set([
     'folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy',
-    'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.summary.audio.generate', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.enhance', 'document.translate', 'document.list-versions', 'document.restore-version', 'document.download',
+    'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.enhance', 'document.translate', 'document.list-versions', 'document.restore-version', 'document.download',
     'content.neighbors', 'content.search-history.delete',
   ]).has(definition.name)).map(publicDefinition),
 ]);

@@ -9,6 +9,7 @@ import { GMAIL_WEBHOOK_V1_PATH, handleGmailWebhook } from './email-webhook';
 import { closeEmailSyncQueue, enqueueEmailWatchRenewal, startEmailSyncWorker } from '@/lib/email-inbox/sync-queue';
 import { closeGalleryUploadQueue, recoverGalleryUploadQueue, startGalleryUploadWorker } from '@/lib/gallery/upload-queue';
 import { registerRoutes } from './routes';
+import { drainStorageDeletionJobs } from '@/lib/storage-deletion';
 
 export const app = new Hono();
 const api = app.basePath('/api/v1');
@@ -67,10 +68,13 @@ if (import.meta.main) {
   const emailWorker = startEmailSyncWorker();
   const galleryWorker = startGalleryUploadWorker();
   void recoverGalleryUploadQueue().catch((error) => console.error('gallery upload queue recovery failed', { error }));
+  void drainStorageDeletionJobs(1000).catch((error) => console.error('storage deletion recovery failed', { error }));
   void enqueueEmailWatchRenewal().catch((error) => console.error('email watch renewal enqueue failed', { error }));
+  const storageDeletionTimer = setInterval(() => { void drainStorageDeletionJobs(1000).catch((error) => console.error('storage deletion recovery failed', { error })); }, 60_000);
   const renewalTimer = setInterval(() => { void enqueueEmailWatchRenewal().catch((error) => console.error('email watch renewal enqueue failed', { error })); }, 6 * 60 * 60_000);
 
   const shutdown = async () => {
+    clearInterval(storageDeletionTimer);
     clearInterval(renewalTimer);
     await emailWorker.close();
     await galleryWorker.close();

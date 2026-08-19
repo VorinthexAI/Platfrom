@@ -46,7 +46,6 @@ export function WorkspaceAppSwitcher({ active, onBeforeSelect, trigger = "identi
             key={app.slug}
             icon={<ChromeIcon glow={0.45} size={32} source={capabilityIconSource[app.slug]} />}
             onPress={() => select(app.slug)}
-            size="lg"
             style={styles.item}
             textStyle={styles.itemText}
             variant="secondary"
