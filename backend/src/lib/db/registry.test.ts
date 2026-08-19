@@ -15,9 +15,6 @@ import { pollOptionSchema } from './poll-options.node';
 import { pollVoteSchema } from './poll-votes.node';
 import { folderSchema } from './folders.node';
 import { documentSchema } from './documents.node';
-import { projectSchema } from './projects.node';
-import { milestoneSchema } from './milestones.node';
-import { taskSchema } from './tasks.node';
 import { documentVersionSchema } from './document-versions.node';
 import { documentShareSchema } from './document-shares.node';
 import { imageSchema } from './images.node';
@@ -69,9 +66,6 @@ describe('node registry schema contracts', () => {
       'bookChapters',
       'chapterContexts',
       'bookProgress',
-      'projects',
-      'milestones',
-      'tasks',
     ]));
     expect(NODE_NAMES).not.toContain('agentTools');
     expect(NODE_NAMES).not.toContain('tools');
@@ -136,14 +130,6 @@ describe('node registry schema contracts', () => {
     expect(shareSchema.shape).toHaveProperty('sourceType');
     expect(shareSchema.shape).toHaveProperty('sourceKey');
     expect(shareSchema.shape).not.toHaveProperty('embedding');
-    for (const schema of [projectSchema, milestoneSchema, taskSchema]) {
-      expect(schema.shape).toHaveProperty('key');
-      expect(schema.shape).toHaveProperty('scopeKey');
-      expect(schema.shape).toHaveProperty('embedding');
-      expect(schema.shape).toHaveProperty('deletedAt');
-      expect(schema.shape).toHaveProperty('createdAt');
-      expect(schema.shape).toHaveProperty('updatedAt');
-    }
     for (const schema of [folderSchema, documentSchema, documentVersionSchema, documentShareSchema, imageSchema, collectionSchema, shareSchema]) {
       expect(schema.shape).toHaveProperty('deletedAt');
       expect(schema.shape.deletedAt.parse(undefined)).toBeNull();
@@ -158,19 +144,6 @@ describe('node registry schema contracts', () => {
     expect(() => channelParticipantSchema.parse(participant)).toThrow();
     expect(() => channelParticipantSchema.parse({ ...participant, userOrganizationKey: 'cmrnlzf640003qc7k4p5zem5w', orchestratorKey: 'cmrnlzf640004qc7k4p5zem5w' })).toThrow();
     expect(channelParticipantSchema.parse({ ...participant, userOrganizationKey: 'cmrnlzf640003qc7k4p5zem5w' }).userOrganizationKey).toBeDefined();
-  });
-
-  test('normalizes the legacy project folder contract while deployments overlap', () => {
-    const project = projectSchema.parse({
-      key: 'cmrnlzf640000qc7k4p5zem5w',
-      scopeKey: 'cmrnlzf640001qc7k4p5zem5w',
-      archiveFolderKey: 'cmrnlzf640002qc7k4p5zem5w',
-      name: 'Launch',
-      createdAt: '2026-07-22T00:00:00.000Z',
-      updatedAt: '2026-07-22T00:00:00.000Z',
-    });
-    expect(project.contentFolderKey).toBe('cmrnlzf640002qc7k4p5zem5w');
-    expect(project).not.toHaveProperty('archiveFolderKey');
   });
 
   test('registers new nodes for generic consumers', () => {

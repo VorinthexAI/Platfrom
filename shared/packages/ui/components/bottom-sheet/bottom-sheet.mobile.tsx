@@ -88,12 +88,11 @@ export type BottomSheetProps = {
   footer?: ReactNode;
   headerLeading?: ReactNode;
   headerTrailing?: ReactNode;
+  height?: "full";
   hideHeading?: boolean;
   hideCloseButton?: boolean;
-  mutation?: boolean;
   onOpenChange: (open: boolean) => void;
   open: boolean;
-  tall?: boolean;
   title: string;
 };
 
@@ -104,17 +103,17 @@ export function BottomSheet({
   footer,
   headerLeading,
   headerTrailing,
+  height,
   hideHeading = false,
   hideCloseButton = false,
-  mutation = false,
   onOpenChange,
   open,
-  tall = false,
   title,
 }: BottomSheetProps) {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
-  const androidBottomInset = Platform.OS === "android" ? Math.max(insets.bottom, 12) : 0;
+  const androidBottomInset = Platform.OS === "android" ? insets.bottom : 0;
+  const fullHeight = height === "full";
   const setSceneSheetOpen = useContext(BottomSheetSceneContext);
   const [visible, setVisible] = useState(open);
   const [reducedMotion, setReducedMotion] = useState(false);
@@ -253,11 +252,10 @@ export function BottomSheet({
           accessibilityRole="summary"
           style={[
             styles.sheet,
-            tall && styles.tallSheet,
-            mutation && styles.mutationSheet,
-            Platform.OS === "android" && styles.androidSheet,
+            fullHeight && styles.fullSheet,
             {
-              top: mutation ? insets.top : undefined,
+              bottom: fullHeight ? androidBottomInset : undefined,
+              top: fullHeight ? insets.top : undefined,
               paddingBottom: Platform.OS === "android" ? 16 : Math.max(insets.bottom, 16),
               transform: [{ translateY }],
             },
@@ -285,7 +283,7 @@ export function BottomSheet({
               <CloseIcon size="sm" />
             </Button> : null}
           </View>
-          <View style={[styles.content, (tall || mutation) && styles.flexContent]}>{children}</View>
+          <View style={[styles.content, fullHeight && styles.flexContent]}>{children}</View>
           {footer ? <View style={styles.footer}>{footer}</View> : null}
         </Animated.View>
       </View>
@@ -328,18 +326,15 @@ const styles = StyleSheet.create({
   sheet: {
     backgroundColor: colors.page,
     borderColor: "rgba(221, 226, 229, 0.14)",
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     borderWidth: 1,
     maxHeight: "90%",
     paddingHorizontal: 20,
   },
-  androidSheet: {
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
-  },
-  tallSheet: { height: "72%" },
-  mutationSheet: {
+  fullSheet: {
     bottom: 0,
     left: 0,
     maxHeight: "100%",

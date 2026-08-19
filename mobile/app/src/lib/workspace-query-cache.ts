@@ -4,8 +4,10 @@ import type { Book, BookDetail } from "./books-client";
 import type { ContentContext } from "./content-client";
 import { contentQueryKeys } from "./content-query-cache";
 import type { EmailFilter, EmailOverview, EmailThread } from "./email-client";
-import type { GalleryCollection, GalleryImage, GalleryOverview } from "./gallery-client";
+import { normalizeCollection } from "./collection-access";
+import type { GalleryCollection, GalleryCollectionInvite, GalleryCollectionMember, GalleryCollectionShareLink, GalleryImage, GalleryOverview } from "./gallery-client";
 import type { Place, Trip } from "./travel-client";
+import type { UserHiddenRecord } from "./user-hidden-client";
 
 export type WorkspaceContext = { organizationKey: string; scopeKey: string };
 
@@ -14,16 +16,51 @@ const contextKey = (context: WorkspaceContext) => [context.organizationKey, cont
 export const galleryQueryKeys = {
   all: (context: WorkspaceContext) => ["gallery", ...contextKey(context)] as const,
   collections: (context: WorkspaceContext) => [...galleryQueryKeys.all(context), "collections"] as const,
+  userHiddens: (context: WorkspaceContext) => [...galleryQueryKeys.all(context), "user-hiddens"] as const,
   overviews: (context: WorkspaceContext) => [...galleryQueryKeys.all(context), "overviews"] as const,
   overview: (context: WorkspaceContext, collectionKey?: string) => [...galleryQueryKeys.overviews(context), collectionKey ?? null] as const,
+  members: (context: WorkspaceContext, collectionKey: string) => [...galleryQueryKeys.all(context), "sharing", collectionKey, "members"] as const,
+  invites: (context: WorkspaceContext, collectionKey: string) => [...galleryQueryKeys.all(context), "sharing", collectionKey, "invites"] as const,
+  incomingInvites: (context: WorkspaceContext) => [...galleryQueryKeys.all(context), "sharing", "incoming-invites"] as const,
+  shareLinks: (context: WorkspaceContext, collectionKey: string) => [...galleryQueryKeys.all(context), "sharing", collectionKey, "share-links"] as const,
+  subjects: (context: WorkspaceContext) => [...galleryQueryKeys.all(context), "subjects"] as const,
+  search: (context: WorkspaceContext, mode: "text" | "similar" | "identity", collectionKey: string | undefined, value: string) => [...galleryQueryKeys.all(context), "search", mode, collectionKey ?? null, value] as const,
+  duplicates: (context: WorkspaceContext, collectionKey: string) => [...galleryQueryKeys.all(context), "duplicates", collectionKey] as const,
+  cleanups: (context: WorkspaceContext, collectionKey: string) => [...galleryQueryKeys.all(context), "cleanup", collectionKey] as const,
+  cleanup: (context: WorkspaceContext, collectionKey: string, threshold: number) => [...galleryQueryKeys.cleanups(context, collectionKey), threshold] as const,
+  uploads: (context: WorkspaceContext) => [...galleryQueryKeys.all(context), "uploads"] as const,
+  highlights: (context: WorkspaceContext, collectionKey: string) => [...galleryQueryKeys.all(context), "highlights", collectionKey] as const,
+  highlight: (context: WorkspaceContext, collectionKey: string, highlightKey: string) => [...galleryQueryKeys.highlights(context, collectionKey), highlightKey] as const,
 };
 
+export function patchGalleryUserHiddens(queryClient: QueryClient, context: WorkspaceContext, update: (current: UserHiddenRecord[]) => UserHiddenRecord[]) {
+  const key = galleryQueryKeys.userHiddens(context);
+  const previous = queryClient.getQueryData<UserHiddenRecord[]>(key) ?? [];
+  queryClient.setQueryData(key, update(previous));
+  return previous;
+}
+
+export function setCachedGalleryMembers(queryClient: QueryClient, context: WorkspaceContext, collectionKey: string, members: GalleryCollectionMember[]) {
+  queryClient.setQueryData(galleryQueryKeys.members(context, collectionKey), members);
+}
+
+export function setCachedGalleryInvites(queryClient: QueryClient, context: WorkspaceContext, collectionKey: string, invites: GalleryCollectionInvite[]) {
+  queryClient.setQueryData(galleryQueryKeys.invites(context, collectionKey), invites);
+}
+
+export function setCachedGalleryShareLinks(queryClient: QueryClient, context: WorkspaceContext, collectionKey: string, links: GalleryCollectionShareLink[]) {
+  queryClient.setQueryData(galleryQueryKeys.shareLinks(context, collectionKey), links);
+}
+
 export async function getGalleryCollections(queryClient: QueryClient, context: WorkspaceContext, queryFn: () => Promise<GalleryCollection[]>) {
-  return queryClient.fetchQuery({ queryKey: galleryQueryKeys.collections(context), queryFn, staleTime: Infinity });
+  const collections = await queryClient.fetchQuery({ queryKey: galleryQueryKeys.collections(context), queryFn, staleTime: Infinity });
+  const normalized = collections.map(normalizeCollection);
+  queryClient.setQueryData(galleryQueryKeys.collections(context), normalized);
+  return normalized;
 }
 
 export function setCachedGalleryCollections(queryClient: QueryClient, context: WorkspaceContext, collections: GalleryCollection[]) {
-  queryClient.setQueryData(galleryQueryKeys.collections(context), collections);
+  queryClient.setQueryData(galleryQueryKeys.collections(context), collections.map(normalizeCollection));
 }
 
 export const compassQueryKeys = {
@@ -117,7 +154,7 @@ export function transferCachedGalleryImages(queryClient: QueryClient, context: W
   for (const collectionKey of input.destinationCollectionKeys) {
     const queryKey = galleryQueryKeys.overview(context, collectionKey);
     if (queryClient.getQueryData(queryKey)) continue;
-    queryClient.setQueryData<GalleryOverview>(queryKey, { collections: root.collections.map((collection) => collection.key === collectionKey ? { ...collection, count: collection.count + input.images.length, coverUrl: collection.coverUrl ?? input.images[0]?.url ?? null } : collection), images: input.images, nextCursor: null });
+    queryClient.setQueryData<GalleryOverview>(queryKey, { collections: root.collections.map((collection) => collection.key === collectionKey ? { ...collection, count: collection.count + input.images.length, coverUrl: collection.coverUrl ?? input.images[0]?.url ?? null } : collection), images: input.images, nextCursor: null, canCreateCollections: root.canCreateCollections });
   }
 }
 

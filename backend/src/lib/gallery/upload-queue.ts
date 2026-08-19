@@ -2,11 +2,13 @@ import { createHash } from 'node:crypto';
 import { Queue, Worker, type JobsOptions } from 'bullmq';
 import { z } from 'zod';
 import { createRedisConnection } from '@/lib/redis';
+import { documentStorage } from '@/lib/ai/document-processing/storage';
 import { getDefaultGalleryRepository } from './repository';
 import { processGalleryUploadBatch } from './upload-processing';
 
 const QUEUE_NAME = 'gallery-upload-processing';
-export const galleryUploadJobSchema = z.object({ schemaVersion: z.literal(1), uploadKeys: z.array(z.string().cuid()).min(1).max(20) }).strict();
+export const GALLERY_UPLOAD_PROCESSING_LEASE_MS = 30 * 60_000;
+export const galleryUploadJobSchema = z.object({ schemaVersion: z.literal(1), uploadKeys: z.array(z.string().cuid()).min(1).max(20).refine((keys) => new Set(keys).size === keys.length, 'Upload keys must be unique.') }).strict();
 type GalleryUploadJob = z.infer<typeof galleryUploadJobSchema>;
 type GalleryUploadResult = { processed: number };
 const options: JobsOptions = {
@@ -31,6 +33,10 @@ function jobId(uploadKeys: readonly string[]) {
 
 export function galleryUploadFailureStatus(attemptsMade: number, attempts: number | undefined) {
   return attemptsMade + 1 < Number(attempts ?? 1) ? 'queued' as const : 'failed' as const;
+}
+
+export function galleryUploadStaleBefore(now: Date) {
+  return new Date(now.getTime() - GALLERY_UPLOAD_PROCESSING_LEASE_MS).toISOString();
 }
 
 export async function enqueueGalleryUploadBatch(uploadKeys: readonly string[]) {
@@ -58,7 +64,10 @@ export async function recoverGalleryUploadQueue() {
     const parsed = galleryUploadJobSchema.safeParse(job.data);
     return parsed.success ? parsed.data.uploadKeys : [];
   }));
-  const uploads = (await getDefaultGalleryRepository().listRecoverableUploads()).filter(({ key }) => !alreadyQueued.has(key));
+  const now = new Date();
+  const recovered = await getDefaultGalleryRepository().recoverUploadQueue(galleryUploadStaleBefore(now), now.toISOString());
+  await Promise.all(recovered.storageKeys.map((key) => documentStorage.delete(key).catch(() => undefined)));
+  const uploads = recovered.uploads.filter(({ key }) => !alreadyQueued.has(key));
   const groups = new Map<string, string[]>();
   for (const upload of uploads) {
     const key = `${upload.organizationKey}:${upload.scopeKey}:${upload.actorKey}`;

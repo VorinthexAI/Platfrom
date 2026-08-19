@@ -19,6 +19,7 @@ export const galleryUploadSchema = z.object({
   storageKey: z.string().min(1),
   processingMode: z.enum(['library', 'cover']).default('library'),
   status: galleryUploadStatusSchema,
+  processingLeaseId: z.string().cuid().nullable().default(null),
   errorCode: z.string().nullable(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),

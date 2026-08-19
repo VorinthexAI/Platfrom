@@ -1,13 +1,12 @@
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import { coreChatInputSchema, type CoreChatMessage } from '@/lib/ai/actions/core-chat';
-import type { DomainToolContext } from '@/lib/ai/tools/domain-execute';
+import type { ToolContext } from '@/lib/ai/tools/tool-context';
 import { runContentTool, type ContentToolDependencies } from '@/lib/ai/tools/content-runtime';
-import { imageSearchTool } from '@/lib/ai/tools/image-search';
 import type { TravelService } from '@/lib/travel/service';
 import type { EmailService } from '@/lib/email-inbox/service';
 import type { BookService } from '@/lib/books/service';
-import type { UserSettingsService } from '@/lib/user-settings/service';
+import type { UserHiddenService } from '@/lib/user-hiddens/service';
 import { executeAction, type ExecuteActionOptions } from '@/lib/ai/router';
 import type { RouteRequestInput } from '@/lib/ai/router/route-request';
 import { assistantSourceSchema, assistantSurfaceSchema, defaultAssistantCapabilityRegistry, type AssistantCapability, type AssistantCapabilityContext, type AssistantCapabilityRegistry } from './capabilities';
@@ -46,13 +45,12 @@ export interface PersonalAssistantDependencies {
   registry?: AssistantCapabilityRegistry;
   execute?: (request: RouteRequestInput, input: z.output<typeof coreChatInputSchema>, options?: ExecuteActionOptions) => Promise<{ output: unknown }>;
   executeContent?: typeof runContentTool;
-  executeImageSearch?: typeof imageSearchTool.execute;
   router?: ExecuteActionOptions;
   content?: ContentToolDependencies;
   travel?: TravelService;
   email?: EmailService;
   books?: BookService;
-  userSettings?: UserSettingsService;
+  userHiddens?: UserHiddenService;
   gallery?: AssistantCapabilityContext['gallery'];
 }
 
@@ -116,8 +114,8 @@ function systemPrompt(surface: z.infer<typeof assistantSurfaceSchema>) {
   const bookRules = `
 - Create a book only when the user explicitly asks to create, generate, or write a book. Otherwise discuss the idea or ask a clarifying question.
 - Before creating, gather or reasonably infer topic, goal, audience, tone, length, and language. Never call a book tool with placeholder values.
-- Call book.create-context first. Then call book.write with its returned bookKey and the exact same brief.
-- Do not claim the book is ready until book.write returns status ready.`;
+- Call book.create exactly once with the complete brief.
+- Do not claim the book is ready until book.create succeeds.`;
   if (surface === 'book-workspace') return `${BASE_SYSTEM_PROMPT}
 - You are operating inside the user's book library.${bookRules}`;
   if (surface === 'travel-workspace') return `${BASE_SYSTEM_PROMPT}
@@ -150,7 +148,7 @@ function initialMessage(input: z.output<typeof personalAssistantInputSchema>) {
 /** Executes a small, bounded agent loop over capabilities selected by the server-owned surface registry. */
 export async function runPersonalAssistant(
   rawInput: z.input<typeof personalAssistantInputSchema>,
-  domain: DomainToolContext,
+  domain: ToolContext,
   dependencies: PersonalAssistantDependencies = {},
 ): Promise<PersonalAssistantOutput> {
   const input = personalAssistantInputSchema.parse(rawInput);
@@ -169,8 +167,7 @@ export async function runPersonalAssistant(
   const byName = new Map(capabilities.map((capability) => [capability.definition.name, capability]));
   const messages: CoreChatMessage[] = [{ role: 'user', content: [{ type: 'text', text: initialMessage(input) }] }];
   const sources = new Map<string, z.infer<typeof assistantSourceSchema>>();
-  let createdBook: { bookKey: string; brief: unknown } | undefined;
-  let bookWritten = false;
+  let bookCreated = false;
   let domainToolExecuted = false;
   const changedWorkspaces = new Set<NonNullable<AssistantCapability['mutationWorkspace']>>();
   const changes = () => changedWorkspaces.size ? [...changedWorkspaces].map((workspace) => ({ workspace })) : undefined;
@@ -191,7 +188,6 @@ export async function runPersonalAssistant(
     const output = chatOutputSchema.parse(response.output);
     if (output.toolCalls.length === 0) {
       if (!domainToolExecuted) return personalAssistantOutputSchema.parse({ type: 'unsupported', message: UNSUPPORTED_MESSAGES[input.surface], sources: [] });
-      if (input.surface === 'book-workspace' && createdBook && !bookWritten) throw new Error('Assistant stopped before writing the created book.');
       const message = userVisibleMessage(output.text, input.surface);
       return personalAssistantOutputSchema.parse({ type: 'answer', message, sources: [...sources.values()], changes: changes() });
     }
@@ -204,26 +200,20 @@ export async function runPersonalAssistant(
     const capability = byName.get(toolCall.name);
     if (!capability) throw new Error(`Assistant requested unavailable capability: ${toolCall.name}`);
     if (output.stopReason !== 'tool_use') throw new Error(`Assistant tool call ended unexpectedly: ${output.stopReason ?? 'unknown'}`);
-    if (toolCall.name === 'book.create-context' && createdBook) throw new Error('Assistant attempted to create more than one book in a request.');
-    if (toolCall.name === 'book.write') {
-      if (!createdBook) throw new Error('Assistant attempted to write a book before creating its context.');
-      const candidate = z.object({ bookKey: z.string(), topic: z.unknown(), goal: z.unknown(), audience: z.unknown(), tone: z.unknown(), length: z.unknown(), language: z.unknown(), sourceNotes: z.unknown().optional() }).strict().parse(toolCall.arguments);
-      const { bookKey, ...brief } = candidate;
-      if (bookKey !== createdBook.bookKey || canonicalJson(brief) !== canonicalJson(createdBook.brief)) throw new Error('Assistant book write did not match the newly created book brief.');
-    }
+    if (toolCall.name === 'book.create' && bookCreated) throw new Error('Assistant attempted to create more than one book in a request.');
     const result = await capability.execute(toolCall.arguments, {
       currentDocumentKey: input.currentNote.documentKey,
       currentNote: { content: input.currentNote.content, selection: input.currentNote.selection },
       domain,
       folderKey: input.folderKey,
       requestKey,
+      clientRequestKey: input.requestKey ?? null,
       contentDependencies: dependencies.content,
       executeContent: dependencies.executeContent,
-      executeImageSearch: dependencies.executeImageSearch,
       travel: dependencies.travel,
       email: dependencies.email,
       books: dependencies.books,
-      userSettings: dependencies.userSettings,
+      userHiddens: dependencies.userHiddens,
       gallery: dependencies.gallery,
     });
     domainToolExecuted = true;
@@ -231,11 +221,7 @@ export async function runPersonalAssistant(
     if (input.surface === 'travel-workspace' && toolCall.name === 'knowledge.search' && result.kind === 'continue' && (result.sources?.length ?? 0) === 0) {
       return personalAssistantOutputSchema.parse({ type: 'unsupported', message: UNSUPPORTED_MESSAGES[input.surface], sources: [] });
     }
-    if (toolCall.name === 'book.create-context' && result.kind === 'continue') {
-      const created = z.object({ bookKey: z.string().cuid(), status: z.literal('planning') }).parse(result.result);
-      createdBook = { bookKey: created.bookKey, brief: toolCall.arguments };
-    }
-    if (toolCall.name === 'book.write' && result.kind === 'continue') bookWritten = true;
+    if (toolCall.name === 'book.create' && result.kind === 'continue') bookCreated = true;
     if (result.kind === 'continue') for (const source of result.sources ?? []) sources.set(source.documentKey, source);
     if (result.kind === 'note') return personalAssistantOutputSchema.parse({ type: 'note', content: result.content, message: result.message, sources: [...sources.values()], changes: changes() });
     messages.push({

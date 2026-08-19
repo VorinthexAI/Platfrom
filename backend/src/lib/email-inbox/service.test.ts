@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { createEmailService } from './service';
 import { GmailApiError } from './gmail';
+import { decodeEmailCursor } from './repository';
+import { newId } from '@/lib/ids';
 
 const userKey = 'cmrnlzf650002qc7k4p5zem5w';
 const scopeKey = 'cmrnlzf640001qc7kazsr96k5';
@@ -76,6 +78,64 @@ describe('email reply sending', () => {
   });
 });
 
+describe('email thread read state', () => {
+  function threadService(role: 'owner' | 'viewer', threadMessages: unknown[] = [message]) {
+    const calls: string[] = [];
+    let unread = true;
+    const repository = {
+      thread: async () => ({ thread: { ...thread, unread }, messages: threadMessages }),
+      readThreadPage: async () => ({ thread: { ...thread, unread }, messages: threadMessages, nextCursor: null }),
+      markThreadRead: async () => { calls.push('repository.markThreadRead'); unread = false; },
+    };
+    const connectors = {
+      find: async () => connector,
+      credentials: () => ({ accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: '2027-08-11T12:00:00.000Z' }),
+    };
+    const gmail = { modifyThread: async () => { calls.push('gmail.modifyThread'); } };
+    return { calls, service: createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role }), client: () => gmail as never }) };
+  }
+
+  test('explicitly marks an owner thread read and returns the bounded tool projection', async () => {
+    const longMessage = { ...message, body: 'x'.repeat(8_001) };
+    const { calls, service } = threadService('owner', [longMessage]);
+    const result = await service.markRead(actor, userKey);
+    expect(result).toMatchObject({ thread: { key: userKey, unread: false }, messages: [{ key: scopeKey, bodyTruncated: true }] });
+    expect(result.messages[0]?.body).toHaveLength(8_000);
+    expect(calls).toEqual(['gmail.modifyThread', 'repository.markThreadRead']);
+  });
+
+  test('restores Gmail UNREAD best-effort when local mark-read persistence fails', async () => {
+    const modifications: unknown[][] = [];
+    const repository = {
+      thread: async () => ({ thread: { ...thread, unread: true }, messages: [message] }),
+      markThreadRead: async () => { throw new Error('database unavailable'); },
+    };
+    const connectors = { find: async () => connector, credentials: () => ({ accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: '2027-08-11T12:00:00.000Z' }) };
+    const gmail = { modifyThread: async (...input: unknown[]) => { modifications.push(input); } };
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never });
+    await expect(service.markRead(actor, userKey)).rejects.toThrow('database unavailable');
+    expect(modifications).toEqual([
+      ['thread-1', [], ['UNREAD']],
+      ['thread-1', ['UNREAD'], []],
+    ]);
+  });
+
+  test('rejects explicit viewer mark-read tool mutations', async () => {
+    const { calls, service } = threadService('viewer');
+    await expect(service.markRead(actor, userKey)).rejects.toThrow('may not perform');
+    expect(calls).toEqual([]);
+  });
+
+  test('preserves the HTTP default read behavior for viewers without mutating', async () => {
+    const fullBody = 'x'.repeat(9_000);
+    const { calls, service } = threadService('viewer', [{ ...message, body: fullBody }]);
+    const result = await service.threadForHttp(actor, userKey, true);
+    expect(result).toMatchObject({ thread: { unread: true }, messages: [{ key: scopeKey, body: fullBody }] });
+    expect('bodyTruncated' in result.messages[0]!).toBe(false);
+    expect(calls).toEqual([]);
+  });
+});
+
 describe('email synchronization', () => {
   const gmailMessage = (id: string, threadId: string) => ({
     id, threadId, labelIds: threadId === 'thread-2' ? ['SENT'] : ['INBOX', 'CATEGORY_PRIMARY'], internalDate: String(Date.parse(now)),
@@ -145,19 +205,95 @@ describe('email synchronization', () => {
   });
 });
 
-describe('deep email reads', () => {
-  test('returns bounded chronological messages and a deeply nested reply tree', async () => {
+describe('model-safe email thread reads', () => {
+  test('returns at most 50 messages with bounded bodies and explicit truncation', async () => {
     const child = { ...message, key: 'cmsp3gwac0009r07kdlin5eoi', providerMessageId: 'message-2', messageIdHeader: '<child@example.com>', inReplyTo: '<source@example.com>', parentMessageId: '<source@example.com>', replyDepth: 1, body: 'x'.repeat(9_000) };
-    const repository = { readThreadPage: async () => ({ thread, messages: [message, child], nextCursor: 'next' }) };
+    let received: unknown[] = [];
+    const repository = { readThreadPage: async (...input: unknown[]) => { received = input; return { thread, messages: [message, child], nextCursor: 'next' }; } };
     const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'viewer' }) });
-    const output = await service.read(actor, [{ threadKey: userKey, limit: 20 }]);
-    const result = output.results[0];
-    expect(result?.success).toBe(true);
-    if (!result?.success) throw new Error('expected read success');
-    expect(result.data.messages[1]?.body).toHaveLength(8_000);
-    expect(result.data.messages[1]?.bodyTruncated).toBe(true);
-    expect(result.data.messages[1]?.replyDepth).toBe(1);
-    expect(result.data.messages[1]?.parentMessageId).toBe('<source@example.com>');
-    expect(result.data.nextCursor).toBe('next');
+    const output = await service.threadForTool(actor, userKey, 'cursor-1');
+    expect(received).toEqual([scopeKey, userKey, 50, 'cursor-1']);
+    expect(output.messages[1]?.body).toHaveLength(8_000);
+    expect(output.messages[1]?.bodyTruncated).toBe(true);
+    expect(output.messages[1]?.replyDepth).toBe(1);
+    expect(output.messages[1]?.parentMessageId).toBe('<source@example.com>');
+    expect(output.nextCursor).toBe('next');
+    expect(output.truncated).toBe(true);
+  });
+
+  test('includes exact 8k bodies without per-message truncation', async () => {
+    const exact = { ...message, body: 'x'.repeat(8_000) };
+    const repository = { readThreadPage: async () => ({ thread, messages: [exact], nextCursor: null }) };
+    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'viewer' }) });
+    const output = await service.threadForTool(actor, userKey);
+    expect(output.messages[0]).toMatchObject({ body: exact.body, bodyTruncated: false });
+    expect(output.nextCursor).toBeNull();
+    expect(output.truncated).toBe(false);
+  });
+
+  test('includes exactly 64k and continues before the first message over budget', async () => {
+    const messages = Array.from({ length: 9 }, (_, index) => ({ ...message, key: newId(), providerMessageId: `message-${index}`, body: index < 8 ? 'x'.repeat(8_000) : 'y' }));
+    const repository = { readThreadPage: async (_scopeKey: string, _threadKey: string, _limit: number, cursor?: string) => {
+      const afterKey = cursor ? decodeEmailCursor(cursor, userKey).key : undefined;
+      const start = afterKey ? messages.findIndex(({ key }) => key === afterKey) + 1 : 0;
+      return { thread, messages: messages.slice(start), nextCursor: null };
+    } };
+    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'viewer' }) });
+    const output = await service.threadForTool(actor, userKey);
+    expect(output.messages).toHaveLength(8);
+    expect(output.messages.reduce((total, item) => total + item.body.length, 0)).toBe(64_000);
+    expect(decodeEmailCursor(output.nextCursor!, userKey).key).toBe(messages[7]!.key);
+    expect(output.truncated).toBe(true);
+    const continuation = await service.threadForTool(actor, userKey, output.nextCursor!);
+    expect(continuation.messages.map(({ key }) => key)).toEqual([messages[8]!.key]);
+    expect(continuation.nextCursor).toBeNull();
+  });
+
+  test('does not partially emit or skip a message when multiple bodies exceed 64k', async () => {
+    const messages = Array.from({ length: 10 }, (_, index) => ({ ...message, key: newId(), providerMessageId: `message-${index}`, body: 'x'.repeat(7_500) }));
+    const repository = { readThreadPage: async () => ({ thread, messages, nextCursor: 'repository-next' }) };
+    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'viewer' }) });
+    const output = await service.threadForTool(actor, userKey);
+    expect(output.messages).toHaveLength(8);
+    expect(output.messages.every(({ body }) => body.length === 7_500)).toBe(true);
+    expect(decodeEmailCursor(output.nextCursor!, userKey).key).toBe(messages[7]!.key);
+  });
+
+  test('returns all 50 bounded messages and the repository continuation cursor', async () => {
+    const messages = Array.from({ length: 50 }, (_, index) => ({ ...message, key: newId(), providerMessageId: `message-${index}`, body: 'x' }));
+    let received: unknown[] = [];
+    const repository = { readThreadPage: async (...input: unknown[]) => { received = input; return { thread, messages, nextCursor: 'page-2' }; } };
+    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'viewer' }) });
+    const output = await service.threadForTool(actor, userKey, 'page-1');
+    expect(received).toEqual([scopeKey, userKey, 50, 'page-1']);
+    expect(output.messages).toHaveLength(50);
+    expect(output.nextCursor).toBe('page-2');
+  });
+
+  test('includes an oversized first message once and terminates empty pages', async () => {
+    let page = 0;
+    const oversized = { ...message, body: 'x'.repeat(65_000) };
+    const repository = { readThreadPage: async () => ++page === 1
+      ? { thread, messages: [oversized], nextCursor: null }
+      : { thread, messages: [], nextCursor: 'repeated-cursor' } };
+    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'viewer' }) });
+    const first = await service.threadForTool(actor, userKey);
+    expect(first.messages).toHaveLength(1);
+    expect(first.messages[0]).toMatchObject({ body: 'x'.repeat(8_000), bodyTruncated: true });
+    expect(first.nextCursor).toBeNull();
+    const empty = await service.threadForTool(actor, userKey, 'repeated-cursor');
+    expect(empty.messages).toEqual([]);
+    expect(empty.nextCursor).toBeNull();
+  });
+
+  test('authorizes viewer tool reads without mutating read state', async () => {
+    const calls: string[] = [];
+    const repository = {
+      readThreadPage: async () => { calls.push('repository.readThreadPage'); return { thread: { ...thread, unread: true }, messages: [message], nextCursor: null }; },
+      markThreadRead: async () => { calls.push('repository.markThreadRead'); },
+    };
+    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'viewer' }) });
+    expect(await service.threadForTool(actor, userKey)).toMatchObject({ thread: { unread: true } });
+    expect(calls).toEqual(['repository.readThreadPage']);
   });
 });

@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { authorizeAgentExecution, type ExecutionAccessDataSource } from '@/lib/ai/agents/access';
 import { loadAgentRuntime, type AgentRuntimeDataSource } from '@/lib/ai/agents/runtime';
 import { getUserOrganizationByOrganizationAndUser } from '@/lib/db/user-organization.node';
-import type { DomainToolContext } from './domain-execute';
+import type { ToolContext } from './tool-context';
 import { ContentError } from './content-errors';
 import { contentToolNameSchema } from './content-registry';
 import { runContentTool } from './content-runtime';
@@ -29,7 +29,7 @@ const agentExecutionContextSchema = z.object({
   agentKey: z.string().cuid(),
 }).strict();
 
-/** Authenticates a human and resolves the agent's authorized domain context without selecting a tool. */
+/** Authenticates a human and resolves the agent's authorized tool context without selecting a tool. */
 export async function authorizeContentAgentExecution(rawInput: z.input<typeof agentExecutionContextSchema>, options: Omit<RunContentAgentToolOptions, 'execute'>) {
   const input = agentExecutionContextSchema.parse(rawInput);
   const authenticatedUserKey = z.string().trim().min(1).parse(options.authenticatedUserKey);
@@ -45,7 +45,7 @@ export async function authorizeContentAgentExecution(rawInput: z.input<typeof ag
   if (principal.kind !== 'member' || principal.user.key !== authenticatedUserKey) {
     throw new ContentError('CONTENT_FORBIDDEN', 'Authenticated user does not match the resolved principal.', 'agent.execution', { action: 'authorization' });
   }
-  return { input, context: { organizationKey: input.organizationKey, runtimeScopeKey: runtime.scope.key, principal } satisfies DomainToolContext };
+  return { input, context: { organizationKey: input.organizationKey, runtimeScopeKey: runtime.scope.key, principal } satisfies ToolContext };
 }
 
 /** Authenticated human boundary for invoking a registered Content tool. */

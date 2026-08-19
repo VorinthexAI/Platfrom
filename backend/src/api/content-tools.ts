@@ -9,7 +9,7 @@ import { getAuthIdentity } from './security';
 import { strictObject } from './validation';
 
 const bodySchema = strictObject({ organizationKey: z.string().trim().min(1), agentKey: z.string().cuid(), input: z.unknown() });
-const delayedDevTools = new Set(['folder.list', 'document.list', 'scope.content.search-history']);
+const delayedDevTools = new Set(['folder.list', 'document.list', 'content.search-history.list']);
 type ContentToolRunner = (input: Parameters<typeof runContentAgentTool>[0], options: RunContentAgentToolOptions) => Promise<unknown>;
 export interface ContentToolHandlerDependencies {
   getIdentity?: typeof getAuthIdentity;

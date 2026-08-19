@@ -28,7 +28,6 @@ import { readAction } from './read';
 import { reasonAction } from './reason';
 import { speakAction } from './speak';
 import { storageUploadAction } from './storage-upload';
-import { transcribeAction } from './transcribe';
 import { translateAction } from './translate';
 import { traverseAction } from './traverse';
 import { ACTION_SLUGS, actionIdSchema, isValidActionIdFormat, type ActionDefinition, type ActionId } from './types';
@@ -67,7 +66,6 @@ export { readAction } from './read';
 export { reasonAction } from './reason';
 export { speakAction } from './speak';
 export { storageUploadAction } from './storage-upload';
-export { transcribeAction } from './transcribe';
 export { translateAction } from './translate';
 export { traverseAction } from './traverse';
 export { updateActionDefinition } from './update';
@@ -88,7 +86,7 @@ export {
 
 /** Stable, provider- and domain-neutral runtime primitives. */
 export const ACTION_DEFINITIONS: readonly ActionDefinition[] = [
-  askAction, chatAction, reasonAction, deepReasonAction, embedAction, speakAction, transcribeAction, webSearchAction,
+  askAction, chatAction, reasonAction, deepReasonAction, embedAction, speakAction, webSearchAction,
   traverseAction, readAction, insertActionDefinition, upsertAction, updateActionDefinition, deleteActionDefinition,
   generateImageAction, editImageAction, generateVideoAction, editVideoAction, extendVideoAction, analyzeVideoAction,
   generateSpeechAction, analyzeAudioAction, generateMusicAction, orchestratorChatAction,

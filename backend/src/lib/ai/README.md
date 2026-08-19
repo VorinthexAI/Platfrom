@@ -111,24 +111,19 @@ relations and selects deterministically using `modelActions.priority` only:
 
 There is no random choice, quality/cost/speed scoring, or execution fallback.
 
-Organization, organization-member/provider, scope, scope-member/agent,
-agent-member, and access evaluation/explanation tools use a separate local
-execution boundary.
-GPT-5.4 Mini routes only through `core.reason` to select one direct action and
-produce arguments matching its JSON schema. `runDomainAgentTool` then reloads
-the agent context, resolves the initiating human, validates the input
-with Zod, enforces organization and scope RBAC, and executes the local handler.
-These deterministic domain actions intentionally have no `modelActions` rows:
-models may interpret intent but can never perform database mutations directly.
-Mutations use Arango stream transactions and emit domain audit events.
+Archive content tools use the canonical Content registry and runtime.
+`runContentAgentTool` reloads the agent context, resolves the initiating human,
+validates the strict tool input with Zod, and invokes `runContentTool` with the
+trusted context. Organization, scope, member, agent-access, project, milestone,
+and task management are not exposed as generic tools.
 
 `scopeAgents` is the authoritative lifecycle and minimum-role link between a
 scope and an existing agent definition. `agentMembers` stores inherited and
 explicit grants separately. Every AgentRun reloads these relations and requires
 an active organization, active scope, active scope-agent link, valid scope
-access, and at least one valid agent grant. Access explanations render the
-structured decision returned by the same evaluator used for enforcement.
-A fixed route never bypasses organization provider permissions.
+access, and at least one valid agent grant. A fixed route never bypasses the
+structured access evaluators or organization provider permissions used for
+enforcement.
 
 ## Execution and validation
 

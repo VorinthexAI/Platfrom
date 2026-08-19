@@ -153,15 +153,15 @@ export type PersonalAssistantResponse =
 
 type ToolResponse<T> =
   | { success: true; data: T }
-  | { success: false; error: { message: string } };
+  | { success: false; error: { message: string; code?: string; action?: string } };
 
 type ContentBatchToolResult = {
   success: boolean;
   data?: { document?: ContentDocument; folder?: ContentFolder; folderCount?: number; documentCount?: number };
-  error?: { message: string };
+  error?: { message: string; code?: string; action?: string };
 };
 
-export type ContentBatchFailure = ContentSelectionOperation & { tool: string; message: string };
+export type ContentBatchFailure = ContentSelectionOperation & { tool: string; message: string; code?: string; action?: string };
 
 export type ContentBatchOutcome = {
   folders: ContentFolder[];
@@ -188,7 +188,7 @@ async function executeContentSelectionPlan(plan: ContentSelectionPlan): Promise<
       call.operations.forEach((operation, index) => {
         const result = data.results[index];
         if (!result?.success || !result.data) {
-          failures.push({ ...operation, tool: call.tool, message: result?.error?.message ?? "The Archive operation failed." });
+          failures.push({ ...operation, tool: call.tool, message: result?.error?.message ?? "The Archive operation failed.", ...(result?.error?.code ? { code: result.error.code } : {}), ...(result?.error?.action ? { action: result.error.action } : {}) });
           return;
         }
         if (result.data.document) documents.push(result.data.document);
@@ -199,7 +199,9 @@ async function executeContentSelectionPlan(plan: ContentSelectionPlan): Promise<
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "The Archive operation failed.";
-      failures.push(...call.operations.map((operation) => ({ ...operation, tool: call.tool, message })));
+      const code = typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : undefined;
+      const action = typeof (error as { action?: unknown })?.action === "string" ? (error as { action: string }).action : undefined;
+      failures.push(...call.operations.map((operation) => ({ ...operation, tool: call.tool, message, ...(code ? { code } : {}), ...(action ? { action } : {}) })));
     }
     return { folders, documents, copiedFolders, failures };
   }));
@@ -268,6 +270,9 @@ function documentFilename(name: string, mimeType: string) {
   return extension ? `${filename}.${extension}` : filename;
 }
 
+function contentToolError(error: { message: string; code?: string; action?: string }) {
+  return Object.assign(new Error(error.message), error.code ? { code: error.code } : {}, error.action ? { action: error.action } : {});
+}
 
 async function callContentTool<T>(tool: string, input: Record<string, unknown>, signal?: AbortSignal, requestContext = getContentContext()): Promise<T> {
   const contentContext = requestContext;
@@ -278,11 +283,11 @@ async function callContentTool<T>(tool: string, input: Record<string, unknown>, 
       agentKey: contentContext.agentKey,
       input,
     }, { signal, timeout: tool === "document.summary.audio.generate" || tool === "document.read" && input.persistAudio === true ? 15 * 60_000 : tool === "document.parse" || tool === "document.scan" ? 5 * 60_000 : tool === "document.summarize" || tool === "document.topics" ? 4 * 60_000 : 60_000 });
-    if (!response.data.success) throw new Error(response.data.error.message);
+    if (!response.data.success) throw contentToolError(response.data.error);
     return response.data.data;
   } catch (error) {
     const failure = (error as { response?: { data?: ToolResponse<T> } }).response?.data;
-    if (failure && !failure.success) throw new Error(failure.error.message);
+    if (failure && !failure.success) throw contentToolError(failure.error);
     throw error;
   }
 }
@@ -694,7 +699,7 @@ export async function scanContentDocument(pages: { name: string; size: number; b
 
 export function searchContent(query: string, folderKey?: string, includeDescendants = false) {
   const contentContext = getContentContext();
-  return callContentTool<ContentSearchResponse>("scope.content.search", {
+  return callContentTool<ContentSearchResponse>("content.search", {
     scopeKey: contentContext.scopeKey,
     query,
     minimumScore: 0.55,
@@ -704,7 +709,7 @@ export function searchContent(query: string, folderKey?: string, includeDescenda
 
 export async function searchContentMatches(query: string, signal?: AbortSignal, folderKey?: string, recordHistory = true) {
   const contentContext = getContentContext();
-  return callContentTool<ContentSearchResponse>("scope.content.search", {
+  return callContentTool<ContentSearchResponse>("content.search", {
     scopeKey: contentContext.scopeKey,
     query,
     includeSummaries: false,
@@ -734,7 +739,7 @@ export async function summarizeContentDocument(documentKey: string, topic: strin
 
 export async function listContentSearchHistory(requestContext = getContentContext()) {
   const contentContext = requestContext;
-  const data = await callContentTool<{ history: ContentSearchHistoryItem[] }>("scope.content.search-history", {
+  const data = await callContentTool<{ history: ContentSearchHistoryItem[] }>("content.search-history.list", {
     scopeKey: contentContext.scopeKey,
     allLocations: true,
     limit: 100,
@@ -744,7 +749,7 @@ export async function listContentSearchHistory(requestContext = getContentContex
 
 export async function deleteContentSearchHistory(normalizedQuery: string) {
   const contentContext = getContentContext();
-  return callContentTool<{ normalizedQuery: string; deleted: boolean }>("scope.content.search-history.delete", {
+  return callContentTool<{ normalizedQuery: string; deleted: boolean }>("content.search-history.delete", {
     scopeKey: contentContext.scopeKey,
     normalizedQuery,
     allLocations: true,

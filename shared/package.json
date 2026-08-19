@@ -56,6 +56,10 @@
       "react-native": "./packages/ui/components/search-history-pill/search-history-pill.mobile.tsx",
       "default": "./packages/ui/components/search-history-pill/search-history-pill.web.tsx"
     },
+    "./ui/action-pill": {
+      "react-native": "./packages/ui/components/action-pill/action-pill.mobile.tsx",
+      "default": "./packages/ui/components/action-pill/action-pill.web.tsx"
+    },
     "./ui/slider": {
       "react-native": "./packages/ui/components/slider/slider.mobile.tsx",
       "default": "./packages/ui/components/slider/slider.web.tsx"
@@ -63,6 +67,10 @@
     "./ui/switch": {
       "react-native": "./packages/ui/components/switch/switch.mobile.tsx",
       "default": "./packages/ui/components/switch/switch.web.tsx"
+    },
+    "./ui/clipboard": {
+      "react-native": "./packages/ui/clipboard.mobile.ts",
+      "default": "./packages/ui/clipboard.web.ts"
     },
     "./ui/document-search": "./packages/ui/document-search.ts",
     "./ui/components": "./packages/ui/components.ts",

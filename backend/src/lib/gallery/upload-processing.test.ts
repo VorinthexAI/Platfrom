@@ -5,14 +5,20 @@ import { galleryUploadSchema, type GalleryUpload } from '@/lib/db/gallery-upload
 import { imageSchema } from '@/lib/db/images.node';
 import { processImages } from '@/lib/ai/image-processing';
 import { perceptualHashDistance, PERCEPTUAL_HASH_DUPLICATE_DISTANCE } from '@/lib/perceptual-hash';
+import { newId } from '@/lib/ids';
 import type { GalleryRepository } from './repository';
-import { processGalleryUploadBatch } from './upload-processing';
+import { processGalleryUploadBatch as executeGalleryUploadBatch, type GalleryUploadProcessingDependencies } from './upload-processing';
 import { sanitizeGalleryImage } from './image-location';
 import { imageDataUrl } from './image-reference';
 
 const now = '2026-08-17T12:00:00.000Z';
 const keys = ['cmrnlzf650002qc7k4p5zem5w', 'cmrnlzf650002qc7k4p5zem5x', 'cmrnlzf650002qc7k4p5zem5y'];
 const passthroughSanitizer: typeof sanitizeGalleryImage = async (bytes) => ({ bytes: new Uint8Array(bytes), coordinates: undefined });
+const processGalleryUploadBatch = (uploadKeys: readonly string[], dependencies: GalleryUploadProcessingDependencies) => executeGalleryUploadBatch(uploadKeys, {
+  publishCollectionEvent: async () => undefined,
+  publishUserEvent: async () => undefined,
+  ...dependencies,
+});
 
 function upload(index: number): GalleryUpload {
   return galleryUploadSchema.parse({
@@ -31,10 +37,16 @@ function fixture() {
   const repository = {
     async getUpload(key: string) { return uploads.get(key) ?? null; },
     async updateUpload(key: string, patch: Partial<GalleryUpload>) { const updated = galleryUploadSchema.parse({ ...uploads.get(key)!, ...patch }); uploads.set(key, updated); updates.push({ key, status: patch.status }); return updated; },
+    async claimUploads(uploadKeys: string[], leaseId: string, updatedAt: string) { return Promise.all(uploadKeys.filter((key) => uploads.get(key)?.status === 'queued').map((key) => repository.updateUpload(key, { status: 'processing', processingLeaseId: leaseId, errorCode: null, updatedAt }))); },
+    async renewUploadLease(uploadKeys: string[], leaseId: string, updatedAt: string) { const owned = uploadKeys.filter((key) => uploads.get(key)?.status === 'processing' && uploads.get(key)?.processingLeaseId === leaseId); await Promise.all(owned.map((key) => repository.updateUpload(key, { updatedAt }))); return owned.length; },
     async addImageToCollection(relation: { imageKey: string }) { relations.push(relation.imageKey); return relation; },
     async listIdentityMatches() { return []; },
-    async persistIdentityMatches() {},
-    async failUpload(key: string, _scopeKey: string, errorCode: string, updatedAt: string) { const imageKey = uploads.get(key)!.imageKey; compensated.push(imageKey); await repository.updateUpload(key, { status: 'failed', errorCode, updatedAt }); return true; },
+    async persistIdentityMatches() { return false; },
+    async getUserKeyByMemberKey() { return 'user-1'; },
+    async listScopeManagerUserKeys() { return ['manager-1']; },
+    async canFinalizeUpload() { return true; },
+    async finalizeUpload(value: GalleryUpload, relation: { imageKey: string } | null, leaseId: string, updatedAt: string) { if (uploads.get(value.key)?.processingLeaseId !== leaseId) return { status: 'unchanged' as const }; if (relation) relations.push(relation.imageKey); await repository.updateUpload(value.key, { status: 'completed', processingLeaseId: null, errorCode: null, updatedAt }); return { status: 'completed' as const }; },
+    async compensateUpload(key: string, _scopeKey: string, leaseId: string, errorCode: string, status: 'queued' | 'failed', updatedAt: string) { if (uploads.get(key)?.status !== 'processing' || uploads.get(key)?.processingLeaseId !== leaseId) return null; const imageKey = uploads.get(key)!.imageKey; compensated.push(imageKey); await repository.updateUpload(key, { status, processingLeaseId: null, errorCode, updatedAt }); return { collectionKeys: [], subjectChanged: false, imageChanged: true, storageKeys: [`media/${imageKey}`] }; },
   } as unknown as GalleryRepository;
   const storage = {
     async upload({ key }: { key: string }) { return { storageKey: key }; },
@@ -51,6 +63,7 @@ describe('Gallery upload batch processing', () => {
     const captionRequests: string[][] = [];
     let sanitized = 0;
     let measured = 0;
+    const collectionEvents: string[] = [], userEvents: string[] = [];
     const result = await processGalleryUploadBatch(keys, {
       repository: f.repository,
       storage: f.storage,
@@ -70,6 +83,8 @@ describe('Gallery upload batch processing', () => {
         }));
       },
       onMetrics(metrics) { measured = metrics.durationMs; expect(metrics).toMatchObject({ count: 3, generated: 2, reused: 1, downloadDurationMs: expect.any(Number), persistDurationMs: expect.any(Number) }); },
+      publishCollectionEvent: async (collectionKey) => { collectionEvents.push(collectionKey); },
+      publishUserEvent: async (userKey) => { userEvents.push(userKey); },
     });
     expect(result).toEqual({ processed: 3 });
     expect(captionRequests).toHaveLength(1);
@@ -79,16 +94,33 @@ describe('Gallery upload batch processing', () => {
     expect(f.updates.filter(({ status }) => status === 'completed')).toHaveLength(3);
     expect(f.uploads.get(keys[0]!)!).toMatchObject({ city: 'Stockholm', country: 'Sweden', countryCode: 'SE' });
     expect(f.relations).toHaveLength(3);
+    expect(collectionEvents).toEqual(Array(3).fill(upload(0).collectionKey));
+    expect(userEvents).toEqual(Array(2).fill('user-1'));
     expect(f.deleted).toHaveLength(6);
     expect(measured).toBeGreaterThan(0);
     expect(measured).toBeLessThan(1_000);
   });
 
+  test('publishes only after completion and ignores publisher failures', async () => {
+    const f = fixture();
+    const publications: string[] = [];
+    const result = await processGalleryUploadBatch([keys[0]!], {
+      repository: f.repository, storage: f.storage, resolveImageReference: async () => 'data:image/jpeg;base64,/9j/2Q==', sanitizeImage: passthroughSanitizer,
+      processBatch: async ([input]) => [imageSchema.parse({ key: input!.imageKey, scopeKey: input!.scopeKey, filename: 'image.jpg', caption: 'Caption.', imageCaptionKey: 'cmrnlzf650002qc7k4p5zemc0', createdByKey: input!.ownerKey, storageKey: 'media/image.jpg', mimeType: 'image/jpeg', sizeBytes: 4, width: 10, height: 10, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now })],
+      publishCollectionEvent: async () => { publications.push(f.uploads.get(keys[0]!)!.status); throw new Error('redis unavailable'); },
+      publishUserEvent: async () => { publications.push(f.uploads.get(keys[0]!)!.status); },
+    });
+    expect(result).toEqual({ processed: 1 });
+    expect(publications).toEqual(['processing', ...Array(4).fill('completed')]);
+  });
+
   test('marks the whole retryable batch failed when processing fails', async () => {
     const f = fixture();
-    await expect(processGalleryUploadBatch(keys, { repository: f.repository, storage: f.storage, resolveImageReference: async () => 'https://images.example/image.jpg', sanitizeImage: passthroughSanitizer, processBatch: async () => { throw new Error('temporary model failure'); } })).rejects.toThrow('temporary model failure');
+    const publications: string[] = [];
+    await expect(processGalleryUploadBatch(keys, { repository: f.repository, storage: f.storage, resolveImageReference: async () => 'https://images.example/image.jpg', sanitizeImage: passthroughSanitizer, processBatch: async () => { throw new Error('temporary model failure'); }, publishCollectionEvent: async () => { publications.push('collection'); }, publishUserEvent: async () => { publications.push('user'); } })).rejects.toThrow('temporary model failure');
     expect(f.updates.filter(({ status }) => status === 'failed')).toHaveLength(3);
     expect(f.compensated).toHaveLength(3);
+    expect(publications).toEqual(['user', 'user', 'user']);
   });
 
   test('keeps completed siblings replayable when one upload fails finalization', async () => {
@@ -96,9 +128,11 @@ describe('Gallery upload batch processing', () => {
     const imageKeys = keys.map((_, index) => upload(index).imageKey);
     const scopeKey = upload(0).scopeKey;
     const captionKeys = ['cmrnlzf650002qc7k4p5zemd0', 'cmrnlzf650002qc7k4p5zemd1', 'cmrnlzf650002qc7k4p5zemd2'];
-    f.repository.addImageToCollection = async (relation) => {
-      if (relation.imageKey === imageKeys[1]) throw new Error('relation unavailable');
-      return relation;
+    const finalize = f.repository.finalizeUpload.bind(f.repository);
+    f.repository.finalizeUpload = async (value, relation, leaseId, updatedAt, failureStatus, errorCode) => {
+      if (relation?.imageKey !== imageKeys[1]) return finalize(value, relation, leaseId, updatedAt, failureStatus, errorCode);
+      const effects = await f.repository.compensateUpload(value.key, value.scopeKey, leaseId, errorCode, failureStatus, updatedAt);
+      return effects ? { status: 'compensated', effects } : { status: 'unchanged' };
     };
     await expect(processGalleryUploadBatch(keys, {
       repository: f.repository, storage: f.storage, resolveImageReference: async () => 'https://images.example/image.jpg', sanitizeImage: passthroughSanitizer,
@@ -108,7 +142,116 @@ describe('Gallery upload batch processing', () => {
     expect((await f.repository.getUpload(keys[1]))?.status).toBe('failed');
     expect((await f.repository.getUpload(keys[2]))?.status).toBe('completed');
     expect(f.compensated).toEqual([imageKeys[1]]);
-    expect([...new Set(f.deleted)].sort()).toEqual(['pending/0.jpg', 'pending/0.jpg.sanitized.jpg', 'pending/1.jpg', 'pending/1.jpg.sanitized.jpg', 'pending/2.jpg', 'pending/2.jpg.sanitized.jpg']);
+    expect([...new Set(f.deleted)].sort()).toEqual([`media/${imageKeys[1]}`, 'pending/0.jpg', 'pending/0.jpg.sanitized.jpg', 'pending/1.jpg', 'pending/1.jpg.sanitized.jpg', 'pending/2.jpg', 'pending/2.jpg.sanitized.jpg']);
+  });
+
+  test('duplicate workers no-op when the queued batch claim is already held', async () => {
+    const f = fixture();
+    f.repository.claimUploads = async () => [];
+    let processed = false, published = false;
+    await expect(processGalleryUploadBatch([keys[0]!], { repository: f.repository, storage: f.storage, processBatch: async () => { processed = true; return []; }, publishUserEvent: async () => { published = true; } })).resolves.toEqual({ processed: 0 });
+    expect(processed).toBe(false);
+    expect(published).toBe(false);
+    expect(f.uploads.get(keys[0]!)?.status).toBe('queued');
+  });
+
+  test('renews processing ownership before persistence and finalization', async () => {
+    const active = fixture();
+    const renew = active.repository.renewUploadLease.bind(active.repository);
+    let renewals = 0;
+    active.repository.renewUploadLease = async (...args) => { renewals += 1; return renew(...args); };
+    await processGalleryUploadBatch([keys[0]!], {
+      repository: active.repository, storage: active.storage, resolveImageReference: async () => 'data:image/jpeg;base64,/9j/2Q==', sanitizeImage: passthroughSanitizer,
+      processBatch: async ([input]) => [imageSchema.parse({ key: input!.imageKey, scopeKey: input!.scopeKey, filename: 'image.jpg', caption: 'Caption.', imageCaptionKey: keys[2], createdByKey: input!.ownerKey, storageKey: 'media/image.jpg', mimeType: 'image/jpeg', sizeBytes: 4, width: 10, height: 10, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now })],
+    });
+    expect(renewals).toBe(2);
+    expect(active.uploads.get(keys[0]!)?.status).toBe('completed');
+  });
+
+  test('fences a worker after processing ownership changes', async () => {
+    const fenced = fixture();
+    let finalized = false;
+    const finalize = fenced.repository.finalizeUpload.bind(fenced.repository);
+    fenced.repository.finalizeUpload = async (...args) => { finalized = true; return finalize(...args); };
+    await expect(processGalleryUploadBatch([keys[0]!], {
+      repository: fenced.repository, storage: fenced.storage, resolveImageReference: async () => 'data:image/jpeg;base64,/9j/2Q==', sanitizeImage: passthroughSanitizer,
+      processBatch: async ([input]) => { await fenced.repository.updateUpload(keys[0]!, { processingLeaseId: newId() }); return [imageSchema.parse({ key: input!.imageKey, scopeKey: input!.scopeKey, filename: 'image.jpg', caption: 'Caption.', imageCaptionKey: keys[2], createdByKey: input!.ownerKey, storageKey: 'media/image.jpg', mimeType: 'image/jpeg', sizeBytes: 4, width: 10, height: 10, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now })]; },
+    })).rejects.toThrow('processing lease was lost');
+    expect(finalized).toBe(false);
+    expect(fenced.uploads.get(keys[0]!)?.status).toBe('processing');
+  });
+
+  test('processes only queued siblings while preserving completed and active-processing siblings', async () => {
+    const f = fixture();
+    f.uploads.set(keys[0]!, galleryUploadSchema.parse({ ...f.uploads.get(keys[0]!)!, status: 'completed' }));
+    f.uploads.set(keys[1]!, galleryUploadSchema.parse({ ...f.uploads.get(keys[1]!)!, status: 'processing' }));
+    const processedKeys: string[] = [];
+    const result = await processGalleryUploadBatch(keys, {
+      repository: f.repository, storage: f.storage, resolveImageReference: async () => 'data:image/jpeg;base64,/9j/2Q==', sanitizeImage: passthroughSanitizer,
+      processBatch: async (inputs) => inputs.map((input) => { processedKeys.push(input.imageKey!); return imageSchema.parse({ key: input.imageKey!, scopeKey: input.scopeKey, filename: 'image.jpg', caption: 'Caption.', imageCaptionKey: keys[2], createdByKey: input.ownerKey, storageKey: `media/${input.imageKey}`, mimeType: 'image/jpeg', sizeBytes: 4, width: 10, height: 10, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now }); }),
+    });
+    expect(result).toEqual({ processed: 1 });
+    expect(processedKeys).toEqual([upload(2).imageKey]);
+    expect(f.uploads.get(keys[0]!)?.status).toBe('completed');
+    expect(f.uploads.get(keys[1]!)?.status).toBe('processing');
+    expect(f.uploads.get(keys[2]!)?.status).toBe('completed');
+  });
+
+  test.each([true, false])('compensates persisted %s collection retry artifacts before atomically requeueing', async (filed) => {
+    const f = fixture();
+    if (!filed) f.uploads.set(keys[0]!, galleryUploadSchema.parse({ ...f.uploads.get(keys[0]!)!, collectionKey: null }));
+    f.repository.finalizeUpload = async (value, relation, leaseId, updatedAt, failureStatus, errorCode) => {
+      if (relation) f.relations.push(relation.imageKey);
+      const effects = await f.repository.compensateUpload(value.key, value.scopeKey, leaseId, errorCode, failureStatus, updatedAt);
+      if (relation) f.relations.splice(f.relations.indexOf(relation.imageKey), 1);
+      return effects ? { status: 'compensated', effects: { ...effects, collectionKeys: filed ? [value.collectionKey!] : [] } } : { status: 'unchanged' };
+    };
+    await expect(processGalleryUploadBatch([keys[0]!], {
+      repository: f.repository, storage: f.storage, failureStatus: 'queued', resolveImageReference: async () => 'data:image/jpeg;base64,/9j/2Q==', sanitizeImage: passthroughSanitizer,
+      processBatch: async ([input]) => [imageSchema.parse({ key: input!.imageKey, scopeKey: input!.scopeKey, filename: 'image.jpg', caption: 'Caption.', imageCaptionKey: keys[2], createdByKey: input!.ownerKey, storageKey: `media/${input!.imageKey}`, mimeType: 'image/jpeg', sizeBytes: 4, width: 10, height: 10, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now })],
+    })).rejects.toThrow('finalization failed');
+    expect(f.uploads.get(keys[0]!)?.status).toBe('queued');
+    expect(f.relations).toEqual([]);
+    expect(f.deleted).toContain(`media/${upload(0).imageKey}`);
+    expect(f.deleted).not.toContain(upload(0).storageKey);
+  });
+
+  test('stops a collectionless upload before image persistence when manager access is revoked', async () => {
+    const f = fixture();
+    f.uploads.set(keys[0]!, galleryUploadSchema.parse({ ...f.uploads.get(keys[0]!)!, collectionKey: null }));
+    f.repository.canFinalizeUpload = async () => false;
+    const compensate = f.repository.compensateUpload.bind(f.repository);
+    f.repository.compensateUpload = async (...args: Parameters<GalleryRepository['compensateUpload']>) => ({ ...(await compensate(...args))!, imageChanged: false, storageKeys: [] });
+    let processingCalls = 0;
+    const events: string[] = [];
+    await expect(processGalleryUploadBatch([keys[0]!], {
+      repository: f.repository, storage: f.storage, resolveImageReference: async () => 'data:image/jpeg;base64,/9j/2Q==', sanitizeImage: passthroughSanitizer,
+      processBatch: async () => { processingCalls += 1; return []; },
+      publishUserEvent: async (_userKey, event) => { events.push(event); },
+    })).rejects.toThrow('access was revoked before processing');
+    expect(processingCalls).toBe(0);
+    expect(f.relations).toEqual([]);
+    expect(f.compensated).toEqual([upload(0).imageKey]);
+    expect(f.uploads.get(keys[0]!)?.status).toBe('failed');
+    expect(events).toEqual(['upload.changed', 'upload.changed']);
+  });
+
+  test('compensates a persisted image without classifying or attaching it when collection access races finalization', async () => {
+    const f = fixture();
+    f.repository.finalizeUpload = async (value, _relation, leaseId, updatedAt, failureStatus, errorCode) => {
+      const effects = await f.repository.compensateUpload(value.key, value.scopeKey, leaseId, errorCode, failureStatus, updatedAt);
+      return effects ? { status: 'compensated', effects } : { status: 'unchanged' };
+    };
+    let classifications = 0;
+    f.repository.listIdentityMatches = async () => { classifications += 1; return [{ identityKey: keys[2]!, confidence: 0.9 }]; };
+    await expect(processGalleryUploadBatch([keys[0]!], {
+      repository: f.repository, storage: f.storage, resolveImageReference: async () => 'data:image/jpeg;base64,/9j/2Q==', sanitizeImage: passthroughSanitizer,
+      processBatch: async ([input]) => [imageSchema.parse({ key: input!.imageKey, scopeKey: input!.scopeKey, filename: 'image.jpg', caption: 'Caption.', imageCaptionKey: keys[2], createdByKey: input!.ownerKey, storageKey: 'media/image.jpg', mimeType: 'image/jpeg', sizeBytes: 4, width: 10, height: 10, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now })],
+    })).rejects.toThrow('finalization failed');
+    expect(classifications).toBe(0);
+    expect(f.relations).toEqual([]);
+    expect(f.compensated).toEqual([upload(0).imageKey]);
+    expect(f.uploads.get(keys[0]!)?.status).toBe('failed');
   });
 
   test('processes exact, near, and distinct S3 uploads with canonical scored-caption reuse', async () => {
@@ -129,8 +272,13 @@ describe('Gallery upload batch processing', () => {
     const repository = {
       async getUpload(key: string) { return uploads.get(key) ?? null; },
       async updateUpload(key: string, patch: Partial<GalleryUpload>) { const updated = galleryUploadSchema.parse({ ...uploads.get(key)!, ...patch }); uploads.set(key, updated); return updated; },
+      async claimUploads(uploadKeys: string[], leaseId: string, updatedAt: string) { return Promise.all(uploadKeys.filter((key) => uploads.get(key)?.status === 'queued').map((key) => repository.updateUpload(key, { status: 'processing', processingLeaseId: leaseId, updatedAt }))); },
+      async renewUploadLease(uploadKeys: string[], leaseId: string, updatedAt: string) { const owned = uploadKeys.filter((key) => uploads.get(key)?.status === 'processing' && uploads.get(key)?.processingLeaseId === leaseId); for (const key of owned) await repository.updateUpload(key, { updatedAt }); return owned.length; },
       async addImageToCollection(relation: unknown) { return relation; },
-      async listIdentityMatches() { return []; }, async persistIdentityMatches() {},
+      async listIdentityMatches() { return []; }, async persistIdentityMatches() { return false; },
+      async getUserKeyByMemberKey() { return 'user-1'; }, async listScopeManagerUserKeys() { return []; }, async canFinalizeUpload() { return true; },
+      async finalizeUpload(value: GalleryUpload, _relation: unknown, _leaseId: string, updatedAt: string) { const updated = galleryUploadSchema.parse({ ...uploads.get(value.key)!, status: 'completed', processingLeaseId: null, errorCode: null, updatedAt }); uploads.set(value.key, updated); return { status: 'completed' as const }; },
+      async compensateUpload() { return null; },
     } as unknown as GalleryRepository;
     const storage = {
       async upload({ key, bytes: value }: { key: string; bytes: Uint8Array }) { objects.set(key, value); return { storageKey: key }; },

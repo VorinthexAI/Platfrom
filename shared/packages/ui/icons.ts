@@ -1,6 +1,7 @@
 ﻿export * from './icons/home';
 export * from './icons/search';
 export * from './icons/menu';
+export * from './icons/member';
 export * from './icons/close';
 export * from './icons/arrow-left';
 export * from './icons/arrow-right';
@@ -49,6 +50,7 @@ export * from './icons/image';
 export * from './icons/file';
 export * from './icons/folder';
 export * from './icons/camera';
+export * from './icons/camera-rotate';
 export * from './icons/location-pin';
 export * from './icons/log-out';
 export * from './icons/calendar';

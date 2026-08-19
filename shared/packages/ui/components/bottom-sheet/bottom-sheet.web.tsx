@@ -17,11 +17,10 @@ export type BottomSheetProps = {
   description?: string;
   dismissible?: boolean;
   footer?: ReactNode;
+  height?: "full";
   hideHeading?: boolean;
-  mutation?: boolean;
   onOpenChange: (open: boolean) => void;
   open: boolean;
-  tall?: boolean;
   title: string;
 };
 
@@ -34,11 +33,10 @@ export function BottomSheet({
   description,
   dismissible = true,
   footer,
+  height,
   hideHeading = false,
-  mutation = false,
   onOpenChange,
   open,
-  tall = false,
   title,
 }: BottomSheetProps) {
   const contentRef = useRef<HTMLDivElement>(null);
@@ -86,7 +84,7 @@ export function BottomSheet({
         <Dialog.Content
           aria-describedby={description ? descriptionId : undefined}
           aria-labelledby={titleId}
-          className={`vui-bottom-sheet${tall ? " vui-bottom-sheet-tall" : ""}${mutation ? " vui-bottom-sheet-mutation" : ""}`}
+          className={`vui-bottom-sheet${height === "full" ? " vui-bottom-sheet-full" : ""}`}
           onEscapeKeyDown={(event) => { if (!dismissible) event.preventDefault(); }}
           onInteractOutside={(event) => { if (!dismissible) event.preventDefault(); }}
           ref={contentRef}

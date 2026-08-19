@@ -56,15 +56,19 @@ export function createBookRuntime(options: BookRuntimeDependencies = {}): BookGe
   return {
     async create(input, context) {
       await repository.authorize(context, true);
-      const idea = json(ideaSchema, await ask(prompt('Design a useful nonfiction book from the reader brief. Return only strict JSON with title, optional subtitle, description, outcome, and summary.', JSON.stringify(input)), context.organizationKey));
+      const { generationBriefFingerprint, ...brief } = input;
+      const idea = json(ideaSchema, await ask(prompt('Design a useful nonfiction book from the reader brief. Return only strict JSON with title, optional subtitle, description, outcome, and summary.', JSON.stringify(brief)), context.organizationKey));
       const timestamp = now(); const bookKey = id();
-       const draft = { key: bookKey, scopeKey: input.scopeKey, ...(input.generationRequestKey ? { generationRequestKey: input.generationRequestKey } : {}), title: idea.title, ...(idea.subtitle ? { subtitle: idea.subtitle } : {}), description: idea.description, goal: input.goal, audience: input.audience, outcome: idea.outcome, language: input.language, status: 'planning' as const, createdAt: timestamp, updatedAt: timestamp };
+       const draft = { key: bookKey, scopeKey: input.scopeKey, ...(input.generationRequestKey ? { generationRequestKey: input.generationRequestKey } : {}), ...(generationBriefFingerprint ? { generationBriefFingerprint } : {}), title: idea.title, ...(idea.subtitle ? { subtitle: idea.subtitle } : {}), description: idea.description, goal: input.goal, audience: input.audience, outcome: idea.outcome, language: input.language, status: 'planning' as const, createdAt: timestamp, updatedAt: timestamp };
       const sourceNotes = input.sourceNotes?.trim() || 'No source notes supplied.';
       const contextDraft = { key: id(), scopeKey: input.scopeKey, bookKey, userContext: `Topic: ${input.topic}\nGoal: ${input.goal}\nAudience: ${input.audience}\nTone: ${input.tone}\nLength: ${input.length}`, priorKnowledge: sourceNotes, priorBookContext: idea.summary, personalizationContext: `Write for ${input.audience} in a ${input.tone} tone.`, researchContext: input.sourceNotes?.trim() || 'Use durable general knowledge and avoid unsupported claims.', noveltyContext: 'Prefer concrete examples, useful distinctions, and original synthesis.', generationBrief: idea.summary, createdAt: timestamp, updatedAt: timestamp };
       await repository.create(context, bookSchema.parse({ ...draft, embedding: await vector(booksEmbeddingFields, draft) }), bookContextSchema.parse({ ...contextDraft, embedding: await vector(bookContextsEmbeddingFields, contextDraft) }));
       return bookKey;
     },
     async write(bookKey, input, context) {
+      if (!context.generationLeaseToken) throw new Error('Book generation lease token is required.');
+      const attemptKey = context.generationLeaseToken; const uncommittedUploads = new Set<string>();
+      const cleanupUploads = async () => { await Promise.all([...uncommittedUploads].map((key) => storage.delete(key).catch(() => undefined))); };
       await repository.authorize(context, true); const initial = await repository.detail(context, bookKey); const timestamp = now();
       await repository.updateBook(context, bookKey, { status: 'generating', updatedAt: timestamp });
       try {
@@ -77,35 +81,43 @@ export function createBookRuntime(options: BookRuntimeDependencies = {}): BookGe
         }
         const written: typeof chapters = [];
         for (const chapter of chapters.sort((a, b) => a.position - b.position)) {
-           if (chapter.content && chapter.audioStorageKey) { written.push(chapter); continue; }
-           if (!chapter.content) await repository.updateChapter(context, chapter.key, { status: 'writing', updatedAt: now() });
-           const previous = written.map((item) => `${item.title}: ${item.description}`).join('\n');
-           const content = chapter.content ?? (await ask(prompt(`Write this nonfiction chapter as natural, human prose in ${input.language}. Follow the chapter objective and topics while matching the requested ${input.tone} tone.
+          if (chapter.content && chapter.audioStorageKey) { written.push(chapter); continue; }
+          if (!chapter.content) await repository.updateChapter(context, chapter.key, { status: 'writing', updatedAt: now() });
+          const previous = written.map((item) => `${item.title}: ${item.description}`).join('\n');
+          const content = chapter.content ?? (await ask(prompt(`Write this nonfiction chapter as natural, human prose in ${input.language}. Follow the chapter objective and topics while matching the requested ${input.tone} tone.
 
 Use complete paragraphs, varied sentence lengths, concrete examples, and smooth transitions. Write with the confidence and rhythm of an experienced nonfiction author. Prefer plain punctuation and natural connective language.
 
 Do not use bullet lists, numbered lists, headings, fragments, slogans, canned motivational language, repetitive summaries, or meta commentary. Avoid em dashes and avoid excessive hyphens; use commas, periods, or full connecting phrases instead. Do not announce the chapter structure or say what the reader will learn. Return only the finished chapter prose.`, JSON.stringify({ book: { title: initial.book.title, description: initial.book.description, goal: input.goal, audience: input.audience, tone: input.tone, language: input.language }, chapter, previous }), input.length === 'deep' ? 8_000 : input.length === 'short' ? 2_500 : 4_500), context.organizationKey)).trim();
           const estimatedMinutes = Math.max(1, Math.ceil(content.split(/\s+/).length / 220));
           let audioStorageKey: string | undefined; let audioDurationSeconds: number | undefined;
-           try {
-             const narration = await Promise.all(speechChunks(content).map((chunk) => speak(chunk, input.language, context.organizationKey)));
-             const mimeType = narration[0]?.mimeType ?? 'audio/mpeg';
-             const extension = mimeType.includes('wav') ? 'wav' : mimeType.includes('ogg') ? 'ogg' : 'mp3';
-             const byteLength = narration.reduce((sum, item) => sum + item.bytes.byteLength, 0);
-             const bytes = new Uint8Array(byteLength);
-             let offset = 0;
-             for (const item of narration) { bytes.set(item.bytes, offset); offset += item.bytes.byteLength; }
-             audioStorageKey = (await storage.upload({ key: `books/${input.scopeKey}/${bookKey}/chapters/${chapter.key}.${extension}`, bytes, mimeType })).storageKey;
-             const durationMs = narration.reduce((sum, item) => sum + (item.durationMs ?? 0), 0);
-             audioDurationSeconds = durationMs ? Math.max(1, Math.ceil(durationMs / 1_000)) : undefined;
-           } catch { /* Prose remains available when speech is not configured. */ }
+          try {
+            const narration = await Promise.all(speechChunks(content).map((chunk) => speak(chunk, input.language, context.organizationKey)));
+            const mimeType = narration[0]?.mimeType ?? 'audio/mpeg';
+            const extension = mimeType.includes('wav') ? 'wav' : mimeType.includes('ogg') ? 'ogg' : 'mp3';
+            const byteLength = narration.reduce((sum, item) => sum + item.bytes.byteLength, 0);
+            const bytes = new Uint8Array(byteLength);
+            let offset = 0;
+            for (const item of narration) { bytes.set(item.bytes, offset); offset += item.bytes.byteLength; }
+            audioStorageKey = (await storage.upload({ key: `books/${input.scopeKey}/${bookKey}/attempts/${attemptKey}/chapters/${chapter.key}.${extension}`, bytes, mimeType })).storageKey;
+            uncommittedUploads.add(audioStorageKey);
+            const durationMs = narration.reduce((sum, item) => sum + (item.durationMs ?? 0), 0);
+            audioDurationSeconds = durationMs ? Math.max(1, Math.ceil(durationMs / 1_000)) : undefined;
+          } catch { /* Prose remains available when speech is not configured. */ }
           const patch = { content, estimatedMinutes, status: audioStorageKey ? 'audio-ready' as const : 'written' as const, ...(audioStorageKey ? { audioStorageKey } : {}), ...(audioDurationSeconds ? { audioDurationSeconds } : {}), embedding: await vector(bookChaptersEmbeddingFields, { ...chapter, content }), updatedAt: now() };
           written.push(await repository.updateChapter(context, chapter.key, patch));
+          if (audioStorageKey) uncommittedUploads.delete(audioStorageKey);
         }
         let coverStorageKey = initial.book.coverStorageKey;
-        if (!coverStorageKey) { const image = await cover(`Editorial nonfiction book cover, no logos. Title: ${initial.book.title}. Theme: ${initial.book.description}.`, context.organizationKey); if (image) { const extension = image.mimeType.includes('jpeg') ? 'jpg' : image.mimeType.includes('webp') ? 'webp' : 'png'; coverStorageKey = (await storage.upload({ key: `books/${input.scopeKey}/${bookKey}/cover.${extension}`, bytes: image.bytes, mimeType: image.mimeType })).storageKey; } }
+        if (!coverStorageKey) { const image = await cover(`Editorial nonfiction book cover, no logos. Title: ${initial.book.title}. Theme: ${initial.book.description}.`, context.organizationKey); if (image) { const extension = image.mimeType.includes('jpeg') ? 'jpg' : image.mimeType.includes('webp') ? 'webp' : 'png'; coverStorageKey = (await storage.upload({ key: `books/${input.scopeKey}/${bookKey}/attempts/${attemptKey}/cover.${extension}`, bytes: image.bytes, mimeType: image.mimeType })).storageKey; uncommittedUploads.add(coverStorageKey); } }
         await repository.updateBook(context, bookKey, { status: 'ready', chapterCount: written.length, estimatedMinutes: written.reduce((sum, chapter) => sum + chapter.estimatedMinutes, 0), ...(coverStorageKey ? { coverStorageKey } : {}), updatedAt: now() });
-      } catch (error) { await repository.updateBook(context, bookKey, { status: 'failed', updatedAt: now() }); throw error; }
+        if (coverStorageKey) uncommittedUploads.delete(coverStorageKey);
+      } catch (error) {
+        await cleanupUploads();
+        try { await repository.updateBook(context, bookKey, { status: 'failed', updatedAt: now() }); }
+        catch { /* Preserve the generation failure when the lease was lost. */ }
+        throw error;
+      }
     },
   };
 }

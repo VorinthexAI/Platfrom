@@ -1,5 +1,6 @@
 import { apiClient } from "@/lib/api-client";
 import type { AssistantChange } from "@/lib/assistant-changes";
+import { normalizeCollection, type CollectionRole } from "@/lib/collection-access";
 import { useAuthStore } from "@/state/auth";
 
 export type GalleryCollection = {
@@ -9,7 +10,51 @@ export type GalleryCollection = {
   isFavorite: boolean;
   count: number;
   coverUrl: string | null;
+  memberKey: string;
+  isOwned?: boolean;
+  role: GalleryCollectionRole;
+  access: { canRead: boolean; canContribute: boolean; canManage: boolean };
 };
+
+export type GalleryCollectionRole = CollectionRole;
+
+type GalleryCollectionAccess = GalleryCollection["access"];
+type GalleryCollectionProjection = Omit<GalleryCollection, "role" | "access"> & {
+  role?: GalleryCollectionRole;
+  access?: Partial<GalleryCollectionAccess>;
+};
+
+export type GalleryCollectionMember = {
+  key: string;
+  memberKey: string;
+  name: string;
+  email: string | null;
+  role: GalleryCollectionRole;
+  joinedAt: string;
+};
+
+export type GalleryCollectionInvite = {
+  key: string;
+  recipient: string;
+  role: Exclude<GalleryCollectionRole, "owner">;
+  createdAt: string;
+  collection: { key: string; name: string };
+  inviterDisplayName: string;
+  email?: string;
+  inviteeKey?: string;
+};
+
+export type GalleryCollectionShareLink = {
+  key: string;
+  url: string;
+  role: Exclude<GalleryCollectionRole, "owner">;
+  active: boolean;
+  createdAt: string;
+};
+
+export function filterGalleryShareLinks(links: GalleryCollectionShareLink[], active: boolean) {
+  return links.filter((link) => link.active === active);
+}
 
 export type GalleryImage = {
   key: string;
@@ -28,18 +73,60 @@ export type GalleryImage = {
   updatedAt: string;
   url: string;
   score?: number;
+  createdByKey?: string | null;
 };
 
 export type GalleryOverview = {
   collections: GalleryCollection[];
   images: GalleryImage[];
   nextCursor: string | null;
+  canCreateCollections: boolean;
 };
+
+export type GalleryHighlight = {
+  key: string;
+  collectionKey: string;
+  imageKeys: string[];
+  images: GalleryImage[];
+  createdByKey: string;
+  title: string;
+  slideCount: number;
+  coverUrl: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type GalleryHighlightProjection = Omit<GalleryHighlight, "title" | "slideCount" | "coverUrl">;
+export type GalleryHighlightSlide = { key: string; imageKey: string; url: string };
+export type GalleryHighlightDetail = GalleryHighlight;
+
+const galleryHighlightDateFormatter = new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+
+function normalizeGalleryHighlight(highlight: GalleryHighlightProjection): GalleryHighlight {
+  return {
+    ...highlight,
+    title: `Highlight ${galleryHighlightDateFormatter.format(new Date(highlight.createdAt))}`,
+    slideCount: highlight.imageKeys.length,
+    coverUrl: highlight.images[0]?.url ?? null,
+  };
+}
+
+export function resolveGalleryHighlightSlides(highlight: GalleryHighlightDetail) {
+  const images = new Map(highlight.images.map((image) => [image.key, image]));
+  return highlight.imageKeys.flatMap((imageKey, index) => {
+    const image = images.get(imageKey);
+    return image ? [{ key: `${highlight.key}:${index}`, imageKey, url: image.url }] : [];
+  });
+}
 
 export function filterCollections(collections: GalleryCollection[], query: string) {
   const normalized = query.trim().toLocaleLowerCase();
   if (!normalized) return collections;
   return collections.filter(({ name, description }) => `${name}\n${description ?? ""}`.toLocaleLowerCase().includes(normalized));
+}
+
+export function isGalleryCollectionOwned(collection: Pick<GalleryCollection, "isOwned" | "role">) {
+  return collection.isOwned ?? (collection.role === "owner");
 }
 
 export function filterMediaItems(items: GalleryImage[], query: string) {
@@ -84,7 +171,25 @@ export type GallerySubject = {
 
 type ApiResponse<T> =
   | { success: true; data: T }
-  | { success: false; error: { message: string } };
+  | { success: false; error: { message: string; code?: string } };
+
+export class GalleryClientError extends Error {
+  code?: string;
+
+  constructor(message: string, code?: string) {
+    super(message);
+    this.name = "GalleryClientError";
+    this.code = code;
+  }
+}
+
+export function isGalleryClientErrorCode(error: unknown, code: string) {
+  return error instanceof GalleryClientError && error.code === code;
+}
+
+function galleryClientError(error: { message: string; code?: string }) {
+  return new GalleryClientError(error.message, error.code);
+}
 
 type GalleryContext = { organizationKey: string; scopeKey: string };
 
@@ -102,16 +207,108 @@ export function getGalleryContext(): GalleryContext {
   return context;
 }
 
+export function getGalleryMemberKey() {
+  const organization = useAuthStore.getState().organization;
+  const value = organization?.membership_key ?? organization?.membershipKey;
+  return typeof value === "string" ? value : "";
+}
+
 async function postGallery<T>(path: string, input: Record<string, unknown>, timeout = 60_000) {
   try {
     const response = await apiClient.post<ApiResponse<T>>(path, { ...getGalleryContext(), ...input }, { timeout });
-    if (!response.data.success) throw new Error(response.data.error.message);
+    if (!response.data.success) throw galleryClientError(response.data.error);
     return response.data.data;
   } catch (error) {
     const failure = (error as { response?: { data?: ApiResponse<T> } }).response?.data;
-    if (failure && !failure.success) throw new Error(failure.error.message);
+    if (failure && !failure.success) throw galleryClientError(failure.error);
     throw error;
   }
+}
+
+export const GALLERY_COLLECTION_SHARING_ENDPOINTS = {
+  members: "/gallery/collections/members",
+  updateMember: "/gallery/collections/members/role",
+  removeMember: "/gallery/collections/members/remove",
+  invites: "/gallery/invites/pending",
+  acceptInvite: "/gallery/invites/accept",
+  rejectInvite: "/gallery/invites/reject",
+  shareLinks: "/gallery/collections/shares/list",
+  createShareLink: "/gallery/collections/shares",
+  updateShareLink: "/gallery/collections/shares/update",
+  leave: "/gallery/collections/leave",
+  activateShare: "/gallery/shares/activate",
+} as const;
+
+export const GALLERY_COLLECTION_HIGHLIGHT_ENDPOINTS = {
+  create: "/gallery/highlights",
+  list: "/gallery/highlights/list",
+  detail: "/gallery/highlights/read",
+  delete: "/gallery/highlights/delete",
+} as const;
+
+export function createGalleryCollectionHighlight(collectionKey: string) {
+  return postGallery<{ highlight: GalleryHighlightProjection }>(GALLERY_COLLECTION_HIGHLIGHT_ENDPOINTS.create, { collectionKey })
+    .then(({ highlight }) => ({ highlight: normalizeGalleryHighlight(highlight) }));
+}
+
+export function listGalleryCollectionHighlights(collectionKey: string) {
+  return postGallery<{ highlights: GalleryHighlightProjection[] }>(GALLERY_COLLECTION_HIGHLIGHT_ENDPOINTS.list, { collectionKey })
+    .then(({ highlights }) => ({ highlights: highlights.map(normalizeGalleryHighlight) }));
+}
+
+export function fetchGalleryCollectionHighlight(highlightKey: string) {
+  return postGallery<{ highlight: GalleryHighlightProjection }>(GALLERY_COLLECTION_HIGHLIGHT_ENDPOINTS.detail, { highlightKey })
+    .then(({ highlight }) => ({ highlight: normalizeGalleryHighlight(highlight) }));
+}
+
+export function deleteGalleryCollectionHighlight(highlightKey: string) {
+  return postGallery<{ highlightKey: string }>(GALLERY_COLLECTION_HIGHLIGHT_ENDPOINTS.delete, { highlightKey });
+}
+
+export function listGalleryCollectionMembers(collectionKey: string) {
+  type ProjectedMember = Omit<GalleryCollectionMember, "name" | "email"> & { displayName: string };
+  return postGallery<{ owners: ProjectedMember[]; collaborators: ProjectedMember[]; viewers: ProjectedMember[] }>(GALLERY_COLLECTION_SHARING_ENDPOINTS.members, { collectionKey }).then(({ owners, collaborators, viewers }) => ({ members: [...owners, ...collaborators, ...viewers].map(({ displayName, ...member }) => ({ ...member, name: displayName, email: null })) }));
+}
+
+export function updateGalleryCollectionMember(collectionKey: string, memberKey: string, role: Exclude<GalleryCollectionRole, "owner">) {
+  return postGallery<{ memberKey: string; role: Exclude<GalleryCollectionRole, "owner">; joinedAt: string }>(GALLERY_COLLECTION_SHARING_ENDPOINTS.updateMember, { collectionKey, memberKey, role });
+}
+
+export function removeGalleryCollectionMember(collectionKey: string, memberKey: string) {
+  return postGallery<{ memberKey: string }>(GALLERY_COLLECTION_SHARING_ENDPOINTS.removeMember, { collectionKey, memberKey });
+}
+
+export function listGalleryCollectionInvites(memberKeys: string[] = []) {
+  type PendingInvite = Omit<GalleryCollectionInvite, "recipient"> & { email?: string; inviteeKey?: string };
+  const email = useAuthStore.getState().user?.email?.trim().toLocaleLowerCase();
+  const memberships = new Set([getGalleryMemberKey(), ...memberKeys].filter(Boolean));
+  return postGallery<{ invites: PendingInvite[] }>(GALLERY_COLLECTION_SHARING_ENDPOINTS.invites, {}).then(({ invites }) => ({ invites: invites
+    .filter((invite) => Boolean(email && invite.email?.toLocaleLowerCase() === email) || Boolean(invite.inviteeKey && memberships.has(invite.inviteeKey)))
+    .map((invite) => ({ ...invite, recipient: invite.email ?? invite.inviteeKey ?? "Pending recipient" })) }));
+}
+
+export function respondToGalleryCollectionInvite(inviteKey: string, response: "accept" | "reject") {
+  return postGallery<{ inviteKey: string }>(response === "accept" ? GALLERY_COLLECTION_SHARING_ENDPOINTS.acceptInvite : GALLERY_COLLECTION_SHARING_ENDPOINTS.rejectInvite, { inviteKey });
+}
+
+export function listGalleryCollectionShareLinks(collectionKey: string) {
+  return postGallery<{ shares: GalleryCollectionShareLink[] }>(GALLERY_COLLECTION_SHARING_ENDPOINTS.shareLinks, { collectionKey }).then(({ shares }) => ({ links: shares }));
+}
+
+export function createGalleryCollectionShareLink(collectionKey: string, role: Exclude<GalleryCollectionRole, "owner">, active: boolean) {
+  return postGallery<{ share: GalleryCollectionShareLink; token?: string }>(GALLERY_COLLECTION_SHARING_ENDPOINTS.createShareLink, { collectionKey, role, active }).then(({ share, token }) => ({ link: share, token }));
+}
+
+export function updateGalleryCollectionShareLink(collectionKey: string, shareKey: string, active: boolean) {
+  return postGallery<{ share: GalleryCollectionShareLink }>(GALLERY_COLLECTION_SHARING_ENDPOINTS.updateShareLink, { collectionKey, shareKey, active }).then(({ share }) => ({ link: share }));
+}
+
+export function leaveGalleryCollection(collectionKey: string) {
+  return postGallery<{ collectionKey: string }>(GALLERY_COLLECTION_SHARING_ENDPOINTS.leave, { collectionKey });
+}
+
+export function activateGalleryShare(token: string) {
+  return postGallery<{ scopeKey: string; collectionKey: string; role: GalleryCollectionRole }>(GALLERY_COLLECTION_SHARING_ENDPOINTS.activateShare, { token });
 }
 
 async function fetchWithTimeout(input: string, init: RequestInit | undefined, timeout: number) {
@@ -124,16 +321,18 @@ async function fetchWithTimeout(input: string, init: RequestInit | undefined, ti
   }
 }
 
-export function fetchGalleryOverview(collectionKey?: string, cursor?: string, limit = 100) {
-  return postGallery<GalleryOverview>("/gallery/overview", { ...(collectionKey ? { collectionKey } : {}), ...(cursor ? { cursor } : {}), limit });
+export function fetchGalleryOverview(collectionKey?: string, cursor?: string, limit = 100, maxCaptionScore?: number) {
+  return postGallery<Omit<GalleryOverview, "collections"> & { collections: GalleryCollectionProjection[] }>("/gallery/overview", { ...(collectionKey ? { collectionKey } : {}), ...(cursor ? { cursor } : {}), limit, ...(maxCaptionScore !== undefined ? { maxCaptionScore } : {}) })
+    .then((overview) => ({ ...overview, collections: overview.collections.map(normalizeCollection) }));
 }
 
 export function createGalleryCollection(name: string, isFavorite: boolean) {
-  return postGallery<GalleryCollection>("/gallery/collections", { name, isFavorite });
+  return postGallery<GalleryCollectionProjection>("/gallery/collections", { name, isFavorite }).then(normalizeCollection);
 }
 
-export function updateGalleryCollection(collectionKey: string, name: string, isFavorite: boolean) {
-  return postGallery<{ collection: GalleryCollection }>("/gallery/collections/update", { collectionKey, name, isFavorite });
+export function updateGalleryCollection(collectionKey: string, name: string, isFavorite: boolean, coverImageKey?: string | null) {
+  return postGallery<{ collection: GalleryCollectionProjection }>("/gallery/collections/update", { collectionKey, name, isFavorite, ...(coverImageKey !== undefined ? { coverImageKey } : {}) })
+    .then(({ collection }) => ({ collection: normalizeCollection(collection) }));
 }
 
 export function deleteGalleryCollection(collectionKey: string) {
@@ -201,8 +400,40 @@ export function updateGalleryImage(imageKey: string, name: string, isFavorite: b
   return postGallery<{ image: GalleryImage }>("/gallery/images/update", { imageKey, name, isFavorite });
 }
 
+export type GalleryImageDeleteResult = { deletedImageKeys: string[]; favoriteImageKeys: string[] };
+export type GalleryDuplicateDeleteResult = { removedImageKeys: string[]; deletedImageKeys: string[]; favoriteImageKeys: string[] };
+
+export function partitionFavoriteGalleryImages(images: GalleryImage[]) {
+  return {
+    favoriteImages: images.filter(({ isFavorite }) => isFavorite),
+    eligibleImages: images.filter(({ isFavorite }) => !isFavorite),
+  };
+}
+
+export function reconcileGalleryImageDeletion(images: GalleryImage[], result: GalleryImageDeleteResult) {
+  const requestedKeys = new Set(images.map(({ key }) => key));
+  const favoriteKeys = new Set(result.favoriteImageKeys.filter((key) => requestedKeys.has(key)));
+  const deletedKeys = new Set(result.deletedImageKeys.filter((key) => requestedKeys.has(key) && !favoriteKeys.has(key)));
+  return {
+    deletedImages: images.filter(({ key }) => deletedKeys.has(key)),
+    favoriteImages: images.filter(({ key }) => favoriteKeys.has(key)).map((image) => ({ ...image, isFavorite: true })),
+    unknownImages: images.filter(({ key }) => !deletedKeys.has(key) && !favoriteKeys.has(key)),
+  };
+}
+
+export function reconcileGalleryDuplicateDeletion(images: GalleryImage[], result: GalleryDuplicateDeleteResult) {
+  const requestedKeys = new Set(images.map(({ key }) => key));
+  const favoriteKeys = new Set(result.favoriteImageKeys.filter((key) => requestedKeys.has(key)));
+  const removedKeys = new Set(result.removedImageKeys.filter((key) => requestedKeys.has(key) && !favoriteKeys.has(key)));
+  return {
+    removedImages: images.filter(({ key }) => removedKeys.has(key)),
+    favoriteImages: images.filter(({ key }) => favoriteKeys.has(key)).map((image) => ({ ...image, isFavorite: true })),
+    unknownImages: images.filter(({ key }) => !removedKeys.has(key) && !favoriteKeys.has(key)),
+  };
+}
+
 export function deleteGalleryImages(imageKeys: string[]) {
-  return postGallery<{ deletedImageKeys: string[] }>("/gallery/images/delete", { imageKeys });
+  return postGallery<GalleryImageDeleteResult>("/gallery/images/delete", { imageKeys });
 }
 
 export function findGalleryCollectionDuplicates(collectionKey: string) {
@@ -210,7 +441,7 @@ export function findGalleryCollectionDuplicates(collectionKey: string) {
 }
 
 export function deleteGalleryCollectionDuplicates(collectionKey: string, imageKeys: string[]) {
-  return postGallery<{ removedImageKeys: string[]; deletedImageKeys: string[] }>("/gallery/collections/duplicates/delete", { collectionKey, imageKeys });
+  return postGallery<GalleryDuplicateDeleteResult>("/gallery/collections/duplicates/delete", { collectionKey, imageKeys });
 }
 
 export function transferGalleryCollectionImages(input: { sourceCollectionKey: string; destinationCollectionKeys: string[]; imageKeys: string[]; mode: "copy" | "move" }) {

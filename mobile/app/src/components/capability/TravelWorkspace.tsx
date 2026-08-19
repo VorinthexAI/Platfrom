@@ -287,6 +287,7 @@ export function TravelWorkspace() {
         : activeSheet === "explore" ? "Explore places"
           : activeSheet === "confirmRemove" ? "Remove stop?"
             : selectedTrip ? selectedTrip.name : "Trips";
+  const fullHeightSheet = activeSheet === "explore" || activeSheet === "newTrip" || activeSheet === "chooseTrip" || activeSheet === "trips";
 
   return (
     <KeyboardAvoidingView behavior="height" style={styles.root}>
@@ -336,8 +337,8 @@ export function TravelWorkspace() {
         value={assistantInput}
       /> : null}
 
-      <BottomSheet description={activeSheet === "newTrip" ? "Use ISO dates in YYYY-MM-DD format." : undefined} dismissible={!busy} mutation={activeSheet === "newTrip"} onOpenChange={setSheetOpen} open={sheetOpen} tall={activeSheet === "trips" || activeSheet === "explore"} title={sheetTitle}>
-        <ScrollView contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={{ maxHeight: height * 0.58 }}>
+      <BottomSheet description={activeSheet === "newTrip" ? "Use ISO dates in YYYY-MM-DD format." : undefined} dismissible={!busy} height={fullHeightSheet ? "full" : undefined} onOpenChange={setSheetOpen} open={sheetOpen} title={sheetTitle}>
+        <ScrollView contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={[fullHeightSheet && styles.fullSheetScroll, { maxHeight: fullHeightSheet ? undefined : height * 0.58 }]}>
           {error ? <View accessibilityLiveRegion="assertive" style={styles.inlineError}><Text style={styles.errorText}>{error}</Text></View> : null}
 
           {activeSheet === "explore" ? <>
@@ -423,6 +424,7 @@ const styles = StyleSheet.create({
   inlineNotice: { paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: palette.hairlineBright, borderRadius: radii.md, backgroundColor: palette.panelRaised },
   errorText: { color: palette.silver100, fontFamily: fonts.regular, fontSize: 12, lineHeight: 18 },
   sheetContent: { gap: 6, paddingBottom: 6 },
+  fullSheetScroll: { flex: 1 },
   countrySearch: { minHeight: 48, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.lg, backgroundColor: palette.panelRaised },
   countrySearchInput: { minHeight: 40, flex: 1, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent" },
   listLabel: { marginTop: 10, marginBottom: 2, color: palette.silver500, fontFamily: fonts.medium, fontSize: 10, letterSpacing: tracking.micro },

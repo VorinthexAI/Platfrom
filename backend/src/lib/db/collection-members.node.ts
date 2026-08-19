@@ -4,8 +4,8 @@ import { createNodeHelpers, withArangoKey } from './base';
 import { db } from './client';
 
 export const COLLECTION_MEMBERS_COLLECTION = 'collectionMembers';
-export const collectionMemberRoleSchema = z.enum(['owner', 'member']);
-export const collectionMemberSchema = z.object({ key: z.string().cuid(), scopeKey: z.string().cuid(), collectionKey: z.string().cuid(), memberKey: z.string().cuid(), role: collectionMemberRoleSchema.default('member'), createdAt: z.string().datetime() });
+export const collectionMemberRoleSchema = z.preprocess((role) => role === 'member' ? 'collaborator' : role, z.enum(['owner', 'collaborator', 'viewer']));
+export const collectionMemberSchema = z.object({ key: z.string().cuid(), scopeKey: z.string().cuid(), collectionKey: z.string().cuid(), memberKey: z.string().cuid(), role: collectionMemberRoleSchema.default('collaborator'), createdAt: z.string().datetime() });
 export type CollectionMember = z.infer<typeof collectionMemberSchema>;
 export const collectionMembersEmbeddingFields = [] as const;
 const helpers = createNodeHelpers(COLLECTION_MEMBERS_COLLECTION, collectionMemberSchema, collectionMembersEmbeddingFields, { requireEmbedding: false });

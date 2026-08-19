@@ -1,9 +1,9 @@
-import { CameraView, useCameraPermissions, type CameraCapturedPicture } from "expo-camera";
+import { CameraView, useCameraPermissions, type CameraCapturedPicture, type CameraType } from "expo-camera";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Modal, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button } from "@vorinthex/shared/ui/button";
-import { CameraIcon, CloseIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { CameraIcon, CameraRotateIcon, CloseIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { fonts, palette, radii, spacing } from "@/theme/tokens";
 
 type Props = {
@@ -27,6 +27,7 @@ export function BrandedCameraModal({ title, hint = "Keep the page flat and fill 
   const [permission, requestPermission] = useCameraPermissions();
   const [ready, setReady] = useState(false);
   const [capturing, setCapturing] = useState(false);
+  const [facing, setFacing] = useState<CameraType>("back");
   const [torch, setTorch] = useState(false);
   const [error, setError] = useState<string>();
 
@@ -49,12 +50,12 @@ export function BrandedCameraModal({ title, hint = "Keep the page flat and fill 
   return <Modal animationType="fade" onRequestClose={() => { if (!capturing && !disabled) onClose(); }} presentationStyle="fullScreen" visible>
     <View style={styles.root}>
       {permission?.granted ? <>
-        <CameraView active facing="back" enableTorch={torch} mode="picture" onCameraReady={() => setReady(true)} onMountError={({ message }) => setError(message)} ref={camera} responsiveOrientationWhenOrientationLocked style={StyleSheet.absoluteFill} />
+        <CameraView active facing={facing} enableTorch={torch} mode="picture" onCameraReady={() => setReady(true)} onMountError={({ message }) => setError(message)} ref={camera} responsiveOrientationWhenOrientationLocked style={StyleSheet.absoluteFill} />
         <View pointerEvents="box-none" style={[styles.overlay, { paddingTop: insets.top + spacing.sm, paddingBottom: insets.bottom + spacing.lg }]}>
           <View style={styles.topBar}>
             <Button accessibilityLabel="Close camera" contentMode="raw" disabled={capturing || disabled} onPress={onClose} size="sm" variant="icon"><CloseIcon size="sm" /></Button>
             <View style={styles.heading}><Text style={styles.title}>{title}</Text><Text accessibilityLiveRegion="polite" style={styles.count}>{count} of {maximum}{countUnit ? ` ${countUnit}` : ""}</Text></View>
-            <View style={styles.headerSide} />
+            <Button accessibilityLabel={`Use ${facing === "back" ? "front" : "back"} camera`} contentMode="raw" disabled={capturing || disabled} onPress={() => { setReady(false); setTorch(false); setFacing((current) => current === "back" ? "front" : "back"); }} size="sm" variant="icon"><CameraRotateIcon size="sm" /></Button>
           </View>
           <View style={styles.guide}><View style={styles.guideCornerTopLeft} /><View style={styles.guideCornerTopRight} /><View style={styles.guideCornerBottomLeft} /><View style={styles.guideCornerBottomRight} /></View>
           <View style={styles.bottomBar}>
@@ -85,7 +86,6 @@ const styles = StyleSheet.create({
   overlay: { bottom: 0, justifyContent: "space-between", left: 0, paddingHorizontal: spacing.md, position: "absolute", right: 0, top: 0 },
   topBar: { alignItems: "center", backgroundColor: "rgba(3,5,7,0.78)", borderColor: palette.hairline, borderRadius: radii.xl, borderWidth: 1, flexDirection: "row", justifyContent: "space-between", padding: spacing.sm },
   heading: { alignItems: "center", flex: 1 },
-  headerSide: { width: 40 },
   title: { color: palette.text, fontFamily: fonts.semibold, fontSize: 15 },
   count: { color: palette.muted, fontFamily: fonts.regular, fontSize: 11, marginTop: 2 },
   guide: { alignSelf: "center", aspectRatio: 0.72, flexShrink: 1, marginVertical: spacing.lg, maxHeight: "48%", width: "82%" },

@@ -18,7 +18,6 @@ import {
   awsBedrockCredentialsSchema,
   awsBedrockMantleCredentialsSchema,
   awsPollyCredentialsSchema,
-  awsTranscribeCredentialsSchema,
   azureAIFoundryCredentialsSchema,
   googleVertexCredentialsSchema,
   openAICredentialsSchema,
@@ -53,7 +52,6 @@ export const foundersProviderCredentialsSchemas: Record<ProviderSlug, z.ZodTypeA
   'aws-bedrock': awsBedrockCredentialsSchema,
   'aws-bedrock-mantle': awsBedrockMantleCredentialsSchema,
   'aws-polly': awsPollyCredentialsSchema,
-  'aws-transcribe': awsTranscribeCredentialsSchema,
   openrouter: openRouterCredentialsSchema,
 };
 

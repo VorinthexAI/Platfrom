@@ -1,39 +1,35 @@
-import { z } from 'zod';
-import { CONTENT_TOOL_DEFINITIONS, contentToolInputSchemas, isContentToolName } from './content-registry';
+import { CONTENT_TOOL_DEFINITIONS, contentToolModelInputSchemas, hasPrimaryModelScope } from './content-registry';
 import { runContentTool, type ContentToolDependencies } from './content-runtime';
-import { domainToolInputSchemas, isDomainActionSlug } from './domain-schemas';
-import { domainToolJsonSchemas } from './domain-interpret';
-import { executeDomainTool, type DomainToolContext, type DomainToolExecutionOptions } from './domain-execute';
+import type { ContentToolName } from './content-schemas';
+import type { ToolContext } from './tool-context';
 
 export interface PublicToolDependencies {
-  context: DomainToolContext;
+  context: ToolContext;
   content?: ContentToolDependencies;
-  domain?: DomainToolExecutionOptions;
+  executeContent?: typeof runContentTool;
 }
 
 const contentDefinitions = new Map(CONTENT_TOOL_DEFINITIONS.map((definition) => [definition.name, definition]));
 
-/** Builds one direct public tool definition over the private domain/content runtimes. */
-export function createPublicToolDefinition(name: string) {
-  const contentDefinition = isContentToolName(name) ? contentDefinitions.get(name) : undefined;
-  const domainSchema = isDomainActionSlug(name) ? domainToolInputSchemas[name] : undefined;
-  const contentSchema = isContentToolName(name) ? contentToolInputSchemas[name] : undefined;
-  if (!domainSchema && !contentSchema) throw new Error(`Unknown public tool ${name}`);
-  const inputSchema = domainSchema && contentSchema ? z.union([domainSchema, contentSchema]) : domainSchema ?? contentSchema!;
-  const providerDefinition = {
-    name,
-    description: contentDefinition?.description ?? name,
-    inputSchema: contentDefinition && domainSchema ? { oneOf: [domainToolJsonSchemas[name]!, contentDefinition.inputSchema] } : domainSchema ? domainToolJsonSchemas[name]! : contentDefinition!.inputSchema,
-    ...(contentDefinition?.outputSchema ? { outputSchema: contentDefinition.outputSchema } : {}),
-  };
+/** Builds one public tool definition over the canonical Content runtime. */
+export function createPublicToolDefinition<Name extends ContentToolName>(name: Name) {
+  const providerDefinition = contentDefinitions.get(name);
+  if (!providerDefinition) throw new Error(`Unknown Content tool ${name}`);
+  const inputSchema = contentToolModelInputSchemas[name];
   return {
     name,
     inputSchema,
     providerDefinition,
     async execute(rawInput: unknown, dependencies: PublicToolDependencies) {
-      const lifecycleInput = Boolean(rawInput && typeof rawInput === 'object' && !Array.isArray(rawInput) && 'items' in rawInput);
-      if (isDomainActionSlug(name) && (!isContentToolName(name) || lifecycleInput)) return executeDomainTool(name, rawInput, dependencies.context, dependencies.domain);
-      return runContentTool(name as Parameters<typeof runContentTool>[0], rawInput, dependencies.context, dependencies.content);
+      const input = inputSchema.parse(rawInput) as Record<string, unknown>;
+      const canonicalInput = name === 'folder.create'
+        ? { ...input, folders: (input.folders as Record<string, unknown>[]).map((folder) => ({ scopeKey: dependencies.context.runtimeScopeKey, ...folder })) }
+        : name === 'document.search-all'
+          ? { organizationKey: dependencies.context.organizationKey, ...input }
+          : hasPrimaryModelScope(name)
+            ? { scopeKey: dependencies.context.runtimeScopeKey, ...input }
+            : input;
+      return (dependencies.executeContent ?? runContentTool)(name, canonicalInput as never, dependencies.context, dependencies.content);
     },
   };
 }

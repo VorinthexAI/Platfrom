@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { isLegacyIndex, normalizeLegacyDocumentSharePermission } from './arango-migrate-indexes';
 import { stageLegacyDocumentShares } from './content-migration';
-import { collections, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateEmailReplyMetadata, migrateImageCaptions, retireRemovedActions } from './arango-migrate';
+import { collections, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateEmailReplyMetadata, migrateImageCaptions, retireMomentumScope, retireRemovedActions, retireTranscriptionDomain, retireUserSettings } from './arango-migrate';
 import { EMBEDDING_DIMENSIONS, embeddingMetadata } from '../lib/embeddings';
 import { DOCUMENT_CHUNK_MAX_WORDS, DOCUMENT_MAX_CHUNKS, documentSemanticHash } from '../lib/ai/document-processing/chunking';
 
@@ -29,6 +29,35 @@ function migrationDatabase(collection: 'documents' | 'documentVersions', row: Re
 }
 
 describe('Arango migration indexes', () => {
+  test('creates persistent highlights under the exact required collection name with read indexes', () => {
+    const spec = collections.find(({ name }) => name === 'imageCollecitionHightlights');
+    expect(spec).toEqual(expect.objectContaining({ name: 'imageCollecitionHightlights', skipEmbedding: true }));
+    expect(spec?.indexes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ fields: ['scopeKey', 'collectionKey', 'deletedAt', 'createdAt'] }),
+      expect.objectContaining({ fields: ['scopeKey', 'createdByKey', 'deletedAt'] }),
+    ]));
+  });
+  test('creates the private user hidden overlay with unique and cleanup indexes', async () => {
+    const spec = collections.find(({ name }) => name === 'userHiddens');
+    expect(spec).toEqual(expect.objectContaining({ name: 'userHiddens', skipEmbedding: true }));
+    expect(spec?.indexes).toEqual(expect.arrayContaining([
+      { fields: ['userKey', 'source', 'sourceKey'], unique: true },
+      { fields: ['userKey', 'createdAt'] },
+      { fields: ['source', 'sourceKey'] },
+    ]));
+    const registry = await Bun.file(new URL('../lib/db/registry.ts', import.meta.url)).text();
+    expect(registry).not.toContain('userHiddens:');
+  });
+  test('physically retires the legacy settings blob when users already exist', async () => {
+    const calls: string[] = [];
+    const database = {
+      collection() { return { async exists() { return true; } }; },
+      async query(query: string) { calls.push(query); return { async all() { return []; }, async next() { return undefined; } }; },
+    };
+    await retireUserSettings(database as never);
+    expect(calls).toEqual([expect.stringContaining('UPDATE user WITH { settings: null }')]);
+    expect(calls[0]).toContain('OPTIONS { keepNull: false }');
+  });
   test('additively backfills canonical image captions and image references', async () => {
     const calls: string[] = [];
     const database = {
@@ -64,8 +93,43 @@ describe('Arango migration indexes', () => {
     expect(calls).toHaveLength(2);
     expect(calls[0]?.query).toContain('REMOVE relation IN modelActions');
     expect(calls[1]?.query).toContain('REMOVE action IN actions');
-    expect(calls[0]?.bindVars).toEqual({ slugs: ['document-generate-json'] });
-    expect(calls[1]?.bindVars).toEqual({ slugs: ['document-generate-json'] });
+    const slugs = calls[0]?.bindVars?.slugs as string[];
+    expect(slugs).toHaveLength(96);
+    expect(slugs).toEqual(expect.arrayContaining(['document-generate-json', 'core.transcribe', 'audio.transcribe', 'transcribe', 'artifact.create', 'project.create', 'organization.read', 'scope.list']));
+    expect(calls[1]?.bindVars).toEqual({ slugs });
+  });
+
+  test('removes the retired execution-workspace scope and access relations', async () => {
+    const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
+    const database = { async query(query: string, bindVars?: Record<string, unknown>) { calls.push({ query, bindVars }); return { async all() { return query.includes('RETURN scope._key') ? ['scope-key'] : []; }, async next() { return undefined; } }; } };
+    await retireMomentumScope(database as never, 'organization-key', 'archive-scope-key');
+    expect(calls).toHaveLength(22);
+    const contentMoves = calls.slice(1, 13);
+    expect(contentMoves.map(({ bindVars }) => bindVars?.['@collection'])).toEqual(['folders', 'tags', 'tagAssignments', 'documents', 'documentVersions', 'documentAudioVersions', 'documentSummaries', 'documentSummaryAudio', 'shares', 'agents', 'agentRuns', 'agentMemories']);
+    expect(contentMoves.every(({ query, bindVars }) => query.includes('UPDATE resource WITH { scopeKey: @archiveScopeKey }') && bindVars?.archiveScopeKey === 'archive-scope-key')).toBe(true);
+    expect(calls.map(({ query }) => query).join('\n')).toContain('REMOVE variable IN runtimeVariables');
+    expect(calls.map(({ query }) => query).join('\n')).toContain('candidate.scopeKey IN @scopeKeys && candidate._key < variable._key');
+    expect(calls.map(({ query }) => query).join('\n')).toContain('SORT candidateLink.scopeKey == @archiveScopeKey DESC, candidate._key ASC');
+    expect(calls.map(({ query }) => query).join('\n')).toContain('UPDATE member WITH { scopeKey: @archiveScopeKey');
+    expect(calls.map(({ query }) => query).join('\n')).toContain('link.scopeKey IN @scopeKeys && link._key <= retiredLink._key');
+    expect(calls.map(({ query }) => query).join('\n')).toContain('UPDATE link WITH { scopeKey: @archiveScopeKey } IN scopeAgents');
+    expect(calls.map(({ query }) => query).join('\n')).toContain('REMOVE relation IN scopeScopes');
+    expect(calls.map(({ query }) => query).join('\n')).toContain('REMOVE relation IN scopeMembers');
+    expect(calls.at(-1)?.query).toContain('REMOVE scope IN scopes');
+  });
+
+  test('removes dedicated transcription models, routes, provider access, and credentials', async () => {
+    const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
+    const database = { async query(query: string, bindVars?: Record<string, unknown>) { calls.push({ query, bindVars }); return { async all() { return []; }, async next() { return undefined; } }; } };
+    await retireTranscriptionDomain(database as never);
+    expect(calls).toHaveLength(6);
+    expect(calls[0]?.query).toContain('REMOVE relation IN modelActions');
+    expect(calls[1]?.query).toContain('REMOVE relation IN modelProviders');
+    expect(calls.slice(2, 4).map(({ bindVars }) => bindVars?.['@collection'])).toEqual(['organizationProviders', 'orgCredentials']);
+    expect(calls[4]?.query).toContain('REMOVE model IN models');
+    expect(calls[5]?.query).toContain('REMOVE provider IN providers');
+    expect(calls[0]?.bindVars?.modelSlugs).toEqual(['openai.gpt-4o-mini-transcribe', 'aws.transcribe-standard']);
+    expect(calls[1]?.bindVars?.providerSlugs).toEqual(['aws-transcribe']);
   });
 
   test('normalizes legacy share permissions without granting additional access', () => {
@@ -162,7 +226,13 @@ describe('Arango migration indexes', () => {
     expect(source).toContain('INSERT record INTO contentIdempotency');
     expect(source).toContain('if (ledgerAlreadyExisted) await legacyLedger.drop()');
     expect(source).toContain('migration found conflicting records');
-    expect(source).toContain('contentFolderKey: project.contentFolderKey != null ? project.contentFolderKey : project.archiveFolderKey');
+    expect(source).not.toContain("targetDb.collection('projects')");
+    expect(source).not.toContain("{ name: 'projects'");
+    expect(source).not.toContain("{ name: 'milestones'");
+    expect(source).not.toContain("{ name: 'tasks'");
+    for (const collection of ['tasks', 'milestones', 'projects', 'artifactDependencies', 'artifactSnapshots', 'artifacts']) {
+      expect(source).toContain(`'${collection}',`);
+    }
     expect(source).toContain("_key: 'content-document-shares-cutover'");
     expect(source.indexOf('await migrateGenericContentContracts(targetDb)')).toBeLessThan(source.indexOf('for (const spec of collections)'));
   });

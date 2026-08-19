@@ -375,8 +375,8 @@ export function EmailWorkspace() {
         />
       </View> : null}
 
-      <BottomSheet description={sheetDescription} dismissible={!busy} mutation={sheet === "reply" || sheet === "disconnect" || sheet === "discard"} onOpenChange={(open) => { setSheetOpen(open); if (!open && sheet === "discard") setPendingExit(undefined); }} open={sheetOpen} tall={sheet === "reply"} title={sheetTitle}>
-        <ScrollView contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+      <BottomSheet description={sheetDescription} dismissible={!busy} height={sheet === "reply" ? "full" : undefined} onOpenChange={(open) => { setSheetOpen(open); if (!open && sheet === "discard") setPendingExit(undefined); }} open={sheetOpen} title={sheetTitle}>
+        <ScrollView contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={sheet === "reply" ? styles.fullSheetScroll : undefined}>
           {error ? <View accessibilityLiveRegion="assertive" accessibilityRole="alert" style={styles.inlineError}><Text style={styles.errorText}>{error}</Text></View> : null}
           {sheet === "reply" ? <>
             <Text style={styles.sheetLabel}>TONE</Text>
@@ -481,6 +481,7 @@ const styles = StyleSheet.create({
   detailError: { position: "absolute", right: 0, bottom: 90, left: 0 },
   errorText: { color: palette.silver100, fontFamily: fonts.regular, fontSize: 12, lineHeight: 18 },
   sheetContent: { gap: 12, paddingBottom: 8 },
+  fullSheetScroll: { flex: 1 },
   sheetLabel: { marginTop: 3, color: palette.silver500, fontFamily: fonts.semibold, fontSize: 9, letterSpacing: tracking.micro },
   toneRow: { flexDirection: "row", flexWrap: "wrap", gap: 7 },
   instructionInput: { minHeight: 110, paddingTop: 12 },

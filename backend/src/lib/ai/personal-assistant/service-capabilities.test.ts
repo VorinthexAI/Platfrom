@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
-import type { DomainToolContext } from '@/lib/ai/tools/domain-execute';
+import type { ToolContext } from '@/lib/ai/tools/tool-context';
 import { defaultAssistantCapabilityRegistry, type AssistantSurface } from './capabilities';
 
 const organizationKey = newId();
@@ -9,14 +9,14 @@ const userKey = newId();
 const domain = {
   organizationKey,
   runtimeScopeKey: scopeKey,
-  principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: newId(), status: 'active' } },
-} as unknown as DomainToolContext;
+  principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } },
+} as unknown as ToolContext;
 
 const expected: Array<[AssistantSurface, string[]]> = [
-  ['knowledge-workspace', ['user.settings.read', 'user.settings.update', 'folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy', 'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.summary.audio.generate', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.enhance', 'document.translate', 'document.list-versions', 'document.restore-version', 'document.download', 'content.neighbors', 'scope.content.search-history.delete', 'knowledge.search', 'note.write']],
+  ['knowledge-workspace', ['content.hidden.list', 'folder.hide', 'folder.reveal', 'document.hide', 'document.reveal', 'folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy', 'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.summary.audio.generate', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.enhance', 'document.translate', 'document.list-versions', 'document.restore-version', 'document.download', 'content.neighbors', 'content.search-history.delete', 'knowledge.search', 'note.write']],
   ['travel-workspace', ['place.list', 'place.create', 'place.visit.create', 'trip.create', 'trip.place.add', 'trip.place.remove']],
-  ['signal-workspace', ['email.overview', 'email.sync', 'email.thread.read', 'email.thread.favorite', 'email.draft.create', 'email.draft.update', 'email.draft.send', 'email.disconnect']],
-  ['book-workspace', ['book.list', 'book.detail', 'book.chapter.progress', 'book.create-context', 'book.write']],
+  ['signal-workspace', ['email.overview', 'email.sync', 'email.thread.read', 'email.thread.mark-read', 'email.thread.favorite', 'email.draft.create', 'email.draft.update', 'email.draft.send', 'email.disconnect']],
+  ['book-workspace', ['book.list', 'book.detail', 'book.chapter.progress', 'book.create']],
 ];
 
 describe('personal assistant service capabilities', () => {
@@ -51,7 +51,8 @@ describe('personal assistant service capabilities', () => {
     const email: any = {
       overview: async (...args: unknown[]) => { calls.push(['email.overview', ...args]); return {}; },
       sync: async (...args: unknown[]) => { calls.push(['email.sync', ...args]); return {}; },
-      thread: async (...args: unknown[]) => { calls.push(['email.thread', ...args]); return {}; },
+      threadForTool: async (...args: unknown[]) => { calls.push(['email.threadForTool', ...args]); return {}; },
+      markRead: async (...args: unknown[]) => { calls.push(['email.markRead', ...args]); return {}; },
       setFavorite: async (...args: unknown[]) => { calls.push(['email.setFavorite', ...args]); return {}; },
       draft: async (...args: unknown[]) => { calls.push(['email.draft', ...args]); return {}; },
       updateDraft: async (...args: unknown[]) => { calls.push(['email.updateDraft', ...args]); return {}; },
@@ -62,6 +63,7 @@ describe('personal assistant service capabilities', () => {
       overview: async (...args: unknown[]) => { calls.push(['books.overview', ...args]); return {}; },
       detail: async (...args: unknown[]) => { calls.push(['books.detail', ...args]); return {}; },
       progress: async (...args: unknown[]) => { calls.push(['books.progress', ...args]); return {}; },
+      create: async (...args: unknown[]) => { calls.push(['books.create', ...args]); return {}; },
     };
     const context: any = { domain, requestKey: 'request-1', travel, email, books };
     const cases: Array<[AssistantSurface, string, unknown]> = [
@@ -74,6 +76,7 @@ describe('personal assistant service capabilities', () => {
       ['signal-workspace', 'email.overview', {}],
       ['signal-workspace', 'email.sync', {}],
       ['signal-workspace', 'email.thread.read', { threadKey }],
+      ['signal-workspace', 'email.thread.mark-read', { threadKey }],
       ['signal-workspace', 'email.thread.favorite', { threadKey, isFavorite: true }],
       ['signal-workspace', 'email.draft.create', { threadKey, tone: 'warm' }],
       ['signal-workspace', 'email.draft.update', { draftKey, finalContent: 'Thanks.' }],
@@ -82,14 +85,18 @@ describe('personal assistant service capabilities', () => {
       ['book-workspace', 'book.list', {}],
       ['book-workspace', 'book.detail', { bookKey }],
       ['book-workspace', 'book.chapter.progress', { bookKey, chapterKey, progressSeconds: 30, isCompleted: false }],
+      ['book-workspace', 'book.create', { topic: 'Decision making', goal: 'Decide well', audience: 'Leaders', tone: 'Clear', length: 'short', language: 'English' }],
     ];
     for (const [surface, capabilityName, input] of cases) await defaultAssistantCapabilityRegistry.resolve(surface).find(({ definition }) => definition.name === capabilityName)!.execute(input, context);
     const serviceContext = { organizationKey, scopeKey };
     const actor = { userKey, ...serviceContext };
     expect(calls).toContainEqual(['travel.overview', serviceContext, userKey]);
     expect(calls).toContainEqual(['email.overview', actor, {}]);
+    expect(calls).toContainEqual(['email.threadForTool', actor, threadKey, undefined]);
+    expect(calls).toContainEqual(['email.markRead', actor, threadKey]);
     expect(calls).toContainEqual(['books.progress', bookKey, chapterKey, { ...serviceContext, progressSeconds: 30, isCompleted: false }, userKey]);
-    expect(JSON.stringify(calls)).not.toContain((domain.principal as Extract<DomainToolContext['principal'], { kind: 'member' }>).userOrganization.userId);
+    expect(calls).toContainEqual(['books.create', { ...serviceContext, generationRequestKey: 'request-1', topic: 'Decision making', goal: 'Decide well', audience: 'Leaders', tone: 'Clear', length: 'short', language: 'English' }, userKey]);
+    expect(JSON.stringify(calls)).not.toContain((domain.principal as Extract<ToolContext['principal'], { kind: 'member' }>).userOrganization.key);
   });
 
   test('injects runtime scope and stable request idempotency into Archive mutations', async () => {
@@ -100,6 +107,8 @@ describe('personal assistant service capabilities', () => {
     const playback = defaultAssistantCapabilityRegistry.resolve('knowledge-workspace').find(({ definition }) => definition.name === 'document.audio.playback.update')!;
     const folderKey = newId(), targetParentFolderKey = newId();
     const context: any = { domain, requestKey: 'stable-request', executeContent };
+    await expect(create.execute({ name: 'xyz', scopeKey: newId() }, context)).rejects.toThrow('Unrecognized key');
+    await expect(copy.execute({ copies: [{ folderKey, targetParentFolderKey, targetScopeKey: newId() }] }, context)).rejects.toThrow('Unrecognized key');
     await create.execute({ name: 'xyz' }, context);
     await create.execute({ name: 'xyz' }, context);
     await copy.execute({ copies: [{ folderKey, targetParentFolderKey }] }, context);
@@ -115,21 +124,62 @@ describe('personal assistant service capabilities', () => {
     expect(playback.mutationWorkspace).toBe('archive');
   });
 
-  test('injects trusted user identity into settings tools and marks updates as Archive mutations', async () => {
+  test('injects trusted identity into Archive hidden-content tools', async () => {
     const calls: unknown[] = [];
-    const userSettings: any = {
-      read: async (...args: unknown[]) => { calls.push(['read', ...args]); return { archive: { showOnlyFavorites: false } }; },
-      update: async (...args: unknown[]) => { calls.push(['update', ...args]); return args[1]; },
+    const userHiddens: any = {
+      hide: async (...args: unknown[]) => { calls.push(args); return {}; },
     };
     const capabilities = defaultAssistantCapabilityRegistry.resolve('knowledge-workspace');
-    const read = capabilities.find(({ definition }) => definition.name === 'user.settings.read')!;
-    const update = capabilities.find(({ definition }) => definition.name === 'user.settings.update')!;
-    await expect(read.execute({ userKey }, { domain, userSettings } as any)).rejects.toThrow('Unrecognized key');
-    await read.execute({}, { domain, userSettings } as any);
-    await update.execute({ archive: { showOnlyFavorites: true }, gallery: { showOnlyFavorites: false } }, { domain, userSettings } as any);
-    expect(calls).toEqual([['read', userKey], ['update', userKey, { archive: { showOnlyFavorites: true }, gallery: { showOnlyFavorites: false } }]]);
-    expect(update.definition.description).toContain('Archive and Gallery');
-    expect(update.mutationWorkspace).toBe('archive');
+    const hide = capabilities.find(({ definition }) => definition.name === 'folder.hide')!;
+    const sourceKey = newId();
+    await expect(hide.execute({ sourceKey, userKey }, { domain, userHiddens } as any)).rejects.toThrow('Unrecognized key');
+    await hide.execute({ sourceKey }, { domain, userHiddens } as any);
+    expect(calls).toEqual([[{ userKey, organizationKey, membershipKey: (domain.principal as any).userOrganization.key, service: userHiddens }, { source: 'folder', sourceKey }]]);
+    expect(hide.mutationWorkspace).toBe('archive');
+  });
+
+  test('lists hidden content on Archive and Gallery with an empty schema and no user key', async () => {
+    const hiddenKey = newId(), sourceKey = newId();
+    const userHiddens: any = { list: async () => [{ key: hiddenKey, userKey, source: 'image', sourceKey, createdAt: '2026-08-19T00:00:00.000Z' }] };
+    const archive = defaultAssistantCapabilityRegistry.resolve('knowledge-workspace').find(({ definition }) => definition.name === 'content.hidden.list')!;
+    const gallery = defaultAssistantCapabilityRegistry.resolve('media-workspace').find(({ definition }) => definition.name === 'content.hidden.list')!;
+    expect(archive).toBe(gallery);
+    await expect(archive.execute({ userKey }, { domain, userHiddens } as any)).rejects.toThrow('Unrecognized key');
+    const result = await archive.execute({}, { domain, userHiddens } as any);
+    expect(result).toEqual({ kind: 'continue', result: { items: [{ key: hiddenKey, source: 'image', sourceKey, createdAt: '2026-08-19T00:00:00.000Z' }] } });
+    expect(JSON.stringify(result)).not.toContain(userKey);
+  });
+
+  test('rejects inactive and mismatched memberships before hidden-content execution', async () => {
+    let calls = 0;
+    const userHiddens: any = { list: async () => { calls += 1; return []; } };
+    const list = defaultAssistantCapabilityRegistry.resolve('knowledge-workspace').find(({ definition }) => definition.name === 'content.hidden.list')!;
+    const principal = domain.principal as Extract<ToolContext['principal'], { kind: 'member' }>;
+    await expect(list.execute({}, { domain: { ...domain, principal: { ...principal, userOrganization: { ...principal.userOrganization, status: 'inactive' } } }, userHiddens } as any)).rejects.toThrow('active matching');
+    await expect(list.execute({}, { domain: { ...domain, principal: { ...principal, userOrganization: { ...principal.userOrganization, organizationId: newId() } } }, userHiddens } as any)).rejects.toThrow('active matching');
+    await expect(list.execute({}, { domain: { ...domain, principal: { ...principal, userOrganization: { ...principal.userOrganization, userId: newId() } } }, userHiddens } as any)).rejects.toThrow('active matching');
+    expect(calls).toBe(0);
+  });
+
+  test('uses fresh fallback book generation keys and hashes only overlong supplied keys', async () => {
+    const calls: unknown[] = [];
+    const books: any = { create: async (...args: unknown[]) => { calls.push(args); return {}; } };
+    const create = defaultAssistantCapabilityRegistry.resolve('book-workspace').find(({ definition }) => definition.name === 'book.create')!;
+    const brief = { topic: 'Decision making', goal: 'Decide well', audience: 'Leaders', tone: 'Clear', length: 'short', language: 'English' };
+    await create.execute(brief, { domain, books } as any);
+    await create.execute(brief, { domain, books } as any);
+    await create.execute(brief, { domain, books, requestKey: 'derived-invocation-key', clientRequestKey: null } as any);
+    await create.execute(brief, { domain, books, requestKey: 'x'.repeat(201) } as any);
+    const generationRequestKey = (calls[0] as any)[0].generationRequestKey;
+    expect(generationRequestKey).toMatch(/^c/);
+    expect((calls[1] as any)[0].generationRequestKey).toMatch(/^c/);
+    expect((calls[1] as any)[0].generationRequestKey).not.toBe(generationRequestKey);
+    expect((calls[2] as any)[0].generationRequestKey).toMatch(/^c/);
+    expect((calls[2] as any)[0].generationRequestKey).not.toBe('derived-invocation-key');
+    expect((calls[3] as any)[0].generationRequestKey).toMatch(/^[a-f0-9]{64}$/);
+    expect((calls[3] as any)[0].generationRequestKey).not.toBe('x'.repeat(201));
+    expect(() => create.inputSchema.parse({ ...brief, generationRequestKey })).toThrow('Unrecognized key');
+    expect(create.mutationWorkspace).toBe('ascend');
   });
 
   test('injects the trusted open document into document-specific Core actions', async () => {

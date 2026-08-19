@@ -124,7 +124,7 @@ suite('Content live E2E', () => {
     const save = (collection: string, value: Record<string, unknown>) => db.collection(collection).save(value);
     await save('organizations', { _key: organizationKey, name: 'Content E2E', is_root: false, slug: `archive-${organizationKey}`, description: null, isActive: true, mfa_enabled: false, metadata: {}, createdAt: now, updatedAt: now, embedding: [] });
     await save('organizations', { _key: outsiderOrganizationKey, name: 'Content outsider', is_root: false, slug: `outside-${outsiderOrganizationKey}`, description: null, isActive: true, mfa_enabled: false, metadata: {}, createdAt: now, updatedAt: now, embedding: [] });
-    for (const [key, organization, slug] of [[scopeKey, organizationKey, 'primary'], [secondScopeKey, organizationKey, 'project'], [outsiderScopeKey, outsiderOrganizationKey, 'outsider']] as const) {
+    for (const [key, organization, slug] of [[scopeKey, organizationKey, 'primary'], [secondScopeKey, organizationKey, 'secondary'], [outsiderScopeKey, outsiderOrganizationKey, 'outsider']] as const) {
       await save('scopes', { _key: key, organizationKey: organization, slug: `${slug}-${key}`, name: slug, summary: `${slug} archive scope`, description: `${slug} documents`, position: 1, level: 1, deletedAt: null, embedding: [] });
     }
     await save('users', { _key: userKey, organizationId: organizationKey, email: `${userKey}@example.test`, emailHash: userKey, countryCode: 'SE', name: 'Content Owner', createdAt: now, updatedAt: now, embedding: [] });
@@ -159,7 +159,6 @@ suite('Content live E2E', () => {
       },
       mergeAudio: async (chunks: Uint8Array[]) => new Uint8Array(Buffer.concat(chunks)),
       audioDuration: () => 250,
-      bookRuntime: { async create() { return newId(); }, async write() {} },
       scanDocument: async () => ({ documentKey: newId(), content: 'Scanned deterministic text.', storageKeys: [] }),
       generateExport: (input: any) => generateDocumentExport(input, { pdfRenderer: async () => new TextEncoder().encode('%PDF-1.4\n%%EOF') }),
       random: (size: number) => Uint8Array.from({ length: size }, (_, index) => (organizationKey.charCodeAt(index % organizationKey.length) + randomSeed + index) % 255 + 1),
@@ -195,10 +194,6 @@ suite('Content live E2E', () => {
     });
     outputSchemas['folder.list']!.parse(agentList);
     covered.add('folder.list');
-
-    const bookInput = { scopeKey, topic: 'Deterministic systems', goal: 'Test the complete runtime', audience: 'Engineers', tone: 'Direct', length: 'short', language: 'English' } as const;
-    const book = await call('book.create-context', bookInput);
-    await call('book.write', { ...bookInput, bookKey: book.bookKey });
 
     const created = await call('folder.create', { folders: [{ scopeKey, name: 'Root' }, { scopeKey, name: 'Destination' }], idempotencyKey: `folders-${organizationKey}` });
     expect(created.summary).toEqual({ requested: 2, succeeded: 2, failed: 0 });
@@ -366,25 +361,25 @@ suite('Content live E2E', () => {
 
     const secondFolders = await call('folder.create', { folders: [{ scopeKey: secondScopeKey, name: 'Project Documents' }] });
     const secondFolderKey = secondFolders.results[0].data.folder.key;
-    const secondText = 'Semantic roadmap from the project scope.';
-    const secondDocument = await call('document.parse', { file: { filename: 'project.txt', mimeType: 'text/plain', sizeBytes: secondText.length, bytes: new TextEncoder().encode(secondText) }, scopeKey: secondScopeKey, folderKey: secondFolderKey });
+    const secondText = 'Semantic roadmap from the secondary scope.';
+    const secondDocument = await call('document.parse', { file: { filename: 'secondary.txt', mimeType: 'text/plain', sizeBytes: secondText.length, bytes: new TextEncoder().encode(secondText) }, scopeKey: secondScopeKey, folderKey: secondFolderKey });
     const outsiderFolderKey = newId();
     const outsiderDocumentKey = newId();
     await save('folders', { _key: outsiderFolderKey, scopeKey: outsiderScopeKey, name: 'Private outsider', embedding, createdAt: now, updatedAt: now });
     await save('documents', { _key: outsiderDocumentKey, scopeKey: outsiderScopeKey, folderKey: outsiderFolderKey, name: 'Forbidden source', extension: 'txt', mimeType: 'text/plain', storageKey: `content/${outsiderOrganizationKey}/${outsiderScopeKey}/${outsiderDocumentKey}/original.txt`, sizeBytes: 8, content: 'roadmap', embedding, createdAt: now, updatedAt: now });
-    const scopedSearch = await call('scope.document.search', { scopeKey, query: 'roadmap', sources: [{ type: 'scope', scopeKeys: [scopeKey] }, { type: 'project', projectKeys: [secondScopeKey] }, { type: 'folder', folderKeys: [rootFolderKey], includeDescendants: true }], include: ['snippet', 'content', 'folder', 'scoreBreakdown'] });
+    const scopedSearch = await call('document.search', { scopeKey, query: 'roadmap', sources: [{ type: 'scope', scopeKeys: [scopeKey, secondScopeKey] }, { type: 'folder', folderKeys: [rootFolderKey], includeDescendants: true }], include: ['snippet', 'content', 'folder', 'scoreBreakdown'] });
     expect(scopedSearch.results.some((item: any) => item.documentKey === documentKey)).toBe(true);
-    const organizationSearch = await call('organization.document.search', { organizationKey, query: 'roadmap', sources: [{ type: 'scope', scopeKeys: [scopeKey, secondScopeKey, outsiderScopeKey] }], include: ['snippet', 'scope', 'scoreBreakdown'] });
+    const organizationSearch = await call('document.search-all', { organizationKey, query: 'roadmap', sources: [{ type: 'scope', scopeKeys: [scopeKey, secondScopeKey, outsiderScopeKey] }], include: ['snippet', 'scope', 'scoreBreakdown'] });
     expect(organizationSearch.results.map((item: any) => item.documentKey)).toContain(secondDocument.document.key);
     expect(organizationSearch.results.map((item: any) => item.documentKey)).not.toContain(outsiderDocumentKey);
-    const contentSearch = await call('scope.content.search', { scopeKey, query: 'semantic roadmap', minimumScore: 0.1 });
+    const contentSearch = await call('content.search', { scopeKey, query: 'semantic roadmap', minimumScore: 0.1 });
     expect(contentSearch.documents.some((item: any) => item.documentKey === documentKey)).toBe(true);
-    const contentSearchReplay = await call('scope.content.search', { scopeKey, query: '  SEMANTIC   ROADMAP  ', minimumScore: 0.1 });
+    const contentSearchReplay = await call('content.search', { scopeKey, query: '  SEMANTIC   ROADMAP  ', minimumScore: 0.1 });
     expect(contentSearchReplay.cached).toBe(true);
-    const contentSearchHistory = await call('scope.content.search-history', { scopeKey, limit: 8 });
+    const contentSearchHistory = await call('content.search-history.list', { scopeKey, limit: 8 });
     expect(contentSearchHistory.history).toContainEqual({ query: expect.any(String), normalizedQuery: 'semantic roadmap', searchedAt: expect.any(String), usageCount: 2 });
-    expect(await call('scope.content.search-history.delete', { scopeKey, normalizedQuery: 'semantic roadmap' })).toEqual({ normalizedQuery: 'semantic roadmap', deleted: true });
-    expect((await call('scope.content.search-history', { scopeKey, limit: 8 })).history.some((item: any) => item.normalizedQuery === 'semantic roadmap')).toBe(false);
+    expect(await call('content.search-history.delete', { scopeKey, normalizedQuery: 'semantic roadmap' })).toEqual({ normalizedQuery: 'semantic roadmap', deleted: true });
+    expect((await call('content.search-history.list', { scopeKey, limit: 8 })).history.some((item: any) => item.normalizedQuery === 'semantic roadmap')).toBe(false);
 
     const neighbors = await call('content.neighbors', { documentKey });
     expect(neighbors.folders.length).toBeLessThanOrEqual(10);
@@ -409,6 +404,8 @@ suite('Content live E2E', () => {
     const restoredDocument = await call('document.restore', { documentKeys: [documentKey], atomic: true });
     expect(restoredDocument.results[0].data.document.deletedAt).toBeNull();
 
+    await expect(call('folder.archive', { folderKeys: [rootFolderKey], includeDescendants: true, atomic: true })).rejects.toMatchObject({ code: 'CONTENT_CONFLICT' });
+    await call('folder.update', { updates: [{ folderKey: rootFolderKey, isFavorite: false }] });
     await call('folder.archive', { folderKeys: [rootFolderKey], includeDescendants: true, atomic: true });
     expect((await db.collection('documents').document(documentKey)).deletedAt).toBe(now);
     await call('folder.restore', { folderKeys: [rootFolderKey], includeDescendants: true, atomic: true });

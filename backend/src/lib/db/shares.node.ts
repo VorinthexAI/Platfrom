@@ -5,7 +5,7 @@ import { db } from './client';
 
 export const SHARES_COLLECTION = 'shares';
 export const shareSourceTypeSchema = z.enum(['document', 'image', 'collection', 'place', 'trip']);
-export const sharePermissionSchema = z.enum(['read', 'comment']);
+export const sharePermissionSchema = z.enum(['read', 'comment', 'viewer', 'collaborator']);
 export const shareSchema = z.object({
   key: z.string().cuid(), scopeKey: z.string().cuid(), sourceType: shareSourceTypeSchema, sourceKey: z.string().cuid(), permission: sharePermissionSchema,
   tokenHash: z.string().regex(/^[a-f0-9]{64}$/), passwordHash: z.string().trim().min(20).optional(), expiresAt: z.string().datetime().optional(), revokedAt: z.string().datetime().optional(),

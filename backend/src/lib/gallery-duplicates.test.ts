@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { findRedundantGalleryImageKeys } from './gallery-duplicates';
+import { findRedundantGalleryImageKeys, GALLERY_PERCEPTUAL_HASH_DUPLICATE_DISTANCE } from './gallery-duplicates';
+import { PERCEPTUAL_HASH_DUPLICATE_DISTANCE } from './perceptual-hash';
 
 const at = (key: string, createdAt: string, perceptualHash: string) => ({ key, createdAt, perceptualHash });
 
@@ -18,6 +19,26 @@ describe('Gallery duplicate clustering', () => {
       at('first', '2026-08-11T10:00:00.000Z', '0000000000000000'),
       at('second', '2026-08-11T11:00:00.000Z', 'ffffffffffffffff'),
     ])).toEqual([]);
+  });
+
+  test('uses a Gallery-specific distance-four boundary while caption reuse remains at three', () => {
+    expect(GALLERY_PERCEPTUAL_HASH_DUPLICATE_DISTANCE).toBe(4);
+    expect(PERCEPTUAL_HASH_DUPLICATE_DISTANCE).toBe(3);
+    expect(findRedundantGalleryImageKeys([
+      at('keeper', '2026-08-11T10:00:00.000Z', '0000000000000000'),
+      at('distance-4', '2026-08-11T11:00:00.000Z', '000000000000000f'),
+    ])).toEqual(['distance-4']);
+    expect(findRedundantGalleryImageKeys([
+      at('keeper', '2026-08-11T10:00:00.000Z', '0000000000000000'),
+      at('distance-5', '2026-08-11T11:00:00.000Z', '000000000000001f'),
+    ])).toEqual([]);
+  });
+
+  test('finds distance-four candidates with one changed bit in every old index segment', () => {
+    expect(findRedundantGalleryImageKeys([
+      at('keeper', '2026-08-11T10:00:00.000Z', '0000000000000000'),
+      at('copy', '2026-08-11T11:00:00.000Z', '0001000100010001'),
+    ])).toEqual(['copy']);
   });
 
   test('retains an active Subject reference even when it is newer', () => {
@@ -50,10 +71,10 @@ describe('Gallery duplicate clustering', () => {
     ])).toEqual(['bridge', 'edge']);
   });
 
-  test('clusters five hundred exact-image entries within the duplicate-search budget', () => {
-    const images = Array.from({ length: 500 }, (_, index) => at(`image-${index.toString().padStart(3, '0')}`, new Date(Date.UTC(2026, 7, 17, 0, 0, index)).toISOString(), createHash('sha256').update(String(Math.floor(index / 2))).digest('hex').slice(0, 16)));
+  test('indexes ten thousand diverse representatives within the duplicate-search budget', () => {
+    const images = Array.from({ length: 10_000 }, (_, index) => at(`image-${index.toString().padStart(5, '0')}`, new Date(Date.UTC(2026, 7, 17, 0, 0, index)).toISOString(), createHash('sha256').update(String(index)).digest('hex').slice(0, 16)));
     const startedAt = performance.now();
-    expect(findRedundantGalleryImageKeys(images)).toHaveLength(250);
-    expect(performance.now() - startedAt).toBeLessThan(1_000);
+    expect(findRedundantGalleryImageKeys(images)).toEqual([]);
+    expect(performance.now() - startedAt).toBeLessThan(2_000);
   });
 });

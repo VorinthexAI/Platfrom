@@ -706,10 +706,9 @@ export function AscendWorkspace() {
               : undefined
         }
         dismissible={sheet !== "create" || !dirty}
-        mutation={sheet === "create" || sheet === "reader"}
+        height={sheet === "create" || sheet === "reader" ? "full" : undefined}
         onOpenChange={setSheetOpen}
         open={sheetOpen}
-        tall={false}
         title={
           sheet === "actions"
             ? "New in Ascend"

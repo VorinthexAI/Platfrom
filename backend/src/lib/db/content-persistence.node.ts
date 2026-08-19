@@ -20,6 +20,8 @@ export interface ContentQueryExecutor {
 
 export const CONTENT_SHARE_CUTOVER_KEY = 'content-document-shares-cutover';
 type ShareStorageMode = 'legacy' | 'dual' | 'global';
+type ContentRole = 'viewer' | 'moderator' | 'admin' | 'owner';
+const contentRoleRank: Record<ContentRole, number> = { viewer: 1, moderator: 2, admin: 3, owner: 4 };
 
 async function shareStorageMode(executor: ContentQueryExecutor): Promise<ShareStorageMode> {
   const collections = await executor.query('LET names = COLLECTIONS()[*].name RETURN { legacy: "documentShares" IN names, global: "shares" IN names }');
@@ -33,8 +35,9 @@ async function shareStorageMode(executor: ContentQueryExecutor): Promise<ShareSt
 function globalDocumentShare(value: Record<string, unknown>): DocumentShare {
   const share = shareSchema.parse(typeof value.key === 'string' ? value : withArangoKey(value));
   if (share.sourceType !== 'document') throw new Error('Expected a document share.');
+  if (share.permission !== 'read' && share.permission !== 'comment') throw new Error('Document shares require document permissions.');
   const { sourceType: _sourceType, sourceKey: documentKey, ...projected } = share;
-  return { ...projected, documentKey };
+  return { ...projected, permission: share.permission, documentKey };
 }
 
 function toGlobalDocumentShare(share: DocumentShare): Share {
@@ -59,7 +62,7 @@ function splitPatch(patch: Record<string, unknown>) {
 
 async function scopedUpdate<T>(
   executor: ContentQueryExecutor,
-  collection: 'folders' | 'documents' | 'documentShares' | 'shares',
+  collection: 'folders' | 'documents' | 'documentVersions' | 'documentShares' | 'shares',
   scopeKey: string,
   key: string,
   patch: Record<string, unknown>,
@@ -69,23 +72,28 @@ async function scopedUpdate<T>(
   const { set, unset } = splitPatch(patch);
   const ownership = collection === 'folders' ? `
       FILTER !HAS(current, "_internalDeletion") || current._internalDeletion == null
-      LET destination = @destinationKey == null ? null : DOCUMENT(folders, @destinationKey)
-      FILTER destination == null || (destination.scopeKey == @scopeKey && (!HAS(destination, "_internalDeletion") || destination._internalDeletion == null))
+      LET destinationKey = @changesLocation ? @destinationKey : (HAS(current, "parentFolderKey") ? current.parentFolderKey : null)
+      LET destination = destinationKey == null ? null : DOCUMENT(folders, destinationKey)
+      FILTER destinationKey == null || (destination != null && destination.scopeKey == @scopeKey)
+      FILTER destinationKey == null || (!HAS(destination, "_internalDeletion") || destination._internalDeletion == null)
+      FILTER !@requireActiveOwner || destinationKey == null || destination.deletedAt == null
   ` : collection === 'documents' ? `
       FILTER !HAS(current, "_internalDeletion") || current._internalDeletion == null
       LET destinationKey = @changesLocation ? @destinationKey : (HAS(current, "folderKey") ? current.folderKey : null)
       LET destination = destinationKey == null ? null : DOCUMENT(folders, destinationKey)
       FILTER destinationKey == null || (destination != null && destination.scopeKey == @scopeKey)
       FILTER destinationKey == null || ((!HAS(destination, "_internalDeletion") || destination._internalDeletion == null) && destination.deletedAt == null)
-  ` : collection === 'documentShares' ? `
+  ` : collection === 'documentShares' || collection === 'documentVersions' ? `
       LET owner = DOCUMENT(documents, current.documentKey)
       FILTER owner != null && owner.scopeKey == @scopeKey
       FILTER !HAS(owner, "_internalDeletion") || owner._internalDeletion == null
+      FILTER !@requireActiveOwner || owner.deletedAt == null
   ` : `
       FILTER current.sourceType == "document"
       LET owner = DOCUMENT(documents, current.sourceKey)
       FILTER owner != null && owner.scopeKey == @scopeKey
       FILTER !HAS(owner, "_internalDeletion") || owner._internalDeletion == null
+      FILTER !@requireActiveOwner || owner.deletedAt == null
   `;
   const cursor = await executor.query(`
     FOR current IN @@collection
@@ -100,8 +108,10 @@ async function scopedUpdate<T>(
     '@collection': collection,
     key,
     scopeKey,
-    ...(collection === 'documentShares' || collection === 'shares' ? {} : { destinationKey: set.parentFolderKey ?? set.folderKey ?? null }),
+    ...(collection === 'documentVersions' || collection === 'documentShares' || collection === 'shares' ? {} : { destinationKey: set.parentFolderKey ?? set.folderKey ?? null }),
+    ...(collection === 'folders' ? { changesLocation: Object.prototype.hasOwnProperty.call(patch, 'parentFolderKey') } : {}),
     ...(collection === 'documents' ? { changesLocation: Object.prototype.hasOwnProperty.call(patch, 'folderKey') } : {}),
+    requireActiveOwner: set.deletedAt === null,
     patch: set,
     unset,
     expectedUpdatedAt: expectedUpdatedAt ?? null,
@@ -116,6 +126,7 @@ async function scopedDelete(
   scopeKey: string,
   key: string,
 ): Promise<boolean> {
+  const hiddenSource = collection === 'folders' ? 'folder' : collection === 'documents' ? 'document' : null;
   const cursor = await executor.query(`
     FOR current IN @@collection
       FILTER current._key == @key && current.scopeKey == @scopeKey
@@ -123,12 +134,35 @@ async function scopedDelete(
       REMOVE current IN @@collection
       RETURN OLD._key
   `, { '@collection': collection, key, scopeKey });
-  return (await cursor.next()) !== undefined;
+  const removedKey = await cursor.next();
+  if (removedKey === undefined) return false;
+  if (hiddenSource) {
+    await executor.query('FOR hidden IN userHiddens FILTER hidden.source == @hiddenSource && hidden.sourceKey == @removedKey REMOVE hidden IN userHiddens', { hiddenSource, removedKey });
+  }
+  return true;
 }
 
 /** Query-bound mutations can use either the global database or a streaming transaction executor. */
 export function createContentPersistence(executor: ContentQueryExecutor) {
   return {
+    async getScope(scopeKey: string): Promise<{ key: string; organizationKey: string; deletedAt?: string | null } | null> {
+      const cursor = await executor.query('LET scope = DOCUMENT(scopes, @scopeKey) RETURN scope == null ? null : { key: scope._key, organizationKey: scope.organizationKey, deletedAt: scope.deletedAt }', { scopeKey });
+      const value = await cursor.next() as { key?: unknown; organizationKey?: unknown; deletedAt?: unknown } | null | undefined;
+      if (!value) return null;
+      return z.object({ key: z.string(), organizationKey: z.string(), deletedAt: z.string().nullable().optional() }).parse(value);
+    },
+    async role(scopeKey: string, membershipKey: string): Promise<ContentRole | null> {
+      const cursor = await executor.query(
+        'RETURN { members: (FOR member IN scopeMembers FILTER member.userOrganizationKey == @membershipKey && member.status == "active" RETURN { scopeKey: member.scopeKey, role: member.role }), relations: (FOR relation IN scopeScopes FILTER relation.deletedAt == null RETURN { parentKey: relation.parentKey, childKey: relation.childKey }) }',
+        { membershipKey },
+      );
+      const data = await cursor.next() as { members?: Array<{ scopeKey: string; role: ContentRole }>; relations?: Array<{ parentKey: string; childKey: string }> } | undefined;
+      const parentByChild = new Map((data?.relations ?? []).map((relation) => [relation.childKey, relation.parentKey]));
+      const ancestors = new Set([scopeKey]);
+      let current = parentByChild.get(scopeKey);
+      while (current && !ancestors.has(current)) { ancestors.add(current); current = parentByChild.get(current); }
+      return (data?.members ?? []).filter((item) => ancestors.has(item.scopeKey)).sort((a, b) => contentRoleRank[b.role] - contentRoleRank[a.role])[0]?.role ?? null;
+    },
     async scopeBelongsToActiveOrganization(scopeKey: string, organizationKey: string): Promise<boolean> {
       const cursor = await executor.query('LET scope = DOCUMENT(scopes, @scopeKey) RETURN scope != null && scope.organizationKey == @organizationKey && scope.deletedAt == null', { scopeKey, organizationKey });
       return await cursor.next() === true;
@@ -497,6 +531,9 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       const preparedPatch = patch.content === undefined ? patch : { ...patch, contentChunks, chunkEmbeddings, semanticChunkCount: contentChunks!.length, semanticContentHash: documentSemanticHash(patch.content), _semanticChunkingSkipped: undefined };
       return scopedUpdate(executor, 'documents', scopeKey, key, preparedPatch, (value) => documentSchema.parse(value), options?.expectedUpdatedAt);
     },
+    updateVersion(scopeKey: string, key: string, patch: Pick<DocumentVersion, 'deletedAt'>) {
+      return scopedUpdate(executor, 'documentVersions', scopeKey, key, patch, (value) => documentVersionSchema.parse(value));
+    },
     updateShare(scopeKey: string, key: string, patch: Partial<Pick<DocumentShare, 'revokedAt' | 'deletedAt' | 'updatedAt'>>) {
       return (async () => {
         const mode = await shareStorageMode(executor);
@@ -505,13 +542,17 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
           const cursor = await executor.query(`
             LET legacy = DOCUMENT(documentShares, @key)
             LET global = DOCUMENT(shares, @key)
+            LET owner = legacy == null ? null : DOCUMENT(documents, legacy.documentKey)
             FILTER legacy != null && global != null && legacy.scopeKey == @scopeKey
-              && global.scopeKey == @scopeKey && global.sourceType == "document"
+              && global.scopeKey == @scopeKey && global.sourceType == "document" && global.sourceKey == legacy.documentKey
+            FILTER owner != null && owner.scopeKey == @scopeKey
+            FILTER !HAS(owner, "_internalDeletion") || owner._internalDeletion == null
+            FILTER !@requireActiveOwner || owner.deletedAt == null
             UPDATE global WITH MERGE(@patch, ZIP(@unset, @unset[* RETURN null])) IN shares OPTIONS { keepNull: false }
             LET updatedGlobal = NEW
             UPDATE legacy WITH MERGE(@patch, ZIP(@unset, @unset[* RETURN null])) IN documentShares OPTIONS { keepNull: false }
             RETURN updatedGlobal
-          `, { key, scopeKey, patch: splitPatch(patch).set, unset: splitPatch(patch).unset });
+          `, { key, scopeKey, patch: splitPatch(patch).set, unset: splitPatch(patch).unset, requireActiveOwner: patch.deletedAt === null });
           const updated = await cursor.next();
           return updated ? globalDocumentShare(updated as Record<string, unknown>) : null;
         }
@@ -577,6 +618,6 @@ export function withContentPersistenceTransaction<T>(
   operation: (persistence: ReturnType<typeof createContentPersistence>) => Promise<T>,
 ): Promise<T> {
   return shareStorageMode(db as unknown as ContentQueryExecutor).then((mode) =>
-    withTransaction(['folders', 'documents', 'documentVersions', 'documentAudioVersions', 'documentSummaries', 'documentSummaryAudio', 'scopes', ...(mode === 'legacy' ? ['documentShares'] : mode === 'global' ? ['shares'] : ['documentShares', 'shares'])], (transaction) =>
+    withTransaction(['folders', 'documents', 'documentVersions', 'documentAudioVersions', 'documentSummaries', 'documentSummaryAudio', 'userHiddens', 'scopes', 'scopeMembers', 'scopeScopes', ...(mode === 'legacy' ? ['documentShares'] : mode === 'global' ? ['shares'] : ['documentShares', 'shares'])], (transaction) =>
       operation(createContentPersistence(transaction as unknown as ContentQueryExecutor))));
 }

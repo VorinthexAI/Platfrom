@@ -1,7 +1,7 @@
 import { beforeEach, expect, mock, test } from "bun:test";
 
 const realContext = {
-  user: { key: "user", email: "user@example.com", country_code: "SE", is_onboarded: true, settings: { archive: { showOnlyFavorites: false }, gallery: { showOnlyFavorites: false } } },
+  user: { key: "user", email: "user@example.com", country_code: "SE", is_onboarded: true },
   organization: { key: "org" },
   main_scope: { key: "scope" },
   content_execution: { agent_key: "agent" },
@@ -129,21 +129,4 @@ test("does not clear a session for a non-bearer 401", async () => {
 
   expect(clearTokenCalls).toBe(0);
   expect(session).toEqual(storedSession);
-});
-
-test("optimistically persists complete Archive and Gallery favorite settings", async () => {
-  session = storedSession;
-  await useAuthStore.getState().bootstrap();
-
-  useAuthStore.getState().setArchiveShowOnlyFavorites(true);
-  expect(useAuthStore.getState().user?.settings.archive.showOnlyFavorites).toBe(true);
-  expect(useAuthStore.getState().user?.settings.gallery.showOnlyFavorites).toBe(false);
-  useAuthStore.getState().setGalleryShowOnlyFavorites(true);
-  expect(useAuthStore.getState().user?.settings.gallery.showOnlyFavorites).toBe(true);
-  expect(useAuthStore.getState().user?.settings.archive.showOnlyFavorites).toBe(true);
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  expect(patchCalls).toEqual([
-    { path: "/auth/me/settings", input: { archive: { showOnlyFavorites: true }, gallery: { showOnlyFavorites: false } } },
-    { path: "/auth/me/settings", input: { archive: { showOnlyFavorites: true }, gallery: { showOnlyFavorites: true } } },
-  ]);
 });

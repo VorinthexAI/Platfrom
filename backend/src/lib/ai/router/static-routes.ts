@@ -1,13 +1,12 @@
 import { createAwsBedrockProvider } from '@/lib/ai/providers/aws-bedrock';
 import { createAwsBedrockMantleProvider } from '@/lib/ai/providers/aws-bedrock-mantle';
 import { createAwsPollyProvider } from '@/lib/ai/providers/aws-polly';
-import { createAwsTranscribeProvider } from '@/lib/ai/providers/aws-transcribe';
 import { createOpenAIProvider, type OpenAIProviderConfig } from '@/lib/ai/providers/openai';
 import { createOpenRouterProvider, resolveOpenRouterEnvironment } from '@/lib/ai/providers/openrouter';
 import type { AwsCredentialEnvironment } from '@/lib/ai/providers/aws-sigv4';
 import type { ProviderAdapter, ProviderId } from '@/lib/ai/providers/types';
 
-export const STATIC_PROVIDER_IDS = ['openai', 'openrouter', 'aws-bedrock', 'aws-bedrock-mantle', 'aws-polly', 'aws-transcribe'] as const satisfies readonly ProviderId[];
+export const STATIC_PROVIDER_IDS = ['openai', 'openrouter', 'aws-bedrock', 'aws-bedrock-mantle', 'aws-polly'] as const satisfies readonly ProviderId[];
 
 export function isStaticProvider(providerSlug: ProviderId): boolean {
   return STATIC_PROVIDER_IDS.includes(providerSlug as (typeof STATIC_PROVIDER_IDS)[number]);
@@ -72,7 +71,6 @@ export function createStaticProviderAdapter(providerSlug: ProviderId): ProviderA
       case 'aws-bedrock': return createAwsBedrockProvider(undefined, resolveStaticBedrockEnvironment(process.env));
       case 'aws-bedrock-mantle': return createAwsBedrockMantleProvider(undefined, resolveStaticBedrockEnvironment(process.env));
       case 'aws-polly': return createAwsPollyProvider(undefined, resolveStaticPollyEnvironment(process.env));
-      case 'aws-transcribe': return createAwsTranscribeProvider();
     }
   } catch {
     return undefined;

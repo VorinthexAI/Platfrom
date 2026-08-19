@@ -19,7 +19,6 @@ export const LEGACY_INDEX_FIELDS: Readonly<Record<string, readonly (readonly str
   documents: [['folderKey']],
   documentVersions: [['scopeKey'], ['documentKey'], ['storageKey']],
   documentShares: [['scopeKey'], ['token']],
-  projects: [['archiveFolderKey']],
   contentSearchQueries: [['actorKey', 'scopeKey', 'normalizedQuery'], ['actorKey', 'scopeKey', 'contextDomain', 'normalizedQuery', 'folderKey', 'includeDescendants'], ['actorKey', 'scopeKey', 'contextDomain', 'searchedAt'], ['expiresAt']],
 };
 

@@ -8,6 +8,15 @@ export type FolderDocumentRecord = {
   folderKey?: string;
 };
 
+export function partitionFavoriteContentSelection<F extends { isFavorite?: boolean }, D extends { isFavorite?: boolean }>(folders: readonly F[], documents: readonly D[]) {
+  return {
+    favoriteFolders: folders.filter(({ isFavorite }) => Boolean(isFavorite)),
+    favoriteDocuments: documents.filter(({ isFavorite }) => Boolean(isFavorite)),
+    eligibleFolders: folders.filter(({ isFavorite }) => !isFavorite),
+    eligibleDocuments: documents.filter(({ isFavorite }) => !isFavorite),
+  };
+}
+
 export function removeFoldersCoveredBySelectedAncestors<T extends FolderAncestorRecord>(folders: readonly T[], parentByKey: ReadonlyMap<string, string | undefined>) {
   const selectedKeys = new Set(folders.map(({ key }) => key));
   return folders.filter((folder) => {

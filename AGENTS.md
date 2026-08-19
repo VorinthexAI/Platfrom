@@ -64,6 +64,103 @@ bun run --cwd backend dev
 
 This repo uses a newer Next.js version with breaking changes. Before changing Next.js-specific APIs, conventions, or file structure, read the relevant guide in `node_modules/next/dist/docs/` and heed deprecation notices.
 
+## Unified Tools And Actions
+
+Every user-facing business capability for Archive, Gallery, Signal, Compass,
+and Ascend has exactly one product-neutral entry in the public unified backend
+tool registry. HTTP transports and Core may use separate transport or model
+adapters, but every entry point must converge on the same canonical domain
+service, operation, Content runtime, or provider-neutral action. Do not
+duplicate business behavior across handlers and tool wrappers.
+
+Before adding or changing API behavior, read the current registries and their
+execution paths:
+
+- `backend/src/lib/ai/tools/index.ts` aggregates public tool names, validation
+  schemas, provider definitions, and dispatch.
+- `backend/src/lib/ai/tools/tool-definitions.ts` and
+  `backend/src/lib/ai/tools/workspace-tool-definitions.ts` assemble the public
+  tool registry.
+- `backend/src/lib/ai/tools/content-schemas.ts` owns Archive Content Zod input
+  and output contracts; `content-registry.ts` derives provider definitions,
+  and `content-runtime.ts` validates and executes them.
+- `backend/src/lib/ai/personal-assistant/capabilities.ts`,
+  `service-capabilities.ts`, and `gallery-capabilities.ts` own Core surface
+  allowlists, model-facing schemas, trusted-context injection, execution
+  adapters, and workspace mutation metadata.
+- Service or operation modules own canonical non-Content validation where
+  applicable. HTTP-only transport schemas remain under `backend/src/api`.
+- `backend/src/lib/ai/actions/index.ts` and
+  `backend/src/lib/ai/actions/types.ts` own provider-neutral AI actions. Read
+  them before adding a model-backed tool or changing model routing.
+
+The required layering is:
+
+```text
+HTTP handler -----------------------------------\
+unified tool definition / Core capability ------> canonical service / operation / Content runtime
+trusted caller ---------------------------------/                    |
+                                                                    v
+                                                       repository and/or AI action
+                                                                    |
+                                                                    v
+                                                                 provider
+```
+
+Public tool definitions and Core capabilities are thin adapters. They own
+product-neutral names and model-facing input schemas; Core capabilities also
+own trusted-context injection and workspace mutation metadata. HTTP handlers
+own transport validation only. Canonical services, operations, the Content
+runtime, and repositories own domain validation, authorization, invariants,
+transactions, external side-effect recovery, and persistence. Do not duplicate
+those rules in route handlers or tool adapters.
+
+For every new or changed API capability:
+
+1. Search the unified tool registry first and extend an existing tool when its
+   semantics already match.
+2. Otherwise add one product-neutral dot-notation public registry entry with a
+   strict Zod model-input schema and canonical service/runtime validation.
+   Content tools must define strict Zod input and output contracts in
+   `content-schemas.ts`; add output contracts elsewhere when the public contract
+   requires one.
+3. Never accept authenticated user identity, membership, or execution principal
+   from model-visible input. Core capabilities must inject organization,
+   runtime scope, membership, and request/idempotency context from the authorized
+   `ToolContext`. HTTP APIs may accept organization, scope, or agent identifiers
+   as untrusted selectors and must authorize them against the session. Canonical
+   Content contracts may include scope selectors and idempotency keys, but must
+   validate them against `ToolContext` rather than trust them.
+4. Make HTTP and tool callers invoke the same canonical service/action method.
+   Never call the local HTTP API from a tool.
+5. Register model-visible mutations in the correct Core surface allowlist and
+   declare workspace mutation metadata.
+6. Update matching TanStack Query keys so direct API and Core-driven changes
+   converge.
+7. Add parity tests proving HTTP and tool/Core entry points reach the same
+   canonical service, operation, or runtime and preserve the same authorization
+   and business invariants. Transport schemas and response projections may
+   intentionally differ. Also add strict-input, registry uniqueness/count,
+   authorization, and service-level invariant tests.
+8. Delete superseded handlers, adapters, schemas, aliases, tests, and dead
+   business implementations in the same change. Do not retain a second path
+   for compatibility without a concrete shipped consumer or persisted-data
+   requirement.
+
+Tools and actions are different. Tools expose business capabilities such as
+`folder.create` or `email.draft.send`. Actions are reusable provider-neutral
+AI primitives such as generation, reasoning, embedding, speech, or image
+analysis. A model-backed tool may call an action, but ordinary database-backed
+tools call canonical services/repositories directly. Never create public
+generic database tools such as `database.insert`, `node.update`, or arbitrary
+query execution; public tools must express domain intent and preserve domain
+invariants.
+
+Authentication/session issuance, OAuth handshakes, webhooks, SSE subscriptions,
+and raw signed-byte transfers remain protocol boundaries rather than
+model-visible tools unless a task explicitly establishes a safe design. Their
+post-authentication business effects may call canonical tools where applicable.
+
 ## SEO / AEO
 
 All public SEO, AEO, and GEO surfaces are generated from ONE source of truth:
@@ -112,7 +209,7 @@ After SEO-affecting changes, verify `/llms.txt`, `/llms-full.txt`,
 - Validate backend endpoint JSON payloads and query parameters with Zod strict object schemas; reject unknown fields instead of silently accepting them.
 - ArangoDB documents: application code and schemas ALWAYS use `key` as the public primary-key field — never read or write Arango's `_key` directly. The only place that translates between them is `toArangoDoc`/`withArangoKey` in `backend/src/lib/db/base.ts`; document schemas parse in Zod's default strip mode so `_key`/`_id`/`_rev` drop away on read.
 - Keep backend HTTP endpoints behind the env API key middleware and Redis-backed per-IP rate limiting unless a task explicitly changes that security model.
-- Every user-facing API operation for Archive, Gallery, Signal, Compass, or Ascend must have a corresponding executable definition in the unified backend tool registry. HTTP handlers and tools must call the same canonical action/service/repository operation; never reimplement business logic in a tool or call the local HTTP API from a tool. Model-visible schemas must omit and server-inject authenticated user, membership, organization, scope, agent, and idempotency fields. Register CRUD mutations in the appropriate Core surface allowlist, mark their workspace mutation metadata, and update the matching TanStack Query keys so direct API and Core-driven changes converge in the UI. OAuth handshakes and raw signed-byte transfers remain user-mediated unless a task explicitly establishes a safe agent flow.
+- Every user-facing API capability for Archive, Gallery, Signal, Compass, or Ascend must follow the Unified Tools And Actions rules above.
 - Tool names always use product-neutral dot notation (`folder.create`, `email.draft.send`), never underscores or current/future product names.
 
 ## Notes For Agents

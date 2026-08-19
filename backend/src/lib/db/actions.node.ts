@@ -8,8 +8,7 @@ export const ACTIONS_COLLECTION = 'actions';
 
 const retiredActionAliases: Record<string, string> = {
   'core.chat': 'chat', 'core.reason': 'reason', 'core.embedd': 'embed',
-  'core.speak': 'generate-speech', 'core.transcribe': 'transcribe',
-  'artifact.create': 'insert', 'artifact.read': 'read',
+  'core.speak': 'generate-speech',
 };
 
 /** Translates persisted pre-refactor action IDs at the node boundary. */

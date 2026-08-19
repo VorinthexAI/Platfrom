@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import { currentEmbeddingSchema, QWEN_RETRIEVAL_INSTRUCTION } from '@/lib/embeddings';
 import { newId } from '@/lib/ids';
-import type { DomainToolContext } from './domain-execute';
+import type { ToolContext } from './tool-context';
 import { imageSearchInputSchema, imageSearchTool } from './image-search';
 
 const embedding = currentEmbeddingSchema.parse(Array.from({ length: 4_096 }, () => 0.25));
 const now = '2026-08-11T12:00:00.000Z';
 
-function context(): DomainToolContext {
+function context(): ToolContext {
   const organizationKey = newId();
   return {
     organizationKey,
@@ -26,7 +26,7 @@ function result(scopeKey: string, key = newId()) {
       image: {
       key, scopeKey, filename: 'mountain.jpg', caption: 'Snow-covered mountains beneath a blue sky.',
       storageKey: 'private/mountain.jpg', mimeType: 'image/jpeg', sizeBytes: 100, width: 1_200, height: 800,
-      embedding, imageCaptionKey: null, isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now,
+      embedding, imageCaptionKey: null, createdByKey: null, isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now,
     },
     score: 0.92,
   };

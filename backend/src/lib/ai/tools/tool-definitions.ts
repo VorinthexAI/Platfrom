@@ -1,18 +1,4 @@
-import { accessAgentEvaluateTool } from './access-agent-evaluate';
-import { accessAgentExplainTool } from './access-agent-explain';
-import { accessOrganizationEvaluateTool } from './access-organization-evaluate';
-import { accessOrganizationExplainTool } from './access-organization-explain';
-import { accessScopeEvaluateTool } from './access-scope-evaluate';
-import { accessScopeExplainTool } from './access-scope-explain';
-import { agentMemberGrantTool } from './agent-member-grant';
-import { agentMemberListTool } from './agent-member-list';
-import { agentMemberReadTool } from './agent-member-read';
-import { agentMemberRevokeTool } from './agent-member-revoke';
-import { agentMemberSyncTool } from './agent-member-sync';
-import { artifactCreateTool } from './artifact-create';
 import { audioGenerateTool } from './audio-generate';
-import { bookCreateContextToolDefinition } from './book-create-context';
-import { bookWriteToolDefinition } from './book-write';
 import { documentContentToolDefinition } from './document-content';
 import { documentAudioPlaybackClearToolDefinition } from './document-audio-playback-clear';
 import { documentAudioPlaybackUpdateToolDefinition } from './document-audio-playback-update';
@@ -51,10 +37,6 @@ import { documentUnshareToolDefinition } from './document-unshare';
 import { documentUpdateToolDefinition } from './document-update';
 import { documentVersionContentTool } from './document-version-content';
 import { documentVersionRestoreTool } from './document-version-restore';
-import { emailReplyDraftTool } from './email-reply-draft';
-import { emailReadTool } from './email-read';
-import { emailThreadListTool } from './email-thread-list';
-import { emailThreadReadTool } from './email-thread-read';
 import { folderContentToolDefinition } from './folder-content';
 import { folderCopyToolDefinition } from './folder-copy';
 import { folderCreateToolDefinition } from './folder-create';
@@ -67,115 +49,22 @@ import { folderRestoreToolDefinition } from './folder-restore';
 import { folderUpdateToolDefinition } from './folder-update';
 import { imageCaptionTool } from './image-caption';
 import { imageCreateVisualIdentityTool } from './image-create-visual-identity';
-import { imageSearchTool } from './image-search';
-import { milestoneContentTool } from './milestone-content';
-import { milestoneChangeStatusTool } from './milestone-change-status';
-import { milestoneCompleteTool } from './milestone-complete';
-import { milestoneCreateTool } from './milestone-create';
-import { milestoneDeleteTool } from './milestone-delete';
-import { milestoneFindTool } from './milestone-find';
-import { milestoneListTool } from './milestone-list';
-import { milestoneMoveTool } from './milestone-move';
-import { milestoneRenameTool } from './milestone-rename';
-import { milestoneReopenTool } from './milestone-reopen';
-import { milestoneRestoreTool } from './milestone-restore';
-import { milestoneScheduleTool } from './milestone-schedule';
-import { milestoneUpdateTool } from './milestone-update';
-import { orchestratorChatTool } from './orchestrator-chat';
-import { organizationContentTool } from './organization-content';
-import { organizationDocumentSearchToolDefinition } from './organization-document-search';
-import { organizationMemberActivateTool } from './organization-member-activate';
-import { organizationMemberAddTool } from './organization-member-add';
-import { organizationMemberListTool } from './organization-member-list';
-import { organizationMemberReadTool } from './organization-member-read';
-import { organizationMemberRemoveTool } from './organization-member-remove';
-import { organizationMemberRoleUpdateTool } from './organization-member-role-update';
-import { organizationMemberSuspendTool } from './organization-member-suspend';
-import { organizationProjectSearchTool } from './organization-project-search';
-import { organizationProviderDisableTool } from './organization-provider-disable';
-import { organizationProviderEnableTool } from './organization-provider-enable';
-import { organizationProviderListTool } from './organization-provider-list';
-import { organizationProviderReadTool } from './organization-provider-read';
-import { organizationProviderTestTool } from './organization-provider-test';
-import { organizationReadTool } from './organization-read';
-import { organizationRestoreTool } from './organization-restore';
-import { organizationUpdateTool } from './organization-update';
-import { projectContentTool } from './project-content';
-import { projectCreateTool } from './project-create';
-import { projectDeleteTool } from './project-delete';
-import { projectFindTool } from './project-find';
-import { projectListTool } from './project-list';
-import { projectMoveTool } from './project-move';
-import { projectRenameTool } from './project-rename';
-import { projectRestoreTool } from './project-restore';
-import { projectUpdateTool } from './project-update';
-import { scopeAgentAccessThresholdUpdateTool } from './scope-agent-access-threshold-update';
-import { scopeAgentAddTool } from './scope-agent-add';
-import { scopeAgentContentTool } from './scope-agent-content';
-import { scopeAgentListTool } from './scope-agent-list';
-import { scopeAgentMoveTool } from './scope-agent-move';
-import { scopeAgentReadTool } from './scope-agent-read';
-import { scopeAgentRemoveTool } from './scope-agent-remove';
-import { scopeAgentRestoreTool } from './scope-agent-restore';
-import { scopeContentTool } from './scope-content';
-import { scopeContentSearchToolDefinition } from './scope-content-search';
-import { scopeContentSearchHistoryToolDefinition } from './scope-content-search-history';
-import { scopeContentSearchHistoryDeleteToolDefinition } from './scope-content-search-history-delete';
+import { documentSearchAllToolDefinition } from './document-search-all';
+import { contentSearchToolDefinition } from './content-search';
+import { contentSearchHistoryListToolDefinition } from './content-search-history-list';
+import { contentSearchHistoryDeleteToolDefinition } from './content-search-history-delete';
 import { contentNeighborsToolDefinition } from './content-neighbors';
-import { scopeCreateTool } from './scope-create';
-import { scopeDocumentSearchToolDefinition } from './scope-document-search';
-import { scopeListTool } from './scope-list';
-import { scopeMemberActivateTool } from './scope-member-activate';
-import { scopeMemberAddTool } from './scope-member-add';
-import { scopeMemberListTool } from './scope-member-list';
-import { scopeMemberReadTool } from './scope-member-read';
-import { scopeMemberRemoveTool } from './scope-member-remove';
-import { scopeMemberRoleUpdateTool } from './scope-member-role-update';
-import { scopeMemberSuspendTool } from './scope-member-suspend';
-import { scopeMoveTool } from './scope-move';
-import { scopeProjectSearchTool } from './scope-project-search';
-import { scopeReadTool } from './scope-read';
-import { scopeRemoveTool } from './scope-remove';
-import { scopeRestoreTool } from './scope-restore';
-import { scopeUpdateTool } from './scope-update';
-import { taskContentTool } from './task-content';
-import { taskChangeStatusTool } from './task-change-status';
-import { taskCompleteTool } from './task-complete';
-import { taskCreateTool } from './task-create';
-import { taskDeleteTool } from './task-delete';
-import { taskFindTool } from './task-find';
-import { taskListTool } from './task-list';
-import { taskMoveTool } from './task-move';
-import { taskReopenTool } from './task-reopen';
-import { taskReorderTool } from './task-reorder';
-import { taskRenameTool } from './task-rename';
-import { taskRestoreTool } from './task-restore';
-import { taskRewriteTool } from './task-rewrite';
-import { taskSummarizeTool } from './task-summarize';
-import { taskTranslateTool } from './task-translate';
-import { taskUpdateTool } from './task-update';
-import { transcribeTool } from './transcribe';
+import { documentSearchToolDefinition } from './document-search';
 import { WORKSPACE_TOOL_DEFINITIONS } from './workspace-tool-definitions';
 
 export const PUBLIC_TOOL_DEFINITIONS = Object.freeze([
-  orchestratorChatTool,
-  transcribeTool,
   audioGenerateTool,
   imageCaptionTool,
   imageCreateVisualIdentityTool,
-  imageSearchTool,
   contentNeighborsToolDefinition,
-  bookCreateContextToolDefinition,
-  bookWriteToolDefinition,
-  emailThreadListTool, emailThreadReadTool, emailReadTool, emailReplyDraftTool,
-  accessAgentEvaluateTool, accessAgentExplainTool, accessOrganizationEvaluateTool, accessOrganizationExplainTool, accessScopeEvaluateTool, accessScopeExplainTool,
-  agentMemberGrantTool, agentMemberListTool, agentMemberReadTool, agentMemberRevokeTool, agentMemberSyncTool, artifactCreateTool,
   documentAudioPlaybackClearToolDefinition, documentAudioPlaybackUpdateToolDefinition, documentContentToolDefinition, documentCreateToolDefinition, documentCopyToolDefinition, documentCreateVersionToolDefinition, documentDeleteToolDefinition, documentDeleteVersionToolDefinition, documentDownloadToolDefinition, documentEnhanceToolDefinition, documentExportToolDefinition, documentFindToolDefinition, documentFindSummaryToolDefinition, documentFindVersionToolDefinition, documentListToolDefinition, documentListAudioVersionsToolDefinition, documentListSummariesToolDefinition, documentListSharesToolDefinition, documentListVersionsToolDefinition, documentMoveToolDefinition, documentParseToolDefinition, documentReadToolDefinition, documentRenameToolDefinition, documentScanToolDefinition, documentRestoreToolDefinition, documentRestoreVersionToolDefinition, documentRewriteToolDefinition, documentShareToolDefinition, documentShareContentTool, documentShareRestoreTool, documentSummarizeToolDefinition, documentSummaryAudioGenerateToolDefinition, documentTopicsToolDefinition, documentTranslateToolDefinition, documentUnshareToolDefinition, documentUpdateToolDefinition, documentVersionContentTool, documentVersionRestoreTool,
   folderContentToolDefinition, folderCopyToolDefinition, folderCreateToolDefinition, folderDeleteToolDefinition, folderFindToolDefinition, folderListToolDefinition, folderMoveToolDefinition, folderRenameToolDefinition, folderRestoreToolDefinition, folderUpdateToolDefinition,
-  milestoneContentTool, milestoneChangeStatusTool, milestoneCompleteTool, milestoneCreateTool, milestoneDeleteTool, milestoneFindTool, milestoneListTool, milestoneMoveTool, milestoneRenameTool, milestoneReopenTool, milestoneRestoreTool, milestoneScheduleTool, milestoneUpdateTool,
-  organizationContentTool, organizationDocumentSearchToolDefinition, organizationMemberActivateTool, organizationMemberAddTool, organizationMemberListTool, organizationMemberReadTool, organizationMemberRemoveTool, organizationMemberRoleUpdateTool, organizationMemberSuspendTool, organizationProjectSearchTool, organizationProviderDisableTool, organizationProviderEnableTool, organizationProviderListTool, organizationProviderReadTool, organizationProviderTestTool, organizationReadTool, organizationRestoreTool, organizationUpdateTool,
-  projectContentTool, projectCreateTool, projectDeleteTool, projectFindTool, projectListTool, projectMoveTool, projectRenameTool, projectRestoreTool, projectUpdateTool,
-  scopeAgentAccessThresholdUpdateTool, scopeAgentAddTool, scopeAgentContentTool, scopeAgentListTool, scopeAgentMoveTool, scopeAgentReadTool, scopeAgentRemoveTool, scopeAgentRestoreTool, scopeContentTool, scopeContentSearchToolDefinition, scopeContentSearchHistoryToolDefinition, scopeContentSearchHistoryDeleteToolDefinition, scopeCreateTool, scopeDocumentSearchToolDefinition, scopeListTool, scopeMemberActivateTool, scopeMemberAddTool, scopeMemberListTool, scopeMemberReadTool, scopeMemberRemoveTool, scopeMemberRoleUpdateTool, scopeMemberSuspendTool, scopeMoveTool, scopeProjectSearchTool, scopeReadTool, scopeRemoveTool, scopeRestoreTool, scopeUpdateTool,
-  taskContentTool, taskChangeStatusTool, taskCompleteTool, taskCreateTool, taskDeleteTool, taskFindTool, taskListTool, taskMoveTool, taskReopenTool, taskReorderTool, taskRenameTool, taskRestoreTool, taskRewriteTool, taskSummarizeTool, taskTranslateTool, taskUpdateTool,
+  documentSearchAllToolDefinition,
+  contentSearchToolDefinition, contentSearchHistoryListToolDefinition, contentSearchHistoryDeleteToolDefinition, documentSearchToolDefinition,
   ...WORKSPACE_TOOL_DEFINITIONS,
 ] as const);

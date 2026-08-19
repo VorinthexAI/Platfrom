@@ -1,12 +1,10 @@
 # Vorinthex Backend
 
-Vorinthex runs AI-driven admin, content, and marketing operations for companies and their apps.
+Vorinthex runs the API, persistence, and AI execution layer for the platform.
 
 ## Model
 
-The runtime hierarchy is Agent -> Manager -> Role -> Task -> Action.
-
-Agents own managers. Managers validate role completion against their assignment and decide what happens next. Roles are repeatable task runners with no chaining logic. Tasks are ordered data-defined sequences. Actions are the hardcoded primitives in `src/core/actions`; new deployed behavior belongs there, while new workflows should usually be new Manager/Role/Task data in `companies.graph` or a blueprint.
+The AI runtime routes generic actions through models and providers. Product behavior is exposed through the unified tool registry, with HTTP handlers and tools sharing canonical domain services.
 
 ## Local Development
 
@@ -26,26 +24,9 @@ Run the live content release gate with `bun run test:e2e:content`. It starts the
 
 Production deploys are defined in `.github/workflows/deploy.yml` and `deploy/`. The app role runs blue-green behind Caddy and processes document parsing and scanning directly while it waits on external OCR and model APIs. Image hashing remains isolated transient Fargate compute.
 
-## Blueprints
-
-Blueprints are reusable starter graphs stored in `blueprints`. Applying a blueprint copies its agents, roles, and tasks into a new company with fresh IDs. The copied company graph has no foreign key or live reference to the blueprint, so later blueprint edits do not alter existing companies.
-
-Create a company with blueprints:
-
-```http
-POST /companies
-{
-  "slug": "lensoflow",
-  "metadata": { "name": "Lensoflow" },
-  "blueprint_ids": ["blueprint_cmo_content", "blueprint_cto_platform"]
-}
-```
-
 ## Adding Behavior
 
-Actions are a fixed deployed code library. Add or change an Action manually in `src/core/actions`, register it in `src/core/actions/index.ts`, cover the behavior with tests where practical, and ship it through the normal human-reviewed deploy path.
-
-Add a new Manager, Task, or Role as data by writing to a company graph through the existing graph Actions or by adding a blueprint. This does not require a deploy if it only rearranges existing Actions.
+Add generic model behavior through the action registry and product operations through the unified tool registry. Keep shared business logic in canonical services, cover behavior changes with tests, and ship through the normal human-reviewed deploy path.
 
 ## Security
 

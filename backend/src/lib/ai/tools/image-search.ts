@@ -3,7 +3,7 @@ import { executeAction, type ExecuteActionOptions } from '@/lib/ai/router';
 import { currentEmbeddingSchema, prepareEmbeddingText } from '@/lib/embeddings';
 import { searchAccessibleImages, type AccessibleImageSearchInput, type AccessibleImageSearchResult } from '@/lib/media-library';
 import type { EmbeddingInput, EmbeddingOutput, ProviderExecuteResponse } from '@/lib/ai/providers';
-import type { DomainToolContext } from './domain-execute';
+import type { ToolContext } from './tool-context';
 import { imageSearchActor, imageSimilarityOutput, imageSimilarityThresholdSchema, type ImageSimilarityOutput } from './image-similarity';
 import { getDefaultGalleryRepository, type GalleryRepository } from '@/lib/gallery/repository';
 
@@ -32,8 +32,18 @@ const duplicateImageSearchSchema = z.object({ duplicates: z.literal(true), colle
 export const imageSearchInputSchema = z.union([textSearchSchema, similarImageSearchSchema, identitySearchSchema, duplicateImageSearchSchema]);
 export type ImageSearchInput = z.infer<typeof imageSearchInputSchema>;
 
+export const imageSearchProviderInputSchema = {
+  type: 'object',
+  oneOf: [
+    { type: 'object', required: ['query'], additionalProperties: false, properties: { query: { type: 'string', minLength: 1, maxLength: 12_000 }, collectionKey: { type: 'string' }, recordHistory: { type: 'boolean', default: true }, threshold: { type: 'number', minimum: -1, maximum: 1 }, limit: { type: 'integer', minimum: 1, maximum: 50, default: 50 } } },
+    { type: 'object', required: ['imageKey'], additionalProperties: false, properties: { imageKey: { type: 'string' }, collectionKey: { type: 'string' }, threshold: { type: 'number', minimum: -1, maximum: 1 }, limit: { type: 'integer', minimum: 1, maximum: 50, default: 50 } } },
+    { type: 'object', required: ['identityKey'], additionalProperties: false, properties: { identityKey: { type: 'string' }, collectionKey: { type: 'string' } } },
+    { type: 'object', required: ['duplicates', 'collectionKey'], additionalProperties: false, properties: { duplicates: { type: 'boolean', const: true }, collectionKey: { type: 'string' } } },
+  ],
+} as const;
+
 export interface ImageSearchToolDependencies extends ExecuteActionOptions {
-  context: DomainToolContext;
+  context: ToolContext;
   executeEmbedding?: (organizationKey: string, input: EmbeddingInput) => Promise<ProviderExecuteResponse<EmbeddingOutput>>;
   searchImages?: (input: AccessibleImageSearchInput) => Promise<AccessibleImageSearchResult[]>;
   listMatchingVisualIdentities?: GalleryRepository['listMatchingIdentityNames'];
@@ -55,15 +65,7 @@ export const imageSearchTool = {
   providerDefinition: {
     name: 'image.search',
     description: 'Search accessible images by text, a source image, or a saved visual identity, or find deterministic duplicates within a collection.',
-    inputSchema: {
-      type: 'object',
-      oneOf: [
-        { type: 'object', required: ['query'], additionalProperties: false, properties: { query: { type: 'string', minLength: 1, maxLength: 12_000 }, collectionKey: { type: 'string' }, recordHistory: { type: 'boolean', default: true }, threshold: { type: 'number', minimum: -1, maximum: 1 }, limit: { type: 'integer', minimum: 1, maximum: 50, default: 50 } } },
-        { type: 'object', required: ['imageKey'], additionalProperties: false, properties: { imageKey: { type: 'string' }, collectionKey: { type: 'string' }, threshold: { type: 'number', minimum: -1, maximum: 1 }, limit: { type: 'integer', minimum: 1, maximum: 50, default: 50 } } },
-        { type: 'object', required: ['identityKey'], additionalProperties: false, properties: { identityKey: { type: 'string' }, collectionKey: { type: 'string' } } },
-        { type: 'object', required: ['duplicates', 'collectionKey'], additionalProperties: false, properties: { duplicates: { type: 'boolean', const: true }, collectionKey: { type: 'string' } } },
-      ],
-    },
+    inputSchema: imageSearchProviderInputSchema,
   },
   async execute(rawInput: unknown, dependencies: ImageSearchToolDependencies): Promise<ImageSimilarityOutput> {
     const startedAt = performance.now();
