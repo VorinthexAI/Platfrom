@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test';
 import { Hono } from 'hono';
 import { newId } from '@/lib/ids';
 import { ProviderExecutionError } from '@/lib/ai/router/errors';
-import { TravelPlaceLookupError } from '@/lib/travel/service';
 import { createTravelHandlers } from './travel';
 import { registerRoutes } from './routes';
 
@@ -50,15 +49,6 @@ describe('travel HTTP handlers', () => {
     const response = await app.request('/travel/places/find', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey: 'organization', scopeKey: newId(), query: 'Japan' }) });
     expect(response.status).toBe(504);
     expect(await response.json()).toMatchObject({ success: false, error: { code: 'TRAVEL_LOOKUP_TIMEOUT' } });
-  });
-
-  test('maps malformed place model output to a safe upstream response error', async () => {
-    const service = { findPlace: async () => { throw new TravelPlaceLookupError('malformed'); } } as never;
-    const app = new Hono();
-    app.post('/travel/places/find', createTravelHandlers({ service, getIdentity: async () => ({ key: 'trusted-user', identityType: 'user' }) }).findPlace);
-    const response = await app.request('/travel/places/find', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey: 'organization', scopeKey: newId(), query: 'Japan' }) });
-    expect(response.status).toBe(502);
-    expect(await response.json()).toMatchObject({ success: false, error: { code: 'TRAVEL_INVALID_PROVIDER_RESPONSE' } });
   });
 
   test('registers every travel route', async () => {

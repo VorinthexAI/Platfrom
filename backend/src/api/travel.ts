@@ -2,7 +2,7 @@ import type { Context } from 'hono';
 import { z, ZodError } from 'zod';
 import { ProviderExecutionError } from '@/lib/ai/router/errors';
 import { TravelRepositoryError } from '@/lib/travel/repository';
-import { createTravelService, TravelPlaceLookupError, type TravelService } from '@/lib/travel/service';
+import { createTravelService, type TravelService } from '@/lib/travel/service';
 import { getAuthIdentity } from './security';
 
 type IdentityReader = typeof getAuthIdentity;
@@ -31,7 +31,6 @@ export function createTravelHandlers(options: { service?: TravelService; getIden
         if (codes.has('timeout') || codes.has('aborted')) return c.json({ success: false, error: { code: 'TRAVEL_LOOKUP_TIMEOUT', message: 'Place information took too long to load. Try again.' } }, 504);
         return c.json({ success: false, error: { code: 'TRAVEL_PROVIDER_UNAVAILABLE', message: 'Place information is temporarily unavailable.' } }, 503);
       }
-      if (error instanceof TravelPlaceLookupError) return c.json({ success: false, error: { code: 'TRAVEL_INVALID_PROVIDER_RESPONSE', message: 'Place information could not be read. Try again.' } }, 502);
       if (error instanceof ZodError || error instanceof SyntaxError) return c.json({ success: false, error: { code: 'TRAVEL_INVALID_INPUT', message: 'Travel request input was invalid.' } }, 400);
       return c.json({ success: false, error: { code: 'TRAVEL_FAILED', message: 'Travel request failed.' } }, 500);
     }

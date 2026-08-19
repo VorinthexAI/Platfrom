@@ -91,7 +91,7 @@ describe('travel contracts', () => {
     expect(JSON.stringify(calls[1]?.[2])).not.toContain('secret-user-key');
   });
 
-  test('does not call the model when read access is denied and rejects malformed or extra model output', async () => {
+  test('does not call the model when read access is denied and safely projects malformed model output', async () => {
     let calls = 0;
     const denied = createTravelService({ repository: { authorizeRead: async () => { throw new TravelRepositoryError('forbidden'); } } as unknown as TravelRepository, execute: (async () => { calls += 1; }) as any });
     await expect(denied.findPlace({ organizationKey: 'organization', scopeKey: otherKey, query: 'Japan' }, 'user')).rejects.toMatchObject({ reason: 'forbidden' });
@@ -100,7 +100,9 @@ describe('travel contracts', () => {
     const repository = { authorizeRead: async () => undefined } as unknown as TravelRepository;
     for (const text of ['not json', JSON.stringify({ ...detail, unexpected: true })]) {
       const service = createTravelService({ repository, execute: (async () => ({ output: { text, toolCalls: [], stopReason: 'stop' } })) as any });
-      await expect(service.findPlace({ organizationKey: 'organization', scopeKey: otherKey, query: 'Japan' }, 'user')).rejects.toThrow('malformed structured output');
+      const result = await service.findPlace({ organizationKey: 'organization', scopeKey: otherKey, query: 'Japan (JP), Asia' }, 'user');
+      expect(result.place).toMatchObject({ location: { kind: 'country', name: 'Japan', countryCode: 'JP', continent: 'Asia' }, title: 'Japan' });
+      expect(travelPlaceDetailSchema.safeParse(result.place).success).toBe(true);
     }
   });
 });

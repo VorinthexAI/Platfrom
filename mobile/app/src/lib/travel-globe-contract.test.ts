@@ -21,4 +21,5 @@ test("opens a full country detail sheet while place.find loads", () => {
   expect(workspace).toContain("await findPlace(");
   expect(workspace).toContain("onCountryPress=");
   expect(workspace).toContain("selectedCountryCode=");
+  expect(workspace).not.toContain(">Try again</Button>");
 });

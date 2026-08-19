@@ -398,7 +398,6 @@ export function TravelWorkspace() {
           </View> : countryDetailError ? <View style={styles.countryDetailFailure}>
             <GlobeIcon size="lg" variant="muted" />
             <Text style={styles.loadFailureText}>{countryDetailError}</Text>
-            {selectedCountry ? <Button onPress={() => void openCountryDetail(selectedCountry)} size="md" variant="secondary">Try again</Button> : null}
           </View> : countryDetail ? <View style={styles.countryDetail}>
             <View style={styles.countryHero}>
               <Text style={styles.countryEyebrow}>{countryDetail.location.countryCode} · {countryDetail.location.continent}</Text>
