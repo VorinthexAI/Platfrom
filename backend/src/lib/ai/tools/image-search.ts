@@ -31,6 +31,7 @@ const duplicateImageSearchSchema = z.object({ duplicates: z.literal(true), colle
 
 export const imageSearchInputSchema = z.union([textSearchSchema, similarImageSearchSchema, identitySearchSchema, duplicateImageSearchSchema]);
 export type ImageSearchInput = z.infer<typeof imageSearchInputSchema>;
+export const IMAGE_SEARCH_EMBEDDING_ATTEMPT_TIMEOUT_MS = 2_500;
 
 export const imageSearchProviderInputSchema = {
   type: 'object',
@@ -44,7 +45,7 @@ export const imageSearchProviderInputSchema = {
 
 export interface ImageSearchToolDependencies extends ExecuteActionOptions {
   context: ToolContext;
-  executeEmbedding?: (organizationKey: string, input: EmbeddingInput) => Promise<ProviderExecuteResponse<EmbeddingOutput>>;
+  executeEmbedding?: (organizationKey: string, input: EmbeddingInput, options: { timeoutMs: number }) => Promise<ProviderExecuteResponse<EmbeddingOutput>>;
   searchImages?: (input: AccessibleImageSearchInput) => Promise<AccessibleImageSearchResult[]>;
   listMatchingVisualIdentities?: (scopeKey: string, query: string) => ReturnType<GalleryRepository['listMatchingIdentityNames']>;
   getImage?: GalleryRepository['getImage'];
@@ -112,12 +113,12 @@ export const imageSearchTool = {
     }
     const embeddingInput = { text: prepareEmbeddingText(input.query, 'query') };
     const embeddingPromise = dependencies.executeEmbedding
-      ? dependencies.executeEmbedding(organizationKey, embeddingInput)
+      ? dependencies.executeEmbedding(organizationKey, embeddingInput, { timeoutMs: IMAGE_SEARCH_EMBEDDING_ATTEMPT_TIMEOUT_MS })
       : executeAction<EmbeddingInput, EmbeddingOutput>({
           mode: 'auto',
           organizationKey,
           actionSlug: 'embed',
-        }, embeddingInput, dependencies);
+        }, embeddingInput, { ...dependencies, timeoutMs: Math.min(dependencies.timeoutMs ?? IMAGE_SEARCH_EMBEDDING_ATTEMPT_TIMEOUT_MS, IMAGE_SEARCH_EMBEDDING_ATTEMPT_TIMEOUT_MS) });
     const [response, identities] = await Promise.all([
       embeddingPromise,
       dependencies.listMatchingVisualIdentities

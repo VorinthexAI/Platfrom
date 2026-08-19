@@ -90,9 +90,8 @@ async function createEmbeddings(config: OpenRouterProviderConfig, request: Provi
   if (config.siteUrl) headers['HTTP-Referer'] = config.siteUrl;
   if (config.appName) headers['X-Title'] = config.appName;
   let lastError: unknown;
+  const signal = resolveRequestSignal({ ...request, timeoutMs: request.timeoutMs ?? DEFAULT_TIMEOUT_MS });
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
-    const timeout = AbortSignal.timeout(request.timeoutMs ?? DEFAULT_TIMEOUT_MS);
-    const signal = request.signal ? AbortSignal.any([request.signal, timeout]) : timeout;
     let requestedDelay: number | undefined;
     try {
       const response = await fetch(`${config.baseUrl.replace(/\/$/, '')}/embeddings`, {
@@ -117,10 +116,10 @@ async function createEmbeddings(config: OpenRouterProviderConfig, request: Provi
       return { embeddings, usage: tokenUsage(raw.usage?.prompt_tokens, 0, raw.usage?.total_tokens), providerId: PROVIDER_ID, externalModelId: request.externalModelId, rawResponse: raw };
     } catch (error) {
       const normalized = normalizeProviderError(PROVIDER_ID, error);
-      if (request.signal?.aborted || !isRetryable(normalized) || attempt === MAX_ATTEMPTS) throw normalized;
+      if (signal?.aborted || !isRetryable(normalized) || attempt === MAX_ATTEMPTS) throw normalized;
       lastError = normalized;
       try {
-        await delay(requestedDelay ?? Math.min(250 * 2 ** (attempt - 1), 1_000), request.signal);
+        await delay(requestedDelay ?? Math.min(250 * 2 ** (attempt - 1), 1_000), signal);
       } catch (backoffError) {
         throw normalizeProviderError(PROVIDER_ID, backoffError);
       }

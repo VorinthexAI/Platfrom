@@ -42,16 +42,19 @@ describe('OpenRouter Qwen embeddings', () => {
     await expect(provider.embed!({ externalModelId: EXTERNAL_EMBEDDING_MODEL_ID, input: 'bad dimensions' })).rejects.toMatchObject({ code: 'response_invalid' });
   });
 
-  test('uses a fresh timeout signal for each retry attempt', async () => {
+  test('keeps retries within one total timeout signal', async () => {
     let attempts = 0;
-    globalThis.fetch = (async () => {
+    const signals: (AbortSignal | null | undefined)[] = [];
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
       attempts += 1;
-      if (attempts === 1) throw new DOMException('timed out', 'TimeoutError');
+      signals.push(init?.signal);
+      if (attempts === 1) return new Response(null, { status: 503, headers: { 'retry-after-ms': '5' } });
       return Response.json({ provider: 'DeepInfra', data: [{ index: 0, embedding: vector(1) }] });
     }) as unknown as typeof fetch;
 
-    await expect(createOpenRouterProvider({ apiKey: 'test-key' }).embed!({ externalModelId: EXTERNAL_EMBEDDING_MODEL_ID, input: 'retry timeout' })).resolves.toBeDefined();
+    await expect(createOpenRouterProvider({ apiKey: 'test-key' }).embed!({ externalModelId: EXTERNAL_EMBEDDING_MODEL_ID, input: 'retry timeout', timeoutMs: 2_500 })).resolves.toBeDefined();
     expect(attempts).toBe(2);
+    expect(signals[0]).toBe(signals[1]);
   });
 
   test('retains retries for normalized fetch network failures', async () => {

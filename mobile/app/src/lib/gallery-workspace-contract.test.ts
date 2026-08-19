@@ -565,6 +565,18 @@ test("silently refreshes picker searches without history or selection loss", () 
   expect(source).toContain("await refreshIdentityPickerSearchSilently(identityPickerQuery, pickerCollection, generation)");
 });
 
+test("keeps collection search responsive and falls back without inline errors", () => {
+  const start = source.indexOf("async function search(value = query.trim()");
+  const end = source.indexOf("function clearCollectionSearch", start);
+  const search = source.slice(start, end);
+  expect(search).toContain("recordHistory: true");
+  expect(search).toContain("setCollectionSearchResults(immediateMatches)");
+  expect(search).toContain("setStatus(undefined)");
+  expect(search).not.toContain("setStatus(errorMessage(error))");
+  expect(source).not.toContain("historyTimer");
+  expect(source).not.toContain('searching && visibleImages.length === 0');
+});
+
 test("coalesces and generation-checks sharing refreshes and uses one incoming key", () => {
   expect(sharingSource).toContain("refreshInFlight.current");
   expect(sharingSource).toContain("request !== requestGeneration.current");
