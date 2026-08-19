@@ -79,9 +79,10 @@ test("only lifts Core for its own focus and uses distinct image sheet presentati
   expect(source).not.toContain('activeSheet === "imageActions" || activeSheet === "imageEdit"');
   expect(source).not.toContain("detailCaption");
   expect(source).toContain('accessibilityLabel="Open image actions"');
+  expect(source).toContain('<View collapsable={false} style={styles.detailImageFrame}>');
   expect(source).toContain('footer={<Button onPress={closeSheet} size="md" variant="secondary">Close</Button>}');
   expect(source).toContain('if (activeSheetRef.current === "imageActions") goBackSheet(); else closeSheet();');
-  expect(source).toContain('detailImageFrame: { flex: 1, width: "100%", overflow: "hidden", borderRadius: radii.md');
+  expect(source).toContain('detailImageFrame: { flex: 1, width: "100%", overflow: "hidden", borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.md');
   expect(bottomSheetSource).toContain('height?: "full"');
   expect(bottomSheetSource).not.toContain("mutation?: boolean");
   expect(bottomSheetSource).not.toContain("tall?: boolean");

@@ -3,7 +3,7 @@ import * as Haptics from "expo-haptics";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
-import Animated, { Easing, SlideInLeft, SlideInRight, SlideOutLeft, SlideOutRight, useReducedMotion } from "react-native-reanimated";
+import Animated, { Easing, LinearTransition, useReducedMotion } from "react-native-reanimated";
 import { BottomSheet } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
 import { CheckIcon, CloseIcon } from "@vorinthex/shared/ui/icons-mobile";
@@ -27,7 +27,7 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
   const { showToast } = useToast();
   const galleryContext = getGalleryContext();
   const reducedMotion = useReducedMotion();
-  const { width } = useWindowDimensions();
+  const { height, width } = useWindowDimensions();
   const [gridWidth, setGridWidth] = useState(0);
   const [memories, setMemories] = useState<GalleryMemory[]>([]);
   const [detail, setDetail] = useState<GalleryMemory>();
@@ -49,6 +49,7 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
   const longPressedMemory = useRef<string | undefined>(undefined);
   const owner = isGalleryCollectionOwned(collection);
   const cardWidth = Math.floor(((gridWidth || width - 40) - GAP * (COLUMNS - 1)) / COLUMNS);
+  const expandedImageHeight = Math.max(420, height - 260);
   const listEmpty = !creating && !listLoading && memories.length === 0;
   listSheetOpen.current = open && !detail && !opening && activeSheet === "list";
 
@@ -216,7 +217,7 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
     </BottomSheet>
 
     <BottomSheet footer={detailFooter} height="full" onOpenChange={(next) => { if (!next) close(); }} open={open && Boolean(detail)} title="Memory">
-      {detail ? <ScrollView contentContainerStyle={styles.detail} showsVerticalScrollIndicator={false}>{showImage ? <Animated.View entering={reducedMotion ? undefined : SlideInRight.duration(360).easing(Easing.out(Easing.cubic))} exiting={reducedMotion ? undefined : SlideOutRight.duration(300).easing(Easing.inOut(Easing.cubic))} key="image" style={styles.detailScene}><View style={styles.detailImageFrameZoom}><Image contentFit="contain" source={detail.image.url} style={styles.detailImage} transition={180} /></View></Animated.View> : <Animated.View entering={reducedMotion ? undefined : SlideInLeft.duration(360).easing(Easing.out(Easing.cubic))} exiting={reducedMotion ? undefined : SlideOutLeft.duration(300).easing(Easing.inOut(Easing.cubic))} key="memory" style={styles.detailScene}><View style={styles.detailImageFrame}><Image contentFit="cover" source={detail.image.url} style={styles.detailImage} transition={180} /></View><View style={styles.memoryCopy}>{splitGalleryMemoryText(typedText).map((section, index) => <Text key={`${index}:${section.length}`} style={styles.memoryText}>{section}</Text>)}</View></Animated.View>}</ScrollView> : null}
+      {detail ? <ScrollView contentContainerStyle={styles.detail} showsVerticalScrollIndicator={false}><Animated.View layout={reducedMotion ? undefined : LinearTransition.duration(420).easing(Easing.inOut(Easing.cubic))} style={[styles.detailImageFrame, showImage && styles.detailImageFrameZoom, showImage && { height: expandedImageHeight }]}><View collapsable={false} style={styles.detailImageClip}><Image contentFit={showImage ? "contain" : "cover"} source={detail.image.url} style={styles.detailImage} transition={180} /></View></Animated.View><Animated.View accessibilityElementsHidden={showImage} importantForAccessibility={showImage ? "no-hide-descendants" : "auto"} layout={reducedMotion ? undefined : LinearTransition.duration(420).easing(Easing.inOut(Easing.cubic))} pointerEvents={showImage ? "none" : "auto"} style={[styles.memoryCopy, showImage && styles.memoryCopyHidden]}>{splitGalleryMemoryText(typedText).map((section, index) => <Text key={`${index}:${section.length}`} style={styles.memoryText}>{section}</Text>)}</Animated.View></ScrollView> : null}
     </BottomSheet>
 
     <BottomSheet dismissible={!deleting} onOpenChange={(next) => { if (!next) setActiveSheet("list"); }} open={open && !detail && selectedMemoryKeys.length > 0 && activeSheet === "confirmDelete"} title={`Delete ${selectedMemoryKeys.length === 1 ? "memory" : `${selectedMemoryKeys.length} memories`}?`}>
@@ -237,12 +238,13 @@ const styles = StyleSheet.create({
   bulkClose: { height: 28, width: 28, paddingHorizontal: 0, paddingVertical: 0 },
   bulkText: { color: palette.silver100, fontFamily: fonts.medium, fontSize: 12 },
   empty: { width: "100%", paddingVertical: spacing.md, textAlign: "center", color: palette.silver500, fontFamily: fonts.regular, fontSize: 13 },
-  detail: { flexGrow: 1, paddingVertical: spacing.lg },
-  detailScene: { width: "100%", alignItems: "center", gap: spacing.xl },
-  detailImageFrame: { width: 120, height: 120, overflow: "hidden", borderRadius: radii.md, backgroundColor: palette.voidBlack },
-  detailImageFrameZoom: { width: "100%", height: 420, overflow: "hidden", borderRadius: radii.sm, backgroundColor: palette.voidBlack },
+  detail: { flexGrow: 1, alignItems: "center", paddingVertical: spacing.lg, gap: spacing.xl },
+  detailImageFrame: { width: 120, height: 120 },
+  detailImageFrameZoom: { width: "100%" },
+  detailImageClip: { width: "100%", height: "100%", overflow: "hidden", borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.sm, backgroundColor: palette.voidBlack },
   detailImage: { width: "100%", height: "100%" },
   memoryCopy: { width: "100%", gap: spacing.md, paddingBottom: spacing.xl },
+  memoryCopyHidden: { opacity: 0 },
   memoryText: { color: palette.silver100, fontFamily: fonts.regular, fontSize: 17, lineHeight: 27 },
   confirmActions: { gap: spacing.sm },
 });

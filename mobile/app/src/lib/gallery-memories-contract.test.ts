@@ -36,10 +36,15 @@ test("guards auto-open and preserves typing across zoom and event refresh", () =
   expect(memories).toContain('"memory.created", "memory.deleted", "image.changed", "collection.content.changed"');
   expect(memories).toContain('showImage ? "Read memory" : "Show image"');
   expect(memories).toContain("useReducedMotion()");
-  expect(memories).toContain("SlideInRight.duration(360)");
-  expect(memories).toContain("SlideInLeft.duration(360)");
-  expect(memories).toContain('showImage ? <Animated.View');
-  expect(memories).toContain('detailImageFrameZoom: { width: "100%", height: 420, overflow: "hidden", borderRadius: radii.sm');
+  expect(memories).toContain("LinearTransition.duration(420)");
+  expect(memories).toContain('style={[styles.detailImageFrame, showImage && styles.detailImageFrameZoom, showImage && { height: expandedImageHeight }]}');
+  expect(memories).toContain('<View collapsable={false} style={styles.detailImageClip}>');
+  expect(memories).toContain('detailImageClip: { width: "100%", height: "100%", overflow: "hidden", borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.sm');
+  expect(memories).toContain('const expandedImageHeight = Math.max(420, height - 260)');
+  expect(memories).toContain('detailImageFrameZoom: { width: "100%" }');
+  expect(memories).toContain('style={[styles.memoryCopy, showImage && styles.memoryCopyHidden]}');
+  expect(memories).toContain('accessibilityElementsHidden={showImage}');
+  expect(memories).not.toContain("SlideInRight");
 });
 
 test("matches bulk partial deletion and hard-removes detail caches", () => {
