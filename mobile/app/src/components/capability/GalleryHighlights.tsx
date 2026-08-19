@@ -7,6 +7,7 @@ import { BottomSheet, BottomSheetItem } from "@vorinthex/shared/ui/bottom-sheet"
 import { Button } from "@vorinthex/shared/ui/button";
 import { ChevronLeftIcon, ChevronRightIcon, MoreHorizontalIcon, PauseIcon, PlayIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { Skeleton } from "@vorinthex/shared/ui/skeleton";
+import { useToast } from "@vorinthex/shared/ui/toast";
 
 import { createGalleryCollectionHighlight, deleteGalleryCollectionHighlight, fetchGalleryCollectionHighlight, getGalleryContext, isGalleryClientErrorCode, isGalleryCollectionOwned, listGalleryCollectionHighlights, resolveGalleryHighlightSlides, type GalleryCollection, type GalleryHighlight, type GalleryHighlightDetail } from "@/lib/gallery-client";
 import { HIGHLIGHT_SLIDE_DURATION_MS, initialHighlightPlaybackState, reduceHighlightPlayback } from "@/lib/gallery-highlight-playback";
@@ -26,6 +27,8 @@ type HighlightSheet = "player" | "actions" | "confirmDelete";
 
 export function GalleryHighlights({ collection, onClose, open }: GalleryHighlightsProps) {
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
+  const notify = (title: string) => showToast({ title, duration: 2_000 });
   const galleryContext = getGalleryContext();
   const { width } = useWindowDimensions();
   const [highlights, setHighlights] = useState<GalleryHighlight[]>([]);
@@ -35,7 +38,6 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
   const [opening, setOpening] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [activeSheet, setActiveSheet] = useState<HighlightSheet>("player");
-  const [error, setError] = useState<string>();
   const [playback, dispatch] = useReducer(reduceHighlightPlayback, initialHighlightPlaybackState);
   const request = useRef(0);
   const createRequest = useRef(0);
@@ -52,12 +54,11 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
   async function loadList() {
     const generation = ++request.current;
     if (!listLoaded.current) setListLoading(true);
-    setError(undefined);
     try {
       const result = await queryClient.fetchQuery({ queryKey: galleryQueryKeys.highlights(galleryContext, collection.key), queryFn: () => listGalleryCollectionHighlights(collection.key), staleTime: 0 });
       if (generation === request.current) setHighlights(result.highlights);
-    } catch (failure) {
-      if (generation === request.current) setError(failure instanceof Error ? failure.message : "Highlights could not be loaded.");
+    } catch {
+      if (generation === request.current) notify("Highlights could not be loaded");
     } finally {
       if (generation === request.current) { listLoaded.current = true; setListLoading(false); }
     }
@@ -66,7 +67,6 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
   async function openHighlight(highlight: GalleryHighlight) {
     const generation = ++request.current;
     setOpening(true);
-    setError(undefined);
     try {
       const result = await queryClient.fetchQuery({ queryKey: galleryQueryKeys.highlight(galleryContext, collection.key, highlight.key), queryFn: () => fetchGalleryCollectionHighlight(highlight.key), staleTime: 0 });
       if (generation !== request.current) return;
@@ -79,7 +79,7 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
         setActiveSheet("player");
         dispatch({ type: "pause" });
         void loadList();
-      } else if (generation === request.current) setError(failure instanceof Error ? failure.message : "The highlight could not be opened.");
+      } else if (generation === request.current) notify("Highlight could not be opened");
     } finally {
       if (generation === request.current) setOpening(false);
     }
@@ -89,15 +89,14 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
     if (!owner) return;
     const generation = ++createRequest.current;
     setCreating(true);
-    setError(undefined);
     try {
       const { highlight } = await createGalleryCollectionHighlight(collection.key);
       if (generation !== createRequest.current) return;
       setHighlights((current) => [highlight, ...current.filter(({ key }) => key !== highlight.key)]);
       queryClient.setQueryData(galleryQueryKeys.highlight(galleryContext, collection.key, highlight.key), { highlight });
       await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.highlights(galleryContext, collection.key), exact: true, refetchType: "none" });
-    } catch (failure) {
-      if (generation === createRequest.current) setError(failure instanceof Error ? failure.message : "A highlight could not be created.");
+    } catch {
+      if (generation === createRequest.current) notify("Highlight could not be created");
     } finally {
       if (generation === createRequest.current) setCreating(false);
     }
@@ -107,7 +106,6 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
     if (!owner || !detail) return;
     const highlightKey = detail.key;
     setDeleting(true);
-    setError(undefined);
     try {
       await deleteGalleryCollectionHighlight(highlightKey);
       setHighlights((current) => current.filter(({ key }) => key !== highlightKey));
@@ -116,8 +114,8 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
       setDetail(undefined);
       setActiveSheet("player");
       dispatch({ type: "pause" });
-    } catch (failure) {
-      setError(failure instanceof Error ? failure.message : "The highlight could not be deleted.");
+    } catch {
+      notify("Highlight could not be deleted");
     } finally {
       setDeleting(false);
     }
@@ -186,9 +184,8 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
           <View style={styles.cardShade} />
           <View style={styles.cardCopy}><Text numberOfLines={2} style={styles.title}>{highlight.title}</Text><Text style={styles.cardCount}>{highlight.slideCount} slide{highlight.slideCount === 1 ? "" : "s"}</Text></View>
         </Button>)}
-        {!listLoading && highlights.length === 0 && !error ? <Text style={styles.empty}>No highlights yet.</Text> : null}
+        {!listLoading && highlights.length === 0 ? <Text style={styles.empty}>No highlights yet.</Text> : null}
       </ScrollView>
-      {error ? <Text accessibilityLiveRegion="polite" style={styles.error}>{error}</Text> : null}
     </BottomSheet>
 
     <BottomSheet footer={playerFooter} height="full" onOpenChange={(next) => { if (!next) close(); }} open={open && Boolean(detail)} title={detail?.title ?? "Highlight"}>
@@ -236,5 +233,4 @@ const styles = StyleSheet.create({
   actionMenu: { gap: spacing.sm },
   compactActions: { gap: spacing.sm },
   empty: { width: "100%", paddingVertical: spacing.md, textAlign: "center", color: palette.silver500, fontFamily: fonts.regular, fontSize: 13 },
-  error: { paddingVertical: spacing.sm, color: palette.silver100, fontFamily: fonts.regular, fontSize: 13 },
 });

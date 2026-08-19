@@ -3,6 +3,7 @@ import { beforeEach, expect, mock, test } from "bun:test";
 const calls: { path: string; body: Record<string, unknown>; timeout?: number }[] = [];
 const responses = new Map<string, unknown>();
 const failures = new Map<string, { message: string; code?: string; transport?: boolean }>();
+const malformed = new Set<string>();
 
 mock.module("@/state/auth", () => ({
   useAuthStore: { getState: () => ({ user: { email: "recipient@example.com" }, organization: { key: "organization", membership_key: "membership" }, scope: { key: "scope" } }) },
@@ -10,6 +11,7 @@ mock.module("@/state/auth", () => ({
 mock.module("./api-client", () => ({
   apiClient: { post: async (path: string, body: Record<string, unknown>, options?: { timeout?: number }) => {
     calls.push({ path, body, timeout: options?.timeout });
+    if (malformed.has(path)) return { data: { success: false } };
     const failure = failures.get(path);
     if (failure?.transport) throw { response: { data: { success: false, error: { message: failure.message, code: failure.code } } } };
     if (failure) return { data: { success: false, error: { message: failure.message, code: failure.code } } };
@@ -35,7 +37,7 @@ mock.module("./api-client", () => ({
 
 const { activateGalleryShare, createGalleryCollection, createGalleryCollectionHighlight, createGalleryCollectionShareLink, deleteGalleryCollection, deleteGalleryCollectionDuplicates, deleteGalleryCollectionHighlight, deleteGalleryImages, deleteGallerySubject, fetchGalleryCollectionHighlight, fetchGalleryOverview, filterCollections, filterGalleryShareLinks, filterMediaItems, findGalleryCollectionDuplicates, groupGalleryImagesByCreatedDate, isGalleryClientErrorCode, isGalleryCollectionOwned, leaveGalleryCollection, listGalleryCollectionHighlights, listGalleryCollectionInvites, listGalleryCollectionMembers, listGalleryCollectionShareLinks, mergeMediaItems, partitionFavoriteGalleryImages, reconcileGalleryDuplicateDeletion, reconcileGalleryImageDeletion, removeGalleryCollectionMember, resolveGalleryHighlightSlides, respondToGalleryCollectionInvite, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryCollectionMember, updateGalleryCollectionShareLink, updateGalleryImage, uploadGalleryImages } = await import("./gallery-client");
 
-beforeEach(() => { calls.splice(0); responses.clear(); failures.clear(); });
+beforeEach(() => { calls.splice(0); responses.clear(); failures.clear(); malformed.clear(); });
 
 const collection = (name: string, key: string) => ({
   key,
@@ -211,6 +213,13 @@ test("preserves Gallery server error codes for direct and transport failures", a
   failures.set("/gallery/collections/delete", { message: "transport message", code: "GALLERY_COLLECTION_FAVORITE", transport: true });
   const transport = await deleteGalleryCollection("collection").catch((error: unknown) => error);
   expect(isGalleryClientErrorCode(transport, "GALLERY_COLLECTION_FAVORITE")).toBe(true);
+});
+
+test("normalizes malformed Gallery failures without reading a missing message", async () => {
+  malformed.add("/gallery/highlights/list");
+  const failure = await listGalleryCollectionHighlights("collection").catch((error: unknown) => error);
+  expect(failure).toBeInstanceOf(Error);
+  expect((failure as Error).message).toBe("Gallery request failed.");
 });
 
 test("returns authoritative favorite keys from image and duplicate deletion", async () => {

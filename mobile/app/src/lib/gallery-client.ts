@@ -187,8 +187,10 @@ export function isGalleryClientErrorCode(error: unknown, code: string) {
   return error instanceof GalleryClientError && error.code === code;
 }
 
-function galleryClientError(error: { message: string; code?: string }) {
-  return new GalleryClientError(error.message, error.code);
+function galleryClientError(error: unknown) {
+  const value = error && typeof error === "object" ? error as { message?: unknown; code?: unknown } : undefined;
+  const message = typeof value?.message === "string" && value.message.trim() ? value.message : "Gallery request failed.";
+  return new GalleryClientError(message, typeof value?.code === "string" ? value.code : undefined);
 }
 
 type GalleryContext = { organizationKey: string; scopeKey: string };
@@ -216,11 +218,13 @@ export function getGalleryMemberKey() {
 async function postGallery<T>(path: string, input: Record<string, unknown>, timeout = 60_000) {
   try {
     const response = await apiClient.post<ApiResponse<T>>(path, { ...getGalleryContext(), ...input }, { timeout });
-    if (!response.data.success) throw galleryClientError(response.data.error);
-    return response.data.data;
+    const payload = response.data as ApiResponse<T> | undefined;
+    if (!payload || typeof payload !== "object" || payload.success !== true) throw galleryClientError(payload && "error" in payload ? payload.error : undefined);
+    if (!("data" in payload)) throw galleryClientError(undefined);
+    return payload.data;
   } catch (error) {
-    const failure = (error as { response?: { data?: ApiResponse<T> } }).response?.data;
-    if (failure && !failure.success) throw galleryClientError(failure.error);
+    const failure = (error as { response?: { data?: unknown } }).response?.data;
+    if (failure && typeof failure === "object" && "success" in failure && failure.success === false) throw galleryClientError("error" in failure ? failure.error : undefined);
     throw error;
   }
 }
