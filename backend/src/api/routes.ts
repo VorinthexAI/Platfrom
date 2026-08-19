@@ -477,7 +477,7 @@ export function registerRoutes(app: Hono) {
   app.post('/gallery/subjects/delete', deleteGallerySubject);
   app.post('/gallery/subjects/restore', restoreGallerySubject);
   app.post('/gallery/highlights', createGalleryHighlight);
-  app.post('/gallery/highlights/list', listGalleryHighlights);
+  app.get('/gallery/highlights', listGalleryHighlights);
   app.post('/gallery/highlights/read', readGalleryHighlight);
   app.post('/gallery/highlights/delete', deleteGalleryHighlight);
   app.post('/travel/overview', travelHandlers.overview);

@@ -12,6 +12,7 @@ import { z } from 'zod';
 
 const trustedContextSchema = z.object({ organizationKey: z.string().trim().min(1), scopeKey: z.string().cuid() }).passthrough();
 const idempotencyKeySchema = z.string().trim().min(1).max(200);
+export const galleryHighlightListQuerySchema = z.object({ organizationKey: z.string().trim().min(1), scopeKey: z.string().cuid(), collectionKey: z.string().cuid() }).strict();
 
 async function context(c: Context, organizationKey: string, scopeKey: string): Promise<GalleryOperationContext> {
   const identity = await getAuthIdentity(c);
@@ -76,6 +77,15 @@ export const listGallerySubjectImages = handler('listSubjectImages');
 export const deleteGallerySubject = handler('deleteSubject');
 export const restoreGallerySubject = handler('restoreSubject');
 export const createGalleryHighlight = handler('createHighlight', 201);
-export const listGalleryHighlights = handler('listHighlights');
+export const listGalleryHighlights = async (c: Context) => {
+  try {
+    const { organizationKey, scopeKey, ...input } = galleryHighlightListQuerySchema.parse(c.req.query());
+    const data = await galleryOperations.listHighlights(input, await context(c, organizationKey, scopeKey));
+    return c.json({ success: true, data }, 200);
+  } catch (error) {
+    const normalized = normalizeGalleryOperationError(error);
+    return c.json({ success: false, error: { code: normalized.code, message: normalized.message } }, normalized.status);
+  }
+};
 export const readGalleryHighlight = handler('readHighlight');
 export const deleteGalleryHighlight = handler('deleteHighlight');

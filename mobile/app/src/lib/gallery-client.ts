@@ -245,7 +245,7 @@ export const GALLERY_COLLECTION_SHARING_ENDPOINTS = {
 
 export const GALLERY_COLLECTION_HIGHLIGHT_ENDPOINTS = {
   create: "/gallery/highlights",
-  list: "/gallery/highlights/list",
+  list: "/gallery/highlights",
   detail: "/gallery/highlights/read",
   delete: "/gallery/highlights/delete",
 } as const;
@@ -256,7 +256,11 @@ export function createGalleryCollectionHighlight(collectionKey: string) {
 }
 
 export function listGalleryCollectionHighlights(collectionKey: string) {
-  return postGallery<{ highlights: GalleryHighlightProjection[] }>(GALLERY_COLLECTION_HIGHLIGHT_ENDPOINTS.list, { collectionKey })
+  return apiClient.get<ApiResponse<{ highlights: GalleryHighlightProjection[] }>>(GALLERY_COLLECTION_HIGHLIGHT_ENDPOINTS.list, { params: { ...getGalleryContext(), collectionKey }, timeout: 60_000 })
+    .then(({ data }) => {
+      if (!data || data.success !== true || !("data" in data)) throw galleryClientError(data && "error" in data ? data.error : undefined);
+      return data.data;
+    })
     .then(({ highlights }) => ({ highlights: highlights.map(normalizeGalleryHighlight) }));
 }
 

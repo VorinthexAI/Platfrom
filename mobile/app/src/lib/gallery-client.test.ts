@@ -1,6 +1,6 @@
 import { beforeEach, expect, mock, test } from "bun:test";
 
-const calls: { path: string; body: Record<string, unknown>; timeout?: number }[] = [];
+const calls: { path: string; body: Record<string, unknown>; timeout?: number; method?: "GET" }[] = [];
 const responses = new Map<string, unknown>();
 const failures = new Map<string, { message: string; code?: string; transport?: boolean }>();
 const malformed = new Set<string>();
@@ -9,7 +9,13 @@ mock.module("@/state/auth", () => ({
   useAuthStore: { getState: () => ({ user: { email: "recipient@example.com" }, organization: { key: "organization", membership_key: "membership" }, scope: { key: "scope" } }) },
 }));
 mock.module("./api-client", () => ({
-  apiClient: { post: async (path: string, body: Record<string, unknown>, options?: { timeout?: number }) => {
+  apiClient: { get: async (path: string, options?: { params?: Record<string, unknown>; timeout?: number }) => {
+    const body = options?.params ?? {};
+    calls.push({ path, body, timeout: options?.timeout, method: "GET" });
+    if (malformed.has(path)) return { data: { success: false } };
+    const response = responses.get(`GET ${path}`);
+    return { data: { success: true, data: response } };
+  }, post: async (path: string, body: Record<string, unknown>, options?: { timeout?: number }) => {
     calls.push({ path, body, timeout: options?.timeout });
     if (malformed.has(path)) return { data: { success: false } };
     const failure = failures.get(path);
@@ -216,7 +222,7 @@ test("preserves Gallery server error codes for direct and transport failures", a
 });
 
 test("normalizes malformed Gallery failures without reading a missing message", async () => {
-  malformed.add("/gallery/highlights/list");
+  malformed.add("/gallery/highlights");
   const failure = await listGalleryCollectionHighlights("collection").catch((error: unknown) => error);
   expect(failure).toBeInstanceOf(Error);
   expect((failure as Error).message).toBe("Gallery request failed.");
@@ -338,7 +344,7 @@ test("deletes visual identities through the canonical Gallery mutation", async (
 test("creates, lists, and reads collection highlights through canonical operation routes", async () => {
   const projection = { key: "highlight", collectionKey: "collection", imageKeys: [], images: [], createdByKey: "membership", createdAt: "2026-08-18T00:00:00.000Z", updatedAt: "2026-08-18T00:00:00.000Z" };
   responses.set("/gallery/highlights", { highlight: projection });
-  responses.set("/gallery/highlights/list", { highlights: [projection] });
+  responses.set("GET /gallery/highlights", { highlights: [projection] });
   responses.set("/gallery/highlights/read", { highlight: projection });
   responses.set("/gallery/highlights/delete", { highlightKey: "highlight" });
 
@@ -346,11 +352,11 @@ test("creates, lists, and reads collection highlights through canonical operatio
   expect((await listGalleryCollectionHighlights("collection")).highlights[0]).toMatchObject({ key: "highlight", slideCount: 0 });
   expect((await fetchGalleryCollectionHighlight("highlight")).highlight.key).toBe("highlight");
   expect(await deleteGalleryCollectionHighlight("highlight")).toEqual({ highlightKey: "highlight" });
-  expect(calls.map(({ path, body, timeout }) => ({ path, body, timeout }))).toEqual([
-    { path: "/gallery/highlights", body: { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection" }, timeout: 60_000 },
-    { path: "/gallery/highlights/list", body: { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection" }, timeout: 60_000 },
-    { path: "/gallery/highlights/read", body: { organizationKey: "organization", scopeKey: "scope", highlightKey: "highlight" }, timeout: 60_000 },
-    { path: "/gallery/highlights/delete", body: { organizationKey: "organization", scopeKey: "scope", highlightKey: "highlight" }, timeout: 60_000 },
+  expect(calls.map(({ path, body, timeout, method }) => ({ path, body, timeout, method }))).toEqual([
+    { path: "/gallery/highlights", body: { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection" }, timeout: 60_000, method: undefined },
+    { path: "/gallery/highlights", body: { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection" }, timeout: 60_000, method: "GET" },
+    { path: "/gallery/highlights/read", body: { organizationKey: "organization", scopeKey: "scope", highlightKey: "highlight" }, timeout: 60_000, method: undefined },
+    { path: "/gallery/highlights/delete", body: { organizationKey: "organization", scopeKey: "scope", highlightKey: "highlight" }, timeout: 60_000, method: undefined },
   ]);
 });
 

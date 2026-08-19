@@ -31,6 +31,7 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
   const notify = (title: string) => showToast({ title, duration: 2_000 });
   const galleryContext = getGalleryContext();
   const { width } = useWindowDimensions();
+  const [gridWidth, setGridWidth] = useState(0);
   const [highlights, setHighlights] = useState<GalleryHighlight[]>([]);
   const [detail, setDetail] = useState<GalleryHighlightDetail>();
   const [listLoading, setListLoading] = useState(false);
@@ -47,15 +48,16 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
   const cubeDirection = useSharedValue(1);
   const reducedMotion = useReducedMotion();
   const owner = isGalleryCollectionOwned(collection);
-  const cardWidth = Math.floor((width - spacing.md * 2 - GAP * (COLUMNS - 1)) / COLUMNS);
+  const cardWidth = Math.floor(((gridWidth || width - 40) - GAP * (COLUMNS - 1)) / COLUMNS);
   const slides = detail ? resolveGalleryHighlightSlides(detail) : [];
   const activeSlide = slides[playback.index];
   const listEmpty = !creating && !listLoading && highlights.length === 0;
 
-  async function loadList() {
+  async function loadList(invalidate = false) {
     const generation = ++request.current;
     if (!listLoaded.current) setListLoading(true);
     try {
+      if (invalidate) await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.highlights(galleryContext, collection.key), exact: true, refetchType: "none" });
       const result = await queryClient.fetchQuery({ queryKey: galleryQueryKeys.highlights(galleryContext, collection.key), queryFn: () => listGalleryCollectionHighlights(collection.key), staleTime: 0 });
       if (generation === request.current) setHighlights(result.highlights);
     } catch {
@@ -89,14 +91,18 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
   async function createHighlight() {
     if (!owner) return;
     const generation = ++createRequest.current;
+    const skeletonUntil = Date.now() + 300;
+    const finishSkeleton = () => new Promise((resolve) => setTimeout(resolve, Math.max(0, skeletonUntil - Date.now())));
     setCreating(true);
     try {
       const { highlight } = await createGalleryCollectionHighlight(collection.key);
+      await finishSkeleton();
       if (generation !== createRequest.current) return;
       setHighlights((current) => [highlight, ...current.filter(({ key }) => key !== highlight.key)]);
       queryClient.setQueryData(galleryQueryKeys.highlight(galleryContext, collection.key, highlight.key), { highlight });
       await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.highlights(galleryContext, collection.key), exact: true, refetchType: "none" });
     } catch {
+      await finishSkeleton();
       if (generation === createRequest.current) notify("Highlight could not be created");
     } finally {
       if (generation === createRequest.current) setCreating(false);
@@ -124,7 +130,7 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
 
   useEffect(() => {
     if (!open) { request.current += 1; return; }
-    const timer = setTimeout(() => void loadList(), 0);
+    const timer = setTimeout(() => void loadList(true), 0);
     return () => clearTimeout(timer);
     // Opening or changing collections is the operation boundary; queryClient is stable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -143,7 +149,7 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
   }, [open]);
 
   useEffect(() => subscribeAppEvent((event) => {
-    if (!open || deleting || event.type === "gallery.changed" && !["highlight.changed", "image.changed", "collection.content.changed"].includes(event.slug)) return;
+    if (!open || deleting || event.type !== "gallery.changed" || !["highlight.changed", "image.changed", "collection.content.changed"].includes(event.slug)) return;
     if (detail) void openHighlight(detail);
     else void loadList();
     // Event handlers intentionally reopen the latest key; operation functions are render-local.
@@ -178,7 +184,7 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
 
   return <>
     <BottomSheet footer={listFooter} height="full" onOpenChange={(next) => { if (!next) close(); }} open={open && !detail} title="Highlights">
-      <ScrollView contentContainerStyle={[styles.grid, listEmpty && styles.emptyGrid]} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={[styles.grid, listEmpty && styles.emptyGrid]} onLayout={({ nativeEvent }) => setGridWidth(nativeEvent.layout.width)} showsVerticalScrollIndicator={false}>
         {creating ? <View accessibilityLabel="Creating highlight" accessibilityRole="progressbar"><Skeleton style={[styles.creatingCard, { width: cardWidth, height: cardWidth * 16 / 9 }]} /></View> : null}
         {listLoading ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={{ width: cardWidth, height: cardWidth * 16 / 9 }} />) : highlights.map((highlight) => <Button accessibilityLabel={`${highlight.title}, ${highlight.slideCount} slides`} contentMode="raw" disabled={opening} key={highlight.key} onPress={() => void openHighlight(highlight)} shape="rounded" size="xl" style={[styles.card, { width: cardWidth, height: cardWidth * 16 / 9 }]} variant="ghost">
           {highlight.coverUrl ? <Image contentFit="cover" source={highlight.coverUrl} style={StyleSheet.absoluteFill} transition={180} /> : null}

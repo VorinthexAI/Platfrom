@@ -19,12 +19,17 @@ test("uses separate full-height grid and player sheets with footer actions", () 
   expect(highlights).toContain('variant="primary">Create</Button>');
   expect(highlights).toContain('variant="secondary">Close</Button>');
   expect(highlights).toContain('accessibilityLabel="Creating highlight"');
+  expect(highlights).toContain('const skeletonUntil = Date.now() + 300');
+  expect(highlights).toContain('await finishSkeleton()');
   expect(highlights).toContain("useToast()");
   expect(highlights).toContain('notify("Highlights could not be loaded")');
+  expect(highlights).toContain('void loadList(true)');
+  expect(highlights).toContain('invalidateQueries({ queryKey: galleryQueryKeys.highlights(galleryContext, collection.key), exact: true, refetchType: "none" })');
   expect(highlights).not.toContain('style={styles.error}');
   expect(highlights).toContain('contentContainerStyle={[styles.grid, listEmpty && styles.emptyGrid]}');
   expect(highlights).toContain('emptyGrid: { flexGrow: 1, alignItems: "center", justifyContent: "center" }');
-  expect(highlights).toContain('const cardWidth = Math.floor((width - spacing.md * 2 - GAP * (COLUMNS - 1)) / COLUMNS)');
+  expect(highlights).toContain('const cardWidth = Math.floor(((gridWidth || width - 40) - GAP * (COLUMNS - 1)) / COLUMNS)');
+  expect(highlights).toContain('onLayout={({ nativeEvent }) => setGridWidth(nativeEvent.layout.width)}');
   expect(highlights).toContain('height: cardWidth * 16 / 9');
   expect(highlights).toContain('<Button accessibilityLabel="Previous slide"');
   expect(highlights).toContain("<ChevronLeftIcon />");
@@ -72,12 +77,14 @@ test("matches the backend highlight operation routes and event cache family", ()
   const convergence = readFileSync(join(import.meta.dir, "gallery-convergence.ts"), "utf8");
   const bridge = readFileSync(join(import.meta.dir, "event-bridge.tsx"), "utf8");
   expect(client).toContain('create: "/gallery/highlights"');
-  expect(client).toContain('list: "/gallery/highlights/list"');
+  expect(client).toContain('list: "/gallery/highlights"');
+  expect(client).toContain('apiClient.get<ApiResponse<{ highlights: GalleryHighlightProjection[] }>>');
   expect(client).toContain('detail: "/gallery/highlights/read"');
   expect(client).toContain('delete: "/gallery/highlights/delete"');
   expect(convergence).toContain('"highlight.changed": ["highlights"]');
   expect(bridge).toContain('families.has("highlights")');
   expect(highlights).toContain('["highlight.changed", "image.changed", "collection.content.changed"].includes(event.slug)');
+  expect(highlights).toContain('event.type !== "gallery.changed"');
   expect(highlights).toContain('if (detail) void openHighlight(detail)');
 });
 
