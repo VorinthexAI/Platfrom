@@ -46,6 +46,33 @@ export type Place = z.infer<typeof placeSchema>;
 export type ItineraryPlace = z.infer<typeof itineraryPlaceSchema>;
 export type Trip = z.infer<typeof tripSchema>;
 
+export const placeDetailSchema = z.strictObject({
+  location: z.strictObject({
+    kind: z.enum(["country", "place"]),
+    name: z.string().trim().min(1).max(160),
+    countryCode: z.string().regex(/^[A-Z]{2}$/),
+    country: z.string().trim().min(1).max(160),
+    continent: z.string().trim().min(1).max(80),
+    region: z.string().trim().min(1).max(160).nullable(),
+    city: z.string().trim().min(1).max(160).nullable(),
+    latitude: z.number().finite().min(-90).max(90),
+    longitude: z.number().finite().min(-180).max(180),
+  }),
+  title: z.string().trim().min(1).max(160),
+  summary: z.string().trim().min(1).max(1_500),
+  facts: z.array(z.strictObject({ label: z.string().trim().min(1).max(80), value: z.string().trim().min(1).max(300) })).min(3).max(10),
+  highlights: z.array(z.strictObject({ title: z.string().trim().min(1).max(120), description: z.string().trim().min(1).max(500) })).min(1).max(8),
+  practicalInfo: z.strictObject({
+    bestTimeToVisit: z.string().trim().min(1).max(500),
+    languages: z.array(z.string().trim().min(1).max(80)).min(1).max(8),
+    currency: z.string().trim().min(1).max(120),
+    timeZone: z.string().trim().min(1).max(120),
+    safety: z.string().trim().min(1).max(600),
+    entryRequirements: z.string().trim().min(1).max(800),
+  }),
+});
+export type PlaceDetail = z.infer<typeof placeDetailSchema>;
+
 const overviewSchema = z.object({ places: z.array(placeSchema), trips: z.array(tripSchema) });
 const assistantResponseSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("answer"), message: z.string().min(1), sources: z.array(z.object({ documentKey: keySchema, name: z.string().min(1) })), changes: assistantChangesSchema }),
@@ -99,8 +126,8 @@ export function getTravelContext() {
 
 function unwrap<T>(value: unknown, schema: z.ZodType<T>): T {
   const response = z.discriminatedUnion("success", [
-    z.object({ success: z.literal(true), data: schema }),
-    z.object({ success: z.literal(false), error: z.object({ message: z.string().min(1) }) }),
+    z.strictObject({ success: z.literal(true), data: schema }),
+    z.strictObject({ success: z.literal(false), error: z.strictObject({ message: z.string().min(1) }) }),
   ]).parse(value);
   if (!response.success) throw new Error(response.error.message);
   return response.data;
@@ -133,6 +160,14 @@ async function remove<T>(path: string, schema: z.ZodType<T>) {
 
 export function fetchTravelOverview() {
   return post("/travel/overview", {}, overviewSchema);
+}
+
+export function findPlace(query: string) {
+  return post(
+    "/travel/places/find",
+    z.strictObject({ query: z.string().trim().min(2).max(200) }).parse({ query }),
+    z.strictObject({ place: placeDetailSchema }),
+  ).then(({ place }) => place);
 }
 
 export function createPlace(input: z.input<typeof createPlaceSchema>) {

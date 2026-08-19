@@ -14,7 +14,7 @@ const domain = {
 
 const expected: Array<[AssistantSurface, string[]]> = [
   ['knowledge-workspace', ['content.hidden.list', 'folder.hide', 'folder.reveal', 'document.hide', 'document.reveal', 'folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy', 'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.summary.audio.generate', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.enhance', 'document.translate', 'document.list-versions', 'document.restore-version', 'document.download', 'content.neighbors', 'content.search-history.delete', 'knowledge.search', 'note.write']],
-  ['travel-workspace', ['place.list', 'place.create', 'place.visit.create', 'trip.create', 'trip.place.add', 'trip.place.remove']],
+  ['travel-workspace', ['place.list', 'place.find', 'place.create', 'place.visit.create', 'trip.create', 'trip.place.add', 'trip.place.remove']],
   ['signal-workspace', ['email.overview', 'email.sync', 'email.thread.read', 'email.thread.mark-read', 'email.thread.favorite', 'email.draft.create', 'email.draft.update', 'email.draft.send', 'email.disconnect']],
   ['book-workspace', ['book.list', 'book.detail', 'book.chapter.progress', 'book.create']],
 ];
@@ -42,6 +42,7 @@ describe('personal assistant service capabilities', () => {
     const calls: unknown[] = [];
     const travel: any = {
       overview: async (...args: unknown[]) => { calls.push(['travel.overview', ...args]); return {}; },
+      findPlace: async (...args: unknown[]) => { calls.push(['travel.findPlace', ...args]); return {}; },
       createPlace: async (...args: unknown[]) => { calls.push(['travel.createPlace', ...args]); return {}; },
       createVisit: async (...args: unknown[]) => { calls.push(['travel.createVisit', ...args]); return {}; },
       createTrip: async (...args: unknown[]) => { calls.push(['travel.createTrip', ...args]); return {}; },
@@ -68,6 +69,7 @@ describe('personal assistant service capabilities', () => {
     const context: any = { domain, requestKey: 'request-1', travel, email, books };
     const cases: Array<[AssistantSurface, string, unknown]> = [
       ['travel-workspace', 'place.list', {}],
+      ['travel-workspace', 'place.find', { query: 'Lisbon' }],
       ['travel-workspace', 'place.create', { name: 'Lisbon', latitude: 38.72, longitude: -9.14, countryCode: 'PT' }],
       ['travel-workspace', 'place.visit.create', { placeKey }],
       ['travel-workspace', 'trip.create', { name: 'Portugal' }],
@@ -91,6 +93,7 @@ describe('personal assistant service capabilities', () => {
     const serviceContext = { organizationKey, scopeKey };
     const actor = { userKey, ...serviceContext };
     expect(calls).toContainEqual(['travel.overview', serviceContext, userKey]);
+    expect(calls).toContainEqual(['travel.findPlace', { ...serviceContext, query: 'Lisbon' }, userKey, { signal: undefined, timeoutMs: undefined }]);
     expect(calls).toContainEqual(['email.overview', actor, {}]);
     expect(calls).toContainEqual(['email.threadForTool', actor, threadKey, undefined]);
     expect(calls).toContainEqual(['email.markRead', actor, threadKey]);

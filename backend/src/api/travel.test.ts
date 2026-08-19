@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { Hono } from 'hono';
 import { newId } from '@/lib/ids';
+import { ProviderExecutionError } from '@/lib/ai/router/errors';
+import { TravelPlaceLookupError } from '@/lib/travel/service';
 import { createTravelHandlers } from './travel';
 import { registerRoutes } from './routes';
 
@@ -27,11 +29,43 @@ describe('travel HTTP handlers', () => {
     expect(await response.json()).toMatchObject({ success: false, error: { code: 'TRAVEL_INVALID_INPUT' } });
   });
 
+  test('routes place.find to the canonical service with trusted user identity and cancellation', async () => {
+    const calls: unknown[][] = [];
+    const service = { findPlace: async (...args: unknown[]) => { calls.push(args); return { place: { title: 'Japan' } }; } } as never;
+    const app = new Hono();
+    app.post('/travel/places/find', createTravelHandlers({ service, getIdentity: async () => ({ key: 'trusted-user', identityType: 'user' }) }).findPlace);
+    const body = { organizationKey: 'organization', scopeKey: newId(), query: 'Japan' };
+    const response = await app.request('/travel/places/find', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ success: true, data: { place: { title: 'Japan' } } });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.slice(0, 2)).toEqual([body, 'trusted-user']);
+    expect((calls[0]?.[2] as { signal?: AbortSignal }).signal).toBeInstanceOf(AbortSignal);
+  });
+
+  test('maps transient place lookup failures to retryable HTTP responses', async () => {
+    const service = { findPlace: async () => { throw new ProviderExecutionError('ask', [{ modelId: 'model', providerId: 'openrouter', externalModelId: 'model', code: 'timeout', message: 'timed out' }]); } } as never;
+    const app = new Hono();
+    app.post('/travel/places/find', createTravelHandlers({ service, getIdentity: async () => ({ key: 'trusted-user', identityType: 'user' }) }).findPlace);
+    const response = await app.request('/travel/places/find', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey: 'organization', scopeKey: newId(), query: 'Japan' }) });
+    expect(response.status).toBe(504);
+    expect(await response.json()).toMatchObject({ success: false, error: { code: 'TRAVEL_LOOKUP_TIMEOUT' } });
+  });
+
+  test('maps malformed place model output to a safe upstream response error', async () => {
+    const service = { findPlace: async () => { throw new TravelPlaceLookupError('malformed'); } } as never;
+    const app = new Hono();
+    app.post('/travel/places/find', createTravelHandlers({ service, getIdentity: async () => ({ key: 'trusted-user', identityType: 'user' }) }).findPlace);
+    const response = await app.request('/travel/places/find', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey: 'organization', scopeKey: newId(), query: 'Japan' }) });
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({ success: false, error: { code: 'TRAVEL_INVALID_PROVIDER_RESPONSE' } });
+  });
+
   test('registers every travel route', async () => {
     const app = new Hono();
     registerRoutes(app);
     const requests: Array<[string, string]> = [
-      ['POST', '/travel/overview'], ['POST', '/travel/places'], ['POST', `/travel/places/${newId()}/visits`], ['POST', '/travel/trips'], ['POST', `/travel/trips/${newId()}/places`], ['DELETE', `/travel/trips/${newId()}/places/${newId()}`],
+      ['POST', '/travel/overview'], ['POST', '/travel/places/find'], ['POST', '/travel/places'], ['POST', `/travel/places/${newId()}/visits`], ['POST', '/travel/trips'], ['POST', `/travel/trips/${newId()}/places`], ['DELETE', `/travel/trips/${newId()}/places/${newId()}`],
     ];
     for (const [method, path] of requests) {
       const response = await app.request(path, { method, headers: { 'content-type': 'application/json' }, body: '{}' });

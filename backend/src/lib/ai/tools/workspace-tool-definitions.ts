@@ -24,6 +24,8 @@ export interface WorkspaceToolDependencies {
   books?: BookService;
   userHiddens?: UserHiddenService;
   gallery?: AssistantCapabilityContext['gallery'];
+  signal?: AbortSignal;
+  timeoutMs?: number;
 }
 
 function publicDefinition(capability: AssistantCapability) {
@@ -43,6 +45,8 @@ function publicDefinition(capability: AssistantCapability) {
         books: dependencies.books,
         userHiddens: dependencies.userHiddens,
         gallery: dependencies.gallery,
+        signal: dependencies.signal,
+        timeoutMs: dependencies.timeoutMs,
       };
       const result = await capability.execute(rawInput, context);
       if (result.kind !== 'continue') throw new Error(`Public workspace tool ${capability.definition.name} returned a UI-only result.`);

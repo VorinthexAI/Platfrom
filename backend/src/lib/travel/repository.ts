@@ -68,6 +68,7 @@ export class TravelRepositoryError extends Error {
 }
 
 export interface TravelRepository {
+  authorizeRead(context: TravelAccessContext): Promise<void>;
   authorizeWrite(context: TravelAccessContext): Promise<void>;
   findCountry(context: TravelAccessContext, countryCode: string): Promise<Place | null>;
   overview(context: TravelAccessContext): Promise<TravelOverviewRow>;
@@ -80,6 +81,9 @@ export interface TravelRepository {
 
 export function createTravelRepository(database: TravelDatabase = db, runTransaction: TransactionRunner = defaultTransactionRunner): TravelRepository {
   return {
+    authorizeRead(context) {
+      return authorizeRead(database, context);
+    },
     authorizeWrite(context) {
       return authorize(database, context);
     },

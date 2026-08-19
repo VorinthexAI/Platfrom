@@ -4,7 +4,7 @@ import { placeSchema } from '@/lib/db/places.node';
 import { tripSchema } from '@/lib/db/trips.node';
 import { tripPlaceSchema } from '@/lib/db/trip-places.node';
 import { createTravelRepository, hasTravelWriteAccess, TravelRepositoryError, type TravelAccessContext, type TravelDatabase, type TravelRepository } from './repository';
-import { createTravelService, placeDto, travelPlaceInputSchema, travelTripInputSchema, travelTripPlaceInputSchema, travelVisitInputSchema, tripDto } from './service';
+import { createTravelService, placeDto, travelPlaceDetailSchema, travelPlaceFindInputSchema, travelPlaceInputSchema, travelTripInputSchema, travelTripPlaceInputSchema, travelVisitInputSchema, tripDto } from './service';
 
 const key = 'cmrnlzf650002qc7k4p5zem5w';
 const otherKey = 'cmrnlzf640001qc7kazsr96k5';
@@ -13,6 +13,13 @@ const timestamp = '2026-08-11T12:00:00.000Z';
 const embedding = Array(EMBEDDING_DIMENSIONS).fill(0.1);
 const place = placeSchema.parse({ key, scopeKey: otherKey, kind: 'place', name: 'Tokyo', latitude: 35.6, longitude: 139.6, countryCode: 'JP', isWishlist: true, embedding, createdAt: timestamp, updatedAt: timestamp });
 const trip = tripSchema.parse({ key: thirdKey, scopeKey: otherKey, name: 'Japan', embedding, createdAt: timestamp, updatedAt: timestamp });
+const detail = travelPlaceDetailSchema.parse({
+  location: { kind: 'country', name: 'Japan', countryCode: 'JP', country: 'Japan', continent: 'Asia', region: null, city: null, latitude: 36.2048, longitude: 138.2529 },
+  title: 'Japan', summary: 'An island country in East Asia.',
+  facts: [{ label: 'Capital', value: 'Tokyo' }, { label: 'Population', value: 'About 124 million' }, { label: 'Government', value: 'Constitutional monarchy' }],
+  highlights: [{ title: 'Kyoto', description: 'Historic temples and traditional neighborhoods.' }],
+  practicalInfo: { bestTimeToVisit: 'Spring and autumn are generally mild.', languages: ['Japanese'], currency: 'Japanese yen (JPY)', timeZone: 'Japan Standard Time (UTC+9)', safety: 'Review current official travel advice.', entryRequirements: 'Verify current requirements with official authorities before travel.' },
+});
 
 describe('travel contracts', () => {
   test('strictly rejects unknown body fields and invalid date ranges', () => {
@@ -22,6 +29,9 @@ describe('travel contracts', () => {
     expect(travelVisitInputSchema.safeParse({ ...context, arrivedAt: '2026-08-12', departedAt: '2026-08-11' }).success).toBe(false);
     expect(travelTripInputSchema.safeParse({ ...context, name: 'Invalid', startDate: '2026-08-12', endDate: '2026-08-11' }).success).toBe(false);
     expect(travelTripPlaceInputSchema.safeParse({ ...context, placeKey: key, arrivalDate: '2026-08-12', departureDate: '2026-08-11' }).success).toBe(false);
+    expect(travelPlaceFindInputSchema.safeParse({ ...context, query: 'Japan', userKey: 'untrusted' }).success).toBe(false);
+    expect(travelPlaceDetailSchema.safeParse({ ...detail, extra: true }).success).toBe(false);
+    expect(travelPlaceDetailSchema.safeParse({ ...detail, location: { ...detail.location, countryCode: 'Japan' } }).success).toBe(false);
   });
 
   test('allows elevated organization roles or writable active scope roles only', () => {
@@ -59,6 +69,40 @@ describe('travel contracts', () => {
     await expect(service.createPlace({ organizationKey: 'organization', scopeKey: otherKey, kind: 'country', name: 'Japan', latitude: 36, longitude: 138, countryCode: 'JP' }, 'user')).rejects.toMatchObject({ reason: 'forbidden' });
     expect(embeddingCalls).toBe(0);
   });
+
+  test('authorizes before one pinned bounded ask call and parses fenced JSON', async () => {
+    const calls: unknown[][] = [];
+    const controller = new AbortController();
+    let authorized = false;
+    const repository = { authorizeRead: async (context: TravelAccessContext) => { calls.push(['authorize', context]); authorized = true; } } as unknown as TravelRepository;
+    const execute: any = async (...args: unknown[]) => {
+      expect(authorized).toBe(true);
+      calls.push(['execute', ...args]);
+      return { output: { text: `Result:\n\`\`\`json\n${JSON.stringify(detail)}\n\`\`\``, toolCalls: [], stopReason: 'stop' } };
+    };
+    const service = createTravelService({ repository, execute });
+    await expect(service.findPlace({ organizationKey: 'organization', scopeKey: otherKey, query: ' Japan ' }, 'secret-user-key', { signal: controller.signal, timeoutMs: 2_000 })).resolves.toEqual({ place: detail });
+    expect(calls[0]).toEqual(['authorize', { organizationKey: 'organization', scopeKey: otherKey, userKey: 'secret-user-key' }]);
+    expect(calls).toHaveLength(2);
+    expect(calls[1]?.[1]).toEqual({ mode: 'model', organizationKey: 'organization', actionSlug: 'ask', modelSlug: 'google.gemini-2.5-flash-lite' });
+    expect(calls[1]?.[3]).toEqual({ signal: controller.signal, timeoutMs: 2_000 });
+    expect(JSON.stringify(calls[1]?.[2])).not.toContain('organization');
+    expect(JSON.stringify(calls[1]?.[2])).not.toContain(otherKey);
+    expect(JSON.stringify(calls[1]?.[2])).not.toContain('secret-user-key');
+  });
+
+  test('does not call the model when read access is denied and rejects malformed or extra model output', async () => {
+    let calls = 0;
+    const denied = createTravelService({ repository: { authorizeRead: async () => { throw new TravelRepositoryError('forbidden'); } } as unknown as TravelRepository, execute: (async () => { calls += 1; }) as any });
+    await expect(denied.findPlace({ organizationKey: 'organization', scopeKey: otherKey, query: 'Japan' }, 'user')).rejects.toMatchObject({ reason: 'forbidden' });
+    expect(calls).toBe(0);
+
+    const repository = { authorizeRead: async () => undefined } as unknown as TravelRepository;
+    for (const text of ['not json', JSON.stringify({ ...detail, unexpected: true })]) {
+      const service = createTravelService({ repository, execute: (async () => ({ output: { text, toolCalls: [], stopReason: 'stop' } })) as any });
+      await expect(service.findPlace({ organizationKey: 'organization', scopeKey: otherKey, query: 'Japan' }, 'user')).rejects.toThrow('malformed structured output');
+    }
+  });
 });
 
 describe('travel repository atomic itinerary changes', () => {
@@ -86,5 +130,12 @@ describe('travel repository atomic itinerary changes', () => {
     const database: TravelDatabase = { async query() { return { async all() { return []; } }; } };
     const repository = createTravelRepository(database, async (_collections, operation) => operation(database));
     await expect(repository.createPlace({ organizationKey: 'organization', scopeKey: otherKey, userKey: 'user' }, place)).rejects.toBeInstanceOf(TravelRepositoryError);
+  });
+
+  test('exposes read authorization for active viewers and denies absent membership', async () => {
+    const allowed: TravelDatabase = { async query(query) { return { async all() { return query.includes('RETURN membership._key') ? ['membership'] : []; } }; } };
+    await expect(createTravelRepository(allowed).authorizeRead({ organizationKey: 'organization', scopeKey: otherKey, userKey: 'user' })).resolves.toBeUndefined();
+    const denied: TravelDatabase = { async query() { return { async all() { return []; } }; } };
+    await expect(createTravelRepository(denied).authorizeRead({ organizationKey: 'organization', scopeKey: otherKey, userKey: 'user' })).rejects.toMatchObject({ reason: 'forbidden' });
   });
 });

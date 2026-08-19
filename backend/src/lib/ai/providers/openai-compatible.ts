@@ -41,11 +41,29 @@ export function buildChatCompletionParams(
   if (input.systemPrompt) messages.push({ role: 'system', content: input.systemPrompt });
   for (const message of input.messages) {
     const text = message.content.filter((part) => part.type === 'text').map((part) => part.text).join('\n');
-    if (!text || message.content.some((part) => part.type !== 'text')) throw new ProviderError('openai', 'unsupported_action', 'This provider adapter does not support non-text core.chat content');
+    const toolCalls = message.content.filter((part) => part.type === 'tool-call');
+    const toolResults = message.content.filter((part) => part.type === 'tool-result');
+    const hasUnsupportedContent = message.content.some((part) => part.type === 'audio');
+    if (hasUnsupportedContent) throw new ProviderError('openai', 'unsupported_action', 'This provider adapter does not support audio core.chat content');
+    if (message.role === 'assistant' && toolCalls.length > 0) {
+      if (toolResults.length > 0) throw new ProviderError('openai', 'invalid_input', 'Assistant messages cannot contain tool results');
+      messages.push({
+        role: 'assistant',
+        content: text || null,
+        tool_calls: toolCalls.map((part) => ({
+          id: part.toolCallId,
+          type: 'function' as const,
+          function: { name: part.name, arguments: JSON.stringify(part.arguments) ?? 'null' },
+        })),
+      });
+      continue;
+    }
     if (message.role === 'tool') {
-      if (!message.toolCallId) throw new ProviderError('openai', 'response_invalid', 'core.chat tool messages require toolCallId');
-      messages.push({ role: 'tool', tool_call_id: message.toolCallId, content: text });
+      const result = toolResults[0];
+      if (toolResults.length !== 1 || toolCalls.length > 0 || text) throw new ProviderError('openai', 'invalid_input', 'Tool messages require exactly one tool result');
+      messages.push({ role: 'tool', tool_call_id: result!.toolCallId, content: JSON.stringify(result!.result) ?? 'null' });
     } else {
+      if (!text || toolCalls.length > 0 || toolResults.length > 0) throw new ProviderError('openai', 'unsupported_action', 'This provider adapter does not support this core.chat message content');
       messages.push({ role: message.role, content: text });
     }
   }

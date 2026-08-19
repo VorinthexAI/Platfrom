@@ -7,9 +7,9 @@ describe('unified tool registry', () => {
   test('has one unique definition for every public tool name', () => {
     expect(new Set(TOOL_NAMES).size).toBe(TOOL_NAMES.length);
     expect(new Set(TOOL_DEFINITIONS.map(({ name }) => name)).size).toBe(TOOL_DEFINITIONS.length);
-    expect(TOOL_NAMES).toHaveLength(113);
-    expect(TOOL_DEFINITIONS).toHaveLength(113);
-    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 67);
+    expect(TOOL_NAMES).toHaveLength(114);
+    expect(TOOL_DEFINITIONS).toHaveLength(114);
+    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 68);
     expect(TOOL_DEFINITIONS.map(({ name }) => name)).toEqual([...TOOL_NAMES]);
     expect(TOOL_NAMES).not.toContain('chat');
     expect(TOOL_NAMES).not.toContain('orchestrator.chat');
@@ -42,6 +42,7 @@ describe('unified tool registry', () => {
       expect(toolInputSchemas).not.toHaveProperty(name);
     }
     expect(TOOL_NAMES).toContain('trip.create');
+    expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'place.find')).toHaveLength(1);
     expect(TOOL_NAMES).toContain('email.draft.send');
     expect(TOOL_NAMES).toEqual(expect.arrayContaining(['content.hidden.list', 'book.create', 'email.thread.read', 'email.thread.mark-read']));
     expect(TOOL_NAMES).not.toContain('book.create-context');
@@ -85,6 +86,17 @@ describe('unified tool registry', () => {
     await runTool('trip.create', '', { name: 'Portugal' }, { contentContext, travelService });
     expect(calls).toEqual([[{ organizationKey, scopeKey, name: 'Portugal' }, userKey]]);
     expect(() => toolInputSchemas['collection.create'].parse({ name: 'Favorites', organizationKey })).toThrow('Unrecognized key');
+  });
+
+  test('executes place.find through the same canonical service with strict model input', async () => {
+    const organizationKey = newId(), scopeKey = newId(), userKey = newId();
+    const contentContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const calls: unknown[][] = [];
+    const travelService = { findPlace: async (...args: unknown[]) => { calls.push(args); return { place: { title: 'Japan' } }; } } as any;
+    await expect(runTool('place.find', '', { query: 'Japan', scopeKey }, { contentContext, travelService })).rejects.toThrow('Unrecognized key');
+    const result = await runTool('place.find', '', { query: 'Japan' }, { contentContext, travelService, timeoutMs: 2_000 });
+    expect(result).toEqual({ place: { title: 'Japan' } });
+    expect(calls).toEqual([[{ organizationKey, scopeKey, query: 'Japan' }, userKey, { signal: undefined, timeoutMs: 2_000 }]]);
   });
 
   test('injects trusted Content scope and organization into public tools', async () => {

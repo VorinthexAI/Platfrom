@@ -64,6 +64,8 @@ export async function runTool(name: string, skill: string, rawInput: unknown, de
     books: dependencies.bookService,
     userHiddens: dependencies.userHiddenService,
     gallery: dependencies.gallery,
+    signal: dependencies.signal,
+    timeoutMs: dependencies.timeoutMs,
     content: {
       adapters: dependencies.adapters,
       credentials: dependencies.credentials,

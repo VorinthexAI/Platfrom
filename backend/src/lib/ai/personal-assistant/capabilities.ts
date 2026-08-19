@@ -25,6 +25,8 @@ export type AssistantCapabilityResult =
   | { kind: 'note'; content: string; message: string };
 
 export interface AssistantCapabilityContext {
+  signal?: AbortSignal;
+  timeoutMs?: number;
   currentDocumentKey?: string;
   currentNote?: { content: string; selection?: { start: number; end: number } };
   domain: ToolContext;

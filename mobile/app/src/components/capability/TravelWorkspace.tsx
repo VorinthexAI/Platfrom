@@ -7,6 +7,7 @@ import { BottomSheet, BottomSheetItem } from "@vorinthex/shared/ui/bottom-sheet"
 import { Button } from "@vorinthex/shared/ui/button";
 import { CoreComposer } from "@vorinthex/shared/ui/core-composer";
 import { CalendarIcon, CheckIcon, GlobeIcon, LocationPinIcon, PlusIcon, SearchIcon, SendIcon, TrashIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { Skeleton } from "@vorinthex/shared/ui/skeleton";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 
 import { WorkspaceAppSwitcher } from "@/components/capability/WorkspaceAppSwitcher";
@@ -20,11 +21,13 @@ import {
   createPlace,
   createTrip,
   fetchTravelOverview,
+  findPlace,
   getTravelContext,
   markPlaceVisited,
   removePlaceFromTrip,
   tripContainsPlace,
   type Place,
+  type PlaceDetail,
   type Trip,
 } from "@/lib/travel-client";
 import { getContentContext } from "@/lib/content-client";
@@ -39,7 +42,7 @@ export type CountrySelection = {
   longitude: number;
 };
 
-type WorkspaceSheet = "actions" | "explore" | "newTrip" | "chooseTrip" | "trips" | "confirmRemove";
+type WorkspaceSheet = "actions" | "countryDetail" | "explore" | "newTrip" | "chooseTrip" | "trips" | "confirmRemove";
 const CORE_PROMPTS = [
   "Plan a quiet week in Kyoto",
   "Build a route through Portugal",
@@ -64,6 +67,9 @@ export function TravelWorkspace() {
   const [trips, setTrips] = useState<Trip[]>([]);
   const [selectedCountry, setSelectedCountry] = useState<CountrySelection>();
   const [selectedPlace, setSelectedPlace] = useState<Place>();
+  const [countryDetail, setCountryDetail] = useState<PlaceDetail>();
+  const [countryDetailLoading, setCountryDetailLoading] = useState(false);
+  const [countryDetailError, setCountryDetailError] = useState<string>();
   const [selectedTrip, setSelectedTrip] = useState<Trip>();
   const [activeSheet, setActiveSheet] = useState<WorkspaceSheet>("actions");
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -81,6 +87,7 @@ export function TravelWorkspace() {
   const [assistantMessage, setAssistantMessage] = useState<string>();
   const [assistantFailed, setAssistantFailed] = useState(false);
   const assistantRequestKey = useRef<string | undefined>(undefined);
+  const countryDetailRequest = useRef(0);
   const overviewQuery = useQuery({ queryKey: compassQueryKeys.overview(travelContext), queryFn: fetchTravelOverview });
 
   const loadOverview = useCallback(async () => {
@@ -136,6 +143,31 @@ export function TravelWorkspace() {
       });
     }
     setError(undefined);
+  }
+
+  async function openCountryDetail(country: CountrySelection) {
+    const generation = ++countryDetailRequest.current;
+    selectCountry(country);
+    setCountryDetail(undefined);
+    setCountryDetailError(undefined);
+    setCountryDetailLoading(true);
+    setActiveSheet("countryDetail");
+    setSheetOpen(true);
+    try {
+      const detail = await findPlace(`${country.name} (${country.countryCode}), ${country.continent}`);
+      if (generation !== countryDetailRequest.current) return;
+      setCountryDetail(detail);
+    } catch (failure) {
+      if (generation === countryDetailRequest.current) setCountryDetailError(errorMessage(failure));
+    } finally {
+      if (generation === countryDetailRequest.current) setCountryDetailLoading(false);
+    }
+  }
+
+  function closeCountryDetail() {
+    countryDetailRequest.current += 1;
+    setCountryDetailLoading(false);
+    setSheetOpen(false);
   }
 
   async function pinCountry() {
@@ -280,14 +312,25 @@ export function TravelWorkspace() {
       .filter(({ properties }) => !normalized || properties.name.toLowerCase().includes(normalized) || properties.countryCode.toLowerCase().includes(normalized))
       .sort((left, right) => left.properties.name.localeCompare(right.properties.name));
   }, [countryQuery]);
+  const globePlaces = useMemo(() => places.map((place) => ({
+    id: place.key,
+    latitude: place.latitude,
+    longitude: place.longitude,
+    status: place.visited ? "visited" as const : "planned" as const,
+  })), [places]);
   const panelWidth = Math.min(width - Math.max(insets.left, spacing.md) - Math.max(insets.right, spacing.md), 600);
   const sheetTitle = activeSheet === "actions" ? "Place actions"
+    : activeSheet === "countryDetail" ? selectedCountry?.name ?? "Country"
     : activeSheet === "newTrip" ? "Create trip"
       : activeSheet === "chooseTrip" ? "Choose a trip"
         : activeSheet === "explore" ? "Explore places"
           : activeSheet === "confirmRemove" ? "Remove stop?"
             : selectedTrip ? selectedTrip.name : "Trips";
-  const fullHeightSheet = activeSheet === "explore" || activeSheet === "newTrip" || activeSheet === "chooseTrip" || activeSheet === "trips";
+  const fullHeightSheet = activeSheet === "countryDetail" || activeSheet === "explore" || activeSheet === "newTrip" || activeSheet === "chooseTrip" || activeSheet === "trips";
+  const countryDetailFooter = activeSheet === "countryDetail" && selectedCountry ? <>
+    <Button disabled={busy || countryDetailLoading || Boolean(selectedPlace)} loading={busy} onPress={() => void pinCountry()} size="md" variant="primary">{selectedPlace ? "Country pinned" : "Pin country"}</Button>
+    <Button onPress={closeCountryDetail} size="md" variant="secondary">Close</Button>
+  </> : undefined;
 
   return (
     <KeyboardAvoidingView behavior="height" style={styles.root}>
@@ -296,7 +339,13 @@ export function TravelWorkspace() {
       </View>
 
       <View style={styles.globe}>
-        <InteractiveGlobe />
+        <InteractiveGlobe
+          onCountryPress={(country) => { if (country) void openCountryDetail(country.properties); }}
+          onPlacePress={(marker) => { const place = places.find(({ key }) => key === marker.id); if (place) selectPlace(place); }}
+          places={globePlaces}
+          selectedCountryCode={selectedCountry?.countryCode}
+          selectedPlaceId={selectedPlace?.key}
+        />
         {!loadError ? <View style={[styles.globeActions, { right: Math.max(insets.right, spacing.md) }]}>
           <Button accessibilityLabel="Choose a country or saved place" contentMode="raw" disabled={loading} onPress={() => openSheet("explore")} size="md" variant="icon"><SearchIcon size="sm" /></Button>
           <Button accessibilityLabel="Show trips" contentMode="raw" disabled={loading} onPress={() => { setSelectedTrip(undefined); openSheet("trips"); }} size="md" variant="icon"><CalendarIcon size="sm" /></Button>
@@ -337,15 +386,46 @@ export function TravelWorkspace() {
         value={assistantInput}
       /> : null}
 
-      <BottomSheet description={activeSheet === "newTrip" ? "Use ISO dates in YYYY-MM-DD format." : undefined} dismissible={!busy} height={fullHeightSheet ? "full" : undefined} onOpenChange={setSheetOpen} open={sheetOpen} title={sheetTitle}>
+      <BottomSheet description={activeSheet === "newTrip" ? "Use ISO dates in YYYY-MM-DD format." : activeSheet === "countryDetail" ? "A concise guide generated for the selected country." : undefined} dismissible={!busy} footer={countryDetailFooter} height={fullHeightSheet ? "full" : undefined} onOpenChange={(next) => { if (!next && activeSheet === "countryDetail") closeCountryDetail(); else setSheetOpen(next); }} open={sheetOpen} title={sheetTitle}>
         <ScrollView contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={[fullHeightSheet && styles.fullSheetScroll, { maxHeight: fullHeightSheet ? undefined : height * 0.58 }]}>
           {error ? <View accessibilityLiveRegion="assertive" style={styles.inlineError}><Text style={styles.errorText}>{error}</Text></View> : null}
+
+          {activeSheet === "countryDetail" ? countryDetailLoading ? <View accessibilityLabel={`Loading information about ${selectedCountry?.name ?? "country"}`} accessibilityRole="progressbar" style={styles.countryDetailSkeleton}>
+            <Skeleton style={[styles.skeletonBlock, styles.skeletonTitle]} />
+            <Skeleton style={[styles.skeletonBlock, styles.skeletonSummary]} />
+            <View style={styles.factGrid}>{Array.from({ length: 4 }, (_, index) => <Skeleton key={index} style={[styles.skeletonBlock, styles.skeletonFact]} />)}</View>
+            {Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.skeletonBlock, styles.skeletonHighlight]} />)}
+          </View> : countryDetailError ? <View style={styles.countryDetailFailure}>
+            <GlobeIcon size="lg" variant="muted" />
+            <Text style={styles.loadFailureText}>{countryDetailError}</Text>
+            {selectedCountry ? <Button onPress={() => void openCountryDetail(selectedCountry)} size="md" variant="secondary">Try again</Button> : null}
+          </View> : countryDetail ? <View style={styles.countryDetail}>
+            <View style={styles.countryHero}>
+              <Text style={styles.countryEyebrow}>{countryDetail.location.countryCode} · {countryDetail.location.continent}</Text>
+              <Text style={styles.countryTitle}>{countryDetail.title}</Text>
+              <Text style={styles.countrySummary}>{countryDetail.summary}</Text>
+            </View>
+            <Text style={styles.detailSectionLabel}>AT A GLANCE</Text>
+            <View style={styles.factGrid}>{countryDetail.facts.map((fact) => <View key={`${fact.label}:${fact.value}`} style={styles.factCard}><Text style={styles.factLabel}>{fact.label}</Text><Text style={styles.factValue}>{fact.value}</Text></View>)}</View>
+            <Text style={styles.detailSectionLabel}>HIGHLIGHTS</Text>
+            <View style={styles.detailList}>{countryDetail.highlights.map((highlight) => <View key={highlight.title} style={styles.highlightCard}><Text style={styles.highlightTitle}>{highlight.title}</Text><Text style={styles.highlightDescription}>{highlight.description}</Text></View>)}</View>
+            <Text style={styles.detailSectionLabel}>PRACTICAL</Text>
+            <View style={styles.practicalCard}>
+              <Text style={styles.factLabel}>Best time to visit</Text><Text style={styles.practicalValue}>{countryDetail.practicalInfo.bestTimeToVisit}</Text>
+              <Text style={styles.factLabel}>Languages</Text><Text style={styles.practicalValue}>{countryDetail.practicalInfo.languages.join(", ")}</Text>
+              <Text style={styles.factLabel}>Currency</Text><Text style={styles.practicalValue}>{countryDetail.practicalInfo.currency}</Text>
+              <Text style={styles.factLabel}>Time zone</Text><Text style={styles.practicalValue}>{countryDetail.practicalInfo.timeZone}</Text>
+              <Text style={styles.factLabel}>Safety</Text><Text style={styles.practicalValue}>{countryDetail.practicalInfo.safety}</Text>
+              <Text style={styles.factLabel}>Entry requirements</Text><Text style={styles.practicalValue}>{countryDetail.practicalInfo.entryRequirements}</Text>
+            </View>
+            <Text style={styles.verificationNote}>Verify safety and entry requirements with official sources before travel.</Text>
+          </View> : null : null}
 
           {activeSheet === "explore" ? <>
             <View style={styles.countrySearch}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel="Search countries" onChangeText={setCountryQuery} placeholder="Search countries" style={styles.countrySearchInput} value={countryQuery} /></View>
             {places.length ? <><Text style={styles.listLabel}>SAVED PLACES</Text>{places.map((place) => <BottomSheetItem key={place.key} disabled={busy} icon={<LocationPinIcon size="md" />} onPress={() => { selectPlace(place); setSheetOpen(false); }}>{place.name}</BottomSheetItem>)}</> : null}
             <Text style={styles.listLabel}>COUNTRIES</Text>
-            {visibleCountries.map((country: CountryFeature) => <BottomSheetItem key={country.properties.countryCode} disabled={busy} icon={<GlobeIcon size="md" />} onPress={() => { selectCountry(country.properties); setSheetOpen(false); }}>{country.properties.name}</BottomSheetItem>)}
+            {visibleCountries.map((country: CountryFeature) => <BottomSheetItem key={country.properties.countryCode} disabled={busy} icon={<GlobeIcon size="md" />} onPress={() => void openCountryDetail(country.properties)}>{country.properties.name}</BottomSheetItem>)}
           </> : null}
 
           {activeSheet === "actions" ? <>
@@ -428,6 +508,30 @@ const styles = StyleSheet.create({
   countrySearch: { minHeight: 48, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.lg, backgroundColor: palette.panelRaised },
   countrySearchInput: { minHeight: 40, flex: 1, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent" },
   listLabel: { marginTop: 10, marginBottom: 2, color: palette.silver500, fontFamily: fonts.medium, fontSize: 10, letterSpacing: tracking.micro },
+  countryDetailSkeleton: { gap: spacing.md, paddingVertical: spacing.md },
+  skeletonBlock: { backgroundColor: palette.hairlineBright, opacity: 0.72 },
+  skeletonTitle: { width: "62%", height: 38 },
+  skeletonSummary: { width: "100%", height: 112 },
+  skeletonFact: { minWidth: 130, flexBasis: "47%", height: 86 },
+  skeletonHighlight: { width: "100%", height: 104 },
+  countryDetailFailure: { flex: 1, minHeight: 360, alignItems: "center", justifyContent: "center", gap: spacing.md },
+  countryDetail: { gap: spacing.md, paddingTop: spacing.md, paddingBottom: spacing.xl },
+  countryHero: { paddingVertical: spacing.md, gap: spacing.sm },
+  countryEyebrow: { color: palette.silver500, fontFamily: fonts.medium, fontSize: 11, letterSpacing: tracking.micro, textTransform: "uppercase" },
+  countryTitle: { color: palette.silver50, fontFamily: fonts.medium, fontSize: 32, lineHeight: 37 },
+  countrySummary: { color: palette.silver300, fontFamily: fonts.regular, fontSize: 16, lineHeight: 25 },
+  detailSectionLabel: { marginTop: spacing.sm, color: palette.silver500, fontFamily: fonts.medium, fontSize: 10, letterSpacing: tracking.micro },
+  factGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
+  factCard: { minWidth: 130, flexGrow: 1, flexBasis: "47%", padding: spacing.md, gap: 5, borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.lg, backgroundColor: palette.panelRaised },
+  factLabel: { color: palette.silver500, fontFamily: fonts.medium, fontSize: 10, letterSpacing: tracking.micro, textTransform: "uppercase" },
+  factValue: { color: palette.silver100, fontFamily: fonts.medium, fontSize: 15, lineHeight: 20 },
+  detailList: { gap: spacing.sm },
+  highlightCard: { padding: spacing.md, gap: 6, borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.lg, backgroundColor: palette.panelRaised },
+  highlightTitle: { color: palette.silver50, fontFamily: fonts.medium, fontSize: 16 },
+  highlightDescription: { color: palette.silver300, fontFamily: fonts.regular, fontSize: 13, lineHeight: 20 },
+  practicalCard: { padding: spacing.md, gap: 7, borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.lg, backgroundColor: palette.panelRaised },
+  practicalValue: { marginBottom: spacing.sm, color: palette.silver300, fontFamily: fonts.regular, fontSize: 14, lineHeight: 21 },
+  verificationNote: { paddingBottom: spacing.md, color: palette.silver500, fontFamily: fonts.regular, fontSize: 11, lineHeight: 17, textAlign: "center" },
   form: { gap: 14 },
   dateRow: { flexDirection: "row", gap: 8 },
   dateRowCompact: { flexDirection: "column" },

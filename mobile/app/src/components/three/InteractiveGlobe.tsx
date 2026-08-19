@@ -1,115 +1,468 @@
-import { useMemo, useState } from "react";
-import type { StyleProp, ViewStyle } from "react-native";
-import { PanResponder, StyleSheet, View } from "react-native";
-import Svg, { Circle, ClipPath, Defs, G, Path } from "react-native-svg";
+/* eslint-disable react/no-unknown-property */
+import { useEffect, useMemo, useRef, useState } from "react";
+import { AccessibilityInfo, Platform, StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
+import { useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
+import * as THREE from "three";
+
+import { Canvas } from "@/components/three/Canvas";
+import {
+  COUNTRIES,
+  createCountryBoundaryGeometry,
+  findCountryAtCoordinates,
+  type CountryFeature,
+} from "@/lib/globe-data";
+import {
+  clampGlobeZoom,
+  exceedsGlobeDragThreshold,
+  latLonToVector,
+  projectToTrackball,
+  vectorToLatLon,
+} from "@/lib/globe-math";
+
+const GLOBE_RADIUS = 1;
+const DRAG_THRESHOLD = 10;
+const IDLE_DELAY_MS = 1400;
+const IDLE_ROTATION_SPEED = 0.075;
+const MIN_CAMERA_DISTANCE = 2.15;
+const MAX_CAMERA_DISTANCE = 4.1;
+const WEB_TOUCH_STYLE = { touchAction: "none" } as unknown as ViewStyle;
+
+export type GlobePlace = Readonly<{
+  id: string;
+  latitude: number;
+  longitude: number;
+  status: "visited" | "planned";
+}>;
 
 export type InteractiveGlobeProps = {
+  places?: readonly GlobePlace[];
+  onPlacePress?: (place: GlobePlace) => void;
+  onCountryPress?: (country: CountryFeature | undefined, coordinates: { latitude: number; longitude: number }) => void;
+  reducedMotion?: boolean;
+  selectedCountryCode?: string;
+  selectedPlaceId?: string;
   style?: StyleProp<ViewStyle>;
 };
 
-type Coordinate = readonly [longitude: number, latitude: number];
-type Rotation = { yaw: number; pitch: number };
+type PointerGesture = {
+  activePointerId: number | undefined;
+  startScreen: THREE.Vector2;
+  previousTrackball: THREE.Vector3;
+  moved: boolean;
+  pointers: Map<number, THREE.Vector2>;
+  pinchDistance: number;
+  pinchZoom: number;
+  resetTrackball: boolean;
+};
 
-const SIZE = 320;
-const CENTER = SIZE / 2;
-const RADIUS = 132;
-const LINE = "rgba(184, 199, 208, 0.3)";
-const LAND_LINE = "rgba(213, 224, 230, 0.72)";
+type GlobeControls = {
+  rotateBy: (radians: number) => void;
+  zoomBy: (distance: number) => void;
+};
 
-const CONTINENTS: readonly Coordinate[][] = [
-  [[-168, 68], [-145, 72], [-124, 59], [-108, 52], [-97, 29], [-82, 25], [-74, 43], [-60, 47], [-53, 60], [-73, 72], [-105, 76], [-138, 72], [-168, 68]],
-  [[-81, 12], [-70, 8], [-55, -2], [-46, -22], [-55, -39], [-68, -55], [-76, -28], [-81, 12]],
-  [[-18, 36], [5, 37], [31, 31], [43, 11], [34, -10], [23, -35], [9, -31], [-3, -5], [-17, 15], [-18, 36]],
-  [[-10, 36], [7, 52], [35, 61], [67, 71], [102, 68], [137, 55], [161, 61], [177, 48], [151, 35], [126, 22], [103, 6], [79, 9], [55, 24], [35, 31], [14, 42], [-10, 36]],
-  [[112, -12], [132, -10], [153, -24], [146, -40], [122, -43], [112, -12]],
-  [[-52, 60], [-42, 76], [-22, 82], [-18, 68], [-35, 59], [-52, 60]],
-];
+type PointerSource = {
+  clientX?: number;
+  clientY?: number;
+  locationX?: number;
+  locationY?: number;
+  offsetX?: number;
+  offsetY?: number;
+  pageX?: number;
+  pageY?: number;
+  preventDefault?: () => void;
+  touches?: ArrayLike<{
+    identifier?: number;
+    clientX?: number;
+    clientY?: number;
+    locationX?: number;
+    locationY?: number;
+    pageX?: number;
+    pageY?: number;
+  }>;
+};
 
-function latitudeLine(latitude: number): Coordinate[] {
-  return Array.from({ length: 49 }, (_, index) => [-180 + index * 7.5, latitude] as const);
+function pointerSource(event: ThreeEvent<PointerEvent>): PointerSource | undefined {
+  const sources = event as unknown as { sourceEvent?: PointerSource; nativeEvent?: PointerSource };
+  return sources.sourceEvent ?? sources.nativeEvent;
 }
 
-function longitudeLine(longitude: number): Coordinate[] {
-  return Array.from({ length: 25 }, (_, index) => [longitude, -90 + index * 7.5] as const);
+function eventScreenPoint(event: ThreeEvent<PointerEvent>): THREE.Vector2 {
+  const source = pointerSource(event);
+  return new THREE.Vector2(
+    source?.clientX ?? source?.pageX ?? source?.offsetX ?? source?.locationX ?? event.pointer.x * 100,
+    source?.clientY ?? source?.pageY ?? source?.offsetY ?? source?.locationY ?? event.pointer.y * 100,
+  );
 }
 
-const GRID = [
-  latitudeLine(-45), latitudeLine(0), latitudeLine(45),
-  longitudeLine(-120), longitudeLine(-60), longitudeLine(0), longitudeLine(60), longitudeLine(120),
-];
-
-function project([longitude, latitude]: Coordinate, rotation: Rotation) {
-  "worklet";
-  const longitudeRadians = longitude * Math.PI / 180;
-  const latitudeRadians = latitude * Math.PI / 180;
-  const sourceX = Math.cos(latitudeRadians) * Math.sin(longitudeRadians);
-  const sourceY = Math.sin(latitudeRadians);
-  const sourceZ = Math.cos(latitudeRadians) * Math.cos(longitudeRadians);
-  const yawX = sourceX * Math.cos(rotation.yaw) + sourceZ * Math.sin(rotation.yaw);
-  const yawZ = -sourceX * Math.sin(rotation.yaw) + sourceZ * Math.cos(rotation.yaw);
-  const rotatedY = sourceY * Math.cos(rotation.pitch) - yawZ * Math.sin(rotation.pitch);
-  const rotatedZ = sourceY * Math.sin(rotation.pitch) + yawZ * Math.cos(rotation.pitch);
-  return { x: CENTER + yawX * RADIUS, y: CENTER - rotatedY * RADIUS, visible: rotatedZ >= 0 };
+function activeTouchPoints(event: ThreeEvent<PointerEvent>): Map<number, THREE.Vector2> | undefined {
+  const touches = pointerSource(event)?.touches;
+  if (!touches) return undefined;
+  const points = new Map<number, THREE.Vector2>();
+  for (let index = 0; index < touches.length; index += 1) {
+    const touch = touches[index];
+    if (!touch) continue;
+    points.set(touch.identifier ?? index, new THREE.Vector2(
+      touch.clientX ?? touch.pageX ?? touch.locationX ?? 0,
+      touch.clientY ?? touch.pageY ?? touch.locationY ?? 0,
+    ));
+  }
+  return points;
 }
 
-function pathFor(lines: readonly Coordinate[][], rotation: Rotation) {
-  return lines.map((line) => {
-    let path = "";
-    let drawing = false;
-    for (const coordinate of line) {
-      const point = project(coordinate, rotation);
-      if (!point.visible) {
-        drawing = false;
-        continue;
-      }
-      path += `${drawing ? "L" : "M"}${point.x.toFixed(1)} ${point.y.toFixed(1)}`;
-      drawing = true;
-    }
-    return path;
-  }).join("");
+function trackballVector(pointer: THREE.Vector2): THREE.Vector3 {
+  const projected = projectToTrackball(pointer.x, pointer.y);
+  return new THREE.Vector3(projected.x, projected.y, projected.z);
 }
 
-export function InteractiveGlobe({ style }: InteractiveGlobeProps) {
-  const [rotation, setRotation] = useState<Rotation>({ yaw: -0.35, pitch: -0.12 });
-  const [responder] = useState(() => {
-    let previousX = 0;
-    let previousY = 0;
-    return PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: () => { previousX = 0; previousY = 0; },
-      onPanResponderMove: (_, gesture) => {
-        const deltaX = gesture.dx - previousX;
-        const deltaY = gesture.dy - previousY;
-        previousX = gesture.dx;
-        previousY = gesture.dy;
-        setRotation((current) => ({
-          yaw: current.yaw + deltaX / RADIUS,
-          pitch: Math.max(-Math.PI / 2, Math.min(Math.PI / 2, current.pitch - deltaY / RADIUS)),
-        }));
-      },
-    });
-  });
-  const gridPath = useMemo(() => pathFor(GRID, rotation), [rotation]);
-  const continentPath = useMemo(() => pathFor(CONTINENTS, rotation), [rotation]);
+function pointerDistance(pointers: Map<number, THREE.Vector2>): number {
+  const [first, second] = [...pointers.values()];
+  return first && second ? first.distanceTo(second) : 0;
+}
+
+function PlaceMarker({
+  canSelect,
+  onPress,
+  place,
+  selected,
+}: {
+  canSelect: () => boolean;
+  onPress?: (place: GlobePlace) => void;
+  place: GlobePlace;
+  selected: boolean;
+}) {
+  const normal = useMemo(() => {
+    const point = latLonToVector(place.latitude, place.longitude);
+    return new THREE.Vector3(point.x, point.y, point.z).normalize();
+  }, [place.latitude, place.longitude]);
+  const orientation = useMemo(
+    () => new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal),
+    [normal],
+  );
 
   return (
-    <View accessibilityLabel="Rotatable globe" accessibilityRole="adjustable" style={[styles.root, style]} {...responder.panHandlers}>
-      <View pointerEvents="none" style={styles.glow} />
-      <Svg height={SIZE} pointerEvents="none" width={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`}>
-        <Defs><ClipPath id="globe-clip"><Circle cx={CENTER} cy={CENTER} r={RADIUS} /></ClipPath></Defs>
-        <Circle cx={CENTER} cy={CENTER} fill="#081017" r={RADIUS} stroke="rgba(219, 229, 234, 0.62)" strokeWidth="1.5" />
-        <G clipPath="url(#globe-clip)">
-          <Path d={gridPath} fill="none" stroke={LINE} strokeWidth="1" />
-          <Path d={continentPath} fill="none" stroke={LAND_LINE} strokeLinejoin="round" strokeWidth="1.5" />
-        </G>
-        <Circle cx={CENTER} cy={CENTER} fill="none" r={RADIUS + 5} stroke="rgba(125, 162, 184, 0.12)" strokeWidth="10" />
-      </Svg>
+    <group
+      position={normal.clone().multiplyScalar(1.025)}
+      quaternion={orientation}
+      onClick={(event) => {
+        event.stopPropagation();
+        if (canSelect()) onPress?.(place);
+      }}
+    >
+      <mesh position={[0, 0.055, 0]}>
+        <sphereGeometry args={[0.06, 10, 8]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
+      <mesh position={[0, 0.03, 0]}>
+        <cylinderGeometry args={[0.006, 0.006, 0.06, 6]} />
+        <meshBasicMaterial color={place.status === "visited" ? "#dce8ed" : "#7f9099"} />
+      </mesh>
+      <mesh position={[0, 0.07, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[selected ? 0.035 : 0.023, selected ? 0.007 : 0.005, 8, 18]} />
+        <meshBasicMaterial color={selected ? "#ffffff" : place.status === "visited" ? "#dce8ed" : "#7f9099"} />
+      </mesh>
+    </group>
+  );
+}
+
+type GlobeSceneProps = Required<Pick<InteractiveGlobeProps, "places">> & Omit<InteractiveGlobeProps, "places" | "style"> & {
+  controlsRef: { current: GlobeControls | null };
+};
+
+function GlobeScene({
+  controlsRef,
+  places,
+  onPlacePress,
+  onCountryPress,
+  reducedMotion,
+  selectedCountryCode,
+  selectedPlaceId,
+}: GlobeSceneProps) {
+  const globeRef = useRef<THREE.Group>(null);
+  const camera = useThree((state) => state.camera);
+  const renderer = useThree((state) => state.gl);
+  const gestureRef = useRef<PointerGesture>({
+    activePointerId: undefined,
+    startScreen: new THREE.Vector2(),
+    previousTrackball: new THREE.Vector3(),
+    moved: false,
+    pointers: new Map(),
+    pinchDistance: 0,
+    pinchZoom: camera.position.z,
+    resetTrackball: false,
+  });
+  const lastInteractionAt = useRef(performance.now());
+  const boundaries = useMemo(() => createCountryBoundaryGeometry(), []);
+  const selectedBoundaries = useMemo(() => {
+    const country = COUNTRIES.features.find(({ properties }) => properties.countryCode === selectedCountryCode);
+    return country
+      ? createCountryBoundaryGeometry({ type: "FeatureCollection", features: [country] }, 1.026)
+      : undefined;
+  }, [selectedCountryCode]);
+  const rotationDelta = useMemo(() => new THREE.Quaternion(), []);
+  const worldYAxis = useMemo(() => new THREE.Vector3(0, 1, 0), []);
+
+  useEffect(() => () => boundaries.dispose(), [boundaries]);
+  useEffect(() => () => selectedBoundaries?.dispose(), [selectedBoundaries]);
+  useEffect(() => {
+    const element = renderer.domElement as unknown as { addEventListener?: (type: string, listener: (event: WheelEvent) => void, options?: AddEventListenerOptions) => void; removeEventListener?: (type: string, listener: (event: WheelEvent) => void) => void };
+    if (!element.addEventListener || !element.removeEventListener) return;
+    const preventPageScroll = (event: WheelEvent) => event.preventDefault();
+    element.addEventListener("wheel", preventPageScroll, { passive: false });
+    return () => element.removeEventListener?.("wheel", preventPageScroll);
+  }, [renderer]);
+
+  useFrame((_, delta) => {
+    const globe = globeRef.current;
+    const gesture = gestureRef.current;
+    if (
+      !globe
+      || reducedMotion
+      || gesture.pointers.size > 0
+      || performance.now() - lastInteractionAt.current < IDLE_DELAY_MS
+    ) return;
+
+    rotationDelta.setFromAxisAngle(worldYAxis, IDLE_ROTATION_SPEED * delta);
+    globe.quaternion.premultiply(rotationDelta).normalize();
+  });
+
+  const updateZoom = (nextDistance: number) => {
+    camera.position.z = clampGlobeZoom(nextDistance, MIN_CAMERA_DISTANCE, MAX_CAMERA_DISTANCE);
+    camera.updateProjectionMatrix();
+    lastInteractionAt.current = performance.now();
+  };
+
+  useEffect(() => {
+    controlsRef.current = {
+      rotateBy(radians) {
+        const globe = globeRef.current;
+        if (!globe) return;
+        rotationDelta.setFromAxisAngle(worldYAxis, radians);
+        globe.quaternion.premultiply(rotationDelta).normalize();
+        lastInteractionAt.current = performance.now();
+      },
+      zoomBy(distance) { updateZoom(camera.position.z + distance); },
+    };
+    return () => { controlsRef.current = null; };
+  });
+
+  const onPointerDown = (event: ThreeEvent<PointerEvent>) => {
+    event.stopPropagation();
+    const gesture = gestureRef.current;
+    const screen = eventScreenPoint(event);
+    gesture.pointers.set(event.pointerId, screen);
+    lastInteractionAt.current = performance.now();
+
+    if (gesture.pointers.size === 1) {
+      gesture.activePointerId = event.pointerId;
+      gesture.startScreen.copy(screen);
+      gesture.previousTrackball.copy(trackballVector(event.pointer));
+      gesture.moved = false;
+      gesture.resetTrackball = false;
+    } else {
+      gesture.moved = true;
+      gesture.pinchDistance = pointerDistance(gesture.pointers);
+      gesture.pinchZoom = camera.position.z;
+    }
+
+    const target = event.currentTarget as unknown as { setPointerCapture?: (pointerId: number) => void };
+    target.setPointerCapture?.(event.pointerId);
+  };
+
+  const onPointerMove = (event: ThreeEvent<PointerEvent>) => {
+    const gesture = gestureRef.current;
+    const activeTouches = activeTouchPoints(event);
+    if (!gesture.pointers.has(event.pointerId) && activeTouches === undefined) return;
+    event.stopPropagation();
+    const screen = eventScreenPoint(event);
+    if (activeTouches && activeTouches.size > 1) gesture.pointers = activeTouches;
+    else gesture.pointers.set(event.pointerId, screen);
+    lastInteractionAt.current = performance.now();
+
+    if (gesture.pointers.size > 1) {
+      const distance = pointerDistance(gesture.pointers);
+      if (gesture.pinchDistance > 0 && distance > 0) {
+        updateZoom(gesture.pinchZoom * gesture.pinchDistance / distance);
+      }
+      gesture.moved = true;
+      return;
+    }
+
+    const globe = globeRef.current;
+    if (gesture.resetTrackball && gesture.pointers.size === 1) gesture.activePointerId = event.pointerId;
+    if (gesture.activePointerId !== event.pointerId || !globe) return;
+    const current = trackballVector(event.pointer);
+    if (gesture.resetTrackball) {
+      gesture.previousTrackball.copy(current);
+      gesture.resetTrackball = false;
+      return;
+    }
+    rotationDelta.setFromUnitVectors(gesture.previousTrackball, current);
+    globe.quaternion.premultiply(rotationDelta).normalize();
+    gesture.previousTrackball.copy(current);
+    gesture.moved ||= exceedsGlobeDragThreshold(
+      gesture.startScreen.x,
+      gesture.startScreen.y,
+      screen.x,
+      screen.y,
+      DRAG_THRESHOLD,
+    );
+  };
+
+  const finishPointer = (event: ThreeEvent<PointerEvent>) => {
+    const gesture = gestureRef.current;
+    const remainingTouches = activeTouchPoints(event);
+    if (!gesture.pointers.has(event.pointerId) && remainingTouches === undefined) return;
+    event.stopPropagation();
+    if (remainingTouches !== undefined) gesture.pointers = remainingTouches;
+    else gesture.pointers.delete(event.pointerId);
+    lastInteractionAt.current = performance.now();
+    if (gesture.activePointerId === event.pointerId) gesture.activePointerId = undefined;
+    if (gesture.pointers.size === 1) {
+      gesture.activePointerId = [...gesture.pointers.keys()][0];
+      gesture.resetTrackball = true;
+      gesture.moved = true;
+    }
+    const target = event.currentTarget as unknown as { releasePointerCapture?: (pointerId: number) => void };
+    target.releasePointerCapture?.(event.pointerId);
+  };
+
+  const cancelPointers = () => {
+    const gesture = gestureRef.current;
+    gesture.pointers.clear();
+    gesture.activePointerId = undefined;
+    gesture.resetTrackball = false;
+    gesture.moved = true;
+    lastInteractionAt.current = performance.now();
+  };
+
+  const selectCountry = (event: ThreeEvent<MouseEvent>) => {
+    event.stopPropagation();
+    if (gestureRef.current.moved) return;
+    const globe = globeRef.current;
+    if (!globe) return;
+    const coordinates = vectorToLatLon(globe.worldToLocal(event.point.clone()).normalize());
+    onCountryPress?.(
+      findCountryAtCoordinates(COUNTRIES, coordinates.latitude, coordinates.longitude),
+      coordinates,
+    );
+  };
+
+  return (
+    <>
+      <ambientLight intensity={0.45} />
+      <directionalLight position={[3, 2.5, 4]} intensity={1.25} color="#dceaf0" />
+      <group
+        ref={globeRef}
+        rotation={[0.08, -0.4, -0.04]}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={finishPointer}
+        onPointerCancel={cancelPointers}
+        onWheel={(event) => {
+          event.stopPropagation();
+          const wheel = event as unknown as { deltaY?: number; nativeEvent?: PointerSource; sourceEvent?: PointerSource };
+          wheel.sourceEvent?.preventDefault?.();
+          wheel.nativeEvent?.preventDefault?.();
+          const deltaY = wheel.deltaY ?? (wheel.nativeEvent as { deltaY?: number } | undefined)?.deltaY ?? 0;
+          updateZoom(camera.position.z + deltaY * 0.0025);
+        }}
+      >
+        <mesh onClick={selectCountry}>
+          <sphereGeometry args={[GLOBE_RADIUS, 72, 48]} />
+          <meshStandardMaterial color="#071016" metalness={0.08} roughness={0.9} />
+        </mesh>
+        <lineSegments geometry={boundaries}>
+          <lineBasicMaterial color="#a9bac2" transparent opacity={0.68} />
+        </lineSegments>
+        {selectedBoundaries ? (
+          <lineSegments geometry={selectedBoundaries}>
+            <lineBasicMaterial color="#ffffff" transparent opacity={1} />
+          </lineSegments>
+        ) : null}
+        {places.map((place) => (
+          <PlaceMarker
+            key={place.id}
+            canSelect={() => !gestureRef.current.moved}
+            onPress={onPlacePress}
+            place={place}
+            selected={place.id === selectedPlaceId}
+          />
+        ))}
+      </group>
+      <mesh scale={1.035}>
+        <sphereGeometry args={[GLOBE_RADIUS, 48, 32]} />
+        <meshBasicMaterial
+          color="#638296"
+          side={THREE.BackSide}
+          transparent
+          opacity={0.11}
+          depthWrite={false}
+        />
+      </mesh>
+    </>
+  );
+}
+
+export function InteractiveGlobe({
+  places = [],
+  onPlacePress,
+  onCountryPress,
+  reducedMotion,
+  selectedCountryCode,
+  selectedPlaceId,
+  style,
+}: InteractiveGlobeProps) {
+  const [systemReducedMotion, setSystemReducedMotion] = useState(false);
+  const controlsRef = useRef<GlobeControls | null>(null);
+
+  useEffect(() => {
+    if (reducedMotion !== undefined) return;
+    void AccessibilityInfo.isReduceMotionEnabled().then(setSystemReducedMotion);
+    const subscription = AccessibilityInfo.addEventListener("reduceMotionChanged", setSystemReducedMotion);
+    return () => subscription.remove();
+  }, [reducedMotion]);
+
+  return (
+    <View
+      accessibilityActions={[
+        { name: "increment", label: "Zoom in" },
+        { name: "decrement", label: "Zoom out" },
+        { name: "activate", label: "Rotate globe" },
+      ]}
+      accessibilityHint="Drag to rotate, pinch or scroll to zoom, or use the country search button."
+      accessibilityLabel="Interactive country globe"
+      accessibilityRole="adjustable"
+      accessibilityValue={{ text: "World map" }}
+      onAccessibilityAction={({ nativeEvent }) => {
+        if (nativeEvent.actionName === "increment") controlsRef.current?.zoomBy(-0.25);
+        else if (nativeEvent.actionName === "decrement") controlsRef.current?.zoomBy(0.25);
+        else if (nativeEvent.actionName === "activate") controlsRef.current?.rotateBy(Math.PI / 8);
+      }}
+      style={[styles.root, Platform.OS === "web" && WEB_TOUCH_STYLE, style]}
+    >
+      <Canvas
+      style={styles.canvas}
+      camera={{ position: [0, 0, 2.6], fov: 40, near: 0.1, far: 20 }}
+      dpr={[1, 2]}
+      frameloop="always"
+      gl={{ antialias: true, powerPreference: "high-performance" }}
+    >
+      <color attach="background" args={["#020609"]} />
+      <GlobeScene
+        controlsRef={controlsRef}
+        places={places}
+        onPlacePress={onPlacePress}
+        onCountryPress={onCountryPress}
+        reducedMotion={reducedMotion ?? systemReducedMotion}
+        selectedCountryCode={selectedCountryCode}
+        selectedPlaceId={selectedPlaceId}
+      />
+      </Canvas>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, alignItems: "center", justifyContent: "center" },
-  glow: { position: "absolute", width: RADIUS * 2, height: RADIUS * 2, borderRadius: RADIUS, backgroundColor: "rgba(73, 117, 143, 0.09)", boxShadow: "0 0 70px rgba(80, 132, 163, 0.22)" },
+  root: { flex: 1, width: "100%", height: "100%" },
+  canvas: { flex: 1, width: "100%", height: "100%" },
 });

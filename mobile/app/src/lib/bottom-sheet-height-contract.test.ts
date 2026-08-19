@@ -60,7 +60,7 @@ test("uses no legacy BottomSheet sizing props", () => {
 test("classifies every full-height sheet workflow explicitly", () => {
   expect(core).toContain('<BottomSheet height="full"');
   expect(switcher).not.toContain("height=");
-  expect(travel).toContain('const fullHeightSheet = activeSheet === "explore" || activeSheet === "newTrip" || activeSheet === "chooseTrip" || activeSheet === "trips"');
+  expect(travel).toContain('const fullHeightSheet = activeSheet === "countryDetail" || activeSheet === "explore" || activeSheet === "newTrip" || activeSheet === "chooseTrip" || activeSheet === "trips"');
   expect(travel).toContain('height={fullHeightSheet ? "full" : undefined}');
   expect(email).toContain('height={sheet === "reply" ? "full" : undefined}');
   expect(email).toContain('style={sheet === "reply" ? styles.fullSheetScroll : undefined}');
