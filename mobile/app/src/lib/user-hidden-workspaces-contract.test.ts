@@ -5,11 +5,11 @@ const archive = await Bun.file(new URL("../components/capability/KnowledgeWorksp
 const auth = await Bun.file(new URL("../state/auth.ts", import.meta.url)).text();
 const authHelpers = await Bun.file(new URL("./auth-helpers.ts", import.meta.url)).text();
 
-test("keeps favorite and hidden view modes local to each workspace", () => {
+test("keeps independent favorite and hidden filters local to each workspace", () => {
   for (const source of [gallery, archive]) {
-    expect(source).toContain('useState<HiddenViewMode>("normal")');
-    expect(source).toContain('setViewMode(checked ? "favorites" : "normal")');
-    expect(source).toContain('setViewMode(checked ? "hidden" : "normal")');
+    expect(source).toContain('useState<HiddenViewFilters>({ favoritesOnly: false, showHidden: false })');
+    expect(source).toContain('({ ...current, favoritesOnly: checked })');
+    expect(source).toContain('({ ...current, showHidden: checked })');
   }
   expect(auth).not.toContain("ShowOnlyFavorites");
   expect(auth).not.toContain("/auth/me/settings");

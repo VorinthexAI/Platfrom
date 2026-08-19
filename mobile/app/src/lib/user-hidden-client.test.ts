@@ -24,10 +24,11 @@ test("uses the authenticated per-user hidden overlay contract", async () => {
   ]);
 });
 
-test("maps files to documents and keeps view modes mutually exclusive", () => {
+test("maps files to documents and applies favorite and hidden filters independently", () => {
   expect(hiddenSourceFor("file")).toBe("document");
   const items = [{ key: "visible", isFavorite: true }, { key: "hidden", isFavorite: true }, { key: "plain", isFavorite: false }];
-  expect(filterByHiddenView(items, [record], "file", "normal").map(({ key }) => key)).toEqual(["visible", "plain"]);
-  expect(filterByHiddenView(items, [record], "file", "favorites").map(({ key }) => key)).toEqual(["visible"]);
-  expect(filterByHiddenView(items, [record], "file", "hidden").map(({ key }) => key)).toEqual(["hidden"]);
+  expect(filterByHiddenView(items, [record], "file", { favoritesOnly: false, showHidden: false }).map(({ key }) => key)).toEqual(["visible", "plain"]);
+  expect(filterByHiddenView(items, [record], "file", { favoritesOnly: true, showHidden: false }).map(({ key }) => key)).toEqual(["visible"]);
+  expect(filterByHiddenView(items, [record], "file", { favoritesOnly: false, showHidden: true }).map(({ key }) => key)).toEqual(["visible", "hidden", "plain"]);
+  expect(filterByHiddenView(items, [record], "file", { favoritesOnly: true, showHidden: true }).map(({ key }) => key)).toEqual(["visible", "hidden"]);
 });

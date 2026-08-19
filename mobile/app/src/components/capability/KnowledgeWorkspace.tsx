@@ -147,7 +147,7 @@ import { audioTimelineDuration, audioTimelinePosition, formatAudioTime, resolveA
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
 import { useAuthStore } from "@/state/auth";
 import { languageForCountryCode } from "@/lib/auth-helpers";
-import { filterByHiddenView, hideUserSource, isUserHidden, listUserHiddens, revealUserSource, type HiddenViewMode, type UserHiddenRecord, type UserHiddenSource } from "@/lib/user-hidden-client";
+import { filterByHiddenView, hideUserSource, isUserHidden, listUserHiddens, revealUserSource, type HiddenViewFilters, type UserHiddenRecord, type UserHiddenSource } from "@/lib/user-hidden-client";
 
 type SaveState = "local" | "dirty" | "saving" | "saved" | "error";
 type WorkspaceMode = "auto" | "folders" | "folder" | "editor" | "viewer";
@@ -301,7 +301,7 @@ export function KnowledgeWorkspace() {
   const narrationPlayer = useAudioPlayer(null, { updateInterval: 500, keepAudioSessionActive: true });
   const narrationAudio = useAudioPlayerStatus(narrationPlayer);
   const [activeSheet, setActiveSheet] = useState<ArchiveSheet>();
-  const [viewMode, setViewMode] = useState<HiddenViewMode>("normal");
+  const [viewFilters, setViewFilters] = useState<HiddenViewFilters>({ favoritesOnly: false, showHidden: false });
   const [userHiddens, setUserHiddens] = useState<UserHiddenRecord[]>([]);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetError, setSheetError] = useState<string>();
@@ -479,8 +479,9 @@ export function KnowledgeWorkspace() {
   folderStackRef.current = folderStack;
   workspaceModeRef.current = workspaceMode;
   const currentFolder = folderStack.at(-1);
-  const showOnlyFavorites = viewMode === "favorites";
-  const showHidden = viewMode === "hidden";
+  const showOnlyFavorites = viewFilters.favoritesOnly;
+  const showHidden = viewFilters.showHidden;
+  const filtersActive = showOnlyFavorites || showHidden;
   const hidden = (source: UserHiddenSource | "file", sourceKey: string) => isUserHidden(userHiddens, source, sourceKey);
   const destinationFolder = destinationStack.at(-1);
   const contentSelection: ContentSelection = { folderKeys: selectedFolders.map(({ key }) => key), documentKeys: selectedDocuments.map(({ key }) => key) };
@@ -500,10 +501,10 @@ export function KnowledgeWorkspace() {
     : undefined;
   const archiveLocationLoading = locationLoading;
   const archiveFolderTreeReady = Boolean(queryClient.getQueryData<ContentFolder[]>(contentQueryKeys.folderTree(contentContext)));
-  const filteredRootFolders = filterByHiddenView(rootFolders, userHiddens, "folder", viewMode);
-  const filteredFolders = filterByHiddenView(folders, userHiddens, "folder", viewMode);
-  const filteredRootDocuments = filterByHiddenView(rootDocuments, userHiddens, "document", viewMode);
-  const filteredDocuments = filterByHiddenView(documents, userHiddens, "document", viewMode);
+  const filteredRootFolders = filterByHiddenView(rootFolders, userHiddens, "folder", viewFilters);
+  const filteredFolders = filterByHiddenView(folders, userHiddens, "folder", viewFilters);
+  const filteredRootDocuments = filterByHiddenView(rootDocuments, userHiddens, "document", viewFilters);
+  const filteredDocuments = filterByHiddenView(documents, userHiddens, "document", viewFilters);
   const visibleFolders = filteredRootFolders.filter((folder) => {
     const normalized = libraryQuery.trim().toLowerCase();
     return !normalized || folder.name.toLowerCase().includes(normalized) || folder.description?.toLowerCase().includes(normalized);
@@ -517,12 +518,12 @@ export function KnowledgeWorkspace() {
   const folderFiles = filteredDocuments.filter((document) => Boolean(document.extension));
   const rootTabDocuments = folderContentTab === "files" ? rootFiles : rootNotes;
   const folderTabDocuments = folderContentTab === "files" ? folderFiles : folderNotes;
-  const folderSearchFolders = filterByHiddenView(folderSearchResults?.folders ?? [], userHiddens, "folder", viewMode);
-  const folderSearchDocuments = filterByHiddenView(folderSearchResults?.documents ?? [], userHiddens, "document", viewMode, ({ documentKey }) => documentKey).filter((document) => folderContentTab === "files" ? Boolean(document.extension) : !document.extension);
-  const rootSearchFolders = filterByHiddenView(rootSearchResults?.folders ?? [], userHiddens, "folder", viewMode);
-  const rootSearchDocuments = filterByHiddenView(rootSearchResults?.documents ?? [], userHiddens, "document", viewMode, ({ documentKey }) => documentKey).filter((document) => folderContentTab === "files" ? Boolean(document.extension) : !document.extension);
-  const similarFolders = filterByHiddenView(similarResults?.folders ?? [], userHiddens, "folder", viewMode);
-  const similarTabDocuments = filterByHiddenView(similarContentTab === "files" ? similarResults?.files ?? [] : similarResults?.documents ?? [], userHiddens, "document", viewMode);
+  const folderSearchFolders = filterByHiddenView(folderSearchResults?.folders ?? [], userHiddens, "folder", viewFilters);
+  const folderSearchDocuments = filterByHiddenView(folderSearchResults?.documents ?? [], userHiddens, "document", viewFilters, ({ documentKey }) => documentKey).filter((document) => folderContentTab === "files" ? Boolean(document.extension) : !document.extension);
+  const rootSearchFolders = filterByHiddenView(rootSearchResults?.folders ?? [], userHiddens, "folder", viewFilters);
+  const rootSearchDocuments = filterByHiddenView(rootSearchResults?.documents ?? [], userHiddens, "document", viewFilters, ({ documentKey }) => documentKey).filter((document) => folderContentTab === "files" ? Boolean(document.extension) : !document.extension);
+  const similarFolders = filterByHiddenView(similarResults?.folders ?? [], userHiddens, "folder", viewFilters);
+  const similarTabDocuments = filterByHiddenView(similarContentTab === "files" ? similarResults?.files ?? [] : similarResults?.documents ?? [], userHiddens, "document", viewFilters);
   const currentNotePassages = useMemo(() => notePassages(content), [content]);
   const documentSearchMatches = useMemo(() => editorEditing ? [] : searchDocumentPassagesLiteral(currentNotePassages, documentSearchQuery), [currentNotePassages, documentSearchQuery, editorEditing]);
   const documentSearchMatchesById = useMemo(() => new Map(documentSearchMatches.map((match) => [match.id, match])), [documentSearchMatches]);
@@ -915,7 +916,7 @@ export function KnowledgeWorkspace() {
     setDestinationUsesDirectSelection(false);
     setTemporarySingleSelection(false);
     setBulkLoading(false);
-    setViewMode("normal");
+    setViewFilters({ favoritesOnly: false, showHidden: false });
     setUserHiddens([]);
     longPressedItem.current = undefined;
   }, [contentContextKey]);
@@ -3595,9 +3596,9 @@ export function KnowledgeWorkspace() {
     </View>
     <Button accessibilityLabel="Selected item actions" contentMode="raw" disabled={selectionMetadataLoading} loading={selectionMetadataLoading} onPress={() => openSheet("bulkActions")} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
   </Tabs> : null;
-  const filterBadges = viewMode === "normal" ? null : <View style={styles.filterBadgeRow}>
-    {showOnlyFavorites ? <View style={styles.similarPill}><Text numberOfLines={1} style={styles.similarPillText}>Favorites</Text><Button accessibilityLabel="Close Favorites filter" contentMode="raw" onPress={() => setViewMode("normal")} size="xs" variant="icon"><CloseIcon size="sm" /></Button></View> : null}
-    {showHidden ? <View style={styles.similarPill}><Text numberOfLines={1} style={styles.similarPillText}>Show hidden</Text><Button accessibilityLabel="Close Show hidden filter" contentMode="raw" onPress={() => setViewMode("normal")} size="xs" variant="icon"><CloseIcon size="sm" /></Button></View> : null}
+  const filterBadges = !filtersActive ? null : <View style={styles.filterBadgeRow}>
+    {showOnlyFavorites ? <View style={styles.similarPill}><Text numberOfLines={1} style={styles.similarPillText}>Favorites</Text><Button accessibilityLabel="Close Favorites filter" contentMode="raw" onPress={() => setViewFilters((current) => ({ ...current, favoritesOnly: false }))} size="xs" variant="icon"><CloseIcon size="sm" /></Button></View> : null}
+    {showHidden ? <View style={styles.similarPill}><Text numberOfLines={1} style={styles.similarPillText}>Show hidden</Text><Button accessibilityLabel="Close Show hidden filter" contentMode="raw" onPress={() => setViewFilters((current) => ({ ...current, showHidden: false }))} size="xs" variant="icon"><CloseIcon size="sm" /></Button></View> : null}
   </View>;
 
   return (
@@ -3627,7 +3628,7 @@ export function KnowledgeWorkspace() {
                 <TextInput accessibilityLabel="Search all Archive folders, documents, and files" editable={rootSearchFocusable} focusable={rootSearchFocusable} onChangeText={setRootSearchQuery} placeholder="Search..." ref={rootSearchInputRef} style={styles.rootSearchInput} value={rootSearchQuery} />
                 {rootSearchQuery.trim() ? <Button accessibilityLabel="Clear Archive search" contentMode="raw" onPress={() => setRootSearchQuery("")} size="xs" variant="icon"><CloseIcon size="sm" /></Button> : null}
               </View>
-              <Button accessibilityLabel="Filter Archive" contentMode="raw" disabled={!hasContentContext} onPress={() => openSheet("filter")} size="sm" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={viewMode !== "normal" ? "accent" : "default"} /></Button>
+              <Button accessibilityLabel="Filter Archive" contentMode="raw" disabled={!hasContentContext} onPress={() => openSheet("filter")} size="sm" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={filtersActive ? "accent" : "default"} /></Button>
             </View>
             {bulkToolbar}
             {filterBadges}
@@ -3686,7 +3687,7 @@ export function KnowledgeWorkspace() {
                 <TextInput accessibilityLabel={`Search ${currentFolder?.name ?? "folder"}`} onChangeText={setQuery} placeholder="Search..." style={styles.rootSearchInput} value={query} />
                 {query.trim() ? <Button accessibilityLabel="Clear folder search" contentMode="raw" onPress={() => setQuery("")} size="xs" variant="icon"><CloseIcon size="sm" /></Button> : null}
               </View>
-              <Button accessibilityLabel={`Filter ${currentFolder?.name ?? "this folder"}`} contentMode="raw" disabled={!hasContentContext} onPress={() => openSheet("filter")} size="sm" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={viewMode !== "normal" ? "accent" : "default"} /></Button>
+              <Button accessibilityLabel={`Filter ${currentFolder?.name ?? "this folder"}`} contentMode="raw" disabled={!hasContentContext} onPress={() => openSheet("filter")} size="sm" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={filtersActive ? "accent" : "default"} /></Button>
             </View>
             {bulkToolbar}
             {filterBadges}
@@ -3911,11 +3912,11 @@ export function KnowledgeWorkspace() {
         ) : null}
         {activeSheet === "filter" ? <View style={styles.filterPanel}>
           <View style={styles.favoriteSwitchRow}>
-            <Switch accessibilityLabel="Show only Archive favorites" checked={showOnlyFavorites} onCheckedChange={(checked) => { setViewMode(checked ? "favorites" : "normal"); closeSheet(); }} />
+            <Switch accessibilityLabel="Show only Archive favorites" checked={showOnlyFavorites} onCheckedChange={(checked) => { setViewFilters((current) => ({ ...current, favoritesOnly: checked })); closeSheet(); }} />
             <Text style={styles.favoriteSwitchLabel}>Favorites</Text>
           </View>
           <View style={styles.favoriteSwitchRow}>
-            <Switch accessibilityLabel="Show hidden Archive items" checked={showHidden} onCheckedChange={(checked) => { setViewMode(checked ? "hidden" : "normal"); closeSheet(); }} />
+            <Switch accessibilityLabel="Show hidden Archive items" checked={showHidden} onCheckedChange={(checked) => { setViewFilters((current) => ({ ...current, showHidden: checked })); closeSheet(); }} />
             <Text style={styles.favoriteSwitchLabel}>Show hidden</Text>
           </View>
           <Button onPress={() => void openSearchHistory()} size="lg" variant="secondary">Search history</Button>
@@ -4122,7 +4123,7 @@ export function KnowledgeWorkspace() {
                 <SearchIcon size="sm" variant="muted" />
                 <TextInput accessibilityLabel="Search Archive folders" autoFocus onChangeText={setLibraryQuery} placeholder="Search..." style={styles.folderSearchInput} value={libraryQuery} />
               </View>
-              <Button accessibilityLabel="Filter Archive folders" contentMode="raw" onPress={() => openSheet("filter")} size="sm" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={viewMode !== "normal" ? "accent" : "default"} /></Button>
+              <Button accessibilityLabel="Filter Archive folders" contentMode="raw" onPress={() => openSheet("filter")} size="sm" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={filtersActive ? "accent" : "default"} /></Button>
             </View>
             {filterBadges}
             <ScrollView contentContainerStyle={[styles.folderGrid, !showArchiveRoot && visibleFolders.length === 0 && styles.sheetEmptyContent]} keyboardShouldPersistTaps="handled" style={styles.folderList}>
@@ -4144,7 +4145,7 @@ export function KnowledgeWorkspace() {
                 <SearchIcon size="sm" variant="muted" />
                 <TextInput accessibilityLabel="Search Archive documents and files" autoFocus onChangeText={setLibraryQuery} placeholder="Search..." style={styles.folderSearchInput} value={libraryQuery} />
               </View>
-              <Button accessibilityLabel="Filter Archive documents and files" contentMode="raw" onPress={() => openSheet("filter")} size="sm" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={viewMode !== "normal" ? "accent" : "default"} /></Button>
+              <Button accessibilityLabel="Filter Archive documents and files" contentMode="raw" onPress={() => openSheet("filter")} size="sm" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={filtersActive ? "accent" : "default"} /></Button>
             </View>
             {filterBadges}
             <ScrollView contentContainerStyle={[styles.folderGrid, visibleDocuments.length === 0 && styles.sheetEmptyContent]} keyboardShouldPersistTaps="handled" style={styles.folderList}>
