@@ -65,10 +65,10 @@ describe('priority-only persisted router', () => {
   });
 
   test('routes every action supported by a static provider without an organization provider', async () => {
-    const embeddingModel = model('qwen.qwen3-embedding-8b');
+    const embeddingModel = model('openai.text-embedding-3-small');
     const openrouter = providerSchema.parse({ key: newId(), slug: 'openrouter', name: 'OpenRouter', description: 'Provider', supportedUseCases: 'AI', handlerKey: 'openrouter', enabled: true });
     const modelActions = ['embed', 'reason'].map((actionSlug) => modelActionSchema.parse({ key: newId(), modelKey: embeddingModel.key, actionSlug, priority: 100, enabled: true }));
-    const modelProvider = modelProviderSchema.parse({ key: newId(), modelKey: embeddingModel.key, providerKey: openrouter.key, providerModelId: 'qwen/qwen3-embedding-8b', enabled: true });
+    const modelProvider = modelProviderSchema.parse({ key: newId(), modelKey: embeddingModel.key, providerKey: openrouter.key, providerModelId: 'openai/text-embedding-3-small', enabled: true });
     const data: RouterDataSource = {
       async getModelBySlug(slug) { return slug === embeddingModel.slug ? embeddingModel : null; },
       async getModelByKey(key) { return key === embeddingModel.key ? embeddingModel : null; },
@@ -80,7 +80,7 @@ describe('priority-only persisted router', () => {
     };
 
     await expect(selectRoute({ mode: 'auto', organizationKey, actionSlug: 'reason' }, { data })).resolves.toMatchObject({
-      actionSlug: 'reason', modelSlug: 'qwen.qwen3-embedding-8b', providerSlug: 'openrouter', credentialSource: 'environment',
+      actionSlug: 'reason', modelSlug: 'openai.text-embedding-3-small', providerSlug: 'openrouter', credentialSource: 'environment',
     });
   });
 

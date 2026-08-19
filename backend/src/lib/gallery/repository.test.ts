@@ -5,6 +5,7 @@ import type { MediaLibraryDatabase } from '@/lib/media-library';
 import { collectionInviteSchema } from '@/lib/db/collection-invites.node';
 import { shareSchema } from '@/lib/db/shares.node';
 import { galleryUploadSchema } from '@/lib/db/gallery-uploads.node';
+import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
 
 describe('Gallery repository transactions', () => {
   test('accepts an invite with separate valid transaction queries and returns the upserted membership', async () => {
@@ -66,7 +67,7 @@ describe('Gallery repository transactions', () => {
     const database: MediaLibraryDatabase = { async query(query) { queries.push(query); return { async all() { return []; } }; } };
     const repository = createGalleryRepository(database);
     await repository.setImageFavorite(newId(), newId(), newId(), true, '2026-08-18T12:00:00.000Z');
-    await repository.updateImageDetails(newId(), newId(), newId(), 'photo.jpg', false, Array(4_096).fill(0), '2026-08-18T12:00:00.000Z');
+    await repository.updateImageDetails(newId(), newId(), newId(), 'photo.jpg', false, Array(EMBEDDING_DIMENSIONS).fill(0), '2026-08-18T12:00:00.000Z');
     for (const query of queries) {
       expect(query).toContain('"owner" IN roles');
       expect(query).toContain('image.createdByKey == @actorKey');
@@ -81,9 +82,9 @@ describe('Gallery repository transactions', () => {
     const database: MediaLibraryDatabase = { async query(query, bindVars) { queries.push(query); binds.push(bindVars ?? {}); return { async all() { return []; } }; } };
     const repository = createGalleryRepository(database);
     const coverImageKey = newId();
-    await repository.updateCollectionDetails(newId(), newId(), newId(), 'Summer', false, coverImageKey, Array(4_096).fill(0), '2026-08-18T12:00:00.000Z');
-    await repository.updateCollectionDetails(newId(), newId(), newId(), 'Summer', false, null, Array(4_096).fill(0), '2026-08-18T12:00:00.000Z');
-    await repository.updateCollectionDetails(newId(), newId(), newId(), 'Summer', false, undefined, Array(4_096).fill(0), '2026-08-18T12:00:00.000Z');
+    await repository.updateCollectionDetails(newId(), newId(), newId(), 'Summer', false, coverImageKey, Array(EMBEDDING_DIMENSIONS).fill(0), '2026-08-18T12:00:00.000Z');
+    await repository.updateCollectionDetails(newId(), newId(), newId(), 'Summer', false, null, Array(EMBEDDING_DIMENSIONS).fill(0), '2026-08-18T12:00:00.000Z');
+    await repository.updateCollectionDetails(newId(), newId(), newId(), 'Summer', false, undefined, Array(EMBEDDING_DIMENSIONS).fill(0), '2026-08-18T12:00:00.000Z');
     const query = queries[0]!;
     expect(query).toContain('actor.status == "active"');
     expect(query).toContain('actor.orgRole IN ["owner", "admin"]');
@@ -139,7 +140,7 @@ describe('Gallery repository transactions', () => {
   test('projects explicit ownership independently from elevated effective access', async () => {
     const scopeKey = newId(), actorKey = newId(), now = '2026-08-18T12:00:00.000Z';
     const rows = [true, false].map((isOwned, index) => ({
-      collection: { _key: newId(), scopeKey, name: isOwned ? 'Mine' : 'Shared', embedding: Array(4_096).fill(0), isFavorite: false, createdAt: now, updatedAt: now },
+      collection: { _key: newId(), scopeKey, name: isOwned ? 'Mine' : 'Shared', embedding: Array(EMBEDDING_DIMENSIONS).fill(0), isFavorite: false, createdAt: now, updatedAt: now },
       count: 0, cover: null, role: 'owner', isOwned,
     }));
     const database: MediaLibraryDatabase = { async query(query) { return { async all() { return query.includes('FOR collection IN collections') ? rows : []; } }; } };
@@ -158,7 +159,7 @@ describe('Gallery repository transactions', () => {
 
   test('returns only an authorized live visual identity in the requested scope', async () => {
     const scopeKey = newId(), identityKey = newId(), actorKey = newId();
-    const identity = { _key: identityKey, scopeKey, createdByKey: actorKey, name: 'Alex', description: 'A person.', referenceImageKey: newId(), embedding: Array(4_096).fill(0), createdAt: '2026-08-17T12:00:00.000Z', updatedAt: '2026-08-17T12:00:00.000Z' };
+    const identity = { _key: identityKey, scopeKey, createdByKey: actorKey, name: 'Alex', description: 'A person.', referenceImageKey: newId(), embedding: Array(EMBEDDING_DIMENSIONS).fill(0), createdAt: '2026-08-17T12:00:00.000Z', updatedAt: '2026-08-17T12:00:00.000Z' };
     let authorized = false;
     const database: MediaLibraryDatabase = { async query(query, bindVars) { return { async all() {
       if (query.includes('LET actorMembership')) return authorized ? [true] : [];
@@ -174,7 +175,7 @@ describe('Gallery repository transactions', () => {
   test('returns collection images as bound keyset cursor pages of at most one hundred', async () => {
     const scopeKey = newId(), collectionKey = newId(), actorKey = newId();
     const rows = ['2026-08-17T12:00:03.000Z', '2026-08-17T12:00:02.000Z', '2026-08-17T12:00:01.000Z'].map((createdAt, index) => ({
-      _key: newId(), scopeKey, filename: `${index}.jpg`, caption: `Image ${index}`, imageCaptionKey: null, storageKey: `media/${index}`, mimeType: 'image/jpeg', sizeBytes: 100, width: 10, height: 10, embedding: Array(4_096).fill(0), isFavorite: false, createdAt, updatedAt: createdAt,
+      _key: newId(), scopeKey, filename: `${index}.jpg`, caption: `Image ${index}`, imageCaptionKey: null, storageKey: `media/${index}`, mimeType: 'image/jpeg', sizeBytes: 100, width: 10, height: 10, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), isFavorite: false, createdAt, updatedAt: createdAt,
     }));
     const imageBinds: Record<string, unknown>[] = [];
     const database: MediaLibraryDatabase = { async query(query, bindVars) { return { async all() {
@@ -196,7 +197,7 @@ describe('Gallery repository transactions', () => {
     const scopeKey = newId(), collectionKey = newId(), actorKey = newId();
     const createdAt = '2026-08-17T12:00:00.000Z';
     const rows = [0, 1, 2].map((index) => ({
-      _key: newId(), scopeKey, filename: `${index}.jpg`, caption: `Image ${index}`, imageCaptionKey: newId(), storageKey: `media/${index}`, mimeType: 'image/jpeg', sizeBytes: 100, width: 10, height: 10, embedding: Array(4_096).fill(0), isFavorite: false, createdAt, updatedAt: createdAt,
+      _key: newId(), scopeKey, filename: `${index}.jpg`, caption: `Image ${index}`, imageCaptionKey: newId(), storageKey: `media/${index}`, mimeType: 'image/jpeg', sizeBytes: 100, width: 10, height: 10, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), isFavorite: false, createdAt, updatedAt: createdAt,
     }));
     let imageQuery = '', imageBinds: Record<string, unknown> = {};
     const database: MediaLibraryDatabase = { async query(query, bindVars) { return { async all() {
@@ -265,7 +266,7 @@ describe('Gallery repository transactions', () => {
 
   test('lists persisted visual identity matches within an optional collection', async () => {
     const scopeKey = newId(), identityKey = newId(), collectionKey = newId(), imageKey = newId(), actorKey = newId();
-    const image = { _key: imageKey, scopeKey, filename: 'reference.jpg', caption: 'Reference', imageCaptionKey: null, storageKey: 'media/reference', mimeType: 'image/jpeg', sizeBytes: 100, width: 10, height: 10, embedding: Array(4_096).fill(0), isFavorite: false, createdAt: '2026-08-17T12:00:00.000Z', updatedAt: '2026-08-17T12:00:00.000Z' };
+    const image = { _key: imageKey, scopeKey, filename: 'reference.jpg', caption: 'Reference', imageCaptionKey: null, storageKey: 'media/reference', mimeType: 'image/jpeg', sizeBytes: 100, width: 10, height: 10, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), isFavorite: false, createdAt: '2026-08-17T12:00:00.000Z', updatedAt: '2026-08-17T12:00:00.000Z' };
     const database: MediaLibraryDatabase = { async query(query, bindVars) { return { async all() {
       expect(query).toContain('collectionImage.collectionKey == @collectionKey');
       expect(bindVars).toEqual({ scopeKey, identityKey, actorKey, collectionKey });
@@ -303,7 +304,7 @@ describe('Gallery repository transactions', () => {
 
   test('partitions validated duplicate favorites and leaves favorite relations and covers untouched', async () => {
     const scopeKey = newId(), collectionKey = newId(), selected = [newId(), newId()];
-    const makeImage = (imageKey: string, isFavorite: boolean, createdAt: string) => ({ _key: imageKey, scopeKey, filename: `${imageKey}.jpg`, caption: 'Duplicate', imageCaptionKey: newId(), storageKey: `media/${imageKey}`, mimeType: 'image/jpeg', sizeBytes: 10, width: 10, height: 10, embedding: Array(4_096).fill(0), isFavorite, createdAt, updatedAt: createdAt });
+    const makeImage = (imageKey: string, isFavorite: boolean, createdAt: string) => ({ _key: imageKey, scopeKey, filename: `${imageKey}.jpg`, caption: 'Duplicate', imageCaptionKey: newId(), storageKey: `media/${imageKey}`, mimeType: 'image/jpeg', sizeBytes: 10, width: 10, height: 10, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), isFavorite, createdAt, updatedAt: createdAt });
     const rows = [
       { image: makeImage(newId(), false, '2026-08-18T10:00:00.000Z'), perceptualHash: '0000000000000000', protected: false },
       { image: makeImage(selected[0]!, true, '2026-08-18T10:01:00.000Z'), perceptualHash: '0000000000000000', protected: false },
@@ -344,7 +345,7 @@ describe('Gallery repository transactions', () => {
 
   test('resolves memory identity names by direct actor-owned cosine similarity', async () => {
     const scopeKey = newId(), collectionKey = newId(), actorKey = newId(), imageKey = newId(), now = new Date().toISOString();
-    const image = { _key: imageKey, scopeKey, filename: 'hugo.jpg', caption: 'Hugo in the snow.', imageCaptionKey: null, storageKey: 'hugo.jpg', mimeType: 'image/jpeg', sizeBytes: 1, width: 1, height: 1, embedding: Array(4_096).fill(0.1), createdByKey: actorKey, isFavorite: false, createdAt: now, updatedAt: now };
+    const image = { _key: imageKey, scopeKey, filename: 'hugo.jpg', caption: 'Hugo in the snow.', imageCaptionKey: null, storageKey: 'hugo.jpg', mimeType: 'image/jpeg', sizeBytes: 1, width: 1, height: 1, embedding: Array(EMBEDDING_DIMENSIONS).fill(0.1), createdByKey: actorKey, isFavorite: false, createdAt: now, updatedAt: now };
     let query = '';
     const database: MediaLibraryDatabase = { async query(value, bindVars) { query = value; expect(bindVars).toEqual({ scopeKey, collectionKey, actorKey }); return { async all() { return [[{ image, caption: image.caption, captionScore: 90, identityNames: ['Hugo'] }]]; } }; } };
     const candidates = await createGalleryRepository(database).listMemoryCandidates(scopeKey, collectionKey, actorKey);
@@ -358,7 +359,7 @@ describe('Gallery repository transactions', () => {
   test('deletes a global memory only through the exact owned containing collection', async () => {
     const scopeKey = newId(), memoryKey = newId(), collectionKey = newId(), actorKey = newId(), imageKey = newId(), now = new Date().toISOString();
     const memory = { _key: memoryKey, scopeKey, imageKey, text: 'One.\n\nTwo.\n\nThree.', createdByKey: actorKey, createdAt: now, updatedAt: now };
-    const image = { _key: imageKey, scopeKey, filename: 'memory.jpg', caption: 'Memory', imageCaptionKey: null, storageKey: 'memory.jpg', mimeType: 'image/jpeg', sizeBytes: 1, width: 1, height: 1, embedding: Array(4_096).fill(0), createdByKey: actorKey, isFavorite: false, createdAt: now, updatedAt: now };
+    const image = { _key: imageKey, scopeKey, filename: 'memory.jpg', caption: 'Memory', imageCaptionKey: null, storageKey: 'memory.jpg', mimeType: 'image/jpeg', sizeBytes: 1, width: 1, height: 1, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), createdByKey: actorKey, isFavorite: false, createdAt: now, updatedAt: now };
     let query = '', binds: unknown;
     const database: MediaLibraryDatabase = { async query(value, bindVars) { query = value; binds = bindVars; return { async all() { return [{ memory, image, collectionKeys: [collectionKey, newId()] }]; } }; } };
     const deleted = await createGalleryRepository(database).deleteAccessibleMemory(scopeKey, memoryKey, collectionKey, actorKey);
@@ -373,7 +374,7 @@ describe('Gallery repository transactions', () => {
   test('validates the duplicate set before partitioning and makes all-favorite duplicate batches no-ops', async () => {
     const scopeKey = newId(), collectionKey = newId(), canonicalKey = newId(), favoriteKey = newId(), invalidKey = newId();
     const createdAt = '2026-08-18T10:00:00.000Z';
-    const image = (imageKey: string, isFavorite: boolean, offset: number) => ({ _key: imageKey, scopeKey, filename: `${offset}.jpg`, caption: 'Duplicate', imageCaptionKey: newId(), storageKey: `media/${offset}`, mimeType: 'image/jpeg', sizeBytes: 10, width: 10, height: 10, embedding: Array(4_096).fill(0), isFavorite, createdAt: new Date(Date.parse(createdAt) + offset).toISOString(), updatedAt: createdAt });
+    const image = (imageKey: string, isFavorite: boolean, offset: number) => ({ _key: imageKey, scopeKey, filename: `${offset}.jpg`, caption: 'Duplicate', imageCaptionKey: newId(), storageKey: `media/${offset}`, mimeType: 'image/jpeg', sizeBytes: 10, width: 10, height: 10, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), isFavorite, createdAt: new Date(Date.parse(createdAt) + offset).toISOString(), updatedAt: createdAt });
     for (const imageKeys of [[favoriteKey, invalidKey], [favoriteKey]]) {
       const queries: string[] = [];
       const database: MediaLibraryDatabase = { async query(query) { queries.push(query); return { async all() {
@@ -619,7 +620,7 @@ describe('Gallery repository transactions', () => {
 
   test('loads every live collection image as a highlight candidate without deduplication', async () => {
     const scopeKey = newId(), collectionKey = newId(), actorKey = newId(), now = '2026-08-18T12:00:00.000Z';
-    const image = { _key: newId(), scopeKey, filename: 'same.jpg', caption: 'Same image', storageKey: newId(), mimeType: 'image/jpeg', sizeBytes: 1, width: 1, height: 1, embedding: Array(4096).fill(0), createdByKey: actorKey, isFavorite: false, createdAt: now, updatedAt: now };
+    const image = { _key: newId(), scopeKey, filename: 'same.jpg', caption: 'Same image', storageKey: newId(), mimeType: 'image/jpeg', sizeBytes: 1, width: 1, height: 1, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), createdByKey: actorKey, isFavorite: false, createdAt: now, updatedAt: now };
     let query = '';
     const database: MediaLibraryDatabase = { async query(value) { query = value; return { async all() { return [[{ image, qualityScore: 90 }, { image: { ...image, _key: newId(), storageKey: newId() }, qualityScore: 90 }]]; } }; } };
     const rows = await createGalleryRepository(database).listHighlightCandidates(scopeKey, collectionKey, actorKey);

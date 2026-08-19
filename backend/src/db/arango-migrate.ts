@@ -89,7 +89,6 @@ export async function migrateImageCaptions(targetDb: Database): Promise<void> {
           || caption.scopeKey != image.scopeKey
           || caption.caption != image.caption
           || !IS_NUMBER(caption.score) || caption.score < 1 || caption.score > 100
-          || caption.embedding != image.embedding
         RETURN 1
     )
   `);
@@ -348,7 +347,7 @@ export async function migrateEmailReplyMetadata(targetDb: Database): Promise<voi
   }
 }
 
-export async function migrateExactSemanticRecords(targetDb: Database, collectionName: 'folders' | 'images' | 'collections' | 'tags', embedKeys: readonly string[]) {
+export async function migrateExactSemanticRecords(targetDb: Database, collectionName: 'folders' | 'images' | 'collections' | 'tags' | 'imageCaptions' | 'visualIdentities', embedKeys: readonly string[]) {
   const dimensions = EMBEDDING_DIMENSIONS;
   let after = '';
   while (true) {
@@ -1295,7 +1294,10 @@ async function main() {
     if (spec.name === 'folders' || spec.name === 'images' || spec.name === 'collections' || spec.name === 'documents' || spec.name === 'emailThreads') {
       await migrateContentFavorites(targetDb, spec.name);
     }
-    if (spec.name === 'imageCaptions') await migrateImageCaptions(targetDb);
+    if (spec.name === 'imageCaptions') {
+      await migrateImageCaptions(targetDb);
+      await migrateExactSemanticRecords(targetDb, 'imageCaptions', ['caption']);
+    }
     if (spec.name === 'imageCollectionMemories') {
       await targetDb.query('FOR memory IN imageCollectionMemories SORT memory.createdAt ASC, memory._key ASC COLLECT scopeKey = memory.scopeKey, imageKey = memory.imageKey INTO grouped FOR duplicate IN SLICE(grouped, 1) REMOVE duplicate.memory IN imageCollectionMemories');
       await targetDb.query('FOR memory IN imageCollectionMemories FILTER HAS(memory, "collectionKey") UPDATE memory WITH { collectionKey: null } IN imageCollectionMemories OPTIONS { keepNull: false }');
@@ -1347,6 +1349,7 @@ async function main() {
     if (spec.name === 'images') await migrateExactSemanticRecords(targetDb, 'images', ['filename', 'caption']);
     if (spec.name === 'collections') await migrateExactSemanticRecords(targetDb, 'collections', ['name', 'description']);
     if (spec.name === 'tags') await migrateExactSemanticRecords(targetDb, 'tags', ['name', 'description']);
+    if (spec.name === 'visualIdentities') await migrateExactSemanticRecords(targetDb, 'visualIdentities', ['name', 'description']);
     if (spec.name === 'collections' || spec.name === 'tags') {
       await targetDb.query(`FOR resource IN @@collection FILTER IS_STRING(resource.description) && LENGTH(TRIM(resource.description)) == 0 UPDATE resource WITH { description: null } IN @@collection OPTIONS { keepNull: false }`, { '@collection': spec.name });
     }

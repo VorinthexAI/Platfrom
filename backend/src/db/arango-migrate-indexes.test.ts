@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { isLegacyIndex, LEGACY_REMOVAL_MARKER, normalizeLegacyDocumentSharePermission } from './arango-migrate-indexes';
 import { stageLegacyDocumentShares } from './content-migration';
 import { collections, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateEmailReplyMetadata, migrateImageCaptions, migrateModelActionSlugs, retireMomentumScope, retireTranscriptionDomain, retireUserSettings } from './arango-migrate';
-import { EMBEDDING_DIMENSIONS, embeddingMetadata } from '../lib/embeddings';
+import { EMBEDDING_DIMENSIONS, LEGACY_EMBEDDING_DIMENSIONS, embeddingMetadata } from '../lib/embeddings';
 import { DOCUMENT_CHUNK_MAX_WORDS, DOCUMENT_MAX_CHUNKS, documentSemanticHash } from '../lib/ai/document-processing/chunking';
 
 function migrationDatabase(collection: 'documents' | 'documentVersions', row: Record<string, unknown>) {
@@ -175,9 +175,11 @@ describe('Arango migration indexes', () => {
       expect.objectContaining({ fields: ['scopeKey', 'hashAlgorithm', 'perceptualHash'], sparse: true }),
     ]));
     expect(collections.find(({ name }) => name === 'imageCaptions')?.indexes?.find(({ fields }) => fields.join('.') === 'scopeKey.hashAlgorithm.perceptualHash')?.unique).not.toBe(true);
-    expect(calls.at(-1)).toContain('caption.embedding != image.embedding');
+    expect(calls.at(-1)).not.toContain('caption.embedding != image.embedding');
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
     expect(source).toContain('Dropped obsolete unique image-caption pHash index');
+    expect(source).toContain("migrateExactSemanticRecords(targetDb, 'imageCaptions', ['caption'])");
+    expect(source).toContain("migrateExactSemanticRecords(targetDb, 'visualIdentities', ['name', 'description'])");
   });
   test('removes the retired execution-workspace scope and access relations', async () => {
     const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
@@ -361,11 +363,11 @@ describe('Arango migration indexes', () => {
       else process.env.CONTENT_E2E = previous;
     }
   });
-  test('regenerates legacy 1536 embeddings without allowing a concurrent replacement', async () => {
+  test('regenerates outgoing 4096 embeddings without allowing a concurrent replacement', async () => {
     const previous = process.env.CONTENT_E2E;
     process.env.CONTENT_E2E = 'true';
     try {
-      const migration = migrationDatabase('documents', { _key: 'legacy-document', _rev: 'legacy-rev', name: 'Legacy', html: '<p>Historical body</p>', content: 'Historical body', embedding: Array(1_536).fill(0.1) });
+      const migration = migrationDatabase('documents', { _key: 'legacy-document', _rev: 'legacy-rev', name: 'Legacy', html: '<p>Historical body</p>', content: 'Historical body', embedding: Array(LEGACY_EMBEDDING_DIMENSIONS).fill(0.1) });
       await migrateContentDocuments(migration.database);
       const [patch] = migration.update?.bindVars?.updates as Array<Record<string, unknown>>;
       expect(patch.embedding).toHaveLength(EMBEDDING_DIMENSIONS);

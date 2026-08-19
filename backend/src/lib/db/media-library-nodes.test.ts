@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, EMBEDDING_PROVIDER_ID, currentEmbeddingSchema } from '@/lib/embeddings';
+import { EMBEDDING_DIMENSIONS, currentEmbeddingSchema } from '@/lib/embeddings';
 import { imageSchema, imagesEmbeddingFields, IMAGES_COLLECTION } from './images.node';
 import { collectionSchema, collectionsEmbeddingFields, COLLECTIONS_COLLECTION } from './collections.node';
 import { COLLECTION_IMAGES_COLLECTION } from './collection-images.node';
@@ -15,8 +15,8 @@ describe('MediaLibrary node contracts', () => {
   test('declares the Gallery physical collections and keeps secrets private', () => {
     expect([IMAGES_COLLECTION, IMAGE_CAPTIONS_COLLECTION, COLLECTIONS_COLLECTION, COLLECTION_IMAGES_COLLECTION, COLLECTION_MEMBERS_COLLECTION, COLLECTION_INVITES_COLLECTION, TAGS_COLLECTION, TAG_ASSIGNMENTS_COLLECTION, SHARES_COLLECTION]).toEqual(['images', 'imageCaptions', 'collections', 'collectionImages', 'collectionMembers', 'collectionInvites', 'tags', 'tagAssignments', 'shares']);
   });
-  test('uses the global current Qwen embedding contract', () => {
-    expect(EMBEDDING_DIMENSIONS).toBe(4096); expect(EMBEDDING_MODEL).toBe('qwen.qwen3-embedding-8b'); expect(EMBEDDING_PROVIDER_ID).toBe('openrouter');
+  test('uses the global current embedding contract', () => {
+    expect(EMBEDDING_DIMENSIONS).toBe(1_536);
     expect(currentEmbeddingSchema.safeParse(embedding).success).toBe(true); expect(currentEmbeddingSchema.safeParse(embedding.slice(1)).success).toBe(false);
     expect(imagesEmbeddingFields).toEqual(['filename', 'caption']); expect(collectionsEmbeddingFields).toEqual(['name', 'description']); expect(tagsEmbeddingFields).toEqual(['name', 'description']);
   });

@@ -16,8 +16,8 @@ const now = '2026-08-08T12:00:00.000Z';
 const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
 
 describe('book generation node contracts', () => {
-  test('requires exact 4096-dimensional vectors on every semantic record', () => {
-    expect(EMBEDDING_DIMENSIONS).toBe(4096);
+  test('requires exact current-dimensional vectors on every semantic record', () => {
+    expect(EMBEDDING_DIMENSIONS).toBe(1_536);
     const semanticSchemas = [bookSchema, bookContextSchema, bookThemeSchema, bookSourceSchema, bookPartSchema, bookChapterSchema, chapterContextSchema];
     for (const schema of semanticSchemas) {
       const object = 'innerType' in schema ? schema.innerType() : schema;

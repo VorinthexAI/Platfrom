@@ -2,7 +2,6 @@ import OpenAI from 'openai';
 import { OpenAIRealtimeWebSocket } from 'openai/realtime/websocket';
 import { z } from 'zod';
 import { tokenUsage } from '@/lib/ai/shared/usage';
-import { LEGACY_EMBEDDING_DIMENSIONS, LEGACY_EXTERNAL_EMBEDDING_MODEL_ID } from '@/lib/embedding-constants';
 import { normalizeProviderError, ProviderError } from './errors';
 import {
   CHAT_ACTION_IDS,
@@ -13,17 +12,13 @@ import {
 import {
   imageGenerateInputSchema,
   chatInputSchema,
-  embeddingInputSchema,
   resolveRequestSignal,
   speechInputSchema,
   type ImageOutput,
   type ChatOutput,
-  type EmbeddingOutput,
   type ProviderAdapter,
   type ProviderExecuteRequest,
   type ProviderExecuteResponse,
-  type ProviderEmbedRequest,
-  type ProviderEmbedResponse,
   type ProviderFactory,
   type SpeechOutput,
   type ProviderStreamChunk,
@@ -81,27 +76,6 @@ async function raceAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<
   });
   try { return await Promise.race([promise, aborted]); }
   finally { removeAbort(); }
-}
-
-/** Rollout-only compatibility for persisted legacy routes. Current seeds disable every OpenAI embedding binding and route. */
-async function createLegacyEmbeddings(client: OpenAI, request: ProviderEmbedRequest): Promise<ProviderEmbedResponse> {
-  try {
-    if (request.externalModelId !== LEGACY_EXTERNAL_EMBEDDING_MODEL_ID) throw new ProviderError(PROVIDER_ID, 'unsupported_action', `Legacy OpenAI embeddings require ${LEGACY_EXTERNAL_EMBEDDING_MODEL_ID}`);
-    const raw = await client.embeddings.create({
-      model: request.externalModelId,
-      input: request.input,
-      dimensions: LEGACY_EMBEDDING_DIMENSIONS,
-      encoding_format: 'float',
-    }, { signal: resolveRequestSignal(request) });
-    const expectedCount = typeof request.input === 'string' ? 1 : request.input.length;
-    const ordered = [...raw.data].sort((left, right) => left.index - right.index);
-    if (ordered.length !== expectedCount || ordered.some((item, index) => item.index !== index || item.embedding.length !== LEGACY_EMBEDDING_DIMENSIONS || item.embedding.some((value) => !Number.isFinite(value)))) {
-      throw new ProviderError(PROVIDER_ID, 'response_invalid', 'legacy openai embeddings returned invalid vectors');
-    }
-    return { embeddings: ordered.map((item) => item.embedding), usage: tokenUsage(raw.usage.prompt_tokens, 0, raw.usage.total_tokens), providerId: PROVIDER_ID, externalModelId: request.externalModelId, rawResponse: raw };
-  } catch (error) {
-    throw normalizeProviderError(PROVIDER_ID, error);
-  }
 }
 
 async function executeRealtimeChat<TInput, TOutput>(client: OpenAI, request: ProviderExecuteRequest<TInput>): Promise<ProviderExecuteResponse<TOutput>> {
@@ -252,12 +226,6 @@ export function createOpenAIProvider(config: OpenAIProviderConfig): ProviderAdap
         return executeOpenAICompatibleChat(PROVIDER_ID, client, request, { maxTokensParam: 'max_completion_tokens' });
       }
       try {
-        if (request.actionId === 'embed') {
-          const input = embeddingInputSchema.parse(request.input);
-          const embedded = await createLegacyEmbeddings(client, { externalModelId: request.externalModelId, input: input.text, dimensions: LEGACY_EMBEDDING_DIMENSIONS, timeoutMs: request.timeoutMs, signal: request.signal });
-          const output: EmbeddingOutput = { embedding: embedded.embeddings[0]! };
-          return { output: output as TOutput, usage: embedded.usage, providerId: PROVIDER_ID, modelId: request.modelId, externalModelId: request.externalModelId, rawResponse: embedded.rawResponse };
-        }
         if (request.actionId === 'generate-image') return await executeImageGenerate(client, request);
         if (request.actionId === 'speak' || request.actionId === 'generate-speech') return await executeSpeech(client, request);
       } catch (err) {
@@ -270,10 +238,6 @@ export function createOpenAIProvider(config: OpenAIProviderConfig): ProviderAdap
       if (!CHAT_ACTION_IDS.has(request.actionId)) throw unsupportedAction(PROVIDER_ID, request.actionId);
       if (request.externalModelId === OPENAI_REALTIME_MODEL) return streamRealtimeChat(client, request);
       return streamOpenAICompatibleChat(PROVIDER_ID, client, request, { maxTokensParam: 'max_completion_tokens' });
-    },
-
-    embed(request) {
-      return createLegacyEmbeddings(client, request);
     },
 
   };

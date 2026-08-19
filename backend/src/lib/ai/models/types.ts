@@ -8,7 +8,7 @@ export const MODEL_SLUGS = [
   'amazon.nova-pro',
   'openai.gpt-realtime-2',
   'amazon.polly-generative',
-  'qwen.qwen3-embedding-8b',
+  'openai.text-embedding-3-small',
   'google.gemini-2.5-flash-lite',
 ] as const;
 export const modelSlugSchema = z.string().trim().min(1).max(200).regex(/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/, 'Model slug must use lowercase dot or hyphen notation');

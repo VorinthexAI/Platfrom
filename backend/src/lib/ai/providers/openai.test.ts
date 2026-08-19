@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { createOpenAIProvider } from './openai';
-import { LEGACY_EMBEDDING_DIMENSIONS, LEGACY_EXTERNAL_EMBEDDING_MODEL_ID } from '@/lib/embedding-constants';
 import { speechInputSchema } from './types';
 
 const originalFetch = globalThis.fetch;
@@ -9,13 +8,10 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-test('retains only generic legacy embedding compatibility for persisted rollout routes', async () => {
-  const embedding = Array(LEGACY_EMBEDDING_DIMENSIONS).fill(0.25);
-  globalThis.fetch = (async () => Response.json({ data: [{ index: 0, embedding }], usage: { prompt_tokens: 2, total_tokens: 2 } })) as unknown as typeof fetch;
+test('does not expose a direct OpenAI embedding route', async () => {
   const provider = createOpenAIProvider({ apiKey: 'test-key' });
-  const result = await provider.embed!({ externalModelId: LEGACY_EXTERNAL_EMBEDDING_MODEL_ID, input: 'legacy' });
-  expect(result.embeddings).toEqual([embedding]);
-  await expect(provider.embed!({ externalModelId: 'qwen/qwen3-embedding-8b', input: 'current' })).rejects.toMatchObject({ code: 'unsupported_action' });
+  expect(provider.embed).toBeUndefined();
+  await expect(provider.execute({ actionId: 'embed', modelId: 'openai.text-embedding-3-small', externalModelId: 'text-embedding-3-small', input: { text: 'query' }, organizationKey: 'organization' })).rejects.toMatchObject({ code: 'unsupported_action' });
 });
 
 describe('OpenAI Realtime provider', () => {

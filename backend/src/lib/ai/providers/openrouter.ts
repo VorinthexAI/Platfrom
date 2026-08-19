@@ -103,7 +103,9 @@ async function createEmbeddings(config: OpenRouterProviderConfig, request: Provi
         throw new ProviderError(PROVIDER_ID, providerErrorCodeForStatus(response.status), `openrouter request failed with status ${response.status}`, { status: response.status });
       }
       const raw = responseSchema.parse(await response.json());
-      if (raw.provider.toLowerCase().replace(/[^a-z0-9]/g, '') !== EMBEDDING_ROUTE) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'openrouter embeddings were not served by DeepInfra');
+      const normalizedProvider = raw.provider.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const normalizedRoute = EMBEDDING_ROUTE.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (normalizedProvider !== normalizedRoute) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'openrouter embeddings were not served by Azure');
       const ordered = [...raw.data].sort((left, right) => left.index - right.index);
       const indices = ordered.map(({ index }) => index);
       if (ordered.length !== inputs.length || new Set(indices).size !== indices.length || indices.some((index, position) => index !== position)) {

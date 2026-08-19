@@ -1,11 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
 import { imageSchema } from '@/lib/db/images.node';
+import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
 import { highlightTargetCount, selectHighlightCandidates } from './highlight-selection';
 
 const candidate = (embedding: number[], qualityScore = 50) => {
   const now = new Date().toISOString();
-  const vector = Array.from({ length: 4096 }, (_, index) => embedding[index] ?? 0);
+  const vector = Array.from({ length: EMBEDDING_DIMENSIONS }, (_, index) => embedding[index] ?? 0);
   return { qualityScore, image: imageSchema.parse({ key: newId(), scopeKey: newId(), filename: 'image.jpg', caption: 'Image', storageKey: newId(), mimeType: 'image/jpeg', sizeBytes: 1, width: 1, height: 1, embedding: vector, createdByKey: null, isFavorite: false, createdAt: now, updatedAt: now }) };
 };
 

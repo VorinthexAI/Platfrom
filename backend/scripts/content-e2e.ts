@@ -13,7 +13,7 @@ const defaults: Record<string, string> = {
   AWS_ACCESS_KEY_ID: 'test',
   AWS_SECRET_ACCESS_KEY: 'test',
   S3_BUCKET: 'vorinthex-dev',
-  EMBEDDING_DIMENSIONS: '4096',
+  EMBEDDING_DIMENSIONS: '1536',
   ORCHESTRATION_CREDENTIALS_MASTER_KEY: Buffer.alloc(32, 7).toString('base64'),
 };
 const suppliedDatabase = Boolean(process.env.ARANGO_DATABASE && process.env.ARANGO_DATABASE !== 'vorinthex');

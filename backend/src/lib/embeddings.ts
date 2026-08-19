@@ -5,7 +5,6 @@ import {
   EMBEDDING_PROVIDER_ID,
   EXTERNAL_EMBEDDING_MODEL_ID,
   LEGACY_EMBEDDING_DIMENSIONS,
-  QWEN_RETRIEVAL_INSTRUCTION,
 } from './embedding-constants';
 
 export * from './embedding-constants';
@@ -44,10 +43,8 @@ export function embeddingMetadata() {
   } as const;
 }
 
-export function prepareEmbeddingText(text: string, purpose: EmbeddingPurpose): string {
-  const value = text.trim();
-  if (purpose === 'query' && !value.startsWith(QWEN_RETRIEVAL_INSTRUCTION)) return `${QWEN_RETRIEVAL_INSTRUCTION}${value}`;
-  return value;
+export function prepareEmbeddingText(text: string, _purpose: EmbeddingPurpose): string {
+  return text.trim();
 }
 
 export async function embedTexts(input: EmbedTextsInput): Promise<number[][]> {

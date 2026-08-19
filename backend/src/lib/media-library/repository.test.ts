@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
-import { currentEmbeddingSchema } from '@/lib/embeddings';
+import { EMBEDDING_DIMENSIONS, currentEmbeddingSchema } from '@/lib/embeddings';
 import { createMediaLibraryRepository, searchAccessibleImages, type MediaLibraryDatabase } from './repository';
 
 describe('MediaLibrary repository transactions', () => {
@@ -49,7 +49,7 @@ describe('MediaLibrary repository transactions', () => {
 describe('MediaLibrary image similarity search', () => {
   test('enforces Gallery access and returns descending cosine matches', async () => {
     const organizationKey = newId(), scopeKey = newId(), actorKey = newId(), collectionKey = newId(), imageKey = newId();
-    const embedding = currentEmbeddingSchema.parse(Array.from({ length: 4_096 }, () => 0.25));
+    const embedding = currentEmbeddingSchema.parse(Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.25));
     const now = '2026-08-11T12:00:00.000Z';
     let query = '';
     let bindVars: Record<string, unknown> = {};
@@ -72,7 +72,7 @@ describe('MediaLibrary image similarity search', () => {
     expect(query).toContain('FILTER @threshold == null || score >= @threshold');
     expect(query).toContain('SORT score DESC, image._key ASC');
     expect(query).toContain('LIMIT @limit');
-    expect(bindVars).toMatchObject({ organizationKey, scopeKey, actorKey, collectionKey, dimensions: 4_096, threshold: null, limit: 50 });
+    expect(bindVars).toMatchObject({ organizationKey, scopeKey, actorKey, collectionKey, dimensions: EMBEDDING_DIMENSIONS, threshold: null, limit: 50 });
     expect(results).toEqual([{ image: expect.objectContaining({ key: imageKey, filename: 'image.jpg' }), score: 0.9 }]);
     expect(results[0]?.image).not.toHaveProperty('_key');
   });
@@ -80,7 +80,7 @@ describe('MediaLibrary image similarity search', () => {
   test('binds an explicit threshold without interpolating it into AQL', async () => {
     let bindVars: Record<string, unknown> = {};
     const database: MediaLibraryDatabase = { async query(_query, variables) { bindVars = variables ?? {}; return { async all() { return []; } }; } };
-    await searchAccessibleImages({ organizationKey: newId(), scopeKey: newId(), actorKey: newId(), embedding: Array.from({ length: 4_096 }, () => 0), threshold: 0.97, limit: 10 }, database);
+    await searchAccessibleImages({ organizationKey: newId(), scopeKey: newId(), actorKey: newId(), embedding: Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0), threshold: 0.97, limit: 10 }, database);
     expect(bindVars).toMatchObject({ threshold: 0.97, limit: 10 });
   });
 });

@@ -15,8 +15,8 @@ const now = '2026-08-08T12:00:00.000Z';
 const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
 
 describe('email node contracts', () => {
-  test('requires exact 4096-dimensional vectors only on semantic records', () => {
-    expect(EMBEDDING_DIMENSIONS).toBe(4096);
+  test('requires exact current-dimensional vectors only on semantic records', () => {
+    expect(EMBEDDING_DIMENSIONS).toBe(1_536);
     for (const schema of [emailThreadSchema, emailMessageSchema, emailContactSchema, emailWritingProfileSchema, emailRuleSchema, emailReplyDraftSchema]) {
       const object = 'innerType' in schema ? schema.innerType() : schema;
       expect(object.shape.embedding.safeParse(embedding).success).toBe(true);

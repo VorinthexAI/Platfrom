@@ -86,7 +86,7 @@ describe('model and routing relation seeds', () => {
       'amazon.nova-pro',
       'openai.gpt-realtime-2',
       'amazon.polly-generative',
-      'qwen.qwen3-embedding-8b',
+      'openai.text-embedding-3-small',
       'google.gemini-2.5-flash-lite',
     ]);
     expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'orchestrator-chat').map(({ modelSlug }) => modelSlug))
@@ -95,7 +95,7 @@ describe('model and routing relation seeds', () => {
       .toEqual(['google.gemini-2.5-flash-lite']);
     expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'translate').map(({ modelSlug }) => modelSlug))
       .toEqual(['google.gemini-2.5-flash-lite']);
-    expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'embed')?.modelSlug).toBe('qwen.qwen3-embedding-8b');
+    expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'embed')?.modelSlug).toBe('openai.text-embedding-3-small');
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'generate-speech')?.modelSlug).toBe('amazon.polly-generative');
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'caption-image')?.modelSlug).toBe('google.gemini-2.5-flash-lite');
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'document-cleanup')?.modelSlug).toBe('google.gemini-2.5-flash-lite');
@@ -107,11 +107,11 @@ describe('model and routing relation seeds', () => {
       'amazon.nova-premier:aws-bedrock:us.amazon.nova-premier-v1:0:false',
       'amazon.nova-pro:aws-bedrock:us.amazon.nova-pro-v1:0:true',
       'openai.gpt-realtime-2:openai:gpt-realtime-2:true',
-      'qwen.qwen3-embedding-8b:openrouter:qwen/qwen3-embedding-8b:true',
+      'openai.text-embedding-3-small:openrouter:openai/text-embedding-3-small:true',
       'amazon.polly-generative:aws-polly:generative:true',
       'google.gemini-2.5-flash-lite:openrouter:google/gemini-2.5-flash-lite:true',
     ]);
-    expect(SEEDED_MODEL_PROVIDERS.filter((route) => route.modelSlug.includes('embedding')).map((route) => route.modelSlug)).toEqual(['qwen.qwen3-embedding-8b']);
+    expect(SEEDED_MODEL_PROVIDERS.filter((route) => route.modelSlug.includes('embedding')).map((route) => route.modelSlug)).toEqual(['openai.text-embedding-3-small']);
   });
 
   test('joins every action binding to its declared provider route', () => {
@@ -351,20 +351,27 @@ describe('AI runtime seed orchestration', () => {
     expect(route.enabled).toBe(false);
   });
 
-  test('retires the persisted OpenAI embedding model, binding, and route while Qwen remains seeded', async () => {
-    const model = { key: 'legacy-openai', enabled: true };
-    const binding = { key: 'legacy-openai-binding', enabled: true };
-    const route = { key: 'legacy-openai-route', enabled: true };
-    await reconcileObsoleteSeededModelActions({
-      getModelBySlug: async (slug) => slug === 'openai.text-embedding-3-small' ? model : null,
-      updateModel: async (_key, patch) => { model.enabled = patch.enabled; },
-      getModelActionByPair: async () => binding,
-      updateModelAction: async (_key, patch) => { binding.enabled = patch.enabled; },
-      getProviderBySlug: async (slug) => slug === 'openai' ? { key: 'openai-provider' } : null,
-      getModelProviderByPair: async () => route,
-      updateModelProvider: async (_key, patch) => { route.enabled = patch.enabled; },
+  test('keeps the current model and action enabled while retiring all other embedding routes', async () => {
+    const currentModel = { key: 'current-embedding', enabled: true };
+    const retiredModel = { key: 'retired-embedding', enabled: true };
+    const currentBinding = { key: 'current-binding', enabled: true };
+    const retiredBinding = { key: 'retired-binding', enabled: true };
+    const directRoute = { key: 'direct-openai-route', enabled: true };
+    const retiredRoute = { key: 'retired-openrouter-route', enabled: true };
+    const results = await reconcileObsoleteSeededModelActions({
+      getModelBySlug: async (slug) => slug === 'openai.text-embedding-3-small' ? currentModel : null,
+      getModelById: async (key) => key === retiredModel.key ? retiredModel : null,
+      updateModel: async (key, patch) => { (key === currentModel.key ? currentModel : retiredModel).enabled = patch.enabled; },
+      getModelActionByPair: async (modelKey) => modelKey === currentModel.key ? currentBinding : retiredBinding,
+      listEnabledModelActionsByActionSlug: async () => [{ ...retiredBinding, modelKey: retiredModel.key }],
+      updateModelAction: async (key, patch) => { (key === currentBinding.key ? currentBinding : retiredBinding).enabled = patch.enabled; },
+      getProviderBySlug: async (slug) => ({ key: `${slug}-provider` }),
+      getModelProviderByPair: async (modelKey, providerKey) => modelKey === currentModel.key && providerKey === 'openai-provider' ? directRoute : modelKey === retiredModel.key && providerKey === 'openrouter-provider' ? retiredRoute : null,
+      updateModelProvider: async (key, patch) => { (key === directRoute.key ? directRoute : retiredRoute).enabled = patch.enabled; },
     });
-    expect({ model: model.enabled, binding: binding.enabled, route: route.enabled }).toEqual({ model: false, binding: false, route: false });
-    expect(SEEDED_MODEL_ACTIONS.find((seed) => seed.actionSlug === 'embed')).toMatchObject({ modelSlug: 'qwen.qwen3-embedding-8b', enabled: true });
+    expect({ model: currentModel.enabled, binding: currentBinding.enabled, directRoute: directRoute.enabled }).toEqual({ model: true, binding: true, directRoute: false });
+    expect({ model: retiredModel.enabled, binding: retiredBinding.enabled, route: retiredRoute.enabled }).toEqual({ model: false, binding: false, route: false });
+    expect(results.map(({ collection, key }) => `${collection}:${key}`)).toEqual(['modelProviders:direct-openai-route', 'models:retired-embedding', 'modelActions:retired-binding', 'modelProviders:retired-openrouter-route']);
+    expect(SEEDED_MODEL_ACTIONS.find((seed) => seed.actionSlug === 'embed')).toMatchObject({ modelSlug: 'openai.text-embedding-3-small', enabled: true });
   });
 });

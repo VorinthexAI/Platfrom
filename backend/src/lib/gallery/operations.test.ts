@@ -7,6 +7,7 @@ import { galleryUploadSchema } from '@/lib/db/gallery-uploads.node';
 import { imageSchema } from '@/lib/db/images.node';
 import { shareSchema } from '@/lib/db/shares.node';
 import { encryptAuthenticatedJson } from '@/lib/authenticated-encryption';
+import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
 
 const key = () => newId();
 const validInputs = {
@@ -56,7 +57,7 @@ describe('Gallery operation boundaries', () => {
     process.env.AWS_ACCESS_KEY_ID ??= 'test';
     process.env.AWS_SECRET_ACCESS_KEY ??= 'test';
     const createdByKey = key(), now = new Date().toISOString();
-    const image = imageSchema.parse({ key: key(), scopeKey: key(), filename: 'photo.jpg', caption: 'Photo.', imageCaptionKey: null, createdByKey, storageKey: 'gallery/photo.jpg', mimeType: 'image/jpeg', sizeBytes: 10, width: 10, height: 10, embedding: Array(4_096).fill(0), isFavorite: false, createdAt: now, updatedAt: now });
+    const image = imageSchema.parse({ key: key(), scopeKey: key(), filename: 'photo.jpg', caption: 'Photo.', imageCaptionKey: null, createdByKey, storageKey: 'gallery/photo.jpg', mimeType: 'image/jpeg', sizeBytes: 10, width: 10, height: 10, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), isFavorite: false, createdAt: now, updatedAt: now });
     expect(await safeImage(image)).toMatchObject({ key: image.key, createdByKey });
   });
 
@@ -139,7 +140,7 @@ describe('Gallery operation boundaries', () => {
     expect(source).toContain('canCreateCollections,');
     expect(source).toContain('role, isOwned');
     const now = '2026-08-18T12:00:00.000Z';
-    const collection = { key: key(), scopeKey: key(), name: 'Shared', embedding: Array(4_096).fill(0), isFavorite: false, createdAt: now, updatedAt: now };
+    const collection = { key: key(), scopeKey: key(), name: 'Shared', embedding: Array(EMBEDDING_DIMENSIONS).fill(0), isFavorite: false, createdAt: now, updatedAt: now };
     expect(projectGalleryCollection(collection, 0, null, key(), 'owner', false)).toMatchObject({ role: 'owner', isOwned: false, access: { canManage: true } });
   });
 
@@ -303,7 +304,7 @@ describe('Gallery operation boundaries', () => {
     process.env.AWS_ACCESS_KEY_ID ??= 'test';
     process.env.AWS_SECRET_ACCESS_KEY ??= 'test';
     const organizationKey = 'organization', scopeKey = key(), actorKey = key(), collectionKey = key(), highlightKey = key(), userId = key(), now = new Date().toISOString();
-    const visible = imageSchema.parse({ key: key(), scopeKey, filename: 'visible.jpg', caption: 'Visible', storageKey: 'private/visible.jpg', mimeType: 'image/jpeg', sizeBytes: 1, width: 1, height: 1, embedding: Array(4096).fill(0), createdByKey: actorKey, isFavorite: false, createdAt: now, updatedAt: now });
+    const visible = imageSchema.parse({ key: key(), scopeKey, filename: 'visible.jpg', caption: 'Visible', storageKey: 'private/visible.jpg', mimeType: 'image/jpeg', sizeBytes: 1, width: 1, height: 1, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), createdByKey: actorKey, isFavorite: false, createdAt: now, updatedAt: now });
     const highlight = { key: highlightKey, scopeKey, collectionKey, imageKeys: [key(), visible.key, key()], createdByKey: actorKey, createdAt: now, updatedAt: now };
     const context = { organizationKey, scopeKey, membership: { key: actorKey, organizationId: organizationKey, userId, status: 'active' }, getHighlight: async () => ({ highlight, images: [visible] }) } as any;
     const output = await galleryOperations.readHighlight({ highlightKey }, context);
@@ -342,7 +343,7 @@ describe('Gallery operation boundaries', () => {
     process.env.AWS_ACCESS_KEY_ID ??= 'test';
     process.env.AWS_SECRET_ACCESS_KEY ??= 'test';
     const organizationKey = 'organization', scopeKey = key(), actorKey = key(), collectionKey = key(), now = new Date().toISOString();
-    const image = imageSchema.parse({ key: key(), scopeKey, filename: 'day.jpg', caption: 'A family picnic.', storageKey: 'private/day.jpg', mimeType: 'image/jpeg', sizeBytes: 1, width: 1, height: 1, embedding: Array(4096).fill(0), createdByKey: actorKey, isFavorite: false, createdAt: now, updatedAt: now });
+    const image = imageSchema.parse({ key: key(), scopeKey, filename: 'day.jpg', caption: 'A family picnic.', storageKey: 'private/day.jpg', mimeType: 'image/jpeg', sizeBytes: 1, width: 1, height: 1, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), createdByKey: actorKey, isFavorite: false, createdAt: now, updatedAt: now });
     let prompt = '', persisted: any, metrics: any;
     const events: string[] = [];
     const context = {
@@ -381,7 +382,7 @@ describe('Gallery operation boundaries', () => {
     const base = { organizationKey, scopeKey, membership: { key: actorKey, organizationId: organizationKey, userId: key(), status: 'active' }, getCollectionRole: async () => 'owner' } as any;
     await expect(galleryOperations.createMemory({ collectionKey }, { ...base, listMemoryCandidates: async () => [] })).rejects.toMatchObject({ status: 409, code: 'GALLERY_MEMORY_IMAGES_EXHAUSTED', message: 'Add more unique images to this collection to create another memory.' });
     const now = new Date().toISOString();
-    const image = imageSchema.parse({ key: key(), scopeKey, filename: 'x.jpg', caption: 'X', storageKey: 'x', mimeType: 'image/jpeg', sizeBytes: 1, width: 1, height: 1, embedding: Array(4096).fill(0), createdByKey: actorKey, isFavorite: false, createdAt: now, updatedAt: now });
+    const image = imageSchema.parse({ key: key(), scopeKey, filename: 'x.jpg', caption: 'X', storageKey: 'x', mimeType: 'image/jpeg', sizeBytes: 1, width: 1, height: 1, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), createdByKey: actorKey, isFavorite: false, createdAt: now, updatedAt: now });
     await expect(galleryOperations.createMemory({ collectionKey }, { ...base, listMemoryCandidates: async () => [{ image, caption: 'X', captionScore: 1, identityNames: [] }], generateMemory: async () => 'One.\nTwo.\nThree.', createMemory: async () => ({ status: 'exhausted', collectionKeys: [] }) })).rejects.toMatchObject({ status: 409, code: 'GALLERY_MEMORY_IMAGES_EXHAUSTED' });
   });
 
@@ -389,7 +390,7 @@ describe('Gallery operation boundaries', () => {
     process.env.AWS_ACCESS_KEY_ID ??= 'test';
     process.env.AWS_SECRET_ACCESS_KEY ??= 'test';
     const organizationKey = 'organization', scopeKey = key(), actorKey = key(), collectionKey = key(), imageKey = key(), now = new Date().toISOString();
-    const image = imageSchema.parse({ key: imageKey, scopeKey, filename: 'replay.jpg', caption: 'Replay', storageKey: 'private/replay.jpg', mimeType: 'image/jpeg', sizeBytes: 1, width: 1, height: 1, embedding: Array(4096).fill(0), createdByKey: actorKey, isFavorite: false, createdAt: now, updatedAt: now });
+    const image = imageSchema.parse({ key: imageKey, scopeKey, filename: 'replay.jpg', caption: 'Replay', storageKey: 'private/replay.jpg', mimeType: 'image/jpeg', sizeBytes: 1, width: 1, height: 1, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), createdByKey: actorKey, isFavorite: false, createdAt: now, updatedAt: now });
     let selected = 0, generated = 0, events = 0;
     const context = {
       organizationKey, scopeKey, idempotencyKey: 'same-request', membership: { key: actorKey, organizationId: organizationKey, userId: key(), status: 'active' },
@@ -409,7 +410,7 @@ describe('Gallery operation boundaries', () => {
     process.env.AWS_ACCESS_KEY_ID ??= 'test';
     process.env.AWS_SECRET_ACCESS_KEY ??= 'test';
     const organizationKey = 'organization', scopeKey = key(), actorKey = key(), firstCollectionKey = key(), secondCollectionKey = key(), now = new Date().toISOString();
-    const makeImage = (imageKey: string) => imageSchema.parse({ key: imageKey, scopeKey, filename: `${imageKey}.jpg`, caption: 'A shared day.', storageKey: `private/${imageKey}.jpg`, mimeType: 'image/jpeg', sizeBytes: 1, width: 1, height: 1, embedding: Array(4096).fill(0), createdByKey: actorKey, isFavorite: false, createdAt: now, updatedAt: now });
+    const makeImage = (imageKey: string) => imageSchema.parse({ key: imageKey, scopeKey, filename: `${imageKey}.jpg`, caption: 'A shared day.', storageKey: `private/${imageKey}.jpg`, mimeType: 'image/jpeg', sizeBytes: 1, width: 1, height: 1, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), createdByKey: actorKey, isFavorite: false, createdAt: now, updatedAt: now });
     const images = new Map([[firstCollectionKey, makeImage(key())], [secondCollectionKey, makeImage(key())]]);
     const replayLookups: string[] = [], persisted: Array<{ memoryKey: string; collectionKey: string }> = [];
     const context = {
@@ -429,7 +430,7 @@ describe('Gallery operation boundaries', () => {
 
   test('requires an exact collection selector when deleting a memory', async () => {
     const organizationKey = 'organization', scopeKey = key(), actorKey = key(), memoryKey = key(), collectionKey = key(), imageKey = key(), now = new Date().toISOString();
-    const image = imageSchema.parse({ key: imageKey, scopeKey, filename: 'memory.jpg', caption: 'Memory', storageKey: 'private/memory.jpg', mimeType: 'image/jpeg', sizeBytes: 1, width: 1, height: 1, embedding: Array(4096).fill(0), createdByKey: actorKey, isFavorite: false, createdAt: now, updatedAt: now });
+    const image = imageSchema.parse({ key: imageKey, scopeKey, filename: 'memory.jpg', caption: 'Memory', storageKey: 'private/memory.jpg', mimeType: 'image/jpeg', sizeBytes: 1, width: 1, height: 1, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), createdByKey: actorKey, isFavorite: false, createdAt: now, updatedAt: now });
     const memory = { key: memoryKey, scopeKey, imageKey, text: 'One.\n\nTwo.\n\nThree.', createdByKey: actorKey, createdAt: now, updatedAt: now };
     let deletionArgs: unknown[] = [];
     const context = { organizationKey, scopeKey, membership: { key: actorKey, organizationId: organizationKey, userId: key(), status: 'active' }, getMemory: async () => ({ memory, image, collectionKeys: [collectionKey] }), deleteMemory: async (...args: unknown[]) => { deletionArgs = args; return { memory, image, collectionKeys: [collectionKey, key()] }; }, publishCollectionEvent: async () => undefined } as any;

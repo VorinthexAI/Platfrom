@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { findReusableImageCaption } from './image-captions.node';
 import { PERCEPTUAL_HASH_DUPLICATE_DISTANCE } from '@/lib/perceptual-hash';
+import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
 
 const scopeKey = 'cmrnlzf640001qc7kazsr96k5';
 const now = '2026-08-11T12:00:00.000Z';
@@ -11,7 +12,7 @@ const record = (key: string, perceptualHash: string, createdAt = now) => ({
   caption: key,
   score: 80,
   scoreVersion: 1,
-  embedding: Array(4_096).fill(0.1),
+  embedding: Array(EMBEDDING_DIMENSIONS).fill(0.1),
   perceptualHash,
   hashAlgorithm: 'phash-64-dct-v1',
   hashSegment0: perceptualHash.slice(0, 4),

@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
 
 const live = process.env.CONTENT_E2E === 'true';
 const suite = live ? describe : describe.skip;
@@ -19,14 +20,14 @@ suite('Content live E2E', () => {
   let GetObjectCommand: any;
   const roots = new Set<string>();
   const prefixes = new Set<string>();
-  const embedding = Array.from({ length: 4096 }, (_, index) => (index % 17) / 17);
+  const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, (_, index) => (index % 17) / 17);
   const now = '2026-07-22T12:00:00.000Z';
 
   beforeAll(async () => {
     expect(process.env.ARANGO_DATABASE).toBeTruthy();
     expect(process.env.ARANGO_DATABASE).not.toBe('vorinthex');
     expect(() => new URL(process.env.AWS_ENDPOINT_URL!)).not.toThrow();
-    expect(process.env.EMBEDDING_DIMENSIONS).toBe('4096');
+    expect(process.env.EMBEDDING_DIMENSIONS).toBe('1536');
     const [client, ids, content, processing, exports, storage, s3Module, aws] = await Promise.all([
       import('@/lib/db/client'),
       import('@/lib/ids'),
@@ -129,7 +130,7 @@ suite('Content live E2E', () => {
     const dependencies = {
       embed: async () => embedding,
       ingestion: {
-        embeddingDimensions: 4096,
+        embeddingDimensions: EMBEDDING_DIMENSIONS,
         embed: async () => embedding,
         embedBatch: async ({ texts }: { texts: string[] }) => { ingestionBatchSizes.push(texts.length); return texts.map(() => embedding); },
         logger: (event: any) => {
@@ -141,7 +142,7 @@ suite('Content live E2E', () => {
         if (action === 'document-topics') return { text: '{"topics":["Deterministic systems","Archive"]}' };
         if (action === 'speak' || action === 'generate-speech') return { audio: new TextEncoder().encode('deterministic audio'), mimeType: 'audio/mpeg', durationMs: 250 };
         if (action === 'document-cleanup') return { content: input.text };
-        if (action === 'document-embed') return documentEmbed(input, { embed: async () => embedding, dimensions: 4096, logger: () => undefined });
+        if (action === 'document-embed') return documentEmbed(input, { embed: async () => embedding, dimensions: EMBEDDING_DIMENSIONS, logger: () => undefined });
         throw new Error(`Unexpected provider action: ${action}`);
       },
       mergeAudio: async (chunks: Uint8Array[]) => new Uint8Array(Buffer.concat(chunks)),
@@ -229,7 +230,7 @@ suite('Content live E2E', () => {
       scopeKey, folderKey: childFolderKey, name: 'Created note', content: 'Created directly through Content.', idempotencyKey: `created-${organizationKey}`,
     });
     expect(createdDocument.document.key).toBeString();
-    expect((await call('document.find', { documentKeys: [documentKey], include: ['content', 'embedding', 'folder', 'shares'] })).results[0].data.document.embedding).toHaveLength(4096);
+    expect((await call('document.find', { documentKeys: [documentKey], include: ['content', 'embedding', 'folder', 'shares'] })).results[0].data.document.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
     expect((await call('document.list', { scopeKey, folderKey: childFolderKey, extensions: ['md'] })).documents.map((item: any) => item.key)).toContain(documentKey);
 
     const [{ Hono }, { createContentToolHandler }] = await Promise.all([import('hono'), import('@/api/content-tools')]);
@@ -262,11 +263,11 @@ suite('Content live E2E', () => {
     const apiResult = await apiResponse.json() as any;
     const apiDocument = await db.collection('documents').document(apiResult.data.document.key);
     expect(apiDocument.content).toBe(apiText);
-    expect(apiDocument.embedding).toHaveLength(4096);
+    expect(apiDocument.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
     expect(apiDocument.contentChunks).toHaveLength(3);
     expect(apiDocument.contentChunks.every((chunk: string) => chunk.trim().split(/\s+/).length <= 1_000)).toBe(true);
     expect(apiDocument.chunkEmbeddings).toHaveLength(3);
-    expect(apiDocument.chunkEmbeddings.every((vector: number[]) => vector.length === 4_096)).toBe(true);
+    expect(apiDocument.chunkEmbeddings.every((vector: number[]) => vector.length === EMBEDDING_DIMENSIONS)).toBe(true);
     expect(ingestionBatchSizes).toContain(3);
     const apiObject = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: apiDocument.storageKey }));
     expect(Buffer.from(await apiObject.Body.transformToByteArray()).toString()).toBe(apiText);
@@ -295,7 +296,7 @@ suite('Content live E2E', () => {
     await call('document.update', { updates: [{ documentKey, content: 'Canonical updated body with semantic roadmap.', createVersion: true }] });
     const canonical = (await call('document.find', { documentKeys: [documentKey], include: ['content', 'embedding'] })).results[0].data.document;
     expect(canonical.content).toContain('Canonical updated body');
-    expect(canonical.embedding).toHaveLength(4096);
+    expect(canonical.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
     expect((await call('document.list-audio-versions', { documentKeys: [documentKey] })).results[0].data.audioVersions[0].current).toBe(false);
     const updatedAudio = await call('document.read', { documentKeys: [documentKey], mode: 'audio', persistAudio: true, idempotencyKey: `audio-updated-${organizationKey}` });
     expect(updatedAudio.results[0].data.audioVersion.version).toBe(2);
@@ -319,7 +320,7 @@ suite('Content live E2E', () => {
     expect(typeof (await db.collection('documentVersions').document(versionOne.key)).content).toBe('string');
     const versionTwo = (await call('document.create-version', { documentKeys: [documentKey], labels: { [documentKey]: 'Release two' }, atomic: true })).results[0].data.version;
     expect(versionTwo.version).toBeGreaterThan(versionOne.version);
-    expect((await call('document.find-version', { versionKeys: [versionOne.key], include: ['content', 'embedding'] })).results[0].data.version.embedding).toHaveLength(4096);
+    expect((await call('document.find-version', { versionKeys: [versionOne.key], include: ['content', 'embedding'] })).results[0].data.version.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
     expect((await call('document.list-versions', { documentKeys: [documentKey], limit: 1 })).results[0].data.versions).toHaveLength(1);
     const restoredVersion = await call('document.restore-version', { restores: [{ documentKey, versionKey: versionOne.key, createBackupVersion: true }], atomic: true });
     expect(restoredVersion.results[0].data.document.key).toBe(documentKey);
@@ -481,7 +482,7 @@ suite('Content live E2E', () => {
       expect(await temporary.collection('documentShares').exists()).toBe(false);
       const versions = await (await temporary.query('FOR version IN documentVersions SORT version._key RETURN version')).all();
       expect(versions).toHaveLength(55);
-      expect(versions.every((version: any) => !('html' in version) && !('json' in version) && version.embedding.length === 4096)).toBe(true);
+      expect(versions.every((version: any) => !('html' in version) && !('json' in version) && version.embedding.length === EMBEDDING_DIMENSIONS)).toBe(true);
       const shareIndexes = await temporary.collection('shares').indexes();
       const versionIndexes = await temporary.collection('documentVersions').indexes();
       expect(shareIndexes.some((index: any) => index.unique && index.fields?.join(',') === 'tokenHash')).toBe(true);

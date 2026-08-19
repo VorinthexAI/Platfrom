@@ -1,13 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
+import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
 import { createBookRuntime } from './runtime';
 import { BookRepositoryError, type BookAccessContext } from './repository';
 
 const organizationKey = 'organization'; const scopeKey = newId(); const userKey = newId(); const bookKey = newId(); const chapterKey = newId(); const timestamp = '2026-08-19T12:00:00.000Z';
 const context: BookAccessContext & { generationLeaseToken: string } = { organizationKey, scopeKey, userKey, generationLeaseToken: 'owner' };
 const input = { organizationKey, scopeKey, topic: 'Thinking', goal: 'Decide well', audience: 'Leaders', tone: 'Clear', length: 'short' as const, language: 'English' };
-  const book = { key: bookKey, scopeKey, title: 'Clear Thinking', description: 'A guide', goal: input.goal, audience: input.audience, outcome: 'Better decisions', language: input.language, estimatedMinutes: 0, chapterCount: 0, isFavorite: false, status: 'planning' as const, embedding: Array(4096).fill(0), createdAt: timestamp, updatedAt: timestamp };
-const plannedChapter = { key: chapterKey, scopeKey, bookKey, title: 'Signals', description: 'Notice signals', objective: 'Observe', topics: ['attention'], status: 'planned' as const, position: 1, estimatedMinutes: 0, embedding: Array(4096).fill(0), createdAt: timestamp, updatedAt: timestamp };
+  const book = { key: bookKey, scopeKey, title: 'Clear Thinking', description: 'A guide', goal: input.goal, audience: input.audience, outcome: 'Better decisions', language: input.language, estimatedMinutes: 0, chapterCount: 0, isFavorite: false, status: 'planning' as const, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), createdAt: timestamp, updatedAt: timestamp };
+const plannedChapter = { key: chapterKey, scopeKey, bookKey, title: 'Signals', description: 'Notice signals', objective: 'Observe', topics: ['attention'], status: 'planned' as const, position: 1, estimatedMinutes: 0, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), createdAt: timestamp, updatedAt: timestamp };
 
 function leaseRepository(chapters: any[]) {
   let activeToken = 'owner'; const successfulBookStatuses: string[] = []; const attempts: string[] = [];
@@ -21,7 +22,7 @@ function leaseRepository(chapters: any[]) {
   return { repository, attempts, successfulBookStatuses, takeOver: () => { activeToken = 'new-owner'; } };
 }
 
-const dependencies = { embed: async () => Array(4096).fill(0), speak: async () => ({ bytes: new Uint8Array([1]), mimeType: 'audio/mpeg' }), storage: { upload: async ({ key }: { key: string }) => ({ storageKey: key }), download: async () => new Uint8Array(), delete: async () => {} } as any, id: newId, now: () => timestamp };
+const dependencies = { embed: async () => Array(EMBEDDING_DIMENSIONS).fill(0), speak: async () => ({ bytes: new Uint8Array([1]), mimeType: 'audio/mpeg' }), storage: { upload: async ({ key }: { key: string }) => ({ storageKey: key }), download: async () => new Uint8Array(), delete: async () => {} } as any, id: newId, now: () => timestamp };
 
 describe('book runtime generation lease fencing', () => {
   test('requires a generation lease token before runtime writes', async () => {

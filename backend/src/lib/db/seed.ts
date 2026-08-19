@@ -2,8 +2,8 @@ import { aql } from 'arangojs';
 import { closeDb, db } from './client';
 import { newId } from '@/lib/ids';
 import { getProviderBySlug, insertProvider, updateProvider, type Provider } from './providers.node';
-import { getModelBySlug, insertModel, updateModel as updatePersistedModel, type Model } from './models.node';
-import { getModelActionById, getModelActionByPair, insertModelAction, modelActionSeedSchema, updateModelAction } from './model-actions.node';
+import { getModelById, getModelBySlug, insertModel, updateModel as updatePersistedModel, type Model } from './models.node';
+import { getModelActionById, getModelActionByPair, insertModelAction, listEnabledModelActionsByActionSlug, modelActionSeedSchema, updateModelAction } from './model-actions.node';
 import { isArangoUniqueConstraintError } from './base';
 import { getModelProviderById, getModelProviderByPair, insertModelProvider, modelProviderSeedSchema, updateModelProvider, type ModelProvider } from './model-providers.node';
 import { getRootOrganization, insertOrganization, updateOrganization, type Organization } from './organizations.node';
@@ -40,8 +40,10 @@ export interface AiRuntimeSeedUpserters {
 
 export interface ObsoleteModelActionReconciliationStore {
   getModelBySlug(slug: string): Promise<{ key: string } | null>;
+  getModelById?(key: string): Promise<{ key: string; enabled: boolean } | null>;
   updateModel(key: string, patch: { enabled: boolean }): Promise<unknown>;
   getModelActionByPair(modelKey: string, actionSlug: ActionId): Promise<{ key: string; enabled: boolean } | null>;
+  listEnabledModelActionsByActionSlug?(actionSlug: ActionId): Promise<Array<{ key: string; modelKey: string; enabled: boolean }>>;
   updateModelAction(key: string, patch: { enabled: boolean }): Promise<unknown>;
   getProviderBySlug?(slug: string): Promise<{ key: string } | null>;
   getModelProviderByPair?(modelKey: string, providerKey: string): Promise<{ key: string; enabled: boolean } | null>;
@@ -166,10 +168,10 @@ export const SEEDED_MODELS = [
     enabled: true,
   },
   {
-    key: 'cmqwen3embedmodel0000001',
-    slug: 'qwen.qwen3-embedding-8b',
-    name: 'Qwen3 Embedding 8B',
-    description: 'Qwen3 8B embedding model at 4096 dimensions, strictly routed through OpenRouter to DeepInfra.',
+    key: 'cmopenai3smallembed00001',
+    slug: 'openai.text-embedding-3-small',
+    name: 'OpenAI Text Embedding 3 Small',
+    description: 'OpenAI embedding model at 1536 dimensions, strictly routed through OpenRouter to Azure.',
     supportedUseCases: 'Retrieval-augmented generation, semantic search, vector retrieval, classification, and document similarity.',
     enabled: true,
   },
@@ -239,10 +241,10 @@ export const SEEDED_MODEL_PROVIDERS = [
     enabled: true,
   },
   {
-    key: 'cmqwen3embedroute0000001',
-    modelSlug: 'qwen.qwen3-embedding-8b',
+    key: 'cmopenai3smallembedroute1',
+    modelSlug: 'openai.text-embedding-3-small',
     providerSlug: 'openrouter',
-    providerModelId: 'qwen/qwen3-embedding-8b',
+    providerModelId: 'openai/text-embedding-3-small',
     enabled: true,
   },
   {
@@ -584,8 +586,10 @@ async function upsertSeedModelAction(seed: (typeof SEEDED_MODEL_ACTIONS)[number]
 /** Retires models and relations previously owned by the seed without touching custom routes. */
 export async function reconcileObsoleteSeededModelActions(store: ObsoleteModelActionReconciliationStore = {
   getModelBySlug,
+  getModelById,
   updateModel: updatePersistedModel,
   getModelActionByPair,
+  listEnabledModelActionsByActionSlug,
   updateModelAction,
   getProviderBySlug,
   getModelProviderByPair,
@@ -631,20 +635,33 @@ export async function reconcileObsoleteSeededModelActions(store: ObsoleteModelAc
     }
   }
 
-  const legacyOpenAIEmbedding = await store.getModelBySlug('openai.text-embedding-3-small');
-  if (legacyOpenAIEmbedding) {
-    await store.updateModel(legacyOpenAIEmbedding.key, { enabled: false });
-    results.push({ collection: 'models', key: legacyOpenAIEmbedding.key, status: 'updated' });
-    const legacyAction = await store.getModelActionByPair(legacyOpenAIEmbedding.key, 'embed');
-    if (legacyAction?.enabled) {
-      await store.updateModelAction(legacyAction.key, { enabled: false });
-      results.push({ collection: 'modelActions', key: legacyAction.key, status: 'updated' });
-    }
+  const currentEmbedding = await store.getModelBySlug('openai.text-embedding-3-small');
+  if (currentEmbedding) {
     const openai = await store.getProviderBySlug?.('openai');
-    const legacyRoute = openai ? await store.getModelProviderByPair?.(legacyOpenAIEmbedding.key, openai.key) : null;
-    if (legacyRoute?.enabled && store.updateModelProvider) {
-      await store.updateModelProvider(legacyRoute.key, { enabled: false });
-      results.push({ collection: 'modelProviders', key: legacyRoute.key, status: 'updated' });
+    const directRoute = openai ? await store.getModelProviderByPair?.(currentEmbedding.key, openai.key) : null;
+    if (directRoute?.enabled && store.updateModelProvider) {
+      await store.updateModelProvider(directRoute.key, { enabled: false });
+      results.push({ collection: 'modelProviders', key: directRoute.key, status: 'updated' });
+    }
+  }
+
+  if (currentEmbedding && store.listEnabledModelActionsByActionSlug && store.getModelById) {
+    const openrouter = await store.getProviderBySlug?.('openrouter');
+    const obsoleteBindings = (await store.listEnabledModelActionsByActionSlug('embed'))
+      .filter(({ modelKey }) => modelKey !== currentEmbedding.key);
+    for (const binding of obsoleteBindings) {
+      const model = await store.getModelById(binding.modelKey);
+      if (model?.enabled) {
+        await store.updateModel(model.key, { enabled: false });
+        results.push({ collection: 'models', key: model.key, status: 'updated' });
+      }
+      await store.updateModelAction(binding.key, { enabled: false });
+      results.push({ collection: 'modelActions', key: binding.key, status: 'updated' });
+      const route = openrouter ? await store.getModelProviderByPair?.(binding.modelKey, openrouter.key) : null;
+      if (route?.enabled && store.updateModelProvider) {
+        await store.updateModelProvider(route.key, { enabled: false });
+        results.push({ collection: 'modelProviders', key: route.key, status: 'updated' });
+      }
     }
   }
 

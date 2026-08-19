@@ -621,8 +621,8 @@ describe('Content runtime', () => {
         output,
         usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
         providerId: 'openrouter',
-        modelId: request.actionSlug === 'embed' ? 'qwen.qwen3-embedding-8b' : 'google.gemini-2.5-flash-lite',
-        externalModelId: request.actionSlug === 'embed' ? 'qwen/qwen3-embedding-8b' : 'google/gemini-2.5-flash-lite',
+        modelId: request.actionSlug === 'embed' ? 'openai.text-embedding-3-small' : 'google.gemini-2.5-flash-lite',
+        externalModelId: request.actionSlug === 'embed' ? 'openai/text-embedding-3-small' : 'google/gemini-2.5-flash-lite',
       };
     };
     const dependencies = { repository: f.repository, executeAction };

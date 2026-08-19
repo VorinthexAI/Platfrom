@@ -84,10 +84,10 @@ const MODEL_DEFAULTS: Record<ModelCategory, Record<ModelLevel, string>> = {
     low: 'stability/sdxl',
   },
   embedding: {
-    xhigh: 'qwen/qwen3-embedding-8b',
-    high: 'qwen/qwen3-embedding-8b',
-    medium: 'qwen/qwen3-embedding-8b',
-    low: 'qwen/qwen3-embedding-8b',
+    xhigh: 'openai/text-embedding-3-small',
+    high: 'openai/text-embedding-3-small',
+    medium: 'openai/text-embedding-3-small',
+    low: 'openai/text-embedding-3-small',
   },
 };
 

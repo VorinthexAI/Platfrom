@@ -637,7 +637,7 @@ jobs:
           test -n "$bedrock_aws_access_key_id" || { echo "::error::BEDROCK_AWS_ACCESS_KEY_ID not found under $SSM_PATH"; exit 1; }
           test -n "$bedrock_aws_secret_access_key" || { echo "::error::BEDROCK_AWS_SECRET_ACCESS_KEY not found under $SSM_PATH"; exit 1; }
           test -n "$openai_api_key" || { echo "::error::OPENAI_API_KEY not found under $SSM_PATH; non-embedding OpenAI functions cannot run"; exit 1; }
-          test -n "$openrouter_api_key" || { echo "::error::OPENROUTER_API_KEY not found under $SSM_PATH; Gemini runtime routes and Qwen embeddings cannot run"; exit 1; }
+          test -n "$openrouter_api_key" || { echo "::error::OPENROUTER_API_KEY not found under $SSM_PATH; Gemini runtime routes and Azure-routed OpenAI embeddings cannot run"; exit 1; }
           echo "::add-mask::$arango_password"
           echo "::add-mask::$bedrock_aws_access_key_id"
           echo "::add-mask::$bedrock_aws_secret_access_key"
@@ -936,7 +936,7 @@ jobs:
           test -n "$bedrock_aws_access_key_id" || { echo "::error::BEDROCK_AWS_ACCESS_KEY_ID not found under $SSM_PATH; Bedrock models cannot run"; exit 1; }
           test -n "$bedrock_aws_secret_access_key" || { echo "::error::BEDROCK_AWS_SECRET_ACCESS_KEY not found under $SSM_PATH; Bedrock models cannot run"; exit 1; }
           test -n "$openai_api_key" || { echo "::error::OPENAI_API_KEY not found under $SSM_PATH; non-embedding OpenAI functions cannot run"; exit 1; }
-          test -n "$openrouter_api_key" || { echo "::error::OPENROUTER_API_KEY not found under $SSM_PATH; Gemini runtime routes and Qwen embeddings cannot run"; exit 1; }
+          test -n "$openrouter_api_key" || { echo "::error::OPENROUTER_API_KEY not found under $SSM_PATH; Gemini runtime routes and Azure-routed OpenAI embeddings cannot run"; exit 1; }
           echo "::add-mask::$arango_password"
           echo "::add-mask::$bedrock_aws_access_key_id"
           echo "::add-mask::$bedrock_aws_secret_access_key"
