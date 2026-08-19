@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { isLegacyIndex, normalizeLegacyDocumentSharePermission } from './arango-migrate-indexes';
+import { isLegacyIndex, LEGACY_REMOVAL_MARKER, normalizeLegacyDocumentSharePermission } from './arango-migrate-indexes';
 import { stageLegacyDocumentShares } from './content-migration';
 import { collections, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateEmailReplyMetadata, migrateImageCaptions, retireMomentumScope, retireRemovedActions, retireTranscriptionDomain, retireUserSettings } from './arango-migrate';
 import { EMBEDDING_DIMENSIONS, embeddingMetadata } from '../lib/embeddings';
@@ -33,8 +33,8 @@ describe('Arango migration indexes', () => {
     const spec = collections.find(({ name }) => name === 'imageCollecitionHightlights');
     expect(spec).toEqual(expect.objectContaining({ name: 'imageCollecitionHightlights', skipEmbedding: true }));
     expect(spec?.indexes).toEqual(expect.arrayContaining([
-      expect.objectContaining({ fields: ['scopeKey', 'collectionKey', 'deletedAt', 'createdAt'] }),
-      expect.objectContaining({ fields: ['scopeKey', 'createdByKey', 'deletedAt'] }),
+      expect.objectContaining({ fields: ['scopeKey', 'collectionKey', 'createdAt'] }),
+      expect.objectContaining({ fields: ['scopeKey', 'createdByKey'] }),
     ]));
   });
   test('creates the private user hidden overlay with unique and cleanup indexes', async () => {
@@ -153,6 +153,21 @@ describe('Arango migration indexes', () => {
   test('never classifies a currently desired index as legacy', () => {
     expect(isLegacyIndex('documentVersions', ['storageKey'], [['storageKey']])).toBe(false);
     expect(isLegacyIndex('documentVersions', ['storageKey'], [['documentKey', 'version']])).toBe(true);
+  });
+  test('drops every obsolete tombstone index without preserving the retired field in source', () => {
+    expect(isLegacyIndex('collections', ['scopeKey', LEGACY_REMOVAL_MARKER])).toBe(true);
+    expect(isLegacyIndex('documents', ['scopeKey', 'folderKey', LEGACY_REMOVAL_MARKER])).toBe(true);
+    expect(LEGACY_REMOVAL_MARKER).toBe(['deleted', 'At'].join(''));
+  });
+  test('hard-removes legacy tombstones and reconciles their indexes for every affected collection', async () => {
+    const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    for (const name of ['scopes', 'scopeScopes', 'folders', 'images', 'visualIdentities', 'collections', 'imageCollecitionHightlights', 'documents', 'documentVersions', 'shares', 'places', 'trips', 'books', 'emailThreads', 'messages']) {
+      expect(source).toContain(`'${name}'`);
+    }
+    expect(source).toContain('resource[@marker] != null');
+    expect(source).toContain('REMOVE resource IN @@collection');
+    expect(source).toContain('fields.includes(LEGACY_REMOVAL_MARKER)');
+    expect(source).toContain('OPTIONS { keepNull: false }');
   });
   test('declares private independent document audio version indexes', () => {
     const audio = collections.find(({ name }) => name === 'documentAudioVersions');

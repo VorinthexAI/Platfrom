@@ -51,7 +51,7 @@ import { normalizeStructurallyCoveredResources, partitionFavoriteContentSelectio
 import { ChromeIcon } from "@/components/ChromeIcon";
 import { assistantIconSource } from "@/data/capability-icons";
 import {
-  archiveContentSelection,
+  hardDeleteContentSelection,
   askPersonalAssistant,
   clearContentDocumentAudioPlayback,
   createContentDocument,
@@ -534,7 +534,7 @@ export function KnowledgeWorkspace() {
   const destinationTargetKey = destinationFolder?.key ?? null;
   const destinationAtInitialLocation = destinationInitialFolderKey !== undefined && destinationTargetKey === destinationInitialFolderKey;
   const destinationIsBlocked = typeof destinationTargetKey === "string" && destinationBlockedFolderKeys.includes(destinationTargetKey);
-  const showArchiveRoot = !libraryQuery.trim() || "archive".includes(libraryQuery.trim().toLowerCase());
+  const showArchiveRoot = !libraryQuery.trim() || "delete".includes(libraryQuery.trim().toLowerCase());
   const narrationDuration = audioTimelineDuration(narrationManifest);
   const narrationPlayerElapsed = audioTimelinePosition(narrationManifest, narrationActiveIndex, narrationAudio.currentTime);
   const narrationElapsed = narrationScrubValue ?? narrationPlayerElapsed;
@@ -3199,7 +3199,7 @@ export function KnowledgeWorkspace() {
         }).catch(() => undefined);
       }
       let committed = false;
-      void archiveContentSelection({ folderKeys: [directFolder.key], documentKeys: [] }).then((outcome) => {
+      void hardDeleteContentSelection({ folderKeys: [directFolder.key], documentKeys: [] }).then((outcome) => {
         if (outcome.succeeded === 0) throw outcome.failures[0] ?? new Error("The folder could not be deleted.");
         committed = true;
         removeCachedContentFoldersEverywhere(queryClient, contentContext, [directFolder.key]);
@@ -3242,7 +3242,7 @@ export function KnowledgeWorkspace() {
       const operationSelection: ContentSelection = { folderKeys: operationFolders.map(({ key }) => key), documentKeys: operationDocuments.map(({ key }) => key) };
       setSelectedFolders([...favoriteFolders, ...operationFolders]);
       setSelectedDocuments([...favoriteDocuments, ...operationDocuments]);
-      const outcome = await archiveContentSelection(operationSelection);
+      const outcome = await hardDeleteContentSelection(operationSelection);
       const failedFolders = new Set(outcome.failures.filter(({ kind }) => kind === "folder").map(({ key }) => key));
       const failedDocuments = new Set(outcome.failures.filter(({ kind }) => kind === "document").map(({ key }) => key));
       const serverFavoriteFailures = new Set(outcome.failures.filter(isFavoriteContentConflict).map(({ kind, key }) => `${kind}:${key}`));
@@ -3416,7 +3416,7 @@ export function KnowledgeWorkspace() {
     setDocumentActionLoading("delete");
     setSheetError(undefined);
     try {
-      const outcome = await archiveContentSelection({ folderKeys: [], documentKeys: [target.key] });
+      const outcome = await hardDeleteContentSelection({ folderKeys: [], documentKeys: [target.key] });
       if (outcome.succeeded === 0) {
         if (outcome.failures.some(isFavoriteContentConflict)) {
           closeSheet();

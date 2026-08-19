@@ -160,7 +160,7 @@ describe('organization scope membership invariant', () => {
         { key: moderatorKey, orgRole: 'member' },
         { key: viewerKey, orgRole: 'viewer' },
       ],
-      scopes: [{ key: parentKey, deletedAt: null }, { key: childKey, deletedAt: null }],
+      scopes: [{ key: parentKey }, { key: childKey }],
       scopeMembers: [
         { scopeKey: parentKey, userOrganizationKey: moderatorKey, role: 'moderator' },
         { scopeKey: childKey, userOrganizationKey: viewerKey, role: 'viewer' },

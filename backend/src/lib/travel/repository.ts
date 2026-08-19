@@ -28,7 +28,7 @@ const authorizationQuery = `
   LET scopeRole = membership == null ? null : FIRST(FOR member IN scopeMembers
     FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == membership._key && member.status == "active"
     LIMIT 1 RETURN member.role)
-  FILTER membership != null && scope != null && scope.deletedAt == null && scope.organizationKey == @organizationKey
+  FILTER membership != null && scope != null && scope.organizationKey == @organizationKey
   FILTER membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"]
   RETURN membership._key
 `;
@@ -41,7 +41,7 @@ const readAuthorizationQuery = `
   LET scopeRole = membership == null ? null : FIRST(FOR member IN scopeMembers
     FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == membership._key && member.status == "active"
     LIMIT 1 RETURN member.role)
-  FILTER membership != null && scope != null && scope.deletedAt == null && scope.organizationKey == @organizationKey
+  FILTER membership != null && scope != null && scope.organizationKey == @organizationKey
   FILTER membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member", "viewer"]
   RETURN membership._key
 `;
@@ -85,7 +85,7 @@ export function createTravelRepository(database: TravelDatabase = db, runTransac
     },
     async findCountry(context, countryCode) {
       await authorizeRead(database, context);
-      const cursor = await database.query(`FOR place IN places FILTER place.scopeKey == @scopeKey && place.kind == "country" && place.countryCode == @countryCode && place.deletedAt == null LIMIT 1 RETURN place`, { scopeKey: context.scopeKey, countryCode });
+      const cursor = await database.query(`FOR place IN places FILTER place.scopeKey == @scopeKey && place.kind == "country" && place.countryCode == @countryCode LIMIT 1 RETURN place`, { scopeKey: context.scopeKey, countryCode });
       const raw = (await cursor.all())[0];
       return raw ? parse(placeSchema, raw) : null;
     },
@@ -93,15 +93,15 @@ export function createTravelRepository(database: TravelDatabase = db, runTransac
       await authorizeRead(database, context);
       const cursor = await database.query(`
         LET placeRows = (FOR place IN places
-          FILTER place.scopeKey == @scopeKey && place.deletedAt == null
+          FILTER place.scopeKey == @scopeKey
           LET visitCount = LENGTH(FOR visit IN placeVisits FILTER visit.scopeKey == @scopeKey && visit.placeKey == place._key RETURN 1)
           SORT place.name ASC, place._key ASC RETURN { place, visitCount })
         LET trips = (FOR trip IN trips
-          FILTER trip.scopeKey == @scopeKey && trip.deletedAt == null
+          FILTER trip.scopeKey == @scopeKey
           LET itinerary = (FOR relation IN tripPlaces
             FILTER relation.scopeKey == @scopeKey && relation.tripKey == trip._key
             LET place = DOCUMENT(places, relation.placeKey)
-            FILTER place != null && place.scopeKey == @scopeKey && place.deletedAt == null
+            FILTER place != null && place.scopeKey == @scopeKey
             LET visitCount = LENGTH(FOR visit IN placeVisits FILTER visit.scopeKey == @scopeKey && visit.placeKey == place._key RETURN 1)
             SORT relation.position ASC, relation._key ASC RETURN { relation, place, visitCount })
           SORT trip.startDate ASC, trip.name ASC, trip._key ASC RETURN { trip, itinerary })
@@ -126,8 +126,8 @@ export function createTravelRepository(database: TravelDatabase = db, runTransac
         const references = await (await transaction.query(`
           LET place = DOCUMENT(places, @placeKey)
           LET trip = @tripKey == null ? true : DOCUMENT(trips, @tripKey)
-          FILTER place != null && place.scopeKey == @scopeKey && place.deletedAt == null
-          FILTER @tripKey == null || (trip != null && trip.scopeKey == @scopeKey && trip.deletedAt == null)
+          FILTER place != null && place.scopeKey == @scopeKey
+          FILTER @tripKey == null || (trip != null && trip.scopeKey == @scopeKey)
           RETURN true
         `, { scopeKey: context.scopeKey, placeKey: visit.placeKey, tripKey: visit.tripKey ?? null })).all();
         if (references.length === 0) throw new TravelRepositoryError('not_found');
@@ -153,7 +153,7 @@ export function createTravelRepository(database: TravelDatabase = db, runTransac
           LET trip = DOCUMENT(trips, @tripKey)
           LET place = DOCUMENT(places, @placeKey)
           LET existing = FIRST(FOR relation IN tripPlaces FILTER relation.scopeKey == @scopeKey && relation.tripKey == @tripKey && relation.placeKey == @placeKey LIMIT 1 RETURN relation)
-          FILTER trip != null && trip.scopeKey == @scopeKey && trip.deletedAt == null && place != null && place.scopeKey == @scopeKey && place.deletedAt == null
+          FILTER trip != null && trip.scopeKey == @scopeKey && place != null && place.scopeKey == @scopeKey
            RETURN { place, existing, position: MAX(APPEND([0], (FOR item IN tripPlaces FILTER item.scopeKey == @scopeKey && item.tripKey == @tripKey RETURN item.position))) + 1 }
         `, { scopeKey: context.scopeKey, tripKey: relation.tripKey, placeKey: relation.placeKey });
         const row = (await cursor.all())[0] as { place: unknown; existing: unknown | null; position: number } | undefined;
@@ -167,7 +167,7 @@ export function createTravelRepository(database: TravelDatabase = db, runTransac
     removePlace(context, tripKey, placeKey) {
       return runTransaction({ read: ['userOrganizations', 'scopes', 'scopeMembers'], write: ['trips', 'tripPlaces'] }, async (transaction) => {
         await authorize(transaction, context);
-        const cursor = await transaction.query(`LET trip = DOCUMENT(trips, @tripKey) FILTER trip != null && trip.scopeKey == @scopeKey && trip.deletedAt == null FOR relation IN tripPlaces FILTER relation.scopeKey == @scopeKey && relation.tripKey == @tripKey && relation.placeKey == @placeKey LIMIT 1 RETURN relation`, { scopeKey: context.scopeKey, tripKey, placeKey });
+        const cursor = await transaction.query(`LET trip = DOCUMENT(trips, @tripKey) FILTER trip != null && trip.scopeKey == @scopeKey FOR relation IN tripPlaces FILTER relation.scopeKey == @scopeKey && relation.tripKey == @tripKey && relation.placeKey == @placeKey LIMIT 1 RETURN relation`, { scopeKey: context.scopeKey, tripKey, placeKey });
         const rawRelation = (await cursor.all())[0];
         if (!rawRelation) throw new TravelRepositoryError('not_found');
         const relation = parse(tripPlaceSchema, rawRelation);

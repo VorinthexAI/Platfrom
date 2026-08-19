@@ -130,10 +130,7 @@ describe('node registry schema contracts', () => {
     expect(shareSchema.shape).toHaveProperty('sourceType');
     expect(shareSchema.shape).toHaveProperty('sourceKey');
     expect(shareSchema.shape).not.toHaveProperty('embedding');
-    for (const schema of [folderSchema, documentSchema, documentVersionSchema, documentShareSchema, imageSchema, collectionSchema, shareSchema]) {
-      expect(schema.shape).toHaveProperty('deletedAt');
-      expect(schema.shape.deletedAt.parse(undefined)).toBeNull();
-    }
+    for (const schema of [imageSchema, collectionSchema, folderSchema, documentSchema, documentVersionSchema, documentShareSchema, shareSchema]) expect(schema.safeParse({}).success).toBe(false);
   });
 
   test('requires exactly one channel participant identity', () => {

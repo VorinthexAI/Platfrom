@@ -7,7 +7,7 @@ export const rankAccessRole = (role: unknown) => typeof role === 'string' && rol
 
 export interface OrganizationRecord { key: string; name: string; slug: string | null; description: string | null; is_root: boolean; isActive: boolean; createdAt: string; updatedAt: string; metadata: Record<string, unknown> }
 export interface MembershipRecord { key: string; organizationId: string; userId: string; orgRole: string; status: string; user: { key: string; name: string | null; email: string; alias: string | null } }
-export interface ScopeRecord { key: string; organizationKey: string; slug: string; name: string; deletedAt: string | null }
+export interface ScopeRecord { key: string; organizationKey: string; slug: string; name: string }
 export interface ScopeAgentRecord { key: string; organizationKey: string; scopeKey: string; agentKey: string; position: number; status: 'active' | 'archived'; minimumAccessRole: AccessRole; createdByUserOrganizationKey: string | null; createdAt: string; updatedAt: string }
 export interface AgentRecord { key: string; slug: string; name: string; title: string; scopeKey: string }
 
@@ -99,13 +99,12 @@ export async function evaluateScopeAccess(context: ToolContext, input: { scope: 
   const scope = await resolveScope(context, input.scope);
   const organizationDecision = await evaluateOrganizationAccess(context, { member: input.member });
   if (!organizationDecision.allowed) return { allowed: false, reason: 'ORGANIZATION_ACCESS_DENIED', effectiveRole: organizationDecision.effectiveRole, accessSources: [], organizationDecision, scope };
-  if (scope.deletedAt) return { allowed: false, reason: 'SCOPE_ARCHIVED', effectiveRole: null, accessSources: [], organizationDecision, scope };
   const membership = organizationDecision.membership!;
   if (organizationDecision.effectiveRole === 'owner' || organizationDecision.effectiveRole === 'admin') {
     const role = organizationDecision.effectiveRole;
     return { allowed: scopeActionAllowed(role, input.action), reason: scopeActionAllowed(role, input.action) ? 'ALLOWED' : 'ACTION_DENIED', effectiveRole: role, accessSources: ['organization-role'], organizationDecision, scope };
   }
-  const hierarchy = await one<{ members: Array<{ scopeKey: string; role: AccessRole }>; relations: Array<{ parentKey: string; childKey: string }> }>('RETURN { members: (FOR member IN scopeMembers FILTER member.userOrganizationKey == @membershipKey && member.status == "active" RETURN { scopeKey: member.scopeKey, role: member.role }), relations: (FOR relation IN scopeScopes FILTER relation.deletedAt == null RETURN { parentKey: relation.parentKey, childKey: relation.childKey }) }', { membershipKey: membership.key });
+  const hierarchy = await one<{ members: Array<{ scopeKey: string; role: AccessRole }>; relations: Array<{ parentKey: string; childKey: string }> }>('RETURN { members: (FOR member IN scopeMembers FILTER member.userOrganizationKey == @membershipKey && member.status == "active" RETURN { scopeKey: member.scopeKey, role: member.role }), relations: (FOR relation IN scopeScopes RETURN { parentKey: relation.parentKey, childKey: relation.childKey }) }', { membershipKey: membership.key });
   const parentByChild = new Map((hierarchy?.relations ?? []).map((relation) => [relation.childKey, relation.parentKey]));
   const ancestors = new Set<string>([scope.key]);
   let parent = parentByChild.get(scope.key);

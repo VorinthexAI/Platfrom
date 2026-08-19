@@ -3,7 +3,7 @@ import { beforeEach, expect, mock, test } from "bun:test";
 const calls: { method: string; path: string; body: unknown; config?: unknown }[] = [];
 const authState = { organization: { key: "org-key", role: "member" }, scope: { key: "scope-key", role: "moderator" }, contentExecution: { agentKey: "agent-key" } };
 const now = "2026-08-11T10:00:00.000Z";
-const thread = { key: "thread-key", scopeKey: "scope-key", accountKey: "account-key", providerThreadId: "provider-thread", subject: "Subject", summary: "Summary", intent: "Review message", priority: "normal", state: "needs_action", lastMessageAt: now, latestFrom: "sender@example.com", isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now };
+const thread = { key: "thread-key", scopeKey: "scope-key", accountKey: "account-key", providerThreadId: "provider-thread", subject: "Subject", summary: "Summary", intent: "Review message", priority: "normal", state: "needs_action", lastMessageAt: now, latestFrom: "sender@example.com", isFavorite: false, createdAt: now, updatedAt: now };
 const draft = { key: "draft-key", scopeKey: "scope-key", threadKey: "thread-key", messageKey: "message-key", generatedContent: "Reply", status: "generated", createdAt: now, updatedAt: now };
 
 mock.module("@/state/auth", () => ({ useAuthStore: { getState: () => authState } }));

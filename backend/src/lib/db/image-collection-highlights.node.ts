@@ -9,7 +9,6 @@ export const imageCollectionHighlightSchema = z.object({
   collectionKey: z.string().cuid(),
   imageKeys: z.array(z.string().cuid()).max(10),
   createdByKey: z.string().cuid(),
-  deletedAt: z.string().datetime().nullable().default(null),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });

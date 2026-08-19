@@ -5,7 +5,7 @@ import { createBookService } from './service';
 import { BookRepositoryError } from './repository';
 
 const organizationKey = 'organization'; const scopeKey = newId(); const userKey = newId(); const bookKey = newId(); const chapterKey = newId(); const now = '2026-08-12T12:00:00.000Z';
-const book = { key: bookKey, scopeKey, title: 'Clear Thinking', description: 'A guide', goal: 'Decide well', audience: 'Leaders', outcome: 'Better decisions', language: 'en', estimatedMinutes: 10, chapterCount: 1, isFavorite: false, status: 'ready' as const, embedding: Array(4096).fill(0), deletedAt: null, createdAt: now, updatedAt: now };
+const book = { key: bookKey, scopeKey, title: 'Clear Thinking', description: 'A guide', goal: 'Decide well', audience: 'Leaders', outcome: 'Better decisions', language: 'en', estimatedMinutes: 10, chapterCount: 1, isFavorite: false, status: 'ready' as const, embedding: Array(4096).fill(0), createdAt: now, updatedAt: now };
 const chapter = { key: chapterKey, scopeKey, bookKey, title: 'Signals', description: 'Notice signals', objective: 'Observe', topics: ['attention'], content: 'Chapter prose', status: 'written' as const, position: 1, estimatedMinutes: 10, embedding: Array(4096).fill(0), createdAt: now, updatedAt: now };
 const createInput = { organizationKey, scopeKey, generationRequestKey: 'stable-request', topic: 'Thinking', goal: 'Improve', audience: 'Leaders', tone: 'Clear', length: 'short' as const, language: 'English' };
 const briefFingerprint = (input: typeof createInput = createInput) => { const { generationRequestKey: _key, organizationKey: _organization, scopeKey: _scope, ...brief } = input; return createHash('sha256').update(JSON.stringify(brief)).digest('hex'); };

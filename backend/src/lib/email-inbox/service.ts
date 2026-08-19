@@ -232,7 +232,7 @@ export function createEmailService(options: {
             snippet: summary(latest.body), unread: labels.includes('UNREAD'), starred: labels.includes('STARRED'), labels,
             latestFrom: latest.from, inInbox: labels.includes('INBOX'), lastMessageAt: latest.sentAt,
             embedding: await embed({ text: boundedEmbeddingText(buildEmbeddingText(emailThreadsEmbeddingFields, { subject: latest.subject, summary: summary(latest.body), intent: classification.intent, action: classification.action })!) }),
-            embeddingContentVersion: 2 as const, deletedAt: null, isFavorite: false,
+            embeddingContentVersion: 2 as const, isFavorite: false,
           };
           const replyDepths = new Map<string, number>();
           const providerMessageIds: string[] = [];
@@ -365,7 +365,7 @@ export function createEmailService(options: {
               scopeKey: detail.thread.scopeKey, accountKey: detail.thread.accountKey, providerThreadId: detail.thread.providerThreadId,
               subject: detail.thread.subject, summary: summary(body), intent: 'Awaiting a response', priority: 'normal', state: 'waiting',
               category: detail.thread.category, snippet: summary(body), unread: false, starred: detail.thread.starred, labels: detail.thread.labels,
-              latestFrom: connection.connector.email, inInbox: detail.thread.inInbox, lastMessageAt: sentAt, embedding: detail.thread.embedding, embeddingContentVersion: 2, deletedAt: null, isFavorite: detail.thread.isFavorite,
+              latestFrom: connection.connector.email, inInbox: detail.thread.inInbox, lastMessageAt: sentAt, embedding: detail.thread.embedding, embeddingContentVersion: 2, isFavorite: detail.thread.isFavorite,
             },
             messages: [{
               scopeKey: actor.scopeKey, accountKey: detail.thread.accountKey, providerMessageId: sent.id,

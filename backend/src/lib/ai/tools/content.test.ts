@@ -12,15 +12,15 @@ import {
 } from './index';
 
 const expectedNames = [
-  'folder.create', 'folder.find', 'folder.list', 'folder.update', 'folder.rename', 'folder.move', 'folder.copy', 'folder.archive', 'folder.restore', 'folder.delete',
-  'document.parse', 'document.scan', 'document.create', 'document.find', 'document.list', 'document.read', 'document.list-audio-versions', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.list-summaries', 'document.find-summary', 'document.summary.audio.generate', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.download', 'document.export', 'document.share', 'document.unshare', 'document-share.archive', 'document-share.restore', 'document.list-shares', 'document.create-version', 'document.find-version', 'document.list-versions', 'document.restore-version', 'document-version.archive', 'document-version.restore', 'document.delete-version', 'document.summarize', 'document.topics', 'document.enhance', 'document.translate', 'document.rewrite',
+  'folder.create', 'folder.find', 'folder.list', 'folder.update', 'folder.rename', 'folder.move', 'folder.copy', 'folder.delete',
+  'document.parse', 'document.scan', 'document.create', 'document.find', 'document.list', 'document.read', 'document.list-audio-versions', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.list-summaries', 'document.find-summary', 'document.summary.audio.generate', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.delete', 'document.download', 'document.export', 'document.share', 'document.unshare', 'document.list-shares', 'document.create-version', 'document.find-version', 'document.list-versions', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.topics', 'document.enhance', 'document.translate', 'document.rewrite',
   'document.search', 'content.search', 'content.search-history.list', 'content.search-history.delete', 'content.neighbors', 'document.search-all',
 ] as const;
 
 describe('Content tool registry', () => {
   test('contains exactly the registered dotted names and no action-style kebab names', () => {
     expect([...CONTENT_TOOL_NAMES]).toEqual([...expectedNames]);
-    expect(CONTENT_TOOL_NAMES).toHaveLength(54);
+    expect(CONTENT_TOOL_NAMES).toHaveLength(46);
     for (const name of CONTENT_TOOL_NAMES) {
       expect(name).toMatch(/^[a-z]+(?:[.-][a-z]+)*$/);
       expect(name).toContain('.');
@@ -68,7 +68,7 @@ describe('Content input contracts', () => {
     expect(contentToolInputSchemas['content.neighbors'].safeParse({ folderKey: key, documentKey: key }).success).toBe(false);
   });
 
-  test('applies atomic and mode defaults, including nested restore defaults', () => {
+  test('applies atomic and mode defaults, including version rollback defaults', () => {
     expect(contentToolInputSchemas['folder.update'].parse({ updates: [{ folderKey: key, name: 'Renamed' }] }).atomic).toBe(false);
     expect(contentToolInputSchemas['document.read'].parse({ documentKeys: [key] })).toMatchObject({ mode: 'content', atomic: false });
     expect(contentToolInputSchemas['document.download'].parse({ documentKeys: [key] }).format).toBe('original');
@@ -82,12 +82,10 @@ describe('Content input contracts', () => {
   });
 
   test('preserves specified optional controls', () => {
-    expect(contentToolInputSchemas['folder.restore'].parse({ folderKeys: [key], restoreAncestors: true })).toMatchObject({ restoreAncestors: true });
     expect(contentToolInputSchemas['document.read'].parse({ documentKeys: [key], mode: 'audio', includeCode: true, persistAudio: true })).toMatchObject({ includeCode: true, persistAudio: true });
     expect(contentToolInputSchemas['document.summarize'].parse({ documentKeys: [key], combine: true })).toMatchObject({ combine: true });
     expect(contentToolInputSchemas['document.summarize'].parse({ documentKeys: [key], topic: 'Launch' })).toMatchObject({ topic: 'Launch', style: 'brief' });
     expect(contentToolInputSchemas['folder.update'].parse({ updates: [{ folderKey: key, description: null }] })).toMatchObject({ updates: [{ description: null }] });
-    expect(contentToolInputSchemas['document.delete'].parse({ documentKeys: [key], deleteVersions: true, deleteShares: true })).toMatchObject({ deleteVersions: true, deleteShares: true });
     expect(contentToolInputSchemas['content.search-history.list'].parse({ scopeKey: key, allLocations: true })).toMatchObject({ allLocations: true });
   });
 
@@ -113,14 +111,18 @@ describe('Content input contracts', () => {
     expect(contentToolInputSchemas['document.summary.audio.generate'].parse({ summaryKeys: [key], language: 'en-US' })).toMatchObject({ language: 'en-US' });
     expect(() => contentToolInputSchemas['document.summary.audio.generate'].parse({ summaryKeys: [key], language: 'English' })).toThrow();
     expect(contentToolInputSchemas['document.search'].parse({ scopeKey: key, query: 'roadmap', sources: [{ type: 'scope', scopeKeys: [newId()] }] })).toMatchObject({ sources: [{ type: 'scope' }] });
+    expect(() => contentToolInputSchemas['folder.find'].parse({ folderKeys: [key], unexpected: true })).toThrow();
+    expect(() => contentToolInputSchemas['document.find'].parse({ documentKeys: [key], unexpected: true })).toThrow();
+    expect(() => contentToolInputSchemas['document.search'].parse({ scopeKey: key, query: 'roadmap', filters: { unexpected: true } })).toThrow();
+    expect(() => contentToolInputSchemas['document.delete'].parse({ documentKeys: [key], deleteVersions: true })).toThrow();
   });
 
   test('enforces non-empty arrays for every batch-first contract', () => {
     const invalid: Array<[keyof typeof contentToolInputSchemas, object]> = [
       ['folder.create', { folders: [] }], ['folder.update', { updates: [] }], ['folder.rename', { renames: [] }], ['folder.move', { moves: [] }], ['folder.copy', { copies: [] }],
-      ['folder.archive', { folderKeys: [] }], ['folder.restore', { folderKeys: [] }], ['folder.delete', { folderKeys: [] }],
+      ['folder.delete', { folderKeys: [] }],
       ['document.find', { documentKeys: [] }], ['document.read', { documentKeys: [] }], ['document.update', { updates: [] }], ['document.rename', { renames: [] }],
-      ['document.move', { moves: [] }], ['document.copy', { copies: [] }], ['document.archive', { documentKeys: [] }], ['document.restore', { documentKeys: [] }],
+      ['document.move', { moves: [] }], ['document.copy', { copies: [] }],
       ['document.delete', { documentKeys: [] }], ['document.download', { documentKeys: [] }], ['document.export', { exports: [] }], ['document.share', { shares: [] }],
       ['document.list-shares', { documentKeys: [] }], ['document.create-version', { documentKeys: [] }], ['document.find-version', { versionKeys: [] }],
       ['document.list-versions', { documentKeys: [] }], ['document.list-summaries', { documentKeys: [] }], ['document.find-summary', { summaryKeys: [] }], ['document.summary.audio.generate', { summaryKeys: [] }], ['document.restore-version', { restores: [] }], ['document.delete-version', { versionKeys: [] }],
@@ -156,12 +158,12 @@ describe('Content input contracts', () => {
       ['folder.rename', { renames: [{ folderKey: key, name: 'Folder' }] }],
       ['folder.move', { moves: [{ folderKey: key }] }],
       ['folder.copy', { copies: [{ folderKey: key, targetScopeKey: newId() }] }],
-      ['folder.archive', { folderKeys: [key] }], ['folder.restore', { folderKeys: [key] }], ['folder.delete', { folderKeys: [key] }],
+      ['folder.delete', { folderKeys: [key] }],
       ['document.update', { updates: [{ documentKey: key, content: 'text' }] }],
       ['document.rename', { renames: [{ documentKey: key, name: 'Name' }] }],
       ['document.move', { moves: [{ documentKey: key, targetScopeKey: newId(), targetFolderKey: newId() }] }],
       ['document.copy', { copies: [{ documentKey: key, targetScopeKey: newId(), targetFolderKey: newId() }] }],
-      ['document.archive', { documentKeys: [key] }], ['document.restore', { documentKeys: [key] }], ['document.delete', { documentKeys: [key] }],
+      ['document.delete', { documentKeys: [key] }],
       ['document.share', { shares: [{ documentKey: key, permission: 'read' }] }],
       ['document.unshare', { shareKeys: [key] }], ['document.create-version', { documentKeys: [key] }],
       ['document.restore-version', { restores: [{ documentKey: key, versionKey: newId() }] }],

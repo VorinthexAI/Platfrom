@@ -22,7 +22,7 @@ export type ScopeMembershipReconciliation = {
 
 type InheritedGrantData = {
   memberships: Array<{ key: string; orgRole: string }>;
-  scopes: Array<{ key: string; deletedAt: string | null }>;
+  scopes: Array<{ key: string }>;
   scopeMembers: Array<{ scopeKey: string; userOrganizationKey: string; role: ScopeMemberRole }>;
   relations: Array<{ parentKey: string; childKey: string }>;
   scopeAgents: Array<{ key: string; scopeKey: string; agentKey: string; minimumAccessRole: ScopeMemberRole }>;
@@ -98,9 +98,9 @@ export async function reconcileOrganizationInheritedAgentMemberships(
   const cursor = await database.query<InheritedGrantData>(`
     RETURN {
       memberships: (FOR membership IN userOrganizations FILTER membership.organizationId == @organizationKey && membership.status == "active" RETURN { key: membership._key, orgRole: membership.orgRole }),
-      scopes: (FOR scope IN scopes FILTER scope.organizationKey == @organizationKey RETURN { key: scope._key, deletedAt: scope.deletedAt }),
+      scopes: (FOR scope IN scopes FILTER scope.organizationKey == @organizationKey RETURN { key: scope._key }),
       scopeMembers: (FOR member IN scopeMembers FOR scope IN scopes FILTER scope._key == member.scopeKey && scope.organizationKey == @organizationKey && member.status == "active" RETURN { scopeKey: member.scopeKey, userOrganizationKey: member.userOrganizationKey, role: member.role }),
-      relations: (FOR relation IN scopeScopes FILTER relation.deletedAt == null RETURN { parentKey: relation.parentKey, childKey: relation.childKey }),
+      relations: (FOR relation IN scopeScopes RETURN { parentKey: relation.parentKey, childKey: relation.childKey }),
       scopeAgents: (FOR relation IN scopeAgents FILTER relation.organizationKey == @organizationKey && relation.status == "active" RETURN { key: relation._key, scopeKey: relation.scopeKey, agentKey: relation.agentKey, minimumAccessRole: relation.minimumAccessRole }),
       inheritedGrants: (FOR grant IN agentMembers FILTER grant.organizationKey == @organizationKey && grant.source == "inherited" RETURN { key: grant._key, scopeAgentKey: grant.scopeAgentKey, userOrganizationKey: grant.userOrganizationKey })
     }
@@ -112,7 +112,7 @@ export async function reconcileOrganizationInheritedAgentMemberships(
   const parentByChild = new Map(data.relations.map((relation) => [relation.childKey, relation.parentKey]));
   const eligible = new Set<string>();
   for (const relation of data.scopeAgents) {
-    if (scopes.get(relation.scopeKey)?.deletedAt) continue;
+    if (!scopes.has(relation.scopeKey)) continue;
     for (const membership of data.memberships) {
       let effectiveRole: ScopeMemberRole | null = scopeRoleForOrganizationRole(membership.orgRole);
       if (membership.orgRole !== 'owner' && membership.orgRole !== 'admin') {

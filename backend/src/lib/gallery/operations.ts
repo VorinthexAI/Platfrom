@@ -30,6 +30,8 @@ import { publishCollectionEvent, publishUserEvent } from '@/api/events';
 import { mutationEventTargets, publishGalleryEvents, type GalleryMutationEventName } from './mutation-events';
 import { imageCollectionHighlightSchema, type ImageCollectionHighlight } from '@/lib/db/image-collection-highlights.node';
 import { selectHighlightCandidates } from './highlight-selection';
+import { documentStorage } from '@/lib/ai/document-processing/storage';
+import { acknowledgeStorageDeletionKey } from '@/lib/db/storage-deletion-jobs.node';
 
 const overviewSchema = strictObject({ collectionKey: z.string().cuid().optional(), maxCaptionScore: z.number().int().min(1).max(100).optional(), ...cursorPaginationInputShape });
 const collectionCreateSchema = strictObject({ name: z.string().trim().min(1).max(120), isFavorite: z.boolean().default(false) });
@@ -56,7 +58,7 @@ const statusSchema = strictObject({ uploadKeys: z.array(z.string().cuid()).min(1
 const favoriteSchema = strictObject({ imageKey: z.string().cuid(), isFavorite: z.boolean() });
 const deleteImagesSchema = strictObject({ imageKeys: z.array(z.string().cuid()).min(1).max(100) }).refine(({ imageKeys }) => new Set(imageKeys).size === imageKeys.length, 'Image keys must be unique');
 const deleteDuplicatesSchema = strictObject({ collectionKey: z.string().cuid(), imageKeys: z.array(z.string().cuid()).min(1).max(500) }).refine(({ imageKeys }) => new Set(imageKeys).size === imageKeys.length, 'Image keys must be unique');
-const subjectListSchema = strictObject({ includeDeleted: z.boolean().default(false) });
+const subjectListSchema = strictObject({});
 const subjectCreateSchema = strictObject({ name: z.string().trim().min(1).max(120), imageKeys: z.array(z.string().cuid()).min(1).max(8) }).refine(({ imageKeys }) => new Set(imageKeys).size === imageKeys.length, 'Reference image keys must be unique');
 const subjectKeySchema = strictObject({ identityKey: z.string().cuid() });
 const collectionTransferSchema = strictObject({
@@ -103,6 +105,8 @@ export interface GalleryOperationContext {
   deleteCollection?: typeof repository.deleteCollection;
   deleteImages?: typeof repository.deleteImages;
   deleteDuplicateImages?: typeof repository.deleteDuplicateImages;
+  deleteStorageObject?: (storageKey: string) => Promise<void>;
+  acknowledgeStorageDeletion?: (storageKey: string) => Promise<boolean>;
   listScopeManagerUserKeys?: typeof repository.listScopeManagerUserKeys;
   publishCollectionEvent?: typeof publishCollectionEvent;
   publishUserEvent?: typeof publishUserEvent;
@@ -209,7 +213,7 @@ async function safeSubject(row: { identity: z.infer<typeof visualIdentitySchema>
   const { identity, reference } = row;
   return {
     key: identity.key, name: identity.name, description: identity.description, referenceImageKey: identity.referenceImageKey,
-    referenceUrl: await imageUrl(reference.storageKey), imageCount: row.imageCount, deletedAt: identity.deletedAt,
+    referenceUrl: await imageUrl(reference.storageKey), imageCount: row.imageCount,
     createdAt: identity.createdAt, updatedAt: identity.updatedAt,
   };
 }
@@ -245,7 +249,7 @@ async function createCollection(rawInput: unknown, context: GalleryOperationCont
     const membership = await authorize(context);
     if (!await repository.canManageScope(input.scopeKey, membership.key)) throw new GalleryOperationError(403, 'GALLERY_FORBIDDEN', 'Gallery collection creation denied.');
     const now = new Date().toISOString();
-    const collection = collectionSchema.parse({ key: newId(), scopeKey: input.scopeKey, name: input.name, embedding: currentEmbeddingSchema.parse(await embedText({ text: input.name })), isFavorite: input.isFavorite, deletedAt: null, createdAt: now, updatedAt: now });
+    const collection = collectionSchema.parse({ key: newId(), scopeKey: input.scopeKey, name: input.name, embedding: currentEmbeddingSchema.parse(await embedText({ text: input.name })), isFavorite: input.isFavorite, createdAt: now, updatedAt: now });
     const member = collectionMemberSchema.parse({ key: newId(), scopeKey: input.scopeKey, collectionKey: collection.key, memberKey: membership.key, role: 'owner', createdAt: now });
     if (!await repository.createCollection(collection, member)) throw new GalleryOperationError(403, 'GALLERY_FORBIDDEN', 'Gallery collection creation denied.');
     await publish(context, 'createCollection', { collections: [collection.key] });
@@ -278,7 +282,7 @@ async function updateImageDetails(rawInput: unknown, context: GalleryOperationCo
     const membership = await authorize(context);
     if (!await repository.canMutateImage(input.scopeKey, input.imageKey, membership.key)) throw new GalleryOperationError(403, 'GALLERY_IMAGE_READ_ONLY', 'Image is read-only.');
     const previous = await repository.getImage(input.imageKey);
-    if (!previous || previous.scopeKey !== input.scopeKey || previous.deletedAt) throw new GalleryOperationError(404, 'GALLERY_IMAGE_NOT_FOUND', 'Image not found.');
+    if (!previous || previous.scopeKey !== input.scopeKey) throw new GalleryOperationError(404, 'GALLERY_IMAGE_NOT_FOUND', 'Image not found.');
     const embeddingText = buildImageEmbeddingText({ filename: input.name, caption: previous.caption, city: previous.city, country: previous.country, countryCode: previous.countryCode });
     const updated = await repository.updateImageDetails(input.scopeKey, input.imageKey, membership.key, input.name, input.isFavorite, currentEmbeddingSchema.parse(await embedText({ text: embeddingText })), new Date().toISOString());
     if (!updated) throw new GalleryOperationError(404, 'GALLERY_IMAGE_NOT_FOUND', 'Image not found.');
@@ -408,12 +412,19 @@ async function deleteImages(rawInput: unknown, context: GalleryOperationContext)
     if ((await Promise.all(input.imageKeys.map((imageKey) => (context.canMutateImage ?? repository.canMutateImage)(input.scopeKey, imageKey, membership.key)))).some((owns) => !owns)) throw new GalleryOperationError(403, 'GALLERY_IMAGE_READ_ONLY', 'One or more images are read-only.');
     const deletion = await (context.deleteImages ?? repository.deleteImages)(input.scopeKey, input.imageKeys, membership.key, new Date().toISOString());
     if (!deletion) throw new GalleryOperationError(404, 'GALLERY_IMAGE_NOT_FOUND', 'One or more images were not found.');
+    await Promise.all(deletion.storageKeys.map(async (storageKey) => {
+      try {
+        await (context.deleteStorageObject ?? documentStorage.delete)(storageKey);
+        await (context.acknowledgeStorageDeletion ?? acknowledgeStorageDeletionKey)(storageKey);
+      } catch { /* The durable outbox is retried at startup. */ }
+    }));
     if (deletion.deletedImageKeys.length > 0) {
       await publish(context, 'deleteImages', { collections: deletion.collectionKeys });
       if (deletion.hadUnfiledImages) await publish(context, 'unfiledImageChanged', { users: [membership.userId] });
       if (deletion.subjectChanged) await publish(context, 'reconcileSubject', { users: await (context.listScopeManagerUserKeys ?? repository.listScopeManagerUserKeys)(input.scopeKey) });
     }
-    return deletion;
+    const { storageKeys: _storageKeys, ...result } = deletion;
+    return result;
 }
 
 async function deleteDuplicates(rawInput: unknown, context: GalleryOperationContext) {
@@ -422,8 +433,15 @@ async function deleteDuplicates(rawInput: unknown, context: GalleryOperationCont
     const now = new Date().toISOString();
     const deletion = await (context.deleteDuplicateImages ?? repository.deleteDuplicateImages)(input.scopeKey, input.collectionKey, input.imageKeys, membership.key, now);
     if (!deletion) throw new GalleryOperationError(409, 'GALLERY_DUPLICATES_CHANGED', 'The duplicate set changed. Find duplicates again before deleting.');
+    await Promise.all(deletion.storageKeys.map(async (storageKey) => {
+      try {
+        await (context.deleteStorageObject ?? documentStorage.delete)(storageKey);
+        await (context.acknowledgeStorageDeletion ?? acknowledgeStorageDeletionKey)(storageKey);
+      } catch { /* The durable outbox is retried at startup. */ }
+    }));
     if (deletion.removedImageKeys.length > 0) await publish(context, 'deleteDuplicates', { collections: deletion.collectionKeys });
-    return deletion;
+    const { storageKeys: _storageKeys, ...result } = deletion;
+    return result;
 }
 
 async function transferCollectionImages(rawInput: unknown, context: GalleryOperationContext) {
@@ -544,7 +562,7 @@ async function createShare(rawInput: unknown, context: GalleryOperationContext) 
   const now = new Date().toISOString();
   if (input.expiresAt && input.expiresAt <= now) throw new GalleryOperationError(400, 'GALLERY_INVALID_INPUT', 'Share expiry must be in the future.');
   const token = randomBytes(32).toString('base64url');
-  const share = shareSchema.parse({ key: requestIdentity('collection-share-create', context), scopeKey: input.scopeKey, sourceType: 'collection', sourceKey: input.collectionKey, permission: input.role, tokenHash: createHash('sha256').update(token).digest('hex'), revokedAt: input.active ? undefined : now, ...(input.expiresAt ? { expiresAt: input.expiresAt } : {}), deletedAt: null, createdAt: now, updatedAt: now });
+  const share = shareSchema.parse({ key: requestIdentity('collection-share-create', context), scopeKey: input.scopeKey, sourceType: 'collection', sourceKey: input.collectionKey, permission: input.role, tokenHash: createHash('sha256').update(token).digest('hex'), revokedAt: input.active ? undefined : now, ...(input.expiresAt ? { expiresAt: input.expiresAt } : {}), createdAt: now, updatedAt: now });
   const response = { share: safeShare(share, token), token };
   const requestHash = createHash('sha256').update(JSON.stringify({ collectionKey: input.collectionKey, role: input.role, active: input.active, expiresAt: input.expiresAt })).digest('hex');
   const saved = await repository.createCollectionShare(share, membership.key, { requestHash, responseCiphertext: encryptAuthenticatedJson(response) });
@@ -580,7 +598,7 @@ async function listSubjects(rawInput: unknown, context: GalleryOperationContext)
     const input = { ...subjectListSchema.parse(rawInput), ...context };
     const membership = await authorize(context);
     if (!await repository.canManageScope(input.scopeKey, membership.key)) throw new GalleryOperationError(403, 'GALLERY_FORBIDDEN', 'Gallery subjects are unavailable.');
-    const rows = await repository.listSubjects(input.scopeKey, input.includeDeleted);
+    const rows = await repository.listSubjects(input.scopeKey);
     return { subjects: await Promise.all(rows.map((row) => safeSubject(row))) };
 }
 
@@ -590,20 +608,20 @@ async function createSubject(rawInput: unknown, context: GalleryOperationContext
     if (!await repository.canManageScope(input.scopeKey, membership.key)) throw new GalleryOperationError(403, 'GALLERY_FORBIDDEN', 'Gallery subjects are read-only.');
     const references = await Promise.all(input.imageKeys.map(async (key) => {
       const image = await repository.getImage(key);
-      if (!image || image.scopeKey !== input.scopeKey || image.deletedAt) throw new GalleryOperationError(404, 'GALLERY_IMAGE_NOT_FOUND', 'Reference image not found.');
+      if (!image || image.scopeKey !== input.scopeKey) throw new GalleryOperationError(404, 'GALLERY_IMAGE_NOT_FOUND', 'Reference image not found.');
       return image;
     }));
     const profile = await imageCreateVisualIdentityTool.execute({ imageUrls: await Promise.all(references.map(({ storageKey }) => storedImageAnalysisDataUrl(storageKey, 1024))) }, { organizationKey: input.organizationKey, signal: context.signal });
     const now = new Date().toISOString();
     const embedding = currentEmbeddingSchema.parse(await embedText({ text: `${input.name}\n\n${profile.description}` }));
-    const identity = visualIdentitySchema.parse({ key: newId(), scopeKey: input.scopeKey, name: input.name, description: profile.description, referenceImageKey: references[0]!.key, embedding, deletedAt: null, createdAt: now, updatedAt: now });
+    const identity = visualIdentitySchema.parse({ key: newId(), scopeKey: input.scopeKey, name: input.name, description: profile.description, referenceImageKey: references[0]!.key, embedding, createdAt: now, updatedAt: now });
     const matches = await repository.searchAccessibleImages({ organizationKey: input.organizationKey, scopeKey: input.scopeKey, actorKey: membership.key, embedding, threshold: 0.82, limit: 50 });
     const confidence = new Map(matches.map(({ image, score }) => [image.key, score]));
     for (const reference of references) confidence.set(reference.key, 1);
     const referenceKeys = new Set(references.map(({ key }) => key));
     const relations = [...confidence].map(([imageKey, score]) => imageIdentitySchema.parse({ key: newId(), scopeKey: input.scopeKey, imageKey, identityKey: identity.key, confidence: score, isReference: referenceKeys.has(imageKey), createdAt: now }));
     if (!await repository.createSubject(identity, relations, input.imageKeys, membership.key)) throw new GalleryOperationError(409, 'GALLERY_REFERENCES_CHANGED', 'A reference image or current access changed before the Subject was created.');
-    const row = await repository.getSubject(input.scopeKey, identity.key, false);
+    const row = await repository.getSubject(input.scopeKey, identity.key);
     if (!row) throw new GalleryOperationError(500, 'GALLERY_SUBJECT_FAILED', 'Subject could not be read after creation.');
     await publish(context, 'createSubject', { users: await repository.listScopeManagerUserKeys(input.scopeKey) });
     return { subject: await safeSubject(row) };
@@ -613,28 +631,22 @@ async function listSubjectImages(rawInput: unknown, context: GalleryOperationCon
     const input = { ...subjectKeySchema.parse(rawInput), ...context };
     const membership = await authorize(context);
     if (!await repository.canManageScope(input.scopeKey, membership.key)) throw new GalleryOperationError(403, 'GALLERY_FORBIDDEN', 'Gallery subjects are unavailable.');
-    const row = await repository.getSubject(input.scopeKey, input.identityKey, false);
+    const row = await repository.getSubject(input.scopeKey, input.identityKey);
     if (!row) throw new GalleryOperationError(404, 'GALLERY_SUBJECT_NOT_FOUND', 'Subject not found.');
     await reconcileVisualIdentity(row.identity, input.organizationKey, membership.key, context);
     const rows = await repository.listSubjectImages(input.scopeKey, input.identityKey);
     return { images: await Promise.all(rows.map(({ image, confidence }) => safeImage(image, confidence))) };
 }
 
-async function setSubjectDeleted(rawInput: unknown, context: GalleryOperationContext, deleted: boolean) {
+async function deleteSubject(rawInput: unknown, context: GalleryOperationContext) {
     const input = { ...subjectKeySchema.parse(rawInput), ...context };
     const membership = await authorize(context);
     if (!await repository.canManageScope(input.scopeKey, membership.key)) throw new GalleryOperationError(403, 'GALLERY_FORBIDDEN', 'Gallery subjects are read-only.');
-    const now = new Date().toISOString();
-    const value = await repository.setSubjectDeleted(input.scopeKey, input.identityKey, membership.key, deleted, now);
+    const value = await repository.deleteSubject(input.scopeKey, input.identityKey, membership.key);
     if (!value) throw new GalleryOperationError(404, 'GALLERY_SUBJECT_NOT_FOUND', 'Subject not found.');
-    const row = await repository.getSubject(input.scopeKey, input.identityKey, true);
-    if (!row) throw new GalleryOperationError(404, 'GALLERY_SUBJECT_NOT_FOUND', 'Subject reference image is unavailable.');
-    await publish(context, deleted ? 'deleteSubject' : 'restoreSubject', { users: await repository.listScopeManagerUserKeys(input.scopeKey) });
-    return { subject: await safeSubject(row) };
+    await publish(context, 'deleteSubject', { users: await repository.listScopeManagerUserKeys(input.scopeKey) });
+    return { identityKey: input.identityKey };
 }
-
-const deleteSubject = (input: unknown, context: GalleryOperationContext) => setSubjectDeleted(input, context, true);
-const restoreSubject = (input: unknown, context: GalleryOperationContext) => setSubjectDeleted(input, context, false);
 
 async function createHighlight(rawInput: unknown, context: GalleryOperationContext) {
   const input = { ...highlightCreateSchema.parse(rawInput), ...context };
@@ -643,7 +655,7 @@ async function createHighlight(rawInput: unknown, context: GalleryOperationConte
   if (!candidates) throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.');
   const selected = selectHighlightCandidates(candidates, context.random);
   const now = new Date().toISOString();
-  const highlight = imageCollectionHighlightSchema.parse({ key: requestIdentity('highlight-create', context), scopeKey: input.scopeKey, collectionKey: input.collectionKey, imageKeys: selected.map(({ image }) => image.key), createdByKey: membership.key, deletedAt: null, createdAt: now, updatedAt: now });
+  const highlight = imageCollectionHighlightSchema.parse({ key: requestIdentity('highlight-create', context), scopeKey: input.scopeKey, collectionKey: input.collectionKey, imageKeys: selected.map(({ image }) => image.key), createdByKey: membership.key, createdAt: now, updatedAt: now });
   const saved = await (context.createHighlight ?? repository.createHighlight)(highlight, membership.key);
   if (!saved) throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.');
   const row = await (context.getHighlight ?? repository.getHighlight)(input.scopeKey, saved.key, membership.key);
@@ -672,7 +684,7 @@ async function deleteHighlight(rawInput: unknown, context: GalleryOperationConte
   const row = await (context.getHighlight ?? repository.getHighlight)(input.scopeKey, input.highlightKey, membership.key);
   if (!row) throw new GalleryOperationError(404, 'GALLERY_HIGHLIGHT_NOT_FOUND', 'Highlight not found.');
   await requireOwner(context, row.highlight.collectionKey);
-  const highlight = await (context.deleteHighlight ?? repository.deleteHighlight)(input.scopeKey, input.highlightKey, membership.key, new Date().toISOString());
+  const highlight = await (context.deleteHighlight ?? repository.deleteHighlight)(input.scopeKey, input.highlightKey, membership.key);
   if (!highlight) throw new GalleryOperationError(404, 'GALLERY_HIGHLIGHT_NOT_FOUND', 'Highlight not found.');
   await publish(context, 'highlightChanged', { collections: [highlight.collectionKey] });
   return { highlightKey: highlight.key };
@@ -710,7 +722,6 @@ export const galleryOperationInputSchemas = {
   createSubject: subjectCreateSchema,
   listSubjectImages: subjectKeySchema,
   deleteSubject: subjectKeySchema,
-  restoreSubject: subjectKeySchema,
   createHighlight: highlightCreateSchema,
   listHighlights: highlightListSchema,
   readHighlight: highlightKeySchema,
@@ -749,7 +760,6 @@ export const galleryOperations = {
   createSubject,
   listSubjectImages,
   deleteSubject,
-  restoreSubject,
   createHighlight,
   listHighlights,
   readHighlight,

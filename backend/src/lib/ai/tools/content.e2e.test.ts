@@ -125,7 +125,7 @@ suite('Content live E2E', () => {
     await save('organizations', { _key: organizationKey, name: 'Content E2E', is_root: false, slug: `archive-${organizationKey}`, description: null, isActive: true, mfa_enabled: false, metadata: {}, createdAt: now, updatedAt: now, embedding: [] });
     await save('organizations', { _key: outsiderOrganizationKey, name: 'Content outsider', is_root: false, slug: `outside-${outsiderOrganizationKey}`, description: null, isActive: true, mfa_enabled: false, metadata: {}, createdAt: now, updatedAt: now, embedding: [] });
     for (const [key, organization, slug] of [[scopeKey, organizationKey, 'primary'], [secondScopeKey, organizationKey, 'secondary'], [outsiderScopeKey, outsiderOrganizationKey, 'outsider']] as const) {
-      await save('scopes', { _key: key, organizationKey: organization, slug: `${slug}-${key}`, name: slug, summary: `${slug} archive scope`, description: `${slug} documents`, position: 1, level: 1, deletedAt: null, embedding: [] });
+      await save('scopes', { _key: key, organizationKey: organization, slug: `${slug}-${key}`, name: slug, summary: `${slug} archive scope`, description: `${slug} documents`, position: 1, level: 1, embedding: [] });
     }
     await save('users', { _key: userKey, organizationId: organizationKey, email: `${userKey}@example.test`, emailHash: userKey, countryCode: 'SE', name: 'Content Owner', createdAt: now, updatedAt: now, embedding: [] });
     await save('userOrganizations', { _key: membershipKey, organizationId: organizationKey, userId: userKey, orgRole: 'owner', status: 'active', joinedAt: now, createdAt: now, updatedAt: now, embedding: [] });
@@ -163,7 +163,6 @@ suite('Content live E2E', () => {
       generateExport: (input: any) => generateDocumentExport(input, { pdfRenderer: async () => new TextEncoder().encode('%PDF-1.4\n%%EOF') }),
       random: (size: number) => Uint8Array.from({ length: size }, (_, index) => (organizationKey.charCodeAt(index % organizationKey.length) + randomSeed + index) % 255 + 1),
       clock: () => new Date(now),
-      canPermanentlyDelete: () => true,
     };
     const context = {
       organizationKey,
@@ -397,24 +396,12 @@ suite('Content live E2E', () => {
     const unshared = await call('document.unshare', { shareKeys: [shareKey], atomic: true });
     expect(unshared.results[0].data.share.revokedAt).toBe(now);
     expect((await call('document.list-shares', { documentKeys: [documentKey], includeRevoked: true })).results[0].data.shares[0].revokedAt).toBe(now);
-    const archivedDocument = await call('document.archive', { documentKeys: [documentKey], atomic: true });
-    expect(archivedDocument.results[0].data.document.deletedAt).toBe(now);
     await call('document.delete-version', { versionKeys: [versionTwo.key], atomic: true });
     expect(await (await db.query('RETURN DOCUMENT(documentVersions, @key) == null', { key: versionTwo.key })).next()).toBe(true);
-    const restoredDocument = await call('document.restore', { documentKeys: [documentKey], atomic: true });
-    expect(restoredDocument.results[0].data.document.deletedAt).toBeNull();
 
-    await expect(call('folder.archive', { folderKeys: [rootFolderKey], includeDescendants: true, atomic: true })).rejects.toMatchObject({ code: 'CONTENT_CONFLICT' });
-    await call('folder.update', { updates: [{ folderKey: rootFolderKey, isFavorite: false }] });
-    await call('folder.archive', { folderKeys: [rootFolderKey], includeDescendants: true, atomic: true });
-    expect((await db.collection('documents').document(documentKey)).deletedAt).toBe(now);
-    await call('folder.restore', { folderKeys: [rootFolderKey], includeDescendants: true, atomic: true });
-    expect((await db.collection('documents').document(documentKey)).deletedAt).toBeNull();
-
-    await call('document.archive', { documentKeys: [copiedDocumentKey] });
     const copiedRaw = await db.collection('documents').document(copiedDocumentKey);
     const copiedStorageKey = copiedRaw.storageKey;
-    expect((await call('document.delete', { documentKeys: [copiedDocumentKey], deleteVersions: true, deleteShares: true })).summary.failed).toBe(0);
+    expect((await call('document.delete', { documentKeys: [copiedDocumentKey] })).summary.failed).toBe(0);
     expect(await (await db.query('RETURN DOCUMENT(documents, @key) == null', { key: copiedDocumentKey })).next()).toBe(true);
     expect(await (await db.query('RETURN DOCUMENT(documentAudioVersions, @key) == null', { key: copiedAudio.results[0].data.audioVersion.key })).next()).toBe(true);
     expect(await (await db.query('RETURN DOCUMENT(documentSummaries, @key) == null', { key: summaryKey })).next()).toBe(true);
@@ -423,7 +410,6 @@ suite('Content live E2E', () => {
 
     const disposable = await call('folder.create', { folders: [{ scopeKey, name: 'Disposable' }] });
     const disposableKey = disposable.results[0].data.folder.key;
-    await call('folder.archive', { folderKeys: [disposableKey] });
     await call('folder.delete', { folderKeys: [disposableKey], atomic: true });
     expect(await (await db.query('RETURN DOCUMENT(folders, @key) == null', { key: disposableKey })).next()).toBe(true);
 

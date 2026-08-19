@@ -3,7 +3,7 @@ import * as Crypto from "expo-crypto";
 import { useAuthStore } from "@/state/auth";
 import type { AssistantChange } from "./assistant-changes";
 import {
-  planContentSelectionArchive,
+  planContentSelectionDelete,
   planContentSelectionCopy,
   planContentSelectionFavorite,
   planContentSelectionMove,
@@ -577,8 +577,8 @@ export async function copyContentDocument(documentKey: string, targetFolderKey?:
   return singleBatchRecord(outcome, outcome.documents, "The document could not be copied.");
 }
 
-export async function archiveContentDocument(documentKey: string) {
-  const outcome = await archiveContentSelection({ folderKeys: [], documentKeys: [documentKey] });
+export async function deleteContentDocument(documentKey: string) {
+  const outcome = await hardDeleteContentSelection({ folderKeys: [], documentKeys: [documentKey] });
   return singleBatchRecord(outcome, outcome.documents, "The document could not be deleted.");
 }
 
@@ -647,8 +647,8 @@ export function copyContentSelection(selection: ContentSelection, destinationFol
   return executeContentSelectionPlan(planContentSelectionCopy(selection, getContentContext().scopeKey, destinationFolderKeys, idempotencyKey));
 }
 
-export function archiveContentSelection(selection: ContentSelection, idempotencyKey = createContentMutationKey()) {
-  return executeContentSelectionPlan(planContentSelectionArchive(selection, idempotencyKey));
+export function hardDeleteContentSelection(selection: ContentSelection, idempotencyKey = createContentMutationKey()) {
+  return executeContentSelectionPlan(planContentSelectionDelete(selection, idempotencyKey));
 }
 
 export async function setContentFolderFavorite(folderKey: string, isFavorite: boolean) {
@@ -661,8 +661,8 @@ export async function copyContentFolder(folderKey: string, targetParentFolderKey
   return singleBatchRecord(outcome, outcome.copiedFolders, "The folder could not be copied.");
 }
 
-export async function archiveContentFolder(folderKey: string) {
-  const outcome = await archiveContentSelection({ folderKeys: [folderKey], documentKeys: [] });
+export async function deleteContentFolder(folderKey: string) {
+  const outcome = await hardDeleteContentSelection({ folderKeys: [folderKey], documentKeys: [] });
   return singleBatchRecord(outcome, outcome.folders, "The folder could not be deleted.");
 }
 

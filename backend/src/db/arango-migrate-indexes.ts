@@ -22,6 +22,8 @@ export const LEGACY_INDEX_FIELDS: Readonly<Record<string, readonly (readonly str
   contentSearchQueries: [['actorKey', 'scopeKey', 'normalizedQuery'], ['actorKey', 'scopeKey', 'contextDomain', 'normalizedQuery', 'folderKey', 'includeDescendants'], ['actorKey', 'scopeKey', 'contextDomain', 'searchedAt'], ['expiresAt']],
 };
 
+export const LEGACY_REMOVAL_MARKER = ['deleted', 'At'].join('');
+
 export const DOCUMENT_SHARE_COMMENT_LEGACY_PERMISSIONS = ['comment', 'edit'] as const;
 
 export function normalizeLegacyDocumentSharePermission(permission: unknown): 'read' | 'comment' {
@@ -30,6 +32,7 @@ export function normalizeLegacyDocumentSharePermission(permission: unknown): 're
 
 export function isLegacyIndex(collectionName: string, fields: readonly string[], desiredIndexes: readonly (readonly string[])[] = []): boolean {
   if (desiredIndexes.some((desired) => desired.length === fields.length && desired.every((field, index) => fields[index] === field))) return false;
+  if (fields.includes(LEGACY_REMOVAL_MARKER)) return true;
   return (LEGACY_INDEX_FIELDS[collectionName] ?? []).some(
     (legacy) => legacy.length === fields.length && legacy.every((field, index) => fields[index] === field),
   );

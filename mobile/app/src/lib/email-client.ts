@@ -29,7 +29,7 @@ export const emailThreadSchema = z.object({
   priority: z.enum(["low", "normal", "high", "urgent"]), state: z.enum(["needs_action", "waiting", "informational", "filtered", "done"]), lastMessageAt: dateSchema,
   snippet: z.string().optional(), category: z.enum(["primary", "updates", "promotions", "social", "forums", "other"]).optional(), unread: z.boolean().optional(), starred: z.boolean().optional(), labels: z.array(z.string()).optional(),
   latestFrom: z.string().email().optional(), inInbox: z.boolean().optional(), isFavorite: z.boolean(),
-  deletedAt: dateSchema.nullable(), createdAt: dateSchema, updatedAt: dateSchema,
+  createdAt: dateSchema, updatedAt: dateSchema,
 });
 export const emailMessageSchema = z.object({
   key: keySchema, scopeKey: keySchema, accountKey: keySchema, threadKey: keySchema, providerMessageId: z.string().min(1), from: z.string().email(), to: z.array(z.string().email()), cc: z.array(z.string().email()).optional(), bcc: z.array(z.string().email()).optional(),

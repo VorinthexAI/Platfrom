@@ -7,9 +7,9 @@ describe('unified tool registry', () => {
   test('has one unique definition for every public tool name', () => {
     expect(new Set(TOOL_NAMES).size).toBe(TOOL_NAMES.length);
     expect(new Set(TOOL_DEFINITIONS.map(({ name }) => name)).size).toBe(TOOL_DEFINITIONS.length);
-    expect(TOOL_NAMES).toHaveLength(118);
-    expect(TOOL_DEFINITIONS).toHaveLength(118);
-    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 64);
+    expect(TOOL_NAMES).toHaveLength(109);
+    expect(TOOL_DEFINITIONS).toHaveLength(109);
+    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 63);
     expect(TOOL_DEFINITIONS.map(({ name }) => name)).toEqual([...TOOL_NAMES]);
     expect(TOOL_NAMES).not.toContain('chat');
     expect(TOOL_NAMES).not.toContain('orchestrator.chat');
@@ -23,8 +23,6 @@ describe('unified tool registry', () => {
     expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'image.delete')).toHaveLength(1);
     expect(TOOL_NAMES).not.toContain('collection.duplicates.find');
     expect(TOOL_DEFINITIONS.some(({ name }) => name === 'orchestrator.chat')).toBe(false);
-    expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'folder.archive')).toHaveLength(1);
-    expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'document.restore')).toHaveLength(1);
     expect(TOOL_NAMES).not.toContain('email.read');
     expect(TOOL_NAMES).not.toContain('email.thread.list');
     expect(TOOL_NAMES).not.toContain('email.reply.draft');
@@ -74,30 +72,6 @@ describe('unified tool registry', () => {
       expect(TOOL_NAMES).not.toContain(name);
       expect(toolInputSchemas).not.toHaveProperty(name);
     }
-  });
-
-  test('rejects historical lifecycle inputs and retains canonical strict schemas', () => {
-    const folderKey = newId();
-    const documentKey = newId();
-    const historicalInputs = {
-      'folder.archive': { folderKey },
-      'folder.restore': { folderKey },
-      'document.archive': { documentKey },
-      'document.restore': { documentKey },
-      'document-version.archive': { documentVersionKey: newId() },
-      'document-version.restore': { documentVersionKey: newId() },
-      'document-share.archive': { documentShareKey: newId() },
-      'document-share.restore': { documentShareKey: newId() },
-    };
-    for (const [name, item] of Object.entries(historicalInputs)) {
-      expect(toolInputSchemas[name].safeParse({ items: [item], atomic: true }).success, name).toBe(false);
-    }
-    expect(toolInputSchemas['folder.archive'].parse({ folderKeys: [folderKey] })).toEqual({ folderKeys: [folderKey], atomic: false });
-    expect(toolInputSchemas['document.restore'].parse({ documentKeys: [documentKey] })).toEqual({ documentKeys: [documentKey], atomic: false });
-    expect(toolInputSchemas['document-version.archive'].parse({ versionKeys: [documentKey] })).toEqual({ versionKeys: [documentKey], atomic: false });
-    expect(toolInputSchemas['document-share.restore'].parse({ shareKeys: [documentKey] })).toEqual({ shareKeys: [documentKey], atomic: false });
-    expect(toolInputSchemas['folder.archive'].safeParse({ folderKeys: [folderKey], unexpected: true }).success).toBe(false);
-    expect(TOOL_DEFINITIONS.find(({ name }) => name === 'folder.archive')?.inputSchema).not.toHaveProperty('oneOf');
   });
 
   test('executes workspace tools with strict input and trusted context', async () => {

@@ -57,13 +57,6 @@ describe('agent execution access', () => {
     expect(await authorizeAgentExecution(f.runtime, { kind: 'system' }, f.data)).toEqual({ kind: 'system' });
   });
 
-  test('blocks member and delegated system execution in archived scopes', async () => {
-    const f = fixture();
-    const archived = { ...f.runtime, scope: { ...f.runtime.scope, deletedAt: '2026-07-18T00:00:00.000Z' } };
-    await expect(authorizeAgentExecution(archived, { kind: 'member', userOrganizationKey: f.userOrganization.key }, f.data)).rejects.toThrow('archived');
-    await expect(authorizeAgentExecution(archived, { kind: 'system' }, f.data)).rejects.toThrow('archived');
-  });
-
   test('blocks archived scope-agent relations and missing agent grants', async () => {
     const archived = fixture();
     await expect(authorizeAgentExecution(archived.runtime, { kind: 'member', userOrganizationKey: archived.userOrganization.key }, { ...archived.data, async getScopeAgent() { return { ...archived.scopeAgent, status: 'archived' as const }; } })).rejects.toThrow('scope agent');

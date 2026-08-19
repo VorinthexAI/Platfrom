@@ -19,11 +19,12 @@ import { ensureRuntimeVariablesCollection } from '../lib/ai/runtime-variables/in
 import { organizationProviderSchema } from '../lib/ai/organization-providers/schema';
 import { buildEmbeddingText } from '../lib/db/base';
 import { NEXUS_SCOPE_KEY, SEEDED_SCOPES } from '../lib/db/seed';
-import { isLegacyIndex, LEGACY_INDEX_FIELDS } from './arango-migrate-indexes';
+import { isLegacyIndex, LEGACY_REMOVAL_MARKER } from './arango-migrate-indexes';
 import { stageLegacyDocumentShares } from './content-migration';
 import { htmlToPlainText } from '../lib/ai/document-processing/representation';
 import { chunkDocumentContent, chunkDocumentText, documentEmbeddingTexts, documentSemanticHash } from '../lib/ai/document-processing/chunking';
 import { z } from 'zod';
+import { withDatabaseTransaction } from '../lib/db/client';
 
 const url = process.env.ARANGO_URL ?? 'http://127.0.0.1:8529';
 const databaseName = process.env.ARANGO_DATABASE ?? 'vorinthex';
@@ -34,7 +35,6 @@ export interface CollectionSpec {
   indexes?: Array<{ fields: string[]; unique?: boolean; sparse?: boolean }>;
   embedKeys?: string[];
   skipEmbedding?: boolean;
-  archive?: boolean;
 }
 
 export async function migrateImageCaptions(targetDb: Database): Promise<void> {
@@ -645,7 +645,7 @@ export async function migrateContentShares(targetDb: Database) {
   const target = targetDb.collection('shares');
   if (!(await target.exists())) await target.create();
   for (const index of [
-    { fields: ['scopeKey'] }, { fields: ['scopeKey', 'sourceType', 'sourceKey', 'deletedAt'] },
+    { fields: ['scopeKey'] },
     { fields: ['scopeKey', 'sourceType', 'sourceKey', 'revokedAt'] }, { fields: ['tokenHash'], unique: true }, { fields: ['expiresAt'], sparse: true },
   ]) await target.ensureIndex({ type: 'persistent', unique: false, sparse: false, ...index });
 
@@ -658,18 +658,18 @@ export async function migrateContentShares(targetDb: Database) {
     const [patch] = stageLegacyDocumentShares([share]);
     const requiredDates = ['createdAt', 'updatedAt'] as const;
     for (const field of requiredDates) iso.parse(share[field]);
-    for (const field of ['expiresAt', 'revokedAt', 'deletedAt'] as const) if (share[field] != null) iso.parse(share[field]);
+    for (const field of ['expiresAt', 'revokedAt'] as const) if (share[field] != null) iso.parse(share[field]);
     if (typeof share.scopeKey !== 'string' || typeof share.documentKey !== 'string') throw new Error(`Cannot migrate documentShares/${String(share._key)}: invalid scope or document key.`);
     return {
       _key: String(share._key), scopeKey: share.scopeKey, sourceType: 'document', sourceKey: share.documentKey,
-      permission: patch!.permission, tokenHash: patch!.tokenHash, deletedAt: share.deletedAt ?? null,
+      permission: patch!.permission, tokenHash: patch!.tokenHash,
       ...(share.passwordHash != null ? { passwordHash: share.passwordHash } : {}),
       ...(share.expiresAt != null ? { expiresAt: share.expiresAt } : {}),
       ...(share.revokedAt != null ? { revokedAt: share.revokedAt } : {}),
       createdAt: share.createdAt, updatedAt: share.updatedAt,
     };
   };
-  const fields = ['scopeKey', 'sourceType', 'sourceKey', 'permission', 'tokenHash', 'passwordHash', 'expiresAt', 'revokedAt', 'deletedAt', 'createdAt', 'updatedAt'] as const;
+  const fields = ['scopeKey', 'sourceType', 'sourceKey', 'permission', 'tokenHash', 'passwordHash', 'expiresAt', 'revokedAt', 'createdAt', 'updatedAt'] as const;
   const equal = (left: Record<string, unknown>, right: Record<string, unknown>) => fields.every((field) => (left[field] ?? null) === (right[field] ?? null));
   const copyAndVerify = async () => {
     let after = '';
@@ -740,6 +740,221 @@ async function getUserIdByEmailHash(targetDb: Database, emailHash: string): Prom
   );
   const user = await cursor.next();
   return user?._key ?? null;
+}
+
+const formerlyTombstonedCollections = [
+  'scopes', 'scopeScopes', 'folders', 'images', 'visualIdentities', 'collections',
+  'imageCollecitionHightlights', 'documents', 'documentVersions', 'documentShares',
+  'shares', 'places', 'trips', 'books', 'emailThreads', 'messages',
+] as const;
+
+export async function removeLegacyTombstones(targetDb: Database): Promise<void> {
+  const jobs = targetDb.collection('storageDeletionJobs');
+  if (!await jobs.exists()) await jobs.create();
+  await jobs.ensureIndex({ type: 'persistent', fields: ['storageKey'], unique: true });
+  const existing = new Set((await targetDb.listCollections()).map(({ name }) => name));
+  const exists = async (name: string) => existing.has(name);
+  await withDatabaseTransaction(targetDb, { write: [...existing] }, async (transaction) => {
+  const keysFor = async (name: string): Promise<string[]> => {
+    if (!await exists(name)) return [];
+    const cursor = await transaction.query(
+      'FOR resource IN @@collection FILTER HAS(resource, @marker) && resource[@marker] != null RETURN resource._key',
+      { '@collection': name, marker: LEGACY_REMOVAL_MARKER },
+    );
+    return cursor.all() as Promise<string[]>;
+  };
+  const removeKeys = async (name: string, keys: string[]) => {
+    if (!keys.length || !await exists(name)) return;
+    await transaction.query('FOR resource IN @@collection FILTER resource._key IN @keys REMOVE resource IN @@collection', { '@collection': name, keys });
+  };
+  const removeBy = async (name: string, field: string, keys: string[]) => {
+    if (!keys.length || !await exists(name)) return;
+    await transaction.query('FOR resource IN @@collection FILTER resource[@field] IN @keys REMOVE resource IN @@collection', { '@collection': name, field, keys });
+  };
+  const removeTyped = async (name: string, typeField: string, type: string, keys: string[], sourceCollection?: string) => {
+    if (!keys.length || !await exists(name)) return;
+    if (sourceCollection && await exists(sourceCollection) && name !== 'userHiddens') {
+      await transaction.query('FOR source IN @@source FILTER source._key IN @keys FOR resource IN @@collection FILTER resource.scopeKey == source.scopeKey && resource[@typeField] == @type && resource.sourceKey == source._key REMOVE resource IN @@collection', { '@source': sourceCollection, '@collection': name, keys, typeField, type });
+      return;
+    }
+    await transaction.query('FOR resource IN @@collection FILTER resource[@typeField] == @type && resource.sourceKey IN @keys REMOVE resource IN @@collection', { '@collection': name, keys, typeField, type });
+  };
+  const mergeKeys = (...values: string[][]) => [...new Set(values.flat())];
+
+  const scopeKeys = await keysFor('scopes');
+  const directFolderKeys = await keysFor('folders');
+  const allFolderKeys = new Set(directFolderKeys);
+  if (await exists('folders')) {
+    let parents = directFolderKeys;
+    while (parents.length) {
+      const cursor = await transaction.query('FOR folder IN folders FILTER folder.parentFolderKey IN @parents RETURN folder._key', { parents });
+      const children = ((await cursor.all()) as string[]).filter((key) => !allFolderKeys.has(key));
+      for (const key of children) allFolderKeys.add(key);
+      parents = children;
+    }
+  }
+  const removedFolderKeys = [...allFolderKeys];
+  const scopedFolderKeys = scopeKeys.length && await exists('folders') ? await (await transaction.query('FOR folder IN folders FILTER folder.scopeKey IN @scopeKeys RETURN folder._key', { scopeKeys })).all() as string[] : [];
+  const documentKeys = mergeKeys(
+    await keysFor('documents'),
+    await exists('documents') && removedFolderKeys.length ? await (await transaction.query('FOR document IN documents FILTER document.folderKey IN @keys RETURN document._key', { keys: removedFolderKeys })).all() as string[] : [],
+    await exists('documents') && scopeKeys.length ? await (await transaction.query('FOR document IN documents FILTER document.scopeKey IN @scopeKeys RETURN document._key', { scopeKeys })).all() as string[] : [],
+  );
+  const imageKeys = mergeKeys(
+    await keysFor('images'),
+    await exists('images') && scopeKeys.length ? await (await transaction.query('FOR image IN images FILTER image.scopeKey IN @scopeKeys RETURN image._key', { scopeKeys })).all() as string[] : [],
+  );
+  const collectionKeys = mergeKeys(
+    await keysFor('collections'),
+    await exists('collections') && scopeKeys.length ? await (await transaction.query('FOR collection IN collections FILTER collection.scopeKey IN @scopeKeys RETURN collection._key', { scopeKeys })).all() as string[] : [],
+  );
+  const summaryKeys = await exists('documentSummaries') && documentKeys.length ? await (await transaction.query('FOR summary IN documentSummaries FILTER summary.documentKey IN @keys RETURN summary._key', { keys: documentKeys })).all() as string[] : [];
+  const uploadKeys = await exists('galleryUploads') ? await (await transaction.query('FOR upload IN galleryUploads FILTER upload.scopeKey IN @scopeKeys || upload.imageKey IN @imageKeys || DOCUMENT(images, upload.imageKey) == null RETURN upload._key', { scopeKeys, imageKeys })).all() as string[] : [];
+  const storageKeys: string[] = [];
+  if (documentKeys.length && await exists('documents')) storageKeys.push(...((await (await transaction.query('FOR document IN documents FILTER document._key IN @keys RETURN APPEND(APPEND(IS_STRING(document.storageKey) ? [document.storageKey] : [], IS_ARRAY(document.sourceStorageKeys) ? document.sourceStorageKeys : []), IS_ARRAY(document.speechStorageKeys) ? document.speechStorageKeys : [])', { keys: documentKeys })).all()) as string[][]).flat());
+  if (imageKeys.length && await exists('images')) storageKeys.push(...await (await transaction.query('FOR image IN images FILTER image._key IN @keys && IS_STRING(image.storageKey) RETURN image.storageKey', { keys: imageKeys })).all() as string[]);
+  if (documentKeys.length && await exists('documentAudioVersions')) storageKeys.push(...await (await transaction.query('FOR audio IN documentAudioVersions FILTER audio.documentKey IN @keys && IS_STRING(audio.storageKey) RETURN audio.storageKey', { keys: documentKeys })).all() as string[]);
+  if (documentKeys.length && await exists('documentSummaryAudio')) storageKeys.push(...await (await transaction.query('FOR audio IN documentSummaryAudio FILTER audio.documentKey IN @keys && IS_STRING(audio.storageKey) RETURN audio.storageKey', { keys: documentKeys })).all() as string[]);
+  if (uploadKeys.length && await exists('galleryUploads')) storageKeys.push(...await (await transaction.query('FOR upload IN galleryUploads FILTER upload._key IN @keys && IS_STRING(upload.storageKey) RETURN upload.storageKey', { keys: uploadKeys })).all() as string[]);
+  await transaction.query('FOR storageKey IN UNIQUE(@storageKeys) FILTER IS_STRING(storageKey) && LENGTH(storageKey) > 0 UPSERT { storageKey } INSERT { storageKey, createdAt: @now } UPDATE {} IN storageDeletionJobs', { storageKeys, now: new Date().toISOString() });
+
+  const agentKeys = mergeKeys(
+    await keysFor('agents'),
+    await exists('agents') && scopeKeys.length ? await (await transaction.query('FOR agent IN agents FILTER agent.scopeKey IN @scopeKeys RETURN agent._key', { scopeKeys })).all() as string[] : [],
+  );
+  const scopeAgentKeys = await exists('scopeAgents') ? await (await transaction.query('FOR link IN scopeAgents FILTER link.scopeKey IN @scopeKeys || link.agentKey IN @agentKeys RETURN link._key', { scopeKeys, agentKeys })).all() as string[] : [];
+  const runKeys = await exists('agentRuns') ? await (await transaction.query('FOR run IN agentRuns FILTER run.scopeKey IN @scopeKeys || run.agentKey IN @agentKeys RETURN run._key', { scopeKeys, agentKeys })).all() as string[] : [];
+  for (const name of ['agentRunCalls', 'agentRunSteps', 'agentArtifacts', 'agentRunSources', 'agentArtifactChecks']) await removeBy(name, 'agentRunKey', runKeys);
+  await removeBy('agentMemories', 'sourceRunKey', runKeys);
+  await removeBy('agentMembers', 'scopeAgentKey', scopeAgentKeys);
+  await removeBy('agentMembers', 'agentKey', agentKeys);
+  await removeBy('agentSkills', 'agentKey', agentKeys);
+  await removeBy('runtimeVariables', 'agentKey', agentKeys);
+  await removeBy('agentRuns', 'agentKey', agentKeys);
+  await removeBy('agentMemories', 'agentKey', agentKeys);
+  await removeKeys('scopeAgents', scopeAgentKeys);
+  await removeKeys('agents', agentKeys);
+
+  if (scopeKeys.length) {
+    for (const name of [
+      'scopeMembers', 'imageCaptions', 'visualIdentities', 'imageIdentities',
+      'galleryUploads', 'collections', 'collectionImages', 'imageCollecitionHightlights',
+      'collectionMembers', 'collectionInvites', 'tags', 'tagAssignments', 'documents',
+      'documentVersions', 'documentAudioVersions', 'documentSummaries', 'documentSummaryAudio',
+      'shares', 'places', 'trips', 'tripPlaces', 'placeVisits', 'books', 'bookContexts',
+      'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'chapterContexts', 'bookProgress',
+      'emailAccounts', 'emailThreads', 'emailMessages', 'emailContacts', 'emailWritingProfiles',
+      'emailRules', 'emailReplyDrafts', 'channels', 'threads', 'messages', 'messageMentions',
+      'messageReactions', 'polls', 'pollOptions', 'pollVotes',
+      'agents', 'scopeAgents', 'agentMembers', 'agentRuns', 'agentMemories', 'runtimeVariables',
+    ]) await removeBy(name, 'scopeKey', scopeKeys);
+    if (await exists('scopeScopes')) {
+      await transaction.query('FOR relation IN scopeScopes FILTER relation.parentKey IN @keys || relation.childKey IN @keys REMOVE relation IN scopeScopes', { keys: scopeKeys });
+    }
+    await removeKeys('scopes', scopeKeys);
+  }
+
+  await removeDocumentDependents(documentKeys, removeBy, removeKeys, removeTyped, summaryKeys);
+  await removeTyped('userHiddens', 'source', 'folder', mergeKeys(removedFolderKeys, scopedFolderKeys));
+  await removeKeys('folders', mergeKeys(removedFolderKeys, scopedFolderKeys));
+
+  for (const name of ['collectionImages', 'collectionMembers', 'collectionInvites', 'imageCollecitionHightlights']) await removeBy(name, 'collectionKey', collectionKeys);
+  await removeTyped('shares', 'sourceType', 'collection', collectionKeys, 'collections');
+  await removeTyped('tagAssignments', 'sourceType', 'collection', collectionKeys, 'collections');
+  await removeTyped('userHiddens', 'source', 'collection', collectionKeys);
+  await removeKeys('collections', collectionKeys);
+
+  for (const name of ['collectionImages', 'imageIdentities']) await removeBy(name, 'imageKey', imageKeys);
+  await removeTyped('shares', 'sourceType', 'image', imageKeys, 'images');
+  await removeTyped('tagAssignments', 'sourceType', 'image', imageKeys, 'images');
+  await removeTyped('userHiddens', 'source', 'image', imageKeys);
+  await removeBy('galleryUploads', 'imageKey', imageKeys);
+  if (imageKeys.length && await exists('collections')) await transaction.query('FOR collection IN collections FILTER collection.coverImageKey IN @keys UPDATE collection WITH { coverImageKey: null } IN collections OPTIONS { keepNull: false }', { keys: imageKeys });
+  if (imageKeys.length && await exists('visualIdentities')) {
+    const cursor = await transaction.query('FOR identity IN visualIdentities FILTER identity.referenceImageKey IN @keys RETURN identity._key', { keys: imageKeys });
+    const referencedIdentityKeys = await cursor.all() as string[];
+    await removeBy('imageIdentities', 'identityKey', referencedIdentityKeys);
+    await removeKeys('visualIdentities', referencedIdentityKeys);
+  }
+  await removeKeys('images', imageKeys);
+  await removeKeys('galleryUploads', uploadKeys);
+  if (await exists('imageCaptions')) await transaction.query('FOR caption IN imageCaptions FILTER LENGTH(FOR image IN images FILTER image.imageCaptionKey == caption._key LIMIT 1 RETURN 1) == 0 REMOVE caption IN imageCaptions');
+
+  const identityKeys = await keysFor('visualIdentities');
+  await removeBy('imageIdentities', 'identityKey', identityKeys);
+  await removeKeys('visualIdentities', identityKeys);
+
+  const tripKeys = await keysFor('trips');
+  for (const name of ['tripPlaces', 'placeVisits']) await removeBy(name, 'tripKey', tripKeys);
+  await removeTyped('shares', 'sourceType', 'trip', tripKeys, 'trips');
+  await removeTyped('tagAssignments', 'sourceType', 'trip', tripKeys, 'trips');
+  await removeKeys('trips', tripKeys);
+
+  const placeKeys = await keysFor('places');
+  for (const name of ['tripPlaces', 'placeVisits']) await removeBy(name, 'placeKey', placeKeys);
+  await removeTyped('shares', 'sourceType', 'place', placeKeys, 'places');
+  await removeTyped('tagAssignments', 'sourceType', 'place', placeKeys, 'places');
+  await removeKeys('places', placeKeys);
+
+  const bookKeys = await keysFor('books');
+  if (bookKeys.length && await exists('bookChapters')) {
+    const cursor = await transaction.query('FOR chapter IN bookChapters FILTER chapter.bookKey IN @keys RETURN chapter._key', { keys: bookKeys });
+    await removeBy('chapterContexts', 'chapterKey', await cursor.all() as string[]);
+  }
+  for (const name of ['bookContexts', 'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'bookProgress']) await removeBy(name, 'bookKey', bookKeys);
+  await removeKeys('books', bookKeys);
+
+  const emailThreadKeys = await keysFor('emailThreads');
+  for (const name of ['emailMessages', 'emailReplyDrafts']) await removeBy(name, 'threadKey', emailThreadKeys);
+  await removeKeys('emailThreads', emailThreadKeys);
+
+  const messageKeys = await keysFor('messages');
+  const threadKeys = messageKeys.length && await exists('threads') ? await (await transaction.query('FOR thread IN threads FILTER thread.rootMessageKey IN @keys RETURN thread._key', { keys: messageKeys })).all() as string[] : [];
+  const removedMessageKeys = mergeKeys(messageKeys, threadKeys.length && await exists('messages') ? await (await transaction.query('FOR message IN messages FILTER message.threadKey IN @threadKeys RETURN message._key', { threadKeys })).all() as string[] : []);
+  if (removedMessageKeys.length && await exists('polls')) {
+    const cursor = await transaction.query('FOR poll IN polls FILTER poll.messageKey IN @keys RETURN poll._key', { keys: removedMessageKeys });
+    const pollKeys = await cursor.all() as string[];
+    for (const name of ['pollOptions', 'pollVotes']) await removeBy(name, 'pollKey', pollKeys);
+  }
+  for (const name of ['messageMentions', 'messageReactions', 'polls']) await removeBy(name, 'messageKey', removedMessageKeys);
+  await removeKeys('messages', removedMessageKeys);
+  await removeKeys('threads', threadKeys);
+
+  for (const name of formerlyTombstonedCollections) {
+    const keys = await keysFor(name);
+    await removeKeys(name, keys);
+  }
+  });
+
+  for (const name of formerlyTombstonedCollections) {
+    if (!await exists(name)) continue;
+    const collection = targetDb.collection(name);
+    for (const index of await collection.indexes()) {
+      const fields = 'fields' in index && Array.isArray(index.fields) ? index.fields.map(String) : [];
+      if (fields.includes(LEGACY_REMOVAL_MARKER)) await collection.dropIndex(index.id);
+    }
+    await targetDb.query(
+      'FOR resource IN @@collection FILTER HAS(resource, @marker) UPDATE resource WITH ZIP([@marker], [null]) IN @@collection OPTIONS { keepNull: false }',
+      { '@collection': name, marker: LEGACY_REMOVAL_MARKER },
+    );
+  }
+}
+
+async function removeDocumentDependents(
+  documentKeys: string[],
+  removeBy: (name: string, field: string, keys: string[]) => Promise<void>,
+  removeKeys: (name: string, keys: string[]) => Promise<void>,
+  removeTyped: (name: string, typeField: string, type: string, keys: string[], sourceCollection?: string) => Promise<void>,
+  summaryKeys: string[],
+) {
+  if (!documentKeys.length) return;
+  await removeBy('documentSummaryAudio', 'summaryKey', summaryKeys);
+  for (const name of ['documentVersions', 'documentAudioVersions', 'documentSummaries']) await removeBy(name, 'documentKey', documentKeys);
+  await removeBy('documentShares', 'documentKey', documentKeys);
+  await removeTyped('shares', 'sourceType', 'document', documentKeys, 'documents');
+  await removeTyped('tagAssignments', 'sourceType', 'document', documentKeys, 'documents');
+  await removeTyped('userHiddens', 'source', 'document', documentKeys);
+  await removeKeys('documents', documentKeys);
 }
 
 export const collections: CollectionSpec[] = [
@@ -939,32 +1154,32 @@ export const collections: CollectionSpec[] = [
   { name: 'polls', embedKeys: ['question'], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['messageKey'], unique: true }, { fields: ['channelKey', 'status'] }] },
   { name: 'pollOptions', embedKeys: ['text'], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['pollKey'] }, { fields: ['pollKey', 'position'], unique: true }] },
   { name: 'pollVotes', embedKeys: [], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['pollKey'] }, { fields: ['optionKey'] }, { fields: ['participantKey'] }, { fields: ['pollKey', 'optionKey', 'participantKey'], unique: true }] },
-  { name: 'folders', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'parentFolderKey'] }, { fields: ['scopeKey', 'isFavorite', 'deletedAt'] }, { fields: ['scopeKey', 'parentFolderKey', 'name'] }] },
-  { name: 'images', embedKeys: ['filename', 'caption', 'country', 'city', 'countryCode'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'deletedAt', 'createdAt'] }, { fields: ['imageCaptionKey'], sparse: true }, { fields: ['storageKey'], unique: true }] },
+  { name: 'folders', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'parentFolderKey'] }, { fields: ['scopeKey', 'isFavorite'] }, { fields: ['scopeKey', 'parentFolderKey', 'name'] }] },
+  { name: 'images', embedKeys: ['filename', 'caption', 'country', 'city', 'countryCode'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'createdAt'] }, { fields: ['imageCaptionKey'], sparse: true }, { fields: ['storageKey'], unique: true }] },
   { name: 'imageCaptions', skipEmbedding: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'hashAlgorithm', 'perceptualHash'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment0'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment1'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment2'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment3'], sparse: true }] },
-  { name: 'visualIdentities', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'name'] }, { fields: ['scopeKey', 'referenceImageKey'] }] },
+  { name: 'visualIdentities', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'name'] }, { fields: ['scopeKey', 'referenceImageKey'] }] },
   { name: 'imageIdentities', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'identityKey', 'imageKey'], unique: true }, { fields: ['scopeKey', 'identityKey', 'confidence'] }, { fields: ['scopeKey', 'imageKey'] }, { fields: ['scopeKey', 'imageKey', 'isReference'], sparse: true }] },
   { name: 'galleryUploads', skipEmbedding: true, indexes: [{ fields: ['actorKey', 'createdAt'] }, { fields: ['storageKey'], unique: true }, { fields: ['expiresAt'] }] },
-  { name: 'collections', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'name'] }, { fields: ['scopeKey', 'coverImageKey'], sparse: true }] },
+  { name: 'collections', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'name'] }, { fields: ['scopeKey', 'coverImageKey'], sparse: true }] },
   { name: 'collectionImages', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'collectionKey', 'imageKey'], unique: true }, { fields: ['scopeKey', 'collectionKey'] }, { fields: ['scopeKey', 'imageKey'] }] },
-  { name: 'imageCollecitionHightlights', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'collectionKey', 'deletedAt', 'createdAt'] }, { fields: ['scopeKey', 'createdByKey', 'deletedAt'] }] },
+  { name: 'imageCollecitionHightlights', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'collectionKey', 'createdAt'] }, { fields: ['scopeKey', 'createdByKey'] }] },
   { name: 'collectionMembers', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'collectionKey', 'memberKey'], unique: true }, { fields: ['scopeKey', 'collectionKey', 'role'] }, { fields: ['scopeKey', 'memberKey'] }] },
   { name: 'collectionInvites', skipEmbedding: true, indexes: [{ fields: ['tokenHash'], unique: true }, { fields: ['scopeKey', 'collectionKey'] }, { fields: ['expiresAt'] }, { fields: ['acceptedAt'], sparse: true }, { fields: ['revokedAt'], sparse: true }] },
   { name: 'tags', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey', 'name'] }] },
   { name: 'tagAssignments', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'tagKey', 'sourceType', 'sourceKey'], unique: true }, { fields: ['scopeKey', 'sourceType', 'sourceKey'] }, { fields: ['scopeKey', 'tagKey'] }] },
-  { name: 'documents', embedKeys: ['name', 'content'], archive: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'folderKey', 'deletedAt'] }, { fields: ['scopeKey', 'isFavorite', 'deletedAt'] }, { fields: ['storageKey'], unique: true, sparse: true }, { fields: ['folderKey', 'name'] }] },
-  { name: 'documentVersions', embedKeys: ['label', 'content'], archive: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'documentKey', 'deletedAt'] }, { fields: ['documentKey', 'version'], unique: true }] },
+  { name: 'documents', embedKeys: ['name', 'content'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'folderKey'] }, { fields: ['scopeKey', 'isFavorite'] }, { fields: ['storageKey'], unique: true, sparse: true }, { fields: ['folderKey', 'name'] }] },
+  { name: 'documentVersions', embedKeys: ['label', 'content'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'documentKey'] }, { fields: ['documentKey', 'version'], unique: true }] },
   { name: 'documentAudioVersions', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'documentKey', 'version'], unique: true }, { fields: ['scopeKey', 'documentKey', 'createdAt'] }, { fields: ['scopeKey', 'documentKey', 'isCurrent'] }, { fields: ['storageKey'], unique: true }] },
   // Private immutable generated summaries. Never expose through the generic node registry.
   { name: 'documentSummaries', skipEmbedding: true, indexes: [{ fields: ['documentKey', 'version'], unique: true }, { fields: ['scopeKey', 'documentKey', 'createdAt'] }] },
   // Private one-to-one durable audio for generated summaries.
   { name: 'documentSummaryAudio', skipEmbedding: true, indexes: [{ fields: ['summaryKey'], unique: true }, { fields: ['scopeKey', 'documentKey', 'createdAt'] }, { fields: ['storageKey'], unique: true }] },
-  { name: 'shares', skipEmbedding: true, archive: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'sourceType', 'sourceKey', 'deletedAt'] }, { fields: ['scopeKey', 'sourceType', 'sourceKey', 'revokedAt'] }, { fields: ['tokenHash'], unique: true }, { fields: ['expiresAt'], sparse: true }] },
-  { name: 'places', embedKeys: ['name', 'description', 'country', 'continent', 'region', 'city'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'isWishlist', 'deletedAt'] }, { fields: ['scopeKey', 'isFavorite', 'deletedAt'] }, { fields: ['scopeKey', 'countryCode'] }] },
-  { name: 'trips', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'startDate'] }, { fields: ['scopeKey', 'endDate'] }, { fields: ['scopeKey', 'isFavorite', 'deletedAt'] }] },
+  { name: 'shares', skipEmbedding: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'sourceType', 'sourceKey'] }, { fields: ['scopeKey', 'sourceType', 'sourceKey', 'revokedAt'] }, { fields: ['tokenHash'], unique: true }, { fields: ['expiresAt'], sparse: true }] },
+  { name: 'places', embedKeys: ['name', 'description', 'country', 'continent', 'region', 'city'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'isWishlist'] }, { fields: ['scopeKey', 'isFavorite'] }, { fields: ['scopeKey', 'countryCode'] }] },
+  { name: 'trips', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'startDate'] }, { fields: ['scopeKey', 'endDate'] }, { fields: ['scopeKey', 'isFavorite'] }] },
   { name: 'tripPlaces', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'tripKey', 'placeKey'], unique: true }, { fields: ['scopeKey', 'tripKey', 'position'], unique: true }, { fields: ['scopeKey', 'placeKey'] }] },
   { name: 'placeVisits', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'placeKey'] }, { fields: ['scopeKey', 'tripKey'], sparse: true }, { fields: ['scopeKey', 'arrivedAt'] }] },
-  { name: 'books', embedKeys: ['title', 'subtitle', 'description', 'goal', 'audience', 'outcome'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'status', 'deletedAt'] }, { fields: ['scopeKey', 'isFavorite', 'deletedAt'] }, { fields: ['scopeKey', 'generationRequestKey'], unique: true, sparse: true }] },
+  { name: 'books', embedKeys: ['title', 'subtitle', 'description', 'goal', 'audience', 'outcome'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'status'] }, { fields: ['scopeKey', 'isFavorite'] }, { fields: ['scopeKey', 'generationRequestKey'], unique: true, sparse: true }] },
   { name: 'bookContexts', embedKeys: ['userContext', 'priorKnowledge', 'priorBookContext', 'personalizationContext', 'researchContext', 'noveltyContext', 'generationBrief'], indexes: [{ fields: ['scopeKey', 'bookKey'], unique: true }] },
   { name: 'bookThemes', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey', 'bookKey', 'position'], unique: true }, { fields: ['scopeKey', 'bookKey'] }] },
   { name: 'bookSources', embedKeys: ['title', 'content', 'relevance'], indexes: [{ fields: ['scopeKey', 'bookKey'] }, { fields: ['scopeKey', 'bookKey', 'sourceType'] }, { fields: ['scopeKey', 'sourceType', 'sourceKey'], sparse: true }] },
@@ -973,7 +1188,7 @@ export const collections: CollectionSpec[] = [
   { name: 'chapterContexts', embedKeys: ['previousContext', 'objectiveContext', 'sourceContext', 'personalizationContext', 'noveltyContext', 'nextContext', 'generationBrief'], indexes: [{ fields: ['scopeKey', 'chapterKey'], unique: true }] },
   { name: 'bookProgress', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'userKey', 'bookKey', 'chapterKey'], unique: true }, { fields: ['scopeKey', 'userKey', 'bookKey'] }, { fields: ['scopeKey', 'userKey', 'isCompleted'] }] },
   { name: 'emailAccounts', skipEmbedding: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'provider', 'providerAccountId'], unique: true }, { fields: ['scopeKey', 'email'] }, { fields: ['email', 'syncEnabled'] }, { fields: ['syncEnabled', 'watchExpiresAt'] }, { fields: ['scopeKey', 'syncEnabled'] }] },
-  { name: 'emailThreads', embedKeys: ['subject', 'summary', 'intent', 'action'], archive: true, indexes: [{ fields: ['scopeKey', 'accountKey', 'providerThreadId'], unique: true }, { fields: ['scopeKey', 'accountKey', 'lastMessageAt'] }, { fields: ['scopeKey', 'state', 'priority', 'deletedAt'] }] },
+  { name: 'emailThreads', embedKeys: ['subject', 'summary', 'intent', 'action'], indexes: [{ fields: ['scopeKey', 'accountKey', 'providerThreadId'], unique: true }, { fields: ['scopeKey', 'accountKey', 'lastMessageAt'] }, { fields: ['scopeKey', 'state', 'priority'] }] },
   { name: 'emailMessages', embedKeys: ['subject', 'body', 'summary'], indexes: [{ fields: ['scopeKey', 'accountKey', 'providerMessageId'], unique: true }, { fields: ['scopeKey', 'threadKey', 'sentAt'] }, { fields: ['scopeKey', 'direction', 'sentAt'] }] },
   { name: 'emailContacts', embedKeys: ['name', 'relationship', 'context'], indexes: [{ fields: ['scopeKey', 'email'], unique: true }, { fields: ['scopeKey', 'emailWritingProfileKey'], sparse: true }] },
   { name: 'emailWritingProfiles', embedKeys: ['name', 'description', 'tone', 'style', 'structure', 'vocabulary', 'conventions'], indexes: [{ fields: ['scopeKey', 'name'], unique: true }] },
@@ -984,6 +1199,8 @@ export const collections: CollectionSpec[] = [
   { name: 'contentIdempotency', skipEmbedding: true, indexes: [{ fields: ['organizationKey', 'actorKey', 'tool', 'idempotencyKey'], unique: true }, { fields: ['leaseExpiresAt'], sparse: true }, { fields: ['expiresAt'], sparse: true }] },
   // Private global user history. Identity is deliberately independent of every product and scope.
   { name: 'userSearches', skipEmbedding: true, indexes: [{ fields: ['userKey', 'normalizedQuery'], unique: true }, { fields: ['userKey', 'searchedAt'] }] },
+  // Private durable outbox for object deletion after metadata commits.
+  { name: 'storageDeletionJobs', skipEmbedding: true, indexes: [{ fields: ['storageKey'], unique: true }, { fields: ['createdAt'] }] },
   // Private Archive contextual replay cache. The collection itself identifies the context.
   { name: 'contentSearchQueries', skipEmbedding: true, indexes: [{ fields: ['actorKey', 'scopeKey', 'normalizedQuery', 'folderKey', 'includeDescendants'], unique: true }, { fields: ['actorKey', 'scopeKey', 'searchedAt'] }] },
   // Pure link nodes (scope tree edges, scope memberships) — ids only, so
@@ -1032,6 +1249,7 @@ async function main() {
   }
   const targetDb = systemDb.database(databaseName);
 
+  await removeLegacyTombstones(targetDb);
   await migrateGenericContentContracts(targetDb);
   await retireUserSettings(targetDb);
 
@@ -1123,11 +1341,6 @@ async function main() {
         updatedAt: null
       } IN scopes OPTIONS { keepNull: false }
   `);
-  await targetDb.query(`
-    FOR scope IN scopes
-      FILTER !HAS(scope, "deletedAt")
-      UPDATE scope WITH { deletedAt: null } IN scopes
-  `);
   await ensureScopesCollection(targetDb);
   const scopeScopesCollection = targetDb.collection('scopeScopes');
   if (!(await scopeScopesCollection.exists())) await scopeScopesCollection.create();
@@ -1154,11 +1367,6 @@ async function main() {
       FILTER !HAS(relation, "parentKey") || relation.parentKey == null
         || !HAS(relation, "childKey") || relation.childKey == null
       REMOVE relation IN scopeScopes
-  `);
-  await targetDb.query(`
-    FOR relation IN scopeScopes
-      FILTER !HAS(relation, "deletedAt")
-      UPDATE relation WITH { deletedAt: null } IN scopeScopes
   `);
   await ensureScopeScopesCollection(targetDb);
   await ensureScopeMembersCollection(targetDb);
@@ -1218,7 +1426,6 @@ async function main() {
         parentKey,
         childKey,
         level: 1,
-        deletedAt: null,
       });
       seenChildren.add(childKey);
       const children = childrenByParent.get(parentKey) ?? new Set<string>();
@@ -1244,12 +1451,6 @@ async function main() {
           FILTER event.provider == "polar"
           REMOVE event IN processedWebhookEvents
       `);
-    }
-    if (spec.archive) {
-      await targetDb.query(
-        `FOR doc IN @@collection FILTER !HAS(doc, "deletedAt") UPDATE doc WITH { deletedAt: null } IN @@collection`,
-        { '@collection': spec.name },
-      );
     }
     if (spec.name === 'folders' || spec.name === 'images' || spec.name === 'collections' || spec.name === 'documents' || spec.name === 'emailThreads') {
       await migrateContentFavorites(targetDb, spec.name);
@@ -1299,9 +1500,6 @@ async function main() {
     if (spec.name === 'images') await migrateExactSemanticRecords(targetDb, 'images', ['filename', 'caption']);
     if (spec.name === 'collections') await migrateExactSemanticRecords(targetDb, 'collections', ['name', 'description']);
     if (spec.name === 'tags') await migrateExactSemanticRecords(targetDb, 'tags', ['name', 'description']);
-    if (spec.name === 'tags') {
-      await targetDb.query(`FOR tag IN tags FILTER HAS(tag, "deletedAt") UPDATE tag WITH { deletedAt: null } IN tags OPTIONS { keepNull: false }`);
-    }
     if (spec.name === 'collections' || spec.name === 'tags') {
       await targetDb.query(`FOR resource IN @@collection FILTER IS_STRING(resource.description) && LENGTH(TRIM(resource.description)) == 0 UPDATE resource WITH { description: null } IN @@collection OPTIONS { keepNull: false }`, { '@collection': spec.name });
     }
@@ -1398,15 +1596,12 @@ async function main() {
         }
       }
     }
-    const legacyIndexes = LEGACY_INDEX_FIELDS[spec.name] ?? [];
-    if (legacyIndexes.length > 0) {
-      const existingIndexes = await collection.indexes();
-      for (const index of existingIndexes) {
-        const fields = 'fields' in index && Array.isArray(index.fields) ? index.fields.map(String) : [];
-        if (isLegacyIndex(spec.name, fields, (spec.indexes ?? []).map((desired) => desired.fields))) {
-          await collection.dropIndex(index.id);
-          console.log(`Dropped legacy index ${index.id} on ${spec.name}(${fields.join(', ')})`);
-        }
+    const existingIndexes = await collection.indexes();
+    for (const index of existingIndexes) {
+      const fields = 'fields' in index && Array.isArray(index.fields) ? index.fields.map(String) : [];
+      if (isLegacyIndex(spec.name, fields, (spec.indexes ?? []).map((desired) => desired.fields))) {
+        await collection.dropIndex(index.id);
+        console.log(`Dropped legacy index ${index.id} on ${spec.name}(${fields.join(', ')})`);
       }
     }
     if (spec.name === 'channels') {
@@ -1470,7 +1665,7 @@ async function main() {
   // Every pre-relation agent is linked to its existing home scope. Existing
   // scope memberships become inherited grants, preserving current access
   // while making the new runtime checks authoritative on the next deploy.
-  const hierarchyCursor = await targetDb.query<{ parentKey: string; childKey: string }>('FOR relation IN scopeScopes FILTER relation.deletedAt == null RETURN { parentKey: relation.parentKey, childKey: relation.childKey }');
+  const hierarchyCursor = await targetDb.query<{ parentKey: string; childKey: string }>('FOR relation IN scopeScopes RETURN { parentKey: relation.parentKey, childKey: relation.childKey }');
   const parentByChild = new Map((await hierarchyCursor.all()).map((relation) => [relation.childKey, relation.parentKey]));
   const agentsWithoutRelations = await targetDb.query<{ agentKey: string; scopeKey: string; organizationKey: string }>(`
     FOR agent IN agents
@@ -1812,7 +2007,6 @@ async function main() {
         summary: seed.summary,
         description: seed.description,
         position: seed.position,
-        deletedAt: null,
       });
     } else {
       const embedding = await generateEmbedding(buildEmbeddingText(['summary'], seed)!);
@@ -1824,7 +2018,6 @@ async function main() {
         summary: seed.summary,
         description: seed.description,
         position: seed.position,
-        deletedAt: null,
         embedding,
       });
     }
@@ -1860,12 +2053,10 @@ async function main() {
       parentKey,
       childKey,
       level: seed.level,
-      deletedAt: null,
     });
   }
   const scopeHierarchyCursor = await targetDb.query<{ parentKey: string; childKey: string }>(`
     FOR relation IN scopeScopes
-      FILTER relation.deletedAt == null
       RETURN { parentKey: relation.parentKey, childKey: relation.childKey }
   `);
   const hierarchyParentByChild = new Map<string, string>();

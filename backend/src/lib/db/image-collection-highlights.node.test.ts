@@ -9,7 +9,6 @@ describe('image collection highlight node', () => {
     const value = imageCollectionHighlightSchema.parse({ key: newId(), scopeKey: newId(), collectionKey: newId(), imageKeys, createdByKey: newId(), createdAt: now, updatedAt: now });
     expect(IMAGE_COLLECTION_HIGHLIGHTS_COLLECTION).toBe('imageCollecitionHightlights');
     expect(value.imageKeys).toEqual(imageKeys);
-    expect(value.deletedAt).toBeNull();
     expect(value).not.toHaveProperty('embedding');
     expect(value).not.toHaveProperty('storageKey');
   });

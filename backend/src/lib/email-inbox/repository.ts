@@ -120,7 +120,7 @@ export function createEmailRepository(database: Database = db) {
       if (!account) return { account: null, threads: [], counts: { all: 0, important: 0, urgent: 0, needsAction: 0, filtered: 0, unread: 0, favorite: 0 } };
       const normalizedSearch = search?.trim().toLowerCase() ?? '';
       const cursor = await database.query(`
-        LET scoped = (FOR thread IN emailThreads FILTER thread.scopeKey == @scopeKey && thread.accountKey == @accountKey && thread.deletedAt == null && thread.inInbox != false RETURN thread)
+        LET scoped = (FOR thread IN emailThreads FILTER thread.scopeKey == @scopeKey && thread.accountKey == @accountKey && thread.inInbox != false RETURN thread)
         LET visible = (FOR thread IN scoped
           FILTER @filter == "all" || (@filter == "important" && thread.priority IN ["high", "urgent"]) || (@filter == "urgent" && thread.priority == "urgent") || (@filter == "needs_action" && thread.state == "needs_action") || (@filter == "filtered" && thread.state == "filtered") || (@filter == "unread" && thread.unread == true) || (@filter == "favorite" && thread.isFavorite == true)
           FILTER @search == "" || CONTAINS(LOWER(thread.subject), @search) || CONTAINS(LOWER(thread.summary), @search) || CONTAINS(LOWER(thread.snippet || ""), @search)
@@ -136,13 +136,13 @@ export function createEmailRepository(database: Database = db) {
       return { account, threads: result.threads.map((raw) => parse(emailThreadSchema, raw)), counts: result.counts };
     },
     async thread(scopeKey: string, threadKey: string) {
-      const thread = await queryOne<EmailThread>('FOR thread IN emailThreads FILTER thread._key == @threadKey && thread.scopeKey == @scopeKey && thread.deletedAt == null && thread.inInbox != false LIMIT 1 RETURN thread', { scopeKey, threadKey }, emailThreadSchema);
+      const thread = await queryOne<EmailThread>('FOR thread IN emailThreads FILTER thread._key == @threadKey && thread.scopeKey == @scopeKey && thread.inInbox != false LIMIT 1 RETURN thread', { scopeKey, threadKey }, emailThreadSchema);
       if (!thread) throw new EmailRepositoryError('not_found');
       const cursor = await database.query('FOR message IN emailMessages FILTER message.scopeKey == @scopeKey && message.threadKey == @threadKey SORT message.sentAt ASC, message._key ASC RETURN message', { scopeKey, threadKey });
       return { thread, messages: (await cursor.all()).map((raw) => parse(emailMessageSchema, raw)) };
     },
     async readThreadPage(scopeKey: string, threadKey: string, limit: number, cursorValue?: string) {
-      const thread = await queryOne<EmailThread>('FOR thread IN emailThreads FILTER thread._key == @threadKey && thread.scopeKey == @scopeKey && thread.deletedAt == null LIMIT 1 RETURN thread', { scopeKey, threadKey }, emailThreadSchema);
+      const thread = await queryOne<EmailThread>('FOR thread IN emailThreads FILTER thread._key == @threadKey && thread.scopeKey == @scopeKey LIMIT 1 RETURN thread', { scopeKey, threadKey }, emailThreadSchema);
       if (!thread) throw new EmailRepositoryError('not_found');
       const after = cursorValue ? decodeEmailCursor(cursorValue, threadKey) : null;
       const cursor = await database.query(`FOR message IN emailMessages
@@ -162,7 +162,7 @@ export function createEmailRepository(database: Database = db) {
       return thread.thread;
     },
     async setThreadFavorite(scopeKey: string, threadKey: string, isFavorite: boolean) {
-      const cursor = await database.query('FOR thread IN emailThreads FILTER thread._key == @threadKey && thread.scopeKey == @scopeKey && thread.deletedAt == null && thread.inInbox != false UPDATE thread WITH { isFavorite: @isFavorite, updatedAt: @updatedAt } IN emailThreads RETURN NEW', { scopeKey, threadKey, isFavorite, updatedAt: new Date().toISOString() });
+      const cursor = await database.query('FOR thread IN emailThreads FILTER thread._key == @threadKey && thread.scopeKey == @scopeKey && thread.inInbox != false UPDATE thread WITH { isFavorite: @isFavorite, updatedAt: @updatedAt } IN emailThreads RETURN NEW', { scopeKey, threadKey, isFavorite, updatedAt: new Date().toISOString() });
       const raw = await cursor.next();
       if (!raw) throw new EmailRepositoryError('not_found');
       return parse(emailThreadSchema, raw);

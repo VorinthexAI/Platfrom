@@ -15,14 +15,13 @@ export const documentShareSchema = z.object({
   passwordHash: z.string().trim().min(20).optional(),
   expiresAt: z.string().datetime().optional(),
   revokedAt: z.string().datetime().optional(),
-  deletedAt: z.string().datetime().nullable().default(null),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
 
 export type DocumentShare = z.infer<typeof documentShareSchema>;
 export const documentSharesEmbeddingFields = [] as const;
-export async function insertDocumentShare(share: Omit<DocumentShare, 'deletedAt'>): Promise<DocumentShare> {
+export async function insertDocumentShare(share: DocumentShare): Promise<DocumentShare> {
   const { contentPersistence } = await import('./content-persistence.node');
   return contentPersistence.insertShare(share);
 }
@@ -30,7 +29,7 @@ export async function getDocumentShareById(shareKey: string): Promise<DocumentSh
   const { contentPersistence } = await import('./content-persistence.node');
   return contentPersistence.getShare(shareKey);
 }
-export async function updateDocumentShare(shareKey: string, patch: Partial<Pick<DocumentShare, 'revokedAt' | 'deletedAt' | 'updatedAt'>>): Promise<DocumentShare> {
+export async function updateDocumentShare(shareKey: string, patch: Partial<Pick<DocumentShare, 'revokedAt' | 'updatedAt'>>): Promise<DocumentShare> {
   const current = await getDocumentShareById(shareKey);
   if (!current) throw new Error(`Document share ${shareKey} was not found.`);
   const { contentPersistence } = await import('./content-persistence.node');
@@ -56,13 +55,13 @@ export async function getActiveDocumentShareByTokenHash(tokenHash: string, at = 
     const cursor = await db.query(aql`
       FOR share IN ${db.collection('shares')}
         FILTER share.sourceType == "document" && share.tokenHash == ${validatedTokenHash}
-        FILTER share.deletedAt == null && share.revokedAt == null
+        FILTER share.revokedAt == null
         FILTER share.expiresAt == null || share.expiresAt > ${validatedAt}
         LET document = DOCUMENT(${db.collection('documents')}, share.sourceKey)
-        FILTER document != null && document.scopeKey == share.scopeKey && document.deletedAt == null
+        FILTER document != null && document.scopeKey == share.scopeKey
         FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
         LET folder = document.folderKey == null ? null : DOCUMENT(${db.collection('folders')}, document.folderKey)
-        FILTER folder == null || (folder.scopeKey == share.scopeKey && folder.deletedAt == null && (!HAS(folder, "_internalDeletion") || folder._internalDeletion == null))
+        FILTER folder == null || (folder.scopeKey == share.scopeKey && (!HAS(folder, "_internalDeletion") || folder._internalDeletion == null))
         LIMIT 1 RETURN share
     `);
     const share = await cursor.next();
@@ -76,17 +75,14 @@ export async function getActiveDocumentShareByTokenHash(tokenHash: string, at = 
   const cursor = await db.query(aql`
     FOR share IN ${db.collection(DOCUMENT_SHARES_COLLECTION)}
       FILTER share.tokenHash == ${validatedTokenHash}
-      FILTER share.deletedAt == null
       FILTER (!HAS(share, "revokedAt") || share.revokedAt == null)
       FILTER (!HAS(share, "expiresAt") || share.expiresAt == null || share.expiresAt > ${validatedAt})
       LET document = DOCUMENT(${db.collection('documents')}, share.documentKey)
       FILTER document != null && document.scopeKey == share.scopeKey
       FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
-      FILTER document.deletedAt == null
       LET folder = HAS(document, "folderKey") && document.folderKey != null ? DOCUMENT(${db.collection('folders')}, document.folderKey) : null
       FILTER folder == null || folder.scopeKey == share.scopeKey
       FILTER folder == null || !HAS(folder, "_internalDeletion") || folder._internalDeletion == null
-      FILTER folder == null || folder.deletedAt == null
       LIMIT 1
       RETURN share
   `);
@@ -98,7 +94,6 @@ export async function listDocumentShares(scopeKey: string, documentKey: string, 
   const cursor = await db.query(aql`
     FOR share IN ${db.collection(DOCUMENT_SHARES_COLLECTION)}
       FILTER share.scopeKey == ${scopeKey} && share.documentKey == ${documentKey}
-      FILTER share.deletedAt == null
       FILTER ${includeRevoked} || !HAS(share, "revokedAt") || share.revokedAt == null
       SORT share.createdAt DESC
       RETURN share
@@ -138,7 +133,6 @@ export async function listDocumentSharesByDocumentKeys(
   const cursor = await db.query(aql`
     FOR share IN ${db.collection(DOCUMENT_SHARES_COLLECTION)}
       FILTER share.scopeKey == ${scopeKey} && share.documentKey IN ${documentKeys}
-      FILTER share.deletedAt == null
       FILTER ${options.includeRevoked ?? false} || !HAS(share, "revokedAt") || share.revokedAt == null
       FILTER ${options.includeExpired ?? false} || !HAS(share, "expiresAt") || share.expiresAt == null || share.expiresAt > ${at}
       SORT POSITION(${documentKeys}, share.documentKey) ASC, share.createdAt DESC
@@ -150,14 +144,4 @@ export async function listDocumentSharesByDocumentKeys(
 export async function revokeDocumentShare(scopeKey: string, shareKey: string, revokedAt = new Date().toISOString()): Promise<DocumentShare | null> {
   const { contentPersistence } = await import('./content-persistence.node');
   return contentPersistence.updateShare(scopeKey, shareKey, { revokedAt, updatedAt: revokedAt });
-}
-
-export async function archiveDocumentShare(key: string): Promise<DocumentShare> {
-  const timestamp = new Date().toISOString();
-  return updateDocumentShare(key, { deletedAt: timestamp, updatedAt: timestamp });
-}
-
-export async function restoreDocumentShare(key: string): Promise<DocumentShare> {
-  const timestamp = new Date().toISOString();
-  return updateDocumentShare(key, { deletedAt: null, updatedAt: timestamp });
 }

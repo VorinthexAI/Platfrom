@@ -54,7 +54,6 @@ export function buildDefaultPersonalContainers(input: {
     name: DEFAULT_IMAGE_COLLECTION_NAME,
     embedding: input.collectionEmbedding,
     isFavorite: false,
-    deletedAt: null,
     createdAt: input.now,
     updatedAt: input.now,
   });
@@ -73,7 +72,6 @@ export function buildDefaultPersonalContainers(input: {
       scopeKey: input.scopeKey,
       name: DEFAULT_CONTENT_FOLDER_NAME,
       embedding: input.folderEmbedding,
-      deletedAt: null,
       createdAt: input.now,
       updatedAt: input.now,
     }),
@@ -138,9 +136,9 @@ export async function provisionPersonalAuthContext(user: { key: string; name: st
           INSERT {
             _key: ${scopeKey}, organizationKey: organization._key, slug: "main", name: "Main",
             summary: "Main personal workspace", description: "Main personal workspace", position: 1,
-            level: 1, deletedAt: null, embedding: []
+            level: 1, embedding: []
           }
-          UPDATE { deletedAt: null } IN scopes
+          UPDATE {} IN scopes
         LET scope = NEW
         UPSERT { scopeKey: scope._key, userOrganizationKey: membership._key }
           INSERT {
@@ -221,7 +219,7 @@ export async function getPersonalAuthContext(userId: string): Promise<PersonalAu
     FOR organization IN organizations
       FILTER organization.personalOwnerUserId == ${userId} && organization.isActive == true
       LET membership = FIRST(FOR item IN userOrganizations FILTER item.organizationId == organization._key && item.userId == ${userId} && item.status == "active" RETURN item)
-      LET scope = FIRST(FOR item IN scopes FILTER item.organizationKey == organization._key && item.slug == "main" && item.deletedAt == null RETURN item)
+      LET scope = FIRST(FOR item IN scopes FILTER item.organizationKey == organization._key && item.slug == "main" RETURN item)
       LET scopeMembership = FIRST(FOR item IN scopeMembers FILTER item.scopeKey == scope._key && item.userOrganizationKey == membership._key && item.status == "active" RETURN item)
       LET agent = FIRST(FOR item IN agents FILTER item.personalOwnerUserId == ${userId} && item.scopeKey == scope._key RETURN item)
       LET skill = FIRST(FOR item IN skills FILTER item.slug == "personal-content-execution" RETURN item)

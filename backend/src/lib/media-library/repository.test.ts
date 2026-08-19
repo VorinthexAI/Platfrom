@@ -12,7 +12,6 @@ describe('MediaLibrary repository transactions', () => {
     expect(query).toContain('LET sourceAccess =');
     expect(query).toContain('scoped || elevated');
     expect(query).not.toContain('image.ownerKey');
-    expect(query).toContain('sourceCollection.deletedAt == null');
     expect(query).toContain('actor != null && sourceAccess');
   });
 
@@ -58,7 +57,7 @@ describe('MediaLibrary image similarity search', () => {
       async query(value, variables) {
         query = value;
         bindVars = variables ?? {};
-        return { async all() { return [{ image: { _key: imageKey, scopeKey, filename: 'image.jpg', caption: 'Caption', storageKey: 'private/image.jpg', mimeType: 'image/jpeg', sizeBytes: 100, width: 10, height: 10, embedding, isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now }, score: 0.9 }]; } };
+        return { async all() { return [{ image: { _key: imageKey, scopeKey, filename: 'image.jpg', caption: 'Caption', storageKey: 'private/image.jpg', mimeType: 'image/jpeg', sizeBytes: 100, width: 10, height: 10, embedding, isFavorite: false, createdAt: now, updatedAt: now }, score: 0.9 }]; } };
       },
     };
 
@@ -68,7 +67,6 @@ describe('MediaLibrary image similarity search', () => {
     expect(query).toContain('actorScope.organizationKey == @organizationKey');
     expect(query).toContain('FILTER privileged || (image.createdByKey == @actorKey && relationCount == 0) || collectionAccess');
     expect(query).toContain('collectionImage.collectionKey == @collectionKey');
-    expect(query).toContain('collection.deletedAt == null');
     expect(query).toContain('LENGTH(image.embedding) == @dimensions');
     expect(query).toContain('COSINE_SIMILARITY(image.embedding, @embedding)');
     expect(query).toContain('FILTER @threshold == null || score >= @threshold');

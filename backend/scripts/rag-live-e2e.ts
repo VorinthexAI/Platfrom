@@ -26,7 +26,7 @@ try {
   const unauthorizedScope = newId();
   const now = new Date().toISOString();
   const folderByScope = new Map([[authorizedScope, newId()], [unauthorizedScope, newId()]]);
-  for (const [scopeKey, key] of folderByScope) await target.collection('folders').save({ _key: key, scopeKey, name: 'RAG E2E', embedding: [], deletedAt: null, createdAt: now, updatedAt: now });
+  for (const [scopeKey, key] of folderByScope) await target.collection('folders').save({ _key: key, scopeKey, name: 'RAG E2E', embedding: [], createdAt: now, updatedAt: now });
   const sources = [
     { name: 'Password reset guide', content: 'To regain account access, request a password reset email and follow the secure recovery link.', scopeKey: authorizedScope },
     { name: 'Office lunch menu', content: 'The cafeteria serves vegetable soup and sandwiches on Tuesday.', scopeKey: authorizedScope },
@@ -38,7 +38,7 @@ try {
     keys.push(key);
     const embedding = await embedText({ text: `${source.name}\n\n${source.content}`, purpose: 'document' });
     if (embedding.length !== EMBEDDING_DIMENSIONS || embedding.some((value) => !Number.isFinite(value))) throw new Error('Live document embedding is not finite 4096-dimensional data.');
-    await insertPreparedDocument({ key, scopeKey: source.scopeKey, folderKey: folderByScope.get(source.scopeKey), name: source.name, content: source.content, embedding, isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now });
+    await insertPreparedDocument({ key, scopeKey: source.scopeKey, folderKey: folderByScope.get(source.scopeKey), name: source.name, content: source.content, embedding, isFavorite: false, createdAt: now, updatedAt: now });
   }
   const queryEmbedding = await embedText({ text: 'How can I recover access when I forgot my login password?', purpose: 'query' });
   if (queryEmbedding.length !== EMBEDDING_DIMENSIONS || queryEmbedding.some((value) => !Number.isFinite(value))) throw new Error('Live query embedding is not finite 4096-dimensional data.');

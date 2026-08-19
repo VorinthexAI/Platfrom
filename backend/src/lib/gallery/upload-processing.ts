@@ -128,7 +128,7 @@ export async function processGalleryUploadBatch(uploadKeys: readonly string[], d
       embed: async (text, signal) => text.endsWith('\n\nFolder cover image.') ? Array(EMBEDDING_DIMENSIONS).fill(0) : embedText({ text, signal }),
       persistImage: async ({ image, caption, actorKey }) => {
         await renewLease();
-        return insertPreparedImageWithCaption({ image: { ...image, deletedAt: now().toISOString() }, ...(caption ? { caption } : {}), actorKey });
+        return insertPreparedImageWithCaption({ image, ...(caption ? { caption } : {}), actorKey });
       },
       onMetrics(metrics) { processingMetrics = metrics; },
     });

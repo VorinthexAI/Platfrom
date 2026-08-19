@@ -164,7 +164,6 @@ export type GallerySubject = {
   referenceImageKey: string;
   referenceUrl: string;
   imageCount: number;
-  deletedAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -448,8 +447,8 @@ export function transferGalleryCollectionImages(input: { sourceCollectionKey: st
   return postGallery<{ mode: "copy" | "move"; imageKeys: string[]; destinationCollectionKeys: string[]; createdRelationCount: number }>("/gallery/collections/images/transfer", input);
 }
 
-export function listGallerySubjects(includeDeleted = false) {
-  return postGallery<{ subjects: GallerySubject[] }>("/gallery/subjects/list", { includeDeleted });
+export function listGallerySubjects() {
+  return postGallery<{ subjects: GallerySubject[] }>("/gallery/subjects/list", {});
 }
 
 export function createGallerySubject(name: string, imageKeys: string[]) {
@@ -461,11 +460,7 @@ export function listGallerySubjectImages(identityKey: string) {
 }
 
 export function deleteGallerySubject(identityKey: string) {
-  return postGallery<{ subject: GallerySubject }>("/gallery/subjects/delete", { identityKey });
-}
-
-export function restoreGallerySubject(identityKey: string) {
-  return postGallery<{ subject: GallerySubject }>("/gallery/subjects/restore", { identityKey });
+  return postGallery<{ identityKey: string }>("/gallery/subjects/delete", { identityKey });
 }
 
 export async function askGalleryAssistant(message: string) {

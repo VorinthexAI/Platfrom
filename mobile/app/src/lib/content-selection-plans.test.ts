@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 
 import {
   MAX_CONTENT_BATCH_OPERATIONS,
-  planContentSelectionArchive,
+  planContentSelectionDelete,
   planContentSelectionCopy,
   planContentSelectionFavorite,
   planContentSelectionMove,
@@ -53,8 +53,8 @@ test("enforces favorite, move, and archive bounds for each canonical tool", () =
   expect(() => planContentSelectionFavorite({ folderKeys: [], documentKeys: tooMany }, true, "favorite")).toThrow("document.update operations cannot exceed 100");
   expect(() => planContentSelectionMove({ folderKeys: tooMany, documentKeys: [] }, "scope", undefined, "move")).toThrow("folder.move operations cannot exceed 100");
   expect(() => planContentSelectionMove({ folderKeys: [], documentKeys: tooMany }, "scope", undefined, "move")).toThrow("document.move operations cannot exceed 100");
-  expect(() => planContentSelectionArchive({ folderKeys: tooMany, documentKeys: [] }, "archive")).toThrow("folder.archive operations cannot exceed 100");
-  expect(() => planContentSelectionArchive({ folderKeys: [], documentKeys: tooMany }, "archive")).toThrow("document.archive operations cannot exceed 100");
+  expect(() => planContentSelectionDelete({ folderKeys: tooMany, documentKeys: [] }, "delete")).toThrow("folder.delete operations cannot exceed 100");
+  expect(() => planContentSelectionDelete({ folderKeys: [], documentKeys: tooMany }, "delete")).toThrow("document.delete operations cannot exceed 100");
 });
 
 test("rejects empty destination keys without treating them as root", () => {
@@ -71,12 +71,12 @@ test("deterministically bounds per-tool keys derived from any valid caller key",
   expect(keys).toEqual(second.calls.map(({ input }) => input.idempotencyKey));
   expect(keys.every((key) => key.length <= 200)).toBe(true);
   expect(keys[0]).not.toBe(keys[1]);
-  expect(planContentSelectionArchive({ folderKeys: ["folder"], documentKeys: [] }, "short-key").calls[0]?.input.idempotencyKey).toBe("short-key:folder.archive");
+  expect(planContentSelectionDelete({ folderKeys: ["folder"], documentKeys: [] }, "short-key").calls[0]?.input.idempotencyKey).toBe("short-key:folder.delete");
 });
 
 test("plans descendant folder archive separately from document archive", () => {
-  expect(planContentSelectionArchive(selection, "archive-request").calls.map(({ tool, input }) => ({ tool, input }))).toEqual([
-    { tool: "folder.archive", input: { folderKeys: ["folder-a", "folder-b"], includeDescendants: true, atomic: false, idempotencyKey: "archive-request:folder.archive" } },
-    { tool: "document.archive", input: { documentKeys: ["document-a"], atomic: false, idempotencyKey: "archive-request:document.archive" } },
+  expect(planContentSelectionDelete(selection, "delete-request").calls.map(({ tool, input }) => ({ tool, input }))).toEqual([
+    { tool: "folder.delete", input: { folderKeys: ["folder-a", "folder-b"], recursive: true, atomic: false, idempotencyKey: "delete-request:folder.delete" } },
+    { tool: "document.delete", input: { documentKeys: ["document-a"], atomic: false, idempotencyKey: "delete-request:document.delete" } },
   ]);
 });

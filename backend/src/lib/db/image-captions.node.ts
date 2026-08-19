@@ -50,7 +50,6 @@ export async function findReusableImageCaption(
     LET actorScope = DOCUMENT(scopes, @scopeKey)
     LET active = actorMembership != null
       && actorScope != null
-      && actorScope.deletedAt == null
       && actorMembership.status == "active"
       && actorMembership.organizationId == actorScope.organizationKey
     LET elevated = active && actorMembership.orgRole IN ["owner", "admin"]
@@ -73,13 +72,13 @@ export async function findReusableImageCaption(
       LET accessibleImage = FIRST(
         FOR image IN images
           FILTER image.imageCaptionKey == caption._key
-          FILTER image.scopeKey == @scopeKey && image.deletedAt == null
+          FILTER image.scopeKey == @scopeKey
           LET collectionAccess = active && LENGTH(
             FOR relation IN collectionImages
               FILTER relation.scopeKey == @scopeKey
               FILTER relation.imageKey == image._key
               LET collection = DOCUMENT(collections, relation.collectionKey)
-              FILTER collection != null && collection.scopeKey == @scopeKey && collection.deletedAt == null
+              FILTER collection != null && collection.scopeKey == @scopeKey
               FOR member IN collectionMembers
                 FILTER member.scopeKey == @scopeKey
                 FILTER member.collectionKey == relation.collectionKey

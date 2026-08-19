@@ -225,8 +225,8 @@ const historyEntry = (searchHistory.history as unknown[]).map(object).find((entr
 if (!historyEntry) throw new Error('Semantic search history was not persisted.');
 if (['contextDomain', 'documents', 'folderKey', 'includeDescendants', 'scopeKey'].some((field) => field in historyEntry)) throw new Error('Global search history exposed Archive context.');
 
-await tool('document.archive', { documentKeys: [documentKey, uploadedDocumentKey, uploadedPdfKey], atomic: true });
+await tool('document.delete', { documentKeys: [documentKey, uploadedDocumentKey, uploadedPdfKey], atomic: true });
 await tool('document.delete', { documentKeys: [documentKey, uploadedDocumentKey, uploadedPdfKey], deleteVersions: true, deleteShares: true });
-await tool('folder.archive', { folderKeys: [folderKey], atomic: true });
+await tool('folder.delete', { folderKeys: [folderKey], recursive: true, atomic: true });
 
 console.log(`Archive API E2E passed: guest auth, ${process.env.ARCHIVE_E2E_AUDIO === 'true' ? 'streamed and persisted document/summary Polly narration, ' : ''}folder/document creation, autosave, LocalStack upload, AWS PDF extraction, fast folder/file search, semantic retrieval, and history.`);

@@ -25,11 +25,9 @@ semanticCollections.push({ name: 'agentMemories', embedKeys: ['content'], includ
 await migrateContentDocuments(db);
 await migrateContentVersions(db);
 
-function inclusionFilter(name: string): string {
+function inclusionFilter(_name: string): string {
   const active = 'FILTER !HAS(doc, "_internalDeletion") || doc._internalDeletion == null';
-  // Recoverable Content documents and versions deliberately remain eligible for includeArchived retrieval.
-  if (name === 'documents' || name === 'documentVersions') return active;
-  return `${active}\nFILTER !HAS(doc, "deletedAt") || doc.deletedAt == null`;
+  return active;
 }
 
 function sourcePresentFilter(): string {

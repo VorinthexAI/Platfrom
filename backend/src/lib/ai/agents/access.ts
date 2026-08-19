@@ -36,7 +36,7 @@ const defaultAccessData: ExecutionAccessDataSource = {
   async listScopeMembers(scopeKey) {
     const [memberCursor, relationCursor] = await Promise.all([
       db.query<Record<string, unknown>>('FOR member IN scopeMembers RETURN MERGE(member, { key: member._key })'),
-      db.query<{ parentKey: string; childKey: string }>('FOR relation IN scopeScopes FILTER relation.deletedAt == null RETURN { parentKey: relation.parentKey, childKey: relation.childKey }'),
+      db.query<{ parentKey: string; childKey: string }>('FOR relation IN scopeScopes RETURN { parentKey: relation.parentKey, childKey: relation.childKey }'),
     ]);
     const parentByChild = new Map((await relationCursor.all()).map((relation) => [relation.childKey, relation.parentKey]));
     const ancestors = new Set([scopeKey]); let parent = parentByChild.get(scopeKey);
@@ -62,9 +62,6 @@ export async function authorizeAgentExecution(
   options: { allowArchivedOrganization?: boolean } = {},
 ): Promise<ResolvedExecutionPrincipal> {
   const parsed = executionPrincipalSchema.parse(principal);
-  if (runtime.scope.deletedAt !== null) {
-    throw new AgentExecutionAccessError(`scope ${runtime.scope.key} is archived`);
-  }
   if (!runtime.organization.isActive && !options.allowArchivedOrganization) throw new AgentExecutionAccessError(`organization ${runtime.organization.key} is archived`);
   const scopeAgent = await source.getScopeAgent(runtime.scope.key, runtime.agent.key);
   if (!scopeAgent) throw new AgentExecutionAccessError(`agent ${runtime.agent.key} is not linked to scope ${runtime.scope.key}`);

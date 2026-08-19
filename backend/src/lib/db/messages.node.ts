@@ -12,7 +12,6 @@ export const messageSchema = z.object({
   content: z.string().min(1),
   replyToMessageKey: z.string().cuid().optional(),
   editedAt: z.string().datetime().optional(),
-  deletedAt: z.string().datetime().optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
   embedding: z.array(z.number().finite()).default([]),

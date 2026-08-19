@@ -13,7 +13,7 @@ describe('GET /auth/me response contract', () => {
     }, {
       organization: { key: 'org-1', name: "Person's Organization", is_root: false, slug: 'personal-user-1', description: null, isActive: true, mfa_enabled: false, metadata: {}, createdAt: '', updatedAt: '', embedding: [] },
       membership: { key: 'membership-1', organizationId: 'org-1', userId: 'user-1', orgRole: 'owner', orgTitle: 'Owner', orchestratorKey: null, status: 'active', joinedAt: '', isMfaEnabled: false, totpSecret: null, lastTotpTimeStep: null, mfaVersion: 0, mfaRecoveryPending: false, createdAt: '', updatedAt: '', embedding: [] },
-      scope: { key: 'cmrnlzf640000qc7k4p5zem5w', organizationKey: 'org-1', slug: 'main', name: 'Main', summary: 'Main personal workspace', description: 'Main personal workspace', position: 1, level: 1, deletedAt: null, embedding: [] },
+      scope: { key: 'cmrnlzf640000qc7k4p5zem5w', organizationKey: 'org-1', slug: 'main', name: 'Main', summary: 'Main personal workspace', description: 'Main personal workspace', position: 1, level: 1, embedding: [] },
       scopeMembership: { key: 'cmrnlzf640000qc7k4p5zem5x', scopeKey: 'cmrnlzf640000qc7k4p5zem5w', userOrganizationKey: 'membership-1', role: 'owner', status: 'active', source: 'explicit' },
       agent: { key: 'cmrnlzf640000qc7k4p5zem5y', slug: 'personal-content-user-1', name: 'Personal Content Agent', title: 'Personal Content Agent', scopeKey: 'cmrnlzf640000qc7k4p5zem5w', explorationRate: 0, embedding: [] },
     });

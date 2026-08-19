@@ -96,7 +96,7 @@ export const imageSearchTool = {
     }
     if ('imageKey' in input) {
       const source = await (dependencies.getImage ?? repository.getImage)(input.imageKey);
-      if (!source || source.scopeKey !== scopeKey || source.deletedAt || !await (dependencies.canAccessImage ?? repository.canAccessImage)(scopeKey, source.key, actorKey)) throw new Error('Source image not found.');
+      if (!source || source.scopeKey !== scopeKey || !await (dependencies.canAccessImage ?? repository.canAccessImage)(scopeKey, source.key, actorKey)) throw new Error('Source image not found.');
       const results = await (dependencies.searchImages ?? repository.searchAccessibleImages)({
         organizationKey,
         scopeKey,

@@ -133,7 +133,7 @@ async function projectPoll(pollKey: string, channelKey: string, viewerParticipan
   return first<PollProjection>(`
     FOR poll IN polls FILTER poll._key == @pollKey && poll.channelKey == @channelKey
       LET message = DOCUMENT(messages, poll.messageKey)
-      FILTER message != null && message.deletedAt == null && message.channelKey == @channelKey
+      FILTER message != null && message.channelKey == @channelKey
       RETURN { key: poll._key, question: poll.question, allowMultiple: poll.allowMultiple, status: poll.status, closedAt: poll.closedAt,
         options: (FOR option IN pollOptions FILTER option.pollKey == poll._key SORT option.position ASC
           LET votes = (FOR vote IN pollVotes FILTER vote.optionKey == option._key RETURN vote)
@@ -144,7 +144,7 @@ async function projectPoll(pollKey: string, channelKey: string, viewerParticipan
 async function updateMessageIndex(message: Message, patch: Record<string, unknown>): Promise<void> {
   await db.query(`
     FOR current IN messages
-      FILTER current._key == @messageKey && current.deletedAt == null && current.updatedAt == @updatedAt && current.content == @content
+      FILTER current._key == @messageKey && current.updatedAt == @updatedAt && current.content == @content
       UPDATE current WITH @patch IN messages
   `, { messageKey: message.key, updatedAt: message.updatedAt, content: message.content, patch });
 }
@@ -176,7 +176,7 @@ export const arangoCommunicationRepository: CommunicationRepository = {
     }, async (trx) => {
       const accessCursor = await trx.query<Record<string, any>>(`
         LET membership = DOCUMENT(userOrganizations, @membershipKey)
-        LET scope = FIRST(FOR item IN scopes FILTER item.organizationKey == @organizationKey && item.slug == "hq" && item.deletedAt == null LIMIT 1 RETURN item)
+        LET scope = FIRST(FOR item IN scopes FILTER item.organizationKey == @organizationKey && item.slug == "hq" LIMIT 1 RETURN item)
         LET allowed = membership != null && membership.organizationId == @organizationKey && membership.status == "active" && scope != null
         FILTER allowed
         RETURN { scopeKey: scope._key, position: scope.position }
@@ -236,7 +236,7 @@ export const arangoCommunicationRepository: CommunicationRepository = {
 
   async listMessages(channelKey, viewerParticipantKey, limit) {
     const cursor = await db.query<MessageProjection>(`
-      FOR message IN messages FILTER message.channelKey == @channelKey && message.deletedAt == null && message.threadKey == null && message.replyToMessageKey == null
+      FOR message IN messages FILTER message.channelKey == @channelKey && message.threadKey == null && message.replyToMessageKey == null
         SORT message.createdAt DESC, message._key DESC LIMIT @limit
         LET participant = DOCUMENT(channelParticipants, message.authorParticipantKey)
         LET membership = participant.userOrganizationKey == null ? null : DOCUMENT(userOrganizations, participant.userOrganizationKey)
@@ -245,8 +245,8 @@ export const arangoCommunicationRepository: CommunicationRepository = {
         LET viewer = DOCUMENT(channelParticipants, @viewerParticipantKey)
         LET viewerMembership = viewer.userOrganizationKey == null ? null : DOCUMENT(userOrganizations, viewer.userOrganizationKey)
         LET legacyReplyGroup = FIRST(FOR item IN threads FILTER item.rootMessageKey == message._key LIMIT 1 RETURN item)
-        LET legacyReplies = legacyReplyGroup == null ? [] : (FOR reply IN messages FILTER reply.threadKey == legacyReplyGroup._key && reply.deletedAt == null RETURN 1)
-        LET directReplies = (FOR reply IN messages FILTER reply.replyToMessageKey == message._key && reply.deletedAt == null RETURN 1)
+        LET legacyReplies = legacyReplyGroup == null ? [] : (FOR reply IN messages FILTER reply.threadKey == legacyReplyGroup._key RETURN 1)
+        LET directReplies = (FOR reply IN messages FILTER reply.replyToMessageKey == message._key RETURN 1)
         LET poll = FIRST(FOR item IN polls FILTER item.messageKey == message._key LIMIT 1 RETURN item)
         RETURN { key: message._key, channelKey: message.channelKey, threadKey: message.threadKey, replyToMessageKey: message.replyToMessageKey, content: message.content, editedAt: message.editedAt, createdAt: message.createdAt, updatedAt: message.updatedAt,
           author: { participantKey: participant._key, type: participant.userOrganizationKey == null ? "orchestrator" : "user", key: participant.userOrganizationKey == null ? orchestrator._key : user._key, name: participant.userOrganizationKey == null ? orchestrator.name : NOT_NULL(user.name, user.alias, user.email, "Member") },
@@ -262,7 +262,7 @@ export const arangoCommunicationRepository: CommunicationRepository = {
   async listMessageReplies(channelKey, parentMessageKey, viewerParticipantKey, limit) {
     const cursor = await db.query<MessageProjection>(`
       FOR message IN messages
-        FILTER message.channelKey == @channelKey && message.deletedAt == null
+        FILTER message.channelKey == @channelKey
         FILTER message._key == @parentMessageKey || message.replyToMessageKey == @parentMessageKey
         SORT message.createdAt ASC, message._key ASC LIMIT @limit
         LET participant = DOCUMENT(channelParticipants, message.authorParticipantKey)
@@ -271,7 +271,7 @@ export const arangoCommunicationRepository: CommunicationRepository = {
         LET orchestrator = participant.orchestratorKey == null ? null : DOCUMENT(orchestrators, participant.orchestratorKey)
         LET viewer = DOCUMENT(channelParticipants, @viewerParticipantKey)
         LET viewerMembership = viewer.userOrganizationKey == null ? null : DOCUMENT(userOrganizations, viewer.userOrganizationKey)
-        LET directReplies = (FOR reply IN messages FILTER reply.replyToMessageKey == message._key && reply.deletedAt == null RETURN 1)
+        LET directReplies = (FOR reply IN messages FILTER reply.replyToMessageKey == message._key RETURN 1)
         LET poll = FIRST(FOR item IN polls FILTER item.messageKey == message._key LIMIT 1 RETURN item)
         RETURN { key: message._key, channelKey: message.channelKey, threadKey: message.threadKey, replyToMessageKey: message.replyToMessageKey, content: message.content, editedAt: message.editedAt, createdAt: message.createdAt, updatedAt: message.updatedAt,
           author: { participantKey: participant._key, type: participant.userOrganizationKey == null ? "orchestrator" : "user", key: participant.userOrganizationKey == null ? orchestrator._key : user._key, name: participant.userOrganizationKey == null ? orchestrator.name : NOT_NULL(user.name, user.alias, user.email, "Member") },
@@ -284,34 +284,51 @@ export const arangoCommunicationRepository: CommunicationRepository = {
     return (await cursor.all()).map(normalizeMessageProjection);
   },
 
-  async deleteMessage(channelKey, messageKey, membershipKey, now) {
-    return withTransaction({ read: ['userOrganizations', 'channelParticipants', 'threads'], write: ['messages'] }, async (trx) => {
+  async deleteMessage(channelKey, messageKey, membershipKey, _now) {
+    return withTransaction({
+      read: ['userOrganizations', 'channelParticipants'],
+      write: ['messages', 'messageMentions', 'messageReactions', 'polls', 'pollOptions', 'pollVotes', 'threads'],
+    }, async (trx) => {
       const targetCursor = await trx.query<{ key: string; legacyThreadKey: string | null }>(`
         LET message = DOCUMENT(messages, @messageKey)
         LET membership = DOCUMENT(userOrganizations, @membershipKey)
         LET author = message == null ? null : DOCUMENT(channelParticipants, message.authorParticipantKey)
-        FILTER message != null && message.channelKey == @channelKey && message.deletedAt == null && membership != null
+        FILTER message != null && message.channelKey == @channelKey && membership != null
         FILTER author.userOrganizationKey == @membershipKey || membership.orgRole == "owner" || membership.orgRole == "admin"
         LET legacyThreadKey = FIRST(FOR item IN threads FILTER item.rootMessageKey == message._key LIMIT 1 RETURN item._key)
-        UPDATE message WITH { deletedAt: @now, updatedAt: @now } IN messages
-        RETURN { key: NEW._key, legacyThreadKey }
-      `, { channelKey, messageKey, membershipKey, now });
+        RETURN { key: message._key, legacyThreadKey }
+      `, { channelKey, messageKey, membershipKey });
       const target = await targetCursor.next();
       if (!target) return false;
 
-      let parentKeys = [target.key];
+      const messageKeys = new Set([target.key]);
+      if (target.legacyThreadKey) {
+        const legacyCursor = await trx.query<string>('FOR message IN messages FILTER message.channelKey == @channelKey && message.threadKey == @threadKey RETURN message._key', { channelKey, threadKey: target.legacyThreadKey });
+        for (const key of await legacyCursor.all()) messageKeys.add(key);
+      }
+      let parentKeys = [...messageKeys];
       while (parentKeys.length) {
         const childCursor = await trx.query<{ key: string }>(`
           FOR message IN messages
-            FILTER message.channelKey == @channelKey && message.deletedAt == null && message.replyToMessageKey IN @parentKeys
-            UPDATE message WITH { deletedAt: @now, updatedAt: @now } IN messages
-            RETURN { key: NEW._key }
-        `, { channelKey, parentKeys, now });
+            FILTER message.channelKey == @channelKey && message.replyToMessageKey IN @parentKeys && message._key NOT IN @messageKeys
+            RETURN { key: message._key }
+        `, { channelKey, parentKeys, messageKeys: [...messageKeys] });
         parentKeys = (await childCursor.all()).map(({ key }) => key);
+        for (const key of parentKeys) messageKeys.add(key);
       }
-      if (target.legacyThreadKey) {
-        await trx.query('FOR message IN messages FILTER message.channelKey == @channelKey && message.threadKey == @threadKey && message.deletedAt == null UPDATE message WITH { deletedAt: @now, updatedAt: @now } IN messages', { channelKey, threadKey: target.legacyThreadKey, now });
-      }
+
+      const keys = [...messageKeys];
+      const pollCursor = await trx.query<string>('FOR poll IN polls FILTER poll.messageKey IN @messageKeys RETURN poll._key', { messageKeys: keys });
+      const pollKeys = await pollCursor.all();
+      const optionCursor = await trx.query<string>('FOR option IN pollOptions FILTER option.pollKey IN @pollKeys RETURN option._key', { pollKeys });
+      const optionKeys = await optionCursor.all();
+      await trx.query('FOR vote IN pollVotes FILTER vote.pollKey IN @pollKeys || vote.optionKey IN @optionKeys REMOVE vote IN pollVotes', { pollKeys, optionKeys });
+      await trx.query('FOR option IN pollOptions FILTER option.pollKey IN @pollKeys REMOVE option IN pollOptions', { pollKeys });
+      await trx.query('FOR poll IN polls FILTER poll._key IN @pollKeys REMOVE poll IN polls', { pollKeys });
+      await trx.query('FOR mention IN messageMentions FILTER mention.messageKey IN @messageKeys REMOVE mention IN messageMentions', { messageKeys: keys });
+      await trx.query('FOR reaction IN messageReactions FILTER reaction.messageKey IN @messageKeys REMOVE reaction IN messageReactions', { messageKeys: keys });
+      await trx.query('FOR thread IN threads FILTER thread.rootMessageKey IN @messageKeys REMOVE thread IN threads', { messageKeys: keys });
+      await trx.query('FOR message IN messages FILTER message._key IN @messageKeys REMOVE message IN messages', { messageKeys: keys });
       return true;
     });
   },
@@ -319,7 +336,7 @@ export const arangoCommunicationRepository: CommunicationRepository = {
     const raw = await first<Record<string, unknown>>(`
       LET message = DOCUMENT(messages, @messageKey)
       LET author = message == null ? null : DOCUMENT(channelParticipants, message.authorParticipantKey)
-      FILTER message != null && message.channelKey == @channelKey && message.deletedAt == null
+      FILTER message != null && message.channelKey == @channelKey
       FILTER author.userOrganizationKey == @membershipKey
       UPDATE message WITH { content: @content, editedAt: @now, updatedAt: @now, embedding: [], embeddingState: "pending", embeddingDimensions: null, embeddedAt: null, embeddingModel: null, embeddingProvider: null } IN messages OPTIONS { keepNull: false }
       RETURN NEW
@@ -333,7 +350,7 @@ export const arangoCommunicationRepository: CommunicationRepository = {
   async listThreadMessages(channelKey, threadKey, rootMessageKey, viewerParticipantKey, limit) {
     const cursor = await db.query<MessageProjection>(`
       FOR message IN messages
-        FILTER message.channelKey == @channelKey && message.deletedAt == null
+        FILTER message.channelKey == @channelKey
         FILTER message._key == @rootMessageKey || message.threadKey == @threadKey
         SORT message.createdAt DESC, message._key DESC LIMIT @limit
         LET participant = DOCUMENT(channelParticipants, message.authorParticipantKey)
@@ -343,8 +360,8 @@ export const arangoCommunicationRepository: CommunicationRepository = {
         LET viewer = DOCUMENT(channelParticipants, @viewerParticipantKey)
         LET viewerMembership = viewer.userOrganizationKey == null ? null : DOCUMENT(userOrganizations, viewer.userOrganizationKey)
         LET legacyReplyGroup = message._key == @rootMessageKey ? DOCUMENT(threads, @threadKey) : null
-        LET legacyReplies = legacyReplyGroup == null ? [] : (FOR reply IN messages FILTER reply.threadKey == legacyReplyGroup._key && reply.deletedAt == null RETURN 1)
-        LET directReplies = (FOR reply IN messages FILTER reply.replyToMessageKey == message._key && reply.deletedAt == null RETURN 1)
+        LET legacyReplies = legacyReplyGroup == null ? [] : (FOR reply IN messages FILTER reply.threadKey == legacyReplyGroup._key RETURN 1)
+        LET directReplies = (FOR reply IN messages FILTER reply.replyToMessageKey == message._key RETURN 1)
         LET poll = FIRST(FOR item IN polls FILTER item.messageKey == message._key LIMIT 1 RETURN item)
         RETURN { key: message._key, channelKey: message.channelKey, threadKey: message.threadKey, replyToMessageKey: message.replyToMessageKey, content: message.content, editedAt: message.editedAt, createdAt: message.createdAt, updatedAt: message.updatedAt,
           author: { participantKey: participant._key, type: participant.userOrganizationKey == null ? "orchestrator" : "user", key: participant.userOrganizationKey == null ? orchestrator._key : user._key, name: participant.userOrganizationKey == null ? orchestrator.name : NOT_NULL(user.name, user.alias, user.email, "Member") },
@@ -360,7 +377,7 @@ export const arangoCommunicationRepository: CommunicationRepository = {
     const cursor = await db.query<ThreadProjection>(`
       FOR thread IN threads FILTER thread.channelKey == @channelKey && thread.status != "archived"
         LET root = DOCUMENT(messages, thread.rootMessageKey)
-        LET replyCount = LENGTH(FOR message IN messages FILTER message.threadKey == thread._key && message.deletedAt == null RETURN 1)
+        LET replyCount = LENGTH(FOR message IN messages FILTER message.threadKey == thread._key RETURN 1)
         SORT thread.updatedAt DESC, thread._key DESC
         RETURN { key: thread._key, channelKey: thread.channelKey, title: thread.title, rootMessageKey: thread.rootMessageKey, rootContent: root.content, status: thread.status, replyCount, updatedAt: thread.updatedAt }
     `, { channelKey });
@@ -370,7 +387,7 @@ export const arangoCommunicationRepository: CommunicationRepository = {
   async listHistory(channelKey, threadKey, excludeMessageKey, limit) {
     const cursor = await db.query<{ role: 'user' | 'assistant'; content: string }>(`
       LET rootMessageKey = @threadKey == null ? null : FIRST(FOR thread IN threads FILTER thread._key == @threadKey && thread.channelKey == @channelKey RETURN thread.rootMessageKey)
-      FOR message IN messages FILTER message.channelKey == @channelKey && message.deletedAt == null && message._key != @excludeMessageKey
+      FOR message IN messages FILTER message.channelKey == @channelKey && message._key != @excludeMessageKey
         FILTER @threadKey == null ? message.threadKey == null : (message.threadKey == @threadKey || message._key == rootMessageKey)
         SORT message.createdAt DESC, message._key DESC LIMIT @limit
         LET participant = DOCUMENT(channelParticipants, message.authorParticipantKey)
@@ -380,7 +397,7 @@ export const arangoCommunicationRepository: CommunicationRepository = {
   },
 
   async getMessage(messageKey) {
-    const raw = await first<Record<string, unknown>>('FOR message IN messages FILTER message._key == @messageKey && message.deletedAt == null LIMIT 1 RETURN message', { messageKey });
+    const raw = await first<Record<string, unknown>>('FOR message IN messages FILTER message._key == @messageKey LIMIT 1 RETURN message', { messageKey });
     return raw ? parse(messageSchema, raw) : null;
   },
   async getThreadByRootMessage(rootMessageKey) {
@@ -434,7 +451,7 @@ export const arangoCommunicationRepository: CommunicationRepository = {
       const cursor = await trx.query<{ scopeKey: string; existingKey: string | null }>(`
         LET message = DOCUMENT(messages, @messageKey)
         LET participant = DOCUMENT(channelParticipants, @participantKey)
-        FILTER message != null && message.deletedAt == null && participant != null && message.channelKey == @channelKey && participant.channelKey == @channelKey
+        FILTER message != null && participant != null && message.channelKey == @channelKey && participant.channelKey == @channelKey
         LET existing = FIRST(FOR reaction IN messageReactions FILTER reaction.messageKey == @messageKey && reaction.participantKey == @participantKey && reaction.reaction == @reaction LIMIT 1 RETURN reaction)
         RETURN { scopeKey: message.scopeKey, existingKey: existing == null ? null : existing._key }
       `, { channelKey: input.channelKey, messageKey: input.messageKey, participantKey: input.participantKey, reaction: input.reaction });
@@ -485,7 +502,7 @@ export const arangoCommunicationRepository: CommunicationRepository = {
   getPollProjection: projectPoll,
   async votePoll({ vote, allowMultiple }) {
     const outcome = await withTransaction({ read: ['messages', 'pollOptions'], write: ['polls', 'pollVotes'] }, async (trx) => {
-      const targetCursor = await trx.query<{ pollStatus: string; optionExists: boolean }>('LET poll = DOCUMENT(polls, @pollKey) LET message = poll == null ? null : DOCUMENT(messages, poll.messageKey) LET option = DOCUMENT(pollOptions, @optionKey) FILTER poll != null && message != null && message.deletedAt == null && poll.channelKey == @channelKey && message.channelKey == @channelKey RETURN { pollStatus: poll.status, optionExists: option != null && option.pollKey == poll._key }', vote);
+      const targetCursor = await trx.query<{ pollStatus: string; optionExists: boolean }>('LET poll = DOCUMENT(polls, @pollKey) LET message = poll == null ? null : DOCUMENT(messages, poll.messageKey) LET option = DOCUMENT(pollOptions, @optionKey) FILTER poll != null && message != null && poll.channelKey == @channelKey && message.channelKey == @channelKey RETURN { pollStatus: poll.status, optionExists: option != null && option.pollKey == poll._key }', vote);
       const target = await targetCursor.next();
       if (!target || !target.optionExists) return 'not_found' as const;
       if (target.pollStatus !== 'open') return 'conflict' as const;
@@ -504,7 +521,7 @@ export const arangoCommunicationRepository: CommunicationRepository = {
     return poll ? { outcome: 'ok', poll } : { outcome: 'not_found' };
   },
   async closePoll(pollKey, channelKey, participantKey, now) {
-    const raw = await first<Record<string, unknown>>('FOR poll IN polls FILTER poll._key == @pollKey && poll.channelKey == @channelKey && poll.creatorParticipantKey == @participantKey LET message = DOCUMENT(messages, poll.messageKey) FILTER message != null && message.deletedAt == null && message.channelKey == @channelKey UPDATE poll WITH { status: "closed", closedAt: @now, updatedAt: @now } IN polls RETURN NEW', { pollKey, channelKey, participantKey, now });
+    const raw = await first<Record<string, unknown>>('FOR poll IN polls FILTER poll._key == @pollKey && poll.channelKey == @channelKey && poll.creatorParticipantKey == @participantKey LET message = DOCUMENT(messages, poll.messageKey) FILTER message != null && message.channelKey == @channelKey UPDATE poll WITH { status: "closed", closedAt: @now, updatedAt: @now } IN polls RETURN NEW', { pollKey, channelKey, participantKey, now });
     return raw ? projectPoll(pollKey, channelKey, participantKey) : null;
   },
 };

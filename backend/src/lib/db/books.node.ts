@@ -10,7 +10,7 @@ export const bookSchema = z.object({
   language: z.string().trim().min(1), generationRequestKey: z.string().trim().min(1).max(200).optional(), generationBriefFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   generationLeaseToken: z.string().trim().min(1).max(200).optional(), generationLeaseExpiresAt: z.string().datetime().optional(), coverStorageKey: z.string().trim().min(1).optional(), estimatedMinutes: z.number().int().nonnegative().default(0),
   chapterCount: z.number().int().nonnegative().default(0), isFavorite: z.boolean().default(false), status: bookStatusSchema, embedding: currentEmbeddingSchema,
-  deletedAt: z.string().datetime().nullable().default(null), createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
+  createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
 });
 export type Book = z.infer<typeof bookSchema>;
 export const booksEmbeddingFields = ['title', 'subtitle', 'description', 'goal', 'audience', 'outcome'] as const;
