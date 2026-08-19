@@ -27,8 +27,9 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
   const { showToast } = useToast();
   const galleryContext = getGalleryContext();
   const reducedMotion = useReducedMotion();
-  const { height, width } = useWindowDimensions();
+  const { width } = useWindowDimensions();
   const [gridWidth, setGridWidth] = useState(0);
+  const [detailViewportHeight, setDetailViewportHeight] = useState(0);
   const [memories, setMemories] = useState<GalleryMemory[]>([]);
   const [detail, setDetail] = useState<GalleryMemory>();
   const [typedText, setTypedText] = useState("");
@@ -50,7 +51,7 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
   const longPressedMemory = useRef<string | undefined>(undefined);
   const owner = isGalleryCollectionOwned(collection);
   const cardWidth = Math.floor(((gridWidth || width - 40) - GAP * (COLUMNS - 1)) / COLUMNS);
-  const expandedImageHeight = Math.max(420, height - 260);
+  const expandedImageHeight = Math.max(120, detailViewportHeight - spacing.lg * 2);
   const imageStageStyle = useAnimatedStyle(() => ({ height: interpolate(imageExpansion.value, [0, 1], [120, expandedImageHeight]) }), [expandedImageHeight]);
   const compactImageStyle = useAnimatedStyle(() => ({ opacity: interpolate(imageExpansion.value, [0, 0.24], [1, 0], "clamp") }));
   const expandedImageStyle = useAnimatedStyle(() => ({ opacity: interpolate(imageExpansion.value, [0, 0.24], [0, 1], "clamp") }));
@@ -225,7 +226,7 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
     </BottomSheet>
 
     <BottomSheet footer={detailFooter} height="full" onOpenChange={(next) => { if (!next) close(); }} open={open && Boolean(detail)} title="Memory">
-      {detail ? <ScrollView contentContainerStyle={styles.detail} showsVerticalScrollIndicator={false}><Animated.View style={[styles.detailImageStage, imageStageStyle]}><Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, expandedImageStyle]}><View collapsable={false} style={styles.expandedImageClip}><Image contentFit="contain" source={detail.image.url} style={styles.detailImage} transition={180} /></View></Animated.View><Animated.View pointerEvents="none" style={[styles.detailThumbnailLayer, compactImageStyle]}><View collapsable={false} style={styles.thumbnailImageClip}><Image contentFit="cover" source={detail.image.url} style={styles.detailImage} transition={180} /></View></Animated.View></Animated.View><View accessibilityElementsHidden={showImage} importantForAccessibility={showImage ? "no-hide-descendants" : "auto"} pointerEvents={showImage ? "none" : "auto"} style={[styles.memoryCopy, showImage && styles.memoryCopyHidden]}>{splitGalleryMemoryText(typedText).map((section, index) => <Text key={`${index}:${section.length}`} style={styles.memoryText}>{section}</Text>)}</View></ScrollView> : null}
+      {detail ? <ScrollView contentContainerStyle={styles.detail} onLayout={({ nativeEvent }) => setDetailViewportHeight(nativeEvent.layout.height)} showsVerticalScrollIndicator={false}><Animated.View style={[styles.detailImageStage, imageStageStyle]}><Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, expandedImageStyle]}><Image contentFit="contain" source={detail.image.url} style={styles.detailImage} transition={180} /></Animated.View><Animated.View pointerEvents="none" style={[styles.detailThumbnailLayer, compactImageStyle]}><View collapsable={false} style={styles.thumbnailImageClip}><Image contentFit="cover" source={detail.image.url} style={styles.detailImage} transition={180} /></View></Animated.View></Animated.View>{showImage ? null : <View style={styles.memoryCopy}>{splitGalleryMemoryText(typedText).map((section, index) => <Text key={`${index}:${section.length}`} style={styles.memoryText}>{section}</Text>)}</View>}</ScrollView> : null}
     </BottomSheet>
 
     <BottomSheet dismissible={!deleting} onOpenChange={(next) => { if (!next) setActiveSheet("list"); }} open={open && !detail && selectedMemoryKeys.length > 0 && activeSheet === "confirmDelete"} title={`Delete ${selectedMemoryKeys.length === 1 ? "memory" : `${selectedMemoryKeys.length} memories`}?`}>
@@ -250,10 +251,8 @@ const styles = StyleSheet.create({
   detailImageStage: { width: "100%", height: 120 },
   detailThumbnailLayer: { position: "absolute", top: 0, left: "50%", width: 120, height: 120, marginLeft: -60 },
   thumbnailImageClip: { width: "100%", height: "100%", overflow: "hidden", borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.sm, backgroundColor: palette.voidBlack },
-  expandedImageClip: { width: "100%", height: "100%", overflow: "hidden", borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.lg, backgroundColor: palette.voidBlack },
   detailImage: { width: "100%", height: "100%" },
   memoryCopy: { width: "100%", gap: spacing.md, paddingBottom: spacing.xl },
-  memoryCopyHidden: { opacity: 0 },
   memoryText: { color: palette.silver100, fontFamily: fonts.regular, fontSize: 17, lineHeight: 27 },
   confirmActions: { gap: spacing.sm },
 });

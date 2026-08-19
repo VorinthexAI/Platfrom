@@ -40,12 +40,12 @@ test("guards auto-open and preserves typing across zoom and event refresh", () =
   expect(memories).toContain('height: interpolate(imageExpansion.value, [0, 1], [120, expandedImageHeight])');
   expect(memories).toContain('style={[styles.detailImageStage, imageStageStyle]}');
   expect(memories).toContain('style={[styles.detailThumbnailLayer, compactImageStyle]}');
-  expect(memories).toContain('<View collapsable={false} style={styles.expandedImageClip}>');
   expect(memories).toContain('thumbnailImageClip: { width: "100%", height: "100%", overflow: "hidden", borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.sm');
-  expect(memories).toContain('expandedImageClip: { width: "100%", height: "100%", overflow: "hidden", borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.lg');
-  expect(memories).toContain('const expandedImageHeight = Math.max(420, height - 260)');
-  expect(memories).toContain('style={[styles.memoryCopy, showImage && styles.memoryCopyHidden]}');
-  expect(memories).toContain('accessibilityElementsHidden={showImage}');
+  expect(memories).toContain('const expandedImageHeight = Math.max(120, detailViewportHeight - spacing.lg * 2)');
+  expect(memories).toContain('onLayout={({ nativeEvent }) => setDetailViewportHeight(nativeEvent.layout.height)}');
+  expect(memories).toContain('{showImage ? null : <View style={styles.memoryCopy}>');
+  expect(memories).not.toContain('expandedImageClip');
+  expect(memories).not.toContain('memoryCopyHidden');
   expect(memories).not.toContain("LinearTransition");
 });
 

@@ -2592,7 +2592,7 @@ export function GalleryWorkspace() {
           <View style={styles.detailMenuRow}>
             {selectedImage ? <Button accessibilityLabel="Open image actions" contentMode="raw" onPress={() => pushSheet("imageActions")} size="md" variant="icon"><MoreHorizontalIcon size="sm" /></Button> : null}
           </View>
-          <View collapsable={false} style={styles.detailImageFrame}><Image source={selectedImage?.url ?? selectedOptimisticItem?.uri} contentFit="contain" style={styles.detailImage} /></View>
+          <View style={styles.detailImageFrame}><Image source={selectedImage?.url ?? selectedOptimisticItem?.uri} contentFit="contain" style={styles.detailImage} /></View>
         </View> : null}
       </BottomSheet>
 
@@ -2911,7 +2911,7 @@ const styles = StyleSheet.create({
   collectionCoverButton: { width: 96, height: 96, overflow: "hidden", paddingHorizontal: 0, paddingVertical: 0 },
   detail: { flex: 1, gap: 8 },
   detailMenuRow: { minHeight: 40, flexDirection: "row", alignItems: "center", justifyContent: "flex-end" },
-  detailImageFrame: { flex: 1, width: "100%", overflow: "hidden", borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.lg, backgroundColor: palette.voidBlack },
+  detailImageFrame: { flex: 1, width: "100%" },
   detailImage: { width: "100%", height: "100%" },
   detailActions: { flexDirection: "row", gap: 8 },
   detailActionsCompact: { flexDirection: "column" },
