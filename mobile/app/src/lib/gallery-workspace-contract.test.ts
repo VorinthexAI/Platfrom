@@ -11,12 +11,17 @@ const memberMobileSource = await Bun.file(new URL("../../../../shared/packages/u
 const webIconsSource = await Bun.file(new URL("../../../../shared/packages/ui/icons.ts", import.meta.url)).text();
 const mobileIconsSource = await Bun.file(new URL("../../../../shared/packages/ui/icons-mobile.ts", import.meta.url)).text();
 
-test("keeps image similarity collection-scoped and outside the image footer", () => {
+test("opens collection-scoped image similarity in an invalidated full-screen sheet", () => {
   const footer = source.slice(source.indexOf('const sheetFooter ='), source.indexOf('return (', source.indexOf('const sheetFooter =')));
   expect(footer).not.toContain("Find similar");
   expect(source).toContain("imageKey: source.key, collectionKey: collection.key");
   expect(source).toContain("Image.prefetch(url)");
-  expect(source).toContain("Similar to {similarSource.filename}");
+  expect(source).toContain('galleryQueryKeys.search(galleryContext, "similar", collection.key, source.key)');
+  expect(source).toContain('invalidateQueries({ queryKey, exact: true, refetchType: "none" })');
+  expect(source).toContain('activeSheetRef.current === "similar"');
+  expect(source).toContain('openSheet("similar")');
+  expect(source).toContain('height={activeSheet === "destination" || activeSheet === "imageEdit" || activeSheet === "newCollection" || activeSheet === "collectionEdit" || activeSheet === "similar"');
+  expect(source).toContain('activeSheet === "similar" ? "Similar images"');
   expect(source.indexOf(">Find similar image<")).toBeLessThan(source.indexOf(">Delete image<"));
 });
 
@@ -101,19 +106,29 @@ test("provides the full visual identity library and image picker workflow", () =
   expect(source.match(/onPress=\{\(\) => void openVisualIdentities\(\)\} size="lg" variant="secondary">Visual identities<\/Button>/g)).toHaveLength(2);
 });
 
-test("keeps similar-image and visual-identity pills mutually exclusive", () => {
-  const similar = source.slice(source.indexOf("async function findSimilar"), source.indexOf("function clearSimilarImages"));
-  const identity = source.slice(source.indexOf("async function filterByVisualIdentity"), source.indexOf("function clearIdentityFilter"));
+test("keeps similar-image results sheet-local without replacing the collection grid", () => {
+  const similar = source.slice(source.indexOf("async function findSimilar"), source.indexOf("function showSimilarImage"));
   const leave = source.slice(source.indexOf("async function leaveActiveCollection"), source.indexOf("function replaceVisibleImages"));
-  expect(similar).toContain("identityFilterRequest.current += 1");
-  expect(similar).toContain("setActiveIdentityFilter(undefined)");
-  expect(identity).toContain("imageSheetRequest.current += 1");
-  expect(identity).toContain("setSimilarSource(undefined)");
-  expect(identity).toContain("setSimilarImages([])");
+  expect(similar).not.toContain("setActiveIdentityFilter(undefined)");
+  expect(source).toContain("const unfilteredVisibleImages = activeIdentityFilter && activeCollection");
+  expect(source).not.toContain("const unfilteredVisibleImages = similarSource");
+  expect(source).not.toContain("Similar to {similarSource.filename}");
+  expect(source).not.toContain('accessibilityLabel="Close similar image filter"');
   expect(leave).toContain("setActiveIdentityFilter(undefined)");
   expect(leave).toContain("setSimilarSource(undefined)");
-  expect(source).toContain('accessibilityLabel="Close similar image filter"');
   expect(source).toContain('accessibilityLabel="Close visual identity filter"');
+});
+
+test("renders one four-card skeleton row and guarded results in the similar-images sheet", () => {
+  const start = source.indexOf('activeSheet === "similar" ? <View style={styles.duplicatePanel}');
+  const end = source.indexOf('activeSheet === "duplicates"', start);
+  const sheet = source.slice(start, end);
+  expect(sheet).toContain('accessibilityLabel="Loading similar images"');
+  expect(sheet).toContain('Array.from({ length: IMAGE_COLUMNS }');
+  expect(sheet).toContain('width: sheetImageSize, height: sheetImageSize');
+  expect(sheet).toContain('similarImages.map((image)');
+  expect(sheet).toContain('onPress={() => showSimilarImage(image)}');
+  expect(sheet).toContain('No similar images found in this collection.');
 });
 
 test("uses separate image-selection and naming steps for visual identities", () => {
@@ -187,7 +202,7 @@ test("provides collection cleanup discovery, pagination, exclusion, and confirme
   expect(source).toContain('for (let index = 0; index < targets.length; index += DELETE_IMAGE_CHUNK_SIZE)');
   expect(source).toContain('await deleteGalleryImages(eligibleChunk.map(({ key }) => key))');
   expect(source).toContain('activeSheet === "cleanupMenu" || activeSheet === "confirmCleanupDelete"');
-  expect(source).toContain('height={activeSheet === "destination" || activeSheet === "imageEdit" || activeSheet === "newCollection" || activeSheet === "collectionEdit" || activeSheet === "duplicates" || activeSheet === "cleanup"');
+  expect(source).toContain('height={activeSheet === "destination" || activeSheet === "imageEdit" || activeSheet === "newCollection" || activeSheet === "collectionEdit" || activeSheet === "similar" || activeSheet === "duplicates" || activeSheet === "cleanup"');
   expect(source).toContain('!collection || !isGalleryCollectionOwned(collection)');
   expect(source).not.toContain('cleanupScore');
 });
@@ -540,7 +555,6 @@ test("closes upload surfaces on contributor loss and rechecks destinations", () 
 test("replays media and picker windows and recovers contextual failures", () => {
   expect(source).toContain("replayPaginatedWindow({");
   expect(source).toContain("replayOverviewWindow(pickerCollection.key, identityPickerImages.length, generation)");
-  expect(source).toContain('recoverContextualSearchFailure("similar")');
   expect(source).toContain('recoverContextualSearchFailure("identity")');
   expect(source).toContain("await replayOverviewWindow(activeCollection?.key, images.length, generation)");
 });
