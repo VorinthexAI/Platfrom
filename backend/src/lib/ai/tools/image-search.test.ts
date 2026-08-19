@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { currentEmbeddingSchema, QWEN_RETRIEVAL_INSTRUCTION } from '@/lib/embeddings';
 import { newId } from '@/lib/ids';
 import type { ToolContext } from './tool-context';
-import { IMAGE_SEARCH_EMBEDDING_ATTEMPT_TIMEOUT_MS, imageSearchInputSchema, imageSearchTool } from './image-search';
+import { imageSearchInputSchema, imageSearchTool } from './image-search';
 
 const embedding = currentEmbeddingSchema.parse(Array.from({ length: 4_096 }, () => 0.25));
 const now = '2026-08-11T12:00:00.000Z';
@@ -39,8 +39,8 @@ describe('image.search tool', () => {
     let searched: any;
     const output = await imageSearchTool.execute({ query: 'snowy mountain' }, {
       context: toolContext,
-      async executeEmbedding(organizationKey, input, options) {
-        embedded = { organizationKey, input, options };
+      async executeEmbedding(organizationKey, input) {
+        embedded = { organizationKey, input };
         return { output: { embedding } } as never;
       },
       listMatchingVisualIdentities: async () => [],
@@ -53,7 +53,6 @@ describe('image.search tool', () => {
     expect(embedded).toEqual({
       organizationKey: toolContext.organizationKey,
       input: { text: `${QWEN_RETRIEVAL_INSTRUCTION}snowy mountain` },
-      options: { timeoutMs: IMAGE_SEARCH_EMBEDDING_ATTEMPT_TIMEOUT_MS },
     });
     expect(searched).toMatchObject({
       organizationKey: toolContext.organizationKey,

@@ -188,6 +188,7 @@ export function GalleryWorkspace() {
   const [assistantBusy, setAssistantBusy] = useState(false);
   const [aiInputFocused, setAiInputFocused] = useState(false);
   const [collectionSearchFocusBlocked, setCollectionSearchFocusBlocked] = useState(false);
+  const [searching, setSearching] = useState(false);
   const viewRequest = useRef(0);
   const backgroundLoadRequest = useRef(0);
   const searchRequest = useRef(0);
@@ -927,6 +928,7 @@ export function GalleryWorkspace() {
     searchRequest.current += 1;
     identityFilterRequest.current += 1;
     activeSearch.current = undefined;
+    setSearching(Boolean(value.trim()));
     setCollectionSearchResults(undefined);
     setSimilarSource(undefined);
     setSimilarImages([]);
@@ -941,24 +943,24 @@ export function GalleryWorkspace() {
     if (activeSearch.current === searchKey) return;
     activeSearch.current = searchKey;
     const request = ++searchRequest.current;
-    const immediateMatches = collection ? filterMediaItems(images, value) : [];
+    setSearching(true);
     try {
       const result = await searchGalleryImages({ query: value, ...(collection ? { collectionKey: collection.key } : {}), recordHistory: true, limit: 50 });
       const expectedView = collection ? "search" : "root";
       if (request !== searchRequest.current || activeCollectionKey.current !== collection?.key || visibleGalleryView.current !== expectedView) return;
       setSelectedImageKeys([]);
-      const matches = mergeMediaItems(immediateMatches, result.images);
-      setCollectionSearchResults(matches);
+      setCollectionSearchResults(result.images);
       setStatus(undefined);
       void queryClient.invalidateQueries({ queryKey: contentQueryKeys.history(contentContext, undefined), exact: true, refetchType: "none" }).catch(() => undefined);
     } catch {
       const expectedView = collection ? "search" : "root";
       if (request === searchRequest.current && activeCollectionKey.current === collection?.key && visibleGalleryView.current === expectedView) {
-        setCollectionSearchResults(immediateMatches);
+        setCollectionSearchResults([]);
         setStatus(undefined);
       }
     } finally {
       if (activeSearch.current === searchKey) activeSearch.current = undefined;
+      if (request === searchRequest.current) setSearching(false);
     }
   }
 
@@ -968,6 +970,7 @@ export function GalleryWorkspace() {
     activeSearch.current = undefined;
     setQuery("");
     setCollectionSearchResults(undefined);
+    setSearching(false);
     setStatus(undefined);
     if (refresh && activeCollection) {
       const collection = activeCollection;
@@ -2385,8 +2388,7 @@ export function GalleryWorkspace() {
                                   : activeSheet === "transferDestination" ? `${transferMode === "move" ? "Move" : "Copy"} to collection`
                                     : "Gallery";
   const collectionSearchActive = Boolean(activeCollection && query.trim());
-  const immediateSearchResults = collectionSearchActive ? filterMediaItems(images, query) : images;
-  const unfilteredVisibleImages = activeIdentityFilter && activeCollection ? collectionSearchResults ?? [] : collectionSearchActive && collectionSearchResults ? collectionSearchResults : immediateSearchResults;
+  const unfilteredVisibleImages = activeIdentityFilter && activeCollection ? collectionSearchResults ?? [] : collectionSearchActive ? collectionSearchResults ?? [] : images;
   const optimisticImageKeys = new Set(optimisticMediaItems.map(({ imageKey }) => imageKey).filter((key): key is string => Boolean(key)));
   const reconciledVisibleImages = mergeMediaItems([], unfilteredVisibleImages).filter(({ key }) => !optimisticImageKeys.has(key));
   const visibleImages = filterByHiddenView(reconciledVisibleImages, userHiddens, "image", viewFilters);
@@ -2514,7 +2516,7 @@ export function GalleryWorkspace() {
           {bulkToolbar}
           {filterBadges(true)}
           {status ? <View accessibilityLiveRegion="polite" style={styles.statusCard}><Text style={styles.status}>{status}</Text></View> : null}
-           {loading ? <View accessibilityLabel="Loading images" accessibilityRole="progressbar" style={styles.grid}>{Array.from({ length: IMAGE_COLUMNS }, (_, index) => <Skeleton key={index} style={[styles.imageSkeleton, { width: imageSize, height: imageSize }]} />)}</View> : visibleImages.length === 0 && visibleOptimisticItems.length === 0 && normalCollectionView ? <View style={styles.emptyState}><Text style={styles.emptyText}>{showOnlyFavorites ? "No favorite images here." : emptyGridMessage}</Text>{collectionSearchActive || showOnlyFavorites || !canAddImages ? null : <Button accessibilityLabel={`Upload images to ${activeCollection.name}`} contentMode="raw" onPress={() => void choosePhotos()} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button>}</View> : visibleImages.length === 0 && visibleOptimisticItems.length === 0 ? <Text style={styles.emptyText}>{showOnlyFavorites ? "No favorite images here." : emptyGridMessage}</Text> : (
+           {loading || searching && visibleImages.length === 0 ? <View accessibilityLabel={searching ? "Searching images" : "Loading images"} accessibilityRole="progressbar" style={styles.grid}>{Array.from({ length: IMAGE_COLUMNS }, (_, index) => <Skeleton key={index} style={[styles.imageSkeleton, { width: imageSize, height: imageSize }]} />)}</View> : visibleImages.length === 0 && visibleOptimisticItems.length === 0 && normalCollectionView ? <View style={styles.emptyState}><Text style={styles.emptyText}>{showOnlyFavorites ? "No favorite images here." : emptyGridMessage}</Text>{collectionSearchActive || showOnlyFavorites || !canAddImages ? null : <Button accessibilityLabel={`Upload images to ${activeCollection.name}`} contentMode="raw" onPress={() => void choosePhotos()} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button>}</View> : visibleImages.length === 0 && visibleOptimisticItems.length === 0 ? <Text style={styles.emptyText}>{showOnlyFavorites ? "No favorite images here." : emptyGridMessage}</Text> : (
             <View style={styles.imageSections}>
               {visibleImageGroups.map((group) => <View key={group.label} style={styles.dateGroup}>
                 <Text style={styles.dateHeading}>{group.label}</Text>

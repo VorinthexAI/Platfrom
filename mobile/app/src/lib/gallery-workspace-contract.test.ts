@@ -565,16 +565,19 @@ test("silently refreshes picker searches without history or selection loss", () 
   expect(source).toContain("await refreshIdentityPickerSearchSilently(identityPickerQuery, pickerCollection, generation)");
 });
 
-test("keeps collection search responsive and falls back without inline errors", () => {
+test("uses semantic-only collection search with loading skeletons and no inline errors", () => {
   const start = source.indexOf("async function search(value = query.trim()");
   const end = source.indexOf("function clearCollectionSearch", start);
   const search = source.slice(start, end);
   expect(search).toContain("recordHistory: true");
-  expect(search).toContain("setCollectionSearchResults(immediateMatches)");
+  expect(search).toContain("setCollectionSearchResults(result.images)");
+  expect(search).toContain("setCollectionSearchResults([])");
   expect(search).toContain("setStatus(undefined)");
   expect(search).not.toContain("setStatus(errorMessage(error))");
+  expect(search).not.toContain("immediateMatches");
   expect(source).not.toContain("historyTimer");
-  expect(source).not.toContain('searching && visibleImages.length === 0');
+  expect(source).toContain('searching && visibleImages.length === 0');
+  expect(source).toContain('collectionSearchActive ? collectionSearchResults ?? [] : images');
 });
 
 test("coalesces and generation-checks sharing refreshes and uses one incoming key", () => {
