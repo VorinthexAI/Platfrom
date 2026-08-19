@@ -4,6 +4,7 @@ import type { AssistantCapability, AssistantCapabilityContext } from './capabili
 import { GalleryOperationError, galleryOperationInputSchemas, galleryOperations, redactCollectionShareOutput, type GalleryOperationContext, type GalleryOperationName } from '@/lib/gallery/operations';
 import { imageSearchInputSchema, imageSearchProviderInputSchema } from '@/lib/ai/tools/image-search';
 import { userHiddenOperations } from '@/lib/user-hiddens/operations';
+import { createImageGenerationService, imageGenerateModelInputSchema, imageIdeasInputSchema, type ImageGenerationService } from '@/lib/image-generation/service';
 
 type GalleryExecutor = (input: unknown, context: GalleryOperationContext) => Promise<unknown>;
 
@@ -68,7 +69,7 @@ function trustedContext(context: AssistantCapabilityContext): GalleryOperationCo
   };
 }
 
-export function createGalleryAssistantCapabilities(operations: Partial<Record<GalleryOperationName, GalleryExecutor>> = galleryOperations): AssistantCapability[] {
+export function createGalleryAssistantCapabilities(operations: Partial<Record<GalleryOperationName, GalleryExecutor>> = galleryOperations, imageService: ImageGenerationService = createImageGenerationService()): AssistantCapability[] {
   const gallery: AssistantCapability[] = definitions.map(({ operation, name, description, schema, mutation }) => {
     return ({
     inputSchema: schema,
@@ -94,7 +95,20 @@ export function createGalleryAssistantCapabilities(operations: Partial<Record<Ga
       return { kind: 'continue', result };
     },
   })));
-  return [...gallery, ...hidden];
+  const generated: AssistantCapability[] = [
+    {
+      inputSchema: imageIdeasInputSchema,
+      definition: { name: 'image.ideas.create', description: 'Create distinct, production-ready image concepts and complete generation prompts from a creative brief.', inputSchema: contentZodToJsonSchema(imageIdeasInputSchema) },
+      async execute(input, context) { return { kind: 'continue', result: await (context.images ?? imageService).createIdeas(imageIdeasInputSchema.parse(input), context.domain) }; },
+    },
+    {
+      inputSchema: imageGenerateModelInputSchema,
+      mutationWorkspace: 'gallery',
+      definition: { name: 'image.generate', description: 'Generate images and save them into the current user Gallery scope.', inputSchema: contentZodToJsonSchema(imageGenerateModelInputSchema) },
+      async execute(input, context) { return { kind: 'continue', result: await (context.images ?? imageService).generate(imageGenerateModelInputSchema.parse(input), context.domain, context.requestKey) }; },
+    },
+  ];
+  return [...gallery, ...hidden, ...generated];
 }
 
 export const galleryAssistantCapabilities = createGalleryAssistantCapabilities();

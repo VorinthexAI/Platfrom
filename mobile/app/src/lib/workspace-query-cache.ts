@@ -67,6 +67,9 @@ export function setCachedGalleryCollections(queryClient: QueryClient, context: W
 export const compassQueryKeys = {
   all: (context: WorkspaceContext) => ["compass", ...contextKey(context)] as const,
   overview: (context: WorkspaceContext) => [...compassQueryKeys.all(context), "overview"] as const,
+  countryDetails: (context: WorkspaceContext) => [...compassQueryKeys.all(context), "country-details"] as const,
+  countryDetail: (context: WorkspaceContext, countryCode: string) => [...compassQueryKeys.countryDetails(context), countryCode] as const,
+  countryImages: (context: WorkspaceContext, imageRequestToken: string) => [...compassQueryKeys.all(context), "country-images", imageRequestToken] as const,
 };
 
 export const signalQueryKeys = {

@@ -3,6 +3,7 @@ import { z, ZodError } from 'zod';
 import { ProviderExecutionError } from '@/lib/ai/router/errors';
 import { TravelRepositoryError } from '@/lib/travel/repository';
 import { createTravelService, type TravelService } from '@/lib/travel/service';
+import { travelPlaceImagesInputSchema } from '@/lib/travel/place-images';
 import { getAuthIdentity } from './security';
 
 type IdentityReader = typeof getAuthIdentity;
@@ -27,9 +28,9 @@ export function createTravelHandlers(options: { service?: TravelService; getIden
       }
       if (error instanceof ProviderExecutionError) {
         const codes = new Set(error.attempts.map(({ code }) => code));
-        if (codes.has('rate_limited')) return c.json({ success: false, error: { code: 'TRAVEL_RATE_LIMITED', message: 'Place information is temporarily busy. Try again shortly.' } }, 429);
-        if (codes.has('timeout') || codes.has('aborted')) return c.json({ success: false, error: { code: 'TRAVEL_LOOKUP_TIMEOUT', message: 'Place information took too long to load. Try again.' } }, 504);
-        return c.json({ success: false, error: { code: 'TRAVEL_PROVIDER_UNAVAILABLE', message: 'Place information is temporarily unavailable.' } }, 503);
+        if (codes.has('rate_limited')) return c.json({ success: false, error: { code: 'TRAVEL_RATE_LIMITED', message: 'Travel generation is temporarily busy. Try again shortly.' } }, 429);
+        if (codes.has('timeout') || codes.has('aborted')) return c.json({ success: false, error: { code: 'TRAVEL_LOOKUP_TIMEOUT', message: 'Travel generation took too long. Try again.' } }, 504);
+        return c.json({ success: false, error: { code: 'TRAVEL_PROVIDER_UNAVAILABLE', message: 'Travel generation is temporarily unavailable.' } }, 503);
       }
       if (error instanceof ZodError || error instanceof SyntaxError) return c.json({ success: false, error: { code: 'TRAVEL_INVALID_INPUT', message: 'Travel request input was invalid.' } }, 400);
       return c.json({ success: false, error: { code: 'TRAVEL_FAILED', message: 'Travel request failed.' } }, 500);
@@ -38,6 +39,7 @@ export function createTravelHandlers(options: { service?: TravelService; getIden
   return {
     overview: run(async (c, travel, userKey) => travel.overview(await c.req.json(), userKey)),
     findPlace: run(async (c, travel, userKey) => travel.findPlace(await c.req.json(), userKey, { signal: c.req.raw.signal })),
+    generatePlaceImages: run(async (c, travel, userKey) => travel.generatePlaceImages(travelPlaceImagesInputSchema.parse(await c.req.json()), userKey, { signal: c.req.raw.signal })),
     createPlace: run(async (c, travel, userKey) => travel.createPlace(await c.req.json(), userKey), 201),
     createVisit: run(async (c, travel, userKey) => travel.createVisit(pathKeySchema.parse(c.req.param('placeKey')), await c.req.json(), userKey), 201),
     createTrip: run(async (c, travel, userKey) => travel.createTrip(await c.req.json(), userKey), 201),

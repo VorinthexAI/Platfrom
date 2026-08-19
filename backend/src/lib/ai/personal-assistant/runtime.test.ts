@@ -80,12 +80,28 @@ describe('personal assistant runtime', () => {
       'subject.image.list', 'subject.delete', 'highlight.create', 'highlight.list',
       'highlight.read', 'highlight.delete', 'image.create-memory', 'image.memory.list',
       'image.memory.read', 'image.memory.delete', 'collection.hide', 'collection.reveal',
-      'image.hide', 'image.reveal', 'assistant.unsupported',
+      'image.hide', 'image.reveal', 'image.ideas.create', 'image.generate', 'assistant.unsupported',
     ]);
     expect(chatInput.systemPrompt).toContain('Call image.search whenever');
     expect(chatInput.systemPrompt).toContain('duplicates true plus collectionKey');
     expect(chatInput.messages[0].content[0].text).toContain('"workspace":"Gallery"');
     expect(result).toEqual({ type: 'unsupported', message: 'This request is not supported in Gallery. Core can search your images.', sources: [] });
+  });
+
+  test('executes image generation with trusted Core context and reports a Gallery mutation', async () => {
+    let modelCalls = 0;
+    const calls: unknown[][] = [];
+    const result = await runPersonalAssistant({ ...input, surface: 'media-workspace', message: 'Generate an image of Earth', requestKey: 'request-1' }, domain, {
+      execute: async () => {
+        modelCalls += 1;
+        if (modelCalls === 1) return response({ text: '', toolCalls: [{ id: 'generate-1', name: 'image.generate', arguments: { prompt: 'Earth from orbit', count: 1, size: '1024x1024', quality: 'high' } }], stopReason: 'tool_use' });
+        return response({ text: 'Generated and saved the image.', toolCalls: [], stopReason: 'end_turn' });
+      },
+      images: { generate: async (...args: unknown[]) => { calls.push(args); return { images: [{ key: newId(), url: 'https://images.example/signed.png' }], provider: { durationMs: 10, costUsd: 0.1 } }; } } as any,
+    });
+    expect(calls).toEqual([[{ prompt: 'Earth from orbit', count: 1, size: '1024x1024', quality: 'high' }, domain, expect.stringMatching(/^[a-f0-9]{64}$/)]]);
+    expect(calls[0]?.[2]).not.toBe('request-1');
+    expect(result).toEqual({ type: 'answer', message: 'Generated and saved the image.', sources: [], changes: [{ workspace: 'gallery' }] });
   });
 
   test('exposes canonical Compass capabilities', async () => {

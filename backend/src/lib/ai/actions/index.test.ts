@@ -36,6 +36,8 @@ describe('action registry', () => {
         { provider: 'openrouter', model: 'google.gemini-2.5-flash-lite', priority: 100 },
         { provider: 'aws-bedrock', model: 'amazon.nova-pro', priority: 90 },
       ]);
+    expect(ACTION_DEFINITIONS.find((action) => action.id === 'generate-image')?.models)
+      .toEqual([{ provider: 'openrouter', model: 'openai.gpt-image-2', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'enhance')?.models)
       .toEqual([{ provider: 'openrouter', model: 'google.gemini-2.5-flash-lite', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'translate')?.models)

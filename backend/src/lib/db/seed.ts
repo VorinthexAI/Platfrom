@@ -181,6 +181,14 @@ export const SEEDED_MODELS = [
     supportedUseCases: 'Chat, tool use, summarization, translation, extraction, classification, image captions, visual understanding, optical character recognition, and visual identity descriptions.',
     enabled: true,
   },
+  {
+    key: 'cmgptimage2model00000001',
+    slug: 'openai.gpt-image-2',
+    name: 'OpenAI GPT Image 2',
+    description: 'OpenAI image generation model routed through the OpenRouter Images API.',
+    supportedUseCases: 'Text-to-image generation with configurable quality, size, and image count.',
+    enabled: true,
+  },
 ] as const;
 
 /** Model bindings are owned by actions and selected by descending priority. */
@@ -257,6 +265,13 @@ export const SEEDED_MODEL_PROVIDERS = [
     modelSlug: 'google.gemini-2.5-flash-lite',
     providerSlug: 'openrouter',
     providerModelId: 'google/gemini-2.5-flash-lite',
+    enabled: true,
+  },
+  {
+    key: 'cmgptimage2route000000001',
+    modelSlug: 'openai.gpt-image-2',
+    providerSlug: 'openrouter',
+    providerModelId: 'openai/gpt-image-2',
     enabled: true,
   },
 ] as const;

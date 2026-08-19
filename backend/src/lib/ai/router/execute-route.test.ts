@@ -15,4 +15,16 @@ describe('route execution', () => {
     expect(response.usage.totalTokens).toBe(5);
     expect(telemetry[0]).toMatchObject({ modelKey: decision.modelKey, providerKey: decision.providerKey, status: 'completed', usage: { totalTokens: 5 } });
   });
+
+  test('passes optional provider cost through to attempt telemetry', async () => {
+    const telemetry: RouteAttemptTelemetry[] = [];
+    const response = await executeRoute({
+      decision,
+      input: { prompt: 'hello' },
+      adapters: { openai: { id: 'openai', name: 'OpenAI', async execute<TInput, TOutput>(request: ProviderExecuteRequest<TInput>) { return { output: {} as TOutput, usage: tokenUsage(1, 2), costUsd: 0.13, providerId: 'openai', modelId: request.modelId, externalModelId: request.externalModelId }; } } },
+      onAttempt: (attempt) => { telemetry.push(attempt); },
+    });
+    expect(response.costUsd).toBe(0.13);
+    expect(telemetry[0]).toMatchObject({ status: 'completed', usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 }, costUsd: 0.13 });
+  });
 });

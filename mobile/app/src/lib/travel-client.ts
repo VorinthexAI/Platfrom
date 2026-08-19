@@ -46,6 +46,28 @@ export type Place = z.infer<typeof placeSchema>;
 export type ItineraryPlace = z.infer<typeof itineraryPlaceSchema>;
 export type Trip = z.infer<typeof tripSchema>;
 
+const PLACE_IMAGE_ROLES = ["hero", "scene-1", "scene-2", "scene-3"] as const;
+export const travelAssetConceptSchema = z.strictObject({
+  title: z.string().trim().min(1).max(160),
+  prompt: z.string().trim().min(1).max(4_000),
+});
+export const travelAssetConceptsSchema = z.tuple([
+  travelAssetConceptSchema,
+  travelAssetConceptSchema,
+  travelAssetConceptSchema,
+  travelAssetConceptSchema,
+]).superRefine((concepts, context) => {
+  for (const field of ["title", "prompt"] as const) {
+    const normalized = concepts.map((concept) => concept[field].toLocaleLowerCase());
+    if (new Set(normalized).size !== concepts.length) context.addIssue({ code: "custom", path: [], message: `Asset concept ${field}s must be distinct.` });
+  }
+  concepts.forEach((concept, index) => {
+    if (!concept.prompt.toLocaleLowerCase().startsWith(`role: ${PLACE_IMAGE_ROLES[index]}.`)) {
+      context.addIssue({ code: "custom", path: [index, "prompt"], message: `Asset concept ${index + 1} must have role ${PLACE_IMAGE_ROLES[index]}.` });
+    }
+  });
+});
+
 export const placeDetailSchema = z.strictObject({
   location: z.strictObject({
     kind: z.enum(["country", "place"]),
@@ -70,8 +92,45 @@ export const placeDetailSchema = z.strictObject({
     safety: z.string().trim().min(1).max(600),
     entryRequirements: z.string().trim().min(1).max(800),
   }),
+  assetConcepts: travelAssetConceptsSchema,
+  imageRequestToken: z.string().min(1).max(64 * 1024),
 });
 export type PlaceDetail = z.infer<typeof placeDetailSchema>;
+
+const authoritativeCountrySchema = z.strictObject({
+  name: z.string().trim().min(1).max(160),
+  code: z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/),
+  continent: z.string().trim().min(1).max(80),
+  lat: z.number().finite().min(-90).max(90),
+  lon: z.number().finite().min(-180).max(180),
+});
+export type AuthoritativeCountry = z.input<typeof authoritativeCountrySchema>;
+
+const readyPlaceImageSchema = <Role extends typeof PLACE_IMAGE_ROLES[number]>(role: Role) => z.strictObject({
+  role: z.literal(role),
+  status: z.literal("ready"),
+  title: z.string().trim().min(1).max(160),
+  url: z.string().max("data:image/webp;base64,".length + Math.ceil((4 * 1024 * 1024) / 3) * 4).regex(/^data:image\/webp;base64,[A-Za-z0-9+/]+={0,2}$/),
+  width: z.literal(864),
+  height: z.literal(1536),
+  mimeType: z.literal("image/webp"),
+});
+export const placeImagesResponseSchema = z.strictObject({
+  status: z.literal("ready"),
+  images: z.tuple([
+    readyPlaceImageSchema("hero"),
+    readyPlaceImageSchema("scene-1"),
+    readyPlaceImageSchema("scene-2"),
+    readyPlaceImageSchema("scene-3"),
+  ]),
+  durationMs: z.number().int().nonnegative(),
+  costUsd: z.number().nonnegative().nullable(),
+});
+export type PlaceImagesResponse = z.infer<typeof placeImagesResponseSchema>;
+
+const placeImagesInputSchema = z.strictObject({
+  imageRequestToken: z.string().min(1).max(64 * 1024),
+});
 
 const overviewSchema = z.object({ places: z.array(placeSchema), trips: z.array(tripSchema) });
 const assistantResponseSchema = z.discriminatedUnion("type", [
@@ -140,9 +199,9 @@ function responseError(error: unknown) {
     : error;
 }
 
-async function post<T>(path: string, body: Record<string, unknown>, schema: z.ZodType<T>) {
+async function post<T>(path: string, body: Record<string, unknown>, schema: z.ZodType<T>, config?: { timeout?: number; signal?: AbortSignal }) {
   try {
-    const response = await apiClient.post(path, { ...getTravelContext(), ...body });
+    const response = await apiClient.post(path, { ...getTravelContext(), ...body }, config);
     return unwrap(response.data, schema);
   } catch (error) {
     throw responseError(error);
@@ -162,12 +221,22 @@ export function fetchTravelOverview() {
   return post("/travel/overview", {}, overviewSchema);
 }
 
-export function findPlace(query: string) {
+export function findPlace(query: string, country: AuthoritativeCountry, signal?: AbortSignal) {
   return post(
     "/travel/places/find",
-    z.strictObject({ query: z.string().trim().min(2).max(200) }).parse({ query }),
+    z.strictObject({ query: z.string().trim().min(2).max(200), country: authoritativeCountrySchema }).parse({ query, country }),
     z.strictObject({ place: placeDetailSchema }),
+    { signal },
   ).then(({ place }) => place);
+}
+
+export function generatePlaceImages(input: z.input<typeof placeImagesInputSchema>, signal?: AbortSignal) {
+  return post(
+    "/travel/places/images",
+    placeImagesInputSchema.parse(input),
+    placeImagesResponseSchema,
+    { timeout: 5 * 60_000, signal },
+  );
 }
 
 export function createPlace(input: z.input<typeof createPlaceSchema>) {

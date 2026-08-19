@@ -12,6 +12,7 @@ import {
 } from './openai-compatible';
 import {
   imageGenerateInputSchema,
+  imageOutputSchema,
   chatInputSchema,
   embeddingInputSchema,
   resolveRequestSignal,
@@ -178,6 +179,7 @@ async function executeImageGenerate<TInput, TOutput>(
       prompt: input.prompt,
       n: input.count,
       ...(input.size ? { size: input.size } : {}),
+      ...(input.quality ? { quality: input.quality } : {}),
     },
     { signal: resolveRequestSignal(request) },
   );
@@ -185,10 +187,10 @@ async function executeImageGenerate<TInput, TOutput>(
   const images = (parsed.data ?? [])
     .filter((item): item is { b64_json: string } => typeof item.b64_json === 'string' && item.b64_json.length > 0)
     .map((item) => ({ base64: item.b64_json, mimeType: 'image/png' }));
-  if (images.length === 0) {
-    throw new ProviderError(PROVIDER_ID, 'response_invalid', 'openai image generation returned no images');
+  if (images.length !== input.count) {
+    throw new ProviderError(PROVIDER_ID, 'response_invalid', 'openai image generation returned an unexpected image count');
   }
-  const output: ImageOutput = { images };
+  const output: ImageOutput = imageOutputSchema.parse({ images });
   return {
     output: output as TOutput,
     usage: tokenUsage(parsed.usage?.input_tokens, parsed.usage?.output_tokens, parsed.usage?.total_tokens),

@@ -52,6 +52,7 @@ export interface PersonalAssistantDependencies {
   books?: BookService;
   userHiddens?: UserHiddenService;
   gallery?: AssistantCapabilityContext['gallery'];
+  images?: AssistantCapabilityContext['images'];
 }
 
 const BASE_SYSTEM_PROMPT = `You are the user's capability-bound personal AI assistant. Select an available tool for the request.
@@ -215,6 +216,7 @@ export async function runPersonalAssistant(
       books: dependencies.books,
       userHiddens: dependencies.userHiddens,
       gallery: dependencies.gallery,
+      images: dependencies.images,
       signal: dependencies.router?.signal,
       timeoutMs: dependencies.router?.timeoutMs,
     });

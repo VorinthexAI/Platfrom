@@ -5,7 +5,7 @@ import { IMAGE_CAPTION_EXTERNAL_MODEL_ID } from '@/lib/image-caption-constants';
 import { tokenUsage } from '@/lib/ai/shared/usage';
 import { normalizeProviderError, ProviderError, providerErrorCodeForStatus } from './errors';
 import { CHAT_ACTION_IDS, executeOpenAICompatibleChat, streamOpenAICompatibleChat, unsupportedAction } from './openai-compatible';
-import { documentCleanupInputSchema, documentCleanupOutputSchema, embeddingInputSchema, imageCaptionInputSchema, imageCaptionOutputSchema, resolveRequestSignal, visualIdentityDescriptionInputSchema, visualIdentityDescriptionOutputSchema, type DocumentCleanupOutput, type EmbeddingOutput, type ImageCaptionOutput, type ProviderAdapter, type ProviderEmbedRequest, type ProviderEmbedResponse, type ProviderExecuteRequest, type ProviderExecuteResponse, type ProviderFactory, type VisualIdentityDescriptionOutput } from './types';
+import { documentCleanupInputSchema, documentCleanupOutputSchema, embeddingInputSchema, GENERATED_IMAGE_BASE64_MAX_LENGTH, generatedImageMimeTypeSchema, imageCaptionInputSchema, imageCaptionOutputSchema, imageGenerateInputSchema, imageOutputSchema, resolveRequestSignal, visualIdentityDescriptionInputSchema, visualIdentityDescriptionOutputSchema, type DocumentCleanupOutput, type EmbeddingOutput, type ImageCaptionOutput, type ImageOutput, type ProviderAdapter, type ProviderEmbedRequest, type ProviderEmbedResponse, type ProviderExecuteRequest, type ProviderExecuteResponse, type ProviderFactory, type VisualIdentityDescriptionOutput } from './types';
 
 /** OpenRouter is an OpenAI-compatible gateway; model ids are `vendor/model` slugs. */
 export const openRouterProviderConfigSchema = z
@@ -27,12 +27,27 @@ const PROVIDER_ID = 'openrouter' as const;
 const privateThroughputRoute = { data_collection: 'deny', sort: 'throughput', require_parameters: true } as const;
 type PrivateThroughputRoute = typeof privateThroughputRoute;
 const DEFAULT_TIMEOUT_MS = 30_000;
+export const OPENROUTER_IMAGE_DEFAULT_TIMEOUT_MS = 180_000;
+export const OPENROUTER_IMAGE_MAX_TIMEOUT_MS = 300_000;
+export const OPENROUTER_GPT_IMAGE_2_MODEL = 'openai/gpt-image-2';
 const MAX_ATTEMPTS = 3;
 const MAX_RETRY_DELAY_MS = 5_000;
 const responseSchema = z.object({
   data: z.array(z.object({ index: z.number().int().nonnegative(), embedding: z.array(z.number().finite()) }).passthrough()),
   provider: z.string().trim().min(1),
   usage: z.object({ prompt_tokens: z.number().int().nonnegative().optional(), total_tokens: z.number().int().nonnegative().optional() }).passthrough().optional(),
+}).passthrough();
+const imageResponseSchema = z.object({
+  data: z.array(z.object({
+    b64_json: z.string(),
+    media_type: z.string().optional(),
+  }).passthrough()).min(1).max(4),
+  usage: z.object({
+    prompt_tokens: z.number().int().nonnegative().optional(),
+    completion_tokens: z.number().int().nonnegative().optional(),
+    total_tokens: z.number().int().nonnegative().optional(),
+    cost: z.number().finite().nonnegative().optional(),
+  }).passthrough().optional(),
 }).passthrough();
 
 interface OpenRouterEnvironment {
@@ -127,6 +142,91 @@ async function createEmbeddings(config: OpenRouterProviderConfig, request: Provi
     }
   }
   throw normalizeProviderError(PROVIDER_ID, lastError);
+}
+
+function imageMimeType(base64: string, declared: string | undefined): z.infer<typeof generatedImageMimeTypeSchema> {
+  const bytes = Buffer.from(base64, 'base64');
+  const detected = bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+    ? 'image/png'
+    : bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
+      ? 'image/jpeg'
+      : bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP'
+        ? 'image/webp'
+        : undefined;
+  if (!detected) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter image generation returned unrecognized image bytes');
+  if (declared !== undefined) {
+    const parsed = generatedImageMimeTypeSchema.safeParse(declared);
+    if (!parsed.success || parsed.data !== detected) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter image generation returned mismatched media metadata');
+  }
+  return detected;
+}
+
+async function readBoundedJson(response: Response, maximumBytes: number): Promise<unknown> {
+  if (!response.body) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter image generation returned an empty response');
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    length += value.byteLength;
+    if (length > maximumBytes) { await reader.cancel(); throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter image generation response exceeds the maximum allowed size'); }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+}
+
+async function generateImages<TInput, TOutput>(
+  config: OpenRouterProviderConfig,
+  request: ProviderExecuteRequest<TInput>,
+): Promise<ProviderExecuteResponse<TOutput>> {
+  if (request.externalModelId !== OPENROUTER_GPT_IMAGE_2_MODEL) throw new ProviderError(PROVIDER_ID, 'unsupported_action', `OpenRouter image generation requires ${OPENROUTER_GPT_IMAGE_2_MODEL}`);
+  const input = imageGenerateInputSchema.parse(request.input);
+  const timeoutMs = Math.max(1, Math.min(request.timeoutMs ?? OPENROUTER_IMAGE_DEFAULT_TIMEOUT_MS, OPENROUTER_IMAGE_MAX_TIMEOUT_MS));
+  const timeout = AbortSignal.timeout(timeoutMs);
+  const signal = request.signal ? AbortSignal.any([request.signal, timeout]) : timeout;
+  const headers: Record<string, string> = { Authorization: `Bearer ${config.apiKey}`, 'Content-Type': 'application/json' };
+  if (config.siteUrl) headers['HTTP-Referer'] = config.siteUrl;
+  if (config.appName) headers['X-Title'] = config.appName;
+  try {
+    const response = await fetch(`${config.baseUrl.replace(/\/$/, '')}/images`, {
+      method: 'POST',
+      headers,
+      signal,
+      body: JSON.stringify({
+        model: request.externalModelId,
+        prompt: input.prompt,
+        n: input.count,
+        ...(input.size ? { size: input.size } : {}),
+        ...(input.quality ? { quality: input.quality } : {}),
+        provider: { only: ['openai'], allow_fallbacks: false },
+      }),
+    });
+    if (!response.ok) throw new ProviderError(PROVIDER_ID, providerErrorCodeForStatus(response.status), `openrouter request failed with status ${response.status}`, { status: response.status });
+    const contentLength = response.headers.get('content-length');
+    const maximumResponseBytes = input.count * GENERATED_IMAGE_BASE64_MAX_LENGTH + 64 * 1024;
+    if (contentLength !== null && (!/^\d+$/.test(contentLength) || Number(contentLength) > maximumResponseBytes)) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter image generation response exceeds the maximum allowed size');
+    const raw = imageResponseSchema.parse(await readBoundedJson(response, maximumResponseBytes));
+    if (raw.data.length !== input.count) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter image generation returned an unexpected image count');
+    const output: ImageOutput = imageOutputSchema.parse({
+      images: raw.data.map((image) => ({ base64: image.b64_json, mimeType: imageMimeType(image.b64_json, image.media_type) })),
+    });
+    return {
+      output: output as TOutput & ImageOutput,
+      usage: tokenUsage(raw.usage?.prompt_tokens, raw.usage?.completion_tokens, raw.usage?.total_tokens),
+      ...(raw.usage?.cost !== undefined ? { costUsd: raw.usage.cost } : {}),
+      providerId: PROVIDER_ID,
+      modelId: request.modelId,
+      externalModelId: request.externalModelId,
+      rawResponse: raw,
+    };
+  } catch (error) {
+    if (error instanceof z.ZodError || error instanceof SyntaxError) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter image generation returned an invalid response', { cause: error });
+    throw normalizeProviderError(PROVIDER_ID, error);
+  }
 }
 
 async function captionImages<TInput, TOutput>(
@@ -304,6 +404,7 @@ export function createOpenRouterProvider(config: OpenRouterProviderConfigInput):
         const result = await createEmbeddings(parsed, { externalModelId: request.externalModelId, input: input.text, dimensions: EMBEDDING_DIMENSIONS, timeoutMs: request.timeoutMs, signal: request.signal });
         return { output: { embedding: result.embeddings[0]! } as TOutput & EmbeddingOutput, usage: result.usage, providerId: PROVIDER_ID, modelId: request.modelId, externalModelId: request.externalModelId, rawResponse: result.rawResponse };
       }
+      if (request.actionId === 'generate-image') return generateImages(parsed, request);
       if (request.actionId === 'caption-image') return captionImages(client, request);
       if (request.actionId === 'document-cleanup') return cleanupDocument(client, request);
       if (request.actionId === 'describe-visual-identity') return describeVisualIdentity(client, request);

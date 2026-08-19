@@ -74,6 +74,7 @@ export const providerExecuteRequestSchema = z.object({
 export interface ProviderExecuteResponse<TOutput = unknown> {
   output: TOutput;
   usage: TokenUsage;
+  costUsd?: number;
   providerId: ProviderId;
   modelId: string;
   externalModelId: string;
@@ -160,17 +161,34 @@ export interface ChatOutput {
 
 export const imageGenerateInputSchema = z
   .object({
-    prompt: z.string().min(1),
+    prompt: z.string().trim().min(1).max(32_000),
     size: z.enum(['1024x1024', '1024x1536', '1536x1024']).optional(),
     count: z.number().int().min(1).max(4).default(1),
+    quality: z.enum(['low', 'medium', 'high']).optional(),
   })
   .strict();
 
 export type ImageGenerateInput = z.infer<typeof imageGenerateInputSchema>;
 
-export interface ImageOutput {
-  images: Array<{ base64: string; mimeType: string }>;
+export const GENERATED_IMAGE_BASE64_MAX_LENGTH = 16 * 1024 * 1024;
+function isGeneratedImageBase64(value: string): boolean {
+  if (value.length % 4 !== 0) return false;
+  const padding = value.endsWith('==') ? 2 : value.endsWith('=') ? 1 : 0;
+  for (let index = 0; index < value.length - padding; index += 1) {
+    const code = value.charCodeAt(index);
+    if (!((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code === 43 || code === 47)) return false;
+  }
+  return !value.slice(0, -padding || undefined).includes('=');
 }
+const generatedImageBase64Schema = z.string().min(4).max(GENERATED_IMAGE_BASE64_MAX_LENGTH).refine(isGeneratedImageBase64, 'Generated image must be valid base64');
+export const generatedImageMimeTypeSchema = z.enum(['image/png', 'image/jpeg', 'image/webp']);
+export const imageOutputSchema = z.object({
+  images: z.array(z.object({
+    base64: generatedImageBase64Schema,
+    mimeType: generatedImageMimeTypeSchema,
+  }).strict()).min(1).max(4),
+}).strict();
+export type ImageOutput = z.infer<typeof imageOutputSchema>;
 
 const httpImageUrlSchema = z.string().url().refine((value) => {
   const protocol = new URL(value).protocol;

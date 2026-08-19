@@ -24,6 +24,7 @@ export interface WorkspaceToolDependencies {
   books?: BookService;
   userHiddens?: UserHiddenService;
   gallery?: AssistantCapabilityContext['gallery'];
+  images?: AssistantCapabilityContext['images'];
   signal?: AbortSignal;
   timeoutMs?: number;
 }
@@ -45,6 +46,7 @@ function publicDefinition(capability: AssistantCapability) {
         books: dependencies.books,
         userHiddens: dependencies.userHiddens,
         gallery: dependencies.gallery,
+        images: dependencies.images,
         signal: dependencies.signal,
         timeoutMs: dependencies.timeoutMs,
       };

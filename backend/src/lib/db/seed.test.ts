@@ -88,6 +88,7 @@ describe('model and routing relation seeds', () => {
       'amazon.polly-generative',
       'qwen.qwen3-embedding-8b',
       'google.gemini-2.5-flash-lite',
+      'openai.gpt-image-2',
     ]);
     expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'orchestrator-chat').map(({ modelSlug }) => modelSlug))
       .toEqual(['google.gemini-2.5-flash-lite', 'amazon.nova-pro']);
@@ -97,6 +98,7 @@ describe('model and routing relation seeds', () => {
       .toEqual(['google.gemini-2.5-flash-lite']);
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'embed')?.modelSlug).toBe('qwen.qwen3-embedding-8b');
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'generate-speech')?.modelSlug).toBe('amazon.polly-generative');
+    expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'generate-image')).toMatchObject({ modelSlug: 'openai.gpt-image-2', priority: 100, enabled: true });
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'caption-image')?.modelSlug).toBe('google.gemini-2.5-flash-lite');
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'document-cleanup')?.modelSlug).toBe('google.gemini-2.5-flash-lite');
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'describe-visual-identity')?.modelSlug).toBe('google.gemini-2.5-flash-lite');
@@ -110,6 +112,7 @@ describe('model and routing relation seeds', () => {
       'qwen.qwen3-embedding-8b:openrouter:qwen/qwen3-embedding-8b:true',
       'amazon.polly-generative:aws-polly:generative:true',
       'google.gemini-2.5-flash-lite:openrouter:google/gemini-2.5-flash-lite:true',
+      'openai.gpt-image-2:openrouter:openai/gpt-image-2:true',
     ]);
     expect(SEEDED_MODEL_PROVIDERS.filter((route) => route.modelSlug.includes('embedding')).map((route) => route.modelSlug)).toEqual(['qwen.qwen3-embedding-8b']);
   });

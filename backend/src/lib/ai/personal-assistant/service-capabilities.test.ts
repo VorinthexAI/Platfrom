@@ -6,6 +6,12 @@ import { defaultAssistantCapabilityRegistry, type AssistantSurface } from './cap
 const organizationKey = newId();
 const scopeKey = newId();
 const userKey = newId();
+const assetConcepts = [
+  { title: 'Overview', prompt: 'Role: hero. Complete country hero.' },
+  { title: 'Coast', prompt: 'Role: scene-1. Complete coastal scene.' },
+  { title: 'City', prompt: 'Role: scene-2. Complete urban scene.' },
+  { title: 'Garden', prompt: 'Role: scene-3. Complete garden scene.' },
+] as const;
 const domain = {
   organizationKey,
   runtimeScopeKey: scopeKey,
@@ -30,6 +36,12 @@ describe('personal assistant service capabilities', () => {
       expect(properties).not.toHaveProperty('userKey');
       expect(properties).not.toHaveProperty('idempotencyKey');
     }
+  });
+
+  test('keeps country selection server-side and excludes transient image transfer from models', () => {
+    const capabilities = defaultAssistantCapabilityRegistry.resolve('travel-workspace');
+    expect(Object.keys(capabilities.find(({ definition }) => definition.name === 'place.find')!.definition.inputSchema.properties ?? {})).toEqual(['query']);
+    expect(capabilities.some(({ definition }) => definition.name === 'place.images.generate')).toBe(false);
   });
 
   test('executes canonical services with identity derived only from the member principal', async () => {

@@ -470,6 +470,7 @@ export function registerRoutes(app: Hono) {
   app.post('/gallery/memories/delete', deleteGalleryMemory);
   app.post('/travel/overview', travelHandlers.overview);
   app.post('/travel/places/find', travelHandlers.findPlace);
+  app.post('/travel/places/images', travelHandlers.generatePlaceImages);
   app.post('/travel/places', travelHandlers.createPlace);
   app.post('/travel/places/:placeKey/visits', travelHandlers.createVisit);
   app.post('/travel/trips', travelHandlers.createTrip);

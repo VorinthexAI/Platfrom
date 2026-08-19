@@ -84,6 +84,30 @@ describe('priority-only persisted router', () => {
     });
   });
 
+  test('selects the persisted GPT Image 2 OpenRouter route for generate-image', async () => {
+    const imageModel = model('openai.gpt-image-2');
+    const openrouter = providerSchema.parse({ key: newId(), slug: 'openrouter', name: 'OpenRouter', description: 'Provider', supportedUseCases: 'AI', handlerKey: 'openrouter', enabled: true });
+    const binding = modelActionSchema.parse({ key: newId(), modelKey: imageModel.key, actionSlug: 'generate-image', priority: 100, enabled: true });
+    const route = modelProviderSchema.parse({ key: newId(), modelKey: imageModel.key, providerKey: openrouter.key, providerModelId: 'openai/gpt-image-2', enabled: true });
+    const data: RouterDataSource = {
+      async getModelBySlug(slug) { return slug === imageModel.slug ? imageModel : null; },
+      async getModelByKey(key) { return key === imageModel.key ? imageModel : null; },
+      async getProviderBySlug(slug) { return slug === openrouter.slug ? openrouter : null; },
+      async getProviderByKey(key) { return key === openrouter.key ? openrouter : null; },
+      async listModelActions(actionSlug) { return actionSlug === 'generate-image' ? [binding] : []; },
+      async listModelProviders(modelKey) { return modelKey === imageModel.key ? [route] : []; },
+      async listOrganizationProviderKeys() { return []; },
+    };
+
+    await expect(selectRoute({ mode: 'auto', organizationKey, actionSlug: 'generate-image' }, { data })).resolves.toMatchObject({
+      actionSlug: 'generate-image',
+      modelSlug: 'openai.gpt-image-2',
+      providerSlug: 'openrouter',
+      providerModelId: 'openai/gpt-image-2',
+      credentialSource: 'environment',
+    });
+  });
+
   test('model and fixed modes never silently change their requested route', async () => {
     const deps = fixture();
     await expect(selectRoute({ mode: 'model', organizationKey, actionSlug: 'chat', modelSlug: 'openai.gpt-5.4-mini' }, deps)).rejects.toBeInstanceOf(NoEligibleRouteError);

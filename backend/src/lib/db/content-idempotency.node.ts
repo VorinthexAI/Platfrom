@@ -97,6 +97,24 @@ export async function completeContentIdempotency(
   if (!await cursor.next()) throw new Error('Content idempotency claim could not be completed.');
 }
 
+export async function renewContentIdempotency(
+  identity: ContentIdempotencyIdentity,
+  requestHash: string,
+  leaseOwner: string,
+  now: string,
+): Promise<boolean> {
+  const collection = await resolveContentLedgerCollection(db, CONTENT_IDEMPOTENCY_COLLECTION);
+  const leaseExpiresAt = future(now, Number(process.env.CONTENT_IDEMPOTENCY_LEASE_MS ?? DEFAULT_LEASE_MS));
+  const cursor = await db.query(`
+    FOR claim IN @@collection
+      FILTER claim._key == @key && claim.requestHash == @requestHash
+        && claim.status == "pending" && claim.leaseOwner == @leaseOwner
+      UPDATE claim WITH { leaseExpiresAt: @leaseExpiresAt, updatedAt: @now } IN @@collection
+      RETURN true
+  `, { '@collection': collection, key: ledgerKey(identity), requestHash, leaseOwner, leaseExpiresAt, now });
+  return Boolean(await cursor.next());
+}
+
 export async function releaseContentIdempotency(
   identity: ContentIdempotencyIdentity,
   requestHash: string,

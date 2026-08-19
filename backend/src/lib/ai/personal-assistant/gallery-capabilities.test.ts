@@ -9,13 +9,14 @@ const context = { domain: { organizationKey, runtimeScopeKey: scopeKey, principa
 
 describe('Gallery assistant capabilities', () => {
   test('covers every canonical operation and exposes no trusted context fields', () => {
-    expect(galleryAssistantCapabilityNames).toHaveLength(40);
-    expect(new Set(galleryAssistantCapabilityNames).size).toBe(40);
+    expect(galleryAssistantCapabilityNames).toHaveLength(42);
+    expect(new Set(galleryAssistantCapabilityNames).size).toBe(42);
     expect(galleryAssistantCapabilityNames).not.toContain('collection.duplicates.find');
     expect(galleryAssistantCapabilityNames).not.toEqual(expect.arrayContaining(['image.upload.reserve', 'image.upload.status', 'image.upload.complete']));
     expect(galleryAssistantCapabilityNames).toEqual(expect.arrayContaining(['highlight.create', 'highlight.list', 'highlight.read', 'highlight.delete']));
     expect(galleryAssistantCapabilityNames).toEqual(expect.arrayContaining(['image.create-memory', 'image.memory.list', 'image.memory.read', 'image.memory.delete']));
     expect(galleryAssistantCapabilityNames).toEqual(expect.arrayContaining(['collection.hide', 'collection.reveal', 'image.hide', 'image.reveal']));
+    expect(galleryAssistantCapabilityNames).toEqual(expect.arrayContaining(['image.ideas.create', 'image.generate']));
     const search = createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'image.search')!;
     const listCollections = createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'collection.list')!;
     const createCollection = createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'collection.create')!;
@@ -47,6 +48,7 @@ describe('Gallery assistant capabilities', () => {
     expect(createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'highlight.create')?.mutationWorkspace).toBe('gallery');
     expect(createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'highlight.delete')?.mutationWorkspace).toBe('gallery');
     expect(createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'image.create-memory')?.mutationWorkspace).toBe('gallery');
+    expect(createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'image.generate')?.mutationWorkspace).toBe('gallery');
     const deleteMemory = createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'image.memory.delete')!;
     expect(deleteMemory.inputSchema.parse({ memoryKey: newId(), collectionKey: newId() })).toEqual({ memoryKey: expect.any(String), collectionKey: expect.any(String) });
     expect(() => deleteMemory.inputSchema.parse({ memoryKey: newId() })).toThrow();
@@ -88,6 +90,32 @@ describe('Gallery assistant capabilities', () => {
     await capability.execute({ collectionKey: newId(), role: 'viewer' }, { ...context, requestKey: 'request-1' });
     expect(trusted?.idempotencyKey).toBe('request-1');
     expect(JSON.stringify(capability.definition.inputSchema)).not.toContain('idempotency');
+  });
+
+  test('injects trusted image context and keeps generation fields model-invisible', async () => {
+    const calls: unknown[][] = [];
+    const images = {
+      createIdeas: async (...args: unknown[]) => { calls.push(['ideas', ...args]); return { concepts: [] }; },
+      generate: async (...args: unknown[]) => { calls.push(['generate', ...args]); return { images: [], provider: {} }; },
+    } as any;
+    const capabilities = createGalleryAssistantCapabilities({}, images);
+    const ideas = capabilities.find(({ definition }) => definition.name === 'image.ideas.create')!;
+    const generate = capabilities.find(({ definition }) => definition.name === 'image.generate')!;
+    await expect(ideas.execute({ prompt: 'Earth', requestedCount: 1, scopeKey }, context)).rejects.toThrow('Unrecognized key');
+    await ideas.execute({ prompt: 'Earth', requestedCount: 1 }, context);
+    await generate.execute({ prompt: 'Earth', count: 1, size: '1024x1024', quality: 'high' }, { ...context, requestKey: 'request-1' });
+    expect(calls).toEqual([
+      ['ideas', { prompt: 'Earth', requestedCount: 1 }, context.domain],
+      ['generate', { prompt: 'Earth', count: 1, size: '1024x1024', quality: 'high' }, context.domain, 'request-1'],
+    ]);
+    for (const capability of [ideas, generate]) {
+      const schema = JSON.stringify(capability.definition.inputSchema);
+      expect(schema).not.toContain('organizationKey');
+      expect(schema).not.toContain('scopeKey');
+      expect(schema).not.toContain('member');
+      expect(schema).not.toContain('requestKey');
+      expect(schema).not.toContain('idempotency');
+    }
   });
 
   test('redacts bearer material from every model-visible collection share output', async () => {
