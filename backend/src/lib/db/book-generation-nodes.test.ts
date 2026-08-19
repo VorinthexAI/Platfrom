@@ -49,6 +49,14 @@ describe('book generation node contracts', () => {
     expect(progress.completedAt).toBeNull();
   });
 
+  test('strictly validates generation fingerprint and lease metadata', () => {
+    const metadata = { generationBriefFingerprint: 'a'.repeat(64), generationLeaseToken: 'writer-1', generationLeaseExpiresAt: now };
+    const common = { key, scopeKey: otherKey, title: 'Leadership', description: 'A personal guide', goal: 'Lead better', audience: 'Managers', outcome: 'Build leaders', language: 'en', status: 'planning', embedding, createdAt: now, updatedAt: now };
+    expect(bookSchema.safeParse({ ...common, ...metadata }).success).toBe(true);
+    expect(bookSchema.safeParse({ ...common, ...metadata, generationBriefFingerprint: 'not-a-sha256' }).success).toBe(false);
+    expect(bookSchema.safeParse({ ...common, ...metadata, generationLeaseExpiresAt: 'tomorrow' }).success).toBe(false);
+  });
+
   test('requires internal source keys and web source URLs', () => {
     const common = { key, scopeKey: otherKey, bookKey: key, title: 'Source', content: 'Snapshot', relevance: 'Grounding', embedding, createdAt: now };
     expect(bookSourceSchema.safeParse({ ...common, sourceType: 'document', sourceKey: otherKey }).success).toBe(true);

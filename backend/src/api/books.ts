@@ -1,30 +1,23 @@
 import type { Context } from 'hono';
-import { GetObjectCommand, type S3Client } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { z, ZodError } from 'zod';
-import { createBookRuntime } from '@/lib/books/runtime';
-import { BookRepositoryError, createBookRepository } from '@/lib/books/repository';
-import { createBookService, type BookService } from '@/lib/books/service';
-import { createPublicS3Client, S3_BUCKET } from '@/lib/s3';
+import { defaultBookService } from '@/lib/books/default-service';
+import { BookRepositoryError } from '@/lib/books/repository';
+import type { BookService } from '@/lib/books/service';
 import { getAuthIdentity } from './security';
 
 const pathKeySchema = z.string().cuid();
-const publicS3 = createPublicS3Client();
-const signObject = getSignedUrl as unknown as (client: S3Client, command: GetObjectCommand, options: { expiresIn: number }) => Promise<string>;
-const repository = createBookRepository();
-const defaultService = createBookService({ repository, generator: createBookRuntime({ repository }), signUrl: (key) => signObject(publicS3, new GetObjectCommand({ Bucket: S3_BUCKET, Key: key }), { expiresIn: 15 * 60 }) });
 
 class BookHttpError extends Error { constructor(readonly status: 401 | 403, readonly code: string, message: string) { super(message); } }
 
 export function createBookHandlers(options: { service?: BookService; getIdentity?: typeof getAuthIdentity } = {}) {
-  const service = options.service ?? defaultService; const identity = options.getIdentity ?? getAuthIdentity;
+  const service = options.service ?? defaultBookService; const identity = options.getIdentity ?? getAuthIdentity;
   const run = (operation: (c: Context, books: BookService, userKey: string) => Promise<unknown>, status: 200 | 201 = 200) => async (c: Context) => {
     try {
       const current = await identity(c); if (!current) throw new BookHttpError(401, 'BOOK_UNAUTHORIZED', 'Authentication required.'); if (current.identityType !== 'user') throw new BookHttpError(403, 'BOOK_FORBIDDEN', 'A user session is required.');
       return c.json({ success: true, data: await operation(c, service, current.key) }, status);
     } catch (error) {
       if (error instanceof BookHttpError) return c.json({ success: false, error: { code: error.code, message: error.message } }, error.status);
-      if (error instanceof BookRepositoryError) { const status = error.reason === 'forbidden' ? 403 : 404; return c.json({ success: false, error: { code: error.reason === 'forbidden' ? 'BOOK_FORBIDDEN' : 'BOOK_NOT_FOUND', message: error.reason === 'forbidden' ? 'Book scope access denied.' : 'Book not found.' } }, status); }
+      if (error instanceof BookRepositoryError) { const status = error.reason === 'forbidden' ? 403 : error.reason === 'conflict' ? 409 : 404; const code = error.reason === 'forbidden' ? 'BOOK_FORBIDDEN' : error.reason === 'conflict' ? 'BOOK_CONFLICT' : 'BOOK_NOT_FOUND'; const message = error.reason === 'forbidden' ? 'Book scope access denied.' : error.reason === 'conflict' ? error.message : 'Book not found.'; return c.json({ success: false, error: { code, message } }, status); }
       if (error instanceof ZodError || error instanceof SyntaxError) return c.json({ success: false, error: { code: 'BOOK_INVALID_INPUT', message: 'Book request input was invalid.' } }, 400);
       return c.json({ success: false, error: { code: 'BOOK_FAILED', message: 'Book request failed.' } }, 500);
     }

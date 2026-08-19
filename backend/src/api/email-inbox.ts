@@ -66,7 +66,7 @@ export function createEmailHandlers(options: { service?: EmailService; oauth?: E
       return result;
     }),
     sync: run(async (c) => { const body = contextSchema.parse(await c.req.json()); return service.sync(await actor(c, body)); }),
-    thread: run(async (c) => { const body = strictObject({ ...contextSchema.shape, markRead: z.boolean().optional() }).parse(await c.req.json()); return service.thread(await actor(c, body), threadKeySchema.parse(c.req.param('threadKey')), body.markRead); }),
+    thread: run(async (c) => { const body = strictObject({ ...contextSchema.shape, markRead: z.boolean().optional() }).parse(await c.req.json()); const current = await actor(c, body); const threadKey = threadKeySchema.parse(c.req.param('threadKey')); return service.threadForHttp(current, threadKey, body.markRead !== false); }),
     favorite: run(async (c) => { const body = strictObject({ ...contextSchema.shape, isFavorite: z.boolean() }).parse(await c.req.json()); return service.setFavorite(await actor(c, body), threadKeySchema.parse(c.req.param('threadKey')), body.isFavorite); }),
     draft: run(async (c) => {
       const body = strictObject({ ...contextSchema.shape, threadKey: threadKeySchema, tone: z.enum(['concise', 'warm', 'formal', 'direct']), instruction: z.string().trim().max(1000).optional(), profileKey: z.string().cuid().optional() }).parse(await c.req.json());

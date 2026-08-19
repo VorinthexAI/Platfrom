@@ -13,6 +13,7 @@ function appWith(overrides: Parameters<typeof createEmailHandlers>[0]) {
     .post('/email/overview', handlers.overview)
     .post('/email/connect', handlers.startConnect)
     .post('/email/connect/exchange', handlers.exchangeConnect)
+    .post('/email/threads/:threadKey', handlers.thread)
     .post('/email/drafts', handlers.draft);
 }
 
@@ -40,5 +41,18 @@ describe('email inbox handlers', () => {
     expect(exchange.status).toBe(401);
     const draft = await app.request('/email/drafts', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey, threadKey: userKey, tone: 'impersonate' }) });
     expect(draft.status).toBe(400);
+  });
+
+  test('preserves HTTP mark-read defaults while allowing read-only thread requests', async () => {
+    const calls: boolean[] = [];
+    const service = {
+      threadForHttp: async (_actor: unknown, _threadKey: string, markRead: boolean) => { calls.push(markRead); return { thread: {}, messages: [] }; },
+    };
+    const app = appWith({ getIdentity: identity as never, service: service as never, oauth: {} as never });
+    const request = (body: object) => app.request(`/email/threads/${userKey}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey, ...body }) });
+    expect((await request({})).status).toBe(200);
+    expect((await request({ markRead: true })).status).toBe(200);
+    expect((await request({ markRead: false })).status).toBe(200);
+    expect(calls).toEqual([true, true, false]);
   });
 });

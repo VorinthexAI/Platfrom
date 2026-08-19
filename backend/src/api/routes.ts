@@ -33,7 +33,6 @@ import {
 import { joinPresence, leavePresence, presenceBeat, streamPresence } from './presence';
 import { unsubscribeFromUpdates } from './updates';
 import { listNodes } from './nodes';
-import { postOrchestratorChat } from './orchestrators';
 import {
   attachCurrentMindCapability,
   createSystemCapability,
@@ -441,7 +440,6 @@ export function registerRoutes(app: Hono) {
   app.post('/mind/capabilities', attachCurrentMindCapability);
   app.delete('/mind/capabilities/:capabilityId', detachCurrentMindCapability);
 
-  app.post('/orchestrators/chat', postOrchestratorChat);
   app.post('/assistant/respond', postPersonalAssistantResponse);
   app.post('/audio/generate', (c) => postAudioGenerate(c));
   app.post('/content/tools/:tool', invokeContentTool);

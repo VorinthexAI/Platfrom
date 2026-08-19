@@ -15,7 +15,7 @@ export function createUserHiddenService(repository: UserHiddenRepository = creat
     if (!await repository.canAccess(actor, source, sourceKey)) throw new UserHiddenSourceNotFoundError('Source was not found.');
   };
   return {
-    list: (actor) => repository.list(actor.userKey),
+    list: (actor) => repository.list(actor),
     async hide(actor, input) {
       const source = userHiddenSourceSchema.parse(input.source);
       await validateAccess(actor, source, input.sourceKey);

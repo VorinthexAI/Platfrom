@@ -117,16 +117,20 @@ test("assistant changes invalidate exact workspace prefixes without crossing con
   const galleryDetail = galleryQueryKeys.overview(context, "collection");
   const otherGallery = galleryQueryKeys.overview(otherContext);
   const signalOverview = signalQueryKeys.overview(context);
+  const signalDetail = signalQueryKeys.detail(context, "thread");
+  const ascendOverview = ascendQueryKeys.overview(context);
   const archiveLocation = contentQueryKeys.location(context);
-  for (const key of [galleryOverview, galleryDetail, otherGallery, signalOverview, archiveLocation]) client.setQueryData(key, {});
+  for (const key of [galleryOverview, galleryDetail, otherGallery, signalOverview, signalDetail, ascendOverview, archiveLocation]) client.setQueryData(key, {});
 
-  await invalidateAssistantChanges(client, context, [{ workspace: "gallery" }, { workspace: "gallery" }, { workspace: "archive" }]);
+  await invalidateAssistantChanges(client, context, [{ workspace: "gallery" }, { workspace: "gallery" }, { workspace: "archive" }, { workspace: "signal" }, { workspace: "ascend" }]);
 
   expect(client.getQueryState(galleryOverview)?.isInvalidated).toBe(true);
   expect(client.getQueryState(galleryDetail)?.isInvalidated).toBe(true);
   expect(client.getQueryState(archiveLocation)?.isInvalidated).toBe(true);
   expect(client.getQueryState(otherGallery)?.isInvalidated).toBe(false);
-  expect(client.getQueryState(signalOverview)?.isInvalidated).toBe(false);
+  expect(client.getQueryState(signalOverview)?.isInvalidated).toBe(true);
+  expect(client.getQueryState(signalDetail)?.isInvalidated).toBe(true);
+  expect(client.getQueryState(ascendOverview)?.isInvalidated).toBe(true);
 });
 
 test("isolates and updates collection sharing caches", () => {

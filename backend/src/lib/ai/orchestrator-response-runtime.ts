@@ -2,17 +2,16 @@ import { z } from 'zod';
 import { coreChatInputSchema, type CoreChatInput } from '@/lib/ai/actions';
 import { ProviderExecutionError, selectRoute, streamRoute, type RouterDependencies } from '@/lib/ai/router';
 import type { ChatOutput, ProviderExecuteResponse, ProviderStreamChunk } from '@/lib/ai/providers';
-import type { DocumentParseDependencies } from '@/lib/ai/document-processing';
 import { isAiError } from '@/lib/ai/shared/result';
 import { embedText } from '@/lib/embeddings';
-import { sanitizedAgentMessageSchema } from './input-sanitizer';
-import { retrievalTool, type RetrievalContext, type RetrievalDependencies, type RetrievalNodeResult } from './retrieval';
+import { sanitizedAgentMessageSchema } from './tools/input-sanitizer';
+import { retrievalTool, type RetrievalContext, type RetrievalDependencies, type RetrievalNodeResult } from './tools/retrieval';
 
-export const orchestratorChatToolInputSchema = z.object({
+export const orchestratorResponseInputSchema = z.object({
   message: sanitizedAgentMessageSchema,
 }).strict();
 
-export interface OrchestratorChatToolDependencies extends RouterDependencies, DocumentParseDependencies, RetrievalDependencies {
+export interface OrchestratorResponseDependencies extends RouterDependencies, RetrievalDependencies {
   execute?: (organizationKey: string, input: CoreChatInput) => Promise<ProviderExecuteResponse<ChatOutput>>;
   stream?: (organizationKey: string, input: CoreChatInput) => AsyncIterable<ProviderStreamChunk>;
   selectRoute?: typeof selectRoute;
@@ -30,20 +29,8 @@ const chatOutputSchema = z.object({
   stopReason: z.string().nullable(),
 }).strict();
 
-export const orchestratorChatTool = {
-  name: 'chat',
-  inputSchema: orchestratorChatToolInputSchema,
-  providerDefinition: {
-    name: 'chat',
-    description: 'Answer the user through the orchestrator chat action.',
-    inputSchema: {
-      type: 'object',
-      required: ['message'],
-      additionalProperties: false,
-      properties: { message: { type: 'string', maxLength: 8_000 } },
-    },
-  },
-  async execute(skill: string, rawInput: unknown, dependencies: OrchestratorChatToolDependencies = {}): Promise<string> {
+export const orchestratorResponseRuntime = {
+  async execute(skill: string, rawInput: unknown, dependencies: OrchestratorResponseDependencies = {}): Promise<string> {
     if (dependencies.execute) {
       const chatInput = await prepareChatInput(skill, rawInput, dependencies);
       const response = await dependencies.execute(dependencies.organizationKey ?? 'nexus', chatInput);
@@ -55,7 +42,7 @@ export const orchestratorChatTool = {
     }
     return z.string().trim().min(1).parse(text);
   },
-  async *stream(skill: string, rawInput: unknown, dependencies: OrchestratorChatToolDependencies = {}): AsyncIterable<ProviderStreamChunk> {
+  async *stream(skill: string, rawInput: unknown, dependencies: OrchestratorResponseDependencies = {}): AsyncIterable<ProviderStreamChunk> {
     const chatInput = await prepareChatInput(skill, rawInput, dependencies);
     const organizationKey = dependencies.organizationKey ?? 'nexus';
     if (dependencies.stream) {
@@ -126,13 +113,13 @@ function canTryAnotherRoute(error: unknown, signal?: AbortSignal): boolean {
   return typeof error === 'object' && error !== null && 'retryable' in error && error.retryable === true;
 }
 
-async function prepareChatInput(skill: string, rawInput: unknown, dependencies: OrchestratorChatToolDependencies): Promise<CoreChatInput> {
-  const input = orchestratorChatToolInputSchema.parse(rawInput);
+async function prepareChatInput(skill: string, rawInput: unknown, dependencies: OrchestratorResponseDependencies): Promise<CoreChatInput> {
+  const input = orchestratorResponseInputSchema.parse(rawInput);
   const context = dependencies.retrievalContext ? await retrieveChatContext(input.message, dependencies) : '';
   return buildChatInput(skill, input.message, context);
 }
 
-async function retrieveChatContext(message: string, dependencies: OrchestratorChatToolDependencies): Promise<string> {
+async function retrieveChatContext(message: string, dependencies: OrchestratorResponseDependencies): Promise<string> {
   const controller = new AbortController();
   const abort = () => controller.abort(dependencies.signal?.reason);
   if (dependencies.signal?.aborted) abort();

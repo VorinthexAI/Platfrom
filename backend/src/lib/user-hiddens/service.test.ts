@@ -9,7 +9,7 @@ describe('user hidden service', () => {
     const records = new Map<string, any>();
     const repository: any = {
       canAccess: async () => true,
-      list: async (userKey: string) => [...records.values()].filter((record) => record.userKey === userKey),
+      list: async (listActor: typeof actor) => [...records.values()].filter((record) => record.userKey === listActor.userKey),
       hide: async (record: any) => { const key = `${record.userKey}:${record.source}:${record.sourceKey}`; if (!records.has(key)) records.set(key, record); return records.get(key); },
       reveal: async (userKey: string, source: string, key: string) => records.delete(`${userKey}:${source}:${key}`) ? { userKey, source, sourceKey: key } : null,
     };
@@ -27,5 +27,13 @@ describe('user hidden service', () => {
     const repository: any = { canAccess: async () => false, hide: async () => { throw new Error('not reached'); }, reveal: async () => null, list: async () => [] };
     const service = createUserHiddenService(repository);
     await expect(service.hide({ userKey: newId(), organizationKey: newId(), membershipKey: newId() }, { source: 'image', sourceKey: newId() })).rejects.toBeInstanceOf(UserHiddenSourceNotFoundError);
+  });
+
+  test('preserves organization and membership context when listing', async () => {
+    const actor = { userKey: newId(), organizationKey: newId(), membershipKey: newId() };
+    let received: unknown;
+    const repository: any = { list: async (value: unknown) => { received = value; return []; } };
+    await createUserHiddenService(repository).list(actor);
+    expect(received).toEqual(actor);
   });
 });

@@ -4,7 +4,7 @@ import { newId } from '@/lib/ids';
 import { createUserHiddenHandlers } from './user-hiddens';
 
 const userKey = newId(), organizationKey = newId(), membershipKey = newId(), sourceKey = newId();
-const authContext = { organization: { key: organizationKey }, membership: { key: membershipKey } } as any;
+const authContext = { organization: { key: organizationKey }, membership: { key: membershipKey, userId: userKey, organizationId: organizationKey, status: 'active' } } as any;
 
 function appWith(options: Parameters<typeof createUserHiddenHandlers>[0]) {
   const handlers = createUserHiddenHandlers(options);
@@ -25,11 +25,13 @@ describe('user hidden HTTP handlers', () => {
     } as any;
     const app = appWith({ service, getIdentity: async () => ({ key: userKey, identityType: 'user' }), getContext: async () => authContext });
     expect((await app.request('/auth/me/hiddens?extra=1')).status).toBe(400);
+    expect((await app.request('/auth/me/hiddens')).status).toBe(200);
     expect((await app.request('/auth/me/hiddens', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ source: 'image', sourceKey, userKey }) })).status).toBe(400);
     expect((await app.request('/auth/me/hiddens', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ source: 'image', sourceKey }) })).status).toBe(200);
     expect((await app.request(`/auth/me/hiddens?source=image&sourceKey=${sourceKey}`, { method: 'DELETE' })).status).toBe(200);
-    expect(calls.map((call) => (call as any[])[0])).toEqual(['hide', 'reveal']);
+    expect(calls.map((call) => (call as any[])[0])).toEqual(['list', 'hide', 'reveal']);
     expect(JSON.stringify(calls)).toContain(userKey);
+    expect(calls[0]).toEqual(['list', { userKey, organizationKey, membershipKey, service }]);
   });
 
   test('requires a user identity', async () => {

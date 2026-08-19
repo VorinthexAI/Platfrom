@@ -111,13 +111,11 @@ relations and selects deterministically using `modelActions.priority` only:
 
 There is no random choice, quality/cost/speed scoring, or execution fallback.
 
-Archive content tools use the local domain execution boundary. GPT-5.4 Mini
-routes only through `core.reason` to select one registered content action and
-produce arguments matching its JSON schema. `runDomainAgentTool` then reloads
-the agent context, resolves the initiating human, validates the input with Zod,
-and executes the authorized content handler. Organization, scope, member,
-agent-access, project, milestone, and task management are not exposed through
-the generic domain tool registry.
+Archive content tools use the canonical Content registry and runtime.
+`runContentAgentTool` reloads the agent context, resolves the initiating human,
+validates the strict tool input with Zod, and invokes `runContentTool` with the
+trusted context. Organization, scope, member, agent-access, project, milestone,
+and task management are not exposed as generic tools.
 
 `scopeAgents` is the authoritative lifecycle and minimum-role link between a
 scope and an existing agent definition. `agentMembers` stores inherited and

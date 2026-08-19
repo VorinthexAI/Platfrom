@@ -50,13 +50,6 @@ function fakeDatabase(input: {
 }
 
 describe('organization scope membership invariant', () => {
-  test('does not expose removed organization and scope mutation handlers', async () => {
-    const source = await Bun.file(new URL('../tools/domain-execute.ts', import.meta.url)).text();
-    expect(source).not.toContain('organization.member.');
-    expect(source).not.toContain("action === 'scope.create'");
-    expect(source).not.toContain('executeAccessDomainTool');
-  });
-
   test('retains inherited agent grant reconciliation as internal infrastructure', async () => {
     const source = await Bun.file(new URL('../tools/domain-execute-access-domains.ts', import.meta.url)).text();
     expect(source).toContain('export async function syncOrganizationAgentMembers');

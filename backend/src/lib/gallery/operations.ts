@@ -55,7 +55,6 @@ const searchSchema = imageSearchInputSchema;
 const statusSchema = strictObject({ uploadKeys: z.array(z.string().cuid()).min(1).max(20) });
 const favoriteSchema = strictObject({ imageKey: z.string().cuid(), isFavorite: z.boolean() });
 const deleteImagesSchema = strictObject({ imageKeys: z.array(z.string().cuid()).min(1).max(100) }).refine(({ imageKeys }) => new Set(imageKeys).size === imageKeys.length, 'Image keys must be unique');
-const duplicatesSchema = strictObject({ collectionKey: z.string().cuid() });
 const deleteDuplicatesSchema = strictObject({ collectionKey: z.string().cuid(), imageKeys: z.array(z.string().cuid()).min(1).max(500) }).refine(({ imageKeys }) => new Set(imageKeys).size === imageKeys.length, 'Image keys must be unique');
 const subjectListSchema = strictObject({ includeDeleted: z.boolean().default(false) });
 const subjectCreateSchema = strictObject({ name: z.string().trim().min(1).max(120), imageKeys: z.array(z.string().cuid()).min(1).max(8) }).refine(({ imageKeys }) => new Set(imageKeys).size === imageKeys.length, 'Reference image keys must be unique');
@@ -417,11 +416,6 @@ async function deleteImages(rawInput: unknown, context: GalleryOperationContext)
     return deletion;
 }
 
-async function findDuplicates(rawInput: unknown, context: GalleryOperationContext) {
-    const input = { ...duplicatesSchema.parse(rawInput), ...context };
-    return search({ duplicates: true, collectionKey: input.collectionKey }, context);
-}
-
 async function deleteDuplicates(rawInput: unknown, context: GalleryOperationContext) {
     const input = { ...deleteDuplicatesSchema.parse(rawInput), ...context };
     const membership = await requireOwner(context, input.collectionKey);
@@ -710,7 +704,6 @@ export const galleryOperationInputSchemas = {
   setFavorite: favoriteSchema,
   updateImage: imageUpdateSchema,
   deleteImages: deleteImagesSchema,
-  findDuplicates: duplicatesSchema,
   deleteDuplicates: deleteDuplicatesSchema,
   transferCollectionImages: collectionTransferSchema,
   listSubjects: subjectListSchema,
@@ -750,7 +743,6 @@ export const galleryOperations = {
   setFavorite,
   updateImage: updateImageDetails,
   deleteImages,
-  findDuplicates,
   deleteDuplicates,
   transferCollectionImages,
   listSubjects,

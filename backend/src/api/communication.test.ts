@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import { newId } from '@/lib/ids';
 import { buildMentionRoster, createCommunicationHandlers, orchestratorPromptMessage } from './communication';
 import { CANONICAL_ORCHESTRATOR_NAMES } from '@/lib/orchestrators/roster';
-import { orchestratorChatTool } from '@/lib/ai/tools/orchestrator-chat';
+import { orchestratorResponseRuntime } from '@/lib/ai/orchestrator-response-runtime';
 
 const organizationKey = 'root-org';
 const channelKey = newId();
@@ -19,7 +19,7 @@ function parseSse(text: string) {
   });
 }
 
-function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: boolean; partialFail?: boolean; abort?: boolean; failSkill?: string; failPersistence?: boolean; failPersistenceSkill?: string; output?: string; gate?: Promise<void>; orchestratorCount?: number; failScopes?: boolean; throughChatTool?: boolean; leaseUnavailable?: boolean; leaseRefreshFails?: boolean; leaseRefreshResults?: boolean[]; duplicateResolved?: boolean } = {}) {
+function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: boolean; partialFail?: boolean; abort?: boolean; failSkill?: string; failPersistence?: boolean; failPersistenceSkill?: string; output?: string; gate?: Promise<void>; orchestratorCount?: number; failScopes?: boolean; throughResponseRuntime?: boolean; leaseUnavailable?: boolean; leaseRefreshFails?: boolean; leaseRefreshResults?: boolean[]; duplicateResolved?: boolean } = {}) {
   const persisted: string[] = [];
   const assistantCalls: unknown[][] = [];
   const streamSkills: string[] = [];
@@ -54,7 +54,7 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
     resolveActor: async (c) => options.authenticated === false ? c.json({ error: 'authentication required' }, 401) : options.forbidden ? c.json({ error: 'founders gate access required' }, 403) : actor,
     stream(skill, input, dependencies) {
       streamSkills.push(skill); streamInputs.push(input); streamDependencies.push(dependencies);
-      if (options.throughChatTool) return orchestratorChatTool.stream(skill, input, {
+      if (options.throughResponseRuntime) return orchestratorResponseRuntime.stream(skill, input, {
         ...dependencies,
         embedRetrievalQuery: async () => [1, 0],
         queryRetrieval: async (query, bindVars) => { retrievalQueries.push({ query, bindVars }); return { all: async () => [{ key: 'prior-message', fields: { content: 'The launch is Friday.' }, createdAt: '2026-07-28T12:00:00.000Z', score: 0.9 }] }; },
@@ -189,7 +189,7 @@ describe('Communication SSE API', () => {
   });
 
   test('runs authorized retrieval before the orchestrator Nova chat response', async () => {
-    const { app, retrievalQueries, novaInputs } = appFor({ throughChatTool: true });
+    const { app, retrievalQueries, novaInputs } = appFor({ throughResponseRuntime: true });
     const response = await app.request(`/founders/organizations/${organizationKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: '@Atlas explain the launch' }) });
     const events = parseSse(await response.text());
     expect(events.map(({ event }) => event)).toEqual(['start', 'assistant-start', 'token', 'done', 'complete']);

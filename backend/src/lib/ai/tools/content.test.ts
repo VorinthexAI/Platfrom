@@ -6,21 +6,21 @@ import {
   CONTENT_TOOL_NAMES,
   contentBatchOutputSchema,
   contentToolInputSchemas,
+  contentToolModelInputSchemas,
   contentToolOutputSchemas,
   isContentToolName,
 } from './index';
 
 const expectedNames = [
-  'book.create-context', 'book.write',
   'folder.create', 'folder.find', 'folder.list', 'folder.update', 'folder.rename', 'folder.move', 'folder.copy', 'folder.archive', 'folder.restore', 'folder.delete',
-  'document.parse', 'document.scan', 'document.create', 'document.find', 'document.list', 'document.read', 'document.list-audio-versions', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.list-summaries', 'document.find-summary', 'document.summary.audio.generate', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.download', 'document.export', 'document.share', 'document.unshare', 'document.list-shares', 'document.create-version', 'document.find-version', 'document.list-versions', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.topics', 'document.enhance', 'document.translate', 'document.rewrite',
-  'scope.document.search', 'scope.content.search', 'scope.content.search-history', 'scope.content.search-history.delete', 'content.neighbors', 'organization.document.search',
+  'document.parse', 'document.scan', 'document.create', 'document.find', 'document.list', 'document.read', 'document.list-audio-versions', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.list-summaries', 'document.find-summary', 'document.summary.audio.generate', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.download', 'document.export', 'document.share', 'document.unshare', 'document-share.archive', 'document-share.restore', 'document.list-shares', 'document.create-version', 'document.find-version', 'document.list-versions', 'document.restore-version', 'document-version.archive', 'document-version.restore', 'document.delete-version', 'document.summarize', 'document.topics', 'document.enhance', 'document.translate', 'document.rewrite',
+  'document.search', 'content.search', 'content.search-history.list', 'content.search-history.delete', 'content.neighbors', 'document.search-all',
 ] as const;
 
 describe('Content tool registry', () => {
   test('contains exactly the registered dotted names and no action-style kebab names', () => {
     expect([...CONTENT_TOOL_NAMES]).toEqual([...expectedNames]);
-    expect(CONTENT_TOOL_NAMES).toHaveLength(52);
+    expect(CONTENT_TOOL_NAMES).toHaveLength(54);
     for (const name of CONTENT_TOOL_NAMES) {
       expect(name).toMatch(/^[a-z]+(?:[.-][a-z]+)*$/);
       expect(name).toContain('.');
@@ -35,6 +35,26 @@ describe('Content tool registry', () => {
       expect(definition.inputSchema).toMatchObject({ type: 'object', additionalProperties: false });
       expect(definition.outputSchema).toMatchObject({ type: 'object', additionalProperties: false });
     }
+  });
+
+  test('keeps trusted selectors canonical while omitting them from model inputs', () => {
+    const scopeKey = newId();
+    const organizationKey = newId();
+    expect(contentToolInputSchemas['folder.list'].parse({ scopeKey })).toMatchObject({ scopeKey });
+    expect(contentToolInputSchemas['folder.create'].parse({ folders: [{ scopeKey, name: 'Folder' }] })).toMatchObject({ folders: [{ scopeKey }] });
+    expect(contentToolInputSchemas['document.search-all'].parse({ organizationKey, query: 'roadmap' })).toMatchObject({ organizationKey });
+    for (const name of ['folder.list', 'document.parse', 'document.scan', 'document.create', 'document.list', 'document.search', 'content.search', 'content.search-history.list', 'content.search-history.delete'] as const) {
+      expect(contentToolModelInputSchemas[name].safeParse({ scopeKey }).error?.issues.some((issue) => issue.code === 'unrecognized_keys')).toBe(true);
+    }
+    expect(() => contentToolModelInputSchemas['folder.create'].parse({ folders: [{ scopeKey, name: 'Folder' }] })).toThrow('Unrecognized key');
+    expect(() => contentToolModelInputSchemas['document.search-all'].parse({ organizationKey, query: 'roadmap' })).toThrow('Unrecognized key');
+
+    const definitions = Object.fromEntries(CONTENT_TOOL_DEFINITIONS.map((definition) => [definition.name, definition.inputSchema])) as Record<string, any>;
+    expect(definitions['folder.list'].properties).not.toHaveProperty('scopeKey');
+    expect(definitions['folder.create'].properties.folders.items.properties).not.toHaveProperty('scopeKey');
+    expect(definitions['document.search-all'].properties).not.toHaveProperty('organizationKey');
+    expect(definitions['document.move'].properties.moves.items.properties).toHaveProperty('targetScopeKey');
+    expect(definitions['document.search'].properties.sources.items).toBeDefined();
   });
 });
 
@@ -68,7 +88,7 @@ describe('Content input contracts', () => {
     expect(contentToolInputSchemas['document.summarize'].parse({ documentKeys: [key], topic: 'Launch' })).toMatchObject({ topic: 'Launch', style: 'brief' });
     expect(contentToolInputSchemas['folder.update'].parse({ updates: [{ folderKey: key, description: null }] })).toMatchObject({ updates: [{ description: null }] });
     expect(contentToolInputSchemas['document.delete'].parse({ documentKeys: [key], deleteVersions: true, deleteShares: true })).toMatchObject({ deleteVersions: true, deleteShares: true });
-    expect(contentToolInputSchemas['scope.content.search-history'].parse({ scopeKey: key, allLocations: true })).toMatchObject({ allLocations: true });
+    expect(contentToolInputSchemas['content.search-history.list'].parse({ scopeKey: key, allLocations: true })).toMatchObject({ allLocations: true });
   });
 
   test('rejects unknown properties and invalid enum, score, and range values', () => {
@@ -76,7 +96,7 @@ describe('Content input contracts', () => {
     expect(() => contentToolInputSchemas['document.enhance'].parse({ documentKeys: [key], surprise: true })).toThrow();
     expect(() => contentToolInputSchemas['folder.find'].parse({ folderKeys: [key], surprise: true })).toThrow();
     expect(() => contentToolInputSchemas['document.download'].parse({ documentKeys: [key], format: 'pdf' })).toThrow();
-    expect(() => contentToolInputSchemas['scope.document.search'].parse({ scopeKey: key, query: 'roadmap', minimumScore: 1.1 })).toThrow();
+    expect(() => contentToolInputSchemas['document.search'].parse({ scopeKey: key, query: 'roadmap', minimumScore: 1.1 })).toThrow();
     expect(() => contentToolInputSchemas['document.read'].parse({ documentKeys: [key], startOffset: 10, endOffset: 5 })).toThrow();
     expect(() => contentToolInputSchemas['document.read'].parse({ documentKeys: [key], mode: 'audio', startOffset: 10, persistAudio: true })).toThrow();
     expect(() => contentToolInputSchemas['document.read'].parse({ documentKeys: [key, newId()], mode: 'audio', persistAudio: true })).toThrow();
@@ -88,11 +108,11 @@ describe('Content input contracts', () => {
     expect(() => contentToolInputSchemas['document.copy'].parse({ copies: [{ documentKey: key, targetFolderKey: newId(), name: 'Wrong field' }] })).toThrow();
     expect(() => contentToolInputSchemas['document.summarize'].parse({ documentKeys: [key, newId()], persist: true })).toThrow();
     expect(() => contentToolInputSchemas['document.summarize'].parse({ documentKeys: [key], persist: true, combine: true })).toThrow();
-    expect(contentToolInputSchemas['scope.content.search-history'].parse({ scopeKey: key, folderKey: newId(), allLocations: true })).toMatchObject({ allLocations: true });
+    expect(contentToolInputSchemas['content.search-history.list'].parse({ scopeKey: key, folderKey: newId(), allLocations: true })).toMatchObject({ allLocations: true });
     expect(() => contentToolInputSchemas['document.topics'].parse({ documentKey: key, scopeKey: newId() })).toThrow();
     expect(contentToolInputSchemas['document.summary.audio.generate'].parse({ summaryKeys: [key], language: 'en-US' })).toMatchObject({ language: 'en-US' });
     expect(() => contentToolInputSchemas['document.summary.audio.generate'].parse({ summaryKeys: [key], language: 'English' })).toThrow();
-    expect(contentToolInputSchemas['scope.document.search'].parse({ scopeKey: key, query: 'roadmap', sources: [{ type: 'scope', scopeKeys: [newId()] }] })).toMatchObject({ sources: [{ type: 'scope' }] });
+    expect(contentToolInputSchemas['document.search'].parse({ scopeKey: key, query: 'roadmap', sources: [{ type: 'scope', scopeKeys: [newId()] }] })).toMatchObject({ sources: [{ type: 'scope' }] });
   });
 
   test('enforces non-empty arrays for every batch-first contract', () => {
@@ -171,15 +191,15 @@ describe('Content output contracts', () => {
     const documentKey = newId();
     const scopeKey = newId();
     const folderKey = newId();
-    const output = contentToolOutputSchemas['scope.document.search'].parse({
+    const output = contentToolOutputSchemas['document.search'].parse({
       query: 'roadmap',
       results: [{ documentKey, name: 'Roadmap', extension: 'md', scopeKey, folderKey, score: 0.9, matchedSource: { type: 'scope', key: scopeKey }, scoreBreakdown: { vector: 0.9, lexical: 0.5, final: 0.8 } }],
       totalCandidates: 12,
     });
     expect(output).toMatchObject({ query: 'roadmap', results: [{ documentKey, extension: 'md', scoreBreakdown: { vector: 0.9 } }], totalCandidates: 12 });
-    expect(() => contentToolOutputSchemas['scope.document.search'].parse({ query: 'roadmap', results: [], total: 0 })).toThrow();
-    expect(() => contentToolOutputSchemas['scope.document.search'].parse({ query: 'roadmap', results: [{ documentKey, name: 'Roadmap', scopeKey, folderKey, score: 2 }], totalCandidates: 1 })).toThrow();
-    expect(() => contentToolOutputSchemas['scope.document.search'].parse({ query: 'roadmap', results: [{ documentKey, name: 'Roadmap', scopeKey, folderKey, score: 0.5, source: { type: 'scope', scopeKeys: [scopeKey] } }] })).toThrow();
+    expect(() => contentToolOutputSchemas['document.search'].parse({ query: 'roadmap', results: [], total: 0 })).toThrow();
+    expect(() => contentToolOutputSchemas['document.search'].parse({ query: 'roadmap', results: [{ documentKey, name: 'Roadmap', scopeKey, folderKey, score: 2 }], totalCandidates: 1 })).toThrow();
+    expect(() => contentToolOutputSchemas['document.search'].parse({ query: 'roadmap', results: [{ documentKey, name: 'Roadmap', scopeKey, folderKey, score: 0.5, source: { type: 'scope', scopeKeys: [scopeKey] } }] })).toThrow();
   });
 
   test('validates batch summary arithmetic and result error shape', () => {

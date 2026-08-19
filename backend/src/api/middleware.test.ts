@@ -178,6 +178,20 @@ describe('validateQueryParams', () => {
     ).rejects.toThrow();
     expect(nextCalls).toBe(0);
   });
+
+  test('does not retain a query whitelist for the removed orchestrator chat route', async () => {
+    let nextCalls = 0;
+
+    await expect(
+      validateQueryParams(
+        middlewareContext('/api/v1/orchestrators/chat', {}, '?orchestrator_slug=atlas'),
+        async () => {
+          nextCalls += 1;
+        },
+      ),
+    ).rejects.toThrow();
+    expect(nextCalls).toBe(0);
+  });
 });
 
 describe('backend session cookies', () => {

@@ -699,7 +699,7 @@ export async function scanContentDocument(pages: { name: string; size: number; b
 
 export function searchContent(query: string, folderKey?: string, includeDescendants = false) {
   const contentContext = getContentContext();
-  return callContentTool<ContentSearchResponse>("scope.content.search", {
+  return callContentTool<ContentSearchResponse>("content.search", {
     scopeKey: contentContext.scopeKey,
     query,
     minimumScore: 0.55,
@@ -709,7 +709,7 @@ export function searchContent(query: string, folderKey?: string, includeDescenda
 
 export async function searchContentMatches(query: string, signal?: AbortSignal, folderKey?: string, recordHistory = true) {
   const contentContext = getContentContext();
-  return callContentTool<ContentSearchResponse>("scope.content.search", {
+  return callContentTool<ContentSearchResponse>("content.search", {
     scopeKey: contentContext.scopeKey,
     query,
     includeSummaries: false,
@@ -739,7 +739,7 @@ export async function summarizeContentDocument(documentKey: string, topic: strin
 
 export async function listContentSearchHistory(requestContext = getContentContext()) {
   const contentContext = requestContext;
-  const data = await callContentTool<{ history: ContentSearchHistoryItem[] }>("scope.content.search-history", {
+  const data = await callContentTool<{ history: ContentSearchHistoryItem[] }>("content.search-history.list", {
     scopeKey: contentContext.scopeKey,
     allLocations: true,
     limit: 100,
@@ -749,7 +749,7 @@ export async function listContentSearchHistory(requestContext = getContentContex
 
 export async function deleteContentSearchHistory(normalizedQuery: string) {
   const contentContext = getContentContext();
-  return callContentTool<{ normalizedQuery: string; deleted: boolean }>("scope.content.search-history.delete", {
+  return callContentTool<{ normalizedQuery: string; deleted: boolean }>("content.search-history.delete", {
     scopeKey: contentContext.scopeKey,
     normalizedQuery,
     allLocations: true,

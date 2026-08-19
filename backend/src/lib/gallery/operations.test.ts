@@ -35,7 +35,6 @@ const validInputs = {
   setFavorite: { imageKey: key(), isFavorite: true },
   updateImage: { imageKey: key(), name: 'portrait.jpg', isFavorite: true },
   deleteImages: { imageKeys: [key()] },
-  findDuplicates: { collectionKey: key() },
   deleteDuplicates: { collectionKey: key(), imageKeys: [key()] },
   transferCollectionImages: { sourceCollectionKey: key(), destinationCollectionKeys: [key()], imageKeys: [key()], mode: 'copy' },
   listSubjects: {},
@@ -86,6 +85,7 @@ describe('Gallery operation boundaries', () => {
   });
   test('defines one strict input boundary for every canonical operation', () => {
     expect(Object.keys(galleryOperationInputSchemas)).toEqual(Object.keys(validInputs));
+    expect(Object.keys(galleryOperations)).toEqual(Object.keys(validInputs));
     for (const name of Object.keys(validInputs) as Array<keyof typeof validInputs>) {
       expect(galleryOperationInputSchemas[name].parse(validInputs[name])).toBeDefined();
       expect(() => galleryOperationInputSchemas[name].parse({ ...validInputs[name], organizationKey: 'forged', scopeKey: key(), actorKey: key() })).toThrow();

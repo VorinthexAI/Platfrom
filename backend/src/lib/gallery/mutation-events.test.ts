@@ -12,7 +12,8 @@ describe('Gallery mutation event matrix', () => {
   });
 
   test('exhaustively maps every canonical mutation tool, including deferred worker transitions', () => {
-    expect(Object.keys(GALLERY_CANONICAL_MUTATION_PUBLICATIONS).sort()).toEqual([...galleryAssistantMutationOperations].sort());
+    expect(Object.keys(GALLERY_CANONICAL_MUTATION_PUBLICATIONS).sort()).toEqual([...galleryAssistantMutationOperations, 'reserveUploads', 'completeUploads'].sort());
+    expect(galleryAssistantMutationOperations).not.toEqual(expect.arrayContaining(['reserveUploads', 'completeUploads']));
     const mappedEvents = Object.values(GALLERY_CANONICAL_MUTATION_PUBLICATIONS).flatMap(({ events, ...value }) => [...events, ...('deferredEvents' in value ? value.deferredEvents : [])]);
     for (const event of mappedEvents) expect(GALLERY_MUTATION_EVENTS).toHaveProperty(event);
     expect(GALLERY_CANONICAL_MUTATION_PUBLICATIONS.completeUploads).toEqual({

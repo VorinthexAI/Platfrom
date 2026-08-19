@@ -418,23 +418,27 @@ test("can preserve the previous note as a version during an AI autosave", async 
 
 test("searches a folder while listing global user history", async () => {
   const documents = [{ documentKey: "document", name: "Note", score: 0.9, summary: "Relevant note", folderKey: "folder" }];
-  responseForTool = (tool) => tool === "scope.content.search"
+  responseForTool = (tool) => tool === "content.search"
     ? { data: { success: true, data: { query: "roadmap", cached: false, folders: [], documents } } }
     : { data: { success: true, data: { history: [{ query: "roadmap", normalizedQuery: "roadmap", searchedAt: "2026-08-10T00:00:00.000Z", usageCount: 2 }] } } };
 
   expect((await searchContent("roadmap", "folder", true)).documents).toEqual(documents);
   expect((await listContentSearchHistory())[0]?.query).toBe("roadmap");
+  expect(calls[0]?.url).toContain("/content.search");
+  expect(calls[1]?.url).toContain("/content.search-history.list");
   expect(calls[0]?.body.input).toEqual({ scopeKey: "scope-authenticated", query: "roadmap", minimumScore: 0.55, folderKey: "folder", includeDescendants: true });
   expect(calls[1]?.body.input).toEqual({ scopeKey: "scope-authenticated", allLocations: true, limit: 100 });
 });
 
 test("lists and deletes search history across all Archive locations", async () => {
-  responseForTool = (tool) => tool === "scope.content.search-history"
+  responseForTool = (tool) => tool === "content.search-history.list"
     ? { data: { success: true, data: { history: [] } } }
     : { data: { success: true, data: { normalizedQuery: "roadmap", deleted: true } } };
 
   await listContentSearchHistory();
   await deleteContentSearchHistory("roadmap");
+  expect(calls[0]?.url).toContain("/content.search-history.list");
+  expect(calls[1]?.url).toContain("/content.search-history.delete");
   expect(calls[0]?.body.input).toEqual({ scopeKey: "scope-authenticated", allLocations: true, limit: 100 });
   expect(calls[1]?.body.input).toMatchObject({ scopeKey: "scope-authenticated", normalizedQuery: "roadmap", allLocations: true });
 });
@@ -451,6 +455,7 @@ test("runs fast combined search without summaries", async () => {
   responseForTool = () => ({ data: { success: true, data: { query: "roadmap", cached: false, folders: [{ key: "folder", scopeKey: "scope-authenticated", name: "Roadmaps", score: 0.8 }], documents: [{ documentKey: "document", scopeKey: "scope-authenticated", name: "Roadmap", extension: "docx", score: 0.72 }] } } });
 
   expect(await searchContentMatches("roadmap")).toMatchObject({ folders: [{ key: "folder" }], documents: [{ documentKey: "document", extension: "docx" }] });
+  expect(calls[0]?.url).toContain("/content.search");
   expect(calls[0]?.body.input).toEqual({ scopeKey: "scope-authenticated", query: "roadmap", includeSummaries: false, minimumScore: 0.55 });
 });
 

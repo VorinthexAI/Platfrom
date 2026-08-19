@@ -159,7 +159,6 @@ suite('Content live E2E', () => {
       },
       mergeAudio: async (chunks: Uint8Array[]) => new Uint8Array(Buffer.concat(chunks)),
       audioDuration: () => 250,
-      bookRuntime: { async create() { return newId(); }, async write() {} },
       scanDocument: async () => ({ documentKey: newId(), content: 'Scanned deterministic text.', storageKeys: [] }),
       generateExport: (input: any) => generateDocumentExport(input, { pdfRenderer: async () => new TextEncoder().encode('%PDF-1.4\n%%EOF') }),
       random: (size: number) => Uint8Array.from({ length: size }, (_, index) => (organizationKey.charCodeAt(index % organizationKey.length) + randomSeed + index) % 255 + 1),
@@ -195,10 +194,6 @@ suite('Content live E2E', () => {
     });
     outputSchemas['folder.list']!.parse(agentList);
     covered.add('folder.list');
-
-    const bookInput = { scopeKey, topic: 'Deterministic systems', goal: 'Test the complete runtime', audience: 'Engineers', tone: 'Direct', length: 'short', language: 'English' } as const;
-    const book = await call('book.create-context', bookInput);
-    await call('book.write', { ...bookInput, bookKey: book.bookKey });
 
     const created = await call('folder.create', { folders: [{ scopeKey, name: 'Root' }, { scopeKey, name: 'Destination' }], idempotencyKey: `folders-${organizationKey}` });
     expect(created.summary).toEqual({ requested: 2, succeeded: 2, failed: 0 });
@@ -372,19 +367,19 @@ suite('Content live E2E', () => {
     const outsiderDocumentKey = newId();
     await save('folders', { _key: outsiderFolderKey, scopeKey: outsiderScopeKey, name: 'Private outsider', embedding, createdAt: now, updatedAt: now });
     await save('documents', { _key: outsiderDocumentKey, scopeKey: outsiderScopeKey, folderKey: outsiderFolderKey, name: 'Forbidden source', extension: 'txt', mimeType: 'text/plain', storageKey: `content/${outsiderOrganizationKey}/${outsiderScopeKey}/${outsiderDocumentKey}/original.txt`, sizeBytes: 8, content: 'roadmap', embedding, createdAt: now, updatedAt: now });
-    const scopedSearch = await call('scope.document.search', { scopeKey, query: 'roadmap', sources: [{ type: 'scope', scopeKeys: [scopeKey, secondScopeKey] }, { type: 'folder', folderKeys: [rootFolderKey], includeDescendants: true }], include: ['snippet', 'content', 'folder', 'scoreBreakdown'] });
+    const scopedSearch = await call('document.search', { scopeKey, query: 'roadmap', sources: [{ type: 'scope', scopeKeys: [scopeKey, secondScopeKey] }, { type: 'folder', folderKeys: [rootFolderKey], includeDescendants: true }], include: ['snippet', 'content', 'folder', 'scoreBreakdown'] });
     expect(scopedSearch.results.some((item: any) => item.documentKey === documentKey)).toBe(true);
-    const organizationSearch = await call('organization.document.search', { organizationKey, query: 'roadmap', sources: [{ type: 'scope', scopeKeys: [scopeKey, secondScopeKey, outsiderScopeKey] }], include: ['snippet', 'scope', 'scoreBreakdown'] });
+    const organizationSearch = await call('document.search-all', { organizationKey, query: 'roadmap', sources: [{ type: 'scope', scopeKeys: [scopeKey, secondScopeKey, outsiderScopeKey] }], include: ['snippet', 'scope', 'scoreBreakdown'] });
     expect(organizationSearch.results.map((item: any) => item.documentKey)).toContain(secondDocument.document.key);
     expect(organizationSearch.results.map((item: any) => item.documentKey)).not.toContain(outsiderDocumentKey);
-    const contentSearch = await call('scope.content.search', { scopeKey, query: 'semantic roadmap', minimumScore: 0.1 });
+    const contentSearch = await call('content.search', { scopeKey, query: 'semantic roadmap', minimumScore: 0.1 });
     expect(contentSearch.documents.some((item: any) => item.documentKey === documentKey)).toBe(true);
-    const contentSearchReplay = await call('scope.content.search', { scopeKey, query: '  SEMANTIC   ROADMAP  ', minimumScore: 0.1 });
+    const contentSearchReplay = await call('content.search', { scopeKey, query: '  SEMANTIC   ROADMAP  ', minimumScore: 0.1 });
     expect(contentSearchReplay.cached).toBe(true);
-    const contentSearchHistory = await call('scope.content.search-history', { scopeKey, limit: 8 });
+    const contentSearchHistory = await call('content.search-history.list', { scopeKey, limit: 8 });
     expect(contentSearchHistory.history).toContainEqual({ query: expect.any(String), normalizedQuery: 'semantic roadmap', searchedAt: expect.any(String), usageCount: 2 });
-    expect(await call('scope.content.search-history.delete', { scopeKey, normalizedQuery: 'semantic roadmap' })).toEqual({ normalizedQuery: 'semantic roadmap', deleted: true });
-    expect((await call('scope.content.search-history', { scopeKey, limit: 8 })).history.some((item: any) => item.normalizedQuery === 'semantic roadmap')).toBe(false);
+    expect(await call('content.search-history.delete', { scopeKey, normalizedQuery: 'semantic roadmap' })).toEqual({ normalizedQuery: 'semantic roadmap', deleted: true });
+    expect((await call('content.search-history.list', { scopeKey, limit: 8 })).history.some((item: any) => item.normalizedQuery === 'semantic roadmap')).toBe(false);
 
     const neighbors = await call('content.neighbors', { documentKey });
     expect(neighbors.folders.length).toBeLessThanOrEqual(10);

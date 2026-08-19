@@ -1,6 +1,5 @@
 import { z } from 'zod';
-import type { DomainToolContext } from './domain-execute';
-import { DomainToolExecutionError } from './domain-execute';
+import { ToolExecutionError, type ToolContext } from './tool-context';
 import type { AccessibleImageSearchResult } from '@/lib/media-library';
 
 export const imageSimilarityThresholdSchema = z.number().finite().min(-1).max(1);
@@ -25,13 +24,13 @@ export const imageSimilarityOutputSchema = z.object({
 
 export type ImageSimilarityOutput = z.infer<typeof imageSimilarityOutputSchema>;
 
-export function imageSearchActor(context: DomainToolContext): string {
+export function imageSearchActor(context: ToolContext): string {
   if (context.principal.kind !== 'member') {
-    throw new DomainToolExecutionError('human_principal_required', 'A human organization member must search Gallery images');
+    throw new ToolExecutionError('human_principal_required', 'A human organization member must search Gallery images');
   }
   const membership = context.principal.userOrganization;
   if (membership.status !== 'active' || membership.organizationId !== context.organizationKey) {
-    throw new DomainToolExecutionError('organization_forbidden', 'Active organization membership is required');
+    throw new ToolExecutionError('organization_forbidden', 'Active organization membership is required');
   }
   return membership.key;
 }

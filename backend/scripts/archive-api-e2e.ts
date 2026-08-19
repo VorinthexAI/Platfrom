@@ -206,9 +206,9 @@ const foundPdf = await tool('document.find', { documentKeys: [uploadedPdfKey], i
 const foundPdfDocument = object(object(object((foundPdf.results as unknown[])[0]).data).document);
 if (typeof foundPdfDocument.content !== 'string' || !foundPdfDocument.content.includes(pdfPhrase)) throw new Error(`Uploaded PDF text was not persisted: ${JSON.stringify(foundPdfDocument)}`);
 
-const fastFolderSearch = await tool('scope.content.search', { scopeKey, query: folderName, includeSummaries: false });
+const fastFolderSearch = await tool('content.search', { scopeKey, query: folderName, includeSummaries: false });
 if (!(fastFolderSearch.folders as unknown[]).some((entry) => object(entry).key === folderKey)) throw new Error('Fast search did not return the matching folder.');
-const fastFileSearch = await tool('scope.content.search', { scopeKey, folderKey, includeDescendants: true, query: 'silver observatory', includeSummaries: false });
+const fastFileSearch = await tool('content.search', { scopeKey, folderKey, includeDescendants: true, query: 'silver observatory', includeSummaries: false });
 const fastFile = (fastFileSearch.documents as unknown[]).map(object).find((entry) => entry.documentKey === uploadedDocumentKey);
 if (!fastFile || fastFile.extension !== 'txt' || fastFile.summary !== undefined) throw new Error('Fast recursive search did not return the uploaded file without a summary.');
 
@@ -216,11 +216,11 @@ const listed = await tool('document.list', { scopeKey, folderKey, limit: 100, so
 if (!(listed.documents as unknown[]).some((entry) => object(entry).key === documentKey)) throw new Error('Created document was not listed.');
 
 const query = `cobalt lighthouse ${suffix.slice(0, 8)}`;
-const search = await tool('scope.content.search', { scopeKey, query, minimumScore: 0 });
+const search = await tool('content.search', { scopeKey, query, minimumScore: 0 });
 if (!(search.documents as unknown[]).some((entry) => object(entry).documentKey === documentKey)) throw new Error('Semantic retrieval did not return the created document.');
-const replay = await tool('scope.content.search', { scopeKey, query: `  ${query.toUpperCase()}  `, minimumScore: 0 });
+const replay = await tool('content.search', { scopeKey, query: `  ${query.toUpperCase()}  `, minimumScore: 0 });
 if (!(replay.documents as unknown[]).some((entry) => object(entry).documentKey === documentKey)) throw new Error('Normalized semantic retrieval did not return the created document.');
-const searchHistory = await tool('scope.content.search-history', { scopeKey, limit: 8 });
+const searchHistory = await tool('content.search-history.list', { scopeKey, limit: 8 });
 const historyEntry = (searchHistory.history as unknown[]).map(object).find((entry) => entry.normalizedQuery === query && Number(entry.usageCount) >= 2);
 if (!historyEntry) throw new Error('Semantic search history was not persisted.');
 if (['contextDomain', 'documents', 'folderKey', 'includeDescendants', 'scopeKey'].some((field) => field in historyEntry)) throw new Error('Global search history exposed Archive context.');

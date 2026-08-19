@@ -1,6 +1,4 @@
 import { audioGenerateTool } from './audio-generate';
-import { bookCreateContextToolDefinition } from './book-create-context';
-import { bookWriteToolDefinition } from './book-write';
 import { documentContentToolDefinition } from './document-content';
 import { documentAudioPlaybackClearToolDefinition } from './document-audio-playback-clear';
 import { documentAudioPlaybackUpdateToolDefinition } from './document-audio-playback-update';
@@ -39,9 +37,6 @@ import { documentUnshareToolDefinition } from './document-unshare';
 import { documentUpdateToolDefinition } from './document-update';
 import { documentVersionContentTool } from './document-version-content';
 import { documentVersionRestoreTool } from './document-version-restore';
-import { emailReplyDraftTool } from './email-reply-draft';
-import { emailThreadListTool } from './email-thread-list';
-import { emailThreadReadTool } from './email-thread-read';
 import { folderContentToolDefinition } from './folder-content';
 import { folderCopyToolDefinition } from './folder-copy';
 import { folderCreateToolDefinition } from './folder-create';
@@ -54,29 +49,22 @@ import { folderRestoreToolDefinition } from './folder-restore';
 import { folderUpdateToolDefinition } from './folder-update';
 import { imageCaptionTool } from './image-caption';
 import { imageCreateVisualIdentityTool } from './image-create-visual-identity';
-import { imageSearchTool } from './image-search';
-import { orchestratorChatTool } from './orchestrator-chat';
-import { organizationDocumentSearchToolDefinition } from './organization-document-search';
-import { scopeContentSearchToolDefinition } from './scope-content-search';
-import { scopeContentSearchHistoryToolDefinition } from './scope-content-search-history';
-import { scopeContentSearchHistoryDeleteToolDefinition } from './scope-content-search-history-delete';
+import { documentSearchAllToolDefinition } from './document-search-all';
+import { contentSearchToolDefinition } from './content-search';
+import { contentSearchHistoryListToolDefinition } from './content-search-history-list';
+import { contentSearchHistoryDeleteToolDefinition } from './content-search-history-delete';
 import { contentNeighborsToolDefinition } from './content-neighbors';
-import { scopeDocumentSearchToolDefinition } from './scope-document-search';
+import { documentSearchToolDefinition } from './document-search';
 import { WORKSPACE_TOOL_DEFINITIONS } from './workspace-tool-definitions';
 
 export const PUBLIC_TOOL_DEFINITIONS = Object.freeze([
-  orchestratorChatTool,
   audioGenerateTool,
   imageCaptionTool,
   imageCreateVisualIdentityTool,
-  imageSearchTool,
   contentNeighborsToolDefinition,
-  bookCreateContextToolDefinition,
-  bookWriteToolDefinition,
-  emailThreadListTool, emailThreadReadTool, emailReplyDraftTool,
   documentAudioPlaybackClearToolDefinition, documentAudioPlaybackUpdateToolDefinition, documentContentToolDefinition, documentCreateToolDefinition, documentCopyToolDefinition, documentCreateVersionToolDefinition, documentDeleteToolDefinition, documentDeleteVersionToolDefinition, documentDownloadToolDefinition, documentEnhanceToolDefinition, documentExportToolDefinition, documentFindToolDefinition, documentFindSummaryToolDefinition, documentFindVersionToolDefinition, documentListToolDefinition, documentListAudioVersionsToolDefinition, documentListSummariesToolDefinition, documentListSharesToolDefinition, documentListVersionsToolDefinition, documentMoveToolDefinition, documentParseToolDefinition, documentReadToolDefinition, documentRenameToolDefinition, documentScanToolDefinition, documentRestoreToolDefinition, documentRestoreVersionToolDefinition, documentRewriteToolDefinition, documentShareToolDefinition, documentShareContentTool, documentShareRestoreTool, documentSummarizeToolDefinition, documentSummaryAudioGenerateToolDefinition, documentTopicsToolDefinition, documentTranslateToolDefinition, documentUnshareToolDefinition, documentUpdateToolDefinition, documentVersionContentTool, documentVersionRestoreTool,
   folderContentToolDefinition, folderCopyToolDefinition, folderCreateToolDefinition, folderDeleteToolDefinition, folderFindToolDefinition, folderListToolDefinition, folderMoveToolDefinition, folderRenameToolDefinition, folderRestoreToolDefinition, folderUpdateToolDefinition,
-  organizationDocumentSearchToolDefinition,
-  scopeContentSearchToolDefinition, scopeContentSearchHistoryToolDefinition, scopeContentSearchHistoryDeleteToolDefinition, scopeDocumentSearchToolDefinition,
+  documentSearchAllToolDefinition,
+  contentSearchToolDefinition, contentSearchHistoryListToolDefinition, contentSearchHistoryDeleteToolDefinition, documentSearchToolDefinition,
   ...WORKSPACE_TOOL_DEFINITIONS,
 ] as const);

@@ -1,7 +1,8 @@
 import type { Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
-import { streamTool, sanitizedAgentMessageSchema, type ToolDependencies } from '@/lib/ai/tools';
+import { sanitizedAgentMessageSchema } from '@/lib/ai/tools';
+import { orchestratorResponseRuntime, type OrchestratorResponseDependencies } from '@/lib/ai/orchestrator-response-runtime';
 import { executeAction } from '@/lib/ai/router';
 import type { SpeechOutput } from '@/lib/ai/providers';
 import { dedupeMentionCandidates } from '@/lib/communication/mention-candidates';
@@ -40,7 +41,7 @@ export const communicationMessageListQuerySchema = strictObject({ limit: z.coerc
 export interface CommunicationApiDependencies {
   service: CommunicationService;
   resolveActor(c: Context, requestedOrganizationKey: string): Promise<CommunicationActor | Response>;
-  stream(skill: string, input: { message: string }, dependencies: ToolDependencies): AsyncIterable<{ type: string; text?: string }>;
+  stream(skill: string, input: { message: string }, dependencies: OrchestratorResponseDependencies): AsyncIterable<{ type: string; text?: string }>;
   listScopes(actor: CommunicationActor): Promise<readonly { name: string; description: string | null }[]>;
   publishTyping?(event: CommunicationTypingEvent): Promise<void>;
   subscribeTyping?(listener: (event: CommunicationTypingEvent) => void): () => void;
@@ -89,7 +90,7 @@ const defaultDependencies: CommunicationApiDependencies = {
       throw error;
     }
   },
-  stream: (skill, input, dependencies) => streamTool('chat', skill, input, dependencies),
+  stream: (skill, input, dependencies) => orchestratorResponseRuntime.stream(skill, input, dependencies),
   async listScopes(actor) {
     const membership = await getUserOrganizationById(actor.membershipKey);
     if (!membership || membership.organizationId !== actor.organizationKey || membership.status !== 'active') return [];

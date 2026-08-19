@@ -24,18 +24,22 @@ async function context(c: Context, organizationKey: string, scopeKey: string): P
   return { organizationKey, scopeKey, membership, ...(idempotencyKey ? { idempotencyKey } : {}), signal: c.req.raw.signal };
 }
 
-function handler(name: GalleryOperationName, successStatus = 200) {
+function handler(name: GalleryOperationName, successStatus = 200, transformInput: (input: Record<string, unknown>) => unknown = (input) => input) {
   return async (c: Context) => {
     try {
       const { organizationKey, scopeKey, ...input } = trustedContextSchema.parse(await c.req.json());
       const operation = galleryOperations[name] as (input: unknown, context: GalleryOperationContext) => Promise<unknown>;
-      const data = await operation(input, await context(c, organizationKey, scopeKey));
+      const data = await operation(transformInput(input), await context(c, organizationKey, scopeKey));
       return c.json({ success: true, data }, successStatus as 200);
     } catch (error) {
       const normalized = normalizeGalleryOperationError(error);
       return c.json({ success: false, error: { code: normalized.code, message: normalized.message } }, normalized.status);
     }
   };
+}
+
+export function duplicateSearchTransportInput<Input extends Record<string, unknown>>(input: Input) {
+  return { ...input, duplicates: true as const };
 }
 
 export const galleryOverview = handler('overview');
@@ -63,7 +67,7 @@ export const searchGalleryImages = handler('search');
 export const setGalleryImageFavorite = handler('setFavorite');
 export const updateGalleryImage = handler('updateImage');
 export const deleteGalleryImages = handler('deleteImages');
-export const findGalleryCollectionDuplicates = handler('findDuplicates');
+export const findGalleryCollectionDuplicates = handler('search', 200, duplicateSearchTransportInput);
 export const deleteGalleryCollectionDuplicates = handler('deleteDuplicates');
 export const transferGalleryCollectionImages = handler('transferCollectionImages');
 export const listGallerySubjects = handler('listSubjects');

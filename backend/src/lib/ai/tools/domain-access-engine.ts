@@ -1,6 +1,5 @@
 import { db } from '@/lib/db/client';
-import type { DomainToolContext } from './domain-execute';
-import { DomainToolExecutionError } from './domain-execute';
+import { ToolExecutionError, type ToolContext } from './tool-context';
 
 export const accessRoleRank = { owner: 4, admin: 3, moderator: 2, viewer: 1 } as const;
 export type AccessRole = keyof typeof accessRoleRank;
@@ -22,13 +21,13 @@ async function one<T>(query: string, bindVars: Record<string, unknown>): Promise
   return await cursor.next() ?? null;
 }
 
-export async function getActiveOrganization(context: DomainToolContext): Promise<OrganizationRecord> {
+export async function getActiveOrganization(context: ToolContext): Promise<OrganizationRecord> {
   const organization = await one<OrganizationRecord>('FOR organization IN organizations FILTER organization._key == @key LIMIT 1 RETURN MERGE(organization, { key: organization._key })', { key: context.organizationKey });
-  if (!organization) throw new DomainToolExecutionError('organization_not_found', 'The active organization no longer exists');
+  if (!organization) throw new ToolExecutionError('organization_not_found', 'The active organization no longer exists');
   return organization;
 }
 
-export async function resolveMembership(context: DomainToolContext, reference?: string): Promise<MembershipRecord | null> {
+export async function resolveMembership(context: ToolContext, reference?: string): Promise<MembershipRecord | null> {
   const membershipKey = reference ?? (context.principal.kind === 'member' ? context.principal.userOrganization.key : null);
   if (!membershipKey) return null;
   const needle = membershipKey.toLocaleLowerCase();
@@ -40,19 +39,19 @@ export async function resolveMembership(context: DomainToolContext, reference?: 
       RETURN { key: membership._key, organizationId: membership.organizationId, userId: membership.userId, orgRole: membership.orgRole, status: membership.status, user: { key: user._key, name: user.name, email: user.email, alias: user.alias } }
   `, { organizationKey: context.organizationKey, reference: membershipKey, needle });
   const matches = await cursor.all();
-  if (matches.length > 1) throw new DomainToolExecutionError('member_ambiguous', `${reference} resolved to multiple organization members`);
+  if (matches.length > 1) throw new ToolExecutionError('member_ambiguous', `${reference} resolved to multiple organization members`);
   return matches[0] ?? null;
 }
 
-export async function resolveScope(context: DomainToolContext, reference: string): Promise<ScopeRecord> {
+export async function resolveScope(context: ToolContext, reference: string): Promise<ScopeRecord> {
   const needle = reference.toLocaleLowerCase();
   const cursor = await db.query<ScopeRecord>('FOR scope IN scopes FILTER scope.organizationKey == @organizationKey FILTER scope._key == @reference || LOWER(scope.slug) == @needle || LOWER(scope.name) == @needle RETURN MERGE(scope, { key: scope._key })', { organizationKey: context.organizationKey, reference, needle });
   const matches = await cursor.all();
-  if (matches.length !== 1) throw new DomainToolExecutionError(matches.length ? 'scope_ambiguous' : 'scope_not_found', `${reference} resolved to ${matches.length} scopes`);
+  if (matches.length !== 1) throw new ToolExecutionError(matches.length ? 'scope_ambiguous' : 'scope_not_found', `${reference} resolved to ${matches.length} scopes`);
   return matches[0]!;
 }
 
-export async function resolveAgentInOrganization(context: DomainToolContext, reference: string): Promise<AgentRecord> {
+export async function resolveAgentInOrganization(context: ToolContext, reference: string): Promise<AgentRecord> {
   const needle = reference.toLocaleLowerCase();
   const cursor = await db.query<AgentRecord>(`
     FOR agent IN agents
@@ -61,7 +60,7 @@ export async function resolveAgentInOrganization(context: DomainToolContext, ref
       RETURN MERGE(agent, { key: agent._key })
   `, { organizationKey: context.organizationKey, reference, needle });
   const matches = await cursor.all();
-  if (matches.length !== 1) throw new DomainToolExecutionError(matches.length ? 'agent_ambiguous' : 'agent_not_found', `${reference} resolved to ${matches.length} agents`);
+  if (matches.length !== 1) throw new ToolExecutionError(matches.length ? 'agent_ambiguous' : 'agent_not_found', `${reference} resolved to ${matches.length} agents`);
   return matches[0]!;
 }
 
@@ -76,9 +75,9 @@ function organizationActionAllowed(role: AccessRole, action?: string) {
   return role === 'owner' || role === 'admin';
 }
 
-export async function evaluateOrganizationAccess(context: DomainToolContext, input: { organization?: string; member?: string; action?: string }): Promise<OrganizationAccessDecision> {
+export async function evaluateOrganizationAccess(context: ToolContext, input: { organization?: string; member?: string; action?: string }): Promise<OrganizationAccessDecision> {
   const organization = await getActiveOrganization(context);
-  if (input.organization && ![organization.key, organization.name.toLocaleLowerCase(), organization.slug?.toLocaleLowerCase()].includes(input.organization.toLocaleLowerCase())) throw new DomainToolExecutionError('organization_forbidden', 'Only the active organization may be evaluated');
+  if (input.organization && ![organization.key, organization.name.toLocaleLowerCase(), organization.slug?.toLocaleLowerCase()].includes(input.organization.toLocaleLowerCase())) throw new ToolExecutionError('organization_forbidden', 'Only the active organization may be evaluated');
   const membership = await resolveMembership(context, input.member);
   if (!membership) return { allowed: false, reason: input.member ? 'MEMBERSHIP_NOT_FOUND' : 'UNAUTHENTICATED', effectiveRole: null, organization, membership: null };
   const role = membership.orgRole === 'member' ? 'viewer' : membership.orgRole as AccessRole;
@@ -96,7 +95,7 @@ function scopeActionAllowed(role: AccessRole, action?: string) {
   return rankAccessRole(role) >= accessRoleRank.moderator;
 }
 
-export async function evaluateScopeAccess(context: DomainToolContext, input: { scope: string; member?: string; action?: string }): Promise<ScopeAccessDecision> {
+export async function evaluateScopeAccess(context: ToolContext, input: { scope: string; member?: string; action?: string }): Promise<ScopeAccessDecision> {
   const scope = await resolveScope(context, input.scope);
   const organizationDecision = await evaluateOrganizationAccess(context, { member: input.member });
   if (!organizationDecision.allowed) return { allowed: false, reason: 'ORGANIZATION_ACCESS_DENIED', effectiveRole: organizationDecision.effectiveRole, accessSources: [], organizationDecision, scope };
@@ -122,7 +121,7 @@ export async function evaluateScopeAccess(context: DomainToolContext, input: { s
   return { allowed, reason: allowed ? 'ALLOWED' : 'ACTION_DENIED', effectiveRole: effective, accessSources: sources, organizationDecision, scope };
 }
 
-export async function evaluateAgentAccess(context: DomainToolContext, input: { scope: string; agent: string; member?: string; action?: 'read' | 'run' | 'delegate' | 'manage' }): Promise<AgentAccessDecision> {
+export async function evaluateAgentAccess(context: ToolContext, input: { scope: string; agent: string; member?: string; action?: 'read' | 'run' | 'delegate' | 'manage' }): Promise<AgentAccessDecision> {
   const scopeDecision = await evaluateScopeAccess(context, { scope: input.scope, member: input.member, action: input.action === 'manage' ? 'scope.agent.manage' : 'read' });
   const base = { effectiveScopeRole: scopeDecision.effectiveRole, agentAccessSources: [] as AgentAccessDecision['agentAccessSources'], scopeDecision };
   if (!scopeDecision.organizationDecision.allowed) return { ...base, allowed: false, reason: 'ORGANIZATION_ACCESS_DENIED', scopeAgent: null, agent: null };

@@ -9,7 +9,7 @@ import { emailThreadsEmbeddingFields } from '@/lib/db/email-threads.node';
 import { buildEmbeddingText } from '@/lib/db/base';
 import { classifyEmailWithFallback } from './classification';
 import { connectorPublic, createConnectorRepository, type ConnectorRepository } from './connector-repository';
-import { createEmailRepository, EmailRepositoryError, type EmailRepository } from './repository';
+import { createEmailRepository, encodeEmailCursor, EmailRepositoryError, type EmailRepository } from './repository';
 import { createGmailClient, emailAddresses, GmailApiError, header, messageBodies, refreshGmailCredentials, type GmailClient, type GmailMessageResource } from './gmail';
 
 export interface EmailActor { userKey: string; organizationKey: string; scopeKey: string }
@@ -42,6 +42,9 @@ function publicMessage<T extends { embedding: number[]; bodyHtml?: string }>(val
   return safe;
 }
 type ReadEmailMessage = Omit<EmailMessage, 'embedding' | 'bodyHtml'> & { bodyTruncated: boolean };
+const TOOL_THREAD_MESSAGE_LIMIT = 50;
+const TOOL_MESSAGE_BODY_LIMIT = 8_000;
+const TOOL_THREAD_BODY_LIMIT = 64_000;
 
 function parsedMessage(message: GmailMessageResource, ownEmail: string) {
   const headers = message.payload?.headers;
@@ -93,6 +96,49 @@ export function createEmailService(options: {
       await connectors.updateCredentials(connector, credentials);
     }
     return { connector, credentials, gmail: clientFactory(credentials.accessToken) };
+  };
+  const fullThread = async (actor: EmailActor, threadKey: string) => {
+    const detail = await repository.thread(actor.scopeKey, threadKey);
+    return { thread: withoutEmbedding(detail.thread), messages: detail.messages.map(publicMessage) };
+  };
+  const boundedThread = async (actor: EmailActor, threadKey: string, cursor?: string) => {
+    const page = await repository.readThreadPage(actor.scopeKey, threadKey, TOOL_THREAD_MESSAGE_LIMIT, cursor);
+    let bodyCharacters = 0;
+    const messages: ReadEmailMessage[] = [];
+    for (const message of page.messages) {
+      const safe = publicMessage(message);
+      const body = safe.body.slice(0, TOOL_MESSAGE_BODY_LIMIT);
+      if (bodyCharacters + body.length > TOOL_THREAD_BODY_LIMIT) break;
+      bodyCharacters += body.length;
+      messages.push({ ...safe, body, bodyTruncated: body.length < safe.body.length } as ReadEmailMessage);
+    }
+    const stoppedByBodyLimit = messages.length < page.messages.length;
+    const last = messages.at(-1);
+    const nextCursor = messages.length === 0
+      ? null
+      : stoppedByBodyLimit && last
+        ? encodeEmailCursor({ v: 1, threadKey, sentAt: last.sentAt, key: last.key })
+        : page.nextCursor;
+    return {
+      thread: withoutEmbedding(page.thread), messages, nextCursor,
+      truncated: stoppedByBodyLimit || nextCursor !== null || messages.some(({ bodyTruncated }) => bodyTruncated),
+    };
+  };
+  const markThreadRead = async (actor: EmailActor, threadKey: string) => {
+    await mutate(actor, ['owner', 'admin', 'moderator']);
+    const detail = await repository.thread(actor.scopeKey, threadKey);
+    if (detail.thread.unread) {
+      const connection = await active(actor);
+      if (connection) await connection.gmail.modifyThread(detail.thread.providerThreadId, [], ['UNREAD']);
+      try {
+        await repository.markThreadRead(actor.scopeKey, threadKey);
+      } catch (error) {
+        if (connection) await connection.gmail.modifyThread(detail.thread.providerThreadId, ['UNREAD'], []).catch(() => undefined);
+        throw error;
+      }
+      detail.thread.unread = false;
+    }
+    return detail;
   };
 
   return {
@@ -238,38 +284,19 @@ export function createEmailService(options: {
       await repository.updateWatch(account.key, watch);
       return { watchExpiresAt: new Date(Number(watch.expiration)).toISOString() };
     },
-    async thread(actor: EmailActor, threadKey: string, markRead = true) {
+    async threadForHttp(actor: EmailActor, threadKey: string, markRead: boolean) {
       const resolved = await access(actor);
-      const detail = await repository.thread(actor.scopeKey, threadKey);
-      if (markRead && detail.thread.unread && resolved.role !== 'viewer') {
-        const connection = await active(actor);
-        if (connection) await connection.gmail.modifyThread(detail.thread.providerThreadId, [], ['UNREAD']);
-        await repository.markThreadRead(actor.scopeKey, threadKey);
-        detail.thread.unread = false;
-      }
+      if (!markRead || resolved.role === 'viewer') return fullThread(actor, threadKey);
+      const detail = await markThreadRead(actor, threadKey);
       return { thread: withoutEmbedding(detail.thread), messages: detail.messages.map(publicMessage) };
     },
-    async read(actor: EmailActor, requests: Array<{ threadKey: string; cursor?: string; limit: number }>) {
+    async threadForTool(actor: EmailActor, threadKey: string, cursor?: string) {
       await access(actor);
-      let remainingCharacters = 64_000;
-      const results = [];
-      for (const request of requests) {
-        try {
-          const page = await repository.readThreadPage(actor.scopeKey, request.threadKey, request.limit, request.cursor);
-          const nodes = page.messages.map((message) => {
-            const safe = publicMessage(message);
-            const allowed = Math.max(0, Math.min(8_000, remainingCharacters));
-            const body = safe.body.slice(0, allowed);
-            remainingCharacters -= body.length;
-            return { ...safe, body, bodyTruncated: body.length < safe.body.length } as ReadEmailMessage;
-          });
-          results.push({ key: request.threadKey, success: true as const, data: { thread: withoutEmbedding(page.thread), messages: nodes, nextCursor: page.nextCursor } });
-        } catch (error) {
-          const message = error instanceof EmailRepositoryError && error.reason === 'conflict' ? error.message : 'Email thread was not found';
-          results.push({ key: request.threadKey, success: false as const, error: { code: 'EMAIL_NOT_FOUND', message } });
-        }
-      }
-      return { results, summary: { requested: requests.length, succeeded: results.filter(({ success }) => success).length, failed: results.filter(({ success }) => !success).length } };
+      return boundedThread(actor, threadKey, cursor);
+    },
+    async markRead(actor: EmailActor, threadKey: string) {
+      await markThreadRead(actor, threadKey);
+      return boundedThread(actor, threadKey);
     },
     async setFavorite(actor: EmailActor, threadKey: string, isFavorite: boolean) {
       await mutate(actor, ['owner', 'admin', 'moderator']);

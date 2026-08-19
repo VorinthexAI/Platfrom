@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { z } from 'zod';
 import { newId } from '@/lib/ids';
-import type { DomainToolContext } from '@/lib/ai/tools/domain-execute';
+import type { ToolContext } from '@/lib/ai/tools/tool-context';
 import type { runContentTool } from '@/lib/ai/tools/content-runtime';
 import { AssistantCapabilityRegistry } from './capabilities';
 import { runPersonalAssistant } from './runtime';
@@ -13,7 +13,7 @@ const domain = {
   organizationKey,
   runtimeScopeKey: scopeKey,
   principal: { kind: 'member', user: { key: newId() }, userOrganization: { key: newId(), organizationId: organizationKey, status: 'active' } },
-} as unknown as DomainToolContext;
+} as unknown as ToolContext;
 
 const input = { surface: 'knowledge-workspace' as const, message: 'Help me', currentNote: { title: 'Notes', content: 'Existing text' } };
 const response = (output: unknown) => ({ output });
@@ -32,11 +32,12 @@ describe('personal assistant runtime', () => {
 
     expect(request).toEqual({ mode: 'model', organizationKey, actionSlug: 'orchestrator-chat', modelSlug: 'google.gemini-2.5-flash-lite' });
     expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual([
+      'content.hidden.list',
       'folder.hide', 'folder.reveal', 'document.hide', 'document.reveal',
       'folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy',
       'document.list', 'document.find', 'document.create', 'document.update',
       'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.summary.audio.generate', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.enhance', 'document.translate',
-      'document.list-versions', 'document.restore-version', 'document.download', 'content.neighbors', 'scope.content.search-history.delete', 'knowledge.search', 'note.write', 'assistant.unsupported',
+      'document.list-versions', 'document.restore-version', 'document.download', 'content.neighbors', 'content.search-history.delete', 'knowledge.search', 'note.write', 'assistant.unsupported',
     ]);
     expect(result).toEqual({ type: 'unsupported', message: 'This request is not supported in Archive. Core can search your documents or help write the open note.', sources: [] });
   });
@@ -70,13 +71,13 @@ describe('personal assistant runtime', () => {
     });
 
     expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual([
+      'content.hidden.list',
       'collection.list', 'collection.create', 'collection.update', 'collection.delete',
       'collection.member.list', 'collection.invite.pending.list', 'collection.invite.create', 'collection.invite.accept', 'collection.invite.reject', 'collection.invite.revoke',
       'collection.member.role.update', 'collection.member.remove', 'collection.leave', 'collection.share.list', 'collection.share.create', 'collection.share.update', 'collection.share.revoke', 'collection.share.activate',
       'image.search', 'image.favorite', 'image.update', 'image.delete',
       'collection.duplicates.delete', 'collection.image.transfer', 'subject.list', 'subject.create',
-      'subject.image.list', 'subject.delete', 'subject.restore', 'image.upload.reserve',
-      'image.upload.status', 'image.upload.complete', 'highlight.create', 'highlight.list',
+      'subject.image.list', 'subject.delete', 'subject.restore', 'highlight.create', 'highlight.list',
       'highlight.read', 'highlight.delete', 'collection.hide', 'collection.reveal',
       'image.hide', 'image.reveal', 'assistant.unsupported',
     ]);
@@ -210,67 +211,39 @@ describe('personal assistant runtime', () => {
     expect(result).toMatchObject({ type: 'answer', changes: [{ workspace: 'archive' }] });
   });
 
-  test('creates and writes a book through sequential scoped capabilities', async () => {
+  test('creates a book through one canonical service call', async () => {
     const bookKey = newId();
     const brief = { topic: 'Decision making', goal: 'Make clearer decisions', audience: 'Curious leaders', tone: 'Warm and rigorous', length: 'short', language: 'English' } as const;
-    const contentCalls: Array<{ name: string; input: any }> = [];
+    const serviceCalls: unknown[][] = [];
     let modelCalls = 0;
     const result = await runPersonalAssistant({ ...input, surface: 'book-workspace', requestKey: 'book-request-1', message: 'Create a short book about decision making for leaders.' }, domain, {
       execute: async (_request, nextInput) => {
         modelCalls += 1;
         if (modelCalls === 1) {
-          expect(nextInput.tools?.map(({ name }) => name)).toEqual(['book.list', 'book.detail', 'book.chapter.progress', 'book.create-context', 'book.write', 'assistant.unsupported']);
-          expect(nextInput.systemPrompt).toContain('Call book.create-context first');
-          return response({ text: '', toolCalls: [{ id: 'book-context-1', name: 'book.create-context', arguments: brief }], stopReason: 'tool_use' });
+          expect(nextInput.tools?.map(({ name }) => name)).toEqual(['book.list', 'book.detail', 'book.chapter.progress', 'book.create', 'assistant.unsupported']);
+          expect(nextInput.systemPrompt).toContain('Call book.create exactly once');
+          return response({ text: '', toolCalls: [{ id: 'book-create-1', name: 'book.create', arguments: brief }], stopReason: 'tool_use' });
         }
-        if (modelCalls === 2) {
-          expect(nextInput.messages.at(-1)).toMatchObject({ role: 'tool', content: [{ type: 'tool-result', result: { bookKey, status: 'planning' } }] });
-          return response({ text: '', toolCalls: [{ id: 'book-write-1', name: 'book.write', arguments: { bookKey, ...brief } }], stopReason: 'tool_use' });
-        }
-        expect(nextInput.messages.at(-1)).toMatchObject({ role: 'tool', content: [{ type: 'tool-result', result: { bookKey, status: 'ready' } }] });
+        expect(nextInput.messages.at(-1)).toMatchObject({ role: 'tool', content: [{ type: 'tool-result', result: { key: bookKey, status: 'ready' } }] });
         return response({ text: 'Your book is ready in Ascend.', toolCalls: [], stopReason: 'end_turn' });
       },
-      executeContent: (async (name: string, nextInput: any) => {
-        contentCalls.push({ name, input: nextInput });
-        return name === 'book.create-context' ? { bookKey, status: 'planning' } : { bookKey, status: 'ready' };
-      }) as any,
+      books: { create: async (...args: unknown[]) => { serviceCalls.push(args); return { key: bookKey, status: 'ready' }; } } as any,
     });
 
-    expect(contentCalls).toEqual([
-      { name: 'book.create-context', input: { scopeKey, ...brief, idempotencyKey: expect.stringMatching(/^[a-f0-9]{64}:context$/) } },
-      { name: 'book.write', input: { scopeKey, bookKey, ...brief, idempotencyKey: expect.stringMatching(/^[a-f0-9]{64}:write$/) } },
-    ]);
-    expect(modelCalls).toBe(3);
+    expect(serviceCalls).toEqual([[{ organizationKey, scopeKey, generationRequestKey: 'book-request-1', ...brief }, (domain.principal as any).user.key]]);
+    expect(modelCalls).toBe(2);
     expect(result).toEqual({ type: 'answer', message: 'Your book is ready in Ascend.', sources: [], changes: [{ workspace: 'ascend' }] });
   });
 
-  test('enforces the server-owned book creation sequence and matching brief', async () => {
-    await expect(runPersonalAssistant({ ...input, surface: 'book-workspace' }, domain, {
-      execute: async () => response({ text: '', toolCalls: [{ id: 'write-first', name: 'book.write', arguments: { bookKey: newId(), topic: 'Topic', goal: 'Goal', audience: 'Readers', tone: 'Clear', length: 'short', language: 'English' } }], stopReason: 'tool_use' }),
-    })).rejects.toThrow('before creating');
-
-    const bookKey = newId();
+  test('allows at most one book creation per assistant request', async () => {
     let call = 0;
     await expect(runPersonalAssistant({ ...input, surface: 'book-workspace' }, domain, {
       execute: async () => {
         call += 1;
-        return call === 1
-          ? response({ text: '', toolCalls: [{ id: 'create', name: 'book.create-context', arguments: { topic: 'Topic', goal: 'Goal', audience: 'Readers', tone: 'Clear', length: 'short', language: 'English' } }], stopReason: 'tool_use' })
-          : response({ text: '', toolCalls: [{ id: 'write', name: 'book.write', arguments: { bookKey, topic: 'Changed', goal: 'Goal', audience: 'Readers', tone: 'Clear', length: 'short', language: 'English' } }], stopReason: 'tool_use' });
+        return response({ text: '', toolCalls: [{ id: `create-${call}`, name: 'book.create', arguments: { topic: 'Topic', goal: 'Goal', audience: 'Readers', tone: 'Clear', length: 'short', language: 'English' } }], stopReason: 'tool_use' });
       },
-      executeContent: (async () => ({ bookKey, status: 'planning' })) as any,
-    })).rejects.toThrow('did not match');
-
-    let stoppedCall = 0;
-    await expect(runPersonalAssistant({ ...input, surface: 'book-workspace' }, domain, {
-      execute: async () => {
-        stoppedCall += 1;
-        return stoppedCall === 1
-          ? response({ text: '', toolCalls: [{ id: 'create', name: 'book.create-context', arguments: { topic: 'Topic', goal: 'Goal', audience: 'Readers', tone: 'Clear', length: 'short', language: 'English' } }], stopReason: 'tool_use' })
-          : response({ text: 'Your book is ready.', toolCalls: [], stopReason: 'end_turn' });
-      },
-      executeContent: (async () => ({ bookKey: newId(), status: 'planning' })) as any,
-    })).rejects.toThrow('before writing');
+      books: { create: async () => ({ key: newId(), status: 'ready' }) } as any,
+    })).rejects.toThrow('more than one book');
   });
 
   test('rejects capabilities outside the server-selected surface allowlist', async () => {

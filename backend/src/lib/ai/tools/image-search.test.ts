@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import { currentEmbeddingSchema, QWEN_RETRIEVAL_INSTRUCTION } from '@/lib/embeddings';
 import { newId } from '@/lib/ids';
-import type { DomainToolContext } from './domain-execute';
+import type { ToolContext } from './tool-context';
 import { imageSearchInputSchema, imageSearchTool } from './image-search';
 
 const embedding = currentEmbeddingSchema.parse(Array.from({ length: 4_096 }, () => 0.25));
 const now = '2026-08-11T12:00:00.000Z';
 
-function context(): DomainToolContext {
+function context(): ToolContext {
   const organizationKey = newId();
   return {
     organizationKey,

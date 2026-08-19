@@ -6,7 +6,7 @@ import { channelParticipantSchema } from '@/lib/db/channel-participants.node';
 import type { Message } from '@/lib/db/messages.node';
 import { CommunicationService } from '@/lib/communication/communication-service';
 import type { CommunicationRepository, GeneralChannelAccess } from '@/lib/communication/repository';
-import { orchestratorChatTool } from '@/lib/ai/tools/orchestrator-chat';
+import { orchestratorResponseRuntime } from '@/lib/ai/orchestrator-response-runtime';
 import { createCommunicationHandlers } from './communication';
 
 const now = '2026-07-29T12:00:00.000Z';
@@ -55,7 +55,7 @@ describe('Communication orchestrator chat flow', () => {
     const handlers = createCommunicationHandlers({
       service,
       resolveActor: async () => ({ organizationKey, membershipKey }),
-      stream: (skill, input, dependencies) => orchestratorChatTool.stream(skill, input, {
+      stream: (skill, input, dependencies) => orchestratorResponseRuntime.stream(skill, input, {
         ...dependencies,
         embedRetrievalQuery: async () => [1, 0],
         queryRetrieval: async (query, bindVars) => {

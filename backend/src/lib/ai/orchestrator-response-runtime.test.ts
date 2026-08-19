@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { ProviderExecutionError } from '@/lib/ai/router';
 import type { ProviderErrorCode } from '@/lib/ai/providers/errors';
 import type { ProviderStreamChunk } from '@/lib/ai/providers';
-import { orchestratorChatTool } from './orchestrator-chat';
+import { orchestratorResponseRuntime } from './orchestrator-response-runtime';
 
 function completed(text: string): () => AsyncIterable<ProviderStreamChunk> {
   return async function* () {
@@ -35,32 +35,33 @@ function routes(outcomes: Array<() => AsyncIterable<ProviderStreamChunk>>) {
 
 async function collect(dependencies: unknown): Promise<ProviderStreamChunk[]> {
   const chunks: ProviderStreamChunk[] = [];
-  for await (const chunk of orchestratorChatTool.stream('Atlas', { message: 'hello' }, dependencies as never)) chunks.push(chunk);
+  for await (const chunk of orchestratorResponseRuntime.stream('Atlas', { message: 'hello' }, dependencies as never)) chunks.push(chunk);
   return chunks;
 }
 
-describe('orchestrator chat tool', () => {
+describe('orchestrator response runtime', () => {
   test('validates messages and uses the injected executor', async () => {
-    await expect(orchestratorChatTool.execute('Atlas', { message: ' hello ' }, {
+    await expect(orchestratorResponseRuntime.execute('Atlas', { message: ' hello 😀 <unsafe>! ' }, {
       async execute(organizationKey, input) {
         expect(organizationKey).toBe('nexus');
-        expect(input.messages[0]?.content[0]).toEqual({ type: 'text', text: 'hello' });
+        expect(input.messages[0]?.content[0]).toEqual({ type: 'text', text: 'hello unsafe!' });
         expect(input.options?.maxTokens).toBe(1_200);
         return { output: { text: 'Answer', toolCalls: [], stopReason: 'stop' } } as never;
       },
     })).resolves.toBe('Answer');
-    await expect(orchestratorChatTool.execute('Atlas', { message: '' }, { execute: async () => ({}) as never })).rejects.toThrow();
-    await expect(orchestratorChatTool.execute('Atlas', { message: 'new', history: [{ role: 'user', content: 'old' }] }, { execute: async () => ({}) as never })).rejects.toThrow();
+    await expect(orchestratorResponseRuntime.execute('Atlas', { message: '' }, { execute: async () => ({}) as never })).rejects.toThrow();
+    await expect(orchestratorResponseRuntime.execute('Atlas', { message: '😀' }, { execute: async () => ({}) as never })).rejects.toThrow('message is empty after sanitization');
+    await expect(orchestratorResponseRuntime.execute('Atlas', { message: 'new', history: [{ role: 'user', content: 'old' }] }, { execute: async () => ({}) as never })).rejects.toThrow();
   });
 
   test('allows detailed responses', async () => {
     const calls: unknown[] = [];
-    await orchestratorChatTool.execute('Atlas', { message: 'Explain the plan' }, { execute: async (_organizationKey, input) => { calls.push(input); return { output: { text: 'Answer', toolCalls: [], stopReason: null } } as never; } });
+    await orchestratorResponseRuntime.execute('Atlas', { message: 'Explain the plan' }, { execute: async (_organizationKey, input) => { calls.push(input); return { output: { text: 'Answer', toolCalls: [], stopReason: null } } as never; } });
     expect(calls[0]).toMatchObject({ options: { maxTokens: 1_200 } });
   });
 
   test('retrieves authorized message nodes before channel chat', async () => {
-    await orchestratorChatTool.execute('Atlas skill', { message: 'Explain the launch' }, {
+    await orchestratorResponseRuntime.execute('Atlas skill', { message: 'Explain the launch' }, {
       organizationKey: 'org',
       retrievalContext: { organizationKey: 'org', membershipKey: 'membership', exclude: { messages: ['current'] } },
       embedRetrievalQuery: async (message) => { expect(message).toBe('Explain the launch'); return [1, 0]; },
@@ -80,7 +81,7 @@ describe('orchestrator chat tool', () => {
   });
 
   test('continues to model chat when retrieval exceeds its deadline', async () => {
-    await expect(orchestratorChatTool.execute('Atlas skill', { message: 'hello' }, {
+    await expect(orchestratorResponseRuntime.execute('Atlas skill', { message: 'hello' }, {
       organizationKey: 'org',
       retrievalContext: { organizationKey: 'org', membershipKey: 'membership' },
       retrievalTimeoutMs: 5,
@@ -97,7 +98,7 @@ describe('orchestrator chat tool', () => {
     const controller = new AbortController();
     controller.abort(new DOMException('cancelled', 'AbortError'));
     let sawAbortedSignal = false;
-    await expect(orchestratorChatTool.execute('Atlas skill', { message: 'hello' }, {
+    await expect(orchestratorResponseRuntime.execute('Atlas skill', { message: 'hello' }, {
       organizationKey: 'org',
       retrievalContext: { organizationKey: 'org', membershipKey: 'membership' },
       signal: controller.signal,
@@ -136,7 +137,7 @@ describe('orchestrator chat tool', () => {
     const route = routes([failed('provider_unavailable', 'discard me'), completed('safe response')]);
     const chunks: ProviderStreamChunk[] = [];
     await expect((async () => {
-      for await (const chunk of orchestratorChatTool.stream('Atlas', { message: 'hello' }, route.dependencies as never)) chunks.push(chunk);
+      for await (const chunk of orchestratorResponseRuntime.stream('Atlas', { message: 'hello' }, route.dependencies as never)) chunks.push(chunk);
     })()).rejects.toBeInstanceOf(ProviderExecutionError);
     expect(chunks).toEqual([{ type: 'text-delta', text: 'discard me' }]);
     expect(route.selections).toEqual([{ modelSlug: 'google.gemini-2.5-flash-lite', providerSlug: 'openrouter' }]);
