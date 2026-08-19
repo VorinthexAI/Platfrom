@@ -8,17 +8,13 @@ export const LEGACY_INDEX_FIELDS: Readonly<Record<string, readonly (readonly str
   users: [['platformId'], ['platform_role'], ['organization_role']],
   visitorSessions: [['platformId', 'connectedAt']],
   userSessions: [['platformId', 'connectedAt']],
-  agents: [['orchestratorId'], ['orchestratorId', 'name'], ['enabled']],
-  skills: [['enabled']],
   scopes: [['organizationId', 'name'], ['organizationId']],
-  // Agents may be assigned to multiple scopes. The current unique identity
-  // is (scopeKey, agentKey), not agentKey by itself.
-  scopeAgents: [['agentKey']],
   organizations: [['ownerId']],
   folders: [['parentFolderKey']],
   documents: [['folderKey']],
   documentVersions: [['scopeKey'], ['documentKey'], ['storageKey']],
   documentShares: [['scopeKey'], ['token']],
+  modelActions: [['modelKey', 'actionKey'], ['actionKey', 'enabled', 'priority']],
   contentSearchQueries: [['actorKey', 'scopeKey', 'normalizedQuery'], ['actorKey', 'scopeKey', 'contextDomain', 'normalizedQuery', 'folderKey', 'includeDescendants'], ['actorKey', 'scopeKey', 'contextDomain', 'searchedAt'], ['expiresAt']],
 };
 

@@ -17,9 +17,9 @@ describe('audio generation API', () => {
     expect((await app.request('/audio/generate', { method: 'POST', body: '{}' })).status).toBe(403);
   });
 
-  test('authorizes the agent and streams completed MP3 chunks in order', async () => {
+  test('authorizes the scope and streams completed MP3 chunks in order', async () => {
     const organizationKey = newId();
-    const agentKey = newId();
+    const scopeKey = newId();
     const userKey = newId();
     const calls: unknown[] = [];
     const app = new Hono();
@@ -32,7 +32,7 @@ describe('audio generation API', () => {
         yield { index: 1, startWord: 20, endWord: 21, startCharacter: 101, endCharacter: 105, audioBase64: 'c2Vjb25k', mimeType: 'audio/mpeg', durationMs: 200 };
       },
     }));
-    const response = await app.request('/audio/generate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, agentKey, input: { text: Array.from({ length: 21 }, () => 'word').join(' '), wordsPerChunk: 20 } }) });
+    const response = await app.request('/audio/generate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey, input: { text: Array.from({ length: 21 }, () => 'word').join(' '), wordsPerChunk: 20 } }) });
     const body = await response.text();
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toContain('text/event-stream');
@@ -40,10 +40,10 @@ describe('audio generation API', () => {
     expect(body.match(/event: chunk/g)).toHaveLength(2);
     expect(body.indexOf('"index":0')).toBeLessThan(body.indexOf('"index":1'));
     expect(body).toContain('event: done');
-    expect(calls).toEqual([{ input: { organizationKey, agentKey }, authenticatedUserKey: userKey }]);
+    expect(calls).toEqual([{ input: { organizationKey, scopeKey }, authenticatedUserKey: userKey }]);
   });
 
-  test('does not start generation when agent authorization fails', async () => {
+  test('does not start generation when scope authorization fails', async () => {
     let generated = false;
     const app = new Hono();
     app.post('/audio/generate', (context) => postAudioGenerate(context, {
@@ -51,7 +51,7 @@ describe('audio generation API', () => {
       authorize: async () => { throw new ContentError('CONTENT_FORBIDDEN', 'Denied.', 'audio.generate'); },
       generate: async function* () { generated = true; yield {} as never; },
     }));
-    const response = await app.request('/audio/generate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey: newId(), agentKey: newId(), input: { text: 'Read this document.' } }) });
+    const response = await app.request('/audio/generate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey: newId(), scopeKey: newId(), input: { text: 'Read this document.' } }) });
     expect(response.status).toBe(403);
     expect(generated).toBe(false);
   });
@@ -66,7 +66,7 @@ describe('audio generation API', () => {
         throw new Error('provider failed');
       },
     }));
-    const response = await app.request('/audio/generate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey: newId(), agentKey: newId(), input: { text: 'Read this document.' } }) });
+    const response = await app.request('/audio/generate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey: newId(), scopeKey: newId(), input: { text: 'Read this document.' } }) });
     const body = await response.text();
     expect(body).toContain('event: chunk');
     expect(body).toContain('event: error');

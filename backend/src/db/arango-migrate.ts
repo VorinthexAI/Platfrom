@@ -7,15 +7,8 @@ import { ensureOrganizationProvidersCollection } from '../lib/ai/organization-pr
 import { ensureOrganizationCredentialsCollection } from '../lib/ai/organization-credentials/indexes';
 import { ensureOrganizationConnectorsCollection } from '../lib/email-inbox/indexes';
 import { ensureScopeMembersCollection, ensureScopesCollection, ensureScopeScopesCollection } from '../lib/ai/scopes/indexes';
-import { reconcileOrganizationInheritedAgentMemberships, reconcileOrganizationScopeMemberships } from '../lib/ai/scopes/membership-invariant';
-import { ensureAgentRunsCollection } from '../lib/ai/agent-runs/indexes';
-import { ensureAgentRunStepsCollection } from '../lib/ai/agent-run-steps/indexes';
-import { ensureAgentRunCallsCollection } from '../lib/ai/agent-run-calls/indexes';
-import { ensureAgentArtifactsCollection } from '../lib/ai/agent-artifacts/indexes';
-import { ensureAgentMemoriesCollection } from '../lib/ai/agent-memories/indexes';
-import { ensureAgentRunSourcesCollection } from '../lib/ai/agent-run-sources/indexes';
-import { ensureAgentArtifactChecksCollection } from '../lib/ai/agent-artifact-checks/indexes';
-import { ensureRuntimeVariablesCollection } from '../lib/ai/runtime-variables/indexes';
+import { reconcileOrganizationScopeMemberships } from '../lib/ai/scopes/membership-invariant';
+import { actionIdSchema, type ActionId } from '../lib/ai/actions/types';
 import { organizationProviderSchema } from '../lib/ai/organization-providers/schema';
 import { buildEmbeddingText } from '../lib/db/base';
 import { NEXUS_SCOPE_KEY, SEEDED_SCOPES } from '../lib/db/seed';
@@ -230,29 +223,36 @@ async function runMigrationTransaction(targetDb: Database, collectionName: strin
   }
 }
 
-export async function retireRemovedActions(targetDb: Database): Promise<void> {
-  const slugs = [
-    'document-generate-json', 'core.transcribe', 'audio.transcribe', 'transcribe', 'email.read',
-    'access.agent.evaluate', 'access.agent.explain', 'access.organization.evaluate', 'access.organization.explain', 'access.scope.evaluate', 'access.scope.explain',
-    'agent.member.grant', 'agent.member.list', 'agent.member.read', 'agent.member.revoke', 'agent.member.sync',
-    'artifact.create',
-    'project.archive', 'project.create', 'project.delete', 'project.find', 'project.list', 'project.move', 'project.rename', 'project.restore', 'project.update',
-    'milestone.archive', 'milestone.change-status', 'milestone.complete', 'milestone.create', 'milestone.delete', 'milestone.find', 'milestone.list', 'milestone.move', 'milestone.rename', 'milestone.reopen', 'milestone.restore', 'milestone.schedule', 'milestone.update',
-    'task.archive', 'task.change-status', 'task.complete', 'task.create', 'task.delete', 'task.find', 'task.list', 'task.move', 'task.reopen', 'task.reorder', 'task.rename', 'task.restore', 'task.rewrite', 'task.summarize', 'task.translate', 'task.update',
-    'organization.archive', 'organization.member.activate', 'organization.member.add', 'organization.member.list', 'organization.member.read', 'organization.member.remove', 'organization.member.role.update', 'organization.member.suspend', 'organization.project.search', 'organization.provider.disable', 'organization.provider.enable', 'organization.provider.list', 'organization.provider.read', 'organization.provider.test', 'organization.read', 'organization.restore', 'organization.update',
-    'scope.agent.access-threshold.update', 'scope.agent.add', 'scope.agent.archive', 'scope.agent.list', 'scope.agent.move', 'scope.agent.read', 'scope.agent.remove', 'scope.agent.restore', 'scope.archive', 'scope.create', 'scope.list', 'scope.member.activate', 'scope.member.add', 'scope.member.list', 'scope.member.read', 'scope.member.remove', 'scope.member.role.update', 'scope.member.suspend', 'scope.move', 'scope.project.search', 'scope.read', 'scope.remove', 'scope.restore', 'scope.update',
-  ];
-  await targetDb.query(`
-    FOR relation IN modelActions
-      LET action = DOCUMENT(actions, relation.actionKey)
-      FILTER action != null && action.slug IN @slugs
-      REMOVE relation IN modelActions
-  `, { slugs });
-  await targetDb.query(`
-    FOR action IN actions
-      FILTER action.slug IN @slugs
-      REMOVE action IN actions
-  `, { slugs });
+export async function migrateModelActionSlugs(targetDb: Database): Promise<void> {
+  if (!await targetDb.collection('modelActions').exists()) return;
+  const actions = new Map<string, unknown>();
+  if (await targetDb.collection('actions').exists()) {
+    const cursor = await targetDb.query<{ key: string; slug: unknown }>('FOR action IN actions RETURN { key: action._key, slug: action.slug }');
+    for (const action of await cursor.all()) actions.set(action.key, action.slug);
+  }
+  const cursor = await targetDb.query<Record<string, unknown>>('FOR relation IN modelActions SORT relation._key RETURN relation');
+  const pairs = new Map<string, Array<{ key: string; actionSlug: ActionId; enabled: boolean; priority: number }>>();
+  for (const relation of await cursor.all()) {
+    const key = nonEmptyString(relation._key);
+    const modelKey = nonEmptyString(relation.modelKey);
+    const currentSlug = actionIdSchema.safeParse(relation.actionSlug);
+    const legacySlug = actionIdSchema.safeParse(actions.get(String(relation.actionKey)));
+    const actionSlug = currentSlug.success ? currentSlug.data : legacySlug.success ? legacySlug.data : null;
+    const pair = modelKey && actionSlug ? `${modelKey}\0${actionSlug}` : null;
+    if (!key || !pair || !actionSlug) {
+      if (key) await targetDb.query('REMOVE @key IN modelActions', { key });
+      continue;
+    }
+    const candidates = pairs.get(pair) ?? [];
+    candidates.push({ key, actionSlug, enabled: relation.enabled === true, priority: typeof relation.priority === 'number' && Number.isFinite(relation.priority) ? relation.priority : 0 });
+    pairs.set(pair, candidates);
+  }
+  for (const candidates of pairs.values()) {
+    candidates.sort((left, right) => Number(right.enabled) - Number(left.enabled) || right.priority - left.priority || left.key.localeCompare(right.key));
+    const [winner, ...duplicates] = candidates;
+    await targetDb.query('UPDATE @key WITH { actionSlug: @actionSlug, actionKey: null } IN modelActions OPTIONS { keepNull: false }', { key: winner!.key, actionSlug: winner!.actionSlug });
+    for (const duplicate of duplicates) await targetDb.query('REMOVE @key IN modelActions', { key: duplicate.key });
+  }
 }
 
 export async function retireTranscriptionDomain(targetDb: Database): Promise<void> {
@@ -291,73 +291,13 @@ export async function retireMomentumScope(targetDb: Database, organizationKey: s
   `, { organizationKey });
   const scopeKeys = await retired.all();
   if (scopeKeys.length === 0) return;
-  for (const collection of ['folders', 'tags', 'tagAssignments', 'documents', 'documentVersions', 'documentAudioVersions', 'documentSummaries', 'documentSummaryAudio', 'shares', 'agents', 'agentRuns', 'agentMemories']) {
+  for (const collection of ['folders', 'tags', 'tagAssignments', 'documents', 'documentVersions', 'documentAudioVersions', 'documentSummaries', 'documentSummaryAudio', 'shares']) {
     await targetDb.query(`
       FOR resource IN @@collection
         FILTER resource.scopeKey IN @scopeKeys
         UPDATE resource WITH { scopeKey: @archiveScopeKey } IN @@collection
     `, { '@collection': collection, scopeKeys, archiveScopeKey });
   }
-  await targetDb.query(`
-    FOR variable IN runtimeVariables
-      FILTER variable.scopeKey IN @scopeKeys
-      LET duplicate = FIRST(
-        FOR candidate IN runtimeVariables
-          FILTER candidate.organizationKey == variable.organizationKey
-            && candidate.agentKey == variable.agentKey
-            && candidate.name == variable.name
-            && (candidate.scopeKey == @archiveScopeKey || (candidate.scopeKey IN @scopeKeys && candidate._key < variable._key))
-          SORT candidate.scopeKey == @archiveScopeKey DESC, candidate._key ASC
-          RETURN candidate
-      )
-      FILTER duplicate != null
-      REMOVE variable IN runtimeVariables
-  `, { scopeKeys, archiveScopeKey });
-  await targetDb.query('FOR variable IN runtimeVariables FILTER variable.scopeKey IN @scopeKeys UPDATE variable WITH { scopeKey: @archiveScopeKey } IN runtimeVariables', { scopeKeys, archiveScopeKey });
-  await targetDb.query(`
-    FOR member IN agentMembers
-      FILTER member.scopeKey IN @scopeKeys
-      LET retiredLink = DOCUMENT(scopeAgents, member.scopeAgentKey)
-      LET canonicalMember = FIRST(
-        FOR candidate IN agentMembers
-          LET candidateLink = DOCUMENT(scopeAgents, candidate.scopeAgentKey)
-          FILTER candidateLink.agentKey == retiredLink.agentKey
-            && (candidateLink.scopeKey == @archiveScopeKey || candidateLink.scopeKey IN @scopeKeys)
-            && candidate.userOrganizationKey == member.userOrganizationKey
-            && candidate.source == member.source
-          SORT candidateLink.scopeKey == @archiveScopeKey DESC, candidate._key ASC
-          RETURN candidate
-      )
-      FILTER canonicalMember != null && canonicalMember._key != member._key
-      REMOVE member IN agentMembers
-  `, { scopeKeys, archiveScopeKey });
-  await targetDb.query(`
-    FOR member IN agentMembers
-      FILTER member.scopeKey IN @scopeKeys
-      LET retiredLink = DOCUMENT(scopeAgents, member.scopeAgentKey)
-      LET targetLink = FIRST(
-        FOR link IN scopeAgents
-          FILTER link.agentKey == retiredLink.agentKey
-            && (link.scopeKey == @archiveScopeKey || (link.scopeKey IN @scopeKeys && link._key <= retiredLink._key))
-          SORT link.scopeKey == @archiveScopeKey DESC, link._key ASC
-          RETURN link
-      )
-      UPDATE member WITH { scopeKey: @archiveScopeKey, scopeAgentKey: targetLink == null ? member.scopeAgentKey : targetLink._key } IN agentMembers
-  `, { scopeKeys, archiveScopeKey });
-  await targetDb.query(`
-    FOR link IN scopeAgents
-      FILTER link.scopeKey IN @scopeKeys
-      LET targetLink = FIRST(
-        FOR candidate IN scopeAgents
-          FILTER candidate.agentKey == link.agentKey
-            && (candidate.scopeKey == @archiveScopeKey || (candidate.scopeKey IN @scopeKeys && candidate._key < link._key))
-          SORT candidate.scopeKey == @archiveScopeKey DESC, candidate._key ASC
-          RETURN candidate
-      )
-      FILTER targetLink != null
-      REMOVE link IN scopeAgents
-  `, { scopeKeys, archiveScopeKey });
-  await targetDb.query('FOR link IN scopeAgents FILTER link.scopeKey IN @scopeKeys UPDATE link WITH { scopeKey: @archiveScopeKey } IN scopeAgents', { scopeKeys, archiveScopeKey });
   await targetDb.query('FOR relation IN scopeScopes FILTER relation.parentKey IN @scopeKeys || relation.childKey IN @scopeKeys REMOVE relation IN scopeScopes', { scopeKeys });
   await targetDb.query('FOR relation IN scopeMembers FILTER relation.scopeKey IN @scopeKeys REMOVE relation IN scopeMembers', { scopeKeys });
   await targetDb.query('FOR scope IN scopes FILTER scope._key IN @scopeKeys REMOVE scope IN scopes', { scopeKeys });
@@ -818,23 +758,6 @@ export async function removeLegacyTombstones(targetDb: Database): Promise<void> 
   if (uploadKeys.length && await exists('galleryUploads')) storageKeys.push(...await (await transaction.query('FOR upload IN galleryUploads FILTER upload._key IN @keys && IS_STRING(upload.storageKey) RETURN upload.storageKey', { keys: uploadKeys })).all() as string[]);
   await transaction.query('FOR storageKey IN UNIQUE(@storageKeys) FILTER IS_STRING(storageKey) && LENGTH(storageKey) > 0 UPSERT { storageKey } INSERT { storageKey, createdAt: @now } UPDATE {} IN storageDeletionJobs', { storageKeys, now: new Date().toISOString() });
 
-  const agentKeys = mergeKeys(
-    await keysFor('agents'),
-    await exists('agents') && scopeKeys.length ? await (await transaction.query('FOR agent IN agents FILTER agent.scopeKey IN @scopeKeys RETURN agent._key', { scopeKeys })).all() as string[] : [],
-  );
-  const scopeAgentKeys = await exists('scopeAgents') ? await (await transaction.query('FOR link IN scopeAgents FILTER link.scopeKey IN @scopeKeys || link.agentKey IN @agentKeys RETURN link._key', { scopeKeys, agentKeys })).all() as string[] : [];
-  const runKeys = await exists('agentRuns') ? await (await transaction.query('FOR run IN agentRuns FILTER run.scopeKey IN @scopeKeys || run.agentKey IN @agentKeys RETURN run._key', { scopeKeys, agentKeys })).all() as string[] : [];
-  for (const name of ['agentRunCalls', 'agentRunSteps', 'agentArtifacts', 'agentRunSources', 'agentArtifactChecks']) await removeBy(name, 'agentRunKey', runKeys);
-  await removeBy('agentMemories', 'sourceRunKey', runKeys);
-  await removeBy('agentMembers', 'scopeAgentKey', scopeAgentKeys);
-  await removeBy('agentMembers', 'agentKey', agentKeys);
-  await removeBy('agentSkills', 'agentKey', agentKeys);
-  await removeBy('runtimeVariables', 'agentKey', agentKeys);
-  await removeBy('agentRuns', 'agentKey', agentKeys);
-  await removeBy('agentMemories', 'agentKey', agentKeys);
-  await removeKeys('scopeAgents', scopeAgentKeys);
-  await removeKeys('agents', agentKeys);
-
   if (scopeKeys.length) {
     for (const name of [
       'scopeMembers', 'imageCaptions', 'visualIdentities', 'imageIdentities',
@@ -846,7 +769,6 @@ export async function removeLegacyTombstones(targetDb: Database): Promise<void> 
       'emailAccounts', 'emailThreads', 'emailMessages', 'emailContacts', 'emailWritingProfiles',
       'emailRules', 'emailReplyDrafts', 'channels', 'threads', 'messages', 'messageMentions',
       'messageReactions', 'polls', 'pollOptions', 'pollVotes',
-      'agents', 'scopeAgents', 'agentMembers', 'agentRuns', 'agentMemories', 'runtimeVariables',
     ]) await removeBy(name, 'scopeKey', scopeKeys);
     if (await exists('scopeScopes')) {
       await transaction.query('FOR relation IN scopeScopes FILTER relation.parentKey IN @keys || relation.childKey IN @keys REMOVE relation IN scopeScopes', { keys: scopeKeys });
@@ -959,15 +881,6 @@ async function removeDocumentDependents(
 
 export const collections: CollectionSpec[] = [
   {
-    name: 'actions',
-    embedKeys: ['name', 'description', 'objective', 'inputDescription', 'outputDescription'],
-    indexes: [
-      { fields: ['slug'], unique: true },
-      { fields: ['handlerKey'] },
-      { fields: ['enabled'] },
-    ],
-  },
-  {
     name: 'providers',
     embedKeys: ['name', 'slug'],
     indexes: [
@@ -984,8 +897,8 @@ export const collections: CollectionSpec[] = [
     name: 'modelActions',
     skipEmbedding: true,
     indexes: [
-      { fields: ['modelKey', 'actionKey'], unique: true },
-      { fields: ['actionKey', 'enabled', 'priority'] },
+      { fields: ['modelKey', 'actionSlug'], unique: true },
+      { fields: ['actionSlug', 'enabled', 'priority'] },
     ],
   },
   {
@@ -1041,7 +954,6 @@ export const collections: CollectionSpec[] = [
       { fields: ['orchestratorKey'], sparse: true },
     ],
   },
-  { name: 'minds', embedKeys: ['name'], indexes: [{ fields: ['userId'], unique: true }] },
   {
     name: 'orchestrators',
     embedKeys: ['name', 'role'],
@@ -1051,49 +963,6 @@ export const collections: CollectionSpec[] = [
     name: 'voices',
     embedKeys: ['voice', 'label', 'modelLabel', 'language'],
     indexes: [{ fields: ['provider', 'model', 'voice'], unique: true }],
-  },
-  {
-    name: 'agents',
-    embedKeys: ['name', 'title'],
-    indexes: [
-      { fields: ['slug'], unique: true },
-      { fields: ['scopeKey'] },
-      { fields: ['personalOwnerUserId'], unique: true, sparse: true },
-    ],
-  },
-  {
-    name: 'scopeAgents',
-    skipEmbedding: true,
-    indexes: [
-      { fields: ['scopeKey', 'agentKey'], unique: true },
-      { fields: ['organizationKey', 'scopeKey', 'status', 'position'] },
-      { fields: ['agentKey', 'status'] },
-    ],
-  },
-  {
-    name: 'agentMembers',
-    skipEmbedding: true,
-    indexes: [
-      { fields: ['scopeAgentKey', 'userOrganizationKey', 'source'], unique: true },
-      { fields: ['organizationKey', 'agentKey', 'userOrganizationKey'] },
-      { fields: ['scopeKey', 'userOrganizationKey'] },
-    ],
-  },
-  {
-    name: 'skills',
-    embedKeys: ['name', 'title', 'definition'],
-    indexes: [
-      { fields: ['slug'], unique: true },
-    ],
-  },
-  { name: 'capabilities', embedKeys: ['name'], indexes: [{ fields: ['name'] }] },
-  {
-    name: 'mindCapabilities',
-    indexes: [
-      { fields: ['mindId'] },
-      { fields: ['capabilityId'] },
-      { fields: ['mindId', 'capabilityId'], unique: true },
-    ],
   },
   { name: 'processedWebhookEvents', indexes: [{ fields: ['provider', 'eventId'], unique: true }] },
   {
@@ -1238,6 +1107,30 @@ const droppedCollections = [
   'organizationScopes',
   'organization_scopes',
   'scopeUsers',
+  'agents',
+  'skills',
+  'agentSkills',
+  'scopeAgents',
+  'agentMembers',
+  'agentRuns',
+  'agentRunSteps',
+  'agentRunCalls',
+  'agentRunSources',
+  'agentArtifacts',
+  'agentArtifactChecks',
+  'agentMemories',
+  'runtimeVariables',
+  'capabilities',
+  'mindCapabilities',
+  'minds',
+  'actions',
+  'agentArtifactsLegacy',
+  'agentRunsLegacy',
+  'agent_runs',
+  'agentTools',
+  'toolActions',
+  'tools',
+  'templates',
 ];
 
 async function main() {
@@ -1252,6 +1145,7 @@ async function main() {
   await removeLegacyTombstones(targetDb);
   await migrateGenericContentContracts(targetDb);
   await retireUserSettings(targetDb);
+  await migrateModelActionSlugs(targetDb);
 
   for (const name of droppedCollections) {
     const collection = targetDb.collection(name);
@@ -1260,66 +1154,6 @@ async function main() {
       console.log(`Dropped collection ${name}`);
     }
   }
-
-  // Preserve documents from the temporary templates collection, then retire it.
-  const skillsCollection = targetDb.collection('skills');
-  if (!(await skillsCollection.exists())) {
-    await skillsCollection.create();
-  }
-  for (const legacyName of ['templates']) {
-    const legacyCollection = targetDb.collection(legacyName);
-    if (!(await legacyCollection.exists())) continue;
-    await targetDb.query(
-      `
-        FOR doc IN @@legacy
-          INSERT doc INTO skills OPTIONS { overwriteMode: "ignore" }
-      `,
-      { '@legacy': legacyName },
-    );
-    await legacyCollection.drop();
-    console.log(`Copied ${legacyName} -> skills and dropped ${legacyName}`);
-  }
-
-  // agentSkills is a pure relation collection. It deliberately has no
-  // embedding field, so it is created outside the generic node backfill.
-  const agentSkillsCollection = targetDb.collection('agentSkills');
-  if (!(await agentSkillsCollection.exists())) {
-    await agentSkillsCollection.create();
-  }
-  await agentSkillsCollection.ensureIndex({ type: 'persistent', fields: ['agentKey', 'skillKey'], unique: true });
-  await agentSkillsCollection.ensureIndex({ type: 'persistent', fields: ['agentKey'], unique: false });
-  await agentSkillsCollection.ensureIndex({ type: 'persistent', fields: ['skillKey'], unique: false });
-  await agentSkillsCollection.ensureIndex({ type: 'persistent', fields: ['agentKey', 'priority'], unique: false });
-
-  // Persisted tool catalogs and grants are retired. These collections contain
-  // configuration only; audit records remain in agent run and event collections.
-  for (const name of ['agentTools', 'toolActions', 'tools']) {
-    const collection = targetDb.collection(name);
-    if (await collection.exists()) {
-      await collection.drop();
-      console.log(`Dropped retired ${name} collection`);
-    }
-  }
-  const agentRunCallsCollection = targetDb.collection('agentRunCalls');
-  if (await agentRunCallsCollection.exists()) {
-    for (const index of await agentRunCallsCollection.indexes()) {
-      const fields = 'fields' in index && Array.isArray(index.fields) ? index.fields.map(String) : [];
-      if (fields.length === 1 && fields[0] === 'toolKey') await agentRunCallsCollection.dropIndex(index.id);
-    }
-  }
-
-  // Agents are registry-only: the agent document's own scopeKey declares its
-  // home scope and no scope-assignment linking collection is maintained. A
-  // legacy scopeAgents collection may still exist in older databases; it is
-  // deliberately left untouched (never read, never written).
-
-  // Existing skills predate the separate competence-area name. Preserve
-  // their title as the initial name before the stricter schema is read.
-  await targetDb.query(`
-    FOR skill IN skills
-      FILTER !HAS(skill, "name") || skill.name == null || skill.name == ""
-      UPDATE skill WITH { name: skill.title } IN skills
-  `);
 
   // AI framework collections: creation + read-path indexes are owned by
   // their ensure* modules. Runs BEFORE the `collections` loop so the
@@ -1503,13 +1337,6 @@ async function main() {
     if (spec.name === 'collections' || spec.name === 'tags') {
       await targetDb.query(`FOR resource IN @@collection FILTER IS_STRING(resource.description) && LENGTH(TRIM(resource.description)) == 0 UPDATE resource WITH { description: null } IN @@collection OPTIONS { keepNull: false }`, { '@collection': spec.name });
     }
-    if (spec.name === 'actions') {
-      await targetDb.query(`
-        FOR doc IN actions
-          UPDATE doc WITH { createdAt: null, updatedAt: null }
-          IN actions OPTIONS { keepNull: false }
-      `);
-    }
     if (spec.name === 'providers') {
       await targetDb.query(`
         FOR doc IN providers
@@ -1518,47 +1345,6 @@ async function main() {
             supportedUseCases: null,
             enabled: null
           } IN providers OPTIONS { keepNull: false }
-      `);
-    }
-    if (spec.name === 'skills') {
-      // Normalize the retired orchestrator-owned shape before the new
-      // indexes and embeddings are created. The key is a stable slug fallback
-      // for any legacy document that predates the slug field.
-      await targetDb.query(`
-        FOR doc IN skills
-          UPDATE doc WITH {
-            slug: doc.slug != null && doc.slug != "" ? doc.slug : doc._key,
-            name: doc.name != null && doc.name != "" ? doc.name : doc._key,
-            title: doc.title != null && doc.title != "" ? doc.title : (doc.role != null ? doc.role : doc._key),
-            definition: doc.definition != null ? doc.definition : (doc.skill != null ? doc.skill : (doc.role != null ? doc.role : "")),
-            skill: null,
-            enabled: null,
-            orchestratorId: null,
-            role: null,
-            model: null,
-            storagePath: null,
-            createdAt: null,
-            updatedAt: null
-          } IN skills OPTIONS { keepNull: false }
-      `);
-    }
-    if (spec.name === 'agents') {
-      await targetDb.query(`
-        FOR doc IN agents
-          UPDATE doc WITH {
-            slug: doc.slug != null && doc.slug != "" ? doc.slug : doc._key,
-            name: doc.name != null && doc.name != "" ? doc.name : doc._key,
-            title: doc.title != null && doc.title != "" ? doc.title : (doc.role != null ? doc.role : doc._key),
-            scopeKey: doc.scopeKey != null && doc.scopeKey != "" ? doc.scopeKey : (doc.orchestratorId != null ? doc.orchestratorId : doc._key),
-            explorationRate: HAS(doc, "explorationRate") && doc.explorationRate >= 0 && doc.explorationRate <= 1 ? doc.explorationRate : 0.5,
-            enabled: null,
-            orchestratorId: null,
-            role: null,
-            model: null,
-            storagePath: null,
-            createdAt: null,
-            updatedAt: null
-          } IN agents OPTIONS { keepNull: false }
       `);
     }
     if (spec.name === 'documents') {
@@ -1650,10 +1436,6 @@ async function main() {
       } IN documentAudioVersions
   `);
 
-  // Removed action slugs can occupy fixed seed keys. Retire them before the
-  // strict seed reader resolves those keys into current action definitions.
-  await retireRemovedActions(targetDb);
-
   // Existing users predate country tracking. Sweden is the historical fallback;
   // new web signups provide their detected code.
   await targetDb.query(`
@@ -1661,35 +1443,6 @@ async function main() {
       FILTER !HAS(user, "countryCode") || user.countryCode == null || user.countryCode == ""
       UPDATE user WITH { countryCode: "SE" } IN users
   `);
-
-  // Every pre-relation agent is linked to its existing home scope. Existing
-  // scope memberships become inherited grants, preserving current access
-  // while making the new runtime checks authoritative on the next deploy.
-  const hierarchyCursor = await targetDb.query<{ parentKey: string; childKey: string }>('FOR relation IN scopeScopes RETURN { parentKey: relation.parentKey, childKey: relation.childKey }');
-  const parentByChild = new Map((await hierarchyCursor.all()).map((relation) => [relation.childKey, relation.parentKey]));
-  const agentsWithoutRelations = await targetDb.query<{ agentKey: string; scopeKey: string; organizationKey: string }>(`
-    FOR agent IN agents
-      LET scope = FIRST(FOR candidate IN scopes FILTER candidate._key == agent.scopeKey RETURN candidate)
-      FILTER scope != null
-      FILTER LENGTH(FOR link IN scopeAgents FILTER link.scopeKey == scope._key && link.agentKey == agent._key LIMIT 1 RETURN 1) == 0
-      RETURN { agentKey: agent._key, scopeKey: scope._key, organizationKey: scope.organizationKey }
-  `);
-  for (const agent of await agentsWithoutRelations.all()) {
-    const timestamp = new Date().toISOString();
-    const scopeAgentKey = newId();
-    await targetDb.collection('scopeAgents').save({ _key: scopeAgentKey, ...agent, position: 1, status: 'active', minimumAccessRole: 'viewer', createdByUserOrganizationKey: null, createdAt: timestamp, updatedAt: timestamp, embedding: [] });
-    const ancestorKeys = [agent.scopeKey]; let parentKey = parentByChild.get(agent.scopeKey);
-    while (parentKey && !ancestorKeys.includes(parentKey)) { ancestorKeys.push(parentKey); parentKey = parentByChild.get(parentKey); }
-    const members = await targetDb.query<{ userOrganizationKey: string }>(`
-      FOR membership IN userOrganizations
-        FILTER membership.organizationId == @organizationKey && membership.status == "active"
-        LET elevated = membership.orgRole == "owner" || membership.orgRole == "admin"
-        LET scoped = LENGTH(FOR member IN scopeMembers FILTER member.userOrganizationKey == membership._key && member.scopeKey IN @ancestorKeys && member.status == "active" LIMIT 1 RETURN 1) > 0
-        FILTER elevated || scoped
-        RETURN { userOrganizationKey: membership._key }
-    `, { organizationKey: agent.organizationKey, ancestorKeys });
-    for (const member of await members.all()) await targetDb.collection('agentMembers').save({ _key: newId(), organizationKey: agent.organizationKey, scopeKey: agent.scopeKey, agentKey: agent.agentKey, scopeAgentKey, userOrganizationKey: member.userOrganizationKey, source: 'inherited', createdByUserOrganizationKey: null, createdAt: timestamp, embedding: [] });
-  }
 
   // AI-layer collections rename: the first cut shipped snake_case names;
   // every other collection is camelCase plural, so copy the documents
@@ -1699,7 +1452,6 @@ async function main() {
   const aiCollectionRenames: Array<{ legacy: string; current: string }> = [
     { legacy: 'organization_providers', current: 'organizationProviders' },
     { legacy: 'organization_scopes', current: 'organizationScopes' },
-    { legacy: 'agent_runs', current: 'agentRuns' },
   ];
   for (const { legacy, current } of aiCollectionRenames) {
     const legacyCollection = targetDb.collection(legacy);
@@ -1796,70 +1548,6 @@ async function main() {
   await ensureOrganizationCredentialsCollection(targetDb);
   await ensureOrganizationConnectorsCollection(targetDb);
   await retireTranscriptionDomain(targetDb);
-
-  // The call-level ledger cannot safely infer DB keys or provider-reported
-  // usage for runs written with the retired slug-based shape. Preserve
-  // those documents verbatim for audit/history, but keep the live
-  // collection strict so every current run satisfies agentRunSchema.
-  const agentRuns = targetDb.collection('agentRuns');
-  if (await agentRuns.exists()) {
-    const legacyAgentRuns = targetDb.collection('agentRunsLegacy');
-    if (!(await legacyAgentRuns.exists())) await legacyAgentRuns.create();
-    const legacyFilter = 'doc.organizationKey == null || doc.scopeKey == null || doc.agentKey == null || HAS(doc, "steps") || HAS(doc, "calls") || doc.reason == null || doc.score == null || doc.startedAt == null || doc.endedAt == null || doc.elapsedMs == null';
-    await targetDb.query(`
-      FOR doc IN agentRuns
-        FILTER ${legacyFilter}
-        INSERT doc INTO agentRunsLegacy OPTIONS { overwriteMode: "ignore" }
-    `);
-    await targetDb.query(`
-      FOR doc IN agentRuns
-        FILTER ${legacyFilter}
-        REMOVE doc IN agentRuns
-    `);
-  }
-  await ensureAgentRunsCollection(targetDb);
-  await targetDb.query(`
-    FOR run IN agentRuns
-      FILTER !HAS(run, "principalType") || !HAS(run, "userOrganizationKey")
-      UPDATE run WITH {
-        principalType: HAS(run, "principalType") ? run.principalType : "system",
-        userOrganizationKey: HAS(run, "userOrganizationKey") ? run.userOrganizationKey : null
-      } IN agentRuns
-  `);
-  await ensureAgentRunStepsCollection(targetDb);
-  await ensureAgentRunCallsCollection(targetDb);
-  const agentArtifacts = targetDb.collection('agentArtifacts');
-  if (await agentArtifacts.exists()) {
-    const legacyAgentArtifacts = targetDb.collection('agentArtifactsLegacy');
-    if (!(await legacyAgentArtifacts.exists())) await legacyAgentArtifacts.create();
-    await targetDb.query(`
-      FOR doc IN agentArtifacts
-        FILTER HAS(doc, "artifactKey") || !HAS(doc, "nodeType") || !HAS(doc, "nodeKey")
-        INSERT doc INTO agentArtifactsLegacy OPTIONS { overwriteMode: "ignore" }
-    `);
-    await targetDb.query(`
-      FOR doc IN agentArtifacts
-        FILTER HAS(doc, "artifactKey") || !HAS(doc, "nodeType") || !HAS(doc, "nodeKey")
-        REMOVE doc IN agentArtifacts
-    `);
-    await targetDb.query(`
-      FOR doc IN agentArtifacts
-        UPDATE doc WITH {
-          groupKey: HAS(doc, "groupKey") ? doc.groupKey : null,
-          position: HAS(doc, "position") ? doc.position : 0
-        } IN agentArtifacts
-    `);
-    for (const index of await agentArtifacts.indexes()) {
-      const fields: string[] = 'fields' in index && Array.isArray(index.fields) ? index.fields.map(String) : [];
-      if (fields.includes('artifactKey')) await agentArtifacts.dropIndex(index.id);
-    }
-  }
-  await ensureAgentArtifactsCollection(targetDb);
-  await ensureAgentRunSourcesCollection(targetDb);
-  await ensureAgentArtifactChecksCollection(targetDb);
-  await ensureRuntimeVariablesCollection(targetDb);
-  await ensureAgentMemoriesCollection(targetDb);
-
 
   // Legacy scratch collection the org-migration steps below write into
   // before the final user_organization -> userOrganizations copy. Not part
@@ -2683,14 +2371,11 @@ async function main() {
       RETURN { key: organization._key }
   `);
   let reconciledScopeMemberships = 0;
-  let reconciledAgentMemberships = 0;
   for (const organization of await organizationCursor.all()) {
     const reconciliation = await reconcileOrganizationScopeMemberships(organization.key, {}, targetDb);
     reconciledScopeMemberships += reconciliation.created.length;
-    const agentReconciliation = await reconcileOrganizationInheritedAgentMemberships(organization.key, targetDb);
-    reconciledAgentMemberships += agentReconciliation.created.length;
   }
-  console.log(`Reconciled ${reconciledScopeMemberships} organization scope memberships and ${reconciledAgentMemberships} inherited agent grants`);
+  console.log(`Reconciled ${reconciledScopeMemberships} organization scope memberships`);
 
   // Invitations are no longer part of organization membership. Strip the
   // retired field from every live document so the production database and

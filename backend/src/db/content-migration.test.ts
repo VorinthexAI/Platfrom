@@ -50,8 +50,6 @@ describe('Content share migration staging', () => {
     expect(source).toContain("await removeTyped('shares', 'sourceType', 'document'");
     expect(source).toContain("await removeTyped('tagAssignments', 'sourceType', 'document'");
     expect(source).toContain("await removeTyped('userHiddens', 'source', 'document'");
-    expect(source).toContain("await removeBy('agentSkills', 'agentKey', agentKeys)");
-    expect(source).toContain("['agentRunCalls', 'agentRunSteps', 'agentArtifacts', 'agentRunSources', 'agentArtifactChecks']");
     expect(source).toContain("FILTER thread.rootMessageKey IN @keys");
     expect(source).toContain('DOCUMENT(images, upload.imageKey) == null');
   });

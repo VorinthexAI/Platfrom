@@ -4,7 +4,6 @@ const realContext = {
   user: { key: "user", email: "user@example.com", country_code: "SE", is_onboarded: true },
   organization: { key: "org" },
   main_scope: { key: "scope" },
-  content_execution: { agent_key: "agent" },
 };
 const guestContext = {
   ...realContext,
@@ -77,7 +76,7 @@ beforeEach(() => {
   clearTokenCalls = 0;
   revokeCalls = 0;
   patchCalls.length = 0;
-  useAuthStore.setState({ status: "bootstrapping", user: null, organization: null, scope: null, contentExecution: null });
+  useAuthStore.setState({ status: "bootstrapping", user: null, organization: null, scope: null });
 });
 
 test("shows signed-out state without creating a guest when no session exists", async () => {

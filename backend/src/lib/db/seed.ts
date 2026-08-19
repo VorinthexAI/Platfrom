@@ -1,11 +1,9 @@
 import { aql } from 'arangojs';
-import { ZodError } from 'zod';
 import { closeDb, db } from './client';
 import { newId } from '@/lib/ids';
-import { getActionById, getActionBySlug, insertAction, updateAction, upsertActionByKey, type Action } from './actions.node';
 import { getProviderBySlug, insertProvider, updateProvider, type Provider } from './providers.node';
 import { getModelBySlug, insertModel, updateModel as updatePersistedModel, type Model } from './models.node';
-import { getModelActionById, getModelActionByPair, insertModelAction, listEnabledModelActionsByActionKey, modelActionSeedSchema, updateModelAction } from './model-actions.node';
+import { getModelActionById, getModelActionByPair, insertModelAction, modelActionSeedSchema, updateModelAction } from './model-actions.node';
 import { isArangoUniqueConstraintError } from './base';
 import { getModelProviderById, getModelProviderByPair, insertModelProvider, modelProviderSeedSchema, updateModelProvider, type ModelProvider } from './model-providers.node';
 import { getRootOrganization, insertOrganization, updateOrganization, type Organization } from './organizations.node';
@@ -14,10 +12,10 @@ import { getUserByEmail } from './users.node';
 import { getVoiceByProviderModelVoice, insertVoice, updateVoice, type Voice } from './voices.node';
 import { getOrchestratorByName, insertOrchestrator, updateOrchestrator, type Orchestrator } from './orchestrators.node';
 import { getDefaultScopeRepository, NEXUS_SCOPE_KEY } from '@/lib/ai/scopes';
-import { reconcileOrganizationInheritedAgentMemberships, reconcileOrganizationScopeMemberships } from '@/lib/ai/scopes/membership-invariant';
+import { reconcileOrganizationScopeMemberships } from '@/lib/ai/scopes/membership-invariant';
 import { SEEDED_ORCHESTRATOR_SKILLS } from '@/lib/orchestrators/seeded-skills';
 import { CANONICAL_ORCHESTRATOR_NAMES } from '@/lib/orchestrators/roster';
-import { ACTION_DEFINITIONS } from '@/lib/ai/actions';
+import { ACTION_DEFINITIONS, type ActionId } from '@/lib/ai/actions';
 
 export type SeedResult = {
   collection: string;
@@ -33,7 +31,6 @@ export class SeedReferenceError extends Error {
 }
 
 export interface AiRuntimeSeedUpserters {
-  action(seed: (typeof SEEDED_ACTIONS)[number]): Promise<SeedResult>;
   provider(seed: (typeof SEEDED_PROVIDERS)[number]): Promise<SeedResult>;
   model(seed: (typeof SEEDED_MODELS)[number]): Promise<SeedResult>;
   reconcileObsoleteModelActions(): Promise<SeedResult[]>;
@@ -44,8 +41,7 @@ export interface AiRuntimeSeedUpserters {
 export interface ObsoleteModelActionReconciliationStore {
   getModelBySlug(slug: string): Promise<{ key: string } | null>;
   updateModel(key: string, patch: { enabled: boolean }): Promise<unknown>;
-  getActionBySlug(slug: string): Promise<{ key: string } | null>;
-  getModelActionByPair(modelKey: string, actionKey: string): Promise<{ key: string; enabled: boolean } | null>;
+  getModelActionByPair(modelKey: string, actionSlug: ActionId): Promise<{ key: string; enabled: boolean } | null>;
   updateModelAction(key: string, patch: { enabled: boolean }): Promise<unknown>;
   getProviderBySlug?(slug: string): Promise<{ key: string } | null>;
   getModelProviderByPair?(modelKey: string, providerKey: string): Promise<{ key: string; enabled: boolean } | null>;
@@ -53,220 +49,6 @@ export interface ObsoleteModelActionReconciliationStore {
 }
 
 const now = () => new Date().toISOString();
-
-const LEGACY_SEEDED_ACTIONS = [
-  {
-    key: 'cm9action01vorinthexseed',
-    slug: 'core.chat',
-    name: 'Chat',
-    description: 'Answer a natural-language request within the active agent role and scope.',
-    objective: 'Provide a clear and useful response while respecting skill, guardrails, tools, permissions, and schema.',
-    inputDescription: 'A question, instruction, or conversational message with optional context and runtime metadata.',
-    outputDescription: 'A schema-valid answer with mandatory metadata containing accepted or rejected status, a reason of at most ten words, and a self-assessed score.',
-    handlerKey: 'core.chat',
-    enabled: true,
-  },
-  {
-    key: 'cm9action02vorinthexseed',
-    slug: 'core.reason',
-    name: 'Reason',
-    description: 'Perform deliberate analysis, planning, comparison, evaluation, decomposition, or decision support.',
-    objective: 'Produce a structured conclusion or plan from available context, constraints, evidence, alternatives, and success criteria.',
-    inputDescription: 'A problem, objective, decision, planning request, evaluation target, or structured facts and constraints.',
-    outputDescription: 'A validated recommendation, plan, comparison, decision, or evaluation with mandatory metadata.',
-    handlerKey: 'core.reason',
-    enabled: true,
-  },
-  {
-    key: 'cmcoreembedaction00000001',
-    slug: 'core.embedd',
-    name: 'Embed',
-    description: 'Generate a semantic vector for text using the selected embedding model.',
-    objective: 'Create a normalized vector suitable for retrieval and similarity operations.',
-    inputDescription: 'A nonempty text value to embed.',
-    outputDescription: 'A finite embedding vector.',
-    handlerKey: 'core.embedd',
-    enabled: true,
-  },
-  {
-    key: 'cmcorespeakaction00000001',
-    slug: 'core.speak',
-    name: 'Speak',
-    description: 'Synthesize speech from text using the selected voice engine.',
-    objective: 'Produce playable audio from text.',
-    inputDescription: 'Text, an optional voice identifier, and mp3 or wav output format.',
-    outputDescription: 'Base64-encoded audio with its MIME type.',
-    handlerKey: 'core.speak',
-    enabled: true,
-  },
-  {
-    key: 'cmartifactreadaction00000001',
-    slug: 'artifact.read',
-    name: 'Read Artifact',
-    description: 'Lazily reads one authorized artifact through its registered reverse-context resolver.',
-    objective: 'Return the full safe context projection for one permitted knowledge block.',
-    inputDescription: 'Organization, scope, agent, node type, and node key identifiers.',
-    outputDescription: 'A normalized Knowledge Block without raw database fields or storage metadata.',
-    handlerKey: 'artifact.read',
-    enabled: true,
-  },
-  {
-    key: 'cm9action03vorinthexseed',
-    slug: 'web.search',
-    name: 'Web Search',
-    description: 'Search the public web for relevant pages, documents, sources, products, entities, facts, or current information.',
-    objective: 'Retrieve focused web results for grounded evidence or downstream use.',
-    inputDescription: 'A search query with optional recency, domain, language, region, result count, and content-type constraints.',
-    outputDescription: 'Normalized search results with titles, snippets, source references, and mandatory metadata.',
-    handlerKey: 'web.search',
-    enabled: true,
-  },
-  {
-    key: 'cm9action04vorinthexseed',
-    slug: 'web.deep-research',
-    name: 'Deep Research',
-    description: 'Conduct iterative multi-source web research with synthesis, comparison, contradiction handling, and evidence-based conclusions.',
-    objective: 'Produce a comprehensive and defensible research result with uncertainty and gaps made explicit.',
-    inputDescription: 'A research question or investigation target with optional source, geography, date, depth, and output constraints.',
-    outputDescription: 'A structured research report with findings, sources, caveats, unresolved questions, and mandatory metadata.',
-    handlerKey: 'web.deep-research',
-    enabled: true,
-  },
-  {
-    key: 'cm9action05vorinthexseed',
-    slug: 'image.generate',
-    name: 'Generate Image',
-    description: 'Create one or more new images from text and optional reference assets or brand direction.',
-    objective: 'Generate image output matching the requested subject, composition, style, format, dimensions, and intended use.',
-    inputDescription: 'A detailed image prompt with optional references, aspect ratio, dimensions, quantity, transparency, style, and negative constraints.',
-    outputDescription: 'Generated image artifacts with normalized media metadata and mandatory metadata.',
-    handlerKey: 'image.generate',
-    enabled: true,
-  },
-  {
-    key: 'cm9action06vorinthexseed',
-    slug: 'image.edit',
-    name: 'Edit Image',
-    description: 'Modify an existing image by adding, removing, replacing, restyling, retouching, enhancing, extending, or correcting content.',
-    objective: 'Produce an edited image that preserves required source characteristics while applying requested changes accurately.',
-    inputDescription: 'Source image references, editing instructions, optional masks, regions, dimensions, preservation constraints, and format.',
-    outputDescription: 'Edited image artifacts with normalized media metadata and mandatory metadata.',
-    handlerKey: 'image.edit',
-    enabled: true,
-  },
-  {
-    key: 'cm9action07vorinthexseed',
-    slug: 'image.create-slideshow',
-    name: 'Create Slideshow',
-    description: 'Create a coherent multi-slide visual slideshow from a topic, objective, source material, brand context, and audience.',
-    objective: 'Produce a complete slideshow with logical narrative, consistent design, suitable pacing, and platform-aware content.',
-    inputDescription: 'A topic, goal, source text, audience, platform, slide count, aspect ratio, brand rules, tone, and call to action.',
-    outputDescription: 'An ordered slideshow with slide copy, asset references, layout metadata, narrative flow, and mandatory metadata.',
-    handlerKey: 'image.create-slideshow',
-    enabled: true,
-  },
-  {
-    key: 'cm9action08vorinthexseed',
-    slug: 'video.generate',
-    name: 'Generate Video',
-    description: 'Create a new video from text instructions and optional visual, audio, character, brand, or reference inputs.',
-    objective: 'Generate a video matching the requested subject, motion, timing, composition, style, duration, and publishing context.',
-    inputDescription: 'A video prompt with optional references, aspect ratio, duration, resolution, frame rate, audio, camera, motion, and style constraints.',
-    outputDescription: 'A generated video artifact with normalized metadata, duration, dimensions, previews when available, and mandatory metadata.',
-    handlerKey: 'video.generate',
-    enabled: true,
-  },
-  {
-    key: 'cm9action09vorinthexseed',
-    slug: 'video.edit',
-    name: 'Edit Video',
-    description: 'Modify an existing video by changing content, timing, pacing, visuals, audio, captions, transitions, framing, or production elements.',
-    objective: 'Produce an edited video that preserves required source material while applying requested changes coherently.',
-    inputDescription: 'A source video, editing instructions, optional time ranges, replacement assets, crop, subtitle, audio, brand, and output settings.',
-    outputDescription: 'An edited video artifact with normalized metadata, an edit summary, previews when available, and mandatory metadata.',
-    handlerKey: 'video.edit',
-    enabled: true,
-  },
-  {
-    key: 'cm9action10vorinthexseed',
-    slug: 'video.extend',
-    name: 'Extend Video',
-    description: 'Continue an existing video beyond its current ending while preserving continuity, identity, motion, style, and scene logic.',
-    objective: 'Generate a seamless continuation satisfying the requested direction and duration.',
-    inputDescription: 'A source video, extension duration, continuation prompt, continuity constraints, optional end-frame guidance, audio, and format.',
-    outputDescription: 'An extended video artifact with normalized metadata, extension duration, continuity notes when available, and mandatory metadata.',
-    handlerKey: 'video.extend',
-    enabled: true,
-  },
-  {
-    key: 'cm9action11vorinthexseed',
-    slug: 'video.analyze',
-    name: 'Analyze Video',
-    description: 'Inspect video content including scenes, objects, people, actions, speech, timing, quality, structure, or compliance.',
-    objective: 'Return a grounded structured analysis of the supplied video according to requested dimensions.',
-    inputDescription: 'A video reference with analysis objectives, optional time ranges, categories, questions, quality criteria, and detail level.',
-    outputDescription: 'A structured analysis with observations, timestamps, findings, issues, summaries, and mandatory metadata.',
-    handlerKey: 'video.analyze',
-    enabled: true,
-  },
-  {
-    key: 'cm9action12vorinthexseed',
-    slug: 'video.create-variation',
-    name: 'Create Video Variation',
-    description: 'Create a new variation of an existing video while preserving selected characteristics and changing specified attributes.',
-    objective: 'Produce an alternative version for testing, localization, platform adaptation, targeting, or stylistic exploration.',
-    inputDescription: 'A source video, variation brief, preserved and changed attributes, target audience or platform, duration, ratio, and output settings.',
-    outputDescription: 'A new video variation with normalized metadata, a concise description of changes, and mandatory metadata.',
-    handlerKey: 'video.create-variation',
-    enabled: true,
-  },
-  {
-    key: 'cm9action14vorinthexseed',
-    slug: 'audio.generate-speech',
-    name: 'Generate Speech',
-    description: 'Generate spoken audio from text using a requested voice, tone, pacing, language, pronunciation, and delivery style.',
-    objective: 'Produce natural and intelligible speech matching the requested vocal direction.',
-    inputDescription: 'Text with optional voice identifier, language, tone, pace, emphasis, pronunciation hints, emotion, format, and quality settings.',
-    outputDescription: 'A generated speech artifact with normalized metadata, duration when available, and mandatory metadata.',
-    handlerKey: 'audio.generate-speech',
-    enabled: true,
-  },
-  {
-    key: 'cm9action15vorinthexseed',
-    slug: 'audio.analyze',
-    name: 'Analyze Audio',
-    description: 'Inspect audio for speech, sound events, music, speaker characteristics, sentiment, quality, structure, or compliance.',
-    objective: 'Return a grounded structured interpretation according to requested analytical criteria.',
-    inputDescription: 'An audio reference with an analysis objective, optional time ranges, target properties, categories, quality criteria, and detail level.',
-    outputDescription: 'A structured analysis with observations, timestamps, detected properties, issues, summaries, and mandatory metadata.',
-    handlerKey: 'audio.analyze',
-    enabled: true,
-  },
-  {
-    key: 'cm9action16vorinthexseed',
-    slug: 'audio.generate-music',
-    name: 'Generate Music',
-    description: 'Create original music from a text brief and optional structural, instrumental, stylistic, emotional, or temporal constraints.',
-    objective: 'Generate coherent music matching the requested mood, genre, instrumentation, structure, duration, energy, and use.',
-    inputDescription: 'A music brief with optional genre, mood, instruments, tempo, duration, structure, vocals, references, loop requirement, and format.',
-    outputDescription: 'A generated music artifact with normalized metadata, duration, structural notes when available, and mandatory metadata.',
-    handlerKey: 'audio.generate-music',
-    enabled: true,
-  },
-] as const;
-
-/** Only generic runtime primitives are persisted as actions. Domain workflows are tools. */
-export const SEEDED_ACTIONS = ACTION_DEFINITIONS.map((definition, index) => ({
-  key: `cmruntimeaction${String(index + 1).padStart(10, '0')}`,
-  slug: definition.id,
-  name: definition.id.split('-').map((word) => word[0]!.toUpperCase() + word.slice(1)).join(' '),
-  description: `Generic ${definition.id} runtime primitive.`,
-  objective: `Execute the provider- and domain-neutral ${definition.id} primitive.`,
-  inputDescription: `Validated input for ${definition.id}.`,
-  outputDescription: `Normalized ${definition.id} result.`,
-  handlerKey: definition.id,
-  enabled: true,
-}));
 
 export const SEEDED_PROVIDERS = [
   {
@@ -397,16 +179,6 @@ export const SEEDED_MODELS = [
     name: 'Google Gemini 2.5 Flash-Lite',
     description: 'Google low-latency multimodal model for fast general-purpose and visual tasks through OpenRouter.',
     supportedUseCases: 'Chat, tool use, summarization, translation, extraction, classification, image captions, visual understanding, optical character recognition, and visual identity descriptions.',
-    enabled: true,
-  },
-] as const;
-
-const LEGACY_SEEDED_MODEL_ACTIONS = [
-  {
-    key: 'cmpollygenerativeaction0001',
-    modelSlug: 'amazon.polly-generative',
-    actionSlug: 'core.speak',
-    priority: 100,
     enabled: true,
   },
 ] as const;
@@ -697,15 +469,6 @@ export const SEEDED_VOICES: SeededVoice[] = [
   },
 ];
 
-/** Converts the retired persisted action before strict action parsing occurs. */
-async function migrateRetiredCoreAskAction(): Promise<void> {
-  await db.query(aql`
-    FOR action IN ${db.collection('actions')}
-      FILTER action.slug == ${'core.ask'}
-      UPDATE action WITH { slug: 'core.chat', handlerKey: 'core.chat' } IN ${db.collection('actions')}
-  `);
-}
-
 /** Rewrites the previously seeded Sonic graph in place so production keeps stable references. */
 async function migrateRetiredNovaSonicModel(): Promise<void> {
   await db.query(aql`
@@ -751,49 +514,6 @@ async function migrateRetiredNovaSonicModel(): Promise<void> {
   `);
 }
 
-async function upsertSeedAction(seed: (typeof SEEDED_ACTIONS)[number]): Promise<SeedResult> {
-  const existingBySlug = await getActionBySlug(seed.slug);
-  let existingByKey: Action | null = null;
-  let retiredKeyOwner = false;
-  try {
-    existingByKey = await getActionById(seed.key);
-  } catch (error) {
-    if (!(error instanceof ZodError)) throw error;
-    retiredKeyOwner = true;
-  }
-  if (!existingBySlug) {
-    if (retiredKeyOwner) {
-      await upsertActionByKey(seed);
-      for (const relation of await listEnabledModelActionsByActionKey(seed.key)) {
-        await updateModelAction(relation.key, { enabled: false });
-      }
-      return { collection: 'actions', key: seed.key, status: 'updated' };
-    }
-    let key = existingByKey ? newId() : seed.key;
-    try {
-      await insertAction({ ...seed, key });
-    } catch (error) {
-      if (!isArangoUniqueConstraintError(error)) throw error;
-      key = newId();
-      await insertAction({ ...seed, key });
-    }
-    return { collection: 'actions', key, status: 'created' };
-  }
-
-  const patch: Partial<Omit<Action, 'key' | 'embedding'>> = {
-    slug: seed.slug,
-    name: seed.name,
-    description: seed.description,
-    objective: seed.objective,
-    inputDescription: seed.inputDescription,
-    outputDescription: seed.outputDescription,
-    handlerKey: seed.handlerKey,
-    enabled: seed.enabled,
-  };
-  await updateAction(existingBySlug.key, patch);
-  return { collection: 'actions', key: existingBySlug.key, status: 'updated' };
-}
-
 async function upsertSeedProvider(seed: (typeof SEEDED_PROVIDERS)[number]): Promise<SeedResult> {
   const existing = await getProviderBySlug(seed.slug);
   if (!existing) {
@@ -830,10 +550,8 @@ async function upsertSeedModelAction(seed: (typeof SEEDED_MODEL_ACTIONS)[number]
   const parsed = modelActionSeedSchema.parse(seed);
   const model = await getModelBySlug(parsed.modelSlug);
   if (!model) throw new SeedReferenceError('model', parsed.modelSlug, 'modelAction');
-  const action = await getActionBySlug(parsed.actionSlug);
-  if (!action) throw new SeedReferenceError('action', parsed.actionSlug, 'modelAction');
 
-  const existing = await getModelActionByPair(model.key, action.key);
+  const existing = await getModelActionByPair(model.key, parsed.actionSlug);
   if (!existing) {
     const seededKeyOwner = await getModelActionById(parsed.key);
     let key = seededKeyOwner ? newId() : parsed.key;
@@ -841,7 +559,7 @@ async function upsertSeedModelAction(seed: (typeof SEEDED_MODEL_ACTIONS)[number]
       await insertModelAction({
         key,
         modelKey: model.key,
-        actionKey: action.key,
+        actionSlug: parsed.actionSlug,
         priority: parsed.priority,
         enabled: parsed.enabled,
       });
@@ -851,7 +569,7 @@ async function upsertSeedModelAction(seed: (typeof SEEDED_MODEL_ACTIONS)[number]
       await insertModelAction({
         key,
         modelKey: model.key,
-        actionKey: action.key,
+        actionSlug: parsed.actionSlug,
         priority: parsed.priority,
         enabled: parsed.enabled,
       });
@@ -867,7 +585,6 @@ async function upsertSeedModelAction(seed: (typeof SEEDED_MODEL_ACTIONS)[number]
 export async function reconcileObsoleteSeededModelActions(store: ObsoleteModelActionReconciliationStore = {
   getModelBySlug,
   updateModel: updatePersistedModel,
-  getActionBySlug,
   getModelActionByPair,
   updateModelAction,
   getProviderBySlug,
@@ -881,9 +598,7 @@ export async function reconcileObsoleteSeededModelActions(store: ObsoleteModelAc
     await store.updateModel(model.key, { enabled: false });
     results.push({ collection: 'models', key: model.key, status: 'updated' });
     for (const actionDefinition of ACTION_DEFINITIONS) {
-      const action = await store.getActionBySlug(actionDefinition.id);
-      if (!action) continue;
-      const existing = await store.getModelActionByPair(model.key, action.key);
+      const existing = await store.getModelActionByPair(model.key, actionDefinition.id);
       if (!existing?.enabled) continue;
       await store.updateModelAction(existing.key, { enabled: false });
       results.push({ collection: 'modelActions', key: existing.key, status: 'updated' });
@@ -891,9 +606,8 @@ export async function reconcileObsoleteSeededModelActions(store: ObsoleteModelAc
   }
 
   const realtime = await store.getModelBySlug('openai.gpt-realtime-2');
-  const orchestratorChat = await store.getActionBySlug('orchestrator-chat');
-  if (realtime && orchestratorChat) {
-    const existing = await store.getModelActionByPair(realtime.key, orchestratorChat.key);
+  if (realtime) {
+    const existing = await store.getModelActionByPair(realtime.key, 'orchestrator-chat');
     if (existing?.enabled) {
       await store.updateModelAction(existing.key, { enabled: false });
       results.push({ collection: 'modelActions', key: existing.key, status: 'updated' });
@@ -904,8 +618,7 @@ export async function reconcileObsoleteSeededModelActions(store: ObsoleteModelAc
   if (titan) {
     await store.updateModel(titan.key, { enabled: false });
     results.push({ collection: 'models', key: titan.key, status: 'updated' });
-    const embed = await store.getActionBySlug('embed');
-    const legacyAction = embed ? await store.getModelActionByPair(titan.key, embed.key) : null;
+    const legacyAction = await store.getModelActionByPair(titan.key, 'embed');
     if (legacyAction?.enabled) {
       await store.updateModelAction(legacyAction.key, { enabled: false });
       results.push({ collection: 'modelActions', key: legacyAction.key, status: 'updated' });
@@ -922,8 +635,7 @@ export async function reconcileObsoleteSeededModelActions(store: ObsoleteModelAc
   if (legacyOpenAIEmbedding) {
     await store.updateModel(legacyOpenAIEmbedding.key, { enabled: false });
     results.push({ collection: 'models', key: legacyOpenAIEmbedding.key, status: 'updated' });
-    const embed = await store.getActionBySlug('embed');
-    const legacyAction = embed ? await store.getModelActionByPair(legacyOpenAIEmbedding.key, embed.key) : null;
+    const legacyAction = await store.getModelActionByPair(legacyOpenAIEmbedding.key, 'embed');
     if (legacyAction?.enabled) {
       await store.updateModelAction(legacyAction.key, { enabled: false });
       results.push({ collection: 'modelActions', key: legacyAction.key, status: 'updated' });
@@ -945,8 +657,7 @@ export async function reconcileObsoleteSeededModelActions(store: ObsoleteModelAc
     await store.updateModel(legacyModel.key, { enabled: false });
     results.push({ collection: 'models', key: legacyModel.key, status: 'updated' });
     for (const actionDefinition of ACTION_DEFINITIONS) {
-      const action = await store.getActionBySlug(actionDefinition.id);
-      const binding = action ? await store.getModelActionByPair(legacyModel.key, action.key) : null;
+      const binding = await store.getModelActionByPair(legacyModel.key, actionDefinition.id);
       if (!binding?.enabled) continue;
       await store.updateModelAction(binding.key, { enabled: false });
       results.push({ collection: 'modelActions', key: binding.key, status: 'updated' });
@@ -1086,7 +797,6 @@ async function assignSeededFounderOrchestrators(rootOrganizationKey: string): Pr
 }
 
 export async function seedAiRuntimeNodes(upserters: AiRuntimeSeedUpserters = {
-  action: upsertSeedAction,
   provider: upsertSeedProvider,
   model: upsertSeedModel,
   reconcileObsoleteModelActions: reconcileObsoleteSeededModelActions,
@@ -1094,7 +804,6 @@ export async function seedAiRuntimeNodes(upserters: AiRuntimeSeedUpserters = {
   modelProvider: upsertSeedModelProvider,
 }): Promise<SeedResult[]> {
   const results: SeedResult[] = [];
-  for (const seed of SEEDED_ACTIONS) results.push(await upserters.action(seed));
   for (const seed of SEEDED_PROVIDERS) results.push(await upserters.provider(seed));
   for (const seed of SEEDED_MODELS) results.push(await upserters.model(seed));
   results.push(...await upserters.reconcileObsoleteModelActions());
@@ -1104,7 +813,6 @@ export async function seedAiRuntimeNodes(upserters: AiRuntimeSeedUpserters = {
 }
 
 export async function seedCoreDbNodes(): Promise<SeedResult[]> {
-  await migrateRetiredCoreAskAction();
   await migrateRetiredNovaSonicModel();
   const results = await seedAiRuntimeNodes();
 
@@ -1184,8 +892,6 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
 
   const membershipReconciliation = await reconcileOrganizationScopeMemberships(rootOrganization.key);
   results.push(...membershipReconciliation.created.map(({ key }) => ({ collection: 'scopeMembers', key, status: 'created' as const })));
-  const agentMembershipReconciliation = await reconcileOrganizationInheritedAgentMemberships(rootOrganization.key);
-  results.push(...agentMembershipReconciliation.created.map(({ key }) => ({ collection: 'agentMembers', key, status: 'created' as const })));
 
   for (const voice of SEEDED_VOICES) {
     results.push(await upsertSeedVoice(voice));

@@ -1,14 +1,13 @@
 import { describe, expect, test } from 'bun:test';
-import { ACTION_DEFINITIONS, ACTION_SLUGS } from '@/lib/ai/actions';
+import { ACTION_DEFINITIONS } from '@/lib/ai/actions';
 import { PROVIDER_SLUGS } from '@/lib/ai/providers';
 import { EMBEDDING_MODEL, EXTERNAL_EMBEDDING_MODEL_ID } from '@/lib/embedding-constants';
-import { actionSchema } from './actions.node';
 import { providerSchema } from './providers.node';
 import { voiceSchema } from './voices.node';
 import { scopeSchema, scopeScopeSchema } from '@/lib/ai/scopes';
 import { newId } from '@/lib/ids';
 import { join } from 'node:path';
-import { NEXUS_SCOPE_KEY, SEEDED_ACTIONS, SEEDED_MODELS, SEEDED_MODEL_ACTIONS, SEEDED_MODEL_PROVIDERS, SEEDED_ORCHESTRATOR_SOURCES, SEEDED_PROVIDERS, SEEDED_SCOPES, SEEDED_VOICES, reconcileObsoleteSeededModelActions, seedAiRuntimeNodes, type AiRuntimeSeedUpserters, type SeedResult } from './seed';
+import { NEXUS_SCOPE_KEY, SEEDED_MODELS, SEEDED_MODEL_ACTIONS, SEEDED_MODEL_PROVIDERS, SEEDED_ORCHESTRATOR_SOURCES, SEEDED_PROVIDERS, SEEDED_SCOPES, SEEDED_VOICES, reconcileObsoleteSeededModelActions, seedAiRuntimeNodes, type AiRuntimeSeedUpserters, type SeedResult } from './seed';
 import { CANONICAL_ORCHESTRATOR_NAMES } from '@/lib/orchestrators/roster';
 
 describe('scope seeds', () => {
@@ -57,30 +56,6 @@ describe('scope seeds', () => {
   });
 });
 
-describe('action seeds', () => {
-  test('seed every registered action exactly once', () => {
-    const slugs = SEEDED_ACTIONS.map((action) => action.slug);
-
-    expect([...slugs].sort()).toEqual([...ACTION_SLUGS].sort());
-    expect(new Set(slugs).size).toBe(slugs.length);
-    expect(new Set(SEEDED_ACTIONS.map((action) => action.key)).size).toBe(SEEDED_ACTIONS.length);
-  });
-
-  test('match the persisted action schema and handler slug', () => {
-    for (const seed of SEEDED_ACTIONS) {
-      const parsed = actionSchema.parse(seed);
-
-      expect(parsed.handlerKey).toBe(parsed.slug);
-      expect(parsed.embedding).toEqual([]);
-    }
-  });
-
-  test('does not seed domain workflows as actions', () => {
-    expect(SEEDED_ACTIONS.some(({ slug }) => slug.includes('.'))).toBe(false);
-    expect(SEEDED_ACTIONS.find(({ slug }) => slug === 'insert')).toMatchObject({ name: 'Insert', handlerKey: 'insert' });
-  });
-});
-
 describe('provider seeds', () => {
   test('seed every supported provider while keeping its slug registered', () => {
     const slugs = SEEDED_PROVIDERS.map((provider) => provider.slug);
@@ -116,7 +91,6 @@ describe('model and routing relation seeds', () => {
     ]);
     expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'orchestrator-chat').map(({ modelSlug }) => modelSlug))
       .toEqual(['google.gemini-2.5-flash-lite', 'amazon.nova-pro']);
-    expect(SEEDED_MODEL_ACTIONS.some(({ actionSlug }) => actionSlug === 'transcribe')).toBe(false);
     expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'enhance').map(({ modelSlug }) => modelSlug))
       .toEqual(['google.gemini-2.5-flash-lite']);
     expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'translate').map(({ modelSlug }) => modelSlug))
@@ -229,7 +203,6 @@ describe('AI runtime seed orchestration', () => {
       return { collection, key: seed.key, status };
     };
     const upserters: AiRuntimeSeedUpserters = {
-      action: upsert('actions'),
       provider: upsert('providers'),
       model: upsert('models'),
       reconcileObsoleteModelActions: async () => [],
@@ -248,25 +221,22 @@ describe('AI runtime seed orchestration', () => {
 
   test('retires Realtime orchestrator chat while preserving unrelated bindings', async () => {
     const routes = new Map([
-      ['sonic-key:chat-key', { key: 'stale-binding-key', priority: 100, enabled: true }],
-      ['nova-pro-key:chat-key', { key: 'nova-pro-chat-key', priority: 100, enabled: true }],
-      ['gemini-key:chat-key', { key: 'gemini-chat-key', priority: 90, enabled: true }],
-      ['sonic-key:speak-key', { key: 'sonic-speak-key', priority: 100, enabled: true }],
-      ['custom-key:chat-key', { key: 'custom-chat-key', priority: 80, enabled: true }],
+      ['sonic-key:orchestrator-chat', { key: 'stale-binding-key', priority: 100, enabled: true }],
+      ['nova-pro-key:orchestrator-chat', { key: 'nova-pro-chat-key', priority: 100, enabled: true }],
+      ['gemini-key:orchestrator-chat', { key: 'gemini-chat-key', priority: 90, enabled: true }],
+      ['sonic-key:speak', { key: 'sonic-speak-key', priority: 100, enabled: true }],
+      ['custom-key:orchestrator-chat', { key: 'custom-chat-key', priority: 80, enabled: true }],
     ]);
     const modelKeys = new Map([['openai.gpt-realtime-2', 'sonic-key'], ['openai.gpt-5.6-terra', 'terra-key'], ['openai.gpt-5.6-luna', 'luna-key'], ['amazon.nova-pro', 'nova-pro-key'], ['google.gemini-2.5-flash-lite', 'gemini-key'], ['custom.model', 'custom-key']]);
-    const actionKeys = new Map([['orchestrator-chat', 'chat-key'], ['speak', 'speak-key']]);
     let reconciliationUpdates = 0;
     const noop = (collection: string) => async (seed: { key: string }): Promise<SeedResult> => ({ collection, key: seed.key, status: 'updated' });
     const upserters: AiRuntimeSeedUpserters = {
-      action: noop('actions'),
       provider: noop('providers'),
       model: noop('models'),
       reconcileObsoleteModelActions: () => reconcileObsoleteSeededModelActions({
         getModelBySlug: async (slug) => modelKeys.has(slug) ? { key: modelKeys.get(slug)! } : null,
         updateModel: async () => ({ collection: 'models', key: 'updated-model', status: 'updated' }),
-        getActionBySlug: async (slug) => actionKeys.has(slug) ? { key: actionKeys.get(slug)! } : null,
-        getModelActionByPair: async (modelKey, actionKey) => routes.get(`${modelKey}:${actionKey}`) ?? null,
+        getModelActionByPair: async (modelKey, actionSlug) => routes.get(`${modelKey}:${actionSlug}`) ?? null,
         updateModelAction: async (key, patch) => {
           const route = [...routes.values()].find((candidate) => candidate.key === key)!;
           route.enabled = patch.enabled;
@@ -275,8 +245,7 @@ describe('AI runtime seed orchestration', () => {
       }),
       modelAction: async (seed) => {
         const modelKey = modelKeys.get(seed.modelSlug) ?? seed.modelSlug;
-        const actionKey = actionKeys.get(seed.actionSlug) ?? seed.actionSlug;
-        routes.set(`${modelKey}:${actionKey}`, { key: seed.key, priority: seed.priority, enabled: seed.enabled });
+        routes.set(`${modelKey}:${seed.actionSlug}`, { key: seed.key, priority: seed.priority, enabled: seed.enabled });
         return { collection: 'modelActions', key: seed.key, status: 'updated' };
       },
       modelProvider: noop('modelProviders'),
@@ -285,18 +254,17 @@ describe('AI runtime seed orchestration', () => {
     await seedAiRuntimeNodes(upserters);
     await seedAiRuntimeNodes(upserters);
 
-    expect(routes.get('sonic-key:chat-key')?.enabled).toBe(false);
-    expect(routes.get('nova-pro-key:chat-key')?.enabled).toBe(true);
-    expect(routes.get('gemini-key:chat-key')?.enabled).toBe(true);
-    expect(routes.get('sonic-key:speak-key')?.enabled).toBe(true);
-    expect(routes.get('custom-key:chat-key')?.enabled).toBe(true);
+    expect(routes.get('sonic-key:orchestrator-chat')?.enabled).toBe(false);
+    expect(routes.get('nova-pro-key:orchestrator-chat')?.enabled).toBe(true);
+    expect(routes.get('gemini-key:orchestrator-chat')?.enabled).toBe(true);
+    expect(routes.get('sonic-key:speak')?.enabled).toBe(true);
+    expect(routes.get('custom-key:orchestrator-chat')?.enabled).toBe(true);
     expect(reconciliationUpdates).toBe(1);
   });
 
   test('disables blocked GPT-5.6 models and their seeded routes during migration', async () => {
     const models = new Map([['openai.gpt-5.6-terra', { key: 'blocked-terra', enabled: true }]]);
-    const actions = new Map([['chat', 'chat-key']]);
-    const routes = new Map([['blocked-terra:chat-key', { key: 'blocked-route', enabled: true }]]);
+    const routes = new Map([['blocked-terra:chat', { key: 'blocked-route', enabled: true }]]);
 
     const results = await reconcileObsoleteSeededModelActions({
       getModelBySlug: async (slug) => models.get(slug) ?? null,
@@ -304,8 +272,7 @@ describe('AI runtime seed orchestration', () => {
         const model = [...models.values()].find((candidate) => candidate.key === key)!;
         model.enabled = patch.enabled;
       },
-      getActionBySlug: async (slug) => actions.has(slug) ? { key: actions.get(slug)! } : null,
-      getModelActionByPair: async (modelKey, actionKey) => routes.get(`${modelKey}:${actionKey}`) ?? null,
+      getModelActionByPair: async (modelKey, actionSlug) => routes.get(`${modelKey}:${actionSlug}`) ?? null,
       updateModelAction: async (key, patch) => {
         const route = [...routes.values()].find((candidate) => candidate.key === key)!;
         route.enabled = patch.enabled;
@@ -313,13 +280,12 @@ describe('AI runtime seed orchestration', () => {
     });
 
     expect(models.get('openai.gpt-5.6-terra')?.enabled).toBe(false);
-    expect(routes.get('blocked-terra:chat-key')?.enabled).toBe(false);
+    expect(routes.get('blocked-terra:chat')?.enabled).toBe(false);
     expect(results.map(({ collection, key }) => `${collection}:${key}`)).toEqual(['models:blocked-terra', 'modelActions:blocked-route']);
   });
 
   test('retires the persisted Titan embedding model, action binding, and provider route', async () => {
     const model = { key: 'legacy-titan', enabled: true };
-    const action = { key: 'embed-action' };
     const provider = { key: 'bedrock-provider' };
     const binding = { key: 'legacy-binding', enabled: true };
     const route = { key: 'legacy-route', enabled: true };
@@ -327,7 +293,6 @@ describe('AI runtime seed orchestration', () => {
     const results = await reconcileObsoleteSeededModelActions({
       getModelBySlug: async (slug) => slug === 'amazon.titan-embed-text-v2' ? model : null,
       updateModel: async (_key, patch) => { model.enabled = patch.enabled; },
-      getActionBySlug: async (slug) => slug === 'embed' ? action : null,
       getModelActionByPair: async () => binding,
       updateModelAction: async (_key, patch) => { binding.enabled = patch.enabled; },
       getProviderBySlug: async (slug) => slug === 'aws-bedrock' ? provider : null,
@@ -345,15 +310,14 @@ describe('AI runtime seed orchestration', () => {
 
   test('retires the persisted Qwen vision model, bindings, and OpenRouter route', async () => {
     const model = { key: 'legacy-qwen-vision', enabled: true };
-    const actions = new Map(['caption-image', 'document-cleanup', 'describe-visual-identity'].map((slug) => [slug, { key: `${slug}-action` }]));
-    const bindings = new Map([...actions].map(([slug, action]) => [`${model.key}:${action.key}`, { key: `${slug}-binding`, enabled: true }]));
+    const actionSlugs = ['caption-image', 'document-cleanup', 'describe-visual-identity'];
+    const bindings = new Map(actionSlugs.map((slug) => [`${model.key}:${slug}`, { key: `${slug}-binding`, enabled: true }]));
     const route = { key: 'legacy-qwen-route', enabled: true };
 
     const results = await reconcileObsoleteSeededModelActions({
       getModelBySlug: async (slug) => slug === 'qwen.qwen3-vl-32b-instruct' ? model : null,
       updateModel: async (_key, patch) => { model.enabled = patch.enabled; },
-      getActionBySlug: async (slug) => actions.get(slug) ?? null,
-      getModelActionByPair: async (modelKey, actionKey) => bindings.get(`${modelKey}:${actionKey}`) ?? null,
+      getModelActionByPair: async (modelKey, actionSlug) => bindings.get(`${modelKey}:${actionSlug}`) ?? null,
       updateModelAction: async (key, patch) => { [...bindings.values()].find((binding) => binding.key === key)!.enabled = patch.enabled; },
       getProviderBySlug: async (slug) => slug === 'openrouter' ? { key: 'openrouter-provider' } : null,
       getModelProviderByPair: async () => route,
@@ -368,15 +332,14 @@ describe('AI runtime seed orchestration', () => {
 
   test('retires the persisted Nova Lite model, bindings, and Bedrock route', async () => {
     const model = { key: 'legacy-fast-model', enabled: true };
-    const actions = new Map(['ask', 'enhance', 'orchestrator-chat'].map((slug) => [slug, { key: `${slug}-action` }]));
-    const bindings = new Map([...actions].map(([slug, action]) => [`${model.key}:${action.key}`, { key: `${slug}-binding`, enabled: true }]));
+    const actionSlugs = ['ask', 'enhance', 'orchestrator-chat'];
+    const bindings = new Map(actionSlugs.map((slug) => [`${model.key}:${slug}`, { key: `${slug}-binding`, enabled: true }]));
     const route = { key: 'legacy-fast-route', enabled: true };
 
     await reconcileObsoleteSeededModelActions({
       getModelBySlug: async (slug) => slug === 'amazon.nova-lite' ? model : null,
       updateModel: async (_key, patch) => { model.enabled = patch.enabled; },
-      getActionBySlug: async (slug) => actions.get(slug) ?? null,
-      getModelActionByPair: async (modelKey, actionKey) => bindings.get(`${modelKey}:${actionKey}`) ?? null,
+      getModelActionByPair: async (modelKey, actionSlug) => bindings.get(`${modelKey}:${actionSlug}`) ?? null,
       updateModelAction: async (key, patch) => { [...bindings.values()].find((binding) => binding.key === key)!.enabled = patch.enabled; },
       getProviderBySlug: async (slug) => slug === 'aws-bedrock' ? { key: 'bedrock-provider' } : null,
       getModelProviderByPair: async () => route,
@@ -395,7 +358,6 @@ describe('AI runtime seed orchestration', () => {
     await reconcileObsoleteSeededModelActions({
       getModelBySlug: async (slug) => slug === 'openai.text-embedding-3-small' ? model : null,
       updateModel: async (_key, patch) => { model.enabled = patch.enabled; },
-      getActionBySlug: async (slug) => slug === 'embed' ? { key: 'embed-action' } : null,
       getModelActionByPair: async () => binding,
       updateModelAction: async (_key, patch) => { binding.enabled = patch.enabled; },
       getProviderBySlug: async (slug) => slug === 'openai' ? { key: 'openai-provider' } : null,

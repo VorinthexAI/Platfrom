@@ -19,7 +19,7 @@ import {
 
 export type ContentLocation = { folders: ContentFolder[]; documents: ContentDocument[] };
 
-const contextKey = (context: ContentContext) => [context.userKey ?? "", context.organizationKey, context.scopeKey, context.agentKey] as const;
+const contextKey = (context: ContentContext) => [context.userKey ?? "", context.organizationKey, context.scopeKey] as const;
 
 export const contentQueryKeys = {
   all: (context: ContentContext) => ["archive", ...contextKey(context)] as const,

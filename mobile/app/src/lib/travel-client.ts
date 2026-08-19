@@ -160,14 +160,11 @@ export function tripContainsPlace(trip: Trip, placeKey: string) {
 }
 
 export async function askTravelAssistant(message: string, requestKey: string) {
-  const state = useAuthStore.getState();
-  const { organizationKey } = getTravelContext();
-  const agentKey = typeof state.contentExecution?.agentKey === "string" ? state.contentExecution.agentKey : "";
-  if (!agentKey) throw new Error("Your personal assistant is unavailable for this session.");
+  const { organizationKey, scopeKey } = getTravelContext();
   try {
     const response = await apiClient.post("/assistant/respond", {
       organizationKey,
-      agentKey,
+      scopeKey,
       input: {
         surface: "travel-workspace",
         requestKey: z.string().trim().min(1).max(180).parse(requestKey),

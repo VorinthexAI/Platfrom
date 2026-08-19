@@ -105,12 +105,9 @@ export function updateBookChapterProgress(bookKey: string, chapterKey: string, i
 }
 
 export async function askBookAssistant(message: string, requestKey: string) {
-  const state = useAuthStore.getState();
-  const { organizationKey } = getBooksContext();
-  const agentKey = typeof state.contentExecution?.agentKey === "string" ? state.contentExecution.agentKey : "";
-  if (!agentKey) throw new Error("Your personal assistant is unavailable for this session.");
+  const { organizationKey, scopeKey } = getBooksContext();
   try {
-    const response = await apiClient.post("/assistant/respond", { organizationKey, agentKey, input: { surface: "book-workspace", requestKey: z.string().trim().min(1).max(180).parse(requestKey), message: z.string().trim().min(1).max(8_000).parse(message), currentNote: { title: "", content: "" } } }, { timeout: 15 * 60_000 });
+    const response = await apiClient.post("/assistant/respond", { organizationKey, scopeKey, input: { surface: "book-workspace", requestKey: z.string().trim().min(1).max(180).parse(requestKey), message: z.string().trim().min(1).max(8_000).parse(message), currentNote: { title: "", content: "" } } }, { timeout: 15 * 60_000 });
     return unwrap(response.data, assistantResponseSchema);
   } catch (error) {
     throw responseError(error);

@@ -9,7 +9,7 @@ suite('Content live E2E', () => {
   let bucket: string;
   let newId: () => string;
   let runContentTool: any;
-  let runContentAgentTool: any;
+  let runAuthenticatedContentTool: any;
   let toolNames: readonly string[];
   let outputSchemas: Record<string, { parse(value: unknown): unknown }>;
   let generateDocumentExport: any;
@@ -40,7 +40,7 @@ suite('Content live E2E', () => {
     db = client.db;
     newId = ids.newId;
     runContentTool = content.runContentTool;
-    runContentAgentTool = content.runContentAgentTool;
+    runAuthenticatedContentTool = content.runAuthenticatedContentTool;
     toolNames = content.CONTENT_TOOL_NAMES;
     outputSchemas = content.contentToolOutputSchemas;
     documentEmbed = processing.documentEmbed;
@@ -65,8 +65,6 @@ suite('Content live E2E', () => {
 
   async function cleanupOrganization(organizationKey: string) {
     const scopeKeys = await (await db.query('FOR scope IN scopes FILTER scope.organizationKey == @organizationKey RETURN scope._key', { organizationKey })).all();
-    const agentKeys = await (await db.query('FOR agent IN agents FILTER agent.scopeKey IN @scopeKeys RETURN agent._key', { scopeKeys })).all();
-    const skillKeys = await (await db.query('FOR row IN agentSkills FILTER row.agentKey IN @agentKeys RETURN DISTINCT row.skillKey', { agentKeys })).all();
     const removals: Array<[string, string, Record<string, unknown>]> = [
       ['shares', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
       ['documentSummaries', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
@@ -77,13 +75,8 @@ suite('Content live E2E', () => {
       ['contentSearchQueries', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
       ['userSearches', 'row.userKey IN (FOR user IN users FILTER user.organizationId == @organizationKey RETURN user._key)', { organizationKey }],
       ['contentIdempotency', 'row.organizationKey == @organizationKey', { organizationKey }],
-      ['agentMembers', 'row.organizationKey == @organizationKey', { organizationKey }],
-      ['agentSkills', 'row.agentKey IN @agentKeys', { agentKeys }],
-      ['scopeAgents', 'row.organizationKey == @organizationKey', { organizationKey }],
       ['scopeMembers', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
       ['scopeScopes', 'row.parentKey IN @scopeKeys OR row.childKey IN @scopeKeys', { scopeKeys }],
-      ['agents', 'row._key IN @agentKeys', { agentKeys }],
-      ['skills', 'row._key IN @skillKeys', { skillKeys }],
       ['userOrganizations', 'row.organizationId == @organizationKey', { organizationKey }],
       ['users', 'row.organizationId == @organizationKey', { organizationKey }],
       ['scopes', 'row._key IN @scopeKeys', { scopeKeys }],
@@ -109,12 +102,10 @@ suite('Content live E2E', () => {
     const outsiderOrganizationKey = newId();
     const scopeKey = newId();
     const secondScopeKey = newId();
+    const unauthorizedScopeKey = newId();
     const outsiderScopeKey = newId();
     const userKey = newId();
     const membershipKey = newId();
-    const agentKey = newId();
-    const skillKey = newId();
-    const scopeAgentKey = newId();
     const testPrefix = `content/${scopeKey}/`;
     roots.add(organizationKey);
     roots.add(outsiderOrganizationKey);
@@ -124,17 +115,13 @@ suite('Content live E2E', () => {
     const save = (collection: string, value: Record<string, unknown>) => db.collection(collection).save(value);
     await save('organizations', { _key: organizationKey, name: 'Content E2E', is_root: false, slug: `archive-${organizationKey}`, description: null, isActive: true, mfa_enabled: false, metadata: {}, createdAt: now, updatedAt: now, embedding: [] });
     await save('organizations', { _key: outsiderOrganizationKey, name: 'Content outsider', is_root: false, slug: `outside-${outsiderOrganizationKey}`, description: null, isActive: true, mfa_enabled: false, metadata: {}, createdAt: now, updatedAt: now, embedding: [] });
-    for (const [key, organization, slug] of [[scopeKey, organizationKey, 'primary'], [secondScopeKey, organizationKey, 'secondary'], [outsiderScopeKey, outsiderOrganizationKey, 'outsider']] as const) {
-      await save('scopes', { _key: key, organizationKey: organization, slug: `${slug}-${key}`, name: slug, summary: `${slug} archive scope`, description: `${slug} documents`, position: 1, level: 1, embedding: [] });
+    for (const [key, organization, slug] of [[scopeKey, organizationKey, 'primary'], [secondScopeKey, organizationKey, 'secondary'], [unauthorizedScopeKey, organizationKey, 'unauthorized'], [outsiderScopeKey, outsiderOrganizationKey, 'outsider']] as const) {
+      await save('scopes', { _key: key, organizationKey: organization, slug: `${slug}-${key}`, name: slug, summary: `${slug} archive scope`, description: `${slug} documents`, position: 1, level: 1, deletedAt: null, embedding: [] });
     }
     await save('users', { _key: userKey, organizationId: organizationKey, email: `${userKey}@example.test`, emailHash: userKey, countryCode: 'SE', name: 'Content Owner', createdAt: now, updatedAt: now, embedding: [] });
-    await save('userOrganizations', { _key: membershipKey, organizationId: organizationKey, userId: userKey, orgRole: 'owner', status: 'active', joinedAt: now, createdAt: now, updatedAt: now, embedding: [] });
+    await save('userOrganizations', { _key: membershipKey, organizationId: organizationKey, userId: userKey, orgRole: 'member', status: 'active', joinedAt: now, createdAt: now, updatedAt: now, embedding: [] });
     await save('scopeMembers', { _key: newId(), scopeKey, userOrganizationKey: membershipKey, role: 'owner', status: 'active' });
-    await save('agents', { _key: agentKey, slug: `content-e2e-${agentKey}`, name: 'Content E2E Agent', title: 'Content E2E Agent', scopeKey, explorationRate: 0, embedding: [] });
-    await save('skills', { _key: skillKey, slug: `content-e2e-${skillKey}`, name: 'Content E2E', title: 'Content E2E', definition: 'Exercise Content tools.', embedding: [] });
-    await save('agentSkills', { _key: newId(), agentKey, skillKey, priority: 100 });
-    await save('scopeAgents', { _key: scopeAgentKey, organizationKey, scopeKey, agentKey, position: 1, status: 'active', minimumAccessRole: 'viewer', createdByUserOrganizationKey: membershipKey, createdAt: now, updatedAt: now, embedding: [] });
-    await save('agentMembers', { _key: newId(), organizationKey, scopeKey, agentKey, scopeAgentKey, userOrganizationKey: membershipKey, source: 'explicit', createdByUserOrganizationKey: membershipKey, createdAt: now, embedding: [] });
+    await save('scopeScopes', { _key: newId(), parentKey: scopeKey, childKey: secondScopeKey, level: 1 });
 
     let randomSeed = 1;
     const processingOrder: string[] = [];
@@ -163,6 +150,7 @@ suite('Content live E2E', () => {
       generateExport: (input: any) => generateDocumentExport(input, { pdfRenderer: async () => new TextEncoder().encode('%PDF-1.4\n%%EOF') }),
       random: (size: number) => Uint8Array.from({ length: size }, (_, index) => (organizationKey.charCodeAt(index % organizationKey.length) + randomSeed + index) % 255 + 1),
       clock: () => new Date(now),
+      canPermanentlyDelete: () => true,
     };
     const context = {
       organizationKey,
@@ -187,12 +175,23 @@ suite('Content live E2E', () => {
       return output;
     };
 
-    const agentList = await runContentAgentTool({ organizationKey, agentKey, tool: 'folder.list', input: { scopeKey } }, {
+    const authorizedList = await runAuthenticatedContentTool({ organizationKey, scopeKey, tool: 'folder.list', input: { scopeKey } }, {
       authenticatedUserKey: userKey,
       execute: ((tool: string, input: unknown, resolvedContext: unknown) => runContentTool(tool, input, resolvedContext, dependencies)) as any,
     });
-    outputSchemas['folder.list']!.parse(agentList);
+    outputSchemas['folder.list']!.parse(authorizedList);
     covered.add('folder.list');
+
+    const inheritedList = await runAuthenticatedContentTool({ organizationKey, scopeKey: secondScopeKey, tool: 'folder.list', input: { scopeKey: secondScopeKey } }, {
+      authenticatedUserKey: userKey,
+      execute: ((tool: string, input: unknown, resolvedContext: unknown) => runContentTool(tool, input, resolvedContext, dependencies)) as any,
+    });
+    outputSchemas['folder.list']!.parse(inheritedList);
+
+    await expect(runAuthenticatedContentTool({ organizationKey, scopeKey: unauthorizedScopeKey, tool: 'folder.list', input: { scopeKey: unauthorizedScopeKey } }, {
+      authenticatedUserKey: userKey,
+      execute: ((tool: string, input: unknown, resolvedContext: unknown) => runContentTool(tool, input, resolvedContext, dependencies)) as any,
+    })).rejects.toMatchObject({ code: 'CONTENT_FORBIDDEN' });
 
     const created = await call('folder.create', { folders: [{ scopeKey, name: 'Root' }, { scopeKey, name: 'Destination' }], idempotencyKey: `folders-${organizationKey}` });
     expect(created.summary).toEqual({ requested: 2, succeeded: 2, failed: 0 });
@@ -237,15 +236,21 @@ suite('Content live E2E', () => {
     const api = new Hono();
     api.post('/content/tools/:tool', createContentToolHandler({
       getIdentity: async () => ({ key: userKey, identityType: 'user' }),
-      run: async (request) => runContentTool(request.tool, request.input, context, dependencies),
+      serviceOptions: { contentDependencies: dependencies },
     }));
+    const unauthorizedResponse = await api.request('/content/tools/folder.list', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ organizationKey, scopeKey: unauthorizedScopeKey, input: { scopeKey: unauthorizedScopeKey } }),
+    });
+    expect(unauthorizedResponse.status).toBe(403);
     const apiText = Array.from({ length: 2_105 }, (_, index) => `word${index}`).join(' ');
     const apiResponse = await api.request('/content/tools/document.parse', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'idempotency-key': `http-processing-${organizationKey}` },
       body: JSON.stringify({
         organizationKey,
-        agentKey,
+        scopeKey,
         input: {
           scopeKey,
           folderKey: childFolderKey,
@@ -396,12 +401,24 @@ suite('Content live E2E', () => {
     const unshared = await call('document.unshare', { shareKeys: [shareKey], atomic: true });
     expect(unshared.results[0].data.share.revokedAt).toBe(now);
     expect((await call('document.list-shares', { documentKeys: [documentKey], includeRevoked: true })).results[0].data.shares[0].revokedAt).toBe(now);
+    const archivedDocument = await call('document.archive', { documentKeys: [documentKey], atomic: true });
+    expect(archivedDocument.results[0].data.document.deletedAt).toBe(now);
     await call('document.delete-version', { versionKeys: [versionTwo.key], atomic: true });
     expect(await (await db.query('RETURN DOCUMENT(documentVersions, @key) == null', { key: versionTwo.key })).next()).toBe(true);
+    const restoredDocument = await call('document.restore', { documentKeys: [documentKey], atomic: true });
+    expect(restoredDocument.results[0].data.document.deletedAt).toBeNull();
 
+    await expect(call('folder.archive', { folderKeys: [rootFolderKey], includeDescendants: true, atomic: true })).rejects.toMatchObject({ code: 'CONTENT_CONFLICT' });
+    await call('folder.update', { updates: [{ folderKey: rootFolderKey, isFavorite: false }] });
+    await call('folder.archive', { folderKeys: [rootFolderKey], includeDescendants: true, atomic: true });
+    expect((await db.collection('documents').document(documentKey)).deletedAt).toBe(now);
+    await call('folder.restore', { folderKeys: [rootFolderKey], includeDescendants: true, atomic: true });
+    expect((await db.collection('documents').document(documentKey)).deletedAt).toBeNull();
+
+    await call('document.archive', { documentKeys: [copiedDocumentKey] });
     const copiedRaw = await db.collection('documents').document(copiedDocumentKey);
     const copiedStorageKey = copiedRaw.storageKey;
-    expect((await call('document.delete', { documentKeys: [copiedDocumentKey] })).summary.failed).toBe(0);
+    expect((await call('document.delete', { documentKeys: [copiedDocumentKey], deleteVersions: true, deleteShares: true })).summary.failed).toBe(0);
     expect(await (await db.query('RETURN DOCUMENT(documents, @key) == null', { key: copiedDocumentKey })).next()).toBe(true);
     expect(await (await db.query('RETURN DOCUMENT(documentAudioVersions, @key) == null', { key: copiedAudio.results[0].data.audioVersion.key })).next()).toBe(true);
     expect(await (await db.query('RETURN DOCUMENT(documentSummaries, @key) == null', { key: summaryKey })).next()).toBe(true);
@@ -410,6 +427,7 @@ suite('Content live E2E', () => {
 
     const disposable = await call('folder.create', { folders: [{ scopeKey, name: 'Disposable' }] });
     const disposableKey = disposable.results[0].data.folder.key;
+    await call('folder.archive', { folderKeys: [disposableKey] });
     await call('folder.delete', { folderKeys: [disposableKey], atomic: true });
     expect(await (await db.query('RETURN DOCUMENT(folders, @key) == null', { key: disposableKey })).next()).toBe(true);
 

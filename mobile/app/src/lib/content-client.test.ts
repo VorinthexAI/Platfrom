@@ -5,7 +5,6 @@ const testRuntime = globalThis as typeof globalThis & { __archiveApiPost?: (...i
 let authState = {
   organization: { key: "org-authenticated" },
   scope: { key: "scope-authenticated" },
-  contentExecution: { agentKey: "agent-authenticated" },
 };
 let responseForTool: ((tool: string) => unknown) | undefined;
 const digestInputs: string[] = [];
@@ -92,7 +91,6 @@ beforeEach(() => {
   authState = {
     organization: { key: "org-authenticated" },
     scope: { key: "scope-authenticated" },
-    contentExecution: { agentKey: "agent-authenticated" },
   };
 });
 
@@ -158,7 +156,7 @@ test("sends document and folder mutations with the authenticated Archive context
     "/api/v1/content/tools/document.update",
     "/api/v1/content/tools/folder.create",
   ]);
-  expect(calls.every(({ body }) => body.organizationKey === "org-authenticated" && body.agentKey === "agent-authenticated")).toBe(true);
+  expect(calls.every(({ body }) => body.organizationKey === "org-authenticated" && body.scopeKey === "scope-authenticated")).toBe(true);
   expect(calls[0]?.body.input).toEqual({
     scopeKey: "scope-authenticated",
     folderKey: "parent",
@@ -176,7 +174,7 @@ test("uploads documents through the authenticated Archive context", async () => 
 
   expect(calls[0]?.body).toMatchObject({
     organizationKey: "org-authenticated",
-    agentKey: "agent-authenticated",
+    scopeKey: "scope-authenticated",
     input: {
       scopeKey: "scope-authenticated",
       folderKey: "folder",
@@ -394,7 +392,7 @@ test("sends Archive requests to the personal assistant surface", async () => {
   expect(calls[0]?.url).toBe("/api/v1/assistant/respond");
   expect(calls[0]?.body).toEqual({
     organizationKey: "org-authenticated",
-    agentKey: "agent-authenticated",
+    scopeKey: "scope-authenticated",
     input: { surface: "knowledge-workspace", message: "Write a launch plan", currentNote: { documentKey: "document", title: "Untitled note", content: "Draft", selection: { start: 0, end: 5 } }, requestKey: expect.any(String), folderKey: "folder" },
   });
 });
@@ -550,7 +548,7 @@ test("surfaces tool and item errors for document actions", async () => {
 });
 
 test("rejects Archive calls when authenticated context is incomplete", async () => {
-  authState = { ...authState, contentExecution: { agentKey: "" } };
+  authState = { ...authState, scope: { key: "" } };
 
   await expect(createContentFolder("Work")).rejects.toThrow("Archive is unavailable for this session.");
   expect(calls).toHaveLength(0);

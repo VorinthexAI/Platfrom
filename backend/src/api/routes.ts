@@ -34,17 +34,9 @@ import { joinPresence, leavePresence, presenceBeat, streamPresence } from './pre
 import { unsubscribeFromUpdates } from './updates';
 import { listNodes } from './nodes';
 import {
-  attachCurrentMindCapability,
-  createSystemCapability,
   createSystemOrchestrator,
-  detachCurrentMindCapability,
-  getCurrentMind,
-  listCurrentMindCapabilities,
-  listSystemCapabilities,
   listSystemOrchestrators,
-  updateSystemCapability,
   updateSystemOrchestrator,
-  upsertCurrentMind,
 } from './system';
 import { invokeContentTool } from './content-tools';
 import { postAudioGenerate } from './audio';
@@ -433,13 +425,6 @@ export function registerRoutes(app: Hono) {
 
   app.get('/nodes', listNodes);
 
-  app.get('/mind', getCurrentMind);
-  app.post('/mind', upsertCurrentMind);
-  app.put('/mind', upsertCurrentMind);
-  app.get('/mind/capabilities', listCurrentMindCapabilities);
-  app.post('/mind/capabilities', attachCurrentMindCapability);
-  app.delete('/mind/capabilities/:capabilityId', detachCurrentMindCapability);
-
   app.post('/assistant/respond', postPersonalAssistantResponse);
   app.post('/audio/generate', (c) => postAudioGenerate(c));
   app.post('/content/tools/:tool', invokeContentTool);
@@ -525,8 +510,5 @@ export function registerRoutes(app: Hono) {
   app.get('/system/orchestrators', listSystemOrchestrators);
   app.post('/system/orchestrators', createSystemOrchestrator);
   app.patch('/system/orchestrators/:orchestratorId', updateSystemOrchestrator);
-  app.get('/system/capabilities', listSystemCapabilities);
-  app.post('/system/capabilities', createSystemCapability);
-  app.patch('/system/capabilities/:capabilityId', updateSystemCapability);
 
 }

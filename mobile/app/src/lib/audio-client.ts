@@ -6,7 +6,7 @@ export interface AudioClientDependencies { postEvents?: typeof postEventStream }
 
 export async function streamGeneratedAudio(input: {
   organizationKey: string;
-  agentKey: string;
+  scopeKey: string;
   text: string;
   wordsPerChunk?: number;
   voice?: string;

@@ -12,7 +12,6 @@ export type AuthContext = {
   user: AuthUser | null;
   organization: Record<string, unknown> | null;
   scope: Record<string, unknown> | null;
-  contentExecution: { agentKey: string } | null;
 };
 
 export type SessionTokens = {
@@ -95,11 +94,6 @@ export function normalizeAuthContext(value: unknown): AuthContext {
     user,
     organization: record(body?.organization) ?? record(body?.org),
     scope: record(body?.scope) ?? record(body?.main_scope),
-    contentExecution: (() => {
-      const execution = record(body?.contentExecution) ?? record(body?.content_execution);
-      const agentKey = stringValue(execution, "agentKey", "agent_key");
-      return agentKey ? { agentKey } : null;
-    })(),
   };
 }
 
@@ -107,8 +101,7 @@ export function hasCompleteAuthContext(context: AuthContext | null) {
   return Boolean(
     context?.user &&
     stringValue(record(context.organization), "key") &&
-    stringValue(record(context.scope), "key") &&
-    context.contentExecution?.agentKey,
+    stringValue(record(context.scope), "key"),
   );
 }
 

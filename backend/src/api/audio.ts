@@ -1,23 +1,21 @@
 import type { Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
-import { AgentExecutionAccessError } from '@/lib/ai/agents/access';
-import { AgentRuntimeNotFoundError } from '@/lib/ai/agents/runtime';
 import { audioGenerateInputSchema, generateAudioChunks, type AudioGenerateChunk, type AudioGenerateDependencies } from '@/lib/ai/tools/audio-generate';
-import { authorizeContentAgentExecution, ContentError, type RunContentAgentToolOptions } from '@/lib/ai/tools';
+import { authorizeContentExecution, ContentError, type RunAuthenticatedContentToolOptions } from '@/lib/ai/tools';
 import { getAuthIdentity } from './security';
 import { parseJson, strictObject } from './validation';
 
 const bodySchema = strictObject({
   organizationKey: z.string().trim().min(1),
-  agentKey: z.string().cuid(),
+  scopeKey: z.string().cuid(),
   input: audioGenerateInputSchema,
 });
 
 export interface AudioGenerateHandlerDependencies {
   getIdentity?: typeof getAuthIdentity;
-  authorize?: typeof authorizeContentAgentExecution;
-  authorizationOptions?: Omit<RunContentAgentToolOptions, 'authenticatedUserKey' | 'execute'>;
+  authorize?: typeof authorizeContentExecution;
+  authorizationOptions?: Omit<RunAuthenticatedContentToolOptions, 'authenticatedUserKey' | 'execute'>;
   generate?: (input: unknown, dependencies: AudioGenerateDependencies) => AsyncIterable<AudioGenerateChunk>;
 }
 
@@ -28,14 +26,12 @@ export async function postAudioGenerate(c: Context, dependencies: AudioGenerateH
   if (identity.identityType !== 'user') return c.json({ error: 'user session required' }, 403);
   const body = await parseJson(c, bodySchema);
   try {
-    await (dependencies.authorize ?? authorizeContentAgentExecution)(
-      { organizationKey: body.organizationKey, agentKey: body.agentKey },
+    await (dependencies.authorize ?? authorizeContentExecution)(
+      { organizationKey: body.organizationKey, scopeKey: body.scopeKey },
       { ...dependencies.authorizationOptions, authenticatedUserKey: identity.key },
     );
   } catch (error) {
     if (error instanceof ContentError) return c.json({ error: error.toJSON() }, 403);
-    if (error instanceof AgentExecutionAccessError) return c.json({ error: 'agent execution access denied' }, 403);
-    if (error instanceof AgentRuntimeNotFoundError) return c.json({ error: 'agent runtime not found' }, 404);
     throw error;
   }
   const generate = dependencies.generate ?? generateAudioChunks;

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { aql } from 'arangojs';
-import { actionSlugSchema } from './actions.node';
+import { actionIdSchema } from '@/lib/ai/actions/types';
 import { modelSlugSchema } from './models.node';
 import { db } from './client';
 import { createEdgeHelpers, withArangoKey } from './base';
@@ -10,20 +10,20 @@ export const MODEL_ACTIONS_COLLECTION = 'modelActions';
 export const modelActionSchema = z.object({
   key: z.string().cuid(),
   modelKey: z.string().cuid(),
-  actionKey: z.string().cuid(),
+  actionSlug: actionIdSchema,
   priority: z.number().int().nonnegative().default(100),
   enabled: z.boolean().default(true),
-});
+}).strict();
 
 export type ModelAction = z.infer<typeof modelActionSchema>;
 
 export const modelActionSeedSchema = z.object({
   key: z.string().cuid(),
   modelSlug: modelSlugSchema,
-  actionSlug: actionSlugSchema,
+  actionSlug: actionIdSchema,
   priority: z.number().int().nonnegative(),
   enabled: z.boolean(),
-});
+}).strict();
 
 export type ModelActionSeed = z.infer<typeof modelActionSeedSchema>;
 
@@ -37,10 +37,11 @@ export const upsertModelActionByKey = helpers.upsertByKey;
 export const getAllModelActionsChunked = helpers.getAllChunked;
 export const listModelActionsPage = helpers.listPage;
 
-export async function getModelActionByPair(modelKey: string, actionKey: string): Promise<ModelAction | null> {
+export async function getModelActionByPair(modelKey: string, actionSlug: ModelAction['actionSlug']): Promise<ModelAction | null> {
+  const validActionSlug = actionIdSchema.parse(actionSlug);
   const cursor = await db.query(aql`
     FOR link IN ${db.collection(MODEL_ACTIONS_COLLECTION)}
-      FILTER link.modelKey == ${modelKey} && link.actionKey == ${actionKey}
+      FILTER link.modelKey == ${modelKey} && link.actionSlug == ${validActionSlug}
       LIMIT 1
       RETURN link
   `);
@@ -48,11 +49,11 @@ export async function getModelActionByPair(modelKey: string, actionKey: string):
   return doc ? modelActionSchema.parse(withArangoKey(doc)) : null;
 }
 
-export async function listEnabledModelActionsByActionKey(actionKey: string): Promise<ModelAction[]> {
-  const validActionKey = modelActionSchema.shape.actionKey.parse(actionKey);
+export async function listEnabledModelActionsByActionSlug(actionSlug: ModelAction['actionSlug']): Promise<ModelAction[]> {
+  const validActionSlug = actionIdSchema.parse(actionSlug);
   const cursor = await db.query(aql`
     FOR link IN ${db.collection(MODEL_ACTIONS_COLLECTION)}
-      FILTER link.actionKey == ${validActionKey} && link.enabled == true
+      FILTER link.actionSlug == ${validActionSlug} && link.enabled == true
       SORT link.priority DESC, link._key ASC
       RETURN link
   `);

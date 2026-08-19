@@ -104,14 +104,11 @@ export function updateEmailDraft(draftKey: string, finalContent: string) { retur
 export function sendEmailDraft(draftKey: string) { return request("post", `/email/drafts/${keySchema.parse(draftKey)}/send`, {}, z.object({ sent: z.literal(true), providerMessageId: z.string().min(1), threadKey: keySchema })); }
 export function disconnectEmail() { return request("post", "/email/disconnect", {}, z.object({ disconnected: z.literal(true) })); }
 export async function askEmailAssistant(message: string, requestKey: string) {
-  const state = useAuthStore.getState();
-  const { organizationKey } = getEmailContext();
-  const agentKey = typeof state.contentExecution?.agentKey === "string" ? state.contentExecution.agentKey : "";
-  if (!agentKey) throw new Error("Your personal assistant is unavailable for this session.");
+  const { organizationKey, scopeKey } = getEmailContext();
   try {
     const response = await apiClient.post("/assistant/respond", {
       organizationKey,
-      agentKey,
+      scopeKey,
       input: { surface: "signal-workspace", requestKey: z.string().trim().min(1).max(180).parse(requestKey), message: z.string().trim().min(1).max(8_000).parse(message), currentNote: { title: "", content: "" } },
     }, { timeout: 4 * 60_000 });
     return unwrap(response.data, assistantResponseSchema);

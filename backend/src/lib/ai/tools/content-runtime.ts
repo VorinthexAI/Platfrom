@@ -1,6 +1,7 @@
 import { createHash, randomBytes, scrypt as nodeScrypt } from 'node:crypto';
 import { promisify } from 'node:util';
 import { z } from 'zod';
+import type { ActionId } from '@/lib/ai/actions';
 import type { ToolContext } from './tool-context';
 import type { DocumentParseDependencies, DocumentParseInput } from '@/lib/ai/document-processing';
 import type { RouterDependencies } from '@/lib/ai/router';
@@ -28,7 +29,6 @@ import { DEFAULT_AUDIO_GENERATION_VOICE, generateAudioChunks as canonicalGenerat
 import type { UserSearchService } from '@/lib/user-searches/service';
 
 type Role = 'viewer' | 'moderator' | 'admin' | 'owner';
-type Action = 'ask' | 'enhance' | 'translate' | 'read' | 'traverse' | 'insert' | 'update' | 'delete' | 'embed' | 'speak' | 'generate-speech' | 'reason' | 'deep-reason' | 'document-cleanup' | 'document-embed' | 'document-summarize' | 'document-topics';
 type SafeEvent = {
   type: 'authorization' | 'resolution' | 'action' | 'db' | 'embedding' | 'storage' | 'speech' | 'cleanup';
   status: 'started' | 'succeeded' | 'failed';
@@ -103,7 +103,7 @@ export interface ContentToolDependencies extends RouterDependencies {
   repository?: ContentRepository;
   storage?: DocumentObjectStorage;
   parseDocument?: (input: DocumentParseInput, dependencies?: DocumentParseDependencies) => Promise<{ document: Document }>;
-  runAction?: (action: Action, input: Record<string, unknown>, context: ToolContext) => Promise<ContentActionResult>;
+  runAction?: (action: ActionId, input: Record<string, unknown>, context: ToolContext) => Promise<ContentActionResult>;
   executeAction?: typeof import('@/lib/ai/router').executeAction;
   embed?: (text: string) => Promise<number[]>;
   embedBatch?: (texts: string[]) => Promise<number[][]>;
@@ -493,7 +493,7 @@ async function defaults(deps: ContentToolDependencies, context: ToolContext): Pr
     parseDocument: deps.parseDocument ?? processing.parseDocument, id: deps.id ?? newId, clock: deps.clock ?? (() => new Date()), random: deps.random ?? randomBytes,
     embed: embedding,
     embedBatch: embeddingBatch,
-    runAction: deps.runAction ?? (async (action: Action, input: Record<string, unknown>): Promise<ContentActionResult> => {
+    runAction: deps.runAction ?? (async (action: ActionId, input: Record<string, unknown>): Promise<ContentActionResult> => {
       if (action === 'document-embed') return processing.documentEmbed(input as never, { embedBatch: ({ texts }) => embeddingBatch(texts), dimensions: deps.ingestion?.embeddingDimensions }) as Promise<ContentActionResult>;
       const request = { mode: 'auto' as const, organizationKey: context.organizationKey, actionSlug: action };
       const response = await executeAction<Record<string, unknown>, ContentActionResult>(request, input, deps);
@@ -660,7 +660,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
     },
   });
   const repo = observeRepository(d.repository);
-  const action = async (slug: Action, actionInput: Record<string, unknown>, resourceKey?: string, scopeKey?: string) => {
+  const action = async (slug: ActionId, actionInput: Record<string, unknown>, resourceKey?: string, scopeKey?: string) => {
     const started = performance.now();
     await event('action', 'started', slug, resourceKey, scopeKey);
     try {

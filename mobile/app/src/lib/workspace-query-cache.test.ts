@@ -34,8 +34,8 @@ const {
   transferCachedGalleryImages,
 } = await import("./workspace-query-cache");
 
-const context: ContentContext = { organizationKey: "org-a", scopeKey: "scope-a", agentKey: "agent-a" };
-const otherContext: ContentContext = { organizationKey: "org-b", scopeKey: "scope-b", agentKey: "agent-b" };
+const context: ContentContext = { organizationKey: "org-a", scopeKey: "scope-a" };
+const otherContext: ContentContext = { organizationKey: "org-b", scopeKey: "scope-b" };
 
 test("isolates every routed workspace key by context and resource", () => {
   expect(galleryQueryKeys.overview(context, "collection")).not.toEqual(galleryQueryKeys.overview(otherContext, "collection"));

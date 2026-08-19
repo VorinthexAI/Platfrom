@@ -464,13 +464,10 @@ export function deleteGallerySubject(identityKey: string) {
 }
 
 export async function askGalleryAssistant(message: string) {
-  const state = useAuthStore.getState();
-  const { organizationKey } = getGalleryContext();
-  const agentKey = state.contentExecution?.agentKey ?? "";
-  if (!agentKey) throw new Error("Your personal assistant is unavailable for this session.");
+  const { organizationKey, scopeKey } = getGalleryContext();
   const response = await apiClient.post<ApiResponse<{ type: "answer" | "note" | "unsupported"; message: string; changes?: AssistantChange[] }>>(
     "/assistant/respond",
-    { organizationKey, agentKey, input: { surface: "media-workspace", message, currentNote: { title: "", content: "" } } },
+    { organizationKey, scopeKey, input: { surface: "media-workspace", message, currentNote: { title: "", content: "" } } },
     { timeout: 4 * 60_000 },
   );
   if (!response.data.success) throw new Error(response.data.error.message);

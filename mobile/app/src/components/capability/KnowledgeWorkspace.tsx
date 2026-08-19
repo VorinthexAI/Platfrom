@@ -291,12 +291,11 @@ export function KnowledgeWorkspace() {
   const destinationCardSize = Math.floor((width - 42 - 20) / 3);
   const organizationKey = useAuthStore((state) => typeof state.organization?.key === "string" ? state.organization.key : "");
   const scopeKey = useAuthStore((state) => typeof state.scope?.key === "string" ? state.scope.key : "");
-  const agentKey = useAuthStore((state) => state.contentExecution?.agentKey ?? "");
   const user = useAuthStore((state) => state.user);
   const reconnectContentContext = useAuthStore((state) => state.reconnectContentContext);
-  const hasContentContext = isContentContextConfigured({ organizationKey, scopeKey, agentKey });
-  const contentContextKey = hasContentContext ? `${organizationKey}:${scopeKey}:${agentKey}` : "";
-  const contentContext = { organizationKey, scopeKey, agentKey, userKey: user?.key ?? "" };
+  const hasContentContext = isContentContextConfigured({ organizationKey, scopeKey });
+  const contentContextKey = hasContentContext ? `${organizationKey}:${scopeKey}` : "";
+  const contentContext = { organizationKey, scopeKey, userKey: user?.key ?? "" };
   const userHiddensQuery = useQuery({ queryKey: contentQueryKeys.userHiddens(contentContext), queryFn: listUserHiddens, enabled: hasContentContext, staleTime: 0 });
   const narrationPlayer = useAudioPlayer(null, { updateInterval: 500, keepAudioSessionActive: true });
   const narrationAudio = useAudioPlayerStatus(narrationPlayer);
@@ -2577,7 +2576,7 @@ export function KnowledgeWorkspace() {
 
   const pickAndUpload = async (folderKey?: string) => {
     const requestContext = getContentContext();
-    const requestContextKey = `${requestContext.organizationKey}:${requestContext.scopeKey}:${requestContext.agentKey}`;
+    const requestContextKey = `${requestContext.organizationKey}:${requestContext.scopeKey}`;
     const generation = ++uploadGeneration.current;
     setSheetError(undefined);
     try {
@@ -2665,7 +2664,7 @@ export function KnowledgeWorkspace() {
 
   const submitDocumentScan = async (pages: DocumentScanPage[]) => {
     const requestContext = getContentContext();
-    const requestContextKey = `${requestContext.organizationKey}:${requestContext.scopeKey}:${requestContext.agentKey}`;
+    const requestContextKey = `${requestContext.organizationKey}:${requestContext.scopeKey}`;
     const folderKey = scanFolderKey;
     const generation = ++scanGeneration.current;
     const name = `Scanned document ${new Date().toISOString().slice(0, 10)}`;

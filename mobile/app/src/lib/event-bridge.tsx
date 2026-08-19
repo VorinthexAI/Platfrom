@@ -14,7 +14,6 @@ export function AuthenticatedEventBridge() {
   const userKey = useAuthStore((state) => state.user?.key);
   const organizationKey = useAuthStore((state) => typeof state.organization?.key === "string" ? state.organization.key : "");
   const scopeKey = useAuthStore((state) => typeof state.scope?.key === "string" ? state.scope.key : "");
-  const agentKey = useAuthStore((state) => state.contentExecution?.agentKey ?? "");
   const previousIdentity = useRef<string | null | undefined>(undefined);
   const streamGeneration = useRef(0);
 
@@ -108,7 +107,7 @@ export function AuthenticatedEventBridge() {
       currentController?.abort();
       subscription.remove();
     };
-  }, [agentKey, organizationKey, queryClient, scopeKey, status, userKey]);
+  }, [organizationKey, queryClient, scopeKey, status, userKey]);
 
   return null;
 }

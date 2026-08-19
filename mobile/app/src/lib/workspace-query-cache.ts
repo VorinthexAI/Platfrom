@@ -1,7 +1,6 @@
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import type { AssistantChange } from "./assistant-changes";
 import type { Book, BookDetail } from "./books-client";
-import type { ContentContext } from "./content-client";
 import { contentQueryKeys } from "./content-query-cache";
 import type { EmailFilter, EmailOverview, EmailThread } from "./email-client";
 import { normalizeCollection } from "./collection-access";
@@ -85,11 +84,11 @@ export const ascendQueryKeys = {
 
 export async function invalidateAssistantChanges(
   queryClient: QueryClient,
-  context: WorkspaceContext & Partial<Pick<ContentContext, "agentKey">>,
+  context: WorkspaceContext,
   changes: AssistantChange[] | undefined,
 ) {
   const prefixes = {
-    archive: contentQueryKeys.all({ ...context, agentKey: context.agentKey ?? "" }),
+    archive: contentQueryKeys.all(context),
     gallery: galleryQueryKeys.all(context),
     signal: signalQueryKeys.all(context),
     compass: compassQueryKeys.all(context),

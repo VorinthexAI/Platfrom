@@ -1,5 +1,5 @@
 import type { ProviderAdapter, ProviderId } from '@/lib/ai/providers/types';
-import type { Action } from '@/lib/db/actions.node';
+import type { ActionId } from '@/lib/ai/actions';
 import type { Model } from '@/lib/db/models.node';
 import type { ModelAction } from '@/lib/db/model-actions.node';
 import type { ModelProvider } from '@/lib/db/model-providers.node';
@@ -8,8 +8,7 @@ import type { OrganizationCredentialsRepository } from '@/lib/ai/organization-cr
 
 interface RouteDecisionBase {
   organizationKey: string;
-  actionKey: string;
-  actionSlug: Action['slug'];
+  actionSlug: ActionId;
   modelKey: string;
   modelSlug: Model['slug'];
   providerKey: string;
@@ -21,12 +20,11 @@ export type RouteDecision = RouteDecisionBase & (
   | { credentialSource: 'environment'; orgProviderKey?: never }
 );
 export interface RouterDataSource {
-  getActionBySlug(slug: Action['slug']): Promise<Action | null>;
   getModelBySlug(slug: Model['slug']): Promise<Model | null>;
   getModelByKey(key: string): Promise<Model | null>;
   getProviderBySlug(slug: Provider['slug']): Promise<Provider | null>;
   getProviderByKey(key: string): Promise<Provider | null>;
-  listModelActions(actionKey: string): Promise<readonly ModelAction[]>;
+  listModelActions(actionSlug: ActionId): Promise<readonly ModelAction[]>;
   listModelProviders(modelKey: string): Promise<readonly ModelProvider[]>;
   listOrganizationProviderKeys(organizationKey: string): Promise<readonly string[]>;
 }

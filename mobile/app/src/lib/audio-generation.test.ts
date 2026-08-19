@@ -2,11 +2,11 @@ import { expect, test } from "bun:test";
 import { buildAudioGenerateRequest, generatedAudioChunkSchema, splitAudioGenerationText } from "./audio-generation";
 
 test("builds a default one-hundred-word audio generation request", () => {
-  expect(buildAudioGenerateRequest({ organizationKey: "organization", agentKey: "agent", text: "Read this." })).toEqual({ organizationKey: "organization", agentKey: "agent", input: { text: "Read this.", wordsPerChunk: 100 } });
+  expect(buildAudioGenerateRequest({ organizationKey: "organization", scopeKey: "scope", text: "Read this." })).toEqual({ organizationKey: "organization", scopeKey: "scope", input: { text: "Read this.", wordsPerChunk: 100 } });
 });
 
 test("preserves explicit generation controls without adding empty options", () => {
-  expect(buildAudioGenerateRequest({ organizationKey: "organization", agentKey: "agent", text: "Läs detta.", wordsPerChunk: 80, voice: "Elin", language: "sv-SE" })).toEqual({ organizationKey: "organization", agentKey: "agent", input: { text: "Läs detta.", wordsPerChunk: 80, voice: "Elin", language: "sv-SE" } });
+  expect(buildAudioGenerateRequest({ organizationKey: "organization", scopeKey: "scope", text: "Läs detta.", wordsPerChunk: 80, voice: "Elin", language: "sv-SE" })).toEqual({ organizationKey: "organization", scopeKey: "scope", input: { text: "Läs detta.", wordsPerChunk: 80, voice: "Elin", language: "sv-SE" } });
 });
 
 test("accepts complete MP3 chunks and rejects malformed stream data", () => {
