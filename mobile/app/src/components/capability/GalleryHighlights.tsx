@@ -91,21 +91,19 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
   async function createHighlight() {
     if (!owner) return;
     const generation = ++createRequest.current;
-    const skeletonUntil = Date.now() + 300;
-    const finishSkeleton = () => new Promise((resolve) => setTimeout(resolve, Math.max(0, skeletonUntil - Date.now())));
     setCreating(true);
     try {
       const { highlight } = await createGalleryCollectionHighlight(collection.key);
-      await finishSkeleton();
       if (generation !== createRequest.current) return;
-      setHighlights((current) => [highlight, ...current.filter(({ key }) => key !== highlight.key)]);
       queryClient.setQueryData(galleryQueryKeys.highlight(galleryContext, collection.key, highlight.key), { highlight });
-      await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.highlights(galleryContext, collection.key), exact: true, refetchType: "none" });
+      setHighlights((current) => [highlight, ...current.filter(({ key }) => key !== highlight.key)]);
+      setCreating(false);
+      void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.highlights(galleryContext, collection.key), exact: true, refetchType: "none" }).catch(() => undefined);
     } catch {
-      await finishSkeleton();
-      if (generation === createRequest.current) notify("Highlight could not be created");
-    } finally {
-      if (generation === createRequest.current) setCreating(false);
+      if (generation === createRequest.current) {
+        setCreating(false);
+        notify("Highlight could not be created");
+      }
     }
   }
 

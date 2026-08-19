@@ -19,8 +19,11 @@ test("uses separate full-height grid and player sheets with footer actions", () 
   expect(highlights).toContain('variant="primary">Create</Button>');
   expect(highlights).toContain('variant="secondary">Close</Button>');
   expect(highlights).toContain('accessibilityLabel="Creating highlight"');
-  expect(highlights).toContain('const skeletonUntil = Date.now() + 300');
-  expect(highlights).toContain('await finishSkeleton()');
+  expect(highlights).toContain('setHighlights((current) => [highlight, ...current.filter(({ key }) => key !== highlight.key)])');
+  expect(highlights).toContain('setCreating(false)');
+  expect(highlights).not.toContain('skeletonUntil');
+  expect(highlights).not.toContain('finishSkeleton');
+  expect(highlights.indexOf('{creating ?')).toBeLessThan(highlights.indexOf('highlights.map((highlight)'));
   expect(highlights).toContain("useToast()");
   expect(highlights).toContain('notify("Highlights could not be loaded")');
   expect(highlights).toContain('void loadList(true)');
