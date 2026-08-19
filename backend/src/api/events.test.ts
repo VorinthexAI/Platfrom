@@ -29,10 +29,14 @@ describe('app event routing', () => {
     expect(checks).toBe(2);
   });
 
-  test('delivers highlight changes to current collaborators', async () => {
+  test('delivers highlight changes to current collection members until access is revoked', async () => {
     const envelope = parseEventEnvelope('{"route":"collection","collectionKey":"collection-1","event":"highlight.changed"}')!;
-    const collaborator = async () => true;
-    expect(await shouldDeliverEvent(envelope, 'collaborator', collaborator)).toBe(true);
+    let active = true;
+    const member = async () => active;
+    expect(await shouldDeliverEvent(envelope, 'collaborator', member)).toBe(true);
+    expect(await shouldDeliverEvent(envelope, 'viewer', member)).toBe(true);
+    active = false;
+    expect(await shouldDeliverEvent(envelope, 'former-member', member)).toBe(false);
   });
 
   test('passes the slug to authorization so owner-only cache families deny readers', async () => {

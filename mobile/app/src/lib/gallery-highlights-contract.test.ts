@@ -10,6 +10,10 @@ test("opens persistent highlights from the active collection brain menu", () => 
   expect(workspace).toContain('setHighlightsOpen(true)');
   expect(workspace).toContain('>Highlights</BottomSheetItem>');
   expect(workspace).not.toContain('>Create highlight</BottomSheetItem>');
+  const cleanupStart = workspace.indexOf('{activeSheet === "cleanupMenu" ? <>');
+  const cleanupMenu = workspace.slice(cleanupStart, workspace.indexOf('activeSheet === "imageActions"', cleanupStart));
+  expect(cleanupMenu).toContain('>Highlights</BottomSheetItem>');
+  expect(cleanupMenu.indexOf('>Highlights</BottomSheetItem>')).toBeLessThan(cleanupMenu.indexOf('{isCollectionOwner ?'));
 });
 
 test("uses separate full-height grid and player sheets with footer actions", () => {
@@ -26,8 +30,8 @@ test("uses separate full-height grid and player sheets with footer actions", () 
   expect(highlights).not.toContain('finishSkeleton');
   expect(highlights.indexOf('{creating ?')).toBeLessThan(highlights.indexOf('highlights.map((highlight)'));
   expect(highlights).toContain('Skeleton style={[styles.cardFrame, { width: cardWidth, height: cardWidth * 16 / 9 }]}');
-  expect(highlights).toContain('style={[styles.cardFrame, styles.card, { width: cardWidth, height: cardWidth * 16 / 9 }]}');
-  expect(highlights).toContain('cardFrame: { overflow: "hidden", borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.lg, backgroundColor: palette.panelRaised }');
+  expect(highlights).toContain('style={[styles.cardFrame, styles.card, selected && styles.cardSelected, { width: cardWidth, height: cardWidth * 16 / 9 }]}');
+  expect(highlights).toContain('cardFrame: { overflow: "hidden", borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.sm, backgroundColor: palette.panelRaised }');
   expect(highlights).toContain("useToast()");
   expect(highlights).toContain('notify("Highlights could not be loaded")');
   expect(highlights).toContain('void loadList(true)');
@@ -44,23 +48,31 @@ test("uses separate full-height grid and player sheets with footer actions", () 
   expect(highlights).toContain('<PlayIcon variant="inverse" />');
   expect(highlights).toContain('<Button accessibilityLabel="Next slide"');
   expect(highlights).toContain("<ChevronRightIcon />");
-  expect(highlights).toContain('accessibilityLabel="Open highlight actions"');
-  expect(highlights).toContain('<MoreHorizontalIcon size="sm" />');
+  expect(highlights).not.toContain('accessibilityLabel="Open highlight actions"');
+  expect(highlights).not.toContain('MoreHorizontalIcon');
+  expect(highlights).not.toContain('detailMenuRow');
   expect(highlights).not.toContain("<Pressable");
   expect(highlights).not.toContain("<Touchable");
 });
 
-test("uses owner-only creation and a titleless short delete confirmation", () => {
+test("uses owner-only creation and long-press bulk deletion from the grid", () => {
   expect(highlights).toContain("const owner = isGalleryCollectionOwned(collection)");
   expect(highlights).toContain('owner ? <Button disabled={creating || listLoading || opening}');
-  expect(highlights).toContain('activeSheet === "actions"');
-  expect(highlights).toContain('>Delete highlight</BottomSheetItem>');
+  expect(highlights).toContain('onLongPress={owner ? () => handleHighlightLongPress(highlight.key) : undefined}');
+  expect(highlights).toContain('accessibilityActions={owner ? [{ name: "longpress"');
+  expect(highlights).toContain('onAccessibilityAction={owner ?');
+  expect(highlights).toContain('accessibilityState={{ selected }}');
+  expect(highlights).toContain('<CheckIcon size="sm" variant="inverse" />');
+  expect(highlights).toContain('accessibilityLabel="Clear highlight selection"');
+  expect(highlights).toContain('style={styles.bulkDeleteAction} variant="secondary">Delete</Button>');
+  expect(highlights).not.toContain('activeSheet === "actions"');
+  expect(highlights).not.toContain('BottomSheetItem');
   expect(highlights).toContain('activeSheet === "confirmDelete"');
-  expect(highlights).toContain('title="Delete highlight?"');
+  expect(highlights).toContain('title="Delete selected highlights?"');
   expect(highlights).toContain("hideHeading");
-  expect(highlights).toContain('variant="primary">Delete</Button>');
-  expect(highlights).toContain('deleteGalleryCollectionHighlight(highlightKey)');
-  expect(highlights).toContain("setDetail(undefined)");
+  expect(highlights).toContain('size="md" variant="primary">Delete</Button>');
+  expect(highlights).toContain('Promise.allSettled(highlightKeys.map((highlightKey) => deleteGalleryCollectionHighlight(highlightKey)))');
+  expect(highlights).toContain('size="md" variant="secondary">Close</Button>');
 });
 
 test("rotates each incoming slide as a reduced-motion-aware 3D cube face", () => {
@@ -93,6 +105,7 @@ test("matches the backend highlight operation routes and event cache family", ()
   expect(highlights).toContain('["highlight.changed", "image.changed", "collection.content.changed"].includes(event.slug)');
   expect(highlights).toContain('event.type !== "gallery.changed"');
   expect(highlights).toContain('if (detail) void openHighlight(detail)');
+  expect(highlights).toContain('event.type !== "event-stream.connected"');
 });
 
 test("does not route assistant Gallery mutations through text search", () => {

@@ -620,8 +620,12 @@ describe('Gallery repository transactions', () => {
       expect(query).toContain('image.deletedAt == null');
       expect(query).toContain('relation.collectionKey == highlight.collectionKey');
       expect(query).toContain('collection.deletedAt == null');
+      expect(query).toContain('collectionMember != null');
     }
+    expect(queries[0]).toContain('elevated || collectionMember != null');
     expect(queries[2]).toContain('UPDATE highlight WITH { deletedAt: @now, updatedAt: @now }');
+    expect(queries[2]).toContain('member.role == "owner"');
+    expect(queries[2]).toContain('owner != null');
     expect(queries[2]).not.toContain('highlight.createdByKey == @actorKey');
     expect(queries[2]).not.toContain('UPDATE image');
     expect(queries[2]).not.toContain('REMOVE');

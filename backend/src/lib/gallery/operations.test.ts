@@ -281,6 +281,21 @@ describe('Gallery operation boundaries', () => {
     await expect(galleryOperations.createHighlight({ collectionKey }, context)).rejects.toMatchObject({ status: 403, code: 'GALLERY_OWNER_REQUIRED' });
   });
 
+  test('lists highlights for collection collaborators and viewers without requiring ownership', async () => {
+    process.env.AWS_ACCESS_KEY_ID ??= 'test';
+    process.env.AWS_SECRET_ACCESS_KEY ??= 'test';
+    for (const role of ['collaborator', 'viewer'] as const) {
+      const organizationKey = 'organization', scopeKey = key(), actorKey = key(), collectionKey = key(), highlightKey = key(), now = new Date().toISOString();
+      const highlight = { key: highlightKey, scopeKey, collectionKey, imageKeys: [], createdByKey: actorKey, deletedAt: null, createdAt: now, updatedAt: now };
+      const context = {
+        organizationKey, scopeKey, membership: { key: actorKey, organizationId: organizationKey, userId: key(), status: 'active' },
+        getCollectionRole: async () => { throw new Error(`${role} listing must not require ownership`); },
+        listHighlights: async () => [{ highlight, images: [] }],
+      } as any;
+      await expect(galleryOperations.listHighlights({ collectionKey }, context)).resolves.toMatchObject({ highlights: [{ key: highlightKey, collectionKey }] });
+    }
+  });
+
   test('projects only fresh visible images without persistence internals', async () => {
     process.env.AWS_ACCESS_KEY_ID ??= 'test';
     process.env.AWS_SECRET_ACCESS_KEY ??= 'test';
@@ -308,6 +323,15 @@ describe('Gallery operation boundaries', () => {
     const organizationKey = 'organization', scopeKey = key(), actorKey = key(), collectionKey = key(), highlightKey = key(), now = new Date().toISOString();
     const highlight = { key: highlightKey, scopeKey, collectionKey, imageKeys: [], createdByKey: actorKey, deletedAt: null, createdAt: now, updatedAt: now };
     const context = { organizationKey, scopeKey, membership: { key: actorKey, organizationId: organizationKey, userId: key(), status: 'active' }, getCollectionRole: async () => 'collaborator', getHighlight: async () => ({ highlight, images: [] }) } as any;
+    await expect(galleryOperations.deleteHighlight({ highlightKey }, context)).rejects.toMatchObject({ status: 403, code: 'GALLERY_OWNER_REQUIRED' });
+  });
+
+  test('denies highlight creation and deletion to collection viewers', async () => {
+    const organizationKey = 'organization', scopeKey = key(), actorKey = key(), collectionKey = key(), highlightKey = key(), now = new Date().toISOString();
+    const membership = { key: actorKey, organizationId: organizationKey, userId: key(), status: 'active' };
+    const highlight = { key: highlightKey, scopeKey, collectionKey, imageKeys: [], createdByKey: actorKey, deletedAt: null, createdAt: now, updatedAt: now };
+    const context = { organizationKey, scopeKey, membership, getCollectionRole: async () => 'viewer', getHighlight: async () => ({ highlight, images: [] }) } as any;
+    await expect(galleryOperations.createHighlight({ collectionKey }, context)).rejects.toMatchObject({ status: 403, code: 'GALLERY_OWNER_REQUIRED' });
     await expect(galleryOperations.deleteHighlight({ highlightKey }, context)).rejects.toMatchObject({ status: 403, code: 'GALLERY_OWNER_REQUIRED' });
   });
 

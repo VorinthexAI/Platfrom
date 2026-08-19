@@ -2663,16 +2663,16 @@ export function GalleryWorkspace() {
           </View>
         </View> : null}
         {activeSheet === "confirmDeleteImage" ? <View style={styles.compactSheetActions}>
-          <Button disabled={busy} loading={busy} onPress={deleteSelectedImage} size="lg" variant="primary">Delete</Button>
-          <Button disabled={busy} onPress={goBackSheet} size="lg" variant="secondary">Close</Button>
+          <Button disabled={busy} loading={busy} onPress={deleteSelectedImage} size="md" variant="primary">Delete</Button>
+          <Button disabled={busy} onPress={goBackSheet} size="md" variant="secondary">Close</Button>
         </View> : null}
         {activeSheet === "confirmDeleteCollection" ? <View style={styles.compactSheetActions}>
-          <Button disabled={busy} loading={busy} onPress={() => void removeActiveCollection()} size="lg" variant="primary">Delete</Button>
-          <Button disabled={busy} onPress={goBackSheet} size="lg" variant="secondary">Close</Button>
+          <Button disabled={busy} loading={busy} onPress={() => void removeActiveCollection()} size="md" variant="primary">Delete</Button>
+          <Button disabled={busy} onPress={goBackSheet} size="md" variant="secondary">Close</Button>
         </View> : null}
         {activeSheet === "confirmLeaveCollection" ? <View style={styles.compactSheetActions}>
-          <Button disabled={busy} loading={busy} onPress={() => void leaveActiveCollection()} size="lg" variant="primary">Leave</Button>
-          <Button disabled={busy} onPress={goBackSheet} size="lg" variant="secondary">Close</Button>
+          <Button disabled={busy} loading={busy} onPress={() => void leaveActiveCollection()} size="md" variant="primary">Leave</Button>
+          <Button disabled={busy} onPress={goBackSheet} size="md" variant="secondary">Close</Button>
         </View> : null}
         {activeSheet === "similar" ? <View style={styles.duplicatePanel}>
           {similarLoading ? <View accessibilityLabel="Loading similar images" accessibilityRole="progressbar" style={styles.grid}>{Array.from({ length: IMAGE_COLUMNS }, (_, index) => <Skeleton key={index} style={[styles.imageSkeleton, { width: sheetImageSize, height: sheetImageSize }]} />)}</View>
@@ -2693,8 +2693,6 @@ export function GalleryWorkspace() {
             <Switch accessibilityLabel="Show hidden Gallery items" checked={showHidden} onCheckedChange={(checked) => { setViewFilters((current) => ({ ...current, showHidden: checked })); closeSheet(); }} />
             <Text style={styles.favoriteSwitchLabel}>Show hidden</Text>
           </View>
-          <Button onPress={() => void openVisualIdentities()} size="lg" variant="secondary">Visual identities</Button>
-          <Button onPress={() => void openSearchHistory()} size="lg" variant="secondary">Search history</Button>
         </View> : null}
         {activeSheet === "identityPickerFilter" ? <View style={styles.filterPanel}>
           <View style={styles.favoriteSwitchRow}>
@@ -2720,8 +2718,8 @@ export function GalleryWorkspace() {
             </View>)}</View> : <View style={styles.duplicateEmpty}><Text style={styles.emptyText}>No visual identities yet.</Text></View>}
         </View> : null}
         {activeSheet === "confirmDeleteIdentity" ? <View style={styles.compactSheetActions}>
-          <Button disabled={!identityPendingDelete} onPress={deleteVisualIdentity} size="lg" variant="primary">Delete</Button>
-          <Button onPress={goBackSheet} size="lg" variant="secondary">Close</Button>
+          <Button disabled={!identityPendingDelete} onPress={deleteVisualIdentity} size="md" variant="primary">Delete</Button>
+          <Button onPress={goBackSheet} size="md" variant="secondary">Close</Button>
         </View> : null}
         {activeSheet === "identityPicker" ? <View style={styles.identityPicker}>
           <Text style={styles.sheetSubtitle}>{imagePickerPurpose === "cover" ? `Choose an existing image from ${activeCollection?.name ?? "this collection"}.` : "Choose an image to create a visual identity from."}</Text>
@@ -2755,8 +2753,8 @@ export function GalleryWorkspace() {
           <Button disabled={busy} onPress={() => pushSheet("bulkDelete")} size="lg" variant="secondary">Delete</Button>
         </View> : null}
         {activeSheet === "bulkDelete" ? <View style={styles.compactSheetActions}>
-          <Button disabled={busy} loading={busy} onPress={deleteSelectedImages} size="lg" variant="primary">Delete</Button>
-          <Button disabled={busy} onPress={goBackSheet} size="lg" variant="secondary">Close</Button>
+          <Button disabled={busy} loading={busy} onPress={deleteSelectedImages} size="md" variant="primary">Delete</Button>
+          <Button disabled={busy} onPress={goBackSheet} size="md" variant="secondary">Close</Button>
         </View> : null}
         {activeSheet === "transferDestination" ? <View style={styles.destinationBrowser}>
           <View style={styles.destinationLocationLane}><Text numberOfLines={1} style={styles.destinationLocationTitle}>Gallery</Text></View>
@@ -2774,14 +2772,14 @@ export function GalleryWorkspace() {
           {writableCollections.filter(({ key }) => key !== activeCollection?.key).length === 0 ? <Text style={styles.emptyText}>No writable destination collections are available.</Text> : null}
           </View>
         </View> : null}
-        {activeSheet === "confirmDeleteDuplicates" ? <View style={styles.form}>
-          <Button disabled={busy || duplicateImages.length === 0} loading={busy} onPress={() => void deleteDuplicates()} size="lg" variant="primary">Delete</Button>
-          <Button disabled={busy} onPress={goBackSheet} size="lg" variant="secondary">Close</Button>
+        {activeSheet === "confirmDeleteDuplicates" ? <View style={styles.compactSheetActions}>
+          <Button disabled={busy || duplicateImages.length === 0} loading={busy} onPress={() => void deleteDuplicates()} size="md" variant="primary">Delete</Button>
+          <Button disabled={busy} onPress={goBackSheet} size="md" variant="secondary">Close</Button>
         </View> : null}
         {activeSheet === "confirmCleanupDelete" ? <View style={styles.compactSheetActions}>
           <Text style={styles.confirmationText}>Delete {cleanupImages.length} selected image{cleanupImages.length === 1 ? "" : "s"}?</Text>
-          <Button disabled={busy || cleanupImages.length === 0} loading={busy} onPress={() => void deleteCleanupImages()} size="lg" variant="primary">Delete</Button>
-          <Button disabled={busy} onPress={goBackSheet} size="lg" variant="secondary">Close</Button>
+          <Button disabled={busy || cleanupImages.length === 0} loading={busy} onPress={() => void deleteCleanupImages()} size="md" variant="primary">Delete</Button>
+          <Button disabled={busy} onPress={goBackSheet} size="md" variant="secondary">Close</Button>
         </View> : null}
         </ScrollView>}
       </BottomSheet>

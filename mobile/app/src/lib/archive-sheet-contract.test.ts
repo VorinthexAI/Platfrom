@@ -30,6 +30,14 @@ test("uses only intrinsic and full-height Archive sheets", () => {
   expect(sheet).not.toContain("tall=");
 });
 
+test("uses standard-sized actions in compact Archive confirmations", () => {
+  const compactDeleteStart = source.indexOf("{compactDelete ?");
+  const compactDeleteEnd = source.indexOf("{activeSheet === \"create\"", compactDeleteStart);
+  const compactDelete = source.slice(compactDeleteStart, compactDeleteEnd);
+  expect(compactDelete.match(/size="md"/g)).toHaveLength(2);
+  expect(compactDelete).not.toContain('size="lg"');
+});
+
 test("shows a top-right check badge on selected Archive folders", () => {
   expect(source.match(/selected \? <View pointerEvents="none" style=\{styles\.selectionBadge\}/g)).toHaveLength(4);
   expect(source).toContain('selectionBadge: { position: "absolute", top: 4, right: 4');

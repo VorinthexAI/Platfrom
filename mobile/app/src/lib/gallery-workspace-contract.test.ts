@@ -60,6 +60,15 @@ test("uses a singleton collection cache without root search or filtering", () =>
   expect(source).toContain('accessibilityLabel="Create in Gallery"');
 });
 
+test("keeps the Gallery filter sheet limited to favorite and hidden toggles", () => {
+  const start = source.indexOf('activeSheet === "filter" ?');
+  const filterSheet = source.slice(start, source.indexOf('activeSheet === "identityPickerFilter"', start));
+  expect(filterSheet).toContain('>Favorites</Text>');
+  expect(filterSheet).toContain('>Show hidden</Text>');
+  expect(filterSheet).not.toContain('>Visual identities</Button>');
+  expect(filterSheet).not.toContain('>Search history</Button>');
+});
+
 test("only lifts Core for its own focus and uses distinct image sheet presentations", () => {
   expect(source).toContain('behavior={aiInputFocused ? "height" : undefined}');
   expect(source).toContain("setAiInputFocused(focused)");
@@ -103,7 +112,7 @@ test("provides the full visual identity library and image picker workflow", () =
   expect(source).toContain("Array.from({ length: COLLECTION_COLUMNS }");
   expect(source).toContain('<Button disabled={identitiesLoading} onPress={() => void openIdentityPicker()} size="lg" variant="primary">Create</Button>');
   expect(source).not.toContain('identityLibraryMode === "browse" ? <Button');
-  expect(source.match(/onPress=\{\(\) => void openVisualIdentities\(\)\} size="lg" variant="secondary">Visual identities<\/Button>/g)).toHaveLength(2);
+  expect(source.match(/onPress=\{\(\) => void openVisualIdentities\(\)\} size="lg" variant="secondary">Visual identities<\/Button>/g)).toHaveLength(1);
 });
 
 test("keeps similar-image results sheet-local without replacing the collection grid", () => {
@@ -598,6 +607,24 @@ test("uses full-height lists for collection collaboration", () => {
   expect(sharingSource).not.toContain('variant="ghost"><View><Text numberOfLines={1} style={styles.name}>{link.url}');
 });
 
+test("uses standard-sized compact confirmations and collaboration notices", () => {
+  for (const sheet of ["confirmDeleteImage", "confirmDeleteCollection", "confirmLeaveCollection", "confirmDeleteIdentity", "bulkDelete", "confirmDeleteDuplicates", "confirmCleanupDelete"]) {
+    const start = source.indexOf(`activeSheet === "${sheet}" ? <View`);
+    const end = source.indexOf("</View> : null}", start);
+    const confirmation = source.slice(start, end);
+    expect(confirmation.match(/size="md"/g)).toHaveLength(2);
+    expect(confirmation).not.toContain('size="lg"');
+  }
+  expect(sharingSource).toContain('notify("Member updated")');
+  expect(sharingSource).toContain('notify("Member removed")');
+  expect(sharingSource).toContain('"Invite accepted" : "Invite rejected"');
+  expect(sharingSource).toContain('notify("Share link created")');
+  expect(sharingSource).toContain('notify("Share link updated")');
+  expect(sharingSource).toContain('notify("Share link shared")');
+  expect(sharingSource).toContain('onPress={() => void removeMember()} size="md"');
+  expect(sharingSource).toContain('onPress={() => void respondInvite()} size="md"');
+});
+
 test("gates member editing to owners and keeps removal inside one shared pill", () => {
   expect(sharingSource).toContain('const owner = isGalleryCollectionOwned(collection)');
   expect(sharingSource).not.toContain('collection.role === "owner" || !collection.role');
@@ -617,8 +644,8 @@ test("keeps pending-invite rejection inside the shared pill", () => {
   expect(sharingSource).toContain('<ActionPill action={<CloseIcon size="sm" />} actionLabel={`Reject invite to ${invite.collection.name}`}');
   expect(sharingSource).toContain('onAction={() => { setSelectedInvite(invite); setInviteResponse("reject"); setView("inviteConfirm"); }}');
   expect(sharingSource).toContain('pressLabel={`Accept invite to ${invite.collection.name}`}');
-  expect(sharingSource).toContain('{inviteResponse === "accept" ? "Accept" : "Remove"}</Button>');
-  expect(sharingSource).toContain('inviteResponse === "accept" ? "Invite accepted" : "Invite removed"');
+  expect(sharingSource).toContain('{inviteResponse === "accept" ? "Accept" : "Reject"}</Button>');
+  expect(sharingSource).toContain('inviteResponse === "accept" ? "Invite accepted" : "Invite rejected"');
 });
 
 test("uses shared tabs for editable member and share-link roles", () => {
@@ -643,7 +670,7 @@ test("keeps non-owner leave at the end of the collection menu with compact confi
   expect(menu).toContain('pushSheet("confirmLeaveCollection")');
   expect(menu).toContain('>Leave</BottomSheetItem>');
   expect(source).toContain('activeSheet === "confirmCleanupDelete" || activeSheet === "confirmDeleteIdentity" || activeSheet === "confirmLeaveCollection"');
-  expect(source).toContain('onPress={() => void leaveActiveCollection()} size="lg" variant="primary">Leave</Button>');
+  expect(source).toContain('onPress={() => void leaveActiveCollection()} size="md" variant="primary">Leave</Button>');
 });
 
 test("shares secure links through the native OS chooser", () => {

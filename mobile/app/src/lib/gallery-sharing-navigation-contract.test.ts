@@ -25,6 +25,7 @@ test("preserves and activates authenticated share links", () => {
   expect(shareRoute).toContain("activateGalleryShare(token)");
   expect(shareRoute).toContain("activation.scopeKey !== context.scopeKey");
   expect(shareRoute).toContain("galleryQueryKeys.overview(context)");
+  expect(shareRoute).toContain('title: "Shared collection added"');
   expect(shareRoute).toContain('slug: "gallery"');
   expect(layout).toContain("savePendingReturnRoute(pathname)");
   expect(layout).toContain(".finally(() => router.replace");
