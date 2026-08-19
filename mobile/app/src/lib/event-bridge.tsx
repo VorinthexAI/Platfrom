@@ -48,6 +48,7 @@ export function AuthenticatedEventBridge() {
       if (families.has("duplicates")) void queryClient.invalidateQueries({ queryKey: [...root, "duplicates"], refetchType: "none" });
       if (families.has("upload")) void queryClient.invalidateQueries({ queryKey: [...root, "uploads"], refetchType: "none" });
       if (families.has("highlights")) void queryClient.invalidateQueries({ queryKey: [...root, "highlights"], refetchType: "none" });
+      if (families.has("memories")) void queryClient.invalidateQueries({ queryKey: [...root, "memories"], refetchType: "none" });
     };
     const invalidateUserHiddens = () => {
       void queryClient.invalidateQueries({ predicate: ({ queryKey }) => queryKey.at(-1) === "user-hiddens" && (queryKey[0] === "gallery" || queryKey[0] === "archive"), refetchType: "active" });

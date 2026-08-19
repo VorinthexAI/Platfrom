@@ -48,6 +48,10 @@ const definitions: Array<{
   { operation: 'listHighlights', name: 'highlight.list', description: 'List accessible persistent image highlights with currently visible collection images.', schema: galleryOperationInputSchemas.listHighlights },
   { operation: 'readHighlight', name: 'highlight.read', description: 'Read one accessible persistent image highlight with currently visible collection images.', schema: galleryOperationInputSchemas.readHighlight },
   { operation: 'deleteHighlight', name: 'highlight.delete', description: 'Delete an owner-managed persistent image highlight without deleting its images.', schema: galleryOperationInputSchemas.deleteHighlight, mutation: true },
+  { operation: 'createMemory', name: 'image.create-memory', description: 'Create a generated memory for one unused image in an owned collection.', schema: galleryOperationInputSchemas.createMemory, mutation: true },
+  { operation: 'listMemories', name: 'image.memory.list', description: 'List image memories in an accessible collection.', schema: galleryOperationInputSchemas.listMemories },
+  { operation: 'readMemory', name: 'image.memory.read', description: 'Read an accessible image memory.', schema: galleryOperationInputSchemas.readMemory },
+  { operation: 'deleteMemory', name: 'image.memory.delete', description: 'Delete an image memory from an owned collection.', schema: galleryOperationInputSchemas.deleteMemory, mutation: true },
 ];
 
 export const galleryAssistantMutationOperations = definitions.filter(({ mutation }) => mutation).map(({ operation }) => operation);

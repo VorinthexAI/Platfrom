@@ -158,11 +158,11 @@ describe('Gallery repository transactions', () => {
 
   test('returns only an authorized live visual identity in the requested scope', async () => {
     const scopeKey = newId(), identityKey = newId(), actorKey = newId();
-    const identity = { _key: identityKey, scopeKey, name: 'Alex', description: 'A person.', referenceImageKey: newId(), embedding: Array(4_096).fill(0), createdAt: '2026-08-17T12:00:00.000Z', updatedAt: '2026-08-17T12:00:00.000Z' };
+    const identity = { _key: identityKey, scopeKey, createdByKey: actorKey, name: 'Alex', description: 'A person.', referenceImageKey: newId(), embedding: Array(4_096).fill(0), createdAt: '2026-08-17T12:00:00.000Z', updatedAt: '2026-08-17T12:00:00.000Z' };
     let authorized = false;
     const database: MediaLibraryDatabase = { async query(query, bindVars) { return { async all() {
       if (query.includes('LET actorMembership')) return authorized ? [true] : [];
-      expect(bindVars).toEqual({ scopeKey, identityKey });
+      expect(bindVars).toEqual({ scopeKey, identityKey, actorKey });
       return [identity];
     } }; } };
     const repository = createGalleryRepository(database);
@@ -264,14 +264,14 @@ describe('Gallery repository transactions', () => {
   });
 
   test('lists persisted visual identity matches within an optional collection', async () => {
-    const scopeKey = newId(), identityKey = newId(), collectionKey = newId(), imageKey = newId();
+    const scopeKey = newId(), identityKey = newId(), collectionKey = newId(), imageKey = newId(), actorKey = newId();
     const image = { _key: imageKey, scopeKey, filename: 'reference.jpg', caption: 'Reference', imageCaptionKey: null, storageKey: 'media/reference', mimeType: 'image/jpeg', sizeBytes: 100, width: 10, height: 10, embedding: Array(4_096).fill(0), isFavorite: false, createdAt: '2026-08-17T12:00:00.000Z', updatedAt: '2026-08-17T12:00:00.000Z' };
     const database: MediaLibraryDatabase = { async query(query, bindVars) { return { async all() {
       expect(query).toContain('collectionImage.collectionKey == @collectionKey');
-      expect(bindVars).toEqual({ scopeKey, identityKey, collectionKey });
+      expect(bindVars).toEqual({ scopeKey, identityKey, actorKey, collectionKey });
       return [{ image, confidence: 1 }];
     } }; } };
-    await expect(createGalleryRepository(database).listSubjectImages(scopeKey, identityKey, collectionKey)).resolves.toEqual([{ image: expect.objectContaining({ key: imageKey }), confidence: 1 }]);
+    await expect(createGalleryRepository(database).listSubjectImages(scopeKey, identityKey, actorKey, collectionKey)).resolves.toEqual([{ image: expect.objectContaining({ key: imageKey }), confidence: 1 }]);
   });
 
   test('rejects duplicate deletion when the protected duplicate set changes', async () => {
@@ -318,7 +318,7 @@ describe('Gallery repository transactions', () => {
       return [];
     } }; } };
     const result = await createGalleryRepository(database, async (_collections, operation) => operation(database)).deleteDuplicateImages(scopeKey, collectionKey, selected, newId(), '2026-08-18T12:00:00.000Z');
-    expect(result).toEqual({ removedImageKeys: [selected[1]], deletedImageKeys: [selected[1]], favoriteImageKeys: [selected[0]], collectionKeys: [collectionKey], subjectChanged: false, storageKeys: [`media/${selected[1]}`] });
+    expect(result).toEqual({ removedImageKeys: [selected[1]], deletedImageKeys: [selected[1]], favoriteImageKeys: [selected[0]], collectionKeys: [collectionKey], memoryCollectionKeys: [], subjectChanged: false, storageKeys: [`media/${selected[1]}`] });
     for (let index = 2; index < binds.length; index += 1) if ('imageKeys' in binds[index]!) expect(binds[index]?.imageKeys).toEqual([selected[1]]);
   });
 
@@ -326,9 +326,48 @@ describe('Gallery repository transactions', () => {
     const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
     const start = source.lastIndexOf('deleteDuplicateImages(');
     const duplicateDeletion = source.slice(start, source.indexOf('deleteImages(scopeKey', start));
-    expect(duplicateDeletion).toContain("write: ['images', 'imageCaptions', 'collectionImages', 'collections', 'imageIdentities', 'imageCollecitionHightlights', 'tagAssignments', 'shares', 'userHiddens', 'storageDeletionJobs']");
+    for (const collection of ['images', 'collectionImages', 'imageCollectionMemories', 'storageDeletionJobs']) expect(duplicateDeletion).toContain(`"${collection}"`);
     expect(duplicateDeletion).toContain('UPSERT { storageKey: @storageKey }');
     expect(duplicateDeletion).toContain('{ scopeKey, imageKeys: removedImageKeys, now }');
+    expect(duplicateDeletion).toContain('REMOVE memory IN imageCollectionMemories');
+  });
+
+  test('keeps global image memory uniqueness and preserves memories across relation changes', async () => {
+    const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
+    expect(source).toContain('UPSERT { scopeKey: @scopeKey, imageKey: @imageKey }');
+    const transfer = source.slice(source.indexOf('transferCollectionImages(input)'), source.indexOf('insertUploads(uploads)'));
+    expect(transfer).not.toContain('imageCollectionMemories');
+    const collectionDeleteStart = source.lastIndexOf('deleteCollection(scopeKey');
+    const collectionDelete = source.slice(collectionDeleteStart, source.indexOf('listSubjects:', collectionDeleteStart));
+    expect(collectionDelete).not.toContain('imageCollectionMemories');
+  });
+
+  test('resolves memory identity names by direct actor-owned cosine similarity', async () => {
+    const scopeKey = newId(), collectionKey = newId(), actorKey = newId(), imageKey = newId(), now = new Date().toISOString();
+    const image = { _key: imageKey, scopeKey, filename: 'hugo.jpg', caption: 'Hugo in the snow.', imageCaptionKey: null, storageKey: 'hugo.jpg', mimeType: 'image/jpeg', sizeBytes: 1, width: 1, height: 1, embedding: Array(4_096).fill(0.1), createdByKey: actorKey, isFavorite: false, createdAt: now, updatedAt: now };
+    let query = '';
+    const database: MediaLibraryDatabase = { async query(value, bindVars) { query = value; expect(bindVars).toEqual({ scopeKey, collectionKey, actorKey }); return { async all() { return [[{ image, caption: image.caption, captionScore: 90, identityNames: ['Hugo'] }]]; } }; } };
+    const candidates = await createGalleryRepository(database).listMemoryCandidates(scopeKey, collectionKey, actorKey);
+    expect(candidates?.[0]?.identityNames).toEqual(['Hugo']);
+    expect(query).toContain('identity.createdByKey == @actorKey');
+    expect(query).toContain('COSINE_SIMILARITY(identity.embedding, image.embedding)');
+    expect(query).toContain('confidence >= 0.82');
+    expect(query).not.toContain('FOR imageIdentity IN imageIdentities');
+  });
+
+  test('deletes a global memory only through the exact owned containing collection', async () => {
+    const scopeKey = newId(), memoryKey = newId(), collectionKey = newId(), actorKey = newId(), imageKey = newId(), now = new Date().toISOString();
+    const memory = { _key: memoryKey, scopeKey, imageKey, text: 'One.\n\nTwo.\n\nThree.', createdByKey: actorKey, createdAt: now, updatedAt: now };
+    const image = { _key: imageKey, scopeKey, filename: 'memory.jpg', caption: 'Memory', imageCaptionKey: null, storageKey: 'memory.jpg', mimeType: 'image/jpeg', sizeBytes: 1, width: 1, height: 1, embedding: Array(4_096).fill(0), createdByKey: actorKey, isFavorite: false, createdAt: now, updatedAt: now };
+    let query = '', binds: unknown;
+    const database: MediaLibraryDatabase = { async query(value, bindVars) { query = value; binds = bindVars; return { async all() { return [{ memory, image, collectionKeys: [collectionKey, newId()] }]; } }; } };
+    const deleted = await createGalleryRepository(database).deleteAccessibleMemory(scopeKey, memoryKey, collectionKey, actorKey);
+    expect(deleted?.memory.key).toBe(memoryKey);
+    expect(binds).toEqual({ scopeKey, memoryKey, collectionKey, actorKey });
+    expect(query).toContain('relation.collectionKey == @collectionKey && relation.imageKey == memory.imageKey');
+    expect(query).toContain('member.collectionKey == @collectionKey');
+    expect(query).toContain('member.role == "owner"');
+    expect(query).toContain('RETURN DISTINCT relation.collectionKey');
   });
 
   test('validates the duplicate set before partitioning and makes all-favorite duplicate batches no-ops', async () => {
@@ -343,7 +382,7 @@ describe('Gallery repository transactions', () => {
         return [];
       } }; } };
       const result = await createGalleryRepository(database, async (_collections, operation) => operation(database)).deleteDuplicateImages(scopeKey, collectionKey, imageKeys, newId(), '2026-08-18T12:00:00.000Z');
-      expect(result).toEqual(imageKeys.length === 2 ? null : { removedImageKeys: [], deletedImageKeys: [], favoriteImageKeys: [favoriteKey], collectionKeys: [], subjectChanged: false, storageKeys: [] });
+      expect(result).toEqual(imageKeys.length === 2 ? null : { removedImageKeys: [], deletedImageKeys: [], favoriteImageKeys: [favoriteKey], collectionKeys: [], memoryCollectionKeys: [], subjectChanged: false, storageKeys: [] });
       expect(queries).toHaveLength(2);
     }
   });
@@ -396,7 +435,7 @@ describe('Gallery repository transactions', () => {
       return { async all() { return query.includes('LET image = DOCUMENT') ? imageKeys : []; } };
     } };
     const repository = createGalleryRepository(database, async (collections, operation) => { transactionCollections = collections; return operation(database); });
-    await expect(repository.deleteImages(newId(), imageKeys, newId(), '2026-08-13T12:00:00.000Z')).resolves.toEqual({ deletedImageKeys: imageKeys, favoriteImageKeys: [], collectionKeys: [], subjectChanged: false, hadUnfiledImages: false, storageKeys: [] });
+    await expect(repository.deleteImages(newId(), imageKeys, newId(), '2026-08-13T12:00:00.000Z')).resolves.toEqual({ deletedImageKeys: imageKeys, favoriteImageKeys: [], collectionKeys: [], memoryCollectionKeys: [], subjectChanged: false, hadUnfiledImages: false, storageKeys: [] });
     expect(transactionCollections).toEqual(expect.objectContaining({ write: expect.arrayContaining(['images', 'imageCaptions', 'collectionImages', 'imageIdentities', 'visualIdentities', 'imageCollecitionHightlights', 'tagAssignments', 'shares', 'userHiddens']) }));
     expect(queries.some((query) => query.includes('REMOVE relation IN collectionImages'))).toBe(true);
     expect(queries.some((query) => query.includes('REMOVE relation IN imageIdentities'))).toBe(true);
@@ -415,7 +454,7 @@ describe('Gallery repository transactions', () => {
       return [];
     } }; } };
     const result = await createGalleryRepository(database, async (_collections, operation) => operation(database)).deleteImages(newId(), imageKeys, newId(), '2026-08-18T12:00:00.000Z');
-    expect(result).toEqual({ deletedImageKeys: [imageKeys[1]], favoriteImageKeys: [imageKeys[0], imageKeys[2]], collectionKeys: [], subjectChanged: false, hadUnfiledImages: false, storageKeys: [`media/${imageKeys[1]}`] });
+    expect(result).toEqual({ deletedImageKeys: [imageKeys[1]], favoriteImageKeys: [imageKeys[0], imageKeys[2]], collectionKeys: [], memoryCollectionKeys: [], subjectChanged: false, hadUnfiledImages: false, storageKeys: [`media/${imageKeys[1]}`] });
     for (let index = 1; index < binds.length; index += 1) if ('imageKeys' in binds[index]!) expect(binds[index]?.imageKeys).toEqual([imageKeys[1]]);
     expect(queries.some((query) => query.includes('REMOVE image IN images'))).toBe(true);
   });
@@ -429,7 +468,7 @@ describe('Gallery repository transactions', () => {
         return authorized ? imageKeys.map((imageKey) => ({ imageKey, isFavorite: true })) : [{ imageKey: imageKeys[0], isFavorite: true }];
       } }; } };
       const result = await createGalleryRepository(database, async (_collections, operation) => operation(database)).deleteImages(newId(), imageKeys, newId(), '2026-08-18T12:00:00.000Z');
-      expect(result).toEqual(authorized ? { deletedImageKeys: [], favoriteImageKeys: imageKeys, collectionKeys: [], subjectChanged: false, hadUnfiledImages: false, storageKeys: [] } : null);
+      expect(result).toEqual(authorized ? { deletedImageKeys: [], favoriteImageKeys: imageKeys, collectionKeys: [], memoryCollectionKeys: [], subjectChanged: false, hadUnfiledImages: false, storageKeys: [] } : null);
       expect(queries).toHaveLength(1);
     }
   });

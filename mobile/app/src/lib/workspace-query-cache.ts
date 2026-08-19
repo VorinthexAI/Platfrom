@@ -30,6 +30,8 @@ export const galleryQueryKeys = {
   uploads: (context: WorkspaceContext) => [...galleryQueryKeys.all(context), "uploads"] as const,
   highlights: (context: WorkspaceContext, collectionKey: string) => [...galleryQueryKeys.all(context), "highlights", collectionKey] as const,
   highlight: (context: WorkspaceContext, collectionKey: string, highlightKey: string) => [...galleryQueryKeys.highlights(context, collectionKey), highlightKey] as const,
+  memories: (context: WorkspaceContext, collectionKey: string) => [...galleryQueryKeys.all(context), "memories", collectionKey] as const,
+  memory: (context: WorkspaceContext, collectionKey: string, memoryKey: string) => [...galleryQueryKeys.memories(context, collectionKey), memoryKey] as const,
 };
 
 export function patchGalleryUserHiddens(queryClient: QueryClient, context: WorkspaceContext, update: (current: UserHiddenRecord[]) => UserHiddenRecord[]) {

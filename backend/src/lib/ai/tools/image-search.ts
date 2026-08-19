@@ -46,14 +46,14 @@ export interface ImageSearchToolDependencies extends ExecuteActionOptions {
   context: ToolContext;
   executeEmbedding?: (organizationKey: string, input: EmbeddingInput) => Promise<ProviderExecuteResponse<EmbeddingOutput>>;
   searchImages?: (input: AccessibleImageSearchInput) => Promise<AccessibleImageSearchResult[]>;
-  listMatchingVisualIdentities?: GalleryRepository['listMatchingIdentityNames'];
+  listMatchingVisualIdentities?: (scopeKey: string, query: string) => ReturnType<GalleryRepository['listMatchingIdentityNames']>;
   getImage?: GalleryRepository['getImage'];
   getVisualIdentity?: GalleryRepository['getVisualIdentity'];
   canAccessImage?: GalleryRepository['canAccessImage'];
   canAccessCollection?: GalleryRepository['canAccessCollection'];
   getCollection?: GalleryRepository['getCollection'];
   findDuplicateImages?: GalleryRepository['listRedundantCollectionImages'];
-  listVisualIdentityImages?: GalleryRepository['listSubjectImages'];
+  listVisualIdentityImages?: (scopeKey: string, identityKey: string, collectionKey?: string) => ReturnType<GalleryRepository['listSubjectImages']>;
   onMetrics?: (metrics: { mode: 'text' | 'similar' | 'identity' | 'duplicates'; resultCount: number; durationMs: number }) => void;
 }
 
@@ -91,7 +91,9 @@ export const imageSearchTool = {
     if ('identityKey' in input) {
       const identity = await (dependencies.getVisualIdentity ?? repository.getVisualIdentity)(scopeKey, input.identityKey, actorKey);
       if (!identity) throw new Error('Visual identity not found.');
-      const matches = await (dependencies.listVisualIdentityImages ?? repository.listSubjectImages)(scopeKey, identity.key, input.collectionKey);
+      const matches = dependencies.listVisualIdentityImages
+        ? await dependencies.listVisualIdentityImages(scopeKey, identity.key, input.collectionKey)
+        : await repository.listSubjectImages(scopeKey, identity.key, actorKey, input.collectionKey);
       return finish('identity', imageSimilarityOutput(matches.map(({ image, confidence }) => ({ image, score: confidence }))));
     }
     if ('imageKey' in input) {
@@ -118,7 +120,9 @@ export const imageSearchTool = {
         }, embeddingInput, dependencies);
     const [response, identities] = await Promise.all([
       embeddingPromise,
-      (dependencies.listMatchingVisualIdentities ?? repository.listMatchingIdentityNames)(scopeKey, input.query),
+      dependencies.listMatchingVisualIdentities
+        ? dependencies.listMatchingVisualIdentities(scopeKey, input.query)
+        : repository.listMatchingIdentityNames(scopeKey, input.query, actorKey),
     ]);
     const embedding = currentEmbeddingSchema.parse(response.output.embedding);
     const search = dependencies.searchImages ?? searchAccessibleImages;

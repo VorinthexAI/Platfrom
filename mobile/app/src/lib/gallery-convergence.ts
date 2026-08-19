@@ -8,10 +8,12 @@ export const GALLERY_EVENT_SLUGS = [
   "upload.changed",
   "subject.changed",
   "highlight.changed",
+  "memory.created",
+  "memory.deleted",
 ] as const;
 
 export type GalleryEventSlug = typeof GALLERY_EVENT_SLUGS[number];
-export type GalleryRefreshFamily = "root" | "current" | "access" | "members" | "collectionInvites" | "incomingInvites" | "shares" | "subjects" | "search" | "duplicates" | "cleanup" | "upload" | "highlights";
+export type GalleryRefreshFamily = "root" | "current" | "access" | "members" | "collectionInvites" | "incomingInvites" | "shares" | "subjects" | "search" | "duplicates" | "cleanup" | "upload" | "highlights" | "memories";
 export type GalleryRefreshPlan = ReadonlySet<GalleryRefreshFamily>;
 
 export function isCurrentContextGeneration(expected: number, current: number) {
@@ -20,17 +22,19 @@ export function isCurrentContextGeneration(expected: number, current: number) {
 
 const plans: Record<GalleryEventSlug, readonly GalleryRefreshFamily[]> = {
   "collection.index.changed": ["root", "access"],
-  "collection.content.changed": ["current", "search", "duplicates", "cleanup", "highlights"],
+  "collection.content.changed": ["current", "search", "duplicates", "cleanup", "highlights", "memories"],
   "collection.access.changed": ["root", "access", "members", "cleanup"],
   "collection.invites.changed": ["collectionInvites", "incomingInvites"],
   "collection.shares.changed": ["shares"],
-  "image.changed": ["current", "search", "duplicates", "cleanup", "subjects", "upload", "highlights"],
+  "image.changed": ["current", "search", "duplicates", "cleanup", "subjects", "upload", "highlights", "memories"],
   "upload.changed": ["current", "search", "duplicates", "cleanup", "upload", "subjects"],
   "subject.changed": ["subjects", "search"],
   "highlight.changed": ["highlights"],
+  "memory.created": ["memories"],
+  "memory.deleted": ["memories"],
 };
 
-const recoveryPlan: readonly GalleryRefreshFamily[] = ["root", "current", "access", "members", "collectionInvites", "incomingInvites", "shares", "subjects", "search", "duplicates", "cleanup", "upload", "highlights"];
+const recoveryPlan: readonly GalleryRefreshFamily[] = ["root", "current", "access", "members", "collectionInvites", "incomingInvites", "shares", "subjects", "search", "duplicates", "cleanup", "upload", "highlights", "memories"];
 
 export function isGalleryEventSlug(value: string): value is GalleryEventSlug {
   return (GALLERY_EVENT_SLUGS as readonly string[]).includes(value);

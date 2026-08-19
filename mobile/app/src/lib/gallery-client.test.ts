@@ -41,7 +41,7 @@ mock.module("./api-client", () => ({
   } },
 }));
 
-const { activateGalleryShare, createGalleryCollection, createGalleryCollectionHighlight, createGalleryCollectionShareLink, deleteGalleryCollection, deleteGalleryCollectionDuplicates, deleteGalleryCollectionHighlight, deleteGalleryImages, deleteGallerySubject, fetchGalleryCollectionHighlight, fetchGalleryOverview, filterCollections, filterGalleryShareLinks, filterMediaItems, findGalleryCollectionDuplicates, groupGalleryImagesByCreatedDate, isGalleryClientErrorCode, isGalleryCollectionOwned, leaveGalleryCollection, listGalleryCollectionHighlights, listGalleryCollectionInvites, listGalleryCollectionMembers, listGalleryCollectionShareLinks, mergeMediaItems, partitionFavoriteGalleryImages, reconcileGalleryDuplicateDeletion, reconcileGalleryImageDeletion, removeGalleryCollectionMember, resolveGalleryHighlightSlides, respondToGalleryCollectionInvite, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryCollectionMember, updateGalleryCollectionShareLink, updateGalleryImage, uploadGalleryImages } = await import("./gallery-client");
+const { activateGalleryShare, createGalleryCollection, createGalleryCollectionHighlight, createGalleryCollectionMemory, createGalleryCollectionShareLink, deleteGalleryCollection, deleteGalleryCollectionDuplicates, deleteGalleryCollectionHighlight, deleteGalleryCollectionMemory, deleteGalleryImages, deleteGallerySubject, fetchGalleryCollectionHighlight, fetchGalleryCollectionMemory, fetchGalleryOverview, filterCollections, filterGalleryShareLinks, filterMediaItems, findGalleryCollectionDuplicates, groupGalleryImagesByCreatedDate, isGalleryClientErrorCode, isGalleryCollectionOwned, isGalleryMemoryExhaustion, leaveGalleryCollection, listGalleryCollectionHighlights, listGalleryCollectionInvites, listGalleryCollectionMemories, listGalleryCollectionMembers, listGalleryCollectionShareLinks, mergeMediaItems, partitionFavoriteGalleryImages, reconcileGalleryDuplicateDeletion, reconcileGalleryImageDeletion, removeGalleryCollectionMember, resolveGalleryHighlightSlides, respondToGalleryCollectionInvite, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryCollectionMember, updateGalleryCollectionShareLink, updateGalleryImage, uploadGalleryImages } = await import("./gallery-client");
 
 beforeEach(() => { calls.splice(0); responses.clear(); failures.clear(); malformed.clear(); });
 
@@ -363,6 +363,32 @@ test("creates, lists, and reads collection highlights through canonical operatio
 test("silently removes highlight slides whose direct image pointer no longer resolves", () => {
   const base = { key: "highlight", collectionKey: "collection", imageKeys: ["image", "gone"], images: [image("image", "image.jpg", "Image")], createdByKey: "membership", title: "Highlight", slideCount: 2, coverUrl: null, createdAt: "2026-08-18T00:00:00.000Z", updatedAt: "2026-08-18T00:00:00.000Z" };
   expect(resolveGalleryHighlightSlides(base)).toEqual([{ key: "highlight:0", imageKey: "image", url: "https://images.example/image" }]);
+});
+
+test("creates, lists, reads, and deletes collection memories through canonical routes", async () => {
+  const memory = { key: "memory", imageKey: "image", text: "A remembered afternoon.", image: { key: "image", url: "https://images.example/image" }, createdByKey: "membership", createdAt: "2026-08-18T00:00:00.000Z", updatedAt: "2026-08-18T00:00:00.000Z" };
+  responses.set("/gallery/memories", { memory });
+  responses.set("GET /gallery/memories", { memories: [memory] });
+  responses.set("/gallery/memories/read", { memory });
+  responses.set("/gallery/memories/delete", { memoryKey: "memory" });
+
+  expect((await createGalleryCollectionMemory("collection")).memory).toEqual(memory);
+  expect((await listGalleryCollectionMemories("collection")).memories).toEqual([memory]);
+  expect((await fetchGalleryCollectionMemory("memory")).memory).toEqual(memory);
+  expect(await deleteGalleryCollectionMemory("memory", "collection")).toEqual({ memoryKey: "memory" });
+  expect(calls.map(({ path, body, method }) => ({ path, body, method }))).toEqual([
+    { path: "/gallery/memories", body: { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection" }, method: undefined },
+    { path: "/gallery/memories", body: { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection" }, method: "GET" },
+    { path: "/gallery/memories/read", body: { organizationKey: "organization", scopeKey: "scope", memoryKey: "memory" }, method: undefined },
+    { path: "/gallery/memories/delete", body: { organizationKey: "organization", scopeKey: "scope", memoryKey: "memory", collectionKey: "collection" }, method: undefined },
+  ]);
+});
+
+test("recognizes memory exhaustion while retaining the friendly backend message", async () => {
+  failures.set("/gallery/memories", { message: "You have remembered every eligible image.", code: "GALLERY_MEMORY_EXHAUSTED" });
+  const failure = await createGalleryCollectionMemory("collection").catch((error: unknown) => error);
+  expect(isGalleryMemoryExhaustion(failure)).toBe(true);
+  expect((failure as Error).message).toBe("You have remembered every eligible image.");
 });
 
 test("maps accepted upload jobs back to optimistic client images", async () => {

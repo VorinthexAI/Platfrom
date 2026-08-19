@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { Hono } from 'hono';
 import { newId } from '@/lib/ids';
 import { galleryOperationInputSchemas } from '@/lib/gallery/operations';
-import { duplicateSearchTransportInput, galleryHighlightListQuerySchema } from './gallery';
+import { duplicateSearchTransportInput, galleryHighlightListQuerySchema, galleryMemoryListQuerySchema } from './gallery';
 import { registerRoutes } from './routes';
 
 describe('Gallery HTTP transport', () => {
@@ -26,5 +26,19 @@ describe('Gallery HTTP transport', () => {
     expect(routes).toContain('GET /gallery/highlights');
     expect(routes).toContain('POST /gallery/highlights');
     expect(routes).not.toContain('POST /gallery/highlights/list');
+  });
+
+  test('exposes strict memory CRUD routes', () => {
+    const query = { organizationKey: 'organization', scopeKey: newId(), collectionKey: newId() };
+    expect(galleryMemoryListQuerySchema.parse(query)).toEqual(query);
+    expect(() => galleryMemoryListQuerySchema.parse({ ...query, unexpected: true })).toThrow();
+    const app = new Hono();
+    registerRoutes(app);
+    const routes = app.routes.map(({ method, path }) => `${method} ${path}`);
+    expect(routes).toEqual(expect.arrayContaining(['POST /gallery/memories', 'GET /gallery/memories', 'POST /gallery/memories/read', 'POST /gallery/memories/delete']));
+    const memoryKey = newId(), collectionKey = newId();
+    expect(galleryOperationInputSchemas.deleteMemory.parse({ memoryKey, collectionKey })).toEqual({ memoryKey, collectionKey });
+    expect(() => galleryOperationInputSchemas.deleteMemory.parse({ memoryKey })).toThrow();
+    expect(() => galleryOperationInputSchemas.deleteMemory.parse({ memoryKey, collectionKey, unexpected: true })).toThrow();
   });
 });

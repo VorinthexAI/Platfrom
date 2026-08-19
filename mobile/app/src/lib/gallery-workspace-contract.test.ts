@@ -79,7 +79,7 @@ test("only lifts Core for its own focus and uses distinct image sheet presentati
   expect(source).not.toContain('activeSheet === "imageActions" || activeSheet === "imageEdit"');
   expect(source).not.toContain("detailCaption");
   expect(source).toContain('accessibilityLabel="Open image actions"');
-  expect(source).toContain('footer={<Button onPress={closeSheet} size="lg" variant="secondary">Close</Button>}');
+  expect(source).toContain('footer={<Button onPress={closeSheet} size="md" variant="secondary">Close</Button>}');
   expect(source).toContain('if (activeSheetRef.current === "imageActions") goBackSheet(); else closeSheet();');
   expect(source).toContain('detailImageFrame: { flex: 1, width: "100%", overflow: "hidden", borderRadius: radii.lg');
   expect(bottomSheetSource).toContain('height?: "full"');
@@ -123,9 +123,9 @@ test("provides the full visual identity library and image picker workflow", () =
   expect(source).toContain("setIdentityError(errorMessage(error))");
   expect(source).toContain("identitiesLoading || creatingIdentityKeys.length > 0");
   expect(source).toContain("Array.from({ length: COLLECTION_COLUMNS }");
-  expect(source).toContain('<Button disabled={identitiesLoading} onPress={() => void openIdentityPicker()} size="lg" variant="primary">Create</Button>');
+  expect(source).toContain('<Button disabled={identitiesLoading} onPress={() => void openIdentityPicker()} size="md" variant="primary">Create</Button>');
   expect(source).not.toContain('identityLibraryMode === "browse" ? <Button');
-  expect(source.match(/onPress=\{\(\) => void openVisualIdentities\(\)\} size="lg" variant="secondary">Visual identities<\/Button>/g)).toHaveLength(1);
+  expect(source.match(/onPress=\{\(\) => void openVisualIdentities\(\)\} size="md" variant="secondary">Visual identities<\/Button>/g)).toHaveLength(1);
 });
 
 test("keeps similar-image results sheet-local without replacing the collection grid", () => {
@@ -595,7 +595,7 @@ test("orders owner sharing routes and reuses the share-link loader", () => {
 test("filters share links with shared active and inactive tabs", () => {
   expect(sharingSource).toContain('accessibilityLabel="Share link status"');
   expect(sharingSource).toContain('accessibilityRole="tablist"');
-  expect(sharingSource).toContain('size="xs" style={styles.tab} variant={linkTab === "active" ? "secondary" : "ghost"}');
+  expect(sharingSource).toContain('size="md" style={styles.tab} variant={linkTab === "active" ? "secondary" : "ghost"}');
   expect(sharingSource).toContain(">Active links</Button>");
   expect(sharingSource).toContain(">Inactive links</Button>");
   expect(sharingSource).toContain('filterGalleryShareLinks(links, linkTab === "active")');
@@ -613,7 +613,7 @@ test("uses full-height lists for collection collaboration", () => {
   expect(sharingSource).toContain('if (navigate) { setInvites([]); setView("invites"); }');
   expect(sharingSource).toContain('queryKey: incomingInvitesQueryKey, exact: true, refetchType: "none"');
   expect(sharingSource).toContain('if (navigate) { setLinks([]); setLinkTab("active"); setView("links"); }');
-  expect(sharingSource).toContain('size="sm" style={styles.pillButton} variant="secondary"');
+  expect(sharingSource).toContain('size="md" style={styles.pillButton} variant="secondary"');
   expect(sharingSource).toContain('pillSkeleton: { width: "100%", minHeight: 38, borderRadius: 999, backgroundColor: palette.hairlineBright, opacity: 0.72 }');
   expect(sharingSource).toContain('list: { gap: 6, paddingBottom: spacing.xl }');
   expect(sharingSource).not.toContain('rowSkeleton');

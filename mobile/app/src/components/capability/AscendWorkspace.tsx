@@ -339,7 +339,7 @@ function Reader({
               accessibilityLabel="Play chapter audio"
               icon={<PlayIcon size="md" variant="inverse" />}
               onPress={toggleAudio}
-              size="lg"
+              size="md"
               variant="primary"
             >
               {audio.currentTime > 0 || chapter.progressSeconds > 0
@@ -379,7 +379,7 @@ function Reader({
           accessibilityLabel="Pause chapter audio"
           contentMode="raw"
           onPress={toggleAudio}
-          size="lg"
+          size="md"
           variant="primary"
         >
           <PauseIcon size="md" variant="inverse" />
@@ -721,7 +721,6 @@ export function AscendWorkspace() {
           <BottomSheetItem
             icon={<AscendIcon size="md" />}
             onPress={beginCreate}
-            size="lg"
           >
             Create book
           </BottomSheetItem>
@@ -839,7 +838,7 @@ export function AscendWorkspace() {
                         onPress={() =>
                           setDraft((current) => ({ ...current, length }))
                         }
-                        size="sm"
+                        size="md"
                         style={styles.choice}
                         variant={
                           draft.length === length ? "secondary" : "ghost"

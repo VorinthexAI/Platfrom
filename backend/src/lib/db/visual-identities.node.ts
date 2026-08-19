@@ -6,6 +6,7 @@ export const VISUAL_IDENTITIES_COLLECTION = 'visualIdentities';
 export const visualIdentitySchema = z.object({
   key: z.string().cuid(),
   scopeKey: z.string().cuid(),
+  createdByKey: z.string().cuid(),
   name: z.string().trim().min(1).max(120),
   description: z.string().trim().min(1).max(12_000),
   referenceImageKey: z.string().cuid(),

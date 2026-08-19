@@ -42,6 +42,9 @@ test("isolates every routed workspace key by context and resource", () => {
   expect(galleryQueryKeys.cleanup(context, "collection", 25)).not.toEqual(galleryQueryKeys.cleanup(context, "collection", 50));
   expect(galleryQueryKeys.cleanup(context, "collection", 25)).not.toEqual(galleryQueryKeys.cleanup(context, "other", 25));
   expect(galleryQueryKeys.highlight(context, "collection", "one")).not.toEqual(galleryQueryKeys.highlight(context, "collection", "two"));
+  expect(galleryQueryKeys.memories(context, "collection")).toEqual(["gallery", "org-a", "scope-a", "memories", "collection"]);
+  expect(galleryQueryKeys.memory(context, "collection", "one")).toEqual(["gallery", "org-a", "scope-a", "memories", "collection", "one"]);
+  expect(galleryQueryKeys.memory(context, "collection", "one")).not.toEqual(galleryQueryKeys.memory(context, "collection", "two"));
   expect(galleryQueryKeys.userHiddens(context)).not.toEqual(galleryQueryKeys.userHiddens(otherContext));
   expect(compassQueryKeys.overview(context)).not.toEqual(compassQueryKeys.overview(otherContext));
   expect(signalQueryKeys.overview(context, "all")).not.toEqual(signalQueryKeys.overview(context, "favorite"));

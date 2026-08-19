@@ -100,6 +100,22 @@ type GalleryHighlightProjection = Omit<GalleryHighlight, "title" | "slideCount" 
 export type GalleryHighlightSlide = { key: string; imageKey: string; url: string };
 export type GalleryHighlightDetail = GalleryHighlight;
 
+export type GalleryMemory = {
+  key: string;
+  imageKey: string;
+  text: string;
+  image: { key: string; url: string };
+  createdByKey: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type GalleryMemoryDetail = GalleryMemory;
+
+export function normalizeGalleryMemory(memory: GalleryMemory): GalleryMemory {
+  return { ...memory, image: { ...memory.image } };
+}
+
 const galleryHighlightDateFormatter = new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 
 function normalizeGalleryHighlight(highlight: GalleryHighlightProjection): GalleryHighlight {
@@ -174,11 +190,13 @@ type ApiResponse<T> =
 
 export class GalleryClientError extends Error {
   code?: string;
+  status?: number;
 
-  constructor(message: string, code?: string) {
+  constructor(message: string, code?: string, status?: number) {
     super(message);
     this.name = "GalleryClientError";
     this.code = code;
+    this.status = status;
   }
 }
 
@@ -186,10 +204,14 @@ export function isGalleryClientErrorCode(error: unknown, code: string) {
   return error instanceof GalleryClientError && error.code === code;
 }
 
-function galleryClientError(error: unknown) {
+function galleryClientError(error: unknown, status?: number) {
   const value = error && typeof error === "object" ? error as { message?: unknown; code?: unknown } : undefined;
   const message = typeof value?.message === "string" && value.message.trim() ? value.message : "Gallery request failed.";
-  return new GalleryClientError(message, typeof value?.code === "string" ? value.code : undefined);
+  return new GalleryClientError(message, typeof value?.code === "string" ? value.code : undefined, status);
+}
+
+export function isGalleryMemoryExhaustion(error: unknown) {
+  return error instanceof GalleryClientError && (error.status === 409 || error.code?.includes("EXHAUST") === true);
 }
 
 type GalleryContext = { organizationKey: string; scopeKey: string };
@@ -223,7 +245,7 @@ async function postGallery<T>(path: string, input: Record<string, unknown>, time
     return payload.data;
   } catch (error) {
     const failure = (error as { response?: { data?: unknown } }).response?.data;
-    if (failure && typeof failure === "object" && "success" in failure && failure.success === false) throw galleryClientError("error" in failure ? failure.error : undefined);
+    if (failure && typeof failure === "object" && "success" in failure && failure.success === false) throw galleryClientError("error" in failure ? failure.error : undefined, (error as { response?: { status?: number } }).response?.status);
     throw error;
   }
 }
@@ -249,6 +271,13 @@ export const GALLERY_COLLECTION_HIGHLIGHT_ENDPOINTS = {
   delete: "/gallery/highlights/delete",
 } as const;
 
+export const GALLERY_COLLECTION_MEMORY_ENDPOINTS = {
+  create: "/gallery/memories",
+  list: "/gallery/memories",
+  detail: "/gallery/memories/read",
+  delete: "/gallery/memories/delete",
+} as const;
+
 export function createGalleryCollectionHighlight(collectionKey: string) {
   return postGallery<{ highlight: GalleryHighlightProjection }>(GALLERY_COLLECTION_HIGHLIGHT_ENDPOINTS.create, { collectionKey })
     .then(({ highlight }) => ({ highlight: normalizeGalleryHighlight(highlight) }));
@@ -270,6 +299,28 @@ export function fetchGalleryCollectionHighlight(highlightKey: string) {
 
 export function deleteGalleryCollectionHighlight(highlightKey: string) {
   return postGallery<{ highlightKey: string }>(GALLERY_COLLECTION_HIGHLIGHT_ENDPOINTS.delete, { highlightKey });
+}
+
+export function createGalleryCollectionMemory(collectionKey: string) {
+  return postGallery<{ memory: GalleryMemory }>(GALLERY_COLLECTION_MEMORY_ENDPOINTS.create, { collectionKey })
+    .then(({ memory }) => ({ memory: normalizeGalleryMemory(memory) }));
+}
+
+export function listGalleryCollectionMemories(collectionKey: string) {
+  return apiClient.get<ApiResponse<{ memories: GalleryMemory[] }>>(GALLERY_COLLECTION_MEMORY_ENDPOINTS.list, { params: { ...getGalleryContext(), collectionKey }, timeout: 60_000 })
+    .then(({ data }) => {
+      if (!data || data.success !== true || !("data" in data)) throw galleryClientError(data && "error" in data ? data.error : undefined);
+      return { memories: data.data.memories.map(normalizeGalleryMemory) };
+    });
+}
+
+export function fetchGalleryCollectionMemory(memoryKey: string) {
+  return postGallery<{ memory: GalleryMemory }>(GALLERY_COLLECTION_MEMORY_ENDPOINTS.detail, { memoryKey })
+    .then(({ memory }) => ({ memory: normalizeGalleryMemory(memory) }));
+}
+
+export function deleteGalleryCollectionMemory(memoryKey: string, collectionKey: string) {
+  return postGallery<{ memoryKey: string }>(GALLERY_COLLECTION_MEMORY_ENDPOINTS.delete, { memoryKey, collectionKey });
 }
 
 export function listGalleryCollectionMembers(collectionKey: string) {

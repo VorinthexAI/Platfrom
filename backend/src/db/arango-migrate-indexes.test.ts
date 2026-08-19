@@ -112,6 +112,25 @@ describe('Arango migration indexes', () => {
       expect.objectContaining({ fields: ['scopeKey', 'createdByKey'] }),
     ]));
   });
+  test('creates one memory per scoped image and owner-scoped identities', () => {
+    const spec = collections.find(({ name }) => name === 'imageCollectionMemories');
+    expect(spec).toEqual(expect.objectContaining({ name: 'imageCollectionMemories', skipEmbedding: true }));
+    expect(spec?.indexes).toContainEqual({ fields: ['scopeKey', 'imageKey'], unique: true });
+    const identities = collections.find(({ name }) => name === 'visualIdentities');
+    expect(identities?.indexes).toEqual(expect.arrayContaining([{ fields: ['scopeKey', 'createdByKey'] }, { fields: ['scopeKey', 'createdByKey', 'name'] }]));
+  });
+  test('backfills visual identity owners and transactionally removes unresolved identities after their relations', async () => {
+    const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    const transaction = source.indexOf("withDatabaseTransaction(targetDb, { write: ['visualIdentities', 'imageIdentities'] }");
+    const backfill = source.indexOf('UPDATE identity WITH { createdByKey: reference.createdByKey }', transaction);
+    const relationCleanup = source.indexOf('REMOVE relation IN imageIdentities', backfill);
+    const identityCleanup = source.indexOf('REMOVE identity IN visualIdentities', relationCleanup);
+    expect(transaction).toBeGreaterThan(-1);
+    expect(backfill).toBeGreaterThan(transaction);
+    expect(relationCleanup).toBeGreaterThan(backfill);
+    expect(identityCleanup).toBeGreaterThan(relationCleanup);
+    expect(source.slice(transaction, identityCleanup)).toContain('!IS_STRING(identity.createdByKey) || LENGTH(TRIM(identity.createdByKey)) == 0');
+  });
   test('creates the private user hidden overlay with unique and cleanup indexes', async () => {
     const spec = collections.find(({ name }) => name === 'userHiddens');
     expect(spec).toEqual(expect.objectContaining({ name: 'userHiddens', skipEmbedding: true }));

@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 
-import { Button, type ButtonProps } from "../button/button.web";
+import { Button, ButtonSizeProvider, type ButtonProps } from "../button/button.web";
 import { CloseIcon } from "../../icons/close/close.web";
 
 export type BottomSheetProps = {
@@ -81,71 +81,73 @@ export function BottomSheet({
     <Dialog.Root onOpenChange={(next) => { if (next || dismissible) onOpenChange(next); }} open={open}>
       <Dialog.Portal>
         <Dialog.Overlay className="vui-bottom-sheet-overlay" />
-        <Dialog.Content
-          aria-describedby={description ? descriptionId : undefined}
-          aria-labelledby={titleId}
-          className={`vui-bottom-sheet${height === "full" ? " vui-bottom-sheet-full" : ""}`}
-          onEscapeKeyDown={(event) => { if (!dismissible) event.preventDefault(); }}
-          onInteractOutside={(event) => { if (!dismissible) event.preventDefault(); }}
-          ref={contentRef}
-        >
-          <div
-            aria-hidden="true"
-            className="vui-bottom-sheet-drag-handle"
-            onLostPointerCapture={resetDrag}
-            onPointerCancel={handlePointerEnd}
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerEnd}
+        <ButtonSizeProvider size="md">
+          <Dialog.Content
+            aria-describedby={description ? descriptionId : undefined}
+            aria-labelledby={titleId}
+            className={`vui-bottom-sheet${height === "full" ? " vui-bottom-sheet-full" : ""}`}
+            onEscapeKeyDown={(event) => { if (!dismissible) event.preventDefault(); }}
+            onInteractOutside={(event) => { if (!dismissible) event.preventDefault(); }}
+            ref={contentRef}
           >
-            <span />
-          </div>
-          <header className={`vui-bottom-sheet-header${hideHeading ? " vui-bottom-sheet-header-empty" : ""}`}>
-            <Dialog.Title className="vui-bottom-sheet-title" hidden={hideHeading} id={titleId}>
-              {title}
-            </Dialog.Title>
-            {!hideHeading && description ? (
-              <Dialog.Description
-                className="vui-bottom-sheet-description"
-                id={descriptionId}
-              >
-                {description}
-              </Dialog.Description>
-            ) : null}
-          </header>
-          <Dialog.Close asChild>
-            <Button
-              aria-label="Close bottom sheet"
-              className="vui-bottom-sheet-close"
-              disabled={!dismissible}
-              size="sm"
-              variant="icon"
+            <div
+              aria-hidden="true"
+              className="vui-bottom-sheet-drag-handle"
+              onLostPointerCapture={resetDrag}
+              onPointerCancel={handlePointerEnd}
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerEnd}
             >
-              <CloseIcon size="sm" />
-            </Button>
-          </Dialog.Close>
-          <div className="vui-bottom-sheet-content">{children}</div>
-          {footer ? <footer className="vui-bottom-sheet-footer">{footer}</footer> : null}
-        </Dialog.Content>
+              <span />
+            </div>
+            <header className={`vui-bottom-sheet-header${hideHeading ? " vui-bottom-sheet-header-empty" : ""}`}>
+              <Dialog.Title className="vui-bottom-sheet-title" hidden={hideHeading} id={titleId}>
+                {title}
+              </Dialog.Title>
+              {!hideHeading && description ? (
+                <Dialog.Description
+                  className="vui-bottom-sheet-description"
+                  id={descriptionId}
+                >
+                  {description}
+                </Dialog.Description>
+              ) : null}
+            </header>
+            <Dialog.Close asChild>
+              <Button
+                aria-label="Close bottom sheet"
+                className="vui-bottom-sheet-close"
+                disabled={!dismissible}
+                size="md"
+                variant="icon"
+              >
+                <CloseIcon size="sm" />
+              </Button>
+            </Dialog.Close>
+            <div className="vui-bottom-sheet-content">{children}</div>
+            {footer ? <footer className="vui-bottom-sheet-footer">{footer}</footer> : null}
+          </Dialog.Content>
+        </ButtonSizeProvider>
       </Dialog.Portal>
     </Dialog.Root>
   );
 }
 
-export type BottomSheetItemProps = ButtonProps;
+export type BottomSheetItemProps = Omit<ButtonProps, "size">;
 
 export const BottomSheetItem = forwardRef<
   HTMLButtonElement,
   BottomSheetItemProps
 >(function BottomSheetItem(
-  { className = "", size = "lg", variant = "ghost", ...props },
+  { className = "", variant = "ghost", ...props },
   ref,
 ) {
   return (
     <Button
       className={["vui-bottom-sheet-item", className].filter(Boolean).join(" ")}
       ref={ref}
-      size={size}
+      size="md"
       variant={variant}
       {...props}
     />

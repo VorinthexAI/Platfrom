@@ -684,7 +684,7 @@ async function getUserIdByEmailHash(targetDb: Database, emailHash: string): Prom
 
 const formerlyTombstonedCollections = [
   'scopes', 'scopeScopes', 'folders', 'images', 'visualIdentities', 'collections',
-  'imageCollecitionHightlights', 'documents', 'documentVersions', 'documentShares',
+  'imageCollecitionHightlights', 'imageCollectionMemories', 'documents', 'documentVersions', 'documentShares',
   'shares', 'places', 'trips', 'books', 'emailThreads', 'messages',
 ] as const;
 
@@ -761,7 +761,7 @@ export async function removeLegacyTombstones(targetDb: Database): Promise<void> 
   if (scopeKeys.length) {
     for (const name of [
       'scopeMembers', 'imageCaptions', 'visualIdentities', 'imageIdentities',
-      'galleryUploads', 'collections', 'collectionImages', 'imageCollecitionHightlights',
+       'galleryUploads', 'collections', 'collectionImages', 'imageCollecitionHightlights', 'imageCollectionMemories',
       'collectionMembers', 'collectionInvites', 'tags', 'tagAssignments', 'documents',
       'documentVersions', 'documentAudioVersions', 'documentSummaries', 'documentSummaryAudio',
       'shares', 'places', 'trips', 'tripPlaces', 'placeVisits', 'books', 'bookContexts',
@@ -786,7 +786,7 @@ export async function removeLegacyTombstones(targetDb: Database): Promise<void> 
   await removeTyped('userHiddens', 'source', 'collection', collectionKeys);
   await removeKeys('collections', collectionKeys);
 
-  for (const name of ['collectionImages', 'imageIdentities']) await removeBy(name, 'imageKey', imageKeys);
+  for (const name of ['collectionImages', 'imageIdentities', 'imageCollectionMemories']) await removeBy(name, 'imageKey', imageKeys);
   await removeTyped('shares', 'sourceType', 'image', imageKeys, 'images');
   await removeTyped('tagAssignments', 'sourceType', 'image', imageKeys, 'images');
   await removeTyped('userHiddens', 'source', 'image', imageKeys);
@@ -1026,12 +1026,13 @@ export const collections: CollectionSpec[] = [
   { name: 'folders', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'parentFolderKey'] }, { fields: ['scopeKey', 'isFavorite'] }, { fields: ['scopeKey', 'parentFolderKey', 'name'] }] },
   { name: 'images', embedKeys: ['filename', 'caption', 'country', 'city', 'countryCode'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'createdAt'] }, { fields: ['imageCaptionKey'], sparse: true }, { fields: ['storageKey'], unique: true }] },
   { name: 'imageCaptions', skipEmbedding: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'hashAlgorithm', 'perceptualHash'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment0'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment1'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment2'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment3'], sparse: true }] },
-  { name: 'visualIdentities', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'name'] }, { fields: ['scopeKey', 'referenceImageKey'] }] },
+  { name: 'visualIdentities', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'createdByKey'] }, { fields: ['scopeKey', 'createdByKey', 'name'] }, { fields: ['scopeKey', 'referenceImageKey'] }] },
   { name: 'imageIdentities', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'identityKey', 'imageKey'], unique: true }, { fields: ['scopeKey', 'identityKey', 'confidence'] }, { fields: ['scopeKey', 'imageKey'] }, { fields: ['scopeKey', 'imageKey', 'isReference'], sparse: true }] },
   { name: 'galleryUploads', skipEmbedding: true, indexes: [{ fields: ['actorKey', 'createdAt'] }, { fields: ['storageKey'], unique: true }, { fields: ['expiresAt'] }] },
   { name: 'collections', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'name'] }, { fields: ['scopeKey', 'coverImageKey'], sparse: true }] },
   { name: 'collectionImages', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'collectionKey', 'imageKey'], unique: true }, { fields: ['scopeKey', 'collectionKey'] }, { fields: ['scopeKey', 'imageKey'] }] },
   { name: 'imageCollecitionHightlights', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'collectionKey', 'createdAt'] }, { fields: ['scopeKey', 'createdByKey'] }] },
+  { name: 'imageCollectionMemories', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'imageKey'], unique: true }, { fields: ['scopeKey', 'createdAt'] }] },
   { name: 'collectionMembers', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'collectionKey', 'memberKey'], unique: true }, { fields: ['scopeKey', 'collectionKey', 'role'] }, { fields: ['scopeKey', 'memberKey'] }] },
   { name: 'collectionInvites', skipEmbedding: true, indexes: [{ fields: ['tokenHash'], unique: true }, { fields: ['scopeKey', 'collectionKey'] }, { fields: ['expiresAt'] }, { fields: ['acceptedAt'], sparse: true }, { fields: ['revokedAt'], sparse: true }] },
   { name: 'tags', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey', 'name'] }] },
@@ -1290,6 +1291,13 @@ async function main() {
       await migrateContentFavorites(targetDb, spec.name);
     }
     if (spec.name === 'imageCaptions') await migrateImageCaptions(targetDb);
+    if (spec.name === 'imageCollectionMemories') {
+      await targetDb.query('FOR memory IN imageCollectionMemories SORT memory.createdAt ASC, memory._key ASC COLLECT scopeKey = memory.scopeKey, imageKey = memory.imageKey INTO grouped FOR duplicate IN SLICE(grouped, 1) REMOVE duplicate.memory IN imageCollectionMemories');
+      await targetDb.query('FOR memory IN imageCollectionMemories FILTER HAS(memory, "collectionKey") UPDATE memory WITH { collectionKey: null } IN imageCollectionMemories OPTIONS { keepNull: false }');
+      for (const index of await collection.indexes()) {
+        if (JSON.stringify(index.fields ?? []) === JSON.stringify(['scopeKey', 'collectionKey', 'imageKey'])) await collection.dropIndex(index.id);
+      }
+    }
     if (spec.name === 'emailMessages') await migrateEmailReplyMetadata(targetDb);
     if (spec.name === 'places') await targetDb.query(`FOR place IN places FILTER !HAS(place, "kind") UPDATE place WITH { kind: "place" } IN places`);
     if (spec.name === 'contentSearchQueries') {
@@ -2467,6 +2475,11 @@ async function main() {
   await targetDb.query('FOR member IN collectionMembers FILTER member.role == "member" || !HAS(member, "role") UPDATE member WITH { role: "collaborator" } IN collectionMembers');
   await targetDb.query('FOR invite IN collectionInvites FILTER !HAS(invite, "role") UPDATE invite WITH { role: "collaborator" } IN collectionInvites');
   await targetDb.query('FOR image IN images FILTER !HAS(image, "createdByKey") UPDATE image WITH { createdByKey: null } IN images');
+  await withDatabaseTransaction(targetDb, { write: ['visualIdentities', 'imageIdentities'] }, async (transaction) => {
+    await transaction.query('FOR identity IN visualIdentities FILTER !HAS(identity, "createdByKey") || !IS_STRING(identity.createdByKey) || LENGTH(TRIM(identity.createdByKey)) == 0 LET reference = DOCUMENT(images, identity.referenceImageKey) FILTER reference != null && IS_STRING(reference.createdByKey) && LENGTH(TRIM(reference.createdByKey)) > 0 UPDATE identity WITH { createdByKey: reference.createdByKey } IN visualIdentities');
+    await transaction.query('FOR relation IN imageIdentities LET identity = DOCUMENT(visualIdentities, relation.identityKey) FILTER identity != null && (!HAS(identity, "createdByKey") || !IS_STRING(identity.createdByKey) || LENGTH(TRIM(identity.createdByKey)) == 0) REMOVE relation IN imageIdentities');
+    await transaction.query('FOR identity IN visualIdentities FILTER !HAS(identity, "createdByKey") || !IS_STRING(identity.createdByKey) || LENGTH(TRIM(identity.createdByKey)) == 0 REMOVE identity IN visualIdentities');
+  });
   await targetDb.query('FOR share IN shares FILTER share.sourceType == "collection" && share.permission IN ["read", "comment"] UPDATE share WITH { permission: share.permission == "comment" ? "collaborator" : "viewer" } IN shares');
 
   // Retire the private per-orchestrator conversations. Their messages and all

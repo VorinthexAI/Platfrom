@@ -126,7 +126,7 @@ describe('image.search tool', () => {
       async listMatchingVisualIdentities(scopeKey, query) {
         identityLookups += 1;
         expect({ scopeKey, query }).toEqual({ scopeKey: toolContext.runtimeScopeKey, query: 'photos of Hugo' });
-        return [{ key: identityKey, scopeKey: toolContext.runtimeScopeKey, name: 'Hugo', description: 'A saved identity.', referenceImageKey: newId(), embedding: identityEmbedding, createdAt: now, updatedAt: now }];
+        return [{ key: identityKey, scopeKey: toolContext.runtimeScopeKey, createdByKey: (toolContext.principal as any).userOrganization.key, name: 'Hugo', description: 'A saved identity.', referenceImageKey: newId(), embedding: identityEmbedding, createdAt: now, updatedAt: now }];
       },
       async searchImages(input) {
         searches.push(input);
@@ -179,7 +179,7 @@ describe('image.search tool', () => {
     let listed: any;
     let metrics: { mode: string; resultCount: number; durationMs: number } | undefined;
     const identity = {
-      key: identityKey, scopeKey: toolContext.runtimeScopeKey, name: 'Alex', description: 'A person wearing a blue coat.',
+      key: identityKey, scopeKey: toolContext.runtimeScopeKey, createdByKey: (toolContext.principal as any).userOrganization.key, name: 'Alex', description: 'A person wearing a blue coat.',
       referenceImageKey: newId(), embedding, createdAt: now, updatedAt: now,
     };
     const first = { image: result(toolContext.runtimeScopeKey).image, confidence: 1 }, second = { image: result(toolContext.runtimeScopeKey).image, confidence: 0.81 };

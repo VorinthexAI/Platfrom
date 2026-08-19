@@ -48,6 +48,7 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
   const listLoaded = useRef(false);
   const previousSlideIndex = useRef(0);
   const longPressedHighlight = useRef<string | undefined>(undefined);
+  const listSheetOpen = useRef(open && !detail && !opening && activeSheet === "player");
   const cubeProgress = useSharedValue(1);
   const cubeDirection = useSharedValue(1);
   const reducedMotion = useReducedMotion();
@@ -56,6 +57,7 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
   const slides = detail ? resolveGalleryHighlightSlides(detail) : [];
   const activeSlide = slides[playback.index];
   const listEmpty = !creating && !listLoading && highlights.length === 0;
+  listSheetOpen.current = open && !detail && !opening && activeSheet === "player";
 
   async function loadList(invalidate = false) {
     const generation = ++request.current;
@@ -75,6 +77,7 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
   }
 
   async function openHighlight(highlight: GalleryHighlight) {
+    listSheetOpen.current = false;
     const generation = ++request.current;
     setOpening(true);
     try {
@@ -107,6 +110,7 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
       setCreating(false);
       notify("Highlight created");
       void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.highlights(galleryContext, collection.key), exact: true, refetchType: "none" }).catch(() => undefined);
+      if (listSheetOpen.current) void openHighlight(highlight);
     } catch {
       if (generation === createRequest.current) {
         setCreating(false);
@@ -214,19 +218,19 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
     };
   });
 
-  const close = () => { request.current += 1; createRequest.current += 1; setDetail(undefined); setCreating(false); setDeleting(false); setSelectedHighlightKeys([]); setActiveSheet("player"); dispatch({ type: "pause" }); onClose(); };
-  const listFooter = <>{owner ? <Button disabled={creating || listLoading || opening} onPress={() => void createHighlight()} size="lg" variant="primary">Create</Button> : null}<Button disabled={creating} onPress={close} size="lg" variant="secondary">Close</Button></>;
-  const playerFooter = <Button onPress={close} size="lg" variant="secondary">Close</Button>;
+  const close = () => { listSheetOpen.current = false; request.current += 1; createRequest.current += 1; setDetail(undefined); setCreating(false); setDeleting(false); setSelectedHighlightKeys([]); setActiveSheet("player"); dispatch({ type: "pause" }); onClose(); };
+  const listFooter = <>{owner ? <Button disabled={creating || listLoading || opening} onPress={() => void createHighlight()} size="md" variant="primary">Create</Button> : null}<Button disabled={creating} onPress={close} size="md" variant="secondary">Close</Button></>;
+  const playerFooter = <Button onPress={close} size="md" variant="secondary">Close</Button>;
 
   return <>
     <BottomSheet footer={listFooter} height="full" onOpenChange={(next) => { if (!next) close(); }} open={open && !detail} title="Highlights">
       <ScrollView contentContainerStyle={[styles.grid, listEmpty && styles.emptyGrid]} onLayout={({ nativeEvent }) => setGridWidth(nativeEvent.layout.width)} showsVerticalScrollIndicator={false}>
         {selectedHighlightKeys.length ? <Tabs style={styles.bulkToolbar}>
-          <View style={styles.bulkToolbarSelection}><Button accessibilityLabel="Clear highlight selection" contentMode="raw" disabled={deleting} onPress={() => setSelectedHighlightKeys([])} size="xs" style={styles.bulkToolbarClose} variant="secondary"><CloseIcon size="sm" /></Button><Text style={styles.bulkSelectionText}>{selectedHighlightKeys.length} selected</Text></View>
-          <Button disabled={deleting} onPress={() => setActiveSheet("confirmDelete")} size="xs" style={styles.bulkDeleteAction} variant="secondary">Delete</Button>
+          <View style={styles.bulkToolbarSelection}><Button accessibilityLabel="Clear highlight selection" contentMode="raw" disabled={deleting} onPress={() => setSelectedHighlightKeys([])} size="md" style={styles.bulkToolbarClose} variant="secondary"><CloseIcon size="sm" /></Button><Text style={styles.bulkSelectionText}>{selectedHighlightKeys.length} selected</Text></View>
+          <Button disabled={deleting} onPress={() => { listSheetOpen.current = false; setActiveSheet("confirmDelete"); }} size="md" style={styles.bulkDeleteAction} variant="secondary">Delete</Button>
         </Tabs> : null}
         {creating ? <View accessibilityLabel="Creating highlight" accessibilityRole="progressbar"><Skeleton style={[styles.cardFrame, { width: cardWidth, height: cardWidth * 16 / 9 }]} /></View> : null}
-        {listLoading ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.cardFrame, { width: cardWidth, height: cardWidth * 16 / 9 }]} />) : highlights.map((highlight) => { const selected = selectedHighlightKeys.includes(highlight.key); return <Button accessibilityActions={owner ? [{ name: "longpress", label: selected ? "Deselect highlight" : "Select highlight" }] : undefined} accessibilityLabel={`${highlight.title}, ${highlight.slideCount} slides`} accessibilityState={{ selected }} contentMode="raw" disabled={opening || deleting} key={highlight.key} onAccessibilityAction={owner ? ({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") toggleHighlightSelection(highlight.key); } : undefined} onLongPress={owner ? () => handleHighlightLongPress(highlight.key) : undefined} onPress={() => handleHighlightPress(highlight)} shape="rounded" size="xl" style={[styles.cardFrame, styles.card, selected && styles.cardSelected, { width: cardWidth, height: cardWidth * 16 / 9 }]} variant="ghost">
+        {listLoading ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.cardFrame, { width: cardWidth, height: cardWidth * 16 / 9 }]} />) : highlights.map((highlight) => { const selected = selectedHighlightKeys.includes(highlight.key); return <Button accessibilityActions={owner ? [{ name: "longpress", label: selected ? "Deselect highlight" : "Select highlight" }] : undefined} accessibilityLabel={`${highlight.title}, ${highlight.slideCount} slides`} accessibilityState={{ selected }} contentMode="raw" disabled={creating || opening || deleting} key={highlight.key} onAccessibilityAction={owner ? ({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") toggleHighlightSelection(highlight.key); } : undefined} onLongPress={owner ? () => handleHighlightLongPress(highlight.key) : undefined} onPress={() => handleHighlightPress(highlight)} shape="rounded" size="md" style={[styles.cardFrame, styles.card, selected && styles.cardSelected, { width: cardWidth, height: cardWidth * 16 / 9 }]} variant="ghost">
           {highlight.coverUrl ? <Image contentFit="cover" source={highlight.coverUrl} style={StyleSheet.absoluteFill} transition={180} /> : null}
           <View style={styles.cardShade} />
           <View style={styles.cardCopy}><Text numberOfLines={2} style={styles.title}>{highlight.title}</Text><Text style={styles.cardCount}>{highlight.slideCount} slide{highlight.slideCount === 1 ? "" : "s"}</Text></View>
@@ -242,7 +246,7 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
         <View accessibilityLabel={`Slide ${slides.length ? playback.index + 1 : 0} of ${slides.length}`} accessibilityRole="progressbar" style={styles.progress}>{slides.map((slide, index) => <View key={slide.key} style={styles.progressTrack}><View style={[styles.progressFill, { width: index < playback.index ? "100%" : index > playback.index ? "0%" : `${Math.min(100, playback.progressMs / HIGHLIGHT_SLIDE_DURATION_MS * 100)}%` }]} /></View>)}</View>
         <View style={styles.controls}>
           <Button accessibilityLabel="Previous slide" contentMode="raw" disabled={playback.index === 0 || slides.length === 0} onPress={() => dispatch({ type: "previous" })} size="md" variant="icon"><ChevronLeftIcon /></Button>
-          <Button accessibilityLabel={playback.playing ? "Pause highlight" : "Play highlight"} contentMode="raw" disabled={slides.length === 0} onPress={() => dispatch(playback.playing ? { type: "pause" } : { type: "play", slideCount: slides.length })} size="lg" variant="primary">{playback.playing ? <PauseIcon variant="inverse" /> : <PlayIcon variant="inverse" />}</Button>
+          <Button accessibilityLabel={playback.playing ? "Pause highlight" : "Play highlight"} contentMode="raw" disabled={slides.length === 0} onPress={() => dispatch(playback.playing ? { type: "pause" } : { type: "play", slideCount: slides.length })} size="md" variant="primary">{playback.playing ? <PauseIcon variant="inverse" /> : <PlayIcon variant="inverse" />}</Button>
           <Button accessibilityLabel="Next slide" contentMode="raw" disabled={playback.index >= slides.length - 1 || slides.length === 0} onPress={() => dispatch({ type: "next", slideCount: slides.length })} size="md" variant="icon"><ChevronRightIcon /></Button>
         </View>
         <Text style={styles.count}>{slides.length} slide{slides.length === 1 ? "" : "s"}</Text>

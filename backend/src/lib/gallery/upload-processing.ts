@@ -36,7 +36,8 @@ export interface GalleryUploadProcessingDependencies {
 }
 
 async function classifyImageSubjects(repository: GalleryRepository, image: Awaited<ReturnType<typeof processImages>>[number]) {
-  const matches = await repository.listIdentityMatches(image.scopeKey, image.embedding);
+  if (!image.createdByKey) return false;
+  const matches = await repository.listIdentityMatches(image.scopeKey, image.embedding, image.createdByKey);
   const changes = await Promise.all(matches.map((match) => repository.persistIdentityMatches(image.scopeKey, match.identityKey, [{ imageKey: image.key, confidence: match.confidence }])));
   return changes.some(Boolean);
 }

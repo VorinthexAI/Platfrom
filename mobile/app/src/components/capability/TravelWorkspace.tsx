@@ -379,7 +379,7 @@ export function TravelWorkspace() {
           </> : null}
 
           {activeSheet === "trips" && selectedTrip ? <View style={styles.itinerary}>
-            <Button disabled={busy} onPress={() => setSelectedTrip(undefined)} size="sm" variant="ghost">All trips</Button>
+            <Button disabled={busy} onPress={() => setSelectedTrip(undefined)} size="md" variant="ghost">All trips</Button>
             <Text style={styles.tripMeta}>{dateRange(selectedTrip)}</Text>
             {itinerary.map((item) => {
               const place = item.place;

@@ -23,6 +23,8 @@ describe('Gallery mutation event matrix', () => {
     expect(GALLERY_CANONICAL_MUTATION_PUBLICATIONS.reserveUploads.events).toEqual(['uploadReserved']);
     expect(GALLERY_CANONICAL_MUTATION_PUBLICATIONS.createHighlight.events).toEqual(['highlightChanged']);
     expect(GALLERY_CANONICAL_MUTATION_PUBLICATIONS.deleteHighlight.events).toEqual(['highlightChanged']);
+    expect(GALLERY_CANONICAL_MUTATION_PUBLICATIONS.createMemory.events).toEqual(['memoryCreated']);
+    expect(GALLERY_CANONICAL_MUTATION_PUBLICATIONS.deleteMemory.events).toEqual(['memoryDeleted']);
   });
 
   test.each([
@@ -30,6 +32,8 @@ describe('Gallery mutation event matrix', () => {
     ['acceptInvite', ['collection.invites.changed', 'collection.access.changed', 'collection.index.changed']],
     ['uploadCompleted', ['image.changed', 'collection.content.changed', 'collection.index.changed']],
     ['highlightChanged', ['highlight.changed']],
+    ['memoryCreated', ['memory.created']],
+    ['memoryDeleted', ['memory.deleted']],
   ] as const)('%s publishes its collection cache families', (operation, expected) => {
     expect(mutationEventTargets(operation, { collections: ['collection-1'] }).map(({ event }) => event)).toEqual([...expected]);
   });

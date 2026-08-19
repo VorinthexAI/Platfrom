@@ -1,9 +1,12 @@
 import { expect, test } from "bun:test";
 
 const read = (path: string) => Bun.file(new URL(path, import.meta.url)).text();
-const [mobileSheet, webSheet, theme, core, switcher, travel, email, ascend, gallery, sharing, archive] = await Promise.all([
+const [mobileSheet, webSheet, mobileButton, webButton, agents, theme, core, switcher, travel, email, ascend, gallery, sharing, archive] = await Promise.all([
   read("../../../../shared/packages/ui/components/bottom-sheet/bottom-sheet.mobile.tsx"),
   read("../../../../shared/packages/ui/components/bottom-sheet/bottom-sheet.web.tsx"),
+  read("../../../../shared/packages/ui/components/button/button.mobile.tsx"),
+  read("../../../../shared/packages/ui/components/button/button.web.tsx"),
+  read("../../../../AGENTS.md"),
   read("../../../../shared/packages/ui/theme.css"),
   read("../../../../shared/packages/ui/components/core-composer/core-composer.mobile.tsx"),
   read("../components/capability/WorkspaceAppSwitcher.tsx"),
@@ -14,6 +17,21 @@ const [mobileSheet, webSheet, theme, core, switcher, travel, email, ascend, gall
   read("../components/capability/GalleryCollectionSharing.tsx"),
   read("../components/capability/KnowledgeWorkspace.tsx"),
 ]);
+
+test("enforces medium buttons throughout every BottomSheet", () => {
+  for (const button of [mobileButton, webButton]) {
+    expect(button).toContain("const ButtonSizeContext = createContext<ButtonSize | undefined>(undefined)");
+    expect(button).toContain("const size = useContext(ButtonSizeContext) ?? requestedSize");
+  }
+  for (const sheet of [mobileSheet, webSheet]) {
+    expect(sheet).toContain('<ButtonSizeProvider size="md">');
+    expect(sheet).toContain('export type BottomSheetItemProps = Omit<ButtonProps, "size">');
+    expect(sheet).toContain('size="md"');
+    expect(sheet).not.toContain('size = "lg"');
+  }
+  expect(agents).toContain("Every button rendered anywhere inside a `BottomSheet`");
+  expect(agents).toContain("`BottomSheetItem` must not expose a size override");
+});
 
 test("exposes only intrinsic and full BottomSheet heights", () => {
   for (const implementation of [mobileSheet, webSheet]) {

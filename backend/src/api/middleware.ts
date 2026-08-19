@@ -158,6 +158,7 @@ function querySchemaForPath(path: string, method: string) {
     return strictObject({ limit: z.string().regex(/^\d+$/).optional() });
   }
   if (method === 'GET' && apiPath === '/gallery/highlights') return strictObject({ organizationKey: z.string(), scopeKey: z.string(), collectionKey: z.string() });
+  if (method === 'GET' && apiPath === '/gallery/memories') return strictObject({ organizationKey: z.string(), scopeKey: z.string(), collectionKey: z.string() });
   if (/^\/content\/tools\/[^/]+$/.test(apiPath)) return strictObject({});
   if (apiPath === '/books' || apiPath === '/books/overview' || /^\/books\/[^/]+\/detail$/.test(apiPath) || /^\/books\/[^/]+\/chapters\/[^/]+\/progress$/.test(apiPath)) return strictObject({});
   return strictObject({});

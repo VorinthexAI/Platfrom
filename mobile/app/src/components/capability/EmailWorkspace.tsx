@@ -380,15 +380,15 @@ export function EmailWorkspace() {
           {error ? <View accessibilityLiveRegion="assertive" accessibilityRole="alert" style={styles.inlineError}><Text style={styles.errorText}>{error}</Text></View> : null}
           {sheet === "reply" ? <>
             <Text style={styles.sheetLabel}>TONE</Text>
-            <View style={styles.toneRow}>{TONES.map((item) => <Button accessibilityState={{ selected: tone === item }} disabled={Boolean(busy)} key={item} onPress={() => setTone(item)} size="sm" variant={tone === item ? "primary" : "secondary"}>{item[0]?.toUpperCase()}{item.slice(1)}</Button>)}</View>
+            <View style={styles.toneRow}>{TONES.map((item) => <Button accessibilityState={{ selected: tone === item }} disabled={Boolean(busy)} key={item} onPress={() => setTone(item)} size="md" variant={tone === item ? "primary" : "secondary"}>{item[0]?.toUpperCase()}{item.slice(1)}</Button>)}</View>
             {!draft ? <>
               <TextInput accessibilityLabel="Reply instructions" editable={!busy} multiline onChangeText={setInstruction} placeholder="Optional direction, facts, or outcome" style={styles.instructionInput} textAlignVertical="top" value={instruction} />
-              <Button disabled={Boolean(busy)} loading={busy === "draft"} onPress={() => void generateDraft()} size="lg" variant="primary">Generate draft</Button>
+              <Button disabled={Boolean(busy)} loading={busy === "draft"} onPress={() => void generateDraft()} size="md" variant="primary">Generate draft</Button>
             </> : <>
               <Text style={styles.sheetLabel}>REVIEW</Text>
               <TextInput accessibilityLabel="Reply draft" editable={!busy} multiline onChangeText={setDraftText} style={styles.draftInput} textAlignVertical="top" value={draftText} />
-              <Button disabled={Boolean(busy) || !draftText.trim()} icon={<SendIcon size="sm" variant="inverse" />} loading={busy === "send"} onPress={() => void sendReply()} size="lg" variant="primary">Send reply</Button>
-              <Button disabled={Boolean(busy)} onPress={() => { setDraft(undefined); setDraftText(""); }} size="sm" variant="ghost">Start again</Button>
+              <Button disabled={Boolean(busy) || !draftText.trim()} icon={<SendIcon size="sm" variant="inverse" />} loading={busy === "send"} onPress={() => void sendReply()} size="md" variant="primary">Send reply</Button>
+              <Button disabled={Boolean(busy)} onPress={() => { setDraft(undefined); setDraftText(""); }} size="md" variant="ghost">Start again</Button>
             </>}
           </> : sheet === "account" ? <>
             {permissions.canMutate ? <BottomSheetItem disabled={Boolean(busy)} icon={<MailIcon size="md" />} loading={busy === "sync"} onPress={() => void synchronize().then((synced) => { if (synced) setSheetOpen(false); })}>Sync Gmail</BottomSheetItem> : null}
