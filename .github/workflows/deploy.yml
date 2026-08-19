@@ -81,6 +81,7 @@ jobs:
               shared/*) shared=true ;;
               .github/scripts/cloudflare-cache-policy.ts) web=true ;;
               .github/environments.json) web=true; backend=true; mobile=true ;;
+              .github/actions/*) web=true; backend=true; mobile=true ;;
               # deploy.yml defines the backend jobs (image, db, migrate,
               # api roll) as much as the web ones — a workflow change must
               # re-run both pipelines, not just web.

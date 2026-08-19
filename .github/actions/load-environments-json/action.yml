@@ -13,7 +13,21 @@ runs:
     - shell: bash
       run: |
         test -n "${{ inputs.git-crypt-key-b64 }}" || { echo "::error::GIT_CRYPT_KEY is not configured; cannot unlock .github/environments.json."; exit 1; }
-        sudo apt-get update -qq && sudo apt-get install -y -qq git-crypt
+        if ! command -v git-crypt >/dev/null 2>&1; then
+          installed=false
+          for attempt in 1 2 3; do
+            if sudo timeout --kill-after=10s 90s apt-get update -qq \
+                -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 && \
+              sudo timeout --kill-after=10s 90s apt-get install -y -qq git-crypt \
+                -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20; then
+              installed=true
+              break
+            fi
+            echo "::warning::git-crypt installation attempt ${attempt} failed; retrying."
+            sleep $((attempt * 5))
+          done
+          $installed || { echo "::error::Unable to install git-crypt after 3 bounded attempts."; exit 1; }
+        fi
         echo "${{ inputs.git-crypt-key-b64 }}" | base64 -d > /tmp/git-crypt.key
         git-crypt unlock /tmp/git-crypt.key
         rm -f /tmp/git-crypt.key
