@@ -36,6 +36,10 @@ test("guards auto-open and preserves typing across zoom and event refresh", () =
   expect(memories).toContain('"memory.created", "memory.deleted", "image.changed", "collection.content.changed"');
   expect(memories).toContain('showImage ? "Read memory" : "Show image"');
   expect(memories).toContain("useReducedMotion()");
+  expect(memories).toContain("SlideInRight.duration(360)");
+  expect(memories).toContain("SlideInLeft.duration(360)");
+  expect(memories).toContain('showImage ? <Animated.View');
+  expect(memories).toContain('detailImageFrameZoom: { width: "100%", height: 420, overflow: "hidden", borderRadius: radii.sm');
 });
 
 test("matches bulk partial deletion and hard-removes detail caches", () => {
