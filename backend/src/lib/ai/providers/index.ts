@@ -23,6 +23,8 @@ export {
   chatMessageSchema,
   chatToolSchema,
   imageGenerateInputSchema,
+  imageOutputSchema,
+  generatedImageMimeTypeSchema,
   imageCaptionInputSchema,
   imageCaptionOutputSchema,
   visualIdentityDescriptionInputSchema,

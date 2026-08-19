@@ -27,11 +27,15 @@ export class TravelRepositoryError extends Error {
 }
 
 export interface TravelRepository {
+  authorizeRead(context: TravelAccessContext): Promise<void>;
   overview(context: TravelAccessContext): Promise<Place[]>;
 }
 
 export function createTravelRepository(database: TravelDatabase = db): TravelRepository {
   return {
+    authorizeRead(context) {
+      return authorizeRead(database, context);
+    },
     async overview(context) {
       await authorizeRead(database, context);
       const cursor = await database.query('FOR place IN places FILTER place.scopeKey == @scopeKey SORT place.name ASC, place._key ASC RETURN place', { scopeKey: context.scopeKey });

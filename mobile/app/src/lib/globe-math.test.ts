@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test";
 
-import { latLonToVector, pointInPolygon, vectorToLatLon, type PolygonCoordinates } from "./globe-math";
+import {
+  clampGlobeZoom,
+  exceedsGlobeDragThreshold,
+  latLonToVector,
+  pointInPolygon,
+  projectToTrackball,
+  vectorToLatLon,
+  type PolygonCoordinates,
+} from "./globe-math";
 
 describe("globe coordinates", () => {
   test("converts cardinal coordinates to globe vectors", () => {
@@ -15,6 +23,29 @@ describe("globe coordinates", () => {
     const result = vectorToLatLon(latLonToVector(-33.8688, 151.2093, 4));
     expect(result.latitude).toBeCloseTo(-33.8688, 8);
     expect(result.longitude).toBeCloseTo(151.2093, 8);
+  });
+});
+
+describe("globe gestures", () => {
+  test("projects the full pointer plane onto a unit trackball", () => {
+    expect(projectToTrackball(0, 0)).toEqual({ x: 0, y: 0, z: 1 });
+    expect(projectToTrackball(0.6, 0.8)).toEqual({ x: 0.6, y: 0.8, z: 0 });
+    const outside = projectToTrackball(3, 4);
+    expect(outside.x).toBeCloseTo(0.6, 10);
+    expect(outside.y).toBeCloseTo(0.8, 10);
+    expect(outside.z).toBe(0);
+    expect(Math.hypot(outside.x, outside.y, outside.z)).toBeCloseTo(1, 10);
+  });
+
+  test("distinguishes taps from drags at the configured screen threshold", () => {
+    expect(exceedsGlobeDragThreshold(10, 10, 16, 18, 10)).toBe(false);
+    expect(exceedsGlobeDragThreshold(10, 10, 17, 18, 10)).toBe(true);
+  });
+
+  test("bounds wheel and pinch camera distances", () => {
+    expect(clampGlobeZoom(1, 2.15, 4.1)).toBe(2.15);
+    expect(clampGlobeZoom(3, 2.15, 4.1)).toBe(3);
+    expect(clampGlobeZoom(5, 2.15, 4.1)).toBe(4.1);
   });
 });
 

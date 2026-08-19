@@ -3,6 +3,8 @@ import { EMBEDDING_DIMENSIONS, EXTERNAL_EMBEDDING_MODEL_ID } from '@/lib/embeddi
 import { IMAGE_CAPTION_EXTERNAL_MODEL_ID, IMAGE_CAPTION_MODEL } from '@/lib/image-caption-constants';
 import { createOpenAIProvider } from './openai';
 
+const png = 'iVBORw0KGgo=';
+
 const originalFetch = globalThis.fetch;
 
 afterEach(() => {
@@ -43,4 +45,18 @@ test('preserves structured caption, cleanup, and visual identity contracts on di
   expect(bodies.map(({ model }) => model)).toEqual(['gpt-5.6-luna', 'gpt-5.6-luna', 'gpt-5.6-luna']);
   expect(bodies.map(({ response_format }) => response_format.json_schema.name)).toEqual(['image_caption_results', 'document_cleanup', 'visual_identity_description']);
   expect(bodies.every((body) => !('provider' in body))).toBe(true);
+});
+
+test('preserves direct OpenAI image generation with the extended contract', async () => {
+  let url = '';
+  let body: Record<string, unknown> = {};
+  globalThis.fetch = (async (input, init) => {
+    url = String(input);
+    body = JSON.parse(String(init?.body));
+    return Response.json({ data: [{ b64_json: png }], usage: { input_tokens: 2, output_tokens: 3, total_tokens: 5 } });
+  }) as typeof fetch;
+  const result = await createOpenAIProvider({ apiKey: 'test-key' }).execute({ actionId: 'generate-image', modelId: 'openai.gpt-image-2', externalModelId: 'gpt-image-2', input: { prompt: 'globe', count: 1, size: '1024x1024', quality: 'medium' }, organizationKey: 'organization' });
+  expect(url).toBe('https://api.openai.com/v1/images/generations');
+  expect(body).toMatchObject({ model: 'gpt-image-2', prompt: 'globe', n: 1, size: '1024x1024', quality: 'medium' });
+  expect(result).toMatchObject({ output: { images: [{ base64: png, mimeType: 'image/png' }] }, usage: { inputTokens: 2, outputTokens: 3, totalTokens: 5 }, providerId: 'openai' });
 });

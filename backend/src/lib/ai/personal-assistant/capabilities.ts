@@ -8,6 +8,7 @@ import type { EmailService } from '@/lib/email-inbox/service';
 import type { BookService } from '@/lib/books/service';
 import type { UserHiddenService } from '@/lib/user-hiddens/service';
 import type { GalleryOperationContext, GalleryOperationName } from '@/lib/gallery/operations';
+import type { ImageGenerationService } from '@/lib/image-generation/service';
 import { archiveCapabilities, ascendCapabilities, compassCapabilities, hiddenListCapability, signalCapabilities } from './service-capabilities';
 import { galleryAssistantCapabilities, galleryAssistantCapabilityNames } from './gallery-capabilities';
 
@@ -25,6 +26,8 @@ export type AssistantCapabilityResult =
   | { kind: 'note'; content: string; message: string };
 
 export interface AssistantCapabilityContext {
+  signal?: AbortSignal;
+  timeoutMs?: number;
   currentDocumentKey?: string;
   currentNote?: { content: string; selection?: { start: number; end: number } };
   domain: ToolContext;
@@ -38,6 +41,7 @@ export interface AssistantCapabilityContext {
   books?: BookService;
   userHiddens?: UserHiddenService;
   gallery?: Partial<Record<GalleryOperationName, (input: unknown, context: GalleryOperationContext) => Promise<unknown>>>;
+  images?: ImageGenerationService;
 }
 
 export interface AssistantCapability<Schema extends z.ZodTypeAny = z.ZodTypeAny> {

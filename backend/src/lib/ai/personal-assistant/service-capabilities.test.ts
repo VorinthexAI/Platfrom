@@ -32,6 +32,11 @@ describe('personal assistant service capabilities', () => {
     }
   });
 
+  test('excludes raw place image generation from models', () => {
+    const capabilities = defaultAssistantCapabilityRegistry.resolve('travel-workspace');
+    expect(capabilities.some(({ definition }) => definition.name === 'place.images.generate')).toBe(false);
+  });
+
   test('executes canonical services with identity derived only from the member principal', async () => {
     const threadKey = newId();
     const draftKey = newId();

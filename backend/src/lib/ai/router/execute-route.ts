@@ -48,6 +48,7 @@ export interface RouteAttemptTelemetry {
   endedAt: string;
   elapsedMs: number;
   errorCode?: string;
+  costUsd?: number;
 }
 
 /** V1 executes exactly the selected deterministic route; there are no scored fallbacks. */
@@ -70,7 +71,7 @@ export async function executeRoute<TInput, TOutput>(options: ExecuteRouteOptions
       signal: options.signal,
     });
     const endedAtMs = Date.now();
-    await options.onAttempt?.({ ...attemptBase, callKey, status: 'completed', usage: response.usage, endedAt: new Date(endedAtMs).toISOString(), elapsedMs: endedAtMs - startedAtMs });
+    await options.onAttempt?.({ ...attemptBase, callKey, status: 'completed', usage: response.usage, ...(response.costUsd !== undefined ? { costUsd: response.costUsd } : {}), endedAt: new Date(endedAtMs).toISOString(), elapsedMs: endedAtMs - startedAtMs });
     return response;
   } catch (error) {
     const endedAtMs = Date.now();

@@ -39,6 +39,7 @@ export interface ToolDependencies extends RouterDependencies, DocumentParseDepen
   userHiddenService?: WorkspaceToolDependencies['userHiddens'];
   executeWorkspaceContent?: WorkspaceToolDependencies['executeContent'];
   gallery?: WorkspaceToolDependencies['gallery'];
+  images?: WorkspaceToolDependencies['images'];
 }
 
 /** Executes one of the capabilities exposed by the unified tool registry. */
@@ -61,6 +62,9 @@ export async function runTool(name: string, skill: string, rawInput: unknown, de
     books: dependencies.bookService,
     userHiddens: dependencies.userHiddenService,
     gallery: dependencies.gallery,
+    images: dependencies.images,
+    signal: dependencies.signal,
+    timeoutMs: dependencies.timeoutMs,
     content: {
       adapters: dependencies.adapters,
       credentials: dependencies.credentials,

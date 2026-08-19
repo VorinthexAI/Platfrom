@@ -467,6 +467,8 @@ export function registerRoutes(app: Hono) {
   app.post('/gallery/memories/read', readGalleryMemory);
   app.post('/gallery/memories/delete', deleteGalleryMemory);
   app.post('/travel/overview', travelHandlers.overview);
+  app.post('/travel/places/find', travelHandlers.findPlace);
+  app.post('/travel/places/images', travelHandlers.generatePlaceImages);
   app.post('/email/overview', emailHandlers.overview);
   app.post('/email/connect', emailHandlers.startConnect);
   app.get('/email/connectors/gmail/callback', emailHandlers.callback);
