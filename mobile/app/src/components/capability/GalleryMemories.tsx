@@ -3,7 +3,7 @@ import * as Haptics from "expo-haptics";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
-import Animated, { Easing, LinearTransition, useReducedMotion } from "react-native-reanimated";
+import Animated, { Easing, interpolate, useAnimatedStyle, useReducedMotion, useSharedValue, withTiming } from "react-native-reanimated";
 import { BottomSheet } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
 import { CheckIcon, CloseIcon } from "@vorinthex/shared/ui/icons-mobile";
@@ -41,6 +41,7 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
   const [deleting, setDeleting] = useState(false);
   const [selectedMemoryKeys, setSelectedMemoryKeys] = useState<string[]>([]);
   const [activeSheet, setActiveSheet] = useState<MemorySheet>("list");
+  const imageExpansion = useSharedValue(0);
   const listRequest = useRef(0);
   const detailRequest = useRef(0);
   const createRequest = useRef(0);
@@ -50,6 +51,9 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
   const owner = isGalleryCollectionOwned(collection);
   const cardWidth = Math.floor(((gridWidth || width - 40) - GAP * (COLUMNS - 1)) / COLUMNS);
   const expandedImageHeight = Math.max(420, height - 260);
+  const imageStageStyle = useAnimatedStyle(() => ({ height: interpolate(imageExpansion.value, [0, 1], [120, expandedImageHeight]) }), [expandedImageHeight]);
+  const compactImageStyle = useAnimatedStyle(() => ({ opacity: interpolate(imageExpansion.value, [0, 0.24], [1, 0], "clamp") }));
+  const expandedImageStyle = useAnimatedStyle(() => ({ opacity: interpolate(imageExpansion.value, [0, 0.24], [0, 1], "clamp") }));
   const listEmpty = !creating && !listLoading && memories.length === 0;
   listSheetOpen.current = open && !detail && !opening && activeSheet === "list";
 
@@ -193,6 +197,10 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
     return () => clearInterval(timer);
   }, [reducedMotion, typingRun, typingText]);
 
+  useEffect(() => {
+    imageExpansion.value = reducedMotion ? Number(showImage) : withTiming(Number(showImage), { duration: 420, easing: Easing.inOut(Easing.cubic) });
+  }, [imageExpansion, reducedMotion, showImage]);
+
   useEffect(() => subscribeAppEvent((event) => {
     if (!open || creating || deleting || opening) return;
     if (event.type !== "event-stream.connected" && (event.type !== "gallery.changed" || !["memory.created", "memory.deleted", "image.changed", "collection.content.changed"].includes(event.slug))) return;
@@ -217,7 +225,7 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
     </BottomSheet>
 
     <BottomSheet footer={detailFooter} height="full" onOpenChange={(next) => { if (!next) close(); }} open={open && Boolean(detail)} title="Memory">
-      {detail ? <ScrollView contentContainerStyle={styles.detail} showsVerticalScrollIndicator={false}><Animated.View layout={reducedMotion ? undefined : LinearTransition.duration(420).easing(Easing.inOut(Easing.cubic))} style={[styles.detailImageFrame, showImage && styles.detailImageFrameZoom, showImage && { height: expandedImageHeight }]}><View collapsable={false} style={styles.detailImageClip}><Image contentFit={showImage ? "contain" : "cover"} source={detail.image.url} style={styles.detailImage} transition={180} /></View></Animated.View><Animated.View accessibilityElementsHidden={showImage} importantForAccessibility={showImage ? "no-hide-descendants" : "auto"} layout={reducedMotion ? undefined : LinearTransition.duration(420).easing(Easing.inOut(Easing.cubic))} pointerEvents={showImage ? "none" : "auto"} style={[styles.memoryCopy, showImage && styles.memoryCopyHidden]}>{splitGalleryMemoryText(typedText).map((section, index) => <Text key={`${index}:${section.length}`} style={styles.memoryText}>{section}</Text>)}</Animated.View></ScrollView> : null}
+      {detail ? <ScrollView contentContainerStyle={styles.detail} showsVerticalScrollIndicator={false}><Animated.View style={[styles.detailImageStage, imageStageStyle]}><Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, expandedImageStyle]}><View collapsable={false} style={styles.expandedImageClip}><Image contentFit="contain" source={detail.image.url} style={styles.detailImage} transition={180} /></View></Animated.View><Animated.View pointerEvents="none" style={[styles.detailThumbnailLayer, compactImageStyle]}><View collapsable={false} style={styles.thumbnailImageClip}><Image contentFit="cover" source={detail.image.url} style={styles.detailImage} transition={180} /></View></Animated.View></Animated.View><View accessibilityElementsHidden={showImage} importantForAccessibility={showImage ? "no-hide-descendants" : "auto"} pointerEvents={showImage ? "none" : "auto"} style={[styles.memoryCopy, showImage && styles.memoryCopyHidden]}>{splitGalleryMemoryText(typedText).map((section, index) => <Text key={`${index}:${section.length}`} style={styles.memoryText}>{section}</Text>)}</View></ScrollView> : null}
     </BottomSheet>
 
     <BottomSheet dismissible={!deleting} onOpenChange={(next) => { if (!next) setActiveSheet("list"); }} open={open && !detail && selectedMemoryKeys.length > 0 && activeSheet === "confirmDelete"} title={`Delete ${selectedMemoryKeys.length === 1 ? "memory" : `${selectedMemoryKeys.length} memories`}?`}>
@@ -239,9 +247,10 @@ const styles = StyleSheet.create({
   bulkText: { color: palette.silver100, fontFamily: fonts.medium, fontSize: 12 },
   empty: { width: "100%", paddingVertical: spacing.md, textAlign: "center", color: palette.silver500, fontFamily: fonts.regular, fontSize: 13 },
   detail: { flexGrow: 1, alignItems: "center", paddingVertical: spacing.lg, gap: spacing.xl },
-  detailImageFrame: { width: 120, height: 120 },
-  detailImageFrameZoom: { width: "100%" },
-  detailImageClip: { width: "100%", height: "100%", overflow: "hidden", borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.sm, backgroundColor: palette.voidBlack },
+  detailImageStage: { width: "100%", height: 120 },
+  detailThumbnailLayer: { position: "absolute", top: 0, left: "50%", width: 120, height: 120, marginLeft: -60 },
+  thumbnailImageClip: { width: "100%", height: "100%", overflow: "hidden", borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.sm, backgroundColor: palette.voidBlack },
+  expandedImageClip: { width: "100%", height: "100%", overflow: "hidden", borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.lg, backgroundColor: palette.voidBlack },
   detailImage: { width: "100%", height: "100%" },
   memoryCopy: { width: "100%", gap: spacing.md, paddingBottom: spacing.xl },
   memoryCopyHidden: { opacity: 0 },

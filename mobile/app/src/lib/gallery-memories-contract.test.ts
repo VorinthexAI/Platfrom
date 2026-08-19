@@ -36,15 +36,17 @@ test("guards auto-open and preserves typing across zoom and event refresh", () =
   expect(memories).toContain('"memory.created", "memory.deleted", "image.changed", "collection.content.changed"');
   expect(memories).toContain('showImage ? "Read memory" : "Show image"');
   expect(memories).toContain("useReducedMotion()");
-  expect(memories).toContain("LinearTransition.duration(420)");
-  expect(memories).toContain('style={[styles.detailImageFrame, showImage && styles.detailImageFrameZoom, showImage && { height: expandedImageHeight }]}');
-  expect(memories).toContain('<View collapsable={false} style={styles.detailImageClip}>');
-  expect(memories).toContain('detailImageClip: { width: "100%", height: "100%", overflow: "hidden", borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.sm');
+  expect(memories).toContain("withTiming(Number(showImage), { duration: 420");
+  expect(memories).toContain('height: interpolate(imageExpansion.value, [0, 1], [120, expandedImageHeight])');
+  expect(memories).toContain('style={[styles.detailImageStage, imageStageStyle]}');
+  expect(memories).toContain('style={[styles.detailThumbnailLayer, compactImageStyle]}');
+  expect(memories).toContain('<View collapsable={false} style={styles.expandedImageClip}>');
+  expect(memories).toContain('thumbnailImageClip: { width: "100%", height: "100%", overflow: "hidden", borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.sm');
+  expect(memories).toContain('expandedImageClip: { width: "100%", height: "100%", overflow: "hidden", borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.lg');
   expect(memories).toContain('const expandedImageHeight = Math.max(420, height - 260)');
-  expect(memories).toContain('detailImageFrameZoom: { width: "100%" }');
   expect(memories).toContain('style={[styles.memoryCopy, showImage && styles.memoryCopyHidden]}');
   expect(memories).toContain('accessibilityElementsHidden={showImage}');
-  expect(memories).not.toContain("SlideInRight");
+  expect(memories).not.toContain("LinearTransition");
 });
 
 test("matches bulk partial deletion and hard-removes detail caches", () => {
