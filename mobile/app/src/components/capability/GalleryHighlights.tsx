@@ -98,6 +98,7 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
       queryClient.setQueryData(galleryQueryKeys.highlight(galleryContext, collection.key, highlight.key), { highlight });
       setHighlights((current) => [highlight, ...current.filter(({ key }) => key !== highlight.key)]);
       setCreating(false);
+      notify("Highlight created");
       void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.highlights(galleryContext, collection.key), exact: true, refetchType: "none" }).catch(() => undefined);
     } catch {
       if (generation === createRequest.current) {
@@ -183,8 +184,8 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
   return <>
     <BottomSheet footer={listFooter} height="full" onOpenChange={(next) => { if (!next) close(); }} open={open && !detail} title="Highlights">
       <ScrollView contentContainerStyle={[styles.grid, listEmpty && styles.emptyGrid]} onLayout={({ nativeEvent }) => setGridWidth(nativeEvent.layout.width)} showsVerticalScrollIndicator={false}>
-        {creating ? <View accessibilityLabel="Creating highlight" accessibilityRole="progressbar"><Skeleton style={[styles.creatingCard, { width: cardWidth, height: cardWidth * 16 / 9 }]} /></View> : null}
-        {listLoading ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={{ width: cardWidth, height: cardWidth * 16 / 9 }} />) : highlights.map((highlight) => <Button accessibilityLabel={`${highlight.title}, ${highlight.slideCount} slides`} contentMode="raw" disabled={opening} key={highlight.key} onPress={() => void openHighlight(highlight)} shape="rounded" size="xl" style={[styles.card, { width: cardWidth, height: cardWidth * 16 / 9 }]} variant="ghost">
+        {creating ? <View accessibilityLabel="Creating highlight" accessibilityRole="progressbar"><Skeleton style={[styles.cardFrame, { width: cardWidth, height: cardWidth * 16 / 9 }]} /></View> : null}
+        {listLoading ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.cardFrame, { width: cardWidth, height: cardWidth * 16 / 9 }]} />) : highlights.map((highlight) => <Button accessibilityLabel={`${highlight.title}, ${highlight.slideCount} slides`} contentMode="raw" disabled={opening} key={highlight.key} onPress={() => void openHighlight(highlight)} shape="rounded" size="xl" style={[styles.cardFrame, styles.card, { width: cardWidth, height: cardWidth * 16 / 9 }]} variant="ghost">
           {highlight.coverUrl ? <Image contentFit="cover" source={highlight.coverUrl} style={StyleSheet.absoluteFill} transition={180} /> : null}
           <View style={styles.cardShade} />
           <View style={styles.cardCopy}><Text numberOfLines={2} style={styles.title}>{highlight.title}</Text><Text style={styles.cardCount}>{highlight.slideCount} slide{highlight.slideCount === 1 ? "" : "s"}</Text></View>
@@ -220,8 +221,8 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
 const styles = StyleSheet.create({
   grid: { flexDirection: "row", flexWrap: "wrap", gap: GAP, paddingVertical: spacing.md },
   emptyGrid: { flexGrow: 1, alignItems: "center", justifyContent: "center" },
-  creatingCard: { borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.lg, backgroundColor: palette.panelRaised },
-  card: { overflow: "hidden", alignItems: "stretch", justifyContent: "flex-end", padding: 0, borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.lg, backgroundColor: palette.panelRaised },
+  cardFrame: { overflow: "hidden", borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.lg, backgroundColor: palette.panelRaised },
+  card: { alignItems: "stretch", justifyContent: "flex-end", padding: 0 },
   cardShade: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundColor: "rgba(0,0,0,0.35)" },
   cardCopy: { marginTop: "auto", padding: 8, gap: 2 },
   title: { color: palette.silver50, fontFamily: fonts.semibold, fontSize: 12 },
