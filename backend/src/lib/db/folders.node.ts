@@ -15,7 +15,6 @@ export const folderSchema = z.object({
   coverImageKey: z.string().cuid().optional(),
   embedding: currentEmbeddingSchema,
   isFavorite: z.boolean().default(false),
-  deletedAt: z.string().datetime().nullable().default(null),
   _internalDeletion: z.object({
     kind: z.literal('folder'),
     owner: z.string().trim().min(1),
@@ -63,12 +62,11 @@ export async function deleteFolder(folderKey: string): Promise<void> {
   if (!current || !await deleteFolderInScope(current.scopeKey, folderKey)) throw new Error(`Folder ${folderKey} was not found.`);
 }
 
-export async function getFolderInScope(scopeKey: string, folderKey: string, includeArchived = false): Promise<Folder | null> {
+export async function getFolderInScope(scopeKey: string, folderKey: string): Promise<Folder | null> {
   const cursor = await db.query(aql`
     FOR folder IN ${db.collection(FOLDERS_COLLECTION)}
       FILTER folder._key == ${folderKey} && folder.scopeKey == ${scopeKey}
       FILTER !HAS(folder, "_internalDeletion") || folder._internalDeletion == null
-      FILTER ${includeArchived} || folder.deletedAt == null
       LIMIT 1
       RETURN folder
   `);
@@ -84,7 +82,6 @@ export async function semanticSearchFolders(input: { embedding: number[]; author
     FOR folder IN ${db.collection(FOLDERS_COLLECTION)}
       FILTER folder.scopeKey IN ${input.authorizedScopeKeys}
       FILTER ${input.folderKeys === undefined} || folder._key IN ${input.folderKeys ?? []}
-      FILTER folder.deletedAt == null
       FILTER !HAS(folder, "_internalDeletion") || folder._internalDeletion == null
       FILTER IS_ARRAY(folder.embedding) && LENGTH(folder.embedding) == LENGTH(${embedding})
       LET score = COSINE_SIMILARITY(folder.embedding, ${embedding})
@@ -101,14 +98,13 @@ export async function semanticSearchFolders(input: { embedding: number[]; author
 
 export async function listFoldersByScope(
   scopeKey: string,
-  options: { parentFolderKey?: string | null; includeArchived?: boolean; includePendingDeletion?: boolean } = {},
+  options: { parentFolderKey?: string | null; includePendingDeletion?: boolean } = {},
 ): Promise<Folder[]> {
   const hasParentBoundary = Object.prototype.hasOwnProperty.call(options, 'parentFolderKey');
   const cursor = await db.query(aql`
     FOR folder IN ${db.collection(FOLDERS_COLLECTION)}
       FILTER folder.scopeKey == ${scopeKey}
       FILTER ${options.includePendingDeletion ?? false} || !HAS(folder, "_internalDeletion") || folder._internalDeletion == null
-      FILTER ${options.includeArchived ?? false} || folder.deletedAt == null
       FILTER !${hasParentBoundary} || (${options.parentFolderKey ?? null} == null
         ? (!HAS(folder, "parentFolderKey") || folder.parentFolderKey == null)
         : folder.parentFolderKey == ${options.parentFolderKey ?? null})
@@ -121,18 +117,16 @@ export async function listFoldersByScope(
 export function listFoldersByParent(
   scopeKey: string,
   parentFolderKey: string | null,
-  includeArchived = false,
 ): Promise<Folder[]> {
-  return listFoldersByScope(scopeKey, { parentFolderKey, includeArchived });
+  return listFoldersByScope(scopeKey, { parentFolderKey });
 }
 
 /** Returns descendants in breadth-first order while keeping the complete read scope-bounded in AQL. */
-export async function listFolderDescendants(scopeKey: string, folderKey: string, includeArchived = false): Promise<Folder[]> {
+export async function listFolderDescendants(scopeKey: string, folderKey: string): Promise<Folder[]> {
   const cursor = await db.query(aql`
     FOR folder IN ${db.collection(FOLDERS_COLLECTION)}
       FILTER folder.scopeKey == ${scopeKey}
       FILTER !HAS(folder, "_internalDeletion") || folder._internalDeletion == null
-      FILTER ${includeArchived} || folder.deletedAt == null
       RETURN folder
   `);
   const folders = (await cursor.all()).map((folder) => folderSchema.parse(withArangoKey(folder)));
@@ -154,14 +148,4 @@ export async function listFolderDescendants(scopeKey: string, folderKey: string,
     pending.push(...(children.get(folder.key) ?? []));
   }
   return descendants;
-}
-
-export async function archiveFolder(key: string): Promise<Folder> {
-  const timestamp = new Date().toISOString();
-  return updateFolder(key, { deletedAt: timestamp, updatedAt: timestamp });
-}
-
-export async function restoreFolder(key: string): Promise<Folder> {
-  const timestamp = new Date().toISOString();
-  return updateFolder(key, { deletedAt: null, updatedAt: timestamp });
 }

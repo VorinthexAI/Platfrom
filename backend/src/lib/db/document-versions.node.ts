@@ -20,7 +20,6 @@ export const documentVersionSchema = z.object({
   semanticChunkCount: z.number().int().positive().optional(),
   semanticContentHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   _semanticChunkingSkipped: z.boolean().optional(),
-  deletedAt: z.string().datetime().nullable().default(null),
   createdAt: z.string().datetime(),
 });
 
@@ -83,7 +82,6 @@ export async function getDocumentVersion(
   const cursor = await db.query(aql`
     FOR snapshot IN ${db.collection(DOCUMENT_VERSIONS_COLLECTION)}
       FILTER snapshot.scopeKey == ${scopeKey} && snapshot.documentKey == ${documentKey} && snapshot.version == ${version}
-      FILTER snapshot.deletedAt == null
       LIMIT 1
       RETURN snapshot
   `);
@@ -95,7 +93,6 @@ export async function listDocumentVersions(scopeKey: string, documentKey: string
   const cursor = await db.query(aql`
     FOR snapshot IN ${db.collection(DOCUMENT_VERSIONS_COLLECTION)}
       FILTER snapshot.scopeKey == ${scopeKey} && snapshot.documentKey == ${documentKey}
-      FILTER snapshot.deletedAt == null
       SORT snapshot.version DESC
       RETURN snapshot
   `);
@@ -129,7 +126,6 @@ export async function listDocumentVersionsByDocumentKeys(scopeKey: string, docum
   const cursor = await db.query(aql`
     FOR snapshot IN ${db.collection(DOCUMENT_VERSIONS_COLLECTION)}
       FILTER snapshot.scopeKey == ${scopeKey} && snapshot.documentKey IN ${documentKeys}
-      FILTER snapshot.deletedAt == null
       SORT POSITION(${documentKeys}, snapshot.documentKey) ASC, snapshot.version DESC
       RETURN snapshot
   `);
@@ -147,7 +143,7 @@ export async function deleteDocumentVersionInScope(scopeKey: string, versionKey:
   return contentPersistence.deleteVersion(scopeKey, versionKey);
 }
 
-type NewDocumentVersion = Omit<DocumentVersion, 'key' | 'version' | 'embedding' | 'createdAt' | 'deletedAt'>;
+type NewDocumentVersion = Omit<DocumentVersion, 'key' | 'version' | 'embedding' | 'createdAt'>;
 
 /** Exclusive collection transaction makes MAX(version)+1 monotonic under concurrent writers. */
 export async function createDocumentVersion(input: NewDocumentVersion): Promise<DocumentVersion> {
@@ -159,19 +155,4 @@ export async function createDocumentVersion(input: NewDocumentVersion): Promise<
 export async function semanticSearchDocumentVersions(input: Omit<import('./documents.node').ContentSemanticSearchInput, 'sources'>) {
   const { semanticSearchContent } = await import('./documents.node');
   return semanticSearchContent({ ...input, sources: ['version'] });
-}
-
-export async function updateDocumentVersion(key: string, patch: Pick<DocumentVersion, 'deletedAt'>): Promise<DocumentVersion> {
-  const updated = await helpers.updateById(key, patch);
-  if (!updated) throw new Error(`Document version ${key} was not found.`);
-  return updated;
-}
-
-export async function archiveDocumentVersion(key: string): Promise<DocumentVersion> {
-  const timestamp = new Date().toISOString();
-  return updateDocumentVersion(key, { deletedAt: timestamp });
-}
-
-export async function restoreDocumentVersion(key: string): Promise<DocumentVersion> {
-  return updateDocumentVersion(key, { deletedAt: null });
 }

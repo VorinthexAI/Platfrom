@@ -9,8 +9,8 @@ const context = { domain: { organizationKey, runtimeScopeKey: scopeKey, principa
 
 describe('Gallery assistant capabilities', () => {
   test('covers every canonical operation and exposes no trusted context fields', () => {
-    expect(galleryAssistantCapabilityNames).toHaveLength(37);
-    expect(new Set(galleryAssistantCapabilityNames).size).toBe(37);
+    expect(galleryAssistantCapabilityNames).toHaveLength(36);
+    expect(new Set(galleryAssistantCapabilityNames).size).toBe(36);
     expect(galleryAssistantCapabilityNames).not.toContain('collection.duplicates.find');
     expect(galleryAssistantCapabilityNames).not.toEqual(expect.arrayContaining(['image.upload.reserve', 'image.upload.status', 'image.upload.complete']));
     expect(galleryAssistantCapabilityNames).toEqual(expect.arrayContaining(['highlight.create', 'highlight.list', 'highlight.read', 'highlight.delete']));
@@ -50,7 +50,7 @@ describe('Gallery assistant capabilities', () => {
   test('routes every tool to its canonical operation with trusted context injected', async () => {
     const calls: Array<{ operation: GalleryOperationName; input: unknown; context: GalleryOperationContext }> = [];
     const operations = Object.fromEntries([
-      'overview', 'createCollection', 'updateCollection', 'deleteCollection', 'listMembers', 'listPendingInvites', 'createInvite', 'acceptInvite', 'rejectInvite', 'revokeInvite', 'updateMemberRole', 'removeMember', 'leaveCollection', 'listShares', 'createShare', 'updateShare', 'revokeShare', 'activateShare', 'search', 'setFavorite', 'updateImage', 'deleteImages', 'deleteDuplicates', 'transferCollectionImages', 'listSubjects', 'createSubject', 'listSubjectImages', 'deleteSubject', 'restoreSubject', 'createHighlight', 'listHighlights', 'readHighlight', 'deleteHighlight',
+      'overview', 'createCollection', 'updateCollection', 'deleteCollection', 'listMembers', 'listPendingInvites', 'createInvite', 'acceptInvite', 'rejectInvite', 'revokeInvite', 'updateMemberRole', 'removeMember', 'leaveCollection', 'listShares', 'createShare', 'updateShare', 'revokeShare', 'activateShare', 'search', 'setFavorite', 'updateImage', 'deleteImages', 'deleteDuplicates', 'transferCollectionImages', 'listSubjects', 'createSubject', 'listSubjectImages', 'deleteSubject', 'createHighlight', 'listHighlights', 'readHighlight', 'deleteHighlight',
     ].map((operation) => [operation, async (input: unknown, trusted: GalleryOperationContext) => { calls.push({ operation: operation as GalleryOperationName, input, context: trusted }); return { operation }; }])) as any;
     const capabilities = createGalleryAssistantCapabilities(operations);
     const imageKey = newId(), collectionKey = newId(), destinationCollectionKey = newId(), identityKey = newId(), inviteKey = newId(), memberKey = newId(), shareKey = newId(), highlightKey = newId();
@@ -59,11 +59,11 @@ describe('Gallery assistant capabilities', () => {
       { collectionKey }, {}, { collectionKey, inviteeKey: memberKey, role: 'collaborator' }, { inviteKey }, { inviteKey }, { collectionKey, inviteKey }, { collectionKey, memberKey, role: 'viewer' }, { collectionKey, memberKey }, { collectionKey }, { collectionKey }, { collectionKey, role: 'viewer' }, { collectionKey, shareKey, active: true }, { collectionKey, shareKey }, { token: 'x'.repeat(32) },
       { query: 'mountains' }, { imageKey, isFavorite: true }, { imageKey, name: 'mountain.jpg', isFavorite: true }, { imageKeys: [imageKey] },
       { collectionKey, imageKeys: [imageKey] }, { sourceCollectionKey: collectionKey, destinationCollectionKeys: [destinationCollectionKey], imageKeys: [imageKey], mode: 'copy' },
-      {}, { name: 'Oscar', imageKeys: [imageKey] }, { identityKey }, { identityKey }, { identityKey },
+      {}, { name: 'Oscar', imageKeys: [imageKey] }, { identityKey }, { identityKey },
       { collectionKey }, {}, { highlightKey }, { highlightKey },
     ];
     for (const [index, capability] of capabilities.slice(0, inputs.length).entries()) expect(await capability.execute(inputs[index], context)).toEqual({ kind: 'continue', result: { operation: calls.at(-1)!.operation } });
-    expect(calls.map(({ operation }) => operation)).toEqual(['overview', 'createCollection', 'updateCollection', 'deleteCollection', 'listMembers', 'listPendingInvites', 'createInvite', 'acceptInvite', 'rejectInvite', 'revokeInvite', 'updateMemberRole', 'removeMember', 'leaveCollection', 'listShares', 'createShare', 'updateShare', 'revokeShare', 'activateShare', 'search', 'setFavorite', 'updateImage', 'deleteImages', 'deleteDuplicates', 'transferCollectionImages', 'listSubjects', 'createSubject', 'listSubjectImages', 'deleteSubject', 'restoreSubject', 'createHighlight', 'listHighlights', 'readHighlight', 'deleteHighlight']);
+    expect(calls.map(({ operation }) => operation)).toEqual(['overview', 'createCollection', 'updateCollection', 'deleteCollection', 'listMembers', 'listPendingInvites', 'createInvite', 'acceptInvite', 'rejectInvite', 'revokeInvite', 'updateMemberRole', 'removeMember', 'leaveCollection', 'listShares', 'createShare', 'updateShare', 'revokeShare', 'activateShare', 'search', 'setFavorite', 'updateImage', 'deleteImages', 'deleteDuplicates', 'transferCollectionImages', 'listSubjects', 'createSubject', 'listSubjectImages', 'deleteSubject', 'createHighlight', 'listHighlights', 'readHighlight', 'deleteHighlight']);
     for (const call of calls) {
       expect(call.context).toEqual({ organizationKey, scopeKey, membership, modelVisible: true });
     }

@@ -39,9 +39,6 @@ export function buildAuthAccountResponse(
       role: context.scopeMembership.role,
       membership_key: context.scopeMembership.key,
     },
-    content_execution: {
-      agent_key: context.agent.key,
-    },
   };
 }
 

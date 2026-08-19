@@ -116,7 +116,6 @@ describe('scope schemas', () => {
       description: 'The conversational intelligence scope.',
       position: 2,
       level: 1,
-      deletedAt: null,
       embedding: [],
     });
     expect(scopesEmbedKeys.options).toEqual(['summary']);
@@ -134,7 +133,6 @@ describe('scope schemas', () => {
       parentKey,
       childKey,
       level: 2,
-      deletedAt: null,
     });
     expect(() => scopeScopeSchema.parse({ key: newId(), parentKey, childKey: parentKey })).toThrow();
   });

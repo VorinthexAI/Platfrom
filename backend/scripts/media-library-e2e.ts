@@ -24,31 +24,31 @@ try {
   let tokenSequence = 0;
   const service = createMediaLibraryService({ repository, token: () => `media-library-e2e-token-${String(++tokenSequence).padStart(32, '0')}` });
   const scopeKey = newId(); const actorKey = newId(); const strangerKey = newId(); const collectionKey = newId(); const imageKey = newId(); const tagKey = newId(); const now = new Date().toISOString();
-  await database.collection('scopes').save({ _key: scopeKey, organizationKey: 'media-library-e2e-org', deletedAt: null });
+  await database.collection('scopes').save({ _key: scopeKey, organizationKey: 'media-library-e2e-org' });
   await database.collection('userOrganizations').import([{ _key: actorKey, organizationId: 'media-library-e2e-org', userId: newId(), orgRole: 'member', status: 'active' }, { _key: strangerKey, organizationId: 'media-library-e2e-org', userId: newId(), orgRole: 'member', status: 'active' }]);
-  await database.collection('collections').save({ _key: collectionKey, scopeKey, name: 'Launch', description: 'Launch imagery', embedding: Array(4096).fill(0), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now });
+  await database.collection('collections').save({ _key: collectionKey, scopeKey, name: 'Launch', description: 'Launch imagery', embedding: Array(4096).fill(0), isFavorite: false, createdAt: now, updatedAt: now });
   const sourceOwnerMembershipKey = newId();
   await database.collection('collectionMembers').save({ _key: sourceOwnerMembershipKey, scopeKey, collectionKey, memberKey: actorKey, role: 'owner', createdAt: now });
-  await database.collection('images').save({ _key: imageKey, scopeKey, filename: 'launch.png', caption: 'A launch vehicle', storageKey: 'mediaLibrary/e2e.png', mimeType: 'image/png', sizeBytes: 24, width: 1, height: 1, embedding: Array(4096).fill(0), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now });
+  await database.collection('images').save({ _key: imageKey, scopeKey, filename: 'launch.png', caption: 'A launch vehicle', storageKey: 'mediaLibrary/e2e.png', mimeType: 'image/png', sizeBytes: 24, width: 1, height: 1, embedding: Array(4096).fill(0), isFavorite: false, createdAt: now, updatedAt: now });
   await database.collection('tags').save({ _key: tagKey, scopeKey, name: 'Launch', embedding: Array(4096).fill(0), createdAt: now, updatedAt: now });
   const membership = await service.addImageToCollection({ scopeKey, collectionKey, imageKey, actorKey, now });
   const assignment = await service.assignTag({ scopeKey, tagKey, sourceType: 'image', sourceKey: imageKey, source: 'user', actorKey, now });
   const cover = await service.setCollectionCoverImage({ scopeKey, collectionKey, imageKey, ownerKey: actorKey, now });
   if (cover.coverImageKey !== imageKey) throw new Error('Collection cover membership verification failed.');
   const unrelatedImageKey = newId();
-  await database.collection('images').save({ _key: unrelatedImageKey, scopeKey, filename: 'other.png', caption: 'Other', storageKey: 'mediaLibrary/other.png', mimeType: 'image/png', sizeBytes: 24, width: 1, height: 1, embedding: Array(4096).fill(0), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now });
+  await database.collection('images').save({ _key: unrelatedImageKey, scopeKey, filename: 'other.png', caption: 'Other', storageKey: 'mediaLibrary/other.png', mimeType: 'image/png', sizeBytes: 24, width: 1, height: 1, embedding: Array(4096).fill(0), isFavorite: false, createdAt: now, updatedAt: now });
   let unrelatedCoverRejected = false;
   try { await service.setCollectionCoverImage({ scopeKey, collectionKey, imageKey: unrelatedImageKey, ownerKey: actorKey, now }); } catch { unrelatedCoverRejected = true; }
   if (!unrelatedCoverRejected) throw new Error('Unrelated image was accepted as collection cover.');
   const destinationCollectionKey = newId();
-  await database.collection('collections').save({ _key: destinationCollectionKey, scopeKey, name: 'Destination', description: 'Destination imagery', embedding: Array(4096).fill(0), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now });
+  await database.collection('collections').save({ _key: destinationCollectionKey, scopeKey, name: 'Destination', description: 'Destination imagery', embedding: Array(4096).fill(0), isFavorite: false, createdAt: now, updatedAt: now });
   const destinationOwnerMembershipKey = newId();
   await database.collection('collectionMembers').save({ _key: destinationOwnerMembershipKey, scopeKey, collectionKey: destinationCollectionKey, memberKey: actorKey, role: 'owner', createdAt: now });
   await service.moveImageBetweenCollections({ scopeKey, sourceCollectionKey: collectionKey, collectionKey: destinationCollectionKey, imageKey, actorKey, now });
   const sourceAfterMove = await database.collection('collections').document(collectionKey) as Record<string, unknown>;
   if ('coverImageKey' in sourceAfterMove) throw new Error('Moving a cover image did not clear the source cover atomically.');
   const attackerCollectionKey = newId();
-  await database.collection('collections').save({ _key: attackerCollectionKey, scopeKey, name: 'Attacker destination', description: 'Unauthorized destination', embedding: Array(4096).fill(0), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now });
+  await database.collection('collections').save({ _key: attackerCollectionKey, scopeKey, name: 'Attacker destination', description: 'Unauthorized destination', embedding: Array(4096).fill(0), isFavorite: false, createdAt: now, updatedAt: now });
   await database.collection('collectionMembers').save({ _key: newId(), scopeKey, collectionKey: attackerCollectionKey, memberKey: strangerKey, role: 'owner', createdAt: now });
   let inaccessibleAttachRejected = false;
   try { await service.addImageToCollection({ scopeKey, collectionKey: attackerCollectionKey, imageKey, actorKey: strangerKey, now }); } catch { inaccessibleAttachRejected = true; }
@@ -135,10 +135,10 @@ try {
   const caughtUp = await database.collection('shares').document(catchupShareKey) as Record<string, unknown>;
   if (caughtUp.sourceKey !== catchupDocumentKey) throw new Error('Catch-up share was not migrated before cutover.');
   const postDrop = await content.insertShare({ key: newId(), scopeKey, documentKey, permission: 'read', tokenHash: 'f'.repeat(64), createdAt: now, updatedAt: now });
-  const archivedPostDrop = await content.updateShare(scopeKey, postDrop.key, { deletedAt: now, updatedAt: now });
-  const restoredPostDrop = await content.updateShare(scopeKey, postDrop.key, { deletedAt: null, updatedAt: now });
+  const revokedPostDrop = await content.updateShare(scopeKey, postDrop.key, { revokedAt: now, updatedAt: now });
+  const unrevokedPostDrop = await content.updateShare(scopeKey, postDrop.key, { revokedAt: undefined, updatedAt: now });
   const listed = await content.listShares(scopeKey, [documentKey]);
-  if (postDrop.documentKey !== documentKey || archivedPostDrop?.deletedAt !== now || restoredPostDrop?.deletedAt !== null || !listed.some((share) => share.key === postDrop.key) || 'sourceType' in postDrop || 'sourceKey' in postDrop) throw new Error('Post-drop Content share compatibility failed.');
+  if (postDrop.documentKey !== documentKey || revokedPostDrop?.revokedAt !== now || unrevokedPostDrop?.revokedAt !== undefined || !listed.some((share) => share.key === postDrop.key) || 'sourceType' in postDrop || 'sourceKey' in postDrop) throw new Error('Post-drop Content share compatibility failed.');
   console.log('MediaLibrary E2E passed: MediaLibrary authorization/shares, phased catch-up/cutover/drop, and post-drop Content shares.');
 } finally {
   await system.dropDatabase(databaseName);

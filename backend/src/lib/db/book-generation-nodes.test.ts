@@ -40,7 +40,7 @@ describe('book generation node contracts', () => {
 
   test('validates book metadata and progress defaults', () => {
     const book = bookSchema.parse({ key, scopeKey: otherKey, title: 'Leadership', description: 'A personal guide', goal: 'Lead better', audience: 'Managers', outcome: 'Build leaders', language: 'en', status: 'planning', embedding, createdAt: now, updatedAt: now });
-    expect(book).toMatchObject({ isFavorite: false, deletedAt: null, status: 'planning' });
+    expect(book).toMatchObject({ isFavorite: false, status: 'planning' });
     expect(book).toMatchObject({ chapterCount: 0, estimatedMinutes: 0 });
     const chapter = bookChapterSchema.parse({ key, scopeKey: otherKey, bookKey: key, title: 'Start', description: 'Opening', objective: 'Orient the reader', embedding, position: 1, createdAt: now, updatedAt: now });
     expect(chapter).toMatchObject({ status: 'planned', topics: [], estimatedMinutes: 0 });

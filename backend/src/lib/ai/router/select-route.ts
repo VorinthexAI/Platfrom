@@ -1,7 +1,7 @@
 import { getDefaultOrganizationProviderRepository } from '@/lib/ai/organization-providers/repository';
-import { getActionBySlug } from '@/lib/db/actions.node';
+import { getActionDefinition } from '@/lib/ai/actions';
 import { getModelById, getModelBySlug } from '@/lib/db/models.node';
-import { listEnabledModelActionsByActionKey } from '@/lib/db/model-actions.node';
+import { listEnabledModelActionsByActionSlug } from '@/lib/db/model-actions.node';
 import { listEnabledModelProvidersByModelKey } from '@/lib/db/model-providers.node';
 import { getProviderById, getProviderBySlug } from '@/lib/db/providers.node';
 import { NoEligibleRouteError, ProviderNotEnabledForOrganizationError, RouteValidationError, UnknownModelError, UnknownProviderError } from './errors';
@@ -10,12 +10,11 @@ import { isStaticProvider } from './static-routes';
 import type { RouteDecision, RouterDataSource, RouterDependencies } from './types';
 
 const defaultDataSource: RouterDataSource = {
-  getActionBySlug,
   getModelBySlug,
   getModelByKey: getModelById,
   getProviderBySlug,
   getProviderByKey: getProviderById,
-  listModelActions: listEnabledModelActionsByActionKey,
+  listModelActions: listEnabledModelActionsByActionSlug,
   listModelProviders: listEnabledModelProvidersByModelKey,
   listOrganizationProviderKeys: (organizationKey) => getDefaultOrganizationProviderRepository().listProviderKeys(organizationKey),
 };
@@ -26,8 +25,8 @@ export async function selectRoute(input: RouteRequestInput, deps: RouterDependen
   if (!parsed.success) throw new RouteValidationError(parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; '));
   const request = parsed.data;
   const data = deps.data ?? defaultDataSource;
-  const action = await data.getActionBySlug(request.actionSlug);
-  if (!action || !action.enabled) throw new NoEligibleRouteError(request.actionSlug, 'action is missing or disabled');
+  const action = getActionDefinition(request.actionSlug);
+  if (!action) throw new NoEligibleRouteError(request.actionSlug, 'action is not registered');
 
   const selectedModel = request.mode === 'model' || request.mode === 'fixed' ? await data.getModelBySlug(request.modelSlug) : null;
   if ((request.mode === 'model' || request.mode === 'fixed') && !selectedModel) throw new UnknownModelError(request.modelSlug);
@@ -46,7 +45,7 @@ export async function selectRoute(input: RouteRequestInput, deps: RouterDependen
     throw new ProviderNotEnabledForOrganizationError(request.organizationKey, selectedProvider.slug);
   }
 
-  let modelActions = await data.listModelActions(action.key);
+  let modelActions = await data.listModelActions(action.id);
   modelActions = modelActions
     .filter((link) => link.enabled)
     .sort((left, right) => right.priority - left.priority || left.key.localeCompare(right.key));
@@ -67,8 +66,7 @@ export async function selectRoute(input: RouteRequestInput, deps: RouterDependen
       if (!staticProvider && !allowedProviderKeys.has(modelProvider.providerKey)) continue;
       return {
         organizationKey: request.organizationKey,
-        actionKey: action.key,
-        actionSlug: action.slug,
+        actionSlug: action.id,
         modelKey: model.key,
         modelSlug: model.slug,
         providerKey: provider.key,

@@ -87,7 +87,6 @@ async function main() {
     description: fixture.description,
     embedding: deterministicGalleryEmbedding(200 + fixture.index),
     isFavorite: false,
-    deletedAt: null,
     createdAt: NOW,
     updatedAt: NOW,
   }));
@@ -116,12 +115,12 @@ async function main() {
 
     const candidateCursor = await transaction.query(`
       FOR image IN images
-        FILTER image.scopeKey == @scopeKey && image.deletedAt == null
+        FILTER image.scopeKey == @scopeKey
         LET sourceCollectionKey = FIRST(
           FOR relation IN collectionImages
             FILTER relation.scopeKey == @scopeKey && relation.imageKey == image._key && relation.collectionKey NOT IN @sharedCollectionKeys
             LET source = DOCUMENT(collections, relation.collectionKey)
-            FILTER source != null && source.scopeKey == @scopeKey && source.deletedAt == null
+            FILTER source != null && source.scopeKey == @scopeKey
             SORT source._key ASC
             RETURN source._key
         )
@@ -144,14 +143,14 @@ async function main() {
       }
     }
 
-    const ownerlessCursor = await transaction.query('FOR collection IN collections FILTER collection.scopeKey == @scopeKey && collection.deletedAt == null LET ownerCount = LENGTH(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == collection._key && member.role == "owner" RETURN 1) FILTER ownerCount == 0 RETURN { key: collection._key, name: collection.name }', { scopeKey });
+    const ownerlessCursor = await transaction.query('FOR collection IN collections FILTER collection.scopeKey == @scopeKey LET ownerCount = LENGTH(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == collection._key && member.role == "owner" RETURN 1) FILTER ownerCount == 0 RETURN { key: collection._key, name: collection.name }', { scopeKey });
     const ownerless = await ownerlessCursor.all() as Array<{ key: string; name: string }>;
     for (const collection of ownerless) {
       const owner = collectionMemberSchema.parse({ key: deterministicGalleryFixtureKey(scopeKey, 'legacy-owner', collection.key), scopeKey, collectionKey: collection.key, memberKey: oscarMembershipKey, role: 'owner', createdAt: NOW });
       await transaction.query('UPSERT { scopeKey: @scopeKey, collectionKey: @collectionKey, memberKey: @memberKey } INSERT @document UPDATE { role: "owner" } IN collectionMembers', { scopeKey, collectionKey: collection.key, memberKey: oscarMembershipKey, document: document(owner) });
     }
 
-    const ownedCursor = await transaction.query('FOR collection IN collections FILTER collection.scopeKey == @scopeKey && collection.deletedAt == null FILTER LENGTH(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == collection._key && member.memberKey == @memberKey && member.role == "owner" LIMIT 1 RETURN 1) == 1 SORT collection.name RETURN { key: collection._key, name: collection.name }', { scopeKey, memberKey: oscarMembershipKey });
+    const ownedCursor = await transaction.query('FOR collection IN collections FILTER collection.scopeKey == @scopeKey FILTER LENGTH(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == collection._key && member.memberKey == @memberKey && member.role == "owner" LIMIT 1 RETURN 1) == 1 SORT collection.name RETURN { key: collection._key, name: collection.name }', { scopeKey, memberKey: oscarMembershipKey });
     const owned = await ownedCursor.all() as Array<{ key: string; name: string }>;
     for (const collection of owned) {
       const fixture = buildOwnedCollectionFixturePlan(scopeKey, collection.key);
@@ -161,8 +160,8 @@ async function main() {
       await transaction.query('UPSERT { scopeKey: @scopeKey, collectionKey: @collectionKey, memberKey: @memberKey } INSERT @document UPDATE {} IN collectionMembers', { scopeKey, collectionKey: collection.key, memberKey: viewer.memberKey, document: document(viewer) });
 
       const shares = [
-        shareSchema.parse({ key: fixture.viewerShareKey, scopeKey, sourceType: 'collection', sourceKey: collection.key, permission: 'viewer', tokenHash: sha256(fixture.viewerToken), deletedAt: null, createdAt: NOW, updatedAt: NOW }),
-        shareSchema.parse({ key: fixture.collaboratorShareKey, scopeKey, sourceType: 'collection', sourceKey: collection.key, permission: 'collaborator', tokenHash: sha256(fixture.collaboratorToken), revokedAt: REVOKED_AT, deletedAt: null, createdAt: NOW, updatedAt: REVOKED_AT }),
+        shareSchema.parse({ key: fixture.viewerShareKey, scopeKey, sourceType: 'collection', sourceKey: collection.key, permission: 'viewer', tokenHash: sha256(fixture.viewerToken), createdAt: NOW, updatedAt: NOW }),
+        shareSchema.parse({ key: fixture.collaboratorShareKey, scopeKey, sourceType: 'collection', sourceKey: collection.key, permission: 'collaborator', tokenHash: sha256(fixture.collaboratorToken), revokedAt: REVOKED_AT, createdAt: NOW, updatedAt: REVOKED_AT }),
       ];
       for (const [index, share] of shares.entries()) {
         const token = index === 0 ? fixture.viewerToken : fixture.collaboratorToken;
@@ -181,10 +180,10 @@ async function main() {
   const placementKeys = seeded.placementPlan.flatMap(({ placements }) => placements.map(({ key }) => key));
 
   const verificationCursor = await db.query(`
-    LET ownerless = LENGTH(FOR collection IN collections FILTER collection.scopeKey == @scopeKey && collection.deletedAt == null FILTER LENGTH(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == collection._key && member.role == "owner" RETURN 1) == 0 RETURN 1)
-    LET badReferences = LENGTH(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member._key IN @fixtureMemberKeys LET collection = DOCUMENT(collections, member.collectionKey) LET membership = DOCUMENT(userOrganizations, member.memberKey) FILTER collection == null || collection.scopeKey != @scopeKey || collection.deletedAt != null || membership == null || membership.organizationId != @organizationKey || membership.status != "active" RETURN 1)
-    LET badPlacements = LENGTH(FOR relation IN collectionImages FILTER relation._key IN @placementKeys LET image = DOCUMENT(images, relation.imageKey) LET collection = DOCUMENT(collections, relation.collectionKey) LET addedBy = DOCUMENT(userOrganizations, relation.addedByKey) FILTER relation.scopeKey != @scopeKey || image == null || image.scopeKey != @scopeKey || image.deletedAt != null || collection == null || collection.scopeKey != @scopeKey || collection.deletedAt != null || addedBy == null || addedBy.organizationId != @organizationKey || addedBy.status != "active" RETURN 1)
-    LET shared = (FOR collectionKey IN @sharedCollectionKeys LET collection = DOCUMENT(collections, collectionKey) LET owners = (FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == collectionKey && member.role == "owner" RETURN member.memberKey) LET oscarRole = FIRST(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == collectionKey && member.memberKey == @oscarMembershipKey RETURN member.role) LET seededPlacementCount = LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.collectionKey == collectionKey && relation._key IN @placementKeys RETURN 1) LET placementCount = LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.collectionKey == collectionKey RETURN 1) LET coverValid = collection.coverImageKey != null && LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.collectionKey == collectionKey && relation.imageKey == collection.coverImageKey LET image = DOCUMENT(images, relation.imageKey) FILTER image != null && image.scopeKey == @scopeKey && image.deletedAt == null LIMIT 1 RETURN 1) == 1 RETURN { key: collectionKey, name: collection.name, ownerCount: LENGTH(owners), oscarRole, oscarIsOwner: @oscarMembershipKey IN owners, seededPlacementCount, placementCount, coverImageKey: collection.coverImageKey, coverValid })
+    LET ownerless = LENGTH(FOR collection IN collections FILTER collection.scopeKey == @scopeKey FILTER LENGTH(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == collection._key && member.role == "owner" RETURN 1) == 0 RETURN 1)
+    LET badReferences = LENGTH(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member._key IN @fixtureMemberKeys LET collection = DOCUMENT(collections, member.collectionKey) LET membership = DOCUMENT(userOrganizations, member.memberKey) FILTER collection == null || collection.scopeKey != @scopeKey || membership == null || membership.organizationId != @organizationKey || membership.status != "active" RETURN 1)
+    LET badPlacements = LENGTH(FOR relation IN collectionImages FILTER relation._key IN @placementKeys LET image = DOCUMENT(images, relation.imageKey) LET collection = DOCUMENT(collections, relation.collectionKey) LET addedBy = DOCUMENT(userOrganizations, relation.addedByKey) FILTER relation.scopeKey != @scopeKey || image == null || image.scopeKey != @scopeKey || collection == null || collection.scopeKey != @scopeKey || addedBy == null || addedBy.organizationId != @organizationKey || addedBy.status != "active" RETURN 1)
+    LET shared = (FOR collectionKey IN @sharedCollectionKeys LET collection = DOCUMENT(collections, collectionKey) LET owners = (FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == collectionKey && member.role == "owner" RETURN member.memberKey) LET oscarRole = FIRST(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == collectionKey && member.memberKey == @oscarMembershipKey RETURN member.role) LET seededPlacementCount = LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.collectionKey == collectionKey && relation._key IN @placementKeys RETURN 1) LET placementCount = LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.collectionKey == collectionKey RETURN 1) LET coverValid = collection.coverImageKey != null && LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.collectionKey == collectionKey && relation.imageKey == collection.coverImageKey LET image = DOCUMENT(images, relation.imageKey) FILTER image != null && image.scopeKey == @scopeKey LIMIT 1 RETURN 1) == 1 RETURN { key: collectionKey, name: collection.name, ownerCount: LENGTH(owners), oscarRole, oscarIsOwner: @oscarMembershipKey IN owners, seededPlacementCount, placementCount, coverImageKey: collection.coverImageKey, coverValid })
     LET shares = (FOR key IN @shareKeys LET share = DOCUMENT(shares, key) RETURN share)
     LET invites = (FOR key IN @inviteKeys LET invite = DOCUMENT(collectionInvites, key) RETURN invite)
     RETURN { ownerless, badReferences, badPlacements, shared, shares, invites }

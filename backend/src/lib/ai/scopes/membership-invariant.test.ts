@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
-import { reconcileOrganizationInheritedAgentMemberships, reconcileOrganizationScopeMemberships, scopeRoleForOrganizationRole } from './membership-invariant';
+import { reconcileOrganizationScopeMemberships, scopeRoleForOrganizationRole } from './membership-invariant';
 
 type OrganizationMembership = { key: string; organizationId: string; orgRole: string; status: string };
 type Scope = { key: string; organizationKey: string };
@@ -50,14 +50,6 @@ function fakeDatabase(input: {
 }
 
 describe('organization scope membership invariant', () => {
-  test('retains inherited agent grant reconciliation as internal infrastructure', async () => {
-    const source = await Bun.file(new URL('../tools/domain-execute-access-domains.ts', import.meta.url)).text();
-    expect(source).toContain('export async function syncOrganizationAgentMembers');
-    expect(source).toContain('inheritedGrantPlan');
-    expect(source).toContain("source: 'inherited'");
-    expect(source).not.toContain('executeAccessDomainTool');
-  });
-
   test('maps every organization role to the required scope role', () => {
     expect(['owner', 'admin', 'moderator', 'member', 'viewer'].map(scopeRoleForOrganizationRole))
       .toEqual(['owner', 'admin', 'moderator', 'viewer', 'viewer']);
@@ -143,49 +135,4 @@ describe('organization scope membership invariant', () => {
     expect(explicit).toMatchObject({ role: 'moderator', status: 'suspended', source: 'explicit' });
   });
 
-  test('reconciles inherited agent grants from effective hierarchical scope roles', async () => {
-    const organizationKey = newId();
-    const parentKey = newId();
-    const childKey = newId();
-    const scopeAgentKey = newId();
-    const ownerKey = newId();
-    const moderatorKey = newId();
-    const viewerKey = newId();
-    const staleGrantKey = newId();
-    const inserted: Array<Record<string, unknown>> = [];
-    const removed: string[] = [];
-    const data = {
-      memberships: [
-        { key: ownerKey, orgRole: 'owner' },
-        { key: moderatorKey, orgRole: 'member' },
-        { key: viewerKey, orgRole: 'viewer' },
-      ],
-      scopes: [{ key: parentKey, deletedAt: null }, { key: childKey, deletedAt: null }],
-      scopeMembers: [
-        { scopeKey: parentKey, userOrganizationKey: moderatorKey, role: 'moderator' },
-        { scopeKey: childKey, userOrganizationKey: viewerKey, role: 'viewer' },
-      ],
-      relations: [{ parentKey, childKey }],
-      scopeAgents: [{ key: scopeAgentKey, scopeKey: childKey, agentKey: newId(), minimumAccessRole: 'moderator' }],
-      inheritedGrants: [{ key: staleGrantKey, scopeAgentKey, userOrganizationKey: viewerKey }],
-    };
-    const database = {
-      transactionCalls: 0,
-      async atomic<T>(_collections: string[], operation: (database: any) => Promise<T>) { this.transactionCalls++; return operation(this); },
-      async query<T>(query: string, bindVars: Record<string, unknown> = {}) {
-        if (query.includes('RETURN {')) return { all: async () => [data] as T[] };
-        if (Array.isArray(bindVars.removed)) removed.push(...bindVars.removed as string[]);
-        if (Array.isArray(bindVars.documents)) inserted.push(...bindVars.documents as Array<Record<string, unknown>>);
-        return { all: async () => [] as T[] };
-      },
-    };
-
-    const result = await reconcileOrganizationInheritedAgentMemberships(organizationKey, database);
-
-    expect(result.removed).toEqual([staleGrantKey]);
-    expect(result.created.map(({ userOrganizationKey }) => userOrganizationKey).sort()).toEqual([moderatorKey, ownerKey].sort());
-    expect(inserted).toHaveLength(2);
-    expect(removed).toEqual([staleGrantKey]);
-    expect(database.transactionCalls).toBe(1);
-  });
 });

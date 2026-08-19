@@ -16,7 +16,7 @@ export const placeSchema = z.object({
   latitude: z.number().finite().min(-90).max(90), longitude: z.number().finite().min(-180).max(180),
   countryCode: placeCountryCodeSchema.optional(), country: z.string().trim().min(1).optional(), continent: z.string().trim().min(1).optional(),
   region: z.string().trim().min(1).optional(), city: z.string().trim().min(1).optional(), isWishlist: z.boolean().default(false),
-  isFavorite: z.boolean().default(false), embedding: rolloutEmbeddingSchema, deletedAt: z.string().datetime().nullable().default(null),
+  isFavorite: z.boolean().default(false), embedding: rolloutEmbeddingSchema,
   createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
 });
 export type Place = z.infer<typeof placeSchema>;
@@ -29,7 +29,7 @@ export const deletePlace = helpers.deleteById;
 export const upsertPlaceByKey = helpers.upsertByKey;
 export const getAllPlacesChunked = helpers.getAllChunked;
 export const listPlacesPage = helpers.listPage;
-export async function listPlacesByScope(scopeKey: string, includeDeleted = false): Promise<Place[]> {
-  const cursor = await db.query(aql`FOR place IN ${db.collection(PLACES_COLLECTION)} FILTER place.scopeKey == ${scopeKey} FILTER ${includeDeleted} || place.deletedAt == null SORT place.name ASC, place._key ASC RETURN place`);
+export async function listPlacesByScope(scopeKey: string): Promise<Place[]> {
+  const cursor = await db.query(aql`FOR place IN ${db.collection(PLACES_COLLECTION)} FILTER place.scopeKey == ${scopeKey} SORT place.name ASC, place._key ASC RETURN place`);
   return (await cursor.all()).map((place) => placeSchema.parse(withArangoKey(place)));
 }

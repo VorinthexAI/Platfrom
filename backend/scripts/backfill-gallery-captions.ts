@@ -45,7 +45,7 @@ while (true) {
       LET image = FIRST(
         FOR candidate IN images
           FILTER candidate.imageCaptionKey == caption._key && candidate.scopeKey == caption.scopeKey
-          SORT candidate.deletedAt == null DESC, candidate.createdAt ASC
+          SORT candidate.createdAt ASC
           LIMIT 1
           RETURN candidate
       )

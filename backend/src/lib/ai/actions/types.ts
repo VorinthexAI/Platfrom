@@ -9,8 +9,8 @@ export const ACTION_SLUGS = [
   'document-validate', 'storage-upload', 'document-extract', 'document-embed', 'document-insert', 'enhance', 'translate', 'caption-image', 'describe-visual-identity',
   'document-cleanup', 'document-summarize', 'document-topics',
 ] as const;
-export type ActionId = (typeof ACTION_SLUGS)[number] | (string & {});
-export const actionIdSchema = z.enum(ACTION_SLUGS) as z.ZodType<ActionId> & { options: typeof ACTION_SLUGS };
+export type ActionId = (typeof ACTION_SLUGS)[number];
+export const actionIdSchema = z.enum(ACTION_SLUGS);
 export function isValidActionIdFormat(id: string): boolean {
   return /^[a-z]+(?:-[a-z]+)*$/.test(id) && !DOT_NOTATION_PATTERN.test(id);
 }

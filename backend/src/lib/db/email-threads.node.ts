@@ -9,7 +9,7 @@ export const emailThreadSchema = z.object({
   priority: z.enum(['low', 'normal', 'high', 'urgent']), state: z.enum(['needs_action', 'waiting', 'informational', 'filtered', 'done']), lastMessageAt: z.string().datetime(),
   snippet: z.string().optional(), category: z.enum(['primary', 'updates', 'promotions', 'social', 'forums', 'other']).optional(), unread: z.boolean().optional(), starred: z.boolean().optional(), labels: z.array(z.string()).optional(),
   latestFrom: z.string().email().optional(), inInbox: z.boolean().optional(), isFavorite: z.boolean().default(false),
-  embedding: currentEmbeddingSchema, embeddingContentVersion: z.literal(2).optional(), deletedAt: z.string().datetime().nullable(), createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
+  embedding: currentEmbeddingSchema, embeddingContentVersion: z.literal(2).optional(), createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
 });
 export type EmailThread = z.infer<typeof emailThreadSchema>;
 export const emailThreadsEmbeddingFields = ['subject', 'summary', 'intent', 'action'] as const;

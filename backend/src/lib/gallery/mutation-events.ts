@@ -31,7 +31,6 @@ export const GALLERY_MUTATION_EVENTS = {
   uploadCompensated: { collection: ['image.changed', 'collection.content.changed', 'collection.index.changed'], user: ['image.changed'] },
   createSubject: { collection: [], user: ['subject.changed'] },
   deleteSubject: { collection: [], user: ['subject.changed'] },
-  restoreSubject: { collection: [], user: ['subject.changed'] },
   reconcileSubject: { collection: [], user: ['subject.changed'] },
   highlightChanged: { collection: ['highlight.changed'], user: [] },
 } as const satisfies Record<string, { collection: readonly AppEventSlug[]; user: readonly AppEventSlug[] }>;
@@ -62,7 +61,6 @@ export const GALLERY_CANONICAL_MUTATION_PUBLICATIONS = {
   transferCollectionImages: { events: ['transferCollectionImages'] },
   createSubject: { events: ['createSubject'] },
   deleteSubject: { events: ['deleteSubject'] },
-  restoreSubject: { events: ['restoreSubject'] },
   createHighlight: { events: ['highlightChanged'] },
   deleteHighlight: { events: ['highlightChanged'] },
 } as const satisfies Partial<Record<GalleryOperationName, { events: readonly GalleryMutationEventName[]; deferredEvents?: readonly GalleryMutationEventName[] }>>;

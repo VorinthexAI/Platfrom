@@ -47,7 +47,7 @@ test("guards confirmed favorite folder, document, and file deletion with title-o
   expect(source).toContain('notify("Can\'t delete favorite folder")');
   expect(source).toContain('notify(`Can\'t delete favorite ${target.extension ? "file" : "document"}`)');
   expect(source.indexOf("if (directFolder.isFavorite)")).toBeLessThan(source.indexOf("removeCachedContentFolder(queryClient, contentContext, parentKey, directFolder.key)"));
-  expect(source.indexOf("if (target.isFavorite)")).toBeLessThan(source.indexOf("await archiveContentSelection({ folderKeys: [], documentKeys: [target.key] })"));
+  expect(source.indexOf("if (target.isFavorite)")).toBeLessThan(source.indexOf("await hardDeleteContentSelection({ folderKeys: [], documentKeys: [target.key] })"));
   expect(source).not.toContain('showToast({ title, description:');
   expect(source).not.toContain('message.startsWith("Unfavorite")');
 });
@@ -55,7 +55,7 @@ test("guards confirmed favorite folder, document, and file deletion with title-o
 test("partitions bulk favorites before normalization and mutation while retaining them", () => {
   const partition = source.indexOf("partitionFavoriteContentSelection(selectedFoldersSnapshot, selectedDocumentsSnapshot)");
   const normalize = source.indexOf("resolveStructuralResources(eligibleFolders, eligibleDocuments)");
-  const mutation = source.indexOf("archiveContentSelection(operationSelection)");
+  const mutation = source.indexOf("hardDeleteContentSelection(operationSelection)");
   expect(partition).toBeGreaterThan(-1);
   expect(partition).toBeLessThan(normalize);
   expect(normalize).toBeLessThan(mutation);

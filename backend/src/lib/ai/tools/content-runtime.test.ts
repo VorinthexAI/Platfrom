@@ -35,17 +35,15 @@ function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
     async listShares(_scopeKey, keys, options = {}) {
       const at = options.at ?? new Date().toISOString();
       return [...shares.values()].filter((value) => keys.includes(value.documentKey)
-        && (options.includeArchived || !value.deletedAt)
         && (options.includeRevoked || !value.revokedAt)
         && (options.includeExpired || !value.expiresAt || value.expiresAt > at));
     },
-    async insertShare(value) { const share = { ...value, deletedAt: null }; shares.set(share.key, share); return share; },
+    async insertShare(value) { shares.set(value.key, value); return value; },
     async updateShare(key, patch) { const value = { ...shares.get(key), ...patch }; shares.set(key, value); return value; },
     async deleteShare(key) { shares.delete(key); },
     async getVersion(key) { return versions.get(key) ?? null; },
     async listVersions(_scopeKey, keys) { return [...versions.values()].filter((value) => keys.includes(value.documentKey)).sort((a, b) => b.version - a.version); },
-    async createVersion(value) { const version = { ...value, key: newId(), version: [...versions.values()].filter((item) => item.documentKey === value.documentKey).length + 1, deletedAt: null, createdAt: now }; versions.set(version.key, version); return version; },
-    async updateVersion(key, patch) { const value = { ...versions.get(key), ...patch }; versions.set(key, value); return value; },
+    async createVersion(value) { const version = { ...value, key: newId(), version: [...versions.values()].filter((item) => item.documentKey === value.documentKey).length + 1, createdAt: now }; versions.set(version.key, version); return version; },
     async deleteVersion(key) { versions.delete(key); },
     async listAudioVersions(_scopeKey, keys) { return [...audioVersions.values()].filter((value) => keys.includes(value.documentKey)).sort((a, b) => b.version - a.version); },
     async getAudioVersion(key) { return audioVersions.get(key) ?? null; },
@@ -80,14 +78,11 @@ function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
 }
 
 describe('Content runtime', () => {
-  test('preflights document ingestion scope role and active folder hierarchy', async () => {
+  test('preflights document ingestion scope role and folder hierarchy', async () => {
     const allowed = fixture('moderator');
     await expect(authorizeDocumentParseLocation({ scopeKey: allowed.scopeKey, folderKey: allowed.folderKey }, allowed.context, allowed.repository)).resolves.toBeUndefined();
     const denied = fixture('viewer');
     await expect(authorizeDocumentParseLocation({ scopeKey: denied.scopeKey, folderKey: denied.folderKey }, denied.context, denied.repository)).rejects.toMatchObject({ code: 'CONTENT_FORBIDDEN' });
-    const archived = fixture('moderator');
-    archived.folders.get(archived.folderKey).deletedAt = now;
-    await expect(authorizeDocumentParseLocation({ scopeKey: archived.scopeKey, folderKey: archived.folderKey }, archived.context, archived.repository)).rejects.toMatchObject({ code: 'FOLDER_ARCHIVED' });
   });
 
   test('creates one editable document from scanned pages, retains sources, and replays idempotently', async () => {
@@ -231,11 +226,11 @@ describe('Content runtime', () => {
 
   test('lists the complete active folder tree when descendants are requested', async () => {
     const f = fixture('viewer');
-    const child = newId(), leaf = newId(), archived = newId(), hidden = newId();
+    const child = newId(), leaf = newId(), pending = newId(), hidden = newId();
     f.folders.set(child, { key: child, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', embedding, createdAt: now, updatedAt: now });
     f.folders.set(leaf, { key: leaf, scopeKey: f.scopeKey, parentFolderKey: child, name: 'Leaf', embedding, createdAt: now, updatedAt: now });
-    f.folders.set(archived, { key: archived, scopeKey: f.scopeKey, name: 'Archived', embedding, deletedAt: now, createdAt: now, updatedAt: now });
-    f.folders.set(hidden, { key: hidden, scopeKey: f.scopeKey, parentFolderKey: archived, name: 'Hidden', embedding, createdAt: now, updatedAt: now });
+    f.folders.set(pending, { key: pending, scopeKey: f.scopeKey, name: 'Pending', embedding, _internalDeletion: { kind: 'folder', owner: newId(), startedAt: now }, createdAt: now, updatedAt: now });
+    f.folders.set(hidden, { key: hidden, scopeKey: f.scopeKey, parentFolderKey: pending, name: 'Hidden', embedding, createdAt: now, updatedAt: now });
 
     const direct = await runContentTool('folder.list', { scopeKey: f.scopeKey }, f.context, { repository: f.repository });
     const tree = await runContentTool('folder.list', { scopeKey: f.scopeKey, includeDescendants: true }, f.context, { repository: f.repository });
@@ -343,7 +338,7 @@ describe('Content runtime', () => {
   test('lists revoked and expired shares only when explicitly requested', async () => {
     const f = fixture('moderator');
     const documentKey = f.addDocument();
-    const base = { documentKey, scopeKey: f.scopeKey, permission: 'read', tokenHash: 'a'.repeat(64), deletedAt: null, createdAt: now, updatedAt: now };
+    const base = { documentKey, scopeKey: f.scopeKey, permission: 'read', tokenHash: 'a'.repeat(64), createdAt: now, updatedAt: now };
     const activeKey = newId(), revokedKey = newId(), expiredKey = newId();
     f.shares.set(activeKey, { ...base, key: activeKey, expiresAt: '2027-07-22T12:00:00.000Z' });
     f.shares.set(revokedKey, { ...base, key: revokedKey, revokedAt: now });
@@ -569,18 +564,6 @@ describe('Content runtime', () => {
     expect(output.results[0]).toMatchObject({ documentKey, extension: 'txt', matchedSource: { type: 'folder', key: f.folderKey } });
   });
 
-  test('search includes archived folder hierarchies only when explicitly requested', async () => {
-    const f = fixture('viewer');
-    const documentKey = f.addDocument('Archived roadmap');
-    f.folders.get(f.folderKey).deletedAt = now;
-    f.documents.get(documentKey).deletedAt = now;
-    f.repository.semanticSearch = async () => [{ score: 0.9, document: f.documents.get(documentKey) }];
-    const activeOnly = await runContentTool('document.search', { scopeKey: f.scopeKey, query: 'roadmap' }, f.context, { repository: f.repository, embed: async () => embedding });
-    expect(activeOnly.results).toEqual([]);
-    const archived = await runContentTool('document.search', { scopeKey: f.scopeKey, query: 'roadmap', filters: { includeArchived: true } }, f.context, { repository: f.repository, embed: async () => embedding });
-    expect(archived.results.map((item) => item.documentKey)).toEqual([documentKey]);
-  });
-
   test('embeds plain content before document update', async () => {
     const f = fixture('moderator');
     const documentKey = f.addDocument('Old body');
@@ -659,14 +642,14 @@ describe('Content runtime', () => {
     expect(chunkEmbeddings.map((value) => value[0])).toEqual([...chunkEmbeddings.keys()]);
   });
 
-  test('finds independently capped semantic neighbors and excludes inactive hierarchy and the source', async () => {
+  test('finds independently capped semantic neighbors and excludes pending deletion hierarchy and the source', async () => {
     const f = fixture('viewer');
     const activeFolderKey = newId();
-    const archivedParentKey = newId();
+    const pendingParentKey = newId();
     const inactiveChildKey = newId();
     f.folders.set(activeFolderKey, { key: activeFolderKey, scopeKey: f.scopeKey, name: 'Related', embedding, createdAt: now, updatedAt: now });
-    f.folders.set(archivedParentKey, { key: archivedParentKey, scopeKey: f.scopeKey, name: 'Archived', embedding, deletedAt: now, createdAt: now, updatedAt: now });
-    f.folders.set(inactiveChildKey, { key: inactiveChildKey, scopeKey: f.scopeKey, parentFolderKey: archivedParentKey, name: 'Hidden child', embedding, createdAt: now, updatedAt: now });
+    f.folders.set(pendingParentKey, { key: pendingParentKey, scopeKey: f.scopeKey, name: 'Pending', embedding, _internalDeletion: { kind: 'folder', owner: newId(), startedAt: now }, createdAt: now, updatedAt: now });
+    f.folders.set(inactiveChildKey, { key: inactiveChildKey, scopeKey: f.scopeKey, parentFolderKey: pendingParentKey, name: 'Hidden child', embedding, createdAt: now, updatedAt: now });
     const documentKey = f.addDocument('Related note');
     delete f.documents.get(documentKey).extension;
     const fileKey = f.addDocument('Related file');
@@ -688,13 +671,13 @@ describe('Content runtime', () => {
     expect(result.files.map((document) => document.key)).toEqual([fileKey]);
     expect(semanticInput).toMatchObject({ scopeKey: f.scopeKey, sourceFolderKey: f.folderKey, limit: 10 });
     expect(semanticInput.activeFolderKeys).toContain(activeFolderKey);
-    expect(semanticInput.activeFolderKeys).not.toContain(archivedParentKey);
+    expect(semanticInput.activeFolderKeys).not.toContain(pendingParentKey);
     expect(semanticInput.activeFolderKeys).not.toContain(inactiveChildKey);
 
     f.documents.get(fileKey).embedding = undefined;
     await expect(runContentTool('content.neighbors', { documentKey: fileKey }, f.context, { repository: f.repository })).rejects.toMatchObject({ code: 'CONTENT_CONFLICT' });
-    f.folders.get(f.folderKey).deletedAt = now;
-    await expect(runContentTool('content.neighbors', { folderKey: f.folderKey }, f.context, { repository: f.repository })).rejects.toMatchObject({ code: 'FOLDER_ARCHIVED' });
+    f.folders.get(f.folderKey)._internalDeletion = { kind: 'folder', owner: newId(), startedAt: now };
+    await expect(runContentTool('content.neighbors', { folderKey: f.folderKey }, f.context, { repository: f.repository })).rejects.toMatchObject({ code: 'CONTENT_NOT_FOUND' });
   });
 
   test('searches folders and chunk-aware documents with caps, summaries, cache, auth, and global user history', async () => {
@@ -826,12 +809,12 @@ describe('Content runtime', () => {
     expect(replay.cached).toBe(true);
   });
 
-  test('excludes semantic matches below archived folder ancestors before summary generation', async () => {
+  test('excludes semantic matches below pending deletion folder ancestors before summary generation', async () => {
     const f = fixture('viewer');
-    const archivedParentKey = newId();
+    const pendingParentKey = newId();
     const childKey = newId();
-    f.folders.set(archivedParentKey, { key: archivedParentKey, scopeKey: f.scopeKey, name: 'Archived', embedding, deletedAt: now, createdAt: now, updatedAt: now });
-    f.folders.set(childKey, { key: childKey, scopeKey: f.scopeKey, parentFolderKey: archivedParentKey, name: 'Hidden child', embedding, createdAt: now, updatedAt: now });
+    f.folders.set(pendingParentKey, { key: pendingParentKey, scopeKey: f.scopeKey, name: 'Pending', embedding, _internalDeletion: { kind: 'folder', owner: newId(), startedAt: now }, createdAt: now, updatedAt: now });
+    f.folders.set(childKey, { key: childKey, scopeKey: f.scopeKey, parentFolderKey: pendingParentKey, name: 'Hidden child', embedding, createdAt: now, updatedAt: now });
     const documentKey = f.addDocument('Hidden content');
     f.documents.get(documentKey).folderKey = childKey;
     f.repository.semanticSearchFolders = async () => [{ score: 0.9, folder: f.folders.get(childKey) }];
@@ -1253,302 +1236,29 @@ describe('Content runtime', () => {
     expect(output.summary).toEqual({ requested: 2, succeeded: 2, failed: 0 });
   });
 
-  test('orders subtree document and folder lifecycle updates around active destination guards', async () => {
-    const f = fixture('moderator');
-    const child = newId();
-    f.folders.set(child, { key: child, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', embedding, createdAt: now, updatedAt: now });
-    const documentKey = f.addDocument();
-    f.documents.get(documentKey).folderKey = child;
-    const updates: string[] = [];
-    const updateFolder = f.repository.updateFolder.bind(f.repository);
-    const updateDocument = f.repository.updateDocument.bind(f.repository);
-    f.repository.updateFolder = async (key, patch) => { updates.push(`folder:${key}`); return updateFolder(key, patch); };
-    f.repository.updateDocument = async (key, patch) => {
-      const document = f.documents.get(key);
-      if (document?.folderKey && f.folders.get(document.folderKey)?.deletedAt) throw new Error('document destination folder is archived');
-      updates.push(`document:${key}`);
-      return updateDocument(key, patch);
-    };
-    await runContentTool('folder.archive', { folderKeys: [f.folderKey], includeDescendants: true }, f.context, { repository: f.repository, clock: () => new Date(now) });
-    expect(f.folders.get(child).deletedAt).toBe(now);
-    expect(f.documents.get(documentKey).deletedAt).toBe(now);
-    expect(updates).toEqual([`document:${documentKey}`, `folder:${f.folderKey}`, `folder:${child}`]);
-    updates.length = 0;
-    await runContentTool('folder.restore', { folderKeys: [f.folderKey], includeDescendants: true }, f.context, { repository: f.repository, clock: () => new Date(now) });
-    expect(f.folders.get(child).deletedAt).toBeNull();
-    expect(f.documents.get(documentKey).deletedAt).toBeNull();
-    expect(updates).toEqual([`folder:${f.folderKey}`, `folder:${child}`, `document:${documentKey}`]);
-  });
+  test('hard deletes active resources immediately while protecting favorites', async () => {
+    const favoriteDocument = fixture('owner');
+    const favoriteDocumentKey = favoriteDocument.addDocument();
+    favoriteDocument.documents.get(favoriteDocumentKey).isFavorite = true;
+    const storage: any = { async upload() { return { storageKey: '' }; }, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; }, async delete() {} };
+    const blockedDocument = await runContentTool('document.delete', { documentKeys: [favoriteDocumentKey] }, favoriteDocument.context, { repository: favoriteDocument.repository, storage });
+    expect(blockedDocument.results[0]).toMatchObject({ success: false, error: { code: 'CONTENT_CONFLICT' } });
 
-  test('protects favorite folders and documents from archive without partial subtree mutation', async () => {
-    const rootFavorite = fixture('moderator');
-    rootFavorite.folders.get(rootFavorite.folderKey).isFavorite = true;
-    const rootResult = await runContentTool('folder.archive', { folderKeys: [rootFavorite.folderKey], includeDescendants: true }, rootFavorite.context, { repository: rootFavorite.repository, clock: () => new Date(now) });
-    expect(rootResult.results[0]).toMatchObject({ success: false, error: { code: 'CONTENT_CONFLICT' } });
-    expect(rootFavorite.folders.get(rootFavorite.folderKey).deletedAt).toBeUndefined();
+    const activeDocument = fixture('owner');
+    const activeDocumentKey = activeDocument.addDocument();
+    const deletedDocument = await runContentTool('document.delete', { documentKeys: [activeDocumentKey] }, activeDocument.context, { repository: activeDocument.repository, storage });
+    expect(deletedDocument.results[0]).toMatchObject({ success: true });
+    expect(activeDocument.documents.has(activeDocumentKey)).toBe(false);
 
-    for (const favoriteKind of ['folder', 'document'] as const) {
-      const subtree = fixture('moderator');
-      const childKey = newId();
-      subtree.folders.set(childKey, { key: childKey, scopeKey: subtree.scopeKey, parentFolderKey: subtree.folderKey, name: 'Child', embedding, isFavorite: favoriteKind === 'folder', createdAt: now, updatedAt: now });
-      const documentKey = subtree.addDocument();
-      subtree.documents.get(documentKey).folderKey = childKey;
-      subtree.documents.get(documentKey).isFavorite = favoriteKind === 'document';
-      const result = await runContentTool('folder.archive', { folderKeys: [subtree.folderKey], includeDescendants: true }, subtree.context, { repository: subtree.repository, clock: () => new Date(now) });
-      expect(result.results[0]).toMatchObject({ success: false, error: { code: 'CONTENT_CONFLICT' } });
-      expect(subtree.folders.get(subtree.folderKey).deletedAt).toBeUndefined();
-      expect(subtree.folders.get(childKey).deletedAt).toBeUndefined();
-      expect(subtree.documents.get(documentKey).deletedAt).toBeUndefined();
-    }
-
-    const favoriteDocument = fixture('moderator');
-    const documentKey = favoriteDocument.addDocument();
-    favoriteDocument.documents.get(documentKey).isFavorite = true;
-    const documentResult = await runContentTool('document.archive', { documentKeys: [documentKey] }, favoriteDocument.context, { repository: favoriteDocument.repository, clock: () => new Date(now) });
-    expect(documentResult.results[0]).toMatchObject({ success: false, error: { code: 'CONTENT_CONFLICT' } });
-    expect(favoriteDocument.documents.get(documentKey).deletedAt).toBeUndefined();
-  });
-
-  test('partially archives separate non-favorite roots and allows favorite restores', async () => {
-    const f = fixture('moderator');
-    const otherKey = newId();
-    f.folders.get(f.folderKey).isFavorite = true;
-    f.folders.set(otherKey, { key: otherKey, scopeKey: f.scopeKey, name: 'Other', embedding, isFavorite: false, createdAt: now, updatedAt: now });
-    const result = await runContentTool('folder.archive', { folderKeys: [f.folderKey, otherKey] }, f.context, { repository: f.repository, clock: () => new Date(now) });
-    expect(result.results.map((item) => item.success)).toEqual([false, true]);
-    expect(f.folders.get(f.folderKey).deletedAt).toBeUndefined();
-    expect(f.folders.get(otherKey).deletedAt).toBe(now);
-
-    const documentKey = f.addDocument();
-    f.documents.get(documentKey).isFavorite = true;
-    f.documents.get(documentKey).deletedAt = now;
-    const restored = await runContentTool('document.restore', { documentKeys: [documentKey] }, f.context, { repository: f.repository, clock: () => new Date(now) });
-    expect(restored.results[0]).toMatchObject({ success: true, data: { document: { isFavorite: true, deletedAt: null } } });
-  });
-
-  test('runs version and share lifecycle tools with canonical authorization and parent guards', async () => {
-    const f = fixture('admin');
-    const documentKey = f.addDocument('Lifecycle source');
-    const document = f.documents.get(documentKey);
-    const version = await f.repository.createVersion({ scopeKey: f.scopeKey, documentKey, content: document.content, embedding: document.embedding });
-    const shareKey = newId();
-    f.shares.set(shareKey, { key: shareKey, scopeKey: f.scopeKey, documentKey, permission: 'read', tokenHash: 'a'.repeat(64), deletedAt: null, createdAt: now, updatedAt: now });
-
-    expect((await runContentTool('document-version.archive', { versionKeys: [version.key] }, f.context, { repository: f.repository, clock: () => new Date(now) })).summary.failed).toBe(0);
-    expect((await runContentTool('document-share.archive', { shareKeys: [shareKey] }, f.context, { repository: f.repository, clock: () => new Date(now) })).summary.failed).toBe(0);
-    expect(f.versions.get(version.key).deletedAt).toBe(now);
-    expect(f.shares.get(shareKey).deletedAt).toBe(now);
-
-    document.deletedAt = now;
-    expect((await runContentTool('document-version.restore', { versionKeys: [version.key] }, f.context, { repository: f.repository })).results[0]).toMatchObject({ success: false, error: { code: 'DOCUMENT_ARCHIVED' } });
-    expect((await runContentTool('document-share.restore', { shareKeys: [shareKey] }, f.context, { repository: f.repository })).results[0]).toMatchObject({ success: false, error: { code: 'DOCUMENT_ARCHIVED' } });
-
-    const moderator = fixture('moderator');
-    const moderatorDocumentKey = moderator.addDocument('Denied lifecycle source');
-    const moderatorDocument = moderator.documents.get(moderatorDocumentKey);
-    const moderatorVersion = await moderator.repository.createVersion({ scopeKey: moderator.scopeKey, documentKey: moderatorDocumentKey, content: moderatorDocument.content, embedding: moderatorDocument.embedding });
-    expect((await runContentTool('document-version.archive', { versionKeys: [moderatorVersion.key] }, moderator.context, { repository: moderator.repository })).results[0]).toMatchObject({ success: false, error: { code: 'CONTENT_FORBIDDEN' } });
-  });
-
-  test('does not restore a share or version when its owner becomes inactive after preflight', async () => {
-    for (const [tool, ownerChange, expectedCode] of [
-      ['document-share.restore', { deletedAt: now }, 'DOCUMENT_ARCHIVED'],
-      ['document-version.restore', { _internalDeletion: { kind: 'document', owner: newId(), startedAt: now } }, 'CONTENT_NOT_FOUND'],
-    ] as const) {
-      const f = fixture('admin');
-      const documentKey = f.addDocument('Lifecycle race source');
-      const childKey = newId();
-      if (tool === 'document-share.restore') {
-        f.shares.set(childKey, { key: childKey, scopeKey: f.scopeKey, documentKey, permission: 'read', tokenHash: 'a'.repeat(64), deletedAt: now, createdAt: now, updatedAt: now });
-      } else {
-        f.versions.set(childKey, { key: childKey, scopeKey: f.scopeKey, documentKey, version: 1, content: 'Archived', embedding, deletedAt: now, createdAt: now });
-      }
-      f.repository.transaction = async (operation) => {
-        Object.assign(f.documents.get(documentKey), ownerChange);
-        const bound = {
-          ...f.repository,
-          async updateShare(key: string, patch: any) {
-            const owner = f.documents.get(f.shares.get(key)?.documentKey);
-            if (patch.deletedAt === null && (owner?.deletedAt || owner?._internalDeletion)) throw new Error('Share owner is inactive.');
-            return f.repository.updateShare(key, patch);
-          },
-          async updateVersion(key: string, patch: any) {
-            const owner = f.documents.get(f.versions.get(key)?.documentKey);
-            if (patch.deletedAt === null && (owner?.deletedAt || owner?._internalDeletion)) throw new Error('Version owner is inactive.');
-            return f.repository.updateVersion(key, patch);
-          },
-        };
-        return operation(bound);
-      };
-
-      const input = tool === 'document-share.restore' ? { shareKeys: [childKey], atomic: true } : { versionKeys: [childKey], atomic: true };
-      await expect(runContentTool(tool, input, f.context, { repository: f.repository })).rejects.toMatchObject({ code: expectedCode });
-      expect((tool === 'document-share.restore' ? f.shares : f.versions).get(childKey).deletedAt).toBe(now);
-    }
-  });
-
-  test('does not archive or restore shares and versions when the scope role is revoked after preflight', async () => {
-    for (const tool of ['document-share.archive', 'document-share.restore', 'document-version.archive', 'document-version.restore'] as const) {
-      const f = fixture('moderator');
-      const documentKey = f.addDocument('Lifecycle authorization race');
-      const childKey = newId();
-      const restore = tool.endsWith('.restore');
-      const deletedAt = restore ? now : null;
-      if (tool.startsWith('document-share')) {
-        f.shares.set(childKey, { key: childKey, scopeKey: f.scopeKey, documentKey, permission: 'read', tokenHash: 'a'.repeat(64), deletedAt, createdAt: now, updatedAt: now });
-      } else {
-        f.versions.set(childKey, { key: childKey, scopeKey: f.scopeKey, documentKey, version: 1, content: 'Version', embedding, deletedAt, createdAt: now });
-      }
-      f.repository.role = async () => 'admin';
-      let boundScopeReads = 0;
-      let boundRoleReads = 0;
-      let mutationCalls = 0;
-      f.repository.transaction = async (operation) => operation({
-        ...f.repository,
-        async getScope(key: string) { boundScopeReads += 1; return f.repository.getScope(key); },
-        async role() { boundRoleReads += 1; return null; },
-        async updateShare(key: string, patch: any) { mutationCalls += 1; return f.repository.updateShare(key, patch); },
-        async updateVersion(key: string, patch: any) { mutationCalls += 1; return f.repository.updateVersion(key, patch); },
-      });
-
-      const input = tool.startsWith('document-share') ? { shareKeys: [childKey], atomic: true } : { versionKeys: [childKey], atomic: true };
-      await expect(runContentTool(tool, input, f.context, { repository: f.repository, clock: () => new Date(now) })).rejects.toMatchObject({ code: 'CONTENT_FORBIDDEN', resourceKey: childKey });
-      expect(boundScopeReads).toBe(1);
-      expect(boundRoleReads).toBe(1);
-      expect(mutationCalls).toBe(0);
-      expect((tool.startsWith('document-share') ? f.shares : f.versions).get(childKey).deletedAt).toBe(deletedAt);
-    }
-  });
-
-  test('isolates non-atomic share and version lifecycle items from role and scope revocation races', async () => {
-    for (const tool of ['document-share.archive', 'document-share.restore', 'document-version.archive', 'document-version.restore'] as const) {
-      for (const revocation of ['role', 'scope'] as const) {
-        const f = fixture('moderator');
-        const restore = tool.endsWith('.restore');
-        const childKeys = [f.addDocument('Raced lifecycle item'), f.addDocument('Independent lifecycle item')].map((documentKey) => {
-          const childKey = newId();
-          if (tool.startsWith('document-share')) {
-            f.shares.set(childKey, { key: childKey, scopeKey: f.scopeKey, documentKey, permission: 'read', tokenHash: 'a'.repeat(64), deletedAt: restore ? now : null, createdAt: now, updatedAt: now });
-          } else {
-            f.versions.set(childKey, { key: childKey, scopeKey: f.scopeKey, documentKey, version: 1, content: 'Version', embedding, deletedAt: restore ? now : null, createdAt: now });
-          }
-          return childKey;
-        });
-        f.repository.role = async () => 'admin';
-        let transactionCalls = 0;
-        let racedMutationCalls = 0;
-        f.repository.transaction = async (operation) => {
-          transactionCalls += 1;
-          if (transactionCalls > 1) return operation(f.repository);
-          return operation({
-            ...f.repository,
-            async getScope(key: string) {
-              const scope = await f.repository.getScope(key);
-              return revocation === 'scope' && scope ? { ...scope, deletedAt: now } : scope;
-            },
-            async role() { return revocation === 'role' ? null : 'admin'; },
-            async updateShare(key: string, patch: any) { racedMutationCalls += 1; return f.repository.updateShare(key, patch); },
-            async updateVersion(key: string, patch: any) { racedMutationCalls += 1; return f.repository.updateVersion(key, patch); },
-          });
-        };
-
-        const input = tool.startsWith('document-share') ? { shareKeys: childKeys } : { versionKeys: childKeys };
-        const result = await runContentTool(tool, input, f.context, { repository: f.repository, clock: () => new Date(now) });
-        const records = tool.startsWith('document-share') ? f.shares : f.versions;
-        expect(result.results).toMatchObject([
-          { key: childKeys[0], success: false, error: { code: 'CONTENT_FORBIDDEN' } },
-          { key: childKeys[1], success: true },
-        ]);
-        expect(result.summary).toEqual({ requested: 2, succeeded: 1, failed: 1 });
-        expect(transactionCalls).toBe(2);
-        expect(racedMutationCalls).toBe(0);
-        expect(records.get(childKeys[0]).deletedAt).toBe(restore ? now : null);
-        expect(records.get(childKeys[1]).deletedAt).toBe(restore ? null : now);
-      }
-    }
-  });
-
-  test('rechecks restore parents through the transaction-bound repository', async () => {
-    for (const tool of ['folder.restore', 'document.restore'] as const) {
-      const f = fixture('moderator');
-      const parentKey = f.folderKey;
-      const childFolderKey = newId();
-      f.folders.set(childFolderKey, { key: childFolderKey, scopeKey: f.scopeKey, parentFolderKey: parentKey, name: 'Child', embedding, deletedAt: now, createdAt: now, updatedAt: now });
-      const documentKey = f.addDocument();
-      f.documents.get(documentKey).folderKey = childFolderKey;
-      f.documents.get(documentKey).deletedAt = now;
-      f.repository.transaction = async (operation) => {
-        f.folders.get(parentKey).deletedAt = now;
-        return operation(f.repository);
-      };
-
-      const input = tool === 'folder.restore' ? { folderKeys: [childFolderKey], atomic: true } : { documentKeys: [documentKey], atomic: true };
-      await expect(runContentTool(tool, input, f.context, { repository: f.repository })).rejects.toMatchObject({ code: 'FOLDER_ARCHIVED' });
-      expect(tool === 'folder.restore' ? f.folders.get(childFolderKey).deletedAt : f.documents.get(documentKey).deletedAt).toBe(now);
-    }
-  });
-
-  test('rolls back one non-atomic archive root when a subtree update fails', async () => {
-    const f = fixture('moderator');
-    const childKey = newId();
-    f.folders.set(childKey, { key: childKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', embedding, isFavorite: false, createdAt: now, updatedAt: now });
-    const documentKey = f.addDocument();
-    f.documents.get(documentKey).folderKey = childKey;
-    const updateFolder = f.repository.updateFolder.bind(f.repository);
-    f.repository.updateFolder = async (key, patch) => {
-      const updated = await updateFolder(key, patch);
-      if (key === childKey) throw new Error('injected subtree failure');
-      return updated;
-    };
-    f.repository.transaction = async (operation) => {
-      const folderSnapshot = new Map([...f.folders].map(([key, value]) => [key, { ...value }]));
-      const documentSnapshot = new Map([...f.documents].map(([key, value]) => [key, { ...value }]));
-      try {
-        return await operation(f.repository);
-      } catch (error) {
-        f.folders.clear();
-        f.documents.clear();
-        for (const [key, value] of folderSnapshot) f.folders.set(key, value);
-        for (const [key, value] of documentSnapshot) f.documents.set(key, value);
-        throw error;
-      }
-    };
-    const result = await runContentTool('folder.archive', { folderKeys: [f.folderKey], includeDescendants: true }, f.context, { repository: f.repository, clock: () => new Date(now) });
-    expect(result.results[0]?.success).toBe(false);
-    expect(f.folders.get(f.folderKey).deletedAt).toBeUndefined();
-    expect(f.folders.get(childKey).deletedAt).toBeUndefined();
-    expect(f.documents.get(documentKey).deletedAt).toBeUndefined();
-  });
-
-  test('rechecks favorites after entering each non-atomic archive transaction', async () => {
-    const f = fixture('moderator');
-    const childKey = newId();
-    f.folders.set(childKey, { key: childKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', embedding, isFavorite: false, createdAt: now, updatedAt: now });
-    f.repository.transaction = async (operation) => {
-      f.folders.get(childKey).isFavorite = true;
-      return operation(f.repository);
-    };
-    const result = await runContentTool('folder.archive', { folderKeys: [f.folderKey], includeDescendants: true }, f.context, { repository: f.repository, clock: () => new Date(now) });
-    expect(result.results[0]).toMatchObject({ success: false, error: { code: 'CONTENT_CONFLICT' } });
-    expect(f.folders.get(f.folderKey).deletedAt).toBeUndefined();
-    expect(f.folders.get(childKey).isFavorite).toBe(true);
-    expect(f.folders.get(childKey).deletedAt).toBeUndefined();
-
-    const documentFixture = fixture('moderator');
-    const documentKey = documentFixture.addDocument();
-    documentFixture.repository.transaction = async (operation) => {
-      documentFixture.documents.get(documentKey).isFavorite = true;
-      return operation(documentFixture.repository);
-    };
-    const documentResult = await runContentTool('document.archive', { documentKeys: [documentKey] }, documentFixture.context, { repository: documentFixture.repository, clock: () => new Date(now) });
-    expect(documentResult.results[0]).toMatchObject({ success: false, error: { code: 'CONTENT_CONFLICT' } });
-    expect(documentFixture.documents.get(documentKey).deletedAt).toBeUndefined();
+    const favoriteFolder = fixture('owner');
+    favoriteFolder.folders.get(favoriteFolder.folderKey).isFavorite = true;
+    const blockedFolder = await runContentTool('folder.delete', { folderKeys: [favoriteFolder.folderKey] }, favoriteFolder.context, { repository: favoriteFolder.repository, storage });
+    expect(blockedFolder.results[0]).toMatchObject({ success: false, error: { code: 'CONTENT_CONFLICT' } });
   });
 
   test('deletes storage before transaction-bound document metadata and retains pointers on failure', async () => {
     const f = fixture('owner');
     const documentKey = f.addDocument();
-    f.documents.get(documentKey).deletedAt = now;
     f.documents.get(documentKey).speechStorageKeys = ['speech/shared', 'speech/second'];
     const version = await f.repository.createVersion({
       scopeKey: f.scopeKey, documentKey, content: 'old', embedding,
@@ -1561,13 +1271,13 @@ describe('Content runtime', () => {
     const originalDelete = f.repository.deleteDocument;
     f.repository.deleteDocument = async (key) => { calls.push('metadata'); await originalDelete(key); };
     const storage: any = { async upload() { return { storageKey: '' }; }, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; }, async delete() { calls.push('storage'); throw new Error('offline'); } };
-    const failed = await runContentTool('document.delete', { documentKeys: [documentKey], deleteVersions: true, deleteShares: true }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
+    const failed = await runContentTool('document.delete', { documentKeys: [documentKey] }, f.context, { repository: f.repository, storage });
     expect(failed.results[0]?.success).toBe(false);
     expect(calls).toEqual(['storage']);
     expect(f.documents.has(documentKey)).toBe(true);
     expect(f.versions.has(version.key)).toBe(true);
     storage.delete = async () => { calls.push('storage'); };
-    const deleted = await runContentTool('document.delete', { documentKeys: [documentKey], deleteVersions: true, deleteShares: true }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
+    const deleted = await runContentTool('document.delete', { documentKeys: [documentKey] }, f.context, { repository: f.repository, storage });
     expect(deleted.results[0]?.success).toBe(true);
     expect(calls.filter((call) => call === 'storage').length).toBe(6);
     expect(calls.at(-1)).toBe('metadata');
@@ -1580,7 +1290,6 @@ describe('Content runtime', () => {
   test('hides a pending document deletion after metadata commit failure and finishes on retry', async () => {
     const f = fixture('owner');
     const documentKey = f.addDocument();
-    f.documents.get(documentKey).deletedAt = now;
     const deleted: string[] = [];
     const storage: any = {
       async upload() { return { storageKey: '' }; },
@@ -1596,14 +1305,14 @@ describe('Content runtime', () => {
       return normalTransaction(operation);
     };
 
-    const failed = await runContentTool('document.delete', { documentKeys: [documentKey], deleteVersions: true, deleteShares: true }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
+    const failed = await runContentTool('document.delete', { documentKeys: [documentKey] }, f.context, { repository: f.repository, storage });
     expect(failed.results[0]?.success).toBe(false);
     expect(f.documents.get(documentKey)._internalDeletion).toMatchObject({ kind: 'document', objectKeys: [`docs/${documentKey}`] });
-    const inaccessible = await runContentTool('document.find', { documentKeys: [documentKey], includeArchived: true }, f.context, { repository: f.repository });
+    const inaccessible = await runContentTool('document.find', { documentKeys: [documentKey] }, f.context, { repository: f.repository });
     expect(inaccessible.results[0]).toMatchObject({ success: false, error: { code: 'CONTENT_NOT_FOUND' } });
 
     f.repository.transaction = normalTransaction;
-    const retried = await runContentTool('document.delete', { documentKeys: [documentKey], deleteVersions: true, deleteShares: true }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
+    const retried = await runContentTool('document.delete', { documentKeys: [documentKey] }, f.context, { repository: f.repository, storage });
     expect(retried.results[0]?.success).toBe(true);
     expect(f.documents.has(documentKey)).toBe(false);
     expect(deleted).toEqual([`docs/${documentKey}`, `docs/${documentKey}`]);
@@ -1612,11 +1321,10 @@ describe('Content runtime', () => {
   test('deletes logical version snapshots without storage side effects', async () => {
     const f = fixture('owner');
     const documentKey = f.addDocument();
-    f.documents.get(documentKey).deletedAt = now;
     const version = await f.repository.createVersion({ scopeKey: f.scopeKey, documentKey, content: 'old', embedding });
     let storageDeletes = 0;
     const storage: any = { async upload() { return { storageKey: '' }; }, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; }, async delete() { storageDeletes += 1; } };
-    const deleted = await runContentTool('document.delete-version', { versionKeys: [version.key] }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
+    const deleted = await runContentTool('document.delete-version', { versionKeys: [version.key] }, f.context, { repository: f.repository, storage });
     expect(deleted.results[0]?.success).toBe(true);
     expect(f.versions.has(version.key)).toBe(false);
     expect(f.documents.get(documentKey)._internalDeletion).toBeUndefined();
@@ -1626,11 +1334,13 @@ describe('Content runtime', () => {
   test('rejects descendant creation, sharing, versioning, move, and copy after a subtree freeze', async () => {
     const f = fixture('owner');
     const childKey = newId();
-    f.folders.set(childKey, { key: childKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', embedding, deletedAt: now, createdAt: now, updatedAt: now });
-    f.folders.get(f.folderKey).deletedAt = now;
+    f.folders.set(childKey, { key: childKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', embedding, createdAt: now, updatedAt: now });
     const doomedKey = f.addDocument('Doomed');
     f.documents.get(doomedKey).folderKey = childKey;
-    f.documents.get(doomedKey).deletedAt = now;
+    const deletionOwner = newId();
+    f.folders.get(f.folderKey)._internalDeletion = { kind: 'folder', owner: deletionOwner, folderKeys: [f.folderKey, childKey], documentKeys: [doomedKey], objectKeys: [], startedAt: now };
+    f.folders.get(childKey)._internalDeletion = { kind: 'folder', owner: deletionOwner, startedAt: now };
+    f.documents.get(doomedKey)._internalDeletion = { kind: 'document', owner: deletionOwner, objectKeys: [], startedAt: now };
     const doomedSummary = await f.repository.createSummary!({ key: newId(), scopeKey: f.scopeKey, documentKey: doomedKey, summary: 'Doomed summary', style: 'brief', sourceContentHash: 'a'.repeat(64), sourceTitle: 'Doomed', sourceDocumentUpdatedAt: now, createdByKey: newId(), createdAt: now });
     const doomedAudio = { key: newId(), scopeKey: f.scopeKey, documentKey: doomedKey, summaryKey: doomedSummary.key, storageKey: 'audio/doomed-summary.mp3', mimeType: 'audio/mpeg' as const, sizeBytes: 10, durationMs: 100, createdByKey: newId(), createdAt: now };
     f.summaryAudio.set(doomedAudio.key, doomedAudio);
@@ -1655,7 +1365,7 @@ describe('Content runtime', () => {
       return originalListVersions(...args);
     };
     const storage: any = { async upload() { return { storageKey: '' }; }, async download() { return { bytes: new Uint8Array() }; }, async copy() { throw new Error('copy must not reach storage'); }, async delete() {} };
-    const deleted = await runContentTool('folder.delete', { folderKeys: [f.folderKey], recursive: true }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
+    const deleted = await runContentTool('folder.delete', { folderKeys: [f.folderKey], recursive: true }, f.context, { repository: f.repository, storage });
     expect(deleted.results[0]?.success).toBe(true);
     expect(attempted).toHaveLength(4);
     expect(attempted.every((item) => item.success === false)).toBe(true);
@@ -1669,8 +1379,7 @@ describe('Content runtime', () => {
   test('resumes the persisted recursive folder deletion intent regardless of retry flags', async () => {
     const f = fixture('owner');
     const childKey = newId();
-    f.folders.set(childKey, { key: childKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', embedding, deletedAt: now, createdAt: now, updatedAt: now });
-    f.folders.get(f.folderKey).deletedAt = now;
+    f.folders.set(childKey, { key: childKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', embedding, createdAt: now, updatedAt: now });
     const normalTransaction = f.repository.transaction!;
     let transactions = 0;
     f.repository.transaction = async (operation) => {
@@ -1680,18 +1389,18 @@ describe('Content runtime', () => {
     };
     const storage: any = { async upload() { return { storageKey: '' }; }, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; }, async delete() {} };
 
-    const failed = await runContentTool('folder.delete', { folderKeys: [f.folderKey], recursive: true }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
+    const failed = await runContentTool('folder.delete', { folderKeys: [f.folderKey], recursive: true }, f.context, { repository: f.repository, storage });
     expect(failed.results[0]?.success).toBe(false);
     expect(f.folders.get(f.folderKey)._internalDeletion.folderKeys).toEqual([f.folderKey, childKey]);
 
     f.repository.transaction = normalTransaction;
-    const retried = await runContentTool('folder.delete', { folderKeys: [f.folderKey], recursive: false }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
+    const retried = await runContentTool('folder.delete', { folderKeys: [f.folderKey], recursive: false }, f.context, { repository: f.repository, storage });
     expect(retried.results[0]).toMatchObject({ success: true });
     expect(f.folders.has(f.folderKey)).toBe(false);
     expect(f.folders.has(childKey)).toBe(false);
   });
 
-  test('resumes an unarchived copy-compensation manifest without retention bypass for normal deletes', async () => {
+  test('resumes a copy-compensation deletion manifest', async () => {
     const f = fixture('owner');
     const documentKey = f.addDocument('Compensating copy');
     const owner = 'copy-compensation-owner';
@@ -1700,8 +1409,7 @@ describe('Content runtime', () => {
     f.documents.get(documentKey)._internalDeletion = { kind: 'document', owner, objectKeys, startedAt: now };
     const storageDeletes: string[] = [];
     const storage: any = { async upload() { return { storageKey: '' }; }, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; }, async delete(key: string) { storageDeletes.push(key); } };
-    let retentionChecks = 0;
-    const dependencies = { repository: f.repository, storage, canPermanentlyDelete: () => { retentionChecks += 1; return false; } };
+    const dependencies = { repository: f.repository, storage };
 
     await expect(runContentTool('folder.delete', { folderKeys: [f.folderKey], recursive: true, atomic: true }, f.context, dependencies)).rejects.toMatchObject({ code: 'CONTENT_CONFLICT', action: 'transaction', resourceKey: f.folderKey });
     expect(f.folders.has(f.folderKey)).toBe(true);
@@ -1710,7 +1418,6 @@ describe('Content runtime', () => {
 
     const resumed = await runContentTool('folder.delete', { folderKeys: [f.folderKey], recursive: true }, f.context, dependencies);
     expect(resumed.results[0]).toMatchObject({ success: true });
-    expect(retentionChecks).toBe(0);
     expect(storageDeletes).toEqual(objectKeys);
     expect(f.documents.has(documentKey)).toBe(false);
     expect(f.folders.has(f.folderKey)).toBe(false);
@@ -1780,22 +1487,6 @@ describe('Content runtime', () => {
     expect(seen.every((key) => key !== 'caller-key')).toBe(true);
   });
 
-  test('validates the full restore ancestor chain and rejects corrupt cycles before mutation', async () => {
-    const f = fixture('moderator');
-    const middle = newId(), leaf = newId(), documentKey = f.addDocument();
-    f.folders.set(middle, { key: middle, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Middle', deletedAt: now, embedding, createdAt: now, updatedAt: now });
-    f.folders.set(leaf, { key: leaf, scopeKey: f.scopeKey, parentFolderKey: middle, name: 'Leaf', embedding, createdAt: now, updatedAt: now });
-    f.documents.get(documentKey).folderKey = leaf;
-    f.documents.get(documentKey).deletedAt = now;
-    const blocked = await runContentTool('document.restore', { documentKeys: [documentKey] }, f.context, { repository: f.repository });
-    expect(blocked.results[0]).toMatchObject({ success: false, error: { code: 'FOLDER_ARCHIVED' } });
-    expect(f.documents.get(documentKey).deletedAt).toBe(now);
-    f.folders.get(f.folderKey).parentFolderKey = leaf;
-    const cycle = await runContentTool('document.restore', { documentKeys: [documentKey], restoreAncestors: true }, f.context, { repository: f.repository });
-    expect(cycle.results[0]).toMatchObject({ success: false, error: { code: 'FOLDER_CYCLE_DETECTED' } });
-    expect(f.documents.get(documentKey).deletedAt).toBe(now);
-  });
-
   test('keeps generated content out of observer payloads', async () => {
     const f = fixture('viewer');
     const documentKey = f.addDocument('Private source text');
@@ -1855,7 +1546,6 @@ describe('Content runtime', () => {
         embed: async () => embedding,
         ingestion: { embeddingDimensions: EMBEDDING_DIMENSIONS },
         clock: () => new Date(now),
-        canPermanentlyDelete: () => true,
         generateExport: async (input: any) => ({ bytes: new TextEncoder().encode(input.format), mimeType: 'text/plain', extension: input.format }),
         parseDocument: async () => ({ document: f.documents.get(documentKey) }),
         scanDocument: async () => ({ documentKey: newId(), content: 'Scanned body', storageKeys: ['scan/page-01.jpg'] }),
@@ -1888,9 +1578,7 @@ describe('Content runtime', () => {
       else if (name === 'folder.rename') input = { renames: [{ folderKey: childKey, name: 'Renamed' }] };
       else if (name === 'folder.move') input = { moves: [{ folderKey: childKey, targetParentFolderKey: siblingKey }] };
       else if (name === 'folder.copy') input = { copies: [{ folderKey: childKey, targetScopeKey: f.scopeKey, targetParentFolderKey: siblingKey }] };
-      else if (name === 'folder.archive') input = { folderKeys: [childKey] };
-      else if (name === 'folder.restore') { f.folders.get(childKey).deletedAt = now; input = { folderKeys: [childKey] }; }
-      else if (name === 'folder.delete') { f.folders.get(childKey).deletedAt = now; input = { folderKeys: [childKey] }; }
+      else if (name === 'folder.delete') input = { folderKeys: [childKey] };
       else if (name === 'document.parse') input = { file: { filename: 'notes.txt', mimeType: 'text/plain', sizeBytes: 4, bytes: new Uint8Array([1, 2, 3, 4]) }, scopeKey: f.scopeKey, folderKey: f.folderKey };
       else if (name === 'document.scan') input = { pages: [{ filename: 'page.jpg', mimeType: 'image/jpeg', sizeBytes: 4, bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]) }], scopeKey: f.scopeKey, folderKey: f.folderKey };
       else if (name === 'document.create') input = { scopeKey: f.scopeKey, folderKey: f.folderKey, name: 'Created document', content: 'Created body' };
@@ -1915,19 +1603,13 @@ describe('Content runtime', () => {
       else if (name === 'document.rename') input = { renames: [{ documentKey, name: 'Renamed' }] };
       else if (name === 'document.move') input = { moves: [{ documentKey, targetScopeKey: f.scopeKey, targetFolderKey: siblingKey }] };
       else if (name === 'document.copy') input = { copies: [{ documentKey, targetScopeKey: f.scopeKey, targetFolderKey: siblingKey }] };
-      else if (name === 'document.archive') input = { documentKeys: [documentKey] };
-      else if (name === 'document.restore') { f.documents.get(documentKey).deletedAt = now; input = { documentKeys: [documentKey] }; }
-      else if (name === 'document.delete') { f.documents.get(documentKey).deletedAt = now; input = { documentKeys: [documentKey], deleteVersions: true, deleteShares: true }; }
+      else if (name === 'document.delete') input = { documentKeys: [documentKey] };
       else if (name === 'document.download') input = { documentKeys: [documentKey], format: 'original' };
       else if (name === 'document.export') input = { exports: [{ documentKey, format: 'txt' }] };
       else if (name === 'document.share') input = { shares: [{ documentKey, permission: 'read' }] };
       else if (name === 'document.unshare') {
         const shareKey = newId();
         f.shares.set(shareKey, { key: shareKey, scopeKey: f.scopeKey, documentKey, permission: 'read', tokenHash: 'a'.repeat(64), createdAt: now, updatedAt: now });
-        input = { shareKeys: [shareKey] };
-      } else if (name === 'document-share.archive' || name === 'document-share.restore') {
-        const shareKey = newId();
-        f.shares.set(shareKey, { key: shareKey, scopeKey: f.scopeKey, documentKey, permission: 'read', tokenHash: 'a'.repeat(64), deletedAt: name.endsWith('.restore') ? now : null, createdAt: now, updatedAt: now });
         input = { shareKeys: [shareKey] };
       } else if (name === 'document.list-shares') input = { documentKeys: [documentKey] };
       else if (name === 'document.create-version') input = { documentKeys: [documentKey], labels: { [documentKey]: 'Release' } };
@@ -1937,12 +1619,7 @@ describe('Content runtime', () => {
         if (name === 'document.find-version') input = { versionKeys: [version.key] };
         else if (name === 'document.list-versions') input = { documentKeys: [documentKey] };
         else if (name === 'document.restore-version') input = { restores: [{ documentKey, versionKey: version.key }] };
-        else { current.deletedAt = now; input = { versionKeys: [version.key] }; }
-      } else if (name === 'document-version.archive' || name === 'document-version.restore') {
-        const current = f.documents.get(documentKey);
-        const version = await f.repository.createVersion({ scopeKey: f.scopeKey, documentKey, content: current.content, embedding: current.embedding });
-        if (name.endsWith('.restore')) version.deletedAt = now;
-        input = { versionKeys: [version.key] };
+        else input = { versionKeys: [version.key] };
       } else if (name === 'document.summarize') input = { documentKeys: [documentKey] };
       else if (name === 'document.topics') input = { documentKey };
       else if (name === 'document.enhance') input = { documentKeys: [documentKey] };
@@ -1977,16 +1654,6 @@ describe('Content runtime', () => {
           return runContentTool('document.read', { documentKeys: [newId()] }, f.context, { repository: f.repository });
         },
         codes: ['CONTENT_NOT_FOUND'],
-      },
-      {
-        label: 'archived ancestor',
-        run: async () => {
-          const f = fixture('viewer');
-          const documentKey = f.addDocument();
-          f.folders.get(f.folderKey).deletedAt = now;
-          return runContentTool('document.read', { documentKeys: [documentKey] }, f.context, { repository: f.repository });
-        },
-        codes: ['FOLDER_ARCHIVED'],
       },
       {
         label: 'partial ordered batch',

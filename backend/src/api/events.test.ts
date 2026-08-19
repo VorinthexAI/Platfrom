@@ -53,7 +53,6 @@ describe('app event routing', () => {
     const source = await Bun.file(new URL('./events.ts', import.meta.url)).text();
     expect(source).toContain('membership.organizationId == scope.organizationKey');
     expect(source).toContain('member.scopeKey == collection.scopeKey');
-    expect(source).toContain('collection.deletedAt == null');
     expect(source).toContain('membership.orgRole IN ["owner", "admin"]');
     expect(source).toContain('scopeRole IN ["owner", "admin", "moderator"]');
     expect(source).toContain('member.status == "active"');

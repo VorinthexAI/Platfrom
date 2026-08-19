@@ -13,7 +13,7 @@ export const imageSchema = z.object({
   width: z.number().int().positive(), height: z.number().int().positive(), embedding: currentEmbeddingSchema,
   imageCaptionKey: z.string().cuid().nullable().optional(), createdByKey: z.string().cuid().nullable().default(null),
   city: z.string().trim().min(1).max(200).nullable().optional(), country: z.string().trim().min(1).max(200).nullable().optional(), countryCode: z.string().trim().length(2).toUpperCase().nullable().optional(),
-  isFavorite: z.boolean().default(false), deletedAt: z.string().datetime().nullable().default(null), createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
+  isFavorite: z.boolean().default(false), createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
 });
 export type Image = z.infer<typeof imageSchema>;
 export const imagesEmbeddingFields = ['filename', 'caption'] as const;
@@ -25,14 +25,14 @@ export const upsertImageByKey = helpers.upsertByKey;
 export const getAllImagesChunked = helpers.getAllChunked;
 export const listImagesPage = helpers.listPage;
 
-export async function getImageInScope(scopeKey: string, imageKey: string, includeDeleted = false): Promise<Image | null> {
-  const cursor = await db.query(aql`FOR image IN ${db.collection(IMAGES_COLLECTION)} FILTER image._key == ${imageKey} && image.scopeKey == ${scopeKey} FILTER ${includeDeleted} || image.deletedAt == null LIMIT 1 RETURN image`);
+export async function getImageInScope(scopeKey: string, imageKey: string): Promise<Image | null> {
+  const cursor = await db.query(aql`FOR image IN ${db.collection(IMAGES_COLLECTION)} FILTER image._key == ${imageKey} && image.scopeKey == ${scopeKey} LIMIT 1 RETURN image`);
   const image = await cursor.next();
   return image ? imageSchema.parse(withArangoKey(image)) : null;
 }
 
-export async function listImagesByScope(scopeKey: string, includeDeleted = false): Promise<Image[]> {
-  const cursor = await db.query(aql`FOR image IN ${db.collection(IMAGES_COLLECTION)} FILTER image.scopeKey == ${scopeKey} FILTER ${includeDeleted} || image.deletedAt == null SORT image.createdAt DESC, image._key ASC RETURN image`);
+export async function listImagesByScope(scopeKey: string): Promise<Image[]> {
+  const cursor = await db.query(aql`FOR image IN ${db.collection(IMAGES_COLLECTION)} FILTER image.scopeKey == ${scopeKey} SORT image.createdAt DESC, image._key ASC RETURN image`);
   return (await cursor.all()).map((image) => imageSchema.parse(withArangoKey(image)));
 }
 

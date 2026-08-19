@@ -77,7 +77,7 @@ describe('personal assistant runtime', () => {
       'collection.member.role.update', 'collection.member.remove', 'collection.leave', 'collection.share.list', 'collection.share.create', 'collection.share.update', 'collection.share.revoke', 'collection.share.activate',
       'image.search', 'image.favorite', 'image.update', 'image.delete',
       'collection.duplicates.delete', 'collection.image.transfer', 'subject.list', 'subject.create',
-      'subject.image.list', 'subject.delete', 'subject.restore', 'highlight.create', 'highlight.list',
+      'subject.image.list', 'subject.delete', 'highlight.create', 'highlight.list',
       'highlight.read', 'highlight.delete', 'collection.hide', 'collection.reveal',
       'image.hide', 'image.reveal', 'assistant.unsupported',
     ]);

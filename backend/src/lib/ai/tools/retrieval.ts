@@ -85,11 +85,11 @@ export async function retrieveNodeDocuments(node: string, embedding: number[] | 
     LET viewerUserKey = membershipActive ? membership.userId : null
     LET privileged = membershipActive && membership.orgRole IN ["owner", "admin"]
     LET authorizedScopeKeys = !membershipActive ? [] : privileged ? (
-      FOR scope IN scopes FILTER scope.organizationKey == @organizationKey && scope.deletedAt == null RETURN scope._key
+      FOR scope IN scopes FILTER scope.organizationKey == @organizationKey RETURN scope._key
     ) : (
       FOR link IN scopeMembers
         FILTER link.userOrganizationKey == @membershipKey && link.status == "active"
-        FOR scope IN scopes FILTER scope._key == link.scopeKey && scope.organizationKey == @organizationKey && scope.deletedAt == null
+        FOR scope IN scopes FILTER scope._key == link.scopeKey && scope.organizationKey == @organizationKey
         RETURN scope._key
     )
     LET authorizedChannelKeys = !membershipActive ? [] : (
@@ -101,10 +101,9 @@ export async function retrieveNodeDocuments(node: string, embedding: number[] | 
     FOR document IN @@collection
       LET parentFolder = @hasFolderKey ? DOCUMENT(folders, document.folderKey) : null
       FILTER membershipActive
-      FILTER !@hasDeletedAt || document.deletedAt == null
       FILTER !@hasArchivedAt || document.archivedAt == null
       FILTER !@hasInternalDeletion || document._internalDeletion == null
-      FILTER !@hasFolderKey || ((!HAS(document, "folderKey") || document.folderKey == null) ? document.scopeKey IN authorizedScopeKeys : (parentFolder != null && parentFolder.scopeKey IN authorizedScopeKeys && parentFolder.deletedAt == null && parentFolder._internalDeletion == null))
+      FILTER !@hasFolderKey || ((!HAS(document, "folderKey") || document.folderKey == null) ? document.scopeKey IN authorizedScopeKeys : (parentFolder != null && parentFolder.scopeKey IN authorizedScopeKeys && parentFolder._internalDeletion == null))
       FILTER @access != "channel" || document.channelKey IN authorizedChannelKeys
       FILTER @access != "channel-self" || document._key IN authorizedChannelKeys
       FILTER @access != "scope" || document.scopeKey IN authorizedScopeKeys
@@ -145,7 +144,6 @@ export async function retrieveNodeDocuments(node: string, embedding: number[] | 
     dimensions: embedding?.length ?? 0,
     minimumScore: MINIMUM_SCORE,
     limit,
-    hasDeletedAt: has('deletedAt'),
     hasArchivedAt: has('archivedAt'),
     hasInternalDeletion: has('_internalDeletion'),
     hasFolderKey: has('folderKey'),

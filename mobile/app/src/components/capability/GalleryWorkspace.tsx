@@ -498,7 +498,7 @@ export function GalleryWorkspace() {
     const request = ++subjectsRequest.current;
     setIdentitiesLoading(true);
     try {
-      const loaded = (await listGallerySubjects(true)).subjects;
+      const loaded = (await listGallerySubjects()).subjects;
       if (request === subjectsRequest.current) setSubjects((current) => {
         const pending = current.filter(({ key }) => key.startsWith("optimistic-"));
         return [...pending, ...loaded.filter(({ key }) => !deletedIdentityKeys.current.has(key) && !pending.some((identity) => identity.key === key))];
@@ -1775,7 +1775,7 @@ export function GalleryWorkspace() {
     const optimisticKey = `optimistic-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const now = new Date().toISOString();
     setIdentityError(undefined);
-    const optimistic: GallerySubject = { key: optimisticKey, name, description: "Learning visual identity...", referenceImageKey: image.key, referenceUrl: image.url, imageCount: 1, deletedAt: null, createdAt: now, updatedAt: now };
+    const optimistic: GallerySubject = { key: optimisticKey, name, description: "Learning visual identity...", referenceImageKey: image.key, referenceUrl: image.url, imageCount: 1, createdAt: now, updatedAt: now };
     subjectsRequest.current += 1;
     setIdentitiesLoading(false);
     setSubjects((current) => [optimistic, ...current]);
@@ -2226,7 +2226,7 @@ export function GalleryWorkspace() {
 
       let refreshedSubjects = subjects;
       if (needsSubjects) {
-        const result = await queryClient.fetchQuery({ queryKey: galleryQueryKeys.subjects(galleryContext), queryFn: () => listGallerySubjects(true), staleTime: 0 });
+        const result = await queryClient.fetchQuery({ queryKey: galleryQueryKeys.subjects(galleryContext), queryFn: () => listGallerySubjects(), staleTime: 0 });
         if (!isCurrent()) return;
         refreshedSubjects = result.subjects;
         setSubjects(refreshedSubjects);
@@ -2355,7 +2355,7 @@ export function GalleryWorkspace() {
     }
   };
 
-  const activeSubjects = subjects.filter(({ deletedAt }) => deletedAt === null);
+  const activeSubjects = subjects;
   const sheetTitle = activeSheet === "rootActions" ? "New in Gallery"
     : activeSheet === "actions" ? `Add to ${activeCollection?.name ?? "Gallery"}`
     : activeSheet === "destination" ? "Choose destination"

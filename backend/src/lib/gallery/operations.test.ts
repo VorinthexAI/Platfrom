@@ -41,7 +41,6 @@ const validInputs = {
   createSubject: { name: 'Alex', imageKeys: [key()] },
   listSubjectImages: { identityKey: key() },
   deleteSubject: { identityKey: key() },
-  restoreSubject: { identityKey: key() },
   createHighlight: { collectionKey: key() },
   listHighlights: {},
   readHighlight: { highlightKey: key() },
@@ -53,7 +52,7 @@ describe('Gallery operation boundaries', () => {
     process.env.AWS_ACCESS_KEY_ID ??= 'test';
     process.env.AWS_SECRET_ACCESS_KEY ??= 'test';
     const createdByKey = key(), now = new Date().toISOString();
-    const image = imageSchema.parse({ key: key(), scopeKey: key(), filename: 'photo.jpg', caption: 'Photo.', imageCaptionKey: null, createdByKey, storageKey: 'gallery/photo.jpg', mimeType: 'image/jpeg', sizeBytes: 10, width: 10, height: 10, embedding: Array(4_096).fill(0), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now });
+    const image = imageSchema.parse({ key: key(), scopeKey: key(), filename: 'photo.jpg', caption: 'Photo.', imageCaptionKey: null, createdByKey, storageKey: 'gallery/photo.jpg', mimeType: 'image/jpeg', sizeBytes: 10, width: 10, height: 10, embedding: Array(4_096).fill(0), isFavorite: false, createdAt: now, updatedAt: now });
     expect(await safeImage(image)).toMatchObject({ key: image.key, createdByKey });
   });
 
@@ -96,7 +95,7 @@ describe('Gallery operation boundaries', () => {
     expect(galleryOperationInputSchemas.overview.parse({})).toEqual({ limit: 100 });
     expect(galleryOperationInputSchemas.createCollection.parse({ name: 'Summer' })).toEqual({ name: 'Summer', isFavorite: false });
     expect(() => galleryOperationInputSchemas.createCollection.parse({ name: 'Summer', description: 'Memories' })).toThrow();
-    expect(galleryOperationInputSchemas.listSubjects.parse({})).toEqual({ includeDeleted: false });
+    expect(galleryOperationInputSchemas.listSubjects.parse({})).toEqual({});
     expect(galleryOperationInputSchemas.search.parse({ query: 'mountains' })).toEqual({ query: 'mountains', recordHistory: true, limit: 50 });
     expect(galleryOperationInputSchemas.createShare.parse({ collectionKey: key(), role: 'viewer' })).toMatchObject({ active: true });
     expect(galleryOperationInputSchemas.createShare.parse({ collectionKey: key(), role: 'viewer', active: false })).toMatchObject({ active: false });
@@ -136,7 +135,7 @@ describe('Gallery operation boundaries', () => {
     expect(source).toContain('canCreateCollections,');
     expect(source).toContain('role, isOwned');
     const now = '2026-08-18T12:00:00.000Z';
-    const collection = { key: key(), scopeKey: key(), name: 'Shared', embedding: Array(4_096).fill(0), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now };
+    const collection = { key: key(), scopeKey: key(), name: 'Shared', embedding: Array(4_096).fill(0), isFavorite: false, createdAt: now, updatedAt: now };
     expect(projectGalleryCollection(collection, 0, null, key(), 'owner', false)).toMatchObject({ role: 'owner', isOwned: false, access: { canManage: true } });
   });
 
@@ -300,8 +299,8 @@ describe('Gallery operation boundaries', () => {
     process.env.AWS_ACCESS_KEY_ID ??= 'test';
     process.env.AWS_SECRET_ACCESS_KEY ??= 'test';
     const organizationKey = 'organization', scopeKey = key(), actorKey = key(), collectionKey = key(), highlightKey = key(), userId = key(), now = new Date().toISOString();
-    const visible = imageSchema.parse({ key: key(), scopeKey, filename: 'visible.jpg', caption: 'Visible', storageKey: 'private/visible.jpg', mimeType: 'image/jpeg', sizeBytes: 1, width: 1, height: 1, embedding: Array(4096).fill(0), createdByKey: actorKey, isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now });
-    const highlight = { key: highlightKey, scopeKey, collectionKey, imageKeys: [key(), visible.key, key()], createdByKey: actorKey, deletedAt: null, createdAt: now, updatedAt: now };
+    const visible = imageSchema.parse({ key: key(), scopeKey, filename: 'visible.jpg', caption: 'Visible', storageKey: 'private/visible.jpg', mimeType: 'image/jpeg', sizeBytes: 1, width: 1, height: 1, embedding: Array(4096).fill(0), createdByKey: actorKey, isFavorite: false, createdAt: now, updatedAt: now });
+    const highlight = { key: highlightKey, scopeKey, collectionKey, imageKeys: [key(), visible.key, key()], createdByKey: actorKey, createdAt: now, updatedAt: now };
     const context = { organizationKey, scopeKey, membership: { key: actorKey, organizationId: organizationKey, userId, status: 'active' }, getHighlight: async () => ({ highlight, images: [visible] }) } as any;
     const output = await galleryOperations.readHighlight({ highlightKey }, context);
     expect(output.highlight.imageKeys).toEqual([visible.key]);
@@ -313,15 +312,15 @@ describe('Gallery operation boundaries', () => {
   test('soft-deletes only the highlight and publishes its collection invalidation', async () => {
     const organizationKey = 'organization', scopeKey = key(), actorKey = key(), collectionKey = key(), highlightKey = key(), userId = key(), now = new Date().toISOString();
     const events: string[] = [];
-    const highlight = { key: highlightKey, scopeKey, collectionKey, imageKeys: [key()], createdByKey: actorKey, deletedAt: null, createdAt: now, updatedAt: now };
-    const context = { organizationKey, scopeKey, membership: { key: actorKey, organizationId: organizationKey, userId, status: 'active' }, getCollectionRole: async () => 'owner', getHighlight: async () => ({ highlight, images: [] }), deleteHighlight: async () => ({ ...highlight, deletedAt: now, updatedAt: now }), publishCollectionEvent: async (_key: string, event: string) => { events.push(event); } } as any;
+    const highlight = { key: highlightKey, scopeKey, collectionKey, imageKeys: [key()], createdByKey: actorKey, createdAt: now, updatedAt: now };
+    const context = { organizationKey, scopeKey, membership: { key: actorKey, organizationId: organizationKey, userId, status: 'active' }, getCollectionRole: async () => 'owner', getHighlight: async () => ({ highlight, images: [] }), deleteHighlight: async () => highlight, publishCollectionEvent: async (_key: string, event: string) => { events.push(event); } } as any;
     await expect(galleryOperations.deleteHighlight({ highlightKey }, context)).resolves.toEqual({ highlightKey });
     expect(events).toEqual(['highlight.changed']);
   });
 
   test('requires collection ownership to delete highlights', async () => {
     const organizationKey = 'organization', scopeKey = key(), actorKey = key(), collectionKey = key(), highlightKey = key(), now = new Date().toISOString();
-    const highlight = { key: highlightKey, scopeKey, collectionKey, imageKeys: [], createdByKey: actorKey, deletedAt: null, createdAt: now, updatedAt: now };
+    const highlight = { key: highlightKey, scopeKey, collectionKey, imageKeys: [], createdByKey: actorKey, createdAt: now, updatedAt: now };
     const context = { organizationKey, scopeKey, membership: { key: actorKey, organizationId: organizationKey, userId: key(), status: 'active' }, getCollectionRole: async () => 'collaborator', getHighlight: async () => ({ highlight, images: [] }) } as any;
     await expect(galleryOperations.deleteHighlight({ highlightKey }, context)).rejects.toMatchObject({ status: 403, code: 'GALLERY_OWNER_REQUIRED' });
   });
@@ -342,11 +341,11 @@ describe('Gallery operation boundaries', () => {
       organizationKey, scopeKey, membership: { key: actorKey, organizationId: organizationKey, userId, status: 'active' },
       canMutateImage: async () => true,
       publishCollectionEvent: async (_collectionKey: string, slug: string) => { events.push(slug); },
-      deleteImages: async () => ({ deletedImageKeys: [], favoriteImageKeys: imageKeys, collectionKeys: [], subjectChanged: false, hadUnfiledImages: false }),
+      deleteImages: async () => ({ deletedImageKeys: [], favoriteImageKeys: imageKeys, collectionKeys: [], subjectChanged: false, hadUnfiledImages: false, storageKeys: [] }),
     } as any;
     await expect(galleryOperations.deleteImages({ imageKeys }, context)).resolves.toMatchObject({ deletedImageKeys: [], favoriteImageKeys: imageKeys });
     expect(events).toEqual([]);
-    context.deleteImages = async () => ({ deletedImageKeys: [imageKeys[1]], favoriteImageKeys: [imageKeys[0]], collectionKeys: [key()], subjectChanged: false, hadUnfiledImages: false });
+    context.deleteImages = async () => ({ deletedImageKeys: [imageKeys[1]], favoriteImageKeys: [imageKeys[0]], collectionKeys: [key()], subjectChanged: false, hadUnfiledImages: false, storageKeys: [] });
     await expect(galleryOperations.deleteImages({ imageKeys }, context)).resolves.toMatchObject({ deletedImageKeys: [imageKeys[1]], favoriteImageKeys: [imageKeys[0]] });
     expect(events).toEqual(['image.changed', 'collection.content.changed', 'collection.index.changed']);
   });
@@ -358,12 +357,31 @@ describe('Gallery operation boundaries', () => {
       organizationKey, scopeKey, membership: { key: actorKey, organizationId: organizationKey, userId: key(), status: 'active' },
       getCollectionRole: async () => 'owner',
       publishCollectionEvent: async (_collectionKey: string, slug: string) => { events.push(slug); },
-      deleteDuplicateImages: async () => ({ removedImageKeys: [], deletedImageKeys: [], favoriteImageKeys: [imageKey], collectionKeys: [], subjectChanged: false }),
+      deleteDuplicateImages: async () => ({ removedImageKeys: [], deletedImageKeys: [], favoriteImageKeys: [imageKey], collectionKeys: [], subjectChanged: false, storageKeys: [] }),
     } as any;
     await expect(galleryOperations.deleteDuplicates({ collectionKey, imageKeys: [imageKey] }, context)).resolves.toMatchObject({ removedImageKeys: [], favoriteImageKeys: [imageKey] });
     expect(events).toEqual([]);
-    context.deleteDuplicateImages = async () => ({ removedImageKeys: [imageKey], deletedImageKeys: [], favoriteImageKeys: [], collectionKeys: [collectionKey], subjectChanged: false });
+    context.deleteDuplicateImages = async () => ({ removedImageKeys: [imageKey], deletedImageKeys: [], favoriteImageKeys: [], collectionKeys: [collectionKey], subjectChanged: false, storageKeys: [] });
     await galleryOperations.deleteDuplicates({ collectionKey, imageKeys: [imageKey] }, context);
     expect(events).toEqual(['image.changed', 'collection.content.changed', 'collection.index.changed']);
+  });
+
+  test('retains the durable storage job until image object deletion succeeds', async () => {
+    const organizationKey = 'organization', scopeKey = key(), actorKey = key(), imageKey = key();
+    const acknowledged: string[] = [];
+    let available = false;
+    const context = {
+      organizationKey, scopeKey, membership: { key: actorKey, organizationId: organizationKey, userId: key(), status: 'active' },
+      canMutateImage: async () => true,
+      deleteImages: async () => ({ deletedImageKeys: [imageKey], favoriteImageKeys: [], collectionKeys: [], subjectChanged: false, hadUnfiledImages: false, storageKeys: ['gallery/image.jpg'] }),
+      deleteStorageObject: async () => { if (!available) throw new Error('offline'); },
+      acknowledgeStorageDeletion: async (storageKey: string) => { acknowledged.push(storageKey); return true; },
+      publishUserEvent: async () => undefined,
+    } as any;
+    await galleryOperations.deleteImages({ imageKeys: [imageKey] }, context);
+    expect(acknowledged).toEqual([]);
+    available = true;
+    await galleryOperations.deleteImages({ imageKeys: [imageKey] }, context);
+    expect(acknowledged).toEqual(['gallery/image.jpg']);
   });
 });

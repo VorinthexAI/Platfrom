@@ -32,7 +32,7 @@ async function cleanup() {
 
 try {
   await db.query(aql`INSERT { _key: ${membershipKey}, organizationId: ${organizationKey}, userId: ${userKey}, orgRole: "owner", status: "active" } INTO userOrganizations`);
-  await db.query(aql`INSERT { _key: ${scopeKey}, organizationKey: ${organizationKey}, slug: ${`travel-e2e-${scopeKey}`}, name: "Travel E2E", deletedAt: null } INTO scopes`);
+  await db.query(aql`INSERT { _key: ${scopeKey}, organizationKey: ${organizationKey}, slug: ${`travel-e2e-${scopeKey}`}, name: "Travel E2E" } INTO scopes`);
   await db.query(aql`INSERT { _key: ${scopeMembershipKey}, scopeKey: ${scopeKey}, userOrganizationKey: ${membershipKey}, role: "owner", status: "active" } INTO scopeMembers`);
 
   const repository = createTravelRepository();

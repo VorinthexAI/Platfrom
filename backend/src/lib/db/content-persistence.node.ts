@@ -37,16 +37,16 @@ function globalDocumentShare(value: Record<string, unknown>): DocumentShare {
   if (share.sourceType !== 'document') throw new Error('Expected a document share.');
   if (share.permission !== 'read' && share.permission !== 'comment') throw new Error('Document shares require document permissions.');
   const { sourceType: _sourceType, sourceKey: documentKey, ...projected } = share;
-  return { ...projected, permission: share.permission, documentKey };
+  return documentShareSchema.parse({ ...projected, permission: share.permission, documentKey });
 }
 
 function toGlobalDocumentShare(share: DocumentShare): Share {
   const { documentKey, ...fields } = share;
-  return shareSchema.parse({ ...fields, sourceType: 'document', sourceKey: documentKey });
+  return { ...fields, sourceType: 'document', sourceKey: documentKey };
 }
 
-type MutableFolderField = 'parentFolderKey' | 'name' | 'description' | 'coverImageKey' | 'isFavorite' | 'deletedAt' | 'updatedAt' | 'embedding' | '_internalDeletion';
-type MutableDocumentField = 'folderKey' | 'name' | 'content' | 'embedding' | 'contentChunks' | 'chunkEmbeddings' | 'semanticChunkCount' | 'semanticContentHash' | '_semanticChunkingSkipped' | 'speechStorageKeys' | 'isFavorite' | 'deletedAt' | 'updatedAt' | '_internalDeletion';
+type MutableFolderField = 'parentFolderKey' | 'name' | 'description' | 'coverImageKey' | 'isFavorite' | 'updatedAt' | 'embedding' | '_internalDeletion';
+type MutableDocumentField = 'folderKey' | 'name' | 'content' | 'embedding' | 'contentChunks' | 'chunkEmbeddings' | 'semanticChunkCount' | 'semanticContentHash' | '_semanticChunkingSkipped' | 'speechStorageKeys' | 'isFavorite' | 'updatedAt' | '_internalDeletion';
 export type ScopedFolderPatch = Partial<Pick<Folder, MutableFolderField>>;
 export type ScopedDocumentPatch = Partial<Pick<Document, MutableDocumentField>>;
 
@@ -76,24 +76,21 @@ async function scopedUpdate<T>(
       LET destination = destinationKey == null ? null : DOCUMENT(folders, destinationKey)
       FILTER destinationKey == null || (destination != null && destination.scopeKey == @scopeKey)
       FILTER destinationKey == null || (!HAS(destination, "_internalDeletion") || destination._internalDeletion == null)
-      FILTER !@requireActiveOwner || destinationKey == null || destination.deletedAt == null
   ` : collection === 'documents' ? `
       FILTER !HAS(current, "_internalDeletion") || current._internalDeletion == null
       LET destinationKey = @changesLocation ? @destinationKey : (HAS(current, "folderKey") ? current.folderKey : null)
       LET destination = destinationKey == null ? null : DOCUMENT(folders, destinationKey)
       FILTER destinationKey == null || (destination != null && destination.scopeKey == @scopeKey)
-      FILTER destinationKey == null || ((!HAS(destination, "_internalDeletion") || destination._internalDeletion == null) && destination.deletedAt == null)
+      FILTER destinationKey == null || (!HAS(destination, "_internalDeletion") || destination._internalDeletion == null)
   ` : collection === 'documentShares' || collection === 'documentVersions' ? `
       LET owner = DOCUMENT(documents, current.documentKey)
       FILTER owner != null && owner.scopeKey == @scopeKey
       FILTER !HAS(owner, "_internalDeletion") || owner._internalDeletion == null
-      FILTER !@requireActiveOwner || owner.deletedAt == null
   ` : `
       FILTER current.sourceType == "document"
       LET owner = DOCUMENT(documents, current.sourceKey)
       FILTER owner != null && owner.scopeKey == @scopeKey
       FILTER !HAS(owner, "_internalDeletion") || owner._internalDeletion == null
-      FILTER !@requireActiveOwner || owner.deletedAt == null
   `;
   const cursor = await executor.query(`
     FOR current IN @@collection
@@ -111,7 +108,6 @@ async function scopedUpdate<T>(
     ...(collection === 'documentVersions' || collection === 'documentShares' || collection === 'shares' ? {} : { destinationKey: set.parentFolderKey ?? set.folderKey ?? null }),
     ...(collection === 'folders' ? { changesLocation: Object.prototype.hasOwnProperty.call(patch, 'parentFolderKey') } : {}),
     ...(collection === 'documents' ? { changesLocation: Object.prototype.hasOwnProperty.call(patch, 'folderKey') } : {}),
-    requireActiveOwner: set.deletedAt === null,
     patch: set,
     unset,
     expectedUpdatedAt: expectedUpdatedAt ?? null,
@@ -139,21 +135,24 @@ async function scopedDelete(
   if (hiddenSource) {
     await executor.query('FOR hidden IN userHiddens FILTER hidden.source == @hiddenSource && hidden.sourceKey == @removedKey REMOVE hidden IN userHiddens', { hiddenSource, removedKey });
   }
+  if (collection === 'documents') {
+    await executor.query('FOR assignment IN tagAssignments FILTER assignment.scopeKey == @scopeKey && assignment.sourceType == "document" && assignment.sourceKey == @removedKey REMOVE assignment IN tagAssignments', { scopeKey, removedKey });
+  }
   return true;
 }
 
 /** Query-bound mutations can use either the global database or a streaming transaction executor. */
 export function createContentPersistence(executor: ContentQueryExecutor) {
   return {
-    async getScope(scopeKey: string): Promise<{ key: string; organizationKey: string; deletedAt?: string | null } | null> {
-      const cursor = await executor.query('LET scope = DOCUMENT(scopes, @scopeKey) RETURN scope == null ? null : { key: scope._key, organizationKey: scope.organizationKey, deletedAt: scope.deletedAt }', { scopeKey });
-      const value = await cursor.next() as { key?: unknown; organizationKey?: unknown; deletedAt?: unknown } | null | undefined;
+    async getScope(scopeKey: string): Promise<{ key: string; organizationKey: string } | null> {
+      const cursor = await executor.query('LET scope = DOCUMENT(scopes, @scopeKey) RETURN scope == null ? null : { key: scope._key, organizationKey: scope.organizationKey }', { scopeKey });
+      const value = await cursor.next() as { key?: unknown; organizationKey?: unknown } | null | undefined;
       if (!value) return null;
-      return z.object({ key: z.string(), organizationKey: z.string(), deletedAt: z.string().nullable().optional() }).parse(value);
+      return z.object({ key: z.string(), organizationKey: z.string() }).parse(value);
     },
     async role(scopeKey: string, membershipKey: string): Promise<ContentRole | null> {
       const cursor = await executor.query(
-        'RETURN { members: (FOR member IN scopeMembers FILTER member.userOrganizationKey == @membershipKey && member.status == "active" RETURN { scopeKey: member.scopeKey, role: member.role }), relations: (FOR relation IN scopeScopes FILTER relation.deletedAt == null RETURN { parentKey: relation.parentKey, childKey: relation.childKey }) }',
+        'RETURN { members: (FOR member IN scopeMembers FILTER member.userOrganizationKey == @membershipKey && member.status == "active" RETURN { scopeKey: member.scopeKey, role: member.role }), relations: (FOR relation IN scopeScopes RETURN { parentKey: relation.parentKey, childKey: relation.childKey }) }',
         { membershipKey },
       );
       const data = await cursor.next() as { members?: Array<{ scopeKey: string; role: ContentRole }>; relations?: Array<{ parentKey: string; childKey: string }> } | undefined;
@@ -164,7 +163,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       return (data?.members ?? []).filter((item) => ancestors.has(item.scopeKey)).sort((a, b) => contentRoleRank[b.role] - contentRoleRank[a.role])[0]?.role ?? null;
     },
     async scopeBelongsToActiveOrganization(scopeKey: string, organizationKey: string): Promise<boolean> {
-      const cursor = await executor.query('LET scope = DOCUMENT(scopes, @scopeKey) RETURN scope != null && scope.organizationKey == @organizationKey && scope.deletedAt == null', { scopeKey, organizationKey });
+      const cursor = await executor.query('LET scope = DOCUMENT(scopes, @scopeKey) RETURN scope != null && scope.organizationKey == @organizationKey', { scopeKey, organizationKey });
       return await cursor.next() === true;
     },
     async getFolder(key: string): Promise<Folder | null> {
@@ -172,8 +171,8 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       const value = await cursor.next();
       return value ? folderSchema.parse(withArangoKey(value as Record<string, unknown>)) : null;
     },
-    async listFolders(scopeKey: string, includeArchived = false, includePendingDeletion = false): Promise<Folder[]> {
-      const cursor = await executor.query(`FOR folder IN folders FILTER folder.scopeKey == @scopeKey FILTER @includeArchived || folder.deletedAt == null FILTER @includePending || !HAS(folder, "_internalDeletion") || folder._internalDeletion == null RETURN folder`, { scopeKey, includeArchived, includePending: includePendingDeletion });
+    async listFolders(scopeKey: string, includePendingDeletion = false): Promise<Folder[]> {
+      const cursor = await executor.query(`FOR folder IN folders FILTER folder.scopeKey == @scopeKey FILTER @includePending || !HAS(folder, "_internalDeletion") || folder._internalDeletion == null RETURN folder`, { scopeKey, includePending: includePendingDeletion });
       const values = cursor.all ? await cursor.all() : [];
       return values.map((value) => folderSchema.parse(withArangoKey(value as Record<string, unknown>)));
     },
@@ -182,8 +181,8 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       const value = await cursor.next();
       return value ? documentSchema.parse(withArangoKey(value as Record<string, unknown>)) : null;
     },
-    async listDocuments(scopeKey: string, includeArchived = false, includePendingDeletion = false): Promise<Document[]> {
-      const cursor = await executor.query(`FOR document IN documents FILTER document.scopeKey == @scopeKey FILTER @includeArchived || document.deletedAt == null FILTER @includePending || !HAS(document, "_internalDeletion") || document._internalDeletion == null RETURN document`, { scopeKey, includeArchived, includePending: includePendingDeletion });
+    async listDocuments(scopeKey: string, includePendingDeletion = false): Promise<Document[]> {
+      const cursor = await executor.query(`FOR document IN documents FILTER document.scopeKey == @scopeKey FILTER @includePending || !HAS(document, "_internalDeletion") || document._internalDeletion == null RETURN document`, { scopeKey, includePending: includePendingDeletion });
       const values = cursor.all ? await cursor.all() : [];
       return values.map((value) => documentSchema.parse(withArangoKey(value as Record<string, unknown>)));
     },
@@ -192,7 +191,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       const limit = Math.min(Math.max(z.number().int().positive().parse(input.limit), 1), 10);
       const cursor = await executor.query(`
         LET folderMatches = (FOR folder IN folders
-          FILTER folder.scopeKey == @scopeKey && folder.deletedAt == null
+          FILTER folder.scopeKey == @scopeKey
           FILTER (!HAS(folder, "_internalDeletion") || folder._internalDeletion == null) && folder._key IN @activeFolderKeys
           FILTER @sourceFolderKey == null || folder._key != @sourceFolderKey
           FILTER IS_ARRAY(folder.embedding) && LENGTH(folder.embedding) == LENGTH(@embedding)
@@ -202,7 +201,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
           LIMIT @limit
           RETURN { score, value: folder })
         LET documentMatches = (FOR document IN documents
-          FILTER document.scopeKey == @scopeKey && document.deletedAt == null
+          FILTER document.scopeKey == @scopeKey
           FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
           FILTER document.folderKey == null || document.folderKey IN @activeFolderKeys
           FILTER @sourceDocumentKey == null || document._key != @sourceDocumentKey
@@ -218,7 +217,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
           LIMIT @limit
           RETURN { score, value: document })
         LET fileMatches = (FOR document IN documents
-          FILTER document.scopeKey == @scopeKey && document.deletedAt == null
+          FILTER document.scopeKey == @scopeKey
           FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
           FILTER document.folderKey == null || document.folderKey IN @activeFolderKeys
           FILTER @sourceDocumentKey == null || document._key != @sourceDocumentKey
@@ -250,13 +249,13 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       const value = await cursor.next();
       return value ? mode === 'global' ? globalDocumentShare(value as Record<string, unknown>) : documentShareSchema.parse(withArangoKey(value as Record<string, unknown>)) : null;
     },
-    async listShares(scopeKey: string, documentKeys: string[], options: { includeArchived?: boolean; includeExpired?: boolean; includeRevoked?: boolean; at?: string } = {}): Promise<DocumentShare[]> {
+    async listShares(scopeKey: string, documentKeys: string[], options: { includeExpired?: boolean; includeRevoked?: boolean; at?: string } = {}): Promise<DocumentShare[]> {
       if (documentKeys.length === 0) return [];
       const at = z.string().datetime().parse(options.at ?? new Date().toISOString());
       const mode = await shareStorageMode(executor);
       const cursor = await executor.query(mode === 'global'
-        ? 'FOR share IN shares FILTER share.sourceType == "document" && share.scopeKey == @scopeKey && share.sourceKey IN @documentKeys FILTER @includeArchived || share.deletedAt == null FILTER @includeRevoked || share.revokedAt == null FILTER @includeExpired || share.expiresAt == null || share.expiresAt > @at RETURN share'
-        : 'FOR share IN documentShares FILTER share.scopeKey == @scopeKey && share.documentKey IN @documentKeys FILTER @includeArchived || share.deletedAt == null FILTER @includeRevoked || share.revokedAt == null FILTER @includeExpired || share.expiresAt == null || share.expiresAt > @at RETURN share', { scopeKey, documentKeys, includeArchived: options.includeArchived ?? false, includeRevoked: options.includeRevoked ?? false, includeExpired: options.includeExpired ?? false, at });
+        ? 'FOR share IN shares FILTER share.sourceType == "document" && share.scopeKey == @scopeKey && share.sourceKey IN @documentKeys FILTER @includeRevoked || share.revokedAt == null FILTER @includeExpired || share.expiresAt == null || share.expiresAt > @at RETURN share'
+        : 'FOR share IN documentShares FILTER share.scopeKey == @scopeKey && share.documentKey IN @documentKeys FILTER @includeRevoked || share.revokedAt == null FILTER @includeExpired || share.expiresAt == null || share.expiresAt > @at RETURN share', { scopeKey, documentKeys, includeRevoked: options.includeRevoked ?? false, includeExpired: options.includeExpired ?? false, at });
       const values = cursor.all ? await cursor.all() : [];
       return values.map((value) => mode === 'global' ? globalDocumentShare(value as Record<string, unknown>) : documentShareSchema.parse(withArangoKey(value as Record<string, unknown>)));
     },
@@ -288,7 +287,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
         LET target = DOCUMENT(documentAudioVersions, @key)
         FILTER target != null && target.scopeKey == @scopeKey && @playbackPositionMs <= target.durationMs
         LET document = DOCUMENT(documents, target.documentKey)
-        FILTER document != null && document.scopeKey == @scopeKey && document.deletedAt == null
+        FILTER document != null && document.scopeKey == @scopeKey
         FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
         FOR audio IN documentAudioVersions
           FILTER audio.scopeKey == @scopeKey && audio.documentKey == target.documentKey
@@ -307,7 +306,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
     async clearCurrentAudioVersion(scopeKey: string, documentKey: string): Promise<boolean> {
       const cursor = await executor.query(`
         LET document = DOCUMENT(documents, @documentKey)
-        FILTER document != null && document.scopeKey == @scopeKey && document.deletedAt == null
+        FILTER document != null && document.scopeKey == @scopeKey
         FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
         FOR audio IN documentAudioVersions
           FILTER audio.scopeKey == @scopeKey && audio.documentKey == @documentKey && audio.isCurrent == true
@@ -364,7 +363,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       const cursor = await executor.query(
         `LET folder = @folderKey == null ? null : DOCUMENT(folders, @folderKey)
          FILTER @folderKey == null || (folder != null && folder.scopeKey == @scopeKey)
-         FILTER @folderKey == null || ((!HAS(folder, "_internalDeletion") || folder._internalDeletion == null) && folder.deletedAt == null)
+         FILTER @folderKey == null || (!HAS(folder, "_internalDeletion") || folder._internalDeletion == null)
          INSERT @document INTO documents RETURN NEW`,
         { document: toArangoDoc(parsed), folderKey: parsed.folderKey ?? null, scopeKey: parsed.scopeKey },
       );
@@ -372,7 +371,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       if (!created) throw new Error('Document destination is pending deletion.');
       return documentSchema.parse(withArangoKey(created as Record<string, unknown>));
     },
-    async insertShare(share: Omit<DocumentShare, 'deletedAt'>): Promise<DocumentShare> {
+    async insertShare(share: DocumentShare): Promise<DocumentShare> {
       const parsed = documentShareSchema.parse(share);
       const global = toGlobalDocumentShare(parsed);
       const mode = await shareStorageMode(executor);
@@ -394,7 +393,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       if (!created) throw new Error('Share owner is pending deletion.');
       return mode === 'legacy' ? documentShareSchema.parse(withArangoKey(created as Record<string, unknown>)) : globalDocumentShare(created as Record<string, unknown>);
     },
-    async createVersion(version: Omit<DocumentVersion, 'key' | 'version' | 'createdAt' | 'deletedAt'>): Promise<DocumentVersion> {
+    async createVersion(version: Omit<DocumentVersion, 'key' | 'version' | 'createdAt'>): Promise<DocumentVersion> {
       currentEmbeddingSchema.parse(version.embedding);
       const contentChunks = chunkDocumentContent(version.content);
       const chunkEmbeddings = version.chunkEmbeddings ?? (contentChunks.length === 1 ? [version.embedding] : undefined);
@@ -440,7 +439,6 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
           const cursor = await executor.query(`
             LET document = DOCUMENT(documents, @documentKey)
             FILTER document != null && document.scopeKey == @scopeKey
-            FILTER document.deletedAt == null
             FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
             LET nextVersion = FIRST(
               FOR existing IN documentAudioVersions
@@ -468,7 +466,6 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
           const cursor = await executor.query(`
             LET document = DOCUMENT(documents, @documentKey)
             FILTER document != null && document.scopeKey == @scopeKey
-            FILTER document.deletedAt == null
             FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
             LET nextVersion = FIRST(
               FOR existing IN documentSummaries
@@ -496,7 +493,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
           LET summary = DOCUMENT(documentSummaries, @summaryKey)
           LET document = summary == null ? null : DOCUMENT(documents, summary.documentKey)
           FILTER summary != null && summary.scopeKey == @scopeKey && summary.documentKey == @documentKey
-          FILTER document != null && document.scopeKey == @scopeKey && document.deletedAt == null
+          FILTER document != null && document.scopeKey == @scopeKey
           FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
           INSERT @audio INTO documentSummaryAudio RETURN NEW
         `, { summaryKey: audio.summaryKey, documentKey: audio.documentKey, scopeKey: audio.scopeKey, audio: toArangoDoc(audio) });
@@ -531,10 +528,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       const preparedPatch = patch.content === undefined ? patch : { ...patch, contentChunks, chunkEmbeddings, semanticChunkCount: contentChunks!.length, semanticContentHash: documentSemanticHash(patch.content), _semanticChunkingSkipped: undefined };
       return scopedUpdate(executor, 'documents', scopeKey, key, preparedPatch, (value) => documentSchema.parse(value), options?.expectedUpdatedAt);
     },
-    updateVersion(scopeKey: string, key: string, patch: Pick<DocumentVersion, 'deletedAt'>) {
-      return scopedUpdate(executor, 'documentVersions', scopeKey, key, patch, (value) => documentVersionSchema.parse(value));
-    },
-    updateShare(scopeKey: string, key: string, patch: Partial<Pick<DocumentShare, 'revokedAt' | 'deletedAt' | 'updatedAt'>>) {
+    updateShare(scopeKey: string, key: string, patch: Partial<Pick<DocumentShare, 'revokedAt' | 'updatedAt'>>) {
       return (async () => {
         const mode = await shareStorageMode(executor);
         if (mode === 'global') return scopedUpdate(executor, 'shares', scopeKey, key, patch, globalDocumentShare);
@@ -547,12 +541,11 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
               && global.scopeKey == @scopeKey && global.sourceType == "document" && global.sourceKey == legacy.documentKey
             FILTER owner != null && owner.scopeKey == @scopeKey
             FILTER !HAS(owner, "_internalDeletion") || owner._internalDeletion == null
-            FILTER !@requireActiveOwner || owner.deletedAt == null
             UPDATE global WITH MERGE(@patch, ZIP(@unset, @unset[* RETURN null])) IN shares OPTIONS { keepNull: false }
             LET updatedGlobal = NEW
             UPDATE legacy WITH MERGE(@patch, ZIP(@unset, @unset[* RETURN null])) IN documentShares OPTIONS { keepNull: false }
             RETURN updatedGlobal
-          `, { key, scopeKey, patch: splitPatch(patch).set, unset: splitPatch(patch).unset, requireActiveOwner: patch.deletedAt === null });
+          `, { key, scopeKey, patch: splitPatch(patch).set, unset: splitPatch(patch).unset });
           const updated = await cursor.next();
           return updated ? globalDocumentShare(updated as Record<string, unknown>) : null;
         }
@@ -618,6 +611,6 @@ export function withContentPersistenceTransaction<T>(
   operation: (persistence: ReturnType<typeof createContentPersistence>) => Promise<T>,
 ): Promise<T> {
   return shareStorageMode(db as unknown as ContentQueryExecutor).then((mode) =>
-    withTransaction(['folders', 'documents', 'documentVersions', 'documentAudioVersions', 'documentSummaries', 'documentSummaryAudio', 'userHiddens', 'scopes', 'scopeMembers', 'scopeScopes', ...(mode === 'legacy' ? ['documentShares'] : mode === 'global' ? ['shares'] : ['documentShares', 'shares'])], (transaction) =>
+    withTransaction(['folders', 'documents', 'documentVersions', 'documentAudioVersions', 'documentSummaries', 'documentSummaryAudio', 'tagAssignments', 'userHiddens', 'scopes', 'scopeMembers', 'scopeScopes', ...(mode === 'legacy' ? ['documentShares'] : mode === 'global' ? ['shares'] : ['documentShares', 'shares'])], (transaction) =>
       operation(createContentPersistence(transaction as unknown as ContentQueryExecutor))));
 }

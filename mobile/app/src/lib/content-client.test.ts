@@ -5,7 +5,6 @@ const testRuntime = globalThis as typeof globalThis & { __archiveApiPost?: (...i
 let authState = {
   organization: { key: "org-authenticated" },
   scope: { key: "scope-authenticated" },
-  contentExecution: { agentKey: "agent-authenticated" },
 };
 let responseForTool: ((tool: string) => unknown) | undefined;
 const digestInputs: string[] = [];
@@ -34,15 +33,15 @@ testRuntime.__archiveApiPost = async (url: string, body: Record<string, any>, co
   if (tool === "folder.create") {
     return { data: { success: true, data: { results: [{ success: true, data: { folder: { key: "folder", name: "Work" } } }] } } };
   }
-  if (tool === "document.update" || tool === "document.archive") {
+  if (tool === "document.update" || tool === "document.delete") {
     return { data: { success: true, data: { results: [{ success: true, data: { document: { key: "document", name: "Note", isFavorite: false, updatedAt: "2026-08-10T00:01:00.000Z" } } }] } } };
   }
   throw new Error(`Unexpected tool: ${tool}`);
 };
 
 const {
-  archiveContentDocument,
-  archiveContentSelection,
+  deleteContentDocument,
+  hardDeleteContentSelection,
   askPersonalAssistant,
   clearContentDocumentAudioPlayback,
   createContentDocument,
@@ -92,7 +91,6 @@ beforeEach(() => {
   authState = {
     organization: { key: "org-authenticated" },
     scope: { key: "scope-authenticated" },
-    contentExecution: { agentKey: "agent-authenticated" },
   };
 });
 
@@ -158,7 +156,7 @@ test("sends document and folder mutations with the authenticated Archive context
     "/api/v1/content/tools/document.update",
     "/api/v1/content/tools/folder.create",
   ]);
-  expect(calls.every(({ body }) => body.organizationKey === "org-authenticated" && body.agentKey === "agent-authenticated")).toBe(true);
+  expect(calls.every(({ body }) => body.organizationKey === "org-authenticated" && body.scopeKey === "scope-authenticated")).toBe(true);
   expect(calls[0]?.body.input).toEqual({
     scopeKey: "scope-authenticated",
     folderKey: "parent",
@@ -176,7 +174,7 @@ test("uploads documents through the authenticated Archive context", async () => 
 
   expect(calls[0]?.body).toMatchObject({
     organizationKey: "org-authenticated",
-    agentKey: "agent-authenticated",
+    scopeKey: "scope-authenticated",
     input: {
       scopeKey: "scope-authenticated",
       folderKey: "folder",
@@ -217,8 +215,8 @@ test("reads authorized scanned source images without requesting storage keys", a
 });
 
 test("archives notes and uploaded files through the same document lifecycle", async () => {
-  await archiveContentDocument("document");
-  expect(calls[0]?.url).toBe("/api/v1/content/tools/document.archive");
+  await deleteContentDocument("document");
+  expect(calls[0]?.url).toBe("/api/v1/content/tools/document.delete");
   expect(calls[0]?.body.input).toMatchObject({ documentKeys: ["document"], atomic: false });
 });
 
@@ -323,34 +321,34 @@ test("returns copied records and surfaces item and tool partial failures", async
 });
 
 test("preserves structured item and tool error codes in batch failures", async () => {
-  responseForTool = (tool) => tool === "folder.archive"
+  responseForTool = (tool) => tool === "folder.delete"
     ? { data: { success: true, data: { results: [{ success: false, error: { message: "Hidden favorite detail", code: "CONTENT_CONFLICT", action: "update" } }] } } }
     : { data: { success: false, error: { message: "Hidden service detail", code: "CONTENT_UNAVAILABLE", action: "request" } } };
 
-  const result = await archiveContentSelection({ folderKeys: ["folder-a"], documentKeys: ["document-a"] }, "coded-archive");
+  const result = await hardDeleteContentSelection({ folderKeys: ["folder-a"], documentKeys: ["document-a"] }, "coded-delete");
 
   expect(result).toMatchObject({ requested: 2, succeeded: 0, failed: 2 });
   expect(result.failures).toEqual([
-    { kind: "folder", key: "folder-a", tool: "folder.archive", message: "Hidden favorite detail", code: "CONTENT_CONFLICT", action: "update" },
-    { kind: "document", key: "document-a", tool: "document.archive", message: "Hidden service detail", code: "CONTENT_UNAVAILABLE", action: "request" },
+    { kind: "folder", key: "folder-a", tool: "folder.delete", message: "Hidden favorite detail", code: "CONTENT_CONFLICT", action: "update" },
+    { kind: "document", key: "document-a", tool: "document.delete", message: "Hidden service detail", code: "CONTENT_UNAVAILABLE", action: "request" },
   ]);
 });
 
-test("moves and archives mixed selections through separate canonical tools", async () => {
+test("moves and hard deletes mixed selections through separate canonical tools", async () => {
   responseForTool = (tool) => ({ data: { success: true, data: { results: [{ success: true, data: tool.startsWith("folder.")
     ? { folder: { key: "folder-a", name: "Folder" } }
     : { document: { key: "document-a", name: "Document", isFavorite: false, updatedAt: "after" } } }] } } });
 
   await moveContentSelection({ folderKeys: ["folder-a"], documentKeys: ["document-a"] }, "destination", "stable-move");
-  await archiveContentSelection({ folderKeys: ["folder-a"], documentKeys: ["document-a"] }, "stable-archive");
+  await hardDeleteContentSelection({ folderKeys: ["folder-a"], documentKeys: ["document-a"] }, "stable-delete");
   expect(calls.map(({ url }) => url)).toEqual([
     "/api/v1/content/tools/folder.move", "/api/v1/content/tools/document.move",
-    "/api/v1/content/tools/folder.archive", "/api/v1/content/tools/document.archive",
+    "/api/v1/content/tools/folder.delete", "/api/v1/content/tools/document.delete",
   ]);
   expect(calls[0]?.body.input).toEqual({ moves: [{ folderKey: "folder-a", targetParentFolderKey: "destination" }], atomic: false, idempotencyKey: "stable-move:folder.move" });
   expect(calls[1]?.body.input).toEqual({ moves: [{ documentKey: "document-a", targetScopeKey: "scope-authenticated", targetFolderKey: "destination" }], atomic: false, idempotencyKey: "stable-move:document.move" });
-  expect(calls[2]?.body.input).toEqual({ folderKeys: ["folder-a"], includeDescendants: true, atomic: false, idempotencyKey: "stable-archive:folder.archive" });
-  expect(calls[3]?.body.input).toEqual({ documentKeys: ["document-a"], atomic: false, idempotencyKey: "stable-archive:document.archive" });
+  expect(calls[2]?.body.input).toEqual({ folderKeys: ["folder-a"], recursive: true, atomic: false, idempotencyKey: "stable-delete:folder.delete" });
+  expect(calls[3]?.body.input).toEqual({ documentKeys: ["document-a"], atomic: false, idempotencyKey: "stable-delete:document.delete" });
 });
 
 test("sets and clears folder covers with exact payloads", async () => {
@@ -394,7 +392,7 @@ test("sends Archive requests to the personal assistant surface", async () => {
   expect(calls[0]?.url).toBe("/api/v1/assistant/respond");
   expect(calls[0]?.body).toEqual({
     organizationKey: "org-authenticated",
-    agentKey: "agent-authenticated",
+    scopeKey: "scope-authenticated",
     input: { surface: "knowledge-workspace", message: "Write a launch plan", currentNote: { documentKey: "document", title: "Untitled note", content: "Draft", selection: { start: 0, end: 5 } }, requestKey: expect.any(String), folderKey: "folder" },
   });
 });
@@ -550,7 +548,7 @@ test("surfaces tool and item errors for document actions", async () => {
 });
 
 test("rejects Archive calls when authenticated context is incomplete", async () => {
-  authState = { ...authState, contentExecution: { agentKey: "" } };
+  authState = { ...authState, scope: { key: "" } };
 
   await expect(createContentFolder("Work")).rejects.toThrow("Archive is unavailable for this session.");
   expect(calls).toHaveLength(0);

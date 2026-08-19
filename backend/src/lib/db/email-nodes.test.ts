@@ -38,7 +38,7 @@ describe('email node contracts', () => {
   test('validates account, thread, message, rule, and draft enums', () => {
     expect(emailAccountSchema.safeParse({ key, scopeKey: otherKey, provider: 'gmail', providerAccountId: 'account-1', email: 'person@example.com', syncEnabled: true, createdAt: now, updatedAt: now }).success).toBe(true);
     expect(emailAccountSchema.safeParse({ key, scopeKey: otherKey, provider: 'outlook', providerAccountId: 'account-1', email: 'person@example.com', syncEnabled: true, createdAt: now, updatedAt: now }).success).toBe(false);
-    const thread = { key, scopeKey: otherKey, accountKey: key, providerThreadId: 'thread-1', subject: 'Subject', summary: 'Summary', intent: 'Respond', priority: 'urgent', state: 'needs_action', lastMessageAt: now, embedding, deletedAt: null, createdAt: now, updatedAt: now };
+    const thread = { key, scopeKey: otherKey, accountKey: key, providerThreadId: 'thread-1', subject: 'Subject', summary: 'Summary', intent: 'Respond', priority: 'urgent', state: 'needs_action', lastMessageAt: now, embedding, createdAt: now, updatedAt: now };
     expect(emailThreadSchema.safeParse(thread).success).toBe(true);
     expect(emailThreadSchema.safeParse({ ...thread, state: 'open' }).success).toBe(false);
     const message = { key, scopeKey: otherKey, accountKey: key, threadKey: otherKey, providerMessageId: 'message-1', from: 'from@example.com', to: ['to@example.com'], subject: 'Subject', body: 'Body', summary: 'Summary', direction: 'inbound', sentAt: now, hasAttachments: false, embedding, createdAt: now, updatedAt: now };

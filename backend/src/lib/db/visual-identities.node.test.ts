@@ -11,7 +11,7 @@ describe('visual identity records', () => {
     const scopeKey = newId();
     const identityKey = newId();
     const imageKey = newId();
-    expect(visualIdentitySchema.parse({ key: identityKey, scopeKey, name: 'Viggo', description: 'A black dog with a white chest blaze.', referenceImageKey: imageKey, embedding: Array(EMBEDDING_DIMENSIONS).fill(0.1), deletedAt: null, createdAt: now, updatedAt: now })).toMatchObject({ name: 'Viggo', deletedAt: null });
+    expect(visualIdentitySchema.parse({ key: identityKey, scopeKey, name: 'Viggo', description: 'A black dog with a white chest blaze.', referenceImageKey: imageKey, embedding: Array(EMBEDDING_DIMENSIONS).fill(0.1), createdAt: now, updatedAt: now })).toMatchObject({ name: 'Viggo' });
     expect(imageIdentitySchema.parse({ key: newId(), scopeKey, imageKey, identityKey, confidence: 1, isReference: true, createdAt: now })).toMatchObject({ imageKey, confidence: 1, isReference: true });
   });
 

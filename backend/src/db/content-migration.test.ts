@@ -14,7 +14,7 @@ describe('Content share migration staging', () => {
   });
   test('requires every canonical field to match before legacy drop', async () => {
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
-    expect(source).toContain("const fields = ['scopeKey', 'sourceType', 'sourceKey', 'permission', 'tokenHash', 'passwordHash', 'expiresAt', 'revokedAt', 'deletedAt', 'createdAt', 'updatedAt']");
+    expect(source).toContain("const fields = ['scopeKey', 'sourceType', 'sourceKey', 'permission', 'tokenHash', 'passwordHash', 'expiresAt', 'revokedAt', 'createdAt', 'updatedAt']");
     expect(source).toContain('if (!copied || !equal(copied, prepared))');
   });
   test('creates global search history and a separate contextual replay cache', async () => {
@@ -27,7 +27,7 @@ describe('Content share migration staging', () => {
     expect(source).toContain('usageCount: MAX([OLD.usageCount, @usageCount])');
     expect(source).toContain('contextDomain: null, usageCount: null');
     expect(source).toContain('usageCount: HAS(query, "count") ? query.count : 1');
-    expect(source).toContain("fields: ['scopeKey', 'isFavorite', 'deletedAt']");
+    expect(source).toContain("fields: ['scopeKey', 'isFavorite']");
     expect(source).toContain('query.expiresAt <= DATE_ISO8601(DATE_NOW()) && query.output != null');
   });
   test('creates private one-to-one summary audio storage indexes', async () => {
@@ -35,5 +35,22 @@ describe('Content share migration staging', () => {
     expect(source).toContain("name: 'documentSummaryAudio'");
     expect(source).toContain("fields: ['summaryKey'], unique: true");
     expect(source).toContain("fields: ['storageKey'], unique: true");
+  });
+  test('durably inventories legacy object storage and cleans typed dependents', async () => {
+    const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    expect(source).toContain("name: 'storageDeletionJobs'");
+    expect(source).toContain('UPSERT { storageKey } INSERT { storageKey, createdAt: @now } UPDATE {} IN storageDeletionJobs');
+    expect(source).toContain('document.sourceStorageKeys');
+    expect(source).toContain('document.speechStorageKeys');
+    expect(source).toContain('FOR image IN images FILTER image._key IN @keys && IS_STRING(image.storageKey)');
+    expect(source).toContain('FOR audio IN documentAudioVersions FILTER audio.documentKey IN @keys && IS_STRING(audio.storageKey)');
+    expect(source).toContain('FOR audio IN documentSummaryAudio FILTER audio.documentKey IN @keys && IS_STRING(audio.storageKey)');
+    expect(source.indexOf('UPSERT { storageKey }')).toBeLessThan(source.indexOf("await removeDocumentDependents(documentKeys"));
+    expect(source).toContain("await removeBy('documentShares', 'documentKey', documentKeys)");
+    expect(source).toContain("await removeTyped('shares', 'sourceType', 'document'");
+    expect(source).toContain("await removeTyped('tagAssignments', 'sourceType', 'document'");
+    expect(source).toContain("await removeTyped('userHiddens', 'source', 'document'");
+    expect(source).toContain("FILTER thread.rootMessageKey IN @keys");
+    expect(source).toContain('DOCUMENT(images, upload.imageKey) == null');
   });
 });

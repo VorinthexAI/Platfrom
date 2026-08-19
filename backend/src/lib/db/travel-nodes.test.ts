@@ -16,7 +16,7 @@ const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
 describe('travel node contracts', () => {
   test('validates places and builds the exact semantic text', () => {
     const place = placeSchema.parse({ key, scopeKey: otherKey, name: ' Tokyo ', latitude: 35.6762, longitude: 139.6503, countryCode: 'jp', country: 'Japan', region: 'Tokyo', city: 'Tokyo', embedding, createdAt: timestamp, updatedAt: timestamp });
-    expect(place).toMatchObject({ kind: 'place', name: 'Tokyo', countryCode: 'JP', isWishlist: false, isFavorite: false, deletedAt: null });
+    expect(place).toMatchObject({ kind: 'place', name: 'Tokyo', countryCode: 'JP', isWishlist: false, isFavorite: false });
     expect(buildEmbeddingText(placesEmbeddingFields, place)).toBe('Tokyo\n\nJapan\n\nTokyo\n\nTokyo');
     expect(placeSchema.safeParse({ ...place, latitude: 91 }).success).toBe(false);
     expect(placeSchema.safeParse({ ...place, longitude: -181 }).success).toBe(false);
@@ -25,7 +25,7 @@ describe('travel node contracts', () => {
 
   test('validates trips without a persisted status', () => {
     const trip = tripSchema.parse({ key, scopeKey: otherKey, name: 'Japan 2027', startDate: '2027-04-01', endDate: '2027-04-20', embedding, createdAt: timestamp, updatedAt: timestamp });
-    expect(trip).toMatchObject({ isFavorite: false, deletedAt: null });
+    expect(trip).toMatchObject({ isFavorite: false });
     expect(trip).not.toHaveProperty('status');
     expect(buildEmbeddingText(tripsEmbeddingFields, trip)).toBe('Japan 2027');
     expect(tripSchema.safeParse({ ...trip, startDate: '2027-04-20', endDate: '2027-04-01' }).success).toBe(false);

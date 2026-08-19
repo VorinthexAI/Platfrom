@@ -26,14 +26,14 @@ function parse(value: unknown) {
 function accessFilters(source: string, sourceKey: string) {
   return `
     LET target = ${source} == "folder" ? DOCUMENT(folders, ${sourceKey}) : ${source} == "document" ? DOCUMENT(documents, ${sourceKey}) : ${source} == "collection" ? DOCUMENT(collections, ${sourceKey}) : ${source} == "image" ? DOCUMENT(images, ${sourceKey}) : null
-    FILTER target != null && target.deletedAt == null && (!HAS(target, "_internalDeletion") || target._internalDeletion == null)
+    FILTER target != null && (!HAS(target, "_internalDeletion") || target._internalDeletion == null)
     LET scope = DOCUMENT(scopes, target.scopeKey)
-    FILTER scope != null && scope.organizationKey == @organizationKey && scope.deletedAt == null
+    FILTER scope != null && scope.organizationKey == @organizationKey
     LET privileged = membership.orgRole IN ["owner", "admin"]
     LET scoped = LENGTH(FOR member IN scopeMembers FILTER member.scopeKey == target.scopeKey && member.userOrganizationKey == @membershipKey && member.status == "active" LIMIT 1 RETURN 1) > 0
     LET collectionAccess = LENGTH(FOR member IN collectionMembers FILTER member.scopeKey == target.scopeKey && member.collectionKey == target._key && member.memberKey == @membershipKey LIMIT 1 RETURN 1) > 0
     LET relationCount = LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == target.scopeKey && relation.imageKey == target._key RETURN 1)
-    LET imageAccess = (target.createdByKey == @membershipKey && relationCount == 0) || LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == target.scopeKey && relation.imageKey == target._key LET collection = DOCUMENT(collections, relation.collectionKey) FILTER collection != null && collection.deletedAt == null FOR member IN collectionMembers FILTER member.scopeKey == target.scopeKey && member.collectionKey == relation.collectionKey && member.memberKey == @membershipKey LIMIT 1 RETURN 1) > 0
+    LET imageAccess = (target.createdByKey == @membershipKey && relationCount == 0) || LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == target.scopeKey && relation.imageKey == target._key LET collection = DOCUMENT(collections, relation.collectionKey) FILTER collection != null FOR member IN collectionMembers FILTER member.scopeKey == target.scopeKey && member.collectionKey == relation.collectionKey && member.memberKey == @membershipKey LIMIT 1 RETURN 1) > 0
     FILTER ${source} == "collection" ? (privileged || collectionAccess) : ${source} == "image" ? (privileged || imageAccess) : (privileged || scoped)
   `;
 }

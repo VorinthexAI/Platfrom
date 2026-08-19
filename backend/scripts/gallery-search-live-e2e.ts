@@ -25,7 +25,7 @@ async function main() {
         FOR relation IN collectionImages
           FILTER relation.scopeKey == @scopeKey && relation.collectionKey == collection._key
           FOR image IN images
-            FILTER image._key == relation.imageKey && image.deletedAt == null
+            FILTER image._key == relation.imageKey
             SORT image.filename
             RETURN image._key
       )
@@ -82,7 +82,7 @@ async function main() {
     await db.query('FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.collectionKey IN @destinationCollectionKeys && relation.imageKey IN @imageKeys REMOVE relation IN collectionImages', { scopeKey: auth.scope.key, destinationCollectionKeys: fixture.destinationCollectionKeys, imageKeys: actionImageKeys });
     for (const [index, relation] of sourceRelations.entries()) {
       await db.query('UPSERT { scopeKey: @scopeKey, collectionKey: @collectionKey, imageKey: @imageKey } INSERT @relation UPDATE {} IN collectionImages', { scopeKey: auth.scope.key, collectionKey: fixture.collectionKey, imageKey: relation.imageKey, relation: toArangoDoc(relation) });
-      await db.query('FOR image IN images FILTER image._key == @imageKey && image.scopeKey == @scopeKey UPDATE image WITH { deletedAt: null, isFavorite: @isFavorite } IN images', { scopeKey: auth.scope.key, imageKey: relation.imageKey, isFavorite: fixture.actionImages[index]!.isFavorite });
+      await db.query('FOR image IN images FILTER image._key == @imageKey && image.scopeKey == @scopeKey UPDATE image WITH { isFavorite: @isFavorite } IN images', { scopeKey: auth.scope.key, imageKey: relation.imageKey, isFavorite: fixture.actionImages[index]!.isFavorite });
     }
   };
 
@@ -99,8 +99,8 @@ async function main() {
 
     const deleted = await galleryOperations.deleteImages({ imageKeys: actionImageKeys }, context);
     if (deleted.deletedImageKeys.length !== actionImageKeys.length) throw new Error('Image deletion did not return every deleted image.');
-    const deletedCursor = await db.query('FOR image IN images FILTER image._key IN @imageKeys && image.scopeKey == @scopeKey RETURN image.deletedAt != null', { scopeKey: auth.scope.key, imageKeys: actionImageKeys });
-    if ((await deletedCursor.all()).some((deletedAt) => deletedAt !== true)) throw new Error('Image deletion was not persisted.');
+    const deletedCursor = await db.query('FOR imageKey IN @imageKeys RETURN DOCUMENT(images, imageKey) == null', { imageKeys: actionImageKeys });
+    if ((await deletedCursor.all()).some((deleted) => deleted !== true)) throw new Error('Image deletion was not persisted.');
   } finally {
     await restoreFixture();
   }

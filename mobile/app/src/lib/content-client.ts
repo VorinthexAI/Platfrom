@@ -3,7 +3,7 @@ import * as Crypto from "expo-crypto";
 import { useAuthStore } from "@/state/auth";
 import type { AssistantChange } from "./assistant-changes";
 import {
-  planContentSelectionArchive,
+  planContentSelectionDelete,
   planContentSelectionCopy,
   planContentSelectionFavorite,
   planContentSelectionMove,
@@ -16,7 +16,6 @@ export type { ContentSelection } from "./content-selection-plans";
 
 export type ContentContext = {
   organizationKey: string;
-  agentKey: string;
   scopeKey: string;
   userKey?: string;
 };
@@ -230,14 +229,13 @@ export function getContentContext(): ContentContext {
   const state = useAuthStore.getState();
   return {
     organizationKey: recordKey(state.organization),
-    agentKey: state.contentExecution?.agentKey ?? "",
     scopeKey: recordKey(state.scope),
     userKey: state.user?.key ?? "",
   };
 }
 
 export function isContentContextConfigured(context: ContentContext) {
-  return [context.organizationKey, context.agentKey, context.scopeKey].every((value) => value.trim().length > 0);
+  return [context.organizationKey, context.scopeKey].every((value) => value.trim().length > 0);
 }
 
 export function createContentMutationKey() {
@@ -280,7 +278,7 @@ async function callContentTool<T>(tool: string, input: Record<string, unknown>, 
   try {
     const response = await apiClient.post<ToolResponse<T>>(`/api/v1/content/tools/${tool}`, {
       organizationKey: contentContext.organizationKey,
-      agentKey: contentContext.agentKey,
+      scopeKey: contentContext.scopeKey,
       input,
     }, { signal, timeout: tool === "document.summary.audio.generate" || tool === "document.read" && input.persistAudio === true ? 15 * 60_000 : tool === "document.parse" || tool === "document.scan" ? 5 * 60_000 : tool === "document.summarize" || tool === "document.topics" ? 4 * 60_000 : 60_000 });
     if (!response.data.success) throw contentToolError(response.data.error);
@@ -312,7 +310,7 @@ export async function askPersonalAssistant(message: string, currentNote: { docum
   try {
     const response = await apiClient.post<ToolResponse<PersonalAssistantResponse>>("/api/v1/assistant/respond", {
       organizationKey: contentContext.organizationKey,
-      agentKey: contentContext.agentKey,
+      scopeKey: contentContext.scopeKey,
       input: { surface: "knowledge-workspace", message, currentNote, requestKey: createContentMutationKey(), ...(folderKey ? { folderKey } : {}) },
     }, { signal, timeout: 4 * 60_000 });
     if (!response.data.success) throw new Error(response.data.error.message);
@@ -577,8 +575,8 @@ export async function copyContentDocument(documentKey: string, targetFolderKey?:
   return singleBatchRecord(outcome, outcome.documents, "The document could not be copied.");
 }
 
-export async function archiveContentDocument(documentKey: string) {
-  const outcome = await archiveContentSelection({ folderKeys: [], documentKeys: [documentKey] });
+export async function deleteContentDocument(documentKey: string) {
+  const outcome = await hardDeleteContentSelection({ folderKeys: [], documentKeys: [documentKey] });
   return singleBatchRecord(outcome, outcome.documents, "The document could not be deleted.");
 }
 
@@ -647,8 +645,8 @@ export function copyContentSelection(selection: ContentSelection, destinationFol
   return executeContentSelectionPlan(planContentSelectionCopy(selection, getContentContext().scopeKey, destinationFolderKeys, idempotencyKey));
 }
 
-export function archiveContentSelection(selection: ContentSelection, idempotencyKey = createContentMutationKey()) {
-  return executeContentSelectionPlan(planContentSelectionArchive(selection, idempotencyKey));
+export function hardDeleteContentSelection(selection: ContentSelection, idempotencyKey = createContentMutationKey()) {
+  return executeContentSelectionPlan(planContentSelectionDelete(selection, idempotencyKey));
 }
 
 export async function setContentFolderFavorite(folderKey: string, isFavorite: boolean) {
@@ -661,8 +659,8 @@ export async function copyContentFolder(folderKey: string, targetParentFolderKey
   return singleBatchRecord(outcome, outcome.copiedFolders, "The folder could not be copied.");
 }
 
-export async function archiveContentFolder(folderKey: string) {
-  const outcome = await archiveContentSelection({ folderKeys: [folderKey], documentKeys: [] });
+export async function deleteContentFolder(folderKey: string) {
+  const outcome = await hardDeleteContentSelection({ folderKeys: [folderKey], documentKeys: [] });
   return singleBatchRecord(outcome, outcome.folders, "The folder could not be deleted.");
 }
 

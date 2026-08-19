@@ -16,7 +16,6 @@ type AuthState = {
   user: AuthUser | null;
   organization: Record<string, unknown> | null;
   scope: Record<string, unknown> | null;
-  contentExecution: { agentKey: string } | null;
   bootstrap: () => Promise<void>;
   hydrate: () => Promise<void>;
   reconnectContentContext: () => Promise<void>;
@@ -33,7 +32,6 @@ const signedOutState = {
   user: null,
   organization: null,
   scope: null,
-  contentExecution: null,
 };
 
 function isGuest(user: AuthUser | null) {
@@ -45,7 +43,6 @@ export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   organization: null,
   scope: null,
-  contentExecution: null,
   bootstrap: async () => {
     const operation = ++authOperation;
     const { session, generation } = await tokenVault.snapshot();

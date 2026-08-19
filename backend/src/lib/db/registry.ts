@@ -1,18 +1,11 @@
 import type { Page } from './base';
-import { getAllActionsChunked, listActionsPage, upsertActionByKey } from './actions.node';
 import { getAllProvidersChunked, listProvidersPage, upsertProviderByKey } from './providers.node';
 import { getAllModelsChunked, listModelsPage, upsertModelByKey } from './models.node';
 import { getAllModelActionsChunked, listModelActionsPage, upsertModelActionByKey } from './model-actions.node';
 import { getAllModelProvidersChunked, listModelProvidersPage, upsertModelProviderByKey } from './model-providers.node';
-import { getAllAgentsChunked, listAgentsPage, upsertAgentByKey } from './agents.node';
-import { getAllSkillsChunked, listSkillsPage, upsertSkillByKey } from './skills.node';
-import { getAllAgentSkillsChunked, listAgentSkillsPage, upsertAgentSkillByKey } from './agent-skills.node';
 import { getAllVisitorSessionsChunked, listVisitorSessionsPage, upsertVisitorSessionByKey } from './visitor-sessions.node';
 import { getAllUserSessionsChunked, listUserSessionsPage, upsertUserSessionByKey } from './user-sessions.node';
 import { getAllAuthChallengesChunked, listAuthChallengesPage, upsertAuthChallengeByKey } from './auth-challenges.node';
-import { getAllCapabilitiesChunked, listCapabilitiesPage, upsertCapabilityByKey } from './capabilities.node';
-import { getAllMindCapabilitiesChunked, listMindCapabilitiesPage, upsertMindCapabilityByKey } from './mind-capabilities.node';
-import { getAllMindsChunked, listMindsPage, upsertMindByKey } from './minds.node';
 import { getAllOrchestratorsChunked, listOrchestratorsPage, upsertOrchestratorByKey } from './orchestrators.node';
 import { getAllUserOrganizationsChunked, listUserOrganizationsPage, upsertUserOrganizationByKey } from './user-organization.node';
 import { getAllOrganizationsChunked, listOrganizationsPage, upsertOrganization } from './organizations.node';
@@ -20,8 +13,6 @@ import { getAllProcessedWebhookEventsChunked, listProcessedWebhookEventsPage, up
 import { getAllUsersChunked, listUsersPage, upsertUserByKey } from './users.node';
 import { getAllVisitorsChunked, listVisitorsPage, upsertVisitorByKey } from './visitors.node';
 import { getAllVoicesChunked, listVoicesPage, upsertVoiceByKey } from './voices.node';
-import { getAllScopeAgentsChunked, listScopeAgentsPage, upsertScopeAgentByKey } from './scope-agents.node';
-import { getAllAgentMembersChunked, listAgentMembersPage, upsertAgentMemberByKey } from './agent-members.node';
 import { getAllChannelsChunked, listChannelsPage, upsertChannelByKey } from './channels.node';
 import { getAllChannelParticipantsChunked, listChannelParticipantsPage, upsertChannelParticipantByKey } from './channel-participants.node';
 import { getAllThreadsChunked, listThreadsPage, upsertThreadByKey } from './threads.node';
@@ -77,12 +68,7 @@ export interface NodeAccessors {
  * once and it shows up in both automatically.
  */
 export const NODE_REGISTRY: Record<string, NodeAccessors> = {
-  actions: { listPage: listActionsPage, getAllChunked: getAllActionsChunked, upsertByKey: upsertActionByKey },
-  agents: { listPage: listAgentsPage, getAllChunked: getAllAgentsChunked, upsertByKey: upsertAgentByKey },
-  agentSkills: { listPage: listAgentSkillsPage, getAllChunked: getAllAgentSkillsChunked, upsertByKey: upsertAgentSkillByKey },
-  agentMembers: { listPage: listAgentMembersPage, getAllChunked: getAllAgentMembersChunked, upsertByKey: upsertAgentMemberByKey },
   authChallenges: { listPage: listAuthChallengesPage, getAllChunked: getAllAuthChallengesChunked, upsertByKey: upsertAuthChallengeByKey },
-  capabilities: { listPage: listCapabilitiesPage, getAllChunked: getAllCapabilitiesChunked, upsertByKey: upsertCapabilityByKey },
   channels: { listPage: listChannelsPage, getAllChunked: getAllChannelsChunked, upsertByKey: upsertChannelByKey },
   channelParticipants: { listPage: listChannelParticipantsPage, getAllChunked: getAllChannelParticipantsChunked, upsertByKey: upsertChannelParticipantByKey },
   threads: { listPage: listThreadsPage, getAllChunked: getAllThreadsChunked, upsertByKey: upsertThreadByKey },
@@ -115,8 +101,6 @@ export const NODE_REGISTRY: Record<string, NodeAccessors> = {
   bookChapters: { listPage: listBookChaptersPage, getAllChunked: getAllBookChaptersChunked, upsertByKey: upsertBookChapterByKey },
   chapterContexts: { listPage: listChapterContextsPage, getAllChunked: getAllChapterContextsChunked, upsertByKey: upsertChapterContextByKey },
   bookProgress: { listPage: listBookProgressPage, getAllChunked: getAllBookProgressChunked, upsertByKey: upsertBookProgressByKey },
-  mindCapabilities: { listPage: listMindCapabilitiesPage, getAllChunked: getAllMindCapabilitiesChunked, upsertByKey: upsertMindCapabilityByKey },
-  minds: { listPage: listMindsPage, getAllChunked: getAllMindsChunked, upsertByKey: upsertMindByKey },
   modelActions: { listPage: listModelActionsPage, getAllChunked: getAllModelActionsChunked, upsertByKey: upsertModelActionByKey },
   modelProviders: { listPage: listModelProvidersPage, getAllChunked: getAllModelProvidersChunked, upsertByKey: upsertModelProviderByKey },
   models: { listPage: listModelsPage, getAllChunked: getAllModelsChunked, upsertByKey: upsertModelByKey },
@@ -124,8 +108,6 @@ export const NODE_REGISTRY: Record<string, NodeAccessors> = {
   organizations: { listPage: listOrganizationsPage, getAllChunked: getAllOrganizationsChunked, upsertByKey: upsertOrganization },
   processedWebhookEvents: { listPage: listProcessedWebhookEventsPage, getAllChunked: getAllProcessedWebhookEventsChunked, upsertByKey: upsertProcessedWebhookEventByKey },
   providers: { listPage: listProvidersPage, getAllChunked: getAllProvidersChunked, upsertByKey: upsertProviderByKey },
-  skills: { listPage: listSkillsPage, getAllChunked: getAllSkillsChunked, upsertByKey: upsertSkillByKey },
-  scopeAgents: { listPage: listScopeAgentsPage, getAllChunked: getAllScopeAgentsChunked, upsertByKey: upsertScopeAgentByKey },
   userSessions: { listPage: listUserSessionsPage, getAllChunked: getAllUserSessionsChunked, upsertByKey: upsertUserSessionByKey },
   userOrganizations: { listPage: listUserOrganizationsPage, getAllChunked: getAllUserOrganizationsChunked, upsertByKey: upsertUserOrganizationByKey },
   users: { listPage: listUsersPage, getAllChunked: getAllUsersChunked, upsertByKey: upsertUserByKey },

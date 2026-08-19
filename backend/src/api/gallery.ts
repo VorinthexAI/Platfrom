@@ -75,7 +75,6 @@ export const listGallerySubjects = handler('listSubjects');
 export const createGallerySubject = handler('createSubject', 201);
 export const listGallerySubjectImages = handler('listSubjectImages');
 export const deleteGallerySubject = handler('deleteSubject');
-export const restoreGallerySubject = handler('restoreSubject');
 export const createGalleryHighlight = handler('createHighlight', 201);
 export const listGalleryHighlights = async (c: Context) => {
   try {

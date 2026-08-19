@@ -12,7 +12,7 @@ export {
   modelActionSchema,
   getModelActionById,
   getModelActionByPair,
-  listEnabledModelActionsByActionKey,
+  listEnabledModelActionsByActionSlug,
   type ModelAction,
 } from '@/lib/db/model-actions.node';
 export {

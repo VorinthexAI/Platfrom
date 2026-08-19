@@ -26,7 +26,7 @@ function result(scopeKey: string, key = newId()) {
       image: {
       key, scopeKey, filename: 'mountain.jpg', caption: 'Snow-covered mountains beneath a blue sky.',
       storageKey: 'private/mountain.jpg', mimeType: 'image/jpeg', sizeBytes: 100, width: 1_200, height: 800,
-      embedding, imageCaptionKey: null, createdByKey: null, isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now,
+      embedding, imageCaptionKey: null, createdByKey: null, isFavorite: false, createdAt: now, updatedAt: now,
     },
     score: 0.92,
   };
@@ -126,7 +126,7 @@ describe('image.search tool', () => {
       async listMatchingVisualIdentities(scopeKey, query) {
         identityLookups += 1;
         expect({ scopeKey, query }).toEqual({ scopeKey: toolContext.runtimeScopeKey, query: 'photos of Hugo' });
-        return [{ key: identityKey, scopeKey: toolContext.runtimeScopeKey, name: 'Hugo', description: 'A saved identity.', referenceImageKey: newId(), embedding: identityEmbedding, deletedAt: null, createdAt: now, updatedAt: now }];
+        return [{ key: identityKey, scopeKey: toolContext.runtimeScopeKey, name: 'Hugo', description: 'A saved identity.', referenceImageKey: newId(), embedding: identityEmbedding, createdAt: now, updatedAt: now }];
       },
       async searchImages(input) {
         searches.push(input);
@@ -180,7 +180,7 @@ describe('image.search tool', () => {
     let metrics: { mode: string; resultCount: number; durationMs: number } | undefined;
     const identity = {
       key: identityKey, scopeKey: toolContext.runtimeScopeKey, name: 'Alex', description: 'A person wearing a blue coat.',
-      referenceImageKey: newId(), embedding, deletedAt: null, createdAt: now, updatedAt: now,
+      referenceImageKey: newId(), embedding, createdAt: now, updatedAt: now,
     };
     const first = { image: result(toolContext.runtimeScopeKey).image, confidence: 1 }, second = { image: result(toolContext.runtimeScopeKey).image, confidence: 0.81 };
     const output = await imageSearchTool.execute({ identityKey, collectionKey }, {

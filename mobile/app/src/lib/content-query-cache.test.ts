@@ -44,14 +44,12 @@ const context: ContentContext = {
   userKey: "user-a",
   organizationKey: "organization-a",
   scopeKey: "scope-a",
-  agentKey: "agent-a",
 };
 
 const otherContext: ContentContext = {
   userKey: "user-b",
   organizationKey: "organization-b",
   scopeKey: "scope-b",
-  agentKey: "agent-b",
 };
 
 test("scopes Archive cache keys by the complete content context", () => {

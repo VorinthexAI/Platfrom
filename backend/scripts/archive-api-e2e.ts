@@ -58,7 +58,6 @@ if (!guestResponse.ok) throw new Error(`Guest bootstrap failed with ${guestRespo
 const guest = object(await guestResponse.json());
 const organizationKey = string(object(guest.organization).key, 'organization key');
 const scopeKey = string(object(guest.main_scope).key, 'scope key');
-const agentKey = string(object(guest.content_execution).agent_key, 'content execution agent key');
 let accessToken = string(guestResponse.headers.get('x-access-token'), 'access token');
 let refreshToken = string(guestResponse.headers.get('x-refresh-token'), 'refresh token');
 
@@ -72,7 +71,7 @@ if (process.env.ARCHIVE_E2E_AUDIO === 'true') {
       'x-vorinthex-api-key': process.env.API_KEY ?? '',
       'x-vorinthex-session-transport': 'header',
     },
-    body: JSON.stringify({ organizationKey, agentKey, input: { text: Array.from({ length: 25 }, (_, index) => `narration${index}`).join(' '), wordsPerChunk: 20 } }),
+    body: JSON.stringify({ organizationKey, scopeKey, input: { text: Array.from({ length: 25 }, (_, index) => `narration${index}`).join(' '), wordsPerChunk: 20 } }),
   });
   const audioStream = await audioResponse.text();
   if (!audioResponse.ok || audioResponse.headers.get('content-type')?.includes('text/event-stream') !== true) throw new Error(`Audio generation failed with ${audioResponse.status}: ${audioStream}`);
@@ -91,7 +90,7 @@ async function tool(name: string, input: Record<string, unknown>) {
       'x-vorinthex-api-key': process.env.API_KEY ?? '',
       'x-vorinthex-session-transport': 'header',
     },
-    body: JSON.stringify({ organizationKey, agentKey, input }),
+    body: JSON.stringify({ organizationKey, scopeKey, input }),
   });
   const body = object(await response.json());
   accessToken = response.headers.get('x-access-token') ?? accessToken;
@@ -225,8 +224,8 @@ const historyEntry = (searchHistory.history as unknown[]).map(object).find((entr
 if (!historyEntry) throw new Error('Semantic search history was not persisted.');
 if (['contextDomain', 'documents', 'folderKey', 'includeDescendants', 'scopeKey'].some((field) => field in historyEntry)) throw new Error('Global search history exposed Archive context.');
 
-await tool('document.archive', { documentKeys: [documentKey, uploadedDocumentKey, uploadedPdfKey], atomic: true });
+await tool('document.delete', { documentKeys: [documentKey, uploadedDocumentKey, uploadedPdfKey], atomic: true });
 await tool('document.delete', { documentKeys: [documentKey, uploadedDocumentKey, uploadedPdfKey], deleteVersions: true, deleteShares: true });
-await tool('folder.archive', { folderKeys: [folderKey], atomic: true });
+await tool('folder.delete', { folderKeys: [folderKey], recursive: true, atomic: true });
 
 console.log(`Archive API E2E passed: guest auth, ${process.env.ARCHIVE_E2E_AUDIO === 'true' ? 'streamed and persisted document/summary Polly narration, ' : ''}folder/document creation, autosave, LocalStack upload, AWS PDF extraction, fast folder/file search, semantic retrieval, and history.`);

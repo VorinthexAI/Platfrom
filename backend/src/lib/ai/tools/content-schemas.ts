@@ -24,7 +24,6 @@ export const contentFolderSchema = z.object({
   description: textSchema.optional(),
   coverUrl: z.string().url().optional(),
   isFavorite: z.boolean().default(false),
-  deletedAt: dateTimeSchema.nullable().default(null),
   createdAt: dateTimeSchema,
   updatedAt: dateTimeSchema,
   childrenCount: z.number().int().nonnegative().optional(),
@@ -38,7 +37,6 @@ export const contentDocumentShareSchema = z.object({
   permission: z.enum(['read', 'comment']),
   expiresAt: dateTimeSchema.optional(),
   revokedAt: dateTimeSchema.optional(),
-  deletedAt: dateTimeSchema.nullable().default(null),
   createdAt: dateTimeSchema,
   updatedAt: dateTimeSchema,
 }).strict();
@@ -50,7 +48,6 @@ export const contentDocumentVersionSchema = z.object({
   version: z.number().int().positive(),
   type: z.enum(['enhancement', 'translation']).optional(),
   label: z.string().trim().min(1).max(120).optional(),
-  deletedAt: dateTimeSchema.nullable().default(null),
   createdAt: dateTimeSchema,
 }).strict();
 
@@ -70,7 +67,6 @@ export const contentDocumentSchema = z.object({
   sourceImageCount: z.number().int().min(1).max(12).optional(),
   currentVersionKey: keySchema.nullable().optional(),
   isFavorite: z.boolean().default(false),
-  deletedAt: dateTimeSchema.nullable().default(null),
   createdAt: dateTimeSchema,
   updatedAt: dateTimeSchema,
 }).strict();
@@ -186,7 +182,6 @@ const commonSearchFilterShape = {
   createdBefore: dateTimeSchema.optional(),
   updatedAfter: dateTimeSchema.optional(),
   updatedBefore: dateTimeSchema.optional(),
-  includeArchived: z.boolean().optional(),
   documentKeys: keysSchema.optional(),
 };
 export const contentSearchFiltersSchema = z.object(commonSearchFilterShape).strict();
@@ -268,20 +263,18 @@ const documentReadDataSchema = z.union([
 
 export const contentToolContracts = {
   'folder.create': { description: 'Create one or more Content folders.', input: z.object({ folders: z.array(z.object({ key: keySchema.optional(), scopeKey: keySchema, parentFolderKey: keySchema.optional(), name: nameSchema, description: textSchema.optional(), coverImageKey: keySchema.optional() }).strict()).min(1).max(100), ...idempotencyShape }).strict(), output: contentBatchOutputSchema(folderDataSchema) },
-  'folder.find': { description: 'Find Content folders by key.', input: z.object({ folderKeys: keysSchema, includeArchived: z.boolean().optional(), includeChildrenCount: z.boolean().optional(), includeDocumentCount: z.boolean().optional() }).strict(), output: contentBatchOutputSchema(folderDataSchema) },
-  'folder.list': { description: 'List direct child folders or all descendants under a scope or parent folder.', input: z.object({ scopeKey: keySchema, parentFolderKey: keySchema.optional(), includeDescendants: z.boolean().optional(), includeArchived: z.boolean().optional(), includeDocuments: z.boolean().optional(), cursor: cursorSchema.optional(), limit: limitSchema.optional(), sort: folderSortSchema.optional() }).strict(), output: z.object({ folders: z.array(contentFolderSchema), documents: z.array(contentDocumentSchema).optional(), cursor: cursorSchema.optional() }).strict() },
+  'folder.find': { description: 'Find Content folders by key.', input: z.object({ folderKeys: keysSchema, includeChildrenCount: z.boolean().optional(), includeDocumentCount: z.boolean().optional() }).strict(), output: contentBatchOutputSchema(folderDataSchema) },
+  'folder.list': { description: 'List direct child folders or all descendants under a scope or parent folder.', input: z.object({ scopeKey: keySchema, parentFolderKey: keySchema.optional(), includeDescendants: z.boolean().optional(), includeDocuments: z.boolean().optional(), cursor: cursorSchema.optional(), limit: limitSchema.optional(), sort: folderSortSchema.optional() }).strict(), output: z.object({ folders: z.array(contentFolderSchema), documents: z.array(contentDocumentSchema).optional(), cursor: cursorSchema.optional() }).strict() },
   'folder.update': { description: 'Update folder metadata.', input: z.object({ updates: z.array(folderUpdateSchema).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(folderDataSchema) },
   'folder.rename': { description: 'Rename folders.', input: z.object({ renames: z.array(z.object({ folderKey: keySchema, name: nameSchema }).strict()).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(folderDataSchema) },
   'folder.move': { description: 'Move folders to another parent or the scope root.', input: z.object({ moves: z.array(z.object({ folderKey: keySchema, targetParentFolderKey: keySchema.optional() }).strict()).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(folderDataSchema) },
   'folder.copy': { description: 'Copy folder subtrees, including descendant folders and documents, to scoped parent folders or roots.', input: z.object({ copies: z.array(z.object({ folderKey: keySchema, targetScopeKey: keySchema, targetParentFolderKey: keySchema.optional(), newName: nameSchema.optional() }).strict()).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(copiedFolderDataSchema) },
-  'folder.archive': { description: 'Content folders.', input: z.object({ folderKeys: keysSchema, includeDescendants: z.boolean().optional(), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(folderDataSchema) },
-  'folder.restore': { description: 'Restore archived folders.', input: z.object({ folderKeys: keysSchema, includeDescendants: z.boolean().optional(), restoreAncestors: z.boolean().optional(), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(folderDataSchema) },
   'folder.delete': { description: 'Permanently delete folders.', input: z.object({ folderKeys: keysSchema, recursive: z.boolean().optional(), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(emptyDataSchema) },
   'document.parse': { description: 'Parse a TXT, Markdown, DOC, DOCX, or PDF file into cleaned plain text and an embedding.', input: documentParseInputSchema.extend(idempotencyShape), output: z.object({ document: contentDocumentSchema }).strict() },
   'document.scan': { description: 'Convert up to 12 ordered document images into one editable document using reconciled OCR while retaining the source images.', input: documentScanInputSchema, output: z.object({ document: contentDocumentSchema }).strict() },
   'document.create': { description: 'Create a live plain-text document without creating a version.', input: z.object({ scopeKey: keySchema, folderKey: keySchema.optional(), name: nameSchema, content: textSchema, ...idempotencyShape }).strict(), output: z.object({ document: contentDocumentSchema }).strict() },
-  'document.find': { description: 'Find documents by key.', input: z.object({ documentKeys: keysSchema, includeArchived: z.boolean().optional(), include: z.array(z.enum(['content', 'embedding', 'folder', 'shares', 'latestVersion', 'sourceImages'])).min(1).optional() }).strict(), output: contentBatchOutputSchema(projectedDocumentDataSchema) },
-  'document.list': { description: 'List documents at a scope location; omit folderKey for the Content root.', input: z.object({ scopeKey: keySchema, folderKey: keySchema.optional(), includeArchived: z.boolean().optional(), cursor: cursorSchema.optional(), limit: limitSchema.optional(), sort: documentSortSchema.optional(), extensions: z.array(documentExtensionSchema).min(1).optional() }).strict(), output: z.object({ documents: z.array(contentDocumentSchema), cursor: cursorSchema.optional() }).strict() },
+  'document.find': { description: 'Find documents by key.', input: z.object({ documentKeys: keysSchema, include: z.array(z.enum(['content', 'embedding', 'folder', 'shares', 'latestVersion', 'sourceImages'])).min(1).optional() }).strict(), output: contentBatchOutputSchema(projectedDocumentDataSchema) },
+  'document.list': { description: 'List documents at a scope location; omit folderKey for the Content root.', input: z.object({ scopeKey: keySchema, folderKey: keySchema.optional(), cursor: cursorSchema.optional(), limit: limitSchema.optional(), sort: documentSortSchema.optional(), extensions: z.array(documentExtensionSchema).min(1).optional() }).strict(), output: z.object({ documents: z.array(contentDocumentSchema), cursor: cursorSchema.optional() }).strict() },
   'document.read': { description: 'Read document content or generate chunked audio.', input: z.object({ documentKeys: keysSchema, mode: z.enum(['content', 'audio']).default('content'), language: textSchema.optional(), voice: z.literal('Matthew').optional(), speakingRate: z.number().min(0.25).max(4).optional(), startOffset: z.number().int().nonnegative().optional(), endOffset: z.number().int().positive().optional(), includeTitle: z.boolean().optional(), includeCode: z.boolean().optional(), persistAudio: z.boolean().optional(), atomic: atomicSchema, ...idempotencyShape }).strict().superRefine((value, context) => {
     if (value.endOffset !== undefined && value.startOffset !== undefined && value.endOffset <= value.startOffset) context.addIssue({ code: z.ZodIssueCode.custom, message: 'endOffset must be greater than startOffset' });
     if (value.mode !== 'audio') {
@@ -304,15 +297,11 @@ export const contentToolContracts = {
   'document.rename': { description: 'Rename documents.', input: z.object({ renames: z.array(z.object({ documentKey: keySchema, name: nameSchema }).strict()).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(documentDataSchema) },
   'document.move': { description: 'Move documents to a scoped folder or the Content root.', input: z.object({ moves: z.array(z.object({ documentKey: keySchema, targetScopeKey: keySchema, targetFolderKey: keySchema.optional() }).strict()).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(documentDataSchema) },
   'document.copy': { description: 'Copy documents to a scoped folder or the Content root.', input: z.object({ copies: z.array(z.object({ documentKey: keySchema, targetScopeKey: keySchema, targetFolderKey: keySchema.optional(), newName: nameSchema.optional(), includeVersions: z.boolean().default(false), includeShares: z.boolean().default(false) }).strict()).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(copiedDocumentDataSchema) },
-  'document.archive': { description: 'Content documents.', input: z.object({ documentKeys: keysSchema, atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(documentDataSchema) },
-  'document.restore': { description: 'Restore archived documents.', input: z.object({ documentKeys: keysSchema, restoreAncestors: z.boolean().optional(), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(documentDataSchema) },
-  'document.delete': { description: 'Permanently delete documents and optionally their versions and shares.', input: z.object({ documentKeys: keysSchema, deleteVersions: z.boolean().optional(), deleteShares: z.boolean().optional(), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(emptyDataSchema) },
+  'document.delete': { description: 'Permanently delete documents and their versions and shares.', input: z.object({ documentKeys: keysSchema, atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(emptyDataSchema) },
   'document.download': { description: 'Download original files, sandboxed HTML previews, or generated plain-text files.', input: z.object({ documentKeys: keysSchema, format: z.enum(['original', 'html', 'txt']).default('original') }).strict(), output: contentBatchOutputSchema(fileDataSchema) },
   'document.export': { description: 'Export documents as plain text.', input: z.object({ exports: z.array(z.object({ documentKey: keySchema, format: z.literal('txt') }).strict()).min(1).max(100), atomic: atomicSchema }).strict(), output: contentBatchOutputSchema(fileDataSchema) },
   'document.share': { description: 'Create document shares.', input: z.object({ shares: z.array(z.object({ documentKey: keySchema, permission: z.enum(['read', 'comment']), expiresAt: dateTimeSchema.optional(), password: z.string().min(1).max(256).optional() }).strict()).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(createdShareDataSchema) },
   'document.unshare': { description: 'Revoke document shares.', input: z.object({ shareKeys: keysSchema.optional(), documentKeys: keysSchema.optional(), atomic: atomicSchema, ...idempotencyShape }).strict().refine((value) => Number(value.shareKeys !== undefined) + Number(value.documentKeys !== undefined) === 1, 'exactly one of shareKeys or documentKeys is required'), output: contentBatchOutputSchema(unsharedDataSchema) },
-  'document-share.archive': { description: 'Archive document shares.', input: z.object({ shareKeys: keysSchema, atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(shareDataSchema) },
-  'document-share.restore': { description: 'Restore archived document shares.', input: z.object({ shareKeys: keysSchema, atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(shareDataSchema) },
   'document.list-shares': { description: 'List shares for documents.', input: z.object({ documentKeys: keysSchema, includeExpired: z.boolean().optional(), includeRevoked: z.boolean().optional() }).strict(), output: contentBatchOutputSchema(z.object({ documentKey: keySchema, shares: z.array(contentDocumentShareSchema) }).strict()) },
   'document.create-version': { description: 'Create document versions from the current or supplied content.', input: z.object({ documentKeys: keysSchema, labels: z.record(z.string().trim().min(1).max(120)).optional(), contents: z.record(textSchema).optional(), types: z.record(z.enum(['enhancement', 'translation'])).optional(), atomic: atomicSchema, ...idempotencyShape }).strict().superRefine((value, context) => {
     for (const key of Object.keys(value.labels ?? {})) if (!value.documentKeys.includes(key)) context.addIssue({ code: z.ZodIssueCode.custom, path: ['labels', key], message: 'label key must be one of documentKeys' });
@@ -322,8 +311,6 @@ export const contentToolContracts = {
   'document.find-version': { description: 'Find document versions by key.', input: z.object({ versionKeys: keysSchema, include: z.array(z.enum(['content', 'embedding'])).min(1).optional() }).strict(), output: contentBatchOutputSchema(projectedVersionDataSchema) },
   'document.list-versions': { description: 'List ordered versions grouped by document.', input: z.object({ documentKeys: keysSchema, cursor: cursorSchema.optional(), limit: limitSchema.optional() }).strict(), output: contentBatchOutputSchema(z.object({ documentKey: keySchema, versions: z.array(contentDocumentVersionSchema), cursor: cursorSchema.optional() }).strict()) },
   'document.restore-version': { description: 'Restore document versions.', input: z.object({ restores: z.array(z.object({ documentKey: keySchema, versionKey: keySchema, createBackupVersion: z.boolean().default(true) }).strict()).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(documentDataSchema) },
-  'document-version.archive': { description: 'Archive document versions.', input: z.object({ versionKeys: keysSchema, atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(versionDataSchema) },
-  'document-version.restore': { description: 'Restore archived document versions.', input: z.object({ versionKeys: keysSchema, atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(versionDataSchema) },
   'document.delete-version': { description: 'Delete document versions.', input: z.object({ versionKeys: keysSchema, atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(emptyDataSchema) },
   'document.summarize': { description: 'Summarize documents and optionally persist one immutable summary version.', input: z.object({ documentKeys: keysSchema, topic: textSchema.max(500).optional(), style: z.enum(['brief', 'detailed', 'executive', 'bullet-points', 'technical']).default('brief'), language: textSchema.optional(), persist: z.boolean().optional(), combine: z.boolean().optional(), atomic: atomicSchema, ...idempotencyShape }).strict().superRefine((value, context) => {
     if (value.persist && value.documentKeys.length !== 1) context.addIssue({ code: z.ZodIssueCode.custom, path: ['documentKeys'], message: 'persisted summaries accept exactly one document' });

@@ -39,7 +39,7 @@ export function splitAudioGenerationText(text: string, wordsPerChunk = 100) {
 
 export function buildAudioGenerateRequest(input: {
   organizationKey: string;
-  agentKey: string;
+  scopeKey: string;
   text: string;
   wordsPerChunk?: number;
   voice?: string;
@@ -47,7 +47,7 @@ export function buildAudioGenerateRequest(input: {
 }) {
   return {
     organizationKey: input.organizationKey,
-    agentKey: input.agentKey,
+    scopeKey: input.scopeKey,
     input: {
       text: input.text,
       wordsPerChunk: input.wordsPerChunk ?? 100,

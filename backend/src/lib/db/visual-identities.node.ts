@@ -10,7 +10,6 @@ export const visualIdentitySchema = z.object({
   description: z.string().trim().min(1).max(12_000),
   referenceImageKey: z.string().cuid(),
   embedding: currentEmbeddingSchema,
-  deletedAt: z.string().datetime().nullable(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });

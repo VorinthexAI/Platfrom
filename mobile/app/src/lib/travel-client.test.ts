@@ -1,7 +1,7 @@
 import { beforeEach, expect, mock, test } from "bun:test";
 
 const calls: { method: string; path: string; body: unknown; config?: unknown }[] = [];
-const authState = { organization: { key: "org-key" }, scope: { key: "scope-key" }, contentExecution: { agentKey: "agent-key" } };
+const authState = { organization: { key: "org-key" }, scope: { key: "scope-key" } };
 const timestamp = "2026-08-11T10:00:00.000Z";
 const place = { key: "place-key", kind: "country", name: "Iceland", latitude: 64.96, longitude: -19.02, countryCode: "IS", country: "Iceland", continent: "Europe", city: null, wishlist: false, visited: false, createdAt: timestamp, updatedAt: timestamp };
 const trip = { key: "trip-key", name: "North", description: null, startDate: null, endDate: null, itinerary: [], createdAt: timestamp, updatedAt: timestamp };
@@ -67,7 +67,7 @@ test("asks Core through the Compass assistant surface", async () => {
     path: "/assistant/respond",
     body: {
       organizationKey: "org-key",
-      agentKey: "agent-key",
+      scopeKey: "scope-key",
       input: { surface: "travel-workspace", requestKey: "request-key", message: "Where should I go?", currentNote: { title: "", content: "" } },
     },
     config: { timeout: 60_000 },

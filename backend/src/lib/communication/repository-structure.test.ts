@@ -85,7 +85,7 @@ describe('Arango communication repository structure', () => {
     expect(source.match(/viewerMembership\.orgRole == "owner" \|\| viewerMembership\.orgRole == "admin"/g)).toHaveLength(3);
   });
 
-  test('cascades deletion through replies and restricts editing to the author', async () => {
+  test('hard-deletes reply trees and dependent communication records while restricting edits to the author', async () => {
     const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
     expect(source).toContain('message.replyToMessageKey IN @parentKeys');
     expect(source).toContain('message.threadKey == @threadKey');
@@ -93,7 +93,15 @@ describe('Arango communication repository structure', () => {
     expect(source).toContain('FILTER author.userOrganizationKey == @membershipKey');
     expect(source).toContain('editedAt: @now, updatedAt: @now');
     expect(source).toContain('current.updatedAt == @updatedAt && current.content == @content');
-    expect(source.match(/message\.deletedAt == null/g)?.length).toBeGreaterThanOrEqual(3);
+    for (const mutation of [
+      'REMOVE vote IN pollVotes',
+      'REMOVE option IN pollOptions',
+      'REMOVE poll IN polls',
+      'REMOVE mention IN messageMentions',
+      'REMOVE reaction IN messageReactions',
+      'REMOVE thread IN threads',
+      'REMOVE message IN messages',
+    ]) expect(source).toContain(mutation);
   });
 
   test('upserts message mentions by their public message key', async () => {

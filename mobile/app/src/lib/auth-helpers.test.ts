@@ -35,14 +35,12 @@ describe("mobile auth helpers", () => {
       user: { display_name: "Ada Lovelace", country_code: "SE" },
       org: { key: "org" },
       main_scope: { key: "scope" },
-      content_execution: { agent_key: "agent" },
     });
     expect(context.organization).toEqual({ key: "org" });
     expect(context.scope).toEqual({ key: "scope" });
-    expect(context.contentExecution).toEqual({ agentKey: "agent" });
     expect(context.user?.countryCode).toBe("SE");
     expect(hasCompleteAuthContext(context)).toBe(true);
-    expect(hasCompleteAuthContext({ ...context, contentExecution: null })).toBe(false);
+    expect(hasCompleteAuthContext({ ...context, scope: null })).toBe(false);
     expect(firstNameFor(context.user)).toBe("Ada");
   });
 

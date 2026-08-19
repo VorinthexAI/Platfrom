@@ -10,7 +10,7 @@ const actor = { userKey, organizationKey: 'org-1', scopeKey };
 const now = '2026-08-11T12:00:00.000Z';
 const embedding = Array.from({ length: 4096 }, () => 0);
 const connector = { key: userKey, organizationKey: 'org-1', scopeKey, provider: 'gmail', providerAccountId: 'google-1', email: 'me@example.com', encryptedCredentials: 'cipher', encryptionKeyId: 'v1', accessTokenFingerprint: 'a'.repeat(64), scopes: ['email'], createdByMembershipKey: scopeKey, status: 'active', createdAt: now, updatedAt: now } as const;
-const thread = { key: userKey, scopeKey, accountKey: scopeKey, providerThreadId: 'thread-1', subject: 'Project', summary: 'Summary', intent: 'Review', priority: 'normal', state: 'needs_action', lastMessageAt: now, embedding, isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now } as const;
+const thread = { key: userKey, scopeKey, accountKey: scopeKey, providerThreadId: 'thread-1', subject: 'Project', summary: 'Summary', intent: 'Review', priority: 'normal', state: 'needs_action', lastMessageAt: now, embedding, isFavorite: false, createdAt: now, updatedAt: now } as const;
 const message = { key: scopeKey, scopeKey, accountKey: scopeKey, threadKey: userKey, providerMessageId: 'message-1', from: 'sender@example.com', replyTo: 'replies@example.com', to: ['me@example.com'], subject: 'Project', body: 'Can you review?', summary: 'Can you review?', direction: 'inbound', sentAt: now, hasAttachments: false, messageIdHeader: '<source@example.com>', replyDepth: 0, embedding, createdAt: now, updatedAt: now } as const;
 const draft = { key: userKey, scopeKey, threadKey: userKey, messageKey: scopeKey, generatedContent: 'I will review it.', status: 'sending', embedding, createdAt: now, updatedAt: now } as const;
 

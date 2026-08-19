@@ -4,10 +4,10 @@ import { newId } from '@/lib/ids';
 import { createPersonalAssistantHandler } from './personal-assistant';
 
 const organizationKey = newId();
-const agentKey = newId();
+const scopeKey = newId();
 const requestBody = {
   organizationKey,
-  agentKey,
+  scopeKey,
   input: { surface: 'knowledge-workspace', message: 'Improve this', currentNote: { title: 'Draft', content: 'Text' } },
 };
 
@@ -33,7 +33,7 @@ describe('personal assistant API', () => {
       run: async () => ({ type: 'note', content: 'Improved text', message: 'Improved the note.', sources: [] }),
     });
     expect(response.status).toBe(200);
-    expect(authorization).toEqual({ organizationKey, agentKey });
+    expect(authorization).toEqual({ organizationKey, scopeKey });
     expect(await response.json()).toEqual({ success: true, data: { type: 'note', content: 'Improved text', message: 'Improved the note.', sources: [] } });
   });
 
@@ -45,11 +45,11 @@ describe('personal assistant API', () => {
       run: async () => ({ type: 'answer', message: 'Found images.', sources: [] }),
     }, { ...requestBody, input: { ...requestBody.input, surface: 'media-workspace', currentNote: { title: '', content: '' } } });
     expect(response.status).toBe(200);
-    expect(authorization).toEqual({ organizationKey, agentKey });
+    expect(authorization).toEqual({ organizationKey, scopeKey });
   });
 
   test('rejects unknown request fields', async () => {
-    const response = await request({ getIdentity: async () => ({ key: newId(), identityType: 'user' }) }, { ...requestBody, unexpected: true });
+    const response = await request({ getIdentity: async () => ({ key: newId(), identityType: 'user' }) }, { ...requestBody, agentKey: newId() });
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({ success: false, error: { code: 'ASSISTANT_INVALID_INPUT' } });
   });

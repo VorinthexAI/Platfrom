@@ -74,15 +74,6 @@ export { webSearchAction } from './web-search';
 export { ACTION_SLUGS, actionIdSchema, isValidActionIdFormat } from './types';
 export { createDataActions, traverseInputSchema, traverseNodes, type ActionNode, type TraverseInput } from './data';
 export { coreChatContentSchema, coreChatMessageSchema, coreChatToolDefinitionSchema, coreChatInputSchema, type CoreChatContent, type CoreChatMessage, type CoreChatToolDefinition, type CoreChatInput } from './core-chat';
-export {
-  actionSchema,
-  getActionById,
-  getActionBySlug,
-  insertAction,
-  updateAction,
-  deleteAction,
-  type Action,
-} from '@/lib/db/actions.node';
 
 /** Stable, provider- and domain-neutral runtime primitives. */
 export const ACTION_DEFINITIONS: readonly ActionDefinition[] = [
@@ -93,7 +84,7 @@ export const ACTION_DEFINITIONS: readonly ActionDefinition[] = [
   documentValidateAction, storageUploadAction, documentExtractAction, documentEmbedAction, documentInsertAction, enhanceAction, translateAction, captionImageAction, describeVisualIdentityAction,
   documentCleanupAction, documentSummarizeAction, documentTopicsAction,
 ];
-export const getActionDefinition = (id: ActionId) => ACTION_DEFINITIONS.find((definition) => definition.id === id);
+export const getActionDefinition = (id: ActionId): ActionDefinition | undefined => ACTION_DEFINITIONS.find((definition) => definition.id === id);
 
 export function assertActionRegistryIntegrity(): void {
   if (new Set(ACTION_SLUGS).size !== ACTION_SLUGS.length) {

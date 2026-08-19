@@ -14,7 +14,7 @@ function image(overrides: Partial<Image> = {}): Image {
   return {
     key: imageKey, scopeKey, filename: 'image.png', caption: 'Generated caption.', imageCaptionKey: captionKey,
     storageKey: 'media/image.png', mimeType: 'image/png', sizeBytes: 10, width: 10, height: 10,
-    embedding: embedding(0.1), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now,
+    embedding: embedding(0.1), isFavorite: false, createdAt: now, updatedAt: now,
     ...overrides, createdByKey: overrides.createdByKey ?? null,
   };
 }
