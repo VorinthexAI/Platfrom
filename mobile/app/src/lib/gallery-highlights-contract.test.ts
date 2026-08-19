@@ -22,6 +22,8 @@ test("uses separate full-height grid and player sheets with footer actions", () 
   expect(highlights).toContain("useToast()");
   expect(highlights).toContain('notify("Highlights could not be loaded")');
   expect(highlights).not.toContain('style={styles.error}');
+  expect(highlights).toContain('contentContainerStyle={[styles.grid, listEmpty && styles.emptyGrid]}');
+  expect(highlights).toContain('emptyGrid: { flexGrow: 1, alignItems: "center", justifyContent: "center" }');
   expect(highlights).toContain('const cardWidth = Math.floor((width - spacing.md * 2 - GAP * (COLUMNS - 1)) / COLUMNS)');
   expect(highlights).toContain('height: cardWidth * 16 / 9');
   expect(highlights).toContain('<Button accessibilityLabel="Previous slide"');

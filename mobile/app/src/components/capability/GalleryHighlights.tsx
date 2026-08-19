@@ -50,6 +50,7 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
   const cardWidth = Math.floor((width - spacing.md * 2 - GAP * (COLUMNS - 1)) / COLUMNS);
   const slides = detail ? resolveGalleryHighlightSlides(detail) : [];
   const activeSlide = slides[playback.index];
+  const listEmpty = !creating && !listLoading && highlights.length === 0;
 
   async function loadList() {
     const generation = ++request.current;
@@ -177,14 +178,14 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
 
   return <>
     <BottomSheet footer={listFooter} height="full" onOpenChange={(next) => { if (!next) close(); }} open={open && !detail} title="Highlights">
-      <ScrollView contentContainerStyle={styles.grid} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={[styles.grid, listEmpty && styles.emptyGrid]} showsVerticalScrollIndicator={false}>
         {creating ? <View accessibilityLabel="Creating highlight" accessibilityRole="progressbar"><Skeleton style={[styles.creatingCard, { width: cardWidth, height: cardWidth * 16 / 9 }]} /></View> : null}
         {listLoading ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={{ width: cardWidth, height: cardWidth * 16 / 9 }} />) : highlights.map((highlight) => <Button accessibilityLabel={`${highlight.title}, ${highlight.slideCount} slides`} contentMode="raw" disabled={opening} key={highlight.key} onPress={() => void openHighlight(highlight)} shape="rounded" size="xl" style={[styles.card, { width: cardWidth, height: cardWidth * 16 / 9 }]} variant="ghost">
           {highlight.coverUrl ? <Image contentFit="cover" source={highlight.coverUrl} style={StyleSheet.absoluteFill} transition={180} /> : null}
           <View style={styles.cardShade} />
           <View style={styles.cardCopy}><Text numberOfLines={2} style={styles.title}>{highlight.title}</Text><Text style={styles.cardCount}>{highlight.slideCount} slide{highlight.slideCount === 1 ? "" : "s"}</Text></View>
         </Button>)}
-        {!listLoading && highlights.length === 0 ? <Text style={styles.empty}>No highlights yet.</Text> : null}
+        {listEmpty ? <Text style={styles.empty}>No highlights yet.</Text> : null}
       </ScrollView>
     </BottomSheet>
 
@@ -214,6 +215,7 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
 
 const styles = StyleSheet.create({
   grid: { flexDirection: "row", flexWrap: "wrap", gap: GAP, paddingVertical: spacing.md },
+  emptyGrid: { flexGrow: 1, alignItems: "center", justifyContent: "center" },
   creatingCard: { borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.lg, backgroundColor: palette.panelRaised },
   card: { overflow: "hidden", alignItems: "stretch", justifyContent: "flex-end", padding: 0, borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.lg, backgroundColor: palette.panelRaised },
   cardShade: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundColor: "rgba(0,0,0,0.35)" },
