@@ -247,6 +247,7 @@ variable "api_secret_keys" {
     "GOOGLE_OAUTH_CLIENT_SECRET",
     "NO_REPLY_EMAIL",
     "OPENAI_API_KEY",
+    "OPENROUTER_API_KEY",
     "RATE_LIMIT_ENABLED",
     "RATE_LIMIT_REQ_PER_MIN",
     "REDIS_URL",

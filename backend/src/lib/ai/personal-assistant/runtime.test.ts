@@ -100,7 +100,7 @@ describe('personal assistant runtime', () => {
       },
       images: { generate: async (...args: unknown[]) => { calls.push(args); return { images: [{ key: newId(), url: 'https://images.example/signed.png' }], provider: { durationMs: 10, costUsd: 0.1 } }; } } as any,
     });
-    expect(calls).toEqual([[{ prompt: 'Earth from orbit', count: 1, size: '1024x1024', quality: 'high' }, domain, expect.stringMatching(/^[a-f0-9]{64}$/)]]);
+    expect(calls).toEqual([[{ prompt: 'Earth from orbit', count: 1, size: '1024x1024', quality: 'high', mode: 'default' }, domain, expect.stringMatching(/^[a-f0-9]{64}$/)]]);
     expect(calls[0]?.[2]).not.toBe('request-1');
     expect(result).toEqual({ type: 'answer', message: 'Generated and saved the image.', sources: [], changes: [{ workspace: 'gallery' }] });
   });
@@ -114,7 +114,7 @@ describe('personal assistant runtime', () => {
       },
     });
 
-    expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual(['country.search', 'place.list', 'place.find', 'place.create', 'assistant.unsupported']);
+    expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual(['country.search', 'place.list', 'place.find', 'place.find-city', 'place.find-children', 'place.create', 'place.open', 'assistant.unsupported']);
     expect(chatInput.systemPrompt).toContain('operating inside Compass');
     expect(chatInput.messages[0].content[0].text).toContain('"workspace":"Compass"');
     expect(result).toEqual({ type: 'unsupported', message: 'This request is not supported in Compass. Core can search your saved knowledge for travel context.', sources: [] });

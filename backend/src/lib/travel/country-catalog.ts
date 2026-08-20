@@ -4,6 +4,7 @@ import { countryCodeSchema } from '@/lib/db/users.node';
 type FeatureCatalog = { features: Array<{ properties: { name: string; countryCode: string; latitude: number; longitude: number } }> };
 const sourceFiles = ['../../../../mobile/app/src/data/countries-110m.json', '../../../../mobile/app/src/data/countries-small.json'];
 const sourceRows = (await Promise.all(sourceFiles.map((path) => Bun.file(new URL(path, import.meta.url)).json() as Promise<FeatureCatalog>))).flatMap(({ features }) => features.map(({ properties }) => properties));
+const countryNameOverrides = await Bun.file(new URL('../../../../mobile/app/src/data/country-name-overrides.json', import.meta.url)).json() as Record<string, string>;
 const sourceByCode = new Map(sourceRows.map((country) => [country.countryCode, country]));
 const missing = [
   ['BQ', 'Caribbean Netherlands', 12.18, -68.24], ['BV', 'Bouvet Island', -54.42, 3.36], ['CC', 'Cocos (Keeling) Islands', -12.16, 96.87],
@@ -19,7 +20,7 @@ export const COUNTRY_CATALOG = Object.freeze(countryCodeSchema.options.map((coun
   if (!source) throw new Error(`Canonical country catalog is missing ${countryCode}.`);
   return Object.freeze({
     key: `c${createHash('sha256').update(`country\0${countryCode}`).digest('hex').slice(0, 24)}`,
-    name: source.name,
+    name: countryNameOverrides[countryCode] ?? source.name,
     countryCode,
     latitude: source.latitude, longitude: source.longitude,
   });

@@ -50,6 +50,12 @@ export const SEEDED_PROVIDERS = [
     handlerKey: 'openai',
   },
   {
+    key: 'cmopenrouterprovider000001',
+    slug: 'openrouter',
+    name: 'OpenRouter',
+    handlerKey: 'openrouter',
+  },
+  {
     key: 'cmrl6mtn60007a1b23aushlt0',
     slug: 'anthropic',
     name: 'Anthropic',
@@ -112,6 +118,22 @@ export const SEEDED_MODELS = [
     supportedUseCases: 'Retrieval-augmented generation, semantic search, vector retrieval, classification, and document similarity.',
     enabled: true,
   },
+  {
+    key: 'cmflux2klein4bmodel000001',
+    slug: 'bfl.flux-2-klein-4b',
+    name: 'Black Forest Labs FLUX.2 Klein 4B',
+    description: 'Low-latency image generation model routed through OpenRouter.',
+    supportedUseCases: 'Fast image generation and visual asset creation.',
+    enabled: true,
+  },
+  {
+    key: 'cmgrokimagequalitymodel001',
+    slug: 'xai.grok-imagine-image-quality',
+    name: 'xAI Grok Imagine Image Quality',
+    description: 'Quality-focused image generation model routed through OpenRouter.',
+    supportedUseCases: 'Image generation and visual asset creation.',
+    enabled: true,
+  },
 ] as const;
 
 const SEEDED_MODEL_SLUGS = new Set<string>(SEEDED_MODELS.map(({ slug }) => slug));
@@ -147,6 +169,20 @@ export const SEEDED_MODEL_PROVIDERS = [
     modelSlug: 'openai.text-embedding-3-small',
     providerSlug: 'openai',
     providerModelId: 'text-embedding-3-small',
+    enabled: true,
+  },
+  {
+    key: 'cmflux2klein4broute000001',
+    modelSlug: 'bfl.flux-2-klein-4b',
+    providerSlug: 'openrouter',
+    providerModelId: 'black-forest-labs/flux.2-klein-4b',
+    enabled: true,
+  },
+  {
+    key: 'cmgrokimagequalityroute001',
+    modelSlug: 'xai.grok-imagine-image-quality',
+    providerSlug: 'openrouter',
+    providerModelId: 'x-ai/grok-imagine-image-quality',
     enabled: true,
   },
 ] as const;
@@ -487,12 +523,12 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
     const currentCursor = await db.query<{ key: string; semanticVersion?: number; semanticHash?: string }>('FOR country IN countries FILTER country.countryCode == @countryCode LIMIT 1 RETURN { key: country._key, semanticVersion: country.semanticVersion, semanticHash: country.semanticHash }', { countryCode: country.countryCode });
     const current = await currentCursor.next();
     if (current?.semanticVersion === 1 && current.semanticHash === semanticHash) {
-      await db.query('UPDATE @key WITH { name: @name, latitude: @latitude, longitude: @longitude } IN countries', { ...country, key: current.key });
+      await db.query('UPDATE @key WITH { name: @name, latitude: @latitude, longitude: @longitude } IN countries', { key: current.key, name: country.name, latitude: country.latitude, longitude: country.longitude });
       results.push({ collection: 'countries', key: current.key, status: 'updated' });
       continue;
     }
     const embedding = currentEmbeddingSchema.parse(await embedText({ text: country.name }));
-    const cursor = await db.query(`UPSERT { countryCode: @countryCode } INSERT @country UPDATE { name: @name, latitude: @latitude, longitude: @longitude, embedding: @embedding, semanticVersion: 1, semanticHash: @semanticHash } IN countries RETURN NEW._key`, { ...country, semanticHash, country: { _key: country.key, ...country, embedding, semanticVersion: 1, semanticHash }, embedding });
+    const cursor = await db.query(`UPSERT { countryCode: @countryCode } INSERT @country UPDATE { name: @name, latitude: @latitude, longitude: @longitude, embedding: @embedding, semanticVersion: 1, semanticHash: @semanticHash } IN countries RETURN NEW._key`, { countryCode: country.countryCode, name: country.name, latitude: country.latitude, longitude: country.longitude, semanticHash, country: { _key: country.key, ...country, embedding, semanticVersion: 1, semanticHash }, embedding });
     results.push({ collection: 'countries', key: String(await cursor.next()), status: current ? 'updated' : 'created' });
   }
 

@@ -4,6 +4,7 @@ import { awsBedrockMantleProviderFactory } from './aws-bedrock-mantle';
 import { azureAIFoundryProviderFactory } from './azure-ai-foundry';
 import { googleVertexProviderFactory } from './google-vertex';
 import { openAIProviderFactory } from './openai';
+import { openRouterProviderFactory } from './openrouter';
 import { xaiProviderFactory } from './xai';
 import type { AnthropicCredentials } from './anthropic';
 import type { AwsBedrockCredentials } from './aws-bedrock';
@@ -11,6 +12,7 @@ import type { AwsBedrockMantleCredentials } from './aws-bedrock-mantle';
 import type { AzureAIFoundryCredentials } from './azure-ai-foundry';
 import type { GoogleVertexCredentials } from './google-vertex';
 import type { OpenAICredentials } from './openai';
+import type { OpenRouterCredentials } from './openrouter';
 import type { XaiCredentials } from './xai';
 import type { ProviderAdapter, ProviderFactory, ProviderId } from './types';
 
@@ -65,6 +67,7 @@ export {
   type ProviderErrorCode,
 } from './errors';
 export { createOpenAIProvider, openAICredentialsSchema, openAIProviderConfigSchema, openAIProviderFactory, type OpenAICredentials, type OpenAIProviderConfig } from './openai';
+export { createOpenRouterProvider, openRouterProviderConfigSchema, openRouterProviderFactory, type OpenRouterCredentials, type OpenRouterProviderConfig } from './openrouter';
 export { createAnthropicProvider, anthropicCredentialsSchema, anthropicProviderConfigSchema, anthropicProviderFactory, type AnthropicCredentials, type AnthropicProviderConfig } from './anthropic';
 export { createXaiProvider, xaiCredentialsSchema, xaiProviderConfigSchema, xaiProviderFactory, type XaiCredentials, type XaiProviderConfig } from './xai';
 export {
@@ -102,6 +105,7 @@ export {
  */
 export const PROVIDER_REGISTRY: Record<ProviderId, ProviderFactory> = {
   openai: openAIProviderFactory,
+  openrouter: openRouterProviderFactory,
   anthropic: anthropicProviderFactory,
   xai: xaiProviderFactory,
   'google-vertex': googleVertexProviderFactory,
@@ -112,6 +116,7 @@ export const PROVIDER_REGISTRY: Record<ProviderId, ProviderFactory> = {
 
 export type ProviderCredentials = {
   openai: OpenAICredentials;
+  openrouter: OpenRouterCredentials;
   anthropic: AnthropicCredentials;
   xai: XaiCredentials;
   'google-vertex': GoogleVertexCredentials;

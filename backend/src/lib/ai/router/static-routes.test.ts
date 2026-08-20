@@ -1,12 +1,17 @@
 import { describe, expect, test } from 'bun:test';
-import { createStaticProviderAdapter, isStaticProvider, resolveStaticBedrockEnvironment, resolveStaticOpenAIConfig, STATIC_PROVIDER_IDS } from './static-routes';
+import { createStaticProviderAdapter, isStaticProvider, resolveStaticBedrockEnvironment, resolveStaticOpenAIConfig, resolveStaticOpenRouterConfig, STATIC_PROVIDER_IDS } from './static-routes';
 
 describe('static provider routes', () => {
   test('registers each environment-backed provider', () => {
-    expect(STATIC_PROVIDER_IDS).toEqual(['openai', 'aws-bedrock', 'aws-bedrock-mantle']);
+    expect(STATIC_PROVIDER_IDS).toEqual(['openai', 'openrouter', 'aws-bedrock', 'aws-bedrock-mantle']);
     expect(isStaticProvider('aws-bedrock')).toBe(true);
     expect(isStaticProvider('aws-bedrock-mantle')).toBe(true);
     expect(isStaticProvider('openai')).toBe(true);
+    expect(isStaticProvider('openrouter')).toBe(true);
+  });
+
+  test('resolves static OpenRouter configuration from environment variables', () => {
+    expect(resolveStaticOpenRouterConfig({ OPENROUTER_API_KEY: 'key', OPENROUTER_BASE_URL: 'https://example.com/v1' })).toEqual({ apiKey: 'key', baseUrl: 'https://example.com/v1' });
   });
 
   test('does not create an adapter for a non-static provider', () => {

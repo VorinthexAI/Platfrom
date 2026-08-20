@@ -11,13 +11,14 @@ const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
 
 describe('travel node contracts', () => {
   test('validates places and builds the exact semantic text', () => {
-    const place = placeSchema.parse({ key, scopeKey: otherKey, name: ' Tokyo ', summary: ' Temples and gardens. ', latitude: 35.6762, longitude: 139.6503, countryCode: 'jp', embedding, embeddingContentVersion: 2, createdAt: timestamp });
-    expect(place).toEqual({ key, scopeKey: otherKey, name: 'Tokyo', summary: ' Temples and gardens. ', countryCode: 'JP', latitude: 35.6762, longitude: 139.6503, embedding, embeddingContentVersion: 2, createdAt: timestamp });
+    const place = placeSchema.parse({ key, userKey: key, scopeKey: otherKey, saved: false, name: ' Tokyo ', summary: ' Temples and gardens. ', latitude: 35.6762, longitude: 139.6503, countryCode: 'jp', embedding, embeddingContentVersion: 2, openedAt: timestamp, createdAt: timestamp });
+    expect(place).toEqual({ key, userKey: key, scopeKey: otherKey, saved: false, name: 'Tokyo', summary: ' Temples and gardens. ', countryCode: 'JP', latitude: 35.6762, longitude: 139.6503, embedding, embeddingContentVersion: 2, openedAt: timestamp, createdAt: timestamp });
     expect(placesEmbeddingFields).toEqual(['name', 'summary']);
     expect(buildPlaceEmbeddingText(place)).toBe('Tokyo:  Temples and gardens. ');
     expect(placeSchema.safeParse({ ...place, latitude: 91 }).success).toBe(false);
     expect(placeSchema.safeParse({ ...place, longitude: -181 }).success).toBe(false);
     expect(placeSchema.safeParse({ ...place, countryCode: 'ZZ' }).success).toBe(false);
     expect(placeSchema.safeParse({ ...place, embedding: embedding.slice(1) }).success).toBe(false);
+    expect(placeSchema.safeParse({ ...place, openedAt: 'client-owned-garbage' }).success).toBe(false);
   });
 });

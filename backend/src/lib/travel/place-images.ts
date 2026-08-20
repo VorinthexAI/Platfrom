@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
-import sharp from 'sharp';
 import { z } from 'zod';
 import { executeAction, type ExecuteActionOptions } from '@/lib/ai/router';
 import { imageOutputSchema, type ImageOutput } from '@/lib/ai/providers';
+import { GENERATED_IMAGE_BASE64_MAX_LENGTH } from '@/lib/ai/providers/types';
 import { placeCountryCodeSchema } from '@/lib/db/places.node';
 import { decryptAuthenticatedJson } from '@/lib/authenticated-encryption';
 import { documentStorage, type DocumentObjectStorage } from '@/lib/ai/document-processing/storage';
@@ -10,7 +10,7 @@ import type { TravelAccessContext, TravelRepository } from './repository';
 
 export const PLACE_IMAGE_TOKEN_MAX_LENGTH = 64 * 1024;
 export const PLACE_IMAGE_TOKEN_VALIDITY_MS = 60 * 60_000;
-export const PLACE_IMAGE_WEBP_MAX_BYTES = 4 * 1024 * 1024;
+export const PLACE_IMAGE_PNG_MAX_BYTES = Math.floor(GENERATED_IMAGE_BASE64_MAX_LENGTH / 4) * 3;
 
 export const travelPlaceImageInputSchema = z.object({
   organizationKey: z.string().trim().min(1), scopeKey: z.string().cuid(), imageRequestToken: z.string().min(1).max(PLACE_IMAGE_TOKEN_MAX_LENGTH),
@@ -23,19 +23,18 @@ export const placeImageTokenSchema = z.object({
   place: z.object({ name: z.string().trim().min(1).max(160), summary: z.string().trim().min(1), countryCode: placeCountryCodeSchema, latitude: z.number().finite().min(-90).max(90), longitude: z.number().finite().min(-180).max(180) }).strict(),
 }).strict();
 export type PlaceImageToken = z.infer<typeof placeImageTokenSchema>;
-export function stagedPlaceImageKey(nonce: string) { return `pending/gallery/place-media/${nonce}/preview.webp`; }
-const inlineWebpSchema = z.string().max('data:image/webp;base64,'.length + Math.ceil(PLACE_IMAGE_WEBP_MAX_BYTES / 3) * 4).regex(/^data:image\/webp;base64,[A-Za-z0-9+/]+={0,2}$/);
+export function stagedPlaceImageKey(nonce: string) { return `pending/gallery/place-media/${nonce}/preview.png`; }
+const inlinePngSchema = z.string().max('data:image/png;base64,'.length + GENERATED_IMAGE_BASE64_MAX_LENGTH).regex(/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/);
 export const travelPlaceImageResponseSchema = z.object({
   status: z.literal('ready'),
-  image: z.object({ status: z.literal('ready'), title: z.string().trim().min(1).max(160), url: inlineWebpSchema, width: z.literal(1536), height: z.literal(864), mimeType: z.literal('image/webp') }).strict(),
+  image: z.object({ status: z.literal('ready'), title: z.string().trim().min(1).max(160), url: inlinePngSchema, width: z.literal(1536), height: z.literal(1024), mimeType: z.literal('image/png') }).strict(),
   durationMs: z.number().int().nonnegative(), costUsd: z.number().nonnegative().nullable(),
 }).strict();
 export type PlaceImageResult = z.infer<typeof travelPlaceImageResponseSchema>;
-export type PlaceImageMetrics = { countryCode: string; state: 'ready' | 'failed'; title: string; providerDurationMs?: number; transformMs?: number; totalMs: number; costUsd?: number | null };
+export type PlaceImageMetrics = { countryCode: string; state: 'ready' | 'failed'; title: string; providerDurationMs?: number; stagingMs?: number; totalMs: number; costUsd?: number | null };
 export interface PlaceImageDependencies {
   repository: Pick<TravelRepository, 'authorizeRead'>;
   execute?: typeof executeAction;
-  transform?: (bytes: Uint8Array) => Promise<Uint8Array>;
   now?: () => number;
   onMetrics?: (metrics: PlaceImageMetrics) => void;
   log?: (message: string, fields: PlaceImageMetrics) => void;
@@ -43,18 +42,24 @@ export interface PlaceImageDependencies {
   storage?: DocumentObjectStorage;
 }
 
-const defaultTransform = async (bytes: Uint8Array) => new Uint8Array(await sharp(bytes, { animated: false, failOn: 'error', limitInputPixels: 40_000_000 }).resize(1536, 864, { fit: 'cover', position: 'attention' }).webp({ quality: 82 }).toBuffer());
 const elapsed = (now: () => number, started: number) => Math.max(0, Math.round(now() - started));
 const placeImageInFlight = new Map<string, Promise<PlaceImageResult>>();
 const consumedPlaceImageTokens = new Map<string, number>();
 const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex');
+function assertPlacePngDimensions(bytes: Uint8Array) {
+  const signature = [137, 80, 78, 71, 13, 10, 26, 10];
+  if (bytes.byteLength < 24 || signature.some((value, index) => bytes[index] !== value)) throw new Error('Image provider returned invalid PNG bytes.');
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const width = view.getUint32(16);
+  const height = view.getUint32(20);
+  if (width !== 1536 || height !== 1024) throw new Error(`Image provider returned ${width}x${height}; expected 1536x1024.`);
+}
 function pruneReplayState(now: number) { for (const [hash, expiresAt] of consumedPlaceImageTokens) if (expiresAt <= now) consumedPlaceImageTokens.delete(hash); }
 export function resetPlaceImageReplayStateForTests() { placeImageInFlight.clear(); consumedPlaceImageTokens.clear(); }
 export function placeImageReplayStateForTests() { return { inFlight: [...placeImageInFlight.keys()], consumed: [...consumedPlaceImageTokens.entries()] }; }
 
 export function createPlaceImageGenerator(dependencies: PlaceImageDependencies) {
   const execute = dependencies.execute ?? executeAction;
-  const transform = dependencies.transform ?? defaultTransform;
   const now = dependencies.now ?? Date.now;
   const log = dependencies.log ?? ((message: string, fields: PlaceImageMetrics) => console.info(message, fields));
   const decryptImageRequest = dependencies.decryptImageRequest ?? decryptAuthenticatedJson;
@@ -73,38 +78,42 @@ export function createPlaceImageGenerator(dependencies: PlaceImageDependencies) 
     const stagedKey = stagedPlaceImageKey(token.nonce);
     try {
       const staged = await storage.download(stagedKey);
-      if (staged.bytes.byteLength > 0 && staged.bytes.byteLength <= PLACE_IMAGE_WEBP_MAX_BYTES) {
+      if (staged.bytes.byteLength > 0 && staged.bytes.byteLength <= PLACE_IMAGE_PNG_MAX_BYTES) {
+        assertPlacePngDimensions(staged.bytes);
         consumedPlaceImageTokens.set(tokenHash(input.imageRequestToken), expiresAt);
-        return travelPlaceImageResponseSchema.parse({ status: 'ready', image: { status: 'ready', title: token.hero.title, url: `data:image/webp;base64,${Buffer.from(staged.bytes).toString('base64')}`, width: 1536, height: 864, mimeType: 'image/webp' }, durationMs: 0, costUsd: null });
+        return travelPlaceImageResponseSchema.parse({ status: 'ready', image: { status: 'ready', title: token.hero.title, url: `data:image/png;base64,${Buffer.from(staged.bytes).toString('base64')}`, width: 1536, height: 1024, mimeType: 'image/png' }, durationMs: 0, costUsd: null });
       }
     } catch {
       // A missing staged object is the only state that permits provider work.
     }
     const hash = tokenHash(input.imageRequestToken);
-    const existing = placeImageInFlight.get(hash);
+    const inFlightKey = `${token.organizationKey}\0${token.scopeKey}\0${token.nonce}`;
+    const existing = placeImageInFlight.get(inFlightKey);
     if (existing) return existing;
     const started = currentTime;
     const promise = (async () => {
       try {
         const providerStarted = now();
         const response = await execute<Record<string, unknown>, ImageOutput>(
-          { mode: 'fixed', organizationKey: input.organizationKey, actionSlug: 'generate-image', modelSlug: 'openai.gpt-image-2', providerSlug: 'openai' },
-          { prompt: token.hero.prompt, count: 1, size: '1536x1024', quality: 'low' },
+          { mode: 'fixed', organizationKey: input.organizationKey, actionSlug: 'generate-image', modelSlug: 'bfl.flux-2-klein-4b', providerSlug: 'openrouter' },
+          { prompt: token.hero.prompt, count: 1, aspectRatio: '3:2', outputFormat: 'png' },
           { signal: execution.signal, timeoutMs: execution.timeoutMs ?? 60_000 },
         );
         const providerDurationMs = elapsed(now, providerStarted);
         const output = imageOutputSchema.parse(response.output);
         if (output.images.length !== 1) throw new Error(`Image provider returned ${output.images.length} images; expected one.`);
-        const transformStarted = now();
-        const encoded = await transform(new Uint8Array(Buffer.from(output.images[0]!.base64, 'base64')));
-        if (encoded.byteLength > PLACE_IMAGE_WEBP_MAX_BYTES) throw new Error('Prepared place image exceeds the maximum allowed size.');
-        await storage.upload({ key: stagedKey, bytes: encoded, mimeType: 'image/webp' });
-        const transformMs = elapsed(now, transformStarted);
+        if (output.images[0]!.mimeType !== 'image/png') throw new Error(`Image provider returned ${output.images[0]!.mimeType}; expected image/png.`);
+        const encoded = new Uint8Array(Buffer.from(output.images[0]!.base64, 'base64'));
+        if (encoded.byteLength > PLACE_IMAGE_PNG_MAX_BYTES) throw new Error('Generated place PNG exceeds the maximum allowed size.');
+        assertPlacePngDimensions(encoded);
+        const stagingStarted = now();
+        await storage.upload({ key: stagedKey, bytes: encoded, mimeType: 'image/png' });
+        const stagingMs = elapsed(now, stagingStarted);
         const result = travelPlaceImageResponseSchema.parse({
-          status: 'ready', image: { status: 'ready', title: token.hero.title, url: `data:image/webp;base64,${Buffer.from(encoded).toString('base64')}`, width: 1536, height: 864, mimeType: 'image/webp' },
+          status: 'ready', image: { status: 'ready', title: token.hero.title, url: `data:image/png;base64,${Buffer.from(encoded).toString('base64')}`, width: 1536, height: 1024, mimeType: 'image/png' },
           durationMs: elapsed(now, started), costUsd: response.costUsd ?? null,
         });
-        const metrics = { countryCode: token.country.countryCode, state: 'ready' as const, title: token.hero.title, providerDurationMs, transformMs, totalMs: result.durationMs, costUsd: result.costUsd };
+        const metrics = { countryCode: token.country.countryCode, state: 'ready' as const, title: token.hero.title, providerDurationMs, stagingMs, totalMs: result.durationMs, costUsd: result.costUsd };
         dependencies.onMetrics?.(metrics); log('place hero generated', metrics); consumedPlaceImageTokens.set(hash, expiresAt);
         return result;
       } catch (error) {
@@ -112,7 +121,7 @@ export function createPlaceImageGenerator(dependencies: PlaceImageDependencies) 
         dependencies.onMetrics?.(metrics); log('place hero generation failed', metrics); throw error;
       }
     })();
-    placeImageInFlight.set(hash, promise);
-    try { return await promise; } finally { if (placeImageInFlight.get(hash) === promise) placeImageInFlight.delete(hash); }
+    placeImageInFlight.set(inFlightKey, promise);
+    try { return await promise; } finally { if (placeImageInFlight.get(inFlightKey) === promise) placeImageInFlight.delete(inFlightKey); }
   };
 }

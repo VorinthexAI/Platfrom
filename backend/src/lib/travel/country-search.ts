@@ -4,6 +4,7 @@ import { db } from '@/lib/db/client';
 import { countrySchema, type Country } from '@/lib/db/countries.node';
 import { withArangoKey } from '@/lib/db/base';
 import { embedText } from '@/lib/embeddings';
+import { getDefaultUserSearchService, type UserSearchService } from '@/lib/user-searches/service';
 
 export const countrySearchInputSchema = strictObject({
   organizationKey: z.string().trim().min(1), query: z.string().trim().min(1).max(200),
@@ -41,12 +42,14 @@ export function createCountrySearchRepository(database = db): CountrySearchRepos
   } };
 }
 const embeddingCache = new Map<string, number[]>();
-export function createCountrySearchService(options: { repository?: CountrySearchRepository; embed?: typeof embedText } = {}) {
+export function createCountrySearchService(options: { repository?: CountrySearchRepository; embed?: typeof embedText; userSearches?: UserSearchService } = {}) {
   const repository = options.repository ?? createCountrySearchRepository();
+  const userSearches = options.userSearches ?? getDefaultUserSearchService();
   return { async search(raw: unknown, userKey: string, execution: { signal?: AbortSignal; timeoutMs?: number } = {}) {
     const input = countrySearchInputSchema.parse(raw);
     const context = { organizationKey: input.organizationKey, userKey };
     await repository.authorize(context);
+    await userSearches.record(userKey, input.query);
     let country = await repository.findExact(input.query);
     if (!country) {
       const cacheKey = input.query.toLocaleLowerCase();

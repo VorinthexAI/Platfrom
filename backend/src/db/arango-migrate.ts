@@ -21,6 +21,7 @@ import { withDatabaseTransaction } from '../lib/db/client';
 import { countryCodeSchema } from '../lib/db/users.node';
 import { retireAiPersistence } from './retire-ai-persistence';
 import { buildPlaceEmbeddingText } from '../lib/travel/semantic-text';
+import { generatedPlaceDetailSchema } from '../lib/db/places.node';
 import { buildImageEmbeddingText } from '../lib/image-embedding';
 
 const url = process.env.ARANGO_URL ?? 'http://127.0.0.1:8529';
@@ -353,19 +354,55 @@ export async function migrateEmailReplyMetadata(targetDb: Database): Promise<voi
 
 const legacyPlaceSchema = z.object({
   key: z.string().cuid(),
+  userKey: z.string().cuid(),
   scopeKey: z.string().cuid(),
+  saved: z.boolean(),
   name: z.string().trim().min(1),
   summary: z.string().default(''),
   countryCode: z.preprocess((value) => typeof value === 'string' ? value.trim().toUpperCase() : value, countryCodeSchema),
   latitude: z.number().finite().min(-90).max(90),
   longitude: z.number().finite().min(-180).max(180),
+  openedAt: z.string().datetime().optional(),
   createdAt: z.string().datetime(),
 }).strict();
 
 async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
   const places = targetDb.collection('places');
   if (!await places.exists()) return;
-  const canonicalFields = ['scopeKey', 'name', 'summary', 'countryCode', 'latitude', 'longitude', 'embedding', 'embeddingContentVersion', 'createdAt'].sort();
+  const placeImages = targetDb.collection('placeImages');
+  if (!await placeImages.exists()) await placeImages.create();
+  const missingOwners = await targetDb.query<string>(`
+    FOR place IN places
+      FILTER place.kind != "country" && !HAS(place, "userKey")
+      LET membershipKeys = UNIQUE(FOR relation IN placeImages
+        FILTER relation.placeKey == place._key
+        LET image = DOCUMENT(images, relation.imageKey)
+        FILTER image != null && IS_STRING(image.createdByKey)
+        RETURN image.createdByKey)
+      LET userKeys = UNIQUE(FOR membershipKey IN membershipKeys
+        LET membership = DOCUMENT(userOrganizations, membershipKey)
+        FILTER membership != null && IS_STRING(membership.userId) && LENGTH(membership.userId) > 0
+        RETURN membership.userId)
+      FILTER LENGTH(userKeys) != 1
+      RETURN place._key
+  `);
+  const unresolvedOwners = await missingOwners.all();
+  if (unresolvedOwners.length > 0) throw new Error(`places migration cannot safely derive user ownership for: ${unresolvedOwners.join(', ')}`);
+  await targetDb.query(`
+    FOR place IN places
+      FILTER place.kind != "country" && (!HAS(place, "userKey") || !HAS(place, "saved"))
+      LET membershipKey = FIRST(FOR relation IN placeImages
+        FILTER relation.placeKey == place._key
+        LET image = DOCUMENT(images, relation.imageKey)
+        FILTER image != null && IS_STRING(image.createdByKey)
+        RETURN image.createdByKey)
+      LET membership = membershipKey == null ? null : DOCUMENT(userOrganizations, membershipKey)
+      UPDATE place WITH { userKey: HAS(place, "userKey") ? place.userKey : membership.userId, saved: HAS(place, "saved") ? place.saved : true } IN places
+  `);
+  const canonicalFields = ['userKey', 'scopeKey', 'saved', 'name', 'summary', 'countryCode', 'latitude', 'longitude', 'embedding', 'embeddingContentVersion', 'createdAt'].sort();
+  const openedCanonicalFields = [...canonicalFields, 'openedAt'].sort();
+  const generatedCanonicalFields = [...canonicalFields, 'generatedDetail'].sort();
+  const openedGeneratedCanonicalFields = [...generatedCanonicalFields, 'openedAt'].sort();
   const validatePlaces = async () => {
     let validationAfter = '';
     while (true) {
@@ -381,32 +418,37 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
       const rows = await cursor.all();
       if (rows.length === 0) break;
       for (const place of rows) {
+        const generatedDetail = place.generatedDetail == null ? undefined : generatedPlaceDetailSchema.safeParse(place.generatedDetail);
         const result = legacyPlaceSchema.safeParse({
           key: place._key,
+          userKey: place.userKey,
           scopeKey: place.scopeKey,
+          saved: place.saved,
           name: place.name,
           summary: typeof place.summary === 'string' ? place.summary : '',
           countryCode: place.countryCode,
           latitude: place.latitude,
           longitude: place.longitude,
           createdAt: place.createdAt,
+          ...(place.openedAt == null ? {} : { openedAt: place.openedAt }),
         });
         if (!result.success) throw new Error(`places migration cannot retain ${String(place._key)}: ${result.error.issues.map((issue) => issue.message).join(', ')}`);
+        if (generatedDetail && !generatedDetail.success) throw new Error(`places migration cannot retain generated detail for ${String(place._key)}: ${generatedDetail.error.issues.map((issue) => issue.message).join(', ')}`);
       }
       validationAfter = String(rows.at(-1)!._key);
     }
   };
   await validatePlaces();
-  const duplicateCursor = await targetDb.query<{ scopeKey: string; countryCode: string; name: string; count: number }>(`
+  const duplicateCursor = await targetDb.query<{ scopeKey: string; userKey: string; countryCode: string; name: string; count: number }>(`
     FOR place IN places
       FILTER place.kind != "country"
-      COLLECT scopeKey = place.scopeKey, countryCode = UPPER(TRIM(place.countryCode)), name = TRIM(place.name) WITH COUNT INTO count
+      COLLECT scopeKey = place.scopeKey, userKey = place.userKey, countryCode = UPPER(TRIM(place.countryCode)), name = TRIM(place.name) WITH COUNT INTO count
       FILTER count > 1
-      RETURN { scopeKey, countryCode, name, count }
+      RETURN { scopeKey, userKey, countryCode, name, count }
   `);
   const duplicates = await duplicateCursor.all();
   if (duplicates.length > 0) {
-    const identities = duplicates.map(({ scopeKey, countryCode, name, count }) => `${scopeKey}/${countryCode}/${name} (${count})`).join(', ');
+    const identities = duplicates.map(({ scopeKey, userKey, countryCode, name, count }) => `${scopeKey}/${userKey}/${countryCode}/${name} (${count})`).join(', ');
     throw new Error(`places migration found duplicate saved cities: ${identities}`);
   }
   let after = '';
@@ -415,7 +457,8 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
       FOR place IN places
         FILTER place.kind != "country"
         FILTER place._key > @after
-        FILTER ATTRIBUTES(place, true, true) != @canonicalFields
+        LET fields = ATTRIBUTES(place, true, true)
+        FILTER (fields != @canonicalFields && fields != @openedCanonicalFields && fields != @generatedCanonicalFields && fields != @openedGeneratedCanonicalFields)
           || place.name != TRIM(place.name) || place.countryCode != UPPER(TRIM(place.countryCode))
           || place.embeddingContentVersion != 2
           || !IS_ARRAY(place.embedding) || LENGTH(place.embedding) != @dimensions
@@ -423,25 +466,30 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
         SORT place._key
         LIMIT 50
         RETURN place
-    `, { after, canonicalFields, dimensions: EMBEDDING_DIMENSIONS });
+    `, { after, canonicalFields, openedCanonicalFields, generatedCanonicalFields, openedGeneratedCanonicalFields, dimensions: EMBEDDING_DIMENSIONS });
     const legacyPlaces = await cursor.all();
     if (legacyPlaces.length === 0) break;
     const replacements = [];
     for (const place of legacyPlaces) {
       const canonical = legacyPlaceSchema.parse({
         key: place._key,
+        userKey: place.userKey,
         scopeKey: place.scopeKey,
+        saved: place.saved,
         name: place.name,
         summary: typeof place.summary === 'string' ? place.summary : '',
         countryCode: place.countryCode,
         latitude: place.latitude,
         longitude: place.longitude,
+        ...(place.openedAt == null ? {} : { openedAt: place.openedAt }),
         createdAt: place.createdAt,
       });
       replacements.push({
         _key: canonical.key,
         _rev: place._rev,
+        userKey: canonical.userKey,
         scopeKey: canonical.scopeKey,
+        saved: canonical.saved,
         name: canonical.name,
         summary: canonical.summary,
         countryCode: canonical.countryCode,
@@ -449,6 +497,8 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
         longitude: canonical.longitude,
         embedding: await generateEmbedding(buildPlaceEmbeddingText(canonical)),
         embeddingContentVersion: 2,
+        ...(place.generatedDetail == null ? {} : { generatedDetail: generatedPlaceDetailSchema.parse(place.generatedDetail) }),
+        ...(canonical.openedAt == null ? {} : { openedAt: canonical.openedAt }),
         createdAt: canonical.createdAt,
       });
     }
@@ -476,13 +526,14 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
   await targetDb.query('FOR place IN places FILTER place.kind == "country" REMOVE place IN places');
   const invalid = await targetDb.query<number>(`
     RETURN LENGTH(FOR place IN places
-      FILTER ATTRIBUTES(place, true, true) != @canonicalFields
+      LET fields = ATTRIBUTES(place, true, true)
+      FILTER (fields != @canonicalFields && fields != @openedCanonicalFields && fields != @generatedCanonicalFields && fields != @openedGeneratedCanonicalFields)
         || place.name != TRIM(place.name) || place.countryCode != UPPER(TRIM(place.countryCode))
         || place.embeddingContentVersion != 2
         || !IS_ARRAY(place.embedding) || LENGTH(place.embedding) != @dimensions
         || LENGTH(place.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
       RETURN 1)
-  `, { canonicalFields, dimensions: EMBEDDING_DIMENSIONS });
+  `, { canonicalFields, openedCanonicalFields, generatedCanonicalFields, openedGeneratedCanonicalFields, dimensions: EMBEDDING_DIMENSIONS });
   const invalidCount = await invalid.next() ?? 0;
   if (invalidCount > 0) throw new Error(`places minimal projection verification failed for ${invalidCount} row(s).`);
 }
@@ -1210,7 +1261,7 @@ export const collections: CollectionSpec[] = [
   // Private one-to-one durable audio for generated summaries.
   { name: 'documentSummaryAudio', skipEmbedding: true, indexes: [{ fields: ['summaryKey'], unique: true }, { fields: ['scopeKey', 'documentKey', 'createdAt'] }, { fields: ['storageKey'], unique: true }] },
   { name: 'shares', skipEmbedding: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'sourceType', 'sourceKey'] }, { fields: ['scopeKey', 'sourceType', 'sourceKey', 'revokedAt'] }, { fields: ['tokenHash'], unique: true }, { fields: ['expiresAt'], sparse: true }] },
-  { name: 'places', embedKeys: ['name', 'summary'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'countryCode'] }, { fields: ['scopeKey', 'countryCode', 'name'], unique: true }] },
+  { name: 'places', embedKeys: ['name', 'summary'], indexes: [{ fields: ['scopeKey', 'userKey', 'saved'] }, { fields: ['scopeKey', 'userKey', 'openedAt'], sparse: true }, { fields: ['scopeKey', 'userKey', 'countryCode'] }, { fields: ['scopeKey', 'userKey', 'countryCode', 'name'], unique: true }] },
   { name: 'countries', embedKeys: ['name'], indexes: [{ fields: ['countryCode'], unique: true }, { fields: ['name'] }] },
   { name: 'books', embedKeys: ['title', 'subtitle', 'description', 'goal', 'audience', 'outcome'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'status'] }, { fields: ['scopeKey', 'isFavorite'] }, { fields: ['scopeKey', 'generationRequestKey'], unique: true, sparse: true }] },
   { name: 'bookContexts', embedKeys: ['userContext', 'priorKnowledge', 'priorBookContext', 'personalizationContext', 'researchContext', 'noveltyContext', 'generationBrief'], indexes: [{ fields: ['scopeKey', 'bookKey'], unique: true }] },

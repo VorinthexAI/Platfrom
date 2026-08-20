@@ -1,6 +1,7 @@
 import * as THREE from "three";
 
 import countriesJson from "@/data/countries-110m.json";
+import countryNameOverridesJson from "@/data/country-name-overrides.json";
 import smallCountriesJson from "@/data/countries-small.json";
 import {
   latLonToVector,
@@ -81,7 +82,13 @@ export function parseCountryFeatureCollection(value: unknown): CountryFeatureCol
 export const COUNTRIES = parseCountryFeatureCollection({
   type: "FeatureCollection",
   // Small-state polygons take precedence where coarse 110m neighbors overlap.
-  features: [...smallCountriesJson.features, ...countriesJson.features],
+  features: [...smallCountriesJson.features, ...countriesJson.features].map((feature) => ({
+    ...feature,
+    properties: {
+      ...feature.properties,
+      name: (countryNameOverridesJson as Record<string, string>)[feature.properties.countryCode] ?? feature.properties.name,
+    },
+  })),
 });
 
 export function findCountryAtCoordinates(
@@ -136,21 +143,80 @@ export function createCountryBoundaryGeometry(
 
 export function createCountryFillGeometry(feature: CountryFeature, radius = 1.018): THREE.BufferGeometry {
   const positions: number[] = [];
+  const maximumEdgeAngle = THREE.MathUtils.degToRad(2);
+  const midpoint = new THREE.Vector3();
+
+  const appendSphericalTriangle = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, depth = 0) => {
+    const angles = [a.angleTo(b), b.angleTo(c), c.angleTo(a)] as const;
+    const longestEdge = angles.indexOf(Math.max(...angles));
+    if (angles[longestEdge]! <= maximumEdgeAngle || depth >= 16) {
+      positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+      return;
+    }
+
+    if (longestEdge === 0) {
+      midpoint.copy(a).add(b).normalize().multiplyScalar(radius);
+      const ab = midpoint.clone();
+      appendSphericalTriangle(a, ab, c, depth + 1);
+      appendSphericalTriangle(ab, b, c, depth + 1);
+    } else if (longestEdge === 1) {
+      midpoint.copy(b).add(c).normalize().multiplyScalar(radius);
+      const bc = midpoint.clone();
+      appendSphericalTriangle(a, b, bc, depth + 1);
+      appendSphericalTriangle(a, bc, c, depth + 1);
+    } else {
+      midpoint.copy(c).add(a).normalize().multiplyScalar(radius);
+      const ca = midpoint.clone();
+      appendSphericalTriangle(a, b, ca, depth + 1);
+      appendSphericalTriangle(ca, b, c, depth + 1);
+    }
+  };
+
+  const cleanAndUnwrapRing = (
+    ring: PolygonCoordinates[number],
+    referenceLongitude?: number,
+  ): Array<readonly [number, number]> => {
+    const cleaned: Array<readonly [number, number]> = [];
+    for (const coordinate of ring) {
+      if (!Number.isFinite(coordinate[0]) || !Number.isFinite(coordinate[1])) continue;
+      const previous = cleaned.at(-1);
+      const longitude = previous
+        ? previous[0] + ((coordinate[0] - previous[0] + 540) % 360) - 180
+        : coordinate[0];
+      if (!previous || Math.abs(longitude - previous[0]) > 1e-9 || Math.abs(coordinate[1] - previous[1]) > 1e-9) {
+        cleaned.push([longitude, coordinate[1]]);
+      }
+    }
+
+    const first = cleaned[0];
+    const last = cleaned.at(-1);
+    if (first && last && Math.abs(first[0] - last[0]) < 1e-9 && Math.abs(first[1] - last[1]) < 1e-9) cleaned.pop();
+    if (cleaned.length < 3 || referenceLongitude === undefined) return cleaned;
+
+    const averageLongitude = cleaned.reduce((sum, coordinate) => sum + coordinate[0], 0) / cleaned.length;
+    const longitudeShift = Math.round((referenceLongitude - averageLongitude) / 360) * 360;
+    return longitudeShift === 0 ? cleaned : cleaned.map(([longitude, latitude]) => [longitude + longitudeShift, latitude]);
+  };
+
   const polygons = feature.geometry.type === "Polygon" ? [feature.geometry.coordinates] : feature.geometry.coordinates;
   for (const polygon of polygons) {
-    const [outer, ...holes] = polygon;
-    if (!outer) continue;
+    const outer = polygon[0] ? cleanAndUnwrapRing(polygon[0]) : [];
+    if (outer.length < 3) continue;
+    const referenceLongitude = outer.reduce((sum, coordinate) => sum + coordinate[0], 0) / outer.length;
+    const holes = polygon.slice(1)
+      .map((ring) => cleanAndUnwrapRing(ring, referenceLongitude))
+      .filter((ring) => ring.length >= 3);
     const vertices = outer.map(([longitude, latitude]) => new THREE.Vector2(longitude, latitude));
     const holeVertices = holes.map((ring) => ring.map(([longitude, latitude]) => new THREE.Vector2(longitude, latitude)));
     const rings = [outer, ...holes];
     const flatCoordinates = rings.flat();
     for (const triangle of THREE.ShapeUtils.triangulateShape(vertices, holeVertices)) {
-      for (const index of triangle) {
-        const coordinate = flatCoordinates[index];
-        if (!coordinate) continue;
+      const points = triangle.map((index) => {
+        const coordinate = flatCoordinates[index]!;
         const point = latLonToVector(coordinate[1], coordinate[0], radius);
-        positions.push(point.x, point.y, point.z);
-      }
+        return new THREE.Vector3(point.x, point.y, point.z);
+      });
+      appendSphericalTriangle(points[0]!, points[1]!, points[2]!);
     }
   }
   const geometry = new THREE.BufferGeometry();

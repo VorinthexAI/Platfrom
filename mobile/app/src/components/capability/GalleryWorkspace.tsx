@@ -2519,7 +2519,7 @@ export function GalleryWorkspace() {
             <View style={styles.collectionSearch}>
               <SearchIcon size="sm" variant="muted" />
               <TextInput accessibilityLabel={`Search images in ${activeCollection.name}`} editable={!collectionSearchFocusBlocked} onChangeText={updateCollectionSearch} onFocus={() => { if (collectionSearchFocusBlocked) { collectionSearchInput.current?.blur(); Keyboard.dismiss(); } }} onSubmitEditing={() => { if (searchTimer.current) clearTimeout(searchTimer.current); void search(); }} placeholder="Search..." ref={collectionSearchInput} returnKeyType="search" style={styles.rootSearchInput} value={query} />
-              {query.trim() ? <Button accessibilityLabel="Clear image search" contentMode="raw" hitSlop={8} onPress={() => clearCollectionSearch()} size="xs" variant="icon"><CloseIcon size="sm" /></Button> : null}
+              {query.trim() ? <Button accessibilityLabel="Clear image search" contentMode="raw" hitSlop={8} onPress={() => clearCollectionSearch()} size="xs" style={styles.clearSearchButton} variant="secondary"><CloseIcon size="sm" /></Button> : null}
             </View>
              <Button accessibilityLabel={`Filter ${activeCollection.name}`} contentMode="raw" onPress={() => openSheet("filter")} size="sm" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={filtersActive ? "accent" : "default"} /></Button>
            </View> : null}
@@ -2737,7 +2737,7 @@ export function GalleryWorkspace() {
           <Text style={styles.sheetSubtitle}>{imagePickerPurpose === "cover" ? `Choose an existing image from ${activeCollection?.name ?? "this collection"}.` : "Choose an image to create a visual identity from."}</Text>
           {identityPickerCollection ? <View style={styles.destinationLocationLane}><Button accessibilityLabel="Back to collections" contentMode="raw" onPress={backIdentityPicker} size="md" variant="icon"><ChevronLeftIcon size="sm" /></Button><Text numberOfLines={1} style={styles.destinationLocationTitle}>{identityPickerCollection.name}</Text></View> : null}
           <View style={styles.rootActions}>
-            <View style={styles.collectionSearch}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel="Search images for visual identity" onChangeText={updateIdentityPickerSearch} placeholder="Search images..." style={styles.rootSearchInput} value={identityPickerQuery} />{identityPickerQuery.trim() ? <Button accessibilityLabel="Clear image search" contentMode="raw" onPress={() => updateIdentityPickerSearch("")} size="md" variant="icon"><CloseIcon size="sm" /></Button> : null}</View>
+            <View style={styles.collectionSearch}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel="Search images for visual identity" onChangeText={updateIdentityPickerSearch} placeholder="Search images..." style={styles.rootSearchInput} value={identityPickerQuery} />{identityPickerQuery.trim() ? <Button accessibilityLabel="Clear image search" contentMode="raw" onPress={() => updateIdentityPickerSearch("")} size="md" style={styles.clearSearchButton} variant="secondary"><CloseIcon size="sm" /></Button> : null}</View>
             <Button accessibilityLabel="Filter visual identity image picker" contentMode="raw" onPress={() => pushSheet("identityPickerFilter")} size="md" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={filtersActive ? "accent" : "default"} /></Button>
           </View>
           {filterBadges()}
@@ -2809,6 +2809,7 @@ const styles = StyleSheet.create({
   rootActions: { minHeight: 52, flexDirection: "row", alignItems: "center", gap: 8 },
   rootSearchInput: { minHeight: 40, flex: 1, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", fontSize: 13 },
   searchHistoryButton: { width: 44, height: 44 },
+  clearSearchButton: { aspectRatio: 1, flexGrow: 0, flexShrink: 0, paddingHorizontal: 0, paddingVertical: 0 },
   statusCard: { marginBottom: spacing.sm, paddingHorizontal: 13, paddingVertical: 10, borderLeftWidth: 2, borderLeftColor: palette.silver700, borderRadius: radii.md, backgroundColor: palette.panel },
   status: { color: palette.silver300, fontFamily: fonts.regular, fontSize: 12, lineHeight: 18 },
   collectionView: { flexGrow: 1, gap: spacing.md },

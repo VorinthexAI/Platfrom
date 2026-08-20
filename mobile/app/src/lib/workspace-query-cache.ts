@@ -5,10 +5,11 @@ import { contentQueryKeys } from "./content-query-cache";
 import type { EmailFilter, EmailOverview, EmailThread } from "./email-client";
 import { normalizeCollection } from "./collection-access";
 import type { GalleryCollection, GalleryCollectionInvite, GalleryCollectionMember, GalleryCollectionShareLink, GalleryImage, GalleryOverview } from "./gallery-client";
-import type { Place } from "./travel-client";
+import type { Place, RecentPlace } from "./travel-client";
 import type { UserHiddenRecord } from "./user-hidden-client";
-
-export type WorkspaceContext = { organizationKey: string; scopeKey: string };
+import { compassQueryKeys, type WorkspaceContext } from "./compass-query-keys";
+export { compassQueryKeys } from "./compass-query-keys";
+export type { WorkspaceContext } from "./compass-query-keys";
 
 const contextKey = (context: WorkspaceContext) => [context.organizationKey, context.scopeKey] as const;
 
@@ -64,33 +65,22 @@ export function setCachedGalleryCollections(queryClient: QueryClient, context: W
   queryClient.setQueryData(galleryQueryKeys.collections(context), collections.map(normalizeCollection));
 }
 
-export const compassQueryKeys = {
-  all: (context: WorkspaceContext) => ["compass", ...contextKey(context)] as const,
-  overview: (context: WorkspaceContext) => [...compassQueryKeys.all(context), "overview"] as const,
-  countryDetails: (context: WorkspaceContext) => [...compassQueryKeys.all(context), "country-details"] as const,
-  countryDetail: (context: WorkspaceContext, countryCode: string) => [...compassQueryKeys.countryDetails(context), countryCode] as const,
-  countryImage: (context: WorkspaceContext, imageRequestToken: string) => [...compassQueryKeys.all(context), "country-image", imageRequestToken] as const,
-  cityDetails: (context: WorkspaceContext) => [...compassQueryKeys.all(context), "city-details"] as const,
-  cityDetail: (context: WorkspaceContext, countryCode: string, city: string) => [...compassQueryKeys.cityDetails(context), countryCode, city.trim().toLocaleLowerCase()] as const,
-  cityImage: (context: WorkspaceContext, countryCode: string, city: string, imageRequestToken: string) => [...compassQueryKeys.all(context), "city-image", countryCode, city.trim().toLocaleLowerCase(), imageRequestToken] as const,
-};
-
-export type CompassOverview = { places: Place[] };
+export type CompassOverview = { places: Place[]; recentPlaces: RecentPlace[] };
 
 function sortCompassPlaces(places: Place[]) {
   return places.sort((left, right) => left.name.localeCompare(right.name));
 }
 
 export function addOptimisticCompassPlace(current: CompassOverview | undefined, place: Place): CompassOverview {
-  return { places: sortCompassPlaces([...(current?.places ?? []), place]) };
+  return { places: sortCompassPlaces([...(current?.places ?? []), place]), recentPlaces: current?.recentPlaces ?? [] };
 }
 
 export function removeOptimisticCompassPlace(current: CompassOverview | undefined, optimisticKey: string): CompassOverview {
-  return { places: (current?.places ?? []).filter(({ key }) => key !== optimisticKey) };
+  return { places: (current?.places ?? []).filter(({ key }) => key !== optimisticKey), recentPlaces: current?.recentPlaces ?? [] };
 }
 
 export function reconcileOptimisticCompassPlace(current: CompassOverview | undefined, optimisticKey: string, place: Place): CompassOverview {
-  return { places: sortCompassPlaces([...(current?.places ?? []).filter(({ key }) => key !== optimisticKey && key !== place.key), place]) };
+  return { places: sortCompassPlaces([...(current?.places ?? []).filter(({ key }) => key !== optimisticKey && key !== place.key), place]), recentPlaces: current?.recentPlaces ?? [] };
 }
 
 export const signalQueryKeys = {

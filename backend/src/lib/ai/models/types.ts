@@ -3,6 +3,8 @@ import { z } from 'zod';
 export const MODEL_SLUGS = [
   'openai.gpt-5.6-luna',
   'openai.gpt-image-2',
+  'bfl.flux-2-klein-4b',
+  'xai.grok-imagine-image-quality',
   'openai.text-embedding-3-small',
 ] as const;
 export const modelSlugSchema = z.string().trim().min(1).max(200).regex(/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/, 'Model slug must use lowercase dot or hyphen notation');

@@ -106,7 +106,7 @@ describe('Gallery assistant capabilities', () => {
     await generate.execute({ prompt: 'Earth', count: 1, size: '1024x1024', quality: 'high' }, { ...context, requestKey: 'request-1' });
     expect(calls).toEqual([
       ['ideas', { prompt: 'Earth', requestedCount: 1 }, context.domain],
-      ['generate', { prompt: 'Earth', count: 1, size: '1024x1024', quality: 'high' }, context.domain, 'request-1'],
+      ['generate', { prompt: 'Earth', count: 1, size: '1024x1024', quality: 'high', mode: 'default' }, context.domain, 'request-1'],
     ]);
     for (const capability of [ideas, generate]) {
       const schema = JSON.stringify(capability.definition.inputSchema);

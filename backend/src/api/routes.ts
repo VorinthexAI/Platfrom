@@ -468,7 +468,9 @@ export function registerRoutes(app: Hono) {
   app.post('/travel/overview', travelHandlers.overview);
   app.post('/travel/countries/search', countryHandlers.search);
   app.post('/travel/places', travelHandlers.createPlace);
+  app.post('/travel/places/open', travelHandlers.openPlace);
   app.post('/travel/places/find', travelHandlers.findPlace);
+  app.post('/travel/places/children/find', travelHandlers.findChildren);
   app.post('/travel/cities/find', travelHandlers.findCity);
   app.post('/travel/places/image', travelHandlers.generatePlaceHeroImage);
   app.post('/email/overview', emailHandlers.overview);

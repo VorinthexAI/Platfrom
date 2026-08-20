@@ -1,10 +1,11 @@
 import { createAwsBedrockProvider } from '@/lib/ai/providers/aws-bedrock';
 import { createAwsBedrockMantleProvider } from '@/lib/ai/providers/aws-bedrock-mantle';
 import { createOpenAIProvider, type OpenAIProviderConfig } from '@/lib/ai/providers/openai';
+import { createOpenRouterProvider, type OpenRouterProviderConfig } from '@/lib/ai/providers/openrouter';
 import type { AwsCredentialEnvironment } from '@/lib/ai/providers/aws-sigv4';
 import type { ProviderAdapter, ProviderId } from '@/lib/ai/providers/types';
 
-export const STATIC_PROVIDER_IDS = ['openai', 'aws-bedrock', 'aws-bedrock-mantle'] as const satisfies readonly ProviderId[];
+export const STATIC_PROVIDER_IDS = ['openai', 'openrouter', 'aws-bedrock', 'aws-bedrock-mantle'] as const satisfies readonly ProviderId[];
 
 export function isStaticProvider(providerSlug: ProviderId): boolean {
   return STATIC_PROVIDER_IDS.includes(providerSlug as (typeof STATIC_PROVIDER_IDS)[number]);
@@ -23,12 +24,24 @@ interface StaticOpenAIEnvironment {
   OPENAI_PROJECT?: string;
 }
 
+interface StaticOpenRouterEnvironment {
+  OPENROUTER_API_KEY?: string;
+  OPENROUTER_BASE_URL?: string;
+}
+
 export function resolveStaticOpenAIConfig(env: StaticOpenAIEnvironment): OpenAIProviderConfig {
   return {
     apiKey: env.OPENAI_API_KEY ?? '',
     ...(env.OPENAI_BASE_URL ? { baseUrl: env.OPENAI_BASE_URL } : {}),
     ...(env.OPENAI_ORGANIZATION ? { organization: env.OPENAI_ORGANIZATION } : {}),
     ...(env.OPENAI_PROJECT ? { project: env.OPENAI_PROJECT } : {}),
+  };
+}
+
+export function resolveStaticOpenRouterConfig(env: StaticOpenRouterEnvironment): OpenRouterProviderConfig {
+  return {
+    apiKey: env.OPENROUTER_API_KEY ?? '',
+    ...(env.OPENROUTER_BASE_URL ? { baseUrl: env.OPENROUTER_BASE_URL } : {}),
   };
 }
 
@@ -51,6 +64,7 @@ export function createStaticProviderAdapter(providerSlug: ProviderId): ProviderA
         OPENAI_ORGANIZATION: process.env.OPENAI_ORGANIZATION,
         OPENAI_PROJECT: process.env.OPENAI_PROJECT,
       }));
+      case 'openrouter': return createOpenRouterProvider(resolveStaticOpenRouterConfig({ OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY, OPENROUTER_BASE_URL: process.env.OPENROUTER_BASE_URL }));
       case 'aws-bedrock': return createAwsBedrockProvider(undefined, resolveStaticBedrockEnvironment(process.env));
       case 'aws-bedrock-mantle': return createAwsBedrockMantleProvider(undefined, resolveStaticBedrockEnvironment(process.env));
     }

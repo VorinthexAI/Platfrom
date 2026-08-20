@@ -66,7 +66,7 @@ describe('provider seeds', () => {
   test('seed every supported provider while keeping its slug registered', () => {
     const slugs = SEEDED_PROVIDERS.map((provider) => provider.slug);
 
-    expect(slugs).toEqual(['openai', 'anthropic', 'aws-bedrock', 'aws-bedrock-mantle', 'google-vertex', 'azure-ai-foundry', 'xai']);
+    expect(slugs).toEqual(['openai', 'openrouter', 'anthropic', 'aws-bedrock', 'aws-bedrock-mantle', 'google-vertex', 'azure-ai-foundry', 'xai']);
     expect(slugs.every((slug) => PROVIDER_SLUGS.includes(slug))).toBe(true);
     expect(new Set(slugs).size).toBe(slugs.length);
     expect(new Set(SEEDED_PROVIDERS.map((provider) => provider.key)).size).toBe(SEEDED_PROVIDERS.length);
@@ -88,6 +88,8 @@ describe('model and routing relation seeds', () => {
       'openai.gpt-5.6-luna',
       'openai.gpt-image-2',
       'openai.text-embedding-3-small',
+      'bfl.flux-2-klein-4b',
+      'xai.grok-imagine-image-quality',
     ]);
     expect(new Set(SEEDED_MODEL_ACTIONS.map(({ modelSlug }) => modelSlug))).toEqual(new Set(SEEDED_MODELS.map(({ slug }) => slug)));
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'orchestrator-chat')?.modelSlug).toBe('openai.gpt-5.6-luna');
@@ -98,10 +100,10 @@ describe('model and routing relation seeds', () => {
       'openai.gpt-5.6-luna:openai:gpt-5.6-luna:true',
       'openai.gpt-image-2:openai:gpt-image-2:true',
       'openai.text-embedding-3-small:openai:text-embedding-3-small:true',
+      'bfl.flux-2-klein-4b:openrouter:black-forest-labs/flux.2-klein-4b:true',
+      'xai.grok-imagine-image-quality:openrouter:x-ai/grok-imagine-image-quality:true',
     ]);
-    for (const model of SEEDED_MODELS) {
-      expect(SEEDED_MODEL_PROVIDERS.find((route) => route.modelSlug === model.slug && route.providerSlug === 'openai' && route.enabled)).toBeDefined();
-    }
+    for (const model of SEEDED_MODELS) expect(SEEDED_MODEL_PROVIDERS.find((route) => route.modelSlug === model.slug && route.enabled)).toBeDefined();
     for (const action of ACTION_DEFINITIONS) {
       for (const binding of action.models) {
         expect(SEEDED_MODELS.some(({ slug }) => slug === binding.model)).toBe(true);

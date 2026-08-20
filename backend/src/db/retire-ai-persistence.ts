@@ -5,6 +5,8 @@ import { PROVIDER_SLUGS } from '@/lib/ai/providers/types';
 export const RETAINED_MODEL_SLUGS = [
   'openai.gpt-5.6-luna',
   'openai.gpt-image-2',
+  'bfl.flux-2-klein-4b',
+  'xai.grok-imagine-image-quality',
   'openai.text-embedding-3-small',
 ] as const;
 
@@ -13,6 +15,8 @@ export const RETAINED_MODEL_ACTION_BINDINGS = ACTION_DEFINITIONS.flatMap(({ id, 
 export const RETAINED_MODEL_PROVIDER_BINDINGS = [
   'openai.gpt-5.6-luna:openai:gpt-5.6-luna',
   'openai.gpt-image-2:openai:gpt-image-2',
+  'bfl.flux-2-klein-4b:openrouter:black-forest-labs/flux.2-klein-4b',
+  'xai.grok-imagine-image-quality:openrouter:x-ai/grok-imagine-image-quality',
   'openai.text-embedding-3-small:openai:text-embedding-3-small',
 ] as const;
 

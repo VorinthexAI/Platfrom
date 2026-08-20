@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
 import { TravelRepositoryError } from './repository';
-import { createPlaceImageGenerator, PLACE_IMAGE_TOKEN_MAX_LENGTH, PLACE_IMAGE_TOKEN_VALIDITY_MS, PLACE_IMAGE_WEBP_MAX_BYTES, placeImageReplayStateForTests, resetPlaceImageReplayStateForTests, travelPlaceImageInputSchema } from './place-images';
+import { createPlaceImageGenerator, PLACE_IMAGE_PNG_MAX_BYTES, PLACE_IMAGE_TOKEN_MAX_LENGTH, PLACE_IMAGE_TOKEN_VALIDITY_MS, placeImageReplayStateForTests, resetPlaceImageReplayStateForTests, travelPlaceImageInputSchema } from './place-images';
 
 const organizationKey = 'organization';
 const scopeKey = newId();
@@ -14,7 +14,15 @@ const staged = new Map<string, Uint8Array>();
 const storage = { upload: async ({ key, bytes }: { key: string; bytes: Uint8Array }) => { staged.set(key, bytes); return { storageKey: key }; }, download: async (key: string) => { const bytes = staged.get(key); if (!bytes) throw new Error('missing'); return { bytes }; }, delete: async (key: string) => { staged.delete(key); } } as any;
 const token = { storage, decryptImageRequest: (value: string) => { if (!value.startsWith(input.imageRequestToken)) throw new Error('tampered token'); return tokenPayload; } };
 const repository = { authorizeRead: async () => {} };
-const generated = (count = 1, costUsd: number | null = 0.04) => ({ output: { images: Array.from({ length: count }, () => ({ base64: 'AQ==', mimeType: 'image/png' as const })) }, costUsd });
+function png(width = 1536, height = 1024) {
+  const bytes = new Uint8Array(24);
+  bytes.set([137, 80, 78, 71, 13, 10, 26, 10]);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(16, width);
+  view.setUint32(20, height);
+  return bytes;
+}
+const generated = (count = 1, costUsd: number | null = 0.04, bytes = png()) => ({ output: { images: Array.from({ length: count }, () => ({ base64: Buffer.from(bytes).toString('base64'), mimeType: 'image/png' as const })) }, costUsd });
 
 describe('transient place hero generation', () => {
   beforeEach(() => { resetPlaceImageReplayStateForTests(); staged.clear(); });
@@ -41,30 +49,34 @@ describe('transient place hero generation', () => {
     const result = await createPlaceImageGenerator({
       repository, ...token,
       execute: (async (...args: any[]) => { calls.push(args); return generated(); }) as any,
-      transform: async (bytes) => { expect([...bytes]).toEqual([1]); return new Uint8Array([1, 2, 3]); },
       onMetrics: (value) => metrics.push(value), log: () => {},
     })(input, userKey, { signal: controller.signal, timeoutMs: 12_345 });
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.[0]).toEqual({ mode: 'fixed', organizationKey, actionSlug: 'generate-image', modelSlug: 'openai.gpt-image-2', providerSlug: 'openai' });
-    expect(calls[0]?.[1]).toEqual({ prompt: hero.prompt, count: 1, size: '1536x1024', quality: 'low' });
+    expect(calls[0]?.[0]).toEqual({ mode: 'fixed', organizationKey, actionSlug: 'generate-image', modelSlug: 'bfl.flux-2-klein-4b', providerSlug: 'openrouter' });
+    expect(calls[0]?.[1]).toEqual({ prompt: hero.prompt, count: 1, aspectRatio: '3:2', outputFormat: 'png' });
     expect(calls[0]?.[2]).toEqual({ signal: controller.signal, timeoutMs: 12_345 });
-    expect(result).toEqual({ status: 'ready', image: { status: 'ready', title: hero.title, url: 'data:image/webp;base64,AQID', width: 1536, height: 864, mimeType: 'image/webp' }, durationMs: expect.any(Number), costUsd: 0.04 });
+    expect(result).toEqual({ status: 'ready', image: { status: 'ready', title: hero.title, url: `data:image/png;base64,${Buffer.from(png()).toString('base64')}`, width: 1536, height: 1024, mimeType: 'image/png' }, durationMs: expect.any(Number), costUsd: 0.04 });
+    expect([...staged.values()][0]).toEqual(png());
     expect(metrics).toHaveLength(1);
     expect(JSON.stringify(metrics)).not.toContain(hero.prompt);
+    expect(JSON.stringify(metrics)).not.toContain('transform');
   });
 
-  test('rejects invalid provider counts and oversized prepared output', async () => {
+  test('rejects invalid provider counts and non-PNG provider output', async () => {
     await expect(createPlaceImageGenerator({ repository, ...token, execute: (async () => generated(2)) as any, log: () => {} })(input, userKey)).rejects.toThrow('expected one');
     resetPlaceImageReplayStateForTests();
-    await expect(createPlaceImageGenerator({ repository, ...token, execute: (async () => generated()) as any, transform: async () => new Uint8Array(PLACE_IMAGE_WEBP_MAX_BYTES + 1), log: () => {} })(input, userKey)).rejects.toThrow('maximum allowed size');
+    await expect(createPlaceImageGenerator({ repository, ...token, execute: (async () => ({ output: { images: [{ base64: 'AQ==', mimeType: 'image/jpeg' }] } })) as any, log: () => {} })(input, userKey)).rejects.toThrow('expected image/png');
+    resetPlaceImageReplayStateForTests();
+    await expect(createPlaceImageGenerator({ repository, ...token, execute: (async () => generated(1, null, png(1024, 1024))) as any, log: () => {} })(input, userKey)).rejects.toThrow('expected 1536x1024');
+    expect(PLACE_IMAGE_PNG_MAX_BYTES).toBe(12 * 1024 * 1024);
   });
 
   test('coalesces concurrent use, rejects replay, and retains no sensitive state', async () => {
     let calls = 0, release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
-    const dependencies = { repository, ...token, execute: (async () => { calls += 1; await gate; return generated(); }) as any, transform: async () => new Uint8Array([1]), log: () => {} };
+    const dependencies = { repository, ...token, execute: (async () => { calls += 1; await gate; return generated(); }) as any, log: () => {} };
     const generate = createPlaceImageGenerator(dependencies);
-    const first = generate(input, userKey), second = generate(input, userKey);
+    const first = generate(input, userKey), second = generate({ ...input, imageRequestToken: `${input.imageRequestToken}-final` }, userKey);
     while (calls === 0) await Promise.resolve();
     release();
     await Promise.all([first, second]);

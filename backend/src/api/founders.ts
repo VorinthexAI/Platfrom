@@ -20,6 +20,7 @@ import {
   azureAIFoundryCredentialsSchema,
   googleVertexCredentialsSchema,
   openAICredentialsSchema,
+  openRouterProviderConfigSchema,
   providerSlugSchema,
   xaiCredentialsSchema,
   type ProviderSlug,
@@ -43,6 +44,7 @@ export const foundersOrganizationKeyParamSchema = z.string().trim().min(1).max(1
 export const foundersProviderCredentialsBodySchema = strictObject({ credentials: z.unknown() });
 export const foundersProviderCredentialsSchemas: Record<ProviderSlug, z.ZodTypeAny> = {
   openai: openAICredentialsSchema,
+  openrouter: openRouterProviderConfigSchema,
   anthropic: anthropicCredentialsSchema,
   xai: xaiCredentialsSchema,
   'google-vertex': googleVertexCredentialsSchema,

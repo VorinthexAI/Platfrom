@@ -16,7 +16,7 @@ export const LEGACY_INDEX_FIELDS: Readonly<Record<string, readonly (readonly str
   documentShares: [['scopeKey'], ['token']],
   modelActions: [['modelKey', 'actionKey'], ['actionKey', 'enabled', 'priority']],
   contentSearchQueries: [['actorKey', 'scopeKey', 'normalizedQuery'], ['actorKey', 'scopeKey', 'contextDomain', 'normalizedQuery', 'folderKey', 'includeDescendants'], ['actorKey', 'scopeKey', 'contextDomain', 'searchedAt'], ['expiresAt']],
-  places: [['scopeKey', 'isWishlist'], ['scopeKey', 'isFavorite']],
+  places: [['scopeKey', 'isWishlist'], ['scopeKey', 'isFavorite'], ['scopeKey', 'countryCode', 'name']],
 };
 
 export const LEGACY_REMOVAL_MARKER = ['deleted', 'At'].join('');

@@ -9,6 +9,7 @@ describe('image action schemas', () => {
       .toEqual({ prompt: 'a globe', size: '1024x1536', quality: 'high', count: 1 });
     for (const size of ['1024x1024', '1024x1536', '1536x1024']) expect(imageGenerateInputSchema.safeParse({ prompt: 'x', size }).success).toBe(true);
     for (const quality of ['low', 'medium', 'high']) expect(imageGenerateInputSchema.safeParse({ prompt: 'x', quality }).success).toBe(true);
+    expect(imageGenerateInputSchema.parse({ prompt: 'x', resolution: '1K', aspectRatio: '3:2', outputFormat: 'png' })).toMatchObject({ resolution: '1K', aspectRatio: '3:2', outputFormat: 'png' });
     for (const count of [1, 4]) expect(imageGenerateInputSchema.safeParse({ prompt: 'x', count }).success).toBe(true);
   });
 
@@ -20,6 +21,9 @@ describe('image action schemas', () => {
       { prompt: 'x', count: 5 },
       { prompt: 'x', size: '512x512' },
       { prompt: 'x', quality: 'auto' },
+      { prompt: 'x', resolution: '8K' },
+      { prompt: 'x', aspectRatio: '3:1' },
+      { prompt: 'x', outputFormat: 'svg' },
       { prompt: 'x', extra: true },
     ]) expect(imageGenerateInputSchema.safeParse(input).success).toBe(false);
   });
