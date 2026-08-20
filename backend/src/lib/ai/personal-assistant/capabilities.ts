@@ -4,6 +4,7 @@ import { contentZodToJsonSchema } from '@/lib/ai/tools/content-json-schema';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
 import { runContentTool, type ContentToolDependencies } from '@/lib/ai/tools/content-runtime';
 import type { TravelService } from '@/lib/travel/service';
+import type { CountrySearchService } from '@/lib/travel/country-search';
 import type { EmailService } from '@/lib/email-inbox/service';
 import type { BookService } from '@/lib/books/service';
 import type { UserHiddenService } from '@/lib/user-hiddens/service';
@@ -37,6 +38,7 @@ export interface AssistantCapabilityContext {
   contentDependencies?: ContentToolDependencies;
   executeContent?: typeof runContentTool;
   travel?: TravelService;
+  countries?: CountrySearchService;
   email?: EmailService;
   books?: BookService;
   userHiddens?: UserHiddenService;

@@ -9,13 +9,15 @@ const userKey = newId();
 const input = { organizationKey, scopeKey, imageRequestToken: 'opaque-token' };
 const issuedAt = Date.now();
 const hero = { title: 'Japan travel interpretation', prompt: 'Authoritative destination: Japan. Create an original landscape editorial interpretation of a volcanic island country with cedar forests, dense cities, timber architecture, and soft morning light. No text or identifiable people.' };
-const tokenPayload = { version: 3, issuedAt, nonce: 'A'.repeat(43), organizationKey, scopeKey, country: { name: 'Japan', countryCode: 'JP', continent: 'Asia', latitude: 36.2, longitude: 138.2 }, hero } as const;
-const token = { decryptImageRequest: (value: string) => { if (!value.startsWith(input.imageRequestToken)) throw new Error('tampered token'); return tokenPayload; } };
+const tokenPayload = { version: 4, issuedAt, nonce: 'A'.repeat(43), organizationKey, scopeKey, country: { name: 'Japan', countryCode: 'JP', continent: 'Asia', latitude: 36.2, longitude: 138.2 }, place: { name: 'Japan', summary: 'Island country.', countryCode: 'JP', latitude: 36.2, longitude: 138.2 }, hero } as const;
+const staged = new Map<string, Uint8Array>();
+const storage = { upload: async ({ key, bytes }: { key: string; bytes: Uint8Array }) => { staged.set(key, bytes); return { storageKey: key }; }, download: async (key: string) => { const bytes = staged.get(key); if (!bytes) throw new Error('missing'); return { bytes }; }, delete: async (key: string) => { staged.delete(key); } } as any;
+const token = { storage, decryptImageRequest: (value: string) => { if (!value.startsWith(input.imageRequestToken)) throw new Error('tampered token'); return tokenPayload; } };
 const repository = { authorizeRead: async () => {} };
 const generated = (count = 1, costUsd: number | null = 0.04) => ({ output: { images: Array.from({ length: count }, () => ({ base64: 'AQ==', mimeType: 'image/png' as const })) }, costUsd });
 
 describe('transient place hero generation', () => {
-  beforeEach(() => resetPlaceImageReplayStateForTests());
+  beforeEach(() => { resetPlaceImageReplayStateForTests(); staged.clear(); });
 
   test('accepts only trusted context and authorizes before token use', async () => {
     expect(() => travelPlaceImageInputSchema.parse({ ...input, prompt: 'untrusted' })).toThrow('Unrecognized key');
@@ -67,7 +69,7 @@ describe('transient place hero generation', () => {
     release();
     await Promise.all([first, second]);
     expect(calls).toBe(1);
-    await expect(generate(input, userKey)).rejects.toThrow('already been used');
+    await expect(generate(input, userKey)).resolves.toMatchObject({ status: 'ready', costUsd: null });
     const state = JSON.stringify(placeImageReplayStateForTests());
     expect(state).not.toContain(input.imageRequestToken);
     expect(state).not.toContain(hero.prompt);

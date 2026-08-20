@@ -122,23 +122,31 @@ export function createScopeRepository(
 
     async removeScope(scopeKey) {
       await requireScope(scopeKey);
-      await database.query(
-        `
-          FOR relation IN @@collection
-            FILTER relation.parentKey == @scopeKey || relation.childKey == @scopeKey
-            REMOVE relation IN @@collection
-        `,
-        { '@collection': SCOPE_SCOPES_COLLECTION, scopeKey },
-      );
-      await database.query(
-        `
-          FOR member IN @@collection
-            FILTER member.scopeKey == @scopeKey
-            REMOVE member IN @@collection
-        `,
-        { '@collection': SCOPE_MEMBERS_COLLECTION, scopeKey },
-      );
-      await database.collection(SCOPES_COLLECTION).remove(scopeKey);
+      await database.query(`
+        LET managedCollections = (FOR collection IN collections FILTER collection.scopeKey == @scopeKey && collection.purpose == "place-media" && collection.mutationPolicy == "system-only" RETURN collection._key)
+        LET managedImages = UNIQUE(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.collectionKey IN managedCollections LET image = DOCUMENT(images, relation.imageKey) FILTER image != null && image.scopeKey == @scopeKey && image.mutationPolicy == "system-only" RETURN { key: image._key, storageKey: image.storageKey, captionKey: image.imageCaptionKey })
+        LET imageKeys = managedImages[*].key
+        LET captionKeys = managedImages[*].captionKey
+        LET cleanupPlaceImages = (FOR relation IN placeImages FILTER relation.scopeKey == @scopeKey REMOVE relation IN placeImages RETURN 1)
+        LET cleanupCollectionImages = (FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.collectionKey IN managedCollections REMOVE relation IN collectionImages RETURN 1)
+        LET cleanupIdentities = (FOR relation IN imageIdentities FILTER relation.scopeKey == @scopeKey && relation.imageKey IN imageKeys REMOVE relation IN imageIdentities RETURN 1)
+        LET cleanupHighlights = (FOR highlight IN imageCollecitionHightlights FILTER highlight.scopeKey == @scopeKey && highlight.collectionKey IN managedCollections REMOVE highlight IN imageCollecitionHightlights RETURN 1)
+        LET cleanupMemories = (FOR memory IN imageCollectionMemories FILTER memory.scopeKey == @scopeKey && memory.imageKey IN imageKeys REMOVE memory IN imageCollectionMemories RETURN 1)
+        LET cleanupInvites = (FOR invite IN collectionInvites FILTER invite.scopeKey == @scopeKey && invite.collectionKey IN managedCollections REMOVE invite IN collectionInvites RETURN 1)
+        LET cleanupMembers = (FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey IN managedCollections REMOVE member IN collectionMembers RETURN 1)
+        LET cleanupTags = (FOR assignment IN tagAssignments FILTER assignment.scopeKey == @scopeKey && ((assignment.sourceType == "image" && assignment.sourceKey IN imageKeys) || (assignment.sourceType == "collection" && assignment.sourceKey IN managedCollections) || assignment.sourceType == "place") REMOVE assignment IN tagAssignments RETURN 1)
+        LET cleanupShares = (FOR share IN shares FILTER share.scopeKey == @scopeKey && ((share.sourceType == "image" && share.sourceKey IN imageKeys) || (share.sourceType == "collection" && share.sourceKey IN managedCollections) || share.sourceType == "place") REMOVE share IN shares RETURN 1)
+        LET cleanupHiddens = (FOR hidden IN userHiddens FILTER (hidden.source == "image" && hidden.sourceKey IN imageKeys) || (hidden.source == "collection" && hidden.sourceKey IN managedCollections) REMOVE hidden IN userHiddens RETURN 1)
+        LET cleanupPlaces = (FOR place IN places FILTER place.scopeKey == @scopeKey REMOVE place IN places RETURN 1)
+        LET cleanupImages = (FOR image IN images FILTER image._key IN imageKeys REMOVE image IN images RETURN 1)
+        LET cleanupCaptions = (FOR caption IN imageCaptions FILTER caption._key IN captionKeys FILTER LENGTH(FOR retained IN images FILTER retained.imageCaptionKey == caption._key LIMIT 1 RETURN 1) == 0 REMOVE caption IN imageCaptions RETURN 1)
+        LET cleanupCollections = (FOR collection IN collections FILTER collection._key IN managedCollections REMOVE collection IN collections RETURN 1)
+        LET deletionJobs = (FOR image IN managedImages FILTER image.storageKey != null UPSERT { storageKey: image.storageKey } INSERT { storageKey: image.storageKey, createdAt: @now } UPDATE {} IN storageDeletionJobs RETURN 1)
+        LET cleanupScopeRelations = (FOR relation IN scopeScopes FILTER relation.parentKey == @scopeKey || relation.childKey == @scopeKey REMOVE relation IN scopeScopes RETURN 1)
+        LET cleanupScopeMembers = (FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey REMOVE member IN scopeMembers RETURN 1)
+        LET cleanupScope = (FOR scope IN scopes FILTER scope._key == @scopeKey REMOVE scope IN scopes RETURN 1)
+        RETURN { collectionCount: LENGTH(managedCollections), imageCount: LENGTH(managedImages) }
+      `, { scopeKey, now: new Date().toISOString() });
     },
 
     async addScopeRelation(parentKey, childKey) {

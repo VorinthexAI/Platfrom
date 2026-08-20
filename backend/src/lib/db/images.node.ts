@@ -1,6 +1,7 @@
 import { aql } from 'arangojs';
 import { z } from 'zod';
 import { createNodeHelpers, toArangoDoc, withArangoKey } from './base';
+import { mutationPolicySchema } from './collections.node';
 import { db } from './client';
 import { withTransaction } from './client';
 import { currentEmbeddingSchema } from '@/lib/embeddings';
@@ -13,10 +14,13 @@ export const imageSchema = z.object({
   width: z.number().int().positive(), height: z.number().int().positive(), embedding: currentEmbeddingSchema,
   imageCaptionKey: z.string().cuid().nullable().optional(), createdByKey: z.string().cuid().nullable().default(null),
   city: z.string().trim().min(1).max(200).nullable().optional(), country: z.string().trim().min(1).max(200).nullable().optional(), countryCode: z.string().trim().length(2).toUpperCase().nullable().optional(),
+  placeName: z.string().trim().min(1).nullable().optional(), placeSummary: z.string().trim().min(1).nullable().optional(),
+  latitude: z.number().finite().min(-90).max(90).nullable().optional(), longitude: z.number().finite().min(-180).max(180).nullable().optional(),
+  locationSource: z.enum(['exif', 'supplied', 'place']).nullable().optional(), mutationPolicy: mutationPolicySchema.default('user'),
   isFavorite: z.boolean().default(false), createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
 });
 export type Image = z.infer<typeof imageSchema>;
-export const imagesEmbeddingFields = ['filename', 'caption'] as const;
+export const imagesEmbeddingFields = ['filename', 'caption', 'placeName', 'placeSummary', 'country', 'countryCode'] as const;
 const helpers = createNodeHelpers(IMAGES_COLLECTION, imageSchema, imagesEmbeddingFields, { includeEmbeddingMetadata: false });
 export const insertImage = helpers.insert;
 export const getImageById = helpers.getById;

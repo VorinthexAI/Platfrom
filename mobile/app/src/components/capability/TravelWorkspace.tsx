@@ -1,7 +1,7 @@
 import { randomUUID } from "expo-crypto";
 import { Image } from "expo-image";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Fragment, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { KeyboardAvoidingView, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomSheet, BottomSheetItem } from "@vorinthex/shared/ui/bottom-sheet";
@@ -25,11 +25,14 @@ import {
   findPlace,
   generatePlaceHeroImage,
   getTravelContext,
+  searchCountries,
   type CityDetail,
+  type CountrySearchResult,
+  type CreatePlaceInput,
   type Place,
   type PlaceImageResponse,
 } from "@/lib/travel-client";
-import { compassQueryKeys, invalidateAssistantChanges } from "@/lib/workspace-query-cache";
+import { addOptimisticCompassPlace, compassQueryKeys, galleryQueryKeys, invalidateAssistantChanges, reconcileOptimisticCompassPlace, removeOptimisticCompassPlace } from "@/lib/workspace-query-cache";
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
 
 const CORE_PROMPTS = [
@@ -42,6 +45,7 @@ type SheetView = "browse" | "countryDetail";
 type GeneratedCity = { name: string; latitude: number; longitude: number };
 
 export const COUNTRY_SHEET_CACHE_MS = 60 * 60_000;
+export const COUNTRY_SEARCH_DEBOUNCE_MS = 350;
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Compass could not complete that request.";
@@ -61,12 +65,14 @@ export function TravelWorkspace() {
   const [actionsOpen, setActionsOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [countryQuery, setCountryQuery] = useState("");
+  const [searchFocus, setSearchFocus] = useState<NonNullable<CountrySearchResult>>();
   const [assistantInput, setAssistantInput] = useState("");
   const [assistantBusy, setAssistantBusy] = useState(false);
   const [assistantMessage, setAssistantMessage] = useState<string>();
   const [assistantFailed, setAssistantFailed] = useState(false);
   const assistantRequestKey = useRef<string | undefined>(undefined);
   const countryScrollRef = useRef<ScrollView>(null);
+  const countrySearchRequest = useRef(0);
   const overviewQuery = useQuery({ queryKey: compassQueryKeys.overview(travelContext), queryFn: fetchTravelOverview });
   const places = useMemo(() => overviewQuery.data?.places ?? [], [overviewQuery.data]);
   const selectedPlace = places.find(({ key }) => key === selectedPlaceKey);
@@ -155,6 +161,22 @@ export function TravelWorkspace() {
     status: "planned" as const,
   })), [places]);
 
+  useEffect(() => {
+    const query = countryQuery.trim();
+    const request = ++countrySearchRequest.current;
+    if (!query) return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      void searchCountries(query, controller.signal).then((match) => {
+        if (request !== countrySearchRequest.current || !match) return;
+        setSearchFocus(match);
+      }).catch((error: unknown) => {
+        if (request === countrySearchRequest.current && !(error instanceof Error && error.name === "CanceledError")) setSearchFocus(undefined);
+      });
+    }, COUNTRY_SEARCH_DEBOUNCE_MS);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [countryQuery]);
+
   function openBrowse() {
     setSheetView("browse");
     setSheetOpen(true);
@@ -179,38 +201,39 @@ export function TravelWorkspace() {
     setCitySheetOpen(true);
   }
 
-  function cachePlace(place: Place) {
-    queryClient.setQueryData<{ places: Place[] }>(compassQueryKeys.overview(travelContext), (current) => ({
-      places: [...(current?.places ?? []).filter((saved) => saved.key !== place.key && !(saved.countryCode === place.countryCode && saved.name.toLocaleLowerCase() === place.name.toLocaleLowerCase())), place]
-        .sort((left, right) => left.name.localeCompare(right.name)),
+  async function persistGeneratedPlace(input: CreatePlaceInput, optimisticKey: string, failureTitle: string) {
+    const overviewKey = compassQueryKeys.overview(travelContext);
+    await queryClient.cancelQueries({ queryKey: overviewKey, exact: true }).catch(() => undefined);
+    queryClient.setQueryData(overviewKey, (current: { places: Place[] } | undefined) => addOptimisticCompassPlace(current, {
+      key: optimisticKey, name: input.name, summary: input.summary, countryCode: input.countryCode,
+      latitude: input.latitude, longitude: input.longitude, createdAt: new Date().toISOString(),
     }));
+    void createPlace(input).then((place) => {
+      queryClient.setQueryData(overviewKey, (current: { places: Place[] } | undefined) => reconcileOptimisticCompassPlace(current, optimisticKey, place));
+      void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.all(travelContext) });
+    }).catch(() => {
+      queryClient.setQueryData(overviewKey, (current: { places: Place[] } | undefined) => removeOptimisticCompassPlace(current, optimisticKey));
+      showToast({ title: failureTitle, duration: 2_000 });
+    });
   }
 
   function saveCountry() {
-    if (!countryDetail) return;
-    const input = { name: countryDetail.location.name, countryCode: countryDetail.location.countryCode, latitude: countryDetail.location.latitude, longitude: countryDetail.location.longitude };
-    const previous = queryClient.getQueryData<{ places: Place[] }>(compassQueryKeys.overview(travelContext));
-    cachePlace({ key: `optimistic-${randomUUID()}`, ...input, createdAt: new Date().toISOString() });
+    if (!countryDetail || countryImage?.status !== "ready") return;
+    const input = { name: countryDetail.location.name, summary: countryDetail.summary, countryCode: countryDetail.location.countryCode, latitude: countryDetail.location.latitude, longitude: countryDetail.location.longitude, imageRequestToken: countryDetail.imageRequestToken };
+    const optimisticKey = `optimistic-${randomUUID()}`;
     setSheetOpen(false);
     showToast({ title: "Country saved to my places", duration: 2_000 });
-    void createPlace(input).then(cachePlace).catch(() => {
-      queryClient.setQueryData(compassQueryKeys.overview(travelContext), previous);
-      showToast({ title: "Country could not be saved", duration: 2_000 });
-    });
+    void persistGeneratedPlace(input, optimisticKey, "Country could not be saved");
   }
 
   function saveCity() {
-    if (!cityDetail) return;
-    const input = { name: cityDetail.location.name, countryCode: cityDetail.location.countryCode, latitude: cityDetail.location.latitude, longitude: cityDetail.location.longitude };
-    const previous = queryClient.getQueryData<{ places: Place[] }>(compassQueryKeys.overview(travelContext));
-    cachePlace({ key: `optimistic-${randomUUID()}`, ...input, createdAt: new Date().toISOString() });
+    if (!cityDetail || cityImage?.status !== "ready") return;
+    const input = { name: cityDetail.location.name, summary: cityDetail.summary, countryCode: cityDetail.location.countryCode, latitude: cityDetail.location.latitude, longitude: cityDetail.location.longitude, imageRequestToken: cityDetail.imageRequestToken };
+    const optimisticKey = `optimistic-${randomUUID()}`;
     setCitySheetOpen(false);
     requestAnimationFrame(() => countryScrollRef.current?.scrollTo({ y: 0, animated: true }));
     showToast({ title: "City saved to my places", duration: 2_000 });
-    void createPlace(input).then(cachePlace).catch(() => {
-      queryClient.setQueryData(compassQueryKeys.overview(travelContext), previous);
-      showToast({ title: "City could not be saved", duration: 2_000 });
-    });
+    void persistGeneratedPlace(input, optimisticKey, "City could not be saved");
   }
 
   function selectPlace(place: Place) {
@@ -263,13 +286,14 @@ export function TravelWorkspace() {
         <View style={styles.searchRow}>
           <View style={styles.workspaceSearch}>
             <SearchIcon size="sm" variant="muted" />
-            <TextInput accessibilityLabel="Search Compass places" onChangeText={(value) => { setCountryQuery(value); if (value.trim()) openBrowse(); }} onFocus={openBrowse} placeholder="Search..." style={styles.workspaceSearchInput} value={countryQuery} />
+            <TextInput accessibilityLabel="Search Compass countries" onChangeText={(value) => { setCountryQuery(value); setSearchFocus(undefined); }} placeholder="Search countries..." style={styles.workspaceSearchInput} value={countryQuery} />
           </View>
           <Button accessibilityLabel="Filter Compass" contentMode="raw" onPress={() => setFiltersOpen(true)} size="sm" style={styles.filterButton} variant="icon"><FilterIcon size="sm" /></Button>
         </View>
         <View style={styles.globe}>
           <InteractiveGlobe
             onCountryPress={(country) => { if (country) openCountryDetail(country.properties); }}
+            focusTarget={searchFocus ?? undefined}
             onPlacePress={(marker) => { const place = places.find(({ key }) => key === marker.id); if (place) selectPlace(place); }}
             places={globePlaces}
             selectedCountryCode={selectedCountry?.countryCode}
@@ -301,7 +325,7 @@ export function TravelWorkspace() {
       /> : null}
 
       <BottomSheet
-        footer={sheetView === "countryDetail" ? <View style={styles.sheetFooter}><Button onPress={closeCountryDetail} size="md" style={styles.footerButton} variant="secondary">Close</Button><Button disabled={!countryDetail} onPress={saveCountry} size="md" style={styles.footerButton} variant="primary">Save</Button></View> : undefined}
+        footer={sheetView === "countryDetail" ? <View style={styles.sheetFooter}><Button onPress={closeCountryDetail} size="md" style={styles.footerButton} variant="secondary">Close</Button><Button disabled={!countryDetail || countryImage?.status !== "ready"} onPress={saveCountry} size="md" style={styles.footerButton} variant="primary">Save</Button></View> : undefined}
         height="full"
         onOpenChange={(next) => { if (!next && sheetView === "countryDetail") closeCountryDetail(); else setSheetOpen(next); }}
         open={sheetOpen}
@@ -344,7 +368,7 @@ export function TravelWorkspace() {
         </ScrollView>
       </BottomSheet>
       <BottomSheet
-        footer={<View style={styles.sheetFooter}><Button onPress={() => setCitySheetOpen(false)} size="md" style={styles.footerButton} variant="secondary">Close</Button><Button disabled={!cityDetail} onPress={saveCity} size="md" style={styles.footerButton} variant="primary">Save</Button></View>}
+        footer={<View style={styles.sheetFooter}><Button onPress={() => setCitySheetOpen(false)} size="md" style={styles.footerButton} variant="secondary">Close</Button><Button disabled={!cityDetail || cityImage?.status !== "ready"} onPress={saveCity} size="md" style={styles.footerButton} variant="primary">Save</Button></View>}
         height="full"
         onOpenChange={(next) => { if (!next) setCitySheetOpen(false); }}
         open={citySheetOpen}
@@ -364,7 +388,7 @@ export function TravelWorkspace() {
           </View>
         </ScrollView>
       </BottomSheet>
-      <BottomSheet footer={<Button onPress={() => setActionsOpen(false)} size="md" variant="secondary">Close</Button>} onOpenChange={setActionsOpen} open={actionsOpen} title="Add in Compass"><Text style={styles.emptyText}>No additional actions are available yet.</Text></BottomSheet>
+      <BottomSheet footer={<Button onPress={() => setActionsOpen(false)} size="md" variant="secondary">Close</Button>} onOpenChange={setActionsOpen} open={actionsOpen} title="Add in Compass"><BottomSheetItem icon={<GlobeIcon size="md" />} onPress={() => { setActionsOpen(false); openBrowse(); }}>Browse countries and saved places</BottomSheetItem></BottomSheet>
       <BottomSheet footer={<Button onPress={() => setFiltersOpen(false)} size="md" variant="secondary">Close</Button>} onOpenChange={setFiltersOpen} open={filtersOpen} title="Filter Compass"><Text style={styles.emptyText}>No filters are available yet.</Text></BottomSheet>
     </KeyboardAvoidingView>
   );

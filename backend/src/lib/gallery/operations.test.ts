@@ -140,8 +140,14 @@ describe('Gallery operation boundaries', () => {
     expect(source).toContain('canCreateCollections,');
     expect(source).toContain('role, isOwned');
     const now = '2026-08-18T12:00:00.000Z';
-    const collection = { key: key(), scopeKey: key(), name: 'Shared', embedding: Array(EMBEDDING_DIMENSIONS).fill(0), isFavorite: false, createdAt: now, updatedAt: now };
+    const collection = { key: key(), scopeKey: key(), name: 'Shared', purpose: null, mutationPolicy: 'user' as const, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), isFavorite: false, createdAt: now, updatedAt: now };
     expect(projectGalleryCollection(collection, 0, null, key(), 'owner', false)).toMatchObject({ role: 'owner', isOwned: false, access: { canManage: true } });
+    expect(projectGalleryCollection({ ...collection, purpose: 'place-media', mutationPolicy: 'system-only' }, 1, null, key(), 'owner', false)).toMatchObject({ purpose: 'place-media', access: { canRead: true, canContribute: false, canManage: false } });
+  });
+
+  test('exposes persisted image mutation policy in safe DTOs', async () => {
+    const image = imageSchema.parse({ key: key(), scopeKey: key(), filename: 'place.webp', caption: 'Place', storageKey: 'media/place.webp', mimeType: 'image/webp', sizeBytes: 10, width: 1, height: 1, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), mutationPolicy: 'system-only', isFavorite: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    await expect(safeImage(image)).resolves.toMatchObject({ mutationPolicy: 'system-only' });
   });
 
   test('accepts only complete image coordinate pairs', () => {

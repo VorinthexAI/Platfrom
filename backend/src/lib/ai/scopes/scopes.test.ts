@@ -27,6 +27,15 @@ function createFakeDb() {
 
   const fake: ScopesDatabase = {
     async query(query: string, bindVars: Record<string, unknown> = {}) {
+      if (query.includes('LET cleanupScopeRelations')) {
+        for (const collection of [SCOPE_SCOPES_COLLECTION, SCOPE_MEMBERS_COLLECTION]) {
+          for (const [key, doc] of [...store(collection).entries()]) {
+            if (doc.parentKey === bindVars.scopeKey || doc.childKey === bindVars.scopeKey || doc.scopeKey === bindVars.scopeKey) store(collection).delete(key);
+          }
+        }
+        store(SCOPES_COLLECTION).delete(String(bindVars.scopeKey));
+        return { all: async () => [], next: async () => undefined };
+      }
       const docs = store(String(bindVars['@collection']));
       if (query.includes('REMOVE')) {
         for (const [key, doc] of [...docs.entries()]) {
@@ -140,6 +149,15 @@ describe('scope schemas', () => {
 });
 
 describe('scope repository', () => {
+  test('hard-deletes managed place media and queues permanent object deletion during scope teardown', async () => {
+    const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
+    const teardown = source.slice(source.indexOf('async removeScope(scopeKey)'), source.indexOf('async addScopeRelation'));
+    for (const collection of ['placeImages', 'collectionImages', 'imageIdentities', 'imageCollecitionHightlights', 'imageCollectionMemories', 'collectionInvites', 'collectionMembers', 'tagAssignments', 'shares', 'userHiddens', 'places', 'images', 'imageCaptions', 'collections', 'scopeScopes', 'scopeMembers', 'scopes']) expect(teardown).toContain(collection);
+    expect(teardown).toContain('UPSERT { storageKey: image.storageKey }');
+    expect(teardown).toContain('storageDeletionJobs');
+    expect(teardown).toContain('collection.purpose == "place-media" && collection.mutationPolicy == "system-only"');
+    expect(teardown.match(/await database\.query/g)).toHaveLength(1);
+  });
   const organizationKey = newId();
   const generateEmbedding = async (text: string) => {
     const vector = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0);

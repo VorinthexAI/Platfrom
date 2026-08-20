@@ -34,6 +34,8 @@ import { getAllCollectionMembersChunked, listCollectionMembersPage, upsertCollec
 import { getAllTagsChunked, listTagsPage, upsertTagByKey } from './tags.node';
 import { getAllTagAssignmentsChunked, listTagAssignmentsPage, upsertTagAssignmentByKey } from './tag-assignments.node';
 import { getAllPlacesChunked, listPlacesPage, upsertPlaceByKey } from './places.node';
+import { getAllPlaceImagesChunked, listPlaceImagesPage, upsertPlaceImageByKey } from './place-images.node';
+import { getAllCountriesChunked, listCountriesPage, upsertCountryByKey } from './countries.node';
 import { getAllBooksChunked, listBooksPage, upsertBookByKey } from './books.node';
 import { getAllBookContextsChunked, listBookContextsPage, upsertBookContextByKey } from './book-contexts.node';
 import { getAllBookThemesChunked, listBookThemesPage, upsertBookThemeByKey } from './book-themes.node';
@@ -87,6 +89,8 @@ export const NODE_REGISTRY: Record<string, NodeAccessors> = {
   tags: { listPage: listTagsPage, getAllChunked: getAllTagsChunked, upsertByKey: upsertTagByKey },
   tagAssignments: { listPage: listTagAssignmentsPage, getAllChunked: getAllTagAssignmentsChunked, upsertByKey: upsertTagAssignmentByKey },
   places: { listPage: listPlacesPage, getAllChunked: getAllPlacesChunked, upsertByKey: upsertPlaceByKey },
+  placeImages: { listPage: listPlaceImagesPage, getAllChunked: getAllPlaceImagesChunked, upsertByKey: upsertPlaceImageByKey },
+  countries: { listPage: listCountriesPage, getAllChunked: getAllCountriesChunked, upsertByKey: upsertCountryByKey },
   books: { listPage: listBooksPage, getAllChunked: getAllBooksChunked, upsertByKey: upsertBookByKey },
   bookContexts: { listPage: listBookContextsPage, getAllChunked: getAllBookContextsChunked, upsertByKey: upsertBookContextByKey },
   bookThemes: { listPage: listBookThemesPage, getAllChunked: getAllBookThemesChunked, upsertByKey: upsertBookThemeByKey },

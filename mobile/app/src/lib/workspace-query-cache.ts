@@ -5,6 +5,7 @@ import { contentQueryKeys } from "./content-query-cache";
 import type { EmailFilter, EmailOverview, EmailThread } from "./email-client";
 import { normalizeCollection } from "./collection-access";
 import type { GalleryCollection, GalleryCollectionInvite, GalleryCollectionMember, GalleryCollectionShareLink, GalleryImage, GalleryOverview } from "./gallery-client";
+import type { Place } from "./travel-client";
 import type { UserHiddenRecord } from "./user-hidden-client";
 
 export type WorkspaceContext = { organizationKey: string; scopeKey: string };
@@ -73,6 +74,24 @@ export const compassQueryKeys = {
   cityDetail: (context: WorkspaceContext, countryCode: string, city: string) => [...compassQueryKeys.cityDetails(context), countryCode, city.trim().toLocaleLowerCase()] as const,
   cityImage: (context: WorkspaceContext, countryCode: string, city: string, imageRequestToken: string) => [...compassQueryKeys.all(context), "city-image", countryCode, city.trim().toLocaleLowerCase(), imageRequestToken] as const,
 };
+
+export type CompassOverview = { places: Place[] };
+
+function sortCompassPlaces(places: Place[]) {
+  return places.sort((left, right) => left.name.localeCompare(right.name));
+}
+
+export function addOptimisticCompassPlace(current: CompassOverview | undefined, place: Place): CompassOverview {
+  return { places: sortCompassPlaces([...(current?.places ?? []), place]) };
+}
+
+export function removeOptimisticCompassPlace(current: CompassOverview | undefined, optimisticKey: string): CompassOverview {
+  return { places: (current?.places ?? []).filter(({ key }) => key !== optimisticKey) };
+}
+
+export function reconcileOptimisticCompassPlace(current: CompassOverview | undefined, optimisticKey: string, place: Place): CompassOverview {
+  return { places: sortCompassPlaces([...(current?.places ?? []).filter(({ key }) => key !== optimisticKey && key !== place.key), place]) };
+}
 
 export const signalQueryKeys = {
   all: (context: WorkspaceContext) => ["signal", ...contextKey(context)] as const,

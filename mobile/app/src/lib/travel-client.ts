@@ -9,6 +9,7 @@ const keySchema = z.string().min(1);
 export const placeSchema = z.strictObject({
   key: keySchema,
   name: z.string().min(1),
+  summary: z.string().max(1_200),
   countryCode: z.string().length(2),
   latitude: z.number().finite().min(-90).max(90),
   longitude: z.number().finite().min(-180).max(180),
@@ -87,6 +88,16 @@ const assistantResponseSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("unsupported"), message: z.string().min(1), sources: z.tuple([]), changes: assistantChangesSchema }),
 ]);
 const contextSchema = z.strictObject({ organizationKey: keySchema, scopeKey: keySchema });
+const countrySearchInputSchema = z.strictObject({ organizationKey: keySchema, query: z.string().trim().min(1).max(200) });
+export const countrySearchResultSchema = z.strictObject({
+  country: z.strictObject({
+    name: z.string().trim().min(1).max(160),
+    countryCode: z.string().regex(/^[A-Z]{2}$/),
+    latitude: z.number().finite().min(-90).max(90),
+    longitude: z.number().finite().min(-180).max(180),
+  }).nullable(),
+});
+export type CountrySearchResult = z.infer<typeof countrySearchResultSchema>["country"];
 
 type ApiResponse<T> = { success: true; data: T } | { success: false; error: { message: string } };
 
@@ -151,10 +162,27 @@ export function findCity(city: string, country: AuthoritativeCountry, signal?: A
   ).then(({ city: detail }) => detail);
 }
 
-export function createPlace(input: Pick<Place, "name" | "countryCode" | "latitude" | "longitude">, signal?: AbortSignal) {
+export async function searchCountries(query: string, signal?: AbortSignal) {
+  const { organizationKey } = getTravelContext();
+  const body = countrySearchInputSchema.parse({ organizationKey, query });
+  try {
+    const response = await apiClient.post("/travel/countries/search", body, { timeout: 30_000, signal });
+    return unwrap(response.data, countrySearchResultSchema).country;
+  } catch (error) {
+    throw responseError(error);
+  }
+}
+
+const createPlaceInputSchema = placeSchema.pick({ name: true, summary: true, countryCode: true, latitude: true, longitude: true }).extend({
+  summary: summarySchema,
+  imageRequestToken: z.string().min(1).max(64 * 1024),
+}).strict();
+export type CreatePlaceInput = z.input<typeof createPlaceInputSchema>;
+
+export function createPlace(input: CreatePlaceInput, signal?: AbortSignal) {
   return post(
     "/travel/places",
-    placeSchema.pick({ name: true, countryCode: true, latitude: true, longitude: true }).parse(input),
+    createPlaceInputSchema.parse(input),
     z.strictObject({ place: placeSchema }),
     { timeout: 30_000, signal },
   ).then(({ place }) => place);

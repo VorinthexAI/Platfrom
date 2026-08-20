@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { strictObject } from '@/api/validation';
 import { placeCountryCodeSchema, type Place } from '@/lib/db/places.node';
@@ -9,6 +9,11 @@ import type { ChatOutput } from '@/lib/ai/providers';
 import { decryptAuthenticatedJson, encryptAuthenticatedJson } from '@/lib/authenticated-encryption';
 import { createTravelRepository, type TravelAccessContext, type TravelRepository } from './repository';
 import { createPlaceImageGenerator, PLACE_IMAGE_TOKEN_MAX_LENGTH, type PlaceImageDependencies } from './place-images';
+import { placeImageTokenSchema, stagedPlaceImageKey } from './place-images';
+import { buildPlaceEmbeddingText } from './semantic-text';
+import { documentStorage, type DocumentObjectStorage } from '@/lib/ai/document-processing/storage';
+import { processImage } from '@/lib/ai/image-processing';
+import { getImageById } from '@/lib/db/images.node';
 
 const requestContextShape = { organizationKey: z.string().trim().min(1), scopeKey: z.string().cuid() };
 export const travelOverviewInputSchema = strictObject(requestContextShape);
@@ -49,6 +54,8 @@ export const travelPlaceCreateInputSchema = strictObject({
   countryCode: placeCountryCodeSchema,
   latitude: z.number().finite().min(-90).max(90),
   longitude: z.number().finite().min(-180).max(180),
+  summary: z.string().trim().min(1),
+  imageRequestToken: z.string().min(1).max(PLACE_IMAGE_TOKEN_MAX_LENGTH),
 });
 const travelPlaceModelDetailSchema = z.object({
   location: locationSchema,
@@ -77,27 +84,27 @@ function parsePlaceDetail(text: string) {
 }
 
 export function placeDto(place: Place) {
-  return { key: place.key, name: place.name, countryCode: place.countryCode, latitude: place.latitude, longitude: place.longitude, createdAt: place.createdAt };
+  return { key: place.key, name: place.name, summary: place.summary, countryCode: place.countryCode, latitude: place.latitude, longitude: place.longitude, createdAt: place.createdAt };
 }
 
 type Execute = typeof executeAction;
 const guideSystemPrompt = 'You write concise travel guides from general knowledge. Do not browse, search, cite sources, or claim current facts. Return strict JSON only, with no markdown or code fences.';
 const guideInput = (prompt: string) => ({ systemPrompt: guideSystemPrompt, messages: [{ role: 'user' as const, content: [{ type: 'text' as const, text: prompt }] }], options: { temperature: 0.5, maxTokens: 1_200 } });
-export function createTravelService(options: { repository?: TravelRepository; execute?: Execute; embed?: typeof embedText; now?: () => string; issueImageNonce?: () => string; encryptImageRequest?: (value: unknown) => string; decryptImageRequest?: (value: string) => unknown; placeImages?: Omit<PlaceImageDependencies, 'repository'> } = {}) {
+export function createTravelService(options: { repository?: TravelRepository; execute?: Execute; embed?: typeof embedText; now?: () => string; issueImageNonce?: () => string; encryptImageRequest?: (value: unknown) => string; decryptImageRequest?: (value: string) => unknown; placeImages?: Omit<PlaceImageDependencies, 'repository'>; storage?: DocumentObjectStorage; process?: typeof processImage; getImage?: typeof getImageById } = {}) {
   const repository = options.repository ?? createTravelRepository();
   const now = options.now ?? (() => new Date().toISOString());
   const execute = options.execute ?? executeAction;
   const encryptImageRequest = options.encryptImageRequest ?? encryptAuthenticatedJson;
-  const generatePlaceHeroImage = createPlaceImageGenerator({ repository, decryptImageRequest: options.decryptImageRequest ?? decryptAuthenticatedJson, ...options.placeImages });
+  const generatePlaceHeroImage = createPlaceImageGenerator({ repository, decryptImageRequest: options.decryptImageRequest ?? decryptAuthenticatedJson, storage: options.storage, ...options.placeImages });
   const access = ({ organizationKey, scopeKey }: { organizationKey: string; scopeKey: string }, userKey: string): TravelAccessContext => ({ organizationKey, scopeKey, userKey });
-  const issueImageToken = (input: { organizationKey: string; scopeKey: string }, country: { name: string; countryCode: string; continent: string; latitude: number; longitude: number }, title: string, heroImagePrompt: string) => {
+  const issueImageToken = (input: { organizationKey: string; scopeKey: string }, country: { name: string; countryCode: string; continent: string; latitude: number; longitude: number }, place: { name: string; summary: string; countryCode: string; latitude: number; longitude: number }, heroImagePrompt: string) => {
     const issuedAt = Date.parse(now());
     if (!Number.isFinite(issuedAt)) throw new Error('Travel service clock returned an invalid timestamp.');
     return encryptImageRequest({
-      version: 3, issuedAt, nonce: (options.issueImageNonce ?? (() => randomBytes(32).toString('base64url')))(), organizationKey: input.organizationKey, scopeKey: input.scopeKey, country,
+      version: 4, issuedAt, nonce: (options.issueImageNonce ?? (() => randomBytes(32).toString('base64url')))(), organizationKey: input.organizationKey, scopeKey: input.scopeKey, country, place,
       hero: {
-        title: `${title} travel interpretation`.slice(0, 160),
-        prompt: `Authoritative destination: ${title}, ${country.name} (${country.countryCode}), ${country.continent}. Create one premium landscape editorial travel hero image informed by this researched visual brief: ${heroImagePrompt}. The result must be clearly an AI-generated interpretation, not documentary evidence or a recreation of any source photograph. Use authentic geography, architecture, vegetation, materials, weather, and natural light. No text, lettering, logos, flags, maps, borders, identifiable people, fabricated named landmarks, or invented named places.`,
+        title: `${place.name} travel interpretation`.slice(0, 160),
+        prompt: `Authoritative destination: ${place.name}, ${country.name} (${country.countryCode}), ${country.continent}. Create one premium landscape editorial travel hero image informed by this researched visual brief: ${heroImagePrompt}. The result must be clearly an AI-generated interpretation, not documentary evidence or a recreation of any source photograph. Use authentic geography, architecture, vegetation, materials, weather, and natural light. No text, lettering, logos, flags, maps, borders, identifiable people, fabricated named landmarks, or invented named places.`,
       },
     });
   };
@@ -106,14 +113,55 @@ export function createTravelService(options: { repository?: TravelRepository; ex
     async createPlace(raw: unknown, userKey: string, execution: Pick<ExecuteActionOptions, 'signal' | 'timeoutMs'> = {}) {
       const input = travelPlaceCreateInputSchema.parse(raw);
       const context = access(input, userKey);
-      await repository.authorizeWrite(context);
-      const place = await repository.create(context, {
-        key: newId(), scopeKey: input.scopeKey, name: input.name, countryCode: input.countryCode,
+      const membershipKey = await repository.authorizeWrite(context);
+      const decrypt = options.decryptImageRequest ?? decryptAuthenticatedJson;
+      const token = placeImageTokenSchema.parse(decrypt(input.imageRequestToken));
+      if (token.organizationKey !== input.organizationKey || token.scopeKey !== input.scopeKey || token.place.name !== input.name || token.place.summary !== input.summary || token.place.countryCode !== input.countryCode || token.place.latitude !== input.latitude || token.place.longitude !== input.longitude) throw new Error('Place image request token does not match the saved place.');
+      const at = Date.parse(now());
+      if (token.issuedAt > at || at >= token.issuedAt + 60 * 60_000) throw new Error('Place image request token has expired.');
+      const stableKey = (kind: string, value: string) => `c${createHash('sha256').update(`${kind}\0${value}`).digest('hex').slice(0, 24)}`;
+      const imageKey = stableKey('place-image', token.nonce);
+      const storage = options.storage ?? documentStorage;
+      let image = await (options.getImage ?? getImageById)(imageKey);
+      let processedForRequest = false;
+      if (!image) {
+        let staged;
+        try { staged = await storage.download(stagedPlaceImageKey(token.nonce)); }
+        catch {
+          await generatePlaceHeroImage({ organizationKey: input.organizationKey, scopeKey: input.scopeKey, imageRequestToken: input.imageRequestToken }, userKey, execution);
+          staged = await storage.download(stagedPlaceImageKey(token.nonce));
+        }
+        const permanentStorageKey = `media/${input.scopeKey}/${imageKey}/${createHash('sha256').update(staged.bytes).digest('hex')}/original.webp`;
+        await repository.cancelManagedImageDeletion(permanentStorageKey);
+        image = await (options.process ?? processImage)({
+          scopeKey: input.scopeKey, ownerKey: membershipKey, imageKey, idempotencyKey: token.nonce,
+          file: { filename: `${input.name.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').toLowerCase() || 'place'}.webp`, mimeType: 'image/webp', sizeBytes: staged.bytes.byteLength, bytes: staged.bytes },
+          location: { placeName: input.name, placeSummary: input.summary, country: token.country.name, countryCode: input.countryCode, latitude: input.latitude, longitude: input.longitude, locationSource: 'place' },
+          mutationPolicy: 'system-only', signal: execution.signal,
+        });
+        processedForRequest = true;
+      }
+      try {
+        const timestamp = now();
+        const collectionKey = stableKey('place-media-collection', input.scopeKey);
+        const place = await repository.convergeManagedPlace({ context, place: {
+        key: stableKey('place', `${input.scopeKey}\0${input.countryCode}\0${input.name}`), scopeKey: input.scopeKey, name: input.name, summary: input.summary, countryCode: input.countryCode,
         latitude: input.latitude, longitude: input.longitude,
-        embedding: await (options.embed ?? embedText)({ text: input.name, signal: execution.signal, timeoutMs: execution.timeoutMs }),
-        createdAt: now(),
-      });
-      return { place: placeDto(place) };
+        embedding: await (options.embed ?? embedText)({ text: buildPlaceEmbeddingText(input), signal: execution.signal, timeoutMs: execution.timeoutMs }), embeddingContentVersion: 2, createdAt: timestamp,
+      }, collection: { key: collectionKey, scopeKey: input.scopeKey, name: 'Compass', purpose: 'place-media', mutationPolicy: 'system-only', embedding: await (options.embed ?? embedText)({ text: 'Compass', signal: execution.signal, timeoutMs: execution.timeoutMs }), isFavorite: false, createdAt: timestamp, updatedAt: timestamp },
+      member: { key: stableKey('place-media-member', `${collectionKey}\0${membershipKey}`), scopeKey: input.scopeKey, collectionKey, memberKey: membershipKey, role: 'viewer', createdAt: timestamp },
+      hidden: { key: stableKey('place-media-hidden', `${userKey}\0${collectionKey}`), userKey, source: 'collection', sourceKey: collectionKey, createdAt: timestamp }, image,
+      collectionImage: { key: stableKey('place-media-link', `${collectionKey}\0${image.key}`), scopeKey: input.scopeKey, collectionKey, imageKey: image.key, addedByKey: membershipKey, createdAt: timestamp },
+        placeImage: { key: stableKey('place-image-link', image.key), scopeKey: input.scopeKey, placeKey: stableKey('place', `${input.scopeKey}\0${input.countryCode}\0${input.name}`), imageKey: image.key, role: 'hero', provenance: 'generated', position: 0, createdAt: timestamp } });
+        await storage.delete(stagedPlaceImageKey(token.nonce)).catch(() => undefined);
+        return { place: placeDto(place) };
+      } catch (error) {
+        if (processedForRequest) {
+          const storageKey = await repository.compensateManagedImage(input.scopeKey, image.key, now()).catch((cleanup) => { throw new AggregateError([error, cleanup], 'Place save and orphan compensation failed.'); });
+          if (storageKey) await storage.delete(storageKey).then(() => repository.acknowledgeManagedImageDeletion(storageKey)).catch(() => undefined);
+        }
+        throw error;
+      }
     },
     async findPlace(raw: unknown, userKey: string, execution: Pick<ExecuteActionOptions, 'signal' | 'timeoutMs'> = {}) {
       const input = travelPlaceFindInputSchema.parse(raw);
@@ -125,7 +173,7 @@ export function createTravelService(options: { repository?: TravelRepository; ex
         name: researched.location.country, countryCode: researched.location.countryCode, continent: researched.location.continent, latitude: researched.location.latitude, longitude: researched.location.longitude,
       };
       const detail = input.country ? { ...researched, location: { ...researched.location, kind: 'country' as const, name: country.name, country: country.name, countryCode: country.countryCode, continent: country.continent, region: null, city: null, latitude: country.latitude, longitude: country.longitude }, title: country.name } : researched;
-      const imageRequestToken = issueImageToken(input, country, country.name, detail.heroImagePrompt);
+      const imageRequestToken = issueImageToken(input, country, { name: detail.title, summary: detail.summary, countryCode: detail.location.countryCode, latitude: detail.location.latitude, longitude: detail.location.longitude }, detail.heroImagePrompt);
       const { heroImagePrompt: _heroImagePrompt, ...publicDetail } = detail;
       return { place: travelPlaceDetailSchema.parse({ ...publicDetail, imageRequestToken }) };
     },
@@ -139,7 +187,7 @@ export function createTravelService(options: { repository?: TravelRepository; ex
       if (researched.data.location.countryCode !== input.country.code.toUpperCase()) throw new TravelGenerationError(`Guide returned ${researched.data.location.countryCode} for selected country ${input.country.code.toUpperCase()}.`);
       const country = { name: input.country.name, countryCode: input.country.code.toUpperCase(), continent: input.country.continent, latitude: input.country.lat, longitude: input.country.lon };
       const detail = { ...researched.data, location: { ...researched.data.location, kind: 'place' as const, name: input.city, country: country.name, countryCode: country.countryCode, continent: country.continent, city: input.city }, title: input.city };
-      const imageRequestToken = issueImageToken(input, country, input.city, detail.heroImagePrompt);
+      const imageRequestToken = issueImageToken(input, country, { name: detail.title, summary: detail.summary, countryCode: detail.location.countryCode, latitude: detail.location.latitude, longitude: detail.location.longitude }, detail.heroImagePrompt);
       const { heroImagePrompt: _heroImagePrompt, ...publicDetail } = detail;
       return { city: travelCityDetailSchema.parse({ ...publicDetail, imageRequestToken }) };
     },

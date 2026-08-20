@@ -14,7 +14,7 @@ const domain = {
 
 const expected: Array<[AssistantSurface, string[]]> = [
   ['knowledge-workspace', ['content.hidden.list', 'folder.hide', 'folder.reveal', 'document.hide', 'document.reveal', 'folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy', 'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.enhance', 'document.translate', 'document.list-versions', 'document.restore-version', 'document.download', 'content.neighbors', 'content.search-history.delete', 'knowledge.search', 'note.write']],
-  ['travel-workspace', ['place.list', 'place.find', 'place.create']],
+  ['travel-workspace', ['country.search', 'place.list', 'place.find', 'place.create']],
   ['signal-workspace', ['email.overview', 'email.sync', 'email.thread.read', 'email.thread.mark-read', 'email.thread.favorite', 'email.draft.create', 'email.draft.update', 'email.draft.send', 'email.disconnect']],
   ['book-workspace', ['book.list', 'book.detail', 'book.chapter.progress', 'book.create']],
 ];
@@ -47,6 +47,7 @@ describe('personal assistant service capabilities', () => {
       overview: async (...args: unknown[]) => { calls.push(['travel.overview', ...args]); return {}; },
       createPlace: async (...args: unknown[]) => { calls.push(['travel.createPlace', ...args]); return {}; },
     };
+    const countries: any = { search: async (...args: unknown[]) => { calls.push(['countries.search', ...args]); return {}; } };
     const email: any = {
       overview: async (...args: unknown[]) => { calls.push(['email.overview', ...args]); return {}; },
       sync: async (...args: unknown[]) => { calls.push(['email.sync', ...args]); return {}; },
@@ -64,10 +65,11 @@ describe('personal assistant service capabilities', () => {
       progress: async (...args: unknown[]) => { calls.push(['books.progress', ...args]); return {}; },
       create: async (...args: unknown[]) => { calls.push(['books.create', ...args]); return {}; },
     };
-    const context: any = { domain, requestKey: 'request-1', travel, email, books };
+    const context: any = { domain, requestKey: 'request-1', travel, countries, email, books };
     const cases: Array<[AssistantSurface, string, unknown]> = [
       ['travel-workspace', 'place.list', {}],
-      ['travel-workspace', 'place.create', { name: 'Japan', countryCode: 'JP', latitude: 36.2, longitude: 138.2 }],
+      ['travel-workspace', 'country.search', { query: 'Japan' }],
+      ['travel-workspace', 'place.create', { name: 'Japan', summary: 'Island country.', countryCode: 'JP', latitude: 36.2, longitude: 138.2, imageRequestToken: 'token' }],
       ['signal-workspace', 'email.overview', {}],
       ['signal-workspace', 'email.sync', {}],
       ['signal-workspace', 'email.thread.read', { threadKey }],
@@ -86,7 +88,8 @@ describe('personal assistant service capabilities', () => {
     const serviceContext = { organizationKey, scopeKey };
     const actor = { userKey, ...serviceContext };
     expect(calls).toContainEqual(['travel.overview', serviceContext, userKey]);
-    expect(calls).toContainEqual(['travel.createPlace', { ...serviceContext, name: 'Japan', countryCode: 'JP', latitude: 36.2, longitude: 138.2 }, userKey, { signal: undefined, timeoutMs: undefined }]);
+    expect(calls).toContainEqual(['countries.search', { organizationKey, query: 'Japan' }, userKey, { signal: undefined, timeoutMs: undefined }]);
+    expect(calls).toContainEqual(['travel.createPlace', { ...serviceContext, name: 'Japan', summary: 'Island country.', countryCode: 'JP', latitude: 36.2, longitude: 138.2, imageRequestToken: 'token' }, userKey, { signal: undefined, timeoutMs: undefined }]);
     expect(calls).toContainEqual(['email.overview', actor, {}]);
     expect(calls).toContainEqual(['email.threadForTool', actor, threadKey, undefined]);
     expect(calls).toContainEqual(['email.markRead', actor, threadKey]);

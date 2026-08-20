@@ -34,7 +34,7 @@ function accessFilters(source: string, sourceKey: string) {
     LET collectionAccess = LENGTH(FOR member IN collectionMembers FILTER member.scopeKey == target.scopeKey && member.collectionKey == target._key && member.memberKey == @membershipKey LIMIT 1 RETURN 1) > 0
     LET relationCount = LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == target.scopeKey && relation.imageKey == target._key RETURN 1)
     LET imageAccess = (target.createdByKey == @membershipKey && relationCount == 0) || LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == target.scopeKey && relation.imageKey == target._key LET collection = DOCUMENT(collections, relation.collectionKey) FILTER collection != null FOR member IN collectionMembers FILTER member.scopeKey == target.scopeKey && member.collectionKey == relation.collectionKey && member.memberKey == @membershipKey LIMIT 1 RETURN 1) > 0
-    FILTER ${source} == "collection" ? (privileged || collectionAccess) : ${source} == "image" ? (privileged || imageAccess) : (privileged || scoped)
+    FILTER ${source} == "collection" ? (privileged || collectionAccess) : ${source} == "image" ? (target.mutationPolicy != "system-only" && (privileged || imageAccess)) : (privileged || scoped)
   `;
 }
 

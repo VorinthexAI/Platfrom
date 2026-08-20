@@ -44,6 +44,7 @@ import { bootstrapGuestAuth, getAuthAccount, logoutAuthAccount, patchAuthAccount
 import { recordPlatformEvent } from './platform-events';
 import { acceptGalleryCollectionInvite, activateGalleryCollectionShare, completeGalleryUploads, createGalleryCollection, createGalleryCollectionInvite, createGalleryCollectionShare, createGalleryHighlight, createGalleryMemory, createGallerySubject, deleteGalleryCollection, deleteGalleryCollectionDuplicates, deleteGalleryHighlight, deleteGalleryImages, deleteGalleryMemory, deleteGallerySubject, findGalleryCollectionDuplicates, galleryOverview, galleryUploadStatus, leaveGalleryCollection, listGalleryCollectionMembers, listGalleryCollectionShares, listGalleryHighlights, listGalleryMemories, listGalleryPendingInvites, listGallerySubjectImages, listGallerySubjects, presignGalleryUploads, readGalleryHighlight, readGalleryMemory, rejectGalleryCollectionInvite, removeGalleryCollectionMember, revokeGalleryCollectionInvite, revokeGalleryCollectionShare, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryCollectionMemberRole, updateGalleryCollectionShare, updateGalleryImage } from './gallery';
 import { travelHandlers } from './travel';
+import { countryHandlers } from './countries';
 import { emailHandlers } from './email-inbox';
 import { bookHandlers } from './books';
 import { userHiddenHandlers } from './user-hiddens';
@@ -465,6 +466,7 @@ export function registerRoutes(app: Hono) {
   app.post('/gallery/memories/read', readGalleryMemory);
   app.post('/gallery/memories/delete', deleteGalleryMemory);
   app.post('/travel/overview', travelHandlers.overview);
+  app.post('/travel/countries/search', countryHandlers.search);
   app.post('/travel/places', travelHandlers.createPlace);
   app.post('/travel/places/find', travelHandlers.findPlace);
   app.post('/travel/cities/find', travelHandlers.findCity);

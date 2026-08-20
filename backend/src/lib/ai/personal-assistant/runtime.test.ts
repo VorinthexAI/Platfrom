@@ -114,7 +114,7 @@ describe('personal assistant runtime', () => {
       },
     });
 
-    expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual(['place.list', 'place.find', 'place.create', 'assistant.unsupported']);
+    expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual(['country.search', 'place.list', 'place.find', 'place.create', 'assistant.unsupported']);
     expect(chatInput.systemPrompt).toContain('operating inside Compass');
     expect(chatInput.messages[0].content[0].text).toContain('"workspace":"Compass"');
     expect(result).toEqual({ type: 'unsupported', message: 'This request is not supported in Compass. Core can search your saved knowledge for travel context.', sources: [] });

@@ -69,6 +69,26 @@ test("keeps the Gallery filter sheet limited to favorite and hidden toggles", ()
   expect(filterSheet).not.toContain('>Search history</Button>');
 });
 
+test("presents managed place media as readable Compass content with collection-only visibility control", () => {
+  expect(source).toContain("isManagedGalleryCollection(activeCollection)");
+  expect(source).toContain("capabilityIconSource.compass");
+  expect(source).toContain('accessibilityLabel="Compass collection"');
+  expect(source.indexOf('isManagedGalleryCollection(collection) ? <Image accessibilityLabel="Compass collection"')).toBeLessThan(source.indexOf('collection.coverUrl ? <Image source={collection.coverUrl}'));
+  expect(source).toContain("!managedCollection && !isManagedGalleryImage(image)");
+  expect(source).toContain("activeCollection && !managedCollection ? <GalleryHighlights");
+  expect(source).toContain("activeCollection && !managedCollection ? <GalleryMemories");
+  expect(source).toContain("!managedCollection ? <View style={styles.sharingRow}");
+  const collectionMenuStart = source.indexOf('{activeSheet === "collectionMenu" ? <>');
+  const collectionMenu = source.slice(collectionMenuStart, source.indexOf('activeSheet === "cleanupMenu"', collectionMenuStart));
+  expect(collectionMenu).toContain('!managedCollection');
+  expect(collectionMenu).toContain('setHiddenOptimistically("collection"');
+  const imageMenuStart = source.indexOf('activeSheet === "imageActions" && selectedImage');
+  const imageMenu = source.slice(imageMenuStart, source.indexOf('activeSheet === "imageEdit"', imageMenuStart));
+  expect(imageMenu).toContain("Find similar image");
+  expect(imageMenu).toContain("!managedCollection && !isManagedGalleryImage(selectedImage)");
+  expect(source).toContain("selectedImage && (activeCollection || !isManagedGalleryImage(selectedImage))");
+});
+
 test("only lifts Core for its own focus and uses distinct image sheet presentations", () => {
   expect(source).toContain('behavior={aiInputFocused ? "height" : undefined}');
   expect(source).toContain("setAiInputFocused(focused)");
@@ -516,7 +536,8 @@ test("edits owner collection covers from existing images with tri-state changes"
 
 test("uses covered collection cards in every collection browser and destination picker", () => {
   expect(source.match(/collection\.coverUrl \? <Image source=\{collection\.coverUrl\}/g)?.length).toBeGreaterThanOrEqual(4);
-  expect(source.match(/collection\.coverUrl && styles\.coveredCollectionMain/g)?.length).toBeGreaterThanOrEqual(4);
+  expect(source.match(/collection\.coverUrl && styles\.coveredCollectionMain/g)?.length).toBeGreaterThanOrEqual(3);
+  expect(source).toContain("(collection.coverUrl || isManagedGalleryCollection(collection)) && styles.coveredCollectionMain");
   expect(source).toContain('accessibilityLabel={`Upload to ${collection.name}`}');
   expect(source).toContain('accessibilityLabel={`${selected ? "Remove" : "Select"} ${collection.name}`}');
   expect(source).toContain('openIdentityPickerCollection(collection)');

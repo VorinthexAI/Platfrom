@@ -4,7 +4,12 @@ import readExif from 'exif-reader';
 import sharp from 'sharp';
 
 export type ImageCoordinates = { latitude: number; longitude: number };
-export type ImageLocation = { city?: string; country?: string; countryCode?: string };
+export type ImageLocation = {
+  city?: string; country?: string; countryCode?: string;
+  placeName?: string; placeSummary?: string;
+  latitude?: number; longitude?: number;
+  locationSource?: 'exif' | 'supplied' | 'place';
+};
 
 type ReverseGeocodeClient = Pick<GeoPlacesClient, 'send'>;
 const locationCache = new Map<string, ImageLocation | null>();

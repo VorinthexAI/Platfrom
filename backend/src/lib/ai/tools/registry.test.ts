@@ -7,9 +7,9 @@ describe('unified tool registry', () => {
   test('has one unique definition for every public tool name', () => {
     expect(new Set(TOOL_NAMES).size).toBe(TOOL_NAMES.length);
     expect(new Set(TOOL_DEFINITIONS.map(({ name }) => name)).size).toBe(TOOL_DEFINITIONS.length);
-    expect(TOOL_NAMES).toHaveLength(110);
-    expect(TOOL_DEFINITIONS).toHaveLength(110);
-    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 65);
+    expect(TOOL_NAMES).toHaveLength(111);
+    expect(TOOL_DEFINITIONS).toHaveLength(111);
+    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 66);
     expect(TOOL_DEFINITIONS.map(({ name }) => name)).toEqual([...TOOL_NAMES]);
     expect(TOOL_NAMES).not.toContain('chat');
     expect(TOOL_NAMES).not.toContain('orchestrator.chat');
@@ -43,7 +43,7 @@ describe('unified tool registry', () => {
       expect(TOOL_NAMES).not.toContain(name);
       expect(toolInputSchemas).not.toHaveProperty(name);
     }
-    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['place.list', 'place.find', 'place.create']));
+    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['country.search', 'place.list', 'place.find', 'place.create']));
     expect(TOOL_NAMES).not.toContain('place.images.generate');
     for (const name of ['place.visit.create', 'trip.create', 'trip.place.add', 'trip.place.remove']) expect(TOOL_NAMES).not.toContain(name);
     expect(TOOL_NAMES).toContain('email.draft.send');
@@ -92,14 +92,24 @@ describe('unified tool registry', () => {
     await expect(runTool('place.list', '', { scopeKey: newId() }, { contentContext, travelService })).rejects.toThrow('Unrecognized key');
     await runTool('place.list', '', {}, { contentContext, travelService });
     await runTool('place.find', '', { query: 'Reykjavik' }, { contentContext, travelService });
-    await expect(runTool('place.create', '', { name: 'Iceland', countryCode: 'IS', latitude: 65, longitude: -18, scopeKey }, { contentContext, travelService })).rejects.toThrow('Unrecognized key');
-    await runTool('place.create', '', { name: 'Iceland', countryCode: 'IS', latitude: 65, longitude: -18 }, { contentContext, travelService });
+    const createInput = { name: 'Iceland', summary: 'Volcanic island.', countryCode: 'IS', latitude: 65, longitude: -18, imageRequestToken: 'token' };
+    await expect(runTool('place.create', '', { ...createInput, scopeKey }, { contentContext, travelService })).rejects.toThrow('Unrecognized key');
+    await runTool('place.create', '', createInput, { contentContext, travelService });
     expect(calls).toEqual([
       ['overview', { organizationKey, scopeKey }, userKey],
       ['findPlace', { organizationKey, scopeKey, query: 'Reykjavik' }, userKey, { signal: undefined }],
-      ['createPlace', { organizationKey, scopeKey, name: 'Iceland', countryCode: 'IS', latitude: 65, longitude: -18 }, userKey, { signal: undefined, timeoutMs: undefined }],
+      ['createPlace', { organizationKey, scopeKey, ...createInput }, userKey, { signal: undefined, timeoutMs: undefined }],
     ]);
     expect(() => toolInputSchemas['collection.create'].parse({ name: 'Favorites', organizationKey })).toThrow('Unrecognized key');
+  });
+
+  test('executes country.search through the canonical read-only service with trusted identity', async () => {
+    const organizationKey = newId(), scopeKey = newId(), userKey = newId();
+    const contentContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const calls: unknown[][] = [];
+    await runTool('country.search', '', { query: 'Portugal' }, { contentContext, countrySearchService: { search: async (...args: unknown[]) => { calls.push(args); return { country: null }; } } as any });
+    expect(calls).toEqual([[{ organizationKey, query: 'Portugal' }, userKey, { signal: undefined, timeoutMs: undefined }]]);
+    await expect(runTool('country.search', '', { query: 'Portugal', organizationKey }, { contentContext })).rejects.toThrow('Unrecognized key');
   });
 
   test('injects trusted Content scope and organization into public tools', async () => {

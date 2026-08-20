@@ -77,7 +77,7 @@ test("caches token-dependent country sheets for exactly one hour without polling
   expect(workspace).toContain("Keep an already-paid image request alive");
   expect(workspace).toContain("queryFn: ({ signal })");
   expect(workspace).not.toContain("POLL");
-  expect(workspace).not.toContain("setTimeout");
+  expect(workspace.match(/setTimeout/g)).toHaveLength(1);
   expect(workspace).not.toContain("removeQueries");
   expect(workspace).not.toContain("setCountryImages");
   expect(workspace).not.toContain("countryDetailRequest");
@@ -85,14 +85,65 @@ test("caches token-dependent country sheets for exactly one hour without polling
 
 test("uses shared Compass chrome, save footers, and a composer accessory island", () => {
   expect(workspace).toContain('trigger="back"');
-  expect(workspace).toContain('accessibilityLabel="Search Compass places"');
+  expect(workspace).toContain('accessibilityLabel="Search Compass countries"');
   expect(workspace).toContain('accessibilityLabel="Filter Compass"');
   expect(workspace).toContain('accessibilityLabel="Add in Compass"');
   expect(workspace).toContain("accessory={selectedCountry");
   expect(workspace).toContain('title: "Country saved to my places"');
   expect(workspace).toContain('title: "City saved to my places"');
-  expect(workspace).toContain("void createPlace(input).then(cachePlace)");
+  expect(workspace).toContain("void persistGeneratedPlace(input, optimisticKey");
+  expect(workspace).toContain("summary: countryDetail.summary");
+  expect(workspace).toContain("imageRequestToken: countryDetail.imageRequestToken");
+  expect(workspace).toContain('countryImage?.status !== "ready"');
+  expect(workspace).toContain('cityImage?.status !== "ready"');
   expect(workspace).not.toContain("loading={countrySaving}");
   expect(workspace).not.toContain("loading={citySaving}");
   expect(workspace).toContain("countryScrollRef.current?.scrollTo({ y: 0");
+});
+
+test("debounces canonical country search, aborts stale requests, and focuses without opening detail", () => {
+  expect(workspace).toContain("export const COUNTRY_SEARCH_DEBOUNCE_MS = 350");
+  expect(workspace).toContain("const controller = new AbortController()");
+  expect(workspace).toContain("return () => { clearTimeout(timer); controller.abort(); }");
+  expect(workspace).toContain("void searchCountries(query, controller.signal)");
+  expect(workspace).toContain("setSearchFocus(undefined)");
+  expect(workspace).toContain("focusTarget={searchFocus ?? undefined}");
+  const searchInput = workspace.slice(workspace.indexOf('accessibilityLabel="Search Compass countries"'), workspace.indexOf('accessibilityLabel="Filter Compass"'));
+  expect(searchInput).not.toContain("openBrowse");
+  expect(searchInput).not.toContain("openCountryDetail");
+  expect(workspace).toContain("Browse countries and saved places");
+});
+
+test("animates a bounded controlled focus pulse and renders pressable branded pin silhouettes", () => {
+  expect(globe).toContain("focusTarget?: Readonly");
+  expect(globe).toContain("FOCUS_DURATION_MS = 700");
+  expect(globe).toContain("FOCUS_PULSE_DURATION_MS = 2_600");
+  expect(globe).toContain("setFromUnitVectors");
+  expect(globe).toContain("globe.quaternion.copy(focus.from).slerp");
+  expect(globe).toContain("focusAnimation.current = undefined");
+  expect(globe).toContain("pulseElapsed < FOCUS_PULSE_DURATION_MS");
+  expect(globe).toContain("if (focusAnimation.current || pulseElapsed < FOCUS_PULSE_DURATION_MS) invalidate()");
+  expect(globe).toContain("PIN_STEM_GEOMETRY = new THREE.ConeGeometry");
+  expect(globe).toContain("PIN_HEAD_GEOMETRY = new THREE.SphereGeometry");
+  expect(globe).toContain("PIN_MARK_GEOMETRY = new THREE.OctahedronGeometry");
+  expect(globe).toContain('place.status === "visited" ? PIN_VISITED_MATERIAL : PIN_PLANNED_MATERIAL');
+  expect(globe).toContain("dispose={null}");
+  expect(globe).toContain("if (canSelect()) onPress?.(place)");
+});
+
+test("uses backend coordinates for search focus while pulsing only mapped local geometry", () => {
+  expect(workspace).toContain("setSearchFocus(match)");
+  expect(workspace).toContain("focusTarget={searchFocus ?? undefined}");
+  expect(globe).toContain("const point = latLonToVector(focusLatitude, focusLongitude)");
+  expect(globe).toContain("properties.countryCode === highlightedCountryCode");
+  expect(globe).toContain("return country ? createCountryBoundaryGeometry");
+});
+
+test("scopes concurrent optimistic save reconciliation and invalidates managed Gallery caches", () => {
+  expect(workspace).toContain("await queryClient.cancelQueries({ queryKey: overviewKey, exact: true }).catch(() => undefined)");
+  expect(workspace).toContain("addOptimisticCompassPlace(current");
+  expect(workspace).toContain("reconcileOptimisticCompassPlace(current, optimisticKey, place)");
+  expect(workspace).toContain("removeOptimisticCompassPlace(current, optimisticKey)");
+  expect(workspace).not.toContain("setQueryData(compassQueryKeys.overview(travelContext), previous)");
+  expect(workspace).toContain("invalidateQueries({ queryKey: galleryQueryKeys.all(travelContext) })");
 });

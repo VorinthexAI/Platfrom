@@ -308,7 +308,7 @@ describe('Arango migration indexes', () => {
     expect(collections.filter(({ name }) => ['places', 'trips', 'tripPlaces', 'placeVisits'].includes(name)).map(({ name }) => name)).toEqual(['places']);
     expect(collections.find(({ name }) => name === 'places')).toEqual({
       name: 'places',
-      embedKeys: ['name'],
+      embedKeys: ['name', 'summary'],
       indexes: [
         { fields: ['scopeKey'] },
         { fields: ['scopeKey', 'countryCode'] },
@@ -351,7 +351,7 @@ describe('Arango migration indexes', () => {
     expect(cleanup).toBeGreaterThan(-1);
     expect(cleanup).toBeLessThan(activeLoop);
     expect(source).toContain('REPLACE place WITH UNSET(replacement, "_rev") IN places');
-    expect(source).toContain('embedding: await generateEmbedding(canonical.name)');
+    expect(source).toContain('embedding: await generateEmbedding(buildPlaceEmbeddingText(canonical))');
     expect(source).toContain('FILTER place.kind == "country" REMOVE place IN places');
     expect(source).toContain('resource.sourceType == "place" && resource.sourceKey IN @countryPlaceKeys');
     expect(source).toContain('places migration found duplicate saved cities');
@@ -382,10 +382,12 @@ describe('Arango migration indexes', () => {
         _rev: 'legacy-revision',
         scopeKey: 'cmrnlzf640001qc7kazsr96k5',
         name: 'Stockholm',
+        summary: '',
         countryCode: 'SE',
         latitude: 59.3293,
         longitude: 18.0686,
         embedding: expect.any(Array),
+        embeddingContentVersion: 2,
         createdAt: '2026-08-08T12:00:00.000Z',
       });
       expect(first.embedding).toHaveLength(EMBEDDING_DIMENSIONS);

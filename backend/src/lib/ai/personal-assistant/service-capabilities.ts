@@ -4,6 +4,7 @@ import { contentZodToJsonSchema } from '@/lib/ai/tools/content-json-schema';
 import { runContentTool } from '@/lib/ai/tools/content-runtime';
 import type { ContentToolName } from '@/lib/ai/tools/content-schemas';
 import { createTravelService, travelPlaceCreateInputSchema, travelPlaceFindInputSchema } from '@/lib/travel/service';
+import { createCountrySearchService } from '@/lib/travel/country-search';
 import { createEmailService, type EmailActor } from '@/lib/email-inbox/service';
 import { defaultBookService } from '@/lib/books/default-service';
 import { newId } from '@/lib/ids';
@@ -104,6 +105,7 @@ export const archiveCapabilities = [
 ];
 
 export const compassCapabilities = [
+  capability('country.search', 'Find the country that best matches a country-name query.', z.object({ query: z.string().trim().min(1).max(200) }).strict(), async (input, context) => { const actor = identity(context); return (context.countries ?? createCountrySearchService()).search({ organizationKey: actor.serviceContext.organizationKey, ...input }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }),
   capability('place.list', 'List saved places.', z.object({}).strict(), async (_input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).overview(actor.serviceContext, actor.userKey); }),
   capability('place.find', 'Find a destination and create its structured travel guide.', travelPlaceFindInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).findPlace({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal }); }),
   capability('place.create', 'Save a country or city to the current Compass workspace.', travelPlaceCreateInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).createPlace({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }, 'compass'),

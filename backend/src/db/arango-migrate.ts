@@ -20,6 +20,8 @@ import { z } from 'zod';
 import { withDatabaseTransaction } from '../lib/db/client';
 import { countryCodeSchema } from '../lib/db/users.node';
 import { retireAiPersistence } from './retire-ai-persistence';
+import { buildPlaceEmbeddingText } from '../lib/travel/semantic-text';
+import { buildImageEmbeddingText } from '../lib/image-embedding';
 
 const url = process.env.ARANGO_URL ?? 'http://127.0.0.1:8529';
 const databaseName = process.env.ARANGO_DATABASE ?? 'vorinthex';
@@ -353,6 +355,7 @@ const legacyPlaceSchema = z.object({
   key: z.string().cuid(),
   scopeKey: z.string().cuid(),
   name: z.string().trim().min(1),
+  summary: z.string().default(''),
   countryCode: z.preprocess((value) => typeof value === 'string' ? value.trim().toUpperCase() : value, countryCodeSchema),
   latitude: z.number().finite().min(-90).max(90),
   longitude: z.number().finite().min(-180).max(180),
@@ -362,7 +365,7 @@ const legacyPlaceSchema = z.object({
 async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
   const places = targetDb.collection('places');
   if (!await places.exists()) return;
-  const canonicalFields = ['scopeKey', 'name', 'countryCode', 'latitude', 'longitude', 'embedding', 'createdAt'].sort();
+  const canonicalFields = ['scopeKey', 'name', 'summary', 'countryCode', 'latitude', 'longitude', 'embedding', 'embeddingContentVersion', 'createdAt'].sort();
   const validatePlaces = async () => {
     let validationAfter = '';
     while (true) {
@@ -382,6 +385,7 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
           key: place._key,
           scopeKey: place.scopeKey,
           name: place.name,
+          summary: typeof place.summary === 'string' ? place.summary : '',
           countryCode: place.countryCode,
           latitude: place.latitude,
           longitude: place.longitude,
@@ -413,6 +417,7 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
         FILTER place._key > @after
         FILTER ATTRIBUTES(place, true, true) != @canonicalFields
           || place.name != TRIM(place.name) || place.countryCode != UPPER(TRIM(place.countryCode))
+          || place.embeddingContentVersion != 2
           || !IS_ARRAY(place.embedding) || LENGTH(place.embedding) != @dimensions
           || LENGTH(place.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
         SORT place._key
@@ -427,6 +432,7 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
         key: place._key,
         scopeKey: place.scopeKey,
         name: place.name,
+        summary: typeof place.summary === 'string' ? place.summary : '',
         countryCode: place.countryCode,
         latitude: place.latitude,
         longitude: place.longitude,
@@ -437,10 +443,12 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
         _rev: place._rev,
         scopeKey: canonical.scopeKey,
         name: canonical.name,
+        summary: canonical.summary,
         countryCode: canonical.countryCode,
         latitude: canonical.latitude,
         longitude: canonical.longitude,
-        embedding: await generateEmbedding(canonical.name),
+        embedding: await generateEmbedding(buildPlaceEmbeddingText(canonical)),
+        embeddingContentVersion: 2,
         createdAt: canonical.createdAt,
       });
     }
@@ -470,6 +478,7 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
     RETURN LENGTH(FOR place IN places
       FILTER ATTRIBUTES(place, true, true) != @canonicalFields
         || place.name != TRIM(place.name) || place.countryCode != UPPER(TRIM(place.countryCode))
+        || place.embeddingContentVersion != 2
         || !IS_ARRAY(place.embedding) || LENGTH(place.embedding) != @dimensions
         || LENGTH(place.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
       RETURN 1)
@@ -516,7 +525,12 @@ export async function migrateExactSemanticRecords(targetDb: Database, collection
       let embedding = resource.embedding;
       const hasEmbeddingMetadata = resource.embeddingProvider !== undefined || resource.embeddingModel !== undefined || resource.embeddingDimensions !== undefined;
       if ((hasEmbeddingMetadata && (resource.embeddingProvider !== EMBEDDING_PROVIDER_ID || resource.embeddingModel !== EMBEDDING_MODEL || resource.embeddingDimensions !== dimensions)) || !Array.isArray(embedding) || embedding.length !== dimensions || embedding.some((value) => typeof value !== 'number' || !Number.isFinite(value))) {
-        const text = buildEmbeddingText(embedKeys, resource);
+        const text = collectionName === 'images' ? buildImageEmbeddingText({
+          filename: String(resource.filename ?? ''), caption: String(resource.caption ?? ''),
+          city: typeof resource.city === 'string' ? resource.city : null, country: typeof resource.country === 'string' ? resource.country : null,
+          countryCode: typeof resource.countryCode === 'string' ? resource.countryCode : null,
+          placeName: typeof resource.placeName === 'string' ? resource.placeName : null, placeSummary: typeof resource.placeSummary === 'string' ? resource.placeSummary : null,
+        }) : buildEmbeddingText(embedKeys, resource);
         if (!text) throw new Error(`Cannot migrate ${collectionName}: ${String(resource._key)} has no semantic embedding input.`);
         embedding = await generateEmbedding(text);
       }
@@ -1174,13 +1188,14 @@ export const collections: CollectionSpec[] = [
   { name: 'pollOptions', embedKeys: ['text'], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['pollKey'] }, { fields: ['pollKey', 'position'], unique: true }] },
   { name: 'pollVotes', embedKeys: [], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['pollKey'] }, { fields: ['optionKey'] }, { fields: ['participantKey'] }, { fields: ['pollKey', 'optionKey', 'participantKey'], unique: true }] },
   { name: 'folders', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'parentFolderKey'] }, { fields: ['scopeKey', 'isFavorite'] }, { fields: ['scopeKey', 'parentFolderKey', 'name'] }] },
-  { name: 'images', embedKeys: ['filename', 'caption', 'country', 'city', 'countryCode'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'createdAt'] }, { fields: ['imageCaptionKey'], sparse: true }, { fields: ['storageKey'], unique: true }] },
+  { name: 'images', embedKeys: ['filename', 'caption', 'placeName', 'placeSummary', 'country', 'city', 'countryCode'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'createdAt'] }, { fields: ['scopeKey', 'latitude', 'longitude'], sparse: true }, { fields: ['imageCaptionKey'], sparse: true }, { fields: ['storageKey'], unique: true }] },
   { name: 'imageCaptions', skipEmbedding: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'hashAlgorithm', 'perceptualHash'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment0'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment1'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment2'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment3'], sparse: true }] },
   { name: 'visualIdentities', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'createdByKey'] }, { fields: ['scopeKey', 'createdByKey', 'name'] }, { fields: ['scopeKey', 'referenceImageKey'] }] },
   { name: 'imageIdentities', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'identityKey', 'imageKey'], unique: true }, { fields: ['scopeKey', 'identityKey', 'confidence'] }, { fields: ['scopeKey', 'imageKey'] }, { fields: ['scopeKey', 'imageKey', 'isReference'], sparse: true }] },
   { name: 'galleryUploads', skipEmbedding: true, indexes: [{ fields: ['actorKey', 'createdAt'] }, { fields: ['storageKey'], unique: true }, { fields: ['expiresAt'] }] },
-  { name: 'collections', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'name'] }, { fields: ['scopeKey', 'coverImageKey'], sparse: true }] },
+  { name: 'collections', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'name'] }, { fields: ['scopeKey', 'purpose'], unique: true, sparse: true }, { fields: ['scopeKey', 'coverImageKey'], sparse: true }] },
   { name: 'collectionImages', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'collectionKey', 'imageKey'], unique: true }, { fields: ['scopeKey', 'collectionKey'] }, { fields: ['scopeKey', 'imageKey'] }] },
+  { name: 'placeImages', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'imageKey'], unique: true }, { fields: ['scopeKey', 'placeKey', 'imageKey'], unique: true }, { fields: ['scopeKey', 'placeKey', 'position'] }] },
   { name: 'imageCollecitionHightlights', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'collectionKey', 'createdAt'] }, { fields: ['scopeKey', 'createdByKey'] }] },
   { name: 'imageCollectionMemories', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'imageKey'], unique: true }, { fields: ['scopeKey', 'createdAt'] }] },
   { name: 'collectionMembers', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'collectionKey', 'memberKey'], unique: true }, { fields: ['scopeKey', 'collectionKey', 'role'] }, { fields: ['scopeKey', 'memberKey'] }] },
@@ -1195,7 +1210,8 @@ export const collections: CollectionSpec[] = [
   // Private one-to-one durable audio for generated summaries.
   { name: 'documentSummaryAudio', skipEmbedding: true, indexes: [{ fields: ['summaryKey'], unique: true }, { fields: ['scopeKey', 'documentKey', 'createdAt'] }, { fields: ['storageKey'], unique: true }] },
   { name: 'shares', skipEmbedding: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'sourceType', 'sourceKey'] }, { fields: ['scopeKey', 'sourceType', 'sourceKey', 'revokedAt'] }, { fields: ['tokenHash'], unique: true }, { fields: ['expiresAt'], sparse: true }] },
-  { name: 'places', embedKeys: ['name'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'countryCode'] }, { fields: ['scopeKey', 'countryCode', 'name'], unique: true }] },
+  { name: 'places', embedKeys: ['name', 'summary'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'countryCode'] }, { fields: ['scopeKey', 'countryCode', 'name'], unique: true }] },
+  { name: 'countries', embedKeys: ['name'], indexes: [{ fields: ['countryCode'], unique: true }, { fields: ['name'] }] },
   { name: 'books', embedKeys: ['title', 'subtitle', 'description', 'goal', 'audience', 'outcome'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'status'] }, { fields: ['scopeKey', 'isFavorite'] }, { fields: ['scopeKey', 'generationRequestKey'], unique: true, sparse: true }] },
   { name: 'bookContexts', embedKeys: ['userContext', 'priorKnowledge', 'priorBookContext', 'personalizationContext', 'researchContext', 'noveltyContext', 'generationBrief'], indexes: [{ fields: ['scopeKey', 'bookKey'], unique: true }] },
   { name: 'bookThemes', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey', 'bookKey', 'position'], unique: true }, { fields: ['scopeKey', 'bookKey'] }] },
@@ -1441,6 +1457,8 @@ async function main() {
     if (spec.name === 'folders' || spec.name === 'images' || spec.name === 'collections' || spec.name === 'documents' || spec.name === 'emailThreads') {
       await migrateContentFavorites(targetDb, spec.name);
     }
+    if (spec.name === 'images') await targetDb.query('FOR image IN images FILTER !HAS(image, "mutationPolicy") UPDATE image WITH { mutationPolicy: "user" } IN images');
+    if (spec.name === 'collections') await targetDb.query('FOR collection IN collections FILTER !HAS(collection, "mutationPolicy") || !HAS(collection, "purpose") UPDATE collection WITH { mutationPolicy: HAS(collection, "mutationPolicy") ? collection.mutationPolicy : "user", purpose: HAS(collection, "purpose") ? collection.purpose : null } IN collections OPTIONS { keepNull: true }');
     if (spec.name === 'imageCaptions') {
       await migrateImageCaptions(targetDb);
       await migrateExactSemanticRecords(targetDb, 'imageCaptions', ['caption']);

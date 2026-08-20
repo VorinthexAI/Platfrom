@@ -24,7 +24,7 @@ import { GalleryCollectionSharing } from "@/components/capability/GalleryCollect
 import { GalleryHighlights } from "@/components/capability/GalleryHighlights";
 import { GalleryMemories } from "@/components/capability/GalleryMemories";
 import { ChromeIcon } from "@/components/ChromeIcon";
-import { assistantIconSource } from "@/data/capability-icons";
+import { assistantIconSource, capabilityIconSource } from "@/data/capability-icons";
 import {
   askGalleryAssistant,
   createGalleryCollection,
@@ -42,6 +42,8 @@ import {
   groupGalleryImagesByCreatedDate,
   isGalleryClientErrorCode,
   isGalleryCollectionOwned,
+  isManagedGalleryCollection,
+  isManagedGalleryImage,
   leaveGalleryCollection,
   listGallerySubjects,
   mergeMediaItems,
@@ -245,14 +247,15 @@ export function GalleryWorkspace() {
   const imageSize = Math.floor((contentWidth - GRID_GAP * (IMAGE_COLUMNS - 1)) / IMAGE_COLUMNS);
   const sheetImageSize = Math.floor((width - 42 - GRID_GAP * (IMAGE_COLUMNS - 1)) / IMAGE_COLUMNS);
   const collectionRole = activeCollection ? collectionMembershipRole(activeCollection) : undefined;
+  const managedCollection = isManagedGalleryCollection(activeCollection);
   const isCollectionOwner = Boolean(activeCollection && isGalleryCollectionOwned(activeCollection));
   const canAddImages = Boolean(activeCollection?.access?.canContribute && collectionRole !== "viewer");
   const memberKeys = [...new Set([getGalleryMemberKey(), ...collections.map(({ memberKey }) => memberKey)].filter(Boolean))];
-  const canMutateImage = (image: GalleryImage | undefined) => Boolean(image && (activeCollection
+  const canMutateImage = (image: GalleryImage | undefined) => Boolean(image && !managedCollection && !isManagedGalleryImage(image) && (activeCollection
     ? isCollectionOwner || collectionRole === "collaborator" && image.createdByKey === activeCollection.memberKey
     : false));
   const latestActiveCollection = () => activeCollection ? collections.find(({ key }) => key === activeCollection.key) : undefined;
-  const canMutateInCollection = (image: GalleryImage | undefined, collection: GalleryCollection | undefined) => Boolean(image && collection && (isGalleryCollectionOwned(collection) || collectionMembershipRole(collection) === "collaborator" && image.createdByKey === collection.memberKey));
+  const canMutateInCollection = (image: GalleryImage | undefined, collection: GalleryCollection | undefined) => Boolean(image && collection && !isManagedGalleryCollection(collection) && !isManagedGalleryImage(image) && (isGalleryCollectionOwned(collection) || collectionMembershipRole(collection) === "collaborator" && image.createdByKey === collection.memberKey));
   const showOnlyFavorites = viewFilters.favoritesOnly;
   const showHidden = viewFilters.showHidden;
   const filtersActive = showOnlyFavorites || showHidden;
@@ -1045,6 +1048,13 @@ export function GalleryWorkspace() {
       sizeBytes: item.sizeBytes,
       width: 0,
       height: 0,
+      city: null,
+      country: null,
+      countryCode: null,
+      latitude: null,
+      longitude: null,
+      locationSource: null,
+      mutationPolicy: "user",
       isFavorite: false,
       createdAt: item.createdAt,
       updatedAt: item.createdAt,
@@ -2483,10 +2493,10 @@ export function GalleryWorkspace() {
             <View style={styles.collectionGrid}>
               {loading ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.collectionCard, styles.collectionSkeleton, { width: collectionSize, height: collectionSize }]} />) : visibleCollections.map((collection) => (
                 <View key={collection.key} style={[styles.collectionCard, { width: collectionSize, height: collectionSize }]}>
-                  {collection.coverUrl ? <Image source={collection.coverUrl} contentFit="cover" style={styles.collectionCover} /> : null}
-                  <Button accessibilityLabel={`${collection.name}, ${collection.count} images`} contentMode="raw" onPress={() => { viewRequest.current += 1; setShowingCollectionOverview(false); setLoading(true); setQuery(""); setSelectedImageKeys([]); setActiveSubject(undefined); setShowingSearchResults(false); setActiveCollection(collection); }} size="xl" style={[styles.collectionMain, collection.coverUrl && styles.coveredCollectionMain]} variant="ghost">
-                    {collection.coverUrl ? null : <FolderIcon size="lg" />}
-                    <Text numberOfLines={1} style={[styles.collectionName, collection.coverUrl && styles.coveredCollectionName]}>{collection.name}</Text>
+                  {isManagedGalleryCollection(collection) ? <Image accessibilityLabel="Compass collection" source={capabilityIconSource.compass} contentFit="contain" style={[styles.collectionCover, styles.managedCollectionCover]} /> : collection.coverUrl ? <Image source={collection.coverUrl} contentFit="cover" style={styles.collectionCover} /> : null}
+                  <Button accessibilityLabel={`${collection.name}, ${collection.count} images`} contentMode="raw" onPress={() => { viewRequest.current += 1; setShowingCollectionOverview(false); setLoading(true); setQuery(""); setSelectedImageKeys([]); setActiveSubject(undefined); setShowingSearchResults(false); setActiveCollection(collection); }} size="xl" style={[styles.collectionMain, (collection.coverUrl || isManagedGalleryCollection(collection)) && styles.coveredCollectionMain]} variant="ghost">
+                    {collection.coverUrl || isManagedGalleryCollection(collection) ? null : <FolderIcon size="lg" />}
+                    <Text numberOfLines={1} style={[styles.collectionName, (collection.coverUrl || isManagedGalleryCollection(collection)) && styles.coveredCollectionName]}>{collection.name}</Text>
                   </Button>
                 </View>
               ))}
@@ -2504,7 +2514,7 @@ export function GalleryWorkspace() {
               {canAddImages ? <Button accessibilityLabel={`Add images to ${activeCollection.name}`} contentMode="raw" disabled={busy} hitSlop={5} onPress={() => openSheet("actions")} size="sm" variant="icon"><PlusIcon size="sm" /></Button> : null}
             </View>
           </View>
-          <View style={styles.sharingRow}><Button accessibilityLabel={`AI actions for ${activeCollection.name}`} contentMode="raw" onPress={() => openSheet("cleanupMenu")} size="sm" variant="icon"><BrainIcon size="sm" /></Button><Button accessibilityLabel={`Sharing and access for ${activeCollection.name}`} contentMode="raw" onPress={() => { closeSheet(); setSharingOpen(true); }} size="sm" variant="icon"><MemberIcon size="sm" /></Button></View>
+          {!managedCollection ? <View style={styles.sharingRow}><Button accessibilityLabel={`AI actions for ${activeCollection.name}`} contentMode="raw" onPress={() => openSheet("cleanupMenu")} size="sm" variant="icon"><BrainIcon size="sm" /></Button><Button accessibilityLabel={`Sharing and access for ${activeCollection.name}`} contentMode="raw" onPress={() => { closeSheet(); setSharingOpen(true); }} size="sm" variant="icon"><MemberIcon size="sm" /></Button></View> : null}
           {normalCollectionView ? <View style={styles.rootActions}>
             <View style={styles.collectionSearch}>
               <SearchIcon size="sm" variant="muted" />
@@ -2565,8 +2575,8 @@ export function GalleryWorkspace() {
         value={aiInput}
       />
 
-      {activeCollection ? <GalleryHighlights collection={activeCollection} key={`highlights:${activeCollection.key}`} onClose={() => setHighlightsOpen(false)} open={highlightsOpen} /> : null}
-      {activeCollection ? <GalleryMemories collection={activeCollection} key={`memories:${activeCollection.key}`} onClose={() => setMemoriesOpen(false)} open={memoriesOpen} /> : null}
+      {activeCollection && !managedCollection ? <GalleryHighlights collection={activeCollection} key={`highlights:${activeCollection.key}`} onClose={() => setHighlightsOpen(false)} open={highlightsOpen} /> : null}
+      {activeCollection && !managedCollection ? <GalleryMemories collection={activeCollection} key={`memories:${activeCollection.key}`} onClose={() => setMemoriesOpen(false)} open={memoriesOpen} /> : null}
 
       <BottomSheet
         footer={<Button onPress={closeSheet} size="md" variant="secondary">Close</Button>}
@@ -2577,7 +2587,7 @@ export function GalleryWorkspace() {
       >
         {selectedImage || selectedOptimisticItem ? <View style={styles.detail}>
           <View style={styles.detailMenuRow}>
-            {selectedImage ? <Button accessibilityLabel="Open image actions" contentMode="raw" onPress={() => pushSheet("imageActions")} size="md" variant="icon"><MoreHorizontalIcon size="sm" /></Button> : null}
+            {selectedImage && (activeCollection || !isManagedGalleryImage(selectedImage)) ? <Button accessibilityLabel="Open image actions" contentMode="raw" onPress={() => pushSheet("imageActions")} size="md" variant="icon"><MoreHorizontalIcon size="sm" /></Button> : null}
           </View>
           <View style={styles.detailImageFrame}><Image source={selectedImage?.url ?? selectedOptimisticItem?.uri} contentFit="contain" style={styles.detailImage} /></View>
         </View> : null}
@@ -2631,12 +2641,12 @@ export function GalleryWorkspace() {
           <TextInput autoFocus accessibilityLabel="Collection name" editable={!busy} onChangeText={setNewCollectionName} placeholder="Name" returnKeyType="done" style={styles.formInput} value={newCollectionName} />
         </View> : null}
         {activeSheet === "collectionMenu" ? <>
-          {isCollectionOwner ? <BottomSheetItem disabled={busy} onPress={openCollectionEdit} style={styles.sheetAction} variant="secondary">Edit</BottomSheetItem> : null}
-          {collectionRole !== "viewer" ? <BottomSheetItem disabled={busy} onPress={() => { closeSheet(); setStatus("Long press one of your images to begin selecting, then tap to add more."); }} style={styles.sheetAction} variant="secondary">Select images</BottomSheetItem> : null}
-          {isCollectionOwner ? <BottomSheetItem disabled={busy} onPress={() => void showDuplicates()} style={styles.sheetAction} variant="secondary">Find duplicates</BottomSheetItem> : null}
-          {isCollectionOwner ? <BottomSheetItem disabled={busy} onPress={() => void openVisualIdentities()} style={styles.sheetAction} variant="secondary">Visual identities</BottomSheetItem> : null}
+          {isCollectionOwner && !managedCollection ? <BottomSheetItem disabled={busy} onPress={openCollectionEdit} style={styles.sheetAction} variant="secondary">Edit</BottomSheetItem> : null}
+          {collectionRole !== "viewer" && !managedCollection ? <BottomSheetItem disabled={busy} onPress={() => { closeSheet(); setStatus("Long press one of your images to begin selecting, then tap to add more."); }} style={styles.sheetAction} variant="secondary">Select images</BottomSheetItem> : null}
+          {isCollectionOwner && !managedCollection ? <BottomSheetItem disabled={busy} onPress={() => void showDuplicates()} style={styles.sheetAction} variant="secondary">Find duplicates</BottomSheetItem> : null}
+          {isCollectionOwner && !managedCollection ? <BottomSheetItem disabled={busy} onPress={() => void openVisualIdentities()} style={styles.sheetAction} variant="secondary">Visual identities</BottomSheetItem> : null}
           <BottomSheetItem disabled={busy} onPress={() => { if (activeCollection) setHiddenOptimistically("collection", activeCollection.key, !hidden("collection", activeCollection.key), "Collection"); }} style={styles.sheetAction} variant="secondary">{activeCollection && hidden("collection", activeCollection.key) ? "Reveal" : "Hide"}</BottomSheetItem>
-          {isCollectionOwner ? <BottomSheetItem disabled={busy} onPress={() => pushSheet("confirmDeleteCollection")} style={styles.sheetAction} variant="secondary">Delete collection</BottomSheetItem> : <BottomSheetItem disabled={busy} onPress={() => pushSheet("confirmLeaveCollection")} style={styles.sheetAction} variant="secondary">Leave</BottomSheetItem>}
+          {!managedCollection ? isCollectionOwner ? <BottomSheetItem disabled={busy} onPress={() => pushSheet("confirmDeleteCollection")} style={styles.sheetAction} variant="secondary">Delete collection</BottomSheetItem> : <BottomSheetItem disabled={busy} onPress={() => pushSheet("confirmLeaveCollection")} style={styles.sheetAction} variant="secondary">Leave</BottomSheetItem> : null}
         </> : null}
         {activeSheet === "cleanupMenu" ? <>
           <BottomSheetItem disabled={busy} onPress={() => { closeSheet(); setMemoriesOpen(true); }} style={styles.sheetAction} variant="secondary">Memories</BottomSheetItem>
@@ -2646,7 +2656,7 @@ export function GalleryWorkspace() {
         {activeSheet === "imageActions" && selectedImage ? <View style={styles.actionMenu}>
           {canMutateImage(selectedImage) ? <BottomSheetItem onPress={openImageEdit} style={styles.sheetAction} variant="secondary">Edit</BottomSheetItem> : null}
           {activeCollection ? <BottomSheetItem onPress={() => void findSimilar()} style={styles.sheetAction} variant="secondary">Find similar image</BottomSheetItem> : null}
-          <BottomSheetItem onPress={() => setHiddenOptimistically("image", selectedImage.key, !hidden("image", selectedImage.key), "Image")} style={styles.sheetAction} variant="secondary">{hidden("image", selectedImage.key) ? "Reveal" : "Hide"}</BottomSheetItem>
+          {!managedCollection && !isManagedGalleryImage(selectedImage) ? <BottomSheetItem onPress={() => setHiddenOptimistically("image", selectedImage.key, !hidden("image", selectedImage.key), "Image")} style={styles.sheetAction} variant="secondary">{hidden("image", selectedImage.key) ? "Reveal" : "Hide"}</BottomSheetItem> : null}
           {canMutateImage(selectedImage) ? <BottomSheetItem onPress={() => pushSheet("confirmDeleteImage")} style={styles.sheetAction} variant="secondary">Delete image</BottomSheetItem> : null}
         </View> : null}
         {activeSheet === "imageEdit" && selectedImage ? <View style={styles.form}>
@@ -2826,6 +2836,7 @@ const styles = StyleSheet.create({
   collectionCard: { position: "relative", overflow: "hidden", borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.md, backgroundColor: palette.panelRaised },
   collectionSkeleton: { backgroundColor: palette.hairlineBright, opacity: 0.72 },
   collectionCover: StyleSheet.absoluteFill,
+  managedCollectionCover: { padding: spacing.lg, backgroundColor: palette.voidBlack },
   collectionMain: { width: "100%", height: "100%", flexDirection: "column", justifyContent: "center", gap: 10, paddingHorizontal: 8 },
   coveredCollectionMain: { justifyContent: "flex-end", paddingBottom: 10, backgroundColor: "rgba(0, 0, 0, 0.16)" },
   collectionName: { width: "100%", color: palette.silver100, fontFamily: fonts.medium, fontSize: 12, textAlign: "center" },

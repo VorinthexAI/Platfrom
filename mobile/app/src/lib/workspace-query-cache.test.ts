@@ -17,12 +17,15 @@ mock.module("./content-client", () => ({
 const { contentQueryKeys } = await import("./content-query-cache");
 const {
   ascendQueryKeys,
+  addOptimisticCompassPlace,
   compassQueryKeys,
   galleryQueryKeys,
   getGalleryCollections,
   invalidateAssistantChanges,
   patchGalleryImage,
   patchGalleryUserHiddens,
+  reconcileOptimisticCompassPlace,
+  removeOptimisticCompassPlace,
   removeCachedGalleryImages,
   restoreGalleryOverviews,
   snapshotGalleryOverviews,
@@ -55,6 +58,17 @@ test("isolates every routed workspace key by context and resource", () => {
   expect(signalQueryKeys.overview(context, "all")).not.toEqual(signalQueryKeys.overview(context, "favorite"));
   expect(signalQueryKeys.detail(context, "thread-a")).not.toEqual(signalQueryKeys.detail(context, "thread-b"));
   expect(ascendQueryKeys.detail(context, "book-a")).not.toEqual(ascendQueryKeys.detail(otherContext, "book-a"));
+});
+
+test("reconciles overlapping Compass saves by optimistic key without erasing siblings", () => {
+  const at = "2026-08-20T00:00:00.000Z";
+  const first = { key: "optimistic-first", name: "Lisbon", summary: "First", countryCode: "PT", latitude: 38.72, longitude: -9.14, createdAt: at };
+  const second = { key: "optimistic-second", name: "Porto", summary: "Second", countryCode: "PT", latitude: 41.15, longitude: -8.61, createdAt: at };
+  const both = addOptimisticCompassPlace(addOptimisticCompassPlace(undefined, first), second);
+  const failedFirst = removeOptimisticCompassPlace(both, first.key);
+  expect(failedFirst.places).toEqual([second]);
+  const savedSecond = { ...second, key: "saved-second" };
+  expect(reconcileOptimisticCompassPlace(both, second.key, savedSecond).places.map(({ key }) => key).sort()).toEqual([first.key, savedSecond.key].sort());
 });
 
 test("optimistically patches and snapshots Gallery hidden overlays", () => {

@@ -1,4 +1,11 @@
 import { describe, expect, test } from 'bun:test';
+
+test('country seeds embed only missing or stale semantic content', async () => {
+  const source = await Bun.file(new URL('./seed.ts', import.meta.url)).text();
+  expect(source).toContain('current?.semanticVersion === 1 && current.semanticHash === semanticHash');
+  expect(source).toContain("createHash('sha256').update(country.name)");
+  expect(source.indexOf('if (current?.semanticVersion')).toBeLessThan(source.indexOf('embedText({ text: country.name })'));
+});
 import { PROVIDER_SLUGS } from '@/lib/ai/providers';
 import { ACTION_DEFINITIONS } from '@/lib/ai/actions';
 import { providerSchema } from './providers.node';

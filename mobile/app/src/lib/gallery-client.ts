@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 import { apiClient } from "@/lib/api-client";
 import type { AssistantChange } from "@/lib/assistant-changes";
 import { normalizeCollection, type CollectionRole } from "@/lib/collection-access";
@@ -7,6 +9,8 @@ export type GalleryCollection = {
   key: string;
   name: string;
   description: string | null;
+  purpose: "place-media" | null;
+  mutationPolicy: "user" | "system-only";
   isFavorite: boolean;
   count: number;
   coverUrl: string | null;
@@ -14,15 +18,11 @@ export type GalleryCollection = {
   isOwned?: boolean;
   role: GalleryCollectionRole;
   access: { canRead: boolean; canContribute: boolean; canManage: boolean };
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type GalleryCollectionRole = CollectionRole;
-
-type GalleryCollectionAccess = GalleryCollection["access"];
-type GalleryCollectionProjection = Omit<GalleryCollection, "role" | "access"> & {
-  role?: GalleryCollectionRole;
-  access?: Partial<GalleryCollectionAccess>;
-};
 
 export type GalleryCollectionMember = {
   key: string;
@@ -65,9 +65,13 @@ export type GalleryImage = {
   sizeBytes: number;
   width: number;
   height: number;
-  city?: string | null;
-  country?: string | null;
-  countryCode?: string | null;
+  city: string | null;
+  country: string | null;
+  countryCode: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  locationSource: "exif" | "supplied" | "place" | null;
+  mutationPolicy: "user" | "system-only";
   isFavorite: boolean;
   createdAt: string;
   updatedAt: string;
@@ -82,6 +86,22 @@ export type GalleryOverview = {
   nextCursor: string | null;
   canCreateCollections: boolean;
 };
+
+const galleryCollectionRoleSchema = z.enum(["owner", "collaborator", "viewer"]);
+const galleryCollectionAccessSchema = z.strictObject({ canRead: z.boolean(), canContribute: z.boolean(), canManage: z.boolean() });
+export const galleryCollectionSchema = z.strictObject({
+  key: z.string().min(1), name: z.string().min(1), description: z.string().nullable(), purpose: z.enum(["place-media"]).nullable(), mutationPolicy: z.enum(["user", "system-only"]),
+  isFavorite: z.boolean(), count: z.number().int().nonnegative(), coverUrl: z.string().min(1).nullable(), memberKey: z.string().min(1), isOwned: z.boolean().optional(),
+  role: galleryCollectionRoleSchema, access: galleryCollectionAccessSchema, createdAt: z.iso.datetime(), updatedAt: z.iso.datetime(),
+});
+export const galleryImageSchema = z.strictObject({
+  key: z.string().min(1), filename: z.string().min(1), caption: z.string().min(1), imageCaptionKey: z.string().min(1).nullable(), mimeType: z.string().min(1),
+  sizeBytes: z.number().int().positive(), width: z.number().int().positive(), height: z.number().int().positive(), city: z.string().min(1).nullable(), country: z.string().min(1).nullable(),
+  countryCode: z.string().length(2).nullable(), latitude: z.number().finite().min(-90).max(90).nullable(), longitude: z.number().finite().min(-180).max(180).nullable(),
+  locationSource: z.enum(["exif", "supplied", "place"]).nullable(), mutationPolicy: z.enum(["user", "system-only"]), isFavorite: z.boolean(),
+  createdAt: z.iso.datetime(), updatedAt: z.iso.datetime(), url: z.string().min(1), score: z.number().optional(), createdByKey: z.string().min(1).nullable(),
+});
+const galleryOverviewSchema = z.strictObject({ collections: z.array(galleryCollectionSchema), images: z.array(galleryImageSchema), nextCursor: z.string().nullable(), canCreateCollections: z.boolean() });
 
 export type GalleryHighlight = {
   key: string;
@@ -143,6 +163,14 @@ export function filterCollections(collections: GalleryCollection[], query: strin
 
 export function isGalleryCollectionOwned(collection: Pick<GalleryCollection, "isOwned" | "role">) {
   return collection.isOwned ?? (collection.role === "owner");
+}
+
+export function isManagedGalleryCollection(collection: Pick<GalleryCollection, "purpose" | "mutationPolicy"> | undefined) {
+  return collection?.purpose === "place-media" || collection?.mutationPolicy === "system-only";
+}
+
+export function isManagedGalleryImage(image: Pick<GalleryImage, "mutationPolicy"> | undefined) {
+  return image?.mutationPolicy === "system-only";
 }
 
 export function filterMediaItems(items: GalleryImage[], query: string) {
@@ -380,16 +408,18 @@ async function fetchWithTimeout(input: string, init: RequestInit | undefined, ti
 }
 
 export function fetchGalleryOverview(collectionKey?: string, cursor?: string, limit = 100, maxCaptionScore?: number) {
-  return postGallery<Omit<GalleryOverview, "collections"> & { collections: GalleryCollectionProjection[] }>("/gallery/overview", { ...(collectionKey ? { collectionKey } : {}), ...(cursor ? { cursor } : {}), limit, ...(maxCaptionScore !== undefined ? { maxCaptionScore } : {}) })
+  return postGallery<unknown>("/gallery/overview", { ...(collectionKey ? { collectionKey } : {}), ...(cursor ? { cursor } : {}), limit, ...(maxCaptionScore !== undefined ? { maxCaptionScore } : {}) })
+    .then((overview) => galleryOverviewSchema.parse(overview))
     .then((overview) => ({ ...overview, collections: overview.collections.map(normalizeCollection) }));
 }
 
 export function createGalleryCollection(name: string, isFavorite: boolean) {
-  return postGallery<GalleryCollectionProjection>("/gallery/collections", { name, isFavorite }).then(normalizeCollection);
+  return postGallery<unknown>("/gallery/collections", { name, isFavorite }).then((collection) => normalizeCollection(galleryCollectionSchema.parse(collection)));
 }
 
 export function updateGalleryCollection(collectionKey: string, name: string, isFavorite: boolean, coverImageKey?: string | null) {
-  return postGallery<{ collection: GalleryCollectionProjection }>("/gallery/collections/update", { collectionKey, name, isFavorite, ...(coverImageKey !== undefined ? { coverImageKey } : {}) })
+  return postGallery<unknown>("/gallery/collections/update", { collectionKey, name, isFavorite, ...(coverImageKey !== undefined ? { coverImageKey } : {}) })
+    .then((value) => z.strictObject({ collection: galleryCollectionSchema }).parse(value))
     .then(({ collection }) => ({ collection: normalizeCollection(collection) }));
 }
 
@@ -447,15 +477,15 @@ export function fetchGalleryUploadStatus(uploadKeys: string[], timeout = 60_000)
 }
 
 export function searchGalleryImages(input: { query?: string; imageKey?: string; identityKey?: string; duplicates?: true; collectionKey?: string; recordHistory?: boolean; limit?: number }) {
-  return postGallery<{ images: GalleryImage[] }>("/gallery/images/search", input, 4 * 60_000);
+  return postGallery<unknown>("/gallery/images/search", input, 4 * 60_000).then((value) => z.strictObject({ images: z.array(galleryImageSchema) }).parse(value));
 }
 
 export function setGalleryImageFavorite(imageKey: string, isFavorite: boolean) {
-  return postGallery<{ image: GalleryImage }>("/gallery/images/favorite", { imageKey, isFavorite });
+  return postGallery<unknown>("/gallery/images/favorite", { imageKey, isFavorite }).then((value) => z.strictObject({ image: galleryImageSchema }).parse(value));
 }
 
 export function updateGalleryImage(imageKey: string, name: string, isFavorite: boolean) {
-  return postGallery<{ image: GalleryImage }>("/gallery/images/update", { imageKey, name, isFavorite });
+  return postGallery<unknown>("/gallery/images/update", { imageKey, name, isFavorite }).then((value) => z.strictObject({ image: galleryImageSchema }).parse(value));
 }
 
 export type GalleryImageDeleteResult = { deletedImageKeys: string[]; favoriteImageKeys: string[] };

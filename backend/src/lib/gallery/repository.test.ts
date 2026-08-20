@@ -8,6 +8,21 @@ import { galleryUploadSchema } from '@/lib/db/gallery-uploads.node';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
 
 describe('Gallery repository transactions', () => {
+  test('enforces managed media policy below operations for elevated actors and registry paths', async () => {
+    const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
+    expect(source).toContain('image.mutationPolicy != "system-only"');
+    expect(source).toContain('collection.mutationPolicy != "system-only"');
+    expect(source).toContain('userMutableCollection(database');
+    expect(source).toContain('userMutableMemory(database');
+    expect(source).toContain('FOR relation IN placeImages');
+    expect(source).toContain('sourceCollection.mutationPolicy != "system-only"');
+    expect(source).toContain('image.mutationPolicy != "system-only" && relation != null');
+    expect(source).toContain('collection.mutationPolicy != "system-only" && (manager || member.role');
+    expect(source).toContain('upload.collectionKey == null || (collection != null && collection.scopeKey == @scopeKey && collection.mutationPolicy != "system-only")');
+    const mediaSource = await Bun.file(new URL('../media-library/repository.ts', import.meta.url)).text();
+    expect(mediaSource).toContain('target.mutationPolicy != "system-only"');
+    expect(mediaSource).toContain('@sourceType NOT IN ["image", "collection"] || target.mutationPolicy != "system-only"');
+  });
   test('accepts an invite with separate valid transaction queries and returns the upserted membership', async () => {
     const scopeKey = newId(), collectionKey = newId(), inviteKey = newId(), actorKey = newId(), memberKey = newId(), ownerKey = newId(), now = '2026-08-18T12:00:00.000Z';
     const invite = { _key: inviteKey, scopeKey, collectionKey, invitedByKey: ownerKey, inviteeKey: actorKey, role: 'viewer', tokenHash: 'a'.repeat(64), createdAt: now, updatedAt: now };
@@ -287,14 +302,15 @@ describe('Gallery repository transactions', () => {
     const database: MediaLibraryDatabase = { async query(query) { queries.push(query); return { async all() { return [{ isFavorite: true, formerUserKeys: [newId()] }]; } }; } };
     const repository = createGalleryRepository(database, async (_collections, operation) => operation(database));
     await expect(repository.deleteCollection(newId(), newId(), newId(), '2026-08-18T12:00:00.000Z')).resolves.toEqual({ status: 'favorite' });
-    expect(queries).toHaveLength(1);
-    expect(queries[0]).toContain('RETURN { isFavorite: collection.isFavorite == true, formerUserKeys }');
-    expect(queries[0]).not.toContain('UPDATE collection');
+    expect(queries).toHaveLength(2);
+    expect(queries[0]).toContain('mutationPolicy != "system-only"');
+    expect(queries[1]).toContain('RETURN { isFavorite: collection.isFavorite == true, formerUserKeys }');
+    expect(queries[1]).not.toContain('UPDATE collection');
   });
 
   test('hard removes a collection and every Gallery dependent after authorization', async () => {
     const queries: string[] = [];
-    const database: MediaLibraryDatabase = { async query(query) { queries.push(query); return { async all() { return query.includes('RETURN { isFavorite:') ? [{ isFavorite: false, formerUserKeys: [] }] : []; } }; } };
+    const database: MediaLibraryDatabase = { async query(query) { queries.push(query); return { async all() { return query.includes('mutationPolicy != "system-only"') ? [true] : query.includes('RETURN { isFavorite:') ? [{ isFavorite: false, formerUserKeys: [] }] : []; } }; } };
     const repository = createGalleryRepository(database, async (_collections, operation) => operation(database));
     await expect(repository.deleteCollection(newId(), newId(), newId(), '2026-08-18T12:00:00.000Z')).resolves.toEqual({ status: 'deleted', formerUserKeys: [] });
     for (const collection of ['collectionImages', 'collectionMembers', 'collectionInvites', 'imageCollecitionHightlights', 'tagAssignments', 'shares', 'userHiddens', 'collections']) {
@@ -347,7 +363,7 @@ describe('Gallery repository transactions', () => {
     const scopeKey = newId(), collectionKey = newId(), actorKey = newId(), imageKey = newId(), now = new Date().toISOString();
     const image = { _key: imageKey, scopeKey, filename: 'hugo.jpg', caption: 'Hugo in the snow.', imageCaptionKey: null, storageKey: 'hugo.jpg', mimeType: 'image/jpeg', sizeBytes: 1, width: 1, height: 1, embedding: Array(EMBEDDING_DIMENSIONS).fill(0.1), createdByKey: actorKey, isFavorite: false, createdAt: now, updatedAt: now };
     let query = '';
-    const database: MediaLibraryDatabase = { async query(value, bindVars) { query = value; expect(bindVars).toEqual({ scopeKey, collectionKey, actorKey }); return { async all() { return [[{ image, caption: image.caption, captionScore: 90, identityNames: ['Hugo'] }]]; } }; } };
+    const database: MediaLibraryDatabase = { async query(value, bindVars) { if (value.includes('mutationPolicy')) return { async all() { return [true]; } }; query = value; expect(bindVars).toEqual({ scopeKey, collectionKey, actorKey }); return { async all() { return [[{ image, caption: image.caption, captionScore: 90, identityNames: ['Hugo'] }]]; } }; } };
     const candidates = await createGalleryRepository(database).listMemoryCandidates(scopeKey, collectionKey, actorKey);
     expect(candidates?.[0]?.identityNames).toEqual(['Hugo']);
     expect(query).toContain('identity.createdByKey == @actorKey');
@@ -395,6 +411,14 @@ describe('Gallery repository transactions', () => {
     const result = await repository.transferCollectionImages({ scopeKey: newId(), actorKey: newId(), sourceCollectionKey: newId(), destinationCollectionKeys: [newId()], imageKeys: [newId()], mode: 'move', now: '2026-08-13T12:00:00.000Z' });
     expect(result).toEqual({ status: 'selection-changed' });
     expect(queries).toHaveLength(1);
+  });
+
+  test('keeps managed transfer policy checks inside the transfer transaction', async () => {
+    const queries: string[] = [];
+    const database: MediaLibraryDatabase = { async query(query) { queries.push(query); return { async all() { return []; } }; } };
+    await createGalleryRepository(database, async (_collections, operation) => operation(database)).transferCollectionImages({ scopeKey: newId(), actorKey: newId(), sourceCollectionKey: newId(), destinationCollectionKeys: [newId()], imageKeys: [newId()], mode: 'copy', now: new Date().toISOString() });
+    expect(queries[0]).toContain('sourceCollection.mutationPolicy != "system-only"');
+    expect(queries[0]).toContain('image.mutationPolicy != "system-only"');
   });
 
   test('copies every selected image to every destination in one transaction', async () => {
@@ -527,7 +551,7 @@ describe('Gallery repository transactions', () => {
     let collections: unknown;
     const repository = createGalleryRepository(database, async (value, operation) => { collections = value; return operation(database); });
     await expect(repository.queueUploads({ uploadKeys, organizationKey: 'organization', scopeKey, actorKey, now })).resolves.toHaveLength(2);
-    expect(collections).toEqual({ read: [], write: ['galleryUploads'] });
+    expect(collections).toEqual({ read: ['collections'], write: ['galleryUploads'] });
     expect(queries).toHaveLength(2);
     expect(queries[0]).toContain('upload.status == "reserved"');
     expect(queries[1]).toContain('status: "queued"');
@@ -641,9 +665,10 @@ describe('Gallery repository transactions', () => {
     const repository = createGalleryRepository(database, async (collections, operation) => { transactionCollections = collections; return operation(database); });
     await expect(repository.createHighlight(highlight, actorKey)).resolves.toMatchObject({ key: highlight.key, imageKeys: [] });
     expect(transactionCollections).toEqual(expect.objectContaining({ write: ['imageCollecitionHightlights'] }));
-    expect(queries[0]).toContain('RETURN { selected }');
-    expect(queries[0]).toContain('collectionMember.role == "owner"');
-    expect(queries[1]).toContain('UPSERT { _key: @highlightKey }');
+    expect(queries[0]).toContain('mutationPolicy != "system-only"');
+    expect(queries[1]).toContain('RETURN { selected }');
+    expect(queries[1]).toContain('collectionMember.role == "owner"');
+    expect(queries[2]).toContain('UPSERT { _key: @highlightKey }');
   });
 
   test('silently drops image pointers that disappear while a highlight is being created', async () => {
@@ -663,7 +688,7 @@ describe('Gallery repository transactions', () => {
   test('hydrates ordered keys through current collection relations and hard-deletes only the highlight', async () => {
     const queries: string[] = [];
     const scopeKey = newId(), actorKey = newId(), highlightKey = newId();
-    const database: MediaLibraryDatabase = { async query(query) { queries.push(query); return { async all() { return []; } }; } };
+    const database: MediaLibraryDatabase = { async query(query) { queries.push(query); return { async all() { return query.includes('mutationPolicy != "system-only"') ? [true] : []; } }; } };
     const repository = createGalleryRepository(database);
     await repository.listHighlights(scopeKey, undefined, actorKey);
     await repository.getHighlight(scopeKey, highlightKey, actorKey);
@@ -674,10 +699,10 @@ describe('Gallery repository transactions', () => {
       expect(query).toContain('collectionMember != null');
     }
     expect(queries[0]).toContain('elevated || collectionMember != null');
-    expect(queries[2]).toContain('member.role == "owner"');
-    expect(queries[2]).toContain('owner != null');
-    expect(queries[2]).toContain('REMOVE highlight IN imageCollecitionHightlights RETURN OLD');
-    expect(queries[2]).not.toContain('highlight.createdByKey == @actorKey');
-    expect(queries[2]).not.toContain('UPDATE image');
+    expect(queries[3]).toContain('member.role == "owner"');
+    expect(queries[3]).toContain('owner != null');
+    expect(queries[3]).toContain('REMOVE highlight IN imageCollecitionHightlights RETURN OLD');
+    expect(queries[3]).not.toContain('highlight.createdByKey == @actorKey');
+    expect(queries[3]).not.toContain('UPDATE image');
   });
 });

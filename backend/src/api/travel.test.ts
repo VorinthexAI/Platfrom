@@ -50,7 +50,7 @@ describe('travel HTTP handlers', () => {
     const service = { createPlace: async (...args: unknown[]) => { calls.push(args); return { place: { name: 'Japan' } }; } } as never;
     const app = new Hono();
     app.post('/travel/places', createTravelHandlers({ service, getIdentity: async () => ({ key: 'trusted-user', identityType: 'user' }) }).createPlace);
-    const body = { organizationKey: 'organization', scopeKey: newId(), name: 'Japan', countryCode: 'JP', latitude: 36.2, longitude: 138.2 };
+    const body = { organizationKey: 'organization', scopeKey: newId(), name: 'Japan', summary: 'Island country.', countryCode: 'JP', latitude: 36.2, longitude: 138.2, imageRequestToken: 'token' };
     const response = await app.request('/travel/places', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     expect(response.status).toBe(200);
     expect(calls[0]?.slice(0, 2)).toEqual([body, 'trusted-user']);
@@ -60,7 +60,7 @@ describe('travel HTTP handlers', () => {
 
   test('keeps HTTP and Core place.create adapters in parity on the same canonical service', async () => {
     const organizationKey = newId(), scopeKey = newId(), userKey = newId();
-    const input = { name: 'Japan', countryCode: 'JP', latitude: 36.2, longitude: 138.2 };
+    const input = { name: 'Japan', summary: 'Island country.', countryCode: 'JP', latitude: 36.2, longitude: 138.2, imageRequestToken: 'token' };
     const calls: unknown[][] = [];
     const service = { createPlace: async (...args: unknown[]) => { calls.push(args); return { place: input }; } } as never;
     const app = new Hono();

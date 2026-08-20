@@ -3,7 +3,7 @@ import { beforeEach, expect, mock, test } from "bun:test";
 const calls: { method: string; path: string; body: unknown; config?: unknown }[] = [];
 const authState = { organization: { key: "org-key" }, scope: { key: "scope-key" } };
 const timestamp = "2026-08-11T10:00:00.000Z";
-const place = { key: "place-key", name: "Reykjavik", countryCode: "IS", latitude: 64.15, longitude: -21.94, createdAt: timestamp };
+const place = { key: "place-key", name: "Reykjavik", summary: "A compact North Atlantic capital.", countryCode: "IS", latitude: 64.15, longitude: -21.94, createdAt: timestamp };
 const summary = "Iceland offers dramatic volcanic landscapes, immense glaciers, black-sand coasts, geothermal pools, and compact towns shaped by the North Atlantic. Travelers can explore waterfalls and lava fields by day, then experience a creative food and music scene in Reykjavik. Summer brings long daylight for road trips, while winter offers quieter scenery and northern lights. Strong infrastructure makes remote nature unusually accessible, though rapidly changing weather rewards flexible plans and careful local guidance.";
 const popularCities = ["Reykjavik", "Akureyri", "Husavik", "Vik", "Selfoss", "Hofn", "Isafjordur", "Stykkisholmur", "Seydisfjordur", "Borgarnes"].map((name, index) => ({ name, latitude: 64 + index / 10, longitude: -22 + index / 10 }));
 const detail = {
@@ -33,6 +33,7 @@ mock.module("./api-client", () => ({
     if (path === "/travel/cities/find") return { data: { success: true, data: { city: cityDetail } } };
     if (path === "/travel/places") return { data: { success: true, data: { place } } };
     if (path === "/travel/places/image") return { data: { success: true, data: readyImage } };
+    if (path === "/travel/countries/search") return { data: { success: true, data: { country: { name: "Iceland", countryCode: "IS", latitude: 64.96, longitude: -19.02 } } } };
     return { data: { success: true, data: { places: [place] } } };
   } },
 }));
@@ -44,6 +45,7 @@ test("sends and strictly validates the saved-city overview", async () => {
   expect(await client.fetchTravelOverview()).toEqual({ places: [place] });
   expect(client.placeSchema.parse(place)).toEqual(place);
   expect(client.placeSchema.safeParse({ ...place, visited: false }).success).toBe(false);
+  expect(client.placeSchema.parse({ ...place, summary: "" }).summary).toBe("");
   expect(calls[0]?.body).toEqual({ organizationKey: "org-key", scopeKey: "scope-key" });
 });
 
@@ -86,10 +88,21 @@ test("passes cancellation and authoritative country context", async () => {
   expect(() => client.generatePlaceHeroImage({ imageRequestToken: "opaque-image-token", prompt: "untrusted" } as never)).toThrow();
 });
 
+test("strictly searches for one country without leaking the workspace scope", async () => {
+  const controller = new AbortController();
+  expect(await client.searchCountries(" volcanic island ", controller.signal)).toEqual({ name: "Iceland", countryCode: "IS", latitude: 64.96, longitude: -19.02 });
+  expect(calls[0]).toEqual({ method: "POST", path: "/travel/countries/search", body: { organizationKey: "org-key", query: "volcanic island" }, config: { timeout: 30_000, signal: controller.signal } });
+  expect(client.countrySearchResultSchema.safeParse({ country: { name: "Iceland", countryCode: "IS", latitude: 64.96, longitude: -19.02, continent: "Europe" } }).success).toBe(false);
+  expect(client.countrySearchResultSchema.parse({ country: null })).toEqual({ country: null });
+});
+
 test("saves a generated place through the canonical travel route", async () => {
   const controller = new AbortController();
-  expect(await client.createPlace({ name: place.name, countryCode: place.countryCode, latitude: place.latitude, longitude: place.longitude }, controller.signal)).toEqual(place);
-  expect(calls[0]).toEqual({ method: "POST", path: "/travel/places", body: { organizationKey: "org-key", scopeKey: "scope-key", name: place.name, countryCode: place.countryCode, latitude: place.latitude, longitude: place.longitude }, config: { timeout: 30_000, signal: controller.signal } });
+  const input = { name: place.name, summary: place.summary, countryCode: place.countryCode, latitude: place.latitude, longitude: place.longitude, imageRequestToken: detail.imageRequestToken };
+  expect(await client.createPlace(input, controller.signal)).toEqual(place);
+  expect(calls[0]).toEqual({ method: "POST", path: "/travel/places", body: { organizationKey: "org-key", scopeKey: "scope-key", ...input }, config: { timeout: 30_000, signal: controller.signal } });
+  expect(() => client.createPlace({ ...input, summary: "" })).toThrow();
+  expect(() => client.createPlace({ ...input, imageRequestToken: "" })).toThrow();
 });
 
 test("asks Core through the Compass assistant surface", async () => {

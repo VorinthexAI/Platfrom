@@ -1,5 +1,5 @@
 /* eslint-disable react/no-unknown-property */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AccessibilityInfo, Platform, StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
 import { useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import * as THREE from "three";
@@ -22,12 +22,23 @@ import {
 
 const GLOBE_RADIUS = 1;
 const DRAG_THRESHOLD = 10;
-const IDLE_DELAY_MS = 1400;
-const IDLE_ROTATION_SPEED = 0.075;
+const FOCUS_DURATION_MS = 700;
+const FOCUS_PULSE_DURATION_MS = 2_600;
 const MIN_CAMERA_DISTANCE = 2.15;
 const MAX_CAMERA_DISTANCE = 5.2;
 const WEB_TOUCH_STYLE = { touchAction: "none" } as unknown as ViewStyle;
 const disableRaycast: THREE.Object3D["raycast"] = () => {};
+const PIN_HIT_GEOMETRY = new THREE.SphereGeometry(0.09, 12, 10);
+const PIN_STEM_GEOMETRY = new THREE.ConeGeometry(0.026, 0.07, 12);
+const PIN_HEAD_GEOMETRY = new THREE.SphereGeometry(0.056, 18, 14);
+const PIN_MARK_GEOMETRY = new THREE.OctahedronGeometry(0.025, 0);
+const PIN_DOT_GEOMETRY = new THREE.SphereGeometry(0.007, 10, 8);
+const PIN_HIT_MATERIAL = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
+const PIN_PLANNED_MATERIAL = new THREE.MeshStandardMaterial({ color: "#748c99", metalness: 0.25, roughness: 0.5 });
+const PIN_VISITED_MATERIAL = new THREE.MeshStandardMaterial({ color: "#d5e5ea", metalness: 0.18, roughness: 0.42 });
+const PIN_SELECTED_MATERIAL = new THREE.MeshStandardMaterial({ color: "#f1f7f9", metalness: 0.12, roughness: 0.4 });
+const PIN_MARK_MATERIAL = new THREE.MeshBasicMaterial({ color: "#173846" });
+const PIN_DOT_MATERIAL = new THREE.MeshBasicMaterial({ color: "#e8f3f6" });
 
 export type GlobePlace = Readonly<{
   id: string;
@@ -37,6 +48,7 @@ export type GlobePlace = Readonly<{
 }>;
 
 export type InteractiveGlobeProps = {
+  focusTarget?: Readonly<{ countryCode: string; latitude: number; longitude: number }>;
   places?: readonly GlobePlace[];
   onPlacePress?: (place: GlobePlace) => void;
   onCountryPress?: (country: CountryFeature | undefined, coordinates: { latitude: number; longitude: number }) => void;
@@ -143,6 +155,7 @@ function PlaceMarker({
 
   return (
     <group
+      dispose={null}
       position={normal.clone().multiplyScalar(1.025)}
       quaternion={orientation}
       onClick={(event) => {
@@ -150,18 +163,11 @@ function PlaceMarker({
         if (canSelect()) onPress?.(place);
       }}
     >
-      <mesh position={[0, 0.055, 0]}>
-        <sphereGeometry args={[0.06, 10, 8]} />
-        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
-      </mesh>
-      <mesh position={[0, 0.03, 0]} raycast={disableRaycast}>
-        <cylinderGeometry args={[0.006, 0.006, 0.06, 6]} />
-        <meshBasicMaterial color={place.status === "visited" ? "#dce8ed" : "#7f9099"} />
-      </mesh>
-      <mesh position={[0, 0.07, 0]} raycast={disableRaycast} rotation={[Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[selected ? 0.035 : 0.023, selected ? 0.007 : 0.005, 8, 18]} />
-        <meshBasicMaterial color={selected ? "#ffffff" : place.status === "visited" ? "#dce8ed" : "#7f9099"} />
-      </mesh>
+      <mesh geometry={PIN_HIT_GEOMETRY} material={PIN_HIT_MATERIAL} position={[0, 0.085, 0]} />
+      <mesh geometry={PIN_STEM_GEOMETRY} material={place.status === "visited" ? PIN_VISITED_MATERIAL : PIN_PLANNED_MATERIAL} position={[0, 0.035, 0]} raycast={disableRaycast} rotation={[0, 0, Math.PI]} />
+      <mesh geometry={PIN_HEAD_GEOMETRY} material={selected ? PIN_SELECTED_MATERIAL : place.status === "visited" ? PIN_VISITED_MATERIAL : PIN_PLANNED_MATERIAL} position={[0, 0.105, 0]} raycast={disableRaycast} scale={selected ? 1.14 : 1} />
+      <mesh geometry={PIN_MARK_GEOMETRY} material={PIN_MARK_MATERIAL} position={[0, 0.158, 0]} raycast={disableRaycast} rotation={[0, Math.PI / 4, 0]} scale={selected ? 1.16 : 1} />
+      <mesh geometry={PIN_DOT_GEOMETRY} material={PIN_DOT_MATERIAL} position={[0, 0.164, 0]} raycast={disableRaycast} />
     </group>
   );
 }
@@ -172,6 +178,7 @@ type GlobeSceneProps = Required<Pick<InteractiveGlobeProps, "places">> & Omit<In
 
 function GlobeScene({
   controlsRef,
+  focusTarget,
   places,
   onPlacePress,
   onCountryPress,
@@ -194,9 +201,13 @@ function GlobeScene({
     pinchZoom: MAX_CAMERA_DISTANCE,
     resetTrackball: false,
   });
-  const lastInteractionAt = useRef(0);
-  const idleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const focusAnimation = useRef<{ from: THREE.Quaternion; to: THREE.Quaternion; startedAt: number } | undefined>(undefined);
+  const pulseStartedAt = useRef<number | undefined>(undefined);
+  const pulseMaterial = useRef<THREE.LineBasicMaterial>(null);
   const boundaries = useMemo(() => createCountryBoundaryGeometry(), []);
+  const focusCountryCode = focusTarget?.countryCode;
+  const focusLatitude = focusTarget?.latitude;
+  const focusLongitude = focusTarget?.longitude;
   const selectedBoundaries = useMemo(() => {
     const country = COUNTRIES.features.find(({ properties }) => properties.countryCode === selectedCountryCode);
     return country
@@ -207,21 +218,38 @@ function GlobeScene({
     const country = COUNTRIES.features.find(({ properties }) => properties.countryCode === selectedCountryCode);
     return country ? createCountryFillGeometry(country) : undefined;
   }, [selectedCountryCode]);
+  const highlightedCountryCode = focusCountryCode ?? selectedCountryCode;
+  const focusBoundaries = useMemo(() => {
+    const country = COUNTRIES.features.find(({ properties }) => properties.countryCode === highlightedCountryCode);
+    return country ? createCountryBoundaryGeometry({ type: "FeatureCollection", features: [country] }, 1.032) : undefined;
+  }, [highlightedCountryCode]);
   const rotationDelta = useMemo(() => new THREE.Quaternion(), []);
   const worldYAxis = useMemo(() => new THREE.Vector3(0, 1, 0), []);
-  const scheduleIdleRotation = useCallback(() => {
-    if (idleTimer.current) clearTimeout(idleTimer.current);
-    if (!reducedMotion) idleTimer.current = setTimeout(() => invalidate(), IDLE_DELAY_MS);
-  }, [invalidate, reducedMotion]);
 
   useEffect(() => () => boundaries.dispose(), [boundaries]);
   useEffect(() => () => selectedBoundaries?.dispose(), [selectedBoundaries]);
   useEffect(() => () => selectedFill?.dispose(), [selectedFill]);
+  useEffect(() => () => focusBoundaries?.dispose(), [focusBoundaries]);
   useEffect(() => {
-    lastInteractionAt.current = performance.now();
-    scheduleIdleRotation();
-    return () => { if (idleTimer.current) clearTimeout(idleTimer.current); };
-  }, [scheduleIdleRotation]);
+    const globe = globeRef.current;
+    if (!globe || focusCountryCode === undefined || focusLatitude === undefined || focusLongitude === undefined) {
+      focusAnimation.current = undefined;
+      return;
+    }
+    const point = latLonToVector(focusLatitude, focusLongitude);
+    const target = new THREE.Quaternion().setFromUnitVectors(
+      new THREE.Vector3(point.x, point.y, point.z).normalize(),
+      new THREE.Vector3(0, 0, 1),
+    );
+    const startedAt = performance.now();
+    if (reducedMotion) globe.quaternion.copy(target);
+    else focusAnimation.current = { from: globe.quaternion.clone(), to: target, startedAt };
+    invalidate();
+  }, [focusCountryCode, focusLatitude, focusLongitude, invalidate, reducedMotion]);
+  useEffect(() => {
+    pulseStartedAt.current = highlightedCountryCode && !reducedMotion ? performance.now() : undefined;
+    invalidate();
+  }, [highlightedCountryCode, invalidate, reducedMotion]);
   useEffect(() => {
     const element = renderer.domElement as unknown as { addEventListener?: (type: string, listener: (event: WheelEvent) => void, options?: AddEventListenerOptions) => void; removeEventListener?: (type: string, listener: (event: WheelEvent) => void) => void };
     if (!element.addEventListener || !element.removeEventListener) return;
@@ -230,26 +258,24 @@ function GlobeScene({
     return () => element.removeEventListener?.("wheel", preventPageScroll);
   }, [renderer]);
 
-  useFrame((_, delta) => {
+  useFrame(() => {
     const globe = globeRef.current;
-    const gesture = gestureRef.current;
-    if (
-      !globe
-      || reducedMotion
-      || gesture.pointers.size > 0
-      || performance.now() - lastInteractionAt.current < IDLE_DELAY_MS
-    ) return;
-
-    rotationDelta.setFromAxisAngle(worldYAxis, IDLE_ROTATION_SPEED * delta);
-    globe.quaternion.premultiply(rotationDelta).normalize();
-    invalidate();
+    if (!globe) return;
+    const now = performance.now();
+    const focus = focusAnimation.current;
+    if (focus && gestureRef.current.pointers.size === 0) {
+      const progress = Math.min(1, (now - focus.startedAt) / FOCUS_DURATION_MS);
+      globe.quaternion.copy(focus.from).slerp(focus.to, 1 - (1 - progress) ** 3).normalize();
+      if (progress === 1) focusAnimation.current = undefined;
+    }
+    const pulseElapsed = pulseStartedAt.current === undefined ? FOCUS_PULSE_DURATION_MS : now - pulseStartedAt.current;
+    if (pulseMaterial.current) pulseMaterial.current.opacity = pulseElapsed < FOCUS_PULSE_DURATION_MS ? 0.55 + 0.45 * Math.sin(pulseElapsed / 115) ** 2 : 1;
+    if (focusAnimation.current || pulseElapsed < FOCUS_PULSE_DURATION_MS) invalidate();
   });
 
   const updateZoom = (nextDistance: number) => {
     cameraRef.current.position.z = clampGlobeZoom(nextDistance, MIN_CAMERA_DISTANCE, MAX_CAMERA_DISTANCE);
-    lastInteractionAt.current = performance.now();
     invalidate();
-    scheduleIdleRotation();
   };
 
   useEffect(() => {
@@ -259,9 +285,7 @@ function GlobeScene({
         if (!globe) return;
         rotationDelta.setFromAxisAngle(worldYAxis, radians);
         globe.quaternion.premultiply(rotationDelta).normalize();
-        lastInteractionAt.current = performance.now();
         invalidate();
-        scheduleIdleRotation();
       },
       zoomBy(distance) { updateZoom(cameraRef.current.position.z + distance); },
     };
@@ -273,8 +297,7 @@ function GlobeScene({
     const gesture = gestureRef.current;
     const screen = eventScreenPoint(event);
     gesture.pointers.set(event.pointerId, screen);
-    lastInteractionAt.current = performance.now();
-    scheduleIdleRotation();
+    focusAnimation.current = undefined;
 
     if (gesture.pointers.size === 1) {
       gesture.activePointerId = event.pointerId;
@@ -300,7 +323,6 @@ function GlobeScene({
     const screen = eventScreenPoint(event);
     if (activeTouches && activeTouches.size > 1) gesture.pointers = activeTouches;
     else gesture.pointers.set(event.pointerId, screen);
-    lastInteractionAt.current = performance.now();
 
     if (gesture.pointers.size > 1) {
       const distance = pointerDistance(gesture.pointers);
@@ -340,8 +362,6 @@ function GlobeScene({
     event.stopPropagation();
     if (remainingTouches !== undefined) gesture.pointers = remainingTouches;
     else gesture.pointers.delete(event.pointerId);
-    lastInteractionAt.current = performance.now();
-    scheduleIdleRotation();
     if (gesture.activePointerId === event.pointerId) gesture.activePointerId = undefined;
     if (gesture.pointers.size === 1) {
       gesture.activePointerId = [...gesture.pointers.keys()][0];
@@ -358,8 +378,7 @@ function GlobeScene({
     gesture.activePointerId = undefined;
     gesture.resetTrackball = false;
     gesture.moved = true;
-    lastInteractionAt.current = performance.now();
-    scheduleIdleRotation();
+    focusAnimation.current = undefined;
   };
 
   const selectCountry = (event: ThreeEvent<MouseEvent>) => {
@@ -411,6 +430,11 @@ function GlobeScene({
             <lineBasicMaterial color="#a9bac2" transparent opacity={1} />
           </lineSegments>
         ) : null}
+        {focusBoundaries ? (
+          <lineSegments geometry={focusBoundaries} raycast={disableRaycast}>
+            <lineBasicMaterial ref={pulseMaterial} color="#e7f7fb" transparent opacity={1} />
+          </lineSegments>
+        ) : null}
         {places.map((place) => (
           <PlaceMarker
             key={place.id}
@@ -436,6 +460,7 @@ function GlobeScene({
 }
 
 export function InteractiveGlobe({
+  focusTarget,
   places = [],
   onPlacePress,
   onCountryPress,
@@ -482,6 +507,7 @@ export function InteractiveGlobe({
       <color attach="background" args={["#020609"]} />
       <GlobeScene
         controlsRef={controlsRef}
+        focusTarget={focusTarget}
         places={places}
         onPlacePress={onPlacePress}
         onCountryPress={onCountryPress}

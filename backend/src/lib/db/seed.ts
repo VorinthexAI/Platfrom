@@ -16,6 +16,9 @@ import { SEEDED_ORCHESTRATOR_SKILLS } from '@/lib/orchestrators/seeded-skills';
 import { CANONICAL_ORCHESTRATOR_NAMES } from '@/lib/orchestrators/roster';
 import { retireAiPersistence } from '@/db/retire-ai-persistence';
 import { ACTION_DEFINITIONS } from '@/lib/ai/actions';
+import { COUNTRY_CATALOG } from '@/lib/travel/country-catalog';
+import { currentEmbeddingSchema, embedText } from '@/lib/embeddings';
+import { createHash } from 'node:crypto';
 
 export type SeedResult = {
   collection: string;
@@ -479,6 +482,19 @@ export async function seedAiRuntimeNodes(upserters: AiRuntimeSeedUpserters = {
 export async function seedCoreDbNodes(): Promise<SeedResult[]> {
   await retireAiPersistence(db);
   const results = await seedAiRuntimeNodes();
+  for (const country of COUNTRY_CATALOG) {
+    const semanticHash = createHash('sha256').update(country.name).digest('hex');
+    const currentCursor = await db.query<{ key: string; semanticVersion?: number; semanticHash?: string }>('FOR country IN countries FILTER country.countryCode == @countryCode LIMIT 1 RETURN { key: country._key, semanticVersion: country.semanticVersion, semanticHash: country.semanticHash }', { countryCode: country.countryCode });
+    const current = await currentCursor.next();
+    if (current?.semanticVersion === 1 && current.semanticHash === semanticHash) {
+      await db.query('UPDATE @key WITH { name: @name, latitude: @latitude, longitude: @longitude } IN countries', { ...country, key: current.key });
+      results.push({ collection: 'countries', key: current.key, status: 'updated' });
+      continue;
+    }
+    const embedding = currentEmbeddingSchema.parse(await embedText({ text: country.name }));
+    const cursor = await db.query(`UPSERT { countryCode: @countryCode } INSERT @country UPDATE { name: @name, latitude: @latitude, longitude: @longitude, embedding: @embedding, semanticVersion: 1, semanticHash: @semanticHash } IN countries RETURN NEW._key`, { ...country, semanticHash, country: { _key: country.key, ...country, embedding, semanticVersion: 1, semanticHash }, embedding });
+    results.push({ collection: 'countries', key: String(await cursor.next()), status: current ? 'updated' : 'created' });
+  }
 
   results.push(await upsertSeedOrganization(SEEDED_ORGANIZATION));
   const rootOrganization = await getRootOrganization();
