@@ -3,7 +3,7 @@ import { createTravelService } from '@/lib/travel/service';
 import type { TravelRepository } from '@/lib/travel/repository';
 
 const apiKey = process.env.OPENAI_API_KEY;
-if (!apiKey) throw new Error('OPENAI_API_KEY is required for the live place web-search benchmark.');
+if (!apiKey) throw new Error('OPENAI_API_KEY is required for the live place guide benchmark.');
 
 const countries = [
   { name: 'Japan', code: 'JP', continent: 'Asia', capital: 'Tokyo', lat: 36.2048, lon: 138.2529 },
@@ -17,7 +17,7 @@ const countries = [
 ] as const;
 
 const durations: number[] = [];
-const results: Array<{ country: string; durationMs: number; facts: number; citations: number; images: number }> = [];
+const results: Array<{ country: string; guideMs: number; heroMs: number; totalMs: number; summaryWords: number; cities: number }> = [];
 for (const country of countries) {
   let sealed: unknown;
   const token = `live-${country.code}-${newId()}`;
@@ -31,15 +31,19 @@ for (const country of countries) {
   const started = performance.now();
   const { capital: _capital, ...countryInput } = country;
   const { place } = await service.findPlace({ organizationKey: 'place-web-search-live', scopeKey, query: country.name, country: countryInput }, 'live-user', { timeoutMs: 60_000 });
-  const imageSet = await service.generatePlaceImages({ organizationKey: 'place-web-search-live', scopeKey, imageRequestToken: token }, 'live-user');
-  const durationMs = Math.round(performance.now() - started);
-  const factualText = JSON.stringify({ summary: place.summary, facts: place.facts, highlights: place.highlights }).normalize('NFD').replace(/\p{Diacritic}/gu, '').toLocaleLowerCase();
+  const guideMs = Math.round(performance.now() - started);
+  const imageStarted = performance.now();
+  const imageSet = await service.generatePlaceHeroImage({ organizationKey: 'place-web-search-live', scopeKey, imageRequestToken: token }, 'live-user', { timeoutMs: 90_000 });
+  const heroMs = Math.round(performance.now() - imageStarted);
+  const totalMs = Math.round(performance.now() - started);
+  const factualText = JSON.stringify({ summary: place.summary, culture: place.culture, food: place.food, whyVisit: place.whyVisit, popularCities: place.popularCities }).normalize('NFD').replace(/\p{Diacritic}/gu, '').toLocaleLowerCase();
+  const summaryWords = place.summary.split(/\s+/).filter(Boolean).length;
   if (!factualText.includes(country.name.toLocaleLowerCase()) && !factualText.includes(country.capital.toLocaleLowerCase())) throw new Error(`${country.name} response did not contain country-specific text.`);
-  if (place.facts.length < 3 || place.highlights.length < 1) throw new Error(`${country.name} response did not contain enough factual text.`);
-  if (place.sources.length === 0) throw new Error(`${country.name} response did not contain cited web sources.`);
-  if (imageSet.images.length === 0) throw new Error(`${country.name} response did not contain a usable image.`);
-  durations.push(durationMs);
-  results.push({ country: country.name, durationMs, facts: place.facts.length, citations: place.sources.length, images: imageSet.images.length });
+  if (summaryWords < 60 || summaryWords > 110 || !place.culture || !place.food || !place.whyVisit) throw new Error(`${country.name} response did not satisfy the focused travel contract.`);
+  if (place.popularCities.length !== 10 || new Set(place.popularCities.map(({ name }) => name.toLocaleLowerCase())).size !== 10) throw new Error(`${country.name} response did not contain ten distinct cities with coordinates.`);
+  if (!imageSet.image.url.startsWith('data:image/webp;base64,')) throw new Error(`${country.name} response did not contain a generated hero.`);
+  durations.push(totalMs);
+  results.push({ country: country.name, guideMs, heroMs, totalMs, summaryWords, cities: place.popularCities.length });
 }
 
 const ordered = [...durations].sort((left, right) => left - right);

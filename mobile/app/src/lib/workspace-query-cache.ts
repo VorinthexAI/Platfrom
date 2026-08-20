@@ -68,7 +68,10 @@ export const compassQueryKeys = {
   overview: (context: WorkspaceContext) => [...compassQueryKeys.all(context), "overview"] as const,
   countryDetails: (context: WorkspaceContext) => [...compassQueryKeys.all(context), "country-details"] as const,
   countryDetail: (context: WorkspaceContext, countryCode: string) => [...compassQueryKeys.countryDetails(context), countryCode] as const,
-  countryImages: (context: WorkspaceContext, imageRequestToken: string) => [...compassQueryKeys.all(context), "country-images", imageRequestToken] as const,
+  countryImage: (context: WorkspaceContext, imageRequestToken: string) => [...compassQueryKeys.all(context), "country-image", imageRequestToken] as const,
+  cityDetails: (context: WorkspaceContext) => [...compassQueryKeys.all(context), "city-details"] as const,
+  cityDetail: (context: WorkspaceContext, countryCode: string, city: string) => [...compassQueryKeys.cityDetails(context), countryCode, city.trim().toLocaleLowerCase()] as const,
+  cityImage: (context: WorkspaceContext, countryCode: string, city: string, imageRequestToken: string) => [...compassQueryKeys.all(context), "city-image", countryCode, city.trim().toLocaleLowerCase(), imageRequestToken] as const,
 };
 
 export const signalQueryKeys = {
@@ -110,7 +113,7 @@ export function patchGalleryImage(queryClient: QueryClient, context: WorkspaceCo
   } : overview);
 }
 
-export type GalleryOverviewSnapshot = Array<[QueryKey, GalleryOverview | undefined]>;
+export type GalleryOverviewSnapshot = [QueryKey, GalleryOverview | undefined][];
 
 export function snapshotGalleryOverviews(queryClient: QueryClient, context: WorkspaceContext): GalleryOverviewSnapshot {
   return queryClient.getQueriesData<GalleryOverview>({ queryKey: galleryQueryKeys.overviews(context) });

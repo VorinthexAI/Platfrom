@@ -3,8 +3,7 @@ import { z } from 'zod';
 import { contentZodToJsonSchema } from '@/lib/ai/tools/content-json-schema';
 import { runContentTool } from '@/lib/ai/tools/content-runtime';
 import type { ContentToolName } from '@/lib/ai/tools/content-schemas';
-import { createTravelService, travelPlaceFindInputSchema } from '@/lib/travel/service';
-import { travelPlaceImagesInputSchema } from '@/lib/travel/place-images';
+import { createTravelService, travelPlaceCreateInputSchema, travelPlaceFindInputSchema } from '@/lib/travel/service';
 import { createEmailService, type EmailActor } from '@/lib/email-inbox/service';
 import { defaultBookService } from '@/lib/books/default-service';
 import { newId } from '@/lib/ids';
@@ -17,7 +16,7 @@ const name = z.string().trim().min(1).max(255);
 function identity(context: AssistantCapabilityContext) {
   const { domain } = context;
   if (domain.principal.kind !== 'member') throw new Error('A member principal is required for personal assistant capabilities.');
-  if (domain.principal.userOrganization.organizationId !== domain.organizationKey || domain.principal.userOrganization.status !== 'active') throw new Error('Active organization membership is required.');
+  if (domain.principal.userOrganization.organizationId !== domain.organizationKey || domain.principal.userOrganization.userId !== domain.principal.user.key || domain.principal.userOrganization.status !== 'active') throw new Error('Active matching organization membership is required.');
   const serviceContext = { organizationKey: domain.organizationKey, scopeKey: domain.runtimeScopeKey };
   return {
     userKey: domain.principal.user.key,
@@ -105,9 +104,9 @@ export const archiveCapabilities = [
 ];
 
 export const compassCapabilities = [
-  capability('place.list', 'List saved cities.', z.object({}).strict(), async (_input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).overview(actor.serviceContext, actor.userKey); }),
-  capability('place.find', 'Find a destination and create its structured travel guide.', travelPlaceFindInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).findPlace({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal }); }, 'compass'),
-  capability('place.images.generate', 'Generate safe processed images for a travel guide returned by place.find.', travelPlaceImagesInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).generatePlaceImages({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal }); }, 'compass'),
+  capability('place.list', 'List saved places.', z.object({}).strict(), async (_input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).overview(actor.serviceContext, actor.userKey); }),
+  capability('place.find', 'Find a destination and create its structured travel guide.', travelPlaceFindInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).findPlace({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal }); }),
+  capability('place.create', 'Save a country or city to the current Compass workspace.', travelPlaceCreateInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).createPlace({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }, 'compass'),
 ];
 
 export const signalCapabilities = [

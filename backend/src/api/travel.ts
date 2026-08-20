@@ -2,8 +2,8 @@ import type { Context } from 'hono';
 import { ZodError } from 'zod';
 import { ProviderExecutionError } from '@/lib/ai/router/errors';
 import { TravelRepositoryError } from '@/lib/travel/repository';
-import { createTravelService, type TravelService } from '@/lib/travel/service';
-import { travelPlaceImagesInputSchema } from '@/lib/travel/place-images';
+import { createTravelService, TravelGenerationError, travelCityFindInputSchema, travelPlaceCreateInputSchema, type TravelService } from '@/lib/travel/service';
+import { travelPlaceImageInputSchema } from '@/lib/travel/place-images';
 import { getAuthIdentity } from './security';
 
 type IdentityReader = typeof getAuthIdentity;
@@ -27,16 +27,19 @@ export function createTravelHandlers(options: { service?: TravelService; getIden
         const codes = new Set(error.attempts.map(({ code }) => code));
         if (codes.has('rate_limited')) return c.json({ success: false, error: { code: 'TRAVEL_RATE_LIMITED', message: 'Travel generation is temporarily busy. Try again shortly.' } }, 429);
         if (codes.has('timeout') || codes.has('aborted')) return c.json({ success: false, error: { code: 'TRAVEL_LOOKUP_TIMEOUT', message: 'Travel generation took too long. Try again.' } }, 504);
-        return c.json({ success: false, error: { code: 'TRAVEL_PROVIDER_UNAVAILABLE', message: 'Travel generation is temporarily unavailable.' } }, 503);
+        return c.json({ success: false, error: { code: 'TRAVEL_PROVIDER_UNAVAILABLE', message: 'Place generation is temporarily unavailable.' } }, 503);
       }
+      if (error instanceof TravelGenerationError) return c.json({ success: false, error: { code: 'TRAVEL_PROVIDER_INVALID_RESPONSE', message: 'Travel generation returned an invalid response. Try again.' } }, 502);
       if (error instanceof ZodError || error instanceof SyntaxError) return c.json({ success: false, error: { code: 'TRAVEL_INVALID_INPUT', message: 'Travel request input was invalid.' } }, 400);
       return c.json({ success: false, error: { code: 'TRAVEL_FAILED', message: 'Travel request failed.' } }, 500);
     }
   };
   return {
     overview: run(async (c, travel, userKey) => travel.overview(await c.req.json(), userKey)),
+    createPlace: run(async (c, travel, userKey) => travel.createPlace(travelPlaceCreateInputSchema.parse(await c.req.json()), userKey, { signal: c.req.raw.signal })),
     findPlace: run(async (c, travel, userKey) => travel.findPlace(await c.req.json(), userKey, { signal: c.req.raw.signal })),
-    generatePlaceImages: run(async (c, travel, userKey) => travel.generatePlaceImages(travelPlaceImagesInputSchema.parse(await c.req.json()), userKey, { signal: c.req.raw.signal })),
+    findCity: run(async (c, travel, userKey) => travel.findCity(travelCityFindInputSchema.parse(await c.req.json()), userKey, { signal: c.req.raw.signal })),
+    generatePlaceHeroImage: run(async (c, travel, userKey) => travel.generatePlaceHeroImage(travelPlaceImageInputSchema.parse(await c.req.json()), userKey, { signal: c.req.raw.signal })),
   };
 }
 

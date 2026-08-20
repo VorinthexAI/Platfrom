@@ -32,6 +32,7 @@ import {
   type ProviderFactory,
   type ProviderEmbedRequest,
   type ProviderEmbedResponse,
+  type ChatOutput,
   type VisualIdentityDescriptionOutput,
 } from './types';
 
@@ -63,17 +64,10 @@ const imageResponseSchema = z.object({
     .optional(),
 });
 
-const webSearchImageResultSchema = z.object({
-  type: z.literal('image_result'),
-  image_url: z.string(),
-  source_website_url: z.string(),
-  thumbnail_url: z.string().optional(),
-  caption: z.string().nullable().optional(),
-}).passthrough();
 const webSearchCallSchema = z.object({
   type: z.literal('web_search_call'),
+  status: z.literal('completed'),
   action: z.object({ sources: z.array(z.object({ type: z.literal('url'), url: z.string() }).passthrough()).optional() }).passthrough().optional(),
-  results: z.array(z.unknown()).optional(),
 }).passthrough();
 const webSearchMessageSchema = z.object({
   type: z.literal('message'),
@@ -84,14 +78,39 @@ const webSearchMessageSchema = z.object({
   }).passthrough()),
 }).passthrough();
 
+async function executeDirectResponse<TInput, TOutput>(client: OpenAI, request: ProviderExecuteRequest<TInput>): Promise<ProviderExecuteResponse<TOutput>> {
+  const input = z.object({
+    systemPrompt: z.string().optional(),
+    messages: z.array(z.object({ role: z.enum(['user', 'assistant']), content: z.array(z.object({ type: z.literal('text'), text: z.string() })) })).min(1),
+    options: z.object({ maxTokens: z.number().int().positive().optional() }).optional(),
+  }).parse(request.input);
+  try {
+    const raw = await client.responses.create({
+      model: request.externalModelId,
+      ...(input.systemPrompt ? { instructions: input.systemPrompt } : {}),
+      input: input.messages.map((message) => ({ role: message.role, content: message.content.map((part) => part.text).join('\n') })),
+      ...(input.options?.maxTokens ? { max_output_tokens: input.options.maxTokens } : {}),
+    }, { signal: resolveRequestSignal(request) });
+    const parsed = z.object({ output_text: z.string(), usage: z.object({ input_tokens: z.number().optional(), output_tokens: z.number().optional(), total_tokens: z.number().optional() }).optional() }).parse(raw);
+    return {
+      output: { text: parsed.output_text, toolCalls: [], stopReason: null } as TOutput & ChatOutput,
+      usage: tokenUsage(parsed.usage?.input_tokens, parsed.usage?.output_tokens, parsed.usage?.total_tokens),
+      providerId: PROVIDER_ID,
+      modelId: request.modelId,
+      externalModelId: request.externalModelId,
+      rawResponse: raw,
+    };
+  } catch (error) {
+    throw normalizeProviderError(PROVIDER_ID, error);
+  }
+}
+
 async function executeWebSearch<TInput, TOutput>(client: OpenAI, request: ProviderExecuteRequest<TInput>): Promise<ProviderExecuteResponse<TOutput>> {
   const input = webSearchInputSchema.parse(request.input);
   const tool = {
     type: 'web_search' as const,
     search_context_size: 'low' as const,
     external_web_access: true,
-    search_content_types: input.imageCount > 0 ? ['text', 'image'] : ['text'],
-    ...(input.imageCount > 0 ? { image_settings: { max_results: input.imageCount, caption: true } } : {}),
   } as OpenAI.Responses.WebSearchTool;
   try {
     const raw = await client.responses.create({
@@ -100,7 +119,7 @@ async function executeWebSearch<TInput, TOutput>(client: OpenAI, request: Provid
       reasoning: { effort: 'low' },
       tools: [tool],
       tool_choice: 'required',
-      include: ['web_search_call.action.sources', 'web_search_call.results'],
+      include: ['web_search_call.action.sources'],
       max_output_tokens: 4_000,
       ...(input.responseFormat ? { text: { format: { type: 'json_schema' as const, name: input.responseFormat.name, strict: true, schema: input.responseFormat.schema } } } : {}),
     }, { signal: resolveRequestSignal(request) });
@@ -108,21 +127,12 @@ async function executeWebSearch<TInput, TOutput>(client: OpenAI, request: Provid
     const textParts: string[] = [];
     const citations: Array<{ title: string; url: string }> = [];
     const sources: string[] = [];
-    const images: Array<{ imageUrl: string; sourcePageUrl: string; thumbnailUrl?: string; caption?: string }> = [];
+    let searchCompleted = false;
     for (const item of outputItems.output) {
       const call = webSearchCallSchema.safeParse(item);
       if (call.success) {
+        searchCompleted = true;
         for (const source of call.data.action?.sources ?? []) sources.push(source.url);
-        for (const result of call.data.results ?? []) {
-          const image = webSearchImageResultSchema.safeParse(result);
-          if (!image.success) continue;
-          images.push({
-            imageUrl: image.data.image_url,
-            sourcePageUrl: image.data.source_website_url,
-            ...(image.data.thumbnail_url ? { thumbnailUrl: image.data.thumbnail_url } : {}),
-            ...(image.data.caption?.trim() ? { caption: image.data.caption.trim() } : {}),
-          });
-        }
       }
       const message = webSearchMessageSchema.safeParse(item);
       if (!message.success) continue;
@@ -135,14 +145,13 @@ async function executeWebSearch<TInput, TOutput>(client: OpenAI, request: Provid
         }
       }
     }
+    if (!searchCompleted) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'openai web search did not complete');
     const uniqueBy = <T>(values: T[], key: (value: T) => string) => [...new Map(values.map((value) => [key(value), value])).values()];
     const output: WebSearchOutput = webSearchOutputSchema.parse({
       text: textParts.join('\n').trim(),
       citations: uniqueBy(citations, ({ url }) => url),
       sources: [...new Set(sources)],
-      images: uniqueBy(images, ({ imageUrl }) => imageUrl),
     });
-    if (input.imageCount > 0 && output.images.length === 0) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'openai web search returned no images');
     return { output: output as TOutput, usage: tokenUsage(outputItems.usage?.input_tokens, outputItems.usage?.output_tokens, outputItems.usage?.total_tokens), providerId: PROVIDER_ID, modelId: request.modelId, externalModelId: request.externalModelId, rawResponse: raw };
   } catch (error) {
     throw normalizeProviderError(PROVIDER_ID, error);
@@ -325,6 +334,7 @@ export function createOpenAIProvider(config: OpenAIProviderConfig): ProviderAdap
       if (request.actionId === 'document-cleanup') return cleanupDocument(client, request);
       if (request.actionId === 'describe-visual-identity') return describeVisualIdentity(client, request);
       if (request.actionId === 'web-search') return executeWebSearch(client, request);
+      if (request.actionId === 'ask') return executeDirectResponse(client, request);
       if (CHAT_ACTION_IDS.has(request.actionId)) {
         return executeOpenAICompatibleChat(PROVIDER_ID, client, request, { maxTokensParam: 'max_completion_tokens' });
       }

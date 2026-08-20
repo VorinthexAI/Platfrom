@@ -133,3 +133,29 @@ export function createCountryBoundaryGeometry(
   geometry.computeBoundingSphere();
   return geometry;
 }
+
+export function createCountryFillGeometry(feature: CountryFeature, radius = 1.018): THREE.BufferGeometry {
+  const positions: number[] = [];
+  const polygons = feature.geometry.type === "Polygon" ? [feature.geometry.coordinates] : feature.geometry.coordinates;
+  for (const polygon of polygons) {
+    const [outer, ...holes] = polygon;
+    if (!outer) continue;
+    const vertices = outer.map(([longitude, latitude]) => new THREE.Vector2(longitude, latitude));
+    const holeVertices = holes.map((ring) => ring.map(([longitude, latitude]) => new THREE.Vector2(longitude, latitude)));
+    const rings = [outer, ...holes];
+    const flatCoordinates = rings.flat();
+    for (const triangle of THREE.ShapeUtils.triangulateShape(vertices, holeVertices)) {
+      for (const index of triangle) {
+        const coordinate = flatCoordinates[index];
+        if (!coordinate) continue;
+        const point = latLonToVector(coordinate[1], coordinate[0], radius);
+        positions.push(point.x, point.y, point.z);
+      }
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.computeVertexNormals();
+  geometry.computeBoundingSphere();
+  return geometry;
+}

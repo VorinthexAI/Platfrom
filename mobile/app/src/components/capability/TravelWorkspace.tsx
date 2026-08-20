@@ -1,15 +1,16 @@
 import { randomUUID } from "expo-crypto";
 import { Image } from "expo-image";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { KeyboardAvoidingView, Linking, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { Fragment, useMemo, useRef, useState, type ReactNode } from "react";
+import { KeyboardAvoidingView, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomSheet, BottomSheetItem } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
 import { CoreComposer } from "@vorinthex/shared/ui/core-composer";
-import { GlobeIcon, LocationPinIcon, SearchIcon, SendIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { ChevronRightIcon, FilterIcon, GlobeIcon, LocationPinIcon, PlusIcon, SearchIcon, SendIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { Skeleton } from "@vorinthex/shared/ui/skeleton";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
+import { useToast } from "@vorinthex/shared/ui/toast";
 
 import { ChromeIcon } from "@/components/ChromeIcon";
 import { WorkspaceAppSwitcher } from "@/components/capability/WorkspaceAppSwitcher";
@@ -18,12 +19,15 @@ import { assistantIconSource } from "@/data/capability-icons";
 import { COUNTRIES, type CountryFeature, type CountryProperties } from "@/lib/globe-data";
 import {
   askTravelAssistant,
+  createPlace,
   fetchTravelOverview,
+  findCity,
   findPlace,
-  generatePlaceImages,
+  generatePlaceHeroImage,
   getTravelContext,
+  type CityDetail,
   type Place,
-  type PlaceImagesResponse,
+  type PlaceImageResponse,
 } from "@/lib/travel-client";
 import { compassQueryKeys, invalidateAssistantChanges } from "@/lib/workspace-query-cache";
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
@@ -35,6 +39,7 @@ const CORE_PROMPTS = [
 ] as const;
 
 type SheetView = "browse" | "countryDetail";
+type GeneratedCity = { name: string; latitude: number; longitude: number };
 
 export const COUNTRY_SHEET_CACHE_MS = 60 * 60_000;
 
@@ -44,19 +49,24 @@ function errorMessage(error: unknown) {
 
 export function TravelWorkspace() {
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
   const travelContext = getTravelContext();
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
   const [selectedCountry, setSelectedCountry] = useState<CountryProperties>();
   const [selectedPlaceKey, setSelectedPlaceKey] = useState<string>();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetView, setSheetView] = useState<SheetView>("browse");
+  const [selectedCity, setSelectedCity] = useState<GeneratedCity>();
+  const [citySheetOpen, setCitySheetOpen] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [countryQuery, setCountryQuery] = useState("");
   const [assistantInput, setAssistantInput] = useState("");
   const [assistantBusy, setAssistantBusy] = useState(false);
   const [assistantMessage, setAssistantMessage] = useState<string>();
   const [assistantFailed, setAssistantFailed] = useState(false);
   const assistantRequestKey = useRef<string | undefined>(undefined);
+  const countryScrollRef = useRef<ScrollView>(null);
   const overviewQuery = useQuery({ queryKey: compassQueryKeys.overview(travelContext), queryFn: fetchTravelOverview });
   const places = useMemo(() => overviewQuery.data?.places ?? [], [overviewQuery.data]);
   const selectedPlace = places.find(({ key }) => key === selectedPlaceKey);
@@ -77,11 +87,11 @@ export function TravelWorkspace() {
     staleTime: COUNTRY_SHEET_CACHE_MS,
     gcTime: COUNTRY_SHEET_CACHE_MS,
   });
-  const countryImagesQuery = useQuery({
-    queryKey: compassQueryKeys.countryImages(travelContext, countryDetailQuery.data?.imageRequestToken ?? ""),
+  const countryImageQuery = useQuery({
+    queryKey: compassQueryKeys.countryImage(travelContext, countryDetailQuery.data?.imageRequestToken ?? ""),
     queryFn: ({ signal }) => {
       if (!countryDetailQuery.data) throw new Error("Country details are unavailable.");
-      return generatePlaceImages({ imageRequestToken: countryDetailQuery.data.imageRequestToken }, signal);
+      return generatePlaceHeroImage({ imageRequestToken: countryDetailQuery.data.imageRequestToken }, signal);
     },
     enabled: countryDetailEnabled && !countryDetailQuery.isFetching && !countryDetailQuery.isError && Boolean(countryDetailQuery.data?.imageRequestToken),
     staleTime: COUNTRY_SHEET_CACHE_MS,
@@ -91,8 +101,35 @@ export function TravelWorkspace() {
   const countryDetail = countryDetailQuery.isFetching || countryDetailQuery.isError ? undefined : countryDetailQuery.data;
   const countryDetailLoading = countryDetailEnabled && countryDetailQuery.isFetching;
   const countryDetailError = countryDetailQuery.error ? errorMessage(countryDetailQuery.error) : undefined;
-  const countryImages = countryDetail ? countryImagesQuery.data : undefined;
-  const countryImagesUnavailable = countryDetailQuery.isError || countryImagesQuery.isError;
+  const countryImage = countryDetail ? countryImageQuery.data : undefined;
+  const countryImageUnavailable = countryDetailQuery.isError || countryImageQuery.isError;
+  const cityDetailEnabled = citySheetOpen && Boolean(selectedCountry && selectedCity);
+  const cityDetailQuery = useQuery({
+    queryKey: compassQueryKeys.cityDetail(travelContext, selectedCountry?.countryCode ?? "", selectedCity?.name ?? ""),
+    queryFn: ({ signal }) => {
+      if (!selectedCountry || !selectedCity) throw new Error("Select a city to continue.");
+      return findCity(selectedCity.name, countryInput(selectedCountry), signal);
+    },
+    enabled: cityDetailEnabled,
+    staleTime: COUNTRY_SHEET_CACHE_MS,
+    gcTime: COUNTRY_SHEET_CACHE_MS,
+  });
+  const cityImageQuery = useQuery({
+    queryKey: compassQueryKeys.cityImage(travelContext, selectedCountry?.countryCode ?? "", selectedCity?.name ?? "", cityDetailQuery.data?.imageRequestToken ?? ""),
+    queryFn: ({ signal }) => {
+      if (!cityDetailQuery.data) throw new Error("City details are unavailable.");
+      return generatePlaceHeroImage({ imageRequestToken: cityDetailQuery.data.imageRequestToken }, signal);
+    },
+    enabled: cityDetailEnabled && !cityDetailQuery.isFetching && !cityDetailQuery.isError && Boolean(cityDetailQuery.data?.imageRequestToken),
+    staleTime: COUNTRY_SHEET_CACHE_MS,
+    gcTime: COUNTRY_SHEET_CACHE_MS,
+    retry: false,
+  });
+  const cityDetail = cityDetailQuery.isFetching || cityDetailQuery.isError ? undefined : cityDetailQuery.data;
+  const cityDetailLoading = cityDetailEnabled && cityDetailQuery.isFetching;
+  const cityDetailError = cityDetailQuery.error ? errorMessage(cityDetailQuery.error) : undefined;
+  const cityImage = cityDetail ? cityImageQuery.data : undefined;
+  const cityImageUnavailable = cityDetailQuery.isError || cityImageQuery.isError;
 
   const countryByCode = useMemo(() => new Map(COUNTRIES.features.map(({ properties }) => [properties.countryCode, properties])), []);
   const citiesByCountry = useMemo(() => {
@@ -125,6 +162,8 @@ export function TravelWorkspace() {
 
   function openCountryDetail(country: CountryProperties) {
     setSelectedCountry(country);
+    setSelectedCity(undefined);
+    setCitySheetOpen(false);
     setSelectedPlaceKey(undefined);
     setSheetView("countryDetail");
     setSheetOpen(true);
@@ -133,6 +172,45 @@ export function TravelWorkspace() {
   function closeCountryDetail() {
     // Keep an already-paid image request alive so its transient result can enter the one-hour query cache.
     setSheetOpen(false);
+  }
+
+  function openCityDetail(city: GeneratedCity) {
+    setSelectedCity(city);
+    setCitySheetOpen(true);
+  }
+
+  function cachePlace(place: Place) {
+    queryClient.setQueryData<{ places: Place[] }>(compassQueryKeys.overview(travelContext), (current) => ({
+      places: [...(current?.places ?? []).filter((saved) => saved.key !== place.key && !(saved.countryCode === place.countryCode && saved.name.toLocaleLowerCase() === place.name.toLocaleLowerCase())), place]
+        .sort((left, right) => left.name.localeCompare(right.name)),
+    }));
+  }
+
+  function saveCountry() {
+    if (!countryDetail) return;
+    const input = { name: countryDetail.location.name, countryCode: countryDetail.location.countryCode, latitude: countryDetail.location.latitude, longitude: countryDetail.location.longitude };
+    const previous = queryClient.getQueryData<{ places: Place[] }>(compassQueryKeys.overview(travelContext));
+    cachePlace({ key: `optimistic-${randomUUID()}`, ...input, createdAt: new Date().toISOString() });
+    setSheetOpen(false);
+    showToast({ title: "Country saved to my places", duration: 2_000 });
+    void createPlace(input).then(cachePlace).catch(() => {
+      queryClient.setQueryData(compassQueryKeys.overview(travelContext), previous);
+      showToast({ title: "Country could not be saved", duration: 2_000 });
+    });
+  }
+
+  function saveCity() {
+    if (!cityDetail) return;
+    const input = { name: cityDetail.location.name, countryCode: cityDetail.location.countryCode, latitude: cityDetail.location.latitude, longitude: cityDetail.location.longitude };
+    const previous = queryClient.getQueryData<{ places: Place[] }>(compassQueryKeys.overview(travelContext));
+    cachePlace({ key: `optimistic-${randomUUID()}`, ...input, createdAt: new Date().toISOString() });
+    setCitySheetOpen(false);
+    requestAnimationFrame(() => countryScrollRef.current?.scrollTo({ y: 0, animated: true }));
+    showToast({ title: "City saved to my places", duration: 2_000 });
+    void createPlace(input).then(cachePlace).catch(() => {
+      queryClient.setQueryData(compassQueryKeys.overview(travelContext), previous);
+      showToast({ title: "City could not be saved", duration: 2_000 });
+    });
   }
 
   function selectPlace(place: Place) {
@@ -170,43 +248,39 @@ export function TravelWorkspace() {
 
   const loading = overviewQuery.isPending;
   const loadError = overviewQuery.error ? errorMessage(overviewQuery.error) : undefined;
-  const panelTitle = selectedPlace?.name ?? selectedCountry?.name;
-  const panelMeta = selectedPlace && selectedCountry
-    ? `${selectedCountry.name} · ${selectedPlace.countryCode}`
-    : selectedCountry ? `${selectedCountry.continent} · ${selectedCountryCities?.length ?? 0} saved ${(selectedCountryCities?.length ?? 0) === 1 ? "city" : "cities"}` : undefined;
-  const panelWidth = Math.min(width - Math.max(insets.left, spacing.md) - Math.max(insets.right, spacing.md), 600);
-
   return (
     <KeyboardAvoidingView behavior="height" style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + 6, paddingLeft: Math.max(insets.left, spacing.md), paddingRight: Math.max(insets.right, spacing.md) }]}>
         <WorkspaceAppSwitcher active="compass" />
       </View>
 
-      <View style={styles.globe}>
-        <InteractiveGlobe
-          onCountryPress={(country) => { if (country) openCountryDetail(country.properties); }}
-          onPlacePress={(marker) => { const place = places.find(({ key }) => key === marker.id); if (place) selectPlace(place); }}
-          places={globePlaces}
-          selectedCountryCode={selectedCountry?.countryCode}
-          selectedPlaceId={selectedPlace?.key}
-        />
-        {!loadError ? <View style={[styles.globeActions, { right: Math.max(insets.right, spacing.md) }]}>
-          <Button accessibilityLabel="Browse countries and saved cities" contentMode="raw" disabled={loading} onPress={openBrowse} size="md" variant="icon"><SearchIcon size="sm" /></Button>
-        </View> : null}
-        {loading ? <View accessibilityLabel="Loading saved cities" accessibilityRole="progressbar" style={[styles.selectionSkeleton, { bottom: 0, left: (width - panelWidth) / 2, width: panelWidth }]} /> : null}
-        {loadError && !loading ? <View style={styles.loadFailure}><GlobeIcon size="lg" variant="muted" /><Text style={styles.loadFailureText}>{loadError}</Text><Button onPress={() => void overviewQuery.refetch()} size="sm" variant="secondary">Retry</Button></View> : null}
+      <View style={[styles.workspaceViewport, { paddingLeft: Math.max(insets.left, spacing.md), paddingRight: Math.max(insets.right, spacing.md) }]}>
+        <View style={styles.titleRow}>
+          <WorkspaceAppSwitcher active="compass" trigger="back" />
+          <Text numberOfLines={1} style={styles.workspaceTitle}>Compass</Text>
+          <Button accessibilityLabel="Add in Compass" contentMode="raw" onPress={() => setActionsOpen(true)} size="xs" variant="icon"><PlusIcon size="sm" /></Button>
+        </View>
+        <View style={styles.searchRow}>
+          <View style={styles.workspaceSearch}>
+            <SearchIcon size="sm" variant="muted" />
+            <TextInput accessibilityLabel="Search Compass places" onChangeText={(value) => { setCountryQuery(value); if (value.trim()) openBrowse(); }} onFocus={openBrowse} placeholder="Search..." style={styles.workspaceSearchInput} value={countryQuery} />
+          </View>
+          <Button accessibilityLabel="Filter Compass" contentMode="raw" onPress={() => setFiltersOpen(true)} size="sm" style={styles.filterButton} variant="icon"><FilterIcon size="sm" /></Button>
+        </View>
+        <View style={styles.globe}>
+          <InteractiveGlobe
+            onCountryPress={(country) => { if (country) openCountryDetail(country.properties); }}
+            onPlacePress={(marker) => { const place = places.find(({ key }) => key === marker.id); if (place) selectPlace(place); }}
+            places={globePlaces}
+            selectedCountryCode={selectedCountry?.countryCode}
+            selectedPlaceId={selectedPlace?.key}
+          />
+          {loadError && !loading ? <View style={styles.loadFailure}><GlobeIcon size="lg" variant="muted" /><Text style={styles.loadFailureText}>{loadError}</Text><Button onPress={() => void overviewQuery.refetch()} size="sm" variant="secondary">Retry</Button></View> : null}
+        </View>
       </View>
 
-      {!loading && panelTitle && !loadError ? <View style={[styles.selectionPanel, { bottom: 0, left: (width - panelWidth) / 2, width: panelWidth }]}>
-        <View style={styles.panelIcon}><LocationPinIcon size="md" /></View>
-        <View style={styles.panelCopy}>
-          <Text numberOfLines={1} style={styles.panelTitle}>{panelTitle}</Text>
-          <Text numberOfLines={1} style={styles.panelMeta}>{panelMeta}</Text>
-        </View>
-        <Button accessibilityLabel={`Browse saved cities in ${selectedCountry?.name ?? panelTitle}`} contentMode="raw" onPress={openBrowse} size="md" variant="icon"><SearchIcon size="sm" /></Button>
-      </View> : !loading && !loadError ? <View pointerEvents="none" style={[styles.hint, { bottom: 0 }]}><GlobeIcon size="sm" variant="muted" /><Text style={styles.hintText}>Rotate freely or browse countries</Text></View> : null}
-
       {!loadError ? <CoreComposer
+        accessory={selectedCountry && !sheetOpen && !citySheetOpen ? <Button accessibilityLabel={`Reopen ${selectedCountry.name}`} onPress={() => openCountryDetail(selectedCountry)} size="md" style={styles.placeIsland} variant="secondary"><LocationPinIcon size="sm" /><Text numberOfLines={1} style={styles.placeIslandText}>{selectedCountry.name}</Text><ChevronRightIcon size="sm" /></Button> : undefined}
         accessibilityLabel="Ask Core about saved cities"
         disabled={assistantBusy}
         editable={!assistantBusy}
@@ -227,24 +301,15 @@ export function TravelWorkspace() {
       /> : null}
 
       <BottomSheet
-        description={sheetView === "countryDetail" ? "A concise guide generated for the selected country." : undefined}
-        footer={sheetView === "countryDetail" ? <Button onPress={closeCountryDetail} size="md" variant="secondary">Close</Button> : undefined}
+        footer={sheetView === "countryDetail" ? <View style={styles.sheetFooter}><Button onPress={closeCountryDetail} size="md" style={styles.footerButton} variant="secondary">Close</Button><Button disabled={!countryDetail} onPress={saveCountry} size="md" style={styles.footerButton} variant="primary">Save</Button></View> : undefined}
         height="full"
         onOpenChange={(next) => { if (!next && sheetView === "countryDetail") closeCountryDetail(); else setSheetOpen(next); }}
         open={sheetOpen}
-        title={sheetView === "countryDetail" ? selectedCountry?.name ?? "Country" : selectedCountry ? `${selectedCountry.name} cities` : "Saved cities"}
+        title={sheetView === "countryDetail" ? selectedCountry?.name ?? "Country" : countryQuery.trim() ? "Search places" : selectedCountry ? `${selectedCountry.name} cities` : "Saved places"}
       >
-        <ScrollView contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={styles.fullSheetScroll}>
+        <ScrollView contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps="handled" ref={countryScrollRef} showsVerticalScrollIndicator={false} style={styles.fullSheetScroll}>
           {sheetView === "countryDetail" ? <View style={styles.countryDetail}>
-            <View accessibilityLabel={countryImages ? "Web-sourced country images" : countryImagesUnavailable ? "Image unavailable" : "Loading country images"} accessibilityRole={!countryImages && !countryImagesUnavailable ? "progressbar" : undefined} style={styles.placeMedia}>
-              <PlaceImageFrame conceptTitle={countryImages?.images[0]?.title ?? countryDetail?.assetConcepts[0].title} image={countryImages?.images[0]} unavailable={countryImagesUnavailable} wide={width >= 600} />
-              <View style={styles.supportingMedia}>
-                {(countryImages ? countryImages.images.slice(1) : [undefined, undefined, undefined]).map((image, index) => <PlaceImageFrame conceptTitle={image?.title ?? countryDetail?.assetConcepts[index + 1]?.title} image={image} key={image?.role ?? index} supporting unavailable={countryImagesUnavailable} />)}
-              </View>
-              {countryImages ? <Text style={styles.mediaDisclosure}>Images sourced from the web</Text> : null}
-            </View>
-
-            {countryDetailLoading ? <View accessibilityLabel={`Loading information about ${selectedCountry?.name ?? "country"}`} accessibilityRole="progressbar" style={styles.countryDetailSkeleton}>
+             {countryDetailLoading ? <View accessibilityLabel={`Loading information about ${selectedCountry?.name ?? "country"}`} accessibilityRole="progressbar" style={styles.countryDetailSkeleton}>
               <Skeleton style={[styles.skeletonBlock, styles.skeletonSummary]} />
               <View style={styles.factGrid}>{Array.from({ length: 4 }, (_, index) => <Skeleton key={index} style={[styles.skeletonBlock, styles.skeletonFact]} />)}</View>
               {Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.skeletonBlock, styles.skeletonHighlight]} />)}
@@ -252,33 +317,15 @@ export function TravelWorkspace() {
               <GlobeIcon size="lg" variant="muted" />
               <Text style={styles.loadFailureText}>{countryDetailError}</Text>
             </View> : countryDetail ? <>
-              <View style={styles.countryHero}>
-                <Text style={styles.countryEyebrow}>{countryDetail.location.countryCode} · {countryDetail.location.continent}</Text>
-                <Text style={styles.countrySummary}>{countryDetail.summary}</Text>
-                {countryDetail.sources.length > 0 ? <View style={styles.sourceList}>{countryDetail.sources.map((source) => <Button key={source.url} onPress={() => void Linking.openURL(source.url)} size="md" variant="secondary">{source.title}</Button>)}</View> : null}
-              </View>
-              <Text style={styles.detailSectionLabel}>AT A GLANCE</Text>
-              <View style={styles.factGrid}>{countryDetail.facts.map((fact) => <View key={`${fact.label}:${fact.value}`} style={styles.factCard}><Text style={styles.factLabel}>{fact.label}</Text><Text style={styles.factValue}>{fact.value}</Text></View>)}</View>
-              <Text style={styles.detailSectionLabel}>HIGHLIGHTS</Text>
-              <View style={styles.detailList}>{countryDetail.highlights.map((highlight) => <View key={highlight.title} style={styles.highlightCard}><Text style={styles.highlightTitle}>{highlight.title}</Text><Text style={styles.highlightDescription}>{highlight.description}</Text></View>)}</View>
-              <Text style={styles.detailSectionLabel}>PRACTICAL</Text>
-              <View style={styles.practicalCard}>
-                <Text style={styles.factLabel}>Best time to visit</Text><Text style={styles.practicalValue}>{countryDetail.practicalInfo.bestTimeToVisit}</Text>
-                <Text style={styles.factLabel}>Languages</Text><Text style={styles.practicalValue}>{countryDetail.practicalInfo.languages.join(", ")}</Text>
-                <Text style={styles.factLabel}>Currency</Text><Text style={styles.practicalValue}>{countryDetail.practicalInfo.currency}</Text>
-                <Text style={styles.factLabel}>Time zone</Text><Text style={styles.practicalValue}>{countryDetail.practicalInfo.timeZone}</Text>
-                <Text style={styles.factLabel}>Safety</Text><Text style={styles.practicalValue}>{countryDetail.practicalInfo.safety}</Text>
-                <Text style={styles.factLabel}>Entry requirements</Text><Text style={styles.practicalValue}>{countryDetail.practicalInfo.entryRequirements}</Text>
-              </View>
-              {countryImages ? <>
-                <Text style={styles.detailSectionLabel}>IMAGE SOURCES</Text>
-                <View style={styles.sourceList}>{countryImages.images.map((image) => <Button key={`${image.role}:${image.sourcePageUrl}`} onPress={() => void Linking.openURL(image.sourcePageUrl)} size="md" variant="secondary">{image.title}</Button>)}</View>
-              </> : null}
-              <Text style={styles.verificationNote}>Verify safety and entry requirements with official sources before travel.</Text>
-            </> : null}
+              <GuideHero detail={countryDetail} image={countryImage?.image} imageUnavailable={countryImageUnavailable} />
+              <TravelRecommendationSection label="CULTURE" text={countryDetail.culture} />
+              <TravelRecommendationSection label="FOOD" text={countryDetail.food} />
+              <TravelRecommendationSection label="WHY VISIT" text={countryDetail.whyVisit} />
+              <Text style={styles.detailSectionLabel}>POPULAR CITIES</Text>
+               <View style={styles.cityList}>{countryDetail.popularCities.map((city, index) => <Button accessibilityLabel={`Open ${city.name}, ${selectedCountry?.name ?? "country"}`} key={city.name} onPress={() => openCityDetail(city)} size="md" style={styles.cityPill} variant="secondary"><Text style={styles.cityRank}>{String(index + 1).padStart(2, "0")}</Text><Text style={styles.cityName}>{city.name}</Text></Button>)}</View>
+             </> : null}
           </View> : <>
-            <View style={styles.countrySearch}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel="Search countries" onChangeText={setCountryQuery} placeholder="Search countries" style={styles.countrySearchInput} value={countryQuery} /></View>
-            {selectedCountry ? <>
+             {selectedCountry ? <>
               <BottomSheetItem icon={<GlobeIcon size="md" />} onPress={() => { setSelectedCountry(undefined); setSelectedPlaceKey(undefined); }}>Show all saved cities</BottomSheetItem>
               <Text style={styles.listLabel}>SAVED CITIES IN {selectedCountry.countryCode}</Text>
               {selectedCountryCities?.map((place) => <BottomSheetItem key={place.key} icon={<LocationPinIcon size="md" />} onPress={() => selectPlace(place)}>{place.name}</BottomSheetItem>)}
@@ -296,39 +343,75 @@ export function TravelWorkspace() {
           </>}
         </ScrollView>
       </BottomSheet>
+      <BottomSheet
+        footer={<View style={styles.sheetFooter}><Button onPress={() => setCitySheetOpen(false)} size="md" style={styles.footerButton} variant="secondary">Close</Button><Button disabled={!cityDetail} onPress={saveCity} size="md" style={styles.footerButton} variant="primary">Save</Button></View>}
+        height="full"
+        onOpenChange={(next) => { if (!next) setCitySheetOpen(false); }}
+        open={citySheetOpen}
+        title={selectedCity?.name ?? "City"}
+      >
+        <ScrollView contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={styles.fullSheetScroll}>
+          <View style={styles.countryDetail}>
+             {cityDetailLoading ? <View accessibilityLabel={`Loading information about ${selectedCity?.name ?? "city"}`} accessibilityRole="progressbar" style={styles.countryDetailSkeleton}>
+              <Skeleton style={[styles.skeletonBlock, styles.skeletonSummary]} />
+              {Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.skeletonBlock, styles.skeletonHighlight]} />)}
+            </View> : cityDetailError ? <View style={styles.countryDetailFailure}><GlobeIcon size="lg" variant="muted" /><Text style={styles.loadFailureText}>{cityDetailError}</Text></View> : cityDetail ? <>
+              <GuideHero detail={cityDetail} image={cityImage?.image} imageUnavailable={cityImageUnavailable} />
+              <TravelRecommendationSection label="CULTURE" text={cityDetail.culture} />
+              <TravelRecommendationSection label="FOOD" text={cityDetail.food} />
+              <TravelRecommendationSection label="WHY VISIT" text={cityDetail.whyVisit} />
+             </> : null}
+          </View>
+        </ScrollView>
+      </BottomSheet>
+      <BottomSheet footer={<Button onPress={() => setActionsOpen(false)} size="md" variant="secondary">Close</Button>} onOpenChange={setActionsOpen} open={actionsOpen} title="Add in Compass"><Text style={styles.emptyText}>No additional actions are available yet.</Text></BottomSheet>
+      <BottomSheet footer={<Button onPress={() => setFiltersOpen(false)} size="md" variant="secondary">Close</Button>} onOpenChange={setFiltersOpen} open={filtersOpen} title="Filter Compass"><Text style={styles.emptyText}>No filters are available yet.</Text></BottomSheet>
     </KeyboardAvoidingView>
   );
 }
 
-function PlaceImageFrame({ conceptTitle, image, supporting = false, unavailable, wide = false }: { conceptTitle?: string; image?: PlaceImagesResponse["images"][number]; supporting?: boolean; unavailable: boolean; wide?: boolean }) {
+function countryInput(country: CountryProperties) {
+  return { name: country.name, code: country.countryCode, continent: country.continent, lat: country.latitude, lon: country.longitude };
+}
+
+function TravelRecommendationSection({ label, text }: { label: string; text: string }) {
+  return <><Text style={styles.detailSectionLabel}>{label}</Text><View style={styles.recommendationCard}><Text style={styles.recommendationText}>{text}</Text></View></>;
+}
+
+function GuideHero({ detail, image, imageUnavailable }: { detail: Pick<CityDetail, "summary">; image?: PlaceImageResponse["image"]; imageUnavailable: boolean }) {
+  return <View accessibilityLabel={image ? "Destination hero" : imageUnavailable ? "Image unavailable" : "Generating destination hero"} accessibilityRole={!image && !imageUnavailable ? "progressbar" : undefined} style={styles.guideHero}><PlaceImageFrame image={image} key={image?.url ?? "hero"} unavailable={imageUnavailable}><View style={styles.heroText}><Text style={styles.heroSummary}>{detail.summary}</Text></View></PlaceImageFrame></View>;
+}
+
+function PlaceImageFrame({ children, image, unavailable }: { children?: ReactNode; image?: PlaceImageResponse["image"]; unavailable: boolean }) {
   const [loadState, setLoadState] = useState<"loading" | "loaded" | "error">("loading");
-  useEffect(() => setLoadState("loading"), [image?.url]);
   const failed = unavailable || loadState === "error";
-  return <View style={[styles.imageFrame, supporting ? styles.supportingImageFrame : styles.heroImageFrame, wide && !supporting && styles.heroImageFrameWide, failed && styles.imageUnavailable]}>
-    {image && !failed ? <Image accessibilityLabel={image.title} contentFit="cover" onError={() => setLoadState("error")} onLoad={() => setLoadState("loaded")} source={{ uri: image.url }} style={styles.placeImage} transition={250} /> : null}
+  return <View style={[styles.imageFrame, failed && styles.imageUnavailable]}>
+    {image && !failed ? <Image accessibilityLabel={image.title} cachePolicy="none" contentFit="cover" onError={() => setLoadState("error")} onLoad={() => setLoadState("loaded")} source={{ uri: image.url }} style={styles.placeImage} transition={250} /> : null}
     {failed ? <Text style={styles.imageUnavailableText}>Image unavailable</Text> : loadState !== "loaded" ? <Skeleton style={styles.imageSkeleton} /> : null}
-    {conceptTitle && loadState === "loaded" && !failed ? <View style={styles.imageCaption}><Text numberOfLines={1} style={styles.imageCaptionText}>{conceptTitle}</Text></View> : null}
+    {image && loadState === "loaded" && !failed ? children : null}
   </View>;
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: palette.voidBlack },
   header: { minHeight: 64, paddingBottom: 8, paddingHorizontal: spacing.md, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomColor: palette.hairline, borderBottomWidth: 1, backgroundColor: palette.page, zIndex: 4 },
-  globe: { flex: 1, overflow: "hidden", backgroundColor: palette.voidBlack },
-  globeActions: { position: "absolute", top: 12, flexDirection: "row", gap: 8 },
-  selectionSkeleton: { position: "absolute", height: 72, borderRadius: radii.xl, backgroundColor: palette.hairlineBright, opacity: 0.72 },
+  workspaceViewport: { flex: 1, minHeight: 0, gap: spacing.sm, paddingTop: spacing.sm },
+  titleRow: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: 8 },
+  workspaceTitle: { flex: 1, color: palette.silver50, fontFamily: fonts.medium, fontSize: 24 },
+  searchRow: { minHeight: 52, flexDirection: "row", alignItems: "center", gap: 8 },
+  workspaceSearch: { minHeight: 44, flex: 1, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 7, borderRadius: 999, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.page },
+  workspaceSearchInput: { minHeight: 40, flex: 1, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", fontSize: 13 },
+  filterButton: { width: 44, height: 44 },
+  globe: { flex: 1, minHeight: 0, overflow: "hidden", borderRadius: radii.xl, backgroundColor: palette.voidBlack },
   loadFailure: { position: "absolute", top: 0, right: spacing.xl, bottom: 0, left: spacing.xl, alignItems: "center", justifyContent: "center", gap: 14 },
   loadFailureText: { maxWidth: 320, color: palette.silver300, fontFamily: fonts.regular, fontSize: 13, lineHeight: 19, textAlign: "center" },
-  selectionPanel: { position: "absolute", minHeight: 72, padding: 10, flexDirection: "row", alignItems: "center", gap: 11, borderWidth: 1, borderColor: palette.hairlineBright, borderRadius: radii.xl, backgroundColor: "rgba(13,17,23,0.94)" },
-  panelIcon: { width: 42, height: 42, alignItems: "center", justifyContent: "center", borderRadius: 21, backgroundColor: palette.panelRaised },
-  panelCopy: { minWidth: 0, flex: 1 },
-  panelTitle: { color: palette.silver50, fontFamily: fonts.medium, fontSize: 17 },
-  panelMeta: { marginTop: 3, color: palette.silver500, fontFamily: fonts.regular, fontSize: 11 },
-  hint: { position: "absolute", alignSelf: "center", paddingHorizontal: 14, paddingVertical: 9, flexDirection: "row", alignItems: "center", gap: 8, borderRadius: 999, backgroundColor: "rgba(10,14,19,0.86)" },
-  hintText: { color: palette.silver500, fontFamily: fonts.medium, fontSize: 11, letterSpacing: tracking.micro },
   inlineError: { paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: "rgba(176,74,74,0.45)", borderRadius: radii.md, backgroundColor: "rgba(64,20,20,0.9)" },
   inlineNotice: { paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: palette.hairlineBright, borderRadius: radii.md, backgroundColor: palette.panelRaised },
   messageText: { color: palette.silver100, fontFamily: fonts.regular, fontSize: 12, lineHeight: 18 },
+  placeIsland: { width: "100%", minHeight: 52, justifyContent: "flex-start", paddingHorizontal: spacing.md },
+  placeIslandText: { minWidth: 0, flex: 1, color: palette.silver100, fontFamily: fonts.medium, fontSize: 14, textAlign: "left" },
+  sheetFooter: { flexDirection: "row", gap: spacing.sm },
+  footerButton: { flex: 1 },
   sheetContent: { gap: 6, paddingBottom: 6 },
   fullSheetScroll: { flex: 1 },
   countrySearch: { minHeight: 48, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.lg, backgroundColor: palette.panelRaised },
@@ -342,22 +425,14 @@ const styles = StyleSheet.create({
   skeletonHighlight: { width: "100%", height: 104 },
   countryDetailFailure: { flex: 1, minHeight: 360, alignItems: "center", justifyContent: "center", gap: spacing.md },
   countryDetail: { gap: spacing.md, paddingTop: spacing.md, paddingBottom: spacing.xl },
-  placeMedia: { gap: spacing.sm },
-  supportingMedia: { width: "100%", flexDirection: "row", gap: spacing.sm },
-  imageFrame: { minWidth: 0, aspectRatio: 9 / 16, overflow: "hidden", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.lg, backgroundColor: palette.panelRaised },
-  heroImageFrame: { width: "100%" },
-  heroImageFrameWide: { width: "56%", maxWidth: 315, alignSelf: "center" },
-  supportingImageFrame: { flex: 1 },
+  guideHero: { marginBottom: spacing.sm },
+  imageFrame: { width: "100%", aspectRatio: 1.15, overflow: "hidden", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.lg, backgroundColor: palette.panelRaised },
   imageUnavailable: { borderColor: palette.hairline, backgroundColor: palette.page, opacity: 0.72 },
   imageUnavailableText: { paddingHorizontal: 4, color: palette.silver500, fontFamily: fonts.regular, fontSize: 9, lineHeight: 13, textAlign: "center" },
   imageSkeleton: { position: "absolute", width: "100%", height: "100%", backgroundColor: palette.hairlineBright, opacity: 0.72 },
   placeImage: { width: "100%", height: "100%" },
-  imageCaption: { position: "absolute", right: 6, bottom: 6, left: 6, paddingHorizontal: 7, paddingVertical: 5, borderRadius: radii.sm, backgroundColor: "rgba(2,6,9,0.74)" },
-  imageCaptionText: { color: palette.silver100, fontFamily: fonts.medium, fontSize: 9 },
-  mediaDisclosure: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 10, lineHeight: 15, textAlign: "right" },
-  countryHero: { paddingVertical: spacing.md, gap: spacing.sm },
-  countryEyebrow: { color: palette.silver500, fontFamily: fonts.medium, fontSize: 11, letterSpacing: tracking.micro, textTransform: "uppercase" },
-  countrySummary: { color: palette.silver300, fontFamily: fonts.regular, fontSize: 16, lineHeight: 25 },
+  heroText: { position: "absolute", right: 0, bottom: 0, left: 0, padding: spacing.md, backgroundColor: "rgba(2,6,9,0.7)" },
+  heroSummary: { color: palette.silver50, fontFamily: fonts.regular, fontSize: 14, lineHeight: 21 },
   detailSectionLabel: { marginTop: spacing.sm, color: palette.silver500, fontFamily: fonts.medium, fontSize: 10, letterSpacing: tracking.micro },
   factGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
   factCard: { minWidth: 130, flexGrow: 1, flexBasis: "47%", padding: spacing.md, gap: 5, borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.lg, backgroundColor: palette.panelRaised },
@@ -370,6 +445,11 @@ const styles = StyleSheet.create({
   practicalCard: { padding: spacing.md, gap: 7, borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.lg, backgroundColor: palette.panelRaised },
   practicalValue: { marginBottom: spacing.sm, color: palette.silver300, fontFamily: fonts.regular, fontSize: 14, lineHeight: 21 },
   sourceList: { gap: spacing.sm },
-  verificationNote: { paddingBottom: spacing.md, color: palette.silver500, fontFamily: fonts.regular, fontSize: 11, lineHeight: 17, textAlign: "center" },
+  recommendationCard: { padding: spacing.md, borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.lg, backgroundColor: palette.panelRaised },
+  recommendationText: { color: palette.silver300, fontFamily: fonts.regular, fontSize: 14, lineHeight: 22 },
+  cityList: { gap: spacing.xs },
+  cityPill: { minHeight: 44, paddingHorizontal: spacing.md, flexDirection: "row", justifyContent: "flex-start", gap: spacing.sm, borderRadius: radii.md },
+  cityRank: { color: palette.silver500, fontFamily: fonts.medium, fontSize: 10, letterSpacing: tracking.micro },
+  cityName: { minWidth: 0, flex: 1, color: palette.silver100, fontFamily: fonts.medium, fontSize: 14 },
   emptyText: { paddingVertical: 18, color: palette.silver500, fontFamily: fonts.regular, fontSize: 13, textAlign: "center" },
 });

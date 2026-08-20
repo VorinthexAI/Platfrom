@@ -1,5 +1,5 @@
 /* eslint-disable react/no-unknown-property */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AccessibilityInfo, Platform, StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
 import { useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import * as THREE from "three";
@@ -8,6 +8,7 @@ import { Canvas } from "@/components/three/Canvas";
 import {
   COUNTRIES,
   createCountryBoundaryGeometry,
+  createCountryFillGeometry,
   findCountryAtCoordinates,
   type CountryFeature,
 } from "@/lib/globe-data";
@@ -24,8 +25,9 @@ const DRAG_THRESHOLD = 10;
 const IDLE_DELAY_MS = 1400;
 const IDLE_ROTATION_SPEED = 0.075;
 const MIN_CAMERA_DISTANCE = 2.15;
-const MAX_CAMERA_DISTANCE = 4.1;
+const MAX_CAMERA_DISTANCE = 5.2;
 const WEB_TOUCH_STYLE = { touchAction: "none" } as unknown as ViewStyle;
+const disableRaycast: THREE.Object3D["raycast"] = () => {};
 
 export type GlobePlace = Readonly<{
   id: string;
@@ -152,11 +154,11 @@ function PlaceMarker({
         <sphereGeometry args={[0.06, 10, 8]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
-      <mesh position={[0, 0.03, 0]}>
+      <mesh position={[0, 0.03, 0]} raycast={disableRaycast}>
         <cylinderGeometry args={[0.006, 0.006, 0.06, 6]} />
         <meshBasicMaterial color={place.status === "visited" ? "#dce8ed" : "#7f9099"} />
       </mesh>
-      <mesh position={[0, 0.07, 0]} rotation={[Math.PI / 2, 0, 0]}>
+      <mesh position={[0, 0.07, 0]} raycast={disableRaycast} rotation={[Math.PI / 2, 0, 0]}>
         <torusGeometry args={[selected ? 0.035 : 0.023, selected ? 0.007 : 0.005, 8, 18]} />
         <meshBasicMaterial color={selected ? "#ffffff" : place.status === "visited" ? "#dce8ed" : "#7f9099"} />
       </mesh>
@@ -179,7 +181,9 @@ function GlobeScene({
 }: GlobeSceneProps) {
   const globeRef = useRef<THREE.Group>(null);
   const camera = useThree((state) => state.camera);
+  const cameraRef = useRef(camera);
   const renderer = useThree((state) => state.gl);
+  const invalidate = useThree((state) => state.invalidate);
   const gestureRef = useRef<PointerGesture>({
     activePointerId: undefined,
     startScreen: new THREE.Vector2(),
@@ -187,10 +191,11 @@ function GlobeScene({
     moved: false,
     pointers: new Map(),
     pinchDistance: 0,
-    pinchZoom: camera.position.z,
+    pinchZoom: MAX_CAMERA_DISTANCE,
     resetTrackball: false,
   });
-  const lastInteractionAt = useRef(performance.now());
+  const lastInteractionAt = useRef(0);
+  const idleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const boundaries = useMemo(() => createCountryBoundaryGeometry(), []);
   const selectedBoundaries = useMemo(() => {
     const country = COUNTRIES.features.find(({ properties }) => properties.countryCode === selectedCountryCode);
@@ -198,11 +203,25 @@ function GlobeScene({
       ? createCountryBoundaryGeometry({ type: "FeatureCollection", features: [country] }, 1.026)
       : undefined;
   }, [selectedCountryCode]);
+  const selectedFill = useMemo(() => {
+    const country = COUNTRIES.features.find(({ properties }) => properties.countryCode === selectedCountryCode);
+    return country ? createCountryFillGeometry(country) : undefined;
+  }, [selectedCountryCode]);
   const rotationDelta = useMemo(() => new THREE.Quaternion(), []);
   const worldYAxis = useMemo(() => new THREE.Vector3(0, 1, 0), []);
+  const scheduleIdleRotation = useCallback(() => {
+    if (idleTimer.current) clearTimeout(idleTimer.current);
+    if (!reducedMotion) idleTimer.current = setTimeout(() => invalidate(), IDLE_DELAY_MS);
+  }, [invalidate, reducedMotion]);
 
   useEffect(() => () => boundaries.dispose(), [boundaries]);
   useEffect(() => () => selectedBoundaries?.dispose(), [selectedBoundaries]);
+  useEffect(() => () => selectedFill?.dispose(), [selectedFill]);
+  useEffect(() => {
+    lastInteractionAt.current = performance.now();
+    scheduleIdleRotation();
+    return () => { if (idleTimer.current) clearTimeout(idleTimer.current); };
+  }, [scheduleIdleRotation]);
   useEffect(() => {
     const element = renderer.domElement as unknown as { addEventListener?: (type: string, listener: (event: WheelEvent) => void, options?: AddEventListenerOptions) => void; removeEventListener?: (type: string, listener: (event: WheelEvent) => void) => void };
     if (!element.addEventListener || !element.removeEventListener) return;
@@ -223,12 +242,14 @@ function GlobeScene({
 
     rotationDelta.setFromAxisAngle(worldYAxis, IDLE_ROTATION_SPEED * delta);
     globe.quaternion.premultiply(rotationDelta).normalize();
+    invalidate();
   });
 
   const updateZoom = (nextDistance: number) => {
-    camera.position.z = clampGlobeZoom(nextDistance, MIN_CAMERA_DISTANCE, MAX_CAMERA_DISTANCE);
-    camera.updateProjectionMatrix();
+    cameraRef.current.position.z = clampGlobeZoom(nextDistance, MIN_CAMERA_DISTANCE, MAX_CAMERA_DISTANCE);
     lastInteractionAt.current = performance.now();
+    invalidate();
+    scheduleIdleRotation();
   };
 
   useEffect(() => {
@@ -239,8 +260,10 @@ function GlobeScene({
         rotationDelta.setFromAxisAngle(worldYAxis, radians);
         globe.quaternion.premultiply(rotationDelta).normalize();
         lastInteractionAt.current = performance.now();
+        invalidate();
+        scheduleIdleRotation();
       },
-      zoomBy(distance) { updateZoom(camera.position.z + distance); },
+      zoomBy(distance) { updateZoom(cameraRef.current.position.z + distance); },
     };
     return () => { controlsRef.current = null; };
   });
@@ -251,6 +274,7 @@ function GlobeScene({
     const screen = eventScreenPoint(event);
     gesture.pointers.set(event.pointerId, screen);
     lastInteractionAt.current = performance.now();
+    scheduleIdleRotation();
 
     if (gesture.pointers.size === 1) {
       gesture.activePointerId = event.pointerId;
@@ -261,7 +285,7 @@ function GlobeScene({
     } else {
       gesture.moved = true;
       gesture.pinchDistance = pointerDistance(gesture.pointers);
-      gesture.pinchZoom = camera.position.z;
+      gesture.pinchZoom = cameraRef.current.position.z;
     }
 
     const target = event.currentTarget as unknown as { setPointerCapture?: (pointerId: number) => void };
@@ -298,6 +322,7 @@ function GlobeScene({
     }
     rotationDelta.setFromUnitVectors(gesture.previousTrackball, current);
     globe.quaternion.premultiply(rotationDelta).normalize();
+    invalidate();
     gesture.previousTrackball.copy(current);
     gesture.moved ||= exceedsGlobeDragThreshold(
       gesture.startScreen.x,
@@ -316,6 +341,7 @@ function GlobeScene({
     if (remainingTouches !== undefined) gesture.pointers = remainingTouches;
     else gesture.pointers.delete(event.pointerId);
     lastInteractionAt.current = performance.now();
+    scheduleIdleRotation();
     if (gesture.activePointerId === event.pointerId) gesture.activePointerId = undefined;
     if (gesture.pointers.size === 1) {
       gesture.activePointerId = [...gesture.pointers.keys()][0];
@@ -333,6 +359,7 @@ function GlobeScene({
     gesture.resetTrackball = false;
     gesture.moved = true;
     lastInteractionAt.current = performance.now();
+    scheduleIdleRotation();
   };
 
   const selectCountry = (event: ThreeEvent<MouseEvent>) => {
@@ -364,19 +391,24 @@ function GlobeScene({
           wheel.sourceEvent?.preventDefault?.();
           wheel.nativeEvent?.preventDefault?.();
           const deltaY = wheel.deltaY ?? (wheel.nativeEvent as { deltaY?: number } | undefined)?.deltaY ?? 0;
-          updateZoom(camera.position.z + deltaY * 0.0025);
+          updateZoom(cameraRef.current.position.z + deltaY * 0.0025);
         }}
       >
-        <mesh onClick={selectCountry}>
+        <mesh raycast={disableRaycast}>
           <sphereGeometry args={[GLOBE_RADIUS, 72, 48]} />
           <meshStandardMaterial color="#071016" metalness={0.08} roughness={0.9} />
         </mesh>
-        <lineSegments geometry={boundaries}>
+        <mesh onClick={selectCountry}>
+          <sphereGeometry args={[GLOBE_RADIUS, 24, 16]} />
+          <meshBasicMaterial colorWrite={false} depthWrite={false} />
+        </mesh>
+        <lineSegments geometry={boundaries} raycast={disableRaycast}>
           <lineBasicMaterial color="#a9bac2" transparent opacity={0.68} />
         </lineSegments>
+        {selectedFill ? <mesh geometry={selectedFill} raycast={disableRaycast}><meshBasicMaterial color="#a9bac2" side={THREE.DoubleSide} transparent opacity={0.42} /></mesh> : null}
         {selectedBoundaries ? (
-          <lineSegments geometry={selectedBoundaries}>
-            <lineBasicMaterial color="#ffffff" transparent opacity={1} />
+          <lineSegments geometry={selectedBoundaries} raycast={disableRaycast}>
+            <lineBasicMaterial color="#a9bac2" transparent opacity={1} />
           </lineSegments>
         ) : null}
         {places.map((place) => (
@@ -442,10 +474,10 @@ export function InteractiveGlobe({
     >
       <Canvas
       style={styles.canvas}
-      camera={{ position: [0, 0, 2.6], fov: 40, near: 0.1, far: 20 }}
+      camera={{ position: [0, 0, MAX_CAMERA_DISTANCE], fov: 40, near: 0.1, far: 20 }}
       dpr={[1, 2]}
-      frameloop="always"
-      gl={{ antialias: true, powerPreference: "high-performance" }}
+      frameloop="demand"
+      gl={{ antialias: Platform.OS !== "android", powerPreference: "high-performance" }}
     >
       <color attach="background" args={["#020609"]} />
       <GlobeScene
