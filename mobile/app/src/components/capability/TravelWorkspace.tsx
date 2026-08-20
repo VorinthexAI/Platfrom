@@ -2,7 +2,7 @@ import { randomUUID } from "expo-crypto";
 import { Image } from "expo-image";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { KeyboardAvoidingView, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { KeyboardAvoidingView, Linking, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomSheet, BottomSheetItem } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
@@ -236,12 +236,12 @@ export function TravelWorkspace() {
       >
         <ScrollView contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={styles.fullSheetScroll}>
           {sheetView === "countryDetail" ? <View style={styles.countryDetail}>
-            <View accessibilityLabel={countryImages ? "AI-generated interpretation" : countryImagesUnavailable ? "Image unavailable" : "Loading AI-generated interpretation"} accessibilityRole={!countryImages && !countryImagesUnavailable ? "progressbar" : undefined} style={styles.placeMedia}>
-              <PlaceImageFrame conceptTitle={countryDetail?.assetConcepts[0].title} image={countryImages?.images[0]} unavailable={countryImagesUnavailable} wide={width >= 600} />
+            <View accessibilityLabel={countryImages ? "Web-sourced country images" : countryImagesUnavailable ? "Image unavailable" : "Loading country images"} accessibilityRole={!countryImages && !countryImagesUnavailable ? "progressbar" : undefined} style={styles.placeMedia}>
+              <PlaceImageFrame conceptTitle={countryImages?.images[0]?.title ?? countryDetail?.assetConcepts[0].title} image={countryImages?.images[0]} unavailable={countryImagesUnavailable} wide={width >= 600} />
               <View style={styles.supportingMedia}>
-                {[0, 1, 2].map((index) => <PlaceImageFrame conceptTitle={countryDetail?.assetConcepts[index + 1]?.title} image={countryImages?.images[index + 1]} key={index} supporting unavailable={countryImagesUnavailable} />)}
+                {(countryImages ? countryImages.images.slice(1) : [undefined, undefined, undefined]).map((image, index) => <PlaceImageFrame conceptTitle={image?.title ?? countryDetail?.assetConcepts[index + 1]?.title} image={image} key={image?.role ?? index} supporting unavailable={countryImagesUnavailable} />)}
               </View>
-              {countryImages ? <Text style={styles.mediaDisclosure}>AI-generated interpretation</Text> : null}
+              {countryImages ? <Text style={styles.mediaDisclosure}>Images sourced from the web</Text> : null}
             </View>
 
             {countryDetailLoading ? <View accessibilityLabel={`Loading information about ${selectedCountry?.name ?? "country"}`} accessibilityRole="progressbar" style={styles.countryDetailSkeleton}>
@@ -255,6 +255,7 @@ export function TravelWorkspace() {
               <View style={styles.countryHero}>
                 <Text style={styles.countryEyebrow}>{countryDetail.location.countryCode} · {countryDetail.location.continent}</Text>
                 <Text style={styles.countrySummary}>{countryDetail.summary}</Text>
+                {countryDetail.sources.length > 0 ? <View style={styles.sourceList}>{countryDetail.sources.map((source) => <Button key={source.url} onPress={() => void Linking.openURL(source.url)} size="md" variant="secondary">{source.title}</Button>)}</View> : null}
               </View>
               <Text style={styles.detailSectionLabel}>AT A GLANCE</Text>
               <View style={styles.factGrid}>{countryDetail.facts.map((fact) => <View key={`${fact.label}:${fact.value}`} style={styles.factCard}><Text style={styles.factLabel}>{fact.label}</Text><Text style={styles.factValue}>{fact.value}</Text></View>)}</View>
@@ -269,8 +270,10 @@ export function TravelWorkspace() {
                 <Text style={styles.factLabel}>Safety</Text><Text style={styles.practicalValue}>{countryDetail.practicalInfo.safety}</Text>
                 <Text style={styles.factLabel}>Entry requirements</Text><Text style={styles.practicalValue}>{countryDetail.practicalInfo.entryRequirements}</Text>
               </View>
-              <Text style={styles.detailSectionLabel}>VISUAL CONCEPTS</Text>
-              <View style={styles.conceptList}>{countryDetail.assetConcepts.map((concept) => <Text key={concept.title} style={styles.conceptTitle}>{concept.title}</Text>)}</View>
+              {countryImages ? <>
+                <Text style={styles.detailSectionLabel}>IMAGE SOURCES</Text>
+                <View style={styles.sourceList}>{countryImages.images.map((image) => <Button key={`${image.role}:${image.sourcePageUrl}`} onPress={() => void Linking.openURL(image.sourcePageUrl)} size="md" variant="secondary">{image.title}</Button>)}</View>
+              </> : null}
               <Text style={styles.verificationNote}>Verify safety and entry requirements with official sources before travel.</Text>
             </> : null}
           </View> : <>
@@ -366,8 +369,7 @@ const styles = StyleSheet.create({
   highlightDescription: { color: palette.silver300, fontFamily: fonts.regular, fontSize: 13, lineHeight: 20 },
   practicalCard: { padding: spacing.md, gap: 7, borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.lg, backgroundColor: palette.panelRaised },
   practicalValue: { marginBottom: spacing.sm, color: palette.silver300, fontFamily: fonts.regular, fontSize: 14, lineHeight: 21 },
-  conceptList: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
-  conceptTitle: { paddingHorizontal: 10, paddingVertical: 7, borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.md, color: palette.silver300, fontFamily: fonts.medium, fontSize: 11, backgroundColor: palette.panelRaised },
+  sourceList: { gap: spacing.sm },
   verificationNote: { paddingBottom: spacing.md, color: palette.silver500, fontFamily: fonts.regular, fontSize: 11, lineHeight: 17, textAlign: "center" },
   emptyText: { paddingVertical: 18, color: palette.silver500, fontFamily: fonts.regular, fontSize: 13, textAlign: "center" },
 });

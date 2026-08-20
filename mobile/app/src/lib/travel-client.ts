@@ -63,6 +63,7 @@ export const placeDetailSchema = z.strictObject({
     safety: z.string().trim().min(1).max(600),
     entryRequirements: z.string().trim().min(1).max(800),
   }),
+  sources: z.array(z.strictObject({ title: z.string().trim().min(1).max(500), url: z.url().startsWith("https://").max(8_000) })).max(20),
   assetConcepts: travelAssetConceptsSchema,
   imageRequestToken: z.string().min(1).max(64 * 1024),
 });
@@ -77,23 +78,18 @@ const authoritativeCountrySchema = z.strictObject({
 });
 export type AuthoritativeCountry = z.input<typeof authoritativeCountrySchema>;
 
-const readyPlaceImageSchema = <Role extends typeof PLACE_IMAGE_ROLES[number]>(role: Role) => z.strictObject({
-  role: z.literal(role),
+const readyPlaceImageSchema = z.strictObject({
+  role: z.enum(PLACE_IMAGE_ROLES),
   status: z.literal("ready"),
   title: z.string().trim().min(1).max(160),
   url: z.string().max("data:image/webp;base64,".length + Math.ceil((4 * 1024 * 1024) / 3) * 4).regex(/^data:image\/webp;base64,[A-Za-z0-9+/]+={0,2}$/),
-  width: z.literal(864),
-  height: z.literal(1536),
-  mimeType: z.literal("image/webp"),
+  sourcePageUrl: z.url().startsWith("https://").max(8_000),
 });
 export const placeImagesResponseSchema = z.strictObject({
   status: z.literal("ready"),
-  images: z.tuple([
-    readyPlaceImageSchema("hero"),
-    readyPlaceImageSchema("scene-1"),
-    readyPlaceImageSchema("scene-2"),
-    readyPlaceImageSchema("scene-3"),
-  ]),
+  images: z.array(readyPlaceImageSchema).min(1).max(4).superRefine((images, context) => {
+    images.forEach((image, index) => { if (image.role !== PLACE_IMAGE_ROLES[index]) context.addIssue({ code: "custom", path: [index, "role"], message: `Place image ${index + 1} must have role ${PLACE_IMAGE_ROLES[index]}.` }); });
+  }),
   durationMs: z.number().int().nonnegative(),
   costUsd: z.number().nonnegative().nullable(),
 });

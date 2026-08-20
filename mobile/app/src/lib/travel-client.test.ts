@@ -17,19 +17,20 @@ const detail = {
   facts: [{ label: "Capital", value: "Reykjavik" }, { label: "Population", value: "About 390,000" }, { label: "Region", value: "Nordic Europe" }],
   highlights: [{ title: "Golden Circle", description: "A route through major geological landmarks." }],
   practicalInfo: { bestTimeToVisit: "Summer for long daylight.", languages: ["Icelandic"], currency: "Icelandic krona", timeZone: "UTC", safety: "Monitor weather and road conditions.", entryRequirements: "Verify current requirements with official authorities." },
+  sources: [{ title: "Government of Iceland", url: "https://www.government.is/" }],
   assetConcepts,
   imageRequestToken: "opaque-image-token",
 };
 const readyImages = {
   status: "ready" as const,
   images: [
-    { role: "hero" as const, status: "ready" as const, title: "Overview", url: "data:image/webp;base64,aW1hZ2Uw", width: 864 as const, height: 1536 as const, mimeType: "image/webp" as const },
-    { role: "scene-1" as const, status: "ready" as const, title: "Coast", url: "data:image/webp;base64,aW1hZ2Ux", width: 864 as const, height: 1536 as const, mimeType: "image/webp" as const },
-    { role: "scene-2" as const, status: "ready" as const, title: "City", url: "data:image/webp;base64,aW1hZ2Uy", width: 864 as const, height: 1536 as const, mimeType: "image/webp" as const },
-    { role: "scene-3" as const, status: "ready" as const, title: "Garden", url: "data:image/webp;base64,aW1hZ2Uz", width: 864 as const, height: 1536 as const, mimeType: "image/webp" as const },
+    { role: "hero" as const, status: "ready" as const, title: "Overview", url: "data:image/webp;base64,aW1hZ2Uw", sourcePageUrl: "https://example.com/hero" },
+    { role: "scene-1" as const, status: "ready" as const, title: "Coast", url: "data:image/webp;base64,aW1hZ2Ux", sourcePageUrl: "https://example.com/coast" },
+    { role: "scene-2" as const, status: "ready" as const, title: "City", url: "data:image/webp;base64,aW1hZ2Uy", sourcePageUrl: "https://example.com/city" },
+    { role: "scene-3" as const, status: "ready" as const, title: "Garden", url: "data:image/webp;base64,aW1hZ2Uz", sourcePageUrl: "https://example.com/garden" },
   ],
   durationMs: 12_345,
-  costUsd: 0.16,
+  costUsd: 0,
 };
 
 mock.module("@/state/auth", () => ({ useAuthStore: { getState: () => authState } }));
@@ -62,7 +63,7 @@ test("accepts only the saved-city response fields", () => {
   expect(client.placeSchema.safeParse({ ...place, visited: false }).success).toBe(false);
 });
 
-test("strictly validates generated place details", () => {
+test("strictly validates web-grounded place details", () => {
   const { imageRequestToken: _token, ...detailWithoutToken } = detail;
   expect(client.placeDetailSchema.parse(detail)).toEqual(detail);
   expect(() => client.placeDetailSchema.parse({ ...detail, unexpected: true })).toThrow();
@@ -74,11 +75,11 @@ test("strictly validates generated place details", () => {
   expect(() => client.placeDetailSchema.parse({ ...detail, imageRequestToken: "x".repeat(64 * 1024 + 1) })).toThrow();
 });
 
-test("strictly parses ready data URL images and sends only the opaque token", async () => {
+test("strictly parses prepared data URL images and sends only the opaque token", async () => {
   expect(client.placeImagesResponseSchema.parse(readyImages)).toEqual(readyImages);
   expect(() => client.placeImagesResponseSchema.parse({ status: "processing" })).toThrow();
   expect(() => client.placeImagesResponseSchema.parse({ status: "failed" })).toThrow();
-  expect(() => client.placeImagesResponseSchema.parse({ ...readyImages, images: readyImages.images.map((image, index) => index === 0 ? { ...image, url: "https://images.example/hero.webp" } : image) })).toThrow();
+  expect(() => client.placeImagesResponseSchema.parse({ ...readyImages, images: readyImages.images.map((image, index) => index === 0 ? { ...image, url: "http://images.example/hero.webp" } : image) })).toThrow();
   expect(() => client.placeImagesResponseSchema.parse({ ...readyImages, images: [readyImages.images[1], readyImages.images[0], readyImages.images[2], readyImages.images[3]] })).toThrow();
   expect(() => client.placeImagesResponseSchema.parse({ ...readyImages, images: [...readyImages.images, readyImages.images[0]] })).toThrow();
   const oversizedUrl = `data:image/webp;base64,${"A".repeat(Math.ceil((4 * 1024 * 1024) / 3) * 4 + 4)}`;

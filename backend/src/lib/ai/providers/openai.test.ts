@@ -60,3 +60,41 @@ test('preserves direct OpenAI image generation with the extended contract', asyn
   expect(body).toMatchObject({ model: 'gpt-image-2', prompt: 'globe', n: 1, size: '1024x1024', quality: 'medium' });
   expect(result).toMatchObject({ output: { images: [{ base64: png, mimeType: 'image/png' }] }, usage: { inputTokens: 2, outputTokens: 3, totalTokens: 5 }, providerId: 'openai' });
 });
+
+test('uses Responses web search and returns grounded text, citations, sources, and images', async () => {
+  let url = '';
+  let body: Record<string, any> = {};
+  globalThis.fetch = (async (input, init) => {
+    url = String(input);
+    body = JSON.parse(String(init?.body));
+    return Response.json({
+      output: [
+        { type: 'web_search_call', status: 'completed', action: { type: 'search', sources: [{ type: 'url', url: 'https://www.japan.go.jp/' }] }, results: [{ type: 'text_result', url: 'https://www.japan.go.jp/' }, ...[0, 1, 2, 3].map((index) => ({ type: 'image_result', image_url: `https://images.example.com/japan-${index}.jpg`, source_website_url: `https://example.com/japan-${index}`, thumbnail_url: `https://images.example.com/thumb-${index}.jpg`, caption: index === 0 ? null : `Japan scene ${index + 1}` }))] },
+        { type: 'message', status: 'completed', role: 'assistant', content: [{ type: 'output_text', text: '{"title":"Japan"}', annotations: [{ type: 'url_citation', title: 'Government of Japan', url: 'https://www.japan.go.jp/', start_index: 0, end_index: 5 }] }] },
+      ],
+      usage: { input_tokens: 20, output_tokens: 10, total_tokens: 30 },
+    });
+  }) as typeof fetch;
+  const result = await createOpenAIProvider({ apiKey: 'test-key' }).execute({ actionId: 'web-search', modelId: 'openai.gpt-5.6-luna', externalModelId: 'gpt-5.6-luna', input: { prompt: 'Research Japan', imageCount: 4, responseFormat: { name: 'place_detail', schema: { type: 'object' } } }, organizationKey: 'organization' });
+  expect(url).toBe('https://api.openai.com/v1/responses');
+  expect(body).toMatchObject({
+    model: 'gpt-5.6-luna',
+    input: 'Research Japan',
+    reasoning: { effort: 'low' },
+    tool_choice: 'required',
+    text: { format: { type: 'json_schema', name: 'place_detail', strict: true, schema: { type: 'object' } } },
+    include: ['web_search_call.action.sources', 'web_search_call.results'],
+    tools: [{ type: 'web_search', search_context_size: 'low', external_web_access: true, search_content_types: ['text', 'image'], image_settings: { max_results: 4, caption: true } }],
+  });
+  expect((result.output as { images: unknown[] }).images).toHaveLength(4);
+  expect(result).toMatchObject({
+    output: { text: '{"title":"Japan"}', citations: [{ title: 'Government of Japan', url: 'https://www.japan.go.jp/' }], sources: ['https://www.japan.go.jp/'], images: expect.any(Array) },
+    usage: { inputTokens: 20, outputTokens: 10, totalTokens: 30 },
+    providerId: 'openai',
+  });
+});
+
+test('rejects web search responses that return no requested images', async () => {
+  globalThis.fetch = (async () => Response.json({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'Japan', annotations: [] }] }], usage: {} })) as unknown as typeof fetch;
+  await expect(createOpenAIProvider({ apiKey: 'test-key' }).execute({ actionId: 'web-search', modelId: 'openai.gpt-5.6-luna', externalModelId: 'gpt-5.6-luna', input: { prompt: 'Research Japan', imageCount: 4 }, organizationKey: 'organization' })).rejects.toThrow('returned no images');
+});

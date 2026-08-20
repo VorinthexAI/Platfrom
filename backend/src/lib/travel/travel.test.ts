@@ -21,10 +21,11 @@ const detail = travelPlaceDetailSchema.parse({
   facts: [{ label: 'Capital', value: 'Tokyo' }, { label: 'Population', value: 'About 124 million' }, { label: 'Government', value: 'Constitutional monarchy' }],
   highlights: [{ title: 'Kyoto', description: 'Historic temples and traditional neighborhoods.' }],
   practicalInfo: { bestTimeToVisit: 'Spring and autumn are generally mild.', languages: ['Japanese'], currency: 'Japanese yen (JPY)', timeZone: 'Japan Standard Time (UTC+9)', safety: 'Review current official travel advice.', entryRequirements: 'Verify current requirements with official authorities before travel.' },
+  sources: [],
   assetConcepts,
   imageRequestToken: 'opaque-token',
 });
-const { imageRequestToken: _token, ...modelDetail } = detail;
+const { imageRequestToken: _token, sources: _sources, assetConcepts: _concepts, ...modelDetail } = detail;
 
 describe('travel contracts and service', () => {
   test('keeps overview and place lookup inputs strict', () => {
@@ -44,7 +45,7 @@ describe('travel contracts and service', () => {
     await expect(service.overview({ organizationKey: 'organization', scopeKey }, 'user')).resolves.toEqual({ places: [placeDto(place)] });
   });
 
-  test('authorizes before one pinned target-supported ask call and seals the four concepts', async () => {
+  test('authorizes before one pinned Luna web search and seals its four image results', async () => {
     const calls: unknown[][] = [];
     const controller = new AbortController();
     let authorized = false;
@@ -53,17 +54,59 @@ describe('travel contracts and service', () => {
     const execute: any = async (...args: unknown[]) => {
       expect(authorized).toBe(true);
       calls.push(['execute', ...args]);
-      return { output: { text: `Result:\n\`\`\`json\n${JSON.stringify(modelDetail)}\n\`\`\``, toolCalls: [], stopReason: 'stop' } };
+      const portugalDetail = { ...modelDetail, title: 'Portugal', summary: 'Portugal is a country in southwestern Europe.', location: { ...modelDetail.location, name: 'Portugal', country: 'Portugal', countryCode: 'PT', continent: 'Europe' } };
+      return { output: {
+        text: `Result:\n\`\`\`json\n${JSON.stringify(portugalDetail)}\n\`\`\``,
+        citations: [{ title: 'Official Portugal source', url: 'https://www.portugal.gov.pt/' }],
+        sources: ['https://www.portugal.gov.pt/'],
+        images: [0, 1, 2, 3].map((index) => ({ imageUrl: `https://images.example.com/portugal-${index}.jpg`, sourcePageUrl: `https://example.com/portugal-${index}`, caption: `Portugal image ${index + 1}` })),
+      } };
     };
     const service = createTravelService({ repository, execute, now: () => '2026-08-19T12:00:00.000Z', issueImageNonce: () => 'A'.repeat(43), encryptImageRequest: (value) => { sealed = value; return 'opaque-token'; } });
     const country = { name: 'Portugal', code: 'pt', continent: 'Europe', lat: 39.4, lon: -8.2 };
     const result = await service.findPlace({ organizationKey: 'organization', scopeKey, query: 'Portugal', country }, 'secret-user-key', { signal: controller.signal, timeoutMs: 2_000 });
-    expect(result.place).toMatchObject({ title: 'Portugal', imageRequestToken: 'opaque-token', location: { kind: 'country', name: 'Portugal', countryCode: 'PT', continent: 'Europe', latitude: 39.4, longitude: -8.2 } });
+    expect(result.place).toMatchObject({ title: 'Portugal', imageRequestToken: 'opaque-token', sources: [{ title: 'Official Portugal source', url: 'https://www.portugal.gov.pt/' }], location: { kind: 'country', name: 'Portugal', countryCode: 'PT', continent: 'Europe', latitude: 39.4, longitude: -8.2 } });
     expect(calls[0]).toEqual(['authorize', { organizationKey: 'organization', scopeKey, userKey: 'secret-user-key' }]);
     expect(calls).toHaveLength(2);
-    expect(calls[1]?.[1]).toEqual({ mode: 'fixed', organizationKey: 'organization', actionSlug: 'ask', modelSlug: 'openai.gpt-5.6-luna', providerSlug: 'openai' });
+    expect(calls[1]?.[1]).toEqual({ mode: 'fixed', organizationKey: 'organization', actionSlug: 'web-search', modelSlug: 'openai.gpt-5.6-luna', providerSlug: 'openai' });
+    expect(calls[1]?.[2]).toMatchObject({ imageCount: 4, prompt: expect.stringContaining('Search the live web') });
     expect(calls[1]?.[3]).toEqual({ signal: controller.signal, timeoutMs: 2_000 });
-    expect(sealed).toEqual({ version: 1, issuedAt: Date.parse('2026-08-19T12:00:00.000Z'), nonce: 'A'.repeat(43), organizationKey: 'organization', scopeKey, country: { name: 'Portugal', countryCode: 'PT', continent: 'Europe', latitude: 39.4, longitude: -8.2 }, concepts: assetConcepts });
+    expect(sealed).toEqual({
+      version: 2,
+      issuedAt: Date.parse('2026-08-19T12:00:00.000Z'),
+      nonce: 'A'.repeat(43),
+      organizationKey: 'organization',
+      scopeKey,
+      country: { name: 'Portugal', countryCode: 'PT', continent: 'Europe', latitude: 39.4, longitude: -8.2 },
+      images: [0, 1, 2, 3].map((index) => ({ role: ['hero', 'scene-1', 'scene-2', 'scene-3'][index], title: `Portugal image ${index + 1}`, url: `https://images.example.com/portugal-${index}.jpg`, sourcePageUrl: `https://example.com/portugal-${index}` })),
+    });
+  });
+
+  test('returns factual text and four web images across a representative country matrix', async () => {
+    const countries = [
+      { name: 'Japan', code: 'JP', continent: 'Asia', lat: 36.2, lon: 138.2 },
+      { name: 'Brazil', code: 'BR', continent: 'South America', lat: -14.2, lon: -51.9 },
+      { name: 'Kenya', code: 'KE', continent: 'Africa', lat: 0.02, lon: 37.9 },
+      { name: 'Norway', code: 'NO', continent: 'Europe', lat: 60.5, lon: 8.5 },
+      { name: 'New Zealand', code: 'NZ', continent: 'Oceania', lat: -40.9, lon: 174.9 },
+      { name: 'Canada', code: 'CA', continent: 'North America', lat: 56.1, lon: -106.3 },
+    ] as const;
+    for (const country of countries) {
+      let sealed: any;
+      const countryDetail = { ...modelDetail, title: country.name, summary: `${country.name} has current country information.`, location: { ...modelDetail.location, name: country.name, country: country.name, countryCode: country.code, continent: country.continent } };
+      const service = createTravelService({
+        repository: { authorizeRead: async () => {} } as unknown as TravelRepository,
+        execute: (async () => ({ output: { text: JSON.stringify(countryDetail), citations: [{ title: `${country.name} official`, url: `https://example.com/${country.code.toLowerCase()}` }], sources: [], images: [0, 1, 2, 3].map((index) => ({ imageUrl: `https://images.example.com/${country.code.toLowerCase()}-${index}.jpg`, sourcePageUrl: `https://example.com/${country.code.toLowerCase()}/image-${index}` })) } })) as any,
+        issueImageNonce: () => 'A'.repeat(43),
+        encryptImageRequest: (value) => { sealed = value; return `token-${country.code}`; },
+      });
+      const result = await service.findPlace({ organizationKey: 'organization', scopeKey, query: country.name, country }, 'user');
+      expect(result.place.summary).toContain(country.name);
+      expect(result.place.facts.length).toBeGreaterThanOrEqual(3);
+      expect(result.place.sources).toHaveLength(1);
+      expect(sealed.images).toHaveLength(4);
+      expect(sealed.images.every((image: any) => image.url.startsWith('https://'))).toBe(true);
+    }
   });
 
   test('does not call the model when read access is denied', async () => {
@@ -71,6 +114,14 @@ describe('travel contracts and service', () => {
     const service = createTravelService({ repository: { authorizeRead: async () => { throw new TravelRepositoryError('forbidden'); } } as unknown as TravelRepository, execute: (async () => { calls += 1; }) as any });
     await expect(service.findPlace({ organizationKey: 'organization', scopeKey, query: 'Japan' }, 'user')).rejects.toMatchObject({ reason: 'forbidden' });
     expect(calls).toBe(0);
+  });
+
+  test('rejects web results for a different authoritative country', async () => {
+    const service = createTravelService({
+      repository: { authorizeRead: async () => {} } as unknown as TravelRepository,
+      execute: (async () => ({ output: { text: JSON.stringify(modelDetail), citations: [], sources: [], images: [{ imageUrl: 'https://images.example.com/japan.jpg', sourcePageUrl: 'https://example.com/japan' }] } })) as any,
+    });
+    await expect(service.findPlace({ organizationKey: 'organization', scopeKey, query: 'Portugal', country: { name: 'Portugal', code: 'PT', continent: 'Europe', lat: 39.4, lon: -8.2 } }, 'user')).rejects.toThrow('returned JP for selected country PT');
   });
 });
 

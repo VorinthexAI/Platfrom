@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { EMBEDDING_DIMENSIONS, EXTERNAL_EMBEDDING_MODEL_ID } from '@/lib/embedding-constants';
 import { IMAGE_CAPTION_EXTERNAL_MODEL_ID } from '@/lib/image-caption-constants';
 import { tokenUsage } from '@/lib/ai/shared/usage';
+import { webSearchInputSchema, webSearchOutputSchema, type WebSearchOutput } from '@/lib/ai/actions/web-search';
 import { normalizeProviderError, ProviderError } from './errors';
 import {
   CHAT_ACTION_IDS,
@@ -61,6 +62,92 @@ const imageResponseSchema = z.object({
     .passthrough()
     .optional(),
 });
+
+const webSearchImageResultSchema = z.object({
+  type: z.literal('image_result'),
+  image_url: z.string(),
+  source_website_url: z.string(),
+  thumbnail_url: z.string().optional(),
+  caption: z.string().nullable().optional(),
+}).passthrough();
+const webSearchCallSchema = z.object({
+  type: z.literal('web_search_call'),
+  action: z.object({ sources: z.array(z.object({ type: z.literal('url'), url: z.string() }).passthrough()).optional() }).passthrough().optional(),
+  results: z.array(z.unknown()).optional(),
+}).passthrough();
+const webSearchMessageSchema = z.object({
+  type: z.literal('message'),
+  content: z.array(z.object({
+    type: z.literal('output_text'),
+    text: z.string(),
+    annotations: z.array(z.object({ type: z.string() }).passthrough()).optional(),
+  }).passthrough()),
+}).passthrough();
+
+async function executeWebSearch<TInput, TOutput>(client: OpenAI, request: ProviderExecuteRequest<TInput>): Promise<ProviderExecuteResponse<TOutput>> {
+  const input = webSearchInputSchema.parse(request.input);
+  const tool = {
+    type: 'web_search' as const,
+    search_context_size: 'low' as const,
+    external_web_access: true,
+    search_content_types: input.imageCount > 0 ? ['text', 'image'] : ['text'],
+    ...(input.imageCount > 0 ? { image_settings: { max_results: input.imageCount, caption: true } } : {}),
+  } as OpenAI.Responses.WebSearchTool;
+  try {
+    const raw = await client.responses.create({
+      model: request.externalModelId,
+      input: input.prompt,
+      reasoning: { effort: 'low' },
+      tools: [tool],
+      tool_choice: 'required',
+      include: ['web_search_call.action.sources', 'web_search_call.results'],
+      max_output_tokens: 4_000,
+      ...(input.responseFormat ? { text: { format: { type: 'json_schema' as const, name: input.responseFormat.name, strict: true, schema: input.responseFormat.schema } } } : {}),
+    }, { signal: resolveRequestSignal(request) });
+    const outputItems = z.object({ output: z.array(z.object({ type: z.string() }).passthrough()), usage: z.object({ input_tokens: z.number().optional(), output_tokens: z.number().optional(), total_tokens: z.number().optional() }).passthrough().optional() }).passthrough().parse(raw);
+    const textParts: string[] = [];
+    const citations: Array<{ title: string; url: string }> = [];
+    const sources: string[] = [];
+    const images: Array<{ imageUrl: string; sourcePageUrl: string; thumbnailUrl?: string; caption?: string }> = [];
+    for (const item of outputItems.output) {
+      const call = webSearchCallSchema.safeParse(item);
+      if (call.success) {
+        for (const source of call.data.action?.sources ?? []) sources.push(source.url);
+        for (const result of call.data.results ?? []) {
+          const image = webSearchImageResultSchema.safeParse(result);
+          if (!image.success) continue;
+          images.push({
+            imageUrl: image.data.image_url,
+            sourcePageUrl: image.data.source_website_url,
+            ...(image.data.thumbnail_url ? { thumbnailUrl: image.data.thumbnail_url } : {}),
+            ...(image.data.caption?.trim() ? { caption: image.data.caption.trim() } : {}),
+          });
+        }
+      }
+      const message = webSearchMessageSchema.safeParse(item);
+      if (!message.success) continue;
+      for (const content of message.data.content) {
+        textParts.push(content.text);
+        for (const annotation of content.annotations ?? []) {
+          if (annotation.type !== 'url_citation') continue;
+          const citation = z.object({ title: z.string(), url: z.string() }).safeParse(annotation);
+          if (citation.success) citations.push(citation.data);
+        }
+      }
+    }
+    const uniqueBy = <T>(values: T[], key: (value: T) => string) => [...new Map(values.map((value) => [key(value), value])).values()];
+    const output: WebSearchOutput = webSearchOutputSchema.parse({
+      text: textParts.join('\n').trim(),
+      citations: uniqueBy(citations, ({ url }) => url),
+      sources: [...new Set(sources)],
+      images: uniqueBy(images, ({ imageUrl }) => imageUrl),
+    });
+    if (input.imageCount > 0 && output.images.length === 0) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'openai web search returned no images');
+    return { output: output as TOutput, usage: tokenUsage(outputItems.usage?.input_tokens, outputItems.usage?.output_tokens, outputItems.usage?.total_tokens), providerId: PROVIDER_ID, modelId: request.modelId, externalModelId: request.externalModelId, rawResponse: raw };
+  } catch (error) {
+    throw normalizeProviderError(PROVIDER_ID, error);
+  }
+}
 
 async function executeImageGenerate<TInput, TOutput>(
   client: OpenAI,
@@ -237,6 +324,7 @@ export function createOpenAIProvider(config: OpenAIProviderConfig): ProviderAdap
       if (request.actionId === 'caption-image') return captionImages(client, request);
       if (request.actionId === 'document-cleanup') return cleanupDocument(client, request);
       if (request.actionId === 'describe-visual-identity') return describeVisualIdentity(client, request);
+      if (request.actionId === 'web-search') return executeWebSearch(client, request);
       if (CHAT_ACTION_IDS.has(request.actionId)) {
         return executeOpenAICompatibleChat(PROVIDER_ID, client, request, { maxTokensParam: 'max_completion_tokens' });
       }
