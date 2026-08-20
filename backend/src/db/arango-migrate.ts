@@ -20,6 +20,9 @@ import { z } from 'zod';
 import { withDatabaseTransaction } from '../lib/db/client';
 import { countryCodeSchema } from '../lib/db/users.node';
 import { retireAiPersistence } from './retire-ai-persistence';
+import { buildPlaceEmbeddingText } from '../lib/travel/semantic-text';
+import { generatedPlaceDetailSchema } from '../lib/db/places.node';
+import { buildImageEmbeddingText } from '../lib/image-embedding';
 
 const url = process.env.ARANGO_URL ?? 'http://127.0.0.1:8529';
 const databaseName = process.env.ARANGO_DATABASE ?? 'vorinthex';
@@ -351,18 +354,55 @@ export async function migrateEmailReplyMetadata(targetDb: Database): Promise<voi
 
 const legacyPlaceSchema = z.object({
   key: z.string().cuid(),
+  userKey: z.string().cuid(),
   scopeKey: z.string().cuid(),
+  saved: z.boolean(),
   name: z.string().trim().min(1),
+  summary: z.string().default(''),
   countryCode: z.preprocess((value) => typeof value === 'string' ? value.trim().toUpperCase() : value, countryCodeSchema),
   latitude: z.number().finite().min(-90).max(90),
   longitude: z.number().finite().min(-180).max(180),
+  openedAt: z.string().datetime().optional(),
   createdAt: z.string().datetime(),
 }).strict();
 
 async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
   const places = targetDb.collection('places');
   if (!await places.exists()) return;
-  const canonicalFields = ['scopeKey', 'name', 'countryCode', 'latitude', 'longitude', 'embedding', 'createdAt'].sort();
+  const placeImages = targetDb.collection('placeImages');
+  if (!await placeImages.exists()) await placeImages.create();
+  const missingOwners = await targetDb.query<string>(`
+    FOR place IN places
+      FILTER place.kind != "country" && !HAS(place, "userKey")
+      LET membershipKeys = UNIQUE(FOR relation IN placeImages
+        FILTER relation.placeKey == place._key
+        LET image = DOCUMENT(images, relation.imageKey)
+        FILTER image != null && IS_STRING(image.createdByKey)
+        RETURN image.createdByKey)
+      LET userKeys = UNIQUE(FOR membershipKey IN membershipKeys
+        LET membership = DOCUMENT(userOrganizations, membershipKey)
+        FILTER membership != null && IS_STRING(membership.userId) && LENGTH(membership.userId) > 0
+        RETURN membership.userId)
+      FILTER LENGTH(userKeys) != 1
+      RETURN place._key
+  `);
+  const unresolvedOwners = await missingOwners.all();
+  if (unresolvedOwners.length > 0) throw new Error(`places migration cannot safely derive user ownership for: ${unresolvedOwners.join(', ')}`);
+  await targetDb.query(`
+    FOR place IN places
+      FILTER place.kind != "country" && (!HAS(place, "userKey") || !HAS(place, "saved"))
+      LET membershipKey = FIRST(FOR relation IN placeImages
+        FILTER relation.placeKey == place._key
+        LET image = DOCUMENT(images, relation.imageKey)
+        FILTER image != null && IS_STRING(image.createdByKey)
+        RETURN image.createdByKey)
+      LET membership = membershipKey == null ? null : DOCUMENT(userOrganizations, membershipKey)
+      UPDATE place WITH { userKey: HAS(place, "userKey") ? place.userKey : membership.userId, saved: HAS(place, "saved") ? place.saved : true } IN places
+  `);
+  const canonicalFields = ['userKey', 'scopeKey', 'saved', 'name', 'summary', 'countryCode', 'latitude', 'longitude', 'embedding', 'embeddingContentVersion', 'createdAt'].sort();
+  const openedCanonicalFields = [...canonicalFields, 'openedAt'].sort();
+  const generatedCanonicalFields = [...canonicalFields, 'generatedDetail'].sort();
+  const openedGeneratedCanonicalFields = [...generatedCanonicalFields, 'openedAt'].sort();
   const validatePlaces = async () => {
     let validationAfter = '';
     while (true) {
@@ -378,31 +418,37 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
       const rows = await cursor.all();
       if (rows.length === 0) break;
       for (const place of rows) {
+        const generatedDetail = place.generatedDetail == null ? undefined : generatedPlaceDetailSchema.safeParse(place.generatedDetail);
         const result = legacyPlaceSchema.safeParse({
           key: place._key,
+          userKey: place.userKey,
           scopeKey: place.scopeKey,
+          saved: place.saved,
           name: place.name,
+          summary: typeof place.summary === 'string' ? place.summary : '',
           countryCode: place.countryCode,
           latitude: place.latitude,
           longitude: place.longitude,
           createdAt: place.createdAt,
+          ...(place.openedAt == null ? {} : { openedAt: place.openedAt }),
         });
         if (!result.success) throw new Error(`places migration cannot retain ${String(place._key)}: ${result.error.issues.map((issue) => issue.message).join(', ')}`);
+        if (generatedDetail && !generatedDetail.success) throw new Error(`places migration cannot retain generated detail for ${String(place._key)}: ${generatedDetail.error.issues.map((issue) => issue.message).join(', ')}`);
       }
       validationAfter = String(rows.at(-1)!._key);
     }
   };
   await validatePlaces();
-  const duplicateCursor = await targetDb.query<{ scopeKey: string; countryCode: string; name: string; count: number }>(`
+  const duplicateCursor = await targetDb.query<{ scopeKey: string; userKey: string; countryCode: string; name: string; count: number }>(`
     FOR place IN places
       FILTER place.kind != "country"
-      COLLECT scopeKey = place.scopeKey, countryCode = UPPER(TRIM(place.countryCode)), name = TRIM(place.name) WITH COUNT INTO count
+      COLLECT scopeKey = place.scopeKey, userKey = place.userKey, countryCode = UPPER(TRIM(place.countryCode)), name = TRIM(place.name) WITH COUNT INTO count
       FILTER count > 1
-      RETURN { scopeKey, countryCode, name, count }
+      RETURN { scopeKey, userKey, countryCode, name, count }
   `);
   const duplicates = await duplicateCursor.all();
   if (duplicates.length > 0) {
-    const identities = duplicates.map(({ scopeKey, countryCode, name, count }) => `${scopeKey}/${countryCode}/${name} (${count})`).join(', ');
+    const identities = duplicates.map(({ scopeKey, userKey, countryCode, name, count }) => `${scopeKey}/${userKey}/${countryCode}/${name} (${count})`).join(', ');
     throw new Error(`places migration found duplicate saved cities: ${identities}`);
   }
   let after = '';
@@ -411,36 +457,48 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
       FOR place IN places
         FILTER place.kind != "country"
         FILTER place._key > @after
-        FILTER ATTRIBUTES(place, true, true) != @canonicalFields
+        LET fields = ATTRIBUTES(place, true, true)
+        FILTER (fields != @canonicalFields && fields != @openedCanonicalFields && fields != @generatedCanonicalFields && fields != @openedGeneratedCanonicalFields)
           || place.name != TRIM(place.name) || place.countryCode != UPPER(TRIM(place.countryCode))
+          || place.embeddingContentVersion != 2
           || !IS_ARRAY(place.embedding) || LENGTH(place.embedding) != @dimensions
           || LENGTH(place.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
         SORT place._key
         LIMIT 50
         RETURN place
-    `, { after, canonicalFields, dimensions: EMBEDDING_DIMENSIONS });
+    `, { after, canonicalFields, openedCanonicalFields, generatedCanonicalFields, openedGeneratedCanonicalFields, dimensions: EMBEDDING_DIMENSIONS });
     const legacyPlaces = await cursor.all();
     if (legacyPlaces.length === 0) break;
     const replacements = [];
     for (const place of legacyPlaces) {
       const canonical = legacyPlaceSchema.parse({
         key: place._key,
+        userKey: place.userKey,
         scopeKey: place.scopeKey,
+        saved: place.saved,
         name: place.name,
+        summary: typeof place.summary === 'string' ? place.summary : '',
         countryCode: place.countryCode,
         latitude: place.latitude,
         longitude: place.longitude,
+        ...(place.openedAt == null ? {} : { openedAt: place.openedAt }),
         createdAt: place.createdAt,
       });
       replacements.push({
         _key: canonical.key,
         _rev: place._rev,
+        userKey: canonical.userKey,
         scopeKey: canonical.scopeKey,
+        saved: canonical.saved,
         name: canonical.name,
+        summary: canonical.summary,
         countryCode: canonical.countryCode,
         latitude: canonical.latitude,
         longitude: canonical.longitude,
-        embedding: await generateEmbedding(canonical.name),
+        embedding: await generateEmbedding(buildPlaceEmbeddingText(canonical)),
+        embeddingContentVersion: 2,
+        ...(place.generatedDetail == null ? {} : { generatedDetail: generatedPlaceDetailSchema.parse(place.generatedDetail) }),
+        ...(canonical.openedAt == null ? {} : { openedAt: canonical.openedAt }),
         createdAt: canonical.createdAt,
       });
     }
@@ -468,12 +526,14 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
   await targetDb.query('FOR place IN places FILTER place.kind == "country" REMOVE place IN places');
   const invalid = await targetDb.query<number>(`
     RETURN LENGTH(FOR place IN places
-      FILTER ATTRIBUTES(place, true, true) != @canonicalFields
+      LET fields = ATTRIBUTES(place, true, true)
+      FILTER (fields != @canonicalFields && fields != @openedCanonicalFields && fields != @generatedCanonicalFields && fields != @openedGeneratedCanonicalFields)
         || place.name != TRIM(place.name) || place.countryCode != UPPER(TRIM(place.countryCode))
+        || place.embeddingContentVersion != 2
         || !IS_ARRAY(place.embedding) || LENGTH(place.embedding) != @dimensions
         || LENGTH(place.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
       RETURN 1)
-  `, { canonicalFields, dimensions: EMBEDDING_DIMENSIONS });
+  `, { canonicalFields, openedCanonicalFields, generatedCanonicalFields, openedGeneratedCanonicalFields, dimensions: EMBEDDING_DIMENSIONS });
   const invalidCount = await invalid.next() ?? 0;
   if (invalidCount > 0) throw new Error(`places minimal projection verification failed for ${invalidCount} row(s).`);
 }
@@ -516,7 +576,12 @@ export async function migrateExactSemanticRecords(targetDb: Database, collection
       let embedding = resource.embedding;
       const hasEmbeddingMetadata = resource.embeddingProvider !== undefined || resource.embeddingModel !== undefined || resource.embeddingDimensions !== undefined;
       if ((hasEmbeddingMetadata && (resource.embeddingProvider !== EMBEDDING_PROVIDER_ID || resource.embeddingModel !== EMBEDDING_MODEL || resource.embeddingDimensions !== dimensions)) || !Array.isArray(embedding) || embedding.length !== dimensions || embedding.some((value) => typeof value !== 'number' || !Number.isFinite(value))) {
-        const text = buildEmbeddingText(embedKeys, resource);
+        const text = collectionName === 'images' ? buildImageEmbeddingText({
+          filename: String(resource.filename ?? ''), caption: String(resource.caption ?? ''),
+          city: typeof resource.city === 'string' ? resource.city : null, country: typeof resource.country === 'string' ? resource.country : null,
+          countryCode: typeof resource.countryCode === 'string' ? resource.countryCode : null,
+          placeName: typeof resource.placeName === 'string' ? resource.placeName : null, placeSummary: typeof resource.placeSummary === 'string' ? resource.placeSummary : null,
+        }) : buildEmbeddingText(embedKeys, resource);
         if (!text) throw new Error(`Cannot migrate ${collectionName}: ${String(resource._key)} has no semantic embedding input.`);
         embedding = await generateEmbedding(text);
       }
@@ -1174,13 +1239,14 @@ export const collections: CollectionSpec[] = [
   { name: 'pollOptions', embedKeys: ['text'], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['pollKey'] }, { fields: ['pollKey', 'position'], unique: true }] },
   { name: 'pollVotes', embedKeys: [], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['pollKey'] }, { fields: ['optionKey'] }, { fields: ['participantKey'] }, { fields: ['pollKey', 'optionKey', 'participantKey'], unique: true }] },
   { name: 'folders', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'parentFolderKey'] }, { fields: ['scopeKey', 'isFavorite'] }, { fields: ['scopeKey', 'parentFolderKey', 'name'] }] },
-  { name: 'images', embedKeys: ['filename', 'caption', 'country', 'city', 'countryCode'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'createdAt'] }, { fields: ['imageCaptionKey'], sparse: true }, { fields: ['storageKey'], unique: true }] },
+  { name: 'images', embedKeys: ['filename', 'caption', 'placeName', 'placeSummary', 'country', 'city', 'countryCode'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'createdAt'] }, { fields: ['scopeKey', 'latitude', 'longitude'], sparse: true }, { fields: ['imageCaptionKey'], sparse: true }, { fields: ['storageKey'], unique: true }] },
   { name: 'imageCaptions', skipEmbedding: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'hashAlgorithm', 'perceptualHash'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment0'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment1'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment2'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment3'], sparse: true }] },
   { name: 'visualIdentities', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'createdByKey'] }, { fields: ['scopeKey', 'createdByKey', 'name'] }, { fields: ['scopeKey', 'referenceImageKey'] }] },
   { name: 'imageIdentities', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'identityKey', 'imageKey'], unique: true }, { fields: ['scopeKey', 'identityKey', 'confidence'] }, { fields: ['scopeKey', 'imageKey'] }, { fields: ['scopeKey', 'imageKey', 'isReference'], sparse: true }] },
   { name: 'galleryUploads', skipEmbedding: true, indexes: [{ fields: ['actorKey', 'createdAt'] }, { fields: ['storageKey'], unique: true }, { fields: ['expiresAt'] }] },
-  { name: 'collections', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'name'] }, { fields: ['scopeKey', 'coverImageKey'], sparse: true }] },
+  { name: 'collections', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'name'] }, { fields: ['scopeKey', 'purpose'], unique: true, sparse: true }, { fields: ['scopeKey', 'coverImageKey'], sparse: true }] },
   { name: 'collectionImages', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'collectionKey', 'imageKey'], unique: true }, { fields: ['scopeKey', 'collectionKey'] }, { fields: ['scopeKey', 'imageKey'] }] },
+  { name: 'placeImages', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'imageKey'], unique: true }, { fields: ['scopeKey', 'placeKey', 'imageKey'], unique: true }, { fields: ['scopeKey', 'placeKey', 'position'] }] },
   { name: 'imageCollecitionHightlights', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'collectionKey', 'createdAt'] }, { fields: ['scopeKey', 'createdByKey'] }] },
   { name: 'imageCollectionMemories', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'imageKey'], unique: true }, { fields: ['scopeKey', 'createdAt'] }] },
   { name: 'collectionMembers', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'collectionKey', 'memberKey'], unique: true }, { fields: ['scopeKey', 'collectionKey', 'role'] }, { fields: ['scopeKey', 'memberKey'] }] },
@@ -1195,7 +1261,8 @@ export const collections: CollectionSpec[] = [
   // Private one-to-one durable audio for generated summaries.
   { name: 'documentSummaryAudio', skipEmbedding: true, indexes: [{ fields: ['summaryKey'], unique: true }, { fields: ['scopeKey', 'documentKey', 'createdAt'] }, { fields: ['storageKey'], unique: true }] },
   { name: 'shares', skipEmbedding: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'sourceType', 'sourceKey'] }, { fields: ['scopeKey', 'sourceType', 'sourceKey', 'revokedAt'] }, { fields: ['tokenHash'], unique: true }, { fields: ['expiresAt'], sparse: true }] },
-  { name: 'places', embedKeys: ['name'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'countryCode'] }, { fields: ['scopeKey', 'countryCode', 'name'], unique: true }] },
+  { name: 'places', embedKeys: ['name', 'summary'], indexes: [{ fields: ['scopeKey', 'userKey', 'saved'] }, { fields: ['scopeKey', 'userKey', 'openedAt'], sparse: true }, { fields: ['scopeKey', 'userKey', 'countryCode'] }, { fields: ['scopeKey', 'userKey', 'countryCode', 'name'], unique: true }] },
+  { name: 'countries', embedKeys: ['name'], indexes: [{ fields: ['countryCode'], unique: true }, { fields: ['name'] }] },
   { name: 'books', embedKeys: ['title', 'subtitle', 'description', 'goal', 'audience', 'outcome'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'status'] }, { fields: ['scopeKey', 'isFavorite'] }, { fields: ['scopeKey', 'generationRequestKey'], unique: true, sparse: true }] },
   { name: 'bookContexts', embedKeys: ['userContext', 'priorKnowledge', 'priorBookContext', 'personalizationContext', 'researchContext', 'noveltyContext', 'generationBrief'], indexes: [{ fields: ['scopeKey', 'bookKey'], unique: true }] },
   { name: 'bookThemes', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey', 'bookKey', 'position'], unique: true }, { fields: ['scopeKey', 'bookKey'] }] },
@@ -1441,6 +1508,8 @@ async function main() {
     if (spec.name === 'folders' || spec.name === 'images' || spec.name === 'collections' || spec.name === 'documents' || spec.name === 'emailThreads') {
       await migrateContentFavorites(targetDb, spec.name);
     }
+    if (spec.name === 'images') await targetDb.query('FOR image IN images FILTER !HAS(image, "mutationPolicy") UPDATE image WITH { mutationPolicy: "user" } IN images');
+    if (spec.name === 'collections') await targetDb.query('FOR collection IN collections FILTER !HAS(collection, "mutationPolicy") || !HAS(collection, "purpose") UPDATE collection WITH { mutationPolicy: HAS(collection, "mutationPolicy") ? collection.mutationPolicy : "user", purpose: HAS(collection, "purpose") ? collection.purpose : null } IN collections OPTIONS { keepNull: true }');
     if (spec.name === 'imageCaptions') {
       await migrateImageCaptions(targetDb);
       await migrateExactSemanticRecords(targetDb, 'imageCaptions', ['caption']);

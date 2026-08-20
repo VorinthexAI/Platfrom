@@ -27,10 +27,10 @@ try {
   await db.query(aql`INSERT { _key: ${scopeMembershipKey}, scopeKey: ${scopeKey}, userOrganizationKey: ${membershipKey}, role: "owner", status: "active" } INTO scopeMembers`);
 
   const repository = createTravelRepository();
-  const place = placeSchema.parse({ key: placeKey, scopeKey, name: 'Stockholm', countryCode: 'SE', latitude: 59.3293, longitude: 18.0686, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), createdAt: now });
+  const place = placeSchema.parse({ key: placeKey, userKey, scopeKey, saved: true, name: 'Stockholm', summary: '', countryCode: 'SE', latitude: 59.3293, longitude: 18.0686, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), embeddingContentVersion: 2, createdAt: now });
   await upsertPlaceByKey(place);
-  const places = await repository.overview(context);
-  if (places.length !== 1 || places[0]?.key !== placeKey) throw new Error('Saved city was not returned by the overview.');
+  const overview = await repository.overview(context);
+  if (overview.places.length !== 1 || overview.places[0]?.key !== placeKey) throw new Error('Saved city was not returned by the overview.');
 
   console.log('Travel persistence E2E passed: administratively seeded city is listed.');
 } finally {

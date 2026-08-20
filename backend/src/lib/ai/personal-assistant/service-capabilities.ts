@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { contentZodToJsonSchema } from '@/lib/ai/tools/content-json-schema';
 import { runContentTool } from '@/lib/ai/tools/content-runtime';
 import type { ContentToolName } from '@/lib/ai/tools/content-schemas';
-import { createTravelService } from '@/lib/travel/service';
+import { createTravelService, travelChildrenFindInputSchema, travelCityFindInputSchema, travelPlaceCreateInputSchema, travelPlaceFindInputSchema, travelPlaceOpenInputSchema } from '@/lib/travel/service';
+import { createCountrySearchService } from '@/lib/travel/country-search';
 import { createEmailService, type EmailActor } from '@/lib/email-inbox/service';
 import { defaultBookService } from '@/lib/books/default-service';
 import { newId } from '@/lib/ids';
@@ -16,7 +17,7 @@ const name = z.string().trim().min(1).max(255);
 function identity(context: AssistantCapabilityContext) {
   const { domain } = context;
   if (domain.principal.kind !== 'member') throw new Error('A member principal is required for personal assistant capabilities.');
-  if (domain.principal.userOrganization.organizationId !== domain.organizationKey || domain.principal.userOrganization.status !== 'active') throw new Error('Active organization membership is required.');
+  if (domain.principal.userOrganization.organizationId !== domain.organizationKey || domain.principal.userOrganization.userId !== domain.principal.user.key || domain.principal.userOrganization.status !== 'active') throw new Error('Active matching organization membership is required.');
   const serviceContext = { organizationKey: domain.organizationKey, scopeKey: domain.runtimeScopeKey };
   return {
     userKey: domain.principal.user.key,
@@ -104,7 +105,13 @@ export const archiveCapabilities = [
 ];
 
 export const compassCapabilities = [
-  capability('place.list', 'List saved cities.', z.object({}).strict(), async (_input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).overview(actor.serviceContext, actor.userKey); }),
+  capability('country.search', 'Find the country that best matches a country-name query.', z.object({ query: z.string().trim().min(1).max(200) }).strict(), async (input, context) => { const actor = identity(context); return (context.countries ?? createCountrySearchService()).search({ organizationKey: actor.serviceContext.organizationKey, ...input }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }),
+  capability('place.list', 'List saved and recently opened places.', z.object({}).strict(), async (_input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).overview(actor.serviceContext, actor.userKey); }),
+  capability('place.find', 'Find a destination and create its structured travel guide.', travelPlaceFindInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).findPlace({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal }); }, 'compass'),
+  capability('place.find-city', 'Find a city in an authoritative country and create its structured travel guide.', travelCityFindInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).findCity({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }, 'compass'),
+  capability('place.find-children', 'Find detailed guides for the ten cities sealed by a country place result.', travelChildrenFindInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).findChildren({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }, 'compass'),
+  capability('place.create', 'Save a country or city to the current Compass workspace.', travelPlaceCreateInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).createPlace({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }, 'compass'),
+  capability('place.open', 'Record that the current user opened an existing country or place.', travelPlaceOpenInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).openPlace({ ...actor.serviceContext, ...input }, actor.userKey); }, 'compass'),
 ];
 
 export const signalCapabilities = [

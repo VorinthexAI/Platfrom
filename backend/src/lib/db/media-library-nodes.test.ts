@@ -18,7 +18,7 @@ describe('MediaLibrary node contracts', () => {
   test('uses the global current embedding contract', () => {
     expect(EMBEDDING_DIMENSIONS).toBe(1_536);
     expect(currentEmbeddingSchema.safeParse(embedding).success).toBe(true); expect(currentEmbeddingSchema.safeParse(embedding.slice(1)).success).toBe(false);
-    expect(imagesEmbeddingFields).toEqual(['filename', 'caption']); expect(collectionsEmbeddingFields).toEqual(['name', 'description']); expect(tagsEmbeddingFields).toEqual(['name', 'description']);
+    expect(imagesEmbeddingFields).toEqual(['filename', 'caption', 'placeName', 'placeSummary', 'country', 'countryCode']); expect(collectionsEmbeddingFields).toEqual(['name', 'description']); expect(tagsEmbeddingFields).toEqual(['name', 'description']);
   });
   test('strips Arango internals and unknown persisted fields by default', () => {
     const parsed = collectionSchema.parse({ _key: key, key, scopeKey, name: 'Launch', embedding, createdAt: now, updatedAt: now, unexpected: true });

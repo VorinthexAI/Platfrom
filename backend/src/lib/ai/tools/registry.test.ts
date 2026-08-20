@@ -7,9 +7,9 @@ describe('unified tool registry', () => {
   test('has one unique definition for every public tool name', () => {
     expect(new Set(TOOL_NAMES).size).toBe(TOOL_NAMES.length);
     expect(new Set(TOOL_DEFINITIONS.map(({ name }) => name)).size).toBe(TOOL_DEFINITIONS.length);
-    expect(TOOL_NAMES).toHaveLength(108);
-    expect(TOOL_DEFINITIONS).toHaveLength(108);
-    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 63);
+    expect(TOOL_NAMES).toHaveLength(114);
+    expect(TOOL_DEFINITIONS).toHaveLength(114);
+    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 69);
     expect(TOOL_DEFINITIONS.map(({ name }) => name)).toEqual([...TOOL_NAMES]);
     expect(TOOL_NAMES).not.toContain('chat');
     expect(TOOL_NAMES).not.toContain('orchestrator.chat');
@@ -43,9 +43,9 @@ describe('unified tool registry', () => {
       expect(TOOL_NAMES).not.toContain(name);
       expect(toolInputSchemas).not.toHaveProperty(name);
     }
-    expect(TOOL_NAMES).toContain('place.list');
-    for (const name of ['place.create', 'place.visit.create', 'trip.create', 'trip.place.add', 'trip.place.remove']) expect(TOOL_NAMES).not.toContain(name);
+    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['country.search', 'place.list', 'place.find', 'place.find-city', 'place.find-children', 'place.create', 'place.open']));
     expect(TOOL_NAMES).not.toContain('place.images.generate');
+    for (const name of ['place.visit.create', 'trip.create', 'trip.place.add', 'trip.place.remove']) expect(TOOL_NAMES).not.toContain(name);
     expect(TOOL_NAMES).toContain('email.draft.send');
     expect(TOOL_NAMES).toEqual(expect.arrayContaining(['content.hidden.list', 'book.create', 'email.thread.read', 'email.thread.mark-read']));
     expect(TOOL_NAMES).not.toContain('book.create-context');
@@ -80,15 +80,50 @@ describe('unified tool registry', () => {
 
   test('executes workspace tools with strict input and trusted context', async () => {
     const organizationKey = newId(), scopeKey = newId(), userKey = newId();
-    const membership = { key: newId(), organizationId: organizationKey, userId: newId(), status: 'active' };
+    const membership = { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' };
     const contentContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: membership } } as unknown as ToolContext;
     const calls: unknown[][] = [];
-    const travelService = { overview: async (...args: unknown[]) => { calls.push(args); return { places: [] }; } } as any;
+    const travelService = {
+      overview: async (...args: unknown[]) => { calls.push(['overview', ...args]); return { places: [] }; },
+      findPlace: async (...args: unknown[]) => { calls.push(['findPlace', ...args]); return {}; },
+      findCity: async (...args: unknown[]) => { calls.push(['findCity', ...args]); return {}; },
+      findChildren: async (...args: unknown[]) => { calls.push(['findChildren', ...args]); return {}; },
+      createPlace: async (...args: unknown[]) => { calls.push(['createPlace', ...args]); return {}; },
+      openPlace: async (...args: unknown[]) => { calls.push(['openPlace', ...args]); return {}; },
+    } as any;
 
     await expect(runTool('place.list', '', { scopeKey: newId() }, { contentContext, travelService })).rejects.toThrow('Unrecognized key');
     await runTool('place.list', '', {}, { contentContext, travelService });
-    expect(calls).toEqual([[{ organizationKey, scopeKey }, userKey]]);
+    await runTool('place.find', '', { query: 'Reykjavik' }, { contentContext, travelService });
+    const cityInput = { city: 'Reykjavik', country: { name: 'Iceland', code: 'IS', continent: 'Europe', lat: 65, lon: -18 } };
+    await expect(runTool('place.find-city', '', { ...cityInput, userKey }, { contentContext, travelService })).rejects.toThrow('Unrecognized key');
+    await runTool('place.find-city', '', cityInput, { contentContext, travelService });
+    await expect(runTool('place.find-children', '', { childrenRequestToken: 'token', scopeKey }, { contentContext, travelService })).rejects.toThrow('Unrecognized key');
+    await runTool('place.find-children', '', { childrenRequestToken: 'token' }, { contentContext, travelService });
+    const createInput = { name: 'Iceland', summary: 'Volcanic island.', countryCode: 'IS', latitude: 65, longitude: -18, imageRequestToken: 'token' };
+    await expect(runTool('place.create', '', { ...createInput, scopeKey }, { contentContext, travelService })).rejects.toThrow('Unrecognized key');
+    await runTool('place.create', '', createInput, { contentContext, travelService });
+    const openInput = { name: 'Iceland', countryCode: 'IS' };
+    await expect(runTool('place.open', '', { ...openInput, openedAt: new Date().toISOString() }, { contentContext, travelService })).rejects.toThrow('Unrecognized key');
+    await runTool('place.open', '', openInput, { contentContext, travelService });
+    expect(calls).toEqual([
+      ['overview', { organizationKey, scopeKey }, userKey],
+      ['findPlace', { organizationKey, scopeKey, query: 'Reykjavik' }, userKey, { signal: undefined }],
+      ['findCity', { organizationKey, scopeKey, ...cityInput }, userKey, { signal: undefined, timeoutMs: undefined }],
+      ['findChildren', { organizationKey, scopeKey, childrenRequestToken: 'token' }, userKey, { signal: undefined, timeoutMs: undefined }],
+      ['createPlace', { organizationKey, scopeKey, ...createInput }, userKey, { signal: undefined, timeoutMs: undefined }],
+      ['openPlace', { organizationKey, scopeKey, ...openInput }, userKey],
+    ]);
     expect(() => toolInputSchemas['collection.create'].parse({ name: 'Favorites', organizationKey })).toThrow('Unrecognized key');
+  });
+
+  test('executes country.search through the canonical read-only service with trusted identity', async () => {
+    const organizationKey = newId(), scopeKey = newId(), userKey = newId();
+    const contentContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const calls: unknown[][] = [];
+    await runTool('country.search', '', { query: 'Portugal' }, { contentContext, countrySearchService: { search: async (...args: unknown[]) => { calls.push(args); return { country: null }; } } as any });
+    expect(calls).toEqual([[{ organizationKey, query: 'Portugal' }, userKey, { signal: undefined, timeoutMs: undefined }]]);
+    await expect(runTool('country.search', '', { query: 'Portugal', organizationKey }, { contentContext })).rejects.toThrow('Unrecognized key');
   });
 
   test('injects trusted Content scope and organization into public tools', async () => {
@@ -142,7 +177,7 @@ describe('unified tool registry', () => {
     await runTool('image.generate', '', { prompt: 'Earth', count: 1, size: '1024x1024', quality: 'high' }, { contentContext, requestKey: 'request-1', images });
     expect(calls).toEqual([
       ['ideas', { prompt: 'Earth', requestedCount: 2 }, contentContext],
-      ['generate', { prompt: 'Earth', count: 1, size: '1024x1024', quality: 'high' }, contentContext, 'request-1'],
+      ['generate', { prompt: 'Earth', count: 1, size: '1024x1024', quality: 'high', mode: 'default' }, contentContext, 'request-1'],
     ]);
     await expect(runTool('image.generate', '', { prompt: 'Earth', count: 1, size: '1024x1024', quality: 'high', scopeKey }, { contentContext, images })).rejects.toThrow('Unrecognized key');
   });
@@ -173,7 +208,7 @@ describe('unified tool registry', () => {
 
   test('executes book creation and Signal read-state tools through injected services', async () => {
     const organizationKey = newId(), scopeKey = newId(), userKey = newId(), threadKey = newId();
-    const contentContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, status: 'active' } } } as unknown as ToolContext;
+    const contentContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
     const calls: unknown[][] = [];
     const emailService = {
       threadForTool: async (...args: unknown[]) => { calls.push(['threadForTool', ...args]); return {}; },

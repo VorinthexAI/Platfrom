@@ -48,7 +48,11 @@ describe('action registry', () => {
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'describe-visual-identity')?.models)
       .toEqual([{ provider: 'openai', model: 'openai.gpt-5.6-luna', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'generate-image')?.models)
-      .toEqual([{ provider: 'openai', model: 'openai.gpt-image-2', priority: 100 }]);
+      .toEqual([
+        { provider: 'openai', model: 'openai.gpt-image-2', priority: 100 },
+        { provider: 'openrouter', model: 'bfl.flux-2-klein-4b', priority: 90 },
+        { provider: 'openrouter', model: 'xai.grok-imagine-image-quality', priority: 80 },
+      ]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'embed')?.models)
       .toEqual([{ provider: 'openai', model: 'openai.text-embedding-3-small', priority: 100 }]);
   });

@@ -104,7 +104,7 @@ export function createGalleryAssistantCapabilities(operations: Partial<Record<Ga
     {
       inputSchema: imageGenerateModelInputSchema,
       mutationWorkspace: 'gallery',
-      definition: { name: 'image.generate', description: 'Generate images and save them into the current user Gallery scope.', inputSchema: contentZodToJsonSchema(imageGenerateModelInputSchema) },
+      definition: { name: 'image.generate', description: 'Generate images and save them into the current user Gallery scope. Use default mode for maximum quality or fast mode for low-latency generation.', inputSchema: contentZodToJsonSchema(imageGenerateModelInputSchema) },
       async execute(input, context) { return { kind: 'continue', result: await (context.images ?? imageService).generate(imageGenerateModelInputSchema.parse(input), context.domain, context.requestKey) }; },
     },
   ];

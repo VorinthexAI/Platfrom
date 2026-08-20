@@ -60,3 +60,68 @@ test('preserves direct OpenAI image generation with the extended contract', asyn
   expect(body).toMatchObject({ model: 'gpt-image-2', prompt: 'globe', n: 1, size: '1024x1024', quality: 'medium' });
   expect(result).toMatchObject({ output: { images: [{ base64: png, mimeType: 'image/png' }] }, usage: { inputTokens: 2, outputTokens: 3, totalTokens: 5 }, providerId: 'openai' });
 });
+
+test('routes provider-neutral ask through direct Responses without web search', async () => {
+  let url = '';
+  let body: Record<string, any> = {};
+  globalThis.fetch = (async (input, init) => {
+    url = String(input);
+    body = JSON.parse(String(init?.body));
+    return Response.json({
+      id: 'resp_1', object: 'response', status: 'completed', model: 'gpt-5.6-luna',
+      output: [{ type: 'message', id: 'msg_1', status: 'completed', role: 'assistant', content: [{ type: 'output_text', text: '{"title":"Japan"}', annotations: [] }] }],
+      usage: { input_tokens: 12, output_tokens: 6, total_tokens: 18 },
+    });
+  }) as typeof fetch;
+  const result = await createOpenAIProvider({ apiKey: 'test-key' }).execute({
+    actionId: 'ask', modelId: 'openai.gpt-5.6-luna', externalModelId: 'gpt-5.6-luna', organizationKey: 'organization',
+    input: { systemPrompt: 'Return JSON only.', messages: [{ role: 'user', content: [{ type: 'text', text: 'Guide Japan' }] }], options: { maxTokens: 1_200 } },
+  });
+  expect(url).toBe('https://api.openai.com/v1/responses');
+  expect(body).toEqual({ model: 'gpt-5.6-luna', instructions: 'Return JSON only.', input: [{ role: 'user', content: 'Guide Japan' }], max_output_tokens: 1_200 });
+  expect(body).not.toHaveProperty('tools');
+  expect(result).toMatchObject({ output: { text: '{"title":"Japan"}', toolCalls: [], stopReason: null }, usage: { inputTokens: 12, outputTokens: 6, totalTokens: 18 }, providerId: 'openai' });
+});
+
+test('uses Responses web search and returns grounded text, citations, and sources', async () => {
+  let url = '';
+  let body: Record<string, any> = {};
+  globalThis.fetch = (async (input, init) => {
+    url = String(input);
+    body = JSON.parse(String(init?.body));
+    return Response.json({
+      output: [
+        { type: 'web_search_call', status: 'completed', action: { type: 'search', sources: [{ type: 'url', url: 'https://www.japan.go.jp/' }] } },
+        { type: 'message', status: 'completed', role: 'assistant', content: [{ type: 'output_text', text: '{"title":"Japan"}', annotations: [{ type: 'url_citation', title: 'Government of Japan', url: 'https://www.japan.go.jp/', start_index: 0, end_index: 5 }] }] },
+      ],
+      usage: { input_tokens: 20, output_tokens: 10, total_tokens: 30 },
+    });
+  }) as typeof fetch;
+  const result = await createOpenAIProvider({ apiKey: 'test-key' }).execute({ actionId: 'web-search', modelId: 'openai.gpt-5.6-luna', externalModelId: 'gpt-5.6-luna', input: { prompt: 'Research Japan', responseFormat: { name: 'place_detail', schema: { type: 'object' } } }, organizationKey: 'organization' });
+  expect(url).toBe('https://api.openai.com/v1/responses');
+  expect(body).toMatchObject({
+    model: 'gpt-5.6-luna',
+    input: 'Research Japan',
+    reasoning: { effort: 'low' },
+    tool_choice: 'required',
+    text: { format: { type: 'json_schema', name: 'place_detail', strict: true, schema: { type: 'object' } } },
+    include: ['web_search_call.action.sources'],
+    tools: [{ type: 'web_search', search_context_size: 'low', external_web_access: true }],
+  });
+  expect(result).toMatchObject({
+    output: { text: '{"title":"Japan"}', citations: [{ title: 'Government of Japan', url: 'https://www.japan.go.jp/' }], sources: ['https://www.japan.go.jp/'] },
+    usage: { inputTokens: 20, outputTokens: 10, totalTokens: 30 },
+    providerId: 'openai',
+  });
+});
+
+test('rejects Responses output when web search did not complete', async () => {
+  globalThis.fetch = (async () => Response.json({
+    output: [
+      { type: 'web_search_call', status: 'failed', action: { type: 'search' } },
+      { type: 'message', status: 'completed', role: 'assistant', content: [{ type: 'output_text', text: '{"title":"Japan"}', annotations: [] }] },
+    ],
+  })) as unknown as typeof fetch;
+  const execution = createOpenAIProvider({ apiKey: 'test-key' }).execute({ actionId: 'web-search', modelId: 'openai.gpt-5.6-luna', externalModelId: 'gpt-5.6-luna', input: { prompt: 'Research Japan' }, organizationKey: 'organization' });
+  await expect(execution).rejects.toMatchObject({ code: 'response_invalid' });
+});

@@ -208,13 +208,15 @@ export async function safeImage(image: z.infer<typeof imageSchema>, score?: numb
     key: image.key, filename: image.filename, caption: image.caption, imageCaptionKey: image.imageCaptionKey ?? null,
     mimeType: image.mimeType, sizeBytes: image.sizeBytes, width: image.width, height: image.height,
     city: image.city ?? null, country: image.country ?? null, countryCode: image.countryCode ?? null,
-    isFavorite: image.isFavorite, createdByKey: image.createdByKey, createdAt: image.createdAt, updatedAt: image.updatedAt,
+    latitude: image.latitude ?? null, longitude: image.longitude ?? null, locationSource: image.locationSource ?? null,
+    mutationPolicy: image.mutationPolicy, isFavorite: image.isFavorite, createdByKey: image.createdByKey, createdAt: image.createdAt, updatedAt: image.updatedAt,
     url: await imageUrl(image.storageKey), ...(score === undefined ? {} : { score }),
   };
 }
 
 export function projectGalleryCollection(collection: z.infer<typeof collectionSchema>, count: number, coverUrl: string | null, memberKey: string, role: 'owner' | 'collaborator' | 'viewer' = 'owner', isOwned = true) {
-  return { key: collection.key, name: collection.name, description: collection.description ?? null, isFavorite: collection.isFavorite, count, coverUrl, memberKey, role, isOwned, access: { canRead: true, canContribute: role !== 'viewer', canManage: role === 'owner' }, createdAt: collection.createdAt, updatedAt: collection.updatedAt };
+  const managed = collection.mutationPolicy === 'system-only';
+  return { key: collection.key, name: collection.name, description: collection.description ?? null, purpose: collection.purpose, mutationPolicy: collection.mutationPolicy, isFavorite: collection.isFavorite, count, coverUrl, memberKey, role, isOwned, access: { canRead: true, canContribute: !managed && role !== 'viewer', canManage: !managed && role === 'owner' }, createdAt: collection.createdAt, updatedAt: collection.updatedAt };
 }
 
 async function reconcileVisualIdentity(identity: z.infer<typeof visualIdentitySchema>, organizationKey: string, actorKey: string, context: GalleryOperationContext) {

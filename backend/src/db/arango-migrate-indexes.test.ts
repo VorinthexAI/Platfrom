@@ -308,11 +308,12 @@ describe('Arango migration indexes', () => {
     expect(collections.filter(({ name }) => ['places', 'trips', 'tripPlaces', 'placeVisits'].includes(name)).map(({ name }) => name)).toEqual(['places']);
     expect(collections.find(({ name }) => name === 'places')).toEqual({
       name: 'places',
-      embedKeys: ['name'],
+      embedKeys: ['name', 'summary'],
       indexes: [
-        { fields: ['scopeKey'] },
-        { fields: ['scopeKey', 'countryCode'] },
-        { fields: ['scopeKey', 'countryCode', 'name'], unique: true },
+        { fields: ['scopeKey', 'userKey', 'saved'] },
+        { fields: ['scopeKey', 'userKey', 'openedAt'], sparse: true },
+        { fields: ['scopeKey', 'userKey', 'countryCode'] },
+        { fields: ['scopeKey', 'userKey', 'countryCode', 'name'], unique: true },
       ],
     });
     const bookNames = ['books', 'bookContexts', 'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'chapterContexts', 'bookProgress'];
@@ -326,10 +327,11 @@ describe('Arango migration indexes', () => {
     expect(collections.find(({ name }) => name === 'emailMessages')?.indexes).toContainEqual({ fields: ['scopeKey', 'accountKey', 'providerMessageId'], unique: true });
   });
   test('drops obsolete place indexes while preserving current indexes', () => {
-    const desired = [['scopeKey'], ['scopeKey', 'countryCode'], ['scopeKey', 'countryCode', 'name']];
+    const desired = [['scopeKey', 'userKey', 'saved'], ['scopeKey', 'userKey', 'openedAt'], ['scopeKey', 'userKey', 'countryCode'], ['scopeKey', 'userKey', 'countryCode', 'name']];
     expect(isLegacyIndex('places', ['scopeKey', 'isWishlist'], desired)).toBe(true);
     expect(isLegacyIndex('places', ['scopeKey', 'isFavorite'], desired)).toBe(true);
-    expect(isLegacyIndex('places', ['scopeKey', 'countryCode'], desired)).toBe(false);
+    expect(isLegacyIndex('places', ['scopeKey', 'countryCode', 'name'], desired)).toBe(true);
+    expect(isLegacyIndex('places', ['scopeKey', 'userKey', 'countryCode'], desired)).toBe(false);
   });
   test('hard-retires trip persistence before projecting and indexing places', async () => {
     const dropped: string[] = [];
@@ -351,10 +353,31 @@ describe('Arango migration indexes', () => {
     expect(cleanup).toBeGreaterThan(-1);
     expect(cleanup).toBeLessThan(activeLoop);
     expect(source).toContain('REPLACE place WITH UNSET(replacement, "_rev") IN places');
-    expect(source).toContain('embedding: await generateEmbedding(canonical.name)');
+    expect(source).toContain('embedding: await generateEmbedding(buildPlaceEmbeddingText(canonical))');
     expect(source).toContain('FILTER place.kind == "country" REMOVE place IN places');
     expect(source).toContain('resource.sourceType == "place" && resource.sourceKey IN @countryPlaceKeys');
     expect(source).toContain('places migration found duplicate saved cities');
+  });
+  test('creates placeImages before first-deployment place migration queries it', async () => {
+    const existing = new Set(['places']);
+    const events: string[] = [];
+    const database = {
+      collection(name: string) {
+        return {
+          async exists() { return existing.has(name); },
+          async create() { events.push(`create:${name}`); existing.add(name); },
+          async drop() {},
+        };
+      },
+      async query(query: string) {
+        if (query.includes('placeImages') && !existing.has('placeImages')) throw new Error('collection not found: placeImages');
+        events.push(query.includes('placeImages') ? 'query:placeImages' : 'query:other');
+        if (query.includes('FILTER LENGTH(userKeys) != 1')) return { async all() { return ['legacy-place']; } };
+        return { async all() { return []; }, async next() { return 0; } };
+      },
+    };
+    await expect(migrateMinimalPlacesAndRetireTrips(database as never)).rejects.toThrow('cannot safely derive user ownership');
+    expect(events.slice(0, 2)).toEqual(['create:placeImages', 'query:placeImages']);
   });
   test('force-projects legacy places once while preserving keys and regenerating name-only embeddings', async () => {
     const previous = process.env.CONTENT_E2E;
@@ -363,11 +386,13 @@ describe('Arango migration indexes', () => {
       let legacy = true;
       let replacements: Array<Record<string, unknown>> = [];
       const database = {
-        collection(name: string) { return { async exists() { return name === 'places'; }, async drop() {} }; },
+        collection(name: string) { return { async exists() { return name === 'places'; }, async create() {}, async drop() {} }; },
         async query(query: string, bindVars?: Record<string, unknown>) {
-          if (query.includes('Validate every retained place')) return { async all() { return bindVars?.after === '' ? [{ _key: 'cmrnlzf650002qc7k4p5zem5w', scopeKey: 'cmrnlzf640001qc7kazsr96k5', name: legacy ? ' Stockholm ' : 'Stockholm', countryCode: legacy ? 'se' : 'SE', latitude: 59.3293, longitude: 18.0686, createdAt: '2026-08-08T12:00:00.000Z' }] : []; }, async next() { return undefined; } };
+          if (query.includes('FILTER LENGTH(userKeys) != 1')) return { async all() { return []; }, async next() { return undefined; } };
+          if (query.includes('UPDATE place WITH { userKey:')) return { async all() { return []; }, async next() { return undefined; } };
+          if (query.includes('Validate every retained place')) return { async all() { return bindVars?.after === '' ? [{ _key: 'cmrnlzf650002qc7k4p5zem5w', userKey: 'cmrnlzf650002qc7k4p5zem5w', scopeKey: 'cmrnlzf640001qc7kazsr96k5', saved: true, name: legacy ? ' Stockholm ' : 'Stockholm', countryCode: legacy ? 'se' : 'SE', latitude: 59.3293, longitude: 18.0686, openedAt: '2026-08-09T12:00:00.000Z', createdAt: '2026-08-08T12:00:00.000Z' }] : []; }, async next() { return undefined; } };
           if (query.includes('WITH COUNT INTO count')) return { async all() { return []; }, async next() { return undefined; } };
-          if (query.includes('RETURN place') && !query.includes('RETURN LENGTH')) return { async all() { return legacy ? [{ _key: 'cmrnlzf650002qc7k4p5zem5w', _rev: 'legacy-revision', scopeKey: 'cmrnlzf640001qc7kazsr96k5', kind: 'place', name: ' Stockholm ', countryCode: 'se', latitude: 59.3293, longitude: 18.0686, embedding: [], createdAt: '2026-08-08T12:00:00.000Z', updatedAt: '2026-08-08T12:00:00.000Z' }] : []; }, async next() { return undefined; } };
+          if (query.includes('RETURN place') && !query.includes('RETURN LENGTH')) return { async all() { return legacy ? [{ _key: 'cmrnlzf650002qc7k4p5zem5w', _rev: 'legacy-revision', userKey: 'cmrnlzf650002qc7k4p5zem5w', scopeKey: 'cmrnlzf640001qc7kazsr96k5', saved: true, kind: 'place', name: ' Stockholm ', countryCode: 'se', latitude: 59.3293, longitude: 18.0686, embedding: [], openedAt: '2026-08-09T12:00:00.000Z', createdAt: '2026-08-08T12:00:00.000Z', updatedAt: '2026-08-08T12:00:00.000Z' }] : []; }, async next() { return undefined; } };
           if (query.includes('FOR replacement IN @replacements')) { replacements = bindVars?.replacements as Array<Record<string, unknown>>; legacy = false; return { async all() { return []; }, async next() { return undefined; } }; }
           if (query.includes('REMOVE place IN places')) return { async all() { return []; }, async next() { return undefined; } };
           if (query.includes('RETURN LENGTH')) return { async all() { return []; }, async next() { return 0; } };
@@ -380,18 +405,25 @@ describe('Arango migration indexes', () => {
       expect(first).toEqual({
         _key: 'cmrnlzf650002qc7k4p5zem5w',
         _rev: 'legacy-revision',
+        userKey: 'cmrnlzf650002qc7k4p5zem5w',
         scopeKey: 'cmrnlzf640001qc7kazsr96k5',
+        saved: true,
         name: 'Stockholm',
+        summary: '',
         countryCode: 'SE',
         latitude: 59.3293,
         longitude: 18.0686,
         embedding: expect.any(Array),
+        embeddingContentVersion: 2,
+        openedAt: '2026-08-09T12:00:00.000Z',
         createdAt: '2026-08-08T12:00:00.000Z',
       });
       expect(first.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
       replacements = [];
       await migrateMinimalPlacesAndRetireTrips(database as never);
       expect(replacements).toEqual([]);
+      const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+      expect(source).toContain('fields != @canonicalFields && fields != @openedCanonicalFields && fields != @generatedCanonicalFields && fields != @openedGeneratedCanonicalFields');
     } finally {
       if (previous === undefined) delete process.env.CONTENT_E2E;
       else process.env.CONTENT_E2E = previous;
@@ -400,16 +432,31 @@ describe('Arango migration indexes', () => {
   test('rejects duplicate canonical saved cities before changing places', async () => {
     let startedTransaction = false;
     const database = {
-      collection(name: string) { return { async exists() { return name === 'places'; }, async drop() {} }; },
+      collection(name: string) { return { async exists() { return name === 'places'; }, async create() {}, async drop() {} }; },
       async query(query: string, bindVars?: Record<string, unknown>) {
-        if (query.includes('Validate every retained place')) return { async all() { return bindVars?.after === '' ? [{ _key: 'cmrnlzf650002qc7k4p5zem5w', scopeKey: 'cmrnlzf640001qc7kazsr96k5', name: ' Stockholm ', countryCode: 'se', latitude: 59.3293, longitude: 18.0686, createdAt: '2026-08-08T12:00:00.000Z' }] : []; } };
-        if (query.includes('WITH COUNT INTO count')) return { async all() { return [{ scopeKey: 'cmrnlzf640001qc7kazsr96k5', countryCode: 'SE', name: 'Stockholm', count: 2 }]; } };
+        if (query.includes('FILTER LENGTH(userKeys) != 1')) return { async all() { return []; } };
+        if (query.includes('UPDATE place WITH { userKey:')) return { async all() { return []; } };
+        if (query.includes('Validate every retained place')) return { async all() { return bindVars?.after === '' ? [{ _key: 'cmrnlzf650002qc7k4p5zem5w', userKey: 'cmrnlzf650002qc7k4p5zem5w', scopeKey: 'cmrnlzf640001qc7kazsr96k5', saved: true, name: ' Stockholm ', countryCode: 'se', latitude: 59.3293, longitude: 18.0686, createdAt: '2026-08-08T12:00:00.000Z' }] : []; } };
+        if (query.includes('WITH COUNT INTO count')) return { async all() { return [{ scopeKey: 'cmrnlzf640001qc7kazsr96k5', userKey: 'cmrnlzf650002qc7k4p5zem5w', countryCode: 'SE', name: 'Stockholm', count: 2 }]; } };
         throw new Error(`Unexpected migration query: ${query}`);
       },
       async beginTransaction() { startedTransaction = true; throw new Error('should not start'); },
     };
     await expect(migrateMinimalPlacesAndRetireTrips(database as never)).rejects.toThrow('duplicate saved cities');
     expect(startedTransaction).toBe(false);
+  });
+  test('refuses to assign an existing place to an ambiguous user', async () => {
+    let updates = 0;
+    const database = {
+      collection(name: string) { return { async exists() { return name === 'places'; }, async create() {}, async drop() {} }; },
+      async query(query: string) {
+        if (query.includes('FILTER LENGTH(userKeys) != 1')) return { async all() { return ['cmrnlzf650002qc7k4p5zem5w']; } };
+        if (query.includes('UPDATE place WITH { userKey:')) updates += 1;
+        return { async all() { return []; } };
+      },
+    };
+    await expect(migrateMinimalPlacesAndRetireTrips(database as never)).rejects.toThrow('cannot safely derive user ownership');
+    expect(updates).toBe(0);
   });
   test('removes legacy scope-shared book progress before per-user indexes', async () => {
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();

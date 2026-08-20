@@ -14,7 +14,7 @@ const domain = {
 
 const expected: Array<[AssistantSurface, string[]]> = [
   ['knowledge-workspace', ['content.hidden.list', 'folder.hide', 'folder.reveal', 'document.hide', 'document.reveal', 'folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy', 'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.enhance', 'document.translate', 'document.list-versions', 'document.restore-version', 'document.download', 'content.neighbors', 'content.search-history.delete', 'knowledge.search', 'note.write']],
-  ['travel-workspace', ['place.list']],
+  ['travel-workspace', ['country.search', 'place.list', 'place.find', 'place.find-city', 'place.find-children', 'place.create', 'place.open']],
   ['signal-workspace', ['email.overview', 'email.sync', 'email.thread.read', 'email.thread.mark-read', 'email.thread.favorite', 'email.draft.create', 'email.draft.update', 'email.draft.send', 'email.disconnect']],
   ['book-workspace', ['book.list', 'book.detail', 'book.chapter.progress', 'book.create']],
 ];
@@ -32,9 +32,21 @@ describe('personal assistant service capabilities', () => {
     }
   });
 
-  test('excludes raw place image generation from models', () => {
+  test('does not expose transient travel hero generation as a model tool', () => {
     const capabilities = defaultAssistantCapabilityRegistry.resolve('travel-workspace');
     expect(capabilities.some(({ definition }) => definition.name === 'place.images.generate')).toBe(false);
+    expect(capabilities.find(({ definition }) => definition.name === 'place.list')?.definition.description).toBe('List saved and recently opened places.');
+  });
+
+  test('rejects untrusted city context and inactive membership before canonical city lookup', async () => {
+    let calls = 0;
+    const travel: any = { findCity: async () => { calls += 1; return {}; } };
+    const capability = defaultAssistantCapabilityRegistry.resolve('travel-workspace').find(({ definition }) => definition.name === 'place.find-city')!;
+    const input = { city: 'Tokyo', country: { name: 'Japan', code: 'JP', continent: 'Asia', lat: 36.2, lon: 138.2 } };
+    await expect(capability.execute({ ...input, organizationKey }, { domain, travel } as any)).rejects.toThrow('Unrecognized key');
+    const principal = domain.principal as Extract<ToolContext['principal'], { kind: 'member' }>;
+    await expect(capability.execute(input, { domain: { ...domain, principal: { ...principal, userOrganization: { ...principal.userOrganization, status: 'inactive' } } }, travel } as any)).rejects.toThrow('Active matching');
+    expect(calls).toBe(0);
   });
 
   test('executes canonical services with identity derived only from the member principal', async () => {
@@ -45,7 +57,12 @@ describe('personal assistant service capabilities', () => {
     const calls: unknown[] = [];
     const travel: any = {
       overview: async (...args: unknown[]) => { calls.push(['travel.overview', ...args]); return {}; },
+      findCity: async (...args: unknown[]) => { calls.push(['travel.findCity', ...args]); return {}; },
+      createPlace: async (...args: unknown[]) => { calls.push(['travel.createPlace', ...args]); return {}; },
+      findChildren: async (...args: unknown[]) => { calls.push(['travel.findChildren', ...args]); return {}; },
+      openPlace: async (...args: unknown[]) => { calls.push(['travel.openPlace', ...args]); return {}; },
     };
+    const countries: any = { search: async (...args: unknown[]) => { calls.push(['countries.search', ...args]); return {}; } };
     const email: any = {
       overview: async (...args: unknown[]) => { calls.push(['email.overview', ...args]); return {}; },
       sync: async (...args: unknown[]) => { calls.push(['email.sync', ...args]); return {}; },
@@ -63,9 +80,14 @@ describe('personal assistant service capabilities', () => {
       progress: async (...args: unknown[]) => { calls.push(['books.progress', ...args]); return {}; },
       create: async (...args: unknown[]) => { calls.push(['books.create', ...args]); return {}; },
     };
-    const context: any = { domain, requestKey: 'request-1', travel, email, books };
+    const context: any = { domain, requestKey: 'request-1', travel, countries, email, books };
     const cases: Array<[AssistantSurface, string, unknown]> = [
       ['travel-workspace', 'place.list', {}],
+      ['travel-workspace', 'country.search', { query: 'Japan' }],
+      ['travel-workspace', 'place.find-city', { city: 'Tokyo', country: { name: 'Japan', code: 'JP', continent: 'Asia', lat: 36.2, lon: 138.2 } }],
+      ['travel-workspace', 'place.create', { name: 'Japan', summary: 'Island country.', countryCode: 'JP', latitude: 36.2, longitude: 138.2, imageRequestToken: 'token' }],
+      ['travel-workspace', 'place.find-children', { childrenRequestToken: 'children-token' }],
+      ['travel-workspace', 'place.open', { name: 'Japan', countryCode: 'JP' }],
       ['signal-workspace', 'email.overview', {}],
       ['signal-workspace', 'email.sync', {}],
       ['signal-workspace', 'email.thread.read', { threadKey }],
@@ -84,12 +106,26 @@ describe('personal assistant service capabilities', () => {
     const serviceContext = { organizationKey, scopeKey };
     const actor = { userKey, ...serviceContext };
     expect(calls).toContainEqual(['travel.overview', serviceContext, userKey]);
+    expect(calls).toContainEqual(['countries.search', { organizationKey, query: 'Japan' }, userKey, { signal: undefined, timeoutMs: undefined }]);
+    expect(calls).toContainEqual(['travel.findCity', { ...serviceContext, city: 'Tokyo', country: { name: 'Japan', code: 'JP', continent: 'Asia', lat: 36.2, lon: 138.2 } }, userKey, { signal: undefined, timeoutMs: undefined }]);
+    expect(calls).toContainEqual(['travel.createPlace', { ...serviceContext, name: 'Japan', summary: 'Island country.', countryCode: 'JP', latitude: 36.2, longitude: 138.2, imageRequestToken: 'token' }, userKey, { signal: undefined, timeoutMs: undefined }]);
+    expect(calls).toContainEqual(['travel.findChildren', { ...serviceContext, childrenRequestToken: 'children-token' }, userKey, { signal: undefined, timeoutMs: undefined }]);
+    expect(calls).toContainEqual(['travel.openPlace', { ...serviceContext, name: 'Japan', countryCode: 'JP' }, userKey]);
     expect(calls).toContainEqual(['email.overview', actor, {}]);
     expect(calls).toContainEqual(['email.threadForTool', actor, threadKey, undefined]);
     expect(calls).toContainEqual(['email.markRead', actor, threadKey]);
     expect(calls).toContainEqual(['books.progress', bookKey, chapterKey, { ...serviceContext, progressSeconds: 30, isCompleted: false }, userKey]);
     expect(calls).toContainEqual(['books.create', { ...serviceContext, generationRequestKey: 'request-1', topic: 'Decision making', goal: 'Decide well', audience: 'Leaders', tone: 'Clear', length: 'short', language: 'English' }, userKey]);
     expect(JSON.stringify(calls)).not.toContain((domain.principal as Extract<ToolContext['principal'], { kind: 'member' }>).userOrganization.key);
+  });
+
+  test('marks durable place generation and creation as Compass mutations', () => {
+    const capabilities = defaultAssistantCapabilityRegistry.resolve('travel-workspace');
+    expect(capabilities.find(({ definition }) => definition.name === 'place.find')?.mutationWorkspace).toBe('compass');
+    expect(capabilities.find(({ definition }) => definition.name === 'place.find-city')?.mutationWorkspace).toBe('compass');
+    expect(capabilities.find(({ definition }) => definition.name === 'place.find-children')?.mutationWorkspace).toBe('compass');
+    expect(capabilities.find(({ definition }) => definition.name === 'place.create')?.mutationWorkspace).toBe('compass');
+    expect(capabilities.find(({ definition }) => definition.name === 'place.open')?.mutationWorkspace).toBe('compass');
   });
 
   test('injects runtime scope and stable request idempotency into Archive mutations', async () => {

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { EMBEDDING_DIMENSIONS, EXTERNAL_EMBEDDING_MODEL_ID } from '@/lib/embedding-constants';
 import { IMAGE_CAPTION_EXTERNAL_MODEL_ID } from '@/lib/image-caption-constants';
 import { tokenUsage } from '@/lib/ai/shared/usage';
+import { webSearchInputSchema, webSearchOutputSchema, type WebSearchOutput } from '@/lib/ai/actions/web-search';
 import { normalizeProviderError, ProviderError } from './errors';
 import {
   CHAT_ACTION_IDS,
@@ -31,6 +32,7 @@ import {
   type ProviderFactory,
   type ProviderEmbedRequest,
   type ProviderEmbedResponse,
+  type ChatOutput,
   type VisualIdentityDescriptionOutput,
 } from './types';
 
@@ -61,6 +63,100 @@ const imageResponseSchema = z.object({
     .passthrough()
     .optional(),
 });
+
+const webSearchCallSchema = z.object({
+  type: z.literal('web_search_call'),
+  status: z.literal('completed'),
+  action: z.object({ sources: z.array(z.object({ type: z.literal('url'), url: z.string() }).passthrough()).optional() }).passthrough().optional(),
+}).passthrough();
+const webSearchMessageSchema = z.object({
+  type: z.literal('message'),
+  content: z.array(z.object({
+    type: z.literal('output_text'),
+    text: z.string(),
+    annotations: z.array(z.object({ type: z.string() }).passthrough()).optional(),
+  }).passthrough()),
+}).passthrough();
+
+async function executeDirectResponse<TInput, TOutput>(client: OpenAI, request: ProviderExecuteRequest<TInput>): Promise<ProviderExecuteResponse<TOutput>> {
+  const input = z.object({
+    systemPrompt: z.string().optional(),
+    messages: z.array(z.object({ role: z.enum(['user', 'assistant']), content: z.array(z.object({ type: z.literal('text'), text: z.string() })) })).min(1),
+    options: z.object({ maxTokens: z.number().int().positive().optional() }).optional(),
+  }).parse(request.input);
+  try {
+    const raw = await client.responses.create({
+      model: request.externalModelId,
+      ...(input.systemPrompt ? { instructions: input.systemPrompt } : {}),
+      input: input.messages.map((message) => ({ role: message.role, content: message.content.map((part) => part.text).join('\n') })),
+      ...(input.options?.maxTokens ? { max_output_tokens: input.options.maxTokens } : {}),
+    }, { signal: resolveRequestSignal(request) });
+    const parsed = z.object({ output_text: z.string(), usage: z.object({ input_tokens: z.number().optional(), output_tokens: z.number().optional(), total_tokens: z.number().optional() }).optional() }).parse(raw);
+    return {
+      output: { text: parsed.output_text, toolCalls: [], stopReason: null } as TOutput & ChatOutput,
+      usage: tokenUsage(parsed.usage?.input_tokens, parsed.usage?.output_tokens, parsed.usage?.total_tokens),
+      providerId: PROVIDER_ID,
+      modelId: request.modelId,
+      externalModelId: request.externalModelId,
+      rawResponse: raw,
+    };
+  } catch (error) {
+    throw normalizeProviderError(PROVIDER_ID, error);
+  }
+}
+
+async function executeWebSearch<TInput, TOutput>(client: OpenAI, request: ProviderExecuteRequest<TInput>): Promise<ProviderExecuteResponse<TOutput>> {
+  const input = webSearchInputSchema.parse(request.input);
+  const tool = {
+    type: 'web_search' as const,
+    search_context_size: 'low' as const,
+    external_web_access: true,
+  } as OpenAI.Responses.WebSearchTool;
+  try {
+    const raw = await client.responses.create({
+      model: request.externalModelId,
+      input: input.prompt,
+      reasoning: { effort: 'low' },
+      tools: [tool],
+      tool_choice: 'required',
+      include: ['web_search_call.action.sources'],
+      max_output_tokens: 4_000,
+      ...(input.responseFormat ? { text: { format: { type: 'json_schema' as const, name: input.responseFormat.name, strict: true, schema: input.responseFormat.schema } } } : {}),
+    }, { signal: resolveRequestSignal(request) });
+    const outputItems = z.object({ output: z.array(z.object({ type: z.string() }).passthrough()), usage: z.object({ input_tokens: z.number().optional(), output_tokens: z.number().optional(), total_tokens: z.number().optional() }).passthrough().optional() }).passthrough().parse(raw);
+    const textParts: string[] = [];
+    const citations: Array<{ title: string; url: string }> = [];
+    const sources: string[] = [];
+    let searchCompleted = false;
+    for (const item of outputItems.output) {
+      const call = webSearchCallSchema.safeParse(item);
+      if (call.success) {
+        searchCompleted = true;
+        for (const source of call.data.action?.sources ?? []) sources.push(source.url);
+      }
+      const message = webSearchMessageSchema.safeParse(item);
+      if (!message.success) continue;
+      for (const content of message.data.content) {
+        textParts.push(content.text);
+        for (const annotation of content.annotations ?? []) {
+          if (annotation.type !== 'url_citation') continue;
+          const citation = z.object({ title: z.string(), url: z.string() }).safeParse(annotation);
+          if (citation.success) citations.push(citation.data);
+        }
+      }
+    }
+    if (!searchCompleted) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'openai web search did not complete');
+    const uniqueBy = <T>(values: T[], key: (value: T) => string) => [...new Map(values.map((value) => [key(value), value])).values()];
+    const output: WebSearchOutput = webSearchOutputSchema.parse({
+      text: textParts.join('\n').trim(),
+      citations: uniqueBy(citations, ({ url }) => url),
+      sources: [...new Set(sources)],
+    });
+    return { output: output as TOutput, usage: tokenUsage(outputItems.usage?.input_tokens, outputItems.usage?.output_tokens, outputItems.usage?.total_tokens), providerId: PROVIDER_ID, modelId: request.modelId, externalModelId: request.externalModelId, rawResponse: raw };
+  } catch (error) {
+    throw normalizeProviderError(PROVIDER_ID, error);
+  }
+}
 
 async function executeImageGenerate<TInput, TOutput>(
   client: OpenAI,
@@ -237,6 +333,8 @@ export function createOpenAIProvider(config: OpenAIProviderConfig): ProviderAdap
       if (request.actionId === 'caption-image') return captionImages(client, request);
       if (request.actionId === 'document-cleanup') return cleanupDocument(client, request);
       if (request.actionId === 'describe-visual-identity') return describeVisualIdentity(client, request);
+      if (request.actionId === 'web-search') return executeWebSearch(client, request);
+      if (request.actionId === 'ask') return executeDirectResponse(client, request);
       if (CHAT_ACTION_IDS.has(request.actionId)) {
         return executeOpenAICompatibleChat(PROVIDER_ID, client, request, { maxTokensParam: 'max_completion_tokens' });
       }

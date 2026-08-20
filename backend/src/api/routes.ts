@@ -42,9 +42,9 @@ import { invokeContentTool } from './content-tools';
 import { communicationHandlers } from './communication';
 import { bootstrapGuestAuth, getAuthAccount, logoutAuthAccount, patchAuthAccount } from './auth-account';
 import { recordPlatformEvent } from './platform-events';
-import { postPersonalAssistantResponse } from './personal-assistant';
 import { acceptGalleryCollectionInvite, activateGalleryCollectionShare, completeGalleryUploads, createGalleryCollection, createGalleryCollectionInvite, createGalleryCollectionShare, createGalleryHighlight, createGalleryMemory, createGallerySubject, deleteGalleryCollection, deleteGalleryCollectionDuplicates, deleteGalleryHighlight, deleteGalleryImages, deleteGalleryMemory, deleteGallerySubject, findGalleryCollectionDuplicates, galleryOverview, galleryUploadStatus, leaveGalleryCollection, listGalleryCollectionMembers, listGalleryCollectionShares, listGalleryHighlights, listGalleryMemories, listGalleryPendingInvites, listGallerySubjectImages, listGallerySubjects, presignGalleryUploads, readGalleryHighlight, readGalleryMemory, rejectGalleryCollectionInvite, removeGalleryCollectionMember, revokeGalleryCollectionInvite, revokeGalleryCollectionShare, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryCollectionMemberRole, updateGalleryCollectionShare, updateGalleryImage } from './gallery';
 import { travelHandlers } from './travel';
+import { countryHandlers } from './countries';
 import { emailHandlers } from './email-inbox';
 import { bookHandlers } from './books';
 import { userHiddenHandlers } from './user-hiddens';
@@ -424,7 +424,6 @@ export function registerRoutes(app: Hono) {
 
   app.get('/nodes', listNodes);
 
-  app.post('/assistant/respond', postPersonalAssistantResponse);
   app.post('/content/tools/:tool', invokeContentTool);
   app.post('/gallery/overview', galleryOverview);
   app.post('/gallery/collections', createGalleryCollection);
@@ -467,8 +466,13 @@ export function registerRoutes(app: Hono) {
   app.post('/gallery/memories/read', readGalleryMemory);
   app.post('/gallery/memories/delete', deleteGalleryMemory);
   app.post('/travel/overview', travelHandlers.overview);
+  app.post('/travel/countries/search', countryHandlers.search);
+  app.post('/travel/places', travelHandlers.createPlace);
+  app.post('/travel/places/open', travelHandlers.openPlace);
   app.post('/travel/places/find', travelHandlers.findPlace);
-  app.post('/travel/places/images', travelHandlers.generatePlaceImages);
+  app.post('/travel/places/children/find', travelHandlers.findChildren);
+  app.post('/travel/cities/find', travelHandlers.findCity);
+  app.post('/travel/places/image', travelHandlers.generatePlaceHeroImage);
   app.post('/email/overview', emailHandlers.overview);
   app.post('/email/connect', emailHandlers.startConnect);
   app.get('/email/connectors/gmail/callback', emailHandlers.callback);

@@ -33,15 +33,17 @@ mock.module("./api-client", () => ({
     if (path === "/gallery/collections/shares") return { data: { success: true, data: { share: { key: "link", url: "https://vorinthex.com/share/secure-created-token", role: "viewer", active: true, createdAt: "2026-08-18T00:00:00.000Z" }, token: "secure-created-token" } } };
     if (path === "/gallery/collections/shares/update") return { data: { success: true, data: { share: { key: "link", url: "https://vorinthex.com/share/secure-created-token", role: "viewer", active: false, createdAt: "2026-08-18T00:00:00.000Z" } } } };
     if (path === "/gallery/shares/activate") return { data: { success: true, data: { scopeKey: "scope", collectionKey: "shared", role: "viewer" } } };
-    const collection = { key: "collection", name: "Collection", description: null, isFavorite: false, count: 0, coverUrl: null, memberKey: "membership" };
+    const collection = { key: "collection", name: "Collection", description: null, purpose: null, mutationPolicy: "user", isFavorite: false, count: 0, coverUrl: null, memberKey: "membership", role: "owner", access: { canRead: true, canContribute: true, canManage: true }, createdAt: "2026-08-14T00:00:00.000Z", updatedAt: "2026-08-14T00:00:00.000Z" };
+    const persistedImage = { key: "image", filename: "image.jpg", caption: "Image", imageCaptionKey: null, mimeType: "image/jpeg", sizeBytes: 100, width: 10, height: 10, city: null, country: null, countryCode: null, latitude: null, longitude: null, locationSource: null, mutationPolicy: "user", isFavorite: false, createdByKey: "membership", createdAt: "2026-08-14T00:00:00.000Z", updatedAt: "2026-08-14T00:00:00.000Z", url: "https://images.example/image" };
     if (path === "/gallery/overview") return { data: { success: true, data: { collections: [], images: [], nextCursor: null, canCreateCollections: true } } };
     if (path === "/gallery/collections") return { data: { success: true, data: collection } };
     if (path === "/gallery/collections/update") return { data: { success: true, data: { collection } } };
+    if (path === "/gallery/images/favorite" || path === "/gallery/images/update") return { data: { success: true, data: { image: persistedImage } } };
     return { data: { success: true, data: { images: [] } } };
   } },
 }));
 
-const { activateGalleryShare, createGalleryCollection, createGalleryCollectionHighlight, createGalleryCollectionMemory, createGalleryCollectionShareLink, deleteGalleryCollection, deleteGalleryCollectionDuplicates, deleteGalleryCollectionHighlight, deleteGalleryCollectionMemory, deleteGalleryImages, deleteGallerySubject, fetchGalleryCollectionHighlight, fetchGalleryCollectionMemory, fetchGalleryOverview, filterCollections, filterGalleryShareLinks, filterMediaItems, findGalleryCollectionDuplicates, groupGalleryImagesByCreatedDate, isGalleryClientErrorCode, isGalleryCollectionOwned, isGalleryMemoryExhaustion, leaveGalleryCollection, listGalleryCollectionHighlights, listGalleryCollectionInvites, listGalleryCollectionMemories, listGalleryCollectionMembers, listGalleryCollectionShareLinks, mergeMediaItems, partitionFavoriteGalleryImages, reconcileGalleryDuplicateDeletion, reconcileGalleryImageDeletion, removeGalleryCollectionMember, resolveGalleryHighlightSlides, respondToGalleryCollectionInvite, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryCollectionMember, updateGalleryCollectionShareLink, updateGalleryImage, uploadGalleryImages } = await import("./gallery-client");
+const { activateGalleryShare, createGalleryCollection, createGalleryCollectionHighlight, createGalleryCollectionMemory, createGalleryCollectionShareLink, deleteGalleryCollection, deleteGalleryCollectionDuplicates, deleteGalleryCollectionHighlight, deleteGalleryCollectionMemory, deleteGalleryImages, deleteGallerySubject, fetchGalleryCollectionHighlight, fetchGalleryCollectionMemory, fetchGalleryOverview, filterCollections, filterGalleryShareLinks, filterMediaItems, findGalleryCollectionDuplicates, galleryCollectionSchema, galleryImageSchema, groupGalleryImagesByCreatedDate, isGalleryClientErrorCode, isGalleryCollectionOwned, isGalleryMemoryExhaustion, isManagedGalleryCollection, isManagedGalleryImage, leaveGalleryCollection, listGalleryCollectionHighlights, listGalleryCollectionInvites, listGalleryCollectionMemories, listGalleryCollectionMembers, listGalleryCollectionShareLinks, mergeMediaItems, partitionFavoriteGalleryImages, reconcileGalleryDuplicateDeletion, reconcileGalleryImageDeletion, removeGalleryCollectionMember, resolveGalleryHighlightSlides, respondToGalleryCollectionInvite, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryCollectionMember, updateGalleryCollectionShareLink, updateGalleryImage, uploadGalleryImages } = await import("./gallery-client");
 
 beforeEach(() => { calls.splice(0); responses.clear(); failures.clear(); malformed.clear(); });
 
@@ -49,12 +51,16 @@ const collection = (name: string, key: string) => ({
   key,
   name,
   description: null,
+  purpose: null,
+  mutationPolicy: "user" as const,
   isFavorite: false,
   count: 0,
   coverUrl: null,
   memberKey: "membership",
   role: "owner" as const,
   access: { canRead: true, canContribute: true, canManage: true },
+  createdAt: "2026-08-14T00:00:00.000Z",
+  updatedAt: "2026-08-14T00:00:00.000Z",
 });
 
 test("filters collections by name without changing their hierarchy", () => {
@@ -76,6 +82,21 @@ test("uses authoritative ownership with a legacy role fallback", () => {
   expect(isGalleryCollectionOwned({ role: "viewer" })).toBe(false);
 });
 
+test("identifies backend-managed place media without inferring it from names", () => {
+  expect(isManagedGalleryCollection({ purpose: "place-media", mutationPolicy: "system-only" })).toBe(true);
+  expect(isManagedGalleryCollection({ purpose: null, mutationPolicy: "user" })).toBe(false);
+  expect(isManagedGalleryImage({ mutationPolicy: "system-only" })).toBe(true);
+  expect(isManagedGalleryImage({ mutationPolicy: "user" })).toBe(false);
+});
+
+test("strictly parses managed collection and image policies with geo metadata", () => {
+  const managedCollection = { ...collection("Compass", "managed"), purpose: "place-media" as const, mutationPolicy: "system-only" as const };
+  const managedImage = { ...image("managed", "managed.jpg", "Managed place"), latitude: 59.33, longitude: 18.07, locationSource: "place" as const, mutationPolicy: "system-only" as const };
+  expect(galleryCollectionSchema.parse(managedCollection).mutationPolicy).toBe("system-only");
+  expect(galleryImageSchema.parse(managedImage)).toMatchObject({ latitude: 59.33, longitude: 18.07, locationSource: "place", mutationPolicy: "system-only" });
+  expect(galleryImageSchema.safeParse({ ...managedImage, forbidden: true }).success).toBe(false);
+});
+
 const image = (key: string, filename: string, caption: string) => ({
   key,
   filename,
@@ -85,7 +106,15 @@ const image = (key: string, filename: string, caption: string) => ({
   sizeBytes: 100,
   width: 10,
   height: 10,
+  city: null,
+  country: null,
+  countryCode: null,
+  latitude: null,
+  longitude: null,
+  locationSource: null,
+  mutationPolicy: "user" as const,
   isFavorite: false,
+  createdByKey: "membership",
   createdAt: "2026-08-14T00:00:00.000Z",
   updatedAt: "2026-08-14T00:00:00.000Z",
   url: `https://images.example/${key}`,
@@ -159,9 +188,9 @@ test("sends an inclusive caption score threshold on initial and cursor overview 
   ]);
 });
 
-test("normalizes legacy overview collection roles and capabilities without granting viewer writes", async () => {
-  const base = { key: "legacy", name: "Legacy", description: null, isFavorite: false, count: 0, coverUrl: null, memberKey: "membership" };
-  responses.set("/gallery/overview", { collections: [base, { ...base, key: "viewer", role: "viewer" }, { ...base, key: "collaborator", role: "collaborator" }], images: [], nextCursor: null, canCreateCollections: true });
+test("strictly parses authoritative overview collection roles and capabilities", async () => {
+  const base = collection("Legacy", "legacy");
+  responses.set("/gallery/overview", { collections: [base, { ...base, key: "viewer", role: "viewer", access: { canRead: true, canContribute: false, canManage: false } }, { ...base, key: "collaborator", role: "collaborator", access: { canRead: true, canContribute: true, canManage: false } }], images: [], nextCursor: null, canCreateCollections: true });
 
   const overview = await fetchGalleryOverview();
 
@@ -173,7 +202,7 @@ test("normalizes legacy overview collection roles and capabilities without grant
 });
 
 test("normalizes create and update responses while preserving authoritative false capabilities", async () => {
-  const base = { key: "collection", name: "Collection", description: null, isFavorite: false, count: 0, coverUrl: null, memberKey: "membership" };
+  const base = collection("Collection", "collection");
   responses.set("/gallery/collections", base);
   responses.set("/gallery/collections/update", { collection: { ...base, role: "owner", access: { canRead: true, canContribute: false, canManage: false } } });
 

@@ -14,7 +14,7 @@ describe('user hidden repository', () => {
     expect(call?.query).toContain('scope.organizationKey == @organizationKey');
     expect(call?.query).toContain('target != null && (!HAS(target, "_internalDeletion") || target._internalDeletion == null)');
     expect(call?.query).toContain('hidden.source == "collection" ? (privileged || collectionAccess)');
-    expect(call?.query).toContain('hidden.source == "image" ? (privileged || imageAccess)');
+    expect(call?.query).toContain('hidden.source == "image" ? (target.mutationPolicy != "system-only" && (privileged || imageAccess))');
     expect(call?.query).toContain('member.memberKey == @membershipKey');
   });
 

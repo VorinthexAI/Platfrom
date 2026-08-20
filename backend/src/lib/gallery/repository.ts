@@ -114,7 +114,13 @@ type TransactionRunner = <T>(collections: string[] | { read: string[]; write: st
 const runTransaction: TransactionRunner = (collections, operation) => withTransaction(collections, (transaction) => operation(transaction));
 const parse = <T>(schema: { parse(value: unknown): T }, value: unknown) => schema.parse(withArangoKey(value as Record<string, unknown>));
 async function all(database: MediaLibraryDatabase, query: string, bindVars: Record<string, unknown>) { return (await database.query(query, bindVars)).all(); }
-const liveCollectionOwner = 'LET scope = DOCUMENT(scopes, @scopeKey) LET actor = DOCUMENT(userOrganizations, @ownerKey) LET collection = DOCUMENT(collections, @collectionKey) LET scopeRole = FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == @ownerKey && member.status == "active" LIMIT 1 RETURN member.role) LET owner = FIRST(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == @collectionKey && member.memberKey == @ownerKey && member.role == "owner" LIMIT 1 RETURN member) FILTER scope != null && actor != null && actor.status == "active" && actor.organizationId == scope.organizationKey && collection != null && collection.scopeKey == @scopeKey FILTER actor.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"] || owner != null';
+async function userMutableCollection(database: MediaLibraryDatabase, scopeKey: string, collectionKey: string) {
+  return Boolean((await all(database, 'FOR collection IN collections FILTER collection._key == @collectionKey && collection.scopeKey == @scopeKey && collection.mutationPolicy != "system-only" LIMIT 1 RETURN true', { scopeKey, collectionKey }))[0]);
+}
+async function userMutableMemory(database: MediaLibraryDatabase, scopeKey: string, memoryKey: string) {
+  return Boolean((await all(database, 'LET memory = DOCUMENT(imageCollectionMemories, @memoryKey) FILTER memory != null && memory.scopeKey == @scopeKey LET managed = LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == memory.imageKey LET collection = DOCUMENT(collections, relation.collectionKey) FILTER collection != null && collection.mutationPolicy == "system-only" LIMIT 1 RETURN 1) FILTER managed == 0 RETURN true', { scopeKey, memoryKey }))[0]);
+}
+const liveCollectionOwner = 'LET scope = DOCUMENT(scopes, @scopeKey) LET actor = DOCUMENT(userOrganizations, @ownerKey) LET collection = DOCUMENT(collections, @collectionKey) LET scopeRole = FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == @ownerKey && member.status == "active" LIMIT 1 RETURN member.role) LET owner = FIRST(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == @collectionKey && member.memberKey == @ownerKey && member.role == "owner" LIMIT 1 RETURN member) FILTER scope != null && actor != null && actor.status == "active" && actor.organizationId == scope.organizationKey && collection != null && collection.scopeKey == @scopeKey && collection.mutationPolicy != "system-only" FILTER actor.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"] || owner != null';
 
 async function redundantCollectionImages(database: MediaLibraryDatabase, scopeKey: string, collectionKey: string) {
   const rows = await all(database, `FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.collectionKey == @collectionKey LET image = DOCUMENT(images, relation.imageKey) FILTER image != null && image.scopeKey == @scopeKey LET caption = DOCUMENT(imageCaptions, image.imageCaptionKey) FILTER caption != null && caption.scopeKey == @scopeKey && caption.perceptualHash != null LET protected = LENGTH(FOR identityRelation IN imageIdentities FILTER identityRelation.scopeKey == @scopeKey && identityRelation.imageKey == image._key && identityRelation.isReference == true LIMIT 1 RETURN 1) > 0 SORT image.createdAt ASC, image._key ASC RETURN { image, perceptualHash: caption.perceptualHash, protected }`, { scopeKey, collectionKey }) as Array<{ image: unknown; perceptualHash: string; protected: boolean }>;
@@ -168,7 +174,7 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
         (
           await all(
             database,
-            `LET membership = DOCUMENT(userOrganizations, @actorKey) LET scope = DOCUMENT(scopes, @scopeKey) LET image = DOCUMENT(images, @imageKey) FILTER membership != null && membership.status == "active" && scope != null && membership.organizationId == scope.organizationKey && image != null && image.scopeKey == @scopeKey LET scopeRole = FIRST(FOR item IN scopeMembers FILTER item.scopeKey == @scopeKey && item.userOrganizationKey == @actorKey && item.status == "active" LIMIT 1 RETURN item.role) LET elevated = membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"] LET relationCount = LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == @imageKey RETURN 1) LET roles = (FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == @imageKey FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == relation.collectionKey && member.memberKey == @actorKey RETURN member.role == "member" ? "collaborator" : member.role) FILTER elevated || "owner" IN roles || (image.createdByKey == @actorKey && (relationCount == 0 || "collaborator" IN roles)) RETURN true`,
+            `LET membership = DOCUMENT(userOrganizations, @actorKey) LET scope = DOCUMENT(scopes, @scopeKey) LET image = DOCUMENT(images, @imageKey) FILTER membership != null && membership.status == "active" && scope != null && membership.organizationId == scope.organizationKey && image != null && image.scopeKey == @scopeKey && image.mutationPolicy != "system-only" LET scopeRole = FIRST(FOR item IN scopeMembers FILTER item.scopeKey == @scopeKey && item.userOrganizationKey == @actorKey && item.status == "active" LIMIT 1 RETURN item.role) LET elevated = membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"] LET relationCount = LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == @imageKey RETURN 1) LET roles = (FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == @imageKey FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == relation.collectionKey && member.memberKey == @actorKey RETURN member.role == "member" ? "collaborator" : member.role) FILTER elevated || "owner" IN roles || (image.createdByKey == @actorKey && (relationCount == 0 || "collaborator" IN roles)) RETURN true`,
             { scopeKey, imageKey, actorKey },
           )
         )[0],
@@ -464,7 +470,7 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
         (
           await all(
             database,
-            'FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == @collectionKey && member.memberKey == @actorKey && member.role != "owner" REMOVE member IN collectionMembers RETURN true',
+            'LET collection = DOCUMENT(collections, @collectionKey) FILTER collection != null && collection.scopeKey == @scopeKey && collection.mutationPolicy != "system-only" FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == @collectionKey && member.memberKey == @actorKey && member.role != "owner" REMOVE member IN collectionMembers RETURN true',
             { scopeKey, collectionKey, actorKey },
           )
         )[0],
@@ -603,6 +609,7 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
             "images",
             "imageCaptions",
             "collectionImages",
+            "placeImages",
             "collections",
             "imageIdentities",
             "imageCollecitionHightlights",
@@ -616,7 +623,7 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
         async (tx) => {
           const owner = await all(
             tx,
-            'LET actor = DOCUMENT(userOrganizations, @actorKey) LET scope = DOCUMENT(scopes, @scopeKey) LET collection = DOCUMENT(collections, @collectionKey) LET scopeRole = FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == @actorKey && member.status == "active" LIMIT 1 RETURN member.role) LET collectionOwner = FIRST(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == @collectionKey && member.memberKey == @actorKey && member.role == "owner" LIMIT 1 RETURN member) FILTER actor != null && actor.status == "active" && scope != null && actor.organizationId == scope.organizationKey && collection != null && collection.scopeKey == @scopeKey FILTER actor.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"] || collectionOwner != null RETURN true',
+            'LET actor = DOCUMENT(userOrganizations, @actorKey) LET scope = DOCUMENT(scopes, @scopeKey) LET collection = DOCUMENT(collections, @collectionKey) LET scopeRole = FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == @actorKey && member.status == "active" LIMIT 1 RETURN member.role) LET collectionOwner = FIRST(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == @collectionKey && member.memberKey == @actorKey && member.role == "owner" LIMIT 1 RETURN member) FILTER actor != null && actor.status == "active" && scope != null && actor.organizationId == scope.organizationKey && collection != null && collection.scopeKey == @scopeKey && collection.mutationPolicy != "system-only" FILTER actor.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"] || collectionOwner != null RETURN true',
             { scopeKey, collectionKey, actorKey },
           );
           if (!owner.length) return null;
@@ -747,6 +754,7 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
             "images",
             "imageCaptions",
             "collectionImages",
+            "placeImages",
             "collections",
             "imageIdentities",
             "visualIdentities",
@@ -761,7 +769,7 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
         async (tx) => {
           const existing = (await all(
             tx,
-            'LET actor = DOCUMENT(userOrganizations, @actorKey) LET scope = DOCUMENT(scopes, @scopeKey) LET scopeRole = FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == @actorKey && member.status == "active" LIMIT 1 RETURN member.role) FILTER actor != null && actor.status == "active" && scope != null && actor.organizationId == scope.organizationKey FOR imageKey IN @imageKeys LET image = DOCUMENT(images, imageKey) FILTER image != null && image.scopeKey == @scopeKey LET relationCount = LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == imageKey RETURN 1) LET roles = (FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == imageKey FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == relation.collectionKey && member.memberKey == @actorKey RETURN member.role) FILTER actor.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"] || "owner" IN roles || (image.createdByKey == @actorKey && (relationCount == 0 || "collaborator" IN roles || "member" IN roles)) RETURN { imageKey, isFavorite: image.isFavorite == true }',
+            'LET actor = DOCUMENT(userOrganizations, @actorKey) LET scope = DOCUMENT(scopes, @scopeKey) LET scopeRole = FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == @actorKey && member.status == "active" LIMIT 1 RETURN member.role) FILTER actor != null && actor.status == "active" && scope != null && actor.organizationId == scope.organizationKey FOR imageKey IN @imageKeys LET image = DOCUMENT(images, imageKey) FILTER image != null && image.scopeKey == @scopeKey && image.mutationPolicy != "system-only" LET relationCount = LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == imageKey RETURN 1) LET roles = (FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == imageKey FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == relation.collectionKey && member.memberKey == @actorKey RETURN member.role) FILTER actor.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"] || "owner" IN roles || (image.createdByKey == @actorKey && (relationCount == 0 || "collaborator" IN roles || "member" IN roles)) RETURN { imageKey, isFavorite: image.isFavorite == true }',
             { scopeKey, imageKeys, actorKey },
           )) as Array<{ imageKey: string; isFavorite: boolean }>;
           if (existing.length !== imageKeys.length) return null;
@@ -822,6 +830,7 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
             "FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey IN @imageKeys REMOVE relation IN collectionImages",
             { scopeKey, imageKeys: deletedImageKeys },
           );
+          await tx.query("FOR relation IN placeImages FILTER relation.scopeKey == @scopeKey && relation.imageKey IN @imageKeys REMOVE relation IN placeImages", { scopeKey, imageKeys: deletedImageKeys });
           await tx.query(
             "FOR memory IN imageCollectionMemories FILTER memory.scopeKey == @scopeKey && memory.imageKey IN @imageKeys REMOVE memory IN imageCollectionMemories",
             { scopeKey, imageKeys: deletedImageKeys },
@@ -919,7 +928,7 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
         async (tx) => {
           const source = await all(
             tx,
-            'LET actor = DOCUMENT(userOrganizations, @actorKey) LET scope = DOCUMENT(scopes, @scopeKey) LET scopeRole = FIRST(FOR item IN scopeMembers FILTER item.scopeKey == @scopeKey && item.userOrganizationKey == @actorKey && item.status == "active" LIMIT 1 RETURN item.role) FILTER actor != null && actor.status == "active" && scope != null && actor.organizationId == scope.organizationKey LET elevated = actor.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"] FOR imageKey IN @imageKeys LET image = DOCUMENT(images, imageKey) LET relation = FIRST(FOR candidate IN collectionImages FILTER candidate.scopeKey == @scopeKey && candidate.collectionKey == @sourceCollectionKey && candidate.imageKey == imageKey LIMIT 1 RETURN candidate) LET member = FIRST(FOR candidate IN collectionMembers FILTER candidate.scopeKey == @scopeKey && candidate.collectionKey == @sourceCollectionKey && candidate.memberKey == @actorKey LIMIT 1 RETURN candidate) FILTER image != null && image.scopeKey == @scopeKey && relation != null FILTER elevated || member != null && (member.role == "owner" || (member.role IN ["collaborator", "member"] && image.createdByKey == @actorKey)) RETURN imageKey',
+            'LET actor = DOCUMENT(userOrganizations, @actorKey) LET scope = DOCUMENT(scopes, @scopeKey) LET sourceCollection = DOCUMENT(collections, @sourceCollectionKey) LET scopeRole = FIRST(FOR item IN scopeMembers FILTER item.scopeKey == @scopeKey && item.userOrganizationKey == @actorKey && item.status == "active" LIMIT 1 RETURN item.role) FILTER actor != null && actor.status == "active" && scope != null && actor.organizationId == scope.organizationKey && sourceCollection != null && sourceCollection.scopeKey == @scopeKey && sourceCollection.mutationPolicy != "system-only" LET elevated = actor.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"] FOR imageKey IN @imageKeys LET image = DOCUMENT(images, imageKey) LET relation = FIRST(FOR candidate IN collectionImages FILTER candidate.scopeKey == @scopeKey && candidate.collectionKey == @sourceCollectionKey && candidate.imageKey == imageKey LIMIT 1 RETURN candidate) LET member = FIRST(FOR candidate IN collectionMembers FILTER candidate.scopeKey == @scopeKey && candidate.collectionKey == @sourceCollectionKey && candidate.memberKey == @actorKey LIMIT 1 RETURN candidate) FILTER image != null && image.scopeKey == @scopeKey && image.mutationPolicy != "system-only" && relation != null FILTER elevated || member != null && (member.role == "owner" || (member.role IN ["collaborator", "member"] && image.createdByKey == @actorKey)) RETURN imageKey',
             {
               imageKeys: input.imageKeys,
               scopeKey: input.scopeKey,
@@ -931,7 +940,7 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
             return { status: "selection-changed" as const };
           const destinations = await all(
             tx,
-            'LET actor = DOCUMENT(userOrganizations, @actorKey) LET scope = DOCUMENT(scopes, @scopeKey) LET scopeRole = FIRST(FOR item IN scopeMembers FILTER item.scopeKey == @scopeKey && item.userOrganizationKey == @actorKey && item.status == "active" LIMIT 1 RETURN item.role) FILTER actor != null && actor.status == "active" && scope != null && actor.organizationId == scope.organizationKey LET elevated = actor.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"] FOR collectionKey IN @collectionKeys LET collection = DOCUMENT(collections, collectionKey) LET member = FIRST(FOR candidate IN collectionMembers FILTER candidate.scopeKey == @scopeKey && candidate.collectionKey == collectionKey && candidate.memberKey == @actorKey LIMIT 1 RETURN candidate) FILTER collection != null && collection.scopeKey == @scopeKey FILTER elevated || member != null && member.role IN ["owner", "collaborator", "member"] RETURN collectionKey',
+            'LET actor = DOCUMENT(userOrganizations, @actorKey) LET scope = DOCUMENT(scopes, @scopeKey) LET scopeRole = FIRST(FOR item IN scopeMembers FILTER item.scopeKey == @scopeKey && item.userOrganizationKey == @actorKey && item.status == "active" LIMIT 1 RETURN item.role) FILTER actor != null && actor.status == "active" && scope != null && actor.organizationId == scope.organizationKey LET elevated = actor.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"] FOR collectionKey IN @collectionKeys LET collection = DOCUMENT(collections, collectionKey) LET member = FIRST(FOR candidate IN collectionMembers FILTER candidate.scopeKey == @scopeKey && candidate.collectionKey == collectionKey && candidate.memberKey == @actorKey LIMIT 1 RETURN candidate) FILTER collection != null && collection.scopeKey == @scopeKey && collection.mutationPolicy != "system-only" FILTER elevated || member != null && member.role IN ["owner", "collaborator", "member"] RETURN collectionKey',
             {
               collectionKeys: input.destinationCollectionKeys,
               scopeKey: input.scopeKey,
@@ -1058,11 +1067,11 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
     updateUpload: updateGalleryUpload,
     queueUploads(input) {
       return transaction(
-        { read: [], write: ["galleryUploads"] },
+        { read: ["collections"], write: ["galleryUploads"] },
         async (tx) => {
           const rows = await all(
             tx,
-            'FOR uploadKey IN @uploadKeys LET upload = DOCUMENT(galleryUploads, uploadKey) FILTER upload != null && upload.organizationKey == @organizationKey && upload.scopeKey == @scopeKey && upload.actorKey == @actorKey && upload.status == "reserved" && upload.expiresAt > @now RETURN upload',
+            'FOR uploadKey IN @uploadKeys LET upload = DOCUMENT(galleryUploads, uploadKey) LET collection = upload == null || upload.collectionKey == null ? null : DOCUMENT(collections, upload.collectionKey) FILTER upload != null && upload.organizationKey == @organizationKey && upload.scopeKey == @scopeKey && upload.actorKey == @actorKey && upload.status == "reserved" && upload.expiresAt > @now FILTER upload.collectionKey == null || (collection != null && collection.scopeKey == @scopeKey && collection.mutationPolicy != "system-only") RETURN upload',
             input,
           );
           if (rows.length !== input.uploadKeys.length) return null;
@@ -1121,7 +1130,7 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
         async (tx) => {
           const allowed = await all(
             tx,
-            'LET current = DOCUMENT(galleryUploads, @uploadKey) LET actor = DOCUMENT(userOrganizations, @actorKey) LET scope = DOCUMENT(scopes, @scopeKey) LET image = DOCUMENT(images, @imageKey) LET scopeRole = FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == @actorKey && member.status == "active" LIMIT 1 RETURN member.role) LET manager = actor.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"] LET collection = @collectionKey == null ? null : DOCUMENT(collections, @collectionKey) LET member = @collectionKey == null ? null : FIRST(FOR candidate IN collectionMembers FILTER candidate.scopeKey == @scopeKey && candidate.collectionKey == @collectionKey && candidate.memberKey == @actorKey LIMIT 1 RETURN candidate) FILTER current != null && current.status == "processing" && current.processingLeaseId == @leaseId && current.scopeKey == @scopeKey && current.actorKey == @actorKey && current.imageKey == @imageKey FILTER actor != null && actor.status == "active" && scope != null && actor.organizationId == scope.organizationKey FILTER image != null && image.scopeKey == @scopeKey && image.createdByKey == @actorKey FILTER @collectionKey == null ? manager : (collection != null && collection.scopeKey == @scopeKey && (manager || member.role IN ["owner", "collaborator", "member"])) RETURN true',
+            'LET current = DOCUMENT(galleryUploads, @uploadKey) LET actor = DOCUMENT(userOrganizations, @actorKey) LET scope = DOCUMENT(scopes, @scopeKey) LET image = DOCUMENT(images, @imageKey) LET scopeRole = FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == @actorKey && member.status == "active" LIMIT 1 RETURN member.role) LET manager = actor.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"] LET collection = @collectionKey == null ? null : DOCUMENT(collections, @collectionKey) LET member = @collectionKey == null ? null : FIRST(FOR candidate IN collectionMembers FILTER candidate.scopeKey == @scopeKey && candidate.collectionKey == @collectionKey && candidate.memberKey == @actorKey LIMIT 1 RETURN candidate) FILTER current != null && current.status == "processing" && current.processingLeaseId == @leaseId && current.scopeKey == @scopeKey && current.actorKey == @actorKey && current.imageKey == @imageKey FILTER actor != null && actor.status == "active" && scope != null && actor.organizationId == scope.organizationKey FILTER image != null && image.scopeKey == @scopeKey && image.createdByKey == @actorKey FILTER @collectionKey == null ? manager : (collection != null && collection.scopeKey == @scopeKey && collection.mutationPolicy != "system-only" && (manager || member.role IN ["owner", "collaborator", "member"])) RETURN true',
             {
               uploadKey: upload.key,
               scopeKey: upload.scopeKey,
@@ -1197,7 +1206,7 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
         (
           await all(
             database,
-            'LET actor = DOCUMENT(userOrganizations, @actorKey) LET scope = DOCUMENT(scopes, @scopeKey) LET scopeRole = FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == @actorKey && member.status == "active" LIMIT 1 RETURN member.role) FILTER actor != null && actor.status == "active" && scope != null && actor.organizationId == scope.organizationKey LET elevated = actor.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"] LET collection = @collectionKey == null ? null : DOCUMENT(collections, @collectionKey) LET member = @collectionKey == null ? null : FIRST(FOR candidate IN collectionMembers FILTER candidate.scopeKey == @scopeKey && candidate.collectionKey == @collectionKey && candidate.memberKey == @actorKey LIMIT 1 RETURN candidate) FILTER @collectionKey == null ? elevated : (collection != null && collection.scopeKey == @scopeKey && (elevated || member.role IN ["owner", "collaborator", "member"])) RETURN true',
+            'LET actor = DOCUMENT(userOrganizations, @actorKey) LET scope = DOCUMENT(scopes, @scopeKey) LET scopeRole = FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == @actorKey && member.status == "active" LIMIT 1 RETURN member.role) FILTER actor != null && actor.status == "active" && scope != null && actor.organizationId == scope.organizationKey LET elevated = actor.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"] LET collection = @collectionKey == null ? null : DOCUMENT(collections, @collectionKey) LET member = @collectionKey == null ? null : FIRST(FOR candidate IN collectionMembers FILTER candidate.scopeKey == @scopeKey && candidate.collectionKey == @collectionKey && candidate.memberKey == @actorKey LIMIT 1 RETURN candidate) FILTER @collectionKey == null ? elevated : (collection != null && collection.scopeKey == @scopeKey && collection.mutationPolicy != "system-only" && (elevated || member.role IN ["owner", "collaborator", "member"])) RETURN true',
             {
               scopeKey: upload.scopeKey,
               collectionKey: upload.collectionKey ?? null,
@@ -1258,7 +1267,7 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
     async setImageFavorite(scopeKey, imageKey, actorKey, isFavorite, now) {
       const value = await all(
         database,
-        'LET actor = DOCUMENT(userOrganizations, @actorKey) LET scope = DOCUMENT(scopes, @scopeKey) LET image = DOCUMENT(images, @imageKey) LET scopeRole = FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == @actorKey && member.status == "active" LIMIT 1 RETURN member.role) LET collectionKeys = (FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == @imageKey RETURN DISTINCT relation.collectionKey) LET roles = (FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == @imageKey FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == relation.collectionKey && member.memberKey == @actorKey RETURN member.role) LET relationCount = LENGTH(collectionKeys) FILTER actor != null && actor.status == "active" && scope != null && actor.organizationId == scope.organizationKey && image != null && image.scopeKey == @scopeKey FILTER actor.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"] || "owner" IN roles || (image.createdByKey == @actorKey && (relationCount == 0 || "collaborator" IN roles || "member" IN roles)) UPDATE image WITH { isFavorite: @isFavorite, updatedAt: @now } IN images RETURN { image: NEW, collectionKeys }',
+        'LET actor = DOCUMENT(userOrganizations, @actorKey) LET scope = DOCUMENT(scopes, @scopeKey) LET image = DOCUMENT(images, @imageKey) LET scopeRole = FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == @actorKey && member.status == "active" LIMIT 1 RETURN member.role) LET collectionKeys = (FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == @imageKey RETURN DISTINCT relation.collectionKey) LET roles = (FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == @imageKey FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == relation.collectionKey && member.memberKey == @actorKey RETURN member.role) LET relationCount = LENGTH(collectionKeys) FILTER actor != null && actor.status == "active" && scope != null && actor.organizationId == scope.organizationKey && image != null && image.scopeKey == @scopeKey && image.mutationPolicy != "system-only" FILTER actor.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"] || "owner" IN roles || (image.createdByKey == @actorKey && (relationCount == 0 || "collaborator" IN roles || "member" IN roles)) UPDATE image WITH { isFavorite: @isFavorite, updatedAt: @now } IN images RETURN { image: NEW, collectionKeys }',
         { scopeKey, imageKey, actorKey, isFavorite, now },
       );
       const row = value[0] as
@@ -1282,7 +1291,7 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
     ) {
       const value = await all(
         database,
-        'LET actor = DOCUMENT(userOrganizations, @actorKey) LET scope = DOCUMENT(scopes, @scopeKey) LET image = DOCUMENT(images, @imageKey) LET scopeRole = FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == @actorKey && member.status == "active" LIMIT 1 RETURN member.role) LET collectionKeys = (FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == @imageKey RETURN DISTINCT relation.collectionKey) LET roles = (FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == @imageKey FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == relation.collectionKey && member.memberKey == @actorKey RETURN member.role) LET relationCount = LENGTH(collectionKeys) FILTER actor != null && actor.status == "active" && scope != null && actor.organizationId == scope.organizationKey && image != null && image.scopeKey == @scopeKey FILTER actor.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"] || "owner" IN roles || (image.createdByKey == @actorKey && (relationCount == 0 || "collaborator" IN roles || "member" IN roles)) UPDATE image WITH { filename: @filename, isFavorite: @isFavorite, embedding: @embedding, updatedAt: @now } IN images RETURN { image: NEW, collectionKeys }',
+        'LET actor = DOCUMENT(userOrganizations, @actorKey) LET scope = DOCUMENT(scopes, @scopeKey) LET image = DOCUMENT(images, @imageKey) LET scopeRole = FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == @actorKey && member.status == "active" LIMIT 1 RETURN member.role) LET collectionKeys = (FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == @imageKey RETURN DISTINCT relation.collectionKey) LET roles = (FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == @imageKey FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == relation.collectionKey && member.memberKey == @actorKey RETURN member.role) LET relationCount = LENGTH(collectionKeys) FILTER actor != null && actor.status == "active" && scope != null && actor.organizationId == scope.organizationKey && image != null && image.scopeKey == @scopeKey && image.mutationPolicy != "system-only" FILTER actor.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"] || "owner" IN roles || (image.createdByKey == @actorKey && (relationCount == 0 || "collaborator" IN roles || "member" IN roles)) UPDATE image WITH { filename: @filename, isFavorite: @isFavorite, embedding: @embedding, updatedAt: @now } IN images RETURN { image: NEW, collectionKeys }',
         { scopeKey, imageKey, actorKey, filename, isFavorite, embedding, now },
       );
       const row = value[0] as
@@ -1307,7 +1316,7 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
     ) {
       const value = await all(
         database,
-        'LET actor = DOCUMENT(userOrganizations, @actorKey) LET scope = DOCUMENT(scopes, @scopeKey) LET collection = DOCUMENT(collections, @collectionKey) LET scopeRole = FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == @actorKey && member.status == "active" LIMIT 1 RETURN member.role) LET owner = FIRST(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == @collectionKey && member.memberKey == @actorKey && member.role == "owner" LIMIT 1 RETURN member) LET cover = @coverImageKey == null ? null : DOCUMENT(images, @coverImageKey) LET related = @coverImageKey == null ? null : FIRST(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.collectionKey == @collectionKey && relation.imageKey == @coverImageKey LIMIT 1 RETURN relation) FILTER actor != null && actor.status == "active" && scope != null && actor.organizationId == scope.organizationKey && collection != null && collection.scopeKey == @scopeKey FILTER actor.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"] || owner != null FILTER !@setCover || @coverImageKey == null || (cover != null && cover.scopeKey == @scopeKey && related != null) UPDATE collection WITH MERGE({ name: @name, isFavorite: @isFavorite, embedding: @embedding, updatedAt: @now }, @setCover ? { coverImageKey: @coverImageKey } : {}) IN collections OPTIONS { keepNull: false } RETURN NEW',
+        'LET actor = DOCUMENT(userOrganizations, @actorKey) LET scope = DOCUMENT(scopes, @scopeKey) LET collection = DOCUMENT(collections, @collectionKey) LET scopeRole = FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == @actorKey && member.status == "active" LIMIT 1 RETURN member.role) LET owner = FIRST(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == @collectionKey && member.memberKey == @actorKey && member.role == "owner" LIMIT 1 RETURN member) LET cover = @coverImageKey == null ? null : DOCUMENT(images, @coverImageKey) LET related = @coverImageKey == null ? null : FIRST(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.collectionKey == @collectionKey && relation.imageKey == @coverImageKey LIMIT 1 RETURN relation) FILTER actor != null && actor.status == "active" && scope != null && actor.organizationId == scope.organizationKey && collection != null && collection.scopeKey == @scopeKey && collection.mutationPolicy != "system-only" FILTER actor.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"] || owner != null FILTER !@setCover || @coverImageKey == null || (cover != null && cover.scopeKey == @scopeKey && related != null) UPDATE collection WITH MERGE({ name: @name, isFavorite: @isFavorite, embedding: @embedding, updatedAt: @now }, @setCover ? { coverImageKey: @coverImageKey } : {}) IN collections OPTIONS { keepNull: false } RETURN NEW',
         {
           scopeKey,
           collectionKey,
@@ -1322,7 +1331,8 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
       );
       return value[0] ? parse(collectionSchema, value[0]) : null;
     },
-    deleteCollection(scopeKey, collectionKey, actorKey, now) {
+    async deleteCollection(scopeKey, collectionKey, actorKey, now) {
+      if (!await userMutableCollection(database, scopeKey, collectionKey)) return null;
       return transaction(
         {
           read: ["scopes", "userOrganizations", "scopeMembers"],
@@ -1409,7 +1419,7 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
         async (tx) => {
           const references = await all(
             tx,
-            'LET actor = DOCUMENT(userOrganizations, @actorKey) LET scope = DOCUMENT(scopes, @scopeKey) LET scopeMember = FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == @actorKey && member.status == "active" LIMIT 1 RETURN member) FILTER actor != null && actor.status == "active" && scope != null && actor.organizationId == scope.organizationKey FILTER actor.orgRole IN ["owner", "admin"] || scopeMember.role IN ["owner", "admin", "moderator"] FOR image IN images FILTER image._key IN @imageKeys && image.scopeKey == @scopeKey && image.createdByKey == @actorKey RETURN image._key',
+            'LET actor = DOCUMENT(userOrganizations, @actorKey) LET scope = DOCUMENT(scopes, @scopeKey) LET scopeMember = FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == @actorKey && member.status == "active" LIMIT 1 RETURN member) FILTER actor != null && actor.status == "active" && scope != null && actor.organizationId == scope.organizationKey FILTER actor.orgRole IN ["owner", "admin"] || scopeMember.role IN ["owner", "admin", "moderator"] FOR image IN images FILTER image._key IN @imageKeys && image.scopeKey == @scopeKey && image.createdByKey == @actorKey && image.mutationPolicy != "system-only" RETURN image._key',
             {
               imageKeys: referenceImageKeys,
               scopeKey: identity.scopeKey,
@@ -1475,6 +1485,7 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
       );
     },
     async listHighlightCandidates(scopeKey, collectionKey, actorKey) {
+      if (!await userMutableCollection(database, scopeKey, collectionKey)) return null;
       const row = (
         (await all(
           database,
@@ -1489,7 +1500,8 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
           }))
         : null;
     },
-    createHighlight(highlight, actorKey) {
+    async createHighlight(highlight, actorKey) {
+      if (!await userMutableCollection(database, highlight.scopeKey, highlight.collectionKey)) return null;
       return transaction(
         {
           read: [
@@ -1546,6 +1558,8 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
       );
     },
     async deleteHighlight(scopeKey, highlightKey, actorKey) {
+      const mutable = await all(database, 'LET highlight = DOCUMENT(imageCollecitionHightlights, @highlightKey) LET collection = highlight == null ? null : DOCUMENT(collections, highlight.collectionKey) FILTER highlight != null && highlight.scopeKey == @scopeKey && collection != null && collection.mutationPolicy != "system-only" RETURN true', { scopeKey, highlightKey });
+      if (!mutable.length) return null;
       const value = (
         await all(
           database,
@@ -1556,6 +1570,7 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
       return value ? parse(imageCollectionHighlightSchema, value) : null;
     },
     async listMemoryCandidates(scopeKey, collectionKey, actorKey) {
+      if (!await userMutableCollection(database, scopeKey, collectionKey)) return null;
       const row = (
         (await all(
           database,
@@ -1577,7 +1592,8 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
           }))
         : null;
     },
-    createMemory(memory, collectionKey, actorKey) {
+    async createMemory(memory, collectionKey, actorKey) {
+      if (!await userMutableCollection(database, memory.scopeKey, collectionKey)) return { status: 'forbidden' as const, collectionKeys: [] };
       return transaction(
         {
           read: [
@@ -1658,6 +1674,7 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
       );
     },
     async deleteAccessibleMemory(scopeKey, memoryKey, collectionKey, actorKey) {
+      if (!await userMutableCollection(database, scopeKey, collectionKey) || !await userMutableMemory(database, scopeKey, memoryKey)) return null;
       return (
         (
           await memoryRows(

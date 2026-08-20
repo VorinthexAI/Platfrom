@@ -18,7 +18,7 @@ export const OPENAI_VISION_MODEL = 'gpt-4.1-mini';
 const formats = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' } as const;
 type Extension = keyof typeof formats;
 export type UploadedImageFile = File | { filename: string; mimeType: string; sizeBytes: number; bytes: Uint8Array };
-export interface ProcessImageInput { scopeKey: string; ownerKey: string; file: UploadedImageFile; imageKey?: string; idempotencyKey?: string; location?: ImageLocation; signal?: AbortSignal; }
+export interface ProcessImageInput { scopeKey: string; ownerKey: string; file: UploadedImageFile; imageKey?: string; idempotencyKey?: string; location?: ImageLocation; mutationPolicy?: 'user' | 'system-only'; signal?: AbortSignal; }
 export const generatedImageCaptionSchema = z.object({ caption: z.string().trim().min(1).max(20_000), score: z.number().int().min(1).max(100) }).strict();
 export type GeneratedImageCaption = z.infer<typeof generatedImageCaptionSchema>;
 export interface ImageProcessingMetrics { count: number; generated: number; reused: number; hashDurationMs: number; captionDurationMs: number; durationMs: number; }
@@ -161,12 +161,12 @@ async function execute(input: ProcessImageInput, image: ValidatedImage, perceptu
       });
       canonical = captionRecord;
     }
-    if (input.location?.city || input.location?.country || input.location?.countryCode) {
+    if (input.location?.city || input.location?.country || input.location?.countryCode || input.location?.placeName || input.location?.placeSummary) {
       const embeddingText = buildImageEmbeddingText({ filename: image.filename, caption, ...input.location });
       try { embedding = dependencies.embed ? await dependencies.embed(embeddingText, input.signal) : await embedText({ text: embeddingText, signal: input.signal }); currentEmbeddingSchema.parse(embedding); } catch (error) { throw new ImageProcessingError('IMAGE_EMBEDDING_FAILED', `The image embedding must contain exactly ${EMBEDDING_DIMENSIONS} finite values.`, { cause: error }); }
     }
     const now = new Date().toISOString();
-    try { return await persistImage({ image: { key, scopeKey: input.scopeKey, filename: image.filename, caption, imageCaptionKey: canonical.key, createdByKey: input.ownerKey, storageKey, mimeType: image.mimeType, sizeBytes: image.sizeBytes, width: image.width, height: image.height, ...(input.location?.city ? { city: input.location.city } : {}), ...(input.location?.country ? { country: input.location.country } : {}), ...(input.location?.countryCode ? { countryCode: input.location.countryCode } : {}), embedding, isFavorite: false, createdAt: now, updatedAt: now }, caption: captionRecord, actorKey: input.ownerKey }); } catch (error) { throw new ImageProcessingError('IMAGE_INSERT_FAILED', 'The prepared image could not be persisted.', { cause: error }); }
+    try { return await persistImage({ image: { key, scopeKey: input.scopeKey, filename: image.filename, caption, imageCaptionKey: canonical.key, createdByKey: input.ownerKey, storageKey, mimeType: image.mimeType, sizeBytes: image.sizeBytes, width: image.width, height: image.height, ...(input.location?.city ? { city: input.location.city } : {}), ...(input.location?.country ? { country: input.location.country } : {}), ...(input.location?.countryCode ? { countryCode: input.location.countryCode } : {}), ...(input.location?.placeName ? { placeName: input.location.placeName } : {}), ...(input.location?.placeSummary ? { placeSummary: input.location.placeSummary } : {}), ...(input.location?.latitude !== undefined ? { latitude: input.location.latitude } : {}), ...(input.location?.longitude !== undefined ? { longitude: input.location.longitude } : {}), ...(input.location?.locationSource ? { locationSource: input.location.locationSource } : {}), mutationPolicy: input.mutationPolicy ?? 'user', embedding, isFavorite: false, createdAt: now, updatedAt: now }, caption: captionRecord, actorKey: input.ownerKey }); } catch (error) { throw new ImageProcessingError('IMAGE_INSERT_FAILED', 'The prepared image could not be persisted.', { cause: error }); }
   } catch (error) {
     let owner: Image | null; try { owner = await getImage(key); } catch (ownershipError) { throw new ImageProcessingError('IMAGE_CLEANUP_FAILED', 'Image ownership could not be verified; the uploaded object was retained.', { cause: new AggregateError([error, ownershipError]) }); }
     if (owner?.storageKey === storageKey) { if (owner.scopeKey === input.scopeKey) return owner; throw error; }

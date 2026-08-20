@@ -62,6 +62,7 @@ if (import.meta.main) {
     hostname: '0.0.0.0',
     port,
     fetch: app.fetch,
+    idleTimeout: 120,
     websocket,
   });
   console.log(`vorinthex app listening on ${port}`);

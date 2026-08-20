@@ -30,7 +30,11 @@ export const imageIdeasOutputSchema = z.object({
   concepts: z.array(imageIdeaSchema).min(1).max(8),
 }).strict();
 
-export const imageGenerateModelInputSchema = imageGenerateInputSchema.required({ size: true, quality: true });
+export const imageGenerateModelInputSchema = imageGenerateInputSchema
+  .pick({ prompt: true, count: true, size: true, quality: true })
+  .required({ size: true, quality: true })
+  .extend({ mode: z.enum(['default', 'fast']).default('default') })
+  .strict();
 
 export const savedGeneratedImageSchema = z.object({
   key: z.string().cuid(),
@@ -124,6 +128,10 @@ function memberContext(context: ToolContext) {
 }
 
 const extensionByMimeType = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' } as const;
+const aspectRatioBySize = { '1024x1024': '1:1', '1024x1536': '2:3', '1536x1024': '3:2' } as const;
+export const imageGenerationRoute = (mode: ImageGenerateModelInput['mode'], organizationKey: string) => mode === 'fast'
+  ? { mode: 'fixed' as const, organizationKey, actionSlug: 'generate-image' as const, modelSlug: 'bfl.flux-2-klein-4b', providerSlug: 'openrouter' as const }
+  : { mode: 'fixed' as const, organizationKey, actionSlug: 'generate-image' as const, modelSlug: 'openai.gpt-image-2', providerSlug: 'openai' as const };
 const inFlight = new Map<string, { hash: string; promise: Promise<ImageGenerateOutput> }>();
 const generatedImageKey = (scopeKey: string, idempotencyKey: string, index: number) => `c${createHash('sha256').update(`${scopeKey}\0${idempotencyKey}:${index}`).digest('hex').slice(0, 24)}`;
 
@@ -156,7 +164,10 @@ export function createImageGenerationService(dependencies: ImageGenerationServic
   async function generateRaw(rawInput: unknown, organizationKey: string, execution: Pick<ExecuteActionOptions, 'signal' | 'timeoutMs'> = {}): Promise<{ output: ImageOutput; durationMs: number; costUsd: number | null }> {
     const input = imageGenerateModelInputSchema.parse(rawInput);
     const startedAt = now();
-    const response: ProviderExecuteResponse<ImageOutput> = await execute({ mode: 'fixed', organizationKey, actionSlug: 'generate-image', modelSlug: 'openai.gpt-image-2', providerSlug: 'openai' }, input, { ...dependencies, ...execution });
+    const providerInput = input.mode === 'fast'
+      ? { prompt: input.prompt, count: input.count, aspectRatio: aspectRatioBySize[input.size], outputFormat: 'png' as const }
+      : { prompt: input.prompt, count: input.count, size: input.size, quality: input.quality };
+    const response: ProviderExecuteResponse<ImageOutput> = await execute(imageGenerationRoute(input.mode, organizationKey), providerInput, { ...dependencies, ...execution });
     const output = imageOutputSchema.parse(response.output);
     if (output.images.length !== input.count) throw new Error(`Image provider returned ${output.images.length} images; expected ${input.count}.`);
     return { output, durationMs: Math.max(0, Math.round(now() - startedAt)), costUsd: response.costUsd ?? null };

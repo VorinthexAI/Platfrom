@@ -12,6 +12,7 @@ import { MAX_IMAGE_CAPTION_URLS } from '@/lib/image-caption-constants';
  */
 export const PROVIDER_SLUGS = [
   'openai',
+  'openrouter',
   'anthropic',
   'xai',
   'google-vertex',
@@ -33,6 +34,7 @@ export const providerIdSchema = providerSlugSchema;
  */
 export const PROVIDER_NAMES: Record<ProviderId, string> = {
   openai: 'OpenAI',
+  openrouter: 'OpenRouter',
   anthropic: 'Anthropic',
   xai: 'xAI',
   'google-vertex': 'Google Vertex AI',
@@ -159,6 +161,9 @@ export const imageGenerateInputSchema = z
   .object({
     prompt: z.string().trim().min(1).max(32_000),
     size: z.enum(['1024x1024', '1024x1536', '1536x1024']).optional(),
+    resolution: z.enum(['512', '1K', '2K', '4K']).optional(),
+    aspectRatio: z.enum(['1:1', '4:3', '3:4', '3:2', '2:3', '16:9', '9:16', '21:9']).optional(),
+    outputFormat: z.enum(['png', 'jpeg', 'webp']).optional(),
     count: z.number().int().min(1).max(4).default(1),
     quality: z.enum(['low', 'medium', 'high']).optional(),
   })

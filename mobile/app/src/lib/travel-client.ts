@@ -9,6 +9,7 @@ const keySchema = z.string().min(1);
 export const placeSchema = z.strictObject({
   key: keySchema,
   name: z.string().min(1),
+  summary: z.string().max(1_200),
   countryCode: z.string().length(2),
   latitude: z.number().finite().min(-90).max(90),
   longitude: z.number().finite().min(-180).max(180),
@@ -17,29 +18,29 @@ export const placeSchema = z.strictObject({
 
 export type Place = z.infer<typeof placeSchema>;
 
-const PLACE_IMAGE_ROLES = ["hero", "scene-1", "scene-2", "scene-3"] as const;
-export const travelAssetConceptSchema = z.strictObject({
-  title: z.string().trim().min(1).max(160),
-  prompt: z.string().trim().min(1).max(4_000),
+export const recentPlaceSchema = z.strictObject({
+  key: keySchema,
+  kind: z.enum(["country", "place"]),
+  name: z.string().trim().min(1),
+  summary: z.string(),
+  countryCode: z.string().regex(/^[A-Z]{2}$/),
+  latitude: z.number().finite().min(-90).max(90),
+  longitude: z.number().finite().min(-180).max(180),
+  openedAt: z.iso.datetime(),
 });
-export const travelAssetConceptsSchema = z.tuple([
-  travelAssetConceptSchema,
-  travelAssetConceptSchema,
-  travelAssetConceptSchema,
-  travelAssetConceptSchema,
-]).superRefine((concepts, context) => {
-  for (const field of ["title", "prompt"] as const) {
-    const normalized = concepts.map((concept) => concept[field].toLocaleLowerCase());
-    if (new Set(normalized).size !== concepts.length) context.addIssue({ code: "custom", path: [], message: `Asset concept ${field}s must be distinct.` });
-  }
-  concepts.forEach((concept, index) => {
-    if (!concept.prompt.toLocaleLowerCase().startsWith(`role: ${PLACE_IMAGE_ROLES[index]}.`)) {
-      context.addIssue({ code: "custom", path: [index, "prompt"], message: `Asset concept ${index + 1} must have role ${PLACE_IMAGE_ROLES[index]}.` });
-    }
-  });
+export type RecentPlace = z.infer<typeof recentPlaceSchema>;
+
+const summarySchema = z.string().trim().min(1).max(1_200);
+const popularCitySchema = z.strictObject({
+  name: z.string().trim().min(1).max(120),
+  latitude: z.number().finite().min(-90).max(90),
+  longitude: z.number().finite().min(-180).max(180),
+});
+const popularCitiesSchema = z.array(popularCitySchema).length(10).superRefine((cities, context) => {
+  if (new Set(cities.map(({ name }) => name.toLocaleLowerCase())).size !== cities.length) context.addIssue({ code: "custom", message: "Popular cities must be distinct." });
 });
 
-export const placeDetailSchema = z.strictObject({
+const detailBaseSchema = z.strictObject({
   location: z.strictObject({
     kind: z.enum(["country", "place"]),
     name: z.string().trim().min(1).max(160),
@@ -52,21 +53,22 @@ export const placeDetailSchema = z.strictObject({
     longitude: z.number().finite().min(-180).max(180),
   }),
   title: z.string().trim().min(1).max(160),
-  summary: z.string().trim().min(1).max(1_500),
-  facts: z.array(z.strictObject({ label: z.string().trim().min(1).max(80), value: z.string().trim().min(1).max(300) })).min(3).max(10),
-  highlights: z.array(z.strictObject({ title: z.string().trim().min(1).max(120), description: z.string().trim().min(1).max(500) })).min(1).max(8),
-  practicalInfo: z.strictObject({
-    bestTimeToVisit: z.string().trim().min(1).max(500),
-    languages: z.array(z.string().trim().min(1).max(80)).min(1).max(8),
-    currency: z.string().trim().min(1).max(120),
-    timeZone: z.string().trim().min(1).max(120),
-    safety: z.string().trim().min(1).max(600),
-    entryRequirements: z.string().trim().min(1).max(800),
-  }),
-  assetConcepts: travelAssetConceptsSchema,
+  summary: summarySchema,
+  culture: z.string().trim().min(1).max(1_200),
+  food: z.string().trim().min(1).max(1_200),
+  whyVisit: z.string().trim().min(1).max(1_200),
   imageRequestToken: z.string().min(1).max(64 * 1024),
 });
+export const placeDetailSchema = detailBaseSchema.extend({
+  location: detailBaseSchema.shape.location.extend({ kind: z.literal("country") }),
+  popularCities: popularCitiesSchema,
+  childrenRequestToken: z.string().min(1).max(64 * 1024),
+}).strict();
 export type PlaceDetail = z.infer<typeof placeDetailSchema>;
+export const cityDetailSchema = detailBaseSchema.extend({
+  location: detailBaseSchema.shape.location.extend({ kind: z.literal("place") }),
+}).strict();
+export type CityDetail = z.infer<typeof cityDetailSchema>;
 
 const authoritativeCountrySchema = z.strictObject({
   name: z.string().trim().min(1).max(160),
@@ -77,39 +79,55 @@ const authoritativeCountrySchema = z.strictObject({
 });
 export type AuthoritativeCountry = z.input<typeof authoritativeCountrySchema>;
 
-const readyPlaceImageSchema = <Role extends typeof PLACE_IMAGE_ROLES[number]>(role: Role) => z.strictObject({
-  role: z.literal(role),
+export const PLACE_IMAGE_PNG_MAX_BYTES = 12 * 1024 * 1024;
+const pngDataUrlSchema = z.string()
+  .max("data:image/png;base64,".length + Math.ceil(PLACE_IMAGE_PNG_MAX_BYTES / 3) * 4)
+  .regex(/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/)
+  .superRefine((url, context) => {
+    const encoded = url.slice("data:image/png;base64,".length);
+    const decodedBytes = Math.floor(encoded.length * 3 / 4) - (encoded.endsWith("==") ? 2 : encoded.endsWith("=") ? 1 : 0);
+    if (decodedBytes > PLACE_IMAGE_PNG_MAX_BYTES) context.addIssue({ code: "custom", message: "Place image exceeds 12 MiB." });
+  });
+const readyPlaceImageSchema = z.strictObject({
   status: z.literal("ready"),
   title: z.string().trim().min(1).max(160),
-  url: z.string().max("data:image/webp;base64,".length + Math.ceil((4 * 1024 * 1024) / 3) * 4).regex(/^data:image\/webp;base64,[A-Za-z0-9+/]+={0,2}$/),
-  width: z.literal(864),
-  height: z.literal(1536),
-  mimeType: z.literal("image/webp"),
+  url: pngDataUrlSchema,
+  width: z.literal(1536),
+  height: z.literal(1024),
+  mimeType: z.literal("image/png"),
 });
-export const placeImagesResponseSchema = z.strictObject({
+export const placeImageResponseSchema = z.strictObject({
   status: z.literal("ready"),
-  images: z.tuple([
-    readyPlaceImageSchema("hero"),
-    readyPlaceImageSchema("scene-1"),
-    readyPlaceImageSchema("scene-2"),
-    readyPlaceImageSchema("scene-3"),
-  ]),
+  image: readyPlaceImageSchema,
   durationMs: z.number().int().nonnegative(),
   costUsd: z.number().nonnegative().nullable(),
 });
-export type PlaceImagesResponse = z.infer<typeof placeImagesResponseSchema>;
+export type PlaceImageResponse = z.infer<typeof placeImageResponseSchema>;
 
 const placeImagesInputSchema = z.strictObject({
   imageRequestToken: z.string().min(1).max(64 * 1024),
 });
 
-const overviewSchema = z.strictObject({ places: z.array(placeSchema) });
+export const travelOverviewSchema = z.strictObject({
+  places: z.array(placeSchema),
+  recentPlaces: z.array(recentPlaceSchema).max(25),
+});
 const assistantResponseSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("answer"), message: z.string().min(1), sources: z.array(z.object({ documentKey: keySchema, name: z.string().min(1) })), changes: assistantChangesSchema }),
   z.object({ type: z.literal("note"), content: z.string(), message: z.string().min(1), sources: z.array(z.object({ documentKey: keySchema, name: z.string().min(1) })), changes: assistantChangesSchema }),
   z.object({ type: z.literal("unsupported"), message: z.string().min(1), sources: z.tuple([]), changes: assistantChangesSchema }),
 ]);
 const contextSchema = z.strictObject({ organizationKey: keySchema, scopeKey: keySchema });
+const countrySearchInputSchema = z.strictObject({ organizationKey: keySchema, query: z.string().trim().min(1).max(200) });
+export const countrySearchResultSchema = z.strictObject({
+  country: z.strictObject({
+    name: z.string().trim().min(1).max(160),
+    countryCode: z.string().regex(/^[A-Z]{2}$/),
+    latitude: z.number().finite().min(-90).max(90),
+    longitude: z.number().finite().min(-180).max(180),
+  }).nullable(),
+});
+export type CountrySearchResult = z.infer<typeof countrySearchResultSchema>["country"];
 
 type ApiResponse<T> = { success: true; data: T } | { success: false; error: { message: string } };
 
@@ -153,7 +171,16 @@ async function post<T>(path: string, body: Record<string, unknown>, schema: z.Zo
 }
 
 export function fetchTravelOverview() {
-  return post("/travel/overview", {}, overviewSchema);
+  return post("/travel/overview", {}, travelOverviewSchema);
+}
+
+export function openPlace(name: string, countryCode: string, signal?: AbortSignal) {
+  return post(
+    "/travel/places/open",
+    z.strictObject({ name: z.string().trim().min(1).max(160), countryCode: z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/) }).parse({ name, countryCode }),
+    z.strictObject({ place: recentPlaceSchema }),
+    { timeout: 30_000, signal },
+  ).then(({ place }) => place);
 }
 
 export function findPlace(query: string, country: AuthoritativeCountry, signal?: AbortSignal) {
@@ -161,15 +188,59 @@ export function findPlace(query: string, country: AuthoritativeCountry, signal?:
     "/travel/places/find",
     z.strictObject({ query: z.string().trim().min(2).max(200), country: authoritativeCountrySchema }).parse({ query, country }),
     z.strictObject({ place: placeDetailSchema }),
-    { signal },
+    { timeout: 30_000, signal },
   ).then(({ place }) => place);
 }
 
-export function generatePlaceImages(input: z.input<typeof placeImagesInputSchema>, signal?: AbortSignal) {
+export function findCity(city: string, country: AuthoritativeCountry, signal?: AbortSignal) {
   return post(
-    "/travel/places/images",
+    "/travel/cities/find",
+    z.strictObject({ city: z.string().trim().min(1).max(160), country: authoritativeCountrySchema }).parse({ city, country }),
+    z.strictObject({ city: cityDetailSchema }),
+    { timeout: 30_000, signal },
+  ).then(({ city: detail }) => detail);
+}
+
+export function findPlaceChildren(childrenRequestToken: string, signal?: AbortSignal) {
+  return post(
+    "/travel/places/children/find",
+    z.strictObject({ childrenRequestToken: z.string().min(1).max(64 * 1024) }).parse({ childrenRequestToken }),
+    z.strictObject({ cities: z.array(cityDetailSchema).length(10) }),
+    { timeout: 30_000, signal },
+  ).then(({ cities }) => cities);
+}
+
+export async function searchCountries(query: string, signal?: AbortSignal) {
+  const { organizationKey } = getTravelContext();
+  const body = countrySearchInputSchema.parse({ organizationKey, query });
+  try {
+    const response = await apiClient.post("/travel/countries/search", body, { timeout: 30_000, signal });
+    return unwrap(response.data, countrySearchResultSchema).country;
+  } catch (error) {
+    throw responseError(error);
+  }
+}
+
+const createPlaceInputSchema = placeSchema.pick({ name: true, summary: true, countryCode: true, latitude: true, longitude: true }).extend({
+  summary: summarySchema,
+  imageRequestToken: z.string().min(1).max(64 * 1024),
+}).strict();
+export type CreatePlaceInput = z.input<typeof createPlaceInputSchema>;
+
+export function createPlace(input: CreatePlaceInput, signal?: AbortSignal) {
+  return post(
+    "/travel/places",
+    createPlaceInputSchema.parse(input),
+    z.strictObject({ place: placeSchema }),
+    { timeout: 30_000, signal },
+  ).then(({ place }) => place);
+}
+
+export function generatePlaceHeroImage(input: z.input<typeof placeImagesInputSchema>, signal?: AbortSignal) {
+  return post(
+    "/travel/places/image",
     placeImagesInputSchema.parse(input),
-    placeImagesResponseSchema,
+    placeImageResponseSchema,
     { timeout: 5 * 60_000, signal },
   );
 }

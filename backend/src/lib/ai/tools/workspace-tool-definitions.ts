@@ -2,6 +2,7 @@ import type { BookService } from '@/lib/books/service';
 import type { EmailService } from '@/lib/email-inbox/service';
 import type { TravelService } from '@/lib/travel/service';
 import type { UserHiddenService } from '@/lib/user-hiddens/service';
+import type { CountrySearchService } from '@/lib/travel/country-search';
 import {
   archiveCapabilities,
   ascendCapabilities,
@@ -20,6 +21,7 @@ export interface WorkspaceToolDependencies {
   content?: ContentToolDependencies;
   executeContent?: typeof runContentTool;
   travel?: TravelService;
+  countries?: CountrySearchService;
   email?: EmailService;
   books?: BookService;
   userHiddens?: UserHiddenService;
@@ -42,6 +44,7 @@ function publicDefinition(capability: AssistantCapability) {
         contentDependencies: dependencies.content,
         executeContent: dependencies.executeContent,
         travel: dependencies.travel,
+        countries: dependencies.countries,
         email: dependencies.email,
         books: dependencies.books,
         userHiddens: dependencies.userHiddens,
