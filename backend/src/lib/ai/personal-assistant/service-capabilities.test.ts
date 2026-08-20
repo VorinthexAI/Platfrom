@@ -14,7 +14,7 @@ const domain = {
 
 const expected: Array<[AssistantSurface, string[]]> = [
   ['knowledge-workspace', ['content.hidden.list', 'folder.hide', 'folder.reveal', 'document.hide', 'document.reveal', 'folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy', 'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.enhance', 'document.translate', 'document.list-versions', 'document.restore-version', 'document.download', 'content.neighbors', 'content.search-history.delete', 'knowledge.search', 'note.write']],
-  ['travel-workspace', ['place.list']],
+  ['travel-workspace', ['place.list', 'place.find', 'place.images.generate']],
   ['signal-workspace', ['email.overview', 'email.sync', 'email.thread.read', 'email.thread.mark-read', 'email.thread.favorite', 'email.draft.create', 'email.draft.update', 'email.draft.send', 'email.disconnect']],
   ['book-workspace', ['book.list', 'book.detail', 'book.chapter.progress', 'book.create']],
 ];
@@ -32,9 +32,9 @@ describe('personal assistant service capabilities', () => {
     }
   });
 
-  test('excludes raw place image generation from models', () => {
+  test('exposes place image generation through the canonical travel tool', () => {
     const capabilities = defaultAssistantCapabilityRegistry.resolve('travel-workspace');
-    expect(capabilities.some(({ definition }) => definition.name === 'place.images.generate')).toBe(false);
+    expect(capabilities.some(({ definition }) => definition.name === 'place.images.generate')).toBe(true);
   });
 
   test('executes canonical services with identity derived only from the member principal', async () => {

@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { contentZodToJsonSchema } from '@/lib/ai/tools/content-json-schema';
 import { runContentTool } from '@/lib/ai/tools/content-runtime';
 import type { ContentToolName } from '@/lib/ai/tools/content-schemas';
-import { createTravelService } from '@/lib/travel/service';
+import { createTravelService, travelPlaceFindInputSchema } from '@/lib/travel/service';
+import { travelPlaceImagesInputSchema } from '@/lib/travel/place-images';
 import { createEmailService, type EmailActor } from '@/lib/email-inbox/service';
 import { defaultBookService } from '@/lib/books/default-service';
 import { newId } from '@/lib/ids';
@@ -105,6 +106,8 @@ export const archiveCapabilities = [
 
 export const compassCapabilities = [
   capability('place.list', 'List saved cities.', z.object({}).strict(), async (_input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).overview(actor.serviceContext, actor.userKey); }),
+  capability('place.find', 'Find a destination and create its structured travel guide.', travelPlaceFindInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).findPlace({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal }); }, 'compass'),
+  capability('place.images.generate', 'Generate safe processed images for a travel guide returned by place.find.', travelPlaceImagesInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).generatePlaceImages({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal }); }, 'compass'),
 ];
 
 export const signalCapabilities = [

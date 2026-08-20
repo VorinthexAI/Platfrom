@@ -76,6 +76,10 @@ duplicate business behavior across handlers and tool wrappers.
 Before adding or changing API behavior, read the current registries and their
 execution paths:
 
+- `backend/src/lib/ai/tools/README.md` defines tools, registry ownership, and
+  the required HTTP/Core-to-canonical-service layering.
+- `backend/src/lib/ai/actions/README.md` defines provider-neutral AI actions
+  and when an operation is an action rather than a tool.
 - `backend/src/lib/ai/tools/index.ts` aggregates public tool names, validation
   schemas, provider definitions, and dispatch.
 - `backend/src/lib/ai/tools/tool-definitions.ts` and
@@ -114,6 +118,15 @@ own transport validation only. Canonical services, operations, the Content
 runtime, and repositories own domain validation, authorization, invariants,
 transactions, external side-effect recovery, and persistence. Do not duplicate
 those rules in route handlers or tool adapters.
+
+Every HTTP route must be classified as either a protocol boundary or a
+business capability. Business capabilities, including CRUD operations, must
+have exactly one product-neutral unified tool whose HTTP and Core adapters
+invoke the same canonical domain service or operation. Do not add route-local
+CRUD behavior. Protocol boundaries (authentication/session issuance, OAuth,
+webhooks, SSE subscriptions, health checks, signed transfers, and provider
+callbacks) are not model-visible tools; their post-authentication business
+effects still use the canonical business layer.
 
 For every new or changed API capability:
 

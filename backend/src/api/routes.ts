@@ -42,7 +42,6 @@ import { invokeContentTool } from './content-tools';
 import { communicationHandlers } from './communication';
 import { bootstrapGuestAuth, getAuthAccount, logoutAuthAccount, patchAuthAccount } from './auth-account';
 import { recordPlatformEvent } from './platform-events';
-import { postPersonalAssistantResponse } from './personal-assistant';
 import { acceptGalleryCollectionInvite, activateGalleryCollectionShare, completeGalleryUploads, createGalleryCollection, createGalleryCollectionInvite, createGalleryCollectionShare, createGalleryHighlight, createGalleryMemory, createGallerySubject, deleteGalleryCollection, deleteGalleryCollectionDuplicates, deleteGalleryHighlight, deleteGalleryImages, deleteGalleryMemory, deleteGallerySubject, findGalleryCollectionDuplicates, galleryOverview, galleryUploadStatus, leaveGalleryCollection, listGalleryCollectionMembers, listGalleryCollectionShares, listGalleryHighlights, listGalleryMemories, listGalleryPendingInvites, listGallerySubjectImages, listGallerySubjects, presignGalleryUploads, readGalleryHighlight, readGalleryMemory, rejectGalleryCollectionInvite, removeGalleryCollectionMember, revokeGalleryCollectionInvite, revokeGalleryCollectionShare, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryCollectionMemberRole, updateGalleryCollectionShare, updateGalleryImage } from './gallery';
 import { travelHandlers } from './travel';
 import { emailHandlers } from './email-inbox';
@@ -424,7 +423,6 @@ export function registerRoutes(app: Hono) {
 
   app.get('/nodes', listNodes);
 
-  app.post('/assistant/respond', postPersonalAssistantResponse);
   app.post('/content/tools/:tool', invokeContentTool);
   app.post('/gallery/overview', galleryOverview);
   app.post('/gallery/collections', createGalleryCollection);
