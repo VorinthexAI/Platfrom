@@ -3566,7 +3566,7 @@ export function KnowledgeWorkspace() {
               <View style={styles.rootSearch}>
                 <SearchIcon size="sm" variant="muted" />
                 <TextInput accessibilityLabel="Search all Archive folders, documents, and files" editable={rootSearchFocusable} focusable={rootSearchFocusable} onChangeText={setRootSearchQuery} placeholder="Search..." ref={rootSearchInputRef} style={styles.rootSearchInput} value={rootSearchQuery} />
-                {rootSearchQuery.trim() ? <Button accessibilityLabel="Clear Archive search" contentMode="raw" onPress={() => setRootSearchQuery("")} size="xs" style={styles.clearSearchButton} variant="secondary"><CloseIcon size="sm" /></Button> : null}
+                {rootSearchQuery.trim() ? <Button accessibilityLabel="Clear Archive search" contentMode="raw" onPress={() => setRootSearchQuery("")} size="xs" variant="icon"><CloseIcon size="sm" /></Button> : null}
               </View>
               <Button accessibilityLabel="Filter Archive" contentMode="raw" disabled={!hasContentContext} onPress={() => openSheet("filter")} size="sm" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={filtersActive ? "accent" : "default"} /></Button>
             </View>
@@ -3625,7 +3625,7 @@ export function KnowledgeWorkspace() {
               <View style={[styles.rootSearch, styles.folderScopedSearch]}>
                 <SearchIcon size="sm" variant="muted" />
                 <TextInput accessibilityLabel={`Search ${currentFolder?.name ?? "folder"}`} onChangeText={setQuery} placeholder="Search..." style={styles.rootSearchInput} value={query} />
-                {query.trim() ? <Button accessibilityLabel="Clear folder search" contentMode="raw" onPress={() => setQuery("")} size="xs" style={styles.clearSearchButton} variant="secondary"><CloseIcon size="sm" /></Button> : null}
+                {query.trim() ? <Button accessibilityLabel="Clear folder search" contentMode="raw" onPress={() => setQuery("")} size="xs" variant="icon"><CloseIcon size="sm" /></Button> : null}
               </View>
               <Button accessibilityLabel={`Filter ${currentFolder?.name ?? "this folder"}`} contentMode="raw" disabled={!hasContentContext} onPress={() => openSheet("filter")} size="sm" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={filtersActive ? "accent" : "default"} /></Button>
             </View>
@@ -3692,7 +3692,7 @@ export function KnowledgeWorkspace() {
           <View style={[styles.rootSearch, styles.documentSearch]}>
             <SearchIcon size="sm" variant="muted" />
             <TextInput accessibilityLabel="Search in document" editable={!editorEditing} maxLength={200} onChangeText={setDocumentSearchQuery} onSubmitEditing={() => setDocumentSearchRevision((current) => current + 1)} placeholder="Search in document..." returnKeyType="search" style={styles.rootSearchInput} value={documentSearchQuery} />
-            {documentSearchQuery.trim() ? <Button accessibilityLabel="Clear document search" contentMode="raw" onPress={() => setDocumentSearchQuery("")} size="xs" style={styles.clearSearchButton} variant="secondary"><CloseIcon size="sm" /></Button> : null}
+            {documentSearchQuery.trim() ? <Button accessibilityLabel="Clear document search" contentMode="raw" onPress={() => setDocumentSearchQuery("")} size="xs" variant="icon"><CloseIcon size="sm" /></Button> : null}
           </View>
           {narrationError ? <Text accessibilityRole="alert" style={styles.documentSearchStatus}>{narrationError}</Text> : null}
           <View style={[styles.noteSheet, (editorFocused || aiInputFocused) && styles.noteSheetFocused]}>
@@ -4061,7 +4061,7 @@ export function KnowledgeWorkspace() {
               <View style={styles.folderSearch}>
                 <SearchIcon size="sm" variant="muted" />
                 <TextInput accessibilityLabel="Search Archive folders" autoFocus onChangeText={setLibraryQuery} placeholder="Search..." style={styles.folderSearchInput} value={libraryQuery} />
-                {libraryQuery.trim() ? <Button accessibilityLabel="Clear Archive folder picker search" contentMode="raw" onPress={() => setLibraryQuery("")} size="md" style={styles.clearSearchButton} variant="secondary"><CloseIcon size="sm" /></Button> : null}
+                {libraryQuery.trim() ? <Button accessibilityLabel="Clear Archive folder picker search" contentMode="raw" onPress={() => setLibraryQuery("")} size="md" variant="icon"><CloseIcon size="sm" /></Button> : null}
               </View>
               <Button accessibilityLabel="Filter Archive folders" contentMode="raw" onPress={() => openSheet("filter")} size="md" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={filtersActive ? "accent" : "default"} /></Button>
             </View>
@@ -4084,7 +4084,7 @@ export function KnowledgeWorkspace() {
               <View style={styles.folderSearch}>
                 <SearchIcon size="sm" variant="muted" />
                 <TextInput accessibilityLabel="Search Archive documents and files" autoFocus onChangeText={setLibraryQuery} placeholder="Search..." style={styles.folderSearchInput} value={libraryQuery} />
-                {libraryQuery.trim() ? <Button accessibilityLabel="Clear Archive document picker search" contentMode="raw" onPress={() => setLibraryQuery("")} size="md" style={styles.clearSearchButton} variant="secondary"><CloseIcon size="sm" /></Button> : null}
+                {libraryQuery.trim() ? <Button accessibilityLabel="Clear Archive document picker search" contentMode="raw" onPress={() => setLibraryQuery("")} size="md" variant="icon"><CloseIcon size="sm" /></Button> : null}
               </View>
               <Button accessibilityLabel="Filter Archive documents and files" contentMode="raw" onPress={() => openSheet("filter")} size="md" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={filtersActive ? "accent" : "default"} /></Button>
             </View>
@@ -4130,7 +4130,6 @@ const styles = StyleSheet.create({
   folderScopedSearch: { flex: 1 },
   folderSearchRow: { minHeight: 44, marginTop: spacing.xxs, flexDirection: "row", alignItems: "center", gap: spacing.xs },
   searchHistoryButton: { width: 44, height: 44 },
-  clearSearchButton: { aspectRatio: 1, flexGrow: 0, flexShrink: 0, paddingHorizontal: 0, paddingVertical: 0 },
   rootSearchInput: { minHeight: 40, flex: 1, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", fontSize: 13 },
   rootSearchResults: { gap: 7 },
   rootContent: { gap: spacing.lg },

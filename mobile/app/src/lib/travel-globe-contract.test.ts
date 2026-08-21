@@ -120,6 +120,8 @@ test("uses shared Compass chrome, save footers, and a composer accessory island"
   expect(workspace).toContain('<LoadingText text="Generating image..." />');
   expect(workspace).toContain('text="Generating country guide..."');
   expect(workspace).toContain('text="Generating city guide..."');
+  expect(workspace).toContain("cityDetailQuery.isPending || cityDetailQuery.isFetching");
+  expect(workspace).toMatch(/function openCityDetail[\s\S]*setCitySheetOpen\(true\);[\s\S]*setSheetOpen\(false\);/);
   expect(workspace).toContain('sheetFooter: { width: "100%", gap: spacing.sm');
 });
 
@@ -142,6 +144,7 @@ test("animates a bounded controlled focus pulse without saved-place map pins", (
   expect(globe).toContain("FOCUS_PULSE_DURATION_MS = 2_600");
   expect(globe).toContain("setFromUnitVectors");
   expect(globe).toContain("globe.quaternion.copy(focus.from).slerp");
+  expect(globe).toContain("THREE.MathUtils.lerp(focus.fromDistance, MIN_CAMERA_DISTANCE, easedProgress)");
   expect(globe).toContain("focusAnimation.current = undefined");
   expect(globe).toContain("pulseElapsed < FOCUS_PULSE_DURATION_MS");
   expect(globe).toContain("focusAnimation.current || pulseElapsed < FOCUS_PULSE_DURATION_MS || idle && !reducedMotion");

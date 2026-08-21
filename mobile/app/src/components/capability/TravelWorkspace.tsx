@@ -171,7 +171,7 @@ export function TravelWorkspace() {
     retry: false,
   });
   const cityDetail = cityDetailQuery.isFetching || cityDetailQuery.isError ? undefined : cityDetailQuery.data;
-  const cityDetailLoading = cityDetailEnabled && cityDetailQuery.isPending;
+  const cityDetailLoading = cityDetailEnabled && (cityDetailQuery.isPending || cityDetailQuery.isFetching);
   const cityDetailError = cityDetailQuery.error ? errorMessage(cityDetailQuery.error) : undefined;
   const cityImage = cityDetail ? cityImageQuery.data : undefined;
   const cityImageUnavailable = cityDetailQuery.isError || cityImageQuery.isError;
@@ -265,6 +265,7 @@ export function TravelWorkspace() {
   function openCityDetail(city: GeneratedCity) {
     setSelectedCity(city);
     setCitySheetOpen(true);
+    setSheetOpen(false);
     setCityOpenRequest((current) => current + 1);
   }
 
@@ -421,7 +422,7 @@ export function TravelWorkspace() {
           <View style={styles.workspaceSearch}>
             <SearchIcon size="sm" variant="muted" />
             <TextInput accessibilityLabel="Search Compass countries" editable={!countrySearchFocusBlocked} focusable={!countrySearchFocusBlocked} onChangeText={(value) => { setCountryQuery(value); setSearchFocus(undefined); }} onFocus={() => { if (countrySearchFocusBlocked) { countrySearchInput.current?.blur(); Keyboard.dismiss(); } }} placeholder="Search countries..." ref={countrySearchInput} style={styles.workspaceSearchInput} value={countryQuery} />
-            {countryQuery.trim() ? <Button accessibilityLabel="Clear Compass search" contentMode="raw" onPress={() => { setCountryQuery(""); setSearchFocus(undefined); }} size="xs" style={styles.clearSearchButton} variant="secondary"><CloseIcon size="sm" /></Button> : null}
+            {countryQuery.trim() ? <Button accessibilityLabel="Clear Compass search" contentMode="raw" onPress={() => { setCountryQuery(""); setSearchFocus(undefined); }} size="xs" variant="icon"><CloseIcon size="sm" /></Button> : null}
           </View>
           <Button accessibilityLabel="Filter Compass" contentMode="raw" onPress={() => setFiltersOpen(true)} size="sm" style={styles.filterButton} variant="icon"><FilterIcon size="sm" /></Button>
         </View>
@@ -553,7 +554,6 @@ const styles = StyleSheet.create({
   workspaceSearch: { minHeight: 44, flex: 1, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 7, borderRadius: 999, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.page },
   workspaceSearchInput: { minHeight: 40, flex: 1, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", fontSize: 13 },
   filterButton: { width: 44, height: 44 },
-  clearSearchButton: { aspectRatio: 1, flexGrow: 0, flexShrink: 0, paddingHorizontal: 0, paddingVertical: 0 },
   globe: { flex: 1, minHeight: 0, overflow: "hidden", borderRadius: radii.xl, backgroundColor: palette.voidBlack },
   loadFailure: { position: "absolute", top: 0, right: spacing.xl, bottom: 0, left: spacing.xl, alignItems: "center", justifyContent: "center", gap: 14 },
   loadFailureText: { maxWidth: 320, color: palette.silver300, fontFamily: fonts.regular, fontSize: 13, lineHeight: 19, textAlign: "center" },

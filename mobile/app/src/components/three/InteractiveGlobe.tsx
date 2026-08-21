@@ -141,7 +141,7 @@ function GlobeScene({
     pinchZoom: MAX_CAMERA_DISTANCE,
     resetTrackball: false,
   });
-  const focusAnimation = useRef<{ from: THREE.Quaternion; to: THREE.Quaternion; startedAt: number } | undefined>(undefined);
+  const focusAnimation = useRef<{ from: THREE.Quaternion; fromDistance: number; to: THREE.Quaternion; startedAt: number } | undefined>(undefined);
   const pulseStartedAt = useRef<number | undefined>(undefined);
   const pulseMaterial = useRef<THREE.LineBasicMaterial>(null);
   const boundaries = useMemo(() => createCountryBoundaryGeometry(), []);
@@ -190,8 +190,12 @@ function GlobeScene({
       new THREE.Vector3(0, 0, 1),
     );
     const startedAt = performance.now();
-    if (reducedMotion) globe.quaternion.copy(target);
-    else focusAnimation.current = { from: globe.quaternion.clone(), to: target, startedAt };
+    if (reducedMotion) {
+      globe.quaternion.copy(target);
+      cameraRef.current.position.z = MIN_CAMERA_DISTANCE;
+    } else {
+      focusAnimation.current = { from: globe.quaternion.clone(), fromDistance: cameraRef.current.position.z, to: target, startedAt };
+    }
     invalidate();
   }, [focusCountryCode, focusLatitude, focusLongitude, invalidate, reducedMotion]);
   useEffect(() => {
@@ -215,7 +219,9 @@ function GlobeScene({
     const pulseElapsed = pulseStartedAt.current === undefined ? FOCUS_PULSE_DURATION_MS : now - pulseStartedAt.current;
     if (focus && idle) {
       const progress = Math.min(1, (now - focus.startedAt) / FOCUS_DURATION_MS);
-      globe.quaternion.copy(focus.from).slerp(focus.to, 1 - (1 - progress) ** 3).normalize();
+      const easedProgress = 1 - (1 - progress) ** 3;
+      globe.quaternion.copy(focus.from).slerp(focus.to, easedProgress).normalize();
+      cameraRef.current.position.z = THREE.MathUtils.lerp(focus.fromDistance, MIN_CAMERA_DISTANCE, easedProgress);
       if (progress === 1) focusAnimation.current = undefined;
     } else if (idle && !reducedMotion && pulseElapsed >= FOCUS_PULSE_DURATION_MS) {
       const speed = angularVelocity.current;
