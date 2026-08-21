@@ -136,7 +136,7 @@ test("debounces canonical country search, aborts stale requests, and focuses wit
   expect(workspace).toContain("Browse countries and saved places");
 });
 
-test("animates a bounded controlled focus pulse and renders one-hit-target branded map pins", () => {
+test("animates a bounded controlled focus pulse without saved-place map pins", () => {
   expect(globe).toContain("focusTarget?: Readonly");
   expect(globe).toContain("FOCUS_DURATION_MS = 700");
   expect(globe).toContain("FOCUS_PULSE_DURATION_MS = 2_600");
@@ -145,18 +145,10 @@ test("animates a bounded controlled focus pulse and renders one-hit-target brand
   expect(globe).toContain("focusAnimation.current = undefined");
   expect(globe).toContain("pulseElapsed < FOCUS_PULSE_DURATION_MS");
   expect(globe).toContain("focusAnimation.current || pulseElapsed < FOCUS_PULSE_DURATION_MS || idle && !reducedMotion");
-  expect(globe).toContain('require("../../../assets/brand/capability-compass.png")');
-  expect(globe).toContain("useLoader(THREE.TextureLoader, COMPASS_MARKER_SOURCE");
-  expect(globe).toContain("PIN_HEAD_GEOMETRY = new THREE.CircleGeometry");
-  expect(globe).toContain("PIN_POINT_GEOMETRY.setAttribute");
-  expect(globe).toContain('color: "#000000"');
-  expect(globe).toContain("marker.quaternion.copy(parentQuaternion).invert().multiply(cameraQuaternion)");
-  expect(globe).toContain("marker.visible = worldNormal.dot(cameraPosition) > 0");
-  expect(globe.match(/onClick={selectMarker}/g)).toHaveLength(1);
-  expect(globe).not.toContain("<sprite");
-  expect(globe).toContain("dispose={null}");
-  expect(globe).toContain("scale={selected ? 1.2 : 1}");
-  expect(globe).toContain("if (canSelect()) onPress?.(place)");
+  expect(globe).not.toContain("PlaceMarker");
+  expect(globe).not.toContain("GlobePlace");
+  expect(workspace).not.toContain("places={globePlaces}");
+  expect(workspace).not.toContain("onPlacePress=");
 });
 
 test("uses backend coordinates for search focus while pulsing only mapped local geometry", () => {

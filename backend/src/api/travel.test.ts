@@ -159,6 +159,15 @@ describe('travel HTTP handlers', () => {
     expect(await response.json()).toMatchObject({ error: { message: 'Country generation is temporarily unavailable.' } });
   });
 
+  test('identifies provider credential failures instead of reporting an outage', async () => {
+    const service = { findPlace: async () => { throw new ProviderExecutionError('ask', [{ modelId: 'model', providerId: 'openai', externalModelId: 'model', code: 'authentication_failed', message: 'failed with status 401' }]); } } as never;
+    const app = new Hono();
+    app.post('/travel/places/find', createTravelHandlers({ service, getIdentity: async () => ({ key: 'trusted-user', identityType: 'user' }) }).findPlace);
+    const response = await app.request('/travel/places/find', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey: 'organization', scopeKey: newId(), query: 'Japan' }) });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ error: { code: 'TRAVEL_PROVIDER_CONFIGURATION_REQUIRED', message: 'Country generation requires updated AI provider credentials.' } });
+  });
+
   test('keeps transient place hero generation behind the authenticated strict HTTP protocol boundary', async () => {
     const organizationKey = newId(), scopeKey = newId(), userKey = newId();
     const calls: unknown[][] = [];

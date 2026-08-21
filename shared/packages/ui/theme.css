@@ -50,6 +50,41 @@
   --font-serif: var(--vui-font-serif);
 }
 
+@keyframes vui-skeleton-shimmer {
+  0% { transform: translateX(-140%) skewX(-18deg); }
+  100% { transform: translateX(340%) skewX(-18deg); }
+}
+
+.vui-skeleton {
+  background-color: var(--vui-color-surface);
+  border-radius: var(--vui-radius-md);
+  isolation: isolate;
+  overflow: hidden;
+  position: relative;
+}
+
+.vui-skeleton::after {
+  animation: vui-skeleton-shimmer 1.35s var(--vui-ease-luxury) infinite;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.2),
+    transparent
+  );
+  content: "";
+  inset: 0 auto 0 0;
+  pointer-events: none;
+  position: absolute;
+  width: 52%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vui-skeleton::after {
+    animation: none;
+    left: 24%;
+  }
+}
+
 .vui-button {
   --vui-button-loading-background: linear-gradient(
     135deg,

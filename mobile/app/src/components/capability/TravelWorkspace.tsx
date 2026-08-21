@@ -67,7 +67,6 @@ export function TravelWorkspace() {
   const insets = useSafeAreaInsets();
   const [selectedCountry, setSelectedCountry] = useState<CountryProperties>();
   const [highlightSelectedCountry, setHighlightSelectedCountry] = useState(false);
-  const [selectedPlaceKey, setSelectedPlaceKey] = useState<string>();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetView, setSheetView] = useState<SheetView>("browse");
   const [selectedCity, setSelectedCity] = useState<GeneratedCity>();
@@ -100,7 +99,6 @@ export function TravelWorkspace() {
   const overviewQuery = useQuery({ queryKey: compassQueryKeys.overview(travelContext), queryFn: fetchTravelOverview });
   const places = useMemo(() => overviewQuery.data?.places ?? [], [overviewQuery.data]);
   const recentPlaces = overviewQuery.data?.recentPlaces ?? [];
-  const selectedPlace = places.find(({ key }) => key === selectedPlaceKey);
   const countryDetailEnabled = sheetOpen && sheetView === "countryDetail" && Boolean(selectedCountry);
   const countryDetailQuery = useQuery({
     queryKey: compassQueryKeys.countryDetail(travelContext, selectedCountry?.countryCode ?? ""),
@@ -195,13 +193,6 @@ export function TravelWorkspace() {
       .filter(({ properties }) => !normalized || properties.name.toLowerCase().includes(normalized) || properties.countryCode.toLowerCase().includes(normalized))
       .sort((left, right) => left.properties.name.localeCompare(right.properties.name));
   }, [countryQuery]);
-  const globePlaces = useMemo(() => places.map((place) => ({
-    id: place.key,
-    latitude: place.latitude,
-    longitude: place.longitude,
-    status: "planned" as const,
-  })), [places]);
-
   useEffect(() => {
     const query = countryQuery.trim();
     const request = ++countrySearchRequest.current;
@@ -261,7 +252,6 @@ export function TravelWorkspace() {
     setSelectedCountry(country);
     setSelectedCity(undefined);
     setCitySheetOpen(false);
-    setSelectedPlaceKey(undefined);
     setSheetView("countryDetail");
     setSheetOpen(true);
     setCountryOpenRequest((current) => current + 1);
@@ -339,7 +329,6 @@ export function TravelWorkspace() {
     setSearchFocus(undefined);
     setHighlightSelectedCountry(false);
     setSelectedCountry(country);
-    setSelectedPlaceKey(undefined);
     setSheetOpen(false);
     openCityDetail({ name: place.name, latitude: place.latitude, longitude: place.longitude });
   }
@@ -380,7 +369,6 @@ export function TravelWorkspace() {
   }
 
   function selectPlace(place: Place) {
-    setSelectedPlaceKey(place.key);
     setSelectedCountry(countryByCode.get(place.countryCode) ?? {
       countryCode: place.countryCode,
       name: place.countryCode,
@@ -441,10 +429,7 @@ export function TravelWorkspace() {
           <InteractiveGlobe
             onCountryPress={(country) => { if (country) openCountryDetail(country.properties); }}
             focusTarget={searchFocus ?? undefined}
-            onPlacePress={(marker) => { const place = places.find(({ key }) => key === marker.id); if (place) selectPlace(place); }}
-            places={globePlaces}
             selectedCountryCode={highlightSelectedCountry ? selectedCountry?.countryCode : undefined}
-            selectedPlaceId={selectedPlace?.key}
           />
           {loadError && !loading ? <View style={styles.loadFailure}><GlobeIcon size="lg" variant="muted" /><Text style={styles.loadFailureText}>{loadError}</Text><Button onPress={() => void overviewQuery.refetch()} size="sm" variant="secondary">Retry</Button></View> : null}
         </View>
@@ -485,7 +470,7 @@ export function TravelWorkspace() {
              </> : null}
           </View> : <>
              {selectedCountry ? <>
-              <BottomSheetItem icon={<GlobeIcon size="md" />} onPress={() => { setSelectedCountry(undefined); setHighlightSelectedCountry(false); setSelectedPlaceKey(undefined); }}>Show all saved cities</BottomSheetItem>
+              <BottomSheetItem icon={<GlobeIcon size="md" />} onPress={() => { setSelectedCountry(undefined); setHighlightSelectedCountry(false); }}>Show all saved cities</BottomSheetItem>
               <Text style={styles.listLabel}>SAVED CITIES IN {selectedCountry.countryCode}</Text>
               {selectedCountryCities?.map((place) => <BottomSheetItem key={place.key} icon={<LocationPinIcon size="md" />} onPress={() => selectPlace(place)}>{place.name}</BottomSheetItem>)}
               {selectedCountryCities?.length === 0 ? <Text style={styles.emptyText}>No saved cities in {selectedCountry.name}.</Text> : null}

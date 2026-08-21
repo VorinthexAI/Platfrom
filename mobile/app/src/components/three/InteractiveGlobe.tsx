@@ -1,7 +1,7 @@
 /* eslint-disable react/no-unknown-property */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AccessibilityInfo, Platform, StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
-import { useFrame, useLoader, useThree, type ThreeEvent } from "@react-three/fiber";
+import { useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import * as THREE from "three";
 
 import { Canvas } from "@/components/three/Canvas";
@@ -32,33 +32,11 @@ const MAX_INERTIA_RADIANS_PER_SECOND = 4;
 const MIN_INERTIA_RADIANS_PER_SECOND = 0.01;
 const WEB_TOUCH_STYLE = { touchAction: "none" } as unknown as ViewStyle;
 const disableRaycast: THREE.Object3D["raycast"] = () => {};
-const PIN_HIT_GEOMETRY = new THREE.PlaneGeometry(0.14, 0.19);
-const PIN_HEAD_GEOMETRY = new THREE.CircleGeometry(0.055, 24);
-const PIN_POINT_GEOMETRY = new THREE.BufferGeometry();
-PIN_POINT_GEOMETRY.setAttribute("position", new THREE.Float32BufferAttribute([
-  -0.043, 0.075, 0,
-  0.043, 0.075, 0,
-  0, 0, 0,
-], 3));
-const PIN_HIT_MATERIAL = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
-const PIN_BLACK_MATERIAL = new THREE.MeshBasicMaterial({ color: "#000000", depthWrite: false });
-const COMPASS_MARKER_SOURCE = require("../../../assets/brand/capability-compass.png");
-
-export type GlobePlace = Readonly<{
-  id: string;
-  latitude: number;
-  longitude: number;
-  status: "visited" | "planned";
-}>;
-
 export type InteractiveGlobeProps = {
   focusTarget?: Readonly<{ countryCode: string; latitude: number; longitude: number }>;
-  places?: readonly GlobePlace[];
-  onPlacePress?: (place: GlobePlace) => void;
   onCountryPress?: (country: CountryFeature | undefined, coordinates: { latitude: number; longitude: number }) => void;
   reducedMotion?: boolean;
   selectedCountryCode?: string;
-  selectedPlaceId?: string;
   style?: StyleProp<ViewStyle>;
 };
 
@@ -137,80 +115,16 @@ function pointerDistance(pointers: Map<number, THREE.Vector2>): number {
   return first && second ? first.distanceTo(second) : 0;
 }
 
-function PlaceMarker({
-  canSelect,
-  onPress,
-  place,
-  selected,
-}: {
-  canSelect: () => boolean;
-  onPress?: (place: GlobePlace) => void;
-  place: GlobePlace;
-  selected: boolean;
-}) {
-  const markerRef = useRef<THREE.Group>(null);
-  const camera = useThree((state) => state.camera);
-  const compassTexture = useLoader(THREE.TextureLoader, COMPASS_MARKER_SOURCE as unknown as string);
-  const normal = useMemo(() => {
-    const point = latLonToVector(place.latitude, place.longitude);
-    return new THREE.Vector3(point.x, point.y, point.z).normalize();
-  }, [place.latitude, place.longitude]);
-  const markerPosition = useMemo(() => normal.clone().multiplyScalar(1.025), [normal]);
-  const worldNormal = useMemo(() => new THREE.Vector3(), []);
-  const cameraPosition = useMemo(() => new THREE.Vector3(), []);
-  const globeCenter = useMemo(() => new THREE.Vector3(), []);
-  const cameraQuaternion = useMemo(() => new THREE.Quaternion(), []);
-  const parentQuaternion = useMemo(() => new THREE.Quaternion(), []);
-
-  useFrame(() => {
-    const marker = markerRef.current;
-    const parent = marker?.parent;
-    if (!marker || !parent) return;
-    parent.getWorldPosition(globeCenter);
-    parent.getWorldQuaternion(parentQuaternion);
-    worldNormal.copy(normal).applyQuaternion(parentQuaternion);
-    camera.getWorldPosition(cameraPosition).sub(globeCenter).normalize();
-    marker.visible = worldNormal.dot(cameraPosition) > 0;
-    camera.getWorldQuaternion(cameraQuaternion);
-    marker.quaternion.copy(parentQuaternion).invert().multiply(cameraQuaternion);
-  });
-
-  const selectMarker = (event: ThreeEvent<MouseEvent>) => {
-    event.stopPropagation();
-    if (canSelect()) onPress?.(place);
-  };
-
-  return (
-    <group
-      ref={markerRef}
-      dispose={null}
-      position={markerPosition}
-      scale={selected ? 1.2 : 1}
-    >
-      <mesh geometry={PIN_HIT_GEOMETRY} material={PIN_HIT_MATERIAL} onClick={selectMarker} position={[0, 0.072, 0.004]} />
-      <mesh geometry={PIN_POINT_GEOMETRY} material={PIN_BLACK_MATERIAL} raycast={disableRaycast} />
-      <mesh geometry={PIN_HEAD_GEOMETRY} material={PIN_BLACK_MATERIAL} position={[0, 0.095, 0]} raycast={disableRaycast} />
-      <mesh position={[0, 0.095, 0.002]} raycast={disableRaycast}>
-        <planeGeometry args={[0.078, 0.078]} />
-        <meshBasicMaterial alphaTest={0.08} depthWrite={false} map={compassTexture} toneMapped={false} transparent />
-      </mesh>
-    </group>
-  );
-}
-
-type GlobeSceneProps = Required<Pick<InteractiveGlobeProps, "places">> & Omit<InteractiveGlobeProps, "places" | "style"> & {
+type GlobeSceneProps = Omit<InteractiveGlobeProps, "style"> & {
   controlsRef: { current: GlobeControls | null };
 };
 
 function GlobeScene({
   controlsRef,
   focusTarget,
-  places,
-  onPlacePress,
   onCountryPress,
   reducedMotion,
   selectedCountryCode,
-  selectedPlaceId,
 }: GlobeSceneProps) {
   const globeRef = useRef<THREE.Group>(null);
   const camera = useThree((state) => state.camera);
@@ -499,15 +413,6 @@ function GlobeScene({
             <lineBasicMaterial ref={index === 1 ? pulseMaterial : undefined} color="#e7f7fb" transparent opacity={index === 1 ? 1 : 0.72} />
           </lineSegments>
         ))}
-        {places.map((place) => (
-          <PlaceMarker
-            key={place.id}
-            canSelect={() => !gestureRef.current.moved}
-            onPress={onPlacePress}
-            place={place}
-            selected={place.id === selectedPlaceId}
-          />
-        ))}
       </group>
       <mesh scale={1.035}>
         <sphereGeometry args={[GLOBE_RADIUS, 48, 32]} />
@@ -525,12 +430,9 @@ function GlobeScene({
 
 export function InteractiveGlobe({
   focusTarget,
-  places = [],
-  onPlacePress,
   onCountryPress,
   reducedMotion,
   selectedCountryCode,
-  selectedPlaceId,
   style,
 }: InteractiveGlobeProps) {
   const [systemReducedMotion, setSystemReducedMotion] = useState(false);
@@ -572,12 +474,9 @@ export function InteractiveGlobe({
       <GlobeScene
         controlsRef={controlsRef}
         focusTarget={focusTarget}
-        places={places}
-        onPlacePress={onPlacePress}
         onCountryPress={onCountryPress}
         reducedMotion={reducedMotion ?? systemReducedMotion}
         selectedCountryCode={selectedCountryCode}
-        selectedPlaceId={selectedPlaceId}
       />
       </Canvas>
     </View>
