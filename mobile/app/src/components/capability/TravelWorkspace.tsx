@@ -422,7 +422,7 @@ export function TravelWorkspace() {
           <View style={styles.workspaceSearch}>
             <SearchIcon size="sm" variant="muted" />
             <TextInput accessibilityLabel="Search Compass countries" editable={!countrySearchFocusBlocked} focusable={!countrySearchFocusBlocked} onChangeText={(value) => { setCountryQuery(value); setSearchFocus(undefined); }} onFocus={() => { if (countrySearchFocusBlocked) { countrySearchInput.current?.blur(); Keyboard.dismiss(); } }} placeholder="Search countries..." ref={countrySearchInput} style={styles.workspaceSearchInput} value={countryQuery} />
-            {countryQuery.trim() ? <Button accessibilityLabel="Clear Compass search" contentMode="raw" onPress={() => { setCountryQuery(""); setSearchFocus(undefined); }} size="xs" variant="icon"><CloseIcon size="sm" /></Button> : null}
+            {countryQuery.trim() ? <Button accessibilityLabel="Clear Compass search" contentMode="raw" iconOnly onPress={() => { setCountryQuery(""); setSearchFocus(undefined); }} size="xs" variant="secondary"><CloseIcon size="sm" /></Button> : null}
           </View>
           <Button accessibilityLabel="Filter Compass" contentMode="raw" onPress={() => setFiltersOpen(true)} size="sm" style={styles.filterButton} variant="icon"><FilterIcon size="sm" /></Button>
         </View>

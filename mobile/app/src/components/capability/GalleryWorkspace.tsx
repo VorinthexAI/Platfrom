@@ -2519,7 +2519,7 @@ export function GalleryWorkspace() {
             <View style={styles.collectionSearch}>
               <SearchIcon size="sm" variant="muted" />
               <TextInput accessibilityLabel={`Search images in ${activeCollection.name}`} editable={!collectionSearchFocusBlocked} onChangeText={updateCollectionSearch} onFocus={() => { if (collectionSearchFocusBlocked) { collectionSearchInput.current?.blur(); Keyboard.dismiss(); } }} onSubmitEditing={() => { if (searchTimer.current) clearTimeout(searchTimer.current); void search(); }} placeholder="Search..." ref={collectionSearchInput} returnKeyType="search" style={styles.rootSearchInput} value={query} />
-              {query.trim() ? <Button accessibilityLabel="Clear image search" contentMode="raw" hitSlop={8} onPress={() => clearCollectionSearch()} size="xs" variant="icon"><CloseIcon size="sm" /></Button> : null}
+              {query.trim() ? <Button accessibilityLabel="Clear image search" contentMode="raw" hitSlop={8} iconOnly onPress={() => clearCollectionSearch()} size="xs" variant="secondary"><CloseIcon size="sm" /></Button> : null}
             </View>
              <Button accessibilityLabel={`Filter ${activeCollection.name}`} contentMode="raw" onPress={() => openSheet("filter")} size="sm" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={filtersActive ? "accent" : "default"} /></Button>
            </View> : null}
@@ -2737,7 +2737,7 @@ export function GalleryWorkspace() {
           <Text style={styles.sheetSubtitle}>{imagePickerPurpose === "cover" ? `Choose an existing image from ${activeCollection?.name ?? "this collection"}.` : "Choose an image to create a visual identity from."}</Text>
           {identityPickerCollection ? <View style={styles.destinationLocationLane}><Button accessibilityLabel="Back to collections" contentMode="raw" onPress={backIdentityPicker} size="md" variant="icon"><ChevronLeftIcon size="sm" /></Button><Text numberOfLines={1} style={styles.destinationLocationTitle}>{identityPickerCollection.name}</Text></View> : null}
           <View style={styles.rootActions}>
-            <View style={styles.collectionSearch}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel="Search images for visual identity" onChangeText={updateIdentityPickerSearch} placeholder="Search images..." style={styles.rootSearchInput} value={identityPickerQuery} />{identityPickerQuery.trim() ? <Button accessibilityLabel="Clear image search" contentMode="raw" onPress={() => updateIdentityPickerSearch("")} size="md" variant="icon"><CloseIcon size="sm" /></Button> : null}</View>
+            <View style={styles.collectionSearch}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel="Search images for visual identity" onChangeText={updateIdentityPickerSearch} placeholder="Search images..." style={styles.rootSearchInput} value={identityPickerQuery} />{identityPickerQuery.trim() ? <Button accessibilityLabel="Clear image search" contentMode="raw" iconOnly onPress={() => updateIdentityPickerSearch("")} size="md" variant="secondary"><CloseIcon size="sm" /></Button> : null}</View>
             <Button accessibilityLabel="Filter visual identity image picker" contentMode="raw" onPress={() => pushSheet("identityPickerFilter")} size="md" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={filtersActive ? "accent" : "default"} /></Button>
           </View>
           {filterBadges()}

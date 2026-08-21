@@ -19,6 +19,7 @@ export type ButtonShape = "pill" | "rounded";
 export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   asChild?: boolean;
   icon?: ReactNode;
+  iconOnly?: boolean;
   loading?: boolean;
   shape?: ButtonShape;
   size?: ButtonSize;
@@ -38,6 +39,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
     className,
     disabled,
     icon,
+    iconOnly = false,
     loading = false,
     shape = "pill",
     size: requestedSize = "md",
@@ -53,6 +55,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
     `vui-button-${variant}`,
     `vui-button-${size}`,
     `vui-button-${shape}`,
+    iconOnly && "vui-button-icon-only",
     className,
   );
 
@@ -77,7 +80,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       {...props}
     >
       {loading ? <span aria-hidden="true" className="vui-button-fill" /> : icon}
-      {variant === "icon" ? <span className="sr-only">{children}</span> : children}
+      {variant === "icon" || iconOnly ? <span className="sr-only">{children}</span> : children}
     </button>
   );
 });

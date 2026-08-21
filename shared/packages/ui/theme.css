@@ -379,6 +379,18 @@
   padding: 0;
 }
 
+.vui-button-icon-only {
+  aspect-ratio: 1;
+  flex: 0 0 auto;
+  padding: 0;
+}
+
+.vui-button-icon-only.vui-button-xs { height: 28px; width: 28px; }
+.vui-button-icon-only.vui-button-sm { height: 34px; width: 34px; }
+.vui-button-icon-only.vui-button-md { height: 42px; width: 42px; }
+.vui-button-icon-only.vui-button-lg { height: 50px; width: 50px; }
+.vui-button-icon-only.vui-button-xl { height: 58px; width: 58px; }
+
 .vui-control {
   background: var(--vui-color-secondary);
   border: 1px solid rgba(255, 255, 255, 0.12);
