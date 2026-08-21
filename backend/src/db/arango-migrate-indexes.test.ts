@@ -222,6 +222,10 @@ describe('Arango migration indexes', () => {
     expect(calls[5]?.query).toContain('REMOVE provider IN providers');
     expect(calls[0]?.bindVars?.retainedModelActionBindings).toEqual(RETAINED_MODEL_ACTION_BINDINGS);
     expect(calls[1]?.bindVars?.retainedModelProviderBindings).toEqual(RETAINED_MODEL_PROVIDER_BINDINGS);
+    expect(RETAINED_MODEL_SLUGS).toContain('google.gemini-2.5-flash-lite');
+    expect(RETAINED_MODEL_ACTION_BINDINGS).toContain('google.gemini-2.5-flash-lite:chat');
+    expect(RETAINED_MODEL_ACTION_BINDINGS).toContain('openai.gpt-5.6-luna:chat');
+    expect(RETAINED_MODEL_PROVIDER_BINDINGS).toContain('google.gemini-2.5-flash-lite:openrouter:google/gemini-2.5-flash-lite');
     expect(calls[0]?.query).toContain('CONCAT(model.slug, ":", relation.actionSlug) NOT IN @retainedModelActionBindings');
     expect(calls[1]?.query).toContain('CONCAT(model.slug, ":", provider.slug, ":", relation.providerModelId) NOT IN @retainedModelProviderBindings');
     expect(calls[2]?.bindVars?.retainedProviderSlugs).toEqual(RETAINED_PROVIDER_SLUGS);
@@ -354,8 +358,8 @@ describe('Arango migration indexes', () => {
     expect(cleanup).toBeLessThan(activeLoop);
     expect(source).toContain('REPLACE place WITH UNSET(replacement, "_rev") IN places');
     expect(source).toContain('embedding: await generateEmbedding(buildPlaceEmbeddingText(canonical))');
-    expect(source).toContain('FILTER place.kind == "country" REMOVE place IN places');
-    expect(source).toContain('resource.sourceType == "place" && resource.sourceKey IN @countryPlaceKeys');
+    expect(source).toContain('place.kind == "country" && (!HAS(place, "userKey") || !HAS(place, "saved"))');
+    expect(source).toContain('resource.sourceType == "place" && resource.sourceKey IN @obsoleteCountryKeys');
     expect(source).toContain('places migration found duplicate saved cities');
   });
   test('creates placeImages before first-deployment place migration queries it', async () => {
@@ -377,7 +381,7 @@ describe('Arango migration indexes', () => {
       },
     };
     await expect(migrateMinimalPlacesAndRetireTrips(database as never)).rejects.toThrow('cannot safely derive user ownership');
-    expect(events.slice(0, 2)).toEqual(['create:placeImages', 'query:placeImages']);
+    expect(events.slice(0, 3)).toEqual(['create:placeImages', 'query:other', 'query:placeImages']);
   });
   test('force-projects legacy places once while preserving keys and regenerating name-only embeddings', async () => {
     const previous = process.env.CONTENT_E2E;
@@ -388,6 +392,7 @@ describe('Arango migration indexes', () => {
       const database = {
         collection(name: string) { return { async exists() { return name === 'places'; }, async create() {}, async drop() {} }; },
         async query(query: string, bindVars?: Record<string, unknown>) {
+          if (query.includes('obsoleteCountryKeys') || query.includes('RETURN place._key')) return { async all() { return []; }, async next() { return undefined; } };
           if (query.includes('FILTER LENGTH(userKeys) != 1')) return { async all() { return []; }, async next() { return undefined; } };
           if (query.includes('UPDATE place WITH { userKey:')) return { async all() { return []; }, async next() { return undefined; } };
           if (query.includes('Validate every retained place')) return { async all() { return bindVars?.after === '' ? [{ _key: 'cmrnlzf650002qc7k4p5zem5w', userKey: 'cmrnlzf650002qc7k4p5zem5w', scopeKey: 'cmrnlzf640001qc7kazsr96k5', saved: true, name: legacy ? ' Stockholm ' : 'Stockholm', countryCode: legacy ? 'se' : 'SE', latitude: 59.3293, longitude: 18.0686, openedAt: '2026-08-09T12:00:00.000Z', createdAt: '2026-08-08T12:00:00.000Z' }] : []; }, async next() { return undefined; } };
@@ -408,6 +413,7 @@ describe('Arango migration indexes', () => {
         userKey: 'cmrnlzf650002qc7k4p5zem5w',
         scopeKey: 'cmrnlzf640001qc7kazsr96k5',
         saved: true,
+        kind: 'place',
         name: 'Stockholm',
         summary: '',
         countryCode: 'SE',
@@ -423,7 +429,36 @@ describe('Arango migration indexes', () => {
       await migrateMinimalPlacesAndRetireTrips(database as never);
       expect(replacements).toEqual([]);
       const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
-      expect(source).toContain('fields != @canonicalFields && fields != @openedCanonicalFields && fields != @generatedCanonicalFields && fields != @openedGeneratedCanonicalFields');
+      expect(source).toContain('fields NOT IN @canonicalFieldSets');
+    } finally {
+      if (previous === undefined) delete process.env.CONTENT_E2E;
+      else process.env.CONTENT_E2E = previous;
+    }
+  });
+  test('retains valid generated country places and projects kind and detail version', async () => {
+    const previous = process.env.CONTENT_E2E;
+    process.env.CONTENT_E2E = 'true';
+    try {
+      const cities = Array.from({ length: 10 }, (_, index) => ({ name: `City ${index}`, latitude: index, longitude: index }));
+      const generatedDetail = { location: { kind: 'country', name: 'Japan', countryCode: 'JP', country: 'Japan', continent: 'Asia', region: null, city: null, latitude: 36.2, longitude: 138.2 }, title: 'Japan', summary: 'Island country.', culture: 'Culture.', food: 'Food.', whyVisit: 'Visit.', heroImagePrompt: 'Landscape.', popularCities: cities };
+      let legacy = true;
+      let replacement: Record<string, unknown> | undefined;
+      const row = () => ({ _key: 'cmrnlzf650002qc7k4p5zem5w', _rev: 'revision', userKey: 'cmrnlzf650002qc7k4p5zem5w', scopeKey: 'cmrnlzf640001qc7kazsr96k5', saved: true, kind: 'country', name: ' Japan ', summary: 'Island country.', countryCode: 'jp', latitude: 36.2, longitude: 138.2, embedding: [], embeddingContentVersion: 1, generatedDetail, generatedDetailVersion: 2, createdAt: '2026-08-08T12:00:00.000Z' });
+      const database = {
+        collection(name: string) { return { async exists() { return name === 'places' || name === 'placeImages'; }, async create() {}, async drop() {} }; },
+        async query(query: string, bindVars?: Record<string, unknown>) {
+          if (query.includes('obsoleteCountryKeys') || query.includes('FILTER LENGTH(userKeys) != 1') || query.includes('UPDATE place WITH { userKey:') || query.includes('WITH COUNT INTO count')) return { async all() { return []; }, async next() { return undefined; } };
+          if (query.includes('Validate every retained place')) return { async all() { return bindVars?.after === '' ? [legacy ? row() : { ...replacement, _key: replacement?._key }] : []; }, async next() { return undefined; } };
+          if (query.includes('RETURN place') && !query.includes('RETURN LENGTH')) return { async all() { return legacy ? [row()] : []; }, async next() { return undefined; } };
+          if (query.includes('FOR replacement IN @replacements')) { replacement = (bindVars?.replacements as Array<Record<string, unknown>>)[0]; legacy = false; return { async all() { return []; }, async next() { return undefined; } }; }
+          if (query.includes('RETURN LENGTH')) return { async all() { return []; }, async next() { return 0; } };
+          throw new Error(`Unexpected migration query: ${query}`);
+        },
+        async beginTransaction() { return { async step(run: () => Promise<void>) { await run(); }, async commit() {}, async abort() {} }; },
+      };
+
+      await migrateMinimalPlacesAndRetireTrips(database as never);
+      expect(replacement).toMatchObject({ saved: true, kind: 'country', name: 'Japan', countryCode: 'JP', generatedDetail, generatedDetailVersion: 2 });
     } finally {
       if (previous === undefined) delete process.env.CONTENT_E2E;
       else process.env.CONTENT_E2E = previous;
@@ -434,6 +469,7 @@ describe('Arango migration indexes', () => {
     const database = {
       collection(name: string) { return { async exists() { return name === 'places'; }, async create() {}, async drop() {} }; },
       async query(query: string, bindVars?: Record<string, unknown>) {
+        if (query.includes('obsoleteCountryKeys') || query.includes('RETURN place._key')) return { async all() { return []; } };
         if (query.includes('FILTER LENGTH(userKeys) != 1')) return { async all() { return []; } };
         if (query.includes('UPDATE place WITH { userKey:')) return { async all() { return []; } };
         if (query.includes('Validate every retained place')) return { async all() { return bindVars?.after === '' ? [{ _key: 'cmrnlzf650002qc7k4p5zem5w', userKey: 'cmrnlzf650002qc7k4p5zem5w', scopeKey: 'cmrnlzf640001qc7kazsr96k5', saved: true, name: ' Stockholm ', countryCode: 'se', latitude: 59.3293, longitude: 18.0686, createdAt: '2026-08-08T12:00:00.000Z' }] : []; } };

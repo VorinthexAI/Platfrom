@@ -10,6 +10,7 @@ import { CoreComposer } from "@vorinthex/shared/ui/core-composer";
 import { ClockIcon, ChevronRightIcon, CloseIcon, FilterIcon, GlobeIcon, LocationPinIcon, PlusIcon, SearchIcon, SendIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { SearchHistoryPill } from "@vorinthex/shared/ui/search-history-pill";
 import { Skeleton } from "@vorinthex/shared/ui/skeleton";
+import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { LoadingText } from "@vorinthex/shared/ui/loading-text";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 import { useToast } from "@vorinthex/shared/ui/toast";
@@ -51,12 +52,18 @@ const CORE_PROMPTS = [
 
 type SheetView = "browse" | "countryDetail";
 type GeneratedCity = { name: string; latitude: number; longitude: number };
+type DetailSource = "browse" | "myPlaces";
+type MyPlacesTab = "countries" | "cities";
 
 export const COUNTRY_SHEET_CACHE_MS = PLACE_GUIDE_CACHE_MS;
 export const COUNTRY_SEARCH_DEBOUNCE_MS = 350;
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Compass could not complete that request.";
+}
+
+export function normalizePlaceName(value: string) {
+  return value.trim().toLocaleLowerCase().replace(/\s+/g, " ");
 }
 
 export function TravelWorkspace() {
@@ -66,7 +73,7 @@ export function TravelWorkspace() {
   const contentContext = useMemo(() => getContentContext(), []);
   const insets = useSafeAreaInsets();
   const [selectedCountry, setSelectedCountry] = useState<CountryProperties>();
-  const [highlightSelectedCountry, setHighlightSelectedCountry] = useState(false);
+  const [lastOpenedCountryCode, setLastOpenedCountryCode] = useState<string>();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetView, setSheetView] = useState<SheetView>("browse");
   const [selectedCity, setSelectedCity] = useState<GeneratedCity>();
@@ -75,11 +82,18 @@ export function TravelWorkspace() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [recentOpen, setRecentOpen] = useState(false);
+  const [myPlacesOpen, setMyPlacesOpen] = useState(false);
+  const [myPlacesLoading, setMyPlacesLoading] = useState(false);
+  const [myPlacesError, setMyPlacesError] = useState<string>();
+  const [myPlacesGridWidth, setMyPlacesGridWidth] = useState(0);
+  const [myPlacesTab, setMyPlacesTab] = useState<MyPlacesTab>("countries");
+  const [detailSource, setDetailSource] = useState<DetailSource>("browse");
   const [history, setHistory] = useState<ContentSearchHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [removingHistoryQuery, setRemovingHistoryQuery] = useState<string>();
   const [countryQuery, setCountryQuery] = useState("");
   const [searchFocus, setSearchFocus] = useState<NonNullable<CountrySearchResult>>();
+  const [globeFocusTarget, setGlobeFocusTarget] = useState<NonNullable<CountrySearchResult>>();
   const [assistantInput, setAssistantInput] = useState("");
   const [assistantBusy, setAssistantBusy] = useState(false);
   const [assistantInputFocused, setAssistantInputFocused] = useState(false);
@@ -88,6 +102,7 @@ export function TravelWorkspace() {
   const [assistantFailed, setAssistantFailed] = useState(false);
   const [countryOpenRequest, setCountryOpenRequest] = useState(0);
   const [cityOpenRequest, setCityOpenRequest] = useState(0);
+  const [globeFocusRequest, setGlobeFocusRequest] = useState(0);
   const assistantRequestKey = useRef<string | undefined>(undefined);
   const countryScrollRef = useRef<ScrollView>(null);
   const countrySearchRequest = useRef(0);
@@ -96,6 +111,7 @@ export function TravelWorkspace() {
   const historyGeneration = useRef(0);
   const recordedCountryOpen = useRef(0);
   const recordedCityOpen = useRef(0);
+  const myPlacesGeneration = useRef(0);
   const overviewQuery = useQuery({ queryKey: compassQueryKeys.overview(travelContext), queryFn: fetchTravelOverview });
   const places = useMemo(() => overviewQuery.data?.places ?? [], [overviewQuery.data]);
   const recentPlaces = overviewQuery.data?.recentPlaces ?? [];
@@ -177,15 +193,18 @@ export function TravelWorkspace() {
   const cityImageUnavailable = cityDetailQuery.isError || cityImageQuery.isError;
 
   const countryByCode = useMemo(() => new Map(COUNTRIES.features.map(({ properties }) => [properties.countryCode, properties])), []);
+  const savedCountries = useMemo(() => places.filter(({ kind }) => kind === "country"), [places]);
+  const savedCities = useMemo(() => places.filter(({ kind }) => kind === "place"), [places]);
+  const savedCountryCodes = useMemo(() => [...new Set(savedCountries.map(({ countryCode }) => countryCode))], [savedCountries]);
   const citiesByCountry = useMemo(() => {
     const groups = new Map<string, Place[]>();
-    for (const place of [...places].sort((left, right) => left.name.localeCompare(right.name))) {
+    for (const place of [...savedCities].sort((left, right) => left.name.localeCompare(right.name))) {
       const group = groups.get(place.countryCode) ?? [];
       group.push(place);
       groups.set(place.countryCode, group);
     }
     return groups;
-  }, [places]);
+  }, [savedCities]);
   const selectedCountryCities = selectedCountry ? citiesByCountry.get(selectedCountry.countryCode) ?? [] : undefined;
   const visibleCountries = useMemo(() => {
     const normalized = countryQuery.trim().toLowerCase();
@@ -193,6 +212,10 @@ export function TravelWorkspace() {
       .filter(({ properties }) => !normalized || properties.name.toLowerCase().includes(normalized) || properties.countryCode.toLowerCase().includes(normalized))
       .sort((left, right) => left.properties.name.localeCompare(right.properties.name));
   }, [countryQuery]);
+  const savedCountryDetail = selectedCountry ? savedCountries.find(({ countryCode }) => countryCode === selectedCountry.countryCode) : undefined;
+  const savedCityDetail = selectedCountry && selectedCity ? savedCities.find(({ countryCode, name }) => countryCode === selectedCountry.countryCode && normalizePlaceName(name) === normalizePlaceName(selectedCity.name)) : undefined;
+  const activeCountryCode = searchFocus?.countryCode ?? lastOpenedCountryCode;
+  const myPlacesCardSize = myPlacesGridWidth > 0 ? Math.floor((myPlacesGridWidth - 20) / 3) : undefined;
   useEffect(() => {
     const query = countryQuery.trim();
     const request = ++countrySearchRequest.current;
@@ -202,8 +225,11 @@ export function TravelWorkspace() {
        void searchCountries(query, controller.signal).then((match) => {
          if (request !== countrySearchRequest.current) return;
          void queryClient.invalidateQueries({ queryKey: contentQueryKeys.history(contentContext, undefined), exact: true, refetchType: "none" }).catch(() => undefined);
-         if (!match) return;
-         setSearchFocus(match);
+          setSearchFocus(match ?? undefined);
+          if (match) {
+            setGlobeFocusTarget(match);
+            setGlobeFocusRequest((current) => current + 1);
+          }
       }).catch((error: unknown) => {
         if (request === countrySearchRequest.current && !(error instanceof Error && error.name === "CanceledError")) setSearchFocus(undefined);
       });
@@ -246,9 +272,14 @@ export function TravelWorkspace() {
     setSheetOpen(true);
   }
 
-  function openCountryDetail(country: CountryProperties, focusGlobe = false) {
-    setSearchFocus(focusGlobe ? { name: country.name, countryCode: country.countryCode, latitude: country.latitude, longitude: country.longitude } : undefined);
-    setHighlightSelectedCountry(true);
+  function openCountryDetail(country: CountryProperties, focusGlobe = false, source: DetailSource = "browse") {
+    setLastOpenedCountryCode(country.countryCode);
+    setSearchFocus(undefined);
+    if (focusGlobe) {
+      setGlobeFocusTarget({ name: country.name, countryCode: country.countryCode, latitude: country.latitude, longitude: country.longitude });
+      setGlobeFocusRequest((current) => current + 1);
+    }
+    setDetailSource(source);
     setSelectedCountry(country);
     setSelectedCity(undefined);
     setCitySheetOpen(false);
@@ -262,11 +293,58 @@ export function TravelWorkspace() {
     setSheetOpen(false);
   }
 
-  function openCityDetail(city: GeneratedCity) {
+  function openCityDetail(city: GeneratedCity, source: DetailSource = "browse", focusGlobe = false, country = selectedCountry) {
+    if (country) {
+      setSelectedCountry(country);
+      setLastOpenedCountryCode(country.countryCode);
+      setSearchFocus(undefined);
+      if (focusGlobe) {
+        setGlobeFocusTarget({ name: city.name, countryCode: country.countryCode, latitude: city.latitude, longitude: city.longitude });
+        setGlobeFocusRequest((current) => current + 1);
+      }
+    }
+    setDetailSource(source);
     setSelectedCity(city);
     setCitySheetOpen(true);
     setSheetOpen(false);
     setCityOpenRequest((current) => current + 1);
+  }
+
+  function refreshMyPlaces() {
+    const generation = ++myPlacesGeneration.current;
+    setMyPlacesLoading(true);
+    setMyPlacesError(undefined);
+    requestAnimationFrame(() => {
+      void queryClient.invalidateQueries({ queryKey: compassQueryKeys.overview(travelContext), exact: true }, { throwOnError: true })
+        .catch((error: unknown) => {
+          if (generation === myPlacesGeneration.current) setMyPlacesError(errorMessage(error));
+        })
+        .finally(() => {
+          if (generation === myPlacesGeneration.current) setMyPlacesLoading(false);
+        });
+    });
+  }
+
+  function openMyPlaces(tab: MyPlacesTab = "countries") {
+    setMyPlacesTab(tab);
+    setMyPlacesOpen(true);
+    refreshMyPlaces();
+  }
+
+  function openSavedPlace(place: Place) {
+    const country = countryByCode.get(place.countryCode) ?? {
+      countryCode: place.countryCode,
+      name: place.kind === "country" ? place.name : place.countryCode,
+      continent: "Unknown",
+      latitude: place.latitude,
+      longitude: place.longitude,
+    };
+    setMyPlacesOpen(false);
+    if (place.kind === "country") {
+      openCountryDetail(country, true, "myPlaces");
+      return;
+    }
+    openCityDetail({ name: place.name, latitude: place.latitude, longitude: place.longitude }, "myPlaces", true, country);
   }
 
   async function openSearchHistory() {
@@ -327,19 +405,17 @@ export function TravelWorkspace() {
       openCountryDetail(country, true);
       return;
     }
-    setSearchFocus(undefined);
-    setHighlightSelectedCountry(false);
-    setSelectedCountry(country);
-    setSheetOpen(false);
-    openCityDetail({ name: place.name, latitude: place.latitude, longitude: place.longitude });
+    openCityDetail({ name: place.name, latitude: place.latitude, longitude: place.longitude }, "browse", true, country);
   }
 
-  async function persistGeneratedPlace(input: CreatePlaceInput, optimisticKey: string, failureTitle: string) {
+  async function persistGeneratedPlace(input: CreatePlaceInput, optimisticKey: string, kind: Place["kind"], coverUrl: string | undefined, failureTitle: string) {
     const overviewKey = compassQueryKeys.overview(travelContext);
     await queryClient.cancelQueries({ queryKey: overviewKey, exact: true }).catch(() => undefined);
     queryClient.setQueryData(overviewKey, (current: CompassOverview | undefined) => addOptimisticCompassPlace(current, {
       key: optimisticKey, name: input.name, summary: input.summary, countryCode: input.countryCode,
+      kind,
       latitude: input.latitude, longitude: input.longitude, createdAt: new Date().toISOString(),
+      ...(coverUrl ? { coverUrl } : {}),
     }));
     void createPlace(input).then((place) => {
       queryClient.setQueryData(overviewKey, (current: CompassOverview | undefined) => reconcileOptimisticCompassPlace(current, optimisticKey, place));
@@ -356,7 +432,7 @@ export function TravelWorkspace() {
     const optimisticKey = `optimistic-${randomUUID()}`;
     setSheetOpen(false);
     showToast({ title: "Country saved to my places", duration: 2_000 });
-    void persistGeneratedPlace(input, optimisticKey, "Country could not be saved");
+    void persistGeneratedPlace(input, optimisticKey, "country", countryImage.image.url, "Country could not be saved");
   }
 
   function saveCity() {
@@ -366,7 +442,7 @@ export function TravelWorkspace() {
     setCitySheetOpen(false);
     requestAnimationFrame(() => countryScrollRef.current?.scrollTo({ y: 0, animated: true }));
     showToast({ title: "City saved to my places", duration: 2_000 });
-    void persistGeneratedPlace(input, optimisticKey, "City could not be saved");
+    void persistGeneratedPlace(input, optimisticKey, "place", cityImage.image.url, "City could not be saved");
   }
 
   function selectPlace(place: Place) {
@@ -377,8 +453,10 @@ export function TravelWorkspace() {
       latitude: place.latitude,
       longitude: place.longitude,
     });
-    setHighlightSelectedCountry(true);
-    setSearchFocus({ name: place.name, countryCode: place.countryCode, latitude: place.latitude, longitude: place.longitude });
+    setLastOpenedCountryCode(place.countryCode);
+    setSearchFocus(undefined);
+    setGlobeFocusTarget({ name: place.name, countryCode: place.countryCode, latitude: place.latitude, longitude: place.longitude });
+    setGlobeFocusRequest((current) => current + 1);
     setSheetOpen(false);
   }
 
@@ -429,15 +507,17 @@ export function TravelWorkspace() {
         <View style={styles.globe}>
           <InteractiveGlobe
             onCountryPress={(country) => { if (country) openCountryDetail(country.properties); }}
-            focusTarget={searchFocus ?? undefined}
-            selectedCountryCode={highlightSelectedCountry ? selectedCountry?.countryCode : undefined}
+            focusTarget={globeFocusTarget}
+            focusRequest={globeFocusRequest}
+            savedCountryCodes={savedCountryCodes}
+            selectedCountryCode={activeCountryCode}
           />
           {loadError && !loading ? <View style={styles.loadFailure}><GlobeIcon size="lg" variant="muted" /><Text style={styles.loadFailureText}>{loadError}</Text><Button onPress={() => void overviewQuery.refetch()} size="sm" variant="secondary">Retry</Button></View> : null}
         </View>
       </View>
 
       {!loadError ? <CoreComposer
-        accessory={selectedCountry && !sheetOpen && !citySheetOpen ? <Button accessibilityLabel={`Reopen ${selectedCountry.name}`} contentMode="raw" onPress={() => openCountryDetail(selectedCountry)} size="sm" style={styles.placeIsland} variant="secondary"><LocationPinIcon size="sm" /><Text numberOfLines={1} style={styles.placeIslandText}>{selectedCountry.name}</Text><ChevronRightIcon size="sm" /></Button> : undefined}
+        accessory={selectedCountry && !sheetOpen && !citySheetOpen ? <Button accessibilityLabel={`Reopen ${selectedCountry.name}`} contentMode="raw" onPress={() => openCountryDetail(selectedCountry, true)} size="sm" style={styles.placeIsland} variant="secondary"><LocationPinIcon size="sm" /><Text numberOfLines={1} style={styles.placeIslandText}>{selectedCountry.name}</Text><ChevronRightIcon size="sm" /></Button> : undefined}
         accessibilityLabel="Ask Core about saved cities"
         disabled={assistantBusy}
         editable={!assistantBusy}
@@ -453,7 +533,7 @@ export function TravelWorkspace() {
       /> : null}
 
       <BottomSheet
-        footer={sheetView === "countryDetail" ? <View style={styles.sheetFooter}><Button disabled={!countryDetail || countryImage?.status !== "ready"} onPress={saveCountry} size="md" variant="primary">Save</Button><Button onPress={closeCountryDetail} size="md" variant="secondary">Close</Button></View> : undefined}
+        footer={sheetView === "countryDetail" ? <View style={styles.sheetFooter}>{detailSource === "myPlaces" ? null : savedCountryDetail ? <Button onPress={() => { setSheetOpen(false); requestAnimationFrame(() => openMyPlaces("countries")); }} size="md" variant="primary">Open</Button> : <Button disabled={!countryDetail || countryImage?.status !== "ready"} onPress={saveCountry} size="md" variant="primary">Save</Button>}<Button onPress={closeCountryDetail} size="md" variant="secondary">Close</Button></View> : undefined}
         height="full"
         onOpenChange={(next) => { if (!next && sheetView === "countryDetail") closeCountryDetail(); else setSheetOpen(next); }}
         open={sheetOpen}
@@ -471,7 +551,7 @@ export function TravelWorkspace() {
              </> : null}
           </View> : <>
              {selectedCountry ? <>
-              <BottomSheetItem icon={<GlobeIcon size="md" />} onPress={() => { setSelectedCountry(undefined); setHighlightSelectedCountry(false); }}>Show all saved cities</BottomSheetItem>
+               <BottomSheetItem icon={<GlobeIcon size="md" />} onPress={() => setSelectedCountry(undefined)}>Show all saved cities</BottomSheetItem>
               <Text style={styles.listLabel}>SAVED CITIES IN {selectedCountry.countryCode}</Text>
               {selectedCountryCities?.map((place) => <BottomSheetItem key={place.key} icon={<LocationPinIcon size="md" />} onPress={() => selectPlace(place)}>{place.name}</BottomSheetItem>)}
               {selectedCountryCities?.length === 0 ? <Text style={styles.emptyText}>No saved cities in {selectedCountry.name}.</Text> : null}
@@ -481,15 +561,16 @@ export function TravelWorkspace() {
                 <Text style={styles.countryLabel}>{countryByCode.get(countryCode)?.name ?? countryCode} · {countryCode}</Text>
                 {countryPlaces.map((place) => <BottomSheetItem key={place.key} icon={<LocationPinIcon size="md" />} onPress={() => selectPlace(place)}>{place.name}</BottomSheetItem>)}
               </Fragment>)}
-              {places.length === 0 ? <Text style={styles.emptyText}>No saved cities are available.</Text> : null}
-            </>}
-            <Text style={styles.listLabel}>COUNTRIES</Text>
+               {savedCities.length === 0 ? <Text style={styles.emptyText}>No saved cities are available.</Text> : null}
+             </>}
+             <BottomSheetItem icon={<LocationPinIcon size="md" />} onPress={() => { setSheetOpen(false); requestAnimationFrame(() => openMyPlaces()); }}>My Places</BottomSheetItem>
+             <Text style={styles.listLabel}>COUNTRIES</Text>
             {visibleCountries.map((country: CountryFeature) => <BottomSheetItem key={country.properties.countryCode} icon={<GlobeIcon size="md" />} onPress={() => openCountryDetail(country.properties)}>{country.properties.name}</BottomSheetItem>)}
           </>}
         </ScrollView>
       </BottomSheet>
       <BottomSheet
-        footer={<View style={styles.sheetFooter}><Button disabled={!cityDetail || cityImage?.status !== "ready"} onPress={saveCity} size="md" variant="primary">Save</Button><Button onPress={() => setCitySheetOpen(false)} size="md" variant="secondary">Close</Button></View>}
+        footer={<View style={styles.sheetFooter}>{detailSource === "myPlaces" ? null : savedCityDetail ? <Button onPress={() => { setCitySheetOpen(false); requestAnimationFrame(() => openMyPlaces("cities")); }} size="md" variant="primary">Open</Button> : <Button disabled={!cityDetail || cityImage?.status !== "ready"} onPress={saveCity} size="md" variant="primary">Save</Button>}<Button onPress={() => setCitySheetOpen(false)} size="md" variant="secondary">Close</Button></View>}
         height="full"
         onOpenChange={(next) => { if (!next) setCitySheetOpen(false); }}
         open={citySheetOpen}
@@ -503,7 +584,21 @@ export function TravelWorkspace() {
           </View>
         </ScrollView>
       </BottomSheet>
-      <BottomSheet footer={<Button onPress={() => setActionsOpen(false)} size="md" variant="secondary">Close</Button>} onOpenChange={setActionsOpen} open={actionsOpen} title="Add in Compass"><BottomSheetItem icon={<GlobeIcon size="md" />} onPress={() => { setActionsOpen(false); openBrowse(); }}>Browse countries and saved places</BottomSheetItem></BottomSheet>
+      <BottomSheet footer={<Button onPress={() => setActionsOpen(false)} size="md" variant="secondary">Close</Button>} onOpenChange={setActionsOpen} open={actionsOpen} title="Add in Compass"><BottomSheetItem icon={<GlobeIcon size="md" />} onPress={() => { setActionsOpen(false); openBrowse(); }}>Browse countries and saved places</BottomSheetItem><BottomSheetItem icon={<LocationPinIcon size="md" />} onPress={() => { setActionsOpen(false); requestAnimationFrame(() => openMyPlaces()); }}>My Places</BottomSheetItem></BottomSheet>
+      <BottomSheet footer={<Button disabled={myPlacesLoading} onPress={() => setMyPlacesOpen(false)} size="md" variant="secondary">Close</Button>} height="full" onOpenChange={(open) => { setMyPlacesOpen(open); if (!open) myPlacesGeneration.current += 1; }} open={myPlacesOpen} title="My Places">
+        <View style={styles.myPlacesContent}>
+          <Tabs accessibilityLabel="My Places categories" accessibilityRole="tablist" role="tablist" style={styles.myPlacesTabs}>
+            <Button accessibilityLabel="Saved countries" accessibilityRole="tab" accessibilityState={{ selected: myPlacesTab === "countries" }} onPress={() => setMyPlacesTab("countries")} size="md" style={styles.myPlacesTab} variant={myPlacesTab === "countries" ? "secondary" : "ghost"}>Countries</Button>
+            <Button accessibilityLabel="Saved cities" accessibilityRole="tab" accessibilityState={{ selected: myPlacesTab === "cities" }} onPress={() => setMyPlacesTab("cities")} size="md" style={styles.myPlacesTab} variant={myPlacesTab === "cities" ? "secondary" : "ghost"}>Cities</Button>
+          </Tabs>
+          <ScrollView accessibilityLabel={`Saved ${myPlacesTab}`} contentContainerStyle={styles.myPlacesGrid} onLayout={({ nativeEvent }) => setMyPlacesGridWidth(nativeEvent.layout.width)} role="tabpanel" showsVerticalScrollIndicator={false} style={styles.fullSheetScroll}>
+            {myPlacesLoading ? <View accessibilityLabel="Loading My Places" accessibilityRole="progressbar" style={styles.myPlacesLoadingGrid}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.myPlaceCard, { width: myPlacesCardSize, height: myPlacesCardSize }]} />)}</View> : (myPlacesTab === "countries" ? savedCountries : savedCities).map((place) => <View key={place.key} style={[styles.myPlaceCard, { width: myPlacesCardSize, height: myPlacesCardSize }]}>{place.coverUrl ? <Image contentFit="cover" source={place.coverUrl} style={StyleSheet.absoluteFill} /> : null}<Button accessibilityLabel={`Open ${place.name}`} contentMode="raw" onPress={() => openSavedPlace(place)} shape="rounded" size="md" style={[styles.myPlaceMain, place.coverUrl && styles.coveredMyPlaceMain]} variant="ghost">{place.coverUrl ? null : place.kind === "country" ? <GlobeIcon size="lg" /> : <LocationPinIcon size="lg" />}<Text numberOfLines={1} style={[styles.myPlaceLabel, place.coverUrl && styles.coveredMyPlaceLabel]}>{place.name}</Text></Button></View>)}
+            {!myPlacesLoading && myPlacesError && !overviewQuery.data ? <View style={styles.myPlacesFailure}><Text style={styles.loadFailureText}>{myPlacesError}</Text><Button onPress={refreshMyPlaces} size="md" variant="secondary">Retry</Button></View> : null}
+            {!myPlacesLoading && myPlacesError && overviewQuery.data ? <Text style={styles.refreshWarning}>Could not refresh My Places. Showing saved results.</Text> : null}
+            {!myPlacesLoading && (!myPlacesError || overviewQuery.data) && (myPlacesTab === "countries" ? savedCountries : savedCities).length === 0 ? <Text style={styles.emptyText}>No saved {myPlacesTab} yet.</Text> : null}
+          </ScrollView>
+        </View>
+      </BottomSheet>
       <BottomSheet footer={<Button onPress={() => setFiltersOpen(false)} size="md" variant="secondary">Close</Button>} onOpenChange={setFiltersOpen} open={filtersOpen} title="Filter Compass"><Button onPress={() => void openSearchHistory()} size="md" variant="secondary">Search history</Button></BottomSheet>
       <BottomSheet footer={<Button disabled={historyLoading} onPress={() => setHistoryOpen(false)} size="md" variant="secondary">Close</Button>} height="full" onOpenChange={(open) => { setHistoryOpen(open); if (!open) historyGeneration.current += 1; }} open={historyOpen} title="Search history">
         <ScrollView contentContainerStyle={[styles.searchHistoryList, !historyLoading && history.length === 0 && styles.sheetEmptyContent]} showsVerticalScrollIndicator={false} style={styles.fullSheetScroll}>
@@ -601,6 +696,18 @@ const styles = StyleSheet.create({
   searchHistoryList: { flexGrow: 1, gap: spacing.xs, paddingBottom: spacing.xl },
   searchHistorySkeletons: { gap: spacing.xs },
   historySkeleton: { width: "100%", height: 38, borderRadius: 999 },
+  myPlacesContent: { flex: 1, minHeight: 0, gap: spacing.md },
+  myPlacesTabs: { flexDirection: "row", gap: 4, padding: 3, borderWidth: 1, backgroundColor: palette.panel },
+  myPlacesTab: { flex: 1 },
+  myPlacesGrid: { alignContent: "flex-start", flexDirection: "row", flexWrap: "wrap", gap: 10, paddingBottom: spacing.xl },
+  myPlacesLoadingGrid: { width: "100%", flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  myPlacesFailure: { width: "100%", flex: 1, minHeight: 240, alignItems: "center", justifyContent: "center", gap: spacing.md },
+  refreshWarning: { width: "100%", color: palette.silver500, fontFamily: fonts.regular, fontSize: 12, textAlign: "center" },
+  myPlaceCard: { position: "relative", overflow: "hidden", borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.md, backgroundColor: palette.panelRaised },
+  myPlaceMain: { width: "100%", height: "100%", flexDirection: "column", justifyContent: "center", gap: spacing.sm, paddingHorizontal: spacing.xs },
+  coveredMyPlaceMain: { justifyContent: "flex-end", paddingBottom: 10 },
+  myPlaceLabel: { width: "100%", color: palette.silver100, fontFamily: fonts.medium, fontSize: 12, textAlign: "center" },
+  coveredMyPlaceLabel: { paddingHorizontal: 5, paddingVertical: 4, borderRadius: radii.sm, backgroundColor: "rgba(0, 0, 0, 0.68)", color: "#FFFFFF" },
   sheetEmptyContent: { flexGrow: 1, justifyContent: "center" },
   emptyText: { paddingVertical: 18, color: palette.silver500, fontFamily: fonts.regular, fontSize: 13, textAlign: "center" },
 });

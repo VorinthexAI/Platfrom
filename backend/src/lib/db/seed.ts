@@ -134,6 +134,14 @@ export const SEEDED_MODELS = [
     supportedUseCases: 'Image generation and visual asset creation.',
     enabled: true,
   },
+  {
+    key: 'cmgemini25flashlitemodel1',
+    slug: 'google.gemini-2.5-flash-lite',
+    name: 'Google Gemini 2.5 Flash Lite',
+    description: 'Fast, cost-efficient Google text generation model routed through OpenRouter.',
+    supportedUseCases: 'Destination guides, image briefs, summarization, and structured text generation.',
+    enabled: true,
+  },
 ] as const;
 
 const SEEDED_MODEL_SLUGS = new Set<string>(SEEDED_MODELS.map(({ slug }) => slug));
@@ -183,6 +191,13 @@ export const SEEDED_MODEL_PROVIDERS = [
     modelSlug: 'xai.grok-imagine-image-quality',
     providerSlug: 'openrouter',
     providerModelId: 'x-ai/grok-imagine-image-quality',
+    enabled: true,
+  },
+  {
+    key: 'cmgemini25flashliteroute1',
+    modelSlug: 'google.gemini-2.5-flash-lite',
+    providerSlug: 'openrouter',
+    providerModelId: 'google/gemini-2.5-flash-lite',
     enabled: true,
   },
 ] as const;

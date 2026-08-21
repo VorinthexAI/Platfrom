@@ -62,8 +62,8 @@ test("isolates every routed workspace key by context and resource", () => {
 
 test("reconciles overlapping Compass saves by optimistic key without erasing siblings", () => {
   const at = "2026-08-20T00:00:00.000Z";
-  const first = { key: "optimistic-first", name: "Lisbon", summary: "First", countryCode: "PT", latitude: 38.72, longitude: -9.14, createdAt: at };
-  const second = { key: "optimistic-second", name: "Porto", summary: "Second", countryCode: "PT", latitude: 41.15, longitude: -8.61, createdAt: at };
+  const first = { key: "optimistic-first", kind: "place" as const, name: "Lisbon", summary: "First", countryCode: "PT", latitude: 38.72, longitude: -9.14, createdAt: at, coverUrl: "https://signed.test/lisbon.png" };
+  const second = { key: "optimistic-second", kind: "place" as const, name: "Porto", summary: "Second", countryCode: "PT", latitude: 41.15, longitude: -8.61, createdAt: at, coverUrl: "https://signed.test/porto.png" };
   const recent = { key: "recent-lisbon", kind: "place" as const, name: "Lisbon", summary: "Recent", countryCode: "PT", latitude: 38.72, longitude: -9.14, openedAt: at };
   const both = addOptimisticCompassPlace(addOptimisticCompassPlace({ places: [], recentPlaces: [recent] }, first), second);
   const failedFirst = removeOptimisticCompassPlace(both, first.key);
@@ -72,6 +72,7 @@ test("reconciles overlapping Compass saves by optimistic key without erasing sib
   const savedSecond = { ...second, key: "saved-second" };
   const reconciled = reconcileOptimisticCompassPlace(both, second.key, savedSecond);
   expect(reconciled.places.map(({ key }) => key).sort()).toEqual([first.key, savedSecond.key].sort());
+  expect(reconciled.places.find(({ key }) => key === savedSecond.key)).toMatchObject({ kind: "place", coverUrl: second.coverUrl });
   expect(reconciled.recentPlaces).toEqual([recent]);
 });
 

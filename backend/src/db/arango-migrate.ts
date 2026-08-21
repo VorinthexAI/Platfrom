@@ -371,9 +371,22 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
   if (!await places.exists()) return;
   const placeImages = targetDb.collection('placeImages');
   if (!await placeImages.exists()) await placeImages.create();
+  const obsoleteCountryCursor = await targetDb.query<string>('FOR place IN places FILTER place.kind == "country" && (!HAS(place, "userKey") || !HAS(place, "saved")) RETURN place._key');
+  const obsoleteCountryKeys = await obsoleteCountryCursor.all();
+  if (obsoleteCountryKeys.length > 0) {
+    for (const collectionName of ['shares', 'tagAssignments', 'bookSources']) {
+      if (!await targetDb.collection(collectionName).exists()) continue;
+      await targetDb.query(`
+        FOR resource IN @@collection
+          FILTER resource.sourceType == "place" && resource.sourceKey IN @obsoleteCountryKeys
+          REMOVE resource IN @@collection
+      `, { '@collection': collectionName, obsoleteCountryKeys });
+    }
+    await targetDb.query('FOR place IN places FILTER place._key IN @obsoleteCountryKeys REMOVE place IN places', { obsoleteCountryKeys });
+  }
   const missingOwners = await targetDb.query<string>(`
     FOR place IN places
-      FILTER place.kind != "country" && !HAS(place, "userKey")
+      FILTER !HAS(place, "userKey")
       LET membershipKeys = UNIQUE(FOR relation IN placeImages
         FILTER relation.placeKey == place._key
         LET image = DOCUMENT(images, relation.imageKey)
@@ -390,7 +403,7 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
   if (unresolvedOwners.length > 0) throw new Error(`places migration cannot safely derive user ownership for: ${unresolvedOwners.join(', ')}`);
   await targetDb.query(`
     FOR place IN places
-      FILTER place.kind != "country" && (!HAS(place, "userKey") || !HAS(place, "saved"))
+      FILTER !HAS(place, "userKey") || !HAS(place, "saved")
       LET membershipKey = FIRST(FOR relation IN placeImages
         FILTER relation.placeKey == place._key
         LET image = DOCUMENT(images, relation.imageKey)
@@ -400,16 +413,15 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
       UPDATE place WITH { userKey: HAS(place, "userKey") ? place.userKey : membership.userId, saved: HAS(place, "saved") ? place.saved : true } IN places
   `);
   const canonicalFields = ['userKey', 'scopeKey', 'saved', 'name', 'summary', 'countryCode', 'latitude', 'longitude', 'embedding', 'embeddingContentVersion', 'createdAt'].sort();
-  const openedCanonicalFields = [...canonicalFields, 'openedAt'].sort();
-  const generatedCanonicalFields = [...canonicalFields, 'generatedDetail'].sort();
-  const openedGeneratedCanonicalFields = [...generatedCanonicalFields, 'openedAt'].sort();
+  const canonicalFieldSets = [false, true].flatMap((hasKind) => [false, true].flatMap((hasOpenedAt) => [false, true].flatMap((hasGeneratedDetail) => [false, true]
+    .filter((hasGeneratedDetailVersion) => hasGeneratedDetail || !hasGeneratedDetailVersion)
+    .map((hasGeneratedDetailVersion) => [...canonicalFields, ...(hasKind ? ['kind'] : []), ...(hasOpenedAt ? ['openedAt'] : []), ...(hasGeneratedDetail ? ['generatedDetail'] : []), ...(hasGeneratedDetailVersion ? ['generatedDetailVersion'] : [])].sort()))));
   const validatePlaces = async () => {
     let validationAfter = '';
     while (true) {
       const cursor = await targetDb.query<Record<string, unknown>>(`
         /* Validate every retained place before accepting its canonical projection. */
         FOR place IN places
-          FILTER place.kind != "country"
           FILTER place._key > @after
           SORT place._key
           LIMIT 100
@@ -441,7 +453,6 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
   await validatePlaces();
   const duplicateCursor = await targetDb.query<{ scopeKey: string; userKey: string; countryCode: string; name: string; count: number }>(`
     FOR place IN places
-      FILTER place.kind != "country"
       COLLECT scopeKey = place.scopeKey, userKey = place.userKey, countryCode = UPPER(TRIM(place.countryCode)), name = TRIM(place.name) WITH COUNT INTO count
       FILTER count > 1
       RETURN { scopeKey, userKey, countryCode, name, count }
@@ -455,10 +466,9 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
   while (true) {
     const cursor = await targetDb.query<Record<string, unknown>>(`
       FOR place IN places
-        FILTER place.kind != "country"
         FILTER place._key > @after
         LET fields = ATTRIBUTES(place, true, true)
-        FILTER (fields != @canonicalFields && fields != @openedCanonicalFields && fields != @generatedCanonicalFields && fields != @openedGeneratedCanonicalFields)
+        FILTER fields NOT IN @canonicalFieldSets
           || place.name != TRIM(place.name) || place.countryCode != UPPER(TRIM(place.countryCode))
           || place.embeddingContentVersion != 2
           || !IS_ARRAY(place.embedding) || LENGTH(place.embedding) != @dimensions
@@ -466,7 +476,7 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
         SORT place._key
         LIMIT 50
         RETURN place
-    `, { after, canonicalFields, openedCanonicalFields, generatedCanonicalFields, openedGeneratedCanonicalFields, dimensions: EMBEDDING_DIMENSIONS });
+    `, { after, canonicalFieldSets, dimensions: EMBEDDING_DIMENSIONS });
     const legacyPlaces = await cursor.all();
     if (legacyPlaces.length === 0) break;
     const replacements = [];
@@ -490,6 +500,7 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
         userKey: canonical.userKey,
         scopeKey: canonical.scopeKey,
         saved: canonical.saved,
+        ...(place.kind == null ? {} : { kind: z.enum(['country', 'place']).parse(place.kind) }),
         name: canonical.name,
         summary: canonical.summary,
         countryCode: canonical.countryCode,
@@ -498,6 +509,7 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
         embedding: await generateEmbedding(buildPlaceEmbeddingText(canonical)),
         embeddingContentVersion: 2,
         ...(place.generatedDetail == null ? {} : { generatedDetail: generatedPlaceDetailSchema.parse(place.generatedDetail) }),
+        ...(place.generatedDetailVersion == null ? {} : { generatedDetailVersion: z.number().int().positive().parse(place.generatedDetailVersion) }),
         ...(canonical.openedAt == null ? {} : { openedAt: canonical.openedAt }),
         createdAt: canonical.createdAt,
       });
@@ -511,29 +523,16 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
     after = String(legacyPlaces.at(-1)!._key);
   }
   await validatePlaces();
-  const countryPlaceCursor = await targetDb.query<string>('FOR place IN places FILTER place.kind == "country" RETURN place._key');
-  const countryPlaceKeys = await countryPlaceCursor.all();
-  if (countryPlaceKeys.length > 0) {
-    for (const collectionName of ['shares', 'tagAssignments', 'bookSources']) {
-      if (!await targetDb.collection(collectionName).exists()) continue;
-      await targetDb.query(`
-        FOR resource IN @@collection
-          FILTER resource.sourceType == "place" && resource.sourceKey IN @countryPlaceKeys
-          REMOVE resource IN @@collection
-      `, { '@collection': collectionName, countryPlaceKeys });
-    }
-  }
-  await targetDb.query('FOR place IN places FILTER place.kind == "country" REMOVE place IN places');
   const invalid = await targetDb.query<number>(`
     RETURN LENGTH(FOR place IN places
       LET fields = ATTRIBUTES(place, true, true)
-      FILTER (fields != @canonicalFields && fields != @openedCanonicalFields && fields != @generatedCanonicalFields && fields != @openedGeneratedCanonicalFields)
+      FILTER fields NOT IN @canonicalFieldSets
         || place.name != TRIM(place.name) || place.countryCode != UPPER(TRIM(place.countryCode))
         || place.embeddingContentVersion != 2
         || !IS_ARRAY(place.embedding) || LENGTH(place.embedding) != @dimensions
         || LENGTH(place.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
       RETURN 1)
-  `, { canonicalFields, openedCanonicalFields, generatedCanonicalFields, openedGeneratedCanonicalFields, dimensions: EMBEDDING_DIMENSIONS });
+  `, { canonicalFieldSets, dimensions: EMBEDDING_DIMENSIONS });
   const invalidCount = await invalid.next() ?? 0;
   if (invalidCount > 0) throw new Error(`places minimal projection verification failed for ${invalidCount} row(s).`);
 }

@@ -33,9 +33,11 @@ const MIN_INERTIA_RADIANS_PER_SECOND = 0.01;
 const WEB_TOUCH_STYLE = { touchAction: "none" } as unknown as ViewStyle;
 const disableRaycast: THREE.Object3D["raycast"] = () => {};
 export type InteractiveGlobeProps = {
+  focusRequest?: number;
   focusTarget?: Readonly<{ countryCode: string; latitude: number; longitude: number }>;
   onCountryPress?: (country: CountryFeature | undefined, coordinates: { latitude: number; longitude: number }) => void;
   reducedMotion?: boolean;
+  savedCountryCodes?: readonly string[];
   selectedCountryCode?: string;
   style?: StyleProp<ViewStyle>;
 };
@@ -121,9 +123,11 @@ type GlobeSceneProps = Omit<InteractiveGlobeProps, "style"> & {
 
 function GlobeScene({
   controlsRef,
+  focusRequest,
   focusTarget,
   onCountryPress,
   reducedMotion,
+  savedCountryCodes = [],
   selectedCountryCode,
 }: GlobeSceneProps) {
   const globeRef = useRef<THREE.Group>(null);
@@ -148,17 +152,19 @@ function GlobeScene({
   const focusCountryCode = focusTarget?.countryCode;
   const focusLatitude = focusTarget?.latitude;
   const focusLongitude = focusTarget?.longitude;
-  const highlightedCountryCode = focusCountryCode ?? selectedCountryCode;
+  const highlightedCountryCode = selectedCountryCode;
   const selectedBoundaries = useMemo(() => {
     const country = COUNTRIES.features.find(({ properties }) => properties.countryCode === selectedCountryCode);
     return country
       ? createCountryBoundaryGeometry({ type: "FeatureCollection", features: [country] }, 1.026)
       : undefined;
   }, [selectedCountryCode]);
-  const selectedFill = useMemo(() => {
-    const country = COUNTRIES.features.find(({ properties }) => properties.countryCode === selectedCountryCode);
-    return country && selectedCountryCode !== highlightedCountryCode ? createCountryFillGeometry(country) : undefined;
-  }, [highlightedCountryCode, selectedCountryCode]);
+  const savedFills = useMemo(() => new Map(savedCountryCodes
+    .map((code) => {
+      const country = COUNTRIES.features.find(({ properties }) => properties.countryCode === code);
+      return country ? [code, createCountryFillGeometry(country, 1.012)] as const : undefined;
+    })
+    .filter((entry): entry is readonly [string, THREE.BufferGeometry] => Boolean(entry))), [savedCountryCodes]);
   const focusBoundaries = useMemo(() => {
     const country = COUNTRIES.features.find(({ properties }) => properties.countryCode === highlightedCountryCode);
     return country ? [1.03, 1.034, 1.038].map((radius) => createCountryBoundaryGeometry({ type: "FeatureCollection", features: [country] }, radius)) : [];
@@ -175,7 +181,7 @@ function GlobeScene({
 
   useEffect(() => () => boundaries.dispose(), [boundaries]);
   useEffect(() => () => selectedBoundaries?.dispose(), [selectedBoundaries]);
-  useEffect(() => () => selectedFill?.dispose(), [selectedFill]);
+  useEffect(() => () => savedFills.forEach((geometry) => geometry.dispose()), [savedFills]);
   useEffect(() => () => focusBoundaries.forEach((geometry) => geometry.dispose()), [focusBoundaries]);
   useEffect(() => () => focusFill?.dispose(), [focusFill]);
   useEffect(() => {
@@ -197,7 +203,7 @@ function GlobeScene({
       focusAnimation.current = { from: globe.quaternion.clone(), fromDistance: cameraRef.current.position.z, to: target, startedAt };
     }
     invalidate();
-  }, [focusCountryCode, focusLatitude, focusLongitude, invalidate, reducedMotion]);
+  }, [focusCountryCode, focusLatitude, focusLongitude, focusRequest, invalidate, reducedMotion]);
   useEffect(() => {
     pulseStartedAt.current = highlightedCountryCode && !reducedMotion ? performance.now() : undefined;
     invalidate();
@@ -407,13 +413,13 @@ function GlobeScene({
         <lineSegments geometry={boundaries} raycast={disableRaycast}>
           <lineBasicMaterial color="#a9bac2" transparent opacity={0.68} />
         </lineSegments>
-        {selectedFill ? <mesh geometry={selectedFill} raycast={disableRaycast}><meshBasicMaterial color="#a9bac2" depthWrite={false} side={THREE.DoubleSide} transparent opacity={0.42} /></mesh> : null}
+        {[...savedFills].filter(([code]) => code !== highlightedCountryCode).map(([code, geometry]) => <mesh geometry={geometry} key={code} raycast={disableRaycast}><meshBasicMaterial color="#526f7d" depthWrite side={THREE.DoubleSide} /></mesh>)}
         {selectedBoundaries ? (
           <lineSegments geometry={selectedBoundaries} raycast={disableRaycast}>
             <lineBasicMaterial color="#a9bac2" transparent opacity={1} />
           </lineSegments>
         ) : null}
-        {focusFill ? <mesh geometry={focusFill} raycast={disableRaycast}><meshBasicMaterial color={focusCountryCode ? "#d9f5fb" : "#a9bac2"} depthWrite={false} side={THREE.DoubleSide} transparent opacity={focusCountryCode ? 0.18 : 0.42} /></mesh> : null}
+        {focusFill ? <mesh geometry={focusFill} raycast={disableRaycast}><meshBasicMaterial color={focusCountryCode === highlightedCountryCode ? "#d9f5fb" : "#a9bac2"} depthWrite={false} side={THREE.DoubleSide} transparent opacity={focusCountryCode === highlightedCountryCode ? 0.18 : 0.42} /></mesh> : null}
         {focusBoundaries.map((geometry, index) => (
           <lineSegments geometry={geometry} key={geometry.uuid} raycast={disableRaycast}>
             <lineBasicMaterial ref={index === 1 ? pulseMaterial : undefined} color="#e7f7fb" transparent opacity={index === 1 ? 1 : 0.72} />
@@ -435,9 +441,11 @@ function GlobeScene({
 }
 
 export function InteractiveGlobe({
+  focusRequest,
   focusTarget,
   onCountryPress,
   reducedMotion,
+  savedCountryCodes,
   selectedCountryCode,
   style,
 }: InteractiveGlobeProps) {
@@ -479,9 +487,11 @@ export function InteractiveGlobe({
       <color attach="background" args={["#020609"]} />
       <GlobeScene
         controlsRef={controlsRef}
+        focusRequest={focusRequest}
         focusTarget={focusTarget}
         onCountryPress={onCountryPress}
         reducedMotion={reducedMotion ?? systemReducedMotion}
+        savedCountryCodes={savedCountryCodes}
         selectedCountryCode={selectedCountryCode}
       />
       </Canvas>

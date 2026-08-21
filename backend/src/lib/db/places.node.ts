@@ -45,12 +45,12 @@ export const generatedPlaceDetailSchema = z.object({
 });
 export type GeneratedPlaceDetail = z.infer<typeof generatedPlaceDetailSchema>;
 export const placeSchema = z.object({
-  key: z.string().cuid(), userKey: z.string().cuid(), scopeKey: z.string().cuid(), saved: z.boolean(), name: z.string().trim().min(1),
+  key: z.string().cuid(), userKey: z.string().cuid(), scopeKey: z.string().cuid(), saved: z.boolean(), kind: z.enum(['country', 'place']).optional(), name: z.string().trim().min(1),
   // Empty is retained only so pre-summary rows remain readable until migration backfills them.
   summary: z.string().default(''),
   countryCode: placeCountryCodeSchema,
   latitude: z.number().finite().min(-90).max(90), longitude: z.number().finite().min(-180).max(180),
-  embedding: currentEmbeddingSchema, embeddingContentVersion: z.literal(2).default(2), generatedDetail: generatedPlaceDetailSchema.optional(), openedAt: z.string().datetime().optional(), createdAt: z.string().datetime(),
+  embedding: currentEmbeddingSchema, embeddingContentVersion: z.literal(2).default(2), generatedDetail: generatedPlaceDetailSchema.optional(), generatedDetailVersion: z.number().int().positive().optional(), openedAt: z.string().datetime().optional(), createdAt: z.string().datetime(),
 });
 export type Place = z.infer<typeof placeSchema>;
 export const placesEmbeddingFields = ['name', 'summary'] as const;

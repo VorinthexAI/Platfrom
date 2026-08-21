@@ -9,7 +9,7 @@ const userKey = newId();
 const input = { organizationKey, scopeKey, imageRequestToken: 'opaque-token' };
 const issuedAt = Date.now();
 const hero = { title: 'Japan travel interpretation', prompt: 'Authoritative destination: Japan. Create an original landscape editorial interpretation of a volcanic island country with cedar forests, dense cities, timber architecture, and soft morning light. No text or identifiable people.' };
-const tokenPayload = { version: 4, issuedAt, nonce: 'A'.repeat(43), organizationKey, scopeKey, country: { name: 'Japan', countryCode: 'JP', continent: 'Asia', latitude: 36.2, longitude: 138.2 }, place: { name: 'Japan', summary: 'Island country.', countryCode: 'JP', latitude: 36.2, longitude: 138.2 }, hero } as const;
+const tokenPayload = { version: 5, issuedAt, nonce: 'A'.repeat(43), organizationKey, scopeKey, country: { name: 'Japan', countryCode: 'JP', continent: 'Asia', latitude: 36.2, longitude: 138.2 }, place: { kind: 'country', name: 'Japan', summary: 'Island country.', countryCode: 'JP', latitude: 36.2, longitude: 138.2 }, hero } as const;
 const staged = new Map<string, Uint8Array>();
 const storage = { upload: async ({ key, bytes }: { key: string; bytes: Uint8Array }) => { staged.set(key, bytes); return { storageKey: key }; }, download: async (key: string) => { const bytes = staged.get(key); if (!bytes) throw new Error('missing'); return { bytes }; }, delete: async (key: string) => { staged.delete(key); } } as any;
 const token = { storage, decryptImageRequest: (value: string) => { if (!value.startsWith(input.imageRequestToken)) throw new Error('tampered token'); return tokenPayload; } };

@@ -7,7 +7,7 @@ const workspace = readFileSync(new URL("../components/capability/TravelWorkspace
 test("renders Natural Earth country boundaries on the interactive Three.js globe", () => {
   expect(globe).toContain("createCountryBoundaryGeometry");
   expect(globe).toContain("createCountryFillGeometry");
-  expect(globe).toContain('color="#a9bac2" depthWrite={false} side={THREE.DoubleSide}');
+  expect(globe).toContain('color="#526f7d" depthWrite side={THREE.DoubleSide}');
   expect(globe).toContain("findCountryAtCoordinates");
   expect(globe).toContain("projectToTrackball");
   expect(globe).toContain("useFrame");
@@ -27,8 +27,12 @@ test("renders Natural Earth country boundaries on the interactive Three.js globe
   expect(globe).toContain("[1.03, 1.034, 1.038]");
   expect(globe).toContain("pulseElapsed >= FOCUS_PULSE_DURATION_MS");
   expect(globe).toContain("focusFill");
-  expect(globe.match(/depthWrite={false} side={THREE.DoubleSide}/g)?.length).toBe(2);
-  expect(globe).toContain("selectedCountryCode !== highlightedCountryCode");
+  expect(globe.match(/depthWrite={false} side={THREE.DoubleSide}/g)?.length).toBe(1);
+  expect(globe).toContain("createCountryFillGeometry(country, 1.012)");
+  expect(globe).toContain("[...savedFills].filter(([code]) => code !== highlightedCountryCode)");
+  expect(globe).toContain("const highlightedCountryCode = selectedCountryCode");
+  expect(globe).toContain("[savedCountryCodes]");
+  expect(globe).not.toContain("[highlightedCountryCode, savedCountryCodes]");
 });
 
 test("opens a full country detail sheet while place.find loads", () => {
@@ -116,7 +120,7 @@ test("uses shared Compass chrome, save footers, and a composer accessory island"
   expect(workspace).not.toContain("loading={countrySaving}");
   expect(workspace).not.toContain("loading={citySaving}");
   expect(workspace).toContain("countryScrollRef.current?.scrollTo({ y: 0");
-  expect(workspace).toContain('contentMode="raw" onPress={() => openCountryDetail(selectedCountry)} size="sm"');
+  expect(workspace).toContain('contentMode="raw" onPress={() => openCountryDetail(selectedCountry, true)} size="sm"');
   expect(workspace).toContain('<LoadingText text="Generating image..." />');
   expect(workspace).toContain('text="Generating country guide..."');
   expect(workspace).toContain('text="Generating city guide..."');
@@ -131,7 +135,7 @@ test("debounces canonical country search, aborts stale requests, and focuses wit
   expect(workspace).toContain("return () => { clearTimeout(timer); controller.abort(); }");
   expect(workspace).toContain("void searchCountries(query, controller.signal)");
   expect(workspace).toContain("setSearchFocus(undefined)");
-  expect(workspace).toContain("focusTarget={searchFocus ?? undefined}");
+  expect(workspace).toContain("focusTarget={globeFocusTarget}");
   const searchInput = workspace.slice(workspace.indexOf('accessibilityLabel="Search Compass countries"'), workspace.indexOf('accessibilityLabel="Filter Compass"'));
   expect(searchInput).not.toContain("openBrowse");
   expect(searchInput).not.toContain("openCountryDetail");
@@ -155,8 +159,9 @@ test("animates a bounded controlled focus pulse without saved-place map pins", (
 });
 
 test("uses backend coordinates for search focus while pulsing only mapped local geometry", () => {
-  expect(workspace).toContain("setSearchFocus(match)");
-  expect(workspace).toContain("focusTarget={searchFocus ?? undefined}");
+  expect(workspace).toContain("setSearchFocus(match ?? undefined)");
+  expect(workspace).toContain("setGlobeFocusTarget(match)");
+  expect(workspace).toContain("focusTarget={globeFocusTarget}");
   expect(globe).toContain("const point = latLonToVector(focusLatitude, focusLongitude)");
   expect(globe).toContain("properties.countryCode === highlightedCountryCode");
   expect(globe).toContain("createCountryBoundaryGeometry({ type: \"FeatureCollection\", features: [country] }, radius)");
@@ -190,8 +195,43 @@ test("opens an exact full-screen Recent places sheet with distinct globe behavio
   expect(workspace).toContain("recentPlaces.slice(0, 25)");
   expect(workspace).toContain('if (place.kind === "country")');
   expect(workspace).toContain("openCountryDetail(country, true)");
+  expect(workspace).toContain("selectedCountryCode={activeCountryCode}");
+  expect(workspace).toContain('openCityDetail({ name: place.name, latitude: place.latitude, longitude: place.longitude }, "browse", true, country)');
+});
+
+test("renders My Places from an exact refreshed overview with typed matching and shared controls", () => {
+  expect(workspace).toContain('title="My Places"');
+  expect(workspace).toContain('import { Tabs } from "@vorinthex/shared/ui/tabs"');
+  expect(workspace).toContain('queryClient.invalidateQueries({ queryKey: compassQueryKeys.overview(travelContext), exact: true })');
+  expect(workspace).toContain('Array.from({ length: 3 }');
+  expect(workspace).toContain('places.filter(({ kind }) => kind === "country")');
+  expect(workspace).toContain('places.filter(({ kind }) => kind === "place")');
+  expect(workspace).toContain("normalizePlaceName(name) === normalizePlaceName(selectedCity.name)");
+  expect(workspace).toContain('detailSource === "myPlaces" ? null');
+  expect(workspace).toContain('requestAnimationFrame(() => openMyPlaces("countries"))');
+  expect(workspace).toContain('requestAnimationFrame(() => openMyPlaces("cities"))');
+  expect(workspace).toContain('savedCountryCodes={savedCountryCodes}');
+  expect(workspace).toContain('size="md" style={[styles.myPlaceMain');
+  expect(workspace).toContain("setMyPlacesLoading(true)");
+  expect(workspace).toContain("setMyPlacesError(errorMessage(error))");
+  expect(workspace).toContain("myPlacesError && !overviewQuery.data");
+  expect(workspace).toContain("Could not refresh My Places. Showing saved results.");
+  expect(workspace).toContain("onPress={refreshMyPlaces}");
+  expect(workspace).toContain("setMyPlacesGridWidth(nativeEvent.layout.width)");
+  expect(workspace).toContain("(myPlacesGridWidth - 20) / 3");
+  expect(workspace).not.toContain("useWindowDimensions");
+  expect(workspace).toContain('role="tablist"');
+  expect(workspace).toContain('accessibilityRole="tab" accessibilityState={{ selected:');
+  expect(workspace).toContain('role="tabpanel"');
+});
+
+test("keeps search and last-opened highlighting distinct and refocuses repeated opens", () => {
+  expect(workspace).toContain("const activeCountryCode = searchFocus?.countryCode ?? lastOpenedCountryCode");
+  expect(workspace).toContain("setLastOpenedCountryCode(country.countryCode)");
+  expect(workspace).toContain("setSearchFocus(match ?? undefined)");
   expect(workspace).toContain("setSearchFocus(undefined)");
-  expect(workspace).toContain("setHighlightSelectedCountry(false)");
-  expect(workspace).toContain("selectedCountryCode={highlightSelectedCountry ? selectedCountry?.countryCode : undefined}");
-  expect(workspace).toContain("openCityDetail({ name: place.name");
+  expect(workspace).toContain("setGlobeFocusRequest((current) => current + 1)");
+  expect(workspace).toContain("focusRequest={globeFocusRequest}");
+  expect(globe).toContain("focusRequest?: number");
+  expect(globe).toContain("focusLongitude, focusRequest, invalidate");
 });

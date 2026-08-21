@@ -7,8 +7,10 @@ import { collectionImageSchema, type CollectionImage } from '@/lib/db/collection
 import { imageSchema, type Image } from '@/lib/db/images.node';
 import { placeImageSchema, type PlaceImage } from '@/lib/db/place-images.node';
 import { userHiddenSchema, type UserHidden } from '@/lib/db/user-hiddens.node';
+import { z } from 'zod';
 
 export interface TravelAccessContext { organizationKey: string; scopeKey: string; userKey: string }
+export interface PlacePresentationRecord { place: Place; heroStorageKey?: string }
 export interface TravelDatabase { query(query: string, bindVars?: Record<string, unknown>): Promise<{ all(): Promise<unknown[]> }> }
 const readAuthorizationQuery = `
   LET membership = FIRST(FOR candidate IN userOrganizations
@@ -36,7 +38,7 @@ export class TravelRepositoryError extends Error {
 export interface TravelRepository {
   authorizeRead(context: TravelAccessContext): Promise<void>;
   authorizeWrite(context: TravelAccessContext): Promise<string>;
-  overview(context: TravelAccessContext): Promise<{ places: Place[]; recentPlaces: Place[] }>;
+  overview(context: TravelAccessContext): Promise<{ places: PlacePresentationRecord[]; recentPlaces: PlacePresentationRecord[] }>;
   open(context: TravelAccessContext, countryCode: string, name: string, openedAt: string): Promise<Place>;
   findGenerated(context: TravelAccessContext, countryCode: string | undefined, name: string): Promise<Place | null>;
   upsertGenerated(context: TravelAccessContext, place: Place): Promise<Place>;
@@ -61,10 +63,13 @@ export function createTravelRepository(database: TravelDatabase = db): TravelRep
       await authorizeRead(database, context);
       const bindVars = { scopeKey: context.scopeKey, userKey: context.userKey };
       const [placesCursor, recentCursor] = await Promise.all([
-        database.query('FOR place IN places FILTER place.scopeKey == @scopeKey && place.userKey == @userKey && place.saved == true SORT place.name ASC, place._key ASC RETURN place', bindVars),
-        database.query('FOR place IN places FILTER place.scopeKey == @scopeKey && place.userKey == @userKey && place.openedAt != null && place.generatedDetail != null SORT place.openedAt DESC, place._key ASC LIMIT 25 RETURN place', bindVars),
+        database.query('FOR place IN places FILTER place.scopeKey == @scopeKey && place.userKey == @userKey && place.saved == true SORT place.name ASC, place._key ASC LET hero = FIRST(FOR relation IN placeImages FILTER relation.scopeKey == @scopeKey && relation.placeKey == place._key && relation.role == "hero" SORT relation.position ASC, relation._key ASC LET image = DOCUMENT(images, relation.imageKey) FILTER image != null && image.scopeKey == @scopeKey RETURN image) RETURN { place, heroStorageKey: hero == null ? null : hero.storageKey }', bindVars),
+        database.query('FOR place IN places FILTER place.scopeKey == @scopeKey && place.userKey == @userKey && place.openedAt != null && place.generatedDetail != null SORT place.openedAt DESC, place._key ASC LIMIT 25 LET hero = FIRST(FOR relation IN placeImages FILTER relation.scopeKey == @scopeKey && relation.placeKey == place._key && relation.role == "hero" SORT relation.position ASC, relation._key ASC LET image = DOCUMENT(images, relation.imageKey) FILTER image != null && image.scopeKey == @scopeKey RETURN image) RETURN { place, heroStorageKey: hero == null ? null : hero.storageKey }', bindVars),
       ]);
-      const parse = (place: unknown) => placeSchema.parse(withArangoKey(place as Record<string, unknown>));
+      const parse = (raw: unknown): PlacePresentationRecord => {
+        const row = z.object({ place: z.record(z.unknown()), heroStorageKey: z.string().trim().min(1).nullable().optional() }).parse(raw);
+        return { place: placeSchema.parse(withArangoKey(row.place)), ...(row.heroStorageKey ? { heroStorageKey: row.heroStorageKey } : {}) };
+      };
       return { places: (await placesCursor.all()).map(parse), recentPlaces: (await recentCursor.all()).map(parse) };
     },
     async open(context, countryCode, name, openedAt) {
@@ -101,11 +106,11 @@ export function createTravelRepository(database: TravelDatabase = db): TravelRep
         UPSERT { scopeKey: @scopeKey, userKey: @userKey, countryCode: @countryCode, name: @name }
           INSERT @place
           UPDATE {
-            summary: @summary, latitude: @latitude, longitude: @longitude,
-            embedding: @embedding, embeddingContentVersion: 2, generatedDetail: @generatedDetail
+            kind: @kind, summary: @summary, latitude: @latitude, longitude: @longitude,
+            embedding: @embedding, embeddingContentVersion: 2, generatedDetail: @generatedDetail, generatedDetailVersion: @generatedDetailVersion
           } IN places
           RETURN NEW
-      `, { scopeKey: context.scopeKey, userKey: context.userKey, countryCode: valid.countryCode, name: valid.name, summary: valid.summary, latitude: valid.latitude, longitude: valid.longitude, embedding: valid.embedding, generatedDetail: valid.generatedDetail, place: toArangoDoc(valid) });
+      `, { scopeKey: context.scopeKey, userKey: context.userKey, countryCode: valid.countryCode, name: valid.name, kind: valid.kind, summary: valid.summary, latitude: valid.latitude, longitude: valid.longitude, embedding: valid.embedding, generatedDetail: valid.generatedDetail, generatedDetailVersion: valid.generatedDetailVersion, place: toArangoDoc(valid) });
       return placeSchema.parse(withArangoKey((await cursor.all())[0] as Record<string, unknown>));
     },
     async create(context, place) {
@@ -141,7 +146,7 @@ export function createTravelRepository(database: TravelDatabase = db): TravelRep
         LET scopeRole = membership == null ? null : FIRST(FOR candidate IN scopeMembers FILTER candidate.scopeKey == @scopeKey && candidate.userOrganizationKey == membership._key && candidate.status == "active" LIMIT 1 RETURN candidate.role)
         FILTER membership != null && scope != null && scope.organizationKey == @organizationKey
         FILTER membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"]
-        LET savedPlace = FIRST(UPSERT { scopeKey: @scopeKey, userKey: @userKey, countryCode: @countryCode, name: @name } INSERT @place UPDATE { saved: true, summary: @summary, latitude: @latitude, longitude: @longitude, embedding: @placeEmbedding } IN places RETURN NEW)
+        LET savedPlace = FIRST(UPSERT { scopeKey: @scopeKey, userKey: @userKey, countryCode: @countryCode, name: @name } INSERT @place UPDATE { saved: true, kind: @kind, summary: @summary, latitude: @latitude, longitude: @longitude, embedding: @placeEmbedding } IN places RETURN NEW)
         LET savedCollectionState = FIRST(UPSERT { scopeKey: @scopeKey, purpose: "place-media" } INSERT @collection UPDATE { mutationPolicy: "system-only", purpose: "place-media" } IN collections RETURN { collection: NEW, created: OLD == null })
         LET savedCollection = savedCollectionState.collection
         LET memberCandidates = savedCollectionState.created ? (FOR candidate IN userOrganizations FILTER candidate.organizationId == @organizationKey && candidate.status == "active" LET candidateScopeRole = FIRST(FOR scoped IN scopeMembers FILTER scoped.scopeKey == @scopeKey && scoped.userOrganizationKey == candidate._key && scoped.status == "active" LIMIT 1 RETURN scoped.role) FILTER candidate.orgRole IN ["owner", "admin"] || candidateScopeRole IN ["owner", "admin", "moderator", "member", "viewer"] RETURN candidate) : [membership]
@@ -151,7 +156,7 @@ export function createTravelRepository(database: TravelDatabase = db): TravelRep
         LET savedPlaceImage = FIRST(UPSERT { scopeKey: @scopeKey, imageKey: @imageKey } INSERT MERGE(@placeImage, { placeKey: savedPlace._key }) UPDATE { placeKey: savedPlace._key } IN placeImages RETURN NEW)
         RETURN savedPlace
       `, {
-        ...input.context, countryCode: place.countryCode, name: place.name, summary: place.summary, latitude: place.latitude, longitude: place.longitude,
+        ...input.context, countryCode: place.countryCode, name: place.name, kind: place.kind, summary: place.summary, latitude: place.latitude, longitude: place.longitude,
         placeEmbedding: place.embedding, place: toArangoDoc(place), collection: toArangoDoc(collection), member: toArangoDoc(member), hidden: toArangoDoc(hidden),
         imageKey: image.key, collectionImage: toArangoDoc(collectionImage), placeImage: toArangoDoc(placeImage),
       });

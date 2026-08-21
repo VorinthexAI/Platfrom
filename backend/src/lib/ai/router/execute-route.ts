@@ -9,7 +9,7 @@ import { selectRoute } from './select-route';
 import { createStaticProviderAdapter } from './static-routes';
 import type { RouteRequestInput } from './route-request';
 import type { RouteDecision, RouterDependencies } from './types';
-import type { CoreChatInput } from '@/lib/ai/actions/core-chat';
+import { coreChatInputSchema, type CoreChatInput } from '@/lib/ai/actions/core-chat';
 
 export interface ExecuteRouteOptions<TInput> {
   decision: RouteDecision;
@@ -87,14 +87,14 @@ export async function executeAction<TInput, TOutput>(request: RouteRequestInput,
   return executeRoute<TInput, TOutput>({ decision, input, adapters: options.adapters, credentials: options.credentials, timeoutMs: options.timeoutMs, signal: options.signal });
 }
 
-/** Executes standalone chat through the caller-selected organization provider. */
+/** Executes canonical chat using the model selected by its provider-neutral mode. */
 export async function executeCoreChat<TOutput>(organizationKey: string, input: CoreChatInput, options: ExecuteActionOptions = {}) {
-  return executeAction<CoreChatInput, TOutput>({
-    mode: 'auto',
-    organizationKey,
-    actionSlug: 'chat',
-    organizationProviderKey: input.organizationProviderKey,
-  }, input, options);
+  const { mode, organizationProviderKey, ...providerInput } = coreChatInputSchema.parse(input);
+  if (mode === 'deep' && organizationProviderKey) throw new Error('Deep chat cannot be combined with an organization provider.');
+  const request: RouteRequestInput = organizationProviderKey
+    ? { mode: 'auto', organizationKey, actionSlug: 'chat', organizationProviderKey }
+    : { mode: 'model', organizationKey, actionSlug: 'chat', modelSlug: mode === 'deep' ? 'openai.gpt-5.6-luna' : 'google.gemini-2.5-flash-lite' };
+  return executeAction<typeof providerInput, TOutput>(request, providerInput, options);
 }
 
 /** Streams normalized provider chunks over the selected organization provider route. */

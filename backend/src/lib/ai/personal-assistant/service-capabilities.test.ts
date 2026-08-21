@@ -57,6 +57,7 @@ describe('personal assistant service capabilities', () => {
     const calls: unknown[] = [];
     const travel: any = {
       overview: async (...args: unknown[]) => { calls.push(['travel.overview', ...args]); return {}; },
+      findPlace: async (...args: unknown[]) => { calls.push(['travel.findPlace', ...args]); return {}; },
       findCity: async (...args: unknown[]) => { calls.push(['travel.findCity', ...args]); return {}; },
       createPlace: async (...args: unknown[]) => { calls.push(['travel.createPlace', ...args]); return {}; },
       findChildren: async (...args: unknown[]) => { calls.push(['travel.findChildren', ...args]); return {}; },
@@ -84,6 +85,7 @@ describe('personal assistant service capabilities', () => {
     const cases: Array<[AssistantSurface, string, unknown]> = [
       ['travel-workspace', 'place.list', {}],
       ['travel-workspace', 'country.search', { query: 'Japan' }],
+      ['travel-workspace', 'place.find', { query: 'Japan' }],
       ['travel-workspace', 'place.find-city', { city: 'Tokyo', country: { name: 'Japan', code: 'JP', continent: 'Asia', lat: 36.2, lon: 138.2 } }],
       ['travel-workspace', 'place.create', { name: 'Japan', summary: 'Island country.', countryCode: 'JP', latitude: 36.2, longitude: 138.2, imageRequestToken: 'token' }],
       ['travel-workspace', 'place.find-children', { childrenRequestToken: 'children-token' }],
@@ -107,6 +109,7 @@ describe('personal assistant service capabilities', () => {
     const actor = { userKey, ...serviceContext };
     expect(calls).toContainEqual(['travel.overview', serviceContext, userKey]);
     expect(calls).toContainEqual(['countries.search', { organizationKey, query: 'Japan' }, userKey, { signal: undefined, timeoutMs: undefined }]);
+    expect(calls).toContainEqual(['travel.findPlace', { ...serviceContext, query: 'Japan' }, userKey, { signal: undefined, timeoutMs: undefined }]);
     expect(calls).toContainEqual(['travel.findCity', { ...serviceContext, city: 'Tokyo', country: { name: 'Japan', code: 'JP', continent: 'Asia', lat: 36.2, lon: 138.2 } }, userKey, { signal: undefined, timeoutMs: undefined }]);
     expect(calls).toContainEqual(['travel.createPlace', { ...serviceContext, name: 'Japan', summary: 'Island country.', countryCode: 'JP', latitude: 36.2, longitude: 138.2, imageRequestToken: 'token' }, userKey, { signal: undefined, timeoutMs: undefined }]);
     expect(calls).toContainEqual(['travel.findChildren', { ...serviceContext, childrenRequestToken: 'children-token' }, userKey, { signal: undefined, timeoutMs: undefined }]);

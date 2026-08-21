@@ -29,8 +29,11 @@ describe('action registry', () => {
         'traverse', 'read', 'insert', 'upsert', 'update', 'delete',
         'document-validate', 'storage-upload', 'document-extract', 'document-embed', 'document-insert',
       ]);
-    expect(ACTION_DEFINITIONS.find((action) => action.id === 'chat')?.models.map(({ model }) => model))
-      .toEqual(['openai.gpt-5.6-luna']);
+    expect(ACTION_DEFINITIONS.find((action) => action.id === 'chat')?.models)
+      .toEqual([
+        { provider: 'openrouter', model: 'google.gemini-2.5-flash-lite', priority: 100 },
+        { provider: 'openai', model: 'openai.gpt-5.6-luna', priority: 90 },
+      ]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'orchestrator-chat')?.models)
       .toEqual([{ provider: 'openai', model: 'openai.gpt-5.6-luna', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'enhance')?.models)

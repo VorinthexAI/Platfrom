@@ -151,11 +151,12 @@ export interface NormalizedToolCall {
   arguments: unknown;
 }
 
-export interface ChatOutput {
-  text: string;
-  toolCalls: NormalizedToolCall[];
-  stopReason: string | null;
-}
+export const chatOutputSchema = z.object({
+  text: z.string(),
+  toolCalls: z.array(z.object({ id: z.string().min(1), name: z.string().min(1), arguments: z.unknown() }).strict()),
+  stopReason: z.string().nullable(),
+}).strict();
+export type ChatOutput = z.infer<typeof chatOutputSchema>;
 
 export const imageGenerateInputSchema = z
   .object({

@@ -69,7 +69,7 @@ export { upsertAction } from './upsert';
 export { webSearchAction } from './web-search';
 export { ACTION_SLUGS, actionIdSchema, isValidActionIdFormat } from './types';
 export { createDataActions, traverseInputSchema, traverseNodes, type ActionNode, type TraverseInput } from './data';
-export { coreChatContentSchema, coreChatMessageSchema, coreChatToolDefinitionSchema, coreChatInputSchema, type CoreChatContent, type CoreChatMessage, type CoreChatToolDefinition, type CoreChatInput } from './core-chat';
+export { coreChatContentSchema, coreChatMessageSchema, coreChatToolDefinitionSchema, coreChatInputSchema, type CoreChatContent, type CoreChatMessage, type CoreChatToolDefinition, type CoreChatInput, type ParsedCoreChatInput } from './core-chat';
 
 /** Stable, provider- and domain-neutral runtime primitives. */
 export const ACTION_DEFINITIONS: readonly ActionDefinition[] = [

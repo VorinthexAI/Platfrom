@@ -8,12 +8,14 @@ const keySchema = z.string().min(1);
 
 export const placeSchema = z.strictObject({
   key: keySchema,
+  kind: z.enum(["country", "place"]),
   name: z.string().min(1),
-  summary: z.string().max(1_200),
+  summary: z.string(),
   countryCode: z.string().length(2),
   latitude: z.number().finite().min(-90).max(90),
   longitude: z.number().finite().min(-180).max(180),
   createdAt: z.iso.datetime(),
+  coverUrl: z.url().optional(),
 });
 
 export type Place = z.infer<typeof placeSchema>;
@@ -27,6 +29,7 @@ export const recentPlaceSchema = z.strictObject({
   latitude: z.number().finite().min(-90).max(90),
   longitude: z.number().finite().min(-180).max(180),
   openedAt: z.iso.datetime(),
+  coverUrl: z.url().optional(),
 });
 export type RecentPlace = z.infer<typeof recentPlaceSchema>;
 

@@ -3,8 +3,8 @@ import { beforeEach, expect, mock, test } from "bun:test";
 const calls: { method: string; path: string; body: unknown; config?: unknown }[] = [];
 const authState = { organization: { key: "org-key" }, scope: { key: "scope-key" } };
 const timestamp = "2026-08-11T10:00:00.000Z";
-const place = { key: "place-key", name: "Reykjavik", summary: "A compact North Atlantic capital.", countryCode: "IS", latitude: 64.15, longitude: -21.94, createdAt: timestamp };
-const recentPlace = { key: "country-key", kind: "country" as const, name: "Iceland", summary: place.summary, countryCode: "IS", latitude: 64.96, longitude: -19.02, openedAt: timestamp };
+const place = { key: "place-key", kind: "place" as const, name: "Reykjavik", summary: "A compact North Atlantic capital.", countryCode: "IS", latitude: 64.15, longitude: -21.94, createdAt: timestamp, coverUrl: "https://signed.test/media/reykjavik.png" };
+const recentPlace = { key: "country-key", kind: "country" as const, name: "Iceland", summary: place.summary, countryCode: "IS", latitude: 64.96, longitude: -19.02, openedAt: timestamp, coverUrl: "https://signed.test/media/iceland.png" };
 const summary = "Iceland offers dramatic volcanic landscapes, immense glaciers, black-sand coasts, geothermal pools, and compact towns shaped by the North Atlantic. Travelers can explore waterfalls and lava fields by day, then experience a creative food and music scene in Reykjavik. Summer brings long daylight for road trips, while winter offers quieter scenery and northern lights. Strong infrastructure makes remote nature unusually accessible, though rapidly changing weather rewards flexible plans and careful local guidance.";
 const popularCities = ["Reykjavik", "Akureyri", "Husavik", "Vik", "Selfoss", "Hofn", "Isafjordur", "Stykkisholmur", "Seydisfjordur", "Borgarnes"].map((name, index) => ({ name, latitude: 64 + index / 10, longitude: -22 + index / 10 }));
 const detail = {
@@ -56,6 +56,7 @@ test("sends and strictly validates the saved-city overview", async () => {
   expect(await client.fetchTravelOverview()).toEqual({ places: [place], recentPlaces: [recentPlace] });
   expect(client.placeSchema.parse(place)).toEqual(place);
   expect(client.placeSchema.safeParse({ ...place, visited: false }).success).toBe(false);
+  expect(client.placeSchema.safeParse({ ...place, kind: "city" }).success).toBe(false);
   expect(client.placeSchema.parse({ ...place, summary: "" }).summary).toBe("");
   expect(calls[0]?.body).toEqual({ organizationKey: "org-key", scopeKey: "scope-key" });
 });
