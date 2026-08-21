@@ -18,7 +18,7 @@ export type CoreChatMessage = z.infer<typeof coreChatMessageSchema>;
 export const coreChatToolDefinitionSchema = z.object({ name: z.string().min(1), description: z.string().default(''), inputSchema: z.record(z.unknown()).default({}) }).strict();
 export type CoreChatToolDefinition = z.infer<typeof coreChatToolDefinitionSchema>;
 
-/** Provider-neutral multimodal input for the `core.chat` action. */
+/** Provider-neutral multimodal message protocol used by text actions. */
 export const coreChatInputSchema = z.object({
   mode: z.enum(['default', 'deep']).optional().default('default'),
   organizationProviderKey: z.string().min(1).optional(),

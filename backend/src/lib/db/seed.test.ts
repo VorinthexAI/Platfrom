@@ -12,7 +12,7 @@ import { providerSchema } from './providers.node';
 import { scopeSchema, scopeScopeSchema } from '@/lib/ai/scopes';
 import { newId } from '@/lib/ids';
 import { join } from 'node:path';
-import { NEXUS_SCOPE_KEY, SEEDED_MODELS, SEEDED_MODEL_ACTIONS, SEEDED_MODEL_PROVIDERS, SEEDED_ORCHESTRATOR_SOURCES, SEEDED_PROVIDERS, SEEDED_SCOPES, seedAiRuntimeNodes, type AiRuntimeSeedUpserters, type SeedResult } from './seed';
+import { NEXUS_SCOPE_KEY, SEEDED_MODELS, SEEDED_MODEL_ACTIONS, SEEDED_MODEL_PROVIDERS, SEEDED_ORCHESTRATOR_SOURCES, SEEDED_PROVIDERS, SEEDED_SCOPES, seedAiRuntimeNodes, seededModelActionKey, type AiRuntimeSeedUpserters, type SeedResult } from './seed';
 import { CANONICAL_ORCHESTRATOR_NAMES } from '@/lib/orchestrators/roster';
 
 describe('scope seeds', () => {
@@ -95,14 +95,21 @@ describe('model and routing relation seeds', () => {
       'google.gemini-2.5-flash-lite',
     ]);
     expect(new Set(SEEDED_MODEL_ACTIONS.map(({ modelSlug }) => modelSlug))).toEqual(new Set(SEEDED_MODELS.map(({ slug }) => slug)));
-    expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'orchestrator-chat')?.modelSlug).toBe('openai.gpt-5.6-luna');
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'caption-image')?.modelSlug).toBe('openai.gpt-5.6-luna');
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'generate-image')?.modelSlug).toBe('openai.gpt-image-2');
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'embed')?.modelSlug).toBe('openai.text-embedding-3-small');
-    expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'chat').map(({ actionSlug, modelSlug, priority }) => ({ actionSlug, modelSlug, priority }))).toEqual([
-      { actionSlug: 'chat', modelSlug: 'google.gemini-2.5-flash-lite', priority: 100 },
-      { actionSlug: 'chat', modelSlug: 'openai.gpt-5.6-luna', priority: 90 },
+    expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'ask').map(({ actionSlug, modelSlug, priority }) => ({ actionSlug, modelSlug, priority }))).toEqual([
+      { actionSlug: 'ask', modelSlug: 'google.gemini-2.5-flash-lite', priority: 100 },
+      { actionSlug: 'ask', modelSlug: 'openai.gpt-5.6-luna', priority: 90 },
     ]);
+    expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'web-search').map(({ modelSlug, priority }) => ({ modelSlug, priority }))).toEqual([
+      { modelSlug: 'google.gemini-2.5-flash-lite', priority: 100 }, { modelSlug: 'openai.gpt-5.6-luna', priority: 90 },
+    ]);
+    expect(new Set(SEEDED_MODEL_ACTIONS.map(({ key }) => key)).size).toBe(SEEDED_MODEL_ACTIONS.length);
+    expect(SEEDED_MODEL_ACTIONS.every(({ key }) => /^c[a-f0-9]{24}$/.test(key))).toBe(true);
+    expect(seededModelActionKey('ask', 'google.gemini-2.5-flash-lite')).toBe(seededModelActionKey('ask', 'google.gemini-2.5-flash-lite'));
+    expect(seededModelActionKey('ask', 'google.gemini-2.5-flash-lite')).not.toBe(seededModelActionKey('web-search', 'google.gemini-2.5-flash-lite'));
+    expect(SEEDED_MODEL_ACTIONS.map(({ key }) => key)).not.toContain('cmmodelaction00000000001');
     expect(SEEDED_MODEL_PROVIDERS.map(({ modelSlug, providerSlug, providerModelId, enabled }) => `${modelSlug}:${providerSlug}:${providerModelId}:${enabled}`)).toEqual([
       'openai.gpt-5.6-luna:openai:gpt-5.6-luna:true',
       'openai.gpt-image-2:openai:gpt-image-2:true',

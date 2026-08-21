@@ -147,9 +147,11 @@ export const SEEDED_MODELS = [
 const SEEDED_MODEL_SLUGS = new Set<string>(SEEDED_MODELS.map(({ slug }) => slug));
 
 /** Persist only runtime bindings backed by the retained model catalog. */
-export const SEEDED_MODEL_ACTIONS = ACTION_DEFINITIONS.flatMap((definition, actionIndex) =>
-  definition.models.filter(({ model }) => SEEDED_MODEL_SLUGS.has(model)).map((binding, modelIndex) => ({
-    key: `cmmodelaction${String(actionIndex * 10 + modelIndex + 1).padStart(11, '0')}`,
+export const seededModelActionKey = (actionSlug: string, modelSlug: string) => `c${createHash('sha256').update(`${actionSlug}\0${modelSlug}`).digest('hex').slice(0, 24)}`;
+
+export const SEEDED_MODEL_ACTIONS = ACTION_DEFINITIONS.flatMap((definition) =>
+  definition.models.filter(({ model }) => SEEDED_MODEL_SLUGS.has(model)).map((binding) => ({
+    key: seededModelActionKey(definition.id, binding.model),
     modelSlug: binding.model,
     actionSlug: definition.id,
     priority: binding.priority,

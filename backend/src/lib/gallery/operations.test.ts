@@ -374,11 +374,11 @@ describe('Gallery operation boundaries', () => {
     expect(metrics).toMatchObject({ generationDurationMs: expect.any(Number), persistenceDurationMs: expect.any(Number), durationMs: expect.any(Number) });
   });
 
-  test('weights memory selection toward caption quality and pins the bounded ask route', async () => {
+  test('weights memory selection toward caption quality and uses bounded canonical ask', async () => {
     const low = { captionScore: 1, value: 'low' }, high = { captionScore: 100, value: 'high' };
     expect(selectMemoryCandidate([low, high], () => 0.5)).toBe(high);
     const source = await Bun.file(new URL('./operations.ts', import.meta.url)).text();
-    expect(source).toContain("mode: 'fixed', organizationKey: input.organizationKey, actionSlug: 'ask', modelSlug: 'openai.gpt-5.6-luna', providerSlug: 'openai'");
+    expect(source).toContain('executeAsk<ChatOutput>(input.organizationKey');
     expect(source).toContain('maxTokens: 220');
     expect(source).toContain('timeoutMs: 15_000');
   });

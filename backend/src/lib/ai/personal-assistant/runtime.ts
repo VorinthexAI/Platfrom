@@ -7,8 +7,7 @@ import type { TravelService } from '@/lib/travel/service';
 import type { EmailService } from '@/lib/email-inbox/service';
 import type { BookService } from '@/lib/books/service';
 import type { UserHiddenService } from '@/lib/user-hiddens/service';
-import { executeAction, type ExecuteActionOptions } from '@/lib/ai/router';
-import type { RouteRequestInput } from '@/lib/ai/router/route-request';
+import { executeAsk, type ExecuteActionOptions } from '@/lib/ai/router';
 import { assistantSourceSchema, assistantSurfaceSchema, defaultAssistantCapabilityRegistry, type AssistantCapability, type AssistantCapabilityContext, type AssistantCapabilityRegistry } from './capabilities';
 
 const currentNoteSchema = z.object({
@@ -43,7 +42,7 @@ const chatOutputSchema = z.object({
 
 export interface PersonalAssistantDependencies {
   registry?: AssistantCapabilityRegistry;
-  execute?: (request: RouteRequestInput, input: z.output<typeof coreChatInputSchema>, options?: ExecuteActionOptions) => Promise<{ output: unknown }>;
+  execute?: (organizationKey: string, input: z.input<typeof coreChatInputSchema>, options?: ExecuteActionOptions) => Promise<{ output: unknown }>;
   executeContent?: typeof runContentTool;
   router?: ExecuteActionOptions;
   content?: ContentToolDependencies;
@@ -180,13 +179,7 @@ export async function runPersonalAssistant(
       tools: [...capabilities.map(({ definition }) => definition), unsupportedRequestDefinition],
       options: { temperature: 0.2, maxTokens: 4_096 },
     });
-    const response = await (dependencies.execute ?? executeAction)({
-      mode: 'fixed',
-      organizationKey: domain.organizationKey,
-      actionSlug: 'orchestrator-chat',
-      modelSlug: 'openai.gpt-5.6-luna',
-      providerSlug: 'openai',
-    }, chatInput, { ...dependencies.router, timeoutMs: dependencies.router?.timeoutMs ?? 45_000 });
+    const response = await (dependencies.execute ?? executeAsk)(domain.organizationKey, chatInput, { ...dependencies.router, timeoutMs: dependencies.router?.timeoutMs ?? 45_000 });
     const output = chatOutputSchema.parse(response.output);
     if (output.toolCalls.length === 0) {
       if (!domainToolExecuted) return personalAssistantOutputSchema.parse({ type: 'unsupported', message: UNSUPPORTED_MESSAGES[input.surface], sources: [] });

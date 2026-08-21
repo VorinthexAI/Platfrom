@@ -553,7 +553,7 @@ describe('Content runtime', () => {
       userSearches,
       clock: () => clock,
       embed: async () => { embeddingCalls += 1; return embedding; },
-      runAction: async (action: string, input: any) => { summaryCalls += 1; expect(action).toBe('reason'); const parsed = chatInputSchema.parse(input); const text = parsed.messages[0]?.content[0]?.type === 'text' ? parsed.messages[0].content[0].text : ''; expect(text).toContain('Launch Roadmap'); return { text: 'Relevant to Launch Roadmap' }; },
+      runAction: async (action: string, input: any) => { summaryCalls += 1; expect(action).toBe('text.search-summary'); const parsed = chatInputSchema.parse(input); const text = parsed.messages[0]?.content[0]?.type === 'text' ? parsed.messages[0].content[0].text : ''; expect(text).toContain('Launch Roadmap'); return { text: 'Relevant to Launch Roadmap' }; },
     };
     await runContentTool('content.search', { scopeKey: f.scopeKey, query: 'Roadmap content', includeSummaries: false, recordHistory: false }, f.context, dependencies);
     expect(rows).toHaveLength(1);
@@ -717,7 +717,7 @@ describe('Content runtime', () => {
     const generated = await runContentTool('document.translate', { documentKeys: [documentKey], targetLanguage: 'engleksa', instruction: 'Use concise headings.', mode: 'replace' }, f.context, {
       ...dependencies,
       runAction: async (action: string, input: any) => {
-        if (action === 'translate') {
+        if (action === 'text.translate') {
           expect(input.systemPrompt).toContain('collapse excessive blank lines');
           expect(input.systemPrompt).toContain('readable sections');
           expect(input.systemPrompt).toContain('into engleksa');
@@ -930,7 +930,7 @@ describe('Content runtime', () => {
       repository: f.repository,
       storage,
       runAction: async (action, input) => {
-        if (action === 'translate') return { text: 'Texte traduit' };
+        if (action === 'text.translate') return { text: 'Texte traduit' };
         if (action === 'document-embed') {
           embeddedNames.push(String(input.name));
           return documentEmbed(input as never, { embed: async () => embedding, dimensions: EMBEDDING_DIMENSIONS });
@@ -954,7 +954,7 @@ describe('Content runtime', () => {
       const parsed = chatInputSchema.parse(input);
       expect(parsed.systemPrompt).toBeString();
       expect(parsed.messages[0]?.content[0]).toMatchObject({ type: 'text' });
-      return { text: action === 'document-topics' ? '```json\n{"topics":["Launch","Launch","Risk"]}\n```' : action === 'document-summarize' ? '<thinking>Private model planning.</thinking>\nHere is the requested summary.\n```json\n{"sections":[{"heading":"Overview","body":"Generated text"},{"heading":"Details","body":"Additional context"}]}\n```\nNo further commentary.' : 'Generated text' };
+      return { text: action === 'text.topics' ? '```json\n{"topics":["Launch","Launch","Risk"]}\n```' : action === 'text.summarize' ? '<thinking>Private model planning.</thinking>\nHere is the requested summary.\n```json\n{"sections":[{"heading":"Overview","body":"Generated text"},{"heading":"Details","body":"Additional context"}]}\n```\nNo further commentary.' : 'Generated text' };
     };
     const dependencies = { repository: f.repository, runAction };
     expect((await runContentTool('document.summarize', { documentKeys: [first] }, f.context, dependencies)).results[0]?.success).toBe(true);
@@ -966,7 +966,7 @@ describe('Content runtime', () => {
     expect((await runContentTool('document.list-summaries', { documentKeys: [first] }, f.context, dependencies)).results[0]?.data?.summaries).toHaveLength(1);
     expect((await runContentTool('document.find-summary', { summaryKeys: [summaryKey] }, f.context, dependencies)).results[0]?.data?.summary.key).toBe(summaryKey);
     expect(await runContentTool('document.topics', { documentKey: first }, f.context, dependencies)).toEqual({ documentKey: first, topics: ['Launch', 'Risk'] });
-    expect(actions).toEqual(['document-summarize', 'document-summarize', 'document-summarize', 'document-topics']);
+    expect(actions).toEqual(['text.summarize', 'text.summarize', 'text.summarize', 'text.topics']);
   });
 
   test('projects already persisted summary audio without exposing storage keys', async () => {
@@ -1286,7 +1286,7 @@ describe('Content runtime', () => {
       },
     });
     expect(output.results[0]).toMatchObject({ success: true, data: { documentKey, text: 'This is the text.', persistedDocumentKey: documentKey } });
-    expect(call.action).toBe('enhance');
+    expect(call.action).toBe('text.enhance');
     expect(call.input.systemPrompt).toContain('collapse excessive blank lines');
     expect(call.input.systemPrompt).toContain('readable sections');
     expect(call.input.systemPrompt).toContain('nonsensical words');
@@ -1321,8 +1321,7 @@ describe('Content runtime', () => {
         parseDocument: async () => ({ document: f.documents.get(documentKey) }),
         scanDocument: async () => ({ documentKey: newId(), content: 'Scanned body', storageKeys: ['scan/page-01.jpg'] }),
         runAction: async (action: string, input: any) => {
-          if (action === 'ask' || action === 'enhance' || action === 'translate' || action === 'reason' || action === 'deep-reason' || action === 'document-summarize') return { text: 'Generated text' };
-          if (action === 'document-topics') return { text: '{"topics":["Source"]}' };
+          if (action.startsWith('text.')) return { text: action === 'text.topics' ? '{"topics":["Source"]}' : 'Generated text' };
           if (action === 'document-cleanup') return { content: input.text };
           if (action === 'document-embed') return documentEmbed(input, { embed: async () => embedding, dimensions: EMBEDDING_DIMENSIONS });
           throw new Error(`Unexpected action ${action}`);

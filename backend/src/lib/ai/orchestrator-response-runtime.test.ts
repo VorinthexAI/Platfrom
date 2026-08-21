@@ -14,7 +14,7 @@ function completed(text: string): () => AsyncIterable<ProviderStreamChunk> {
 function failed(code: ProviderErrorCode, partialText?: string): () => AsyncIterable<ProviderStreamChunk> {
   return async function* () {
     if (partialText) yield { type: 'text-delta', text: partialText };
-    throw new ProviderExecutionError('orchestrator-chat', [{ modelId: 'model', providerId: 'aws-bedrock', externalModelId: 'model', code, message: 'failed' }]);
+    throw new ProviderExecutionError('ask', [{ modelId: 'model', providerId: 'openrouter', externalModelId: 'model', code, message: 'failed' }]);
   };
 }
 
@@ -108,16 +108,16 @@ describe('orchestrator response runtime', () => {
     expect(sawAbortedSignal).toBe(true);
   });
 
-  test('streams the direct OpenAI route', async () => {
+  test('streams the default Flash/OpenRouter ask route', async () => {
     const route = routes([completed('first')]);
     await expect(collect(route.dependencies)).resolves.toEqual([{ type: 'text-delta', text: 'first' }, { type: 'done' }]);
-    expect(route.selections).toEqual([{ modelSlug: 'openai.gpt-5.6-luna', providerSlug: 'openai' }]);
+    expect(route.selections).toEqual([{ modelSlug: 'google.gemini-2.5-flash-lite', providerSlug: 'openrouter' }]);
   });
 
-  test('does not fall back to another provider when direct OpenAI fails', async () => {
+  test('does not fall back to another provider when default ask fails', async () => {
     const route = routes([failed('provider_unavailable'), completed('must not run')]);
     await expect(collect(route.dependencies)).rejects.toMatchObject({ attempts: [{ code: 'provider_unavailable' }] });
-    expect(route.selections).toEqual([{ modelSlug: 'openai.gpt-5.6-luna', providerSlug: 'openai' }]);
+    expect(route.selections).toEqual([{ modelSlug: 'google.gemini-2.5-flash-lite', providerSlug: 'openrouter' }]);
   });
 
   test('streams immediately and does not retry after exposing partial output', async () => {
@@ -127,12 +127,12 @@ describe('orchestrator response runtime', () => {
       for await (const chunk of orchestratorResponseRuntime.stream('Atlas', { message: 'hello' }, route.dependencies as never)) chunks.push(chunk);
     })()).rejects.toBeInstanceOf(ProviderExecutionError);
     expect(chunks).toEqual([{ type: 'text-delta', text: 'discard me' }]);
-    expect(route.selections).toEqual([{ modelSlug: 'openai.gpt-5.6-luna', providerSlug: 'openai' }]);
+    expect(route.selections).toEqual([{ modelSlug: 'google.gemini-2.5-flash-lite', providerSlug: 'openrouter' }]);
   });
 
   test('does not retry or fall back after an abort', async () => {
     const route = routes([failed('aborted'), completed('must not run')]);
     await expect(collect(route.dependencies)).rejects.toMatchObject({ attempts: [{ code: 'aborted' }] });
-    expect(route.selections).toEqual([{ modelSlug: 'openai.gpt-5.6-luna', providerSlug: 'openai' }]);
+    expect(route.selections).toEqual([{ modelSlug: 'google.gemini-2.5-flash-lite', providerSlug: 'openrouter' }]);
   });
 });

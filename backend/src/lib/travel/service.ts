@@ -4,7 +4,7 @@ import { strictObject } from '@/api/validation';
 import { generatedPlaceDetailSchema, generatedPlaceLocationSchema, generatedPopularCitySchema, generatedPopularCitiesSchema, placeCountryCodeSchema, placeSchema, type GeneratedPlaceDetail, type Place } from '@/lib/db/places.node';
 import { embedText } from '@/lib/embeddings';
 import { newId } from '@/lib/ids';
-import { executeCoreChat, type ExecuteActionOptions } from '@/lib/ai/router';
+import { executeAsk, type ExecuteActionOptions } from '@/lib/ai/router';
 import { chatOutputSchema, type ChatOutput } from '@/lib/ai/providers';
 import type { CoreChatInput } from '@/lib/ai/actions';
 import { decryptAuthenticatedJson, encryptAuthenticatedJson } from '@/lib/authenticated-encryption';
@@ -146,7 +146,7 @@ export function recentPlaceDto(place: Place) {
   });
 }
 
-type ExecuteChat = typeof executeCoreChat;
+type ExecuteAsk = typeof executeAsk;
 type LoadedCity = { detail: GeneratedPlaceDetail; imageNonce?: string };
 const defaultCityRequests = new Map<string, Promise<LoadedCity>>();
 const guideSystemPrompt = 'You write concise travel guides from general knowledge. Do not browse, search, cite sources, or claim current facts. Return strict JSON only, with no markdown or code fences.';
@@ -161,10 +161,10 @@ const guideInput = (prompt: string) => chatInput(guideSystemPrompt, prompt, { te
 const imageBriefSystemPrompt = 'You are an expert editorial location art director. Return only one positive image-generation brief with no JSON, markdown, commentary, exclusions, or negative instructions. Never mention people, humans, crowds, figures, faces, body parts, text, logos, flags, or maps in the returned brief.';
 const forbiddenImageBriefSubject = /\b(?:people|person|persons|human|humans|crowd|crowds|figure|figures|pedestrian|pedestrians|tourist|tourists|face|faces|body|bodies)\b/i;
 const GENERATED_DETAIL_VERSION = 2;
-export function createTravelService(options: { repository?: TravelRepository; execute?: ExecuteChat; embed?: typeof embedText; now?: () => string; issueImageNonce?: () => string; issueChildrenNonce?: () => string; encryptImageRequest?: (value: unknown) => string; decryptImageRequest?: (value: string) => unknown; encryptChildrenRequest?: (value: unknown) => string; decryptChildrenRequest?: (value: string) => unknown; placeImages?: Omit<PlaceImageDependencies, 'repository'>; storage?: DocumentObjectStorage; process?: typeof processImage; getImage?: typeof getImageById; signImageUrl?: typeof signedImageUrl } = {}) {
+export function createTravelService(options: { repository?: TravelRepository; execute?: ExecuteAsk; embed?: typeof embedText; now?: () => string; issueImageNonce?: () => string; issueChildrenNonce?: () => string; encryptImageRequest?: (value: unknown) => string; decryptImageRequest?: (value: string) => unknown; encryptChildrenRequest?: (value: unknown) => string; decryptChildrenRequest?: (value: string) => unknown; placeImages?: Omit<PlaceImageDependencies, 'repository'>; storage?: DocumentObjectStorage; process?: typeof processImage; getImage?: typeof getImageById; signImageUrl?: typeof signedImageUrl } = {}) {
   const repository = options.repository ?? createTravelRepository();
   const now = options.now ?? (() => new Date().toISOString());
-  const execute = options.execute ?? executeCoreChat;
+  const execute = options.execute ?? executeAsk;
   const encryptImageRequest = options.encryptImageRequest ?? encryptAuthenticatedJson;
   const encryptChildrenRequest = options.encryptChildrenRequest ?? options.encryptImageRequest ?? encryptAuthenticatedJson;
   const decryptChildrenRequest = options.decryptChildrenRequest ?? options.decryptImageRequest ?? decryptAuthenticatedJson;

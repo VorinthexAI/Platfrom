@@ -138,8 +138,7 @@ suite('Content live E2E', () => {
         },
       },
       runAction: async (action: string, input: any) => {
-        if (action === 'ask' || action === 'enhance' || action === 'translate' || action === 'reason' || action === 'deep-reason' || action === 'document-summarize') return { text: `Generated ${action}: deterministic archive result.` };
-        if (action === 'document-topics') return { text: '{"topics":["Deterministic systems","Archive"]}' };
+        if (action.startsWith('text.')) return { text: action === 'text.topics' ? '{"topics":["Deterministic systems","Archive"]}' : `Generated ${action}: deterministic archive result.` };
         if (action === 'document-cleanup') return { content: input.text };
         if (action === 'document-embed') return documentEmbed(input, { embed: async () => embedding, dimensions: EMBEDDING_DIMENSIONS, logger: () => undefined });
         throw new Error(`Unexpected provider action: ${action}`);

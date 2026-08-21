@@ -31,7 +31,7 @@ describe('personal assistant runtime', () => {
       },
     });
 
-    expect(request).toEqual({ mode: 'fixed', organizationKey, actionSlug: 'orchestrator-chat', modelSlug: 'openai.gpt-5.6-luna', providerSlug: 'openai' });
+    expect(request).toBe(organizationKey);
     expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual([
       'content.hidden.list',
       'folder.hide', 'folder.reveal', 'document.hide', 'document.reveal',

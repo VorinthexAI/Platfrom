@@ -6,7 +6,7 @@ import { bookChapterSchema, bookChaptersEmbeddingFields } from '@/lib/db/book-ch
 import { currentEmbeddingSchema } from '@/lib/embeddings';
 import { newId } from '@/lib/ids';
 import { documentStorage, type DocumentObjectStorage } from '@/lib/ai/document-processing/storage';
-import { executeAction } from '@/lib/ai/router';
+import { executeAction, executeAsk } from '@/lib/ai/router';
 import type { ChatOutput, ImageOutput } from '@/lib/ai/providers';
 import type { BookCreateInput, BookGenerator } from './service';
 import { createBookRepository, type BookAccessContext, type BookRepository } from './repository';
@@ -28,7 +28,7 @@ export interface BookRuntimeDependencies {
 
 export function createBookRuntime(options: BookRuntimeDependencies = {}): BookGenerator {
   const repository = options.repository ?? createBookRepository(); const storage = options.storage ?? documentStorage; const id = options.id ?? newId; const now = options.now ?? (() => new Date().toISOString());
-  const ask = options.ask ?? (async (input, organizationKey) => (await executeAction<Record<string, unknown>, ChatOutput>({ mode: 'auto', organizationKey, actionSlug: 'ask' }, input)).output.text);
+  const ask = options.ask ?? (async (input, organizationKey) => (await executeAsk<ChatOutput>(organizationKey, input as never)).output.text);
   const embed = options.embed ?? (async (text) => { const { embedText } = await import('@/lib/embeddings'); return embedText({ text }); });
   const cover = options.cover ?? (async (prompt, organizationKey) => { try { const output = (await executeAction<Record<string, unknown>, ImageOutput>({ mode: 'auto', organizationKey, actionSlug: 'generate-image' }, { prompt, count: 1, size: '1024x1024' })).output.images[0]; return output ? { bytes: Buffer.from(output.base64, 'base64'), mimeType: output.mimeType } : null; } catch { return null; } });
   const vector = async (fields: readonly string[], value: Record<string, unknown>) => currentEmbeddingSchema.parse(await embed(buildEmbeddingText(fields, value)!));

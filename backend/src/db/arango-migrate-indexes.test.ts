@@ -42,10 +42,11 @@ describe('Arango migration indexes', () => {
     const droppedIndexes: string[] = [];
     const updateQueries: string[] = [];
     const relations = [
-      { _key: 'current', modelKey: 'model-a', actionSlug: 'chat', enabled: false, priority: 7 },
+      { _key: 'current', modelKey: 'model-a', actionSlug: 'ask', enabled: false, priority: 7 },
       { _key: 'legacy', modelKey: 'model-b', actionKey: 'action-ask', enabled: true, priority: 3 },
       { _key: 'invalid', modelKey: 'model-c', actionKey: 'action-invalid', enabled: true, priority: 1 },
-      { _key: 'duplicate', modelKey: 'model-a', actionKey: 'action-chat', enabled: true, priority: 9 },
+      { _key: 'stale-chat', modelKey: 'model-d', actionSlug: 'chat', enabled: true, priority: 100 },
+      { _key: 'duplicate', modelKey: 'model-a', actionKey: 'action-ask', enabled: true, priority: 9 },
     ];
     const database = {
       collection(name: string) { return {
@@ -65,13 +66,13 @@ describe('Arango migration indexes', () => {
     await migrateModelActionSlugs(database as never);
 
     expect(updates).toEqual([
-      { key: 'duplicate', actionSlug: 'chat' },
+      { key: 'duplicate', actionSlug: 'ask' },
       { key: 'legacy', actionSlug: 'ask' },
     ]);
     expect(updateQueries.every((query) => query.includes('actionKey: null') && query.includes('keepNull: false'))).toBe(true);
-    expect(removals).toEqual(['invalid', 'current']);
+    expect(removals).toEqual(['invalid', 'stale-chat', 'current']);
     expect(droppedIndexes).toEqual(['legacy-unique']);
-    expect(relations[3]).toMatchObject({ enabled: true, priority: 9, modelKey: 'model-a' });
+    expect(relations[4]).toMatchObject({ enabled: true, priority: 9, modelKey: 'model-a' });
   });
   test('model route migration works when actions are absent and routes already use slugs', async () => {
     const calls: string[] = [];
@@ -85,7 +86,7 @@ describe('Arango migration indexes', () => {
     };
     await migrateModelActionSlugs(database as never);
     expect(calls).not.toContain(expect.stringContaining('FOR action IN actions'));
-    expect(calls.at(-1)).toContain('actionKey: null');
+    expect(calls.at(-1)).toContain('REMOVE @key IN modelActions');
   });
   test('hard-drops retired persistence without recreating it and retains collaboration collections', async () => {
     const retired = ['agents', 'skills', 'agentSkills', 'scopeAgents', 'agentMembers', 'agentRuns', 'agentRunSteps', 'agentRunCalls', 'agentRunSources', 'agentArtifacts', 'agentArtifactChecks', 'agentMemories', 'runtimeVariables', 'capabilities', 'mindCapabilities', 'minds', 'actions', 'agentArtifactsLegacy', 'agentRunsLegacy', 'agent_runs', 'agentTools', 'toolActions', 'tools', 'templates'];
@@ -223,8 +224,11 @@ describe('Arango migration indexes', () => {
     expect(calls[0]?.bindVars?.retainedModelActionBindings).toEqual(RETAINED_MODEL_ACTION_BINDINGS);
     expect(calls[1]?.bindVars?.retainedModelProviderBindings).toEqual(RETAINED_MODEL_PROVIDER_BINDINGS);
     expect(RETAINED_MODEL_SLUGS).toContain('google.gemini-2.5-flash-lite');
-    expect(RETAINED_MODEL_ACTION_BINDINGS).toContain('google.gemini-2.5-flash-lite:chat');
-    expect(RETAINED_MODEL_ACTION_BINDINGS).toContain('openai.gpt-5.6-luna:chat');
+    expect(RETAINED_MODEL_ACTION_BINDINGS).toContain('google.gemini-2.5-flash-lite:ask');
+    expect(RETAINED_MODEL_ACTION_BINDINGS).toContain('openai.gpt-5.6-luna:ask');
+    expect(RETAINED_MODEL_ACTION_BINDINGS).toContain('google.gemini-2.5-flash-lite:web-search');
+    expect(RETAINED_MODEL_ACTION_BINDINGS).toContain('openai.gpt-5.6-luna:web-search');
+    expect(RETAINED_MODEL_ACTION_BINDINGS.some((binding) => binding.endsWith(':chat') || binding.endsWith(':reason'))).toBe(false);
     expect(RETAINED_MODEL_PROVIDER_BINDINGS).toContain('google.gemini-2.5-flash-lite:openrouter:google/gemini-2.5-flash-lite');
     expect(calls[0]?.query).toContain('CONCAT(model.slug, ":", relation.actionSlug) NOT IN @retainedModelActionBindings');
     expect(calls[1]?.query).toContain('CONCAT(model.slug, ":", provider.slug, ":", relation.providerModelId) NOT IN @retainedModelProviderBindings');

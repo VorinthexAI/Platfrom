@@ -45,16 +45,15 @@ describe('image generation service', () => {
       getImage: async () => null,
       execute: (async (...args: unknown[]) => {
         calls.push(args);
-        const request = args[0] as { actionSlug: string };
-        return request.actionSlug === 'ask'
-          ? { output: { text: '{"concepts":[{"title":"Orbit","prompt":"A complete orbital image"}]}', toolCalls: [], stopReason: 'completed' }, usage: {}, providerId: 'openai', modelId: 'openai.gpt-5.6-luna', externalModelId: 'gpt-5.6-luna' }
-          : { output: { images: [{ base64: png, mimeType: 'image/png' }] }, usage: {}, costUsd: 0.12, providerId: 'openai', modelId: 'openai.gpt-image-2', externalModelId: 'gpt-image-2' };
+        return { output: { images: [{ base64: png, mimeType: 'image/png' }] }, usage: {}, costUsd: 0.12, providerId: 'openai', modelId: 'openai.gpt-image-2', externalModelId: 'gpt-image-2' };
       }) as any,
+      executeAsk: (async (...args: unknown[]) => { calls.push(args); return { output: { text: '{"concepts":[{"title":"Orbit","prompt":"A complete orbital image"}]}', toolCalls: [], stopReason: 'completed' }, usage: {}, providerId: 'openrouter', modelId: 'google.gemini-2.5-flash-lite', externalModelId: 'google/gemini-2.5-flash-lite' }; }) as any,
       now: (() => { let value = 10; return () => value += 25; })(),
     });
     await service.createRawIdeas({ prompt: 'Earth', requestedCount: 1 }, organizationKey);
     const generated = await service.generateRaw({ prompt: 'Earth', count: 1, size: '1024x1024', quality: 'high' }, organizationKey);
-    expect(calls[0]?.[0]).toEqual({ mode: 'fixed', organizationKey, actionSlug: 'ask', modelSlug: 'openai.gpt-5.6-luna', providerSlug: 'openai' });
+    expect(calls[0]?.[0]).toBe(organizationKey);
+    expect(calls[0]?.[1]).not.toHaveProperty('mode');
     expect(calls[1]?.[0]).toEqual({ mode: 'fixed', organizationKey, actionSlug: 'generate-image', modelSlug: 'openai.gpt-image-2', providerSlug: 'openai' });
     expect(generated).toMatchObject({ durationMs: 25, costUsd: 0.12 });
 

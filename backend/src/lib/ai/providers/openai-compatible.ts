@@ -1,4 +1,5 @@
 import type OpenAI from 'openai';
+import type { ActionId } from '@/lib/ai/actions';
 import { tokenUsage, type TokenUsage } from '@/lib/ai/shared/usage';
 import { normalizeProviderError, ProviderError } from './errors';
 import {
@@ -24,7 +25,9 @@ import {
  * providers barrel.
  */
 
-export const CHAT_ACTION_IDS = new Set(['ask', 'chat', 'enhance', 'orchestrator-chat', 'reason', 'deep-reason', 'translate', 'analyze-video', 'analyze-audio', 'document-summarize', 'document-topics']);
+export function acceptsChatInput(actionId: ActionId): boolean {
+  return actionId === 'ask' || actionId === 'analyze-video' || actionId === 'analyze-audio';
+}
 
 export interface OpenAICompatibleOptions {
   /** gpt-5-era OpenAI/Azure endpoints require `max_completion_tokens`; other compatible providers use `max_tokens`. */
@@ -107,6 +110,9 @@ export function normalizeChatCompletion(providerId: ProviderId, completion: Open
   if (!choice) {
     throw new ProviderError(providerId, 'response_invalid', `${providerId} returned no choices`);
   }
+  if (choice.finish_reason !== 'stop' && choice.finish_reason !== 'tool_calls') {
+    throw new ProviderError(providerId, 'response_invalid', `${providerId} chat response did not complete normally`);
+  }
   const toolCalls: NormalizedToolCall[] = [];
   for (const call of choice.message.tool_calls ?? []) {
     if (call.type !== 'function') continue;
@@ -116,7 +122,7 @@ export function normalizeChatCompletion(providerId: ProviderId, completion: Open
     output: {
       text: choice.message.content ?? '',
       toolCalls,
-      stopReason: choice.finish_reason ?? null,
+      stopReason: choice.finish_reason === 'tool_calls' ? 'tool_use' : choice.finish_reason ?? null,
     },
     usage: tokenUsage(completion.usage?.prompt_tokens, completion.usage?.completion_tokens, completion.usage?.total_tokens),
   };

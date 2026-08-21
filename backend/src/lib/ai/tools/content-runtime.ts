@@ -1,7 +1,6 @@
 import { createHash, randomBytes, scrypt as nodeScrypt } from 'node:crypto';
 import { promisify } from 'node:util';
 import { z } from 'zod';
-import type { ActionId } from '@/lib/ai/actions';
 import type { ToolContext } from './tool-context';
 import type { DocumentParseDependencies, DocumentParseInput } from '@/lib/ai/document-processing';
 import type { RouterDependencies } from '@/lib/ai/router';
@@ -101,7 +100,7 @@ export interface ContentToolDependencies extends RouterDependencies {
   repository?: ContentRepository;
   storage?: DocumentObjectStorage;
   parseDocument?: (input: DocumentParseInput, dependencies?: DocumentParseDependencies) => Promise<{ document: Document }>;
-  runAction?: (action: ActionId, input: Record<string, unknown>, context: ToolContext) => Promise<ContentActionResult>;
+  runAction?: (operation: string, input: Record<string, unknown>, context: ToolContext) => Promise<ContentActionResult>;
   executeAction?: typeof import('@/lib/ai/router').executeAction;
   embed?: (text: string) => Promise<number[]>;
   embedBatch?: (texts: string[]) => Promise<number[][]>;
@@ -461,9 +460,13 @@ async function defaults(deps: ContentToolDependencies, context: ToolContext): Pr
     parseDocument: deps.parseDocument ?? processing.parseDocument, id: deps.id ?? newId, clock: deps.clock ?? (() => new Date()), random: deps.random ?? randomBytes,
     embed: embedding,
     embedBatch: embeddingBatch,
-    runAction: deps.runAction ?? (async (action: ActionId, input: Record<string, unknown>): Promise<ContentActionResult> => {
-      if (action === 'document-embed') return processing.documentEmbed(input as never, { embedBatch: ({ texts }) => embeddingBatch(texts), dimensions: deps.ingestion?.embeddingDimensions }) as Promise<ContentActionResult>;
-      const request = { mode: 'auto' as const, organizationKey: context.organizationKey, actionSlug: action };
+    runAction: deps.runAction ?? (async (operation: string, input: Record<string, unknown>): Promise<ContentActionResult> => {
+      if (operation === 'document-embed') return processing.documentEmbed(input as never, { embedBatch: ({ texts }) => embeddingBatch(texts), dimensions: deps.ingestion?.embeddingDimensions }) as Promise<ContentActionResult>;
+      if (operation.startsWith('text.')) {
+        const response = await router.executeAsk<ContentActionResult>(context.organizationKey, { ...input, ...(operation === 'text.rewrite' ? { mode: 'deep' as const } : {}) } as never, deps);
+        return response.output;
+      }
+      const request = { mode: 'auto' as const, organizationKey: context.organizationKey, actionSlug: operation as never };
       const response = await executeAction<Record<string, unknown>, ContentActionResult>(request, input, deps);
       return response.output;
     }),
@@ -593,7 +596,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
     },
   });
   const repo = observeRepository(d.repository);
-  const action = async (slug: ActionId, actionInput: Record<string, unknown>, resourceKey?: string, scopeKey?: string) => {
+  const action = async (slug: string, actionInput: Record<string, unknown>, resourceKey?: string, scopeKey?: string) => {
     const started = performance.now();
     await event('action', 'started', slug, resourceKey, scopeKey);
     try {
@@ -713,7 +716,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
     return target;
   };
   const generated = async (doc: Document, instruction: string, deep = false) => {
-    const slug = deep ? 'deep-reason' : 'reason';
+    const slug = deep ? 'text.rewrite' : 'text.generate';
     const output = await action(slug, {
       systemPrompt: `${instruction} Use only the supplied document. Preserve its facts and return only the requested text without commentary.`,
       messages: [{ role: 'user', content: [{ type: 'text', text: `Title: ${doc.name}\n\n${doc.content}` }] }],
@@ -1871,7 +1874,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
        })), false, repo);
     } else if (tool === 'document.topics') {
       const current = await document(input.documentKey, 'viewer', false);
-      const generated = await action('document-topics', {
+      const generated = await action('text.topics', {
         systemPrompt: 'Identify the document\'s distinct primary topics. Return strict JSON only in the form {"topics":["topic"]}. Include no more than 10 concise topic strings, with no duplicates or commentary.',
         messages: [{ role: 'user', content: [{ type: 'text', text: `Title: ${current.name}\n\n${current.content}` }] }],
         options: { temperature: 0.1, maxTokens: 500 },
@@ -1882,15 +1885,15 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         const fenced = /^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i.exec(text);
         parsed = z.object({ topics: z.array(z.string().trim().min(1).max(200)).max(10) }).strict().parse(JSON.parse(fenced?.[1]?.trim() ?? text));
       } catch (error) {
-        fail('CONTENT_INVALID_INPUT', 'The topic model returned invalid JSON.', tool, 'document-topics', current.key, error);
+        fail('CONTENT_INVALID_INPUT', 'The topic model returned invalid JSON.', tool, 'text.topics', current.key, error);
       }
       result = { documentKey: current.key, topics: [...new Set(parsed.topics)].slice(0, 10) };
     } else if (tool === 'document.summarize') {
-      if (input.atomic && input.persist) fail('CONTENT_CONFLICT', 'Atomic persisted summaries are unavailable because generation is an external side effect.', tool, 'document-summarize');
+      if (input.atomic && input.persist) fail('CONTENT_CONFLICT', 'Atomic persisted summaries are unavailable because generation is an external side effect.', tool, 'text.summarize');
       const sources: Document[] = [];
       for (const key of input.documentKeys) sources.push(await document(key, input.persist ? 'moderator' : 'viewer', false));
       const generateSummary = async (sourceDocuments: Document[]) => {
-        const generated = await action('document-summarize', {
+        const generated = await action('text.summarize', {
           systemPrompt: `Create a ${input.style} summary${input.topic ? ` focused on ${input.topic}` : ''}${input.language ? ` in ${input.language}` : ''}. Use only the supplied document content and preserve its facts. Return strict JSON only in the form {"sections":[{"heading":"Short heading","body":"Prose paragraph"}]}. Return 2 to 4 distinct sections. Bodies must be concise prose paragraphs, never bullet points or numbered lists. Do not include analysis, reasoning, planning, self-reference, a preamble, a conclusion about the task, Markdown, code fences, or commentary. Output the JSON object and nothing else.`,
           messages: [{ role: 'user', content: [{ type: 'text', text: sourceDocuments.map((item) => `Title: ${item.name}\n\n${item.content}`).join('\n\n---\n\n') }] }],
           options: { temperature: 0.2, maxTokens: 5_000 },
@@ -1920,7 +1923,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           documentKey,
           mode: input.mode,
         }));
-      if (input.atomic && items.some((item: any) => item.mode !== 'preview')) fail('CONTENT_CONFLICT', 'Atomic persisted AI transformations are unavailable because generation and storage cannot be rolled back.', tool, 'reason');
+      if (input.atomic && items.some((item: any) => item.mode !== 'preview')) fail('CONTENT_CONFLICT', 'Atomic persisted AI transformations are unavailable because generation and storage cannot be rolled back.', tool, 'text.generate');
 
       result = await batch(tool, items.map((item: any) => ({
           key: item.documentKey,
@@ -1930,7 +1933,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
                 ? `Translate to ${input.targetLanguage}${input.sourceLanguage ? ` from ${input.sourceLanguage}` : ''}. ${input.preserveFormatting ? 'Preserve headings, lists, tables, paragraph boundaries, and inline emphasis.' : 'Return clear translated prose.'}`
                 : `${item.instruction}${item.tone ? ` Tone: ${item.tone}.` : ''}${item.audience ? ` Audience: ${item.audience}.` : ''}${item.length ? ` Length: ${item.length}.` : ''}`;
             const text = tool === 'document.enhance'
-              ? z.string().trim().min(1).parse((await action('enhance', {
+              ? z.string().trim().min(1).parse((await action('text.enhance', {
                 systemPrompt: `Correct spelling, grammar, awkward wording, and unclear phrasing. Repair or remove nonsensical words, isolated stray characters, corrupted fragments, and OCR artifacts when their intended meaning can be inferred from context. Reconstruct words, sentences, and paragraphs broken by artificial hard line wraps, including input with only a few characters per line. Join those artificial breaks so prose uses normal line width, while preserving intentional headings, lists, and paragraph boundaries. Preserve the original meaning, facts, tone, and useful structure. Trim leading and trailing whitespace, remove trailing spaces, collapse excessive blank lines, and organize longer content into readable sections with concise plain-text headings when the material supports them. Do not force headings into short content. Do not add new claims, Markdown decoration, or commentary. ${input.instruction ? `Additional direction: ${input.instruction} ` : ''}Return only the revised text.`,
                 messages: [{ role: 'user', content: [{ type: 'text', text: current.content }] }],
                 options: { temperature: 0.1, maxTokens: Math.min(5_000, Math.max(256, Math.ceil(current.content.length / 3))) },
@@ -1942,7 +1945,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
                 .replace(/\n{3,}/g, '\n\n')
                 .trim()
               : tool === 'document.translate'
-              ? z.string().trim().min(1).parse((await action('translate', {
+              ? z.string().trim().min(1).parse((await action('text.translate', {
                 systemPrompt: `Translate the supplied text${input.sourceLanguage ? ` from ${input.sourceLanguage}` : ''} into ${input.targetLanguage} using fluent, idiomatic target-language grammar. The target language label may be an English name, a native name or endonym, an ISO language code, or mildly misspelled; infer the intended language before translating. Preserve meaning, facts, tone, and useful structure. Trim leading and trailing whitespace, remove trailing spaces, collapse excessive blank lines, and organize longer content into readable sections with concise plain-text headings when the material supports them. Do not force headings into short content. ${input.preserveFormatting ? 'Preserve meaningful paragraph boundaries and formatting.' : 'Use clear, natural prose.'} Do not add Markdown decoration or commentary. ${input.instruction ? `Additional direction: ${input.instruction} ` : ''}Return only the translated text.`,
                 messages: [{ role: 'user', content: [{ type: 'text', text: current.content }] }],
                 options: { temperature: 0.1, maxTokens: Math.min(5_000, Math.max(256, Math.ceil(current.content.length / 3))) },
@@ -2138,7 +2141,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             let summary: string;
             let complete = true;
             try {
-              const generatedSummary = await action('reason', {
+              const generatedSummary = await action('text.search-summary', {
                 systemPrompt: 'Summarize only how the supplied document relates to the search query. Use only the supplied text and return only the concise summary without commentary.',
                 messages: [{ role: 'user', content: [{ type: 'text', text: `Search query: ${input.query}\n\nTitle: ${current.name}\n\n${(matchedContent ?? current.content).slice(0, 16_000)}` }] }],
                 options: { temperature: 0.1, maxTokens: 300 },

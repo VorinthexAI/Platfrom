@@ -8,7 +8,7 @@ afterEach(() => {
 });
 
 const request = {
-  actionId: 'chat' as const,
+  actionId: 'ask' as const,
   modelId: 'openai.gpt-5.6-terra',
   externalModelId: 'openai.gpt-5.6-terra',
   input: {
