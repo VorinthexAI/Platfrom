@@ -25,20 +25,24 @@ import { Button, ButtonSizeProvider, type ButtonProps } from "../button/button.m
 import { CloseIcon } from "../../icons/close/close.mobile";
 import { colors } from "../../tokens";
 
-const BottomSheetSceneContext = createContext<((open: boolean) => void) | null>(
+const BottomSheetSceneContext = createContext<((id: symbol, open: boolean) => void) | null>(
   null,
 );
 
 export function BottomSheetScene({ children }: { children: ReactNode }) {
   const progress = useRef(new Animated.Value(0)).current;
+  const openSheets = useRef(new Set<symbol>());
 
   const setSheetOpen = useCallback(
-    (open: boolean) => {
+    (id: symbol, open: boolean) => {
+      if (open) openSheets.current.add(id);
+      else openSheets.current.delete(id);
+      const hasOpenSheet = openSheets.current.size > 0;
       progress.stopAnimation();
       Animated.timing(progress, {
-        duration: open ? 320 : 220,
-        easing: open ? Easing.out(Easing.cubic) : Easing.inOut(Easing.cubic),
-        toValue: open ? 1 : 0,
+        duration: hasOpenSheet ? 320 : 220,
+        easing: hasOpenSheet ? Easing.out(Easing.cubic) : Easing.inOut(Easing.cubic),
+        toValue: hasOpenSheet ? 1 : 0,
         useNativeDriver: true,
       }).start();
     },
@@ -115,6 +119,7 @@ export function BottomSheet({
   const androidBottomInset = Platform.OS === "android" ? insets.bottom : 0;
   const fullHeight = height === "full";
   const setSceneSheetOpen = useContext(BottomSheetSceneContext);
+  const sceneSheetId = useRef(Symbol("bottom-sheet")).current;
   const [visible, setVisible] = useState(open);
   const [reducedMotion, setReducedMotion] = useState(false);
   const closedOffsetRef = useRef(windowHeight + 64);
@@ -177,9 +182,10 @@ export function BottomSheet({
   }, []);
 
   useEffect(() => {
-    setSceneSheetOpen?.(open);
-    return () => setSceneSheetOpen?.(false);
-  }, [open, setSceneSheetOpen]);
+    if (!open) return;
+    setSceneSheetOpen?.(sceneSheetId, true);
+    return () => setSceneSheetOpen?.(sceneSheetId, false);
+  }, [open, sceneSheetId, setSceneSheetOpen]);
 
   useEffect(() => {
     if (open) {

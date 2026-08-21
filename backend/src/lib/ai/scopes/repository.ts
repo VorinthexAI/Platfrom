@@ -128,6 +128,8 @@ export function createScopeRepository(
         LET imageKeys = managedImages[*].key
         LET captionKeys = managedImages[*].captionKey
         LET cleanupPlaceImages = (FOR relation IN placeImages FILTER relation.scopeKey == @scopeKey REMOVE relation IN placeImages RETURN 1)
+        LET cleanupTripPlaces = (FOR relation IN tripPlaces FILTER relation.scopeKey == @scopeKey REMOVE relation IN tripPlaces RETURN 1)
+        LET cleanupTrips = (FOR trip IN trips FILTER trip.scopeKey == @scopeKey REMOVE trip IN trips RETURN 1)
         LET cleanupCollectionImages = (FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.collectionKey IN managedCollections REMOVE relation IN collectionImages RETURN 1)
         LET cleanupIdentities = (FOR relation IN imageIdentities FILTER relation.scopeKey == @scopeKey && relation.imageKey IN imageKeys REMOVE relation IN imageIdentities RETURN 1)
         LET cleanupHighlights = (FOR highlight IN imageCollecitionHightlights FILTER highlight.scopeKey == @scopeKey && highlight.collectionKey IN managedCollections REMOVE highlight IN imageCollecitionHightlights RETURN 1)

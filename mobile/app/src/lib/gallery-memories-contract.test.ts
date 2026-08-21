@@ -23,6 +23,7 @@ test("uses four-column full sheets, exact-open freshness, and owner-only creatio
   expect(memories).toContain('exact: true, refetchType: "none"');
   expect(memories).toContain('owner ? <Button disabled={creating || listLoading || opening}');
   expect(memories).toContain('notify("Memory created")');
+  expect(memories).toContain('setMemories((current) => [...current.filter(({ key }) => key !== memory.key), memory])');
   expect(memories.indexOf('{creating ?')).toBeLessThan(memories.indexOf('memories.map((memory)'));
 });
 

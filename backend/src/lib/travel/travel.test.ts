@@ -3,7 +3,7 @@ import { placeSchema, type Place } from '@/lib/db/places.node';
 import { imageSchema } from '@/lib/db/images.node';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
 import { createTravelRepository, TravelRepositoryError, type TravelAccessContext, type TravelDatabase, type TravelRepository } from './repository';
-import { CHILDREN_REQUEST_TOKEN_MAX_LENGTH, CHILDREN_REQUEST_TOKEN_VALIDITY_MS, childrenRequestTokenSchema, createTravelService, placeDto, recentPlaceDto, travelChildrenFindInputSchema, travelCityDetailSchema, travelCityFindInputSchema, travelOverviewInputSchema, travelPlaceCreateInputSchema, travelPlaceDetailSchema, travelPlaceFindInputSchema, travelPlaceOpenInputSchema } from './service';
+import { CHILDREN_REQUEST_TOKEN_MAX_LENGTH, CHILDREN_REQUEST_TOKEN_VALIDITY_MS, childrenRequestTokenSchema, createTravelService, placeDto, recentPlaceDto, travelChildrenFindInputSchema, travelCityDetailSchema, travelCityFindInputSchema, travelOverviewInputSchema, travelPlaceCreateInputSchema, travelPlaceDetailSchema, travelPlaceFindInputSchema, travelPlaceOpenInputSchema, travelPlaceSearchInputSchema, travelPlaceSearchResponseSchema, travelTripCreateInputSchema, travelTripListInputSchema } from './service';
 
 const key = 'cmrnlzf650002qc7k4p5zem5w';
 const scopeKey = 'cmrnlzf640001qc7kazsr96k5';
@@ -33,6 +33,54 @@ const { heroImagePrompt: _heroImagePrompt, ...publicModelDetail } = modelDetail;
 const detail = travelPlaceDetailSchema.parse({ ...publicModelDetail, imageRequestToken: 'opaque-token', childrenRequestToken: 'children-token' });
 
 describe('travel contracts and service', () => {
+  test('searches through the ask action after authorization without reading or mutating place persistence', async () => {
+    const results = Array.from({ length: 10 }, (_, index) => index === 0
+      ? { kind: 'country' as const, name: 'Japan', country: 'japan', countryCode: 'JP' as const, continent: 'Asia', summary: 'Island country.', lat: 36.2, long: 138.2 }
+      : { kind: 'city' as const, name: `City ${index}`, country: 'Japan', countryCode: 'JP' as const, continent: 'Asia', summary: `City ${index} summary.`, lat: 30 + index, long: 130 + index });
+    const calls: string[] = [];
+    const service = createTravelService({
+      repository: { authorizeRead: async () => { calls.push('authorize'); }, findGenerated: async () => { throw new Error('search must not read places'); }, upsertGenerated: async () => { throw new Error('search must not persist'); } } as unknown as TravelRepository,
+      execute: (async () => { calls.push('execute'); return chatResponse(`\`\`\`json\n${JSON.stringify({ results })}\n\`\`\``); }) as any,
+    });
+    await expect(service.searchPlaces({ organizationKey: 'organization', scopeKey, query: ' culture and food ' }, key)).resolves.toEqual({ results });
+    expect(calls).toEqual(['authorize', 'execute']);
+    expect(travelPlaceSearchInputSchema.safeParse({ organizationKey: 'organization', scopeKey, query: 'x' }).success).toBe(false);
+    expect(travelPlaceSearchInputSchema.safeParse({ organizationKey: 'organization', scopeKey, query: 'x'.repeat(501) }).success).toBe(false);
+  });
+
+  test('retries malformed or duplicate mixed search output once and fails safely', async () => {
+    const duplicate = { kind: 'country', name: 'Japan', country: 'Japan', countryCode: 'JP', continent: 'Asia', summary: 'Country.', lat: 36, long: 138 };
+    expect(travelPlaceSearchResponseSchema.safeParse({ results: Array(10).fill(duplicate) }).success).toBe(false);
+    let attempts = 0;
+    const service = createTravelService({ repository: { authorizeRead: async () => {} } as unknown as TravelRepository, execute: (async () => { attempts += 1; return chatResponse('{"results":[]}'); }) as any });
+    await expect(service.searchPlaces({ organizationKey: 'organization', scopeKey, query: 'Japan' }, key)).rejects.toMatchObject({ guideKind: 'search', message: 'Place search provider returned an invalid response.' });
+    expect(attempts).toBe(2);
+  });
+
+  test('creates and lists strict trips with server identity, ordered places, and first-place cover', async () => {
+    const calls: unknown[][] = [];
+    let createdRecord: any;
+    const repository = {
+      createTrip: async (context: unknown, trip: any, relations: any[]) => { calls.push([context, trip, relations]); createdRecord = { trip, places: [place], coverStorageKey: 'media/tokyo.png' }; return createdRecord; },
+      listTrips: async () => [createdRecord],
+    } as unknown as TravelRepository;
+    const service = createTravelService({ repository, now: () => timestamp, signImageUrl: async (storageKey) => `https://signed.test/${storageKey}` });
+    const input = { organizationKey: 'organization', scopeKey, name: ' Tokyo route ', description: ' Spring trip ', placeKeys: [key], idempotencyKey: 'request-1' };
+    const created = await service.createTrip(input, key);
+    expect(created.trip).toMatchObject({ name: 'Tokyo route', description: 'Spring trip', places: [placeDto(place)], coverUrl: 'https://signed.test/media/tokyo.png', createdAt: timestamp });
+    const [context, trip, relations] = calls[0]! as any[];
+    expect(context).toEqual({ organizationKey: 'organization', scopeKey, userKey: key });
+    expect(trip).toMatchObject({ userKey: key, scopeKey, name: 'Tokyo route', description: 'Spring trip', createdAt: timestamp });
+    expect(relations).toMatchObject([{ scopeKey, tripKey: trip.key, placeKey: key, position: 0, createdAt: timestamp }]);
+    const replay = await service.createTrip(input, key);
+    expect(replay.trip.key).toBe(created.trip.key);
+    expect((calls[1]![1] as any).requestHash).toBe(trip.requestHash);
+    expect((calls[1]![2] as any[])[0]?.key).toBe(relations[0].key);
+    await expect(service.listTrips({ organizationKey: 'organization', scopeKey }, key)).resolves.toEqual({ trips: [created.trip] });
+    expect(travelTripCreateInputSchema.safeParse({ ...input, placeKeys: [key, key] }).success).toBe(false);
+    expect(travelTripCreateInputSchema.safeParse({ ...input, placeKeys: [] }).success).toBe(false);
+    expect(travelTripListInputSchema.safeParse({ organizationKey: 'organization', scopeKey, userKey: key }).success).toBe(false);
+  });
   test('creates a missing staged preview through the canonical generator and preserves staged bytes', async () => {
     const bytesByKey = new Map<string, Uint8Array>();
     const deleted: string[] = [], processed: Uint8Array[] = [];
@@ -85,7 +133,7 @@ describe('travel contracts and service', () => {
     expect(recentPlaceDto(recent)).toEqual({ key, kind: 'place', name: 'Tokyo', summary: place.summary, countryCode: 'JP', latitude: 35.6, longitude: 139.6, openedAt: timestamp });
     const repository = { overview: async () => ({ places: [{ place, heroStorageKey: 'media/tokyo.png' }], recentPlaces: [{ place: recent }] }) } as unknown as TravelRepository;
     const service = createTravelService({ repository, signImageUrl: async (storageKey) => `https://signed.test/${storageKey}` });
-    expect(Object.keys(service)).toEqual(['overview', 'openPlace', 'createPlace', 'findPlace', 'findCity', 'findChildren', 'generatePlaceHeroImage']);
+    expect(Object.keys(service)).toEqual(['searchPlaces', 'listTrips', 'createTrip', 'overview', 'openPlace', 'createPlace', 'findPlace', 'findCity', 'findChildren', 'generatePlaceHeroImage']);
     await expect(service.overview({ organizationKey: 'organization', scopeKey }, 'user')).resolves.toEqual({ places: [placeDto(place, 'https://signed.test/media/tokyo.png')], recentPlaces: [recentPlaceDto(recent)] });
   });
 
@@ -173,6 +221,7 @@ describe('travel contracts and service', () => {
     expect(briefCall?.[2]).toMatchObject({ systemPrompt: expect.stringContaining('editorial location art director'), messages: [{ content: [{ text: expect.stringContaining('Portugal') }] }] });
     expect(guideCall?.[3]).toEqual({ signal: controller.signal, timeoutMs: 2_000 });
     expect(briefCall?.[3]).toEqual({ signal: controller.signal, timeoutMs: 2_000 });
+    expect(calls.filter((call) => call[0] === 'execute')).toHaveLength(2);
     const sealedPrompt = sealed.hero.prompt as string;
     expect(sealed).toMatchObject({ version: 5, issuedAt: Date.parse('2026-08-19T12:00:00.000Z'), nonce: 'A'.repeat(43), organizationKey: 'organization', scopeKey, country: { name: 'Portugal', countryCode: 'PT' }, place: { kind: 'country', name: 'Portugal', summary, countryCode: 'PT', latitude: 39.4, longitude: -8.2 }, hero: { title: 'Portugal travel interpretation', prompt: expect.stringContaining(imageBriefFor('Portugal')) } });
     expect(sealedPrompt).toContain('Strictly exclude people, human figures, crowds, faces, and body parts');
@@ -269,24 +318,43 @@ describe('travel contracts and service', () => {
     expect({ asks, embeds }).toEqual({ asks: 0, embeds: 0 });
   });
 
-  test('regenerates legacy cached detail with the current guide and image-brief routes', async () => {
-    let actionCalls = 0;
-    const persisted: Place[] = [];
+  test('reuses schema-valid persisted country detail without requiring a version marker', async () => {
+    let actionCalls = 0, embeds = 0, upserts = 0;
     const legacy = placeSchema.parse({ ...place, generatedDetail: modelDetail, name: 'Japan', summary, countryCode: 'JP', latitude: 36.2048, longitude: 138.2529 });
     const service = createTravelService({
       repository: {
         authorizeRead: async () => {}, findGenerated: async () => legacy,
-        upsertGenerated: async (_context: TravelAccessContext, value: Place) => { persisted.push(value); return value; },
+        upsertGenerated: async (_context: TravelAccessContext, value: Place) => { upserts += 1; return value; },
       } as unknown as TravelRepository,
       execute: (async (_organizationKey: string, input: any) => { actionCalls += 1; return chatResponse(isBrief(input) ? imageBriefFor('Japan') : JSON.stringify(modelGuideDetail)); }) as any,
-      embed: async () => embedding,
+      embed: async () => { embeds += 1; return embedding; },
       issueImageNonce: () => 'A'.repeat(43),
       encryptImageRequest: () => 'image-token',
       encryptChildrenRequest: () => 'children-token',
     });
-    await service.findPlace({ organizationKey: 'organization', scopeKey, query: 'Japan', country: { name: 'Japan', code: 'JP', continent: 'Asia', lat: 36.2, lon: 138.2 } }, key);
-    expect(actionCalls).toBeGreaterThanOrEqual(2);
-    expect(persisted.find(({ name }) => name === 'Japan')?.generatedDetailVersion).toBe(2);
+    const result = await service.findPlace({ organizationKey: 'organization', scopeKey, query: 'Japan', country: { name: 'Japan', code: 'JP', continent: 'Asia', lat: 36.2, lon: 138.2 } }, key);
+    expect(result.place).toMatchObject({ title: 'Japan', imageRequestToken: 'image-token', childrenRequestToken: 'children-token' });
+    expect({ actionCalls, embeds, upserts }).toEqual({ actionCalls: 0, embeds: 0, upserts: 0 });
+  });
+
+  test('reuses schema-valid persisted city detail without requiring a version marker', async () => {
+    let actionCalls = 0, embeds = 0, upserts = 0;
+    const { popularCities: _popularCities, ...countryDetail } = modelDetail;
+    const cityDetail = { ...countryDetail, location: { ...modelDetail.location, kind: 'place' as const, name: 'Tokyo', city: 'Tokyo' }, title: 'Tokyo' };
+    const legacy = placeSchema.parse({ ...place, generatedDetail: cityDetail, name: 'Tokyo', summary, countryCode: 'JP', latitude: 35.6, longitude: 139.6 });
+    const service = createTravelService({
+      repository: {
+        authorizeRead: async () => {}, findGenerated: async () => legacy,
+        upsertGenerated: async (_context: TravelAccessContext, value: Place) => { upserts += 1; return value; },
+      } as unknown as TravelRepository,
+      execute: (async () => { actionCalls += 1; return chatResponse('unused'); }) as any,
+      embed: async () => { embeds += 1; return embedding; },
+      issueImageNonce: () => 'A'.repeat(43),
+      encryptImageRequest: () => 'image-token',
+    });
+    const result = await service.findCity({ organizationKey: 'organization', scopeKey, city: 'Tokyo', country: { name: 'Japan', code: 'JP', continent: 'Asia', lat: 36.2, lon: 138.2 } }, key);
+    expect(result.city).toMatchObject({ title: 'Tokyo', imageRequestToken: 'image-token' });
+    expect({ actionCalls, embeds, upserts }).toEqual({ actionCalls: 0, embeds: 0, upserts: 0 });
   });
 
   test('returns ten cities and focused recommendations across representative countries', async () => {
@@ -497,6 +565,44 @@ describe('travel repository', () => {
     expect(queries[0]?.query).toContain('UPSERT { scopeKey: @scopeKey, userKey: @userKey, countryCode: @countryCode, name: @name }');
     expect(queries[0]?.query).toContain('UPDATE {}');
     expect(queries[0]?.bindVars).toMatchObject({ organizationKey: 'organization', scopeKey, userKey: 'user', countryCode: 'JP', name: 'Tokyo' });
+  });
+
+  test('atomically creates a trip only from distinct saved places owned by the trusted user and scope', async () => {
+    const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
+    const trip = { key, userKey: key, scopeKey, name: 'Tokyo route', requestHash: 'a'.repeat(64), createdAt: timestamp };
+    const relation = { key: scopeKey, scopeKey, tripKey: key, placeKey: key, position: 0, createdAt: timestamp };
+    const database: TravelDatabase = { async query(query, bindVars) { calls.push({ query, bindVars }); return { async all() { return [{ trip: { ...trip, _key: key }, places: [{ ...place, _key: key }], coverStorageKey: 'media/tokyo.png' }]; } }; } };
+    await expect(createTravelRepository(database).createTrip({ organizationKey: 'organization', scopeKey, userKey: key }, trip, [relation])).resolves.toEqual({ trip, places: [place], coverStorageKey: 'media/tokyo.png' });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.query).toContain('FILTER LENGTH(UNIQUE(@placeKeys)) == LENGTH(@placeKeys)');
+    expect(calls[0]!.query).toContain('place.scopeKey == @scopeKey && place.userKey == @userKey && place.saved == true');
+    expect(calls[0]!.query).toContain('FILTER LENGTH(selectedPlaces) == LENGTH(@placeKeys)');
+    expect(calls[0]!.query.indexOf('FILTER LENGTH(selectedPlaces)')).toBeLessThan(calls[0]!.query.indexOf('INSERT @trip'));
+    expect(calls[0]!.query.indexOf('DOCUMENT(images, relation.imageKey)')).toBeLessThan(calls[0]!.query.indexOf('INSERT @trip'));
+    expect(calls[0]!.query).toContain('UPSERT { _key: @tripKey }');
+    expect(calls[0]!.query).toContain('persistedTrip.requestHash == @requestHash');
+    expect(calls[0]!.query).toContain('UPSERT { _key: relation._key }');
+    expect(calls[0]!.bindVars).toMatchObject({ organizationKey: 'organization', scopeKey, userKey: key, placeKeys: [key] });
+  });
+
+  test('lists only trusted trips with ordered saved places and first-place cover storage', async () => {
+    const queries: string[] = [];
+    const trip = { key, userKey: key, scopeKey, name: 'Tokyo route', createdAt: timestamp };
+    const database: TravelDatabase = { async query(query) { queries.push(query); return { async all() { return [{ trip: { ...trip, _key: key }, places: [{ ...place, _key: key }], coverStorageKey: 'media/tokyo.png' }]; } }; } };
+    await expect(createTravelRepository(database).listTrips({ organizationKey: 'organization', scopeKey, userKey: key })).resolves.toEqual([{ trip, places: [place], coverStorageKey: 'media/tokyo.png' }]);
+    expect(queries[0]).toContain('trip.scopeKey == @scopeKey && trip.userKey == @userKey');
+    expect(queries[0]).toContain('SORT trip.createdAt ASC, trip._key ASC');
+    expect(queries[0]).toContain('SORT relation.position ASC, relation._key ASC');
+    expect(queries[0]).toContain('place.saved == true');
+    expect(queries[0]).toContain('DOCUMENT(images, relation.imageKey)');
+  });
+
+  test('rejects reuse of a trip request key for different data', async () => {
+    const trip = { key, userKey: key, scopeKey, name: 'Tokyo route', requestHash: 'a'.repeat(64), createdAt: timestamp };
+    const relation = { key: scopeKey, scopeKey, tripKey: key, placeKey: key, position: 0, createdAt: timestamp };
+    let call = 0;
+    const database: TravelDatabase = { async query() { call += 1; return { async all() { return call === 1 ? [] : ['b'.repeat(64)]; } }; } };
+    await expect(createTravelRepository(database).createTrip({ organizationKey: 'organization', scopeKey, userKey: key }, trip, [relation])).rejects.toMatchObject({ reason: 'conflict' });
   });
 
   test('denies absent membership', async () => {

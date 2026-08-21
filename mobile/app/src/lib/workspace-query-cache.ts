@@ -5,7 +5,7 @@ import { contentQueryKeys } from "./content-query-cache";
 import type { EmailFilter, EmailOverview, EmailThread } from "./email-client";
 import { normalizeCollection } from "./collection-access";
 import type { GalleryCollection, GalleryCollectionInvite, GalleryCollectionMember, GalleryCollectionShareLink, GalleryImage, GalleryOverview } from "./gallery-client";
-import type { Place, RecentPlace } from "./travel-client";
+import type { Place, RecentPlace, Trip } from "./travel-client";
 import type { UserHiddenRecord } from "./user-hidden-client";
 import { compassQueryKeys, type WorkspaceContext } from "./compass-query-keys";
 export { compassQueryKeys } from "./compass-query-keys";
@@ -81,6 +81,22 @@ export function removeOptimisticCompassPlace(current: CompassOverview | undefine
 
 export function reconcileOptimisticCompassPlace(current: CompassOverview | undefined, optimisticKey: string, place: Place): CompassOverview {
   return { places: sortCompassPlaces([...(current?.places ?? []).filter(({ key }) => key !== optimisticKey && key !== place.key), place]), recentPlaces: current?.recentPlaces ?? [] };
+}
+
+export function appendOptimisticCompassTrip(current: Trip[] | undefined, trip: Trip): Trip[] {
+  return [...(current ?? []).filter(({ key }) => key !== trip.key), trip];
+}
+
+export function removeOptimisticCompassTrip(current: Trip[] | undefined, optimisticKey: string): Trip[] {
+  return (current ?? []).filter(({ key }) => key !== optimisticKey);
+}
+
+export function reconcileOptimisticCompassTrip(current: Trip[] | undefined, optimisticKey: string, trip: Trip): Trip[] {
+  const index = (current ?? []).findIndex(({ key }) => key === optimisticKey);
+  const remaining = (current ?? []).filter(({ key }) => key !== optimisticKey && key !== trip.key);
+  if (index < 0) return [...remaining, trip];
+  remaining.splice(Math.min(index, remaining.length), 0, trip);
+  return remaining;
 }
 
 export const signalQueryKeys = {

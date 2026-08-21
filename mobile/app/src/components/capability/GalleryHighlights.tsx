@@ -107,7 +107,7 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
       const { highlight } = await createGalleryCollectionHighlight(collection.key);
       if (generation !== createRequest.current) return;
       queryClient.setQueryData(galleryQueryKeys.highlight(galleryContext, collection.key, highlight.key), { highlight });
-      setHighlights((current) => [highlight, ...current.filter(({ key }) => key !== highlight.key)]);
+      setHighlights((current) => [...current.filter(({ key }) => key !== highlight.key), highlight]);
       notify("Highlight created");
       void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.highlights(galleryContext, collection.key), exact: true, refetchType: "none" }).catch(() => undefined);
       if (listSheetOpen.current) void openHighlight(highlight);

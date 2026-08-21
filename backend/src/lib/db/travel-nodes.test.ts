@@ -3,6 +3,8 @@ import { buildEmbeddingText } from './base';
 import { placeSchema, placesEmbeddingFields } from './places.node';
 import { EMBEDDING_DIMENSIONS } from '../embeddings';
 import { buildPlaceEmbeddingText } from '../travel/semantic-text';
+import { tripSchema } from './trips.node';
+import { tripPlaceSchema } from './trip-places.node';
 
 const key = 'cmrnlzf650002qc7k4p5zem5w';
 const otherKey = 'cmrnlzf640001qc7kazsr96k5';
@@ -20,5 +22,18 @@ describe('travel node contracts', () => {
     expect(placeSchema.safeParse({ ...place, countryCode: 'ZZ' }).success).toBe(false);
     expect(placeSchema.safeParse({ ...place, embedding: embedding.slice(1) }).success).toBe(false);
     expect(placeSchema.safeParse({ ...place, openedAt: 'client-owned-garbage' }).success).toBe(false);
+  });
+  test('validates private trip documents without tombstones or embeddings', () => {
+    const trip = tripSchema.parse({ key, userKey: key, scopeKey: otherKey, name: ' Japan ', description: ' Spring route ', createdAt: timestamp, deletedAt: timestamp, embedding });
+    expect(trip).toEqual({ key, userKey: key, scopeKey: otherKey, name: 'Japan', description: 'Spring route', createdAt: timestamp });
+    expect(tripSchema.safeParse({ ...trip, description: ' ' }).success).toBe(false);
+    const relation = tripPlaceSchema.parse({ key, scopeKey: otherKey, tripKey: key, placeKey: otherKey, position: 0, createdAt: timestamp, embedding });
+    expect(relation).toEqual({ key, scopeKey: otherKey, tripKey: key, placeKey: otherKey, position: 0, createdAt: timestamp });
+    expect(tripPlaceSchema.safeParse({ ...relation, position: -1 }).success).toBe(false);
+  });
+  test('hard-deleting a place also removes its trip relations', async () => {
+    const source = await Bun.file(new URL('./places.node.ts', import.meta.url)).text();
+    expect(source).toContain("write: [PLACES_COLLECTION, 'placeImages', 'tripPlaces']");
+    expect(source).toContain('FOR relation IN tripPlaces FILTER relation.placeKey == @key REMOVE relation IN tripPlaces');
   });
 });

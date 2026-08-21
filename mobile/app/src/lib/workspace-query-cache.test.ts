@@ -17,6 +17,7 @@ mock.module("./content-client", () => ({
 const { contentQueryKeys } = await import("./content-query-cache");
 const {
   ascendQueryKeys,
+  appendOptimisticCompassTrip,
   addOptimisticCompassPlace,
   compassQueryKeys,
   galleryQueryKeys,
@@ -25,7 +26,9 @@ const {
   patchGalleryImage,
   patchGalleryUserHiddens,
   reconcileOptimisticCompassPlace,
+  reconcileOptimisticCompassTrip,
   removeOptimisticCompassPlace,
+  removeOptimisticCompassTrip,
   removeCachedGalleryImages,
   restoreGalleryOverviews,
   snapshotGalleryOverviews,
@@ -50,6 +53,7 @@ test("isolates every routed workspace key by context and resource", () => {
   expect(galleryQueryKeys.memory(context, "collection", "one")).not.toEqual(galleryQueryKeys.memory(context, "collection", "two"));
   expect(galleryQueryKeys.userHiddens(context)).not.toEqual(galleryQueryKeys.userHiddens(otherContext));
   expect(compassQueryKeys.overview(context)).not.toEqual(compassQueryKeys.overview(otherContext));
+  expect(compassQueryKeys.trips(context)).toEqual(["compass", "org-a", "scope-a", "trips"]);
   expect(compassQueryKeys.countryDetail(context, "IS")).toEqual(["compass", "org-a", "scope-a", "country-details", "IS"]);
   expect(compassQueryKeys.countryDetail(context, "IS")).not.toEqual(compassQueryKeys.countryDetail(otherContext, "IS"));
   expect(compassQueryKeys.countryImage(context, "token-a")).not.toEqual(compassQueryKeys.countryImage(context, "token-b"));
@@ -58,6 +62,19 @@ test("isolates every routed workspace key by context and resource", () => {
   expect(signalQueryKeys.overview(context, "all")).not.toEqual(signalQueryKeys.overview(context, "favorite"));
   expect(signalQueryKeys.detail(context, "thread-a")).not.toEqual(signalQueryKeys.detail(context, "thread-b"));
   expect(ascendQueryKeys.detail(context, "book-a")).not.toEqual(ascendQueryKeys.detail(otherContext, "book-a"));
+});
+
+test("appends and independently reconciles overlapping optimistic Compass trips", () => {
+  const place = { key: "place", kind: "place" as const, name: "Lisbon", summary: "City", countryCode: "PT", latitude: 38.72, longitude: -9.14, createdAt: "2026-08-20T00:00:00.000Z" };
+  const first = { key: "optimistic-first", name: "First", createdAt: place.createdAt, places: [place] };
+  const second = { key: "optimistic-second", name: "Second", createdAt: place.createdAt, places: [place] };
+  const both = appendOptimisticCompassTrip(appendOptimisticCompassTrip([], first), second);
+  expect(both.map(({ key }) => key)).toEqual([first.key, second.key]);
+
+  const reconciled = reconcileOptimisticCompassTrip(both, second.key, { ...second, key: "saved-second" });
+  expect(reconciled.map(({ key }) => key)).toEqual([first.key, "saved-second"]);
+  expect(removeOptimisticCompassTrip(reconciled, first.key).map(({ key }) => key)).toEqual(["saved-second"]);
+  expect(removeOptimisticCompassTrip(reconciled, "missing")).toEqual(reconciled);
 });
 
 test("reconciles overlapping Compass saves by optimistic key without erasing siblings", () => {

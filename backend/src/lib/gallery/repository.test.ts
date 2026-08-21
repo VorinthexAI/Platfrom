@@ -699,10 +699,18 @@ describe('Gallery repository transactions', () => {
       expect(query).toContain('collectionMember != null');
     }
     expect(queries[0]).toContain('elevated || collectionMember != null');
+    expect(queries[0]).toContain('SORT highlight.createdAt ASC, highlight._key ASC');
     expect(queries[3]).toContain('member.role == "owner"');
     expect(queries[3]).toContain('owner != null');
     expect(queries[3]).toContain('REMOVE highlight IN imageCollecitionHightlights RETURN OLD');
     expect(queries[3]).not.toContain('highlight.createdByKey == @actorKey');
     expect(queries[3]).not.toContain('UPDATE image');
+  });
+
+  test('lists memories oldest first so newly created rows append persistently', async () => {
+    let query = '';
+    const database: MediaLibraryDatabase = { async query(value) { query = value; return { async all() { return []; } }; } };
+    await createGalleryRepository(database).listMemories(newId(), newId(), newId());
+    expect(query).toContain('SORT memory.createdAt ASC, memory._key ASC');
   });
 });

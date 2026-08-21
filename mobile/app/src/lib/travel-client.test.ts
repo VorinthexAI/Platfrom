@@ -5,6 +5,9 @@ const authState = { organization: { key: "org-key" }, scope: { key: "scope-key" 
 const timestamp = "2026-08-11T10:00:00.000Z";
 const place = { key: "place-key", kind: "place" as const, name: "Reykjavik", summary: "A compact North Atlantic capital.", countryCode: "IS", latitude: 64.15, longitude: -21.94, createdAt: timestamp, coverUrl: "https://signed.test/media/reykjavik.png" };
 const recentPlace = { key: "country-key", kind: "country" as const, name: "Iceland", summary: place.summary, countryCode: "IS", latitude: 64.96, longitude: -19.02, openedAt: timestamp, coverUrl: "https://signed.test/media/iceland.png" };
+const tripPlace = { key: place.key, kind: place.kind, name: place.name, summary: place.summary, countryCode: place.countryCode, latitude: place.latitude, longitude: place.longitude, createdAt: place.createdAt };
+const trip = { key: "trip-key", name: "Iceland winter", description: "Northern lights", createdAt: timestamp, places: [tripPlace], coverUrl: place.coverUrl };
+const placeSearchResults = Array.from({ length: 10 }, (_, index) => ({ kind: index ? "city" as const : "country" as const, name: index ? `City ${index}` : "Iceland", country: "Iceland", countryCode: "IS", continent: "Europe", summary: `Result ${index}`, lat: 64 + index / 10, long: -22 + index / 10 }));
 const summary = "Iceland offers dramatic volcanic landscapes, immense glaciers, black-sand coasts, geothermal pools, and compact towns shaped by the North Atlantic. Travelers can explore waterfalls and lava fields by day, then experience a creative food and music scene in Reykjavik. Summer brings long daylight for road trips, while winter offers quieter scenery and northern lights. Strong infrastructure makes remote nature unusually accessible, though rapidly changing weather rewards flexible plans and careful local guidance.";
 const popularCities = ["Reykjavik", "Akureyri", "Husavik", "Vik", "Selfoss", "Hofn", "Isafjordur", "Stykkisholmur", "Seydisfjordur", "Borgarnes"].map((name, index) => ({ name, latitude: 64 + index / 10, longitude: -22 + index / 10 }));
 const detail = {
@@ -43,6 +46,9 @@ mock.module("./api-client", () => ({
     if (path === "/travel/places/children/find") return { data: { success: true, data: { cities: childCities } } };
     if (path === "/travel/places") return { data: { success: true, data: { place } } };
     if (path === "/travel/places/open") return { data: { success: true, data: { place: recentPlace } } };
+    if (path === "/travel/places/search") return { data: { success: true, data: { results: placeSearchResults } } };
+    if (path === "/travel/trips/list") return { data: { success: true, data: { trips: [trip] } } };
+    if (path === "/travel/trips") return { data: { success: true, data: { trip } } };
     if (path === "/travel/places/image") return { data: { success: true, data: readyImage } };
     if (path === "/travel/countries/search") return { data: { success: true, data: { country: { name: "Iceland", countryCode: "IS", latitude: 64.96, longitude: -19.02 } } } };
     return { data: { success: true, data: { places: [place], recentPlaces: [recentPlace] } } };
@@ -139,6 +145,36 @@ test("saves a generated place through the canonical travel route", async () => {
   expect(calls[0]).toEqual({ method: "POST", path: "/travel/places", body: { organizationKey: "org-key", scopeKey: "scope-key", ...input }, config: { timeout: 30_000, signal: controller.signal } });
   expect(() => client.createPlace({ ...input, summary: "" })).toThrow();
   expect(() => client.createPlace({ ...input, imageRequestToken: "" })).toThrow();
+});
+
+test("searches for exactly ten strict country and city results", async () => {
+  const controller = new AbortController();
+  expect(await client.searchPlaces(" Iceland ", controller.signal)).toEqual(placeSearchResults);
+  expect(calls[0]).toEqual({ method: "POST", path: "/travel/places/search", body: { organizationKey: "org-key", scopeKey: "scope-key", query: "Iceland" }, config: { timeout: 30_000, signal: controller.signal } });
+  expect(client.placeSearchResultSchema.safeParse({ ...placeSearchResults[0], extra: true }).success).toBe(false);
+  await expect(client.searchPlaces(" ")).rejects.toThrow();
+  await expect(client.searchPlaces("x")).rejects.toThrow();
+  await expect(client.searchPlaces("x".repeat(501))).rejects.toThrow();
+});
+
+test("lists trips separately from the travel overview with strict DTOs", async () => {
+  const controller = new AbortController();
+  expect(await client.listTrips(controller.signal)).toEqual([trip]);
+  expect(calls[0]).toEqual({ method: "POST", path: "/travel/trips/list", body: { organizationKey: "org-key", scopeKey: "scope-key" }, config: { timeout: 30_000, signal: controller.signal } });
+  expect(client.tripSchema.safeParse({ ...trip, places: [{ ...tripPlace, coverUrl: place.coverUrl }] }).success).toBe(false);
+  expect(client.tripSchema.safeParse({ ...trip, places: [tripPlace, tripPlace] }).success).toBe(false);
+  expect(client.tripSchema.safeParse({ ...trip, places: [] }).success).toBe(true);
+  expect(client.tripSchema.safeParse({ ...trip, unknown: true }).success).toBe(false);
+});
+
+test("creates a strict trip and rejects blank or duplicate input", async () => {
+  const controller = new AbortController();
+  const input = { name: " Iceland winter ", description: " Northern lights ", placeKeys: [place.key], idempotencyKey: "request-1" };
+  expect(await client.createTrip(input, controller.signal)).toEqual(trip);
+  expect(calls[0]).toEqual({ method: "POST", path: "/travel/trips", body: { organizationKey: "org-key", scopeKey: "scope-key", name: "Iceland winter", description: "Northern lights", placeKeys: [place.key], idempotencyKey: "request-1" }, config: { timeout: 30_000, signal: controller.signal } });
+  await expect(client.createTrip({ name: " ", placeKeys: [place.key], idempotencyKey: "request-2" })).rejects.toThrow();
+  await expect(client.createTrip({ name: "Trip", description: " ", placeKeys: [place.key], idempotencyKey: "request-3" })).rejects.toThrow();
+  await expect(client.createTrip({ name: "Trip", placeKeys: [place.key, place.key], idempotencyKey: "request-4" })).rejects.toThrow();
 });
 
 test("asks Core through the Compass assistant surface", async () => {

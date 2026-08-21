@@ -5,6 +5,7 @@ const contextKey = (context: WorkspaceContext) => [context.organizationKey, cont
 export const compassQueryKeys = {
   all: (context: WorkspaceContext) => ["compass", ...contextKey(context)] as const,
   overview: (context: WorkspaceContext) => [...compassQueryKeys.all(context), "overview"] as const,
+  trips: (context: WorkspaceContext) => [...compassQueryKeys.all(context), "trips"] as const,
   countryDetails: (context: WorkspaceContext) => [...compassQueryKeys.all(context), "country-details"] as const,
   countryDetail: (context: WorkspaceContext, countryCode: string) => [...compassQueryKeys.countryDetails(context), countryCode] as const,
   countryImage: (context: WorkspaceContext, imageRequestToken: string) => [...compassQueryKeys.all(context), "country-image", imageRequestToken] as const,

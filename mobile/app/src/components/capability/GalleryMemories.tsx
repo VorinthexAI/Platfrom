@@ -119,7 +119,7 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
       const { memory } = await createGalleryCollectionMemory(collection.key);
       if (generation !== createRequest.current || !open) return;
       queryClient.setQueryData(galleryQueryKeys.memory(galleryContext, collection.key, memory.key), { memory });
-      setMemories((current) => [memory, ...current.filter(({ key }) => key !== memory.key)]);
+      setMemories((current) => [...current.filter(({ key }) => key !== memory.key), memory]);
       notify("Memory created");
       void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.memories(galleryContext, collection.key), exact: true, refetchType: "none" }).catch(() => undefined);
       if (listSheetOpen.current) void openMemory(memory);

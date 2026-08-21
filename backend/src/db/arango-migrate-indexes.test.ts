@@ -312,8 +312,8 @@ describe('Arango migration indexes', () => {
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
     expect(source).toContain('Dropped obsolete unique folder-name index');
   });
-  test('retains only minimal places and declares book-generation collection indexes', () => {
-    expect(collections.filter(({ name }) => ['places', 'trips', 'tripPlaces', 'placeVisits'].includes(name)).map(({ name }) => name)).toEqual(['places']);
+  test('retains minimal places and private ordered trips and declares book-generation collection indexes', () => {
+    expect(collections.filter(({ name }) => ['places', 'trips', 'tripPlaces', 'placeVisits'].includes(name)).map(({ name }) => name)).toEqual(['places', 'trips', 'tripPlaces']);
     expect(collections.find(({ name }) => name === 'places')).toEqual({
       name: 'places',
       embedKeys: ['name', 'summary'],
@@ -324,6 +324,12 @@ describe('Arango migration indexes', () => {
         { fields: ['scopeKey', 'userKey', 'countryCode', 'name'], unique: true },
       ],
     });
+    expect(collections.find(({ name }) => name === 'trips')).toEqual({ name: 'trips', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'userKey', 'createdAt'] }] });
+    expect(collections.find(({ name }) => name === 'tripPlaces')?.indexes).toEqual([
+      { fields: ['scopeKey', 'tripKey', 'position'], unique: true },
+      { fields: ['scopeKey', 'tripKey', 'placeKey'], unique: true },
+      { fields: ['scopeKey', 'placeKey'] },
+    ]);
     const bookNames = ['books', 'bookContexts', 'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'chapterContexts', 'bookProgress'];
     expect(collections.filter(({ name }) => bookNames.includes(name)).map(({ name }) => name)).toEqual(bookNames);
     expect(collections.find(({ name }) => name === 'bookChapters')?.indexes).toContainEqual({ fields: ['scopeKey', 'bookKey', 'position'], unique: true });
@@ -341,19 +347,20 @@ describe('Arango migration indexes', () => {
     expect(isLegacyIndex('places', ['scopeKey', 'countryCode', 'name'], desired)).toBe(true);
     expect(isLegacyIndex('places', ['scopeKey', 'userKey', 'countryCode'], desired)).toBe(false);
   });
-  test('hard-retires trip persistence before projecting and indexing places', async () => {
+  test('retains trip persistence and retires only legacy place visits', async () => {
     const dropped: string[] = [];
     const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
-    const existing = new Set(['shares', 'tagAssignments', 'bookSources', 'tripPlaces', 'placeVisits', 'trips']);
+    const existing = new Set(['tripPlaces', 'placeVisits', 'trips']);
     const database = {
       collection(name: string) { return { async exists() { return existing.has(name); }, async drop() { dropped.push(name); existing.delete(name); } }; },
       async query(query: string, bindVars?: Record<string, unknown>) { calls.push({ query, bindVars }); return { async all() { return []; }, async next() { return 0; } }; },
     };
     await migrateMinimalPlacesAndRetireTrips(database as never);
     await migrateMinimalPlacesAndRetireTrips(database as never);
-    expect(calls.map(({ bindVars }) => bindVars?.['@collection'])).toEqual(['shares', 'tagAssignments', 'bookSources', 'shares', 'tagAssignments', 'bookSources']);
-    expect(calls.every(({ query }) => query.includes('resource.sourceType == "trip"') && query.includes('REMOVE resource'))).toBe(true);
-    expect(dropped).toEqual(['tripPlaces', 'placeVisits', 'trips']);
+    expect(calls.filter(({ query }) => query.includes('FOR trip IN trips'))).toHaveLength(2);
+    expect(calls.filter(({ query }) => query.includes('FOR relation IN tripPlaces'))).toHaveLength(2);
+    expect(dropped).toEqual(['placeVisits']);
+    expect(existing).toEqual(new Set(['tripPlaces', 'trips']));
 
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
     const cleanup = source.indexOf('await migrateMinimalPlacesAndRetireTrips(targetDb)');
@@ -365,6 +372,8 @@ describe('Arango migration indexes', () => {
     expect(source).toContain('place.kind == "country" && (!HAS(place, "userKey") || !HAS(place, "saved"))');
     expect(source).toContain('resource.sourceType == "place" && resource.sourceKey IN @obsoleteCountryKeys');
     expect(source).toContain('places migration found duplicate saved cities');
+    expect(source).toContain('trip.userKey != place.userKey || place.saved != true');
+    expect(source).toContain('resource.sourceType == "trip"');
   });
   test('creates placeImages before first-deployment place migration queries it', async () => {
     const existing = new Set(['places']);

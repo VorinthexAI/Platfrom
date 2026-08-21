@@ -33,6 +33,7 @@ const MIN_INERTIA_RADIANS_PER_SECOND = 0.01;
 const WEB_TOUCH_STYLE = { touchAction: "none" } as unknown as ViewStyle;
 const disableRaycast: THREE.Object3D["raycast"] = () => {};
 export type InteractiveGlobeProps = {
+  autoRotate?: boolean;
   focusRequest?: number;
   focusTarget?: Readonly<{ countryCode: string; latitude: number; longitude: number }>;
   onCountryPress?: (country: CountryFeature | undefined, coordinates: { latitude: number; longitude: number }) => void;
@@ -122,6 +123,7 @@ type GlobeSceneProps = Omit<InteractiveGlobeProps, "style"> & {
 };
 
 function GlobeScene({
+  autoRotate = true,
   controlsRef,
   focusRequest,
   focusTarget,
@@ -229,7 +231,7 @@ function GlobeScene({
       globe.quaternion.copy(focus.from).slerp(focus.to, easedProgress).normalize();
       cameraRef.current.position.z = THREE.MathUtils.lerp(focus.fromDistance, MIN_CAMERA_DISTANCE, easedProgress);
       if (progress === 1) focusAnimation.current = undefined;
-    } else if (idle && !reducedMotion && pulseElapsed >= FOCUS_PULSE_DURATION_MS) {
+    } else if (idle && autoRotate && !reducedMotion && pulseElapsed >= FOCUS_PULSE_DURATION_MS) {
       const speed = angularVelocity.current;
       if (speed > MIN_INERTIA_RADIANS_PER_SECOND) {
         const nextSpeed = speed * Math.exp(-INERTIA_DAMPING * delta);
@@ -242,7 +244,7 @@ function GlobeScene({
       globe.quaternion.premultiply(rotationDelta).normalize();
     }
     if (pulseMaterial.current) pulseMaterial.current.opacity = pulseElapsed < FOCUS_PULSE_DURATION_MS ? 0.55 + 0.45 * Math.sin(pulseElapsed / 115) ** 2 : 1;
-    if (focusAnimation.current || pulseElapsed < FOCUS_PULSE_DURATION_MS || idle && !reducedMotion) invalidate();
+    if (focusAnimation.current || pulseElapsed < FOCUS_PULSE_DURATION_MS || idle && autoRotate && !reducedMotion) invalidate();
   });
 
   const updateZoom = (nextDistance: number) => {
@@ -413,7 +415,7 @@ function GlobeScene({
         <lineSegments geometry={boundaries} raycast={disableRaycast}>
           <lineBasicMaterial color="#a9bac2" transparent opacity={0.68} />
         </lineSegments>
-        {[...savedFills].filter(([code]) => code !== highlightedCountryCode).map(([code, geometry]) => <mesh geometry={geometry} key={code} raycast={disableRaycast}><meshBasicMaterial color="#526f7d" depthWrite side={THREE.DoubleSide} /></mesh>)}
+        {[...savedFills].filter(([code]) => code !== highlightedCountryCode).map(([code, geometry]) => <mesh geometry={geometry} key={code} raycast={disableRaycast}><meshBasicMaterial color="#a9bac2" depthWrite side={THREE.DoubleSide} /></mesh>)}
         {selectedBoundaries ? (
           <lineSegments geometry={selectedBoundaries} raycast={disableRaycast}>
             <lineBasicMaterial color="#a9bac2" transparent opacity={1} />
@@ -441,6 +443,7 @@ function GlobeScene({
 }
 
 export function InteractiveGlobe({
+  autoRotate,
   focusRequest,
   focusTarget,
   onCountryPress,
@@ -486,6 +489,7 @@ export function InteractiveGlobe({
     >
       <color attach="background" args={["#020609"]} />
       <GlobeScene
+        autoRotate={autoRotate}
         controlsRef={controlsRef}
         focusRequest={focusRequest}
         focusTarget={focusTarget}

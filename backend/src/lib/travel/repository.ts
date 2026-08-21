@@ -7,10 +7,13 @@ import { collectionImageSchema, type CollectionImage } from '@/lib/db/collection
 import { imageSchema, type Image } from '@/lib/db/images.node';
 import { placeImageSchema, type PlaceImage } from '@/lib/db/place-images.node';
 import { userHiddenSchema, type UserHidden } from '@/lib/db/user-hiddens.node';
+import { tripSchema, type Trip } from '@/lib/db/trips.node';
+import { tripPlaceSchema, type TripPlace } from '@/lib/db/trip-places.node';
 import { z } from 'zod';
 
 export interface TravelAccessContext { organizationKey: string; scopeKey: string; userKey: string }
 export interface PlacePresentationRecord { place: Place; heroStorageKey?: string }
+export interface TripPresentationRecord { trip: Trip; places: Place[]; coverStorageKey?: string }
 export interface TravelDatabase { query(query: string, bindVars?: Record<string, unknown>): Promise<{ all(): Promise<unknown[]> }> }
 const readAuthorizationQuery = `
   LET membership = FIRST(FOR candidate IN userOrganizations
@@ -32,7 +35,7 @@ async function authorizeRead(database: TravelDatabase, context: TravelAccessCont
 }
 
 export class TravelRepositoryError extends Error {
-  constructor(readonly reason: 'forbidden') { super(reason); }
+  constructor(readonly reason: 'forbidden' | 'conflict') { super(reason); }
 }
 
 export interface TravelRepository {
@@ -43,6 +46,8 @@ export interface TravelRepository {
   findGenerated(context: TravelAccessContext, countryCode: string | undefined, name: string): Promise<Place | null>;
   upsertGenerated(context: TravelAccessContext, place: Place): Promise<Place>;
   create(context: TravelAccessContext, place: Place): Promise<Place>;
+  createTrip(context: TravelAccessContext, trip: Trip, relations: TripPlace[]): Promise<TripPresentationRecord>;
+  listTrips(context: TravelAccessContext): Promise<TripPresentationRecord[]>;
   convergeManagedPlace(input: { context: TravelAccessContext; place: Place; collection: Collection; member: CollectionMember; hidden: UserHidden; image: Image; collectionImage: CollectionImage; placeImage: PlaceImage }): Promise<Place>;
   compensateManagedImage(scopeKey: string, imageKey: string, now: string): Promise<string | null>;
   cancelManagedImageDeletion(storageKey: string): Promise<void>;
@@ -50,6 +55,14 @@ export interface TravelRepository {
 }
 
 export function createTravelRepository(database: TravelDatabase = db): TravelRepository {
+  const parseTripPresentation = (raw: unknown): TripPresentationRecord => {
+    const row = z.object({ trip: z.record(z.unknown()), places: z.array(z.record(z.unknown())), coverStorageKey: z.string().trim().min(1).nullable().optional() }).parse(raw);
+    return {
+      trip: tripSchema.parse(withArangoKey(row.trip)),
+      places: row.places.map((place) => placeSchema.parse(withArangoKey(place))),
+      ...(row.coverStorageKey ? { coverStorageKey: row.coverStorageKey } : {}),
+    };
+  };
   return {
     authorizeRead(context) {
       return authorizeRead(database, context);
@@ -131,6 +144,89 @@ export function createTravelRepository(database: TravelDatabase = db): TravelRep
       const saved = (await cursor.all())[0];
       if (!saved) throw new TravelRepositoryError('forbidden');
       return placeSchema.parse(withArangoKey(saved as Record<string, unknown>));
+    },
+    async createTrip(context, trip, relations) {
+      const validTrip = tripSchema.parse(trip);
+      const validRelations = relations.map((relation) => tripPlaceSchema.parse(relation));
+      if (!validTrip.requestHash || validTrip.scopeKey !== context.scopeKey || validTrip.userKey !== context.userKey
+        || validRelations.length === 0
+        || validRelations.some((relation, position) => relation.scopeKey !== context.scopeKey || relation.tripKey !== validTrip.key || relation.position !== position)) {
+        throw new TravelRepositoryError('forbidden');
+      }
+      const cursor = await database.query(`
+        LET membership = FIRST(FOR candidate IN userOrganizations
+          FILTER candidate.organizationId == @organizationKey && candidate.userId == @userKey && candidate.status == "active"
+          LIMIT 1 RETURN candidate)
+        LET scope = DOCUMENT(scopes, @scopeKey)
+        LET scopeRole = membership == null ? null : FIRST(FOR member IN scopeMembers
+          FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == membership._key && member.status == "active"
+          LIMIT 1 RETURN member.role)
+        FILTER membership != null && scope != null && scope.organizationKey == @organizationKey
+        FILTER membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"]
+        FILTER LENGTH(UNIQUE(@placeKeys)) == LENGTH(@placeKeys)
+        LET selectedPlaces = (FOR placeKey IN @placeKeys
+          LET place = DOCUMENT(places, placeKey)
+          FILTER place != null && place.scopeKey == @scopeKey && place.userKey == @userKey && place.saved == true
+          RETURN place)
+        FILTER LENGTH(selectedPlaces) == LENGTH(@placeKeys)
+        LET firstPlace = FIRST(selectedPlaces)
+        LET hero = FIRST(FOR relation IN placeImages
+          FILTER firstPlace != null && relation.scopeKey == @scopeKey && relation.placeKey == firstPlace._key && relation.role == "hero"
+          SORT relation.position ASC, relation._key ASC
+          LET image = DOCUMENT(images, relation.imageKey)
+          FILTER image != null && image.scopeKey == @scopeKey
+          RETURN image)
+        UPSERT { _key: @tripKey }
+          INSERT @trip
+          UPDATE {} IN trips
+        LET persistedTrip = NEW
+        FILTER persistedTrip.scopeKey == @scopeKey && persistedTrip.userKey == @userKey && persistedTrip.requestHash == @requestHash
+        LET persistedRelations = (FOR relation IN @relations
+          UPSERT { _key: relation._key }
+            INSERT relation
+            UPDATE {} IN tripPlaces
+          RETURN NEW)
+        FILTER LENGTH(persistedRelations) == LENGTH(@relations)
+        RETURN { trip: persistedTrip, places: selectedPlaces, coverStorageKey: hero == null ? null : hero.storageKey }
+      `, { ...context, tripKey: validTrip.key, requestHash: validTrip.requestHash, placeKeys: validRelations.map(({ placeKey }) => placeKey), trip: toArangoDoc(validTrip), relations: validRelations.map((relation) => toArangoDoc(relation)) });
+      const created = (await cursor.all())[0];
+      if (!created) {
+        const existing = await (await database.query('FOR trip IN trips FILTER trip._key == @tripKey && trip.scopeKey == @scopeKey && trip.userKey == @userKey LIMIT 1 RETURN trip.requestHash', { ...context, tripKey: validTrip.key })).all();
+        if (existing.length > 0 && existing[0] !== validTrip.requestHash) throw new TravelRepositoryError('conflict');
+        throw new TravelRepositoryError('forbidden');
+      }
+      return parseTripPresentation(created);
+    },
+    async listTrips(context) {
+      const cursor = await database.query(`
+        LET membership = FIRST(FOR candidate IN userOrganizations
+          FILTER candidate.organizationId == @organizationKey && candidate.userId == @userKey && candidate.status == "active"
+          LIMIT 1 RETURN candidate)
+        LET scope = DOCUMENT(scopes, @scopeKey)
+        LET scopeRole = membership == null ? null : FIRST(FOR member IN scopeMembers
+          FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == membership._key && member.status == "active"
+          LIMIT 1 RETURN member.role)
+        FILTER membership != null && scope != null && scope.organizationKey == @organizationKey
+        FILTER membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member", "viewer"]
+        FOR trip IN trips
+          FILTER trip.scopeKey == @scopeKey && trip.userKey == @userKey
+          SORT trip.createdAt ASC, trip._key ASC
+          LET places = (FOR relation IN tripPlaces
+            FILTER relation.scopeKey == @scopeKey && relation.tripKey == trip._key
+            SORT relation.position ASC, relation._key ASC
+            LET place = DOCUMENT(places, relation.placeKey)
+            FILTER place != null && place.scopeKey == @scopeKey && place.userKey == @userKey && place.saved == true
+            RETURN place)
+          LET firstPlace = FIRST(places)
+          LET hero = FIRST(FOR relation IN placeImages
+            FILTER firstPlace != null && relation.scopeKey == @scopeKey && relation.placeKey == firstPlace._key && relation.role == "hero"
+            SORT relation.position ASC, relation._key ASC
+            LET image = DOCUMENT(images, relation.imageKey)
+            FILTER image != null && image.scopeKey == @scopeKey
+            RETURN image)
+          RETURN { trip, places, coverStorageKey: hero == null ? null : hero.storageKey }
+      `, { ...context });
+      return (await cursor.all()).map(parseTripPresentation);
     },
     async convergeManagedPlace(input) {
       const place = placeSchema.parse(input.place);

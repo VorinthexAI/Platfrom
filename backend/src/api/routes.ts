@@ -473,6 +473,9 @@ export function registerRoutes(app: Hono) {
   app.post('/travel/places/children/find', travelHandlers.findChildren);
   app.post('/travel/cities/find', travelHandlers.findCity);
   app.post('/travel/places/image', travelHandlers.generatePlaceHeroImage);
+  app.post('/travel/places/search', travelHandlers.searchPlaces);
+  app.post('/travel/trips/list', travelHandlers.listTrips);
+  app.post('/travel/trips', travelHandlers.createTrip);
   app.post('/email/overview', emailHandlers.overview);
   app.post('/email/connect', emailHandlers.startConnect);
   app.get('/email/connectors/gmail/callback', emailHandlers.callback);

@@ -23,7 +23,7 @@ test("uses separate full-height grid and player sheets with footer actions", () 
   expect(highlights).toContain('variant="primary">Create</Button>');
   expect(highlights).toContain('variant="secondary">Close</Button>');
   expect(highlights).toContain('accessibilityLabel="Creating highlight"');
-  expect(highlights).toContain('setHighlights((current) => [highlight, ...current.filter(({ key }) => key !== highlight.key)])');
+  expect(highlights).toContain('setHighlights((current) => [...current.filter(({ key }) => key !== highlight.key), highlight])');
   expect(highlights).toContain('setCreating(false)');
   expect(highlights).toContain('notify("Highlight created")');
   expect(highlights).not.toContain('skeletonUntil');

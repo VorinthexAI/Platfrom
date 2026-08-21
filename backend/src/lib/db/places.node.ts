@@ -59,8 +59,9 @@ export const insertPlace = helpers.insert;
 export const getPlaceById = helpers.getById;
 export const updatePlace = helpers.updateById;
 export async function deletePlace(key: string) {
-  return withTransaction({ read: [], write: [PLACES_COLLECTION, 'placeImages'] }, async (transaction) => {
+  return withTransaction({ read: [], write: [PLACES_COLLECTION, 'placeImages', 'tripPlaces'] }, async (transaction) => {
     await transaction.query('FOR relation IN placeImages FILTER relation.placeKey == @key REMOVE relation IN placeImages', { key });
+    await transaction.query('FOR relation IN tripPlaces FILTER relation.placeKey == @key REMOVE relation IN tripPlaces', { key });
     const cursor = await transaction.query('FOR place IN places FILTER place._key == @key REMOVE place IN places RETURN OLD', { key });
     const removed = await cursor.next();
     return removed ? placeSchema.parse(withArangoKey(removed as Record<string, unknown>)) : null;

@@ -2,7 +2,7 @@ import type { Context } from 'hono';
 import { ZodError } from 'zod';
 import { ProviderExecutionError } from '@/lib/ai/router/errors';
 import { TravelRepositoryError } from '@/lib/travel/repository';
-import { createTravelService, GuideGenerationError, travelChildrenFindInputSchema, travelCityFindInputSchema, travelPlaceCreateInputSchema, travelPlaceOpenInputSchema, type TravelService } from '@/lib/travel/service';
+import { createTravelService, GuideGenerationError, travelChildrenFindInputSchema, travelCityFindInputSchema, travelPlaceCreateInputSchema, travelPlaceOpenInputSchema, travelPlaceSearchInputSchema, travelTripCreateInputSchema, travelTripListInputSchema, type TravelService } from '@/lib/travel/service';
 import { travelPlaceImageInputSchema } from '@/lib/travel/place-images';
 import { getAuthIdentity } from './security';
 
@@ -12,7 +12,7 @@ class TravelHttpError extends Error { constructor(readonly status: 401 | 403, re
 export function createTravelHandlers(options: { service?: TravelService; getIdentity?: IdentityReader } = {}) {
   const service = options.service ?? createTravelService();
   const getIdentity = options.getIdentity ?? getAuthIdentity;
-  const run = (operation: (c: Context, service: TravelService, userKey: string) => Promise<unknown>, generationKind: 'country' | 'city' | 'image' | 'destination' = 'destination') => async (c: Context) => {
+  const run = (operation: (c: Context, service: TravelService, userKey: string) => Promise<unknown>, generationKind: 'country' | 'city' | 'image' | 'search' | 'destination' = 'destination') => async (c: Context) => {
     try {
       const identity = await getIdentity(c);
       if (!identity) throw new TravelHttpError(401, 'TRAVEL_UNAUTHORIZED', 'Authentication required.');
@@ -21,6 +21,7 @@ export function createTravelHandlers(options: { service?: TravelService; getIden
     } catch (error) {
       if (error instanceof TravelHttpError) return c.json({ success: false, error: { code: error.code, message: error.message } }, error.status);
       if (error instanceof TravelRepositoryError) {
+        if (error.reason === 'conflict') return c.json({ success: false, error: { code: 'TRAVEL_IDEMPOTENCY_CONFLICT', message: 'This Compass request key was already used for different trip data.' } }, 409);
         return c.json({ success: false, error: { code: 'TRAVEL_FORBIDDEN', message: 'Compass access denied.' } }, 403);
       }
       if (error instanceof ProviderExecutionError) {
@@ -33,7 +34,7 @@ export function createTravelHandlers(options: { service?: TravelService; getIden
       }
       if (error instanceof GuideGenerationError) {
         console.error(`${error.guideKind} guide generation returned an invalid provider response`, { message: error.message, cause: error.cause instanceof Error ? error.cause.message : String(error.cause) });
-        const label = error.guideKind === 'country' ? 'Country' : 'City';
+        const label = error.guideKind === 'country' ? 'Country' : error.guideKind === 'city' ? 'City' : 'Search';
         return c.json({ success: false, error: { code: `${label.toUpperCase()}_PROVIDER_INVALID_RESPONSE`, message: `${label} generation returned an invalid response. Try again.` } }, 502);
       }
       if (error instanceof ZodError || error instanceof SyntaxError) return c.json({ success: false, error: { code: 'TRAVEL_INVALID_INPUT', message: 'Compass request input was invalid.' } }, 400);
@@ -42,6 +43,9 @@ export function createTravelHandlers(options: { service?: TravelService; getIden
     }
   };
   return {
+    searchPlaces: run(async (c, travel, userKey) => travel.searchPlaces(travelPlaceSearchInputSchema.parse(await c.req.json()), userKey, { signal: c.req.raw.signal }), 'search'),
+    listTrips: run(async (c, travel, userKey) => travel.listTrips(travelTripListInputSchema.parse(await c.req.json()), userKey)),
+    createTrip: run(async (c, travel, userKey) => travel.createTrip(travelTripCreateInputSchema.parse(await c.req.json()), userKey)),
     overview: run(async (c, travel, userKey) => travel.overview(await c.req.json(), userKey)),
     createPlace: run(async (c, travel, userKey) => travel.createPlace(travelPlaceCreateInputSchema.parse(await c.req.json()), userKey, { signal: c.req.raw.signal })),
     openPlace: run(async (c, travel, userKey) => travel.openPlace(travelPlaceOpenInputSchema.parse(await c.req.json()), userKey)),

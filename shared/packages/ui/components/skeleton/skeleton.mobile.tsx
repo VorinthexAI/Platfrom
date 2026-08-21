@@ -6,7 +6,6 @@ export type SkeletonProps = ViewProps & { children?: ReactNode };
 export function Skeleton({ children, onLayout, style, ...props }: SkeletonProps) {
   const [size, setSize] = useState({ height: 0, width: 0 });
   const [progress] = useState(() => new Animated.Value(0));
-  const [timing] = useState(() => ({ delay: 140 + Math.round(Math.random() * 420), duration: 1_450 + Math.round(Math.random() * 650) }));
 
   useEffect(() => {
     if (size.height <= 0 || size.width <= 0) return;
@@ -18,15 +17,21 @@ export function Skeleton({ children, onLayout, style, ...props }: SkeletonProps)
         progress.setValue(0.5);
         return;
       }
+      progress.setValue(0);
       animation = Animated.loop(Animated.sequence([
-        Animated.delay(timing.delay),
         Animated.timing(progress, {
-          duration: timing.duration,
+          duration: 1_800,
           easing: Easing.bezier(0.45, 0, 0.2, 1),
           toValue: 1,
           useNativeDriver: true,
         }),
-      ]));
+        Animated.timing(progress, {
+          duration: 0,
+          toValue: 0,
+          useNativeDriver: true,
+        }),
+        Animated.delay(180),
+      ]), { resetBeforeIteration: false });
       animation.start();
     });
     return () => {
@@ -35,7 +40,7 @@ export function Skeleton({ children, onLayout, style, ...props }: SkeletonProps)
       progress.stopAnimation();
       progress.setValue(0);
     };
-  }, [progress, size.height, size.width, timing.delay, timing.duration]);
+  }, [progress, size.height, size.width]);
 
   function handleLayout(event: LayoutChangeEvent) {
     const { height, width } = event.nativeEvent.layout;
@@ -43,7 +48,6 @@ export function Skeleton({ children, onLayout, style, ...props }: SkeletonProps)
     onLayout?.(event);
   }
 
-  const bandHeight = Math.max(56, size.height * 1.35);
   const bandWidth = Math.max(56, size.width * 0.46);
   return <View onLayout={handleLayout} style={[styles.root, style]} {...props}>
     <Animated.View
@@ -53,12 +57,10 @@ export function Skeleton({ children, onLayout, style, ...props }: SkeletonProps)
       style={[
         styles.shimmer,
         {
-          height: bandHeight,
+          height: size.height,
           opacity: progress.interpolate({ inputRange: [0, 0.16, 0.5, 0.84, 1], outputRange: [0, 0.2, 0.34, 0.16, 0] }),
           transform: [
             { translateX: progress.interpolate({ inputRange: [0, 1], outputRange: [-bandWidth, size.width + bandWidth] }) },
-            { translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [-bandHeight, size.height + bandHeight] }) },
-            { rotate: "18deg" },
           ],
           width: bandWidth,
         },

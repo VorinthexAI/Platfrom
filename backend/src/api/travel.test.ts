@@ -5,6 +5,7 @@ import { ProviderExecutionError } from '@/lib/ai/router/errors';
 import { runTool } from '@/lib/ai/tools';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
 import { GuideGenerationError } from '@/lib/travel/service';
+import { TravelRepositoryError } from '@/lib/travel/repository';
 import { createTravelHandlers } from './travel';
 import { registerRoutes } from './routes';
 
@@ -72,6 +73,46 @@ describe('travel HTTP handlers', () => {
       [{ organizationKey, scopeKey, ...input }, userKey],
       [{ organizationKey, scopeKey, ...input }, userKey],
     ]);
+  });
+
+  test('keeps strict HTTP and Core search and trip adapters on the same canonical services', async () => {
+    const organizationKey = newId(), scopeKey = newId(), userKey = newId(), placeKey = newId();
+    const calls: unknown[][] = [];
+    const service = {
+      searchPlaces: async (...args: unknown[]) => { calls.push(['search', ...args]); return { results: [] }; },
+      listTrips: async (...args: unknown[]) => { calls.push(['list', ...args]); return { trips: [] }; },
+      createTrip: async (...args: unknown[]) => { calls.push(['create', ...args]); return { trip: {} }; },
+    } as never;
+    const handlers = createTravelHandlers({ service, getIdentity: async () => ({ key: userKey, identityType: 'user' }) });
+    const app = new Hono();
+    app.post('/travel/places/search', handlers.searchPlaces);
+    app.post('/travel/trips/list', handlers.listTrips);
+    app.post('/travel/trips', handlers.createTrip);
+    const headers = { 'content-type': 'application/json' };
+    const search = { organizationKey, scopeKey, query: 'warm coast' };
+    const create = { organizationKey, scopeKey, name: 'Coast', placeKeys: [placeKey], idempotencyKey: 'http-request-1' };
+    expect((await app.request('/travel/places/search', { method: 'POST', headers, body: JSON.stringify({ ...search, userKey }) })).status).toBe(400);
+    expect((await app.request('/travel/places/search', { method: 'POST', headers, body: JSON.stringify(search) })).status).toBe(200);
+    expect((await app.request('/travel/trips/list', { method: 'POST', headers, body: JSON.stringify({ organizationKey, scopeKey }) })).status).toBe(200);
+    expect((await app.request('/travel/trips', { method: 'POST', headers, body: JSON.stringify(create) })).status).toBe(200);
+    const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    await runTool('place.search', '', { query: search.query }, { contentContext: context, travelService: service });
+    await runTool('trip.list', '', {}, { contentContext: context, travelService: service });
+    await runTool('trip.create', '', { name: create.name, placeKeys: create.placeKeys }, { contentContext: context, travelService: service, requestKey: 'core-request-1' });
+    expect(calls.map((call) => call.slice(0, 3))).toEqual([
+      ['search', search, userKey], ['list', { organizationKey, scopeKey }, userKey], ['create', create, userKey],
+      ['search', search, userKey], ['list', { organizationKey, scopeKey }, userKey], ['create', { organizationKey, scopeKey, name: create.name, placeKeys: create.placeKeys, idempotencyKey: 'core-request-1:trip.create' }, userKey],
+    ]);
+  });
+
+  test('returns conflict when a trip idempotency key is reused for different data', async () => {
+    const organizationKey = newId(), scopeKey = newId(), userKey = newId(), placeKey = newId();
+    const service = { createTrip: async () => { throw new TravelRepositoryError('conflict'); } } as never;
+    const app = new Hono();
+    app.post('/travel/trips', createTravelHandlers({ service, getIdentity: async () => ({ key: userKey, identityType: 'user' }) }).createTrip);
+    const response = await app.request('/travel/trips', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey, name: 'Route', placeKeys: [placeKey], idempotencyKey: 'request-1' }) });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ success: false, error: { code: 'TRAVEL_IDEMPOTENCY_CONFLICT' } });
   });
 
   test('keeps strict HTTP and Core place.open adapters in parity with server-owned time', async () => {
@@ -187,13 +228,13 @@ describe('travel HTTP handlers', () => {
     const app = new Hono();
     registerRoutes(app);
     const requests: Array<[string, string]> = [
-       ['POST', '/travel/overview'], ['POST', '/travel/places'], ['POST', '/travel/places/open'], ['POST', '/travel/places/find'], ['POST', '/travel/places/children/find'], ['POST', '/travel/cities/find'], ['POST', '/travel/places/image'],
+       ['POST', '/travel/overview'], ['POST', '/travel/places'], ['POST', '/travel/places/open'], ['POST', '/travel/places/find'], ['POST', '/travel/places/children/find'], ['POST', '/travel/cities/find'], ['POST', '/travel/places/image'], ['POST', '/travel/places/search'], ['POST', '/travel/trips/list'], ['POST', '/travel/trips'],
     ];
     for (const [method, path] of requests) {
       const response = await app.request(path, { method, headers: { 'content-type': 'application/json' }, body: '{}' });
       expect(response.status).toBe(401);
     }
-    for (const [method, path] of [['POST', `/travel/places/${newId()}/visits`], ['POST', '/travel/trips']] as const) {
+    for (const [method, path] of [['POST', `/travel/places/${newId()}/visits`]] as const) {
       expect((await app.request(path, { method, headers: { 'content-type': 'application/json' }, body: '{}' })).status).toBe(404);
     }
   });

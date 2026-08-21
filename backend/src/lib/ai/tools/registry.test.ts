@@ -7,9 +7,9 @@ describe('unified tool registry', () => {
   test('has one unique definition for every public tool name', () => {
     expect(new Set(TOOL_NAMES).size).toBe(TOOL_NAMES.length);
     expect(new Set(TOOL_DEFINITIONS.map(({ name }) => name)).size).toBe(TOOL_DEFINITIONS.length);
-    expect(TOOL_NAMES).toHaveLength(114);
-    expect(TOOL_DEFINITIONS).toHaveLength(114);
-    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 69);
+    expect(TOOL_NAMES).toHaveLength(117);
+    expect(TOOL_DEFINITIONS).toHaveLength(117);
+    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 72);
     expect(TOOL_DEFINITIONS.map(({ name }) => name)).toEqual([...TOOL_NAMES]);
     expect(TOOL_NAMES).not.toContain('chat');
     expect(TOOL_NAMES).not.toContain('orchestrator.chat');
@@ -43,9 +43,9 @@ describe('unified tool registry', () => {
       expect(TOOL_NAMES).not.toContain(name);
       expect(toolInputSchemas).not.toHaveProperty(name);
     }
-    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['country.search', 'place.list', 'place.find', 'place.find-city', 'place.find-children', 'place.create', 'place.open']));
+    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['country.search', 'place.search', 'place.list', 'place.find', 'place.find-city', 'place.find-children', 'place.create', 'place.open', 'trip.list', 'trip.create']));
     expect(TOOL_NAMES).not.toContain('place.images.generate');
-    for (const name of ['place.visit.create', 'trip.create', 'trip.place.add', 'trip.place.remove']) expect(TOOL_NAMES).not.toContain(name);
+    for (const name of ['place.visit.create', 'trip.place.add', 'trip.place.remove']) expect(TOOL_NAMES).not.toContain(name);
     expect(TOOL_NAMES).toContain('email.draft.send');
     expect(TOOL_NAMES).toEqual(expect.arrayContaining(['content.hidden.list', 'book.create', 'email.thread.read', 'email.thread.mark-read']));
     expect(TOOL_NAMES).not.toContain('book.create-context');
@@ -85,6 +85,9 @@ describe('unified tool registry', () => {
     const calls: unknown[][] = [];
     const travelService = {
       overview: async (...args: unknown[]) => { calls.push(['overview', ...args]); return { places: [] }; },
+      searchPlaces: async (...args: unknown[]) => { calls.push(['searchPlaces', ...args]); return { results: [] }; },
+      listTrips: async (...args: unknown[]) => { calls.push(['listTrips', ...args]); return { trips: [] }; },
+      createTrip: async (...args: unknown[]) => { calls.push(['createTrip', ...args]); return {}; },
       findPlace: async (...args: unknown[]) => { calls.push(['findPlace', ...args]); return {}; },
       findCity: async (...args: unknown[]) => { calls.push(['findCity', ...args]); return {}; },
       findChildren: async (...args: unknown[]) => { calls.push(['findChildren', ...args]); return {}; },
@@ -94,6 +97,11 @@ describe('unified tool registry', () => {
 
     await expect(runTool('place.list', '', { scopeKey: newId() }, { contentContext, travelService })).rejects.toThrow('Unrecognized key');
     await runTool('place.list', '', {}, { contentContext, travelService });
+    await expect(runTool('place.search', '', { query: 'x', scopeKey }, { contentContext, travelService })).rejects.toThrow();
+    await runTool('place.search', '', { query: 'warm coast' }, { contentContext, travelService });
+    await runTool('trip.list', '', {}, { contentContext, travelService });
+    await expect(runTool('trip.create', '', { name: 'Route', placeKeys: [scopeKey], userKey }, { contentContext, travelService })).rejects.toThrow('Unrecognized key');
+    await runTool('trip.create', '', { name: 'Route', placeKeys: [scopeKey] }, { contentContext, travelService, requestKey: 'request-1' });
     await runTool('place.find', '', { query: 'Reykjavik' }, { contentContext, travelService });
     const cityInput = { city: 'Reykjavik', country: { name: 'Iceland', code: 'IS', continent: 'Europe', lat: 65, lon: -18 } };
     await expect(runTool('place.find-city', '', { ...cityInput, userKey }, { contentContext, travelService })).rejects.toThrow('Unrecognized key');
@@ -108,6 +116,9 @@ describe('unified tool registry', () => {
     await runTool('place.open', '', openInput, { contentContext, travelService });
     expect(calls).toEqual([
       ['overview', { organizationKey, scopeKey }, userKey],
+      ['searchPlaces', { organizationKey, scopeKey, query: 'warm coast' }, userKey, { signal: undefined, timeoutMs: undefined }],
+      ['listTrips', { organizationKey, scopeKey }, userKey],
+      ['createTrip', { organizationKey, scopeKey, name: 'Route', placeKeys: [scopeKey], idempotencyKey: 'request-1:trip.create' }, userKey],
       ['findPlace', { organizationKey, scopeKey, query: 'Reykjavik' }, userKey, { signal: undefined }],
       ['findCity', { organizationKey, scopeKey, ...cityInput }, userKey, { signal: undefined, timeoutMs: undefined }],
       ['findChildren', { organizationKey, scopeKey, childrenRequestToken: 'token' }, userKey, { signal: undefined, timeoutMs: undefined }],

@@ -539,16 +539,45 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
 
 export async function migrateMinimalPlacesAndRetireTrips(targetDb: Database): Promise<void> {
   await migrateMinimalPlaces(targetDb);
-  for (const collectionName of ['shares', 'tagAssignments', 'bookSources']) {
-    if (!await targetDb.collection(collectionName).exists()) continue;
-    await targetDb.query(
-      'FOR resource IN @@collection FILTER resource.sourceType == "trip" REMOVE resource IN @@collection',
-      { '@collection': collectionName },
-    );
+  const legacyVisits = targetDb.collection('placeVisits');
+  if (await legacyVisits.exists()) await legacyVisits.drop();
+
+  const trips = targetDb.collection('trips');
+  if (!await trips.exists()) return;
+  const tripPlaces = targetDb.collection('tripPlaces');
+  const hasTripPlaces = await tripPlaces.exists();
+  const invalidCursor = await targetDb.query<string>(`
+    FOR trip IN trips
+      FILTER !IS_STRING(trip.userKey) || !IS_STRING(trip.scopeKey) || !IS_STRING(trip.name)
+        || trip.name != TRIM(trip.name) || LENGTH(trip.name) == 0 || LENGTH(trip.name) > 255
+        || !IS_STRING(trip.createdAt)
+        || HAS(trip, "description") && (!IS_STRING(trip.description) || trip.description != TRIM(trip.description) || LENGTH(trip.description) == 0 || LENGTH(trip.description) > 10000)
+        || HAS(trip, "requestHash") && (!IS_STRING(trip.requestHash) || !REGEX_TEST(trip.requestHash, "^[a-f0-9]{64}$"))
+      RETURN trip._key
+  `);
+  const invalidTripKeys = await invalidCursor.all();
+  if (invalidTripKeys.length > 0) {
+    if (hasTripPlaces) await targetDb.query('FOR relation IN tripPlaces FILTER relation.tripKey IN @tripKeys REMOVE relation IN tripPlaces', { tripKeys: invalidTripKeys });
+    await targetDb.query('FOR trip IN trips FILTER trip._key IN @tripKeys REMOVE trip IN trips', { tripKeys: invalidTripKeys });
   }
-  for (const collectionName of ['tripPlaces', 'placeVisits', 'trips']) {
-    const collection = targetDb.collection(collectionName);
-    if (await collection.exists()) await collection.drop();
+  if (hasTripPlaces) {
+    const places = targetDb.collection('places');
+    if (!await places.exists()) await targetDb.query('FOR relation IN tripPlaces REMOVE relation IN tripPlaces');
+    else await targetDb.query(`
+      FOR relation IN tripPlaces
+        LET trip = DOCUMENT(trips, relation.tripKey)
+        LET place = DOCUMENT(places, relation.placeKey)
+        FILTER !IS_STRING(relation.scopeKey) || !IS_STRING(relation.tripKey) || !IS_STRING(relation.placeKey)
+          || !IS_NUMBER(relation.position) || relation.position < 0 || relation.position != FLOOR(relation.position)
+          || !IS_STRING(relation.createdAt)
+          || trip == null || place == null || trip.scopeKey != relation.scopeKey || place.scopeKey != relation.scopeKey
+          || trip.userKey != place.userKey || place.saved != true
+        REMOVE relation IN tripPlaces
+    `);
+  }
+  for (const name of ['shares', 'tagAssignments']) {
+    const collection = targetDb.collection(name);
+    if (await collection.exists()) await targetDb.query('FOR resource IN @@collection FILTER resource.sourceType == "trip" REMOVE resource IN @@collection', { '@collection': name });
   }
 }
 
@@ -1261,6 +1290,9 @@ export const collections: CollectionSpec[] = [
   { name: 'documentSummaryAudio', skipEmbedding: true, indexes: [{ fields: ['summaryKey'], unique: true }, { fields: ['scopeKey', 'documentKey', 'createdAt'] }, { fields: ['storageKey'], unique: true }] },
   { name: 'shares', skipEmbedding: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'sourceType', 'sourceKey'] }, { fields: ['scopeKey', 'sourceType', 'sourceKey', 'revokedAt'] }, { fields: ['tokenHash'], unique: true }, { fields: ['expiresAt'], sparse: true }] },
   { name: 'places', embedKeys: ['name', 'summary'], indexes: [{ fields: ['scopeKey', 'userKey', 'saved'] }, { fields: ['scopeKey', 'userKey', 'openedAt'], sparse: true }, { fields: ['scopeKey', 'userKey', 'countryCode'] }, { fields: ['scopeKey', 'userKey', 'countryCode', 'name'], unique: true }] },
+  // Private Compass persistence. Access is only through the canonical travel service.
+  { name: 'trips', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'userKey', 'createdAt'] }] },
+  { name: 'tripPlaces', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'tripKey', 'position'], unique: true }, { fields: ['scopeKey', 'tripKey', 'placeKey'], unique: true }, { fields: ['scopeKey', 'placeKey'] }] },
   { name: 'countries', embedKeys: ['name'], indexes: [{ fields: ['countryCode'], unique: true }, { fields: ['name'] }] },
   { name: 'books', embedKeys: ['title', 'subtitle', 'description', 'goal', 'audience', 'outcome'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'status'] }, { fields: ['scopeKey', 'isFavorite'] }, { fields: ['scopeKey', 'generationRequestKey'], unique: true, sparse: true }] },
   { name: 'bookContexts', embedKeys: ['userContext', 'priorKnowledge', 'priorBookContext', 'personalizationContext', 'researchContext', 'noveltyContext', 'generationBrief'], indexes: [{ fields: ['scopeKey', 'bookKey'], unique: true }] },
@@ -1345,9 +1377,7 @@ const droppedCollections = [
   'toolActions',
   'tools',
   'templates',
-  'tripPlaces',
   'placeVisits',
-  'trips',
 ];
 
 async function main() {

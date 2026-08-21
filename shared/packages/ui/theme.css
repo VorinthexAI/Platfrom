@@ -51,11 +51,11 @@
 }
 
 @keyframes vui-skeleton-shimmer {
-  0%, 9% { opacity: 0; transform: translate3d(-150%, -150%, 0) rotate(18deg) scale(0.9); }
+  0%, 9% { opacity: 0; transform: translate3d(-150%, 0, 0); }
   23% { opacity: 0.18; }
-  52% { opacity: 0.34; transform: translate3d(90%, 80%, 0) rotate(21deg) scale(1.08); }
+  52% { opacity: 0.34; transform: translate3d(90%, 0, 0); }
   79% { opacity: 0.14; }
-  91%, 100% { opacity: 0; transform: translate3d(350%, 250%, 0) rotate(17deg) scale(0.96); }
+  91%, 100% { opacity: 0; transform: translate3d(350%, 0, 0); }
 }
 
 .vui-skeleton {
@@ -68,14 +68,14 @@
 
 .vui-skeleton::after {
   animation: vui-skeleton-shimmer 2.05s cubic-bezier(0.45, 0, 0.2, 1) infinite;
-  background: radial-gradient(
-    ellipse at center,
+  background: linear-gradient(
+    90deg,
     transparent,
     rgba(255, 255, 255, 0.32),
     transparent
   );
   content: "";
-  height: 170%;
+  height: 100%;
   left: 0;
   pointer-events: none;
   position: absolute;
@@ -83,23 +83,13 @@
   width: 46%;
 }
 
-.vui-skeleton:nth-child(2n)::after {
-  animation-delay: -0.73s;
-  animation-duration: 2.32s;
-}
-
-.vui-skeleton:nth-child(3n)::after {
-  animation-delay: -1.21s;
-  animation-duration: 1.84s;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .vui-skeleton::after {
     animation: none;
     left: 28%;
     opacity: 0.18;
-    top: 12%;
-    transform: rotate(18deg);
+    top: 0;
+    transform: translate3d(90%, 0, 0);
   }
 }
 

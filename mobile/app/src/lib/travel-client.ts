@@ -20,6 +20,31 @@ export const placeSchema = z.strictObject({
 
 export type Place = z.infer<typeof placeSchema>;
 
+export const placeSearchResultSchema = z.strictObject({
+  kind: z.enum(["country", "city"]),
+  name: z.string().trim().min(1).max(160),
+  country: z.string().trim().min(1).max(160),
+  countryCode: z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/),
+  continent: z.string().trim().min(1).max(80),
+  summary: z.string().trim().min(1).max(1_200),
+  lat: z.number().finite().min(-90).max(90),
+  long: z.number().finite().min(-180).max(180),
+});
+export type PlaceSearchResult = z.infer<typeof placeSearchResultSchema>;
+
+const tripPlaceSchema = placeSchema.omit({ coverUrl: true });
+export const tripSchema = z.strictObject({
+  key: keySchema,
+  name: z.string().trim().min(1).max(255),
+  description: z.string().trim().min(1).max(10_000).optional(),
+  createdAt: z.iso.datetime(),
+  places: z.array(tripPlaceSchema).max(100),
+  coverUrl: z.url().optional(),
+}).superRefine(({ places }, context) => {
+  if (new Set(places.map(({ key }) => key)).size !== places.length) context.addIssue({ code: "custom", message: "Trip places must be distinct.", path: ["places"] });
+});
+export type Trip = z.infer<typeof tripSchema>;
+
 export const recentPlaceSchema = z.strictObject({
   key: keySchema,
   kind: z.enum(["country", "place"]),
@@ -121,6 +146,16 @@ const assistantResponseSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("unsupported"), message: z.string().min(1), sources: z.tuple([]), changes: assistantChangesSchema }),
 ]);
 const contextSchema = z.strictObject({ organizationKey: keySchema, scopeKey: keySchema });
+const placeSearchInputSchema = z.strictObject({ query: z.string().trim().min(2).max(500) });
+const createTripInputSchema = z.strictObject({
+  name: z.string().trim().min(1).max(255),
+  description: z.string().trim().min(1).max(10_000).optional(),
+  idempotencyKey: z.string().trim().min(1).max(200),
+  placeKeys: z.array(keySchema).min(1).max(100),
+}).superRefine(({ placeKeys }, context) => {
+  if (new Set(placeKeys).size !== placeKeys.length) context.addIssue({ code: "custom", message: "Trip places must be distinct.", path: ["placeKeys"] });
+});
+export type CreateTripInput = z.input<typeof createTripInputSchema>;
 const countrySearchInputSchema = z.strictObject({ organizationKey: keySchema, query: z.string().trim().min(1).max(200) });
 export const countrySearchResultSchema = z.strictObject({
   country: z.strictObject({
@@ -175,6 +210,33 @@ async function post<T>(path: string, body: Record<string, unknown>, schema: z.Zo
 
 export function fetchTravelOverview() {
   return post("/travel/overview", {}, travelOverviewSchema);
+}
+
+export async function searchPlaces(query: string, signal?: AbortSignal) {
+  return post(
+    "/travel/places/search",
+    placeSearchInputSchema.parse({ query }),
+    z.strictObject({ results: z.array(placeSearchResultSchema).length(10) }),
+    { timeout: 30_000, signal },
+  ).then(({ results }) => results);
+}
+
+export function listTrips(signal?: AbortSignal) {
+  return post(
+    "/travel/trips/list",
+    {},
+    z.strictObject({ trips: z.array(tripSchema) }),
+    { timeout: 30_000, signal },
+  ).then(({ trips }) => trips);
+}
+
+export async function createTrip(input: CreateTripInput, signal?: AbortSignal) {
+  return post(
+    "/travel/trips",
+    createTripInputSchema.parse(input),
+    z.strictObject({ trip: tripSchema }),
+    { timeout: 30_000, signal },
+  ).then(({ trip }) => trip);
 }
 
 export function openPlace(name: string, countryCode: string, signal?: AbortSignal) {

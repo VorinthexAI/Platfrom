@@ -57,6 +57,13 @@ test("uses no legacy BottomSheet sizing props", () => {
   }
 });
 
+test("keeps the scene transformed until every stacked mobile sheet closes", () => {
+  expect(mobileSheet).toContain("const openSheets = useRef(new Set<symbol>())");
+  expect(mobileSheet).toContain("openSheets.current.add(id)");
+  expect(mobileSheet).toContain("openSheets.current.delete(id)");
+  expect(mobileSheet).toContain("const hasOpenSheet = openSheets.current.size > 0");
+});
+
 test("classifies every full-height sheet workflow explicitly", () => {
   expect(core).toContain('<BottomSheet height="full"');
   expect(switcher).not.toContain("height=");

@@ -55,6 +55,8 @@ export * from './icons/location-pin';
 export * from './icons/log-out';
 export * from './icons/calendar';
 export * from './icons/globe';
+export * from './icons/globe-view';
+export * from './icons/table-view';
 export * from './icons/chat-bubble';
 export * from './icons/archive';
 export * from './icons/gallery';
