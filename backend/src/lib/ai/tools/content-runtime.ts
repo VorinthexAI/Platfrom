@@ -475,7 +475,11 @@ async function defaults(deps: ContentToolDependencies, context: ToolContext): Pr
     runAction: deps.runAction ?? (async (operation: string, input: Record<string, unknown>): Promise<ContentActionResult> => {
       if (operation === 'document-embed') return processing.documentEmbed(input as never, { embedBatch: ({ texts }) => embeddingBatch(texts), dimensions: deps.ingestion?.embeddingDimensions }) as Promise<ContentActionResult>;
       if (operation.startsWith('text.')) {
-        const response = await router.executeAsk<ContentActionResult>(context.organizationKey, { ...input, ...(operation === 'text.rewrite' ? { mode: 'deep' as const } : {}) } as never, deps);
+        const deep = operation === 'text.rewrite';
+        const request = deep
+          ? { mode: 'model' as const, organizationKey: context.organizationKey, actionSlug: 'ask' as const, modelSlug: 'openai.gpt-5.6-luna' }
+          : { mode: 'auto' as const, organizationKey: context.organizationKey, actionSlug: 'ask' as const };
+        const response = await executeAction<Record<string, unknown>, ContentActionResult>(request, input, deps);
         return response.output;
       }
       const request = { mode: 'auto' as const, organizationKey: context.organizationKey, actionSlug: operation as never };
@@ -1543,7 +1547,8 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       result = await batch(tool, input.documentKeys.map((key: string) => ({
         key,
         preflight: async () => {
-          const current = await document(key, 'owner', true);
+          const generatedByPrincipal = linkedBindings.some((binding) => binding.documentKey === key && binding.createdByKey === member.user.key);
+          const current = await document(key, generatedByPrincipal ? 'moderator' : 'owner', true);
           if (current.isFavorite) fail('CONTENT_CONFLICT', 'Unfavorite the document before deleting it.', tool, 'delete', key);
         },
         run: async () => {

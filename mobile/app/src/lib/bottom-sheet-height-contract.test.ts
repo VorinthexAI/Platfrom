@@ -1,11 +1,12 @@
 import { expect, test } from "bun:test";
 
 const read = (path: string) => Bun.file(new URL(path, import.meta.url)).text();
-const [mobileSheet, webSheet, mobileButton, webButton, agents, theme, core, switcher, travel, email, ascend, gallery, sharing, archive] = await Promise.all([
+const [mobileSheet, webSheet, mobileButton, webButton, mobileToast, agents, theme, core, switcher, travel, email, ascend, gallery, sharing, archive] = await Promise.all([
   read("../../../../shared/packages/ui/components/bottom-sheet/bottom-sheet.mobile.tsx"),
   read("../../../../shared/packages/ui/components/bottom-sheet/bottom-sheet.web.tsx"),
   read("../../../../shared/packages/ui/components/button/button.mobile.tsx"),
   read("../../../../shared/packages/ui/components/button/button.web.tsx"),
+  read("../../../../shared/packages/ui/components/toast/toast.mobile.tsx"),
   read("../../../../AGENTS.md"),
   read("../../../../shared/packages/ui/theme.css"),
   read("../../../../shared/packages/ui/components/core-composer/core-composer.mobile.tsx"),
@@ -62,6 +63,35 @@ test("keeps the scene transformed until every stacked mobile sheet closes", () =
   expect(mobileSheet).toContain("openSheets.current.add(id)");
   expect(mobileSheet).toContain("openSheets.current.delete(id)");
   expect(mobileSheet).toContain("const hasOpenSheet = openSheets.current.size > 0");
+});
+
+test("renders the shared toast viewport inside native mobile sheets", () => {
+  expect(mobileToast).toContain("export function ToastViewport()");
+  expect(mobileToast).toContain("<ToastViewport />");
+  expect(mobileSheet).toContain('import { ToastViewport } from "../toast/toast.mobile"');
+  expect(mobileSheet).toContain("<ToastViewport />");
+});
+
+test("layers complete mobile sheet pages over a stationary previous page", () => {
+  expect(mobileSheet).toContain("pageKey?: string");
+  expect(mobileSheet).toContain("onSwipeLeft?: () => void");
+  expect(mobileSheet).toContain("onSwipeRight?: () => void");
+  expect(mobileSheet).toContain("const previous = pageSnapshotRef.current");
+  expect(mobileSheet).toContain("pageDirectionRef.current * windowWidth");
+  expect(mobileSheet).toContain("page={pageTransition.previous}");
+  expect(mobileSheet).toContain("translateX: pageTranslateX");
+  expect(mobileSheet).toContain("duration: 280");
+  expect(mobileSheet).toContain('<GestureDetector gesture={horizontalSwipeGesture}><Animated.View');
+  expect(mobileSheet).toContain("key={pageTransition.previous.pageKey}");
+  expect(mobileSheet).toContain("key={presentedPage.pageKey}");
+  expect(mobileSheet).toContain("pageTransition.previous.pageKey !== presentedPage.pageKey");
+  expect(mobileSheet).not.toContain("setPageTransition({ pageKey, previous: livePage })");
+  expect(mobileSheet).toContain("GestureHandlerRootView");
+  expect(mobileSheet).toContain('import { scheduleOnRN } from "react-native-worklets"');
+  expect(mobileSheet).toContain("scheduleOnRN(navigateHorizontal, translationX < 0 ? 1 : -1)");
+  expect(mobileSheet).not.toContain(".runOnJS(true)");
+  expect(mobileSheet).toContain("toValue: 0, useNativeDriver: false");
+  expect(mobileSheet).toContain("style={[styles.layerSurface, transitioningPage && { transform: [{ translateX: pageTranslateX }] }]}");
 });
 
 test("classifies every full-height sheet workflow explicitly", () => {

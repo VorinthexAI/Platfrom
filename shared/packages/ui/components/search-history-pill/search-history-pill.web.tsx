@@ -15,7 +15,7 @@ export type SearchHistoryPillProps = Omit<HTMLAttributes<HTMLDivElement>, "child
 export function SearchHistoryPill({ count, disabled, onPress, onRemove, query, removing = false, className = "", ...props }: SearchHistoryPillProps) {
   return (
     <div className={`vui-search-history-pill ${className}`} {...props}>
-      <Button aria-label={`Remove ${query} from search history`} disabled={disabled} icon={<CloseIcon size="sm" />} loading={removing} onClick={onRemove} size="sm" variant="icon">Remove search</Button>
+      <Button aria-label={`Remove ${query} from search history`} className="vui-search-history-pill-remove" disabled={disabled} icon={<CloseIcon size="sm" />} loading={removing} onClick={onRemove} size="md" variant="icon">Remove search</Button>
       <Button aria-label={`Search for ${query}`} className="vui-search-history-pill-query" disabled={disabled || removing} onClick={onPress} size="md" variant="ghost">
         <span>{query}</span><span aria-label={`Used ${count} ${count === 1 ? "time" : "times"}`} className="vui-search-history-pill-badge">{count}x</span>
       </Button>

@@ -86,4 +86,21 @@ describe("country GeoJSON", () => {
       expect(Math.abs(longitude) < 176 || Math.abs(latitude) >= 5).toBe(true);
     }
   });
+
+  test("keeps Russia fill triangles inside its high-latitude antimeridian geometry", () => {
+    const russia = COUNTRIES.features.find(({ properties }) => properties.countryCode === "RU");
+    expect(russia).toBeDefined();
+    const positions = createCountryFillGeometry(russia!).getAttribute("position");
+    let offCountryTriangles = 0;
+    for (let index = 0; index < positions.count; index += 3) {
+      const center = new THREE.Vector3();
+      for (let offset = 0; offset < 3; offset += 1) center.add(new THREE.Vector3().fromBufferAttribute(positions, index + offset));
+      center.normalize();
+      const longitude = THREE.MathUtils.radToDeg(Math.atan2(center.x, center.z));
+      const latitude = THREE.MathUtils.radToDeg(Math.asin(center.y));
+      if (findCountryAtCoordinates(COUNTRIES, latitude, longitude)?.properties.countryCode !== "RU") offCountryTriangles += 1;
+    }
+    // Two coarse Natural Earth border triangles resolve to neighbors; broad fill wedges must not.
+    expect(offCountryTriangles).toBeLessThanOrEqual(2);
+  });
 });

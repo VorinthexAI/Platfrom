@@ -21,7 +21,10 @@ export type BottomSheetProps = {
   hideHeading?: boolean;
   hideCloseButton?: boolean;
   onOpenChange: (open: boolean) => void;
+  onSwipeLeft?: () => void;
+  onSwipeRight?: () => void;
   open: boolean;
+  pageKey?: string;
   title: string;
 };
 

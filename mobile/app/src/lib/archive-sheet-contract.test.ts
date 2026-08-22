@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test";
 
 const source = await Bun.file(new URL("../components/capability/KnowledgeWorkspace.tsx", import.meta.url)).text();
+const searchHistorySheet = await Bun.file(new URL("../components/SearchHistorySheet.tsx", import.meta.url)).text();
+const searchHistoryPill = await Bun.file(new URL("../../../../shared/packages/ui/components/search-history-pill/search-history-pill.mobile.tsx", import.meta.url)).text();
 
 test("opens routed cached folders without flashing Archive root", () => {
   expect(source).toContain("const cachedInitialTree = initialFolderKey ? queryClient.getQueryData<ContentFolder[]>");
@@ -9,8 +11,44 @@ test("opens routed cached folders without flashing Archive root", () => {
   expect(source).toContain("useState<ContentFolder[]>(cachedInitialStack)");
 });
 
+test("uses the root header spacing rhythm inside folders", () => {
+  expect(source.match(/<View style=\{styles\.rootActions\}>/g)).toHaveLength(2);
+});
+
+test("appends processing documents and generated versions as full-pill skeletons", () => {
+  expect(source).toContain('import { Skeleton } from "@vorinthex/shared/ui/skeleton";');
+  const processingButton = source.slice(source.indexOf("function ProcessingDocumentButton"), source.indexOf("export function KnowledgeWorkspace"));
+  expect(processingButton).toContain('<Skeleton accessibilityLabel={`Processing ${name}`} accessibilityRole="progressbar" style={styles.documentSkeleton} />');
+  expect(processingButton).not.toContain("Spinner");
+  expect(source).toContain('setVersions((history) => [...history.filter(({ key }) => key !== version.key), version])');
+  const versionList = source.slice(source.indexOf('{versions.map((version)'), source.indexOf('</View>\n        ) : null}', source.indexOf('{versions.map((version)')));
+  expect(versionList.indexOf('{versions.map((version)')).toBeLessThan(versionList.indexOf('<Skeleton accessibilityLabel={pendingDocumentVersionLabel}'));
+  const rootDocuments = source.indexOf('<View style={styles.rootDocuments}>');
+  const rootPills = source.indexOf('rootTabDocuments.map', rootDocuments);
+  expect(rootPills).toBeLessThan(source.indexOf('visibleUploadBatch.map', rootPills));
+  const folderDocuments = source.lastIndexOf('<View style={[styles.folderDocuments, styles.folderTabContent]}>');
+  const folderPills = source.indexOf('folderTabDocuments.map', folderDocuments);
+  expect(folderPills).toBeLessThan(source.indexOf('visibleUploadBatch.map', folderPills));
+});
+
+test("keeps transformation sheets dismissible and background errors out of the editor", () => {
+  expect(source).toContain('documentActionLoading === "enhance" || documentActionLoading === "translate"');
+  expect(source).toContain('await openDocumentVersion(version, generated.text, true)');
+  expect(source).toContain('if (propagateError) throw cause');
+  expect(source).toContain('if (activeSheetRef.current === "versions") setSheetError(message);\n      else notify(message);');
+  const versionFooter = source.slice(source.indexOf('if (activeSheet === "versions")'), source.indexOf('if (activeSheet === "documentVersions")'));
+  expect(versionFooter).toContain('{close(false)}');
+  expect(versionFooter).not.toContain('close(Boolean(documentActionLoading))');
+});
+
+test("keeps folder actions titleless and cover removal circular", () => {
+  expect(source).toContain('activeSheet === "filter" || activeSheet === "folderActions" || activeSheet === "bulkActions"');
+  expect(source).toContain('accessibilityLabel="Remove folder cover" contentMode="raw" iconOnly');
+  expect(source).toContain('folderDetailsCoverRemove: { width: 42, height: 42, minHeight: 42');
+});
+
 test("centers confirmed empty states across Archive sheets", () => {
-  expect(source).toContain('styles.searchHistoryList, !historyLoading && history.length === 0 && styles.sheetEmptyContent');
+  expect(searchHistorySheet).toContain('styles.list, !loading && history.length === 0 && styles.emptyContent');
   expect(source).toContain('styles.summaryTopicPanel, !loadingSummaryTopics && !sheetError && summaryTopics.length === 0 && styles.sheetEmptyContent');
   expect(source).toContain('styles.versionPanel, !loadingVersions && !pendingDocumentVersionLabel && versions.length === 0 && styles.sheetEmptyContent');
   expect(source).toContain('styles.audioVersionList, !loadingAudioVersions && audioVersions.length === 0 && styles.sheetEmptyContent');
@@ -19,6 +57,22 @@ test("centers confirmed empty states across Archive sheets", () => {
   expect(source).toContain('styles.destinationFolderGrid, !destinationLoading && !sheetError && destinationFolders.length === 0 && styles.sheetEmptyContent');
   expect(source).toContain('styles.folderGrid, !showArchiveRoot && visibleFolders.length === 0 && styles.sheetEmptyContent');
   expect(source).toContain('styles.folderGrid, visibleDocuments.length === 0 && styles.sheetEmptyContent');
+});
+
+test("uses the single shared search history sheet", async () => {
+  const gallery = await Bun.file(new URL("../components/capability/GalleryWorkspace.tsx", import.meta.url)).text();
+  const compass = await Bun.file(new URL("../components/capability/TravelWorkspace.tsx", import.meta.url)).text();
+  for (const workspace of [source, gallery, compass]) expect(workspace).toContain('import { SearchHistorySheet } from "@/components/SearchHistorySheet";');
+  expect(searchHistorySheet).toContain('<SearchHistoryPill');
+  expect(source).not.toContain('<SearchHistoryPill');
+  expect(gallery).not.toContain('<SearchHistoryPill');
+  expect(compass).not.toContain('<SearchHistoryPill');
+});
+
+test("keeps search history removal local to one inset control", () => {
+  expect(searchHistorySheet).toContain("disabled={removingQuery === item.normalizedQuery}");
+  expect(searchHistorySheet).not.toContain("disabled={Boolean(removingQuery)}");
+  expect(searchHistoryPill).toContain("marginLeft: 6");
 });
 
 test("provides messages for previously blank Archive sheet states", () => {

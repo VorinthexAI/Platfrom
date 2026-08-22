@@ -89,6 +89,18 @@ test("creates trips in three full-screen steps with complete optimistic fields",
   expect(workspace).not.toContain("previousTrips");
 });
 
+test("adds only new saved places to a selected trip from a separate titleless menu", () => {
+  expect(workspace).toContain('<BottomSheet hideHeading onOpenChange={setTripAddMenuOpen} open={tripAddMenuOpen} title="">');
+  expect(workspace).toContain(">Add places</BottomSheetItem>");
+  expect(workspace).toContain('open={tripAddPlacesOpen} title="Choose places"');
+  expect(workspace).toContain('places.filter((place) => !selectedTrip.places.some(({ key }) => key === place.key))');
+  expect(workspace).toContain('accessibilityLabel="Places available to add to this trip"');
+  expect(workspace).toContain('selectedTripAddPlaceKeys.includes(place.key)');
+  expect(workspace).toContain('places: [...current.places, ...additions.filter(({ key }) => !current.places.some((place) => place.key === key))]');
+  expect(workspace).toContain('updateTrip({ tripKey, placeKeys: optimistic.places.map(({ key }) => key) })');
+  expect(workspace).toContain(">All saved places are already in this trip.</Text>");
+});
+
 test("does not record generated Find Place results in recent history", () => {
   expect(workspace).toContain('detailSource === "createPlace" || !countryDetailEnabled');
   expect(workspace).toContain('detailSource === "createPlace" || !cityDetailEnabled');
@@ -113,7 +125,7 @@ test("orders places with shared round chevrons, wrapping moves, and bulk remove"
   expect(workspace).toContain('orderPill: { height: 48');
   expect(workspace).toContain('orderHero: { width: 32, height: 32');
   expect(workspace).toContain('orderControl: { width: 32, height: 32, minHeight: 32');
-  expect(workspace).toContain('bulkToolbar: { minHeight: 36, padding: 3');
+  expect(workspace).toContain('bulkToolbar: { width: "100%", minHeight: 36, marginBottom: spacing.xs, padding: 3');
   expect(workspace).toContain('bulkRemoveAction: { height: 30, minHeight: 30');
   expect(workspace).toContain('bulkRemoveText: { fontFamily: fonts.regular, fontSize: 11, letterSpacing: 0.4 }');
   expect(workspace).toContain('backgroundColor: palette.page');
@@ -139,6 +151,11 @@ test("opens shared-button trip cards as a local cache-derived detail with ordere
   expect(tripCard).not.toContain("<CheckIcon");
   expect(workspace).toContain('accessibilityLabel="Back to trips"');
   expect(workspace).toContain('accessibilityLabel="Trip menu"');
+  expect(workspace).toContain('accessibilityLabel="Add to trip"');
+  expect(workspace).toContain('style={styles.detailHeaderActions}');
+  expect(workspace).toContain('titleRow: { minHeight: 40, minWidth: 0, flexDirection: "row", alignItems: "center", gap: spacing.xs }');
+  expect(workspace).toContain('detailHeaderActions: { minHeight: 40, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 8 }');
+  expect(workspace).toContain('workspaceTitle: { flex: 1, minWidth: 0, color: palette.silver50, fontFamily: fonts.medium, fontSize: 15, lineHeight: 20 }');
   expect(workspace).toContain('<CoreComposer accessory={rootView === "globe" && !selectedPlace && !selectedTrip && selectedCountry && !countryDetailOpen && !cityDetailOpen');
   expect(workspace).not.toContain('!selectedTrip && !loadError ? <CoreComposer');
   expect(workspace).toContain('accessibilityLabel="Trip detail categories"');
@@ -148,9 +165,26 @@ test("opens shared-button trip cards as a local cache-derived detail with ordere
   expect(workspace).toContain(': null}\n        <Tabs accessibilityLabel="Trip detail categories"');
   expect(workspace).toContain("Math.floor(((tripGridWidth || fallbackGridWidth) - GRID_GAP * 3) / 4)");
   expect(workspace).toContain('accessibilityLabel="Trip images"');
-  expect(workspace).toContain("place.coverUrl ? <Button");
-  expect(workspace).toContain("url: place.coverUrl!");
+  expect(workspace).toContain("const tripImages = useMemo");
+  expect(workspace).toContain("coverUrl ? [{ key, title, url: coverUrl }] : []");
+  expect(workspace).toContain("setImageViewerKey(image.key)");
   expect(workspace).toContain('title={imageViewer?.title ?? "Image"}');
+});
+
+test("wraps the whole-sheet trip image viewer and preserves generated-image proportions", () => {
+  expect(workspace).toContain("(imageViewerIndex + offset + tripImages.length) % tripImages.length");
+  expect(workspace).toContain('onSwipeLeft={tripImages.length > 1 ? () => focusTripImage(1) : undefined}');
+  expect(workspace).toContain('onSwipeRight={tripImages.length > 1 ? () => focusTripImage(-1) : undefined}');
+  expect(workspace).toContain('pageKey={imageViewer?.key}');
+  expect(workspace).not.toContain("imageViewerScrollRef");
+  expect(workspace).toContain('{ name: "decrement", label: "Previous image" }');
+  expect(workspace).toContain('{ name: "increment", label: "Next image" }');
+  expect(workspace).toContain('accessibilityValue={{ text: `${imageViewerIndex + 1} of ${tripImages.length}` }}');
+  expect(workspace).toContain('viewerFrame: { width: "100%", aspectRatio: 3 / 2');
+  expect(workspace).toContain('borderRadius: radii.lg');
+  expect(workspace).toContain('<Image contentFit="contain" source={imageViewer.url}');
+  expect(workspace).not.toContain('style={styles.viewerControls}');
+  expect(workspace).not.toContain('styles.viewerPosition');
 });
 
 test("toggles trip table and globe views with Compass markers and an arc place selector", () => {
@@ -186,6 +220,13 @@ test("toggles trip table and globe views with Compass markers and an arc place s
   expect(workspace).not.toContain('tripPlaceArcShade');
   expect(globe).not.toContain("<octahedronGeometry");
   expect(globe).toContain("onMarkerPress?.(marker.key)");
+});
+
+test("keeps the root search lane fixed when switching Compass layouts", () => {
+  expect(workspace).toContain('rootActions: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: 8 }');
+  expect(workspace).not.toContain('rootActions: { minHeight: 52, marginTop: -spacing.xs');
+  expect(workspace).toContain('workspaceSearch: { minHeight: 44');
+  expect(workspace).toContain('rootSearch: { minHeight: 44');
 });
 
 test("uses compact sheet-specific controls without changing collapsed Core sizing", () => {
@@ -278,6 +319,8 @@ test("edits trip metadata and cover with the shared switch and Gallery cover pip
 test("optimistically manages Places status, favorites, bulk actions, and filters", () => {
   expect(workspace).toContain('>Places</Button>');
   expect(workspace).toContain('tableTab === "places" ? "Search Places" : "Search Trips"');
+  expect(workspace).toContain('maxLength={500} onChangeText={setPlaceTableQuery}');
+  expect(workspace).toContain('setPlaceTableQuery(item.query.slice(0, 500))');
   expect(workspace).toContain('style={styles.rootSearch}');
   expect(workspace).toContain('style={styles.searchHistoryButton}');
   expect(workspace).not.toContain("BookmarkIcon");
@@ -336,10 +379,10 @@ test("shows Compass success feedback before mutation APIs settle", () => {
   expect(singlePlace.indexOf("showToast({ title: successTitle")).toBeLessThan(singlePlace.indexOf("updateSavedPlace(selectedPlace, patch)"));
 
   const history = workspace.slice(workspace.indexOf("async function removePlaceHistoryQuery"), workspace.indexOf("function toggleTripPlace"));
-  expect(history.indexOf('showToast({ title: "Search removed"')).toBeLessThan(history.indexOf("await deleteContentSearchHistory"));
+  expect(history).not.toContain('showToast({ title: "Search removed"');
 
   const guide = workspace.slice(workspace.indexOf("async function createTripGuide"), workspace.indexOf("function openPlaceReferences"));
-  expect(guide.indexOf('showToast({ title: "Travel guide created"')).toBeGreaterThan(guide.indexOf("await generateTripGuide"));
+  expect(guide.indexOf('showToast({ title: "Travel guide request complete"')).toBeGreaterThan(guide.indexOf("await generateTripGuide"));
 
   const deletion = workspace.slice(workspace.indexOf("function confirmDeleteTrip"), workspace.indexOf("function beginAssetSelection"));
   expect(deletion.indexOf('showToast({ title: "Trip deleted"')).toBeLessThan(deletion.indexOf("deleteTrip(tripKey)"));
@@ -393,6 +436,8 @@ test("links all user folders and collections and opens exact assets in their app
   expect(appSwitcher).toContain('onPress={() => setOpen(true)}');
   expect(workspace).toContain('assetTabs: { flexDirection: "row", gap: 4, padding: 3');
   expect(workspace).toContain("assetTab: { flex: 1, height: 28, minHeight: 28");
+  expect(workspace).toContain('textStyle={styles.assetTabText}');
+  expect(workspace).toContain("assetTabText: { fontSize: 10, letterSpacing: 0.8, lineHeight: 12 }");
   expect(workspace).toContain("Math.floor(((assetGridWidth || fallbackGridWidth) - GRID_GAP * 2) / 3)");
 });
 
@@ -481,12 +526,13 @@ test("matches the Gallery root filter sheet spacing", () => {
   expect(workspace).toContain('filterSwitchLabel: { color: palette.muted, fontFamily: fonts.regular, fontSize: 12 }');
 });
 
-test("matches duplicate saves by normalized name and country code", () => {
+test("hides duplicate and in-flight saves immediately", () => {
   expect(workspace).toContain("countryCode.toLocaleUpperCase() === selectedCountry.countryCode.toLocaleUpperCase()");
-  expect(workspace).toContain("normalizePlaceName(name) === normalizePlaceName(selectedCountry.name)");
   expect(workspace).toContain("normalizePlaceName(name) === normalizePlaceName(selectedCity.name)");
-  expect(workspace).toContain("!savedCountryDetail && countryDetail ? <Button");
-  expect(workspace).toContain("!savedCityDetail && cityDetail ? <Button");
+  expect(workspace).toContain('kind === "country" ? `country:${countryCode.toLocaleUpperCase()}`');
+  expect(workspace).toContain("pendingPlaceSaveRef.current.add(saveIdentity)");
+  expect(workspace).toContain("!countryAlreadySaved && countryDetail ? <Button");
+  expect(workspace).toContain("!cityAlreadySaved && cityDetail ? <Button");
   expect(workspace).toContain("setCountryDetailOpen(false)");
   expect(workspace).toContain("setCityDetailOpen(false)");
   expect(workspace).not.toContain("setCreatePlaceOpen(false);\n    showToast");

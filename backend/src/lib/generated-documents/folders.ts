@@ -30,7 +30,7 @@ export async function ensureGeneratedDocumentFolders(database: Pick<TravelDataba
     const key = generatedDocumentFolderKey(scopeKey, item.purpose);
     await database.query(`
       UPSERT { scopeKey: @scopeKey, purpose: @purpose }
-        INSERT { _key: @key, scopeKey: @scopeKey, parentFolderKey: @parentFolderKey, name: @name, purpose: @purpose, mutationPolicy: "system-container", embedding: @embedding, isFavorite: false, createdAt: @at, updatedAt: @at }
+        INSERT MERGE({ _key: @key, scopeKey: @scopeKey, name: @name, purpose: @purpose, mutationPolicy: "system-container", embedding: @embedding, isFavorite: false, createdAt: @at, updatedAt: @at }, @parentFolderKey == null ? {} : { parentFolderKey: @parentFolderKey })
         UPDATE { parentFolderKey: @parentFolderKey, name: @name, mutationPolicy: "system-container", updatedAt: OLD.name == @name && OLD.parentFolderKey == @parentFolderKey && OLD.mutationPolicy == "system-container" ? OLD.updatedAt : @at } IN folders OPTIONS { keepNull: false }
     `, { key, scopeKey, purpose: item.purpose, parentFolderKey: item === root ? null : rootKey, name: item.name, embedding, at });
   }

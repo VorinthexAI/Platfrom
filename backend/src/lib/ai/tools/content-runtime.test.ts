@@ -1027,6 +1027,22 @@ describe('Content runtime', () => {
     expect(blockedFolder.results[0]).toMatchObject({ success: false, error: { code: 'CONTENT_CONFLICT' } });
   });
 
+  test('allows a moderator to delete their own generated document binding', async () => {
+    const f = fixture('moderator');
+    const documentKey = f.addDocument();
+    f.repository.generatedDocumentBindings = async () => [{ key: documentKey, scopeKey: f.scopeKey, documentKey, subjectType: 'trip', subjectKey: newId(), kind: 'guide', provenance: 'generated', createdByKey: f.context.principal.user.key, idempotencyKey: 'guide-request', requestHash: 'a'.repeat(64), createdAt: now, updatedAt: now }];
+    const storage: any = { async upload() { return { storageKey: '' }; }, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; }, async delete() {} };
+    const deleted = await runContentTool('document.delete', { documentKeys: [documentKey] }, f.context, { repository: f.repository, storage });
+    expect(deleted.results[0]).toMatchObject({ success: true });
+    expect(f.documents.has(documentKey)).toBe(false);
+
+    const otherDocumentKey = f.addDocument();
+    f.repository.generatedDocumentBindings = async () => [{ key: otherDocumentKey, scopeKey: f.scopeKey, documentKey: otherDocumentKey, subjectType: 'trip', subjectKey: newId(), kind: 'guide', provenance: 'generated', createdByKey: newId(), idempotencyKey: 'other-guide-request', requestHash: 'b'.repeat(64), createdAt: now, updatedAt: now }];
+    const blocked = await runContentTool('document.delete', { documentKeys: [otherDocumentKey] }, f.context, { repository: f.repository, storage });
+    expect(blocked.results[0]).toMatchObject({ success: false, error: { code: 'CONTENT_FORBIDDEN' } });
+    expect(f.documents.has(otherDocumentKey)).toBe(true);
+  });
+
   test('deletes storage before transaction-bound document metadata and retains pointers on failure', async () => {
     const f = fixture('owner');
     const documentKey = f.addDocument();
@@ -1296,6 +1312,19 @@ describe('Content runtime', () => {
     expect(call.input.systemPrompt).toContain('normal line width');
     expect(call.input.options).toMatchObject({ temperature: 0.1, maxTokens: 256 });
     expect(f.documents.get(documentKey).content).toBe('This is the text.');
+  });
+
+  test('routes preview transformations through the provider-neutral ask fallback chain', async () => {
+    const f = fixture('viewer');
+    const documentKey = f.addDocument('Translate this text.');
+    let request: any;
+    const output = await runContentTool('document.translate', { documentKeys: [documentKey], targetLanguage: 'French', mode: 'preview' }, f.context, {
+      repository: f.repository,
+      executeAction: (async (candidate: any, input: any) => { request = candidate; expect(input).toMatchObject({ messages: [{ role: 'user' }] }); return { output: { text: 'Traduisez ce texte.' } }; }) as any,
+    });
+    expect(request).toMatchObject({ mode: 'auto', organizationKey: f.context.organizationKey, actionSlug: 'ask' });
+    expect(request).not.toHaveProperty('modelSlug');
+    expect(output.results[0]).toMatchObject({ success: true, data: { documentKey, text: 'Traduisez ce texte.', language: 'French' } });
   });
 
   test('executes one authorized valid behavior path for every registered tool', async () => {

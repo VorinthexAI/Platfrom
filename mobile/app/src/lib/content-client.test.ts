@@ -33,14 +33,16 @@ testRuntime.__archiveApiPost = async (url: string, body: Record<string, any>, co
   if (tool === "folder.create") {
     return { data: { success: true, data: { results: [{ success: true, data: { folder: { key: "folder", name: "Work" } } }] } } };
   }
-  if (tool === "document.update" || tool === "document.delete") {
+  if (tool === "document.update") {
     return { data: { success: true, data: { results: [{ success: true, data: { document: { key: "document", name: "Note", isFavorite: false, updatedAt: "2026-08-10T00:01:00.000Z" } } }] } } };
   }
+  if (tool === "document.delete" || tool === "folder.delete") return { data: { success: true, data: { results: [{ success: true, data: {} }] } } };
   throw new Error(`Unexpected tool: ${tool}`);
 };
 
 const {
   deleteContentDocument,
+  deleteContentFolder,
   hardDeleteContentSelection,
   askPersonalAssistant,
   clearContentDocumentAudioPlayback,
@@ -204,10 +206,13 @@ test("reads authorized scanned source images without requesting storage keys", a
   expect(calls[0]?.body.input).toEqual({ documentKeys: ["document"], include: ["sourceImages"] });
 });
 
-test("archives notes and uploaded files through the same document lifecycle", async () => {
-  await deleteContentDocument("document");
+test("accepts empty canonical success data when hard deleting documents and folders", async () => {
+  await expect(deleteContentDocument("document")).resolves.toBeUndefined();
   expect(calls[0]?.url).toBe("/api/v1/content/tools/document.delete");
   expect(calls[0]?.body.input).toMatchObject({ documentKeys: ["document"], atomic: false });
+  await expect(deleteContentFolder("folder")).resolves.toBeUndefined();
+  expect(calls[1]?.url).toBe("/api/v1/content/tools/folder.delete");
+  expect(calls[1]?.body.input).toMatchObject({ folderKeys: ["folder"], recursive: true, atomic: false });
 });
 
 test("normalizes platform PDF MIME aliases without changing the picker filename", async () => {
@@ -415,7 +420,7 @@ test("searches a folder while listing global user history", async () => {
   expect(calls[0]?.url).toContain("/content.search");
   expect(calls[1]?.url).toContain("/content.search-history.list");
   expect(calls[0]?.body.input).toEqual({ scopeKey: "scope-authenticated", query: "roadmap", minimumScore: 0.55, folderKey: "folder", includeDescendants: true });
-  expect(calls[1]?.body.input).toEqual({ scopeKey: "scope-authenticated", allLocations: true, limit: 100 });
+  expect(calls[1]?.body.input).toEqual({ scopeKey: "scope-authenticated", allLocations: true, limit: 50 });
 });
 
 test("lists and deletes search history across all Archive locations", async () => {
@@ -427,7 +432,7 @@ test("lists and deletes search history across all Archive locations", async () =
   await deleteContentSearchHistory("roadmap");
   expect(calls[0]?.url).toContain("/content.search-history.list");
   expect(calls[1]?.url).toContain("/content.search-history.delete");
-  expect(calls[0]?.body.input).toEqual({ scopeKey: "scope-authenticated", allLocations: true, limit: 100 });
+  expect(calls[0]?.body.input).toEqual({ scopeKey: "scope-authenticated", allLocations: true, limit: 50 });
   expect(calls[1]?.body.input).toMatchObject({ scopeKey: "scope-authenticated", normalizedQuery: "roadmap", allLocations: true });
 });
 

@@ -15,12 +15,12 @@ import { Button } from "@vorinthex/shared/ui/button";
 import { CoreComposer } from "@vorinthex/shared/ui/core-composer";
 import { FileViewer } from "@vorinthex/shared/ui/file-viewer";
 import { LoadingText } from "@vorinthex/shared/ui/loading-text";
-import { SearchHistoryPill } from "@vorinthex/shared/ui/search-history-pill";
 import { highlightedSegments, searchDocumentPassagesLiteral, type DocumentPassage, type HighlightRange } from "@vorinthex/shared/ui/document-search";
 import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 import { useToast } from "@vorinthex/shared/ui/toast";
 import { Spinner } from "@vorinthex/shared/ui/spinner";
+import { Skeleton } from "@vorinthex/shared/ui/skeleton";
 import { Slider } from "@vorinthex/shared/ui/slider";
 import { Switch } from "@vorinthex/shared/ui/switch";
 import {
@@ -49,6 +49,7 @@ import { MAX_DOCUMENT_SCAN_BYTES, scanSessionSize } from "@/lib/document-scan-se
 import { normalizeCapturedJpeg } from "@/lib/captured-image";
 import { normalizeStructurallyCoveredResources, partitionFavoriteContentSelection } from "@/lib/content-selection-ancestry";
 import { ChromeIcon } from "@/components/ChromeIcon";
+import { SearchHistorySheet } from "@/components/SearchHistorySheet";
 import { assistantIconSource } from "@/data/capability-icons";
 import {
   hardDeleteContentSelection,
@@ -284,11 +285,7 @@ function ScannedBadge({ document }: { document: ContentDocument }) {
 }
 
 function ProcessingDocumentButton({ name }: { name: string }) {
-  return <Button accessibilityLabel={`Processing ${name}`} accessibilityState={{ busy: true }} contentMode="raw" disabled size="sm" style={styles.documentButton} variant="secondary">
-    <FileIcon size="sm" />
-    <Text numberOfLines={1} style={styles.documentButtonLabel}>{name}</Text>
-    <Spinner size="small" variant="muted" />
-  </Button>;
+  return <Skeleton accessibilityLabel={`Processing ${name}`} accessibilityRole="progressbar" style={styles.documentSkeleton} />;
 }
 
 export function KnowledgeWorkspace({ initialFolderKey, returnTripKey, returnTripName }: { initialFolderKey?: string; returnTripKey?: string; returnTripName?: string } = {}) {
@@ -1365,13 +1362,13 @@ export function KnowledgeWorkspace({ initialFolderKey, returnTripKey, returnTrip
       if (session !== editorSession.current || documentKeyRef.current !== documentKey || updatedAtRef.current !== expectedUpdatedAt) throw new Error("The document changed while the new version was generating.");
       const version = await createContentDocumentVersion(documentKey, action === "enhance" ? "Enhanced version" : `${targetLanguage} translation`, generated.text, action === "enhance" ? "enhancement" : "translation");
       setPendingDocumentVersionLabel(undefined);
-      setVersions((history) => [version, ...history.filter(({ key }) => key !== version.key)]);
-      await openDocumentVersion(version, generated.text);
+      setVersions((history) => [...history.filter(({ key }) => key !== version.key), version]);
+      await openDocumentVersion(version, generated.text, true);
       notify(action === "enhance" ? "Enhanced version ready" : "Translated version ready");
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : action === "enhance" ? "The document could not be enhanced." : "The document could not be translated.";
       if (activeSheetRef.current === "versions") setSheetError(message);
-      else setError(message);
+      else notify(message);
     } finally {
       setPendingDocumentVersionLabel(undefined);
       setDocumentActionLoading(undefined);
@@ -1588,7 +1585,7 @@ export function KnowledgeWorkspace({ initialFolderKey, returnTripKey, returnTrip
     }
   };
 
-  const openDocumentVersion = async (version: ContentDocumentVersion, generatedContent?: string) => {
+  const openDocumentVersion = async (version: ContentDocumentVersion, generatedContent?: string, propagateError = false) => {
     if (dirty.current || saveInFlight.current || saveState !== "saved") return false;
     setOpeningDocumentKey(version.documentKey);
     setError(undefined);
@@ -1613,6 +1610,7 @@ export function KnowledgeWorkspace({ initialFolderKey, returnTripKey, returnTrip
       void invalidateContentDocumentTopics(queryClient, contentContext, opened.key);
       return true;
     } catch (cause) {
+      if (propagateError) throw cause;
       setError(cause instanceof Error ? cause.message : "The version could not be opened.");
       return false;
     } finally {
@@ -3464,7 +3462,7 @@ export function KnowledgeWorkspace({ initialFolderKey, returnTripKey, returnTrip
     </>;
     if (activeSheet === "versions") return <>
       {!documentActionLoading ? <Button disabled={loadingVersions} onPress={() => { if (documentTransformation === "enhance") void generateDocumentTransformation(); else pushSheet("transform"); }} size="md" variant="primary">{documentTransformation === "enhance" ? "Enhance" : "Translate"}</Button> : null}
-      {close(Boolean(documentActionLoading))}
+      {close(false)}
     </>;
     if (activeSheet === "documentVersions") return close(loadingVersions);
     if (activeSheet === "summarize") return <>
@@ -3485,7 +3483,6 @@ export function KnowledgeWorkspace({ initialFolderKey, returnTripKey, returnTrip
       {documentNarrationIsland}
       {close(false)}
     </>;
-    if (activeSheet === "searchHistory") return close(historyLoading);
     if (activeSheet === "folderDetails") return <>
       <Button disabled={!folderDetailsName.trim()} onPress={() => void submitFolderDetails()} size="md" variant="primary">Save</Button>
       {close(false)}
@@ -3643,15 +3640,15 @@ export function KnowledgeWorkspace({ initialFolderKey, returnTripKey, returnTrip
                 </View>
               ) : (
                 <View style={styles.rootDocuments}>
-                  {folderContentTab === "files" && visibleUploadBatch.length ? <LoadingText text={`Processing ${visibleUploadBatch.length} ${visibleUploadBatch.length === 1 ? "file" : "files"}, this might take a while...`} /> : folderContentTab === "documents" && visibleProcessingScan ? <LoadingText text="Processing scanned document, this might take a while..." /> : null}
-                  {folderContentTab === "files" ? visibleUploadBatch.map((item) => <ProcessingDocumentButton key={item.id} name={item.name} />) : visibleProcessingScan ? <ProcessingDocumentButton key={visibleProcessingScan.id} name={visibleProcessingScan.name} /> : null}
                    {rootTabDocuments.length ? rootTabDocuments.map((document) => (
                     <Button accessibilityState={{ selected: selectedDocuments.some(({ key }) => key === document.key) }} contentMode="raw" key={document.key} onLongPress={() => handleDocumentLongPress(document)} onPress={() => handleDocumentPress(document)} size="sm" style={[styles.documentButton, selectedDocuments.some(({ key }) => key === document.key) && styles.selectedDocumentItem]} variant={selectedDocuments.some(({ key }) => key === document.key) ? "ghost" : "secondary"}>
                       <FileIcon size="sm" />
                       <Text numberOfLines={1} style={styles.documentButtonLabel}>{documentDisplayName(document)}</Text>
                       <ScannedBadge document={document} />
-                    </Button>
+                   </Button>
                   )) : (folderContentTab === "files" ? visibleUploadBatch.length === 0 : !visibleProcessingScan) && !error ? <View style={styles.folderEmptyState}><Text style={styles.empty}>{showOnlyFavorites ? `No favorite ${folderContentTab}.` : folderContentTab === "files" ? "No files here yet." : "No documents here yet."}</Text>{!showOnlyFavorites ? <Button accessibilityLabel={folderContentTab === "files" ? "Upload files" : "Create document"} contentMode="raw" onPress={() => { if (folderContentTab === "files") void pickAndUpload(currentFolder?.key); else startNewNote(); }} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button> : null}</View> : null}
+                  {folderContentTab === "files" && visibleUploadBatch.length ? <LoadingText text={`Processing ${visibleUploadBatch.length} ${visibleUploadBatch.length === 1 ? "file" : "files"}, this might take a while...`} /> : folderContentTab === "documents" && visibleProcessingScan ? <LoadingText text="Processing scanned document, this might take a while..." /> : null}
+                  {folderContentTab === "files" ? visibleUploadBatch.map((item) => <ProcessingDocumentButton key={item.id} name={item.name} />) : visibleProcessingScan ? <ProcessingDocumentButton key={visibleProcessingScan.id} name={visibleProcessingScan.name} /> : null}
                 </View>
               )}
             </View>
@@ -3667,7 +3664,7 @@ export function KnowledgeWorkspace({ initialFolderKey, returnTripKey, returnTrip
               </View>
             </View>
             {error ? <Text accessibilityRole="alert" style={styles.notice}>{error}</Text> : null}
-            <View style={styles.folderSearchRow}>
+            <View style={styles.rootActions}>
               <View style={[styles.rootSearch, styles.folderScopedSearch]}>
                 <SearchIcon size="sm" variant="muted" />
                 <TextInput accessibilityLabel={`Search ${currentFolder?.name ?? "folder"}`} onChangeText={setQuery} placeholder="Search..." style={styles.rootSearchInput} value={query} />
@@ -3709,8 +3706,6 @@ export function KnowledgeWorkspace({ initialFolderKey, returnTripKey, returnTrip
               </View>
             ) : (
               <View style={[styles.folderDocuments, styles.folderTabContent]}>
-                {folderContentTab === "files" && visibleUploadBatch.length ? <LoadingText text={`Processing ${visibleUploadBatch.length} ${visibleUploadBatch.length === 1 ? "file" : "files"}, this might take a while...`} /> : folderContentTab === "documents" && visibleProcessingScan ? <LoadingText text="Processing scanned document, this might take a while..." /> : null}
-                {folderContentTab === "files" ? visibleUploadBatch.map((item) => <ProcessingDocumentButton key={item.id} name={item.name} />) : visibleProcessingScan ? <ProcessingDocumentButton key={visibleProcessingScan.id} name={visibleProcessingScan.name} /> : null}
                 {folderTabDocuments.length ? folderTabDocuments.map((document) => (
                   <Button accessibilityState={{ selected: selectedDocuments.some(({ key }) => key === document.key) }} contentMode="raw" key={document.key} onLongPress={() => handleDocumentLongPress(document)} onPress={() => handleDocumentPress(document)} size="sm" style={[styles.documentButton, selectedDocuments.some(({ key }) => key === document.key) && styles.selectedDocumentItem]} variant={selectedDocuments.some(({ key }) => key === document.key) ? "ghost" : "secondary"}>
                     <FileIcon size="sm" />
@@ -3718,6 +3713,8 @@ export function KnowledgeWorkspace({ initialFolderKey, returnTripKey, returnTrip
                     <ScannedBadge document={document} />
                   </Button>
                 )) : (folderContentTab === "files" ? visibleUploadBatch.length === 0 : !visibleProcessingScan) ? <View style={styles.folderEmptyState}><Text style={styles.empty}>{showOnlyFavorites ? `No favorite ${folderContentTab}.` : folderContentTab === "files" ? "No files here yet." : "No documents here yet."}</Text>{!showOnlyFavorites ? <Button accessibilityLabel={folderContentTab === "files" ? "Upload files" : "Create document"} contentMode="raw" onPress={() => { if (folderContentTab === "files") void pickAndUpload(currentFolder?.key); else startNewNote(); }} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button> : null}</View> : null}
+                {folderContentTab === "files" && visibleUploadBatch.length ? <LoadingText text={`Processing ${visibleUploadBatch.length} ${visibleUploadBatch.length === 1 ? "file" : "files"}, this might take a while...`} /> : folderContentTab === "documents" && visibleProcessingScan ? <LoadingText text="Processing scanned document, this might take a while..." /> : null}
+                {folderContentTab === "files" ? visibleUploadBatch.map((item) => <ProcessingDocumentButton key={item.id} name={item.name} />) : visibleProcessingScan ? <ProcessingDocumentButton key={visibleProcessingScan.id} name={visibleProcessingScan.name} /> : null}
               </View>
             )}
           </View>
@@ -3853,14 +3850,16 @@ export function KnowledgeWorkspace({ initialFolderKey, returnTripKey, returnTrip
         value={aiInstruction}
       />
 
+      <SearchHistorySheet error={sheetLoadError ?? sheetError} history={history} loading={historyLoading} onClose={closeSheet} onRemove={(item) => void removeHistoryQuery(item)} onSelect={useHistoryQuery} open={sheetOpen && activeSheet === "searchHistory"} removingQuery={removingHistoryQuery} />
+
       <BottomSheet
         description={activeSheet === "create" ? "Choose what to add to the current folder." : activeSheet === "transform" ? documentTransformation === "enhance" ? "Review or adjust how this document should be enhanced." : "Review or adjust how this document should be translated." : activeSheet === "documentVersions" ? "Choose a document version to open." : activeSheet === "versions" ? `Choose an ${documentTransformation === "enhance" ? "enhancement" : "translation"} to open.` : activeSheet === "audioVersions" ? "Listen to your saved recordings." : activeSheet === "summarize" ? `Choose one of the ${selectedDocument?.extension ? "file's" : "document's"} primary topics to summarize.` : activeSheet === "summaryVersions" ? "View saved summaries or create a new one." : undefined}
-        dismissible={!destinationLoading && !documentActionLoading && !bulkLoading}
+        dismissible={!destinationLoading && !bulkLoading && (!documentActionLoading || documentActionLoading === "enhance" || documentActionLoading === "translate")}
         footer={mutationFooter()}
-        hideHeading={activeSheet === "create" || activeSheet === "documentActions" || activeSheet === "enhance" || activeSheet === "historyChooser" || activeSheet === "filter" || activeSheet === "bulkActions"}
+        hideHeading={activeSheet === "create" || activeSheet === "documentActions" || activeSheet === "enhance" || activeSheet === "historyChooser" || activeSheet === "filter" || activeSheet === "folderActions" || activeSheet === "bulkActions"}
         height={activeSheet === "documents" || activeSheet === "folder" || activeSheet === "folders" || activeSheet === "searchHistory" || activeSheet === "similar" || activeSheet === "transform" || activeSheet === "documentVersions" || activeSheet === "versions" || activeSheet === "audioVersions" || activeSheet === "summarize" || activeSheet === "summaryVersions" || activeSheet === "summaryReader" || activeSheet === "scanSources" || activeSheet === "destinationBrowser" || activeSheet === "folderDetails" || activeSheet === "documentDetails" ? "full" : undefined}
         onOpenChange={(open) => { if (!open) closeSheet(); }}
-        open={sheetOpen}
+        open={sheetOpen && activeSheet !== "searchHistory"}
         title={compactDelete ? deleteConfirmationTitle : activeSheet === "enhance" ? "AI actions" : activeSheet === "transform" ? documentTransformation === "enhance" ? "Enhance document" : "Translate document" : activeSheet === "summarize" ? "Summarize document" : activeSheet === "summaryVersions" ? "Summary versions" : activeSheet === "summaryReader" ? capitalizeLabel(selectedSummary?.topic ?? summaryReaderTopic ?? `Summary ${selectedSummary?.version ?? ""}`) : activeSheet === "historyChooser" ? "Document history" : activeSheet === "searchHistory" ? "Search history" : activeSheet === "similar" ? "Archive" : activeSheet === "documentVersions" ? "Document versions" : activeSheet === "versions" ? documentTransformation === "enhance" ? "Enhancements" : "Translations" : activeSheet === "audioVersions" ? "Audio versions" : activeSheet === "scanSources" ? "Scanned pages" : activeSheet === "folder" ? "Create folder" : activeSheet === "documents" ? "Documents and files" : activeSheet === "folders" ? "Folders" : activeSheet === "destinationBrowser" ? destinationAction === "upload" ? destinationFolder?.name ?? "Archive" : destinationAction === "move" ? "Move to folder" : "Copy to folder" : activeSheet === "library" ? "Browse Archive" : activeSheet === "documentActions" ? selectedDocument?.name ?? "Document actions" : activeSheet === "documentDetails" ? `Edit ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "destination" ? destinationAction === "upload" ? "Upload files" : "Choose destination" : activeSheet === "folderActions" ? selectedFolder?.name ?? "Folder actions" : activeSheet === "folderDetails" ? "Edit folder" : "New in Archive"}
       >
         {sheetError ? <Text accessibilityRole="alert" style={styles.notice}>{sheetError}</Text> : null}
@@ -3889,13 +3888,6 @@ export function KnowledgeWorkspace({ initialFolderKey, returnTripKey, returnTrip
             <BottomSheetItem onPress={() => void openAudioVersionHistory()} style={styles.sheetAction}>Audio versions</BottomSheetItem>
             <BottomSheetItem onPress={() => void openSummaryVersionHistory()} style={styles.sheetAction}>Summary versions</BottomSheetItem>
           </View>
-        ) : null}
-        {activeSheet === "searchHistory" ? (
-          <ScrollView contentContainerStyle={[styles.searchHistoryList, !historyLoading && history.length === 0 && styles.sheetEmptyContent]} showsVerticalScrollIndicator={false}>
-            {historyLoading ? <View accessibilityLabel="Loading search history" accessibilityRole="progressbar" style={styles.searchHistorySkeletons}>{Array.from({ length: 3 }, (_, index) => <View key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />)}</View> : null}
-            {!historyLoading && history.length === 0 ? <Text style={styles.empty}>No searches saved yet.</Text> : null}
-            {!historyLoading ? history.map((item) => <SearchHistoryPill count={item.usageCount} disabled={Boolean(removingHistoryQuery)} key={item.normalizedQuery} onPress={() => useHistoryQuery(item)} onRemove={() => void removeHistoryQuery(item)} query={item.query} removing={removingHistoryQuery === item.normalizedQuery} />) : null}
-          </ScrollView>
         ) : null}
         {activeSheet === "filter" ? <View style={styles.filterPanel}>
           <View style={styles.favoriteSwitchRow}>
@@ -3975,7 +3967,7 @@ export function KnowledgeWorkspace({ initialFolderKey, returnTripKey, returnTrip
                   ? <Image contentFit="cover" source={folderDetailsCoverAsset === undefined ? selectedFolder.coverUrl : folderDetailsCoverAsset?.uri} style={styles.folderCover} />
                   : <FolderIcon size="lg" />}
               </Button>
-              {(folderDetailsCoverAsset === undefined ? selectedFolder.coverUrl : folderDetailsCoverAsset?.uri) ? <Button accessibilityLabel="Remove folder cover" contentMode="raw" onPress={clearFolderCover} size="md" style={styles.folderDetailsCoverRemove} variant="secondary"><CloseIcon size="sm" /></Button> : null}
+              {(folderDetailsCoverAsset === undefined ? selectedFolder.coverUrl : folderDetailsCoverAsset?.uri) ? <Button accessibilityLabel="Remove folder cover" contentMode="raw" iconOnly onPress={clearFolderCover} size="md" style={styles.folderDetailsCoverRemove} variant="secondary"><CloseIcon size="sm" /></Button> : null}
             </View>
             <View style={styles.favoriteSwitchRow}>
               <Switch accessibilityLabel="Favorite folder" checked={folderDetailsFavorite} onCheckedChange={setFolderDetailsFavorite} />
@@ -4063,7 +4055,6 @@ export function KnowledgeWorkspace({ initialFolderKey, returnTripKey, returnTrip
           <View style={[styles.versionPanel, !loadingVersions && !pendingDocumentVersionLabel && versions.length === 0 && styles.sheetEmptyContent]}>
             {loadingVersions && !pendingDocumentVersionLabel ? Array.from({ length: 3 }, (_, index) => <View accessibilityLabel="Loading version history" accessibilityRole="progressbar" key={index} style={[styles.versionSkeleton, styles.skeletonCard]} />) : null}
             {!loadingVersions && !pendingDocumentVersionLabel && versions.length === 0 ? <Text style={styles.empty}>{activeSheet === "documentVersions" ? "No document versions yet." : `No ${documentTransformation === "enhance" ? "enhancements" : "translations"} yet.`}</Text> : null}
-            {activeSheet === "versions" && pendingDocumentVersionLabel ? <Button accessibilityLabel={pendingDocumentVersionLabel} accessibilityState={{ busy: true }} contentMode="raw" disabled size="md" style={styles.versionMain} variant="secondary"><ClockIcon size="sm" variant="accent" /><Text numberOfLines={1} style={styles.documentButtonLabel}>{pendingDocumentVersionLabel}</Text><Spinner size="small" variant="muted" /></Button> : null}
             {versions.map((version) => {
               const document = activeDocument?.key === version.documentKey ? activeDocument : selectedDocument?.key === version.documentKey ? selectedDocument : undefined;
               const isCurrentVersion = document?.currentVersionKey === version.key;
@@ -4071,6 +4062,7 @@ export function KnowledgeWorkspace({ initialFolderKey, returnTripKey, returnTrip
                 <Button accessibilityState={{ selected: isCurrentVersion }} contentMode="raw" onPress={() => void openDocumentVersion(version)} size="md" style={[styles.versionMain, isCurrentVersion && styles.selectedDocumentItem]} variant="secondary"><ClockIcon size="sm" variant="accent" /><Text numberOfLines={1} style={styles.documentButtonLabel}>Version {version.version}</Text></Button>
               </View>;
             })}
+            {activeSheet === "versions" && pendingDocumentVersionLabel ? <Skeleton accessibilityLabel={pendingDocumentVersionLabel} accessibilityRole="progressbar" style={styles.versionSkeleton} /> : null}
           </View>
         ) : null}
         {activeSheet === "audioVersions" ? (
@@ -4267,8 +4259,6 @@ const styles = StyleSheet.create({
   versionRow: { flexDirection: "row", alignItems: "stretch", gap: 6 },
   versionMain: { flex: 1, justifyContent: "flex-start", paddingHorizontal: 14 },
   historyChoices: { gap: 6 },
-  searchHistoryList: { flexGrow: 1, gap: spacing.xs, paddingBottom: spacing.xl },
-  searchHistorySkeletons: { gap: spacing.xs },
   sheetEmptyContent: { flexGrow: 1, alignContent: "center", alignItems: "center", justifyContent: "center" },
   sheetList: { flex: 1 },
   audioVersionPanel: { flex: 1, minHeight: 0, gap: spacing.md },
@@ -4313,7 +4303,7 @@ const styles = StyleSheet.create({
   folderDetailsForm: { gap: spacing.lg, paddingBottom: spacing.xs },
   folderDetailsCoverControl: { width: 88, height: 88, position: "relative", alignSelf: "flex-start" },
   folderDetailsCoverButton: { width: 88, height: 88, paddingHorizontal: 0, paddingVertical: 0, overflow: "hidden" },
-  folderDetailsCoverRemove: { width: 28, height: 28, paddingHorizontal: 0, paddingVertical: 0, position: "absolute", right: -7, top: -7 },
+  folderDetailsCoverRemove: { width: 42, height: 42, minHeight: 42, paddingHorizontal: 0, paddingVertical: 0, position: "absolute", right: -12, top: -12 },
   documentDetailsForm: { gap: 12, paddingBottom: spacing.xs },
   favoriteSwitchRow: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: spacing.xs },
   favoriteSwitchLabel: { color: palette.muted, fontFamily: fonts.regular, fontSize: 12 },

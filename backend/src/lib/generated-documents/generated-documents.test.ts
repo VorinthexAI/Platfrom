@@ -18,6 +18,7 @@ describe('generated Archive documents', () => {
     expect(calls).toHaveLength(12);
     expect(calls.map(({ bindVars }) => bindVars?.name).slice(0, 6)).toEqual(['Compass', 'Guides', 'Briefs', 'Accommodations', 'Restaurants', 'Activities']);
     expect(calls.every(({ query }) => query.includes('UPSERT') && query.includes('mutationPolicy: "system-container"'))).toBe(true);
+    expect(calls.every(({ query }) => query.includes('@parentFolderKey == null ? {} : { parentFolderKey: @parentFolderKey }'))).toBe(true);
   });
 
   test('keeps the binding strict and product-neutral', () => {

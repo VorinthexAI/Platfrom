@@ -225,6 +225,11 @@ function singleBatchRecord<T>(outcome: ContentBatchOutcome, records: T[], fallba
   return record;
 }
 
+function assertSingleBatchSuccess(outcome: ContentBatchOutcome, fallback: string) {
+  if (outcome.failures[0]) throw new Error(outcome.failures[0].message);
+  if (outcome.requested !== 1 || outcome.succeeded !== 1) throw new Error(fallback);
+}
+
 export function getContentContext(): ContentContext {
   const state = useAuthStore.getState();
   return {
@@ -559,7 +564,7 @@ export async function copyContentDocument(documentKey: string, targetFolderKey?:
 
 export async function deleteContentDocument(documentKey: string) {
   const outcome = await hardDeleteContentSelection({ folderKeys: [], documentKeys: [documentKey] });
-  return singleBatchRecord(outcome, outcome.documents, "The document could not be deleted.");
+  assertSingleBatchSuccess(outcome, "The document could not be deleted.");
 }
 
 export async function downloadContentDocument(documentKey: string, format: "original" | "html" | "txt" = "original") {
@@ -643,7 +648,7 @@ export async function copyContentFolder(folderKey: string, targetParentFolderKey
 
 export async function deleteContentFolder(folderKey: string) {
   const outcome = await hardDeleteContentSelection({ folderKeys: [folderKey], documentKeys: [] });
-  return singleBatchRecord(outcome, outcome.folders, "The folder could not be deleted.");
+  assertSingleBatchSuccess(outcome, "The folder could not be deleted.");
 }
 
 export async function uploadContentDocument(file: { name: string; type: string; size: number; base64: string }, folderKey?: string, contentContext = getContentContext(), idempotencyKey = createContentMutationKey()) {
@@ -722,7 +727,7 @@ export async function listContentSearchHistory(requestContext = getContentContex
   const data = await callContentTool<{ history: ContentSearchHistoryItem[] }>("content.search-history.list", {
     scopeKey: contentContext.scopeKey,
     allLocations: true,
-    limit: 100,
+    limit: 50,
   }, undefined, requestContext);
   return data.history;
 }

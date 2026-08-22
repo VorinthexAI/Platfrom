@@ -248,7 +248,7 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
         await executor.query('FOR binding IN generatedDocumentBindings FILTER binding.scopeKey == @scopeKey && binding.subjectType == "place" && binding.subjectKey == @placeKey REMOVE binding IN generatedDocumentBindings', { scopeKey: context.scopeKey, placeKey });
         await executor.query('FOR relation IN placeImages FILTER relation.scopeKey == @scopeKey && relation.placeKey == @placeKey REMOVE relation IN placeImages', { scopeKey: context.scopeKey, placeKey });
         await executor.query('FOR relation IN tripPlaces FILTER relation.scopeKey == @scopeKey && relation.placeKey == @placeKey REMOVE relation IN tripPlaces', { scopeKey: context.scopeKey, placeKey });
-        if (tripKeys.length > 0) await executor.query('FOR trip IN trips FILTER trip._key IN @tripKeys && trip.scopeKey == @scopeKey && trip.userKey == @userKey UPDATE trip WITH { updatedAt: @updatedAt } IN trips', { ...context, tripKeys, updatedAt });
+        if (tripKeys.length > 0) await executor.query('FOR trip IN trips FILTER trip._key IN @tripKeys && trip.scopeKey == @scopeKey && trip.userKey == @userKey UPDATE trip WITH { updatedAt: @updatedAt } IN trips', { scopeKey: context.scopeKey, userKey: context.userKey, tripKeys, updatedAt });
         await executor.query('REMOVE @placeKey IN places', { placeKey });
         return 'deleted' as const;
       });
@@ -341,7 +341,8 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
       `, { ...context, tripKey });
       const row = (await cursor.all())[0];
       if (!row) throw new TravelRepositoryError('forbidden');
-      return z.object({ name: z.string().trim().min(1).max(255), description: z.string().trim().min(1).max(10_000).optional() }).parse(row);
+      const source = z.object({ name: z.string().trim().min(1).max(255), description: z.string().trim().min(1).max(10_000).nullable().optional() }).parse(row);
+      return { name: source.name, ...(source.description ? { description: source.description } : {}) };
     },
     async updateTrip(context, tripKey, patch, relations, updatedAt) {
       z.string().datetime().parse(updatedAt);
@@ -385,7 +386,7 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
               FILTER place != null && place.scopeKey == @scopeKey && place.userKey == @userKey && place.saved == true
               FILTER (place.status IN ["wishlist", "visited"] ? place.status : "wishlist") != "visited"
               UPDATE place WITH { status: "visited" } IN places
-          `, { ...context, tripKey });
+          `, { scopeKey: context.scopeKey, userKey: context.userKey, tripKey });
         }
         const cursor = await executor.query(`
           LET membership = FIRST(FOR candidate IN userOrganizations FILTER candidate.organizationId == @organizationKey && candidate.userId == @userKey && candidate.status == "active" LIMIT 1 RETURN candidate)

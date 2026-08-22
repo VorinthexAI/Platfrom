@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { db } from '@/lib/db/client';
+import { db, withTransaction } from '@/lib/db/client';
 import { toArangoDoc, withArangoKey } from '@/lib/db/base';
 
 export const USER_SEARCHES_COLLECTION = 'userSearches';
@@ -24,26 +24,29 @@ export interface UserSearchRepository {
 }
 
 type SearchDatabase = Pick<typeof db, 'query'>;
+type SearchTransaction = <T>(operation: (database: SearchDatabase) => Promise<T>) => Promise<T>;
 
-export function createUserSearchRepository(database: SearchDatabase = db): UserSearchRepository {
+export function createUserSearchRepository(database: SearchDatabase = db, runTransaction: SearchTransaction = database === db ? (operation) => withTransaction([USER_SEARCHES_COLLECTION], operation) : (operation) => operation(database)): UserSearchRepository {
   return {
     async record(input) {
       const value = userSearchSchema.parse(input);
-      const cursor = await database.query(`
-        UPSERT { userKey: @userKey, normalizedQuery: @normalizedQuery }
-          INSERT @value
-          UPDATE { query: @query, searchedAt: @searchedAt, usageCount: OLD.usageCount + 1 }
-          IN @@collection
-          RETURN NEW
-      `, { '@collection': USER_SEARCHES_COLLECTION, userKey: value.userKey, normalizedQuery: value.normalizedQuery, query: value.query, searchedAt: value.searchedAt, value: toArangoDoc(value) });
-      const recorded = userSearchSchema.parse(withArangoKey(await cursor.next() as Record<string, unknown>));
-      await database.query(`
-        LET retained = (FOR search IN @@collection FILTER search.userKey == @userKey SORT search.searchedAt DESC LIMIT 100 RETURN search._key)
-        FOR search IN @@collection
-          FILTER search.userKey == @userKey && search._key NOT IN retained
-          REMOVE search IN @@collection
-      `, { '@collection': USER_SEARCHES_COLLECTION, userKey: value.userKey });
-      return recorded;
+      return runTransaction(async (executor) => {
+        const cursor = await executor.query(`
+          UPSERT { userKey: @userKey, normalizedQuery: @normalizedQuery }
+            INSERT @value
+            UPDATE { query: @query, searchedAt: @searchedAt, usageCount: OLD.usageCount + 1 }
+            IN @@collection
+            RETURN NEW
+        `, { '@collection': USER_SEARCHES_COLLECTION, userKey: value.userKey, normalizedQuery: value.normalizedQuery, query: value.query, searchedAt: value.searchedAt, value: toArangoDoc(value) });
+        const recorded = userSearchSchema.parse(withArangoKey(await cursor.next() as Record<string, unknown>));
+        await executor.query(`
+          LET retained = (FOR search IN @@collection FILTER search.userKey == @userKey SORT search.searchedAt DESC, search._key DESC LIMIT 50 RETURN search._key)
+          FOR search IN @@collection
+            FILTER search.userKey == @userKey && search._key NOT IN retained
+            REMOVE search IN @@collection
+        `, { '@collection': USER_SEARCHES_COLLECTION, userKey: value.userKey });
+        return recorded;
+      });
     },
     async list(userKey, limit) {
       userKey = userKeySchema.parse(userKey);

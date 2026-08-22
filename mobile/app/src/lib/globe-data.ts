@@ -150,39 +150,39 @@ export function createCountryBoundaryGeometry(
 export function createCountryFillGeometry(feature: CountryFeature, radius = 1.018): THREE.BufferGeometry {
   const positions: number[] = [];
   const maximumEdgeAngle = THREE.MathUtils.degToRad(2);
-  const midpoint = new THREE.Vector3();
 
-  const appendSphericalTriangle = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, depth = 0) => {
-    const angles = [a.angleTo(b), b.angleTo(c), c.angleTo(a)] as const;
+  const appendGeographicTriangle = (a: readonly [number, number], b: readonly [number, number], c: readonly [number, number], depth = 0) => {
+    const points = [a, b, c].map(([longitude, latitude]) => {
+      const point = latLonToVector(latitude, longitude, radius);
+      return new THREE.Vector3(point.x, point.y, point.z);
+    });
+    const angles = [points[0]!.angleTo(points[1]!), points[1]!.angleTo(points[2]!), points[2]!.angleTo(points[0]!)] as const;
     const longestEdge = angles.indexOf(Math.max(...angles));
     if (angles[longestEdge]! <= maximumEdgeAngle || depth >= 16) {
-      positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+      positions.push(...points.flatMap(({ x, y, z }) => [x, y, z]));
       return;
     }
 
     if (longestEdge === 0) {
-      midpoint.copy(a).add(b).normalize().multiplyScalar(radius);
-      const ab = midpoint.clone();
-      appendSphericalTriangle(a, ab, c, depth + 1);
-      appendSphericalTriangle(ab, b, c, depth + 1);
+      const ab = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] as const;
+      appendGeographicTriangle(a, ab, c, depth + 1);
+      appendGeographicTriangle(ab, b, c, depth + 1);
     } else if (longestEdge === 1) {
-      midpoint.copy(b).add(c).normalize().multiplyScalar(radius);
-      const bc = midpoint.clone();
-      appendSphericalTriangle(a, b, bc, depth + 1);
-      appendSphericalTriangle(a, bc, c, depth + 1);
+      const bc = [(b[0] + c[0]) / 2, (b[1] + c[1]) / 2] as const;
+      appendGeographicTriangle(a, b, bc, depth + 1);
+      appendGeographicTriangle(a, bc, c, depth + 1);
     } else {
-      midpoint.copy(c).add(a).normalize().multiplyScalar(radius);
-      const ca = midpoint.clone();
-      appendSphericalTriangle(a, b, ca, depth + 1);
-      appendSphericalTriangle(ca, b, c, depth + 1);
+      const ca = [(c[0] + a[0]) / 2, (c[1] + a[1]) / 2] as const;
+      appendGeographicTriangle(a, b, ca, depth + 1);
+      appendGeographicTriangle(ca, b, c, depth + 1);
     }
   };
 
   const cleanAndUnwrapRing = (
     ring: PolygonCoordinates[number],
     referenceLongitude?: number,
-  ): Array<readonly [number, number]> => {
-    const cleaned: Array<readonly [number, number]> = [];
+  ): (readonly [number, number])[] => {
+    const cleaned: (readonly [number, number])[] = [];
     for (const coordinate of ring) {
       if (!Number.isFinite(coordinate[0]) || !Number.isFinite(coordinate[1])) continue;
       const previous = cleaned.at(-1);
@@ -217,12 +217,7 @@ export function createCountryFillGeometry(feature: CountryFeature, radius = 1.01
     const rings = [outer, ...holes];
     const flatCoordinates = rings.flat();
     for (const triangle of THREE.ShapeUtils.triangulateShape(vertices, holeVertices)) {
-      const points = triangle.map((index) => {
-        const coordinate = flatCoordinates[index]!;
-        const point = latLonToVector(coordinate[1], coordinate[0], radius);
-        return new THREE.Vector3(point.x, point.y, point.z);
-      });
-      appendSphericalTriangle(points[0]!, points[1]!, points[2]!);
+      appendGeographicTriangle(flatCoordinates[triangle[0]!]!, flatCoordinates[triangle[1]!]!, flatCoordinates[triangle[2]!]!);
     }
   }
   const geometry = new THREE.BufferGeometry();
