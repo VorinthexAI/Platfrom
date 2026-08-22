@@ -14,7 +14,7 @@ const domain = {
 
 const expected: Array<[AssistantSurface, string[]]> = [
   ['knowledge-workspace', ['content.hidden.list', 'folder.hide', 'folder.reveal', 'document.hide', 'document.reveal', 'folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy', 'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.enhance', 'document.translate', 'document.list-versions', 'document.restore-version', 'document.download', 'content.neighbors', 'content.search-history.delete', 'knowledge.search', 'note.write']],
-  ['travel-workspace', ['country.search', 'place.search', 'place.list', 'trip.list', 'trip.create', 'place.find', 'place.find-city', 'place.find-children', 'place.create', 'place.open']],
+  ['travel-workspace', ['country.search', 'place.find', 'place.search', 'place.list', 'place.reference.generate', 'place.reference.list', 'trip.list', 'trip.search', 'trip.guide.generate', 'trip.guide.list', 'trip.create', 'trip.update', 'trip.delete', 'trip.attachment.set', 'place.guide.find', 'place.find-city', 'place.find-children', 'place.create', 'place.update', 'place.delete', 'place.open']],
   ['signal-workspace', ['email.overview', 'email.sync', 'email.thread.read', 'email.thread.mark-read', 'email.thread.favorite', 'email.draft.create', 'email.draft.update', 'email.draft.send', 'email.disconnect']],
   ['book-workspace', ['book.list', 'book.detail', 'book.chapter.progress', 'book.create']],
 ];
@@ -57,12 +57,19 @@ describe('personal assistant service capabilities', () => {
     const calls: unknown[] = [];
     const travel: any = {
       overview: async (...args: unknown[]) => { calls.push(['travel.overview', ...args]); return {}; },
+      findPlaces: async (...args: unknown[]) => { calls.push(['travel.findPlaces', ...args]); return {}; },
       searchPlaces: async (...args: unknown[]) => { calls.push(['travel.searchPlaces', ...args]); return {}; },
       listTrips: async (...args: unknown[]) => { calls.push(['travel.listTrips', ...args]); return {}; },
+      searchTrips: async (...args: unknown[]) => { calls.push(['travel.searchTrips', ...args]); return {}; },
       createTrip: async (...args: unknown[]) => { calls.push(['travel.createTrip', ...args]); return {}; },
-      findPlace: async (...args: unknown[]) => { calls.push(['travel.findPlace', ...args]); return {}; },
+      updateTrip: async (...args: unknown[]) => { calls.push(['travel.updateTrip', ...args]); return {}; },
+      deleteTrip: async (...args: unknown[]) => { calls.push(['travel.deleteTrip', ...args]); return {}; },
+      setTripAttachments: async (...args: unknown[]) => { calls.push(['travel.setTripAttachments', ...args]); return {}; },
+      findPlaceGuide: async (...args: unknown[]) => { calls.push(['travel.findPlaceGuide', ...args]); return {}; },
       findCity: async (...args: unknown[]) => { calls.push(['travel.findCity', ...args]); return {}; },
       createPlace: async (...args: unknown[]) => { calls.push(['travel.createPlace', ...args]); return {}; },
+      updatePlace: async (...args: unknown[]) => { calls.push(['travel.updatePlace', ...args]); return {}; },
+      deletePlace: async (...args: unknown[]) => { calls.push(['travel.deletePlace', ...args]); return {}; },
       findChildren: async (...args: unknown[]) => { calls.push(['travel.findChildren', ...args]); return {}; },
       openPlace: async (...args: unknown[]) => { calls.push(['travel.openPlace', ...args]); return {}; },
     };
@@ -89,11 +96,18 @@ describe('personal assistant service capabilities', () => {
       ['travel-workspace', 'place.list', {}],
       ['travel-workspace', 'country.search', { query: 'Japan' }],
       ['travel-workspace', 'place.search', { query: 'warm islands' }],
-      ['travel-workspace', 'trip.list', {}],
-      ['travel-workspace', 'trip.create', { name: 'Japan', placeKeys: [scopeKey] }],
       ['travel-workspace', 'place.find', { query: 'Japan' }],
+      ['travel-workspace', 'trip.list', {}],
+      ['travel-workspace', 'trip.search', { query: 'spring in Japan' }],
+      ['travel-workspace', 'trip.create', { name: 'Japan', placeKeys: [scopeKey] }],
+      ['travel-workspace', 'trip.update', { tripKey: scopeKey, isFavorite: true }],
+      ['travel-workspace', 'trip.delete', { tripKey: scopeKey }],
+      ['travel-workspace', 'trip.attachment.set', { tripKey: scopeKey, attachments: [{ type: 'collection', key: scopeKey }] }],
+      ['travel-workspace', 'place.guide.find', { query: 'Japan' }],
       ['travel-workspace', 'place.find-city', { city: 'Tokyo', country: { name: 'Japan', code: 'JP', continent: 'Asia', lat: 36.2, lon: 138.2 } }],
       ['travel-workspace', 'place.create', { name: 'Japan', summary: 'Island country.', countryCode: 'JP', latitude: 36.2, longitude: 138.2, imageRequestToken: 'token' }],
+      ['travel-workspace', 'place.update', { placeKey: scopeKey, status: 'visited', isFavorite: true }],
+      ['travel-workspace', 'place.delete', { placeKey: scopeKey }],
       ['travel-workspace', 'place.find-children', { childrenRequestToken: 'children-token' }],
       ['travel-workspace', 'place.open', { name: 'Japan', countryCode: 'JP' }],
       ['signal-workspace', 'email.overview', {}],
@@ -114,13 +128,20 @@ describe('personal assistant service capabilities', () => {
     const serviceContext = { organizationKey, scopeKey };
     const actor = { userKey, ...serviceContext };
     expect(calls).toContainEqual(['travel.overview', serviceContext, userKey]);
-    expect(calls).toContainEqual(['travel.searchPlaces', { ...serviceContext, query: 'warm islands' }, userKey, { signal: undefined, timeoutMs: undefined }]);
+    expect(calls).toContainEqual(['travel.searchPlaces', { ...serviceContext, query: 'warm islands', recordHistory: true }, userKey, { signal: undefined, timeoutMs: undefined }]);
+    expect(calls).toContainEqual(['travel.findPlaces', { ...serviceContext, query: 'Japan' }, userKey, { signal: undefined, timeoutMs: undefined }]);
     expect(calls).toContainEqual(['travel.listTrips', serviceContext, userKey]);
+    expect(calls).toContainEqual(['travel.searchTrips', { ...serviceContext, query: 'spring in Japan', recordHistory: true }, userKey, { signal: undefined, timeoutMs: undefined }]);
     expect(calls).toContainEqual(['travel.createTrip', { ...serviceContext, name: 'Japan', placeKeys: [scopeKey], idempotencyKey: 'request-1:trip.create' }, userKey]);
+    expect(calls).toContainEqual(['travel.updateTrip', { ...serviceContext, tripKey: scopeKey, isFavorite: true }, userKey]);
+    expect(calls).toContainEqual(['travel.deleteTrip', { ...serviceContext, tripKey: scopeKey }, userKey]);
+    expect(calls).toContainEqual(['travel.setTripAttachments', { ...serviceContext, tripKey: scopeKey, attachments: [{ type: 'collection', key: scopeKey }] }, userKey]);
     expect(calls).toContainEqual(['countries.search', { organizationKey, query: 'Japan' }, userKey, { signal: undefined, timeoutMs: undefined }]);
-    expect(calls).toContainEqual(['travel.findPlace', { ...serviceContext, query: 'Japan' }, userKey, { signal: undefined, timeoutMs: undefined }]);
+    expect(calls).toContainEqual(['travel.findPlaceGuide', { ...serviceContext, query: 'Japan' }, userKey, { signal: undefined, timeoutMs: undefined }]);
     expect(calls).toContainEqual(['travel.findCity', { ...serviceContext, city: 'Tokyo', country: { name: 'Japan', code: 'JP', continent: 'Asia', lat: 36.2, lon: 138.2 } }, userKey, { signal: undefined, timeoutMs: undefined }]);
     expect(calls).toContainEqual(['travel.createPlace', { ...serviceContext, name: 'Japan', summary: 'Island country.', countryCode: 'JP', latitude: 36.2, longitude: 138.2, imageRequestToken: 'token' }, userKey, { signal: undefined, timeoutMs: undefined }]);
+    expect(calls).toContainEqual(['travel.updatePlace', { ...serviceContext, placeKey: scopeKey, status: 'visited', isFavorite: true }, userKey]);
+    expect(calls).toContainEqual(['travel.deletePlace', { ...serviceContext, placeKey: scopeKey }, userKey]);
     expect(calls).toContainEqual(['travel.findChildren', { ...serviceContext, childrenRequestToken: 'children-token' }, userKey, { signal: undefined, timeoutMs: undefined }]);
     expect(calls).toContainEqual(['travel.openPlace', { ...serviceContext, name: 'Japan', countryCode: 'JP' }, userKey]);
     expect(calls).toContainEqual(['email.overview', actor, {}]);
@@ -133,14 +154,25 @@ describe('personal assistant service capabilities', () => {
 
   test('marks durable place generation and creation as Compass mutations', () => {
     const capabilities = defaultAssistantCapabilityRegistry.resolve('travel-workspace');
-    expect(capabilities.find(({ definition }) => definition.name === 'place.find')?.mutationWorkspace).toBe('compass');
+    expect(capabilities.find(({ definition }) => definition.name === 'place.guide.find')?.mutationWorkspace).toBe('compass');
     expect(capabilities.find(({ definition }) => definition.name === 'place.find-city')?.mutationWorkspace).toBe('compass');
     expect(capabilities.find(({ definition }) => definition.name === 'place.find-children')?.mutationWorkspace).toBe('compass');
     expect(capabilities.find(({ definition }) => definition.name === 'place.create')?.mutationWorkspace).toBe('compass');
+    expect(capabilities.find(({ definition }) => definition.name === 'place.update')?.mutationWorkspace).toBe('compass');
+    expect(capabilities.find(({ definition }) => definition.name === 'place.delete')?.mutationWorkspace).toBe('compass');
     expect(capabilities.find(({ definition }) => definition.name === 'place.open')?.mutationWorkspace).toBe('compass');
     expect(capabilities.find(({ definition }) => definition.name === 'trip.create')?.mutationWorkspace).toBe('compass');
+    expect(capabilities.find(({ definition }) => definition.name === 'trip.guide.generate')?.mutationWorkspace).toBe('compass');
+    expect(capabilities.find(({ definition }) => definition.name === 'place.reference.generate')?.mutationWorkspace).toBe('compass');
+    expect(capabilities.find(({ definition }) => definition.name === 'trip.update')?.mutationWorkspace).toBe('compass');
+    expect(capabilities.find(({ definition }) => definition.name === 'trip.delete')?.mutationWorkspace).toBe('compass');
+    expect(capabilities.find(({ definition }) => definition.name === 'trip.attachment.set')?.mutationWorkspace).toBe('compass');
     expect(capabilities.find(({ definition }) => definition.name === 'trip.list')?.mutationWorkspace).toBeUndefined();
+    expect(capabilities.find(({ definition }) => definition.name === 'trip.guide.list')?.mutationWorkspace).toBeUndefined();
+    expect(capabilities.find(({ definition }) => definition.name === 'place.reference.list')?.mutationWorkspace).toBeUndefined();
     expect(capabilities.find(({ definition }) => definition.name === 'place.search')?.mutationWorkspace).toBeUndefined();
+    expect(capabilities.find(({ definition }) => definition.name === 'place.find')?.mutationWorkspace).toBeUndefined();
+    expect(capabilities.find(({ definition }) => definition.name === 'trip.search')?.mutationWorkspace).toBeUndefined();
   });
 
   test('injects runtime scope and stable request idempotency into Archive mutations', async () => {

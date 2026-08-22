@@ -10,11 +10,15 @@ export const APP_EVENT_SLUGS = [
   'highlight.changed',
   'memory.created',
   'memory.deleted',
+  'trip.changed',
+  'place.reference.changed',
+  'content.changed',
 ] as const;
 export type AppEventSlug = (typeof APP_EVENT_SLUGS)[number];
 export type EventEnvelope =
   | { route: 'user'; userKey: string; event: AppEventSlug }
-  | { route: 'collection'; collectionKey: string; event: AppEventSlug };
+  | { route: 'collection'; collectionKey: string; event: AppEventSlug }
+  | { route: 'scope'; scopeKey: string; event: AppEventSlug };
 
 const eventSlugs = new Set<string>(APP_EVENT_SLUGS);
 
@@ -39,6 +43,11 @@ export function parseEventEnvelope(message: string): EventEnvelope | null {
       && typeof envelope.collectionKey === 'string' && envelope.collectionKey.length > 0) {
       return envelope as EventEnvelope;
     }
+    if (envelope.route === 'scope'
+      && hasExactKeys(envelope, ['route', 'scopeKey', 'event'])
+      && typeof envelope.scopeKey === 'string' && envelope.scopeKey.length > 0) {
+      return envelope as EventEnvelope;
+    }
     return null;
   } catch {
     return null;
@@ -49,7 +58,9 @@ export async function shouldDeliverEvent(
   envelope: EventEnvelope,
   userKey: string,
   collectionAccess: (userKey: string, collectionKey: string, event: AppEventSlug) => Promise<boolean>,
+  scopeAccess: (userKey: string, scopeKey: string) => Promise<boolean> = async () => false,
 ) {
   if (envelope.route === 'user') return envelope.userKey === userKey;
-  return collectionAccess(userKey, envelope.collectionKey, envelope.event);
+  if (envelope.route === 'collection') return collectionAccess(userKey, envelope.collectionKey, envelope.event);
+  return scopeAccess(userKey, envelope.scopeKey);
 }

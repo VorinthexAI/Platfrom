@@ -76,7 +76,10 @@ export function createScopeRepository(
       try {
         const result = await database.collection(SCOPES_COLLECTION).save(toArangoDoc({ ...scope, ...embeddingMetadata() }), { returnNew: true });
         const saved = (result as { new?: Record<string, unknown> }).new;
-        return (saved ? scopeSchema.parse(withArangoKey(saved)) : scope) satisfies Scope;
+        const created = (saved ? scopeSchema.parse(withArangoKey(saved)) : scope) satisfies Scope;
+        const { ensureGeneratedDocumentFolders } = await import('@/lib/generated-documents/folders');
+        await ensureGeneratedDocumentFolders(database, created.key);
+        return created;
       } catch (error) {
         if (isArangoUniqueConstraintError(error)) {
           throw new DuplicateScopeSlugError(scope.organizationKey, scope.slug);
@@ -127,6 +130,9 @@ export function createScopeRepository(
         LET managedImages = UNIQUE(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.collectionKey IN managedCollections LET image = DOCUMENT(images, relation.imageKey) FILTER image != null && image.scopeKey == @scopeKey && image.mutationPolicy == "system-only" RETURN { key: image._key, storageKey: image.storageKey, captionKey: image.imageCaptionKey })
         LET imageKeys = managedImages[*].key
         LET captionKeys = managedImages[*].captionKey
+        LET cleanupGeneratedDocumentBindings = (FOR binding IN generatedDocumentBindings FILTER binding.scopeKey == @scopeKey REMOVE binding IN generatedDocumentBindings RETURN 1)
+        LET cleanupTripAttachments = (FOR attachment IN tripAttachments FILTER attachment.scopeKey == @scopeKey REMOVE attachment IN tripAttachments RETURN 1)
+        LET cleanupTripCreationReceipts = (FOR receipt IN tripCreationReceipts FILTER receipt.scopeKey == @scopeKey REMOVE receipt IN tripCreationReceipts RETURN 1)
         LET cleanupPlaceImages = (FOR relation IN placeImages FILTER relation.scopeKey == @scopeKey REMOVE relation IN placeImages RETURN 1)
         LET cleanupTripPlaces = (FOR relation IN tripPlaces FILTER relation.scopeKey == @scopeKey REMOVE relation IN tripPlaces RETURN 1)
         LET cleanupTrips = (FOR trip IN trips FILTER trip.scopeKey == @scopeKey REMOVE trip IN trips RETURN 1)

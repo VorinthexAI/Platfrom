@@ -2,6 +2,13 @@ import { expect, test } from "bun:test";
 
 const source = await Bun.file(new URL("../components/capability/KnowledgeWorkspace.tsx", import.meta.url)).text();
 
+test("opens routed cached folders without flashing Archive root", () => {
+  expect(source).toContain("const cachedInitialTree = initialFolderKey ? queryClient.getQueryData<ContentFolder[]>");
+  expect(source).toContain("const cachedInitialStack = initialFolderKey && cachedInitialTree ? contentFolderPath");
+  expect(source).toContain('useState<WorkspaceMode>(cachedInitialFolder ? "folder" : "folders")');
+  expect(source).toContain("useState<ContentFolder[]>(cachedInitialStack)");
+});
+
 test("centers confirmed empty states across Archive sheets", () => {
   expect(source).toContain('styles.searchHistoryList, !historyLoading && history.length === 0 && styles.sheetEmptyContent');
   expect(source).toContain('styles.summaryTopicPanel, !loadingSummaryTopics && !sheetError && summaryTopics.length === 0 && styles.sheetEmptyContent');
@@ -18,6 +25,29 @@ test("provides messages for previously blank Archive sheet states", () => {
   expect(source).toContain("No scanned pages found.");
   expect(source).toContain("No subfolders here.");
   expect(source).toContain("No summary available.");
+});
+
+test("centers full-height Archive load errors instead of rendering empty sheet bodies", () => {
+  expect(source).toContain('const [sheetLoadError, setSheetLoadError] = useState<string>();');
+  expect(source).toContain('{sheetLoadError ? <View style={styles.sheetEmptyContent}><Text accessibilityRole="alert" style={styles.notice}>{sheetLoadError}</Text></View> : <>');
+  expect(source).toContain('setSheetLoadError(cause instanceof Error ? cause.message : "Search history could not be loaded.")');
+  expect(source).toContain('setSheetLoadError(cause instanceof Error ? cause.message : "Similar Archive content could not be loaded.")');
+  expect(source).toContain('setSheetLoadError(cause instanceof Error ? cause.message : "The scanned pages could not be opened.")');
+  expect(source).toContain('setSheetLoadError(cause instanceof Error ? cause.message : "Document topics could not be generated.")');
+  expect(source).toContain('setSheetLoadError(cause instanceof Error ? cause.message : "Summary versions could not be loaded.")');
+  expect(source).toContain('setSheetLoadError(cause instanceof Error ? cause.message : "The document summary could not be created.")');
+  expect(source).toContain('setSheetLoadError(cause instanceof Error ? cause.message : "Document versions could not be loaded.")');
+  expect(source).toContain('setSheetLoadError(cause instanceof Error ? cause.message : "Versions could not be loaded.")');
+  expect(source).toContain('setSheetLoadError(cause instanceof Error ? cause.message : "Audio versions could not be loaded.")');
+  expect(source).toContain('setSheetLoadError(cause instanceof Error ? cause.message : "The folder could not be opened.")');
+  expect(source).toContain('{sheetLoadError ? <Button disabled={loadingSummaryTopics || generatingSummary}');
+});
+
+test("keeps compact and actionable Archive errors inline", () => {
+  expect(source).toContain('if (action === "upload") setSheetError(message);');
+  expect(source).toContain('setSheetError(cause instanceof Error ? cause.message : "The search could not be removed.")');
+  expect(source).toContain('if (activeSheetRef.current === "versions") setSheetError(message);');
+  expect(source).toContain('setSheetError(cause instanceof Error ? cause.message : "Files could not be selected.")');
 });
 
 test("uses only intrinsic and full-height Archive sheets", () => {

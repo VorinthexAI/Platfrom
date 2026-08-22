@@ -95,8 +95,8 @@ export function createPlaceImageGenerator(dependencies: PlaceImageDependencies) 
       try {
         const providerStarted = now();
         const response = await execute<Record<string, unknown>, ImageOutput>(
-          { mode: 'fixed', organizationKey: input.organizationKey, actionSlug: 'generate-image', modelSlug: 'bfl.flux-2-klein-4b', providerSlug: 'openrouter' },
-          { prompt: token.hero.prompt, count: 1, aspectRatio: '3:2', outputFormat: 'png' },
+          { mode: 'auto', organizationKey: input.organizationKey, actionSlug: 'generate-image' },
+          { prompt: token.hero.prompt, count: 1, size: '1536x1024', aspectRatio: '3:2', quality: 'low', outputFormat: 'png' },
           { signal: execution.signal, timeoutMs: execution.timeoutMs ?? 60_000 },
         );
         const providerDurationMs = elapsed(now, providerStarted);

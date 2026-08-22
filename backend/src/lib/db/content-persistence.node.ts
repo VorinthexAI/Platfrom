@@ -72,10 +72,12 @@ async function scopedUpdate<T>(
   const { set, unset } = splitPatch(patch);
   const ownership = collection === 'folders' ? `
       FILTER !HAS(current, "_internalDeletion") || current._internalDeletion == null
+      FILTER current.mutationPolicy != "system-container" || @allowSystemContainerUpdate
       LET destinationKey = @changesLocation ? @destinationKey : (HAS(current, "parentFolderKey") ? current.parentFolderKey : null)
       LET destination = destinationKey == null ? null : DOCUMENT(folders, destinationKey)
       FILTER destinationKey == null || (destination != null && destination.scopeKey == @scopeKey)
       FILTER destinationKey == null || (!HAS(destination, "_internalDeletion") || destination._internalDeletion == null)
+      FILTER destinationKey == null || destination.mutationPolicy != "system-container"
   ` : collection === 'documents' ? `
       FILTER !HAS(current, "_internalDeletion") || current._internalDeletion == null
       LET destinationKey = @changesLocation ? @destinationKey : (HAS(current, "folderKey") ? current.folderKey : null)
@@ -111,6 +113,7 @@ async function scopedUpdate<T>(
     patch: set,
     unset,
     expectedUpdatedAt: expectedUpdatedAt ?? null,
+    allowSystemContainerUpdate: collection === 'folders' && Object.keys(patch).every((field) => field === 'isFavorite' || field === 'updatedAt'),
   });
   const value = await cursor.next();
   return value ? parse(withArangoKey(value as Record<string, unknown>)) : null;
@@ -121,17 +124,28 @@ async function scopedDelete(
   collection: 'folders' | 'documents' | 'documentVersions' | 'documentAudioVersions' | 'documentSummaries' | 'documentSummaryAudio' | 'documentShares' | 'shares',
   scopeKey: string,
   key: string,
+  protectSystemContainer = false,
 ): Promise<boolean> {
   const hiddenSource = collection === 'folders' ? 'folder' : collection === 'documents' ? 'document' : null;
+  const attachmentType = collection === 'folders' ? 'folder' : null;
+  const now = new Date().toISOString();
   const cursor = await executor.query(`
-    FOR current IN @@collection
-      FILTER current._key == @key && current.scopeKey == @scopeKey
-      LIMIT 1
-      REMOVE current IN @@collection
-      RETURN OLD._key
-  `, { '@collection': collection, key, scopeKey });
+    LET affectedTripKeys = @attachmentType == null ? [] : (FOR attachment IN tripAttachments FILTER attachment.scopeKey == @scopeKey && attachment.targetType == @attachmentType && attachment.targetKey == @key RETURN DISTINCT attachment.tripKey)
+    LET removedKey = FIRST(FOR current IN @@collection
+        FILTER current._key == @key && current.scopeKey == @scopeKey
+        FILTER !@protectSystemContainer || current.mutationPolicy != "system-container"
+        LIMIT 1
+        REMOVE current IN @@collection
+        RETURN OLD._key)
+    LET cleanupAttachments = (FOR attachment IN tripAttachments
+      FILTER @attachmentType != null && attachment.scopeKey == @scopeKey
+        && attachment.targetType == @attachmentType && attachment.targetKey == removedKey
+      REMOVE attachment IN tripAttachments RETURN 1)
+    LET touchTrips = (FOR trip IN trips FILTER trip.scopeKey == @scopeKey && trip._key IN affectedTripKeys UPDATE trip WITH { updatedAt: @now } IN trips RETURN 1)
+    RETURN removedKey
+  `, { '@collection': collection, key, scopeKey, attachmentType, protectSystemContainer, now });
   const removedKey = await cursor.next();
-  if (removedKey === undefined) return false;
+  if (typeof removedKey !== 'string') return false;
   if (hiddenSource) {
     await executor.query('FOR hidden IN userHiddens FILTER hidden.source == @hiddenSource && hidden.sourceKey == @removedKey REMOVE hidden IN userHiddens', { hiddenSource, removedKey });
   }
@@ -343,7 +357,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       if (parsed.embedding.length) currentEmbeddingSchema.parse(parsed.embedding);
       const cursor = await executor.query(
         `LET parent = @parentKey == null ? {} : DOCUMENT(folders, @parentKey)
-         FILTER @parentKey == null || (parent != null && parent.scopeKey == @scopeKey && (!HAS(parent, "_internalDeletion") || parent._internalDeletion == null))
+         FILTER @parentKey == null || (parent != null && parent.scopeKey == @scopeKey && (!HAS(parent, "_internalDeletion") || parent._internalDeletion == null) && parent.mutationPolicy != "system-container")
          INSERT @folder INTO folders RETURN NEW`,
         { folder: toArangoDoc(parsed), parentKey: parsed.parentFolderKey ?? null, scopeKey: parsed.scopeKey },
       );
@@ -556,7 +570,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       const { set, unset } = splitPatch({ _internalDeletion: marker });
       const cursor = await executor.query(`
         FOR current IN folders
-          FILTER current._key == @key && current.scopeKey == @scopeKey
+          FILTER current._key == @key && current.scopeKey == @scopeKey && current.mutationPolicy != "system-container"
           FILTER @owner == null || current._internalDeletion.owner == @owner
           LIMIT 1
           UPDATE current WITH MERGE(@patch, ZIP(@unset, @unset[* RETURN null])) IN folders OPTIONS { keepNull: false }
@@ -578,8 +592,12 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       const value = await cursor.next();
       return value ? documentSchema.parse(withArangoKey(value as Record<string, unknown>)) : null;
     },
-    deleteFolder(scopeKey: string, key: string) { return scopedDelete(executor, 'folders', scopeKey, key); },
-    deleteDocument(scopeKey: string, key: string) { return scopedDelete(executor, 'documents', scopeKey, key); },
+    deleteFolder(scopeKey: string, key: string) { return scopedDelete(executor, 'folders', scopeKey, key, true); },
+    async deleteDocument(scopeKey: string, key: string) {
+      const deleted = await scopedDelete(executor, 'documents', scopeKey, key);
+      if (deleted) await executor.query('FOR binding IN generatedDocumentBindings FILTER binding.scopeKey == @scopeKey && binding.documentKey == @key REMOVE binding IN generatedDocumentBindings', { scopeKey, key });
+      return deleted;
+    },
     deleteVersion(scopeKey: string, key: string) { return scopedDelete(executor, 'documentVersions', scopeKey, key); },
     deleteAudioVersion(scopeKey: string, key: string) { return scopedDelete(executor, 'documentAudioVersions', scopeKey, key); },
     deleteSummary(scopeKey: string, key: string) { return scopedDelete(executor, 'documentSummaries', scopeKey, key); },
@@ -611,6 +629,6 @@ export function withContentPersistenceTransaction<T>(
   operation: (persistence: ReturnType<typeof createContentPersistence>) => Promise<T>,
 ): Promise<T> {
   return shareStorageMode(db as unknown as ContentQueryExecutor).then((mode) =>
-    withTransaction(['folders', 'documents', 'documentVersions', 'documentAudioVersions', 'documentSummaries', 'documentSummaryAudio', 'tagAssignments', 'userHiddens', 'scopes', 'scopeMembers', 'scopeScopes', ...(mode === 'legacy' ? ['documentShares'] : mode === 'global' ? ['shares'] : ['documentShares', 'shares'])], (transaction) =>
+    withTransaction(['folders', 'documents', 'generatedDocumentBindings', 'documentVersions', 'documentAudioVersions', 'documentSummaries', 'documentSummaryAudio', 'tagAssignments', 'userHiddens', 'tripAttachments', 'trips', 'scopes', 'scopeMembers', 'scopeScopes', ...(mode === 'legacy' ? ['documentShares'] : mode === 'global' ? ['shares'] : ['documentShares', 'shares'])], (transaction) =>
       operation(createContentPersistence(transaction as unknown as ContentQueryExecutor))));
 }

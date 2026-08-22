@@ -1136,7 +1136,8 @@ describe('Content runtime', () => {
       return originalListVersions(...args);
     };
     const storage: any = { async upload() { return { storageKey: '' }; }, async download() { return { bytes: new Uint8Array() }; }, async copy() { throw new Error('copy must not reach storage'); }, async delete() {} };
-    const deleted = await runContentTool('folder.delete', { folderKeys: [f.folderKey], recursive: true }, f.context, { repository: f.repository, storage });
+    const tripChanges: string[] = [];
+    const deleted = await runContentTool('folder.delete', { folderKeys: [f.folderKey], recursive: true }, f.context, { repository: f.repository, storage, publishTripChange: async (scopeKey) => { tripChanges.push(scopeKey); } });
     expect(deleted.results[0]?.success).toBe(true);
     expect(attempted).toHaveLength(4);
     expect(attempted.every((item) => item.success === false)).toBe(true);
@@ -1145,6 +1146,7 @@ describe('Content runtime', () => {
     expect(f.summaries.has(doomedSummary.key)).toBe(false);
     expect(f.summaryAudio.has(doomedAudio.key)).toBe(false);
     expect(f.documents.get(movableKey).folderKey).toBe(outsideKey);
+    expect(tripChanges).toEqual([f.scopeKey]);
   });
 
   test('resumes the persisted recursive folder deletion intent regardless of retry flags', async () => {

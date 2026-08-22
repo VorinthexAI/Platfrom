@@ -13,6 +13,8 @@ export const folderSchema = z.object({
   name: z.string().trim().min(1),
   description: z.string().trim().min(1).optional(),
   coverImageKey: z.string().cuid().optional(),
+  purpose: z.enum(['generated-documents-root', 'generated-documents-guide', 'generated-documents-brief', 'generated-documents-accommodations', 'generated-documents-restaurants', 'generated-documents-activities']).optional(),
+  mutationPolicy: z.enum(['user', 'system-container']).optional(),
   embedding: currentEmbeddingSchema,
   isFavorite: z.boolean().default(false),
   _internalDeletion: z.object({

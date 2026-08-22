@@ -96,7 +96,7 @@ describe('model and routing relation seeds', () => {
     ]);
     expect(new Set(SEEDED_MODEL_ACTIONS.map(({ modelSlug }) => modelSlug))).toEqual(new Set(SEEDED_MODELS.map(({ slug }) => slug)));
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'caption-image')?.modelSlug).toBe('openai.gpt-5.6-luna');
-    expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'generate-image')?.modelSlug).toBe('openai.gpt-image-2');
+    expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'generate-image')?.modelSlug).toBe('bfl.flux-2-klein-4b');
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'embed')?.modelSlug).toBe('openai.text-embedding-3-small');
     expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'ask').map(({ actionSlug, modelSlug, priority }) => ({ actionSlug, modelSlug, priority }))).toEqual([
       { actionSlug: 'ask', modelSlug: 'google.gemini-2.5-flash-lite', priority: 100 },

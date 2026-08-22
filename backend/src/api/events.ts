@@ -54,6 +54,33 @@ export function publishCollectionEvent(collectionKey: string, event: AppEventSlu
   return publishEvent({ route: 'collection', collectionKey, event });
 }
 
+export function publishScopeEvent(scopeKey: string, event: AppEventSlug) {
+  return publishEvent({ route: 'scope', scopeKey, event });
+}
+
+export async function hasScopeEventAccess(userKey: string, scopeKey: string) {
+  const cursor = await db.query(aql`
+    RETURN LENGTH(
+      FOR scope IN scopes
+        FILTER scope._key == ${scopeKey}
+        FOR membership IN userOrganizations
+          FILTER membership.userId == ${userKey} AND membership.status == "active"
+            AND membership.organizationId == scope.organizationKey
+          LET scopeRole = FIRST(
+            FOR member IN scopeMembers
+              FILTER member.scopeKey == scope._key
+                AND member.userOrganizationKey == membership._key
+                AND member.status == "active"
+              LIMIT 1
+              RETURN member.role
+          )
+          FILTER membership.orgRole IN ["owner", "admin"] OR scopeRole != null
+          RETURN 1
+    ) > 0
+  `);
+  return Boolean(await cursor.next());
+}
+
 export async function hasCollectionEventAccess(userKey: string, collectionKey: string, event: AppEventSlug) {
   const ownerOnly = event === 'collection.invites.changed' || event === 'collection.shares.changed';
   const cursor = await db.query(aql`
@@ -104,7 +131,7 @@ export async function streamEvents(c: Context) {
     const onEvent = (message: string) => {
       const envelope = parseEventEnvelope(message);
       if (!envelope) return;
-      void shouldDeliverEvent(envelope, identity.key, hasCollectionEventAccess).then((deliver) => {
+      void shouldDeliverEvent(envelope, identity.key, hasCollectionEventAccess, hasScopeEventAccess).then((deliver) => {
         if (active && deliver) return stream.writeSSE({ event: envelope.event, data: '' });
       }).catch((error) => {
         console.warn('event routing failed', error instanceof Error ? error.message : String(error));

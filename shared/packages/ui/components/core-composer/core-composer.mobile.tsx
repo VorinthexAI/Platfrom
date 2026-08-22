@@ -319,7 +319,7 @@ export function CoreComposer({
       loading={loading}
       onPress={submit}
       size={expanded ? "md" : "sm"}
-      style={multiline ? styles.sendBottom : undefined}
+      style={[multiline ? styles.sendBottom : undefined, expanded ? styles.expandedSend : undefined]}
       variant="primary"
     >
       {sendIcon}
@@ -387,6 +387,7 @@ const styles = StyleSheet.create({
   },
   leadingTop: { alignSelf: "flex-start" },
   sendBottom: { alignSelf: "flex-end" },
+  expandedSend: { height: 39, minHeight: 39, width: 39 },
   inputArea: {
     flex: 1,
     justifyContent: "center",

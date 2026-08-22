@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { Database } from 'arangojs';
-import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, EMBEDDING_PROVIDER_ID, embedText, embedTexts, embeddingMetadata } from '../lib/embeddings';
+import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, EMBEDDING_PROVIDER_ID, LEGACY_EMBEDDING_DIMENSIONS, embedText, embedTexts, embeddingMetadata } from '../lib/embeddings';
 import { ALIAS_SLUG_PREFIX_SPACE, generateAlias, generateAliasSlug } from '../lib/alias';
 import { newId } from '../lib/ids';
 import { ensureOrganizationProvidersCollection } from '../lib/ai/organization-providers/indexes';
@@ -20,7 +20,7 @@ import { z } from 'zod';
 import { withDatabaseTransaction } from '../lib/db/client';
 import { countryCodeSchema } from '../lib/db/users.node';
 import { retireAiPersistence } from './retire-ai-persistence';
-import { buildPlaceEmbeddingText } from '../lib/travel/semantic-text';
+import { buildPlaceEmbeddingText, buildTripEmbeddingText, TRIP_EMBEDDING_CONTENT_VERSION } from '../lib/travel/semantic-text';
 import { generatedPlaceDetailSchema } from '../lib/db/places.node';
 import { buildImageEmbeddingText } from '../lib/image-embedding';
 
@@ -357,6 +357,8 @@ const legacyPlaceSchema = z.object({
   userKey: z.string().cuid(),
   scopeKey: z.string().cuid(),
   saved: z.boolean(),
+  status: z.enum(['wishlist', 'visited']).default('wishlist'),
+  isFavorite: z.boolean().default(false),
   name: z.string().trim().min(1),
   summary: z.string().default(''),
   countryCode: z.preprocess((value) => typeof value === 'string' ? value.trim().toUpperCase() : value, countryCodeSchema),
@@ -412,7 +414,7 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
       LET membership = membershipKey == null ? null : DOCUMENT(userOrganizations, membershipKey)
       UPDATE place WITH { userKey: HAS(place, "userKey") ? place.userKey : membership.userId, saved: HAS(place, "saved") ? place.saved : true } IN places
   `);
-  const canonicalFields = ['userKey', 'scopeKey', 'saved', 'name', 'summary', 'countryCode', 'latitude', 'longitude', 'embedding', 'embeddingContentVersion', 'createdAt'].sort();
+  const canonicalFields = ['userKey', 'scopeKey', 'saved', 'status', 'isFavorite', 'name', 'summary', 'countryCode', 'latitude', 'longitude', 'embedding', 'embeddingContentVersion', 'createdAt'].sort();
   const canonicalFieldSets = [false, true].flatMap((hasKind) => [false, true].flatMap((hasOpenedAt) => [false, true].flatMap((hasGeneratedDetail) => [false, true]
     .filter((hasGeneratedDetailVersion) => hasGeneratedDetail || !hasGeneratedDetailVersion)
     .map((hasGeneratedDetailVersion) => [...canonicalFields, ...(hasKind ? ['kind'] : []), ...(hasOpenedAt ? ['openedAt'] : []), ...(hasGeneratedDetail ? ['generatedDetail'] : []), ...(hasGeneratedDetailVersion ? ['generatedDetailVersion'] : [])].sort()))));
@@ -436,6 +438,8 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
           userKey: place.userKey,
           scopeKey: place.scopeKey,
           saved: place.saved,
+          status: place.status === 'visited' ? 'visited' : 'wishlist',
+          isFavorite: place.isFavorite === true,
           name: place.name,
           summary: typeof place.summary === 'string' ? place.summary : '',
           countryCode: place.countryCode,
@@ -471,6 +475,7 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
         FILTER fields NOT IN @canonicalFieldSets
           || place.name != TRIM(place.name) || place.countryCode != UPPER(TRIM(place.countryCode))
           || place.embeddingContentVersion != 2
+          || place.status NOT IN ["wishlist", "visited"] || !IS_BOOL(place.isFavorite)
           || !IS_ARRAY(place.embedding) || LENGTH(place.embedding) != @dimensions
           || LENGTH(place.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
         SORT place._key
@@ -486,6 +491,8 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
         userKey: place.userKey,
         scopeKey: place.scopeKey,
         saved: place.saved,
+        status: place.status === 'visited' ? 'visited' : 'wishlist',
+        isFavorite: place.isFavorite === true,
         name: place.name,
         summary: typeof place.summary === 'string' ? place.summary : '',
         countryCode: place.countryCode,
@@ -500,6 +507,8 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
         userKey: canonical.userKey,
         scopeKey: canonical.scopeKey,
         saved: canonical.saved,
+        status: canonical.status,
+        isFavorite: canonical.isFavorite,
         ...(place.kind == null ? {} : { kind: z.enum(['country', 'place']).parse(place.kind) }),
         name: canonical.name,
         summary: canonical.summary,
@@ -529,6 +538,7 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
       FILTER fields NOT IN @canonicalFieldSets
         || place.name != TRIM(place.name) || place.countryCode != UPPER(TRIM(place.countryCode))
         || place.embeddingContentVersion != 2
+        || place.status NOT IN ["wishlist", "visited"] || !IS_BOOL(place.isFavorite)
         || !IS_ARRAY(place.embedding) || LENGTH(place.embedding) != @dimensions
         || LENGTH(place.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
       RETURN 1)
@@ -546,11 +556,20 @@ export async function migrateMinimalPlacesAndRetireTrips(targetDb: Database): Pr
   if (!await trips.exists()) return;
   const tripPlaces = targetDb.collection('tripPlaces');
   const hasTripPlaces = await tripPlaces.exists();
+  await targetDb.query('FOR trip IN trips UPDATE trip WITH { status: trip.status IN ["planned", "completed"] ? trip.status : "planned", isFavorite: HAS(trip, "isFavorite") && IS_BOOL(trip.isFavorite) ? trip.isFavorite : false, updatedAt: HAS(trip, "updatedAt") && IS_STRING(trip.updatedAt) ? trip.updatedAt : trip.createdAt } IN trips');
+  const images = targetDb.collection('images');
+  if (await images.exists()) await targetDb.query('FOR trip IN trips FILTER HAS(trip, "coverImageKey") LET image = DOCUMENT(images, trip.coverImageKey) FILTER image == null || image.scopeKey != trip.scopeKey UPDATE trip WITH { coverImageKey: null } IN trips OPTIONS { keepNull: false }');
+  else await targetDb.query('FOR trip IN trips FILTER HAS(trip, "coverImageKey") UPDATE trip WITH { coverImageKey: null } IN trips OPTIONS { keepNull: false }');
   const invalidCursor = await targetDb.query<string>(`
     FOR trip IN trips
-      FILTER !IS_STRING(trip.userKey) || !IS_STRING(trip.scopeKey) || !IS_STRING(trip.name)
+      LET createdAtTimestamp = IS_STRING(trip.createdAt) && REGEX_TEST(trip.createdAt, "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\\\.[0-9]+)?Z$") && IS_DATESTRING(trip.createdAt) ? DATE_TIMESTAMP(trip.createdAt) : null
+      LET updatedAtTimestamp = IS_STRING(trip.updatedAt) && REGEX_TEST(trip.updatedAt, "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\\\.[0-9]+)?Z$") && IS_DATESTRING(trip.updatedAt) ? DATE_TIMESTAMP(trip.updatedAt) : null
+      LET createdAtValid = createdAtTimestamp != null && DATE_YEAR(createdAtTimestamp) == TO_NUMBER(SUBSTRING(trip.createdAt, 0, 4)) && DATE_MONTH(createdAtTimestamp) == TO_NUMBER(SUBSTRING(trip.createdAt, 5, 2)) && DATE_DAY(createdAtTimestamp) == TO_NUMBER(SUBSTRING(trip.createdAt, 8, 2)) && DATE_HOUR(createdAtTimestamp) == TO_NUMBER(SUBSTRING(trip.createdAt, 11, 2)) && DATE_MINUTE(createdAtTimestamp) == TO_NUMBER(SUBSTRING(trip.createdAt, 14, 2)) && DATE_SECOND(createdAtTimestamp) == TO_NUMBER(SUBSTRING(trip.createdAt, 17, 2))
+      LET updatedAtValid = updatedAtTimestamp != null && DATE_YEAR(updatedAtTimestamp) == TO_NUMBER(SUBSTRING(trip.updatedAt, 0, 4)) && DATE_MONTH(updatedAtTimestamp) == TO_NUMBER(SUBSTRING(trip.updatedAt, 5, 2)) && DATE_DAY(updatedAtTimestamp) == TO_NUMBER(SUBSTRING(trip.updatedAt, 8, 2)) && DATE_HOUR(updatedAtTimestamp) == TO_NUMBER(SUBSTRING(trip.updatedAt, 11, 2)) && DATE_MINUTE(updatedAtTimestamp) == TO_NUMBER(SUBSTRING(trip.updatedAt, 14, 2)) && DATE_SECOND(updatedAtTimestamp) == TO_NUMBER(SUBSTRING(trip.updatedAt, 17, 2))
+      FILTER !REGEX_TEST(trip._key, "^[cC][0-9a-z]{6,}$") || !REGEX_TEST(trip.userKey, "^[cC][0-9a-z]{6,}$") || !REGEX_TEST(trip.scopeKey, "^[cC][0-9a-z]{6,}$") || !IS_STRING(trip.name)
         || trip.name != TRIM(trip.name) || LENGTH(trip.name) == 0 || LENGTH(trip.name) > 255
-        || !IS_STRING(trip.createdAt)
+        || !createdAtValid || !updatedAtValid || trip.status NOT IN ["planned", "completed"] || !IS_BOOL(trip.isFavorite)
+        || HAS(trip, "coverImageKey") && !REGEX_TEST(trip.coverImageKey, "^[cC][0-9a-z]{6,}$")
         || HAS(trip, "description") && (!IS_STRING(trip.description) || trip.description != TRIM(trip.description) || LENGTH(trip.description) == 0 || LENGTH(trip.description) > 10000)
         || HAS(trip, "requestHash") && (!IS_STRING(trip.requestHash) || !REGEX_TEST(trip.requestHash, "^[a-f0-9]{64}$"))
       RETURN trip._key
@@ -579,6 +598,186 @@ export async function migrateMinimalPlacesAndRetireTrips(targetDb: Database): Pr
     const collection = targetDb.collection(name);
     if (await collection.exists()) await targetDb.query('FOR resource IN @@collection FILTER resource.sourceType == "trip" REMOVE resource IN @@collection', { '@collection': name });
   }
+  let after = '';
+  while (true) {
+    const cursor = await targetDb.query<Record<string, unknown>>(`
+      FOR trip IN trips
+        FILTER trip._key > @after
+        FILTER trip.embeddingContentVersion != @contentVersion || !IS_ARRAY(trip.embedding) || LENGTH(trip.embedding) != @dimensions || LENGTH(trip.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
+        SORT trip._key ASC
+        LIMIT 50
+        RETURN trip
+    `, { after, contentVersion: TRIP_EMBEDDING_CONTENT_VERSION, dimensions: EMBEDDING_DIMENSIONS });
+    const tripsToEmbed = await cursor.all();
+    if (tripsToEmbed.length === 0) break;
+    const updates = await Promise.all(tripsToEmbed.map(async (trip) => ({
+      _key: trip._key, _rev: trip._rev,
+      embedding: await generateEmbedding(buildTripEmbeddingText({ name: String(trip.name), description: typeof trip.description === 'string' ? trip.description : undefined })),
+    })));
+    await targetDb.query(`
+      FOR patch IN @updates
+        LET trip = DOCUMENT(trips, patch._key)
+        FILTER trip != null && trip._rev == patch._rev
+        UPDATE trip WITH { embedding: patch.embedding, embeddingContentVersion: @contentVersion } IN trips
+    `, { updates, contentVersion: TRIP_EMBEDDING_CONTENT_VERSION });
+    after = String(tripsToEmbed.at(-1)!._key);
+  }
+}
+
+export async function migrateTripCreationReceipts(targetDb: Database): Promise<void> {
+  const receipts = targetDb.collection('tripCreationReceipts');
+  if (!await receipts.exists()) return;
+  await targetDb.query(`
+    FOR receipt IN tripCreationReceipts
+      LET createdAtTimestamp = IS_STRING(receipt.createdAt) && REGEX_TEST(receipt.createdAt, "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\\\.[0-9]+)?Z$") && IS_DATESTRING(receipt.createdAt) ? DATE_TIMESTAMP(receipt.createdAt) : null
+      LET createdAtValid = createdAtTimestamp != null && DATE_YEAR(createdAtTimestamp) == TO_NUMBER(SUBSTRING(receipt.createdAt, 0, 4)) && DATE_MONTH(createdAtTimestamp) == TO_NUMBER(SUBSTRING(receipt.createdAt, 5, 2)) && DATE_DAY(createdAtTimestamp) == TO_NUMBER(SUBSTRING(receipt.createdAt, 8, 2)) && DATE_HOUR(createdAtTimestamp) == TO_NUMBER(SUBSTRING(receipt.createdAt, 11, 2)) && DATE_MINUTE(createdAtTimestamp) == TO_NUMBER(SUBSTRING(receipt.createdAt, 14, 2)) && DATE_SECOND(createdAtTimestamp) == TO_NUMBER(SUBSTRING(receipt.createdAt, 17, 2))
+      FILTER !REGEX_TEST(receipt._key, "^[cC][0-9a-z]{6,}$") || !REGEX_TEST(receipt.scopeKey, "^[cC][0-9a-z]{6,}$") || !REGEX_TEST(receipt.userKey, "^[cC][0-9a-z]{6,}$") || receipt.tripKey != receipt._key || !REGEX_TEST(receipt.tripKey, "^[cC][0-9a-z]{6,}$") || !REGEX_TEST(receipt.requestHash, "^[a-f0-9]{64}$") || !createdAtValid
+      REMOVE receipt IN tripCreationReceipts
+  `);
+  const trips = targetDb.collection('trips');
+  if (await trips.exists()) await targetDb.query(`
+    FOR trip IN trips
+      LET createdAtTimestamp = IS_STRING(trip.createdAt) && REGEX_TEST(trip.createdAt, "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\\\.[0-9]+)?Z$") && IS_DATESTRING(trip.createdAt) ? DATE_TIMESTAMP(trip.createdAt) : null
+      LET createdAtValid = createdAtTimestamp != null && DATE_YEAR(createdAtTimestamp) == TO_NUMBER(SUBSTRING(trip.createdAt, 0, 4)) && DATE_MONTH(createdAtTimestamp) == TO_NUMBER(SUBSTRING(trip.createdAt, 5, 2)) && DATE_DAY(createdAtTimestamp) == TO_NUMBER(SUBSTRING(trip.createdAt, 8, 2)) && DATE_HOUR(createdAtTimestamp) == TO_NUMBER(SUBSTRING(trip.createdAt, 11, 2)) && DATE_MINUTE(createdAtTimestamp) == TO_NUMBER(SUBSTRING(trip.createdAt, 14, 2)) && DATE_SECOND(createdAtTimestamp) == TO_NUMBER(SUBSTRING(trip.createdAt, 17, 2))
+      FILTER REGEX_TEST(trip._key, "^[cC][0-9a-z]{6,}$") && REGEX_TEST(trip.scopeKey, "^[cC][0-9a-z]{6,}$") && REGEX_TEST(trip.userKey, "^[cC][0-9a-z]{6,}$") && IS_STRING(trip.requestHash) && REGEX_TEST(trip.requestHash, "^[a-f0-9]{64}$") && createdAtValid
+      UPSERT { _key: trip._key }
+        INSERT { _key: trip._key, scopeKey: trip.scopeKey, userKey: trip.userKey, tripKey: trip._key, requestHash: trip.requestHash, createdAt: trip.createdAt }
+        UPDATE {} IN tripCreationReceipts
+  `);
+}
+
+export async function migrateTripGuides(targetDb: Database): Promise<void> {
+  const guides = targetDb.collection('tripGuides');
+  if (!await guides.exists()) return;
+  await targetDb.query(`
+    FOR guide IN tripGuides
+      LET trip = DOCUMENT(trips, guide.tripKey)
+      FILTER !REGEX_TEST(guide._key, "^[cC][0-9a-z]{6,}$")
+        || !REGEX_TEST(guide.scopeKey, "^[cC][0-9a-z]{6,}$")
+        || !REGEX_TEST(guide.userKey, "^[cC][0-9a-z]{6,}$")
+        || !REGEX_TEST(guide.tripKey, "^[cC][0-9a-z]{6,}$")
+        || trip == null || trip.scopeKey != guide.scopeKey || trip.userKey != guide.userKey
+        || !IS_STRING(guide.name) || guide.name != TRIM(guide.name) || LENGTH(guide.name) == 0 || LENGTH(guide.name) > 255
+        || !IS_STRING(guide.summary) || guide.summary != TRIM(guide.summary) || LENGTH(guide.summary) == 0 || LENGTH(guide.summary) > 4000
+        || !IS_STRING(guide.requestHash) || !REGEX_TEST(guide.requestHash, "^[a-f0-9]{64}$")
+        || !IS_ARRAY(guide.embedding) || (LENGTH(guide.embedding) != @dimensions && LENGTH(guide.embedding) != @legacyDimensions) || LENGTH(guide.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
+        || !IS_STRING(guide.createdAt) || !IS_DATESTRING(guide.createdAt)
+      REMOVE guide IN tripGuides
+  `, { dimensions: EMBEDDING_DIMENSIONS, legacyDimensions: LEGACY_EMBEDDING_DIMENSIONS });
+}
+
+export async function migratePlaceReports(targetDb: Database): Promise<void> {
+  const reports = targetDb.collection('placeReports');
+  if (!await reports.exists()) return;
+  await targetDb.query(`
+    FOR report IN placeReports
+      LET place = DOCUMENT(places, report.placeKey)
+      FILTER !REGEX_TEST(report._key, "^[cC][0-9a-z]{6,}$")
+        || !REGEX_TEST(report.scopeKey, "^[cC][0-9a-z]{6,}$")
+        || !REGEX_TEST(report.userKey, "^[cC][0-9a-z]{6,}$")
+        || !REGEX_TEST(report.placeKey, "^[cC][0-9a-z]{6,}$")
+        || place == null || place.scopeKey != report.scopeKey || place.userKey != report.userKey || place.saved != true
+        || !IS_STRING(report.name) || report.name != TRIM(report.name) || LENGTH(report.name) == 0 || LENGTH(report.name) > 255
+        || !IS_STRING(report.summary) || report.summary != TRIM(report.summary) || LENGTH(report.summary) == 0 || LENGTH(report.summary) > 4000
+        || !IS_STRING(report.requestHash) || !REGEX_TEST(report.requestHash, "^[a-f0-9]{64}$")
+        || !IS_ARRAY(report.embedding) || (LENGTH(report.embedding) != @dimensions && LENGTH(report.embedding) != @legacyDimensions) || LENGTH(report.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
+        || !IS_STRING(report.createdAt) || !IS_DATESTRING(report.createdAt)
+      REMOVE report IN placeReports
+  `, { dimensions: EMBEDDING_DIMENSIONS, legacyDimensions: LEGACY_EMBEDDING_DIMENSIONS });
+}
+
+export async function migrateGeneratedTravelDocuments(targetDb: Database): Promise<void> {
+  await migrateTripGuides(targetDb);
+  await migratePlaceReports(targetDb);
+  const { ensureGeneratedDocumentFolders } = await import('@/lib/generated-documents/folders');
+  const scopes = await (await targetDb.query<{ _key: string }>('FOR scope IN scopes RETURN { _key: scope._key }')).all();
+  for (const scope of scopes) await ensureGeneratedDocumentFolders(targetDb, scope._key);
+  const migrations = [
+    { source: 'tripGuides', subjectType: 'trip', subjectField: 'tripKey', kind: 'guide' },
+    { source: 'placeReports', subjectType: 'place', subjectField: 'placeKey', kind: 'brief' },
+  ] as const;
+  for (const migration of migrations) {
+    const source = targetDb.collection(migration.source);
+    if (!await source.exists()) continue;
+    await targetDb.query(`
+      FOR legacy IN @@source
+        LET folderPurpose = CONCAT("generated-documents-", @kind)
+        LET folder = FIRST(FOR candidate IN folders FILTER candidate.scopeKey == legacy.scopeKey && candidate.purpose == folderPurpose LIMIT 1 RETURN candidate)
+        FILTER folder != null
+        UPSERT { _key: legacy._key }
+          INSERT { _key: legacy._key, scopeKey: legacy.scopeKey, folderKey: folder._key, name: legacy.name, content: legacy.summary, embedding: legacy.embedding, contentChunks: [legacy.summary], chunkEmbeddings: [legacy.embedding], semanticChunkCount: 1, semanticContentHash: SHA256(legacy.summary), isFavorite: false, createdAt: legacy.createdAt, updatedAt: legacy.createdAt }
+          UPDATE {} IN documents
+        UPSERT { _key: legacy._key }
+          INSERT { _key: legacy._key, scopeKey: legacy.scopeKey, documentKey: legacy._key, subjectType: @subjectType, subjectKey: legacy[@subjectField], kind: @kind, provenance: "generated", createdByKey: legacy.userKey, idempotencyKey: CONCAT("migration:", legacy._key), requestHash: legacy.requestHash, createdAt: legacy.createdAt, updatedAt: legacy.createdAt }
+          UPDATE {} IN generatedDocumentBindings
+    `, { '@source': migration.source, subjectType: migration.subjectType, subjectField: migration.subjectField, kind: migration.kind });
+    const verification = await targetDb.query<number>(`
+      RETURN LENGTH(FOR legacy IN @@source
+        LET document = DOCUMENT(documents, legacy._key)
+        LET binding = DOCUMENT(generatedDocumentBindings, legacy._key)
+        LET folderPurpose = CONCAT("generated-documents-", @kind)
+        LET folder = FIRST(FOR candidate IN folders FILTER candidate.scopeKey == legacy.scopeKey && candidate.purpose == folderPurpose LIMIT 1 RETURN candidate)
+        FILTER document == null || binding == null || folder == null
+          || document.scopeKey != legacy.scopeKey || document.folderKey != folder._key || document.name != legacy.name || document.content != legacy.summary
+          || binding.scopeKey != legacy.scopeKey || binding.documentKey != legacy._key || binding.subjectType != @subjectType || binding.subjectKey != legacy[@subjectField]
+          || binding.kind != @kind || binding.createdByKey != legacy.userKey || binding.requestHash != legacy.requestHash
+        RETURN 1)
+    `, { '@source': migration.source, subjectType: migration.subjectType, subjectField: migration.subjectField, kind: migration.kind });
+    const invalid = await verification.next() ?? 0;
+    if (invalid > 0) throw new Error(`${migration.source} conversion failed for ${invalid} row(s); source collection was preserved.`);
+    await source.drop();
+  }
+  await migrateContentDocuments(targetDb);
+}
+
+type TripAttachmentMigrationTransaction = <T>(operation: (transaction: Pick<Database, 'query'>) => Promise<T>) => Promise<T>;
+
+export async function migrateTripAttachments(targetDb: Database, runTransaction: TripAttachmentMigrationTransaction = (operation) => withDatabaseTransaction(targetDb, ['tripAttachments'], operation)): Promise<void> {
+  const collection = targetDb.collection('tripAttachments');
+  if (!await collection.exists()) return;
+  const existing = new Set((await targetDb.listCollections()).map(({ name }) => name));
+  const required = ['scopes', 'trips', 'folders', 'collections'];
+  const missing = required.filter((name) => !existing.has(name));
+  if (missing.length > 0) {
+    await targetDb.query('FOR attachment IN tripAttachments REMOVE attachment IN tripAttachments');
+    return;
+  }
+  await targetDb.query(`
+    FOR attachment IN tripAttachments
+      LET scope = DOCUMENT(scopes, attachment.scopeKey)
+      LET trip = DOCUMENT(trips, attachment.tripKey)
+      LET target = attachment.targetType == "folder" ? DOCUMENT(folders, attachment.targetKey)
+        : attachment.targetType == "collection" ? DOCUMENT(collections, attachment.targetKey)
+        : null
+      LET createdAtTimestamp = IS_STRING(attachment.createdAt) && REGEX_TEST(attachment.createdAt, "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\\\.[0-9]+)?Z$") && IS_DATESTRING(attachment.createdAt) ? DATE_TIMESTAMP(attachment.createdAt) : null
+      LET createdAtValid = createdAtTimestamp != null
+        && DATE_YEAR(createdAtTimestamp) == TO_NUMBER(SUBSTRING(attachment.createdAt, 0, 4))
+        && DATE_MONTH(createdAtTimestamp) == TO_NUMBER(SUBSTRING(attachment.createdAt, 5, 2))
+        && DATE_DAY(createdAtTimestamp) == TO_NUMBER(SUBSTRING(attachment.createdAt, 8, 2))
+        && DATE_HOUR(createdAtTimestamp) == TO_NUMBER(SUBSTRING(attachment.createdAt, 11, 2))
+        && DATE_MINUTE(createdAtTimestamp) == TO_NUMBER(SUBSTRING(attachment.createdAt, 14, 2))
+        && DATE_SECOND(createdAtTimestamp) == TO_NUMBER(SUBSTRING(attachment.createdAt, 17, 2))
+      FILTER !REGEX_TEST(attachment._key, "^[cC][0-9a-z]{6,}$")
+        || !REGEX_TEST(attachment.scopeKey, "^[cC][0-9a-z]{6,}$")
+        || !REGEX_TEST(attachment.tripKey, "^[cC][0-9a-z]{6,}$")
+        || !REGEX_TEST(attachment.targetKey, "^[cC][0-9a-z]{6,}$")
+        || !createdAtValid
+        || attachment.targetType NOT IN ["folder", "collection"]
+        || !IS_NUMBER(attachment.position) || attachment.position < 0 || attachment.position != FLOOR(attachment.position)
+        || scope == null || trip == null || target == null
+        || trip.scopeKey != attachment.scopeKey || target.scopeKey != attachment.scopeKey
+        || (HAS(trip, @marker) && trip[@marker] != null)
+        || (HAS(target, @marker) && target[@marker] != null)
+        || (attachment.targetType == "collection" && (target.mutationPolicy == "system-only" || target.purpose != null))
+      REMOVE attachment IN tripAttachments
+  `, {
+    marker: LEGACY_REMOVAL_MARKER,
+  });
+  await targetDb.query('FOR attachment IN tripAttachments SORT attachment.createdAt ASC, attachment._key ASC COLLECT scopeKey = attachment.scopeKey, tripKey = attachment.tripKey, targetType = attachment.targetType, targetKey = attachment.targetKey INTO grouped FOR duplicate IN SLICE(grouped, 1) REMOVE duplicate.attachment IN tripAttachments');
+  await runTransaction(async (transaction) => {
+    await transaction.query('FOR attachment IN tripAttachments UPDATE attachment WITH { position: CONCAT("migration:", attachment._key), _migrationPosition: attachment.position } IN tripAttachments');
+    await transaction.query('FOR attachment IN tripAttachments SORT attachment.scopeKey, attachment.tripKey, attachment._migrationPosition, attachment.createdAt, attachment._key COLLECT scopeKey = attachment.scopeKey, tripKey = attachment.tripKey INTO grouped FOR position IN 0..(LENGTH(grouped) - 1) LET item = grouped[position] REPLACE item.attachment WITH UNSET(MERGE(item.attachment, { position }), "_migrationPosition") IN tripAttachments');
+  });
 }
 
 export async function migrateExactSemanticRecords(targetDb: Database, collectionName: 'folders' | 'images' | 'collections' | 'tags' | 'imageCaptions' | 'visualIdentities', embedKeys: readonly string[]) {
@@ -962,6 +1161,10 @@ export async function removeLegacyTombstones(targetDb: Database): Promise<void> 
     }
     await transaction.query('FOR resource IN @@collection FILTER resource[@typeField] == @type && resource.sourceKey IN @keys REMOVE resource IN @@collection', { '@collection': name, keys, typeField, type });
   };
+  const removeAttachmentTargets = async (targetType: string, keys: string[]) => {
+    if (!keys.length || !await exists('tripAttachments')) return;
+    await transaction.query('LET tripKeys = UNIQUE(FOR attachment IN tripAttachments FILTER attachment.targetType == @targetType && attachment.targetKey IN @keys RETURN attachment.tripKey) LET removed = (FOR attachment IN tripAttachments FILTER attachment.targetType == @targetType && attachment.targetKey IN @keys REMOVE attachment IN tripAttachments RETURN 1) LET touched = (FOR trip IN trips FILTER trip._key IN tripKeys UPDATE trip WITH { updatedAt: @now } IN trips RETURN 1) RETURN LENGTH(removed)', { targetType, keys, now: new Date().toISOString() });
+  };
   const mergeKeys = (...values: string[][]) => [...new Set(values.flat())];
 
   const scopeKeys = await keysFor('scopes');
@@ -1007,7 +1210,7 @@ export async function removeLegacyTombstones(targetDb: Database): Promise<void> 
        'galleryUploads', 'collections', 'collectionImages', 'imageCollecitionHightlights', 'imageCollectionMemories',
       'collectionMembers', 'collectionInvites', 'tags', 'tagAssignments', 'documents',
       'documentVersions', 'documentAudioVersions', 'documentSummaries', 'documentSummaryAudio',
-      'shares', 'places', 'trips', 'tripPlaces', 'placeVisits', 'books', 'bookContexts',
+       'shares', 'places', 'generatedDocumentBindings', 'trips', 'tripCreationReceipts', 'tripPlaces', 'tripAttachments', 'placeVisits', 'books', 'bookContexts',
       'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'chapterContexts', 'bookProgress',
       'emailAccounts', 'emailThreads', 'emailMessages', 'emailContacts', 'emailWritingProfiles',
       'emailRules', 'emailReplyDrafts', 'channels', 'threads', 'messages', 'messageMentions',
@@ -1020,9 +1223,11 @@ export async function removeLegacyTombstones(targetDb: Database): Promise<void> 
   }
 
   await removeDocumentDependents(documentKeys, removeBy, removeKeys, removeTyped, summaryKeys);
+  await removeAttachmentTargets('folder', mergeKeys(removedFolderKeys, scopedFolderKeys));
   await removeTyped('userHiddens', 'source', 'folder', mergeKeys(removedFolderKeys, scopedFolderKeys));
   await removeKeys('folders', mergeKeys(removedFolderKeys, scopedFolderKeys));
 
+  await removeAttachmentTargets('collection', collectionKeys);
   for (const name of ['collectionImages', 'collectionMembers', 'collectionInvites', 'imageCollecitionHightlights']) await removeBy(name, 'collectionKey', collectionKeys);
   await removeTyped('shares', 'sourceType', 'collection', collectionKeys, 'collections');
   await removeTyped('tagAssignments', 'sourceType', 'collection', collectionKeys, 'collections');
@@ -1035,6 +1240,7 @@ export async function removeLegacyTombstones(targetDb: Database): Promise<void> 
   await removeTyped('userHiddens', 'source', 'image', imageKeys);
   await removeBy('galleryUploads', 'imageKey', imageKeys);
   if (imageKeys.length && await exists('collections')) await transaction.query('FOR collection IN collections FILTER collection.coverImageKey IN @keys UPDATE collection WITH { coverImageKey: null } IN collections OPTIONS { keepNull: false }', { keys: imageKeys });
+  if (imageKeys.length && await exists('trips')) await transaction.query('FOR trip IN trips FILTER trip.coverImageKey IN @keys UPDATE trip WITH { coverImageKey: null, updatedAt: @now } IN trips OPTIONS { keepNull: false }', { keys: imageKeys, now: new Date().toISOString() });
   if (imageKeys.length && await exists('visualIdentities')) {
     const cursor = await transaction.query('FOR identity IN visualIdentities FILTER identity.referenceImageKey IN @keys RETURN identity._key', { keys: imageKeys });
     const referencedIdentityKeys = await cursor.all() as string[];
@@ -1050,12 +1256,15 @@ export async function removeLegacyTombstones(targetDb: Database): Promise<void> 
   await removeKeys('visualIdentities', identityKeys);
 
   const tripKeys = await keysFor('trips');
+  await removeBy('generatedDocumentBindings', 'subjectKey', tripKeys);
+  await removeBy('tripAttachments', 'tripKey', tripKeys);
   for (const name of ['tripPlaces', 'placeVisits']) await removeBy(name, 'tripKey', tripKeys);
   await removeTyped('shares', 'sourceType', 'trip', tripKeys, 'trips');
   await removeTyped('tagAssignments', 'sourceType', 'trip', tripKeys, 'trips');
   await removeKeys('trips', tripKeys);
 
   const placeKeys = await keysFor('places');
+  await removeBy('generatedDocumentBindings', 'subjectKey', placeKeys);
   for (const name of ['tripPlaces', 'placeVisits']) await removeBy(name, 'placeKey', placeKeys);
   await removeTyped('shares', 'sourceType', 'place', placeKeys, 'places');
   await removeTyped('tagAssignments', 'sourceType', 'place', placeKeys, 'places');
@@ -1266,7 +1475,7 @@ export const collections: CollectionSpec[] = [
   { name: 'polls', embedKeys: ['question'], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['messageKey'], unique: true }, { fields: ['channelKey', 'status'] }] },
   { name: 'pollOptions', embedKeys: ['text'], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['pollKey'] }, { fields: ['pollKey', 'position'], unique: true }] },
   { name: 'pollVotes', embedKeys: [], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['pollKey'] }, { fields: ['optionKey'] }, { fields: ['participantKey'] }, { fields: ['pollKey', 'optionKey', 'participantKey'], unique: true }] },
-  { name: 'folders', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'parentFolderKey'] }, { fields: ['scopeKey', 'isFavorite'] }, { fields: ['scopeKey', 'parentFolderKey', 'name'] }] },
+  { name: 'folders', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'parentFolderKey'] }, { fields: ['scopeKey', 'isFavorite'] }, { fields: ['scopeKey', 'parentFolderKey', 'name'] }, { fields: ['scopeKey', 'purpose'], unique: true, sparse: true }] },
   { name: 'images', embedKeys: ['filename', 'caption', 'placeName', 'placeSummary', 'country', 'city', 'countryCode'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'createdAt'] }, { fields: ['scopeKey', 'latitude', 'longitude'], sparse: true }, { fields: ['imageCaptionKey'], sparse: true }, { fields: ['storageKey'], unique: true }] },
   { name: 'imageCaptions', skipEmbedding: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'hashAlgorithm', 'perceptualHash'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment0'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment1'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment2'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment3'], sparse: true }] },
   { name: 'visualIdentities', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'createdByKey'] }, { fields: ['scopeKey', 'createdByKey', 'name'] }, { fields: ['scopeKey', 'referenceImageKey'] }] },
@@ -1290,9 +1499,12 @@ export const collections: CollectionSpec[] = [
   { name: 'documentSummaryAudio', skipEmbedding: true, indexes: [{ fields: ['summaryKey'], unique: true }, { fields: ['scopeKey', 'documentKey', 'createdAt'] }, { fields: ['storageKey'], unique: true }] },
   { name: 'shares', skipEmbedding: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'sourceType', 'sourceKey'] }, { fields: ['scopeKey', 'sourceType', 'sourceKey', 'revokedAt'] }, { fields: ['tokenHash'], unique: true }, { fields: ['expiresAt'], sparse: true }] },
   { name: 'places', embedKeys: ['name', 'summary'], indexes: [{ fields: ['scopeKey', 'userKey', 'saved'] }, { fields: ['scopeKey', 'userKey', 'openedAt'], sparse: true }, { fields: ['scopeKey', 'userKey', 'countryCode'] }, { fields: ['scopeKey', 'userKey', 'countryCode', 'name'], unique: true }] },
+  { name: 'generatedDocumentBindings', skipEmbedding: true, indexes: [{ fields: ['documentKey'], unique: true }, { fields: ['scopeKey', 'subjectType', 'subjectKey', 'kind', 'createdAt'] }, { fields: ['scopeKey', 'createdByKey', 'idempotencyKey'], unique: true }] },
   // Private Compass persistence. Access is only through the canonical travel service.
-  { name: 'trips', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'userKey', 'createdAt'] }] },
+  { name: 'trips', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey', 'userKey', 'createdAt'] }, { fields: ['scopeKey', 'coverImageKey'], sparse: true }] },
+  { name: 'tripCreationReceipts', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'userKey', 'createdAt'] }, { fields: ['scopeKey', 'tripKey'], unique: true }] },
   { name: 'tripPlaces', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'tripKey', 'position'], unique: true }, { fields: ['scopeKey', 'tripKey', 'placeKey'], unique: true }, { fields: ['scopeKey', 'placeKey'] }] },
+  { name: 'tripAttachments', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'tripKey', 'position'], unique: true }, { fields: ['scopeKey', 'tripKey', 'targetType', 'targetKey'], unique: true }, { fields: ['scopeKey', 'targetType', 'targetKey'] }] },
   { name: 'countries', embedKeys: ['name'], indexes: [{ fields: ['countryCode'], unique: true }, { fields: ['name'] }] },
   { name: 'books', embedKeys: ['title', 'subtitle', 'description', 'goal', 'audience', 'outcome'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'status'] }, { fields: ['scopeKey', 'isFavorite'] }, { fields: ['scopeKey', 'generationRequestKey'], unique: true, sparse: true }] },
   { name: 'bookContexts', embedKeys: ['userContext', 'priorKnowledge', 'priorBookContext', 'personalizationContext', 'researchContext', 'noveltyContext', 'generationBrief'], indexes: [{ fields: ['scopeKey', 'bookKey'], unique: true }] },
@@ -1394,6 +1606,7 @@ async function main() {
   await retireUserSettings(targetDb);
   await migrateModelActionSlugs(targetDb);
   await migrateMinimalPlacesAndRetireTrips(targetDb);
+  await migrateTripAttachments(targetDb);
 
   for (const name of droppedCollections) {
     const collection = targetDb.collection(name);
@@ -1539,6 +1752,7 @@ async function main() {
     }
     if (spec.name === 'images') await targetDb.query('FOR image IN images FILTER !HAS(image, "mutationPolicy") UPDATE image WITH { mutationPolicy: "user" } IN images');
     if (spec.name === 'collections') await targetDb.query('FOR collection IN collections FILTER !HAS(collection, "mutationPolicy") || !HAS(collection, "purpose") UPDATE collection WITH { mutationPolicy: HAS(collection, "mutationPolicy") ? collection.mutationPolicy : "user", purpose: HAS(collection, "purpose") ? collection.purpose : null } IN collections OPTIONS { keepNull: true }');
+    if (spec.name === 'tripCreationReceipts') await migrateTripCreationReceipts(targetDb);
     if (spec.name === 'imageCaptions') {
       await migrateImageCaptions(targetDb);
       await migrateExactSemanticRecords(targetDb, 'imageCaptions', ['caption']);
@@ -1589,7 +1803,10 @@ async function main() {
       await targetDb.query('FOR query IN contentSearchQueries FILTER HAS(query, "expiresAt") UPDATE query WITH { expiresAt: null } IN contentSearchQueries OPTIONS { keepNull: false }');
       await targetDb.query('FOR query IN contentSearchQueries UPDATE query WITH { contextDomain: null, usageCount: null } IN contentSearchQueries OPTIONS { keepNull: false }');
     }
-    if (spec.name === 'folders') await migrateExactSemanticRecords(targetDb, 'folders', ['name', 'description']);
+    if (spec.name === 'folders') {
+      await targetDb.query('FOR folder IN folders FILTER !HAS(folder, "mutationPolicy") UPDATE folder WITH { mutationPolicy: "user" } IN folders');
+      await migrateExactSemanticRecords(targetDb, 'folders', ['name', 'description']);
+    }
     if (spec.name === 'images') await migrateExactSemanticRecords(targetDb, 'images', ['filename', 'caption']);
     if (spec.name === 'collections') await migrateExactSemanticRecords(targetDb, 'collections', ['name', 'description']);
     if (spec.name === 'tags') await migrateExactSemanticRecords(targetDb, 'tags', ['name', 'description']);
@@ -1686,6 +1903,8 @@ async function main() {
       });
     }
   }
+
+  await migrateGeneratedTravelDocuments(targetDb);
 
   await targetDb.query(`
     FOR audio IN documentAudioVersions

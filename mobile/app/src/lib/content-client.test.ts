@@ -99,6 +99,15 @@ test("loads extracted text for uploaded files", async () => {
   expect(calls[0]?.body.input).toEqual({ documentKeys: ["document"], include: ["content"] });
 });
 
+test("passes document read cancellation to the transport", async () => {
+  responseForTool = (tool) => tool === "document.find" ? { data: { success: true, data: { results: [{ success: true, data: { document: { key: "document", name: "Brief.pdf", extension: "pdf", mimeType: "application/pdf", isFavorite: false, updatedAt: "2026-08-10T00:00:00.000Z", content: "Brief" } } }] } } } : undefined;
+  const controller = new AbortController();
+
+  await readContentDocument("document", undefined, controller.signal);
+
+  expect(calls[0]?.config.signal).toBe(controller.signal);
+});
+
 test("lists independent persisted full-audio versions", async () => {
   const metadata = { key: "audio-version", documentKey: "document", version: 2, sourceContentHash: "a".repeat(64), sourceTitle: "Note", sourceDocumentUpdatedAt: "2026-08-10T00:00:00.000Z", mimeType: "audio/mpeg", sizeBytes: 1024, durationMs: 65_000, isCurrent: false, playbackPositionMs: 0, includeTitle: false, includeCode: false, createdAt: "2026-08-10T00:02:00.000Z" };
   responseForTool = (tool) => tool === "document.list-audio-versions"

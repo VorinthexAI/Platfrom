@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { isLegacyIndex, LEGACY_REMOVAL_MARKER, normalizeLegacyDocumentSharePermission } from './arango-migrate-indexes';
 import { stageLegacyDocumentShares } from './content-migration';
-import { collections, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateEmailReplyMetadata, migrateImageCaptions, migrateMinimalPlacesAndRetireTrips, migrateModelActionSlugs, retireMomentumScope, retireTranscriptionDomain, retireUserSettings } from './arango-migrate';
+import { collections, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateEmailReplyMetadata, migrateGeneratedTravelDocuments, migrateImageCaptions, migrateMinimalPlacesAndRetireTrips, migrateModelActionSlugs, migratePlaceReports, migrateTripAttachments, migrateTripCreationReceipts, migrateTripGuides, retireMomentumScope, retireTranscriptionDomain, retireUserSettings } from './arango-migrate';
 import { EMBEDDING_DIMENSIONS, LEGACY_EMBEDDING_DIMENSIONS, embeddingMetadata } from '../lib/embeddings';
 import { DOCUMENT_CHUNK_MAX_WORDS, DOCUMENT_MAX_CHUNKS, documentSemanticHash } from '../lib/ai/document-processing/chunking';
 import { RETAINED_MODEL_ACTION_BINDINGS, RETAINED_MODEL_PROVIDER_BINDINGS, RETAINED_MODEL_SLUGS, RETAINED_PROVIDER_SLUGS, retireAiPersistence } from './retire-ai-persistence';
@@ -271,6 +271,10 @@ describe('Arango migration indexes', () => {
     }
     expect(source).toContain('resource[@marker] != null');
     expect(source).toContain('REMOVE resource IN @@collection');
+    expect(source).toContain('attachment.targetType == @targetType && attachment.targetKey IN @keys');
+    expect(source.indexOf("await removeAttachmentTargets('collection', collectionKeys)")).toBeLessThan(source.indexOf("await removeKeys('collections', collectionKeys)"));
+    expect(source.indexOf('FOR trip IN trips FILTER trip.coverImageKey IN @keys')).toBeLessThan(source.indexOf("await removeKeys('images', imageKeys)"));
+    expect(source.indexOf("await removeBy('tripAttachments', 'tripKey', tripKeys)")).toBeLessThan(source.indexOf("await removeKeys('trips', tripKeys)"));
     expect(source).toContain('fields.includes(LEGACY_REMOVAL_MARKER)');
     expect(source).toContain('OPTIONS { keepNull: false }');
   });
@@ -313,7 +317,7 @@ describe('Arango migration indexes', () => {
     expect(source).toContain('Dropped obsolete unique folder-name index');
   });
   test('retains minimal places and private ordered trips and declares book-generation collection indexes', () => {
-    expect(collections.filter(({ name }) => ['places', 'trips', 'tripPlaces', 'placeVisits'].includes(name)).map(({ name }) => name)).toEqual(['places', 'trips', 'tripPlaces']);
+    expect(collections.filter(({ name }) => ['places', 'generatedDocumentBindings', 'trips', 'tripCreationReceipts', 'tripPlaces', 'tripAttachments', 'placeVisits'].includes(name)).map(({ name }) => name)).toEqual(['places', 'generatedDocumentBindings', 'trips', 'tripCreationReceipts', 'tripPlaces', 'tripAttachments']);
     expect(collections.find(({ name }) => name === 'places')).toEqual({
       name: 'places',
       embedKeys: ['name', 'summary'],
@@ -324,12 +328,23 @@ describe('Arango migration indexes', () => {
         { fields: ['scopeKey', 'userKey', 'countryCode', 'name'], unique: true },
       ],
     });
-    expect(collections.find(({ name }) => name === 'trips')).toEqual({ name: 'trips', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'userKey', 'createdAt'] }] });
+    expect(collections.find(({ name }) => name === 'trips')).toEqual({ name: 'trips', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey', 'userKey', 'createdAt'] }, { fields: ['scopeKey', 'coverImageKey'], sparse: true }] });
+    expect(collections.find(({ name }) => name === 'generatedDocumentBindings')).toEqual({ name: 'generatedDocumentBindings', skipEmbedding: true, indexes: [{ fields: ['documentKey'], unique: true }, { fields: ['scopeKey', 'subjectType', 'subjectKey', 'kind', 'createdAt'] }, { fields: ['scopeKey', 'createdByKey', 'idempotencyKey'], unique: true }] });
+    expect(collections.find(({ name }) => name === 'tripCreationReceipts')).toEqual({ name: 'tripCreationReceipts', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'userKey', 'createdAt'] }, { fields: ['scopeKey', 'tripKey'], unique: true }] });
     expect(collections.find(({ name }) => name === 'tripPlaces')?.indexes).toEqual([
       { fields: ['scopeKey', 'tripKey', 'position'], unique: true },
       { fields: ['scopeKey', 'tripKey', 'placeKey'], unique: true },
       { fields: ['scopeKey', 'placeKey'] },
     ]);
+    expect(collections.find(({ name }) => name === 'tripAttachments')).toEqual({
+      name: 'tripAttachments',
+      skipEmbedding: true,
+      indexes: [
+        { fields: ['scopeKey', 'tripKey', 'position'], unique: true },
+        { fields: ['scopeKey', 'tripKey', 'targetType', 'targetKey'], unique: true },
+        { fields: ['scopeKey', 'targetType', 'targetKey'] },
+      ],
+    });
     const bookNames = ['books', 'bookContexts', 'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'chapterContexts', 'bookProgress'];
     expect(collections.filter(({ name }) => bookNames.includes(name)).map(({ name }) => name)).toEqual(bookNames);
     expect(collections.find(({ name }) => name === 'bookChapters')?.indexes).toContainEqual({ fields: ['scopeKey', 'bookKey', 'position'], unique: true });
@@ -339,6 +354,108 @@ describe('Arango migration indexes', () => {
     expect(collections.filter(({ name }) => emailNames.includes(name)).map(({ name }) => name)).toEqual(emailNames);
     expect(collections.find(({ name }) => name === 'emailAccounts')?.skipEmbedding).toBe(true);
     expect(collections.find(({ name }) => name === 'emailMessages')?.indexes).toContainEqual({ fields: ['scopeKey', 'accountKey', 'providerMessageId'], unique: true });
+  });
+  test('cleans and collision-safely compacts existing trip attachments before indexing', async () => {
+    const calls: string[] = [];
+    const names = ['tripAttachments', 'scopes', 'trips', 'folders', 'documents', 'collections', 'images', 'imageCollecitionHightlights', 'imageCollectionMemories', 'collectionImages'];
+    const database = {
+      collection(name: string) { return { async exists() { return names.includes(name); } }; },
+      async listCollections() { return names.map((name) => ({ name })); },
+      async query(query: string) { calls.push(query); return { async all() { return []; } }; },
+    };
+    let transactionCount = 0;
+    await migrateTripAttachments(database as never, async (operation) => { transactionCount += 1; return operation(database as never); });
+    expect(calls).toHaveLength(4);
+    expect(transactionCount).toBe(1);
+    expect(calls[0]).toContain('trip.scopeKey != attachment.scopeKey || target.scopeKey != attachment.scopeKey');
+    expect(calls[0]).toContain('attachment.targetType NOT IN ["folder", "collection"]');
+    expect(calls[0]).not.toContain('DOCUMENT(documents');
+    expect(calls[0]).not.toContain('DOCUMENT(images');
+    expect(calls[0]).toContain('LET createdAtValid = createdAtTimestamp != null');
+    expect(calls[0]).toContain('(\\\\.[0-9]+)?Z$');
+    expect(calls[0]).toContain('DATE_DAY(createdAtTimestamp) == TO_NUMBER(SUBSTRING(attachment.createdAt, 8, 2))');
+    for (const field of ['attachment._key', 'attachment.scopeKey', 'attachment.tripKey', 'attachment.targetKey']) expect(calls[0]).toContain(`REGEX_TEST(${field}, "^[cC][0-9a-z]{6,}$")`);
+    expect(calls[0]).not.toContain('[^');
+    expect(calls[0]).not.toContain('LET memoryHasCollection');
+    expect(calls[0]).toContain('target.mutationPolicy == "system-only" || target.purpose != null');
+    expect(calls[1]).toContain('FOR duplicate IN SLICE(grouped, 1)');
+    expect(calls[2]).toContain('position: CONCAT("migration:", attachment._key)');
+    expect(calls[3]).toContain('FOR position IN 0..(LENGTH(grouped) - 1) LET item = grouped[position]');
+    expect(calls[3]).toContain('REPLACE item.attachment WITH UNSET');
+  });
+  test('validates and backfills durable trip creation receipts', async () => {
+    const calls: string[] = [];
+    const database = {
+      collection(name: string) { return { async exists() { return name === 'tripCreationReceipts' || name === 'trips'; } }; },
+      async query(query: string) { calls.push(query); return { async all() { return []; } }; },
+    };
+    await migrateTripCreationReceipts(database as never);
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toContain('receipt.tripKey != receipt._key');
+    expect(calls[0]).toContain('LET createdAtValid');
+    expect(calls[0]).toContain('(\\\\.[0-9]+)?Z$');
+    for (const field of ['receipt._key', 'receipt.scopeKey', 'receipt.userKey', 'receipt.tripKey']) expect(calls[0]).toContain(`REGEX_TEST(${field}, "^[cC][0-9a-z]{6,}$")`);
+    expect(calls[0]).not.toContain('[^');
+    expect(calls[0]).toContain('REGEX_TEST(receipt.requestHash, "^[a-f0-9]{64}$")');
+    expect(calls[1]).toContain('UPSERT { _key: trip._key }');
+    expect(calls[1]).toContain('UPDATE {} IN tripCreationReceipts');
+    expect(calls[1]).toContain('(\\\\.[0-9]+)?Z$');
+    expect(calls[1]).toContain('&& createdAtValid');
+    for (const field of ['trip._key', 'trip.scopeKey', 'trip.userKey']) expect(calls[1]).toContain(`REGEX_TEST(${field}, "^[cC][0-9a-z]{6,}$")`);
+    expect(calls[1].indexOf('FILTER REGEX_TEST(trip._key')).toBeLessThan(calls[1].indexOf('UPSERT { _key: trip._key }'));
+  });
+  test('removes malformed and orphaned trip guides before indexing', async () => {
+    const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
+    const database = {
+      collection(name: string) { return { async exists() { return name === 'tripGuides'; } }; },
+      async query(query: string, bindVars?: Record<string, unknown>) { calls.push({ query, bindVars }); return { async all() { return []; } }; },
+    };
+    await migrateTripGuides(database as never);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.query).toContain('trip == null || trip.scopeKey != guide.scopeKey || trip.userKey != guide.userKey');
+    expect(calls[0]?.query).toContain('LENGTH(guide.embedding) != @dimensions && LENGTH(guide.embedding) != @legacyDimensions');
+    expect(calls[0]?.bindVars).toEqual({ dimensions: EMBEDDING_DIMENSIONS, legacyDimensions: LEGACY_EMBEDDING_DIMENSIONS });
+    const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    expect(source.indexOf("await removeBy('generatedDocumentBindings', 'subjectKey', tripKeys)")).toBeLessThan(source.indexOf("await removeKeys('trips', tripKeys)"));
+    const backfill = await Bun.file(new URL('../../scripts/backfill-semantic-embeddings.ts', import.meta.url)).text();
+    expect(backfill).not.toContain("'tripGuides'");
+  });
+  test('removes malformed, unsaved, and orphaned place reports before indexing', async () => {
+    const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
+    const database = {
+      collection(name: string) { return { async exists() { return name === 'placeReports'; } }; },
+      async query(query: string, bindVars?: Record<string, unknown>) { calls.push({ query, bindVars }); return { async all() { return []; } }; },
+    };
+    await migratePlaceReports(database as never);
+    expect(calls[0]?.query).toContain('place == null || place.scopeKey != report.scopeKey || place.userKey != report.userKey || place.saved != true');
+    expect(calls[0]?.query).toContain('LENGTH(report.embedding) != @dimensions && LENGTH(report.embedding) != @legacyDimensions');
+    expect(calls[0]?.bindVars).toEqual({ dimensions: EMBEDDING_DIMENSIONS, legacyDimensions: LEGACY_EMBEDDING_DIMENSIONS });
+    const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    expect(source.indexOf("await removeBy('generatedDocumentBindings', 'subjectKey', placeKeys)")).toBeLessThan(source.indexOf("await removeKeys('places', placeKeys)"));
+    const backfill = await Bun.file(new URL('../../scripts/backfill-semantic-embeddings.ts', import.meta.url)).text();
+    expect(backfill).not.toContain("'placeReports'");
+  });
+  test('cleans legacy generated travel records before converting them', async () => {
+    const calls: string[] = [];
+    const database = {
+      collection(name: string) {
+        return {
+          async exists() { return name === 'tripGuides' || name === 'placeReports'; },
+          async drop() { calls.push(`drop:${name}`); },
+        };
+      },
+      async query(query: string) {
+        calls.push(query);
+        return { async all() { return []; }, async next() { return 0; } };
+      },
+    };
+    await migrateGeneratedTravelDocuments(database as never);
+    const tripCleanup = calls.findIndex((query) => query.includes('REMOVE guide IN tripGuides'));
+    const reportCleanup = calls.findIndex((query) => query.includes('REMOVE report IN placeReports'));
+    const conversion = calls.findIndex((query) => query.includes('INSERT { _key: legacy._key'));
+    expect(tripCleanup).toBeGreaterThanOrEqual(0);
+    expect(reportCleanup).toBeGreaterThan(tripCleanup);
+    expect(conversion).toBeGreaterThan(reportCleanup);
   });
   test('drops obsolete place indexes while preserving current indexes', () => {
     const desired = [['scopeKey', 'userKey', 'saved'], ['scopeKey', 'userKey', 'openedAt'], ['scopeKey', 'userKey', 'countryCode'], ['scopeKey', 'userKey', 'countryCode', 'name']];
@@ -357,8 +474,16 @@ describe('Arango migration indexes', () => {
     };
     await migrateMinimalPlacesAndRetireTrips(database as never);
     await migrateMinimalPlacesAndRetireTrips(database as never);
-    expect(calls.filter(({ query }) => query.includes('FOR trip IN trips'))).toHaveLength(2);
+    expect(calls.filter(({ query }) => query.includes('FOR trip IN trips'))).toHaveLength(8);
+    const validation = calls.find(({ query }) => query.includes('LET createdAtTimestamp') && query.includes('FOR trip IN trips'))?.query ?? '';
+    expect(validation).toContain('LET createdAtValid');
+    expect(validation).toContain('LET updatedAtValid');
+    expect(validation).toContain('trip.status NOT IN ["planned", "completed"]');
+    expect(validation).toContain('(\\\\.[0-9]+)?Z$');
+    for (const field of ['trip._key', 'trip.userKey', 'trip.scopeKey', 'trip.coverImageKey']) expect(validation).toContain(`REGEX_TEST(${field}, "^[cC][0-9a-z]{6,}$")`);
+    expect(validation).not.toContain('[^');
     expect(calls.filter(({ query }) => query.includes('FOR relation IN tripPlaces'))).toHaveLength(2);
+    expect(calls.find(({ query }) => query.includes('UPDATE trip WITH { status:'))?.query).toContain('trip.status IN ["planned", "completed"] ? trip.status : "planned"');
     expect(dropped).toEqual(['placeVisits']);
     expect(existing).toEqual(new Set(['tripPlaces', 'trips']));
 
@@ -426,6 +551,8 @@ describe('Arango migration indexes', () => {
         userKey: 'cmrnlzf650002qc7k4p5zem5w',
         scopeKey: 'cmrnlzf640001qc7kazsr96k5',
         saved: true,
+        status: 'wishlist',
+        isFavorite: false,
         kind: 'place',
         name: 'Stockholm',
         summary: '',
@@ -456,7 +583,7 @@ describe('Arango migration indexes', () => {
       const generatedDetail = { location: { kind: 'country', name: 'Japan', countryCode: 'JP', country: 'Japan', continent: 'Asia', region: null, city: null, latitude: 36.2, longitude: 138.2 }, title: 'Japan', summary: 'Island country.', culture: 'Culture.', food: 'Food.', whyVisit: 'Visit.', heroImagePrompt: 'Landscape.', popularCities: cities };
       let legacy = true;
       let replacement: Record<string, unknown> | undefined;
-      const row = () => ({ _key: 'cmrnlzf650002qc7k4p5zem5w', _rev: 'revision', userKey: 'cmrnlzf650002qc7k4p5zem5w', scopeKey: 'cmrnlzf640001qc7kazsr96k5', saved: true, kind: 'country', name: ' Japan ', summary: 'Island country.', countryCode: 'jp', latitude: 36.2, longitude: 138.2, embedding: [], embeddingContentVersion: 1, generatedDetail, generatedDetailVersion: 2, createdAt: '2026-08-08T12:00:00.000Z' });
+      const row = () => ({ _key: 'cmrnlzf650002qc7k4p5zem5w', _rev: 'revision', userKey: 'cmrnlzf650002qc7k4p5zem5w', scopeKey: 'cmrnlzf640001qc7kazsr96k5', saved: true, status: 'visited', isFavorite: true, kind: 'country', name: ' Japan ', summary: 'Island country.', countryCode: 'jp', latitude: 36.2, longitude: 138.2, embedding: [], embeddingContentVersion: 1, generatedDetail, generatedDetailVersion: 2, createdAt: '2026-08-08T12:00:00.000Z' });
       const database = {
         collection(name: string) { return { async exists() { return name === 'places' || name === 'placeImages'; }, async create() {}, async drop() {} }; },
         async query(query: string, bindVars?: Record<string, unknown>) {
@@ -471,7 +598,7 @@ describe('Arango migration indexes', () => {
       };
 
       await migrateMinimalPlacesAndRetireTrips(database as never);
-      expect(replacement).toMatchObject({ saved: true, kind: 'country', name: 'Japan', countryCode: 'JP', generatedDetail, generatedDetailVersion: 2 });
+      expect(replacement).toMatchObject({ saved: true, status: 'visited', isFavorite: true, kind: 'country', name: 'Japan', countryCode: 'JP', generatedDetail, generatedDetailVersion: 2 });
     } finally {
       if (previous === undefined) delete process.env.CONTENT_E2E;
       else process.env.CONTENT_E2E = previous;

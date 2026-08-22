@@ -56,7 +56,6 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
   const compactImageStyle = useAnimatedStyle(() => ({ opacity: interpolate(imageExpansion.value, [0, 0.24], [1, 0], "clamp") }));
   const expandedImageStyle = useAnimatedStyle(() => ({ opacity: interpolate(imageExpansion.value, [0, 0.24], [0, 1], "clamp") }));
   const listEmpty = !creating && !listLoading && memories.length === 0;
-  listSheetOpen.current = open && !detail && !opening && activeSheet === "list";
 
   const notify = (title: string) => showToast({ title, duration: 2_000 });
 
@@ -68,8 +67,9 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
       if (invalidate) await queryClient.invalidateQueries({ queryKey, exact: true, refetchType: "none" });
       const result = await queryClient.fetchQuery({ queryKey, queryFn: () => listGalleryCollectionMemories(collection.key), staleTime: 0 });
       if (generation !== listRequest.current || !open) return;
-      setMemories(result.memories);
-      setSelectedMemoryKeys((current) => current.filter((key) => result.memories.some((memory) => memory.key === key)));
+      const orderedMemories = [...result.memories].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+      setMemories(orderedMemories);
+      setSelectedMemoryKeys((current) => current.filter((key) => orderedMemories.some((memory) => memory.key === key)));
     } catch {
       if (generation === listRequest.current && open) notify("Memories could not be loaded");
     } finally {
@@ -173,7 +173,15 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
   }
 
   useEffect(() => {
-    if (!open) { listRequest.current += 1; detailRequest.current += 1; createRequest.current += 1; setCreating(false); return; }
+    listSheetOpen.current = open && !detail && !opening && activeSheet === "list";
+  }, [activeSheet, detail, open, opening]);
+
+  useEffect(() => {
+    if (!open) {
+      listRequest.current += 1; detailRequest.current += 1; createRequest.current += 1;
+      const timer = setTimeout(() => setCreating(false), 0);
+      return () => clearTimeout(timer);
+    }
     const timer = setTimeout(() => void loadList(true), 0);
     return () => clearTimeout(timer);
     // Opening the feature is the list freshness boundary.
@@ -187,7 +195,10 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
   }, [owner]);
 
   useEffect(() => {
-    if (reducedMotion) { setTypedText(typingText); return; }
+    if (reducedMotion) {
+      const timer = setTimeout(() => setTypedText(typingText), 0);
+      return () => clearTimeout(timer);
+    }
     const duration = galleryMemoryTypingDuration(typingText);
     const started = Date.now();
     const timer = setInterval(() => {
@@ -199,6 +210,8 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
   }, [reducedMotion, typingRun, typingText]);
 
   useEffect(() => {
+    // Reanimated shared values are synchronized through their mutable value API.
+    // eslint-disable-next-line react-hooks/immutability
     imageExpansion.value = reducedMotion ? Number(showImage) : withTiming(Number(showImage), { duration: 420, easing: Easing.inOut(Easing.cubic) });
   }, [imageExpansion, reducedMotion, showImage]);
 
@@ -218,9 +231,9 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
   return <>
     <BottomSheet footer={listFooter} height="full" onOpenChange={(next) => { if (!next) close(); }} open={open && !detail} title="Memories">
       <ScrollView contentContainerStyle={[styles.grid, listEmpty && styles.emptyGrid]} onLayout={({ nativeEvent }) => setGridWidth(nativeEvent.layout.width)} showsVerticalScrollIndicator={false}>
-        {selectedMemoryKeys.length ? <Tabs style={styles.bulkToolbar}><View style={styles.bulkSelection}><Button accessibilityLabel="Clear memory selection" contentMode="raw" disabled={deleting} onPress={() => setSelectedMemoryKeys([])} size="md" style={styles.bulkClose} variant="secondary"><CloseIcon size="sm" /></Button><Text style={styles.bulkText}>{selectedMemoryKeys.length} selected</Text></View><Button disabled={deleting} onPress={() => { listSheetOpen.current = false; setActiveSheet("confirmDelete"); }} size="md" variant="secondary">Delete</Button></Tabs> : null}
-        {creating ? <View accessibilityLabel="Creating memory" accessibilityRole="progressbar"><Skeleton style={[styles.cardFrame, { width: cardWidth, height: cardWidth }]} /></View> : null}
+        {selectedMemoryKeys.length ? <Tabs style={styles.bulkToolbar}><View style={styles.bulkToolbarSelection}><Button accessibilityLabel="Clear memory selection" contentMode="raw" disabled={deleting} onPress={() => setSelectedMemoryKeys([])} size="md" style={styles.bulkToolbarClose} variant="secondary"><CloseIcon size="sm" /></Button><Text style={styles.bulkSelectionText}>{selectedMemoryKeys.length} selected</Text></View><Button disabled={deleting} onPress={() => { listSheetOpen.current = false; setActiveSheet("confirmDelete"); }} size="md" style={styles.bulkDeleteAction} textStyle={styles.bulkDeleteText} variant="secondary">Delete</Button></Tabs> : null}
         {listLoading ? Array.from({ length: 4 }, (_, index) => <Skeleton key={index} style={[styles.cardFrame, { width: cardWidth, height: cardWidth }]} />) : memories.map((memory) => { const selected = selectedMemoryKeys.includes(memory.key); return <Button accessibilityActions={owner ? [{ name: "longpress", label: selected ? "Deselect memory" : "Select memory" }] : undefined} accessibilityLabel="Open memory" accessibilityState={{ selected }} contentMode="raw" disabled={creating || opening || deleting} key={memory.key} onAccessibilityAction={owner ? ({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") toggleSelection(memory.key); } : undefined} onLongPress={owner ? () => handleLongPress(memory.key) : undefined} onPress={() => handlePress(memory)} shape="rounded" size="md" style={[styles.cardFrame, styles.card, selected && styles.cardSelected, { width: cardWidth, height: cardWidth }]} variant="ghost"><Image contentFit="cover" source={memory.image.url} style={StyleSheet.absoluteFill} transition={150} />{selected ? <View pointerEvents="none" style={styles.selectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}</Button>; })}
+        {creating ? <View accessibilityLabel="Creating memory" accessibilityRole="progressbar"><Skeleton style={[styles.cardFrame, { width: cardWidth, height: cardWidth }]} /></View> : null}
         {listEmpty ? <Text style={styles.empty}>No memories yet.</Text> : null}
       </ScrollView>
     </BottomSheet>
@@ -242,10 +255,12 @@ const styles = StyleSheet.create({
   card: { padding: 0 },
   cardSelected: { borderColor: palette.silver50, borderWidth: 2 },
   selectionBadge: { position: "absolute", top: 4, right: 4, width: 20, height: 20, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: palette.silver50 },
-  bulkToolbar: { width: "100%", minHeight: 40, padding: 5, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderWidth: 1, backgroundColor: palette.panel },
-  bulkSelection: { flexDirection: "row", alignItems: "center", gap: 8 },
-  bulkClose: { height: 28, width: 28, paddingHorizontal: 0, paddingVertical: 0 },
-  bulkText: { color: palette.silver100, fontFamily: fonts.medium, fontSize: 12 },
+  bulkToolbar: { width: "100%", minHeight: 36, marginBottom: spacing.xs, padding: 3, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderWidth: 1, backgroundColor: palette.panel },
+  bulkToolbarSelection: { flexDirection: "row", alignItems: "center", gap: 8 },
+  bulkToolbarClose: { height: 30, minHeight: 30, width: 30, paddingHorizontal: 0, paddingVertical: 0 },
+  bulkSelectionText: { color: palette.silver100, fontFamily: fonts.medium, fontSize: 12 },
+  bulkDeleteAction: { height: 30, minHeight: 30, minWidth: 68, paddingHorizontal: 12, paddingVertical: 0 },
+  bulkDeleteText: { fontFamily: fonts.regular, fontSize: 11, letterSpacing: 0.4 },
   empty: { width: "100%", paddingVertical: spacing.md, textAlign: "center", color: palette.silver500, fontFamily: fonts.regular, fontSize: 13 },
   detail: { flexGrow: 1, alignItems: "center", paddingVertical: spacing.lg, gap: spacing.xl },
   detailImageStage: { width: "100%", height: 120 },

@@ -183,7 +183,7 @@ test("uses separate image-selection and naming steps for visual identities", () 
   expect(source).toContain('accessibilityLabel="Choose a different visual identity image"');
   expect(source).toContain("returnToIdentityLibrary();");
   expect(source).toContain("width: 88, height: 88");
-  expect(source).toContain('(activeSheet === "destination" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory") && styles.fullSheetScroll');
+  expect(source).toContain('(activeSheet === "destination" || activeSheet === "similar" || activeSheet === "duplicates" || activeSheet === "visualIdentities" || activeSheet === "identityPicker" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory") && styles.fullSheetScroll');
   expect(source.indexOf('accessibilityLabel="Back to collections"')).toBeLessThan(source.indexOf('accessibilityLabel="Search images for visual identity"'));
 });
 
@@ -424,13 +424,13 @@ test("uses full-height destination browsers without legacy sizing props", () => 
   expect(sheet).toContain('? "full" : undefined}');
   expect(sheet).not.toContain('mutation=');
   expect(sheet).not.toContain('tall=');
-  expect(source).toContain('(activeSheet === "destination" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory") && styles.fullSheetContent');
-  expect(source).toContain('(activeSheet === "destination" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory") && styles.fullSheetScroll');
+  expect(source).toContain('(activeSheet === "destination" || activeSheet === "similar" || activeSheet === "duplicates" || activeSheet === "visualIdentities" || activeSheet === "identityPicker" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory") && styles.fullSheetContent');
+  expect(source).toContain('(activeSheet === "destination" || activeSheet === "similar" || activeSheet === "duplicates" || activeSheet === "visualIdentities" || activeSheet === "identityPicker" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory") && styles.fullSheetScroll');
 });
 
 test("fills the mutation body for Gallery search history", () => {
-  expect(source).toContain('(activeSheet === "destination" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory") && styles.fullSheetContent');
-  expect(source).toContain('(activeSheet === "destination" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory") && styles.fullSheetScroll');
+  expect(source).toContain('(activeSheet === "destination" || activeSheet === "similar" || activeSheet === "duplicates" || activeSheet === "visualIdentities" || activeSheet === "identityPicker" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory") && styles.fullSheetContent');
+  expect(source).toContain('(activeSheet === "destination" || activeSheet === "similar" || activeSheet === "duplicates" || activeSheet === "visualIdentities" || activeSheet === "identityPicker" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory") && styles.fullSheetScroll');
   expect(source).toContain('activeSheet === "identityName" || activeSheet === "searchHistory" ? undefined : height * 0.6');
 });
 
@@ -672,6 +672,21 @@ test("uses full-height lists for collection collaboration", () => {
   expect(sharingSource).toContain('list: { gap: 6, paddingBottom: spacing.xl }');
   expect(sharingSource).not.toContain('rowSkeleton');
   expect(sharingSource).not.toContain('variant="ghost"><View><Text numberOfLines={1} style={styles.name}>{link.url}');
+});
+
+test("centers full-sheet Gallery empty and initial load-error states", () => {
+  expect(source).toContain('activeSheet === "similar" || activeSheet === "duplicates" || activeSheet === "visualIdentities" || activeSheet === "identityPicker" || activeSheet === "identityName"');
+  expect(source).toContain('duplicateEmpty: { flexGrow: 1, minHeight: 320, alignItems: "center", justifyContent: "center" }');
+  expect(source).toContain('cleanupError && cleanupImages.length > 0');
+  expect(source).toContain('{cleanupError ?? "No scored images found at this threshold."}');
+  expect(source).toContain('identityError && activeSubjects.length > 0');
+  expect(source).toContain('{identityError ?? "No visual identities yet."}');
+  expect(sharingSource).toContain('loadError && fullHeight ? <View style={styles.sheetEmptyContent}>');
+  expect(sharingSource).toContain('!loading && visibleMembers.length === 0 && styles.sheetEmptyContent');
+  expect(sharingSource).toContain('>No {tab} members.</Text>');
+  expect(sharingSource).toContain('!loading && invites.length === 0 && styles.sheetEmptyContent');
+  expect(sharingSource).toContain('>No pending invites.</Text>');
+  expect(sharingSource).toContain('!loading && visibleLinks.length === 0 && styles.sheetEmptyContent');
 });
 
 test("uses standard-sized compact confirmations and collaboration notices", () => {

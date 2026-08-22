@@ -23,10 +23,13 @@ const {
   galleryQueryKeys,
   getGalleryCollections,
   invalidateAssistantChanges,
+  patchCachedCompassPlace,
   patchGalleryImage,
   patchGalleryUserHiddens,
   reconcileOptimisticCompassPlace,
   reconcileOptimisticCompassTrip,
+  removeCachedCompassPlace,
+  removeCachedCompassTrip,
   removeOptimisticCompassPlace,
   removeOptimisticCompassTrip,
   removeCachedGalleryImages,
@@ -38,6 +41,8 @@ const {
   setCachedGalleryMembers,
   setCachedGalleryShareLinks,
   transferCachedGalleryImages,
+  upsertCachedCompassTrip,
+  upsertCompassTrip,
 } = await import("./workspace-query-cache");
 
 const context: ContentContext = { organizationKey: "org-a", scopeKey: "scope-a" };
@@ -54,6 +59,11 @@ test("isolates every routed workspace key by context and resource", () => {
   expect(galleryQueryKeys.userHiddens(context)).not.toEqual(galleryQueryKeys.userHiddens(otherContext));
   expect(compassQueryKeys.overview(context)).not.toEqual(compassQueryKeys.overview(otherContext));
   expect(compassQueryKeys.trips(context)).toEqual(["compass", "org-a", "scope-a", "trips"]);
+  expect(compassQueryKeys.placeReferences(context, "place-a", "brief")).toEqual(["compass", "org-a", "scope-a", "places", "place-a", "references", "brief"]);
+  expect(compassQueryKeys.placeReferences(context, "place-a", "brief")).not.toEqual(compassQueryKeys.placeReferences(context, "place-a", "activities"));
+  expect(compassQueryKeys.tripGuides(context, "trip-a")).toEqual(["compass", "org-a", "scope-a", "trips", "trip-a", "guides"]);
+  expect(compassQueryKeys.tripGuides(context, "trip-a")).not.toEqual(compassQueryKeys.tripGuides(context, "trip-b"));
+  expect(compassQueryKeys.tripGuides(context, "trip-a")).not.toEqual(compassQueryKeys.tripGuides(otherContext, "trip-a"));
   expect(compassQueryKeys.countryDetail(context, "IS")).toEqual(["compass", "org-a", "scope-a", "country-details", "IS"]);
   expect(compassQueryKeys.countryDetail(context, "IS")).not.toEqual(compassQueryKeys.countryDetail(otherContext, "IS"));
   expect(compassQueryKeys.countryImage(context, "token-a")).not.toEqual(compassQueryKeys.countryImage(context, "token-b"));
@@ -65,9 +75,9 @@ test("isolates every routed workspace key by context and resource", () => {
 });
 
 test("appends and independently reconciles overlapping optimistic Compass trips", () => {
-  const place = { key: "place", kind: "place" as const, name: "Lisbon", summary: "City", countryCode: "PT", latitude: 38.72, longitude: -9.14, createdAt: "2026-08-20T00:00:00.000Z" };
-  const first = { key: "optimistic-first", name: "First", createdAt: place.createdAt, places: [place] };
-  const second = { key: "optimistic-second", name: "Second", createdAt: place.createdAt, places: [place] };
+  const place = { key: "place", kind: "place" as const, name: "Lisbon", summary: "City", countryCode: "PT", latitude: 38.72, longitude: -9.14, status: "wishlist" as const, isFavorite: false, createdAt: "2026-08-20T00:00:00.000Z" };
+  const first = { key: "optimistic-first", name: "First", status: "planned" as const, createdAt: place.createdAt, places: [place] };
+  const second = { key: "optimistic-second", name: "Second", status: "planned" as const, createdAt: place.createdAt, places: [place] };
   const both = appendOptimisticCompassTrip(appendOptimisticCompassTrip([], first), second);
   expect(both.map(({ key }) => key)).toEqual([first.key, second.key]);
 
@@ -77,10 +87,44 @@ test("appends and independently reconciles overlapping optimistic Compass trips"
   expect(removeOptimisticCompassTrip(reconciled, "missing")).toEqual(reconciled);
 });
 
+test("upserts Compass trips in place and appends new trips", () => {
+  const at = "2026-08-20T00:00:00.000Z";
+  const place = { key: "place", kind: "place" as const, name: "Lisbon", summary: "City", countryCode: "PT", latitude: 38.72, longitude: -9.14, status: "wishlist" as const, isFavorite: false, createdAt: at };
+  const first = { key: "first", name: "First", status: "planned" as const, createdAt: at, places: [place] };
+  const second = { key: "second", name: "Second", status: "planned" as const, createdAt: at, places: [place] };
+  const updated = { ...first, name: "Updated" };
+
+  expect(upsertCompassTrip([first, second], updated)).toEqual([updated, second]);
+  expect(upsertCompassTrip([first, second], { ...second, key: "third" }).map(({ key }) => key)).toEqual(["first", "second", "third"]);
+});
+
+test("upserts and removes Compass trips only in the exact context cache", () => {
+  const client = new QueryClient();
+  const at = "2026-08-20T00:00:00.000Z";
+  const place = { key: "place", kind: "place" as const, name: "Lisbon", summary: "City", countryCode: "PT", latitude: 38.72, longitude: -9.14, status: "wishlist" as const, isFavorite: false, createdAt: at };
+  const first = { key: "first", name: "First", status: "planned" as const, createdAt: at, places: [place] };
+  const second = { key: "second", name: "Second", status: "planned" as const, createdAt: at, places: [place] };
+  const exactKey = compassQueryKeys.trips(context);
+  const otherKey = compassQueryKeys.trips(otherContext);
+  const overviewKey = compassQueryKeys.overview(context);
+  client.setQueryData(exactKey, [first, second]);
+  client.setQueryData(otherKey, [first]);
+  client.setQueryData(overviewKey, { sentinel: true });
+  client.setQueryData(compassQueryKeys.tripGuides(context, first.key), [{ key: "guide" }]);
+
+  upsertCachedCompassTrip(client, context, { ...first, name: "Updated" });
+  expect(client.getQueryData(exactKey)).toEqual([{ ...first, name: "Updated" }, second]);
+  removeCachedCompassTrip(client, context, first.key);
+  expect(client.getQueryData(exactKey)).toEqual([second]);
+  expect(client.getQueryData(otherKey)).toEqual([first]);
+  expect(client.getQueryData(overviewKey)).toEqual({ sentinel: true });
+  expect(client.getQueryState(compassQueryKeys.tripGuides(context, first.key))).toBeUndefined();
+});
+
 test("reconciles overlapping Compass saves by optimistic key without erasing siblings", () => {
   const at = "2026-08-20T00:00:00.000Z";
-  const first = { key: "optimistic-first", kind: "place" as const, name: "Lisbon", summary: "First", countryCode: "PT", latitude: 38.72, longitude: -9.14, createdAt: at, coverUrl: "https://signed.test/lisbon.png" };
-  const second = { key: "optimistic-second", kind: "place" as const, name: "Porto", summary: "Second", countryCode: "PT", latitude: 41.15, longitude: -8.61, createdAt: at, coverUrl: "https://signed.test/porto.png" };
+  const first = { key: "optimistic-first", kind: "place" as const, name: "Lisbon", summary: "First", countryCode: "PT", latitude: 38.72, longitude: -9.14, status: "wishlist" as const, isFavorite: false, createdAt: at, coverUrl: "https://signed.test/lisbon.png" };
+  const second = { key: "optimistic-second", kind: "place" as const, name: "Porto", summary: "Second", countryCode: "PT", latitude: 41.15, longitude: -8.61, status: "wishlist" as const, isFavorite: false, createdAt: at, coverUrl: "https://signed.test/porto.png" };
   const recent = { key: "recent-lisbon", kind: "place" as const, name: "Lisbon", summary: "Recent", countryCode: "PT", latitude: 38.72, longitude: -9.14, openedAt: at };
   const both = addOptimisticCompassPlace(addOptimisticCompassPlace({ places: [], recentPlaces: [recent] }, first), second);
   const failedFirst = removeOptimisticCompassPlace(both, first.key);
@@ -91,6 +135,49 @@ test("reconciles overlapping Compass saves by optimistic key without erasing sib
   expect(reconciled.places.map(({ key }) => key).sort()).toEqual([first.key, savedSecond.key].sort());
   expect(reconciled.places.find(({ key }) => key === savedSecond.key)).toMatchObject({ kind: "place", coverUrl: second.coverUrl });
   expect(reconciled.recentPlaces).toEqual([recent]);
+});
+
+test("patches one Compass place across overview, trip, and semantic search caches", () => {
+  const client = new QueryClient();
+  const at = "2026-08-20T00:00:00.000Z";
+  const place = { key: "place", kind: "place" as const, name: "Lisbon", summary: "City", countryCode: "PT", latitude: 38.72, longitude: -9.14, status: "wishlist" as const, isFavorite: false, createdAt: at };
+  const updated = { ...place, status: "visited" as const, isFavorite: true };
+  client.setQueryData(compassQueryKeys.overview(context), { places: [place], recentPlaces: [] });
+  client.setQueryData(compassQueryKeys.trips(context), [{ key: "trip", name: "Portugal", status: "planned", createdAt: at, places: [place] }]);
+  client.setQueryData(compassQueryKeys.placeSearch(context, "coast"), [place]);
+  client.setQueryData(compassQueryKeys.tripSearch(context, "coast"), [{ key: "trip", name: "Portugal", status: "planned", createdAt: at, places: [place] }]);
+  client.setQueryData(compassQueryKeys.overview(otherContext), { places: [place], recentPlaces: [] });
+
+  patchCachedCompassPlace(client, context, updated);
+
+  expect(client.getQueryData<{ places: (typeof updated)[] }>(compassQueryKeys.overview(context))?.places).toEqual([updated]);
+  expect(client.getQueryData<{ places: (typeof updated)[] }[]>(compassQueryKeys.trips(context))?.[0]?.places).toEqual([updated]);
+  expect(client.getQueryData(compassQueryKeys.placeSearch(context, "coast"))).toEqual([updated]);
+  expect(client.getQueryData<{ places: (typeof updated)[] }[]>(compassQueryKeys.tripSearch(context, "coast"))?.[0]?.places).toEqual([updated]);
+  expect(client.getQueryData<{ places: (typeof place)[] }>(compassQueryKeys.overview(otherContext))?.places).toEqual([place]);
+});
+
+test("hard-removes one Compass place and every reference kind from relevant caches", () => {
+  const client = new QueryClient();
+  const at = "2026-08-20T00:00:00.000Z";
+  const removed = { key: "removed", kind: "place" as const, name: "Lisbon", summary: "City", countryCode: "PT", latitude: 38.72, longitude: -9.14, status: "wishlist" as const, isFavorite: false, createdAt: at };
+  const retained = { ...removed, key: "retained", name: "Porto" };
+  const trip = { key: "trip", name: "Portugal", status: "planned" as const, createdAt: at, places: [removed, retained] };
+  client.setQueryData(compassQueryKeys.overview(context), { places: [removed, retained], recentPlaces: [] });
+  client.setQueryData(compassQueryKeys.placeSearch(context, "coast"), [removed, retained]);
+  client.setQueryData(compassQueryKeys.trips(context), [trip]);
+  client.setQueryData(compassQueryKeys.tripSearch(context, "coast"), [trip]);
+  client.setQueryData(compassQueryKeys.placeReferences(context, removed.key, "brief"), [{ key: "brief" }]);
+  client.setQueryData(compassQueryKeys.placeReferences(context, removed.key, "activities"), [{ key: "activities" }]);
+
+  removeCachedCompassPlace(client, context, removed.key);
+
+  expect(client.getQueryData<{ places: (typeof retained)[] }>(compassQueryKeys.overview(context))?.places).toEqual([retained]);
+  expect(client.getQueryData(compassQueryKeys.placeSearch(context, "coast"))).toEqual([retained]);
+  expect(client.getQueryData<(typeof trip)[]>(compassQueryKeys.trips(context))?.[0]?.places).toEqual([retained]);
+  expect(client.getQueryData<(typeof trip)[]>(compassQueryKeys.tripSearch(context, "coast"))?.[0]?.places).toEqual([retained]);
+  expect(client.getQueryState(compassQueryKeys.placeReferences(context, removed.key, "brief"))).toBeUndefined();
+  expect(client.getQueryState(compassQueryKeys.placeReferences(context, removed.key, "activities"))).toBeUndefined();
 });
 
 test("optimistically patches and snapshots Gallery hidden overlays", () => {

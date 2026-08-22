@@ -32,6 +32,12 @@ health checks, and signed-byte transfers are protocol boundaries rather than
 tools. Never expose generic database, arbitrary query, or credential-management
 tools.
 
+Generated travel references use the same canonical travel service from HTTP
+and Core. `trip.guide.generate/list` and the parameterized
+`place.reference.generate/list` persist ordinary Archive documents plus one
+private `generatedDocumentBindings` relation; no travel adapter owns a second
+document implementation.
+
 ## Adding A Tool
 
 1. Search the existing registry for matching semantics.

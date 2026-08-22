@@ -83,8 +83,33 @@ export function reconcileOptimisticCompassPlace(current: CompassOverview | undef
   return { places: sortCompassPlaces([...(current?.places ?? []).filter(({ key }) => key !== optimisticKey && key !== place.key), place]), recentPlaces: current?.recentPlaces ?? [] };
 }
 
+export function patchCachedCompassPlace(queryClient: QueryClient, context: WorkspaceContext, place: Place) {
+  queryClient.setQueryData<CompassOverview>(compassQueryKeys.overview(context), (overview) => overview ? {
+    ...overview,
+    places: overview.places.map((candidate) => candidate.key === place.key ? place : candidate),
+  } : overview);
+  queryClient.setQueryData<Trip[]>(compassQueryKeys.trips(context), (trips) => trips?.map((trip) => ({
+    ...trip,
+    places: trip.places.map((candidate) => candidate.key === place.key ? place : candidate),
+  })));
+  queryClient.setQueriesData<Place[]>({ queryKey: compassQueryKeys.placeSearches(context) }, (places) => places?.map((candidate) => candidate.key === place.key ? place : candidate));
+  queryClient.setQueriesData<Trip[]>({ queryKey: compassQueryKeys.tripSearches(context) }, (trips) => trips?.map((trip) => ({ ...trip, places: trip.places.map((candidate) => candidate.key === place.key ? place : candidate) })));
+}
+
+export function removeCachedCompassPlace(queryClient: QueryClient, context: WorkspaceContext, placeKey: string) {
+  queryClient.setQueryData<CompassOverview>(compassQueryKeys.overview(context), (overview) => overview ? {
+    ...overview,
+    places: overview.places.filter(({ key }) => key !== placeKey),
+  } : overview);
+  queryClient.setQueriesData<Place[]>({ queryKey: compassQueryKeys.placeSearches(context) }, (places) => places?.filter(({ key }) => key !== placeKey));
+  const removeFromTrips = (trips: Trip[] | undefined) => trips?.map((trip) => ({ ...trip, places: trip.places.filter(({ key }) => key !== placeKey) }));
+  queryClient.setQueryData<Trip[]>(compassQueryKeys.trips(context), removeFromTrips);
+  queryClient.setQueriesData<Trip[]>({ queryKey: compassQueryKeys.tripSearches(context) }, removeFromTrips);
+  queryClient.removeQueries({ queryKey: [...compassQueryKeys.places(context), placeKey, "references"] });
+}
+
 export function appendOptimisticCompassTrip(current: Trip[] | undefined, trip: Trip): Trip[] {
-  return [...(current ?? []).filter(({ key }) => key !== trip.key), trip];
+  return upsertCompassTrip(current, trip);
 }
 
 export function removeOptimisticCompassTrip(current: Trip[] | undefined, optimisticKey: string): Trip[] {
@@ -97,6 +122,24 @@ export function reconcileOptimisticCompassTrip(current: Trip[] | undefined, opti
   if (index < 0) return [...remaining, trip];
   remaining.splice(Math.min(index, remaining.length), 0, trip);
   return remaining;
+}
+
+export function upsertCompassTrip(current: Trip[] | undefined, trip: Trip): Trip[] {
+  const trips = current ?? [];
+  const index = trips.findIndex(({ key }) => key === trip.key);
+  if (index < 0) return [...trips, trip];
+  return trips.map((candidate, candidateIndex) => candidateIndex === index ? trip : candidate);
+}
+
+export function upsertCachedCompassTrip(queryClient: QueryClient, context: WorkspaceContext, trip: Trip) {
+  queryClient.setQueryData<Trip[]>(compassQueryKeys.trips(context), (current) => upsertCompassTrip(current, trip));
+  queryClient.setQueriesData<Trip[]>({ queryKey: compassQueryKeys.tripSearches(context) }, (current) => current?.some(({ key }) => key === trip.key) ? upsertCompassTrip(current, trip) : current);
+}
+
+export function removeCachedCompassTrip(queryClient: QueryClient, context: WorkspaceContext, tripKey: string) {
+  queryClient.setQueryData<Trip[]>(compassQueryKeys.trips(context), (current) => removeOptimisticCompassTrip(current, tripKey));
+  queryClient.setQueriesData<Trip[]>({ queryKey: compassQueryKeys.tripSearches(context) }, (current) => removeOptimisticCompassTrip(current, tripKey));
+  queryClient.removeQueries({ queryKey: compassQueryKeys.tripGuides(context, tripKey), exact: true });
 }
 
 export const signalQueryKeys = {

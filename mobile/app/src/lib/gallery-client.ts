@@ -264,9 +264,9 @@ export function getGalleryMemberKey() {
   return typeof value === "string" ? value : "";
 }
 
-async function postGallery<T>(path: string, input: Record<string, unknown>, timeout = 60_000) {
+async function postGallery<T>(path: string, input: Record<string, unknown>, timeout = 60_000, signal?: AbortSignal) {
   try {
-    const response = await apiClient.post<ApiResponse<T>>(path, { ...getGalleryContext(), ...input }, { timeout });
+    const response = await apiClient.post<ApiResponse<T>>(path, { ...getGalleryContext(), ...input }, { signal, timeout });
     const payload = response.data as ApiResponse<T> | undefined;
     if (!payload || typeof payload !== "object" || payload.success !== true) throw galleryClientError(payload && "error" in payload ? payload.error : undefined);
     if (!("data" in payload)) throw galleryClientError(undefined);
@@ -407,8 +407,8 @@ async function fetchWithTimeout(input: string, init: RequestInit | undefined, ti
   }
 }
 
-export function fetchGalleryOverview(collectionKey?: string, cursor?: string, limit = 100, maxCaptionScore?: number) {
-  return postGallery<unknown>("/gallery/overview", { ...(collectionKey ? { collectionKey } : {}), ...(cursor ? { cursor } : {}), limit, ...(maxCaptionScore !== undefined ? { maxCaptionScore } : {}) })
+export function fetchGalleryOverview(collectionKey?: string, cursor?: string, limit = 100, maxCaptionScore?: number, signal?: AbortSignal) {
+  return postGallery<unknown>("/gallery/overview", { ...(collectionKey ? { collectionKey } : {}), ...(cursor ? { cursor } : {}), limit, ...(maxCaptionScore !== undefined ? { maxCaptionScore } : {}) }, 60_000, signal)
     .then((overview) => galleryOverviewSchema.parse(overview))
     .then((overview) => ({ ...overview, collections: overview.collections.map(normalizeCollection) }));
 }

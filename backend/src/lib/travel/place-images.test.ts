@@ -52,8 +52,8 @@ describe('transient place hero generation', () => {
       onMetrics: (value) => metrics.push(value), log: () => {},
     })(input, userKey, { signal: controller.signal, timeoutMs: 12_345 });
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.[0]).toEqual({ mode: 'fixed', organizationKey, actionSlug: 'generate-image', modelSlug: 'bfl.flux-2-klein-4b', providerSlug: 'openrouter' });
-    expect(calls[0]?.[1]).toEqual({ prompt: hero.prompt, count: 1, aspectRatio: '3:2', outputFormat: 'png' });
+    expect(calls[0]?.[0]).toEqual({ mode: 'auto', organizationKey, actionSlug: 'generate-image' });
+    expect(calls[0]?.[1]).toEqual({ prompt: hero.prompt, count: 1, size: '1536x1024', aspectRatio: '3:2', quality: 'low', outputFormat: 'png' });
     expect(calls[0]?.[2]).toEqual({ signal: controller.signal, timeoutMs: 12_345 });
     expect(result).toEqual({ status: 'ready', image: { status: 'ready', title: hero.title, url: `data:image/png;base64,${Buffer.from(png()).toString('base64')}`, width: 1536, height: 1024, mimeType: 'image/png' }, durationMs: expect.any(Number), costUsd: 0.04 });
     expect([...staged.values()][0]).toEqual(png());

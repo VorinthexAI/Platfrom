@@ -1,6 +1,6 @@
 import { beforeEach, expect, mock, test } from "bun:test";
 
-const calls: { path: string; body: Record<string, unknown>; timeout?: number; method?: "GET" }[] = [];
+const calls: { path: string; body: Record<string, unknown>; timeout?: number; signal?: AbortSignal; method?: "GET" }[] = [];
 const responses = new Map<string, unknown>();
 const failures = new Map<string, { message: string; code?: string; transport?: boolean }>();
 const malformed = new Set<string>();
@@ -15,8 +15,8 @@ mock.module("./api-client", () => ({
     if (malformed.has(path)) return { data: { success: false } };
     const response = responses.get(`GET ${path}`);
     return { data: { success: true, data: response } };
-  }, post: async (path: string, body: Record<string, unknown>, options?: { timeout?: number }) => {
-    calls.push({ path, body, timeout: options?.timeout });
+  }, post: async (path: string, body: Record<string, unknown>, options?: { timeout?: number; signal?: AbortSignal }) => {
+    calls.push({ path, body, timeout: options?.timeout, ...(options?.signal ? { signal: options.signal } : {}) });
     if (malformed.has(path)) return { data: { success: false } };
     const failure = failures.get(path);
     if (failure?.transport) throw { response: { data: { success: false, error: { message: failure.message, code: failure.code } } } };
@@ -176,6 +176,13 @@ test("requests cursor pages of one hundred collection images", async () => {
   await fetchGalleryOverview("collection", "next-page");
   expect(calls[0]).toMatchObject({ path: "/gallery/overview", body: { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection", cursor: "next-page", limit: 100 } });
   expect(calls[0]?.body).not.toHaveProperty("maxCaptionScore");
+});
+
+test("passes overview cancellation to the transport", async () => {
+  const controller = new AbortController();
+  await fetchGalleryOverview("collection", undefined, 100, undefined, controller.signal);
+
+  expect(calls[0]?.signal).toBe(controller.signal);
 });
 
 test("sends an inclusive caption score threshold on initial and cursor overview calls", async () => {

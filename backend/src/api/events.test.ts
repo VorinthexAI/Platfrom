@@ -8,6 +8,9 @@ describe('app event routing', () => {
     expect(parseEventEnvelope('{"route":"user","userKey":"user-1","event":"unknown"}')).toBeNull();
     expect(parseEventEnvelope('{"route":"user","userKey":"user-1","event":"image.changed","data":{}}')).toBeNull();
     expect(parseEventEnvelope('{"route":"collection","collectionKey":"collection-1","event":"image.changed","imageKey":"secret"}')).toBeNull();
+    expect(parseEventEnvelope('{"route":"scope","scopeKey":"scope-1","event":"trip.changed"}')).toEqual({ route: 'scope', scopeKey: 'scope-1', event: 'trip.changed' });
+    expect(parseEventEnvelope('{"route":"scope","scopeKey":"scope-1","event":"place.reference.changed"}')).toEqual({ route: 'scope', scopeKey: 'scope-1', event: 'place.reference.changed' });
+    expect(parseEventEnvelope('{"route":"scope","scopeKey":"scope-1","event":"trip.changed","tripKey":"secret"}')).toBeNull();
     expect(parseEventEnvelope('not json')).toBeNull();
   });
 
@@ -27,6 +30,12 @@ describe('app event routing', () => {
     member = false;
     expect(await shouldDeliverEvent(envelope, 'user-1', checkMembership)).toBe(false);
     expect(checks).toBe(2);
+  });
+
+  test('checks current scope membership for scope events', async () => {
+    const envelope = parseEventEnvelope('{"route":"scope","scopeKey":"scope-1","event":"trip.changed"}')!;
+    expect(await shouldDeliverEvent(envelope, 'member', async () => false, async (userKey, scopeKey) => userKey === 'member' && scopeKey === 'scope-1')).toBe(true);
+    expect(await shouldDeliverEvent(envelope, 'outsider', async () => false, async () => false)).toBe(false);
   });
 
   test('delivers highlight changes to current collection members until access is revoked', async () => {
@@ -58,5 +67,6 @@ describe('app event routing', () => {
     expect(source).toContain('member.status == "active"');
     expect(source).toContain('collectionMembership.role == "owner"');
     expect(source).toContain('ownerOnly');
+    expect(source).toContain('export async function hasScopeEventAccess');
   });
 });

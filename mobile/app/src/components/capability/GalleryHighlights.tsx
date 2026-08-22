@@ -58,7 +58,6 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
   const slides = detail ? resolveGalleryHighlightSlides(detail) : [];
   const activeSlide = slides[playback.index];
   const listEmpty = !creating && !listLoading && highlights.length === 0;
-  listSheetOpen.current = open && !detail && !opening && activeSheet === "player";
 
   async function loadList(invalidate = false) {
     const generation = ++listRequest.current;
@@ -67,8 +66,9 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
       if (invalidate) await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.highlights(galleryContext, collection.key), exact: true, refetchType: "none" });
       const result = await queryClient.fetchQuery({ queryKey: galleryQueryKeys.highlights(galleryContext, collection.key), queryFn: () => listGalleryCollectionHighlights(collection.key), staleTime: 0 });
       if (generation === listRequest.current) {
-        setHighlights(result.highlights);
-        setSelectedHighlightKeys((current) => current.filter((key) => result.highlights.some((highlight) => highlight.key === key)));
+        const orderedHighlights = [...result.highlights].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+        setHighlights(orderedHighlights);
+        setSelectedHighlightKeys((current) => current.filter((key) => orderedHighlights.some((highlight) => highlight.key === key)));
       }
     } catch {
       if (generation === listRequest.current) notify("Highlights could not be loaded");
@@ -161,7 +161,15 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
   }
 
   useEffect(() => {
-    if (!open) { listRequest.current += 1; detailRequest.current += 1; createRequest.current += 1; setCreating(false); return; }
+    listSheetOpen.current = open && !detail && !opening && activeSheet === "player";
+  }, [activeSheet, detail, open, opening]);
+
+  useEffect(() => {
+    if (!open) {
+      listRequest.current += 1; detailRequest.current += 1; createRequest.current += 1;
+      const timer = setTimeout(() => setCreating(false), 0);
+      return () => clearTimeout(timer);
+    }
     const timer = setTimeout(() => void loadList(true), 0);
     return () => clearTimeout(timer);
     // Opening or changing collections is the operation boundary; queryClient is stable.
@@ -226,15 +234,15 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
       <ScrollView contentContainerStyle={[styles.grid, listEmpty && styles.emptyGrid]} onLayout={({ nativeEvent }) => setGridWidth(nativeEvent.layout.width)} showsVerticalScrollIndicator={false}>
         {selectedHighlightKeys.length ? <Tabs style={styles.bulkToolbar}>
           <View style={styles.bulkToolbarSelection}><Button accessibilityLabel="Clear highlight selection" contentMode="raw" disabled={deleting} onPress={() => setSelectedHighlightKeys([])} size="md" style={styles.bulkToolbarClose} variant="secondary"><CloseIcon size="sm" /></Button><Text style={styles.bulkSelectionText}>{selectedHighlightKeys.length} selected</Text></View>
-          <Button disabled={deleting} onPress={() => { listSheetOpen.current = false; setActiveSheet("confirmDelete"); }} size="md" style={styles.bulkDeleteAction} variant="secondary">Delete</Button>
+          <Button disabled={deleting} onPress={() => { listSheetOpen.current = false; setActiveSheet("confirmDelete"); }} size="md" style={styles.bulkDeleteAction} textStyle={styles.bulkDeleteText} variant="secondary">Delete</Button>
         </Tabs> : null}
-        {creating ? <View accessibilityLabel="Creating highlight" accessibilityRole="progressbar"><Skeleton style={[styles.cardFrame, { width: cardWidth, height: cardWidth * 16 / 9 }]} /></View> : null}
         {listLoading ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.cardFrame, { width: cardWidth, height: cardWidth * 16 / 9 }]} />) : highlights.map((highlight) => { const selected = selectedHighlightKeys.includes(highlight.key); return <Button accessibilityActions={owner ? [{ name: "longpress", label: selected ? "Deselect highlight" : "Select highlight" }] : undefined} accessibilityLabel={`${highlight.title}, ${highlight.slideCount} slides`} accessibilityState={{ selected }} contentMode="raw" disabled={creating || opening || deleting} key={highlight.key} onAccessibilityAction={owner ? ({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") toggleHighlightSelection(highlight.key); } : undefined} onLongPress={owner ? () => handleHighlightLongPress(highlight.key) : undefined} onPress={() => handleHighlightPress(highlight)} shape="rounded" size="md" style={[styles.cardFrame, styles.card, selected && styles.cardSelected, { width: cardWidth, height: cardWidth * 16 / 9 }]} variant="ghost">
           {highlight.coverUrl ? <Image contentFit="cover" source={highlight.coverUrl} style={StyleSheet.absoluteFill} transition={180} /> : null}
           <View style={styles.cardShade} />
           <View style={styles.cardCopy}><Text numberOfLines={2} style={styles.title}>{highlight.title}</Text><Text style={styles.cardCount}>{highlight.slideCount} slide{highlight.slideCount === 1 ? "" : "s"}</Text></View>
           {selected ? <View pointerEvents="none" style={styles.selectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}
         </Button>; })}
+        {creating ? <View accessibilityLabel="Creating highlight" accessibilityRole="progressbar"><Skeleton style={[styles.cardFrame, { width: cardWidth, height: cardWidth * 16 / 9 }]} /></View> : null}
         {listEmpty ? <Text style={styles.empty}>No highlights yet.</Text> : null}
       </ScrollView>
     </BottomSheet>
@@ -245,7 +253,7 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
         <View accessibilityLabel={`Slide ${slides.length ? playback.index + 1 : 0} of ${slides.length}`} accessibilityRole="progressbar" style={styles.progress}>{slides.map((slide, index) => <View key={slide.key} style={styles.progressTrack}><View style={[styles.progressFill, { width: index < playback.index ? "100%" : index > playback.index ? "0%" : `${Math.min(100, playback.progressMs / HIGHLIGHT_SLIDE_DURATION_MS * 100)}%` }]} /></View>)}</View>
         <View style={styles.controls}>
           <Button accessibilityLabel="Previous slide" contentMode="raw" disabled={playback.index === 0 || slides.length === 0} onPress={() => dispatch({ type: "previous" })} size="md" variant="icon"><ChevronLeftIcon /></Button>
-          <Button accessibilityLabel={playback.playing ? "Pause highlight" : "Play highlight"} contentMode="raw" disabled={slides.length === 0} onPress={() => dispatch(playback.playing ? { type: "pause" } : { type: "play", slideCount: slides.length })} size="md" variant="primary">{playback.playing ? <PauseIcon variant="inverse" /> : <PlayIcon variant="inverse" />}</Button>
+          <Button accessibilityLabel={playback.playing ? "Pause highlight" : "Play highlight"} contentMode="raw" disabled={slides.length === 0} onPress={() => dispatch(playback.playing ? { type: "pause" } : { type: "play", slideCount: slides.length })} size="md" style={styles.playbackToggle} variant="primary">{playback.playing ? <PauseIcon variant="inverse" /> : <PlayIcon variant="inverse" />}</Button>
           <Button accessibilityLabel="Next slide" contentMode="raw" disabled={playback.index >= slides.length - 1 || slides.length === 0} onPress={() => dispatch({ type: "next", slideCount: slides.length })} size="md" variant="icon"><ChevronRightIcon /></Button>
         </View>
         <Text style={styles.count}>{slides.length} slide{slides.length === 1 ? "" : "s"}</Text>
@@ -261,11 +269,12 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
 const styles = StyleSheet.create({
   grid: { flexDirection: "row", flexWrap: "wrap", gap: GAP, paddingVertical: spacing.md },
   emptyGrid: { flexGrow: 1, alignItems: "center", justifyContent: "center" },
-  bulkToolbar: { width: "100%", minHeight: 40, padding: 5, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderWidth: 1, backgroundColor: palette.panel },
+  bulkToolbar: { width: "100%", minHeight: 36, marginBottom: spacing.xs, padding: 3, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderWidth: 1, backgroundColor: palette.panel },
   bulkToolbarSelection: { flexDirection: "row", alignItems: "center", gap: 8 },
-  bulkToolbarClose: { height: 28, width: 28, paddingHorizontal: 0, paddingVertical: 0 },
+  bulkToolbarClose: { height: 30, minHeight: 30, width: 30, paddingHorizontal: 0, paddingVertical: 0 },
   bulkSelectionText: { color: palette.silver100, fontFamily: fonts.medium, fontSize: 12 },
-  bulkDeleteAction: { minWidth: 74 },
+  bulkDeleteAction: { height: 30, minHeight: 30, minWidth: 68, paddingHorizontal: 12, paddingVertical: 0 },
+  bulkDeleteText: { fontFamily: fonts.regular, fontSize: 11, letterSpacing: 0.4 },
   cardFrame: { overflow: "hidden", borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.sm, backgroundColor: palette.panelRaised },
   card: { alignItems: "stretch", justifyContent: "flex-end", padding: 0 },
   cardSelected: { borderColor: palette.silver50, borderWidth: 2 },
@@ -282,6 +291,7 @@ const styles = StyleSheet.create({
   progressTrack: { flex: 1, height: 3, overflow: "hidden", borderRadius: 2, backgroundColor: palette.silver700 },
   progressFill: { height: "100%", backgroundColor: palette.silver50 },
   controls: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.md },
+  playbackToggle: { height: 39, minHeight: 39, width: 39 },
   count: { textAlign: "center", color: palette.silver500, fontFamily: fonts.regular, fontSize: 12 },
   compactActions: { gap: spacing.sm },
   empty: { width: "100%", paddingVertical: spacing.md, textAlign: "center", color: palette.silver500, fontFamily: fonts.regular, fontSize: 13 },

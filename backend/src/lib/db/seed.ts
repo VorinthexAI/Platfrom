@@ -19,6 +19,7 @@ import { ACTION_DEFINITIONS } from '@/lib/ai/actions';
 import { COUNTRY_CATALOG } from '@/lib/travel/country-catalog';
 import { currentEmbeddingSchema, embedText } from '@/lib/embeddings';
 import { createHash } from 'node:crypto';
+import { ensureGeneratedDocumentFolders } from '@/lib/generated-documents/folders';
 
 export type SeedResult = {
   collection: string;
@@ -599,6 +600,7 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
     actualKeysBySeedKey.set(seed.key, scope.key);
     results.push({ collection: 'scopes', key: scope.key, status: 'created' });
   }
+  for (const scope of organizationScopes) await ensureGeneratedDocumentFolders(db, scope.key);
 
   const relationsByChild = new Map<string, { parentKey: string; childKey: string }>();
   for (const scope of organizationScopes) {

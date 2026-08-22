@@ -91,6 +91,12 @@ export const COUNTRIES = parseCountryFeatureCollection({
   })),
 });
 
+const NON_SELECTABLE_COUNTRY_CODES = new Set(["AQ", "XK"]);
+
+export function isSelectableCountryFeature(feature: CountryFeature) {
+  return !NON_SELECTABLE_COUNTRY_CODES.has(feature.properties.countryCode);
+}
+
 export function findCountryAtCoordinates(
   collection: CountryFeatureCollection,
   latitude: number,
@@ -98,9 +104,9 @@ export function findCountryAtCoordinates(
 ): CountryFeature | undefined {
   if (latitude < -90 || latitude > 90 || !Number.isFinite(latitude) || !Number.isFinite(longitude)) return undefined;
 
-  return collection.features.find((feature) => feature.geometry.type === "Polygon"
+  return collection.features.find((feature) => isSelectableCountryFeature(feature) && (feature.geometry.type === "Polygon"
     ? pointInPolygon(longitude, latitude, feature.geometry.coordinates)
-    : pointInMultiPolygon(longitude, latitude, feature.geometry.coordinates));
+    : pointInMultiPolygon(longitude, latitude, feature.geometry.coordinates)));
 }
 
 export function createCountryBoundaryGeometry(

@@ -24,6 +24,8 @@ import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
 import { chunkDocumentContent, documentSemanticHash } from '@/lib/ai/document-processing/chunking';
 import type { DocumentScanInput } from '@/lib/ai/document-scanning';
 import type { UserSearchService } from '@/lib/user-searches/service';
+import type { GeneratedDocumentBinding } from '@/lib/db/generated-document-bindings.node';
+import { withArangoKey } from '@/lib/db/base';
 
 type Role = 'viewer' | 'moderator' | 'admin' | 'owner';
 type SafeEvent = {
@@ -86,6 +88,7 @@ export interface ContentRepository {
   semanticSearch(input: { embedding: number[]; authorizedScopeKeys: string[]; folderKeys?: string[]; documentKeys?: string[]; extensions?: Document['extension'][]; createdAfter?: string; createdBefore?: string; updatedAfter?: string; updatedBefore?: string; minScore?: number; limit?: number }): Promise<Array<{ score: number; document: Document; matchedContent?: string }>>;
   semanticSearchFolders?(input: { embedding: number[]; authorizedScopeKeys: string[]; folderKeys?: string[]; minScore: number; limit: number }): Promise<Array<{ score: number; folder: Folder }>>;
   semanticNeighbors?(input: { embedding: number[]; scopeKey: string; activeFolderKeys: string[]; sourceFolderKey?: string; sourceDocumentKey?: string; limit: number }): Promise<{ folders: Array<{ score: number; folder: Folder }>; documents: Array<{ score: number; document: Document }>; files: Array<{ score: number; document: Document }> }>;
+  generatedDocumentBindings?(documentKeys: string[]): Promise<GeneratedDocumentBinding[]>;
   transaction?<T>(operation: (repository: ContentRepository) => Promise<T>): Promise<T>;
 }
 
@@ -121,6 +124,9 @@ export interface ContentToolDependencies extends RouterDependencies {
   signFolderCoverUrl?: (storageKey: string) => Promise<string>;
   signDocumentSourceUrl?: (storageKey: string) => Promise<string>;
   signAudioUrl?: (storageKey: string) => Promise<string>;
+  publishTripChange?: (scopeKey: string) => Promise<void>;
+  publishPlaceReferenceChange?: (scopeKey: string) => Promise<void>;
+  publishContentChange?: (scopeKey: string) => Promise<void>;
 }
 
 const rank: Record<Role, number> = { viewer: 1, moderator: 2, admin: 3, owner: 4 };
@@ -155,7 +161,7 @@ function mappedError(error: unknown, tool: ContentToolName, action?: string, res
 }
 
 async function folderView(folder: Folder, dependencies: Pick<RuntimeDefaults, 'getFolderCoverImage' | 'signFolderCoverUrl'>) {
-  const { embedding: _embedding, coverImageKey, _internalDeletion: _internalDeletion, ...safe } = folder;
+  const { embedding: _embedding, coverImageKey, purpose: _purpose, mutationPolicy: _mutationPolicy, _internalDeletion: _internalDeletion, ...safe } = folder;
   if (!coverImageKey) return safe;
   const image = await dependencies.getFolderCoverImage(folder.scopeKey, coverImageKey);
   return { ...safe, ...(image ? { coverUrl: await dependencies.signFolderCoverUrl(image.storageKey) } : {}) };
@@ -377,6 +383,12 @@ async function productionRepository(): Promise<ContentRepository> {
     semanticSearch: documents.semanticSearchDocuments,
     semanticSearchFolders: folders.semanticSearchFolders,
     semanticNeighbors: persistence.semanticNeighbors,
+    async generatedDocumentBindings(documentKeys) {
+      if (documentKeys.length === 0) return [];
+      const cursor = await client.db.query('FOR binding IN generatedDocumentBindings FILTER binding.documentKey IN @documentKeys RETURN binding', { documentKeys });
+      const { generatedDocumentBindingSchema } = await import('@/lib/db/generated-document-bindings.node');
+      return (await cursor.all()).map((value) => generatedDocumentBindingSchema.parse(withArangoKey(value as Record<string, unknown>)));
+    },
     transaction: (operation) => content.withContentPersistenceTransaction((bound) => operation(makeRepository(bound))),
   });
   return makeRepository(content.contentPersistence);
@@ -840,6 +852,12 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
     ownsIdempotencyClaim = true;
   }
   let result: unknown;
+  const changedTripScopeKeys = new Set<string>();
+  const linkedMutationKeys = tool === 'document.update' ? input.updates.map((item: any) => item.documentKey)
+    : tool === 'document.rename' ? input.renames.map((item: any) => item.documentKey)
+      : tool === 'document.move' ? input.moves.map((item: any) => item.documentKey)
+        : tool === 'document.delete' ? input.documentKeys : [];
+  const linkedBindings = linkedMutationKeys.length > 0 && repo.generatedDocumentBindings ? await repo.generatedDocumentBindings(linkedMutationKeys) : [];
   try {
     if (tool === 'folder.create') {
       const creates = input.folders.map((item: any) => ({ ...item, key: item.key ?? d.id() }));
@@ -850,6 +868,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           if (item.parentFolderKey) {
             const parent = await folder(item.parentFolderKey, 'moderator', false);
             if (parent.scopeKey !== item.scopeKey) fail('FOLDER_MOVE_FORBIDDEN', 'Parent belongs to another scope.', tool, 'insert', item.parentFolderKey);
+            if (parent.mutationPolicy === 'system-container') fail('CONTENT_FORBIDDEN', 'System container folders cannot contain child folders.', tool, 'insert', item.parentFolderKey);
           }
           if (item.coverImageKey && !await d.getFolderCoverImage(item.scopeKey, item.coverImageKey)) fail('CONTENT_NOT_FOUND', 'Folder cover image was not found in this scope.', tool, 'read', item.coverImageKey);
           const embedding = await embed([item.name, item.description].filter(Boolean).join('\n\n'), item.key, item.scopeKey);
@@ -938,6 +957,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         preflight: async () => { await folder(item.folderKey, 'moderator', false); },
         run: async (mutationRepository: ContentRepository) => {
           const current = await folder(item.folderKey, 'moderator', false);
+          if (current.mutationPolicy === 'system-container' && (tool === 'folder.rename' || item.name !== undefined || item.description !== undefined || item.coverImageKey !== undefined)) fail('CONTENT_FORBIDDEN', 'System container folder metadata is managed by the system.', tool, 'update', current.key);
           if (item.coverImageKey && !await d.getFolderCoverImage(current.scopeKey, item.coverImageKey)) fail('CONTENT_NOT_FOUND', 'Folder cover image was not found in this scope.', tool, 'read', item.coverImageKey);
           const changesEmbedding = item.name !== undefined || item.description !== undefined;
           const name = item.name ?? current.name;
@@ -959,6 +979,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         key: item.folderKey,
         preflight: async () => {
           const source = await folder(item.folderKey, 'admin', false);
+          if (source.mutationPolicy === 'system-container') fail('CONTENT_FORBIDDEN', 'System container folders cannot be moved.', tool, 'update', source.key);
           if (!item.targetParentFolderKey) return;
           const target = await folder(item.targetParentFolderKey, 'admin', false);
           if (source.scopeKey !== target.scopeKey) fail('FOLDER_MOVE_FORBIDDEN', 'Cross-scope folder moves are forbidden.', tool, 'update', source.key);
@@ -980,6 +1001,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         key: item.folderKey,
         run: async () => {
           const source = await folder(item.folderKey, 'viewer', false);
+          if (source.mutationPolicy === 'system-container') fail('CONTENT_FORBIDDEN', 'System container folders cannot be copied.', tool, 'copy', source.key);
           const target = await location(item.targetScopeKey, item.targetParentFolderKey, 'moderator');
           const sourceScopeFolders = await foldersIn(source.scopeKey);
           const sourceFolders = [source, ...descendants(sourceScopeFolders, source.key)];
@@ -1107,6 +1129,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         key,
         preflight: async () => {
           const root = await folder(key, 'owner', true);
+          if (root.mutationPolicy === 'system-container') fail('CONTENT_FORBIDDEN', 'System container folders cannot be deleted.', tool, 'delete', key);
           if (root._internalDeletion) {
             const manifest = root._internalDeletion;
             if (input.atomic) fail('CONTENT_CONFLICT', 'Atomic folder deletion cannot resume an existing deletion manifest.', tool, 'transaction', key);
@@ -1134,6 +1157,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             const marker = { kind: 'folder' as const, owner: invocationKey, startedAt: now(), folderKeys: affected.map((item) => item.key), documentKeys: [], objectKeys: [] };
             for (const item of [...affected].reverse()) if (!await mutationRepository.setFolderDeletion(item.key, marker)) fail('CONTENT_CONFLICT', 'Folder could not be frozen for deletion.', tool, 'transaction', item.key);
             for (const item of [...affected].reverse()) await mutationRepository.deleteFolder(item.key);
+            changedTripScopeKeys.add(candidate.scopeKey);
             return {};
           }
           if (!repo.transaction) fail('CONTENT_CONFLICT', 'Transaction-bound deletion marking is unavailable.', tool, 'transaction', key);
@@ -1230,6 +1254,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             for (const item of affected.reverse()) await bound.deleteFolder(item.key);
           };
             await repo.transaction(removeMetadata);
+            changedTripScopeKeys.add(root.scopeKey);
           } catch (error) {
             if (ownsFreeze && !storageStarted) await repo.transaction(async (bound) => {
               for (const item of documents) await bound.setDocumentDeletion(item.key, undefined, invocationKey);
@@ -2297,6 +2322,25 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
     const parsed = contentToolOutputSchemas[tool].parse(result) as ContentToolOutput<Name>;
     executionCompleted = true;
     if (idempotencyIdentity && requestHash && ownsIdempotencyClaim) await d.idempotency.complete(idempotencyIdentity, requestHash, invocationKey, parsed, now());
+    if (tool === 'folder.delete' && changedTripScopeKeys.size > 0) {
+      const publishTripChange = dependencies.publishTripChange ?? (!dependencies.repository
+        ? async (scopeKey: string) => (await import('@/api/events')).publishScopeEvent(scopeKey, 'trip.changed')
+        : undefined);
+      if (publishTripChange) await Promise.all([...changedTripScopeKeys].map((scopeKey) => publishTripChange(scopeKey).catch(() => undefined)));
+    }
+    if (linkedBindings.length > 0 && 'summary' in parsed && parsed.summary.succeeded > 0) {
+      const contentScopes = new Set(linkedBindings.map(({ scopeKey }) => scopeKey));
+      const tripScopes = new Set(linkedBindings.filter(({ subjectType }) => subjectType === 'trip').map(({ scopeKey }) => scopeKey));
+      const placeScopes = new Set(linkedBindings.filter(({ subjectType }) => subjectType === 'place').map(({ scopeKey }) => scopeKey));
+      const publishContentChange = dependencies.publishContentChange ?? (!dependencies.repository ? async (scopeKey: string) => (await import('@/api/events')).publishScopeEvent(scopeKey, 'content.changed') : undefined);
+      const publishTripChange = dependencies.publishTripChange ?? (!dependencies.repository ? async (scopeKey: string) => (await import('@/api/events')).publishScopeEvent(scopeKey, 'trip.changed') : undefined);
+      const publishPlaceReferenceChange = dependencies.publishPlaceReferenceChange ?? (!dependencies.repository ? async (scopeKey: string) => (await import('@/api/events')).publishScopeEvent(scopeKey, 'place.reference.changed') : undefined);
+      await Promise.all([
+        ...[...contentScopes].map((scopeKey) => publishContentChange?.(scopeKey).catch(() => undefined)),
+        ...[...tripScopes].map((scopeKey) => publishTripChange?.(scopeKey).catch(() => undefined)),
+        ...[...placeScopes].map((scopeKey) => publishPlaceReferenceChange?.(scopeKey).catch(() => undefined)),
+      ]);
+    }
     await event('action', 'succeeded', 'tool', undefined, context.runtimeScopeKey, Math.round(performance.now() - invocationStarted));
     return parsed;
   } catch (error) {

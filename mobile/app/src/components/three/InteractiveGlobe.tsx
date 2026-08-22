@@ -5,6 +5,8 @@ import { useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import * as THREE from "three";
 
 import { Canvas } from "@/components/three/Canvas";
+import { COMPASS_MARKER_RGBA_BASE64, COMPASS_MARKER_SIZE } from "../../data/compass-marker-texture.generated";
+import { decodeBase64Bytes } from "@/lib/earth-textures";
 import {
   COUNTRIES,
   createCountryBoundaryGeometry,
@@ -36,6 +38,8 @@ export type InteractiveGlobeProps = {
   autoRotate?: boolean;
   focusRequest?: number;
   focusTarget?: Readonly<{ countryCode: string; latitude: number; longitude: number }>;
+  markers?: readonly Readonly<{ key: string; latitude: number; longitude: number }>[];
+  onMarkerPress?: (key: string) => void;
   onCountryPress?: (country: CountryFeature | undefined, coordinates: { latitude: number; longitude: number }) => void;
   reducedMotion?: boolean;
   savedCountryCodes?: readonly string[];
@@ -127,6 +131,8 @@ function GlobeScene({
   controlsRef,
   focusRequest,
   focusTarget,
+  markers = [],
+  onMarkerPress,
   onCountryPress,
   reducedMotion,
   savedCountryCodes = [],
@@ -175,6 +181,16 @@ function GlobeScene({
     const country = COUNTRIES.features.find(({ properties }) => properties.countryCode === highlightedCountryCode);
     return country ? createCountryFillGeometry(country, 1.022) : undefined;
   }, [highlightedCountryCode]);
+  const markerTexture = useMemo(() => {
+    const texture = new THREE.DataTexture(decodeBase64Bytes(COMPASS_MARKER_RGBA_BASE64), COMPASS_MARKER_SIZE, COMPASS_MARKER_SIZE, THREE.RGBAFormat, THREE.UnsignedByteType);
+    texture.flipY = true;
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.magFilter = THREE.LinearFilter;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.generateMipmaps = true;
+    texture.needsUpdate = true;
+    return texture;
+  }, []);
   const rotationDelta = useMemo(() => new THREE.Quaternion(), []);
   const worldYAxis = useMemo(() => new THREE.Vector3(0, 1, 0), []);
   const inertiaAxis = useRef(new THREE.Vector3(0, 1, 0));
@@ -186,6 +202,7 @@ function GlobeScene({
   useEffect(() => () => savedFills.forEach((geometry) => geometry.dispose()), [savedFills]);
   useEffect(() => () => focusBoundaries.forEach((geometry) => geometry.dispose()), [focusBoundaries]);
   useEffect(() => () => focusFill?.dispose(), [focusFill]);
+  useEffect(() => () => markerTexture.dispose(), [markerTexture]);
   useEffect(() => {
     const globe = globeRef.current;
     if (!globe || focusCountryCode === undefined || focusLatitude === undefined || focusLongitude === undefined) {
@@ -383,6 +400,11 @@ function GlobeScene({
       coordinates,
     );
   };
+  const markerTransforms = markers.map((marker) => {
+    const point = latLonToVector(marker.latitude, marker.longitude, 1.055);
+    const normal = new THREE.Vector3(point.x, point.y, point.z).normalize();
+    return { ...marker, position: [point.x, point.y, point.z] as const, quaternion: new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal) };
+  });
 
   return (
     <>
@@ -427,6 +449,18 @@ function GlobeScene({
             <lineBasicMaterial ref={index === 1 ? pulseMaterial : undefined} color="#e7f7fb" transparent opacity={index === 1 ? 1 : 0.72} />
           </lineSegments>
         ))}
+        {markerTransforms.map((marker) => (
+          <group key={marker.key} position={marker.position} quaternion={marker.quaternion} onClick={(event) => { event.stopPropagation(); if (!gestureRef.current.moved) onMarkerPress?.(marker.key); }}>
+            <mesh>
+              <circleGeometry args={[0.052, 24]} />
+              <meshBasicMaterial depthWrite={false} opacity={0} transparent />
+            </mesh>
+            <mesh position={[0, 0, 0.002]}>
+              <planeGeometry args={[0.078, 0.078]} />
+              <meshBasicMaterial alphaTest={0.04} depthWrite={false} map={markerTexture} side={THREE.DoubleSide} toneMapped={false} transparent />
+            </mesh>
+          </group>
+        ))}
       </group>
       <mesh scale={1.035}>
         <sphereGeometry args={[GLOBE_RADIUS, 48, 32]} />
@@ -446,6 +480,8 @@ export function InteractiveGlobe({
   autoRotate,
   focusRequest,
   focusTarget,
+  markers,
+  onMarkerPress,
   onCountryPress,
   reducedMotion,
   savedCountryCodes,
@@ -493,6 +529,8 @@ export function InteractiveGlobe({
         controlsRef={controlsRef}
         focusRequest={focusRequest}
         focusTarget={focusTarget}
+        markers={markers}
+        onMarkerPress={onMarkerPress}
         onCountryPress={onCountryPress}
         reducedMotion={reducedMotion ?? systemReducedMotion}
         savedCountryCodes={savedCountryCodes}

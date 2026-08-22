@@ -152,7 +152,7 @@ describe('scope repository', () => {
   test('hard-deletes managed place media and queues permanent object deletion during scope teardown', async () => {
     const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
     const teardown = source.slice(source.indexOf('async removeScope(scopeKey)'), source.indexOf('async addScopeRelation'));
-    for (const collection of ['placeImages', 'collectionImages', 'imageIdentities', 'imageCollecitionHightlights', 'imageCollectionMemories', 'collectionInvites', 'collectionMembers', 'tagAssignments', 'shares', 'userHiddens', 'places', 'images', 'imageCaptions', 'collections', 'scopeScopes', 'scopeMembers', 'scopes']) expect(teardown).toContain(collection);
+    for (const collection of ['generatedDocumentBindings', 'tripAttachments', 'tripCreationReceipts', 'placeImages', 'collectionImages', 'imageIdentities', 'imageCollecitionHightlights', 'imageCollectionMemories', 'collectionInvites', 'collectionMembers', 'tagAssignments', 'shares', 'userHiddens', 'places', 'images', 'imageCaptions', 'collections', 'scopeScopes', 'scopeMembers', 'scopes']) expect(teardown).toContain(collection);
     expect(teardown).toContain('UPSERT { storageKey: image.storageKey }');
     expect(teardown).toContain('storageDeletionJobs');
     expect(teardown).toContain('collection.purpose == "place-media" && collection.mutationPolicy == "system-only"');
