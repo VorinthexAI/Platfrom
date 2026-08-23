@@ -1,0 +1,21 @@
+import { z } from 'zod';
+import { currentEmbeddingSchema } from '@/lib/embeddings';
+
+export const INBOXES_COLLECTION = 'inboxes';
+export const inboxEmbeddingFields = ['name', 'description'] as const;
+
+export const inboxSchema = z.object({
+  key: z.string().cuid(),
+  organizationKey: z.string().min(1),
+  scopeKey: z.string().cuid(),
+  connectorKey: z.string().cuid(),
+  name: z.string().trim().min(1).max(255),
+  description: z.string().trim().min(1).max(10_000).optional(),
+  coverImageKey: z.string().cuid().optional(),
+  isFavorite: z.boolean(),
+  embedding: currentEmbeddingSchema,
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+export type Inbox = z.infer<typeof inboxSchema>;

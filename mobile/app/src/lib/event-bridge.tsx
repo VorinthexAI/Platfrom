@@ -45,6 +45,7 @@ export function AuthenticatedEventBridge() {
       void queryClient.invalidateQueries({ queryKey: signalQueryKeys.overviews(compassContext), refetchType: "active" });
       void queryClient.invalidateQueries({ queryKey: signalQueryKeys.details(compassContext), refetchType: "active" });
       void queryClient.invalidateQueries({ queryKey: signalQueryKeys.tones(compassContext), refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: signalQueryKeys.replyContexts(compassContext), refetchType: "active" });
     };
     const inCurrentGallery = (queryKey: readonly unknown[]) => root.every((value, index) => queryKey[index] === value);
     const invalidateSharingSuffix = (suffixes: readonly string[]) => {
@@ -82,6 +83,7 @@ export function AuthenticatedEventBridge() {
         if (event.event === "content.changed") {
           invalidateArchive();
           void queryClient.invalidateQueries({ queryKey: signalQueryKeys.tones(compassContext), refetchType: "active" });
+          void queryClient.invalidateQueries({ queryKey: signalQueryKeys.replyContexts(compassContext), refetchType: "active" });
           publishAppEvent({ type: "inbox.changed" });
           invalidateCompassTrips();
           invalidateCompassPlaceReferences();

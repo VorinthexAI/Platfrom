@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { deterministicEmailClassification } from './classification';
+import { deterministicEmailClassification, emailLabelsVisibleInInbox, inboxCategoryFor } from './classification';
 import { buildGmailAuthorizationUrl, createGmailClient, emailAddresses, messageBodies } from './gmail';
 
 describe('Gmail connector protocol', () => {
@@ -24,6 +24,14 @@ describe('Gmail connector protocol', () => {
   test('classifies provider labels and urgent subjects deterministically', () => {
     expect(deterministicEmailClassification({ labels: ['CATEGORY_PROMOTIONS'], subject: 'Sale', from: 'shop@example.com', direction: 'inbound' })).toMatchObject({ priority: 'low', state: 'filtered', category: 'promotions' });
     expect(deterministicEmailClassification({ labels: ['INBOX'], subject: 'Urgent: review today', from: 'lead@example.com', direction: 'inbound' })).toMatchObject({ priority: 'urgent', state: 'needs_action' });
+    expect(inboxCategoryFor(['TRASH'], { priority: 'urgent', state: 'needs_action' })).toBe('Filtered');
+    expect(inboxCategoryFor([], { priority: 'normal', state: 'filtered' })).toBe('Filtered');
+    expect(inboxCategoryFor([], { priority: 'urgent', state: 'needs_action' })).toBe('Urgent');
+    expect(inboxCategoryFor([], { priority: 'high', state: 'needs_action' })).toBe('Important');
+    expect(emailLabelsVisibleInInbox(['INBOX'])).toBe(true);
+    expect(emailLabelsVisibleInInbox(['SPAM'])).toBe(true);
+    expect(emailLabelsVisibleInInbox(['TRASH'])).toBe(true);
+    expect(emailLabelsVisibleInInbox(['SENT'])).toBe(false);
   });
 
   test('requests paginated inbox and incremental history without exposing tokens in URLs', async () => {
@@ -39,14 +47,17 @@ describe('Gmail connector protocol', () => {
     await client.threadMetadata('thread-1');
     await client.message('message-1');
     await client.watch('projects/project/topics/gmail');
+    await client.trashThread('thread-1');
     await client.revoke();
-    expect(requests[0]).toContain('includeSpamTrash=false');
+    expect(requests[0]).toContain('includeSpamTrash=true');
     expect(requests[0]).toContain('pageToken=next-page');
     expect(requests[1]).toContain('startHistoryId=history-1');
     expect(requests.join(' ')).not.toContain('private-access-token');
     expect(requests[2]).toContain('/threads/thread-1?format=minimal');
     expect(requests[3]).toContain('/messages/message-1?format=full');
     expect(bodies[4]).toBe(JSON.stringify({ topicName: 'projects/project/topics/gmail' }));
-    expect(bodies[5]).toBe('token=private-access-token');
+    expect(requests[5]).toContain('/threads/thread-1/trash');
+    expect(bodies[5]).toBe('{}');
+    expect(bodies[6]).toBe('token=private-access-token');
   });
 });

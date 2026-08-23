@@ -25,7 +25,9 @@ const {
   invalidateAssistantChanges,
   patchCachedCompassPlace,
   patchGalleryImage,
+  patchSignalInbox,
   patchSignalThread,
+  moveSignalThreadToFiltered,
   patchGalleryUserHiddens,
   reconcileOptimisticCompassPlace,
   reconcileOptimisticCompassTrip,
@@ -44,6 +46,12 @@ const {
   transferCachedGalleryImages,
   upsertCachedCompassTrip,
   upsertCompassTrip,
+  upsertSignalTone,
+  upsertSignalSummary,
+  upsertSignalTranslationVersion,
+  removeSignalReplyContexts,
+  reconcileSignalTrashedThread,
+  upsertSignalReplyContext,
 } = await import("./workspace-query-cache");
 
 const context: ContentContext = { organizationKey: "org-a", scopeKey: "scope-a" };
@@ -75,6 +83,8 @@ test("isolates every routed workspace key by context and resource", () => {
   expect(signalQueryKeys.overviewPage(context, "connector-a", "all", undefined, "cursor-a")).not.toEqual(signalQueryKeys.overviewPage(context, "connector-a", "all", undefined, "cursor-b"));
   expect(signalQueryKeys.detail(context, "connector-a", "thread-a")).not.toEqual(signalQueryKeys.detail(context, "connector-b", "thread-a"));
   expect(signalQueryKeys.tones(context)).not.toEqual(signalQueryKeys.tones(otherContext));
+  expect(signalQueryKeys.replyContexts(context)).toEqual(["signal", "org-a", "scope-a", "reply-contexts"]);
+  expect(signalQueryKeys.replyContexts(context)).not.toEqual(signalQueryKeys.replyContexts(otherContext));
   expect(ascendQueryKeys.detail(context, "book-a")).not.toEqual(ascendQueryKeys.detail(otherContext, "book-a"));
 });
 
@@ -278,7 +288,7 @@ test("patches Signal favorites across filtered overviews and the exact detail ca
   const overview = { accounts: [], selectedAccount: null, threads: [thread], drafts: [], counts: { all: 1, important: 0, urgent: 0, needsAction: 1, filtered: 0, unread: 0, favorite: 0 }, nextCursor: null };
   client.setQueryData(signalQueryKeys.overview(context, "connector", "all"), overview);
   client.setQueryData(signalQueryKeys.overview(context, "connector", "favorite"), { ...overview, threads: [] });
-  client.setQueryData(signalQueryKeys.detail(context, "connector", thread.key), { thread, messages: [] });
+  client.setQueryData(signalQueryKeys.detail(context, "connector", thread.key), { thread, messages: [{ key: "message", inboxCategory: "Important", labels: ["INBOX"] }] });
   client.setQueryData(signalQueryKeys.overview(context, "other-connector", "all"), overview);
   client.setQueryData(signalQueryKeys.overview(otherContext), overview);
 
@@ -289,6 +299,108 @@ test("patches Signal favorites across filtered overviews and the exact detail ca
   expect(client.getQueryData<{ thread: typeof updated }>(signalQueryKeys.detail(context, "connector", thread.key))?.thread.isFavorite).toBe(true);
   expect(client.getQueryData<typeof overview>(signalQueryKeys.overview(context, "other-connector", "all"))?.threads[0]?.isFavorite).toBe(false);
   expect(client.getQueryData<typeof overview>(signalQueryKeys.overview(otherContext))?.threads[0]?.isFavorite).toBe(false);
+});
+
+test("moves a trashed Signal thread into Filtered caches and reconciles counts and detail", () => {
+  const client = new QueryClient();
+  const at = "2026-08-23T10:00:00.000Z";
+  const thread = { key: "thread", scopeKey: context.scopeKey, accountKey: "account", providerThreadId: "provider", subject: "Subject", summary: "Summary", intent: "Review", priority: "normal" as const, state: "needs_action" as const, inboxCategory: "Important" as const, lastMessageAt: at, isFavorite: false, createdAt: at, updatedAt: at };
+  const overview = { accounts: [], selectedAccount: null, threads: [thread], drafts: [], unassignedDrafts: [], counts: { all: 1, important: 1, urgent: 0, needsAction: 1, filtered: 0, unread: 0, favorite: 0 }, nextCursor: null };
+  client.setQueryData(signalQueryKeys.overview(context, "connector", "important"), overview);
+  client.setQueryData(signalQueryKeys.overview(context, "connector", "filtered"), { ...overview, threads: [] });
+  client.setQueryData(signalQueryKeys.overview(context, "connector", "all"), overview);
+  client.setQueryData(signalQueryKeys.detail(context, "connector", thread.key), { thread, messages: [{ key: "message", inboxCategory: "Important", labels: ["INBOX"] }] });
+  client.setQueryData(signalQueryKeys.overview(context, "other", "important"), overview);
+  const trashed = reconcileSignalTrashedThread(client, context, "connector", { ...thread, inboxCategory: "Filtered", state: "filtered", labels: ["TRASH"], inInbox: true });
+  expect(trashed).toMatchObject({ inboxCategory: "Filtered", state: "filtered", labels: ["TRASH"], inInbox: true });
+  expect(client.getQueryData<typeof overview>(signalQueryKeys.overview(context, "connector", "important"))).toMatchObject({ threads: [], counts: { important: 0, filtered: 1, needsAction: 0 } });
+  expect(client.getQueryData<typeof overview>(signalQueryKeys.overview(context, "connector", "filtered"))).toMatchObject({ threads: [{ key: thread.key, inboxCategory: "Filtered" }], counts: { important: 1, filtered: 0 } });
+  expect(client.getQueryData<{ thread: typeof trashed; messages: { inboxCategory: string; labels: string[] }[] }>(signalQueryKeys.detail(context, "connector", thread.key))).toMatchObject({ thread: trashed, messages: [{ inboxCategory: "Filtered", labels: ["INBOX", "TRASH"] }] });
+  expect(client.getQueryData<typeof overview>(signalQueryKeys.overview(context, "other", "important"))?.threads).toHaveLength(1);
+});
+
+test("functionally merges concurrent Signal translation and summary versions", () => {
+  const client = new QueryClient();
+  const translation = (key: string, version: number, content = key) => ({ key, version, content }) as Parameters<typeof upsertSignalTranslationVersion>[3];
+  const summary = (key: string, version: number, value = key) => ({ key, version, summary: value }) as Parameters<typeof upsertSignalSummary>[3];
+  client.setQueryData(signalQueryKeys.translations(context, "message"), { messageKey: "message", versions: [translation("two", 2)] });
+  upsertSignalTranslationVersion(client, context, "message", translation("one", 1));
+  upsertSignalTranslationVersion(client, context, "message", translation("three", 3));
+  upsertSignalTranslationVersion(client, context, "message", translation("two", 2, "updated"));
+  expect(client.getQueryData<{ versions: { key: string; content: string }[] }>(signalQueryKeys.translations(context, "message"))?.versions).toEqual([
+    expect.objectContaining({ key: "three" }), expect.objectContaining({ key: "two", content: "updated" }), expect.objectContaining({ key: "one" }),
+  ]);
+  client.setQueryData(signalQueryKeys.summaries(context, "message"), { messageKey: "message", summaries: [summary("two", 2)] });
+  upsertSignalSummary(client, context, "message", summary("one", 1));
+  upsertSignalSummary(client, context, "message", summary("three", 3));
+  expect(client.getQueryData<{ summaries: { key: string }[] }>(signalQueryKeys.summaries(context, "message"))?.summaries.map(({ key }) => key)).toEqual(["three", "two", "one"]);
+});
+
+test("trashing an already Filtered thread keeps one cached result without changing category counts", () => {
+  const client = new QueryClient();
+  const at = "2026-08-23T10:00:00.000Z";
+  const thread = { key: "thread", scopeKey: context.scopeKey, accountKey: "account", providerThreadId: "provider", subject: "Subject", summary: "Summary", intent: "Review", priority: "low" as const, state: "filtered" as const, inboxCategory: "Filtered" as const, labels: ["TRASH"], inInbox: true, lastMessageAt: at, isFavorite: false, createdAt: at, updatedAt: at };
+  const overview = { accounts: [], selectedAccount: null, threads: [thread], drafts: [], unassignedDrafts: [], counts: { all: 1, important: 0, urgent: 0, needsAction: 0, filtered: 1, unread: 0, favorite: 0 }, nextCursor: null };
+  client.setQueryData(signalQueryKeys.overview(context, "connector", "filtered"), overview);
+  reconcileSignalTrashedThread(client, context, "connector", thread);
+  expect(client.getQueryData<typeof overview>(signalQueryKeys.overview(context, "connector", "filtered"))).toMatchObject({ threads: [{ key: thread.key }], counts: { filtered: 1 } });
+});
+
+test("authoritative already-Filtered cache state is idempotent against a repeated trash result", () => {
+  const client = new QueryClient();
+  const at = "2026-08-23T10:00:00.000Z";
+  const thread = { key: "thread", scopeKey: context.scopeKey, accountKey: "account", providerThreadId: "provider", subject: "Subject", summary: "Summary", intent: "Review", priority: "low" as const, state: "filtered" as const, inboxCategory: "Filtered" as const, labels: ["INBOX", "TRASH"], inInbox: true, lastMessageAt: at, isFavorite: false, createdAt: at, updatedAt: at };
+  const overview = { accounts: [], selectedAccount: null, threads: [thread], drafts: [], unassignedDrafts: [], counts: { all: 3, important: 1, urgent: 0, needsAction: 1, filtered: 2, unread: 0, favorite: 0 }, nextCursor: null };
+  client.setQueryData(signalQueryKeys.overview(context, "connector", "filtered"), overview);
+  reconcileSignalTrashedThread(client, context, "connector", thread);
+  reconcileSignalTrashedThread(client, context, "connector", thread);
+  expect(client.getQueryData(signalQueryKeys.overview(context, "connector", "filtered"))).toEqual(overview);
+});
+
+test("pure trash reconciliation preserves loaded continuation threads and cursor", () => {
+  const at = "2026-08-23T10:00:00.000Z";
+  const thread = { key: "thread", scopeKey: context.scopeKey, accountKey: "account", providerThreadId: "provider", subject: "Subject", summary: "Summary", intent: "Review", priority: "normal" as const, state: "needs_action" as const, inboxCategory: "Important" as const, lastMessageAt: at, isFavorite: false, createdAt: at, updatedAt: at };
+  const continuation = { ...thread, key: "continuation", providerThreadId: "continued", subject: "Loaded from page two" };
+  const overview = { accounts: [], selectedAccount: null, threads: [thread, continuation], drafts: [], unassignedDrafts: [], counts: { all: 2, important: 2, urgent: 0, needsAction: 2, filtered: 0, unread: 0, favorite: 0 }, nextCursor: "page-three" };
+  const reconciled = moveSignalThreadToFiltered(overview, { ...thread, inboxCategory: "Filtered", state: "filtered", labels: ["TRASH"], inInbox: true }, "important", null);
+  expect(reconciled).toMatchObject({ threads: [{ key: continuation.key }], nextCursor: "page-three", counts: { important: 1, filtered: 1, needsAction: 1 } });
+});
+
+test("patches folder-like Signal inboxes and tones without crossing contexts", () => {
+  const client = new QueryClient();
+  const inbox = { key: "inbox", connectorKey: "connector", email: "team@example.com", name: "Team", isFavorite: false, status: "active" as const, syncEnabled: true, syncStatus: "idle" as const };
+  const updatedInbox = { ...inbox, name: "Priority team", isFavorite: true };
+  const overview = { accounts: [inbox], selectedAccount: inbox, threads: [], drafts: [], unassignedDrafts: [], counts: { all: 0, important: 0, urgent: 0, needsAction: 0, filtered: 0, unread: 0, favorite: 0 }, nextCursor: null };
+  client.setQueryData(signalQueryKeys.overview(context), overview);
+  client.setQueryData(signalQueryKeys.overview(context, inbox.connectorKey), overview);
+  client.setQueryData(signalQueryKeys.overview(otherContext), overview);
+
+  patchSignalInbox(client, context, updatedInbox);
+  expect(client.getQueryData<typeof overview>(signalQueryKeys.overview(context))?.accounts).toEqual([updatedInbox]);
+  expect(client.getQueryData<typeof overview>(signalQueryKeys.overview(context, inbox.connectorKey))?.selectedAccount).toEqual(updatedInbox);
+  expect(client.getQueryData<typeof overview>(signalQueryKeys.overview(otherContext))?.accounts).toEqual([inbox]);
+
+  const first = { key: "tone", name: "Warm", instruction: "Write warmly.", isFavorite: false };
+  const updatedTone = { ...first, name: "Human", isFavorite: true };
+  client.setQueryData(signalQueryKeys.tones(context), [first]);
+  client.setQueryData(signalQueryKeys.tones(otherContext), [first]);
+  upsertSignalTone(client, context, updatedTone);
+  upsertSignalTone(client, context, { ...first, key: "second" });
+  expect(client.getQueryData(signalQueryKeys.tones(context))).toEqual([updatedTone, { ...first, key: "second" }]);
+  expect(client.getQueryData(signalQueryKeys.tones(otherContext))).toEqual([first]);
+});
+
+test("atomically upserts and removes Signal reply context in one exact workspace", () => {
+  const client = new QueryClient();
+  const first = { key: "one", name: "One", text: "First note", createdAt: "2026-08-20T00:00:00.000Z", updatedAt: "2026-08-20T00:00:00.000Z" };
+  const second = { ...first, key: "two", name: "Two" };
+  client.setQueryData(signalQueryKeys.replyContexts(context), [first]);
+  client.setQueryData(signalQueryKeys.replyContexts(otherContext), [first]);
+  upsertSignalReplyContext(client, context, { ...first, text: "Updated" });
+  upsertSignalReplyContext(client, context, second);
+  removeSignalReplyContexts(client, context, [first.key]);
+  expect(client.getQueryData(signalQueryKeys.replyContexts(context))).toEqual([second]);
+  expect(client.getQueryData(signalQueryKeys.replyContexts(otherContext))).toEqual([first]);
 });
 
 test("isolates and updates collection sharing caches", () => {

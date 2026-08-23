@@ -12,6 +12,7 @@ import {
   AccessibilityInfo,
   Animated,
   Easing,
+  KeyboardAvoidingView,
   Modal,
   PanResponder,
   Platform,
@@ -331,23 +332,25 @@ export function BottomSheet({
       transparent
       visible
     >
-      <GestureHandlerRootView style={[styles.root, { paddingBottom: androidBottomInset }]}>
-        <Animated.View style={[styles.overlay, { opacity: overlayOpacity }]}>
-          <Button
-            accessibilityLabel="Close bottom sheet"
-            contentMode="raw"
-            disabled={!dismissible}
-            onPress={dismiss}
-            style={StyleSheet.absoluteFill}
-            variant="ghost"
-          />
-        </Animated.View>
-        <ButtonSizeProvider size="md">
-          {pageKey !== undefined && fullHeight ? <GestureDetector gesture={horizontalSwipeGesture}><Animated.View style={[styles.layerHost, { bottom: androidBottomInset, top: insets.top, transform: [{ translateY }] }]}>
-            {transitioningPage && pageTransition && pageTransition.previous.pageKey !== presentedPage.pageKey ? <SheetSurface key={pageTransition.previous.pageKey} bottomInset={insets.bottom} dismiss={dismiss} dismissible={dismissible} dragPanHandlers={panResponder.panHandlers} fullHeight inactive page={pageTransition.previous} sheetBottom={0} style={[styles.layerSurface, styles.underLayer]} /> : null}
-            <SheetSurface key={presentedPage.pageKey} bottomInset={insets.bottom} dismiss={dismiss} dismissible={dismissible} dragPanHandlers={panResponder.panHandlers} fullHeight page={presentedPage} sheetBottom={0} style={[styles.layerSurface, transitioningPage && { transform: [{ translateX: pageTranslateX }] }]} />
-          </Animated.View></GestureDetector> : <SheetSurface bottomInset={insets.bottom} dismiss={dismiss} dismissible={dismissible} dragPanHandlers={panResponder.panHandlers} fullHeight={fullHeight} page={livePage} sheetBottom={androidBottomInset} style={{ top: fullHeight ? insets.top : undefined, transform: [{ translateY }] }} />}
-        </ButtonSizeProvider>
+      <GestureHandlerRootView style={styles.root}>
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={[styles.root, { paddingBottom: androidBottomInset }]}>
+          <Animated.View style={[styles.overlay, { opacity: overlayOpacity }]}>
+            <Button
+              accessibilityLabel="Close bottom sheet"
+              contentMode="raw"
+              disabled={!dismissible}
+              onPress={dismiss}
+              style={StyleSheet.absoluteFill}
+              variant="ghost"
+            />
+          </Animated.View>
+          <ButtonSizeProvider size="md">
+            {pageKey !== undefined && fullHeight ? <GestureDetector gesture={horizontalSwipeGesture}><Animated.View style={[styles.layerHost, { bottom: androidBottomInset, top: insets.top, transform: [{ translateY }] }]}>
+              {transitioningPage && pageTransition && pageTransition.previous.pageKey !== presentedPage.pageKey ? <SheetSurface key={pageTransition.previous.pageKey} bottomInset={insets.bottom} dismiss={dismiss} dismissible={dismissible} dragPanHandlers={panResponder.panHandlers} fullHeight inactive page={pageTransition.previous} sheetBottom={0} style={[styles.layerSurface, styles.underLayer]} /> : null}
+              <SheetSurface key={presentedPage.pageKey} bottomInset={insets.bottom} dismiss={dismiss} dismissible={dismissible} dragPanHandlers={panResponder.panHandlers} fullHeight page={presentedPage} sheetBottom={0} style={[styles.layerSurface, transitioningPage && { transform: [{ translateX: pageTranslateX }] }]} />
+            </Animated.View></GestureDetector> : <SheetSurface bottomInset={insets.bottom} dismiss={dismiss} dismissible={dismissible} dragPanHandlers={panResponder.panHandlers} fullHeight={fullHeight} page={livePage} sheetBottom={androidBottomInset} style={{ top: fullHeight ? insets.top : undefined, transform: [{ translateY }] }} />}
+          </ButtonSizeProvider>
+        </KeyboardAvoidingView>
         <ToastViewport />
       </GestureHandlerRootView>
     </Modal>

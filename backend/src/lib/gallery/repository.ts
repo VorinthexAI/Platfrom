@@ -145,6 +145,8 @@ async function compensateProcessingUpload(database: MediaLibraryDatabase, upload
   const collectionKeys = await all(database, 'FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == @imageKey RETURN DISTINCT relation.collectionKey', { scopeKey, imageKey }) as string[];
   const subjectChanged = Boolean((await all(database, 'FOR relation IN imageIdentities FILTER relation.scopeKey == @scopeKey && relation.imageKey == @imageKey LIMIT 1 RETURN true', { scopeKey, imageKey }))[0]);
   await database.query('FOR collection IN collections FILTER collection.scopeKey == @scopeKey && collection.coverImageKey == @imageKey UPDATE collection WITH { coverImageKey: null, updatedAt: @now } IN collections', { scopeKey, imageKey, now });
+  await database.query('FOR inbox IN inboxes FILTER inbox.scopeKey == @scopeKey && inbox.coverImageKey == @imageKey UPDATE inbox WITH { coverImageKey: null, updatedAt: @now } IN inboxes OPTIONS { keepNull: false }', { scopeKey, imageKey, now });
+  await database.query('FOR document IN documents FILTER document.scopeKey == @scopeKey && document.coverImageKey == @imageKey UPDATE document WITH { coverImageKey: null, updatedAt: @now } IN documents OPTIONS { keepNull: false }', { scopeKey, imageKey, now });
   await database.query('FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == @imageKey REMOVE relation IN collectionImages', { scopeKey, imageKey });
   await database.query('FOR relation IN imageIdentities FILTER relation.scopeKey == @scopeKey && relation.imageKey == @imageKey REMOVE relation IN imageIdentities', { scopeKey, imageKey });
   const removedIdentityKeys = await all(database, 'FOR identity IN visualIdentities FILTER identity.scopeKey == @scopeKey && identity.referenceImageKey == @imageKey LET replacement = FIRST(FOR relation IN imageIdentities FILTER relation.scopeKey == @scopeKey && relation.identityKey == identity._key && relation.imageKey != @imageKey LET image = DOCUMENT(images, relation.imageKey) FILTER image != null && image.scopeKey == @scopeKey SORT relation.isReference DESC, relation.confidence DESC, relation.createdAt ASC RETURN relation.imageKey) FILTER replacement == null REMOVE identity IN visualIdentities RETURN OLD._key', { scopeKey, imageKey }) as string[];
@@ -620,6 +622,8 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
             "shares",
             "userHiddens",
             "storageDeletionJobs",
+            "inboxes",
+            "documents",
           ],
         },
         async (tx) => {
@@ -700,6 +704,8 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
             { scopeKey, imageKeys: deletedImageKeys },
           );
           await tx.query("FOR trip IN trips FILTER trip.scopeKey == @scopeKey && trip.coverImageKey IN @imageKeys UPDATE trip WITH { coverImageKey: null, updatedAt: @now } IN trips OPTIONS { keepNull: false }", { scopeKey, imageKeys: deletedImageKeys, now });
+          await tx.query("FOR inbox IN inboxes FILTER inbox.scopeKey == @scopeKey && inbox.coverImageKey IN @imageKeys UPDATE inbox WITH { coverImageKey: null, updatedAt: @now } IN inboxes OPTIONS { keepNull: false }", { scopeKey, imageKeys: deletedImageKeys, now });
+          await tx.query("FOR document IN documents FILTER document.scopeKey == @scopeKey && document.coverImageKey IN @imageKeys UPDATE document WITH { coverImageKey: null, updatedAt: @now } IN documents OPTIONS { keepNull: false }", { scopeKey, imageKeys: deletedImageKeys, now });
           await tx.query(
             "FOR image IN images FILTER image._key IN @imageKeys && image.scopeKey == @scopeKey REMOVE image IN images",
             { imageKeys: deletedImageKeys, scopeKey },
@@ -765,6 +771,8 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
             "shares",
             "userHiddens",
             "storageDeletionJobs",
+            "inboxes",
+            "documents",
           ],
         },
         async (tx) => {
@@ -837,6 +845,8 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
             { scopeKey, imageKeys: deletedImageKeys },
           );
           await tx.query("FOR trip IN trips FILTER trip.scopeKey == @scopeKey && trip.coverImageKey IN @imageKeys UPDATE trip WITH { coverImageKey: null, updatedAt: @now } IN trips OPTIONS { keepNull: false }", { scopeKey, imageKeys: deletedImageKeys, now });
+          await tx.query("FOR inbox IN inboxes FILTER inbox.scopeKey == @scopeKey && inbox.coverImageKey IN @imageKeys UPDATE inbox WITH { coverImageKey: null, updatedAt: @now } IN inboxes OPTIONS { keepNull: false }", { scopeKey, imageKeys: deletedImageKeys, now });
+          await tx.query("FOR document IN documents FILTER document.scopeKey == @scopeKey && document.coverImageKey IN @imageKeys UPDATE document WITH { coverImageKey: null, updatedAt: @now } IN documents OPTIONS { keepNull: false }", { scopeKey, imageKeys: deletedImageKeys, now });
           await tx.query(
             "FOR relation IN imageIdentities FILTER relation.scopeKey == @scopeKey && relation.imageKey IN @imageKeys REMOVE relation IN imageIdentities",
             { scopeKey, imageKeys: deletedImageKeys },
@@ -1031,6 +1041,8 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
             "visualIdentities",
             "imageCollectionMemories",
             "trips",
+            "inboxes",
+            "documents",
           ],
         },
         async (tx) => {
@@ -1132,6 +1144,8 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
             "imageCaptions",
             "imageCollectionMemories",
             "trips",
+            "inboxes",
+            "documents",
           ],
         },
         async (tx) => {
@@ -1196,6 +1210,8 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
             "visualIdentities",
             "imageCollectionMemories",
             "trips",
+            "inboxes",
+            "documents",
           ],
         },
         (tx) =>

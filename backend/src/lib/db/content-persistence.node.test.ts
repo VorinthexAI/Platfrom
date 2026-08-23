@@ -132,6 +132,7 @@ describe('scoped Content persistence', () => {
       embedding: Array(EMBEDDING_DIMENSIONS).fill(1),
     });
     expect(calls[0]?.bindVars?.patch).toMatchObject({ content: 'Hello Core' });
+    expect(calls[0]?.bindVars?.unset).toContain('emailToneEmbeddingVersion');
     expect(calls[0]?.bindVars).toMatchObject({ changesLocation: false });
     expect(calls[0]?.query).toContain('current.updatedAt == @expectedUpdatedAt');
     expect(() => createContentPersistence(executor).updateDocument(scopeKey, folderKey, { content: 'detached' })).toThrow('Document content updates require a fresh embedding.');
@@ -148,6 +149,7 @@ describe('scoped Content persistence', () => {
     const persistence = createContentPersistence(executor);
     await persistence.updateDocument(scopeKey, folderKey, { isFavorite: true, updatedAt: timestamp });
     expect(calls.map(({ bindVars }) => bindVars?.patch)).toEqual([{ isFavorite: true, updatedAt: timestamp }]);
+    expect(calls[0]?.bindVars?.unset).toEqual([]);
   });
 
   test('only the marker owner can unfreeze a pending deletion', async () => {

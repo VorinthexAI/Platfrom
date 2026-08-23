@@ -151,7 +151,7 @@ export function createGmailClient(accessToken: string, fetcher: typeof fetch = f
   return {
     profile: () => request<z.infer<typeof profileSchema>>('/profile').then((value) => profileSchema.parse(value)),
     async listThreads(maxResults = 100, pageToken?: string) {
-      const query = new URLSearchParams({ maxResults: String(maxResults), includeSpamTrash: 'false' });
+      const query = new URLSearchParams({ maxResults: String(maxResults), includeSpamTrash: 'true' });
       if (pageToken) query.set('pageToken', pageToken);
       return request<{ threads?: Array<{ id: string }>; nextPageToken?: string }>(`/threads?${query}`);
     },
@@ -170,6 +170,7 @@ export function createGmailClient(accessToken: string, fetcher: typeof fetch = f
       return (await request<{ messages?: Array<{ id: string; threadId: string }> }>(`/messages?${query}`)).messages?.[0] ?? null;
     },
     modifyThread: (id: string, addLabelIds: string[], removeLabelIds: string[]) => request(`/threads/${encodeURIComponent(id)}/modify`, { method: 'POST', body: JSON.stringify({ addLabelIds, removeLabelIds }) }),
+    trashThread: (id: string) => request<GmailThreadResource>(`/threads/${encodeURIComponent(id)}/trash`, { method: 'POST', body: '{}' }),
     sendRaw: (raw: string, threadId?: string) => request<{ id: string; threadId: string }>('/messages/send', { method: 'POST', body: JSON.stringify({ raw: Buffer.from(raw).toString('base64url'), ...(threadId ? { threadId } : {}) }) }),
     async revoke() {
       await fetcher('https://oauth2.googleapis.com/revoke', { method: 'POST', signal: AbortSignal.timeout(30_000), headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ token: accessToken }).toString() });

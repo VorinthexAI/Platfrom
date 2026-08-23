@@ -10,6 +10,18 @@ export const emailClassificationSchema = z.object({
   action: z.string().trim().min(1).max(240).optional(),
 }).strict();
 export type EmailClassification = z.infer<typeof emailClassificationSchema>;
+export const inboxCategorySchema = z.enum(['Urgent', 'Important', 'Filtered']);
+export type InboxCategory = z.infer<typeof inboxCategorySchema>;
+
+export function emailLabelsVisibleInInbox(labels: Iterable<string>): boolean {
+  const values = new Set(labels);
+  return values.has('INBOX') || values.has('SPAM') || values.has('TRASH');
+}
+
+export function inboxCategoryFor(labels: string[], classification: Pick<EmailClassification, 'priority' | 'state'>): InboxCategory {
+  if (labels.includes('SPAM') || labels.includes('TRASH') || classification.state === 'filtered') return 'Filtered';
+  return classification.priority === 'urgent' ? 'Urgent' : 'Important';
+}
 
 export function deterministicEmailClassification(input: { labels: string[]; subject: string; from: string; direction: 'inbound' | 'outbound' }): EmailClassification | null {
   const labels = new Set(input.labels);

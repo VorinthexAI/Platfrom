@@ -1,13 +1,14 @@
 import { createHash } from 'node:crypto';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
 
-export type MailFolderKind = 'root' | 'threads' | 'drafts' | 'tones' | 'settings';
+export type MailFolderKind = 'root' | 'threads' | 'drafts' | 'tones' | 'replyContext' | 'settings';
 
 const definitions = [
   { kind: 'root', purpose: 'communication-mail-root', name: 'Signal' },
   { kind: 'threads', purpose: 'communication-mail-threads', name: 'Threads' },
   { kind: 'drafts', purpose: 'communication-mail-drafts', name: 'Drafts' },
   { kind: 'tones', purpose: 'communication-mail-tones', name: 'Tones' },
+  { kind: 'replyContext', purpose: 'communication-mail-reply-context', name: 'Reply context' },
   { kind: 'settings', purpose: 'communication-mail-settings', name: 'Settings' },
 ] as const;
 

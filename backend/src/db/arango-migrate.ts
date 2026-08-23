@@ -23,6 +23,8 @@ import { retireAiPersistence } from './retire-ai-persistence';
 import { buildPlaceEmbeddingText, buildTripEmbeddingText, TRIP_EMBEDDING_CONTENT_VERSION } from '../lib/travel/semantic-text';
 import { generatedPlaceDetailSchema } from '../lib/db/places.node';
 import { buildImageEmbeddingText } from '../lib/image-embedding';
+import { decodeEmailToneContent, emailToneSemanticText } from '../lib/email-inbox/archive-payloads';
+import { mailFolderKeys } from '../lib/email-inbox/folders';
 
 const url = process.env.ARANGO_URL ?? 'http://127.0.0.1:8529';
 const databaseName = process.env.ARANGO_DATABASE ?? 'vorinthex';
@@ -902,6 +904,121 @@ export async function migrateExactSemanticRecords(targetDb: Database, collection
   if (invalid > 0) throw new Error(`${collectionName} exact semantic migration verification failed for ${invalid} row(s).`);
 }
 
+export async function backfillConnectorInboxes(targetDb: Database) {
+  if (!await targetDb.collection('organizationConnectors').exists() || !await targetDb.collection('inboxes').exists()) return;
+  const cursor = await targetDb.query<{ key: string; organizationKey: string; scopeKey: string; email: string; createdAt: string; updatedAt: string }>(`FOR connector IN organizationConnectors
+    FILTER connector.provider == "gmail"
+    FILTER LENGTH(FOR inbox IN inboxes FILTER inbox.connectorKey == connector._key LIMIT 1 RETURN 1) == 0
+    RETURN { key: connector._key, organizationKey: connector.organizationKey, scopeKey: connector.scopeKey, email: connector.email, createdAt: connector.createdAt, updatedAt: connector.updatedAt }`);
+  for (const connector of await cursor.all()) {
+    const name = connector.email;
+    const embedding = await embedText({ text: buildEmbeddingText(['name', 'description'], { name })! });
+    await targetDb.query(`UPSERT { connectorKey: @connectorKey }
+      INSERT { _key: @key, organizationKey: @organizationKey, scopeKey: @scopeKey, connectorKey: @connectorKey, name: @name, isFavorite: false, embedding: @embedding, createdAt: @createdAt, updatedAt: @updatedAt }
+      UPDATE {} IN inboxes`, { key: newId(), organizationKey: connector.organizationKey, scopeKey: connector.scopeKey, connectorKey: connector.key, name, embedding, createdAt: connector.createdAt, updatedAt: connector.updatedAt });
+  }
+}
+
+function emailToneSemanticsCurrent(document: Record<string, unknown>, contentChunks: string[], semanticText: string, dimensions: number) {
+  const embedding = document.embedding;
+  const storedChunks = document.contentChunks;
+  const chunkEmbeddings = document.chunkEmbeddings;
+  return document.emailToneEmbeddingVersion === 1
+    && Array.isArray(embedding) && embedding.length === dimensions && embedding.every((value) => typeof value === 'number' && Number.isFinite(value))
+    && Array.isArray(storedChunks) && storedChunks.length === contentChunks.length && storedChunks.every((value, index) => value === contentChunks[index])
+    && Array.isArray(chunkEmbeddings) && chunkEmbeddings.length === contentChunks.length
+    && chunkEmbeddings.every((value) => Array.isArray(value) && value.length === dimensions && value.every((item, index) => typeof item === 'number' && Number.isFinite(item) && item === embedding[index]))
+    && document.semanticChunkCount === contentChunks.length && document.semanticContentHash === documentSemanticHash(semanticText);
+}
+
+function isCanonicalEmailToneDocument(document: Record<string, unknown>) {
+  return typeof document.scopeKey === 'string' && document.folderKey === mailFolderKeys(document.scopeKey).tones;
+}
+
+export async function migrateEmailToneEmbeddings(targetDb: Database) {
+  if (!await targetDb.collection('documents').exists() || !await targetDb.collection('folders').exists()) return;
+  const dimensions = EMBEDDING_DIMENSIONS;
+  const cursor = await targetDb.query<Record<string, unknown>>(`FOR document IN documents
+    LET folder = DOCUMENT(folders, document.folderKey)
+    FILTER folder != null && folder.scopeKey == document.scopeKey && folder.purpose == "communication-mail-tones"
+    RETURN document`);
+  for (const document of await cursor.all()) {
+    if (!isCanonicalEmailToneDocument(document)) continue;
+    let tone;
+    try { tone = decodeEmailToneContent(String(document.content)); } catch { continue; }
+    const semanticText = emailToneSemanticText(tone);
+    const contentChunks = chunkDocumentContent(semanticText);
+    if (emailToneSemanticsCurrent(document, contentChunks, semanticText, dimensions)) continue;
+    const embedding = await embedText({ text: semanticText });
+    await targetDb.query('FOR document IN documents FILTER document._key == @key && document._rev == @revision UPDATE document WITH { embedding: @embedding, contentChunks: @contentChunks, chunkEmbeddings: @chunkEmbeddings, semanticChunkCount: @semanticChunkCount, semanticContentHash: @semanticContentHash, emailToneEmbeddingVersion: 1 } IN documents', { key: document._key, revision: document._rev, embedding, contentChunks, chunkEmbeddings: contentChunks.map(() => embedding), semanticChunkCount: contentChunks.length, semanticContentHash: documentSemanticHash(semanticText) });
+  }
+  const verification = await targetDb.query<Record<string, unknown>>(`FOR document IN documents
+    LET folder = DOCUMENT(folders, document.folderKey)
+    FILTER folder != null && folder.scopeKey == document.scopeKey && folder.purpose == "communication-mail-tones"
+    RETURN document`);
+  let invalid = 0;
+  for (const document of await verification.all()) {
+    if (!isCanonicalEmailToneDocument(document)) continue;
+    let tone;
+    try { tone = decodeEmailToneContent(String(document.content)); } catch { continue; }
+    const semanticText = emailToneSemanticText(tone);
+    const contentChunks = chunkDocumentContent(semanticText);
+    if (!emailToneSemanticsCurrent(document, contentChunks, semanticText, dimensions)) invalid += 1;
+  }
+  if (invalid > 0) throw new Error(`Email tone semantic migration failed for ${invalid} stale row(s), including any concurrent edit conflicts; rerun the migration.`);
+}
+
+export async function migrateRetiredEmailDefaultTones(targetDb: Database) {
+  const retiredTones = [
+    { slug: 'warm', name: 'Warm', description: 'Friendly and considerate.', instruction: 'Sound approachable, appreciative, and human.' },
+    { slug: 'direct', name: 'Direct', description: 'Clear and decisive.', instruction: 'Lead with the answer or action and avoid hedging.' },
+  ];
+  await targetDb.query(`FOR document IN documents
+    LET folder = DOCUMENT(folders, document.folderKey)
+    FILTER folder != null && folder.scopeKey == document.scopeKey && folder.purpose == "communication-mail-tones"
+    LET retired = FIRST(FOR tone IN @retiredTones LET key = CONCAT("c", SUBSTRING(SHA256(CONCAT("mail-tone", "\\u0000", document.scopeKey, "\\u0000", tone.slug)), 0, 24)) FILTER document._key == key RETURN tone)
+    FILTER retired != null
+    LET defaultContent = CONCAT("# ", retired.name, "\\n\\n<!-- vorinthex-mail-tone ", JSON_STRINGIFY({ version: 1, slug: retired.slug }), " -->\\n\\n", retired.description, "\\n\\n## Instruction\\n\\n", retired.instruction)
+    LET summaryKeys = (FOR summary IN documentSummaries FILTER summary.scopeKey == document.scopeKey && summary.documentKey == document._key RETURN summary._key)
+    LET hasDependents = LENGTH(FOR version IN documentVersions FILTER version.scopeKey == document.scopeKey && version.documentKey == document._key LIMIT 1 RETURN 1) > 0
+      || LENGTH(summaryKeys) > 0
+      || LENGTH(FOR audio IN documentAudioVersions FILTER audio.scopeKey == document.scopeKey && audio.documentKey == document._key LIMIT 1 RETURN 1) > 0
+      || LENGTH(FOR audio IN documentSummaryAudio FILTER audio.scopeKey == document.scopeKey && (audio.documentKey == document._key || audio.summaryKey IN summaryKeys) LIMIT 1 RETURN 1) > 0
+    LET untouched = document.content == defaultContent && document.name == retired.name && document.isFavorite != true && document.coverImageKey == null && document.createdAt == document.updatedAt && !hasDependents
+    LET removed = (FOR candidate IN untouched ? [document] : [] REMOVE candidate IN documents RETURN 1)
+    LET wasRemoved = LENGTH(removed) > 0
+    FOR candidate IN wasRemoved ? [] : [document]
+      LET customContent = SUBSTITUTE(candidate.content, JSON_STRINGIFY({ version: 1, slug: retired.slug }), JSON_STRINGIFY({ version: 1 }))
+      UPDATE candidate WITH { content: customContent, updatedAt: DATE_ISO8601(DATE_NOW()) } IN documents`, { retiredTones });
+}
+
+export async function migrateEmailInboxCategoriesAndDefaultTones(targetDb: Database) {
+  if (!await targetDb.collection('documents').exists() || !await targetDb.collection('folders').exists()) return;
+  const defaultTones = [
+    { slug: 'casual', name: 'Casual', description: 'Relaxed, friendly, and natural.', instruction: 'Use conversational language, natural contractions, and an approachable tone.' },
+    { slug: 'formal', name: 'Formal', description: 'Polished, respectful, and professional.', instruction: 'Use professional language, complete sentences, and a clear conventional structure.' },
+    { slug: 'concise', name: 'Concise', description: 'Brief, clear, and focused.', instruction: 'Lead with the point, use short sentences, and include only necessary details.' },
+  ];
+  await targetDb.query(`FOR folder IN folders
+    FILTER folder.purpose == "communication-mail-tones"
+    FOR tone IN @defaultTones
+      LET key = CONCAT("c", SUBSTRING(SHA256(CONCAT("mail-tone", "\\u0000", folder.scopeKey, "\\u0000", tone.slug)), 0, 24))
+      LET content = CONCAT("# ", tone.name, "\\n\\n<!-- vorinthex-mail-tone ", JSON_STRINGIFY({ version: 1, slug: tone.slug }), " -->\\n\\n", tone.description, "\\n\\n## Instruction\\n\\n", tone.instruction)
+      LET timestamp = DATE_ISO8601(DATE_NOW())
+      UPSERT { _key: key }
+      INSERT { _key: key, scopeKey: folder.scopeKey, folderKey: folder._key, name: tone.name, content, embedding: @placeholder, mutationPolicy: "user", isFavorite: false, createdAt: timestamp, updatedAt: timestamp }
+      UPDATE {} IN documents`, { defaultTones, placeholder: Array(EMBEDDING_DIMENSIONS).fill(0) });
+  await targetDb.query(`FOR document IN documents
+    FILTER document.mutationPolicy == "system-only" && STARTS_WITH(TRIM(document.content), "{")
+    LET payload = JSON_PARSE(document.content)
+    FILTER payload.version == 1 && payload.kind IN ["mail-thread", "mail-message"]
+    LET labels = payload.data.labels || []
+    LET inboxCategory = "SPAM" IN labels || "TRASH" IN labels || payload.data.state == "filtered" ? "Filtered" : payload.data.priority == "urgent" ? "Urgent" : "Important"
+    LET inInbox = "INBOX" IN labels || "SPAM" IN labels || "TRASH" IN labels
+    FILTER payload.data.inboxCategory != inboxCategory || (payload.kind == "mail-thread" && payload.data.inInbox != inInbox)
+    UPDATE document WITH { content: JSON_STRINGIFY(MERGE(payload, { data: MERGE(payload.data, payload.kind == "mail-thread" ? { inboxCategory, inInbox } : { inboxCategory }) })) } IN documents`);
+}
+
 export async function migrateContentVersions(targetDb: Database) {
   const dimensions = EMBEDDING_DIMENSIONS;
   let after = '';
@@ -999,6 +1116,7 @@ export async function migrateContentDocuments(targetDb: Database) {
     const cursor = await targetDb.query<Record<string, unknown>>(`
       FOR document IN documents
         FILTER document._key > @after
+        FILTER document.emailToneEmbeddingVersion != 1 && document.emailReplyContextEmbeddingVersion != 1
         FILTER HAS(document, "html") || (document._semanticChunkingSkipped != true && (HAS(document, "json")
           || !IS_STRING(document.content) || LENGTH(TRIM(document.content)) == 0
           || !IS_ARRAY(document.embedding) || LENGTH(document.embedding) == 0
@@ -1067,6 +1185,7 @@ export async function migrateContentDocuments(targetDb: Database) {
   }
   const verification = await targetDb.query<number>(`
     RETURN LENGTH(FOR document IN documents
+      FILTER document.emailToneEmbeddingVersion != 1 && document.emailReplyContextEmbeddingVersion != 1
       FILTER HAS(document, "html") || (document._semanticChunkingSkipped != true && (HAS(document, "json")
         || !IS_STRING(document.content) || LENGTH(TRIM(document.content)) == 0
         || !IS_ARRAY(document.embedding) || LENGTH(document.embedding) == 0
@@ -1204,6 +1323,7 @@ export async function removeLegacyTombstones(targetDb: Database): Promise<void> 
   const existing = new Set((await targetDb.listCollections()).map(({ name }) => name));
   const exists = async (name: string) => existing.has(name);
   await withDatabaseTransaction(targetDb, { write: [...existing] }, async (transaction) => {
+  const cleanupAt = new Date().toISOString();
   const keysFor = async (name: string): Promise<string[]> => {
     if (!await exists(name)) return [];
     const cursor = await transaction.query(
@@ -1269,7 +1389,7 @@ export async function removeLegacyTombstones(targetDb: Database): Promise<void> 
   if (documentKeys.length && await exists('documentAudioVersions')) storageKeys.push(...await (await transaction.query('FOR audio IN documentAudioVersions FILTER audio.documentKey IN @keys && IS_STRING(audio.storageKey) RETURN audio.storageKey', { keys: documentKeys })).all() as string[]);
   if (documentKeys.length && await exists('documentSummaryAudio')) storageKeys.push(...await (await transaction.query('FOR audio IN documentSummaryAudio FILTER audio.documentKey IN @keys && IS_STRING(audio.storageKey) RETURN audio.storageKey', { keys: documentKeys })).all() as string[]);
   if (uploadKeys.length && await exists('galleryUploads')) storageKeys.push(...await (await transaction.query('FOR upload IN galleryUploads FILTER upload._key IN @keys && IS_STRING(upload.storageKey) RETURN upload.storageKey', { keys: uploadKeys })).all() as string[]);
-  await transaction.query('FOR storageKey IN UNIQUE(@storageKeys) FILTER IS_STRING(storageKey) && LENGTH(storageKey) > 0 UPSERT { storageKey } INSERT { storageKey, createdAt: @now } UPDATE {} IN storageDeletionJobs', { storageKeys, now: new Date().toISOString() });
+  await transaction.query('FOR storageKey IN UNIQUE(@storageKeys) FILTER IS_STRING(storageKey) && LENGTH(storageKey) > 0 UPSERT { storageKey } INSERT { storageKey, createdAt: @now } UPDATE {} IN storageDeletionJobs', { storageKeys, now: cleanupAt });
 
   if (scopeKeys.length) {
     for (const name of [
@@ -1279,7 +1399,7 @@ export async function removeLegacyTombstones(targetDb: Database): Promise<void> 
       'documentVersions', 'documentAudioVersions', 'documentSummaries', 'documentSummaryAudio',
        'shares', 'places', 'generatedDocumentBindings', 'trips', 'tripCreationReceipts', 'tripPlaces', 'tripAttachments', 'placeVisits', 'books', 'bookContexts',
       'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'chapterContexts', 'bookProgress',
-      'organizationConnectors', 'channels', 'threads', 'messages', 'messageMentions',
+       'organizationConnectors', 'inboxes', 'channels', 'threads', 'messages', 'messageMentions',
       'messageReactions', 'polls', 'pollOptions', 'pollVotes',
     ]) await removeBy(name, 'scopeKey', scopeKeys);
     if (await exists('scopeScopes')) {
@@ -1305,8 +1425,10 @@ export async function removeLegacyTombstones(targetDb: Database): Promise<void> 
   await removeTyped('tagAssignments', 'sourceType', 'image', imageKeys, 'images');
   await removeTyped('userHiddens', 'source', 'image', imageKeys);
   await removeBy('galleryUploads', 'imageKey', imageKeys);
-  if (imageKeys.length && await exists('collections')) await transaction.query('FOR collection IN collections FILTER collection.coverImageKey IN @keys UPDATE collection WITH { coverImageKey: null } IN collections OPTIONS { keepNull: false }', { keys: imageKeys });
-  if (imageKeys.length && await exists('trips')) await transaction.query('FOR trip IN trips FILTER trip.coverImageKey IN @keys UPDATE trip WITH { coverImageKey: null, updatedAt: @now } IN trips OPTIONS { keepNull: false }', { keys: imageKeys, now: new Date().toISOString() });
+  if (imageKeys.length && await exists('collections')) await transaction.query('FOR collection IN collections FILTER collection.coverImageKey IN @keys UPDATE collection WITH { coverImageKey: null, updatedAt: @now } IN collections OPTIONS { keepNull: false }', { keys: imageKeys, now: cleanupAt });
+  if (imageKeys.length && await exists('inboxes')) await transaction.query('FOR inbox IN inboxes FILTER inbox.coverImageKey IN @keys UPDATE inbox WITH { coverImageKey: null, updatedAt: @now } IN inboxes OPTIONS { keepNull: false }', { keys: imageKeys, now: cleanupAt });
+  if (imageKeys.length && await exists('documents')) await transaction.query('FOR document IN documents FILTER document.coverImageKey IN @keys UPDATE document WITH { coverImageKey: null, updatedAt: @now } IN documents OPTIONS { keepNull: false }', { keys: imageKeys, now: cleanupAt });
+  if (imageKeys.length && await exists('trips')) await transaction.query('FOR trip IN trips FILTER trip.coverImageKey IN @keys UPDATE trip WITH { coverImageKey: null, updatedAt: @now } IN trips OPTIONS { keepNull: false }', { keys: imageKeys, now: cleanupAt });
   if (imageKeys.length && await exists('visualIdentities')) {
     const cursor = await transaction.query('FOR identity IN visualIdentities FILTER identity.referenceImageKey IN @keys RETURN identity._key', { keys: imageKeys });
     const referencedIdentityKeys = await cursor.all() as string[];
@@ -1544,6 +1666,7 @@ export const collections: CollectionSpec[] = [
   { name: 'imageIdentities', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'identityKey', 'imageKey'], unique: true }, { fields: ['scopeKey', 'identityKey', 'confidence'] }, { fields: ['scopeKey', 'imageKey'] }, { fields: ['scopeKey', 'imageKey', 'isReference'], sparse: true }] },
   { name: 'galleryUploads', skipEmbedding: true, indexes: [{ fields: ['actorKey', 'createdAt'] }, { fields: ['storageKey'], unique: true }, { fields: ['expiresAt'] }] },
   { name: 'collections', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'name'] }, { fields: ['scopeKey', 'purpose'], unique: true, sparse: true }, { fields: ['scopeKey', 'coverImageKey'], sparse: true }] },
+  { name: 'inboxes', embedKeys: ['name', 'description'], indexes: [{ fields: ['connectorKey'], unique: true }, { fields: ['organizationKey', 'scopeKey'] }, { fields: ['scopeKey', 'isFavorite'] }, { fields: ['scopeKey', 'coverImageKey'], sparse: true }] },
   { name: 'collectionImages', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'collectionKey', 'imageKey'], unique: true }, { fields: ['scopeKey', 'collectionKey'] }, { fields: ['scopeKey', 'imageKey'] }] },
   { name: 'placeImages', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'imageKey'], unique: true }, { fields: ['scopeKey', 'placeKey', 'imageKey'], unique: true }, { fields: ['scopeKey', 'placeKey', 'position'] }] },
   { name: 'imageCollecitionHightlights', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'collectionKey', 'createdAt'] }, { fields: ['scopeKey', 'createdByKey'] }] },
@@ -1893,7 +2016,8 @@ async function main() {
         FILTER payload.kind == "mail-tone" && payload.version == 1
         LET tone = payload.data
         LET content = CONCAT("# ", tone.name, "\n\n<!-- vorinthex-mail-tone ", JSON_STRINGIFY({ version: 1, slug: tone.slug }), " -->\n\n", tone.description, "\n\n## Instruction\n\n", tone.instruction)
-        UPDATE document WITH { content, mutationPolicy: "user", updatedAt: DATE_ISO8601(DATE_NOW()) } IN documents`);
+        UPDATE document WITH { content, mutationPolicy: "user" } IN documents`);
+      await migrateEmailInboxCategoriesAndDefaultTones(targetDb);
       const cursor = await targetDb.query<number>(`
         RETURN LENGTH(
           FOR document IN documents
@@ -1907,6 +2031,7 @@ async function main() {
       if (incompatibleDocuments > 0) {
         throw new Error(`Cannot migrate documents: ${incompatibleDocuments} existing row(s) lack required Content ingestion fields.`);
       }
+      await migrateEmailToneEmbeddings(targetDb);
       await migrateContentDocuments(targetDb);
     }
     if (spec.name === 'documentVersions') {
@@ -1973,6 +2098,7 @@ async function main() {
     }
   }
 
+  await migrateRetiredEmailDefaultTones(targetDb);
   await migrateGeneratedTravelDocuments(targetDb);
 
   await targetDb.query(`
@@ -2095,6 +2221,7 @@ async function main() {
   await ensureOrganizationProvidersCollection(targetDb);
   await ensureOrganizationCredentialsCollection(targetDb);
   await ensureOrganizationConnectorsCollection(targetDb);
+  await backfillConnectorInboxes(targetDb);
   await migrateProviderIndependentEmailDrafts(targetDb);
   await retireTranscriptionDomain(targetDb);
   await retireAiPersistence(targetDb);

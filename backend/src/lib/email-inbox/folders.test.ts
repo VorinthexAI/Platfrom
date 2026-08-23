@@ -11,10 +11,10 @@ describe('managed mail folders', () => {
     const second = await ensureMailFolders(database, scopeKey, '2026-08-20T09:00:00.000Z');
     expect(first).toEqual(second);
     expect(first).toEqual(mailFolderKeys(scopeKey));
-    expect(calls).toHaveLength(10);
+    expect(calls).toHaveLength(12);
     expect(calls.every(({ query }) => query.includes('UPSERT') && query.includes('system-container'))).toBe(true);
-    expect(calls.slice(0, 5).map(({ bindVars }) => bindVars?.purpose)).toEqual(['communication-mail-root', 'communication-mail-threads', 'communication-mail-drafts', 'communication-mail-tones', 'communication-mail-settings']);
+    expect(calls.slice(0, 6).map(({ bindVars }) => bindVars?.purpose)).toEqual(['communication-mail-root', 'communication-mail-threads', 'communication-mail-drafts', 'communication-mail-tones', 'communication-mail-reply-context', 'communication-mail-settings']);
     expect(calls[0]?.bindVars?.name).toBe('Signal');
-    expect(calls.slice(1, 5).every(({ bindVars }) => bindVars?.parentFolderKey === first.root)).toBe(true);
+    expect(calls.slice(1, 6).every(({ bindVars }) => bindVars?.parentFolderKey === first.root)).toBe(true);
   });
 });

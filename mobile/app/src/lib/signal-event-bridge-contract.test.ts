@@ -11,6 +11,7 @@ test("the authenticated unified stream converges Signal and Archive caches", () 
   expect(cache).toContain("accountOverviews: (context: WorkspaceContext, connectorKey?: string)");
   expect(bridge).toContain("signalQueryKeys.details(compassContext)");
   expect(bridge).toContain("signalQueryKeys.tones(compassContext)");
+  expect(bridge).toContain("signalQueryKeys.replyContexts(compassContext)");
   expect(bridge).toContain('publishAppEvent({ type: "inbox.changed" })');
   expect(bridge).toContain("contentQueryKeys.all(contentContext)");
   expect(bridge).not.toContain('["archive", organizationKey, scopeKey]');
@@ -18,4 +19,5 @@ test("the authenticated unified stream converges Signal and Archive caches", () 
 
 test("content changes invalidate Signal tones in the current workspace", () => {
   expect(bridge).toMatch(/if \(event\.event === "content\.changed"\) \{[\s\S]*?signalQueryKeys\.tones\(compassContext\)[\s\S]*?refetchType: "active"[\s\S]*?\}/);
+  expect(bridge).toMatch(/if \(event\.event === "content\.changed"\) \{[\s\S]*?signalQueryKeys\.replyContexts\(compassContext\)[\s\S]*?refetchType: "active"[\s\S]*?\}/);
 });

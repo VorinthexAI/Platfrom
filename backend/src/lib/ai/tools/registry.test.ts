@@ -7,9 +7,9 @@ describe('unified tool registry', () => {
   test('has one unique definition for every public tool name', () => {
     expect(new Set(TOOL_NAMES).size).toBe(TOOL_NAMES.length);
     expect(new Set(TOOL_DEFINITIONS.map(({ name }) => name)).size).toBe(TOOL_DEFINITIONS.length);
-    expect(TOOL_NAMES).toHaveLength(132);
-    expect(TOOL_DEFINITIONS).toHaveLength(132);
-    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 87);
+    expect(TOOL_NAMES).toHaveLength(146);
+    expect(TOOL_DEFINITIONS).toHaveLength(146);
+    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 101);
     expect(TOOL_DEFINITIONS.map(({ name }) => name)).toEqual([...TOOL_NAMES]);
     expect(TOOL_NAMES).not.toContain('chat');
     expect(TOOL_NAMES).not.toContain('orchestrator.chat');
@@ -48,7 +48,17 @@ describe('unified tool registry', () => {
     for (const name of ['place.visit.create', 'trip.place.add', 'trip.place.remove']) expect(TOOL_NAMES).not.toContain(name);
     expect(TOOL_NAMES).toContain('email.draft.send');
     expect(TOOL_NAMES).toContain('email.draft.assign');
+    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['email.reply-context.list', 'email.reply-context.create', 'email.reply-context.update', 'email.reply-context.delete']));
+    expect(TOOL_NAMES.filter((name) => name === 'email.draft.create')).toHaveLength(1);
+    expect(() => toolInputSchemas['email.draft.create'].parse({ threadKey: newId(), tone: 'warm', contextKeys: [newId()] })).toThrow('Unrecognized key');
+    expect(() => toolInputSchemas['email.reply-context.list'].parse({ scopeKey: newId() })).toThrow('Unrecognized key');
+    expect(() => toolInputSchemas['email.reply-context.create'].parse({ name: 'x', text: 'y', userKey: newId() })).toThrow('Unrecognized key');
+    const replyContextKey = newId();
+    expect(() => toolInputSchemas['email.reply-context.delete'].parse({ noteKeys: [replyContextKey, replyContextKey] })).toThrow();
     expect(TOOL_NAMES).toContain('inbox.sync');
+    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['inbox.sort', 'email.similar.find', 'email.thread.trash', 'email.message.translate', 'email.message.translation.list', 'email.message.summarize', 'email.message.summary.list']));
+    expect(() => toolInputSchemas['inbox.sort'].parse({ connectorKey: newId(), scopeKey: newId() })).toThrow('Unrecognized key');
+    expect(() => toolInputSchemas['email.similar.find'].parse({ messageKey: newId(), categories: ['Other'] })).toThrow();
     expect(TOOL_NAMES).toContain('inbox.subscribe');
     expect(TOOL_NAMES).not.toContain('email.sync');
     expect(() => toolInputSchemas['inbox.sync'].parse({ scopeKey: newId() })).toThrow('Unrecognized key');
@@ -257,6 +267,8 @@ describe('unified tool registry', () => {
     const emailService = {
       threadForTool: async (...args: unknown[]) => { calls.push(['threadForTool', ...args]); return {}; },
       markRead: async (...args: unknown[]) => { calls.push(['markRead', ...args]); return {}; },
+      sort: async (...args: unknown[]) => { calls.push(['sort', ...args]); return {}; },
+      findSimilar: async (...args: unknown[]) => { calls.push(['findSimilar', ...args]); return {}; },
     } as any;
     const bookService = { create: async (...args: unknown[]) => { calls.push(['create', ...args]); return {}; } } as any;
     const brief = { topic: 'Decision making', goal: 'Decide well', audience: 'Leaders', tone: 'Clear', length: 'short', language: 'English' };
@@ -264,11 +276,16 @@ describe('unified tool registry', () => {
     await runTool('book.create', '', brief, { contentContext, bookService, requestKey: 'request-1' });
     await runTool('email.thread.read', '', { threadKey }, { contentContext, emailService });
     await runTool('email.thread.mark-read', '', { threadKey }, { contentContext, emailService });
+    await expect(runTool('inbox.sort', '', { connectorKey: threadKey, scopeKey }, { contentContext, emailService })).rejects.toThrow('Unrecognized key');
+    await runTool('inbox.sort', '', { connectorKey: threadKey }, { contentContext, emailService });
+    await runTool('email.similar.find', '', { messageKey: threadKey, categories: ['Important'] }, { contentContext, emailService });
     const actor = { userKey, organizationKey, scopeKey };
     expect(calls).toEqual([
       ['create', { organizationKey, scopeKey, generationRequestKey: 'request-1', ...brief }, userKey],
       ['threadForTool', actor, threadKey, undefined],
       ['markRead', actor, threadKey],
+      ['sort', actor, { connectorKey: threadKey }],
+      ['findSimilar', actor, { messageKey: threadKey, categories: ['Important'], limit: 20 }],
     ]);
   });
 });

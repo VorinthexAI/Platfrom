@@ -15,12 +15,26 @@ function appWith(overrides: Parameters<typeof createEmailHandlers>[0]) {
     .post('/email/connect', handlers.startConnect)
     .post('/email/connect/exchange', handlers.exchangeConnect)
     .post('/email/sync', handlers.sync)
+    .post('/email/sort', handlers.sort)
     .post('/email/subscribe', handlers.subscribe)
     .post('/email/threads/:threadKey', handlers.thread)
+    .post('/email/threads/:threadKey/trash', handlers.trashThread)
+    .post('/email/messages/:messageKey/similar', handlers.findSimilar)
+    .post('/email/messages/:messageKey/translations', handlers.translateMessage)
+    .post('/email/messages/:messageKey/translations/list', handlers.listMessageTranslations)
+    .post('/email/messages/:messageKey/summaries', handlers.summarizeMessage)
+    .post('/email/messages/:messageKey/summaries/list', handlers.listMessageSummaries)
     .post('/email/drafts', handlers.draft)
     .post('/email/drafts/compose', handlers.draftNew)
     .post('/email/drafts/:draftKey/assign', handlers.assignDraft)
-    .post('/email/tones/list', handlers.tones);
+    .post('/email/tones/list', handlers.tones)
+    .post('/email/reply-context/list', handlers.listReplyContext)
+    .post('/email/reply-context', handlers.createReplyContext)
+    .patch('/email/reply-context/:noteKey', handlers.updateReplyContext)
+    .post('/email/reply-context/delete', handlers.deleteReplyContext)
+    .post('/email/tones', handlers.createTone)
+    .patch('/email/tones/:toneKey', handlers.updateTone)
+    .patch('/email/inboxes', handlers.updateInbox);
 }
 
 describe('email inbox handlers', () => {
@@ -51,12 +65,37 @@ describe('email inbox handlers', () => {
     expect(calls).toEqual([['sync', { userKey, organizationKey, scopeKey }, connectorKey], ['subscribe', { userKey, organizationKey, scopeKey }, connectorKey]]);
   });
 
+  test('routes sorting, similarity, trash, translation, and summaries through canonical service operations', async () => {
+    const calls: unknown[] = [];
+    const generated = { key: connectorKey, documentKey: userKey, version: 1, content: 'Bonjour.', summary: 'Summary.', style: 'brief', sourceTitle: 'Subject', sourceDocumentUpdatedAt: '2026-08-23T00:00:00.000Z', createdAt: '2026-08-23T00:00:00.000Z', embedding: [1], chunkEmbeddings: [[1]], scopeKey, createdByKey: userKey };
+    const service = {
+      ...Object.fromEntries(['sort', 'findSimilar', 'trashThread'].map((name) => [name, async (...args: unknown[]) => { calls.push([name, ...args]); return {}; }])),
+      translateMessage: async (...args: unknown[]) => { calls.push(['translateMessage', ...args]); return { messageKey: userKey, language: 'French', version: generated }; },
+      listMessageTranslations: async (...args: unknown[]) => { calls.push(['listMessageTranslations', ...args]); return { messageKey: userKey, versions: [generated] }; },
+      summarizeMessage: async (...args: unknown[]) => { calls.push(['summarizeMessage', ...args]); return { messageKey: userKey, text: 'Summary.', summary: generated }; },
+      listMessageSummaries: async (...args: unknown[]) => { calls.push(['listMessageSummaries', ...args]); return { messageKey: userKey, summaries: [generated] }; },
+    };
+    const app = appWith({ getIdentity: identity as never, service: service as never, oauth: {} as never });
+    const context = { organizationKey, scopeKey };
+    const post = (path: string, body: object) => app.request(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...context, ...body }) });
+    expect((await post('/email/sort', { connectorKey })).status).toBe(200);
+    expect((await post(`/email/messages/${userKey}/similar`, { categories: ['Urgent', 'Filtered'], limit: 5 })).status).toBe(200);
+    expect((await post(`/email/threads/${userKey}/trash`, {})).status).toBe(200);
+    const generatedResponses = await Promise.all([post(`/email/messages/${userKey}/translations`, { targetLanguage: 'French' }), post(`/email/messages/${userKey}/translations/list`, {}), post(`/email/messages/${userKey}/summaries`, { style: 'brief' }), post(`/email/messages/${userKey}/summaries/list`, {})]);
+    expect(generatedResponses.map(({ status }) => status)).toEqual([201, 200, 201, 200]);
+    for (const response of generatedResponses) expect(await response.text()).not.toMatch(/embedding|chunkEmbeddings|scopeKey|createdByKey/);
+    expect((await post('/email/sort', { connectorKey, userKey })).status).toBe(400);
+    expect((await post(`/email/messages/${userKey}/similar`, { categories: ['Important', 'Important'] })).status).toBe(400);
+    expect(calls.map((call) => (call as unknown[])[0])).toEqual(['sort', 'findSimilar', 'trashThread', 'translateMessage', 'listMessageTranslations', 'summarizeMessage', 'listMessageSummaries']);
+    expect(calls.every((call) => JSON.stringify(call).includes(`"scopeKey":"${scopeKey}"`))).toBe(true);
+  });
+
   test('requires one-time connection grants and strict drafting tones', async () => {
     const oauth = { exchange: async () => null };
     const app = appWith({ getIdentity: identity as never, service: { draft: async () => ({}) } as never, oauth: oauth as never });
     const exchange = await app.request('/email/connect/exchange', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey, code: `vrtx_email_grant_${'a'.repeat(20)}` }) });
     expect(exchange.status).toBe(401);
-    const draft = await app.request('/email/drafts', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey, threadKey: userKey, tone: 'impersonate' }) });
+    const draft = await app.request('/email/drafts', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey, threadKey: userKey, tone: '' }) });
     expect(draft.status).toBe(400);
   });
 
@@ -98,5 +137,51 @@ describe('email inbox handlers', () => {
     expect((await app.request(`/email/drafts/${userKey}/assign`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).status).toBe(200);
     expect((await app.request(`/email/drafts/${userKey}/assign`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, accountKey: connectorKey }) })).status).toBe(400);
     expect(calls).toEqual([[{ userKey, organizationKey, scopeKey }, { draftKey: userKey, connectorKey }]]);
+  });
+
+  test('routes strict inbox and custom tone mutations through the canonical service', async () => {
+    const calls: unknown[] = [];
+    const service = {
+      updateInbox: async (...args: unknown[]) => { calls.push(['updateInbox', ...args]); return {}; },
+      createTone: async (...args: unknown[]) => { calls.push(['createTone', ...args]); return {}; },
+      updateTone: async (...args: unknown[]) => { calls.push(['updateTone', ...args]); return {}; },
+    };
+    const app = appWith({ getIdentity: identity as never, service: service as never, oauth: {} as never });
+    const context = { organizationKey, scopeKey };
+    expect((await app.request('/email/inboxes', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...context, connectorKey, name: 'Work' }) })).status).toBe(200);
+    expect((await app.request('/email/tones', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...context, name: 'Calm', instruction: 'Use calm language.' }) })).status).toBe(201);
+    expect((await app.request(`/email/tones/${userKey}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...context, isFavorite: true }) })).status).toBe(200);
+    expect((await app.request(`/email/tones/${userKey}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...context, instruction: 'Keep it direct.' }) })).status).toBe(200);
+    expect((await app.request('/email/inboxes', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...context, connectorKey, name: 'Work', forged: true }) })).status).toBe(400);
+    expect(calls).toEqual([
+      ['updateInbox', { userKey, ...context }, { connectorKey, name: 'Work' }],
+      ['createTone', { userKey, ...context }, { name: 'Calm', instruction: 'Use calm language.', isFavorite: false }],
+      ['updateTone', { userKey, ...context }, { toneKey: userKey, isFavorite: true }],
+      ['updateTone', { userKey, ...context }, { toneKey: userKey, instruction: 'Keep it direct.' }],
+    ]);
+  });
+
+  test('routes strict reply-context HTTP operations through the canonical service with atomic key lists', async () => {
+    const calls: unknown[] = [];
+    const service = {
+      listReplyContext: async (...args: unknown[]) => { calls.push(['list', ...args]); return []; },
+      createReplyContext: async (...args: unknown[]) => { calls.push(['create', ...args]); return {}; },
+      updateReplyContext: async (...args: unknown[]) => { calls.push(['update', ...args]); return {}; },
+      deleteReplyContext: async (...args: unknown[]) => { calls.push(['delete', ...args]); return {}; },
+    };
+    const app = appWith({ getIdentity: identity as never, service: service as never, oauth: {} as never });
+    const context = { organizationKey, scopeKey };
+    expect((await app.request('/email/reply-context/list', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(context) })).status).toBe(200);
+    expect((await app.request('/email/reply-context', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...context, name: 'Availability', text: 'No Fridays.' }) })).status).toBe(201);
+    expect((await app.request(`/email/reply-context/${userKey}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...context, text: 'No Mondays.' }) })).status).toBe(200);
+    expect((await app.request('/email/reply-context/delete', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...context, noteKeys: [userKey] }) })).status).toBe(200);
+    expect((await app.request('/email/reply-context/delete', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...context, noteKeys: [userKey, userKey] }) })).status).toBe(400);
+    expect((await app.request('/email/reply-context', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...context, name: 'x', text: 'y', scope: 'forged' }) })).status).toBe(400);
+    expect(calls).toEqual([
+      ['list', { userKey, ...context }],
+      ['create', { userKey, ...context }, { name: 'Availability', text: 'No Fridays.' }],
+      ['update', { userKey, ...context }, { noteKey: userKey, text: 'No Mondays.' }],
+      ['delete', { userKey, ...context }, { noteKeys: [userKey] }],
+    ]);
   });
 });

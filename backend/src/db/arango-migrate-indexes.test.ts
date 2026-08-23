@@ -279,6 +279,7 @@ describe('Arango migration indexes', () => {
     expect(source).toContain('attachment.targetType == @targetType && attachment.targetKey IN @keys');
     expect(source.indexOf("await removeAttachmentTargets('collection', collectionKeys)")).toBeLessThan(source.indexOf("await removeKeys('collections', collectionKeys)"));
     expect(source.indexOf('FOR trip IN trips FILTER trip.coverImageKey IN @keys')).toBeLessThan(source.indexOf("await removeKeys('images', imageKeys)"));
+    for (const [owner, collection] of [['collection', 'collections'], ['inbox', 'inboxes'], ['document', 'documents'], ['trip', 'trips']]) expect(source).toContain(`FOR ${owner} IN ${collection} FILTER ${owner}.coverImageKey IN @keys UPDATE ${owner} WITH { coverImageKey: null, updatedAt: @now }`);
     expect(source.indexOf("await removeBy('tripAttachments', 'tripKey', tripKeys)")).toBeLessThan(source.indexOf("await removeKeys('trips', tripKeys)"));
     expect(source).toContain('fields.includes(LEGACY_REMOVAL_MARKER)');
     expect(source).toContain('OPTIONS { keepNull: false }');
@@ -873,5 +874,67 @@ describe('Arango migration indexes', () => {
     expect(source).toContain('IN users OPTIONS { keepNull: false }');
     expect(source).toContain("name: 'events'");
     expect(source).toContain("{ fields: ['distinctId', 'createdAt'] }");
+  });
+
+  test('declares one-to-one inbox indexes and an idempotent connector backfill', async () => {
+    expect(collections.find(({ name }) => name === 'inboxes')).toEqual({ name: 'inboxes', embedKeys: ['name', 'description'], indexes: [{ fields: ['connectorKey'], unique: true }, { fields: ['organizationKey', 'scopeKey'] }, { fields: ['scopeKey', 'isFavorite'] }, { fields: ['scopeKey', 'coverImageKey'], sparse: true }] });
+    const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    const backfill = source.slice(source.indexOf('export async function backfillConnectorInboxes'), source.indexOf('export async function migrateContentVersions'));
+    expect(backfill).toContain('FILTER LENGTH(FOR inbox IN inboxes FILTER inbox.connectorKey == connector._key LIMIT 1 RETURN 1) == 0');
+    expect(backfill).toContain('UPSERT { connectorKey: @connectorKey }');
+    expect(backfill).toContain("buildEmbeddingText(['name', 'description'], { name })");
+    expect(source).toContain("'organizationConnectors', 'inboxes'");
+  });
+
+  test('protects tone semantics from generic document chunking and embeds only ordered name plus description', async () => {
+    const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    const toneMigration = source.slice(source.indexOf('export async function migrateEmailToneEmbeddings'), source.indexOf('export async function migrateContentVersions'));
+    const documentMigration = source.slice(source.indexOf('export async function migrateContentDocuments'), source.indexOf('export async function migrateContentShares'));
+    expect(toneMigration).toContain('folder.purpose == "communication-mail-tones"');
+    expect(toneMigration).toContain('isCanonicalEmailToneDocument(document)');
+    expect(toneMigration).toContain('decodeEmailToneContent');
+    expect(toneMigration).toContain('emailToneSemanticText');
+    expect(toneMigration).toContain('chunkDocumentContent(semanticText)');
+    expect(toneMigration).toContain('chunkEmbeddings: contentChunks.map(() => embedding)');
+    expect(toneMigration).not.toContain('CONTAINS(document.content, "<!-- vorinthex-mail-tone ")');
+    const retiredToneMigration = source.slice(source.indexOf('export async function migrateRetiredEmailDefaultTones'), source.indexOf('export async function migrateEmailInboxCategoriesAndDefaultTones'));
+    expect(retiredToneMigration).toContain('document._key == key');
+    expect(retiredToneMigration).toContain('document.isFavorite != true');
+    expect(retiredToneMigration).toContain('document.coverImageKey == null');
+    expect(retiredToneMigration).toContain('document.createdAt == document.updatedAt');
+    expect(retiredToneMigration).toContain('LET hasDependents =');
+    expect(retiredToneMigration).toContain('FOR version IN documentVersions');
+    expect(retiredToneMigration).toContain('FOR summary IN documentSummaries');
+    expect(retiredToneMigration).toContain('FOR audio IN documentAudioVersions');
+    expect(retiredToneMigration).toContain('FOR audio IN documentSummaryAudio');
+    expect(retiredToneMigration).toContain('audio.summaryKey IN summaryKeys');
+    expect(retiredToneMigration).toContain('&& !hasDependents');
+    expect(retiredToneMigration).toContain('wasRemoved ? [] : [document]');
+    expect(retiredToneMigration).toContain('JSON_STRINGIFY({ version: 1 })');
+    expect(toneMigration).toContain('FOR tone IN @defaultTones');
+    expect(toneMigration).toContain('UPSERT { _key: key }');
+    expect(toneMigration).toContain('payload.kind IN ["mail-thread", "mail-message"]');
+    expect(toneMigration).toContain('? "Filtered" : payload.data.priority == "urgent" ? "Urgent" : "Important"');
+    expect(toneMigration).toContain('LET inInbox = "INBOX" IN labels || "SPAM" IN labels || "TRASH" IN labels');
+    expect(toneMigration).toContain('{ inboxCategory, inInbox }');
+    expect(documentMigration).toContain('FILTER document.emailToneEmbeddingVersion != 1');
+    expect(documentMigration).toContain('document.emailReplyContextEmbeddingVersion != 1');
+    expect(source.indexOf('await migrateEmailToneEmbeddings(targetDb)')).toBeLessThan(source.indexOf('await migrateContentDocuments(targetDb)', source.indexOf("if (spec.name === 'documents')")));
+    expect(source.indexOf('await migrateEmailInboxCategoriesAndDefaultTones(targetDb)')).toBeLessThan(source.indexOf('await migrateEmailToneEmbeddings(targetDb)'));
+  });
+
+  test('defers dependent-aware retired tone cleanup until a fresh database has ensured every required collection', async () => {
+    const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    const earlyMigration = source.slice(source.indexOf('export async function migrateEmailInboxCategoriesAndDefaultTones'), source.indexOf('export async function migrateContentVersions'));
+    for (const collection of ['documentVersions', 'documentSummaries', 'documentAudioVersions', 'documentSummaryAudio']) expect(earlyMigration).not.toContain(` IN ${collection}`);
+    const loopStart = source.indexOf('for (const spec of collections)');
+    const deferredCall = source.indexOf('await migrateRetiredEmailDefaultTones(targetDb)', loopStart);
+    const afterCollectionLoop = source.indexOf('await migrateGeneratedTravelDocuments(targetDb)', loopStart);
+    const loopClose = source.lastIndexOf('\n  }\n\n', deferredCall);
+    expect(deferredCall).toBeGreaterThan(loopStart);
+    expect(deferredCall).toBeLessThan(afterCollectionLoop);
+    expect(loopClose).toBeGreaterThan(loopStart);
+    expect(source.slice(loopClose, deferredCall)).toBe('\n  }\n\n  ');
+    for (const collection of ['documents', 'folders', 'documentVersions', 'documentSummaries', 'documentAudioVersions', 'documentSummaryAudio']) expect(collections.some(({ name }) => name === collection)).toBe(true);
   });
 });

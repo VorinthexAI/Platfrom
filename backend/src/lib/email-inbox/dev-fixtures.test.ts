@@ -10,5 +10,6 @@ describe('mail development fixtures', () => {
     expect(fixtures.threads.length).toBeGreaterThanOrEqual(2);
     expect(fixtures.threads.some(({ messages }) => messages.some(({ direction }) => direction === 'outbound'))).toBe(true);
     expect(fixtures.threads.every(({ thread, messages }) => thread.scopeKey === scopeKey && messages.every((message) => message.scopeKey === scopeKey && message.accountKey === accountKey))).toBe(true);
+    expect(fixtures.tones.map(({ name }) => name)).toEqual(['Casual', 'Formal', 'Concise']);
   });
 });
