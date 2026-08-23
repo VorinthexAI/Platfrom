@@ -23,10 +23,19 @@ export const organizationConnectorSchema = z.object({
   scopes: z.array(z.string().min(1)).min(1),
   createdByMembershipKey: z.string().cuid(),
   status: z.enum(['active', 'error', 'revoked']),
+  syncEnabled: z.boolean().default(true),
+  historyId: z.string().trim().min(1).optional(),
+  lastSyncedAt: z.string().datetime().optional(),
+  syncStatus: z.enum(['idle', 'syncing', 'error']).default('idle'),
+  syncError: z.string().max(500).optional(),
+  syncLeaseToken: z.string().uuid().optional(),
+  syncLeaseExpiresAt: z.string().datetime().optional(),
+  watchRegisteredAt: z.string().datetime().optional(),
+  watchExpiresAt: z.string().datetime().optional(),
   lastRefreshedAt: z.string().datetime().optional(),
   lastError: z.string().max(500).optional(),
   revokedAt: z.string().datetime().optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
-});
+}).strict();
 export type OrganizationConnector = z.infer<typeof organizationConnectorSchema>;

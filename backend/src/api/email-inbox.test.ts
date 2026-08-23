@@ -14,7 +14,9 @@ function appWith(overrides: Parameters<typeof createEmailHandlers>[0]) {
     .post('/email/connect', handlers.startConnect)
     .post('/email/connect/exchange', handlers.exchangeConnect)
     .post('/email/threads/:threadKey', handlers.thread)
-    .post('/email/drafts', handlers.draft);
+    .post('/email/drafts', handlers.draft)
+    .post('/email/drafts/compose', handlers.draftNew)
+    .post('/email/tones/list', handlers.tones);
 }
 
 describe('email inbox handlers', () => {
@@ -54,5 +56,22 @@ describe('email inbox handlers', () => {
     expect((await request({ markRead: true })).status).toBe(200);
     expect((await request({ markRead: false })).status).toBe(200);
     expect(calls).toEqual([true, true, false]);
+  });
+
+  test('routes strict new drafts and tone listing through the canonical service', async () => {
+    const calls: unknown[] = [];
+    const service = {
+      draftNew: async (...args: unknown[]) => { calls.push(['draftNew', ...args]); return { variant: 'new' }; },
+      tones: async (...args: unknown[]) => { calls.push(['tones', ...args]); return []; },
+    };
+    const app = appWith({ getIdentity: identity as never, service: service as never, oauth: {} as never });
+    const input = { organizationKey, scopeKey, to: ['recipient@example.com'], subject: 'Planning', tone: 'direct', attachments: [{ type: 'document', key: userKey }] };
+    expect((await app.request('/email/drafts/compose', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })).status).toBe(201);
+    expect((await app.request('/email/drafts/compose', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...input, unexpected: true }) })).status).toBe(400);
+    expect((await app.request('/email/tones/list', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey }) })).status).toBe(200);
+    expect(calls).toEqual([
+      ['draftNew', { userKey, organizationKey, scopeKey }, { to: input.to, subject: input.subject, tone: input.tone, attachments: input.attachments }],
+      ['tones', { userKey, organizationKey, scopeKey }],
+    ]);
   });
 });

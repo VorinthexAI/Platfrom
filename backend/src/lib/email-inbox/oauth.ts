@@ -3,7 +3,6 @@ import { z } from 'zod';
 import { requireOrganizationAccess, requireScopeAccess } from '@/lib/founders/access';
 import { redisConnection } from '@/lib/redis';
 import { connectorPublic, createConnectorRepository, type ConnectorRepository } from './connector-repository';
-import { createEmailRepository, type EmailRepository } from './repository';
 import { buildGmailAuthorizationUrl, createGmailClient, createPkce, exchangeGmailCode } from './gmail';
 
 const STATE_PREFIX = 'email:oauth:state:';
@@ -37,14 +36,13 @@ function allowedReturnUri(value: string) {
 }
 
 export function createEmailOAuthService(options: {
-  store?: OAuthStore; connectors?: ConnectorRepository; repository?: EmailRepository;
+  store?: OAuthStore; connectors?: ConnectorRepository;
   exchange?: typeof exchangeGmailCode; authorize?: (userKey: string, organizationKey: string, scopeKey: string) => Promise<{ membershipKey: string }>;
   profile?: (accessToken: string) => Promise<{ historyId: string }>;
   watch?: (accessToken: string) => Promise<{ historyId: string; expiration: string } | null>;
 } = {}) {
   const store = options.store ?? redisStore;
   const connectors = options.connectors ?? createConnectorRepository();
-  const repository = options.repository ?? createEmailRepository();
   const exchange = options.exchange ?? exchangeGmailCode;
   const profile = options.profile ?? ((accessToken: string) => createGmailClient(accessToken).profile());
   const registerWatch = options.watch ?? (async (accessToken: string) => {
@@ -91,9 +89,8 @@ export function createEmailOAuthService(options: {
           organizationKey: state.organizationKey, scopeKey: state.scopeKey, createdByMembershipKey: state.membershipKey,
           providerAccountId: result.identity.providerAccountId, email: result.identity.email, scopes: result.scopes, credentials: result.credentials,
         });
-        await repository.disableAccounts(state.scopeKey);
-        const account = await repository.upsertAccount({ scopeKey: state.scopeKey, connectorKey: connector.key, providerAccountId: connector.providerAccountId, email: connector.email, historyId: watch?.historyId ?? gmailProfile.historyId });
-        if (watch) await repository.updateWatch(account.key, watch);
+        await connectors.setSyncState(connector.key, 'idle', { historyId: watch?.historyId ?? gmailProfile.historyId, markSynced: false });
+        if (watch) await connectors.updateWatch(connector.key, watch);
         const grant = token('vrtx_email_grant_');
         const payload = grantSchema.parse({ userKey: state.userKey, organizationKey: state.organizationKey, scopeKey: state.scopeKey, connectorKey: connector.key, email: connector.email });
         if (!(await store.put(`${GRANT_PREFIX}${grant}`, JSON.stringify(payload), 300))) throw new Error('Could not create email connection grant');

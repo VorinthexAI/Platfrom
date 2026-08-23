@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { isLegacyIndex, LEGACY_REMOVAL_MARKER, normalizeLegacyDocumentSharePermission } from './arango-migrate-indexes';
 import { stageLegacyDocumentShares } from './content-migration';
-import { collections, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateEmailReplyMetadata, migrateGeneratedTravelDocuments, migrateImageCaptions, migrateMinimalPlacesAndRetireTrips, migrateModelActionSlugs, migratePlaceReports, migrateTripAttachments, migrateTripCreationReceipts, migrateTripGuides, retireMomentumScope, retireTranscriptionDomain, retireUserSettings } from './arango-migrate';
+import { collections, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateGeneratedTravelDocuments, migrateImageCaptions, migrateMinimalPlacesAndRetireTrips, migrateModelActionSlugs, migratePlaceReports, migrateTripAttachments, migrateTripCreationReceipts, migrateTripGuides, retireMomentumScope, retireTranscriptionDomain, retireUserSettings } from './arango-migrate';
 import { EMBEDDING_DIMENSIONS, LEGACY_EMBEDDING_DIMENSIONS, embeddingMetadata } from '../lib/embeddings';
 import { DOCUMENT_CHUNK_MAX_WORDS, DOCUMENT_MAX_CHUNKS, documentSemanticHash } from '../lib/ai/document-processing/chunking';
 import { RETAINED_MODEL_ACTION_BINDINGS, RETAINED_MODEL_PROVIDER_BINDINGS, RETAINED_MODEL_SLUGS, RETAINED_PROVIDER_SLUGS, retireAiPersistence } from './retire-ai-persistence';
@@ -266,7 +266,7 @@ describe('Arango migration indexes', () => {
   });
   test('hard-removes legacy tombstones and reconciles their indexes for every affected collection', async () => {
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
-    for (const name of ['scopes', 'scopeScopes', 'folders', 'images', 'visualIdentities', 'collections', 'imageCollecitionHightlights', 'documents', 'documentVersions', 'shares', 'places', 'trips', 'books', 'emailThreads', 'messages']) {
+    for (const name of ['scopes', 'scopeScopes', 'folders', 'images', 'visualIdentities', 'collections', 'imageCollecitionHightlights', 'documents', 'documentVersions', 'shares', 'places', 'trips', 'books', 'messages']) {
       expect(source).toContain(`'${name}'`);
     }
     expect(source).toContain('resource[@marker] != null');
@@ -351,9 +351,19 @@ describe('Arango migration indexes', () => {
     expect(collections.find(({ name }) => name === 'bookProgress')?.indexes).toContainEqual({ fields: ['scopeKey', 'userKey', 'bookKey', 'chapterKey'], unique: true });
     expect(collections.find(({ name }) => name === 'books')?.indexes).toContainEqual({ fields: ['scopeKey', 'generationRequestKey'], unique: true, sparse: true });
     const emailNames = ['emailAccounts', 'emailThreads', 'emailMessages', 'emailContacts', 'emailWritingProfiles', 'emailRules', 'emailReplyDrafts'];
-    expect(collections.filter(({ name }) => emailNames.includes(name)).map(({ name }) => name)).toEqual(emailNames);
-    expect(collections.find(({ name }) => name === 'emailAccounts')?.skipEmbedding).toBe(true);
-    expect(collections.find(({ name }) => name === 'emailMessages')?.indexes).toContainEqual({ fields: ['scopeKey', 'accountKey', 'providerMessageId'], unique: true });
+    expect(collections.filter(({ name }) => emailNames.includes(name))).toEqual([]);
+  });
+  test('migrates mail state into Archive and connectors before dropping retired collections', async () => {
+    const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    const migrate = source.indexOf('await migrateMailArchiveDocuments(targetDb);');
+    const drop = source.indexOf('for (const name of droppedCollections)');
+    expect(migrate).toBeGreaterThan(-1);
+    expect(migrate).toBeLessThan(drop);
+    expect(source).toContain('kind: "mail-thread"');
+    expect(source).toContain('kind: "mail-message"');
+    expect(source).toContain('kind: "mail-reply-draft"');
+    expect(source).toContain('kind: "mail-writing-profile"');
+    expect(source).toContain('UPDATE connector WITH { syncEnabled: account.syncEnabled');
   });
   test('cleans and collision-safely compacts existing trip attachments before indexing', async () => {
     const calls: string[] = [];
@@ -741,7 +751,7 @@ describe('Arango migration indexes', () => {
     expect(patch).not.toHaveProperty('chunkEmbeddings');
   });
   test('physically normalizes and verifies favorite-bearing resources idempotently', async () => {
-    for (const collection of ['folders', 'images', 'collections', 'documents', 'emailThreads'] as const) {
+    for (const collection of ['folders', 'images', 'collections', 'documents'] as const) {
       const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
       const database = {
         async query(query: string, bindVars?: Record<string, unknown>) {
@@ -759,17 +769,6 @@ describe('Arango migration indexes', () => {
       expect(calls.filter(({ query }) => query.includes('RETURN LENGTH'))).toHaveLength(2);
       expect(calls.every(({ bindVars }) => bindVars?.['@collection'] === collection)).toBe(true);
     }
-  });
-  test('backfills stable email reply depths from RFC message links', async () => {
-    const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
-    const database = { async query(query: string, bindVars?: Record<string, unknown>) {
-      calls.push({ query, bindVars });
-      if (calls.length === 1) return { async all() { return [{ scopeKey: 'scope', threadKey: 'thread' }]; } };
-      if (calls.length === 2) return { async all() { return [{ key: 'one', messageIdHeader: '<one@example.com>' }, { key: 'two', messageIdHeader: '<two@example.com>', inReplyTo: '<one@example.com>' }]; } };
-      return { async all() { return []; } };
-    } };
-    await migrateEmailReplyMetadata(database as never);
-    expect(calls[2]?.bindVars?.updates).toEqual([{ key: 'one', parentMessageId: null, replyDepth: 0 }, { key: 'two', parentMessageId: '<one@example.com>', replyDepth: 1 }]);
   });
   test('uses a durable two-phase cutover and verifies before dropping legacy shares', async () => {
     const staged = stageLegacyDocumentShares([

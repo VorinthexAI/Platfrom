@@ -79,6 +79,8 @@ export function createScopeRepository(
         const created = (saved ? scopeSchema.parse(withArangoKey(saved)) : scope) satisfies Scope;
         const { ensureGeneratedDocumentFolders } = await import('@/lib/generated-documents/folders');
         await ensureGeneratedDocumentFolders(database, created.key);
+        const { ensureMailFolders } = await import('@/lib/email-inbox/folders');
+        await ensureMailFolders(database, created.key);
         return created;
       } catch (error) {
         if (isArangoUniqueConstraintError(error)) {
@@ -149,6 +151,10 @@ export function createScopeRepository(
         LET cleanupImages = (FOR image IN images FILTER image._key IN imageKeys REMOVE image IN images RETURN 1)
         LET cleanupCaptions = (FOR caption IN imageCaptions FILTER caption._key IN captionKeys FILTER LENGTH(FOR retained IN images FILTER retained.imageCaptionKey == caption._key LIMIT 1 RETURN 1) == 0 REMOVE caption IN imageCaptions RETURN 1)
         LET cleanupCollections = (FOR collection IN collections FILTER collection._key IN managedCollections REMOVE collection IN collections RETURN 1)
+        LET mailFolderKeys = (FOR folder IN folders FILTER folder.scopeKey == @scopeKey && STARTS_WITH(folder.purpose || "", "communication-mail-") RETURN folder._key)
+        LET cleanupMailDocuments = (FOR document IN documents FILTER document.scopeKey == @scopeKey && document.folderKey IN mailFolderKeys REMOVE document IN documents RETURN 1)
+        LET cleanupMailFolders = (FOR folder IN folders FILTER folder._key IN mailFolderKeys REMOVE folder IN folders RETURN 1)
+        LET cleanupMailConnectors = (FOR connector IN organizationConnectors FILTER connector.scopeKey == @scopeKey REMOVE connector IN organizationConnectors RETURN 1)
         LET deletionJobs = (FOR image IN managedImages FILTER image.storageKey != null UPSERT { storageKey: image.storageKey } INSERT { storageKey: image.storageKey, createdAt: @now } UPDATE {} IN storageDeletionJobs RETURN 1)
         LET cleanupScopeRelations = (FOR relation IN scopeScopes FILTER relation.parentKey == @scopeKey || relation.childKey == @scopeKey REMOVE relation IN scopeScopes RETURN 1)
         LET cleanupScopeMembers = (FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey REMOVE member IN scopeMembers RETURN 1)

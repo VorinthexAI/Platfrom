@@ -495,6 +495,8 @@ export function registerRoutes(app: Hono) {
   app.post('/email/threads/:threadKey', emailHandlers.thread);
   app.post('/email/threads/:threadKey/favorite', emailHandlers.favorite);
   app.post('/email/drafts', emailHandlers.draft);
+  app.post('/email/drafts/compose', emailHandlers.draftNew);
+  app.post('/email/tones/list', emailHandlers.tones);
   app.patch('/email/drafts/:draftKey', emailHandlers.updateDraft);
   app.post('/email/drafts/:draftKey/send', emailHandlers.sendDraft);
   app.post('/email/disconnect', emailHandlers.disconnect);

@@ -25,6 +25,7 @@ const {
   invalidateAssistantChanges,
   patchCachedCompassPlace,
   patchGalleryImage,
+  patchSignalThread,
   patchGalleryUserHiddens,
   reconcileOptimisticCompassPlace,
   reconcileOptimisticCompassTrip,
@@ -264,6 +265,25 @@ test("assistant changes invalidate exact workspace prefixes without crossing con
   expect(client.getQueryState(signalDetail)?.isInvalidated).toBe(true);
   expect(client.getQueryState(compassOverview)?.isInvalidated).toBe(true);
   expect(client.getQueryState(ascendOverview)?.isInvalidated).toBe(true);
+});
+
+test("patches Signal favorites across filtered overviews and the exact detail cache", () => {
+  const client = new QueryClient();
+  const at = "2026-08-23T10:00:00.000Z";
+  const thread = { key: "thread", scopeKey: context.scopeKey, accountKey: "account", providerThreadId: "provider", subject: "Subject", summary: "Summary", intent: "Review", priority: "normal" as const, state: "needs_action" as const, lastMessageAt: at, isFavorite: false, createdAt: at, updatedAt: at };
+  const updated = { ...thread, isFavorite: true };
+  const overview = { account: null, connector: null, threads: [thread], drafts: [], counts: { all: 1, important: 0, urgent: 0, needsAction: 1, filtered: 0, unread: 0, favorite: 0 } };
+  client.setQueryData(signalQueryKeys.overview(context), overview);
+  client.setQueryData(signalQueryKeys.overview(context, "favorite"), { ...overview, threads: [] });
+  client.setQueryData(signalQueryKeys.detail(context, thread.key), { thread, messages: [] });
+  client.setQueryData(signalQueryKeys.overview(otherContext), overview);
+
+  patchSignalThread(client, context, updated);
+
+  expect(client.getQueryData<typeof overview>(signalQueryKeys.overview(context))?.threads[0]?.isFavorite).toBe(true);
+  expect(client.getQueryData<typeof overview>(signalQueryKeys.overview(context, "favorite"))?.threads).toEqual([]);
+  expect(client.getQueryData<{ thread: typeof updated }>(signalQueryKeys.detail(context, thread.key))?.thread.isFavorite).toBe(true);
+  expect(client.getQueryData<typeof overview>(signalQueryKeys.overview(otherContext))?.threads[0]?.isFavorite).toBe(false);
 });
 
 test("isolates and updates collection sharing caches", () => {

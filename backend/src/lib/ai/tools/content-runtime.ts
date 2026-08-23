@@ -168,7 +168,7 @@ async function folderView(folder: Folder, dependencies: Pick<RuntimeDefaults, 'g
 }
 
 function documentView(document: Document) {
-  const { content: _content, embedding: _embedding, contentChunks: _contentChunks, chunkEmbeddings: _chunkEmbeddings, semanticChunkCount: _semanticChunkCount, semanticContentHash: _semanticContentHash, _semanticChunkingSkipped: _semanticChunkingSkipped, storageKey: _storageKey, speechStorageKeys: _speechStorageKeys, sourceStorageKeys: _sourceStorageKeys, _internalDeletion: _internalDeletion, ...safe } = document;
+  const { content: _content, embedding: _embedding, contentChunks: _contentChunks, chunkEmbeddings: _chunkEmbeddings, semanticChunkCount: _semanticChunkCount, semanticContentHash: _semanticContentHash, _semanticChunkingSkipped: _semanticChunkingSkipped, storageKey: _storageKey, speechStorageKeys: _speechStorageKeys, sourceStorageKeys: _sourceStorageKeys, mutationPolicy: _mutationPolicy, _internalDeletion: _internalDeletion, ...safe } = document;
   return { ...safe, ...(document.sourceStorageKeys?.length ? { sourceImageCount: document.sourceStorageKeys.length } : {}) };
 }
 
@@ -831,6 +831,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       scopeKey: source.scopeKey,
       ...(source.folderKey ? { folderKey: source.folderKey } : {}),
       name: finalName,
+      mutationPolicy: 'user',
       isFavorite: false,
       ...transformed,
       createdAt: timestamp,
@@ -1308,6 +1309,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             scopeKey: input.scopeKey,
             ...(input.folderKey ? { folderKey: input.folderKey } : {}),
             name: input.name ?? `Scanned document ${timestamp.slice(0, 10)}`,
+            mutationPolicy: 'user',
             isFavorite: false,
             sourceStorageKeys: processed.storageKeys,
             ...transformed,
@@ -1351,6 +1353,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         scopeKey: input.scopeKey,
         ...(input.folderKey ? { folderKey: input.folderKey } : {}),
         name: input.name,
+        mutationPolicy: 'user',
         isFavorite: false,
         ...transformed,
         createdAt: timestamp,

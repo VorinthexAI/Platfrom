@@ -1,15 +1,31 @@
+import { createHash, randomUUID } from 'node:crypto';
+import { z } from 'zod';
 import { db, withTransaction } from '@/lib/db/client';
 import { toArangoDoc, withArangoKey } from '@/lib/db/base';
+import { documentSchema, type Document } from '@/lib/db/documents.node';
 import { newId } from '@/lib/ids';
-import { EMAIL_ACCOUNTS_COLLECTION, emailAccountSchema, type EmailAccount } from '@/lib/db/email-accounts.node';
-import { EMAIL_THREADS_COLLECTION, emailThreadSchema, type EmailThread } from '@/lib/db/email-threads.node';
-import { EMAIL_MESSAGES_COLLECTION, emailMessageSchema, type EmailMessage } from '@/lib/db/email-messages.node';
-import { EMAIL_REPLY_DRAFTS_COLLECTION, emailReplyDraftSchema, type EmailReplyDraft } from '@/lib/db/email-reply-drafts.node';
-import { EMAIL_WRITING_PROFILES_COLLECTION, emailWritingProfileSchema } from '@/lib/db/email-writing-profiles.node';
-import { z } from 'zod';
+import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
+import {
+  archiveDocument,
+  decodeEmailDraft,
+  decodeEmailMessage,
+  decodeEmailThread,
+  decodeEmailTone,
+  decodeEmailWritingProfile,
+  emailAttachmentRefsSchema,
+  emailDraftPayloadSchema,
+  emailMessagePayloadSchema,
+  emailThreadPayloadSchema,
+  emailTonePayloadSchema,
+  type EmailAttachmentRef,
+  type EmailDraft,
+  type EmailDraftCreate,
+  type EmailMessage,
+  type EmailThread,
+} from './archive-payloads';
+import { ensureMailFolders, mailFolderKeys } from './folders';
 
 type Database = Pick<typeof db, 'query' | 'collection'>;
-const parse = <T>(schema: { parse: (value: unknown) => T }, raw: unknown) => schema.parse(withArangoKey(raw as Record<string, unknown>));
 const emailCursorSchema = z.object({ v: z.literal(1), threadKey: z.string().cuid(), sentAt: z.string().datetime(), key: z.string().cuid() }).strict();
 export function encodeEmailCursor(value: z.infer<typeof emailCursorSchema>) { return Buffer.from(JSON.stringify(emailCursorSchema.parse(value))).toString('base64url'); }
 export function decodeEmailCursor(value: string, threadKey: string) {
@@ -22,191 +38,236 @@ export class EmailRepositoryError extends Error {
   constructor(readonly reason: 'not_found' | 'forbidden' | 'conflict', message: string = reason) { super(message); }
 }
 
+function stableKey(kind: string, ...values: string[]) {
+  return `c${createHash('sha256').update([kind, ...values].join('\0')).digest('hex').slice(0, 24)}`;
+}
+
+function parsedDocument(raw: unknown): Document {
+  return documentSchema.parse(withArangoKey(raw as Record<string, unknown>));
+}
+
+function withoutRecordFields<T extends { key: string; scopeKey: string; embedding: number[]; createdAt: string; updatedAt: string }>(value: T) {
+  const { key: _key, scopeKey: _scopeKey, embedding: _embedding, createdAt: _createdAt, updatedAt: _updatedAt, ...data } = value;
+  return data;
+}
+
+const defaultTones = [
+  { slug: 'concise', name: 'Concise', description: 'Brief and focused.', instruction: 'Use short sentences and include only necessary details.' },
+  { slug: 'warm', name: 'Warm', description: 'Friendly and considerate.', instruction: 'Sound approachable, appreciative, and human.' },
+  { slug: 'formal', name: 'Formal', description: 'Polished and professional.', instruction: 'Use professional language and a clear conventional structure.' },
+  { slug: 'direct', name: 'Direct', description: 'Clear and decisive.', instruction: 'Lead with the answer or action and avoid hedging.' },
+] as const;
+
 export function createEmailRepository(database: Database = db) {
-  const queryOne = async <T>(query: string, bindVars: Record<string, unknown>, schema: { parse: (value: unknown) => T }) => {
-    const cursor = await database.query(query, bindVars);
+  const attachmentResources = async (scopeKey: string, refs: EmailAttachmentRef[]) => {
+    const parsed = emailAttachmentRefsSchema.parse(refs);
+    if (new Set(parsed.map(({ type, key }) => `${type}:${key}`)).size !== parsed.length) throw new EmailRepositoryError('conflict', 'Attachment references must be unique');
+    if (!parsed.length) return [];
+    const cursor = await database.query(`FOR ref IN @refs
+      LET item = ref.type == "document" ? DOCUMENT(documents, ref.key) : DOCUMENT(images, ref.key)
+      FILTER item != null && item.scopeKey == @scopeKey && item.mutationPolicy != "system-only"
+      FILTER ref.type != "document" || !HAS(item, "_internalDeletion") || item._internalDeletion == null
+      RETURN { type: ref.type, key: ref.key, name: ref.type == "document" ? item.name : item.filename, mimeType: item.mimeType, sizeBytes: item.sizeBytes, storageKey: item.storageKey, content: ref.type == "document" && item.storageKey == null ? item.content : null }`, { scopeKey, refs: parsed });
+    const resources = await cursor.all() as Array<{ type: 'document' | 'image'; key: string; name: string; mimeType?: string; sizeBytes?: number; storageKey?: string; content?: string | null }>;
+    if (resources.length !== parsed.length) throw new EmailRepositoryError('forbidden', 'Every attachment must belong to the authorized scope');
+    return resources;
+  };
+  const listFolderDocuments = async (scopeKey: string, folderKey: string) => {
+    const cursor = await database.query('FOR document IN documents FILTER document.scopeKey == @scopeKey && document.folderKey == @folderKey && (!HAS(document, "_internalDeletion") || document._internalDeletion == null) RETURN document', { scopeKey, folderKey });
+    return (await cursor.all()).map(parsedDocument);
+  };
+  const getDocument = async (scopeKey: string, key: string) => {
+    const cursor = await database.query('FOR document IN documents FILTER document._key == @key && document.scopeKey == @scopeKey && (!HAS(document, "_internalDeletion") || document._internalDeletion == null) LIMIT 1 RETURN document', { scopeKey, key });
     const raw = await cursor.next();
-    return raw ? parse(schema, raw) : null;
+    return raw ? parsedDocument(raw) : null;
+  };
+  const replaceDocument = async (document: Document) => {
+    const cursor = await database.query('UPSERT { _key: @key } INSERT @document UPDATE MERGE(@document, { _key: OLD._key, createdAt: OLD.createdAt }) IN documents RETURN NEW', { key: document.key, document: toArangoDoc(document) });
+    return parsedDocument(await cursor.next());
+  };
+  const updatePayload = async <T>(scopeKey: string, key: string, decode: (document: unknown) => T, schema: z.ZodTypeAny, patch: Record<string, unknown>) => {
+    const { set, unset } = Object.entries(patch).reduce((result, [field, value]) => {
+      if (value === undefined) result.unset.push(field);
+      else result.set[field] = value;
+      return result;
+    }, { set: {} as Record<string, unknown>, unset: [] as string[] });
+    const updatedAt = new Date().toISOString();
+    const cursor = await database.query(`FOR document IN documents
+      FILTER document._key == @key && document.scopeKey == @scopeKey
+      LET payload = JSON_PARSE(document.content)
+      LET nextPayload = MERGE(payload, { data: UNSET(MERGE(payload.data, @set), @unset) })
+      UPDATE document WITH { content: JSON_STRINGIFY(nextPayload), updatedAt: @updatedAt } IN documents RETURN NEW`, { key, scopeKey, set, unset, updatedAt });
+    const raw = await cursor.next();
+    if (!raw) throw new EmailRepositoryError('not_found');
+    const decoded = decode(parsedDocument(raw));
+    schema.parse({ version: 1, kind: JSON.parse(parsedDocument(raw).content).kind, data: withoutRecordFields(decoded as T & { key: string; scopeKey: string; embedding: number[]; createdAt: string; updatedAt: string }) });
+    return decoded;
   };
 
   return {
-    async accountForScope(scopeKey: string) {
-      return queryOne<EmailAccount>('FOR account IN emailAccounts FILTER account.scopeKey == @scopeKey && account.syncEnabled == true SORT account.updatedAt DESC LIMIT 1 RETURN account', { scopeKey }, emailAccountSchema);
-    },
-    async listSyncTargetsByEmail(email: string) {
-      const cursor = await database.query(`FOR account IN emailAccounts
-        FILTER account.syncEnabled == true && LOWER(account.email) == @email
-        LET connector = DOCUMENT(organizationConnectors, account.connectorKey)
-        FILTER connector != null && connector.status != "revoked" && connector.scopeKey == account.scopeKey
-        RETURN { organizationKey: connector.organizationKey, scopeKey: account.scopeKey }`, { email: email.toLowerCase() });
-      return cursor.all() as Promise<Array<{ organizationKey: string; scopeKey: string }>>;
-    },
-    async listWatchRenewalTargets(before: string) {
-      const cursor = await database.query(`FOR account IN emailAccounts
-        FILTER account.syncEnabled == true && (account.watchExpiresAt == null || account.watchExpiresAt <= @before)
-        LET connector = DOCUMENT(organizationConnectors, account.connectorKey)
-        FILTER connector != null && connector.status != "revoked" && connector.scopeKey == account.scopeKey
-        RETURN { organizationKey: connector.organizationKey, scopeKey: account.scopeKey }`, { before });
-      return cursor.all() as Promise<Array<{ organizationKey: string; scopeKey: string }>>;
-    },
-    async claimSync(accountKey: string, token: string, expiresAt: string) {
-      const cursor = await database.query('FOR account IN emailAccounts FILTER account._key == @accountKey && account.syncEnabled == true && (account.syncLeaseExpiresAt == null || account.syncLeaseExpiresAt <= @now) UPDATE account WITH { syncLeaseToken: @token, syncLeaseExpiresAt: @expiresAt } IN emailAccounts RETURN true', { accountKey, token, expiresAt, now: new Date().toISOString() });
-      return (await cursor.next()) === true;
-    },
-    async releaseSync(accountKey: string, token: string) {
-      await database.query('FOR account IN emailAccounts FILTER account._key == @accountKey && account.syncLeaseToken == @token UPDATE account WITH { syncLeaseToken: null, syncLeaseExpiresAt: null } IN emailAccounts OPTIONS { keepNull: false }', { accountKey, token });
-    },
-    async renewSync(accountKey: string, token: string, expiresAt: string) {
-      const cursor = await database.query('FOR account IN emailAccounts FILTER account._key == @accountKey && account.syncLeaseToken == @token UPDATE account WITH { syncLeaseExpiresAt: @expiresAt } IN emailAccounts RETURN true', { accountKey, token, expiresAt });
-      return (await cursor.next()) === true;
-    },
-    async updateWatch(accountKey: string, input: { historyId: string; expiration: string }) {
-      const timestamp = new Date().toISOString();
-      await database.collection(EMAIL_ACCOUNTS_COLLECTION).update(accountKey, { watchRegisteredAt: timestamp, watchExpiresAt: new Date(Number(input.expiration)).toISOString(), updatedAt: timestamp });
-    },
-    async upsertAccount(input: { scopeKey: string; connectorKey: string; providerAccountId: string; email: string; historyId?: string }) {
-      const timestamp = new Date().toISOString();
-      const document = emailAccountSchema.parse({ key: newId(), ...input, provider: 'gmail', syncEnabled: true, syncStatus: 'idle', createdAt: timestamp, updatedAt: timestamp });
-      const cursor = await database.query(`
-        UPSERT { scopeKey: @scopeKey, provider: "gmail", providerAccountId: @providerAccountId }
-        INSERT @document UPDATE MERGE(@document, { _key: OLD._key, createdAt: OLD.createdAt, historyId: @historyId != null ? @historyId : OLD.historyId })
-        IN emailAccounts OPTIONS { keepNull: false } RETURN NEW
-      `, { scopeKey: input.scopeKey, providerAccountId: input.providerAccountId, historyId: input.historyId ?? null, document: toArangoDoc(document) });
-      return parse(emailAccountSchema, await cursor.next());
-    },
-    async setSyncState(accountKey: string, status: 'idle' | 'syncing' | 'error', input: { historyId?: string; error?: string } = {}) {
-      const timestamp = new Date().toISOString();
-      const patch = { syncStatus: status, syncError: input.error?.slice(0, 500) ?? null, historyId: input.historyId, ...(status === 'idle' ? { lastSyncedAt: timestamp } : {}), updatedAt: timestamp };
-      await database.collection(EMAIL_ACCOUNTS_COLLECTION).update(accountKey, patch, { keepNull: false });
-    },
-    async disableAccount(accountKey: string) {
-      await database.collection(EMAIL_ACCOUNTS_COLLECTION).update(accountKey, { syncEnabled: false, syncStatus: 'idle', updatedAt: new Date().toISOString() });
-    },
-    async disableAccounts(scopeKey: string) {
-      await database.query('FOR account IN emailAccounts FILTER account.scopeKey == @scopeKey && account.syncEnabled == true UPDATE account WITH { syncEnabled: false, syncStatus: "idle", updatedAt: @updatedAt } IN emailAccounts', { scopeKey, updatedAt: new Date().toISOString() });
-    },
+    async ensureFolders(scopeKey: string) { return ensureMailFolders(database, scopeKey); },
     async syncThread(input: {
       thread: Omit<EmailThread, 'key' | 'createdAt' | 'updatedAt'>;
       messages: Array<Omit<EmailMessage, 'key' | 'threadKey' | 'createdAt' | 'updatedAt'>>;
       reconcileMessages?: boolean;
     }) {
+      const folders = await ensureMailFolders(database, input.thread.scopeKey);
       const timestamp = new Date().toISOString();
-      return withTransaction({ read: [], write: [EMAIL_THREADS_COLLECTION, EMAIL_MESSAGES_COLLECTION] }, async (trx) => {
-        const threadDocument = emailThreadSchema.parse({ key: newId(), ...input.thread, createdAt: timestamp, updatedAt: timestamp });
-        const threadCursor = await trx.query(`
-          UPSERT { scopeKey: @scopeKey, accountKey: @accountKey, providerThreadId: @providerThreadId }
-          INSERT @document UPDATE MERGE(@document, { _key: OLD._key, createdAt: OLD.createdAt, isFavorite: OLD.isFavorite == true })
-          IN emailThreads RETURN NEW
-        `, { scopeKey: input.thread.scopeKey, accountKey: input.thread.accountKey, providerThreadId: input.thread.providerThreadId, document: toArangoDoc(threadDocument) });
-        const thread = parse(emailThreadSchema, await threadCursor.next());
-        for (const messageInput of input.messages) {
-          const message = emailMessageSchema.parse({ key: newId(), ...messageInput, threadKey: thread.key, createdAt: timestamp, updatedAt: timestamp });
-          await trx.query(`
-            UPSERT { scopeKey: @scopeKey, accountKey: @accountKey, providerMessageId: @providerMessageId }
-            INSERT @document UPDATE MERGE(@document, { _key: OLD._key, threadKey: @threadKey, createdAt: OLD.createdAt })
-            IN emailMessages
-          `, { scopeKey: message.scopeKey, accountKey: message.accountKey, providerMessageId: message.providerMessageId, threadKey: thread.key, document: toArangoDoc(message) });
+      const threadKey = stableKey('mail-thread', input.thread.scopeKey, input.thread.accountKey, input.thread.providerThreadId);
+      const threadPayload = emailThreadPayloadSchema.parse({ version: 1, kind: 'mail-thread', data: withoutRecordFields({ ...input.thread, key: threadKey, createdAt: timestamp, updatedAt: timestamp }) });
+      const threadDocument = archiveDocument({ key: threadKey, scopeKey: input.thread.scopeKey, folderKey: folders.threads, name: input.thread.subject, payload: threadPayload, embedding: input.thread.embedding, createdAt: timestamp, updatedAt: timestamp });
+      return withTransaction({ read: [], write: ['documents'] }, async (trx) => {
+        const threadCursor = await trx.query('UPSERT { _key: @key } INSERT @document UPDATE MERGE(@document, { _key: OLD._key, createdAt: OLD.createdAt, content: JSON_STRINGIFY(MERGE(JSON_PARSE(@document.content), { data: MERGE(JSON_PARSE(@document.content).data, { isFavorite: JSON_PARSE(OLD.content).data.isFavorite == true }) })) }) IN documents RETURN NEW', { key: threadKey, document: toArangoDoc(threadDocument) });
+        const thread = decodeEmailThread(parsedDocument(await threadCursor.next()));
+        for (const inputMessage of input.messages) {
+          const messageKey = stableKey('mail-message', inputMessage.scopeKey, inputMessage.accountKey, inputMessage.providerMessageId);
+          const data = withoutRecordFields({ ...inputMessage, threadKey, key: messageKey, createdAt: timestamp, updatedAt: timestamp });
+          const payload = emailMessagePayloadSchema.parse({ version: 1, kind: 'mail-message', data });
+          const document = archiveDocument({ key: messageKey, scopeKey: inputMessage.scopeKey, folderKey: folders.threads, name: inputMessage.subject, payload, embedding: inputMessage.embedding, createdAt: timestamp, updatedAt: timestamp });
+          await trx.query('UPSERT { _key: @key } INSERT @document UPDATE MERGE(@document, { _key: OLD._key, createdAt: OLD.createdAt }) IN documents', { key: messageKey, document: toArangoDoc(document) });
         }
         if (input.reconcileMessages !== false) {
-          await trx.query('FOR message IN emailMessages FILTER message.scopeKey == @scopeKey && message.threadKey == @threadKey && message.providerMessageId NOT IN @providerMessageIds REMOVE message IN emailMessages', {
-            scopeKey: input.thread.scopeKey, threadKey: thread.key, providerMessageIds: input.messages.map(({ providerMessageId }) => providerMessageId),
-          });
+          const keep = input.messages.map(({ providerMessageId }) => stableKey('mail-message', input.thread.scopeKey, input.thread.accountKey, providerMessageId));
+          await trx.query('FOR document IN documents FILTER document.scopeKey == @scopeKey && document.folderKey == @folderKey && document._key NOT IN @keep LET payload = JSON_PARSE(document.content) FILTER payload.kind == "mail-message" && payload.data.threadKey == @threadKey REMOVE document IN documents', { scopeKey: input.thread.scopeKey, folderKey: folders.threads, threadKey, keep });
         }
         return thread;
       });
     },
     async overview(scopeKey: string, filter: 'all' | 'important' | 'urgent' | 'needs_action' | 'filtered' | 'unread' | 'favorite' = 'all', search?: string) {
-      const account = await this.accountForScope(scopeKey);
-      if (!account) return { account: null, threads: [], counts: { all: 0, important: 0, urgent: 0, needsAction: 0, filtered: 0, unread: 0, favorite: 0 } };
-      const normalizedSearch = search?.trim().toLowerCase() ?? '';
-      const cursor = await database.query(`
-        LET scoped = (FOR thread IN emailThreads FILTER thread.scopeKey == @scopeKey && thread.accountKey == @accountKey && thread.inInbox != false RETURN thread)
-        LET visible = (FOR thread IN scoped
-          FILTER @filter == "all" || (@filter == "important" && thread.priority IN ["high", "urgent"]) || (@filter == "urgent" && thread.priority == "urgent") || (@filter == "needs_action" && thread.state == "needs_action") || (@filter == "filtered" && thread.state == "filtered") || (@filter == "unread" && thread.unread == true) || (@filter == "favorite" && thread.isFavorite == true)
-          FILTER @search == "" || CONTAINS(LOWER(thread.subject), @search) || CONTAINS(LOWER(thread.summary), @search) || CONTAINS(LOWER(thread.snippet || ""), @search)
-          SORT thread.lastMessageAt DESC, thread._key DESC LIMIT 100 RETURN thread)
-        RETURN { threads: visible, counts: {
-          all: LENGTH(scoped), important: LENGTH(FOR thread IN scoped FILTER thread.priority IN ["high", "urgent"] RETURN 1), urgent: LENGTH(FOR thread IN scoped FILTER thread.priority == "urgent" RETURN 1),
-          needsAction: LENGTH(FOR thread IN scoped FILTER thread.state == "needs_action" RETURN 1),
-          filtered: LENGTH(FOR thread IN scoped FILTER thread.state == "filtered" RETURN 1),
-          unread: LENGTH(FOR thread IN scoped FILTER thread.unread == true RETURN 1), favorite: LENGTH(FOR thread IN scoped FILTER thread.isFavorite == true RETURN 1)
-        }}
-      `, { scopeKey, accountKey: account.key, filter, search: normalizedSearch });
-      const result = await cursor.next() as { threads: unknown[]; counts: { all: number; important: number; urgent: number; needsAction: number; filtered: number; unread: number; favorite: number } };
-      return { account, threads: result.threads.map((raw) => parse(emailThreadSchema, raw)), counts: result.counts };
+      const threads = (await listFolderDocuments(scopeKey, mailFolderKeys(scopeKey).threads)).flatMap((document) => {
+        try { return JSON.parse(document.content).kind === 'mail-thread' ? [decodeEmailThread(document)] : []; } catch { return []; }
+      });
+      const normalized = search?.trim().toLowerCase() ?? '';
+      const inbox = threads.filter((thread) => thread.inInbox !== false);
+      const visible = inbox.filter((thread) => {
+        const matchesFilter = filter === 'all' || (filter === 'important' && ['high', 'urgent'].includes(thread.priority)) || (filter === 'urgent' && thread.priority === 'urgent') || (filter === 'needs_action' && thread.state === 'needs_action') || (filter === 'filtered' && thread.state === 'filtered') || (filter === 'unread' && thread.unread === true) || (filter === 'favorite' && thread.isFavorite === true);
+        return matchesFilter && (!normalized || `${thread.subject} ${thread.summary} ${thread.snippet ?? ''}`.toLowerCase().includes(normalized));
+      }).sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt)).slice(0, 100);
+      const connectorCursor = await database.query('FOR connector IN organizationConnectors FILTER connector.scopeKey == @scopeKey && connector.provider == "gmail" && connector.status != "revoked" SORT connector.updatedAt DESC LIMIT 1 RETURN connector', { scopeKey });
+      const account = await connectorCursor.next();
+      return { account: account ? withArangoKey(account as Record<string, unknown>) : null, threads: visible, counts: { all: inbox.length, important: inbox.filter(({ priority }) => ['high', 'urgent'].includes(priority)).length, urgent: inbox.filter(({ priority }) => priority === 'urgent').length, needsAction: inbox.filter(({ state }) => state === 'needs_action').length, filtered: inbox.filter(({ state }) => state === 'filtered').length, unread: inbox.filter(({ unread }) => unread).length, favorite: inbox.filter(({ isFavorite }) => isFavorite).length } };
     },
     async thread(scopeKey: string, threadKey: string) {
-      const thread = await queryOne<EmailThread>('FOR thread IN emailThreads FILTER thread._key == @threadKey && thread.scopeKey == @scopeKey && thread.inInbox != false LIMIT 1 RETURN thread', { scopeKey, threadKey }, emailThreadSchema);
-      if (!thread) throw new EmailRepositoryError('not_found');
-      const cursor = await database.query('FOR message IN emailMessages FILTER message.scopeKey == @scopeKey && message.threadKey == @threadKey SORT message.sentAt ASC, message._key ASC RETURN message', { scopeKey, threadKey });
-      return { thread, messages: (await cursor.all()).map((raw) => parse(emailMessageSchema, raw)) };
+      const document = await getDocument(scopeKey, threadKey);
+      if (!document) throw new EmailRepositoryError('not_found');
+      let thread: EmailThread;
+      try { thread = decodeEmailThread(document); } catch { throw new EmailRepositoryError('not_found'); }
+      if (thread.inInbox === false) throw new EmailRepositoryError('not_found');
+      const messages = (await listFolderDocuments(scopeKey, mailFolderKeys(scopeKey).threads)).flatMap((candidate) => {
+        try { const message = decodeEmailMessage(candidate); return message.threadKey === threadKey ? [message] : []; } catch { return []; }
+      }).sort((a, b) => a.sentAt.localeCompare(b.sentAt) || a.key.localeCompare(b.key));
+      return { thread, messages };
     },
     async readThreadPage(scopeKey: string, threadKey: string, limit: number, cursorValue?: string) {
-      const thread = await queryOne<EmailThread>('FOR thread IN emailThreads FILTER thread._key == @threadKey && thread.scopeKey == @scopeKey LIMIT 1 RETURN thread', { scopeKey, threadKey }, emailThreadSchema);
-      if (!thread) throw new EmailRepositoryError('not_found');
+      const detail = await this.thread(scopeKey, threadKey);
       const after = cursorValue ? decodeEmailCursor(cursorValue, threadKey) : null;
-      const cursor = await database.query(`FOR message IN emailMessages
-        FILTER message.scopeKey == @scopeKey && message.threadKey == @threadKey
-        FILTER @afterSentAt == null || message.sentAt > @afterSentAt || (message.sentAt == @afterSentAt && message._key > @afterKey)
-        SORT message.sentAt ASC, message._key ASC LIMIT @limit RETURN message`, {
-        scopeKey, threadKey, afterSentAt: after?.sentAt ?? null, afterKey: after?.key ?? null, limit: limit + 1,
-      });
-      const messages = (await cursor.all()).map((raw) => parse(emailMessageSchema, raw));
-      const page = messages.slice(0, limit);
+      const eligible = detail.messages.filter((message) => !after || message.sentAt > after.sentAt || (message.sentAt === after.sentAt && message.key > after.key));
+      const page = eligible.slice(0, limit);
       const last = page.at(-1);
-      return { thread, messages: page, nextCursor: messages.length > limit && last ? encodeEmailCursor({ v: 1, threadKey, sentAt: last.sentAt, key: last.key }) : null };
+      return { thread: detail.thread, messages: page, nextCursor: eligible.length > limit && last ? encodeEmailCursor({ v: 1, threadKey, sentAt: last.sentAt, key: last.key }) : null };
     },
-    async markThreadRead(scopeKey: string, threadKey: string) {
-      const thread = await this.thread(scopeKey, threadKey);
-      await database.collection(EMAIL_THREADS_COLLECTION).update(threadKey, { unread: false, updatedAt: new Date().toISOString() });
-      return thread.thread;
-    },
-    async setThreadFavorite(scopeKey: string, threadKey: string, isFavorite: boolean) {
-      const cursor = await database.query('FOR thread IN emailThreads FILTER thread._key == @threadKey && thread.scopeKey == @scopeKey && thread.inInbox != false UPDATE thread WITH { isFavorite: @isFavorite, updatedAt: @updatedAt } IN emailThreads RETURN NEW', { scopeKey, threadKey, isFavorite, updatedAt: new Date().toISOString() });
-      const raw = await cursor.next();
-      if (!raw) throw new EmailRepositoryError('not_found');
-      return parse(emailThreadSchema, raw);
-    },
+    async markThreadRead(scopeKey: string, threadKey: string) { return updatePayload(scopeKey, threadKey, decodeEmailThread, emailThreadPayloadSchema, { unread: false }); },
+    async setThreadFavorite(scopeKey: string, threadKey: string, isFavorite: boolean) { return updatePayload(scopeKey, threadKey, decodeEmailThread, emailThreadPayloadSchema, { isFavorite }); },
     async deleteProviderThread(scopeKey: string, accountKey: string, providerThreadId: string) {
-      const thread = await queryOne<EmailThread>('FOR thread IN emailThreads FILTER thread.scopeKey == @scopeKey && thread.accountKey == @accountKey && thread.providerThreadId == @providerThreadId LIMIT 1 RETURN thread', { scopeKey, accountKey, providerThreadId }, emailThreadSchema);
-      if (!thread) return;
-      await withTransaction([EMAIL_MESSAGES_COLLECTION, EMAIL_THREADS_COLLECTION], async (trx) => {
-        await trx.query('FOR message IN emailMessages FILTER message.scopeKey == @scopeKey && message.threadKey == @threadKey REMOVE message IN emailMessages', { scopeKey, threadKey: thread.key });
-        await trx.query('FOR thread IN emailThreads FILTER thread._key == @threadKey && thread.scopeKey == @scopeKey REMOVE thread IN emailThreads', { scopeKey, threadKey: thread.key });
-      });
+      const threadKey = stableKey('mail-thread', scopeKey, accountKey, providerThreadId);
+      await database.query('FOR document IN documents FILTER document.scopeKey == @scopeKey LET payload = JSON_PARSE(document.content) FILTER document._key == @threadKey || (payload.kind == "mail-message" && payload.data.threadKey == @threadKey) REMOVE document IN documents', { scopeKey, threadKey });
     },
     async reconcileInbox(scopeKey: string, accountKey: string, providerThreadIds: string[]) {
-      await database.query('FOR thread IN emailThreads FILTER thread.scopeKey == @scopeKey && thread.accountKey == @accountKey && thread.inInbox != false && thread.providerThreadId NOT IN @providerThreadIds UPDATE thread WITH { inInbox: false, updatedAt: @updatedAt } IN emailThreads', { scopeKey, accountKey, providerThreadIds, updatedAt: new Date().toISOString() });
+      const keep = providerThreadIds.map((providerThreadId) => stableKey('mail-thread', scopeKey, accountKey, providerThreadId));
+      const documents = await listFolderDocuments(scopeKey, mailFolderKeys(scopeKey).threads);
+      for (const document of documents) {
+        try { const thread = decodeEmailThread(document); if (thread.accountKey === accountKey && !keep.includes(thread.key) && thread.inInbox !== false) await updatePayload(scopeKey, thread.key, decodeEmailThread, emailThreadPayloadSchema, { inInbox: false }); } catch { /* Other document kind. */ }
+      }
     },
     async reconcileThreadMessages(scopeKey: string, threadKey: string, providerMessageIds: string[]) {
-      await database.query('FOR message IN emailMessages FILTER message.scopeKey == @scopeKey && message.threadKey == @threadKey && message.providerMessageId NOT IN @providerMessageIds REMOVE message IN emailMessages', { scopeKey, threadKey, providerMessageIds });
+      const documents = await listFolderDocuments(scopeKey, mailFolderKeys(scopeKey).threads);
+      for (const document of documents) {
+        try { const message = decodeEmailMessage(document); if (message.threadKey === threadKey && !providerMessageIds.includes(message.providerMessageId)) await database.collection('documents').remove(message.key); } catch { /* Other document kind. */ }
+      }
     },
     async writingProfile(scopeKey: string, profileKey?: string) {
-      return queryOne(`FOR profile IN emailWritingProfiles FILTER profile.scopeKey == @scopeKey FILTER @profileKey == null || profile._key == @profileKey SORT profile.updatedAt DESC LIMIT 1 RETURN profile`, { scopeKey, profileKey: profileKey ?? null }, emailWritingProfileSchema);
+      const documents = await listFolderDocuments(scopeKey, mailFolderKeys(scopeKey).tones);
+      const profiles = documents.flatMap((document) => {
+        try { return [decodeEmailWritingProfile(document)]; } catch { return []; }
+      });
+      const profile = profileKey ? profiles.find(({ key }) => key === profileKey) : profiles.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+      if (profile) return profile;
+      const tones = await this.listTones(scopeKey);
+      const tone = profileKey ? tones.find(({ key }) => key === profileKey) : tones[0];
+      return tone ? { ...tone, tone: tone.instruction, style: tone.description, structure: tone.description, vocabulary: tone.instruction, conventions: tone.instruction } : null;
     },
-    async createDraft(input: Omit<EmailReplyDraft, 'key' | 'createdAt' | 'updatedAt'>) {
+    async createDraft(input: EmailDraftCreate) {
+      const folders = await ensureMailFolders(database, input.scopeKey);
       const timestamp = new Date().toISOString();
-      const draft = emailReplyDraftSchema.parse({ key: newId(), ...input, createdAt: timestamp, updatedAt: timestamp });
-      const result = await database.collection(EMAIL_REPLY_DRAFTS_COLLECTION).save(toArangoDoc(draft), { returnNew: true });
-      return parse(emailReplyDraftSchema, (result as { new: unknown }).new);
+      const key = newId();
+      const data = withoutRecordFields({ ...input, key, createdAt: timestamp, updatedAt: timestamp });
+      const kind = input.variant === 'new' ? 'mail-new-draft' : 'mail-reply-draft';
+      const payload = emailDraftPayloadSchema.parse({ version: 1, kind, data });
+      const name = input.variant === 'new' ? input.subject : `Reply ${input.threadKey}`;
+      const document = archiveDocument({ key, scopeKey: input.scopeKey, folderKey: folders.drafts, name, payload, embedding: input.embedding, createdAt: timestamp, updatedAt: timestamp });
+      return decodeEmailDraft(await replaceDocument(document));
+    },
+    async listDrafts(scopeKey: string) {
+      const folders = await ensureMailFolders(database, scopeKey);
+      const drafts = await listFolderDocuments(scopeKey, folders.drafts);
+      return drafts.map(decodeEmailDraft).filter(({ status }) => status === 'generated' || status === 'edited').sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 50);
     },
     async updateDraft(scopeKey: string, draftKey: string, finalContent: string) {
-      const cursor = await database.query('FOR draft IN emailReplyDrafts FILTER draft._key == @draftKey && draft.scopeKey == @scopeKey && draft.status IN ["generated", "edited"] UPDATE draft WITH { finalContent: @finalContent, status: "edited", updatedAt: @updatedAt } IN emailReplyDrafts RETURN NEW', { scopeKey, draftKey, finalContent, updatedAt: new Date().toISOString() });
+      const updatedAt = new Date().toISOString();
+      const cursor = await database.query(`FOR document IN documents
+        FILTER document._key == @draftKey && document.scopeKey == @scopeKey
+        LET payload = JSON_PARSE(document.content)
+        FILTER payload.kind IN ["mail-reply-draft", "mail-new-draft"] && payload.data.status IN ["generated", "edited"]
+        UPDATE document WITH { content: JSON_STRINGIFY(MERGE(payload, { data: MERGE(payload.data, { finalContent: @finalContent, status: "edited" }) })), updatedAt: @updatedAt } IN documents
+        RETURN NEW`, { scopeKey, draftKey, finalContent, updatedAt });
       const raw = await cursor.next();
       if (!raw) throw new EmailRepositoryError('conflict', 'Draft is already sending or finalized');
-      return parse(emailReplyDraftSchema, raw);
+      return decodeEmailDraft(parsedDocument(raw));
     },
     async claimDraft(scopeKey: string, draftKey: string) {
       const updatedAt = new Date().toISOString();
-      const staleBefore = new Date(Date.now() - 5 * 60_000).toISOString();
-      const cursor = await database.query(`FOR draft IN emailReplyDrafts FILTER draft._key == @draftKey && draft.scopeKey == @scopeKey && (draft.status IN ["generated", "edited"] || (draft.status == "sending" && (draft.sendStartedAt == null || draft.sendStartedAt < @staleBefore))) UPDATE draft WITH { status: "sending", sendStartedAt: @updatedAt, updatedAt: @updatedAt } IN emailReplyDrafts RETURN NEW`, { scopeKey, draftKey, staleBefore, updatedAt });
+      const staleBefore = new Date(Date.now() - 30 * 60_000).toISOString();
+      const sendLeaseToken = randomUUID();
+      const cursor = await database.query(`FOR document IN documents
+        FILTER document._key == @draftKey && document.scopeKey == @scopeKey
+        LET payload = JSON_PARSE(document.content)
+        FILTER payload.kind IN ["mail-reply-draft", "mail-new-draft"]
+        FILTER payload.data.status IN ["generated", "edited"] || (payload.data.status == "sending" && (payload.data.sendStartedAt == null || payload.data.sendStartedAt < @staleBefore))
+        UPDATE document WITH { content: JSON_STRINGIFY(MERGE(payload, { data: MERGE(payload.data, { status: "sending", sendStartedAt: @updatedAt, sendLeaseToken: @sendLeaseToken }) })), updatedAt: @updatedAt } IN documents
+        RETURN NEW`, { scopeKey, draftKey, staleBefore, updatedAt, sendLeaseToken });
       const raw = await cursor.next();
       if (!raw) throw new EmailRepositoryError('conflict', 'Draft was already sent or is being sent');
-      return parse(emailReplyDraftSchema, raw);
+      return decodeEmailDraft(parsedDocument(raw));
     },
-    async finishDraft(draftKey: string, sent: boolean, providerMessageId?: string) {
-      const result = await database.collection(EMAIL_REPLY_DRAFTS_COLLECTION).update(draftKey, { status: sent ? 'sent' : 'edited', providerMessageId, sendStartedAt: null, updatedAt: new Date().toISOString() }, { returnNew: true, keepNull: false });
-      return parse(emailReplyDraftSchema, (result as { new: unknown }).new);
+    async renewDraftLease(draftKey: string, sendLeaseToken: string) {
+      const updatedAt = new Date().toISOString();
+      const cursor = await database.query(`FOR document IN documents FILTER document._key == @draftKey LET payload = JSON_PARSE(document.content) FILTER payload.data.status == "sending" && payload.data.sendLeaseToken == @sendLeaseToken UPDATE document WITH { content: JSON_STRINGIFY(MERGE(payload, { data: MERGE(payload.data, { sendStartedAt: @updatedAt }) })), updatedAt: @updatedAt } IN documents RETURN 1`, { draftKey, sendLeaseToken, updatedAt });
+      return Boolean(await cursor.next());
+    },
+    async finishDraft(draftKey: string, sendLeaseToken: string, sent: boolean, providerMessageId?: string) {
+      const updatedAt = new Date().toISOString();
+      const cursor = await database.query(`FOR document IN documents FILTER document._key == @draftKey LET payload = JSON_PARSE(document.content) FILTER payload.data.sendLeaseToken == @sendLeaseToken UPDATE document WITH { content: JSON_STRINGIFY(MERGE(payload, { data: UNSET(MERGE(payload.data, { status: @status, providerMessageId: @providerMessageId }), ["sendStartedAt", "sendLeaseToken"]) })), updatedAt: @updatedAt } IN documents OPTIONS { keepNull: false } RETURN NEW`, { draftKey, sendLeaseToken, status: sent ? 'sent' : 'edited', providerMessageId: providerMessageId ?? null, updatedAt });
+      const raw = await cursor.next();
+      if (!raw) throw new EmailRepositoryError('conflict', 'Draft send lease was lost');
+      return decodeEmailDraft(parsedDocument(raw));
+    },
+    async resolveAttachments(scopeKey: string, refs: EmailAttachmentRef[]) {
+      await attachmentResources(scopeKey, refs);
+      return emailAttachmentRefsSchema.parse(refs);
+    },
+    attachmentResources,
+    async listTones(scopeKey: string) {
+      const folders = await ensureMailFolders(database, scopeKey);
+      const timestamp = new Date().toISOString();
+      const embedding = Array(EMBEDDING_DIMENSIONS).fill(0);
+      for (const tone of defaultTones) {
+        const key = stableKey('mail-tone', scopeKey, tone.slug);
+        const payload = emailTonePayloadSchema.parse({ version: 1, kind: 'mail-tone', data: tone });
+        await replaceDocument(archiveDocument({ key, scopeKey, folderKey: folders.tones, name: tone.name, payload, embedding, createdAt: timestamp, updatedAt: timestamp }));
+      }
+      return (await listFolderDocuments(scopeKey, folders.tones)).flatMap((document) => {
+        try { return [decodeEmailTone(document)]; } catch { return []; }
+      }).sort((a, b) => defaultTones.findIndex(({ slug }) => slug === a.slug) - defaultTones.findIndex(({ slug }) => slug === b.slug));
     },
   };
 }

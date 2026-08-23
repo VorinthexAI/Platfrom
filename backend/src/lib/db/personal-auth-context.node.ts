@@ -9,6 +9,7 @@ import { folderSchema, type Folder } from './folders.node';
 import { organizationSchema, type Organization } from './organizations.node';
 import { userOrganizationSchema, type UserOrganization } from './user-organization.node';
 import { scopeMemberSchema, scopeSchema, type Scope, type ScopeMember } from '@/lib/ai/scopes/schema';
+import { ensureMailFolders } from '@/lib/email-inbox/folders';
 
 export const DEFAULT_IMAGE_COLLECTION_NAME = 'My Images';
 export const DEFAULT_CONTENT_FOLDER_NAME = 'My Documents';
@@ -79,7 +80,11 @@ export function buildDefaultPersonalContainers(input: {
 /** Creates the complete personal workspace atomically after identity verification. */
 export async function provisionPersonalAuthContext(user: { key: string; name: string | null; email: string; guestBootstrapSecretHash?: string | null }): Promise<PersonalAuthContext> {
   const existing = await getPersonalAuthContext(user.key);
-  if (existing) return existing;
+  if (existing) {
+    const { db } = await import('./client');
+    await ensureMailFolders(db, existing.scope.key);
+    return existing;
+  }
   const now = new Date().toISOString();
   const organizationKey = newId();
   const membershipKey = newId();
@@ -164,12 +169,15 @@ export async function provisionPersonalAuthContext(user: { key: string; name: st
     },
   );
   if (!result) throw new Error('personal auth context provisioning failed');
-  return {
+  const context = {
     organization: organizationSchema.parse({ ...result.organization, key: result.organization._key }),
     membership: userOrganizationSchema.parse({ ...result.membership, key: result.membership._key }),
     scope: scopeSchema.parse({ ...result.scope, key: result.scope._key }),
     scopeMembership: scopeMemberSchema.parse({ ...result.scopeMembership, key: result.scopeMembership._key }),
   };
+  const { db } = await import('./client');
+  await ensureMailFolders(db, context.scope.key);
+  return context;
 }
 
 export async function getPersonalAuthContext(userId: string): Promise<PersonalAuthContext | null> {

@@ -170,7 +170,7 @@ export function createGmailClient(accessToken: string, fetcher: typeof fetch = f
       return (await request<{ messages?: Array<{ id: string; threadId: string }> }>(`/messages?${query}`)).messages?.[0] ?? null;
     },
     modifyThread: (id: string, addLabelIds: string[], removeLabelIds: string[]) => request(`/threads/${encodeURIComponent(id)}/modify`, { method: 'POST', body: JSON.stringify({ addLabelIds, removeLabelIds }) }),
-    sendRaw: (raw: string, threadId: string) => request<{ id: string; threadId: string }>('/messages/send', { method: 'POST', body: JSON.stringify({ raw: Buffer.from(raw).toString('base64url'), threadId }) }),
+    sendRaw: (raw: string, threadId?: string) => request<{ id: string; threadId: string }>('/messages/send', { method: 'POST', body: JSON.stringify({ raw: Buffer.from(raw).toString('base64url'), ...(threadId ? { threadId } : {}) }) }),
     async revoke() {
       await fetcher('https://oauth2.googleapis.com/revoke', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ token: accessToken }).toString() });
     },

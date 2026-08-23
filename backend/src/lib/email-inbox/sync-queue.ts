@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { Queue, Worker, type JobsOptions } from 'bullmq';
 import { z } from 'zod';
 import { createRedisConnection } from '@/lib/redis';
-import { createEmailRepository } from './repository';
+import { createConnectorRepository } from './connector-repository';
 import { createSystemEmailService } from './service';
 
 const SYNC_QUEUE_NAME = 'email-incremental-sync';
@@ -49,14 +49,14 @@ export async function enqueueEmailWatchRenewal(now = new Date()) {
 }
 
 export async function processEmailSyncJob(raw: unknown, dependencies: {
-  repository?: ReturnType<typeof createEmailRepository>;
+  connectors?: ReturnType<typeof createConnectorRepository>;
   service?: ReturnType<typeof createSystemEmailService>;
 } = {}): Promise<EmailSyncResult> {
   const job = emailSyncJobSchema.parse(raw);
-  const repository = dependencies.repository ?? createEmailRepository();
-  const service = dependencies.service ?? createSystemEmailService({ repository });
+  const connectors = dependencies.connectors ?? createConnectorRepository();
+  const service = dependencies.service ?? createSystemEmailService({ connectors });
   if (job.kind === 'notification') {
-    const targets = await repository.listSyncTargetsByEmail(job.emailAddress);
+    const targets = await connectors.listSyncTargetsByEmail(job.emailAddress);
     let failures = 0;
     for (const target of targets) {
       try { await service.sync({ userKey: 'system', ...target }); }
@@ -66,7 +66,7 @@ export async function processEmailSyncJob(raw: unknown, dependencies: {
     return { synchronized: targets.length };
   }
   const before = new Date(Date.now() + 24 * 60 * 60_000).toISOString();
-  const targets = await repository.listWatchRenewalTargets(before);
+  const targets = await connectors.listWatchRenewalTargets(before);
   let failures = 0;
   for (const target of targets) {
     try { await service.renewWatch({ userKey: 'system', ...target }); }

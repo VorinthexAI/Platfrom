@@ -15,6 +15,27 @@ export const emailFilterSchema = z.enum(["all", "important", "urgent", "needs_ac
 export type EmailFilter = z.infer<typeof emailFilterSchema>;
 export const emailToneSchema = z.enum(["concise", "warm", "formal", "direct"]);
 export type EmailTone = z.infer<typeof emailToneSchema>;
+export const BUILT_IN_EMAIL_TONES: EmailTone[] = ["concise", "warm", "formal", "direct"];
+export const emailAttachmentRefSchema = z.strictObject({ type: z.enum(["document", "image"]), key: keySchema });
+export type EmailAttachmentRef = z.infer<typeof emailAttachmentRefSchema>;
+const emailAddressListSchema = z.array(z.string().trim().email()).min(1).max(50);
+export const emailReplyDraftInputSchema = z.strictObject({
+  threadKey: keySchema,
+  tone: emailToneSchema,
+  instruction: z.string().trim().min(1).max(1_000).optional(),
+  attachments: z.array(emailAttachmentRefSchema).max(20).optional(),
+});
+export const emailComposeDraftInputSchema = z.strictObject({
+  to: emailAddressListSchema,
+  cc: z.array(z.string().trim().email()).max(50).optional(),
+  bcc: z.array(z.string().trim().email()).max(50).optional(),
+  subject: z.string().trim().min(1).max(998),
+  tone: emailToneSchema,
+  instruction: z.string().trim().min(1).max(1_000).optional(),
+  attachments: z.array(emailAttachmentRefSchema).max(20).optional(),
+});
+export type EmailReplyDraftInput = z.infer<typeof emailReplyDraftInputSchema>;
+export type EmailComposeDraftInput = z.infer<typeof emailComposeDraftInputSchema>;
 
 const accountSchema = z.object({
   key: keySchema, scopeKey: keySchema, provider: z.literal("gmail"), providerAccountId: z.string().min(1), email: z.string().email(), connectorKey: keySchema.optional(),
@@ -36,11 +57,11 @@ export const emailMessageSchema = z.object({
   subject: z.string().min(1), body: z.string().min(1), summary: z.string().min(1), replyTo: z.string().email().optional(), direction: z.enum(["inbound", "outbound"]), sentAt: dateSchema, hasAttachments: z.boolean(), unread: z.boolean().optional(), createdAt: dateSchema, updatedAt: dateSchema,
 });
 export const emailDraftSchema = z.object({
-  key: keySchema, scopeKey: keySchema, threadKey: keySchema, messageKey: keySchema, emailWritingProfileKey: keySchema.optional(), generatedContent: z.string().min(1), finalContent: z.string().optional(), providerMessageId: z.string().optional(), sendStartedAt: dateSchema.optional(), status: z.enum(["generated", "edited", "sending", "sent", "discarded"]), createdAt: dateSchema, updatedAt: dateSchema,
+  key: keySchema, scopeKey: keySchema, variant: z.enum(["new", "reply"]), accountKey: keySchema.optional(), threadKey: keySchema.optional(), messageKey: keySchema.optional(), to: z.array(z.string().email()).optional(), cc: z.array(z.string().email()).optional(), bcc: z.array(z.string().email()).optional(), subject: z.string().optional(), tone: emailToneSchema.optional(), instruction: z.string().optional(), attachments: z.array(emailAttachmentRefSchema).optional(), emailWritingProfileKey: keySchema.optional(), generatedContent: z.string().min(1), finalContent: z.string().optional(), providerMessageId: z.string().optional(), sendStartedAt: dateSchema.optional(), status: z.enum(["generated", "edited", "sending", "sent", "discarded"]), createdAt: dateSchema, updatedAt: dateSchema,
 });
 
 const overviewSchema = z.object({
-  account: accountSchema.nullable(), connector: connectorSchema.nullable(), threads: z.array(emailThreadSchema),
+  account: accountSchema.nullable(), connector: connectorSchema.nullable(), threads: z.array(emailThreadSchema), drafts: z.array(emailDraftSchema),
   counts: z.object({ all: z.number().int(), important: z.number().int(), urgent: z.number().int(), needsAction: z.number().int(), filtered: z.number().int(), unread: z.number().int(), favorite: z.number().int() }),
 });
 const threadDetailSchema = z.object({ thread: emailThreadSchema, messages: z.array(emailMessageSchema) });
@@ -99,9 +120,19 @@ export async function syncEmail() {
 }
 export function fetchEmailThread(threadKey: string) { return request("post", `/email/threads/${keySchema.parse(threadKey)}`, {}, threadDetailSchema); }
 export function setEmailThreadFavorite(threadKey: string, isFavorite: boolean) { return request("post", `/email/threads/${keySchema.parse(threadKey)}/favorite`, { isFavorite }, emailThreadSchema); }
-export function createEmailDraft(input: { threadKey: string; tone: EmailTone; instruction?: string }) { return request("post", "/email/drafts", input, emailDraftSchema); }
+export function createEmailDraft(input: EmailReplyDraftInput) { return request("post", "/email/drafts", emailReplyDraftInputSchema.parse(input), emailDraftSchema); }
+export function composeEmailDraft(input: EmailComposeDraftInput) { return request("post", "/email/drafts/compose", emailComposeDraftInputSchema.parse(input), emailDraftSchema); }
 export function updateEmailDraft(draftKey: string, finalContent: string) { return request("patch", `/email/drafts/${keySchema.parse(draftKey)}`, { finalContent }, emailDraftSchema); }
-export function sendEmailDraft(draftKey: string) { return request("post", `/email/drafts/${keySchema.parse(draftKey)}/send`, {}, z.object({ sent: z.literal(true), providerMessageId: z.string().min(1), threadKey: keySchema })); }
+export function sendEmailDraft(draftKey: string) { return request("post", `/email/drafts/${keySchema.parse(draftKey)}/send`, {}, z.object({ sent: z.literal(true), providerMessageId: z.string().min(1), draftKey: keySchema.optional(), threadKey: keySchema.optional() })); }
+export async function fetchEmailTones() {
+  try {
+    const toneOptionSchema = z.object({ slug: emailToneSchema });
+    const response = await request("post", "/email/tones/list", {}, z.union([z.array(z.union([emailToneSchema, toneOptionSchema])), z.strictObject({ tones: z.array(z.union([emailToneSchema, toneOptionSchema])) })]));
+    const values = Array.isArray(response) ? response : response.tones;
+    const tones = values.map((value) => typeof value === "string" ? value : value.slug);
+    return tones.length ? tones : BUILT_IN_EMAIL_TONES;
+  } catch { return BUILT_IN_EMAIL_TONES; }
+}
 export function disconnectEmail() { return request("post", "/email/disconnect", {}, z.object({ disconnected: z.literal(true) })); }
 export async function askEmailAssistant(message: string, requestKey: string) {
   const { organizationKey, scopeKey } = getEmailContext();

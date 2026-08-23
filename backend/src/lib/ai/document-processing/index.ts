@@ -105,6 +105,7 @@ export async function parseDocument(rawInput: DocumentParseInput, dependencies: 
       storageKey: uploaded.storageKey,
       sizeBytes: normalized.sizeBytes,
       content,
+      mutationPolicy: 'user',
       isFavorite: false,
       ...semantics,
       createdAt: timestamp,

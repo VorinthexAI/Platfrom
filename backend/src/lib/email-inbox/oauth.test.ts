@@ -24,7 +24,7 @@ afterEach(() => {
 
 describe('email OAuth state', () => {
   test('binds state to access context and consumes denial callbacks once', async () => {
-    const oauth = createEmailOAuthService({ store, authorize: async () => ({ membershipKey: scopeKey }), connectors: {} as never, repository: {} as never });
+    const oauth = createEmailOAuthService({ store, authorize: async () => ({ membershipKey: scopeKey }), connectors: {} as never });
     const started = await oauth.start({ userKey, organizationKey: 'org-1', scopeKey, returnUri: 'vorinthexcore://capability/signal' });
     const authorization = new URL(started.authorizationUrl);
     const state = authorization.searchParams.get('state')!;
@@ -34,7 +34,7 @@ describe('email OAuth state', () => {
   });
 
   test('rejects unregistered mobile return URIs', async () => {
-    const oauth = createEmailOAuthService({ store, authorize: async () => ({ membershipKey: scopeKey }), connectors: {} as never, repository: {} as never });
+    const oauth = createEmailOAuthService({ store, authorize: async () => ({ membershipKey: scopeKey }), connectors: {} as never });
     await expect(oauth.start({ userKey, organizationKey: 'org-1', scopeKey, returnUri: 'https://attacker.example/callback' })).rejects.toThrow('not allowed');
   });
 
@@ -45,16 +45,17 @@ describe('email OAuth state', () => {
       encryptedCredentials: 'ciphertext', encryptionKeyId: 'v1', accessTokenFingerprint: 'a'.repeat(64), scopes: ['email'], createdByMembershipKey: scopeKey,
       status: 'active', createdAt: now, updatedAt: now,
     });
-    let accountWrites = 0;
+    let stateWrites = 0;
     let watchWrites = 0;
     const connectors = {
       find: async () => null,
       upsert: async () => connector,
       getByKey: async () => connector,
+      setSyncState: async () => { stateWrites += 1; },
+      updateWatch: async () => { watchWrites += 1; },
     };
-    const repository = { disableAccounts: async () => undefined, upsertAccount: async () => { accountWrites += 1; return { key: userKey }; }, updateWatch: async () => { watchWrites += 1; } };
     const oauth = createEmailOAuthService({
-      store, connectors: connectors as never, repository: repository as never, authorize: async () => ({ membershipKey: scopeKey }), profile: async () => ({ historyId: 'history-1' }),
+      store, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey }), profile: async () => ({ historyId: 'history-1' }),
       watch: async () => ({ historyId: 'history-watch', expiration: String(Date.now() + 86_400_000) }),
       exchange: async () => ({ identity: { providerAccountId: 'google-1', email: 'person@example.com' }, scopes: ['email'], credentials: { accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now } }),
     });
@@ -62,7 +63,7 @@ describe('email OAuth state', () => {
     const state = new URL(started.authorizationUrl).searchParams.get('state')!;
     const redirect = new URL(await oauth.callback({ state, code: 'provider-code' }));
     const code = redirect.searchParams.get('email_connection_code')!;
-    expect(accountWrites).toBe(1);
+    expect(stateWrites).toBe(1);
     expect(watchWrites).toBe(1);
     expect(await oauth.exchange({ userKey, organizationKey: 'org-1', scopeKey, code })).toMatchObject({ email: 'person@example.com' });
     expect(await oauth.exchange({ userKey, organizationKey: 'org-1', scopeKey, code })).toBeNull();

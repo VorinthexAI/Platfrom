@@ -75,6 +75,7 @@ const completeDocument = (overrides: Partial<Document> = {}): Document => ({
   storageKey: `content/${scopeKey}/${folderKey}/${documentKey}/original.txt`, sizeBytes: 10,
   content: 'Report\n\nBody', embedding,
   isFavorite: false, createdAt: timestamp, updatedAt: timestamp, ...overrides,
+  mutationPolicy: overrides.mutationPolicy ?? 'user',
 });
 
 describe('document-validate action', () => {

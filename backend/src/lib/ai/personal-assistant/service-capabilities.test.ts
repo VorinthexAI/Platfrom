@@ -15,7 +15,7 @@ const domain = {
 const expected: Array<[AssistantSurface, string[]]> = [
   ['knowledge-workspace', ['content.hidden.list', 'folder.hide', 'folder.reveal', 'document.hide', 'document.reveal', 'folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy', 'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.enhance', 'document.translate', 'document.list-versions', 'document.restore-version', 'document.download', 'content.neighbors', 'content.search-history.delete', 'knowledge.search', 'note.write']],
   ['travel-workspace', ['country.search', 'place.find', 'place.search', 'place.list', 'place.reference.generate', 'place.reference.list', 'trip.list', 'trip.search', 'trip.guide.generate', 'trip.guide.list', 'trip.create', 'trip.update', 'trip.delete', 'trip.attachment.set', 'place.guide.find', 'place.find-city', 'place.find-children', 'place.create', 'place.update', 'place.delete', 'place.open']],
-  ['signal-workspace', ['email.overview', 'email.sync', 'email.thread.read', 'email.thread.mark-read', 'email.thread.favorite', 'email.draft.create', 'email.draft.update', 'email.draft.send', 'email.disconnect']],
+  ['signal-workspace', ['email.overview', 'email.sync', 'email.thread.read', 'email.thread.mark-read', 'email.thread.favorite', 'email.draft.create', 'email.draft.compose', 'email.tone.list', 'email.draft.update', 'email.draft.send', 'email.disconnect']],
   ['book-workspace', ['book.list', 'book.detail', 'book.chapter.progress', 'book.create']],
 ];
 
@@ -81,6 +81,8 @@ describe('personal assistant service capabilities', () => {
       markRead: async (...args: unknown[]) => { calls.push(['email.markRead', ...args]); return {}; },
       setFavorite: async (...args: unknown[]) => { calls.push(['email.setFavorite', ...args]); return {}; },
       draft: async (...args: unknown[]) => { calls.push(['email.draft', ...args]); return {}; },
+      draftNew: async (...args: unknown[]) => { calls.push(['email.draftNew', ...args]); return {}; },
+      tones: async (...args: unknown[]) => { calls.push(['email.tones', ...args]); return {}; },
       updateDraft: async (...args: unknown[]) => { calls.push(['email.updateDraft', ...args]); return {}; },
       sendDraft: async (...args: unknown[]) => { calls.push(['email.sendDraft', ...args]); return {}; },
       disconnect: async (...args: unknown[]) => { calls.push(['email.disconnect', ...args]); return {}; },
@@ -116,6 +118,8 @@ describe('personal assistant service capabilities', () => {
       ['signal-workspace', 'email.thread.mark-read', { threadKey }],
       ['signal-workspace', 'email.thread.favorite', { threadKey, isFavorite: true }],
       ['signal-workspace', 'email.draft.create', { threadKey, tone: 'warm' }],
+      ['signal-workspace', 'email.draft.compose', { to: ['person@example.com'], subject: 'Hello', tone: 'direct' }],
+      ['signal-workspace', 'email.tone.list', {}],
       ['signal-workspace', 'email.draft.update', { draftKey, finalContent: 'Thanks.' }],
       ['signal-workspace', 'email.draft.send', { draftKey }],
       ['signal-workspace', 'email.disconnect', {}],

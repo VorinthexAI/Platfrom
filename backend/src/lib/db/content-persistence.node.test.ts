@@ -110,6 +110,7 @@ describe('scoped Content persistence', () => {
       name: 'Root note',
       content: 'Body',
       embedding,
+      mutationPolicy: 'user',
       isFavorite: false,
       createdAt: timestamp,
       updatedAt: timestamp,

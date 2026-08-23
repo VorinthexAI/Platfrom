@@ -28,6 +28,7 @@ export const documentSchema = z.object({
   speechStorageKeys: z.array(z.string().trim().min(1)).optional(),
   sourceStorageKeys: z.array(z.string().trim().min(1)).max(12).optional(),
   currentVersionKey: z.string().cuid().nullable().optional(),
+  mutationPolicy: z.enum(['user', 'system-only']).default('user'),
   isFavorite: z.boolean().default(false),
   _internalDeletion: z.object({
     kind: z.literal('document'),
@@ -105,6 +106,7 @@ export async function getDocumentInScope(scopeKey: string, documentKey: string):
   const cursor = await db.query(aql`
     FOR document IN ${db.collection(DOCUMENTS_COLLECTION)}
       FILTER document._key == ${documentKey} && document.scopeKey == ${scopeKey}
+      FILTER document.mutationPolicy != "system-only"
       FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
       LIMIT 1
       RETURN document
@@ -121,6 +123,7 @@ export async function listDocumentsByScope(
   const cursor = await db.query(aql`
     FOR document IN ${db.collection(DOCUMENTS_COLLECTION)}
       FILTER document.scopeKey == ${scopeKey}
+      FILTER document.mutationPolicy != "system-only"
       FILTER ${options.includePendingDeletion ?? false} || !HAS(document, "_internalDeletion") || document._internalDeletion == null
       FILTER !${hasFolderBoundary} || (${options.folderKey ?? null} == null
         ? (!HAS(document, "folderKey") || document.folderKey == null)
@@ -143,6 +146,7 @@ export async function listDocumentsByKeysInScope(
   const cursor = await db.query(aql`
     FOR document IN ${db.collection(DOCUMENTS_COLLECTION)}
       FILTER document.scopeKey == ${scopeKey} && document._key IN ${documentKeys}
+      FILTER document.mutationPolicy != "system-only"
       FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
       SORT POSITION(${documentKeys}, document._key) ASC
       RETURN document
@@ -195,6 +199,7 @@ export async function semanticSearchContent(input: ContentSemanticSearchInput): 
       FOR document IN ${db.collection(DOCUMENTS_COLLECTION)}
         FILTER document.scopeKey IN ${input.authorizedScopeKeys}
         FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
+        FILTER document.mutationPolicy != "system-only"
         LET folder = HAS(document, "folderKey") && document.folderKey != null ? DOCUMENT(${db.collection('folders')}, document.folderKey) : null
         FILTER folder == null || folder.scopeKey == document.scopeKey
         FILTER folder == null || !HAS(folder, "_internalDeletion") || folder._internalDeletion == null
@@ -230,6 +235,7 @@ export async function semanticSearchContent(input: ContentSemanticSearchInput): 
         LET document = DOCUMENT(${db.collection(DOCUMENTS_COLLECTION)}, version.documentKey)
         FILTER document != null && document.scopeKey == version.scopeKey
         FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
+        FILTER document.mutationPolicy != "system-only"
         LET folder = HAS(document, "folderKey") && document.folderKey != null ? DOCUMENT(${db.collection('folders')}, document.folderKey) : null
         FILTER folder == null || folder.scopeKey == document.scopeKey
         FILTER ${folderKeys} == null || document.folderKey IN ${folderKeys ?? []}
