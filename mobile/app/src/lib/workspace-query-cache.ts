@@ -146,8 +146,10 @@ export const signalQueryKeys = {
   all: (context: WorkspaceContext) => ["signal", ...contextKey(context)] as const,
   overviews: (context: WorkspaceContext) => [...signalQueryKeys.all(context), "overviews"] as const,
   overview: (context: WorkspaceContext, filter: EmailFilter = "all", search?: string) => [...signalQueryKeys.overviews(context), filter, search?.trim() || null] as const,
+  overviewPage: (context: WorkspaceContext, filter: EmailFilter = "all", search?: string, cursor?: string) => [...signalQueryKeys.overview(context, filter, search), "pages", cursor ?? null] as const,
   details: (context: WorkspaceContext) => [...signalQueryKeys.all(context), "details"] as const,
   detail: (context: WorkspaceContext, threadKey: string) => [...signalQueryKeys.details(context), threadKey] as const,
+  tones: (context: WorkspaceContext) => [...signalQueryKeys.all(context), "tones"] as const,
 };
 
 export const ascendQueryKeys = {

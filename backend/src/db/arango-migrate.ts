@@ -1872,6 +1872,13 @@ async function main() {
       `);
     }
     if (spec.name === 'documents') {
+      await targetDb.query(`FOR document IN documents
+        FILTER document.mutationPolicy == "system-only" && STARTS_WITH(TRIM(document.content), "{")
+        LET payload = JSON_PARSE(document.content)
+        FILTER payload.kind == "mail-tone" && payload.version == 1
+        LET tone = payload.data
+        LET content = CONCAT("# ", tone.name, "\n\n<!-- vorinthex-mail-tone ", JSON_STRINGIFY({ version: 1, slug: tone.slug }), " -->\n\n", tone.description, "\n\n## Instruction\n\n", tone.instruction)
+        UPDATE document WITH { content, mutationPolicy: "user", updatedAt: DATE_ISO8601(DATE_NOW()) } IN documents`);
       const cursor = await targetDb.query<number>(`
         RETURN LENGTH(
           FOR document IN documents

@@ -5,6 +5,10 @@ const authState = { organization: { key: "org-key", role: "member" }, scope: { k
 const now = "2026-08-11T10:00:00.000Z";
 const thread = { key: "thread-key", scopeKey: "scope-key", accountKey: "account-key", providerThreadId: "provider-thread", subject: "Subject", summary: "Summary", intent: "Review message", priority: "normal", state: "needs_action", lastMessageAt: now, latestFrom: "sender@example.com", isFavorite: false, createdAt: now, updatedAt: now };
 const draft = { key: "draft-key", scopeKey: "scope-key", variant: "reply", threadKey: "thread-key", messageKey: "message-key", generatedContent: "Reply", status: "generated", createdAt: now, updatedAt: now };
+const tones = [
+  { key: "tone-warm", scopeKey: "scope-key", slug: "warm", name: "Warm", description: "Friendly and considerate.", instruction: "Sound approachable and human.", createdAt: now, updatedAt: now },
+  { key: "tone-direct", scopeKey: "scope-key", slug: "direct", name: "Direct", description: "Clear and decisive.", instruction: "Lead with the answer.", createdAt: now, updatedAt: now },
+];
 
 mock.module("@/state/auth", () => ({ useAuthStore: { getState: () => authState } }));
 mock.module("expo-linking", () => ({ parse: () => ({ queryParams: {} }) }));
@@ -12,9 +16,9 @@ mock.module("expo-web-browser", () => ({ openAuthSessionAsync: async () => ({ ty
 mock.module("./api-client", () => ({ apiClient: {
   post: async (path: string, body: unknown, config?: unknown) => {
     calls.push({ method: "POST", path, body, config });
-    const data = path === "/email/overview" ? { account: null, connector: null, threads: [thread], drafts: [], counts: { all: 1, important: 0, urgent: 0, needsAction: 1, filtered: 0, unread: 0, favorite: 0 } }
+    const data = path === "/email/overview" ? { account: null, connector: null, threads: [thread], drafts: [], counts: { all: 1, important: 0, urgent: 0, needsAction: 1, filtered: 0, unread: 0, favorite: 0 }, nextCursor: null }
       : path === "/email/drafts" || path === "/email/drafts/compose" ? draft
-        : path === "/email/tones/list" ? { tones: [{ slug: "warm" }, { slug: "direct" }] }
+        : path === "/email/tones/list" ? { tones }
         : path.endsWith("/favorite") ? { ...thread, isFavorite: true }
         : path.endsWith("/send") ? { sent: true, providerMessageId: "sent-1", threadKey: "thread-key" }
           : path === "/email/sync" ? { synced: 1, lastSyncedAt: now }
@@ -63,9 +67,15 @@ test("rejects unknown compose fields and malformed attachment references before 
   expect(calls).toHaveLength(0);
 });
 
-test("loads server tones and retains built-in fallback values", async () => {
-  expect(await client.fetchEmailTones()).toEqual(["warm", "direct"]);
+test("loads complete server tone records while retaining slug-only drafting values", async () => {
+  expect(await client.fetchEmailTones()).toEqual(tones);
   expect(client.BUILT_IN_EMAIL_TONES).toEqual(["concise", "warm", "formal", "direct"]);
+  expect(client.emailToneRecordSchema.parse(tones[0])).toMatchObject({ key: "tone-warm", slug: "warm", name: "Warm", description: "Friendly and considerate." });
+});
+
+test("sends the inbox cursor and page limit without changing the product-neutral overview route", async () => {
+  await client.fetchEmailOverview({ filter: "all", cursor: "cursor-1", limit: 50 });
+  expect(calls[0]).toMatchObject({ path: "/email/overview", body: { organizationKey: "org-key", scopeKey: "scope-key", filter: "all", cursor: "cursor-1", limit: 50 } });
 });
 
 test("sends Signal assistant requests with a replay key and accepts workspace changes", async () => {

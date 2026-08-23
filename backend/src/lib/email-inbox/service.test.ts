@@ -108,7 +108,7 @@ describe('email thread read state', () => {
       credentials: () => ({ accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: '2027-08-11T12:00:00.000Z' }),
     };
     const gmail = { modifyThread: async () => { calls.push('gmail.modifyThread'); } };
-    return { calls, service: createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role }), client: () => gmail as never }) };
+    return { calls, service: createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role }), client: () => gmail as never, publishInboxChanged: async () => { calls.push('inbox.changed'); } }) };
   }
 
   test('explicitly marks an owner thread read and returns the bounded tool projection', async () => {
@@ -117,7 +117,7 @@ describe('email thread read state', () => {
     const result = await service.markRead(actor, userKey);
     expect(result).toMatchObject({ thread: { key: userKey, unread: false }, messages: [{ key: scopeKey, bodyTruncated: true }] });
     expect(result.messages[0]?.body).toHaveLength(8_000);
-    expect(calls).toEqual(['gmail.modifyThread', 'repository.markThreadRead']);
+    expect(calls).toEqual(['gmail.modifyThread', 'repository.markThreadRead', 'inbox.changed']);
   });
 
   test('restores Gmail UNREAD best-effort when local mark-read persistence fails', async () => {
@@ -158,7 +158,7 @@ describe('email synchronization', () => {
     payload: { mimeType: 'text/plain', headers: [{ name: 'From', value: threadId === 'thread-2' ? 'my-alias@example.com' : 'sender@example.com' }, { name: 'To', value: 'me@example.com' }, { name: 'Subject', value: 'Review' }], body: { data: Buffer.from('Please review this.').toString('base64url') } },
   });
 
-  test('paginates the complete inbox and reconciles absent local threads', async () => {
+  test('synchronizes only the latest Gmail page and reconciles it when complete', async () => {
     const synced: unknown[] = [];
     const reconciled: unknown[] = [];
     const embeddedTexts: string[] = [];
@@ -171,7 +171,7 @@ describe('email synchronization', () => {
     let page = 0;
     const gmail = {
       profile: async () => ({ emailAddress: 'me@example.com', historyId: 'history-2' }),
-      listThreads: async () => ++page === 1 ? { threads: [{ id: 'thread-1' }], nextPageToken: 'page-2' } : { threads: [{ id: 'thread-2' }] },
+      listThreads: async () => { page += 1; return { threads: [{ id: 'thread-1' }] }; },
       history: async () => ({}),
       threadMetadata: async (id: string) => ({ id, messages: [gmailMessage(`message-${id}`, id)] }),
       message: async (id: string) => gmailMessage(id, id.replace('message-', '')),
@@ -182,11 +182,135 @@ describe('email synchronization', () => {
       classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', intent: 'Review message' }),
       embed: async ({ text }) => { embeddedTexts.push(text); return embedding; },
     });
-    expect(await service.sync(actor)).toMatchObject({ synced: 2 });
-    expect(synced).toHaveLength(2);
-    expect((synced[1] as { messages: Array<{ direction: string }> }).messages[0]?.direction).toBe('outbound');
+    expect(await service.sync(actor)).toMatchObject({ synced: 1 });
+    expect(synced).toHaveLength(1);
     expect(embeddedTexts).toContain('Review\n\nPlease review this.\n\nPlease review this.');
-    expect(reconciled).toEqual([[scopeKey, userKey, ['thread-1', 'thread-2']]]);
+    expect(reconciled).toEqual([[scopeKey, userKey, ['thread-1']]]);
+  });
+
+  test('caps work at 100 threads and runs sequential batches of at most ten', async () => {
+    let active = 0, maximum = 0, embedded = 0, publications = 0;
+    const saved: unknown[] = [];
+    const ids = Array.from({ length: 105 }, (_, index) => `thread-${index}`);
+    const gmail = {
+      profile: async () => ({ historyId: 'history-2' }),
+      listThreads: async () => ({ threads: ids.map((id) => ({ id })), nextPageToken: 'more' }),
+      threadMetadata: async (id: string) => {
+        active += 1; maximum = Math.max(maximum, active);
+        await Bun.sleep(1);
+        active -= 1;
+        return { id, messages: [gmailMessage(`message-${id}`, id)] };
+      },
+      message: async (id: string) => gmailMessage(id, id.replace('message-', '')),
+    };
+    const repository = { syncThread: async (input: unknown) => { saved.push(input); return thread; }, reconcileInbox: async () => undefined, deleteProviderThread: async () => undefined };
+    const connectors = { find: async () => connector, credentials: () => ({ accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: '2027-08-11T12:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async () => true };
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', intent: 'Review' }), embed: async () => { embedded += 1; return embedding; }, publishInboxChanged: async () => { publications += 1; } });
+    expect(await service.sync(actor)).toMatchObject({ synced: 100 });
+    expect(saved).toHaveLength(100);
+    expect(maximum).toBe(10);
+    expect(embedded).toBe(200);
+    expect(publications).toBe(1);
+  });
+
+  test('waits for every thread in a failed batch before marking the connector errored and releasing its lease', async () => {
+    let releaseSibling!: () => void;
+    const siblingGate = new Promise<void>((resolve) => { releaseSibling = resolve; });
+    const events: string[] = [];
+    const ids = Array.from({ length: 10 }, (_, index) => `thread-${index}`);
+    const gmail = {
+      profile: async () => ({ historyId: 'history-2' }),
+      listThreads: async () => ({ threads: ids.map((id) => ({ id })) }),
+      threadMetadata: async (id: string) => {
+        if (id === 'thread-0') { events.push('failed'); throw new Error('thread failed'); }
+        if (id === 'thread-1') { await siblingGate; events.push('sibling settled'); }
+        return { id, messages: [gmailMessage(`message-${id}`, id)] };
+      },
+      message: async (id: string) => gmailMessage(id, id.replace('message-', '')),
+    };
+    const repository = { syncThread: async () => thread, reconcileInbox: async () => undefined, deleteProviderThread: async () => undefined };
+    const connectors = {
+      find: async () => connector,
+      credentials: () => ({ accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: '2027-08-11T12:00:00.000Z' }),
+      claimSync: async () => true,
+      renewSync: async () => true,
+      setSyncState: async (_key: string, state: string) => { events.push(`state:${state}`); return true; },
+      releaseSync: async () => { events.push('released'); },
+    };
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', intent: 'Review' }), embed: async () => embedding, publishInboxChanged: async () => undefined });
+    const releaseTimer = setTimeout(releaseSibling, 20);
+    try {
+      await expect(service.sync(actor)).rejects.toThrow('Email synchronization batch failed');
+    } finally {
+      clearTimeout(releaseTimer);
+      releaseSibling();
+    }
+    expect(events.indexOf('failed')).toBeLessThan(events.indexOf('sibling settled'));
+    expect(events.indexOf('sibling settled')).toBeLessThan(events.indexOf('state:error'));
+    expect(events.indexOf('state:error')).toBeLessThan(events.indexOf('released'));
+  });
+
+  test('persists incremental history overflow and consumes it before advancing history', async () => {
+    const ids = Array.from({ length: 105 }, (_, index) => `changed-${index}`);
+    const account: any = { ...connector, historyId: 'history-1', lastSyncedAt: now };
+    const processed: string[] = [];
+    const idleStates: Array<Record<string, any>> = [];
+    let historyCalls = 0;
+    const gmail = {
+      profile: async () => ({ historyId: 'history-2' }),
+      listThreads: async () => { throw new Error('full sync should not be queried'); },
+      history: async (historyId: string) => {
+        historyCalls += 1;
+        expect(historyId).toBe('history-1');
+        return { historyId: 'history-2', history: [{ id: 'change-set', messagesAdded: ids.map((threadId, index) => ({ message: { id: `message-${index}`, threadId } })) }] };
+      },
+      threadMetadata: async (id: string) => { processed.push(id); return { id, messages: [gmailMessage(`message-${id}`, id)] }; },
+      message: async (id: string) => gmailMessage(id, id.replace('message-', '')),
+    };
+    const repository = { syncThread: async () => thread, reconcileInbox: async () => undefined, deleteProviderThread: async () => undefined };
+    const connectors = {
+      find: async () => account,
+      credentials: () => ({ accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: '2027-08-11T12:00:00.000Z' }),
+      claimSync: async () => true,
+      renewSync: async () => true,
+      releaseSync: async () => undefined,
+      setSyncState: async (_key: string, state: string, input: Record<string, any>) => {
+        if (state === 'idle') {
+          idleStates.push(input);
+          account.historyId = input.historyId;
+          account.syncPendingHistoryId = input.pendingHistoryId ?? undefined;
+          account.syncPendingThreadIds = input.pendingThreadIds ?? undefined;
+        }
+        return true;
+      },
+    };
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', intent: 'Review' }), embed: async () => embedding, publishInboxChanged: async () => undefined });
+    expect(await service.sync(actor)).toMatchObject({ synced: 100 });
+    expect(idleStates[0]).toMatchObject({ historyId: 'history-1', pendingHistoryId: 'history-2', pendingThreadIds: ids.slice(0, 5).reverse() });
+    expect(await service.sync(actor)).toMatchObject({ synced: 5 });
+    expect(idleStates[1]).toMatchObject({ historyId: 'history-2', pendingHistoryId: null, pendingThreadIds: null });
+    expect(historyCalls).toBe(1);
+    expect(processed).toHaveLength(105);
+    expect(new Set(processed)).toEqual(new Set(ids));
+  });
+
+  test('resolves deeply nested replies regardless of provider order', async () => {
+    const resource = (id: string, messageId: string, inReplyTo?: string, references?: string) => ({
+      ...gmailMessage(id, 'thread-nested'),
+      payload: { ...gmailMessage(id, 'thread-nested').payload, headers: [...gmailMessage(id, 'thread-nested').payload.headers, { name: 'Message-ID', value: messageId }, ...(inReplyTo ? [{ name: 'In-Reply-To', value: inReplyTo }] : []), ...(references ? [{ name: 'References', value: references }] : [])] },
+    });
+    const messages = [resource('grandchild', '<grandchild@example.com>', '<missing@example.com>', '<root@example.com> <child@example.com>'), resource('root', '<root@example.com>'), resource('child', '<child@example.com>', '<root@example.com>')];
+    let saved: any;
+    const repository = { syncThread: async (input: unknown) => { saved = input; return thread; }, reconcileInbox: async () => undefined, deleteProviderThread: async () => undefined };
+    const gmail = { profile: async () => ({ historyId: 'history-2' }), listThreads: async () => ({ threads: [{ id: 'thread-nested' }] }), threadMetadata: async () => ({ id: 'thread-nested', messages }), message: async (id: string) => messages.find((message) => message.id === id)! };
+    const connectors = { find: async () => connector, credentials: () => ({ accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: '2027-08-11T12:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async () => true };
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', intent: 'Review' }), embed: async () => embedding, publishInboxChanged: async () => undefined });
+    await service.sync(actor);
+    expect(saved.messages.map(({ providerMessageId, parentMessageId, replyDepth }: any) => ({ providerMessageId, parentMessageId, replyDepth }))).toEqual([
+      { providerMessageId: 'grandchild', parentMessageId: '<child@example.com>', replyDepth: 2 },
+      { providerMessageId: 'root', parentMessageId: undefined, replyDepth: 0 },
+      { providerMessageId: 'child', parentMessageId: '<root@example.com>', replyDepth: 1 },
+    ]);
   });
 
   test('deletes a thread removed during incremental history', async () => {
@@ -209,7 +333,44 @@ describe('email synchronization', () => {
   });
 });
 
+describe('inbox watch subscription', () => {
+  test('registers and persists a Gmail watch without exposing credentials', async () => {
+    const previous = process.env.GMAIL_PUBSUB_TOPIC;
+    process.env.GMAIL_PUBSUB_TOPIC = 'projects/example/topics/inbox';
+    try {
+      const writes: unknown[] = [];
+      const connectors = { find: async () => connector, credentials: () => ({ accessToken: 'secret-access', refreshToken: 'secret-refresh', tokenType: 'Bearer', expiresAt: '2027-08-11T12:00:00.000Z' }), updateWatch: async (...args: unknown[]) => { writes.push(args); } };
+      const gmail = { watch: async (topic: string) => { expect(topic).toBe('projects/example/topics/inbox'); return { historyId: '123', expiration: String(Date.parse('2026-08-24T12:00:00.000Z')) }; } };
+      const service = createEmailService({ connectors: connectors as never, repository: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never });
+      const result = await service.subscribe(actor);
+      expect(result).toEqual({ watchExpiresAt: '2026-08-24T12:00:00.000Z' });
+      expect(JSON.stringify(result)).not.toContain('secret');
+      expect(writes).toEqual([[userKey, { historyId: '123', expiration: String(Date.parse('2026-08-24T12:00:00.000Z')) }]]);
+    } finally {
+      if (previous === undefined) delete process.env.GMAIL_PUBSUB_TOPIC; else process.env.GMAIL_PUBSUB_TOPIC = previous;
+    }
+  });
+});
+
 describe('new email drafting', () => {
+  test('includes the edited selected tone in reply and new draft prompts', async () => {
+    const prompts: string[] = [];
+    const profile = { key: userKey, tone: 'Use my edited voice.', style: 'My calmer description.', structure: 'My calmer description.', vocabulary: 'Use my edited voice.', conventions: 'Use my edited voice.' };
+    const profileCalls: unknown[][] = [];
+    const repository = {
+      thread: async () => ({ thread, messages: [message] }),
+      writingProfile: async (...input: unknown[]) => { profileCalls.push(input); return profile; },
+      resolveAttachments: async () => [],
+      createDraft: async (input: any) => ({ key: userKey, createdAt: now, updatedAt: now, ...input }),
+    };
+    const service = createEmailService({ repository: repository as never, connectors: { find: async () => null } as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, ask: (async (_organizationKey: string, input: { systemPrompt: string }) => { prompts.push(input.systemPrompt); return { output: { text: 'Draft body.' } }; }) as never });
+    await service.draft(actor, { threadKey: userKey, tone: 'warm' });
+    await service.draftNew(actor, { to: ['person@example.com'], subject: 'Plan', tone: 'warm' });
+    expect(profileCalls.map(([, , slug]) => slug)).toEqual(['warm', 'warm']);
+    expect(prompts).toHaveLength(2);
+    expect(prompts.every((prompt) => prompt.includes('Use my edited voice.') && prompt.includes('My calmer description.'))).toBe(true);
+  });
+
   test('creates an Archive draft without requiring a provider connection', async () => {
     let created: any;
     const repository = {

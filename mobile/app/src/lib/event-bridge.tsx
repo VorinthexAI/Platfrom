@@ -5,8 +5,10 @@ import { AppState } from "react-native";
 import { getEventStream } from "./api-client";
 import { publishAppEvent } from "./app-events";
 import { compassQueryKeys } from "./compass-query-keys";
+import { contentQueryKeys } from "./content-query-cache";
 import { galleryRefreshPlan, isCurrentContextGeneration, type GalleryRefreshFamily } from "./gallery-convergence";
 import { eventStreamRetryDelay, invalidatesGalleryQueries } from "./sse";
+import { signalQueryKeys } from "./workspace-query-cache";
 import { useAuthStore } from "@/state/auth";
 
 export function AuthenticatedEventBridge() {
@@ -35,9 +37,15 @@ export function AuthenticatedEventBridge() {
 
     const root = ["gallery", organizationKey, scopeKey] as const;
     const compassContext = { organizationKey, scopeKey };
+    const contentContext = { userKey, organizationKey, scopeKey };
     const invalidateCompassTrips = () => void queryClient.invalidateQueries({ queryKey: compassQueryKeys.trips(compassContext) });
     const invalidateCompassPlaceReferences = () => void queryClient.invalidateQueries({ queryKey: compassQueryKeys.places(compassContext) });
-    const invalidateArchive = () => void queryClient.invalidateQueries({ queryKey: ["archive", organizationKey, scopeKey], refetchType: "active" });
+    const invalidateArchive = () => void queryClient.invalidateQueries({ queryKey: contentQueryKeys.all(contentContext), refetchType: "active" });
+    const invalidateSignal = () => {
+      void queryClient.invalidateQueries({ queryKey: signalQueryKeys.overviews(compassContext), refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: signalQueryKeys.details(compassContext), refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: signalQueryKeys.tones(compassContext), refetchType: "active" });
+    };
     const inCurrentGallery = (queryKey: readonly unknown[]) => root.every((value, index) => queryKey[index] === value);
     const invalidateSharingSuffix = (suffixes: readonly string[]) => {
       void queryClient.invalidateQueries({ predicate: ({ queryKey }) => inCurrentGallery(queryKey) && queryKey[3] === "sharing" && suffixes.includes(String(queryKey.at(-1))), refetchType: "none" });
@@ -67,8 +75,14 @@ export function AuthenticatedEventBridge() {
         invalidateUserHiddens();
         if (event.event === "trip.changed") invalidateCompassTrips();
         if (event.event === "place.reference.changed") invalidateCompassPlaceReferences();
+        if (event.event === "inbox.changed") {
+          invalidateSignal();
+          publishAppEvent({ type: "inbox.changed" });
+        }
         if (event.event === "content.changed") {
           invalidateArchive();
+          void queryClient.invalidateQueries({ queryKey: signalQueryKeys.tones(compassContext), refetchType: "active" });
+          publishAppEvent({ type: "inbox.changed" });
           invalidateCompassTrips();
           invalidateCompassPlaceReferences();
         }
@@ -86,6 +100,7 @@ export function AuthenticatedEventBridge() {
         invalidateGallery(galleryRefreshPlan("reconnect"));
         invalidateCompassTrips();
         invalidateCompassPlaceReferences();
+        invalidateSignal();
         publishAppEvent({ type: "event-stream.connected" });
       }).catch((error: unknown) => {
         if (error instanceof Error && error.name === "AbortError") return;
@@ -113,6 +128,7 @@ export function AuthenticatedEventBridge() {
         invalidateArchive();
         invalidateCompassTrips();
         invalidateCompassPlaceReferences();
+        invalidateSignal();
         connect();
       }
     });

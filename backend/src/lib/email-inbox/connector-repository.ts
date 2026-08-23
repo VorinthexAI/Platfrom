@@ -111,15 +111,15 @@ export function createConnectorRepository(database: Database = db) {
     async releaseSync(key: string, token: string) {
       await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.syncLeaseToken == @token UPDATE connector WITH { syncLeaseToken: null, syncLeaseExpiresAt: null } IN @@collection OPTIONS { keepNull: false }', { '@collection': ORGANIZATION_CONNECTORS_COLLECTION, key, token });
     },
-    async setSyncState(key: string, status: 'idle' | 'syncing' | 'error', input: { historyId?: string; error?: string; markSynced?: boolean; leaseToken?: string } = {}) {
+    async setSyncState(key: string, status: 'idle' | 'syncing' | 'error', input: { historyId?: string; pendingHistoryId?: string | null; pendingThreadIds?: string[] | null; resetLastSynced?: boolean; error?: string; markSynced?: boolean; leaseToken?: string } = {}) {
       const updatedAt = new Date().toISOString();
-      const update = { syncStatus: status, syncError: input.error?.slice(0, 500) ?? null, historyId: input.historyId, ...(status === 'idle' && input.markSynced !== false ? { status: 'active', lastError: null, lastSyncedAt: updatedAt } : {}), ...(status === 'error' ? { status: 'error', lastError: input.error?.slice(0, 500) ?? 'Email synchronization failed' } : {}), updatedAt };
+      const update = { syncStatus: status, syncError: input.error?.slice(0, 500) ?? null, historyId: input.historyId, syncPendingHistoryId: input.pendingHistoryId, syncPendingThreadIds: input.pendingThreadIds, ...(input.resetLastSynced ? { lastSyncedAt: null } : {}), ...(status === 'idle' && input.markSynced !== false ? { status: 'active', lastError: null, lastSyncedAt: updatedAt } : {}), ...(status === 'error' ? { status: 'error', lastError: input.error?.slice(0, 500) ?? 'Email synchronization failed' } : {}), updatedAt };
       const cursor = await database.query('FOR connector IN @@collection FILTER connector._key == @key && (@leaseToken == null || connector.syncLeaseToken == @leaseToken) UPDATE connector WITH @update IN @@collection OPTIONS { keepNull: false } RETURN true', { '@collection': ORGANIZATION_CONNECTORS_COLLECTION, key, leaseToken: input.leaseToken ?? null, update });
       return (await cursor.next()) === true;
     },
     async updateWatch(key: string, input: { historyId: string; expiration: string }) {
       const updatedAt = new Date().toISOString();
-      await database.collection(ORGANIZATION_CONNECTORS_COLLECTION).update(key, { historyId: input.historyId, watchRegisteredAt: updatedAt, watchExpiresAt: new Date(Number(input.expiration)).toISOString(), updatedAt });
+      await database.collection(ORGANIZATION_CONNECTORS_COLLECTION).update(key, { watchRegisteredAt: updatedAt, watchExpiresAt: new Date(Number(input.expiration)).toISOString(), updatedAt });
     },
     async disableScope(scopeKey: string) {
       await database.query('FOR connector IN @@collection FILTER connector.scopeKey == @scopeKey && connector.provider == "gmail" && connector.syncEnabled != false UPDATE connector WITH { syncEnabled: false, syncStatus: "idle", updatedAt: @updatedAt } IN @@collection', { '@collection': ORGANIZATION_CONNECTORS_COLLECTION, scopeKey, updatedAt: new Date().toISOString() });

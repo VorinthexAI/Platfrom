@@ -89,7 +89,7 @@ const newDraftDataSchema = draftCommonSchema.extend({
   subject: text.max(998),
 }).strict();
 
-const toneDataSchema = z.object({
+export const emailToneDataSchema = z.object({
   slug: z.enum(['concise', 'warm', 'formal', 'direct']),
   name: z.enum(['Concise', 'Warm', 'Formal', 'Direct']),
   description: text,
@@ -136,7 +136,7 @@ export const emailDraftPayloadSchema = z.discriminatedUnion('kind', [
   emailReplyDraftPayloadSchema,
   emailNewDraftPayloadSchema,
 ]);
-export const emailTonePayloadSchema = envelope('mail-tone', toneDataSchema);
+export const emailTonePayloadSchema = envelope('mail-tone', emailToneDataSchema);
 export const emailWritingProfilePayloadSchema = envelope('mail-writing-profile', writingProfileDataSchema);
 export const emailContactPayloadSchema = envelope('mail-contact', contactDataSchema);
 export const emailRulePayloadSchema = envelope('mail-rule', ruleDataSchema);
@@ -153,7 +153,7 @@ export type EmailThread = ArchiveRecord<z.infer<typeof threadDataSchema>>;
 export type EmailMessage = ArchiveRecord<z.infer<typeof messageDataSchema>>;
 export type EmailDraft = ArchiveRecord<z.infer<typeof replyDraftDataSchema> | z.infer<typeof newDraftDataSchema>>;
 export type EmailDraftCreate = (z.infer<typeof replyDraftDataSchema> | z.infer<typeof newDraftDataSchema>) & { scopeKey: string; embedding: number[] };
-export type EmailTone = ArchiveRecord<z.infer<typeof toneDataSchema>>;
+export type EmailTone = ArchiveRecord<z.infer<typeof emailToneDataSchema>>;
 export type EmailWritingProfile = ArchiveRecord<z.infer<typeof writingProfileDataSchema>>;
 export type EmailContact = ArchiveRecord<z.infer<typeof contactDataSchema>>;
 export type EmailRule = ArchiveRecord<z.infer<typeof ruleDataSchema>>;
@@ -171,7 +171,23 @@ function decode<Data>(document: unknown, schema: z.ZodTypeAny): ArchiveRecord<Da
 export const decodeEmailThread = (document: unknown) => decode<z.infer<typeof threadDataSchema>>(document, emailThreadPayloadSchema);
 export const decodeEmailMessage = (document: unknown) => decode<z.infer<typeof messageDataSchema>>(document, emailMessagePayloadSchema);
 export const decodeEmailDraft = (document: unknown) => decode<z.infer<typeof replyDraftDataSchema> | z.infer<typeof newDraftDataSchema>>(document, emailDraftPayloadSchema);
-export const decodeEmailTone = (document: unknown) => decode<z.infer<typeof toneDataSchema>>(document, emailTonePayloadSchema);
+export function encodeEmailToneContent(tone: z.input<typeof emailToneDataSchema>) {
+  const value = emailToneDataSchema.parse(tone);
+  return `# ${value.name}\n\n<!-- vorinthex-mail-tone ${JSON.stringify({ version: 1, slug: value.slug })} -->\n\n${value.description}\n\n## Instruction\n\n${value.instruction}`;
+}
+
+export function decodeEmailTone(document: unknown): EmailTone {
+  const parsedDocument = documentSchema.parse(document);
+  try {
+    return decode<z.infer<typeof emailToneDataSchema>>(parsedDocument, emailTonePayloadSchema);
+  } catch {
+    const match = /^# ([^\n]+)\n\n<!-- vorinthex-mail-tone (\{[^\n]+\}) -->\n\n([\s\S]+?)\n\n## Instruction\n\n([\s\S]+)$/u.exec(parsedDocument.content.trim());
+    if (!match) throw new Error('Invalid editable email tone document');
+    const metadata = z.object({ version: z.literal(1), slug: emailToneDataSchema.shape.slug }).strict().parse(JSON.parse(match[2]!));
+    const data = emailToneDataSchema.parse({ slug: metadata.slug, name: match[1]!.trim(), description: match[3]!.trim(), instruction: match[4]!.trim() });
+    return { ...data, key: parsedDocument.key, scopeKey: parsedDocument.scopeKey, embedding: parsedDocument.embedding, createdAt: parsedDocument.createdAt, updatedAt: parsedDocument.updatedAt };
+  }
+}
 export const decodeEmailWritingProfile = (document: unknown) => decode<z.infer<typeof writingProfileDataSchema>>(document, emailWritingProfilePayloadSchema);
 export const decodeEmailContact = (document: unknown) => decode<z.infer<typeof contactDataSchema>>(document, emailContactPayloadSchema);
 export const decodeEmailRule = (document: unknown) => decode<z.infer<typeof ruleDataSchema>>(document, emailRulePayloadSchema);
@@ -185,6 +201,8 @@ export function archiveDocument(input: {
   embedding: z.input<typeof currentEmbeddingSchema>;
   createdAt: string;
   updatedAt: string;
+  mutationPolicy?: 'user' | 'system-only';
 }): Document {
-  return documentSchema.parse({ ...input, content: JSON.stringify(input.payload), mutationPolicy: 'system-only', isFavorite: false });
+  const { mutationPolicy = 'system-only', ...document } = input;
+  return documentSchema.parse({ ...document, content: JSON.stringify(document.payload), mutationPolicy, isFavorite: false });
 }

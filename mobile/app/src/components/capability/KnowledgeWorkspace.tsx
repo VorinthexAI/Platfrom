@@ -5,7 +5,7 @@ import * as ImagePicker from "expo-image-picker";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentRef, type ReactNode } from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, type ComponentRef, type ReactNode } from "react";
 import { BackHandler, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View, useWindowDimensions, type NativeSyntheticEvent, type TextLayoutEventData } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -288,7 +288,7 @@ function ProcessingDocumentButton({ name }: { name: string }) {
   return <Skeleton accessibilityLabel={`Processing ${name}`} accessibilityRole="progressbar" style={styles.documentSkeleton} />;
 }
 
-export function KnowledgeWorkspace({ initialFolderKey, returnTripKey, returnTripName }: { initialFolderKey?: string; returnTripKey?: string; returnTripName?: string } = {}) {
+export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, returnTripKey, returnTripName }: { initialDocumentKey?: string; initialFolderKey?: string; returnTripKey?: string; returnTripName?: string } = {}) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
@@ -305,8 +305,10 @@ export function KnowledgeWorkspace({ initialFolderKey, returnTripKey, returnTrip
   const hasContentContext = isContentContextConfigured({ organizationKey, scopeKey });
   const contentContextKey = hasContentContext ? `${organizationKey}:${scopeKey}` : "";
   const contentContext = { organizationKey, scopeKey, userKey: user?.key ?? "" };
-  const cachedInitialTree = initialFolderKey ? queryClient.getQueryData<ContentFolder[]>(contentQueryKeys.folderTree(contentContext)) : undefined;
-  const cachedInitialStack = initialFolderKey && cachedInitialTree ? contentFolderPath(cachedInitialTree, initialFolderKey) : [];
+  const cachedInitialDocument = initialDocumentKey ? queryClient.getQueryData<ContentDocument>(contentQueryKeys.document(contentContext, initialDocumentKey)) : undefined;
+  const cachedTargetFolderKey = cachedInitialDocument?.folderKey ?? initialFolderKey;
+  const cachedInitialTree = cachedTargetFolderKey ? queryClient.getQueryData<ContentFolder[]>(contentQueryKeys.folderTree(contentContext)) : undefined;
+  const cachedInitialStack = cachedTargetFolderKey && cachedInitialTree ? contentFolderPath(cachedInitialTree, cachedTargetFolderKey) : [];
   const cachedInitialFolder = cachedInitialStack.at(-1);
   const cachedInitialLocation = cachedInitialFolder ? queryClient.getQueryData<ContentLocation>(contentQueryKeys.location(contentContext, cachedInitialFolder.key)) : undefined;
   const userHiddensQuery = useQuery({ queryKey: contentQueryKeys.userHiddens(contentContext), queryFn: listUserHiddens, enabled: hasContentContext, staleTime: 0 });
@@ -359,6 +361,7 @@ export function KnowledgeWorkspace({ initialFolderKey, returnTripKey, returnTrip
   const [query, setQuery] = useState("");
   const [locationLoading, setLocationLoading] = useState(!cachedInitialLocation);
   const [openingDocumentKey, setOpeningDocumentKey] = useState<string>();
+  const initialDocumentOpened = useRef<string | undefined>(undefined);
   const [results, setResults] = useState<ContentSearchResponse>();
   const [history, setHistory] = useState<ContentSearchHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -1053,8 +1056,10 @@ export function KnowledgeWorkspace({ initialFolderKey, returnTripKey, returnTrip
         if (workspaceModeRef.current === "folders") setFolders(rootChildren);
       }).catch(() => {});
       const [root, tree] = await Promise.all([getContentLocation(queryClient, contentContext), treeRequest]);
-      if (initialFolderKey) {
-        const target = tree.find(({ key }) => key === initialFolderKey);
+      const initialDocument = initialDocumentKey ? await getContentDocument(queryClient, contentContext, initialDocumentKey) : undefined;
+      const targetFolderKey = initialDocument?.folderKey ?? initialFolderKey;
+      if (targetFolderKey) {
+        const target = tree.find(({ key }) => key === targetFolderKey);
         if (target) {
           const stack = contentFolderPath(tree, target.key);
           return { initial: { root, location: await getContentLocation(queryClient, contentContext, target.key), initialFolder: target }, useInitialFolder: true, initialStack: stack };
@@ -1089,7 +1094,7 @@ export function KnowledgeWorkspace({ initialFolderKey, returnTripKey, returnTrip
           setLocationLoading(false);
         }
       });
-  }, [contentContextKey, hasContentContext, initialFolderKey, stopNarration]);
+  }, [contentContextKey, hasContentContext, initialDocumentKey, initialFolderKey, stopNarration]);
 
   useEffect(() => {
     if (!hasContentContext || !dirty.current) return;
@@ -1752,6 +1757,20 @@ export function KnowledgeWorkspace({ initialFolderKey, returnTripKey, returnTrip
     }
     return opened;
   };
+
+  const openInitialDocument = useEffectEvent(() => {
+    if (!initialDocumentKey || !hasContentContext || locationLoading) return;
+    const requestKey = `${contentContextKey}:${initialDocumentKey}`;
+    if (initialDocumentOpened.current === requestKey) return;
+    initialDocumentOpened.current = requestKey;
+    void getContentDocument(queryClient, contentContext, initialDocumentKey)
+      .then((document) => openArchiveDocument(document))
+      .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "The document could not be opened."));
+  });
+
+  useEffect(() => {
+    openInitialDocument();
+  }, [contentContextKey, hasContentContext, initialDocumentKey, locationLoading]);
 
   const listenToSelectedDocument = async () => {
     if (!selectedDocument) return;

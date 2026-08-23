@@ -7,9 +7,9 @@ describe('unified tool registry', () => {
   test('has one unique definition for every public tool name', () => {
     expect(new Set(TOOL_NAMES).size).toBe(TOOL_NAMES.length);
     expect(new Set(TOOL_DEFINITIONS.map(({ name }) => name)).size).toBe(TOOL_DEFINITIONS.length);
-    expect(TOOL_NAMES).toHaveLength(130);
-    expect(TOOL_DEFINITIONS).toHaveLength(130);
-    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 85);
+    expect(TOOL_NAMES).toHaveLength(131);
+    expect(TOOL_DEFINITIONS).toHaveLength(131);
+    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 86);
     expect(TOOL_DEFINITIONS.map(({ name }) => name)).toEqual([...TOOL_NAMES]);
     expect(TOOL_NAMES).not.toContain('chat');
     expect(TOOL_NAMES).not.toContain('orchestrator.chat');
@@ -47,6 +47,11 @@ describe('unified tool registry', () => {
     expect(TOOL_NAMES).not.toContain('place.images.generate');
     for (const name of ['place.visit.create', 'trip.place.add', 'trip.place.remove']) expect(TOOL_NAMES).not.toContain(name);
     expect(TOOL_NAMES).toContain('email.draft.send');
+    expect(TOOL_NAMES).toContain('inbox.sync');
+    expect(TOOL_NAMES).toContain('inbox.subscribe');
+    expect(TOOL_NAMES).not.toContain('email.sync');
+    expect(() => toolInputSchemas['inbox.sync'].parse({ scopeKey: newId() })).toThrow('Unrecognized key');
+    expect(() => toolInputSchemas['inbox.subscribe'].parse({ accessToken: 'secret' })).toThrow('Unrecognized key');
     expect(TOOL_NAMES).toEqual(expect.arrayContaining(['content.hidden.list', 'book.create', 'email.thread.read', 'email.thread.mark-read']));
     expect(TOOL_NAMES).not.toContain('book.create-context');
     expect(TOOL_NAMES).not.toContain('book.write');

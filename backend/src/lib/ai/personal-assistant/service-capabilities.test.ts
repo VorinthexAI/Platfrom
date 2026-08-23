@@ -15,7 +15,7 @@ const domain = {
 const expected: Array<[AssistantSurface, string[]]> = [
   ['knowledge-workspace', ['content.hidden.list', 'folder.hide', 'folder.reveal', 'document.hide', 'document.reveal', 'folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy', 'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.enhance', 'document.translate', 'document.list-versions', 'document.restore-version', 'document.download', 'content.neighbors', 'content.search-history.delete', 'knowledge.search', 'note.write']],
   ['travel-workspace', ['country.search', 'place.find', 'place.search', 'place.list', 'place.reference.generate', 'place.reference.list', 'trip.list', 'trip.search', 'trip.guide.generate', 'trip.guide.list', 'trip.create', 'trip.update', 'trip.delete', 'trip.attachment.set', 'place.guide.find', 'place.find-city', 'place.find-children', 'place.create', 'place.update', 'place.delete', 'place.open']],
-  ['signal-workspace', ['email.overview', 'email.sync', 'email.thread.read', 'email.thread.mark-read', 'email.thread.favorite', 'email.draft.create', 'email.draft.compose', 'email.tone.list', 'email.draft.update', 'email.draft.send', 'email.disconnect']],
+  ['signal-workspace', ['email.overview', 'inbox.sync', 'inbox.subscribe', 'email.thread.read', 'email.thread.mark-read', 'email.thread.favorite', 'email.draft.create', 'email.draft.compose', 'email.tone.list', 'email.draft.update', 'email.draft.send', 'email.disconnect']],
   ['book-workspace', ['book.list', 'book.detail', 'book.chapter.progress', 'book.create']],
 ];
 
@@ -77,6 +77,7 @@ describe('personal assistant service capabilities', () => {
     const email: any = {
       overview: async (...args: unknown[]) => { calls.push(['email.overview', ...args]); return {}; },
       sync: async (...args: unknown[]) => { calls.push(['email.sync', ...args]); return {}; },
+      subscribe: async (...args: unknown[]) => { calls.push(['email.subscribe', ...args]); return {}; },
       threadForTool: async (...args: unknown[]) => { calls.push(['email.threadForTool', ...args]); return {}; },
       markRead: async (...args: unknown[]) => { calls.push(['email.markRead', ...args]); return {}; },
       setFavorite: async (...args: unknown[]) => { calls.push(['email.setFavorite', ...args]); return {}; },
@@ -113,7 +114,8 @@ describe('personal assistant service capabilities', () => {
       ['travel-workspace', 'place.find-children', { childrenRequestToken: 'children-token' }],
       ['travel-workspace', 'place.open', { name: 'Japan', countryCode: 'JP' }],
       ['signal-workspace', 'email.overview', {}],
-      ['signal-workspace', 'email.sync', {}],
+      ['signal-workspace', 'inbox.sync', {}],
+      ['signal-workspace', 'inbox.subscribe', {}],
       ['signal-workspace', 'email.thread.read', { threadKey }],
       ['signal-workspace', 'email.thread.mark-read', { threadKey }],
       ['signal-workspace', 'email.thread.favorite', { threadKey, isFavorite: true }],
@@ -149,6 +151,8 @@ describe('personal assistant service capabilities', () => {
     expect(calls).toContainEqual(['travel.findChildren', { ...serviceContext, childrenRequestToken: 'children-token' }, userKey, { signal: undefined, timeoutMs: undefined }]);
     expect(calls).toContainEqual(['travel.openPlace', { ...serviceContext, name: 'Japan', countryCode: 'JP' }, userKey]);
     expect(calls).toContainEqual(['email.overview', actor, {}]);
+    expect(calls).toContainEqual(['email.sync', actor]);
+    expect(calls).toContainEqual(['email.subscribe', actor]);
     expect(calls).toContainEqual(['email.threadForTool', actor, threadKey, undefined]);
     expect(calls).toContainEqual(['email.markRead', actor, threadKey]);
     expect(calls).toContainEqual(['books.progress', bookKey, chapterKey, { ...serviceContext, progressSeconds: 30, isCompleted: false }, userKey]);

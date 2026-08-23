@@ -13,6 +13,8 @@ function appWith(overrides: Parameters<typeof createEmailHandlers>[0]) {
     .post('/email/overview', handlers.overview)
     .post('/email/connect', handlers.startConnect)
     .post('/email/connect/exchange', handlers.exchangeConnect)
+    .post('/email/sync', handlers.sync)
+    .post('/email/subscribe', handlers.subscribe)
     .post('/email/threads/:threadKey', handlers.thread)
     .post('/email/drafts', handlers.draft)
     .post('/email/drafts/compose', handlers.draftNew)
@@ -25,7 +27,7 @@ describe('email inbox handlers', () => {
     const app = appWith({ getIdentity: identity as never, service: { overview: async (actor: unknown, input: unknown) => { received = { actor, input }; return { threads: [] }; } } as never, oauth: {} as never });
     const response = await app.request('/email/overview', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey, filter: 'urgent' }) });
     expect(response.status).toBe(200);
-    expect(received).toEqual({ actor: { userKey, organizationKey, scopeKey }, input: { filter: 'urgent', search: undefined } });
+    expect(received).toEqual({ actor: { userKey, organizationKey, scopeKey }, input: { filter: 'urgent', search: undefined, cursor: undefined, limit: undefined } });
   });
 
   test('rejects unknown input and unauthenticated requests', async () => {
@@ -34,6 +36,17 @@ describe('email inbox handlers', () => {
     expect(invalid.status).toBe(400);
     const unauthorized = appWith({ getIdentity: (async () => null) as never, service: { overview: async () => ({}) } as never, oauth: {} as never });
     expect((await unauthorized.request('/email/overview', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey }) })).status).toBe(401);
+  });
+
+  test('keeps HTTP sync and subscription on the canonical service with strict selectors', async () => {
+    const calls: unknown[] = [];
+    const service = { sync: async (...args: unknown[]) => { calls.push(['sync', ...args]); return { synced: 0 }; }, subscribe: async (...args: unknown[]) => { calls.push(['subscribe', ...args]); return { watchExpiresAt: '2026-08-24T00:00:00.000Z' }; } };
+    const app = appWith({ getIdentity: identity as never, service: service as never, oauth: {} as never });
+    const body = { organizationKey, scopeKey };
+    expect((await app.request('/email/sync', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).status).toBe(200);
+    expect((await app.request('/email/subscribe', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).status).toBe(200);
+    expect((await app.request('/email/subscribe', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, accessToken: 'untrusted' }) })).status).toBe(400);
+    expect(calls).toEqual([['sync', { userKey, ...body }], ['subscribe', { userKey, ...body }]]);
   });
 
   test('requires one-time connection grants and strict drafting tones', async () => {

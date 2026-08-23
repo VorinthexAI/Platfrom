@@ -13,7 +13,7 @@ test("scopes place reference caches by workspace, place, and kind", () => {
   expect(compassQueryKeys.placeReferences(context, "place-key", "brief")).not.toEqual(compassQueryKeys.placeReferences(context, "place-key", "restaurants"));
   expect(events).toContain('if (event.event === "place.reference.changed") invalidateCompassPlaceReferences()');
   expect(events).toContain('if (event.event === "content.changed")');
-  expect(events).toContain('queryKey: ["archive", organizationKey, scopeKey]');
+  expect(events).toContain('queryKey: contentQueryKeys.all(contentContext)');
 });
 
 test("offers four parameterized place reference kinds without report compatibility", () => {

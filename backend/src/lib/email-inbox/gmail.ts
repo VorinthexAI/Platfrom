@@ -151,7 +151,7 @@ export function createGmailClient(accessToken: string, fetcher: typeof fetch = f
   return {
     profile: () => request<z.infer<typeof profileSchema>>('/profile').then((value) => profileSchema.parse(value)),
     async listThreads(maxResults = 100, pageToken?: string) {
-      const query = new URLSearchParams({ maxResults: String(maxResults), includeSpamTrash: 'true' });
+      const query = new URLSearchParams({ maxResults: String(maxResults), includeSpamTrash: 'false' });
       if (pageToken) query.set('pageToken', pageToken);
       return request<{ threads?: Array<{ id: string }>; nextPageToken?: string }>(`/threads?${query}`);
     },

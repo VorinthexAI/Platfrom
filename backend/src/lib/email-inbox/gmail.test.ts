@@ -38,7 +38,7 @@ describe('Gmail connector protocol', () => {
     await client.message('message-1');
     await client.watch('projects/project/topics/gmail');
     await client.revoke();
-    expect(requests[0]).toContain('includeSpamTrash=true');
+    expect(requests[0]).toContain('includeSpamTrash=false');
     expect(requests[0]).toContain('pageToken=next-page');
     expect(requests[1]).toContain('startHistoryId=history-1');
     expect(requests.join(' ')).not.toContain('private-access-token');

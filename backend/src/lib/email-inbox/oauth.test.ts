@@ -45,25 +45,26 @@ describe('email OAuth state', () => {
       encryptedCredentials: 'ciphertext', encryptionKeyId: 'v1', accessTokenFingerprint: 'a'.repeat(64), scopes: ['email'], createdByMembershipKey: scopeKey,
       status: 'active', createdAt: now, updatedAt: now,
     });
-    let stateWrites = 0;
+    const stateWrites: unknown[][] = [];
     let watchWrites = 0;
     const connectors = {
       find: async () => null,
       upsert: async () => connector,
       getByKey: async () => connector,
-      setSyncState: async () => { stateWrites += 1; },
+      setSyncState: async (...input: unknown[]) => { stateWrites.push(input); },
       updateWatch: async () => { watchWrites += 1; },
     };
     const oauth = createEmailOAuthService({
       store, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey }), profile: async () => ({ historyId: 'history-1' }),
-      watch: async () => ({ historyId: 'history-watch', expiration: String(Date.now() + 86_400_000) }),
+      subscribe: async (actor) => { expect(actor).toEqual({ userKey, organizationKey: 'org-1', scopeKey }); watchWrites += 1; },
       exchange: async () => ({ identity: { providerAccountId: 'google-1', email: 'person@example.com' }, scopes: ['email'], credentials: { accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now } }),
     });
     const started = await oauth.start({ userKey, organizationKey: 'org-1', scopeKey, returnUri: 'vorinthexcore://capability/signal' });
     const state = new URL(started.authorizationUrl).searchParams.get('state')!;
     const redirect = new URL(await oauth.callback({ state, code: 'provider-code' }));
     const code = redirect.searchParams.get('email_connection_code')!;
-    expect(stateWrites).toBe(1);
+    expect(stateWrites).toHaveLength(1);
+    expect(stateWrites[0]?.[2]).toMatchObject({ historyId: 'history-1', pendingHistoryId: null, pendingThreadIds: null, resetLastSynced: true, markSynced: false });
     expect(watchWrites).toBe(1);
     expect(await oauth.exchange({ userKey, organizationKey: 'org-1', scopeKey, code })).toMatchObject({ email: 'person@example.com' });
     expect(await oauth.exchange({ userKey, organizationKey: 'org-1', scopeKey, code })).toBeNull();

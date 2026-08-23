@@ -7,6 +7,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -35,6 +36,7 @@ import { useToast } from "@vorinthex/shared/ui/toast";
 import { EmailAttachmentPicker } from "@/components/capability/EmailAttachmentPicker";
 import { WorkspaceAppSwitcher } from "@/components/capability/WorkspaceAppSwitcher";
 import { type CapabilitySlug } from "@/data/registry";
+import { subscribeAppEvent } from "@/lib/app-events";
 import {
   askEmailAssistant,
   BUILT_IN_EMAIL_TONES,
@@ -59,15 +61,17 @@ import {
   type EmailOverview,
   type EmailThread,
   type EmailTone,
+  type EmailToneRecord,
 } from "@/lib/email-client";
 import {
   patchSignalThread,
   signalQueryKeys,
 } from "@/lib/workspace-query-cache";
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
+import { appendCursorItems, isNearScrollEnd } from "@vorinthex/shared/lib/pagination";
 
 type Sheet =
-  "ai" | "plus" | "account" | "drafts" | "disconnect" | "discard" | "composer";
+  "ai" | "plus" | "account" | "drafts" | "tones" | "disconnect" | "discard" | "composer";
 type ComposerMode = "new" | "reply";
 type BusyAction =
   | "connect"
@@ -123,6 +127,7 @@ export function EmailWorkspace() {
   const navigation = useNavigation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
   const { showToast } = useToast();
   const notify = (title: string) => showToast({ title, duration: 2_000 });
   const params = useLocalSearchParams<{
@@ -131,6 +136,14 @@ export function EmailWorkspace() {
   }>();
   const processedConnectionCode = useRef<string | undefined>(undefined);
   const overviewRequest = useRef(0);
+  const overviewGeneration = useRef(0);
+  const overviewPageGeneration = useRef(0);
+  const overviewLoadQuery = useRef<{ filter: EmailFilter; search: string } | undefined>(undefined);
+  const overviewQuery = useRef<{ filter: EmailFilter; search: string }>({ filter: "all", search: "" });
+  const loadingOverview = useRef(false);
+  const loadingMore = useRef(false);
+  const toneRequest = useRef(0);
+  const toneContext = useRef({ organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey });
   const nativeNavigationAction = useRef<
     Parameters<typeof navigation.dispatch>[0] | undefined
   >(undefined);
@@ -160,7 +173,9 @@ export function EmailWorkspace() {
   const [showCopies, setShowCopies] = useState(false);
   const [subject, setSubject] = useState("");
   const [tone, setTone] = useState<EmailTone>("concise");
-  const [tones, setTones] = useState<EmailTone[]>(BUILT_IN_EMAIL_TONES);
+  const [toneRecords, setToneRecords] = useState<EmailToneRecord[]>([]);
+  const [toneGridWidth, setToneGridWidth] = useState(0);
+  const [loadingMoreThreads, setLoadingMoreThreads] = useState(false);
   const [instruction, setInstruction] = useState("");
   const [draft, setDraft] = useState<EmailDraft>();
   const [body, setBody] = useState("");
@@ -179,35 +194,116 @@ export function EmailWorkspace() {
     attachments.length,
   );
 
-  async function load(nextFilter = filter, nextQuery = submittedQuery) {
-    const request = ++overviewRequest.current;
-    setLoadError(undefined);
+  const tones = toneRecords.length ? toneRecords.map(({ slug }) => slug) : BUILT_IN_EMAIL_TONES;
+  const toneCardSize = Math.floor(((toneGridWidth || width - spacing.md * 2) - 16) / 3);
+
+  async function load(nextFilter = overviewQuery.current.filter, nextQuery = overviewQuery.current.search, options: { cursor?: string } = {}) {
+    const continuation = Boolean(options.cursor);
+    const request = continuation ? overviewRequest.current : ++overviewRequest.current;
+    if (!continuation && (overviewLoadQuery.current?.filter !== nextFilter || overviewLoadQuery.current.search !== nextQuery)) {
+      overviewLoadQuery.current = { filter: nextFilter, search: nextQuery };
+      overviewGeneration.current += 1;
+    }
+    const generation = overviewGeneration.current;
+    const pageGeneration = continuation ? overviewPageGeneration.current : ++overviewPageGeneration.current;
+    if (!continuation) loadingOverview.current = true;
+    if (!options.cursor) setLoadError(undefined);
     try {
       const value = await queryClient.fetchQuery({
-        queryKey: signalQueryKeys.overview(emailContext, nextFilter, nextQuery),
+        queryKey: options.cursor
+          ? signalQueryKeys.overviewPage(emailContext, nextFilter, nextQuery, options.cursor)
+          : signalQueryKeys.overview(emailContext, nextFilter, nextQuery),
         queryFn: () =>
           fetchEmailOverview({
             filter: nextFilter,
             search: nextQuery || undefined,
+            cursor: options.cursor,
+            limit: 50,
           }),
+        staleTime: 0,
       });
-      if (request === overviewRequest.current) setOverview(value);
-      return true;
+      const currentQuery = overviewQuery.current;
+      const active = generation === overviewGeneration.current
+        && (!continuation ? request === overviewRequest.current : pageGeneration === overviewPageGeneration.current)
+        && currentQuery.filter === nextFilter
+        && currentQuery.search === nextQuery;
+      if (active) setOverview((current) => {
+        if (options.cursor && current) return {
+          ...current,
+          ...value,
+          threads: appendCursorItems(current.threads, value.threads, ({ key }) => key),
+          nextCursor: value.nextCursor === options.cursor ? null : value.nextCursor,
+        };
+        return value;
+      });
+      return active ? "applied" as const : "superseded" as const;
     } catch (failure) {
-      if (request === overviewRequest.current)
+      const currentQuery = overviewQuery.current;
+      const active = generation === overviewGeneration.current
+        && (!continuation ? request === overviewRequest.current : pageGeneration === overviewPageGeneration.current)
+        && currentQuery.filter === nextFilter
+        && currentQuery.search === nextQuery;
+      if (active)
         setLoadError(messageFor(failure));
-      return false;
+      return active ? "failed" as const : "superseded" as const;
     } finally {
-      if (request === overviewRequest.current) setLoading(false);
+      if (!continuation && request === overviewRequest.current) {
+        loadingOverview.current = false;
+        setLoading(false);
+      }
     }
   }
   const loadLatest = useEffectEvent(() => load());
   const notifyLatest = useEffectEvent((title: string) => notify(title));
+  const loadToneRecords = () => {
+    const request = ++toneRequest.current;
+    const context = toneContext.current;
+    return queryClient.fetchQuery({
+      queryKey: signalQueryKeys.tones(emailContext),
+      queryFn: fetchEmailTones,
+      staleTime: 0,
+    }).then((records) => {
+      if (request === toneRequest.current && context.organizationKey === toneContext.current.organizationKey && context.scopeKey === toneContext.current.scopeKey) setToneRecords(records);
+    }).catch(() => {
+      if (request === toneRequest.current && context.organizationKey === toneContext.current.organizationKey && context.scopeKey === toneContext.current.scopeKey) setToneRecords([]);
+    });
+  };
+  const loadToneRecordsLatest = useEffectEvent(() => loadToneRecords());
+  const refreshFromInboxEvent = useEffectEvent(async () => {
+    await Promise.all([
+      queryClient.cancelQueries({ queryKey: signalQueryKeys.overviews(emailContext) }),
+      queryClient.cancelQueries({ queryKey: signalQueryKeys.details(emailContext) }),
+      queryClient.cancelQueries({ queryKey: signalQueryKeys.tones(emailContext) }),
+    ]);
+    void load();
+    void loadToneRecords();
+    if (selected) {
+      const threadKey = selected.thread.key;
+      void queryClient.fetchQuery({
+        queryKey: signalQueryKeys.detail(emailContext, threadKey),
+        queryFn: () => fetchEmailThread(threadKey),
+      }).then(setSelected).catch(() => undefined);
+    }
+  });
 
   useEffect(() => {
+    toneRequest.current += 1;
+    toneContext.current = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
     void Promise.resolve().then(() => loadLatest());
-    void fetchEmailTones().then(setTones);
+    void loadToneRecordsLatest();
   }, [emailContext.organizationKey, emailContext.scopeKey]);
+  useEffect(() => {
+    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    return navigation.addListener("focus", () => {
+      void queryClient.cancelQueries({ queryKey: signalQueryKeys.tones(context) }).then(() => {
+        void queryClient.invalidateQueries({ queryKey: signalQueryKeys.tones(context), refetchType: "none" });
+        void loadToneRecordsLatest();
+      });
+    });
+  }, [emailContext.organizationKey, emailContext.scopeKey, navigation, queryClient]);
+  useEffect(() => subscribeAppEvent((event) => {
+    if (event.type === "inbox.changed" || event.type === "event-stream.connected") refreshFromInboxEvent();
+  }), []);
   useEffect(() => {
     const code =
       typeof params.email_connection_code === "string"
@@ -366,11 +462,18 @@ export function EmailWorkspace() {
   }
   async function chooseFilter(next: EmailFilter) {
     setBusy("sync");
+    const previous = { filter, search: submittedQuery };
+    const candidate = { filter: next, search: submittedQuery };
+    overviewQuery.current = candidate;
     try {
-      if (await load(next, submittedQuery)) {
+      const result = await load(next, submittedQuery);
+      if (result !== "failed" && overviewQuery.current === candidate) {
         setFilter(next);
         setSelected(undefined);
-      }
+      } else if (result === "failed" && overviewQuery.current === candidate) overviewQuery.current = previous;
+    } catch (failure) {
+      if (overviewQuery.current === candidate) overviewQuery.current = previous;
+      throw failure;
     } finally {
       setBusy(undefined);
     }
@@ -378,14 +481,37 @@ export function EmailWorkspace() {
   async function search() {
     setBusy("sync");
     const next = query.trim();
+    const previous = { filter, search: submittedQuery };
+    const candidate = { filter, search: next };
+    overviewQuery.current = candidate;
     try {
-      if (await load(filter, next)) {
+      const result = await load(filter, next);
+      if (result !== "failed" && overviewQuery.current === candidate) {
         setSubmittedQuery(next);
         setSelected(undefined);
-      }
+      } else if (result === "failed" && overviewQuery.current === candidate) overviewQuery.current = previous;
+    } catch (failure) {
+      if (overviewQuery.current === candidate) overviewQuery.current = previous;
+      throw failure;
     } finally {
       setBusy(undefined);
     }
+  }
+  async function loadMore() {
+    const cursor = overview?.nextCursor;
+    if (!cursor || loadingMore.current || loadingOverview.current || loading || loadError) return;
+    loadingMore.current = true;
+    setLoadingMoreThreads(true);
+    try {
+      await load(overviewQuery.current.filter, overviewQuery.current.search, { cursor });
+    } finally {
+      loadingMore.current = false;
+      setLoadingMoreThreads(false);
+    }
+  }
+  function openToneDocument(record: EmailToneRecord) {
+    setSheetOpen(false);
+    router.push({ pathname: "/capability/[slug]", params: { slug: "archive", documentKey: record.key } });
   }
   async function openThread(thread: EmailThread) {
     setOpeningThreadKey(thread.key);
@@ -814,6 +940,10 @@ export function EmailWorkspace() {
               styles.threadList,
               { paddingBottom: insets.bottom + spacing.xl },
             ]}
+            onScroll={({ nativeEvent }) => {
+              if (isNearScrollEnd({ offset: nativeEvent.contentOffset.y, viewport: nativeEvent.layoutMeasurement.height, content: nativeEvent.contentSize.height })) void loadMore();
+            }}
+            scrollEventThrottle={120}
             showsVerticalScrollIndicator={false}
           >
             {overview?.threads.map((thread) => (
@@ -883,6 +1013,7 @@ export function EmailWorkspace() {
                 </Text>
               </View>
             ) : null}
+            {loadingMoreThreads ? <Skeleton accessibilityLabel="Loading more messages" accessibilityRole="progressbar" style={styles.threadSkeleton} /> : null}
           </ScrollView>
         </View>
       ) : null}
@@ -972,7 +1103,7 @@ export function EmailWorkspace() {
             : undefined
         }
         dismissible={!busy && sheet !== "composer"}
-        height={sheet === "composer" ? "full" : undefined}
+        height={sheet === "composer" || sheet === "tones" ? "full" : undefined}
         onOpenChange={(open) => {
           if (!open && sheet === "composer") requestComposerClose();
           else setSheetOpen(open);
@@ -989,6 +1120,8 @@ export function EmailWorkspace() {
                 ? "Create"
                 : sheet === "drafts"
                   ? "Drafts"
+                  : sheet === "tones"
+                    ? "Tone library"
                   : sheet === "disconnect"
                     ? "Disconnect Gmail?"
                     : sheet === "discard"
@@ -1237,6 +1370,30 @@ export function EmailWorkspace() {
               Account and filters
             </BottomSheetItem>
           </View>
+        ) : sheet === "tones" ? (
+          <ScrollView
+            accessibilityLabel="Signal tone library"
+            contentContainerStyle={styles.toneGrid}
+            onLayout={({ nativeEvent }) => setToneGridWidth(nativeEvent.layout.width)}
+            showsVerticalScrollIndicator={false}
+          >
+            {toneRecords.map((record) => (
+              <Button
+                accessibilityLabel={`Open ${record.name} tone in Archive`}
+                contentMode="raw"
+                key={record.key}
+                onPress={() => openToneDocument(record)}
+                shape="rounded"
+                size="md"
+                style={[styles.toneCard, { width: toneCardSize, height: toneCardSize }]}
+                variant="secondary"
+              >
+                <Text numberOfLines={2} style={styles.toneCardName}>{record.name}</Text>
+                <Text numberOfLines={3} style={styles.toneCardDescription}>{record.description}</Text>
+              </Button>
+            ))}
+            {!toneRecords.length ? <Text style={styles.toneEmpty}>Tone documents are unavailable.</Text> : null}
+          </ScrollView>
         ) : sheet === "drafts" ? (
           <View style={styles.sheetItems}>
             {overview?.drafts.map((saved) => (
@@ -1252,6 +1409,12 @@ export function EmailWorkspace() {
           </View>
         ) : sheet === "account" ? (
           <View style={styles.sheetItems}>
+            <BottomSheetItem
+              icon={<FileIcon size="md" />}
+              onPress={() => setSheet("tones")}
+            >
+              Tone library
+            </BottomSheetItem>
             <BottomSheetItem
               accessibilityState={{ selected: filter === "urgent" }}
               onPress={() => {
@@ -1679,6 +1842,11 @@ const styles = StyleSheet.create({
     letterSpacing: tracking.micro,
   },
   toneRow: { flexDirection: "row", flexWrap: "wrap", gap: 7 },
+  toneGrid: { flexGrow: 1, alignContent: "flex-start", flexDirection: "row", flexWrap: "wrap", gap: 8, paddingBottom: spacing.xl },
+  toneCard: { paddingHorizontal: 8, paddingVertical: 10, flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: palette.panelRaised },
+  toneCardName: { width: "100%", color: palette.silver100, fontFamily: fonts.medium, fontSize: 12, textAlign: "center" },
+  toneCardDescription: { width: "100%", color: palette.silver500, fontFamily: fonts.regular, fontSize: 10, lineHeight: 14, textAlign: "center" },
+  toneEmpty: { width: "100%", paddingVertical: 40, color: palette.silver500, fontFamily: fonts.regular, fontSize: 13, textAlign: "center" },
   instructionInput: { minHeight: 88, paddingTop: 12 },
   bodyInput: { minHeight: 220, paddingTop: 12, lineHeight: 22 },
   composerActions: { flexDirection: "row", gap: 8 },

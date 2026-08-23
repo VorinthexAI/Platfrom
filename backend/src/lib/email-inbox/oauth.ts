@@ -39,16 +39,13 @@ export function createEmailOAuthService(options: {
   store?: OAuthStore; connectors?: ConnectorRepository;
   exchange?: typeof exchangeGmailCode; authorize?: (userKey: string, organizationKey: string, scopeKey: string) => Promise<{ membershipKey: string }>;
   profile?: (accessToken: string) => Promise<{ historyId: string }>;
-  watch?: (accessToken: string) => Promise<{ historyId: string; expiration: string } | null>;
+  subscribe?: (actor: { userKey: string; organizationKey: string; scopeKey: string }) => Promise<unknown>;
 } = {}) {
   const store = options.store ?? redisStore;
   const connectors = options.connectors ?? createConnectorRepository();
   const exchange = options.exchange ?? exchangeGmailCode;
   const profile = options.profile ?? ((accessToken: string) => createGmailClient(accessToken).profile());
-  const registerWatch = options.watch ?? (async (accessToken: string) => {
-    const topic = process.env.GMAIL_PUBSUB_TOPIC?.trim();
-    return topic ? createGmailClient(accessToken).watch(topic) : null;
-  });
+  const subscribe = options.subscribe ?? (async (actor: { organizationKey: string; scopeKey: string }) => (await import('./service')).createSystemEmailService({ connectors }).subscribe({ userKey: 'system', ...actor }));
   const authorize = options.authorize ?? (async (userKey, organizationKey, scopeKey) => {
     const { membership } = await requireOrganizationAccess(userKey, organizationKey);
     await requireScopeAccess(membership, scopeKey);
@@ -79,7 +76,6 @@ export function createEmailOAuthService(options: {
         if (access.membershipKey !== state.membershipKey) throw new Error('Email authorization membership changed');
         const result = await exchange(input.code, state.verifier, state.nonce);
         const gmailProfile = await profile(result.credentials.accessToken);
-        const watch = await registerWatch(result.credentials.accessToken);
         const previous = await connectors.find(state.scopeKey);
         if (!result.credentials.refreshToken && previous?.providerAccountId === result.identity.providerAccountId) {
           result.credentials.refreshToken = connectors.credentials(previous).refreshToken;
@@ -89,8 +85,8 @@ export function createEmailOAuthService(options: {
           organizationKey: state.organizationKey, scopeKey: state.scopeKey, createdByMembershipKey: state.membershipKey,
           providerAccountId: result.identity.providerAccountId, email: result.identity.email, scopes: result.scopes, credentials: result.credentials,
         });
-        await connectors.setSyncState(connector.key, 'idle', { historyId: watch?.historyId ?? gmailProfile.historyId, markSynced: false });
-        if (watch) await connectors.updateWatch(connector.key, watch);
+        await connectors.setSyncState(connector.key, 'idle', { historyId: gmailProfile.historyId, pendingHistoryId: null, pendingThreadIds: null, resetLastSynced: true, markSynced: false });
+        await subscribe({ userKey: state.userKey, organizationKey: state.organizationKey, scopeKey: state.scopeKey }).catch(() => undefined);
         const grant = token('vrtx_email_grant_');
         const payload = grantSchema.parse({ userKey: state.userKey, organizationKey: state.organizationKey, scopeKey: state.scopeKey, connectorKey: connector.key, email: connector.email });
         if (!(await store.put(`${GRANT_PREFIX}${grant}`, JSON.stringify(payload), 300))) throw new Error('Could not create email connection grant');

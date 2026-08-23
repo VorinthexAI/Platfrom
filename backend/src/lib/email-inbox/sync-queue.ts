@@ -69,7 +69,7 @@ export async function processEmailSyncJob(raw: unknown, dependencies: {
   const targets = await connectors.listWatchRenewalTargets(before);
   let failures = 0;
   for (const target of targets) {
-    try { await service.renewWatch({ userKey: 'system', ...target }); }
+    try { await service.subscribe({ userKey: 'system', ...target }); }
     catch { failures += 1; }
   }
   if (failures > 0) throw new Error(`Gmail watch renewal failed for ${failures} account(s)`);

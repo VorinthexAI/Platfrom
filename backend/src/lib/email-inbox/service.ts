@@ -91,6 +91,7 @@ export function createEmailService(options: {
   embed?: typeof embedText;
   ask?: typeof executeAsk;
   storage?: DocumentObjectStorage;
+  publishInboxChanged?: (scopeKey: string) => Promise<unknown>;
 } = {}) {
   const repository = options.repository ?? createEmailRepository();
   const connectors = options.connectors ?? createConnectorRepository();
@@ -100,6 +101,7 @@ export function createEmailService(options: {
   const embed = options.embed ?? embedText;
   const ask = options.ask ?? executeAsk;
   const storage = options.storage ?? documentStorage;
+  const publishInboxChanged = options.publishInboxChanged ?? (async (scopeKey: string) => (await import('@/api/events')).publishScopeEvent(scopeKey, 'inbox.changed'));
   const watchTopic = () => process.env.GMAIL_PUBSUB_TOPIC?.trim() || null;
 
   const access = async (actor: EmailActor) => authorize(actor);
@@ -159,6 +161,7 @@ export function createEmailService(options: {
         throw error;
       }
       detail.thread.unread = false;
+      await publishInboxChanged(actor.scopeKey);
     }
     return detail;
   };
@@ -176,9 +179,9 @@ export function createEmailService(options: {
 
   return {
     access,
-    async overview(actor: EmailActor, input: { filter?: 'all' | 'important' | 'urgent' | 'needs_action' | 'filtered' | 'unread' | 'favorite'; search?: string }) {
+    async overview(actor: EmailActor, input: { filter?: 'all' | 'important' | 'urgent' | 'needs_action' | 'filtered' | 'unread' | 'favorite'; search?: string; cursor?: string; limit?: number }) {
       await access(actor);
-      const result = await repository.overview(actor.scopeKey, input.filter, input.search);
+      const result = await repository.overview(actor.scopeKey, input.filter, input.search, input.cursor, input.limit ?? 50);
       const drafts = await repository.listDrafts(actor.scopeKey);
       const connector = await connectors.find(actor.scopeKey);
       const visibleConnector = connector && connector.organizationKey === actor.organizationKey ? connectorPublic(connector) : null;
@@ -202,23 +205,20 @@ export function createEmailService(options: {
       try {
         if (!await connectors.setSyncState(account.key, 'syncing', { leaseToken })) throw new EmailRepositoryError('conflict', 'Email synchronization lease was lost');
         const fullThreadIds = async () => {
-          const ids: string[] = [];
-          let pageToken: string | undefined;
-          const seenTokens = new Set<string>();
-          for (let page = 0; page < 100; page += 1) {
-            const listed = await connection.gmail.listThreads(100, pageToken);
-            ids.push(...(listed.threads ?? []).map(({ id }) => id));
-            pageToken = listed.nextPageToken;
-            if (!pageToken) break;
-            if (seenTokens.has(pageToken)) throw new Error('Gmail inbox pagination repeated a page token');
-            seenTokens.add(pageToken);
-            if (page === 99) throw new Error('Gmail inbox exceeds the supported synchronization page limit');
-          }
-          return ids;
+          const listed = await connection.gmail.listThreads(100);
+          return { ids: (listed.threads ?? []).map(({ id }) => id).slice(0, 100), complete: !listed.nextPageToken };
         };
         let threadIds: string[];
+        let pendingThreadIds: string[] | undefined;
+        let pendingHistoryId: string | undefined;
         let fullSync = false;
-        if (previousAccount?.lastSyncedAt && previousAccount.historyId) {
+        let completeFullSync = false;
+        if (previousAccount.syncPendingThreadIds?.length && previousAccount.syncPendingHistoryId) {
+          threadIds = previousAccount.syncPendingThreadIds.slice(0, 100);
+          pendingThreadIds = previousAccount.syncPendingThreadIds.slice(100);
+          pendingHistoryId = previousAccount.syncPendingHistoryId;
+          profile.historyId = pendingThreadIds.length ? previousAccount.historyId! : pendingHistoryId;
+        } else if (previousAccount?.lastSyncedAt && previousAccount.historyId) {
           try {
             const changed = new Set<string>();
             let pageToken: string | undefined;
@@ -228,7 +228,10 @@ export function createEmailService(options: {
               const history = await connection.gmail.history(previousAccount.historyId, pageToken);
               completedHistoryId = history.historyId ?? completedHistoryId;
               for (const record of history.history ?? []) {
-                for (const change of [...(record.messagesAdded ?? []), ...(record.messagesDeleted ?? []), ...(record.labelsAdded ?? []), ...(record.labelsRemoved ?? [])]) changed.add(change.message.threadId);
+                for (const change of [...(record.messagesAdded ?? []), ...(record.messagesDeleted ?? []), ...(record.labelsAdded ?? []), ...(record.labelsRemoved ?? [])]) {
+                  changed.delete(change.message.threadId);
+                  changed.add(change.message.threadId);
+                }
               }
               pageToken = history.nextPageToken;
               if (!pageToken) break;
@@ -236,28 +239,47 @@ export function createEmailService(options: {
               seenTokens.add(pageToken);
               if (page === 99) throw new Error('Gmail history exceeds the supported synchronization page limit');
             }
-            threadIds = [...changed];
-            profile.historyId = completedHistoryId;
+            const ordered = [...changed].reverse();
+            threadIds = ordered.slice(0, 100);
+            pendingThreadIds = ordered.slice(100);
+            pendingHistoryId = completedHistoryId;
+            profile.historyId = pendingThreadIds.length ? previousAccount.historyId : completedHistoryId;
           } catch (error) {
             if (!(error instanceof GmailApiError) || error.status !== 404) throw error;
-            threadIds = await fullThreadIds(); fullSync = true;
+            const full = await fullThreadIds(); threadIds = full.ids; completeFullSync = full.complete; fullSync = true;
           }
-        } else { threadIds = await fullThreadIds(); fullSync = true; }
+        } else { const full = await fullThreadIds(); threadIds = full.ids; completeFullSync = full.complete; fullSync = true; }
         let synced = 0;
-        for (const providerThreadId of threadIds) {
+        let changed = false;
+        const processThread = async (providerThreadId: string) => {
           let resource;
           try { resource = await connection.gmail.threadMetadata(providerThreadId); }
           catch (error) {
             if (!(error instanceof GmailApiError) || error.status !== 404) throw error;
             await ensureLease();
             await repository.deleteProviderThread(actor.scopeKey, account.key, providerThreadId);
-            continue;
+            changed = true;
+            return 0;
           }
           const providerMessages = resource.messages ?? [];
-          const latestMetadata = providerMessages.at(-1);
-          if (!latestMetadata) continue;
-          const latestResource = await connection.gmail.message(latestMetadata.id);
-          const latest = { ...parsedMessage(latestResource, account.email), parentMessageId: undefined as string | undefined, replyDepth: 0 };
+          if (!providerMessages.length) return 0;
+          const resources = await Promise.all(providerMessages.map((metadata) => connection.gmail.message(metadata.id)));
+          const parsed = resources.map((message) => ({ ...parsedMessage(message, account.email), parentMessageId: undefined as string | undefined, replyDepth: 0 }));
+          const byMessageId = new Map(parsed.flatMap((message) => message.messageIdHeader ? [[message.messageIdHeader, message] as const] : []));
+          const depth = (message: typeof parsed[number], visiting = new Set<typeof message>()): number => {
+            if (visiting.has(message)) return 0;
+            const referencedParent = [...message.references].reverse().find((reference) => byMessageId.has(reference));
+            const parentId = message.inReplyTo && byMessageId.has(message.inReplyTo) ? message.inReplyTo : referencedParent ?? message.inReplyTo;
+            const parent = parentId ? byMessageId.get(parentId) : undefined;
+            message.parentMessageId = parentId;
+            if (!parent) return 0;
+            visiting.add(message);
+            const value = depth(parent, visiting) + 1;
+            visiting.delete(message);
+            return value;
+          };
+          for (const message of parsed) message.replyDepth = depth(message);
+          const latest = [...parsed].sort((a, b) => b.sentAt.localeCompare(a.sentAt) || b.providerMessageId.localeCompare(a.providerMessageId))[0]!;
           const labels = [...new Set(providerMessages.flatMap((message) => message.labelIds ?? []))];
           const classification = await classify(actor.organizationKey, { labels, subject: latest.subject, from: latest.from, body: latest.body, direction: latest.direction });
           const threadInput = {
@@ -269,31 +291,22 @@ export function createEmailService(options: {
             embedding: await embed({ text: boundedEmbeddingText(buildEmbeddingText(emailThreadsEmbeddingFields, { subject: latest.subject, summary: summary(latest.body), intent: classification.intent, action: classification.action })!) }),
             embeddingContentVersion: 2 as const, isFavorite: false,
           };
-          const replyDepths = new Map<string, number>();
-          const providerMessageIds: string[] = [];
-          let localThreadKey: string | undefined;
-          for (const metadata of providerMessages) {
-            const full = metadata.id === latestResource.id ? latestResource : await connection.gmail.message(metadata.id);
-            const message = { ...parsedMessage(full, account.email), parentMessageId: undefined as string | undefined, replyDepth: 0 };
-            const parentMessageId = message.inReplyTo ?? message.references.at(-1);
-            message.parentMessageId = parentMessageId;
-            message.replyDepth = parentMessageId ? (replyDepths.get(parentMessageId) ?? -1) + 1 : 0;
-            if (message.messageIdHeader) replyDepths.set(message.messageIdHeader, message.replyDepth);
-            await ensureLease();
-            const saved = await repository.syncThread({
-              thread: threadInput,
-              messages: [{ ...message, scopeKey: actor.scopeKey, accountKey: account.key, summary: summary(message.body), embedding: await embed({ text: boundedEmbeddingText(buildEmbeddingText(emailMessagesEmbeddingFields, { subject: message.subject, body: message.body, summary: summary(message.body) })!) }), embeddingContentVersion: 2 }],
-              reconcileMessages: false,
-            });
-            localThreadKey = saved.key;
-            providerMessageIds.push(message.providerMessageId);
-          }
-          if (localThreadKey) await repository.reconcileThreadMessages(actor.scopeKey, localThreadKey, providerMessageIds);
-          synced += 1;
+          const messages = await Promise.all(parsed.map(async (message) => ({ ...message, scopeKey: actor.scopeKey, accountKey: account.key, summary: summary(message.body), embedding: await embed({ text: boundedEmbeddingText(buildEmbeddingText(emailMessagesEmbeddingFields, { subject: message.subject, body: message.body, summary: summary(message.body) })!) }), embeddingContentVersion: 2 as const })));
+          await ensureLease();
+          await repository.syncThread({ thread: threadInput, messages });
+          changed = true;
+          return 1;
+        };
+        for (let offset = 0; offset < threadIds.length; offset += 10) {
+          const results = await Promise.allSettled(threadIds.slice(offset, offset + 10).map(processThread));
+          const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+          if (failures.length) throw new AggregateError(failures.map(({ reason }) => reason), 'Email synchronization batch failed');
+          synced += results.reduce<number>((total, result) => total + (result.status === 'fulfilled' ? result.value : 0), 0);
         }
         await ensureLease();
-        if (fullSync) await repository.reconcileInbox(actor.scopeKey, account.key, threadIds);
-        if (!await connectors.setSyncState(account.key, 'idle', { historyId: profile.historyId, leaseToken })) throw new EmailRepositoryError('conflict', 'Email synchronization lease was lost');
+        if (fullSync && completeFullSync) await repository.reconcileInbox(actor.scopeKey, account.key, threadIds);
+        if (!await connectors.setSyncState(account.key, 'idle', { historyId: profile.historyId, pendingHistoryId: pendingThreadIds?.length ? pendingHistoryId : null, pendingThreadIds: pendingThreadIds?.length ? pendingThreadIds : null, leaseToken })) throw new EmailRepositoryError('conflict', 'Email synchronization lease was lost');
+        if (changed || fullSync) await publishInboxChanged(actor.scopeKey);
         return { synced, lastSyncedAt: new Date().toISOString() };
       } catch (error) {
         if (await connectors.renewSync(account.key, leaseToken, new Date(Date.now() + 30 * 60_000).toISOString())) {
@@ -305,7 +318,7 @@ export function createEmailService(options: {
         await connectors.releaseSync(account.key, leaseToken);
       }
     },
-    async renewWatch(actor: EmailActor) {
+    async subscribe(actor: EmailActor) {
       await mutate(actor, ['owner', 'admin', 'moderator']);
       const topic = watchTopic();
       if (!topic) throw new Error('GMAIL_PUBSUB_TOPIC is not configured');
@@ -331,14 +344,16 @@ export function createEmailService(options: {
     },
     async setFavorite(actor: EmailActor, threadKey: string, isFavorite: boolean) {
       await mutate(actor, ['owner', 'admin', 'moderator']);
-      return withoutEmbedding(await repository.setThreadFavorite(actor.scopeKey, threadKey, isFavorite));
+      const updated = withoutEmbedding(await repository.setThreadFavorite(actor.scopeKey, threadKey, isFavorite));
+      await publishInboxChanged(actor.scopeKey);
+      return updated;
     },
     async draft(actor: EmailActor, input: { threadKey: string; tone: 'concise' | 'warm' | 'formal' | 'direct'; instruction?: string; profileKey?: string; attachments?: EmailAttachmentRef[] }) {
       await mutate(actor, ['owner', 'admin', 'moderator']);
       const detail = await repository.thread(actor.scopeKey, input.threadKey);
       const latest = detail.messages.at(-1);
       if (!latest) throw new EmailRepositoryError('not_found');
-      const profile = await repository.writingProfile(actor.scopeKey, input.profileKey);
+      const profile = await repository.writingProfile(actor.scopeKey, input.profileKey, input.tone, (text) => embed({ text }));
       const attachments = await repository.resolveAttachments(actor.scopeKey, emailAttachmentRefsSchema.parse(input.attachments ?? []));
       let content: string;
       try {
@@ -352,16 +367,19 @@ export function createEmailService(options: {
       } catch {
         content = input.tone === 'formal' ? 'Hello,\n\nThank you for your message. I will review this and follow up shortly.\n\nBest regards,' : 'Hi,\n\nThanks for your message. I will take a look and get back to you shortly.\n\nBest,';
       }
-      return withoutEmbedding(await repository.createDraft({ scopeKey: actor.scopeKey, variant: 'reply', threadKey: detail.thread.key, messageKey: latest.key, emailWritingProfileKey: profile?.key, generatedContent: content, tone: input.tone, instruction: input.instruction, attachments, status: 'generated', embedding: await embed({ text: content }) }));
+      const draft = withoutEmbedding(await repository.createDraft({ scopeKey: actor.scopeKey, variant: 'reply', threadKey: detail.thread.key, messageKey: latest.key, emailWritingProfileKey: profile?.key, generatedContent: content, tone: input.tone, instruction: input.instruction, attachments, status: 'generated', embedding: await embed({ text: content }) }));
+      await publishInboxChanged(actor.scopeKey);
+      return draft;
     },
     async draftNew(actor: EmailActor, input: { to: string[]; cc?: string[]; bcc?: string[]; subject: string; tone: 'concise' | 'warm' | 'formal' | 'direct'; instruction?: string; attachments?: EmailAttachmentRef[] }) {
       await mutate(actor, ['owner', 'admin', 'moderator']);
       const connector = await connectors.find(actor.scopeKey);
+      const profile = await repository.writingProfile?.(actor.scopeKey, undefined, input.tone, (text) => embed({ text }));
       const attachments = await repository.resolveAttachments(actor.scopeKey, emailAttachmentRefsSchema.parse(input.attachments ?? []));
       let content: string;
       try {
         const response = await ask<ChatOutput>(actor.organizationKey, {
-          systemPrompt: `Draft only a new email body in a ${input.tone} tone. Do not invent facts or claim that attachments were inspected.`,
+          systemPrompt: `Draft only a new email body in a ${input.tone} tone. Do not invent facts or claim that attachments were inspected. ${profile ? `Writing profile: ${profile.tone}; ${profile.style}; ${profile.structure}; ${profile.vocabulary}; ${profile.conventions}` : ''}`,
           messages: [{ role: 'user', content: [{ type: 'text', text: JSON.stringify({ to: input.to, cc: input.cc, bcc: input.bcc, subject: input.subject, instruction: input.instruction ?? 'Write an appropriate email', attachments }) }] }],
           options: { temperature: 0.4, maxTokens: 700 },
         });
@@ -371,15 +389,19 @@ export function createEmailService(options: {
         content = input.tone === 'formal' ? 'Hello,\n\nI am writing regarding the subject above.\n\nBest regards,' : 'Hi,\n\nI wanted to get in touch about this.\n\nBest,';
       }
       const accountKey = connector?.organizationKey === actor.organizationKey ? connector.key : actor.scopeKey;
-      return withoutEmbedding(await repository.createDraft({ scopeKey: actor.scopeKey, variant: 'new', accountKey, to: input.to, cc: input.cc, bcc: input.bcc, subject: cleanSubject(input.subject), generatedContent: content, tone: input.tone, instruction: input.instruction, attachments, status: 'generated', embedding: await embed({ text: `${input.subject}\n\n${content}` }) }));
+      const draft = withoutEmbedding(await repository.createDraft({ scopeKey: actor.scopeKey, variant: 'new', accountKey, to: input.to, cc: input.cc, bcc: input.bcc, subject: cleanSubject(input.subject), generatedContent: content, tone: input.tone, instruction: input.instruction, attachments, status: 'generated', embedding: await embed({ text: `${input.subject}\n\n${content}` }) }));
+      await publishInboxChanged(actor.scopeKey);
+      return draft;
     },
     async tones(actor: EmailActor) {
       await access(actor);
-      return (await repository.listTones(actor.scopeKey)).map(({ embedding: _embedding, instruction: _instruction, ...tone }) => tone);
+      return (await repository.listTones(actor.scopeKey, (text) => embed({ text }))).map(withoutEmbedding);
     },
     async updateDraft(actor: EmailActor, draftKey: string, finalContent: string) {
       await mutate(actor, ['owner', 'admin', 'moderator']);
-      return withoutEmbedding(await repository.updateDraft(actor.scopeKey, draftKey, finalContent));
+      const draft = withoutEmbedding(await repository.updateDraft(actor.scopeKey, draftKey, finalContent));
+      await publishInboxChanged(actor.scopeKey);
+      return draft;
     },
     async sendDraft(actor: EmailActor, draftKey: string) {
       await mutate(actor, ['owner', 'admin', 'moderator']);
@@ -412,6 +434,7 @@ export function createEmailService(options: {
             });
             threadKey = saved.key;
           } catch { /* Gmail accepted the message; the next sync repairs local state. */ }
+          await publishInboxChanged(actor.scopeKey);
           return { sent: true, providerMessageId: sent.id, draftKey: draft.key, ...(threadKey ? { threadKey } : {}) };
         }
         const detail = await repository.thread(actor.scopeKey, draft.threadKey);
@@ -447,7 +470,7 @@ export function createEmailService(options: {
               scopeKey: detail.thread.scopeKey, accountKey: detail.thread.accountKey, providerThreadId: detail.thread.providerThreadId,
               subject: detail.thread.subject, summary: summary(body), intent: 'Awaiting a response', priority: 'normal', state: 'waiting',
               category: detail.thread.category, snippet: summary(body), unread: false, starred: detail.thread.starred, labels: detail.thread.labels,
-              latestFrom: connection.connector.email, inInbox: detail.thread.inInbox, lastMessageAt: sentAt, embedding: detail.thread.embedding, embeddingContentVersion: 2, isFavorite: detail.thread.isFavorite,
+               latestFrom: connection.connector.email, inInbox: detail.thread.inInbox, lastMessageAt: sentAt, embedding: await embed({ text: boundedEmbeddingText(buildEmbeddingText(emailThreadsEmbeddingFields, { subject: detail.thread.subject, summary: summary(body), intent: 'Awaiting a response' })!) }), embeddingContentVersion: 2, isFavorite: detail.thread.isFavorite,
             },
             messages: [{
               scopeKey: actor.scopeKey, accountKey: detail.thread.accountKey, providerMessageId: sent.id,
@@ -458,6 +481,7 @@ export function createEmailService(options: {
             reconcileMessages: false,
           });
         } catch { /* Gmail accepted the message; the next sync repairs local state. */ }
+        await publishInboxChanged(actor.scopeKey);
         return { sent: true, providerMessageId: sent.id, threadKey: detail.thread.key };
       } catch (error) {
         const definitelyRejected = error instanceof GmailApiError && error.status >= 400 && error.status < 500;
@@ -476,6 +500,7 @@ export function createEmailService(options: {
       } catch { /* Local revocation must still succeed if Google is unavailable. */ }
       await connectors.disableScope(actor.scopeKey);
       await connectors.revoke(connector.key);
+      await publishInboxChanged(actor.scopeKey);
       return { disconnected: true };
     },
   };

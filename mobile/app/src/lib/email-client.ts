@@ -16,6 +16,17 @@ export type EmailFilter = z.infer<typeof emailFilterSchema>;
 export const emailToneSchema = z.enum(["concise", "warm", "formal", "direct"]);
 export type EmailTone = z.infer<typeof emailToneSchema>;
 export const BUILT_IN_EMAIL_TONES: EmailTone[] = ["concise", "warm", "formal", "direct"];
+export const emailToneRecordSchema = z.looseObject({
+  key: keySchema,
+  scopeKey: keySchema,
+  slug: emailToneSchema,
+  name: z.string().min(1),
+  description: z.string().min(1),
+  instruction: z.string().min(1),
+  createdAt: dateSchema,
+  updatedAt: dateSchema,
+});
+export type EmailToneRecord = z.infer<typeof emailToneRecordSchema>;
 export const emailAttachmentRefSchema = z.strictObject({ type: z.enum(["document", "image"]), key: keySchema });
 export type EmailAttachmentRef = z.infer<typeof emailAttachmentRefSchema>;
 const emailAddressListSchema = z.array(z.string().trim().email()).min(1).max(50);
@@ -63,6 +74,7 @@ export const emailDraftSchema = z.object({
 const overviewSchema = z.object({
   account: accountSchema.nullable(), connector: connectorSchema.nullable(), threads: z.array(emailThreadSchema), drafts: z.array(emailDraftSchema),
   counts: z.object({ all: z.number().int(), important: z.number().int(), urgent: z.number().int(), needsAction: z.number().int(), filtered: z.number().int(), unread: z.number().int(), favorite: z.number().int() }),
+  nextCursor: z.string().min(1).nullable(),
 });
 const threadDetailSchema = z.object({ thread: emailThreadSchema, messages: z.array(emailMessageSchema) });
 const assistantResponseSchema = z.discriminatedUnion("type", [
@@ -111,7 +123,7 @@ async function request<T>(method: "post" | "patch", path: string, body: Record<s
   } catch (error) { throw responseError(error); }
 }
 
-export function fetchEmailOverview(input: { filter?: EmailFilter; search?: string } = {}) { return request("post", "/email/overview", input, overviewSchema); }
+export function fetchEmailOverview(input: { filter?: EmailFilter; search?: string; cursor?: string; limit?: number } = {}) { return request("post", "/email/overview", input, overviewSchema); }
 export async function syncEmail() {
   try {
     const response = await apiClient.post("/email/sync", getEmailContext(), { timeout: 120_000 });
@@ -125,13 +137,8 @@ export function composeEmailDraft(input: EmailComposeDraftInput) { return reques
 export function updateEmailDraft(draftKey: string, finalContent: string) { return request("patch", `/email/drafts/${keySchema.parse(draftKey)}`, { finalContent }, emailDraftSchema); }
 export function sendEmailDraft(draftKey: string) { return request("post", `/email/drafts/${keySchema.parse(draftKey)}/send`, {}, z.object({ sent: z.literal(true), providerMessageId: z.string().min(1), draftKey: keySchema.optional(), threadKey: keySchema.optional() })); }
 export async function fetchEmailTones() {
-  try {
-    const toneOptionSchema = z.object({ slug: emailToneSchema });
-    const response = await request("post", "/email/tones/list", {}, z.union([z.array(z.union([emailToneSchema, toneOptionSchema])), z.strictObject({ tones: z.array(z.union([emailToneSchema, toneOptionSchema])) })]));
-    const values = Array.isArray(response) ? response : response.tones;
-    const tones = values.map((value) => typeof value === "string" ? value : value.slug);
-    return tones.length ? tones : BUILT_IN_EMAIL_TONES;
-  } catch { return BUILT_IN_EMAIL_TONES; }
+  const response = await request("post", "/email/tones/list", {}, z.union([z.array(emailToneRecordSchema), z.strictObject({ tones: z.array(emailToneRecordSchema) })]));
+  return Array.isArray(response) ? response : response.tones;
 }
 export function disconnectEmail() { return request("post", "/email/disconnect", {}, z.object({ disconnected: z.literal(true) })); }
 export async function askEmailAssistant(message: string, requestKey: string) {

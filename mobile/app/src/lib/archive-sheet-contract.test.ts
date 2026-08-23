@@ -5,10 +5,22 @@ const searchHistorySheet = await Bun.file(new URL("../components/SearchHistorySh
 const searchHistoryPill = await Bun.file(new URL("../../../../shared/packages/ui/components/search-history-pill/search-history-pill.mobile.tsx", import.meta.url)).text();
 
 test("opens routed cached folders without flashing Archive root", () => {
-  expect(source).toContain("const cachedInitialTree = initialFolderKey ? queryClient.getQueryData<ContentFolder[]>");
-  expect(source).toContain("const cachedInitialStack = initialFolderKey && cachedInitialTree ? contentFolderPath");
+  expect(source).toContain("const cachedTargetFolderKey = cachedInitialDocument?.folderKey ?? initialFolderKey");
+  expect(source).toContain("const cachedInitialTree = cachedTargetFolderKey ? queryClient.getQueryData<ContentFolder[]>");
+  expect(source).toContain("const cachedInitialStack = cachedTargetFolderKey && cachedInitialTree ? contentFolderPath");
   expect(source).toContain('useState<WorkspaceMode>(cachedInitialFolder ? "folder" : "folders")');
   expect(source).toContain("useState<ContentFolder[]>(cachedInitialStack)");
+});
+
+test("opens a routed document once through the canonical Archive path in its containing folder", async () => {
+  const route = await Bun.file(new URL("../app/capability/[slug].tsx", import.meta.url)).text();
+  expect(route).toContain("initialDocumentKey={params.documentKey}");
+  expect(source).toContain("const initialDocumentOpened = useRef<string | undefined>(undefined)");
+  expect(source).toContain("const initialDocument = initialDocumentKey ? await getContentDocument(queryClient, contentContext, initialDocumentKey)");
+  expect(source).toContain("const targetFolderKey = initialDocument?.folderKey ?? initialFolderKey");
+  expect(source).toContain("initialDocumentOpened.current = requestKey");
+  expect(source).toMatch(/getContentDocument\(queryClient, contentContext, initialDocumentKey\)[\s\S]*?\.then\(\(document\) => openArchiveDocument\(document\)\)/);
+  expect(source).toContain("const openInitialDocument = useEffectEvent(() =>");
 });
 
 test("uses the root header spacing rhythm inside folders", () => {

@@ -287,6 +287,7 @@ export function GalleryCollectionSharing({ collection, context, memberKeys, onCl
 
   useEffect(() => subscribeAppEvent((event) => {
     if (!open) return;
+    if (event.type === "inbox.changed") return;
     const relevant = event.type === "event-stream.connected"
       || event.slug === "collection.access.changed" && (view === "members" || view === "member" || view === "memberRemoveConfirm")
       || event.slug === "collection.invites.changed" && (view === "invites" || view === "inviteConfirm")

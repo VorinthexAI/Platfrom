@@ -19,7 +19,7 @@ describe('email synchronization jobs', () => {
   test('attempts every watch renewal before retrying failed accounts', async () => {
     const attempted: string[] = [];
     const connectors = { listWatchRenewalTargets: async () => [{ organizationKey: 'broken', scopeKey: 'scope-1' }, { organizationKey: 'healthy', scopeKey: 'scope-2' }] };
-    const service = { renewWatch: async (actor: { organizationKey: string }) => { attempted.push(actor.organizationKey); if (actor.organizationKey === 'broken') throw new Error('revoked'); } };
+    const service = { subscribe: async (actor: { organizationKey: string }) => { attempted.push(actor.organizationKey); if (actor.organizationKey === 'broken') throw new Error('revoked'); } };
     await expect(processEmailSyncJob({ schemaVersion: 1, kind: 'renew-watches', day: '2026-08-12' }, { connectors: connectors as never, service: service as never })).rejects.toThrow('1 account');
     expect(attempted).toEqual(['broken', 'healthy']);
   });

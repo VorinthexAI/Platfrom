@@ -492,6 +492,7 @@ export function registerRoutes(app: Hono) {
   app.get('/email/connectors/gmail/callback', emailHandlers.callback);
   app.post('/email/connect/exchange', emailHandlers.exchangeConnect);
   app.post('/email/sync', emailHandlers.sync);
+  app.post('/email/subscribe', emailHandlers.subscribe);
   app.post('/email/threads/:threadKey', emailHandlers.thread);
   app.post('/email/threads/:threadKey/favorite', emailHandlers.favorite);
   app.post('/email/drafts', emailHandlers.draft);

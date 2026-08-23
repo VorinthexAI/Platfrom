@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
-import { archiveDocument, decodeEmailDraft, emailAttachmentRefsSchema, emailContactPayloadSchema, emailDraftPayloadSchema, emailRulePayloadSchema, emailWritingProfilePayloadSchema, encodeArchivePayload } from './archive-payloads';
+import { archiveDocument, decodeEmailDraft, decodeEmailTone, emailAttachmentRefsSchema, emailContactPayloadSchema, emailDraftPayloadSchema, emailRulePayloadSchema, emailTonePayloadSchema, emailWritingProfilePayloadSchema, encodeArchivePayload, encodeEmailToneContent } from './archive-payloads';
 
 const key = 'cmrnlzf650002qc7k4p5zem5w';
 const scopeKey = 'cmrnlzf640001qc7kazsr96k5';
@@ -33,5 +33,23 @@ describe('mail Archive payload codecs', () => {
     expect(emailContactPayloadSchema.parse({ version: 1, kind: 'mail-contact', data: { email: 'person@example.com', name: 'Person' } }).kind).toBe('mail-contact');
     expect(emailRulePayloadSchema.parse({ version: 1, kind: 'mail-rule', data: { name: 'Priority', description: 'Founder mail', condition: 'From founder', instruction: 'Prioritize it', action: 'prioritize', config: {}, isEnabled: true } }).kind).toBe('mail-rule');
     expect(() => emailRulePayloadSchema.parse({ version: 1, kind: 'mail-rule', data: { name: 'Incomplete' } })).toThrow();
+  });
+
+  test('decodes user-edited Markdown tones while preserving strict canonical metadata', () => {
+    const tone = { slug: 'warm' as const, name: 'Warm' as const, description: 'Friendly and considerate.', instruction: 'Sound human.' };
+    const document = archiveDocument({ key, scopeKey, folderKey: scopeKey, name: tone.name, payload: emailTonePayloadSchema.parse({ version: 1, kind: 'mail-tone', data: tone }), embedding, createdAt: now, updatedAt: now, mutationPolicy: 'user' });
+    document.content = encodeEmailToneContent(tone).replace('Friendly and considerate.', 'Friendly, calm, and concise.').replace('Sound human.', 'Open with appreciation and use plain language.');
+    expect(decodeEmailTone(document)).toMatchObject({ slug: 'warm', name: 'Warm', description: 'Friendly, calm, and concise.', instruction: 'Open with appreciation and use plain language.' });
+    expect(document.mutationPolicy).toBe('user');
+    expect(() => decodeEmailTone({ ...document, content: document.content.replace('"warm"', '"invented"') })).toThrow();
+  });
+
+  test('keeps non-tone mail documents hidden and includes the tone backfill migration', async () => {
+    const payload = emailDraftPayloadSchema.parse({ version: 1, kind: 'mail-new-draft', data: { variant: 'new', accountKey: key, to: ['person@example.com'], subject: 'Hello', generatedContent: 'Body', status: 'generated' } });
+    expect(archiveDocument({ key, scopeKey, folderKey: scopeKey, name: 'Draft', payload, embedding, createdAt: now, updatedAt: now }).mutationPolicy).toBe('system-only');
+    const migration = await Bun.file(new URL('../../db/arango-migrate.ts', import.meta.url)).text();
+    expect(migration).toContain('payload.kind == "mail-tone"');
+    expect(migration).toContain('mutationPolicy: "user"');
+    expect(migration).toContain('vorinthex-mail-tone');
   });
 });

@@ -25,6 +25,8 @@ export const organizationConnectorSchema = z.object({
   status: z.enum(['active', 'error', 'revoked']),
   syncEnabled: z.boolean().default(true),
   historyId: z.string().trim().min(1).optional(),
+  syncPendingHistoryId: z.string().trim().min(1).optional(),
+  syncPendingThreadIds: z.array(z.string().min(1)).max(100_000).optional(),
   lastSyncedAt: z.string().datetime().optional(),
   syncStatus: z.enum(['idle', 'syncing', 'error']).default('idle'),
   syncError: z.string().max(500).optional(),

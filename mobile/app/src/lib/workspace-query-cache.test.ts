@@ -71,7 +71,9 @@ test("isolates every routed workspace key by context and resource", () => {
   expect(compassQueryKeys.cityDetail(context, "ES", "Valencia")).not.toEqual(compassQueryKeys.cityDetail(context, "VE", "Valencia"));
   expect(compassQueryKeys.cityImage(context, "ES", "Valencia", "token-a")).not.toEqual(compassQueryKeys.cityImage(context, "ES", "Valencia", "token-b"));
   expect(signalQueryKeys.overview(context, "all")).not.toEqual(signalQueryKeys.overview(context, "favorite"));
+  expect(signalQueryKeys.overviewPage(context, "all", undefined, "cursor-a")).not.toEqual(signalQueryKeys.overviewPage(context, "all", undefined, "cursor-b"));
   expect(signalQueryKeys.detail(context, "thread-a")).not.toEqual(signalQueryKeys.detail(context, "thread-b"));
+  expect(signalQueryKeys.tones(context)).not.toEqual(signalQueryKeys.tones(otherContext));
   expect(ascendQueryKeys.detail(context, "book-a")).not.toEqual(ascendQueryKeys.detail(otherContext, "book-a"));
 });
 

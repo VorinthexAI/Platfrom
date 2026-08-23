@@ -10,6 +10,8 @@ describe('app event routing', () => {
     expect(parseEventEnvelope('{"route":"collection","collectionKey":"collection-1","event":"image.changed","imageKey":"secret"}')).toBeNull();
     expect(parseEventEnvelope('{"route":"scope","scopeKey":"scope-1","event":"trip.changed"}')).toEqual({ route: 'scope', scopeKey: 'scope-1', event: 'trip.changed' });
     expect(parseEventEnvelope('{"route":"scope","scopeKey":"scope-1","event":"place.reference.changed"}')).toEqual({ route: 'scope', scopeKey: 'scope-1', event: 'place.reference.changed' });
+    expect(parseEventEnvelope('{"route":"scope","scopeKey":"scope-1","event":"inbox.changed"}')).toEqual({ route: 'scope', scopeKey: 'scope-1', event: 'inbox.changed' });
+    expect(parseEventEnvelope('{"route":"scope","scopeKey":"scope-1","event":"inbox.changed","credentials":"no"}')).toBeNull();
     expect(parseEventEnvelope('{"route":"scope","scopeKey":"scope-1","event":"trip.changed","tripKey":"secret"}')).toBeNull();
     expect(parseEventEnvelope('not json')).toBeNull();
   });

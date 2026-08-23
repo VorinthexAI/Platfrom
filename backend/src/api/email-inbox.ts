@@ -41,8 +41,8 @@ export function createEmailHandlers(options: { service?: EmailService; oauth?: E
   };
   return {
     overview: run(async (c) => {
-      const body = strictObject({ ...contextSchema.shape, filter: z.enum(['all', 'important', 'urgent', 'needs_action', 'filtered', 'unread', 'favorite']).optional(), search: z.string().trim().max(200).optional() }).parse(await c.req.json());
-      return service.overview(await actor(c, body), { filter: body.filter, search: body.search });
+      const body = strictObject({ ...contextSchema.shape, filter: z.enum(['all', 'important', 'urgent', 'needs_action', 'filtered', 'unread', 'favorite']).optional(), search: z.string().trim().max(200).optional(), cursor: z.string().min(1).max(2_000).optional(), limit: z.number().int().min(1).max(50).optional() }).parse(await c.req.json());
+      return service.overview(await actor(c, body), { filter: body.filter, search: body.search, cursor: body.cursor, limit: body.limit });
     }),
     startConnect: run(async (c) => {
       const body = strictObject({ ...contextSchema.shape, returnUri: z.string().url() }).parse(await c.req.json());
@@ -67,6 +67,7 @@ export function createEmailHandlers(options: { service?: EmailService; oauth?: E
       return result;
     }),
     sync: run(async (c) => { const body = contextSchema.parse(await c.req.json()); return service.sync(await actor(c, body)); }),
+    subscribe: run(async (c) => { const body = contextSchema.parse(await c.req.json()); return service.subscribe(await actor(c, body)); }),
     thread: run(async (c) => { const body = strictObject({ ...contextSchema.shape, markRead: z.boolean().optional() }).parse(await c.req.json()); const current = await actor(c, body); const threadKey = threadKeySchema.parse(c.req.param('threadKey')); return service.threadForHttp(current, threadKey, body.markRead !== false); }),
     favorite: run(async (c) => { const body = strictObject({ ...contextSchema.shape, isFavorite: z.boolean() }).parse(await c.req.json()); return service.setFavorite(await actor(c, body), threadKeySchema.parse(c.req.param('threadKey')), body.isFavorite); }),
     draft: run(async (c) => {

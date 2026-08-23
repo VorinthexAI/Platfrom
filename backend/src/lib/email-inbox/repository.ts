@@ -12,6 +12,7 @@ import {
   decodeEmailThread,
   decodeEmailTone,
   decodeEmailWritingProfile,
+  encodeEmailToneContent,
   emailAttachmentRefsSchema,
   emailDraftPayloadSchema,
   emailMessagePayloadSchema,
@@ -31,6 +32,13 @@ export function encodeEmailCursor(value: z.infer<typeof emailCursorSchema>) { re
 export function decodeEmailCursor(value: string, threadKey: string) {
   const parsed = emailCursorSchema.parse(JSON.parse(Buffer.from(value, 'base64url').toString('utf8')));
   if (parsed.threadKey !== threadKey) throw new EmailRepositoryError('conflict', 'Email cursor belongs to another thread');
+  return parsed;
+}
+const overviewCursorSchema = z.object({ v: z.literal(1), scopeKey: z.string().cuid(), filter: z.string(), search: z.string(), lastMessageAt: z.string().datetime(), key: z.string().cuid() }).strict();
+function encodeOverviewCursor(value: z.infer<typeof overviewCursorSchema>) { return Buffer.from(JSON.stringify(overviewCursorSchema.parse(value))).toString('base64url'); }
+function decodeOverviewCursor(value: string, owner: Pick<z.infer<typeof overviewCursorSchema>, 'scopeKey' | 'filter' | 'search'>) {
+  const parsed = overviewCursorSchema.parse(JSON.parse(Buffer.from(value, 'base64url').toString('utf8')));
+  if (parsed.scopeKey !== owner.scopeKey || parsed.filter !== owner.filter || parsed.search !== owner.search) throw new EmailRepositoryError('conflict', 'Inbox cursor belongs to another scope or query');
   return parsed;
 }
 
@@ -133,19 +141,26 @@ export function createEmailRepository(database: Database = db) {
         return thread;
       });
     },
-    async overview(scopeKey: string, filter: 'all' | 'important' | 'urgent' | 'needs_action' | 'filtered' | 'unread' | 'favorite' = 'all', search?: string) {
-      const threads = (await listFolderDocuments(scopeKey, mailFolderKeys(scopeKey).threads)).flatMap((document) => {
-        try { return JSON.parse(document.content).kind === 'mail-thread' ? [decodeEmailThread(document)] : []; } catch { return []; }
-      });
+    async overview(scopeKey: string, filter: 'all' | 'important' | 'urgent' | 'needs_action' | 'filtered' | 'unread' | 'favorite' = 'all', search?: string, cursorValue?: string, limit = 50) {
       const normalized = search?.trim().toLowerCase() ?? '';
-      const inbox = threads.filter((thread) => thread.inInbox !== false);
-      const visible = inbox.filter((thread) => {
-        const matchesFilter = filter === 'all' || (filter === 'important' && ['high', 'urgent'].includes(thread.priority)) || (filter === 'urgent' && thread.priority === 'urgent') || (filter === 'needs_action' && thread.state === 'needs_action') || (filter === 'filtered' && thread.state === 'filtered') || (filter === 'unread' && thread.unread === true) || (filter === 'favorite' && thread.isFavorite === true);
-        return matchesFilter && (!normalized || `${thread.subject} ${thread.summary} ${thread.snippet ?? ''}`.toLowerCase().includes(normalized));
-      }).sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt)).slice(0, 100);
-      const connectorCursor = await database.query('FOR connector IN organizationConnectors FILTER connector.scopeKey == @scopeKey && connector.provider == "gmail" && connector.status != "revoked" SORT connector.updatedAt DESC LIMIT 1 RETURN connector', { scopeKey });
-      const account = await connectorCursor.next();
-      return { account: account ? withArangoKey(account as Record<string, unknown>) : null, threads: visible, counts: { all: inbox.length, important: inbox.filter(({ priority }) => ['high', 'urgent'].includes(priority)).length, urgent: inbox.filter(({ priority }) => priority === 'urgent').length, needsAction: inbox.filter(({ state }) => state === 'needs_action').length, filtered: inbox.filter(({ state }) => state === 'filtered').length, unread: inbox.filter(({ unread }) => unread).length, favorite: inbox.filter(({ isFavorite }) => isFavorite).length } };
+      const after = cursorValue ? decodeOverviewCursor(cursorValue, { scopeKey, filter, search: normalized }) : null;
+      const cursor = await database.query(`LET inbox = (FOR document IN documents
+        FILTER document.scopeKey == @scopeKey && document.folderKey == @folderKey && document.mutationPolicy == "system-only"
+        LET payload = JSON_PARSE(document.content)
+        FILTER payload.kind == "mail-thread" && payload.data.inInbox != false
+        RETURN { document, data: payload.data })
+        LET matching = (FOR row IN inbox
+          FILTER @filter == "all" || (@filter == "important" && row.data.priority IN ["high", "urgent"]) || (@filter == "urgent" && row.data.priority == "urgent") || (@filter == "needs_action" && row.data.state == "needs_action") || (@filter == "filtered" && row.data.state == "filtered") || (@filter == "unread" && row.data.unread == true) || (@filter == "favorite" && row.data.isFavorite == true)
+          FILTER @search == "" || CONTAINS(LOWER(CONCAT_SEPARATOR(" ", row.data.subject, row.data.summary, row.data.snippet)), @search)
+          FILTER @after == null || row.data.lastMessageAt < @after.lastMessageAt || (row.data.lastMessageAt == @after.lastMessageAt && row.document._key > @after.key)
+          SORT row.data.lastMessageAt DESC, row.document._key ASC LIMIT @pageSize RETURN row.document)
+        RETURN { documents: matching, counts: { all: LENGTH(inbox), important: LENGTH(FOR row IN inbox FILTER row.data.priority IN ["high", "urgent"] RETURN 1), urgent: LENGTH(FOR row IN inbox FILTER row.data.priority == "urgent" RETURN 1), needsAction: LENGTH(FOR row IN inbox FILTER row.data.state == "needs_action" RETURN 1), filtered: LENGTH(FOR row IN inbox FILTER row.data.state == "filtered" RETURN 1), unread: LENGTH(FOR row IN inbox FILTER row.data.unread == true RETURN 1), favorite: LENGTH(FOR row IN inbox FILTER row.data.isFavorite == true RETURN 1) } }`, { scopeKey, folderKey: mailFolderKeys(scopeKey).threads, filter, search: normalized, after, pageSize: limit + 1 });
+      const result = await cursor.next() as { documents: unknown[]; counts: Record<string, number> } | undefined;
+      const decoded = (result?.documents ?? []).map((document) => decodeEmailThread(parsedDocument(document)));
+      const threads = decoded.slice(0, limit);
+      const last = threads.at(-1);
+      const nextCursor = decoded.length > limit && last ? encodeOverviewCursor({ v: 1, scopeKey, filter, search: normalized, lastMessageAt: last.lastMessageAt, key: last.key }) : null;
+      return { threads, nextCursor, counts: result?.counts ?? { all: 0, important: 0, urgent: 0, needsAction: 0, filtered: 0, unread: 0, favorite: 0 } };
     },
     async thread(scopeKey: string, threadKey: string) {
       const document = await getDocument(scopeKey, threadKey);
@@ -185,15 +200,15 @@ export function createEmailRepository(database: Database = db) {
         try { const message = decodeEmailMessage(document); if (message.threadKey === threadKey && !providerMessageIds.includes(message.providerMessageId)) await database.collection('documents').remove(message.key); } catch { /* Other document kind. */ }
       }
     },
-    async writingProfile(scopeKey: string, profileKey?: string) {
+    async writingProfile(scopeKey: string, profileKey?: string, toneSlug?: string, embedTone?: (text: string) => Promise<number[]>) {
       const documents = await listFolderDocuments(scopeKey, mailFolderKeys(scopeKey).tones);
       const profiles = documents.flatMap((document) => {
         try { return [decodeEmailWritingProfile(document)]; } catch { return []; }
       });
-      const profile = profileKey ? profiles.find(({ key }) => key === profileKey) : profiles.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+      const profile = profileKey ? profiles.find(({ key }) => key === profileKey) : undefined;
       if (profile) return profile;
-      const tones = await this.listTones(scopeKey);
-      const tone = profileKey ? tones.find(({ key }) => key === profileKey) : tones[0];
+      const tones = await this.listTones(scopeKey, embedTone);
+      const tone = profileKey ? tones.find(({ key }) => key === profileKey) : tones.find(({ slug }) => slug === toneSlug) ?? tones[0];
       return tone ? { ...tone, tone: tone.instruction, style: tone.description, structure: tone.description, vocabulary: tone.instruction, conventions: tone.instruction } : null;
     },
     async createDraft(input: EmailDraftCreate) {
@@ -256,14 +271,25 @@ export function createEmailRepository(database: Database = db) {
       return emailAttachmentRefsSchema.parse(refs);
     },
     attachmentResources,
-    async listTones(scopeKey: string) {
+    async listTones(scopeKey: string, embedTone?: (text: string) => Promise<number[]>) {
       const folders = await ensureMailFolders(database, scopeKey);
       const timestamp = new Date().toISOString();
-      const embedding = Array(EMBEDDING_DIMENSIONS).fill(0);
+      const placeholder = Array(EMBEDDING_DIMENSIONS).fill(0);
+      const existing = new Map((await listFolderDocuments(scopeKey, folders.tones)).map((document) => [document.key, document]));
       for (const tone of defaultTones) {
         const key = stableKey('mail-tone', scopeKey, tone.slug);
-        const payload = emailTonePayloadSchema.parse({ version: 1, kind: 'mail-tone', data: tone });
-        await replaceDocument(archiveDocument({ key, scopeKey, folderKey: folders.tones, name: tone.name, payload, embedding, createdAt: timestamp, updatedAt: timestamp }));
+        const stored = existing.get(key);
+        if (stored) {
+          if (embedTone && stored.embedding.every((value) => value === 0)) {
+            await database.collection('documents').update(key, { embedding: await embedTone(stored.content) });
+          }
+          continue;
+        }
+        const content = encodeEmailToneContent(tone);
+        const embedding = embedTone ? await embedTone(content) : placeholder;
+        const document = archiveDocument({ key, scopeKey, folderKey: folders.tones, name: tone.name, payload: emailTonePayloadSchema.parse({ version: 1, kind: 'mail-tone', data: tone }), embedding, createdAt: timestamp, updatedAt: timestamp, mutationPolicy: 'user' });
+        document.content = content;
+        await database.query('UPSERT { _key: @key } INSERT @document UPDATE {} IN documents', { key, document: toArangoDoc(document) });
       }
       return (await listFolderDocuments(scopeKey, folders.tones)).flatMap((document) => {
         try { return [decodeEmailTone(document)]; } catch { return []; }

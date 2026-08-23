@@ -485,6 +485,7 @@ export function GalleryWorkspace({ initialCollectionKey, returnTripKey, returnTr
   }
 
   useEffect(() => subscribeAppEvent((event) => {
+    if (event.type === "inbox.changed") return;
     const plan = galleryRefreshPlan(event.type === "event-stream.connected" ? "reconnect" : event.slug);
     if (!busyRef.current && (plan.has("access") || plan.has("cleanup")) && (activeSheetRef.current === "cleanup" || activeSheetRef.current === "confirmCleanupDelete")) invalidateCleanupLoad();
     scheduleGalleryRefresh(plan);
