@@ -37,6 +37,7 @@ export const emailReplyDraftInputSchema = z.strictObject({
   attachments: z.array(emailAttachmentRefSchema).max(20).optional(),
 });
 export const emailComposeDraftInputSchema = z.strictObject({
+  connectorKey: keySchema.optional(),
   to: emailAddressListSchema,
   cc: z.array(z.string().trim().email()).max(50).optional(),
   bcc: z.array(z.string().trim().email()).max(50).optional(),
@@ -45,17 +46,15 @@ export const emailComposeDraftInputSchema = z.strictObject({
   instruction: z.string().trim().min(1).max(1_000).optional(),
   attachments: z.array(emailAttachmentRefSchema).max(20).optional(),
 });
+export const emailAssignDraftInputSchema = z.strictObject({ draftKey: keySchema, connectorKey: keySchema });
 export type EmailReplyDraftInput = z.infer<typeof emailReplyDraftInputSchema>;
 export type EmailComposeDraftInput = z.infer<typeof emailComposeDraftInputSchema>;
 
-const accountSchema = z.object({
-  key: keySchema, scopeKey: keySchema, provider: z.literal("gmail"), providerAccountId: z.string().min(1), email: z.string().email(), connectorKey: keySchema.optional(),
-  syncEnabled: z.boolean(), historyId: z.string().optional(), lastSyncedAt: dateSchema.optional(), syncStatus: z.enum(["idle", "syncing", "error"]).optional(), syncError: z.string().optional(), createdAt: dateSchema, updatedAt: dateSchema,
+export const emailConnectorSchema = z.strictObject({
+  key: keySchema, organizationKey: keySchema, scopeKey: keySchema, provider: z.literal("gmail"), email: z.string().email(),
+  status: z.enum(["active", "error", "revoked"]), syncEnabled: z.boolean(), syncStatus: z.enum(["idle", "syncing", "error"]), lastSyncedAt: dateSchema.optional(), syncError: z.string().optional(), createdAt: dateSchema, updatedAt: dateSchema,
 });
-const connectorSchema = z.object({
-  key: keySchema, organizationKey: keySchema, scopeKey: keySchema, provider: z.literal("gmail"), providerAccountId: z.string().min(1), email: z.string().email(),
-  scopes: z.array(z.string()), createdByMembershipKey: keySchema, status: z.enum(["active", "error", "revoked"]), lastRefreshedAt: dateSchema.optional(), lastError: z.string().optional(), revokedAt: dateSchema.optional(), createdAt: dateSchema, updatedAt: dateSchema,
-});
+export type EmailConnector = z.infer<typeof emailConnectorSchema>;
 export const emailThreadSchema = z.object({
   key: keySchema, scopeKey: keySchema, accountKey: keySchema, providerThreadId: z.string().min(1), subject: z.string().min(1), summary: z.string().min(1), intent: z.string().min(1), action: z.string().optional(),
   priority: z.enum(["low", "normal", "high", "urgent"]), state: z.enum(["needs_action", "waiting", "informational", "filtered", "done"]), lastMessageAt: dateSchema,
@@ -72,7 +71,8 @@ export const emailDraftSchema = z.object({
 });
 
 const overviewSchema = z.object({
-  account: accountSchema.nullable(), connector: connectorSchema.nullable(), threads: z.array(emailThreadSchema), drafts: z.array(emailDraftSchema),
+  accounts: z.array(emailConnectorSchema), selectedAccount: emailConnectorSchema.nullable(), threads: z.array(emailThreadSchema), drafts: z.array(emailDraftSchema),
+  unassignedDrafts: z.array(emailDraftSchema).default([]),
   counts: z.object({ all: z.number().int(), important: z.number().int(), urgent: z.number().int(), needsAction: z.number().int(), filtered: z.number().int(), unread: z.number().int(), favorite: z.number().int() }),
   nextCursor: z.string().min(1).nullable(),
 });
@@ -123,24 +123,29 @@ async function request<T>(method: "post" | "patch", path: string, body: Record<s
   } catch (error) { throw responseError(error); }
 }
 
-export function fetchEmailOverview(input: { filter?: EmailFilter; search?: string; cursor?: string; limit?: number } = {}) { return request("post", "/email/overview", input, overviewSchema); }
-export async function syncEmail() {
+export function fetchEmailOverview(input: { connectorKey?: string; filter?: EmailFilter; search?: string; cursor?: string; limit?: number } = {}) { return request("post", "/email/overview", input, overviewSchema); }
+export async function syncEmail(connectorKey: string) {
   try {
-    const response = await apiClient.post("/email/sync", getEmailContext(), { timeout: 120_000 });
+    const response = await apiClient.post("/email/sync", { ...getEmailContext(), connectorKey: keySchema.parse(connectorKey) }, { timeout: 120_000 });
     return unwrap(response.data, z.object({ synced: z.number().int().nonnegative(), busy: z.boolean().optional(), lastSyncedAt: dateSchema.nullable() }));
   } catch (error) { throw responseError(error); }
 }
+export function subscribeEmail(connectorKey: string) { return request("post", "/email/subscribe", { connectorKey: keySchema.parse(connectorKey) }, z.object({ watchExpiresAt: dateSchema })); }
 export function fetchEmailThread(threadKey: string) { return request("post", `/email/threads/${keySchema.parse(threadKey)}`, {}, threadDetailSchema); }
 export function setEmailThreadFavorite(threadKey: string, isFavorite: boolean) { return request("post", `/email/threads/${keySchema.parse(threadKey)}/favorite`, { isFavorite }, emailThreadSchema); }
 export function createEmailDraft(input: EmailReplyDraftInput) { return request("post", "/email/drafts", emailReplyDraftInputSchema.parse(input), emailDraftSchema); }
 export function composeEmailDraft(input: EmailComposeDraftInput) { return request("post", "/email/drafts/compose", emailComposeDraftInputSchema.parse(input), emailDraftSchema); }
+export function assignEmailDraft(draftKey: string, connectorKey: string) {
+  const input = emailAssignDraftInputSchema.parse({ draftKey, connectorKey });
+  return request("post", `/email/drafts/${input.draftKey}/assign`, { connectorKey: input.connectorKey }, emailDraftSchema);
+}
 export function updateEmailDraft(draftKey: string, finalContent: string) { return request("patch", `/email/drafts/${keySchema.parse(draftKey)}`, { finalContent }, emailDraftSchema); }
 export function sendEmailDraft(draftKey: string) { return request("post", `/email/drafts/${keySchema.parse(draftKey)}/send`, {}, z.object({ sent: z.literal(true), providerMessageId: z.string().min(1), draftKey: keySchema.optional(), threadKey: keySchema.optional() })); }
 export async function fetchEmailTones() {
   const response = await request("post", "/email/tones/list", {}, z.union([z.array(emailToneRecordSchema), z.strictObject({ tones: z.array(emailToneRecordSchema) })]));
   return Array.isArray(response) ? response : response.tones;
 }
-export function disconnectEmail() { return request("post", "/email/disconnect", {}, z.object({ disconnected: z.literal(true) })); }
+export function disconnectEmail(connectorKey: string) { return request("post", "/email/disconnect", { connectorKey: keySchema.parse(connectorKey) }, z.object({ disconnected: z.literal(true) })); }
 export async function askEmailAssistant(message: string, requestKey: string) {
   const { organizationKey, scopeKey } = getEmailContext();
   try {
@@ -153,11 +158,11 @@ export async function askEmailAssistant(message: string, requestKey: string) {
   } catch (error) { throw responseError(error); }
 }
 
-const connectionExchanges = new Map<string, Promise<void>>();
+const connectionExchanges = new Map<string, Promise<EmailConnector>>();
 export function exchangeEmailConnection(code: string) {
   const existing = connectionExchanges.get(code);
   if (existing) return existing;
-  const operation = request("post", "/email/connect/exchange", { code }, connectorSchema).then(() => undefined).catch((error: unknown) => { connectionExchanges.delete(code); throw error; });
+  const operation = request("post", "/email/connect/exchange", { code }, emailConnectorSchema).catch((error: unknown) => { connectionExchanges.delete(code); throw error; });
   connectionExchanges.set(code, operation);
   return operation;
 }
@@ -165,12 +170,11 @@ export function exchangeEmailConnection(code: string) {
 export async function launchEmailConnection() {
   const start = await request("post", "/email/connect", { returnUri: EMAIL_RETURN_URI }, z.object({ authorizationUrl: z.string().url() }));
   const result = await WebBrowser.openAuthSessionAsync(start.authorizationUrl, EMAIL_RETURN_URI);
-  if (result.type !== "success") return false;
+  if (result.type !== "success") return null;
   const params = Linking.parse(result.url).queryParams ?? {};
   const error = typeof params.email_connection_error === "string" ? params.email_connection_error : null;
   const code = typeof params.email_connection_code === "string" ? params.email_connection_code : null;
   if (error) throw new Error("Gmail connection was not completed.");
   if (!code) throw new Error("Google returned an incomplete connection response.");
-  await exchangeEmailConnection(code);
-  return true;
+  return exchangeEmailConnection(code);
 }

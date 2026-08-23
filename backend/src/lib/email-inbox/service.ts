@@ -49,6 +49,8 @@ const TOOL_THREAD_BODY_LIMIT = 64_000;
 const emailThreadsEmbeddingFields = ['subject', 'summary', 'intent', 'action'] as const;
 const emailMessagesEmbeddingFields = ['subject', 'body', 'summary'] as const;
 const MAX_EMAIL_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+const CONNECTOR_SEND_LEASE_MS = 5 * 60_000;
+const emptyOverviewCounts = { all: 0, important: 0, urgent: 0, needsAction: 0, filtered: 0, unread: 0, favorite: 0 };
 
 function attachmentName(value: string) { return safeHeader(value, 180).replace(/["\\]/g, '_') || 'attachment'; }
 function encodedLines(bytes: Uint8Array) { return Buffer.from(bytes).toString('base64').match(/.{1,76}/g)?.join('\r\n') ?? ''; }
@@ -87,6 +89,7 @@ function parsedMessage(message: GmailMessageResource, ownEmail: string) {
 export function createEmailService(options: {
   repository?: EmailRepository; connectors?: ConnectorRepository; authorize?: AccessResolver;
   client?: (accessToken: string) => GmailClient;
+  refreshCredentials?: typeof refreshGmailCredentials;
   classify?: typeof classifyEmailWithFallback;
   embed?: typeof embedText;
   ask?: typeof executeAsk;
@@ -97,6 +100,7 @@ export function createEmailService(options: {
   const connectors = options.connectors ?? createConnectorRepository();
   const authorize = options.authorize ?? defaultAccess;
   const clientFactory = options.client ?? createGmailClient;
+  const refreshCredentials = options.refreshCredentials ?? refreshGmailCredentials;
   const classify = options.classify ?? classifyEmailWithFallback;
   const embed = options.embed ?? embedText;
   const ask = options.ask ?? executeAsk;
@@ -110,19 +114,33 @@ export function createEmailService(options: {
     if (!allowed.includes(resolved.role)) throw new EmailRepositoryError('forbidden', 'Email scope role may not perform this operation');
     return resolved;
   };
-  const active = async (actor: EmailActor) => {
+  const active = async (actor: EmailActor, connectorKey: string) => {
     await access(actor);
-    const connector = await connectors.find(actor.scopeKey);
-    if (!connector || connector.organizationKey !== actor.organizationKey) return null;
+    let connector = await connectors.getExact(actor.organizationKey, actor.scopeKey, connectorKey);
+    if (!connector || connector.status === 'revoked' || connector.syncEnabled === false) return null;
     let credentials = connectors.credentials(connector);
     if (new Date(credentials.expiresAt).getTime() <= Date.now() + 60_000) {
-      credentials = await refreshGmailCredentials(credentials);
-      await connectors.updateCredentials(connector, credentials);
+      credentials = await refreshCredentials(credentials);
+      const updated = await connectors.updateCredentials(connector, credentials);
+      if (!updated) throw new EmailRepositoryError('conflict', 'Gmail connector changed while refreshing credentials');
+      connector = updated;
     }
     return { connector, credentials, gmail: clientFactory(credentials.accessToken) };
   };
+  const resolveComposeConnector = async (actor: EmailActor, connectorKey?: string) => {
+    const available = await connectors.listAuthorizedScope(actor.organizationKey, actor.scopeKey);
+    const activeConnectors = available.filter((connector) => connector.status !== 'revoked' && connector.syncEnabled !== false);
+    if (connectorKey) {
+      const connector = activeConnectors.find(({ key }) => key === connectorKey);
+      if (!connector) throw new EmailRepositoryError('not_found', 'Gmail connector is not active in this scope');
+      return connector;
+    }
+    if (activeConnectors.length === 1) return activeConnectors[0]!;
+    if (activeConnectors.length === 0) throw new EmailRepositoryError('not_found', 'No connected Gmail account');
+    throw new EmailRepositoryError('conflict', 'connectorKey is required when multiple Gmail accounts are connected');
+  };
   const fullThread = async (actor: EmailActor, threadKey: string) => {
-    const detail = await repository.thread(actor.scopeKey, threadKey);
+    let detail = await repository.thread(actor.scopeKey, threadKey);
     return { thread: withoutEmbedding(detail.thread), messages: detail.messages.map(publicMessage) };
   };
   const boundedThread = async (actor: EmailActor, threadKey: string, cursor?: string) => {
@@ -152,11 +170,13 @@ export function createEmailService(options: {
     await mutate(actor, ['owner', 'admin', 'moderator']);
     const detail = await repository.thread(actor.scopeKey, threadKey);
     if (detail.thread.unread) {
-      const connection = await active(actor);
+      const connection = await active(actor, detail.thread.accountKey);
       if (connection) await connection.gmail.modifyThread(detail.thread.providerThreadId, [], ['UNREAD']);
       try {
-        await repository.markThreadRead(actor.scopeKey, threadKey);
+        await repository.markThreadRead(actor.scopeKey, threadKey, detail.thread.updatedAt);
       } catch (error) {
+        const current = await repository.thread(actor.scopeKey, threadKey);
+        if (!current.thread.unread) return current;
         if (connection) await connection.gmail.modifyThread(detail.thread.providerThreadId, ['UNREAD'], []).catch(() => undefined);
         throw error;
       }
@@ -179,17 +199,19 @@ export function createEmailService(options: {
 
   return {
     access,
-    async overview(actor: EmailActor, input: { filter?: 'all' | 'important' | 'urgent' | 'needs_action' | 'filtered' | 'unread' | 'favorite'; search?: string; cursor?: string; limit?: number }) {
+    async overview(actor: EmailActor, input: { connectorKey?: string; filter?: 'all' | 'important' | 'urgent' | 'needs_action' | 'filtered' | 'unread' | 'favorite'; search?: string; cursor?: string; limit?: number }) {
       await access(actor);
-      const result = await repository.overview(actor.scopeKey, input.filter, input.search, input.cursor, input.limit ?? 50);
-      const drafts = await repository.listDrafts(actor.scopeKey);
-      const connector = await connectors.find(actor.scopeKey);
-      const visibleConnector = connector && connector.organizationKey === actor.organizationKey ? connectorPublic(connector) : null;
-      return { ...result, account: visibleConnector, threads: result.threads.map(withoutEmbedding), drafts: drafts.map(withoutEmbedding), connector: visibleConnector };
+      const accounts = (await connectors.listAuthorizedScope(actor.organizationKey, actor.scopeKey)).map(connectorPublic);
+      if (!input.connectorKey) return { accounts, selectedAccount: null, threads: [], drafts: [], unassignedDrafts: (await repository.listUnassignedDrafts(actor.scopeKey)).map(withoutEmbedding), nextCursor: null, counts: emptyOverviewCounts };
+      const selected = accounts.find(({ key }) => key === input.connectorKey);
+      if (!selected) throw new EmailRepositoryError('not_found', 'Gmail connector is not available in this scope');
+      const result = await repository.overview(actor.scopeKey, selected.key, input.filter, input.search, input.cursor, input.limit ?? 50);
+      const drafts = await repository.listDrafts(actor.scopeKey, selected.key);
+      return { ...result, accounts, selectedAccount: selected, threads: result.threads.map(withoutEmbedding), drafts: drafts.map(withoutEmbedding) };
     },
-    async sync(actor: EmailActor) {
+    async sync(actor: EmailActor, connectorKey: string) {
       await mutate(actor, ['owner', 'admin', 'moderator']);
-      const connection = await active(actor);
+      const connection = await active(actor, connectorKey);
       if (!connection) throw new EmailRepositoryError('not_found', 'No connected Gmail account');
       const profile = await connection.gmail.profile();
       const account = connection.connector;
@@ -318,11 +340,11 @@ export function createEmailService(options: {
         await connectors.releaseSync(account.key, leaseToken);
       }
     },
-    async subscribe(actor: EmailActor) {
+    async subscribe(actor: EmailActor, connectorKey: string) {
       await mutate(actor, ['owner', 'admin', 'moderator']);
       const topic = watchTopic();
       if (!topic) throw new Error('GMAIL_PUBSUB_TOPIC is not configured');
-      const connection = await active(actor);
+      const connection = await active(actor, connectorKey);
       if (!connection) throw new EmailRepositoryError('not_found', 'No connected Gmail account');
       const watch = await connection.gmail.watch(topic);
       await connectors.updateWatch(connection.connector.key, watch);
@@ -371,9 +393,9 @@ export function createEmailService(options: {
       await publishInboxChanged(actor.scopeKey);
       return draft;
     },
-    async draftNew(actor: EmailActor, input: { to: string[]; cc?: string[]; bcc?: string[]; subject: string; tone: 'concise' | 'warm' | 'formal' | 'direct'; instruction?: string; attachments?: EmailAttachmentRef[] }) {
+    async draftNew(actor: EmailActor, input: { connectorKey?: string; to: string[]; cc?: string[]; bcc?: string[]; subject: string; tone: 'concise' | 'warm' | 'formal' | 'direct'; instruction?: string; attachments?: EmailAttachmentRef[] }) {
       await mutate(actor, ['owner', 'admin', 'moderator']);
-      const connector = await connectors.find(actor.scopeKey);
+      const connector = await resolveComposeConnector(actor, input.connectorKey);
       const profile = await repository.writingProfile?.(actor.scopeKey, undefined, input.tone, (text) => embed({ text }));
       const attachments = await repository.resolveAttachments(actor.scopeKey, emailAttachmentRefsSchema.parse(input.attachments ?? []));
       let content: string;
@@ -388,8 +410,7 @@ export function createEmailService(options: {
       } catch {
         content = input.tone === 'formal' ? 'Hello,\n\nI am writing regarding the subject above.\n\nBest regards,' : 'Hi,\n\nI wanted to get in touch about this.\n\nBest,';
       }
-      const accountKey = connector?.organizationKey === actor.organizationKey ? connector.key : actor.scopeKey;
-      const draft = withoutEmbedding(await repository.createDraft({ scopeKey: actor.scopeKey, variant: 'new', accountKey, to: input.to, cc: input.cc, bcc: input.bcc, subject: cleanSubject(input.subject), generatedContent: content, tone: input.tone, instruction: input.instruction, attachments, status: 'generated', embedding: await embed({ text: `${input.subject}\n\n${content}` }) }));
+      const draft = withoutEmbedding(await repository.createDraft({ scopeKey: actor.scopeKey, variant: 'new', accountKey: connector.key, to: input.to, cc: input.cc, bcc: input.bcc, subject: cleanSubject(input.subject), generatedContent: content, tone: input.tone, instruction: input.instruction, attachments, status: 'generated', embedding: await embed({ text: `${input.subject}\n\n${content}` }) }));
       await publishInboxChanged(actor.scopeKey);
       return draft;
     },
@@ -403,44 +424,63 @@ export function createEmailService(options: {
       await publishInboxChanged(actor.scopeKey);
       return draft;
     },
-    async sendDraft(actor: EmailActor, draftKey: string) {
+    async assignDraft(actor: EmailActor, input: { draftKey: string; connectorKey: string }) {
       await mutate(actor, ['owner', 'admin', 'moderator']);
-      const connection = await active(actor);
-      if (!connection) throw new EmailRepositoryError('not_found', 'No connected Gmail account');
-      const draft = await repository.claimDraft(actor.scopeKey, draftKey);
-      if (!draft.sendLeaseToken) throw new EmailRepositoryError('conflict', 'Draft send lease was not established');
+      const connector = await resolveComposeConnector(actor, input.connectorKey);
+      const draft = withoutEmbedding(await repository.assignDraftConnector(actor.scopeKey, input.draftKey, connector.key));
+      await publishInboxChanged(actor.scopeKey);
+      return draft;
+    },
+    async sendDraft(actor: EmailActor, draftKey: string, connectorKey?: string) {
+      await mutate(actor, ['owner', 'admin', 'moderator']);
+      let persistedDraft = await repository.getDraft(actor.scopeKey, draftKey);
+      if (persistedDraft.variant === 'new' && persistedDraft.accountKey === actor.scopeKey) {
+        const connector = await resolveComposeConnector(actor, connectorKey);
+        persistedDraft = await repository.assignDraftConnector(actor.scopeKey, persistedDraft.key, connector.key);
+      } else if (connectorKey && (persistedDraft.variant !== 'new' || persistedDraft.accountKey !== connectorKey)) {
+        throw new EmailRepositoryError('conflict', 'Draft already belongs to another Gmail inbox');
+      }
+      const accountKey = persistedDraft.variant === 'new' ? persistedDraft.accountKey : (await repository.thread(actor.scopeKey, persistedDraft.threadKey)).thread.accountKey;
+      const connectorSendLeaseToken = randomUUID();
+      if (!await connectors.claimSend(accountKey, connectorSendLeaseToken, new Date(Date.now() + CONNECTOR_SEND_LEASE_MS).toISOString())) throw new EmailRepositoryError('conflict', 'Gmail inbox is disconnecting or another send is in progress');
+      let draft: Awaited<ReturnType<EmailRepository['claimDraft']>> | undefined;
       let providerSent = false;
       let attemptedSend = false;
       try {
-        if (draft.variant === 'new') {
-          const subject = safeHeader(draft.subject);
-          const outboundMessageId = `<vorinthex-${draft.key}@vorinthex.com>`;
-          const attachments = await loadAttachments(actor, draft.attachments);
-          const raw = rawEmail([`From: ${connection.connector.email}`, `To: ${draft.to.map(safeHeader).join(', ')}`, ...(draft.cc?.length ? [`Cc: ${draft.cc.map(safeHeader).join(', ')}`] : []), ...(draft.bcc?.length ? [`Bcc: ${draft.bcc.map(safeHeader).join(', ')}`] : []), `Subject: ${subject}`, `Message-ID: ${outboundMessageId}`], draft.finalContent ?? draft.generatedContent, attachments);
+        const connection = await active(actor, accountKey);
+        if (!connection) throw new EmailRepositoryError('not_found', 'No connected Gmail account');
+        const claimedDraft = await repository.claimDraft(actor.scopeKey, draftKey);
+        draft = claimedDraft;
+        if (!claimedDraft.sendLeaseToken) throw new EmailRepositoryError('conflict', 'Draft send lease was not established');
+        if (claimedDraft.variant === 'new') {
+          const subject = safeHeader(claimedDraft.subject);
+          const outboundMessageId = `<vorinthex-${claimedDraft.key}@vorinthex.com>`;
+          const attachments = await loadAttachments(actor, claimedDraft.attachments);
+          const raw = rawEmail([`From: ${connection.connector.email}`, `To: ${claimedDraft.to.map(safeHeader).join(', ')}`, ...(claimedDraft.cc?.length ? [`Cc: ${claimedDraft.cc.map(safeHeader).join(', ')}`] : []), ...(claimedDraft.bcc?.length ? [`Bcc: ${claimedDraft.bcc.map(safeHeader).join(', ')}`] : []), `Subject: ${subject}`, `Message-ID: ${outboundMessageId}`], claimedDraft.finalContent ?? claimedDraft.generatedContent, attachments);
           const existing = await connection.gmail.findMessageByRfc822Id(outboundMessageId);
-          if (!await repository.renewDraftLease(draft.key, draft.sendLeaseToken)) throw new EmailRepositoryError('conflict', 'Draft send lease was lost');
+          if (!await repository.renewDraftLease(claimedDraft.key, claimedDraft.sendLeaseToken) || !await connectors.renewSend(accountKey, connectorSendLeaseToken, new Date(Date.now() + CONNECTOR_SEND_LEASE_MS).toISOString())) throw new EmailRepositoryError('conflict', 'Email send lease was lost');
           attemptedSend = !existing;
           const sent = existing ?? await connection.gmail.sendRaw(raw);
           providerSent = true;
-          await repository.finishDraft(draft.key, draft.sendLeaseToken, true, sent.id).catch(() => undefined);
+          await repository.finishDraft(claimedDraft.key, claimedDraft.sendLeaseToken, true, sent.id).catch(() => undefined);
           const sentAt = new Date().toISOString();
-          const body = draft.finalContent ?? draft.generatedContent;
+          const body = claimedDraft.finalContent ?? claimedDraft.generatedContent;
           let threadKey: string | undefined;
           try {
             const saved = await repository.syncThread({
               thread: { scopeKey: actor.scopeKey, accountKey: connection.connector.key, providerThreadId: sent.threadId, subject, summary: summary(body), intent: 'Awaiting a response', priority: 'normal', state: 'waiting', category: 'primary', snippet: summary(body), unread: false, starred: false, labels: ['SENT'], latestFrom: connection.connector.email, inInbox: false, lastMessageAt: sentAt, embedding: await embed({ text: boundedEmbeddingText(`${subject}\n\n${summary(body)}\n\nAwaiting a response`) }), embeddingContentVersion: 2, isFavorite: false },
-              messages: [{ scopeKey: actor.scopeKey, accountKey: connection.connector.key, providerMessageId: sent.id, from: connection.connector.email, to: draft.to, cc: draft.cc, bcc: draft.bcc, subject, body, summary: summary(body), direction: 'outbound', sentAt, hasAttachments: Boolean(draft.attachments?.length), attachments: draft.attachments, labels: ['SENT'], unread: false, messageIdHeader: outboundMessageId, replyDepth: 0, embedding: await embed({ text: boundedEmbeddingText(`${subject}\n\n${body}\n\n${summary(body)}`) }), embeddingContentVersion: 2 }],
+              messages: [{ scopeKey: actor.scopeKey, accountKey: connection.connector.key, providerMessageId: sent.id, from: connection.connector.email, to: claimedDraft.to, cc: claimedDraft.cc, bcc: claimedDraft.bcc, subject, body, summary: summary(body), direction: 'outbound', sentAt, hasAttachments: Boolean(claimedDraft.attachments?.length), attachments: claimedDraft.attachments, labels: ['SENT'], unread: false, messageIdHeader: outboundMessageId, replyDepth: 0, embedding: await embed({ text: boundedEmbeddingText(`${subject}\n\n${body}\n\n${summary(body)}`) }), embeddingContentVersion: 2 }],
               reconcileMessages: false,
             });
             threadKey = saved.key;
           } catch { /* Gmail accepted the message; the next sync repairs local state. */ }
           await publishInboxChanged(actor.scopeKey);
-          return { sent: true, providerMessageId: sent.id, draftKey: draft.key, ...(threadKey ? { threadKey } : {}) };
+          return { sent: true, providerMessageId: sent.id, draftKey: claimedDraft.key, ...(threadKey ? { threadKey } : {}) };
         }
-        const detail = await repository.thread(actor.scopeKey, draft.threadKey);
+        const detail = await repository.thread(actor.scopeKey, claimedDraft.threadKey);
         const latest = detail.messages.at(-1);
         if (!latest) throw new EmailRepositoryError('not_found');
-        const source = detail.messages.find((message) => message.key === draft.messageKey);
+        const source = detail.messages.find((message) => message.key === claimedDraft.messageKey);
         if (!source) throw new EmailRepositoryError('not_found', 'Draft source message no longer exists');
         if (latest.key !== source.key) throw new EmailRepositoryError('conflict', 'A newer message arrived; review a new draft before sending');
         const recipient = source.direction === 'inbound' ? source.replyTo ?? source.from : source.to[0];
@@ -448,22 +488,22 @@ export function createEmailService(options: {
         const subject = safeHeader(/^re:/i.test(detail.thread.subject) ? detail.thread.subject : `Re: ${detail.thread.subject}`);
         const parentMessageId = messageId(source.messageIdHeader ?? '');
         const references = [...(source.references ?? []).map(messageId), parentMessageId].filter((value): value is string => Boolean(value)).join(' ');
-        const outboundMessageId = `<vorinthex-${draft.key}@vorinthex.com>`;
+        const outboundMessageId = `<vorinthex-${claimedDraft.key}@vorinthex.com>`;
         const headers = [
           `From: ${connection.connector.email}`, `To: ${recipient}`, `Subject: ${subject}`,
           `Message-ID: ${outboundMessageId}`,
           ...(parentMessageId ? [`In-Reply-To: ${parentMessageId}`] : []), ...(references ? [`References: ${references}`] : []),
         ];
-        const attachments = await loadAttachments(actor, draft.attachments);
-        const raw = rawEmail(headers, draft.finalContent ?? draft.generatedContent, attachments);
+        const attachments = await loadAttachments(actor, claimedDraft.attachments);
+        const raw = rawEmail(headers, claimedDraft.finalContent ?? claimedDraft.generatedContent, attachments);
         const existing = await connection.gmail.findMessageByRfc822Id(outboundMessageId);
-        if (!await repository.renewDraftLease(draft.key, draft.sendLeaseToken)) throw new EmailRepositoryError('conflict', 'Draft send lease was lost');
+        if (!await repository.renewDraftLease(claimedDraft.key, claimedDraft.sendLeaseToken) || !await connectors.renewSend(accountKey, connectorSendLeaseToken, new Date(Date.now() + CONNECTOR_SEND_LEASE_MS).toISOString())) throw new EmailRepositoryError('conflict', 'Email send lease was lost');
         attemptedSend = !existing;
         const sent = existing ?? await connection.gmail.sendRaw(raw, detail.thread.providerThreadId);
         providerSent = true;
-        await repository.finishDraft(draft.key, draft.sendLeaseToken, true, sent.id).catch(() => undefined);
+        await repository.finishDraft(claimedDraft.key, claimedDraft.sendLeaseToken, true, sent.id).catch(() => undefined);
         const sentAt = new Date().toISOString();
-        const body = draft.finalContent ?? draft.generatedContent;
+        const body = claimedDraft.finalContent ?? claimedDraft.generatedContent;
         try {
           await repository.syncThread({
             thread: {
@@ -475,7 +515,7 @@ export function createEmailService(options: {
             messages: [{
               scopeKey: actor.scopeKey, accountKey: detail.thread.accountKey, providerMessageId: sent.id,
               from: connection.connector.email, to: [recipient], subject, body, summary: summary(body), direction: 'outbound', sentAt,
-              hasAttachments: Boolean(draft.attachments?.length), attachments: draft.attachments, labels: ['SENT'], unread: false, messageIdHeader: outboundMessageId, inReplyTo: parentMessageId,
+              hasAttachments: Boolean(claimedDraft.attachments?.length), attachments: claimedDraft.attachments, labels: ['SENT'], unread: false, messageIdHeader: outboundMessageId, inReplyTo: parentMessageId,
               parentMessageId, replyDepth: source.replyDepth + 1, references: references ? references.split(' ') : [], embedding: await embed({ text: boundedEmbeddingText(buildEmbeddingText(emailMessagesEmbeddingFields, { subject, body, summary: summary(body) })!) }), embeddingContentVersion: 2,
             }],
             reconcileMessages: false,
@@ -485,21 +525,17 @@ export function createEmailService(options: {
         return { sent: true, providerMessageId: sent.id, threadKey: detail.thread.key };
       } catch (error) {
         const definitelyRejected = error instanceof GmailApiError && error.status >= 400 && error.status < 500;
-        if (!providerSent && (!attemptedSend || definitelyRejected)) await repository.finishDraft(draft.key, draft.sendLeaseToken, false);
+        if (draft?.sendLeaseToken && !providerSent && (!attemptedSend || definitelyRejected)) await repository.finishDraft(draft.key, draft.sendLeaseToken, false);
         throw error;
+      } finally {
+        await connectors.releaseSend(accountKey, connectorSendLeaseToken).catch(() => undefined);
       }
     },
-    async disconnect(actor: EmailActor) {
+    async disconnect(actor: EmailActor, connectorKey: string) {
       await mutate(actor, ['owner', 'admin']);
-      const connector = await connectors.find(actor.scopeKey);
-      if (!connector || connector.organizationKey !== actor.organizationKey) return { disconnected: true };
-      try {
-        const credentials = connectors.credentials(connector);
-        await clientFactory(credentials.accessToken).stop().catch(() => undefined);
-        await clientFactory(credentials.refreshToken ?? credentials.accessToken).revoke();
-      } catch { /* Local revocation must still succeed if Google is unavailable. */ }
-      await connectors.disableScope(actor.scopeKey);
-      await connectors.revoke(connector.key);
+      const connector = await connectors.getExact(actor.organizationKey, actor.scopeKey, connectorKey);
+      if (!connector || connector.status === 'revoked') return { disconnected: true };
+      if (!await connectors.revoke(connector.key, connector.updatedAt)) throw new EmailRepositoryError('conflict', 'Gmail connector changed while disconnecting');
       await publishInboxChanged(actor.scopeKey);
       return { disconnected: true };
     },

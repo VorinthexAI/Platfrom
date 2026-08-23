@@ -37,17 +37,42 @@ describe('mail overview cursor pagination', () => {
     const calls: Array<{ query: string; bindVars: Record<string, any> }> = [];
     const database = { query: async (query: string, bindVars: Record<string, any>) => { calls.push({ query, bindVars }); return { next: async () => ({ documents: calls.length === 1 ? documents.map(({ key, ...document }) => ({ ...document, _key: key })) : [], counts: { all: 51, important: 0, urgent: 0, needsAction: 51, filtered: 0, unread: 0, favorite: 0 } }) }; }, collection: () => ({}) };
     const repository = createEmailRepository(database as never);
-    const first = await repository.overview(scopeKey, 'all', '  PLAN  ');
+    const first = await repository.overview(scopeKey, documentKey, 'all', '  PLAN  ');
     expect(first.threads).toHaveLength(50);
     expect(first.nextCursor).toBeString();
     expect(first.counts).toMatchObject({ all: 51, needsAction: 51 });
-    expect(calls[0]?.bindVars).toMatchObject({ scopeKey, filter: 'all', search: 'plan', pageSize: 51 });
+    expect(calls[0]?.bindVars).toMatchObject({ scopeKey, connectorKey: documentKey, filter: 'all', search: 'plan', pageSize: 51 });
     expect(calls[0]?.query).toContain('LIMIT @pageSize');
-    await repository.overview(scopeKey, 'all', 'plan', first.nextCursor!);
-    expect(calls[1]?.bindVars.after).toMatchObject({ scopeKey, filter: 'all', search: 'plan', key: first.threads.at(-1)!.key });
-    await expect(repository.overview(scopeKey, 'urgent', 'plan', first.nextCursor!)).rejects.toThrow('another scope or query');
-    await expect(repository.overview(newId(), 'all', 'plan', first.nextCursor!)).rejects.toThrow('another scope or query');
-    await expect(repository.overview(scopeKey, 'all', 'different', first.nextCursor!)).rejects.toThrow('another scope or query');
+    await repository.overview(scopeKey, documentKey, 'all', 'plan', first.nextCursor!);
+    expect(calls[1]?.bindVars.after).toMatchObject({ scopeKey, connectorKey: documentKey, filter: 'all', search: 'plan', key: first.threads.at(-1)!.key });
+    await expect(repository.overview(scopeKey, documentKey, 'urgent', 'plan', first.nextCursor!)).rejects.toThrow('another connector, scope, or query');
+    await expect(repository.overview(newId(), documentKey, 'all', 'plan', first.nextCursor!)).rejects.toThrow('another connector, scope, or query');
+    await expect(repository.overview(scopeKey, newId(), 'all', 'plan', first.nextCursor!)).rejects.toThrow('another connector, scope, or query');
+    await expect(repository.overview(scopeKey, documentKey, 'all', 'different', first.nextCursor!)).rejects.toThrow('another connector, scope, or query');
+  });
+});
+
+describe('mail thread mutation concurrency', () => {
+  test('binds mark-read to the observed thread update timestamp', async () => {
+    let call: { query: string; bindVars: Record<string, unknown> } | undefined;
+    const database = { query: async (query: string, bindVars: Record<string, unknown>) => { call = { query, bindVars }; return { next: async () => null }; }, collection: () => ({}) };
+    const repository = createEmailRepository(database as never);
+    await expect(repository.markThreadRead(scopeKey, documentKey, '2026-08-23T12:00:00.000Z')).rejects.toThrow('changed while marking it read');
+    expect(call?.query).toContain('document.updatedAt == @expectedUpdatedAt');
+    expect(call?.query).toContain('payload.data.unread == true');
+    expect(call?.bindVars).toMatchObject({ scopeKey, threadKey: documentKey, expectedUpdatedAt: '2026-08-23T12:00:00.000Z' });
+  });
+});
+
+describe('legacy draft assignment', () => {
+  test('idempotently updates only editable unassigned new drafts', async () => {
+    let query = '';
+    const database = { query: async (value: string) => { query = value; return { next: async () => null }; }, collection: () => ({}) };
+    const repository = createEmailRepository(database as never);
+    await expect(repository.assignDraftConnector(scopeKey, documentKey, newId())).rejects.toThrow('could not be assigned');
+    expect(query).toContain('payload.kind == "mail-new-draft"');
+    expect(query).toContain('payload.data.accountKey IN [@scopeKey, @connectorKey]');
+    expect(query).toContain('payload.data.status IN ["generated", "edited"]');
   });
 });
 

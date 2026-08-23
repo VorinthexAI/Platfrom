@@ -145,10 +145,11 @@ export function removeCachedCompassTrip(queryClient: QueryClient, context: Works
 export const signalQueryKeys = {
   all: (context: WorkspaceContext) => ["signal", ...contextKey(context)] as const,
   overviews: (context: WorkspaceContext) => [...signalQueryKeys.all(context), "overviews"] as const,
-  overview: (context: WorkspaceContext, filter: EmailFilter = "all", search?: string) => [...signalQueryKeys.overviews(context), filter, search?.trim() || null] as const,
-  overviewPage: (context: WorkspaceContext, filter: EmailFilter = "all", search?: string, cursor?: string) => [...signalQueryKeys.overview(context, filter, search), "pages", cursor ?? null] as const,
+  accountOverviews: (context: WorkspaceContext, connectorKey?: string) => [...signalQueryKeys.overviews(context), connectorKey ?? null] as const,
+  overview: (context: WorkspaceContext, connectorKey?: string, filter: EmailFilter = "all", search?: string) => [...signalQueryKeys.accountOverviews(context, connectorKey), filter, search?.trim() || null] as const,
+  overviewPage: (context: WorkspaceContext, connectorKey: string | undefined, filter: EmailFilter = "all", search?: string, cursor?: string) => [...signalQueryKeys.overview(context, connectorKey, filter, search), "pages", cursor ?? null] as const,
   details: (context: WorkspaceContext) => [...signalQueryKeys.all(context), "details"] as const,
-  detail: (context: WorkspaceContext, threadKey: string) => [...signalQueryKeys.details(context), threadKey] as const,
+  detail: (context: WorkspaceContext, connectorKey: string | undefined, threadKey: string) => [...signalQueryKeys.details(context), connectorKey ?? null, threadKey] as const,
   tones: (context: WorkspaceContext) => [...signalQueryKeys.all(context), "tones"] as const,
 };
 
@@ -254,12 +255,12 @@ export function removeCachedGalleryImages(queryClient: QueryClient, context: Wor
   }
 }
 
-export function patchSignalThread(queryClient: QueryClient, context: WorkspaceContext, thread: EmailThread) {
-  queryClient.setQueriesData<EmailOverview>({ queryKey: signalQueryKeys.overviews(context) }, (overview) => overview ? {
+export function patchSignalThread(queryClient: QueryClient, context: WorkspaceContext, connectorKey: string, thread: EmailThread) {
+  queryClient.setQueriesData<EmailOverview>({ queryKey: signalQueryKeys.accountOverviews(context, connectorKey) }, (overview) => overview ? {
     ...overview,
     threads: overview.threads.map((candidate) => candidate.key === thread.key ? thread : candidate),
   } : overview);
-  queryClient.setQueryData<{ thread: EmailThread; messages: unknown[] }>(signalQueryKeys.detail(context, thread.key), (detail) => detail ? { ...detail, thread } : detail);
+  queryClient.setQueryData<{ thread: EmailThread; messages: unknown[] }>(signalQueryKeys.detail(context, connectorKey, thread.key), (detail) => detail ? { ...detail, thread } : detail);
 }
 
 export function addCachedBook(queryClient: QueryClient, context: WorkspaceContext, book: Book) {

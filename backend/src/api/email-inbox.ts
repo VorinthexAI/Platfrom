@@ -9,6 +9,7 @@ import { emailAttachmentRefsSchema } from '@/lib/email-inbox/archive-payloads';
 
 const contextSchema = strictObject({ organizationKey: z.string().trim().min(1).max(160), scopeKey: z.string().cuid() });
 const threadKeySchema = z.string().cuid();
+const connectorKeySchema = z.string().cuid();
 class EmailHttpError extends Error { constructor(readonly status: 400 | 401 | 403 | 404 | 409 | 503, readonly code: string, message: string) { super(message); } }
 
 export function createEmailHandlers(options: { service?: EmailService; oauth?: EmailOAuthService; getIdentity?: typeof getAuthIdentity } = {}) {
@@ -41,8 +42,8 @@ export function createEmailHandlers(options: { service?: EmailService; oauth?: E
   };
   return {
     overview: run(async (c) => {
-      const body = strictObject({ ...contextSchema.shape, filter: z.enum(['all', 'important', 'urgent', 'needs_action', 'filtered', 'unread', 'favorite']).optional(), search: z.string().trim().max(200).optional(), cursor: z.string().min(1).max(2_000).optional(), limit: z.number().int().min(1).max(50).optional() }).parse(await c.req.json());
-      return service.overview(await actor(c, body), { filter: body.filter, search: body.search, cursor: body.cursor, limit: body.limit });
+      const body = strictObject({ ...contextSchema.shape, connectorKey: connectorKeySchema.optional(), filter: z.enum(['all', 'important', 'urgent', 'needs_action', 'filtered', 'unread', 'favorite']).optional(), search: z.string().trim().max(200).optional(), cursor: z.string().min(1).max(2_000).optional(), limit: z.number().int().min(1).max(50).optional() }).parse(await c.req.json());
+      return service.overview(await actor(c, body), { connectorKey: body.connectorKey, filter: body.filter, search: body.search, cursor: body.cursor, limit: body.limit });
     }),
     startConnect: run(async (c) => {
       const body = strictObject({ ...contextSchema.shape, returnUri: z.string().url() }).parse(await c.req.json());
@@ -66,8 +67,8 @@ export function createEmailHandlers(options: { service?: EmailService; oauth?: E
       if (!result) throw new EmailHttpError(401, 'EMAIL_GRANT_INVALID', 'Email connection grant is invalid or expired.');
       return result;
     }),
-    sync: run(async (c) => { const body = contextSchema.parse(await c.req.json()); return service.sync(await actor(c, body)); }),
-    subscribe: run(async (c) => { const body = contextSchema.parse(await c.req.json()); return service.subscribe(await actor(c, body)); }),
+    sync: run(async (c) => { const body = strictObject({ ...contextSchema.shape, connectorKey: connectorKeySchema }).parse(await c.req.json()); return service.sync(await actor(c, body), body.connectorKey); }),
+    subscribe: run(async (c) => { const body = strictObject({ ...contextSchema.shape, connectorKey: connectorKeySchema }).parse(await c.req.json()); return service.subscribe(await actor(c, body), body.connectorKey); }),
     thread: run(async (c) => { const body = strictObject({ ...contextSchema.shape, markRead: z.boolean().optional() }).parse(await c.req.json()); const current = await actor(c, body); const threadKey = threadKeySchema.parse(c.req.param('threadKey')); return service.threadForHttp(current, threadKey, body.markRead !== false); }),
     favorite: run(async (c) => { const body = strictObject({ ...contextSchema.shape, isFavorite: z.boolean() }).parse(await c.req.json()); return service.setFavorite(await actor(c, body), threadKeySchema.parse(c.req.param('threadKey')), body.isFavorite); }),
     draft: run(async (c) => {
@@ -76,14 +77,15 @@ export function createEmailHandlers(options: { service?: EmailService; oauth?: E
       return service.draft(await actor(c, body), input);
     }, 201),
     draftNew: run(async (c) => {
-      const body = strictObject({ ...contextSchema.shape, to: z.array(z.string().email()).min(1).max(50), cc: z.array(z.string().email()).max(50).optional(), bcc: z.array(z.string().email()).max(50).optional(), subject: z.string().trim().min(1).max(998), tone: z.enum(['concise', 'warm', 'formal', 'direct']), instruction: z.string().trim().max(1000).optional(), attachments: emailAttachmentRefsSchema.optional() }).parse(await c.req.json());
+      const body = strictObject({ ...contextSchema.shape, connectorKey: connectorKeySchema.optional(), to: z.array(z.string().email()).min(1).max(50), cc: z.array(z.string().email()).max(50).optional(), bcc: z.array(z.string().email()).max(50).optional(), subject: z.string().trim().min(1).max(998), tone: z.enum(['concise', 'warm', 'formal', 'direct']), instruction: z.string().trim().max(1000).optional(), attachments: emailAttachmentRefsSchema.optional() }).parse(await c.req.json());
       const { organizationKey: _organizationKey, scopeKey: _scopeKey, ...input } = body;
       return service.draftNew(await actor(c, body), input);
     }, 201),
     tones: run(async (c) => { const body = contextSchema.parse(await c.req.json()); return service.tones(await actor(c, body)); }),
     updateDraft: run(async (c) => { const body = strictObject({ ...contextSchema.shape, finalContent: z.string().trim().min(1).max(50_000) }).parse(await c.req.json()); return service.updateDraft(await actor(c, body), z.string().cuid().parse(c.req.param('draftKey')), body.finalContent); }),
-    sendDraft: run(async (c) => { const body = contextSchema.parse(await c.req.json()); return service.sendDraft(await actor(c, body), z.string().cuid().parse(c.req.param('draftKey'))); }),
-    disconnect: run(async (c) => { const body = contextSchema.parse(await c.req.json()); return service.disconnect(await actor(c, body)); }),
+    assignDraft: run(async (c) => { const body = strictObject({ ...contextSchema.shape, connectorKey: connectorKeySchema }).parse(await c.req.json()); return service.assignDraft(await actor(c, body), { draftKey: z.string().cuid().parse(c.req.param('draftKey')), connectorKey: body.connectorKey }); }),
+    sendDraft: run(async (c) => { const body = strictObject({ ...contextSchema.shape, connectorKey: connectorKeySchema.optional() }).parse(await c.req.json()); return service.sendDraft(await actor(c, body), z.string().cuid().parse(c.req.param('draftKey')), body.connectorKey); }),
+    disconnect: run(async (c) => { const body = strictObject({ ...contextSchema.shape, connectorKey: connectorKeySchema }).parse(await c.req.json()); return service.disconnect(await actor(c, body), body.connectorKey); }),
   };
 }
 

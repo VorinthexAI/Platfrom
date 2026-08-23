@@ -32,6 +32,8 @@ export const organizationConnectorSchema = z.object({
   syncError: z.string().max(500).optional(),
   syncLeaseToken: z.string().uuid().optional(),
   syncLeaseExpiresAt: z.string().datetime().optional(),
+  sendLeaseToken: z.string().uuid().optional(),
+  sendLeaseExpiresAt: z.string().datetime().optional(),
   watchRegisteredAt: z.string().datetime().optional(),
   watchExpiresAt: z.string().datetime().optional(),
   lastRefreshedAt: z.string().datetime().optional(),

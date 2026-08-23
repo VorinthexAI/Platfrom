@@ -6,6 +6,8 @@ describe('Gmail connector protocol', () => {
   test('builds offline PKCE consent without changing login scopes', () => {
     const url = new URL(buildGmailAuthorizationUrl({ state: 'state', nonce: 'nonce', codeChallenge: 'challenge' }, { GOOGLE_OAUTH_CLIENT_ID: 'client', GOOGLE_OAUTH_CLIENT_SECRET: 'secret', BACKEND_PUBLIC_URL: 'https://api.example.com' }));
     expect(url.searchParams.get('access_type')).toBe('offline');
+    expect(url.searchParams.get('prompt')).toBe('consent select_account');
+    expect(url.searchParams.get('include_granted_scopes')).toBe('true');
     expect(url.searchParams.get('code_challenge_method')).toBe('S256');
     expect(url.searchParams.get('scope')).toContain('gmail.modify');
     expect(url.searchParams.get('redirect_uri')).toBe('https://api.example.com/api/v1/auth/mobile/oauth/google/callback');

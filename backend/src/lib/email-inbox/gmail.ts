@@ -142,7 +142,7 @@ export function messageBodies(part: GmailPart | undefined): { text: string; html
 export function createGmailClient(accessToken: string, fetcher: typeof fetch = fetch) {
   const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
     const response = await fetcher(`https://gmail.googleapis.com/gmail/v1/users/me${path}`, {
-      ...init, headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json', ...init?.headers },
+      ...init, signal: init?.signal ?? AbortSignal.timeout(30_000), headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json', ...init?.headers },
     });
     const body = await response.json().catch(() => null);
     if (!response.ok) throw new GmailApiError(response.status);
@@ -172,7 +172,7 @@ export function createGmailClient(accessToken: string, fetcher: typeof fetch = f
     modifyThread: (id: string, addLabelIds: string[], removeLabelIds: string[]) => request(`/threads/${encodeURIComponent(id)}/modify`, { method: 'POST', body: JSON.stringify({ addLabelIds, removeLabelIds }) }),
     sendRaw: (raw: string, threadId?: string) => request<{ id: string; threadId: string }>('/messages/send', { method: 'POST', body: JSON.stringify({ raw: Buffer.from(raw).toString('base64url'), ...(threadId ? { threadId } : {}) }) }),
     async revoke() {
-      await fetcher('https://oauth2.googleapis.com/revoke', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ token: accessToken }).toString() });
+      await fetcher('https://oauth2.googleapis.com/revoke', { method: 'POST', signal: AbortSignal.timeout(30_000), headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ token: accessToken }).toString() });
     },
   };
 }

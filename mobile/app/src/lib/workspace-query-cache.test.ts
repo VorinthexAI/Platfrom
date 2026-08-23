@@ -70,9 +70,10 @@ test("isolates every routed workspace key by context and resource", () => {
   expect(compassQueryKeys.countryImage(context, "token-a")).not.toEqual(compassQueryKeys.countryImage(context, "token-b"));
   expect(compassQueryKeys.cityDetail(context, "ES", "Valencia")).not.toEqual(compassQueryKeys.cityDetail(context, "VE", "Valencia"));
   expect(compassQueryKeys.cityImage(context, "ES", "Valencia", "token-a")).not.toEqual(compassQueryKeys.cityImage(context, "ES", "Valencia", "token-b"));
-  expect(signalQueryKeys.overview(context, "all")).not.toEqual(signalQueryKeys.overview(context, "favorite"));
-  expect(signalQueryKeys.overviewPage(context, "all", undefined, "cursor-a")).not.toEqual(signalQueryKeys.overviewPage(context, "all", undefined, "cursor-b"));
-  expect(signalQueryKeys.detail(context, "thread-a")).not.toEqual(signalQueryKeys.detail(context, "thread-b"));
+  expect(signalQueryKeys.overview(context, "connector-a", "all")).not.toEqual(signalQueryKeys.overview(context, "connector-b", "all"));
+  expect(signalQueryKeys.overview(context)).toEqual([...signalQueryKeys.overviews(context), null, "all", null]);
+  expect(signalQueryKeys.overviewPage(context, "connector-a", "all", undefined, "cursor-a")).not.toEqual(signalQueryKeys.overviewPage(context, "connector-a", "all", undefined, "cursor-b"));
+  expect(signalQueryKeys.detail(context, "connector-a", "thread-a")).not.toEqual(signalQueryKeys.detail(context, "connector-b", "thread-a"));
   expect(signalQueryKeys.tones(context)).not.toEqual(signalQueryKeys.tones(otherContext));
   expect(ascendQueryKeys.detail(context, "book-a")).not.toEqual(ascendQueryKeys.detail(otherContext, "book-a"));
 });
@@ -251,7 +252,7 @@ test("assistant changes invalidate exact workspace prefixes without crossing con
   const galleryDetail = galleryQueryKeys.overview(context, "collection");
   const otherGallery = galleryQueryKeys.overview(otherContext);
   const signalOverview = signalQueryKeys.overview(context);
-  const signalDetail = signalQueryKeys.detail(context, "thread");
+  const signalDetail = signalQueryKeys.detail(context, "connector", "thread");
   const ascendOverview = ascendQueryKeys.overview(context);
   const compassOverview = compassQueryKeys.overview(context);
   const archiveLocation = contentQueryKeys.location(context);
@@ -274,17 +275,19 @@ test("patches Signal favorites across filtered overviews and the exact detail ca
   const at = "2026-08-23T10:00:00.000Z";
   const thread = { key: "thread", scopeKey: context.scopeKey, accountKey: "account", providerThreadId: "provider", subject: "Subject", summary: "Summary", intent: "Review", priority: "normal" as const, state: "needs_action" as const, lastMessageAt: at, isFavorite: false, createdAt: at, updatedAt: at };
   const updated = { ...thread, isFavorite: true };
-  const overview = { account: null, connector: null, threads: [thread], drafts: [], counts: { all: 1, important: 0, urgent: 0, needsAction: 1, filtered: 0, unread: 0, favorite: 0 } };
-  client.setQueryData(signalQueryKeys.overview(context), overview);
-  client.setQueryData(signalQueryKeys.overview(context, "favorite"), { ...overview, threads: [] });
-  client.setQueryData(signalQueryKeys.detail(context, thread.key), { thread, messages: [] });
+  const overview = { accounts: [], selectedAccount: null, threads: [thread], drafts: [], counts: { all: 1, important: 0, urgent: 0, needsAction: 1, filtered: 0, unread: 0, favorite: 0 }, nextCursor: null };
+  client.setQueryData(signalQueryKeys.overview(context, "connector", "all"), overview);
+  client.setQueryData(signalQueryKeys.overview(context, "connector", "favorite"), { ...overview, threads: [] });
+  client.setQueryData(signalQueryKeys.detail(context, "connector", thread.key), { thread, messages: [] });
+  client.setQueryData(signalQueryKeys.overview(context, "other-connector", "all"), overview);
   client.setQueryData(signalQueryKeys.overview(otherContext), overview);
 
-  patchSignalThread(client, context, updated);
+  patchSignalThread(client, context, "connector", updated);
 
-  expect(client.getQueryData<typeof overview>(signalQueryKeys.overview(context))?.threads[0]?.isFavorite).toBe(true);
-  expect(client.getQueryData<typeof overview>(signalQueryKeys.overview(context, "favorite"))?.threads).toEqual([]);
-  expect(client.getQueryData<{ thread: typeof updated }>(signalQueryKeys.detail(context, thread.key))?.thread.isFavorite).toBe(true);
+  expect(client.getQueryData<typeof overview>(signalQueryKeys.overview(context, "connector", "all"))?.threads[0]?.isFavorite).toBe(true);
+  expect(client.getQueryData<typeof overview>(signalQueryKeys.overview(context, "connector", "favorite"))?.threads).toEqual([]);
+  expect(client.getQueryData<{ thread: typeof updated }>(signalQueryKeys.detail(context, "connector", thread.key))?.thread.isFavorite).toBe(true);
+  expect(client.getQueryData<typeof overview>(signalQueryKeys.overview(context, "other-connector", "all"))?.threads[0]?.isFavorite).toBe(false);
   expect(client.getQueryData<typeof overview>(signalQueryKeys.overview(otherContext))?.threads[0]?.isFavorite).toBe(false);
 });
 

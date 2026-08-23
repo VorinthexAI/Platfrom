@@ -499,6 +499,7 @@ export function registerRoutes(app: Hono) {
   app.post('/email/drafts/compose', emailHandlers.draftNew);
   app.post('/email/tones/list', emailHandlers.tones);
   app.patch('/email/drafts/:draftKey', emailHandlers.updateDraft);
+  app.post('/email/drafts/:draftKey/assign', emailHandlers.assignDraft);
   app.post('/email/drafts/:draftKey/send', emailHandlers.sendDraft);
   app.post('/email/disconnect', emailHandlers.disconnect);
   app.post('/books/overview', bookHandlers.overview);

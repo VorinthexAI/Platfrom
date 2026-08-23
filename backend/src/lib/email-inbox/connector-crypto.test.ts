@@ -22,7 +22,7 @@ describe('email connector credential security', () => {
     const now = '2026-08-11T12:00:00.000Z';
     const connector = organizationConnectorSchema.parse({
       key: 'cmrnlzf650002qc7k4p5zem5w', ...binding, provider: 'gmail', email: 'person@example.com', encryptedCredentials: 'ciphertext', encryptionKeyId: 'current',
-      accessTokenFingerprint: tokenFingerprint('access-secret'), scopes: ['email'], createdByMembershipKey: 'cmrnlzf640001qc7kazsr96k5', status: 'active', syncLeaseToken: '123e4567-e89b-42d3-a456-426614174000', syncLeaseExpiresAt: now, createdAt: now, updatedAt: now,
+      accessTokenFingerprint: tokenFingerprint('access-secret'), scopes: ['email'], createdByMembershipKey: 'cmrnlzf640001qc7kazsr96k5', status: 'active', syncLeaseToken: '123e4567-e89b-42d3-a456-426614174000', syncLeaseExpiresAt: now, syncPendingHistoryId: '123', syncPendingThreadIds: ['thread'], createdAt: now, updatedAt: now,
     });
     expect(tokenFingerprint('access-secret')).toMatch(/^[a-f0-9]{64}$/);
     expect(connectorPublic(connector)).not.toHaveProperty('encryptedCredentials');
@@ -30,5 +30,13 @@ describe('email connector credential security', () => {
     expect(connectorPublic(connector)).not.toHaveProperty('accessTokenFingerprint');
     expect(connectorPublic(connector)).not.toHaveProperty('syncLeaseToken');
     expect(connectorPublic(connector)).not.toHaveProperty('syncLeaseExpiresAt');
+    expect(connectorPublic(connector)).not.toHaveProperty('createdByMembershipKey');
+    expect(connectorPublic(connector)).not.toHaveProperty('syncPendingHistoryId');
+    expect(connectorPublic(connector)).not.toHaveProperty('syncPendingThreadIds');
+    expect(connectorPublic(connector)).not.toHaveProperty('providerAccountId');
+    expect(connectorPublic(connector)).not.toHaveProperty('historyId');
+    expect(connectorPublic(connector)).not.toHaveProperty('watchExpiresAt');
+    expect(connectorPublic(connector)).not.toHaveProperty('scopes');
+    expect(connectorPublic(connector)).not.toHaveProperty('lastError');
   });
 });

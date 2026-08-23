@@ -39,13 +39,13 @@ export function createEmailOAuthService(options: {
   store?: OAuthStore; connectors?: ConnectorRepository;
   exchange?: typeof exchangeGmailCode; authorize?: (userKey: string, organizationKey: string, scopeKey: string) => Promise<{ membershipKey: string }>;
   profile?: (accessToken: string) => Promise<{ historyId: string }>;
-  subscribe?: (actor: { userKey: string; organizationKey: string; scopeKey: string }) => Promise<unknown>;
+  subscribe?: (actor: { userKey: string; organizationKey: string; scopeKey: string }, connectorKey: string) => Promise<unknown>;
 } = {}) {
   const store = options.store ?? redisStore;
   const connectors = options.connectors ?? createConnectorRepository();
   const exchange = options.exchange ?? exchangeGmailCode;
   const profile = options.profile ?? ((accessToken: string) => createGmailClient(accessToken).profile());
-  const subscribe = options.subscribe ?? (async (actor: { organizationKey: string; scopeKey: string }) => (await import('./service')).createSystemEmailService({ connectors }).subscribe({ userKey: 'system', ...actor }));
+  const subscribe = options.subscribe ?? (async (actor: { organizationKey: string; scopeKey: string }, connectorKey: string) => (await import('./service')).createSystemEmailService({ connectors }).subscribe({ userKey: 'system', ...actor }, connectorKey));
   const authorize = options.authorize ?? (async (userKey, organizationKey, scopeKey) => {
     const { membership } = await requireOrganizationAccess(userKey, organizationKey);
     await requireScopeAccess(membership, scopeKey);
@@ -76,8 +76,8 @@ export function createEmailOAuthService(options: {
         if (access.membershipKey !== state.membershipKey) throw new Error('Email authorization membership changed');
         const result = await exchange(input.code, state.verifier, state.nonce);
         const gmailProfile = await profile(result.credentials.accessToken);
-        const previous = await connectors.find(state.scopeKey);
-        if (!result.credentials.refreshToken && previous?.providerAccountId === result.identity.providerAccountId) {
+        const previous = await connectors.findExact(state.organizationKey, state.scopeKey, result.identity.providerAccountId);
+        if (!result.credentials.refreshToken && previous && previous.status !== 'revoked' && previous.encryptedCredentials !== 'revoked') {
           result.credentials.refreshToken = connectors.credentials(previous).refreshToken;
         }
         if (!result.credentials.refreshToken) throw new Error('Gmail did not issue an offline refresh token');
@@ -86,7 +86,7 @@ export function createEmailOAuthService(options: {
           providerAccountId: result.identity.providerAccountId, email: result.identity.email, scopes: result.scopes, credentials: result.credentials,
         });
         await connectors.setSyncState(connector.key, 'idle', { historyId: gmailProfile.historyId, pendingHistoryId: null, pendingThreadIds: null, resetLastSynced: true, markSynced: false });
-        await subscribe({ userKey: state.userKey, organizationKey: state.organizationKey, scopeKey: state.scopeKey }).catch(() => undefined);
+        await subscribe({ userKey: state.userKey, organizationKey: state.organizationKey, scopeKey: state.scopeKey }, connector.key).catch(() => undefined);
         const grant = token('vrtx_email_grant_');
         const payload = grantSchema.parse({ userKey: state.userKey, organizationKey: state.organizationKey, scopeKey: state.scopeKey, connectorKey: connector.key, email: connector.email });
         if (!(await store.put(`${GRANT_PREFIX}${grant}`, JSON.stringify(payload), 300))) throw new Error('Could not create email connection grant');

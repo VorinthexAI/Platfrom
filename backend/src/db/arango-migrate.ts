@@ -782,6 +782,21 @@ export async function migrateMailArchiveDocuments(targetDb: Database): Promise<v
   }
 }
 
+export async function migrateProviderIndependentEmailDrafts(targetDb: Database): Promise<void> {
+  if (!await targetDb.collection('documents').exists() || !await targetDb.collection('organizationConnectors').exists() || !await targetDb.collection('scopes').exists()) return;
+  await targetDb.query(`FOR document IN documents
+    LET payload = JSON_PARSE(document.content)
+    FILTER payload.kind == "mail-new-draft" && payload.data.accountKey == document.scopeKey && payload.data.status IN ["generated", "edited"]
+    LET scope = DOCUMENT(scopes, document.scopeKey)
+    LET connectors = (FOR connector IN organizationConnectors
+      FILTER scope != null && connector.organizationKey == scope.organizationKey && connector.scopeKey == document.scopeKey
+      FILTER connector.provider == "gmail" && connector.status != "revoked" && connector.syncEnabled != false
+      LIMIT 2 RETURN connector)
+    FILTER LENGTH(connectors) == 1
+    LET nextPayload = MERGE(payload, { data: MERGE(payload.data, { accountKey: connectors[0]._key }) })
+    UPDATE document WITH { content: JSON_STRINGIFY(nextPayload), updatedAt: MAX([document.updatedAt, @updatedAt]) } IN documents`, { updatedAt: new Date().toISOString() });
+}
+
 type TripAttachmentMigrationTransaction = <T>(operation: (transaction: Pick<Database, 'query'>) => Promise<T>) => Promise<T>;
 
 export async function migrateTripAttachments(targetDb: Database, runTransaction: TripAttachmentMigrationTransaction = (operation) => withDatabaseTransaction(targetDb, ['tripAttachments'], operation)): Promise<void> {
@@ -2080,6 +2095,7 @@ async function main() {
   await ensureOrganizationProvidersCollection(targetDb);
   await ensureOrganizationCredentialsCollection(targetDb);
   await ensureOrganizationConnectorsCollection(targetDb);
+  await migrateProviderIndependentEmailDrafts(targetDb);
   await retireTranscriptionDomain(targetDb);
   await retireAiPersistence(targetDb);
 

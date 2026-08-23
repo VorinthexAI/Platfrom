@@ -48,7 +48,7 @@ describe('email OAuth state', () => {
     const stateWrites: unknown[][] = [];
     let watchWrites = 0;
     const connectors = {
-      find: async () => null,
+      findExact: async () => null,
       upsert: async () => connector,
       getByKey: async () => connector,
       setSyncState: async (...input: unknown[]) => { stateWrites.push(input); },
@@ -56,7 +56,7 @@ describe('email OAuth state', () => {
     };
     const oauth = createEmailOAuthService({
       store, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey }), profile: async () => ({ historyId: 'history-1' }),
-      subscribe: async (actor) => { expect(actor).toEqual({ userKey, organizationKey: 'org-1', scopeKey }); watchWrites += 1; },
+      subscribe: async (actor, connectorKey) => { expect(actor).toEqual({ userKey, organizationKey: 'org-1', scopeKey }); expect(connectorKey).toBe(connector.key); watchWrites += 1; },
       exchange: async () => ({ identity: { providerAccountId: 'google-1', email: 'person@example.com' }, scopes: ['email'], credentials: { accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now } }),
     });
     const started = await oauth.start({ userKey, organizationKey: 'org-1', scopeKey, returnUri: 'vorinthexcore://capability/signal' });
@@ -68,5 +68,60 @@ describe('email OAuth state', () => {
     expect(watchWrites).toBe(1);
     expect(await oauth.exchange({ userKey, organizationKey: 'org-1', scopeKey, code })).toMatchObject({ email: 'person@example.com' });
     expect(await oauth.exchange({ userKey, organizationKey: 'org-1', scopeKey, code })).toBeNull();
+  });
+
+  test('recovers refresh tokens only from the exact provider account', async () => {
+    const now = '2026-08-11T12:00:00.000Z';
+    const previous = organizationConnectorSchema.parse({
+      key: userKey, organizationKey: 'org-1', scopeKey, provider: 'gmail', providerAccountId: 'google-2', email: 'second@example.com',
+      encryptedCredentials: 'ciphertext', encryptionKeyId: 'v1', accessTokenFingerprint: 'a'.repeat(64), scopes: ['email'], createdByMembershipKey: scopeKey,
+      status: 'active', createdAt: now, updatedAt: now,
+    });
+    let upserted: any;
+    const connectors = {
+      findExact: async (organizationKey: string, selectedScopeKey: string, providerAccountId: string) => {
+        expect({ organizationKey, selectedScopeKey, providerAccountId }).toEqual({ organizationKey: 'org-1', selectedScopeKey: scopeKey, providerAccountId: 'google-2' });
+        return previous;
+      },
+      credentials: () => ({ accessToken: 'old-access', refreshToken: 'exact-refresh', tokenType: 'Bearer', expiresAt: now }),
+      upsert: async (input: unknown) => { upserted = input; return previous; },
+      setSyncState: async () => undefined,
+      getByKey: async () => previous,
+    };
+    const oauth = createEmailOAuthService({
+      store, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey }), profile: async () => ({ historyId: 'history-2' }), subscribe: async () => undefined,
+      exchange: async () => ({ identity: { providerAccountId: 'google-2', email: 'second@example.com' }, scopes: ['email'], credentials: { accessToken: 'new-access', refreshToken: undefined, tokenType: 'Bearer', expiresAt: now } }),
+    });
+    const started = await oauth.start({ userKey, organizationKey: 'org-1', scopeKey, returnUri: 'vorinthexcore://capability/signal' });
+    const state = new URL(started.authorizationUrl).searchParams.get('state')!;
+    const redirect = new URL(await oauth.callback({ state, code: 'provider-code' }));
+    expect(redirect.searchParams.get('email_connection_code')).toStartWith('vrtx_email_grant_');
+    expect(upserted).toMatchObject({ providerAccountId: 'google-2', credentials: { accessToken: 'new-access', refreshToken: 'exact-refresh' } });
+  });
+
+  test('never decrypts revoked credentials when Google omits a refresh token', async () => {
+    const now = '2026-08-11T12:00:00.000Z';
+    const revoked = organizationConnectorSchema.parse({
+      key: userKey, organizationKey: 'org-1', scopeKey, provider: 'gmail', providerAccountId: 'google-revoked', email: 'revoked@example.com',
+      encryptedCredentials: 'revoked', encryptionKeyId: 'v1', accessTokenFingerprint: 'a'.repeat(64), scopes: ['email'], createdByMembershipKey: scopeKey,
+      status: 'revoked', revokedAt: now, createdAt: now, updatedAt: now,
+    });
+    let decrypted = false;
+    let upserted = false;
+    const connectors = {
+      findExact: async () => revoked,
+      credentials: () => { decrypted = true; throw new Error('must not decrypt'); },
+      upsert: async () => { upserted = true; return revoked; },
+    };
+    const oauth = createEmailOAuthService({
+      store, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey }), profile: async () => ({ historyId: 'history' }), subscribe: async () => undefined,
+      exchange: async () => ({ identity: { providerAccountId: 'google-revoked', email: 'revoked@example.com' }, scopes: ['email'], credentials: { accessToken: 'new-access', refreshToken: undefined, tokenType: 'Bearer', expiresAt: now } }),
+    });
+    const started = await oauth.start({ userKey, organizationKey: 'org-1', scopeKey, returnUri: 'vorinthexcore://capability/signal' });
+    const state = new URL(started.authorizationUrl).searchParams.get('state')!;
+    const redirect = new URL(await oauth.callback({ state, code: 'provider-code' }));
+    expect(redirect.searchParams.get('email_connection_error')).toBe('connection_failed');
+    expect(decrypted).toBe(false);
+    expect(upserted).toBe(false);
   });
 });

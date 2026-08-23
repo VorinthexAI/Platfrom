@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { isLegacyIndex, LEGACY_REMOVAL_MARKER, normalizeLegacyDocumentSharePermission } from './arango-migrate-indexes';
 import { stageLegacyDocumentShares } from './content-migration';
-import { collections, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateGeneratedTravelDocuments, migrateImageCaptions, migrateMinimalPlacesAndRetireTrips, migrateModelActionSlugs, migratePlaceReports, migrateTripAttachments, migrateTripCreationReceipts, migrateTripGuides, retireMomentumScope, retireTranscriptionDomain, retireUserSettings } from './arango-migrate';
+import { collections, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateGeneratedTravelDocuments, migrateImageCaptions, migrateMinimalPlacesAndRetireTrips, migrateModelActionSlugs, migratePlaceReports, migrateProviderIndependentEmailDrafts, migrateTripAttachments, migrateTripCreationReceipts, migrateTripGuides, retireMomentumScope, retireTranscriptionDomain, retireUserSettings } from './arango-migrate';
 import { EMBEDDING_DIMENSIONS, LEGACY_EMBEDDING_DIMENSIONS, embeddingMetadata } from '../lib/embeddings';
 import { DOCUMENT_CHUNK_MAX_WORDS, DOCUMENT_MAX_CHUNKS, documentSemanticHash } from '../lib/ai/document-processing/chunking';
 import { RETAINED_MODEL_ACTION_BINDINGS, RETAINED_MODEL_PROVIDER_BINDINGS, RETAINED_MODEL_SLUGS, RETAINED_PROVIDER_SLUGS, retireAiPersistence } from './retire-ai-persistence';
@@ -259,6 +259,11 @@ describe('Arango migration indexes', () => {
     expect(isLegacyIndex('documentVersions', ['storageKey'], [['storageKey']])).toBe(false);
     expect(isLegacyIndex('documentVersions', ['storageKey'], [['documentKey', 'version']])).toBe(true);
   });
+  test('retires single Gmail binding uniqueness but preserves account uniqueness', () => {
+    const desired = [['organizationKey', 'scopeKey', 'provider', 'providerAccountId']];
+    expect(isLegacyIndex('organizationConnectors', ['organizationKey', 'scopeKey', 'provider'], desired)).toBe(true);
+    expect(isLegacyIndex('organizationConnectors', desired[0]!, desired)).toBe(false);
+  });
   test('drops every obsolete tombstone index without preserving the retired field in source', () => {
     expect(isLegacyIndex('collections', ['scopeKey', LEGACY_REMOVAL_MARKER])).toBe(true);
     expect(isLegacyIndex('documents', ['scopeKey', 'folderKey', LEGACY_REMOVAL_MARKER])).toBe(true);
@@ -364,6 +369,23 @@ describe('Arango migration indexes', () => {
     expect(source).toContain('kind: "mail-reply-draft"');
     expect(source).toContain('kind: "mail-writing-profile"');
     expect(source).toContain('UPDATE connector WITH { syncEnabled: account.syncEnabled');
+  });
+  test('assigns provider-independent active drafts only when one active organization connector exists', async () => {
+    const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
+    const database = {
+      collection: () => ({ exists: async () => true }),
+      query: async (query: string, bindVars?: Record<string, unknown>) => { calls.push({ query, bindVars }); return { next: async () => undefined, all: async () => [] }; },
+    };
+    await migrateProviderIndependentEmailDrafts(database as never);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.query).toContain('payload.data.accountKey == document.scopeKey');
+    expect(calls[0]?.query).toContain('payload.data.status IN ["generated", "edited"]');
+    expect(calls[0]?.query).toContain('connector.organizationKey == scope.organizationKey');
+    expect(calls[0]?.query).toContain('LIMIT 2');
+    expect(calls[0]?.query).toContain('FILTER LENGTH(connectors) == 1');
+    expect(calls[0]?.query).toContain('accountKey: connectors[0]._key');
+    const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    expect(source.indexOf('await ensureOrganizationConnectorsCollection(targetDb)')).toBeLessThan(source.indexOf('await migrateProviderIndependentEmailDrafts(targetDb)'));
   });
   test('cleans and collision-safely compacts existing trip attachments before indexing', async () => {
     const calls: string[] = [];

@@ -3,8 +3,12 @@ import { beforeEach, expect, mock, test } from "bun:test";
 const calls: { method: string; path: string; body: unknown; config?: unknown }[] = [];
 const authState = { organization: { key: "org-key", role: "member" }, scope: { key: "scope-key", role: "moderator" } };
 const now = "2026-08-11T10:00:00.000Z";
+const connector = { key: "connector-a", organizationKey: "org-key", scopeKey: "scope-key", provider: "gmail" as const, email: "a@example.com", status: "active" as const, syncEnabled: true, syncStatus: "idle" as const, createdAt: now, updatedAt: now };
+const connectorB = { ...connector, key: "connector-b", email: "b@example.com" };
 const thread = { key: "thread-key", scopeKey: "scope-key", accountKey: "account-key", providerThreadId: "provider-thread", subject: "Subject", summary: "Summary", intent: "Review message", priority: "normal", state: "needs_action", lastMessageAt: now, latestFrom: "sender@example.com", isFavorite: false, createdAt: now, updatedAt: now };
 const draft = { key: "draft-key", scopeKey: "scope-key", variant: "reply", threadKey: "thread-key", messageKey: "message-key", generatedContent: "Reply", status: "generated", createdAt: now, updatedAt: now };
+const unassignedDraft = { key: "legacy-draft", scopeKey: "scope-key", variant: "new", to: ["one@example.com"], subject: "Legacy proposal", generatedContent: "Proposal", status: "generated", createdAt: now, updatedAt: now };
+let includeUnassignedDrafts = true;
 const tones = [
   { key: "tone-warm", scopeKey: "scope-key", slug: "warm", name: "Warm", description: "Friendly and considerate.", instruction: "Sound approachable and human.", createdAt: now, updatedAt: now },
   { key: "tone-direct", scopeKey: "scope-key", slug: "direct", name: "Direct", description: "Clear and decisive.", instruction: "Lead with the answer.", createdAt: now, updatedAt: now },
@@ -16,12 +20,16 @@ mock.module("expo-web-browser", () => ({ openAuthSessionAsync: async () => ({ ty
 mock.module("./api-client", () => ({ apiClient: {
   post: async (path: string, body: unknown, config?: unknown) => {
     calls.push({ method: "POST", path, body, config });
-    const data = path === "/email/overview" ? { account: null, connector: null, threads: [thread], drafts: [], counts: { all: 1, important: 0, urgent: 0, needsAction: 1, filtered: 0, unread: 0, favorite: 0 }, nextCursor: null }
+    const data = path === "/email/overview" ? { accounts: [connector, connectorB], selectedAccount: (body as { connectorKey?: string }).connectorKey ? connector : null, threads: (body as { connectorKey?: string }).connectorKey ? [thread] : [], drafts: [], ...(includeUnassignedDrafts ? { unassignedDrafts: [unassignedDraft] } : {}), counts: { all: 1, important: 0, urgent: 0, needsAction: 1, filtered: 0, unread: 0, favorite: 0 }, nextCursor: null }
       : path === "/email/drafts" || path === "/email/drafts/compose" ? draft
+      : path.endsWith("/assign") ? { ...unassignedDraft, accountKey: connector.key }
         : path === "/email/tones/list" ? { tones }
         : path.endsWith("/favorite") ? { ...thread, isFavorite: true }
         : path.endsWith("/send") ? { sent: true, providerMessageId: "sent-1", threadKey: "thread-key" }
           : path === "/email/sync" ? { synced: 1, lastSyncedAt: now }
+            : path === "/email/subscribe" ? { watchExpiresAt: now }
+              : path === "/email/connect/exchange" ? connectorB
+                : path === "/email/disconnect" ? { disconnected: true }
             : path === "/assistant/respond" ? { type: "answer", message: "Synced Signal.", sources: [], changes: [{ workspace: "signal" }] }
               : {};
     return { data: { success: true, data } };
@@ -30,11 +38,11 @@ mock.module("./api-client", () => ({ apiClient: {
 } }));
 
 const client = await import("./email-client");
-beforeEach(() => calls.splice(0));
+beforeEach(() => { calls.splice(0); includeUnassignedDrafts = true; });
 
 test("sends scoped overview, sync, draft, edit, and send requests", async () => {
-  expect((await client.fetchEmailOverview({ filter: "needs_action" })).threads).toHaveLength(1);
-  await client.syncEmail();
+  expect((await client.fetchEmailOverview({ connectorKey: connector.key, filter: "needs_action" })).threads).toHaveLength(1);
+  await client.syncEmail(connector.key);
   await client.setEmailThreadFavorite("thread-key", true);
   await client.createEmailDraft({ threadKey: "thread-key", tone: "warm" });
   await client.updateEmailDraft("draft-key", "Edited");
@@ -42,7 +50,8 @@ test("sends scoped overview, sync, draft, edit, and send requests", async () => 
   expect(calls.map(({ method, path }) => `${method} ${path}`)).toEqual([
     "POST /email/overview", "POST /email/sync", "POST /email/threads/thread-key/favorite", "POST /email/drafts", "PATCH /email/drafts/draft-key", "POST /email/drafts/draft-key/send",
   ]);
-  expect(calls[0]?.body).toEqual({ organizationKey: "org-key", scopeKey: "scope-key", filter: "needs_action" });
+  expect(calls[0]?.body).toEqual({ organizationKey: "org-key", scopeKey: "scope-key", connectorKey: connector.key, filter: "needs_action" });
+  expect(calls[1]?.body).toEqual({ organizationKey: "org-key", scopeKey: "scope-key", connectorKey: connector.key });
   expect(calls[1]?.config).toEqual({ timeout: 120_000 });
   expect(calls[2]?.body).toEqual({ organizationKey: "org-key", scopeKey: "scope-key", isFavorite: true });
   expect(calls[3]?.body).toEqual({ organizationKey: "org-key", scopeKey: "scope-key", threadKey: "thread-key", tone: "warm" });
@@ -55,9 +64,9 @@ test("rejects invalid drafting tones before a request", () => {
 
 test("sends strict new compose and reply attachment requests", async () => {
   const attachments = [{ type: "document" as const, key: "document-key" }, { type: "image" as const, key: "image-key" }];
-  await client.composeEmailDraft({ to: ["one@example.com"], cc: ["two@example.com"], subject: "Project update", tone: "direct", instruction: "Use the reviewed body", attachments });
+  await client.composeEmailDraft({ connectorKey: connector.key, to: ["one@example.com"], cc: ["two@example.com"], subject: "Project update", tone: "direct", instruction: "Use the reviewed body", attachments });
   await client.createEmailDraft({ threadKey: "thread-key", tone: "warm", instruction: "Confirm receipt", attachments });
-  expect(calls[0]).toMatchObject({ method: "POST", path: "/email/drafts/compose", body: { organizationKey: "org-key", scopeKey: "scope-key", to: ["one@example.com"], cc: ["two@example.com"], subject: "Project update", tone: "direct", instruction: "Use the reviewed body", attachments } });
+  expect(calls[0]).toMatchObject({ method: "POST", path: "/email/drafts/compose", body: { organizationKey: "org-key", scopeKey: "scope-key", connectorKey: connector.key, to: ["one@example.com"], cc: ["two@example.com"], subject: "Project update", tone: "direct", instruction: "Use the reviewed body", attachments } });
   expect(calls[1]).toMatchObject({ method: "POST", path: "/email/drafts", body: { organizationKey: "org-key", scopeKey: "scope-key", threadKey: "thread-key", tone: "warm", instruction: "Confirm receipt", attachments } });
 });
 
@@ -74,8 +83,37 @@ test("loads complete server tone records while retaining slug-only drafting valu
 });
 
 test("sends the inbox cursor and page limit without changing the product-neutral overview route", async () => {
-  await client.fetchEmailOverview({ filter: "all", cursor: "cursor-1", limit: 50 });
-  expect(calls[0]).toMatchObject({ path: "/email/overview", body: { organizationKey: "org-key", scopeKey: "scope-key", filter: "all", cursor: "cursor-1", limit: 50 } });
+  await client.fetchEmailOverview({ connectorKey: connector.key, filter: "all", cursor: "cursor-1", limit: 50 });
+  expect(calls[0]).toMatchObject({ path: "/email/overview", body: { organizationKey: "org-key", scopeKey: "scope-key", connectorKey: connector.key, filter: "all", cursor: "cursor-1", limit: 50 } });
+});
+
+test("parses multiple accounts and the sanitized OAuth connector", async () => {
+  const root = await client.fetchEmailOverview();
+  expect(root.accounts.map(({ email }) => email)).toEqual(["a@example.com", "b@example.com"]);
+  expect(root.selectedAccount).toBeNull();
+  expect(await client.exchangeEmailConnection("vrtx_email_grant_code")).toEqual(connectorB);
+  expect(() => client.emailConnectorSchema.parse({ ...connector, createdByMembershipKey: "membership" })).toThrow();
+  expect(() => client.emailConnectorSchema.parse({ ...connector, providerAccountId: "private-provider-id" })).toThrow();
+});
+
+test("parses unassigned drafts and defaults the legacy field to an empty list", async () => {
+  expect((await client.fetchEmailOverview()).unassignedDrafts).toEqual([unassignedDraft]);
+  includeUnassignedDrafts = false;
+  expect((await client.fetchEmailOverview()).unassignedDrafts).toEqual([]);
+});
+
+test("sends a strict draft assignment request without sending the draft", async () => {
+  expect(await client.assignEmailDraft(unassignedDraft.key, connector.key)).toMatchObject({ key: unassignedDraft.key, accountKey: connector.key });
+  expect(calls[0]).toMatchObject({ method: "POST", path: `/email/drafts/${unassignedDraft.key}/assign`, body: { organizationKey: "org-key", scopeKey: "scope-key", connectorKey: connector.key } });
+  expect(() => client.emailAssignDraftInputSchema.parse({ draftKey: unassignedDraft.key, connectorKey: connector.key, send: true })).toThrow();
+});
+
+test("propagates connector selectors to sync, subscribe, compose, and disconnect", async () => {
+  await client.syncEmail(connector.key);
+  await client.subscribeEmail(connector.key);
+  await client.composeEmailDraft({ connectorKey: connector.key, to: ["one@example.com"], subject: "Hello", tone: "warm" });
+  await client.disconnectEmail(connector.key);
+  expect(calls.map(({ body }) => (body as { connectorKey?: string }).connectorKey)).toEqual(Array(4).fill(connector.key));
 });
 
 test("sends Signal assistant requests with a replay key and accepts workspace changes", async () => {
