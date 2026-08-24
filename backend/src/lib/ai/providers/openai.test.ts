@@ -102,10 +102,7 @@ test('rejects Responses output when web search did not complete', async () => {
   await expect(execution).rejects.toMatchObject({ code: 'response_invalid' });
 });
 
-test.each([
-  [],
-  [{ type: 'url', url: 'https://example.com/source' }],
-])('rejects Responses citations not grounded in returned search sources', async (sources) => {
+async function expectUngroundedResponseRejected(sources: Array<{ type: string; url: string }>) {
   globalThis.fetch = (async () => Response.json({
     output: [
       { type: 'web_search_call', status: 'completed', action: { type: 'search', sources } },
@@ -114,6 +111,14 @@ test.each([
   })) as unknown as typeof fetch;
   const execution = createOpenAIProvider({ apiKey: 'test-key' }).execute({ actionId: 'web-search', modelId: 'openai.gpt-5.6-luna', externalModelId: 'gpt-5.6-luna', input: { prompt: 'Research Japan' }, organizationKey: 'organization' });
   await expect(execution).rejects.toMatchObject({ code: 'response_invalid' });
+}
+
+test('rejects Responses citations when returned search sources are empty', async () => {
+  await expectUngroundedResponseRejected([]);
+});
+
+test('rejects Responses citations not grounded in returned search sources', async () => {
+  await expectUngroundedResponseRejected([{ type: 'url', url: 'https://example.com/source' }]);
 });
 
 test('rejects truncated ask completions', async () => {
