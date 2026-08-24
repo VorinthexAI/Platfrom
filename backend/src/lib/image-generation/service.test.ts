@@ -13,7 +13,7 @@ const context = {
 
 const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).toString('base64');
 const authorizedGallery = { canManageScope: async () => true };
-const claimedLedger = () => ({ claim: async () => ({ status: 'claimed' as const }), renew: async () => true, complete: async () => {}, release: async () => {} });
+const claimedLedger = () => ({ claim: async () => ({ status: 'claimed' as const }), start: async () => true, renew: async () => true, complete: async () => {}, fail: async () => {}, release: async () => {} });
 const persistedImage = (key = newId()) => ({ key, scopeKey, filename: 'generated.png', caption: 'Earth', imageCaptionKey: newId(), createdByKey: membershipKey, storageKey: `durable/${key}.png`, mimeType: 'image/png', sizeBytes: 8, width: 1024, height: 1024, embedding: [], isFavorite: false, createdAt: '2026-08-19T00:00:00.000Z', updatedAt: '2026-08-19T00:00:00.000Z' }) as any;
 
 describe('image generation service', () => {
@@ -45,16 +45,15 @@ describe('image generation service', () => {
       getImage: async () => null,
       execute: (async (...args: unknown[]) => {
         calls.push(args);
-        const request = args[0] as { actionSlug: string };
-        return request.actionSlug === 'ask'
-          ? { output: { text: '{"concepts":[{"title":"Orbit","prompt":"A complete orbital image"}]}', toolCalls: [], stopReason: 'completed' }, usage: {}, providerId: 'openai', modelId: 'openai.gpt-5.6-luna', externalModelId: 'gpt-5.6-luna' }
-          : { output: { images: [{ base64: png, mimeType: 'image/png' }] }, usage: {}, costUsd: 0.12, providerId: 'openai', modelId: 'openai.gpt-image-2', externalModelId: 'gpt-image-2' };
+        return { output: { images: [{ base64: png, mimeType: 'image/png' }] }, usage: {}, costUsd: 0.12, providerId: 'openai', modelId: 'openai.gpt-image-2', externalModelId: 'gpt-image-2' };
       }) as any,
+      executeAsk: (async (...args: unknown[]) => { calls.push(args); return { output: { text: '{"concepts":[{"title":"Orbit","prompt":"A complete orbital image"}]}', toolCalls: [], stopReason: 'completed' }, usage: {}, providerId: 'openrouter', modelId: 'google.gemini-2.5-flash-lite', externalModelId: 'google/gemini-2.5-flash-lite' }; }) as any,
       now: (() => { let value = 10; return () => value += 25; })(),
     });
     await service.createRawIdeas({ prompt: 'Earth', requestedCount: 1 }, organizationKey);
     const generated = await service.generateRaw({ prompt: 'Earth', count: 1, size: '1024x1024', quality: 'high' }, organizationKey);
-    expect(calls[0]?.[0]).toEqual({ mode: 'fixed', organizationKey, actionSlug: 'ask', modelSlug: 'openai.gpt-5.6-luna', providerSlug: 'openai' });
+    expect(calls[0]?.[0]).toBe(organizationKey);
+    expect(calls[0]?.[1]).not.toHaveProperty('mode');
     expect(calls[1]?.[0]).toEqual({ mode: 'fixed', organizationKey, actionSlug: 'generate-image', modelSlug: 'openai.gpt-image-2', providerSlug: 'openai' });
     expect(generated).toMatchObject({ durationMs: 25, costUsd: 0.12 });
 
@@ -110,8 +109,10 @@ describe('image generation service', () => {
     let replay: unknown, providerCalls = 0, signCount = 0;
     const ledger = {
       claim: async () => replay ? { status: 'replay' as const, response: replay } : { status: 'claimed' as const },
+      start: async () => true,
       renew: async () => true,
       complete: async (_identity: unknown, _hash: string, _owner: string, value: unknown) => { replay = value; },
+      fail: async () => {},
       release: async () => {},
     };
     const dependencies = {
@@ -138,18 +139,47 @@ describe('image generation service', () => {
     expect(providerCalls).toBe(0);
   });
 
-  test('renews the durable lease while work runs and releases it after failure', async () => {
-    let renewals = 0, releases = 0;
+  test('returns distinct indeterminate and failed image idempotency states without provider execution', async () => {
+    let providerCalls = 0;
+    const execute = (async () => { providerCalls += 1; return {}; }) as any;
+    const indeterminate = createImageGenerationService({ gallery: authorizedGallery, idempotency: { ...claimedLedger(), claim: async () => ({ status: 'indeterminate' }) }, execute });
+    await expect(indeterminate.generate({ prompt: 'Earth', count: 1, size: '1024x1024', quality: 'low' }, context, 'indeterminate')).rejects.toMatchObject({ code: 'IMAGE_IDEMPOTENCY_INDETERMINATE', retryable: false });
+    const failed = createImageGenerationService({ gallery: authorizedGallery, idempotency: { ...claimedLedger(), claim: async () => ({ status: 'failed', failure: { code: 'IMAGE_GENERATION_FAILED', message: 'Image generation execution failed.', retryable: false } }) }, execute });
+    await expect(failed.generate({ prompt: 'Earth', count: 1, size: '1024x1024', quality: 'low' }, context, 'failed')).rejects.toMatchObject({ code: 'IMAGE_IDEMPOTENCY_FAILED', retryable: false });
+    expect(providerCalls).toBe(0);
+  });
+
+  test('renews the durable lease and terminalizes a sanitized execution failure', async () => {
+    let renewals = 0, releases = 0, failures = 0;
+    let storedFailure: unknown;
     const service = createImageGenerationService({
       gallery: authorizedGallery,
       getImage: async () => null,
-      idempotency: { ...claimedLedger(), renew: async () => { renewals += 1; return true; }, release: async () => { releases += 1; } },
+      idempotency: { ...claimedLedger(), renew: async () => { renewals += 1; return true; }, fail: async (_identity, _hash, _owner, failure) => { failures += 1; storedFailure = failure; }, release: async () => { releases += 1; } },
       scheduleLeaseRenewal: (renew) => { renew(); return () => {}; },
       execute: (async () => { throw new Error('provider failed'); }) as any,
     });
-    await expect(service.generate({ prompt: 'Earth', count: 1, size: '1024x1024', quality: 'low' }, context, 'failure')).rejects.toThrow();
+    await expect(service.generate({ prompt: 'Earth', count: 1, size: '1024x1024', quality: 'low' }, context, 'failure')).rejects.toMatchObject({ code: 'IMAGE_IDEMPOTENCY_FAILED', retryable: false });
     expect(renewals).toBeGreaterThan(0);
-    expect(releases).toBe(1);
+    expect(releases).toBe(0);
+    expect(failures).toBe(1);
+    expect(storedFailure).toEqual({ code: 'IMAGE_GENERATION_FAILED', message: 'Image generation execution failed.', retryable: false });
+    expect(JSON.stringify(storedFailure)).not.toContain('provider failed');
+  });
+
+  test('leaves failed image generation indeterminate when terminal failure cannot be written', async () => {
+    let state: 'new' | 'started' = 'new', providerCalls = 0;
+    const ledger = {
+      ...claimedLedger(),
+      claim: async () => state === 'started' ? { status: 'indeterminate' as const } : { status: 'claimed' as const },
+      start: async () => { state = 'started'; return true; },
+      fail: async () => { throw new Error('ledger unavailable'); },
+    };
+    const dependencies = { gallery: authorizedGallery, idempotency: ledger, getImage: async () => null, execute: (async () => { providerCalls += 1; throw new Error('provider failed'); }) as any };
+    const input = { prompt: 'Earth', count: 1, size: '1024x1024' as const, quality: 'low' as const };
+    await expect(createImageGenerationService(dependencies).generate(input, context, 'failure-write')).rejects.toThrow('provider failed');
+    await expect(createImageGenerationService(dependencies).generate(input, context, 'failure-write')).rejects.toMatchObject({ code: 'IMAGE_IDEMPOTENCY_INDETERMINATE', retryable: false });
+    expect(providerCalls).toBe(1);
   });
 
   test('recovers partially persisted indices without regenerating them', async () => {
@@ -182,15 +212,23 @@ describe('image generation service', () => {
       getImage: async (key) => ({ ...persistedImage(key), createdByKey: newId() }),
       execute: (async () => { providerCalls += 1; return {}; }) as any,
     });
-    await expect(service.generate({ prompt: 'Earth', count: 1, size: '1024x1024', quality: 'medium' }, context, 'wrong-owner')).rejects.toThrow('unavailable to this owner and scope');
+    await expect(service.generate({ prompt: 'Earth', count: 1, size: '1024x1024', quality: 'medium' }, context, 'wrong-owner')).rejects.toMatchObject({ code: 'IMAGE_IDEMPOTENCY_FAILED' });
     expect(providerCalls).toBe(0);
   });
 
-  test('recovers all persisted images after ledger completion failure without another provider call', async () => {
-    let stored: any, providerCalls = 0, processCalls = 0, completions = 0, releases = 0;
+  test('does not re-execute an ambiguous image operation after its started lease expires', async () => {
+    let stored: any, providerCalls = 0, processCalls = 0, completions = 0, releases = 0, failures = 0;
+    let state: 'new' | 'claimed' | 'started' = 'new';
+    let beyondLease = false;
     const ledger = {
-      claim: async () => ({ status: 'claimed' as const }), renew: async () => true,
+      claim: async () => {
+        if (state === 'new' || state === 'claimed' && beyondLease) { state = 'claimed'; return { status: 'claimed' as const }; }
+        return { status: 'pending' as const };
+      },
+      start: async () => { state = 'started'; return true; },
+      renew: async () => true,
       complete: async () => { completions += 1; if (completions === 1) throw new Error('ledger completion failed'); },
+      fail: async () => { failures += 1; },
       release: async () => { releases += 1; },
     };
     const dependencies = {
@@ -202,8 +240,9 @@ describe('image generation service', () => {
     };
     const input = { prompt: 'Earth', count: 1, size: '1024x1024' as const, quality: 'medium' as const };
     await expect(createImageGenerationService(dependencies).generate(input, context, 'completion-recovery')).rejects.toThrow('ledger completion failed');
-    const recovered = await createImageGenerationService(dependencies).generate(input, context, 'completion-recovery');
-    expect({ providerCalls, processCalls, completions, releases }).toEqual({ providerCalls: 1, processCalls: 1, completions: 2, releases: 1 });
-    expect(recovered).toMatchObject({ images: [{ key: stored.key, url: 'https://images.example/refreshed.png' }], provider: { durationMs: 0, costUsd: null } });
+    beyondLease = true;
+    await expect(createImageGenerationService(dependencies).generate(input, context, 'completion-recovery')).rejects.toThrow('another server');
+    expect({ providerCalls, processCalls, completions, releases, failures }).toEqual({ providerCalls: 1, processCalls: 1, completions: 1, releases: 0, failures: 0 });
+    expect(state as 'new' | 'claimed' | 'started').toBe('started');
   });
 });

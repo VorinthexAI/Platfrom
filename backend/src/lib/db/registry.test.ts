@@ -118,7 +118,10 @@ describe('node registry schema contracts', () => {
     expect(collectionSchema.shape).toHaveProperty('embedding');
     expect(placeSchema.shape).toHaveProperty('embedding');
     expect(NODE_NAMES).not.toContain('trips');
+    expect(NODE_NAMES).not.toContain('tripGuides');
+    expect(NODE_NAMES).not.toContain('placeReports');
     expect(NODE_NAMES).not.toContain('tripPlaces');
+    expect(NODE_NAMES).not.toContain('tripAttachments');
     expect(NODE_NAMES).not.toContain('placeVisits');
     expect(NODE_NAMES).not.toContain('shares');
     expect(NODE_NAMES).not.toContain('collectionInvites');

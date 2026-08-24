@@ -16,6 +16,7 @@ export type ToastNotice = {
 type ToastRecord = ToastNotice & { id: number };
 type ToastContextValue = {
   dismissToast: (id: number) => void;
+  notices: ToastRecord[];
   showToast: (notice: ToastNotice) => number;
 };
 
@@ -25,7 +26,6 @@ function ToastCard({ depth, notice, onDismiss }: { depth: number; notice: ToastR
   const progress = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    AccessibilityInfo.announceForAccessibility([notice.title, notice.description].filter(Boolean).join(". "));
     Animated.timing(progress, {
       duration: 260,
       easing: Easing.bezier(0.16, 1, 0.3, 1),
@@ -76,7 +76,6 @@ function ToastCard({ depth, notice, onDismiss }: { depth: number; notice: ToastR
 }
 
 export function ToastProvider({ children }: { children: ReactNode }) {
-  const insets = useSafeAreaInsets();
   const nextId = useRef(0);
   const [notices, setNotices] = useState<ToastRecord[]>([]);
   const dismissToast = useCallback((id: number) => setNotices((current) => current.filter((notice) => notice.id !== id)), []);
@@ -84,21 +83,23 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     nextId.current += 1;
     const id = nextId.current;
     setNotices((current) => [{ ...notice, id }, ...current].slice(0, MAX_VISIBLE));
+    AccessibilityInfo.announceForAccessibility([notice.title, notice.description].filter(Boolean).join(". "));
     return id;
   }, []);
 
   return (
-    <ToastContext.Provider value={{ dismissToast, showToast }}>
+    <ToastContext.Provider value={{ dismissToast, notices, showToast }}>
       {children}
-      <View pointerEvents="box-none" style={[styles.viewport, { top: insets.top + spacing.sm }]}>
-        <View pointerEvents="none" style={styles.stack}>
-          {notices.map((notice, depth) => (
-            <ToastCard depth={depth} key={notice.id} notice={notice} onDismiss={dismissToast} />
-          ))}
-        </View>
-      </View>
+      <ToastViewport />
     </ToastContext.Provider>
   );
+}
+
+export function ToastViewport() {
+  const context = useContext(ToastContext);
+  const insets = useSafeAreaInsets();
+  if (!context) return null;
+  return <View pointerEvents="box-none" style={[styles.viewport, { top: insets.top + spacing.sm }]}><View pointerEvents="none" style={styles.stack}>{context.notices.map((notice, depth) => <ToastCard depth={depth} key={notice.id} notice={notice} onDismiss={context.dismissToast} />)}</View></View>;
 }
 
 export function useToast() {
@@ -108,7 +109,7 @@ export function useToast() {
 }
 
 const styles = StyleSheet.create({
-  viewport: { left: spacing.md, position: "absolute", right: spacing.md, zIndex: 100 },
+  viewport: { elevation: 1000, left: spacing.md, position: "absolute", right: spacing.md, zIndex: 1000 },
   stack: { height: 92, position: "relative" },
   toast: {
     alignSelf: "center",

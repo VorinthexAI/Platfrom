@@ -19,8 +19,12 @@ export type BottomSheetProps = {
   footer?: ReactNode;
   height?: "full";
   hideHeading?: boolean;
+  hideCloseButton?: boolean;
   onOpenChange: (open: boolean) => void;
+  onSwipeLeft?: () => void;
+  onSwipeRight?: () => void;
   open: boolean;
+  pageKey?: string;
   title: string;
 };
 
@@ -35,6 +39,7 @@ export function BottomSheet({
   footer,
   height,
   hideHeading = false,
+  hideCloseButton = false,
   onOpenChange,
   open,
   title,
@@ -114,7 +119,7 @@ export function BottomSheet({
                 </Dialog.Description>
               ) : null}
             </header>
-            <Dialog.Close asChild>
+            {!hideCloseButton ? <Dialog.Close asChild>
               <Button
                 aria-label="Close bottom sheet"
                 className="vui-bottom-sheet-close"
@@ -124,7 +129,7 @@ export function BottomSheet({
               >
                 <CloseIcon size="sm" />
               </Button>
-            </Dialog.Close>
+            </Dialog.Close> : null}
             <div className="vui-bottom-sheet-content">{children}</div>
             {footer ? <footer className="vui-bottom-sheet-footer">{footer}</footer> : null}
           </Dialog.Content>

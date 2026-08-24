@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { tokenUsage } from '@/lib/ai/shared/usage';
 import { awsCredentialsSchema, resolveAwsCredentials, signAwsRequest, type AwsCredentialEnvironment } from './aws-sigv4';
 import { normalizeProviderError, ProviderError, providerErrorCodeForStatus } from './errors';
-import { CHAT_ACTION_IDS, unsupportedAction } from './openai-compatible';
+import { acceptsChatInput, unsupportedAction } from './openai-compatible';
 import {
   chatInputSchema,
   embeddingInputSchema,
@@ -120,7 +120,7 @@ export function createAwsBedrockProvider(config?: Partial<AwsBedrockProviderConf
           const output: EmbeddingOutput = { embedding: result.embeddings[0]! };
           return { output: output as TOutput, usage: result.usage, providerId: PROVIDER_ID, modelId: request.modelId, externalModelId: request.externalModelId, rawResponse: result.rawResponse };
         }
-        if (!CHAT_ACTION_IDS.has(request.actionId)) throw unsupportedAction(PROVIDER_ID, request.actionId);
+        if (!acceptsChatInput(request.actionId)) throw unsupportedAction(PROVIDER_ID, request.actionId);
         const input = chatInputSchema.parse(request.input);
         const host = `bedrock-runtime.${parsed.region}.amazonaws.com`;
         const requestPath = `/model/${request.externalModelId}/converse`;
@@ -143,7 +143,7 @@ export function createAwsBedrockProvider(config?: Partial<AwsBedrockProviderConf
     async *stream<TInput>(request: ProviderExecuteRequest<TInput>): AsyncIterable<ProviderStreamChunk> {
       let client: BedrockStreamClient | undefined;
       try {
-        if (!CHAT_ACTION_IDS.has(request.actionId)) throw unsupportedAction(PROVIDER_ID, 'stream');
+        if (!acceptsChatInput(request.actionId)) throw unsupportedAction(PROVIDER_ID, 'stream');
         const input = chatInputSchema.parse(request.input);
         if (input.tools?.length || input.messages.some((message) => message.content.some((part) => part.type === 'tool-call' || part.type === 'tool-result'))) throw new ProviderError(PROVIDER_ID, 'unsupported_action', 'AWS Bedrock streaming does not support tools');
         client = streamClientFactory(request.timeoutMs ?? 300_000);

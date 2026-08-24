@@ -45,12 +45,13 @@ export const generatedPlaceDetailSchema = z.object({
 });
 export type GeneratedPlaceDetail = z.infer<typeof generatedPlaceDetailSchema>;
 export const placeSchema = z.object({
-  key: z.string().cuid(), userKey: z.string().cuid(), scopeKey: z.string().cuid(), saved: z.boolean(), name: z.string().trim().min(1),
+  key: z.string().cuid(), userKey: z.string().cuid(), scopeKey: z.string().cuid(), saved: z.boolean(), kind: z.enum(['country', 'place']).optional(), name: z.string().trim().min(1),
+  status: z.enum(['wishlist', 'visited']).default('wishlist'), isFavorite: z.boolean().default(false),
   // Empty is retained only so pre-summary rows remain readable until migration backfills them.
   summary: z.string().default(''),
   countryCode: placeCountryCodeSchema,
   latitude: z.number().finite().min(-90).max(90), longitude: z.number().finite().min(-180).max(180),
-  embedding: currentEmbeddingSchema, embeddingContentVersion: z.literal(2).default(2), generatedDetail: generatedPlaceDetailSchema.optional(), openedAt: z.string().datetime().optional(), createdAt: z.string().datetime(),
+  embedding: currentEmbeddingSchema, embeddingContentVersion: z.literal(2).default(2), generatedDetail: generatedPlaceDetailSchema.optional(), generatedDetailVersion: z.number().int().positive().optional(), openedAt: z.string().datetime().optional(), createdAt: z.string().datetime(),
 });
 export type Place = z.infer<typeof placeSchema>;
 export const placesEmbeddingFields = ['name', 'summary'] as const;
@@ -59,8 +60,10 @@ export const insertPlace = helpers.insert;
 export const getPlaceById = helpers.getById;
 export const updatePlace = helpers.updateById;
 export async function deletePlace(key: string) {
-  return withTransaction({ read: [], write: [PLACES_COLLECTION, 'placeImages'] }, async (transaction) => {
+  return withTransaction({ read: [], write: [PLACES_COLLECTION, 'placeImages', 'tripPlaces', 'generatedDocumentBindings'] }, async (transaction) => {
     await transaction.query('FOR relation IN placeImages FILTER relation.placeKey == @key REMOVE relation IN placeImages', { key });
+    await transaction.query('FOR relation IN tripPlaces FILTER relation.placeKey == @key REMOVE relation IN tripPlaces', { key });
+    await transaction.query('FOR binding IN generatedDocumentBindings FILTER binding.subjectType == "place" && binding.subjectKey == @key REMOVE binding IN generatedDocumentBindings', { key });
     const cursor = await transaction.query('FOR place IN places FILTER place._key == @key REMOVE place IN places RETURN OLD', { key });
     const removed = await cursor.next();
     return removed ? placeSchema.parse(withArangoKey(removed as Record<string, unknown>)) : null;

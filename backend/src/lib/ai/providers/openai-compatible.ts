@@ -1,4 +1,5 @@
 import type OpenAI from 'openai';
+import type { ActionId } from '@/lib/ai/actions';
 import { tokenUsage, type TokenUsage } from '@/lib/ai/shared/usage';
 import { normalizeProviderError, ProviderError } from './errors';
 import {
@@ -24,7 +25,9 @@ import {
  * providers barrel.
  */
 
-export const CHAT_ACTION_IDS = new Set(['ask', 'chat', 'enhance', 'orchestrator-chat', 'reason', 'deep-reason', 'translate', 'analyze-video', 'analyze-audio', 'document-summarize', 'document-topics']);
+export function acceptsChatInput(actionId: ActionId): boolean {
+  return actionId === 'ask' || actionId === 'analyze-video' || actionId === 'analyze-audio';
+}
 
 export interface OpenAICompatibleOptions {
   /** gpt-5-era OpenAI/Azure endpoints require `max_completion_tokens`; other compatible providers use `max_tokens`. */
@@ -36,6 +39,7 @@ export function buildChatCompletionParams(
   externalModelId: string,
   input: ChatInput,
   options: OpenAICompatibleOptions,
+  providerId: ProviderId = 'openai',
 ): OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming {
   const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
   if (input.systemPrompt) messages.push({ role: 'system', content: input.systemPrompt });
@@ -44,9 +48,9 @@ export function buildChatCompletionParams(
     const toolCalls = message.content.filter((part) => part.type === 'tool-call');
     const toolResults = message.content.filter((part) => part.type === 'tool-result');
     const hasUnsupportedContent = message.content.some((part) => part.type === 'audio');
-    if (hasUnsupportedContent) throw new ProviderError('openai', 'unsupported_action', 'This provider adapter does not support audio core.chat content');
+    if (hasUnsupportedContent) throw new ProviderError(providerId, 'unsupported_action', 'This provider adapter does not support audio core.chat content');
     if (message.role === 'assistant' && toolCalls.length > 0) {
-      if (toolResults.length > 0) throw new ProviderError('openai', 'invalid_input', 'Assistant messages cannot contain tool results');
+      if (toolResults.length > 0) throw new ProviderError(providerId, 'invalid_input', 'Assistant messages cannot contain tool results');
       messages.push({
         role: 'assistant',
         content: text || null,
@@ -60,10 +64,10 @@ export function buildChatCompletionParams(
     }
     if (message.role === 'tool') {
       const result = toolResults[0];
-      if (toolResults.length !== 1 || toolCalls.length > 0 || text) throw new ProviderError('openai', 'invalid_input', 'Tool messages require exactly one tool result');
+      if (toolResults.length !== 1 || toolCalls.length > 0 || text) throw new ProviderError(providerId, 'invalid_input', 'Tool messages require exactly one tool result');
       messages.push({ role: 'tool', tool_call_id: result!.toolCallId, content: JSON.stringify(result!.result) ?? 'null' });
     } else {
-      if (!text || toolCalls.length > 0 || toolResults.length > 0) throw new ProviderError('openai', 'unsupported_action', 'This provider adapter does not support this core.chat message content');
+      if (!text || toolCalls.length > 0 || toolResults.length > 0) throw new ProviderError(providerId, 'unsupported_action', 'This provider adapter does not support this core.chat message content');
       messages.push({ role: message.role, content: text });
     }
   }
@@ -106,6 +110,9 @@ export function normalizeChatCompletion(providerId: ProviderId, completion: Open
   if (!choice) {
     throw new ProviderError(providerId, 'response_invalid', `${providerId} returned no choices`);
   }
+  if (choice.finish_reason !== 'stop' && choice.finish_reason !== 'tool_calls') {
+    throw new ProviderError(providerId, 'response_invalid', `${providerId} chat response did not complete normally`);
+  }
   const toolCalls: NormalizedToolCall[] = [];
   for (const call of choice.message.tool_calls ?? []) {
     if (call.type !== 'function') continue;
@@ -115,7 +122,7 @@ export function normalizeChatCompletion(providerId: ProviderId, completion: Open
     output: {
       text: choice.message.content ?? '',
       toolCalls,
-      stopReason: choice.finish_reason ?? null,
+      stopReason: choice.finish_reason === 'tool_calls' ? 'tool_use' : choice.finish_reason ?? null,
     },
     usage: tokenUsage(completion.usage?.prompt_tokens, completion.usage?.completion_tokens, completion.usage?.total_tokens),
   };
@@ -129,7 +136,7 @@ export async function executeOpenAICompatibleChat<TInput, TOutput>(
   options: OpenAICompatibleOptions,
 ): Promise<ProviderExecuteResponse<TOutput>> {
   const input = chatInputSchema.parse(request.input);
-  const params = buildChatCompletionParams(request.externalModelId, input, options);
+  const params = buildChatCompletionParams(request.externalModelId, input, options, providerId);
   try {
     const completion = await client.chat.completions.create(params, {
       signal: resolveRequestSignal(request),
@@ -156,7 +163,7 @@ export async function* streamOpenAICompatibleChat<TInput>(
   options: OpenAICompatibleOptions,
 ): AsyncIterable<ProviderStreamChunk> {
   const input = chatInputSchema.parse(request.input);
-  const params = buildChatCompletionParams(request.externalModelId, input, options);
+  const params = buildChatCompletionParams(request.externalModelId, input, options, providerId);
   try {
     const stream = await client.chat.completions.create(
       { ...params, stream: true, stream_options: { include_usage: true } },

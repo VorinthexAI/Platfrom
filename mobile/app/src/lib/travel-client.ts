@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { apiClient } from "@/lib/api-client";
+import { appSearchResults, searchApp } from "@/lib/app-search-client";
 import { assistantChangesSchema } from "@/lib/assistant-changes";
 import { useAuthStore } from "@/state/auth";
 
@@ -8,15 +9,79 @@ const keySchema = z.string().min(1);
 
 export const placeSchema = z.strictObject({
   key: keySchema,
+  kind: z.enum(["country", "place"]),
   name: z.string().min(1),
-  summary: z.string().max(1_200),
+  summary: z.string(),
   countryCode: z.string().length(2),
   latitude: z.number().finite().min(-90).max(90),
   longitude: z.number().finite().min(-180).max(180),
+  status: z.enum(["wishlist", "visited"]),
+  isFavorite: z.boolean(),
   createdAt: z.iso.datetime(),
+  coverUrl: z.url().optional(),
 });
 
 export type Place = z.infer<typeof placeSchema>;
+
+export const placeSearchResultSchema = z.strictObject({
+  kind: z.enum(["country", "city"]),
+  name: z.string().trim().min(1).max(160),
+  country: z.string().trim().min(1).max(160),
+  countryCode: z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/),
+  continent: z.string().trim().min(1).max(80),
+  summary: z.string().trim().min(1).max(1_200),
+  lat: z.number().finite().min(-90).max(90),
+  long: z.number().finite().min(-180).max(180),
+});
+export type PlaceSearchResult = z.infer<typeof placeSearchResultSchema>;
+
+export const tripAttachmentSchema = z.strictObject({
+  type: z.enum(["folder", "collection"]),
+  key: keySchema,
+});
+export type TripAttachment = z.infer<typeof tripAttachmentSchema>;
+
+export const tripSchema = z.strictObject({
+  key: keySchema,
+  name: z.string().trim().min(1).max(255),
+  description: z.string().trim().min(1).max(10_000).optional(),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+  status: z.enum(["planned", "completed"]),
+  isFavorite: z.boolean(),
+  coverImageKey: keySchema.optional(),
+  coverUrl: z.url().optional(),
+  places: z.array(placeSchema).max(100),
+  attachments: z.array(tripAttachmentSchema).max(100),
+}).superRefine(({ places, attachments }, context) => {
+  if (new Set(places.map(({ key }) => key)).size !== places.length) context.addIssue({ code: "custom", message: "Trip places must be distinct.", path: ["places"] });
+  if (new Set(attachments.map(({ type, key }) => `${type}:${key}`)).size !== attachments.length) context.addIssue({ code: "custom", message: "Trip attachments must be distinct.", path: ["attachments"] });
+});
+export type PersistedTrip = z.infer<typeof tripSchema>;
+export type Trip = Omit<PersistedTrip, "updatedAt" | "isFavorite" | "attachments"> & Partial<Pick<PersistedTrip, "updatedAt" | "isFavorite" | "attachments">>;
+
+export const tripGuideSchema = z.strictObject({
+  key: keySchema,
+  tripKey: keySchema,
+  name: z.string().trim().min(1).max(255),
+  content: z.string().min(1),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+});
+export type TripGuide = z.infer<typeof tripGuideSchema>;
+
+export const placeReferenceKindSchema = z.enum(["brief", "accommodations", "restaurants", "activities"]);
+export type PlaceReferenceKind = z.infer<typeof placeReferenceKindSchema>;
+export const placeReferenceSchema = z.strictObject({
+  key: keySchema,
+  placeKey: keySchema,
+  kind: placeReferenceKindSchema,
+  name: z.string().trim().min(1).max(255),
+  content: z.string().min(1),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+});
+export type PlaceReference = z.infer<typeof placeReferenceSchema>;
 
 export const recentPlaceSchema = z.strictObject({
   key: keySchema,
@@ -27,6 +92,7 @@ export const recentPlaceSchema = z.strictObject({
   latitude: z.number().finite().min(-90).max(90),
   longitude: z.number().finite().min(-180).max(180),
   openedAt: z.iso.datetime(),
+  coverUrl: z.url().optional(),
 });
 export type RecentPlace = z.infer<typeof recentPlaceSchema>;
 
@@ -118,6 +184,58 @@ const assistantResponseSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("unsupported"), message: z.string().min(1), sources: z.tuple([]), changes: assistantChangesSchema }),
 ]);
 const contextSchema = z.strictObject({ organizationKey: keySchema, scopeKey: keySchema });
+const placeSearchInputSchema = z.strictObject({ query: z.string().trim().min(2).max(500), recordHistory: z.boolean().optional() });
+const createTripInputSchema = z.strictObject({
+  name: z.string().trim().min(1).max(255),
+  description: z.string().trim().min(1).max(10_000).optional(),
+  idempotencyKey: z.string().trim().min(1).max(200),
+  placeKeys: z.array(keySchema).min(1).max(100),
+}).superRefine(({ placeKeys }, context) => {
+  if (new Set(placeKeys).size !== placeKeys.length) context.addIssue({ code: "custom", message: "Trip places must be distinct.", path: ["placeKeys"] });
+});
+export type CreateTripInput = z.input<typeof createTripInputSchema>;
+const tripGuideListInputSchema = z.strictObject({ tripKey: keySchema });
+const tripGuideGenerateInputSchema = z.strictObject({
+  tripKey: keySchema,
+  idempotencyKey: z.string().trim().min(1).max(200),
+});
+const placeReferenceListInputSchema = z.strictObject({ placeKey: keySchema, kind: placeReferenceKindSchema });
+const placeReferenceGenerateInputSchema = z.strictObject({
+  placeKey: keySchema,
+  kind: placeReferenceKindSchema,
+  idempotencyKey: z.string().trim().min(1).max(200),
+});
+const updateTripInputSchema = z.strictObject({
+  tripKey: keySchema,
+  name: z.string().trim().min(1).max(255).optional(),
+  description: z.string().trim().min(1).max(10_000).nullable().optional(),
+  coverImageKey: keySchema.nullable().optional(),
+  isFavorite: z.boolean().optional(),
+  status: z.enum(["planned", "completed"]).optional(),
+  placeKeys: z.array(keySchema).min(1).max(100).optional(),
+}).superRefine((input, context) => {
+  if (input.name === undefined && input.description === undefined && input.coverImageKey === undefined && input.isFavorite === undefined && input.status === undefined && input.placeKeys === undefined) {
+    context.addIssue({ code: "custom", message: "At least one trip field must be updated." });
+  }
+  if (input.placeKeys && new Set(input.placeKeys).size !== input.placeKeys.length) context.addIssue({ code: "custom", message: "Trip places must be distinct.", path: ["placeKeys"] });
+});
+export type UpdateTripInput = z.input<typeof updateTripInputSchema>;
+const updatePlaceInputSchema = z.strictObject({
+  placeKey: keySchema,
+  status: z.enum(["wishlist", "visited"]).optional(),
+  isFavorite: z.boolean().optional(),
+}).superRefine((input, context) => {
+  if (input.status === undefined && input.isFavorite === undefined) context.addIssue({ code: "custom", message: "At least one place field must be updated." });
+});
+export type UpdatePlaceInput = z.input<typeof updatePlaceInputSchema>;
+const deletePlaceInputSchema = z.strictObject({ placeKey: keySchema });
+const setTripAttachmentsInputSchema = z.strictObject({
+  tripKey: keySchema,
+  attachments: z.array(tripAttachmentSchema).max(100),
+}).superRefine(({ attachments }, context) => {
+  if (new Set(attachments.map(({ type, key }) => `${type}:${key}`)).size !== attachments.length) context.addIssue({ code: "custom", message: "Trip attachments must be distinct.", path: ["attachments"] });
+});
+export type SetTripAttachmentsInput = z.input<typeof setTripAttachmentsInputSchema>;
 const countrySearchInputSchema = z.strictObject({ organizationKey: keySchema, query: z.string().trim().min(1).max(200) });
 export const countrySearchResultSchema = z.strictObject({
   country: z.strictObject({
@@ -174,6 +292,137 @@ export function fetchTravelOverview() {
   return post("/travel/overview", {}, travelOverviewSchema);
 }
 
+export async function findPlaces(query: string, signal?: AbortSignal) {
+  return post(
+    "/travel/places/find",
+    placeSearchInputSchema.parse({ query }),
+    z.strictObject({ results: z.array(placeSearchResultSchema).min(1).max(5) }),
+    { timeout: 30_000, signal },
+  ).then(({ results }) => results);
+}
+
+export async function searchPlaces(query: string, signal?: AbortSignal, recordHistory = true) {
+  const input = placeSearchInputSchema.parse({ query, recordHistory });
+  const output = await searchApp({ ...input, collectionSlugs: ["places"], limit: 50 }, signal);
+  return appSearchResults(output, "places", placeSchema);
+}
+
+export function listTrips(signal?: AbortSignal) {
+  return post(
+    "/travel/trips/list",
+    {},
+    z.strictObject({ trips: z.array(tripSchema) }),
+    { timeout: 30_000, signal },
+  ).then(({ trips }) => trips);
+}
+
+export async function listTripGuides(tripKey: string, signal?: AbortSignal) {
+  const parsed = tripGuideListInputSchema.parse({ tripKey });
+  const guides = await post(
+    "/travel/trips/guides/list",
+    parsed,
+    z.strictObject({ guides: z.array(tripGuideSchema).max(100) }),
+    { timeout: 30_000, signal },
+  ).then(({ guides }) => guides);
+  if (guides.some((guide) => guide.tripKey !== parsed.tripKey)) throw new Error("The travel guide response did not match this trip.");
+  return guides;
+}
+
+export async function generateTripGuide(tripKey: string, idempotencyKey: string, signal?: AbortSignal) {
+  const parsed = tripGuideGenerateInputSchema.parse({ tripKey, idempotencyKey });
+  const guide = await post(
+    "/travel/trips/guides/generate",
+    parsed,
+    z.strictObject({ guide: tripGuideSchema }),
+    { timeout: 60_000, signal },
+  ).then(({ guide }) => guide);
+  if (guide.tripKey !== parsed.tripKey) throw new Error("The generated travel guide did not match this trip.");
+  return guide;
+}
+
+export async function listPlaceReferences(placeKey: string, kind: PlaceReferenceKind, signal?: AbortSignal) {
+  const parsed = placeReferenceListInputSchema.parse({ placeKey, kind });
+  const references = await post(
+    "/travel/places/references/list",
+    parsed,
+    z.strictObject({ references: z.array(placeReferenceSchema).max(100) }),
+    { timeout: 30_000, signal },
+  ).then(({ references }) => references);
+  if (references.some((reference) => reference.placeKey !== parsed.placeKey || reference.kind !== parsed.kind)) throw new Error("The place reference response did not match this place and kind.");
+  return references;
+}
+
+export async function generatePlaceReference(placeKey: string, kind: PlaceReferenceKind, idempotencyKey: string, signal?: AbortSignal) {
+  const parsed = placeReferenceGenerateInputSchema.parse({ placeKey, kind, idempotencyKey });
+  const reference = await post(
+    "/travel/places/references/generate",
+    parsed,
+    z.strictObject({ reference: placeReferenceSchema }),
+    { timeout: 60_000, signal },
+  ).then(({ reference }) => reference);
+  if (reference.placeKey !== parsed.placeKey || reference.kind !== parsed.kind) throw new Error("The generated place reference did not match this place and kind.");
+  return reference;
+}
+
+export function searchTrips(query: string, signal?: AbortSignal, recordHistory = true) {
+  const input = placeSearchInputSchema.parse({ query, recordHistory });
+  return searchApp({ ...input, collectionSlugs: ["trips"], limit: 50 }, signal).then((output) => appSearchResults(output, "trips", tripSchema));
+}
+
+export async function createTrip(input: CreateTripInput, signal?: AbortSignal) {
+  return post(
+    "/travel/trips",
+    createTripInputSchema.parse(input),
+    z.strictObject({ trip: tripSchema }),
+    { timeout: 30_000, signal },
+  ).then(({ trip }) => trip);
+}
+
+export async function updateTrip(input: UpdateTripInput, signal?: AbortSignal) {
+  return post(
+    "/travel/trips/update",
+    updateTripInputSchema.parse(input),
+    z.strictObject({ trip: tripSchema }),
+    { timeout: 30_000, signal },
+  ).then(({ trip }) => trip);
+}
+
+export async function updatePlace(input: UpdatePlaceInput, signal?: AbortSignal) {
+  return post(
+    "/travel/places/update",
+    updatePlaceInputSchema.parse(input),
+    z.strictObject({ place: placeSchema }),
+    { timeout: 30_000, signal },
+  ).then(({ place }) => place);
+}
+
+export async function deletePlace(placeKey: string, signal?: AbortSignal) {
+  return post(
+    "/travel/places/delete",
+    deletePlaceInputSchema.parse({ placeKey }),
+    z.strictObject({ placeKey: keySchema }),
+    { timeout: 30_000, signal },
+  );
+}
+
+export async function deleteTrip(tripKey: string, signal?: AbortSignal) {
+  return post(
+    "/travel/trips/delete",
+    z.strictObject({ tripKey: keySchema }).parse({ tripKey }),
+    z.strictObject({ tripKey: keySchema }),
+    { timeout: 30_000, signal },
+  );
+}
+
+export async function setTripAttachments(input: SetTripAttachmentsInput, signal?: AbortSignal) {
+  return post(
+    "/travel/trips/attachments/set",
+    setTripAttachmentsInputSchema.parse(input),
+    z.strictObject({ trip: tripSchema }),
+    { timeout: 30_000, signal },
+  ).then(({ trip }) => trip);
+}
+
 export function openPlace(name: string, countryCode: string, signal?: AbortSignal) {
   return post(
     "/travel/places/open",
@@ -185,7 +434,7 @@ export function openPlace(name: string, countryCode: string, signal?: AbortSigna
 
 export function findPlace(query: string, country: AuthoritativeCountry, signal?: AbortSignal) {
   return post(
-    "/travel/places/find",
+    "/travel/places/guide",
     z.strictObject({ query: z.string().trim().min(2).max(200), country: authoritativeCountrySchema }).parse({ query, country }),
     z.strictObject({ place: placeDetailSchema }),
     { timeout: 30_000, signal },
@@ -211,14 +460,9 @@ export function findPlaceChildren(childrenRequestToken: string, signal?: AbortSi
 }
 
 export async function searchCountries(query: string, signal?: AbortSignal) {
-  const { organizationKey } = getTravelContext();
-  const body = countrySearchInputSchema.parse({ organizationKey, query });
-  try {
-    const response = await apiClient.post("/travel/countries/search", body, { timeout: 30_000, signal });
-    return unwrap(response.data, countrySearchResultSchema).country;
-  } catch (error) {
-    throw responseError(error);
-  }
+  countrySearchInputSchema.parse({ organizationKey: getTravelContext().organizationKey, query });
+  const output = await searchApp({ query, collectionSlugs: ["countries"], limit: 1 }, signal);
+  return appSearchResults(output, "countries", countrySearchResultSchema.shape.country.unwrap()).at(0) ?? null;
 }
 
 const createPlaceInputSchema = placeSchema.pick({ name: true, summary: true, countryCode: true, latitude: true, longitude: true }).extend({
@@ -241,7 +485,7 @@ export function generatePlaceHeroImage(input: z.input<typeof placeImagesInputSch
     "/travel/places/image",
     placeImagesInputSchema.parse(input),
     placeImageResponseSchema,
-    { timeout: 5 * 60_000, signal },
+    { timeout: 15_000, signal },
   );
 }
 

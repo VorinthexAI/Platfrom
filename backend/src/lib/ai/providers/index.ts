@@ -24,6 +24,7 @@ export {
   chatInputSchema,
   chatMessageSchema,
   chatToolSchema,
+  chatOutputSchema,
   imageGenerateInputSchema,
   imageOutputSchema,
   generatedImageMimeTypeSchema,

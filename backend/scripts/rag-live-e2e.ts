@@ -38,7 +38,7 @@ try {
     keys.push(key);
     const embedding = await embedText({ text: `${source.name}\n\n${source.content}`, purpose: 'document' });
     if (embedding.length !== EMBEDDING_DIMENSIONS || embedding.some((value) => !Number.isFinite(value))) throw new Error(`Live document embedding is not finite ${EMBEDDING_DIMENSIONS}-dimensional data.`);
-    await insertPreparedDocument({ key, scopeKey: source.scopeKey, folderKey: folderByScope.get(source.scopeKey), name: source.name, content: source.content, embedding, isFavorite: false, createdAt: now, updatedAt: now });
+    await insertPreparedDocument({ key, scopeKey: source.scopeKey, folderKey: folderByScope.get(source.scopeKey), name: source.name, content: source.content, embedding, mutationPolicy: 'user', isFavorite: false, createdAt: now, updatedAt: now });
   }
   const queryEmbedding = await embedText({ text: 'How can I recover access when I forgot my login password?', purpose: 'query' });
   if (queryEmbedding.length !== EMBEDDING_DIMENSIONS || queryEmbedding.some((value) => !Number.isFinite(value))) throw new Error(`Live query embedding is not finite ${EMBEDDING_DIMENSIONS}-dimensional data.`);

@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
-import { emailConnectorCredentialsSchema, type EmailConnectorCredentials } from './connector-schema';
+import { emailConnectorCredentialsSchema, type EmailConnectorCredentials, type EmailProvider } from './connector-schema';
 
 const keyringSchema = z.record(z.string().min(1), z.string().min(1));
 
@@ -23,19 +23,19 @@ export function resolveEmailConnectorKeyring(environment: NodeJS.ProcessEnv = pr
   return { activeKeyId: 'v1', keys: new Map([['v1', decodeKey(fallback, 'ORCHESTRATION_CREDENTIALS_MASTER_KEY')]]) };
 }
 
-function aad(organizationKey: string, scopeKey: string, providerAccountId: string) {
-  return Buffer.from(`${organizationKey}\0${scopeKey}\0gmail\0${providerAccountId}`, 'utf8');
+function aad(organizationKey: string, scopeKey: string, providerAccountId: string, provider: EmailProvider = 'gmail') {
+  return Buffer.from(`${organizationKey}\0${scopeKey}\0${provider}\0${providerAccountId}`, 'utf8');
 }
 
 export function encryptEmailConnectorCredentials(
   credentials: EmailConnectorCredentials,
-  binding: { organizationKey: string; scopeKey: string; providerAccountId: string },
+  binding: { organizationKey: string; scopeKey: string; providerAccountId: string; provider?: EmailProvider },
   keyring = resolveEmailConnectorKeyring(),
 ) {
   const parsed = emailConnectorCredentialsSchema.parse(credentials);
   const iv = randomBytes(12);
   const cipher = createCipheriv('aes-256-gcm', keyring.keys.get(keyring.activeKeyId)!, iv);
-  cipher.setAAD(aad(binding.organizationKey, binding.scopeKey, binding.providerAccountId));
+  cipher.setAAD(aad(binding.organizationKey, binding.scopeKey, binding.providerAccountId, binding.provider));
   const ciphertext = Buffer.concat([cipher.update(JSON.stringify(parsed), 'utf8'), cipher.final()]);
   return {
     encryptionKeyId: keyring.activeKeyId,
@@ -46,14 +46,14 @@ export function encryptEmailConnectorCredentials(
 export function decryptEmailConnectorCredentials(
   encryptedCredentials: string,
   encryptionKeyId: string,
-  binding: { organizationKey: string; scopeKey: string; providerAccountId: string },
+  binding: { organizationKey: string; scopeKey: string; providerAccountId: string; provider?: EmailProvider },
   keyring = resolveEmailConnectorKeyring(),
 ) {
   const match = /^v1:([A-Za-z0-9_-]+):([A-Za-z0-9_-]+):([A-Za-z0-9_-]+)$/.exec(encryptedCredentials);
   const key = keyring.keys.get(encryptionKeyId);
   if (!match || !key) throw new Error('Email connector credentials cannot be decrypted');
   const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(match[1]!, 'base64url'));
-  decipher.setAAD(aad(binding.organizationKey, binding.scopeKey, binding.providerAccountId));
+  decipher.setAAD(aad(binding.organizationKey, binding.scopeKey, binding.providerAccountId, binding.provider));
   decipher.setAuthTag(Buffer.from(match[2]!, 'base64url'));
   const plaintext = Buffer.concat([decipher.update(Buffer.from(match[3]!, 'base64url')), decipher.final()]);
   return emailConnectorCredentialsSchema.parse(JSON.parse(plaintext.toString('utf8')));

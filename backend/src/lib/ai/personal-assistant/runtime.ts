@@ -7,8 +7,8 @@ import type { TravelService } from '@/lib/travel/service';
 import type { EmailService } from '@/lib/email-inbox/service';
 import type { BookService } from '@/lib/books/service';
 import type { UserHiddenService } from '@/lib/user-hiddens/service';
-import { executeAction, type ExecuteActionOptions } from '@/lib/ai/router';
-import type { RouteRequestInput } from '@/lib/ai/router/route-request';
+import type { AppSearchService } from '@/lib/app-search/service';
+import { executeAsk, type ExecuteActionOptions } from '@/lib/ai/router';
 import { assistantSourceSchema, assistantSurfaceSchema, defaultAssistantCapabilityRegistry, type AssistantCapability, type AssistantCapabilityContext, type AssistantCapabilityRegistry } from './capabilities';
 
 const currentNoteSchema = z.object({
@@ -43,7 +43,7 @@ const chatOutputSchema = z.object({
 
 export interface PersonalAssistantDependencies {
   registry?: AssistantCapabilityRegistry;
-  execute?: (request: RouteRequestInput, input: z.output<typeof coreChatInputSchema>, options?: ExecuteActionOptions) => Promise<{ output: unknown }>;
+  execute?: (organizationKey: string, input: z.input<typeof coreChatInputSchema>, options?: ExecuteActionOptions) => Promise<{ output: unknown }>;
   executeContent?: typeof runContentTool;
   router?: ExecuteActionOptions;
   content?: ContentToolDependencies;
@@ -53,6 +53,7 @@ export interface PersonalAssistantDependencies {
   userHiddens?: UserHiddenService;
   gallery?: AssistantCapabilityContext['gallery'];
   images?: AssistantCapabilityContext['images'];
+  appSearch?: AppSearchService;
 }
 
 const BASE_SYSTEM_PROMPT = `You are the user's capability-bound personal AI assistant. Select an available tool for the request.
@@ -108,28 +109,28 @@ function canonicalJson(value: unknown): string {
 
 function systemPrompt(surface: z.infer<typeof assistantSurfaceSchema>) {
   if (surface === 'media-workspace') return `${BASE_SYSTEM_PROMPT}
-- You are operating inside Gallery. Call image.search whenever the user asks to find, show, locate, filter, compare, count, find visually similar images, or detect duplicates.
+- You are operating inside Gallery. Use app.search with collectionSlugs ["images"] for every text query that finds, shows, locates, filters, compares, or counts images.
 - Use image.search with imageKey for source-image similarity, identityKey for a saved visual identity, and duplicates true plus collectionKey for duplicate detection.
-- Convert conversational wording into a concise visual retrieval query while preserving named Subjects, visible traits, setting, colors, style, actions, and readable text.
-- After image.search, summarize what was found. Never claim that no image exists without searching first.`;
+- Convert conversational wording into a concise text query while preserving named Subjects, visible traits, setting, colors, style, actions, and readable text.
+- After app.search or image.search, summarize what was found. Never claim that no image exists without searching first.`;
   const bookRules = `
 - Create a book only when the user explicitly asks to create, generate, or write a book. Otherwise discuss the idea or ask a clarifying question.
 - Before creating, gather or reasonably infer topic, goal, audience, tone, length, and language. Never call a book tool with placeholder values.
 - Call book.create exactly once with the complete brief.
 - Do not claim the book is ready until book.create succeeds.`;
   if (surface === 'book-workspace') return `${BASE_SYSTEM_PROMPT}
-- You are operating inside the user's book library.${bookRules}`;
+- You are operating inside the user's book library. Use app.search with the relevant collectionSlugs for text search.${bookRules}`;
   if (surface === 'travel-workspace') return `${BASE_SYSTEM_PROMPT}
-- You are operating inside Compass. Use Compass tools to list saved cities.
+- You are operating inside Compass. Use app.search with collectionSlugs ["places", "trips", "countries"] for text search, and use Compass tools to list saved cities.
 - Do not answer live weather, current conditions, or general destination facts.`;
   if (surface === 'signal-workspace') return `${BASE_SYSTEM_PROMPT}
-- You are operating inside Signal. Use Signal tools for inbox overview, synchronization, threads, favorites, reply drafts, and explicit disconnect requests.
-- Never claim a draft was sent until email.draft.send succeeds. OAuth connection is user-mediated and unavailable.`;
+- You are operating inside Signal. Use app.search with collectionSlugs ["inboxes", "email-tones", "email-messages", "email-drafts"] for text search. Use Signal tools for inbox overview, synchronization, threads, favorites, and reply drafts.
+- Never claim a draft was sent until email.draft.send succeeds. OAuth connection and inbox credential lifecycle operations are user-mediated and unavailable.`;
   return `${BASE_SYSTEM_PROMPT}
-- Use Archive folder and document tools for requested CRUD operations. Search knowledge when the request depends on stored information.
+- Use Archive folder and document tools for requested CRUD operations. Use app.search with collectionSlugs ["folders", "documents", "files"] when the request depends on stored information.
 - To create or edit the open note, call note.write with the complete final note. Never describe a note edit without calling note.write.
-- For proofreading, grammar, spelling, punctuation, wording, or clarity improvements to a saved document, call document.enhance.
-- For translation of a saved open document, call document.translate with the exact target language requested by the user. Never substitute English or a different language.
+- For proofreading, grammar, spelling, punctuation, wording, or clarity improvements, call app.enhance.
+- For translation, call app.translate with the exact target language requested by the user. Never substitute English or a different language.
 - Preserve useful existing note content unless the user asks to replace or remove it.
 - After search, answer only from returned evidence or call note.write if the user requested a note change.`;
 }
@@ -170,7 +171,7 @@ export async function runPersonalAssistant(
   const sources = new Map<string, z.infer<typeof assistantSourceSchema>>();
   let bookCreated = false;
   let domainToolExecuted = false;
-  const changedWorkspaces = new Set<NonNullable<AssistantCapability['mutationWorkspace']>>();
+  const changedWorkspaces = new Set<import('./capabilities').MutationWorkspace>();
   const changes = () => changedWorkspaces.size ? [...changedWorkspaces].map((workspace) => ({ workspace })) : undefined;
 
   for (let iteration = 0; iteration < 4; iteration += 1) {
@@ -180,13 +181,7 @@ export async function runPersonalAssistant(
       tools: [...capabilities.map(({ definition }) => definition), unsupportedRequestDefinition],
       options: { temperature: 0.2, maxTokens: 4_096 },
     });
-    const response = await (dependencies.execute ?? executeAction)({
-      mode: 'fixed',
-      organizationKey: domain.organizationKey,
-      actionSlug: 'orchestrator-chat',
-      modelSlug: 'openai.gpt-5.6-luna',
-      providerSlug: 'openai',
-    }, chatInput, { ...dependencies.router, timeoutMs: dependencies.router?.timeoutMs ?? 45_000 });
+    const response = await (dependencies.execute ?? executeAsk)(domain.organizationKey, chatInput, { ...dependencies.router, timeoutMs: dependencies.router?.timeoutMs ?? 45_000 });
     const output = chatOutputSchema.parse(response.output);
     if (output.toolCalls.length === 0) {
       if (!domainToolExecuted) return personalAssistantOutputSchema.parse({ type: 'unsupported', message: UNSUPPORTED_MESSAGES[input.surface], sources: [] });
@@ -218,14 +213,13 @@ export async function runPersonalAssistant(
       userHiddens: dependencies.userHiddens,
       gallery: dependencies.gallery,
       images: dependencies.images,
+      appSearch: dependencies.appSearch,
       signal: dependencies.router?.signal,
       timeoutMs: dependencies.router?.timeoutMs,
     });
     domainToolExecuted = true;
-    if (capability.mutationWorkspace) changedWorkspaces.add(capability.mutationWorkspace);
-    if (input.surface === 'travel-workspace' && toolCall.name === 'knowledge.search' && result.kind === 'continue' && (result.sources?.length ?? 0) === 0) {
-      return personalAssistantOutputSchema.parse({ type: 'unsupported', message: UNSUPPORTED_MESSAGES[input.surface], sources: [] });
-    }
+    const mutationWorkspace = typeof capability.mutationWorkspace === 'function' ? capability.mutationWorkspace(toolCall.arguments) : capability.mutationWorkspace;
+    if (mutationWorkspace) changedWorkspaces.add(mutationWorkspace);
     if (toolCall.name === 'book.create' && result.kind === 'continue') bookCreated = true;
     if (result.kind === 'continue') for (const source of result.sources ?? []) sources.set(source.documentKey, source);
     if (result.kind === 'note') return personalAssistantOutputSchema.parse({ type: 'note', content: result.content, message: result.message, sources: [...sources.values()], changes: changes() });

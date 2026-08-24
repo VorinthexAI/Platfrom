@@ -32,6 +32,7 @@ export type ButtonProps = PressableProps & {
   children?: ReactNode;
   contentMode?: "label" | "raw";
   icon?: ReactNode;
+  iconOnly?: boolean;
   loading?: boolean;
   pressFeedback?: "opacity" | "none";
   shape?: ButtonShape;
@@ -139,6 +140,7 @@ export function Button({
   contentMode = "label",
   disabled,
   icon,
+  iconOnly = false,
   loading = false,
   pressFeedback = "opacity",
   shape = "pill",
@@ -173,7 +175,7 @@ export function Button({
           styles.root,
           sizeStyles[size],
           variantStyles[variant],
-          variant === "icon" && iconSizeStyles[size],
+          (variant === "icon" || iconOnly) && iconSizeStyles[size],
           contentMode === "raw" && styles.rawContent,
           contentMode === "raw" && variant === "primary" && iconSizeStyles[size],
           disabled && !loading && variant !== "primary" && styles.disabledNonPrimary,

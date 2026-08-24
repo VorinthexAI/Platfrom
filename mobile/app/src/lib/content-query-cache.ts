@@ -6,7 +6,6 @@ import {
   listContentFolderTree,
   listContentDocumentAudioVersions,
   listContentDocumentSummaries,
-  listContentSearchHistory,
   getContentDocumentTopics,
   readContentDocument,
   type ContentContext,
@@ -14,7 +13,6 @@ import {
   type ContentDocumentAudioVersion,
   type ContentDocumentSummary,
   type ContentFolder,
-  type ContentSearchHistoryItem,
 } from "./content-client";
 
 export type ContentLocation = { folders: ContentFolder[]; documents: ContentDocument[] };
@@ -28,7 +26,6 @@ export const contentQueryKeys = {
   locations: (context: ContentContext) => [...contentQueryKeys.all(context), "locations"] as const,
   location: (context: ContentContext, folderKey?: string) => [...contentQueryKeys.locations(context), folderKey ?? null] as const,
   document: (context: ContentContext, documentKey: string) => [...contentQueryKeys.all(context), "documents", documentKey] as const,
-  history: (context: ContentContext, _folderKey?: string) => ["user-searches", context.userKey ?? ""] as const,
   audioVersions: (context: ContentContext, documentKey: string) => [...contentQueryKeys.document(context, documentKey), "audio-versions"] as const,
   summaries: (context: ContentContext, documentKey: string) => [...contentQueryKeys.document(context, documentKey), "summaries"] as const,
   topics: (context: ContentContext, documentKey: string) => [...contentQueryKeys.document(context, documentKey), "topics"] as const,
@@ -172,34 +169,6 @@ export async function invalidateContentDocumentTopics(queryClient: QueryClient, 
   await queryClient.invalidateQueries({ queryKey: contentQueryKeys.topics(context, documentKey), exact: true, refetchType: "none" });
 }
 
-export function getContentHistory(queryClient: QueryClient, context: ContentContext, folderKey?: string) {
-  return queryClient.fetchQuery({
-    queryKey: contentQueryKeys.history(context, folderKey),
-    queryFn: () => listContentSearchHistory(context),
-    staleTime: Infinity,
-  });
-}
-
-export async function refreshContentHistory(queryClient: QueryClient, context: ContentContext, folderKey?: string) {
-  await queryClient.invalidateQueries({ queryKey: contentQueryKeys.history(context, folderKey), exact: true, refetchType: "none" });
-  return getContentHistory(queryClient, context, folderKey);
-}
-
-export function promoteCachedContentHistory(queryClient: QueryClient, context: ContentContext, folderKey: string | undefined, item: ContentSearchHistoryItem) {
-  const key = contentQueryKeys.history(context, folderKey);
-  const previous = queryClient.getQueryData<ContentSearchHistoryItem[]>(key) ?? [];
-  const promoted = { ...item, usageCount: item.usageCount + 1, searchedAt: new Date().toISOString() };
-  queryClient.setQueryData<ContentSearchHistoryItem[]>(key, [promoted, ...previous.filter(({ normalizedQuery }) => normalizedQuery !== item.normalizedQuery)]);
-  return promoted;
-}
-
-export function removeCachedContentHistory(queryClient: QueryClient, context: ContentContext, folderKey: string | undefined, normalizedQuery: string) {
-  const key = contentQueryKeys.history(context, folderKey);
-  const previous = queryClient.getQueryData<ContentSearchHistoryItem[]>(key) ?? [];
-  queryClient.setQueryData<ContentSearchHistoryItem[]>(key, previous.filter((item) => item.normalizedQuery !== normalizedQuery));
-  return previous;
-}
-
 export function replaceCachedContentDocument(queryClient: QueryClient, context: ContentContext, updated: ContentDocument) {
   replaceCachedContentDocuments(queryClient, context, [updated]);
 }
@@ -295,14 +264,6 @@ export async function invalidateContentLocations(queryClient: QueryClient, conte
       refetchType: "none",
     })),
   ]);
-}
-
-export async function invalidateContentHistories(queryClient: QueryClient, context: ContentContext, folderKeys: (string | undefined)[]) {
-  await Promise.all([...new Set(folderKeys)].map((folderKey) => queryClient.invalidateQueries({
-    queryKey: contentQueryKeys.history(context, folderKey),
-    exact: true,
-    refetchType: "none",
-  })));
 }
 
 export function replaceCachedContentDocumentDetail(queryClient: QueryClient, context: ContentContext, updated: ContentDocument) {

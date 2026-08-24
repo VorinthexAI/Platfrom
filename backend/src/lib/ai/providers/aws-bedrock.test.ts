@@ -20,7 +20,7 @@ async function streamError(stream: AsyncIterable<unknown>): Promise<ProviderErro
 }
 
 const streamRequest = {
-  actionId: 'orchestrator-chat' as const,
+  actionId: 'ask' as const,
   modelId: 'test.bedrock-chat',
   externalModelId: 'test.bedrock-chat-v1:0',
   input: {
@@ -54,7 +54,7 @@ describe('AWS Bedrock provider', () => {
       BEDROCK_AWS_SECRET_ACCESS_KEY: 'bedrock-secret',
     });
     await adapter.execute({
-      actionId: 'reason', modelId: 'amazon.nova-pro', externalModelId: 'us.amazon.nova-pro-v1:0', organizationKey: 'organization',
+      actionId: 'ask', modelId: 'amazon.nova-pro', externalModelId: 'us.amazon.nova-pro-v1:0', organizationKey: 'organization',
       input: { messages: [{ role: 'user', content: [{ type: 'text', text: 'Summarize' }] }] },
     });
     expect(authorization).toContain('Credential=bedrock-key/');
@@ -73,7 +73,7 @@ describe('AWS Bedrock provider', () => {
     }) as typeof fetch;
 
     const response = await provider().execute({
-      actionId: 'document-topics',
+      actionId: 'ask',
       modelId: 'amazon.nova-pro',
       externalModelId: 'us.amazon.nova-pro-v1:0',
       input: { messages: [{ role: 'user', content: [{ type: 'text', text: 'Continue' }] }] },
@@ -96,7 +96,7 @@ describe('AWS Bedrock provider', () => {
     }) as typeof fetch;
 
     const response = await provider().execute({
-      actionId: 'orchestrator-chat',
+      actionId: 'ask',
       modelId: 'amazon.nova-pro',
       externalModelId: 'us.amazon.nova-pro-v1:0',
       organizationKey: 'organization',
@@ -127,7 +127,7 @@ describe('AWS Bedrock provider', () => {
     }) as typeof fetch;
 
     await provider().execute({
-      actionId: 'orchestrator-chat', modelId: 'amazon.nova-pro', externalModelId: 'us.amazon.nova-pro-v1:0', organizationKey: 'organization',
+      actionId: 'ask', modelId: 'amazon.nova-pro', externalModelId: 'us.amazon.nova-pro-v1:0', organizationKey: 'organization',
       input: { messages: [
         { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'call-1', name: 'search_knowledge', arguments: { query: 'roadmap' } }] },
         { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'call-1', result: { documents: [] } }] },

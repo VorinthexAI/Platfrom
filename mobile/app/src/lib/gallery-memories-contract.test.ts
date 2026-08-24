@@ -23,7 +23,9 @@ test("uses four-column full sheets, exact-open freshness, and owner-only creatio
   expect(memories).toContain('exact: true, refetchType: "none"');
   expect(memories).toContain('owner ? <Button disabled={creating || listLoading || opening}');
   expect(memories).toContain('notify("Memory created")');
-  expect(memories.indexOf('{creating ?')).toBeLessThan(memories.indexOf('memories.map((memory)'));
+  expect(memories).toContain('setMemories((current) => [...current.filter(({ key }) => key !== memory.key), memory])');
+  expect(memories.indexOf('{creating ?')).toBeGreaterThan(memories.indexOf('memories.map((memory)'));
+  expect(memories).toContain('const orderedMemories = [...result.memories].sort((left, right) => left.createdAt.localeCompare(right.createdAt))');
 });
 
 test("guards auto-open and preserves typing across zoom and event refresh", () => {
@@ -55,8 +57,12 @@ test("matches bulk partial deletion and hard-removes detail caches", () => {
   expect(memories).toContain('onPress={() => { listSheetOpen.current = false; setActiveSheet("confirmDelete"); }}');
   expect(memories).toContain("queryClient.removeQueries({ queryKey: galleryQueryKeys.memory");
   expect(memories).toContain('title={`Delete ${selectedMemoryKeys.length === 1 ? "memory" : `${selectedMemoryKeys.length} memories`}?`}');
+  expect(memories).toContain('style={styles.bulkDeleteAction} textStyle={styles.bulkDeleteText} variant="secondary">Delete</Button>');
+  expect(memories).toContain('bulkToolbar: { width: "100%", minHeight: 36, marginBottom: spacing.xs, padding: 3');
+  expect(memories).toContain('bulkDeleteText: { fontFamily: fonts.regular, fontSize: 11, letterSpacing: 0.4 }');
   expect(memories).toContain("finally {\n      if (generation === createRequest.current) setCreating(false);");
-  expect(memories).toContain("createRequest.current += 1; setCreating(false);");
+  expect(memories).toContain("createRequest.current += 1;");
+  expect(memories).toContain("setTimeout(() => setCreating(false), 0)");
   expect(memories).toContain("if (!open || creating || deleting || opening) return;");
   expect(memories).toContain("const listRequest = useRef(0);");
   expect(memories).toContain("const detailRequest = useRef(0);");

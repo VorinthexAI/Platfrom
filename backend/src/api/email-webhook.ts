@@ -4,8 +4,29 @@ import { verifyGoogleOidcToken } from '@/lib/google-oidc';
 import { enqueueEmailSyncNotification } from '@/lib/email-inbox/sync-queue';
 
 export const GMAIL_WEBHOOK_V1_PATH = '/api/v1/webhooks/gmail/pubsub';
+const pubsubMessageSchema = z.object({
+  data: z.string().min(1),
+  messageId: z.string().min(1).max(500).optional(),
+  message_id: z.string().min(1).max(500).optional(),
+  publishTime: z.string().datetime().optional(),
+  publish_time: z.string().datetime().optional(),
+  attributes: z.record(z.string()).optional(),
+  orderingKey: z.string().max(1000).optional(),
+  ordering_key: z.string().max(1000).optional(),
+}).strict().superRefine((message, context) => {
+  if (!message.messageId && !message.message_id) context.addIssue({ code: z.ZodIssueCode.custom, message: 'message ID is required' });
+  if (message.messageId && message.message_id && message.messageId !== message.message_id) context.addIssue({ code: z.ZodIssueCode.custom, message: 'message ID aliases disagree' });
+  if (message.publishTime && message.publish_time && message.publishTime !== message.publish_time) context.addIssue({ code: z.ZodIssueCode.custom, message: 'publish time aliases disagree' });
+  if (message.orderingKey && message.ordering_key && message.orderingKey !== message.ordering_key) context.addIssue({ code: z.ZodIssueCode.custom, message: 'ordering key aliases disagree' });
+}).transform((message) => ({
+  data: message.data,
+  messageId: message.messageId ?? message.message_id!,
+  publishTime: message.publishTime ?? message.publish_time,
+  attributes: message.attributes,
+  orderingKey: message.orderingKey ?? message.ordering_key,
+}));
 const envelopeSchema = z.object({
-  message: z.object({ data: z.string().min(1), messageId: z.string().min(1).max(500), publishTime: z.string().datetime().optional(), attributes: z.record(z.string()).optional() }).strict(),
+  message: pubsubMessageSchema,
   subscription: z.string().min(1).max(1000),
   deliveryAttempt: z.number().int().positive().optional(),
 }).strict();

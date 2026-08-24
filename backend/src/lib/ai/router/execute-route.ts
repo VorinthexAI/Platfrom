@@ -1,5 +1,6 @@
 import { normalizeProviderError } from '@/lib/ai/providers/errors';
 import type { ActionId } from '@/lib/ai/actions';
+import { webSearchInputSchema, type WebSearchInput } from '@/lib/ai/actions/web-search';
 import type { ProviderAdapter, ProviderExecuteResponse, ProviderId } from '@/lib/ai/providers/types';
 import { PROVIDER_REGISTRY } from '@/lib/ai/providers';
 import { getDefaultOrganizationCredentialsRepository } from '@/lib/ai/organization-credentials';
@@ -9,7 +10,7 @@ import { selectRoute } from './select-route';
 import { createStaticProviderAdapter } from './static-routes';
 import type { RouteRequestInput } from './route-request';
 import type { RouteDecision, RouterDependencies } from './types';
-import type { CoreChatInput } from '@/lib/ai/actions/core-chat';
+import { coreChatInputSchema, type CoreChatInput } from '@/lib/ai/actions/core-chat';
 
 export interface ExecuteRouteOptions<TInput> {
   decision: RouteDecision;
@@ -87,14 +88,27 @@ export async function executeAction<TInput, TOutput>(request: RouteRequestInput,
   return executeRoute<TInput, TOutput>({ decision, input, adapters: options.adapters, credentials: options.credentials, timeoutMs: options.timeoutMs, signal: options.signal });
 }
 
-/** Executes standalone chat through the caller-selected organization provider. */
-export async function executeCoreChat<TOutput>(organizationKey: string, input: CoreChatInput, options: ExecuteActionOptions = {}) {
-  return executeAction<CoreChatInput, TOutput>({
-    mode: 'auto',
+/** Executes the canonical text action using the model selected by its provider-neutral mode. */
+export async function executeAsk<TOutput>(organizationKey: string, input: CoreChatInput, options: ExecuteActionOptions = {}) {
+  const { mode, organizationProviderKey, ...providerInput } = coreChatInputSchema.parse(input);
+  if (mode === 'deep' && organizationProviderKey) throw new Error('Deep ask cannot be combined with an organization provider.');
+  const request: RouteRequestInput = {
+    mode: 'model',
     organizationKey,
-    actionSlug: 'chat',
-    organizationProviderKey: input.organizationProviderKey,
-  }, input, options);
+    actionSlug: 'ask',
+    modelSlug: mode === 'deep' ? 'openai.gpt-5.6-luna' : 'google.gemini-2.5-flash-lite',
+    ...(organizationProviderKey ? { organizationProviderKey } : {}),
+  };
+  return executeAction<typeof providerInput, TOutput>(request, providerInput, options);
+}
+
+/** Executes grounded web search using the model selected by its provider-neutral mode. */
+export async function executeWebSearch<TOutput>(organizationKey: string, input: WebSearchInput, options: ExecuteActionOptions = {}) {
+  const { mode, ...providerInput } = webSearchInputSchema.parse(input);
+  return executeAction<typeof providerInput, TOutput>({
+    mode: 'model', organizationKey, actionSlug: 'web-search',
+    modelSlug: mode === 'deep' ? 'openai.gpt-5.6-luna' : 'google.gemini-2.5-flash-lite',
+  }, providerInput, options);
 }
 
 /** Streams normalized provider chunks over the selected organization provider route. */

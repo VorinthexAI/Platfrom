@@ -1,11 +1,12 @@
 import { expect, test } from "bun:test";
 
 const read = (path: string) => Bun.file(new URL(path, import.meta.url)).text();
-const [mobileSheet, webSheet, mobileButton, webButton, agents, theme, core, switcher, travel, email, ascend, gallery, sharing, archive] = await Promise.all([
+const [mobileSheet, webSheet, mobileButton, webButton, mobileToast, agents, theme, core, switcher, travel, email, ascend, gallery, sharing, archive] = await Promise.all([
   read("../../../../shared/packages/ui/components/bottom-sheet/bottom-sheet.mobile.tsx"),
   read("../../../../shared/packages/ui/components/bottom-sheet/bottom-sheet.web.tsx"),
   read("../../../../shared/packages/ui/components/button/button.mobile.tsx"),
   read("../../../../shared/packages/ui/components/button/button.web.tsx"),
+  read("../../../../shared/packages/ui/components/toast/toast.mobile.tsx"),
   read("../../../../AGENTS.md"),
   read("../../../../shared/packages/ui/theme.css"),
   read("../../../../shared/packages/ui/components/core-composer/core-composer.mobile.tsx"),
@@ -57,12 +58,58 @@ test("uses no legacy BottomSheet sizing props", () => {
   }
 });
 
+test("keeps the scene transformed until every stacked mobile sheet closes", () => {
+  expect(mobileSheet).toContain("const openSheets = useRef(new Set<symbol>())");
+  expect(mobileSheet).toContain("openSheets.current.add(id)");
+  expect(mobileSheet).toContain("openSheets.current.delete(id)");
+  expect(mobileSheet).toContain("const hasOpenSheet = openSheets.current.size > 0");
+});
+
+test("renders the shared toast viewport inside native mobile sheets", () => {
+  expect(mobileToast).toContain("export function ToastViewport()");
+  expect(mobileToast).toContain("<ToastViewport />");
+  expect(mobileSheet).toContain('import { ToastViewport } from "../toast/toast.mobile"');
+  expect(mobileSheet).toContain("<ToastViewport />");
+  expect(mobileToast).toContain('viewport: { elevation: 1000');
+  expect(mobileToast).toContain('zIndex: 1000');
+});
+
+test("keeps mobile sheet surfaces and fixed footers above the keyboard", () => {
+  expect(mobileSheet).toContain("KeyboardAvoidingView");
+  expect(mobileSheet).toContain('behavior={Platform.OS === "ios" ? "padding" : fullHeight ? undefined : "height"}');
+  expect(mobileSheet).toMatch(/<KeyboardAvoidingView[\s\S]*?<SheetSurface[\s\S]*?<\/KeyboardAvoidingView>/);
+  expect(mobileSheet).toContain("paddingBottom: androidBottomInset");
+  expect(mobileSheet).toContain("bottomInset={insets.bottom}");
+});
+
+test("layers complete mobile sheet pages over a stationary previous page", () => {
+  expect(mobileSheet).toContain("pageKey?: string");
+  expect(mobileSheet).toContain("onSwipeLeft?: () => void");
+  expect(mobileSheet).toContain("onSwipeRight?: () => void");
+  expect(mobileSheet).toContain("const previous = pageSnapshotRef.current");
+  expect(mobileSheet).toContain("pageDirectionRef.current * windowWidth");
+  expect(mobileSheet).toContain("page={pageTransition.previous}");
+  expect(mobileSheet).toContain("translateX: pageTranslateX");
+  expect(mobileSheet).toContain("duration: 280");
+  expect(mobileSheet).toContain('<GestureDetector gesture={horizontalSwipeGesture}><Animated.View');
+  expect(mobileSheet).toContain("key={pageTransition.previous.pageKey}");
+  expect(mobileSheet).toContain("key={presentedPage.pageKey}");
+  expect(mobileSheet).toContain("pageTransition.previous.pageKey !== presentedPage.pageKey");
+  expect(mobileSheet).not.toContain("setPageTransition({ pageKey, previous: livePage })");
+  expect(mobileSheet).toContain("GestureHandlerRootView");
+  expect(mobileSheet).toContain('import { scheduleOnRN } from "react-native-worklets"');
+  expect(mobileSheet).toContain("scheduleOnRN(navigateHorizontal, translationX < 0 ? 1 : -1)");
+  expect(mobileSheet).not.toContain(".runOnJS(true)");
+  expect(mobileSheet).toContain("toValue: 0, useNativeDriver: false");
+  expect(mobileSheet).toContain("style={[styles.layerSurface, transitioningPage && { transform: [{ translateX: pageTranslateX }] }]}");
+});
+
 test("classifies every full-height sheet workflow explicitly", () => {
   expect(core).toContain('<BottomSheet height="full"');
   expect(switcher).not.toContain("height=");
   expect(travel).toContain('height="full"');
-  expect(email).toContain('height={sheet === "reply" ? "full" : undefined}');
-  expect(email).toContain('style={sheet === "reply" ? styles.fullSheetScroll : undefined}');
+  expect(email).toContain('height={sheet === "trashRoot" || formSheet ? "full" : undefined}');
+  for (const title of ["Recipients", "Write email", "Choose a tone", "Review email"]) expect(email).toMatch(new RegExp(`height="full"[\\s\\S]*?title="${title}"`));
   expect(ascend).toContain('height={sheet === "create" || sheet === "reader" ? "full" : undefined}');
   expect(gallery).toContain('height="full"');
   expect(gallery).toContain('height={activeSheet === "destination" || activeSheet === "imageEdit"');

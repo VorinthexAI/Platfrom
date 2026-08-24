@@ -1,7 +1,7 @@
 import { createHash, randomBytes, scrypt as nodeScrypt } from 'node:crypto';
 import { promisify } from 'node:util';
 import { z } from 'zod';
-import type { ActionId } from '@/lib/ai/actions';
+import { generateDocumentSummary, generateDocumentTranslation, generateTextEnhancement } from '@/lib/ai/actions/document-text-generation';
 import type { ToolContext } from './tool-context';
 import type { DocumentParseDependencies, DocumentParseInput } from '@/lib/ai/document-processing';
 import type { RouterDependencies } from '@/lib/ai/router';
@@ -25,6 +25,8 @@ import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
 import { chunkDocumentContent, documentSemanticHash } from '@/lib/ai/document-processing/chunking';
 import type { DocumentScanInput } from '@/lib/ai/document-scanning';
 import type { UserSearchService } from '@/lib/user-searches/service';
+import type { GeneratedDocumentBinding } from '@/lib/db/generated-document-bindings.node';
+import { withArangoKey } from '@/lib/db/base';
 
 type Role = 'viewer' | 'moderator' | 'admin' | 'owner';
 type SafeEvent = {
@@ -40,8 +42,10 @@ type SafeEvent = {
 };
 
 export interface ContentIdempotencyStore {
-  claim(identity: { organizationKey: string; actorKey: string; tool: string; idempotencyKey: string }, requestHash: string, leaseOwner: string, now: string): Promise<{ status: 'claimed' } | { status: 'pending' } | { status: 'conflict' } | { status: 'replay'; response: unknown }>;
+  claim(identity: { organizationKey: string; actorKey: string; tool: string; idempotencyKey: string }, requestHash: string, leaseOwner: string, now: string): Promise<{ status: 'claimed' } | { status: 'pending' } | { status: 'indeterminate' } | { status: 'conflict' } | { status: 'failed'; failure: { code: string; message: string; retryable: boolean } } | { status: 'replay'; response: unknown }>;
+  start(identity: { organizationKey: string; actorKey: string; tool: string; idempotencyKey: string }, requestHash: string, leaseOwner: string, now: string): Promise<boolean>;
   complete(identity: { organizationKey: string; actorKey: string; tool: string; idempotencyKey: string }, requestHash: string, leaseOwner: string, response: unknown, now: string): Promise<void>;
+  fail(identity: { organizationKey: string; actorKey: string; tool: string; idempotencyKey: string }, requestHash: string, leaseOwner: string, failure: { code: string; message: string; retryable: boolean }, now: string): Promise<void>;
   release(identity: { organizationKey: string; actorKey: string; tool: string; idempotencyKey: string }, requestHash: string, leaseOwner: string): Promise<void>;
 }
 
@@ -87,6 +91,7 @@ export interface ContentRepository {
   semanticSearch(input: { embedding: number[]; authorizedScopeKeys: string[]; folderKeys?: string[]; documentKeys?: string[]; extensions?: Document['extension'][]; createdAfter?: string; createdBefore?: string; updatedAfter?: string; updatedBefore?: string; minScore?: number; limit?: number }): Promise<Array<{ score: number; document: Document; matchedContent?: string }>>;
   semanticSearchFolders?(input: { embedding: number[]; authorizedScopeKeys: string[]; folderKeys?: string[]; minScore: number; limit: number }): Promise<Array<{ score: number; folder: Folder }>>;
   semanticNeighbors?(input: { embedding: number[]; scopeKey: string; activeFolderKeys: string[]; sourceFolderKey?: string; sourceDocumentKey?: string; limit: number }): Promise<{ folders: Array<{ score: number; folder: Folder }>; documents: Array<{ score: number; document: Document }>; files: Array<{ score: number; document: Document }> }>;
+  generatedDocumentBindings?(documentKeys: string[]): Promise<GeneratedDocumentBinding[]>;
   transaction?<T>(operation: (repository: ContentRepository) => Promise<T>): Promise<T>;
 }
 
@@ -101,10 +106,12 @@ export interface ContentToolDependencies extends RouterDependencies {
   repository?: ContentRepository;
   storage?: DocumentObjectStorage;
   parseDocument?: (input: DocumentParseInput, dependencies?: DocumentParseDependencies) => Promise<{ document: Document }>;
-  runAction?: (action: ActionId, input: Record<string, unknown>, context: ToolContext) => Promise<ContentActionResult>;
+  runAction?: (operation: string, input: Record<string, unknown>, context: ToolContext) => Promise<ContentActionResult>;
   executeAction?: typeof import('@/lib/ai/router').executeAction;
   embed?: (text: string) => Promise<number[]>;
   embedBatch?: (texts: string[]) => Promise<number[][]>;
+  /** Trusted query embedding supplied by a canonical parent operation. */
+  queryEmbedding?: number[];
   observer?: (event: SafeEvent) => void | Promise<void>;
   clock?: () => Date;
   id?: () => string;
@@ -122,11 +129,17 @@ export interface ContentToolDependencies extends RouterDependencies {
   signFolderCoverUrl?: (storageKey: string) => Promise<string>;
   signDocumentSourceUrl?: (storageKey: string) => Promise<string>;
   signAudioUrl?: (storageKey: string) => Promise<string>;
+  publishTripChange?: (scopeKey: string) => Promise<void>;
+  publishPlaceReferenceChange?: (scopeKey: string) => Promise<void>;
+  publishContentChange?: (scopeKey: string) => Promise<void>;
 }
 
 const rank: Record<Role, number> = { viewer: 1, moderator: 2, admin: 3, owner: 4 };
 const ROUTED_EMBEDDING_CONCURRENCY = 8;
 const CONTENT_SEARCH_CACHE_VERSION = 4;
+const MAIL_ENVELOPE_KINDS = new Set([
+  'mail-thread', 'mail-message', 'mail-reply-draft', 'mail-new-draft', 'mail-tone', 'mail-reply-context', 'mail-writing-profile', 'mail-contact', 'mail-rule',
+]);
 const scrypt = promisify(nodeScrypt);
 const MUTATIONS = new Set<ContentToolName>([
   'folder.create', 'folder.update', 'folder.rename', 'folder.move', 'folder.copy', 'folder.delete', 'document.parse', 'document.scan', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.delete', 'document.share', 'document.unshare', 'document.create-version', 'document.restore-version', 'document.delete-version', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.summarize', 'document.translate', 'document.rewrite', 'content.search-history.delete',
@@ -156,15 +169,20 @@ function mappedError(error: unknown, tool: ContentToolName, action?: string, res
 }
 
 async function folderView(folder: Folder, dependencies: Pick<RuntimeDefaults, 'getFolderCoverImage' | 'signFolderCoverUrl'>) {
-  const { embedding: _embedding, coverImageKey, _internalDeletion: _internalDeletion, ...safe } = folder;
+  const { embedding: _embedding, coverImageKey, purpose: _purpose, mutationPolicy: _mutationPolicy, _internalDeletion: _internalDeletion, ...safe } = folder;
   if (!coverImageKey) return safe;
   const image = await dependencies.getFolderCoverImage(folder.scopeKey, coverImageKey);
   return { ...safe, ...(image ? { coverUrl: await dependencies.signFolderCoverUrl(image.storageKey) } : {}) };
 }
 
 function documentView(document: Document) {
-  const { content: _content, embedding: _embedding, contentChunks: _contentChunks, chunkEmbeddings: _chunkEmbeddings, semanticChunkCount: _semanticChunkCount, semanticContentHash: _semanticContentHash, _semanticChunkingSkipped: _semanticChunkingSkipped, storageKey: _storageKey, speechStorageKeys: _speechStorageKeys, sourceStorageKeys: _sourceStorageKeys, _internalDeletion: _internalDeletion, ...safe } = document;
+  const { content: _content, embedding: _embedding, contentChunks: _contentChunks, chunkEmbeddings: _chunkEmbeddings, semanticChunkCount: _semanticChunkCount, semanticContentHash: _semanticContentHash, emailToneEmbeddingVersion: _emailToneEmbeddingVersion, emailReplyContextEmbeddingVersion: _emailReplyContextEmbeddingVersion, _semanticChunkingSkipped: _semanticChunkingSkipped, storageKey: _storageKey, speechStorageKeys: _speechStorageKeys, sourceStorageKeys: _sourceStorageKeys, mutationPolicy: _mutationPolicy, _internalDeletion: _internalDeletion, ...safe } = document;
   return { ...safe, ...(document.sourceStorageKeys?.length ? { sourceImageCount: document.sourceStorageKeys.length } : {}) };
+}
+
+function isSystemManagedMailDocument(document: Document) {
+  if (document.mutationPolicy !== 'system-only') return false;
+  try { return MAIL_ENVELOPE_KINDS.has(JSON.parse(document.content)?.kind); } catch { return false; }
 }
 
 function downloadFileName(name: string, extension: string) {
@@ -216,35 +234,6 @@ function plainGeneratedSummary(value: unknown) {
     .replace(/^[ \t]*(?:[-*•]|\d+[.)])[ \t]+/gm, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
-}
-
-const generatedSummarySectionsSchema = z.object({
-  sections: z.array(z.object({
-    heading: z.string().trim().min(1).max(120),
-    body: z.string().trim().min(1),
-  }).strict()).min(2).max(4),
-}).strict();
-
-function sectionedGeneratedSummary(value: unknown) {
-  const raw = z.string().trim().min(1).parse(value)
-    .replace(/<(?:analysis|thinking|reasoning)>[\s\S]*?<\/(?:analysis|thinking|reasoning)>/gi, '')
-    .trim();
-  const candidates = [...raw.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)].map((match) => match[1]!.trim());
-  const firstBrace = raw.indexOf('{');
-  const lastBrace = raw.lastIndexOf('}');
-  if (firstBrace >= 0 && lastBrace > firstBrace) candidates.push(raw.slice(firstBrace, lastBrace + 1));
-  candidates.push(raw);
-  for (const candidate of candidates) {
-    try {
-      const parsed = generatedSummarySectionsSchema.parse(JSON.parse(candidate));
-      return parsed.sections.map(({ heading, body }) => `${plainGeneratedSummary(heading)}\n${plainGeneratedSummary(body)}`).join('\n\n');
-    } catch {
-      // Try the next JSON candidate before accepting a plain-text fallback.
-    }
-  }
-  if (firstBrace >= 0 || lastBrace >= 0) throw new Error('The summary model returned malformed structured output.');
-  const plain = plainGeneratedSummary(raw).replace(/^(?:sure[,!.]?\s*|here(?:'s| is) (?:the |a )?summary:?\s*)/i, '').trim();
-  return `Summary\n${z.string().min(1).parse(plain)}`;
 }
 
 async function audioVersionView(version: DocumentAudioVersion, current: Document, signUrl: (storageKey: string) => Promise<string>) {
@@ -378,6 +367,12 @@ async function productionRepository(): Promise<ContentRepository> {
     semanticSearch: documents.semanticSearchDocuments,
     semanticSearchFolders: folders.semanticSearchFolders,
     semanticNeighbors: persistence.semanticNeighbors,
+    async generatedDocumentBindings(documentKeys) {
+      if (documentKeys.length === 0) return [];
+      const cursor = await client.db.query('FOR binding IN generatedDocumentBindings FILTER binding.documentKey IN @documentKeys RETURN binding', { documentKeys });
+      const { generatedDocumentBindingSchema } = await import('@/lib/db/generated-document-bindings.node');
+      return (await cursor.all()).map((value) => generatedDocumentBindingSchema.parse(withArangoKey(value as Record<string, unknown>)));
+    },
     transaction: (operation) => content.withContentPersistenceTransaction((bound) => operation(makeRepository(bound))),
   });
   return makeRepository(content.contentPersistence);
@@ -461,15 +456,25 @@ async function defaults(deps: ContentToolDependencies, context: ToolContext): Pr
     parseDocument: deps.parseDocument ?? processing.parseDocument, id: deps.id ?? newId, clock: deps.clock ?? (() => new Date()), random: deps.random ?? randomBytes,
     embed: embedding,
     embedBatch: embeddingBatch,
-    runAction: deps.runAction ?? (async (action: ActionId, input: Record<string, unknown>): Promise<ContentActionResult> => {
-      if (action === 'document-embed') return processing.documentEmbed(input as never, { embedBatch: ({ texts }) => embeddingBatch(texts), dimensions: deps.ingestion?.embeddingDimensions }) as Promise<ContentActionResult>;
-      const request = { mode: 'auto' as const, organizationKey: context.organizationKey, actionSlug: action };
+    runAction: deps.runAction ?? (async (operation: string, input: Record<string, unknown>): Promise<ContentActionResult> => {
+      if (operation === 'document-embed') return processing.documentEmbed(input as never, { embedBatch: ({ texts }) => embeddingBatch(texts), dimensions: deps.ingestion?.embeddingDimensions }) as Promise<ContentActionResult>;
+      if (operation.startsWith('text.')) {
+        const deep = operation === 'text.rewrite';
+        const request = deep
+          ? { mode: 'model' as const, organizationKey: context.organizationKey, actionSlug: 'ask' as const, modelSlug: 'openai.gpt-5.6-luna' }
+          : { mode: 'auto' as const, organizationKey: context.organizationKey, actionSlug: 'ask' as const };
+        const response = await executeAction<Record<string, unknown>, ContentActionResult>(request, input, deps);
+        return response.output;
+      }
+      const request = { mode: 'auto' as const, organizationKey: context.organizationKey, actionSlug: operation as never };
       const response = await executeAction<Record<string, unknown>, ContentActionResult>(request, input, deps);
       return response.output;
     }),
     idempotency: deps.idempotency ?? {
       claim: ledger.claimContentIdempotency,
+      start: ledger.startContentIdempotency,
       complete: ledger.completeContentIdempotency,
+      fail: ledger.failContentIdempotency,
       release: ledger.releaseContentIdempotency,
     },
     generateExport: deps.generateExport ?? exports.generateDocumentExport,
@@ -593,7 +598,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
     },
   });
   const repo = observeRepository(d.repository);
-  const action = async (slug: ActionId, actionInput: Record<string, unknown>, resourceKey?: string, scopeKey?: string) => {
+  const action = async (slug: string, actionInput: Record<string, unknown>, resourceKey?: string, scopeKey?: string) => {
     const started = performance.now();
     await event('action', 'started', slug, resourceKey, scopeKey);
     try {
@@ -693,6 +698,13 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
   const foldersIn = async (scopeKey: string, includePendingDeletion = false) => (await repo.listFolders(scopeKey, includePendingDeletion))
     .filter((item) => includePendingDeletion || !item._internalDeletion);
   const descendants = (all: Folder[], key: string) => { const out: Folder[] = []; const pending = [key]; const seen = new Set(pending); while (pending.length) { const parentKey = pending.shift()!; for (const child of all.filter((f) => f.parentFolderKey === parentKey)) if (!seen.has(child.key)) { seen.add(child.key); out.push(child); pending.push(child.key); } } return out; };
+  const forbidSystemMailMutation = (current: Document, action: string, resourceKey = current.key) => {
+    if (isSystemManagedMailDocument(current)) fail('CONTENT_FORBIDDEN', 'Mail documents are managed through their canonical email capabilities.', tool, action, resourceKey);
+  };
+  const forbidSystemMailInFolders = async (scopeKey: string, folderKeys: Set<string>, action: string, repository = repo) => {
+    const current = (await repository.listDocuments(scopeKey, true)).find((item) => item.folderKey && folderKeys.has(item.folderKey) && isSystemManagedMailDocument(item));
+    if (current) forbidSystemMailMutation(current, action);
+  };
   const activeFolderHierarchy = async (key: string | undefined, scopeKey: string) => {
     let currentKey: string | undefined = key;
     const visited = new Set<string>();
@@ -713,7 +725,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
     return target;
   };
   const generated = async (doc: Document, instruction: string, deep = false) => {
-    const slug = deep ? 'deep-reason' : 'reason';
+    const slug = deep ? 'text.rewrite' : 'text.generate';
     const output = await action(slug, {
       systemPrompt: `${instruction} Use only the supplied document. Preserve its facts and return only the requested text without commentary.`,
       messages: [{ role: 'user', content: [{ type: 'text', text: `Title: ${doc.name}\n\n${doc.content}` }] }],
@@ -812,6 +824,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       scopeKey: source.scopeKey,
       ...(source.folderKey ? { folderKey: source.folderKey } : {}),
       name: finalName,
+      mutationPolicy: 'user',
       isFavorite: false,
       ...transformed,
       createdAt: timestamp,
@@ -828,16 +841,34 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
   } : undefined;
   const requestHash = idempotencyIdentity ? await fingerprintInput(input) : undefined;
   let ownsIdempotencyClaim = false;
-  let executionCompleted = false;
+  let idempotencyExecutionStarted = false;
   if (idempotencyIdentity && requestHash) {
     const claim = await d.idempotency.claim(idempotencyIdentity, requestHash, invocationKey, now());
     if (claim.status === 'replay') return contentToolOutputSchemas[tool].parse(claim.response) as ContentToolOutput<Name>;
-    if (claim.status === 'conflict') fail('CONTENT_CONFLICT', 'Idempotency key was already used with a different request.', tool, 'idempotency');
-    if (claim.status === 'pending') throw new ContentError('CONTENT_CONFLICT', 'An invocation with this idempotency key is still pending.', tool, { action: 'idempotency', retryable: true });
+    if (claim.status === 'conflict') fail('CONTENT_IDEMPOTENCY_CONFLICT', 'Idempotency key was already used with a different request.', tool, 'idempotency');
+    if (claim.status === 'pending') throw new ContentError('CONTENT_IDEMPOTENCY_PENDING', 'An invocation with this idempotency key is still active.', tool, { action: 'idempotency', retryable: true });
+    if (claim.status === 'indeterminate') throw new ContentError('CONTENT_IDEMPOTENCY_INDETERMINATE', 'The prior invocation may have produced effects and cannot be executed again.', tool, { action: 'idempotency', retryable: false });
+    if (claim.status === 'failed') {
+      throw new ContentError('CONTENT_IDEMPOTENCY_FAILED', claim.failure.message, tool, { action: 'idempotency', retryable: claim.failure.retryable });
+    }
     ownsIdempotencyClaim = true;
+    if (!await d.idempotency.start(idempotencyIdentity, requestHash, invocationKey, now())) {
+      await d.idempotency.release(idempotencyIdentity, requestHash, invocationKey);
+      ownsIdempotencyClaim = false;
+      throw new ContentError('CONTENT_IDEMPOTENCY_PENDING', 'Idempotency execution ownership was lost.', tool, { action: 'idempotency', retryable: true });
+    }
+    idempotencyExecutionStarted = true;
   }
   let result: unknown;
+  let executionSucceeded = false;
+  const changedTripScopeKeys = new Set<string>();
+  const linkedMutationKeys = tool === 'document.update' ? input.updates.map((item: any) => item.documentKey)
+    : tool === 'document.rename' ? input.renames.map((item: any) => item.documentKey)
+      : tool === 'document.move' ? input.moves.map((item: any) => item.documentKey)
+        : tool === 'document.delete' ? input.documentKeys : [];
+  let linkedBindings: GeneratedDocumentBinding[] = [];
   try {
+    linkedBindings = linkedMutationKeys.length > 0 && repo.generatedDocumentBindings ? await repo.generatedDocumentBindings(linkedMutationKeys) : [];
     if (tool === 'folder.create') {
       const creates = input.folders.map((item: any) => ({ ...item, key: item.key ?? d.id() }));
       result = await batch(tool, creates.map((item: any) => ({
@@ -847,6 +878,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           if (item.parentFolderKey) {
             const parent = await folder(item.parentFolderKey, 'moderator', false);
             if (parent.scopeKey !== item.scopeKey) fail('FOLDER_MOVE_FORBIDDEN', 'Parent belongs to another scope.', tool, 'insert', item.parentFolderKey);
+            if (parent.mutationPolicy === 'system-container') fail('CONTENT_FORBIDDEN', 'System container folders cannot contain child folders.', tool, 'insert', item.parentFolderKey);
           }
           if (item.coverImageKey && !await d.getFolderCoverImage(item.scopeKey, item.coverImageKey)) fail('CONTENT_NOT_FOUND', 'Folder cover image was not found in this scope.', tool, 'read', item.coverImageKey);
           const embedding = await embed([item.name, item.description].filter(Boolean).join('\n\n'), item.key, item.scopeKey);
@@ -935,6 +967,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         preflight: async () => { await folder(item.folderKey, 'moderator', false); },
         run: async (mutationRepository: ContentRepository) => {
           const current = await folder(item.folderKey, 'moderator', false);
+          if (current.mutationPolicy === 'system-container' && (tool === 'folder.rename' || item.name !== undefined || item.description !== undefined || item.coverImageKey !== undefined)) fail('CONTENT_FORBIDDEN', 'System container folder metadata is managed by the system.', tool, 'update', current.key);
           if (item.coverImageKey && !await d.getFolderCoverImage(current.scopeKey, item.coverImageKey)) fail('CONTENT_NOT_FOUND', 'Folder cover image was not found in this scope.', tool, 'read', item.coverImageKey);
           const changesEmbedding = item.name !== undefined || item.description !== undefined;
           const name = item.name ?? current.name;
@@ -956,14 +989,18 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         key: item.folderKey,
         preflight: async () => {
           const source = await folder(item.folderKey, 'admin', false);
+          if (source.mutationPolicy === 'system-container') fail('CONTENT_FORBIDDEN', 'System container folders cannot be moved.', tool, 'update', source.key);
+          const all = await foldersIn(source.scopeKey);
+          await forbidSystemMailInFolders(source.scopeKey, new Set([source.key, ...descendants(all, source.key).map((child) => child.key)]), 'move');
           if (!item.targetParentFolderKey) return;
           const target = await folder(item.targetParentFolderKey, 'admin', false);
           if (source.scopeKey !== target.scopeKey) fail('FOLDER_MOVE_FORBIDDEN', 'Cross-scope folder moves are forbidden.', tool, 'update', source.key);
-          const all = await foldersIn(source.scopeKey);
           if (target.key === source.key || descendants(all, source.key).some((child) => child.key === target.key)) fail('FOLDER_CYCLE_DETECTED', 'Folder move would create a cycle.', tool, 'update', source.key);
         },
         run: async (mutationRepository: ContentRepository) => {
-          const source = await folder(item.folderKey, 'admin', false);
+          const source = await folder(item.folderKey, 'admin', false, mutationRepository);
+          const all = await mutationRepository.listFolders(source.scopeKey, true);
+          await forbidSystemMailInFolders(source.scopeKey, new Set([source.key, ...descendants(all, source.key).map((child) => child.key)]), 'move', mutationRepository);
           const moved = await mutationRepository.updateFolder(source.key, {
             parentFolderKey: item.targetParentFolderKey,
             updatedAt: now(),
@@ -977,9 +1014,11 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         key: item.folderKey,
         run: async () => {
           const source = await folder(item.folderKey, 'viewer', false);
-          const target = await location(item.targetScopeKey, item.targetParentFolderKey, 'moderator');
+          if (source.mutationPolicy === 'system-container') fail('CONTENT_FORBIDDEN', 'System container folders cannot be copied.', tool, 'copy', source.key);
           const sourceScopeFolders = await foldersIn(source.scopeKey);
           const sourceFolders = [source, ...descendants(sourceScopeFolders, source.key)];
+          await forbidSystemMailInFolders(source.scopeKey, new Set(sourceFolders.map((current) => current.key)), 'copy');
+          const target = await location(item.targetScopeKey, item.targetParentFolderKey, 'moderator');
           const rootName = item.newName ?? source.name;
           const sourceFolderKeys = new Set(sourceFolders.map((candidate) => candidate.key));
           const sourceDocuments = (await repo.listDocuments(source.scopeKey)).filter((candidate) => candidate.folderKey && sourceFolderKeys.has(candidate.folderKey));
@@ -1104,6 +1143,9 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         key,
         preflight: async () => {
           const root = await folder(key, 'owner', true);
+          if (root.mutationPolicy === 'system-container') fail('CONTENT_FORBIDDEN', 'System container folders cannot be deleted.', tool, 'delete', key);
+          const all = await foldersIn(root.scopeKey, true);
+          await forbidSystemMailInFolders(root.scopeKey, new Set([root.key, ...descendants(all, root.key).map((child) => child.key)]), 'delete');
           if (root._internalDeletion) {
             const manifest = root._internalDeletion;
             if (input.atomic) fail('CONTENT_CONFLICT', 'Atomic folder deletion cannot resume an existing deletion manifest.', tool, 'transaction', key);
@@ -1121,6 +1163,8 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             const affected = input.recursive ? [candidate, ...children] : [candidate];
             const affectedKeys = new Set(affected.map((item) => item.key));
             const documents = (await mutationRepository.listDocuments(candidate.scopeKey, true)).filter((item) => item.folderKey !== undefined && affectedKeys.has(item.folderKey));
+            const systemMail = documents.find(isSystemManagedMailDocument);
+            if (systemMail) forbidSystemMailMutation(systemMail, 'delete');
             if (!input.recursive && children.length > 0) fail('FOLDER_NOT_EMPTY', 'Folder is not empty.', tool, 'delete', key);
             if (documents.length > 0) fail('CONTENT_CONFLICT', 'Atomic folder deletion is unavailable when storage objects are involved.', tool, 'storage', key);
             for (const item of affected) {
@@ -1131,6 +1175,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             const marker = { kind: 'folder' as const, owner: invocationKey, startedAt: now(), folderKeys: affected.map((item) => item.key), documentKeys: [], objectKeys: [] };
             for (const item of [...affected].reverse()) if (!await mutationRepository.setFolderDeletion(item.key, marker)) fail('CONTENT_CONFLICT', 'Folder could not be frozen for deletion.', tool, 'transaction', item.key);
             for (const item of [...affected].reverse()) await mutationRepository.deleteFolder(item.key);
+            changedTripScopeKeys.add(candidate.scopeKey);
             return {};
           }
           if (!repo.transaction) fail('CONTENT_CONFLICT', 'Transaction-bound deletion marking is unavailable.', tool, 'transaction', key);
@@ -1165,6 +1210,8 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
               const frozen = input.recursive ? [candidate, ...children] : [candidate];
               const frozenKeys = new Set(frozen.map((item) => item.key));
               const ownedDocuments = (await bound.listDocuments(candidate.scopeKey, true)).filter((item) => item.folderKey !== undefined && frozenKeys.has(item.folderKey));
+              const systemMail = ownedDocuments.find(isSystemManagedMailDocument);
+              if (systemMail) forbidSystemMailMutation(systemMail, 'delete');
               if (!input.recursive && (children.length > 0 || ownedDocuments.length > 0)) fail('FOLDER_NOT_EMPTY', 'Folder is not empty.', tool, 'delete', key);
               if (ownedDocuments.length > 0 && input.atomic) fail('CONTENT_CONFLICT', 'Atomic folder deletion is unavailable when storage objects are involved.', tool, 'storage', key);
               for (const item of frozen) {
@@ -1227,6 +1274,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             for (const item of affected.reverse()) await bound.deleteFolder(item.key);
           };
             await repo.transaction(removeMetadata);
+            changedTripScopeKeys.add(root.scopeKey);
           } catch (error) {
             if (ownsFreeze && !storageStarted) await repo.transaction(async (bound) => {
               for (const item of documents) await bound.setDocumentDeletion(item.key, undefined, invocationKey);
@@ -1276,6 +1324,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             scopeKey: input.scopeKey,
             ...(input.folderKey ? { folderKey: input.folderKey } : {}),
             name: input.name ?? `Scanned document ${timestamp.slice(0, 10)}`,
+            mutationPolicy: 'user',
             isFavorite: false,
             sourceStorageKeys: processed.storageKeys,
             ...transformed,
@@ -1319,6 +1368,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         scopeKey: input.scopeKey,
         ...(input.folderKey ? { folderKey: input.folderKey } : {}),
         name: input.name,
+        mutationPolicy: 'user',
         isFavorite: false,
         ...transformed,
         createdAt: timestamp,
@@ -1373,7 +1423,8 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         key: item.documentKey,
         preflight: async () => { await document(item.documentKey, 'moderator', false); },
         run: async (mutationRepository: ContentRepository) => {
-          const current = await document(item.documentKey, 'moderator', false);
+          const current = await document(item.documentKey, 'moderator', false, mutationRepository);
+          forbidSystemMailMutation(current, 'update');
           if (item.expectedUpdatedAt && current.updatedAt !== item.expectedUpdatedAt) fail('DOCUMENT_VERSION_CONFLICT', 'Document changed after it was read.', tool, 'update', current.key);
           const hasRepresentation = item.content !== undefined;
           const transformed = hasRepresentation ? await representations(item.content, current.name, current.key, current.scopeKey) : undefined;
@@ -1411,7 +1462,8 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         key: item.documentKey,
         preflight: async () => { await document(item.documentKey, 'moderator', false); },
         run: async (mutationRepository: ContentRepository) => {
-          const current = await document(item.documentKey, 'moderator', false);
+          const current = await document(item.documentKey, 'moderator', false, mutationRepository);
+          forbidSystemMailMutation(current, 'rename');
           const semantics = await generatedSemantics(item.name, current.content, current.key, current.scopeKey);
           const renamed = await mutationRepository.updateDocument(current.key, { name: item.name, ...semantics, updatedAt: nextUpdatedAt(current.updatedAt) });
           return { document: documentView(renamed) };
@@ -1422,11 +1474,13 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         key: item.documentKey,
         preflight: async () => {
           const source = await document(item.documentKey, 'admin', false);
+          forbidSystemMailMutation(source, 'move');
           await location(item.targetScopeKey, item.targetFolderKey, 'admin');
           if (source.scopeKey !== item.targetScopeKey) fail('FOLDER_MOVE_FORBIDDEN', 'Cross-scope document moves are not supported.', tool, 'update', source.key);
         },
         run: async (mutationRepository: ContentRepository) => {
-          const current = await document(item.documentKey, 'admin', false);
+          const current = await document(item.documentKey, 'admin', false, mutationRepository);
+          forbidSystemMailMutation(current, 'move');
           const moved = await mutationRepository.updateDocument(current.key, { folderKey: item.targetFolderKey, updatedAt: now() });
           return { document: documentView(moved) };
         },
@@ -1437,6 +1491,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         key: item.documentKey,
         run: async () => {
           const source = await document(item.documentKey, 'viewer', false);
+          forbidSystemMailMutation(source, 'copy');
           const target = await location(item.targetScopeKey, item.targetFolderKey, 'moderator');
           const key = d.id();
           const name = item.newName ?? source.name;
@@ -1515,7 +1570,9 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       result = await batch(tool, input.documentKeys.map((key: string) => ({
         key,
         preflight: async () => {
-          const current = await document(key, 'owner', true);
+          const generatedByPrincipal = linkedBindings.some((binding) => binding.documentKey === key && binding.createdByKey === member.user.key);
+          const current = await document(key, generatedByPrincipal ? 'moderator' : 'owner', true);
+          forbidSystemMailMutation(current, 'delete');
           if (current.isFavorite) fail('CONTENT_CONFLICT', 'Unfavorite the document before deleting it.', tool, 'delete', key);
         },
         run: async () => {
@@ -1525,6 +1582,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           let current = await repo.transaction(async (bound) => {
             const candidate = await bound.getDocument(key);
             if (!candidate) fail('CONTENT_NOT_FOUND', 'Document was not found.', tool, 'read', key);
+            forbidSystemMailMutation(candidate, 'delete');
             if (candidate._internalDeletion) {
               if (candidate._internalDeletion.kind !== 'document') fail('CONTENT_CONFLICT', 'A different deletion is already pending.', tool, 'delete', key);
               return candidate;
@@ -1643,11 +1701,12 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       result = await batch(tool, input.shares.map((item: any) => ({
         key: item.documentKey,
         preflight: async () => {
-          await document(item.documentKey, 'moderator', false);
+          forbidSystemMailMutation(await document(item.documentKey, 'moderator', false), 'share');
           if (item.expiresAt && item.expiresAt <= now()) fail('DOCUMENT_SHARE_INVALID', 'Share expiry must be in the future.', tool, 'insert', item.documentKey);
         },
         run: async () => {
           const current = await document(item.documentKey, 'moderator', false);
+          forbidSystemMailMutation(current, 'share');
           const token = Buffer.from(d.random(32)).toString('base64url');
           const timestamp = now();
           const share = await repo.insertShare({
@@ -1672,10 +1731,11 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           if (input.shareKeys) {
             const share = await repo.getShare(key);
             if (!share) fail('CONTENT_NOT_FOUND', 'Share was not found.', tool, 'read', key);
-            await document(share.documentKey, 'viewer');
+            forbidSystemMailMutation(await document(share.documentKey, 'viewer'), 'unshare', key);
             await roleFor(share.scopeKey, 'moderator', key);
           } else {
             const current = await document(key, 'moderator');
+            forbidSystemMailMutation(current, 'unshare');
             const shares = await repo.listShares(current.scopeKey, [key], { includeExpired: true, includeRevoked: true });
             if (shares.length === 0) fail('CONTENT_NOT_FOUND', 'Document has no shares to revoke.', tool, 'read', key);
           }
@@ -1685,10 +1745,11 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           if (input.shareKeys) {
             const share = await repo.getShare(key);
             if (!share) fail('CONTENT_NOT_FOUND', 'Share was not found.', tool, 'read', key);
-            await document(share.documentKey, 'viewer');
+            forbidSystemMailMutation(await document(share.documentKey, 'viewer', false, mutationRepository), 'unshare', key);
             return { share: shareView(await mutationRepository.updateShare(key, { revokedAt: timestamp, updatedAt: timestamp })) };
           }
-          const current = await document(key, 'moderator');
+          const current = await document(key, 'moderator', false, mutationRepository);
+          forbidSystemMailMutation(current, 'unshare');
           const shares = await repo.listShares(current.scopeKey, [key], { includeExpired: true, includeRevoked: true });
           const revoked = [];
           for (const share of shares) revoked.push(shareView(await mutationRepository.updateShare(share.key, { revokedAt: timestamp, updatedAt: timestamp })));
@@ -1707,9 +1768,10 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
     } else if (tool === 'document.create-version') {
       result = await batch(tool, input.documentKeys.map((key: string) => ({
         key,
-        preflight: async () => { await document(key, 'moderator', false); },
+        preflight: async () => { forbidSystemMailMutation(await document(key, 'moderator', false), 'create-version'); },
         run: async (mutationRepository: ContentRepository) => {
-          const current = await document(key, 'moderator', false);
+          const current = await document(key, 'moderator', false, mutationRepository);
+          forbidSystemMailMutation(current, 'create-version');
           const content = input.contents?.[key] ?? current.content;
           const version = await mutationRepository.createVersion({
             scopeKey: current.scopeKey,
@@ -1738,13 +1800,14 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       if (!repo.getAudioVersion || !repo.updateAudioPlayback) fail('CONTENT_CONFLICT', 'Document audio playback state is unavailable.', tool, 'update', input.audioVersionKey);
       const audio = await repo.getAudioVersion(input.audioVersionKey);
       if (!audio) fail('CONTENT_NOT_FOUND', 'Audio version was not found.', tool, 'update', input.audioVersionKey);
-      await document(audio.documentKey, 'viewer', false);
+      forbidSystemMailMutation(await document(audio.documentKey, 'viewer', false), 'update-playback', input.audioVersionKey);
       if (input.playbackPositionMs > audio.durationMs) fail('CONTENT_INVALID_INPUT', 'Playback position cannot exceed audio duration.', tool, 'update', input.audioVersionKey);
       const updated = await repo.updateAudioPlayback(audio.scopeKey, audio.key, input.playbackPositionMs);
       if (!updated) fail('CONTENT_CONFLICT', 'Audio playback state could not be updated.', tool, 'update', input.audioVersionKey);
       result = { audioVersionKey: updated.key, documentKey: updated.documentKey, playbackPositionMs: updated.playbackPositionMs };
     } else if (tool === 'document.audio.playback.clear') {
       const current = await document(input.documentKey, 'viewer', false);
+      forbidSystemMailMutation(current, 'clear-playback');
       if (!repo.clearCurrentAudioVersion) fail('CONTENT_CONFLICT', 'Document audio playback state is unavailable.', tool, 'update', input.documentKey);
       await repo.clearCurrentAudioVersion(current.scopeKey, current.key);
       result = { documentKey: current.key };
@@ -1789,6 +1852,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         key: item.documentKey,
         preflight: async () => {
           const current = await document(item.documentKey, 'moderator', false);
+          forbidSystemMailMutation(current, 'restore-version');
           const rawVersion = await repo.getVersion(item.versionKey);
           const version = rawVersion ? documentVersionSchema.safeParse(rawVersion) : null;
           if (!version?.success || version.data.documentKey !== current.key || version.data.scopeKey !== current.scopeKey) {
@@ -1796,8 +1860,9 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           }
         },
         run: async (mutationRepository: ContentRepository) => {
-          const current = await document(item.documentKey, 'moderator', false);
-          const version = documentVersionSchema.parse(await repo.getVersion(item.versionKey));
+          const current = await document(item.documentKey, 'moderator', false, mutationRepository);
+          forbidSystemMailMutation(current, 'restore-version');
+          const version = documentVersionSchema.parse(await mutationRepository.getVersion(item.versionKey));
           let backup: DocumentVersion | undefined;
           if (item.createBackupVersion) {
             backup = await mutationRepository.createVersion({
@@ -1828,11 +1893,13 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           const version = await repo.getVersion(key);
           if (!version) fail('CONTENT_NOT_FOUND', 'Version was not found.', tool, 'read', key);
           const current = await document(version.documentKey, 'owner', true);
+          forbidSystemMailMutation(current, 'delete-version', key);
           if (current._internalDeletion) fail('CONTENT_CONFLICT', 'Document deletion is already pending.', tool, 'delete', key);
         },
         run: async (mutationRepository: ContentRepository) => {
           const selected = await repo.getVersion(key);
           if (!selected) fail('CONTENT_NOT_FOUND', 'Version was not found.', tool, 'read', key);
+          forbidSystemMailMutation(await document(selected.documentKey, 'owner', true, mutationRepository), 'delete-version', key);
           if (input.atomic) await mutationRepository.deleteVersion(selected.key);
           else {
             if (!repo.transaction) fail('CONTENT_CONFLICT', 'Transaction-bound version deletion is unavailable.', tool, 'transaction', key);
@@ -1871,7 +1938,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
        })), false, repo);
     } else if (tool === 'document.topics') {
       const current = await document(input.documentKey, 'viewer', false);
-      const generated = await action('document-topics', {
+      const generated = await action('text.topics', {
         systemPrompt: 'Identify the document\'s distinct primary topics. Return strict JSON only in the form {"topics":["topic"]}. Include no more than 10 concise topic strings, with no duplicates or commentary.',
         messages: [{ role: 'user', content: [{ type: 'text', text: `Title: ${current.name}\n\n${current.content}` }] }],
         options: { temperature: 0.1, maxTokens: 500 },
@@ -1882,21 +1949,15 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         const fenced = /^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i.exec(text);
         parsed = z.object({ topics: z.array(z.string().trim().min(1).max(200)).max(10) }).strict().parse(JSON.parse(fenced?.[1]?.trim() ?? text));
       } catch (error) {
-        fail('CONTENT_INVALID_INPUT', 'The topic model returned invalid JSON.', tool, 'document-topics', current.key, error);
+        fail('CONTENT_INVALID_INPUT', 'The topic model returned invalid JSON.', tool, 'text.topics', current.key, error);
       }
       result = { documentKey: current.key, topics: [...new Set(parsed.topics)].slice(0, 10) };
     } else if (tool === 'document.summarize') {
-      if (input.atomic && input.persist) fail('CONTENT_CONFLICT', 'Atomic persisted summaries are unavailable because generation is an external side effect.', tool, 'document-summarize');
+      if (input.atomic && input.persist) fail('CONTENT_CONFLICT', 'Atomic persisted summaries are unavailable because generation is an external side effect.', tool, 'text.summarize');
       const sources: Document[] = [];
       for (const key of input.documentKeys) sources.push(await document(key, input.persist ? 'moderator' : 'viewer', false));
-      const generateSummary = async (sourceDocuments: Document[]) => {
-        const generated = await action('document-summarize', {
-          systemPrompt: `Create a ${input.style} summary${input.topic ? ` focused on ${input.topic}` : ''}${input.language ? ` in ${input.language}` : ''}. Use only the supplied document content and preserve its facts. Return strict JSON only in the form {"sections":[{"heading":"Short heading","body":"Prose paragraph"}]}. Return 2 to 4 distinct sections. Bodies must be concise prose paragraphs, never bullet points or numbered lists. Do not include analysis, reasoning, planning, self-reference, a preamble, a conclusion about the task, Markdown, code fences, or commentary. Output the JSON object and nothing else.`,
-          messages: [{ role: 'user', content: [{ type: 'text', text: sourceDocuments.map((item) => `Title: ${item.name}\n\n${item.content}`).join('\n\n---\n\n') }] }],
-          options: { temperature: 0.2, maxTokens: 5_000 },
-        }, sourceDocuments[0]!.key, sourceDocuments[0]!.scopeKey);
-        return sectionedGeneratedSummary(generated.text);
-      };
+      if (input.persist) for (const source of sources) forbidSystemMailMutation(source, 'persist-summary');
+      const generateSummary = async (sourceDocuments: Document[]) => generateDocumentSummary({ documents: sourceDocuments, topic: input.topic, style: input.style, language: input.language }, async (request) => z.string().parse((await action('text.summarize', { systemPrompt: request.systemPrompt, messages: [{ role: 'user', content: [{ type: 'text', text: request.text }] }], options: { temperature: request.temperature, maxTokens: request.maxTokens } }, sourceDocuments[0]!.key, sourceDocuments[0]!.scopeKey)).text));
       if (input.combine) {
         const text = await generateSummary(sources);
         result = { results: sources.map((source) => ({ key: source.key, success: true, data: { documentKey: source.key, text } })), summary: { requested: sources.length, succeeded: sources.length, failed: 0 } };
@@ -1920,39 +1981,20 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           documentKey,
           mode: input.mode,
         }));
-      if (input.atomic && items.some((item: any) => item.mode !== 'preview')) fail('CONTENT_CONFLICT', 'Atomic persisted AI transformations are unavailable because generation and storage cannot be rolled back.', tool, 'reason');
+      if (input.atomic && items.some((item: any) => item.mode !== 'preview')) fail('CONTENT_CONFLICT', 'Atomic persisted AI transformations are unavailable because generation and storage cannot be rolled back.', tool, 'text.generate');
 
       result = await batch(tool, items.map((item: any) => ({
           key: item.documentKey,
           run: async () => {
             const current = await document(item.documentKey, item.mode === 'preview' ? 'viewer' : 'moderator', false);
+            if (item.mode !== 'preview') forbidSystemMailMutation(current, item.mode);
             const instruction = tool === 'document.translate'
                 ? `Translate to ${input.targetLanguage}${input.sourceLanguage ? ` from ${input.sourceLanguage}` : ''}. ${input.preserveFormatting ? 'Preserve headings, lists, tables, paragraph boundaries, and inline emphasis.' : 'Return clear translated prose.'}`
                 : `${item.instruction}${item.tone ? ` Tone: ${item.tone}.` : ''}${item.audience ? ` Audience: ${item.audience}.` : ''}${item.length ? ` Length: ${item.length}.` : ''}`;
             const text = tool === 'document.enhance'
-              ? z.string().trim().min(1).parse((await action('enhance', {
-                systemPrompt: `Correct spelling, grammar, awkward wording, and unclear phrasing. Repair or remove nonsensical words, isolated stray characters, corrupted fragments, and OCR artifacts when their intended meaning can be inferred from context. Reconstruct words, sentences, and paragraphs broken by artificial hard line wraps, including input with only a few characters per line. Join those artificial breaks so prose uses normal line width, while preserving intentional headings, lists, and paragraph boundaries. Preserve the original meaning, facts, tone, and useful structure. Trim leading and trailing whitespace, remove trailing spaces, collapse excessive blank lines, and organize longer content into readable sections with concise plain-text headings when the material supports them. Do not force headings into short content. Do not add new claims, Markdown decoration, or commentary. ${input.instruction ? `Additional direction: ${input.instruction} ` : ''}Return only the revised text.`,
-                messages: [{ role: 'user', content: [{ type: 'text', text: current.content }] }],
-                options: { temperature: 0.1, maxTokens: Math.min(5_000, Math.max(256, Math.ceil(current.content.length / 3))) },
-              }, current.key, current.scopeKey)).text)
-                .replace(/^```(?:text)?\s*/i, '')
-                .replace(/\s*```$/i, '')
-                .replace(/\r\n?/g, '\n')
-                .replace(/[ \t]+\n/g, '\n')
-                .replace(/\n{3,}/g, '\n\n')
-                .trim()
+              ? await generateTextEnhancement({ content: current.content, instruction: input.instruction }, async (request) => z.string().parse((await action('text.enhance', { systemPrompt: request.systemPrompt, messages: [{ role: 'user', content: [{ type: 'text', text: request.text }] }], options: { temperature: request.temperature, maxTokens: request.maxTokens } }, current.key, current.scopeKey)).text))
               : tool === 'document.translate'
-              ? z.string().trim().min(1).parse((await action('translate', {
-                systemPrompt: `Translate the supplied text${input.sourceLanguage ? ` from ${input.sourceLanguage}` : ''} into ${input.targetLanguage} using fluent, idiomatic target-language grammar. The target language label may be an English name, a native name or endonym, an ISO language code, or mildly misspelled; infer the intended language before translating. Preserve meaning, facts, tone, and useful structure. Trim leading and trailing whitespace, remove trailing spaces, collapse excessive blank lines, and organize longer content into readable sections with concise plain-text headings when the material supports them. Do not force headings into short content. ${input.preserveFormatting ? 'Preserve meaningful paragraph boundaries and formatting.' : 'Use clear, natural prose.'} Do not add Markdown decoration or commentary. ${input.instruction ? `Additional direction: ${input.instruction} ` : ''}Return only the translated text.`,
-                messages: [{ role: 'user', content: [{ type: 'text', text: current.content }] }],
-                options: { temperature: 0.1, maxTokens: Math.min(5_000, Math.max(256, Math.ceil(current.content.length / 3))) },
-              }, current.key, current.scopeKey)).text)
-                .replace(/^```(?:text)?\s*/i, '')
-                .replace(/\s*```$/i, '')
-                .replace(/\r\n?/g, '\n')
-                .replace(/[ \t]+\n/g, '\n')
-                .replace(/\n{3,}/g, '\n\n')
-                .trim()
+              ? await generateDocumentTranslation({ content: current.content, targetLanguage: input.targetLanguage, sourceLanguage: input.sourceLanguage, instruction: input.instruction, preserveFormatting: input.preserveFormatting }, async (request) => z.string().parse((await action('text.translate', { systemPrompt: request.systemPrompt, messages: [{ role: 'user', content: [{ type: 'text', text: request.text }] }], options: { temperature: request.temperature, maxTokens: request.maxTokens } }, current.key, current.scopeKey)).text))
               : await generated(current, instruction, tool === 'document.rewrite');
             const persistedDocumentKey = item.mode === 'replace'
               ? await persistGenerated(current, text, 'replace', tool.split('.')[1])
@@ -2083,7 +2125,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         const hasExactMatch = activeFolders.some(({ score }) => score >= 0.75) || activeDocuments.some(({ score }) => score >= 0.75);
         if (!hasExactMatch) {
           let embeddingTimer: number | undefined;
-          const queryEmbedding = await Promise.race<number[] | undefined>([
+          const queryEmbedding = dependencies.queryEmbedding ?? await Promise.race<number[] | undefined>([
             embed(input.query, undefined, input.scopeKey, 'query').catch(() => undefined),
             new Promise<undefined>((resolve) => { embeddingTimer = setTimeout(resolve, dependencies.searchEmbeddingTimeoutMs ?? 500); }),
           ]);
@@ -2114,7 +2156,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         result = freshResult;
       } else {
         let queryEmbedding: number[];
-        try { queryEmbedding = await embed(input.query, undefined, input.scopeKey, 'query'); }
+        try { queryEmbedding = dependencies.queryEmbedding ?? await embed(input.query, undefined, input.scopeKey, 'query'); }
         catch (error) { fail('CONTENT_SEARCH_EMBEDDING_FAILED', 'Search query embedding failed.', tool, 'embed', undefined, error, true); }
         const [documentMatches, folderMatches] = await Promise.all([
           repo.semanticSearch({ embedding: queryEmbedding, authorizedScopeKeys: [input.scopeKey], ...(folderKeys ? { folderKeys } : {}), minScore: input.minimumScore, limit: 100 }),
@@ -2138,7 +2180,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             let summary: string;
             let complete = true;
             try {
-              const generatedSummary = await action('reason', {
+              const generatedSummary = await action('text.search-summary', {
                 systemPrompt: 'Summarize only how the supplied document relates to the search query. Use only the supplied text and return only the concise summary without commentary.',
                 messages: [{ role: 'user', content: [{ type: 'text', text: `Search query: ${input.query}\n\nTitle: ${current.name}\n\n${(matchedContent ?? current.content).slice(0, 16_000)}` }] }],
                 options: { temperature: 0.1, maxTokens: 300 },
@@ -2292,14 +2334,38 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       };
     }
     const parsed = contentToolOutputSchemas[tool].parse(result) as ContentToolOutput<Name>;
-    executionCompleted = true;
+    executionSucceeded = true;
     if (idempotencyIdentity && requestHash && ownsIdempotencyClaim) await d.idempotency.complete(idempotencyIdentity, requestHash, invocationKey, parsed, now());
+    if (tool === 'folder.delete' && changedTripScopeKeys.size > 0) {
+      const publishTripChange = dependencies.publishTripChange ?? (!dependencies.repository
+        ? async (scopeKey: string) => (await import('@/api/events')).publishScopeEvent(scopeKey, 'trip.changed')
+        : undefined);
+      if (publishTripChange) await Promise.all([...changedTripScopeKeys].map((scopeKey) => publishTripChange(scopeKey).catch(() => undefined)));
+    }
+    if (linkedBindings.length > 0 && 'summary' in parsed && parsed.summary.succeeded > 0) {
+      const contentScopes = new Set(linkedBindings.map(({ scopeKey }) => scopeKey));
+      const tripScopes = new Set(linkedBindings.filter(({ subjectType }) => subjectType === 'trip').map(({ scopeKey }) => scopeKey));
+      const placeScopes = new Set(linkedBindings.filter(({ subjectType }) => subjectType === 'place').map(({ scopeKey }) => scopeKey));
+      const publishContentChange = dependencies.publishContentChange ?? (!dependencies.repository ? async (scopeKey: string) => (await import('@/api/events')).publishScopeEvent(scopeKey, 'content.changed') : undefined);
+      const publishTripChange = dependencies.publishTripChange ?? (!dependencies.repository ? async (scopeKey: string) => (await import('@/api/events')).publishScopeEvent(scopeKey, 'trip.changed') : undefined);
+      const publishPlaceReferenceChange = dependencies.publishPlaceReferenceChange ?? (!dependencies.repository ? async (scopeKey: string) => (await import('@/api/events')).publishScopeEvent(scopeKey, 'place.reference.changed') : undefined);
+      await Promise.all([
+        ...[...contentScopes].map((scopeKey) => publishContentChange?.(scopeKey).catch(() => undefined)),
+        ...[...tripScopes].map((scopeKey) => publishTripChange?.(scopeKey).catch(() => undefined)),
+        ...[...placeScopes].map((scopeKey) => publishPlaceReferenceChange?.(scopeKey).catch(() => undefined)),
+      ]);
+    }
     await event('action', 'succeeded', 'tool', undefined, context.runtimeScopeKey, Math.round(performance.now() - invocationStarted));
     return parsed;
   } catch (error) {
     const mapped = mappedError(error, tool);
-    if (idempotencyIdentity && requestHash && ownsIdempotencyClaim && !executionCompleted) await d.idempotency.release(idempotencyIdentity, requestHash, invocationKey).catch(() => undefined);
+    let terminalError: ContentError | undefined;
+    if (idempotencyIdentity && requestHash && idempotencyExecutionStarted && !executionSucceeded) {
+      const terminalized = await d.idempotency.fail(idempotencyIdentity, requestHash, invocationKey, { code: mapped.code, message: mapped.message, retryable: mapped.retryable }, now()).then(() => true, () => false);
+      if (terminalized) terminalError = new ContentError('CONTENT_IDEMPOTENCY_FAILED', mapped.message, tool, { action: 'idempotency', retryable: mapped.retryable });
+    }
     await event('action', 'failed', 'tool', mapped.resourceKey, context.runtimeScopeKey, Math.round(performance.now() - invocationStarted));
+    if (terminalError) throw terminalError;
     throw mapped;
   }
 }

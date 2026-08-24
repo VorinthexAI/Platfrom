@@ -63,6 +63,11 @@ describe('scoped Content persistence', () => {
     expect(await createContentPersistence(executor).deleteFolder(scopeKey, folderKey)).toBe(true);
     expect(calls).toHaveLength(2);
     expect(calls[0]?.query).toContain('RETURN OLD._key');
+    expect(calls[0]?.query).toContain('attachment.targetType == @attachmentType');
+    expect(calls[0]?.query).toContain('LET affectedTripKeys');
+    expect(calls[0]?.query).toContain('UPDATE trip WITH { updatedAt: @now } IN trips');
+    expect(calls[0]!.query.indexOf('LET affectedTripKeys')).toBeLessThan(calls[0]!.query.indexOf('REMOVE attachment IN tripAttachments'));
+    expect(calls[0]?.bindVars).toMatchObject({ attachmentType: 'folder' });
     expect(calls[1]?.query).toContain('FOR hidden IN userHiddens');
     expect(calls[1]?.query).toContain('hidden.sourceKey == @removedKey');
     expect(calls[1]?.bindVars).toEqual({ hiddenSource: 'folder', removedKey: folderKey });
@@ -72,12 +77,14 @@ describe('scoped Content persistence', () => {
     const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
     const executor: ContentQueryExecutor = { async query(query, bindVars) { calls.push({ query, bindVars }); return { async next() { return folderKey; } }; } };
     expect(await createContentPersistence(executor).deleteDocument(scopeKey, folderKey)).toBe(true);
-    expect(calls).toHaveLength(3);
+    expect(calls).toHaveLength(4);
+    expect(calls.some(({ query }) => query.includes('generatedDocumentBindings'))).toBe(true);
     expect(calls[1]?.query).toContain('hidden.source == @hiddenSource');
     expect(calls[1]?.bindVars).toEqual({ hiddenSource: 'document', removedKey: folderKey });
     expect(calls[2]?.query).toContain('assignment.scopeKey == @scopeKey');
     expect(calls[2]?.query).toContain('assignment.sourceType == "document"');
     expect(calls[2]?.bindVars).toEqual({ scopeKey, removedKey: folderKey });
+    expect(calls[0]?.bindVars).toMatchObject({ attachmentType: null });
   });
 
   test('does not clean hidden overlays when permanent source deletion matches nothing', async () => {
@@ -103,6 +110,7 @@ describe('scoped Content persistence', () => {
       name: 'Root note',
       content: 'Body',
       embedding,
+      mutationPolicy: 'user',
       isFavorite: false,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -124,7 +132,9 @@ describe('scoped Content persistence', () => {
       embedding: Array(EMBEDDING_DIMENSIONS).fill(1),
     });
     expect(calls[0]?.bindVars?.patch).toMatchObject({ content: 'Hello Core' });
+    expect(calls[0]?.bindVars?.unset).toContain('emailToneEmbeddingVersion');
     expect(calls[0]?.bindVars).toMatchObject({ changesLocation: false });
+    expect(calls[0]?.bindVars).not.toHaveProperty('allowSystemContainerUpdate');
     expect(calls[0]?.query).toContain('current.updatedAt == @expectedUpdatedAt');
     expect(() => createContentPersistence(executor).updateDocument(scopeKey, folderKey, { content: 'detached' })).toThrow('Document content updates require a fresh embedding.');
   });
@@ -140,6 +150,7 @@ describe('scoped Content persistence', () => {
     const persistence = createContentPersistence(executor);
     await persistence.updateDocument(scopeKey, folderKey, { isFavorite: true, updatedAt: timestamp });
     expect(calls.map(({ bindVars }) => bindVars?.patch)).toEqual([{ isFavorite: true, updatedAt: timestamp }]);
+    expect(calls[0]?.bindVars?.unset).toEqual([]);
   });
 
   test('only the marker owner can unfreeze a pending deletion', async () => {

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { apiClient } from "@/lib/api-client";
+import { appSearchResults, searchApp } from "@/lib/app-search-client";
 import type { AssistantChange } from "@/lib/assistant-changes";
 import { normalizeCollection, type CollectionRole } from "@/lib/collection-access";
 import { useAuthStore } from "@/state/auth";
@@ -155,12 +156,6 @@ export function resolveGalleryHighlightSlides(highlight: GalleryHighlightDetail)
   });
 }
 
-export function filterCollections(collections: GalleryCollection[], query: string) {
-  const normalized = query.trim().toLocaleLowerCase();
-  if (!normalized) return collections;
-  return collections.filter(({ name, description }) => `${name}\n${description ?? ""}`.toLocaleLowerCase().includes(normalized));
-}
-
 export function isGalleryCollectionOwned(collection: Pick<GalleryCollection, "isOwned" | "role">) {
   return collection.isOwned ?? (collection.role === "owner");
 }
@@ -171,15 +166,6 @@ export function isManagedGalleryCollection(collection: Pick<GalleryCollection, "
 
 export function isManagedGalleryImage(image: Pick<GalleryImage, "mutationPolicy"> | undefined) {
   return image?.mutationPolicy === "system-only";
-}
-
-export function filterMediaItems(items: GalleryImage[], query: string) {
-  const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
-  if (terms.length === 0) return items;
-  return items.filter(({ caption, filename, city, country, countryCode }) => {
-    const searchable = `${caption}\n${filename}\n${city ?? ""}\n${country ?? ""}\n${countryCode ?? ""}`.toLocaleLowerCase();
-    return terms.every((term) => searchable.includes(term));
-  });
 }
 
 export function mergeMediaItems(primary: GalleryImage[], secondary: GalleryImage[]) {
@@ -264,9 +250,9 @@ export function getGalleryMemberKey() {
   return typeof value === "string" ? value : "";
 }
 
-async function postGallery<T>(path: string, input: Record<string, unknown>, timeout = 60_000) {
+async function postGallery<T>(path: string, input: Record<string, unknown>, timeout = 60_000, signal?: AbortSignal) {
   try {
-    const response = await apiClient.post<ApiResponse<T>>(path, { ...getGalleryContext(), ...input }, { timeout });
+    const response = await apiClient.post<ApiResponse<T>>(path, { ...getGalleryContext(), ...input }, { signal, timeout });
     const payload = response.data as ApiResponse<T> | undefined;
     if (!payload || typeof payload !== "object" || payload.success !== true) throw galleryClientError(payload && "error" in payload ? payload.error : undefined);
     if (!("data" in payload)) throw galleryClientError(undefined);
@@ -407,8 +393,8 @@ async function fetchWithTimeout(input: string, init: RequestInit | undefined, ti
   }
 }
 
-export function fetchGalleryOverview(collectionKey?: string, cursor?: string, limit = 100, maxCaptionScore?: number) {
-  return postGallery<unknown>("/gallery/overview", { ...(collectionKey ? { collectionKey } : {}), ...(cursor ? { cursor } : {}), limit, ...(maxCaptionScore !== undefined ? { maxCaptionScore } : {}) })
+export function fetchGalleryOverview(collectionKey?: string, cursor?: string, limit = 100, maxCaptionScore?: number, signal?: AbortSignal) {
+  return postGallery<unknown>("/gallery/overview", { ...(collectionKey ? { collectionKey } : {}), ...(cursor ? { cursor } : {}), limit, ...(maxCaptionScore !== undefined ? { maxCaptionScore } : {}) }, 60_000, signal)
     .then((overview) => galleryOverviewSchema.parse(overview))
     .then((overview) => ({ ...overview, collections: overview.collections.map(normalizeCollection) }));
 }
@@ -476,8 +462,12 @@ export function fetchGalleryUploadStatus(uploadKeys: string[], timeout = 60_000)
   );
 }
 
-export function searchGalleryImages(input: { query?: string; imageKey?: string; identityKey?: string; duplicates?: true; collectionKey?: string; recordHistory?: boolean; limit?: number }) {
-  return postGallery<unknown>("/gallery/images/search", input, 4 * 60_000).then((value) => z.strictObject({ images: z.array(galleryImageSchema) }).parse(value));
+export function searchGalleryImages(input: { query?: string; imageKey?: string; identityKey?: string; duplicates?: true; collectionKey?: string; recordHistory?: boolean; limit?: number }, signal?: AbortSignal) {
+  if (input.query !== undefined) {
+    return searchApp({ query: input.query, collectionSlugs: ["images"], recordHistory: input.recordHistory ?? true, limit: Math.min(input.limit ?? 10, 50), ...(input.collectionKey ? { filters: { collectionKey: input.collectionKey } } : {}) }, signal)
+      .then((output) => ({ images: appSearchResults(output, "images", galleryImageSchema) }));
+  }
+  return postGallery<unknown>("/gallery/images/search", input, 4 * 60_000, signal).then((value) => z.strictObject({ images: z.array(galleryImageSchema) }).parse(value));
 }
 
 export function setGalleryImageFavorite(imageKey: string, isFavorite: boolean) {

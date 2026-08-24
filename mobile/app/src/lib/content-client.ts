@@ -1,6 +1,8 @@
 import { apiClient } from "./api-client";
 import * as Crypto from "expo-crypto";
+import { z } from "zod";
 import { useAuthStore } from "@/state/auth";
+import { appSearchResults, searchApp } from "./app-search-client";
 import type { AssistantChange } from "./assistant-changes";
 import {
   planContentSelectionDelete,
@@ -225,6 +227,11 @@ function singleBatchRecord<T>(outcome: ContentBatchOutcome, records: T[], fallba
   return record;
 }
 
+function assertSingleBatchSuccess(outcome: ContentBatchOutcome, fallback: string) {
+  if (outcome.failures[0]) throw new Error(outcome.failures[0].message);
+  if (outcome.requested !== 1 || outcome.succeeded !== 1) throw new Error(fallback);
+}
+
 export function getContentContext(): ContentContext {
   const state = useAuthStore.getState();
   return {
@@ -291,16 +298,14 @@ async function callContentTool<T>(tool: string, input: Record<string, unknown>, 
 }
 
 export async function enhanceContentDocument(documentKey: string, instruction?: string, mode: "preview" | "replace" = "preview") {
-  const data = await callContentTool<{
+  const context = getContentContext();
+  const response = await apiClient.post<ToolResponse<{
     results: { success: boolean; data?: { text: string; persistedDocumentKey?: string }; error?: { message: string } }[];
-  }>("document.enhance", {
-    documentKeys: [documentKey],
-    instruction,
-    mode,
-    ...(mode === "replace" ? { idempotencyKey: createContentMutationKey() } : {}),
-  });
+  }>>("/app/enhance", { organizationKey: context.organizationKey, scopeKey: context.scopeKey, input: { documentKey, instruction, save: false } }, { headers: { "Idempotency-Key": createContentMutationKey() }, timeout: 30 * 60_000 });
+  if (!response.data.success) throw contentToolError(response.data.error);
+  const data = response.data.data;
   const result = data.results[0];
-  if (!result?.success || !result.data || mode === "replace" && result.data.persistedDocumentKey !== documentKey) throw new Error(result?.error?.message ?? "The document could not be enhanced.");
+  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The document could not be enhanced.");
   return result.data;
 }
 
@@ -323,18 +328,14 @@ export async function askPersonalAssistant(message: string, currentNote: { docum
 }
 
 export async function translateContentDocument(documentKey: string, targetLanguage: string, instruction?: string, mode: "preview" | "replace" = "replace") {
-  const data = await callContentTool<{
+  const context = getContentContext();
+  const response = await apiClient.post<ToolResponse<{
     results: { success: boolean; data?: { text: string; persistedDocumentKey?: string }; error?: { message: string } }[];
-  }>("document.translate", {
-    documentKeys: [documentKey],
-    targetLanguage,
-    instruction,
-    preserveFormatting: true,
-    mode,
-    ...(mode === "replace" ? { idempotencyKey: createContentMutationKey() } : {}),
-  });
+  }>>("/app/translate", { organizationKey: context.organizationKey, scopeKey: context.scopeKey, input: { documentKey, targetLanguage, instruction, save: false } }, { headers: { "Idempotency-Key": createContentMutationKey() }, timeout: 30 * 60_000 });
+  if (!response.data.success) throw contentToolError(response.data.error);
+  const data = response.data.data;
   const result = data.results[0];
-  if (!result?.success || !result.data || mode === "replace" && result.data.persistedDocumentKey !== documentKey) throw new Error(result?.error?.message ?? "The note could not be translated.");
+  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The note could not be translated.");
   return result.data;
 }
 
@@ -485,10 +486,10 @@ export async function loadInitialContentLocation() {
   return { root, location: { folders: tree.filter((folder) => folder.parentFolderKey === initialFolder.key), documents }, initialFolder };
 }
 
-export async function readContentDocument(documentKey: string, contentContext = getContentContext()) {
+export async function readContentDocument(documentKey: string, contentContext = getContentContext(), signal?: AbortSignal) {
   const data = await callContentTool<{
     results: { success: boolean; data?: { document: ContentDocument & { content?: string } }; error?: { message: string } }[];
-  }>("document.find", { documentKeys: [documentKey], include: ["content"] }, undefined, contentContext);
+  }>("document.find", { documentKeys: [documentKey], include: ["content"] }, signal, contentContext);
   const result = data.results[0];
   const document = result?.data?.document;
   if (!result?.success || !document || document.content === undefined) throw new Error(result?.error?.message ?? "The document could not be opened.");
@@ -559,7 +560,7 @@ export async function copyContentDocument(documentKey: string, targetFolderKey?:
 
 export async function deleteContentDocument(documentKey: string) {
   const outcome = await hardDeleteContentSelection({ folderKeys: [], documentKeys: [documentKey] });
-  return singleBatchRecord(outcome, outcome.documents, "The document could not be deleted.");
+  assertSingleBatchSuccess(outcome, "The document could not be deleted.");
 }
 
 export async function downloadContentDocument(documentKey: string, format: "original" | "html" | "txt" = "original") {
@@ -643,7 +644,7 @@ export async function copyContentFolder(folderKey: string, targetParentFolderKey
 
 export async function deleteContentFolder(folderKey: string) {
   const outcome = await hardDeleteContentSelection({ folderKeys: [folderKey], documentKeys: [] });
-  return singleBatchRecord(outcome, outcome.folders, "The folder could not be deleted.");
+  assertSingleBatchSuccess(outcome, "The folder could not be deleted.");
 }
 
 export async function uploadContentDocument(file: { name: string; type: string; size: number; base64: string }, folderKey?: string, contentContext = getContentContext(), idempotencyKey = createContentMutationKey()) {
@@ -677,26 +678,22 @@ export async function scanContentDocument(pages: { name: string; size: number; b
   }, undefined, contentContext);
 }
 
-export function searchContent(query: string, folderKey?: string, includeDescendants = false) {
-  const contentContext = getContentContext();
-  return callContentTool<ContentSearchResponse>("content.search", {
-    scopeKey: contentContext.scopeKey,
-    query,
-    minimumScore: 0.55,
-    ...(folderKey ? { folderKey, includeDescendants } : {}),
-  });
+const appFolderResultSchema = z.strictObject({ key: z.string().min(1), scopeKey: z.string().min(1), parentFolderKey: z.string().min(1).optional(), name: z.string().min(1), description: z.string().optional(), isFavorite: z.boolean(), score: z.number() });
+const appDocumentResultSchema = z.strictObject({ key: z.string().min(1), scopeKey: z.string().min(1), folderKey: z.string().min(1).optional(), name: z.string().min(1), extension: z.string().optional(), isFavorite: z.boolean(), score: z.number() });
+
+async function searchAppContent(query: string, signal: AbortSignal | undefined, folderKey: string | undefined, includeDescendants: boolean, recordHistory: boolean): Promise<ContentSearchResponse> {
+  const output = await searchApp({ query, collectionSlugs: ["folders", "documents", "files"], recordHistory, limit: 50, minimumScore: 0.55, ...(folderKey ? { filters: { folderKey, includeDescendants } } : {}) }, signal);
+  const folders = appSearchResults(output, "folders", appFolderResultSchema).map(({ scopeKey: _scopeKey, ...folder }) => folder);
+  const documents = [...appSearchResults(output, "documents", appDocumentResultSchema), ...appSearchResults(output, "files", appDocumentResultSchema)].map(({ key, ...document }) => ({ documentKey: key, ...document }));
+  return { query: output.query, folders, documents, cached: false };
 }
 
-export async function searchContentMatches(query: string, signal?: AbortSignal, folderKey?: string, recordHistory = true) {
-  const contentContext = getContentContext();
-  return callContentTool<ContentSearchResponse>("content.search", {
-    scopeKey: contentContext.scopeKey,
-    query,
-    includeSummaries: false,
-    minimumScore: 0.55,
-    ...(!recordHistory ? { recordHistory: false } : {}),
-    ...(folderKey ? { folderKey, includeDescendants: true } : {}),
-  }, signal);
+export function searchContent(query: string, folderKey?: string, includeDescendants = false) {
+  return searchAppContent(query, undefined, folderKey, includeDescendants, true);
+}
+
+export function searchContentMatches(query: string, signal?: AbortSignal, folderKey?: string, recordHistory = true) {
+  return searchAppContent(query, signal, folderKey, true, recordHistory);
 }
 
 export function findContentNeighbors(source: { folderKey: string } | { documentKey: string }, signal?: AbortSignal) {
@@ -722,7 +719,7 @@ export async function listContentSearchHistory(requestContext = getContentContex
   const data = await callContentTool<{ history: ContentSearchHistoryItem[] }>("content.search-history.list", {
     scopeKey: contentContext.scopeKey,
     allLocations: true,
-    limit: 100,
+    limit: 50,
   }, undefined, requestContext);
   return data.history;
 }

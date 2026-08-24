@@ -16,11 +16,11 @@ export const travelPlaceImageInputSchema = z.object({
   organizationKey: z.string().trim().min(1), scopeKey: z.string().cuid(), imageRequestToken: z.string().min(1).max(PLACE_IMAGE_TOKEN_MAX_LENGTH),
 }).strict();
 export const placeImageTokenSchema = z.object({
-  version: z.literal(4), organizationKey: z.string().trim().min(1), scopeKey: z.string().cuid(),
+  version: z.literal(5), organizationKey: z.string().trim().min(1), scopeKey: z.string().cuid(),
   issuedAt: z.number().int().nonnegative(), nonce: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
   country: z.object({ name: z.string().trim().min(1).max(160), countryCode: placeCountryCodeSchema, continent: z.string().trim().min(1).max(80), latitude: z.number().finite().min(-90).max(90), longitude: z.number().finite().min(-180).max(180) }).strict(),
   hero: z.object({ title: z.string().trim().min(1).max(160), prompt: z.string().trim().min(1).max(4_000) }).strict(),
-  place: z.object({ name: z.string().trim().min(1).max(160), summary: z.string().trim().min(1), countryCode: placeCountryCodeSchema, latitude: z.number().finite().min(-90).max(90), longitude: z.number().finite().min(-180).max(180) }).strict(),
+  place: z.object({ kind: z.enum(['country', 'place']), name: z.string().trim().min(1).max(160), summary: z.string().trim().min(1), countryCode: placeCountryCodeSchema, latitude: z.number().finite().min(-90).max(90), longitude: z.number().finite().min(-180).max(180) }).strict(),
 }).strict();
 export type PlaceImageToken = z.infer<typeof placeImageTokenSchema>;
 export function stagedPlaceImageKey(nonce: string) { return `pending/gallery/place-media/${nonce}/preview.png`; }
@@ -95,8 +95,8 @@ export function createPlaceImageGenerator(dependencies: PlaceImageDependencies) 
       try {
         const providerStarted = now();
         const response = await execute<Record<string, unknown>, ImageOutput>(
-          { mode: 'fixed', organizationKey: input.organizationKey, actionSlug: 'generate-image', modelSlug: 'bfl.flux-2-klein-4b', providerSlug: 'openrouter' },
-          { prompt: token.hero.prompt, count: 1, aspectRatio: '3:2', outputFormat: 'png' },
+          { mode: 'auto', organizationKey: input.organizationKey, actionSlug: 'generate-image' },
+          { prompt: token.hero.prompt, count: 1, size: '1536x1024', aspectRatio: '3:2', quality: 'low', outputFormat: 'png' },
           { signal: execution.signal, timeoutMs: execution.timeoutMs ?? 60_000 },
         );
         const providerDurationMs = elapsed(now, providerStarted);

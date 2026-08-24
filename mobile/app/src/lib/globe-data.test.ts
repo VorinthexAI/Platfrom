@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import * as THREE from "three";
 
-import { COUNTRIES, createCountryFillGeometry, findCountryAtCoordinates, parseCountryFeatureCollection, type CountryFeature } from "./globe-data";
+import { COUNTRIES, createCountryFillGeometry, findCountryAtCoordinates, isSelectableCountryFeature, parseCountryFeatureCollection, type CountryFeature } from "./globe-data";
 
 function testFeature(coordinates: CountryFeature["geometry"]["coordinates"]): CountryFeature {
   return {
@@ -37,6 +37,17 @@ describe("country GeoJSON", () => {
     expect(findCountryAtCoordinates(COUNTRIES, -17.8, 178)?.properties.countryCode).toBe("FJ");
     expect(findCountryAtCoordinates(COUNTRIES, 1.35, 103.82)?.properties.countryCode).toBe("SG");
     expect(findCountryAtCoordinates(COUNTRIES, 0, -140)).toBeUndefined();
+  });
+
+  test("keeps non-country land visible but excludes it from selection", () => {
+    const antarctica = COUNTRIES.features.find(({ properties }) => properties.countryCode === "AQ");
+    const kosovo = COUNTRIES.features.find(({ properties }) => properties.countryCode === "XK");
+    const portugal = COUNTRIES.features.find(({ properties }) => properties.countryCode === "PT");
+    expect(antarctica && isSelectableCountryFeature(antarctica)).toBe(false);
+    expect(kosovo && isSelectableCountryFeature(kosovo)).toBe(false);
+    expect(portugal && isSelectableCountryFeature(portugal)).toBe(true);
+    expect(findCountryAtCoordinates(COUNTRIES, -82, 0)).toBeUndefined();
+    expect(findCountryAtCoordinates(COUNTRIES, 39.5, -8)?.properties.countryCode).toBe("PT");
   });
 
   test("cleans closed rings and tessellates every fill triangle onto the sphere", () => {
@@ -74,5 +85,22 @@ describe("country GeoJSON", () => {
       expect(Math.abs(longitude)).toBeGreaterThan(169);
       expect(Math.abs(longitude) < 176 || Math.abs(latitude) >= 5).toBe(true);
     }
+  });
+
+  test("keeps Russia fill triangles inside its high-latitude antimeridian geometry", () => {
+    const russia = COUNTRIES.features.find(({ properties }) => properties.countryCode === "RU");
+    expect(russia).toBeDefined();
+    const positions = createCountryFillGeometry(russia!).getAttribute("position");
+    let offCountryTriangles = 0;
+    for (let index = 0; index < positions.count; index += 3) {
+      const center = new THREE.Vector3();
+      for (let offset = 0; offset < 3; offset += 1) center.add(new THREE.Vector3().fromBufferAttribute(positions, index + offset));
+      center.normalize();
+      const longitude = THREE.MathUtils.radToDeg(Math.atan2(center.x, center.z));
+      const latitude = THREE.MathUtils.radToDeg(Math.asin(center.y));
+      if (findCountryAtCoordinates(COUNTRIES, latitude, longitude)?.properties.countryCode !== "RU") offCountryTriangles += 1;
+    }
+    // Two coarse Natural Earth border triangles resolve to neighbors; broad fill wedges must not.
+    expect(offCountryTriangles).toBeLessThanOrEqual(2);
   });
 });

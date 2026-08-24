@@ -13,6 +13,7 @@ export const documentVersionSchema = z.object({
   documentKey: z.string().cuid(),
   version: z.number().int().positive(),
   type: z.enum(['enhancement', 'translation']).optional(),
+  language: z.string().trim().min(1).max(100).optional(),
   label: z.string().trim().min(1).max(120).optional(),
   content: z.union([z.string().trim().min(1), documentContentChunksSchema]).transform((value) => typeof value === 'string' ? value : value.join('')),
   embedding: currentEmbeddingSchema,

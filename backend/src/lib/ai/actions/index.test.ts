@@ -17,40 +17,30 @@ describe('action registry', () => {
 
   test('contains only generic runtime primitives with explicit model policies', () => {
     expect(ACTION_SLUGS).toEqual([
-      'ask', 'chat', 'reason', 'deep-reason', 'embed', 'web-search',
+      'ask', 'embed', 'web-search',
       'traverse', 'read', 'insert', 'upsert', 'update', 'delete',
       'generate-image', 'edit-image', 'generate-video', 'edit-video', 'extend-video', 'analyze-video',
-      'analyze-audio', 'generate-music', 'orchestrator-chat',
-      'document-validate', 'storage-upload', 'document-extract', 'document-embed', 'document-insert', 'enhance', 'translate', 'caption-image', 'describe-visual-identity',
-      'document-cleanup', 'document-summarize', 'document-topics',
+      'analyze-audio', 'generate-music',
+      'document-validate', 'storage-upload', 'document-extract', 'document-embed', 'document-insert', 'caption-image', 'describe-visual-identity',
     ]);
     expect(ACTION_DEFINITIONS.filter((action) => action.modelPolicy === 'none').map((action) => action.id))
       .toEqual([
         'traverse', 'read', 'insert', 'upsert', 'update', 'delete',
         'document-validate', 'storage-upload', 'document-extract', 'document-embed', 'document-insert',
       ]);
-    expect(ACTION_DEFINITIONS.find((action) => action.id === 'chat')?.models.map(({ model }) => model))
-      .toEqual(['openai.gpt-5.6-luna']);
-    expect(ACTION_DEFINITIONS.find((action) => action.id === 'orchestrator-chat')?.models)
-      .toEqual([{ provider: 'openai', model: 'openai.gpt-5.6-luna', priority: 100 }]);
-    expect(ACTION_DEFINITIONS.find((action) => action.id === 'enhance')?.models)
-      .toEqual([{ provider: 'openai', model: 'openai.gpt-5.6-luna', priority: 100 }]);
-    expect(ACTION_DEFINITIONS.find((action) => action.id === 'translate')?.models)
-      .toEqual([{ provider: 'openai', model: 'openai.gpt-5.6-luna', priority: 100 }]);
+    expect(ACTION_DEFINITIONS.find((action) => action.id === 'ask')?.models)
+      .toEqual([
+        { provider: 'openrouter', model: 'google.gemini-2.5-flash-lite', priority: 100 },
+        { provider: 'openai', model: 'openai.gpt-5.6-luna', priority: 90 },
+      ]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'caption-image')?.models)
-      .toEqual([{ provider: 'openai', model: 'openai.gpt-5.6-luna', priority: 100 }]);
-    expect(ACTION_DEFINITIONS.find((action) => action.id === 'document-cleanup')?.models)
-      .toEqual([{ provider: 'openai', model: 'openai.gpt-5.6-luna', priority: 100 }]);
-    expect(ACTION_DEFINITIONS.find((action) => action.id === 'document-summarize')?.models)
-      .toEqual([{ provider: 'openai', model: 'openai.gpt-5.6-luna', priority: 100 }]);
-    expect(ACTION_DEFINITIONS.find((action) => action.id === 'document-topics')?.models)
       .toEqual([{ provider: 'openai', model: 'openai.gpt-5.6-luna', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'describe-visual-identity')?.models)
       .toEqual([{ provider: 'openai', model: 'openai.gpt-5.6-luna', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'generate-image')?.models)
       .toEqual([
-        { provider: 'openai', model: 'openai.gpt-image-2', priority: 100 },
-        { provider: 'openrouter', model: 'bfl.flux-2-klein-4b', priority: 90 },
+        { provider: 'openrouter', model: 'bfl.flux-2-klein-4b', priority: 100 },
+        { provider: 'openai', model: 'openai.gpt-image-2', priority: 90 },
         { provider: 'openrouter', model: 'xai.grok-imagine-image-quality', priority: 80 },
       ]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'embed')?.models)

@@ -9,7 +9,7 @@ const userKey = newId();
 const input = { organizationKey, scopeKey, imageRequestToken: 'opaque-token' };
 const issuedAt = Date.now();
 const hero = { title: 'Japan travel interpretation', prompt: 'Authoritative destination: Japan. Create an original landscape editorial interpretation of a volcanic island country with cedar forests, dense cities, timber architecture, and soft morning light. No text or identifiable people.' };
-const tokenPayload = { version: 4, issuedAt, nonce: 'A'.repeat(43), organizationKey, scopeKey, country: { name: 'Japan', countryCode: 'JP', continent: 'Asia', latitude: 36.2, longitude: 138.2 }, place: { name: 'Japan', summary: 'Island country.', countryCode: 'JP', latitude: 36.2, longitude: 138.2 }, hero } as const;
+const tokenPayload = { version: 5, issuedAt, nonce: 'A'.repeat(43), organizationKey, scopeKey, country: { name: 'Japan', countryCode: 'JP', continent: 'Asia', latitude: 36.2, longitude: 138.2 }, place: { kind: 'country', name: 'Japan', summary: 'Island country.', countryCode: 'JP', latitude: 36.2, longitude: 138.2 }, hero } as const;
 const staged = new Map<string, Uint8Array>();
 const storage = { upload: async ({ key, bytes }: { key: string; bytes: Uint8Array }) => { staged.set(key, bytes); return { storageKey: key }; }, download: async (key: string) => { const bytes = staged.get(key); if (!bytes) throw new Error('missing'); return { bytes }; }, delete: async (key: string) => { staged.delete(key); } } as any;
 const token = { storage, decryptImageRequest: (value: string) => { if (!value.startsWith(input.imageRequestToken)) throw new Error('tampered token'); return tokenPayload; } };
@@ -52,8 +52,8 @@ describe('transient place hero generation', () => {
       onMetrics: (value) => metrics.push(value), log: () => {},
     })(input, userKey, { signal: controller.signal, timeoutMs: 12_345 });
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.[0]).toEqual({ mode: 'fixed', organizationKey, actionSlug: 'generate-image', modelSlug: 'bfl.flux-2-klein-4b', providerSlug: 'openrouter' });
-    expect(calls[0]?.[1]).toEqual({ prompt: hero.prompt, count: 1, aspectRatio: '3:2', outputFormat: 'png' });
+    expect(calls[0]?.[0]).toEqual({ mode: 'auto', organizationKey, actionSlug: 'generate-image' });
+    expect(calls[0]?.[1]).toEqual({ prompt: hero.prompt, count: 1, size: '1536x1024', aspectRatio: '3:2', quality: 'low', outputFormat: 'png' });
     expect(calls[0]?.[2]).toEqual({ signal: controller.signal, timeoutMs: 12_345 });
     expect(result).toEqual({ status: 'ready', image: { status: 'ready', title: hero.title, url: `data:image/png;base64,${Buffer.from(png()).toString('base64')}`, width: 1536, height: 1024, mimeType: 'image/png' }, durationMs: expect.any(Number), costUsd: 0.04 });
     expect([...staged.values()][0]).toEqual(png());

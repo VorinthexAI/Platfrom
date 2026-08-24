@@ -19,6 +19,7 @@ import { ACTION_DEFINITIONS } from '@/lib/ai/actions';
 import { COUNTRY_CATALOG } from '@/lib/travel/country-catalog';
 import { currentEmbeddingSchema, embedText } from '@/lib/embeddings';
 import { createHash } from 'node:crypto';
+import { ensureGeneratedDocumentFolders } from '@/lib/generated-documents/folders';
 
 export type SeedResult = {
   collection: string;
@@ -134,14 +135,24 @@ export const SEEDED_MODELS = [
     supportedUseCases: 'Image generation and visual asset creation.',
     enabled: true,
   },
+  {
+    key: 'cmgemini25flashlitemodel1',
+    slug: 'google.gemini-2.5-flash-lite',
+    name: 'Google Gemini 2.5 Flash Lite',
+    description: 'Fast, cost-efficient Google text generation model routed through OpenRouter.',
+    supportedUseCases: 'Destination guides, image briefs, summarization, and structured text generation.',
+    enabled: true,
+  },
 ] as const;
 
 const SEEDED_MODEL_SLUGS = new Set<string>(SEEDED_MODELS.map(({ slug }) => slug));
 
 /** Persist only runtime bindings backed by the retained model catalog. */
-export const SEEDED_MODEL_ACTIONS = ACTION_DEFINITIONS.flatMap((definition, actionIndex) =>
-  definition.models.filter(({ model }) => SEEDED_MODEL_SLUGS.has(model)).map((binding, modelIndex) => ({
-    key: `cmmodelaction${String(actionIndex * 10 + modelIndex + 1).padStart(11, '0')}`,
+export const seededModelActionKey = (actionSlug: string, modelSlug: string) => `c${createHash('sha256').update(`${actionSlug}\0${modelSlug}`).digest('hex').slice(0, 24)}`;
+
+export const SEEDED_MODEL_ACTIONS = ACTION_DEFINITIONS.flatMap((definition) =>
+  definition.models.filter(({ model }) => SEEDED_MODEL_SLUGS.has(model)).map((binding) => ({
+    key: seededModelActionKey(definition.id, binding.model),
     modelSlug: binding.model,
     actionSlug: definition.id,
     priority: binding.priority,
@@ -183,6 +194,13 @@ export const SEEDED_MODEL_PROVIDERS = [
     modelSlug: 'xai.grok-imagine-image-quality',
     providerSlug: 'openrouter',
     providerModelId: 'x-ai/grok-imagine-image-quality',
+    enabled: true,
+  },
+  {
+    key: 'cmgemini25flashliteroute1',
+    modelSlug: 'google.gemini-2.5-flash-lite',
+    providerSlug: 'openrouter',
+    providerModelId: 'google/gemini-2.5-flash-lite',
     enabled: true,
   },
 ] as const;
@@ -582,6 +600,7 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
     actualKeysBySeedKey.set(seed.key, scope.key);
     results.push({ collection: 'scopes', key: scope.key, status: 'created' });
   }
+  for (const scope of organizationScopes) await ensureGeneratedDocumentFolders(db, scope.key);
 
   const relationsByChild = new Map<string, { parentKey: string; childKey: string }>();
   for (const scope of organizationScopes) {

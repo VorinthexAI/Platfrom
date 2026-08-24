@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { Database } from 'arangojs';
-import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, EMBEDDING_PROVIDER_ID, embedText, embedTexts, embeddingMetadata } from '../lib/embeddings';
+import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, EMBEDDING_PROVIDER_ID, LEGACY_EMBEDDING_DIMENSIONS, embedText, embedTexts, embeddingMetadata } from '../lib/embeddings';
 import { ALIAS_SLUG_PREFIX_SPACE, generateAlias, generateAliasSlug } from '../lib/alias';
 import { newId } from '../lib/ids';
 import { ensureOrganizationProvidersCollection } from '../lib/ai/organization-providers/indexes';
@@ -20,9 +20,11 @@ import { z } from 'zod';
 import { withDatabaseTransaction } from '../lib/db/client';
 import { countryCodeSchema } from '../lib/db/users.node';
 import { retireAiPersistence } from './retire-ai-persistence';
-import { buildPlaceEmbeddingText } from '../lib/travel/semantic-text';
+import { buildPlaceEmbeddingText, buildTripEmbeddingText, TRIP_EMBEDDING_CONTENT_VERSION } from '../lib/travel/semantic-text';
 import { generatedPlaceDetailSchema } from '../lib/db/places.node';
 import { buildImageEmbeddingText } from '../lib/image-embedding';
+import { decodeEmailToneContent, emailToneSemanticText, encodeEmailToneContent } from '../lib/email-inbox/archive-payloads';
+import { mailFolderKeys } from '../lib/email-inbox/folders';
 
 const url = process.env.ARANGO_URL ?? 'http://127.0.0.1:8529';
 const databaseName = process.env.ARANGO_DATABASE ?? 'vorinthex';
@@ -312,7 +314,7 @@ export async function retireMomentumScope(targetDb: Database, organizationKey: s
   await targetDb.query('FOR scope IN scopes FILTER scope._key IN @scopeKeys REMOVE scope IN scopes', { scopeKeys });
 }
 
-export async function migrateContentFavorites(targetDb: Database, collectionName: 'folders' | 'documents' | 'images' | 'collections' | 'emailThreads') {
+export async function migrateContentFavorites(targetDb: Database, collectionName: 'folders' | 'documents' | 'images' | 'collections') {
   await runMigrationTransaction(targetDb, collectionName, `
     FOR resource IN @@collection
       FILTER !IS_BOOL(resource.isFavorite)
@@ -327,36 +329,13 @@ export async function migrateContentFavorites(targetDb: Database, collectionName
   if (invalid > 0) throw new Error(`${collectionName} favorite migration verification failed for ${invalid} row(s).`);
 }
 
-export async function migrateEmailReplyMetadata(targetDb: Database): Promise<void> {
-  const targets = await targetDb.query<{ scopeKey: string; threadKey: string }>(`
-    FOR message IN emailMessages
-      FILTER !HAS(message, "replyDepth") || ((message.inReplyTo != null || LENGTH(message.references || []) > 0) && !HAS(message, "parentMessageId"))
-      COLLECT scopeKey = message.scopeKey, threadKey = message.threadKey
-      RETURN { scopeKey, threadKey }
-  `);
-  for (const target of await targets.all()) {
-    const cursor = await targetDb.query<{ key: string; messageIdHeader?: string; inReplyTo?: string; references?: string[] }>(`
-      FOR message IN emailMessages
-        FILTER message.scopeKey == @scopeKey && message.threadKey == @threadKey
-        SORT message.sentAt ASC, message._key ASC
-        RETURN { key: message._key, messageIdHeader: message.messageIdHeader, inReplyTo: message.inReplyTo, references: message.references }
-    `, target);
-    const depths = new Map<string, number>();
-    const updates = (await cursor.all()).map((message) => {
-      const parentMessageId = message.inReplyTo ?? message.references?.at(-1);
-      const replyDepth = parentMessageId ? (depths.get(parentMessageId) ?? -1) + 1 : 0;
-      if (message.messageIdHeader) depths.set(message.messageIdHeader, replyDepth);
-      return { key: message.key, parentMessageId: parentMessageId ?? null, replyDepth };
-    });
-    if (updates.length) await targetDb.query(`FOR patch IN @updates UPDATE patch.key WITH { parentMessageId: patch.parentMessageId, replyDepth: patch.replyDepth } IN emailMessages OPTIONS { keepNull: false }`, { updates });
-  }
-}
-
 const legacyPlaceSchema = z.object({
   key: z.string().cuid(),
   userKey: z.string().cuid(),
   scopeKey: z.string().cuid(),
   saved: z.boolean(),
+  status: z.enum(['wishlist', 'visited']).default('wishlist'),
+  isFavorite: z.boolean().default(false),
   name: z.string().trim().min(1),
   summary: z.string().default(''),
   countryCode: z.preprocess((value) => typeof value === 'string' ? value.trim().toUpperCase() : value, countryCodeSchema),
@@ -371,9 +350,22 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
   if (!await places.exists()) return;
   const placeImages = targetDb.collection('placeImages');
   if (!await placeImages.exists()) await placeImages.create();
+  const obsoleteCountryCursor = await targetDb.query<string>('FOR place IN places FILTER place.kind == "country" && (!HAS(place, "userKey") || !HAS(place, "saved")) RETURN place._key');
+  const obsoleteCountryKeys = await obsoleteCountryCursor.all();
+  if (obsoleteCountryKeys.length > 0) {
+    for (const collectionName of ['shares', 'tagAssignments', 'bookSources']) {
+      if (!await targetDb.collection(collectionName).exists()) continue;
+      await targetDb.query(`
+        FOR resource IN @@collection
+          FILTER resource.sourceType == "place" && resource.sourceKey IN @obsoleteCountryKeys
+          REMOVE resource IN @@collection
+      `, { '@collection': collectionName, obsoleteCountryKeys });
+    }
+    await targetDb.query('FOR place IN places FILTER place._key IN @obsoleteCountryKeys REMOVE place IN places', { obsoleteCountryKeys });
+  }
   const missingOwners = await targetDb.query<string>(`
     FOR place IN places
-      FILTER place.kind != "country" && !HAS(place, "userKey")
+      FILTER !HAS(place, "userKey")
       LET membershipKeys = UNIQUE(FOR relation IN placeImages
         FILTER relation.placeKey == place._key
         LET image = DOCUMENT(images, relation.imageKey)
@@ -390,7 +382,7 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
   if (unresolvedOwners.length > 0) throw new Error(`places migration cannot safely derive user ownership for: ${unresolvedOwners.join(', ')}`);
   await targetDb.query(`
     FOR place IN places
-      FILTER place.kind != "country" && (!HAS(place, "userKey") || !HAS(place, "saved"))
+      FILTER !HAS(place, "userKey") || !HAS(place, "saved")
       LET membershipKey = FIRST(FOR relation IN placeImages
         FILTER relation.placeKey == place._key
         LET image = DOCUMENT(images, relation.imageKey)
@@ -399,17 +391,16 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
       LET membership = membershipKey == null ? null : DOCUMENT(userOrganizations, membershipKey)
       UPDATE place WITH { userKey: HAS(place, "userKey") ? place.userKey : membership.userId, saved: HAS(place, "saved") ? place.saved : true } IN places
   `);
-  const canonicalFields = ['userKey', 'scopeKey', 'saved', 'name', 'summary', 'countryCode', 'latitude', 'longitude', 'embedding', 'embeddingContentVersion', 'createdAt'].sort();
-  const openedCanonicalFields = [...canonicalFields, 'openedAt'].sort();
-  const generatedCanonicalFields = [...canonicalFields, 'generatedDetail'].sort();
-  const openedGeneratedCanonicalFields = [...generatedCanonicalFields, 'openedAt'].sort();
+  const canonicalFields = ['userKey', 'scopeKey', 'saved', 'status', 'isFavorite', 'name', 'summary', 'countryCode', 'latitude', 'longitude', 'embedding', 'embeddingContentVersion', 'createdAt'].sort();
+  const canonicalFieldSets = [false, true].flatMap((hasKind) => [false, true].flatMap((hasOpenedAt) => [false, true].flatMap((hasGeneratedDetail) => [false, true]
+    .filter((hasGeneratedDetailVersion) => hasGeneratedDetail || !hasGeneratedDetailVersion)
+    .map((hasGeneratedDetailVersion) => [...canonicalFields, ...(hasKind ? ['kind'] : []), ...(hasOpenedAt ? ['openedAt'] : []), ...(hasGeneratedDetail ? ['generatedDetail'] : []), ...(hasGeneratedDetailVersion ? ['generatedDetailVersion'] : [])].sort()))));
   const validatePlaces = async () => {
     let validationAfter = '';
     while (true) {
       const cursor = await targetDb.query<Record<string, unknown>>(`
         /* Validate every retained place before accepting its canonical projection. */
         FOR place IN places
-          FILTER place.kind != "country"
           FILTER place._key > @after
           SORT place._key
           LIMIT 100
@@ -424,6 +415,8 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
           userKey: place.userKey,
           scopeKey: place.scopeKey,
           saved: place.saved,
+          status: place.status === 'visited' ? 'visited' : 'wishlist',
+          isFavorite: place.isFavorite === true,
           name: place.name,
           summary: typeof place.summary === 'string' ? place.summary : '',
           countryCode: place.countryCode,
@@ -441,7 +434,6 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
   await validatePlaces();
   const duplicateCursor = await targetDb.query<{ scopeKey: string; userKey: string; countryCode: string; name: string; count: number }>(`
     FOR place IN places
-      FILTER place.kind != "country"
       COLLECT scopeKey = place.scopeKey, userKey = place.userKey, countryCode = UPPER(TRIM(place.countryCode)), name = TRIM(place.name) WITH COUNT INTO count
       FILTER count > 1
       RETURN { scopeKey, userKey, countryCode, name, count }
@@ -455,18 +447,18 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
   while (true) {
     const cursor = await targetDb.query<Record<string, unknown>>(`
       FOR place IN places
-        FILTER place.kind != "country"
         FILTER place._key > @after
         LET fields = ATTRIBUTES(place, true, true)
-        FILTER (fields != @canonicalFields && fields != @openedCanonicalFields && fields != @generatedCanonicalFields && fields != @openedGeneratedCanonicalFields)
+        FILTER fields NOT IN @canonicalFieldSets
           || place.name != TRIM(place.name) || place.countryCode != UPPER(TRIM(place.countryCode))
           || place.embeddingContentVersion != 2
+          || place.status NOT IN ["wishlist", "visited"] || !IS_BOOL(place.isFavorite)
           || !IS_ARRAY(place.embedding) || LENGTH(place.embedding) != @dimensions
           || LENGTH(place.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
         SORT place._key
         LIMIT 50
         RETURN place
-    `, { after, canonicalFields, openedCanonicalFields, generatedCanonicalFields, openedGeneratedCanonicalFields, dimensions: EMBEDDING_DIMENSIONS });
+    `, { after, canonicalFieldSets, dimensions: EMBEDDING_DIMENSIONS });
     const legacyPlaces = await cursor.all();
     if (legacyPlaces.length === 0) break;
     const replacements = [];
@@ -476,6 +468,8 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
         userKey: place.userKey,
         scopeKey: place.scopeKey,
         saved: place.saved,
+        status: place.status === 'visited' ? 'visited' : 'wishlist',
+        isFavorite: place.isFavorite === true,
         name: place.name,
         summary: typeof place.summary === 'string' ? place.summary : '',
         countryCode: place.countryCode,
@@ -490,6 +484,9 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
         userKey: canonical.userKey,
         scopeKey: canonical.scopeKey,
         saved: canonical.saved,
+        status: canonical.status,
+        isFavorite: canonical.isFavorite,
+        ...(place.kind == null ? {} : { kind: z.enum(['country', 'place']).parse(place.kind) }),
         name: canonical.name,
         summary: canonical.summary,
         countryCode: canonical.countryCode,
@@ -498,6 +495,7 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
         embedding: await generateEmbedding(buildPlaceEmbeddingText(canonical)),
         embeddingContentVersion: 2,
         ...(place.generatedDetail == null ? {} : { generatedDetail: generatedPlaceDetailSchema.parse(place.generatedDetail) }),
+        ...(place.generatedDetailVersion == null ? {} : { generatedDetailVersion: z.number().int().positive().parse(place.generatedDetailVersion) }),
         ...(canonical.openedAt == null ? {} : { openedAt: canonical.openedAt }),
         createdAt: canonical.createdAt,
       });
@@ -511,46 +509,360 @@ async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
     after = String(legacyPlaces.at(-1)!._key);
   }
   await validatePlaces();
-  const countryPlaceCursor = await targetDb.query<string>('FOR place IN places FILTER place.kind == "country" RETURN place._key');
-  const countryPlaceKeys = await countryPlaceCursor.all();
-  if (countryPlaceKeys.length > 0) {
-    for (const collectionName of ['shares', 'tagAssignments', 'bookSources']) {
-      if (!await targetDb.collection(collectionName).exists()) continue;
-      await targetDb.query(`
-        FOR resource IN @@collection
-          FILTER resource.sourceType == "place" && resource.sourceKey IN @countryPlaceKeys
-          REMOVE resource IN @@collection
-      `, { '@collection': collectionName, countryPlaceKeys });
-    }
-  }
-  await targetDb.query('FOR place IN places FILTER place.kind == "country" REMOVE place IN places');
   const invalid = await targetDb.query<number>(`
     RETURN LENGTH(FOR place IN places
       LET fields = ATTRIBUTES(place, true, true)
-      FILTER (fields != @canonicalFields && fields != @openedCanonicalFields && fields != @generatedCanonicalFields && fields != @openedGeneratedCanonicalFields)
+      FILTER fields NOT IN @canonicalFieldSets
         || place.name != TRIM(place.name) || place.countryCode != UPPER(TRIM(place.countryCode))
         || place.embeddingContentVersion != 2
+        || place.status NOT IN ["wishlist", "visited"] || !IS_BOOL(place.isFavorite)
         || !IS_ARRAY(place.embedding) || LENGTH(place.embedding) != @dimensions
         || LENGTH(place.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
       RETURN 1)
-  `, { canonicalFields, openedCanonicalFields, generatedCanonicalFields, openedGeneratedCanonicalFields, dimensions: EMBEDDING_DIMENSIONS });
+  `, { canonicalFieldSets, dimensions: EMBEDDING_DIMENSIONS });
   const invalidCount = await invalid.next() ?? 0;
   if (invalidCount > 0) throw new Error(`places minimal projection verification failed for ${invalidCount} row(s).`);
 }
 
 export async function migrateMinimalPlacesAndRetireTrips(targetDb: Database): Promise<void> {
   await migrateMinimalPlaces(targetDb);
-  for (const collectionName of ['shares', 'tagAssignments', 'bookSources']) {
+  const legacyVisits = targetDb.collection('placeVisits');
+  if (await legacyVisits.exists()) await legacyVisits.drop();
+
+  const trips = targetDb.collection('trips');
+  if (!await trips.exists()) return;
+  const tripPlaces = targetDb.collection('tripPlaces');
+  const hasTripPlaces = await tripPlaces.exists();
+  await targetDb.query('FOR trip IN trips UPDATE trip WITH { status: trip.status IN ["planned", "completed"] ? trip.status : "planned", isFavorite: HAS(trip, "isFavorite") && IS_BOOL(trip.isFavorite) ? trip.isFavorite : false, updatedAt: HAS(trip, "updatedAt") && IS_STRING(trip.updatedAt) ? trip.updatedAt : trip.createdAt } IN trips');
+  const images = targetDb.collection('images');
+  if (await images.exists()) await targetDb.query('FOR trip IN trips FILTER HAS(trip, "coverImageKey") LET image = DOCUMENT(images, trip.coverImageKey) FILTER image == null || image.scopeKey != trip.scopeKey UPDATE trip WITH { coverImageKey: null } IN trips OPTIONS { keepNull: false }');
+  else await targetDb.query('FOR trip IN trips FILTER HAS(trip, "coverImageKey") UPDATE trip WITH { coverImageKey: null } IN trips OPTIONS { keepNull: false }');
+  const invalidCursor = await targetDb.query<string>(`
+    FOR trip IN trips
+      LET createdAtTimestamp = IS_STRING(trip.createdAt) && REGEX_TEST(trip.createdAt, "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\\\.[0-9]+)?Z$") && IS_DATESTRING(trip.createdAt) ? DATE_TIMESTAMP(trip.createdAt) : null
+      LET updatedAtTimestamp = IS_STRING(trip.updatedAt) && REGEX_TEST(trip.updatedAt, "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\\\.[0-9]+)?Z$") && IS_DATESTRING(trip.updatedAt) ? DATE_TIMESTAMP(trip.updatedAt) : null
+      LET createdAtValid = createdAtTimestamp != null && DATE_YEAR(createdAtTimestamp) == TO_NUMBER(SUBSTRING(trip.createdAt, 0, 4)) && DATE_MONTH(createdAtTimestamp) == TO_NUMBER(SUBSTRING(trip.createdAt, 5, 2)) && DATE_DAY(createdAtTimestamp) == TO_NUMBER(SUBSTRING(trip.createdAt, 8, 2)) && DATE_HOUR(createdAtTimestamp) == TO_NUMBER(SUBSTRING(trip.createdAt, 11, 2)) && DATE_MINUTE(createdAtTimestamp) == TO_NUMBER(SUBSTRING(trip.createdAt, 14, 2)) && DATE_SECOND(createdAtTimestamp) == TO_NUMBER(SUBSTRING(trip.createdAt, 17, 2))
+      LET updatedAtValid = updatedAtTimestamp != null && DATE_YEAR(updatedAtTimestamp) == TO_NUMBER(SUBSTRING(trip.updatedAt, 0, 4)) && DATE_MONTH(updatedAtTimestamp) == TO_NUMBER(SUBSTRING(trip.updatedAt, 5, 2)) && DATE_DAY(updatedAtTimestamp) == TO_NUMBER(SUBSTRING(trip.updatedAt, 8, 2)) && DATE_HOUR(updatedAtTimestamp) == TO_NUMBER(SUBSTRING(trip.updatedAt, 11, 2)) && DATE_MINUTE(updatedAtTimestamp) == TO_NUMBER(SUBSTRING(trip.updatedAt, 14, 2)) && DATE_SECOND(updatedAtTimestamp) == TO_NUMBER(SUBSTRING(trip.updatedAt, 17, 2))
+      FILTER !REGEX_TEST(trip._key, "^[cC][0-9a-z]{6,}$") || !REGEX_TEST(trip.userKey, "^[cC][0-9a-z]{6,}$") || !REGEX_TEST(trip.scopeKey, "^[cC][0-9a-z]{6,}$") || !IS_STRING(trip.name)
+        || trip.name != TRIM(trip.name) || LENGTH(trip.name) == 0 || LENGTH(trip.name) > 255
+        || !createdAtValid || !updatedAtValid || trip.status NOT IN ["planned", "completed"] || !IS_BOOL(trip.isFavorite)
+        || HAS(trip, "coverImageKey") && !REGEX_TEST(trip.coverImageKey, "^[cC][0-9a-z]{6,}$")
+        || HAS(trip, "description") && (!IS_STRING(trip.description) || trip.description != TRIM(trip.description) || LENGTH(trip.description) == 0 || LENGTH(trip.description) > 10000)
+        || HAS(trip, "requestHash") && (!IS_STRING(trip.requestHash) || !REGEX_TEST(trip.requestHash, "^[a-f0-9]{64}$"))
+      RETURN trip._key
+  `);
+  const invalidTripKeys = await invalidCursor.all();
+  if (invalidTripKeys.length > 0) {
+    if (hasTripPlaces) await targetDb.query('FOR relation IN tripPlaces FILTER relation.tripKey IN @tripKeys REMOVE relation IN tripPlaces', { tripKeys: invalidTripKeys });
+    await targetDb.query('FOR trip IN trips FILTER trip._key IN @tripKeys REMOVE trip IN trips', { tripKeys: invalidTripKeys });
+  }
+  if (hasTripPlaces) {
+    const places = targetDb.collection('places');
+    if (!await places.exists()) await targetDb.query('FOR relation IN tripPlaces REMOVE relation IN tripPlaces');
+    else await targetDb.query(`
+      FOR relation IN tripPlaces
+        LET trip = DOCUMENT(trips, relation.tripKey)
+        LET place = DOCUMENT(places, relation.placeKey)
+        FILTER !IS_STRING(relation.scopeKey) || !IS_STRING(relation.tripKey) || !IS_STRING(relation.placeKey)
+          || !IS_NUMBER(relation.position) || relation.position < 0 || relation.position != FLOOR(relation.position)
+          || !IS_STRING(relation.createdAt)
+          || trip == null || place == null || trip.scopeKey != relation.scopeKey || place.scopeKey != relation.scopeKey
+          || trip.userKey != place.userKey || place.saved != true
+        REMOVE relation IN tripPlaces
+    `);
+  }
+  for (const name of ['shares', 'tagAssignments']) {
+    const collection = targetDb.collection(name);
+    if (await collection.exists()) await targetDb.query('FOR resource IN @@collection FILTER resource.sourceType == "trip" REMOVE resource IN @@collection', { '@collection': name });
+  }
+  let after = '';
+  while (true) {
+    const cursor = await targetDb.query<Record<string, unknown>>(`
+      FOR trip IN trips
+        FILTER trip._key > @after
+        FILTER trip.embeddingContentVersion != @contentVersion || !IS_ARRAY(trip.embedding) || LENGTH(trip.embedding) != @dimensions || LENGTH(trip.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
+        SORT trip._key ASC
+        LIMIT 50
+        RETURN trip
+    `, { after, contentVersion: TRIP_EMBEDDING_CONTENT_VERSION, dimensions: EMBEDDING_DIMENSIONS });
+    const tripsToEmbed = await cursor.all();
+    if (tripsToEmbed.length === 0) break;
+    const updates = await Promise.all(tripsToEmbed.map(async (trip) => ({
+      _key: trip._key, _rev: trip._rev,
+      embedding: await generateEmbedding(buildTripEmbeddingText({ name: String(trip.name), description: typeof trip.description === 'string' ? trip.description : undefined })),
+    })));
+    await targetDb.query(`
+      FOR patch IN @updates
+        LET trip = DOCUMENT(trips, patch._key)
+        FILTER trip != null && trip._rev == patch._rev
+        UPDATE trip WITH { embedding: patch.embedding, embeddingContentVersion: @contentVersion } IN trips
+    `, { updates, contentVersion: TRIP_EMBEDDING_CONTENT_VERSION });
+    after = String(tripsToEmbed.at(-1)!._key);
+  }
+}
+
+export async function migrateTripCreationReceipts(targetDb: Database): Promise<void> {
+  const receipts = targetDb.collection('tripCreationReceipts');
+  if (!await receipts.exists()) return;
+  await targetDb.query(`
+    FOR receipt IN tripCreationReceipts
+      LET createdAtTimestamp = IS_STRING(receipt.createdAt) && REGEX_TEST(receipt.createdAt, "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\\\.[0-9]+)?Z$") && IS_DATESTRING(receipt.createdAt) ? DATE_TIMESTAMP(receipt.createdAt) : null
+      LET createdAtValid = createdAtTimestamp != null && DATE_YEAR(createdAtTimestamp) == TO_NUMBER(SUBSTRING(receipt.createdAt, 0, 4)) && DATE_MONTH(createdAtTimestamp) == TO_NUMBER(SUBSTRING(receipt.createdAt, 5, 2)) && DATE_DAY(createdAtTimestamp) == TO_NUMBER(SUBSTRING(receipt.createdAt, 8, 2)) && DATE_HOUR(createdAtTimestamp) == TO_NUMBER(SUBSTRING(receipt.createdAt, 11, 2)) && DATE_MINUTE(createdAtTimestamp) == TO_NUMBER(SUBSTRING(receipt.createdAt, 14, 2)) && DATE_SECOND(createdAtTimestamp) == TO_NUMBER(SUBSTRING(receipt.createdAt, 17, 2))
+      FILTER !REGEX_TEST(receipt._key, "^[cC][0-9a-z]{6,}$") || !REGEX_TEST(receipt.scopeKey, "^[cC][0-9a-z]{6,}$") || !REGEX_TEST(receipt.userKey, "^[cC][0-9a-z]{6,}$") || receipt.tripKey != receipt._key || !REGEX_TEST(receipt.tripKey, "^[cC][0-9a-z]{6,}$") || !REGEX_TEST(receipt.requestHash, "^[a-f0-9]{64}$") || !createdAtValid
+      REMOVE receipt IN tripCreationReceipts
+  `);
+  const trips = targetDb.collection('trips');
+  if (await trips.exists()) await targetDb.query(`
+    FOR trip IN trips
+      LET createdAtTimestamp = IS_STRING(trip.createdAt) && REGEX_TEST(trip.createdAt, "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\\\.[0-9]+)?Z$") && IS_DATESTRING(trip.createdAt) ? DATE_TIMESTAMP(trip.createdAt) : null
+      LET createdAtValid = createdAtTimestamp != null && DATE_YEAR(createdAtTimestamp) == TO_NUMBER(SUBSTRING(trip.createdAt, 0, 4)) && DATE_MONTH(createdAtTimestamp) == TO_NUMBER(SUBSTRING(trip.createdAt, 5, 2)) && DATE_DAY(createdAtTimestamp) == TO_NUMBER(SUBSTRING(trip.createdAt, 8, 2)) && DATE_HOUR(createdAtTimestamp) == TO_NUMBER(SUBSTRING(trip.createdAt, 11, 2)) && DATE_MINUTE(createdAtTimestamp) == TO_NUMBER(SUBSTRING(trip.createdAt, 14, 2)) && DATE_SECOND(createdAtTimestamp) == TO_NUMBER(SUBSTRING(trip.createdAt, 17, 2))
+      FILTER REGEX_TEST(trip._key, "^[cC][0-9a-z]{6,}$") && REGEX_TEST(trip.scopeKey, "^[cC][0-9a-z]{6,}$") && REGEX_TEST(trip.userKey, "^[cC][0-9a-z]{6,}$") && IS_STRING(trip.requestHash) && REGEX_TEST(trip.requestHash, "^[a-f0-9]{64}$") && createdAtValid
+      UPSERT { _key: trip._key }
+        INSERT { _key: trip._key, scopeKey: trip.scopeKey, userKey: trip.userKey, tripKey: trip._key, requestHash: trip.requestHash, createdAt: trip.createdAt }
+        UPDATE {} IN tripCreationReceipts
+  `);
+}
+
+export async function migrateTripGuides(targetDb: Database): Promise<void> {
+  const guides = targetDb.collection('tripGuides');
+  if (!await guides.exists()) return;
+  await targetDb.query(`
+    FOR guide IN tripGuides
+      LET trip = DOCUMENT(trips, guide.tripKey)
+      FILTER !REGEX_TEST(guide._key, "^[cC][0-9a-z]{6,}$")
+        || !REGEX_TEST(guide.scopeKey, "^[cC][0-9a-z]{6,}$")
+        || !REGEX_TEST(guide.userKey, "^[cC][0-9a-z]{6,}$")
+        || !REGEX_TEST(guide.tripKey, "^[cC][0-9a-z]{6,}$")
+        || trip == null || trip.scopeKey != guide.scopeKey || trip.userKey != guide.userKey
+        || !IS_STRING(guide.name) || guide.name != TRIM(guide.name) || LENGTH(guide.name) == 0 || LENGTH(guide.name) > 255
+        || !IS_STRING(guide.summary) || guide.summary != TRIM(guide.summary) || LENGTH(guide.summary) == 0 || LENGTH(guide.summary) > 4000
+        || !IS_STRING(guide.requestHash) || !REGEX_TEST(guide.requestHash, "^[a-f0-9]{64}$")
+        || !IS_ARRAY(guide.embedding) || (LENGTH(guide.embedding) != @dimensions && LENGTH(guide.embedding) != @legacyDimensions) || LENGTH(guide.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
+        || !IS_STRING(guide.createdAt) || !IS_DATESTRING(guide.createdAt)
+      REMOVE guide IN tripGuides
+  `, { dimensions: EMBEDDING_DIMENSIONS, legacyDimensions: LEGACY_EMBEDDING_DIMENSIONS });
+}
+
+export async function migratePlaceReports(targetDb: Database): Promise<void> {
+  const reports = targetDb.collection('placeReports');
+  if (!await reports.exists()) return;
+  await targetDb.query(`
+    FOR report IN placeReports
+      LET place = DOCUMENT(places, report.placeKey)
+      FILTER !REGEX_TEST(report._key, "^[cC][0-9a-z]{6,}$")
+        || !REGEX_TEST(report.scopeKey, "^[cC][0-9a-z]{6,}$")
+        || !REGEX_TEST(report.userKey, "^[cC][0-9a-z]{6,}$")
+        || !REGEX_TEST(report.placeKey, "^[cC][0-9a-z]{6,}$")
+        || place == null || place.scopeKey != report.scopeKey || place.userKey != report.userKey || place.saved != true
+        || !IS_STRING(report.name) || report.name != TRIM(report.name) || LENGTH(report.name) == 0 || LENGTH(report.name) > 255
+        || !IS_STRING(report.summary) || report.summary != TRIM(report.summary) || LENGTH(report.summary) == 0 || LENGTH(report.summary) > 4000
+        || !IS_STRING(report.requestHash) || !REGEX_TEST(report.requestHash, "^[a-f0-9]{64}$")
+        || !IS_ARRAY(report.embedding) || (LENGTH(report.embedding) != @dimensions && LENGTH(report.embedding) != @legacyDimensions) || LENGTH(report.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
+        || !IS_STRING(report.createdAt) || !IS_DATESTRING(report.createdAt)
+      REMOVE report IN placeReports
+  `, { dimensions: EMBEDDING_DIMENSIONS, legacyDimensions: LEGACY_EMBEDDING_DIMENSIONS });
+}
+
+export async function migrateGeneratedTravelDocuments(targetDb: Database): Promise<void> {
+  await migrateTripGuides(targetDb);
+  await migratePlaceReports(targetDb);
+  const { ensureGeneratedDocumentFolders } = await import('@/lib/generated-documents/folders');
+  const { ensureMailFolders } = await import('@/lib/email-inbox/folders');
+  const scopes = await (await targetDb.query<{ _key: string }>('FOR scope IN scopes RETURN { _key: scope._key }')).all();
+  for (const scope of scopes) {
+    await ensureGeneratedDocumentFolders(targetDb, scope._key);
+    await ensureMailFolders(targetDb, scope._key);
+  }
+  const migrations = [
+    { source: 'tripGuides', subjectType: 'trip', subjectField: 'tripKey', kind: 'guide' },
+    { source: 'placeReports', subjectType: 'place', subjectField: 'placeKey', kind: 'brief' },
+  ] as const;
+  for (const migration of migrations) {
+    const source = targetDb.collection(migration.source);
+    if (!await source.exists()) continue;
+    await targetDb.query(`
+      FOR legacy IN @@source
+        LET folderPurpose = CONCAT("generated-documents-", @kind)
+        LET folder = FIRST(FOR candidate IN folders FILTER candidate.scopeKey == legacy.scopeKey && candidate.purpose == folderPurpose LIMIT 1 RETURN candidate)
+        FILTER folder != null
+        UPSERT { _key: legacy._key }
+          INSERT { _key: legacy._key, scopeKey: legacy.scopeKey, folderKey: folder._key, name: legacy.name, content: legacy.summary, embedding: legacy.embedding, contentChunks: [legacy.summary], chunkEmbeddings: [legacy.embedding], semanticChunkCount: 1, semanticContentHash: SHA256(legacy.summary), isFavorite: false, createdAt: legacy.createdAt, updatedAt: legacy.createdAt }
+          UPDATE {} IN documents
+        UPSERT { _key: legacy._key }
+          INSERT { _key: legacy._key, scopeKey: legacy.scopeKey, documentKey: legacy._key, subjectType: @subjectType, subjectKey: legacy[@subjectField], kind: @kind, provenance: "generated", createdByKey: legacy.userKey, idempotencyKey: CONCAT("migration:", legacy._key), requestHash: legacy.requestHash, createdAt: legacy.createdAt, updatedAt: legacy.createdAt }
+          UPDATE {} IN generatedDocumentBindings
+    `, { '@source': migration.source, subjectType: migration.subjectType, subjectField: migration.subjectField, kind: migration.kind });
+    const verification = await targetDb.query<number>(`
+      RETURN LENGTH(FOR legacy IN @@source
+        LET document = DOCUMENT(documents, legacy._key)
+        LET binding = DOCUMENT(generatedDocumentBindings, legacy._key)
+        LET folderPurpose = CONCAT("generated-documents-", @kind)
+        LET folder = FIRST(FOR candidate IN folders FILTER candidate.scopeKey == legacy.scopeKey && candidate.purpose == folderPurpose LIMIT 1 RETURN candidate)
+        FILTER document == null || binding == null || folder == null
+          || document.scopeKey != legacy.scopeKey || document.folderKey != folder._key || document.name != legacy.name || document.content != legacy.summary
+          || binding.scopeKey != legacy.scopeKey || binding.documentKey != legacy._key || binding.subjectType != @subjectType || binding.subjectKey != legacy[@subjectField]
+          || binding.kind != @kind || binding.createdByKey != legacy.userKey || binding.requestHash != legacy.requestHash
+        RETURN 1)
+    `, { '@source': migration.source, subjectType: migration.subjectType, subjectField: migration.subjectField, kind: migration.kind });
+    const invalid = await verification.next() ?? 0;
+    if (invalid > 0) throw new Error(`${migration.source} conversion failed for ${invalid} row(s); source collection was preserved.`);
+    await source.drop();
+  }
+  await migrateContentDocuments(targetDb);
+}
+
+/** Moves the retired mail collections into protected Archive documents before they are dropped. */
+export async function migrateMailArchiveDocuments(targetDb: Database): Promise<void> {
+  const documents = targetDb.collection('documents');
+  const folders = targetDb.collection('folders');
+  if (!await documents.exists() || !await folders.exists()) return;
+  const { ensureMailFolders, mailFolderKeys } = await import('../lib/email-inbox/folders');
+  const scopeKeys = await (await targetDb.query<string>('FOR scope IN scopes RETURN scope._key')).all();
+  for (const scopeKey of scopeKeys) await ensureMailFolders(targetDb, scopeKey);
+
+  const accounts = targetDb.collection('emailAccounts');
+  if (await accounts.exists() && await targetDb.collection('organizationConnectors').exists()) {
+    await targetDb.query(`FOR account IN emailAccounts FILTER account.syncEnabled != false LET connector = FIRST(FOR candidate IN organizationConnectors FILTER candidate.provider == "gmail" && candidate.scopeKey == account.scopeKey && candidate.providerAccountId == account.providerAccountId && (account.connectorKey == null || candidate._key == account.connectorKey) LIMIT 1 RETURN candidate) FILTER connector != null UPDATE connector WITH { syncEnabled: account.syncEnabled, historyId: account.historyId, lastSyncedAt: account.lastSyncedAt, syncStatus: account.syncStatus, syncError: account.syncError, watchRegisteredAt: account.watchRegisteredAt, watchExpiresAt: account.watchExpiresAt, updatedAt: MAX([connector.updatedAt, account.updatedAt]) } IN organizationConnectors OPTIONS { keepNull: false }`);
+    const unmatched = await (await targetDb.query<number>('RETURN LENGTH(FOR account IN emailAccounts FILTER account.syncEnabled != false LET connectors = (FOR candidate IN organizationConnectors FILTER candidate.provider == "gmail" && candidate.scopeKey == account.scopeKey && candidate.providerAccountId == account.providerAccountId && (account.connectorKey == null || candidate._key == account.connectorKey) LIMIT 2 RETURN candidate) FILTER LENGTH(connectors) != 1 RETURN 1)')).next() ?? 0;
+    if (unmatched > 0) throw new Error(`Mail migration preserved legacy collections because ${unmatched} account record(s) had no connector.`);
+    const invalidAccounts = await (await targetDb.query<number>('RETURN LENGTH(FOR account IN emailAccounts FILTER account.syncEnabled != false LET connector = FIRST(FOR candidate IN organizationConnectors FILTER candidate.provider == "gmail" && candidate.scopeKey == account.scopeKey && candidate.providerAccountId == account.providerAccountId && (account.connectorKey == null || candidate._key == account.connectorKey) LIMIT 1 RETURN candidate) FILTER connector == null || connector.syncEnabled != account.syncEnabled || (HAS(account, "historyId") && connector.historyId != account.historyId) || (HAS(account, "lastSyncedAt") && connector.lastSyncedAt != account.lastSyncedAt) || (HAS(account, "syncStatus") && connector.syncStatus != account.syncStatus) || (HAS(account, "syncError") && connector.syncError != account.syncError) || (HAS(account, "watchRegisteredAt") && connector.watchRegisteredAt != account.watchRegisteredAt) || (HAS(account, "watchExpiresAt") && connector.watchExpiresAt != account.watchExpiresAt) RETURN 1)')).next() ?? 0;
+    if (invalidAccounts > 0) throw new Error(`Mail migration preserved legacy collections because ${invalidAccounts} account record(s) were not verified.`);
+  }
+
+  const threads = targetDb.collection('emailThreads');
+  if (await threads.exists()) {
+    for (const scopeKey of scopeKeys) {
+      const folderKey = mailFolderKeys(scopeKey).threads;
+      await targetDb.query(`FOR source IN emailThreads FILTER source.scopeKey == @scopeKey LET account = DOCUMENT(emailAccounts, source.accountKey) LET connector = FIRST(FOR candidate IN organizationConnectors FILTER account != null && candidate.provider == "gmail" && candidate.scopeKey == account.scopeKey && candidate.providerAccountId == account.providerAccountId && (account.connectorKey == null || candidate._key == account.connectorKey) LIMIT 1 RETURN candidate) LET accountKey = connector != null ? connector._key : (account != null && account.syncEnabled == false ? account._key : null) FILTER accountKey != null LET targetKey = CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "mail-thread", source.scopeKey, accountKey, source.providerThreadId)), 24)) LET data = MERGE(UNSET(source, "_key", "_id", "_rev", "scopeKey", "embedding", "createdAt", "updatedAt"), { accountKey }) LET target = { _key: targetKey, scopeKey: source.scopeKey, folderKey: @folderKey, name: source.subject, content: JSON_STRINGIFY({ version: 1, kind: "mail-thread", data }), embedding: source.embedding, mutationPolicy: "system-only", isFavorite: false, createdAt: source.createdAt, updatedAt: source.updatedAt } UPSERT { _key: targetKey } INSERT target REPLACE target IN documents`, { scopeKey, folderKey });
+    }
+  }
+  const messages = targetDb.collection('emailMessages');
+  if (await messages.exists()) {
+    for (const scopeKey of scopeKeys) {
+      const folderKey = mailFolderKeys(scopeKey).threads;
+      await targetDb.query(`FOR source IN emailMessages FILTER source.scopeKey == @scopeKey LET legacyThread = DOCUMENT(emailThreads, source.threadKey) LET account = DOCUMENT(emailAccounts, source.accountKey) LET connector = FIRST(FOR candidate IN organizationConnectors FILTER account != null && candidate.provider == "gmail" && candidate.scopeKey == account.scopeKey && candidate.providerAccountId == account.providerAccountId && (account.connectorKey == null || candidate._key == account.connectorKey) LIMIT 1 RETURN candidate) LET accountKey = connector != null ? connector._key : (account != null && account.syncEnabled == false ? account._key : null) FILTER legacyThread != null && accountKey != null LET threadKey = CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "mail-thread", source.scopeKey, accountKey, legacyThread.providerThreadId)), 24)) LET targetKey = CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "mail-message", source.scopeKey, accountKey, source.providerMessageId)), 24)) LET data = MERGE(UNSET(source, "_key", "_id", "_rev", "scopeKey", "threadKey", "embedding", "createdAt", "updatedAt"), { accountKey, threadKey }) LET target = { _key: targetKey, scopeKey: source.scopeKey, folderKey: @folderKey, name: source.subject, content: JSON_STRINGIFY({ version: 1, kind: "mail-message", data }), embedding: source.embedding, mutationPolicy: "system-only", isFavorite: false, createdAt: source.createdAt, updatedAt: source.updatedAt } UPSERT { _key: targetKey } INSERT target REPLACE target IN documents`, { scopeKey, folderKey });
+    }
+  }
+  const drafts = targetDb.collection('emailReplyDrafts');
+  if (await drafts.exists()) {
+    for (const scopeKey of scopeKeys) {
+      const folderKey = mailFolderKeys(scopeKey).drafts;
+      await targetDb.query(`FOR source IN emailReplyDrafts FILTER source.scopeKey == @scopeKey LET legacyThread = DOCUMENT(emailThreads, source.threadKey) LET legacyMessage = DOCUMENT(emailMessages, source.messageKey) LET account = legacyThread == null ? null : DOCUMENT(emailAccounts, legacyThread.accountKey) LET connector = FIRST(FOR candidate IN organizationConnectors FILTER account != null && candidate.provider == "gmail" && candidate.scopeKey == account.scopeKey && candidate.providerAccountId == account.providerAccountId && (account.connectorKey == null || candidate._key == account.connectorKey) LIMIT 1 RETURN candidate) LET accountKey = connector != null ? connector._key : (account != null && account.syncEnabled == false ? account._key : null) FILTER legacyThread != null && legacyMessage != null && accountKey != null LET threadKey = CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "mail-thread", source.scopeKey, accountKey, legacyThread.providerThreadId)), 24)) LET messageKey = CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "mail-message", source.scopeKey, accountKey, legacyMessage.providerMessageId)), 24)) LET data = MERGE({ variant: "reply" }, UNSET(source, "_key", "_id", "_rev", "scopeKey", "threadKey", "messageKey", "embedding", "createdAt", "updatedAt"), { threadKey, messageKey }) LET target = { _key: source._key, scopeKey: source.scopeKey, folderKey: @folderKey, name: CONCAT("Reply ", legacyThread.subject), content: JSON_STRINGIFY({ version: 1, kind: "mail-reply-draft", data }), embedding: source.embedding, mutationPolicy: "system-only", isFavorite: false, createdAt: source.createdAt, updatedAt: source.updatedAt } UPSERT { _key: source._key } INSERT target REPLACE target IN documents`, { scopeKey, folderKey });
+    }
+  }
+  const profiles = targetDb.collection('emailWritingProfiles');
+  if (await profiles.exists()) {
+    for (const scopeKey of scopeKeys) {
+      const folderKey = mailFolderKeys(scopeKey).tones;
+      await targetDb.query(`FOR source IN emailWritingProfiles FILTER source.scopeKey == @scopeKey LET data = UNSET(source, "_key", "_id", "_rev", "scopeKey", "embedding", "createdAt", "updatedAt") LET target = { _key: source._key, scopeKey: source.scopeKey, folderKey: @folderKey, name: source.name, content: JSON_STRINGIFY({ version: 1, kind: "mail-writing-profile", data }), embedding: source.embedding, mutationPolicy: "system-only", isFavorite: false, createdAt: source.createdAt, updatedAt: source.updatedAt } UPSERT { _key: source._key } INSERT target REPLACE target IN documents`, { scopeKey, folderKey });
+    }
+  }
+  for (const legacy of [
+    { collection: 'emailContacts', kind: 'mail-contact', name: 'email' },
+    { collection: 'emailRules', kind: 'mail-rule', name: 'name' },
+  ] as const) {
+    const collection = targetDb.collection(legacy.collection);
+    if (!await collection.exists()) continue;
+    for (const scopeKey of scopeKeys) {
+      const folderKey = mailFolderKeys(scopeKey).settings;
+      await targetDb.query(`FOR source IN @@source FILTER source.scopeKey == @scopeKey LET data = UNSET(source, "_key", "_id", "_rev", "scopeKey", "embedding", "createdAt", "updatedAt") LET target = { _key: source._key, scopeKey: source.scopeKey, folderKey: @folderKey, name: source[@nameField], content: JSON_STRINGIFY({ version: 1, kind: @kind, data }), embedding: source.embedding, mutationPolicy: "system-only", isFavorite: false, createdAt: source.createdAt, updatedAt: source.updatedAt } UPSERT { _key: source._key } INSERT target REPLACE target IN documents`, { '@source': legacy.collection, scopeKey, folderKey, nameField: legacy.name, kind: legacy.kind });
+    }
+  }
+
+  const verificationQueries = [
+    ['emailThreads', 'FOR source IN emailThreads LET account = DOCUMENT(emailAccounts, source.accountKey) LET connector = FIRST(FOR candidate IN organizationConnectors FILTER account != null && candidate.provider == "gmail" && candidate.scopeKey == account.scopeKey && candidate.providerAccountId == account.providerAccountId && (account.connectorKey == null || candidate._key == account.connectorKey) LIMIT 1 RETURN candidate) LET folder = FIRST(FOR candidate IN folders FILTER candidate.scopeKey == source.scopeKey && candidate.purpose == "communication-mail-threads" LIMIT 1 RETURN candidate) LET accountKey = connector != null ? connector._key : (account != null && account.syncEnabled == false ? account._key : null) LET targetKey = accountKey == null ? null : CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "mail-thread", source.scopeKey, accountKey, source.providerThreadId)), 24)) LET data = MERGE(UNSET(source, "_key", "_id", "_rev", "scopeKey", "embedding", "createdAt", "updatedAt"), { accountKey }) LET target = targetKey == null ? null : DOCUMENT(documents, targetKey) FILTER accountKey == null || folder == null || target == null || target.scopeKey != source.scopeKey || target.folderKey != folder._key || target.name != source.subject || target.content != JSON_STRINGIFY({ version: 1, kind: "mail-thread", data }) || target.embedding != source.embedding || target.mutationPolicy != "system-only" || target.createdAt != source.createdAt || target.updatedAt != source.updatedAt RETURN 1'],
+    ['emailMessages', 'FOR source IN emailMessages LET legacyThread = DOCUMENT(emailThreads, source.threadKey) LET account = DOCUMENT(emailAccounts, source.accountKey) LET connector = FIRST(FOR candidate IN organizationConnectors FILTER account != null && candidate.provider == "gmail" && candidate.scopeKey == account.scopeKey && candidate.providerAccountId == account.providerAccountId && (account.connectorKey == null || candidate._key == account.connectorKey) LIMIT 1 RETURN candidate) LET folder = FIRST(FOR candidate IN folders FILTER candidate.scopeKey == source.scopeKey && candidate.purpose == "communication-mail-threads" LIMIT 1 RETURN candidate) LET accountKey = connector != null ? connector._key : (account != null && account.syncEnabled == false ? account._key : null) LET threadKey = legacyThread == null || accountKey == null ? null : CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "mail-thread", source.scopeKey, accountKey, legacyThread.providerThreadId)), 24)) LET targetKey = accountKey == null ? null : CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "mail-message", source.scopeKey, accountKey, source.providerMessageId)), 24)) LET data = MERGE(UNSET(source, "_key", "_id", "_rev", "scopeKey", "threadKey", "embedding", "createdAt", "updatedAt"), { accountKey, threadKey }) LET target = targetKey == null ? null : DOCUMENT(documents, targetKey) FILTER legacyThread == null || accountKey == null || folder == null || target == null || target.scopeKey != source.scopeKey || target.folderKey != folder._key || target.name != source.subject || target.content != JSON_STRINGIFY({ version: 1, kind: "mail-message", data }) || target.embedding != source.embedding || target.mutationPolicy != "system-only" || target.createdAt != source.createdAt || target.updatedAt != source.updatedAt RETURN 1'],
+    ['emailReplyDrafts', 'FOR source IN emailReplyDrafts LET legacyThread = DOCUMENT(emailThreads, source.threadKey) LET legacyMessage = DOCUMENT(emailMessages, source.messageKey) LET account = legacyThread == null ? null : DOCUMENT(emailAccounts, legacyThread.accountKey) LET connector = FIRST(FOR candidate IN organizationConnectors FILTER account != null && candidate.provider == "gmail" && candidate.scopeKey == account.scopeKey && candidate.providerAccountId == account.providerAccountId && (account.connectorKey == null || candidate._key == account.connectorKey) LIMIT 1 RETURN candidate) LET folder = FIRST(FOR candidate IN folders FILTER candidate.scopeKey == source.scopeKey && candidate.purpose == "communication-mail-drafts" LIMIT 1 RETURN candidate) LET accountKey = connector != null ? connector._key : (account != null && account.syncEnabled == false ? account._key : null) LET threadKey = legacyThread == null || accountKey == null ? null : CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "mail-thread", source.scopeKey, accountKey, legacyThread.providerThreadId)), 24)) LET messageKey = legacyMessage == null || accountKey == null ? null : CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "mail-message", source.scopeKey, accountKey, legacyMessage.providerMessageId)), 24)) LET data = MERGE({ variant: "reply" }, UNSET(source, "_key", "_id", "_rev", "scopeKey", "threadKey", "messageKey", "embedding", "createdAt", "updatedAt"), { threadKey, messageKey }) LET target = DOCUMENT(documents, source._key) FILTER legacyThread == null || legacyMessage == null || accountKey == null || folder == null || target == null || target.scopeKey != source.scopeKey || target.folderKey != folder._key || target.name != CONCAT("Reply ", legacyThread.subject) || target.content != JSON_STRINGIFY({ version: 1, kind: "mail-reply-draft", data }) || target.embedding != source.embedding || target.mutationPolicy != "system-only" || target.createdAt != source.createdAt || target.updatedAt != source.updatedAt RETURN 1'],
+    ['emailWritingProfiles', 'FOR source IN emailWritingProfiles LET folder = FIRST(FOR candidate IN folders FILTER candidate.scopeKey == source.scopeKey && candidate.purpose == "communication-mail-tones" LIMIT 1 RETURN candidate) LET data = UNSET(source, "_key", "_id", "_rev", "scopeKey", "embedding", "createdAt", "updatedAt") LET target = DOCUMENT(documents, source._key) FILTER folder == null || target == null || target.scopeKey != source.scopeKey || target.folderKey != folder._key || target.name != source.name || target.content != JSON_STRINGIFY({ version: 1, kind: "mail-writing-profile", data }) || target.embedding != source.embedding || target.mutationPolicy != "system-only" || target.createdAt != source.createdAt || target.updatedAt != source.updatedAt RETURN 1'],
+    ['emailContacts', 'FOR source IN emailContacts LET folder = FIRST(FOR candidate IN folders FILTER candidate.scopeKey == source.scopeKey && candidate.purpose == "communication-mail-settings" LIMIT 1 RETURN candidate) LET data = UNSET(source, "_key", "_id", "_rev", "scopeKey", "embedding", "createdAt", "updatedAt") LET target = DOCUMENT(documents, source._key) FILTER folder == null || target == null || target.scopeKey != source.scopeKey || target.folderKey != folder._key || target.name != source.email || target.content != JSON_STRINGIFY({ version: 1, kind: "mail-contact", data }) || target.embedding != source.embedding || target.mutationPolicy != "system-only" || target.createdAt != source.createdAt || target.updatedAt != source.updatedAt RETURN 1'],
+    ['emailRules', 'FOR source IN emailRules LET folder = FIRST(FOR candidate IN folders FILTER candidate.scopeKey == source.scopeKey && candidate.purpose == "communication-mail-settings" LIMIT 1 RETURN candidate) LET data = UNSET(source, "_key", "_id", "_rev", "scopeKey", "embedding", "createdAt", "updatedAt") LET target = DOCUMENT(documents, source._key) FILTER folder == null || target == null || target.scopeKey != source.scopeKey || target.folderKey != folder._key || target.name != source.name || target.content != JSON_STRINGIFY({ version: 1, kind: "mail-rule", data }) || target.embedding != source.embedding || target.mutationPolicy != "system-only" || target.createdAt != source.createdAt || target.updatedAt != source.updatedAt RETURN 1'],
+  ] as const;
+  for (const [collectionName, query] of verificationQueries) {
     if (!await targetDb.collection(collectionName).exists()) continue;
-    await targetDb.query(
-      'FOR resource IN @@collection FILTER resource.sourceType == "trip" REMOVE resource IN @@collection',
-      { '@collection': collectionName },
-    );
+    const invalid = await (await targetDb.query<number>(`RETURN LENGTH(${query})`)).next() ?? 0;
+    if (invalid > 0) throw new Error(`Mail migration preserved legacy collections because ${invalid} ${collectionName} record(s) were not verified.`);
   }
-  for (const collectionName of ['tripPlaces', 'placeVisits', 'trips']) {
-    const collection = targetDb.collection(collectionName);
-    if (await collection.exists()) await collection.drop();
+}
+
+export async function migrateProviderIndependentEmailDrafts(targetDb: Database): Promise<void> {
+  if (!await targetDb.collection('documents').exists() || !await targetDb.collection('organizationConnectors').exists() || !await targetDb.collection('scopes').exists()) return;
+  const batchSize = 100;
+  const updatedAt = new Date().toISOString();
+  let after = '';
+  while (true) {
+    const cursor = await targetDb.query<{ key: string; revision: string; content: string; updatedAt: string }>(`FOR document IN documents
+      FILTER document._key > @after
+      LET payload = JSON_PARSE(document.content)
+      FILTER payload.kind == "mail-new-draft" && payload.data.accountKey == document.scopeKey && payload.data.status IN ["generated", "edited"]
+      LET scope = DOCUMENT(scopes, document.scopeKey)
+      LET connectors = (FOR connector IN organizationConnectors
+        FILTER scope != null && connector.organizationKey == scope.organizationKey && connector.scopeKey == document.scopeKey
+        FILTER connector.provider IN ["gmail", "outlook", "icloud"] && connector.status != "revoked" && connector.syncEnabled != false
+        LIMIT 2 RETURN connector)
+      FILTER LENGTH(connectors) == 1
+      LET nextPayload = MERGE(payload, { data: MERGE(payload.data, { accountKey: connectors[0]._key }) })
+      SORT document._key
+      LIMIT @batchSize
+      RETURN { key: document._key, revision: document._rev, content: JSON_STRINGIFY(nextPayload), updatedAt: MAX([document.updatedAt, @updatedAt]) }`, { after, batchSize, updatedAt });
+    const patches = await cursor.all();
+    if (patches.length === 0) break;
+    await targetDb.query(`FOR patch IN @patches
+      UPDATE { _key: patch.key, _rev: patch.revision }
+      WITH { content: patch.content, updatedAt: patch.updatedAt } IN documents
+      OPTIONS { ignoreRevs: false, ignoreErrors: true }`, { patches });
+    after = patches.at(-1)!.key;
+    if (patches.length < batchSize) break;
   }
+}
+
+type TripAttachmentMigrationTransaction = <T>(operation: (transaction: Pick<Database, 'query'>) => Promise<T>) => Promise<T>;
+
+export async function migrateTripAttachments(targetDb: Database, runTransaction: TripAttachmentMigrationTransaction = (operation) => withDatabaseTransaction(targetDb, ['tripAttachments'], operation)): Promise<void> {
+  const collection = targetDb.collection('tripAttachments');
+  if (!await collection.exists()) return;
+  const existing = new Set((await targetDb.listCollections()).map(({ name }) => name));
+  const required = ['scopes', 'trips', 'folders', 'collections'];
+  const missing = required.filter((name) => !existing.has(name));
+  if (missing.length > 0) {
+    await targetDb.query('FOR attachment IN tripAttachments REMOVE attachment IN tripAttachments');
+    return;
+  }
+  await targetDb.query(`
+    FOR attachment IN tripAttachments
+      LET scope = DOCUMENT(scopes, attachment.scopeKey)
+      LET trip = DOCUMENT(trips, attachment.tripKey)
+      LET target = attachment.targetType == "folder" ? DOCUMENT(folders, attachment.targetKey)
+        : attachment.targetType == "collection" ? DOCUMENT(collections, attachment.targetKey)
+        : null
+      LET createdAtTimestamp = IS_STRING(attachment.createdAt) && REGEX_TEST(attachment.createdAt, "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\\\.[0-9]+)?Z$") && IS_DATESTRING(attachment.createdAt) ? DATE_TIMESTAMP(attachment.createdAt) : null
+      LET createdAtValid = createdAtTimestamp != null
+        && DATE_YEAR(createdAtTimestamp) == TO_NUMBER(SUBSTRING(attachment.createdAt, 0, 4))
+        && DATE_MONTH(createdAtTimestamp) == TO_NUMBER(SUBSTRING(attachment.createdAt, 5, 2))
+        && DATE_DAY(createdAtTimestamp) == TO_NUMBER(SUBSTRING(attachment.createdAt, 8, 2))
+        && DATE_HOUR(createdAtTimestamp) == TO_NUMBER(SUBSTRING(attachment.createdAt, 11, 2))
+        && DATE_MINUTE(createdAtTimestamp) == TO_NUMBER(SUBSTRING(attachment.createdAt, 14, 2))
+        && DATE_SECOND(createdAtTimestamp) == TO_NUMBER(SUBSTRING(attachment.createdAt, 17, 2))
+      FILTER !REGEX_TEST(attachment._key, "^[cC][0-9a-z]{6,}$")
+        || !REGEX_TEST(attachment.scopeKey, "^[cC][0-9a-z]{6,}$")
+        || !REGEX_TEST(attachment.tripKey, "^[cC][0-9a-z]{6,}$")
+        || !REGEX_TEST(attachment.targetKey, "^[cC][0-9a-z]{6,}$")
+        || !createdAtValid
+        || attachment.targetType NOT IN ["folder", "collection"]
+        || !IS_NUMBER(attachment.position) || attachment.position < 0 || attachment.position != FLOOR(attachment.position)
+        || scope == null || trip == null || target == null
+        || trip.scopeKey != attachment.scopeKey || target.scopeKey != attachment.scopeKey
+        || (HAS(trip, @marker) && trip[@marker] != null)
+        || (HAS(target, @marker) && target[@marker] != null)
+        || (attachment.targetType == "collection" && (target.mutationPolicy == "system-only" || target.purpose != null))
+      REMOVE attachment IN tripAttachments
+  `, {
+    marker: LEGACY_REMOVAL_MARKER,
+  });
+  await targetDb.query('FOR attachment IN tripAttachments SORT attachment.createdAt ASC, attachment._key ASC COLLECT scopeKey = attachment.scopeKey, tripKey = attachment.tripKey, targetType = attachment.targetType, targetKey = attachment.targetKey INTO grouped FOR duplicate IN SLICE(grouped, 1) REMOVE duplicate.attachment IN tripAttachments');
+  await runTransaction(async (transaction) => {
+    await transaction.query('FOR attachment IN tripAttachments UPDATE attachment WITH { position: CONCAT("migration:", attachment._key), _migrationPosition: attachment.position } IN tripAttachments');
+    await transaction.query('FOR attachment IN tripAttachments SORT attachment.scopeKey, attachment.tripKey, attachment._migrationPosition, attachment.createdAt, attachment._key COLLECT scopeKey = attachment.scopeKey, tripKey = attachment.tripKey INTO grouped FOR position IN 0..(LENGTH(grouped) - 1) LET item = grouped[position] REPLACE item.attachment WITH UNSET(MERGE(item.attachment, { position }), "_migrationPosition") IN tripAttachments');
+  });
 }
 
 export async function migrateExactSemanticRecords(targetDb: Database, collectionName: 'folders' | 'images' | 'collections' | 'tags' | 'imageCaptions' | 'visualIdentities', embedKeys: readonly string[]) {
@@ -606,6 +918,129 @@ export async function migrateExactSemanticRecords(targetDb: Database, collection
   `, { '@collection': collectionName, dimensions, isImage: collectionName === 'images' });
   const invalid = await verification.next() ?? 0;
   if (invalid > 0) throw new Error(`${collectionName} exact semantic migration verification failed for ${invalid} row(s).`);
+}
+
+export async function backfillConnectorInboxes(targetDb: Database) {
+  if (!await targetDb.collection('organizationConnectors').exists() || !await targetDb.collection('inboxes').exists()) return;
+  const cursor = await targetDb.query<{ key: string; organizationKey: string; scopeKey: string; email: string; createdAt: string; updatedAt: string }>(`FOR connector IN organizationConnectors
+    FILTER connector.provider IN ["gmail", "outlook", "icloud"]
+    FILTER LENGTH(FOR inbox IN inboxes FILTER inbox.connectorKey == connector._key LIMIT 1 RETURN 1) == 0
+    RETURN { key: connector._key, organizationKey: connector.organizationKey, scopeKey: connector.scopeKey, email: connector.email, createdAt: connector.createdAt, updatedAt: connector.updatedAt }`);
+  for (const connector of await cursor.all()) {
+    const name = connector.email;
+    const embedding = await embedText({ text: buildEmbeddingText(['name', 'description'], { name })! });
+    await targetDb.query(`UPSERT { connectorKey: @connectorKey }
+      INSERT { _key: @key, organizationKey: @organizationKey, scopeKey: @scopeKey, connectorKey: @connectorKey, name: @name, isFavorite: false, embedding: @embedding, createdAt: @createdAt, updatedAt: @updatedAt }
+      UPDATE {} IN inboxes`, { key: newId(), organizationKey: connector.organizationKey, scopeKey: connector.scopeKey, connectorKey: connector.key, name, embedding, createdAt: connector.createdAt, updatedAt: connector.updatedAt });
+  }
+}
+
+function emailToneSemanticsCurrent(document: Record<string, unknown>, canonicalContent: string, contentChunks: string[], semanticText: string, dimensions: number) {
+  const embedding = document.embedding;
+  const storedChunks = document.contentChunks;
+  const chunkEmbeddings = document.chunkEmbeddings;
+  return document.content === canonicalContent && document.emailToneEmbeddingVersion === 1
+    && Array.isArray(embedding) && embedding.length === dimensions && embedding.every((value) => typeof value === 'number' && Number.isFinite(value))
+    && Array.isArray(storedChunks) && storedChunks.length === contentChunks.length && storedChunks.every((value, index) => value === contentChunks[index])
+    && Array.isArray(chunkEmbeddings) && chunkEmbeddings.length === contentChunks.length
+    && chunkEmbeddings.every((value) => Array.isArray(value) && value.length === dimensions && value.every((item, index) => typeof item === 'number' && Number.isFinite(item) && item === embedding[index]))
+    && document.semanticChunkCount === contentChunks.length && document.semanticContentHash === documentSemanticHash(semanticText);
+}
+
+function isCanonicalEmailToneDocument(document: Record<string, unknown>) {
+  return typeof document.scopeKey === 'string' && document.folderKey === mailFolderKeys(document.scopeKey).tones;
+}
+
+export async function migrateEmailToneEmbeddings(targetDb: Database) {
+  if (!await targetDb.collection('documents').exists() || !await targetDb.collection('folders').exists()) return;
+  const dimensions = EMBEDDING_DIMENSIONS;
+  const cursor = await targetDb.query<Record<string, unknown>>(`FOR document IN documents
+    LET folder = DOCUMENT(folders, document.folderKey)
+    FILTER folder != null && folder.scopeKey == document.scopeKey && folder.purpose == "communication-mail-tones"
+    RETURN document`);
+  for (const document of await cursor.all()) {
+    if (!isCanonicalEmailToneDocument(document)) continue;
+    let tone;
+    try { tone = decodeEmailToneContent(String(document.content)); } catch { continue; }
+    const semanticText = emailToneSemanticText(tone);
+    const canonicalContent = encodeEmailToneContent(tone);
+    const contentChunks = chunkDocumentContent(semanticText);
+    if (emailToneSemanticsCurrent(document, canonicalContent, contentChunks, semanticText, dimensions)) continue;
+    const embedding = await embedText({ text: semanticText });
+    await targetDb.query('FOR document IN documents FILTER document._key == @key && document._rev == @revision UPDATE document WITH { name: @name, content: @content, embedding: @embedding, contentChunks: @contentChunks, chunkEmbeddings: @chunkEmbeddings, semanticChunkCount: @semanticChunkCount, semanticContentHash: @semanticContentHash, emailToneEmbeddingVersion: 1 } IN documents', { key: document._key, revision: document._rev, name: tone.name, content: canonicalContent, embedding, contentChunks, chunkEmbeddings: contentChunks.map(() => embedding), semanticChunkCount: contentChunks.length, semanticContentHash: documentSemanticHash(semanticText) });
+  }
+  const verification = await targetDb.query<Record<string, unknown>>(`FOR document IN documents
+    LET folder = DOCUMENT(folders, document.folderKey)
+    FILTER folder != null && folder.scopeKey == document.scopeKey && folder.purpose == "communication-mail-tones"
+    RETURN document`);
+  let invalid = 0;
+  for (const document of await verification.all()) {
+    if (!isCanonicalEmailToneDocument(document)) continue;
+    let tone;
+    try { tone = decodeEmailToneContent(String(document.content)); } catch { continue; }
+    const semanticText = emailToneSemanticText(tone);
+    const canonicalContent = encodeEmailToneContent(tone);
+    const contentChunks = chunkDocumentContent(semanticText);
+    if (!emailToneSemanticsCurrent(document, canonicalContent, contentChunks, semanticText, dimensions)) invalid += 1;
+  }
+  if (invalid > 0) throw new Error(`Email tone semantic migration failed for ${invalid} stale row(s), including any concurrent edit conflicts; rerun the migration.`);
+}
+
+export async function migrateRetiredEmailDefaultTones(targetDb: Database) {
+  const retiredTones = [
+    { slug: 'warm', name: 'Warm', description: 'Friendly and considerate.', instruction: 'Sound approachable, appreciative, and human.' },
+    { slug: 'concise', name: 'Concise', instruction: 'Lead with the point, use short sentences, and include only necessary details.' },
+  ];
+  await targetDb.query(`FOR document IN documents
+    LET folder = DOCUMENT(folders, document.folderKey)
+    FILTER folder != null && folder.scopeKey == document.scopeKey && folder.purpose == "communication-mail-tones"
+    LET retired = FIRST(FOR tone IN @retiredTones LET key = CONCAT("c", SUBSTRING(SHA256(CONCAT("mail-tone", "\\u0000", document.scopeKey, "\\u0000", tone.slug)), 0, 24)) FILTER document._key == key RETURN tone)
+    FILTER retired != null
+    LET legacyContent = retired.description == null ? null : CONCAT("# ", retired.name, "\\n\\n<!-- vorinthex-mail-tone ", JSON_STRINGIFY({ version: 1, slug: retired.slug }), " -->\\n\\n", retired.description, "\\n\\n## Instruction\\n\\n", retired.instruction)
+    LET canonicalContent = CONCAT("# ", retired.name, "\\n\\n<!-- vorinthex-mail-tone ", JSON_STRINGIFY({ version: 1, slug: retired.slug }), " -->\\n\\n## Instruction\\n\\n", retired.instruction)
+    LET summaryKeys = (FOR summary IN documentSummaries FILTER summary.scopeKey == document.scopeKey && summary.documentKey == document._key RETURN summary._key)
+    LET hasDependents = LENGTH(FOR version IN documentVersions FILTER version.scopeKey == document.scopeKey && version.documentKey == document._key LIMIT 1 RETURN 1) > 0
+      || LENGTH(summaryKeys) > 0
+      || LENGTH(FOR audio IN documentAudioVersions FILTER audio.scopeKey == document.scopeKey && audio.documentKey == document._key LIMIT 1 RETURN 1) > 0
+      || LENGTH(FOR audio IN documentSummaryAudio FILTER audio.scopeKey == document.scopeKey && (audio.documentKey == document._key || audio.summaryKey IN summaryKeys) LIMIT 1 RETURN 1) > 0
+    LET untouched = (document.content == canonicalContent || legacyContent != null && document.content == legacyContent) && document.name == retired.name && document.isFavorite != true && document.coverImageKey == null && document.createdAt == document.updatedAt && !hasDependents
+    FILTER untouched
+    REMOVE document IN documents`, { retiredTones });
+  await targetDb.query(`FOR document IN documents
+    LET folder = DOCUMENT(folders, document.folderKey)
+    FILTER folder != null && folder.scopeKey == document.scopeKey && folder.purpose == "communication-mail-tones"
+    LET retired = FIRST(FOR tone IN @retiredTones LET key = CONCAT("c", SUBSTRING(SHA256(CONCAT("mail-tone", "\\u0000", document.scopeKey, "\\u0000", tone.slug)), 0, 24)) FILTER document._key == key RETURN tone)
+    FILTER retired != null
+    LET customContent = SUBSTITUTE(document.content, JSON_STRINGIFY({ version: 1, slug: retired.slug }), JSON_STRINGIFY({ version: 1 }))
+    FILTER customContent != document.content
+    UPDATE document WITH { content: customContent, updatedAt: DATE_ISO8601(DATE_NOW()) } IN documents`, { retiredTones });
+}
+
+export async function migrateEmailInboxCategoriesAndDefaultTones(targetDb: Database) {
+  if (!await targetDb.collection('documents').exists() || !await targetDb.collection('folders').exists()) return;
+  const defaultTones = [
+    { slug: 'casual', name: 'Casual', instruction: 'Use conversational language, natural contractions, and an approachable tone.' },
+    { slug: 'formal', name: 'Formal', instruction: 'Use professional language, complete sentences, and a clear conventional structure.' },
+    { slug: 'direct', name: 'Direct', instruction: 'Lead with the answer or action and avoid hedging.' },
+  ];
+  await targetDb.query(`FOR folder IN folders
+    FILTER folder.purpose == "communication-mail-tones"
+    FOR tone IN @defaultTones
+      LET key = CONCAT("c", SUBSTRING(SHA256(CONCAT("mail-tone", "\\u0000", folder.scopeKey, "\\u0000", tone.slug)), 0, 24))
+      LET content = CONCAT("# ", tone.name, "\\n\\n<!-- vorinthex-mail-tone ", JSON_STRINGIFY({ version: 1, slug: tone.slug }), " -->\\n\\n## Instruction\\n\\n", tone.instruction)
+      LET timestamp = DATE_ISO8601(DATE_NOW())
+      UPSERT { _key: key }
+      INSERT { _key: key, scopeKey: folder.scopeKey, folderKey: folder._key, name: tone.name, content, embedding: @placeholder, mutationPolicy: "user", isFavorite: false, createdAt: timestamp, updatedAt: timestamp }
+      UPDATE {} IN documents`, { defaultTones, placeholder: Array(EMBEDDING_DIMENSIONS).fill(0) });
+  await targetDb.query(`FOR document IN documents
+    FILTER document.mutationPolicy == "system-only" && STARTS_WITH(TRIM(document.content), "{")
+    LET payload = JSON_PARSE(document.content)
+    FILTER payload.version == 1 && payload.kind IN ["mail-thread", "mail-message"]
+    LET labels = payload.data.labels || []
+    LET inboxCategory = "SPAM" IN labels || "TRASH" IN labels || payload.data.state == "filtered" ? "Filtered" : payload.data.priority == "urgent" ? "Urgent" : "Important"
+    LET inInbox = "INBOX" IN labels || "SPAM" IN labels || "TRASH" IN labels
+    FILTER payload.data.inboxCategory != inboxCategory || (payload.kind == "mail-thread" && payload.data.inInbox != inInbox)
+    UPDATE document WITH { content: JSON_STRINGIFY(MERGE(payload, { data: MERGE(payload.data, payload.kind == "mail-thread" ? { inboxCategory, inInbox } : { inboxCategory }) })) } IN documents`);
 }
 
 export async function migrateContentVersions(targetDb: Database) {
@@ -705,6 +1140,7 @@ export async function migrateContentDocuments(targetDb: Database) {
     const cursor = await targetDb.query<Record<string, unknown>>(`
       FOR document IN documents
         FILTER document._key > @after
+        FILTER document.emailToneEmbeddingVersion != 1 && document.emailReplyContextEmbeddingVersion != 1
         FILTER HAS(document, "html") || (document._semanticChunkingSkipped != true && (HAS(document, "json")
           || !IS_STRING(document.content) || LENGTH(TRIM(document.content)) == 0
           || !IS_ARRAY(document.embedding) || LENGTH(document.embedding) == 0
@@ -773,6 +1209,7 @@ export async function migrateContentDocuments(targetDb: Database) {
   }
   const verification = await targetDb.query<number>(`
     RETURN LENGTH(FOR document IN documents
+      FILTER document.emailToneEmbeddingVersion != 1 && document.emailReplyContextEmbeddingVersion != 1
       FILTER HAS(document, "html") || (document._semanticChunkingSkipped != true && (HAS(document, "json")
         || !IS_STRING(document.content) || LENGTH(TRIM(document.content)) == 0
         || !IS_ARRAY(document.embedding) || LENGTH(document.embedding) == 0
@@ -900,7 +1337,7 @@ async function getUserIdByEmailHash(targetDb: Database, emailHash: string): Prom
 const formerlyTombstonedCollections = [
   'scopes', 'scopeScopes', 'folders', 'images', 'visualIdentities', 'collections',
   'imageCollecitionHightlights', 'imageCollectionMemories', 'documents', 'documentVersions', 'documentShares',
-  'shares', 'places', 'trips', 'books', 'emailThreads', 'messages',
+  'shares', 'places', 'trips', 'books', 'messages',
 ] as const;
 
 export async function removeLegacyTombstones(targetDb: Database): Promise<void> {
@@ -910,6 +1347,7 @@ export async function removeLegacyTombstones(targetDb: Database): Promise<void> 
   const existing = new Set((await targetDb.listCollections()).map(({ name }) => name));
   const exists = async (name: string) => existing.has(name);
   await withDatabaseTransaction(targetDb, { write: [...existing] }, async (transaction) => {
+  const cleanupAt = new Date().toISOString();
   const keysFor = async (name: string): Promise<string[]> => {
     if (!await exists(name)) return [];
     const cursor = await transaction.query(
@@ -933,6 +1371,10 @@ export async function removeLegacyTombstones(targetDb: Database): Promise<void> 
       return;
     }
     await transaction.query('FOR resource IN @@collection FILTER resource[@typeField] == @type && resource.sourceKey IN @keys REMOVE resource IN @@collection', { '@collection': name, keys, typeField, type });
+  };
+  const removeAttachmentTargets = async (targetType: string, keys: string[]) => {
+    if (!keys.length || !await exists('tripAttachments')) return;
+    await transaction.query('LET tripKeys = UNIQUE(FOR attachment IN tripAttachments FILTER attachment.targetType == @targetType && attachment.targetKey IN @keys RETURN attachment.tripKey) LET removed = (FOR attachment IN tripAttachments FILTER attachment.targetType == @targetType && attachment.targetKey IN @keys REMOVE attachment IN tripAttachments RETURN 1) LET touched = (FOR trip IN trips FILTER trip._key IN tripKeys UPDATE trip WITH { updatedAt: @now } IN trips RETURN 1) RETURN LENGTH(removed)', { targetType, keys, now: new Date().toISOString() });
   };
   const mergeKeys = (...values: string[][]) => [...new Set(values.flat())];
 
@@ -971,7 +1413,7 @@ export async function removeLegacyTombstones(targetDb: Database): Promise<void> 
   if (documentKeys.length && await exists('documentAudioVersions')) storageKeys.push(...await (await transaction.query('FOR audio IN documentAudioVersions FILTER audio.documentKey IN @keys && IS_STRING(audio.storageKey) RETURN audio.storageKey', { keys: documentKeys })).all() as string[]);
   if (documentKeys.length && await exists('documentSummaryAudio')) storageKeys.push(...await (await transaction.query('FOR audio IN documentSummaryAudio FILTER audio.documentKey IN @keys && IS_STRING(audio.storageKey) RETURN audio.storageKey', { keys: documentKeys })).all() as string[]);
   if (uploadKeys.length && await exists('galleryUploads')) storageKeys.push(...await (await transaction.query('FOR upload IN galleryUploads FILTER upload._key IN @keys && IS_STRING(upload.storageKey) RETURN upload.storageKey', { keys: uploadKeys })).all() as string[]);
-  await transaction.query('FOR storageKey IN UNIQUE(@storageKeys) FILTER IS_STRING(storageKey) && LENGTH(storageKey) > 0 UPSERT { storageKey } INSERT { storageKey, createdAt: @now } UPDATE {} IN storageDeletionJobs', { storageKeys, now: new Date().toISOString() });
+  await transaction.query('FOR storageKey IN UNIQUE(@storageKeys) FILTER IS_STRING(storageKey) && LENGTH(storageKey) > 0 UPSERT { storageKey } INSERT { storageKey, createdAt: @now } UPDATE {} IN storageDeletionJobs', { storageKeys, now: cleanupAt });
 
   if (scopeKeys.length) {
     for (const name of [
@@ -979,10 +1421,9 @@ export async function removeLegacyTombstones(targetDb: Database): Promise<void> 
        'galleryUploads', 'collections', 'collectionImages', 'imageCollecitionHightlights', 'imageCollectionMemories',
       'collectionMembers', 'collectionInvites', 'tags', 'tagAssignments', 'documents',
       'documentVersions', 'documentAudioVersions', 'documentSummaries', 'documentSummaryAudio',
-      'shares', 'places', 'trips', 'tripPlaces', 'placeVisits', 'books', 'bookContexts',
+       'shares', 'places', 'generatedDocumentBindings', 'trips', 'tripCreationReceipts', 'tripPlaces', 'tripAttachments', 'placeVisits', 'books', 'bookContexts',
       'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'chapterContexts', 'bookProgress',
-      'emailAccounts', 'emailThreads', 'emailMessages', 'emailContacts', 'emailWritingProfiles',
-      'emailRules', 'emailReplyDrafts', 'channels', 'threads', 'messages', 'messageMentions',
+       'organizationConnectors', 'inboxes', 'channels', 'threads', 'messages', 'messageMentions',
       'messageReactions', 'polls', 'pollOptions', 'pollVotes',
     ]) await removeBy(name, 'scopeKey', scopeKeys);
     if (await exists('scopeScopes')) {
@@ -992,9 +1433,11 @@ export async function removeLegacyTombstones(targetDb: Database): Promise<void> 
   }
 
   await removeDocumentDependents(documentKeys, removeBy, removeKeys, removeTyped, summaryKeys);
+  await removeAttachmentTargets('folder', mergeKeys(removedFolderKeys, scopedFolderKeys));
   await removeTyped('userHiddens', 'source', 'folder', mergeKeys(removedFolderKeys, scopedFolderKeys));
   await removeKeys('folders', mergeKeys(removedFolderKeys, scopedFolderKeys));
 
+  await removeAttachmentTargets('collection', collectionKeys);
   for (const name of ['collectionImages', 'collectionMembers', 'collectionInvites', 'imageCollecitionHightlights']) await removeBy(name, 'collectionKey', collectionKeys);
   await removeTyped('shares', 'sourceType', 'collection', collectionKeys, 'collections');
   await removeTyped('tagAssignments', 'sourceType', 'collection', collectionKeys, 'collections');
@@ -1006,7 +1449,10 @@ export async function removeLegacyTombstones(targetDb: Database): Promise<void> 
   await removeTyped('tagAssignments', 'sourceType', 'image', imageKeys, 'images');
   await removeTyped('userHiddens', 'source', 'image', imageKeys);
   await removeBy('galleryUploads', 'imageKey', imageKeys);
-  if (imageKeys.length && await exists('collections')) await transaction.query('FOR collection IN collections FILTER collection.coverImageKey IN @keys UPDATE collection WITH { coverImageKey: null } IN collections OPTIONS { keepNull: false }', { keys: imageKeys });
+  if (imageKeys.length && await exists('collections')) await transaction.query('FOR collection IN collections FILTER collection.coverImageKey IN @keys UPDATE collection WITH { coverImageKey: null, updatedAt: @now } IN collections OPTIONS { keepNull: false }', { keys: imageKeys, now: cleanupAt });
+  if (imageKeys.length && await exists('inboxes')) await transaction.query('FOR inbox IN inboxes FILTER inbox.coverImageKey IN @keys UPDATE inbox WITH { coverImageKey: null, updatedAt: @now } IN inboxes OPTIONS { keepNull: false }', { keys: imageKeys, now: cleanupAt });
+  if (imageKeys.length && await exists('documents')) await transaction.query('FOR document IN documents FILTER document.coverImageKey IN @keys UPDATE document WITH { coverImageKey: null, updatedAt: @now } IN documents OPTIONS { keepNull: false }', { keys: imageKeys, now: cleanupAt });
+  if (imageKeys.length && await exists('trips')) await transaction.query('FOR trip IN trips FILTER trip.coverImageKey IN @keys UPDATE trip WITH { coverImageKey: null, updatedAt: @now } IN trips OPTIONS { keepNull: false }', { keys: imageKeys, now: cleanupAt });
   if (imageKeys.length && await exists('visualIdentities')) {
     const cursor = await transaction.query('FOR identity IN visualIdentities FILTER identity.referenceImageKey IN @keys RETURN identity._key', { keys: imageKeys });
     const referencedIdentityKeys = await cursor.all() as string[];
@@ -1022,12 +1468,15 @@ export async function removeLegacyTombstones(targetDb: Database): Promise<void> 
   await removeKeys('visualIdentities', identityKeys);
 
   const tripKeys = await keysFor('trips');
+  await removeBy('generatedDocumentBindings', 'subjectKey', tripKeys);
+  await removeBy('tripAttachments', 'tripKey', tripKeys);
   for (const name of ['tripPlaces', 'placeVisits']) await removeBy(name, 'tripKey', tripKeys);
   await removeTyped('shares', 'sourceType', 'trip', tripKeys, 'trips');
   await removeTyped('tagAssignments', 'sourceType', 'trip', tripKeys, 'trips');
   await removeKeys('trips', tripKeys);
 
   const placeKeys = await keysFor('places');
+  await removeBy('generatedDocumentBindings', 'subjectKey', placeKeys);
   for (const name of ['tripPlaces', 'placeVisits']) await removeBy(name, 'placeKey', placeKeys);
   await removeTyped('shares', 'sourceType', 'place', placeKeys, 'places');
   await removeTyped('tagAssignments', 'sourceType', 'place', placeKeys, 'places');
@@ -1040,10 +1489,6 @@ export async function removeLegacyTombstones(targetDb: Database): Promise<void> 
   }
   for (const name of ['bookContexts', 'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'bookProgress']) await removeBy(name, 'bookKey', bookKeys);
   await removeKeys('books', bookKeys);
-
-  const emailThreadKeys = await keysFor('emailThreads');
-  for (const name of ['emailMessages', 'emailReplyDrafts']) await removeBy(name, 'threadKey', emailThreadKeys);
-  await removeKeys('emailThreads', emailThreadKeys);
 
   const messageKeys = await keysFor('messages');
   const threadKeys = messageKeys.length && await exists('threads') ? await (await transaction.query('FOR thread IN threads FILTER thread.rootMessageKey IN @keys RETURN thread._key', { keys: messageKeys })).all() as string[] : [];
@@ -1238,13 +1683,14 @@ export const collections: CollectionSpec[] = [
   { name: 'polls', embedKeys: ['question'], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['messageKey'], unique: true }, { fields: ['channelKey', 'status'] }] },
   { name: 'pollOptions', embedKeys: ['text'], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['pollKey'] }, { fields: ['pollKey', 'position'], unique: true }] },
   { name: 'pollVotes', embedKeys: [], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['pollKey'] }, { fields: ['optionKey'] }, { fields: ['participantKey'] }, { fields: ['pollKey', 'optionKey', 'participantKey'], unique: true }] },
-  { name: 'folders', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'parentFolderKey'] }, { fields: ['scopeKey', 'isFavorite'] }, { fields: ['scopeKey', 'parentFolderKey', 'name'] }] },
+  { name: 'folders', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'parentFolderKey'] }, { fields: ['scopeKey', 'isFavorite'] }, { fields: ['scopeKey', 'parentFolderKey', 'name'] }, { fields: ['scopeKey', 'purpose'], unique: true, sparse: true }] },
   { name: 'images', embedKeys: ['filename', 'caption', 'placeName', 'placeSummary', 'country', 'city', 'countryCode'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'createdAt'] }, { fields: ['scopeKey', 'latitude', 'longitude'], sparse: true }, { fields: ['imageCaptionKey'], sparse: true }, { fields: ['storageKey'], unique: true }] },
   { name: 'imageCaptions', skipEmbedding: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'hashAlgorithm', 'perceptualHash'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment0'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment1'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment2'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment3'], sparse: true }] },
   { name: 'visualIdentities', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'createdByKey'] }, { fields: ['scopeKey', 'createdByKey', 'name'] }, { fields: ['scopeKey', 'referenceImageKey'] }] },
   { name: 'imageIdentities', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'identityKey', 'imageKey'], unique: true }, { fields: ['scopeKey', 'identityKey', 'confidence'] }, { fields: ['scopeKey', 'imageKey'] }, { fields: ['scopeKey', 'imageKey', 'isReference'], sparse: true }] },
   { name: 'galleryUploads', skipEmbedding: true, indexes: [{ fields: ['actorKey', 'createdAt'] }, { fields: ['storageKey'], unique: true }, { fields: ['expiresAt'] }] },
   { name: 'collections', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'name'] }, { fields: ['scopeKey', 'purpose'], unique: true, sparse: true }, { fields: ['scopeKey', 'coverImageKey'], sparse: true }] },
+  { name: 'inboxes', embedKeys: ['name', 'description'], indexes: [{ fields: ['connectorKey'], unique: true }, { fields: ['organizationKey', 'scopeKey'] }, { fields: ['scopeKey', 'isFavorite'] }, { fields: ['scopeKey', 'coverImageKey'], sparse: true }] },
   { name: 'collectionImages', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'collectionKey', 'imageKey'], unique: true }, { fields: ['scopeKey', 'collectionKey'] }, { fields: ['scopeKey', 'imageKey'] }] },
   { name: 'placeImages', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'imageKey'], unique: true }, { fields: ['scopeKey', 'placeKey', 'imageKey'], unique: true }, { fields: ['scopeKey', 'placeKey', 'position'] }] },
   { name: 'imageCollecitionHightlights', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'collectionKey', 'createdAt'] }, { fields: ['scopeKey', 'createdByKey'] }] },
@@ -1262,6 +1708,12 @@ export const collections: CollectionSpec[] = [
   { name: 'documentSummaryAudio', skipEmbedding: true, indexes: [{ fields: ['summaryKey'], unique: true }, { fields: ['scopeKey', 'documentKey', 'createdAt'] }, { fields: ['storageKey'], unique: true }] },
   { name: 'shares', skipEmbedding: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'sourceType', 'sourceKey'] }, { fields: ['scopeKey', 'sourceType', 'sourceKey', 'revokedAt'] }, { fields: ['tokenHash'], unique: true }, { fields: ['expiresAt'], sparse: true }] },
   { name: 'places', embedKeys: ['name', 'summary'], indexes: [{ fields: ['scopeKey', 'userKey', 'saved'] }, { fields: ['scopeKey', 'userKey', 'openedAt'], sparse: true }, { fields: ['scopeKey', 'userKey', 'countryCode'] }, { fields: ['scopeKey', 'userKey', 'countryCode', 'name'], unique: true }] },
+  { name: 'generatedDocumentBindings', skipEmbedding: true, indexes: [{ fields: ['documentKey'], unique: true }, { fields: ['scopeKey', 'subjectType', 'subjectKey', 'kind', 'createdAt'] }, { fields: ['scopeKey', 'createdByKey', 'idempotencyKey'], unique: true }] },
+  // Private Compass persistence. Access is only through the canonical travel service.
+  { name: 'trips', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey', 'userKey', 'createdAt'] }, { fields: ['scopeKey', 'coverImageKey'], sparse: true }] },
+  { name: 'tripCreationReceipts', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'userKey', 'createdAt'] }, { fields: ['scopeKey', 'tripKey'], unique: true }] },
+  { name: 'tripPlaces', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'tripKey', 'position'], unique: true }, { fields: ['scopeKey', 'tripKey', 'placeKey'], unique: true }, { fields: ['scopeKey', 'placeKey'] }] },
+  { name: 'tripAttachments', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'tripKey', 'position'], unique: true }, { fields: ['scopeKey', 'tripKey', 'targetType', 'targetKey'], unique: true }, { fields: ['scopeKey', 'targetType', 'targetKey'] }] },
   { name: 'countries', embedKeys: ['name'], indexes: [{ fields: ['countryCode'], unique: true }, { fields: ['name'] }] },
   { name: 'books', embedKeys: ['title', 'subtitle', 'description', 'goal', 'audience', 'outcome'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'status'] }, { fields: ['scopeKey', 'isFavorite'] }, { fields: ['scopeKey', 'generationRequestKey'], unique: true, sparse: true }] },
   { name: 'bookContexts', embedKeys: ['userContext', 'priorKnowledge', 'priorBookContext', 'personalizationContext', 'researchContext', 'noveltyContext', 'generationBrief'], indexes: [{ fields: ['scopeKey', 'bookKey'], unique: true }] },
@@ -1271,13 +1723,6 @@ export const collections: CollectionSpec[] = [
   { name: 'bookChapters', embedKeys: ['title', 'description', 'objective', 'topics', 'content'], indexes: [{ fields: ['scopeKey', 'bookKey', 'position'], unique: true }, { fields: ['scopeKey', 'bookKey'] }, { fields: ['scopeKey', 'partKey'], sparse: true }] },
   { name: 'chapterContexts', embedKeys: ['previousContext', 'objectiveContext', 'sourceContext', 'personalizationContext', 'noveltyContext', 'nextContext', 'generationBrief'], indexes: [{ fields: ['scopeKey', 'chapterKey'], unique: true }] },
   { name: 'bookProgress', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'userKey', 'bookKey', 'chapterKey'], unique: true }, { fields: ['scopeKey', 'userKey', 'bookKey'] }, { fields: ['scopeKey', 'userKey', 'isCompleted'] }] },
-  { name: 'emailAccounts', skipEmbedding: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'provider', 'providerAccountId'], unique: true }, { fields: ['scopeKey', 'email'] }, { fields: ['email', 'syncEnabled'] }, { fields: ['syncEnabled', 'watchExpiresAt'] }, { fields: ['scopeKey', 'syncEnabled'] }] },
-  { name: 'emailThreads', embedKeys: ['subject', 'summary', 'intent', 'action'], indexes: [{ fields: ['scopeKey', 'accountKey', 'providerThreadId'], unique: true }, { fields: ['scopeKey', 'accountKey', 'lastMessageAt'] }, { fields: ['scopeKey', 'state', 'priority'] }] },
-  { name: 'emailMessages', embedKeys: ['subject', 'body', 'summary'], indexes: [{ fields: ['scopeKey', 'accountKey', 'providerMessageId'], unique: true }, { fields: ['scopeKey', 'threadKey', 'sentAt'] }, { fields: ['scopeKey', 'direction', 'sentAt'] }] },
-  { name: 'emailContacts', embedKeys: ['name', 'relationship', 'context'], indexes: [{ fields: ['scopeKey', 'email'], unique: true }, { fields: ['scopeKey', 'emailWritingProfileKey'], sparse: true }] },
-  { name: 'emailWritingProfiles', embedKeys: ['name', 'description', 'tone', 'style', 'structure', 'vocabulary', 'conventions'], indexes: [{ fields: ['scopeKey', 'name'], unique: true }] },
-  { name: 'emailRules', embedKeys: ['name', 'description', 'condition', 'instruction'], indexes: [{ fields: ['scopeKey', 'name'], unique: true }, { fields: ['scopeKey', 'isEnabled', 'action'] }] },
-  { name: 'emailReplyDrafts', embedKeys: ['generatedContent', 'finalContent'], indexes: [{ fields: ['scopeKey', 'threadKey'] }, { fields: ['scopeKey', 'messageKey'] }, { fields: ['scopeKey', 'status', 'updatedAt'] }] },
   // Private replay ledger. Responses may contain one-time share tokens, so this
   // collection is deliberately not registered as a generic application node.
   { name: 'contentIdempotency', skipEmbedding: true, indexes: [{ fields: ['organizationKey', 'actorKey', 'tool', 'idempotencyKey'], unique: true }, { fields: ['leaseExpiresAt'], sparse: true }, { fields: ['expiresAt'], sparse: true }] },
@@ -1346,9 +1791,14 @@ const droppedCollections = [
   'toolActions',
   'tools',
   'templates',
-  'tripPlaces',
   'placeVisits',
-  'trips',
+  'emailAccounts',
+  'emailThreads',
+  'emailMessages',
+  'emailContacts',
+  'emailWritingProfiles',
+  'emailRules',
+  'emailReplyDrafts',
 ];
 
 async function main() {
@@ -1365,6 +1815,8 @@ async function main() {
   await retireUserSettings(targetDb);
   await migrateModelActionSlugs(targetDb);
   await migrateMinimalPlacesAndRetireTrips(targetDb);
+  await migrateTripAttachments(targetDb);
+  await migrateMailArchiveDocuments(targetDb);
 
   for (const name of droppedCollections) {
     const collection = targetDb.collection(name);
@@ -1505,11 +1957,12 @@ async function main() {
           REMOVE event IN processedWebhookEvents
       `);
     }
-    if (spec.name === 'folders' || spec.name === 'images' || spec.name === 'collections' || spec.name === 'documents' || spec.name === 'emailThreads') {
+    if (spec.name === 'folders' || spec.name === 'images' || spec.name === 'collections' || spec.name === 'documents') {
       await migrateContentFavorites(targetDb, spec.name);
     }
     if (spec.name === 'images') await targetDb.query('FOR image IN images FILTER !HAS(image, "mutationPolicy") UPDATE image WITH { mutationPolicy: "user" } IN images');
     if (spec.name === 'collections') await targetDb.query('FOR collection IN collections FILTER !HAS(collection, "mutationPolicy") || !HAS(collection, "purpose") UPDATE collection WITH { mutationPolicy: HAS(collection, "mutationPolicy") ? collection.mutationPolicy : "user", purpose: HAS(collection, "purpose") ? collection.purpose : null } IN collections OPTIONS { keepNull: true }');
+    if (spec.name === 'tripCreationReceipts') await migrateTripCreationReceipts(targetDb);
     if (spec.name === 'imageCaptions') {
       await migrateImageCaptions(targetDb);
       await migrateExactSemanticRecords(targetDb, 'imageCaptions', ['caption']);
@@ -1521,7 +1974,6 @@ async function main() {
         if (JSON.stringify(index.fields ?? []) === JSON.stringify(['scopeKey', 'collectionKey', 'imageKey'])) await collection.dropIndex(index.id);
       }
     }
-    if (spec.name === 'emailMessages') await migrateEmailReplyMetadata(targetDb);
     if (spec.name === 'contentSearchQueries') {
       await targetDb.query('FOR query IN contentSearchQueries FILTER IS_STRING(query.expiresAt) && query.expiresAt <= DATE_ISO8601(DATE_NOW()) && query.output != null UPDATE query WITH { output: null } IN contentSearchQueries');
       await targetDb.query('FOR query IN contentSearchQueries FILTER !HAS(query, "folderKey") || !HAS(query, "includeDescendants") UPDATE query WITH { folderKey: null, includeDescendants: false } IN contentSearchQueries');
@@ -1560,7 +2012,10 @@ async function main() {
       await targetDb.query('FOR query IN contentSearchQueries FILTER HAS(query, "expiresAt") UPDATE query WITH { expiresAt: null } IN contentSearchQueries OPTIONS { keepNull: false }');
       await targetDb.query('FOR query IN contentSearchQueries UPDATE query WITH { contextDomain: null, usageCount: null } IN contentSearchQueries OPTIONS { keepNull: false }');
     }
-    if (spec.name === 'folders') await migrateExactSemanticRecords(targetDb, 'folders', ['name', 'description']);
+    if (spec.name === 'folders') {
+      await targetDb.query('FOR folder IN folders FILTER !HAS(folder, "mutationPolicy") UPDATE folder WITH { mutationPolicy: "user" } IN folders');
+      await migrateExactSemanticRecords(targetDb, 'folders', ['name', 'description']);
+    }
     if (spec.name === 'images') await migrateExactSemanticRecords(targetDb, 'images', ['filename', 'caption']);
     if (spec.name === 'collections') await migrateExactSemanticRecords(targetDb, 'collections', ['name', 'description']);
     if (spec.name === 'tags') await migrateExactSemanticRecords(targetDb, 'tags', ['name', 'description']);
@@ -1579,6 +2034,16 @@ async function main() {
       `);
     }
     if (spec.name === 'documents') {
+      await targetDb.query(`FOR document IN documents
+        LET folder = DOCUMENT(folders, document.folderKey)
+        FILTER folder != null && folder.scopeKey == document.scopeKey && folder.purpose == "communication-mail-tones" && STARTS_WITH(TRIM(document.content), "{")
+        LET payload = JSON_PARSE(document.content)
+        FILTER payload.kind == "mail-tone" && payload.version == 1
+        LET tone = payload.data
+        LET metadata = MERGE({ version: 1 }, tone.identifier != null ? { identifier: tone.identifier } : {}, tone.slug != null ? { slug: tone.slug } : {})
+        LET content = CONCAT("# ", tone.name, "\n\n<!-- vorinthex-mail-tone ", JSON_STRINGIFY(metadata), " -->\n\n## Instruction\n\n", tone.instruction)
+        UPDATE document WITH { content, mutationPolicy: "user" } IN documents`);
+      await migrateEmailInboxCategoriesAndDefaultTones(targetDb);
       const cursor = await targetDb.query<number>(`
         RETURN LENGTH(
           FOR document IN documents
@@ -1592,6 +2057,7 @@ async function main() {
       if (incompatibleDocuments > 0) {
         throw new Error(`Cannot migrate documents: ${incompatibleDocuments} existing row(s) lack required Content ingestion fields.`);
       }
+      await migrateEmailToneEmbeddings(targetDb);
       await migrateContentDocuments(targetDb);
     }
     if (spec.name === 'documentVersions') {
@@ -1657,6 +2123,9 @@ async function main() {
       });
     }
   }
+
+  await migrateRetiredEmailDefaultTones(targetDb);
+  await migrateGeneratedTravelDocuments(targetDb);
 
   await targetDb.query(`
     FOR audio IN documentAudioVersions
@@ -1778,6 +2247,8 @@ async function main() {
   await ensureOrganizationProvidersCollection(targetDb);
   await ensureOrganizationCredentialsCollection(targetDb);
   await ensureOrganizationConnectorsCollection(targetDb);
+  await backfillConnectorInboxes(targetDb);
+  await migrateProviderIndependentEmailDrafts(targetDb);
   await retireTranscriptionDomain(targetDb);
   await retireAiPersistence(targetDb);
 

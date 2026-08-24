@@ -8,6 +8,7 @@ describe('logical model slugs', () => {
       'bfl.flux-2-klein-4b',
       'xai.grok-imagine-image-quality',
       'openai.text-embedding-3-small',
+      'google.gemini-2.5-flash-lite',
     ]);
     for (const slug of MODEL_SLUGS) expect(modelSlugSchema.parse(slug)).toBe(slug);
   });

@@ -35,7 +35,7 @@ for (const destination of destinations.slice(0, Number.isFinite(destinationLimit
     delete imageMetrics.current;
     const started = performance.now();
     const detail = kind === 'country'
-      ? (await service.findPlace({ ...context, query: destination.country.name, country: destination.country }, 'live-user', { timeoutMs: 60_000 })).place
+      ? (await service.findPlaceGuide({ ...context, query: destination.country.name, country: destination.country }, 'live-user', { timeoutMs: 60_000 })).place
       : (await service.findCity({ ...context, city: destination.city, country: destination.country }, 'live-user', { timeoutMs: 60_000 })).city;
     const guideMs = Math.round(performance.now() - started);
     const heroStarted = performance.now();

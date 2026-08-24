@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { isLegacyIndex, LEGACY_REMOVAL_MARKER, normalizeLegacyDocumentSharePermission } from './arango-migrate-indexes';
 import { stageLegacyDocumentShares } from './content-migration';
-import { collections, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateEmailReplyMetadata, migrateImageCaptions, migrateMinimalPlacesAndRetireTrips, migrateModelActionSlugs, retireMomentumScope, retireTranscriptionDomain, retireUserSettings } from './arango-migrate';
+import { collections, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateGeneratedTravelDocuments, migrateImageCaptions, migrateMinimalPlacesAndRetireTrips, migrateModelActionSlugs, migratePlaceReports, migrateProviderIndependentEmailDrafts, migrateRetiredEmailDefaultTones, migrateTripAttachments, migrateTripCreationReceipts, migrateTripGuides, retireMomentumScope, retireTranscriptionDomain, retireUserSettings } from './arango-migrate';
 import { EMBEDDING_DIMENSIONS, LEGACY_EMBEDDING_DIMENSIONS, embeddingMetadata } from '../lib/embeddings';
 import { DOCUMENT_CHUNK_MAX_WORDS, DOCUMENT_MAX_CHUNKS, documentSemanticHash } from '../lib/ai/document-processing/chunking';
 import { RETAINED_MODEL_ACTION_BINDINGS, RETAINED_MODEL_PROVIDER_BINDINGS, RETAINED_MODEL_SLUGS, RETAINED_PROVIDER_SLUGS, retireAiPersistence } from './retire-ai-persistence';
@@ -42,10 +42,11 @@ describe('Arango migration indexes', () => {
     const droppedIndexes: string[] = [];
     const updateQueries: string[] = [];
     const relations = [
-      { _key: 'current', modelKey: 'model-a', actionSlug: 'chat', enabled: false, priority: 7 },
+      { _key: 'current', modelKey: 'model-a', actionSlug: 'ask', enabled: false, priority: 7 },
       { _key: 'legacy', modelKey: 'model-b', actionKey: 'action-ask', enabled: true, priority: 3 },
       { _key: 'invalid', modelKey: 'model-c', actionKey: 'action-invalid', enabled: true, priority: 1 },
-      { _key: 'duplicate', modelKey: 'model-a', actionKey: 'action-chat', enabled: true, priority: 9 },
+      { _key: 'stale-chat', modelKey: 'model-d', actionSlug: 'chat', enabled: true, priority: 100 },
+      { _key: 'duplicate', modelKey: 'model-a', actionKey: 'action-ask', enabled: true, priority: 9 },
     ];
     const database = {
       collection(name: string) { return {
@@ -65,13 +66,13 @@ describe('Arango migration indexes', () => {
     await migrateModelActionSlugs(database as never);
 
     expect(updates).toEqual([
-      { key: 'duplicate', actionSlug: 'chat' },
+      { key: 'duplicate', actionSlug: 'ask' },
       { key: 'legacy', actionSlug: 'ask' },
     ]);
     expect(updateQueries.every((query) => query.includes('actionKey: null') && query.includes('keepNull: false'))).toBe(true);
-    expect(removals).toEqual(['invalid', 'current']);
+    expect(removals).toEqual(['invalid', 'stale-chat', 'current']);
     expect(droppedIndexes).toEqual(['legacy-unique']);
-    expect(relations[3]).toMatchObject({ enabled: true, priority: 9, modelKey: 'model-a' });
+    expect(relations[4]).toMatchObject({ enabled: true, priority: 9, modelKey: 'model-a' });
   });
   test('model route migration works when actions are absent and routes already use slugs', async () => {
     const calls: string[] = [];
@@ -85,7 +86,7 @@ describe('Arango migration indexes', () => {
     };
     await migrateModelActionSlugs(database as never);
     expect(calls).not.toContain(expect.stringContaining('FOR action IN actions'));
-    expect(calls.at(-1)).toContain('actionKey: null');
+    expect(calls.at(-1)).toContain('REMOVE @key IN modelActions');
   });
   test('hard-drops retired persistence without recreating it and retains collaboration collections', async () => {
     const retired = ['agents', 'skills', 'agentSkills', 'scopeAgents', 'agentMembers', 'agentRuns', 'agentRunSteps', 'agentRunCalls', 'agentRunSources', 'agentArtifacts', 'agentArtifactChecks', 'agentMemories', 'runtimeVariables', 'capabilities', 'mindCapabilities', 'minds', 'actions', 'agentArtifactsLegacy', 'agentRunsLegacy', 'agent_runs', 'agentTools', 'toolActions', 'tools', 'templates'];
@@ -222,6 +223,13 @@ describe('Arango migration indexes', () => {
     expect(calls[5]?.query).toContain('REMOVE provider IN providers');
     expect(calls[0]?.bindVars?.retainedModelActionBindings).toEqual(RETAINED_MODEL_ACTION_BINDINGS);
     expect(calls[1]?.bindVars?.retainedModelProviderBindings).toEqual(RETAINED_MODEL_PROVIDER_BINDINGS);
+    expect(RETAINED_MODEL_SLUGS).toContain('google.gemini-2.5-flash-lite');
+    expect(RETAINED_MODEL_ACTION_BINDINGS).toContain('google.gemini-2.5-flash-lite:ask');
+    expect(RETAINED_MODEL_ACTION_BINDINGS).toContain('openai.gpt-5.6-luna:ask');
+    expect(RETAINED_MODEL_ACTION_BINDINGS).toContain('google.gemini-2.5-flash-lite:web-search');
+    expect(RETAINED_MODEL_ACTION_BINDINGS).toContain('openai.gpt-5.6-luna:web-search');
+    expect(RETAINED_MODEL_ACTION_BINDINGS.some((binding) => binding.endsWith(':chat') || binding.endsWith(':reason'))).toBe(false);
+    expect(RETAINED_MODEL_PROVIDER_BINDINGS).toContain('google.gemini-2.5-flash-lite:openrouter:google/gemini-2.5-flash-lite');
     expect(calls[0]?.query).toContain('CONCAT(model.slug, ":", relation.actionSlug) NOT IN @retainedModelActionBindings');
     expect(calls[1]?.query).toContain('CONCAT(model.slug, ":", provider.slug, ":", relation.providerModelId) NOT IN @retainedModelProviderBindings');
     expect(calls[2]?.bindVars?.retainedProviderSlugs).toEqual(RETAINED_PROVIDER_SLUGS);
@@ -251,6 +259,11 @@ describe('Arango migration indexes', () => {
     expect(isLegacyIndex('documentVersions', ['storageKey'], [['storageKey']])).toBe(false);
     expect(isLegacyIndex('documentVersions', ['storageKey'], [['documentKey', 'version']])).toBe(true);
   });
+  test('retires single Gmail binding uniqueness but preserves account uniqueness', () => {
+    const desired = [['organizationKey', 'scopeKey', 'provider', 'providerAccountId']];
+    expect(isLegacyIndex('organizationConnectors', ['organizationKey', 'scopeKey', 'provider'], desired)).toBe(true);
+    expect(isLegacyIndex('organizationConnectors', desired[0]!, desired)).toBe(false);
+  });
   test('drops every obsolete tombstone index without preserving the retired field in source', () => {
     expect(isLegacyIndex('collections', ['scopeKey', LEGACY_REMOVAL_MARKER])).toBe(true);
     expect(isLegacyIndex('documents', ['scopeKey', 'folderKey', LEGACY_REMOVAL_MARKER])).toBe(true);
@@ -258,11 +271,16 @@ describe('Arango migration indexes', () => {
   });
   test('hard-removes legacy tombstones and reconciles their indexes for every affected collection', async () => {
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
-    for (const name of ['scopes', 'scopeScopes', 'folders', 'images', 'visualIdentities', 'collections', 'imageCollecitionHightlights', 'documents', 'documentVersions', 'shares', 'places', 'trips', 'books', 'emailThreads', 'messages']) {
+    for (const name of ['scopes', 'scopeScopes', 'folders', 'images', 'visualIdentities', 'collections', 'imageCollecitionHightlights', 'documents', 'documentVersions', 'shares', 'places', 'trips', 'books', 'messages']) {
       expect(source).toContain(`'${name}'`);
     }
     expect(source).toContain('resource[@marker] != null');
     expect(source).toContain('REMOVE resource IN @@collection');
+    expect(source).toContain('attachment.targetType == @targetType && attachment.targetKey IN @keys');
+    expect(source.indexOf("await removeAttachmentTargets('collection', collectionKeys)")).toBeLessThan(source.indexOf("await removeKeys('collections', collectionKeys)"));
+    expect(source.indexOf('FOR trip IN trips FILTER trip.coverImageKey IN @keys')).toBeLessThan(source.indexOf("await removeKeys('images', imageKeys)"));
+    for (const [owner, collection] of [['collection', 'collections'], ['inbox', 'inboxes'], ['document', 'documents'], ['trip', 'trips']]) expect(source).toContain(`FOR ${owner} IN ${collection} FILTER ${owner}.coverImageKey IN @keys UPDATE ${owner} WITH { coverImageKey: null, updatedAt: @now }`);
+    expect(source.indexOf("await removeBy('tripAttachments', 'tripKey', tripKeys)")).toBeLessThan(source.indexOf("await removeKeys('trips', tripKeys)"));
     expect(source).toContain('fields.includes(LEGACY_REMOVAL_MARKER)');
     expect(source).toContain('OPTIONS { keepNull: false }');
   });
@@ -304,8 +322,8 @@ describe('Arango migration indexes', () => {
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
     expect(source).toContain('Dropped obsolete unique folder-name index');
   });
-  test('retains only minimal places and declares book-generation collection indexes', () => {
-    expect(collections.filter(({ name }) => ['places', 'trips', 'tripPlaces', 'placeVisits'].includes(name)).map(({ name }) => name)).toEqual(['places']);
+  test('retains minimal places and private ordered trips and declares book-generation collection indexes', () => {
+    expect(collections.filter(({ name }) => ['places', 'generatedDocumentBindings', 'trips', 'tripCreationReceipts', 'tripPlaces', 'tripAttachments', 'placeVisits'].includes(name)).map(({ name }) => name)).toEqual(['places', 'generatedDocumentBindings', 'trips', 'tripCreationReceipts', 'tripPlaces', 'tripAttachments']);
     expect(collections.find(({ name }) => name === 'places')).toEqual({
       name: 'places',
       embedKeys: ['name', 'summary'],
@@ -316,15 +334,252 @@ describe('Arango migration indexes', () => {
         { fields: ['scopeKey', 'userKey', 'countryCode', 'name'], unique: true },
       ],
     });
+    expect(collections.find(({ name }) => name === 'trips')).toEqual({ name: 'trips', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey', 'userKey', 'createdAt'] }, { fields: ['scopeKey', 'coverImageKey'], sparse: true }] });
+    expect(collections.find(({ name }) => name === 'generatedDocumentBindings')).toEqual({ name: 'generatedDocumentBindings', skipEmbedding: true, indexes: [{ fields: ['documentKey'], unique: true }, { fields: ['scopeKey', 'subjectType', 'subjectKey', 'kind', 'createdAt'] }, { fields: ['scopeKey', 'createdByKey', 'idempotencyKey'], unique: true }] });
+    expect(collections.find(({ name }) => name === 'tripCreationReceipts')).toEqual({ name: 'tripCreationReceipts', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'userKey', 'createdAt'] }, { fields: ['scopeKey', 'tripKey'], unique: true }] });
+    expect(collections.find(({ name }) => name === 'tripPlaces')?.indexes).toEqual([
+      { fields: ['scopeKey', 'tripKey', 'position'], unique: true },
+      { fields: ['scopeKey', 'tripKey', 'placeKey'], unique: true },
+      { fields: ['scopeKey', 'placeKey'] },
+    ]);
+    expect(collections.find(({ name }) => name === 'tripAttachments')).toEqual({
+      name: 'tripAttachments',
+      skipEmbedding: true,
+      indexes: [
+        { fields: ['scopeKey', 'tripKey', 'position'], unique: true },
+        { fields: ['scopeKey', 'tripKey', 'targetType', 'targetKey'], unique: true },
+        { fields: ['scopeKey', 'targetType', 'targetKey'] },
+      ],
+    });
     const bookNames = ['books', 'bookContexts', 'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'chapterContexts', 'bookProgress'];
     expect(collections.filter(({ name }) => bookNames.includes(name)).map(({ name }) => name)).toEqual(bookNames);
     expect(collections.find(({ name }) => name === 'bookChapters')?.indexes).toContainEqual({ fields: ['scopeKey', 'bookKey', 'position'], unique: true });
     expect(collections.find(({ name }) => name === 'bookProgress')?.indexes).toContainEqual({ fields: ['scopeKey', 'userKey', 'bookKey', 'chapterKey'], unique: true });
     expect(collections.find(({ name }) => name === 'books')?.indexes).toContainEqual({ fields: ['scopeKey', 'generationRequestKey'], unique: true, sparse: true });
     const emailNames = ['emailAccounts', 'emailThreads', 'emailMessages', 'emailContacts', 'emailWritingProfiles', 'emailRules', 'emailReplyDrafts'];
-    expect(collections.filter(({ name }) => emailNames.includes(name)).map(({ name }) => name)).toEqual(emailNames);
-    expect(collections.find(({ name }) => name === 'emailAccounts')?.skipEmbedding).toBe(true);
-    expect(collections.find(({ name }) => name === 'emailMessages')?.indexes).toContainEqual({ fields: ['scopeKey', 'accountKey', 'providerMessageId'], unique: true });
+    expect(collections.filter(({ name }) => emailNames.includes(name))).toEqual([]);
+  });
+  test('migrates mail state into Archive and connectors before dropping retired collections', async () => {
+    const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    const migrate = source.indexOf('await migrateMailArchiveDocuments(targetDb);');
+    const drop = source.indexOf('for (const name of droppedCollections)');
+    expect(migrate).toBeGreaterThan(-1);
+    expect(migrate).toBeLessThan(drop);
+    expect(source).toContain('kind: "mail-thread"');
+    expect(source).toContain('kind: "mail-message"');
+    expect(source).toContain('kind: "mail-reply-draft"');
+    expect(source).toContain('kind: "mail-writing-profile"');
+    expect(source).toContain('UPDATE connector WITH { syncEnabled: account.syncEnabled');
+  });
+  test('assigns provider-independent active drafts only when one active organization connector exists', async () => {
+    const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
+    const patches = [{ key: 'draft-key', revision: 'draft-revision', content: '{"version":1}', updatedAt: '2026-08-23T00:00:00.000Z' }];
+    const database = {
+      collection: () => ({ exists: async () => true }),
+      query: async (query: string, bindVars?: Record<string, unknown>) => { calls.push({ query, bindVars }); return { next: async () => undefined, all: async () => calls.length === 1 ? patches : [] }; },
+    };
+    await migrateProviderIndependentEmailDrafts(database as never);
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.query).toContain('payload.data.accountKey == document.scopeKey');
+    expect(calls[0]?.query).toContain('payload.data.status IN ["generated", "edited"]');
+    expect(calls[0]?.query).toContain('connector.organizationKey == scope.organizationKey');
+    expect(calls[0]?.query).toContain('LIMIT 2');
+    expect(calls[0]?.query).toContain('FILTER LENGTH(connectors) == 1');
+    expect(calls[0]?.query).toContain('accountKey: connectors[0]._key');
+    expect(calls[0]?.query).toContain('FILTER document._key > @after');
+    expect(calls[0]?.query).toContain('SORT document._key');
+    expect(calls[0]?.query).toContain('LIMIT @batchSize');
+    expect(calls[0]?.query).not.toContain('UPDATE document');
+    expect(calls[1]?.query).toContain('FOR patch IN @patches');
+    expect(calls[1]?.query).toContain('OPTIONS { ignoreRevs: false, ignoreErrors: true }');
+    expect(calls[1]?.query).not.toContain('FOR document IN documents');
+    expect(calls[1]?.query).not.toContain('DOCUMENT(documents');
+    expect(calls[1]?.query).not.toContain('RETURN');
+    expect(calls[1]?.bindVars).toEqual({ patches });
+    expect(calls[0]?.bindVars).toEqual(expect.objectContaining({ after: '', batchSize: 100 }));
+    const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    expect(source.indexOf('await ensureOrganizationConnectorsCollection(targetDb)')).toBeLessThan(source.indexOf('await migrateProviderIndependentEmailDrafts(targetDb)'));
+  });
+  test('pages provider-independent drafts deterministically across bounded batches', async () => {
+    const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
+    const patches = Array.from({ length: 205 }, (_, index) => ({ key: `draft-${String(index).padStart(3, '0')}`, revision: `rev-${index}`, content: `content-${index}`, updatedAt: '2026-08-23T00:00:00.000Z' }));
+    const database = {
+      collection: () => ({ exists: async () => true }),
+      async query(query: string, bindVars?: Record<string, unknown>) {
+        calls.push({ query, bindVars });
+        if (query.includes('FOR document IN documents')) {
+          const after = String(bindVars?.after ?? '');
+          const page = patches.filter(({ key }) => key > after).slice(0, Number(bindVars?.batchSize));
+          return { all: async () => page };
+        }
+        return { all: async () => [] };
+      },
+    };
+
+    await migrateProviderIndependentEmailDrafts(database as never);
+
+    const reads = calls.filter(({ query }) => query.includes('FOR document IN documents'));
+    const writes = calls.filter(({ query }) => query.includes('FOR patch IN @patches'));
+    expect(reads.map(({ bindVars }) => bindVars?.after)).toEqual(['', 'draft-099', 'draft-199']);
+    expect(writes.map(({ bindVars }) => (bindVars?.patches as unknown[]).length)).toEqual([100, 100, 5]);
+  });
+  test('skips stale draft revisions without stalling pagination and converges on rerun', async () => {
+    const rows = new Map(Array.from({ length: 101 }, (_, index) => {
+      const key = `draft-${String(index).padStart(3, '0')}`;
+      return [key, { key, revision: `rev-${index}`, content: `legacy-${index}`, eligible: true }];
+    }));
+    const readAfter: string[] = [];
+    let staleInjected = false;
+    let writes = 0;
+    const database = {
+      collection: () => ({ exists: async () => true }),
+      async query(query: string, bindVars?: Record<string, unknown>) {
+        if (query.includes('FOR document IN documents')) {
+          const after = String(bindVars?.after ?? '');
+          readAfter.push(after);
+          const page = [...rows.values()].filter((row) => row.eligible && row.key > after).slice(0, Number(bindVars?.batchSize)).map((row) => ({ key: row.key, revision: row.revision, content: `migrated-${row.key}`, updatedAt: '2026-08-23T00:00:00.000Z' }));
+          if (!staleInjected && page.length > 0) {
+            staleInjected = true;
+            const stale = rows.get(page[0]!.key)!;
+            stale.revision = 'concurrent-revision';
+            stale.content = 'concurrent-edit';
+          }
+          return { all: async () => page };
+        }
+        writes += 1;
+        for (const patch of bindVars?.patches as Array<{ key: string; revision: string; content: string }>) {
+          const row = rows.get(patch.key)!;
+          if (row.revision !== patch.revision) continue;
+          row.content = patch.content;
+          row.eligible = false;
+        }
+        return { all: async () => [] };
+      },
+    };
+
+    await migrateProviderIndependentEmailDrafts(database as never);
+    expect(readAfter).toEqual(['', 'draft-099']);
+    expect(rows.get('draft-000')?.content).toBe('concurrent-edit');
+    expect(rows.get('draft-100')?.eligible).toBe(false);
+
+    await migrateProviderIndependentEmailDrafts(database as never);
+    expect(rows.get('draft-000')?.eligible).toBe(false);
+    const writesAfterConvergence = writes;
+    await migrateProviderIndependentEmailDrafts(database as never);
+    expect(writes).toBe(writesAfterConvergence);
+  });
+  test('separates retired email tone removal from document updates', async () => {
+    const calls: string[] = [];
+    const database = { query: async (query: string) => { calls.push(query); return { all: async () => [] }; } };
+    await migrateRetiredEmailDefaultTones(database as never);
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toContain('REMOVE document IN documents');
+    expect(calls[0]).not.toContain('UPDATE document');
+    expect(calls[1]).toContain('UPDATE document');
+    expect(calls[1]).toContain('FILTER customContent != document.content');
+    expect(calls[1]).not.toContain('REMOVE document IN documents');
+  });
+  test('cleans and collision-safely compacts existing trip attachments before indexing', async () => {
+    const calls: string[] = [];
+    const names = ['tripAttachments', 'scopes', 'trips', 'folders', 'documents', 'collections', 'images', 'imageCollecitionHightlights', 'imageCollectionMemories', 'collectionImages'];
+    const database = {
+      collection(name: string) { return { async exists() { return names.includes(name); } }; },
+      async listCollections() { return names.map((name) => ({ name })); },
+      async query(query: string) { calls.push(query); return { async all() { return []; } }; },
+    };
+    let transactionCount = 0;
+    await migrateTripAttachments(database as never, async (operation) => { transactionCount += 1; return operation(database as never); });
+    expect(calls).toHaveLength(4);
+    expect(transactionCount).toBe(1);
+    expect(calls[0]).toContain('trip.scopeKey != attachment.scopeKey || target.scopeKey != attachment.scopeKey');
+    expect(calls[0]).toContain('attachment.targetType NOT IN ["folder", "collection"]');
+    expect(calls[0]).not.toContain('DOCUMENT(documents');
+    expect(calls[0]).not.toContain('DOCUMENT(images');
+    expect(calls[0]).toContain('LET createdAtValid = createdAtTimestamp != null');
+    expect(calls[0]).toContain('(\\\\.[0-9]+)?Z$');
+    expect(calls[0]).toContain('DATE_DAY(createdAtTimestamp) == TO_NUMBER(SUBSTRING(attachment.createdAt, 8, 2))');
+    for (const field of ['attachment._key', 'attachment.scopeKey', 'attachment.tripKey', 'attachment.targetKey']) expect(calls[0]).toContain(`REGEX_TEST(${field}, "^[cC][0-9a-z]{6,}$")`);
+    expect(calls[0]).not.toContain('[^');
+    expect(calls[0]).not.toContain('LET memoryHasCollection');
+    expect(calls[0]).toContain('target.mutationPolicy == "system-only" || target.purpose != null');
+    expect(calls[1]).toContain('FOR duplicate IN SLICE(grouped, 1)');
+    expect(calls[2]).toContain('position: CONCAT("migration:", attachment._key)');
+    expect(calls[3]).toContain('FOR position IN 0..(LENGTH(grouped) - 1) LET item = grouped[position]');
+    expect(calls[3]).toContain('REPLACE item.attachment WITH UNSET');
+  });
+  test('validates and backfills durable trip creation receipts', async () => {
+    const calls: string[] = [];
+    const database = {
+      collection(name: string) { return { async exists() { return name === 'tripCreationReceipts' || name === 'trips'; } }; },
+      async query(query: string) { calls.push(query); return { async all() { return []; } }; },
+    };
+    await migrateTripCreationReceipts(database as never);
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toContain('receipt.tripKey != receipt._key');
+    expect(calls[0]).toContain('LET createdAtValid');
+    expect(calls[0]).toContain('(\\\\.[0-9]+)?Z$');
+    for (const field of ['receipt._key', 'receipt.scopeKey', 'receipt.userKey', 'receipt.tripKey']) expect(calls[0]).toContain(`REGEX_TEST(${field}, "^[cC][0-9a-z]{6,}$")`);
+    expect(calls[0]).not.toContain('[^');
+    expect(calls[0]).toContain('REGEX_TEST(receipt.requestHash, "^[a-f0-9]{64}$")');
+    expect(calls[1]).toContain('UPSERT { _key: trip._key }');
+    expect(calls[1]).toContain('UPDATE {} IN tripCreationReceipts');
+    expect(calls[1]).toContain('(\\\\.[0-9]+)?Z$');
+    expect(calls[1]).toContain('&& createdAtValid');
+    for (const field of ['trip._key', 'trip.scopeKey', 'trip.userKey']) expect(calls[1]).toContain(`REGEX_TEST(${field}, "^[cC][0-9a-z]{6,}$")`);
+    expect(calls[1].indexOf('FILTER REGEX_TEST(trip._key')).toBeLessThan(calls[1].indexOf('UPSERT { _key: trip._key }'));
+  });
+  test('removes malformed and orphaned trip guides before indexing', async () => {
+    const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
+    const database = {
+      collection(name: string) { return { async exists() { return name === 'tripGuides'; } }; },
+      async query(query: string, bindVars?: Record<string, unknown>) { calls.push({ query, bindVars }); return { async all() { return []; } }; },
+    };
+    await migrateTripGuides(database as never);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.query).toContain('trip == null || trip.scopeKey != guide.scopeKey || trip.userKey != guide.userKey');
+    expect(calls[0]?.query).toContain('LENGTH(guide.embedding) != @dimensions && LENGTH(guide.embedding) != @legacyDimensions');
+    expect(calls[0]?.bindVars).toEqual({ dimensions: EMBEDDING_DIMENSIONS, legacyDimensions: LEGACY_EMBEDDING_DIMENSIONS });
+    const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    expect(source.indexOf("await removeBy('generatedDocumentBindings', 'subjectKey', tripKeys)")).toBeLessThan(source.indexOf("await removeKeys('trips', tripKeys)"));
+    const backfill = await Bun.file(new URL('../../scripts/backfill-semantic-embeddings.ts', import.meta.url)).text();
+    expect(backfill).not.toContain("'tripGuides'");
+  });
+  test('removes malformed, unsaved, and orphaned place reports before indexing', async () => {
+    const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
+    const database = {
+      collection(name: string) { return { async exists() { return name === 'placeReports'; } }; },
+      async query(query: string, bindVars?: Record<string, unknown>) { calls.push({ query, bindVars }); return { async all() { return []; } }; },
+    };
+    await migratePlaceReports(database as never);
+    expect(calls[0]?.query).toContain('place == null || place.scopeKey != report.scopeKey || place.userKey != report.userKey || place.saved != true');
+    expect(calls[0]?.query).toContain('LENGTH(report.embedding) != @dimensions && LENGTH(report.embedding) != @legacyDimensions');
+    expect(calls[0]?.bindVars).toEqual({ dimensions: EMBEDDING_DIMENSIONS, legacyDimensions: LEGACY_EMBEDDING_DIMENSIONS });
+    const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    expect(source.indexOf("await removeBy('generatedDocumentBindings', 'subjectKey', placeKeys)")).toBeLessThan(source.indexOf("await removeKeys('places', placeKeys)"));
+    const backfill = await Bun.file(new URL('../../scripts/backfill-semantic-embeddings.ts', import.meta.url)).text();
+    expect(backfill).not.toContain("'placeReports'");
+  });
+  test('cleans legacy generated travel records before converting them', async () => {
+    const calls: string[] = [];
+    const database = {
+      collection(name: string) {
+        return {
+          async exists() { return name === 'tripGuides' || name === 'placeReports'; },
+          async drop() { calls.push(`drop:${name}`); },
+        };
+      },
+      async query(query: string) {
+        calls.push(query);
+        return { async all() { return []; }, async next() { return 0; } };
+      },
+    };
+    await migrateGeneratedTravelDocuments(database as never);
+    const tripCleanup = calls.findIndex((query) => query.includes('REMOVE guide IN tripGuides'));
+    const reportCleanup = calls.findIndex((query) => query.includes('REMOVE report IN placeReports'));
+    const conversion = calls.findIndex((query) => query.includes('INSERT { _key: legacy._key'));
+    expect(tripCleanup).toBeGreaterThanOrEqual(0);
+    expect(reportCleanup).toBeGreaterThan(tripCleanup);
+    expect(conversion).toBeGreaterThan(reportCleanup);
   });
   test('drops obsolete place indexes while preserving current indexes', () => {
     const desired = [['scopeKey', 'userKey', 'saved'], ['scopeKey', 'userKey', 'openedAt'], ['scopeKey', 'userKey', 'countryCode'], ['scopeKey', 'userKey', 'countryCode', 'name']];
@@ -333,19 +588,28 @@ describe('Arango migration indexes', () => {
     expect(isLegacyIndex('places', ['scopeKey', 'countryCode', 'name'], desired)).toBe(true);
     expect(isLegacyIndex('places', ['scopeKey', 'userKey', 'countryCode'], desired)).toBe(false);
   });
-  test('hard-retires trip persistence before projecting and indexing places', async () => {
+  test('retains trip persistence and retires only legacy place visits', async () => {
     const dropped: string[] = [];
     const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
-    const existing = new Set(['shares', 'tagAssignments', 'bookSources', 'tripPlaces', 'placeVisits', 'trips']);
+    const existing = new Set(['tripPlaces', 'placeVisits', 'trips']);
     const database = {
       collection(name: string) { return { async exists() { return existing.has(name); }, async drop() { dropped.push(name); existing.delete(name); } }; },
       async query(query: string, bindVars?: Record<string, unknown>) { calls.push({ query, bindVars }); return { async all() { return []; }, async next() { return 0; } }; },
     };
     await migrateMinimalPlacesAndRetireTrips(database as never);
     await migrateMinimalPlacesAndRetireTrips(database as never);
-    expect(calls.map(({ bindVars }) => bindVars?.['@collection'])).toEqual(['shares', 'tagAssignments', 'bookSources', 'shares', 'tagAssignments', 'bookSources']);
-    expect(calls.every(({ query }) => query.includes('resource.sourceType == "trip"') && query.includes('REMOVE resource'))).toBe(true);
-    expect(dropped).toEqual(['tripPlaces', 'placeVisits', 'trips']);
+    expect(calls.filter(({ query }) => query.includes('FOR trip IN trips'))).toHaveLength(8);
+    const validation = calls.find(({ query }) => query.includes('LET createdAtTimestamp') && query.includes('FOR trip IN trips'))?.query ?? '';
+    expect(validation).toContain('LET createdAtValid');
+    expect(validation).toContain('LET updatedAtValid');
+    expect(validation).toContain('trip.status NOT IN ["planned", "completed"]');
+    expect(validation).toContain('(\\\\.[0-9]+)?Z$');
+    for (const field of ['trip._key', 'trip.userKey', 'trip.scopeKey', 'trip.coverImageKey']) expect(validation).toContain(`REGEX_TEST(${field}, "^[cC][0-9a-z]{6,}$")`);
+    expect(validation).not.toContain('[^');
+    expect(calls.filter(({ query }) => query.includes('FOR relation IN tripPlaces'))).toHaveLength(2);
+    expect(calls.find(({ query }) => query.includes('UPDATE trip WITH { status:'))?.query).toContain('trip.status IN ["planned", "completed"] ? trip.status : "planned"');
+    expect(dropped).toEqual(['placeVisits']);
+    expect(existing).toEqual(new Set(['tripPlaces', 'trips']));
 
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
     const cleanup = source.indexOf('await migrateMinimalPlacesAndRetireTrips(targetDb)');
@@ -354,9 +618,11 @@ describe('Arango migration indexes', () => {
     expect(cleanup).toBeLessThan(activeLoop);
     expect(source).toContain('REPLACE place WITH UNSET(replacement, "_rev") IN places');
     expect(source).toContain('embedding: await generateEmbedding(buildPlaceEmbeddingText(canonical))');
-    expect(source).toContain('FILTER place.kind == "country" REMOVE place IN places');
-    expect(source).toContain('resource.sourceType == "place" && resource.sourceKey IN @countryPlaceKeys');
+    expect(source).toContain('place.kind == "country" && (!HAS(place, "userKey") || !HAS(place, "saved"))');
+    expect(source).toContain('resource.sourceType == "place" && resource.sourceKey IN @obsoleteCountryKeys');
     expect(source).toContain('places migration found duplicate saved cities');
+    expect(source).toContain('trip.userKey != place.userKey || place.saved != true');
+    expect(source).toContain('resource.sourceType == "trip"');
   });
   test('creates placeImages before first-deployment place migration queries it', async () => {
     const existing = new Set(['places']);
@@ -377,7 +643,7 @@ describe('Arango migration indexes', () => {
       },
     };
     await expect(migrateMinimalPlacesAndRetireTrips(database as never)).rejects.toThrow('cannot safely derive user ownership');
-    expect(events.slice(0, 2)).toEqual(['create:placeImages', 'query:placeImages']);
+    expect(events.slice(0, 3)).toEqual(['create:placeImages', 'query:other', 'query:placeImages']);
   });
   test('force-projects legacy places once while preserving keys and regenerating name-only embeddings', async () => {
     const previous = process.env.CONTENT_E2E;
@@ -388,6 +654,7 @@ describe('Arango migration indexes', () => {
       const database = {
         collection(name: string) { return { async exists() { return name === 'places'; }, async create() {}, async drop() {} }; },
         async query(query: string, bindVars?: Record<string, unknown>) {
+          if (query.includes('obsoleteCountryKeys') || query.includes('RETURN place._key')) return { async all() { return []; }, async next() { return undefined; } };
           if (query.includes('FILTER LENGTH(userKeys) != 1')) return { async all() { return []; }, async next() { return undefined; } };
           if (query.includes('UPDATE place WITH { userKey:')) return { async all() { return []; }, async next() { return undefined; } };
           if (query.includes('Validate every retained place')) return { async all() { return bindVars?.after === '' ? [{ _key: 'cmrnlzf650002qc7k4p5zem5w', userKey: 'cmrnlzf650002qc7k4p5zem5w', scopeKey: 'cmrnlzf640001qc7kazsr96k5', saved: true, name: legacy ? ' Stockholm ' : 'Stockholm', countryCode: legacy ? 'se' : 'SE', latitude: 59.3293, longitude: 18.0686, openedAt: '2026-08-09T12:00:00.000Z', createdAt: '2026-08-08T12:00:00.000Z' }] : []; }, async next() { return undefined; } };
@@ -408,6 +675,9 @@ describe('Arango migration indexes', () => {
         userKey: 'cmrnlzf650002qc7k4p5zem5w',
         scopeKey: 'cmrnlzf640001qc7kazsr96k5',
         saved: true,
+        status: 'wishlist',
+        isFavorite: false,
+        kind: 'place',
         name: 'Stockholm',
         summary: '',
         countryCode: 'SE',
@@ -423,7 +693,36 @@ describe('Arango migration indexes', () => {
       await migrateMinimalPlacesAndRetireTrips(database as never);
       expect(replacements).toEqual([]);
       const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
-      expect(source).toContain('fields != @canonicalFields && fields != @openedCanonicalFields && fields != @generatedCanonicalFields && fields != @openedGeneratedCanonicalFields');
+      expect(source).toContain('fields NOT IN @canonicalFieldSets');
+    } finally {
+      if (previous === undefined) delete process.env.CONTENT_E2E;
+      else process.env.CONTENT_E2E = previous;
+    }
+  });
+  test('retains valid generated country places and projects kind and detail version', async () => {
+    const previous = process.env.CONTENT_E2E;
+    process.env.CONTENT_E2E = 'true';
+    try {
+      const cities = Array.from({ length: 10 }, (_, index) => ({ name: `City ${index}`, latitude: index, longitude: index }));
+      const generatedDetail = { location: { kind: 'country', name: 'Japan', countryCode: 'JP', country: 'Japan', continent: 'Asia', region: null, city: null, latitude: 36.2, longitude: 138.2 }, title: 'Japan', summary: 'Island country.', culture: 'Culture.', food: 'Food.', whyVisit: 'Visit.', heroImagePrompt: 'Landscape.', popularCities: cities };
+      let legacy = true;
+      let replacement: Record<string, unknown> | undefined;
+      const row = () => ({ _key: 'cmrnlzf650002qc7k4p5zem5w', _rev: 'revision', userKey: 'cmrnlzf650002qc7k4p5zem5w', scopeKey: 'cmrnlzf640001qc7kazsr96k5', saved: true, status: 'visited', isFavorite: true, kind: 'country', name: ' Japan ', summary: 'Island country.', countryCode: 'jp', latitude: 36.2, longitude: 138.2, embedding: [], embeddingContentVersion: 1, generatedDetail, generatedDetailVersion: 2, createdAt: '2026-08-08T12:00:00.000Z' });
+      const database = {
+        collection(name: string) { return { async exists() { return name === 'places' || name === 'placeImages'; }, async create() {}, async drop() {} }; },
+        async query(query: string, bindVars?: Record<string, unknown>) {
+          if (query.includes('obsoleteCountryKeys') || query.includes('FILTER LENGTH(userKeys) != 1') || query.includes('UPDATE place WITH { userKey:') || query.includes('WITH COUNT INTO count')) return { async all() { return []; }, async next() { return undefined; } };
+          if (query.includes('Validate every retained place')) return { async all() { return bindVars?.after === '' ? [legacy ? row() : { ...replacement, _key: replacement?._key }] : []; }, async next() { return undefined; } };
+          if (query.includes('RETURN place') && !query.includes('RETURN LENGTH')) return { async all() { return legacy ? [row()] : []; }, async next() { return undefined; } };
+          if (query.includes('FOR replacement IN @replacements')) { replacement = (bindVars?.replacements as Array<Record<string, unknown>>)[0]; legacy = false; return { async all() { return []; }, async next() { return undefined; } }; }
+          if (query.includes('RETURN LENGTH')) return { async all() { return []; }, async next() { return 0; } };
+          throw new Error(`Unexpected migration query: ${query}`);
+        },
+        async beginTransaction() { return { async step(run: () => Promise<void>) { await run(); }, async commit() {}, async abort() {} }; },
+      };
+
+      await migrateMinimalPlacesAndRetireTrips(database as never);
+      expect(replacement).toMatchObject({ saved: true, status: 'visited', isFavorite: true, kind: 'country', name: 'Japan', countryCode: 'JP', generatedDetail, generatedDetailVersion: 2 });
     } finally {
       if (previous === undefined) delete process.env.CONTENT_E2E;
       else process.env.CONTENT_E2E = previous;
@@ -434,6 +733,7 @@ describe('Arango migration indexes', () => {
     const database = {
       collection(name: string) { return { async exists() { return name === 'places'; }, async create() {}, async drop() {} }; },
       async query(query: string, bindVars?: Record<string, unknown>) {
+        if (query.includes('obsoleteCountryKeys') || query.includes('RETURN place._key')) return { async all() { return []; } };
         if (query.includes('FILTER LENGTH(userKeys) != 1')) return { async all() { return []; } };
         if (query.includes('UPDATE place WITH { userKey:')) return { async all() { return []; } };
         if (query.includes('Validate every retained place')) return { async all() { return bindVars?.after === '' ? [{ _key: 'cmrnlzf650002qc7k4p5zem5w', userKey: 'cmrnlzf650002qc7k4p5zem5w', scopeKey: 'cmrnlzf640001qc7kazsr96k5', saved: true, name: ' Stockholm ', countryCode: 'se', latitude: 59.3293, longitude: 18.0686, createdAt: '2026-08-08T12:00:00.000Z' }] : []; } };
@@ -565,7 +865,7 @@ describe('Arango migration indexes', () => {
     expect(patch).not.toHaveProperty('chunkEmbeddings');
   });
   test('physically normalizes and verifies favorite-bearing resources idempotently', async () => {
-    for (const collection of ['folders', 'images', 'collections', 'documents', 'emailThreads'] as const) {
+    for (const collection of ['folders', 'images', 'collections', 'documents'] as const) {
       const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
       const database = {
         async query(query: string, bindVars?: Record<string, unknown>) {
@@ -583,17 +883,6 @@ describe('Arango migration indexes', () => {
       expect(calls.filter(({ query }) => query.includes('RETURN LENGTH'))).toHaveLength(2);
       expect(calls.every(({ bindVars }) => bindVars?.['@collection'] === collection)).toBe(true);
     }
-  });
-  test('backfills stable email reply depths from RFC message links', async () => {
-    const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
-    const database = { async query(query: string, bindVars?: Record<string, unknown>) {
-      calls.push({ query, bindVars });
-      if (calls.length === 1) return { async all() { return [{ scopeKey: 'scope', threadKey: 'thread' }]; } };
-      if (calls.length === 2) return { async all() { return [{ key: 'one', messageIdHeader: '<one@example.com>' }, { key: 'two', messageIdHeader: '<two@example.com>', inReplyTo: '<one@example.com>' }]; } };
-      return { async all() { return []; } };
-    } };
-    await migrateEmailReplyMetadata(database as never);
-    expect(calls[2]?.bindVars?.updates).toEqual([{ key: 'one', parentMessageId: null, replyDepth: 0 }, { key: 'two', parentMessageId: '<one@example.com>', replyDepth: 1 }]);
   });
   test('uses a durable two-phase cutover and verifies before dropping legacy shares', async () => {
     const staged = stageLegacyDocumentShares([
@@ -677,4 +966,142 @@ describe('Arango migration indexes', () => {
     expect(source).toContain("name: 'events'");
     expect(source).toContain("{ fields: ['distinctId', 'createdAt'] }");
   });
+
+  test('declares one-to-one inbox indexes and an idempotent connector backfill', async () => {
+    expect(collections.find(({ name }) => name === 'inboxes')).toEqual({ name: 'inboxes', embedKeys: ['name', 'description'], indexes: [{ fields: ['connectorKey'], unique: true }, { fields: ['organizationKey', 'scopeKey'] }, { fields: ['scopeKey', 'isFavorite'] }, { fields: ['scopeKey', 'coverImageKey'], sparse: true }] });
+    const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    const backfill = source.slice(source.indexOf('export async function backfillConnectorInboxes'), source.indexOf('export async function migrateContentVersions'));
+    expect(backfill).toContain('FILTER LENGTH(FOR inbox IN inboxes FILTER inbox.connectorKey == connector._key LIMIT 1 RETURN 1) == 0');
+    expect(backfill).toContain('UPSERT { connectorKey: @connectorKey }');
+    expect(backfill).toContain("buildEmbeddingText(['name', 'description'], { name })");
+    expect(source).toContain("'organizationConnectors', 'inboxes'");
+  });
+
+  test('protects tone semantics from generic document chunking and embeds only the name', async () => {
+    const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    const toneMigration = source.slice(source.indexOf('export async function migrateEmailToneEmbeddings'), source.indexOf('export async function migrateContentVersions'));
+    const documentMigration = source.slice(source.indexOf('export async function migrateContentDocuments'), source.indexOf('export async function migrateContentShares'));
+    expect(toneMigration).toContain('folder.purpose == "communication-mail-tones"');
+    expect(toneMigration).toContain('isCanonicalEmailToneDocument(document)');
+    expect(toneMigration).toContain('decodeEmailToneContent');
+    expect(toneMigration).toContain('emailToneSemanticText');
+    expect(toneMigration).toContain('encodeEmailToneContent(tone)');
+    expect(toneMigration).toContain('content: @content');
+    expect(toneMigration).toContain('chunkDocumentContent(semanticText)');
+    expect(toneMigration).toContain('chunkEmbeddings: contentChunks.map(() => embedding)');
+    expect(toneMigration).not.toContain('CONTAINS(document.content, "<!-- vorinthex-mail-tone ")');
+    const retiredToneMigration = source.slice(source.indexOf('export async function migrateRetiredEmailDefaultTones'), source.indexOf('export async function migrateEmailInboxCategoriesAndDefaultTones'));
+    expect(retiredToneMigration).toContain('document._key == key');
+    expect(retiredToneMigration).toContain('document.isFavorite != true');
+    expect(retiredToneMigration).toContain('document.coverImageKey == null');
+    expect(retiredToneMigration).toContain('document.createdAt == document.updatedAt');
+    expect(retiredToneMigration).toContain('LET hasDependents =');
+    expect(retiredToneMigration).toContain('FOR version IN documentVersions');
+    expect(retiredToneMigration).toContain('FOR summary IN documentSummaries');
+    expect(retiredToneMigration).toContain('FOR audio IN documentAudioVersions');
+    expect(retiredToneMigration).toContain('FOR audio IN documentSummaryAudio');
+    expect(retiredToneMigration).toContain('audio.summaryKey IN summaryKeys');
+    expect(retiredToneMigration).toContain('&& !hasDependents');
+    expect(retiredToneMigration).toContain('FILTER untouched');
+    expect(retiredToneMigration).toContain('JSON_STRINGIFY({ version: 1 })');
+    expect(toneMigration).toContain('FOR tone IN @defaultTones');
+    expect(toneMigration).toContain('UPSERT { _key: key }');
+    expect(toneMigration).toContain('payload.kind IN ["mail-thread", "mail-message"]');
+    expect(toneMigration).toContain('? "Filtered" : payload.data.priority == "urgent" ? "Urgent" : "Important"');
+    expect(toneMigration).toContain('LET inInbox = "INBOX" IN labels || "SPAM" IN labels || "TRASH" IN labels');
+    expect(toneMigration).toContain('{ inboxCategory, inInbox }');
+    expect(documentMigration).toContain('FILTER document.emailToneEmbeddingVersion != 1');
+    expect(documentMigration).toContain('document.emailReplyContextEmbeddingVersion != 1');
+    expect(source.indexOf('await migrateEmailToneEmbeddings(targetDb)')).toBeLessThan(source.indexOf('await migrateContentDocuments(targetDb)', source.indexOf("if (spec.name === 'documents')")));
+    expect(source.indexOf('await migrateEmailInboxCategoriesAndDefaultTones(targetDb)')).toBeLessThan(source.indexOf('await migrateEmailToneEmbeddings(targetDb)'));
+  });
+
+  test('defers dependent-aware retired tone cleanup until a fresh database has ensured every required collection', async () => {
+    const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    const earlyMigration = source.slice(source.indexOf('export async function migrateEmailInboxCategoriesAndDefaultTones'), source.indexOf('export async function migrateContentVersions'));
+    for (const collection of ['documentVersions', 'documentSummaries', 'documentAudioVersions', 'documentSummaryAudio']) expect(earlyMigration).not.toContain(` IN ${collection}`);
+    const loopStart = source.indexOf('for (const spec of collections)');
+    const deferredCall = source.indexOf('await migrateRetiredEmailDefaultTones(targetDb)', loopStart);
+    const afterCollectionLoop = source.indexOf('await migrateGeneratedTravelDocuments(targetDb)', loopStart);
+    const loopClose = source.lastIndexOf('\n  }\n\n', deferredCall);
+    expect(deferredCall).toBeGreaterThan(loopStart);
+    expect(deferredCall).toBeLessThan(afterCollectionLoop);
+    expect(loopClose).toBeGreaterThan(loopStart);
+    expect(source.slice(loopClose, deferredCall)).toBe('\n  }\n\n  ');
+    for (const collection of ['documents', 'folders', 'documentVersions', 'documentSummaries', 'documentAudioVersions', 'documentSummaryAudio']) expect(collections.some(({ name }) => name === collection)).toBe(true);
+  });
+});
+
+const liveArangoSuite = process.env.ARANGO_URL && process.env.ARANGO_USERNAME && process.env.ARANGO_ROOT_PASSWORD !== undefined ? describe : describe.skip;
+
+liveArangoSuite('Email migration live Arango', () => {
+  test('batches drafts, handles conflicts, and keeps reruns idempotent', async () => {
+    const { Database } = await import('arangojs');
+    const temporaryName = `email_migration_${crypto.randomUUID().replaceAll('-', '')}`;
+    const root = new Database({
+      url: process.env.ARANGO_URL!,
+      auth: { username: process.env.ARANGO_USERNAME!, password: process.env.ARANGO_ROOT_PASSWORD! },
+    });
+    await root.createDatabase(temporaryName);
+    const temporary = root.database(temporaryName);
+    try {
+      for (const name of ['documents', 'organizationConnectors', 'scopes', 'folders', 'documentVersions', 'documentSummaries', 'documentAudioVersions', 'documentSummaryAudio']) await temporary.createCollection(name);
+      await temporary.collection('scopes').save({ _key: 'scope-live', organizationKey: 'organization-live' });
+      await temporary.collection('organizationConnectors').save({ _key: 'connector-live', organizationKey: 'organization-live', scopeKey: 'scope-live', provider: 'gmail', status: 'active', syncEnabled: true });
+      const documents = Array.from({ length: 105 }, (_, index) => ({
+        _key: `draft-${String(index).padStart(3, '0')}`,
+        scopeKey: 'scope-live',
+        content: JSON.stringify({ version: 1, kind: 'mail-new-draft', data: { accountKey: 'scope-live', status: 'edited', body: `body-${index}` } }),
+        createdAt: '2026-08-23T00:00:00.000Z',
+        updatedAt: '2026-08-23T00:00:00.000Z',
+      }));
+      await temporary.collection('documents').import(documents);
+
+      let injected = false;
+      const concurrentDatabase = {
+        collection: (name: string) => temporary.collection(name),
+        async query(query: string, bindVars?: Record<string, unknown>) {
+          const cursor = await temporary.query(query, bindVars);
+          if (!injected && query.includes('FOR document IN documents')) {
+            injected = true;
+            await temporary.query(`UPDATE "draft-000" WITH {
+              content: JSON_STRINGIFY({ version: 1, kind: "mail-new-draft", data: { accountKey: "scope-live", status: "edited", body: "concurrent-edit" } })
+            } IN documents`);
+          }
+          return cursor;
+        },
+      };
+
+      await migrateProviderIndependentEmailDrafts(concurrentDatabase as never);
+      const conflicted = await temporary.collection('documents').document('draft-000') as { content: string };
+      expect(JSON.parse(conflicted.content).data).toMatchObject({ accountKey: 'scope-live', body: 'concurrent-edit' });
+      expect(await (await temporary.query<number>('RETURN LENGTH(FOR document IN documents LET payload = JSON_PARSE(document.content) FILTER payload.data.accountKey == "connector-live" RETURN 1)')).next()).toBe(104);
+
+      await migrateProviderIndependentEmailDrafts(temporary);
+      const revisionsBeforeNoOp = await (await temporary.query<string>('FOR document IN documents SORT document._key RETURN document._rev')).all();
+      await migrateProviderIndependentEmailDrafts(temporary);
+      const revisionsAfterNoOp = await (await temporary.query<string>('FOR document IN documents SORT document._key RETURN document._rev')).all();
+      expect(revisionsAfterNoOp).toEqual(revisionsBeforeNoOp);
+      const migratedConflict = await temporary.collection('documents').document('draft-000') as { content: string };
+      expect(JSON.parse(migratedConflict.content).data).toMatchObject({ accountKey: 'connector-live', body: 'concurrent-edit' });
+
+      const toneKey = `c${new Bun.CryptoHasher('sha256').update('mail-tone\0scope-live\0warm').digest('hex').slice(0, 24)}`;
+      await temporary.collection('folders').save({ _key: 'tone-folder', scopeKey: 'scope-live', purpose: 'communication-mail-tones' });
+      await temporary.collection('documents').save({ _key: toneKey, scopeKey: 'scope-live', folderKey: 'tone-folder', name: 'Customized', content: '<!-- vorinthex-mail-tone {"version":1} -->', createdAt: '2026-08-22T00:00:00.000Z', updatedAt: '2026-08-23T00:00:00.000Z' });
+      const toneRevision = (await temporary.collection('documents').document(toneKey) as { _rev: string })._rev;
+      await migrateRetiredEmailDefaultTones(temporary);
+      expect((await temporary.collection('documents').document(toneKey) as { _rev: string })._rev).toBe(toneRevision);
+
+      await temporary.query('UPDATE @key WITH { content: @content } IN documents', { key: toneKey, content: '<!-- vorinthex-mail-tone {"version":1,"slug":"warm"} -->' });
+      await migrateRetiredEmailDefaultTones(temporary);
+      const migratedTone = await temporary.collection('documents').document(toneKey) as { _rev: string; content: string };
+      expect(migratedTone.content).toBe('<!-- vorinthex-mail-tone {"version":1} -->');
+      await migrateRetiredEmailDefaultTones(temporary);
+      expect((await temporary.collection('documents').document(toneKey) as { _rev: string })._rev).toBe(migratedTone._rev);
+    } finally {
+      temporary.close();
+      await root.dropDatabase(temporaryName);
+      root.close();
+    }
+  }, 30_000);
 });

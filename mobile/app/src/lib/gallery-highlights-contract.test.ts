@@ -23,12 +23,13 @@ test("uses separate full-height grid and player sheets with footer actions", () 
   expect(highlights).toContain('variant="primary">Create</Button>');
   expect(highlights).toContain('variant="secondary">Close</Button>');
   expect(highlights).toContain('accessibilityLabel="Creating highlight"');
-  expect(highlights).toContain('setHighlights((current) => [highlight, ...current.filter(({ key }) => key !== highlight.key)])');
+  expect(highlights).toContain('setHighlights((current) => [...current.filter(({ key }) => key !== highlight.key), highlight])');
   expect(highlights).toContain('setCreating(false)');
   expect(highlights).toContain('notify("Highlight created")');
   expect(highlights).not.toContain('skeletonUntil');
   expect(highlights).not.toContain('finishSkeleton');
-  expect(highlights.indexOf('{creating ?')).toBeLessThan(highlights.indexOf('highlights.map((highlight)'));
+  expect(highlights.indexOf('{creating ?')).toBeGreaterThan(highlights.indexOf('highlights.map((highlight)'));
+  expect(highlights).toContain('const orderedHighlights = [...result.highlights].sort((left, right) => left.createdAt.localeCompare(right.createdAt))');
   expect(highlights).toContain('Skeleton style={[styles.cardFrame, { width: cardWidth, height: cardWidth * 16 / 9 }]}');
   expect(highlights).toContain('style={[styles.cardFrame, styles.card, selected && styles.cardSelected, { width: cardWidth, height: cardWidth * 16 / 9 }]}');
   expect(highlights).toContain('cardFrame: { overflow: "hidden", borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.sm, backgroundColor: palette.panelRaised }');
@@ -46,6 +47,8 @@ test("uses separate full-height grid and player sheets with footer actions", () 
   expect(highlights).toContain("<ChevronLeftIcon />");
   expect(highlights).toContain('<PauseIcon variant="inverse" />');
   expect(highlights).toContain('<PlayIcon variant="inverse" />');
+  expect(highlights).toContain('style={styles.playbackToggle} variant="primary"');
+  expect(highlights).toContain('playbackToggle: { height: 39, minHeight: 39, width: 39 }');
   expect(highlights).toContain('<Button accessibilityLabel="Next slide"');
   expect(highlights).toContain("<ChevronRightIcon />");
   expect(highlights).not.toContain('accessibilityLabel="Open highlight actions"');
@@ -64,7 +67,9 @@ test("uses owner-only creation and long-press bulk deletion from the grid", () =
   expect(highlights).toContain('accessibilityState={{ selected }}');
   expect(highlights).toContain('<CheckIcon size="sm" variant="inverse" />');
   expect(highlights).toContain('accessibilityLabel="Clear highlight selection"');
-  expect(highlights).toContain('style={styles.bulkDeleteAction} variant="secondary">Delete</Button>');
+  expect(highlights).toContain('style={styles.bulkDeleteAction} textStyle={styles.bulkDeleteText} variant="secondary">Delete</Button>');
+  expect(highlights).toContain('bulkToolbar: { width: "100%", minHeight: 36, marginBottom: spacing.xs, padding: 3');
+  expect(highlights).toContain('bulkDeleteText: { fontFamily: fonts.regular, fontSize: 11, letterSpacing: 0.4 }');
   expect(highlights).not.toContain('activeSheet === "actions"');
   expect(highlights).not.toContain('BottomSheetItem');
   expect(highlights).toContain('activeSheet === "confirmDelete"');
@@ -72,7 +77,8 @@ test("uses owner-only creation and long-press bulk deletion from the grid", () =
   expect(highlights).not.toContain('dismissible={!deleting} hideHeading');
   expect(highlights).toContain('size="md" variant="primary">Delete</Button>');
   expect(highlights).toContain("finally {\n      if (generation === createRequest.current) setCreating(false);");
-  expect(highlights).toContain("createRequest.current += 1; setCreating(false);");
+  expect(highlights).toContain("createRequest.current += 1;");
+  expect(highlights).toContain("setTimeout(() => setCreating(false), 0)");
   expect(highlights).toContain("if (!open || creating || deleting || opening) return;");
   expect(highlights).toContain("const listRequest = useRef(0);");
   expect(highlights).toContain("const detailRequest = useRef(0);");

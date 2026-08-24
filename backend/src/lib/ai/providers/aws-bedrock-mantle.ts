@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { tokenUsage } from '@/lib/ai/shared/usage';
 import { awsCredentialsSchema, resolveAwsCredentials, signAwsRequest, type AwsCredentialEnvironment } from './aws-sigv4';
 import { normalizeProviderError, ProviderError, providerErrorCodeForStatus } from './errors';
-import { CHAT_ACTION_IDS, unsupportedAction } from './openai-compatible';
+import { acceptsChatInput, unsupportedAction } from './openai-compatible';
 import { chatInputSchema, resolveRequestSignal, type ChatInput, type ChatOutput, type ProviderAdapter, type ProviderExecuteRequest, type ProviderExecuteResponse, type ProviderFactory, type ProviderStreamChunk } from './types';
 
 export const awsBedrockMantleProviderConfigSchema = awsCredentialsSchema;
@@ -152,12 +152,12 @@ export function createAwsBedrockMantleProvider(config?: Partial<AwsBedrockMantle
     name: 'AWS Bedrock Mantle',
     async execute<TInput, TOutput>(request: ProviderExecuteRequest<TInput>) {
       try {
-        if (!CHAT_ACTION_IDS.has(request.actionId)) throw unsupportedAction(PROVIDER_ID, request.actionId);
+        if (!acceptsChatInput(request.actionId)) throw unsupportedAction(PROVIDER_ID, request.actionId);
         return await executeMantle<TInput, TOutput>(parsed, request);
       } catch (error) { throw normalizeProviderError(PROVIDER_ID, error); }
     },
     stream(request) {
-      if (!CHAT_ACTION_IDS.has(request.actionId)) throw unsupportedAction(PROVIDER_ID, request.actionId);
+      if (!acceptsChatInput(request.actionId)) throw unsupportedAction(PROVIDER_ID, request.actionId);
       return streamMantle(parsed, request);
     },
   };

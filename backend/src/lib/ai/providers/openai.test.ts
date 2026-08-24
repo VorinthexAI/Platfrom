@@ -25,11 +25,10 @@ test('supports direct OpenAI embeddings and the routed embed action', async () =
   expect(body).toEqual({ model: EXTERNAL_EMBEDDING_MODEL_ID, input: 'query', dimensions: EMBEDDING_DIMENSIONS, encoding_format: 'float' });
 });
 
-test('preserves structured caption, cleanup, and visual identity contracts on direct OpenAI', async () => {
+test('preserves structured caption and visual identity contracts on direct OpenAI', async () => {
   const bodies: Record<string, any>[] = [];
   const outputs = [
     { results: [{ caption: 'A detailed scene.', score: 91 }] },
-    { content: 'Clean document text.' },
     { description: 'A black dog with a white chest blaze.' },
   ];
   globalThis.fetch = (async (_input, init) => {
@@ -40,10 +39,9 @@ test('preserves structured caption, cleanup, and visual identity contracts on di
   const provider = createOpenAIProvider({ apiKey: 'test-key' });
   const base = { modelId: IMAGE_CAPTION_MODEL, externalModelId: IMAGE_CAPTION_EXTERNAL_MODEL_ID, organizationKey: 'organization' };
   expect((await provider.execute({ ...base, actionId: 'caption-image', input: { imageUrls: ['https://cdn.example.com/image.jpg'] } })).output).toEqual({ results: [{ caption: 'A detailed scene.', score: 91 }] });
-  expect((await provider.execute({ ...base, actionId: 'document-cleanup', input: { text: 'Clean   document text.' } })).output).toEqual({ content: 'Clean document text.' });
   expect((await provider.execute({ ...base, actionId: 'describe-visual-identity', input: { imageUrls: ['https://cdn.example.com/dog.jpg'] } })).output).toEqual({ description: 'A black dog with a white chest blaze.' });
-  expect(bodies.map(({ model }) => model)).toEqual(['gpt-5.6-luna', 'gpt-5.6-luna', 'gpt-5.6-luna']);
-  expect(bodies.map(({ response_format }) => response_format.json_schema.name)).toEqual(['image_caption_results', 'document_cleanup', 'visual_identity_description']);
+  expect(bodies.map(({ model }) => model)).toEqual(['gpt-5.6-luna', 'gpt-5.6-luna']);
+  expect(bodies.map(({ response_format }) => response_format.json_schema.name)).toEqual(['image_caption_results', 'visual_identity_description']);
   expect(bodies.every((body) => !('provider' in body))).toBe(true);
 });
 
@@ -59,28 +57,6 @@ test('preserves direct OpenAI image generation with the extended contract', asyn
   expect(url).toBe('https://api.openai.com/v1/images/generations');
   expect(body).toMatchObject({ model: 'gpt-image-2', prompt: 'globe', n: 1, size: '1024x1024', quality: 'medium' });
   expect(result).toMatchObject({ output: { images: [{ base64: png, mimeType: 'image/png' }] }, usage: { inputTokens: 2, outputTokens: 3, totalTokens: 5 }, providerId: 'openai' });
-});
-
-test('routes provider-neutral ask through direct Responses without web search', async () => {
-  let url = '';
-  let body: Record<string, any> = {};
-  globalThis.fetch = (async (input, init) => {
-    url = String(input);
-    body = JSON.parse(String(init?.body));
-    return Response.json({
-      id: 'resp_1', object: 'response', status: 'completed', model: 'gpt-5.6-luna',
-      output: [{ type: 'message', id: 'msg_1', status: 'completed', role: 'assistant', content: [{ type: 'output_text', text: '{"title":"Japan"}', annotations: [] }] }],
-      usage: { input_tokens: 12, output_tokens: 6, total_tokens: 18 },
-    });
-  }) as typeof fetch;
-  const result = await createOpenAIProvider({ apiKey: 'test-key' }).execute({
-    actionId: 'ask', modelId: 'openai.gpt-5.6-luna', externalModelId: 'gpt-5.6-luna', organizationKey: 'organization',
-    input: { systemPrompt: 'Return JSON only.', messages: [{ role: 'user', content: [{ type: 'text', text: 'Guide Japan' }] }], options: { maxTokens: 1_200 } },
-  });
-  expect(url).toBe('https://api.openai.com/v1/responses');
-  expect(body).toEqual({ model: 'gpt-5.6-luna', instructions: 'Return JSON only.', input: [{ role: 'user', content: 'Guide Japan' }], max_output_tokens: 1_200 });
-  expect(body).not.toHaveProperty('tools');
-  expect(result).toMatchObject({ output: { text: '{"title":"Japan"}', toolCalls: [], stopReason: null }, usage: { inputTokens: 12, outputTokens: 6, totalTokens: 18 }, providerId: 'openai' });
 });
 
 test('uses Responses web search and returns grounded text, citations, and sources', async () => {
@@ -124,4 +100,35 @@ test('rejects Responses output when web search did not complete', async () => {
   })) as unknown as typeof fetch;
   const execution = createOpenAIProvider({ apiKey: 'test-key' }).execute({ actionId: 'web-search', modelId: 'openai.gpt-5.6-luna', externalModelId: 'gpt-5.6-luna', input: { prompt: 'Research Japan' }, organizationKey: 'organization' });
   await expect(execution).rejects.toMatchObject({ code: 'response_invalid' });
+});
+
+async function expectUngroundedResponseRejected(sources: Array<{ type: string; url: string }>) {
+  globalThis.fetch = (async () => Response.json({
+    output: [
+      { type: 'web_search_call', status: 'completed', action: { type: 'search', sources } },
+      { type: 'message', status: 'completed', role: 'assistant', content: [{ type: 'output_text', text: 'Claim', annotations: [{ type: 'url_citation', title: 'Unrelated', url: 'https://example.com/citation', start_index: 0, end_index: 5 }] }] },
+    ],
+  })) as unknown as typeof fetch;
+  const execution = createOpenAIProvider({ apiKey: 'test-key' }).execute({ actionId: 'web-search', modelId: 'openai.gpt-5.6-luna', externalModelId: 'gpt-5.6-luna', input: { prompt: 'Research Japan' }, organizationKey: 'organization' });
+  await expect(execution).rejects.toMatchObject({ code: 'response_invalid' });
+}
+
+test('rejects Responses citations when returned search sources are empty', async () => {
+  await expectUngroundedResponseRejected([]);
+});
+
+test('rejects Responses citations not grounded in returned search sources', async () => {
+  await expectUngroundedResponseRejected([{ type: 'url', url: 'https://example.com/source' }]);
+});
+
+test('rejects truncated ask completions', async () => {
+  globalThis.fetch = (async () => Response.json({ choices: [{ message: { content: 'Partial answer' }, finish_reason: 'length' }] })) as unknown as typeof fetch;
+  const execution = createOpenAIProvider({ apiKey: 'test-key' }).execute({
+    actionId: 'ask',
+    modelId: 'openai.gpt-5.6-luna',
+    externalModelId: 'gpt-5.6-luna',
+    input: { messages: [{ role: 'user', content: [{ type: 'text', text: 'Explain this fully.' }] }] },
+    organizationKey: 'organization',
+  });
+  await expect(execution).rejects.toMatchObject({ code: 'response_invalid', providerId: 'openai' });
 });

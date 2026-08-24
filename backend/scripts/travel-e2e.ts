@@ -30,7 +30,7 @@ try {
   const place = placeSchema.parse({ key: placeKey, userKey, scopeKey, saved: true, name: 'Stockholm', summary: '', countryCode: 'SE', latitude: 59.3293, longitude: 18.0686, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), embeddingContentVersion: 2, createdAt: now });
   await upsertPlaceByKey(place);
   const overview = await repository.overview(context);
-  if (overview.places.length !== 1 || overview.places[0]?.key !== placeKey) throw new Error('Saved city was not returned by the overview.');
+  if (overview.places.length !== 1 || overview.places[0]?.place.key !== placeKey) throw new Error('Saved city was not returned by the overview.');
 
   console.log('Travel persistence E2E passed: administratively seeded city is listed.');
 } finally {

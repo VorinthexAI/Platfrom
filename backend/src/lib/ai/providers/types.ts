@@ -151,11 +151,12 @@ export interface NormalizedToolCall {
   arguments: unknown;
 }
 
-export interface ChatOutput {
-  text: string;
-  toolCalls: NormalizedToolCall[];
-  stopReason: string | null;
-}
+export const chatOutputSchema = z.object({
+  text: z.string(),
+  toolCalls: z.array(z.object({ id: z.string().min(1), name: z.string().min(1), arguments: z.unknown() }).strict()),
+  stopReason: z.string().nullable(),
+}).strict();
+export type ChatOutput = z.infer<typeof chatOutputSchema>;
 
 export const imageGenerateInputSchema = z
   .object({
@@ -214,16 +215,6 @@ export const imageCaptionOutputSchema = z.object({
   }).strict()).min(1).max(MAX_IMAGE_CAPTION_URLS),
 }).strict();
 export type ImageCaptionOutput = z.infer<typeof imageCaptionOutputSchema>;
-
-export const documentCleanupInputSchema = z.object({
-  text: z.string().trim().min(1).max(16_000),
-}).strict();
-export type DocumentCleanupInput = z.infer<typeof documentCleanupInputSchema>;
-
-export const documentCleanupOutputSchema = z.object({
-  content: z.string().trim().min(1).max(50_000),
-}).strict();
-export type DocumentCleanupOutput = z.infer<typeof documentCleanupOutputSchema>;
 
 export const visualIdentityDescriptionInputSchema = z.object({
   imageUrls: z.array(z.union([httpImageUrlSchema, inlineImageUrlSchema])).min(1).max(8),

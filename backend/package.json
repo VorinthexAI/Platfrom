@@ -40,6 +40,7 @@
     "seed:dev-media": "bun run load-local-env && bun --env-file=.env.local run scripts/seed-dev-media.ts",
     "seed:dev-gallery-sharing": "bun run load-local-env && bun --env-file=.env.local run scripts/seed-dev-gallery-sharing.ts",
     "seed:dev-gallery-locations": "bun run load-local-env && bun --env-file=.env.local run scripts/seed-dev-gallery-locations.ts",
+    "seed:dev-mail": "bun run load-local-env && bun --env-file=.env.local run scripts/seed-dev-mail.ts",
     "test:e2e:gallery-search": "bun run load-local-env && bun --env-file=.env.local run scripts/gallery-search-live-e2e.ts"
   },
   "dependencies": {
@@ -62,7 +63,9 @@
     "dotenv": "^17.4.2",
     "exif-reader": "^2.0.1",
     "hono": "^4.12.18",
+    "imapflow": "^1.7.6",
     "ioredis": "^5.4.0",
+    "mailparser": "^3.9.16",
     "mammoth": "^1.12.0",
     "marked": "^16.4.1",
     "nodemailer": "^9.0.3",
@@ -77,6 +80,7 @@
   },
   "devDependencies": {
     "@types/bun": "^1.2.0",
+    "@types/mailparser": "^3.4.6",
     "@types/nodemailer": "^8.0.1",
     "@types/qrcode": "^1.5.6",
     "@types/sanitize-html": "^2.16.0",

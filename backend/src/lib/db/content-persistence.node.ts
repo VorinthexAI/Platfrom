@@ -46,7 +46,7 @@ function toGlobalDocumentShare(share: DocumentShare): Share {
 }
 
 type MutableFolderField = 'parentFolderKey' | 'name' | 'description' | 'coverImageKey' | 'isFavorite' | 'updatedAt' | 'embedding' | '_internalDeletion';
-type MutableDocumentField = 'folderKey' | 'name' | 'content' | 'embedding' | 'contentChunks' | 'chunkEmbeddings' | 'semanticChunkCount' | 'semanticContentHash' | '_semanticChunkingSkipped' | 'speechStorageKeys' | 'isFavorite' | 'updatedAt' | '_internalDeletion';
+type MutableDocumentField = 'folderKey' | 'name' | 'content' | 'embedding' | 'contentChunks' | 'chunkEmbeddings' | 'semanticChunkCount' | 'semanticContentHash' | 'emailToneEmbeddingVersion' | '_semanticChunkingSkipped' | 'speechStorageKeys' | 'isFavorite' | 'updatedAt' | '_internalDeletion';
 export type ScopedFolderPatch = Partial<Pick<Folder, MutableFolderField>>;
 export type ScopedDocumentPatch = Partial<Pick<Document, MutableDocumentField>>;
 
@@ -72,16 +72,20 @@ async function scopedUpdate<T>(
   const { set, unset } = splitPatch(patch);
   const ownership = collection === 'folders' ? `
       FILTER !HAS(current, "_internalDeletion") || current._internalDeletion == null
+      FILTER current.mutationPolicy != "system-container" || @allowSystemContainerUpdate
       LET destinationKey = @changesLocation ? @destinationKey : (HAS(current, "parentFolderKey") ? current.parentFolderKey : null)
       LET destination = destinationKey == null ? null : DOCUMENT(folders, destinationKey)
       FILTER destinationKey == null || (destination != null && destination.scopeKey == @scopeKey)
       FILTER destinationKey == null || (!HAS(destination, "_internalDeletion") || destination._internalDeletion == null)
+      FILTER destinationKey == null || destination.mutationPolicy != "system-container"
   ` : collection === 'documents' ? `
       FILTER !HAS(current, "_internalDeletion") || current._internalDeletion == null
+      FILTER current.mutationPolicy != "system-only"
       LET destinationKey = @changesLocation ? @destinationKey : (HAS(current, "folderKey") ? current.folderKey : null)
       LET destination = destinationKey == null ? null : DOCUMENT(folders, destinationKey)
       FILTER destinationKey == null || (destination != null && destination.scopeKey == @scopeKey)
       FILTER destinationKey == null || (!HAS(destination, "_internalDeletion") || destination._internalDeletion == null)
+      FILTER destinationKey == null || destination.mutationPolicy != "system-container"
   ` : collection === 'documentShares' || collection === 'documentVersions' ? `
       LET owner = DOCUMENT(documents, current.documentKey)
       FILTER owner != null && owner.scopeKey == @scopeKey
@@ -108,6 +112,7 @@ async function scopedUpdate<T>(
     ...(collection === 'documentVersions' || collection === 'documentShares' || collection === 'shares' ? {} : { destinationKey: set.parentFolderKey ?? set.folderKey ?? null }),
     ...(collection === 'folders' ? { changesLocation: Object.prototype.hasOwnProperty.call(patch, 'parentFolderKey') } : {}),
     ...(collection === 'documents' ? { changesLocation: Object.prototype.hasOwnProperty.call(patch, 'folderKey') } : {}),
+    ...(collection === 'folders' ? { allowSystemContainerUpdate: Object.keys(patch).every((field) => field === 'isFavorite' || field === 'updatedAt') } : {}),
     patch: set,
     unset,
     expectedUpdatedAt: expectedUpdatedAt ?? null,
@@ -121,17 +126,28 @@ async function scopedDelete(
   collection: 'folders' | 'documents' | 'documentVersions' | 'documentAudioVersions' | 'documentSummaries' | 'documentSummaryAudio' | 'documentShares' | 'shares',
   scopeKey: string,
   key: string,
+  protectSystemContainer = false,
 ): Promise<boolean> {
   const hiddenSource = collection === 'folders' ? 'folder' : collection === 'documents' ? 'document' : null;
+  const attachmentType = collection === 'folders' ? 'folder' : null;
+  const now = new Date().toISOString();
   const cursor = await executor.query(`
-    FOR current IN @@collection
-      FILTER current._key == @key && current.scopeKey == @scopeKey
-      LIMIT 1
-      REMOVE current IN @@collection
-      RETURN OLD._key
-  `, { '@collection': collection, key, scopeKey });
+    LET affectedTripKeys = @attachmentType == null ? [] : (FOR attachment IN tripAttachments FILTER attachment.scopeKey == @scopeKey && attachment.targetType == @attachmentType && attachment.targetKey == @key RETURN DISTINCT attachment.tripKey)
+    LET removedKey = FIRST(FOR current IN @@collection
+        FILTER current._key == @key && current.scopeKey == @scopeKey
+        FILTER (!@protectSystemContainer || current.mutationPolicy != "system-container") && current.mutationPolicy != "system-only"
+        LIMIT 1
+        REMOVE current IN @@collection
+        RETURN OLD._key)
+    LET cleanupAttachments = (FOR attachment IN tripAttachments
+      FILTER @attachmentType != null && attachment.scopeKey == @scopeKey
+        && attachment.targetType == @attachmentType && attachment.targetKey == removedKey
+      REMOVE attachment IN tripAttachments RETURN 1)
+    LET touchTrips = (FOR trip IN trips FILTER trip.scopeKey == @scopeKey && trip._key IN affectedTripKeys UPDATE trip WITH { updatedAt: @now } IN trips RETURN 1)
+    RETURN removedKey
+  `, { '@collection': collection, key, scopeKey, attachmentType, protectSystemContainer, now });
   const removedKey = await cursor.next();
-  if (removedKey === undefined) return false;
+  if (typeof removedKey !== 'string') return false;
   if (hiddenSource) {
     await executor.query('FOR hidden IN userHiddens FILTER hidden.source == @hiddenSource && hidden.sourceKey == @removedKey REMOVE hidden IN userHiddens', { hiddenSource, removedKey });
   }
@@ -177,12 +193,12 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       return values.map((value) => folderSchema.parse(withArangoKey(value as Record<string, unknown>)));
     },
     async getDocument(key: string): Promise<Document | null> {
-      const cursor = await executor.query('RETURN DOCUMENT(documents, @key)', { key });
+      const cursor = await executor.query('LET document = DOCUMENT(documents, @key) FILTER document != null && document.mutationPolicy != "system-only" RETURN document', { key });
       const value = await cursor.next();
       return value ? documentSchema.parse(withArangoKey(value as Record<string, unknown>)) : null;
     },
     async listDocuments(scopeKey: string, includePendingDeletion = false): Promise<Document[]> {
-      const cursor = await executor.query(`FOR document IN documents FILTER document.scopeKey == @scopeKey FILTER @includePending || !HAS(document, "_internalDeletion") || document._internalDeletion == null RETURN document`, { scopeKey, includePending: includePendingDeletion });
+      const cursor = await executor.query(`FOR document IN documents FILTER document.scopeKey == @scopeKey && document.mutationPolicy != "system-only" FILTER @includePending || !HAS(document, "_internalDeletion") || document._internalDeletion == null RETURN document`, { scopeKey, includePending: includePendingDeletion });
       const values = cursor.all ? await cursor.all() : [];
       return values.map((value) => documentSchema.parse(withArangoKey(value as Record<string, unknown>)));
     },
@@ -202,6 +218,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
           RETURN { score, value: folder })
         LET documentMatches = (FOR document IN documents
           FILTER document.scopeKey == @scopeKey
+          FILTER document.mutationPolicy != "system-only"
           FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
           FILTER document.folderKey == null || document.folderKey IN @activeFolderKeys
           FILTER @sourceDocumentKey == null || document._key != @sourceDocumentKey
@@ -218,6 +235,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
           RETURN { score, value: document })
         LET fileMatches = (FOR document IN documents
           FILTER document.scopeKey == @scopeKey
+          FILTER document.mutationPolicy != "system-only"
           FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
           FILTER document.folderKey == null || document.folderKey IN @activeFolderKeys
           FILTER @sourceDocumentKey == null || document._key != @sourceDocumentKey
@@ -343,7 +361,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       if (parsed.embedding.length) currentEmbeddingSchema.parse(parsed.embedding);
       const cursor = await executor.query(
         `LET parent = @parentKey == null ? {} : DOCUMENT(folders, @parentKey)
-         FILTER @parentKey == null || (parent != null && parent.scopeKey == @scopeKey && (!HAS(parent, "_internalDeletion") || parent._internalDeletion == null))
+         FILTER @parentKey == null || (parent != null && parent.scopeKey == @scopeKey && (!HAS(parent, "_internalDeletion") || parent._internalDeletion == null) && parent.mutationPolicy != "system-container")
          INSERT @folder INTO folders RETURN NEW`,
         { folder: toArangoDoc(parsed), parentKey: parsed.parentFolderKey ?? null, scopeKey: parsed.scopeKey },
       );
@@ -525,7 +543,8 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       if (patch.content !== undefined && (!contentChunks || !chunkEmbeddings || contentChunks.length !== chunkEmbeddings.length)) throw new Error('Document content updates require aligned semantic chunks and embeddings.');
       if (patch.embedding !== undefined) currentEmbeddingSchema.parse(patch.embedding);
       if (chunkEmbeddings !== undefined) currentEmbeddingBatchSchema.parse(chunkEmbeddings);
-      const preparedPatch = patch.content === undefined ? patch : { ...patch, contentChunks, chunkEmbeddings, semanticChunkCount: contentChunks!.length, semanticContentHash: documentSemanticHash(patch.content), _semanticChunkingSkipped: undefined };
+      const semanticPatch = patch.content === undefined ? patch : { ...patch, contentChunks, chunkEmbeddings, semanticChunkCount: contentChunks!.length, semanticContentHash: documentSemanticHash(patch.content), _semanticChunkingSkipped: undefined };
+      const preparedPatch = patch.content !== undefined || patch.name !== undefined ? { ...semanticPatch, emailToneEmbeddingVersion: undefined } : semanticPatch;
       return scopedUpdate(executor, 'documents', scopeKey, key, preparedPatch, (value) => documentSchema.parse(value), options?.expectedUpdatedAt);
     },
     updateShare(scopeKey: string, key: string, patch: Partial<Pick<DocumentShare, 'revokedAt' | 'updatedAt'>>) {
@@ -556,7 +575,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       const { set, unset } = splitPatch({ _internalDeletion: marker });
       const cursor = await executor.query(`
         FOR current IN folders
-          FILTER current._key == @key && current.scopeKey == @scopeKey
+          FILTER current._key == @key && current.scopeKey == @scopeKey && current.mutationPolicy != "system-container"
           FILTER @owner == null || current._internalDeletion.owner == @owner
           LIMIT 1
           UPDATE current WITH MERGE(@patch, ZIP(@unset, @unset[* RETURN null])) IN folders OPTIONS { keepNull: false }
@@ -578,8 +597,12 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       const value = await cursor.next();
       return value ? documentSchema.parse(withArangoKey(value as Record<string, unknown>)) : null;
     },
-    deleteFolder(scopeKey: string, key: string) { return scopedDelete(executor, 'folders', scopeKey, key); },
-    deleteDocument(scopeKey: string, key: string) { return scopedDelete(executor, 'documents', scopeKey, key); },
+    deleteFolder(scopeKey: string, key: string) { return scopedDelete(executor, 'folders', scopeKey, key, true); },
+    async deleteDocument(scopeKey: string, key: string) {
+      const deleted = await scopedDelete(executor, 'documents', scopeKey, key);
+      if (deleted) await executor.query('FOR binding IN generatedDocumentBindings FILTER binding.scopeKey == @scopeKey && binding.documentKey == @key REMOVE binding IN generatedDocumentBindings', { scopeKey, key });
+      return deleted;
+    },
     deleteVersion(scopeKey: string, key: string) { return scopedDelete(executor, 'documentVersions', scopeKey, key); },
     deleteAudioVersion(scopeKey: string, key: string) { return scopedDelete(executor, 'documentAudioVersions', scopeKey, key); },
     deleteSummary(scopeKey: string, key: string) { return scopedDelete(executor, 'documentSummaries', scopeKey, key); },
@@ -611,6 +634,6 @@ export function withContentPersistenceTransaction<T>(
   operation: (persistence: ReturnType<typeof createContentPersistence>) => Promise<T>,
 ): Promise<T> {
   return shareStorageMode(db as unknown as ContentQueryExecutor).then((mode) =>
-    withTransaction(['folders', 'documents', 'documentVersions', 'documentAudioVersions', 'documentSummaries', 'documentSummaryAudio', 'tagAssignments', 'userHiddens', 'scopes', 'scopeMembers', 'scopeScopes', ...(mode === 'legacy' ? ['documentShares'] : mode === 'global' ? ['shares'] : ['documentShares', 'shares'])], (transaction) =>
+    withTransaction(['folders', 'documents', 'generatedDocumentBindings', 'documentVersions', 'documentAudioVersions', 'documentSummaries', 'documentSummaryAudio', 'tagAssignments', 'userHiddens', 'tripAttachments', 'trips', 'scopes', 'scopeMembers', 'scopeScopes', ...(mode === 'legacy' ? ['documentShares'] : mode === 'global' ? ['shares'] : ['documentShares', 'shares'])], (transaction) =>
       operation(createContentPersistence(transaction as unknown as ContentQueryExecutor))));
 }

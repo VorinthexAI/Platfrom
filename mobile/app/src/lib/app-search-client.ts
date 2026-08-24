@@ -1,0 +1,68 @@
+import { z } from "zod";
+
+import { apiClient } from "@/lib/api-client";
+import { publishUserSearchHistoryAppend } from "@/lib/user-search-history-events";
+import { useAuthStore } from "@/state/auth";
+
+export const appSearchCollectionSlugSchema = z.enum(["folders", "documents", "files", "images", "inboxes", "email-tones", "email-messages", "email-drafts", "places", "trips", "countries"]);
+export type AppSearchCollectionSlug = z.infer<typeof appSearchCollectionSlugSchema>;
+
+const appSearchInputSchema = z.strictObject({
+  query: z.string().trim().min(1).max(500),
+  collectionSlugs: z.array(appSearchCollectionSlugSchema).min(1).max(10).refine((slugs) => new Set(slugs).size === slugs.length, "Collection slugs must be distinct."),
+  recordHistory: z.boolean().default(true),
+  limit: z.number().int().min(1).max(50).default(10),
+  minimumScore: z.number().min(-1).max(1).default(0.55),
+  filters: z.strictObject({
+    folderKey: z.string().min(1).optional(),
+    includeDescendants: z.boolean().optional(),
+    collectionKey: z.string().min(1).optional(),
+    connectorKey: z.string().min(1).optional(),
+    readState: z.enum(["read", "unread"]).optional(),
+    emailFacets: z.array(z.enum(["urgent", "important", "filtered", "favorite"])).max(4).optional(),
+  }).optional(),
+});
+
+const appSearchOutputSchema = z.strictObject({
+  query: z.string(),
+  groups: z.array(z.strictObject({ collectionSlug: appSearchCollectionSlugSchema, results: z.array(z.unknown()) })),
+});
+export type AppSearchOutput = z.infer<typeof appSearchOutputSchema>;
+
+function context() {
+  const state = useAuthStore.getState();
+  const organizationKey = String(state.organization?.key ?? "");
+  const scopeKey = String(state.scope?.key ?? "");
+  if (!organizationKey || !scopeKey) throw new Error("Search is unavailable for this session.");
+  return { organizationKey, scopeKey };
+}
+
+function responseError(error: unknown) {
+  const failure = (error as { response?: { data?: { error?: unknown } } }).response?.data?.error;
+  if (typeof failure === "string") return new Error(failure);
+  if (failure && typeof failure === "object" && "message" in failure && typeof failure.message === "string") return new Error(failure.message);
+  return error;
+}
+
+export async function searchApp(input: z.input<typeof appSearchInputSchema>, signal?: AbortSignal) {
+  try {
+    const parsed = appSearchInputSchema.parse(input);
+    const state = useAuthStore.getState();
+    const response = await apiClient.post("/app/search", { ...context(), ...parsed }, { signal, timeout: 15_000 });
+    const envelope = z.discriminatedUnion("success", [
+      z.strictObject({ success: z.literal(true), data: appSearchOutputSchema }),
+      z.object({ success: z.literal(false), error: z.unknown() }),
+    ]).parse(response.data);
+    if (!envelope.success) throw new Error("App search failed.");
+    if (parsed.recordHistory) publishUserSearchHistoryAppend(String(state.user?.key ?? ""));
+    return envelope.data;
+  } catch (error) {
+    throw responseError(error);
+  }
+}
+
+export function appSearchResults<T extends z.ZodTypeAny>(output: AppSearchOutput, collectionSlug: AppSearchCollectionSlug, schema: T): z.output<T>[] {
+  const group = output.groups.find((candidate) => candidate.collectionSlug === collectionSlug);
+  if (!group) throw new Error(`Search response omitted ${collectionSlug}.`);
+  return z.array(schema).parse(group.results);
+}

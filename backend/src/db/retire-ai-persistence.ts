@@ -8,6 +8,7 @@ export const RETAINED_MODEL_SLUGS = [
   'bfl.flux-2-klein-4b',
   'xai.grok-imagine-image-quality',
   'openai.text-embedding-3-small',
+  'google.gemini-2.5-flash-lite',
 ] as const;
 
 export const RETAINED_PROVIDER_SLUGS = PROVIDER_SLUGS;
@@ -18,6 +19,7 @@ export const RETAINED_MODEL_PROVIDER_BINDINGS = [
   'bfl.flux-2-klein-4b:openrouter:black-forest-labs/flux.2-klein-4b',
   'xai.grok-imagine-image-quality:openrouter:x-ai/grok-imagine-image-quality',
   'openai.text-embedding-3-small:openai:text-embedding-3-small',
+  'google.gemini-2.5-flash-lite:openrouter:google/gemini-2.5-flash-lite',
 ] as const;
 
 /** Hard-delete retired runtime configuration without rewriting historical usage. */

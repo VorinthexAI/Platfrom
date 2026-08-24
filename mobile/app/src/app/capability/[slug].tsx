@@ -8,16 +8,16 @@ import { TravelWorkspace } from "@/components/capability/TravelWorkspace";
 import { capabilitySlugSchema } from "@/data/registry";
 
 export default function CapabilityRoute() {
-  const params = useLocalSearchParams<{ slug: string }>();
+  const params = useLocalSearchParams<{ slug: string; assetKey?: string; connectorKey?: string; documentKey?: string; returnTripKey?: string; returnTripName?: string; signalReturn?: string; tripKey?: string; openTripAssets?: string }>();
   const parsed = capabilitySlugSchema.safeParse(params.slug);
 
   if (!parsed.success) {
     return <Redirect href="/capability/archive" />;
   }
 
-  if (parsed.data === "archive") return <KnowledgeWorkspace />;
-  if (parsed.data === "gallery") return <GalleryWorkspace />;
-  if (parsed.data === "compass") return <TravelWorkspace />;
-  if (parsed.data === "signal") return <EmailWorkspace />;
+  if (parsed.data === "archive") return <KnowledgeWorkspace initialDocumentKey={params.documentKey} initialFolderKey={params.assetKey} returnTripKey={params.returnTripKey} returnTripName={params.returnTripName} />;
+  if (parsed.data === "gallery") return <GalleryWorkspace initialCollectionKey={params.assetKey} returnTripKey={params.returnTripKey} returnTripName={params.returnTripName} />;
+  if (parsed.data === "compass") return <TravelWorkspace initialTripKey={params.tripKey} openTripAssets={params.openTripAssets === "1"} />;
+  if (parsed.data === "signal") return <EmailWorkspace initialConnectorKey={params.connectorKey} navigatedFromRoot={params.signalReturn === "root"} key={params.connectorKey ?? "root"} />;
   return <AscendWorkspace />;
 }

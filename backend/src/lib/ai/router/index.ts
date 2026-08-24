@@ -23,4 +23,4 @@ export {
 } from './errors';
 export { selectRoute } from './select-route';
 export { STATIC_PROVIDER_IDS, isStaticProvider, createStaticProviderAdapter } from './static-routes';
-export { executeRoute, executeAction, executeCoreChat, streamRoute, type ExecuteRouteOptions, type ExecuteActionOptions, type RouteAttemptTelemetry } from './execute-route';
+export { executeRoute, executeAction, executeAsk, executeWebSearch, streamRoute, type ExecuteRouteOptions, type ExecuteActionOptions, type RouteAttemptTelemetry } from './execute-route';

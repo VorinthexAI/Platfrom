@@ -28,6 +28,7 @@ import {
 } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
 import { CoreComposer } from "@vorinthex/shared/ui/core-composer";
+import { Skeleton } from "@vorinthex/shared/ui/skeleton";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 import {
   AscendIcon,
@@ -625,8 +626,8 @@ export function AscendWorkspace() {
         ) : null}
         {loading ? (
           <View accessibilityRole="progressbar">
-            <View style={styles.sectionHeader}><View style={styles.sectionTitleSkeleton} /><View style={styles.countSkeleton} /></View>
-            <View style={[styles.grid, { gap }]}>{Array.from({ length: columns * 2 }, (_, index) => <View key={index} style={[styles.bookSkeleton, { width: cardWidth, height: Math.round(cardWidth * 1.48) + 52 }]} />)}</View>
+            <View style={styles.sectionHeader}><Skeleton style={styles.sectionTitleSkeleton} /><Skeleton style={styles.countSkeleton} /></View>
+            <View style={[styles.grid, { gap }]}>{Array.from({ length: columns * 2 }, (_, index) => <Skeleton key={index} style={[styles.bookSkeleton, { width: cardWidth, height: Math.round(cardWidth * 1.48) + 52 }]} />)}</View>
           </View>
         ) : books.length === 0 ? (
           <View style={styles.state}>

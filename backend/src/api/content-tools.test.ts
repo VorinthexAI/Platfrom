@@ -43,7 +43,7 @@ describe('Content tool API', () => {
     const deps = { getIdentity: async () => ({ key: newId(), identityType: 'user' as const }), run: async (input: any) => { dispatched = input; return {}; } };
     expect((await request(deps, 'folder.list', undefined, { 'idempotency-key': 'ignored' })).status).toBe(200);
     expect(dispatched.input.idempotencyKey).toBeUndefined();
-    expect((await request(deps, 'document.translate', { organizationKey, scopeKey, input: { documentKeys: [newId()], targetLanguage: 'French' } }, { 'idempotency-key': 'ignored-preview' })).status).toBe(200);
+    expect((await request(deps, 'document.translate', { organizationKey, scopeKey, input: { documentKeys: [newId()], targetLanguage: 'French' } }, { 'idempotency-key': 'ignored-preview' })).status).toBe(400);
     expect(dispatched.input.idempotencyKey).toBeUndefined();
     const mismatch = await request(deps, 'folder.create', { organizationKey, scopeKey, input: { folders: [{ scopeKey, name: 'Plans' }], idempotencyKey: 'body' } }, { 'idempotency-key': 'header' });
     expect(mismatch.status).toBe(409);
@@ -60,7 +60,7 @@ describe('Content tool API', () => {
   });
 
   test('maps structured Content failures to HTTP statuses', async () => {
-    const cases = [['CONTENT_INVALID_INPUT', 400], ['CONTENT_FORBIDDEN', 403], ['CONTENT_NOT_FOUND', 404], ['CONTENT_CONFLICT', 409], ['DOCUMENT_PROCESSING_FAILED', 500]] as const;
+    const cases = [['CONTENT_INVALID_INPUT', 400], ['CONTENT_FORBIDDEN', 403], ['CONTENT_NOT_FOUND', 404], ['CONTENT_CONFLICT', 409], ['CONTENT_IDEMPOTENCY_PENDING', 409], ['CONTENT_IDEMPOTENCY_INDETERMINATE', 409], ['CONTENT_IDEMPOTENCY_FAILED', 409], ['DOCUMENT_PROCESSING_FAILED', 500]] as const;
     for (const [code, status] of cases) {
       const response = await request({ getIdentity: async () => ({ key: newId(), identityType: 'user' }), run: async () => { throw new ContentError(code, 'Safe failure.', 'folder.list'); } });
       expect(response.status).toBe(status);

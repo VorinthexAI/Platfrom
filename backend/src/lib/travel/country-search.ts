@@ -45,22 +45,22 @@ const embeddingCache = new Map<string, number[]>();
 export function createCountrySearchService(options: { repository?: CountrySearchRepository; embed?: typeof embedText; userSearches?: UserSearchService } = {}) {
   const repository = options.repository ?? createCountrySearchRepository();
   const userSearches = options.userSearches ?? getDefaultUserSearchService();
-  return { async search(raw: unknown, userKey: string, execution: { signal?: AbortSignal; timeoutMs?: number } = {}) {
+  return { async search(raw: unknown, userKey: string, execution: { signal?: AbortSignal; timeoutMs?: number; queryEmbedding?: number[]; recordHistory?: boolean; minimumScore?: number } = {}) {
     const input = countrySearchInputSchema.parse(raw);
     const context = { organizationKey: input.organizationKey, userKey };
     await repository.authorize(context);
-    await userSearches.record(userKey, input.query);
+    if (execution.recordHistory !== false) await userSearches.record(userKey, input.query);
     let country = await repository.findExact(input.query);
     if (!country) {
       const cacheKey = input.query.toLocaleLowerCase();
-      let embedding = embeddingCache.get(cacheKey);
+      let embedding = execution.queryEmbedding ?? embeddingCache.get(cacheKey);
       if (!embedding) {
         embedding = await (options.embed ?? embedText)({ text: input.query, signal: execution.signal, timeoutMs: execution.timeoutMs });
         if (embeddingCache.size >= 500) embeddingCache.delete(embeddingCache.keys().next().value!);
         embeddingCache.set(cacheKey, embedding);
       }
       const semantic = await repository.search(context, embedding);
-      country = semantic && semantic.score >= COUNTRY_SEMANTIC_THRESHOLD ? semantic.country : null;
+      country = semantic && semantic.score >= (execution.minimumScore ?? COUNTRY_SEMANTIC_THRESHOLD) ? semantic.country : null;
     }
     if (!country) return { country: null };
     const { name, countryCode, latitude, longitude } = country;

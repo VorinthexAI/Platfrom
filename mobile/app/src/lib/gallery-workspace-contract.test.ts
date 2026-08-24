@@ -22,7 +22,7 @@ test("opens collection-scoped image similarity in an invalidated full-screen she
   expect(source).toContain('openSheet("similar")');
   expect(source).toContain('height={activeSheet === "destination" || activeSheet === "imageEdit" || activeSheet === "newCollection" || activeSheet === "collectionEdit" || activeSheet === "similar"');
   expect(source).toContain('activeSheet === "similar" ? "Similar images"');
-  expect(source.indexOf(">Find similar image<")).toBeLessThan(source.indexOf(">Delete image<"));
+  expect(source.indexOf(">Find similar<")).toBeLessThan(source.indexOf(">Delete image<"));
 });
 
 test("uses four-column cursor grids and one skeleton row for initial and append loading", () => {
@@ -60,6 +60,12 @@ test("uses a singleton collection cache without root search or filtering", () =>
   expect(source).toContain('accessibilityLabel="Create in Gallery"');
 });
 
+test("locks the workspace scroller only for resolved empty Gallery views", () => {
+  expect(source).toContain("const galleryEmpty = !loading && (");
+  expect(source).toContain("scrollEnabled={!galleryEmpty}");
+  expect(source).toContain("visibleOptimisticItems.length === 0");
+});
+
 test("keeps the Gallery filter sheet limited to favorite and hidden toggles", () => {
   const start = source.indexOf('activeSheet === "filter" ?');
   const filterSheet = source.slice(start, source.indexOf('activeSheet === "identityPickerFilter"', start));
@@ -84,7 +90,7 @@ test("presents managed place media as readable Compass content with collection-o
   expect(collectionMenu).toContain('setHiddenOptimistically("collection"');
   const imageMenuStart = source.indexOf('activeSheet === "imageActions" && selectedImage');
   const imageMenu = source.slice(imageMenuStart, source.indexOf('activeSheet === "imageEdit"', imageMenuStart));
-  expect(imageMenu).toContain("Find similar image");
+  expect(imageMenu).toContain("Find similar");
   expect(imageMenu).toContain("!managedCollection && !isManagedGalleryImage(selectedImage)");
   expect(source).toContain("selectedImage && (activeCollection || !isManagedGalleryImage(selectedImage))");
 });
@@ -99,20 +105,32 @@ test("only lifts Core for its own focus and uses distinct image sheet presentati
   expect(source).not.toContain('activeSheet === "imageActions" || activeSheet === "imageEdit"');
   expect(source).not.toContain("detailCaption");
   expect(source).toContain('accessibilityLabel="Open image actions"');
-  expect(source).toContain('<View style={styles.detailImageFrame}>');
+  expect(source).toContain('style={styles.detailMenuButton} variant="icon"');
+  expect(source).toContain('detailMenuButton: { width: 34, height: 34, minHeight: 34 }');
+  expect(source).toContain('style={styles.detailImageFrame}>{selectedImage && imageViewerSize.width > 0');
   expect(source).toContain('footer={<Button onPress={closeSheet} size="md" variant="secondary">Close</Button>}');
   expect(source).toContain('if (activeSheetRef.current === "imageActions") goBackSheet(); else closeSheet();');
   expect(source).toContain('mergeMediaItems([], unfilteredVisibleImages).filter');
-  expect(source).toContain('detailImageFrame: { flex: 1, width: "100%" }');
+  expect(source).toContain('detailImageFrame: { flex: 1, width: "100%", overflow: "hidden", alignItems: "center", justifyContent: "center" }');
   expect(bottomSheetSource).toContain('height?: "full"');
   expect(bottomSheetSource).not.toContain("mutation?: boolean");
   expect(bottomSheetSource).not.toContain("tall?: boolean");
   expect(bottomSheetSource).toContain('fullSheet: {\n    bottom: 0');
   expect(bottomSheetSource).toContain('Platform.OS === "android" ? insets.bottom : 0');
-  expect(bottomSheetSource).toContain('bottom: fullHeight ? androidBottomInset');
+  expect(bottomSheetSource).toContain('bottom: fullHeight ? sheetBottom');
   expect(bottomSheetSource).toContain('borderBottomLeftRadius: 24');
   expect(bottomSheetSource).toContain('borderBottomRightRadius: 24');
   expect(bottomSheetSource).not.toContain('height: fullHeight ? windowHeight - insets.top - androidBottomInset');
+});
+
+test("uses the rounded whole-sheet swipe pager for opened collection images", () => {
+  expect(source).toContain('onSwipeLeft={collectionViewerImages.length > 1 ? () => focusCollectionImage(1) : undefined}');
+  expect(source).toContain('onSwipeRight={collectionViewerImages.length > 1 ? () => focusCollectionImage(-1) : undefined}');
+  expect(source).toContain('pageKey={selectedImage?.key ?? selectedOptimisticItem?.clientKey}');
+  expect(source).not.toContain("imageViewerRef");
+  expect(source).toContain("Math.min(viewport.width / image.width, viewport.height / image.height)");
+  expect(source).toContain("detailImage: { borderRadius: radii.lg }");
+  expect(source).toContain('alignItems: "center", justifyContent: "center"');
 });
 
 test("keeps new collection creation to a required name", () => {
@@ -156,7 +174,7 @@ test("keeps similar-image results sheet-local without replacing the collection g
   expect(similar).not.toContain("setActiveIdentityFilter(undefined)");
   expect(source).toContain("const unfilteredVisibleImages = activeIdentityFilter && activeCollection");
   expect(source).not.toContain("const unfilteredVisibleImages = similarSource");
-  expect(source).not.toContain("Similar to {similarSource.filename}");
+  expect(source).not.toContain("Similar to ${similarSource.filename}");
   expect(source).not.toContain('accessibilityLabel="Close similar image filter"');
   expect(leave).toContain("setActiveIdentityFilter(undefined)");
   expect(leave).toContain("setSimilarSource(undefined)");
@@ -164,13 +182,15 @@ test("keeps similar-image results sheet-local without replacing the collection g
 });
 
 test("renders one four-card skeleton row and guarded results in the similar-images sheet", () => {
-  const start = source.indexOf('activeSheet === "similar" ? <View style={styles.duplicatePanel}');
-  const end = source.indexOf('activeSheet === "duplicates"', start);
+  const start = source.indexOf('activeSheet === "similar" ? <FlatList');
+  const end = source.indexOf(': <ScrollView', start);
   const sheet = source.slice(start, end);
+  expect(sheet).toContain('style={styles.fullSheetScroll}');
+  expect(sheet).toContain('contentContainerStyle={styles.similarListContent}');
   expect(sheet).toContain('accessibilityLabel="Loading similar images"');
   expect(sheet).toContain('Array.from({ length: IMAGE_COLUMNS }');
   expect(sheet).toContain('width: sheetImageSize, height: sheetImageSize');
-  expect(sheet).toContain('similarImages.map((image)');
+  expect(sheet).toContain('data={similarLoading ? [] : similarImages}');
   expect(sheet).toContain('onPress={() => showSimilarImage(image)}');
   expect(sheet).toContain('No similar images found in this collection.');
 });
@@ -183,7 +203,7 @@ test("uses separate image-selection and naming steps for visual identities", () 
   expect(source).toContain('accessibilityLabel="Choose a different visual identity image"');
   expect(source).toContain("returnToIdentityLibrary();");
   expect(source).toContain("width: 88, height: 88");
-  expect(source).toContain('(activeSheet === "destination" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory") && styles.fullSheetScroll');
+  expect(source).toContain('(activeSheet === "destination" || activeSheet === "duplicates" || activeSheet === "visualIdentities" || activeSheet === "identityPicker" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory") && styles.fullSheetScroll');
   expect(source.indexOf('accessibilityLabel="Back to collections"')).toBeLessThan(source.indexOf('accessibilityLabel="Search images for visual identity"'));
 });
 
@@ -424,13 +444,13 @@ test("uses full-height destination browsers without legacy sizing props", () => 
   expect(sheet).toContain('? "full" : undefined}');
   expect(sheet).not.toContain('mutation=');
   expect(sheet).not.toContain('tall=');
-  expect(source).toContain('(activeSheet === "destination" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory") && styles.fullSheetContent');
-  expect(source).toContain('(activeSheet === "destination" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory") && styles.fullSheetScroll');
+  expect(source).toContain('(activeSheet === "destination" || activeSheet === "duplicates" || activeSheet === "visualIdentities" || activeSheet === "identityPicker" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory") && styles.fullSheetContent');
+  expect(source).toContain('(activeSheet === "destination" || activeSheet === "duplicates" || activeSheet === "visualIdentities" || activeSheet === "identityPicker" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory") && styles.fullSheetScroll');
 });
 
 test("fills the mutation body for Gallery search history", () => {
-  expect(source).toContain('(activeSheet === "destination" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory") && styles.fullSheetContent');
-  expect(source).toContain('(activeSheet === "destination" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory") && styles.fullSheetScroll');
+  expect(source).toContain('(activeSheet === "destination" || activeSheet === "duplicates" || activeSheet === "visualIdentities" || activeSheet === "identityPicker" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory") && styles.fullSheetContent');
+  expect(source).toContain('(activeSheet === "destination" || activeSheet === "duplicates" || activeSheet === "visualIdentities" || activeSheet === "identityPicker" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory") && styles.fullSheetScroll');
   expect(source).toContain('activeSheet === "identityName" || activeSheet === "searchHistory" ? undefined : height * 0.6');
 });
 
@@ -470,7 +490,7 @@ test("gates collection search focus while the Core sheet closes", () => {
 });
 
 test("provides collection sharing navigation and permission gates", () => {
-  expect(source).toContain(">My collections</Button>");
+  expect(source).toContain(">Collections</Button>");
   expect(source).toContain(">Shared collections</Button>");
   expect(source).toContain("<MemberIcon size=\"sm\"");
   expect(source).toContain('collectionRole === "collaborator" && image.createdByKey === activeCollection.memberKey');
@@ -504,7 +524,7 @@ test("restores the root create action and Archive-style ownership tabs", () => {
   expect(source).toContain('<PlusIcon size="sm" />');
   expect(source).toContain('<Tabs accessibilityRole="tablist" style={styles.collectionTabs}>');
   expect(source).toContain('<Button accessibilityRole="tab" accessibilityState={{ selected: collectionTab === "mine" }}');
-  expect(source).toContain('size="xs" style={styles.collectionTab} variant={collectionTab === "mine" ? "secondary" : "ghost"}>My collections</Button>');
+  expect(source).toContain('size="xs" style={styles.collectionTab} variant={collectionTab === "mine" ? "secondary" : "ghost"}>Collections</Button>');
   expect(source).toContain('size="xs" style={styles.collectionTab} variant={collectionTab === "shared" ? "secondary" : "ghost"}>Shared collections</Button>');
   expect(source).toContain('collectionTabs: { flexDirection: "row", gap: 4, padding: 3, borderWidth: 1, backgroundColor: palette.panel }');
 });
@@ -532,6 +552,8 @@ test("edits owner collection covers from existing images with tri-state changes"
   expect(source).toContain('if (!activeCollection || !isCollectionOwner) return');
   expect(source).toContain('openIdentityPickerCollection(activeCollection)');
   expect(source).toContain('accessibilityLabel="Clear collection cover"');
+  expect(source).toContain('accessibilityLabel="Clear collection cover" contentMode="raw" disabled={busy} iconOnly');
+  expect(source).toContain('collectionCoverRemove: { width: 42, height: 42, minHeight: 42');
 });
 
 test("uses covered collection cards in every collection browser and destination picker", () => {
@@ -672,6 +694,22 @@ test("uses full-height lists for collection collaboration", () => {
   expect(sharingSource).toContain('list: { gap: 6, paddingBottom: spacing.xl }');
   expect(sharingSource).not.toContain('rowSkeleton');
   expect(sharingSource).not.toContain('variant="ghost"><View><Text numberOfLines={1} style={styles.name}>{link.url}');
+});
+
+test("centers full-sheet Gallery empty and initial load-error states", () => {
+  expect(source).toContain('activeSheet === "duplicates" || activeSheet === "visualIdentities" || activeSheet === "identityPicker" || activeSheet === "identityName"');
+  expect(source).toContain('similarListContent: { flexGrow: 1');
+  expect(source).toContain('duplicateEmpty: { flexGrow: 1, minHeight: 320, alignItems: "center", justifyContent: "center" }');
+  expect(source).toContain('cleanupError && cleanupImages.length > 0');
+  expect(source).toContain('{cleanupError ?? "No scored images found at this threshold."}');
+  expect(source).toContain('identityError && activeSubjects.length > 0');
+  expect(source).toContain('{identityError ?? "No visual identities yet."}');
+  expect(sharingSource).toContain('loadError && fullHeight ? <View style={styles.sheetEmptyContent}>');
+  expect(sharingSource).toContain('!loading && visibleMembers.length === 0 && styles.sheetEmptyContent');
+  expect(sharingSource).toContain('>No {tab} members.</Text>');
+  expect(sharingSource).toContain('!loading && invites.length === 0 && styles.sheetEmptyContent');
+  expect(sharingSource).toContain('>No pending invites.</Text>');
+  expect(sharingSource).toContain('!loading && visibleLinks.length === 0 && styles.sheetEmptyContent');
 });
 
 test("uses standard-sized compact confirmations and collaboration notices", () => {

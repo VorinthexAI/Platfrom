@@ -3,16 +3,33 @@ import { z } from 'zod';
 import { contentZodToJsonSchema } from '@/lib/ai/tools/content-json-schema';
 import { runContentTool } from '@/lib/ai/tools/content-runtime';
 import type { ContentToolName } from '@/lib/ai/tools/content-schemas';
-import { createTravelService, travelChildrenFindInputSchema, travelCityFindInputSchema, travelPlaceCreateInputSchema, travelPlaceFindInputSchema, travelPlaceOpenInputSchema } from '@/lib/travel/service';
+import { createTravelService, travelChildrenFindInputSchema, travelCityFindInputSchema, travelPlaceCreateInputSchema, travelPlaceDeleteToolInputSchema, travelPlaceFindInputSchema, travelPlaceGuideFindInputSchema, travelPlaceOpenInputSchema, travelPlaceReferenceGenerateInputSchema, travelPlaceReferenceListInputSchema, travelPlaceSearchInputSchema, travelPlaceUpdateToolInputSchema, travelTripAttachmentSetInputSchema, travelTripCreateInputSchema, travelTripDeleteInputSchema, travelTripGuideGenerateInputSchema, travelTripGuideListInputSchema, travelTripListInputSchema, travelTripSearchInputSchema, travelTripUpdateToolInputSchema } from '@/lib/travel/service';
 import { createCountrySearchService } from '@/lib/travel/country-search';
-import { createEmailService, type EmailActor } from '@/lib/email-inbox/service';
+import { createEmailService, emailDraftComposeInputSchema, emailDraftCreateInputSchema, emailDraftDeleteInputSchema, emailMessageGeneratedListInputSchema, emailMessageSummarizeInputSchema, emailMessageSummaryDeleteInputSchema, emailMessageTranslateInputSchema, emailMessageTranslationDeleteInputSchema, emailOverviewInputSchema, emailReplyContextCreateInputSchema, emailReplyContextDeleteInputSchema, emailReplyContextUpdateInputSchema, emailSemanticSearchInputSchema, emailSimilarFindInputSchema, emailThreadFavoriteInputSchema, emailThreadReadStateInputSchema, emailThreadTrashInputSchema, emailToneCreateInputSchema, emailToneDeleteInputSchema, emailToneUpdateInputSchema, emailTrashClearInputSchema, inboxUpdateInputSchema, publicEmailGeneratedDeleteResultSchema, publicEmailSummaryListResultSchema, publicEmailSummaryResultSchema, publicEmailTranslationListResultSchema, publicEmailTranslationResultSchema, type EmailActor } from '@/lib/email-inbox/service';
 import { defaultBookService } from '@/lib/books/default-service';
 import { newId } from '@/lib/ids';
 import { userHiddenOperations } from '@/lib/user-hiddens/operations';
 import type { AssistantCapability, AssistantCapabilityContext } from './capabilities';
+import { appSearchInputSchema, createAppSearchService } from '@/lib/app-search/service';
+import { appTextEnhanceInputSchema, appTextTranslateInputSchema, createAppTransformationService } from '@/lib/app-transformation/service';
 
 const key = z.string().cuid();
 const name = z.string().trim().min(1).max(255);
+const appEnhanceInputSchema = z.object({
+  text: appTextEnhanceInputSchema.shape.text.optional(),
+  documentKey: key.optional(),
+  instruction: appTextEnhanceInputSchema.shape.instruction,
+  save: z.boolean().default(true),
+}).strict().refine(({ text, documentKey }) => !(text && documentKey), 'Choose text or a document, not both.');
+const appTranslateInputSchema = z.object({
+  text: appTextTranslateInputSchema.shape.text.optional(),
+  documentKey: key.optional(),
+  messageKey: key.optional(),
+  targetLanguage: appTextTranslateInputSchema.shape.targetLanguage,
+  sourceLanguage: appTextTranslateInputSchema.shape.sourceLanguage,
+  instruction: appTextTranslateInputSchema.shape.instruction,
+  save: z.boolean().default(true),
+}).strict().refine(({ text, documentKey, messageKey }) => Number(Boolean(text)) + Number(Boolean(documentKey)) + Number(Boolean(messageKey)) <= 1, 'Choose only one source.');
 
 function identity(context: AssistantCapabilityContext) {
   const { domain } = context;
@@ -67,6 +84,53 @@ function hiddenCapability(source: 'folder' | 'document', operation: 'hide' | 're
   return capability(`${source}.${operation}`, `${operation === 'hide' ? 'Hide' : 'Reveal'} an accessible Archive ${source} for the current user.`, z.object({ sourceKey: key }).strict(), async ({ sourceKey }, context) => userHiddenOperations[operation]({ source, sourceKey }, hiddenContext(context)), 'archive');
 }
 
+export const appSearchCapability: AssistantCapability<typeof appSearchInputSchema> = {
+  inputSchema: appSearchInputSchema,
+  definition: {
+    name: 'app.search',
+    description: 'Search selected user collections with one unified text query.',
+    inputSchema: contentZodToJsonSchema(appSearchInputSchema),
+  },
+  async execute(rawInput, context) {
+    const input = appSearchInputSchema.parse(rawInput);
+    const output = await (context.appSearch ?? createAppSearchService()).search(input, context.domain, {
+      signal: context.signal,
+      timeoutMs: context.timeoutMs,
+      contentDependencies: context.contentDependencies,
+      executeContent: context.executeContent,
+      email: context.email,
+      travel: context.travel,
+      countries: context.countries,
+    });
+    const sources = output.groups.flatMap((group) => group.collectionSlug === 'documents' || group.collectionSlug === 'files'
+      ? group.results.map(({ key: documentKey, name }) => ({ documentKey, name }))
+      : []);
+    return { kind: 'continue', result: output, sources };
+  },
+};
+
+export const appEnhanceCapability = capability('app.enhance', 'Improve spelling, grammar, punctuation, and wording while preserving the source meaning.', appEnhanceInputSchema, async ({ text, documentKey, instruction, save }, context) => {
+  if (text) return (context.appTransformation ?? createAppTransformationService()).enhance({ text, instruction }, context.domain.organizationKey, { signal: context.signal, timeoutMs: context.timeoutMs });
+  const canonicalInput = { documentKeys: [currentDocumentKey(documentKey, context)], instruction, mode: save ? 'replace' as const : 'preview' as const, ...(save ? { idempotencyKey: `${context.requestKey ?? newId()}:app.enhance` } : {}) };
+  return (context.executeContent ?? runContentTool)('document.enhance', canonicalInput, context.domain, context.contentDependencies);
+}, (rawInput) => {
+  const input = appEnhanceInputSchema.parse(rawInput);
+  return !input.text && input.save ? 'archive' : undefined;
+});
+
+export const appTranslateCapability = capability('app.translate', 'Translate text, an Archive document, or a Signal message into a requested language while preserving meaning and structure.', appTranslateInputSchema, async ({ text, documentKey, messageKey, save, ...input }, context) => {
+  if (text) return (context.appTransformation ?? createAppTransformationService()).translate({ text, ...input }, context.domain.organizationKey, { signal: context.signal, timeoutMs: context.timeoutMs });
+  if (messageKey) {
+    const actor = identity(context);
+    return publicEmailTranslationResultSchema.parse(await (context.email ?? createEmailService()).translateMessage(actor.emailActor, { messageKey, targetLanguage: input.targetLanguage, sourceLanguage: input.sourceLanguage }, context.requestKey));
+  }
+  const canonicalInput = { documentKeys: [currentDocumentKey(documentKey, context)], ...input, preserveFormatting: true, mode: save ? 'replace' as const : 'preview' as const, ...(save ? { idempotencyKey: `${context.requestKey ?? newId()}:app.translate` } : {}) };
+  return (context.executeContent ?? runContentTool)('document.translate', canonicalInput, context.domain, context.contentDependencies);
+}, (rawInput) => {
+  const input = appTranslateInputSchema.parse(rawInput);
+  return input.messageKey ? 'signal' : !input.text && input.save ? 'archive' : undefined;
+});
+
 export const hiddenListCapability = capability('content.hidden.list', 'List content hidden by the current user across Archive and Gallery.', z.object({}).strict(), async (_input, context) => {
   const rows = await userHiddenOperations.list({}, hiddenContext(context));
   return { items: rows.map(({ key, source, sourceKey, createdAt }) => ({ key, source, sourceKey, createdAt })) };
@@ -95,8 +159,6 @@ export const archiveCapabilities = [
   archive('document.find-summary', 'Open one saved Archive document summary by key.', z.object({ summaryKey: key }).strict(), 'document.find-summary', ({ summaryKey }) => ({ summaryKeys: [summaryKey] })),
   archive('document.audio.playback.update', 'Select an Archive document audio version and save its playback position.', z.object({ audioVersionKey: key, playbackPositionMs: z.number().int().nonnegative() }).strict(), 'document.audio.playback.update', (input) => input, true),
   archive('document.audio.playback.clear', 'Dismiss the selected audio version for an Archive document.', z.object({ documentKey: key }).strict(), 'document.audio.playback.clear', (input) => input, true),
-  archive('document.enhance', 'Enhance the open Archive document, or an explicitly identified document, in place while preserving meaning and formatting.', z.object({ documentKey: key.optional() }).strict(), 'document.enhance', ({ documentKey }, context) => ({ documentKeys: [currentDocumentKey(documentKey, context)], mode: 'replace' }), true),
-  archive('document.translate', 'Translate the open Archive document, or an explicitly identified document, in place while preserving formatting.', z.object({ documentKey: key.optional(), targetLanguage: z.string().trim().min(2).max(100) }).strict(), 'document.translate', ({ documentKey, targetLanguage }, context) => ({ documentKeys: [currentDocumentKey(documentKey, context)], targetLanguage, preserveFormatting: true, mode: 'replace' }), true),
   archive('document.list-versions', 'List saved versions of the open Archive document, or an explicitly identified document.', z.object({ documentKey: key.optional(), limit: z.number().int().min(1).max(100).optional() }).strict(), 'document.list-versions', ({ documentKey, ...input }, context) => ({ documentKeys: [currentDocumentKey(documentKey, context)], ...input })),
   archive('document.restore-version', 'Restore one saved version of the open Archive document, or an explicitly identified document, and preserve the current content as a backup version.', z.object({ documentKey: key.optional(), versionKey: key }).strict(), 'document.restore-version', ({ documentKey, versionKey }, context) => ({ restores: [{ documentKey: currentDocumentKey(documentKey, context), versionKey, createBackupVersion: true }] }), true),
   archive('document.download', 'Download an Archive document as its original file or plain text.', z.object({ documentKey: key, format: z.enum(['original', 'txt']).optional() }).strict(), 'document.download', ({ documentKey, ...input }) => ({ documentKeys: [documentKey], ...input })),
@@ -106,24 +168,59 @@ export const archiveCapabilities = [
 
 export const compassCapabilities = [
   capability('country.search', 'Find the country that best matches a country-name query.', z.object({ query: z.string().trim().min(1).max(200) }).strict(), async (input, context) => { const actor = identity(context); return (context.countries ?? createCountrySearchService()).search({ organizationKey: actor.serviceContext.organizationKey, ...input }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }),
+  capability('place.find', 'Find external country and city destination candidates without saving them.', travelPlaceFindInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).findPlaces({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }),
+  capability('place.search', 'Semantically search the current user\'s saved places in this Compass workspace.', travelPlaceSearchInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).searchPlaces({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }),
   capability('place.list', 'List saved and recently opened places.', z.object({}).strict(), async (_input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).overview(actor.serviceContext, actor.userKey); }),
-  capability('place.find', 'Find a destination and create its structured travel guide.', travelPlaceFindInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).findPlace({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal }); }, 'compass'),
+  capability('place.reference.generate', 'Generate and persist one stable general-knowledge reference for a saved place.', travelPlaceReferenceGenerateInputSchema.omit({ organizationKey: true, scopeKey: true, idempotencyKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).generatePlaceReference({ ...actor.serviceContext, ...input, idempotencyKey: `${context.requestKey ?? newId()}:place.reference.generate` }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }, 'compass'),
+  capability('place.reference.list', 'List persisted references of one kind newest first for a saved place.', travelPlaceReferenceListInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).listPlaceReferences({ ...actor.serviceContext, ...input }, actor.userKey); }),
+  capability('trip.list', 'List trips and their ordered saved places.', travelTripListInputSchema.omit({ organizationKey: true, scopeKey: true }), async (_input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).listTrips(actor.serviceContext, actor.userKey); }),
+  capability('trip.search', 'Semantically search the current user\'s trips and return their complete aggregates.', travelTripSearchInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).searchTrips({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }),
+  capability('trip.guide.generate', 'Generate and persist a formatted guide for one trip and its ordered places.', travelTripGuideGenerateInputSchema.omit({ organizationKey: true, scopeKey: true, idempotencyKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).generateTripGuide({ ...actor.serviceContext, ...input, idempotencyKey: `${context.requestKey ?? newId()}:trip.guide.generate` }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }, 'compass'),
+  capability('trip.guide.list', 'List complete persisted trip guides newest first for one trip.', travelTripGuideListInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).listTripGuides({ ...actor.serviceContext, ...input }, actor.userKey); }),
+  capability('trip.create', 'Create a trip from ordered saved places in the current Compass workspace.', travelTripCreateInputSchema.omit({ organizationKey: true, scopeKey: true, idempotencyKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).createTrip({ ...actor.serviceContext, ...input, idempotencyKey: `${context.requestKey ?? newId()}:trip.create` }, actor.userKey); }, 'compass'),
+  capability('trip.update', 'Update trip details, status, favorite state, cover, or ordered saved places.', travelTripUpdateToolInputSchema, async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).updateTrip({ ...actor.serviceContext, ...input }, actor.userKey); }, 'compass'),
+  capability('trip.delete', 'Delete a non-favorite trip and its relations.', travelTripDeleteInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).deleteTrip({ ...actor.serviceContext, ...input }, actor.userKey); }, 'compass'),
+  capability('trip.attachment.set', 'Replace all ordered Archive and Gallery references attached to a trip.', travelTripAttachmentSetInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).setTripAttachments({ ...actor.serviceContext, ...input }, actor.userKey); }, 'compass'),
+  capability('place.guide.find', 'Find a destination and create its structured travel guide.', travelPlaceGuideFindInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).findPlaceGuide({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }, 'compass'),
   capability('place.find-city', 'Find a city in an authoritative country and create its structured travel guide.', travelCityFindInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).findCity({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }, 'compass'),
   capability('place.find-children', 'Find detailed guides for the ten cities sealed by a country place result.', travelChildrenFindInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).findChildren({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }, 'compass'),
   capability('place.create', 'Save a country or city to the current Compass workspace.', travelPlaceCreateInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).createPlace({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }, 'compass'),
+  capability('place.update', 'Update the status or favorite state of a saved place.', travelPlaceUpdateToolInputSchema, async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).updatePlace({ ...actor.serviceContext, ...input }, actor.userKey); }, 'compass'),
+  capability('place.delete', 'Delete one saved place and remove it from trips and reports.', travelPlaceDeleteToolInputSchema, async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).deletePlace({ ...actor.serviceContext, ...input }, actor.userKey); }, 'compass'),
   capability('place.open', 'Record that the current user opened an existing country or place.', travelPlaceOpenInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).openPlace({ ...actor.serviceContext, ...input }, actor.userKey); }, 'compass'),
 ];
 
 export const signalCapabilities = [
-  capability('email.overview', 'List and search Signal email threads.', z.object({ filter: z.enum(['all', 'important', 'urgent', 'needs_action', 'filtered', 'unread', 'favorite']).optional(), search: z.string().trim().max(200).optional() }).strict(), async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).overview(actor.emailActor, input); }),
-  capability('email.sync', 'Synchronize the connected Signal email inbox.', z.object({}).strict(), async (_input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).sync(actor.emailActor); }, 'signal'),
+  capability('email.overview', 'List connected email accounts, or query one selected account by read state and enabled facets with stable cursor pagination.', emailOverviewInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).overview(actor.emailActor, input); }),
+  capability('inbox.search', 'Semantically search connected Signal inboxes by their names and descriptions.', emailSemanticSearchInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).searchInboxes(actor.emailActor, input, { signal: context.signal, timeoutMs: context.timeoutMs }); }),
+  capability('email.tone.search', 'Semantically search available Signal email tones by name.', emailSemanticSearchInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).searchTones(actor.emailActor, input, { signal: context.signal, timeoutMs: context.timeoutMs }); }),
+  capability('inbox.sync', 'Synchronize one connected email inbox.', z.object({ connectorKey: key }).strict(), async ({ connectorKey }, context) => { const actor = identity(context); return (context.email ?? createEmailService()).sync(actor.emailActor, connectorKey); }, 'signal'),
+  capability('inbox.update', 'Update one connected inbox name, description, cover, or favorite state.', inboxUpdateInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).updateInbox(actor.emailActor, input, context.requestKey); }, 'signal'),
   capability('email.thread.read', 'Read up to 50 Signal email messages without changing unread state. Message bodies are limited to 8,000 characters each and 64,000 characters total; truncation and a continuation cursor are returned explicitly.', z.object({ threadKey: key, cursor: z.string().min(1).max(2_000).optional() }).strict(), async ({ threadKey, cursor }, context) => { const actor = identity(context); return (context.email ?? createEmailService()).threadForTool(actor.emailActor, threadKey, cursor); }),
-  capability('email.thread.mark-read', 'Mark a Signal email thread as read and return the same bounded first-page projection as email.thread.read.', z.object({ threadKey: key }).strict(), async ({ threadKey }, context) => { const actor = identity(context); return (context.email ?? createEmailService()).markRead(actor.emailActor, threadKey); }, 'signal'),
-  capability('email.thread.favorite', 'Set or clear the favorite state of a Signal email thread.', z.object({ threadKey: key, isFavorite: z.boolean() }).strict(), async ({ threadKey, isFavorite }, context) => { const actor = identity(context); return (context.email ?? createEmailService()).setFavorite(actor.emailActor, threadKey, isFavorite); }, 'signal'),
-  capability('email.draft.create', 'Generate a reply draft for a Signal email thread without sending it.', z.object({ threadKey: key, tone: z.enum(['concise', 'warm', 'formal', 'direct']), instruction: z.string().trim().max(1_000).optional(), profileKey: key.optional() }).strict(), async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).draft(actor.emailActor, input); }, 'signal'),
-  capability('email.draft.update', 'Replace the final content of a Signal reply draft without sending it.', z.object({ draftKey: key, finalContent: z.string().trim().min(1).max(50_000) }).strict(), async ({ draftKey, finalContent }, context) => { const actor = identity(context); return (context.email ?? createEmailService()).updateDraft(actor.emailActor, draftKey, finalContent); }, 'signal'),
-  capability('email.draft.send', 'Send a reviewed Signal email reply draft.', z.object({ draftKey: key }).strict(), async ({ draftKey }, context) => { const actor = identity(context); return (context.email ?? createEmailService()).sendDraft(actor.emailActor, draftKey); }, 'signal'),
-  capability('email.disconnect', 'Disconnect Signal from Gmail only when the user explicitly asks to disconnect the account.', z.object({}).strict(), async (_input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).disconnect(actor.emailActor); }, 'signal'),
+  capability('email.thread.read-state', 'Set read or unread state for one or up to 50 distinct Signal email threads.', emailThreadReadStateInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).setReadState(actor.emailActor, input, false, context.requestKey); }, 'signal'),
+  capability('email.thread.favorite', 'Set or clear favorite state for one or up to 50 distinct Signal email threads.', emailThreadFavoriteInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).setFavorite(actor.emailActor, input, false, context.requestKey); }, 'signal'),
+  capability('email.thread.trash', 'Move one email thread to the connected provider Trash while preserving its persisted classification.', emailThreadTrashInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).trashThread(actor.emailActor, input, false, context.requestKey); }, 'signal'),
+  capability('email.trash.clear', 'Permanently delete every message in one connected email account Trash.', emailTrashClearInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).clearTrash(actor.emailActor, input, false, undefined, context.requestKey); }, 'signal'),
+  capability('email.similar.find', 'Find semantically similar messages outside the selected message thread, with at most one result per thread.', emailSimilarFindInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).findSimilar(actor.emailActor, input); }),
+  capability('email.message.translation.list', 'List immutable translations saved for one selected persisted email message.', emailMessageGeneratedListInputSchema, async (input, context) => { const actor = identity(context); return publicEmailTranslationListResultSchema.parse(await (context.email ?? createEmailService()).listMessageTranslations(actor.emailActor, input)); }),
+  capability('email.message.translation.delete', 'Atomically delete one or more translations belonging to one selected persisted email message.', emailMessageTranslationDeleteInputSchema, async (input, context) => { const actor = identity(context); return publicEmailGeneratedDeleteResultSchema.parse(await (context.email ?? createEmailService()).deleteMessageTranslations(actor.emailActor, input, context.requestKey)); }, 'signal'),
+  capability('email.message.summarize', 'Summarize one selected persisted email message and save an immutable summary.', emailMessageSummarizeInputSchema, async (input, context) => { const actor = identity(context); return publicEmailSummaryResultSchema.parse(await (context.email ?? createEmailService()).summarizeMessage(actor.emailActor, input, context.requestKey)); }, 'signal'),
+  capability('email.message.summary.list', 'List immutable summaries saved for one selected persisted email message.', emailMessageGeneratedListInputSchema, async (input, context) => { const actor = identity(context); return publicEmailSummaryListResultSchema.parse(await (context.email ?? createEmailService()).listMessageSummaries(actor.emailActor, input)); }),
+  capability('email.message.summary.delete', 'Atomically delete one or more summaries belonging to one selected persisted email message.', emailMessageSummaryDeleteInputSchema, async (input, context) => { const actor = identity(context); return publicEmailGeneratedDeleteResultSchema.parse(await (context.email ?? createEmailService()).deleteMessageSummaries(actor.emailActor, input, context.requestKey)); }, 'signal'),
+  capability('email.draft.create', 'Generate a reply or reply-all draft for a Signal email thread without sending it.', emailDraftCreateInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).draft(actor.emailActor, input, context.requestKey); }, 'signal'),
+  capability('email.draft.compose', 'Generate or preserve and save a new email draft in a selected inbox.', emailDraftComposeInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).draftNew(actor.emailActor, input, context.requestKey); }, 'signal'),
+  capability('email.tone.list', 'List the protected email drafting tones available in this workspace.', z.object({}).strict(), async (_input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).tones(actor.emailActor); }),
+  capability('email.tone.create', 'Create a custom email drafting tone.', emailToneCreateInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).createTone(actor.emailActor, input, context.requestKey); }, 'signal'),
+  capability('email.tone.update', 'Update an email drafting tone.', emailToneUpdateInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).updateTone(actor.emailActor, input, context.requestKey); }, 'signal'),
+  capability('email.tone.delete', 'Hard-delete one custom email drafting tone and its generated dependents.', emailToneDeleteInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).deleteTone(actor.emailActor, input, context.requestKey); }, 'signal'),
+  capability('email.reply-context.list', 'List all protected facts and preferences automatically used when drafting email replies.', z.object({}).strict(), async (_input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).listReplyContext(actor.emailActor); }),
+  capability('email.reply-context.create', 'Create one protected fact or preference used automatically in email replies.', emailReplyContextCreateInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).createReplyContext(actor.emailActor, input, context.requestKey); }, 'signal'),
+  capability('email.reply-context.update', 'Update one protected email reply-context note.', emailReplyContextUpdateInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).updateReplyContext(actor.emailActor, input, context.requestKey); }, 'signal'),
+  capability('email.reply-context.delete', 'Atomically hard-delete one or more protected email reply-context notes.', emailReplyContextDeleteInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).deleteReplyContext(actor.emailActor, input, context.requestKey); }, 'signal'),
+  capability('email.draft.update', 'Replace the final content of a Signal reply draft without sending it.', z.object({ draftKey: key, finalContent: z.string().max(50_000) }).strict(), async ({ draftKey, finalContent }, context) => { const actor = identity(context); return (context.email ?? createEmailService()).updateDraft(actor.emailActor, draftKey, finalContent, context.requestKey); }, 'signal'),
+  capability('email.draft.assign', 'Assign a legacy unassigned new email draft to one connected inbox.', z.object({ draftKey: key, connectorKey: key }).strict(), async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).assignDraft(actor.emailActor, input, context.requestKey); }, 'signal'),
+  capability('email.draft.send', 'Send a reviewed Signal email draft. connectorKey is only needed for a legacy unassigned new draft. replyMode may override recipients for a reply draft.', z.object({ draftKey: key, connectorKey: key.optional(), replyMode: z.enum(['reply', 'reply_all']).optional() }).strict(), async ({ draftKey, connectorKey, replyMode }, context) => { const actor = identity(context); return (context.email ?? createEmailService()).sendDraft(actor.emailActor, draftKey, connectorKey, context.requestKey, replyMode); }, 'signal'),
+  capability('email.draft.delete', 'Hard-delete one unsent, inactive email draft and its generated dependents.', emailDraftDeleteInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).deleteDraft(actor.emailActor, input, context.requestKey); }, 'signal'),
 ];
 
 export const ascendCapabilities = [

@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
 import { tokenUsage } from '@/lib/ai/shared/usage';
 import { normalizeProviderError, ProviderError } from './errors';
-import { CHAT_ACTION_IDS, unsupportedAction } from './openai-compatible';
+import { acceptsChatInput, unsupportedAction } from './openai-compatible';
 import {
   chatInputSchema,
   resolveRequestSignal,
@@ -82,7 +82,7 @@ export function createAnthropicProvider(config: AnthropicProviderConfig): Provid
     name: 'Anthropic',
 
     async execute<TInput, TOutput>(request: ProviderExecuteRequest<TInput>): Promise<ProviderExecuteResponse<TOutput>> {
-      if (!CHAT_ACTION_IDS.has(request.actionId)) throw unsupportedAction(PROVIDER_ID, request.actionId);
+      if (!acceptsChatInput(request.actionId)) throw unsupportedAction(PROVIDER_ID, request.actionId);
       const input = chatInputSchema.parse(request.input);
       try {
         const message = await client.messages.create(buildMessageParams(request.externalModelId, input), {
@@ -102,7 +102,7 @@ export function createAnthropicProvider(config: AnthropicProviderConfig): Provid
     },
 
     async *stream<TInput>(request: ProviderExecuteRequest<TInput>): AsyncIterable<ProviderStreamChunk> {
-      if (!CHAT_ACTION_IDS.has(request.actionId)) throw unsupportedAction(PROVIDER_ID, request.actionId);
+      if (!acceptsChatInput(request.actionId)) throw unsupportedAction(PROVIDER_ID, request.actionId);
       const input = chatInputSchema.parse(request.input);
       try {
         const stream = await client.messages.create(
