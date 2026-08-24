@@ -27,6 +27,13 @@ export interface PersonalAuthContext {
   scopeMembership: ScopeMember;
 }
 
+async function ensurePersonalMailDefaults(scopeKey: string) {
+  const { db } = await import('./client');
+  await ensureMailFolders(db, scopeKey);
+  const { createEmailRepository } = await import('@/lib/email-inbox/repository');
+  await createEmailRepository(db).initializeTones(scopeKey);
+}
+
 function personalOrganizationName(name: string | null, email: string) {
   const fallback = email.split('@')[0]?.trim() || 'Personal';
   const verifiedName = name?.trim() || fallback;
@@ -81,8 +88,7 @@ export function buildDefaultPersonalContainers(input: {
 export async function provisionPersonalAuthContext(user: { key: string; name: string | null; email: string; guestBootstrapSecretHash?: string | null }): Promise<PersonalAuthContext> {
   const existing = await getPersonalAuthContext(user.key);
   if (existing) {
-    const { db } = await import('./client');
-    await ensureMailFolders(db, existing.scope.key);
+    await ensurePersonalMailDefaults(existing.scope.key);
     return existing;
   }
   const now = new Date().toISOString();
@@ -175,8 +181,7 @@ export async function provisionPersonalAuthContext(user: { key: string; name: st
     scope: scopeSchema.parse({ ...result.scope, key: result.scope._key }),
     scopeMembership: scopeMemberSchema.parse({ ...result.scopeMembership, key: result.scopeMembership._key }),
   };
-  const { db } = await import('./client');
-  await ensureMailFolders(db, context.scope.key);
+  await ensurePersonalMailDefaults(context.scope.key);
   return context;
 }
 

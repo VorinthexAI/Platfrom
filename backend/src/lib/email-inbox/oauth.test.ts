@@ -24,6 +24,31 @@ afterEach(() => {
 });
 
 describe('email OAuth state', () => {
+  test('connects iCloud credentials directly without placing secrets in OAuth state', async () => {
+    const now = '2026-08-24T12:00:00.000Z';
+    const connector = organizationConnectorSchema.parse({
+      key: userKey, organizationKey: 'org-1', scopeKey, provider: 'icloud', providerAccountId: 'apple-1', email: 'person@icloud.com',
+      encryptedCredentials: 'ciphertext', encryptionKeyId: 'v1', accessTokenFingerprint: 'a'.repeat(64), scopes: ['imap', 'smtp'], createdByMembershipKey: scopeKey,
+      status: 'error', syncEnabled: false, createdAt: now, updatedAt: now,
+    });
+    let upserted: any;
+    const connectors = {
+      findExact: async () => null,
+      upsert: async (input: unknown) => { upserted = input; return { ...connector, revision: 'upsert' }; },
+      setSyncState: async () => 'sync',
+      activateInitialization: async () => ({ ...connector, status: 'active', syncEnabled: true, revision: 'active' }),
+    };
+    const oauth = createEmailOAuthService({
+      store, connectors: connectors as never, inboxes: { getByConnector: async () => null } as never,
+      authorize: async () => ({ membershipKey: scopeKey }),
+      verifyICloud: async (credentials) => { expect(credentials).toEqual({ username: 'person@icloud.com', appPassword: 'app-password' }); return { providerAccountId: 'apple-1', email: 'person@icloud.com' }; },
+      ensureInbox: async () => ({ revision: 'inbox' }), inboxView: async () => ({ provider: 'icloud', email: 'person@icloud.com' }),
+    });
+    await expect(oauth.connectICloud({ userKey, organizationKey: 'org-1', scopeKey, email: 'Person@iCloud.com', appPassword: 'app-password', name: 'Personal' })).resolves.toMatchObject({ provider: 'icloud' });
+    expect(upserted).toMatchObject({ provider: 'icloud', providerAccountId: 'apple-1', credentials: { username: 'person@icloud.com', appPassword: 'app-password' }, initializeInactive: true });
+    expect(values.size).toBe(0);
+  });
+
   test('binds state to access context and consumes denial callbacks once', async () => {
     const oauth = createEmailOAuthService({ store, authorize: async () => ({ membershipKey: scopeKey }), connectors: {} as never });
     const started = await oauth.start({ userKey, organizationKey: 'org-1', scopeKey, name: 'Work', returnUri: 'vorinthexcore://capability/signal' });

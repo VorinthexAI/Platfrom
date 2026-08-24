@@ -26,6 +26,7 @@ export const documentSchema = z.object({
   semanticContentHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   emailToneEmbeddingVersion: z.literal(1).optional(),
   emailReplyContextEmbeddingVersion: z.literal(1).optional(),
+  developmentFixtureIdentifier: z.string().trim().min(1).optional(),
   _semanticChunkingSkipped: z.boolean().optional(),
   speechStorageKeys: z.array(z.string().trim().min(1)).optional(),
   sourceStorageKeys: z.array(z.string().trim().min(1)).max(12).optional(),

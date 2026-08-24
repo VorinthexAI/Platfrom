@@ -9,6 +9,7 @@ import { contentQueryKeys } from "./content-query-cache";
 import { galleryRefreshPlan, isCurrentContextGeneration, type GalleryRefreshFamily } from "./gallery-convergence";
 import { eventStreamRetryDelay, invalidatesGalleryQueries } from "./sse";
 import { signalQueryKeys } from "./workspace-query-cache";
+import { subscribeUserSearchHistoryAppends, userSearchHistoryQueryKey } from "./user-search-history-events";
 import { useAuthStore } from "@/state/auth";
 
 export function AuthenticatedEventBridge() {
@@ -25,6 +26,10 @@ export function AuthenticatedEventBridge() {
     if (previousIdentity.current !== undefined && previousIdentity.current !== identity) queryClient.clear();
     previousIdentity.current = identity;
   }, [organizationKey, queryClient, scopeKey, status, userKey]);
+
+  useEffect(() => subscribeUserSearchHistoryAppends((appendedUserKey) => {
+    if (appendedUserKey === userKey) void queryClient.invalidateQueries({ queryKey: userSearchHistoryQueryKey(userKey), exact: true, refetchType: "none" });
+  }), [queryClient, userKey]);
 
   useEffect(() => {
     if (status !== "authenticated" || !userKey || !organizationKey || !scopeKey) return;
@@ -44,7 +49,6 @@ export function AuthenticatedEventBridge() {
     const invalidateSignal = () => {
       void queryClient.invalidateQueries({ queryKey: signalQueryKeys.overviews(compassContext), refetchType: "active" });
       void queryClient.invalidateQueries({ queryKey: signalQueryKeys.details(compassContext), refetchType: "active" });
-      void queryClient.invalidateQueries({ queryKey: signalQueryKeys.tones(compassContext), refetchType: "active" });
       void queryClient.invalidateQueries({ queryKey: signalQueryKeys.replyContexts(compassContext), refetchType: "active" });
     };
     const inCurrentGallery = (queryKey: readonly unknown[]) => root.every((value, index) => queryKey[index] === value);
@@ -78,13 +82,13 @@ export function AuthenticatedEventBridge() {
         if (event.event === "place.reference.changed") invalidateCompassPlaceReferences();
         if (event.event === "inbox.changed") {
           invalidateSignal();
+          invalidateArchive();
           publishAppEvent({ type: "inbox.changed" });
         }
         if (event.event === "content.changed") {
           invalidateArchive();
-          void queryClient.invalidateQueries({ queryKey: signalQueryKeys.tones(compassContext), refetchType: "active" });
+          void queryClient.invalidateQueries({ queryKey: signalQueryKeys.overview(compassContext), refetchType: "active" });
           void queryClient.invalidateQueries({ queryKey: signalQueryKeys.replyContexts(compassContext), refetchType: "active" });
-          publishAppEvent({ type: "inbox.changed" });
           invalidateCompassTrips();
           invalidateCompassPlaceReferences();
         }

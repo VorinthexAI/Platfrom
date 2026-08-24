@@ -9,6 +9,7 @@ import { EditIcon } from "../../icons/edit/edit.mobile";
 import { MoreHorizontalIcon } from "../../icons/more-horizontal/more-horizontal.mobile";
 import { colors, radii, spacing } from "../../tokens";
 import { Button } from "../button/button.mobile";
+import { Skeleton } from "../skeleton/skeleton.mobile";
 
 export type FileViewerProps = {
   error?: string;
@@ -37,7 +38,7 @@ export function FileViewer({ error, htmlUri, loading = false, onAi, onBack, onEd
       {onHistory ? <Button accessibilityLabel="Document and audio versions" contentMode="raw" onPress={onHistory} size="sm" variant="icon"><ClockIcon size="sm" /></Button> : null}
     </View> : null}
     <View style={styles.documentArea}>
-      {loading ? <View accessibilityLabel={`Loading ${title}`} accessibilityRole="progressbar" style={styles.loadingSkeleton} />
+      {loading ? <Skeleton accessibilityLabel={`Loading ${title}`} accessibilityRole="progressbar" style={styles.loadingSkeleton} />
         : error ? <View style={styles.center}><Text accessibilityRole="alert" style={styles.error}>{error}</Text></View>
           : pdfUri ? <Pdf enableDoubleTapZoom={false} enablePaging={false} fitPolicy={0} horizontal={false} maxScale={3} minScale={1} onError={(cause) => onRenderError?.(cause.message || "The PDF could not be rendered.")} source={{ uri: pdfUri, cache: false }} style={styles.pdf} trustAllCerts={false} />
             : htmlUri ? <WebView allowFileAccess allowFileAccessFromFileURLs={false} allowUniversalAccessFromFileURLs={false} javaScriptEnabled={false} onError={() => onRenderError?.("The document preview could not be rendered.")} originWhitelist={["file://*"]} source={{ uri: htmlUri }} style={styles.html} />

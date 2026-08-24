@@ -31,6 +31,7 @@ const duplicateImageSearchSchema = z.object({ duplicates: z.literal(true), colle
 
 export const imageSearchInputSchema = z.union([textSearchSchema, similarImageSearchSchema, identitySearchSchema, duplicateImageSearchSchema]);
 export type ImageSearchInput = z.infer<typeof imageSearchInputSchema>;
+export const nonTextImageSearchInputSchema = z.union([similarImageSearchSchema, identitySearchSchema, duplicateImageSearchSchema]);
 
 export const imageSearchProviderInputSchema = {
   type: 'object',
@@ -41,10 +42,13 @@ export const imageSearchProviderInputSchema = {
     { type: 'object', required: ['duplicates', 'collectionKey'], additionalProperties: false, properties: { duplicates: { type: 'boolean', const: true }, collectionKey: { type: 'string' } } },
   ],
 } as const;
+export const nonTextImageSearchProviderInputSchema = { type: 'object', oneOf: imageSearchProviderInputSchema.oneOf.slice(1) } as const;
 
 export interface ImageSearchToolDependencies extends ExecuteActionOptions {
   context: ToolContext;
   executeEmbedding?: (organizationKey: string, input: EmbeddingInput) => Promise<ProviderExecuteResponse<EmbeddingOutput>>;
+  /** Trusted query embedding supplied by a canonical parent operation. */
+  queryEmbedding?: number[];
   searchImages?: (input: AccessibleImageSearchInput) => Promise<AccessibleImageSearchResult[]>;
   listMatchingVisualIdentities?: (scopeKey: string, query: string) => ReturnType<GalleryRepository['listMatchingIdentityNames']>;
   getImage?: GalleryRepository['getImage'];
@@ -111,7 +115,9 @@ export const imageSearchTool = {
       return finish('similar', imageSimilarityOutput(results.filter(({ image }) => image.key !== source.key).slice(0, input.limit)));
     }
     const embeddingInput = { text: prepareEmbeddingText(input.query, 'query') };
-    const embeddingPromise = dependencies.executeEmbedding
+    const embeddingPromise = dependencies.queryEmbedding
+      ? Promise.resolve({ output: { embedding: dependencies.queryEmbedding } })
+      : dependencies.executeEmbedding
       ? dependencies.executeEmbedding(organizationKey, embeddingInput)
       : executeAction<EmbeddingInput, EmbeddingOutput>({
           mode: 'auto',

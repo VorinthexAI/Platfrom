@@ -23,7 +23,7 @@ import { retireAiPersistence } from './retire-ai-persistence';
 import { buildPlaceEmbeddingText, buildTripEmbeddingText, TRIP_EMBEDDING_CONTENT_VERSION } from '../lib/travel/semantic-text';
 import { generatedPlaceDetailSchema } from '../lib/db/places.node';
 import { buildImageEmbeddingText } from '../lib/image-embedding';
-import { decodeEmailToneContent, emailToneSemanticText } from '../lib/email-inbox/archive-payloads';
+import { decodeEmailToneContent, emailToneSemanticText, encodeEmailToneContent } from '../lib/email-inbox/archive-payloads';
 import { mailFolderKeys } from '../lib/email-inbox/folders';
 
 const url = process.env.ARANGO_URL ?? 'http://127.0.0.1:8529';
@@ -786,17 +786,33 @@ export async function migrateMailArchiveDocuments(targetDb: Database): Promise<v
 
 export async function migrateProviderIndependentEmailDrafts(targetDb: Database): Promise<void> {
   if (!await targetDb.collection('documents').exists() || !await targetDb.collection('organizationConnectors').exists() || !await targetDb.collection('scopes').exists()) return;
-  await targetDb.query(`FOR document IN documents
-    LET payload = JSON_PARSE(document.content)
-    FILTER payload.kind == "mail-new-draft" && payload.data.accountKey == document.scopeKey && payload.data.status IN ["generated", "edited"]
-    LET scope = DOCUMENT(scopes, document.scopeKey)
-    LET connectors = (FOR connector IN organizationConnectors
-      FILTER scope != null && connector.organizationKey == scope.organizationKey && connector.scopeKey == document.scopeKey
-      FILTER connector.provider == "gmail" && connector.status != "revoked" && connector.syncEnabled != false
-      LIMIT 2 RETURN connector)
-    FILTER LENGTH(connectors) == 1
-    LET nextPayload = MERGE(payload, { data: MERGE(payload.data, { accountKey: connectors[0]._key }) })
-    UPDATE document WITH { content: JSON_STRINGIFY(nextPayload), updatedAt: MAX([document.updatedAt, @updatedAt]) } IN documents`, { updatedAt: new Date().toISOString() });
+  const batchSize = 100;
+  const updatedAt = new Date().toISOString();
+  let after = '';
+  while (true) {
+    const cursor = await targetDb.query<{ key: string; revision: string; content: string; updatedAt: string }>(`FOR document IN documents
+      FILTER document._key > @after
+      LET payload = JSON_PARSE(document.content)
+      FILTER payload.kind == "mail-new-draft" && payload.data.accountKey == document.scopeKey && payload.data.status IN ["generated", "edited"]
+      LET scope = DOCUMENT(scopes, document.scopeKey)
+      LET connectors = (FOR connector IN organizationConnectors
+        FILTER scope != null && connector.organizationKey == scope.organizationKey && connector.scopeKey == document.scopeKey
+        FILTER connector.provider IN ["gmail", "outlook", "icloud"] && connector.status != "revoked" && connector.syncEnabled != false
+        LIMIT 2 RETURN connector)
+      FILTER LENGTH(connectors) == 1
+      LET nextPayload = MERGE(payload, { data: MERGE(payload.data, { accountKey: connectors[0]._key }) })
+      SORT document._key
+      LIMIT @batchSize
+      RETURN { key: document._key, revision: document._rev, content: JSON_STRINGIFY(nextPayload), updatedAt: MAX([document.updatedAt, @updatedAt]) }`, { after, batchSize, updatedAt });
+    const patches = await cursor.all();
+    if (patches.length === 0) break;
+    await targetDb.query(`FOR patch IN @patches
+      UPDATE { _key: patch.key, _rev: patch.revision }
+      WITH { content: patch.content, updatedAt: patch.updatedAt } IN documents
+      OPTIONS { ignoreRevs: false, ignoreErrors: true }`, { patches });
+    after = patches.at(-1)!.key;
+    if (patches.length < batchSize) break;
+  }
 }
 
 type TripAttachmentMigrationTransaction = <T>(operation: (transaction: Pick<Database, 'query'>) => Promise<T>) => Promise<T>;
@@ -907,7 +923,7 @@ export async function migrateExactSemanticRecords(targetDb: Database, collection
 export async function backfillConnectorInboxes(targetDb: Database) {
   if (!await targetDb.collection('organizationConnectors').exists() || !await targetDb.collection('inboxes').exists()) return;
   const cursor = await targetDb.query<{ key: string; organizationKey: string; scopeKey: string; email: string; createdAt: string; updatedAt: string }>(`FOR connector IN organizationConnectors
-    FILTER connector.provider == "gmail"
+    FILTER connector.provider IN ["gmail", "outlook", "icloud"]
     FILTER LENGTH(FOR inbox IN inboxes FILTER inbox.connectorKey == connector._key LIMIT 1 RETURN 1) == 0
     RETURN { key: connector._key, organizationKey: connector.organizationKey, scopeKey: connector.scopeKey, email: connector.email, createdAt: connector.createdAt, updatedAt: connector.updatedAt }`);
   for (const connector of await cursor.all()) {
@@ -919,11 +935,11 @@ export async function backfillConnectorInboxes(targetDb: Database) {
   }
 }
 
-function emailToneSemanticsCurrent(document: Record<string, unknown>, contentChunks: string[], semanticText: string, dimensions: number) {
+function emailToneSemanticsCurrent(document: Record<string, unknown>, canonicalContent: string, contentChunks: string[], semanticText: string, dimensions: number) {
   const embedding = document.embedding;
   const storedChunks = document.contentChunks;
   const chunkEmbeddings = document.chunkEmbeddings;
-  return document.emailToneEmbeddingVersion === 1
+  return document.content === canonicalContent && document.emailToneEmbeddingVersion === 1
     && Array.isArray(embedding) && embedding.length === dimensions && embedding.every((value) => typeof value === 'number' && Number.isFinite(value))
     && Array.isArray(storedChunks) && storedChunks.length === contentChunks.length && storedChunks.every((value, index) => value === contentChunks[index])
     && Array.isArray(chunkEmbeddings) && chunkEmbeddings.length === contentChunks.length
@@ -947,10 +963,11 @@ export async function migrateEmailToneEmbeddings(targetDb: Database) {
     let tone;
     try { tone = decodeEmailToneContent(String(document.content)); } catch { continue; }
     const semanticText = emailToneSemanticText(tone);
+    const canonicalContent = encodeEmailToneContent(tone);
     const contentChunks = chunkDocumentContent(semanticText);
-    if (emailToneSemanticsCurrent(document, contentChunks, semanticText, dimensions)) continue;
+    if (emailToneSemanticsCurrent(document, canonicalContent, contentChunks, semanticText, dimensions)) continue;
     const embedding = await embedText({ text: semanticText });
-    await targetDb.query('FOR document IN documents FILTER document._key == @key && document._rev == @revision UPDATE document WITH { embedding: @embedding, contentChunks: @contentChunks, chunkEmbeddings: @chunkEmbeddings, semanticChunkCount: @semanticChunkCount, semanticContentHash: @semanticContentHash, emailToneEmbeddingVersion: 1 } IN documents', { key: document._key, revision: document._rev, embedding, contentChunks, chunkEmbeddings: contentChunks.map(() => embedding), semanticChunkCount: contentChunks.length, semanticContentHash: documentSemanticHash(semanticText) });
+    await targetDb.query('FOR document IN documents FILTER document._key == @key && document._rev == @revision UPDATE document WITH { name: @name, content: @content, embedding: @embedding, contentChunks: @contentChunks, chunkEmbeddings: @chunkEmbeddings, semanticChunkCount: @semanticChunkCount, semanticContentHash: @semanticContentHash, emailToneEmbeddingVersion: 1 } IN documents', { key: document._key, revision: document._rev, name: tone.name, content: canonicalContent, embedding, contentChunks, chunkEmbeddings: contentChunks.map(() => embedding), semanticChunkCount: contentChunks.length, semanticContentHash: documentSemanticHash(semanticText) });
   }
   const verification = await targetDb.query<Record<string, unknown>>(`FOR document IN documents
     LET folder = DOCUMENT(folders, document.folderKey)
@@ -962,8 +979,9 @@ export async function migrateEmailToneEmbeddings(targetDb: Database) {
     let tone;
     try { tone = decodeEmailToneContent(String(document.content)); } catch { continue; }
     const semanticText = emailToneSemanticText(tone);
+    const canonicalContent = encodeEmailToneContent(tone);
     const contentChunks = chunkDocumentContent(semanticText);
-    if (!emailToneSemanticsCurrent(document, contentChunks, semanticText, dimensions)) invalid += 1;
+    if (!emailToneSemanticsCurrent(document, canonicalContent, contentChunks, semanticText, dimensions)) invalid += 1;
   }
   if (invalid > 0) throw new Error(`Email tone semantic migration failed for ${invalid} stale row(s), including any concurrent edit conflicts; rerun the migration.`);
 }
@@ -971,39 +989,45 @@ export async function migrateEmailToneEmbeddings(targetDb: Database) {
 export async function migrateRetiredEmailDefaultTones(targetDb: Database) {
   const retiredTones = [
     { slug: 'warm', name: 'Warm', description: 'Friendly and considerate.', instruction: 'Sound approachable, appreciative, and human.' },
-    { slug: 'direct', name: 'Direct', description: 'Clear and decisive.', instruction: 'Lead with the answer or action and avoid hedging.' },
+    { slug: 'concise', name: 'Concise', instruction: 'Lead with the point, use short sentences, and include only necessary details.' },
   ];
   await targetDb.query(`FOR document IN documents
     LET folder = DOCUMENT(folders, document.folderKey)
     FILTER folder != null && folder.scopeKey == document.scopeKey && folder.purpose == "communication-mail-tones"
     LET retired = FIRST(FOR tone IN @retiredTones LET key = CONCAT("c", SUBSTRING(SHA256(CONCAT("mail-tone", "\\u0000", document.scopeKey, "\\u0000", tone.slug)), 0, 24)) FILTER document._key == key RETURN tone)
     FILTER retired != null
-    LET defaultContent = CONCAT("# ", retired.name, "\\n\\n<!-- vorinthex-mail-tone ", JSON_STRINGIFY({ version: 1, slug: retired.slug }), " -->\\n\\n", retired.description, "\\n\\n## Instruction\\n\\n", retired.instruction)
+    LET legacyContent = retired.description == null ? null : CONCAT("# ", retired.name, "\\n\\n<!-- vorinthex-mail-tone ", JSON_STRINGIFY({ version: 1, slug: retired.slug }), " -->\\n\\n", retired.description, "\\n\\n## Instruction\\n\\n", retired.instruction)
+    LET canonicalContent = CONCAT("# ", retired.name, "\\n\\n<!-- vorinthex-mail-tone ", JSON_STRINGIFY({ version: 1, slug: retired.slug }), " -->\\n\\n## Instruction\\n\\n", retired.instruction)
     LET summaryKeys = (FOR summary IN documentSummaries FILTER summary.scopeKey == document.scopeKey && summary.documentKey == document._key RETURN summary._key)
     LET hasDependents = LENGTH(FOR version IN documentVersions FILTER version.scopeKey == document.scopeKey && version.documentKey == document._key LIMIT 1 RETURN 1) > 0
       || LENGTH(summaryKeys) > 0
       || LENGTH(FOR audio IN documentAudioVersions FILTER audio.scopeKey == document.scopeKey && audio.documentKey == document._key LIMIT 1 RETURN 1) > 0
       || LENGTH(FOR audio IN documentSummaryAudio FILTER audio.scopeKey == document.scopeKey && (audio.documentKey == document._key || audio.summaryKey IN summaryKeys) LIMIT 1 RETURN 1) > 0
-    LET untouched = document.content == defaultContent && document.name == retired.name && document.isFavorite != true && document.coverImageKey == null && document.createdAt == document.updatedAt && !hasDependents
-    LET removed = (FOR candidate IN untouched ? [document] : [] REMOVE candidate IN documents RETURN 1)
-    LET wasRemoved = LENGTH(removed) > 0
-    FOR candidate IN wasRemoved ? [] : [document]
-      LET customContent = SUBSTITUTE(candidate.content, JSON_STRINGIFY({ version: 1, slug: retired.slug }), JSON_STRINGIFY({ version: 1 }))
-      UPDATE candidate WITH { content: customContent, updatedAt: DATE_ISO8601(DATE_NOW()) } IN documents`, { retiredTones });
+    LET untouched = (document.content == canonicalContent || legacyContent != null && document.content == legacyContent) && document.name == retired.name && document.isFavorite != true && document.coverImageKey == null && document.createdAt == document.updatedAt && !hasDependents
+    FILTER untouched
+    REMOVE document IN documents`, { retiredTones });
+  await targetDb.query(`FOR document IN documents
+    LET folder = DOCUMENT(folders, document.folderKey)
+    FILTER folder != null && folder.scopeKey == document.scopeKey && folder.purpose == "communication-mail-tones"
+    LET retired = FIRST(FOR tone IN @retiredTones LET key = CONCAT("c", SUBSTRING(SHA256(CONCAT("mail-tone", "\\u0000", document.scopeKey, "\\u0000", tone.slug)), 0, 24)) FILTER document._key == key RETURN tone)
+    FILTER retired != null
+    LET customContent = SUBSTITUTE(document.content, JSON_STRINGIFY({ version: 1, slug: retired.slug }), JSON_STRINGIFY({ version: 1 }))
+    FILTER customContent != document.content
+    UPDATE document WITH { content: customContent, updatedAt: DATE_ISO8601(DATE_NOW()) } IN documents`, { retiredTones });
 }
 
 export async function migrateEmailInboxCategoriesAndDefaultTones(targetDb: Database) {
   if (!await targetDb.collection('documents').exists() || !await targetDb.collection('folders').exists()) return;
   const defaultTones = [
-    { slug: 'casual', name: 'Casual', description: 'Relaxed, friendly, and natural.', instruction: 'Use conversational language, natural contractions, and an approachable tone.' },
-    { slug: 'formal', name: 'Formal', description: 'Polished, respectful, and professional.', instruction: 'Use professional language, complete sentences, and a clear conventional structure.' },
-    { slug: 'concise', name: 'Concise', description: 'Brief, clear, and focused.', instruction: 'Lead with the point, use short sentences, and include only necessary details.' },
+    { slug: 'casual', name: 'Casual', instruction: 'Use conversational language, natural contractions, and an approachable tone.' },
+    { slug: 'formal', name: 'Formal', instruction: 'Use professional language, complete sentences, and a clear conventional structure.' },
+    { slug: 'direct', name: 'Direct', instruction: 'Lead with the answer or action and avoid hedging.' },
   ];
   await targetDb.query(`FOR folder IN folders
     FILTER folder.purpose == "communication-mail-tones"
     FOR tone IN @defaultTones
       LET key = CONCAT("c", SUBSTRING(SHA256(CONCAT("mail-tone", "\\u0000", folder.scopeKey, "\\u0000", tone.slug)), 0, 24))
-      LET content = CONCAT("# ", tone.name, "\\n\\n<!-- vorinthex-mail-tone ", JSON_STRINGIFY({ version: 1, slug: tone.slug }), " -->\\n\\n", tone.description, "\\n\\n## Instruction\\n\\n", tone.instruction)
+      LET content = CONCAT("# ", tone.name, "\\n\\n<!-- vorinthex-mail-tone ", JSON_STRINGIFY({ version: 1, slug: tone.slug }), " -->\\n\\n## Instruction\\n\\n", tone.instruction)
       LET timestamp = DATE_ISO8601(DATE_NOW())
       UPSERT { _key: key }
       INSERT { _key: key, scopeKey: folder.scopeKey, folderKey: folder._key, name: tone.name, content, embedding: @placeholder, mutationPolicy: "user", isFavorite: false, createdAt: timestamp, updatedAt: timestamp }
@@ -2011,11 +2035,13 @@ async function main() {
     }
     if (spec.name === 'documents') {
       await targetDb.query(`FOR document IN documents
-        FILTER document.mutationPolicy == "system-only" && STARTS_WITH(TRIM(document.content), "{")
+        LET folder = DOCUMENT(folders, document.folderKey)
+        FILTER folder != null && folder.scopeKey == document.scopeKey && folder.purpose == "communication-mail-tones" && STARTS_WITH(TRIM(document.content), "{")
         LET payload = JSON_PARSE(document.content)
         FILTER payload.kind == "mail-tone" && payload.version == 1
         LET tone = payload.data
-        LET content = CONCAT("# ", tone.name, "\n\n<!-- vorinthex-mail-tone ", JSON_STRINGIFY({ version: 1, slug: tone.slug }), " -->\n\n", tone.description, "\n\n## Instruction\n\n", tone.instruction)
+        LET metadata = MERGE({ version: 1 }, tone.identifier != null ? { identifier: tone.identifier } : {}, tone.slug != null ? { slug: tone.slug } : {})
+        LET content = CONCAT("# ", tone.name, "\n\n<!-- vorinthex-mail-tone ", JSON_STRINGIFY(metadata), " -->\n\n## Instruction\n\n", tone.instruction)
         UPDATE document WITH { content, mutationPolicy: "user" } IN documents`);
       await migrateEmailInboxCategoriesAndDefaultTones(targetDb);
       const cursor = await targetDb.query<number>(`

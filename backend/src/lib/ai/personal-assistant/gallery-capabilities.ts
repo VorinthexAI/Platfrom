@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { contentZodToJsonSchema } from '@/lib/ai/tools/content-json-schema';
 import type { AssistantCapability, AssistantCapabilityContext } from './capabilities';
 import { GalleryOperationError, galleryOperationInputSchemas, galleryOperations, redactCollectionShareOutput, type GalleryOperationContext, type GalleryOperationName } from '@/lib/gallery/operations';
-import { imageSearchInputSchema, imageSearchProviderInputSchema } from '@/lib/ai/tools/image-search';
+import { nonTextImageSearchInputSchema, nonTextImageSearchProviderInputSchema } from '@/lib/ai/tools/image-search';
 import { userHiddenOperations } from '@/lib/user-hiddens/operations';
 import { createImageGenerationService, imageGenerateModelInputSchema, imageIdeasInputSchema, type ImageGenerationService } from '@/lib/image-generation/service';
 
@@ -35,7 +35,7 @@ const definitions: Array<{
   { operation: 'updateShare', name: 'collection.share.update', description: 'Activate or deactivate a collection share link.', schema: galleryOperationInputSchemas.updateShare, mutation: true },
   { operation: 'revokeShare', name: 'collection.share.revoke', description: 'Revoke a collection share link.', schema: galleryOperationInputSchemas.revokeShare, mutation: true },
   { operation: 'activateShare', name: 'collection.share.activate', description: 'Activate a collection share token for the authenticated user.', schema: galleryOperationInputSchemas.activateShare, mutation: true },
-  { operation: 'search', name: 'image.search', description: 'Search Gallery by visible content, a source image, or a saved visual identity, or find duplicates in a collection.', schema: imageSearchInputSchema },
+  { operation: 'search', name: 'image.search', description: 'Find Gallery images from a source image or saved visual identity, or find duplicates in a collection. Use app.search for text queries.', schema: nonTextImageSearchInputSchema },
   { operation: 'setFavorite', name: 'image.favorite', description: 'Set or clear an image favorite.', schema: galleryOperationInputSchemas.setFavorite, mutation: true },
   { operation: 'updateImage', name: 'image.update', description: 'Update an image name and favorite state.', schema: galleryOperationInputSchemas.updateImage, mutation: true },
   { operation: 'deleteImages', name: 'image.delete', description: 'Permanently delete non-favorite Gallery images and their dependent records. Favorite images are reported and left untouched.', schema: galleryOperationInputSchemas.deleteImages, mutation: true },
@@ -74,7 +74,7 @@ export function createGalleryAssistantCapabilities(operations: Partial<Record<Ga
     return ({
     inputSchema: schema,
     ...(mutation ? { mutationWorkspace: 'gallery' as const } : {}),
-    definition: { name, description, inputSchema: name === 'image.search' ? imageSearchProviderInputSchema : contentZodToJsonSchema(schema) },
+    definition: { name, description, inputSchema: name === 'image.search' ? nonTextImageSearchProviderInputSchema : contentZodToJsonSchema(schema) },
     async execute(input: unknown, context: AssistantCapabilityContext) {
       const execute = context.gallery?.[operation] ?? operations[operation];
       if (!execute) throw new Error(`Gallery operation is unavailable: ${operation}`);

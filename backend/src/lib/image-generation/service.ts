@@ -7,7 +7,7 @@ import type { ToolContext } from '@/lib/ai/tools/tool-context';
 import { signedImageUrl } from '@/lib/gallery/image-url';
 import { getImageById, type Image } from '@/lib/db/images.node';
 import { createGalleryRepository, type GalleryRepository } from '@/lib/gallery/repository';
-import { claimContentIdempotency, completeContentIdempotency, releaseContentIdempotency, renewContentIdempotency, type ContentIdempotencyClaim, type ContentIdempotencyIdentity } from '@/lib/db/content-idempotency.node';
+import { claimContentIdempotency, completeContentIdempotency, failContentIdempotency, releaseContentIdempotency, renewContentIdempotency, startContentIdempotency, type ContentIdempotencyClaim, type ContentIdempotencyIdentity } from '@/lib/db/content-idempotency.node';
 import { newId } from '@/lib/ids';
 
 const prompt = z.string().trim().min(1).max(8_000);
@@ -57,6 +57,10 @@ export type ImageIdea = z.infer<typeof imageIdeaSchema>;
 export type ImageGenerateModelInput = z.infer<typeof imageGenerateModelInputSchema>;
 export type ImageGenerateOutput = z.infer<typeof imageGenerateOutputSchema>;
 
+export class ImageGenerationIdempotencyError extends Error {
+  constructor(readonly code: 'IMAGE_IDEMPOTENCY_CONFLICT' | 'IMAGE_IDEMPOTENCY_PENDING' | 'IMAGE_IDEMPOTENCY_INDETERMINATE' | 'IMAGE_IDEMPOTENCY_FAILED', message: string, readonly retryable: boolean) { super(message); }
+}
+
 const durableGeneratedImageSchema = savedGeneratedImageSchema.omit({ url: true }).extend({ storageKey: z.string().min(1) }).strict();
 const durableGenerateReplaySchema = z.object({
   images: z.array(durableGeneratedImageSchema).min(1).max(4),
@@ -79,8 +83,10 @@ export interface ImageGenerationServiceDependencies extends ExecuteActionOptions
   getImage?: typeof getImageById;
   idempotency?: {
     claim(identity: ContentIdempotencyIdentity, requestHash: string, leaseOwner: string, now: string): Promise<ContentIdempotencyClaim>;
+    start(identity: ContentIdempotencyIdentity, requestHash: string, leaseOwner: string, now: string): Promise<boolean>;
     renew(identity: ContentIdempotencyIdentity, requestHash: string, leaseOwner: string, now: string): Promise<boolean>;
     complete(identity: ContentIdempotencyIdentity, requestHash: string, leaseOwner: string, response: unknown, now: string): Promise<void>;
+    fail(identity: ContentIdempotencyIdentity, requestHash: string, leaseOwner: string, failure: { code: string; message: string; retryable: boolean }, now: string): Promise<void>;
     release(identity: ContentIdempotencyIdentity, requestHash: string, leaseOwner: string): Promise<void>;
   };
   createLeaseOwner?: () => string;
@@ -142,7 +148,7 @@ export function createImageGenerationService(dependencies: ImageGenerationServic
   const ask = dependencies.executeAsk ?? executeAsk;
   const now = dependencies.now ?? Date.now;
   const gallery = dependencies.gallery ?? createGalleryRepository();
-  const idempotency = dependencies.idempotency ?? { claim: claimContentIdempotency, renew: renewContentIdempotency, complete: completeContentIdempotency, release: releaseContentIdempotency };
+  const idempotency = dependencies.idempotency ?? { claim: claimContentIdempotency, start: startContentIdempotency, renew: renewContentIdempotency, complete: completeContentIdempotency, fail: failContentIdempotency, release: releaseContentIdempotency };
   const scheduleLeaseRenewal = dependencies.scheduleLeaseRenewal ?? ((renew, milliseconds) => { const timer = setInterval(renew, milliseconds); timer.unref(); return () => clearInterval(timer); });
 
   async function projectReplay(replay: unknown): Promise<ImageGenerateOutput> {
@@ -196,14 +202,21 @@ export function createImageGenerationService(dependencies: ImageGenerationServic
     const promise = (async () => {
       const leaseOwner = (dependencies.createLeaseOwner ?? newId)();
       const claim = await idempotency.claim(identity, requestHash, leaseOwner, new Date(now()).toISOString());
-      if (claim.status === 'conflict') throw new Error('The image generation idempotency key was already used for a different request.');
-      if (claim.status === 'pending') throw new Error('The image generation request is already processing on another server.');
+      if (claim.status === 'conflict') throw new ImageGenerationIdempotencyError('IMAGE_IDEMPOTENCY_CONFLICT', 'The image generation idempotency key was already used for a different request.', false);
+      if (claim.status === 'pending') throw new ImageGenerationIdempotencyError('IMAGE_IDEMPOTENCY_PENDING', 'The image generation request is still active on another server.', true);
+      if (claim.status === 'indeterminate') throw new ImageGenerationIdempotencyError('IMAGE_IDEMPOTENCY_INDETERMINATE', 'The prior image generation may have produced effects and cannot be executed again.', false);
+      if (claim.status === 'failed') throw new ImageGenerationIdempotencyError('IMAGE_IDEMPOTENCY_FAILED', claim.failure.message, claim.failure.retryable);
       if (claim.status === 'replay') return projectReplay(claim.response);
+      if (!await idempotency.start(identity, requestHash, leaseOwner, new Date(now()).toISOString())) {
+        await idempotency.release(identity, requestHash, leaseOwner);
+        throw new ImageGenerationIdempotencyError('IMAGE_IDEMPOTENCY_PENDING', 'Image generation idempotency execution ownership was lost.', true);
+      }
 
       const controller = new AbortController();
       const signal = dependencies.signal ? AbortSignal.any([dependencies.signal, controller.signal]) : controller.signal;
       let renewal = Promise.resolve();
       let leaseError: Error | undefined;
+      let executionSucceeded = false;
       const renew = () => {
         renewal = renewal.then(async () => {
           if (!await idempotency.renew(identity, requestHash, leaseOwner, new Date(now()).toISOString())) throw new Error('Image generation idempotency lease was lost.');
@@ -247,10 +260,15 @@ export function createImageGenerationService(dependencies: ImageGenerationServic
           images: saved.map((image) => ({ key: image!.key, filename: image!.filename, caption: image!.caption, mimeType: image!.mimeType, width: image!.width, height: image!.height, storageKey: image!.storageKey, createdAt: image!.createdAt })),
           provider: { durationMs: generated?.durationMs ?? 0, costUsd: existing.some(Boolean) ? null : generated?.costUsd ?? null },
         });
+        executionSucceeded = true;
         await idempotency.complete(identity, requestHash, leaseOwner, durable, new Date(now()).toISOString());
         return projectReplay(durable);
       } catch (error) {
-        try { await idempotency.release(identity, requestHash, leaseOwner); } catch (releaseError) { throw new AggregateError([error, releaseError], 'Image generation failed and its idempotency claim could not be released.'); }
+        if (!executionSucceeded) {
+          const failure = { code: 'IMAGE_GENERATION_FAILED', message: 'Image generation execution failed.', retryable: false };
+          const terminalized = await idempotency.fail(identity, requestHash, leaseOwner, failure, new Date(now()).toISOString()).then(() => true, () => false);
+          if (terminalized) throw new ImageGenerationIdempotencyError('IMAGE_IDEMPOTENCY_FAILED', failure.message, failure.retryable);
+        }
         throw error;
       } finally {
         stopRenewal();

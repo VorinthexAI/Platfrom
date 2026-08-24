@@ -336,7 +336,7 @@ test("optimistically manages Places status, favorites, bulk actions, and filters
   expect(workspace).toContain('setPlaceStatusFilter(checked ? "visited" : "all")');
   expect(workspace).toContain('>Search history</Button>');
   expect(workspace).toContain('height="full" onOpenChange={(open) =>');
-  expect(workspace).toContain('getContentHistory(queryClient, contentContext, undefined)');
+  expect(workspace).toContain('getUserSearchHistory(queryClient, contentContext)');
   expect(workspace).toContain('deleteContentSearchHistory(item.normalizedQuery)');
   expect(workspace).toContain('onLongPress={() => handleTablePlaceLongPress(place.key)}');
   expect(workspace).toContain('>Mark as visited</BottomSheetItem>');

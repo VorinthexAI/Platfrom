@@ -2,6 +2,7 @@ import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { BottomSheet } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
 import { SearchHistoryPill } from "@vorinthex/shared/ui/search-history-pill";
+import { Skeleton } from "@vorinthex/shared/ui/skeleton";
 
 import type { ContentSearchHistoryItem } from "@/lib/content-client";
 import { fonts, palette, spacing } from "@/theme/tokens";
@@ -29,7 +30,7 @@ export function SearchHistorySheet({ error, history, loading, onClose, onOpenCha
     >
       <ScrollView contentContainerStyle={[styles.list, !loading && history.length === 0 && styles.emptyContent]} showsVerticalScrollIndicator={false} style={styles.scroll}>
         {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
-        {loading ? <View accessibilityLabel="Loading search history" accessibilityRole="progressbar" style={styles.skeletons}>{Array.from({ length: 3 }, (_, index) => <View key={index} style={styles.skeleton} />)}</View> : null}
+        {loading ? <View accessibilityLabel="Loading search history" accessibilityRole="progressbar" style={styles.skeletons}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={styles.skeleton} />)}</View> : null}
         {!loading && history.length === 0 && !error ? <Text style={styles.empty}>No searches saved yet.</Text> : null}
         {!loading ? history.map((item) => <SearchHistoryPill count={item.usageCount} disabled={removingQuery === item.normalizedQuery} key={item.normalizedQuery} onPress={() => onSelect(item)} onRemove={() => { if (!removingQuery) onRemove(item); }} query={item.query} removing={removingQuery === item.normalizedQuery} />) : null}
       </ScrollView>

@@ -7,7 +7,7 @@ import { inboxCategorySchema } from './classification';
 const key = z.string().cuid();
 const text = z.string().trim().min(1);
 const address = z.string().email();
-export const emailArchiveDocumentSchema = documentSchema.extend({ coverImageKey: key.optional() });
+export const emailArchiveDocumentSchema = documentSchema;
 
 export const emailAttachmentRefSchema = z.object({
   type: z.enum(['document', 'image']),
@@ -28,7 +28,7 @@ const threadDataSchema = z.object({
   lastMessageAt: z.string().datetime(),
   snippet: z.string().optional(),
   category: z.enum(['primary', 'updates', 'promotions', 'social', 'forums', 'other']).optional(),
-  unread: z.boolean().optional(),
+  unread: z.boolean().default(false),
   starred: z.boolean().optional(),
   labels: z.array(z.string()).optional(),
   latestFrom: address.optional(),
@@ -43,6 +43,7 @@ const messageDataSchema = z.object({
   threadKey: key,
   providerMessageId: text,
   from: address,
+  fromName: z.string().trim().min(1).max(320).optional(),
   to: z.array(address),
   cc: z.array(address).optional(),
   bcc: z.array(address).optional(),
@@ -57,7 +58,7 @@ const messageDataSchema = z.object({
   parentMessageId: z.string().optional(),
   replyDepth: z.number().int().nonnegative().default(0),
   labels: z.array(z.string()).optional(),
-  unread: z.boolean().optional(),
+  unread: z.boolean().default(false),
   direction: z.enum(['inbound', 'outbound']),
   sentAt: z.string().datetime(),
   hasAttachments: z.boolean(),
@@ -68,7 +69,7 @@ const messageDataSchema = z.object({
 
 const draftCommonSchema = z.object({
   generatedContent: text,
-  finalContent: text.optional(),
+  finalContent: z.string().max(50_000).optional(),
   providerMessageId: text.optional(),
   sendStartedAt: z.string().datetime().optional(),
   sendLeaseToken: z.string().uuid().optional(),
@@ -80,8 +81,11 @@ const draftCommonSchema = z.object({
 
 const replyDraftDataSchema = draftCommonSchema.extend({
   variant: z.literal('reply').default('reply'),
+  replyMode: z.enum(['reply', 'reply_all']).default('reply'),
   threadKey: key,
   messageKey: key,
+  to: z.array(address).max(50).default([]),
+  cc: z.array(address).max(50).default([]),
   emailWritingProfileKey: key.optional(),
 }).strict();
 
@@ -91,16 +95,17 @@ const newDraftDataSchema = draftCommonSchema.extend({
   to: z.array(address).min(1).max(50),
   cc: z.array(address).max(50).optional(),
   bcc: z.array(address).max(50).optional(),
-  subject: text.max(998),
+  subject: z.string().max(998),
 }).strict();
 
 export const emailToneDataSchema = z.object({
   identifier: z.string().trim().min(1).max(255).optional(),
   slug: z.enum(['casual', 'formal', 'concise', 'warm', 'direct']).optional(),
   name: text.max(255),
-  description: text.max(10_000).optional(),
   instruction: text.max(20_000),
 }).strict();
+const legacyEmailToneDataSchema = emailToneDataSchema.extend({ description: text.max(10_000).optional() }).strict();
+const legacyEmailTonePayloadSchema = envelope('mail-tone', legacyEmailToneDataSchema);
 
 export const emailReplyContextDataSchema = z.object({
   name: text.max(255),
@@ -165,7 +170,7 @@ export type EmailThread = ArchiveRecord<z.infer<typeof threadDataSchema>>;
 export type EmailMessage = ArchiveRecord<z.infer<typeof messageDataSchema>>;
 export type EmailDraft = ArchiveRecord<z.infer<typeof replyDraftDataSchema> | z.infer<typeof newDraftDataSchema>>;
 export type EmailDraftCreate = (z.infer<typeof replyDraftDataSchema> | z.infer<typeof newDraftDataSchema>) & { scopeKey: string; embedding: number[] };
-export type EmailTone = ArchiveRecord<z.infer<typeof emailToneDataSchema>> & { coverImageKey?: string; isFavorite: boolean };
+export type EmailTone = ArchiveRecord<z.infer<typeof emailToneDataSchema>> & { isFavorite: boolean };
 export type EmailReplyContext = ArchiveRecord<z.infer<typeof emailReplyContextDataSchema>>;
 export type EmailWritingProfile = ArchiveRecord<z.infer<typeof writingProfileDataSchema>>;
 export type EmailContact = ArchiveRecord<z.infer<typeof contactDataSchema>>;
@@ -191,18 +196,18 @@ export const decodeEmailDraft = (document: unknown) => decode<z.infer<typeof rep
 export const decodeEmailReplyContext = (document: unknown) => decode<z.infer<typeof emailReplyContextDataSchema>>(document, emailReplyContextPayloadSchema);
 export function encodeEmailToneContent(tone: z.input<typeof emailToneDataSchema>) {
   const value = emailToneDataSchema.parse(tone);
-  return `# ${value.name}\n\n<!-- vorinthex-mail-tone ${JSON.stringify({ version: 1, ...(value.identifier ? { identifier: value.identifier } : {}), ...(value.slug ? { slug: value.slug } : {}) })} -->\n\n${value.description ?? ''}\n\n## Instruction\n\n${value.instruction}`;
+  return `# ${value.name}\n\n<!-- vorinthex-mail-tone ${JSON.stringify({ version: 1, ...(value.identifier ? { identifier: value.identifier } : {}), ...(value.slug ? { slug: value.slug } : {}) })} -->\n\n## Instruction\n\n${value.instruction}`;
 }
 
 export function decodeEmailToneContent(content: string) {
-  const match = /^# ([^\n]+)\n\n<!-- vorinthex-mail-tone (\{[^\n]+\}) -->\n\n([\s\S]*?)\n\n## Instruction\n\n([\s\S]+)$/u.exec(content.trim());
+  const match = /^# ([^\n]+)\n\n<!-- vorinthex-mail-tone (\{[^\n]+\}) -->\n\n(?:[\s\S]*?\n\n)?## Instruction\n\n([\s\S]+)$/u.exec(content.trim());
   if (!match) throw new Error('Invalid editable email tone document');
   const { version: _version, ...metadata } = z.object({ version: z.literal(1), identifier: emailToneDataSchema.shape.identifier, slug: emailToneDataSchema.shape.slug }).strict().parse(JSON.parse(match[2]!));
-  return emailToneDataSchema.parse({ ...metadata, name: match[1]!.trim(), description: match[3]!.trim() || undefined, instruction: match[4]!.trim() });
+  return emailToneDataSchema.parse({ ...metadata, name: match[1]!.trim(), instruction: match[3]!.trim() });
 }
 
-export function emailToneSemanticText(tone: Pick<z.infer<typeof emailToneDataSchema>, 'name' | 'description'>) {
-  return [tone.name, tone.description].filter((value): value is string => Boolean(value)).join('\n\n');
+export function emailToneSemanticText(tone: Pick<z.infer<typeof emailToneDataSchema>, 'name'>) {
+  return tone.name;
 }
 
 export function prepareEmailToneDocument(document: Document, tone: z.infer<typeof emailToneDataSchema>, embedding: z.input<typeof currentEmbeddingSchema>) {
@@ -244,10 +249,16 @@ export function prepareEmailReplyContextDocument(document: Document, note: z.inf
 export function decodeEmailTone(document: unknown): EmailTone {
   const parsedDocument = emailArchiveDocumentSchema.parse(document);
   try {
-    return { ...decode<z.infer<typeof emailToneDataSchema>>(parsedDocument, emailTonePayloadSchema), ...(parsedDocument.coverImageKey ? { coverImageKey: parsedDocument.coverImageKey } : {}), isFavorite: parsedDocument.isFavorite };
+    return { ...decode<z.infer<typeof emailToneDataSchema>>(parsedDocument, emailTonePayloadSchema), isFavorite: parsedDocument.isFavorite };
   } catch {
-    const data = decodeEmailToneContent(parsedDocument.content);
-    return { ...data, key: parsedDocument.key, scopeKey: parsedDocument.scopeKey, embedding: parsedDocument.embedding, ...(parsedDocument.coverImageKey ? { coverImageKey: parsedDocument.coverImageKey } : {}), isFavorite: parsedDocument.isFavorite, createdAt: parsedDocument.createdAt, updatedAt: parsedDocument.updatedAt };
+    let data: z.infer<typeof emailToneDataSchema>;
+    try {
+      const legacy = decode<z.infer<typeof legacyEmailToneDataSchema>>(parsedDocument, legacyEmailTonePayloadSchema);
+      data = emailToneDataSchema.parse({ identifier: legacy.identifier, slug: legacy.slug, name: legacy.name, instruction: legacy.instruction });
+    } catch {
+      data = decodeEmailToneContent(parsedDocument.content);
+    }
+    return { ...data, key: parsedDocument.key, scopeKey: parsedDocument.scopeKey, embedding: parsedDocument.embedding, isFavorite: parsedDocument.isFavorite, createdAt: parsedDocument.createdAt, updatedAt: parsedDocument.updatedAt };
   }
 }
 export const decodeEmailWritingProfile = (document: unknown) => decode<z.infer<typeof writingProfileDataSchema>>(document, emailWritingProfilePayloadSchema);
@@ -264,6 +275,7 @@ export function archiveDocument(input: {
   createdAt: string;
   updatedAt: string;
   mutationPolicy?: 'user' | 'system-only';
+  developmentFixtureIdentifier?: string;
 }): Document {
   const { mutationPolicy = 'system-only', ...document } = input;
   return documentSchema.parse({ ...document, content: JSON.stringify(document.payload), mutationPolicy, isFavorite: false });

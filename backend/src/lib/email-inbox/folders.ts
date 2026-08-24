@@ -24,11 +24,20 @@ export async function ensureMailFolders(database: { query(query: string, bindVar
   const keys = mailFolderKeys(scopeKey);
   const embedding = Array(EMBEDDING_DIMENSIONS).fill(0);
   for (const item of definitions) {
-    await database.query(`
-      UPSERT { scopeKey: @scopeKey, purpose: @purpose }
-        INSERT MERGE({ _key: @key, scopeKey: @scopeKey, name: @name, purpose: @purpose, mutationPolicy: "system-container", embedding: @embedding, isFavorite: false, createdAt: @at, updatedAt: @at }, @parentFolderKey == null ? {} : { parentFolderKey: @parentFolderKey })
-        UPDATE { parentFolderKey: @parentFolderKey, name: @name, mutationPolicy: "system-container", updatedAt: OLD.name == @name && OLD.parentFolderKey == @parentFolderKey && OLD.mutationPolicy == "system-container" ? OLD.updatedAt : @at } IN folders OPTIONS { keepNull: false }
-    `, { key: keys[item.kind], scopeKey, purpose: item.purpose, parentFolderKey: item.kind === 'root' ? null : keys.root, name: item.name, embedding, at });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        await database.query(`
+          UPSERT { scopeKey: @scopeKey, purpose: @purpose }
+            INSERT MERGE({ _key: @key, scopeKey: @scopeKey, name: @name, purpose: @purpose, mutationPolicy: "system-container", embedding: @embedding, isFavorite: false, createdAt: @at, updatedAt: @at }, @parentFolderKey == null ? {} : { parentFolderKey: @parentFolderKey })
+            UPDATE { parentFolderKey: @parentFolderKey, name: @name, mutationPolicy: "system-container", updatedAt: OLD.name == @name && OLD.parentFolderKey == @parentFolderKey && OLD.mutationPolicy == "system-container" ? OLD.updatedAt : @at } IN folders OPTIONS { keepNull: false }
+        `, { key: keys[item.kind], scopeKey, purpose: item.purpose, parentFolderKey: item.kind === 'root' ? null : keys.root, name: item.name, embedding, at });
+        break;
+      } catch (error) {
+        const conflict = error && typeof error === 'object' && (('errorNum' in error && error.errorNum === 1200) || ('code' in error && error.code === 409));
+        if (!conflict || attempt === 2) throw error;
+        await new Promise((resolve) => setTimeout(resolve, (attempt + 1) * 5));
+      }
+    }
   }
   return keys;
 }

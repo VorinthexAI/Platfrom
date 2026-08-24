@@ -10,7 +10,9 @@ import type { BookService } from '@/lib/books/service';
 import type { UserHiddenService } from '@/lib/user-hiddens/service';
 import type { GalleryOperationContext, GalleryOperationName } from '@/lib/gallery/operations';
 import type { ImageGenerationService } from '@/lib/image-generation/service';
-import { archiveCapabilities, ascendCapabilities, compassCapabilities, hiddenListCapability, signalCapabilities } from './service-capabilities';
+import type { AppSearchService } from '@/lib/app-search/service';
+import type { AppTransformationService } from '@/lib/app-transformation/service';
+import { appEnhanceCapability, appSearchCapability, appTranslateCapability, archiveCapabilities, ascendCapabilities, compassCapabilities, hiddenListCapability, signalCapabilities } from './service-capabilities';
 import { galleryAssistantCapabilities, galleryAssistantCapabilityNames } from './gallery-capabilities';
 
 export const assistantSurfaceSchema = z.enum(['knowledge-workspace', 'media-workspace', 'book-workspace', 'travel-workspace', 'signal-workspace']);
@@ -44,12 +46,16 @@ export interface AssistantCapabilityContext {
   userHiddens?: UserHiddenService;
   gallery?: Partial<Record<GalleryOperationName, (input: unknown, context: GalleryOperationContext) => Promise<unknown>>>;
   images?: ImageGenerationService;
+  appSearch?: AppSearchService;
+  appTransformation?: AppTransformationService;
 }
+
+export type MutationWorkspace = 'archive' | 'gallery' | 'signal' | 'compass' | 'ascend';
 
 export interface AssistantCapability<Schema extends z.ZodTypeAny = z.ZodTypeAny> {
   inputSchema: Schema;
   definition: CoreChatToolDefinition;
-  mutationWorkspace?: 'archive' | 'gallery' | 'signal' | 'compass' | 'ascend';
+  mutationWorkspace?: MutationWorkspace | ((input: unknown) => MutationWorkspace | undefined);
   execute(input: unknown, context: AssistantCapabilityContext): Promise<AssistantCapabilityResult>;
 }
 
@@ -74,40 +80,10 @@ export class AssistantCapabilityRegistry {
   }
 }
 
-const searchInputSchema = z.object({ query: z.string().trim().min(1).max(8_000) }).strict();
 const writeNoteInputSchema = z.object({
   content: z.string().max(40_000),
   message: z.string().trim().min(1).max(500),
 }).strict();
-const searchKnowledgeCapability: AssistantCapability = {
-  inputSchema: searchInputSchema,
-  definition: {
-    name: 'knowledge.search',
-    description: 'Search knowledge the user is authorized to access. Use this before answering requests that depend on stored notes or documents.',
-    inputSchema: {
-      type: 'object',
-      properties: { query: { type: 'string', minLength: 1, maxLength: 8_000 } },
-      required: ['query'],
-      additionalProperties: false,
-    },
-  },
-  async execute(rawInput, context) {
-    const input = searchInputSchema.parse(rawInput);
-    const output = await (context.executeContent ?? runContentTool)('document.search', {
-      scopeKey: context.domain.runtimeScopeKey,
-      query: input.query,
-      ...(context.folderKey ? { sources: [{ type: 'folder' as const, folderKeys: [context.folderKey], includeDescendants: true }] } : {}),
-      topK: 8,
-      include: ['snippet'],
-    }, context.domain, context.contentDependencies);
-    return {
-      kind: 'continue',
-      result: output,
-      sources: output.results.map(({ documentKey, name }) => ({ documentKey, name })),
-    };
-  },
-};
-
 const writeNoteCapability: AssistantCapability = {
   inputSchema: writeNoteInputSchema,
   definition: {
@@ -131,13 +107,12 @@ const writeNoteCapability: AssistantCapability = {
 
 export const defaultAssistantCapabilityRegistry = new AssistantCapabilityRegistry();
 
-for (const item of [hiddenListCapability, ...archiveCapabilities, ...galleryAssistantCapabilities, ...compassCapabilities, ...signalCapabilities, ...ascendCapabilities]) defaultAssistantCapabilityRegistry.register(item);
+for (const item of [appSearchCapability, appEnhanceCapability, appTranslateCapability, hiddenListCapability, ...archiveCapabilities, ...galleryAssistantCapabilities, ...compassCapabilities, ...signalCapabilities, ...ascendCapabilities]) defaultAssistantCapabilityRegistry.register(item);
 
 defaultAssistantCapabilityRegistry
-  .register(searchKnowledgeCapability)
   .register(writeNoteCapability)
-  .registerSurface('knowledge-workspace', ['content.hidden.list', ...archiveCapabilities.map(({ definition }) => definition.name), 'knowledge.search', 'note.write'])
-  .registerSurface('media-workspace', ['content.hidden.list', ...galleryAssistantCapabilityNames])
-  .registerSurface('book-workspace', ascendCapabilities.map(({ definition }) => definition.name))
-  .registerSurface('travel-workspace', compassCapabilities.map(({ definition }) => definition.name))
-  .registerSurface('signal-workspace', signalCapabilities.map(({ definition }) => definition.name));
+  .registerSurface('knowledge-workspace', ['app.search', 'app.enhance', 'app.translate', 'content.hidden.list', ...archiveCapabilities.map(({ definition }) => definition.name), 'note.write'])
+  .registerSurface('media-workspace', ['app.search', 'content.hidden.list', ...galleryAssistantCapabilityNames])
+  .registerSurface('book-workspace', ['app.search', ...ascendCapabilities.map(({ definition }) => definition.name)])
+  .registerSurface('travel-workspace', ['app.search', ...compassCapabilities.filter(({ definition }) => !['country.search', 'place.search', 'trip.search'].includes(definition.name)).map(({ definition }) => definition.name)])
+  .registerSurface('signal-workspace', ['app.search', 'app.enhance', 'app.translate', ...signalCapabilities.filter(({ definition }) => !['inbox.search', 'email.tone.search'].includes(definition.name)).map(({ definition }) => definition.name)]);

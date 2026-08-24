@@ -17,4 +17,11 @@ describe('managed mail folders', () => {
     expect(calls[0]?.bindVars?.name).toBe('Signal');
     expect(calls.slice(1, 6).every(({ bindVars }) => bindVars?.parentFolderKey === first.root)).toBe(true);
   });
+
+  test('retries transient Arango write conflicts during concurrent initialization', async () => {
+    let calls = 0;
+    const database = { async query() { calls += 1; if (calls === 1) throw Object.assign(new Error('conflict'), { errorNum: 1200 }); return {}; } };
+    await expect(ensureMailFolders(database, scopeKey)).resolves.toEqual(mailFolderKeys(scopeKey));
+    expect(calls).toBe(7);
+  });
 });

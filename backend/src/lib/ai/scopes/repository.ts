@@ -83,6 +83,8 @@ export function createScopeRepository(
         await ensureGeneratedDocumentFolders(database, created.key);
         const { ensureMailFolders } = await import('@/lib/email-inbox/folders');
         await ensureMailFolders(database, created.key);
+        const { createEmailRepository } = await import('@/lib/email-inbox/repository');
+         await createEmailRepository(database as never).initializeTones(created.key);
         return created;
       } catch (error) {
         if (isArangoUniqueConstraintError(error)) {

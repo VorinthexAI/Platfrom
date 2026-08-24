@@ -173,12 +173,12 @@ describe('scope repository', () => {
   test('exactly decodes default and custom Markdown tones before hard-cleaning every dependent and storage object', async () => {
     const scopeKey = newId();
     const timestamp = '2026-08-23T00:00:00.000Z';
-    const toneDocument = (name: string, data: { identifier?: string; slug?: 'warm'; name: string; description: string; instruction: string }, revision: string) => {
+    const toneDocument = (name: string, data: { identifier?: string; slug?: 'warm'; name: string; instruction: string }, revision: string) => {
       const document = archiveDocument({ key: newId(), scopeKey, folderKey: mailFolderKeys(scopeKey).tones, name, payload: emailTonePayloadSchema.parse({ version: 1, kind: 'mail-tone', data }), embedding: Array(EMBEDDING_DIMENSIONS).fill(0), createdAt: timestamp, updatedAt: timestamp, mutationPolicy: 'user' });
       return { ...document, key: undefined, _key: document.key, _rev: revision, content: encodeEmailToneContent(data), storageKey: `${name}.md`, sourceStorageKeys: [`${name}-source`], speechStorageKeys: [`${name}-speech`] };
     };
-    const defaults = toneDocument('Warm', { slug: 'warm', name: 'Warm', description: 'Friendly.', instruction: 'Sound human.' }, 'default-revision');
-    const custom = toneDocument('Measured', { identifier: newId(), name: 'Measured', description: 'Steady.', instruction: 'Be precise.' }, 'custom-revision');
+    const defaults = toneDocument('Warm', { slug: 'warm', name: 'Warm', instruction: 'Sound human.' }, 'default-revision');
+    const custom = toneDocument('Measured', { identifier: newId(), name: 'Measured', instruction: 'Be precise.' }, 'custom-revision');
     let teardown: { query: string; bindVars: Record<string, any> } | undefined;
     const database: ScopesDatabase = {
       collection: () => ({ document: async () => ({ _key: scopeKey, organizationKey: newId(), slug: 'scope', name: 'Scope', summary: 'Summary', description: null, position: 1, level: 1, embedding: [] }), save: async () => ({}), update: async () => ({}), remove: async () => ({}) }),
@@ -235,6 +235,34 @@ describe('scope repository', () => {
     expect((await repository.listScopes(organizationKey)).map((scope) => scope.slug)).toEqual(['command', 'core']);
     expect(await repository.getScopeByKey(core.key)).toEqual(resummarized);
     await expect(repository.createScope(input())).rejects.toBeInstanceOf(DuplicateScopeSlugError);
+  });
+
+  test('seeds exact default tones without provider work after scope persistence', async () => {
+    const { fake, stores } = createFakeDb();
+    const query = fake.query.bind(fake);
+    const seeded: Record<string, any>[] = [];
+    fake.query = async (text, bindVars = {}) => {
+      if (bindVars.document) seeded.push(bindVars.document as Record<string, any>);
+      return query(text, bindVars);
+    };
+    let embeddingCalls = 0;
+    const repository = createScopeRepository(fake, async (text) => {
+      embeddingCalls += 1;
+      if (embeddingCalls > 1) throw new Error('injected embedding provider failure');
+      return generateEmbedding(text);
+    });
+
+    const created = await repository.createScope(input({ slug: 'durable', name: 'Durable' }));
+
+    expect(stores.get(SCOPES_COLLECTION)?.has(created.key)).toBe(true);
+    expect(embeddingCalls).toBe(1);
+    expect(seeded.map(({ name }) => name)).toEqual(['Casual', 'Formal', 'Direct']);
+    expect(seeded.map(({ embedding }) => embedding)).toEqual(Array.from({ length: 3 }, () => Array(EMBEDDING_DIMENSIONS).fill(0)));
+    expect(seeded.map(({ content }) => content)).toEqual([
+      encodeEmailToneContent({ slug: 'casual', name: 'Casual', instruction: 'Use conversational language, natural contractions, and an approachable tone.' }),
+      encodeEmailToneContent({ slug: 'formal', name: 'Formal', instruction: 'Use professional language, complete sentences, and a clear conventional structure.' }),
+      encodeEmailToneContent({ slug: 'direct', name: 'Direct', instruction: 'Lead with the answer or action and avoid hedging.' }),
+    ]);
   });
 
   test('enforces organization boundaries, strict parents, and cycles', async () => {

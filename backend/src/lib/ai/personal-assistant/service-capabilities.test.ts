@@ -13,16 +13,16 @@ const domain = {
 } as unknown as ToolContext;
 
 const expected: Array<[AssistantSurface, string[]]> = [
-  ['knowledge-workspace', ['content.hidden.list', 'folder.hide', 'folder.reveal', 'document.hide', 'document.reveal', 'folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy', 'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.enhance', 'document.translate', 'document.list-versions', 'document.restore-version', 'document.download', 'content.neighbors', 'content.search-history.delete', 'knowledge.search', 'note.write']],
-  ['travel-workspace', ['country.search', 'place.find', 'place.search', 'place.list', 'place.reference.generate', 'place.reference.list', 'trip.list', 'trip.search', 'trip.guide.generate', 'trip.guide.list', 'trip.create', 'trip.update', 'trip.delete', 'trip.attachment.set', 'place.guide.find', 'place.find-city', 'place.find-children', 'place.create', 'place.update', 'place.delete', 'place.open']],
-  ['signal-workspace', ['email.overview', 'inbox.sync', 'inbox.sort', 'inbox.subscribe', 'inbox.update', 'email.thread.read', 'email.thread.mark-read', 'email.thread.favorite', 'email.thread.trash', 'email.similar.find', 'email.message.translate', 'email.message.translation.list', 'email.message.summarize', 'email.message.summary.list', 'email.draft.create', 'email.draft.compose', 'email.tone.list', 'email.tone.create', 'email.tone.update', 'email.reply-context.list', 'email.reply-context.create', 'email.reply-context.update', 'email.reply-context.delete', 'email.draft.update', 'email.draft.assign', 'email.draft.send', 'email.disconnect']],
+  ['knowledge-workspace', ['app.enhance', 'app.translate', 'content.hidden.list', 'folder.hide', 'folder.reveal', 'document.hide', 'document.reveal', 'folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy', 'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.list-versions', 'document.restore-version', 'document.download', 'content.neighbors', 'content.search-history.delete', 'note.write']],
+  ['travel-workspace', ['place.find', 'place.list', 'place.reference.generate', 'place.reference.list', 'trip.list', 'trip.guide.generate', 'trip.guide.list', 'trip.create', 'trip.update', 'trip.delete', 'trip.attachment.set', 'place.guide.find', 'place.find-city', 'place.find-children', 'place.create', 'place.update', 'place.delete', 'place.open']],
+  ['signal-workspace', ['app.enhance', 'app.translate', 'email.overview', 'inbox.sync', 'inbox.update', 'email.thread.read', 'email.thread.read-state', 'email.thread.favorite', 'email.thread.trash', 'email.trash.clear', 'email.similar.find', 'email.message.translation.list', 'email.message.translation.delete', 'email.message.summarize', 'email.message.summary.list', 'email.message.summary.delete', 'email.draft.create', 'email.draft.compose', 'email.tone.list', 'email.tone.create', 'email.tone.update', 'email.tone.delete', 'email.reply-context.list', 'email.reply-context.create', 'email.reply-context.update', 'email.reply-context.delete', 'email.draft.update', 'email.draft.assign', 'email.draft.send', 'email.draft.delete']],
   ['book-workspace', ['book.list', 'book.detail', 'book.chapter.progress', 'book.create']],
 ];
 
 describe('personal assistant service capabilities', () => {
   test.each(expected)('registers the model-safe %s tool table', (surface, names) => {
     const capabilities = defaultAssistantCapabilityRegistry.resolve(surface);
-    expect(capabilities.map(({ definition }) => definition.name)).toEqual(names);
+    expect(capabilities.map(({ definition }) => definition.name)).toEqual(['app.search', ...names]);
     for (const { definition } of capabilities) {
       const properties = definition.inputSchema.properties as Record<string, unknown> | undefined;
       expect(properties).not.toHaveProperty('scopeKey');
@@ -40,7 +40,7 @@ describe('personal assistant service capabilities', () => {
 
   test('keeps inbox and tone mutation model inputs strict and non-empty', () => {
     const signal = defaultAssistantCapabilityRegistry.resolve('signal-workspace');
-    for (const name of ['inbox.update', 'email.tone.create', 'email.tone.update', 'email.reply-context.list', 'email.reply-context.create', 'email.reply-context.update', 'email.reply-context.delete']) {
+    for (const name of ['inbox.update', 'email.thread.favorite', 'email.thread.read-state', 'email.thread.trash', 'email.trash.clear', 'email.tone.create', 'email.tone.update', 'email.tone.delete', 'email.reply-context.list', 'email.reply-context.create', 'email.reply-context.update', 'email.reply-context.delete', 'email.draft.delete']) {
       const schema = signal.find(({ definition }) => definition.name === name)!.inputSchema;
       expect(() => schema.parse({ forged: true })).toThrow();
     }
@@ -49,6 +49,15 @@ describe('personal assistant service capabilities', () => {
     expect(() => signal.find(({ definition }) => definition.name === 'email.reply-context.update')!.inputSchema.parse({ noteKey: newId() })).toThrow();
     const noteKey = newId();
     expect(() => signal.find(({ definition }) => definition.name === 'email.reply-context.delete')!.inputSchema.parse({ noteKeys: [noteKey, noteKey] })).toThrow();
+  });
+
+  test('keeps the unified email overview tool strict and unambiguous', () => {
+    const schema = defaultAssistantCapabilityRegistry.resolve('signal-workspace').find(({ definition }) => definition.name === 'email.overview')!.inputSchema;
+    const connectorKey = newId();
+    expect(schema.parse({ connectorKey, readState: 'read', facets: ['urgent', 'favorite'] })).toEqual({ connectorKey, readState: 'read', facets: ['urgent', 'favorite'] });
+    expect(() => schema.parse({ connectorKey, filter: 'all', readState: 'read', facets: ['urgent'] })).toThrow();
+    expect(() => schema.parse({ connectorKey, readState: 'read', facets: ['invalid'] })).toThrow();
+    expect(() => schema.parse({ connectorKey, readState: 'read', facets: [], unknown: true })).toThrow();
   });
 
   test('rejects untrusted city context and inactive membership before canonical city lookup', async () => {
@@ -90,24 +99,28 @@ describe('personal assistant service capabilities', () => {
     const countries: any = { search: async (...args: unknown[]) => { calls.push(['countries.search', ...args]); return {}; } };
     const email: any = {
       overview: async (...args: unknown[]) => { calls.push(['email.overview', ...args]); return {}; },
+      searchInboxes: async (...args: unknown[]) => { calls.push(['email.searchInboxes', ...args]); return {}; },
+      searchTones: async (...args: unknown[]) => { calls.push(['email.searchTones', ...args]); return {}; },
       sync: async (...args: unknown[]) => { calls.push(['email.sync', ...args]); return {}; },
-      sort: async (...args: unknown[]) => { calls.push(['email.sort', ...args]); return {}; },
-      subscribe: async (...args: unknown[]) => { calls.push(['email.subscribe', ...args]); return {}; },
       updateInbox: async (...args: unknown[]) => { calls.push(['email.updateInbox', ...args]); return {}; },
       threadForTool: async (...args: unknown[]) => { calls.push(['email.threadForTool', ...args]); return {}; },
-      markRead: async (...args: unknown[]) => { calls.push(['email.markRead', ...args]); return {}; },
+      setReadState: async (...args: unknown[]) => { calls.push(['email.setReadState', ...args]); return {}; },
       setFavorite: async (...args: unknown[]) => { calls.push(['email.setFavorite', ...args]); return {}; },
       trashThread: async (...args: unknown[]) => { calls.push(['email.trashThread', ...args]); return {}; },
+      clearTrash: async (...args: unknown[]) => { calls.push(['email.clearTrash', ...args]); return {}; },
       findSimilar: async (...args: unknown[]) => { calls.push(['email.findSimilar', ...args]); return {}; },
       translateMessage: async (...args: unknown[]) => { calls.push(['email.translateMessage', ...args]); return { messageKey: threadKey, language: 'French', version: generated }; },
       listMessageTranslations: async (...args: unknown[]) => { calls.push(['email.listMessageTranslations', ...args]); return { messageKey: threadKey, versions: [generated] }; },
+      deleteMessageTranslations: async (...args: unknown[]) => { calls.push(['email.deleteMessageTranslations', ...args]); return { messageKey: threadKey, deletedKeys: [generated.key] }; },
       summarizeMessage: async (...args: unknown[]) => { calls.push(['email.summarizeMessage', ...args]); return { messageKey: threadKey, text: 'Summary.', summary: generated }; },
       listMessageSummaries: async (...args: unknown[]) => { calls.push(['email.listMessageSummaries', ...args]); return { messageKey: threadKey, summaries: [generated] }; },
+      deleteMessageSummaries: async (...args: unknown[]) => { calls.push(['email.deleteMessageSummaries', ...args]); return { messageKey: threadKey, deletedKeys: [generated.key] }; },
       draft: async (...args: unknown[]) => { calls.push(['email.draft', ...args]); return {}; },
       draftNew: async (...args: unknown[]) => { calls.push(['email.draftNew', ...args]); return {}; },
       tones: async (...args: unknown[]) => { calls.push(['email.tones', ...args]); return {}; },
       createTone: async (...args: unknown[]) => { calls.push(['email.createTone', ...args]); return {}; },
       updateTone: async (...args: unknown[]) => { calls.push(['email.updateTone', ...args]); return {}; },
+      deleteTone: async (...args: unknown[]) => { calls.push(['email.deleteTone', ...args]); return {}; },
       listReplyContext: async (...args: unknown[]) => { calls.push(['email.listReplyContext', ...args]); return {}; },
       createReplyContext: async (...args: unknown[]) => { calls.push(['email.createReplyContext', ...args]); return {}; },
       updateReplyContext: async (...args: unknown[]) => { calls.push(['email.updateReplyContext', ...args]); return {}; },
@@ -115,7 +128,7 @@ describe('personal assistant service capabilities', () => {
       updateDraft: async (...args: unknown[]) => { calls.push(['email.updateDraft', ...args]); return {}; },
       assignDraft: async (...args: unknown[]) => { calls.push(['email.assignDraft', ...args]); return {}; },
       sendDraft: async (...args: unknown[]) => { calls.push(['email.sendDraft', ...args]); return {}; },
-      disconnect: async (...args: unknown[]) => { calls.push(['email.disconnect', ...args]); return {}; },
+      deleteDraft: async (...args: unknown[]) => { calls.push(['email.deleteDraft', ...args]); return {}; },
     };
     const books: any = {
       overview: async (...args: unknown[]) => { calls.push(['books.overview', ...args]); return {}; },
@@ -126,11 +139,8 @@ describe('personal assistant service capabilities', () => {
     const context: any = { domain, requestKey: 'request-1', travel, countries, email, books };
     const cases: Array<[AssistantSurface, string, unknown]> = [
       ['travel-workspace', 'place.list', {}],
-      ['travel-workspace', 'country.search', { query: 'Japan' }],
-      ['travel-workspace', 'place.search', { query: 'warm islands' }],
       ['travel-workspace', 'place.find', { query: 'Japan' }],
       ['travel-workspace', 'trip.list', {}],
-      ['travel-workspace', 'trip.search', { query: 'spring in Japan' }],
       ['travel-workspace', 'trip.create', { name: 'Japan', placeKeys: [scopeKey] }],
       ['travel-workspace', 'trip.update', { tripKey: scopeKey, isFavorite: true }],
       ['travel-workspace', 'trip.delete', { tripKey: scopeKey }],
@@ -142,25 +152,27 @@ describe('personal assistant service capabilities', () => {
       ['travel-workspace', 'place.delete', { placeKey: scopeKey }],
       ['travel-workspace', 'place.find-children', { childrenRequestToken: 'children-token' }],
       ['travel-workspace', 'place.open', { name: 'Japan', countryCode: 'JP' }],
-      ['signal-workspace', 'email.overview', { connectorKey: threadKey }],
+      ['signal-workspace', 'email.overview', { connectorKey: threadKey, readState: 'unread', facets: ['urgent', 'favorite'] }],
       ['signal-workspace', 'inbox.sync', { connectorKey: threadKey }],
-      ['signal-workspace', 'inbox.sort', { connectorKey: threadKey }],
-      ['signal-workspace', 'inbox.subscribe', { connectorKey: threadKey }],
       ['signal-workspace', 'inbox.update', { connectorKey: threadKey, isFavorite: true }],
       ['signal-workspace', 'email.thread.read', { threadKey }],
-      ['signal-workspace', 'email.thread.mark-read', { threadKey }],
+      ['signal-workspace', 'email.thread.read-state', { threadKey, isRead: true }],
       ['signal-workspace', 'email.thread.favorite', { threadKey, isFavorite: true }],
       ['signal-workspace', 'email.thread.trash', { threadKey }],
-      ['signal-workspace', 'email.similar.find', { messageKey: threadKey, categories: ['Urgent'] }],
-      ['signal-workspace', 'email.message.translate', { messageKey: threadKey, targetLanguage: 'French' }],
+      ['signal-workspace', 'email.trash.clear', { connectorKey: threadKey }],
+      ['signal-workspace', 'email.similar.find', { messageKey: threadKey }],
+      ['signal-workspace', 'app.translate', { messageKey: threadKey, targetLanguage: 'French' }],
       ['signal-workspace', 'email.message.translation.list', { messageKey: threadKey }],
+      ['signal-workspace', 'email.message.translation.delete', { messageKey: threadKey, translationKeys: [generated.key] }],
       ['signal-workspace', 'email.message.summarize', { messageKey: threadKey }],
       ['signal-workspace', 'email.message.summary.list', { messageKey: threadKey }],
+      ['signal-workspace', 'email.message.summary.delete', { messageKey: threadKey, summaryKeys: [generated.key] }],
       ['signal-workspace', 'email.draft.create', { threadKey, tone: 'warm' }],
-      ['signal-workspace', 'email.draft.compose', { to: ['person@example.com'], subject: 'Hello', tone: 'direct' }],
+      ['signal-workspace', 'email.draft.compose', { to: ['person@example.com'], generationMode: 'preserve', subject: '', authoredBody: '' }],
       ['signal-workspace', 'email.tone.list', {}],
       ['signal-workspace', 'email.tone.create', { name: 'Calm', instruction: 'Write calmly.' }],
       ['signal-workspace', 'email.tone.update', { toneKey: threadKey, instruction: 'Write very calmly.' }],
+      ['signal-workspace', 'email.tone.delete', { toneKey: threadKey }],
       ['signal-workspace', 'email.reply-context.list', {}],
       ['signal-workspace', 'email.reply-context.create', { name: 'Availability', text: 'Never promise Friday meetings.' }],
       ['signal-workspace', 'email.reply-context.update', { noteKey: threadKey, text: 'Never promise Monday meetings.' }],
@@ -168,7 +180,7 @@ describe('personal assistant service capabilities', () => {
       ['signal-workspace', 'email.draft.update', { draftKey, finalContent: 'Thanks.' }],
       ['signal-workspace', 'email.draft.assign', { draftKey, connectorKey: threadKey }],
       ['signal-workspace', 'email.draft.send', { draftKey }],
-      ['signal-workspace', 'email.disconnect', { connectorKey: threadKey }],
+      ['signal-workspace', 'email.draft.delete', { draftKey }],
       ['book-workspace', 'book.list', {}],
       ['book-workspace', 'book.detail', { bookKey }],
       ['book-workspace', 'book.chapter.progress', { bookKey, chapterKey, progressSeconds: 30, isCompleted: false }],
@@ -176,19 +188,16 @@ describe('personal assistant service capabilities', () => {
     ];
     const outputs = new Map<string, unknown>();
     for (const [surface, capabilityName, input] of cases) outputs.set(capabilityName, await defaultAssistantCapabilityRegistry.resolve(surface).find(({ definition }) => definition.name === capabilityName)!.execute(input, context));
-    for (const name of ['email.message.translate', 'email.message.translation.list', 'email.message.summarize', 'email.message.summary.list']) expect(JSON.stringify(outputs.get(name))).not.toMatch(/embedding|chunkEmbeddings|scopeKey|createdByKey/);
+    for (const name of ['app.translate', 'email.message.translation.list', 'email.message.translation.delete', 'email.message.summarize', 'email.message.summary.list', 'email.message.summary.delete']) expect(JSON.stringify(outputs.get(name))).not.toMatch(/embedding|chunkEmbeddings|scopeKey|createdByKey/);
     const serviceContext = { organizationKey, scopeKey };
     const actor = { userKey, ...serviceContext };
     expect(calls).toContainEqual(['travel.overview', serviceContext, userKey]);
-    expect(calls).toContainEqual(['travel.searchPlaces', { ...serviceContext, query: 'warm islands', recordHistory: true }, userKey, { signal: undefined, timeoutMs: undefined }]);
     expect(calls).toContainEqual(['travel.findPlaces', { ...serviceContext, query: 'Japan' }, userKey, { signal: undefined, timeoutMs: undefined }]);
     expect(calls).toContainEqual(['travel.listTrips', serviceContext, userKey]);
-    expect(calls).toContainEqual(['travel.searchTrips', { ...serviceContext, query: 'spring in Japan', recordHistory: true }, userKey, { signal: undefined, timeoutMs: undefined }]);
     expect(calls).toContainEqual(['travel.createTrip', { ...serviceContext, name: 'Japan', placeKeys: [scopeKey], idempotencyKey: 'request-1:trip.create' }, userKey]);
     expect(calls).toContainEqual(['travel.updateTrip', { ...serviceContext, tripKey: scopeKey, isFavorite: true }, userKey]);
     expect(calls).toContainEqual(['travel.deleteTrip', { ...serviceContext, tripKey: scopeKey }, userKey]);
     expect(calls).toContainEqual(['travel.setTripAttachments', { ...serviceContext, tripKey: scopeKey, attachments: [{ type: 'collection', key: scopeKey }] }, userKey]);
-    expect(calls).toContainEqual(['countries.search', { organizationKey, query: 'Japan' }, userKey, { signal: undefined, timeoutMs: undefined }]);
     expect(calls).toContainEqual(['travel.findPlaceGuide', { ...serviceContext, query: 'Japan' }, userKey, { signal: undefined, timeoutMs: undefined }]);
     expect(calls).toContainEqual(['travel.findCity', { ...serviceContext, city: 'Tokyo', country: { name: 'Japan', code: 'JP', continent: 'Asia', lat: 36.2, lon: 138.2 } }, userKey, { signal: undefined, timeoutMs: undefined }]);
     expect(calls).toContainEqual(['travel.createPlace', { ...serviceContext, name: 'Japan', summary: 'Island country.', countryCode: 'JP', latitude: 36.2, longitude: 138.2, imageRequestToken: 'token' }, userKey, { signal: undefined, timeoutMs: undefined }]);
@@ -196,17 +205,18 @@ describe('personal assistant service capabilities', () => {
     expect(calls).toContainEqual(['travel.deletePlace', { ...serviceContext, placeKey: scopeKey }, userKey]);
     expect(calls).toContainEqual(['travel.findChildren', { ...serviceContext, childrenRequestToken: 'children-token' }, userKey, { signal: undefined, timeoutMs: undefined }]);
     expect(calls).toContainEqual(['travel.openPlace', { ...serviceContext, name: 'Japan', countryCode: 'JP' }, userKey]);
-    expect(calls).toContainEqual(['email.overview', actor, { connectorKey: threadKey }]);
+    expect(calls).toContainEqual(['email.overview', actor, { connectorKey: threadKey, readState: 'unread', facets: ['urgent', 'favorite'] }]);
     expect(calls).toContainEqual(['email.sync', actor, threadKey]);
-    expect(calls).toContainEqual(['email.sort', actor, { connectorKey: threadKey }]);
-    expect(calls).toContainEqual(['email.subscribe', actor, threadKey]);
     expect(calls).toContainEqual(['email.threadForTool', actor, threadKey, undefined]);
-    expect(calls).toContainEqual(['email.markRead', actor, threadKey]);
-    expect(calls).toContainEqual(['email.assignDraft', actor, { draftKey, connectorKey: threadKey }]);
+    expect(calls).toContainEqual(['email.setReadState', actor, { threadKey, isRead: true }, false, 'request-1']);
+    expect(calls).toContainEqual(['email.clearTrash', actor, { connectorKey: threadKey }, false, undefined, 'request-1']);
+    expect(calls).toContainEqual(['email.assignDraft', actor, { draftKey, connectorKey: threadKey }, 'request-1']);
+    expect(calls).toContainEqual(['email.deleteTone', actor, { toneKey: threadKey }, 'request-1']);
+    expect(calls).toContainEqual(['email.deleteDraft', actor, { draftKey }, 'request-1']);
     expect(calls).toContainEqual(['email.listReplyContext', actor]);
-    expect(calls).toContainEqual(['email.createReplyContext', actor, { name: 'Availability', text: 'Never promise Friday meetings.' }]);
-    expect(calls).toContainEqual(['email.updateReplyContext', actor, { noteKey: threadKey, text: 'Never promise Monday meetings.' }]);
-    expect(calls).toContainEqual(['email.deleteReplyContext', actor, { noteKeys: [threadKey] }]);
+    expect(calls).toContainEqual(['email.createReplyContext', actor, { name: 'Availability', text: 'Never promise Friday meetings.' }, 'request-1']);
+    expect(calls).toContainEqual(['email.updateReplyContext', actor, { noteKey: threadKey, text: 'Never promise Monday meetings.' }, 'request-1']);
+    expect(calls).toContainEqual(['email.deleteReplyContext', actor, { noteKeys: [threadKey] }, 'request-1']);
     expect(calls).toContainEqual(['books.progress', bookKey, chapterKey, { ...serviceContext, progressSeconds: 30, isCompleted: false }, userKey]);
     expect(calls).toContainEqual(['books.create', { ...serviceContext, generationRequestKey: 'request-1', topic: 'Decision making', goal: 'Decide well', audience: 'Leaders', tone: 'Clear', length: 'short', language: 'English' }, userKey]);
     expect(JSON.stringify(calls)).not.toContain((domain.principal as Extract<ToolContext['principal'], { kind: 'member' }>).userOrganization.key);
@@ -230,15 +240,18 @@ describe('personal assistant service capabilities', () => {
     expect(capabilities.find(({ definition }) => definition.name === 'trip.list')?.mutationWorkspace).toBeUndefined();
     expect(capabilities.find(({ definition }) => definition.name === 'trip.guide.list')?.mutationWorkspace).toBeUndefined();
     expect(capabilities.find(({ definition }) => definition.name === 'place.reference.list')?.mutationWorkspace).toBeUndefined();
-    expect(capabilities.find(({ definition }) => definition.name === 'place.search')?.mutationWorkspace).toBeUndefined();
+    expect(capabilities.find(({ definition }) => definition.name === 'place.search')).toBeUndefined();
     expect(capabilities.find(({ definition }) => definition.name === 'place.find')?.mutationWorkspace).toBeUndefined();
-    expect(capabilities.find(({ definition }) => definition.name === 'trip.search')?.mutationWorkspace).toBeUndefined();
+    expect(capabilities.find(({ definition }) => definition.name === 'trip.search')).toBeUndefined();
   });
 
-  test('marks only reply-context mutations as Signal workspace changes', () => {
+  test('marks Signal mutations, including permanent Trash clearing, as workspace changes', () => {
     const capabilities = defaultAssistantCapabilityRegistry.resolve('signal-workspace');
+    expect(capabilities).toHaveLength(31);
     expect(capabilities.find(({ definition }) => definition.name === 'email.reply-context.list')?.mutationWorkspace).toBeUndefined();
-    for (const name of ['email.reply-context.create', 'email.reply-context.update', 'email.reply-context.delete']) expect(capabilities.find(({ definition }) => definition.name === name)?.mutationWorkspace).toBe('signal');
+    for (const name of ['inbox.sync', 'inbox.update', 'email.thread.read-state', 'email.thread.favorite', 'email.thread.trash', 'email.trash.clear', 'email.message.translation.delete', 'email.message.summarize', 'email.message.summary.delete', 'email.draft.create', 'email.draft.compose', 'email.draft.update', 'email.draft.assign', 'email.draft.send', 'email.draft.delete', 'email.tone.create', 'email.tone.update', 'email.tone.delete', 'email.reply-context.create', 'email.reply-context.update', 'email.reply-context.delete']) expect(capabilities.find(({ definition }) => definition.name === name)?.mutationWorkspace).toBe('signal');
+    const translateMutation = capabilities.find(({ definition }) => definition.name === 'app.translate')?.mutationWorkspace;
+    expect(typeof translateMutation === 'function' ? translateMutation({ messageKey: newId(), targetLanguage: 'French' }) : undefined).toBe('signal');
   });
 
   test('injects runtime scope and stable request idempotency into Archive mutations', async () => {
@@ -328,18 +341,18 @@ describe('personal assistant service capabilities', () => {
     const calls: unknown[] = [];
     const currentDocumentKey = newId();
     const executeContent = async (...args: unknown[]) => { calls.push(args); return {}; };
-    const translate = defaultAssistantCapabilityRegistry.resolve('knowledge-workspace').find(({ definition }) => definition.name === 'document.translate')!;
+    const translate = defaultAssistantCapabilityRegistry.resolve('knowledge-workspace').find(({ definition }) => definition.name === 'app.translate')!;
     await translate.execute({ targetLanguage: 'Spanish' }, { domain, currentDocumentKey, requestKey: 'translate-request', executeContent: executeContent as any });
     expect(calls).toEqual([
-      ['document.translate', { documentKeys: [currentDocumentKey], targetLanguage: 'Spanish', preserveFormatting: true, mode: 'replace', idempotencyKey: 'translate-request:document.translate' }, domain, undefined],
+      ['document.translate', { documentKeys: [currentDocumentKey], targetLanguage: 'Spanish', sourceLanguage: undefined, instruction: undefined, preserveFormatting: true, mode: 'replace', idempotencyKey: 'translate-request:app.translate' }, domain, undefined],
     ]);
   });
 
   test('passes any requested target language through unchanged', async () => {
     const calls: unknown[] = [];
     const currentDocumentKey = newId();
-    const translate = defaultAssistantCapabilityRegistry.resolve('knowledge-workspace').find(({ definition }) => definition.name === 'document.translate')!;
+    const translate = defaultAssistantCapabilityRegistry.resolve('knowledge-workspace').find(({ definition }) => definition.name === 'app.translate')!;
     await translate.execute({ targetLanguage: 'Welsh' }, { domain, currentDocumentKey, requestKey: 'welsh-request', executeContent: (async (...args: unknown[]) => { calls.push(args); return {}; }) as any });
-    expect(calls[0]).toEqual(['document.translate', { documentKeys: [currentDocumentKey], targetLanguage: 'Welsh', preserveFormatting: true, mode: 'replace', idempotencyKey: 'welsh-request:document.translate' }, domain, undefined]);
+    expect(calls[0]).toEqual(['document.translate', { documentKeys: [currentDocumentKey], targetLanguage: 'Welsh', sourceLanguage: undefined, instruction: undefined, preserveFormatting: true, mode: 'replace', idempotencyKey: 'welsh-request:app.translate' }, domain, undefined]);
   });
 });

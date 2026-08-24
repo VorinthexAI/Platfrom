@@ -8,6 +8,8 @@ import {
   isGuestPersonalIdentity,
 } from './personal-auth-context.node';
 
+const provisioningSource = await Bun.file(new URL('./personal-auth-context.node.ts', import.meta.url)).text();
+
 describe('default personal containers', () => {
   test('builds schema-valid owned root containers in the personal scope', () => {
     const now = '2026-08-11T12:00:00.000Z';
@@ -51,5 +53,11 @@ describe('default personal containers', () => {
     expect(isGuestPersonalIdentity({ guestBootstrapSecretHash: 'hash' })).toBe(true);
     expect(isGuestPersonalIdentity({ guestBootstrapSecretHash: null })).toBe(false);
     expect(isGuestPersonalIdentity({})).toBe(false);
+  });
+
+  test('initializes canonical mail tones for new and existing personal contexts', () => {
+    expect(provisioningSource).toContain('async function ensurePersonalMailDefaults(scopeKey: string)');
+    expect(provisioningSource).toContain('createEmailRepository(db).initializeTones(scopeKey)');
+    expect(provisioningSource.match(/ensurePersonalMailDefaults\(/g)).toHaveLength(3);
   });
 });

@@ -151,8 +151,8 @@ function querySchemaForPath(path: string, method: string) {
       code: z.string().min(1).optional(), state: z.string().min(1).optional(), error: z.string().optional(), scope: z.string().optional(), authuser: z.string().optional(), prompt: z.string().optional(), hd: z.string().optional(), error_description: z.string().optional(), error_subtype: z.string().optional(),
     });
   }
-  if (apiPath === '/email/connectors/gmail/callback') {
-    return strictObject({ code: z.string().min(1).optional(), state: z.string().min(1), error: z.string().optional(), scope: z.string().optional(), authuser: z.string().optional(), prompt: z.string().optional(), hd: z.string().optional(), error_description: z.string().optional(), error_subtype: z.string().optional() });
+  if (/^\/email\/connectors\/(gmail|outlook)\/callback$/.test(apiPath)) {
+    return strictObject({ code: z.string().min(1).optional(), state: z.string().min(1), error: z.string().optional(), scope: z.string().optional(), authuser: z.string().optional(), prompt: z.string().optional(), hd: z.string().optional(), error_description: z.string().optional(), error_subtype: z.string().optional(), session_state: z.string().optional() });
   }
   if (/^\/founders\/organizations\/[^/]+\/communication\/channels\/[^/]+\/messages$/.test(apiPath)) {
     return strictObject({ limit: z.string().regex(/^\d+$/).optional() });
@@ -181,7 +181,7 @@ export const requireEnvApiKey: MiddlewareHandler = async (c, next) => {
   if (c.req.path.replace(/\/$/, '') === '/api/v1/auth/guest') return next();
   // OAuth providers redirect here directly and cannot attach application headers.
   if (/^\/api\/v1\/auth\/mobile\/oauth\/(google|apple)\/callback\/?$/.test(c.req.path)) return next();
-  if (c.req.path.replace(/\/$/, '') === '/api/v1/email/connectors/gmail/callback') return next();
+  if (/^\/api\/v1\/email\/connectors\/(gmail|outlook)\/callback\/?$/.test(c.req.path)) return next();
   const expected = process.env.API_KEY;
   if (!expected) {
     if (process.env.NODE_ENV === 'production') {

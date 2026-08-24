@@ -26,7 +26,8 @@ import { assistantIconSource, capabilityIconSource } from "@/data/capability-ico
 import { COUNTRIES, type CountryProperties } from "@/lib/globe-data";
 import { normalizeCapturedJpeg, type CapturedImage } from "@/lib/captured-image";
 import { deleteContentDocument, deleteContentSearchHistory, getContentContext, type ContentFolder, type ContentSearchHistoryItem } from "@/lib/content-client";
-import { contentQueryKeys, getContentFolderTree, getContentHistory, promoteCachedContentHistory, removeCachedContentHistory } from "@/lib/content-query-cache";
+import { contentQueryKeys, getContentFolderTree } from "@/lib/content-query-cache";
+import { getUserSearchHistory, promoteCachedUserSearchHistory, removeCachedUserSearchHistory, userSearchHistoryQueryKey } from "@/lib/user-search-history-cache";
 import { deleteGalleryImages, fetchGalleryOverview, fetchGalleryUploadStatus, isManagedGalleryCollection, uploadGalleryImages, type GalleryCollection } from "@/lib/gallery-client";
 import {
   askTravelAssistant,
@@ -455,7 +456,7 @@ export function TravelWorkspace({ initialTripKey, openTripAssets: shouldOpenTrip
     const controller = new AbortController();
     const timer = setTimeout(() => {
       const request = tableTab === "places" ? searchPlaces(query, controller.signal, true) : searchTrips(query, controller.signal, true);
-      void request.then(() => queryClient.invalidateQueries({ queryKey: contentQueryKeys.history(contentContext, undefined), exact: true, refetchType: "none" })).catch(() => undefined);
+      void request.catch(() => undefined);
     }, PLACE_SEARCH_HISTORY_DEBOUNCE_MS);
     return () => { clearTimeout(timer); controller.abort(); };
   }, [contentContext, placeTableQuery, queryClient, rootView, tableTab]);
@@ -742,7 +743,7 @@ export function TravelWorkspace({ initialTripKey, openTripAssets: shouldOpenTrip
 
   async function openPlaceSearchHistory() {
     const generation = ++placeHistoryGeneration.current;
-    const key = contentQueryKeys.history(contentContext, undefined);
+    const key = userSearchHistoryQueryKey(contentContext.userKey);
     const cached = queryClient.getQueryData<ContentSearchHistoryItem[]>(key);
     const invalidated = queryClient.getQueryState(key)?.isInvalidated === true;
     setPlaceSearchHistory(cached ?? []);
@@ -752,7 +753,7 @@ export function TravelWorkspace({ initialTripKey, openTripAssets: shouldOpenTrip
     delaySheetTransition(() => setPlaceHistoryOpen(true));
     if (cached && !invalidated) return;
     try {
-      const loaded = await getContentHistory(queryClient, contentContext, undefined);
+      const loaded = await getUserSearchHistory(queryClient, contentContext);
       if (generation === placeHistoryGeneration.current) setPlaceSearchHistory(loaded);
     } catch (error) {
       if (generation === placeHistoryGeneration.current) showToast({ title: errorMessage(error, "Search history could not be loaded."), duration: 2_000 });
@@ -767,7 +768,7 @@ export function TravelWorkspace({ initialTripKey, openTripAssets: shouldOpenTrip
   }
 
   function applyPlaceHistoryQuery(item: ContentSearchHistoryItem) {
-    const promoted = promoteCachedContentHistory(queryClient, contentContext, undefined, item);
+    const promoted = promoteCachedUserSearchHistory(queryClient, contentContext, item);
     setPlaceSearchHistory((current) => [promoted, ...current.filter(({ normalizedQuery }) => normalizedQuery !== item.normalizedQuery)]);
     setPlaceTableQuery(item.query.slice(0, 500));
     closePlaceSearchHistory();
@@ -775,13 +776,13 @@ export function TravelWorkspace({ initialTripKey, openTripAssets: shouldOpenTrip
 
   async function removePlaceHistoryQuery(item: ContentSearchHistoryItem) {
     if (removingPlaceHistoryQuery) return;
-    const previous = removeCachedContentHistory(queryClient, contentContext, undefined, item.normalizedQuery);
+    const previous = removeCachedUserSearchHistory(queryClient, contentContext, item.normalizedQuery);
     setPlaceSearchHistory((current) => current.filter(({ normalizedQuery }) => normalizedQuery !== item.normalizedQuery));
     setRemovingPlaceHistoryQuery(item.normalizedQuery);
     try {
       await deleteContentSearchHistory(item.normalizedQuery);
     } catch (error) {
-      queryClient.setQueryData(contentQueryKeys.history(contentContext, undefined), previous);
+      queryClient.setQueryData(userSearchHistoryQueryKey(contentContext.userKey), previous);
       setPlaceSearchHistory(previous);
       showToast({ title: errorMessage(error, "The search could not be removed."), duration: 2_000 });
     } finally {

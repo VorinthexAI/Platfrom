@@ -27,6 +27,36 @@ test("uses the root header spacing rhythm inside folders", () => {
   expect(source.match(/<View style=\{styles\.rootActions\}>/g)).toHaveLength(2);
 });
 
+test("keeps root and folder tab-to-content spacing aligned", () => {
+  expect(source).toContain("archiveFolder: { flexGrow: 1, gap: spacing.md }");
+  expect(source).toContain("rootContent: { gap: spacing.md }");
+});
+
+test("locks the Archive viewport only for resolved empty tabs", () => {
+  expect(source).toContain("const archiveEmpty = workspaceMode");
+  expect(source).toContain("scrollEnabled={scrollEnabled}");
+  expect(source).toContain('scrollEnabled={!archiveEmpty}');
+});
+
+test("uses folder cards while root and nested folder searches load", () => {
+  const folderSearchSkeleton = /folderContentTab === "folders" \? <View accessibilityLabel="Loading folder search results" accessibilityRole="progressbar" style=\{\[styles\.rootFolderGrid,[^}]+\}>\{Array\.from\(\{ length: 3 \}, \(_, index\) => <Skeleton key=\{index\} style=\{\[styles\.rootFolderCard, styles\.skeletonCard, \{ width: archiveCardSize, height: archiveCardSize \}]} \/>\)}<\/View>/g;
+  expect(source.match(folderSearchSkeleton)).toHaveLength(2);
+});
+
+test("keeps folder empty states hidden until the visible location resolves", () => {
+  expect(source).toContain('archiveLocationLoading && (folderContentTab !== "folders" || filteredRootFolders.length === 0)');
+  expect(source).toContain('archiveLocationLoading && (folderContentTab !== "folders" || filteredFolders.length === 0)');
+  expect(source).not.toContain("archiveFolderTreeReady");
+});
+
+test("uses canonical app search for Archive folder and document pickers", () => {
+  expect(source).toContain("const [librarySearchResults, setLibrarySearchResults] = useState<ContentSearchResponse>()");
+  expect(source).toContain("searchContentMatches(normalized, controller.signal, undefined, false)");
+  expect(source).toContain('activeSheet !== "folders" && activeSheet !== "documents"');
+  expect(source).toContain('accessibilityLabel="Loading Archive folder picker search"');
+  expect(source).toContain('accessibilityLabel="Loading Archive document picker search"');
+});
+
 test("appends processing documents and generated versions as full-pill skeletons", () => {
   expect(source).toContain('import { Skeleton } from "@vorinthex/shared/ui/skeleton";');
   const processingButton = source.slice(source.indexOf("function ProcessingDocumentButton"), source.indexOf("export function KnowledgeWorkspace"));
@@ -35,6 +65,7 @@ test("appends processing documents and generated versions as full-pill skeletons
   expect(source).toContain('setVersions((history) => [...history.filter(({ key }) => key !== version.key), version])');
   const versionList = source.slice(source.indexOf('{versions.map((version)'), source.indexOf('</View>\n        ) : null}', source.indexOf('{versions.map((version)')));
   expect(versionList.indexOf('{versions.map((version)')).toBeLessThan(versionList.indexOf('<Skeleton accessibilityLabel={pendingDocumentVersionLabel}'));
+  expect(source).toContain('versionSkeleton: { width: "100%", height: 42, borderRadius: 999 }');
   const rootDocuments = source.indexOf('<View style={styles.rootDocuments}>');
   const rootPills = source.indexOf('rootTabDocuments.map', rootDocuments);
   expect(rootPills).toBeLessThan(source.indexOf('visibleUploadBatch.map', rootPills));
@@ -45,6 +76,11 @@ test("appends processing documents and generated versions as full-pill skeletons
 
 test("keeps transformation sheets dismissible and background errors out of the editor", () => {
   expect(source).toContain('documentActionLoading === "enhance" || documentActionLoading === "translate"');
+  expect(source).toContain('>{documentTransformation === "enhance" ? "Enhance" : "Translate"}</Button>');
+  const openTransformation = source.slice(source.indexOf("const openDocumentTransformation"), source.indexOf("const updateTranslationTargetLanguage"));
+  expect(openTransformation.indexOf("setLoadingVersions(true)")).toBeLessThan(openTransformation.indexOf('pushSheet("versions")'));
+  expect(openTransformation.indexOf('pushSheet("versions")')).toBeLessThan(openTransformation.indexOf("await listContentDocumentVersions"));
+  expect(openTransformation.indexOf('pushSheet("versions")')).toBeLessThan(openTransformation.indexOf("requestAnimationFrame"));
   expect(source).toContain('await openDocumentVersion(version, generated.text, true)');
   expect(source).toContain('if (propagateError) throw cause');
   expect(source).toContain('if (activeSheetRef.current === "versions") setSheetError(message);\n      else notify(message);');
@@ -192,9 +228,8 @@ test("maps stale single and bulk conflicts to exact favorite notices", () => {
 
 test("makes post-archive invalidation best effort", () => {
   expect(source).toContain('void queryClient.invalidateQueries({ queryKey: contentQueryKeys.locations(contentContext), refetchType: "none" }).catch(() => undefined)');
-  expect(source).toContain('void invalidateContentHistories(queryClient, contentContext, [currentFolder?.key, undefined]).catch(() => undefined)');
   expect(source).toContain('void invalidateContentLocations(queryClient, contentContext, [target.folderKey]).catch(() => undefined)');
-  expect(source).toContain('void invalidateContentHistories(queryClient, contentContext, [target.folderKey, undefined]).catch(() => undefined)');
+  expect(source).not.toContain("invalidateContentHistories");
 });
 
 test("retains known favorite state on provisional selected search documents", () => {

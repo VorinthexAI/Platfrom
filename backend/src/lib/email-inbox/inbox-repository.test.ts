@@ -37,4 +37,16 @@ describe('inbox repository', () => {
     expect(call?.query).toContain('existing._rev == @expectedRevision');
     expect(call?.bindVars).toMatchObject({ overwrite: true, expectedRevision: 'inbox-before-oauth' });
   });
+
+  test('semantic search applies organization, scope, connector, and score boundaries before ranking', async () => {
+    const scopeKey = newId();
+    const connectorKey = newId();
+    let call: { query: string; bindVars: Record<string, unknown> } | undefined;
+    const database = { query: async (query: string, bindVars: Record<string, unknown>) => { call = { query, bindVars }; return { all: async () => [] }; }, collection: () => ({}) };
+    expect(await createInboxRepository(database as never).search('organization', scopeKey, [connectorKey], embedding, '  Leadership  ', 0.55, 10)).toEqual([]);
+    expect(call?.query).toContain('inbox.organizationKey == @organizationKey && inbox.scopeKey == @scopeKey && inbox.connectorKey IN @connectorKeys');
+    expect(call?.query).toContain('COSINE_SIMILARITY(inbox.embedding, @embedding)');
+    expect(call?.query).toContain('SORT direct DESC, score DESC');
+    expect(call?.bindVars).toMatchObject({ organizationKey: 'organization', scopeKey, connectorKeys: [connectorKey], query: 'leadership', minimumScore: 0.55, limit: 10 });
+  });
 });

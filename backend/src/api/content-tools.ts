@@ -8,6 +8,7 @@ import { strictObject } from './validation';
 
 const bodySchema = strictObject({ organizationKey: z.string().trim().min(1), scopeKey: z.string().cuid(), input: z.unknown() });
 const delayedDevTools = new Set(['folder.list', 'document.list', 'content.search-history.list']);
+const internalOnlyTools = new Set(['document.enhance', 'document.translate']);
 type ContentToolRunner = (input: Parameters<typeof runAuthenticatedContentTool>[0], options: RunAuthenticatedContentToolOptions) => Promise<unknown>;
 export interface ContentToolHandlerDependencies {
   getIdentity?: typeof getAuthIdentity;
@@ -21,7 +22,7 @@ function contentStatus(code: ContentErrorCode): 400 | 401 | 403 | 404 | 409 | 50
   if (code === 'CONTENT_UNAUTHORIZED') return 401;
   if (code === 'CONTENT_FORBIDDEN') return 403;
   if (code === 'CONTENT_NOT_FOUND') return 404;
-  if (code === 'CONTENT_CONFLICT' || code === 'DOCUMENT_VERSION_CONFLICT' || code === 'FOLDER_CYCLE_DETECTED' || code === 'FOLDER_NOT_EMPTY' || code === 'FOLDER_ARCHIVED' || code === 'FOLDER_MOVE_FORBIDDEN' || code === 'DOCUMENT_ARCHIVED') return 409;
+  if (code === 'CONTENT_CONFLICT' || code.startsWith('CONTENT_IDEMPOTENCY_') || code === 'DOCUMENT_VERSION_CONFLICT' || code === 'FOLDER_CYCLE_DETECTED' || code === 'FOLDER_NOT_EMPTY' || code === 'FOLDER_ARCHIVED' || code === 'FOLDER_MOVE_FORBIDDEN' || code === 'DOCUMENT_ARCHIVED') return 409;
   if (code === 'DOCUMENT_PROCESSING_FAILED' || code === 'DOCUMENT_EXTRACTION_FAILED' || code === 'DOCUMENT_EMBEDDING_FAILED' || code === 'DOCUMENT_INSERT_FAILED' || code === 'DOCUMENT_SPEECH_FAILED' || code === 'CONTENT_SEARCH_EMBEDDING_FAILED') return 500;
   return 400;
 }
@@ -85,6 +86,7 @@ export function createContentToolHandler(dependencies: ContentToolHandlerDepende
     let tool: z.infer<typeof contentToolNameSchema>;
     try { tool = contentToolNameSchema.parse(rawTool); }
     catch { return c.json(responseError(new ContentError('CONTENT_INVALID_INPUT', 'Unknown Content tool.', rawTool || 'unknown', { action: 'parse' })), 400); }
+    if (internalOnlyTools.has(tool)) return c.json(responseError(new ContentError('CONTENT_INVALID_INPUT', 'Use the unified app transformation API.', tool, { action: 'parse' })), 400);
     const identity = await (dependencies.getIdentity ?? getAuthIdentity)(c);
     if (!identity) return c.json(responseError(new ContentError('CONTENT_UNAUTHORIZED', 'Authentication required.', tool, { action: 'authorization' })), 401);
     if (identity.identityType !== 'user') return c.json(responseError(new ContentError('CONTENT_FORBIDDEN', 'A user session is required.', tool, { action: 'authorization' })), 403);

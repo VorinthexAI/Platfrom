@@ -22,6 +22,7 @@ mock.module("./api-client", () => ({
     if (failure?.transport) throw { response: { data: { success: false, error: { message: failure.message, code: failure.code } } } };
     if (failure) return { data: { success: false, error: { message: failure.message, code: failure.code } } };
     if (responses.has(path)) return { data: { success: true, data: responses.get(path) } };
+    if (path === "/app/search") return { data: { success: true, data: { query: body.query, groups: [{ collectionSlug: "images", results: [] }] } } };
     if (path === "/gallery/uploads/presign") return { data: { success: true, data: { uploads: [{ clientKey: "local-image", uploadKey: "upload", imageKey: "image", url: "https://uploads.example/image", headers: { "Content-Type": "image/jpeg" } }] } } };
     if (path === "/gallery/uploads/complete") return { data: { success: true, data: { jobs: [{ key: "upload", imageKey: "image", status: "queued" }] } } };
     if (path === "/gallery/collections/members") return { data: { success: true, data: { owners: [], collaborators: [], viewers: [] } } };
@@ -43,7 +44,7 @@ mock.module("./api-client", () => ({
   } },
 }));
 
-const { activateGalleryShare, createGalleryCollection, createGalleryCollectionHighlight, createGalleryCollectionMemory, createGalleryCollectionShareLink, deleteGalleryCollection, deleteGalleryCollectionDuplicates, deleteGalleryCollectionHighlight, deleteGalleryCollectionMemory, deleteGalleryImages, deleteGallerySubject, fetchGalleryCollectionHighlight, fetchGalleryCollectionMemory, fetchGalleryOverview, filterCollections, filterGalleryShareLinks, filterMediaItems, findGalleryCollectionDuplicates, galleryCollectionSchema, galleryImageSchema, groupGalleryImagesByCreatedDate, isGalleryClientErrorCode, isGalleryCollectionOwned, isGalleryMemoryExhaustion, isManagedGalleryCollection, isManagedGalleryImage, leaveGalleryCollection, listGalleryCollectionHighlights, listGalleryCollectionInvites, listGalleryCollectionMemories, listGalleryCollectionMembers, listGalleryCollectionShareLinks, mergeMediaItems, partitionFavoriteGalleryImages, reconcileGalleryDuplicateDeletion, reconcileGalleryImageDeletion, removeGalleryCollectionMember, resolveGalleryHighlightSlides, respondToGalleryCollectionInvite, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryCollectionMember, updateGalleryCollectionShareLink, updateGalleryImage, uploadGalleryImages } = await import("./gallery-client");
+const { activateGalleryShare, createGalleryCollection, createGalleryCollectionHighlight, createGalleryCollectionMemory, createGalleryCollectionShareLink, deleteGalleryCollection, deleteGalleryCollectionDuplicates, deleteGalleryCollectionHighlight, deleteGalleryCollectionMemory, deleteGalleryImages, deleteGallerySubject, fetchGalleryCollectionHighlight, fetchGalleryCollectionMemory, fetchGalleryOverview, filterGalleryShareLinks, findGalleryCollectionDuplicates, galleryCollectionSchema, galleryImageSchema, groupGalleryImagesByCreatedDate, isGalleryClientErrorCode, isGalleryCollectionOwned, isGalleryMemoryExhaustion, isManagedGalleryCollection, isManagedGalleryImage, leaveGalleryCollection, listGalleryCollectionHighlights, listGalleryCollectionInvites, listGalleryCollectionMemories, listGalleryCollectionMembers, listGalleryCollectionShareLinks, mergeMediaItems, partitionFavoriteGalleryImages, reconcileGalleryDuplicateDeletion, reconcileGalleryImageDeletion, removeGalleryCollectionMember, resolveGalleryHighlightSlides, respondToGalleryCollectionInvite, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryCollectionMember, updateGalleryCollectionShareLink, updateGalleryImage, uploadGalleryImages } = await import("./gallery-client");
 
 beforeEach(() => { calls.splice(0); responses.clear(); failures.clear(); malformed.clear(); });
 
@@ -61,18 +62,6 @@ const collection = (name: string, key: string) => ({
   access: { canRead: true, canContribute: true, canManage: true },
   createdAt: "2026-08-14T00:00:00.000Z",
   updatedAt: "2026-08-14T00:00:00.000Z",
-});
-
-test("filters collections by name without changing their hierarchy", () => {
-  const collections = [collection("Alpine Trips", "trips"), collection("My Images", "default")];
-
-  expect(filterCollections(collections, "alpine")).toEqual([collections[0]]);
-});
-
-test("returns every collection for an empty search", () => {
-  const collections = [collection("Trips", "trips"), collection("My Images", "default")];
-
-  expect(filterCollections(collections, "  ")).toEqual(collections);
 });
 
 test("uses authoritative ownership with a legacy role fallback", () => {
@@ -120,30 +109,6 @@ const image = (key: string, filename: string, caption: string) => ({
   url: `https://images.example/${key}`,
 });
 
-test("matches collection images immediately by caption regardless of case", () => {
-  const items = [image("rain", "one.jpg", "City reflections after rain"), image("coast", "two.jpg", "Open coastal water")];
-
-  expect(filterMediaItems(items, "RAIN")).toEqual([items[0]]);
-});
-
-test("matches collection images by filename", () => {
-  const items = [image("rain", "night-walk.jpg", "City reflections"), image("coast", "shore.jpg", "Open water")];
-
-  expect(filterMediaItems(items, "night-walk")).toEqual([items[0]]);
-});
-
-test("requires every search term to match the same image", () => {
-  const items = [image("rain", "night.jpg", "City reflections after rain"), image("day", "daylight.jpg", "City daylight")];
-
-  expect(filterMediaItems(items, "city rain")).toEqual([items[0]]);
-});
-
-test("returns the full image set for an empty collection search", () => {
-  const items = [image("rain", "night.jpg", "Rain")];
-
-  expect(filterMediaItems(items, "  ")).toBe(items);
-});
-
 test("merges immediate and semantic matches without changing immediate order", () => {
   const exact = image("exact", "exact.jpg", "Exact match");
   const semantic = image("semantic", "semantic.jpg", "Related match");
@@ -166,10 +131,16 @@ test("sends collection-scoped semantic searches through the canonical endpoint",
   await searchGalleryImages({ query: "rain", collectionKey: "collection", recordHistory: false, limit: 50 });
 
   expect(calls).toEqual([{
-    path: "/gallery/images/search",
-    body: { organizationKey: "organization", scopeKey: "scope", query: "rain", collectionKey: "collection", recordHistory: false, limit: 50 },
-    timeout: 240_000,
+    path: "/app/search",
+    body: { organizationKey: "organization", scopeKey: "scope", query: "rain", collectionSlugs: ["images"], recordHistory: false, limit: 50, minimumScore: 0.55, filters: { collectionKey: "collection" } },
+    timeout: 15_000,
   }]);
+});
+
+test("passes image search cancellation to the transport", async () => {
+  const controller = new AbortController();
+  await searchGalleryImages({ query: "rain", recordHistory: false }, controller.signal);
+  expect(calls[0]?.signal).toBe(controller.signal);
 });
 
 test("requests cursor pages of one hundred collection images", async () => {

@@ -70,11 +70,13 @@ test("renders the shared toast viewport inside native mobile sheets", () => {
   expect(mobileToast).toContain("<ToastViewport />");
   expect(mobileSheet).toContain('import { ToastViewport } from "../toast/toast.mobile"');
   expect(mobileSheet).toContain("<ToastViewport />");
+  expect(mobileToast).toContain('viewport: { elevation: 1000');
+  expect(mobileToast).toContain('zIndex: 1000');
 });
 
 test("keeps mobile sheet surfaces and fixed footers above the keyboard", () => {
   expect(mobileSheet).toContain("KeyboardAvoidingView");
-  expect(mobileSheet).toContain('behavior={Platform.OS === "ios" ? "padding" : "height"}');
+  expect(mobileSheet).toContain('behavior={Platform.OS === "ios" ? "padding" : fullHeight ? undefined : "height"}');
   expect(mobileSheet).toMatch(/<KeyboardAvoidingView[\s\S]*?<SheetSurface[\s\S]*?<\/KeyboardAvoidingView>/);
   expect(mobileSheet).toContain("paddingBottom: androidBottomInset");
   expect(mobileSheet).toContain("bottomInset={insets.bottom}");
@@ -106,8 +108,8 @@ test("classifies every full-height sheet workflow explicitly", () => {
   expect(core).toContain('<BottomSheet height="full"');
   expect(switcher).not.toContain("height=");
   expect(travel).toContain('height="full"');
-  expect(email).toContain('height={sheet === "composer" || formSheet ? "full" : undefined}');
-  expect(email).toContain('style={styles.composerScroll}');
+  expect(email).toContain('height={sheet === "trashRoot" || formSheet ? "full" : undefined}');
+  for (const title of ["Recipients", "Write email", "Choose a tone", "Review email"]) expect(email).toMatch(new RegExp(`height="full"[\\s\\S]*?title="${title}"`));
   expect(ascend).toContain('height={sheet === "create" || sheet === "reader" ? "full" : undefined}');
   expect(gallery).toContain('height="full"');
   expect(gallery).toContain('height={activeSheet === "destination" || activeSheet === "imageEdit"');

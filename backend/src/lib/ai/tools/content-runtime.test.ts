@@ -9,6 +9,8 @@ import { chatInputSchema } from '@/lib/ai/providers/types';
 
 const now = '2026-07-22T12:00:00.000Z';
 const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
+const mailEnvelopeKinds = ['mail-thread', 'mail-message', 'mail-reply-draft', 'mail-new-draft', 'mail-tone', 'mail-reply-context', 'mail-writing-profile', 'mail-contact', 'mail-rule'];
+const mailContent = (kind: string) => JSON.stringify({ version: 1, kind, data: {} });
 
 function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
   const organizationKey = newId(), scopeKey = newId(), membershipKey = newId(), userKey = newId();
@@ -103,6 +105,7 @@ describe('Content runtime', () => {
           if (!record) { idempotencyRecords.set(identity.idempotencyKey, { hash }); return { status: 'claimed' }; }
           return record.hash === hash && record.response ? { status: 'replay', response: record.response } : { status: 'conflict' };
         },
+        async start() { return true; },
         async complete(identity: any, hash: string, _leaseOwner: string, response: unknown) { idempotencyRecords.set(identity.idempotencyKey, { hash, response }); },
         async release(identity: any) { idempotencyRecords.delete(identity.idempotencyKey); },
       },
@@ -298,9 +301,46 @@ describe('Content runtime', () => {
 
     const currentVersion = await runContentTool('document.create-version', { documentKeys: [rootKey] }, f.context, { repository: f.repository, embed: async () => embedding });
     expect(f.documents.get(rootKey).currentVersionKey).toBe(currentVersion.results[0]?.data?.version.key);
+    const getVersion = f.repository.getVersion.bind(f.repository);
+    let transactionActive = false;
+    f.repository.getVersion = async (key) => {
+      if (transactionActive) throw new Error('outer version reads are unavailable during a transaction');
+      return getVersion(key);
+    };
+    f.repository.transaction = async (operation) => {
+      transactionActive = true;
+      try { return await operation({ ...f.repository, getVersion }); }
+      finally { transactionActive = false; }
+    };
     await runContentTool('document.restore-version', { restores: [{ documentKey: rootKey, versionKey: versioned.results[0]?.data?.version.key, createBackupVersion: false }] }, f.context, { repository: f.repository, embed: async () => { throw new Error('restore should reuse version semantics'); } });
     expect(f.documents.get(rootKey).currentVersionKey).toBe(versioned.results[0]?.data?.version.key);
     expect(f.documents.get(rootKey).content).toBe('Generated version');
+  });
+
+  test('projects visible root mail support documents without persistence embedding markers', async () => {
+    const f = fixture('viewer');
+    const toneKey = f.addDocument('Concise and direct.');
+    const contextKey = f.addDocument('Never schedule on Friday.');
+    const ordinaryKey = f.addDocument('Ordinary Archive content.');
+    for (const key of [toneKey, contextKey, ordinaryKey]) delete f.documents.get(key).folderKey;
+    Object.assign(f.documents.get(toneKey), { mutationPolicy: 'system-only', emailToneEmbeddingVersion: 1 });
+    Object.assign(f.documents.get(contextKey), { mutationPolicy: 'system-only', emailReplyContextEmbeddingVersion: 1 });
+
+    const listed = await runContentTool('document.list', { scopeKey: f.scopeKey }, f.context, { repository: f.repository });
+    expect(listed.documents.map((document) => document.key).sort()).toEqual([toneKey, contextKey, ordinaryKey].sort());
+    for (const document of listed.documents) {
+      expect(document).not.toHaveProperty('emailToneEmbeddingVersion');
+      expect(document).not.toHaveProperty('emailReplyContextEmbeddingVersion');
+    }
+
+    const found = await runContentTool('document.find', { documentKeys: [toneKey, contextKey, ordinaryKey] }, f.context, { repository: f.repository });
+    expect(found.summary).toMatchObject({ succeeded: 3, failed: 0 });
+    for (const item of found.results) {
+      expect(item.success).toBe(true);
+      expect(item.data?.document).not.toHaveProperty('emailToneEmbeddingVersion');
+      expect(item.data?.document).not.toHaveProperty('emailReplyContextEmbeddingVersion');
+    }
+    expect(found.results.find((item) => item.key === ordinaryKey)).toMatchObject({ success: true, data: { document: { key: ordinaryKey, name: 'Notes' } } });
   });
 
   test('rejects cross-scope document moves instead of performing a partial transfer', async () => {
@@ -1223,7 +1263,9 @@ describe('Content runtime', () => {
         if (record.hash !== hash) return { status: 'conflict' };
         return record.status === 'completed' ? { status: 'replay', response: record.response } : { status: 'pending' };
       },
+      async start() { return true; },
       async complete(identity, hash, _leaseOwner, response) { records.set(identity.idempotencyKey, { hash, status: 'completed', response }); },
+      async fail() {},
       async release(identity) { records.delete(identity.idempotencyKey); },
     };
     const request = { folders: [{ scopeKey: f.scopeKey, name: 'Idempotent' }], idempotencyKey: 'same-key' };
@@ -1233,10 +1275,51 @@ describe('Content runtime', () => {
     const replay = await runContentTool('folder.create', request, f.context, dependencies);
     expect(replay).toEqual(first);
     expect([...f.folders.values()].filter((folder) => folder.name === 'Idempotent')).toHaveLength(1);
-    await expect(runContentTool('folder.create', { ...request, folders: [{ scopeKey: f.scopeKey, name: 'Changed' }] }, f.context, dependencies)).rejects.toMatchObject({ code: 'CONTENT_CONFLICT', retryable: false });
+    await expect(runContentTool('folder.create', { ...request, folders: [{ scopeKey: f.scopeKey, name: 'Changed' }] }, f.context, dependencies)).rejects.toMatchObject({ code: 'CONTENT_IDEMPOTENCY_CONFLICT', retryable: false });
     records.set('pending-key', { hash: 'unused', status: 'pending' });
     const pendingStore: ContentIdempotencyStore = { ...store, async claim() { return { status: 'pending' }; } };
-    await expect(runContentTool('folder.create', { folders: [{ scopeKey: f.scopeKey, name: 'Pending' }], idempotencyKey: 'pending-key' }, f.context, { ...dependencies, idempotency: pendingStore })).rejects.toMatchObject({ code: 'CONTENT_CONFLICT', retryable: true });
+    await expect(runContentTool('folder.create', { folders: [{ scopeKey: f.scopeKey, name: 'Pending' }], idempotencyKey: 'pending-key' }, f.context, { ...dependencies, idempotency: pendingStore })).rejects.toMatchObject({ code: 'CONTENT_IDEMPOTENCY_PENDING', retryable: true });
+  });
+
+  test('terminalizes sanitized post-start failures and replays them without executing again', async () => {
+    const f = fixture('moderator');
+    const documentKey = f.addDocument();
+    let state: 'new' | 'started' | 'failed' = 'new', executions = 0;
+    let storedFailure: { code: string; message: string; retryable: boolean } | undefined;
+    const store: ContentIdempotencyStore = {
+      async claim() { return state === 'failed' ? { status: 'failed', failure: storedFailure! } : { status: 'claimed' }; },
+      async start() { state = 'started'; return true; },
+      async complete() {},
+      async fail(_identity, _hash, _owner, failure) { storedFailure = failure; state = 'failed'; },
+      async release() {},
+    };
+    f.repository.generatedDocumentBindings = async () => { executions += 1; throw new Error('database secret token and stack'); };
+    const request = { updates: [{ documentKey, isFavorite: true }], idempotencyKey: 'business-failure' };
+    const dependencies = { repository: f.repository, idempotency: store };
+    await expect(runContentTool('document.update', request, f.context, dependencies)).rejects.toMatchObject({ code: 'CONTENT_IDEMPOTENCY_FAILED' });
+    await expect(runContentTool('document.update', request, f.context, dependencies)).rejects.toMatchObject({ code: 'CONTENT_IDEMPOTENCY_FAILED' });
+    expect(executions).toBe(1);
+    expect(storedFailure).toEqual({ code: 'CONTENT_CONFLICT', message: 'Content operation failed.', retryable: true });
+    expect(JSON.stringify(storedFailure)).not.toContain('secret');
+  });
+
+  test('leaves started work indeterminate when terminal failure persistence fails', async () => {
+    const f = fixture('moderator');
+    const documentKey = f.addDocument();
+    let state: 'new' | 'started' = 'new', executions = 0;
+    const store: ContentIdempotencyStore = {
+      async claim() { return state === 'started' ? { status: 'indeterminate' } : { status: 'claimed' }; },
+      async start() { state = 'started'; return true; },
+      async complete() {},
+      async fail() { throw new Error('ledger unavailable'); },
+      async release() {},
+    };
+    f.repository.generatedDocumentBindings = async () => { executions += 1; throw new Error('business unavailable'); };
+    const request = { updates: [{ documentKey, isFavorite: true }], idempotencyKey: 'failure-write' };
+    const dependencies = { repository: f.repository, idempotency: store };
+    await expect(runContentTool('document.update', request, f.context, dependencies)).rejects.toMatchObject({ code: 'CONTENT_CONFLICT' });
+    await expect(runContentTool('document.update', request, f.context, dependencies)).rejects.toMatchObject({ code: 'CONTENT_IDEMPOTENCY_INDETERMINATE', retryable: false });
+    expect(executions).toBe(1);
   });
 
   test('does not release or duplicate committed work when ledger completion fails', async () => {
@@ -1244,7 +1327,9 @@ describe('Content runtime', () => {
     let claimed = false, releases = 0;
     const store: ContentIdempotencyStore = {
       async claim() { if (claimed) return { status: 'pending' }; claimed = true; return { status: 'claimed' }; },
+      async start() { return true; },
       async complete() { throw new Error('ledger unavailable'); },
+      async fail() {},
       async release() { releases += 1; },
     };
     const request = { folders: [{ scopeKey: f.scopeKey, name: 'Committed once' }], idempotencyKey: 'completion-failure' };
@@ -1253,6 +1338,126 @@ describe('Content runtime', () => {
     await expect(runContentTool('folder.create', request, f.context, dependencies)).rejects.toMatchObject({ retryable: true });
     expect(releases).toBe(0);
     expect([...f.folders.values()].filter((folder) => folder.name === 'Committed once')).toHaveLength(1);
+  });
+
+  test('releases an owned claim when execution cannot start', async () => {
+    const f = fixture('moderator');
+    let releases = 0, executions = 0;
+    const store: ContentIdempotencyStore = {
+      async claim() { return { status: 'claimed' }; },
+      async start() { return false; },
+      async complete() {},
+      async fail() {},
+      async release() { releases += 1; },
+    };
+    await expect(runContentTool('folder.create', { folders: [{ scopeKey: f.scopeKey, name: 'Not started' }], idempotencyKey: 'start-lost' }, f.context, { repository: f.repository, idempotency: store, embed: async () => { executions += 1; return embedding; } })).rejects.toMatchObject({ code: 'CONTENT_IDEMPOTENCY_PENDING', retryable: true });
+    expect({ releases, executions }).toEqual({ releases: 1, executions: 0 });
+  });
+
+  test('fences direct system-managed mail update, rename, move, copy, delete, and share mutations', async () => {
+    const cases: Array<[string, (f: ReturnType<typeof fixture>, key: string) => [any, any]]> = [
+      ['document.update', (_f, key) => ['document.update', { updates: [{ documentKey: key, isFavorite: true }] }]],
+      ['document.rename', (_f, key) => ['document.rename', { renames: [{ documentKey: key, name: 'Renamed' }] }]],
+      ['document.move', (f, key) => ['document.move', { moves: [{ documentKey: key, targetScopeKey: f.scopeKey }] }]],
+      ['document.copy', (f, key) => ['document.copy', { copies: [{ documentKey: key, targetScopeKey: f.scopeKey }] }]],
+      ['document.delete', (_f, key) => ['document.delete', { documentKeys: [key] }]],
+      ['document.share', (_f, key) => ['document.share', { shares: [{ documentKey: key, permission: 'read' }] }]],
+      ['document.unshare', (_f, key) => ['document.unshare', { documentKeys: [key] }]],
+    ];
+    for (const [label, request] of cases) {
+      const f = fixture('owner');
+      const documentKey = f.addDocument(mailContent('mail-thread'));
+      f.documents.get(documentKey).mutationPolicy = 'system-only';
+      const [tool, input] = request(f, documentKey);
+      const output: any = await runContentTool(tool, input, f.context, { repository: f.repository });
+      expect(output.results[0], label).toMatchObject({ success: false, error: { code: 'CONTENT_FORBIDDEN' } });
+      expect(f.documents.has(documentKey), label).toBe(true);
+    }
+  });
+
+  test('fences system-managed mail linked mutations while leaving all linked reads available', async () => {
+    const f = fixture('owner');
+    const documentKey = f.addDocument(mailContent('mail-new-draft'));
+    f.documents.get(documentKey).mutationPolicy = 'system-only';
+    const version = await f.repository.createVersion({ scopeKey: f.scopeKey, documentKey, content: 'Translation', type: 'translation', embedding, createdAt: now } as never);
+    const summary = await f.repository.createSummary!({ key: newId(), scopeKey: f.scopeKey, documentKey, summary: 'Summary', style: 'brief', sourceContentHash: 'a'.repeat(64), sourceTitle: 'Mail', sourceDocumentUpdatedAt: now, createdByKey: newId(), createdAt: now });
+    const audio = await f.repository.createAudioVersion!({ key: newId(), scopeKey: f.scopeKey, documentKey, sourceContentHash: 'a'.repeat(64), sourceTitle: 'Mail', sourceDocumentUpdatedAt: now, storageKey: 'audio/mail.mp3', mimeType: 'audio/mpeg', sizeBytes: 10, durationMs: 60_000, includeTitle: true, includeCode: false, createdByKey: newId(), createdAt: now });
+    const dependencies = { repository: f.repository, runAction: async () => ({ text: 'Generated' }), embed: async () => embedding, signAudioUrl: async () => 'https://audio.example/mail.mp3' };
+
+    for (const [tool, input] of [
+      ['document.find-version', { versionKeys: [version.key] }],
+      ['document.list-versions', { documentKeys: [documentKey] }],
+      ['document.list-summaries', { documentKeys: [documentKey] }],
+      ['document.find-summary', { summaryKeys: [summary.key] }],
+      ['document.list-audio-versions', { documentKeys: [documentKey] }],
+    ] as Array<[any, any]>) {
+      const output: any = await runContentTool(tool, input, f.context, dependencies);
+      expect(output.summary, tool).toMatchObject({ succeeded: 1, failed: 0 });
+    }
+    await expect(runContentTool('document.read', { documentKeys: [documentKey] }, f.context, dependencies)).resolves.toMatchObject({ summary: { succeeded: 1, failed: 0 } });
+
+    for (const [tool, input] of [
+      ['document.create-version', { documentKeys: [documentKey] }],
+      ['document.restore-version', { restores: [{ documentKey, versionKey: version.key }] }],
+      ['document.delete-version', { versionKeys: [version.key] }],
+      ['document.enhance', { documentKeys: [documentKey], mode: 'replace' }],
+      ['document.translate', { documentKeys: [documentKey], targetLanguage: 'French', mode: 'copy' }],
+      ['document.rewrite', { rewrites: [{ documentKey, instruction: 'Shorten', mode: 'replace' }] }],
+    ] as Array<[any, any]>) {
+      const output: any = await runContentTool(tool, input, f.context, dependencies);
+      expect(output.results[0], tool).toMatchObject({ success: false, error: { code: 'CONTENT_FORBIDDEN' } });
+    }
+    await expect(runContentTool('document.summarize', { documentKeys: [documentKey], persist: true }, f.context, dependencies)).rejects.toMatchObject({ code: 'CONTENT_FORBIDDEN' });
+    await expect(runContentTool('document.audio.playback.update', { audioVersionKey: audio.key, playbackPositionMs: 1000 }, f.context, dependencies)).rejects.toMatchObject({ code: 'CONTENT_FORBIDDEN' });
+    await expect(runContentTool('document.audio.playback.clear', { documentKey }, f.context, dependencies)).rejects.toMatchObject({ code: 'CONTENT_FORBIDDEN' });
+    await expect(runContentTool('document.translate', { documentKeys: [documentKey], targetLanguage: 'French', mode: 'preview' }, f.context, dependencies)).resolves.toMatchObject({ summary: { succeeded: 1, failed: 0 } });
+  });
+
+  test('fences folder subtree move, copy, and delete when they contain system-managed mail', async () => {
+    for (const tool of ['folder.move', 'folder.copy', 'folder.delete'] as const) {
+      const f = fixture('owner');
+      const documentKey = f.addDocument(mailContent('mail-rule'));
+      f.documents.get(documentKey).mutationPolicy = 'system-only';
+      const input = tool === 'folder.move'
+        ? { moves: [{ folderKey: f.folderKey }] }
+        : tool === 'folder.copy'
+          ? { copies: [{ folderKey: f.folderKey, targetScopeKey: f.scopeKey }] }
+          : { folderKeys: [f.folderKey], recursive: true };
+      const output: any = await runContentTool(tool, input, f.context, { repository: f.repository });
+      expect(output.results[0], tool).toMatchObject({ success: false, error: { code: 'CONTENT_FORBIDDEN' } });
+      expect(f.documents.has(documentKey), tool).toBe(true);
+    }
+  });
+
+  test('does not fence ordinary Archive document mutation families', async () => {
+    const f = fixture('owner');
+    const documentKey = f.addDocument('Ordinary body');
+    const dependencies = { repository: f.repository, embed: async () => embedding, random: (size: number) => new Uint8Array(size).fill(4) };
+    await expect(runContentTool('document.update', { updates: [{ documentKey, isFavorite: true }] }, f.context, dependencies)).resolves.toMatchObject({ summary: { succeeded: 1 } });
+    await expect(runContentTool('document.rename', { renames: [{ documentKey, name: 'Renamed' }] }, f.context, dependencies)).resolves.toMatchObject({ summary: { succeeded: 1 } });
+    await expect(runContentTool('document.move', { moves: [{ documentKey, targetScopeKey: f.scopeKey }] }, f.context, dependencies)).resolves.toMatchObject({ summary: { succeeded: 1 } });
+    const shared = await runContentTool('document.share', { shares: [{ documentKey, permission: 'read' }] }, f.context, dependencies);
+    expect(shared).toMatchObject({ summary: { succeeded: 1 } });
+    await expect(runContentTool('document.unshare', { documentKeys: [documentKey] }, f.context, dependencies)).resolves.toMatchObject({ summary: { succeeded: 1 } });
+  });
+
+  test('fences every recognized system-managed mail kind and requires both policy and kind', async () => {
+    for (const kind of mailEnvelopeKinds) {
+      const f = fixture('owner');
+      const documentKey = f.addDocument(mailContent(kind));
+      f.documents.get(documentKey).mutationPolicy = 'system-only';
+      const output = await runContentTool('document.update', { updates: [{ documentKey, isFavorite: true }] }, f.context, { repository: f.repository });
+      expect(output.results[0], kind).toMatchObject({ success: false, error: { code: 'CONTENT_FORBIDDEN' } });
+      expect(f.documents.get(documentKey).isFavorite, kind).toBe(false);
+    }
+
+    for (const [content, mutationPolicy] of [[mailContent('mail-thread'), 'user'], [JSON.stringify({ version: 1, kind: 'non-mail-system-record', data: {} }), 'system-only']] as const) {
+      const f = fixture('owner');
+      const documentKey = f.addDocument(content);
+      f.documents.get(documentKey).mutationPolicy = mutationPolicy;
+      await expect(runContentTool('document.update', { updates: [{ documentKey, isFavorite: true }] }, f.context, { repository: f.repository })).resolves.toMatchObject({ summary: { succeeded: 1, failed: 0 } });
+      expect(f.documents.get(documentKey).isFavorite).toBe(true);
+    }
   });
 
   test('scopes delegated processing idempotency to the actor', async () => {
@@ -1265,7 +1470,9 @@ describe('Content runtime', () => {
     };
     const ledger: ContentIdempotencyStore = {
       async claim() { return { status: 'claimed' }; },
+      async start() { return true; },
       async complete() {},
+      async fail() {},
       async release() {},
     };
     await runContentTool('document.parse', { file, scopeKey: f.scopeKey, folderKey: f.folderKey, idempotencyKey: 'caller-key' }, f.context, { repository: f.repository, parseDocument, idempotency: ledger });

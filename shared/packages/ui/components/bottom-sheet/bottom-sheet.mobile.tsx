@@ -333,7 +333,7 @@ export function BottomSheet({
       visible
     >
       <GestureHandlerRootView style={styles.root}>
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={[styles.root, { paddingBottom: androidBottomInset }]}>
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : fullHeight ? undefined : "height"} style={[styles.root, { paddingBottom: androidBottomInset }]}>
           <Animated.View style={[styles.overlay, { opacity: overlayOpacity }]}>
             <Button
               accessibilityLabel="Close bottom sheet"

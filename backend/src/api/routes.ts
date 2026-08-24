@@ -49,6 +49,8 @@ import { emailHandlers } from './email-inbox';
 import { bookHandlers } from './books';
 import { userHiddenHandlers } from './user-hiddens';
 import { streamEvents } from './events';
+import { searchApp } from './app-search';
+import { appTransformationHandlers } from './app-transformation';
 
 const challengeHash = z.string().regex(/^[a-f0-9]{64}$/);
 const tokenHashBodyBase = strictObject({ token_hash: challengeHash });
@@ -395,6 +397,7 @@ export function registerRoutes(app: Hono) {
   app.post('/auth/logout', logoutAuthAccount);
 
   app.post('/app/events', recordPlatformEvent);
+  app.post('/app/search', searchApp);
   app.get('/events/stream', streamEvents);
 
   app.post('/presence/join', joinPresence);
@@ -487,21 +490,32 @@ export function registerRoutes(app: Hono) {
   app.post('/travel/trips/update', travelHandlers.updateTrip);
   app.post('/travel/trips/delete', travelHandlers.deleteTrip);
   app.post('/travel/trips/attachments/set', travelHandlers.setTripAttachments);
+  app.post('/app/enhance', appTransformationHandlers.enhance);
+  app.post('/app/translate', appTransformationHandlers.translate);
   app.post('/email/overview', emailHandlers.overview);
+  app.post('/email/inboxes/search', emailHandlers.searchInboxes);
+  app.post('/email/tones/search', emailHandlers.searchTones);
   app.post('/email/connect', emailHandlers.startConnect);
+  app.post('/email/connect/icloud', emailHandlers.connectICloud);
   app.get('/email/connectors/gmail/callback', emailHandlers.callback);
+  app.get('/email/connectors/outlook/callback', emailHandlers.callback);
   app.post('/email/connect/exchange', emailHandlers.exchangeConnect);
   app.post('/email/sync', emailHandlers.sync);
-  app.post('/email/sort', emailHandlers.sort);
   app.post('/email/subscribe', emailHandlers.subscribe);
+  app.post('/email/threads/favorite', emailHandlers.favoriteBulk);
+  app.post('/email/threads/read-state', emailHandlers.readStateBulk);
+  app.post('/email/threads/trash', emailHandlers.trashThreads);
   app.post('/email/threads/:threadKey', emailHandlers.thread);
   app.post('/email/threads/:threadKey/favorite', emailHandlers.favorite);
+  app.post('/email/threads/:threadKey/read-state', emailHandlers.readState);
   app.post('/email/threads/:threadKey/trash', emailHandlers.trashThread);
+  app.post('/email/trash/clear', emailHandlers.clearTrash);
   app.post('/email/messages/:messageKey/similar', emailHandlers.findSimilar);
-  app.post('/email/messages/:messageKey/translations', emailHandlers.translateMessage);
   app.post('/email/messages/:messageKey/translations/list', emailHandlers.listMessageTranslations);
+  app.delete('/email/messages/:messageKey/translations', emailHandlers.deleteMessageTranslations);
   app.post('/email/messages/:messageKey/summaries', emailHandlers.summarizeMessage);
   app.post('/email/messages/:messageKey/summaries/list', emailHandlers.listMessageSummaries);
+  app.delete('/email/messages/:messageKey/summaries', emailHandlers.deleteMessageSummaries);
   app.post('/email/drafts', emailHandlers.draft);
   app.post('/email/drafts/compose', emailHandlers.draftNew);
   app.post('/email/tones/list', emailHandlers.tones);
@@ -511,8 +525,10 @@ export function registerRoutes(app: Hono) {
   app.post('/email/reply-context/delete', emailHandlers.deleteReplyContext);
   app.post('/email/tones', emailHandlers.createTone);
   app.patch('/email/tones/:toneKey', emailHandlers.updateTone);
+  app.delete('/email/tones/:toneKey', emailHandlers.deleteTone);
   app.patch('/email/inboxes', emailHandlers.updateInbox);
   app.patch('/email/drafts/:draftKey', emailHandlers.updateDraft);
+  app.delete('/email/drafts/:draftKey', emailHandlers.deleteDraft);
   app.post('/email/drafts/:draftKey/assign', emailHandlers.assignDraft);
   app.post('/email/drafts/:draftKey/send', emailHandlers.sendDraft);
   app.post('/email/disconnect', emailHandlers.disconnect);

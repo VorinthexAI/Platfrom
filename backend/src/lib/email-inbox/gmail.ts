@@ -1,12 +1,11 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
-import type { EmailConnectorCredentials } from './connector-schema';
+import type { EmailConnectorCredentials, OAuthEmailConnectorCredentials } from './connector-schema';
 
 export const GMAIL_SCOPES = [
   'openid',
   'email',
-  'https://www.googleapis.com/auth/gmail.modify',
-  'https://www.googleapis.com/auth/gmail.send',
+  'https://mail.google.com/',
 ] as const;
 
 const tokenSchema = z.object({
@@ -76,7 +75,7 @@ export async function exchangeGmailCode(code: string, verifier: string, nonce: s
   };
 }
 
-export async function refreshGmailCredentials(credentials: EmailConnectorCredentials, fetcher: typeof fetch = fetch, environment: NodeJS.ProcessEnv = process.env) {
+export async function refreshGmailCredentials(credentials: OAuthEmailConnectorCredentials, fetcher: typeof fetch = fetch, environment: NodeJS.ProcessEnv = process.env) {
   if (!credentials.refreshToken) throw new Error('Gmail refresh token is unavailable');
   const config = oauthConfiguration(environment);
   const response = await fetcher('https://oauth2.googleapis.com/token', {
@@ -96,7 +95,7 @@ function emailCredentials(token: z.infer<typeof tokenSchema>, refreshToken?: str
 }
 
 export interface GmailHeader { name: string; value: string }
-export interface GmailPart { mimeType?: string; filename?: string; headers?: GmailHeader[]; body?: { data?: string }; parts?: GmailPart[] }
+export interface GmailPart { mimeType?: string; filename?: string; headers?: GmailHeader[]; body?: { attachmentId?: string; data?: string; size?: number }; parts?: GmailPart[] }
 export interface GmailMessageResource { id: string; threadId: string; labelIds?: string[]; snippet?: string; internalDate?: string; payload?: GmailPart }
 export interface GmailThreadResource { id: string; historyId?: string; messages?: GmailMessageResource[] }
 export interface GmailHistoryRecord {
@@ -108,7 +107,28 @@ export interface GmailHistoryRecord {
 }
 
 export class GmailApiError extends Error {
-  constructor(readonly status: number) { super(`Gmail API request failed (${status})`); }
+  constructor(readonly status: number, readonly reasons: string[] = [], readonly metadata: {
+    providerStatus?: string;
+    providerMessage?: string;
+    retryAfterMs?: number;
+    details?: unknown;
+  } = {}) {
+    super(metadata.providerMessage ? `Gmail API request failed (${status}): ${metadata.providerMessage}` : `Gmail API request failed (${status})`);
+    this.name = 'GmailApiError';
+  }
+}
+
+const RETRYABLE_GMAIL_REASONS = new Set(['backendError', 'internalError', 'quotaExceeded', 'rateLimitExceeded', 'userRateLimitExceeded', 'RESOURCE_EXHAUSTED', 'UNAVAILABLE']);
+const RETRYABLE_TRANSPORT_CODES = new Set(['ECONNREFUSED', 'ECONNRESET', 'EHOSTUNREACH', 'ENETUNREACH', 'ETIMEDOUT', 'EAI_AGAIN']);
+export function isRetryableGmailError(error: unknown) {
+  return error instanceof GmailApiError
+    && (error.status === 408 || error.status === 429 || error.status >= 500 || (error.status === 403 && error.reasons.some((reason) => RETRYABLE_GMAIL_REASONS.has(reason))));
+}
+
+function isRetryableTransportError(error: unknown) {
+  if (error instanceof TypeError) return true;
+  if (error instanceof DOMException) return error.name === 'AbortError' || error.name === 'NetworkError' || error.name === 'TimeoutError';
+  return error instanceof Error && 'code' in error && typeof error.code === 'string' && RETRYABLE_TRANSPORT_CODES.has(error.code);
 }
 
 export function header(headers: GmailHeader[] | undefined, name: string) {
@@ -116,20 +136,71 @@ export function header(headers: GmailHeader[] | undefined, name: string) {
 }
 
 export function emailAddresses(value: string): string[] {
-  return [...value.matchAll(/(?:^|,)\s*(?:"[^"]*"\s*)?(?:<)?([^\s,<>"]+@[^\s,<>"]+)(?:>)?/g)]
-    .map((match) => match[1]!.toLowerCase()).filter((email) => z.string().email().safeParse(email).success);
+  return [...value.matchAll(/<\s*([^\s,<>"]+@[^\s,<>"]+)\s*>|(?:^|,)\s*([^\s,<>"]+@[^\s,<>"]+)/g)]
+    .map((match) => (match[1] ?? match[2])!.toLowerCase()).filter((email) => z.string().email().safeParse(email).success);
 }
 
-function decodeBody(data?: string) {
+export function decodeRfc2047Words(value: string) {
+  const joined = value.replace(/(\?=)\s+(?==\?)/g, '$1');
+  return joined.replace(/=\?([^?\s]+)\?([bq])\?([^?]*)\?=/gi, (encoded, charset: string, encoding: string, content: string) => {
+    try {
+      let bytes: Uint8Array;
+      if (encoding.toLowerCase() === 'b') bytes = Buffer.from(content, 'base64');
+      else {
+        const output: number[] = [];
+        const normalized = content.replace(/_/g, ' ');
+        for (let index = 0; index < normalized.length; index += 1) {
+          if (normalized[index] === '=' && /^[0-9a-f]{2}$/i.test(normalized.slice(index + 1, index + 3))) {
+            output.push(Number.parseInt(normalized.slice(index + 1, index + 3), 16));
+            index += 2;
+          } else output.push(normalized.charCodeAt(index));
+        }
+        bytes = Uint8Array.from(output);
+      }
+      return new TextDecoder(charset).decode(bytes);
+    } catch { return encoded; }
+  });
+}
+
+export function emailAddressWithName(value: string): { email?: string; name?: string } {
+  const sanitized = value.replace(/[\r\n\0-\x1f\x7f]+/g, ' ');
+  const email = emailAddresses(sanitized)[0];
+  if (!email) return {};
+  const angle = sanitized.match(/^\s*(.*?)\s*<[^<>]+>\s*$/);
+  if (!angle) return { email };
+  const raw = decodeRfc2047Words(angle[1]!.trim().replace(/^"|"$/g, '').replace(/\\(["\\])/g, '$1'));
+  const name = raw.replace(/[\r\n\0-\x1f\x7f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 320);
+  return { email, ...(name ? { name } : {}) };
+}
+
+const MAX_GMAIL_BODY_BYTES = 25 * 1024 * 1024;
+const MAX_GMAIL_BODY_BASE64_CHARACTERS = Math.ceil(MAX_GMAIL_BODY_BYTES / 3) * 4 + 4;
+
+function isAttachedPart(part: GmailPart) {
+  return part.mimeType?.toLowerCase() === 'message/rfc822'
+    || Boolean(part.filename)
+    || /^\s*attachment(?:\s*;|\s*$)/i.test(header(part.headers, 'content-disposition'));
+}
+
+function decodeBody(data: string | undefined, headers: GmailHeader[] | undefined) {
   if (!data) return '';
-  try { return Buffer.from(data, 'base64url').toString('utf8'); } catch { return ''; }
+  try {
+    if (data.length > MAX_GMAIL_BODY_BASE64_CHARACTERS) return '';
+    const bytes = Buffer.from(data, 'base64url');
+    if (bytes.byteLength > MAX_GMAIL_BODY_BYTES) return '';
+    const contentType = header(headers, 'content-type');
+    const charset = contentType.match(/\bcharset\s*=\s*(?:"([^"]+)"|([^;\s]+))/i)?.slice(1).find(Boolean);
+    try { return new TextDecoder(charset ?? 'utf-8').decode(bytes); }
+    catch { return new TextDecoder().decode(bytes); }
+  } catch { return ''; }
 }
 
 export function messageBodies(part: GmailPart | undefined): { text: string; html?: string; hasAttachments: boolean } {
   if (!part) return { text: '', hasAttachments: false };
-  let text = part.mimeType === 'text/plain' ? decodeBody(part.body?.data) : '';
-  let html = part.mimeType === 'text/html' ? decodeBody(part.body?.data) : '';
-  let hasAttachments = Boolean(part.filename);
+  if (isAttachedPart(part)) return { text: '', hasAttachments: true };
+  let text = part.mimeType?.toLowerCase() === 'text/plain' ? decodeBody(part.body?.data, part.headers) : '';
+  let html = part.mimeType?.toLowerCase() === 'text/html' ? decodeBody(part.body?.data, part.headers) : '';
+  let hasAttachments = false;
   for (const child of part.parts ?? []) {
     const nested = messageBodies(child);
     text ||= nested.text;
@@ -139,14 +210,82 @@ export function messageBodies(part: GmailPart | undefined): { text: string; html
   return { text: text.trim(), html: html.trim() || undefined, hasAttachments };
 }
 
-export function createGmailClient(accessToken: string, fetcher: typeof fetch = fetch) {
-  const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
-    const response = await fetcher(`https://gmail.googleapis.com/gmail/v1/users/me${path}`, {
-      ...init, signal: init?.signal ?? AbortSignal.timeout(30_000), headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json', ...init?.headers },
-    });
-    const body = await response.json().catch(() => null);
-    if (!response.ok) throw new GmailApiError(response.status);
-    return body as T;
+export function createGmailClient(accessToken: string, fetcher: typeof fetch = fetch, options: {
+  sleep?: (milliseconds: number) => Promise<void>;
+  random?: () => number;
+  now?: () => number;
+  maxConcurrency?: number;
+} = {}) {
+  const sleep = options.sleep ?? ((milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
+  const random = options.random ?? Math.random;
+  const now = options.now ?? Date.now;
+  const maxConcurrency = Math.max(1, Math.min(20, Math.trunc(options.maxConcurrency ?? 6)));
+  let activeRequests = 0;
+  const waiting: Array<() => void> = [];
+  const limitedFetch = async (input: string, init: RequestInit) => {
+    if (activeRequests >= maxConcurrency) await new Promise<void>((resolve) => waiting.push(resolve));
+    activeRequests += 1;
+    try { return await fetcher(input, init); }
+    finally {
+      activeRequests -= 1;
+      waiting.shift()?.();
+    }
+  };
+  const retryAfter = (value: string | null) => {
+    if (!value) return undefined;
+    if (/^\d+$/.test(value.trim())) return Number(value.trim()) * 1000;
+    const timestamp = Date.parse(value);
+    return Number.isFinite(timestamp) ? Math.max(0, timestamp - now()) : undefined;
+  };
+  const request = async <T>(path: string, init?: RequestInit, retry = true): Promise<T> => {
+    for (let attempt = 0; ; attempt += 1) {
+      let response: Response;
+      try {
+        response = await limitedFetch(`https://gmail.googleapis.com/gmail/v1/users/me${path}`, {
+          ...init, signal: init?.signal ?? AbortSignal.timeout(30_000), headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json', ...init?.headers },
+        });
+      } catch (error) {
+        if (!retry || attempt >= 3 || init?.signal?.aborted || !isRetryableTransportError(error)) throw error;
+        await sleep(Math.floor(random() * 250 * (2 ** attempt)));
+        continue;
+      }
+      const body = await response.json().catch(() => null);
+      if (response.ok) return body as T;
+      const providerError = body && typeof body === 'object' && 'error' in body && body.error && typeof body.error === 'object' ? body.error : null;
+      const providerStatus = providerError && 'status' in providerError && typeof providerError.status === 'string' ? providerError.status : undefined;
+      const reasons = z.array(z.string()).catch([]).parse([
+        ...(providerError && 'errors' in providerError && Array.isArray(providerError.errors) ? providerError.errors.flatMap((item: unknown) => item && typeof item === 'object' && 'reason' in item && typeof item.reason === 'string' ? [item.reason] : []) : []),
+        ...(providerStatus ? [providerStatus] : []),
+      ]);
+      const error = new GmailApiError(response.status, reasons, {
+        providerStatus,
+        providerMessage: providerError && 'message' in providerError && typeof providerError.message === 'string' ? providerError.message : undefined,
+        retryAfterMs: retryAfter(response.headers.get('retry-after')),
+        details: body,
+      });
+      if (!retry || attempt >= 3 || !isRetryableGmailError(error)) throw error;
+      await sleep(error.metadata.retryAfterMs ?? Math.floor(random() * 250 * (2 ** attempt)));
+    }
+  };
+  const hydrateTextAttachments = async (messageId: string, part: GmailPart | undefined) => {
+    let totalBytes = 0;
+    const visit = async (current: GmailPart) => {
+      if (isAttachedPart(current)) return;
+      const attachmentId = current.body?.attachmentId;
+      if ((current.mimeType === 'text/plain' || current.mimeType === 'text/html') && attachmentId && !current.body?.data) {
+        const advertisedSize = current.body?.size ?? 0;
+        if (totalBytes + advertisedSize > MAX_GMAIL_BODY_BYTES) throw new RangeError('Gmail text MIME attachments exceed the 25 MB limit');
+        const attachment = await request<{ data: string; size?: number }>(`/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`);
+        if (typeof attachment.data !== 'string') throw new TypeError('Gmail text MIME attachment data is invalid');
+        if (attachment.data.length > MAX_GMAIL_BODY_BASE64_CHARACTERS) throw new RangeError('Gmail text MIME attachments exceed the 25 MB limit');
+        const bytes = Buffer.from(attachment.data, 'base64url').byteLength;
+        totalBytes += bytes;
+        if (totalBytes > MAX_GMAIL_BODY_BYTES) throw new RangeError('Gmail text MIME attachments exceed the 25 MB limit');
+        current.body = { ...current.body, data: attachment.data, size: attachment.size ?? bytes };
+      }
+      for (const child of current.parts ?? []) await visit(child);
+    };
+    if (part) await visit(part);
   };
   return {
     profile: () => request<z.infer<typeof profileSchema>>('/profile').then((value) => profileSchema.parse(value)),
@@ -164,14 +303,25 @@ export function createGmailClient(accessToken: string, fetcher: typeof fetch = f
     watch: (topicName: string) => request<{ historyId: string; expiration: string }>('/watch', { method: 'POST', body: JSON.stringify({ topicName }) }),
     stop: () => request<unknown>('/stop', { method: 'POST', body: '{}' }),
     threadMetadata: (id: string) => request<GmailThreadResource>(`/threads/${encodeURIComponent(id)}?format=minimal`),
-    message: (id: string) => request<GmailMessageResource>(`/messages/${encodeURIComponent(id)}?format=full`),
+    async message(id: string) {
+      const message = await request<GmailMessageResource>(`/messages/${encodeURIComponent(id)}?format=full`);
+      await hydrateTextAttachments(id, message.payload);
+      return message;
+    },
     async findMessageByRfc822Id(messageId: string) {
       const query = new URLSearchParams({ q: `rfc822msgid:${messageId}`, maxResults: '1' });
       return (await request<{ messages?: Array<{ id: string; threadId: string }> }>(`/messages?${query}`)).messages?.[0] ?? null;
     },
     modifyThread: (id: string, addLabelIds: string[], removeLabelIds: string[]) => request(`/threads/${encodeURIComponent(id)}/modify`, { method: 'POST', body: JSON.stringify({ addLabelIds, removeLabelIds }) }),
     trashThread: (id: string) => request<GmailThreadResource>(`/threads/${encodeURIComponent(id)}/trash`, { method: 'POST', body: '{}' }),
-    sendRaw: (raw: string, threadId?: string) => request<{ id: string; threadId: string }>('/messages/send', { method: 'POST', body: JSON.stringify({ raw: Buffer.from(raw).toString('base64url'), ...(threadId ? { threadId } : {}) }) }),
+    async listTrashMessages(maxResults = 500, pageToken?: string) {
+      const bounded = Math.max(1, Math.min(500, Math.trunc(maxResults)));
+      const query = new URLSearchParams({ labelIds: 'TRASH', includeSpamTrash: 'true', maxResults: String(bounded) });
+      if (pageToken) query.set('pageToken', pageToken);
+      return request<{ messages?: Array<{ id: string; threadId: string }>; nextPageToken?: string; resultSizeEstimate?: number }>(`/messages?${query}`);
+    },
+    batchDeleteMessages: (ids: string[]) => request<unknown>('/messages/batchDelete', { method: 'POST', body: JSON.stringify({ ids: z.array(z.string().min(1)).min(1).max(500).parse(ids) }) }),
+    sendRaw: (raw: string, threadId?: string) => request<{ id: string; threadId: string }>('/messages/send', { method: 'POST', body: JSON.stringify({ raw: Buffer.from(raw).toString('base64url'), ...(threadId ? { threadId } : {}) }) }, false),
     async revoke() {
       await fetcher('https://oauth2.googleapis.com/revoke', { method: 'POST', signal: AbortSignal.timeout(30_000), headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ token: accessToken }).toString() });
     },

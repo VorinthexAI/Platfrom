@@ -10,6 +10,8 @@ import { imageCaptionTool, type ImageCaptionToolDependencies } from './image-cap
 import { imageCreateVisualIdentityTool, type ImageCreateVisualIdentityToolDependencies } from './image-create-visual-identity';
 import type { ImageSearchInput } from './image-search';
 import type { galleryOperations } from '@/lib/gallery/operations';
+import type { AppSearchService } from '@/lib/app-search/service';
+import type { AppTransformationService } from '@/lib/app-transformation/service';
 import { PUBLIC_TOOL_DEFINITIONS } from './tool-definitions';
 import type { PublicToolDependencies } from './tool-definition';
 import { WORKSPACE_TOOL_DEFINITIONS, type WorkspaceToolDependencies } from './workspace-tool-definitions';
@@ -41,6 +43,8 @@ export interface ToolDependencies extends RouterDependencies, DocumentParseDepen
   executeWorkspaceContent?: WorkspaceToolDependencies['executeContent'];
   gallery?: WorkspaceToolDependencies['gallery'];
   images?: WorkspaceToolDependencies['images'];
+  appSearchService?: AppSearchService;
+  appTransformationService?: AppTransformationService;
 }
 
 /** Executes one of the capabilities exposed by the unified tool registry. */
@@ -65,6 +69,8 @@ export async function runTool(name: string, skill: string, rawInput: unknown, de
     userHiddens: dependencies.userHiddenService,
     gallery: dependencies.gallery,
     images: dependencies.images,
+    appSearch: dependencies.appSearchService,
+    appTransformation: dependencies.appTransformationService,
     signal: dependencies.signal,
     timeoutMs: dependencies.timeoutMs,
     content: {

@@ -24,7 +24,7 @@ mock.module("expo-crypto", () => ({
 
 testRuntime.__archiveApiPost = async (url: string, body: Record<string, any>, config: Record<string, any>) => {
   calls.push({ url, body, config });
-  const tool = url.split("/").at(-1);
+  const tool = url === "/app/search" ? "app.search" : url === "/app/enhance" ? "app.enhance" : url === "/app/translate" ? "app.translate" : url.split("/").at(-1);
   const response = responseForTool?.(tool ?? "");
   if (response) return response;
   if (tool === "document.create" || tool === "document.parse" || tool === "document.scan") {
@@ -354,20 +354,22 @@ test("sets and clears folder covers with exact payloads", async () => {
   expect(calls[1]?.body.input).toEqual({ updates: [{ folderKey: "folder", coverImageKey: null }], atomic: false, idempotencyKey: expect.any(String) });
 });
 
-test("runs note enhancement, translation, and rename through document tools", async () => {
+test("runs note enhancement and translation through app tools", async () => {
   responseForTool = (tool) => {
-    if (tool === "document.enhance") return { data: { success: true, data: { results: [{ success: true, data: { text: "Improved note", persistedDocumentKey: "document" } }] } } };
-    if (tool === "document.translate") return { data: { success: true, data: { results: [{ success: true, data: { text: "Nota", persistedDocumentKey: "document" } }] } } };
+    if (tool === "app.enhance") return { data: { success: true, data: { results: [{ success: true, data: { text: "Improved note" } }] } } };
+    if (tool === "app.translate") return { data: { success: true, data: { results: [{ success: true, data: { text: "Nota" } }] } } };
     if (tool === "document.create-version") return { data: { success: true, data: { results: [{ success: true, data: { version: { key: "version", documentKey: "document", version: 2, label: "Enhanced version", createdAt: "2026-08-10T00:03:00.000Z" } } }] } } };
     if (tool === "document.rename") return { data: { success: true, data: { results: [{ success: true, data: { document: { key: "document", name: "Renamed note", isFavorite: false, updatedAt: "2026-08-10T00:02:00.000Z" } } }] } } };
   };
 
   expect((await enhanceContentDocument("document", "Improve clarity")).text).toBe("Improved note");
-  expect((await translateContentDocument("document", "Spanish")).persistedDocumentKey).toBe("document");
+  expect((await translateContentDocument("document", "Spanish")).text).toBe("Nota");
   expect((await createContentDocumentVersion("document", "Enhanced version", "Generated copy", "enhancement")).label).toBe("Enhanced version");
   expect((await renameContentDocument("document", "Renamed note")).name).toBe("Renamed note");
-  expect(calls[0]?.body.input).toEqual({ documentKeys: ["document"], instruction: "Improve clarity", mode: "preview" });
-  expect(calls[1]?.body.input).toMatchObject({ documentKeys: ["document"], targetLanguage: "Spanish", preserveFormatting: true, mode: "replace" });
+  expect(calls[0]).toMatchObject({ url: "/app/enhance", body: { input: { documentKey: "document", instruction: "Improve clarity", save: false } } });
+  expect(calls[1]).toMatchObject({ url: "/app/translate", body: { input: { documentKey: "document", targetLanguage: "Spanish", save: false } } });
+  expect(calls[0]?.config.timeout).toBe(30 * 60_000);
+  expect(calls[1]?.config.timeout).toBe(30 * 60_000);
   expect(calls[2]?.body.input).toMatchObject({ documentKeys: ["document"], labels: { document: "Enhanced version" }, contents: { document: "Generated copy" }, types: { document: "enhancement" } });
   expect(calls[3]?.body.input).toMatchObject({ renames: [{ documentKey: "document", name: "Renamed note" }], atomic: false });
 });
@@ -410,16 +412,16 @@ test("can preserve the previous note as a version during an AI autosave", async 
 });
 
 test("searches a folder while listing global user history", async () => {
-  const documents = [{ documentKey: "document", name: "Note", score: 0.9, summary: "Relevant note", folderKey: "folder" }];
-  responseForTool = (tool) => tool === "content.search"
-    ? { data: { success: true, data: { query: "roadmap", cached: false, folders: [], documents } } }
+  const documents = [{ documentKey: "document", scopeKey: "scope-authenticated", name: "Note", score: 0.9, folderKey: "folder", isFavorite: false }];
+  responseForTool = (tool) => tool === "app.search"
+    ? { data: { success: true, data: { query: "roadmap", groups: [{ collectionSlug: "folders", results: [] }, { collectionSlug: "documents", results: [{ key: "document", scopeKey: "scope-authenticated", name: "Note", score: 0.9, folderKey: "folder", isFavorite: false }] }, { collectionSlug: "files", results: [] }] } } }
     : { data: { success: true, data: { history: [{ query: "roadmap", normalizedQuery: "roadmap", searchedAt: "2026-08-10T00:00:00.000Z", usageCount: 2 }] } } };
 
   expect((await searchContent("roadmap", "folder", true)).documents).toEqual(documents);
   expect((await listContentSearchHistory())[0]?.query).toBe("roadmap");
-  expect(calls[0]?.url).toContain("/content.search");
+  expect(calls[0]?.url).toBe("/app/search");
   expect(calls[1]?.url).toContain("/content.search-history.list");
-  expect(calls[0]?.body.input).toEqual({ scopeKey: "scope-authenticated", query: "roadmap", minimumScore: 0.55, folderKey: "folder", includeDescendants: true });
+  expect(calls[0]?.body).toEqual({ organizationKey: "org-authenticated", scopeKey: "scope-authenticated", query: "roadmap", collectionSlugs: ["folders", "documents", "files"], recordHistory: true, limit: 50, minimumScore: 0.55, filters: { folderKey: "folder", includeDescendants: true } });
   expect(calls[1]?.body.input).toEqual({ scopeKey: "scope-authenticated", allLocations: true, limit: 50 });
 });
 
@@ -445,18 +447,18 @@ test("deletes one global search-history entry", async () => {
 });
 
 test("runs fast combined search without summaries", async () => {
-  responseForTool = () => ({ data: { success: true, data: { query: "roadmap", cached: false, folders: [{ key: "folder", scopeKey: "scope-authenticated", name: "Roadmaps", score: 0.8 }], documents: [{ documentKey: "document", scopeKey: "scope-authenticated", name: "Roadmap", extension: "docx", score: 0.72 }] } } });
+  responseForTool = () => ({ data: { success: true, data: { query: "roadmap", groups: [{ collectionSlug: "folders", results: [{ key: "folder", scopeKey: "scope-authenticated", name: "Roadmaps", isFavorite: false, score: 0.8 }] }, { collectionSlug: "documents", results: [] }, { collectionSlug: "files", results: [{ key: "document", scopeKey: "scope-authenticated", name: "Roadmap", extension: "docx", isFavorite: false, score: 0.72 }] }] } } });
 
   expect(await searchContentMatches("roadmap")).toMatchObject({ folders: [{ key: "folder" }], documents: [{ documentKey: "document", extension: "docx" }] });
-  expect(calls[0]?.url).toContain("/content.search");
-  expect(calls[0]?.body.input).toEqual({ scopeKey: "scope-authenticated", query: "roadmap", includeSummaries: false, minimumScore: 0.55 });
+  expect(calls[0]?.url).toBe("/app/search");
+  expect(calls[0]?.body).toMatchObject({ query: "roadmap", collectionSlugs: ["folders", "documents", "files"], minimumScore: 0.55 });
 });
 
 test("can search without recording history", async () => {
-  responseForTool = () => ({ data: { success: true, data: { query: "roadmap", cached: false, folders: [], documents: [] } } });
+  responseForTool = () => ({ data: { success: true, data: { query: "roadmap", groups: [{ collectionSlug: "folders", results: [] }, { collectionSlug: "documents", results: [] }, { collectionSlug: "files", results: [] }] } } });
 
   await searchContentMatches("roadmap", undefined, undefined, false);
-  expect(calls[0]?.body.input).toMatchObject({ query: "roadmap", recordHistory: false });
+  expect(calls[0]?.body).toMatchObject({ query: "roadmap", recordHistory: false });
 });
 
 test("finds semantic neighbors from exactly one Content source", async () => {
@@ -489,15 +491,17 @@ test("generates topics and persists, lists, and opens summary versions", async (
 });
 
 test("scopes fast semantic search to a folder and its descendants", async () => {
-  responseForTool = () => ({ data: { success: true, data: { query: "roadmap", cached: false, folders: [], documents: [] } } });
+  responseForTool = () => ({ data: { success: true, data: { query: "roadmap", groups: [{ collectionSlug: "folders", results: [] }, { collectionSlug: "documents", results: [] }, { collectionSlug: "files", results: [] }] } } });
   await searchContentMatches("roadmap", undefined, "folder");
-  expect(calls[0]?.body.input).toEqual({
+  expect(calls[0]?.body).toEqual({
+    organizationKey: "org-authenticated",
     scopeKey: "scope-authenticated",
     query: "roadmap",
-    includeSummaries: false,
+    collectionSlugs: ["folders", "documents", "files"],
+    recordHistory: true,
+    limit: 50,
     minimumScore: 0.55,
-    folderKey: "folder",
-    includeDescendants: true,
+    filters: { folderKey: "folder", includeDescendants: true },
   });
 });
 

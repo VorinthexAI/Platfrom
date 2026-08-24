@@ -36,7 +36,6 @@ import {
   deleteGallerySubject,
   fetchGalleryOverview,
   fetchGalleryUploadStatus,
-  filterMediaItems,
   findGalleryCollectionDuplicates,
   getGalleryContext,
   getGalleryMemberKey,
@@ -65,7 +64,8 @@ import {
 } from "@/lib/gallery-client";
 import { filterByHiddenView, hideUserSource, isUserHidden, listUserHiddens, revealUserSource, type HiddenViewFilters, type UserHiddenRecord, type UserHiddenSource } from "@/lib/user-hidden-client";
 import { deleteContentSearchHistory, getContentContext, type ContentSearchHistoryItem } from "@/lib/content-client";
-import { contentQueryKeys, getContentHistory, promoteCachedContentHistory, removeCachedContentHistory } from "@/lib/content-query-cache";
+import { contentQueryKeys } from "@/lib/content-query-cache";
+import { getUserSearchHistory, promoteCachedUserSearchHistory, removeCachedUserSearchHistory, userSearchHistoryQueryKey } from "@/lib/user-search-history-cache";
 import { compassQueryKeys, galleryQueryKeys, getGalleryCollections, invalidateAssistantChanges, patchGalleryImage, patchGalleryUserHiddens, removeCachedGalleryImages, restoreGalleryOverviews, setCachedGalleryCollections, snapshotGalleryOverviews, transferCachedGalleryImages } from "@/lib/workspace-query-cache";
 import { useAuthStore } from "@/state/auth";
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
@@ -976,7 +976,6 @@ export function GalleryWorkspace({ initialCollectionKey, returnTripKey, returnTr
       setSelectedImageKeys([]);
       setCollectionSearchResults(result.images);
       setStatus(undefined);
-      void queryClient.invalidateQueries({ queryKey: contentQueryKeys.history(contentContext, undefined), exact: true, refetchType: "none" }).catch(() => undefined);
     } catch {
       const expectedView = collection ? "search" : "root";
       if (request === searchRequest.current && activeCollectionKey.current === collection?.key && visibleGalleryView.current === expectedView) {
@@ -1006,7 +1005,7 @@ export function GalleryWorkspace({ initialCollectionKey, returnTripKey, returnTr
   async function openSearchHistory(target: "gallery" | "identityPicker" = "gallery") {
     historyTarget.current = target;
     const generation = ++historyGeneration.current;
-    const key = contentQueryKeys.history(contentContext, undefined);
+    const key = userSearchHistoryQueryKey(contentContext.userKey);
     const cached = queryClient.getQueryData<ContentSearchHistoryItem[]>(key);
     const invalidated = queryClient.getQueryState(key)?.isInvalidated === true;
     setHistory(cached ?? []);
@@ -1016,7 +1015,7 @@ export function GalleryWorkspace({ initialCollectionKey, returnTripKey, returnTr
     pushSheet("searchHistory");
     if (cached && !invalidated) return;
     try {
-      const loaded = await getContentHistory(queryClient, contentContext, undefined);
+      const loaded = await getUserSearchHistory(queryClient, contentContext);
       if (generation === historyGeneration.current && activeSheetRef.current === "searchHistory") setHistory(loaded);
     } catch (error) {
       if (generation === historyGeneration.current && activeSheetRef.current === "searchHistory") setStatus(errorMessage(error));
@@ -1026,7 +1025,7 @@ export function GalleryWorkspace({ initialCollectionKey, returnTripKey, returnTr
   }
 
   function applyHistoryQuery(item: ContentSearchHistoryItem) {
-    const promoted = promoteCachedContentHistory(queryClient, contentContext, undefined, item);
+    const promoted = promoteCachedUserSearchHistory(queryClient, contentContext, item);
     setHistory((current) => [promoted, ...current.filter(({ normalizedQuery }) => normalizedQuery !== item.normalizedQuery)]);
     if (historyTarget.current === "identityPicker") returnToIdentityPicker(item.query);
     else { closeSheet(); updateCollectionSearch(item.query); }
@@ -1034,13 +1033,13 @@ export function GalleryWorkspace({ initialCollectionKey, returnTripKey, returnTr
 
   async function removeHistoryQuery(item: ContentSearchHistoryItem) {
     if (removingHistoryQuery) return;
-    const previous = removeCachedContentHistory(queryClient, contentContext, undefined, item.normalizedQuery);
+    const previous = removeCachedUserSearchHistory(queryClient, contentContext, item.normalizedQuery);
     setHistory((current) => current.filter(({ normalizedQuery }) => normalizedQuery !== item.normalizedQuery));
     setRemovingHistoryQuery(item.normalizedQuery);
     try {
       await deleteContentSearchHistory(item.normalizedQuery);
     } catch (error) {
-      queryClient.setQueryData(contentQueryKeys.history(contentContext, undefined), previous);
+      queryClient.setQueryData(userSearchHistoryQueryKey(contentContext.userKey), previous);
       setHistory(previous);
       setStatus(errorMessage(error));
     } finally {
@@ -1757,7 +1756,7 @@ export function GalleryWorkspace({ initialCollectionKey, returnTripKey, returnTr
       }).catch((error: unknown) => { if (isCurrentContextGeneration(generation, refreshContextGeneration.current) && request === identityPickerRequest.current) setStatus(errorMessage(error)); }).finally(() => { if (isCurrentContextGeneration(generation, refreshContextGeneration.current) && request === identityPickerRequest.current) setIdentityPickerSearching(false); });
     }, 300);
     identityPickerHistoryTimer.current = setTimeout(() => {
-      void searchGalleryImages({ query: normalized, ...(collection ? { collectionKey: collection.key } : {}), recordHistory: true, limit: 1 }).then(() => isCurrentContextGeneration(generation, refreshContextGeneration.current) ? queryClient.invalidateQueries({ queryKey: contentQueryKeys.history(contentContext, undefined), exact: true, refetchType: "none" }) : undefined).catch(() => undefined);
+      void searchGalleryImages({ query: normalized, ...(collection ? { collectionKey: collection.key } : {}), recordHistory: true, limit: 1 }).catch(() => undefined);
     }, 800);
   }
 
@@ -2455,6 +2454,11 @@ export function GalleryWorkspace({ initialCollectionKey, returnTripKey, returnTr
   const visibleCollections = filterByHiddenView(collections, userHiddens, "collection", viewFilters).filter((collection) => collectionTab === "mine" ? isGalleryCollectionOwned(collection) : !isGalleryCollectionOwned(collection));
   const writableCollections = collections.filter(({ access, role }) => access?.canContribute && role !== "viewer");
   const canManageAnyCollection = collections.some((collection) => collection.access?.canManage && isGalleryCollectionOwned(collection));
+  const galleryEmpty = !loading && (
+    !contextualView && showingCollectionOverview && visibleCollections.length === 0
+    || Boolean(activeCollection) && !searching && visibleImages.length === 0 && visibleOptimisticItems.length === 0
+    || contextualView && !activeCollection && visibleImages.length === 0
+  );
   const identityPickerVisibleCollections = filterByHiddenView(collections, userHiddens, "collection", viewFilters);
   const identityPickerVisibleImages = filterByHiddenView(identityPickerResults ?? identityPickerImages, userHiddens, "image", viewFilters);
   const selectableImages = mergeMediaItems(images, mergeMediaItems(collectionSearchResults ?? [], similarImages));
@@ -2510,7 +2514,7 @@ export function GalleryWorkspace({ initialCollectionKey, returnTripKey, returnTr
         <WorkspaceAppSwitcher active="gallery" />
       </View>
 
-      <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: spacing.md }]} keyboardShouldPersistTaps="handled" onScroll={({ nativeEvent }) => { if (isNearScrollEnd({ offset: nativeEvent.contentOffset.y, viewport: nativeEvent.layoutMeasurement.height, content: nativeEvent.contentSize.height })) void loadMoreImages(); }} scrollEventThrottle={120} showsVerticalScrollIndicator={false} style={styles.scrollView}>
+      <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: spacing.md }]} keyboardShouldPersistTaps="handled" onScroll={({ nativeEvent }) => { if (isNearScrollEnd({ offset: nativeEvent.contentOffset.y, viewport: nativeEvent.layoutMeasurement.height, content: nativeEvent.contentSize.height })) void loadMoreImages(); }} scrollEnabled={!galleryEmpty} scrollEventThrottle={120} showsVerticalScrollIndicator={false} style={styles.scrollView}>
         {!contextualView && (showingCollectionOverview || loading) ? (
           <View style={styles.galleryRoot}>
             <View style={styles.collectionTitleRow}>

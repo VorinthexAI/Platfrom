@@ -4,6 +4,9 @@ import type { TravelService } from '@/lib/travel/service';
 import type { UserHiddenService } from '@/lib/user-hiddens/service';
 import type { CountrySearchService } from '@/lib/travel/country-search';
 import {
+  appSearchCapability,
+  appEnhanceCapability,
+  appTranslateCapability,
   archiveCapabilities,
   ascendCapabilities,
   compassCapabilities,
@@ -14,6 +17,8 @@ import { galleryAssistantCapabilities } from '@/lib/ai/personal-assistant/galler
 import type { AssistantCapability, AssistantCapabilityContext } from '@/lib/ai/personal-assistant/capabilities';
 import { runContentTool, type ContentToolDependencies } from './content-runtime';
 import type { ToolContext } from './tool-context';
+import type { AppSearchService } from '@/lib/app-search/service';
+import type { AppTransformationService } from '@/lib/app-transformation/service';
 
 export interface WorkspaceToolDependencies {
   context: ToolContext;
@@ -27,6 +32,8 @@ export interface WorkspaceToolDependencies {
   userHiddens?: UserHiddenService;
   gallery?: AssistantCapabilityContext['gallery'];
   images?: AssistantCapabilityContext['images'];
+  appSearch?: AppSearchService;
+  appTransformation?: AppTransformationService;
   signal?: AbortSignal;
   timeoutMs?: number;
 }
@@ -50,6 +57,8 @@ function publicDefinition(capability: AssistantCapability) {
         userHiddens: dependencies.userHiddens,
         gallery: dependencies.gallery,
         images: dependencies.images,
+        appSearch: dependencies.appSearch,
+        appTransformation: dependencies.appTransformation,
         signal: dependencies.signal,
         timeoutMs: dependencies.timeoutMs,
       };
@@ -62,6 +71,9 @@ function publicDefinition(capability: AssistantCapability) {
 
 export const WORKSPACE_TOOL_DEFINITIONS = Object.freeze([
   ...[
+    appSearchCapability,
+    appEnhanceCapability,
+    appTranslateCapability,
     hiddenListCapability,
     ...archiveCapabilities,
     ...galleryAssistantCapabilities,
@@ -70,7 +82,7 @@ export const WORKSPACE_TOOL_DEFINITIONS = Object.freeze([
     ...ascendCapabilities,
   ].filter(({ definition }) => !new Set([
     'folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy',
-    'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.enhance', 'document.translate', 'document.list-versions', 'document.restore-version', 'document.download',
+    'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.list-versions', 'document.restore-version', 'document.download',
     'content.neighbors', 'content.search-history.delete',
   ]).has(definition.name)).map(publicDefinition),
 ]);

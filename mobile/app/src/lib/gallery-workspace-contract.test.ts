@@ -60,6 +60,12 @@ test("uses a singleton collection cache without root search or filtering", () =>
   expect(source).toContain('accessibilityLabel="Create in Gallery"');
 });
 
+test("locks the workspace scroller only for resolved empty Gallery views", () => {
+  expect(source).toContain("const galleryEmpty = !loading && (");
+  expect(source).toContain("scrollEnabled={!galleryEmpty}");
+  expect(source).toContain("visibleOptimisticItems.length === 0");
+});
+
 test("keeps the Gallery filter sheet limited to favorite and hidden toggles", () => {
   const start = source.indexOf('activeSheet === "filter" ?');
   const filterSheet = source.slice(start, source.indexOf('activeSheet === "identityPickerFilter"', start));

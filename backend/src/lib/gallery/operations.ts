@@ -101,6 +101,7 @@ export interface GalleryOperationContext {
   modelVisible?: boolean;
   signal?: AbortSignal;
   recordUserSearch?: (userKey: string, query: string) => Promise<unknown>;
+  queryEmbedding?: number[];
   enqueueUploadBatch?: (uploadKeys: readonly string[]) => Promise<unknown>;
   getUpload?: typeof repository.getUpload;
   queueUploads?: typeof repository.queueUploads;
@@ -413,6 +414,7 @@ async function search(rawInput: unknown, context: GalleryOperationContext) {
     if (sourceImage) resolvedImages.set(sourceImage.key, sourceImage);
     const output = await imageSearchTool.execute(toolInput, {
       context: { organizationKey: input.organizationKey, runtimeScopeKey: input.scopeKey, principal: { kind: 'member', user: { key: membership.userId }, userOrganization: membership, scopeMember: null } as never },
+      queryEmbedding: context.queryEmbedding,
       searchImages: async (searchInput) => {
         const results = await repository.searchAccessibleImages(searchInput);
         for (const result of results) resolvedImages.set(result.image.key, result.image);

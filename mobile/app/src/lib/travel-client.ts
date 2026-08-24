@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { apiClient } from "@/lib/api-client";
+import { appSearchResults, searchApp } from "@/lib/app-search-client";
 import { assistantChangesSchema } from "@/lib/assistant-changes";
 import { useAuthStore } from "@/state/auth";
 
@@ -301,12 +302,9 @@ export async function findPlaces(query: string, signal?: AbortSignal) {
 }
 
 export async function searchPlaces(query: string, signal?: AbortSignal, recordHistory = true) {
-  return post(
-    "/travel/places/search",
-    placeSearchInputSchema.parse({ query, recordHistory }),
-    z.strictObject({ places: z.array(placeSchema) }),
-    { timeout: 30_000, signal },
-  ).then(({ places }) => places);
+  const input = placeSearchInputSchema.parse({ query, recordHistory });
+  const output = await searchApp({ ...input, collectionSlugs: ["places"], limit: 50 }, signal);
+  return appSearchResults(output, "places", placeSchema);
 }
 
 export function listTrips(signal?: AbortSignal) {
@@ -367,12 +365,8 @@ export async function generatePlaceReference(placeKey: string, kind: PlaceRefere
 }
 
 export function searchTrips(query: string, signal?: AbortSignal, recordHistory = true) {
-  return post(
-    "/travel/trips/search",
-    placeSearchInputSchema.parse({ query, recordHistory }),
-    z.strictObject({ trips: z.array(tripSchema) }),
-    { timeout: 30_000, signal },
-  ).then(({ trips }) => trips);
+  const input = placeSearchInputSchema.parse({ query, recordHistory });
+  return searchApp({ ...input, collectionSlugs: ["trips"], limit: 50 }, signal).then((output) => appSearchResults(output, "trips", tripSchema));
 }
 
 export async function createTrip(input: CreateTripInput, signal?: AbortSignal) {
@@ -466,14 +460,9 @@ export function findPlaceChildren(childrenRequestToken: string, signal?: AbortSi
 }
 
 export async function searchCountries(query: string, signal?: AbortSignal) {
-  const { organizationKey } = getTravelContext();
-  const body = countrySearchInputSchema.parse({ organizationKey, query });
-  try {
-    const response = await apiClient.post("/travel/countries/search", body, { timeout: 30_000, signal });
-    return unwrap(response.data, countrySearchResultSchema).country;
-  } catch (error) {
-    throw responseError(error);
-  }
+  countrySearchInputSchema.parse({ organizationKey: getTravelContext().organizationKey, query });
+  const output = await searchApp({ query, collectionSlugs: ["countries"], limit: 1 }, signal);
+  return appSearchResults(output, "countries", countrySearchResultSchema.shape.country.unwrap()).at(0) ?? null;
 }
 
 const createPlaceInputSchema = placeSchema.pick({ name: true, summary: true, countryCode: true, latitude: true, longitude: true }).extend({

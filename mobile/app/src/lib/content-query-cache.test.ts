@@ -21,9 +21,7 @@ const {
   contentQueryKeys,
   clearCachedContentDocumentAudioPlayback,
   invalidateContentDocumentTopics,
-  invalidateContentHistories,
   invalidateContentLocations,
-  promoteCachedContentHistory,
   patchContentUserHiddens,
   replaceCachedContentDocument,
   replaceCachedContentDocuments,
@@ -35,10 +33,9 @@ const {
   removeCachedContentDocumentsEverywhere,
   removeCachedContentFolder,
   removeCachedContentFoldersEverywhere,
-  removeCachedContentHistory,
   updateCachedContentDocumentAudioPlayback,
 } = await import("./content-query-cache");
-import type { ContentContext, ContentSearchHistoryItem } from "./content-client";
+import type { ContentContext } from "./content-client";
 
 const context: ContentContext = {
   userKey: "user-a",
@@ -69,12 +66,6 @@ test("optimistically patches and snapshots Archive hidden overlays", () => {
   expect(patchContentUserHiddens(client, context, (current) => [...current, hidden])).toEqual([]);
   expect(client.getQueryData(contentQueryKeys.userHiddens(context))).toEqual([hidden]);
   expect(patchContentUserHiddens(client, context, () => [])).toEqual([hidden]);
-});
-
-test("shares global history across scopes for one user and isolates other users", () => {
-  const anotherScope = { ...otherContext, userKey: context.userKey };
-  expect(contentQueryKeys.history(context)).toEqual(contentQueryKeys.history(anotherScope));
-  expect(contentQueryKeys.history(context)).not.toEqual(contentQueryKeys.history(otherContext));
 });
 
 test("invalidates only the edited document topic cache", async () => {
@@ -284,37 +275,15 @@ test("evicts all scoped locations when archived folders may contain cached desce
   expect(client.getQueryData(contentQueryKeys.folderTree(context))).toEqual([{ key: "unrelated", name: "Unrelated" }]);
 });
 
-test("invalidates affected histories and patches moved document detail without corrupting locations", async () => {
+test("patches moved document detail without corrupting locations", () => {
   const client = new QueryClient();
   const source = contentQueryKeys.location(context, "source");
-  const sourceHistory = contentQueryKeys.history(context, "source");
-  const destinationHistory = contentQueryKeys.history(context, "destination");
   const documentKey = contentQueryKeys.document(context, "document-a");
   client.setQueryData(source, { folders: [], documents: [{ key: "document-a", name: "Note", folderKey: "source", isFavorite: false, updatedAt: "before" }] });
-  client.setQueryData(sourceHistory, []);
-  client.setQueryData(destinationHistory, []);
   client.setQueryData(documentKey, { key: "document-a", name: "Note", folderKey: "source", isFavorite: false, updatedAt: "before", content: "Body" });
 
   replaceCachedContentDocumentDetail(client, context, { key: "document-a", name: "Note", folderKey: "destination", isFavorite: false, updatedAt: "after" });
-  await invalidateContentHistories(client, context, ["source", "destination"]);
 
   expect(client.getQueryData<any>(source).documents[0].folderKey).toBe("source");
   expect(client.getQueryData<any>(documentKey)).toMatchObject({ folderKey: "destination", content: "Body" });
-  expect(client.getQueryState(sourceHistory)?.isInvalidated).toBe(true);
-  expect(client.getQueryState(destinationHistory)?.isInvalidated).toBe(true);
-});
-
-test("optimistically promotes, counts, and removes Content search history", () => {
-  const client = new QueryClient();
-  const older: ContentSearchHistoryItem = { query: "older", normalizedQuery: "older", searchedAt: "2026-08-10T00:00:00.000Z", usageCount: 1 };
-  const selected: ContentSearchHistoryItem = { query: "roadmap", normalizedQuery: "roadmap", searchedAt: "2026-08-11T00:00:00.000Z", usageCount: 3 };
-  client.setQueryData(contentQueryKeys.history(context, "folder"), [older, selected]);
-
-  const promoted = promoteCachedContentHistory(client, context, "folder", selected);
-  expect(promoted.usageCount).toBe(4);
-  expect(client.getQueryData<ContentSearchHistoryItem[]>(contentQueryKeys.history(context, "folder"))?.map(({ normalizedQuery, usageCount }) => ({ normalizedQuery, usageCount }))).toEqual([{ normalizedQuery: "roadmap", usageCount: 4 }, { normalizedQuery: "older", usageCount: 1 }]);
-
-  const previous = removeCachedContentHistory(client, context, "folder", "roadmap");
-  expect(previous).toHaveLength(2);
-  expect(client.getQueryData<ContentSearchHistoryItem[]>(contentQueryKeys.history(context, "folder"))).toEqual([older]);
 });

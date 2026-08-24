@@ -30,6 +30,7 @@ describe('Gallery assistant capabilities', () => {
     expect(search.definition.inputSchema.type).toBe('object');
     expect(Array.isArray(search.definition.inputSchema.oneOf)).toBe(true);
     expect(search.inputSchema.parse({ identityKey: newId() })).toEqual({ identityKey: expect.any(String) });
+    expect(() => search.inputSchema.parse({ query: 'mountains' })).toThrow();
     expect(listCollections.inputSchema.parse({ maxCaptionScore: 40 })).toEqual({ maxCaptionScore: 40, limit: 100 });
     expect(listCollections.definition.description).toContain('maximum compatible caption score');
     expect(listCollections.definition.description).toContain('legacy migration placeholder scores are excluded');
@@ -64,7 +65,7 @@ describe('Gallery assistant capabilities', () => {
     const inputs = [
       {}, { name: 'Favorites' }, { collectionKey, name: 'Trips', isFavorite: true }, { collectionKey },
       { collectionKey }, {}, { collectionKey, inviteeKey: memberKey, role: 'collaborator' }, { inviteKey }, { inviteKey }, { collectionKey, inviteKey }, { collectionKey, memberKey, role: 'viewer' }, { collectionKey, memberKey }, { collectionKey }, { collectionKey }, { collectionKey, role: 'viewer' }, { collectionKey, shareKey, active: true }, { collectionKey, shareKey }, { token: 'x'.repeat(32) },
-      { query: 'mountains' }, { imageKey, isFavorite: true }, { imageKey, name: 'mountain.jpg', isFavorite: true }, { imageKeys: [imageKey] },
+      { imageKey }, { imageKey, isFavorite: true }, { imageKey, name: 'mountain.jpg', isFavorite: true }, { imageKeys: [imageKey] },
       { collectionKey, imageKeys: [imageKey] }, { sourceCollectionKey: collectionKey, destinationCollectionKeys: [destinationCollectionKey], imageKeys: [imageKey], mode: 'copy' },
       {}, { name: 'Oscar', imageKeys: [imageKey] }, { identityKey }, { identityKey },
       { collectionKey }, {}, { highlightKey }, { highlightKey },

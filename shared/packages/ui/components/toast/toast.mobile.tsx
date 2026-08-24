@@ -109,7 +109,7 @@ export function useToast() {
 }
 
 const styles = StyleSheet.create({
-  viewport: { left: spacing.md, position: "absolute", right: spacing.md, zIndex: 100 },
+  viewport: { elevation: 1000, left: spacing.md, position: "absolute", right: spacing.md, zIndex: 1000 },
   stack: { height: 92, position: "relative" },
   toast: {
     alignSelf: "center",

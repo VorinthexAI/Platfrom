@@ -2,7 +2,7 @@ import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import type { AssistantChange } from "./assistant-changes";
 import type { Book, BookDetail } from "./books-client";
 import { contentQueryKeys } from "./content-query-cache";
-import type { EmailConnector, EmailFilter, EmailOverview, EmailReplyContext, EmailSummary, EmailThread, EmailToneRecord, EmailTranslationVersion } from "./email-client";
+import { normalizeEmailOverviewQuery, type EmailConnector, type EmailDraft, type EmailFacet, type EmailFilter, type EmailOverview, type EmailOverviewQuery, type EmailReplyContext, type EmailSummary, type EmailThread, type EmailToneRecord, type EmailTranslationVersion } from "./email-client";
 import { normalizeCollection } from "./collection-access";
 import type { GalleryCollection, GalleryCollectionInvite, GalleryCollectionMember, GalleryCollectionShareLink, GalleryImage, GalleryOverview } from "./gallery-client";
 import type { Place, RecentPlace, Trip } from "./travel-client";
@@ -146,15 +146,36 @@ export const signalQueryKeys = {
   all: (context: WorkspaceContext) => ["signal", ...contextKey(context)] as const,
   overviews: (context: WorkspaceContext) => [...signalQueryKeys.all(context), "overviews"] as const,
   accountOverviews: (context: WorkspaceContext, connectorKey?: string) => [...signalQueryKeys.overviews(context), connectorKey ?? null] as const,
-  overview: (context: WorkspaceContext, connectorKey?: string, filter: EmailFilter = "all", search?: string) => [...signalQueryKeys.accountOverviews(context, connectorKey), filter, search?.trim() || null] as const,
-  overviewPage: (context: WorkspaceContext, connectorKey: string | undefined, filter: EmailFilter = "all", search?: string, cursor?: string) => [...signalQueryKeys.overview(context, connectorKey, filter, search), "pages", cursor ?? null] as const,
+  overview: (context: WorkspaceContext, connectorKey?: string, query?: EmailOverviewQuery | EmailFilter, search?: string) => {
+    if (!connectorKey && !query) return [...signalQueryKeys.accountOverviews(context), "root"] as const;
+    if (typeof query === "string") return [...signalQueryKeys.accountOverviews(context, connectorKey), "legacy", query, search?.trim() || null] as const;
+    const normalized = normalizeEmailOverviewQuery(query);
+    return [...signalQueryKeys.accountOverviews(context, connectorKey), "inbox", normalized.readState, normalized.facets.join(","), normalized.search || null] as const;
+  },
+  overviewPage: (context: WorkspaceContext, connectorKey: string | undefined, query: EmailOverviewQuery | EmailFilter, cursor: string, search?: string) => [...signalQueryKeys.overview(context, connectorKey, query, search), "pages", cursor] as const,
   details: (context: WorkspaceContext) => [...signalQueryKeys.all(context), "details"] as const,
   detail: (context: WorkspaceContext, connectorKey: string | undefined, threadKey: string) => [...signalQueryKeys.details(context), connectorKey ?? null, threadKey] as const,
-  tones: (context: WorkspaceContext) => [...signalQueryKeys.all(context), "tones"] as const,
+  drafts: (context: WorkspaceContext, connectorKey: string) => [...signalQueryKeys.all(context), "drafts", connectorKey] as const,
+  draftDetails: (context: WorkspaceContext) => [...signalQueryKeys.all(context), "draft-details"] as const,
+  draftDetail: (context: WorkspaceContext, connectorKey: string, draftKey: string) => [...signalQueryKeys.draftDetails(context), connectorKey, draftKey] as const,
   replyContexts: (context: WorkspaceContext) => [...signalQueryKeys.all(context), "reply-contexts"] as const,
-  translations: (context: WorkspaceContext, messageKey: string) => [...signalQueryKeys.all(context), "messages", messageKey, "translations"] as const,
-  summaries: (context: WorkspaceContext, messageKey: string) => [...signalQueryKeys.all(context), "messages", messageKey, "summaries"] as const,
+  generated: (context: WorkspaceContext) => [...signalQueryKeys.all(context), "messages"] as const,
+  translations: (context: WorkspaceContext, messageKey: string) => [...signalQueryKeys.generated(context), messageKey, "translations"] as const,
+  summaries: (context: WorkspaceContext, messageKey: string) => [...signalQueryKeys.generated(context), messageKey, "summaries"] as const,
 };
+
+export type ParsedSignalOverviewQuery =
+  | Readonly<{ kind: "root" }>
+  | Readonly<{ kind: "legacy"; filter: EmailFilter; search: string | null }>
+  | Readonly<{ kind: "inbox"; query: EmailOverviewQuery }>;
+export function parseSignalOverviewQuery(queryKey: QueryKey): ParsedSignalOverviewQuery | undefined {
+  const mode = queryKey[5];
+  if (mode === "root") return { kind: "root" };
+  if (mode === "legacy" && typeof queryKey[6] === "string") return { kind: "legacy", filter: queryKey[6] as EmailFilter, search: typeof queryKey[7] === "string" ? queryKey[7] : null };
+  if (mode !== "inbox" || (queryKey[6] !== "read" && queryKey[6] !== "unread") || typeof queryKey[7] !== "string") return undefined;
+  const facets = queryKey[7] ? queryKey[7].split(",").filter((facet): facet is EmailFacet => ["urgent", "important", "filtered", "favorite"].includes(facet)) : [];
+  return { kind: "inbox", query: normalizeEmailOverviewQuery({ readState: queryKey[6], facets, search: typeof queryKey[8] === "string" ? queryKey[8] : undefined }) };
+}
 
 export const ascendQueryKeys = {
   all: (context: WorkspaceContext) => ["ascend", ...contextKey(context)] as const,
@@ -266,40 +287,210 @@ export function patchSignalThread(queryClient: QueryClient, context: WorkspaceCo
   queryClient.setQueryData<{ thread: EmailThread; messages: unknown[] }>(signalQueryKeys.detail(context, connectorKey, thread.key), (detail) => detail ? { ...detail, thread } : detail);
 }
 
-export function moveSignalThreadToFiltered(overview: EmailOverview, result: EmailThread, filter: EmailFilter, search: string | null, allowInsert = true): EmailOverview {
-  const trashed: EmailThread = { ...result, inboxCategory: "Filtered", state: "filtered", inInbox: true, labels: [...new Set([...(result.labels ?? []), "TRASH"])] };
-  const cachedThread = overview.threads.find(({ key }) => key === trashed.key);
-  const adjustCounts = Boolean(cachedThread && cachedThread.inboxCategory !== "Filtered");
-  const belongs = filter === "all" || filter === "filtered" || filter === "unread" && trashed.unread || filter === "favorite" && trashed.isFavorite;
-  const canInsert = Boolean(cachedThread) || allowInsert && filter === "filtered" && search === null;
-  const withoutThread = overview.threads.filter(({ key }) => key !== trashed.key);
+function signalThreadIsTrash(thread: EmailThread) { return thread.labels?.includes("TRASH") === true; }
+export type SignalPendingThreadFields = ReadonlyMap<string, { favorite?: boolean; read?: boolean; trash?: boolean }>;
+
+export function overlayPendingSignalThread(thread: EmailThread, pending: SignalPendingThreadFields | undefined) {
+  const fields = pending?.get(thread.key);
+  if (!fields) return thread;
+  const trash = fields.trash;
   return {
-    ...overview,
-    threads: belongs && canInsert ? [trashed, ...withoutThread].sort((left, right) => right.lastMessageAt.localeCompare(left.lastMessageAt) || left.key.localeCompare(right.key)) : withoutThread,
-    counts: adjustCounts ? {
-      ...overview.counts,
-      important: Math.max(0, overview.counts.important - (cachedThread?.inboxCategory === "Important" ? 1 : 0)),
-      urgent: Math.max(0, overview.counts.urgent - (cachedThread?.inboxCategory === "Urgent" ? 1 : 0)),
-      filtered: overview.counts.filtered + 1,
-      needsAction: Math.max(0, overview.counts.needsAction - (cachedThread?.state === "needs_action" ? 1 : 0)),
-    } : overview.counts,
+    ...thread,
+    ...(fields.favorite === undefined ? {} : { isFavorite: fields.favorite }),
+    ...(fields.read === undefined ? {} : { isRead: fields.read, unread: !fields.read }),
+    ...(trash === undefined ? {} : {
+      labels: trash ? [...new Set([...(thread.labels ?? []), "TRASH"])] : (thread.labels ?? []).filter((label) => label !== "TRASH"),
+      inInbox: !trash,
+    }),
   };
 }
 
+export function overlayPendingSignalThreads(threads: readonly EmailThread[], pending: SignalPendingThreadFields | undefined) {
+  return threads.map((thread) => overlayPendingSignalThread(thread, pending));
+}
+
+export type SignalPendingThreadField = "favorite" | "read" | "trash";
+export type SignalRepairPendingThreadFields = ReadonlyMap<string, ReadonlySet<SignalPendingThreadField>>;
+
+function authoritativeThreadMatchesPendingField(thread: EmailThread, field: SignalPendingThreadField, desired: { favorite?: boolean; read?: boolean; trash?: boolean }) {
+  if (field === "favorite") return desired.favorite !== undefined && thread.isFavorite === desired.favorite;
+  if (field === "read") return desired.read !== undefined && thread.isRead === desired.read;
+  return desired.trash !== undefined && signalThreadIsTrash(thread) === desired.trash;
+}
+
+export function settleMatchingSignalRepairPendingFields(pending: SignalPendingThreadFields, repairPending: SignalRepairPendingThreadFields, updates: readonly EmailThread[]) {
+  const nextPending = new Map([...pending].map(([key, fields]) => [key, { ...fields }]));
+  const nextRepairPending = new Map([...repairPending].map(([key, fields]) => [key, new Set(fields)]));
+  const settledThreadKeys: string[] = [];
+  for (const thread of updates) {
+    const desired = nextPending.get(thread.key);
+    const repairFields = nextRepairPending.get(thread.key);
+    if (!desired || !repairFields) continue;
+    for (const field of [...repairFields]) {
+      if (!authoritativeThreadMatchesPendingField(thread, field, desired)) continue;
+      delete desired[field];
+      repairFields.delete(field);
+    }
+    if (Object.keys(desired).length) nextPending.set(thread.key, desired);
+    else nextPending.delete(thread.key);
+    if (repairFields.size) nextRepairPending.set(thread.key, repairFields);
+    else {
+      nextRepairPending.delete(thread.key);
+      settledThreadKeys.push(thread.key);
+    }
+  }
+  return { pending: nextPending, repairPending: nextRepairPending, settledThreadKeys };
+}
+function signalThreadBelongs(thread: EmailThread, filter: EmailFilter) {
+  const trash = signalThreadIsTrash(thread);
+  if (filter === "trash") return trash;
+  if (trash) return false;
+  if (filter === "all") return true;
+  if (filter === "important") return thread.inboxCategory === "Important";
+  if (filter === "urgent") return thread.inboxCategory === "Urgent";
+  if (filter === "filtered") return thread.inboxCategory === "Filtered";
+  if (filter === "needs_action") return thread.state === "needs_action";
+  if (filter === "unread") return !thread.isRead;
+  return thread.isFavorite;
+}
+export function signalThreadBelongsToOverview(thread: EmailThread, query: EmailOverviewQuery) {
+  if (signalThreadIsTrash(thread) || thread.isRead !== (query.readState === "read")) return false;
+  return query.facets.some((facet) => facet === "favorite" ? thread.isFavorite : thread.inboxCategory.toLowerCase() === facet);
+}
+function signalCountContribution(thread: EmailThread) {
+  const trash = signalThreadIsTrash(thread);
+  return {
+    all: trash ? 0 : 1,
+    important: !trash && thread.inboxCategory === "Important" ? 1 : 0,
+    urgent: !trash && thread.inboxCategory === "Urgent" ? 1 : 0,
+    needsAction: !trash && thread.state === "needs_action" ? 1 : 0,
+    filtered: !trash && thread.inboxCategory === "Filtered" ? 1 : 0,
+    unread: !trash && !thread.isRead ? 1 : 0,
+    favorite: !trash && thread.isFavorite ? 1 : 0,
+    trash: trash ? 1 : 0,
+  };
+}
+
+export function reconcileSignalOverviewThreads(overview: EmailOverview, updates: readonly EmailThread[], query: EmailOverviewQuery | EmailFilter, search: string | null = null, allowInsert = true, previousThreads?: ReadonlyMap<string, EmailThread>): EmailOverview {
+  let next = overview;
+  for (const update of updates) {
+    const current = next.threads.find(({ key }) => key === update.key);
+    const belongs = typeof query === "string" ? signalThreadBelongs(update, query) : signalThreadBelongsToOverview(update, query);
+    const activeSearch = typeof query === "string" ? search : query.search || null;
+    const canInsert = Boolean(current) || allowInsert && activeSearch === null && belongs;
+    const remaining = next.threads.filter(({ key }) => key !== update.key);
+    const threads = belongs && canInsert ? [update, ...remaining].sort((left, right) => right.lastMessageAt.localeCompare(left.lastMessageAt) || left.key.localeCompare(right.key)) : remaining;
+    const previous = current ?? previousThreads?.get(update.key);
+    if (!current && threads === remaining && !previous) continue;
+    const before = previous ? signalCountContribution(previous) : signalCountContribution(update);
+    const after = signalCountContribution(update);
+    next = { ...next, threads, counts: Object.fromEntries(Object.entries(next.counts).map(([key, count]) => [key, Math.max(0, count + (after[key as keyof typeof after] ?? 0) - (before[key as keyof typeof before] ?? 0))])) as EmailOverview["counts"] };
+  }
+  return next;
+}
+
+export function reconcileSignalThreads(queryClient: QueryClient, context: WorkspaceContext, connectorKey: string, updates: readonly EmailThread[], pending?: SignalPendingThreadFields) {
+  const snapshots = queryClient.getQueriesData<EmailOverview>({ queryKey: signalQueryKeys.accountOverviews(context, connectorKey) });
+  const previous = new Map<string, EmailThread>();
+  for (const update of updates) {
+    const detail = queryClient.getQueryData<{ thread: EmailThread }>(signalQueryKeys.detail(context, connectorKey, update.key));
+    const cached = [detail?.thread, ...snapshots.flatMap(([, overview]) => overview?.threads ?? [])]
+      .filter((thread): thread is EmailThread => thread?.key === update.key)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+    if (cached) previous.set(update.key, cached);
+  }
+  const currentUpdates = updates.map((update) => {
+    const cached = previous.get(update.key);
+    return overlayPendingSignalThread(cached && cached.updatedAt > update.updatedAt ? cached : update, pending);
+  });
+  for (const [queryKey, overview] of snapshots) {
+    if (!overview) continue;
+    const hasAmbiguousBaseline = updates.some((update) => {
+      if (overview.threads.some(({ key }) => key === update.key)) return false;
+      const cached = previous.get(update.key);
+      if (!cached || cached.updatedAt <= update.updatedAt) return false;
+      const before = signalCountContribution(update);
+      const after = signalCountContribution(cached);
+      return Object.keys(before).some((key) => before[key as keyof typeof before] !== after[key as keyof typeof after]);
+    });
+    if (hasAmbiguousBaseline) {
+      void queryClient.invalidateQueries({ queryKey, exact: true, refetchType: "active" });
+      continue;
+    }
+    const parsed = parseSignalOverviewQuery(queryKey);
+    if (!parsed || parsed.kind === "root") continue;
+    const isPage = queryKey.at(-2) === "pages";
+    queryClient.setQueryData(queryKey, reconcileSignalOverviewThreads(overview, currentUpdates, parsed.kind === "inbox" ? parsed.query : parsed.filter, parsed.kind === "legacy" ? parsed.search : null, !isPage, previous));
+  }
+  for (const update of currentUpdates) queryClient.setQueryData<{ thread: EmailThread; messages: (Record<string, unknown> & { labels?: string[]; isRead?: boolean; unread?: boolean })[] }>(signalQueryKeys.detail(context, connectorKey, update.key), (detail) => {
+    if (!detail) return detail;
+    const wasTrash = signalThreadIsTrash(detail.thread);
+    const isTrash = signalThreadIsTrash(update);
+    const readChanged = detail.thread.isRead !== update.isRead;
+    return { ...detail, thread: update, messages: detail.messages.map((message) => ({
+      ...message,
+      ...(readChanged ? { isRead: update.isRead, ...(message.unread === undefined ? {} : { unread: !update.isRead }) } : {}),
+      ...(wasTrash === isTrash ? {} : { labels: isTrash ? [...new Set([...(message.labels ?? []), "TRASH"])] : (message.labels ?? []).filter((label) => label !== "TRASH") }),
+    })) };
+  });
+  return { previous, updates: currentUpdates };
+}
+
+export function reconcileSignalSelectedThreads(current: readonly EmailThread[], updates: readonly EmailThread[]) {
+  const byKey = new Map(updates.map((thread) => [thread.key, thread]));
+  return current.map((thread) => byKey.get(thread.key) ?? thread);
+}
+
 export function reconcileSignalTrashedThread(queryClient: QueryClient, context: WorkspaceContext, connectorKey: string, result: EmailThread) {
-  const trashed: EmailThread = { ...result, inboxCategory: "Filtered", state: "filtered", inInbox: true, labels: [...new Set([...(result.labels ?? []), "TRASH"])] };
+  reconcileSignalThreads(queryClient, context, connectorKey, [result]);
+  return result;
+}
+
+export type SignalTrashCacheRemoval = {
+  overviews: [QueryKey, { threads: EmailThread[]; trashCount: number; optimisticVersion: number }][];
+  details: [QueryKey, { detail: { thread: EmailThread; messages?: unknown[] }; version: number }][];
+};
+
+export function clearSignalTrashCaches(queryClient: QueryClient, context: WorkspaceContext, connectorKey: string): SignalTrashCacheRemoval {
+  const overviews: SignalTrashCacheRemoval["overviews"] = [];
   for (const [queryKey, overview] of queryClient.getQueriesData<EmailOverview>({ queryKey: signalQueryKeys.accountOverviews(context, connectorKey) })) {
     if (!overview) continue;
-    const filter = queryKey[5] as EmailFilter;
-    const search = typeof queryKey[6] === "string" ? queryKey[6] : null;
-    const isPage = queryKey.at(-2) === "pages";
-    queryClient.setQueryData(queryKey, moveSignalThreadToFiltered(overview, trashed, filter, search, !isPage));
+    const threads = overview.threads.filter(signalThreadIsTrash);
+    const optimistic = { ...overview, threads: overview.threads.filter((thread) => !signalThreadIsTrash(thread)), counts: { ...overview.counts, trash: 0 } };
+    queryClient.setQueryData(queryKey, optimistic);
+    overviews.push([queryKey, { threads, trashCount: overview.counts.trash, optimisticVersion: queryClient.getQueryState(queryKey)?.dataUpdateCount ?? 0 }]);
   }
-  queryClient.setQueryData<{ thread: EmailThread; messages: (Record<string, unknown> & { inboxCategory?: string; labels?: string[] })[] }>(signalQueryKeys.detail(context, connectorKey, trashed.key), (detail) => detail ? {
-    thread: trashed,
-    messages: detail.messages.map((message) => ({ ...message, inboxCategory: "Filtered", labels: [...new Set([...(message.labels ?? []), "TRASH"])] })),
-  } : detail);
-  return trashed;
+  const details: SignalTrashCacheRemoval["details"] = [];
+  for (const [queryKey, detail] of queryClient.getQueriesData<{ thread: EmailThread; messages?: unknown[] }>({ queryKey: signalQueryKeys.details(context) })) {
+    if (queryKey[4] === connectorKey && detail && signalThreadIsTrash(detail.thread)) {
+      details.push([queryKey, { detail, version: queryClient.getQueryState(queryKey)?.dataUpdateCount ?? 0 }]);
+    }
+  }
+  return { overviews, details };
+}
+
+export function restoreSignalTrashCaches(queryClient: QueryClient, removal: SignalTrashCacheRemoval) {
+  const changedAuthoritatively = removal.overviews.some(([queryKey, snapshot]) => queryClient.getQueryState(queryKey)?.dataUpdateCount !== snapshot.optimisticVersion)
+    || removal.details.some(([queryKey, snapshot]) => queryClient.getQueryState(queryKey)?.dataUpdateCount !== snapshot.version);
+  if (changedAuthoritatively) return false;
+  for (const [queryKey, snapshot] of removal.overviews) queryClient.setQueryData<EmailOverview>(queryKey, (current) => {
+    if (!current) return current;
+    const existing = new Set(current.threads.map(({ key }) => key));
+    const restored = snapshot.threads.filter(({ key }) => !existing.has(key));
+    return {
+      ...current,
+      threads: [...current.threads, ...restored].sort((left, right) => right.lastMessageAt.localeCompare(left.lastMessageAt) || left.key.localeCompare(right.key)),
+      counts: { ...current.counts, trash: Math.max(current.counts.trash + restored.length, snapshot.trashCount, current.threads.filter(signalThreadIsTrash).length + restored.length) },
+    };
+  });
+  for (const [queryKey, snapshot] of removal.details) queryClient.setQueryData(queryKey, (current: typeof snapshot.detail | undefined) => current ?? snapshot.detail);
+  return true;
+}
+
+export function commitSignalTrashCaches(queryClient: QueryClient, removal: SignalTrashCacheRemoval) {
+  for (const [queryKey, snapshot] of removal.details) {
+    if (queryClient.getQueryState(queryKey)?.dataUpdateCount === snapshot.version) queryClient.removeQueries({ queryKey, exact: true });
+  }
 }
 
 export function upsertSignalTranslationVersion(queryClient: QueryClient, context: WorkspaceContext, messageKey: string, version: EmailTranslationVersion) {
@@ -316,6 +507,36 @@ export function upsertSignalSummary(queryClient: QueryClient, context: Workspace
   }));
 }
 
+function sortSignalGeneratedRecords<T extends { key: string; version: number }>(records: readonly T[]) {
+  return [...records].sort((left, right) => right.version - left.version || left.key.localeCompare(right.key));
+}
+
+export function removeSignalTranslationVersions(current: { messageKey: string; versions: EmailTranslationVersion[] } | undefined, keys: readonly string[]) {
+  if (!current) return current;
+  const removed = new Set(keys);
+  return { ...current, versions: current.versions.filter(({ key }) => !removed.has(key)) };
+}
+
+export function restoreMissingSignalTranslationVersions(current: { messageKey: string; versions: EmailTranslationVersion[] } | undefined, snapshot: readonly EmailTranslationVersion[], keys: readonly string[]) {
+  if (!current) return current;
+  const restore = new Set(keys);
+  const existing = new Set(current.versions.map(({ key }) => key));
+  return { ...current, versions: sortSignalGeneratedRecords([...current.versions, ...snapshot.filter(({ key }) => restore.has(key) && !existing.has(key))]) };
+}
+
+export function removeSignalSummaries(current: { messageKey: string; summaries: EmailSummary[] } | undefined, keys: readonly string[]) {
+  if (!current) return current;
+  const removed = new Set(keys);
+  return { ...current, summaries: current.summaries.filter(({ key }) => !removed.has(key)) };
+}
+
+export function restoreMissingSignalSummaries(current: { messageKey: string; summaries: EmailSummary[] } | undefined, snapshot: readonly EmailSummary[], keys: readonly string[]) {
+  if (!current) return current;
+  const restore = new Set(keys);
+  const existing = new Set(current.summaries.map(({ key }) => key));
+  return { ...current, summaries: sortSignalGeneratedRecords([...current.summaries, ...snapshot.filter(({ key }) => restore.has(key) && !existing.has(key))]) };
+}
+
 export function patchSignalInbox(queryClient: QueryClient, context: WorkspaceContext, inbox: EmailConnector) {
   queryClient.setQueriesData<EmailOverview>({ queryKey: signalQueryKeys.overviews(context) }, (overview) => overview ? {
     ...overview,
@@ -325,12 +546,26 @@ export function patchSignalInbox(queryClient: QueryClient, context: WorkspaceCon
 }
 
 export function upsertSignalTone(queryClient: QueryClient, context: WorkspaceContext, tone: EmailToneRecord) {
-  queryClient.setQueryData<EmailToneRecord[]>(signalQueryKeys.tones(context), (current) => {
-    const records = current ?? [];
-    return records.some(({ key }) => key === tone.key)
-      ? records.map((candidate) => candidate.key === tone.key ? tone : candidate)
-      : [...records, tone];
-  });
+  queryClient.setQueryData<EmailOverview>(signalQueryKeys.overview(context), (current) => current ? {
+    ...current,
+    tones: current.tones.some(({ key }) => key === tone.key)
+      ? current.tones.map((candidate) => candidate.key === tone.key ? tone : candidate)
+      : [...current.tones, tone],
+  } : current);
+}
+
+export function restoreSignalToneIfStillRemoved(current: EmailToneRecord[] | undefined, removed: EmailToneRecord) {
+  if (!current || current.some(({ key }) => key === removed.key)) return current;
+  return [...current, removed];
+}
+
+export function restoreSignalDraftIfStillRemoved(current: EmailOverview | undefined, removed: EmailDraft, locations: { drafts: boolean; unassignedDrafts: boolean }) {
+  if (!current) return current;
+  return {
+    ...current,
+    drafts: locations.drafts && !current.drafts.some(({ key }) => key === removed.key) ? [...current.drafts, removed] : current.drafts,
+    unassignedDrafts: locations.unassignedDrafts && !current.unassignedDrafts.some(({ key }) => key === removed.key) ? [...current.unassignedDrafts, removed] : current.unassignedDrafts,
+  };
 }
 
 export function upsertSignalReplyContext(queryClient: QueryClient, context: WorkspaceContext, note: EmailReplyContext) {

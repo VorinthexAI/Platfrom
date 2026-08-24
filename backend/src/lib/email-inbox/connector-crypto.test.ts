@@ -18,6 +18,15 @@ describe('email connector credential security', () => {
     expect(() => decryptEmailConnectorCredentials(encrypted.encryptedCredentials, encrypted.encryptionKeyId, { ...binding, scopeKey: 'cmrnlzf650002qc7k4p5zem5w' }, keyring)).toThrow();
   });
 
+  test('keeps legacy Gmail AAD and isolates provider credentials', () => {
+    const gmail = encryptEmailConnectorCredentials({ accessToken: 'gmail', tokenType: 'Bearer', expiresAt: '2026-08-11T12:00:00.000Z' }, binding, keyring);
+    expect(decryptEmailConnectorCredentials(gmail.encryptedCredentials, gmail.encryptionKeyId, { ...binding, provider: 'gmail' }, keyring)).toMatchObject({ accessToken: 'gmail' });
+    expect(() => decryptEmailConnectorCredentials(gmail.encryptedCredentials, gmail.encryptionKeyId, { ...binding, provider: 'outlook' }, keyring)).toThrow();
+    const icloudBinding = { ...binding, providerAccountId: 'apple-1', provider: 'icloud' as const };
+    const icloud = encryptEmailConnectorCredentials({ username: 'person@icloud.com', appPassword: 'app-password' }, icloudBinding, keyring);
+    expect(decryptEmailConnectorCredentials(icloud.encryptedCredentials, icloud.encryptionKeyId, icloudBinding, keyring)).toEqual({ username: 'person@icloud.com', appPassword: 'app-password' });
+  });
+
   test('fingerprints tokens and strips all credential fields from DTOs', () => {
     const now = '2026-08-11T12:00:00.000Z';
     const connector = organizationConnectorSchema.parse({

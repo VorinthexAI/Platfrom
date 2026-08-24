@@ -32,6 +32,16 @@ health checks, and signed-byte transfers are protocol boundaries rather than
 tools. Never expose generic database, arbitrary query, or credential-management
 tools.
 
+`app.search` is the canonical cross-collection text search. The older
+`content.search`, `image.search`, `inbox.search`, `email.tone.search`,
+`place.search`, `trip.search`, and `country.search` entries remain temporarily
+for product-specific callers and should be removed once those callers migrate.
+They must continue to delegate to the same domain services rather than gaining
+separate search behavior. Selected-inbox message search uses the
+`email-messages` collection with an authorized connector selector; saved-draft
+search uses `email-drafts` with the same connector boundary. Read state and
+inbox facets remain email-domain boundaries.
+
 Generated travel references use the same canonical travel service from HTTP
 and Core. `trip.guide.generate/list` and the parameterized
 `place.reference.generate/list` persist ordinary Archive documents plus one

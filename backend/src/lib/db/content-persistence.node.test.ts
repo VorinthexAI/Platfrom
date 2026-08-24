@@ -134,6 +134,7 @@ describe('scoped Content persistence', () => {
     expect(calls[0]?.bindVars?.patch).toMatchObject({ content: 'Hello Core' });
     expect(calls[0]?.bindVars?.unset).toContain('emailToneEmbeddingVersion');
     expect(calls[0]?.bindVars).toMatchObject({ changesLocation: false });
+    expect(calls[0]?.bindVars).not.toHaveProperty('allowSystemContainerUpdate');
     expect(calls[0]?.query).toContain('current.updatedAt == @expectedUpdatedAt');
     expect(() => createContentPersistence(executor).updateDocument(scopeKey, folderKey, { content: 'detached' })).toThrow('Document content updates require a fresh embedding.');
   });

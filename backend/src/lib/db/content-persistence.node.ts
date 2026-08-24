@@ -112,10 +112,10 @@ async function scopedUpdate<T>(
     ...(collection === 'documentVersions' || collection === 'documentShares' || collection === 'shares' ? {} : { destinationKey: set.parentFolderKey ?? set.folderKey ?? null }),
     ...(collection === 'folders' ? { changesLocation: Object.prototype.hasOwnProperty.call(patch, 'parentFolderKey') } : {}),
     ...(collection === 'documents' ? { changesLocation: Object.prototype.hasOwnProperty.call(patch, 'folderKey') } : {}),
+    ...(collection === 'folders' ? { allowSystemContainerUpdate: Object.keys(patch).every((field) => field === 'isFavorite' || field === 'updatedAt') } : {}),
     patch: set,
     unset,
     expectedUpdatedAt: expectedUpdatedAt ?? null,
-    allowSystemContainerUpdate: collection === 'folders' && Object.keys(patch).every((field) => field === 'isFavorite' || field === 'updatedAt'),
   });
   const value = await cursor.next();
   return value ? parse(withArangoKey(value as Record<string, unknown>)) : null;

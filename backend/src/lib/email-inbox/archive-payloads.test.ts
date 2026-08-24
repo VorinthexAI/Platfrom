@@ -15,6 +15,20 @@ describe('mail Archive payload codecs', () => {
     expect(document.content).not.toContain('embedding');
   });
 
+  test('preserves exact blank authored draft fields', () => {
+    const payload = emailDraftPayloadSchema.parse({ version: 1, kind: 'mail-new-draft', data: { variant: 'new', accountKey: key, to: ['person@example.com'], subject: '', generatedContent: '(Empty message)', finalContent: '', status: 'edited' } });
+    const document = archiveDocument({ key, scopeKey, folderKey: scopeKey, name: '(No subject)', payload, embedding, createdAt: now, updatedAt: now });
+    expect(decodeEmailDraft(document)).toMatchObject({ subject: '', finalContent: '', status: 'edited' });
+  });
+
+  test('round-trips safe reply mode and resolved recipients with compatibility defaults', () => {
+    const payload = emailDraftPayloadSchema.parse({ version: 1, kind: 'mail-reply-draft', data: { variant: 'reply', replyMode: 'reply_all', threadKey: key, messageKey: scopeKey, to: ['person@example.com'], cc: ['copy@example.com'], generatedContent: 'Body', status: 'generated' } });
+    const document = archiveDocument({ key, scopeKey, folderKey: scopeKey, name: 'Reply', payload, embedding, createdAt: now, updatedAt: now });
+    expect(decodeEmailDraft(document)).toMatchObject({ replyMode: 'reply_all', to: ['person@example.com'], cc: ['copy@example.com'] });
+    const legacy = emailDraftPayloadSchema.parse({ version: 1, kind: 'mail-reply-draft', data: { threadKey: key, messageKey: scopeKey, generatedContent: 'Body', status: 'generated' } });
+    expect(legacy.data).toMatchObject({ replyMode: 'reply', to: [], cc: [] });
+  });
+
   test('rejects unknown fields, versions, attachment kinds, and more than twenty refs', () => {
     const base = { version: 1, kind: 'mail-new-draft', data: { variant: 'new', accountKey: key, to: ['person@example.com'], subject: 'Hello', generatedContent: 'Body', status: 'generated' } };
     expect(() => emailDraftPayloadSchema.parse({ ...base, extra: true })).toThrow();
@@ -36,10 +50,13 @@ describe('mail Archive payload codecs', () => {
   });
 
   test('decodes user-edited Markdown tones while preserving strict canonical metadata', () => {
-    const tone = { slug: 'warm' as const, name: 'Warm' as const, description: 'Friendly and considerate.', instruction: 'Sound human.' };
+    const tone = { slug: 'warm' as const, name: 'Warm' as const, instruction: 'Sound human.' };
     const document = archiveDocument({ key, scopeKey, folderKey: scopeKey, name: tone.name, payload: emailTonePayloadSchema.parse({ version: 1, kind: 'mail-tone', data: tone }), embedding, createdAt: now, updatedAt: now, mutationPolicy: 'user' });
-    document.content = encodeEmailToneContent(tone).replace('Friendly and considerate.', 'Friendly, calm, and concise.').replace('Sound human.', 'Open with appreciation and use plain language.');
-    expect(decodeEmailTone(document)).toMatchObject({ slug: 'warm', name: 'Warm', description: 'Friendly, calm, and concise.', instruction: 'Open with appreciation and use plain language.' });
+    document.content = `# Warm\n\n<!-- vorinthex-mail-tone {"version":1,"slug":"warm"} -->\n\nLegacy description.\n\n## Instruction\n\nOpen with appreciation and use plain language.`;
+    expect(decodeEmailTone(document)).toMatchObject({ slug: 'warm', name: 'Warm', instruction: 'Open with appreciation and use plain language.' });
+    expect(decodeEmailTone(document)).not.toHaveProperty('description');
+    expect(encodeEmailToneContent(tone)).not.toContain('Legacy description');
+    expect(() => emailTonePayloadSchema.parse({ version: 1, kind: 'mail-tone', data: { ...tone, description: 'Removed' } })).toThrow();
     expect(document.mutationPolicy).toBe('user');
     expect(() => decodeEmailTone({ ...document, content: document.content.replace('"warm"', '"invented"') })).toThrow();
   });

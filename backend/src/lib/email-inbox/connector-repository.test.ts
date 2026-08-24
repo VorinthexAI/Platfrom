@@ -109,4 +109,50 @@ describe('organization connector repository', () => {
     expect(call?.query).toContain('connector.sendLeaseExpiresAt == null || connector.sendLeaseExpiresAt <= @now');
     expect(call?.bindVars).toMatchObject({ key: membershipKey, expectedUpdatedAt: '2026-08-11T12:00:00.000Z' });
   });
+
+  test('makes connector sync and send claims mutually exclusive', async () => {
+    const calls: string[] = [];
+    const database = { collection: () => ({}), query: async (query: string) => { calls.push(query); return { next: async () => null }; } };
+    const repository = createConnectorRepository(database as never);
+    await repository.claimSync(membershipKey, 'sync-token', '2026-08-11T13:00:00.000Z');
+    await repository.claimSend(membershipKey, 'send-token', '2026-08-11T13:00:00.000Z');
+    expect(calls[0]).toContain('connector.sendLeaseExpiresAt == null || connector.sendLeaseExpiresAt <= @now');
+    expect(calls[1]).toContain('connector.syncLeaseExpiresAt == null || connector.syncLeaseExpiresAt <= @now');
+  });
+
+  test('atomically reactivates an errored connector when its sync lease starts work', async () => {
+    let call: { query: string; bindVars: Record<string, any> } | undefined;
+    const database = { collection: () => ({}), query: async (query: string, bindVars: Record<string, any>) => { call = { query, bindVars }; return { next: async () => ({ _rev: 'next' }) }; } };
+    expect(await createConnectorRepository(database as never).setSyncState(membershipKey, 'syncing', { leaseToken: '11111111-1111-4111-8111-111111111111' })).toBe('next');
+    expect(call?.query).toContain('connector.syncLeaseToken == @leaseToken');
+    expect(call?.bindVars.update).toMatchObject({ status: 'active', syncStatus: 'syncing', lastError: null });
+  });
+
+  test('rejects renewal after lease expiry or connector disablement while allowing error recovery', async () => {
+    const calls: Array<{ query: string; bindVars: Record<string, unknown> }> = [];
+    const database = { collection: () => ({}), query: async (query: string, bindVars: Record<string, unknown>) => { calls.push({ query, bindVars }); return { next: async () => null }; } };
+    const repository = createConnectorRepository(database as never);
+    expect(await repository.renewSync(membershipKey, '11111111-1111-4111-8111-111111111111', '2026-08-11T13:00:00.000Z')).toBe(false);
+    expect(await repository.renewSend(membershipKey, '22222222-2222-4222-8222-222222222222', '2026-08-11T13:00:00.000Z')).toBe(false);
+    expect(calls).toHaveLength(2);
+    for (const { query, bindVars } of calls) {
+      expect(query).toContain('connector.syncEnabled != false');
+      expect(query).toContain('LeaseExpiresAt > @now');
+      expect(bindVars.now).toBeString();
+    }
+    expect(calls[0]!.query).toContain('connector.status != "revoked"');
+    expect(calls[0]!.query).not.toContain('connector.status == "active"');
+    expect(calls[1]!.query).toContain('connector.status == "active"');
+    expect(calls[0]!.query).toContain('connector.syncLeaseToken == @token');
+    expect(calls[1]!.query).toContain('connector.sendLeaseToken == @token');
+  });
+
+  test('fences watch persistence against disconnects and connector revisions', async () => {
+    let call: { query: string; bindVars: Record<string, unknown> } | undefined;
+    const database = { collection: () => ({}), query: async (query: string, bindVars: Record<string, unknown>) => { call = { query, bindVars }; return { next: async () => null }; } };
+    await createConnectorRepository(database as never).updateWatch(membershipKey, { historyId: '1', expiration: String(Date.now() + 60_000) }, undefined, '2026-08-11T12:00:00.000Z');
+    expect(call?.query).toContain('connector.status != "revoked"');
+    expect(call?.query).toContain('connector.syncEnabled != false');
+    expect(call?.query).toContain('connector.updatedAt == @expectedUpdatedAt');
+  });
 });

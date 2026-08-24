@@ -71,3 +71,4 @@ export * from './icons/shield';
 export * from './icons/fragment';
 export * from './icons/google';
 export * from './icons/apple';
+export * from './icons/microsoft';

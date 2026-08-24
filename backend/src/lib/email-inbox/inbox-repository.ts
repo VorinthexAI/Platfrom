@@ -23,9 +23,19 @@ export function createInboxRepository(database: Database = db) {
       const raw = await cursor.next();
       return raw ? { ...parse(raw), revision: revision(raw) } : null;
     },
-    async listScope(organizationKey: string, scopeKey: string): Promise<Inbox[]> {
-      const cursor = await database.query('FOR inbox IN inboxes FILTER inbox.organizationKey == @organizationKey && inbox.scopeKey == @scopeKey SORT inbox.name ASC, inbox._key ASC RETURN inbox', { organizationKey, scopeKey });
-      return (await cursor.all()).map(parse);
+    async search(organizationKey: string, scopeKey: string, connectorKeys: string[], embedding: number[], query: string, minimumScore: number, limit: number) {
+      if (!connectorKeys.length) return [];
+      const normalizedQuery = query.normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('en-US');
+      const cursor = await database.query(`FOR inbox IN inboxes
+        FILTER inbox.organizationKey == @organizationKey && inbox.scopeKey == @scopeKey && inbox.connectorKey IN @connectorKeys
+        FILTER IS_ARRAY(inbox.embedding) && LENGTH(inbox.embedding) == LENGTH(@embedding)
+        LET direct = CONTAINS(LOWER(CONCAT_SEPARATOR(" ", inbox.name, inbox.description)), @query)
+        LET score = COSINE_SIMILARITY(inbox.embedding, @embedding)
+        FILTER direct || (IS_NUMBER(score) && score >= @minimumScore)
+        SORT direct DESC, score DESC, inbox.updatedAt DESC, inbox._key ASC
+        LIMIT @limit
+        RETURN { inbox, score: direct ? 1 : score }`, { organizationKey, scopeKey, connectorKeys, embedding, query: normalizedQuery, minimumScore, limit });
+      return (await cursor.all() as Array<{ inbox: unknown; score: number }>).map(({ inbox, score }) => ({ inbox: parse(inbox), score }));
     },
     async ensure(connector: OrganizationConnector, metadata: { name: string; description?: string }, embedding: number[], overwrite: boolean, expectedRevision?: string | null): Promise<(Inbox & { revision: string }) | null> {
       const timestamp = new Date().toISOString();
