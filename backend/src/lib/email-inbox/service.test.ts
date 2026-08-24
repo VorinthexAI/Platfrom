@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createEmailService, emailDraftComposeInputSchema, emailOverviewInputSchema, emailToneCreateInputSchema, emailToneUpdateInputSchema } from './service';
+import { createEmailService as createEmailServiceImplementation, emailDraftComposeInputSchema, emailOverviewInputSchema, emailToneCreateInputSchema, emailToneUpdateInputSchema } from './service';
 import { GmailApiError } from './gmail';
 import { ICloudApiError, iCloudSmtpPayload } from './icloud';
 import { simpleParser } from 'mailparser';
@@ -19,6 +19,19 @@ const connector = { key: userKey, organizationKey: 'org-1', scopeKey, provider: 
 const thread = { key: userKey, scopeKey, accountKey: userKey, providerThreadId: 'thread-1', subject: 'Project', summary: 'Summary', intent: 'Review', priority: 'normal', state: 'needs_action', unread: true, lastMessageAt: now, embedding, isFavorite: false, createdAt: now, updatedAt: now } as const;
 const message = { key: scopeKey, scopeKey, accountKey: userKey, threadKey: userKey, providerMessageId: 'message-1', from: 'sender@example.com', replyTo: 'replies@example.com', to: ['me@example.com'], subject: 'Project', body: 'Can you review?', summary: 'Can you review?', direction: 'inbound', unread: true, sentAt: now, hasAttachments: false, messageIdHeader: '<source@example.com>', replyDepth: 0, embedding, createdAt: now, updatedAt: now } as const;
 const draft = { key: userKey, scopeKey, variant: 'reply', replyMode: 'reply', threadKey: userKey, messageKey: scopeKey, to: ['replies@example.com'], cc: [], generatedContent: 'I will review it.', status: 'sending', sendLeaseToken, embedding, createdAt: now, updatedAt: now } as const;
+
+function createEmailService(options: Parameters<typeof createEmailServiceImplementation>[0] = {}) {
+  return createEmailServiceImplementation({
+    publishInboxChanged: async () => undefined,
+    enqueueRepair: async () => ({ jobId: 'test-repair' }),
+    completeRepair: async () => undefined,
+    enqueueWatchRepair: async () => ({ jobId: 'test-watch-repair' }),
+    completeWatchRepair: async () => undefined,
+    enqueueClearTrash: async () => ({ jobId: 'test-clear-trash' }),
+    completeClearTrash: async () => undefined,
+    ...options,
+  });
+}
 
 function serviceFor(sendRaw: () => Promise<{ id: string; threadId: string }>, existing: { id: string; threadId: string } | null = null, role: 'owner' | 'admin' | 'moderator' | 'viewer' = 'owner', subject: string = thread.subject, messages: unknown[] = [message], claimedDraft: any = draft, attachmentResources: any[] = []) {
   const finishes: unknown[][] = [];
