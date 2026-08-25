@@ -185,6 +185,12 @@ for i in $(seq 1 30); do
 done
 if [ "$ok" != 1 ]; then
 	log "NEW color unhealthy — leaving old color live, removing failed new color"
+	log "api-${NEW} status"
+	docker ps -a --filter "name=^/api-${NEW}$" --format '{{.Names}} {{.Status}}' || true
+	docker logs --tail 200 "api-${NEW}" 2>&1 || true
+	log "web-${NEW} status"
+	docker ps -a --filter "name=^/web-${NEW}$" --format '{{.Names}} {{.Status}}' || true
+	docker logs --tail 200 "web-${NEW}" 2>&1 || true
 	docker rm -f "api-${NEW}" "web-${NEW}" >/dev/null 2>&1 || true
 	exit 1
 fi

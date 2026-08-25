@@ -1179,6 +1179,7 @@ jobs:
             case "$STATUS" in
               Success) break;;
               Failed|Cancelled|TimedOut)
+                aws ssm get-command-invocation --command-id "$CMD" --instance-id "$IID" --query 'StandardOutputContent' --output text || true
                 aws ssm get-command-invocation --command-id "$CMD" --instance-id "$IID" --query 'StandardErrorContent' --output text || true
                 exit 1;;
             esac
