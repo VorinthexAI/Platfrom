@@ -70,6 +70,9 @@ ENV SHARED_DIR=/shared
 COPY --from=deps /app/node_modules ./node_modules
 COPY backend/package.json backend/tsconfig.json ./
 COPY backend/src ./src
+# country-catalog.ts resolves the canonical mobile GeoJSON from the repository
+# root; preserve that path after flattening backend/src into /app/src.
+COPY mobile/app/src/data/countries-110m.json mobile/app/src/data/countries-small.json mobile/app/src/data/country-name-overrides.json /mobile/app/src/data/
 COPY shared /shared
 USER bun
 EXPOSE 3001
