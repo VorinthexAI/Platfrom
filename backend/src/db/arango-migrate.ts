@@ -941,7 +941,7 @@ export async function retireUnsupportedEmailConnectors(targetDb: Database) {
     FILTER connector.provider != "gmail"
     FILTER connector.status != "revoked" || connector.syncEnabled != false || HAS(connector, "encryptedCredentials") || HAS(connector, "encryptionKeyId") || HAS(connector, "accessTokenFingerprint") || HAS(connector, "syncLeaseToken") || HAS(connector, "sendLeaseToken")
     UPDATE connector WITH {
-      status: "revoked", syncEnabled: false, syncStatus: "idle", revokedAt: connector.revokedAt ?? DATE_ISO8601(DATE_NOW()),
+      status: "revoked", syncEnabled: false, syncStatus: "idle", revokedAt: connector.revokedAt != null ? connector.revokedAt : DATE_ISO8601(DATE_NOW()),
       encryptedCredentials: null, encryptionKeyId: null, accessTokenFingerprint: null,
       syncLeaseToken: null, syncLeaseExpiresAt: null, sendLeaseToken: null, sendLeaseExpiresAt: null,
       historyId: null, watchRegisteredAt: null, watchExpiresAt: null, updatedAt: DATE_ISO8601(DATE_NOW())
