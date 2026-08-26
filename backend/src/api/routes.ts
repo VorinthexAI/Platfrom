@@ -47,6 +47,7 @@ import { travelHandlers } from './travel';
 import { countryHandlers } from './countries';
 import { emailHandlers } from './email-inbox';
 import { bookHandlers } from './books';
+import { respondToAssistant } from './assistant';
 import { userHiddenHandlers } from './user-hiddens';
 import { streamEvents } from './events';
 import { searchApp } from './app-search';
@@ -531,9 +532,13 @@ export function registerRoutes(app: Hono) {
   app.post('/email/drafts/:draftKey/send', emailHandlers.sendDraft);
   app.post('/email/disconnect', emailHandlers.disconnect);
   app.post('/books/overview', bookHandlers.overview);
+  app.post('/assistant/respond', respondToAssistant);
   app.post('/books', bookHandlers.create);
   app.post('/books/:bookKey/detail', bookHandlers.detail);
   app.patch('/books/:bookKey/chapters/:chapterKey/progress', bookHandlers.progress);
+  app.post('/books/:bookKey/retry', bookHandlers.retry);
+  app.post('/books/:bookKey/cancel', bookHandlers.cancel);
+  app.delete('/books/:bookKey', bookHandlers.delete);
 
   app.get('/founders/me', getFoundersAccount);
   app.get('/founders/organizations', listFoundersOrganizations);

@@ -298,7 +298,8 @@ test("edits trip metadata and cover with the shared switch and Gallery cover pip
   expect(workspace).toContain('title="Edit trip"');
   expect(workspace).toContain('<Switch accessibilityLabel="Favorite trip"');
   expect(workspace).toContain("ImagePicker.launchImageLibraryAsync");
-  expect(workspace).toContain("normalizeCapturedJpeg(coverChange");
+  expect(workspace).toContain("normalizeCapturedPng(coverChange");
+  expect(workspace).toContain('filename: `trip-cover-${Date.now()}.png`');
   expect(workspace).toContain('processingMode: "cover"');
   expect(workspace).toContain("fetchGalleryUploadStatus([job.key])");
   expect(workspace.indexOf("uploadedImageKey = job.imageKey")).toBeLessThan(workspace.indexOf("fetchGalleryUploadStatus([job.key])"));

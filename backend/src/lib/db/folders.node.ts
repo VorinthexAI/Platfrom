@@ -13,9 +13,10 @@ export const folderSchema = z.object({
   name: z.string().trim().min(1),
   description: z.string().trim().min(1).optional(),
   coverImageKey: z.string().cuid().optional(),
-  purpose: z.enum(['generated-documents-root', 'generated-documents-guide', 'generated-documents-brief', 'generated-documents-accommodations', 'generated-documents-restaurants', 'generated-documents-activities', 'communication-mail-root', 'communication-mail-threads', 'communication-mail-drafts', 'communication-mail-tones', 'communication-mail-reply-context', 'communication-mail-settings']).optional(),
-  managedPurpose: z.enum(['mail-attachment']).optional(), managedOwnerKey: z.string().cuid().optional(),
+  purpose: z.enum(['generated-documents-root', 'generated-documents-guide', 'generated-documents-brief', 'generated-documents-accommodations', 'generated-documents-restaurants', 'generated-documents-activities', 'generated-audio-root', 'communication-mail-root', 'communication-mail-inboxes', 'communication-mail-threads', 'communication-mail-drafts', 'communication-mail-tones', 'communication-mail-reply-context', 'communication-mail-settings']).optional(),
+  managedPurpose: z.enum(['audio-book', 'mail-attachment', 'mail-inbox', 'mail-inbox-files', 'mail-thread']).optional(), managedOwnerKey: z.string().cuid().optional(),
   mutationPolicy: z.enum(['user', 'system-container']).optional(),
+  archiveVisibility: z.enum(['visible', 'domain-only']).default('visible'),
   embedding: currentEmbeddingSchema,
   isFavorite: z.boolean().default(false),
   _internalDeletion: z.object({
@@ -30,14 +31,14 @@ export const folderSchema = z.object({
   updatedAt: z.string().datetime(),
 });
 
-export type Folder = z.infer<typeof folderSchema>;
+export type Folder = Omit<z.infer<typeof folderSchema>, 'archiveVisibility'> & { archiveVisibility?: 'visible' | 'domain-only' };
 export const foldersEmbeddingFields = ['name', 'description'] as const;
 const helpers = createNodeHelpers(FOLDERS_COLLECTION, folderSchema, foldersEmbeddingFields, { includeEmbeddingMetadata: false });
 export async function insertFolder(folder: Folder): Promise<Folder> {
   const { contentPersistence } = await import('./content-persistence.node');
   return contentPersistence.insertFolder(folder);
 }
-export const getFolderById = helpers.getById;
+export const getFolderById: (id: string) => Promise<Folder | null> = helpers.getById;
 export const upsertFolderByKey = helpers.upsertByKey;
 export const getAllFoldersChunked = helpers.getAllChunked;
 export const listFoldersPage = helpers.listPage;
@@ -70,11 +71,30 @@ export async function getFolderInScope(scopeKey: string, folderKey: string): Pro
     FOR folder IN ${db.collection(FOLDERS_COLLECTION)}
       FILTER folder._key == ${folderKey} && folder.scopeKey == ${scopeKey}
       FILTER !HAS(folder, "_internalDeletion") || folder._internalDeletion == null
+      FILTER (folder.archiveVisibility || "visible") == "visible"
       LIMIT 1
       RETURN folder
   `);
   const folder = await cursor.next();
-  return folder ? folderSchema.parse(withArangoKey(folder)) : null;
+  if (!folder) return null;
+  return (await archiveVisibleFolderKeys(scopeKey)).has(folderKey) ? folderSchema.parse(withArangoKey(folder)) : null;
+}
+
+export async function archiveVisibleFolderKeys(scopeKey: string): Promise<Set<string>> {
+  const cursor = await db.query(aql`FOR folder IN ${db.collection(FOLDERS_COLLECTION)} FILTER folder.scopeKey == ${scopeKey} RETURN { key: folder._key, parentFolderKey: folder.parentFolderKey, archiveVisibility: folder.archiveVisibility }`);
+  const folders = await cursor.all() as Array<{ key: string; parentFolderKey?: string; archiveVisibility?: string }>;
+  const byKey = new Map(folders.map((folder) => [folder.key, folder]));
+  const visible = new Set<string>();
+  for (const folder of folders) {
+    const visited = new Set<string>();
+    let current: typeof folder | undefined = folder;
+    while (current && current.archiveVisibility !== 'domain-only' && !visited.has(current.key)) {
+      visited.add(current.key);
+      if (!current.parentFolderKey) { visible.add(folder.key); break; }
+      current = byKey.get(current.parentFolderKey);
+    }
+  }
+  return visible;
 }
 
 /** Scope authorization is applied before semantic scoring. */
@@ -86,6 +106,7 @@ export async function semanticSearchFolders(input: { embedding: number[]; author
       FILTER folder.scopeKey IN ${input.authorizedScopeKeys}
       FILTER ${input.folderKeys === undefined} || folder._key IN ${input.folderKeys ?? []}
       FILTER !HAS(folder, "_internalDeletion") || folder._internalDeletion == null
+      FILTER (folder.archiveVisibility || "visible") == "visible"
       FILTER IS_ARRAY(folder.embedding) && LENGTH(folder.embedding) == LENGTH(${embedding})
       LET score = COSINE_SIMILARITY(folder.embedding, ${embedding})
       FILTER IS_NUMBER(score) && score >= ${input.minScore}
@@ -93,10 +114,11 @@ export async function semanticSearchFolders(input: { embedding: number[]; author
       LIMIT ${Math.min(Math.max(input.limit, 1), 40)}
       RETURN { score, folder }
   `);
+  const visibleByScope = new Map(await Promise.all(input.authorizedScopeKeys.map(async (scopeKey) => [scopeKey, await archiveVisibleFolderKeys(scopeKey)] as const)));
   return (await cursor.all()).map((match: Record<string, unknown>) => ({
     score: Number(match.score),
     folder: folderSchema.parse(withArangoKey(match.folder as Record<string, unknown>)),
-  }));
+  })).filter(({ folder }) => visibleByScope.get(folder.scopeKey)?.has(folder.key));
 }
 
 export async function listFoldersByScope(
@@ -114,7 +136,8 @@ export async function listFoldersByScope(
       SORT folder.name ASC, folder._key ASC
       RETURN folder
   `);
-  return (await cursor.all()).map((folder) => folderSchema.parse(withArangoKey(folder)));
+  const visibleKeys = await archiveVisibleFolderKeys(scopeKey);
+  return (await cursor.all()).map((folder) => folderSchema.parse(withArangoKey(folder))).filter((folder) => visibleKeys.has(folder.key));
 }
 
 export function listFoldersByParent(
@@ -126,13 +149,15 @@ export function listFoldersByParent(
 
 /** Returns descendants in breadth-first order while keeping the complete read scope-bounded in AQL. */
 export async function listFolderDescendants(scopeKey: string, folderKey: string): Promise<Folder[]> {
+  const visibleKeys = await archiveVisibleFolderKeys(scopeKey);
+  if (!visibleKeys.has(folderKey)) return [];
   const cursor = await db.query(aql`
     FOR folder IN ${db.collection(FOLDERS_COLLECTION)}
       FILTER folder.scopeKey == ${scopeKey}
       FILTER !HAS(folder, "_internalDeletion") || folder._internalDeletion == null
       RETURN folder
   `);
-  const folders = (await cursor.all()).map((folder) => folderSchema.parse(withArangoKey(folder)));
+  const folders = (await cursor.all()).map((folder) => folderSchema.parse(withArangoKey(folder))).filter((folder) => visibleKeys.has(folder.key));
   const children = new Map<string, Folder[]>();
   for (const folder of folders) {
     if (!folder.parentFolderKey) continue;

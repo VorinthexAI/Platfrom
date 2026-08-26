@@ -8,7 +8,7 @@ import { compassQueryKeys } from "./compass-query-keys";
 import { contentQueryKeys } from "./content-query-cache";
 import { galleryRefreshPlan, isCurrentContextGeneration, type GalleryRefreshFamily } from "./gallery-convergence";
 import { eventStreamRetryDelay, invalidatesGalleryQueries } from "./sse";
-import { signalQueryKeys } from "./workspace-query-cache";
+import { ascendQueryKeys, signalQueryKeys } from "./workspace-query-cache";
 import { subscribeUserSearchHistoryAppends, userSearchHistoryQueryKey } from "./user-search-history-events";
 import { useAuthStore } from "@/state/auth";
 
@@ -51,6 +51,7 @@ export function AuthenticatedEventBridge() {
       void queryClient.invalidateQueries({ queryKey: signalQueryKeys.details(compassContext), refetchType: "active" });
       void queryClient.invalidateQueries({ queryKey: signalQueryKeys.replyContexts(compassContext), refetchType: "active" });
     };
+    const invalidateBooks = () => void queryClient.invalidateQueries({ queryKey: ascendQueryKeys.all(compassContext), refetchType: "active" });
     const inCurrentGallery = (queryKey: readonly unknown[]) => root.every((value, index) => queryKey[index] === value);
     const invalidateSharingSuffix = (suffixes: readonly string[]) => {
       void queryClient.invalidateQueries({ predicate: ({ queryKey }) => inCurrentGallery(queryKey) && queryKey[3] === "sharing" && suffixes.includes(String(queryKey.at(-1))), refetchType: "none" });
@@ -85,6 +86,9 @@ export function AuthenticatedEventBridge() {
           invalidateArchive();
           publishAppEvent({ type: "inbox.changed" });
         }
+        if (event.event === "book.changed") {
+          invalidateBooks();
+        }
         if (event.event === "content.changed") {
           invalidateArchive();
           void queryClient.invalidateQueries({ queryKey: signalQueryKeys.overview(compassContext), refetchType: "active" });
@@ -107,6 +111,7 @@ export function AuthenticatedEventBridge() {
         invalidateCompassTrips();
         invalidateCompassPlaceReferences();
         invalidateSignal();
+        invalidateBooks();
         publishAppEvent({ type: "event-stream.connected" });
       }).catch((error: unknown) => {
         if (error instanceof Error && error.name === "AbortError") return;
@@ -135,6 +140,7 @@ export function AuthenticatedEventBridge() {
         invalidateCompassTrips();
         invalidateCompassPlaceReferences();
         invalidateSignal();
+        invalidateBooks();
         connect();
       }
     });

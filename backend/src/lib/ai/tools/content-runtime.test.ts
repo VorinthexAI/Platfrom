@@ -251,6 +251,35 @@ describe('Content runtime', () => {
     expect(projected.results[0]?.data?.document).not.toHaveProperty('html');
   });
 
+  test('projects strict email message payloads as body-only Archive content', async () => {
+    const f = fixture('viewer');
+    const documentKey = f.addDocument();
+    const payload = JSON.stringify({
+      version: 1,
+      kind: 'mail-message',
+      data: {
+        accountKey: newId(), threadKey: newId(), providerMessageId: 'provider-message', from: 'sender@example.com', to: ['reader@example.com'],
+        subject: 'Quarterly plan', body: 'The public message body.', summary: 'A summary that must stay private.', direction: 'inbound',
+        sentAt: now, hasAttachments: false,
+      },
+    });
+    Object.assign(f.documents.get(documentKey), { name: 'Quarterly plan', content: payload, mutationPolicy: 'system-only', archiveVisibility: 'visible' });
+
+    const found = await runContentTool('document.find', { documentKeys: [documentKey], include: ['content'] }, f.context, { repository: f.repository });
+    const read = await runContentTool('document.read', { documentKeys: [documentKey] }, f.context, { repository: f.repository });
+
+    expect(found.results[0]).toMatchObject({ success: true, data: { document: { name: 'Quarterly plan', content: 'The public message body.' } } });
+    expect(read.results[0]).toMatchObject({ success: true, data: { title: 'Quarterly plan', content: 'The public message body.' } });
+    expect(JSON.parse(f.documents.get(documentKey).content)).toMatchObject({ kind: 'mail-message', data: { summary: 'A summary that must stay private.' } });
+    expect(JSON.stringify(found)).not.toContain('provider-message');
+    expect(JSON.stringify(read)).not.toContain('provider-message');
+
+    f.documents.get(documentKey).content = JSON.stringify({ ...JSON.parse(payload), unexpected: 'must not leak' });
+    const malformed = await runContentTool('document.find', { documentKeys: [documentKey], include: ['content'] }, f.context, { repository: f.repository });
+    expect(malformed.results[0]).toMatchObject({ success: false, error: { code: 'CONTENT_INVALID_INPUT' } });
+    expect(JSON.stringify(malformed)).not.toContain('must not leak');
+  });
+
   test('sets, projects, clears, and scope-validates folder covers', async () => {
     const f = fixture('moderator');
     const imageKey = newId();
@@ -625,7 +654,7 @@ describe('Content runtime', () => {
     const nestedDocumentKey = [...f.documents.keys()][1]!;
     f.documents.get(nestedDocumentKey).folderKey = childKey;
     const folderReplay = await runContentTool('content.search', { scopeKey: f.scopeKey, folderKey: f.folderKey, query: 'launch roadmap' }, f.context, dependencies);
-    expect(folderReplay.folders).toEqual([{ key: childKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', isFavorite: false, score: 0.9 }]);
+    expect(folderReplay.folders).toEqual([{ key: childKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', isFavorite: false, managed: false, score: 0.9 }]);
     expect(folderReplay.cached).toBe(false);
     expect(rows).toHaveLength(3);
     expect(folderReplay.documents.some((document) => document.documentKey === nestedDocumentKey)).toBe(true);
@@ -689,6 +718,18 @@ describe('Content runtime', () => {
     const replay = await runContentTool('content.search', { scopeKey: f.scopeKey, folderKey: f.folderKey, query: 'semantically related', includeSummaries: false }, f.context, dependencies);
     expect(embeddingCalls).toBe(1);
     expect(replay.cached).toBe(true);
+  });
+
+  test('returns search results when cache and history persistence are unavailable', async () => {
+    const f = fixture('viewer');
+    const documentKey = f.addDocument('Launch notes');
+    f.documents.get(documentKey).name = 'Launch plan';
+    const result = await runContentTool('content.search', { scopeKey: f.scopeKey, query: 'launch', includeSummaries: false }, f.context, {
+      repository: f.repository,
+      searchQueries: { async get() { throw new Error('cache unavailable'); }, async record() { throw new Error('cache unavailable'); } },
+      userSearches: { async record() { throw new Error('history unavailable'); }, async list() { return []; }, async remove(_userKey: string, query: string) { return { normalizedQuery: query, deleted: false }; } },
+    });
+    expect(result.documents).toContainEqual(expect.objectContaining({ documentKey, name: 'Launch plan' }));
   });
 
   test('excludes semantic matches below pending deletion folder ancestors before summary generation', async () => {
@@ -1083,14 +1124,59 @@ describe('Content runtime', () => {
     expect(f.documents.has(otherDocumentKey)).toBe(true);
   });
 
-  test('keeps managed mail attachments readable but rejects generic updates and deletion', async () => {
+  test('rejects generic mutations of published audiobook chapters', async () => {
+    const f = fixture('owner'); const documentKey = f.addDocument();
+    f.repository.generatedDocumentBindings = async () => [{ key: documentKey, scopeKey: f.scopeKey, documentKey, subjectType: 'chapter', subjectKey: newId(), kind: 'chapter', provenance: 'generated', createdByKey: f.context.principal.user.key, idempotencyKey: 'chapter-publication', requestHash: 'c'.repeat(64), createdAt: now, updatedAt: now }];
+    const storage: any = { async upload() { return { storageKey: '' }; }, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; }, async delete() {} };
+    await expect(runContentTool('document.delete', { documentKeys: [documentKey] }, f.context, { repository: f.repository, storage })).rejects.toMatchObject({ code: 'CONTENT_FORBIDDEN', resourceKey: documentKey });
+    expect(f.documents.has(documentKey)).toBe(true);
+  });
+
+  test('keeps managed mail attachments readable and favoritable but rejects destructive generic mutations', async () => {
     const f = fixture('owner');
     const documentKey = f.addDocument();
     f.documents.set(documentKey, { ...f.documents.get(documentKey), managedPurpose: 'mail-attachment', mutationPolicy: 'user' });
     await expect(runContentTool('document.read', { documentKeys: [documentKey] }, f.context, { repository: f.repository })).resolves.toMatchObject({ summary: { succeeded: 1 } });
-    await expect(runContentTool('document.update', { updates: [{ documentKey, isFavorite: true }] }, f.context, { repository: f.repository })).resolves.toMatchObject({ summary: { failed: 1 }, results: [{ success: false, error: { code: 'CONTENT_FORBIDDEN', resourceKey: documentKey } }] });
+    await expect(runContentTool('document.update', { updates: [{ documentKey, isFavorite: true }] }, f.context, { repository: f.repository })).resolves.toMatchObject({ summary: { succeeded: 1 }, results: [{ success: true, data: { document: { managed: true, isFavorite: true } } }] });
     await expect(runContentTool('document.delete', { documentKeys: [documentKey] }, f.context, { repository: f.repository, storage: { delete: async () => undefined } as never })).resolves.toMatchObject({ summary: { failed: 1 }, results: [{ success: false, error: { code: 'CONTENT_FORBIDDEN', resourceKey: documentKey } }] });
     expect(f.documents.has(documentKey)).toBe(true);
+  });
+
+  test('projects visible managed resources and hides domain-only hierarchies from generic reads and search', async () => {
+    const f = fixture('owner');
+    const managedFolderKey = newId();
+    f.folders.set(managedFolderKey, { key: managedFolderKey, scopeKey: f.scopeKey, name: 'Managed library', mutationPolicy: 'system-container', archiveVisibility: 'visible', embedding, isFavorite: false, createdAt: now, updatedAt: now });
+    const managedDocumentKey = f.addDocument('Visible managed reference');
+    Object.assign(f.documents.get(managedDocumentKey), { folderKey: managedFolderKey, mutationPolicy: 'system-only', archiveVisibility: 'visible' });
+    const hiddenFolderKey = newId(), hiddenChildKey = newId();
+    f.folders.set(hiddenFolderKey, { key: hiddenFolderKey, scopeKey: f.scopeKey, name: 'Domain records', archiveVisibility: 'domain-only', embedding, isFavorite: false, createdAt: now, updatedAt: now });
+    f.folders.set(hiddenChildKey, { key: hiddenChildKey, scopeKey: f.scopeKey, parentFolderKey: hiddenFolderKey, name: 'Hidden child', embedding, isFavorite: false, createdAt: now, updatedAt: now });
+    const hiddenDocumentKey = f.addDocument('Hidden domain reference');
+    f.documents.get(hiddenDocumentKey).folderKey = hiddenChildKey;
+
+    const folders = await runContentTool('folder.list', { scopeKey: f.scopeKey, includeDescendants: true }, f.context, { repository: f.repository });
+    expect(folders.folders).toContainEqual(expect.objectContaining({ key: managedFolderKey, managed: true }));
+    expect(folders.folders.map(({ key }) => key)).not.toContain(hiddenFolderKey);
+    expect(folders.folders.map(({ key }) => key)).not.toContain(hiddenChildKey);
+    const found = await runContentTool('document.find', { documentKeys: [managedDocumentKey] }, f.context, { repository: f.repository });
+    expect(found.results[0]).toMatchObject({ success: true, data: { document: { key: managedDocumentKey, managed: true } } });
+    expect(found.results[0]?.data?.document).not.toHaveProperty('mutationPolicy');
+    expect(found.results[0]?.data?.document).not.toHaveProperty('managedPurpose');
+    expect(found.results[0]?.data?.document).not.toHaveProperty('archiveVisibility');
+    await expect(runContentTool('document.find', { documentKeys: [hiddenDocumentKey] }, f.context, { repository: f.repository })).resolves.toMatchObject({ summary: { failed: 1 }, results: [{ error: { code: 'CONTENT_NOT_FOUND' } }] });
+    const search = await runContentTool('document.search', { scopeKey: f.scopeKey, query: 'reference' }, f.context, { repository: f.repository, embed: async () => embedding });
+    expect(search.results).toContainEqual(expect.objectContaining({ documentKey: managedDocumentKey, managed: true }));
+    expect(search.results.map(({ documentKey }) => documentKey)).not.toContain(hiddenDocumentKey);
+  });
+
+  test('rejects generic creation in managed folders and every generated-content path for managed documents', async () => {
+    const f = fixture('owner');
+    f.folders.get(f.folderKey).mutationPolicy = 'system-container';
+    await expect(runContentTool('document.create', { scopeKey: f.scopeKey, folderKey: f.folderKey, name: 'Blocked', content: 'Blocked body' }, f.context, { repository: f.repository, embed: async () => embedding })).rejects.toMatchObject({ code: 'CONTENT_FORBIDDEN' });
+    const documentKey = f.addDocument('Managed source');
+    f.documents.get(documentKey).mutationPolicy = 'system-only';
+    const generated = await runContentTool('document.enhance', { documentKeys: [documentKey], mode: 'preview' }, f.context, { repository: f.repository, runAction: async () => ({ text: 'Generated' }) });
+    expect(generated).toMatchObject({ summary: { failed: 1 }, results: [{ error: { code: 'CONTENT_FORBIDDEN' } }] });
   });
 
   test('deletes storage before transaction-bound document metadata and retains pointers on failure', async () => {
@@ -1366,7 +1452,7 @@ describe('Content runtime', () => {
 
   test('fences direct system-managed mail update, rename, move, copy, delete, and share mutations', async () => {
     const cases: Array<[string, (f: ReturnType<typeof fixture>, key: string) => [any, any]]> = [
-      ['document.update', (_f, key) => ['document.update', { updates: [{ documentKey: key, isFavorite: true }] }]],
+      ['document.update', (_f, key) => ['document.update', { updates: [{ documentKey: key, content: 'Changed' }] }]],
       ['document.rename', (_f, key) => ['document.rename', { renames: [{ documentKey: key, name: 'Renamed' }] }]],
       ['document.move', (f, key) => ['document.move', { moves: [{ documentKey: key, targetScopeKey: f.scopeKey }] }]],
       ['document.copy', (f, key) => ['document.copy', { copies: [{ documentKey: key, targetScopeKey: f.scopeKey }] }]],
@@ -1379,7 +1465,7 @@ describe('Content runtime', () => {
       const documentKey = f.addDocument(mailContent('mail-thread'));
       f.documents.get(documentKey).mutationPolicy = 'system-only';
       const [tool, input] = request(f, documentKey);
-      const output: any = await runContentTool(tool, input, f.context, { repository: f.repository });
+      const output: any = await runContentTool(tool, input, f.context, { repository: f.repository, embed: async () => embedding });
       expect(output.results[0], label).toMatchObject({ success: false, error: { code: 'CONTENT_FORBIDDEN' } });
       expect(f.documents.has(documentKey), label).toBe(true);
     }
@@ -1420,7 +1506,7 @@ describe('Content runtime', () => {
     await expect(runContentTool('document.summarize', { documentKeys: [documentKey], persist: true }, f.context, dependencies)).rejects.toMatchObject({ code: 'CONTENT_FORBIDDEN' });
     await expect(runContentTool('document.audio.playback.update', { audioVersionKey: audio.key, playbackPositionMs: 1000 }, f.context, dependencies)).rejects.toMatchObject({ code: 'CONTENT_FORBIDDEN' });
     await expect(runContentTool('document.audio.playback.clear', { documentKey }, f.context, dependencies)).rejects.toMatchObject({ code: 'CONTENT_FORBIDDEN' });
-    await expect(runContentTool('document.translate', { documentKeys: [documentKey], targetLanguage: 'French', mode: 'preview' }, f.context, dependencies)).resolves.toMatchObject({ summary: { succeeded: 1, failed: 0 } });
+    await expect(runContentTool('document.translate', { documentKeys: [documentKey], targetLanguage: 'French', mode: 'preview' }, f.context, dependencies)).resolves.toMatchObject({ summary: { succeeded: 0, failed: 1 }, results: [{ error: { code: 'CONTENT_FORBIDDEN' } }] });
   });
 
   test('fences folder subtree move, copy, and delete when they contain system-managed mail', async () => {
@@ -1451,14 +1537,14 @@ describe('Content runtime', () => {
     await expect(runContentTool('document.unshare', { documentKeys: [documentKey] }, f.context, dependencies)).resolves.toMatchObject({ summary: { succeeded: 1 } });
   });
 
-  test('fences every recognized system-managed mail kind and requires both policy and kind', async () => {
+  test('allows favorites for every recognized system-managed mail kind', async () => {
     for (const kind of mailEnvelopeKinds) {
       const f = fixture('owner');
       const documentKey = f.addDocument(mailContent(kind));
       f.documents.get(documentKey).mutationPolicy = 'system-only';
       const output = await runContentTool('document.update', { updates: [{ documentKey, isFavorite: true }] }, f.context, { repository: f.repository });
-      expect(output.results[0], kind).toMatchObject({ success: false, error: { code: 'CONTENT_FORBIDDEN' } });
-      expect(f.documents.get(documentKey).isFavorite, kind).toBe(false);
+      expect(output.results[0], kind).toMatchObject({ success: true, data: { document: { managed: true, isFavorite: true } } });
+      expect(f.documents.get(documentKey).isFavorite, kind).toBe(true);
     }
 
     for (const [content, mutationPolicy] of [[mailContent('mail-thread'), 'user'], [JSON.stringify({ version: 1, kind: 'non-mail-system-record', data: {} }), 'system-only']] as const) {

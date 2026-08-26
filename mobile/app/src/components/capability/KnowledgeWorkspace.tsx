@@ -46,7 +46,7 @@ import {
 import { WorkspaceAppSwitcher } from "@/components/capability/WorkspaceAppSwitcher";
 import { DocumentScanModal, type DocumentScanPage } from "@/components/capability/DocumentScanModal";
 import { MAX_DOCUMENT_SCAN_BYTES, scanSessionSize } from "@/lib/document-scan-session";
-import { normalizeCapturedJpeg } from "@/lib/captured-image";
+import { normalizeCapturedPng } from "@/lib/captured-image";
 import { normalizeStructurallyCoveredResources, partitionFavoriteContentSelection } from "@/lib/content-selection-ancestry";
 import { ChromeIcon } from "@/components/ChromeIcon";
 import { SearchHistorySheet } from "@/components/SearchHistorySheet";
@@ -143,6 +143,7 @@ import { audioTimelineDuration, audioTimelinePosition, formatAudioTime, resolveA
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
 import { useAuthStore } from "@/state/auth";
 import { languageForCountryCode } from "@/lib/auth-helpers";
+import { pauseOwnedPlayer } from "@/lib/audio-player-lifecycle";
 import { filterByHiddenView, hideUserSource, isUserHidden, listUserHiddens, revealUserSource, type HiddenViewFilters, type UserHiddenRecord, type UserHiddenSource } from "@/lib/user-hidden-client";
 
 type SaveState = "local" | "dirty" | "saving" | "saved" | "error";
@@ -286,7 +287,7 @@ function ProcessingDocumentButton({ name }: { name: string }) {
   return <Skeleton accessibilityLabel={`Processing ${name}`} accessibilityRole="progressbar" style={styles.documentSkeleton} />;
 }
 
-export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, returnTripKey, returnTripName }: { initialDocumentKey?: string; initialFolderKey?: string; returnTripKey?: string; returnTripName?: string } = {}) {
+export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, returnSignalConnectorKey, returnSignalMessageKey, returnSignalThreadKey, returnTripKey, returnTripName }: { initialDocumentKey?: string; initialFolderKey?: string; returnSignalConnectorKey?: string; returnSignalMessageKey?: string; returnSignalThreadKey?: string; returnTripKey?: string; returnTripName?: string } = {}) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
@@ -312,6 +313,7 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
   const userHiddensQuery = useQuery({ queryKey: contentQueryKeys.userHiddens(contentContext), queryFn: listUserHiddens, enabled: hasContentContext, staleTime: 0 });
   const narrationPlayer = useAudioPlayer(null, { updateInterval: 500, keepAudioSessionActive: true });
   const narrationAudio = useAudioPlayerStatus(narrationPlayer);
+  const narrationPlayerActive = useRef(true);
   const [activeSheet, setActiveSheet] = useState<ArchiveSheet>();
   const [viewFilters, setViewFilters] = useState<HiddenViewFilters>({ favoritesOnly: false, showHidden: false });
   const [userHiddens, setUserHiddens] = useState<UserHiddenRecord[]>([]);
@@ -495,6 +497,7 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
   workspaceModeRef.current = workspaceMode;
   const currentFolder = folderStack.at(-1);
   const returnToTripAssets = returnTripKey ? () => router.replace({ pathname: "/capability/[slug]", params: { slug: "compass", tripKey: returnTripKey, openTripAssets: "1" } }) : undefined;
+  const returnToSignalAttachments = returnSignalConnectorKey && returnSignalThreadKey && returnSignalMessageKey ? () => router.replace({ pathname: "/capability/[slug]", params: { slug: "signal", connectorKey: returnSignalConnectorKey, signalReturn: "root", signalThreadKey: returnSignalThreadKey, signalMessageKey: returnSignalMessageKey, openSignalAttachments: "1" } }) : undefined;
   const showOnlyFavorites = viewFilters.favoritesOnly;
   const showHidden = viewFilters.showHidden;
   const filtersActive = showOnlyFavorites || showHidden;
@@ -509,6 +512,7 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
     ? `Delete ${selectedDocument?.extension ? "file" : "document"}?`
     : `Delete ${selectedCount} ${bulkDeleteNoun}${selectedCount === 1 ? "" : "s"}?`;
   const allSelectedFavorite = selectionActive && [...selectedFolders, ...selectedDocuments].every((item) => Boolean(item.isFavorite));
+  const selectionHasManaged = [...selectedFolders, ...selectedDocuments].some((item) => item.managed);
   const selectionMetadataLoading = hydratingFolderKeys.length > 0 || hydratingDocumentKeys.length > 0;
   const activeDocument = documentKeyRef.current
     ? [...documents, ...rootDocuments].find((document) => document.key === documentKeyRef.current)
@@ -582,7 +586,7 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
     narrationAudioVersionKey.current = undefined;
     pendingNarrationSeek.current = undefined;
     lastFinishedNarrationChunk.current = -1;
-    narrationPlayer.pause();
+    pauseOwnedPlayer(narrationPlayer, narrationPlayerActive.current);
     narrationPlayer.clearLockScreenControls();
     narrationStateRef.current = "idle";
     setNarrationState("idle");
@@ -628,7 +632,7 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
 
   const toggleNarration = () => {
     if (narrationStateRef.current === "playing") {
-      narrationPlayer.pause();
+      pauseOwnedPlayer(narrationPlayer, narrationPlayerActive.current);
       updateNarrationState("paused");
       persistNarrationPosition();
     } else if (narrationStateRef.current === "paused") {
@@ -834,6 +838,7 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
   };
 
   useEffect(() => () => {
+    narrationPlayerActive.current = false;
     if (sheetCloseTimer.current) clearTimeout(sheetCloseTimer.current);
     if (rootSearchFocusTimer.current) clearTimeout(rootSearchFocusTimer.current);
     instructionRequest.current?.abort();
@@ -1208,11 +1213,13 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
   };
 
   const openEnhanceSheet = () => {
+    if (activeDocument?.managed) return;
     openSheet("enhance");
   };
 
   const openSummarizeSheet = () => {
     const document = activeDocument ?? selectedDocument;
+    if (document?.managed) return;
     if (!document?.key || saveState !== "saved") {
       setSheetError("Save the document before creating a summary.");
       return;
@@ -1277,7 +1284,7 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
 
   const generateSummaryForTopic = async (topic: string) => {
     const document = selectedDocument ?? activeDocument;
-    if (!document?.key || generatingSummary) return;
+    if (!document?.key || document.managed || generatingSummary) return;
     const generation = ++summaryMutationGeneration.current;
     const controller = new AbortController();
     summaryRequest.current?.abort();
@@ -1316,6 +1323,7 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
   };
 
   const openDocumentTransformation = (action: DocumentTransformation) => {
+    if (activeDocument?.managed || selectedDocument?.managed) return;
     const documentKey = documentKeyRef.current;
     if (!documentKey) return;
     const generation = ++transformationVersionLoadGeneration.current;
@@ -1871,7 +1879,7 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
   };
 
   const handleSearchDocumentLongPress = (document: ContentSearchDocument) => {
-    const provisional: ContentDocument = { key: document.documentKey, name: document.name, folderKey: document.folderKey, extension: document.extension, isFavorite: document.isFavorite, updatedAt: "" };
+    const provisional: ContentDocument = { key: document.documentKey, name: document.name, folderKey: document.folderKey, extension: document.extension, isFavorite: document.isFavorite, managed: document.managed, updatedAt: "" };
     const selecting = !selectedDocuments.some(({ key }) => key === document.documentKey);
     handleDocumentLongPress(provisional);
     if (!selecting || selectedCount >= MAX_SELECTED_CONTENT_RESOURCES) return;
@@ -1893,7 +1901,7 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
     if (consumeLongPress(id)) return;
     if (selectionActive) {
       const existing = selectedDocuments.find(({ key }) => key === document.documentKey);
-      toggleDocumentSelection(existing ?? { key: document.documentKey, name: document.name, folderKey: document.folderKey, extension: document.extension, isFavorite: document.isFavorite, updatedAt: "" });
+      toggleDocumentSelection(existing ?? { key: document.documentKey, name: document.name, folderKey: document.folderKey, extension: document.extension, isFavorite: document.isFavorite, managed: document.managed, updatedAt: "" });
       if (!existing && selectedCount < MAX_SELECTED_CONTENT_RESOURCES) {
         setHydratingDocumentKeys((current) => [...current.filter((key) => key !== document.documentKey), document.documentKey]);
         void getContentDocument(queryClient, contentContext, document.documentKey).then((resolved) => {
@@ -2051,8 +2059,8 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
       if (folderDetailsFavorite !== Boolean(previous.isFavorite)) updated = await setContentFolderFavorite(previous.key, folderDetailsFavorite);
       if (coverChange === null) updated = await setContentFolderCover(previous.key, null);
       if (coverChange) {
-        const output = await normalizeCapturedJpeg(coverChange, { maxSide: 2400, compress: 0.88 });
-        const upload = await uploadGalleryImages([{ clientKey: `${Date.now()}-${previous.key}`, filename: `folder-cover-${Date.now()}.jpg`, uri: output.uri, sizeBytes: output.sizeBytes, processingMode: "cover" }]);
+        const output = await normalizeCapturedPng(coverChange, { maxSide: 2400, compress: 0.88 });
+        const upload = await uploadGalleryImages([{ clientKey: `${Date.now()}-${previous.key}`, filename: `folder-cover-${Date.now()}.png`, uri: output.uri, sizeBytes: output.sizeBytes, processingMode: "cover" }]);
         const job = upload.jobs[0];
         if (!job) throw new Error("The folder cover upload could not be started.");
         let status = job.status;
@@ -2721,7 +2729,7 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
     setScanError(undefined);
     try {
       if (scanSessionSize(pages) > MAX_DOCUMENT_SCAN_BYTES) throw new Error("Scanned pages must be 16 MB or smaller in total.");
-      const prepared = await Promise.all(pages.map(async (page, index) => ({ name: `scan-page-${index + 1}.jpg`, size: page.sizeBytes, base64: await new File(page.uri).base64() })));
+      const prepared = await Promise.all(pages.map(async (page, index) => ({ name: `scan-page-${index + 1}.png`, size: page.sizeBytes, base64: await new File(page.uri).base64() })));
       if (generation !== scanGeneration.current || contentContextKeyRef.current !== requestContextKey) return;
       processingStarted = true;
       setProcessingScan({ id: `scan-${generation}`, folderKey, name });
@@ -3505,12 +3513,13 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
 
   function mutationFooter() {
     const close = (disabled: boolean) => <Button disabled={disabled} onPress={() => closeSheet()} size="md" variant="secondary">Close</Button>;
+    const managedDocument = activeDocument?.managed || selectedDocument?.managed;
     if (activeSheet === "transform") return <>
-      <Button disabled={!documentKeyRef.current || saveState !== "saved" || (documentTransformation === "enhance" ? !documentTransformationPrompt.trim() : !translationTargetLanguage.trim())} onPress={() => void generateDocumentTransformation()} size="md" variant="primary">{documentTransformation === "enhance" ? "Enhance" : "Translate"}</Button>
+      {!managedDocument ? <Button disabled={!documentKeyRef.current || saveState !== "saved" || (documentTransformation === "enhance" ? !documentTransformationPrompt.trim() : !translationTargetLanguage.trim())} onPress={() => void generateDocumentTransformation()} size="md" variant="primary">{documentTransformation === "enhance" ? "Enhance" : "Translate"}</Button> : null}
       {close(false)}
     </>;
     if (activeSheet === "versions") return <>
-      {!documentActionLoading ? <Button disabled={loadingVersions} onPress={() => { if (documentTransformation === "enhance") void generateDocumentTransformation(); else pushSheet("transform"); }} size="md" variant="primary">{documentTransformation === "enhance" ? "Enhance" : "Translate"}</Button> : null}
+      {!managedDocument && !documentActionLoading ? <Button disabled={loadingVersions} onPress={() => { if (documentTransformation === "enhance") void generateDocumentTransformation(); else pushSheet("transform"); }} size="md" variant="primary">{documentTransformation === "enhance" ? "Enhance" : "Translate"}</Button> : null}
       {close(false)}
     </>;
     if (activeSheet === "documentVersions") return close(loadingVersions);
@@ -3519,7 +3528,7 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
       {close(false)}
     </>;
     if (activeSheet === "summaryVersions") return <>
-      {!loadingSummaries && summaries.length === 0 ? <Button disabled={generatingSummary || saveState !== "saved"} onPress={openSummarizeSheet} size="md" variant="primary">Create summary</Button> : null}
+      {!managedDocument && !loadingSummaries && summaries.length === 0 ? <Button disabled={generatingSummary || saveState !== "saved"} onPress={openSummarizeSheet} size="md" variant="primary">Create summary</Button> : null}
       {close(false)}
     </>;
     if (activeSheet === "summaryReader") return <>
@@ -3577,7 +3586,7 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
     }
     const wasPlaying = narrationStateRef.current === "playing";
     if (wasPlaying) {
-      narrationPlayer.pause();
+      pauseOwnedPlayer(narrationPlayer, narrationPlayerActive.current);
       updateNarrationState("paused");
     }
     void playAudioVersion(version, seconds, wasPlaying);
@@ -3620,7 +3629,8 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
   ) : null;
   const narrationAccessory = activeSheet !== "audioVersions" ? documentNarrationIsland : undefined;
   const tripReturnAccessory = returnToTripAssets ? <Button accessibilityLabel={`Back to ${returnTripName ?? "trip"} assets`} contentMode="raw" onPress={returnToTripAssets} size="sm" style={styles.tripReturn} variant="secondary"><Text numberOfLines={1} style={styles.tripReturnText}>{returnTripName ?? "Trip"}</Text><ChevronRightIcon size="sm" /></Button> : undefined;
-  const coreAccessory = tripReturnAccessory || narrationAccessory ? <View style={styles.coreAccessories}>{tripReturnAccessory}{narrationAccessory}</View> : undefined;
+  const signalReturnAccessory = returnToSignalAttachments ? <Button accessibilityLabel="Back to Signal attachments" contentMode="raw" onPress={returnToSignalAttachments} size="sm" style={styles.tripReturn} variant="secondary"><Text numberOfLines={1} style={styles.tripReturnText}>Signal attachments</Text><ChevronRightIcon size="sm" /></Button> : undefined;
+  const coreAccessory = signalReturnAccessory || tripReturnAccessory || narrationAccessory ? <View style={styles.coreAccessories}>{signalReturnAccessory}{tripReturnAccessory}{narrationAccessory}</View> : undefined;
   const bulkToolbar = selectionActive ? <Tabs style={styles.bulkToolbar}>
     <View style={styles.bulkToolbarSelection}>
       <Button accessibilityLabel="Clear selection" contentMode="raw" onPress={clearSelection} size="xs" style={styles.bulkToolbarClose} variant="secondary"><CloseIcon size="sm" /></Button>
@@ -3724,7 +3734,7 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
               <Text numberOfLines={1} style={styles.folderTitle}>{currentFolder?.name ?? "Archive"}</Text>
               <View style={styles.folderTitleActions}>
                 {currentFolder ? <Button accessibilityLabel={`Manage ${currentFolder.name}`} contentMode="raw" onPress={() => showFolderActions(currentFolder)} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button> : null}
-                <Button accessibilityLabel={`Create in ${currentFolder?.name ?? "Archive"}`} contentMode="raw" onPress={() => openSheet("create")} size="xs" variant="icon"><PlusIcon size="sm" /></Button>
+                {!currentFolder?.managed ? <Button accessibilityLabel={`Create in ${currentFolder?.name ?? "Archive"}`} contentMode="raw" onPress={() => openSheet("create")} size="xs" variant="icon"><PlusIcon size="sm" /></Button> : null}
               </View>
             </View>
             {error ? <Text accessibilityRole="alert" style={styles.notice}>{error}</Text> : null}
@@ -3790,10 +3800,10 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
             <Button accessibilityLabel="Manage document" contentMode="raw" disabled={!activeDocument || saveState !== "saved"} onPress={() => { if (activeDocument) showDocumentActions(activeDocument); }} size="sm" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
           </View>
           <View style={styles.editorHeaderActions}>
-            {editorEditing
+            {!activeDocument?.managed && (editorEditing
               ? <Button accessibilityLabel="Save and lock document" accessibilityState={{ selected: true }} contentMode="raw" onPress={finishEditing} size="sm" variant="primary"><CheckIcon size="sm" variant="inverse" /></Button>
-              : <Button accessibilityLabel="Edit document" contentMode="raw" onPress={() => { persistNarrationPosition(); stopNarration(); setDocumentSearchQuery(""); setEditorEditing(true); }} size="sm" variant="icon"><EditIcon size="sm" /></Button>}
-            <Button accessibilityLabel="AI document actions" contentMode="raw" disabled={!content.trim()} onPress={openEnhanceSheet} size="sm" variant="icon"><BrainIcon size="sm" /></Button>
+              : <Button accessibilityLabel="Edit document" contentMode="raw" onPress={() => { persistNarrationPosition(); stopNarration(); setDocumentSearchQuery(""); setEditorEditing(true); }} size="sm" variant="icon"><EditIcon size="sm" /></Button>)}
+            {!activeDocument?.managed ? <Button accessibilityLabel="AI document actions" contentMode="raw" disabled={!content.trim()} onPress={openEnhanceSheet} size="sm" variant="icon"><BrainIcon size="sm" /></Button> : null}
             <Button accessibilityLabel="Document versions and history" contentMode="raw" disabled={!activeDocument || saveState !== "saved"} onPress={() => { if (activeDocument) openHistoryChooser(activeDocument); }} size="sm" variant="icon"><ClockIcon size="sm" /></Button>
           </View>
           <View style={[styles.rootSearch, styles.documentSearch]}>
@@ -3942,9 +3952,9 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
         ) : null}
         {activeSheet === "bulkActions" ? <View style={styles.bulkActionList}>
           <Button disabled={bulkLoading} loading={bulkLoading} onPress={() => void updateSelectionFavorite()} size="md" variant="secondary">{allSelectedFavorite ? "Unfavorite" : "Favorite"}</Button>
-          <Button disabled={bulkLoading} onPress={() => void openDestinationPicker("move")} size="md" variant="secondary">Move to folder</Button>
-          <Button disabled={bulkLoading} onPress={() => void openDestinationPicker("copy")} size="md" variant="secondary">Copy to folder</Button>
-          <Button disabled={bulkLoading} onPress={() => pushSheet("bulkDelete")} size="md" variant="secondary">Delete</Button>
+          {!selectionHasManaged ? <Button disabled={bulkLoading} onPress={() => void openDestinationPicker("move")} size="md" variant="secondary">Move to folder</Button> : null}
+          {!selectionHasManaged ? <Button disabled={bulkLoading} onPress={() => void openDestinationPicker("copy")} size="md" variant="secondary">Copy to folder</Button> : null}
+          {!selectionHasManaged ? <Button disabled={bulkLoading} onPress={() => pushSheet("bulkDelete")} size="md" variant="secondary">Delete</Button> : null}
         </View> : null}
         {activeSheet === "historyChooser" ? (
           <View style={styles.historyChoices}>
@@ -3991,7 +4001,7 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
         ) : null}
         {activeSheet === "documentActions" && selectedDocument ? (
           <>
-            <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={openDocumentDetails} style={styles.sheetAction}>Edit</BottomSheetItem>
+            {!selectedDocument.managed ? <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={openDocumentDetails} style={styles.sheetAction}>Edit</BottomSheetItem> : null}
             <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void listenToSelectedDocument()} style={styles.sheetAction}>Listen</BottomSheetItem>
             {selectedDocument.extension ? <BottomSheetItem disabled={Boolean(documentActionLoading)} loading={documentActionLoading === "original"} onPress={() => {
               if (workspaceModeRef.current === "viewer") { closeSheet(); leaveFileViewer(); }
@@ -4000,7 +4010,7 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
             <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={downloadOriginal} style={styles.sheetAction}>Download</BottomSheetItem>
             <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void openSimilarContent({ documentKey: selectedDocument.key }, selectedDocument.extension ? "files" : "documents")} style={styles.sheetAction}>Find similar</BottomSheetItem>
             <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => setHiddenOptimistically("document", selectedDocument.key, !hidden("document", selectedDocument.key), selectedDocument.extension ? "File" : "Document")} style={styles.sheetAction}>{hidden("document", selectedDocument.key) ? "Reveal" : "Hide"}</BottomSheetItem>
-            <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => pushSheet("deleteDocument")} style={styles.sheetAction}>Delete {selectedDocument.extension ? "file" : "document"}</BottomSheetItem>
+            {!selectedDocument.managed ? <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => pushSheet("deleteDocument")} style={styles.sheetAction}>Delete {selectedDocument.extension ? "file" : "document"}</BottomSheetItem> : null}
           </>
         ) : null}
         {activeSheet === "scanSources" ? (
@@ -4012,12 +4022,12 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
         ) : null}
         {activeSheet === "folderActions" && selectedFolder ? (
           <>
-            <BottomSheetItem onPress={openFolderDetails} style={styles.sheetAction}>Edit</BottomSheetItem>
-            <BottomSheetItem onPress={() => void openDestinationPicker("move", { folder: selectedFolder })} style={styles.sheetAction}>Move folder</BottomSheetItem>
-            <BottomSheetItem onPress={() => void openDestinationPicker("copy", { folder: selectedFolder })} style={styles.sheetAction}>Copy to folder</BottomSheetItem>
+            {!selectedFolder.managed ? <BottomSheetItem onPress={openFolderDetails} style={styles.sheetAction}>Edit</BottomSheetItem> : null}
+            {!selectedFolder.managed ? <BottomSheetItem onPress={() => void openDestinationPicker("move", { folder: selectedFolder })} style={styles.sheetAction}>Move folder</BottomSheetItem> : null}
+            {!selectedFolder.managed ? <BottomSheetItem onPress={() => void openDestinationPicker("copy", { folder: selectedFolder })} style={styles.sheetAction}>Copy to folder</BottomSheetItem> : null}
             <BottomSheetItem onPress={() => void openSimilarContent({ folderKey: selectedFolder.key }, "folders")} style={styles.sheetAction}>Find similar</BottomSheetItem>
             <BottomSheetItem onPress={() => setHiddenOptimistically("folder", selectedFolder.key, !hidden("folder", selectedFolder.key), "Folder")} style={styles.sheetAction}>{hidden("folder", selectedFolder.key) ? "Reveal" : "Hide"}</BottomSheetItem>
-            <BottomSheetItem onPress={confirmSelectedFolderDelete} style={styles.sheetAction}>Delete folder</BottomSheetItem>
+            {!selectedFolder.managed ? <BottomSheetItem onPress={confirmSelectedFolderDelete} style={styles.sheetAction}>Delete folder</BottomSheetItem> : null}
           </>
         ) : null}
         {activeSheet === "folderDetails" && selectedFolder ? (
@@ -4048,7 +4058,7 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
             </View>
           </View>
         ) : null}
-        {activeSheet === "summarize" ? (
+        {activeSheet === "summarize" && !selectedDocument?.managed ? (
           <ScrollView contentContainerStyle={[styles.summaryTopicPanel, !loadingSummaryTopics && !sheetError && summaryTopics.length === 0 && styles.sheetEmptyContent]} showsVerticalScrollIndicator={false} style={styles.summaryTopicScroll}>
             {!loadingSummaryTopics && !sheetError && summaryTopics.length === 0 ? <Text style={styles.empty}>No topics were found in this document.</Text> : null}
             {loadingSummaryTopics ? Array.from({ length: 3 }, (_, index) => (
@@ -4102,7 +4112,7 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
             </ScrollView>
           </View>
         ) : null}
-        {activeSheet === "enhance" ? (
+        {activeSheet === "enhance" && !activeDocument?.managed ? (
           <View style={styles.enhancePanel}>
             <Button disabled={!documentKeyRef.current || saveState !== "saved"} onPress={openSummarizeSheet} size="md" variant="secondary">Summarize document</Button>
             <Button disabled={!documentKeyRef.current || saveState !== "saved"} onPress={() => void openDocumentTransformation("enhance")} size="md" variant="secondary">Enhance document</Button>

@@ -16,13 +16,13 @@ describe('Gallery image location processing', () => {
 
     expect(result.coordinates).toEqual({ latitude: 59 + 19 / 60, longitude: 18 + 4 / 60 });
     expect(result.bytes.byteLength).toBeGreaterThan(0);
-    expect(metadata.format).toBe('jpeg');
+    expect(metadata.format).toBe('png');
     expect(metadata.exif).toBeUndefined();
     expect(metadata.xmp).toBeUndefined();
     expect(metadata.iptc).toBeUndefined();
   });
 
-  test('uses supplied coordinates when normalized JPEG bytes have no EXIF', async () => {
+  test('uses supplied coordinates when normalized bytes have no EXIF', async () => {
     const source = await sharp({ create: { width: 4, height: 4, channels: 3, background: '#fff' } }).jpeg().toBuffer();
     const result = await sanitizeGalleryImage(source, { latitude: 40.7128, longitude: -74.006 });
     expect(result.coordinates).toEqual({ latitude: 40.7128, longitude: -74.006 });
@@ -33,11 +33,12 @@ describe('Gallery image location processing', () => {
     await expect(sanitizeGalleryImage(new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]))).rejects.toMatchObject({ code: 'GALLERY_IMAGE_INVALID_INPUT' });
   });
 
-  test('preserves PNG, GIF, and WebP sanitizer inputs', async () => {
+  test('normalizes PNG, GIF, and WebP sanitizer inputs to PNG', async () => {
     for (const format of ['png', 'gif', 'webp'] as const) {
       const source = await sharp({ create: { width: 3, height: 2, channels: 3, background: '#336699' } })[format]().toBuffer();
       const result = await sanitizeGalleryImage(source);
-      await expect(sharp(result.bytes).metadata()).resolves.toMatchObject({ format: 'jpeg', width: 3, height: 2 });
+      await expect(sharp(result.bytes).metadata()).resolves.toMatchObject({ format: 'png', width: 3, height: 2 });
+      expect(result.bytes.subarray(0, 8)).toEqual(new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]));
     }
   });
 

@@ -88,8 +88,8 @@ async function main() {
         FILTER document != null
         RETURN { collectionName, id }
   `, { ids })).all() as Array<{ collectionName: string; id: string }>;
-  const bytes = await Promise.all(plan.images.map((image) => sharp(Buffer.from(galleryLocationFixtureSvg(image.visualIndex, image.colors))).jpeg({ quality: 90, chromaSubsampling: '4:4:4' }).toBuffer()));
-  const storageKeys = plan.images.map((image, index) => `media/${auth.scope.key}/${image.key}/${new Bun.CryptoHasher('sha256').update(bytes[index]!).digest('hex')}/original.jpg`);
+  const bytes = await Promise.all(plan.images.map((image) => sharp(Buffer.from(galleryLocationFixtureSvg(image.visualIndex, image.colors))).png().toBuffer()));
+  const storageKeys = plan.images.map((image, index) => `media/${auth.scope.key}/${image.key}/${new Bun.CryptoHasher('sha256').update(bytes[index]!).digest('hex')}/original.png`);
   const existingObjects = (await Promise.all(storageKeys.map(async (key) => {
     try { await s3.send(new HeadObjectCommand({ Bucket: S3_BUCKET, Key: key })); return key; }
     catch (error) { if ((error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode === 404 || (error as { name?: string }).name === 'NotFound') return null; throw error; }
@@ -123,7 +123,7 @@ async function main() {
         scopeKey: auth.scope.key,
         ownerKey: auth.membership.key,
         imageKey: fixture.key,
-        file: { filename: fixture.filename, mimeType: 'image/jpeg', sizeBytes: bytes[index]!.byteLength, bytes: bytes[index]! },
+        file: { filename: fixture.filename, mimeType: 'image/png', sizeBytes: bytes[index]!.byteLength, bytes: bytes[index]! },
         location: { city: fixture.city, country: fixture.country, countryCode: fixture.countryCode },
       }, {
         createCaptionKey: () => fixture.captionKey,

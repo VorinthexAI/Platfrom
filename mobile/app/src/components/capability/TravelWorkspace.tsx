@@ -24,7 +24,7 @@ import { WorkspaceAppSwitcher } from "@/components/capability/WorkspaceAppSwitch
 import { InteractiveGlobe } from "@/components/three/InteractiveGlobe";
 import { assistantIconSource, capabilityIconSource } from "@/data/capability-icons";
 import { COUNTRIES, type CountryProperties } from "@/lib/globe-data";
-import { normalizeCapturedJpeg, type CapturedImage } from "@/lib/captured-image";
+import { normalizeCapturedPng, type CapturedImage } from "@/lib/captured-image";
 import { deleteContentDocument, deleteContentSearchHistory, getContentContext, type ContentFolder, type ContentSearchHistoryItem } from "@/lib/content-client";
 import { contentQueryKeys, getContentFolderTree } from "@/lib/content-query-cache";
 import { getUserSearchHistory, promoteCachedUserSearchHistory, removeCachedUserSearchHistory, userSearchHistoryQueryKey } from "@/lib/user-search-history-cache";
@@ -1126,8 +1126,8 @@ export function TravelWorkspace({ initialTripKey, openTripAssets: shouldOpenTrip
       if (coverChange === null) coverImageKey = null;
       try {
         if (coverChange) {
-          const normalized = await normalizeCapturedJpeg(coverChange, { maxSide: 2400, compress: 0.88 });
-          const upload = await uploadGalleryImages([{ clientKey: `${Date.now()}-${tripKey}`, filename: `trip-cover-${Date.now()}.jpg`, uri: normalized.uri, sizeBytes: normalized.sizeBytes, processingMode: "cover" }]);
+          const normalized = await normalizeCapturedPng(coverChange, { maxSide: 2400, compress: 0.88 });
+          const upload = await uploadGalleryImages([{ clientKey: `${Date.now()}-${tripKey}`, filename: `trip-cover-${Date.now()}.png`, uri: normalized.uri, sizeBytes: normalized.sizeBytes, processingMode: "cover" }]);
           const job = upload.jobs[0];
           if (!job) throw new Error("The trip cover upload could not be started.");
           uploadedImageKey = job.imageKey;

@@ -20,13 +20,15 @@ test('builds a provider-safe inline reference from sanitized bytes', () => {
   expect(imageDataUrl(new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), 'image/jpeg')).toBe('data:image/jpeg;base64,/9j/2Q==');
 });
 
-test('creates bounded JPEG analysis derivatives without changing the source', async () => {
+test('creates bounded PNG analysis derivatives without changing the source', async () => {
   const source = new Uint8Array(await sharp({ create: { width: 1600, height: 1200, channels: 3, background: '#336699' } }).png().toBuffer());
   const original = new Uint8Array(source);
   const reference = await imageAnalysisDataUrl(source, 768);
   const bytes = Buffer.from(reference.slice(reference.indexOf(',') + 1), 'base64');
 
-  expect(await sharp(bytes).metadata()).toMatchObject({ width: 768, height: 576, format: 'jpeg' });
+  expect(reference.startsWith('data:image/png;base64,')).toBe(true);
+  expect(bytes.subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  expect(await sharp(bytes).metadata()).toMatchObject({ width: 768, height: 576, format: 'png' });
   expect(source).toEqual(original);
   await expect(imageAnalysisDataUrl(source, 0)).rejects.toThrow('positive integer');
 });

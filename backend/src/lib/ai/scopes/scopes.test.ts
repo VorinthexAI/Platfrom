@@ -155,7 +155,9 @@ describe('scope repository', () => {
   test('hard-deletes managed place media and queues permanent object deletion during scope teardown', async () => {
     const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
     const teardown = source.slice(source.indexOf('async removeScope(scopeKey)'), source.indexOf('async addScopeRelation'));
-    for (const collection of ['generatedDocumentBindings', 'tripAttachments', 'tripCreationReceipts', 'placeImages', 'collectionImages', 'imageIdentities', 'imageCollecitionHightlights', 'imageCollectionMemories', 'collectionInvites', 'collectionMembers', 'tagAssignments', 'shares', 'userHiddens', 'places', 'images', 'imageCaptions', 'collections', 'documentSummaryAudio', 'documentSummaries', 'documentAudioVersions', 'documentVersions', 'documentShares', 'emailAttachmentBindings', 'inboxes', 'scopeScopes', 'scopeMembers', 'scopes']) expect(teardown).toContain(collection);
+    for (const collection of ['generatedDocumentBindings', 'tripAttachments', 'tripCreationReceipts', 'placeImages', 'collectionImages', 'imageIdentities', 'imageCollecitionHightlights', 'imageCollectionMemories', 'collectionInvites', 'collectionMembers', 'tagAssignments', 'shares', 'userHiddens', 'places', 'images', 'imageCaptions', 'collections', 'documentSummaryAudio', 'documentSummaries', 'documentAudioVersions', 'documentVersions', 'documentShares', 'emailAttachmentBindings', 'folders', 'scopeScopes', 'scopeMembers', 'scopes']) expect(teardown).toContain(collection);
+    expect(teardown).toContain('folder.managedPurpose IN ["mail-attachment", "mail-inbox", "mail-inbox-files", "mail-thread"]');
+    expect(teardown).not.toContain('FOR inbox IN inboxes');
     expect(teardown.indexOf('LET cleanupMailVersions')).toBeLessThan(teardown.indexOf('LET cleanupMailDocuments'));
     expect(teardown).toContain('FOR storageKey IN UNIQUE(UNION(mailStorageKeys');
     expect(teardown).toContain('UPSERT { storageKey }');

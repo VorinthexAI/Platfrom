@@ -19,10 +19,10 @@ const [mobileSheet, webSheet, mobileButton, webButton, mobileToast, agents, them
   read("../components/capability/KnowledgeWorkspace.tsx"),
 ]);
 
-test("enforces medium buttons throughout every BottomSheet", () => {
+test("enforces medium BottomSheet actions while allowing shared compact composites", () => {
   for (const button of [mobileButton, webButton]) {
     expect(button).toContain("const ButtonSizeContext = createContext<ButtonSizeContextValue | undefined>(undefined)");
-    expect(button).toContain("const value = parent?.forced ? parent : { size, forced: force }");
+    expect(button).toContain("const value = parent?.forced && !overrideParent ? parent : { size, forced: force }");
     expect(button).toContain("const size = useContext(ButtonSizeContext)?.size ?? requestedSize");
   }
   for (const sheet of [mobileSheet, webSheet]) {
@@ -31,8 +31,8 @@ test("enforces medium buttons throughout every BottomSheet", () => {
     expect(sheet).toContain('size="md"');
     expect(sheet).not.toContain('size = "lg"');
   }
-  expect(mobileButton).toContain("const value = parent?.forced ? parent : { size, forced: force }");
-  expect(agents).toContain("Every button rendered anywhere inside a `BottomSheet`");
+  expect(mobileButton).toContain("overrideParent?: boolean");
+  expect(agents).toContain("Shared compact composites such as `Tabs`, badges, and chip actions");
   expect(agents).toContain("`BottomSheetItem` must not expose a size override");
 });
 
@@ -112,7 +112,7 @@ test("classifies every full-height sheet workflow explicitly", () => {
   expect(travel).toContain('height="full"');
   expect(email).toContain('height={sheet === "trashRoot" || formSheet ? "full" : undefined}');
   for (const title of ["Recipients", "Write email", "Choose a tone", "Email draft"]) expect(email).toMatch(new RegExp(`height="full"[\\s\\S]*?title="${title}"`));
-  expect(ascend).toContain('height={sheet === "create" || sheet === "reader" ? "full" : undefined}');
+  expect(ascend).toMatch(/height=\{\s*\["create", "sources", "detail", "reader", "sleep"\]\.includes\(\s*sheet \?\? "",\s*\)\s*\? "full"\s*: undefined\s*\}/);
   expect(gallery).toContain('height="full"');
   expect(gallery).toContain('height={activeSheet === "destination" || activeSheet === "imageEdit"');
   expect(sharing).toContain('height={fullHeight ? "full" : undefined}');

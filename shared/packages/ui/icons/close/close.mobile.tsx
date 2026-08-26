@@ -1,12 +1,12 @@
 ﻿import Svg, { Path } from "react-native-svg";
 export type CloseIconVariant = "default" | "muted" | "accent" | "danger" | "inverse";
-export type CloseIconSize = "sm" | "md" | "lg";
+export type CloseIconSize = "xs" | "sm" | "md" | "lg";
 export type CloseIconProps = {
   variant?: CloseIconVariant;
   size?: CloseIconSize;
   strokeWidth?: number;
 };
-const sizes: Record<CloseIconSize, number> = { sm: 16, md: 20, lg: 24 };
+const sizes: Record<CloseIconSize, number> = { xs: 12, sm: 16, md: 20, lg: 24 };
 const colors: Record<CloseIconVariant, string> = {
   default: "#F5F7F8",
   muted: "#7B858C",

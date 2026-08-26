@@ -1,6 +1,11 @@
 import { expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
 import { isReliableDocumentOcr, normalizeDocumentTranscription, scanDocumentImages } from '.';
+import sharp from 'sharp';
+
+const jpegPages = await Promise.all(Array.from({ length: 12 }, (_, index) => sharp({ create: { width: 3, height: 2, channels: 3, background: { r: index * 17, g: 80, b: 140 } } }).jpeg().toBuffer().then((bytes) => new Uint8Array(bytes))));
+const scanPage = (index = 0) => ({ filename: `${index + 1}.jpg`, mimeType: 'image/jpeg' as const, sizeBytes: jpegPages[index]!.byteLength, bytes: jpegPages[index]! });
+const firstCanonicalUrl = `data:image/png;base64,${(await sharp(jpegPages[0]).png().toBuffer()).toString('base64')}`;
 
 test('preserves ordered pages and reconciles Textract with visual transcription', async () => {
   const uploaded: string[] = [];
@@ -15,29 +20,29 @@ test('preserves ordered pages and reconciles Textract with visual transcription'
     scopeKey: newId(),
     name: 'Receipt',
     idempotencyKey: 'stable-scan',
-    pages: [1, 2].map((index) => ({ filename: `${index}.jpg`, mimeType: 'image/jpeg' as const, sizeBytes: 4, bytes: new Uint8Array([0xff, 0xd8, 0xff, index]) })),
+    pages: [scanPage(0), scanPage(1)],
   }, 'organization', {
     storage,
     ocr: { extract: async (key) => ({ extractedText: `textract:${key.at(-5)}`, blocks: [], metadata: {} }) },
     caption: async (input: any) => {
       captionInputs.push(input);
-      const first = Buffer.from(input.imageUrls[0].split(',')[1], 'base64').at(-1) === 1;
+      const first = input.imageUrls[0] === firstCanonicalUrl;
       return { results: [{ caption: input.purpose === 'document-transcription' ? first ? 'visual one' : 'visual two' : first ? 'final one' : 'final two', score: 80 }] };
     },
   });
   expect(uploaded).toHaveLength(2);
-  expect(uploaded[0]).toContain('/scan/page-01.jpg');
+  expect(uploaded[0]).toContain('/scan/page-01.png');
   expect(captionInputs.filter(({ purpose }) => purpose === 'document-transcription')).toHaveLength(2);
   expect(captionInputs.filter(({ purpose }) => purpose === 'document-reconciliation')).toHaveLength(2);
-  expect(captionInputs.find((input) => input.purpose === 'document-reconciliation' && Buffer.from(input.imageUrls[0].split(',')[1], 'base64').at(-1) === 1).referenceTexts[0]).toMatchObject({ secondary: 'visual one' });
-  expect(captionInputs.every((input) => input.imageUrls[0].startsWith('data:image/jpeg;base64,'))).toBe(true);
+  expect(captionInputs.find((input) => input.purpose === 'document-reconciliation' && input.imageUrls[0] === firstCanonicalUrl).referenceTexts[0]).toMatchObject({ secondary: 'visual one' });
+  expect(captionInputs.every((input) => input.imageUrls[0].startsWith('data:image/png;base64,'))).toBe(true);
   expect(output.content).toBe('Page 1\n\nfinal one\n\nPage 2\n\nfinal two');
   expect(output.storageKeys).toEqual(uploaded);
 });
 
 test('cleans retained scan objects when processing fails', async () => {
   const deleted: string[] = [];
-  await expect(scanDocumentImages({ scopeKey: newId(), pages: [{ filename: '1.jpg', mimeType: 'image/jpeg', sizeBytes: 4, bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]) }], idempotencyKey: 'failed' }, 'organization', {
+  await expect(scanDocumentImages({ scopeKey: newId(), pages: [scanPage()], idempotencyKey: 'failed' }, 'organization', {
     storage: { async upload(input) { return { storageKey: input.key }; }, async delete(key) { deleted.push(key); }, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
     ocr: { extract: async () => { throw new Error('offline'); } },
     caption: async () => ({ results: [{ caption: 'visual', score: 80 }] }),
@@ -50,7 +55,7 @@ test('creates OCR content when the visual provider is unavailable', async () => 
   const output = await scanDocumentImages({
     scopeKey: newId(),
     idempotencyKey: 'ocr-fallback',
-    pages: [{ filename: '1.jpg', mimeType: 'image/jpeg', sizeBytes: 4, bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]) }],
+    pages: [scanPage()],
   }, 'organization', {
     storage: { async upload(input) { return { storageKey: input.key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
     ocr: { extract: async () => ({ extractedText: 'Reliable Textract text', blocks: [], metadata: { averageConfidence: 99, minimumConfidence: 98 } }) },
@@ -64,7 +69,7 @@ test('uses OCR content when visual reconciliation fails', async () => {
   const output = await scanDocumentImages({
     scopeKey: newId(),
     idempotencyKey: 'reconciliation-fallback',
-    pages: [{ filename: '1.jpg', mimeType: 'image/jpeg', sizeBytes: 4, bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]) }],
+    pages: [scanPage()],
   }, 'organization', {
     storage: { async upload(input) { return { storageKey: input.key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
     ocr: { extract: async () => ({ extractedText: 'Primary OCR', blocks: [], metadata: {} }) },
@@ -88,7 +93,7 @@ test('finishes parallel OCR before starting visual work only for uncertain pages
   const operation = scanDocumentImages({
     scopeKey: newId(),
     idempotencyKey: 'parallel-scan',
-    pages: Array.from({ length: pageCount }, (_, index) => ({ filename: `${index}.jpg`, mimeType: 'image/jpeg' as const, sizeBytes: 4, bytes: new Uint8Array([0xff, 0xd8, 0xff, index]) })),
+    pages: Array.from({ length: pageCount }, (_, index) => scanPage(index)),
   }, 'organization', {
     storage: { async upload(input) { return { storageKey: input.key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
     ocr: { extract: async () => { ocrStarted += 1; if (ocrStarted === pageCount) allOcrStarted(); await extractionGate; return { extractedText: 'primary', blocks: [], metadata: {} }; } },

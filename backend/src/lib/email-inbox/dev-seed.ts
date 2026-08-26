@@ -3,8 +3,9 @@ import { toArangoDoc } from '@/lib/db/base';
 import { archiveDocument, emailDraftPayloadSchema, emailMessagePayloadSchema, emailReplyContextPayloadSchema, emailThreadPayloadSchema, emailTonePayloadSchema, encodeEmailToneContent, prepareEmailReplyContextDocument, prepareEmailToneDocument } from './archive-payloads';
 import { organizationConnectorSchema } from './connector-schema';
 import { inboxSchema } from './inbox-schema';
-import { mailFolderKeys } from './folders';
+import { mailFolderKeys, mailInboxFilesFolderKey, mailInboxFolderKey } from './folders';
 import { MAIL_DEV_FIXTURE_AT, MAIL_DEV_FIXTURE_PREFIX, mailDevFixtures } from './dev-fixtures';
+import { emailDevelopmentAttachmentAssets } from '@/lib/development-fixture-assets';
 
 export function mailDevFixtureKey(kind: string, ...values: string[]) {
   return `c${createHash('sha256').update([kind, ...values].join('\0')).digest('hex').slice(0, 24)}`;
@@ -43,6 +44,7 @@ export function buildMailDevSeedManifest(input: {
 }) {
   const accountKeys = ['studio', 'personal', 'community'].map((slug) => mailDevFixtureKey('mail-dev-connector', input.scopeKey, slug));
   const fixtures = mailDevFixtures(input.scopeKey, accountKeys);
+  const attachmentAssets = emailDevelopmentAttachmentAssets(input.scopeKey);
   const folders = mailFolderKeys(input.scopeKey);
   const connectors = fixtures.accounts.map((account) => {
     const providerAccountId = `${MAIL_DEV_FIXTURE_PREFIX}:${account.slug}`;
@@ -58,6 +60,7 @@ export function buildMailDevSeedManifest(input: {
     createdByMembershipKey: input.membershipKey,
     status: 'error',
     syncEnabled: false,
+    initialSyncCompleted: true,
     syncStatus: 'idle',
     syncError: 'Local fixture connector; provider access is disabled.',
     lastError: 'Local fixture connector; provider access is disabled.',
@@ -66,7 +69,7 @@ export function buildMailDevSeedManifest(input: {
     });
   });
   const inboxes = fixtures.accounts.map((account, index) => inboxSchema.parse({
-    key: mailDevFixtureKey('mail-dev-inbox', input.scopeKey, account.slug),
+    key: mailInboxFolderKey(input.scopeKey, account.accountKey),
     organizationKey: input.organizationKey,
     scopeKey: input.scopeKey,
     connectorKey: account.accountKey,
@@ -77,14 +80,21 @@ export function buildMailDevSeedManifest(input: {
     createdAt: MAIL_DEV_FIXTURE_AT,
     updatedAt: MAIL_DEV_FIXTURE_AT,
   }));
+  const managedFolders: Array<Record<string, unknown>> = inboxes.flatMap((inbox) => [{
+    _key: inbox.key, scopeKey: input.scopeKey, parentFolderKey: folders.inboxes, name: inbox.name, description: inbox.description,
+    managedPurpose: 'mail-inbox', managedOwnerKey: inbox.connectorKey, mutationPolicy: 'system-container', archiveVisibility: 'visible', embedding: inbox.embedding, isFavorite: inbox.isFavorite, createdAt: MAIL_DEV_FIXTURE_AT, updatedAt: MAIL_DEV_FIXTURE_AT,
+  }, {
+    _key: mailInboxFilesFolderKey(input.scopeKey, inbox.connectorKey), scopeKey: input.scopeKey, parentFolderKey: inbox.key, name: 'Files', description: 'Documents synchronized from email attachments',
+    managedPurpose: 'mail-inbox-files', managedOwnerKey: inbox.connectorKey, mutationPolicy: 'system-container', archiveVisibility: 'visible', embedding: inbox.embedding, isFavorite: false, createdAt: MAIL_DEV_FIXTURE_AT, updatedAt: MAIL_DEV_FIXTURE_AT,
+  }]);
   const documents = fixtures.threads.flatMap(({ thread, messages }) => {
     const threadKey = mailDevFixtureKey('mail-thread', thread.scopeKey, thread.accountKey, thread.providerThreadId);
     const threadPayload = emailThreadPayloadSchema.parse({ version: 1, kind: 'mail-thread', data: withoutArchiveFields(thread) });
-    const threadDocument = archiveDocument({ key: threadKey, scopeKey: input.scopeKey, folderKey: folders.threads, name: thread.subject, payload: threadPayload, embedding: thread.embedding, createdAt: MAIL_DEV_FIXTURE_AT, updatedAt: MAIL_DEV_FIXTURE_AT, developmentFixtureIdentifier: MAIL_DEV_FIXTURE_PREFIX });
+    const threadDocument = archiveDocument({ key: threadKey, scopeKey: input.scopeKey, folderKey: folders.threads, name: thread.subject, payload: threadPayload, embedding: thread.embedding, createdAt: MAIL_DEV_FIXTURE_AT, updatedAt: MAIL_DEV_FIXTURE_AT, archiveVisibility: 'domain-only', developmentFixtureIdentifier: MAIL_DEV_FIXTURE_PREFIX });
     const messageDocuments = messages.map((message) => {
       const key = mailDevFixtureKey('mail-message', message.scopeKey, message.accountKey, message.providerMessageId);
       const payload = emailMessagePayloadSchema.parse({ version: 1, kind: 'mail-message', data: { ...withoutArchiveFields(message), threadKey } });
-      return archiveDocument({ key, scopeKey: input.scopeKey, folderKey: folders.threads, name: message.subject, payload, embedding: message.embedding, createdAt: MAIL_DEV_FIXTURE_AT, updatedAt: MAIL_DEV_FIXTURE_AT, developmentFixtureIdentifier: MAIL_DEV_FIXTURE_PREFIX });
+      return archiveDocument({ key, scopeKey: input.scopeKey, folderKey: mailInboxFolderKey(input.scopeKey, message.accountKey), name: message.subject, payload, embedding: message.embedding, createdAt: MAIL_DEV_FIXTURE_AT, updatedAt: MAIL_DEV_FIXTURE_AT, archiveVisibility: 'visible', developmentFixtureIdentifier: MAIL_DEV_FIXTURE_PREFIX });
     });
     return [threadDocument, ...messageDocuments];
   });
@@ -112,14 +122,14 @@ export function buildMailDevSeedManifest(input: {
     const thread = fixtures.threads.find(({ fixtureId }) => fixtureId === draft.threadFixtureId);
     const data = draft.variant === 'new'
       ? { variant: 'new' as const, accountKey: draft.accountKey, to: draft.to, ...('cc' in draft ? { cc: draft.cc } : {}), ...('bcc' in draft ? { bcc: draft.bcc } : {}), subject: draft.subject, generatedContent: draft.generatedContent, ...('finalContent' in draft ? { finalContent: draft.finalContent } : {}), status: draft.status, tone: draft.tone }
-      : { variant: 'reply' as const, replyMode: draft.replyMode, threadKey: mailDevFixtureKey('mail-thread', input.scopeKey, draft.accountKey, draft.threadFixtureId), messageKey: mailDevFixtureKey('mail-message', input.scopeKey, draft.accountKey, draft.messageProviderId), to: draft.to, cc: draft.cc, generatedContent: draft.generatedContent, ...('finalContent' in draft ? { finalContent: draft.finalContent } : {}), status: draft.status, tone: draft.tone };
+      : { variant: 'reply' as const, creationSource: 'subscription' as const, replyMode: draft.replyMode, threadKey: mailDevFixtureKey('mail-thread', input.scopeKey, draft.accountKey, draft.threadFixtureId), messageKey: mailDevFixtureKey('mail-message', input.scopeKey, draft.accountKey, draft.messageProviderId), to: draft.to, cc: draft.cc, generatedContent: draft.generatedContent, ...('finalContent' in draft ? { finalContent: draft.finalContent } : {}), status: draft.status, tone: draft.tone };
     if (draft.variant === 'reply' && !thread) throw new Error(`Fixture draft ${draft.id} has no thread.`);
     const kind = draft.variant === 'new' ? 'mail-new-draft' : 'mail-reply-draft';
     const payload = emailDraftPayloadSchema.parse({ version: 1, kind, data });
     const embedding = fixtures.threads[fixtures.drafts.indexOf(draft) + 12]!.thread.embedding;
     documents.push(archiveDocument({ key, scopeKey: input.scopeKey, folderKey: folders.drafts, name: draft.variant === 'new' ? draft.subject : `Reply ${draft.threadFixtureId}`, payload, embedding, createdAt: MAIL_DEV_FIXTURE_AT, updatedAt: MAIL_DEV_FIXTURE_AT, developmentFixtureIdentifier: MAIL_DEV_FIXTURE_PREFIX }));
   }
-  return { fixtures, connectors, inboxes, documents, accountKeys };
+  return { fixtures, connectors, inboxes, managedFolders, documents, accountKeys, attachmentAssets };
 }
 
 type SeedDatabase = { query(query: string, bindVars?: Record<string, unknown>): Promise<{ next(): Promise<unknown>; all(): Promise<unknown[]> }> };
@@ -135,18 +145,18 @@ export async function reconcileMailDevSeed(database: SeedDatabase, manifest: Ret
     return Number(await cursor.next() ?? 0);
   };
   await persist('organizationConnectors', manifest.connectors.map(toArangoDoc), true);
-  await persist('inboxes', manifest.inboxes.map(toArangoDoc));
+  await persist('folders', manifest.managedFolders);
   await persist('documents', manifest.documents.map(toArangoDoc));
   await database.query(`LET fixtureConnectorKeys = (FOR connector IN organizationConnectors FILTER connector.scopeKey == @scopeKey && STARTS_WITH(connector.providerAccountId, @prefix) RETURN connector._key)
     LET staleConnectorKeys = MINUS(fixtureConnectorKeys, @keepConnectorKeys)
-    LET removedInboxes = (FOR inbox IN inboxes FILTER inbox.scopeKey == @scopeKey && inbox.connectorKey IN fixtureConnectorKeys && inbox._key NOT IN @keepInboxKeys REMOVE inbox IN inboxes RETURN 1)
-    FOR connector IN organizationConnectors FILTER connector._key IN staleConnectorKeys REMOVE connector IN organizationConnectors`, { scopeKey: manifest.fixtures.threads[0]!.thread.scopeKey, prefix: MAIL_DEV_FIXTURE_PREFIX, keepConnectorKeys: manifest.connectors.map(({ key }) => key), keepInboxKeys: manifest.inboxes.map(({ key }) => key) });
+    FOR connector IN organizationConnectors FILTER connector._key IN staleConnectorKeys REMOVE connector IN organizationConnectors`, { scopeKey: manifest.fixtures.threads[0]!.thread.scopeKey, prefix: MAIL_DEV_FIXTURE_PREFIX, keepConnectorKeys: manifest.connectors.map(({ key }) => key) });
   const keepDocumentKeys = manifest.documents.map(({ key }) => key);
   await database.query(`FOR document IN documents
     FILTER document.scopeKey == @scopeKey && document._key NOT IN @keep
     LET payload = JSON_PARSE(document.content)
     FILTER document.developmentFixtureIdentifier == @prefix || (payload.kind == "mail-thread" && STARTS_WITH(payload.data.providerThreadId, @prefix)) || (payload.kind == "mail-message" && STARTS_WITH(payload.data.providerMessageId, @prefix)) || (payload.kind == "mail-tone" && STARTS_WITH(payload.data.identifier || "", @prefix)) || (CONTAINS(document.content, "<!-- vorinthex-mail-tone ") && CONTAINS(document.content, @toneIdentifierFragment))
     REMOVE document IN documents`, { scopeKey: manifest.fixtures.threads[0]!.thread.scopeKey, keep: keepDocumentKeys, prefix: MAIL_DEV_FIXTURE_PREFIX, toneIdentifierFragment: `"identifier":"${MAIL_DEV_FIXTURE_PREFIX}:` });
+  await database.query('FOR folder IN folders FILTER folder.scopeKey == @scopeKey && folder._key NOT IN @keep FILTER (folder.managedPurpose == "mail-inbox" && folder.managedOwnerKey IN @connectorKeys) || folder.managedPurpose == "mail-thread" FILTER LENGTH(FOR document IN documents FILTER document.folderKey == folder._key LIMIT 1 RETURN 1) == 0 REMOVE folder IN folders', { scopeKey: manifest.fixtures.threads[0]!.thread.scopeKey, keep: manifest.managedFolders.map((folder) => folder._key), connectorKeys: manifest.connectors.map(({ key }) => key) });
 }
 
 export async function verifyMailDevSeed(database: SeedDatabase, manifest: ReturnType<typeof buildMailDevSeedManifest>) {
@@ -154,17 +164,25 @@ export async function verifyMailDevSeed(database: SeedDatabase, manifest: Return
       LET current = DOCUMENT(organizationConnectors, expected._key)
       LET desired = current == null ? expected : MERGE(expected, { encryptedCredentials: current.encryptedCredentials, encryptionKeyId: current.encryptionKeyId, accessTokenFingerprint: current.accessTokenFingerprint })
       FILTER current == null || UNSET(current, "_id", "_rev") != desired RETURN 1)
-    LET inboxMismatches = (FOR expected IN @inboxes LET current = DOCUMENT(inboxes, expected._key) FILTER current == null || UNSET(current, "_id", "_rev") != expected RETURN 1)
+    LET folderMismatches = (FOR expected IN @folders LET current = DOCUMENT(folders, expected._key) FILTER current == null || UNSET(current, "_id", "_rev") != expected RETURN 1)
     LET documentMismatches = (FOR expected IN @documents LET current = DOCUMENT(documents, expected._key) FILTER current == null || UNSET(current, "_id", "_rev") != expected RETURN 1)
+    LET attachmentMismatches = (FOR expected IN @attachmentAssets
+      LET target = expected.type == "document" ? DOCUMENT(documents, expected.key) : DOCUMENT(images, expected.key)
+      LET folder = expected.type == "document" && target != null ? DOCUMENT(folders, expected.folderKey) : null
+      LET placement = expected.type == "image" ? FIRST(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.collectionKey == expected.collectionKey && relation.imageKey == expected.key LIMIT 1 RETURN relation) : null
+      LET collection = expected.type == "image" ? DOCUMENT(collections, expected.collectionKey) : null
+      FILTER target == null || target.scopeKey != @scopeKey || target.mutationPolicy == "system-only"
+        || (expected.type == "document" && (target.folderKey != expected.folderKey || folder == null || folder.scopeKey != @scopeKey))
+        || (expected.type == "image" && (collection == null || collection.scopeKey != @scopeKey || placement == null))
+      RETURN 1)
     LET fixtureConnectorKeys = (FOR connector IN organizationConnectors FILTER connector.scopeKey == @scopeKey && STARTS_WITH(connector.providerAccountId, @prefix) RETURN connector._key)
     LET extraFixtureConnectors = (FOR connectorKey IN fixtureConnectorKeys FILTER connectorKey NOT IN @connectorKeys RETURN 1)
-    LET extraFixtureInboxes = (FOR inbox IN inboxes FILTER inbox.scopeKey == @scopeKey && inbox.connectorKey IN fixtureConnectorKeys && inbox._key NOT IN @inboxKeys RETURN 1)
     LET extraFixtureDocuments = (FOR document IN documents FILTER document.scopeKey == @scopeKey && document._key NOT IN @documentKeys LET payload = JSON_PARSE(document.content) FILTER document.developmentFixtureIdentifier == @prefix || (payload.kind == "mail-thread" && STARTS_WITH(payload.data.providerThreadId, @prefix)) || (payload.kind == "mail-message" && STARTS_WITH(payload.data.providerMessageId, @prefix)) || (payload.kind == "mail-tone" && STARTS_WITH(payload.data.identifier || "", @prefix)) || (CONTAINS(document.content, "<!-- vorinthex-mail-tone ") && CONTAINS(document.content, @toneIdentifierFragment)) RETURN 1)
-    RETURN { connectorMismatches: LENGTH(connectorMismatches), inboxMismatches: LENGTH(inboxMismatches), documentMismatches: LENGTH(documentMismatches), extraFixtureConnectors: LENGTH(extraFixtureConnectors), extraFixtureInboxes: LENGTH(extraFixtureInboxes), extraFixtureDocuments: LENGTH(extraFixtureDocuments) }`, {
-    connectors: manifest.connectors.map(toArangoDoc), connectorKeys: manifest.connectors.map(({ key }) => key), inboxes: manifest.inboxes.map(toArangoDoc), inboxKeys: manifest.inboxes.map(({ key }) => key), documents: manifest.documents.map(toArangoDoc), documentKeys: manifest.documents.map(({ key }) => key), scopeKey: manifest.fixtures.threads[0]!.thread.scopeKey, prefix: MAIL_DEV_FIXTURE_PREFIX, toneIdentifierFragment: `"identifier":"${MAIL_DEV_FIXTURE_PREFIX}:`,
+    RETURN { connectorMismatches: LENGTH(connectorMismatches), folderMismatches: LENGTH(folderMismatches), documentMismatches: LENGTH(documentMismatches), attachmentMismatches: LENGTH(attachmentMismatches), extraFixtureConnectors: LENGTH(extraFixtureConnectors), extraFixtureDocuments: LENGTH(extraFixtureDocuments) }`, {
+    connectors: manifest.connectors.map(toArangoDoc), connectorKeys: manifest.connectors.map(({ key }) => key), folders: manifest.managedFolders, documents: manifest.documents.map(toArangoDoc), documentKeys: manifest.documents.map(({ key }) => key), attachmentAssets: manifest.attachmentAssets, scopeKey: manifest.fixtures.threads[0]!.thread.scopeKey, prefix: MAIL_DEV_FIXTURE_PREFIX, toneIdentifierFragment: `"identifier":"${MAIL_DEV_FIXTURE_PREFIX}:`,
   });
   const mismatches = await cursor.next() as Record<string, number> | undefined;
   if (!mismatches || Object.values(mismatches).some((count) => count !== 0)) throw new Error('Mail fixture verification failed.');
   const counts = { connectors: manifest.connectors.length };
-  return { inboxes: manifest.inboxes.map(({ name }) => name), connectors: counts.connectors, threads: manifest.fixtures.threads.length, messages: manifest.fixtures.threads.reduce((sum, thread) => sum + thread.messages.length, 0), drafts: manifest.fixtures.drafts.length, tones: manifest.fixtures.tones.length, replyContext: manifest.fixtures.replyContext.length };
+  return { inboxes: manifest.inboxes.map(({ name }) => name), connectors: counts.connectors, threads: manifest.fixtures.threads.length, messages: manifest.fixtures.threads.reduce((sum, thread) => sum + thread.messages.length, 0), attachmentReferences: manifest.fixtures.threads.flatMap(({ messages }) => messages.flatMap(({ attachments }) => attachments ?? [])).length, drafts: manifest.fixtures.drafts.length, tones: manifest.fixtures.tones.length, replyContext: manifest.fixtures.replyContext.length };
 }

@@ -14,6 +14,7 @@ import { embedAction } from './embed';
 import { extendVideoAction } from './extend-video';
 import { generateImageAction } from './generate-image';
 import { generateMusicAction } from './generate-music';
+import { generateSpeechAction } from './generate-speech';
 import { generateVideoAction } from './generate-video';
 import { insertActionDefinition } from './insert';
 import { readAction } from './read';
@@ -41,6 +42,7 @@ export { embedAction } from './embed';
 export { extendVideoAction } from './extend-video';
 export { generateImageAction } from './generate-image';
 export { generateMusicAction } from './generate-music';
+export { generateSpeechAction, speechInputSchema, speechOutputSchema, type SpeechInput, type SpeechOutput } from './generate-speech';
 export { generateVideoAction } from './generate-video';
 export { insertActionDefinition } from './insert';
 export { readAction } from './read';
@@ -59,7 +61,7 @@ export const ACTION_DEFINITIONS: readonly ActionDefinition[] = [
   askAction, embedAction, webSearchAction,
   traverseAction, readAction, insertActionDefinition, upsertAction, updateActionDefinition, deleteActionDefinition,
   generateImageAction, editImageAction, generateVideoAction, editVideoAction, extendVideoAction, analyzeVideoAction,
-  analyzeAudioAction, generateMusicAction,
+  analyzeAudioAction, generateMusicAction, generateSpeechAction,
   documentValidateAction, storageUploadAction, documentExtractAction, documentEmbedAction, documentInsertAction, captionImageAction, describeVisualIdentityAction,
 ];
 export const getActionDefinition = (id: ActionId): ActionDefinition | undefined => ACTION_DEFINITIONS.find((definition) => definition.id === id);

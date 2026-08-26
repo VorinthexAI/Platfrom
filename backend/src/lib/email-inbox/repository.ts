@@ -34,7 +34,7 @@ import {
   type EmailThread,
   type EmailTone,
 } from './archive-payloads';
-import { ensureMailFolders, mailFolderKeys } from './folders';
+import { ensureMailFolders, mailFolderKeys, mailInboxFolderKey } from './folders';
 import { documentVersionSchema, type DocumentVersion } from '@/lib/db/document-versions.node';
 import { documentSummarySchema, type DocumentSummary } from '@/lib/db/document-summaries.node';
 import type { InboxCategory } from './classification';
@@ -43,6 +43,7 @@ import { compareEmailMessages } from './message-order';
 import { IMAGE_COLLECTION_HIGHLIGHTS_COLLECTION } from '@/lib/db/image-collection-highlights.node';
 import { IMAGE_COLLECTION_MEMORIES_COLLECTION } from '@/lib/db/image-collection-memories.node';
 import type { StagedEmailAttachment } from './attachment-ingestion';
+import type { PreparedDocumentRepresentation } from '@/lib/ai/document-processing';
 
 type Database = Pick<typeof db, 'query' | 'collection'> & Partial<Pick<typeof db, 'beginTransaction'>>;
 const REPLY_CONTEXT_MAX_NOTES = 20;
@@ -105,6 +106,10 @@ function stableKey(kind: string, ...values: string[]) {
   return `c${createHash('sha256').update([kind, ...values].join('\0')).digest('hex').slice(0, 24)}`;
 }
 
+export const emailThreadKey = (scopeKey: string, accountKey: string, providerThreadId: string) => stableKey('mail-thread', scopeKey, accountKey, providerThreadId);
+export const emailMessageKey = (scopeKey: string, accountKey: string, providerMessageId: string) => stableKey('mail-message', scopeKey, accountKey, providerMessageId);
+export const emailSubscriptionDraftKey = (scopeKey: string, messageKey: string) => stableKey('mail-subscription-draft', scopeKey, messageKey);
+
 function normalizedProviderThreadState(value: ProviderThreadMetadataState) {
   return JSON.stringify([...value.messages]
     .map((message) => ({ providerMessageId: message.providerMessageId, labels: [...new Set(message.labels)].sort(), sentAt: message.sentAt }))
@@ -153,7 +158,7 @@ export function createEmailRepository(database: Database = db) {
     throw new EmailRepositoryError('conflict', 'Generated email content changed concurrently; retry the operation');
   };
   const mailDeletion = async <T>(operation: (executor: Pick<typeof db, 'query'>) => Promise<T>, fenceConnector = false): Promise<T> => database.beginTransaction
-    ? withDatabaseTransaction<T>(database as typeof db, { read: ['scopes', 'scopeMembers', 'userOrganizations'], write: ['folders', 'documents', 'documentVersions', 'documentSummaries', 'documentSummaryAudio', 'documentAudioVersions', 'emailAttachmentBindings', 'images', 'imageCaptions', 'collectionImages', 'imageIdentities', IMAGE_COLLECTION_MEMORIES_COLLECTION, IMAGE_COLLECTION_HIGHLIGHTS_COLLECTION, 'placeImages', 'collections', 'trips', 'inboxes', 'tagAssignments', 'shares', 'userHiddens', 'storageDeletionJobs', ...(fenceConnector ? [ORGANIZATION_CONNECTORS_COLLECTION] : [])] }, operation)
+    ? withDatabaseTransaction<T>(database as typeof db, { read: ['scopes', 'scopeMembers', 'userOrganizations'], write: ['folders', 'documents', 'documentVersions', 'documentSummaries', 'documentSummaryAudio', 'documentAudioVersions', 'emailAttachmentBindings', 'images', 'imageCaptions', 'collectionImages', 'imageIdentities', IMAGE_COLLECTION_MEMORIES_COLLECTION, IMAGE_COLLECTION_HIGHLIGHTS_COLLECTION, 'placeImages', 'collections', 'trips', 'tagAssignments', 'shares', 'userHiddens', 'storageDeletionJobs', ...(fenceConnector ? [ORGANIZATION_CONNECTORS_COLLECTION] : [])] }, operation)
     : operation(database);
   const contentDeletion = async <T>(operation: (executor: Pick<typeof db, 'query'>) => Promise<T>): Promise<T> => database.beginTransaction
     ? withDatabaseTransaction<T>(database as typeof db, { read: [], write: ['documents', 'documentVersions', 'documentSummaries', 'documentSummaryAudio', 'documentAudioVersions', 'storageDeletionJobs'] }, operation)
@@ -231,19 +236,21 @@ export function createEmailRepository(database: Database = db) {
       if (!threads.length) return new Set<string>();
       const requestedIds = [...new Set(threads.map(({ providerThreadId }) => providerThreadId))];
       const cursor = await database.query(`LET threadRows = (FOR document IN documents
-          FILTER document.scopeKey == @scopeKey && document.folderKey == @folderKey && document.mutationPolicy == "system-only"
+          FILTER document.scopeKey == @scopeKey && document.mutationPolicy == "system-only"
           LET payload = JSON_PARSE(document.content)
           FILTER payload.version == 1 && payload.kind == "mail-thread" && payload.data.accountKey == @accountKey && payload.data.providerThreadId IN @providerThreadIds
+           FILTER document.folderKey == CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "managed-mail-folder", @scopeKey, "communication-mail-threads")), 24))
           RETURN { key: document._key, providerThreadId: payload.data.providerThreadId })
         LET threadKeys = threadRows[*].key
         LET providerThreadIdsByKey = ZIP(threadKeys, threadRows[*].providerThreadId)
         LET messageRows = (FOR document IN documents
-          FILTER document.scopeKey == @scopeKey && document.folderKey == @folderKey && document.mutationPolicy == "system-only"
+          FILTER document.scopeKey == @scopeKey && document.mutationPolicy == "system-only"
           LET payload = JSON_PARSE(document.content)
           FILTER payload.version == 1 && payload.kind == "mail-message" && payload.data.accountKey == @accountKey && payload.data.threadKey IN threadKeys
+           FILTER document.folderKey == CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "managed-mail-folder", @scopeKey, CONCAT("mail-inbox\\u0000", @accountKey))), 24))
           RETURN { providerThreadId: providerThreadIdsByKey[payload.data.threadKey], providerMessageId: payload.data.providerMessageId, labels: payload.data.labels || [], sentAt: payload.data.sentAt })
         RETURN { providerThreadIds: threadRows[*].providerThreadId, messages: messageRows }`, {
-        scopeKey, accountKey, folderKey: mailFolderKeys(scopeKey).threads, providerThreadIds: requestedIds,
+        scopeKey, accountKey, providerThreadIds: requestedIds,
       });
       const rows = await cursor.next() as { providerThreadIds: string[]; messages: Array<ProviderThreadMetadataState['messages'][number] & { providerThreadId: string }> } | undefined;
       const storedStates = new Map((rows?.providerThreadIds ?? []).map((providerThreadId) => [providerThreadId, { providerThreadId, messages: [] as ProviderThreadMetadataState['messages'] }]));
@@ -256,15 +263,17 @@ export function createEmailRepository(database: Database = db) {
         FILTER message.scopeKey == @scopeKey && message.mutationPolicy == "system-only"
         LET messagePayload = JSON_PARSE(message.content)
         FILTER messagePayload.version == 1 && messagePayload.kind == "mail-message" && messagePayload.data.accountKey == @accountKey && messagePayload.data.providerMessageId == @providerMessageId
+         FILTER message.folderKey == CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "managed-mail-folder", @scopeKey, CONCAT("mail-inbox\\u0000", @accountKey))), 24))
         LET thread = DOCUMENT(documents, messagePayload.data.threadKey)
         LET threadPayload = thread == null ? null : JSON_PARSE(thread.content)
         FILTER threadPayload != null && threadPayload.version == 1 && threadPayload.kind == "mail-thread" && threadPayload.data.accountKey == @accountKey
+         FILTER thread.folderKey == CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "managed-mail-folder", @scopeKey, "communication-mail-threads")), 24))
         LIMIT 1 RETURN threadPayload.data.providerThreadId`, { scopeKey, accountKey, providerMessageId });
       return await cursor.next() as string | null;
     },
     async syncThread(input: {
-      thread: Omit<EmailThread, 'key' | 'createdAt' | 'updatedAt'>;
-      messages: Array<Omit<EmailMessage, 'key' | 'threadKey' | 'createdAt' | 'updatedAt' | 'attachmentAvailability'> & Partial<Pick<EmailMessage, 'attachmentAvailability'>>>;
+      thread: Omit<EmailThread, 'key' | 'createdAt' | 'updatedAt'> & { archiveRepresentation?: PreparedDocumentRepresentation };
+      messages: Array<Omit<EmailMessage, 'key' | 'threadKey' | 'createdAt' | 'updatedAt' | 'attachmentAvailability'> & Partial<Pick<EmailMessage, 'attachmentAvailability'>> & { archiveRepresentation?: PreparedDocumentRepresentation }>;
       reconcileMessages?: boolean;
       lease?: { kind: 'sync' | 'send'; connectorKey: string; token: string };
       attachmentCommits?: StagedEmailAttachment[];
@@ -273,11 +282,16 @@ export function createEmailRepository(database: Database = db) {
         throw new EmailRepositoryError('conflict', 'Email thread and messages must belong to the same account and scope');
       }
       if (new Set(input.messages.map(({ providerMessageId }) => providerMessageId)).size !== input.messages.length) throw new EmailRepositoryError('conflict', 'Email provider message IDs must be unique within a thread');
-      const folders = await ensureMailFolders(database, input.thread.scopeKey);
       const timestamp = new Date().toISOString();
-      const threadKey = stableKey('mail-thread', input.thread.scopeKey, input.thread.accountKey, input.thread.providerThreadId);
-      const threadPayload = emailThreadPayloadSchema.parse({ version: 1, kind: 'mail-thread', data: withoutRecordFields({ ...input.thread, key: threadKey, createdAt: timestamp, updatedAt: timestamp }) });
-      const threadDocument = archiveDocument({ key: threadKey, scopeKey: input.thread.scopeKey, folderKey: folders.threads, name: input.thread.subject, payload: threadPayload, embedding: input.thread.embedding, createdAt: timestamp, updatedAt: timestamp });
+      const threadKey = emailThreadKey(input.thread.scopeKey, input.thread.accountKey, input.thread.providerThreadId);
+      const inboxCursor = await database.query('LET connector = DOCUMENT(organizationConnectors, @connectorKey) LET inbox = DOCUMENT(folders, @inboxFolderKey) FILTER connector != null && connector.scopeKey == @scopeKey && connector.provider == "gmail" && connector.status != "revoked" && connector.syncEnabled != false && inbox != null && inbox.scopeKey == @scopeKey && inbox.managedPurpose == "mail-inbox" && inbox.managedOwnerKey == connector._key && inbox.mutationPolicy == "system-container" RETURN inbox.name', { scopeKey: input.thread.scopeKey, connectorKey: input.thread.accountKey, inboxFolderKey: mailInboxFolderKey(input.thread.scopeKey, input.thread.accountKey) });
+      const inboxName = await inboxCursor.next() as string | undefined;
+      if (!inboxName) throw new EmailRepositoryError('conflict', 'Email inbox metadata is missing');
+       const folders = mailFolderKeys(input.thread.scopeKey);
+       const inboxFolderKey = mailInboxFolderKey(input.thread.scopeKey, input.thread.accountKey);
+      const { archiveRepresentation: threadRepresentation, ...threadInput } = input.thread;
+      const threadPayload = emailThreadPayloadSchema.parse({ version: 1, kind: 'mail-thread', data: withoutRecordFields({ ...threadInput, key: threadKey, createdAt: timestamp, updatedAt: timestamp }) });
+       const threadDocument = archiveDocument({ key: threadKey, scopeKey: input.thread.scopeKey, folderKey: folders.threads, name: input.thread.subject, payload: threadPayload, embedding: input.thread.embedding, representation: threadRepresentation, createdAt: timestamp, updatedAt: timestamp, archiveVisibility: 'domain-only' });
       return mailDeletion(async (trx) => {
         let attachmentMutation = { documentKeys: [] as string[], imageKeys: [] as string[], collectionKeys: [] as string[] };
         if (input.lease) {
@@ -296,13 +310,14 @@ export function createEmailRepository(database: Database = db) {
         const threadCursor = await trx.query('UPSERT { _key: @key } INSERT @document UPDATE MERGE(@document, { _key: OLD._key, createdAt: OLD.createdAt }) IN documents RETURN NEW', { key: threadKey, document: toArangoDoc(threadDocument) });
         const thread = decodeEmailThread(parsedDocument(await threadCursor.next()));
         for (const inputMessage of input.messages) {
-          const messageKey = stableKey('mail-message', inputMessage.scopeKey, inputMessage.accountKey, inputMessage.providerMessageId);
-          const data = withoutRecordFields({ ...inputMessage, threadKey, key: messageKey, createdAt: timestamp, updatedAt: timestamp });
+          const messageKey = emailMessageKey(inputMessage.scopeKey, inputMessage.accountKey, inputMessage.providerMessageId);
+          const { archiveRepresentation, ...messageInput } = inputMessage;
+          const data = withoutRecordFields({ ...messageInput, threadKey, key: messageKey, createdAt: timestamp, updatedAt: timestamp });
           const payload = emailMessagePayloadSchema.parse({ version: 1, kind: 'mail-message', data });
-          const document = archiveDocument({ key: messageKey, scopeKey: inputMessage.scopeKey, folderKey: folders.threads, name: inputMessage.subject, payload, embedding: inputMessage.embedding, createdAt: timestamp, updatedAt: timestamp });
+           const document = archiveDocument({ key: messageKey, scopeKey: inputMessage.scopeKey, folderKey: inboxFolderKey, name: inputMessage.subject, payload, embedding: inputMessage.embedding, representation: archiveRepresentation, createdAt: timestamp, updatedAt: timestamp, archiveVisibility: 'visible' });
           const messageIdentity = await trx.query(`LET existing = DOCUMENT(documents, @key)
             FILTER existing == null || (existing.scopeKey == @scopeKey && existing.folderKey == @folderKey && existing.mutationPolicy == "system-only" && JSON_PARSE(existing.content).version == 1 && JSON_PARSE(existing.content).kind == "mail-message" && JSON_PARSE(existing.content).data.accountKey == @accountKey && JSON_PARSE(existing.content).data.providerMessageId == @providerMessageId)
-            RETURN true`, { key: messageKey, scopeKey: inputMessage.scopeKey, folderKey: folders.threads, accountKey: inputMessage.accountKey, providerMessageId: inputMessage.providerMessageId });
+             RETURN true`, { key: messageKey, scopeKey: inputMessage.scopeKey, folderKey: inboxFolderKey, accountKey: inputMessage.accountKey, providerMessageId: inputMessage.providerMessageId });
           if (await messageIdentity.next() !== true) throw new EmailRepositoryError('conflict', 'Deterministic email message key belongs to another provider identity');
           await trx.query('UPSERT { _key: @key } INSERT @document UPDATE MERGE(@document, { _key: OLD._key, createdAt: OLD.createdAt }) IN documents', { key: messageKey, document: toArangoDoc(document) });
           const recoveredDraftKey = inputMessage.direction === 'outbound' && inputMessage.labels?.includes('SENT') ? draftKeyFromOutboundMessageId(inputMessage.messageIdHeader) : null;
@@ -320,7 +335,7 @@ export function createEmailRepository(database: Database = db) {
           if (await committed.next() !== true) throw new EmailRepositoryError('conflict', 'Attachment staging lease or target changed before mail persistence');
         }
         if (input.reconcileMessages !== false) {
-          const keep = input.messages.map(({ providerMessageId }) => stableKey('mail-message', input.thread.scopeKey, input.thread.accountKey, providerMessageId));
+            const keep = input.messages.map(({ providerMessageId }) => emailMessageKey(input.thread.scopeKey, input.thread.accountKey, providerMessageId));
           const cleanupCursor = await trx.query(`LET stale = (FOR document IN documents FILTER document.scopeKey == @scopeKey && document.folderKey == @folderKey && document.mutationPolicy == "system-only" && document._key NOT IN @keep LET payload = JSON_PARSE(document.content) FILTER payload.version == 1 && payload.kind == "mail-message" && payload.data.threadKey == @threadKey RETURN document)
             LET staleKeys = stale[*]._key
             LET staleProviderMessageIds = (FOR document IN stale LET payload = JSON_PARSE(document.content) FILTER payload.kind == "mail-message" RETURN payload.data.providerMessageId)
@@ -346,7 +361,6 @@ export function createEmailRepository(database: Database = db) {
             LET cleanedAttachmentFolders = (FOR folder IN folders FILTER folder.scopeKey == @scopeKey && folder.coverImageKey IN attachmentImages[*]._key UPDATE folder WITH { coverImageKey: null, updatedAt: @timestamp } IN folders OPTIONS { keepNull: false } RETURN 1)
             LET cleanedAttachmentCollections = (FOR collection IN collections FILTER collection.scopeKey == @scopeKey && collection.coverImageKey IN attachmentImages[*]._key UPDATE collection WITH { coverImageKey: null, updatedAt: @timestamp } IN collections OPTIONS { keepNull: false } RETURN 1)
             LET cleanedAttachmentTrips = (FOR trip IN trips FILTER trip.scopeKey == @scopeKey && trip.coverImageKey IN attachmentImages[*]._key UPDATE trip WITH { coverImageKey: null, updatedAt: @timestamp } IN trips OPTIONS { keepNull: false } RETURN 1)
-            LET cleanedAttachmentInboxes = (FOR inbox IN inboxes FILTER inbox.scopeKey == @scopeKey && inbox.coverImageKey IN attachmentImages[*]._key UPDATE inbox WITH { coverImageKey: null, updatedAt: @timestamp } IN inboxes OPTIONS { keepNull: false } RETURN 1)
             LET cleanedAttachmentCovers = []
             LET removedAttachmentTags = (FOR assignment IN tagAssignments FILTER assignment.scopeKey == @scopeKey && assignment.sourceType == "image" && assignment.sourceKey IN attachmentImages[*]._key REMOVE assignment IN tagAssignments RETURN 1)
             LET removedAttachmentShares = (FOR share IN shares FILTER share.scopeKey == @scopeKey && share.sourceType == "image" && share.sourceKey IN attachmentImages[*]._key REMOVE share IN shares RETURN 1)
@@ -361,7 +375,7 @@ export function createEmailRepository(database: Database = db) {
             LET removedVersions = (FOR version IN documentVersions FILTER version.scopeKey == @scopeKey && version.documentKey IN dependentDocumentKeys REMOVE version IN documentVersions RETURN 1)
             LET removedAudioVersions = (FOR audio IN documentAudioVersions FILTER audio.scopeKey == @scopeKey && audio.documentKey IN dependentDocumentKeys REMOVE audio IN documentAudioVersions RETURN 1)
             LET removedDocuments = (FOR document IN UNION_DISTINCT(attachmentDocuments, stale) REMOVE document IN documents RETURN 1)
-            RETURN { attachmentTargetKeys, attachmentDocumentKeys, attachmentImageKeys: attachmentImages[*]._key, affectedCollectionKeys, attachmentCaptionKeys: attachmentImages[*].imageCaptionKey }`, { scopeKey: input.thread.scopeKey, folderKey: folders.threads, threadKey, accountKey: input.thread.accountKey, keep, timestamp });
+             RETURN { attachmentTargetKeys, attachmentDocumentKeys, attachmentImageKeys: attachmentImages[*]._key, affectedCollectionKeys, attachmentCaptionKeys: attachmentImages[*].imageCaptionKey }`, { scopeKey: input.thread.scopeKey, folderKey: inboxFolderKey, threadKey, accountKey: input.thread.accountKey, keep, timestamp });
           const cleanup = await cleanupCursor.next() as { attachmentTargetKeys: string[]; attachmentDocumentKeys: string[]; attachmentImageKeys: string[]; affectedCollectionKeys: string[]; attachmentCaptionKeys: string[] } | undefined;
           await cleanAttachmentDocumentReferences(trx, input.thread.scopeKey, cleanup?.attachmentTargetKeys ?? [], timestamp);
           await cleanOrphanAttachmentCaptions(trx, cleanup?.attachmentCaptionKeys ?? []);
@@ -379,20 +393,28 @@ export function createEmailRepository(database: Database = db) {
       const fingerprint = createHash('sha256').update(JSON.stringify({ scopeKey, connectorKey, filter, readState, facets, search })).digest('hex');
       const after = query.cursor ? decodeOverviewCursor(query.cursor, fingerprint) : null;
       const cursor = await database.query(`LET inbox = (FOR document IN documents
-        FILTER document.scopeKey == @scopeKey && document.folderKey == @folderKey && document.mutationPolicy == "system-only"
+        FILTER document.scopeKey == @scopeKey && document.mutationPolicy == "system-only"
         LET payload = JSON_PARSE(document.content)
         FILTER payload.kind == "mail-thread" && payload.data.accountKey == @connectorKey && payload.data.inInbox != false
+         FILTER document.folderKey == CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "managed-mail-folder", @scopeKey, "communication-mail-threads")), 24))
         RETURN { document, data: payload.data })
         LET matching = (FOR row IN inbox
           LET isTrash = "TRASH" IN (row.data.labels || [])
           FILTER @filter != null
             ? ((@filter == "trash" && isTrash) || (!isTrash && (@filter == "all" || (@filter == "important" && row.data.inboxCategory == "Important") || (@filter == "urgent" && row.data.inboxCategory == "Urgent") || (@filter == "needs_action" && row.data.state == "needs_action") || (@filter == "filtered" && row.data.inboxCategory == "Filtered") || (@filter == "unread" && row.data.unread == true) || (@filter == "favorite" && row.data.isFavorite == true))))
             : (!isTrash && row.data.unread == (@readState == "unread") && LENGTH(@facets) > 0 && (("urgent" IN @facets && row.data.inboxCategory == "Urgent") || ("important" IN @facets && row.data.inboxCategory == "Important") || ("filtered" IN @facets && row.data.inboxCategory == "Filtered") || ("favorite" IN @facets && row.data.isFavorite == true)))
-          FILTER @search == "" || CONTAINS(LOWER(CONCAT_SEPARATOR(" ", row.data.subject, row.data.summary, row.data.snippet, row.data.latestFrom)), @search)
+          LET direct = @search == "" || LENGTH(FOR message IN documents
+            FILTER message.scopeKey == @scopeKey && message.mutationPolicy == "system-only"
+            LET messagePayload = JSON_PARSE(message.content)
+            FILTER messagePayload.version == 1 && messagePayload.kind == "mail-message" && messagePayload.data.accountKey == @connectorKey && messagePayload.data.threadKey == row.document._key
+            FILTER message.folderKey == CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "managed-mail-folder", @scopeKey, CONCAT("mail-inbox\\u0000", @connectorKey))), 24))
+            FILTER CONTAINS(LOWER(CONCAT_SEPARATOR(" ", messagePayload.data.from, messagePayload.data.subject, messagePayload.data.body)), @search)
+            LIMIT 1 RETURN 1) > 0
+          FILTER direct
           FILTER @after == null || row.data.lastMessageAt < @after.lastMessageAt || (row.data.lastMessageAt == @after.lastMessageAt && row.document._key > @after.key)
           SORT row.data.lastMessageAt DESC, row.document._key ASC LIMIT @pageSize RETURN row.document)
         LET active = (FOR row IN inbox FILTER "TRASH" NOT IN (row.data.labels || []) RETURN row)
-        RETURN { documents: matching, counts: { all: LENGTH(active), important: LENGTH(FOR row IN active FILTER row.data.inboxCategory == "Important" RETURN 1), urgent: LENGTH(FOR row IN active FILTER row.data.inboxCategory == "Urgent" RETURN 1), needsAction: LENGTH(FOR row IN active FILTER row.data.state == "needs_action" RETURN 1), filtered: LENGTH(FOR row IN active FILTER row.data.inboxCategory == "Filtered" RETURN 1), unread: LENGTH(FOR row IN active FILTER row.data.unread == true RETURN 1), favorite: LENGTH(FOR row IN active FILTER row.data.isFavorite == true RETURN 1), trash: LENGTH(inbox) - LENGTH(active) } }`, { scopeKey, connectorKey, folderKey: mailFolderKeys(scopeKey).threads, filter, readState, facets, search, after, pageSize: limit + 1 });
+        RETURN { documents: matching, counts: { all: LENGTH(active), important: LENGTH(FOR row IN active FILTER row.data.inboxCategory == "Important" RETURN 1), urgent: LENGTH(FOR row IN active FILTER row.data.inboxCategory == "Urgent" RETURN 1), needsAction: LENGTH(FOR row IN active FILTER row.data.state == "needs_action" RETURN 1), filtered: LENGTH(FOR row IN active FILTER row.data.inboxCategory == "Filtered" RETURN 1), unread: LENGTH(FOR row IN active FILTER row.data.unread == true RETURN 1), favorite: LENGTH(FOR row IN active FILTER row.data.isFavorite == true RETURN 1), trash: LENGTH(inbox) - LENGTH(active) } }`, { scopeKey, connectorKey, filter, readState, facets, search, after, pageSize: limit + 1 });
       const result = await cursor.next() as { documents: unknown[]; counts: Record<string, number> } | undefined;
       const decoded = (result?.documents ?? []).map((document) => decodeEmailThread(parsedDocument(document)));
       const threads = decoded.slice(0, limit);
@@ -404,42 +426,61 @@ export function createEmailRepository(database: Database = db) {
       const normalizedQuery = query.trim().toLowerCase();
       const facets = filters.facets === undefined ? null : normalizeEmailOverviewFacets(filters.facets);
       const cursor = await database.query(`FOR document IN documents
-        FILTER document.scopeKey == @scopeKey && document.folderKey == @folderKey && document.mutationPolicy == "system-only"
+        FILTER document.scopeKey == @scopeKey && document.mutationPolicy == "system-only"
         FILTER IS_ARRAY(document.embedding) && LENGTH(document.embedding) == LENGTH(@embedding)
         LET payload = JSON_PARSE(document.content)
-        FILTER payload.version == 1 && payload.kind == "mail-thread" && payload.data.accountKey == @connectorKey && payload.data.inInbox != false
-        FILTER "TRASH" NOT IN (payload.data.labels || [])
-        FILTER @readState == null || payload.data.unread == (@readState == "unread")
-        FILTER @facets == null || LENGTH(@facets) > 0 && (("urgent" IN @facets && payload.data.inboxCategory == "Urgent") || ("important" IN @facets && payload.data.inboxCategory == "Important") || ("filtered" IN @facets && payload.data.inboxCategory == "Filtered") || ("favorite" IN @facets && payload.data.isFavorite == true))
-        LET direct = CONTAINS(LOWER(CONCAT_SEPARATOR(" ", payload.data.subject, payload.data.summary, payload.data.snippet, payload.data.latestFrom)), @query)
+        FILTER payload.version == 1 && payload.kind == "mail-message" && payload.data.accountKey == @connectorKey && payload.data.embeddingContentVersion == 4
+        FILTER document.folderKey == CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "managed-mail-folder", @scopeKey, CONCAT("mail-inbox\\u0000", @connectorKey))), 24))
+        LET thread = DOCUMENT(documents, payload.data.threadKey)
+        LET threadPayload = thread == null ? null : JSON_PARSE(thread.content)
+        FILTER thread != null && thread.scopeKey == @scopeKey && thread.mutationPolicy == "system-only"
+        FILTER thread.folderKey == CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "managed-mail-folder", @scopeKey, "communication-mail-threads")), 24))
+        FILTER threadPayload.version == 1 && threadPayload.kind == "mail-thread" && threadPayload.data.accountKey == @connectorKey && threadPayload.data.inInbox != false
+        FILTER "TRASH" NOT IN (threadPayload.data.labels || [])
+        FILTER @readState == null || threadPayload.data.unread == (@readState == "unread")
+        FILTER @facets == null || LENGTH(@facets) > 0 && (("urgent" IN @facets && threadPayload.data.inboxCategory == "Urgent") || ("important" IN @facets && threadPayload.data.inboxCategory == "Important") || ("filtered" IN @facets && threadPayload.data.inboxCategory == "Filtered") || ("favorite" IN @facets && threadPayload.data.isFavorite == true))
+        LET direct = CONTAINS(LOWER(CONCAT_SEPARATOR(" ", payload.data.from, payload.data.subject, payload.data.body)), @query)
         LET similarity = COSINE_SIMILARITY(document.embedding, @embedding)
         LET score = direct ? 1 : similarity
         FILTER direct || IS_NUMBER(similarity) && similarity >= @minimumScore
-        SORT score DESC, payload.data.lastMessageAt DESC, document._key ASC
+        COLLECT threadKey = payload.data.threadKey INTO candidates = { document: document, payload: payload, thread: thread, threadPayload: threadPayload, score: score }
+        LET selected = FIRST(FOR candidate IN candidates SORT candidate.score DESC, candidate.payload.data.sentAt DESC, candidate.document._key ASC LIMIT 1 RETURN candidate)
+        SORT selected.score DESC, selected.threadPayload.data.lastMessageAt DESC, selected.thread._key ASC
         LIMIT @limit
-        RETURN { document, score }`, { scopeKey, connectorKey, folderKey: mailFolderKeys(scopeKey).threads, embedding, query: normalizedQuery, minimumScore, limit, readState: filters.readState ?? null, facets });
+        RETURN { document: selected.thread, score: selected.score }`, { scopeKey, connectorKey, embedding, query: normalizedQuery, minimumScore, limit, readState: filters.readState ?? null, facets });
       return (await cursor.all() as Array<{ document: unknown; score: number }>).flatMap(({ document, score }) => {
         try { return [{ thread: decodeEmailThread(parsedDocument(document)), score }]; } catch { return []; }
       });
     },
     async thread(scopeKey: string, threadKey: string) {
-      const document = await getDocument(scopeKey, threadKey, mailFolderKeys(scopeKey).threads, 'system-only');
-      if (!document) throw new EmailRepositoryError('not_found');
-      let thread: EmailThread;
-      try { thread = decodeEmailThread(document); } catch { throw new EmailRepositoryError('not_found'); }
-      if (thread.inInbox === false) throw new EmailRepositoryError('not_found');
-      const messages = (await listFolderDocuments(scopeKey, mailFolderKeys(scopeKey).threads, 'system-only')).flatMap((candidate) => {
+       const document = await getDocument(scopeKey, threadKey, mailFolderKeys(scopeKey).threads, 'system-only');
+       if (!document) throw new EmailRepositoryError('not_found');
+       let thread: EmailThread;
+       try { thread = decodeEmailThread(document); } catch { throw new EmailRepositoryError('not_found'); }
+       if (thread.inInbox === false) throw new EmailRepositoryError('not_found');
+       const messages = (await listFolderDocuments(scopeKey, mailInboxFolderKey(scopeKey, thread.accountKey), 'system-only')).flatMap((candidate) => {
         try { const message = decodeEmailMessage(candidate); return message.threadKey === threadKey ? [message] : []; } catch { return []; }
       }).sort(compareEmailMessages);
       return { thread, messages };
     },
     async message(scopeKey: string, messageKey: string) {
-      const document = await getDocument(scopeKey, messageKey, mailFolderKeys(scopeKey).threads, 'system-only');
+      const cursor = await database.query(`LET document = DOCUMENT(documents, @messageKey)
+        FILTER document != null && document.scopeKey == @scopeKey && document.mutationPolicy == "system-only"
+        LET payload = JSON_PARSE(document.content)
+        FILTER payload.version == 1 && payload.kind == "mail-message"
+         FILTER document.folderKey == CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "managed-mail-folder", @scopeKey, CONCAT("mail-inbox\\u0000", payload.data.accountKey))), 24))
+        RETURN document`, { scopeKey, messageKey });
+      const document = await cursor.next();
       if (!document) throw new EmailRepositoryError('not_found');
-      try { return decodeEmailMessage(document); } catch { throw new EmailRepositoryError('not_found'); }
+      try { return decodeEmailMessage(parsedDocument(document)); } catch { throw new EmailRepositoryError('not_found'); }
     },
     async mailbox(scopeKey: string, accountKey: string) {
-      const documents = await listFolderDocuments(scopeKey, mailFolderKeys(scopeKey).threads, 'system-only');
+      const cursor = await database.query(`FOR document IN documents FILTER document.scopeKey == @scopeKey && document.mutationPolicy == "system-only"
+        LET payload = JSON_PARSE(document.content)
+        FILTER payload.version == 1 && payload.data.accountKey == @accountKey && payload.kind IN ["mail-thread", "mail-message"]
+         FILTER document.folderKey == (payload.kind == "mail-thread" ? CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "managed-mail-folder", @scopeKey, "communication-mail-threads")), 24)) : CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "managed-mail-folder", @scopeKey, CONCAT("mail-inbox\\u0000", @accountKey))), 24)))
+        RETURN document`, { scopeKey, accountKey });
+      const documents = (await cursor.all()).flatMap((raw) => { try { return [parsedDocument(raw)]; } catch { return []; } });
       const threads = documents.flatMap((document) => { try { const value = decodeEmailThread(document); return value.accountKey === accountKey ? [value] : []; } catch { return []; } });
       const threadKeys = new Set(threads.map(({ key }) => key));
       const messages = documents.flatMap((document) => { try { const value = decodeEmailMessage(document); return value.accountKey === accountKey && threadKeys.has(value.threadKey) ? [value] : []; } catch { return []; } });
@@ -448,18 +489,19 @@ export function createEmailRepository(database: Database = db) {
     async similarMessages(scopeKey: string, messageKey: string, embedding: number[], limit = 10) {
       const source = await this.message(scopeKey, messageKey);
       const cursor = await database.query(`FOR document IN documents
-        FILTER document.scopeKey == @scopeKey && document.folderKey == @folderKey && document.mutationPolicy == "system-only" && document._key != @messageKey
+        FILTER document.scopeKey == @scopeKey && document.mutationPolicy == "system-only" && document._key != @messageKey
         FILTER IS_ARRAY(document.embedding) && LENGTH(document.embedding) == LENGTH(@embedding)
         LET payload = JSON_PARSE(document.content)
         FILTER payload.version == 1 && payload.kind == "mail-message" && payload.data.threadKey != @currentThreadKey && payload.data.accountKey == @accountKey
-        FILTER payload.data.embeddingContentVersion == 3
+         FILTER document.folderKey == CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "managed-mail-folder", @scopeKey, CONCAT("mail-inbox\\u0000", @accountKey))), 24))
+        FILTER payload.data.embeddingContentVersion == 4
         LET similarity = COSINE_SIMILARITY(document.embedding, @embedding)
         FILTER IS_NUMBER(similarity)
         COLLECT threadKey = payload.data.threadKey INTO candidates
         LET selected = FIRST(FOR candidate IN candidates SORT candidate.similarity DESC, candidate.document._key ASC LIMIT 1 RETURN candidate)
         SORT selected.similarity DESC, selected.document._key ASC
         LIMIT @limit
-        RETURN { document: selected.document, similarity: selected.similarity }`, { scopeKey, folderKey: mailFolderKeys(scopeKey).threads, messageKey, currentThreadKey: source.threadKey, accountKey: source.accountKey, embedding, limit: Math.min(limit, 10) });
+        RETURN { document: selected.document, similarity: selected.similarity }`, { scopeKey, messageKey, currentThreadKey: source.threadKey, accountKey: source.accountKey, embedding, limit: Math.min(limit, 10) });
       return (await cursor.all() as Array<{ document: unknown; similarity: number }>).flatMap(({ document, similarity }) => {
         try { return [{ message: decodeEmailMessage(parsedDocument(document)), similarity }]; } catch { return []; }
       });
@@ -473,12 +515,12 @@ export function createEmailRepository(database: Database = db) {
           FILTER connector != null && connector.status != "revoked" && connector.syncEnabled != false
           FILTER connector.syncLeaseToken == @leaseToken && connector.syncLeaseExpiresAt > @updatedAt
           LET thread = DOCUMENT(documents, @threadKey)
-          FILTER thread != null && thread.scopeKey == @scopeKey && thread.folderKey == @folderKey && thread.mutationPolicy == "system-only"
+           FILTER thread != null && thread.scopeKey == @scopeKey && thread.folderKey == @threadFolderKey && thread.mutationPolicy == "system-only"
           LET threadPayload = JSON_PARSE(thread.content)
           FILTER threadPayload.version == 1 && threadPayload.kind == "mail-thread" && threadPayload.data.accountKey == @accountKey
           LET threadLabels = @mutation == "favorite" ? (@enabled ? PUSH(threadPayload.data.labels || [], "STARRED", true) : REMOVE_VALUE(threadPayload.data.labels || [], "STARRED")) : @mutation == "read-state" ? (@enabled ? REMOVE_VALUE(threadPayload.data.labels || [], "UNREAD") : PUSH(threadPayload.data.labels || [], "UNREAD", true)) : PUSH(threadPayload.data.labels || [], "TRASH", true)
           LET messages = (FOR document IN documents
-            FILTER document.scopeKey == @scopeKey && document.folderKey == @folderKey && document.mutationPolicy == "system-only"
+             FILTER document.scopeKey == @scopeKey && document.folderKey == @inboxFolderKey && document.mutationPolicy == "system-only"
             LET payload = JSON_PARSE(document.content)
             FILTER payload.version == 1 && payload.kind == "mail-message" && payload.data.threadKey == @threadKey && payload.data.accountKey == @accountKey
             LET labels = @mutation == "favorite" ? (@enabled ? PUSH(payload.data.labels || [], "STARRED", true) : REMOVE_VALUE(payload.data.labels || [], "STARRED")) : @mutation == "read-state" ? (@enabled ? REMOVE_VALUE(payload.data.labels || [], "UNREAD") : PUSH(payload.data.labels || [], "UNREAD", true)) : PUSH(payload.data.labels || [], "TRASH", true)
@@ -487,7 +529,7 @@ export function createEmailRepository(database: Database = db) {
           LET threadData = @mutation == "favorite" ? MERGE(threadPayload.data, { isFavorite: @enabled, starred: @enabled, labels: threadLabels }) : @mutation == "read-state" ? MERGE(threadPayload.data, { unread: !@enabled, starred: "STARRED" IN threadLabels, isFavorite: "STARRED" IN threadLabels, labels: threadLabels }) : MERGE(threadPayload.data, { inInbox: true, labels: threadLabels })
           UPDATE thread WITH { content: JSON_STRINGIFY(MERGE(threadPayload, { data: threadData })), updatedAt: @updatedAt } IN documents RETURN NEW`, {
           '@connectors': ORGANIZATION_CONNECTORS_COLLECTION, connectorKey: input.lease.connectorKey, leaseToken: input.lease.token,
-          scopeKey: input.scopeKey, folderKey: mailFolderKeys(input.scopeKey).threads, accountKey: input.accountKey, threadKey: input.threadKey, mutation, enabled, updatedAt,
+           scopeKey: input.scopeKey, threadFolderKey: mailFolderKeys(input.scopeKey).threads, inboxFolderKey: mailInboxFolderKey(input.scopeKey, input.accountKey), accountKey: input.accountKey, threadKey: input.threadKey, mutation, enabled, updatedAt,
         });
         return cursor.next();
       }, true);
@@ -500,12 +542,12 @@ export function createEmailRepository(database: Database = db) {
         const cursor = await trx.query(`LET connector = DOCUMENT(@@connectors, @connectorKey)
           FILTER connector != null && connector.status != "revoked" && connector.syncEnabled != false
           FILTER connector.syncLeaseToken == @leaseToken && connector.syncLeaseExpiresAt > @checkedAt
-          LET trashedMessages = (FOR document IN documents FILTER document.scopeKey == @scopeKey && document.folderKey == @threadFolderKey && document.mutationPolicy == "system-only" LET payload = JSON_PARSE(document.content) FILTER payload.version == 1 && payload.kind == "mail-message" && payload.data.accountKey == @accountKey && (payload.data.providerMessageId IN @providerMessageIds || ("TRASH" IN (payload.data.labels || []) && document.updatedAt <= @trashSnapshotAt)) RETURN { document, data: payload.data })
+           LET trashedMessages = (FOR document IN documents FILTER document.scopeKey == @scopeKey && document.folderKey == @inboxFolderKey && document.mutationPolicy == "system-only" LET payload = JSON_PARSE(document.content) FILTER payload.version == 1 && payload.kind == "mail-message" && payload.data.accountKey == @accountKey FILTER payload.data.providerMessageId IN @providerMessageIds || ("TRASH" IN (payload.data.labels || []) && document.updatedAt <= @trashSnapshotAt) RETURN { document, data: payload.data })
           LET threadKeys = UNIQUE(trashedMessages[*].data.threadKey)
           LET emptyThreadKeys = (FOR threadKey IN threadKeys
-            LET survivor = FIRST(FOR document IN documents FILTER document.scopeKey == @scopeKey && document.folderKey == @threadFolderKey && document.mutationPolicy == "system-only" LET payload = JSON_PARSE(document.content) FILTER payload.version == 1 && payload.kind == "mail-message" && payload.data.threadKey == threadKey && NOT (payload.data.providerMessageId IN @providerMessageIds || ("TRASH" IN (payload.data.labels || []) && document.updatedAt <= @trashSnapshotAt)) LIMIT 1 RETURN true)
+             LET survivor = FIRST(FOR document IN documents FILTER document.scopeKey == @scopeKey && document.folderKey == @inboxFolderKey && document.mutationPolicy == "system-only" LET payload = JSON_PARSE(document.content) FILTER payload.version == 1 && payload.kind == "mail-message" && payload.data.threadKey == threadKey && payload.data.accountKey == @accountKey && NOT (payload.data.providerMessageId IN @providerMessageIds || ("TRASH" IN (payload.data.labels || []) && document.updatedAt <= @trashSnapshotAt)) LIMIT 1 RETURN true)
             FILTER survivor == null RETURN threadKey)
-          LET threads = (FOR document IN documents FILTER document._key IN emptyThreadKeys && document.scopeKey == @scopeKey && document.folderKey == @threadFolderKey && document.mutationPolicy == "system-only" LET payload = JSON_PARSE(document.content) FILTER payload.version == 1 && payload.kind == "mail-thread" && payload.data.accountKey == @accountKey RETURN document)
+           LET threads = (FOR document IN documents FILTER document._key IN emptyThreadKeys && document.scopeKey == @scopeKey && document.folderKey == @threadFolderKey && document.mutationPolicy == "system-only" LET payload = JSON_PARSE(document.content) FILTER payload.version == 1 && payload.kind == "mail-thread" && payload.data.accountKey == @accountKey RETURN document)
           LET drafts = (FOR document IN documents FILTER document.scopeKey == @scopeKey && document.folderKey == @draftFolderKey && document.mutationPolicy == "system-only" LET payload = JSON_PARSE(document.content) FILTER payload.version == 1 && payload.kind == "mail-reply-draft" && payload.data.threadKey IN emptyThreadKeys RETURN document)
           LET stale = UNION(trashedMessages[*].document, threads, drafts)
            LET staleKeys = stale[*]._key
@@ -532,8 +574,7 @@ export function createEmailRepository(database: Database = db) {
            LET cleanedAttachmentFolders = (FOR folder IN folders FILTER folder.scopeKey == @scopeKey && folder.coverImageKey IN attachmentImages[*]._key UPDATE folder WITH { coverImageKey: null, updatedAt: @checkedAt } IN folders OPTIONS { keepNull: false } RETURN 1)
            LET cleanedAttachmentCollections = (FOR collection IN collections FILTER collection.scopeKey == @scopeKey && collection.coverImageKey IN attachmentImages[*]._key UPDATE collection WITH { coverImageKey: null, updatedAt: @checkedAt } IN collections OPTIONS { keepNull: false } RETURN 1)
            LET cleanedAttachmentTrips = (FOR trip IN trips FILTER trip.scopeKey == @scopeKey && trip.coverImageKey IN attachmentImages[*]._key UPDATE trip WITH { coverImageKey: null, updatedAt: @checkedAt } IN trips OPTIONS { keepNull: false } RETURN 1)
-           LET cleanedAttachmentInboxes = (FOR inbox IN inboxes FILTER inbox.scopeKey == @scopeKey && inbox.coverImageKey IN attachmentImages[*]._key UPDATE inbox WITH { coverImageKey: null, updatedAt: @checkedAt } IN inboxes OPTIONS { keepNull: false } RETURN 1)
-           LET cleanedAttachmentCovers = []
+            LET cleanedAttachmentCovers = []
            LET removedAttachmentTags = (FOR assignment IN tagAssignments FILTER assignment.scopeKey == @scopeKey && assignment.sourceType == "image" && assignment.sourceKey IN attachmentImages[*]._key REMOVE assignment IN tagAssignments RETURN 1)
            LET removedAttachmentShares = (FOR share IN shares FILTER share.scopeKey == @scopeKey && share.sourceType == "image" && share.sourceKey IN attachmentImages[*]._key REMOVE share IN shares RETURN 1)
            LET removedAttachmentHiddens = (FOR hidden IN userHiddens FILTER hidden.source == "image" && hidden.sourceKey IN attachmentImages[*]._key REMOVE hidden IN userHiddens RETURN 1)
@@ -546,22 +587,22 @@ export function createEmailRepository(database: Database = db) {
            LET removedSummaries = (FOR summary IN documentSummaries FILTER summary.scopeKey == @scopeKey && summary.documentKey IN dependentDocumentKeys REMOVE summary IN documentSummaries RETURN 1)
            LET removedVersions = (FOR version IN documentVersions FILTER version.scopeKey == @scopeKey && version.documentKey IN dependentDocumentKeys REMOVE version IN documentVersions RETURN 1)
            LET removedAudioVersions = (FOR audio IN documentAudioVersions FILTER audio.scopeKey == @scopeKey && audio.documentKey IN dependentDocumentKeys REMOVE audio IN documentAudioVersions RETURN 1)
-           LET removedDocuments = (FOR document IN UNION_DISTINCT(attachmentDocuments, stale) REMOVE document IN documents RETURN 1)
-           RETURN { threadsDeleted: LENGTH(threads), documentsDeleted: LENGTH(stale), survivingThreadKeys: MINUS(threadKeys, emptyThreadKeys), attachmentTargetKeys, attachmentDocumentKeys, attachmentImageKeys: attachmentImages[*]._key, affectedCollectionKeys, attachmentCaptionKeys: attachmentImages[*].imageCaptionKey }`, { '@connectors': ORGANIZATION_CONNECTORS_COLLECTION, connectorKey: input.lease.connectorKey, leaseToken: input.lease.token, checkedAt, scopeKey: input.scopeKey, threadFolderKey: mailFolderKeys(input.scopeKey).threads, draftFolderKey: mailFolderKeys(input.scopeKey).drafts, accountKey: input.accountKey, providerMessageIds: input.providerMessageIds, trashSnapshotAt: input.trashSnapshotAt });
-         const result = await cursor.next() as { threadsDeleted: number; documentsDeleted: number; survivingThreadKeys: string[]; attachmentTargetKeys: string[]; attachmentDocumentKeys: string[]; attachmentImageKeys: string[]; affectedCollectionKeys: string[]; attachmentCaptionKeys: string[] } | undefined;
-         if (!result) throw new EmailRepositoryError('conflict', 'Email connector lease was lost before clearing Trash');
-         await cleanAttachmentDocumentReferences(trx, input.scopeKey, result.attachmentTargetKeys ?? [], checkedAt);
-         await cleanOrphanAttachmentCaptions(trx, result.attachmentCaptionKeys ?? []);
-        if (result.survivingThreadKeys.length) {
+            LET removedDocuments = (FOR document IN UNION_DISTINCT(attachmentDocuments, stale) REMOVE document IN documents RETURN 1)
+              RETURN { threadsDeleted: LENGTH(threads), documentsDeleted: LENGTH(stale), emptyThreadKeys, survivingThreadKeys: MINUS(threadKeys, emptyThreadKeys), attachmentTargetKeys, attachmentDocumentKeys, attachmentImageKeys: attachmentImages[*]._key, affectedCollectionKeys, attachmentCaptionKeys: attachmentImages[*].imageCaptionKey }`, { '@connectors': ORGANIZATION_CONNECTORS_COLLECTION, connectorKey: input.lease.connectorKey, leaseToken: input.lease.token, checkedAt, scopeKey: input.scopeKey, threadFolderKey: mailFolderKeys(input.scopeKey).threads, inboxFolderKey: mailInboxFolderKey(input.scopeKey, input.accountKey), draftFolderKey: mailFolderKeys(input.scopeKey).drafts, accountKey: input.accountKey, providerMessageIds: input.providerMessageIds, trashSnapshotAt: input.trashSnapshotAt });
+          const result = await cursor.next() as { threadsDeleted: number; documentsDeleted: number; emptyThreadKeys: string[]; survivingThreadKeys: string[]; attachmentTargetKeys: string[]; attachmentDocumentKeys: string[]; attachmentImageKeys: string[]; affectedCollectionKeys: string[]; attachmentCaptionKeys: string[] } | undefined;
+          if (!result) throw new EmailRepositoryError('conflict', 'Email connector lease was lost before clearing Trash');
+          await cleanAttachmentDocumentReferences(trx, input.scopeKey, result.attachmentTargetKeys ?? [], checkedAt);
+          await cleanOrphanAttachmentCaptions(trx, result.attachmentCaptionKeys ?? []);
+         if (result.survivingThreadKeys.length) {
           await trx.query(`FOR threadKey IN @threadKeys
             LET thread = DOCUMENT(documents, threadKey)
-            FILTER thread != null && thread.scopeKey == @scopeKey && thread.folderKey == @threadFolderKey && thread.mutationPolicy == "system-only"
+             FILTER thread != null && thread.scopeKey == @scopeKey && thread.folderKey == @threadFolderKey && thread.mutationPolicy == "system-only"
             LET payload = JSON_PARSE(thread.content)
             FILTER payload.version == 1 && payload.kind == "mail-thread"
-            LET messages = (FOR document IN documents FILTER document.scopeKey == @scopeKey && document.folderKey == @threadFolderKey && document.mutationPolicy == "system-only" LET messagePayload = JSON_PARSE(document.content) FILTER messagePayload.version == 1 && messagePayload.kind == "mail-message" && messagePayload.data.threadKey == threadKey RETURN messagePayload.data)
+             LET messages = (FOR document IN documents FILTER document.scopeKey == @scopeKey && document.folderKey == @inboxFolderKey && document.mutationPolicy == "system-only" LET messagePayload = JSON_PARSE(document.content) FILTER messagePayload.version == 1 && messagePayload.kind == "mail-message" && messagePayload.data.threadKey == threadKey && messagePayload.data.accountKey == @accountKey RETURN messagePayload.data)
             LET labels = (FOR message IN messages FOR label IN (message.labels || []) RETURN DISTINCT label)
             LET data = MERGE(payload.data, { labels, unread: "UNREAD" IN labels, starred: "STARRED" IN labels, isFavorite: "STARRED" IN labels, inInbox: "INBOX" IN labels || "SPAM" IN labels || "TRASH" IN labels })
-            UPDATE thread WITH { content: JSON_STRINGIFY(MERGE(payload, { data })), updatedAt: @checkedAt } IN documents`, { threadKeys: result.survivingThreadKeys, scopeKey: input.scopeKey, threadFolderKey: mailFolderKeys(input.scopeKey).threads, checkedAt });
+             UPDATE thread WITH { content: JSON_STRINGIFY(MERGE(payload, { data })), updatedAt: @checkedAt } IN documents`, { threadKeys: result.survivingThreadKeys, scopeKey: input.scopeKey, threadFolderKey: mailFolderKeys(input.scopeKey).threads, inboxFolderKey: mailInboxFolderKey(input.scopeKey, input.accountKey), accountKey: input.accountKey, checkedAt });
         }
         return { threadsDeleted: result.threadsDeleted, documentsDeleted: result.documentsDeleted, attachmentMutation: { documentKeys: result.attachmentDocumentKeys, imageKeys: result.attachmentImageKeys, collectionKeys: result.affectedCollectionKeys } };
       }, true);
@@ -572,6 +613,7 @@ export function createEmailRepository(database: Database = db) {
         const cursor = await executor.query(`LET document = DOCUMENT(documents, @documentKey)
           FILTER document != null && document.scopeKey == @scopeKey && document.mutationPolicy == "system-only"
           LET payload = JSON_PARSE(document.content) FILTER payload.kind == "mail-message"
+           FILTER document.folderKey == CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "managed-mail-folder", @scopeKey, CONCAT("mail-inbox\\u0000", payload.data.accountKey))), 24))
           LET nextVersion = FIRST(FOR existing IN documentVersions FILTER existing.documentKey == @documentKey COLLECT AGGREGATE maximum = MAX(existing.version) RETURN (maximum || 0) + 1)
           INSERT MERGE(@snapshot, { _key: @key, version: nextVersion, createdAt: @createdAt }) IN documentVersions RETURN NEW`, { documentKey: input.documentKey, scopeKey: input.scopeKey, key: newId(), createdAt: new Date().toISOString(), snapshot });
         return cursor.next();
@@ -589,6 +631,7 @@ export function createEmailRepository(database: Database = db) {
         const cursor = await trx.query(`LET document = DOCUMENT(documents, @messageKey)
           FILTER document != null && document.scopeKey == @scopeKey && document.mutationPolicy == "system-only"
           LET payload = JSON_PARSE(document.content) FILTER payload.kind == "mail-message"
+           FILTER document.folderKey == CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "managed-mail-folder", @scopeKey, CONCAT("mail-inbox\\u0000", payload.data.accountKey))), 24))
           LET selected = (FOR version IN documentVersions FILTER version._key IN @translationKeys && version.scopeKey == @scopeKey && version.documentKey == @messageKey && version.type == "translation" RETURN version)
           FILTER LENGTH(selected) == LENGTH(@translationKeys)
           LET removed = (FOR version IN selected REMOVE version IN documentVersions RETURN OLD._key)
@@ -604,6 +647,7 @@ export function createEmailRepository(database: Database = db) {
         const cursor = await executor.query(`LET document = DOCUMENT(documents, @documentKey)
           FILTER document != null && document.scopeKey == @scopeKey && document.mutationPolicy == "system-only"
           LET payload = JSON_PARSE(document.content) FILTER payload.kind == "mail-message"
+           FILTER document.folderKey == CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "managed-mail-folder", @scopeKey, CONCAT("mail-inbox\\u0000", payload.data.accountKey))), 24))
           LET nextVersion = FIRST(FOR existing IN documentSummaries FILTER existing.documentKey == @documentKey COLLECT AGGREGATE maximum = MAX(existing.version) RETURN (maximum || 0) + 1)
           INSERT MERGE(@summary, { version: nextVersion }) IN documentSummaries RETURN NEW`, { documentKey: input.documentKey, scopeKey: input.scopeKey, summary: toArangoDoc(summary as DocumentSummary) });
         return cursor.next();
@@ -622,6 +666,7 @@ export function createEmailRepository(database: Database = db) {
         const cursor = await trx.query(`LET document = DOCUMENT(documents, @messageKey)
           FILTER document != null && document.scopeKey == @scopeKey && document.mutationPolicy == "system-only"
           LET payload = JSON_PARSE(document.content) FILTER payload.kind == "mail-message"
+           FILTER document.folderKey == CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "managed-mail-folder", @scopeKey, CONCAT("mail-inbox\\u0000", payload.data.accountKey))), 24))
           LET selected = (FOR summary IN documentSummaries FILTER summary._key IN @summaryKeys && summary.scopeKey == @scopeKey && summary.documentKey == @messageKey RETURN summary)
           FILTER LENGTH(selected) == LENGTH(@summaryKeys)
           LET storageKeys = UNIQUE(FOR audio IN documentSummaryAudio FILTER audio.scopeKey == @scopeKey && audio.summaryKey IN @summaryKeys && IS_STRING(audio.storageKey) RETURN audio.storageKey)
@@ -649,7 +694,7 @@ export function createEmailRepository(database: Database = db) {
         const deletionCursor = await executor.query(`LET connector = DOCUMENT(@@connectors, @connectorKey)
         FILTER connector != null && connector.status != "revoked" && connector.syncEnabled != false
         FILTER connector.syncLeaseToken == @leaseToken && connector.syncLeaseExpiresAt > @checkedAt
-        LET stale = (FOR document IN documents FILTER document.scopeKey == @scopeKey && document.mutationPolicy == "system-only" LET payload = JSON_PARSE(document.content) FILTER payload.version == 1 && ((document.folderKey == @threadFolderKey && document._key == @threadKey && payload.kind == "mail-thread" && payload.data.accountKey == @accountKey) || (document.folderKey == @threadFolderKey && payload.kind == "mail-message" && payload.data.threadKey == @threadKey && payload.data.accountKey == @accountKey) || (document.folderKey == @draftFolderKey && payload.kind == "mail-reply-draft" && payload.data.threadKey == @threadKey)) RETURN document)
+         LET stale = (FOR document IN documents FILTER document.scopeKey == @scopeKey && document.mutationPolicy == "system-only" LET payload = JSON_PARSE(document.content) FILTER payload.version == 1 && ((document.folderKey == @threadFolderKey && document._key == @threadKey && payload.kind == "mail-thread" && payload.data.accountKey == @accountKey) || (document.folderKey == @inboxFolderKey && payload.kind == "mail-message" && payload.data.threadKey == @threadKey && payload.data.accountKey == @accountKey) || (document.folderKey == @draftFolderKey && payload.kind == "mail-reply-draft" && payload.data.threadKey == @threadKey)) RETURN document)
         LET staleKeys = stale[*]._key
         LET staleProviderMessageIds = (FOR document IN stale LET payload = JSON_PARSE(document.content) FILTER payload.kind == "mail-message" RETURN payload.data.providerMessageId)
         LET attachmentBindings = (FOR binding IN emailAttachmentBindings FILTER binding.scopeKey == @scopeKey && binding.connectorKey == @accountKey && binding.providerMessageId IN staleProviderMessageIds RETURN binding)
@@ -674,7 +719,6 @@ export function createEmailRepository(database: Database = db) {
         LET cleanedAttachmentFolders = (FOR folder IN folders FILTER folder.scopeKey == @scopeKey && folder.coverImageKey IN attachmentImages[*]._key UPDATE folder WITH { coverImageKey: null, updatedAt: @checkedAt } IN folders OPTIONS { keepNull: false } RETURN 1)
         LET cleanedAttachmentCollections = (FOR collection IN collections FILTER collection.scopeKey == @scopeKey && collection.coverImageKey IN attachmentImages[*]._key UPDATE collection WITH { coverImageKey: null, updatedAt: @checkedAt } IN collections OPTIONS { keepNull: false } RETURN 1)
         LET cleanedAttachmentTrips = (FOR trip IN trips FILTER trip.scopeKey == @scopeKey && trip.coverImageKey IN attachmentImages[*]._key UPDATE trip WITH { coverImageKey: null, updatedAt: @checkedAt } IN trips OPTIONS { keepNull: false } RETURN 1)
-        LET cleanedAttachmentInboxes = (FOR inbox IN inboxes FILTER inbox.scopeKey == @scopeKey && inbox.coverImageKey IN attachmentImages[*]._key UPDATE inbox WITH { coverImageKey: null, updatedAt: @checkedAt } IN inboxes OPTIONS { keepNull: false } RETURN 1)
         LET cleanedAttachmentCovers = []
         LET removedAttachmentTags = (FOR assignment IN tagAssignments FILTER assignment.scopeKey == @scopeKey && assignment.sourceType == "image" && assignment.sourceKey IN attachmentImages[*]._key REMOVE assignment IN tagAssignments RETURN 1)
         LET removedAttachmentShares = (FOR share IN shares FILTER share.scopeKey == @scopeKey && share.sourceType == "image" && share.sourceKey IN attachmentImages[*]._key REMOVE share IN shares RETURN 1)
@@ -689,12 +733,12 @@ export function createEmailRepository(database: Database = db) {
         LET removedVersions = (FOR version IN documentVersions FILTER version.scopeKey == @scopeKey && version.documentKey IN dependentDocumentKeys REMOVE version IN documentVersions RETURN 1)
         LET removedAudioVersions = (FOR audio IN documentAudioVersions FILTER audio.scopeKey == @scopeKey && audio.documentKey IN dependentDocumentKeys REMOVE audio IN documentAudioVersions RETURN 1)
         LET removed = (FOR document IN UNION_DISTINCT(attachmentDocuments, stale) REMOVE document IN documents RETURN 1)
-        RETURN { count: LENGTH(stale), attachmentTargetKeys, attachmentDocumentKeys, attachmentImageKeys: attachmentImages[*]._key, affectedCollectionKeys, attachmentCaptionKeys: attachmentImages[*].imageCaptionKey }`, { '@connectors': ORGANIZATION_CONNECTORS_COLLECTION, connectorKey: lease.connectorKey, leaseToken: lease.token, checkedAt, scopeKey, threadFolderKey: mailFolderKeys(scopeKey).threads, draftFolderKey: mailFolderKeys(scopeKey).drafts, accountKey, threadKey });
+         RETURN { count: LENGTH(stale), attachmentTargetKeys, attachmentDocumentKeys, attachmentImageKeys: attachmentImages[*]._key, affectedCollectionKeys, attachmentCaptionKeys: attachmentImages[*].imageCaptionKey }`, { '@connectors': ORGANIZATION_CONNECTORS_COLLECTION, connectorKey: lease.connectorKey, leaseToken: lease.token, checkedAt, scopeKey, threadFolderKey: mailFolderKeys(scopeKey).threads, inboxFolderKey: mailInboxFolderKey(scopeKey, accountKey), draftFolderKey: mailFolderKeys(scopeKey).drafts, accountKey, threadKey });
         const result = await deletionCursor.next() as { count: number; attachmentTargetKeys: string[]; attachmentDocumentKeys: string[]; attachmentImageKeys: string[]; affectedCollectionKeys: string[]; attachmentCaptionKeys: string[] } | undefined;
         if (result) {
           await cleanAttachmentDocumentReferences(executor, scopeKey, result.attachmentTargetKeys ?? [], checkedAt);
           await cleanOrphanAttachmentCaptions(executor, result.attachmentCaptionKeys ?? []);
-        }
+         }
         return result;
       }, true);
       if (!cursor) throw new EmailRepositoryError('conflict', 'Email synchronization lease was lost before deleting a provider thread');
@@ -706,8 +750,8 @@ export function createEmailRepository(database: Database = db) {
       const cursor = await mailDeletion(async (executor) => executor.query(`LET connector = DOCUMENT(@@connectors, @connectorKey)
         FILTER connector != null && connector.status != "revoked" && connector.syncEnabled != false
         FILTER connector.syncLeaseToken == @leaseToken && connector.syncLeaseExpiresAt > @checkedAt
-        LET stale = (FOR document IN documents FILTER document.scopeKey == @scopeKey && document.folderKey == @folderKey && document.mutationPolicy == "system-only" && document._key NOT IN @keep LET payload = JSON_PARSE(document.content) FILTER payload.version == 1 && payload.kind == "mail-thread" && payload.data.accountKey == @accountKey && IS_STRING(payload.data.providerThreadId) SORT payload.data.providerThreadId RETURN payload.data.providerThreadId)
-        RETURN stale`, { '@connectors': ORGANIZATION_CONNECTORS_COLLECTION, connectorKey: lease.connectorKey, leaseToken: lease.token, checkedAt, scopeKey, folderKey: mailFolderKeys(scopeKey).threads, accountKey, keep }), true);
+         LET stale = (FOR document IN documents FILTER document.scopeKey == @scopeKey && document.folderKey == @threadFolderKey && document.mutationPolicy == "system-only" && document._key NOT IN @keep LET payload = JSON_PARSE(document.content) FILTER payload.version == 1 && payload.kind == "mail-thread" && payload.data.accountKey == @accountKey && IS_STRING(payload.data.providerThreadId) SORT payload.data.providerThreadId RETURN payload.data.providerThreadId)
+         RETURN stale`, { '@connectors': ORGANIZATION_CONNECTORS_COLLECTION, connectorKey: lease.connectorKey, leaseToken: lease.token, checkedAt, scopeKey, threadFolderKey: mailFolderKeys(scopeKey).threads, accountKey, keep }), true);
       const stale = await cursor.next() as string[] | undefined;
       if (!stale) throw new EmailRepositoryError('conflict', 'Email synchronization lease was lost before reconciling the inbox');
       return stale;
@@ -741,6 +785,26 @@ export function createEmailRepository(database: Database = db) {
       const document = archiveDocument({ key, scopeKey: input.scopeKey, folderKey: folders.drafts, name, payload, embedding: input.embedding, createdAt: timestamp, updatedAt: timestamp });
       return decodeEmailDraft(await insertDocument(document));
     },
+    async createSubscriptionDraft(input: EmailDraftCreate & { variant: 'reply'; creationSource: 'subscription' }) {
+      const folders = await ensureMailFolders(database, input.scopeKey);
+      const timestamp = new Date().toISOString();
+      const key = emailSubscriptionDraftKey(input.scopeKey, input.messageKey);
+      const data = withoutRecordFields({ ...input, key, createdAt: timestamp, updatedAt: timestamp });
+      const payload = emailDraftPayloadSchema.parse({ version: 1, kind: 'mail-reply-draft', data });
+      const document = archiveDocument({ key, scopeKey: input.scopeKey, folderKey: folders.drafts, name: `Reply ${input.threadKey}`, payload, embedding: input.embedding, createdAt: timestamp, updatedAt: timestamp });
+      const cursor = await database.query('UPSERT { _key: @key } INSERT @document UPDATE {} IN documents RETURN NEW', { key, document: toArangoDoc(document) });
+      const draft = decodeEmailDraft(parsedDocument(await cursor.next()));
+      if (draft.variant !== 'reply' || draft.creationSource !== 'subscription' || draft.messageKey !== input.messageKey) throw new EmailRepositoryError('conflict', 'Automatic email draft identity is invalid');
+      return draft;
+    },
+    async subscriptionDraftForMessage(scopeKey: string, messageKey: string) {
+      const document = await getDocument(scopeKey, emailSubscriptionDraftKey(scopeKey, messageKey), mailFolderKeys(scopeKey).drafts, 'system-only');
+      if (!document) return null;
+      try {
+        const draft = decodeEmailDraft(document);
+        return draft.variant === 'reply' && draft.creationSource === 'subscription' && draft.messageKey === messageKey ? draft : null;
+      } catch { return null; }
+    },
     async getDraft(scopeKey: string, draftKey: string) {
       const document = await getDocument(scopeKey, draftKey, mailFolderKeys(scopeKey).drafts, 'system-only');
       if (!document) throw new EmailRepositoryError('not_found');
@@ -754,8 +818,8 @@ export function createEmailRepository(database: Database = db) {
         LET thread = payload.kind == "mail-reply-draft" ? DOCUMENT(documents, payload.data.threadKey) : null
         LET threadPayload = thread == null ? null : JSON_PARSE(thread.content)
         FILTER (payload.kind == "mail-new-draft" && payload.data.accountKey == @connectorKey)
-          || (payload.kind == "mail-reply-draft" && thread != null && thread.scopeKey == @scopeKey && thread.folderKey == @threadFolderKey && thread.mutationPolicy == "system-only" && threadPayload.version == 1 && threadPayload.kind == "mail-thread" && threadPayload.data.accountKey == @connectorKey)
-        LIMIT 1 RETURN payload.data.attachments || []`, { scopeKey, connectorKey, draftKey, draftFolderKey: mailFolderKeys(scopeKey).drafts, threadFolderKey: mailFolderKeys(scopeKey).threads });
+           || (payload.kind == "mail-reply-draft" && thread != null && thread.scopeKey == @scopeKey && thread.folderKey == CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "managed-mail-folder", @scopeKey, "communication-mail-threads")), 24)) && thread.mutationPolicy == "system-only" && threadPayload.version == 1 && threadPayload.kind == "mail-thread" && threadPayload.data.accountKey == @connectorKey)
+        LIMIT 1 RETURN payload.data.attachments || []`, { scopeKey, connectorKey, draftKey, draftFolderKey: mailFolderKeys(scopeKey).drafts });
       const refs = await cursor.next();
       return refs === undefined || refs === null ? null : emailAttachmentRefsSchema.parse(refs);
     },
@@ -776,9 +840,12 @@ export function createEmailRepository(database: Database = db) {
     },
     async listDrafts(scopeKey: string, connectorKey?: string) {
       const drafts = await listFolderDocuments(scopeKey, mailFolderKeys(scopeKey).drafts, 'system-only');
-      const decoded = drafts.map(decodeEmailDraft).filter(({ status }) => status === 'generated' || status === 'edited');
+      const decoded = drafts.map(decodeEmailDraft).filter((draft) => draft.variant === 'reply' && draft.creationSource === 'subscription' && (draft.status === 'generated' || draft.status === 'edited'));
       if (!connectorKey) return decoded.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 50);
-      const threads = new Map((await listFolderDocuments(scopeKey, mailFolderKeys(scopeKey).threads, 'system-only')).flatMap((document) => {
+       const threadCursor = await database.query(`FOR document IN documents FILTER document.scopeKey == @scopeKey && document.folderKey == @threadFolderKey && document.mutationPolicy == "system-only" LET payload = JSON_PARSE(document.content) FILTER payload.version == 1 && payload.kind == "mail-thread" RETURN document`, { scopeKey, threadFolderKey: mailFolderKeys(scopeKey).threads });
+      const threads = new Map((await threadCursor.all()).flatMap((raw) => {
+        let document: Document;
+        try { document = parsedDocument(raw); } catch { return []; }
         try { const thread = decodeEmailThread(document); return [[thread.key, thread] as const]; } catch { return []; }
       }));
       return decoded.filter((draft) => draft.variant === 'new' ? draft.accountKey === connectorKey : threads.get(draft.threadKey)?.accountKey === connectorKey).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 50);
@@ -788,17 +855,16 @@ export function createEmailRepository(database: Database = db) {
       const cursor = await database.query(`FOR document IN documents
         FILTER document.scopeKey == @scopeKey && document.folderKey == @draftFolderKey && document.mutationPolicy == "system-only"
         LET payload = JSON_PARSE(document.content)
-        FILTER payload.version == 1 && payload.kind IN ["mail-reply-draft", "mail-new-draft"] && payload.data.status IN ["generated", "edited"]
-        LET thread = payload.kind == "mail-reply-draft" ? DOCUMENT(documents, payload.data.threadKey) : null
+        FILTER payload.version == 1 && payload.kind == "mail-reply-draft" && payload.data.creationSource == "subscription" && payload.data.status IN ["generated", "edited"]
+        LET thread = DOCUMENT(documents, payload.data.threadKey)
         LET threadPayload = thread == null ? null : JSON_PARSE(thread.content)
-        FILTER (payload.kind == "mail-new-draft" && payload.data.accountKey == @connectorKey)
-          || (payload.kind == "mail-reply-draft" && thread != null && thread.scopeKey == @scopeKey && thread.folderKey == @threadFolderKey && thread.mutationPolicy == "system-only" && threadPayload.version == 1 && threadPayload.kind == "mail-thread" && threadPayload.data.accountKey == @connectorKey)
+        FILTER thread != null && thread.scopeKey == @scopeKey && thread.folderKey == CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "managed-mail-folder", @scopeKey, "communication-mail-threads")), 24)) && thread.mutationPolicy == "system-only" && threadPayload.version == 1 && threadPayload.kind == "mail-thread" && threadPayload.data.accountKey == @connectorKey
         LET direct = CONTAINS(LOWER(CONCAT_SEPARATOR(" ", document.name, document.content)), @query)
         LET score = IS_ARRAY(document.embedding) && LENGTH(document.embedding) == LENGTH(@embedding) ? COSINE_SIMILARITY(document.embedding, @embedding) : null
         FILTER direct || (IS_NUMBER(score) && score >= @minimumScore)
         SORT direct DESC, score DESC, document.updatedAt DESC, document._key ASC
         LIMIT @limit
-        RETURN { document, score: direct ? 1 : score }`, { scopeKey, connectorKey, draftFolderKey: mailFolderKeys(scopeKey).drafts, threadFolderKey: mailFolderKeys(scopeKey).threads, embedding, query: normalizedQuery, minimumScore, limit });
+        RETURN { document, score: direct ? 1 : score }`, { scopeKey, connectorKey, draftFolderKey: mailFolderKeys(scopeKey).drafts, embedding, query: normalizedQuery, minimumScore, limit });
       return (await cursor.all() as Array<{ document: unknown; score: number }>).flatMap(({ document, score }) => {
         try { return [{ draft: decodeEmailDraft(parsedDocument(document)), score }]; } catch { return []; }
       });
@@ -879,20 +945,20 @@ export function createEmailRepository(database: Database = db) {
     attachmentResources,
     async semanticReplyContext(scopeKey: string, embedding: number[], currentThreadKey: string, currentMessageKeys: string[]): Promise<SemanticReplyItem[]> {
       const cursor = await database.query(`FOR document IN documents
-        FILTER document.scopeKey == @scopeKey && document.folderKey == @folderKey && document.mutationPolicy == "system-only"
+        FILTER document.scopeKey == @scopeKey && document.mutationPolicy == "system-only"
         FILTER document._key != @currentThreadKey && document._key NOT IN @currentMessageKeys
         FILTER IS_ARRAY(document.embedding) && LENGTH(document.embedding) == LENGTH(@embedding)
         LET payload = JSON_PARSE(document.content)
         FILTER payload.version == 1 && payload.kind IN ["mail-thread", "mail-message"]
+         FILTER document.folderKey == (payload.kind == "mail-thread" ? CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "managed-mail-folder", @scopeKey, "communication-mail-threads")), 24)) : CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "managed-mail-folder", @scopeKey, CONCAT("mail-inbox\\u0000", payload.data.accountKey))), 24)))
         FILTER payload.kind != "mail-message" || payload.data.threadKey != @currentThreadKey
-        FILTER payload.data.embeddingContentVersion == 3
+          FILTER payload.data.embeddingContentVersion == 4
         LET similarity = COSINE_SIMILARITY(document.embedding, @embedding)
         FILTER IS_NUMBER(similarity) && similarity >= @minimumSimilarity
         SORT similarity DESC, document._key ASC
         LIMIT @candidateLimit
         RETURN { document, similarity }`, {
         scopeKey,
-        folderKey: mailFolderKeys(scopeKey).threads,
         embedding,
         currentThreadKey,
         currentMessageKeys,

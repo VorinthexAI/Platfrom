@@ -13,6 +13,7 @@ mock.module("./content-client", () => ({
   listContentSearchHistory: () => undefined,
   readContentDocument: () => undefined,
 }));
+mock.module("./books-client", () => ({}));
 mock.module("./email-client", () => ({
   normalizeEmailOverviewQuery: (input: { readState?: "read" | "unread"; facets?: string[]; search?: string } = {}) => ({
     readState: input.readState ?? "unread",
@@ -24,6 +25,7 @@ mock.module("./email-client", () => ({
 const { contentQueryKeys } = await import("./content-query-cache");
 const {
   ascendQueryKeys,
+  addCachedBook,
   appendOptimisticCompassTrip,
   addOptimisticCompassPlace,
   compassQueryKeys,
@@ -32,6 +34,10 @@ const {
   invalidateAssistantChanges,
   patchCachedCompassPlace,
   patchGalleryImage,
+  patchCachedBook,
+  patchCachedBookProgress,
+  mergeBookDetailProgress,
+  removeCachedBook,
   patchSignalInbox,
   patchSignalThread,
   parseSignalOverviewQuery,
@@ -80,6 +86,47 @@ const {
   reconcileSignalTrashedThread,
   upsertSignalReplyContext,
 } = await import("./workspace-query-cache");
+
+test("converges optimistic books through patch and removal", () => {
+  const client = new QueryClient();
+  const pending = { key: "pending", title: "Pending", subtitle: "Queued", description: "Goal", status: "queued" as const, estimatedMinutes: 25, chapterCount: 0, progressPercent: 0 };
+  client.setQueryData(ascendQueryKeys.overview(context), { books: [] });
+  addCachedBook(client, context, pending);
+  patchCachedBook(client, context, { ...pending, status: "writing", generationProgressPercent: 50 });
+  expect(client.getQueryData<{ books: { status: string }[] }>(ascendQueryKeys.overview(context))?.books[0]?.status).toBe("writing");
+  removeCachedBook(client, context, pending.key);
+  expect(client.getQueryData<{ books: unknown[] }>(ascendQueryKeys.overview(context))?.books).toEqual([]);
+});
+
+test("isolates pending book requests from authoritative overview refreshes", () => {
+  const client = new QueryClient();
+  const pendingKey = ascendQueryKeys.pending(context);
+  client.setQueryData(pendingKey, [{ requestKey: "request", book: { key: "pending-request" } }]);
+  client.setQueryData(ascendQueryKeys.overview(context), { books: [{ key: "server-book" }] });
+  client.setQueryData(ascendQueryKeys.overview(context), { books: [{ key: "server-book-updated" }] });
+  expect(client.getQueryData<{ requestKey: string }[]>(pendingKey)).toEqual([{ requestKey: "request", book: { key: "pending-request" } }]);
+});
+
+test("progress patches retain active signed media and monotonic completion", () => {
+  const client = new QueryClient();
+  const book = { key: "book", title: "Book", subtitle: "Subtitle", description: "Description", status: "ready" as const, coverUrl: "https://old/cover", estimatedMinutes: 10, chapterCount: 1, progressPercent: 50 };
+  const chapter = { key: "chapter", title: "Chapter", description: "Description", position: 1, audioUrl: "https://old/audio", imageUrl: "https://old/image", progressSeconds: 50, isCompleted: true };
+  client.setQueryData(ascendQueryKeys.detail(context, book.key), { book, chapters: [chapter] });
+  client.setQueryData(ascendQueryKeys.overview(context), { books: [book] });
+  patchCachedBookProgress(client, context, { ...book, coverUrl: "https://new/cover", progressPercent: 0 }, { ...chapter, audioUrl: "https://new/audio", imageUrl: "https://new/image", progressSeconds: 10, isCompleted: false });
+  expect(client.getQueryData<{ book: typeof book; chapters: (typeof chapter)[] }>(ascendQueryKeys.detail(context, book.key))).toEqual({ book, chapters: [chapter] });
+});
+
+test("merges every detail ingress monotonically while accepting refreshed media", () => {
+  const book = { key: "book", title: "Book", subtitle: "Subtitle", description: "Description", status: "ready" as const, estimatedMinutes: 10, chapterCount: 1, progressPercent: 60 };
+  const chapter = { key: "chapter", title: "Chapter", description: "Description", position: 1, audioUrl: "https://old/audio", progressSeconds: 60, isCompleted: true };
+  const merged = mergeBookDetailProgress(
+    { book, chapters: [chapter] },
+    { book: { ...book, progressPercent: 10 }, chapters: [{ ...chapter, audioUrl: "https://new/audio", progressSeconds: 10, isCompleted: false }] },
+  );
+  expect(merged.book.progressPercent).toBe(60);
+  expect(merged.chapters[0]).toMatchObject({ audioUrl: "https://new/audio", progressSeconds: 60, isCompleted: true });
+});
 
 test("pending Signal fields overlay equal-timestamp SSE until authoritative completion", () => {
   const at = "2026-08-23T10:00:00.000Z";
@@ -687,7 +734,7 @@ test("successful Clear Trash tombstones loaded group threads absent from caches"
 
 test("patches folder-like Signal inboxes and tones without crossing contexts", () => {
   const client = new QueryClient();
-  const inbox = { key: "inbox", connectorKey: "connector", email: "team@example.com", name: "Team", isFavorite: false, status: "active" as const, syncEnabled: true, syncStatus: "idle" as const };
+  const inbox = { key: "inbox", connectorKey: "connector", email: "team@example.com", name: "Team", isFavorite: false, status: "active" as const, syncEnabled: true, initialSyncCompleted: true, syncStatus: "idle" as const };
   const updatedInbox = { ...inbox, name: "Priority team", isFavorite: true };
   const first = { key: "tone", name: "Warm", instruction: "Write warmly.", isFavorite: false };
   const overview = { accounts: [inbox], tones: [first], selectedAccount: inbox, threads: [], drafts: [], unassignedDrafts: [], counts: { all: 0, important: 0, urgent: 0, needsAction: 0, filtered: 0, unread: 0, favorite: 0 }, nextCursor: null };

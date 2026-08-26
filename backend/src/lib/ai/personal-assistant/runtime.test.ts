@@ -234,14 +234,14 @@ describe('personal assistant runtime', () => {
 
   test('creates a book through one canonical service call', async () => {
     const bookKey = newId();
-    const brief = { topic: 'Decision making', goal: 'Make clearer decisions', audience: 'Curious leaders', tone: 'Warm and rigorous', length: 'short', language: 'English' } as const;
+    const brief = { topic: 'Decision making', goal: 'Make clearer decisions', currentKnowledge: 'Basic familiarity', writingTone: 'Warm and rigorous', chapterCount: 10, language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'warm', narrationPace: 1, chapterImages: false } as const;
     const serviceCalls: unknown[][] = [];
     let modelCalls = 0;
     const result = await runPersonalAssistant({ ...input, surface: 'book-workspace', requestKey: 'book-request-1', message: 'Create a short book about decision making for leaders.' }, domain, {
       execute: async (_request, nextInput) => {
         modelCalls += 1;
         if (modelCalls === 1) {
-          expect(nextInput.tools?.map(({ name }) => name)).toEqual(['app.search', 'book.list', 'book.detail', 'book.chapter.progress', 'book.create', 'assistant.unsupported']);
+          expect(nextInput.tools?.map(({ name }) => name)).toEqual(['app.search', 'book.list', 'book.detail', 'book.chapter.progress', 'book.create', 'book.generation.retry', 'book.generation.cancel', 'book.delete', 'assistant.unsupported']);
           expect(nextInput.systemPrompt).toContain('Call book.create exactly once');
           return response({ text: '', toolCalls: [{ id: 'book-create-1', name: 'book.create', arguments: brief }], stopReason: 'tool_use' });
         }
@@ -261,7 +261,7 @@ describe('personal assistant runtime', () => {
     await expect(runPersonalAssistant({ ...input, surface: 'book-workspace' }, domain, {
       execute: async () => {
         call += 1;
-        return response({ text: '', toolCalls: [{ id: `create-${call}`, name: 'book.create', arguments: { topic: 'Topic', goal: 'Goal', audience: 'Readers', tone: 'Clear', length: 'short', language: 'English' } }], stopReason: 'tool_use' });
+        return response({ text: '', toolCalls: [{ id: `create-${call}`, name: 'book.create', arguments: { topic: 'Topic', goal: 'Goal', currentKnowledge: 'Basic familiarity', writingTone: 'Clear', chapterCount: 10, language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear', narrationPace: 1, chapterImages: false } }], stopReason: 'tool_use' });
       },
       books: { create: async () => ({ key: newId(), status: 'ready' }) } as any,
     })).rejects.toThrow('more than one book');

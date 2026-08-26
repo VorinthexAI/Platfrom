@@ -1,4 +1,5 @@
 import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
+import { emailDevelopmentAttachmentAssets } from '@/lib/development-fixture-assets';
 
 export const MAIL_DEV_SEED_EMAIL = 'oscar.burman005@gmail.com';
 export const MAIL_DEV_FIXTURE_PREFIX = 'vorinthex-local-signal-v1';
@@ -36,6 +37,7 @@ export function mailDevFixtures(scopeKey: string, accountKeys?: readonly string[
   const keys = accountKeys ?? inboxes.map((_, index) => `cmailfixtureaccount00000${index + 1}`);
   if (keys.length !== inboxes.length) throw new Error('Mail fixture account key count is invalid.');
   const accounts = inboxes.map((inbox, index) => ({ ...inbox, accountKey: keys[index]! }));
+  const assets = emailDevelopmentAttachmentAssets(scopeKey);
   const threads = accounts.flatMap((account, accountIndex) => scenarios.map((scenario, scenarioIndex) => {
     const providerThreadId = `${MAIL_DEV_FIXTURE_PREFIX}:${account.slug}:${scenario.slug}`;
     const sender = `${scenario.slug}.${account.slug}@example.com`;
@@ -47,13 +49,25 @@ export function mailDevFixtures(scopeKey: string, accountKeys?: readonly string[
     const outboundBody = `Thanks, I reviewed the ${account.name.toLowerCase()} details. I will follow up with the next step and keep everyone copied.`;
     const rootHeader = `<${providerThreadId}:1@example.com>`;
     const embedding = thematicEmbedding(`${account.slug}:${scenario.category}`);
+    const attachmentRefs = accountIndex === 0 && scenarioIndex === 0
+      ? [[assets[0]!, assets[1]!], [assets[5]!]]
+      : accountIndex === 0 && scenarioIndex === 1
+        ? [[assets[2]!, assets[3]!, assets[4]!, assets[6]!, assets[7]!, assets[8]!], []]
+        : accountIndex === 1 && scenarioIndex === 0
+          ? [[], [assets[5]!, assets[6]!]]
+          : accountIndex === 2 && scenarioIndex === 1
+            ? [[assets[4]!], [assets[8]!]]
+            : [[], []];
+    const attachmentFields = (attachments: typeof assets) => attachments.length
+      ? { hasAttachments: true, attachmentAvailability: 'complete' as const, attachments: attachments.map(({ type, key }) => ({ type, key })) }
+      : { hasAttachments: false, attachmentAvailability: 'none' as const };
     const messages = [
-      { scopeKey, accountKey: account.accountKey, providerMessageId: `${providerThreadId}:1`, from: sender, fromName: `${account.name} Correspondent`, to: [MAIL_DEV_SEED_EMAIL], ...(scenarioIndex % 3 === 0 ? { cc: ['alex@example.com', 'team@example.com'] } : {}), subject, body: inboundBody, summary: inboundBody, direction: 'inbound' as const, sentAt: firstAt, hasAttachments: false, labels: [...scenario.labels], unread: scenario.unread, replyDepth: 0, messageIdHeader: rootHeader, inboxCategory: scenario.inboxCategory, embedding, embeddingContentVersion: 3 as const },
-      { scopeKey, accountKey: account.accountKey, providerMessageId: `${providerThreadId}:2`, from: MAIL_DEV_SEED_EMAIL, to: [sender], ...(scenarioIndex % 3 === 0 ? { cc: ['alex@example.com', 'team@example.com'] } : {}), subject: `Re: ${subject}`, body: outboundBody, summary: outboundBody, direction: 'outbound' as const, sentAt: secondAt, hasAttachments: false, labels: ['SENT'], unread: false, replyDepth: 1, messageIdHeader: `<${providerThreadId}:2@example.com>`, inReplyTo: rootHeader, references: [rootHeader], parentMessageId: rootHeader, inboxCategory: scenario.inboxCategory, embedding, embeddingContentVersion: 3 as const },
+      { scopeKey, accountKey: account.accountKey, providerMessageId: `${providerThreadId}:1`, from: sender, fromName: `${account.name} Correspondent`, to: [MAIL_DEV_SEED_EMAIL], ...(scenarioIndex % 3 === 0 ? { cc: ['alex@example.com', 'team@example.com'] } : {}), subject, body: inboundBody, summary: inboundBody, direction: 'inbound' as const, sentAt: firstAt, ...attachmentFields(attachmentRefs[0]!), labels: [...scenario.labels], unread: scenario.unread, replyDepth: 0, messageIdHeader: rootHeader, inboxCategory: scenario.inboxCategory, embedding, embeddingContentVersion: 4 as const },
+      { scopeKey, accountKey: account.accountKey, providerMessageId: `${providerThreadId}:2`, from: MAIL_DEV_SEED_EMAIL, to: [sender], ...(scenarioIndex % 3 === 0 ? { cc: ['alex@example.com', 'team@example.com'] } : {}), subject: `Re: ${subject}`, body: outboundBody, summary: outboundBody, direction: 'outbound' as const, sentAt: secondAt, ...attachmentFields(attachmentRefs[1]!), labels: ['SENT'], unread: false, replyDepth: 1, messageIdHeader: `<${providerThreadId}:2@example.com>`, inReplyTo: rootHeader, references: [rootHeader], parentMessageId: rootHeader, inboxCategory: scenario.inboxCategory, embedding, embeddingContentVersion: 4 as const },
     ];
     return {
       fixtureId: providerThreadId,
-      thread: { scopeKey, accountKey: account.accountKey, providerThreadId, subject, summary: inboundBody, intent: scenario.state === 'filtered' ? 'Review low-priority mail' : 'Review the request', ...(scenario.state === 'needs_action' ? { action: 'Reply with a decision' } : {}), priority: scenario.priority, state: scenario.state, category: scenario.category, inboxCategory: scenario.inboxCategory, snippet: inboundBody, unread: scenario.unread, starred: scenario.labels.some((label) => label === 'STARRED'), labels: [...scenario.labels], latestFrom: sender, inInbox: true, lastMessageAt: secondAt, embedding, embeddingContentVersion: 3 as const, isFavorite: scenario.favorite },
+      thread: { scopeKey, accountKey: account.accountKey, providerThreadId, subject, summary: inboundBody, intent: scenario.state === 'filtered' ? 'Review low-priority mail' : 'Review the request', ...(scenario.state === 'needs_action' ? { action: 'Reply with a decision' } : {}), priority: scenario.priority, state: scenario.state, category: scenario.category, inboxCategory: scenario.inboxCategory, snippet: inboundBody, unread: scenario.unread, starred: scenario.labels.some((label) => label === 'STARRED'), labels: [...scenario.labels], latestFrom: sender, inInbox: true, lastMessageAt: secondAt, embedding, embeddingContentVersion: 4 as const, isFavorite: scenario.favorite },
       messages,
     };
   }));

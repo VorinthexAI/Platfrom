@@ -363,7 +363,7 @@ describe('Gallery repository transactions', () => {
     const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
     const start = source.lastIndexOf('deleteDuplicateImages(');
     const duplicateDeletion = source.slice(start, source.indexOf('deleteImages(scopeKey', start));
-    for (const collection of ['images', 'collectionImages', 'imageCollectionMemories', 'storageDeletionJobs', 'inboxes', 'documents']) expect(duplicateDeletion).toContain(`"${collection}"`);
+    for (const collection of ['images', 'collectionImages', 'imageCollectionMemories', 'storageDeletionJobs', 'folders', 'documents']) expect(duplicateDeletion).toContain(`"${collection}"`);
     expect(duplicateDeletion).toContain('UPSERT { storageKey: @storageKey }');
     expect(duplicateDeletion).toContain('{ scopeKey, imageKeys: removedImageKeys, now }');
     expect(duplicateDeletion).toContain('REMOVE memory IN imageCollectionMemories');
@@ -483,13 +483,13 @@ describe('Gallery repository transactions', () => {
     } };
     const repository = createGalleryRepository(database, async (collections, operation) => { transactionCollections = collections; return operation(database); });
     await expect(repository.deleteImages(newId(), imageKeys, newId(), '2026-08-13T12:00:00.000Z')).resolves.toEqual({ deletedImageKeys: imageKeys, favoriteImageKeys: [], collectionKeys: [], memoryCollectionKeys: [], subjectChanged: false, hadUnfiledImages: false, storageKeys: [] });
-    expect(transactionCollections).toEqual(expect.objectContaining({ write: expect.arrayContaining(['images', 'imageCaptions', 'collectionImages', 'imageIdentities', 'visualIdentities', 'imageCollecitionHightlights', 'trips', 'inboxes', 'documents', 'tagAssignments', 'shares', 'userHiddens']) }));
+    expect(transactionCollections).toEqual(expect.objectContaining({ write: expect.arrayContaining(['images', 'imageCaptions', 'collectionImages', 'imageIdentities', 'visualIdentities', 'imageCollecitionHightlights', 'trips', 'folders', 'documents', 'tagAssignments', 'shares', 'userHiddens']) }));
     expect(queries.some((query) => query.includes('REMOVE relation IN collectionImages'))).toBe(true);
     expect(queries.some((query) => query.includes('REMOVE relation IN imageIdentities'))).toBe(true);
     expect(queries.some((query) => query.includes('LET replacement = FIRST') && query.includes('referenceImageKey: replacement'))).toBe(true);
     expect(queries.some((query) => query.includes('REMOVE image IN images'))).toBe(true);
     expect(queries.some((query) => query.includes('trip.coverImageKey IN @imageKeys'))).toBe(true);
-    expect(queries.some((query) => query.includes('inbox.coverImageKey IN @imageKeys') && query.includes('updatedAt: @now'))).toBe(true);
+    expect(queries.some((query) => query.includes('folder.managedPurpose') && query.includes('folder.coverImageKey IN @imageKeys') && query.includes('updatedAt: @now'))).toBe(true);
     expect(queries.some((query) => query.includes('document.coverImageKey IN @imageKeys') && query.includes('updatedAt: @now'))).toBe(true);
     expect(queries.some((query) => query.includes('REMOVE identity IN visualIdentities'))).toBe(true);
   });
@@ -531,14 +531,14 @@ describe('Gallery repository transactions', () => {
     const database: MediaLibraryDatabase = { async query(query) { queries.push(query); return { async all() { return query.includes('FOR upload IN galleryUploads') ? [imageKey] : []; } }; } };
     const repository = createGalleryRepository(database, async (collections, operation) => { transactionCollections = collections; return operation(database); });
     await expect(repository.compensateUpload(uploadKey, scopeKey, newId(), 'IMAGE_PROCESSING_FAILED', 'failed', '2026-08-17T12:00:00.000Z')).resolves.toEqual({ collectionKeys: [], subjectChanged: false, imageChanged: false, storageKeys: [] });
-    expect(transactionCollections).toEqual({ read: ['images', 'visualIdentities'], write: ['galleryUploads', 'images', 'imageCaptions', 'collectionImages', 'collections', 'imageIdentities', 'visualIdentities', 'imageCollectionMemories', 'trips', 'inboxes', 'documents'] });
+    expect(transactionCollections).toEqual({ read: ['images', 'visualIdentities'], write: ['galleryUploads', 'images', 'imageCaptions', 'collectionImages', 'collections', 'imageIdentities', 'visualIdentities', 'imageCollectionMemories', 'trips', 'folders', 'documents'] });
     expect(queries.some((query) => query.includes('status: @status'))).toBe(true);
     expect(queries[0]).toContain('upload.status == "processing"');
     expect(queries[0]).toContain('upload.processingLeaseId == @leaseId');
     expect(queries.some((query) => query.includes('REMOVE relation IN collectionImages'))).toBe(true);
     expect(queries.some((query) => query.includes('REMOVE image IN images'))).toBe(true);
     expect(queries.some((query) => query.includes('trip.coverImageKey == @imageKey'))).toBe(true);
-    expect(queries.some((query) => query.includes('inbox.coverImageKey == @imageKey') && query.includes('updatedAt: @now'))).toBe(true);
+    expect(queries.some((query) => query.includes('folder.managedPurpose == "mail-inbox"') && query.includes('folder.coverImageKey == @imageKey') && query.includes('updatedAt: @now'))).toBe(true);
     expect(queries.some((query) => query.includes('document.coverImageKey == @imageKey') && query.includes('updatedAt: @now'))).toBe(true);
   });
 
@@ -643,7 +643,7 @@ describe('Gallery repository transactions', () => {
     let collections: unknown;
     const repository = createGalleryRepository(database, async (value, operation) => { collections = value; return operation(database); });
     await expect(repository.finalizeUpload(upload, relation, leaseId, now, 'failed', 'UPLOAD_ACCESS_REVOKED')).resolves.toEqual({ status: 'completed' });
-    expect(collections).toEqual({ read: ['images', 'scopes', 'userOrganizations', 'scopeMembers', 'collections', 'collectionMembers', 'visualIdentities'], write: ['galleryUploads', 'images', 'collectionImages', 'collections', 'imageIdentities', 'visualIdentities', 'imageCaptions', 'imageCollectionMemories', 'trips', 'inboxes', 'documents'] });
+    expect(collections).toEqual({ read: ['images', 'scopes', 'userOrganizations', 'scopeMembers', 'collections', 'collectionMembers', 'visualIdentities'], write: ['galleryUploads', 'images', 'collectionImages', 'collections', 'imageIdentities', 'visualIdentities', 'imageCaptions', 'imageCollectionMemories', 'trips', 'folders', 'documents'] });
     expect(queries[0]).toContain('scopeRole IN ["owner", "admin", "moderator"]');
     expect(queries[0]).toContain('member.role IN ["owner", "collaborator", "member"]');
     expect(queries.some((query) => query.includes('UPSERT'))).toBe(true);

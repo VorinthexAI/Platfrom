@@ -21,7 +21,7 @@ import { tripPlaceSchema } from '@/lib/db/trip-places.node';
 import { tripAttachmentSchema, tripAttachmentTargetTypeSchema } from '@/lib/db/trip-attachments.node';
 import { tripCreationReceiptSchema } from '@/lib/db/trip-creation-receipts.node';
 import { documentSchema } from '@/lib/db/documents.node';
-import { generatedDocumentBindingSchema, generatedDocumentKindSchema } from '@/lib/db/generated-document-bindings.node';
+import { generatedDocumentBindingSchema } from '@/lib/db/generated-document-bindings.node';
 import { generatedDocumentFolderKeys } from '@/lib/generated-documents/folders';
 import { chunkDocumentContent, documentEmbeddingTexts, documentSemanticHash } from '@/lib/ai/document-processing/chunking';
 import { getDefaultUserSearchService, type UserSearchService } from '@/lib/user-searches/service';
@@ -135,7 +135,7 @@ export const travelTripGuideGenerateInputSchema = strictObject({
   tripKey: z.string().cuid(),
   idempotencyKey: z.string().trim().min(1).max(200),
 });
-export const travelPlaceReferenceKindSchema = generatedDocumentKindSchema.exclude(['guide']);
+export const travelPlaceReferenceKindSchema = z.enum(['brief', 'accommodations', 'restaurants', 'activities']);
 export const travelPlaceReferenceListInputSchema = strictObject({ ...requestContextShape, placeKey: z.string().cuid(), kind: travelPlaceReferenceKindSchema });
 export const travelPlaceReferenceGenerateInputSchema = strictObject({
   ...requestContextShape,
@@ -669,6 +669,7 @@ export function createTravelService(options: { repository?: TravelRepository; ex
       const storage = options.storage ?? documentStorage;
       let image = await (options.getImage ?? getImageById)(imageKey);
       let processedForRequest = false;
+      let uploadReservation: Awaited<ReturnType<TravelRepository['cancelManagedImageDeletion']>> | undefined;
       if (!image) {
         let staged;
         try { staged = await storage.download(stagedPlaceImageKey(token.nonce)); }
@@ -677,12 +678,18 @@ export function createTravelService(options: { repository?: TravelRepository; ex
           staged = await storage.download(stagedPlaceImageKey(token.nonce));
         }
         const permanentStorageKey = `media/${input.scopeKey}/${imageKey}/${createHash('sha256').update(staged.bytes).digest('hex')}/original.png`;
-        await repository.cancelManagedImageDeletion(permanentStorageKey);
+        const reservation = await repository.cancelManagedImageDeletion(permanentStorageKey);
+        uploadReservation = reservation;
         image = await (options.process ?? processImage)({
           scopeKey: input.scopeKey, ownerKey: membershipKey, imageKey, idempotencyKey: token.nonce,
           file: { filename: `${input.name.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').toLowerCase() || 'place'}.png`, mimeType: 'image/png', sizeBytes: staged.bytes.byteLength, bytes: staged.bytes },
           location: { placeName: input.name, placeSummary: input.summary, country: token.country.name, countryCode: input.countryCode, latitude: input.latitude, longitude: input.longitude, locationSource: 'place' },
           mutationPolicy: 'system-only', signal: execution.signal,
+        }, {
+          reserveStorageKey: async (storageKey) => storageKey === reservation.storageKey ? reservation : null,
+          renewStorageReservation: (owned) => repository.renewManagedImageUpload(owned),
+          acknowledgeStorageReservation: (owned) => repository.acknowledgeManagedImageDeletion(owned),
+          releaseStorageReservation: (owned) => repository.releaseManagedImageUpload(owned),
         });
         processedForRequest = true;
       }
@@ -703,7 +710,7 @@ export function createTravelService(options: { repository?: TravelRepository; ex
       } catch (error) {
         if (processedForRequest) {
           const storageKey = await repository.compensateManagedImage(input.scopeKey, image.key, now()).catch((cleanup) => { throw new AggregateError([error, cleanup], 'Place save and orphan compensation failed.'); });
-          if (storageKey) await storage.delete(storageKey).then(() => repository.acknowledgeManagedImageDeletion(storageKey)).catch(() => undefined);
+          if (storageKey && uploadReservation) await storage.delete(storageKey).then(() => repository.releaseManagedImageUpload(uploadReservation!)).catch(() => undefined);
         }
         throw error;
       }

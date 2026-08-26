@@ -42,6 +42,11 @@
             {
               "scheme": "https",
               "host": "vorinthex.com",
+              "path": "/capability/signal"
+            },
+            {
+              "scheme": "https",
+              "host": "vorinthex.com",
               "pathPrefix": "/share/"
             }
           ],

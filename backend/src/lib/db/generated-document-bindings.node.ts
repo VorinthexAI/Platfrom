@@ -1,8 +1,8 @@
 import { z } from 'zod';
 
 export const GENERATED_DOCUMENT_BINDINGS_COLLECTION = 'generatedDocumentBindings';
-export const generatedDocumentSubjectTypeSchema = z.enum(['trip', 'place']);
-export const generatedDocumentKindSchema = z.enum(['guide', 'brief', 'accommodations', 'restaurants', 'activities']);
+export const generatedDocumentSubjectTypeSchema = z.enum(['trip', 'place', 'chapter']);
+export const generatedDocumentKindSchema = z.enum(['guide', 'brief', 'accommodations', 'restaurants', 'activities', 'chapter']);
 
 export const generatedDocumentBindingSchema = z.object({
   key: z.string().cuid(),

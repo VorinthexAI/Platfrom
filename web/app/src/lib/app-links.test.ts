@@ -9,6 +9,7 @@ describe("mobile app associations", () => {
           appIDs: ["3RMYX67679.app.vorinthex.com"],
           components: [
             { "/": "/public/auth/token", comment: "Mobile magic-link sign in" },
+            { "/": "/capability/signal", comment: "Signal Gmail connection return" },
           ],
         }],
       },

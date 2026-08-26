@@ -21,14 +21,15 @@ const validUpload = {
 };
 
 describe('Gallery upload reservations', () => {
-  test('accepts a server-owned JPEG reservation', () => {
+  test('accepts canonical PNG and compatible JPEG reservations', () => {
     expect(galleryUploadSchema.parse(validUpload)).toEqual({ ...validUpload, city: null, country: null, countryCode: null, processingMode: 'library', processingLeaseId: null });
     expect(galleryUploadSchema.parse({ ...validUpload, processingMode: 'cover' })).toMatchObject({ processingMode: 'cover' });
   });
 
   test('rejects oversized files and unsupported media types', () => {
     expect(() => galleryUploadSchema.parse({ ...validUpload, sizeBytes: 20 * 1024 * 1024 + 1 })).toThrow();
-    expect(() => galleryUploadSchema.parse({ ...validUpload, mimeType: 'image/png' })).toThrow();
+    expect(galleryUploadSchema.parse({ ...validUpload, filename: 'photo.png', mimeType: 'image/png', storageKey: 'pending/photo.png' })).toMatchObject({ mimeType: 'image/png' });
+    expect(() => galleryUploadSchema.parse({ ...validUpload, mimeType: 'image/webp' })).toThrow();
   });
 
   test('strips Arango metadata from reads', () => {

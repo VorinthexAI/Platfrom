@@ -3,10 +3,13 @@ import { expect, test } from "bun:test";
 const workspace = await Bun.file(new URL("../components/capability/EmailWorkspace.tsx", import.meta.url)).text();
 const picker = await Bun.file(new URL("../components/capability/EmailAttachmentPicker.tsx", import.meta.url)).text();
 const route = await Bun.file(new URL("../app/capability/[slug].tsx", import.meta.url)).text();
+const archiveWorkspace = await Bun.file(new URL("../components/capability/KnowledgeWorkspace.tsx", import.meta.url)).text();
+const galleryWorkspace = await Bun.file(new URL("../components/capability/GalleryWorkspace.tsx", import.meta.url)).text();
 const client = await Bun.file(new URL("./email-client.ts", import.meta.url)).text();
 const trashAggregation = await Bun.file(new URL("./email-trash-aggregation.ts", import.meta.url)).text();
 const emailAttachmentPicker = await Bun.file(new URL("./email-attachment-picker.ts", import.meta.url)).text();
 const mobileTabs = await Bun.file(new URL("../../../../shared/packages/ui/components/tabs/tabs.mobile.tsx", import.meta.url)).text();
+const appConfig = await Bun.file(new URL("../../app.json", import.meta.url)).json();
 
 test("Signal provides global identity and inbox/thread local headers", () => {
   expect(workspace).toMatch(/<WorkspaceAppSwitcher[\s\S]*?active="signal"[\s\S]*?onBeforeSelect/);
@@ -17,6 +20,12 @@ test("Signal provides global identity and inbox/thread local headers", () => {
   expect(workspace).toContain('accessibilityLabel="Create in Signal"');
   expect(workspace).toContain('accessibilityLabel="More inbox actions"');
   expect(workspace).toContain('accessibilityLabel="New email"');
+});
+
+test("Signal does not expose manual inbox synchronization", () => {
+  expect(workspace).not.toContain("Sync inbox");
+  expect(workspace).not.toContain("syncEmailForContext");
+  expect(workspace).not.toContain("async function synchronize()");
 });
 
 test("Signal exposes Read/Unread tabs and four independent normalized facets", () => {
@@ -65,7 +74,7 @@ test("new email validates recipient chips and preserves exact blank-safe review 
   expect(workspace).toContain("emailAddressListSchema.safeParse(next)");
   expect(workspace).toContain(".split(/[;,\\s]+/)");
   expect(workspace).toContain("function changeNewEmailRecipientInput(value: string)");
-  expect(workspace).toContain('if (/[,;\\s]$/.test(value)) commitNewEmailRecipients(value)');
+  expect(workspace).toContain('if (/[,;\\s]$/.test(value) || emailAddressSchema.safeParse(value.trim()).success) commitNewEmailRecipients(value)');
   expect(workspace).toContain('onSubmitEditing={() => commitNewEmailRecipients()}');
   expect(workspace).toContain('onBlur={() => { if (newEmailRecipientInput.trim()) commitNewEmailRecipients(); }}');
   expect(workspace).toContain('onChangeText={changeNewEmailRecipientInput}');
@@ -75,13 +84,15 @@ test("new email validates recipient chips and preserves exact blank-safe review 
   expect(workspace).toContain("if (!emailAddressListSchema.safeParse(next).success)");
   expect(workspace).toContain('accessibilityRole="alert" style={styles.inlineError}');
   expect(workspace).toContain('accessibilityLabel={`Remove recipient ${address}`}');
-  expect(workspace).toMatch(/accessibilityLabel=\{`Remove recipient[\s\S]*?hitSlop=\{6\}[\s\S]*?iconOnly[\s\S]*?size="md"[\s\S]*?variant="secondary"[\s\S]*?<CloseIcon size="sm"/);
+  expect(workspace).toMatch(/accessibilityLabel=\{`Remove recipient[\s\S]*?hitSlop=\{10\}[\s\S]*?iconOnly[\s\S]*?shape="pill"[\s\S]*?size="xs"[\s\S]*?variant="secondary"[\s\S]*?<CloseIcon size="xs"/);
   expect(workspace).toContain('recipientChip: { alignSelf: "flex-start", minHeight: 42');
   expect(workspace).toContain('borderWidth: 1, borderColor: "rgba(221, 226, 229, 0.18)", borderRadius: 999, backgroundColor: "rgba(255, 255, 255, 0.03)"');
   expect(workspace).toContain('maxWidth: "100%", flexDirection: "row", alignItems: "center", gap: 6');
   expect(workspace).toContain('<Text style={styles.recipientChipText}>{address}</Text>');
   expect(workspace).toContain('recipientChipMain: { minWidth: 0, flexShrink: 1');
   expect(workspace).toContain("recipientChipRemove: { width: 42, height: 42");
+  expect(workspace).toContain("recipientChipCompact: { minHeight: 34 }");
+  expect(workspace).toContain("recipientChipRemoveCompact: { width: 24, minWidth: 24, maxWidth: 24, height: 24, minHeight: 24, maxHeight: 24, marginRight: 3, borderRadius: 12 }");
   expect(workspace).toContain('useDelayedInputFocus(newEmailRecipientsOpen ? "newEmailRecipients" : undefined, newEmailRecipientInputRef, !newEmailSending)');
   expect(workspace).toContain('ref={newEmailRecipientInputRef}');
   expect(workspace).toContain('useDelayedInputFocus(newEmailContentOpen ? "newEmailSubject" : undefined, newEmailSubjectInputRef, !newEmailSending)');
@@ -105,7 +116,8 @@ test("new email generates all tones concurrently with partial-failure ownership 
   expect(workspace).toMatch(/function openNewEmailAlternatives\(\)[\s\S]*?setNewEmailAlternativesOpen\(true\);[\s\S]*?if \(newEmailGenerationOwner\.current\) return;/);
   expect(workspace).toMatch(/function openNewEmailAlternatives\(\)[\s\S]*?setNewEmailContentOpen\(false\);[\s\S]*?setNewEmailAlternativesOpen\(true\);/);
   expect(workspace).toMatch(/function openNewEmailReview[\s\S]*?setNewEmailAlternativesOpen\(false\);[\s\S]*?setNewEmailReviewOpen\(true\);/);
-  expect(workspace).toContain('if (!open && !newEmailSending && !newEmailAlternativesOpen && !newEmailReviewOpen) { invalidateNewEmailAlternatives(); setNewEmailContentOpen(false); setNewEmailRecipientsOpen(true); }');
+  expect(workspace).toContain("setNewEmailReviewSubject(draft?.subject ?? newEmailSubject)");
+  expect(workspace).toContain('if (!open && !newEmailSending && !newEmailBodyTransformation && !newEmailAlternativesOpen && !newEmailReviewOpen) { invalidateNewEmailAlternatives(); setNewEmailContentOpen(false); setNewEmailRecipientsOpen(true); }');
   expect(workspace).not.toContain("returnToNewEmailRecipients");
   expect(workspace).toContain("if (!open && !newEmailSending && !newEmailReviewOpen) returnToNewEmailContent()");
   expect(workspace).toContain("if (!open && !newEmailSending && !newEmailContentOpen && !newEmailAlternativesOpen && !newEmailReviewOpen) closeNewEmailRecipients()");
@@ -127,7 +139,7 @@ test("new email generates all tones concurrently with partial-failure ownership 
   expect(workspace).not.toContain("newEmailRecipientsReturnToReview");
   expect(review).not.toContain('accessibilityLabel="Email recipients"');
   expect(workspace).toContain("setNewEmailSkipped(true);");
-  expect(workspace).toContain("if (!open && !newEmailSending && !newEmailAttachmentsOpen) closeNewEmailReview()");
+  expect(workspace).toContain("if (!open && !newEmailSending && !newEmailReviewTransformation && !newEmailAttachmentsOpen) closeNewEmailReview()");
   expect(workspace).not.toContain("reviewRecipientChip");
 });
 
@@ -164,16 +176,24 @@ test("Skip defers preserve composition until Send and review attachments use tha
   expect(workspace).not.toContain('accessibilityLabel={`Remove attachment ${label}`}');
   expect(workspace).toContain('onPress={removeAllNewEmailAttachments}');
   expect(workspace).toContain('<Text style={[styles.recipientChipText, styles.attachmentChipText]}>Remove all</Text>');
+  expect(workspace).toMatch(/accessibilityLabel="Remove all attachments"[\s\S]*?hitSlop=\{10\}[\s\S]*?shape="pill"[\s\S]*?<CloseIcon size="xs"/);
+  expect(workspace).toContain('<ButtonSizeProvider overrideParent size="xs"><View style={styles.attachmentActions}>');
+  expect(workspace).toContain('style={[styles.recipientChip, styles.attachmentChip]}');
+  expect(workspace).toContain('style={[styles.recipientChipRemove, styles.attachmentChipRemove]}');
+  expect(workspace).toMatch(/accessibilityLabel="Add attachments"[\s\S]*?shape="pill"[\s\S]*?<PlusIcon size="xs"/);
+  expect(workspace).toContain('attachmentChip: { minHeight: 34 }');
+  expect(workspace).toContain('attachmentChipRemove: { width: 24, minWidth: 24, maxWidth: 24, height: 24, minHeight: 24, maxHeight: 24, marginRight: 3, borderRadius: 12 }');
   expect(workspace).toMatch(/function removeAllNewEmailAttachments[\s\S]*?setNewEmailAttachments\(\[\]\);[\s\S]*?setNewEmailAttachmentLabels\(\{\}\);[\s\S]*?setNewEmailAttachmentImageUrls\(\{\}\);/);
   expect(workspace).toContain('style={styles.reviewAttachmentGrid}');
   expect(workspace).toContain('const imageUrl = ref.type === "image" ? newEmailAttachmentImageUrls[identity] : undefined');
   expect(workspace).toContain('style={[styles.reviewAttachmentCard, { width: reviewAttachmentCardSize, height: reviewAttachmentCardSize }]}');
-  expect(workspace).toContain('<Image contentFit="cover" source={imageUrl} style={styles.reviewAttachmentImage} transition={150} />');
+  expect(workspace).toContain('<Image contentFit="cover" onError={() => void refreshNewEmailImageUrls()} source={imageUrl} style={styles.reviewAttachmentImage} transition={150} />');
   expect(workspace).toContain('<FileIcon size="lg" /><Text ellipsizeMode="tail" numberOfLines={1} style={styles.reviewAttachmentLabel}>{label}</Text>');
   expect(workspace).toContain('const reviewAttachmentCardSize = Math.floor(((reviewAttachmentGridWidth || width - 40) - 18) / 4)');
   expect(workspace).toContain('onLayout={({ nativeEvent }) => setReviewAttachmentGridWidth(nativeEvent.layout.width)} style={styles.reviewAttachmentGrid}');
   expect(workspace).toContain('reviewAttachmentGrid: { width: "100%", flexDirection: "row", flexWrap: "wrap", gap: 6 }');
   expect(workspace).not.toContain("attachmentRemoveAll:");
+  expect(workspace).not.toContain("attachmentChipSolo:");
 });
 
 test("Signal root puts shared search before tabs and uses a measured exact three-column grid", () => {
@@ -191,7 +211,7 @@ test("Signal root puts shared search before tabs and uses a measured exact three
   expect(workspace).toContain('rootTabs: { flexDirection: "row", gap: 4, padding: 3, borderWidth: 1, backgroundColor: palette.panel }');
   expect(workspace).toMatch(/accessibilityLabel="Signal root categories"[\s\S]*?size="xs" style=\{styles\.rootTab\}/);
   expect(workspace).not.toContain("styles.favoriteBadge");
-  expect(workspace).toContain("No inboxes yet.");
+  expect(workspace).toContain("No connected inbox yet.");
   expect(workspace).toContain("No tones yet.");
   expect(workspace).toContain('accessibilityLabel="Connect Gmail"');
   expect(workspace).toContain('accessibilityLabel="Create email tone"');
@@ -225,11 +245,19 @@ test("Signal exposes Core with the Archive root-search focus gate", () => {
 
 test("Signal routes exact connector keys and opens tones in their editor", () => {
   expect(route).toContain("connectorKey?: string");
-  expect(route).toContain('<EmailWorkspace initialConnectorKey={params.connectorKey} navigatedFromRoot={params.signalReturn === "root"} key={params.connectorKey ?? "root"} />');
-  expect(workspace).toContain('onPress={() => router.push({ pathname: "/capability/[slug]", params: { slug: "signal", connectorKey: account.connectorKey, signalReturn: "root" } })}');
+  expect(route).toContain('<EmailWorkspace initialConnectorKey={params.connectorKey} initialMessageKey={params.signalMessageKey} initialThreadKey={params.signalThreadKey} navigatedFromRoot={params.signalReturn === "root"} openAttachments={params.openSignalAttachments === "1"}');
+  expect(workspace).toContain('else router.push({ pathname: "/capability/[slug]", params: { slug: "signal", connectorKey: account.connectorKey, signalReturn: "root" } })');
   expect(workspace).toContain("onPress={() => openToneEdit(record)}");
   expect(workspace).not.toContain('params: { slug: "archive", documentKey: record.key }');
   expect(workspace).toContain("if (navigatedFromRoot && router.canGoBack()) router.back()");
+});
+
+test("Signal OAuth returns through the verified app link", () => {
+  expect(client).toContain('const EMAIL_RETURN_URI = "https://vorinthex.com/capability/signal"');
+  expect(appConfig.expo.ios.associatedDomains).toContain("applinks:vorinthex.com");
+  expect(appConfig.expo.android.intentFilters[0].data).toContainEqual({ scheme: "https", host: "vorinthex.com", path: "/capability/signal" });
+  expect(route).toContain("email_connection_code?: string");
+  expect(route).toContain("email_connection_error?: string");
 });
 
 test("new email snapshots every built-in and custom tone selector", () => {
@@ -267,12 +295,22 @@ test("new-email close and navigation cannot invalidate an in-flight send", () =>
 
 test("root inboxes category renders only connected inbox cards", () => {
   expect(client).toContain("unassignedDrafts: z.array(emailDraftSchema).default([])");
-  expect(workspace).toContain("visibleAccounts.map((account) => (");
+  expect(workspace).toContain("visibleAccounts.map((account) => { const accountSelected");
   expect(workspace).toContain("const visibleUnassignedDrafts: EmailDraft[] = []");
   expect(workspace).not.toContain("visibleUnassignedDrafts.map");
   expect(workspace).not.toContain('sheet === "assignDraft"');
   expect(workspace).not.toContain("assignEmailDraftForContext");
   expect(workspace).toContain("No inboxes matched this search.");
+});
+
+test("Signal root inbox selection matches the Archive toolbar and disconnects only local inboxes", () => {
+  expect(workspace).toContain('accessibilityLabel="Selected inbox toolbar"');
+  expect(workspace).toContain('rootBulkToolbar: { minHeight: 40, padding: 5, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderWidth: 1, backgroundColor: palette.panel }');
+  expect(workspace.indexOf("{rootBulkToolbar}")).toBeLessThan(workspace.indexOf('<View style={styles.rootActions}>', workspace.indexOf("{rootBulkToolbar}")));
+  expect(workspace).toContain("updateEmailInboxForContext(context, { connectorKey: account.connectorKey, isFavorite }, randomUUID())");
+  expect(workspace).toContain("disconnectEmailForContext(context, connectorKey)");
+  expect(workspace).toContain("It does not delete messages from Gmail.");
+  expect(workspace).toContain('accessibilityActions={permissions.canMutate ? [{ name: "longpress"');
 });
 
 test("authoritative inbox events replace stale continuation data", () => {
@@ -293,8 +331,9 @@ test("inbox controls compose requested state while results remain latest-wins", 
   expect(workspace).toContain("setEmailOverviewReadState(requestedInboxQuery.current, readState)");
   expect(workspace).toContain("toggleEmailOverviewFacet(requestedInboxQuery.current, facet)");
   expect(workspace).toContain("normalizeEmailOverviewQuery({ ...requestedInboxQuery.current, search: next })");
-  expect(workspace).toContain("loading || inboxQueryPending ? Array.from");
+  expect(workspace).toContain("loading || inboxQueryPending || initialSyncPending ? Array.from");
   expect(workspace).toMatch(/if \(options\.commitQuery\) \{[\s\S]*?requestedInboxQuery\.current = committedInboxQuery\.current;[\s\S]*?setInboxControlsQuery\(committedInboxQuery\.current\)/);
+  expect(workspace).toContain("setInboxTab((current) => current === nextQuery.readState ? committedInboxQuery.current.readState : current)");
   expect(workspace).toContain("if (initialConnectorKey) setRetryInboxQuery(nextQuery)");
   expect(workspace).toContain("changeInboxQuery(retryInboxQuery)");
 });
@@ -328,12 +367,11 @@ test("AI reader actions target canonical message endpoints without local fake ge
 
 test("selected Signal operations propagate connector selectors and reset account-scoped state", () => {
   expect(workspace).toContain("connectorKey: initialConnectorKey");
-  expect(workspace).toContain("syncEmailForContext(context, connectorKey)");
   expect(workspace).not.toContain("subscribeEmailForContext(context, connector.connectorKey)");
   expect(workspace).toContain("disconnectEmailForContext(context, connectorKey)");
   expect(workspace).toContain("detailGeneration.current += 1");
   expect(workspace.match(/clearSelectedThread\(\)/g)?.length).toBeGreaterThanOrEqual(6);
-  expect(workspace).toMatch(/function clearSelectedThread\(preserveTrashOperation = false\) \{\s*detailGeneration\.current \+= 1;\s*readerGeneration\.current \+= 1;[\s\S]*?setSelected\(undefined\);/);
+  expect(workspace).toMatch(/function clearSelectedThread\(preserveTrashOperation = false\) \{\s*detailGeneration\.current \+= 1;\s*receivedAttachmentsRequest\.current \+= 1;\s*readerGeneration\.current \+= 1;[\s\S]*?setSelected\(undefined\);/);
   expect(workspace).toMatch(/committedInboxQuery\.current = defaultInboxQuery\(\);[\s\S]*?setInboxView\(\{ query: committedInboxQuery\.current \}\);[\s\S]*?clearSelectedThreadFromEffect\(\);[\s\S]*?setQuery\(""\);/);
   expect(workspace).toMatch(/const generation = \+\+detailGeneration\.current;[\s\S]*?fetchEmailThread[\s\S]*?generation === detailGeneration\.current/);
   expect(workspace).toContain('router.replace({ pathname: "/capability/[slug]", params: { slug: "signal" } })');
@@ -341,22 +379,26 @@ test("selected Signal operations propagate connector selectors and reset account
   expect(client).not.toContain("createdByMembershipKey:");
 });
 
-test("successful provider connection is not reversed by initial sync or root refresh failures", () => {
-  expect(workspace).toMatch(/function completeConnection[\s\S]*?Promise\.allSettled\(\[[\s\S]*?syncEmailForContext\(context, connector\.connectorKey\)[\s\S]*?rootRefresh[\s\S]*?operationIsCurrent/);
-  expect(workspace).toContain("Inbox connected. Initial sync needs another try.");
+test("successful provider connection navigates while durable backend initial sync proceeds", () => {
+  expect(workspace).toMatch(/function completeConnection[\s\S]*?Promise\.allSettled\(\[rootRefresh\]\)[\s\S]*?operationIsCurrent/);
+  const completion = workspace.slice(workspace.indexOf("function completeConnection"), workspace.indexOf("const completeConnectionFromEffect"));
+  expect(completion).not.toContain("syncEmailForContext");
   expect(workspace).toContain("Inbox connected. The inbox list will refresh automatically.");
   expect(workspace).toMatch(/router\.push[\s\S]*?connectorKey: connector\.connectorKey[\s\S]*?signalReturn: "root"/);
   expect(workspace).toMatch(/exchangeEmailConnection\(code\)[\s\S]*?\.then\(\s*\(connector\) => completeConnectionFromEffect\(connector\),\s*\(failure: unknown\) => notifyLatest/);
-  expect(workspace).toMatch(/connector = await launchEmailConnection\(\{ name: "Gmail" \}\);[\s\S]*?finally \{\s*setBusy\(undefined\);\s*\}\s*if \(connector\) completeConnection/);
+  expect(workspace).toContain("!activeSelectedAccount.initialSyncCompleted");
+  expect(workspace).toContain("initialSyncPending");
 });
 
-test("every Signal Connect action launches Gmail OAuth directly", () => {
-  expect(workspace).toContain('connector = await launchEmailConnection({ name: "Gmail" });');
-  expect(workspace.match(/onPress=\{\(\) => void connect\(\)\}/g)?.length).toBeGreaterThanOrEqual(4);
-  expect(workspace).not.toContain("connectForm");
-  expect(workspace).not.toContain("openConnectForm");
-  expect(workspace).not.toContain("connectName");
-  expect(workspace).not.toContain("connectDescription");
+test("every Signal Connect action opens the Gmail metadata form", () => {
+  expect(workspace).toContain('type FormSheet = "connectForm"');
+  expect(workspace).toContain("function openConnectForm()");
+  expect(workspace.match(/onPress=\{openConnectForm\}/g)?.length).toBeGreaterThanOrEqual(4);
+  expect(workspace).toContain('accessibilityLabel="Inbox name"');
+  expect(workspace).toContain('accessibilityLabel="Inbox description"');
+  expect(workspace).toContain('maxLength={255} onChangeText={setConnectName}');
+  expect(workspace).toContain('maxLength={10000} multiline onChangeText={setConnectDescription}');
+  expect(workspace).toContain('launchEmailConnection({ name, ...(description ? { description } : {}) })');
 });
 
 test("root Filter and Plus expose filtering, history, utility, and creation actions", () => {
@@ -412,7 +454,7 @@ test("root Filter and Plus expose filtering, history, utility, and creation acti
   expect(workspace).toContain("const SHEET_INPUT_FOCUS_DELAY_MS = 300");
   expect(workspace).toContain("setTimeout(() => inputRef.current?.focus(), SHEET_INPUT_FOCUS_DELAY_MS)");
   expect(workspace).toContain('useDelayedInputFocus(sheetOpen && inputSheet ? sheet : undefined, sheetInputRef');
-  expect(workspace).toContain('useDelayedInputFocus(readerSheetOpen && inputReaderSheet ? readerSheet : undefined, readerInputRef');
+  expect(workspace).toContain('useDelayedInputFocus(readerSheetOpen && replyEditorOpen ? "replyEditor" : undefined, readerInputRef');
   expect(workspace).toContain('maxLength={255}');
   expect(workspace).toContain('maxLength={10000} multiline');
   expect(workspace).toContain('maxLength={20000} multiline');
@@ -496,7 +538,8 @@ test("Signal forms close directly and viewer tones remain read-only", () => {
 
 test("inbox editing keeps cover upload while tones expose no cover capability", () => {
   expect(workspace).toContain('launchImageLibraryAsync({ mediaTypes: ["images"], allowsMultipleSelection: false, quality: 1 })');
-  expect(workspace).toContain('normalizeCapturedJpeg(coverChange, { maxSide: 2400, compress: 0.88 })');
+  expect(workspace).toContain('normalizeCapturedPng(coverChange, { maxSide: 2400, compress: 0.88 })');
+  expect(workspace).toContain('filename: `signal-cover-${Date.now()}.png`');
   expect(workspace).toContain('processingMode: "cover"');
   expect(workspace).toContain('fetchGalleryUploadStatus([job.key])');
   expect(workspace).toContain('metadataRequests.current.get(targetKey) !== request');
@@ -556,7 +599,7 @@ test("root and inbox keep controls while rendering only compact local loading an
 test("Signal scopes root and tone states without pairing errors with empty states", () => {
   expect(workspace).toMatch(/rootTab === "inboxes" \? loading \|\| normalizedRootQuery[\s\S]*?loadError \? <View accessibilityRole="alert"/);
   expect(workspace).toContain('!loadError && !visibleAccounts.length && !normalizedRootQuery');
-  expect(workspace).toContain('!loading && !inboxQueryPending && !loadError && !overview?.threads.length');
+  expect(workspace).toContain('!loading && !inboxQueryPending && !initialSyncPending && !loadError && !overview?.threads.length');
   expect(workspace).toContain('!tonesLoading && !toneError && !visibleTones.length');
   expect(workspace).toContain('<View accessibilityRole="alert" style={styles.rootToneError}>');
   expect(workspace).toMatch(/rootTab === "inboxes"[\s\S]*?: tonesLoading \|\| normalizedRootQuery[\s\S]*?Array\.from/);
@@ -598,7 +641,7 @@ test("every Signal search runs after 300ms and records history after 800ms", () 
   expect(workspace).toContain('onSubmitEditing={() => void search(query, false)}');
   expect(picker).toContain('query.trim() ? 300 : 0');
   expect(picker).toContain('searchContentMatches(value, controller.signal, undefined, true, { limit: MAX_VISIBLE_RESULTS, minimumScore: -1 })');
-  expect(picker).toContain('searchGalleryImages({ query: value, recordHistory: true, limit: MAX_VISIBLE_RESULTS, minimumScore: -1 }, controller.signal)');
+  expect(picker).toContain('searchGalleryImages({ query: value, recordHistory: true, limit: GALLERY_CANDIDATE_LIMIT, minimumScore: -1 }, controller.signal)');
   expect(picker).toContain('}, 800)');
 });
 
@@ -624,16 +667,17 @@ test("root cards announce favorites and the root grid honors the bottom safe are
 
 test("attachment picker loads and searches both real stores with persistent multi-selection", () => {
   expect(picker).toContain('listContentDocumentsAtLocation(undefined, operation.signal)');
-  expect(picker).toContain('fetchGalleryOverview(undefined, undefined, MAX_VISIBLE_RESULTS, undefined, operation.signal)');
+  expect(picker).toContain('fetchGalleryOverview(undefined, undefined, GALLERY_CANDIDATE_LIMIT, undefined, operation.signal)');
   expect(picker).toContain('useState<EmailAttachmentRef[]>(() => selection)');
   expect(picker).toContain('searchContentMatches(value, operation.signal, undefined, false, { limit: MAX_VISIBLE_RESULTS, minimumScore: -1 })');
-  expect(picker).toContain('searchGalleryImages({ query: value, recordHistory: false, limit: MAX_VISIBLE_RESULTS, minimumScore: -1 }, operation.signal)');
-  expect(picker).toContain('style={styles.searchClearButton} variant="secondary"');
-  expect(picker).toContain('searchClearButton: { width: 42, height: 42, paddingHorizontal: 0, paddingVertical: 0 }');
+  expect(picker).toContain('searchGalleryImages({ query: value, recordHistory: false, limit: GALLERY_CANDIDATE_LIMIT, minimumScore: -1 }, operation.signal)');
+  expect(picker).toContain('<ButtonSizeProvider overrideParent size="xs"><Button accessibilityLabel="Clear attachment search"');
+  expect(picker).not.toContain('searchClearButton:');
   expect(picker).toContain('style={styles.filterSecondary} variant="secondary">Search history</Button>');
   expect(picker).toContain('filterSecondary: { backgroundColor: palette.voidBlack }');
   expect(picker).toContain('toggleEmailAttachment(current, ref)');
   expect(picker).toContain('const MAX_VISIBLE_RESULTS = 10');
+  expect(picker).toContain('const GALLERY_CANDIDATE_LIMIT = 50');
   expect(picker).toContain('const renderedDocuments = visibleDocuments.slice(0, MAX_VISIBLE_RESULTS)');
   expect(picker).toContain('const renderedImages = visibleImages.slice(0, MAX_VISIBLE_RESULTS)');
   expect(picker).toContain('renderedDocuments.map((document) => {');
@@ -661,7 +705,7 @@ test("attachment picker loads and searches both real stores with persistent mult
   expect(picker).toContain('folderTab: { flex: 1 }');
   expect(picker).toContain('style={styles.folderTab} variant={tab === "archive" ? "secondary" : "ghost"}>Archive</Button>');
   expect(picker).toContain('style={styles.folderTab} variant={tab === "gallery" ? "secondary" : "ghost"}>Gallery</Button>');
-  expect(mobileTabs).toContain('<ButtonSizeProvider size="xs">');
+  expect(mobileTabs).toContain('<ButtonSizeProvider overrideParent size="xs">');
   expect(picker).toContain('style={[styles.documentButton, active && styles.selectedDocumentItem]} variant={active ? "ghost" : "secondary"}');
   expect(picker).toContain('documentButton: { width: "100%", justifyContent: "flex-start", paddingHorizontal: 14 }');
   expect(picker).toContain('size="xl" style={[styles.imageButton, { width: imageSize, height: imageSize }]} variant="ghost"><View style={[styles.imageFrame, active && styles.imageFrameSelected]}');
@@ -670,7 +714,7 @@ test("attachment picker loads and searches both real stores with persistent mult
   expect(picker).toContain('imageFrameSelected: { borderColor: palette.silver50, borderWidth: 2 }');
   expect(picker).toContain('selectionBadge: { position: "absolute", top: 4, right: 4, width: 20, height: 20');
   expect(picker).not.toContain('<Pressable');
-  expect(picker).toContain('fetchGalleryOverview(undefined, undefined, MAX_VISIBLE_RESULTS, undefined, operation.signal)');
+  expect(picker).toContain('fetchGalleryOverview(undefined, undefined, GALLERY_CANDIDATE_LIMIT, undefined, operation.signal)');
   expect(picker).toContain('searchGalleryImages({ imageKey: ref.key }, controller.signal)');
   expect(picker).toMatch(/setLoading\(true\);\s*setError\(undefined\);\s*if \(targetTab === "archive"\) setDocuments\(\[\]\);\s*else setImages\(\[\]\);/);
 });
@@ -726,10 +770,58 @@ test("opened threads use a latest-message document reader and guarded immutable 
   expect(workspace).not.toContain('Replace original');
 });
 
-test("opening an email keeps background detail and read failures silent", () => {
-  const opening = workspace.slice(workspace.indexOf("async function openThread"), workspace.indexOf("function toggleThreadSelection"));
+test("opening an email reads detail without changing Gmail read state", () => {
+  const opening = workspace.slice(workspace.indexOf("async function openThread"), workspace.indexOf("async function loadMoreThreadMessages"));
   expect(opening).not.toContain("notify(");
-  expect(opening).toContain("applyOptimisticThreads(context, connectorKey, [detail.thread])");
+  expect(opening).not.toContain("setEmailThreadsReadStateForContext");
+  expect(opening).toContain("applyAuthoritativeThreads(context, connectorKey, [detail.thread])");
+});
+
+test("reader thread sheet orders messages and paginates the canonical detail endpoint", () => {
+  expect(workspace).toContain("const orderedThreadMessages = [...(selected?.messages ?? [])].sort((left, right) => left.sentAt.localeCompare(right.sentAt)");
+  expect(workspace).toContain('title="Thread"');
+  expect(workspace).toContain("setSelectedMessageKey(message.key); setThreadSheetOpen(false)");
+  expect(workspace).toContain("fetchEmailThreadForContext(context, threadKey, cursor)");
+  expect(client).toContain("cursor ? { cursor: z.string().min(1).max(2_000).parse(cursor) } : {}");
+});
+
+test("Signal attachment navigation restores the exact reader and sheet from Archive or Gallery", () => {
+  for (const param of ["returnSignalConnectorKey", "returnSignalThreadKey", "returnSignalMessageKey", "signalThreadKey", "signalMessageKey", "openSignalAttachments"]) expect(route).toContain(`${param}?: string`);
+  expect(route).toContain("initialImageKey={params.imageKey}");
+  expect(workspace).toContain('returnSignalThreadKey: attachment.source.threadKey');
+  expect(workspace).toContain('returnSignalMessageKey: attachment.source.messageKey');
+  expect(workspace).toContain("restoredSignalAttachments.current");
+  expect(archiveWorkspace).toContain('accessibilityLabel="Back to Signal attachments"');
+  expect(galleryWorkspace).toContain('accessibilityLabel="Back to Signal attachments"');
+  expect(galleryWorkspace).toContain("setSelectedImage(image)");
+  expect(galleryWorkspace).toContain('openSheet("image")');
+});
+
+test("routed restore survives connector initialization ordering and attachment loads retain source ownership", () => {
+  const initialization = workspace.slice(workspace.indexOf("useEffect(() => {\n    overviewRequest.current"), workspace.indexOf("useEffect(() => {\n    const generation = ++operationGeneration.current"));
+  expect(initialization).toContain("if (!initialThreadKey) clearSelectedThreadFromEffect()");
+  expect(workspace).toContain('${initialThreadKey ?? "inbox"}:${initialMessageKey ?? "latest"}:${openAttachments ? "attachments" : "reader"}');
+  const attachments = workspace.slice(workspace.indexOf("async function openReceivedAttachments"), workspace.indexOf("function toggleRootInboxSelection"));
+  expect(attachments).toContain("const request = ++receivedAttachmentsRequest.current");
+  expect(attachments).toContain("request === receivedAttachmentsRequest.current");
+  expect(attachments).toContain("selectedMessageKeyRef.current === source.messageKey");
+  expect(attachments).toContain("{ ...attachment, source }");
+  expect(attachments).toContain("attachment.source.threadKey");
+  expect(attachments).toContain("attachment.source.messageKey");
+  expect(attachments).toContain("...(attachment.collection ? { assetKey: attachment.collection.key } : {})");
+});
+
+test("routed Signal reader restore paginates to the exact message without publishing stale pages", () => {
+  const restore = workspace.slice(workspace.indexOf("async function restoreSignalReader"), workspace.indexOf("const restoreLatestSignalReader"));
+  expect(restore).toContain("if (initialMessageKey) {");
+  expect(restore).toContain("? await fetchEmailThreadForContext(context, initialThreadKey)");
+  expect(restore).toContain("const seenCursors = new Set<string>()");
+  expect(restore).toContain("!seenCursors.has(detail.nextCursor)");
+  expect(restore).toContain("if (detail.nextCursor && seenCursors.has(detail.nextCursor)) detail = { ...detail, nextCursor: null }");
+  expect(restore).toContain("fetchEmailThreadForContext(context, initialThreadKey, cursor)");
+  expect(restore).toContain("messages: appendCursorItems(detail.messages, page.messages, ({ key }) => key)");
+  expect(restore).toContain("generation !== detailGeneration.current || !contextIsCurrent(context)");
+  expect(restore).toContain("queryClient.setQueryData(detailKey, detail)");
 });
 
 test("reader menus separate AI and provider-neutral message actions", () => {
@@ -803,7 +895,7 @@ test("translation and summary pills open separate detail sheets over their versi
 });
 
 test("translation versions open immediately without focusing the language form or losing a new result", () => {
-  expect(workspace).toContain('const inputReaderSheet = readerSheet === "replyReader"');
+  expect(workspace).toContain('readerSheetOpen && replyEditorOpen ? "replyEditor" : undefined');
   expect(workspace).toMatch(/function openReaderFlow\(next: ReaderSheet\)[\s\S]*?setSheetOpen\(false\);[\s\S]*?if \(next === "translate" \|\| next === "summaryVersions"\) setReaderLoading\(true\);[\s\S]*?setReaderSheet\(next\);[\s\S]*?setReaderSheetOpen\(true\);/);
   expect(workspace).toContain("pendingTranslationReaderKey.current = result.version.key");
   expect(workspace).toContain("pendingTranslationReaderKey.current !== selectedTranslationKey");
@@ -839,7 +931,7 @@ test("reply generation and post-send selection remain explicit", () => {
   expect(workspace).toContain('sent.messageKey ?? latestSentEmailMessageKey(detail.messages)');
   expect(workspace).toContain('Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Generating reply options"');
   expect(workspace).toContain('const generated = await Promise.allSettled(selectors.map');
-  expect(workspace).toContain('style={styles.replyReviewInput}');
+  expect(workspace).toMatch(/<EmailTextEditor accessibilityLabel="Reply text"[\s\S]*?onOpenActions=\{\(\) => openEmailEditorActions\("reply"\)\}[\s\S]*?ref=\{readerInputRef\}/);
   expect(workspace).toContain('if (hasAdditionalReplyParticipants()) setReplyModeOpen(true)');
   expect(workspace).toContain('sendEmailDraftForContext(context, prepared.key, replyFinalSend.current.requestKey, mode)');
   expect(workspace).toContain('<BottomSheet dismissible={!replySending} hideHeading');
@@ -851,8 +943,11 @@ test("message headers follow detail icon placement and new email owns separate s
   expect(workspace).toMatch(/localTitle: \{[\s\S]*?fontSize: 21/);
   expect(workspace).toMatch(/accessibilityLabel="Create in Signal"[\s\S]{0,220}?size="xs"/);
   expect(workspace).toContain('<WorkspaceAppSwitcher active="signal" onBeforeSelect={(slug) => requestExit(slug)} trigger="back" />');
-  expect(workspace).toMatch(/<View style=\{styles\.readerActions\}><Button accessibilityLabel="Open Signal AI Brain menu"[\s\S]{0,260}?size="sm"[\s\S]{0,260}?<Button accessibilityLabel="More email actions"[\s\S]{0,260}?size="sm"/);
-  expect(workspace).not.toMatch(/<View style=\{styles\.localActions\}>[\s\S]{0,120}?More email actions/);
+  const readerHeader = workspace.slice(workspace.indexOf('{initialConnectorKey ? <View style={[styles.localHeader'), workspace.indexOf('{!initialConnectorKey ? ('));
+  expect(readerHeader).toContain('selectedMessage?.subject ?? selected.thread.subject');
+  expect(readerHeader).toContain('<Button accessibilityLabel="More email actions"');
+  expect(readerHeader.indexOf('selectedMessage?.subject')).toBeLessThan(readerHeader.indexOf('accessibilityLabel="More email actions"'));
+  expect(workspace).toMatch(/<View style=\{styles\.readerActions\}><Button accessibilityLabel="Open Signal AI Brain menu"[\s\S]*?selected\.messages\.length > 1[\s\S]*?accessibilityLabel="Open received attachments"/);
   expect(workspace).not.toContain("headerTrailing=");
   expect(workspace).toContain('title="Recipients"');
   expect(workspace).not.toMatch(/selectedMessage[\s\S]{0,120}?PlusIcon/);
@@ -871,17 +966,20 @@ test("Trash uses an invisible lock while closing and patching optimistically", (
   expect(workspace).toMatch(/async function trashThread[\s\S]*?const generation = \+\+trashGeneration\.current;[\s\S]*?setTrashBusy\(true\);/);
   expect(workspace).toContain('applyOptimisticThreads(context, connectorKey, [optimistic])');
   expect(workspace).toContain('clearSelectedThread(true)');
-  expect(workspace).toContain('dismissible={!trashBusy && !generatedDeleteBusy && !replySending && !replyEnhancing && !replyAttachmentsOpen}');
+  expect(workspace).toContain('dismissible={!trashBusy && !generatedDeleteBusy && !replySending && !replyAttachmentsOpen && !replyEditorOpen}');
   expect(workspace).toContain('<Button disabled={trashBusy} onPress={() => void trashThread()}');
   expect(workspace).toContain('<Button disabled={trashBusy} onPress={closeReaderFlow}');
   expect(workspace).toContain('<BottomSheetItem disabled={trashBusy} onPress={openReplySuggestions}');
 });
 
-test("Gallery message attachments are truthful non-interactive rows", () => {
-  expect(workspace).toContain('Gallery image · Preview unavailable');
-  expect(workspace).toContain('style={[styles.incomingAttachment, styles.incomingAttachmentStatic]}');
-  expect(workspace).not.toMatch(/attachment\.type === "image"[\s\S]{0,400}?router\.push/);
-  expect(workspace).toContain('params: { slug: "archive", documentKey: attachment.key }');
+test("received attachments resolve canonical Archive and Gallery metadata in a four-column sheet", () => {
+  expect(workspace).toContain('title="Received attachments"');
+  expect(workspace).toContain("getContentDocument(queryClient, contentContext, ref.key)");
+  expect(workspace).toContain("searchGalleryImages({ imageKey: ref.key })");
+  expect(workspace).toContain("const receivedAttachmentCardSize = Math.floor(((receivedAttachmentGridWidth || width - 40) - 18) / 4)");
+  expect(workspace).toContain('receivedAttachmentGrid: { width: "100%", flexDirection: "row", flexWrap: "wrap", gap: 6 }');
+  expect(workspace).toContain('imageKey: attachment.image.key');
+  expect(workspace).toContain('documentKey: attachment.document.key');
 });
 
 test("inbox controls preserve results without a separate refresh line", () => {
@@ -927,23 +1025,51 @@ test("similar email uses ten threshold-free thin pills and opens the normal read
   expect(workspace).toMatch(/async function openSimilarResult[\s\S]*?const detail = await queryClient\.fetchQuery[\s\S]*?generation !== detailGeneration\.current[\s\S]*?!contextIsCurrent\(context\)[\s\S]*?selectedThreadKeyRef\.current !== sourceThreadKey[\s\S]*?setSelected\(detail\);[\s\S]*?setReaderSheetOpen\(false\);[\s\S]*?setSheetOpen\(false\);/);
 });
 
-test("reply options are fresh per tone and support empty AI-enhanced replies", () => {
+test("reply options are fresh per tone and support empty replies without a top action icon", () => {
   expect(workspace).toContain('const generation = ++readerGeneration.current');
   expect(workspace).toContain('Promise.allSettled(selectors.map');
   expect(workspace).toContain('BUILT_IN_EMAIL_TONES.map((tone) => ({ label: tone, tone }))');
-  expect(workspace).toContain('onPress={openEmptyReply} size="md" variant="primary">Empty reply</Button>');
-  expect(workspace).toContain('accessibilityLabel="Enhance reply"');
-  expect(workspace).toContain('title="Enhance reply"');
-  expect(workspace).toContain('setReplyEnhanceOpen(false);');
+  expect(workspace).toContain('<Button disabled={replySending} onPress={openEmptyReply} size="md" variant="primary">Empty reply</Button>');
+  expect(workspace).toMatch(/function openEmptyReply\(\) \{[\s\S]*?setSelectedReplyKey\(undefined\);[\s\S]*?setReplyEditorOpen\(true\);/);
+  expect(workspace).toContain('<Button disabled={replySending} onPress={closeReaderFlow} size="md" variant="secondary">Close</Button>');
+  expect(workspace).toContain('style={styles.newEmailAlternativeSkeleton}');
+  expect(workspace).toContain('onPress={() => openReplyDraft(reply)} shape="pill" size="md" style={styles.newEmailAlternative}');
+  expect(workspace).toContain('<View style={styles.newEmailAlternativeCopy}><Text numberOfLines={1} style={styles.rowTitle}>{reply.tone ?? "Reply"}</Text><Text numberOfLines={1} style={styles.newEmailAlternativePreview}>');
+  expect(workspace).not.toContain('accessibilityLabel="Enhance reply"');
+  expect(workspace).not.toContain('title="Enhance reply"');
+});
+
+test("all four email body editors share direct enhance and translate actions", () => {
+  expect(workspace.match(/<EmailTextEditor accessibilityLabel=/g)).toHaveLength(4);
+  for (const target of ["newEmail", "newEmailReview", "draft", "reply"]) expect(workspace).toContain(`onOpenActions={() => openEmailEditorActions("${target}")}`);
+  expect(workspace).toContain('accessibilityLabel={`${label} AI actions`}');
+  expect(workspace).toContain('disabled={typeof value !== "string" || !value.trim()}');
+  expect(workspace).toContain('emailTextAiButton: { position: "absolute"');
+  expect(workspace).toContain('zIndex: 2, elevation: 2');
+  expect(workspace).toContain('<BrainIcon size="sm" />');
+  expect(workspace).toContain('accessibilityRole="progressbar" style={styles.emailTextTransformation}');
+  expect(workspace).toContain('<Skeleton style={styles.emailTextBodySkeleton} />');
+  expect(workspace).toContain('emailTextBodySkeleton: { width: "100%", minHeight: 280, flex: 1, borderRadius: radii.md, backgroundColor: palette.hairlineBright, opacity: 0.72 }');
+  expect(workspace).not.toContain('emailTextSkeletonShort');
   expect(workspace).toContain('enhanceAppTextForContext(context, text)');
-  expect(workspace).toContain('accessibilityLabel="Enhancing reply" accessibilityRole="progressbar"');
+  expect(workspace).toContain('translateAppTextForContext(context, text, language)');
+  expect(workspace).toContain('setEditorTargetLanguage(languageForCountryCode(countryCode))');
+  expect(workspace).toContain('title="AI actions"');
+  expect(workspace).toContain('variant="secondary">Enhance</BottomSheetItem>');
+  expect(workspace).toContain('variant="secondary">Translate</BottomSheetItem>');
+  expect(workspace).toContain('accessibilityLabel="Email text translation language"');
+  expect(workspace).toContain('title="Translate email text"');
+  expect(workspace).toMatch(/function transformEmailEditor[\s\S]*?setEditorActionTarget\(undefined\);[\s\S]*?setEditorTranslateTarget\(undefined\);[\s\S]*?setEditorTransformation\(\{ target, action \}\);/);
 });
 
 test("reply review reuses canonical attachment selection and sends the final selection", () => {
   const send = workspace.slice(workspace.indexOf("async function sendSuggestedReply"), workspace.indexOf("function requestSuggestedReplySend"));
   expect(workspace).toContain('accessibilityLabel="Open reply attachments"');
+  expect(workspace).toContain('accessibilityLabel="Remove all reply attachments"');
+  expect(workspace).toContain('onPress={removeAllReplyAttachments} shape="pill" size="xs"');
+  expect(workspace).toMatch(/open=\{readerSheetOpen && replyEditorOpen\}[\s\S]*?contentContainerStyle={styles\.newEmailForm}[\s\S]*?style={styles\.newEmailBodyInput}[\s\S]*?<ButtonSizeProvider overrideParent size="xs">/);
   expect(workspace).toContain('accessibilityLabel={`${replyAttachments.length} reply attachments`}');
-  expect(workspace).toContain('<EmailAttachmentPicker context={historyContext} contextKey={`${emailContext.organizationKey}:${emailContext.scopeKey}:reply:${selectedReply.key}`}');
+  expect(workspace).toContain('<EmailAttachmentPicker context={historyContext} contextKey={`${emailContext.organizationKey}:${emailContext.scopeKey}:reply:${selectedReply?.key ?? selected?.thread.key ?? "empty"}`}');
   expect(send).toContain('const attachmentsChanged = !sameAttachmentSelection(replyAttachments, current.attachments ?? [])');
   expect(send).toContain('attachmentsChanged ? { attachments: replyAttachments }');
   expect(send.indexOf('updateEmailDraftForContext(context, current.key')).toBeLessThan(send.indexOf('sendEmailDraftForContext(context, prepared.key'));
@@ -1052,6 +1178,8 @@ test("inbox Trash is scoped to the selected connector and clears with partial fa
   expect(workspace).toContain('clearEmailTrashForContext(context, group.connector.connectorKey, requestKeys.get(group.connector.connectorKey)!)');
   expect(workspace).toContain('const failures = new Map<string, string>()');
   expect(workspace).toContain('failures.set(group.connector.connectorKey, messageFor(failure))');
+  expect(workspace).toContain('...current.filter((group) => !attempted.has(group.connector.connectorKey))');
+  expect(workspace).toContain('...groups.flatMap((group) => {');
   expect(workspace).toContain('return error ? [{ ...group, error, errorKind: "clear" as const }] : []');
   expect(trashAggregation).toContain('seenCursors.has(nextCursor)');
   expect(trashAggregation).toContain('pageIndex === maxPages - 1');
@@ -1063,7 +1191,7 @@ test("inbox Trash is scoped to the selected connector and clears with partial fa
   expect(workspace).toContain('restoreSignalTrashCaches(queryClient, removal)');
   expect(workspace).toContain('commitSignalTrashCaches(queryClient, removal, group.threads.map(({ key }) => key))');
   const trashRoot = workspace.slice(workspace.indexOf('sheet === "trashRoot" ? ('), workspace.indexOf(') : sheet === "clearTrash"'));
-  const confirmation = workspace.slice(workspace.indexOf('sheet === "clearTrash" ? ('), workspace.indexOf(') : sheet === "toneCreate"'));
+  const confirmation = workspace.slice(workspace.indexOf('sheet === "clearTrash" ? ('), workspace.indexOf(') : sheet === "connectForm"'));
   expect(trashRoot).toContain('shape="pill" size="sm" style={styles.threadCard} variant="secondary"');
   expect(trashRoot).toContain('Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading Trash"');
   expect(trashRoot).toContain('trashGroups.flatMap(({ threads }) => threads).map');
@@ -1080,12 +1208,32 @@ test("inbox Trash is scoped to the selected connector and clears with partial fa
 });
 
 test("context changes synchronously remount and cancel a clean new-email session", () => {
-  expect(workspace).toContain('const sessionKey = `${emailContext.organizationKey}:${emailContext.scopeKey}:${initialConnectorKey ?? "root"}`');
-  expect(workspace).toContain('<EmailWorkspaceSession emailContext={emailContext} initialConnectorKey={initialConnectorKey} key={sessionKey} navigatedFromRoot={navigatedFromRoot} />');
+  expect(workspace).toContain('const sessionKey = `${emailContext.organizationKey}:${emailContext.scopeKey}:${initialConnectorKey ?? "root"}:${initialThreadKey ?? "inbox"}:${initialMessageKey ?? "latest"}:${openAttachments ? "attachments" : "reader"}`');
+  expect(workspace).toContain('<EmailWorkspaceSession emailContext={emailContext} initialConnectorKey={initialConnectorKey} initialMessageKey={initialMessageKey} initialThreadKey={initialThreadKey} key={sessionKey} navigatedFromRoot={navigatedFromRoot} openAttachments={openAttachments} />');
   for (const initialState of ['useState("")', 'useState<string[]>([])', 'useState<NewEmailAlternative[]>([])', 'useState(false)']) expect(workspace).toContain(initialState);
   expect(workspace).toContain("newEmailGeneration.current += 1");
   expect(workspace).toContain("request.controller.abort()");
   expect(picker).toMatch(/return \(\) => \{[\s\S]*?searchOwner\.invalidate\(\);/);
+});
+
+test("root inbox bulk actions reconcile authoritative snapshots and never restore stale connector objects", () => {
+  expect(workspace).toContain("function reconcileSelectedInboxSnapshots");
+  expect(workspace).toContain("setSelectedInboxes((current) => reconcileSelectedInboxSnapshots(current, metadataAccounts))");
+  const opening = workspace.slice(workspace.indexOf("async function openRootBulkActions"), workspace.indexOf("async function setSelectedInboxesFavorite"));
+  expect(opening).toContain("fetchEmailOverviewForContext(context)");
+  expect(opening).toContain("generation !== rootSelectionGeneration.current || !contextIsCurrent(context)");
+  expect(opening).toContain("reconcileSelectedInboxSnapshots(selectedInboxesRef.current, authoritative.accounts)");
+  expect(workspace).toContain("onPress={() => void openRootBulkActions()}");
+  const favorite = workspace.slice(workspace.indexOf("async function setSelectedInboxesFavorite"), workspace.indexOf("function removeRootInboxFromCaches"));
+  expect(favorite).toContain("metadataRequests.current.get(owner.targetKey) === owner.request");
+  expect(favorite).not.toContain("patchSignalInbox(queryClient, context, account)");
+  const disconnect = workspace.slice(workspace.indexOf("async function performRootInboxDisconnect"), workspace.indexOf("function toggleThreadSelection"));
+  expect(disconnect).not.toContain("patchSignalInbox(queryClient, context, snapshot");
+  expect(workspace).toContain('accessibilityLabel="Clear inbox selection" contentMode="raw" disabled={rootBulkBusy} hitSlop={8}');
+  expect(workspace).toContain('receivedAttachmentGrid: { width: "100%", flexDirection: "row", flexWrap: "wrap", gap: 6 }');
+  expect(workspace).toContain("const receivedAttachmentCardSize = Math.floor(((receivedAttachmentGridWidth || width - 40) - 18) / 4)");
+  expect(workspace).toContain('accessibilityLabel="Remove all attachments" contentMode="raw" disabled={newEmailSending || Boolean(newEmailReviewTransformation)} hitSlop={10}');
+  expect(workspace).toContain('accessibilityLabel="Remove all reply attachments" contentMode="raw" disabled={replySending || Boolean(replyTransformation)} hitSlop={10}');
 });
 
 test("all authoritative read, favorite, Trash, and bulk completions use one idempotent reconciler", () => {
@@ -1123,7 +1271,7 @@ test("touch and accessibility longpress paths do not share synthetic press suppr
 });
 
 test("provider-duration operations capture context and guard every continuation", () => {
-  for (const name of ["synchronize", "openSimilarResult", "disconnect"]) {
+  for (const name of ["openSimilarResult", "disconnect"]) {
     const start = workspace.indexOf(`async function ${name}`);
     const end = workspace.indexOf("\n  async function ", start + 20);
     const operation = workspace.slice(start, end < 0 ? undefined : end);
@@ -1139,8 +1287,8 @@ test("same-frame new-email sends are rejected by the synchronous owner", () => {
   expect(workspace).toContain("newEmailToneRequests.current");
 });
 
-test("custom tones retain optimistic canonical hard-delete while dead composer draft deletion is removed", () => {
-  expect(workspace).not.toContain("deleteEmailDraftForContext(context, saved.key, requestKey)");
+test("custom tones and discarded generated drafts use canonical hard-delete", () => {
+  expect(workspace).toContain("deleteEmailDraftForContext(context, draftKey, randomUUID())");
   expect(workspace).toContain("deleteEmailToneForContext(context, record.key, requestKey)");
   expect(workspace).not.toContain('variant="danger">Delete draft</Button>');
   expect(workspace).toContain('variant="danger">Delete tone</Button>');
@@ -1166,13 +1314,16 @@ test("same-frame Signal mutations use synchronous owners without adding spinners
 
 test("Signal reserves shared loading indicators for fetch work", () => {
   const mutationLoading = [...workspace.matchAll(/loading=\{([^}]+)\}/g)].map((match) => match[1]);
-  expect(mutationLoading).toEqual(["bulkActionsLoading", "assistantBusy", "searchHistoryLoading"]);
+  expect(mutationLoading).toEqual(["assistantBusy", "searchHistoryLoading"]);
 });
 
 test("reply choices retain their independent full-screen review flow", () => {
   expect(workspace).not.toContain('accessibilityLabel="Reply mode"');
   expect(workspace).toContain('open={readerSheetOpen}');
-  expect(workspace).toContain('readerSheet === "replyReader"');
+  expect(workspace).toContain('open={readerSheetOpen && replyEditorOpen}');
+  expect(workspace).toContain('setReplyEditorOpen(true)');
+  expect(workspace).toMatch(/function closeReplyEditor\(\)[\s\S]*?setReplyEditorOpen\(false\)/);
+  expect(workspace).toContain('closeReaderFlowPreservingDraft(prepared.key)');
   expect(workspace).toContain('onPress={requestSuggestedReplySend} size="md" variant="primary">Reply</Button>');
 });
 
@@ -1206,7 +1357,7 @@ test("provider-deleted mutation items converge without rollback across singular 
   expect(workspace).toContain('clearPendingThreadFields(threadKeys, ["favorite", "read", "trash"])');
   expect(workspace).toContain('if (selectedThreadKeyRef.current && deleted.has(selectedThreadKeyRef.current)) clearSelectedThread(true)');
   expect(workspace).toContain('setSelectedThreads((current) => current.filter(({ key }) => !deleted.has(key)))');
-  expect(workspace.match(/else if \(item\?\.status === "deleted"\)/g)?.length).toBe(4);
+  expect(workspace.match(/else if \(item\?\.status === "deleted"\)/g)?.length).toBe(3);
   expect(workspace).toContain('const deletedKeys = report.items.flatMap((item) => item.status === "deleted" ? [item.threadKey] : [])');
   expect(workspace).toContain('const completedKeys = [...succeededKeys, ...deletedKeys, ...failedKeys]');
   expect(workspace).toContain('applyDeletedThreadKeys(context, connectorKey, deletedKeys, snapshot)');
@@ -1266,7 +1417,7 @@ test("AI results use Archive-style full-height sheets and close remains availabl
   expect(workspace).toContain('<Button disabled={trashBusy} onPress={closeReaderFlow} size="md" variant="secondary">Close</Button>');
   expect(workspace).not.toContain("accessibilityViewIsModal");
   expect(workspace).not.toContain("styles.readerFlowHeader");
-  expect(workspace).toMatch(/function closeReaderFlow\(\) \{\s*if \(trashBusy \|\| replySending\) return;\s*readerGeneration\.current \+= 1;[\s\S]*?setReaderSheetOpen\(false\);[\s\S]*?setReaderLoading\(false\);/);
+  expect(workspace).toMatch(/function closeReaderFlowPreservingDraft\(preserveDraftKey\?: string\) \{\s*if \(trashBusy \|\| replySending\) return;\s*readerGeneration\.current \+= 1;[\s\S]*?setReaderSheetOpen\(false\);[\s\S]*?setReaderLoading\(false\);/);
 });
 
 test("generated message versions converge through functional cache upserts", () => {

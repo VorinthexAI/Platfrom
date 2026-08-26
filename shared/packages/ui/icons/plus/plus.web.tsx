@@ -1,11 +1,11 @@
 ﻿import type { SVGProps } from "react";
 export type PlusIconVariant = "default" | "inherit" | "muted" | "accent" | "danger" | "inverse";
-export type PlusIconSize = "sm" | "md" | "lg";
+export type PlusIconSize = "xs" | "sm" | "md" | "lg";
 export type PlusIconProps = Omit<SVGProps<SVGSVGElement>, "color"> & {
   variant?: PlusIconVariant;
   size?: PlusIconSize;
 };
-const sizes: Record<PlusIconSize, number> = { sm: 16, md: 20, lg: 24 };
+const sizes: Record<PlusIconSize, number> = { xs: 12, sm: 16, md: 20, lg: 24 };
 const colors: Record<PlusIconVariant, string> = {
   default: "var(--vui-color-text)",
   inherit: "currentColor",

@@ -69,7 +69,7 @@ import { getUserSearchHistory, promoteCachedUserSearchHistory, removeCachedUserS
 import { compassQueryKeys, galleryQueryKeys, getGalleryCollections, invalidateAssistantChanges, patchGalleryImage, patchGalleryUserHiddens, removeCachedGalleryImages, restoreGalleryOverviews, setCachedGalleryCollections, snapshotGalleryOverviews, transferCachedGalleryImages } from "@/lib/workspace-query-cache";
 import { useAuthStore } from "@/state/auth";
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
-import { normalizeCapturedJpeg, type CapturedImage } from "@/lib/captured-image";
+import { normalizeCapturedPng, type CapturedImage } from "@/lib/captured-image";
 import { subscribeAppEvent } from "@/lib/app-events";
 import { GalleryRefreshCoalescer, galleryRefreshPlan, isCurrentContextGeneration, reconcileGalleryPermissions, reconcileGalleryState, reconcileOptimisticUploads, reconcilePaginatedSelected, reconcileSelected, reconcileUploadJobRegistry, recoverAssistantSearchMode, recoverContextualSearchFailure, replayPaginatedWindow, shouldRunGalleryAssistantTextSearch, type GalleryRefreshPlan } from "@/lib/gallery-convergence";
 
@@ -110,7 +110,7 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Gallery could not complete that request.";
 }
 
-export function GalleryWorkspace({ initialCollectionKey, returnTripKey, returnTripName }: { initialCollectionKey?: string; returnTripKey?: string; returnTripName?: string } = {}) {
+export function GalleryWorkspace({ initialCollectionKey, initialImageKey, returnSignalConnectorKey, returnSignalMessageKey, returnSignalThreadKey, returnTripKey, returnTripName }: { initialCollectionKey?: string; initialImageKey?: string; returnSignalConnectorKey?: string; returnSignalMessageKey?: string; returnSignalThreadKey?: string; returnTripKey?: string; returnTripName?: string } = {}) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
@@ -132,6 +132,9 @@ export function GalleryWorkspace({ initialCollectionKey, returnTripKey, returnTr
   const [images, setImages] = useState<GalleryImage[]>([]);
   const [activeCollection, setActiveCollection] = useState<GalleryCollection>();
   const initialCollectionOpened = useRef<string | undefined>(undefined);
+  const initialImageOpened = useRef<string | undefined>(undefined);
+  const initialImageRequest = useRef(0);
+  const initialImageLoading = useRef<string | undefined>(undefined);
   const [showingCollectionOverview, setShowingCollectionOverview] = useState(true);
   const [subjects, setSubjects] = useState<GallerySubject[]>([]);
   const [identitiesLoading, setIdentitiesLoading] = useState(true);
@@ -315,6 +318,10 @@ export function GalleryWorkspace({ initialCollectionKey, returnTripKey, returnTr
     if (refreshContextKey.current === contextKey) return;
     refreshContextKey.current = contextKey;
     refreshContextGeneration.current += 1;
+    initialCollectionOpened.current = undefined;
+    initialImageOpened.current = undefined;
+    initialImageRequest.current += 1;
+    initialImageLoading.current = undefined;
     refreshCoalescer.current.reset();
     if (refreshTimer.current) clearTimeout(refreshTimer.current);
     refreshTimer.current = undefined;
@@ -383,7 +390,42 @@ export function GalleryWorkspace({ initialCollectionKey, returnTripKey, returnTr
     setActiveCollection(collection);
   }, [collections, initialCollectionKey]);
 
+  useEffect(() => {
+    if (!initialImageKey || initialImageOpened.current === initialImageKey || activeCollection?.key !== initialCollectionKey) return;
+    const routeKey = `${initialCollectionKey ?? "root"}:${initialImageKey}`;
+    const openInitialImage = (image: GalleryImage) => {
+      initialImageOpened.current = initialImageKey;
+      setImages((current) => appendCursorItems(current, [image], ({ key }) => key));
+      setSelectedImage(image);
+      openSheet("image");
+    };
+    const loaded = images.find(({ key }) => key === initialImageKey);
+    if (loaded) {
+      openInitialImage(loaded);
+      return;
+    }
+    if (initialImageLoading.current === routeKey) return;
+    initialImageLoading.current = routeKey;
+    const request = ++initialImageRequest.current;
+    const generation = refreshContextGeneration.current;
+    void queryClient.fetchQuery({
+      queryKey: galleryQueryKeys.image(galleryContext, initialCollectionKey, initialImageKey),
+      queryFn: () => searchGalleryImages({ imageKey: initialImageKey, ...(initialCollectionKey ? { collectionKey: initialCollectionKey } : {}) }),
+      staleTime: 0,
+    }).then(({ images: results }) => {
+      if (request !== initialImageRequest.current || generation !== refreshContextGeneration.current) return;
+      const image = results.find(({ key }) => key === initialImageKey);
+      if (image) openInitialImage(image);
+      else setStatus("This image is no longer available.");
+    }).catch((error: unknown) => {
+      if (request === initialImageRequest.current && generation === refreshContextGeneration.current) setStatus(errorMessage(error));
+    }).finally(() => {
+      if (request === initialImageRequest.current) initialImageLoading.current = undefined;
+    });
+  }, [activeCollection?.key, images, initialCollectionKey, initialImageKey, queryClient]);
+
   const returnToTripAssets = returnTripKey ? () => router.replace({ pathname: "/capability/[slug]", params: { slug: "compass", tripKey: returnTripKey, openTripAssets: "1" } }) : undefined;
+  const returnToSignalAttachments = returnSignalConnectorKey && returnSignalThreadKey && returnSignalMessageKey ? () => router.replace({ pathname: "/capability/[slug]", params: { slug: "signal", connectorKey: returnSignalConnectorKey, signalReturn: "root", signalThreadKey: returnSignalThreadKey, signalMessageKey: returnSignalMessageKey, openSignalAttachments: "1" } }) : undefined;
 
   function setHiddenOptimistically(source: "collection" | "image", sourceKey: string, shouldHide: boolean, label: "Collection" | "Image") {
     const previous = userHiddens;
@@ -804,10 +846,10 @@ export function GalleryWorkspace({ initialCollectionKey, returnTripKey, returnTr
     setStatus(undefined);
     try {
       const files = await Promise.all(assets.slice(0, 20).map(async (asset, index) => {
-        const output = await normalizeCapturedJpeg(asset, { maxSide: 2400, compress: 0.88 });
+        const output = await normalizeCapturedPng(asset, { maxSide: 2400, compress: 0.88 });
         return {
           clientKey: `${Date.now()}-${index}-${Math.random().toString(36).slice(2)}`,
-          filename: `gallery-${Date.now()}-${index + 1}.jpg`,
+          filename: `gallery-${Date.now()}-${index + 1}.png`,
           uri: output.uri,
           sizeBytes: output.sizeBytes,
           ...(output.latitude !== undefined && output.longitude !== undefined ? { latitude: output.latitude, longitude: output.longitude } : {}),
@@ -1064,7 +1106,7 @@ export function GalleryWorkspace({ initialCollectionKey, returnTripKey, returnTr
       filename: item.filename,
       caption: "",
       imageCaptionKey: null,
-      mimeType: "image/jpeg",
+      mimeType: "image/png",
       sizeBytes: item.sizeBytes,
       width: 0,
       height: 0,
@@ -2599,7 +2641,7 @@ export function GalleryWorkspace({ initialCollectionKey, returnTripKey, returnTr
       </ScrollView>
 
       <CoreComposer
-        accessory={returnToTripAssets ? <Button accessibilityLabel={`Back to ${returnTripName ?? "trip"} assets`} contentMode="raw" onPress={returnToTripAssets} size="sm" style={styles.tripReturn} variant="secondary"><Text numberOfLines={1} style={styles.tripReturnText}>{returnTripName ?? "Trip"}</Text><ChevronRightIcon size="sm" /></Button> : undefined}
+        accessory={returnToSignalAttachments ? <Button accessibilityLabel="Back to Signal attachments" contentMode="raw" onPress={returnToSignalAttachments} size="sm" style={styles.tripReturn} variant="secondary"><Text numberOfLines={1} style={styles.tripReturnText}>Signal attachments</Text><ChevronRightIcon size="sm" /></Button> : returnToTripAssets ? <Button accessibilityLabel={`Back to ${returnTripName ?? "trip"} assets`} contentMode="raw" onPress={returnToTripAssets} size="sm" style={styles.tripReturn} variant="secondary"><Text numberOfLines={1} style={styles.tripReturnText}>{returnTripName ?? "Trip"}</Text><ChevronRightIcon size="sm" /></Button> : undefined}
         accessibilityLabel="Ask Core about your Gallery"
         disabled={assistantBusy}
         editable={!assistantBusy}

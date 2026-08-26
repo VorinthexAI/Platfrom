@@ -4,7 +4,7 @@ import { ButtonSizeProvider } from "../button/button.mobile";
 
 export type TabsProps = ViewProps & { children?: ReactNode };
 export function Tabs({ children, style, ...props }: TabsProps) {
-  return <ButtonSizeProvider size="xs"><View style={[styles.root, style]} {...props}>{children}</View></ButtonSizeProvider>;
+  return <ButtonSizeProvider overrideParent size="xs"><View style={[styles.root, style]} {...props}>{children}</View></ButtonSizeProvider>;
 }
 const styles = StyleSheet.create({
   root: {

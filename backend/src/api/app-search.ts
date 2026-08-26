@@ -38,6 +38,7 @@ export function createAppSearchHandler(dependencies: AppSearchHandlerDependencie
     } catch (error) {
       if (error instanceof ContentError) return c.json({ success: false, error: error.toJSON() }, error.code === 'CONTENT_FORBIDDEN' ? 403 : 400);
       if (error instanceof ZodError || error instanceof SyntaxError) return c.json({ success: false, error: 'invalid app search request' }, 400);
+      console.error('app search failed', { error });
       return c.json({ success: false, error: 'app search failed' }, 500);
     }
   };

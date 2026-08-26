@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { classifyEmbedAndPersistThread } from './message-preparation';
+import { sortAndPersistInboxThread } from './message-preparation';
 
 const scopeKey = 'cmrnlzf640001qc7kazsr96k5';
 const connectorKey = 'cmrnlzf650002qc7k4p5zem5w';
@@ -13,16 +13,16 @@ describe('canonical mail preparation', () => {
     const outcomes: unknown[] = [];
     for (const caller of ['initial sync', 'incremental sync']) {
       const classified: string[] = [], embedded: string[] = [], saved: unknown[] = [];
-      await classifyEmbedAndPersistThread({
+      await sortAndPersistInboxThread({
         organizationKey: 'org-1', thread: { scopeKey, accountKey: connectorKey, providerThreadId: 'thread' }, messages,
         classify: (async (_organization: string, input: { labels: string[]; body: string }) => { classified.push(input.body); return input.labels.includes('TRASH') ? { priority: 'low', state: 'filtered', category: 'other', intent: 'Filtered' } : { priority: 'urgent', state: 'needs_action', category: 'primary', intent: 'Urgent' }; }) as never,
-        embed: (async ({ text }: { text: string }) => { embedded.push(text); return [text.length]; }) as never,
+        prepareDocument: async ({ content, semanticSource }) => { embedded.push(semanticSource); return { content, embedding: [semanticSource.length], contentChunks: [semanticSource], chunkEmbeddings: [[semanticSource.length]], semanticChunkCount: 1, semanticContentHash: 'hash' }; },
         repository: { syncThread: async (input: unknown) => { saved.push(input); return input; } } as never,
         beforePersist: async () => undefined,
         lease: { kind: 'sync', connectorKey, token: 'lease-token' },
       });
       expect(classified).toEqual(['Urgent body', 'Filtered body']);
-      expect(embedded).toHaveLength(2);
+      expect(embedded).toHaveLength(3);
       outcomes.push(saved[0]);
       expect(['initial sync', 'incremental sync']).toContain(caller);
     }
@@ -35,10 +35,10 @@ describe('canonical mail preparation', () => {
   test('rejects duplicate provider message IDs before classification or persistence', async () => {
     let classifications = 0, writes = 0;
     const duplicate = { scopeKey, accountKey: connectorKey, providerMessageId: 'duplicate', from: 'sender@example.com', to: ['me@example.com'], subject: 'Subject', body: 'Body', summary: 'Body', direction: 'inbound' as const, sentAt: '2026-08-23T10:00:00.000Z', hasAttachments: false, replyDepth: 0 };
-    await expect(classifyEmbedAndPersistThread({
+    await expect(sortAndPersistInboxThread({
       organizationKey: 'org-1', thread: { scopeKey, accountKey: connectorKey, providerThreadId: 'thread' }, messages: [duplicate, { ...duplicate, body: 'Conflicting duplicate' }],
       classify: (async () => { classifications += 1; return {}; }) as never,
-      embed: (async () => [1]) as never,
+      prepareDocument: async ({ content, semanticSource }) => ({ content, embedding: [1], contentChunks: [semanticSource], chunkEmbeddings: [[1]], semanticChunkCount: 1, semanticContentHash: 'hash' }),
       repository: { syncThread: async () => { writes += 1; return {}; } } as never,
       beforePersist: async () => undefined,
       lease: { kind: 'sync', connectorKey, token: 'lease-token' },
@@ -49,10 +49,10 @@ describe('canonical mail preparation', () => {
   test('bounds classification and embedding concurrency for large provider threads', async () => {
     let activeClassifications = 0, maxClassifications = 0, activeEmbeddings = 0, maxEmbeddings = 0;
     const messages = Array.from({ length: 40 }, (_, index) => ({ scopeKey, accountKey: connectorKey, providerMessageId: `message-${index}`, from: 'sender@example.com', to: ['me@example.com'], subject: 'Subject', body: `Body ${index}`, summary: 'Body', direction: 'inbound' as const, sentAt: new Date(Date.parse('2026-08-23T10:00:00.000Z') + index).toISOString(), hasAttachments: false, replyDepth: 0 }));
-    await classifyEmbedAndPersistThread({
+    await sortAndPersistInboxThread({
       organizationKey: 'org-1', thread: { scopeKey, accountKey: connectorKey, providerThreadId: 'thread' }, messages,
       classify: (async () => { activeClassifications += 1; maxClassifications = Math.max(maxClassifications, activeClassifications); await Bun.sleep(1); activeClassifications -= 1; return { priority: 'normal', state: 'needs_action', category: 'primary', intent: 'Review' }; }) as never,
-      embed: (async () => { activeEmbeddings += 1; maxEmbeddings = Math.max(maxEmbeddings, activeEmbeddings); await Bun.sleep(1); activeEmbeddings -= 1; return [1]; }) as never,
+      prepareDocument: async ({ content, semanticSource }) => { activeEmbeddings += 1; maxEmbeddings = Math.max(maxEmbeddings, activeEmbeddings); await Bun.sleep(1); activeEmbeddings -= 1; return { content, embedding: [1], contentChunks: [semanticSource], chunkEmbeddings: [[1]], semanticChunkCount: 1, semanticContentHash: 'hash' }; },
       repository: { syncThread: async (input: unknown) => input } as never,
       beforePersist: async () => undefined,
       lease: { kind: 'sync', connectorKey, token: 'lease-token' },
@@ -70,10 +70,10 @@ describe('canonical mail preparation', () => {
       { ...base, providerMessageId: 'spam', from: 'spam@example.com', subject: 'Old spam', body: 'Historical spam', labels: ['SPAM'], sentAt: '2026-08-23T12:00:00.000Z' },
     ];
     let saved: any;
-    await classifyEmbedAndPersistThread({
+    await sortAndPersistInboxThread({
       organizationKey: 'org-1', thread: { scopeKey, accountKey: connectorKey, providerThreadId: 'thread' }, messages,
       classify: (async (_organization: string, input: { labels: string[] }) => input.labels.includes('INBOX') ? { priority: 'high', state: 'needs_action', category: 'primary', intent: 'Active' } : { priority: 'low', state: 'filtered', category: 'other', intent: 'Filtered' }) as never,
-      embed: (async ({ text }: { text: string }) => [text.length]) as never,
+      prepareDocument: async ({ content, semanticSource }) => ({ content, embedding: [semanticSource.length], contentChunks: [semanticSource], chunkEmbeddings: [[semanticSource.length]], semanticChunkCount: 1, semanticContentHash: 'hash' }),
       repository: { syncThread: async (input: unknown) => { saved = input; return input; } } as never,
       beforePersist: async () => undefined,
       lease: { kind: 'sync', connectorKey, token: 'lease-token' },
@@ -85,13 +85,13 @@ describe('canonical mail preparation', () => {
   test('keeps Trash and Spam-only threads represented as Filtered', async () => {
     const base = { scopeKey, accountKey: connectorKey, from: 'sender@example.com', to: ['me@example.com'], summary: 'old', direction: 'inbound' as const, hasAttachments: false, replyDepth: 0 };
     let saved: any;
-    await classifyEmbedAndPersistThread({
+    await sortAndPersistInboxThread({
       organizationKey: 'org-1', thread: { scopeKey, accountKey: connectorKey, providerThreadId: 'thread' }, messages: [
         { ...base, providerMessageId: 'trash', subject: 'Trash', body: 'Trash', labels: ['TRASH'], sentAt: '2026-08-23T10:00:00.000Z' },
         { ...base, providerMessageId: 'spam', subject: 'Spam', body: 'Spam', labels: ['SPAM'], sentAt: '2026-08-23T11:00:00.000Z' },
       ],
       classify: (async () => ({ priority: 'low', state: 'filtered', category: 'other', intent: 'Filtered' })) as never,
-      embed: (async () => [1]) as never,
+      prepareDocument: async ({ content, semanticSource }) => ({ content, embedding: [1], contentChunks: [semanticSource], chunkEmbeddings: [[1]], semanticChunkCount: 1, semanticContentHash: 'hash' }),
       repository: { syncThread: async (input: unknown) => { saved = input; return input; } } as never,
       beforePersist: async () => undefined,
       lease: { kind: 'sync', connectorKey, token: 'lease-token' },

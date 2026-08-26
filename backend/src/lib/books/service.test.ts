@@ -2,177 +2,101 @@ import { createHash } from 'node:crypto';
 import { describe, expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
-import { createBookService } from './service';
+import { bookCreateInputSchema, createBookService } from './service';
 import { BookRepositoryError } from './repository';
 
-const organizationKey = 'organization'; const scopeKey = newId(); const userKey = newId(); const bookKey = newId(); const chapterKey = newId(); const now = '2026-08-12T12:00:00.000Z';
-const book = { key: bookKey, scopeKey, title: 'Clear Thinking', description: 'A guide', goal: 'Decide well', audience: 'Leaders', outcome: 'Better decisions', language: 'en', estimatedMinutes: 10, chapterCount: 1, isFavorite: false, status: 'ready' as const, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), createdAt: now, updatedAt: now };
-const chapter = { key: chapterKey, scopeKey, bookKey, title: 'Signals', description: 'Notice signals', objective: 'Observe', topics: ['attention'], content: 'Chapter prose', status: 'written' as const, position: 1, estimatedMinutes: 10, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), createdAt: now, updatedAt: now };
-const createInput = { organizationKey, scopeKey, generationRequestKey: 'stable-request', topic: 'Thinking', goal: 'Improve', audience: 'Leaders', tone: 'Clear', length: 'short' as const, language: 'English' };
-const briefFingerprint = (input: typeof createInput = createInput) => { const { generationRequestKey: _key, organizationKey: _organization, scopeKey: _scope, ...brief } = input; return createHash('sha256').update(JSON.stringify(brief)).digest('hex'); };
-const detailRow = (status: 'planning' | 'generating' | 'failed' | 'ready' = 'planning', fingerprint = briefFingerprint()) => ({ book: { ...book, generationRequestKey: createInput.generationRequestKey, generationBriefFingerprint: fingerprint, status }, chapters: status === 'ready' ? [{ chapter, progress: null }] : [] });
+const organizationKey = 'organization'; const scopeKey = newId(); const userKey = newId(); const bookKey = newId(); const now = '2026-08-12T12:00:00.000Z';
+const input = { organizationKey, scopeKey, generationRequestKey: 'request-1', topic: 'Decision making', goal: 'Decide well', currentKnowledge: 'I know the basics', writingTone: 'Clear and practical', chapterCount: 10 as const, language: 'English', narratorVoiceKey: 'clear' as const, narrationPace: 1, archiveDocumentKeys: [], chapterImages: false };
+const fingerprint = createHash('sha256').update(JSON.stringify((({ organizationKey: _o, scopeKey: _s, generationRequestKey: _r, ...value }) => value)(bookCreateInputSchema.parse(input)))).digest('hex');
+const row = (status: 'queued' | 'failed' | 'cancelled' | 'ready' = 'queued') => ({ book: { key: bookKey, scopeKey, title: input.topic, description: input.goal, goal: input.goal, audience: input.currentKnowledge, outcome: input.goal, language: input.language, narratorVoiceKey: input.narratorVoiceKey, narrationPace: 1, generationRequestKey: input.generationRequestKey, generationBriefFingerprint: fingerprint, generationInput: (({ organizationKey: _o, scopeKey: _s, generationRequestKey: _r, ...value }) => value)(input), generationOwnerKey: userKey, generationStage: 'accepted' as const, generationCompletedUnits: 0, generationTotalUnits: 34, generationAttempt: 0, estimatedMinutes: 0, chapterCount: 10, isFavorite: false, status, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), createdAt: now, updatedAt: now }, chapters: [] });
 
-describe('book service', () => {
-  test('returns safe user-specific detail and persists progress with userKey', async () => {
-    let progress: any = null;
-    const repository: any = { authorize: async () => {}, list: async () => [{ book, chapters: [{ chapter, progress }] }], detail: async () => ({ book, chapters: [{ chapter, progress }] }), findByGenerationRequest: async () => null, upsertProgress: async (_context: unknown, _book: string, _chapter: string, value: unknown) => { progress = value; return value; } };
-    const service = createBookService({ repository, signUrl: async () => 'https://example.com/signed', id: () => newId(), now: () => now });
-    const result = await service.progress(bookKey, chapterKey, { organizationKey, scopeKey, progressSeconds: 30, isCompleted: true }, userKey);
-    expect(progress).toMatchObject({ userKey, bookKey, chapterKey, progressSeconds: 30, isCompleted: true });
-    expect(result.book).not.toHaveProperty('embedding'); expect(result.chapter).not.toHaveProperty('audioStorageKey');
-    expect(result.book).toMatchObject({ progressPercent: 100 }); expect(result.book).not.toHaveProperty('currentChapterKey');
+describe('book service asynchronous lifecycle', () => {
+  test('accepts and enqueues without running generation', async () => {
+    let current: any; const jobs: unknown[] = [];
+    const repository: any = { authorize: async () => {}, findByGenerationRequest: async () => null, detail: async () => current };
+    const generator: any = { create: async () => { current = row(); return bookKey; }, write: async () => { throw new Error('must be background'); } };
+    const result = await createBookService({ repository, generator, enqueue: async (job) => { jobs.push(job); return { jobId: bookKey }; }, signUrl: async () => 'signed', publishChanged: async () => {} }).create(input, userKey);
+    expect(result).toMatchObject({ key: bookKey, status: 'queued', generationProgressPercent: 0 });
+    expect(jobs).toEqual([{ schemaVersion: 1, bookKey, organizationKey, scopeKey, userKey }]);
   });
 
-  test('rejects unknown create fields before generation', async () => {
-    const service = createBookService({ repository: {} as never, generator: {} as never });
-    await expect(service.create({ organizationKey, scopeKey, generationRequestKey: 'request-1', topic: 'Thinking', goal: 'Improve', audience: 'Leaders', tone: 'clear', length: 'short', language: 'en', unknown: true }, userKey)).rejects.toBeDefined();
+  test('strictly rejects unsupported chapter counts and unknown fields', async () => {
+    const service = createBookService({ repository: {} as never });
+    await expect(service.create({ ...input, chapterCount: 12 }, userKey)).rejects.toBeDefined();
+    await expect(service.create({ ...input, unknown: true }, userKey)).rejects.toBeDefined();
   });
 
-  test('allows exactly one genuinely overlapping caller to write while the other polls for ready', async () => {
-    let row: any = null; let lease: { token: string; expiresAt: string } | null = null; let writes = 0; let polls = 0;
-    const repository: any = {
-      authorize: async () => {}, findByGenerationRequest: async () => row, detail: async () => row,
-      claimGeneration: async (_context: unknown, _key: string, token: string, claimedAt: string, expiresAt: string) => { if (lease && lease.expiresAt > claimedAt) return false; lease = { token, expiresAt }; row = { ...row, book: { ...row.book, generationLeaseToken: token, generationLeaseExpiresAt: expiresAt } }; return true; },
-      releaseGeneration: async (_context: unknown, _key: string, token: string) => { if (lease?.token === token) lease = null; },
-    };
-    const generator: any = {
-      create: async (input: { generationBriefFingerprint: string }) => { await Bun.sleep(1); if (row) throw new BookRepositoryError('conflict'); row = detailRow('planning', input.generationBriefFingerprint); return bookKey; },
-      write: async () => { writes += 1; await Bun.sleep(10); row = detailRow('ready'); },
-    };
-    const service = createBookService({ repository, generator, signUrl: async () => 'signed', sleep: async () => { polls += 1; await Bun.sleep(1); }, generationPollMs: 1 });
-    const results = await Promise.all([service.create(createInput, userKey), service.create(createInput, userKey)]);
-    expect(results).toEqual([expect.objectContaining({ key: bookKey, status: 'ready' }), expect.objectContaining({ key: bookKey, status: 'ready' })]);
-    expect(writes).toBe(1); expect(polls).toBeGreaterThan(0);
+  test('marks accepted work failed when durable queue insertion fails', async () => {
+    let current: any; const patches: any[] = [];
+    const repository: any = { authorize: async () => {}, findByGenerationRequest: async () => null, detail: async () => current, updateBook: async (_context: unknown, _bookKey: string, patch: unknown) => { patches.push(patch); current = row('failed'); return current.book; } };
+    const generator: any = { create: async () => { current = row(); return bookKey; } };
+    const service = createBookService({ repository, generator, enqueue: async () => { throw new Error('queue unavailable'); }, publishChanged: async () => {} });
+    await expect(service.create(input, userKey)).rejects.toThrow('queue unavailable');
+    expect(patches).toContainEqual(expect.objectContaining({ status: 'failed', generationError: expect.stringContaining('could not be queued') }));
   });
 
-  test('rejects generation request key reuse with a different normalized brief', async () => {
-    const repository: any = { authorize: async () => {}, findByGenerationRequest: async () => detailRow('ready'), detail: async () => detailRow('ready') };
-    const service = createBookService({ repository, generator: { create: async () => bookKey, write: async () => { throw new Error('unexpected write'); } }, signUrl: async () => 'signed' });
-    await expect(service.create({ ...createInput, topic: 'Different topic' }, userKey)).rejects.toMatchObject({ reason: 'conflict', message: 'Generation request key was reused with a different brief.' });
+  test('repairs a missing stable job when create is replayed', async () => {
+    const jobs: unknown[] = []; const current: any = row();
+    const repository: any = { authorize: async () => {}, findByGenerationRequest: async () => current };
+    const result = await createBookService({ repository, enqueue: async (job) => { jobs.push(job); return { jobId: bookKey }; }, signUrl: async () => 'signed' }).create(input, userKey);
+    expect(result).toMatchObject({ key: bookKey, status: 'queued' });
+    expect(jobs).toEqual([{ schemaVersion: 1, bookKey, organizationKey, scopeKey, userKey }]);
   });
 
-  test('returns a ready legacy replay without evaluating the retry brief', async () => {
-    const legacy: any = detailRow('ready'); delete legacy.book.generationBriefFingerprint;
-    let claims = 0; let writes = 0;
-    const repository: any = {
-      authorize: async () => {}, findByGenerationRequest: async () => legacy, detail: async () => legacy,
-      claimGeneration: async () => { claims += 1; return true; },
-    };
-    const service = createBookService({ repository, generator: { create: async () => bookKey, write: async () => { writes += 1; } }, signUrl: async () => 'signed' });
-    await expect(service.create({ ...createInput, topic: 'Unverifiable retry topic' }, userKey)).resolves.toMatchObject({ key: bookKey, status: 'ready' });
-    expect(claims).toBe(0); expect(writes).toBe(0); expect(legacy.book.generationBriefFingerprint).toBeUndefined();
+  test('repairs a queued retry replay after the database-to-queue crash window', async () => {
+    const jobs: unknown[] = []; const current: any = row();
+    const repository: any = { retryGeneration: async () => { throw new BookRepositoryError('conflict'); }, detail: async () => current };
+    const result = await createBookService({ repository, enqueue: async (job) => { jobs.push(job); return { jobId: bookKey }; }, signUrl: async () => 'signed', publishChanged: async () => {} }).retry(bookKey, { organizationKey, scopeKey }, userKey);
+    expect(result).toMatchObject({ key: bookKey, status: 'queued' });
+    expect(jobs).toHaveLength(1);
   });
 
-  test('rejects an incomplete legacy replay because the original brief cannot be verified', async () => {
-    const legacy: any = detailRow('planning'); delete legacy.book.generationBriefFingerprint;
-    let claims = 0; let writes = 0;
-    const repository: any = {
-      authorize: async () => {}, findByGenerationRequest: async () => legacy, detail: async () => legacy,
-      claimGeneration: async () => { claims += 1; return true; },
-    };
-    const service = createBookService({ repository, generator: { create: async () => bookKey, write: async () => { writes += 1; } }, signUrl: async () => 'signed' });
-    await expect(service.create(createInput, userKey)).rejects.toMatchObject({ reason: 'conflict', message: 'Cannot resume legacy book generation because the original brief cannot be verified.' });
-    expect(claims).toBe(0); expect(writes).toBe(0); expect(legacy.book.generationBriefFingerprint).toBeUndefined();
+  test('persists terminal worker failures through the repository guard', async () => {
+    const calls: unknown[][] = [];
+    const repository: any = { failTerminalGeneration: async (...args: unknown[]) => { calls.push(args); return true; } };
+    const service = createBookService({ repository, now: () => now });
+    await expect(service.terminalFailure({ schemaVersion: 1, bookKey, organizationKey, scopeKey, userKey })).resolves.toBe(true);
+    expect(calls).toEqual([[{ schemaVersion: 1, bookKey, organizationKey, scopeKey, userKey }, 'Book generation failed after all retry attempts. Retry the book to continue.', now]]);
   });
 
-  test('takes over an expired lease using the configured clock and sleep', async () => {
-    let clock = Date.parse(now); const sleeps: number[] = []; let writes = 0;
-    let row: any = { ...detailRow(), book: { ...detailRow().book, generationLeaseToken: 'crashed-writer', generationLeaseExpiresAt: new Date(clock + 100).toISOString() } };
-    const repository: any = {
-      authorize: async () => {}, findByGenerationRequest: async () => row, detail: async () => row,
-      claimGeneration: async (_context: unknown, _key: string, token: string, claimedAt: string, expiresAt: string) => { if (row.book.generationLeaseToken && row.book.generationLeaseExpiresAt > claimedAt) return false; row = { ...row, book: { ...row.book, generationLeaseToken: token, generationLeaseExpiresAt: expiresAt } }; return true; },
-      releaseGeneration: async () => {},
-    };
-    const service = createBookService({ repository, generator: { create: async () => bookKey, write: async () => { writes += 1; row = detailRow('ready'); } }, signUrl: async () => 'signed', now: () => new Date(clock).toISOString(), sleep: async (milliseconds) => { sleeps.push(milliseconds); clock += milliseconds; }, leaseToken: () => 'takeover', generationLeaseMs: 1_000, generationPollMs: 1_000 });
-    await expect(service.create(createInput, userKey)).resolves.toMatchObject({ key: bookKey, status: 'ready' });
-    expect(sleeps).toEqual([100]); expect(writes).toBe(1);
+  test('retries, cancels, and hard deletes through repository and queue', async () => {
+    let current: any = row('failed'); const calls: string[] = [];
+    const repository: any = { retryGeneration: async () => { calls.push('retry'); current = row(); return current.book; }, cancelGeneration: async () => { calls.push('cancel'); current = row('cancelled'); }, deleteBook: async () => { calls.push('delete'); }, detail: async () => current };
+    const service = createBookService({ repository, enqueue: async () => { calls.push('enqueue'); return { jobId: bookKey }; }, removeJob: async () => { calls.push('remove'); }, signUrl: async () => 'signed', publishChanged: async () => {} });
+    await service.retry(bookKey, { organizationKey, scopeKey }, userKey); await service.cancel(bookKey, { organizationKey, scopeKey }, userKey); expect(await service.delete(bookKey, { organizationKey, scopeKey }, userKey)).toEqual({ key: bookKey });
+    expect(calls).toEqual(['retry', 'enqueue', 'cancel', 'remove', 'delete', 'remove']);
   });
 
-  test('renews its lease deterministically while a long generation is running', async () => {
-    let clock = Date.parse(now); let row: any = detailRow(); let activeToken: string | null = null; const expirations: string[] = []; const releases: string[] = [];
-    let renew: (() => Promise<void>) | undefined; let finishWrite!: () => void; let writing!: () => void;
-    const writeStarted = new Promise<void>((resolve) => { writing = resolve; });
-    const writeFinished = new Promise<void>((resolve) => { finishWrite = resolve; });
-    const repository: any = {
-      authorize: async () => {}, findByGenerationRequest: async () => row, detail: async () => row,
-      claimGeneration: async (_context: unknown, _key: string, token: string, _claimedAt: string, expiresAt: string) => { activeToken = token; expirations.push(expiresAt); return true; },
-      renewGeneration: async (_context: unknown, _key: string, token: string, expiresAt: string) => { if (activeToken !== token) return false; expirations.push(expiresAt); return true; },
-      releaseGeneration: async (_context: unknown, _key: string, token: string) => { if (activeToken !== token) return false; activeToken = null; releases.push(token); return true; },
-    };
-    const generator: any = { create: async () => bookKey, write: async (_key: string, _brief: unknown, context: { generationLeaseToken?: string }) => { expect(context.generationLeaseToken).toBe('owner'); writing(); await writeFinished; row = detailRow('ready'); } };
-    const service = createBookService({ repository, generator, signUrl: async () => 'signed', now: () => new Date(clock).toISOString(), leaseToken: () => 'owner', generationLeaseMs: 900, generationRenewMs: 300, scheduleLeaseRenewal: (callback) => { renew = callback; return () => {}; } });
-    const pending = service.create(createInput, userKey); await writeStarted;
-    clock += 300; await renew!(); clock += 300; await renew!();
-    finishWrite(); await expect(pending).resolves.toMatchObject({ key: bookKey, status: 'ready' });
-    expect(expirations).toEqual([new Date(Date.parse(now) + 900).toISOString(), new Date(Date.parse(now) + 1_200).toISOString(), new Date(Date.parse(now) + 1_500).toISOString()]);
-    expect(releases).toEqual(['owner']);
+  test('does not touch BullMQ when authorized hard deletion fails', async () => {
+    const calls: string[] = []; const repository: any = { deleteBook: async () => { calls.push('delete'); throw new Error('forbidden'); } };
+    const service = createBookService({ repository, removeJob: async () => { calls.push('remove'); }, publishChanged: async () => {} });
+    await expect(service.delete(bookKey, { organizationKey, scopeKey }, userKey)).rejects.toThrow('forbidden');
+    expect(calls).toEqual(['delete']);
   });
 
-  test('does not release or complete after another token takes over', async () => {
-    let row: any = detailRow(); let activeToken = ''; const releases: string[] = []; let renew: (() => Promise<void>) | undefined; let finishWrite!: () => void; let writing!: () => void;
-    const writeStarted = new Promise<void>((resolve) => { writing = resolve; }); const writeFinished = new Promise<void>((resolve) => { finishWrite = resolve; });
-    const repository: any = {
-      authorize: async () => {}, findByGenerationRequest: async () => row, detail: async () => row,
-      claimGeneration: async (_context: unknown, _key: string, token: string) => { activeToken = token; return true; },
-      renewGeneration: async (_context: unknown, _key: string, token: string) => activeToken === token,
-      releaseGeneration: async (_context: unknown, _key: string, token: string) => { if (activeToken !== token) return false; releases.push(token); activeToken = ''; return true; },
-    };
-    const generator: any = { create: async () => bookKey, write: async () => { writing(); await writeFinished; } };
-    const service = createBookService({ repository, generator, signUrl: async () => 'signed', leaseToken: () => 'stale-owner', generationLeaseMs: 900, generationRenewMs: 300, scheduleLeaseRenewal: (callback) => { renew = callback; return () => {}; } });
-    const pending = service.create(createInput, userKey); await writeStarted;
-    activeToken = 'new-owner'; await renew!(); finishWrite();
-    await expect(pending).rejects.toMatchObject({ reason: 'conflict', message: 'Book generation lease was lost.' });
-    expect(releases).toEqual([]); expect(activeToken).toBe('new-owner'); expect(row.book.status).toBe('planning');
+  test('keeps successful hard deletion successful when queue cleanup fails', async () => {
+    const calls: string[] = []; const repository: any = { deleteBook: async () => { calls.push('delete'); } };
+    const service = createBookService({ repository, removeJob: async () => { calls.push('remove'); throw new Error('redis unavailable'); }, publishChanged: async () => { calls.push('publish'); } });
+    await expect(service.delete(bookKey, { organizationKey, scopeKey }, userKey)).resolves.toEqual({ key: bookKey }); expect(calls).toEqual(['delete', 'remove', 'publish']);
   });
 
-  test('releases a failed writer lease and remains resumable', async () => {
-    let row: any = detailRow(); let lease: string | null = null; let attempts = 0; const releases: string[] = [];
-    const repository: any = {
-      authorize: async () => {}, findByGenerationRequest: async () => row, detail: async () => row,
-      claimGeneration: async (_context: unknown, _key: string, token: string) => { if (lease) return false; lease = token; return true; },
-      releaseGeneration: async (_context: unknown, _key: string, token: string) => { if (lease === token) { releases.push(token); lease = null; } },
-    };
-    const generator: any = { create: async () => bookKey, write: async () => { attempts += 1; if (attempts === 1) { row = detailRow('failed'); throw new Error('write failed'); } row = detailRow('ready'); } };
-    let token = 0; const service = createBookService({ repository, generator, signUrl: async () => 'signed', leaseToken: () => `lease-${++token}` });
-    await expect(service.create(createInput, userKey)).rejects.toThrow('write failed');
-    await expect(service.create(createInput, userKey)).resolves.toMatchObject({ key: bookKey, status: 'ready' });
-    expect(attempts).toBe(2); expect(releases).toEqual(['lease-1', 'lease-2']);
+  test('computes listening progress from audio duration rather than chapter count', async () => {
+    const first = newId(); const second = newId(); const current: any = row('ready'); current.chapters = [
+      { chapter: { key: first, title: 'One', description: 'One', position: 1, estimatedMinutes: 1, audioDurationSeconds: 100 }, progress: { progressSeconds: 100, isCompleted: true } },
+      { chapter: { key: second, title: 'Two', description: 'Two', position: 2, estimatedMinutes: 5, audioDurationSeconds: 500 }, progress: { progressSeconds: 200, isCompleted: false } },
+    ];
+    const service = createBookService({ repository: { detail: async () => current } as never, signUrl: async () => 'signed' });
+    expect((await service.detail(bookKey, { organizationKey, scopeKey }, userKey)).book).toMatchObject({ progressPercent: 50, currentChapterKey: second });
   });
 
-  test('returns a ready replay without claiming or writing', async () => {
-    let claims = 0; let writes = 0; const ready = detailRow('ready');
-    const repository: any = { authorize: async () => {}, findByGenerationRequest: async () => ready, detail: async () => ready, claimGeneration: async () => { claims += 1; return true; } };
-    const service = createBookService({ repository, generator: { create: async () => bookKey, write: async () => { writes += 1; } }, signUrl: async () => 'signed' });
-    await expect(service.create({ ...createInput, generationRequestKey: ' stable-request ', topic: ' Thinking ', goal: ' Improve ' }, userKey)).resolves.toMatchObject({ key: bookKey, status: 'ready' });
-    expect(claims).toBe(0); expect(writes).toBe(0);
-  });
-
-  test('loads and resumes the unique-index winner after a concurrent create collision', async () => {
-    const winner = detailRow();
-    let finds = 0;
-    const calls: string[] = [];
-    const repository: any = {
-      authorize: async () => {},
-      findByGenerationRequest: async () => ++finds === 1 ? null : winner,
-      claimGeneration: async () => true,
-      releaseGeneration: async () => {},
-      detail: async () => detailRow('ready'),
-    };
-    const generator: any = {
-      create: async () => { calls.push('create'); throw new BookRepositoryError('conflict'); },
-      write: async (key: string) => { calls.push(`write:${key}`); },
-    };
-    const service = createBookService({ repository, generator, signUrl: async () => 'signed' });
-    await expect(service.create(createInput, userKey)).resolves.toMatchObject({ key: bookKey, status: 'ready' });
-    expect(calls).toEqual(['create', `write:${bookKey}`]);
-  });
-
-  test('clears a stale completion timestamp when listening resumes', async () => {
-    let progress: any;
-    const existing = { key: newId(), scopeKey, userKey, bookKey, chapterKey, progressSeconds: 600, isCompleted: true, completedAt: now, createdAt: now, updatedAt: now };
-    const repository: any = { detail: async () => ({ book, chapters: [{ chapter, progress: progress ?? existing }] }), upsertProgress: async (_context: unknown, _book: string, _chapter: string, value: unknown) => { progress = value; return value; } };
-    const service = createBookService({ repository, signUrl: async () => 'https://example.com/signed', id: () => newId(), now: () => now });
-    await service.progress(bookKey, chapterKey, { organizationKey, scopeKey, progressSeconds: 10, isCompleted: false }, userKey);
-    expect(progress).toMatchObject({ progressSeconds: 10, isCompleted: false, completedAt: null });
+  test('does not presign chapter media for overview summaries', async () => {
+    const current: any = row('ready'); current.book.coverStorageKey = 'cover'; current.chapters = [{ chapter: { key: newId(), title: 'One', description: 'One', position: 1, estimatedMinutes: 2, audioStorageKey: 'audio', imageStorageKey: 'image', audioDurationSeconds: 120 }, progress: null }];
+    const signed: string[] = []; const repository: any = { list: async () => [current], detail: async () => current };
+    const service = createBookService({ repository, signUrl: async (key) => { signed.push(key); return `signed:${key}`; } });
+    await service.overview({ organizationKey, scopeKey }, userKey);
+    expect(signed).toEqual(['cover']);
+    signed.length = 0;
+    await service.detail(bookKey, { organizationKey, scopeKey }, userKey);
+    expect(signed).toEqual(['cover', 'audio', 'image']);
   });
 });

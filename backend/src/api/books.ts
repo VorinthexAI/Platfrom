@@ -11,7 +11,7 @@ class BookHttpError extends Error { constructor(readonly status: 401 | 403, read
 
 export function createBookHandlers(options: { service?: BookService; getIdentity?: typeof getAuthIdentity } = {}) {
   const service = options.service ?? defaultBookService; const identity = options.getIdentity ?? getAuthIdentity;
-  const run = (operation: (c: Context, books: BookService, userKey: string) => Promise<unknown>, status: 200 | 201 = 200) => async (c: Context) => {
+  const run = (operation: (c: Context, books: BookService, userKey: string) => Promise<unknown>, status: 200 | 201 | 202 = 200) => async (c: Context) => {
     try {
       const current = await identity(c); if (!current) throw new BookHttpError(401, 'BOOK_UNAUTHORIZED', 'Authentication required.'); if (current.identityType !== 'user') throw new BookHttpError(403, 'BOOK_FORBIDDEN', 'A user session is required.');
       return c.json({ success: true, data: await operation(c, service, current.key) }, status);
@@ -24,9 +24,12 @@ export function createBookHandlers(options: { service?: BookService; getIdentity
   };
   return {
     overview: run((c, books, userKey) => c.req.json().then((body) => books.overview(body, userKey))),
-    create: run((c, books, userKey) => c.req.json().then((body) => books.create(body, userKey)), 201),
-    detail: run((c, books, userKey) => books.detail(pathKeySchema.parse(c.req.param('bookKey')), c.req.json(), userKey)),
-    progress: run((c, books, userKey) => books.progress(pathKeySchema.parse(c.req.param('bookKey')), pathKeySchema.parse(c.req.param('chapterKey')), c.req.json(), userKey)),
+    create: run((c, books, userKey) => c.req.json().then((body) => books.create(body, userKey)), 202),
+    detail: run(async (c, books, userKey) => books.detail(pathKeySchema.parse(c.req.param('bookKey')), await c.req.json(), userKey)),
+    progress: run(async (c, books, userKey) => books.progress(pathKeySchema.parse(c.req.param('bookKey')), pathKeySchema.parse(c.req.param('chapterKey')), await c.req.json(), userKey)),
+    retry: run(async (c, books, userKey) => books.retry(pathKeySchema.parse(c.req.param('bookKey')), await c.req.json(), userKey), 202),
+    cancel: run(async (c, books, userKey) => books.cancel(pathKeySchema.parse(c.req.param('bookKey')), await c.req.json(), userKey)),
+    delete: run(async (c, books, userKey) => books.delete(pathKeySchema.parse(c.req.param('bookKey')), await c.req.json(), userKey)),
   };
 }
 

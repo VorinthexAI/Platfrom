@@ -151,6 +151,14 @@ describe('scoped Content persistence', () => {
     await persistence.updateDocument(scopeKey, folderKey, { isFavorite: true, updatedAt: timestamp });
     expect(calls.map(({ bindVars }) => bindVars?.patch)).toEqual([{ isFavorite: true, updatedAt: timestamp }]);
     expect(calls[0]?.bindVars?.unset).toEqual([]);
+    expect(calls[0]?.bindVars?.allowManagedUpdate).toBe(true);
+  });
+
+  test('rejects generic document inserts into every managed folder at the persistence boundary', async () => {
+    let query = '';
+    const executor: ContentQueryExecutor = { async query(value) { query = value; return { async next() { return undefined; } }; } };
+    await expect(createContentPersistence(executor).insertDocument({ key: 'cm00000000000000000000003', scopeKey, folderKey, name: 'Blocked', content: 'Body', embedding, mutationPolicy: 'user', isFavorite: false, createdAt: timestamp, updatedAt: timestamp })).rejects.toThrow('Document destination is pending deletion.');
+    expect(query).toContain('folder.mutationPolicy != "system-container" && folder.managedPurpose == null');
   });
 
   test('only the marker owner can unfreeze a pending deletion', async () => {

@@ -8,6 +8,7 @@ export function buildAppleAppSiteAssociation() {
         appIDs: [`${APPLE_TEAM_ID}.${APP_IDENTIFIER}`],
         components: [
           { "/": "/public/auth/token", comment: "Mobile magic-link sign in" },
+          { "/": "/capability/signal", comment: "Signal Gmail connection return" },
         ],
       }],
     },

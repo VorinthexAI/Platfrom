@@ -15,6 +15,9 @@ import { documentSchema, type Document } from '@/lib/db/documents.node';
 import { generatedDocumentBindingSchema, type GeneratedDocumentBinding } from '@/lib/db/generated-document-bindings.node';
 import { generatedDocumentFolderKeys } from '@/lib/generated-documents/folders';
 import { z } from 'zod';
+import { STORAGE_DELETION_CLAIM_MS, STORAGE_UPLOAD_RESERVATION_MS } from '@/lib/db/storage-deletion-jobs.node';
+import type { StorageUploadReservation } from '@/lib/db/storage-deletion-jobs.node';
+import { randomUUID } from 'node:crypto';
 
 export interface TravelAccessContext { organizationKey: string; scopeKey: string; userKey: string }
 export interface PlacePresentationRecord { place: Place; heroStorageKey?: string }
@@ -71,8 +74,10 @@ export interface TravelRepository {
   listGeneratedDocuments(context: TravelAccessContext, subjectType: 'trip' | 'place', subjectKey: string, kinds: Array<GeneratedDocumentBinding['kind']>): Promise<GeneratedDocumentRecord[]>;
   convergeManagedPlace(input: { context: TravelAccessContext; place: Place; collection: Collection; member: CollectionMember; hidden: UserHidden; image: Image; collectionImage: CollectionImage; placeImage: PlaceImage }): Promise<Place>;
   compensateManagedImage(scopeKey: string, imageKey: string, now: string): Promise<string | null>;
-  cancelManagedImageDeletion(storageKey: string): Promise<void>;
-  acknowledgeManagedImageDeletion(storageKey: string): Promise<void>;
+  cancelManagedImageDeletion(storageKey: string): Promise<StorageUploadReservation>;
+  renewManagedImageUpload(reservation: StorageUploadReservation): Promise<boolean>;
+  acknowledgeManagedImageDeletion(reservation: StorageUploadReservation): Promise<boolean>;
+  releaseManagedImageUpload(reservation: StorageUploadReservation): Promise<boolean>;
 }
 
 export function createTravelRepository(database: TravelDatabase = db, transaction: TravelTransactionRunner = runTravelTransaction): TravelRepository {
@@ -601,6 +606,7 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
     async persistGeneratedDocument(context, record) {
       const valid = { document: documentSchema.parse(record.document), binding: generatedDocumentBindingSchema.parse(record.binding) };
       if (valid.document.scopeKey !== context.scopeKey || valid.binding.scopeKey !== context.scopeKey || valid.binding.documentKey !== valid.document.key || valid.binding.createdByKey !== context.userKey) throw new TravelRepositoryError('forbidden');
+      if (valid.binding.subjectType === 'chapter' || valid.binding.kind === 'chapter') throw new TravelRepositoryError('forbidden');
       const expectedFolderKey = generatedDocumentFolderKeys(context.scopeKey)[valid.binding.kind];
       if (valid.document.folderKey !== expectedFolderKey) throw new TravelRepositoryError('forbidden');
       const result = await transaction({ read: ['userOrganizations', 'scopes', 'scopeMembers', 'trips', 'places', 'folders'], write: ['documents', 'generatedDocumentBindings'] }, async (executor) => {
@@ -730,10 +736,23 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
       });
     },
     async cancelManagedImageDeletion(storageKey) {
-      await database.query('FOR job IN storageDeletionJobs FILTER job.storageKey == @storageKey REMOVE job IN storageDeletionJobs', { storageKey });
+      const now = new Date().toISOString();
+      const token = randomUUID();
+      const rows = await (await database.query('LET existing = FIRST(FOR job IN storageDeletionJobs FILTER job.storageKey == @storageKey LIMIT 1 RETURN job) FILTER existing == null || (existing.status == "reserved" && existing.reservationExpiresAt <= @now) || (existing.status == "deleting" && existing.claimedAt <= @staleBefore) UPSERT { storageKey: @storageKey } INSERT { storageKey: @storageKey, createdAt: @now, status: "reserved", reservationExpiresAt: @reservationExpiresAt, claimToken: @token } UPDATE { status: "reserved", reservationExpiresAt: @reservationExpiresAt, claimToken: @token, claimedAt: null } IN storageDeletionJobs OPTIONS { keepNull: false } RETURN true', { storageKey, token, now, staleBefore: new Date(Date.now() - STORAGE_DELETION_CLAIM_MS).toISOString(), reservationExpiresAt: new Date(Date.now() + STORAGE_UPLOAD_RESERVATION_MS).toISOString() })).all();
+      if (rows[0] !== true) throw new TravelRepositoryError('conflict');
+      return { storageKey, token };
     },
-    async acknowledgeManagedImageDeletion(storageKey) {
-      await database.query('FOR job IN storageDeletionJobs FILTER job.storageKey == @storageKey REMOVE job IN storageDeletionJobs', { storageKey });
+    async renewManagedImageUpload(reservation) {
+      const rows = await (await database.query('FOR job IN storageDeletionJobs FILTER job.storageKey == @storageKey && job.status == "reserved" && job.claimToken == @token UPDATE job WITH { reservationExpiresAt: @reservationExpiresAt } IN storageDeletionJobs RETURN true', { ...reservation, reservationExpiresAt: new Date(Date.now() + STORAGE_UPLOAD_RESERVATION_MS).toISOString() })).all();
+      return rows[0] === true;
+    },
+    async acknowledgeManagedImageDeletion(reservation) {
+      const rows = await (await database.query('FOR job IN storageDeletionJobs FILTER job.storageKey == @storageKey && job.status == "reserved" && job.claimToken == @token LET referenced = LENGTH(FOR image IN images FILTER image.storageKey == @storageKey LIMIT 1 RETURN 1) > 0 FILTER referenced REMOVE job IN storageDeletionJobs RETURN true', reservation)).all();
+      return rows[0] === true;
+    },
+    async releaseManagedImageUpload(reservation) {
+      const rows = await (await database.query('FOR job IN storageDeletionJobs FILTER job.storageKey == @storageKey && job.status == "reserved" && job.claimToken == @token LET referenced = LENGTH(FOR image IN images FILTER image.storageKey == @storageKey LIMIT 1 RETURN 1) > 0 FILTER !referenced REMOVE job IN storageDeletionJobs RETURN true', reservation)).all();
+      return rows[0] === true;
     },
   };
   return repository;

@@ -21,6 +21,8 @@ import { useAuthStore } from "@/state/auth";
 import { useOnboardingStore } from "@/state/onboarding";
 import { palette } from "@/theme/tokens";
 import { readPendingReturnRoute, savePendingReturnRoute } from "@/lib/pending-return-route";
+import { BookPlaybackProvider } from "@/lib/book-playback";
+import { BookMiniPlayer } from "@/components/BookMiniPlayer";
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 let appOpenedTracked = false;
@@ -95,14 +97,17 @@ export default function RootLayout() {
         <AppQueryProvider>
           <ToastProvider>
             <BottomSheetScene>
-              <StatusBar style="light" />
-              <Stack
-                screenOptions={{
-                  headerShown: false,
-                  contentStyle: { backgroundColor: palette.page },
-                  animation: "fade",
-                }}
-              />
+              <BookPlaybackProvider>
+                <StatusBar style="light" />
+                <Stack
+                  screenOptions={{
+                    headerShown: false,
+                    contentStyle: { backgroundColor: palette.page },
+                    animation: "fade",
+                  }}
+                />
+                <BookMiniPlayer />
+              </BookPlaybackProvider>
             </BottomSheetScene>
           </ToastProvider>
         </AppQueryProvider>

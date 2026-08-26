@@ -308,7 +308,8 @@ describe('travel contracts and service', () => {
     const storage = { upload: async ({ key, bytes }: any) => { bytesByKey.set(key, bytes); return { storageKey: key }; }, download: async (key: string) => { const bytes = bytesByKey.get(key); if (!bytes) throw new Error('missing'); return { bytes }; }, delete: async (key: string) => { deleted.push(key); bytesByKey.delete(key); }, copy: async () => ({ storageKey: '' }) };
     const token = { version: 5, issuedAt: Date.parse(timestamp), nonce: 'A'.repeat(43), organizationKey: 'organization', scopeKey, country: { name: 'Japan', countryCode: 'JP', continent: 'Asia', latitude: 36.2, longitude: 138.2 }, place: { kind: 'country', name: 'Japan', summary: 'Island country.', countryCode: 'JP', latitude: 36.2, longitude: 138.2 }, hero: { title: 'Japan travel interpretation', prompt: 'Japan landscape' } } as const;
     let providerCalls = 0, converges = 0;
-    const repository = { authorizeRead: async () => {}, authorizeWrite: async () => key, cancelManagedImageDeletion: async () => {}, acknowledgeManagedImageDeletion: async () => {}, compensateManagedImage: async () => null, convergeManagedPlace: async ({ place }: any) => { converges += 1; return place; } } as unknown as TravelRepository;
+    const reservation = { storageKey: 'media/reserved.png', token: '11111111-1111-4111-8111-111111111111' };
+    const repository = { authorizeRead: async () => {}, authorizeWrite: async () => key, cancelManagedImageDeletion: async () => reservation, renewManagedImageUpload: async () => true, acknowledgeManagedImageDeletion: async () => true, releaseManagedImageUpload: async () => true, compensateManagedImage: async () => null, convergeManagedPlace: async ({ place }: any) => { converges += 1; return place; } } as unknown as TravelRepository;
     const service = createTravelService({ repository, storage, decryptImageRequest: () => token, getImage: async () => null, embed: async () => embedding, now: () => timestamp, signImageUrl: async (storageKey) => `https://signed.test/${storageKey}`,
       placeImages: { execute: (async () => { providerCalls += 1; return { output: { images: [{ base64: placePngBase64, mimeType: 'image/png' }] }, costUsd: 0.01 }; }) as any, now: () => Date.parse(timestamp), log: () => {} },
       process: (async (input: any) => { processed.push(input.file.bytes); return imageSchema.parse({ key: input.imageKey, scopeKey, filename: input.file.filename, caption: 'Japan landscape', imageCaptionKey: key, createdByKey: key, storageKey: 'media/japan.png', mimeType: 'image/png', sizeBytes: 3, width: 1536, height: 1024, embedding, mutationPolicy: 'system-only', isFavorite: false, createdAt: timestamp, updatedAt: timestamp }); }) as any });
@@ -321,7 +322,8 @@ describe('travel contracts and service', () => {
     const stagedKey = `pending/gallery/place-media/${'B'.repeat(43)}/preview.png`, deleted: string[] = [], acknowledged: string[] = [];
     const storage = { upload: async ({ key }: any) => ({ storageKey: key }), download: async () => ({ bytes: new Uint8Array([1, 2, 3]) }), delete: async (key: string) => { deleted.push(key); }, copy: async () => ({ storageKey: '' }) };
     const token = { version: 5, issuedAt: Date.parse(timestamp), nonce: 'B'.repeat(43), organizationKey: 'organization', scopeKey, country: { name: 'Japan', countryCode: 'JP', continent: 'Asia', latitude: 36.2, longitude: 138.2 }, place: { kind: 'country', name: 'Japan', summary: 'Island country.', countryCode: 'JP', latitude: 36.2, longitude: 138.2 }, hero: { title: 'Japan', prompt: 'Japan' } } as const;
-    const repository = { authorizeWrite: async () => key, cancelManagedImageDeletion: async () => {}, compensateManagedImage: async () => 'media/orphan.png', acknowledgeManagedImageDeletion: async (storageKey: string) => { acknowledged.push(storageKey); }, convergeManagedPlace: async () => { throw new Error('converge failed'); } } as unknown as TravelRepository;
+    const reservation = { storageKey: 'media/orphan.png', token: '22222222-2222-4222-8222-222222222222' };
+    const repository = { authorizeWrite: async () => key, cancelManagedImageDeletion: async () => reservation, renewManagedImageUpload: async () => true, acknowledgeManagedImageDeletion: async () => true, compensateManagedImage: async () => 'media/orphan.png', releaseManagedImageUpload: async (owned: typeof reservation) => { acknowledged.push(owned.storageKey); return true; }, convergeManagedPlace: async () => { throw new Error('converge failed'); } } as unknown as TravelRepository;
     const image = imageSchema.parse({ key, scopeKey, filename: 'japan.png', caption: 'Japan', imageCaptionKey: key, createdByKey: key, storageKey: 'media/orphan.png', mimeType: 'image/png', sizeBytes: 3, width: 1536, height: 1024, embedding, mutationPolicy: 'system-only', isFavorite: false, createdAt: timestamp, updatedAt: timestamp });
     const service = createTravelService({ repository, storage, decryptImageRequest: () => token, getImage: async () => null, process: async () => image, embed: async () => embedding, now: () => timestamp });
     await expect(service.createPlace({ organizationKey: 'organization', scopeKey, name: 'Japan', summary: 'Island country.', countryCode: 'JP', latitude: 36.2, longitude: 138.2, imageRequestToken: 'token' }, 'user')).rejects.toThrow('converge failed');
@@ -796,6 +798,25 @@ describe('travel repository', () => {
     expect(calls[3]).toContain('IN storageDeletionJobs');
     expect(calls[4]).toBe('REMOVE @captionKey IN imageCaptions');
     expect(calls.slice(1).every((query) => !query.includes('FOR retained IN images'))).toBe(true);
+  });
+  test('reserves managed image keys and refuses an active deletion claim', async () => {
+    const queries: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
+    const database: TravelDatabase = { async query(query, bindVars) { queries.push({ query, bindVars }); return { async all() { return [true]; } }; } };
+    await expect(createTravelRepository(database).cancelManagedImageDeletion('media/reserved.png')).resolves.toMatchObject({ storageKey: 'media/reserved.png', token: expect.any(String) });
+    expect(queries[0]?.query).toContain('status: "reserved"');
+    expect(queries[0]?.query).toContain('existing.status == "reserved" && existing.reservationExpiresAt <= @now');
+
+    const claimed: TravelDatabase = { async query() { return { async all() { return []; } }; } };
+    await expect(createTravelRepository(claimed).cancelManagedImageDeletion('media/claimed.png')).rejects.toMatchObject({ reason: 'conflict' });
+  });
+  test('acknowledges only its referenced managed-image reservation token', async () => {
+    const queries: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
+    const database: TravelDatabase = { async query(query, bindVars) { queries.push({ query, bindVars }); return { async all() { return [true]; } }; } };
+    const reservation = { storageKey: 'media/owned.png', token: '11111111-1111-4111-8111-111111111111' };
+    await expect(createTravelRepository(database).acknowledgeManagedImageDeletion(reservation)).resolves.toBe(true);
+    expect(queries[0]?.query).toContain('job.status == "reserved" && job.claimToken == @token');
+    expect(queries[0]?.query).toContain('image.storageKey == @storageKey');
+    expect(queries[0]?.bindVars).toEqual(reservation);
   });
   test('lists authorized places and exposes the same read authorization', async () => {
     const queries: string[] = [];

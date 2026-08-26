@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { requireOrganizationAccess, requireScopeAccess } from '@/lib/founders/access';
 import { redisConnection } from '@/lib/redis';
@@ -31,7 +31,11 @@ const redisStore: OAuthStore = {
 
 function token(prefix: string) { return `${prefix}${randomBytes(32).toString('base64url')}`; }
 function allowedReturnUri(value: string) {
-  const allowed = new Set((process.env.EMAIL_CONNECTOR_MOBILE_REDIRECT_URIS ?? 'vorinthexcore://capability/signal').split(',').map((item) => item.trim()).filter(Boolean));
+  const allowed = new Set([
+    'vorinthexcore://capability/signal',
+    'https://vorinthex.com/capability/signal',
+    ...(process.env.EMAIL_CONNECTOR_MOBILE_REDIRECT_URIS ?? '').split(',').map((item) => item.trim()).filter(Boolean),
+  ]);
   const url = new URL(value);
   url.search = '';
   url.hash = '';
@@ -43,7 +47,8 @@ export function createEmailOAuthService(options: {
   store?: OAuthStore; connectors?: ConnectorRepository; inboxes?: InboxRepository;
   exchange?: typeof exchangeGmailCode; authorize?: (userKey: string, organizationKey: string, scopeKey: string) => Promise<{ membershipKey: string }>;
   profile?: (accessToken: string) => Promise<{ historyId: string }>;
-  subscribe?: (actor: { userKey: string; organizationKey: string; scopeKey: string }, connectorKey: string, expectedRevision: string) => Promise<unknown>;
+  registerWatch?: (actor: { userKey: string; organizationKey: string; scopeKey: string }, connectorKey: string, expectedRevision: string) => Promise<unknown>;
+  enqueueInitialSync?: (input: { organizationKey: string; scopeKey: string; connectorKey: string; operationKey: string }) => Promise<unknown>;
   ensureInbox?: (actor: { userKey: string; organizationKey: string; scopeKey: string }, connector: NonNullable<Awaited<ReturnType<ConnectorRepository['getByKey']>>>, metadata: { name: string; description?: string }, overwrite: boolean, expectedRevision: string | null) => Promise<unknown>;
   inboxView?: (actor: { userKey: string; organizationKey: string; scopeKey: string }, connectorKey: string) => Promise<unknown>;
 } = {}) {
@@ -52,7 +57,8 @@ export function createEmailOAuthService(options: {
   const inboxes = options.inboxes ?? createInboxRepository();
   const exchange = options.exchange ?? exchangeGmailCode;
   const profile = options.profile ?? ((accessToken: string) => createGmailClient(accessToken).profile());
-  const subscribe = options.subscribe ?? (async (actor: { organizationKey: string; scopeKey: string }, connectorKey: string, expectedRevision: string) => (await import('./service')).createSystemEmailService({ connectors }).subscribe({ userKey: 'system', ...actor }, connectorKey, expectedRevision));
+  const registerWatch = options.registerWatch ?? (async (actor: { organizationKey: string; scopeKey: string }, connectorKey: string, expectedRevision: string) => (await import('./service')).createSystemEmailService({ connectors }).registerWatch({ userKey: 'system', ...actor }, connectorKey, expectedRevision));
+  const enqueueInitialSync = options.enqueueInitialSync ?? (async (input) => (await import('./sync-queue')).enqueueEmailInitialSync(input));
   const ensureInbox = options.ensureInbox ?? (async (actor, connector, metadata, overwrite, expectedRevision) => (await import('./service')).createEmailService({ connectors, inboxes }).ensureInbox(actor, connector, metadata, overwrite, expectedRevision));
   const inboxView = options.inboxView ?? (async (actor, connectorKey) => (await import('./service')).createEmailService({ connectors, inboxes }).inboxView(actor, connectorKey));
   const authorize = options.authorize ?? (async (userKey, organizationKey, scopeKey) => {
@@ -80,7 +86,7 @@ export function createEmailOAuthService(options: {
         redirect.searchParams.set('email_connection_error', input.error ?? 'authorization_denied');
         return redirect.toString();
       }
-      let reconnect: { connectorKey: string; connectorRevision: string; inboxRevision?: string; previous: Awaited<ReturnType<ConnectorRepository['findExact']>>; previousInbox: Awaited<ReturnType<InboxRepository['getByConnector']>> } | undefined;
+      let reconnect: { connectorKey: string; connectorRevision: string; inboxKey?: string; inboxRevision?: string; previous: Awaited<ReturnType<ConnectorRepository['findExact']>>; previousInbox: Awaited<ReturnType<InboxRepository['getByConnector']>> } | undefined;
       try {
         const access = await authorize(state.userKey, state.organizationKey, state.scopeKey);
         if (access.membershipKey !== state.membershipKey) throw new Error('Email authorization membership changed');
@@ -100,9 +106,9 @@ export function createEmailOAuthService(options: {
           expectedRevision: previous?.revision ?? null,
         });
         reconnect = { connectorKey: connector.key, connectorRevision: connector.revision, previous, previousInbox };
-        const initializedInbox = await ensureInbox({ userKey: state.userKey, organizationKey: state.organizationKey, scopeKey: state.scopeKey }, connector, { name: state.name, ...(state.description ? { description: state.description } : {}) }, previous !== null, previousInbox?.revision ?? null) as { revision?: string } | undefined;
-        if (initializedInbox?.revision) reconnect.inboxRevision = initializedInbox.revision;
-        const syncRevision = await connectors.setSyncState(connector.key, 'idle', { historyId: providerProfile.historyId, pendingHistoryId: null, pendingThreadIds: null, resetLastSynced: true, markSynced: false, expectedRevision: reconnect.connectorRevision });
+        const initializedInbox = await ensureInbox({ userKey: state.userKey, organizationKey: state.organizationKey, scopeKey: state.scopeKey }, connector, { name: state.name, ...(state.description ? { description: state.description } : {}) }, previous !== null, previousInbox?.revision ?? null) as { key?: string; revision?: string } | undefined;
+        if (initializedInbox?.revision) { reconnect.inboxKey = initializedInbox.key; reconnect.inboxRevision = initializedInbox.revision; }
+        const syncRevision = await connectors.setSyncState(connector.key, 'idle', { historyId: providerProfile.historyId, pendingHistoryId: null, pendingThreadIds: null, pendingSubscriptionMessages: null, resetLastSynced: true, markSynced: false, expectedRevision: reconnect.connectorRevision });
         if (!syncRevision) throw new Error('Could not initialize email synchronization state');
         reconnect.connectorRevision = syncRevision;
         if (initializeInactive) {
@@ -111,14 +117,18 @@ export function createEmailOAuthService(options: {
           connector = activated;
           reconnect.connectorRevision = activated.revision;
         }
-        try { await subscribe({ userKey: state.userKey, organizationKey: state.organizationKey, scopeKey: state.scopeKey }, connector.key, reconnect.connectorRevision); }
+        try {
+          const watch = await registerWatch({ userKey: state.userKey, organizationKey: state.organizationKey, scopeKey: state.scopeKey }, connector.key, reconnect.connectorRevision) as { connectorRevision?: string } | undefined;
+          if (watch?.connectorRevision) reconnect.connectorRevision = watch.connectorRevision;
+        }
         catch (error) { if (!(error instanceof EmailWatchRepairPendingError)) throw error; }
+        await enqueueInitialSync({ organizationKey: state.organizationKey, scopeKey: state.scopeKey, connectorKey: connector.key, operationKey: randomUUID() });
         const grant = token('vrtx_email_grant_');
         const payload = grantSchema.parse({ userKey: state.userKey, organizationKey: state.organizationKey, scopeKey: state.scopeKey, connectorKey: connector.key });
         if (!(await store.put(`${GRANT_PREFIX}${grant}`, JSON.stringify(payload), 300))) throw new Error('Could not create email connection grant');
         redirect.searchParams.set('email_connection_code', grant);
       } catch {
-        if (reconnect) await connectors.rollbackReconnect({ connectorKey: reconnect.connectorKey, connectorRevision: reconnect.connectorRevision, previousConnector: reconnect.previous, inboxRevision: reconnect.inboxRevision, previousInbox: reconnect.previousInbox }).catch(() => false);
+        if (reconnect) await connectors.rollbackReconnect({ connectorKey: reconnect.connectorKey, connectorRevision: reconnect.connectorRevision, previousConnector: reconnect.previous, inboxKey: reconnect.inboxKey, inboxRevision: reconnect.inboxRevision, previousInbox: reconnect.previousInbox }).catch(() => false);
         redirect.searchParams.set('email_connection_error', 'connection_failed');
       }
       return redirect.toString();

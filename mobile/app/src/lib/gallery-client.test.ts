@@ -112,6 +112,10 @@ const image = (key: string, filename: string, caption: string) => ({
   url: `https://images.example/${key}`,
 });
 
+test("continues parsing existing JPEG image records", () => {
+  expect(galleryImageSchema.parse(image("legacy", "legacy.jpg", "Legacy image"))).toMatchObject({ filename: "legacy.jpg", mimeType: "image/jpeg" });
+});
+
 test("merges immediate and semantic matches without changing immediate order", () => {
   const exact = image("exact", "exact.jpg", "Exact match");
   const semantic = image("semantic", "semantic.jpg", "Related match");

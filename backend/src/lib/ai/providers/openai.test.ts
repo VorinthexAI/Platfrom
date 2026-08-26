@@ -59,6 +59,24 @@ test('preserves direct OpenAI image generation with the extended contract', asyn
   expect(result).toMatchObject({ output: { images: [{ base64: png, mimeType: 'image/png' }] }, usage: { inputTokens: 2, outputTokens: 3, totalTokens: 5 }, providerId: 'openai' });
 });
 
+test('chunks long speech deterministically and preserves exact numeric pace', async () => {
+  const bodies: Array<{ input: string; speed: number }> = []; let responseIndex = 0;
+  globalThis.fetch = (async (_input, init) => { bodies.push(JSON.parse(String(init?.body))); const bytes = responseIndex++ === 0 ? new Uint8Array([1, 2]) : new Uint8Array([0x49, 0x44, 0x33, 4, 0, 0, 0, 0, 0, 0, 3, 4]); return new Response(bytes, { headers: { 'content-type': 'audio/mpeg' } }); }) as typeof fetch;
+  const text = Array(1_000).fill('word').join(' ');
+  const result = await createOpenAIProvider({ apiKey: 'test-key' }).execute({ actionId: 'generate-speech', modelId: 'openai.gpt-4o-mini-tts', externalModelId: 'gpt-4o-mini-tts', input: { text, voice: 'coral', pace: 1.37, format: 'mp3' }, organizationKey: 'organization' });
+  expect(bodies.length).toBeGreaterThan(1); expect(bodies.every(({ input, speed }) => input.length <= 3_800 && speed === 1.37)).toBe(true);
+  expect(bodies.flatMap(({ input }) => input.split(/\s+/))).toEqual(text.split(/\s+/));
+  expect(Buffer.from((result.output as { base64: string }).base64, 'base64')).toEqual(Buffer.from([1, 2, 3, 4]));
+});
+
+test('propagates abort signals through speech requests', async () => {
+  globalThis.fetch = ((_input, init) => new Promise((_resolve, reject) => { const signal = init?.signal; signal?.addEventListener('abort', () => reject(new DOMException('cancelled', 'AbortError')), { once: true }); })) as typeof fetch;
+  const controller = new AbortController();
+  const execution = createOpenAIProvider({ apiKey: 'test-key' }).execute({ actionId: 'generate-speech', modelId: 'openai.gpt-4o-mini-tts', externalModelId: 'gpt-4o-mini-tts', input: { text: 'Narrate this.', voice: 'sage', pace: 0.83, format: 'mp3' }, organizationKey: 'organization', signal: controller.signal });
+  await Promise.resolve(); controller.abort(new DOMException('cancelled', 'AbortError'));
+  await expect(execution).rejects.toMatchObject({ code: 'aborted' });
+});
+
 test('uses Responses web search and returns grounded text, citations, and sources', async () => {
   let url = '';
   let body: Record<string, any> = {};

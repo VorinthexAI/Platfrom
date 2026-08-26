@@ -3,6 +3,7 @@ import { z } from 'zod';
 export const MODEL_SLUGS = [
   'openai.gpt-5.6-luna',
   'openai.gpt-image-2',
+  'openai.gpt-4o-mini-tts',
   'bfl.flux-2-klein-4b',
   'xai.grok-imagine-image-quality',
   'openai.text-embedding-3-small',

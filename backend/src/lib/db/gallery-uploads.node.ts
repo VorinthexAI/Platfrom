@@ -11,7 +11,7 @@ export const galleryUploadSchema = z.object({
   imageKey: z.string().cuid(),
   collectionKey: z.string().cuid().nullable(),
   filename: z.string().trim().min(1).max(255),
-  mimeType: z.literal('image/jpeg'),
+  mimeType: z.enum(['image/jpeg', 'image/png']),
   sizeBytes: z.number().int().positive().max(20 * 1024 * 1024),
   city: z.string().trim().min(1).max(200).nullable().default(null),
   country: z.string().trim().min(1).max(200).nullable().default(null),

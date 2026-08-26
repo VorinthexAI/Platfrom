@@ -5,6 +5,7 @@ describe('logical model slugs', () => {
     expect(MODEL_SLUGS).toEqual([
       'openai.gpt-5.6-luna',
       'openai.gpt-image-2',
+      'openai.gpt-4o-mini-tts',
       'bfl.flux-2-klein-4b',
       'xai.grok-imagine-image-quality',
       'openai.text-embedding-3-small',

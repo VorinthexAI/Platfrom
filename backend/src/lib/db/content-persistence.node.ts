@@ -72,31 +72,31 @@ async function scopedUpdate<T>(
   const { set, unset } = splitPatch(patch);
   const ownership = collection === 'folders' ? `
       FILTER !HAS(current, "_internalDeletion") || current._internalDeletion == null
-      FILTER current.mutationPolicy != "system-container" || @allowSystemContainerUpdate
+      FILTER (current.mutationPolicy != "system-container" && current.managedPurpose == null) || @allowManagedUpdate
       LET destinationKey = @changesLocation ? @destinationKey : (HAS(current, "parentFolderKey") ? current.parentFolderKey : null)
       LET destination = destinationKey == null ? null : DOCUMENT(folders, destinationKey)
       FILTER destinationKey == null || (destination != null && destination.scopeKey == @scopeKey)
       FILTER destinationKey == null || (!HAS(destination, "_internalDeletion") || destination._internalDeletion == null)
-      FILTER destinationKey == null || destination.mutationPolicy != "system-container"
+       FILTER !@changesLocation || destinationKey == null || destinationKey == current.parentFolderKey || (destination.mutationPolicy != "system-container" && destination.managedPurpose == null)
   ` : collection === 'documents' ? `
       FILTER !HAS(current, "_internalDeletion") || current._internalDeletion == null
-      FILTER current.mutationPolicy != "system-only" && current.managedPurpose != "mail-attachment"
+       FILTER (current.mutationPolicy != "system-only" && current.managedPurpose == null) || @allowManagedUpdate
       LET destinationKey = @changesLocation ? @destinationKey : (HAS(current, "folderKey") ? current.folderKey : null)
       LET destination = destinationKey == null ? null : DOCUMENT(folders, destinationKey)
       FILTER destinationKey == null || (destination != null && destination.scopeKey == @scopeKey)
       FILTER destinationKey == null || (!HAS(destination, "_internalDeletion") || destination._internalDeletion == null)
-      FILTER destinationKey == null || destination.mutationPolicy != "system-container"
+       FILTER !@changesLocation || destinationKey == null || destinationKey == current.folderKey || (destination.mutationPolicy != "system-container" && destination.managedPurpose == null)
   ` : collection === 'documentShares' || collection === 'documentVersions' ? `
       LET owner = DOCUMENT(documents, current.documentKey)
-      FILTER owner != null && owner.scopeKey == @scopeKey
-      FILTER !HAS(owner, "_internalDeletion") || owner._internalDeletion == null
-      FILTER owner.managedPurpose != "mail-attachment"
+       FILTER owner != null && owner.scopeKey == @scopeKey
+       FILTER !HAS(owner, "_internalDeletion") || owner._internalDeletion == null
+       FILTER owner.mutationPolicy != "system-only" && owner.managedPurpose == null
   ` : `
       FILTER current.sourceType == "document"
       LET owner = DOCUMENT(documents, current.sourceKey)
-      FILTER owner != null && owner.scopeKey == @scopeKey
-      FILTER !HAS(owner, "_internalDeletion") || owner._internalDeletion == null
-      FILTER owner.managedPurpose != "mail-attachment"
+       FILTER owner != null && owner.scopeKey == @scopeKey
+       FILTER !HAS(owner, "_internalDeletion") || owner._internalDeletion == null
+       FILTER owner.mutationPolicy != "system-only" && owner.managedPurpose == null
   `;
   const cursor = await executor.query(`
     FOR current IN @@collection
@@ -114,7 +114,7 @@ async function scopedUpdate<T>(
     ...(collection === 'documentVersions' || collection === 'documentShares' || collection === 'shares' ? {} : { destinationKey: set.parentFolderKey ?? set.folderKey ?? null }),
     ...(collection === 'folders' ? { changesLocation: Object.prototype.hasOwnProperty.call(patch, 'parentFolderKey') } : {}),
     ...(collection === 'documents' ? { changesLocation: Object.prototype.hasOwnProperty.call(patch, 'folderKey') } : {}),
-    ...(collection === 'folders' ? { allowSystemContainerUpdate: Object.keys(patch).every((field) => field === 'isFavorite' || field === 'updatedAt') } : {}),
+    ...(collection === 'folders' || collection === 'documents' ? { allowManagedUpdate: Object.keys(patch).every((field) => field === 'isFavorite' || field === 'updatedAt') } : {}),
     patch: set,
     unset,
     expectedUpdatedAt: expectedUpdatedAt ?? null,
@@ -137,7 +137,7 @@ async function scopedDelete(
     LET affectedTripKeys = @attachmentType == null ? [] : (FOR attachment IN tripAttachments FILTER attachment.scopeKey == @scopeKey && attachment.targetType == @attachmentType && attachment.targetKey == @key RETURN DISTINCT attachment.tripKey)
     LET removedKey = FIRST(FOR current IN @@collection
         FILTER current._key == @key && current.scopeKey == @scopeKey
-        FILTER (!@protectSystemContainer || current.mutationPolicy != "system-container") && current.mutationPolicy != "system-only" && current.managedPurpose != "mail-attachment"
+        FILTER (!@protectSystemContainer || current.mutationPolicy != "system-container") && current.mutationPolicy != "system-only" && current.managedPurpose == null
         LIMIT 1
         REMOVE current IN @@collection
         RETURN OLD._key)
@@ -195,12 +195,12 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       return values.map((value) => folderSchema.parse(withArangoKey(value as Record<string, unknown>)));
     },
     async getDocument(key: string): Promise<Document | null> {
-      const cursor = await executor.query('LET document = DOCUMENT(documents, @key) FILTER document != null && document.mutationPolicy != "system-only" RETURN document', { key });
+      const cursor = await executor.query('RETURN DOCUMENT(documents, @key)', { key });
       const value = await cursor.next();
       return value ? documentSchema.parse(withArangoKey(value as Record<string, unknown>)) : null;
     },
     async listDocuments(scopeKey: string, includePendingDeletion = false): Promise<Document[]> {
-      const cursor = await executor.query(`FOR document IN documents FILTER document.scopeKey == @scopeKey && document.mutationPolicy != "system-only" FILTER @includePending || !HAS(document, "_internalDeletion") || document._internalDeletion == null RETURN document`, { scopeKey, includePending: includePendingDeletion });
+      const cursor = await executor.query(`FOR document IN documents FILTER document.scopeKey == @scopeKey FILTER @includePending || !HAS(document, "_internalDeletion") || document._internalDeletion == null RETURN document`, { scopeKey, includePending: includePendingDeletion });
       const values = cursor.all ? await cursor.all() : [];
       return values.map((value) => documentSchema.parse(withArangoKey(value as Record<string, unknown>)));
     },
@@ -220,7 +220,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
           RETURN { score, value: folder })
         LET documentMatches = (FOR document IN documents
           FILTER document.scopeKey == @scopeKey
-          FILTER document.mutationPolicy != "system-only"
+          FILTER (document.archiveVisibility || "visible") == "visible"
           FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
           FILTER document.folderKey == null || document.folderKey IN @activeFolderKeys
           FILTER @sourceDocumentKey == null || document._key != @sourceDocumentKey
@@ -237,7 +237,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
           RETURN { score, value: document })
         LET fileMatches = (FOR document IN documents
           FILTER document.scopeKey == @scopeKey
-          FILTER document.mutationPolicy != "system-only"
+          FILTER (document.archiveVisibility || "visible") == "visible"
           FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
           FILTER document.folderKey == null || document.folderKey IN @activeFolderKeys
           FILTER @sourceDocumentKey == null || document._key != @sourceDocumentKey
@@ -309,6 +309,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
         LET document = DOCUMENT(documents, target.documentKey)
         FILTER document != null && document.scopeKey == @scopeKey
         FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
+        FILTER document.mutationPolicy != "system-only" && document.managedPurpose == null
         FOR audio IN documentAudioVersions
           FILTER audio.scopeKey == @scopeKey && audio.documentKey == target.documentKey
           FILTER audio._key == target._key || audio.isCurrent == true
@@ -328,6 +329,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
         LET document = DOCUMENT(documents, @documentKey)
         FILTER document != null && document.scopeKey == @scopeKey
         FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
+        FILTER document.mutationPolicy != "system-only" && document.managedPurpose == null
         FOR audio IN documentAudioVersions
           FILTER audio.scopeKey == @scopeKey && audio.documentKey == @documentKey && audio.isCurrent == true
           UPDATE audio WITH { isCurrent: false } IN documentAudioVersions
@@ -363,7 +365,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       if (parsed.embedding.length) currentEmbeddingSchema.parse(parsed.embedding);
       const cursor = await executor.query(
         `LET parent = @parentKey == null ? {} : DOCUMENT(folders, @parentKey)
-         FILTER @parentKey == null || (parent != null && parent.scopeKey == @scopeKey && (!HAS(parent, "_internalDeletion") || parent._internalDeletion == null) && parent.mutationPolicy != "system-container")
+         FILTER @parentKey == null || (parent != null && parent.scopeKey == @scopeKey && (!HAS(parent, "_internalDeletion") || parent._internalDeletion == null) && parent.mutationPolicy != "system-container" && parent.managedPurpose == null)
          INSERT @folder INTO folders RETURN NEW`,
         { folder: toArangoDoc(parsed), parentKey: parsed.parentFolderKey ?? null, scopeKey: parsed.scopeKey },
       );
@@ -384,6 +386,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
         `LET folder = @folderKey == null ? null : DOCUMENT(folders, @folderKey)
          FILTER @folderKey == null || (folder != null && folder.scopeKey == @scopeKey)
          FILTER @folderKey == null || (!HAS(folder, "_internalDeletion") || folder._internalDeletion == null)
+         FILTER @folderKey == null || (folder.mutationPolicy != "system-container" && folder.managedPurpose == null)
          INSERT @document INTO documents RETURN NEW`,
         { document: toArangoDoc(parsed), folderKey: parsed.folderKey ?? null, scopeKey: parsed.scopeKey },
       );
@@ -399,6 +402,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
         `LET document = DOCUMENT(documents, @documentKey)
          FILTER document != null && document.scopeKey == @scopeKey
          FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
+         FILTER document.mutationPolicy != "system-only" && document.managedPurpose == null
          LET folder = HAS(document, "folderKey") && document.folderKey != null ? DOCUMENT(folders, document.folderKey) : null
          FILTER folder == null || folder.scopeKey == @scopeKey
          FILTER folder == null || !HAS(folder, "_internalDeletion") || folder._internalDeletion == null
@@ -432,6 +436,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
         LET document = DOCUMENT(documents, @documentKey)
         FILTER document != null && document.scopeKey == @scopeKey
         FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
+        FILTER document.mutationPolicy != "system-only" && document.managedPurpose == null
          LET folder = HAS(document, "folderKey") && document.folderKey != null ? DOCUMENT(folders, document.folderKey) : null
          FILTER folder == null || folder.scopeKey == @scopeKey
          FILTER folder == null || !HAS(folder, "_internalDeletion") || folder._internalDeletion == null
@@ -460,6 +465,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
             LET document = DOCUMENT(documents, @documentKey)
             FILTER document != null && document.scopeKey == @scopeKey
             FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
+            FILTER document.mutationPolicy != "system-only" && document.managedPurpose == null
             LET nextVersion = FIRST(
               FOR existing IN documentAudioVersions
                 FILTER existing.documentKey == @documentKey
@@ -487,6 +493,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
             LET document = DOCUMENT(documents, @documentKey)
             FILTER document != null && document.scopeKey == @scopeKey
             FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
+            FILTER document.mutationPolicy != "system-only" && document.managedPurpose == null
             LET nextVersion = FIRST(
               FOR existing IN documentSummaries
                 FILTER existing.documentKey == @documentKey
@@ -515,6 +522,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
           FILTER summary != null && summary.scopeKey == @scopeKey && summary.documentKey == @documentKey
           FILTER document != null && document.scopeKey == @scopeKey
           FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
+          FILTER document.mutationPolicy != "system-only" && document.managedPurpose == null
           INSERT @audio INTO documentSummaryAudio RETURN NEW
         `, { summaryKey: audio.summaryKey, documentKey: audio.documentKey, scopeKey: audio.scopeKey, audio: toArangoDoc(audio) });
         const created = await cursor.next();
@@ -562,6 +570,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
               && global.scopeKey == @scopeKey && global.sourceType == "document" && global.sourceKey == legacy.documentKey
             FILTER owner != null && owner.scopeKey == @scopeKey
             FILTER !HAS(owner, "_internalDeletion") || owner._internalDeletion == null
+            FILTER owner.mutationPolicy != "system-only" && owner.managedPurpose == null
             UPDATE global WITH MERGE(@patch, ZIP(@unset, @unset[* RETURN null])) IN shares OPTIONS { keepNull: false }
             LET updatedGlobal = NEW
             UPDATE legacy WITH MERGE(@patch, ZIP(@unset, @unset[* RETURN null])) IN documentShares OPTIONS { keepNull: false }
@@ -577,7 +586,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       const { set, unset } = splitPatch({ _internalDeletion: marker });
       const cursor = await executor.query(`
         FOR current IN folders
-          FILTER current._key == @key && current.scopeKey == @scopeKey && current.mutationPolicy != "system-container"
+          FILTER current._key == @key && current.scopeKey == @scopeKey && current.mutationPolicy != "system-container" && current.managedPurpose == null
           FILTER @owner == null || current._internalDeletion.owner == @owner
           LIMIT 1
           UPDATE current WITH MERGE(@patch, ZIP(@unset, @unset[* RETURN null])) IN folders OPTIONS { keepNull: false }
@@ -591,6 +600,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       const cursor = await executor.query(`
         FOR current IN documents
           FILTER current._key == @key && current.scopeKey == @scopeKey
+          FILTER current.mutationPolicy != "system-only" && current.managedPurpose == null
           FILTER @owner == null || current._internalDeletion.owner == @owner
           LIMIT 1
           UPDATE current WITH MERGE(@patch, ZIP(@unset, @unset[* RETURN null])) IN documents OPTIONS { keepNull: false }

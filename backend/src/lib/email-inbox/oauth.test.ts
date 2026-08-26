@@ -13,6 +13,7 @@ const store: OAuthStore = {
 };
 const userKey = 'cmrnlzf650002qc7k4p5zem5w';
 const scopeKey = 'cmrnlzf640001qc7kazsr96k5';
+const enqueueInitialSync = async () => ({ jobId: 'initial-sync-job' });
 
 beforeEach(() => {
   values.clear();
@@ -49,6 +50,7 @@ describe('email OAuth state', () => {
     });
     const stateWrites: unknown[][] = [];
     let watchWrites = 0;
+    const initialJobs: any[] = [];
     const connectors = {
       findExact: async () => null,
       upsert: async () => ({ ...connector, revision: 'connector-upsert' }),
@@ -58,10 +60,10 @@ describe('email OAuth state', () => {
       updateWatch: async () => { watchWrites += 1; },
     };
     const oauth = createEmailOAuthService({
-      store, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey }), profile: async () => ({ historyId: 'history-1' }),
+      store, connectors: connectors as never, enqueueInitialSync: async (input) => { expect([...values.keys()].some((key) => key.startsWith('email:oauth:grant:'))).toBe(false); initialJobs.push(input); return { jobId: 'initial' }; }, authorize: async () => ({ membershipKey: scopeKey }), profile: async () => ({ historyId: 'history-1' }),
       ensureInbox: async (_actor, _connector, metadata, overwrite) => { expect(metadata).toEqual({ name: 'Work' }); expect(overwrite).toBe(false); },
       inboxView: async () => ({ key: scopeKey, connectorKey: connector.key, name: 'Work', email: connector.email }),
-      subscribe: async (actor, connectorKey) => { expect(actor).toEqual({ userKey, organizationKey: 'org-1', scopeKey }); expect(connectorKey).toBe(connector.key); watchWrites += 1; },
+      registerWatch: async (actor, connectorKey) => { expect(actor).toEqual({ userKey, organizationKey: 'org-1', scopeKey }); expect(connectorKey).toBe(connector.key); watchWrites += 1; },
       exchange: async () => ({ identity: { providerAccountId: 'google-1', email: 'person@example.com' }, scopes: ['email'], credentials: { accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now } }),
     });
     const started = await oauth.start({ userKey, organizationKey: 'org-1', scopeKey, name: 'Work', returnUri: 'vorinthexcore://capability/signal' });
@@ -71,8 +73,26 @@ describe('email OAuth state', () => {
     expect(stateWrites).toHaveLength(1);
     expect(stateWrites[0]?.[2]).toMatchObject({ historyId: 'history-1', pendingHistoryId: null, pendingThreadIds: null, resetLastSynced: true, markSynced: false, expectedRevision: 'connector-upsert' });
     expect(watchWrites).toBe(1);
+    expect(initialJobs).toEqual([{ organizationKey: 'org-1', scopeKey, connectorKey: connector.key, operationKey: expect.any(String) }]);
+    expect(initialJobs[0].operationKey).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(await oauth.exchange({ userKey, organizationKey: 'org-1', scopeKey, code })).toMatchObject({ email: 'person@example.com' });
     expect(await oauth.exchange({ userKey, organizationKey: 'org-1', scopeKey, code })).toBeNull();
+  });
+
+  test('rolls back and withholds the grant when durable initial-sync enqueue fails', async () => {
+    const now = '2026-08-11T12:00:00.000Z';
+    const connector = organizationConnectorSchema.parse({ key: userKey, organizationKey: 'org-1', scopeKey, provider: 'gmail', providerAccountId: 'google-queue-failure', email: 'person@example.com', encryptedCredentials: 'ciphertext', encryptionKeyId: 'v1', accessTokenFingerprint: 'a'.repeat(64), scopes: ['email'], createdByMembershipKey: scopeKey, status: 'active', createdAt: now, updatedAt: now });
+    let rollback: any;
+    const oauth = createEmailOAuthService({
+      store, connectors: { findExact: async () => connector, credentials: () => ({ accessToken: 'old', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now }), upsert: async () => ({ ...connector, revision: 'upsert' }), setSyncState: async () => 'sync', rollbackReconnect: async (input: unknown) => { rollback = input; return true; } } as never,
+      inboxes: { getByConnector: async () => null } as never, authorize: async () => ({ membershipKey: scopeKey }), profile: async () => ({ historyId: 'history' }), ensureInbox: async () => ({ revision: 'inbox' }), registerWatch: async () => ({ connectorRevision: 'watch' }),
+      enqueueInitialSync: async () => { throw new Error('queue unavailable'); }, exchange: async () => ({ identity: { providerAccountId: connector.providerAccountId, email: connector.email }, scopes: ['email'], credentials: { accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now } }),
+    });
+    const state = new URL((await oauth.start({ userKey, organizationKey: 'org-1', scopeKey, name: 'Work', returnUri: 'vorinthexcore://capability/signal' })).authorizationUrl).searchParams.get('state')!;
+    const redirect = new URL(await oauth.callback({ state, code: 'provider-code' }));
+    expect(redirect.searchParams.get('email_connection_error')).toBe('connection_failed');
+    expect(redirect.searchParams.get('email_connection_code')).toBeNull();
+    expect(rollback).toMatchObject({ connectorKey: connector.key, connectorRevision: 'watch', previousConnector: connector });
   });
 
   test('does not issue a grant when watch setup, configuration, or durable repair enqueue fails', async () => {
@@ -81,11 +101,11 @@ describe('email OAuth state', () => {
     for (const failure of ['GMAIL_PUBSUB_TOPIC is not configured', 'watch repair queue unavailable', 'watch rejected']) {
       let rollback = 0;
       const oauth = createEmailOAuthService({
-        store,
+        store, enqueueInitialSync,
         connectors: { findExact: async () => null, upsert: async () => ({ ...connector, revision: 'upsert' }), setSyncState: async () => 'sync', activateInitialization: async () => ({ ...connector, revision: 'active' }), rollbackReconnect: async () => { rollback += 1; return true; } } as never,
         inboxes: {} as never,
         authorize: async () => ({ membershipKey: scopeKey }), profile: async () => ({ historyId: 'history' }), ensureInbox: async () => ({ revision: 'inbox' }),
-        subscribe: async () => { throw new Error(failure); },
+        registerWatch: async () => { throw new Error(failure); },
         exchange: async () => ({ identity: { providerAccountId: connector.providerAccountId, email: connector.email }, scopes: ['email'], credentials: { accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now } }),
       });
       const state = new URL((await oauth.start({ userKey, organizationKey: 'org-1', scopeKey, name: 'Work', returnUri: 'vorinthexcore://capability/signal' })).authorizationUrl).searchParams.get('state')!;
@@ -101,11 +121,11 @@ describe('email OAuth state', () => {
     const now = '2026-08-11T12:00:00.000Z';
     const connector = organizationConnectorSchema.parse({ key: userKey, organizationKey: 'org-1', scopeKey, provider: 'gmail', providerAccountId: 'google-watch-repair', email: 'person@example.com', encryptedCredentials: 'ciphertext', encryptionKeyId: 'v1', accessTokenFingerprint: 'a'.repeat(64), scopes: ['email'], createdByMembershipKey: scopeKey, status: 'active', createdAt: now, updatedAt: now });
     const oauth = createEmailOAuthService({
-      store,
+      store, enqueueInitialSync,
       connectors: { findExact: async () => connector, credentials: () => ({ accessToken: 'old', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now }), upsert: async () => ({ ...connector, revision: 'upsert' }), setSyncState: async () => 'sync', getByKey: async () => connector } as never,
       inboxes: { getByConnector: async () => null } as never,
       authorize: async () => ({ membershipKey: scopeKey }), profile: async () => ({ historyId: 'history' }), ensureInbox: async () => ({ revision: 'inbox' }), inboxView: async () => ({ connectorKey: connector.key }),
-      subscribe: async () => { throw new EmailWatchRepairPendingError(new Error('watch rejected')); },
+      registerWatch: async () => { throw new EmailWatchRepairPendingError(new Error('watch rejected')); },
       exchange: async () => ({ identity: { providerAccountId: connector.providerAccountId, email: connector.email }, scopes: ['email'], credentials: { accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now } }),
     });
     const state = new URL((await oauth.start({ userKey, organizationKey: 'org-1', scopeKey, name: 'Work', returnUri: 'vorinthexcore://capability/signal' })).authorizationUrl).searchParams.get('state')!;
@@ -134,7 +154,7 @@ describe('email OAuth state', () => {
       getByKey: async () => previous,
     };
     const oauth = createEmailOAuthService({
-      store, connectors: connectors as never, inboxes: { getByConnector: async () => null } as never, authorize: async () => ({ membershipKey: scopeKey }), profile: async () => ({ historyId: 'history-2' }), subscribe: async () => undefined,
+      store, connectors: connectors as never, inboxes: { getByConnector: async () => null } as never, enqueueInitialSync, authorize: async () => ({ membershipKey: scopeKey }), profile: async () => ({ historyId: 'history-2' }), registerWatch: async () => undefined,
       ensureInbox: async (_actor, _connector, metadata, overwrite) => { expect(metadata).toEqual({ name: 'Work' }); expect(overwrite).toBe(true); },
       exchange: async () => ({ identity: { providerAccountId: 'google-2', email: 'second@example.com' }, scopes: ['email'], credentials: { accessToken: 'new-access', refreshToken: undefined, tokenType: 'Bearer', expiresAt: now } }),
     });
@@ -160,7 +180,7 @@ describe('email OAuth state', () => {
       upsert: async () => { upserted = true; return revoked; },
     };
     const oauth = createEmailOAuthService({
-      store, connectors: connectors as never, inboxes: { getByConnector: async () => null } as never, authorize: async () => ({ membershipKey: scopeKey }), profile: async () => ({ historyId: 'history' }), subscribe: async () => undefined,
+      store, connectors: connectors as never, inboxes: { getByConnector: async () => null } as never, enqueueInitialSync, authorize: async () => ({ membershipKey: scopeKey }), profile: async () => ({ historyId: 'history' }), registerWatch: async () => undefined,
       exchange: async () => ({ identity: { providerAccountId: 'google-revoked', email: 'revoked@example.com' }, scopes: ['email'], credentials: { accessToken: 'new-access', refreshToken: undefined, tokenType: 'Bearer', expiresAt: now } }),
     });
     const started = await oauth.start({ userKey, organizationKey: 'org-1', scopeKey, name: 'Work', returnUri: 'vorinthexcore://capability/signal' });
@@ -185,7 +205,7 @@ describe('email OAuth state', () => {
       rollbackReconnect: async (input: unknown) => { rollback = input; return true; },
     };
     const oauth = createEmailOAuthService({
-      store, connectors: connectors as never, inboxes: { getByConnector: async () => null, restoreAfterReconnectFailure: async () => true } as never, authorize: async () => ({ membershipKey: scopeKey }), profile: async () => ({ historyId: 'history' }),
+      store, connectors: connectors as never, inboxes: { getByConnector: async () => null, restoreAfterReconnectFailure: async () => true } as never, enqueueInitialSync, authorize: async () => ({ membershipKey: scopeKey }), profile: async () => ({ historyId: 'history' }),
       ensureInbox: async () => { throw new Error('metadata failed'); },
       exchange: async () => ({ identity: { providerAccountId: 'google-new', email: 'new@example.com' }, scopes: ['email'], credentials: { accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now } }),
     });
@@ -211,7 +231,7 @@ describe('email OAuth state', () => {
       rollbackReconnect: async (input: unknown) => { rollback = input; return true; },
     };
     const oauth = createEmailOAuthService({
-      store, connectors: connectors as never, inboxes: { getByConnector: async () => null, restoreAfterReconnectFailure: async () => true } as never, authorize: async () => ({ membershipKey: scopeKey }), profile: async () => ({ historyId: 'history' }),
+      store, connectors: connectors as never, inboxes: { getByConnector: async () => null, restoreAfterReconnectFailure: async () => true } as never, enqueueInitialSync, authorize: async () => ({ membershipKey: scopeKey }), profile: async () => ({ historyId: 'history' }),
       ensureInbox: async () => { throw new Error('metadata failed'); },
       exchange: async () => ({ identity: { providerAccountId: 'google-existing', email: 'existing@example.com' }, scopes: ['email'], credentials: { accessToken: 'new', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now } }),
     });
@@ -231,7 +251,7 @@ describe('email OAuth state', () => {
       upsert: async () => ({ ...previous, revision: 'callback-upsert' }), rollbackReconnect: async (input: any) => { rollback = input; return true; },
     };
     const oauth = createEmailOAuthService({
-      store, connectors: connectors as never, inboxes: { getByConnector: async () => previousInbox } as never, authorize: async () => ({ membershipKey: scopeKey }), profile: async () => ({ historyId: 'history' }),
+      store, connectors: connectors as never, inboxes: { getByConnector: async () => previousInbox } as never, enqueueInitialSync, authorize: async () => ({ membershipKey: scopeKey }), profile: async () => ({ historyId: 'history' }),
       ensureInbox: async (_actor, _connector, _metadata, _overwrite, expectedRevision) => { expectedInboxRevision = expectedRevision; throw new Error('inbox revision conflict'); },
       exchange: async () => ({ identity: { providerAccountId: previous.providerAccountId, email: previous.email }, scopes: ['email'], credentials: { accessToken: 'new', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now } }),
     });
@@ -266,7 +286,7 @@ describe('email OAuth state', () => {
       getByConnector: async () => previousInbox,
     };
     const oauth = createEmailOAuthService({
-      store: failingStore, connectors: connectors as never, inboxes: inboxes as never, authorize: async () => ({ membershipKey: scopeKey }), profile: async () => ({ historyId: 'new-history' }), subscribe: async () => undefined,
+      store: failingStore, connectors: connectors as never, inboxes: inboxes as never, enqueueInitialSync, authorize: async () => ({ membershipKey: scopeKey }), profile: async () => ({ historyId: 'new-history' }), registerWatch: async () => undefined,
       ensureInbox: async () => ({ revision: 'inbox-write' }),
       exchange: async () => ({ identity: { providerAccountId: previous.providerAccountId, email: previous.email }, scopes: ['email'], credentials: { accessToken: 'new', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now } }),
     });
@@ -297,8 +317,8 @@ describe('email OAuth state', () => {
       rollbackReconnect: async (input: unknown) => { rollback = input; return true; },
     };
     const oauth = createEmailOAuthService({
-      store: failingStore, connectors: connectors as never, inboxes: {} as never,
-      authorize: async () => ({ membershipKey: scopeKey }), profile: async () => ({ historyId: 'history' }), subscribe: async () => undefined, ensureInbox: async () => ({ revision: 'inbox-write' }),
+      store: failingStore, connectors: connectors as never, inboxes: {} as never, enqueueInitialSync,
+      authorize: async () => ({ membershipKey: scopeKey }), profile: async () => ({ historyId: 'history' }), registerWatch: async () => undefined, ensureInbox: async () => ({ revision: 'inbox-write' }),
       exchange: async () => ({ identity: { providerAccountId: pending.providerAccountId, email: pending.email }, scopes: ['email'], credentials: { accessToken: 'new', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now } }),
     });
     const started = await oauth.start({ userKey, organizationKey: 'org-1', scopeKey, name: 'Work', returnUri: 'vorinthexcore://capability/signal' });
@@ -338,8 +358,8 @@ describe('email OAuth state', () => {
       },
     };
     const oauth = createEmailOAuthService({
-      store: failingStore, connectors: connectors as never, inboxes: { getByConnector: async () => previousInbox } as never,
-      authorize: async () => ({ membershipKey: scopeKey }), profile: async () => ({ historyId: 'history' }), subscribe: async () => undefined,
+      store: failingStore, connectors: connectors as never, inboxes: { getByConnector: async () => previousInbox } as never, enqueueInitialSync,
+      authorize: async () => ({ membershipKey: scopeKey }), profile: async () => ({ historyId: 'history' }), registerWatch: async () => undefined,
       ensureInbox: async (_actor, _connector, _metadata, _overwrite, expectedRevision) => {
         expect(expectedRevision).toBe('inbox-before');
         if (concurrentEdit === 'inbox') { inboxRevision = 'concurrent-inbox'; concurrentValue = 'inbox'; throw new Error('inbox conflict'); }

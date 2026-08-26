@@ -16,3 +16,13 @@ export function bookAudioMetadata(book: Book, chapter: BookChapter) {
     ...(book.coverUrl ? { artworkUrl: book.coverUrl } : {}),
   };
 }
+
+export function clampBookSeek(seconds: number, duration: number) {
+  return Math.max(0, Math.min(Math.max(0, duration), seconds));
+}
+
+export function adjacentBookChapter(chapters: readonly BookChapter[], chapterKey: string | undefined, offset: -1 | 1) {
+  const ordered = [...chapters].sort((left, right) => left.position - right.position);
+  const index = ordered.findIndex(({ key }) => key === chapterKey);
+  return index < 0 ? undefined : ordered[index + offset];
+}

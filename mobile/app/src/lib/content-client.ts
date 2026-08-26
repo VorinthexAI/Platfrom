@@ -29,6 +29,7 @@ export type ContentFolder = {
   description?: string;
   coverUrl?: string;
   isFavorite?: boolean;
+  managed?: boolean;
 };
 
 export type ContentDocument = {
@@ -41,6 +42,7 @@ export type ContentDocument = {
   sourceImageCount?: number;
   currentVersionKey?: string | null;
   isFavorite: boolean;
+  managed?: boolean;
   updatedAt: string;
 };
 
@@ -116,6 +118,7 @@ export type ContentSearchDocument = {
   name: string;
   extension?: ContentDocument["extension"];
   isFavorite: boolean;
+  managed?: boolean;
   score: number;
   summary?: string;
   scopeKey?: string;
@@ -673,7 +676,7 @@ export async function scanContentDocument(pages: { name: string; size: number; b
     scopeKey: contentContext.scopeKey,
     folderKey,
     name,
-    pages: pages.map((page) => ({ filename: page.name, mimeType: "image/jpeg", sizeBytes: page.size, encoding: "base64", content: page.base64 })),
+    pages: pages.map((page) => ({ filename: page.name, mimeType: "image/png", sizeBytes: page.size, encoding: "base64", content: page.base64 })),
     idempotencyKey,
   }, undefined, contentContext);
 }

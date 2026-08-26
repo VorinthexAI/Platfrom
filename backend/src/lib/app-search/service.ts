@@ -159,7 +159,7 @@ export function createAppSearchService(defaults: AppSearchDependencies = {}) {
         }
         if (collectionSlug === 'inboxes') {
           const output = await email.searchInboxes({ ...trusted.serviceContext, userKey: trusted.userKey }, commonSearchInput, { signal: dependencies.signal, timeoutMs: dependencies.timeoutMs, queryEmbedding });
-          return { collectionSlug, results: output.inboxes.map((item) => inboxResultSchema.parse(item)) };
+          return { collectionSlug, results: output.inboxes.map(({ initialSyncCompleted: _initialSyncCompleted, ...item }) => inboxResultSchema.parse(item)) };
         }
         if (collectionSlug === 'email-tones') {
           const output = await email.searchTones({ ...trusted.serviceContext, userKey: trusted.userKey }, commonSearchInput, { signal: dependencies.signal, timeoutMs: dependencies.timeoutMs, queryEmbedding });

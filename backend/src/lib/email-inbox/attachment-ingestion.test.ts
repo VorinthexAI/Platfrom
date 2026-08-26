@@ -3,23 +3,24 @@ import { createEmailAttachmentIngestionService, createEmailAttachmentRepository,
 import type { EmailAttachmentBinding } from './attachment-binding-schema';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
 import { documentSchema, type Document } from '@/lib/db/documents.node';
-import { createHash } from 'node:crypto';
 import { DocumentInputError } from '@/lib/ai/document-processing';
 import { GmailPermanentAttachmentError } from './gmail';
 import sharp from 'sharp';
 import { newId } from '@/lib/ids';
+import { mailInboxFilesFolderKey } from './folders';
 
 const organizationKey = 'organization';
 const scopeKey = 'cmrnlzf640001qc7kazsr96k5';
 const membershipKey = 'cmrnlzf650002qc7k4p5zemb0';
 const connectorKey = 'cmrnlzf660003qc7kw1n9j93a';
-const attachmentFolderKey = `c${createHash('sha256').update(['mail-attachment-folder', scopeKey].join('\0')).digest('hex').slice(0, 24)}`;
+const attachmentFolderKey = mailInboxFilesFolderKey(scopeKey, connectorKey);
 
 function fixture() {
   const bindings = new Map<string, EmailAttachmentBinding>();
   const completed: Array<{ type: string; key: string; collectionKey?: string }> = [];
   const released: string[] = [];
   const claimedBy: string[] = [];
+  const ensuredDocumentFolders: Array<{ scopeKey: string; connectorKey: string }> = [];
   const targets = new Map<string, Document>();
   const repository: EmailAttachmentRepository = {
     async activeMembership(input) { return input.preferredMembershipKey; },
@@ -41,7 +42,7 @@ function fixture() {
       return { status: 'claimed', binding };
     },
     async renew() { return true; },
-    async ensureDocumentFolder() { return attachmentFolderKey; },
+    async ensureDocumentFolder(resolvedScopeKey, resolvedConnectorKey) { ensuredDocumentFolders.push({ scopeKey: resolvedScopeKey, connectorKey: resolvedConnectorKey }); return attachmentFolderKey; },
     async ensureImageCollection() { return 'cmrnlzf680005qc7ku7uxyc9d'; },
     async documentTarget(input) { return targets.get(input.targetKey) ?? null; },
     async recoverDocumentTarget(input) {
@@ -71,7 +72,7 @@ function fixture() {
     publishCollectionEvent: async () => undefined,
     now: () => new Date('2026-08-25T12:00:00.000Z'),
   });
-  return { service, repository, bindings, targets, completed, claimedBy, parsed, processed, sanitized, released };
+  return { service, repository, bindings, targets, completed, claimedBy, ensuredDocumentFolders, parsed, processed, sanitized, released };
 }
 
 const common = { organizationKey, scopeKey, membershipKey, connectorKey, providerMessageId: 'provider-message' };
@@ -82,9 +83,11 @@ describe('managed email attachment ingestion', () => {
     const document = await f.service.ingest({ ...common, part: { path: '0.1', type: 'document', mimeType: 'text/plain', filename: 'notes.txt', size: 5, data: 'aGVsbG8' }, bytes: new TextEncoder().encode('hello') });
     const image = await f.service.ingest({ ...common, part: { path: '0.2', type: 'image', mimeType: 'image/png', filename: 'photo.png', size: 4, data: 'iVBORw' }, bytes: new Uint8Array([137, 80, 78, 71]) });
     expect(f.parsed).toHaveLength(1);
+    expect(f.ensuredDocumentFolders).toEqual([{ scopeKey, connectorKey }]);
+    expect(f.parsed[0]).toMatchObject({ scopeKey, folderKey: mailInboxFilesFolderKey(scopeKey, connectorKey) });
     expect(f.sanitized).toHaveLength(1);
     expect(f.processed).toHaveLength(1);
-    expect(f.processed[0]).toMatchObject({ file: { filename: 'photo.jpg', mimeType: 'image/jpeg' }, mutationPolicy: 'system-only', ownerKey: membershipKey });
+    expect(f.processed[0]).toMatchObject({ file: { filename: 'photo.png', mimeType: 'image/png' }, mutationPolicy: 'system-only', ownerKey: membershipKey });
     expect(f.completed.map(({ type }) => type)).toEqual(['document', 'image']);
     expect(document.type).toBe('document');
     expect(image.type).toBe('image');
@@ -333,8 +336,9 @@ describe('managed email attachment ingestion', () => {
     });
     const image = await imageService.ingest({ ...common, part: { path: '5.1', type: 'image', mimeType: 'image/png', filename: 'source.png', size: source.byteLength, data: Buffer.from(source).toString('base64url') }, bytes: source });
     expect(images).toHaveLength(1);
-    expect(images[0]).toMatchObject({ key: image.key, scopeKey, createdByKey: membershipKey, filename: 'source.jpg', mimeType: 'image/jpeg', mutationPolicy: 'system-only', width: 2, height: 3 });
-    expect(Buffer.from(uploads.at(-1)!.bytes).subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]));
+    expect(images[0]).toMatchObject({ key: image.key, scopeKey, createdByKey: membershipKey, filename: 'source.png', mimeType: 'image/png', mutationPolicy: 'system-only', width: 2, height: 3, storageKey: expect.stringMatching(/\/original\.png$/) });
+    expect(Buffer.from(uploads.at(-1)!.bytes).subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    expect(uploads.at(-1)).toMatchObject({ mimeType: 'image/png', key: expect.stringMatching(/\/original\.png$/) });
   });
 
   test('publishes image, affected collection content, and collection index once, but not on replay', async () => {

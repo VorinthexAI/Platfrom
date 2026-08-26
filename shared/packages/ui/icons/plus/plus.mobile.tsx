@@ -1,12 +1,12 @@
 ﻿import Svg, { Path } from "react-native-svg";
 export type PlusIconVariant = "default" | "muted" | "accent" | "danger" | "inverse";
-export type PlusIconSize = "sm" | "md" | "lg";
+export type PlusIconSize = "xs" | "sm" | "md" | "lg";
 export type PlusIconProps = {
   variant?: PlusIconVariant;
   size?: PlusIconSize;
   strokeWidth?: number;
 };
-const sizes: Record<PlusIconSize, number> = { sm: 16, md: 20, lg: 24 };
+const sizes: Record<PlusIconSize, number> = { xs: 12, sm: 16, md: 20, lg: 24 };
 const colors: Record<PlusIconVariant, string> = {
   default: "#F5F7F8",
   muted: "#7B858C",

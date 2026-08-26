@@ -4,6 +4,7 @@ import { EMBEDDING_DIMENSIONS, EXTERNAL_EMBEDDING_MODEL_ID } from '@/lib/embeddi
 import { IMAGE_CAPTION_EXTERNAL_MODEL_ID } from '@/lib/image-caption-constants';
 import { tokenUsage } from '@/lib/ai/shared/usage';
 import { webSearchInputSchema, webSearchOutputSchema, type WebSearchOutput } from '@/lib/ai/actions/web-search';
+import { speechInputSchema, speechOutputSchema, type SpeechOutput } from '@/lib/ai/actions/generate-speech';
 import { normalizeProviderError, ProviderError } from './errors';
 import {
   acceptsChatInput,
@@ -162,6 +163,43 @@ async function executeImageGenerate<TInput, TOutput>(
   };
 }
 
+export const OPENAI_SPEECH_CHUNK_MAX_CHARACTERS = 3_800;
+export function splitOpenAISpeechText(text: string, limit = OPENAI_SPEECH_CHUNK_MAX_CHARACTERS): string[] {
+  const chunks: string[] = []; let current = '';
+  const append = (unit: string) => { const value = unit.trim(); if (!value) return; if (!current) current = value; else if (current.length + 1 + value.length <= limit) current += ` ${value}`; else { chunks.push(current); current = value; } };
+  const appendBounded = (unit: string) => {
+    if (unit.trim().length <= limit) { append(unit); return; }
+    const sentences = unit.match(/[^.!?]+[.!?]+|[^.!?]+$/g) ?? [unit];
+    for (const sentence of sentences) {
+      if (sentence.trim().length <= limit) { append(sentence); continue; }
+      for (const word of sentence.trim().split(/\s+/)) {
+        if (word.length <= limit) append(word);
+        else for (let offset = 0; offset < word.length; offset += limit) append(word.slice(offset, offset + limit));
+      }
+    }
+  };
+  for (const paragraph of text.split(/\n{2,}/)) appendBounded(paragraph);
+  if (current) chunks.push(current);
+  return chunks;
+}
+function stripLeadingId3(bytes: Uint8Array) {
+  if (bytes.length < 10 || bytes[0] !== 0x49 || bytes[1] !== 0x44 || bytes[2] !== 0x33) return bytes;
+  const size = ((bytes[6]! & 0x7f) << 21) | ((bytes[7]! & 0x7f) << 14) | ((bytes[8]! & 0x7f) << 7) | (bytes[9]! & 0x7f);
+  return bytes.slice(Math.min(bytes.length, 10 + size + ((bytes[5]! & 0x10) !== 0 ? 10 : 0)));
+}
+function concatenateMp3(parts: Uint8Array[]) { const normalized = parts.map((part, index) => index === 0 ? part : stripLeadingId3(part)); const output = new Uint8Array(normalized.reduce((size, part) => size + part.length, 0)); let offset = 0; for (const part of normalized) { output.set(part, offset); offset += part.length; } return output; }
+
+async function executeSpeech<TInput, TOutput>(client: OpenAI, request: ProviderExecuteRequest<TInput>): Promise<ProviderExecuteResponse<TOutput>> {
+  const input = speechInputSchema.parse(request.input);
+  const signal = resolveRequestSignal(request);
+  try {
+    const speed = Math.min(2, Math.max(0.75, input.pace)); const parts: Uint8Array[] = [];
+    for (const chunk of splitOpenAISpeechText(input.text)) { signal?.throwIfAborted(); const raw = await client.audio.speech.create({ model: request.externalModelId, input: chunk, voice: input.voice, response_format: 'mp3', speed }, { signal }); parts.push(new Uint8Array(await raw.arrayBuffer())); }
+    const output: SpeechOutput = speechOutputSchema.parse({ base64: Buffer.from(concatenateMp3(parts)).toString('base64'), mimeType: 'audio/mpeg' });
+    return { output: output as TOutput, usage: tokenUsage(), providerId: PROVIDER_ID, modelId: request.modelId, externalModelId: request.externalModelId };
+  } catch (error) { throw normalizeProviderError(PROVIDER_ID, signal?.aborted ? signal.reason ?? new DOMException('aborted', 'AbortError') : error); }
+}
+
 async function createEmbeddings(client: OpenAI, request: ProviderEmbedRequest): Promise<ProviderEmbedResponse> {
   if (request.externalModelId !== EXTERNAL_EMBEDDING_MODEL_ID) throw new ProviderError(PROVIDER_ID, 'unsupported_action', `OpenAI embeddings require ${EXTERNAL_EMBEDDING_MODEL_ID}`);
   if (request.dimensions !== undefined && request.dimensions !== EMBEDDING_DIMENSIONS) throw new ProviderError(PROVIDER_ID, 'invalid_input', `OpenAI embeddings require ${EMBEDDING_DIMENSIONS} dimensions`);
@@ -280,6 +318,7 @@ export function createOpenAIProvider(config: OpenAIProviderConfig): ProviderAdap
       if (request.actionId === 'caption-image') return captionImages(client, request);
       if (request.actionId === 'describe-visual-identity') return describeVisualIdentity(client, request);
       if (request.actionId === 'web-search') return executeWebSearch(client, request);
+      if (request.actionId === 'generate-speech') return executeSpeech(client, request);
       if (acceptsChatInput(request.actionId)) {
         return executeOpenAICompatibleChat(PROVIDER_ID, client, request, { maxTokensParam: 'max_completion_tokens' });
       }

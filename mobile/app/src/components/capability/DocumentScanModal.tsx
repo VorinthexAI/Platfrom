@@ -6,7 +6,7 @@ import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { Button } from "@vorinthex/shared/ui/button";
 import { CloseIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { BrandedCameraModal } from "@/components/capability/BrandedCameraModal";
-import { normalizeCapturedJpeg } from "@/lib/captured-image";
+import { normalizeCapturedPng } from "@/lib/captured-image";
 import { appendScanPage, MAX_DOCUMENT_SCAN_PAGES, removeScanPage, type ScanSessionPage } from "@/lib/document-scan-session";
 import { fonts, palette, radii, spacing } from "@/theme/tokens";
 
@@ -39,7 +39,7 @@ export function DocumentScanModal({ busy, error, onClose, onSubmit }: Props) {
     setCapturing(true);
     setCaptureError(undefined);
     try {
-      const normalized = await normalizeCapturedJpeg(picture, { maxSide: 1800, compress: 0.76 });
+      const normalized = await normalizeCapturedPng(picture, { maxSide: 1800, compress: 0.76 });
       setPages((current) => {
         const next = appendScanPage(current, { id: `${Date.now()}-${Math.random()}`, uri: normalized.uri, sizeBytes: normalized.sizeBytes });
         pagesRef.current = next;
