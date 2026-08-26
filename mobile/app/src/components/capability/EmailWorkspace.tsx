@@ -23,7 +23,6 @@ import {
 import { Button } from "@vorinthex/shared/ui/button";
 import { CoreComposer } from "@vorinthex/shared/ui/core-composer";
 import {
-  AppleIcon,
   BrainIcon,
   CheckIcon,
   ChevronLeftIcon,
@@ -32,9 +31,7 @@ import {
   FileIcon,
   FilterIcon,
   InboxIcon,
-  GoogleIcon,
   MailIcon,
-  MicrosoftIcon,
   MoreHorizontalIcon,
   PlusIcon,
   SearchIcon,
@@ -49,6 +46,7 @@ import { Switch } from "@vorinthex/shared/ui/switch";
 import { useToast } from "@vorinthex/shared/ui/toast";
 
 import { ChromeIcon } from "@/components/ChromeIcon";
+import { EmailAttachmentPicker, type EmailAttachmentImageUrls, type EmailAttachmentLabels } from "@/components/capability/EmailAttachmentPicker";
 import { WorkspaceAppSwitcher } from "@/components/capability/WorkspaceAppSwitcher";
 import { SearchHistorySheet } from "@/components/SearchHistorySheet";
 import { assistantIconSource } from "@/data/capability-icons";
@@ -58,11 +56,9 @@ import { languageForCountryCode } from "@/lib/auth-helpers";
 import { deleteContentSearchHistory, type ContentSearchHistoryItem } from "@/lib/content-client";
 import { getUserSearchHistory, promoteCachedUserSearchHistory, removeCachedUserSearchHistory, userSearchHistoryQueryKey } from "@/lib/user-search-history-cache";
 import {
-  assignEmailDraftForContext,
   askEmailAssistantForContext,
   BUILT_IN_EMAIL_TONES,
   composeEmailDraftForContext,
-  connectIcloudEmail,
   createEmailReplyContextForContext,
   createEmailToneForContext,
   createEmailDraftForContext,
@@ -89,7 +85,6 @@ import {
   searchEmailTonesForContext,
   setEmailThreadsFavoriteForContext,
   setEmailThreadsReadStateForContext,
-  subscribeEmailForContext,
   summarizeEmailMessageForContext,
   syncEmailForContext,
   translateEmailMessageForContext,
@@ -100,13 +95,13 @@ import {
   updateEmailToneForContext,
   updateEmailDraftForContext,
   type EmailAssistantResponse,
+  type EmailAttachmentRef,
   type EmailDraft,
   type EmailConnector,
   type EmailFacet,
   type EmailMessage,
   type EmailOverview,
   type EmailOverviewQuery,
-  type EmailProvider,
   type EmailReadState,
   type EmailReplyContext,
   type EmailReplyMode,
@@ -120,11 +115,12 @@ import {
   emailAddressSchema,
   emailAddressListSchema,
   normalizeEmailOverviewQuery,
+  retainEmailRequestKey,
   setEmailOverviewReadState,
   toggleEmailOverviewFacet,
 } from "@/lib/email-client";
 import { attachmentIdentity, latestSentEmailMessageKey } from "@/lib/email-attachment-picker";
-import { loadEmailTrashGroups, type EmailTrashGroup } from "@/lib/email-trash-aggregation";
+import { clearableEmailTrashGroups, loadEmailTrashGroups, type EmailTrashGroup } from "@/lib/email-trash-aggregation";
 import {
   patchSignalInbox,
   overlayPendingSignalThread,
@@ -132,6 +128,8 @@ import {
   reconcileSignalOverviewThreads,
   reconcileSignalSelectedThreads,
   reconcileSignalThreads,
+  removeSignalOverviewThreadKeys,
+  removeSignalThreadKeys,
   removeSignalSummaries,
   removeSignalTranslationVersions,
   restoreMissingSignalSummaries,
@@ -140,15 +138,19 @@ import {
   restoreSignalToneIfStillRemoved,
   settleMatchingSignalRepairPendingFields,
   clearSignalTrashCaches,
+  clearSignalThreadTombstones,
   commitSignalTrashCaches,
+  filterSignalTombstonedOverview,
+  isSignalThreadTombstoned,
   signalQueryKeys,
+  tombstoneSignalThreadKeys,
   invalidateAssistantChanges,
   upsertSignalSummary,
   upsertSignalTone,
   upsertSignalTranslationVersion,
 } from "@/lib/workspace-query-cache";
 import { normalizeCapturedJpeg } from "@/lib/captured-image";
-import { fetchGalleryUploadStatus, uploadGalleryImages } from "@/lib/gallery-client";
+import { fetchGalleryUploadStatus, searchGalleryImages, uploadGalleryImages } from "@/lib/gallery-client";
 import { useAuthStore } from "@/state/auth";
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
 import { appendCursorItems, isNearScrollEnd } from "@vorinthex/shared/lib/pagination";
@@ -160,10 +162,10 @@ const TextInput = forwardRef<ComponentRef<typeof SharedTextInput>, ComponentProp
 });
 
 type Sheet =
-  "ai" | "plus" | "rootFilter" | "inboxFilter" | "rootCreate" | "searchHistory" | "connectProvider" | "connectForm" | "toneCreate" | "inboxEdit" | "toneEdit" | "toneDelete" | "account" | "assignDraft" | "disconnect" | "bulkActions" | "bulkTrash" | "trashRoot" | "clearTrash";
+  "ai" | "plus" | "rootFilter" | "inboxFilter" | "rootCreate" | "searchHistory" | "toneCreate" | "inboxEdit" | "toneEdit" | "toneDelete" | "account" | "disconnect" | "bulkActions" | "bulkTrash" | "trashRoot" | "clearTrash";
 type RootTab = "inboxes" | "tones";
 type InboxTab = EmailReadState | "drafts";
-type FormSheet = "connectForm" | "toneCreate" | "inboxEdit" | "toneEdit";
+type FormSheet = "toneCreate" | "inboxEdit" | "toneEdit";
 type BusyAction =
   | "connect"
   | "toneCreate"
@@ -172,7 +174,6 @@ type BusyAction =
   | "sort"
   | "send"
   | "favorite"
-  | "assign"
   | "disconnect"
   | "ai";
 const INBOX_FACETS: readonly { facet: EmailFacet; label: string }[] = [
@@ -220,12 +221,8 @@ function parseAddresses(value: string) {
     .map((item) => item.trim())
     .filter(Boolean);
 }
-function formatTime(value: string) {
-  const date = new Date(value);
-  const today = new Date();
-  return date.toDateString() === today.toDateString()
-    ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-    : date.toLocaleDateString([], { month: "short", day: "numeric" });
+function sameAttachmentSelection(left: readonly EmailAttachmentRef[], right: readonly EmailAttachmentRef[]) {
+  return left.length === right.length && left.every((ref, index) => attachmentIdentity(ref) === attachmentIdentity(right[index]!));
 }
 function formatEmailTimestamp(value: string) {
   return new Intl.DateTimeFormat("en-GB", {
@@ -268,6 +265,8 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
   const rootSearchInputRef = useRef<ComponentRef<typeof TextInput>>(null);
   const sheetInputRef = useRef<ComponentRef<typeof TextInput>>(null);
   const readerInputRef = useRef<ComponentRef<typeof TextInput>>(null);
+  const newEmailRecipientInputRef = useRef<ComponentRef<typeof TextInput>>(null);
+  const newEmailSubjectInputRef = useRef<ComponentRef<typeof TextInput>>(null);
   const rootSearchFocusTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const rootSearchRequest = useRef<AbortController | undefined>(undefined);
   const assistantGeneration = useRef(0);
@@ -294,8 +293,14 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
   const newEmailGeneration = useRef(0);
   const newEmailGenerationOwner = useRef<string | undefined>(undefined);
   const newEmailToneRequests = useRef(new Map<string, { controller: AbortController; requestKey: string }>());
-  const newEmailToneRequestKeys = useRef(new Map<string, string>());
+  const newEmailToneRequestKeys = useRef(new Map<string, { fingerprint: string; requestKey: string }>());
   const newEmailSendInFlight = useRef(false);
+  const newEmailPreparation = useRef<{ fingerprint: string; requestKey: string } | undefined>(undefined);
+  const newEmailFinalSend = useRef<{ fingerprint: string; requestKey: string } | undefined>(undefined);
+  const savedDraftFinalSend = useRef<{ fingerprint: string; requestKey: string } | undefined>(undefined);
+  const replyPreparation = useRef<{ fingerprint: string; requestKey: string } | undefined>(undefined);
+  const replyFinalSend = useRef<{ fingerprint: string; requestKey: string } | undefined>(undefined);
+  const selectedReplyKeyRef = useRef<string | undefined>(undefined);
   const favoriteGeneration = useRef(0);
   const favoriteInFlight = useRef(false);
   const readInFlight = useRef(new Set<string>());
@@ -366,6 +371,11 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
   const [replyDrafts, setReplyDrafts] = useState<ReplyDraft[]>([]);
   const [selectedReplyKey, setSelectedReplyKey] = useState<string>();
   const [replyBody, setReplyBody] = useState("");
+  const [replyAttachments, setReplyAttachments] = useState<EmailAttachmentRef[]>([]);
+  const [replyAttachmentLabels, setReplyAttachmentLabels] = useState<EmailAttachmentLabels>({});
+  const [replyAttachmentImageUrls, setReplyAttachmentImageUrls] = useState<EmailAttachmentImageUrls>({});
+  const replyImageRefreshes = useRef(new Map<string, Promise<void>>());
+  const [replyAttachmentsOpen, setReplyAttachmentsOpen] = useState(false);
   const [replyModeOpen, setReplyModeOpen] = useState(false);
   const [replyEnhanceOpen, setReplyEnhanceOpen] = useState(false);
   const [replyEnhancing, setReplyEnhancing] = useState(false);
@@ -388,31 +398,29 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
   const [newEmailContentOpen, setNewEmailContentOpen] = useState(false);
   const [newEmailAlternativesOpen, setNewEmailAlternativesOpen] = useState(false);
   const [newEmailReviewOpen, setNewEmailReviewOpen] = useState(false);
+  const [newEmailAttachmentsOpen, setNewEmailAttachmentsOpen] = useState(false);
   const [newEmailRecipientInput, setNewEmailRecipientInput] = useState("");
   const [newEmailRecipients, setNewEmailRecipients] = useState<string[]>([]);
   const [newEmailRecipientError, setNewEmailRecipientError] = useState<string>();
   const [newEmailSubject, setNewEmailSubject] = useState("");
   const [newEmailBody, setNewEmailBody] = useState("");
-  const [newEmailToneSnapshot, setNewEmailToneSnapshot] = useState<NewEmailToneOption[]>([]);
   const [newEmailAlternatives, setNewEmailAlternatives] = useState<NewEmailAlternative[]>([]);
   const [newEmailSelectedDraft, setNewEmailSelectedDraft] = useState<NewEmailDraft>();
   const [newEmailReviewSubject, setNewEmailReviewSubject] = useState("");
   const [newEmailReviewBody, setNewEmailReviewBody] = useState("");
+  const [newEmailAttachments, setNewEmailAttachments] = useState<EmailAttachmentRef[]>([]);
+  const [newEmailAttachmentLabels, setNewEmailAttachmentLabels] = useState<EmailAttachmentLabels>({});
+  const [newEmailAttachmentImageUrls, setNewEmailAttachmentImageUrls] = useState<EmailAttachmentImageUrls>({});
+  const [reviewAttachmentGridWidth, setReviewAttachmentGridWidth] = useState(0);
   const [newEmailSkipped, setNewEmailSkipped] = useState(false);
   const [newEmailSending, setNewEmailSending] = useState(false);
   const [newEmailError, setNewEmailError] = useState<string>();
-  const [unassignedDraft, setUnassignedDraft] = useState<EmailDraft>();
   const [selectedInboxDraftKey, setSelectedInboxDraftKey] = useState<string>();
   const [draftBody, setDraftBody] = useState("");
   const [draftSending, setDraftSending] = useState(false);
   const [draftSearchResults, setDraftSearchResults] = useState<{ connectorKey: string; query: string; drafts: EmailDraft[] }>();
   const [draftSearching, setDraftSearching] = useState(false);
   const [draftSearchError, setDraftSearchError] = useState<string>();
-  const [connectName, setConnectName] = useState("");
-  const [connectDescription, setConnectDescription] = useState("");
-  const [connectProvider, setConnectProvider] = useState<EmailProvider>("gmail");
-  const [connectEmail, setConnectEmail] = useState("");
-  const [connectAppPassword, setConnectAppPassword] = useState("");
   const [toneName, setToneName] = useState("");
   const [toneInstruction, setToneInstruction] = useState("");
   const [editingTone, setEditingTone] = useState<EmailToneRecord>();
@@ -452,22 +460,26 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
   const activeDraftSearchResults = draftSearchResults && draftSearchResults.connectorKey === initialConnectorKey && draftSearchResults.query === normalizedInboxSearch ? draftSearchResults : undefined;
   const visibleInboxDrafts = normalizedInboxSearch && activeDraftSearchResults ? activeDraftSearchResults.drafts : inboxDrafts;
   const selectedInboxDraft = draftDetailQuery.data;
-  const inputSheet = sheet === "connectForm" || sheet === "toneCreate" || sheet === "inboxEdit" || sheet === "toneEdit";
-  useDelayedInputFocus(sheetOpen && inputSheet ? `${sheet}:${connectProvider}` : undefined, sheetInputRef, sheet !== "toneEdit" || permissions.canMutate);
+  const inputSheet = sheet === "toneCreate" || sheet === "inboxEdit" || sheet === "toneEdit";
+  useDelayedInputFocus(sheetOpen && inputSheet ? sheet : undefined, sheetInputRef, sheet !== "toneEdit" || permissions.canMutate);
   const inputReaderSheet = readerSheet === "replyReader";
   useDelayedInputFocus(readerSheetOpen && inputReaderSheet ? readerSheet : undefined, readerInputRef, permissions.canMutate);
-  const newEmailOpen = newEmailRecipientsOpen || newEmailContentOpen || newEmailAlternativesOpen || newEmailReviewOpen;
+  useDelayedInputFocus(newEmailRecipientsOpen ? "newEmailRecipients" : undefined, newEmailRecipientInputRef, !newEmailSending);
+  useDelayedInputFocus(newEmailContentOpen ? "newEmailSubject" : undefined, newEmailSubjectInputRef, !newEmailSending);
+  const newEmailOpen = newEmailRecipientsOpen || newEmailContentOpen || newEmailAlternativesOpen || newEmailReviewOpen || newEmailAttachmentsOpen;
   const newEmailAlternativeError = newEmailError ?? newEmailAlternatives.find(({ status }) => status === "failed")?.error;
   const newEmailPendingAlternativeCount = newEmailAlternatives.filter(({ status }) => status === "pending").length;
   const newEmailAlternativeSkeletonCount = newEmailAlternatives.length > 0 && newEmailPendingAlternativeCount === newEmailAlternatives.length ? 3 : Math.min(3, newEmailPendingAlternativeCount);
   const availableNewEmailTones = [...BUILT_IN_EMAIL_TONES.map((value) => ({ label: `${value[0]?.toUpperCase()}${value.slice(1)}`, value })), ...toneRecords.map((record) => ({ label: record.name, value: record.slug ?? record.key }))]
     .filter((option, index, options) => options.findIndex((candidate) => candidate.value.toLocaleLowerCase() === option.value.toLocaleLowerCase()) === index);
   const rootCardSize = Math.floor(((rootGridWidth || width - spacing.md * 2) - 20) / 3);
+  const reviewAttachmentCardSize = Math.floor(((reviewAttachmentGridWidth || width - 40) - 18) / 4);
   const normalizedRootQuery = rootQuery.trim();
   const searchedAccounts = normalizedRootQuery && rootSearchResults?.tab === "inboxes" ? rootSearchResults.inboxes ?? [] : metadataAccounts;
   const searchedTones = normalizedRootQuery && rootSearchResults?.tab === "tones" ? rootSearchResults.tones ?? [] : toneRecords;
   const visibleAccounts = searchedAccounts.filter(({ isFavorite }) => !rootFavoritesOnly || isFavorite);
-  const visibleUnassignedDrafts = normalizedRootQuery || rootFavoritesOnly ? [] : (metadataOverview?.unassignedDrafts ?? overview?.unassignedDrafts ?? []).filter((saved): saved is Extract<EmailDraft, { variant: "new" }> => saved.variant === "new");
+  // Keep the removed projection bound while Metro retires pre-change render closures.
+  const visibleUnassignedDrafts: EmailDraft[] = [];
   const visibleTones = searchedTones.filter(({ isFavorite }) => !rootFavoritesOnly || isFavorite);
   const selectedMessage = selected?.messages.find(({ key }) => key === selectedMessageKey)
     ?? [...(selected?.messages ?? [])].sort((left, right) => right.sentAt.localeCompare(left.sentAt) || right.key.localeCompare(left.key))[0];
@@ -564,7 +576,14 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
     setGeneratedDeleteBusy(false);
     setReplyDrafts([]);
     setSelectedReplyKey(undefined);
+    selectedReplyKeyRef.current = undefined;
+    replyPreparation.current = undefined;
+    replyFinalSend.current = undefined;
     setReplyBody("");
+    setReplyAttachments([]);
+    setReplyAttachmentLabels({});
+    setReplyAttachmentImageUrls({});
+    setReplyAttachmentsOpen(false);
     setReplyModeOpen(false);
     setReplyEnhanceOpen(false);
     setReplyEnhancing(false);
@@ -576,12 +595,12 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
     const value = await queryClient.fetchQuery({
       queryKey,
       queryFn: async () => {
-        if (!nextQuery.search) return fetchEmailOverviewForContext(context, { connectorKey, readState: nextQuery.readState, facets: [...nextQuery.facets], limit: 50 });
+        if (!nextQuery.search) return filterSignalTombstonedOverview(context, connectorKey, await fetchEmailOverviewForContext(context, { connectorKey, readState: nextQuery.readState, facets: [...nextQuery.facets], limit: 50 }));
         const [base, threads] = await Promise.all([
           fetchEmailOverviewForContext(context, { connectorKey, readState: nextQuery.readState, facets: [...nextQuery.facets], limit: 50 }),
           searchEmailMessagesForContext(context, connectorKey, nextQuery, false),
         ]);
-        return { ...base, threads, nextCursor: null };
+        return filterSignalTombstonedOverview(context, connectorKey, { ...base, threads, nextCursor: null });
       },
       staleTime: 0,
     });
@@ -645,9 +664,10 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
             limit: 50,
           } : {};
           const base = await fetchEmailOverviewForContext(emailContext, input);
-          if (!initialConnectorKey || !nextQuery.search || options.cursor) return base;
+          if (!initialConnectorKey) return base;
+          if (!nextQuery.search || options.cursor) return filterSignalTombstonedOverview(emailContext, initialConnectorKey, base);
           const threads = await searchEmailMessagesForContext(emailContext, initialConnectorKey, nextQuery, options.recordHistory ?? false);
-          return { ...base, threads, nextCursor: null };
+          return filterSignalTombstonedOverview(emailContext, initialConnectorKey, { ...base, threads, nextCursor: null });
         },
       });
       settleRepairPendingThreads(value.threads);
@@ -708,7 +728,6 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
     for (const request of newEmailToneRequests.current.values()) request.controller.abort();
     newEmailToneRequests.current.clear();
     newEmailToneRequestKeys.current.clear();
-    setNewEmailToneSnapshot([]);
     setNewEmailAlternatives([]);
     setNewEmailSelectedDraft(undefined);
     setNewEmailAlternativesOpen(false);
@@ -721,6 +740,7 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
   function completeConnection(connector: EmailConnector) {
     const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
     const generation = ++operationGeneration.current;
+    clearSignalThreadTombstones(context, connector.connectorKey);
     const rootRefresh = queryClient.fetchQuery({
       queryKey: signalQueryKeys.overview(context),
       queryFn: () => fetchEmailOverviewForContext(context),
@@ -728,12 +748,11 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
     });
     void Promise.allSettled([
       syncEmailForContext(context, connector.connectorKey),
-      subscribeEmailForContext(context, connector.connectorKey),
       rootRefresh,
-    ]).then(([syncResult, subscribeResult, refreshResult]) => {
+    ]).then(([syncResult, refreshResult]) => {
       if (!operationIsCurrent(generation, context)) return;
-      if (syncResult.status === "rejected" || subscribeResult.status === "rejected")
-        notify("Inbox connected. Initial sync or updates need another try.");
+      if (syncResult.status === "rejected")
+        notify("Inbox connected. Initial sync needs another try.");
       else if (refreshResult.status === "rejected")
         notify("Inbox connected. The inbox list will refresh automatically.");
     });
@@ -818,6 +837,9 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
   useEffect(() => {
     const generation = ++operationGeneration.current;
     const activeReadOperations = readInFlight.current;
+    const toneRequests = newEmailToneRequests.current;
+    const toneRequestKeys = newEmailToneRequestKeys.current;
+    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
     invalidateNewEmailAlternatives();
     sendGeneration.current = undefined;
     newEmailSendInFlight.current = false;
@@ -861,9 +883,9 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
       favoriteInFlight.current = false;
       newEmailGeneration.current += 1;
       newEmailGenerationOwner.current = undefined;
-      for (const request of newEmailToneRequests.current.values()) request.controller.abort();
-      newEmailToneRequests.current.clear();
-      newEmailToneRequestKeys.current.clear();
+      for (const request of toneRequests.values()) request.controller.abort();
+      toneRequests.clear();
+      toneRequestKeys.clear();
       sendGeneration.current = undefined;
       newEmailSendInFlight.current = false;
       requests.clear();
@@ -875,14 +897,20 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
       trashInFlight.current = false;
       trashClearInFlight.current = false;
       metadataFormContext.current = undefined;
+      void Promise.all([
+        queryClient.cancelQueries({ queryKey: signalQueryKeys.overviews(context) }),
+        queryClient.cancelQueries({ queryKey: signalQueryKeys.details(context) }),
+      ]);
+      clearSignalThreadTombstones(context);
     };
-  }, [emailContext.organizationKey, emailContext.scopeKey]);
+  }, [emailContext.organizationKey, emailContext.scopeKey, queryClient]);
   useEffect(() => () => {
     if (rootSearchFocusTimer.current) clearTimeout(rootSearchFocusTimer.current);
     rootSearchRequest.current?.abort();
   }, []);
   useEffect(() => {
     const query = rootQuery.trim();
+    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
     rootSearchRequest.current?.abort();
     if (!query) {
       setRootSearchResults(undefined);
@@ -897,8 +925,8 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
     const timeout = setTimeout(() => {
       setRootSearching(true);
       const request = rootTab === "inboxes"
-        ? searchEmailInboxesForContext(emailContext, query, false, controller.signal).then(({ inboxes }) => { if (!controller.signal.aborted) setRootSearchResults({ tab: rootTab, inboxes }); })
-        : searchEmailTonesForContext(emailContext, query, false, controller.signal).then(({ tones }) => { if (!controller.signal.aborted) setRootSearchResults({ tab: rootTab, tones }); });
+        ? searchEmailInboxesForContext(context, query, false, controller.signal).then(({ inboxes }) => { if (!controller.signal.aborted) setRootSearchResults({ tab: rootTab, inboxes }); })
+        : searchEmailTonesForContext(context, query, false, controller.signal).then(({ tones }) => { if (!controller.signal.aborted) setRootSearchResults({ tab: rootTab, tones }); });
       void request.catch((failure: unknown) => {
         if (!controller.signal.aborted) {
           setRootSearchResults(rootTab === "inboxes" ? { tab: rootTab, inboxes: [] } : { tab: rootTab, tones: [] });
@@ -910,8 +938,8 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
     }, 300);
     const historyTimeout = setTimeout(() => {
       const request = rootTab === "inboxes"
-        ? searchEmailInboxesForContext(emailContext, query, true, controller.signal)
-        : searchEmailTonesForContext(emailContext, query, true, controller.signal);
+        ? searchEmailInboxesForContext(context, query, true, controller.signal)
+        : searchEmailTonesForContext(context, query, true, controller.signal);
       void request.catch(() => undefined);
     }, 800);
     return () => { clearTimeout(timeout); clearTimeout(historyTimeout); controller.abort(); };
@@ -919,28 +947,14 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
   useEffect(() => {
     if (!initialConnectorKey) return;
     const next = query.trim();
-    if (!next) {
-      if (inboxTab === "drafts") {
-        setDraftSearchResults(undefined);
-        setDraftSearching(false);
-        setDraftSearchError(undefined);
-      } else if (requestedInboxQuery.current.search) void search("", false);
-      return;
-    }
-    const controller = new AbortController();
-    const timeout = setTimeout(() => { void search(next, false, controller.signal); }, 300);
-    return () => { clearTimeout(timeout); controller.abort(); };
-  }, [emailContext.organizationKey, emailContext.scopeKey, initialConnectorKey, inboxTab, query]);
-  useEffect(() => {
-    if (!initialConnectorKey) return;
-    const next = query.trim();
     if (!next) return;
+    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
     const controller = new AbortController();
     const historyTimeout = setTimeout(() => {
-      if (inboxTab === "drafts") void searchEmailDraftsForContext(emailContext, initialConnectorKey, next, true, controller.signal).catch(() => undefined);
+      if (inboxTab === "drafts") void searchEmailDraftsForContext(context, initialConnectorKey, next, true, controller.signal).catch(() => undefined);
       else {
         const nextQuery = normalizeEmailOverviewQuery({ ...requestedInboxQuery.current, search: next });
-        void searchEmailMessagesForContext(emailContext, initialConnectorKey, nextQuery, true, controller.signal).catch(() => undefined);
+        void searchEmailMessagesForContext(context, initialConnectorKey, nextQuery, true, controller.signal).catch(() => undefined);
       }
     }, 800);
     return () => { clearTimeout(historyTimeout); controller.abort(); };
@@ -975,65 +989,15 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
     if (params.email_connection_error)
       notifyLatest("Email connection was not completed.");
   }, [params.email_connection_error]);
-  useEffect(
-    () =>
-      navigation.addListener("beforeRemove", (event) => {
-        if (sendGeneration.current !== undefined || busy === "send") {
-          event.preventDefault();
-          return;
-        }
-        if (allowNavigation.current) {
-          allowNavigation.current = false;
-          return;
-        }
-        if (sheetOpen && (sheet === "connectForm" || sheet === "toneCreate" || sheet === "inboxEdit" || sheet === "toneEdit")) {
-          event.preventDefault();
-          if (!busy) closeForm();
-          return;
-        }
-        if (newEmailReviewOpen) {
-          event.preventDefault();
-          closeNewEmailReview();
-          return;
-        }
-        if (newEmailAlternativesOpen) {
-          event.preventDefault();
-          setNewEmailAlternativesOpen(false);
-          return;
-        }
-        if (newEmailContentOpen) {
-          event.preventDefault();
-          invalidateNewEmailAlternatives();
-          setNewEmailContentOpen(false);
-          return;
-        }
-        if (newEmailRecipientsOpen) {
-          event.preventDefault();
-          resetNewEmail();
-          return;
-        }
-        if (selected) {
-          event.preventDefault();
-          clearSelectedThreadFromEffect();
-          return;
-        }
-        if (initialConnectorKey) {
-          if (!navigatedFromRoot || !router.canGoBack()) {
-            event.preventDefault();
-            allowNavigation.current = true;
-            router.replace({ pathname: "/capability/[slug]", params: { slug: "signal" } });
-          }
-        }
-      }),
-    [navigation, busy, initialConnectorKey, navigatedFromRoot, newEmailAlternativesOpen, newEmailContentOpen, newEmailRecipientsOpen, newEmailReviewOpen, router, selected, sheet, sheetOpen],
-  );
-
   function resetNewEmail() {
     invalidateNewEmailAlternatives();
+    newEmailPreparation.current = undefined;
+    newEmailFinalSend.current = undefined;
     newEmailSendInFlight.current = false;
     sendGeneration.current = undefined;
     setNewEmailRecipientsOpen(false);
     setNewEmailContentOpen(false);
+    setNewEmailAttachmentsOpen(false);
     setNewEmailRecipientInput("");
     setNewEmailRecipients([]);
     setNewEmailRecipientError(undefined);
@@ -1041,6 +1005,9 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
     setNewEmailBody("");
     setNewEmailReviewSubject("");
     setNewEmailReviewBody("");
+    setNewEmailAttachments([]);
+    setNewEmailAttachmentLabels({});
+    setNewEmailAttachmentImageUrls({});
     setNewEmailSkipped(false);
     setNewEmailSending(false);
     setNewEmailError(undefined);
@@ -1059,7 +1026,7 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
   function requestExit(destination: "inbox" | CapabilitySlug) {
     if (sendGeneration.current !== undefined || busy === "send") return false;
     if (newEmailOpen) resetNewEmail();
-    if (sheet === "connectForm" || sheet === "toneCreate" || sheet === "inboxEdit" || sheet === "toneEdit") closeForm();
+    if (sheet === "toneCreate" || sheet === "inboxEdit" || sheet === "toneEdit") closeForm();
     return true;
   }
 
@@ -1074,20 +1041,6 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
     setSheetError(undefined);
     setSheet(nextSheet);
     setSheetOpen(true);
-  }
-  function openConnectProvider() {
-    setSheetError(undefined);
-    setSheet("connectProvider");
-    setSheetOpen(true);
-  }
-  function openConnectForm(provider: EmailProvider) {
-    void transitionToForm("connectForm", () => {
-      setConnectProvider(provider);
-      setConnectName("");
-      setConnectDescription("");
-      setConnectEmail("");
-      setConnectAppPassword("");
-    });
   }
   function openToneCreate() {
     void transitionToForm("toneCreate", () => {
@@ -1216,20 +1169,14 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
     queryClient.setQueryData<EmailOverview>(signalQueryKeys.overview(context), (current) => current ? { ...current, tones: current.tones.map((candidate) => candidate === expected ? record : candidate) } : current);
   }
   async function connect() {
-    const name = connectName.trim();
-    const email = connectEmail.trim();
-    const appPassword = connectAppPassword.trim();
-    if (!name || connectProvider === "icloud" && (!email || !appPassword)) return;
+    if (busy || !permissions.canManageConnector) return;
+    setSheetOpen(false);
     setBusy("connect");
-    setSheetError(undefined);
     let connector: EmailConnector | null = null;
     try {
-      const metadata = { name, ...(connectDescription.trim() ? { description: connectDescription.trim() } : {}) };
-      connector = connectProvider === "icloud"
-        ? await connectIcloudEmail({ ...metadata, email, appPassword })
-        : await launchEmailConnection({ ...metadata, provider: connectProvider });
+      connector = await launchEmailConnection({ name: "Gmail" });
     } catch (failure) {
-      setSheetError(messageFor(failure));
+      notify(messageFor(failure));
     } finally {
       setBusy(undefined);
     }
@@ -1413,38 +1360,6 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
       if (generation === operationGeneration.current) setBusy(undefined);
     }
   }
-  async function assignDraft(connectorKey: string) {
-    if (!unassignedDraft) return;
-    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
-    const draftKey = unassignedDraft.key;
-    const previous = overview;
-    const generation = ++operationGeneration.current;
-    const requestKey = randomUUID();
-    setBusy("assign");
-    setSheetError(undefined);
-    setOverview((current) => current ? { ...current, unassignedDrafts: current.unassignedDrafts.filter(({ key }) => key !== draftKey) } : current);
-    queryClient.setQueriesData<EmailOverview>({ queryKey: signalQueryKeys.overviews(context) }, (current) => current ? { ...current, unassignedDrafts: current.unassignedDrafts.filter(({ key }) => key !== draftKey) } : current);
-    setSheetOpen(false);
-    setUnassignedDraft(undefined);
-    notify("Draft assigned to inbox");
-    try {
-      await assignEmailDraftForContext(context, draftKey, connectorKey, requestKey);
-      if (!operationIsCurrent(generation, context)) return;
-      await queryClient.invalidateQueries({ queryKey: signalQueryKeys.overviews(context), refetchType: "none" });
-      if (!operationIsCurrent(generation, context)) return;
-      await queryClient.fetchQuery({ queryKey: signalQueryKeys.overview(context), queryFn: () => fetchEmailOverviewForContext(context), staleTime: 0 });
-      if (!operationIsCurrent(generation, context)) return;
-      router.push({ pathname: "/capability/[slug]", params: { slug: "signal", connectorKey, signalReturn: "root" } });
-    } catch (failure) {
-      if (operationIsCurrent(generation, context)) {
-        if (previous) setOverview(previous);
-        void queryClient.invalidateQueries({ queryKey: signalQueryKeys.overviews(context), refetchType: "active" });
-        notify(messageFor(failure));
-      }
-    } finally {
-      if (generation === operationGeneration.current) setBusy(undefined);
-    }
-  }
   async function changeInboxQuery(next: EmailOverviewQuery) {
     requestedInboxQuery.current = next;
     setInboxControlsQuery(next);
@@ -1478,7 +1393,11 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
         queryClient.setQueriesData<EmailOverview>({ queryKey: signalQueryKeys.overviews(context) }, (current) => current ? { ...current, drafts: current.drafts.map((draft) => draft.key === updated.key ? updated : draft) } : current);
         setOverview((current) => current ? { ...current, drafts: current.drafts.map((draft) => draft.key === updated.key ? updated : draft) } : current);
       }
-      await sendEmailDraftForContext(context, saved.key, randomUUID(), saved.variant === "reply" ? saved.replyMode : undefined);
+      const replyMode = saved.variant === "reply" ? saved.replyMode : undefined;
+      const sendFingerprint = JSON.stringify([saved.key, connectorKey, replyMode, finalContent, saved.attachments ?? []]);
+      savedDraftFinalSend.current = retainEmailRequestKey(savedDraftFinalSend.current, sendFingerprint, randomUUID);
+      await sendEmailDraftForContext(context, saved.key, savedDraftFinalSend.current.requestKey, replyMode);
+      savedDraftFinalSend.current = undefined;
       queryClient.setQueryData<EmailDraft[]>(signalQueryKeys.drafts(context, connectorKey), (current) => current?.filter(({ key }) => key !== saved.key));
       queryClient.removeQueries({ queryKey: signalQueryKeys.draftDetail(context, connectorKey, saved.key), exact: true });
       queryClient.setQueriesData<EmailOverview>({ queryKey: signalQueryKeys.overviews(context) }, (current) => current ? { ...current, drafts: current.drafts.filter(({ key }) => key !== saved.key) } : current);
@@ -1521,6 +1440,22 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
     const result = await load(requestedInboxQuery.current, { commitQuery: true, recordHistory: Boolean(next) && recordHistory });
     if (result === "applied") clearSelectedThread();
   }
+  const searchLatest = useEffectEvent(search);
+  useEffect(() => {
+    if (!initialConnectorKey) return;
+    const next = query.trim();
+    if (!next) {
+      if (inboxTab === "drafts") {
+        setDraftSearchResults(undefined);
+        setDraftSearching(false);
+        setDraftSearchError(undefined);
+      } else if (requestedInboxQuery.current.search) void searchLatest("", false);
+      return;
+    }
+    const controller = new AbortController();
+    const timeout = setTimeout(() => { void searchLatest(next, false, controller.signal); }, 300);
+    return () => { clearTimeout(timeout); controller.abort(); };
+  }, [emailContext.organizationKey, emailContext.scopeKey, initialConnectorKey, inboxTab, query]);
   async function loadMore() {
     const cursor = overview?.nextCursor;
     if (!cursor || loadingMore.current || loadingOverview.current || loading || loadError) return;
@@ -1549,6 +1484,7 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
         queryFn: () => fetchEmailThreadForContext(context, thread.key),
       });
       if (generation !== detailGeneration.current || !contextIsCurrent(context) || initialConnectorKey !== connectorKey) return;
+      if (isSignalThreadTombstoned(context, connectorKey, detail.thread.key)) return;
       setSelected(detail);
       applyAuthoritativeThreads(context, connectorKey, [detail.thread]);
       setSelectedMessageKey([...detail.messages].sort((left, right) => right.sentAt.localeCompare(left.sentAt) || right.key.localeCompare(left.key))[0]?.key);
@@ -1565,6 +1501,8 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
           if (item?.status === "succeeded") {
             clearPendingThreadFields([thread.key], ["read"]);
             applyAuthoritativeThreads(context, connectorKey, [item.thread]);
+          } else if (item?.status === "deleted") {
+            applyDeletedThreadKeys(context, connectorKey, [thread.key], [detail.thread]);
           } else if (item?.status === "repairPending") {
             retainRepairPendingField(thread.key, "read");
           } else {
@@ -1621,6 +1559,20 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
   }
   function successfulThreads(report: EmailBulkThreadReport) {
     return report.items.flatMap((item) => item.status === "succeeded" ? [item.thread] : []);
+  }
+  function applyDeletedThreadKeys(context: typeof emailContext, connectorKey: string, threadKeys: readonly string[], previousThreads: readonly EmailThread[] = []) {
+    if (!threadKeys.length) return;
+    const deleted = new Set(threadKeys);
+    tombstoneSignalThreadKeys(context, connectorKey, threadKeys);
+    void Promise.all([
+      queryClient.cancelQueries({ queryKey: signalQueryKeys.accountOverviews(context, connectorKey) }),
+      ...threadKeys.map((threadKey) => queryClient.cancelQueries({ queryKey: signalQueryKeys.detail(context, connectorKey, threadKey), exact: true })),
+    ]);
+    clearPendingThreadFields(threadKeys, ["favorite", "read", "trash"]);
+    removeSignalThreadKeys(queryClient, context, connectorKey, threadKeys, previousThreads);
+    setInboxView((current) => ({ ...current, overview: current.overview ? removeSignalOverviewThreadKeys(current.overview, threadKeys, previousThreads) : current.overview }));
+    setSelectedThreads((current) => current.filter(({ key }) => !deleted.has(key)));
+    if (selectedThreadKeyRef.current && deleted.has(selectedThreadKeyRef.current)) clearSelectedThread(true);
   }
   function retainRepairPendingField(threadKey: string, field: "favorite" | "read" | "trash") {
     repairPendingThreadFields.current.set(threadKey, new Set([...(repairPendingThreadFields.current.get(threadKey) ?? []), field]));
@@ -1697,6 +1649,8 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
       if (item?.status === "succeeded") {
         clearPendingThreadFields([thread.key], ["read"]);
         applyAuthoritativeThreads(context, connectorKey, [item.thread]);
+      } else if (item?.status === "deleted") {
+        applyDeletedThreadKeys(context, connectorKey, [thread.key], [thread]);
       } else if (item?.status === "repairPending") {
         retainRepairPendingField(thread.key, "read");
         notify("Email read update is pending repair.");
@@ -1752,16 +1706,18 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
       if (generation !== bulkGeneration.current || !contextIsCurrent(context) || initialConnectorKey !== connectorKey) return;
       const succeeded = successfulThreads(report);
       const succeededKeys = new Set(succeeded.map(({ key }) => key));
+      const deletedKeys = report.items.flatMap((item) => item.status === "deleted" ? [item.threadKey] : []);
       const failedKeys = report.items.flatMap((item) => item.status === "failed" ? [item.threadKey] : []);
       const repairPendingKeys = report.items.flatMap((item) => item.status === "repairPending" ? [item.threadKey] : []);
       for (const threadKey of repairPendingKeys) retainRepairPendingField(threadKey, action);
-      const completedKeys = [...succeededKeys, ...failedKeys];
+      const completedKeys = [...succeededKeys, ...deletedKeys, ...failedKeys];
       clearPendingThreadFields(completedKeys, [action]);
       applyAuthoritativeThreads(context, connectorKey, succeeded);
+      applyDeletedThreadKeys(context, connectorKey, deletedKeys, snapshot);
       applyOptimisticThreads(context, connectorKey, snapshot.filter(({ key }) => failedKeys.includes(key)));
-      setSelectedThreads((current) => current.filter(({ key }) => !succeededKeys.has(key)));
-      if (report.repairPending) notify(`Email update is pending repair for ${report.repairPending}; ${succeeded.length} succeeded, ${report.failed} failed.`);
-      else if (report.failed) notify(`${succeeded.length} succeeded, ${report.failed} failed.`);
+      setSelectedThreads((current) => current.filter(({ key }) => !succeededKeys.has(key) && !deletedKeys.includes(key)));
+      if (report.repairPending) notify(`Email update is pending repair for ${report.repairPending}; ${report.succeeded} succeeded, ${report.failed} failed.`);
+      else if (report.failed) notify(`${report.succeeded} succeeded, ${report.failed} failed.`);
     } catch (failure) {
       if (generation === bulkGeneration.current && contextIsCurrent(context) && initialConnectorKey === connectorKey) {
         clearPendingThreadFields(threadKeys, [action]);
@@ -1798,6 +1754,8 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
       if (item?.status === "succeeded") {
         clearPendingThreadFields([threadKey], ["favorite"]);
         applyAuthoritativeThreads(context, connectorKey, [item.thread]);
+      } else if (item?.status === "deleted") {
+        applyDeletedThreadKeys(context, connectorKey, [threadKey], [previous]);
       } else if (item?.status === "repairPending") {
         retainRepairPendingField(threadKey, "favorite");
         void queryClient.invalidateQueries({ queryKey: signalQueryKeys.accountOverviews(context, connectorKey), refetchType: "none" });
@@ -1821,8 +1779,8 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
     }
   }
 
-  function commitNewEmailRecipients() {
-    const candidates = parseAddresses(newEmailRecipientInput);
+  function commitNewEmailRecipients(value = newEmailRecipientInput) {
+    const candidates = parseAddresses(value);
     if (!candidates.length) return newEmailRecipients.length > 0;
     const parsed = candidates.map((candidate) => emailAddressSchema.safeParse(candidate));
     if (parsed.some((result) => !result.success)) {
@@ -1848,8 +1806,24 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
     setNewEmailRecipientError(undefined);
     return next.length > 0;
   }
+  function changeNewEmailRecipientInput(value: string) {
+    setNewEmailRecipientInput(value);
+    setNewEmailRecipientError(undefined);
+    if (/[,;\s]$/.test(value)) commitNewEmailRecipients(value);
+  }
   function advanceNewEmailRecipients() {
     if (!commitNewEmailRecipients()) return;
+    setNewEmailRecipientsOpen(false);
+    setNewEmailContentOpen(true);
+  }
+  function closeNewEmailRecipients() {
+    resetNewEmail();
+  }
+  function removeNewEmailRecipient(address: string) {
+    setNewEmailRecipients((current) => current.filter((candidate) => candidate.toLocaleLowerCase() !== address.toLocaleLowerCase()));
+  }
+  function returnToNewEmailContent() {
+    setNewEmailAlternativesOpen(false);
     setNewEmailContentOpen(true);
   }
   function changeNewEmailContent(field: "subject" | "body", value: string) {
@@ -1860,20 +1834,20 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
   function newEmailGenerationIsCurrent(generation: number, owner: string, context: typeof emailContext) {
     return generation === newEmailGeneration.current && owner === newEmailGenerationOwner.current && contextIsCurrent(context);
   }
-  function generateNewEmailAlternatives(options: NewEmailToneOption[], retry = false) {
+  function generateNewEmailAlternatives(options: NewEmailToneOption[]) {
     const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
-    const generation = retry ? newEmailGeneration.current : ++newEmailGeneration.current;
-    const owner = retry ? newEmailGenerationOwner.current : randomUUID();
-    if (!owner || retry && owner !== newEmailGenerationOwner.current) return;
+    const generation = ++newEmailGeneration.current;
+    const owner = randomUUID();
     newEmailGenerationOwner.current = owner;
-    const existing = new Map(newEmailAlternatives.map((alternative) => [alternative.option.value, alternative]));
-    const targets = options.filter((option) => existing.get(option.value)?.status !== "succeeded");
+    const targets = options;
     setNewEmailError(undefined);
-    setNewEmailAlternatives((current) => options.map((option) => current.find((alternative) => alternative.option.value === option.value && alternative.status === "succeeded") ?? { option, status: "pending" }));
+    setNewEmailAlternatives(options.map((option) => ({ option, status: "pending" })));
     const operations = targets.map(async (option) => {
       const previous = newEmailToneRequests.current.get(option.value);
-      const requestKey = newEmailToneRequestKeys.current.get(option.value) ?? randomUUID();
-      newEmailToneRequestKeys.current.set(option.value, requestKey);
+      const fingerprint = JSON.stringify([initialConnectorKey, newEmailRecipients, newEmailSubject, newEmailBody, option.value]);
+      const retained = newEmailToneRequestKeys.current.get(option.value);
+      const requestKey = retained?.fingerprint === fingerprint ? retained.requestKey : randomUUID();
+      newEmailToneRequestKeys.current.set(option.value, { fingerprint, requestKey });
       previous?.controller.abort();
       const controller = new AbortController();
       newEmailToneRequests.current.set(option.value, { controller, requestKey });
@@ -1887,6 +1861,7 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
           tone: option.value,
         }, requestKey, controller.signal);
         if (!newEmailGenerationIsCurrent(generation, owner, context) || created.variant !== "new") return;
+        newEmailToneRequestKeys.current.delete(option.value);
         setNewEmailAlternatives((current) => current.map((alternative) => alternative.option.value === option.value ? { option, status: "succeeded", draft: created } : alternative));
       } catch (failure) {
         if (!controller.signal.aborted && newEmailGenerationIsCurrent(generation, owner, context)) setNewEmailAlternatives((current) => current.map((alternative) => alternative.option.value === option.value ? { option, status: "failed", error: messageFor(failure) } : alternative));
@@ -1896,12 +1871,42 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
     });
     void Promise.allSettled(operations);
   }
+  function retryNewEmailAlternative(option: NewEmailToneOption) {
+    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const generation = newEmailGeneration.current;
+    const owner = newEmailGenerationOwner.current;
+    if (!owner || newEmailToneRequests.current.has(option.value)) return;
+    const controller = new AbortController();
+    const fingerprint = JSON.stringify([initialConnectorKey, newEmailRecipients, newEmailSubject, newEmailBody, option.value]);
+    const retained = newEmailToneRequestKeys.current.get(option.value);
+    const requestKey = retained?.fingerprint === fingerprint ? retained.requestKey : randomUUID();
+    newEmailToneRequestKeys.current.set(option.value, { fingerprint, requestKey });
+    newEmailToneRequests.current.set(option.value, { controller, requestKey });
+    setNewEmailAlternatives((current) => current.map((alternative) => alternative.option.value === option.value ? { option, status: "pending" } : alternative));
+    void composeEmailDraftForContext(context, {
+      ...(initialConnectorKey ? { connectorKey: initialConnectorKey } : {}),
+      to: newEmailRecipients,
+      generationMode: "generate",
+      subject: newEmailSubject,
+      authoredBody: newEmailBody,
+      tone: option.value,
+    }, requestKey, controller.signal).then((created) => {
+      if (newEmailGenerationIsCurrent(generation, owner, context) && created.variant === "new") {
+        newEmailToneRequestKeys.current.delete(option.value);
+        setNewEmailAlternatives((current) => current.map((alternative) => alternative.option.value === option.value ? { option, status: "succeeded", draft: created } : alternative));
+      }
+    }).catch((failure: unknown) => {
+      if (!controller.signal.aborted && newEmailGenerationIsCurrent(generation, owner, context)) setNewEmailAlternatives((current) => current.map((alternative) => alternative.option.value === option.value ? { option, status: "failed", error: messageFor(failure) } : alternative));
+    }).finally(() => {
+      if (newEmailToneRequests.current.get(option.value)?.controller === controller) newEmailToneRequests.current.delete(option.value);
+    });
+  }
   function openNewEmailAlternatives() {
     if (tonesLoading) return;
+    setNewEmailContentOpen(false);
     setNewEmailAlternativesOpen(true);
     if (newEmailGenerationOwner.current) return;
     const snapshot = availableNewEmailTones.map((option) => ({ ...option }));
-    setNewEmailToneSnapshot(snapshot);
     generateNewEmailAlternatives(snapshot);
   }
   function openNewEmailReview(draft?: NewEmailDraft) {
@@ -1909,15 +1914,111 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
     setNewEmailSkipped(!draft);
     setNewEmailReviewSubject(newEmailSubject);
     setNewEmailReviewBody(draft ? draft.finalContent ?? draft.generatedContent : newEmailBody);
+    setNewEmailAttachments(draft?.attachments ?? []);
+    setNewEmailAttachmentLabels({});
+    setNewEmailAttachmentImageUrls({});
     setNewEmailError(undefined);
+    setNewEmailAlternativesOpen(false);
     setNewEmailReviewOpen(true);
   }
+  async function refreshNewEmailImageUrls() {
+    const refs = newEmailAttachments.filter((ref): ref is EmailAttachmentRef & { type: "image" } => ref.type === "image");
+    if (!refs.length) return;
+    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const results = await Promise.allSettled(refs.map((ref) => searchGalleryImages({ imageKey: ref.key }).then(({ images }) => [ref.key, images.find(({ key }) => key === ref.key)?.url] as const)));
+    if (!contextIsCurrent(context)) return;
+    setNewEmailAttachmentImageUrls((current) => Object.fromEntries([
+      ...Object.entries(current),
+      ...results.flatMap((result) => result.status === "fulfilled" && result.value[1] ? [[`image:${result.value[0]}`, result.value[1]] as const] : []),
+    ]));
+  }
+  const refreshLatestNewEmailImageUrls = useEffectEvent(refreshNewEmailImageUrls);
+  useEffect(() => {
+    if (!newEmailReviewOpen || !newEmailAttachments.some(({ type }) => type === "image")) return;
+    void refreshLatestNewEmailImageUrls();
+    const interval = setInterval(() => void refreshLatestNewEmailImageUrls(), 4 * 60_000);
+    return () => clearInterval(interval);
+  }, [newEmailAttachments, newEmailReviewOpen]);
   function closeNewEmailReview() {
     if (newEmailSending) return;
     setNewEmailReviewOpen(false);
-    setNewEmailAlternativesOpen(false);
+    setNewEmailAlternativesOpen(true);
     setNewEmailError(undefined);
   }
+  function openNewEmailAttachments() {
+    if (!newEmailSending) setNewEmailAttachmentsOpen(true);
+  }
+  function finishNewEmailAttachments(selection: EmailAttachmentRef[], labels: EmailAttachmentLabels, imageUrls: EmailAttachmentImageUrls) {
+    setNewEmailAttachments(selection);
+    setNewEmailAttachmentLabels(labels);
+    setNewEmailAttachmentImageUrls(imageUrls);
+    if (!sameAttachmentSelection(selection, newEmailSelectedDraft?.attachments ?? [])) setNewEmailSkipped(true);
+    setNewEmailAttachmentsOpen(false);
+  }
+  function removeAllNewEmailAttachments() {
+    setNewEmailAttachments([]);
+    setNewEmailAttachmentLabels({});
+    setNewEmailAttachmentImageUrls({});
+    setNewEmailSkipped(true);
+  }
+  const closeLatestNewEmailRecipients = useEffectEvent(closeNewEmailRecipients);
+  const closeLatestNewEmailReview = useEffectEvent(closeNewEmailReview);
+  useEffect(
+    () =>
+      navigation.addListener("beforeRemove", (event) => {
+        if (sendGeneration.current !== undefined || busy === "send") {
+          event.preventDefault();
+          return;
+        }
+        if (allowNavigation.current) {
+          allowNavigation.current = false;
+          return;
+        }
+        if (sheetOpen && (sheet === "toneCreate" || sheet === "inboxEdit" || sheet === "toneEdit")) {
+          event.preventDefault();
+          if (!busy) closeForm();
+          return;
+        }
+        if (newEmailAttachmentsOpen) {
+          event.preventDefault();
+          setNewEmailAttachmentsOpen(false);
+          return;
+        }
+        if (newEmailReviewOpen) {
+          event.preventDefault();
+          closeLatestNewEmailReview();
+          return;
+        }
+        if (newEmailAlternativesOpen) {
+          event.preventDefault();
+          returnToNewEmailContent();
+          return;
+        }
+        if (newEmailContentOpen) {
+          event.preventDefault();
+          invalidateNewEmailAlternatives();
+          setNewEmailContentOpen(false);
+          setNewEmailRecipientsOpen(true);
+          return;
+        }
+        if (newEmailRecipientsOpen) {
+          event.preventDefault();
+          closeLatestNewEmailRecipients();
+          return;
+        }
+        if (selected) {
+          event.preventDefault();
+          clearSelectedThreadFromEffect();
+          return;
+        }
+        if (initialConnectorKey && (!navigatedFromRoot || !router.canGoBack())) {
+          event.preventDefault();
+          allowNavigation.current = true;
+          router.replace({ pathname: "/capability/[slug]", params: { slug: "signal" } });
+        }
+      }),
+    [navigation, busy, initialConnectorKey, navigatedFromRoot, newEmailAlternativesOpen, newEmailAttachmentsOpen, newEmailContentOpen, newEmailRecipientsOpen, newEmailReviewOpen, router, selected, sheet, sheetOpen],
+  );
   async function sendNewEmail() {
     if (newEmailSendInFlight.current || newEmailSending) return;
     const selectedDraft = newEmailSelectedDraft;
@@ -1930,25 +2031,41 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
     setNewEmailError(undefined);
     try {
       let prepared: NewEmailDraft;
-      if (newEmailSkipped) {
+      if (!selectedDraft || newEmailReviewSubject !== selectedDraft.subject) {
+        const fingerprint = JSON.stringify(["compose", initialConnectorKey, newEmailRecipients, newEmailReviewSubject, newEmailReviewBody, newEmailAttachments]);
+        const requestKey = newEmailPreparation.current?.fingerprint === fingerprint ? newEmailPreparation.current.requestKey : randomUUID();
+        newEmailPreparation.current = { fingerprint, requestKey };
         const created = await composeEmailDraftForContext(context, {
           ...(initialConnectorKey ? { connectorKey: initialConnectorKey } : {}),
           to: newEmailRecipients,
           generationMode: "preserve",
           subject: newEmailReviewSubject,
           authoredBody: newEmailReviewBody,
-        }, randomUUID());
+          attachments: newEmailAttachments,
+        }, requestKey);
+        newEmailPreparation.current = undefined;
         if (created.variant !== "new") throw new Error("The email draft could not be prepared.");
         prepared = created;
       } else {
-        if (newEmailReviewBody !== (selectedDraft!.finalContent ?? selectedDraft!.generatedContent)) {
-          const updated = await updateEmailDraftForContext(context, selectedDraft!.key, newEmailReviewBody, randomUUID());
+        const bodyChanged = newEmailReviewBody !== (selectedDraft.finalContent ?? selectedDraft.generatedContent);
+        const attachmentsChanged = !sameAttachmentSelection(newEmailAttachments, selectedDraft.attachments ?? []);
+        if (bodyChanged || attachmentsChanged) {
+          const fingerprint = JSON.stringify(["update", selectedDraft.key, bodyChanged ? newEmailReviewBody : null, attachmentsChanged ? newEmailAttachments : null]);
+          const requestKey = newEmailPreparation.current?.fingerprint === fingerprint ? newEmailPreparation.current.requestKey : randomUUID();
+          newEmailPreparation.current = { fingerprint, requestKey };
+          const updated = await updateEmailDraftForContext(context, selectedDraft.key, { ...(bodyChanged ? { finalContent: newEmailReviewBody } : {}), ...(attachmentsChanged ? { attachments: newEmailAttachments } : {}) }, requestKey);
+          newEmailPreparation.current = undefined;
           if (updated.variant !== "new") throw new Error("The email draft could not be updated.");
           prepared = updated;
-        } else prepared = selectedDraft!;
+        } else prepared = selectedDraft;
       }
       if (generation !== newEmailGeneration.current || !contextIsCurrent(context)) return;
-      await sendEmailDraftForContext(context, prepared.key, randomUUID());
+      setNewEmailSelectedDraft(prepared);
+      setNewEmailSkipped(false);
+      const sendFingerprint = JSON.stringify([prepared.key, newEmailReviewSubject, newEmailReviewBody, newEmailAttachments]);
+      newEmailFinalSend.current = retainEmailRequestKey(newEmailFinalSend.current, sendFingerprint, randomUUID);
+      await sendEmailDraftForContext(context, prepared.key, newEmailFinalSend.current.requestKey);
+      newEmailFinalSend.current = undefined;
       if (generation !== newEmailGeneration.current || !contextIsCurrent(context)) return;
       notify("Email sent");
       newEmailSendInFlight.current = false;
@@ -1957,7 +2074,11 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
       void queryClient.invalidateQueries({ queryKey: signalQueryKeys.all(context) });
       void load();
     } catch (failure) {
-      if (generation === newEmailGeneration.current && contextIsCurrent(context)) setNewEmailError(messageFor(failure));
+      if (generation === newEmailGeneration.current && contextIsCurrent(context)) {
+        const notification = messageFor(failure);
+        setNewEmailError(notification);
+        notify(notification);
+      }
     } finally {
       if (sendGeneration.current === generation) sendGeneration.current = undefined;
       if (generation === newEmailGeneration.current) {
@@ -2158,7 +2279,13 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
   }
   function openReplyDraft(draft: ReplyDraft) {
     setSelectedReplyKey(draft.key);
+    selectedReplyKeyRef.current = draft.key;
+    replyPreparation.current = undefined;
+    replyFinalSend.current = undefined;
     setReplyBody(draft.finalContent ?? draft.generatedContent);
+    setReplyAttachments(draft.attachments ?? []);
+    setReplyAttachmentLabels({});
+    setReplyAttachmentImageUrls({});
     setEmptyReply(false);
     setReaderError(undefined);
     setReaderSheet("replyReader");
@@ -2167,11 +2294,52 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
     const backingDraft = replyDrafts[0];
     if (!backingDraft) return;
     setSelectedReplyKey(backingDraft.key);
+    selectedReplyKeyRef.current = backingDraft.key;
+    replyPreparation.current = undefined;
+    replyFinalSend.current = undefined;
     setReplyBody("");
+    setReplyAttachments(backingDraft.attachments ?? []);
+    setReplyAttachmentLabels({});
+    setReplyAttachmentImageUrls({});
     setEmptyReply(true);
     setReaderError(undefined);
     setReaderSheet("replyReader");
   }
+  function finishReplyAttachments(selection: EmailAttachmentRef[], labels: EmailAttachmentLabels, imageUrls: EmailAttachmentImageUrls) {
+    setReplyAttachments(selection);
+    setReplyAttachmentLabels(labels);
+    setReplyAttachmentImageUrls(imageUrls);
+    setReplyAttachmentsOpen(false);
+  }
+  async function refreshReplyImageUrl(ref: EmailAttachmentRef) {
+    if (ref.type !== "image") return;
+    const identity = attachmentIdentity(ref);
+    const active = replyImageRefreshes.current.get(identity);
+    if (active) return active;
+    const draftKey = selectedReplyKeyRef.current;
+    const threadKey = selectedThreadKeyRef.current;
+    const messageKey = selectedMessageKeyRef.current;
+    const generation = readerGeneration.current;
+    if (!draftKey || !threadKey || !messageKey) return;
+    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const request = searchGalleryImages({ imageKey: ref.key }).then(({ images }) => {
+      const url = images.find(({ key }) => key === ref.key)?.url;
+      if (!url || !readerOperationIsCurrent(generation, context, threadKey, messageKey) || selectedReplyKeyRef.current !== draftKey) return;
+      setReplyAttachmentImageUrls((current) => ({ ...current, [identity]: url }));
+    }).finally(() => { if (replyImageRefreshes.current.get(identity) === request) replyImageRefreshes.current.delete(identity); });
+    replyImageRefreshes.current.set(identity, request);
+    return request;
+  }
+  async function refreshReplyImageUrls() {
+    await Promise.all(replyAttachments.filter((ref): ref is EmailAttachmentRef & { type: "image" } => ref.type === "image").map(refreshReplyImageUrl));
+  }
+  const refreshLatestReplyImageUrls = useEffectEvent(refreshReplyImageUrls);
+  useEffect(() => {
+    if (!readerSheetOpen || readerSheet !== "replyReader" || !replyAttachments.some(({ type }) => type === "image")) return;
+    void refreshLatestReplyImageUrls();
+    const interval = setInterval(() => void refreshLatestReplyImageUrls(), 4 * 60_000);
+    return () => clearInterval(interval);
+  }, [readerSheet, readerSheetOpen, replyAttachments]);
   async function enhanceReply() {
     const text = replyBody.trim();
     if (!text || replyEnhancing) return;
@@ -2195,16 +2363,26 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
     if (!current || !threadKey || replySending || !replyBody.trim()) return;
     const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
     const generation = readerGeneration.current;
-    const requestKey = randomUUID();
     setReplyModeOpen(false);
     setReplySending(true);
     setReaderError(undefined);
     try {
-      const prepared = replyBody.trim() !== (current.finalContent ?? current.generatedContent).trim()
-        ? await updateEmailDraftForContext(context, current.key, replyBody.trim(), requestKey)
-        : current;
+      const bodyChanged = replyBody.trim() !== (current.finalContent ?? current.generatedContent).trim();
+      const attachmentsChanged = !sameAttachmentSelection(replyAttachments, current.attachments ?? []);
+      let prepared = current;
+      if (bodyChanged || attachmentsChanged) {
+        const preparationFingerprint = JSON.stringify([current.key, bodyChanged ? replyBody.trim() : null, attachmentsChanged ? replyAttachments : null]);
+        replyPreparation.current = retainEmailRequestKey(replyPreparation.current, preparationFingerprint, randomUUID);
+        const updated = await updateEmailDraftForContext(context, current.key, { ...(bodyChanged ? { finalContent: replyBody.trim() } : {}), ...(attachmentsChanged ? { attachments: replyAttachments } : {}) }, replyPreparation.current.requestKey);
+        replyPreparation.current = undefined;
+        if (updated.variant !== "reply") throw new Error("The reply draft could not be updated.");
+        prepared = updated;
+      }
       if (generation !== readerGeneration.current || !contextIsCurrent(context)) return;
-      const sent = await sendEmailDraftForContext(context, prepared.key, requestKey, mode);
+      const sendFingerprint = JSON.stringify([prepared.key, mode, replyBody.trim(), replyAttachments]);
+      replyFinalSend.current = retainEmailRequestKey(replyFinalSend.current, sendFingerprint, randomUUID);
+      const sent = await sendEmailDraftForContext(context, prepared.key, replyFinalSend.current.requestKey, mode);
+      replyFinalSend.current = undefined;
       if (generation !== readerGeneration.current || !contextIsCurrent(context)) return;
       notify("Reply sent");
       setReplySending(false);
@@ -2336,6 +2514,8 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
       if (item?.status === "succeeded") {
         clearPendingThreadFields([threadKey], ["trash"]);
         applyAuthoritativeThreads(context, connectorKey, [item.thread]);
+      } else if (item?.status === "deleted") {
+        applyDeletedThreadKeys(context, connectorKey, [threadKey], [previousThread]);
       } else if (item?.status === "repairPending") {
         retainRepairPendingField(threadKey, "trash");
         void queryClient.invalidateQueries({ queryKey: signalQueryKeys.accountOverviews(context, connectorKey), refetchType: "none" });
@@ -2384,7 +2564,7 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
     }
   }
   async function clearTrash() {
-    const clearable = trashGroups.filter((group) => !group.error && group.threads.length);
+    const clearable = clearableEmailTrashGroups(trashGroups);
     if (trashClearBusy || trashClearInFlight.current || !clearable.length) return;
     const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
     const generation = ++trashRootGeneration.current;
@@ -2396,6 +2576,14 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
     trashClearInFlight.current = true;
     setTrashClearBusy(true);
     setSheetError(undefined);
+    await Promise.all([
+      ...groups.map(({ connector }) => queryClient.cancelQueries({ queryKey: signalQueryKeys.accountOverviews(context, connector.connectorKey) })),
+      queryClient.cancelQueries({ queryKey: signalQueryKeys.details(context) }),
+    ]);
+    if (generation !== trashRootGeneration.current || !contextIsCurrent(context)) {
+      trashClearInFlight.current = false;
+      return;
+    }
     setTrashGroups((current) => current.filter((group) => !groups.some(({ connector }) => connector.connectorKey === group.connector.connectorKey)));
     setSheet("trashRoot");
     for (const group of groups) cacheRemovals.set(group.connector.connectorKey, clearSignalTrashCaches(queryClient, context, group.connector.connectorKey));
@@ -2407,7 +2595,9 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
           return;
         }
         const removal = cacheRemovals.get(group.connector.connectorKey);
-        if (removal) commitSignalTrashCaches(queryClient, removal);
+        if (removal) {
+          commitSignalTrashCaches(queryClient, removal, group.threads.map(({ key }) => key));
+        }
         cleared += result.threadsDeleted;
       } catch (failure) {
         failures.set(group.connector.connectorKey, messageFor(failure));
@@ -2418,14 +2608,13 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
       setTrashGroups((current) => current.flatMap((group) => {
         if (!attempted.has(group.connector.connectorKey)) return [group];
         const error = failures.get(group.connector.connectorKey);
-        return error ? [{ ...group, error }] : [];
+        return error ? [{ ...group, error, errorKind: "clear" as const }] : [];
       }));
       if (failures.size) {
         for (const connectorKey of failures.keys()) {
           const removal = cacheRemovals.get(connectorKey);
           if (removal && !restoreSignalTrashCaches(queryClient, removal)) void queryClient.invalidateQueries({ queryKey: signalQueryKeys.accountOverviews(context, connectorKey), refetchType: "active" });
         }
-        setTrashGroups((current) => [...current, ...groups.filter(({ connector }) => failures.has(connector.connectorKey)).map((group) => ({ ...group, error: failures.get(group.connector.connectorKey) }))]);
       }
       setSheet("trashRoot");
       setSheetError(undefined);
@@ -2494,7 +2683,7 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
     : !tonesLoading && !toneError && !rootSearchError && !(normalizedRootQuery && (rootSearching || rootSearchResults?.tab !== "tones")) && !visibleTones.length;
   const workspaceBusy = Boolean(busy || bulkBusy);
   const sheetTransitionGeneration = formTransitionGeneration.current;
-  const formSheet = sheet === "connectForm" || sheet === "toneCreate" || sheet === "inboxEdit" || sheet === "toneEdit";
+  const formSheet = sheet === "toneCreate" || sheet === "inboxEdit" || sheet === "toneEdit";
   const menuSheet = sheet === "rootCreate" || sheet === "plus";
   const hideSheetHeading = menuSheet || sheet === "ai" || sheet === "bulkActions" || sheet === "account";
   const selectionActive = selectedThreads.length > 0;
@@ -2505,23 +2694,23 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
       <BottomSheetItem disabled={Boolean(busy)} onPress={() => void synchronize()} style={styles.sheetAction} variant="secondary">Sync inbox</BottomSheetItem>
       <BottomSheetItem onPress={() => void openTrashRoot()} style={styles.sheetAction} variant="secondary">Trash</BottomSheetItem>
     </> : null}
-    {!connected && permissions.canManageConnector ? <BottomSheetItem disabled={Boolean(busy)} onPress={openConnectProvider} style={styles.sheetAction} variant="secondary">Connect inbox</BottomSheetItem> : null}
+    {!connected && permissions.canManageConnector ? <BottomSheetItem disabled={Boolean(busy)} onPress={() => void connect()} style={styles.sheetAction} variant="secondary">Connect Gmail</BottomSheetItem> : null}
     {connected && permissions.canManageConnector ? <BottomSheetItem onPress={() => { if (newEmailOpen) resetNewEmail(); setSheet("disconnect"); }} style={styles.sheetAction} variant="secondary">Disconnect inbox</BottomSheetItem> : null}
   </>;
   const formFooter = formSheet ? <>
     {sheet !== "toneEdit" || permissions.canMutate ? <Button
-      disabled={Boolean(busy) || (sheet === "connectForm" ? !connectName.trim() || connectProvider === "icloud" && (!connectEmail.trim() || !connectAppPassword.trim()) || !permissions.canManageConnector : sheet === "toneCreate" ? !toneName.trim() || !toneInstruction.trim() || !permissions.canMutate : !metadataName.trim() || !permissions.canMutate || sheet === "toneEdit" && !metadataInstruction.trim())}
-      onPress={() => void (sheet === "connectForm" ? connect() : sheet === "toneCreate" ? createTone() : saveMetadata())}
+      disabled={Boolean(busy) || (sheet === "toneCreate" ? !toneName.trim() || !toneInstruction.trim() || !permissions.canMutate : !metadataName.trim() || !permissions.canMutate || sheet === "toneEdit" && !metadataInstruction.trim())}
+      onPress={() => void (sheet === "toneCreate" ? createTone() : saveMetadata())}
       size="md"
       variant="primary"
     >
-      {sheet === "connectForm" ? "Connect" : sheet === "toneCreate" ? "Create tone" : "Save"}
+      {sheet === "toneCreate" ? "Create tone" : "Save"}
     </Button> : null}
     {sheet === "toneEdit" && permissions.canMutate && !editingTone?.slug ? <Button disabled={Boolean(busy)} onPress={() => setSheet("toneDelete")} size="md" variant="danger">Delete tone</Button> : null}
     <Button disabled={Boolean(busy)} onPress={requestFormClose} size="md" variant="secondary">Close</Button>
   </> : undefined;
   const sheetFooter = sheet === "trashRoot" ? <>
-    {permissions.canManageConnector ? <Button disabled={trashRootLoading || trashClearBusy || !trashGroups.some((group) => !group.error && group.threads.length)} onPress={() => setSheet("clearTrash")} size="md" variant="primary">Clear trash</Button> : null}
+    {permissions.canManageConnector ? <Button disabled={trashRootLoading || trashClearBusy || !clearableEmailTrashGroups(trashGroups).length} onPress={() => setSheet("clearTrash")} size="md" variant="primary">Clear trash</Button> : null}
     <Button disabled={trashRootLoading || trashClearBusy} onPress={() => setSheetOpen(false)} size="md" variant="secondary">Close</Button>
   </> : formFooter;
   const readerFooter = readerSheet === "translate" ? <>
@@ -2564,7 +2753,6 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
               } else if (requestExit("signal")) returnToSignalRoot();
             }}
             size="xs"
-            style={styles.headerButton}
             variant="icon"
           >
             <ChevronLeftIcon size="sm" />
@@ -2578,7 +2766,7 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
         </Text>
         {!selected ? <View style={styles.localActions}>
           <>
-            <Button accessibilityLabel="More inbox actions" contentMode="raw" hitSlop={6} onPress={() => { setSheet("account"); setSheetOpen(true); }} size="xs" style={styles.headerButton} variant="icon"><MoreHorizontalIcon size="sm" /></Button>
+            <Button accessibilityLabel="More inbox actions" contentMode="raw" hitSlop={6} onPress={() => { setSheet("account"); setSheetOpen(true); }} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
             <Button
               accessibilityLabel="New email"
               contentMode="raw"
@@ -2588,7 +2776,6 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
                 setSheetOpen(true);
               }}
               size="xs"
-              style={styles.headerButton}
               variant="icon"
             >
               <PlusIcon size="sm" />
@@ -2639,7 +2826,7 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
           <ScrollView
             accessibilityLabel={rootTab === "inboxes" ? "Signal inboxes" : "Signal tones"}
             contentContainerStyle={[styles.rootGrid, { paddingBottom: insets.bottom + spacing.xl }, rootTab === "inboxes"
-              ? !loading && !loadError && !visibleAccounts.length && !visibleUnassignedDrafts.length && styles.emptyGrid
+              ? !loading && !loadError && !visibleAccounts.length && styles.emptyGrid
               : !tonesLoading && !toneError && !visibleTones.length && styles.emptyGrid]}
             onLayout={({ nativeEvent }) => setRootGridWidth(nativeEvent.layout.width)}
             scrollEnabled={!rootEmpty}
@@ -2667,32 +2854,11 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
                   </Button>
                   </View>
                 ))}
-                {visibleUnassignedDrafts.map((saved) => (
-                  <Button
-                    accessibilityLabel={`Assign ${saved.subject ?? "Untitled draft"} to an inbox`}
-                    contentMode="raw"
-                    key={saved.key}
-                    onPress={() => {
-                      setSheetError(undefined);
-                      setUnassignedDraft(saved);
-                      setSheet("assignDraft");
-                      setSheetOpen(true);
-                    }}
-                    shape="rounded"
-                    size="xl"
-                    style={[styles.rootDraftCard, { width: rootCardSize, height: rootCardSize }]}
-                    variant="secondary"
-                  >
-                    <FileIcon size="md" />
-                    <Text numberOfLines={2} style={styles.rootCardTitle}>{saved.subject ?? "Untitled draft"}</Text>
-                    <Text style={styles.rootCardMeta}>DRAFT</Text>
-                  </Button>
-                ))}
                 {!loadError && !rootSearchError && !visibleAccounts.length && normalizedRootQuery ? <Text style={styles.rootEmpty}>No inboxes matched this search.</Text> : null}
-                {!loadError && !visibleAccounts.length && !visibleUnassignedDrafts.length && !normalizedRootQuery ? (
+                {!loadError && !visibleAccounts.length && !normalizedRootQuery ? (
                   <View style={styles.rootEmptyState}>
                     <Text style={styles.rootEmpty}>{rootFavoritesOnly ? "No favorite inboxes." : "No inboxes yet."}</Text>
-                    {permissions.canManageConnector ? <Button accessibilityLabel="Connect inbox" contentMode="raw" onPress={openConnectProvider} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button> : <Text style={styles.rootEmptyHelp}>Ask an organization administrator to connect an inbox.</Text>}
+                    {permissions.canManageConnector ? <Button accessibilityLabel="Connect Gmail" contentMode="raw" onPress={() => void connect()} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button> : <Text style={styles.rootEmptyHelp}>Ask an organization administrator to connect an inbox.</Text>}
                   </View>
                 ) : null}
               </>
@@ -2814,7 +2980,8 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
                 <View style={styles.messageHeader}><Text selectable style={styles.messageAddress}>{selectedMessage.from}</Text><Text accessibilityLabel={`Sent ${formatEmailTimestamp(selectedMessage.sentAt)}`} style={styles.messageTime}>{formatEmailTimestamp(selectedMessage.sentAt)}</Text></View>
                 <Text selectable style={styles.messageSubject}>{selectedMessage.subject}</Text>
                 <Text selectable style={styles.readerBody}>{selectedMessage.body}</Text>
-                {selectedMessage.attachments?.length ? <View accessibilityLabel={`${selectedMessage.attachments.length} attachments`} style={styles.incomingAttachments}>{selectedMessage.attachments.map((attachment) => attachment.type === "document" ? <Button accessibilityLabel={`Open Archive document attachment ${attachment.key}`} contentMode="raw" key={attachmentIdentity(attachment)} onPress={() => router.push({ pathname: "/capability/[slug]", params: { slug: "archive", documentKey: attachment.key } })} size="sm" style={styles.incomingAttachment} variant="secondary"><FileIcon size="sm" variant="muted" /><Text numberOfLines={1} style={styles.incomingAttachmentText}>Archive document · {attachment.key}</Text></Button> : <View accessibilityLabel={`Gallery image attachment ${attachment.key}. Preview unavailable in Signal.`} key={attachmentIdentity(attachment)} style={[styles.incomingAttachment, styles.incomingAttachmentStatic]}><FileIcon size="sm" variant="muted" /><Text numberOfLines={1} style={styles.incomingAttachmentText}>Gallery image · Preview unavailable</Text></View>)}</View> : selectedMessage.hasAttachments ? <View accessibilityLabel="This email has attachments, but file details are unavailable" style={styles.attachmentLabel}><FileIcon size="sm" variant="muted" /><Text style={styles.attachmentText}>Attachment details unavailable</Text></View> : null}
+                {selectedMessage.attachments?.length ? <View accessibilityLabel={`${selectedMessage.attachments.length} attachments`} style={styles.incomingAttachments}>{selectedMessage.attachments.map((attachment) => attachment.type === "document" ? <Button accessibilityLabel={`Open Archive document attachment ${attachment.key}`} contentMode="raw" key={attachmentIdentity(attachment)} onPress={() => router.push({ pathname: "/capability/[slug]", params: { slug: "archive", documentKey: attachment.key } })} size="sm" style={styles.incomingAttachment} variant="secondary"><FileIcon size="sm" variant="muted" /><Text numberOfLines={1} style={styles.incomingAttachmentText}>Archive document · {attachment.key}</Text></Button> : <View accessibilityLabel={`Gallery image attachment ${attachment.key}. Preview unavailable in Signal.`} key={attachmentIdentity(attachment)} style={[styles.incomingAttachment, styles.incomingAttachmentStatic]}><FileIcon size="sm" variant="muted" /><Text numberOfLines={1} style={styles.incomingAttachmentText}>Gallery image · Preview unavailable</Text></View>)}</View> : null}
+                {selectedMessage.attachmentAvailability === "truncated" || selectedMessage.attachmentAvailability === "failed" || (selectedMessage.hasAttachments && !selectedMessage.attachments?.length) ? <View accessibilityLabel="Some email attachment details are unavailable" style={styles.attachmentLabel}><FileIcon size="sm" variant="muted" /><Text style={styles.attachmentText}>{selectedMessage.unavailableAttachmentCount ? `${selectedMessage.unavailableAttachmentCount} attachment${selectedMessage.unavailableAttachmentCount === 1 ? "" : "s"} unavailable` : "Attachment details unavailable"}</Text></View> : null}
               </ScrollView>
             </View> : null}
           </View>
@@ -2881,18 +3048,11 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
         onOpenChange={(open) => {
           if (sheetTransitionGeneration !== formTransitionGeneration.current) return;
           if (!open && formSheet) requestFormClose();
-          else {
-            setSheetOpen(open);
-            if (!open && sheet === "assignDraft") setUnassignedDraft(undefined);
-          }
+          else setSheetOpen(open);
         }}
         open={sheetOpen && sheet !== "searchHistory"}
         title={
-          sheet === "connectProvider"
-              ? "Choose email provider"
-              : sheet === "connectForm"
-              ? `Connect ${connectProvider === "gmail" ? "Gmail" : connectProvider === "outlook" ? "Outlook" : "Apple iCloud"}`
-              : sheet === "toneCreate"
+          sheet === "toneCreate"
                 ? "Create email tone"
                 : sheet === "inboxEdit"
                   ? "Edit inbox"
@@ -2904,9 +3064,7 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
               ? "AI actions"
               : sheet === "plus"
                 ? "Create"
-                : sheet === "assignDraft"
-                    ? "Choose an inbox"
-                  : sheet === "disconnect"
+                : sheet === "disconnect"
                     ? "Disconnect inbox?"
                     : sheet === "bulkActions" ? ""
                         : sheet === "bulkTrash" ? "Move to Trash?"
@@ -2939,7 +3097,7 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
           <View style={styles.sheetItems}>
             <BottomSheetItem disabled={!permissions.canMutate} onPress={openToneCreate} style={styles.sheetAction} variant="secondary">Create email tone</BottomSheetItem>
             <BottomSheetItem onPress={openReplyContexts} style={styles.sheetAction} variant="secondary">Reply context</BottomSheetItem>
-            <BottomSheetItem disabled={!permissions.canManageConnector} onPress={openConnectProvider} style={styles.sheetAction} variant="secondary">Connect inbox</BottomSheetItem>
+            <BottomSheetItem disabled={Boolean(busy) || !permissions.canManageConnector} onPress={() => void connect()} style={styles.sheetAction} variant="secondary">Connect Gmail</BottomSheetItem>
           </View>
         ) : sheet === "trashRoot" ? (
           <ScrollView contentContainerStyle={styles.trashRootContent} showsVerticalScrollIndicator={false}>
@@ -2950,25 +3108,6 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
           </ScrollView>
         ) : sheet === "clearTrash" ? (
           <View style={styles.sheetItems}><Button disabled={trashClearBusy} onPress={() => void clearTrash()} size="md" variant="primary">Clear trash</Button><Button disabled={trashClearBusy} onPress={() => setSheet("trashRoot")} size="md" variant="secondary">Close</Button></View>
-        ) : sheet === "connectProvider" ? (
-          <View style={styles.sheetItems}>
-            <BottomSheetItem icon={<GoogleIcon size={20} />} onPress={() => openConnectForm("gmail")} style={styles.sheetAction} variant="secondary">Gmail</BottomSheetItem>
-            <BottomSheetItem icon={<MicrosoftIcon size={20} />} onPress={() => openConnectForm("outlook")} style={styles.sheetAction} variant="secondary">Outlook</BottomSheetItem>
-            <BottomSheetItem icon={<AppleIcon size={20} />} onPress={() => openConnectForm("icloud")} style={styles.sheetAction} variant="secondary">Apple iCloud</BottomSheetItem>
-          </View>
-        ) : sheet === "connectForm" ? (
-          <ScrollView contentContainerStyle={styles.metadataForm} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={styles.formScroll}>
-            {connectProvider === "icloud" ? <>
-              <Text style={styles.inputLabel}>Apple ID email</Text>
-              <TextInput accessibilityLabel="Apple ID email" autoCapitalize="none" autoComplete="email" autoCorrect={false} editable={!busy} keyboardType="email-address" maxLength={320} onChangeText={setConnectEmail} placeholder="name@icloud.com" ref={sheetInputRef} value={connectEmail} />
-              <Text style={styles.inputLabel}>App-specific password</Text>
-              <TextInput accessibilityLabel="App-specific password" autoCapitalize="none" autoComplete="off" autoCorrect={false} editable={!busy} maxLength={255} onChangeText={setConnectAppPassword} placeholder="App-specific password" secureTextEntry value={connectAppPassword} />
-            </> : null}
-            <Text style={styles.inputLabel}>Inbox name</Text>
-            <TextInput accessibilityLabel="Inbox name" editable={!busy} maxLength={255} onChangeText={setConnectName} placeholder="Inbox name" ref={connectProvider === "icloud" ? undefined : sheetInputRef} value={connectName} />
-            <Text style={styles.inputLabel}>Description (Optional)</Text>
-            <TextInput accessibilityLabel="Inbox description" editable={!busy} maxLength={10000} multiline onChangeText={setConnectDescription} placeholder="What belongs in this inbox?" style={styles.metadataDescriptionInput} textAlignVertical="top" value={connectDescription} />
-          </ScrollView>
         ) : sheet === "toneCreate" ? (
           <ScrollView contentContainerStyle={styles.metadataForm} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={styles.formScroll}>
             <Text style={styles.inputLabel}>Tone name</Text>
@@ -2998,25 +3137,6 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
             </View> : null}
             <View style={styles.favoriteRow}><Switch accessibilityLabel={sheet === "toneEdit" ? "Favorite tone" : "Favorite inbox"} checked={metadataFavorite} disabled={!permissions.canMutate || Boolean(busy)} onCheckedChange={setMetadataFavorite} /><Text style={styles.favoriteLabel}>Favorite</Text></View>
           </ScrollView>
-        ) : sheet === "assignDraft" ? (
-          <View style={styles.sheetItems}>
-            {metadataAccounts.length ? metadataAccounts.map((account) => (
-              <BottomSheetItem
-                disabled={Boolean(busy)}
-                key={account.key}
-                onPress={() => void assignDraft(account.connectorKey)}
-              >
-                {account.email}
-              </BottomSheetItem>
-            )) : (
-              <>
-                <Text style={styles.confirmText}>Connect an email provider before assigning this draft to an inbox.</Text>
-                {permissions.canManageConnector ? (
-                  <Button onPress={() => { setUnassignedDraft(undefined); openConnectProvider(); }} size="md" variant="primary">Connect inbox</Button>
-                ) : <Text style={styles.centerText}>Ask an organization administrator to connect an inbox.</Text>}
-              </>
-            )}
-          </View>
         ) : sheet === "ai" ? (
           <View style={styles.sheetItems}>
             {selected ? (
@@ -3053,7 +3173,7 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
             ) : null}
             <BottomSheetItem disabled={!permissions.canMutate} onPress={openToneCreate} style={styles.sheetAction} variant="secondary">Create email tone</BottomSheetItem>
             <BottomSheetItem onPress={openReplyContexts} style={styles.sheetAction} variant="secondary">Reply context</BottomSheetItem>
-            <BottomSheetItem disabled={!permissions.canManageConnector} onPress={openConnectProvider} style={styles.sheetAction} variant="secondary">Connect inbox</BottomSheetItem>
+            <BottomSheetItem disabled={Boolean(busy) || !permissions.canManageConnector} onPress={() => void connect()} style={styles.sheetAction} variant="secondary">Connect Gmail</BottomSheetItem>
           </View>
         ) : sheet === "bulkActions" ? (
           <View style={styles.sheetItems}>
@@ -3097,63 +3217,68 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
       </View>
       <BottomSheet
         dismissible={!newEmailSending}
-        footer={<><Button disabled={newEmailSending || !newEmailRecipients.length && !newEmailRecipientInput.trim()} onPress={advanceNewEmailRecipients} size="md" variant="primary">Next</Button><Button disabled={newEmailSending} onPress={resetNewEmail} size="md" variant="secondary">Close</Button></>}
+        footer={<><Button disabled={newEmailSending || !newEmailRecipients.length && !newEmailRecipientInput.trim()} onPress={advanceNewEmailRecipients} size="md" variant="primary">Next</Button><Button disabled={newEmailSending} onPress={closeNewEmailRecipients} size="md" variant="secondary">Close</Button></>}
         height="full"
-        onOpenChange={(open) => { if (!open && !newEmailSending) resetNewEmail(); }}
+        onOpenChange={(open) => { if (!open && !newEmailSending && !newEmailContentOpen && !newEmailAlternativesOpen && !newEmailReviewOpen) closeNewEmailRecipients(); }}
         open={newEmailRecipientsOpen}
         title="Recipients"
       >
         <ScrollView contentContainerStyle={styles.newEmailForm} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-          <TextInput accessibilityLabel="Email recipients" autoCapitalize="none" autoCorrect={false} editable={!newEmailSending} keyboardType="email-address" onChangeText={(value) => { setNewEmailRecipientInput(value); setNewEmailRecipientError(undefined); }} onSubmitEditing={advanceNewEmailRecipients} placeholder="Email address" value={newEmailRecipientInput} />
+          <Text style={styles.inputLabel}>Email addresses</Text>
+          <TextInput accessibilityLabel="Email recipients" autoCapitalize="none" autoCorrect={false} editable={!newEmailSending} keyboardType="email-address" onBlur={() => { if (newEmailRecipientInput.trim()) commitNewEmailRecipients(); }} onChangeText={changeNewEmailRecipientInput} onSubmitEditing={() => commitNewEmailRecipients()} placeholder="Email address" ref={newEmailRecipientInputRef} value={newEmailRecipientInput} />
           {newEmailRecipientError ? <View accessibilityLiveRegion="polite" accessibilityRole="alert" style={styles.inlineError}><Text style={styles.inlineErrorText}>{newEmailRecipientError}</Text></View> : null}
-          <View accessibilityLabel="Committed email recipients" style={styles.recipientChips}>{newEmailRecipients.map((address) => <Button accessibilityLabel={`Remove recipient ${address}`} contentMode="raw" disabled={newEmailSending} key={address.toLocaleLowerCase()} onPress={() => setNewEmailRecipients((current) => current.filter((candidate) => candidate.toLocaleLowerCase() !== address.toLocaleLowerCase()))} shape="pill" size="md" style={styles.recipientChip} variant="secondary"><Text numberOfLines={1} style={styles.recipientChipText}>{address}</Text><CloseIcon size="sm" /></Button>)}</View>
+          <View accessibilityLabel="Committed email recipients" style={styles.recipientChips}>{newEmailRecipients.map((address) => <View key={address.toLocaleLowerCase()} style={styles.recipientChip}><Button accessibilityLabel={`Focus recipient input for ${address}`} contentMode="raw" disabled={newEmailSending} onPress={() => newEmailRecipientInputRef.current?.focus()} size="md" style={styles.recipientChipMain} variant="ghost"><Text style={styles.recipientChipText}>{address}</Text></Button><Button accessibilityLabel={`Remove recipient ${address}`} contentMode="raw" disabled={newEmailSending} hitSlop={6} iconOnly onPress={() => removeNewEmailRecipient(address)} size="md" style={styles.recipientChipRemove} variant="secondary"><CloseIcon size="sm" /></Button></View>)}</View>
         </ScrollView>
       </BottomSheet>
       <BottomSheet
         dismissible={!newEmailSending}
-        footer={<><Button disabled={newEmailSending || tonesLoading} onPress={openNewEmailAlternatives} size="md" variant="primary">Next</Button><Button disabled={newEmailSending} onPress={() => { invalidateNewEmailAlternatives(); setNewEmailContentOpen(false); }} size="md" variant="secondary">Close</Button></>}
+        footer={<><Button disabled={newEmailSending || tonesLoading} onPress={openNewEmailAlternatives} size="md" variant="primary">Next</Button><Button disabled={newEmailSending} onPress={() => { invalidateNewEmailAlternatives(); setNewEmailContentOpen(false); setNewEmailRecipientsOpen(true); }} size="md" variant="secondary">Close</Button></>}
         height="full"
-        onOpenChange={(open) => { if (!open && !newEmailSending) { invalidateNewEmailAlternatives(); setNewEmailContentOpen(false); } }}
+        onOpenChange={(open) => { if (!open && !newEmailSending && !newEmailAlternativesOpen && !newEmailReviewOpen) { invalidateNewEmailAlternatives(); setNewEmailContentOpen(false); setNewEmailRecipientsOpen(true); } }}
         open={newEmailContentOpen}
         title="Write email"
       >
         <ScrollView contentContainerStyle={styles.newEmailForm} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-          <TextInput accessibilityLabel="Email subject" editable={!newEmailSending} maxLength={998} onChangeText={(value) => changeNewEmailContent("subject", value)} placeholder="Subject" value={newEmailSubject} />
+          <Text style={styles.inputLabel}>Subject</Text>
+          <TextInput accessibilityLabel="Email subject" editable={!newEmailSending} maxLength={998} onChangeText={(value) => changeNewEmailContent("subject", value)} placeholder="Subject" ref={newEmailSubjectInputRef} value={newEmailSubject} />
+          <Text style={styles.inputLabel}>Message</Text>
           <TextInput accessibilityLabel="Email body" editable={!newEmailSending} maxLength={50_000} multiline onChangeText={(value) => changeNewEmailContent("body", value)} placeholder="Message" style={styles.newEmailBodyInput} textAlignVertical="top" value={newEmailBody} />
         </ScrollView>
       </BottomSheet>
       <BottomSheet
         dismissible={!newEmailSending}
-        footer={<><Button disabled={newEmailSending} onPress={() => openNewEmailReview()} size="md" variant="primary">Skip</Button>{newEmailAlternatives.some(({ status }) => status === "failed") ? <Button disabled={newEmailSending || newEmailAlternatives.some(({ status }) => status === "pending")} onPress={() => generateNewEmailAlternatives(newEmailToneSnapshot, true)} size="md" variant="secondary">Retry failed</Button> : null}<Button disabled={newEmailSending} onPress={() => setNewEmailAlternativesOpen(false)} size="md" variant="secondary">Close</Button></>}
+        footer={<><Button disabled={newEmailSending} onPress={() => openNewEmailReview()} size="md" variant="primary">Skip</Button><Button disabled={newEmailSending} onPress={returnToNewEmailContent} size="md" variant="secondary">Close</Button></>}
         height="full"
-        onOpenChange={(open) => { if (!open && !newEmailSending) setNewEmailAlternativesOpen(false); }}
+        onOpenChange={(open) => { if (!open && !newEmailSending && !newEmailReviewOpen) returnToNewEmailContent(); }}
         open={newEmailAlternativesOpen}
         title="Choose a tone"
       >
         <ScrollView contentContainerStyle={styles.alternativeList} showsVerticalScrollIndicator={false}>
           {newEmailAlternativeError ? <View accessibilityRole="alert" style={styles.sheetError}><Text style={styles.sheetErrorText}>{newEmailAlternativeError}</Text></View> : null}
           {Array.from({ length: newEmailAlternativeSkeletonCount }, (_, index) => <Skeleton accessibilityLabel="Generating email alternatives" accessibilityRole="progressbar" key={index} style={styles.newEmailAlternativeSkeleton} />)}
-          {newEmailAlternatives.flatMap((alternative) => alternative.status === "succeeded" && alternative.draft ? [<Button contentMode="raw" key={alternative.option.value} onPress={() => openNewEmailReview(alternative.draft)} shape="pill" size="md" style={styles.newEmailAlternative} variant="secondary"><View style={styles.resultText}><Text numberOfLines={1} style={styles.rowTitle}>{alternative.option.label}</Text><Text numberOfLines={1} style={styles.rowSubtitle}>{alternative.draft.finalContent ?? alternative.draft.generatedContent}</Text></View></Button>] : [])}
+          {newEmailAlternatives.flatMap((alternative) => alternative.status === "succeeded" && alternative.draft ? [<Button contentMode="raw" key={alternative.option.value} onPress={() => openNewEmailReview(alternative.draft)} shape="pill" size="md" style={styles.newEmailAlternative} variant="secondary"><View style={styles.newEmailAlternativeCopy}><Text numberOfLines={1} style={styles.rowTitle}>{alternative.option.label}</Text><Text numberOfLines={1} style={styles.newEmailAlternativePreview}>{alternative.draft.finalContent ?? alternative.draft.generatedContent}</Text></View></Button>] : alternative.status === "failed" ? [<Button accessibilityLabel={`Retry ${alternative.option.label} email alternative`} key={alternative.option.value} onPress={() => retryNewEmailAlternative(alternative.option)} size="md" style={styles.newEmailAlternative} variant="secondary">Retry {alternative.option.label}</Button>] : [])}
         </ScrollView>
       </BottomSheet>
       <BottomSheet
         dismissible={!newEmailSending}
-        footer={<><Button disabled={newEmailSending} onPress={() => void sendNewEmail()} size="md" variant="primary">Send</Button><Button disabled={newEmailSending} onPress={closeNewEmailReview} size="md" variant="secondary">Close</Button></>}
+        footer={<><Button disabled={newEmailSending || !newEmailRecipients.length} onPress={() => void sendNewEmail()} size="md" variant="primary">Send</Button><Button disabled={newEmailSending} onPress={closeNewEmailReview} size="md" variant="secondary">Close</Button></>}
         height="full"
-        onOpenChange={(open) => { if (!open && !newEmailSending) closeNewEmailReview(); }}
+        onOpenChange={(open) => { if (!open && !newEmailSending && !newEmailAttachmentsOpen) closeNewEmailReview(); }}
         open={newEmailReviewOpen}
-        title="Review email"
+        title="Email draft"
       >
         <ScrollView contentContainerStyle={styles.newEmailForm} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           {newEmailError ? <View accessibilityRole="alert" style={styles.sheetError}><Text style={styles.sheetErrorText}>{newEmailError}</Text></View> : null}
-          <View accessibilityLabel="Email recipients" style={styles.recipientChips}>{newEmailRecipients.map((address) => <View key={address.toLocaleLowerCase()} style={styles.reviewRecipientChip}><Text numberOfLines={1} style={styles.recipientChipText}>{address}</Text></View>)}</View>
-          <TextInput accessibilityLabel="Review email subject" editable={!newEmailSending} maxLength={998} onChangeText={(value) => { setNewEmailReviewSubject(value); if (newEmailSelectedDraft) setNewEmailSkipped(value !== newEmailSubject); }} placeholder="Subject" value={newEmailReviewSubject} />
+          <TextInput accessibilityLabel="Review email subject" editable={!newEmailSending} maxLength={998} onChangeText={(value) => { setNewEmailReviewSubject(value); if (newEmailSelectedDraft && value !== newEmailSubject) setNewEmailSkipped(true); }} placeholder="Subject" value={newEmailReviewSubject} />
           <TextInput accessibilityLabel="Review email body" editable={!newEmailSending} maxLength={50_000} multiline onChangeText={setNewEmailReviewBody} placeholder="Message" style={styles.newEmailBodyInput} textAlignVertical="top" value={newEmailReviewBody} />
+          <View style={styles.attachmentActions}><View style={styles.recipientChip}><Button accessibilityLabel="Open attachments" contentMode="raw" disabled={newEmailSending} onPress={openNewEmailAttachments} size="md" style={[styles.recipientChipMain, styles.attachmentChipMain]} variant="ghost"><Text style={[styles.recipientChipText, styles.attachmentChipText]}>Attachments</Text></Button><Button accessibilityLabel="Add attachments" contentMode="raw" disabled={newEmailSending} hitSlop={6} iconOnly onPress={openNewEmailAttachments} size="md" style={styles.recipientChipRemove} variant="secondary"><PlusIcon size="sm" /></Button></View>{newEmailAttachments.length ? <View style={styles.recipientChip}><Button contentMode="raw" disabled={newEmailSending} onPress={removeAllNewEmailAttachments} size="md" style={[styles.recipientChipMain, styles.attachmentChipMain]} variant="ghost"><Text style={[styles.recipientChipText, styles.attachmentChipText]}>Remove all</Text></Button></View> : null}</View>
+          {newEmailAttachments.length ? <View accessibilityLabel={`${newEmailAttachments.length} email attachments`} onLayout={({ nativeEvent }) => setReviewAttachmentGridWidth(nativeEvent.layout.width)} style={styles.reviewAttachmentGrid}>{newEmailAttachments.map((ref) => { const identity = attachmentIdentity(ref); const label = newEmailAttachmentLabels[identity] ?? (ref.type === "document" ? "Archive document" : "Gallery image"); const imageUrl = ref.type === "image" ? newEmailAttachmentImageUrls[identity] : undefined; return <Button accessibilityLabel={`Edit attachment ${label}`} contentMode="raw" disabled={newEmailSending} key={identity} onPress={openNewEmailAttachments} shape="rounded" size="md" style={[styles.reviewAttachmentCard, { width: reviewAttachmentCardSize, height: reviewAttachmentCardSize }]} variant="ghost">{imageUrl ? <Image contentFit="cover" onError={() => void refreshNewEmailImageUrls()} source={imageUrl} style={styles.reviewAttachmentImage} transition={150} /> : <><FileIcon size="lg" /><Text ellipsizeMode="tail" numberOfLines={1} style={styles.reviewAttachmentLabel}>{label}</Text></>}</Button>; })}</View> : null}
         </ScrollView>
       </BottomSheet>
+      {newEmailAttachmentsOpen ? <EmailAttachmentPicker context={historyContext} contextKey={`${emailContext.organizationKey}:${emailContext.scopeKey}:new-email`} imageUrls={newEmailAttachmentImageUrls} labels={newEmailAttachmentLabels} onClose={() => setNewEmailAttachmentsOpen(false)} onDone={finishNewEmailAttachments} open selection={newEmailAttachments} /> : null}
       <BottomSheet
         description={readerSheet === "translate" || readerSheet === "translationReader" ? "View saved translations or create a new one." : readerSheet === "translationForm" ? "Choose the language for this email translation." : readerSheet === "summaryVersions" || readerSheet === "summaryReader" ? "View saved summaries or create a new one." : readerSheet === "replies" ? "Choose a generated response to review." : undefined}
-        dismissible={!trashBusy && !generatedDeleteBusy && !replySending && !replyEnhancing}
+        dismissible={!trashBusy && !generatedDeleteBusy && !replySending && !replyEnhancing && !replyAttachmentsOpen}
         footer={readerFooter}
         height="full"
         onOpenChange={(open) => { if (!open) closeReaderFlow(); }}
@@ -3176,7 +3301,8 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
           {readerLoading ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Generating reply options" accessibilityRole="progressbar" key={index} style={styles.versionSkeleton} />) : replyDrafts.map((reply) => <Button contentMode="raw" key={reply.key} onPress={() => openReplyDraft(reply)} size="md" style={styles.versionMain} variant="secondary"><MailIcon size="sm" /><View style={styles.resultText}><Text numberOfLines={1} style={styles.rowTitle}>{reply.tone ?? "Reply"}</Text><Text numberOfLines={1} style={styles.rowSubtitle}>{reply.finalContent ?? reply.generatedContent}</Text></View></Button>)}
           {!readerLoading && !readerError && replyDrafts.length === 0 ? <Text style={styles.centerText}>No replies available.</Text> : null}
         </ScrollView> : null}
-        {readerSheet === "replyReader" ? <View style={styles.replyEditor}><Button accessibilityLabel="Enhance reply" contentMode="raw" disabled={replySending || replyEnhancing || !replyBody.trim()} onPress={() => setReplyEnhanceOpen(true)} size="md" style={styles.replyEnhanceButton} variant="secondary"><StarIcon size="sm" /></Button><ScrollView contentContainerStyle={styles.replyReview} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>{replyEnhancing ? <View accessibilityLabel="Enhancing reply" accessibilityRole="progressbar" style={styles.replyEnhancing}><Skeleton style={styles.replyEnhanceSkeleton} /><Skeleton style={styles.replyEnhanceSkeletonShort} /><Skeleton style={styles.replyEnhanceSkeleton} /></View> : <TextInput accessibilityLabel="Reply text" editable={!replySending} maxLength={50_000} multiline onChangeText={setReplyBody} ref={readerInputRef} style={styles.replyReviewInput} textAlignVertical="top" value={replyBody} />}</ScrollView></View> : null}
+        {readerSheet === "replyReader" ? <View style={styles.replyEditor}><Button accessibilityLabel="Enhance reply" contentMode="raw" disabled={replySending || replyEnhancing || !replyBody.trim()} onPress={() => setReplyEnhanceOpen(true)} size="md" style={styles.replyEnhanceButton} variant="secondary"><StarIcon size="sm" /></Button><ScrollView contentContainerStyle={styles.replyReview} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>{replyEnhancing ? <View accessibilityLabel="Enhancing reply" accessibilityRole="progressbar" style={styles.replyEnhancing}><Skeleton style={styles.replyEnhanceSkeleton} /><Skeleton style={styles.replyEnhanceSkeletonShort} /><Skeleton style={styles.replyEnhanceSkeleton} /></View> : <TextInput accessibilityLabel="Reply text" editable={!replySending} maxLength={50_000} multiline onChangeText={setReplyBody} ref={readerInputRef} style={styles.replyReviewInput} textAlignVertical="top" value={replyBody} />}<View style={styles.attachmentActions}><View style={styles.recipientChip}><Button accessibilityLabel="Open reply attachments" contentMode="raw" disabled={replySending || replyEnhancing} onPress={() => setReplyAttachmentsOpen(true)} size="md" style={[styles.recipientChipMain, styles.attachmentChipMain]} variant="ghost"><Text style={[styles.recipientChipText, styles.attachmentChipText]}>Attachments</Text></Button><Button accessibilityLabel="Add reply attachments" contentMode="raw" disabled={replySending || replyEnhancing} hitSlop={6} iconOnly onPress={() => setReplyAttachmentsOpen(true)} size="md" style={styles.recipientChipRemove} variant="secondary"><PlusIcon size="sm" /></Button></View>{replyAttachments.length ? <View style={styles.recipientChip}><Button contentMode="raw" disabled={replySending || replyEnhancing} onPress={() => { setReplyAttachments([]); setReplyAttachmentLabels({}); setReplyAttachmentImageUrls({}); }} size="md" style={[styles.recipientChipMain, styles.attachmentChipMain]} variant="ghost"><Text style={[styles.recipientChipText, styles.attachmentChipText]}>Remove all</Text></Button></View> : null}</View>{replyAttachments.length ? <View accessibilityLabel={`${replyAttachments.length} reply attachments`} onLayout={({ nativeEvent }) => setReviewAttachmentGridWidth(nativeEvent.layout.width)} style={styles.reviewAttachmentGrid}>{replyAttachments.map((ref) => { const identity = attachmentIdentity(ref); const label = replyAttachmentLabels[identity] ?? (ref.type === "document" ? "Archive document" : "Gallery image"); const imageUrl = ref.type === "image" ? replyAttachmentImageUrls[identity] : undefined; return <Button accessibilityLabel={`Edit attachment ${label}`} contentMode="raw" disabled={replySending || replyEnhancing} key={identity} onPress={() => setReplyAttachmentsOpen(true)} shape="rounded" size="md" style={[styles.reviewAttachmentCard, { width: reviewAttachmentCardSize, height: reviewAttachmentCardSize }]} variant="ghost">{imageUrl ? <Image contentFit="cover" source={imageUrl} style={styles.reviewAttachmentImage} transition={150} /> : <><FileIcon size="lg" /><Text ellipsizeMode="tail" numberOfLines={1} style={styles.reviewAttachmentLabel}>{label}</Text></>}</Button>; })}</View> : null}</ScrollView></View> : null}
+        {readerSheet === "replyReader" && replyAttachments.length ? <View accessibilityLabel={`${replyAttachments.length} reply attachments`} onLayout={({ nativeEvent }) => setReviewAttachmentGridWidth(nativeEvent.layout.width)} style={styles.reviewAttachmentGrid}>{replyAttachments.map((ref) => { const identity = attachmentIdentity(ref); const label = replyAttachmentLabels[identity] ?? (ref.type === "document" ? "Archive document" : "Gallery image"); const imageUrl = ref.type === "image" ? replyAttachmentImageUrls[identity] : undefined; return <Button accessibilityLabel={`Edit reply attachment ${label}`} contentMode="raw" disabled={replySending || replyEnhancing} key={identity} onPress={() => setReplyAttachmentsOpen(true)} shape="rounded" size="md" style={[styles.reviewAttachmentCard, { width: reviewAttachmentCardSize, height: reviewAttachmentCardSize }]} variant="ghost">{imageUrl ? <Image contentFit="cover" onError={() => { if (ref.type === "image") void refreshReplyImageUrl(ref); }} source={imageUrl} style={styles.reviewAttachmentImage} transition={150} /> : <><FileIcon size="lg" /><Text ellipsizeMode="tail" numberOfLines={1} style={styles.reviewAttachmentLabel}>{label}</Text></>}</Button>; })}</View> : null}
         {readerSheet === "similar" ? <View style={styles.similarFlow}>
           <ScrollView contentContainerStyle={styles.similarResults} showsVerticalScrollIndicator={false}>{readerLoading ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Finding similar email" accessibilityRole="progressbar" key={index} style={styles.versionSkeleton} />) : !similarResults.length ? <Text style={styles.centerText}>No similar emails found.</Text> : similarResults.map((result) => <Button contentMode="raw" key={result.key} onPress={() => void openSimilarResult(result)} size="md" style={styles.similarResult} variant="secondary"><MailIcon size="sm" /><Text ellipsizeMode="tail" numberOfLines={1} style={styles.similarResultText}>{result.subject}</Text></Button>)}</ScrollView>
        </View> : null}
@@ -3187,6 +3313,7 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, navigatedFro
        </BottomSheet>
        <BottomSheet dismissible={!replySending} hideHeading onOpenChange={(open) => { if (!open && !replySending) setReplyModeOpen(false); }} open={readerSheetOpen && replyModeOpen} title="Choose reply recipients"><View style={styles.sheetItems}><BottomSheetItem disabled={replySending} onPress={() => void sendSuggestedReply("reply")} style={styles.sheetAction} variant="secondary">Reply</BottomSheetItem><BottomSheetItem disabled={replySending} onPress={() => void sendSuggestedReply("reply_all")} style={styles.sheetAction} variant="secondary">Reply all</BottomSheetItem></View></BottomSheet>
        <BottomSheet dismissible={!replyEnhancing} onOpenChange={(open) => { if (!open && !replyEnhancing) setReplyEnhanceOpen(false); }} open={readerSheetOpen && replyEnhanceOpen} title="Enhance reply"><View style={styles.generatedDeleteConfirmation}><Text style={styles.confirmText}>Improve grammar, spelling, and wording while preserving your meaning.</Text><Button disabled={replyEnhancing || !replyBody.trim()} onPress={() => void enhanceReply()} size="md" variant="primary">Enhance</Button><Button disabled={replyEnhancing} onPress={() => setReplyEnhanceOpen(false)} size="md" variant="secondary">Close</Button></View></BottomSheet>
+       {replyAttachmentsOpen && selectedReply ? <EmailAttachmentPicker context={historyContext} contextKey={`${emailContext.organizationKey}:${emailContext.scopeKey}:reply:${selectedReply.key}`} imageUrls={replyAttachmentImageUrls} labels={replyAttachmentLabels} onClose={() => setReplyAttachmentsOpen(false)} onDone={finishReplyAttachments} open selection={replyAttachments} /> : null}
         {readerSheet === "delete" ? <View accessibilityState={{ busy: trashBusy }} style={styles.deleteFlow}><TrashIcon size="lg" variant="muted" /><Text style={styles.confirmText}>Move this email thread to Trash?</Text><Button disabled={trashBusy} onPress={() => void trashThread()} size="md" variant="danger">Move to trash</Button><Button disabled={trashBusy} onPress={closeReaderFlow} size="md" variant="secondary">Cancel</Button></View> : null}
       </BottomSheet>
       <View accessibilityElementsHidden={readerSheetOpen} importantForAccessibility={readerSheetOpen ? "no-hide-descendants" : "auto"} pointerEvents={readerSheetOpen ? "none" : "auto"}>
@@ -3429,7 +3556,6 @@ const styles = StyleSheet.create({
   inboxHeader: { minHeight: 48 },
   inboxTitle: { fontSize: 24, letterSpacing: 0 },
   threadHeaderTitle: { fontSize: 15, lineHeight: 20, letterSpacing: 0 },
-  headerButton: { width: 32, height: 32, minHeight: 32, paddingHorizontal: 0, paddingVertical: 0 },
   localActions: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
   center: {
     flex: 1,
@@ -3485,12 +3611,10 @@ const styles = StyleSheet.create({
   emptyGrid: { minHeight: 360, alignContent: "center", alignItems: "center", justifyContent: "center" },
   rootCard: { position: "relative", overflow: "hidden", borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.md, backgroundColor: palette.panelRaised },
   rootCardSkeleton: { borderRadius: radii.md, backgroundColor: palette.hairlineBright, opacity: 0.72 },
-  rootDraftCard: { paddingHorizontal: 8, paddingVertical: 10, flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 7, backgroundColor: palette.panelRaised },
   rootCardMain: { width: "100%", height: "100%", paddingHorizontal: 8, paddingVertical: 10, flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10 },
   coveredCardMain: { justifyContent: "flex-end", paddingBottom: 10 },
   coveredCardLabel: { width: "auto", maxWidth: "100%", paddingHorizontal: 5, paddingVertical: 4, overflow: "hidden", borderRadius: radii.sm, backgroundColor: "rgba(0,0,0,0.68)", color: palette.silver50 },
   rootCardTitle: { width: "100%", color: palette.silver100, fontFamily: fonts.medium, fontSize: 12, lineHeight: 15, textAlign: "center" },
-  rootCardMeta: { color: palette.silver700, fontFamily: fonts.semibold, fontSize: 8, letterSpacing: 0.8 },
   rootEmptyState: { width: "100%", flex: 1, minHeight: 360, alignItems: "center", justifyContent: "center", gap: 14 },
   rootEmpty: { width: "100%", color: palette.silver500, fontFamily: fonts.regular, fontSize: 13, textAlign: "center" },
   rootEmptyHelp: { maxWidth: 300, color: palette.silver700, fontFamily: fonts.regular, fontSize: 12, lineHeight: 18, textAlign: "center" },
@@ -3675,12 +3799,22 @@ const styles = StyleSheet.create({
   inlineError: { paddingHorizontal: 2 },
   inlineErrorText: { color: palette.silver100, fontFamily: fonts.regular, fontSize: 12, lineHeight: 18 },
   recipientChips: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs },
-  recipientChip: { minHeight: 36, maxWidth: "100%", paddingLeft: spacing.sm, paddingRight: spacing.xs, gap: spacing.xs },
-  reviewRecipientChip: { minHeight: 36, maxWidth: "100%", paddingHorizontal: spacing.sm, flexDirection: "row", alignItems: "center", borderRadius: 999, backgroundColor: palette.panel },
-  recipientChipText: { minWidth: 0, flexShrink: 1, color: palette.silver300, fontFamily: fonts.medium, fontSize: 12 },
+  recipientChip: { alignSelf: "flex-start", minHeight: 42, maxWidth: "100%", flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1, borderColor: "rgba(221, 226, 229, 0.18)", borderRadius: 999, backgroundColor: "rgba(255, 255, 255, 0.03)" },
+  recipientChipMain: { minWidth: 0, flexShrink: 1, justifyContent: "flex-start", paddingLeft: spacing.sm, paddingRight: 0 },
+  recipientChipRemove: { width: 42, height: 42, paddingHorizontal: 0, paddingVertical: 0 },
+  recipientChipText: { minWidth: 0, flexShrink: 1, color: palette.silver100, fontFamily: fonts.medium, fontSize: 12 },
+  attachmentChipMain: { justifyContent: "center", paddingLeft: 7 },
+  attachmentChipText: { textAlign: "center" },
+  attachmentActions: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: spacing.xs },
+  reviewAttachmentGrid: { width: "100%", flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  reviewAttachmentCard: { width: "100%", height: "100%", position: "relative", overflow: "hidden", flexDirection: "column", justifyContent: "center", gap: 8, paddingHorizontal: 6, borderWidth: 1, borderColor: palette.hairline, backgroundColor: palette.panelRaised },
+  reviewAttachmentImage: StyleSheet.absoluteFill,
+  reviewAttachmentLabel: { width: "100%", color: palette.silver100, fontFamily: fonts.medium, fontSize: 12, textAlign: "center" },
   alternativeList: { flexGrow: 1, gap: spacing.xs, paddingBottom: spacing.xl },
-  newEmailAlternative: { width: "100%", minHeight: 44, justifyContent: "flex-start", paddingHorizontal: spacing.md },
-  newEmailAlternativeSkeleton: { width: "100%", height: 44, borderRadius: 999 },
+  newEmailAlternative: { width: "100%", justifyContent: "flex-start", paddingHorizontal: spacing.md, backgroundColor: palette.page },
+  newEmailAlternativeCopy: { minWidth: 0, flex: 1, flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  newEmailAlternativePreview: { minWidth: 0, flex: 1, color: palette.silver500, fontFamily: fonts.regular, fontSize: 11 },
+  newEmailAlternativeSkeleton: { width: "100%", height: 38, borderRadius: 999 },
   fieldLabel: {
     color: palette.silver500,
     fontFamily: fonts.semibold,
@@ -3722,9 +3856,9 @@ const styles = StyleSheet.create({
   generatedSelectionBadge: { position: "absolute", top: 4, right: 4, width: 20, height: 20, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: palette.silver50 },
   generatedBulkToolbar: { width: "100%", minHeight: 36, marginBottom: spacing.xs, padding: 3, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderWidth: 1, backgroundColor: palette.panel },
   generatedBulkToolbarSelection: { flexDirection: "row", alignItems: "center", gap: 8 },
-  generatedBulkToolbarClose: { height: 30, minHeight: 30, width: 30, paddingHorizontal: 0, paddingVertical: 0 },
+  generatedBulkToolbarClose: { height: 42, width: 42, paddingHorizontal: 0, paddingVertical: 0 },
   generatedBulkSelectionText: { color: palette.silver100, fontFamily: fonts.medium, fontSize: 12 },
-  generatedBulkDeleteAction: { height: 30, minHeight: 30, minWidth: 68, paddingHorizontal: 12, paddingVertical: 0 },
+  generatedBulkDeleteAction: { minWidth: 68, paddingHorizontal: 12 },
   generatedBulkDeleteText: { fontFamily: fonts.regular, fontSize: 11, letterSpacing: 0.4 },
   generatedDeleteConfirmation: { gap: spacing.sm },
   resultText: { minWidth: 0, flex: 1, gap: 3 },

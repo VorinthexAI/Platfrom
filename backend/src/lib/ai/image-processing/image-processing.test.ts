@@ -28,6 +28,29 @@ describe('MediaLibrary image processing', () => {
     await expect(processImage(input(), { storage: { async upload({ key }) { return { storageKey: key }; }, async delete(key) { deleted.push(key); } }, hashBatch: async () => ['0123456789abcdef'], findCaption: async () => null, caption: async () => ({ caption: 'Caption', score: 80 }), embed: async () => Array(EMBEDDING_DIMENSIONS - 1).fill(0), getImage: async () => null, persistImage: async ({ image }) => image, createKey: () => 'cmrnlzf650002qc7k4p5zem5w' })).rejects.toBeInstanceOf(ImageProcessingError);
     expect(deleted).toHaveLength(1);
   });
+  test('heartbeats its owned reservation while captioning and acknowledges after image persistence', async () => {
+    let finishCaption!: () => void;
+    const captionGate = new Promise<void>((resolve) => { finishCaption = resolve; });
+    const token = '22222222-2222-4222-8222-222222222222';
+    const renewed: string[] = [];
+    const acknowledged: string[] = [];
+    const processing = processImage(input(), {
+      storage: { async upload({ key }) { return { storageKey: key }; }, async delete() {} },
+      hashBatch: async () => ['0123456789abcdef'], findCaption: async () => null,
+      caption: async () => { await captionGate; return { caption: 'Caption', score: 80 }; },
+      embed: async () => Array(EMBEDDING_DIMENSIONS).fill(0.1), getImage: async () => null,
+      persistImage: async ({ image }) => image, createKey: () => 'cmrnlzf650002qc7k4p5zem5w',
+      reserveStorageKey: async (storageKey) => ({ storageKey, token }),
+      renewStorageReservation: async (owned) => { renewed.push(owned.token); return owned.token === token; },
+      acknowledgeStorageReservation: async (owned) => { acknowledged.push(owned.token); return true; },
+      reservationHeartbeatMs: 5,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 55));
+    expect(renewed.length).toBeGreaterThanOrEqual(2);
+    finishCaption();
+    await processing;
+    expect(acknowledged).toEqual([token]);
+  });
   test('reuses the canonical hash and caption for a perceptual duplicate', async () => {
     const canonical = {
       key: 'cmrnlzf650002qc7k4p5zem5x', scopeKey: 'c123456789', sourceImageKey: 'cmrnlzf650002qc7k4p5zem5y', caption: 'Canonical caption.',

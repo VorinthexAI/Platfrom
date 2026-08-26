@@ -155,4 +155,28 @@ describe('organization connector repository', () => {
     expect(call?.query).toContain('connector.syncEnabled != false');
     expect(call?.query).toContain('connector.updatedAt == @expectedUpdatedAt');
   });
+
+  test('renews watch metadata without changing the persisted History or pending continuation cursor', async () => {
+    const record: Record<string, any> = {
+      ...organizationConnectorSchema.parse({
+        key: membershipKey, organizationKey: 'org-1', scopeKey, provider: 'gmail', providerAccountId: 'google-watch', email: 'watch@example.com',
+        encryptedCredentials: 'cipher', encryptionKeyId: 'test', accessTokenFingerprint: 'a'.repeat(64), scopes: ['email'], createdByMembershipKey: membershipKey,
+        status: 'active', historyId: 'history-committed', syncPendingHistoryId: 'history-pending', syncPendingThreadIds: ['thread-a', 'thread-b'], createdAt: '2026-08-11T12:00:00.000Z', updatedAt: '2026-08-11T12:00:00.000Z',
+      }),
+      _key: membershipKey,
+      _rev: 'before-watch',
+    };
+    const database = {
+      collection: () => ({}),
+      query: async (_query: string, bindVars: Record<string, any>) => {
+        record.watchRegisteredAt = bindVars.updatedAt;
+        record.watchExpiresAt = bindVars.watchExpiresAt;
+        record.updatedAt = bindVars.updatedAt;
+        record._rev = 'after-watch';
+        return { next: async () => ({ ...record }) };
+      },
+    };
+    expect(await createConnectorRepository(database as never).updateWatch(membershipKey, { historyId: 'watch-response-history-must-not-win', expiration: String(Date.parse('2026-08-12T12:00:00.000Z')) }, 'before-watch', '2026-08-11T12:00:00.000Z')).toBe('after-watch');
+    expect(record).toMatchObject({ historyId: 'history-committed', syncPendingHistoryId: 'history-pending', syncPendingThreadIds: ['thread-a', 'thread-b'], watchExpiresAt: '2026-08-12T12:00:00.000Z' });
+  });
 });

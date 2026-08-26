@@ -339,7 +339,7 @@ describe('unified tool registry', () => {
       ['email.reply-context.create', 'createReplyContext', { name: 'Availability', text: 'No Friday meetings.' }],
       ['email.reply-context.update', 'updateReplyContext', { noteKey: key, text: 'No Monday meetings.' }],
       ['email.reply-context.delete', 'deleteReplyContext', { noteKeys: [key] }],
-      ['email.draft.update', 'updateDraft', { draftKey: key, finalContent: 'Thanks.' }],
+      ['email.draft.update', 'updateDraft', { draftKey: key, finalContent: 'Thanks.', attachments: [{ type: 'document', key }] }],
       ['email.draft.assign', 'assignDraft', { draftKey: key, connectorKey: key }],
       ['email.draft.send', 'sendDraft', { draftKey: key }],
       ['email.draft.delete', 'deleteDraft', { draftKey: key }],
@@ -348,6 +348,7 @@ describe('unified tool registry', () => {
     const calls: Array<[string, ...unknown[]]> = [];
     const timestamp = '2026-08-23T12:00:00.000Z';
     const generatedVersion = { key, documentKey: key, version: 1, content: 'Bonjour.', summary: 'Summary.', style: 'brief', sourceTitle: 'Subject', sourceDocumentUpdatedAt: timestamp, createdAt: timestamp, embedding: [1], scopeKey };
+    const draftOutput = { key, variant: 'new' as const, connectorKey: key, to: ['person@example.com'], bcc: ['hidden@example.com'], subject: 'Subject', generatedContent: 'Body', status: 'generated' as const, createdAt: timestamp, updatedAt: timestamp };
     const emailService = new Proxy({}, { get: (_target, property) => async (...args: unknown[]) => {
       const method = String(property);
       calls.push([method, ...args]);
@@ -358,6 +359,7 @@ describe('unified tool registry', () => {
       if (method === 'listMessageSummaries') return { messageKey: key, summaries: [generatedVersion] };
       if (method === 'deleteMessageSummaries') return { messageKey: key, deletedKeys: (args[1] as { summaryKeys: string[] }).summaryKeys };
       if (method === 'threadForTool') return { thread: { key, unread: false, isRead: true }, messages: [], nextCursor: null, truncated: false };
+      if (['draft', 'draftNew', 'updateDraft', 'assignDraft'].includes(method)) return draftOutput;
       return { key, safe: true };
     } }) as any;
     const actor = { userKey, organizationKey, scopeKey };
@@ -378,6 +380,7 @@ describe('unified tool registry', () => {
       expect(call.includes('signal-request')).toBe(receiptMethods.has(method));
       expect(signalCapabilities.find(({ definition }) => definition.name === name)?.mutationWorkspace === 'signal').toBe(mutationNames.has(name));
       expect(JSON.stringify(output)).not.toMatch(/embedding|scopeKey|accountKey|providerThreadId|providerMessageId|encryptedCredentials|sendLeaseToken/);
+      expect(JSON.stringify(output)).not.toMatch(/"bcc"|hidden@example\.com/i);
     }
   });
 });

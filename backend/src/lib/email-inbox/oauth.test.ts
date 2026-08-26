@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { createEmailOAuthService, type OAuthStore } from './oauth';
 import { organizationConnectorSchema } from './connector-schema';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
+import { EmailWatchRepairPendingError } from './service';
 
 const previousClientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
 const previousClientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
@@ -24,31 +25,6 @@ afterEach(() => {
 });
 
 describe('email OAuth state', () => {
-  test('connects iCloud credentials directly without placing secrets in OAuth state', async () => {
-    const now = '2026-08-24T12:00:00.000Z';
-    const connector = organizationConnectorSchema.parse({
-      key: userKey, organizationKey: 'org-1', scopeKey, provider: 'icloud', providerAccountId: 'apple-1', email: 'person@icloud.com',
-      encryptedCredentials: 'ciphertext', encryptionKeyId: 'v1', accessTokenFingerprint: 'a'.repeat(64), scopes: ['imap', 'smtp'], createdByMembershipKey: scopeKey,
-      status: 'error', syncEnabled: false, createdAt: now, updatedAt: now,
-    });
-    let upserted: any;
-    const connectors = {
-      findExact: async () => null,
-      upsert: async (input: unknown) => { upserted = input; return { ...connector, revision: 'upsert' }; },
-      setSyncState: async () => 'sync',
-      activateInitialization: async () => ({ ...connector, status: 'active', syncEnabled: true, revision: 'active' }),
-    };
-    const oauth = createEmailOAuthService({
-      store, connectors: connectors as never, inboxes: { getByConnector: async () => null } as never,
-      authorize: async () => ({ membershipKey: scopeKey }),
-      verifyICloud: async (credentials) => { expect(credentials).toEqual({ username: 'person@icloud.com', appPassword: 'app-password' }); return { providerAccountId: 'apple-1', email: 'person@icloud.com' }; },
-      ensureInbox: async () => ({ revision: 'inbox' }), inboxView: async () => ({ provider: 'icloud', email: 'person@icloud.com' }),
-    });
-    await expect(oauth.connectICloud({ userKey, organizationKey: 'org-1', scopeKey, email: 'Person@iCloud.com', appPassword: 'app-password', name: 'Personal' })).resolves.toMatchObject({ provider: 'icloud' });
-    expect(upserted).toMatchObject({ provider: 'icloud', providerAccountId: 'apple-1', credentials: { username: 'person@icloud.com', appPassword: 'app-password' }, initializeInactive: true });
-    expect(values.size).toBe(0);
-  });
-
   test('binds state to access context and consumes denial callbacks once', async () => {
     const oauth = createEmailOAuthService({ store, authorize: async () => ({ membershipKey: scopeKey }), connectors: {} as never });
     const started = await oauth.start({ userKey, organizationKey: 'org-1', scopeKey, name: 'Work', returnUri: 'vorinthexcore://capability/signal' });
@@ -97,6 +73,46 @@ describe('email OAuth state', () => {
     expect(watchWrites).toBe(1);
     expect(await oauth.exchange({ userKey, organizationKey: 'org-1', scopeKey, code })).toMatchObject({ email: 'person@example.com' });
     expect(await oauth.exchange({ userKey, organizationKey: 'org-1', scopeKey, code })).toBeNull();
+  });
+
+  test('does not issue a grant when watch setup, configuration, or durable repair enqueue fails', async () => {
+    const now = '2026-08-11T12:00:00.000Z';
+    const connector = organizationConnectorSchema.parse({ key: userKey, organizationKey: 'org-1', scopeKey, provider: 'gmail', providerAccountId: 'google-watch-failure', email: 'person@example.com', encryptedCredentials: 'ciphertext', encryptionKeyId: 'v1', accessTokenFingerprint: 'a'.repeat(64), scopes: ['email'], createdByMembershipKey: scopeKey, status: 'active', createdAt: now, updatedAt: now });
+    for (const failure of ['GMAIL_PUBSUB_TOPIC is not configured', 'watch repair queue unavailable', 'watch rejected']) {
+      let rollback = 0;
+      const oauth = createEmailOAuthService({
+        store,
+        connectors: { findExact: async () => null, upsert: async () => ({ ...connector, revision: 'upsert' }), setSyncState: async () => 'sync', activateInitialization: async () => ({ ...connector, revision: 'active' }), rollbackReconnect: async () => { rollback += 1; return true; } } as never,
+        inboxes: {} as never,
+        authorize: async () => ({ membershipKey: scopeKey }), profile: async () => ({ historyId: 'history' }), ensureInbox: async () => ({ revision: 'inbox' }),
+        subscribe: async () => { throw new Error(failure); },
+        exchange: async () => ({ identity: { providerAccountId: connector.providerAccountId, email: connector.email }, scopes: ['email'], credentials: { accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now } }),
+      });
+      const state = new URL((await oauth.start({ userKey, organizationKey: 'org-1', scopeKey, name: 'Work', returnUri: 'vorinthexcore://capability/signal' })).authorizationUrl).searchParams.get('state')!;
+      const redirect = new URL(await oauth.callback({ state, code: 'provider-code' }));
+      expect(redirect.searchParams.get('email_connection_code')).toBeNull();
+      expect(redirect.searchParams.get('email_connection_error')).toBe('connection_failed');
+      expect(rollback).toBe(1);
+      expect([...values.keys()].some((key) => key.startsWith('email:oauth:grant:'))).toBe(false);
+    }
+  });
+
+  test('issues a grant when watch fails only after a durable repair intent is confirmed', async () => {
+    const now = '2026-08-11T12:00:00.000Z';
+    const connector = organizationConnectorSchema.parse({ key: userKey, organizationKey: 'org-1', scopeKey, provider: 'gmail', providerAccountId: 'google-watch-repair', email: 'person@example.com', encryptedCredentials: 'ciphertext', encryptionKeyId: 'v1', accessTokenFingerprint: 'a'.repeat(64), scopes: ['email'], createdByMembershipKey: scopeKey, status: 'active', createdAt: now, updatedAt: now });
+    const oauth = createEmailOAuthService({
+      store,
+      connectors: { findExact: async () => connector, credentials: () => ({ accessToken: 'old', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now }), upsert: async () => ({ ...connector, revision: 'upsert' }), setSyncState: async () => 'sync', getByKey: async () => connector } as never,
+      inboxes: { getByConnector: async () => null } as never,
+      authorize: async () => ({ membershipKey: scopeKey }), profile: async () => ({ historyId: 'history' }), ensureInbox: async () => ({ revision: 'inbox' }), inboxView: async () => ({ connectorKey: connector.key }),
+      subscribe: async () => { throw new EmailWatchRepairPendingError(new Error('watch rejected')); },
+      exchange: async () => ({ identity: { providerAccountId: connector.providerAccountId, email: connector.email }, scopes: ['email'], credentials: { accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now } }),
+    });
+    const state = new URL((await oauth.start({ userKey, organizationKey: 'org-1', scopeKey, name: 'Work', returnUri: 'vorinthexcore://capability/signal' })).authorizationUrl).searchParams.get('state')!;
+    const redirect = new URL(await oauth.callback({ state, code: 'provider-code' }));
+    const code = redirect.searchParams.get('email_connection_code');
+    expect(code).toStartWith('vrtx_email_grant_');
+    expect(await oauth.exchange({ userKey, organizationKey: 'org-1', scopeKey, code: code! })).toEqual({ connectorKey: connector.key });
   });
 
   test('recovers refresh tokens only from the exact provider account', async () => {

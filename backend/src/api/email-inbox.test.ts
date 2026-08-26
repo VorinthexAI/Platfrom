@@ -7,6 +7,10 @@ const userKey = 'cmrnlzf650002qc7k4p5zem5w';
 const organizationKey = 'org-1';
 const scopeKey = 'cmrnlzf640001qc7kazsr96k5';
 const connectorKey = 'cmsp3gwac0009r07kdlin5eoi';
+const now = '2026-08-23T00:00:00.000Z';
+const newDraftOutput = { key: userKey, variant: 'new' as const, connectorKey, to: ['recipient@example.com'], bcc: ['hidden@example.com'], subject: 'Planning', generatedContent: 'Body', status: 'generated' as const, createdAt: now, updatedAt: now };
+const replyDraftOutput = { key: userKey, variant: 'reply' as const, replyMode: 'reply_all' as const, threadKey: userKey, messageKey: connectorKey, to: ['recipient@example.com'], cc: [], generatedContent: 'Body', status: 'generated' as const, createdAt: now, updatedAt: now };
+const overviewOutput = { accounts: [], selectedAccount: null, threads: [], drafts: [], tones: [], unassignedDrafts: [], counts: { all: 0, important: 0, urgent: 0, needsAction: 0, filtered: 0, unread: 0, favorite: 0, trash: 0 }, nextCursor: null };
 const identity = async () => ({ key: userKey, identityType: 'user' as const });
 
 function appWith(overrides: Parameters<typeof createEmailHandlers>[0]) {
@@ -16,7 +20,6 @@ function appWith(overrides: Parameters<typeof createEmailHandlers>[0]) {
     .post('/email/inboxes/search', handlers.searchInboxes)
     .post('/email/tones/search', handlers.searchTones)
     .post('/email/connect', handlers.startConnect)
-    .post('/email/connect/icloud', handlers.connectICloud)
     .post('/email/connect/exchange', handlers.exchangeConnect)
     .post('/email/sync', handlers.sync)
     .post('/email/subscribe', handlers.subscribe)
@@ -36,6 +39,7 @@ function appWith(overrides: Parameters<typeof createEmailHandlers>[0]) {
     .delete('/email/messages/:messageKey/summaries', handlers.deleteMessageSummaries)
     .post('/email/drafts', handlers.draft)
     .post('/email/drafts/compose', handlers.draftNew)
+    .patch('/email/drafts/:draftKey', handlers.updateDraft)
     .post('/email/drafts/:draftKey/send', handlers.sendDraft)
     .post('/email/drafts/:draftKey/assign', handlers.assignDraft)
     .delete('/email/drafts/:draftKey', handlers.deleteDraft)
@@ -53,7 +57,7 @@ function appWith(overrides: Parameters<typeof createEmailHandlers>[0]) {
 describe('email inbox handlers', () => {
   test('passes authenticated organization and scope context to overview', async () => {
     let received: unknown;
-    const app = appWith({ getIdentity: identity as never, service: { overview: async (actor: unknown, input: unknown) => { received = { actor, input }; return { threads: [] }; } } as never, oauth: {} as never });
+    const app = appWith({ getIdentity: identity as never, service: { overview: async (actor: unknown, input: unknown) => { received = { actor, input }; return overviewOutput; } } as never, oauth: {} as never });
     const response = await app.request('/email/overview', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey, connectorKey, filter: 'urgent' }) });
     expect(response.status).toBe(200);
     expect(received).toEqual({ actor: { userKey, organizationKey, scopeKey }, input: { connectorKey, filter: 'urgent', search: undefined, cursor: undefined, limit: undefined } });
@@ -61,7 +65,7 @@ describe('email inbox handlers', () => {
 
   test('passes composite overview input unchanged to the canonical service and rejects ambiguous transport input', async () => {
     const calls: unknown[] = [];
-    const app = appWith({ getIdentity: identity as never, service: { overview: async (...input: unknown[]) => { calls.push(input); return { threads: [] }; } } as never, oauth: {} as never });
+    const app = appWith({ getIdentity: identity as never, service: { overview: async (...input: unknown[]) => { calls.push(input); return overviewOutput; } } as never, oauth: {} as never });
     const composite = { organizationKey, scopeKey, connectorKey, readState: 'unread', facets: ['favorite', 'urgent', 'urgent'], search: 'plan', limit: 10 };
     expect((await app.request('/email/overview', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(composite) })).status).toBe(200);
     expect(calls).toEqual([[{ userKey, organizationKey, scopeKey }, { connectorKey, readState: 'unread', facets: ['favorite', 'urgent', 'urgent'], search: 'plan', limit: 10 }]]);
@@ -159,7 +163,7 @@ describe('email inbox handlers', () => {
 
   test('requires one-time connection grants and strict drafting tones', async () => {
     const oauth = { exchange: async () => null };
-    const app = appWith({ getIdentity: identity as never, service: { draft: async () => ({}) } as never, oauth: oauth as never });
+    const app = appWith({ getIdentity: identity as never, service: { draft: async () => replyDraftOutput } as never, oauth: oauth as never });
     const exchange = await app.request('/email/connect/exchange', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey, code: `vrtx_email_grant_${'a'.repeat(20)}` }) });
     expect(exchange.status).toBe(401);
     const draft = await app.request('/email/drafts', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey, threadKey: userKey, tone: '' }) });
@@ -170,23 +174,18 @@ describe('email inbox handlers', () => {
     expect(invalidMode.status).toBe(400);
   });
 
-  test('validates provider-specific connection transports strictly', async () => {
+  test('accepts only the Gmail connection transport', async () => {
     const calls: unknown[] = [];
     const oauth = {
       start: async (input: unknown) => { calls.push(['oauth', input]); return { authorizationUrl: 'https://provider.example/authorize' }; },
-      connectICloud: async (input: unknown) => { calls.push(['icloud', input]); return { key: connectorKey }; },
     };
     const app = appWith({ getIdentity: identity as never, service: {} as never, oauth: oauth as never });
     const context = { organizationKey, scopeKey, name: 'Work' };
-    const outlook = await app.request('/email/connect', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...context, provider: 'outlook', returnUri: 'vorinthexcore://capability/signal' }) });
-    expect(outlook.status).toBe(200);
-    const icloud = await app.request('/email/connect/icloud', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...context, email: 'person@icloud.com', appPassword: 'app-password' }) });
-    expect(icloud.status).toBe(201);
-    expect((await app.request('/email/connect', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...context, provider: 'icloud', returnUri: 'vorinthexcore://capability/signal' }) })).status).toBe(400);
-    expect((await app.request('/email/connect/icloud', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...context, email: 'person@icloud.com', appPassword: 'secret', forged: true }) })).status).toBe(400);
+    const gmail = await app.request('/email/connect', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...context, provider: 'gmail', returnUri: 'vorinthexcore://capability/signal' }) });
+    expect(gmail.status).toBe(200);
+    expect((await app.request('/email/connect', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...context, provider: 'unsupported', returnUri: 'vorinthexcore://capability/signal' }) })).status).toBe(400);
     expect(calls).toEqual([
-      ['oauth', { userKey, organizationKey, scopeKey, provider: 'outlook', name: 'Work', description: undefined, returnUri: 'vorinthexcore://capability/signal' }],
-      ['icloud', { userKey, organizationKey, scopeKey, email: 'person@icloud.com', appPassword: 'app-password', name: 'Work', description: undefined }],
+      ['oauth', { userKey, organizationKey, scopeKey, provider: 'gmail', name: 'Work', description: undefined, returnUri: 'vorinthexcore://capability/signal' }],
     ]);
   });
 
@@ -240,22 +239,29 @@ describe('email inbox handlers', () => {
   test('routes strict new drafts and tone listing through the canonical service', async () => {
     const calls: unknown[] = [];
     const service = {
-      draftNew: async (...args: unknown[]) => { calls.push(['draftNew', ...args]); return { variant: 'new' }; },
+      draftNew: async (...args: unknown[]) => { calls.push(['draftNew', ...args]); return newDraftOutput; },
       tones: async (...args: unknown[]) => { calls.push(['tones', ...args]); return []; },
     };
     const app = appWith({ getIdentity: identity as never, service: service as never, oauth: {} as never });
     const input = { organizationKey, scopeKey, connectorKey, to: ['recipient@example.com'], subject: 'Planning', tone: 'direct', attachments: [{ type: 'document', key: userKey }] };
-    expect((await app.request('/email/drafts/compose', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })).status).toBe(201);
+    const generatedResponse = await app.request('/email/drafts/compose', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
+    expect(generatedResponse.status).toBe(201);
+    expect((await generatedResponse.json() as any).data.bcc).toEqual(['hidden@example.com']);
     const preserved = { organizationKey, scopeKey, connectorKey, to: ['recipient@example.com'], subject: '', authoredBody: '', generationMode: 'preserve' };
     expect((await app.request('/email/drafts/compose', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(preserved) })).status).toBe(201);
     expect((await app.request('/email/drafts/compose', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...preserved, tone: 'direct' }) })).status).toBe(400);
     expect((await app.request('/email/drafts/compose', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...input, unexpected: true }) })).status).toBe(400);
+    expect((await app.request('/email/drafts/compose', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...input, displayName: 'Untrusted' }) })).status).toBe(400);
+    expect((await app.request('/email/drafts', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey, threadKey: userKey, tone: 'direct', senderIdentity: { displayName: 'Untrusted' } }) })).status).toBe(400);
     expect((await app.request('/email/tones/list', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey }) })).status).toBe(200);
     expect(calls).toEqual([
       ['draftNew', { userKey, organizationKey, scopeKey }, { connectorKey, to: input.to, generationMode: 'generate', subject: input.subject, tone: input.tone, attachments: input.attachments }, undefined],
       ['draftNew', { userKey, organizationKey, scopeKey }, { connectorKey, to: preserved.to, generationMode: 'preserve', subject: '', authoredBody: '' }, undefined],
       ['tones', { userKey, organizationKey, scopeKey }],
     ]);
+
+    const leaking = appWith({ getIdentity: identity as never, service: { draftNew: async () => ({ ...newDraftOutput, scopeKey }) } as never, oauth: {} as never });
+    expect((await leaking.request('/email/drafts/compose', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })).status).toBe(400);
   });
 
   test('routes draft and custom tone hard deletion with trusted request keys', async () => {
@@ -276,12 +282,29 @@ describe('email inbox handlers', () => {
 
   test('routes strict legacy draft assignment through the canonical service', async () => {
     const calls: unknown[] = [];
-    const service = { assignDraft: async (...args: unknown[]) => { calls.push(args); return { key: userKey, accountKey: connectorKey }; } };
+    const service = { assignDraft: async (...args: unknown[]) => { calls.push(args); return newDraftOutput; } };
     const app = appWith({ getIdentity: identity as never, service: service as never, oauth: {} as never });
     const body = { organizationKey, scopeKey, connectorKey };
     expect((await app.request(`/email/drafts/${userKey}/assign`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).status).toBe(200);
     expect((await app.request(`/email/drafts/${userKey}/assign`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, accountKey: connectorKey }) })).status).toBe(400);
     expect(calls).toEqual([[{ userKey, organizationKey, scopeKey }, { draftKey: userKey, connectorKey }]]);
+  });
+
+  test('routes strict body and attachment draft patches through the canonical service', async () => {
+    const calls: unknown[] = [];
+    const service = { updateDraft: async (...args: unknown[]) => { calls.push(args); return newDraftOutput; } };
+    const app = appWith({ getIdentity: identity as never, service: service as never, oauth: {} as never });
+    const request = (body: object) => app.request(`/email/drafts/${userKey}`, { method: 'PATCH', headers: { 'content-type': 'application/json', 'idempotency-key': 'update-1' }, body: JSON.stringify({ organizationKey, scopeKey, ...body }) });
+    const attachments = [{ type: 'document', key: connectorKey }];
+    expect((await request({ finalContent: 'Reviewed', attachments })).status).toBe(200);
+    expect((await request({ attachments: [] })).status).toBe(200);
+    expect((await request({})).status).toBe(400);
+    expect((await request({ finalContent: 'Reviewed', unexpected: true })).status).toBe(400);
+    expect((await request({ attachments: [attachments[0], attachments[0]] })).status).toBe(400);
+    expect(calls).toEqual([
+      [{ userKey, organizationKey, scopeKey }, { draftKey: userKey, finalContent: 'Reviewed', attachments }, 'update-1'],
+      [{ userKey, organizationKey, scopeKey }, { draftKey: userKey, attachments: [] }, 'update-1'],
+    ]);
   });
 
   test('routes an optional send-time reply mode through the canonical service', async () => {

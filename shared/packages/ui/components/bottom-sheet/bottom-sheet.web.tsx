@@ -86,7 +86,7 @@ export function BottomSheet({
     <Dialog.Root onOpenChange={(next) => { if (next || dismissible) onOpenChange(next); }} open={open}>
       <Dialog.Portal>
         <Dialog.Overlay className="vui-bottom-sheet-overlay" />
-        <ButtonSizeProvider size="md">
+        <ButtonSizeProvider force size="md">
           <Dialog.Content
             aria-describedby={description ? descriptionId : undefined}
             aria-labelledby={titleId}

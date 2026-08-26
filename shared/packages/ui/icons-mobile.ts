@@ -75,4 +75,3 @@ export * from "./icons/warning/warning.mobile";
 export * from "./icons/x-circle/x-circle.mobile";
 export * from "./icons/google/google.mobile";
 export * from "./icons/apple/apple.mobile";
-export * from "./icons/microsoft/microsoft.mobile";

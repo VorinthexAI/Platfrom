@@ -13,6 +13,13 @@ mock.module("./content-client", () => ({
   listContentSearchHistory: () => undefined,
   readContentDocument: () => undefined,
 }));
+mock.module("./email-client", () => ({
+  normalizeEmailOverviewQuery: (input: { readState?: "read" | "unread"; facets?: string[]; search?: string } = {}) => ({
+    readState: input.readState ?? "unread",
+    facets: ["urgent", "important", "filtered", "favorite"].filter((facet) => (input.facets ?? ["urgent", "important"]).includes(facet)),
+    search: input.search?.trim() ?? "",
+  }),
+}));
 
 const { contentQueryKeys } = await import("./content-query-cache");
 const {
@@ -29,7 +36,9 @@ const {
   patchSignalThread,
   parseSignalOverviewQuery,
   clearSignalTrashCaches,
+  clearSignalThreadTombstones,
   commitSignalTrashCaches,
+  filterSignalTombstonedOverview,
   patchGalleryUserHiddens,
   reconcileOptimisticCompassPlace,
   reconcileOptimisticCompassTrip,
@@ -56,6 +65,8 @@ const {
   reconcileSignalOverviewThreads,
   reconcileSignalSelectedThreads,
   reconcileSignalThreads,
+  removeSignalOverviewThreadKeys,
+  removeSignalThreadKeys,
   overlayPendingSignalThread,
   restoreSignalDraftIfStillRemoved,
   restoreSignalTrashCaches,
@@ -65,6 +76,7 @@ const {
   restoreMissingSignalSummaries,
   restoreMissingSignalTranslationVersions,
   settleMatchingSignalRepairPendingFields,
+  tombstoneSignalThreadKeys,
   reconcileSignalTrashedThread,
   upsertSignalReplyContext,
 } = await import("./workspace-query-cache");
@@ -544,6 +556,64 @@ test("authoritative external changes update hidden selected thread metadata with
   expect(reconcileSignalSelectedThreads([hidden, visible], [updated])).toEqual([updated, visible]);
 });
 
+test("provider-deleted Signal keys leave every connector overview and detail cache without crossing boundaries", () => {
+  const client = new QueryClient();
+  const at = "2026-08-23T10:00:00.000Z";
+  const deleted = { key: "deleted", subject: "Gone", summary: "Summary", intent: "Review", priority: "normal" as const, state: "needs_action" as const, inboxCategory: "Important" as const, lastMessageAt: at, isFavorite: true, isRead: false, unread: true, createdAt: at, updatedAt: at };
+  const retained = { ...deleted, key: "retained", subject: "Retained", isFavorite: false };
+  const counts = { all: 2, important: 2, urgent: 0, needsAction: 2, filtered: 0, unread: 2, favorite: 1, trash: 0 };
+  const overview = { accounts: [], selectedAccount: null, threads: [deleted, retained], drafts: [], unassignedDrafts: [], counts, nextCursor: "next" };
+  const hiddenKey = signalQueryKeys.overview(context, "connector", "filtered");
+  const visibleKey = signalQueryKeys.overview(context, "connector", "all");
+  const pageKey = signalQueryKeys.overviewPage(context, "connector", "all", "cursor");
+  const detailKey = signalQueryKeys.detail(context, "connector", deleted.key);
+  const otherDetailKey = signalQueryKeys.detail(context, "other", deleted.key);
+  client.setQueryData(visibleKey, overview);
+  client.setQueryData(hiddenKey, { ...overview, threads: [] });
+  client.setQueryData(pageKey, { ...overview, threads: [deleted] });
+  client.setQueryData(detailKey, { thread: deleted, messages: [{ key: "message" }] });
+  client.setQueryData(otherDetailKey, { thread: deleted, messages: [] });
+
+  removeSignalThreadKeys(client, context, "connector", [deleted.key], [deleted, retained]);
+
+  for (const key of [visibleKey, hiddenKey, pageKey]) expect(client.getQueryData<typeof overview>(key)).toMatchObject({ counts: { all: 1, important: 1, needsAction: 1, unread: 1, favorite: 0 }, nextCursor: expect.anything() });
+  expect(client.getQueryData<typeof overview>(visibleKey)?.threads.map(({ key }) => key)).toEqual([retained.key]);
+  expect(client.getQueryData<typeof overview>(hiddenKey)?.threads).toEqual([]);
+  expect(client.getQueryData(detailKey)).toBeUndefined();
+  expect(client.getQueryData(otherDetailKey)).toBeDefined();
+  expect(removeSignalOverviewThreadKeys(overview, [deleted.key], [deleted, retained]).threads).toEqual([retained]);
+});
+
+test("provider-deleted Signal tombstones filter stale fetches and reconciliation without crossing context or connector", () => {
+  const client = new QueryClient();
+  const at = "2026-08-23T10:00:00.000Z";
+  const deleted = { key: "deleted", subject: "Gone", summary: "Summary", intent: "Review", priority: "normal" as const, state: "needs_action" as const, inboxCategory: "Important" as const, lastMessageAt: at, isFavorite: false, isRead: false, unread: true, createdAt: at, updatedAt: at };
+  const overview = { accounts: [], selectedAccount: null, threads: [deleted], drafts: [], unassignedDrafts: [], counts: { all: 1, important: 1, urgent: 0, needsAction: 1, filtered: 0, unread: 1, favorite: 0, trash: 0 }, nextCursor: null };
+  const key = signalQueryKeys.overview(context, "connector", "all");
+  tombstoneSignalThreadKeys(context, "connector", [deleted.key]);
+  expect(filterSignalTombstonedOverview(context, "connector", overview)).toMatchObject({ threads: [], counts: { all: 0, important: 0, unread: 0 } });
+  expect(filterSignalTombstonedOverview(context, "other", overview).threads).toEqual([deleted]);
+  expect(filterSignalTombstonedOverview(otherContext, "connector", overview).threads).toEqual([deleted]);
+  client.setQueryData(key, filterSignalTombstonedOverview(context, "connector", overview));
+  reconcileSignalThreads(client, context, "connector", [deleted]);
+  expect(client.getQueryData<typeof overview>(key)?.threads).toEqual([]);
+  clearSignalThreadTombstones(context, "connector");
+  expect(filterSignalTombstonedOverview(context, "connector", overview).threads).toEqual([deleted]);
+});
+
+test("provider deletion wins over an optimistic Clear Trash rollback", () => {
+  const client = new QueryClient();
+  const at = "2026-08-23T10:00:00.000Z";
+  const deleted = { key: "deleted", subject: "Gone", summary: "Summary", intent: "Review", priority: "normal" as const, state: "filtered" as const, inboxCategory: "Filtered" as const, labels: ["TRASH"], lastMessageAt: at, isFavorite: false, isRead: true, createdAt: at, updatedAt: at };
+  const key = signalQueryKeys.overview(context, "connector", "trash");
+  client.setQueryData(key, { accounts: [], selectedAccount: null, threads: [deleted], drafts: [], unassignedDrafts: [], counts: { all: 0, important: 0, urgent: 0, needsAction: 0, filtered: 0, unread: 0, favorite: 0, trash: 1 }, nextCursor: null });
+  const removal = clearSignalTrashCaches(client, context, "connector");
+  tombstoneSignalThreadKeys(context, "connector", [deleted.key]);
+  expect(restoreSignalTrashCaches(client, removal)).toBe(true);
+  expect(client.getQueryData<{ threads: unknown[] }>(key)?.threads).toEqual([]);
+  clearSignalThreadTombstones(context, "connector");
+});
+
 test("optimistically clears Trash overviews without crossing connectors", () => {
   const client = new QueryClient();
   const at = "2026-08-23T10:00:00.000Z";
@@ -602,6 +672,17 @@ test("successful Clear Trash removes only unchanged detail snapshots", () => {
   const removal = clearSignalTrashCaches(client, context, "connector");
   commitSignalTrashCaches(client, removal);
   expect(client.getQueryData(detailKey)).toBeUndefined();
+});
+
+test("successful Clear Trash tombstones loaded group threads absent from caches", () => {
+  const client = new QueryClient();
+  const at = "2026-08-23T10:00:00.000Z";
+  const uncached = { key: "uncached-trash", subject: "Uncached", summary: "Summary", intent: "Review", priority: "normal" as const, state: "filtered" as const, inboxCategory: "Filtered" as const, labels: ["TRASH"], lastMessageAt: at, isFavorite: false, isRead: true, unread: false, createdAt: at, updatedAt: at };
+  const removal = clearSignalTrashCaches(client, context, "connector");
+  commitSignalTrashCaches(client, removal, [uncached.key]);
+  const stale = { accounts: [], selectedAccount: null, threads: [uncached], drafts: [], unassignedDrafts: [], counts: { all: 0, important: 0, urgent: 0, needsAction: 0, filtered: 0, unread: 0, favorite: 0, trash: 1 }, nextCursor: null };
+  expect(filterSignalTombstonedOverview(context, "connector", stale)).toMatchObject({ threads: [], counts: { trash: 0 } });
+  clearSignalThreadTombstones(context, "connector");
 });
 
 test("patches folder-like Signal inboxes and tones without crossing contexts", () => {

@@ -159,8 +159,8 @@ describe('document-extract action', () => {
   });
 
   test('rejects empty and invalid UTF-8 text files during extraction', async () => {
-    await expect(documentExtract({ ...normalized('txt', bytes('   ')), storageKey: 'txt' }, { logger: quiet })).rejects.toMatchObject({ code: 'DOCUMENT_EXTRACTION_FAILED' });
-    await expect(documentExtract({ ...normalized('md', new Uint8Array([0xff, 0xfe])), storageKey: 'md' }, { logger: quiet })).rejects.toMatchObject({ code: 'DOCUMENT_EXTRACTION_FAILED' });
+    await expect(documentExtract({ ...normalized('txt', bytes('   ')), storageKey: 'txt' }, { logger: quiet })).rejects.toMatchObject({ code: 'DOCUMENT_EMPTY_CONTENT' });
+    await expect(documentExtract({ ...normalized('md', new Uint8Array([0xff, 0xfe])), storageKey: 'md' }, { logger: quiet })).rejects.toMatchObject({ code: 'DOCUMENT_INVALID_UTF8' });
   });
 
   test('uses format adapters for DOC and DOCX', async () => {
@@ -168,6 +168,16 @@ describe('document-extract action', () => {
     const docx = await documentExtract({ ...normalized('docx'), storageKey: 'docx' }, { logger: quiet, extractDocx: async () => 'Modern Word' });
     expect(doc.extractedText).toBe('Legacy Word');
     expect(docx.extractedText).toBe('Modern Word');
+  });
+
+  test('classifies recognized default DOC and DOCX decoder corruption as permanent input', async () => {
+    await expect(documentExtract({ ...normalized('doc'), storageKey: 'doc' }, { logger: quiet })).rejects.toMatchObject({ code: 'DOCUMENT_INVALID_DOC', retryable: false });
+    await expect(documentExtract({ ...normalized('docx'), storageKey: 'docx' }, { logger: quiet })).rejects.toMatchObject({ code: 'DOCUMENT_INVALID_DOCX', retryable: false });
+  });
+
+  test('keeps unknown local extractor runtime failures transient', async () => {
+    const failure = new Error('extractor worker resource temporarily unavailable');
+    await expect(documentExtract({ ...normalized('docx'), storageKey: 'docx' }, { logger: quiet, extractDocx: async () => { throw failure; } })).rejects.toMatchObject({ code: 'DOCUMENT_EXTRACTION_FAILED', retryable: true, cause: failure });
   });
 
   test('normalizes text-based and scanned PDFs through OCR', async () => {
@@ -394,6 +404,30 @@ describe('document.parse tool', () => {
     expect(result.document.isFavorite).toBe(false);
     expect(context.calls).toEqual(['document-validate', 'storage-upload', 'document-extract', 'document-cleanup', 'document-embed', 'document-insert']);
     expect(context.calls.indexOf('document-embed')).toBeLessThan(context.calls.indexOf('document-insert'));
+  });
+
+  test('heartbeats its owned reservation while OCR is in flight and acknowledges it after persistence', async () => {
+    const context = harness();
+    context.actions.upload = storageUpload;
+    let finishExtraction!: () => void;
+    const extractionGate = new Promise<void>((resolve) => { finishExtraction = resolve; });
+    context.actions.extract = async () => { await extractionGate; return { extractedText: 'Body' }; };
+    const reservation = { storageKey: `content/${documentKey}`, token: '11111111-1111-4111-8111-111111111111' };
+    const renewed: string[] = [];
+    const acknowledged: string[] = [];
+    const parsing = parseDocument(input, {
+      ...context,
+      logger: quiet,
+      reserveStorageKey: async (storageKey) => ({ ...reservation, storageKey }),
+      renewStorageReservation: async (owned) => { renewed.push(owned.token); return owned.token === reservation.token; },
+      acknowledgeStorageReservation: async (owned) => { acknowledged.push(owned.token); return true; },
+      reservationHeartbeatMs: 5,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 55));
+    expect(renewed.length).toBeGreaterThanOrEqual(2);
+    finishExtraction();
+    await parsing;
+    expect(acknowledged).toEqual([reservation.token]);
   });
 
   test('embeds and persists cleaned plain text', async () => {

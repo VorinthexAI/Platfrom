@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { reserveStorageKeyForUpload, type StorageUploadReservation } from '@/lib/db/storage-deletion-jobs.node';
+import { startStorageUploadHeartbeat } from '@/lib/storage-upload-reservation';
 import { basename, extname } from 'node:path';
 import mammoth from 'mammoth';
 import WordExtractor from 'word-extractor';
@@ -6,7 +8,7 @@ import { EMBEDDING_DIMENSIONS, embedText, embedTexts } from '@/lib/embeddings';
 import { getDocumentById, insertPreparedDocument, documentSchema, type Document, type DocumentExtension } from '@/lib/db/documents.node';
 import { getFolderById } from '@/lib/db/folders.node';
 import { newId } from '@/lib/ids';
-import { documentActionError, DocumentProcessingError } from './errors';
+import { documentActionError, DocumentInputError, DocumentProcessingError } from './errors';
 import {
   extractionResultSchema,
   normalizedDocumentSchema,
@@ -63,11 +65,11 @@ async function observed<T>(action: DocumentActionName, metadata: Record<string, 
 
 async function uploadedFileBytes(file: UploadedDocumentFile, maxBytes: number): Promise<{ filename: string; mimeType: string; sizeBytes: number; bytes: Uint8Array }> {
   if (typeof File !== 'undefined' && file instanceof File) {
-    if (file.size > maxBytes) throw new DocumentProcessingError('DOCUMENT_TOO_LARGE', 'The document exceeds the maximum allowed size.', 'document-validate');
+    if (file.size > maxBytes) throw new DocumentInputError('DOCUMENT_TOO_LARGE', 'The document exceeds the maximum allowed size.', 'document-validate');
     return { filename: file.name, mimeType: file.type, sizeBytes: file.size, bytes: new Uint8Array(await file.arrayBuffer()) };
   }
   const input = file as Exclude<UploadedDocumentFile, File>;
-  if (input.sizeBytes > maxBytes) throw new DocumentProcessingError('DOCUMENT_TOO_LARGE', 'The document exceeds the maximum allowed size.', 'document-validate');
+  if (input.sizeBytes > maxBytes) throw new DocumentInputError('DOCUMENT_TOO_LARGE', 'The document exceeds the maximum allowed size.', 'document-validate');
   const bytes = input.bytes instanceof Uint8Array ? input.bytes : new Uint8Array(input.bytes);
   return { filename: input.filename, mimeType: input.mimeType, sizeBytes: input.sizeBytes, bytes };
 }
@@ -128,17 +130,17 @@ export async function documentValidate(input: {
       const uploaded = await uploadedFileBytes(input.file, maxBytes);
       const safeFilename = basename(uploaded.filename.trim());
       if (!safeFilename || safeFilename !== uploaded.filename.trim() || safeFilename === '.' || safeFilename === '..' || /[\\/\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/.test(safeFilename)) {
-        throw new DocumentProcessingError('DOCUMENT_INVALID_FILENAME', 'The uploaded filename is invalid.', 'document-validate');
+        throw new DocumentInputError('DOCUMENT_INVALID_FILENAME', 'The uploaded filename is invalid.', 'document-validate');
       }
       const extension = extname(safeFilename).slice(1).toLowerCase() as DocumentExtension;
-      if (!(extension in MIME_TYPES)) throw new DocumentProcessingError('DOCUMENT_UNSUPPORTED_TYPE', 'The document type is not supported.', 'document-validate');
+      if (!(extension in MIME_TYPES)) throw new DocumentInputError('DOCUMENT_UNSUPPORTED_TYPE', 'The document type is not supported.', 'document-validate');
       if (!MIME_TYPES[extension].includes(uploaded.mimeType.toLowerCase())) {
-        throw new DocumentProcessingError('DOCUMENT_INVALID_MIME_TYPE', 'The document MIME type does not match its supported type.', 'document-validate');
+        throw new DocumentInputError('DOCUMENT_INVALID_MIME_TYPE', 'The document MIME type does not match its supported type.', 'document-validate');
       }
       if (uploaded.sizeBytes <= 0 || uploaded.bytes.byteLength !== uploaded.sizeBytes || !validateSignature(extension, uploaded.bytes)) {
-        throw new DocumentProcessingError('DOCUMENT_UPLOAD_INVALID', 'The uploaded document failed its integrity check.', 'document-validate');
+        throw new DocumentInputError('DOCUMENT_UPLOAD_INVALID', 'The uploaded document failed its integrity check.', 'document-validate');
       }
-      if (uploaded.sizeBytes > maxBytes) throw new DocumentProcessingError('DOCUMENT_TOO_LARGE', 'The document exceeds the maximum allowed size.', 'document-validate');
+      if (uploaded.sizeBytes > maxBytes) throw new DocumentInputError('DOCUMENT_TOO_LARGE', 'The document exceeds the maximum allowed size.', 'document-validate');
       return normalizedDocumentSchema.parse({
         name: input.name?.trim() || safeFilename.slice(0, -(extension.length + 1)),
         extension,
@@ -154,12 +156,21 @@ export async function documentValidate(input: {
   });
 }
 
-export async function storageUpload(input: NormalizedDocument & { documentKey: string }, options: { storage?: DocumentStorage; logger?: DocumentActionLogger } = {}) {
+export async function storageUpload(input: NormalizedDocument & { documentKey: string }, options: { storage?: DocumentStorage; logger?: DocumentActionLogger; reserveStorageKey?: (storageKey: string) => Promise<StorageUploadReservation | null>; renewStorageReservation?: (reservation: StorageUploadReservation) => Promise<boolean>; reservationHeartbeatMs?: number } = {}): Promise<Awaited<ReturnType<DocumentStorage['upload']>> & { reservation?: StorageUploadReservation; reservationHeartbeat?: ReturnType<typeof startStorageUploadHeartbeat> }> {
   return observed('storage-upload', { documentKey: input.documentKey, scopeKey: input.scopeKey, folderKey: input.folderKey, extension: input.extension, mimeType: input.mimeType, sizeBytes: input.sizeBytes }, options.logger ?? defaultLogger, async () => {
     try {
       const contentHash = createHash('sha256').update(input.fileInput).digest('hex').slice(0, 16);
       const storageKey = `content/${input.scopeKey}/${input.folderKey ?? 'root'}/${input.documentKey}/${contentHash}/original.${input.extension}`;
-      return await (options.storage ?? documentStorage).upload({ key: storageKey, bytes: input.fileInput, mimeType: input.mimeType });
+      const reserve = options.reserveStorageKey ?? (options.storage ? async (key: string) => ({ storageKey: key, token: 'custom-storage' }) : reserveStorageKeyForUpload);
+      const reservation = await reserve(storageKey);
+      if (!reservation) throw new Error('A storage deletion claim or upload reservation is active for this deterministic document key');
+      const heartbeat = startStorageUploadHeartbeat(reservation, options.renewStorageReservation ?? (async () => true), options.reservationHeartbeatMs);
+      try {
+        return { ...await (options.storage ?? documentStorage).upload({ key: storageKey, bytes: input.fileInput, mimeType: input.mimeType }), reservation, reservationHeartbeat: heartbeat };
+      } catch (error) {
+        await heartbeat.stop();
+        throw error;
+      }
     } catch (error) {
       throw documentActionError(error, 'DOCUMENT_UPLOAD_FAILED', 'The document could not be uploaded.', 'storage-upload', true);
     }
@@ -168,9 +179,23 @@ export async function storageUpload(input: NormalizedDocument & { documentKey: s
 
 function extractionFromText(text: string, metadata?: Record<string, unknown>): ExtractionResult {
   const maxCharacters = maxExtractedCharacters();
-  if (text.length > maxCharacters) throw new Error('Extracted document content exceeds the configured limit.');
-  if (!text.trim()) throw new Error('The document contains no extractable text.');
+  if (text.length > maxCharacters) throw new DocumentInputError('DOCUMENT_EXTRACTED_CONTENT_TOO_LARGE', 'Extracted document content exceeds the configured limit.', 'document-extract');
+  if (!text.trim()) throw new DocumentInputError('DOCUMENT_EMPTY_CONTENT', 'The document contains no extractable text.', 'document-extract');
   return extractionResultSchema.parse({ extractedText: text.trim(), metadata });
+}
+
+function isLocalDecoderCorruption(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return /(?:corrupt(?:ed)? zip|end of central directory|invalid (?:short )?sector allocation table|invalid compound document|not a valid (?:zip|ole|compound)|unexpected end of (?:file|data|archive)|could not find main document part.*valid \.docx file)/i.test(error.message);
+}
+
+async function localExtraction<T>(run: () => Promise<T>, code: string): Promise<T> {
+  try { return await run(); }
+  catch (error) {
+    if (error instanceof DocumentProcessingError) throw error;
+    if (isLocalDecoderCorruption(error)) throw new DocumentInputError(code, 'The local document payload is corrupt or invalid.', 'document-extract', { cause: error });
+    throw error;
+  }
 }
 
 export async function documentExtract(input: NormalizedDocument & { storageKey: string }, options: {
@@ -183,30 +208,29 @@ export async function documentExtract(input: NormalizedDocument & { storageKey: 
     try {
       if (input.extension === 'pdf') {
         const result = extractionResultSchema.parse(await (options.ocr ?? awsTextractDocumentOcr).extract(input.storageKey, input.fileInput));
-        if (result.extractedText.length > maxExtractedCharacters()) throw new Error('Extracted document content exceeds the configured limit.');
-        if (!result.extractedText.trim()) throw new Error('The document contains no extractable text.');
+        if (result.extractedText.length > maxExtractedCharacters()) throw new DocumentInputError('DOCUMENT_EXTRACTED_CONTENT_TOO_LARGE', 'Extracted document content exceeds the configured limit.', 'document-extract');
+        if (!result.extractedText.trim()) throw new DocumentInputError('DOCUMENT_EMPTY_CONTENT', 'The document contains no extractable text.', 'document-extract');
         return result;
       }
       if (input.extension === 'txt') {
-        const text = new TextDecoder('utf-8', { fatal: true }).decode(input.fileInput);
-        if (text.length > maxExtractedCharacters()) throw new Error('Extracted document content exceeds the configured limit.');
+        let text: string;
+        try { text = new TextDecoder('utf-8', { fatal: true }).decode(input.fileInput); }
+        catch (error) { throw new DocumentInputError('DOCUMENT_INVALID_UTF8', 'The text document is not valid UTF-8.', 'document-extract', { cause: error }); }
         const extracted = extractionFromText(text);
         return extracted;
       }
       if (input.extension === 'md') {
-        const text = new TextDecoder('utf-8', { fatal: true }).decode(input.fileInput);
-        if (text.length > maxExtractedCharacters()) throw new Error('Extracted document content exceeds the configured limit.');
+        let text: string;
+        try { text = new TextDecoder('utf-8', { fatal: true }).decode(input.fileInput); }
+        catch (error) { throw new DocumentInputError('DOCUMENT_INVALID_UTF8', 'The Markdown document is not valid UTF-8.', 'document-extract', { cause: error }); }
         return extractionFromText(text, { format: 'markdown' });
       }
       if (input.extension === 'docx') {
-        if (options.extractDocx) return extractionFromText(await options.extractDocx(input.fileInput));
-        const result = await mammoth.extractRawText({ buffer: Buffer.from(input.fileInput) });
+        const result = await localExtraction(async () => options.extractDocx ? { value: await options.extractDocx(input.fileInput), messages: [] } : mammoth.extractRawText({ buffer: Buffer.from(input.fileInput) }), 'DOCUMENT_INVALID_DOCX');
         return extractionFromText(result.value, { format: 'docx', warnings: result.messages.length });
       }
-      if (options.extractDoc) return extractionFromText(await options.extractDoc(input.fileInput));
-      const extractor = new WordExtractor();
-      const extracted = await extractor.extract(Buffer.from(input.fileInput));
-      return extractionFromText(extracted.getBody());
+      const extracted = await localExtraction(async () => options.extractDoc ? { getBody: () => options.extractDoc!(input.fileInput) } : new WordExtractor().extract(Buffer.from(input.fileInput)), 'DOCUMENT_INVALID_DOC');
+      return extractionFromText(await extracted.getBody());
     } catch (error) {
       const message = process.env.NODE_ENV === 'development' && error instanceof Error
         ? `The document could not be extracted: ${error.message}`

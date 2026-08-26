@@ -14,6 +14,7 @@ export const folderSchema = z.object({
   description: z.string().trim().min(1).optional(),
   coverImageKey: z.string().cuid().optional(),
   purpose: z.enum(['generated-documents-root', 'generated-documents-guide', 'generated-documents-brief', 'generated-documents-accommodations', 'generated-documents-restaurants', 'generated-documents-activities', 'communication-mail-root', 'communication-mail-threads', 'communication-mail-drafts', 'communication-mail-tones', 'communication-mail-reply-context', 'communication-mail-settings']).optional(),
+  managedPurpose: z.enum(['mail-attachment']).optional(), managedOwnerKey: z.string().cuid().optional(),
   mutationPolicy: z.enum(['user', 'system-container']).optional(),
   embedding: currentEmbeddingSchema,
   isFavorite: z.boolean().default(false),

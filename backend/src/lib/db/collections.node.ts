@@ -5,7 +5,7 @@ import { db } from './client';
 import { currentEmbeddingSchema } from '@/lib/embeddings';
 
 export const COLLECTIONS_COLLECTION = 'collections';
-export const collectionPurposeSchema = z.enum(['place-media']);
+export const collectionPurposeSchema = z.enum(['place-media', 'email-media']);
 export const mutationPolicySchema = z.enum(['user', 'system-only']);
 export const collectionSchema = z.object({
   key: z.string().cuid(), scopeKey: z.string().cuid(), name: z.string().trim().min(1), description: z.string().trim().min(1).optional(), coverImageKey: z.string().cuid().optional(),

@@ -461,6 +461,13 @@ test("can search without recording history", async () => {
   expect(calls[0]?.body).toMatchObject({ query: "roadmap", recordHistory: false });
 });
 
+test("can request up to ten semantic matches without a score cutoff", async () => {
+  responseForTool = () => ({ data: { success: true, data: { query: "roadmap", groups: [{ collectionSlug: "folders", results: [] }, { collectionSlug: "documents", results: [] }, { collectionSlug: "files", results: [] }] } } });
+
+  await searchContentMatches("roadmap", undefined, undefined, false, { limit: 10, minimumScore: -1 });
+  expect(calls[0]?.body).toMatchObject({ query: "roadmap", recordHistory: false, limit: 10, minimumScore: -1 });
+});
+
 test("finds semantic neighbors from exactly one Content source", async () => {
   const neighbors = { folders: [{ key: "folder", name: "Related" }], documents: [], files: [] };
   responseForTool = (tool) => tool === "content.neighbors" ? { data: { success: true, data: neighbors } } : undefined;

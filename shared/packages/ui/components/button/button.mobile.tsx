@@ -42,10 +42,13 @@ export type ButtonProps = PressableProps & {
   variant?: ButtonVariant;
 };
 
-const ButtonSizeContext = createContext<ButtonSize | undefined>(undefined);
+type ButtonSizeContextValue = { size: ButtonSize; forced: boolean };
+const ButtonSizeContext = createContext<ButtonSizeContextValue | undefined>(undefined);
 
-export function ButtonSizeProvider({ children, size }: { children: ReactNode; size: ButtonSize }) {
-  return <ButtonSizeContext.Provider value={size}>{children}</ButtonSizeContext.Provider>;
+export function ButtonSizeProvider({ children, force = false, size }: { children: ReactNode; force?: boolean; size: ButtonSize }) {
+  const parent = useContext(ButtonSizeContext);
+  const value = parent?.forced ? parent : { size, forced: force };
+  return <ButtonSizeContext.Provider value={value}>{children}</ButtonSizeContext.Provider>;
 }
 
 function useReducedMotion() {
@@ -150,7 +153,7 @@ export function Button({
   variant = "secondary",
   ...props
 }: ButtonProps) {
-  const size = useContext(ButtonSizeContext) ?? requestedSize;
+  const size = useContext(ButtonSizeContext)?.size ?? requestedSize;
   const inactive = disabled || loading;
   const reducedMotion = useReducedMotion();
   const resolveStyle = (state: PressableStateCallbackType) =>

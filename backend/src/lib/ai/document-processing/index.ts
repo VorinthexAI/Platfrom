@@ -16,6 +16,8 @@ import { documentStorage, type DocumentStorage } from './storage';
 import type { DocumentOcr } from './textract';
 import type { embedText } from '@/lib/embeddings';
 import type { embedTexts } from '@/lib/embeddings';
+import { acknowledgeStorageUploadReservation, releaseStorageUploadReservation, renewStorageUploadReservation, reserveStorageKeyForUpload, type StorageUploadReservation } from '@/lib/db/storage-deletion-jobs.node';
+import { startStorageUploadHeartbeat } from '@/lib/storage-upload-reservation';
 
 export interface DocumentParseDependencies extends DocumentInsertDependencies {
   storage?: DocumentStorage;
@@ -26,6 +28,11 @@ export interface DocumentParseDependencies extends DocumentInsertDependencies {
   maxBytes?: number;
   logger?: DocumentActionLogger;
   cleanText?: (text: string) => Promise<string>;
+  reserveStorageKey?: (storageKey: string) => Promise<StorageUploadReservation | null>;
+  renewStorageReservation?: (reservation: StorageUploadReservation) => Promise<boolean>;
+  acknowledgeStorageReservation?: (reservation: StorageUploadReservation) => Promise<boolean>;
+  releaseStorageReservation?: (reservation: StorageUploadReservation) => Promise<boolean>;
+  reservationHeartbeatMs?: number;
   actions?: Partial<DocumentPipelineActions>;
 }
 
@@ -88,12 +95,21 @@ export async function parseDocument(rawInput: DocumentParseInput, dependencies: 
   }
 
   const storage = dependencies.storage ?? documentStorage;
-  const uploaded = await actions.upload({ ...normalized, documentKey }, { storage, logger });
+  const customReservation = (storageKey: string): StorageUploadReservation => ({ storageKey, token: 'custom-storage' });
+  const reserveStorageKey = dependencies.reserveStorageKey ?? (dependencies.storage ? async (key: string) => customReservation(key) : reserveStorageKeyForUpload);
+  const renewReservation = dependencies.renewStorageReservation ?? (dependencies.storage ? async () => true : renewStorageUploadReservation);
+  const acknowledgeReservation = dependencies.acknowledgeStorageReservation ?? (dependencies.storage ? async () => true : acknowledgeStorageUploadReservation);
+  const releaseReservation = dependencies.releaseStorageReservation ?? (dependencies.storage ? async () => true : releaseStorageUploadReservation);
+  const uploaded = await actions.upload({ ...normalized, documentKey }, { storage, logger, reserveStorageKey, renewStorageReservation: renewReservation, reservationHeartbeatMs: dependencies.reservationHeartbeatMs });
+  const reservation = uploaded.reservation ?? customReservation(uploaded.storageKey);
+  const heartbeat = uploaded.reservationHeartbeat ?? startStorageUploadHeartbeat(reservation, renewReservation, dependencies.reservationHeartbeatMs);
   try {
     const extraction = await actions.extract({ ...normalized, storageKey: uploaded.storageKey }, { ocr: dependencies.ocr, logger });
+    await heartbeat.checkpoint();
     if (!extraction.extractedText.trim()) throw new DocumentProcessingError('DOCUMENT_EXTRACTION_FAILED', 'No text could be extracted from the document.', 'document-extract');
     const { content } = await actions.cleanup({ text: extraction.extractedText }, { clean: dependencies.cleanText, logger });
     const semantics = await actions.embed({ name: normalized.name, content }, { embed: dependencies.embed, embedBatch: dependencies.embedBatch, dimensions: dependencies.embeddingDimensions, logger });
+    await heartbeat.checkpoint();
     const timestamp = new Date().toISOString();
     const result = await actions.insert({
       key: documentKey,
@@ -111,6 +127,8 @@ export async function parseDocument(rawInput: DocumentParseInput, dependencies: 
       createdAt: timestamp,
       updatedAt: timestamp,
     }, { getFolder: dependencies.getFolder, getDocument: dependencies.getDocument, insert: dependencies.insert, logger });
+    await heartbeat.checkpoint();
+    if (!await acknowledgeReservation(reservation)) throw new Error('Storage upload reservation acknowledgement fence was lost');
     logger({ action: 'document.parse', status: 'completed', documentKey, scopeKey: input.scopeKey, folderKey: input.folderKey, extension: normalized.extension, mimeType: normalized.mimeType, sizeBytes: normalized.sizeBytes, durationMs: Math.round(performance.now() - started) });
     return result;
   } catch (error) {
@@ -127,6 +145,7 @@ export async function parseDocument(rawInput: DocumentParseInput, dependencies: 
       if (existing.storageKey !== uploaded.storageKey) {
         try {
           await deleteWithRetry(storage, uploaded.storageKey);
+          await releaseReservation(reservation);
         } catch (cleanupError) {
           throw new DocumentProcessingError('DOCUMENT_CLEANUP_FAILED', 'The duplicate document upload could not be cleaned up.', 'document.parse', {
             retryable: true,
@@ -134,11 +153,13 @@ export async function parseDocument(rawInput: DocumentParseInput, dependencies: 
           });
         }
       }
+      else await acknowledgeReservation(reservation);
       logger({ action: 'document.parse', status: 'completed', documentKey, scopeKey: input.scopeKey, folderKey: input.folderKey, durationMs: Math.round(performance.now() - started), idempotent: true });
       return { document: existing };
     }
     try {
       await deleteWithRetry(storage, uploaded.storageKey);
+      await releaseReservation(reservation);
     } catch (cleanupError) {
       logger({ action: 'document.parse', status: 'failed', documentKey, scopeKey: input.scopeKey, folderKey: input.folderKey, durationMs: Math.round(performance.now() - started), cleanup: 'failed' });
       throw new DocumentProcessingError('DOCUMENT_CLEANUP_FAILED', 'Document parsing failed and its uploaded object could not be cleaned up.', 'document.parse', {
@@ -148,6 +169,8 @@ export async function parseDocument(rawInput: DocumentParseInput, dependencies: 
     }
     logger({ action: 'document.parse', status: 'failed', documentKey, scopeKey: input.scopeKey, folderKey: input.folderKey, durationMs: Math.round(performance.now() - started), cleanup: 'completed' });
     throw error;
+  } finally {
+    await heartbeat.stop();
   }
 }
 

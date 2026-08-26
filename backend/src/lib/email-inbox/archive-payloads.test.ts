@@ -21,6 +21,12 @@ describe('mail Archive payload codecs', () => {
     expect(decodeEmailDraft(document)).toMatchObject({ subject: '', finalContent: '', status: 'edited' });
   });
 
+  test('rejects duplicate and overlapping new-draft recipients case-insensitively', () => {
+    const base = { variant: 'new' as const, accountKey: key, subject: 'Hello', generatedContent: 'Body', status: 'generated' as const };
+    expect(() => emailDraftPayloadSchema.parse({ version: 1, kind: 'mail-new-draft', data: { ...base, to: ['A@example.com', 'a@example.com'] } })).toThrow('Duplicate TO');
+    expect(() => emailDraftPayloadSchema.parse({ version: 1, kind: 'mail-new-draft', data: { ...base, to: ['a@example.com'], bcc: ['A@example.com'] } })).toThrow('already present in TO');
+  });
+
   test('round-trips safe reply mode and resolved recipients with compatibility defaults', () => {
     const payload = emailDraftPayloadSchema.parse({ version: 1, kind: 'mail-reply-draft', data: { variant: 'reply', replyMode: 'reply_all', threadKey: key, messageKey: scopeKey, to: ['person@example.com'], cc: ['copy@example.com'], generatedContent: 'Body', status: 'generated' } });
     const document = archiveDocument({ key, scopeKey, folderKey: scopeKey, name: 'Reply', payload, embedding, createdAt: now, updatedAt: now });

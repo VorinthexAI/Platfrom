@@ -150,6 +150,19 @@ describe('Gallery repository transactions', () => {
     expect(queries[0]).toContain('SORT relation.createdAt ASC, relation._key ASC');
     expect(queries[1]).toContain('LENGTH(accessibleCollections) > 0');
     expect(queries[1]).toContain('image.createdByKey == @actorKey && relationCount == 0');
+    expect(queries[0]).toContain('collection.purpose == "email-media"');
+    expect(queries[0]).toContain('collection.mutationPolicy == "system-only" && scoped');
+    expect(queries[0]).toContain('collection.mutationPolicy == "system-only" ? null');
+    expect(queries[1]).toContain('collection.mutationPolicy == "system-only" ? null');
+  });
+
+  test('derives managed email-media roles from live scope membership instead of durable collection members', async () => {
+    const queries: string[] = [];
+    const database: MediaLibraryDatabase = { async query(query) { queries.push(query); return { async all() { return []; } }; } };
+    await createGalleryRepository(database).getCollectionRole(newId(), newId(), newId());
+    expect(queries[0]).toContain('LET managedViewer = collection.purpose == "email-media"');
+    expect(queries[0]).toContain('collection.mutationPolicy == "system-only" ? null');
+    expect(queries[0]).toContain('managedViewer ? "viewer"');
   });
 
   test('projects explicit ownership independently from elevated effective access', async () => {

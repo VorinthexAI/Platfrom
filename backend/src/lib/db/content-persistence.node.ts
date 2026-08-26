@@ -80,7 +80,7 @@ async function scopedUpdate<T>(
       FILTER destinationKey == null || destination.mutationPolicy != "system-container"
   ` : collection === 'documents' ? `
       FILTER !HAS(current, "_internalDeletion") || current._internalDeletion == null
-      FILTER current.mutationPolicy != "system-only"
+      FILTER current.mutationPolicy != "system-only" && current.managedPurpose != "mail-attachment"
       LET destinationKey = @changesLocation ? @destinationKey : (HAS(current, "folderKey") ? current.folderKey : null)
       LET destination = destinationKey == null ? null : DOCUMENT(folders, destinationKey)
       FILTER destinationKey == null || (destination != null && destination.scopeKey == @scopeKey)
@@ -90,11 +90,13 @@ async function scopedUpdate<T>(
       LET owner = DOCUMENT(documents, current.documentKey)
       FILTER owner != null && owner.scopeKey == @scopeKey
       FILTER !HAS(owner, "_internalDeletion") || owner._internalDeletion == null
+      FILTER owner.managedPurpose != "mail-attachment"
   ` : `
       FILTER current.sourceType == "document"
       LET owner = DOCUMENT(documents, current.sourceKey)
       FILTER owner != null && owner.scopeKey == @scopeKey
       FILTER !HAS(owner, "_internalDeletion") || owner._internalDeletion == null
+      FILTER owner.managedPurpose != "mail-attachment"
   `;
   const cursor = await executor.query(`
     FOR current IN @@collection
@@ -135,7 +137,7 @@ async function scopedDelete(
     LET affectedTripKeys = @attachmentType == null ? [] : (FOR attachment IN tripAttachments FILTER attachment.scopeKey == @scopeKey && attachment.targetType == @attachmentType && attachment.targetKey == @key RETURN DISTINCT attachment.tripKey)
     LET removedKey = FIRST(FOR current IN @@collection
         FILTER current._key == @key && current.scopeKey == @scopeKey
-        FILTER (!@protectSystemContainer || current.mutationPolicy != "system-container") && current.mutationPolicy != "system-only"
+        FILTER (!@protectSystemContainer || current.mutationPolicy != "system-container") && current.mutationPolicy != "system-only" && current.managedPurpose != "mail-attachment"
         LIMIT 1
         REMOVE current IN @@collection
         RETURN OLD._key)

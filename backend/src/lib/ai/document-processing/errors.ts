@@ -10,6 +10,13 @@ export class DocumentProcessingError extends AiError {
   }
 }
 
+/** A deterministic defect in caller-supplied bytes or locally extracted content. */
+export class DocumentInputError extends DocumentProcessingError {
+  constructor(code: string, message: string, action: 'document-validate' | 'document-extract', options?: { cause?: unknown }) {
+    super(code, message, action, { retryable: false, cause: options?.cause });
+  }
+}
+
 export function documentActionError(
   error: unknown,
   code: string,

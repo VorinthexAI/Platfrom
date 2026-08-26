@@ -30,6 +30,16 @@ function migrationDatabase(collection: 'documents' | 'documentVersions', row: Re
 }
 
 describe('Arango migration indexes', () => {
+  test('retires non-Gmail connector credentials before strict Gmail backfill reads', async () => {
+    const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    const retire = source.indexOf('await retireUnsupportedEmailConnectors(targetDb)');
+    const backfill = source.indexOf('await backfillConnectorInboxes(targetDb)');
+    expect(retire).toBeGreaterThan(-1);
+    expect(retire).toBeLessThan(backfill);
+    expect(source).toContain('FILTER connector.provider != "gmail"');
+    expect(source).toContain('encryptedCredentials: null');
+    expect(source).toContain('await migrateEmailAttachmentAvailability(targetDb)');
+  });
   test('retires action-key model routing indexes after slug indexes replace them', () => {
     const desired = [['modelKey', 'actionSlug'], ['actionSlug', 'enabled', 'priority']];
     expect(isLegacyIndex('modelActions', ['modelKey', 'actionKey'], desired)).toBe(true);
@@ -263,6 +273,18 @@ describe('Arango migration indexes', () => {
     const desired = [['organizationKey', 'scopeKey', 'provider', 'providerAccountId']];
     expect(isLegacyIndex('organizationConnectors', ['organizationKey', 'scopeKey', 'provider'], desired)).toBe(true);
     expect(isLegacyIndex('organizationConnectors', desired[0]!, desired)).toBe(false);
+  });
+  test('declares the exact email attachment binding ownership and recovery indexes', () => {
+    expect(collections.find(({ name }) => name === 'emailAttachmentBindings')).toEqual({
+      name: 'emailAttachmentBindings',
+      skipEmbedding: true,
+      indexes: [
+        { fields: ['scopeKey', 'connectorKey', 'providerMessageId', 'partPath'], unique: true },
+        { fields: ['targetType', 'targetKey'], unique: true },
+        { fields: ['scopeKey'] },
+        { fields: ['leaseExpiresAt'], sparse: true },
+      ],
+    });
   });
   test('drops every obsolete tombstone index without preserving the retired field in source', () => {
     expect(isLegacyIndex('collections', ['scopeKey', LEGACY_REMOVAL_MARKER])).toBe(true);

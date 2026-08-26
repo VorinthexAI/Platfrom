@@ -797,7 +797,7 @@ export async function migrateProviderIndependentEmailDrafts(targetDb: Database):
       LET scope = DOCUMENT(scopes, document.scopeKey)
       LET connectors = (FOR connector IN organizationConnectors
         FILTER scope != null && connector.organizationKey == scope.organizationKey && connector.scopeKey == document.scopeKey
-        FILTER connector.provider IN ["gmail", "outlook", "icloud"] && connector.status != "revoked" && connector.syncEnabled != false
+        FILTER connector.provider == "gmail" && connector.status != "revoked" && connector.syncEnabled != false
         LIMIT 2 RETURN connector)
       FILTER LENGTH(connectors) == 1
       LET nextPayload = MERGE(payload, { data: MERGE(payload.data, { accountKey: connectors[0]._key }) })
@@ -923,7 +923,7 @@ export async function migrateExactSemanticRecords(targetDb: Database, collection
 export async function backfillConnectorInboxes(targetDb: Database) {
   if (!await targetDb.collection('organizationConnectors').exists() || !await targetDb.collection('inboxes').exists()) return;
   const cursor = await targetDb.query<{ key: string; organizationKey: string; scopeKey: string; email: string; createdAt: string; updatedAt: string }>(`FOR connector IN organizationConnectors
-    FILTER connector.provider IN ["gmail", "outlook", "icloud"]
+    FILTER connector.provider == "gmail"
     FILTER LENGTH(FOR inbox IN inboxes FILTER inbox.connectorKey == connector._key LIMIT 1 RETURN 1) == 0
     RETURN { key: connector._key, organizationKey: connector.organizationKey, scopeKey: connector.scopeKey, email: connector.email, createdAt: connector.createdAt, updatedAt: connector.updatedAt }`);
   for (const connector of await cursor.all()) {
@@ -933,6 +933,31 @@ export async function backfillConnectorInboxes(targetDb: Database) {
       INSERT { _key: @key, organizationKey: @organizationKey, scopeKey: @scopeKey, connectorKey: @connectorKey, name: @name, isFavorite: false, embedding: @embedding, createdAt: @createdAt, updatedAt: @updatedAt }
       UPDATE {} IN inboxes`, { key: newId(), organizationKey: connector.organizationKey, scopeKey: connector.scopeKey, connectorKey: connector.key, name, embedding, createdAt: connector.createdAt, updatedAt: connector.updatedAt });
   }
+}
+
+export async function retireUnsupportedEmailConnectors(targetDb: Database) {
+  if (!await targetDb.collection('organizationConnectors').exists()) return;
+  await targetDb.query(`FOR connector IN organizationConnectors
+    FILTER connector.provider != "gmail"
+    FILTER connector.status != "revoked" || connector.syncEnabled != false || HAS(connector, "encryptedCredentials") || HAS(connector, "encryptionKeyId") || HAS(connector, "accessTokenFingerprint") || HAS(connector, "syncLeaseToken") || HAS(connector, "sendLeaseToken")
+    UPDATE connector WITH {
+      status: "revoked", syncEnabled: false, syncStatus: "idle", revokedAt: connector.revokedAt ?? DATE_ISO8601(DATE_NOW()),
+      encryptedCredentials: null, encryptionKeyId: null, accessTokenFingerprint: null,
+      syncLeaseToken: null, syncLeaseExpiresAt: null, sendLeaseToken: null, sendLeaseExpiresAt: null,
+      historyId: null, watchRegisteredAt: null, watchExpiresAt: null, updatedAt: DATE_ISO8601(DATE_NOW())
+    } IN organizationConnectors OPTIONS { keepNull: false }`);
+}
+
+export async function migrateEmailAttachmentAvailability(targetDb: Database) {
+  if (!await targetDb.collection('documents').exists()) return;
+  await targetDb.query(`FOR document IN documents
+    FILTER document.mutationPolicy == "system-only" && IS_STRING(document.content)
+    LET payload = JSON_PARSE(document.content)
+    FILTER payload != null && payload.kind == "mail-message" && !HAS(payload.data, "attachmentAvailability")
+    LET availability = payload.data.hasAttachments == true ? "failed" : "none"
+    LET unavailable = payload.data.hasAttachments == true ? { unavailableAttachmentCount: 1 } : {}
+    LET data = MERGE(payload.data, { attachmentAvailability: availability }, unavailable)
+    UPDATE document WITH { content: JSON_STRINGIFY(MERGE(payload, { data })) } IN documents`);
 }
 
 function emailToneSemanticsCurrent(document: Record<string, unknown>, canonicalContent: string, contentChunks: string[], semanticText: string, dimensions: number) {
@@ -1683,7 +1708,7 @@ export const collections: CollectionSpec[] = [
   { name: 'polls', embedKeys: ['question'], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['messageKey'], unique: true }, { fields: ['channelKey', 'status'] }] },
   { name: 'pollOptions', embedKeys: ['text'], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['pollKey'] }, { fields: ['pollKey', 'position'], unique: true }] },
   { name: 'pollVotes', embedKeys: [], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['pollKey'] }, { fields: ['optionKey'] }, { fields: ['participantKey'] }, { fields: ['pollKey', 'optionKey', 'participantKey'], unique: true }] },
-  { name: 'folders', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'parentFolderKey'] }, { fields: ['scopeKey', 'isFavorite'] }, { fields: ['scopeKey', 'parentFolderKey', 'name'] }, { fields: ['scopeKey', 'purpose'], unique: true, sparse: true }] },
+  { name: 'folders', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'parentFolderKey'] }, { fields: ['scopeKey', 'isFavorite'] }, { fields: ['scopeKey', 'parentFolderKey', 'name'] }, { fields: ['scopeKey', 'purpose'], unique: true, sparse: true }, { fields: ['scopeKey', 'managedPurpose', 'managedOwnerKey'], unique: true, sparse: true }] },
   { name: 'images', embedKeys: ['filename', 'caption', 'placeName', 'placeSummary', 'country', 'city', 'countryCode'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'createdAt'] }, { fields: ['scopeKey', 'latitude', 'longitude'], sparse: true }, { fields: ['imageCaptionKey'], sparse: true }, { fields: ['storageKey'], unique: true }] },
   { name: 'imageCaptions', skipEmbedding: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'hashAlgorithm', 'perceptualHash'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment0'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment1'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment2'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment3'], sparse: true }] },
   { name: 'visualIdentities', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'createdByKey'] }, { fields: ['scopeKey', 'createdByKey', 'name'] }, { fields: ['scopeKey', 'referenceImageKey'] }] },
@@ -1691,6 +1716,7 @@ export const collections: CollectionSpec[] = [
   { name: 'galleryUploads', skipEmbedding: true, indexes: [{ fields: ['actorKey', 'createdAt'] }, { fields: ['storageKey'], unique: true }, { fields: ['expiresAt'] }] },
   { name: 'collections', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'name'] }, { fields: ['scopeKey', 'purpose'], unique: true, sparse: true }, { fields: ['scopeKey', 'coverImageKey'], sparse: true }] },
   { name: 'inboxes', embedKeys: ['name', 'description'], indexes: [{ fields: ['connectorKey'], unique: true }, { fields: ['organizationKey', 'scopeKey'] }, { fields: ['scopeKey', 'isFavorite'] }, { fields: ['scopeKey', 'coverImageKey'], sparse: true }] },
+  { name: 'emailAttachmentBindings', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'connectorKey', 'providerMessageId', 'partPath'], unique: true }, { fields: ['targetType', 'targetKey'], unique: true }, { fields: ['scopeKey'] }, { fields: ['leaseExpiresAt'], sparse: true }] },
   { name: 'collectionImages', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'collectionKey', 'imageKey'], unique: true }, { fields: ['scopeKey', 'collectionKey'] }, { fields: ['scopeKey', 'imageKey'] }] },
   { name: 'placeImages', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'imageKey'], unique: true }, { fields: ['scopeKey', 'placeKey', 'imageKey'], unique: true }, { fields: ['scopeKey', 'placeKey', 'position'] }] },
   { name: 'imageCollecitionHightlights', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'collectionKey', 'createdAt'] }, { fields: ['scopeKey', 'createdByKey'] }] },
@@ -1729,7 +1755,7 @@ export const collections: CollectionSpec[] = [
   // Private global user history. Identity is deliberately independent of every product and scope.
   { name: 'userSearches', skipEmbedding: true, indexes: [{ fields: ['userKey', 'normalizedQuery'], unique: true }, { fields: ['userKey', 'searchedAt'] }] },
   // Private durable outbox for object deletion after metadata commits.
-  { name: 'storageDeletionJobs', skipEmbedding: true, indexes: [{ fields: ['storageKey'], unique: true }, { fields: ['createdAt'] }] },
+  { name: 'storageDeletionJobs', skipEmbedding: true, indexes: [{ fields: ['storageKey'], unique: true }, { fields: ['createdAt'] }, { fields: ['status'] }, { fields: ['reservationExpiresAt'], sparse: true }, { fields: ['claimedAt'], sparse: true }] },
   // Private Archive contextual replay cache. The collection itself identifies the context.
   { name: 'contentSearchQueries', skipEmbedding: true, indexes: [{ fields: ['actorKey', 'scopeKey', 'normalizedQuery', 'folderKey', 'includeDescendants'], unique: true }, { fields: ['actorKey', 'scopeKey', 'searchedAt'] }] },
   // Pure link nodes (scope tree edges, scope memberships) — ids only, so
@@ -2247,6 +2273,8 @@ async function main() {
   await ensureOrganizationProvidersCollection(targetDb);
   await ensureOrganizationCredentialsCollection(targetDb);
   await ensureOrganizationConnectorsCollection(targetDb);
+  await retireUnsupportedEmailConnectors(targetDb);
+  await migrateEmailAttachmentAvailability(targetDb);
   await backfillConnectorInboxes(targetDb);
   await migrateProviderIndependentEmailDrafts(targetDb);
   await retireTranscriptionDomain(targetDb);

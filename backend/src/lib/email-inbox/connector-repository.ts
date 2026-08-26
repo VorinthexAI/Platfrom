@@ -45,18 +45,18 @@ export function createConnectorRepository(database: Database = db) {
 
   return {
     async listAuthorizedScope(organizationKey: string, scopeKey: string): Promise<OrganizationConnector[]> {
-      const cursor = await database.query('FOR connector IN @@collection FILTER connector.organizationKey == @organizationKey && connector.scopeKey == @scopeKey && connector.provider IN ["gmail", "outlook", "icloud"] && connector.status != "revoked" SORT connector.email ASC, connector._key ASC RETURN connector', { '@collection': ORGANIZATION_CONNECTORS_COLLECTION, organizationKey, scopeKey });
+      const cursor = await database.query('FOR connector IN @@collection FILTER connector.organizationKey == @organizationKey && connector.scopeKey == @scopeKey && connector.provider == "gmail" && connector.status != "revoked" SORT connector.email ASC, connector._key ASC RETURN connector', { '@collection': ORGANIZATION_CONNECTORS_COLLECTION, organizationKey, scopeKey });
       return (await cursor.all()).map(parse);
     },
     findExact,
     async getExact(organizationKey: string, scopeKey: string, key: string): Promise<OrganizationConnector | null> {
-      const raw = await database.collection(ORGANIZATION_CONNECTORS_COLLECTION).document(key).catch(() => null);
+      const raw = await (await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.provider == "gmail" LIMIT 1 RETURN connector', { '@collection': ORGANIZATION_CONNECTORS_COLLECTION, key })).next();
       if (!raw) return null;
       const connector = parse(raw);
       return connector.organizationKey === organizationKey && connector.scopeKey === scopeKey ? connector : null;
     },
     async getByKey(key: string): Promise<OrganizationConnector | null> {
-      const raw = await database.collection(ORGANIZATION_CONNECTORS_COLLECTION).document(key).catch(() => null);
+      const raw = await (await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.provider == "gmail" LIMIT 1 RETURN connector', { '@collection': ORGANIZATION_CONNECTORS_COLLECTION, key })).next();
       return raw ? parse(raw) : null;
     },
     async upsert(input: {
@@ -74,7 +74,7 @@ export function createConnectorRepository(database: Database = db) {
       const fenceRevision = expectedRevision !== undefined;
       const document = organizationConnectorSchema.parse({
         key: newId(), ...persistedInput, provider, ...encrypted,
-        accessTokenFingerprint: tokenFingerprint('accessToken' in input.credentials ? input.credentials.accessToken : input.credentials.appPassword), status: initializeInactive ? 'error' : 'active', syncEnabled: !initializeInactive, syncStatus: 'idle',
+         accessTokenFingerprint: tokenFingerprint(input.credentials.accessToken), status: initializeInactive ? 'error' : 'active', syncEnabled: !initializeInactive, syncStatus: 'idle',
         ...(initializeInactive ? { lastError: 'Email connector initialization is incomplete' } : {}),
         lastRefreshedAt: timestamp, createdAt: timestamp, updatedAt: timestamp,
       });
@@ -115,7 +115,7 @@ export function createConnectorRepository(database: Database = db) {
       const encrypted = encryptEmailConnectorCredentials(credentials, connector);
       const updatedAt = new Date().toISOString();
       const update = {
-        ...encrypted, accessTokenFingerprint: tokenFingerprint('accessToken' in credentials ? credentials.accessToken : credentials.appPassword), status: 'active',
+         ...encrypted, accessTokenFingerprint: tokenFingerprint(credentials.accessToken), status: 'active',
         lastRefreshedAt: updatedAt, lastError: null, updatedAt,
       };
       const cursor = await database.query('FOR current IN @@collection FILTER current._key == @key && current.updatedAt == @expectedUpdatedAt && current.status != "revoked" && current.syncEnabled != false UPDATE current WITH @update IN @@collection OPTIONS { keepNull: false } RETURN NEW', { '@collection': ORGANIZATION_CONNECTORS_COLLECTION, key: connector.key, expectedUpdatedAt: connector.updatedAt, update });
@@ -158,10 +158,6 @@ export function createConnectorRepository(database: Database = db) {
     },
     async listWatchRenewalTargets(before: string) {
       const cursor = await database.query(`FOR connector IN @@collection FILTER connector.provider == "gmail" && connector.status != "revoked" && connector.syncEnabled != false && (connector.watchExpiresAt == null || connector.watchExpiresAt <= @before) RETURN { organizationKey: connector.organizationKey, scopeKey: connector.scopeKey, connectorKey: connector._key }`, { '@collection': ORGANIZATION_CONNECTORS_COLLECTION, before });
-      return cursor.all() as Promise<Array<{ organizationKey: string; scopeKey: string; connectorKey: string }>>;
-    },
-    async listPollingTargets() {
-      const cursor = await database.query(`FOR connector IN @@collection FILTER connector.provider IN ["outlook", "icloud"] && connector.status != "revoked" && connector.syncEnabled != false RETURN { organizationKey: connector.organizationKey, scopeKey: connector.scopeKey, connectorKey: connector._key }`, { '@collection': ORGANIZATION_CONNECTORS_COLLECTION });
       return cursor.all() as Promise<Array<{ organizationKey: string; scopeKey: string; connectorKey: string }>>;
     },
     async claimSync(key: string, token: string, expiresAt: string) {

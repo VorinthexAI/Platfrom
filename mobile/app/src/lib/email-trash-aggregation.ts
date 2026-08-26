@@ -1,6 +1,10 @@
 import type { EmailConnector, EmailThread } from "./email-client";
 
-export type EmailTrashGroup = { connector: EmailConnector; threads: EmailThread[]; error?: string };
+export type EmailTrashGroup = { connector: EmailConnector; threads: EmailThread[]; error?: string; errorKind?: "load" | "clear" };
+
+export function clearableEmailTrashGroups(groups: readonly EmailTrashGroup[]) {
+  return groups.filter((group) => !group.error || group.errorKind === "clear");
+}
 
 export async function loadEmailTrashGroups(
   connectors: readonly EmailConnector[],
@@ -29,7 +33,7 @@ export async function loadEmailTrashGroups(
       groups.push({ connector, threads });
     } catch (error) {
       if (!isCurrent()) return undefined;
-      groups.push({ connector, threads: [], error: errorMessage(error) });
+      groups.push({ connector, threads: [], error: errorMessage(error), errorKind: "load" });
     }
   }
   return groups;

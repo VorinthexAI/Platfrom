@@ -10,6 +10,8 @@ import { computePerceptualHashBatchDispatched } from './perceptual-hash-queue';
 import { newId } from '@/lib/ids';
 import type { ImageLocation } from '@/lib/gallery/image-location';
 import { buildImageEmbeddingText } from '@/lib/image-embedding';
+import { acknowledgeStorageUploadReservation, releaseStorageUploadReservation, renewStorageUploadReservation, reserveStorageKeyForUpload, type StorageUploadReservation } from '@/lib/db/storage-deletion-jobs.node';
+import { startStorageUploadHeartbeat } from '@/lib/storage-upload-reservation';
 
 export const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 export const MAX_IMAGE_DIMENSION = 16_384;
@@ -33,6 +35,11 @@ export interface ImageProcessingDependencies {
   embed?: (text: string, signal?: AbortSignal) => Promise<number[]>; openAI?: ResponsesClient;
   maxBytes?: number; maxDimension?: number; maxPixels?: number; createKey?: () => string; createCaptionKey?: () => string;
   onMetrics?: (metrics: ImageProcessingMetrics) => void;
+  reserveStorageKey?: (storageKey: string) => Promise<StorageUploadReservation | null>;
+  renewStorageReservation?: (reservation: StorageUploadReservation) => Promise<boolean>;
+  acknowledgeStorageReservation?: (reservation: StorageUploadReservation) => Promise<boolean>;
+  releaseStorageReservation?: (reservation: StorageUploadReservation) => Promise<boolean>;
+  reservationHeartbeatMs?: number;
 }
 export class ImageProcessingError extends Error {
   constructor(public readonly code: 'IMAGE_INVALID_INPUT' | 'IMAGE_TOO_LARGE' | 'IMAGE_DIMENSIONS_INVALID' | 'IMAGE_CAPTION_FAILED' | 'IMAGE_EMBEDDING_FAILED' | 'IMAGE_UPLOAD_FAILED' | 'IMAGE_INSERT_FAILED' | 'IMAGE_CLEANUP_FAILED' | 'IMAGE_IDEMPOTENCY_CONFLICT', message: string, options?: ErrorOptions) { super(message, options); this.name = 'ImageProcessingError'; }
@@ -123,7 +130,19 @@ async function execute(input: ProcessImageInput, image: ValidatedImage, perceptu
   const requestedKey = `media/${input.scopeKey}/${key}/${hash(image.bytes)}/original.${image.extension}`;
   if (input.idempotencyKey) { const existing = await getImage(key); if (existing) { if (existing.scopeKey !== input.scopeKey) throw new ImageProcessingError('IMAGE_INSERT_FAILED', 'The idempotent image is unavailable.'); if (existing.filename !== image.filename || existing.mimeType !== image.mimeType || existing.sizeBytes !== image.sizeBytes || existing.width !== image.width || existing.height !== image.height || existing.storageKey !== requestedKey) throw new ImageProcessingError('IMAGE_IDEMPOTENCY_CONFLICT', 'The image idempotency key belongs to a different request.'); return existing; } }
   const storage = dependencies.storage ?? documentStorage; let storageKey: string;
-  try { storageKey = (await storage.upload({ key: requestedKey, bytes: image.bytes, mimeType: image.mimeType })).storageKey; } catch (error) { throw new ImageProcessingError('IMAGE_UPLOAD_FAILED', 'The original image could not be uploaded.', { cause: error }); }
+  const customReservation = (storageKey: string): StorageUploadReservation => ({ storageKey, token: 'custom-storage' });
+  const renewReservation = dependencies.renewStorageReservation ?? (dependencies.storage ? async () => true : renewStorageUploadReservation);
+  const acknowledgeReservation = dependencies.acknowledgeStorageReservation ?? (dependencies.storage ? async () => true : acknowledgeStorageUploadReservation);
+  const releaseReservation = dependencies.releaseStorageReservation ?? (dependencies.storage ? async () => true : releaseStorageUploadReservation);
+  let reservation: StorageUploadReservation | undefined;
+  let heartbeat: ReturnType<typeof startStorageUploadHeartbeat> | undefined;
+  try {
+    const reserve = dependencies.reserveStorageKey ?? (dependencies.storage ? async (storageKey: string) => customReservation(storageKey) : reserveStorageKeyForUpload);
+    reservation = await reserve(requestedKey) ?? undefined;
+    if (!reservation) throw new Error('A storage deletion claim or upload reservation is active for this deterministic image key');
+    heartbeat = startStorageUploadHeartbeat(reservation, renewReservation, dependencies.reservationHeartbeatMs);
+    storageKey = (await storage.upload({ key: requestedKey, bytes: image.bytes, mimeType: image.mimeType })).storageKey;
+  } catch (error) { await heartbeat?.stop(); throw new ImageProcessingError('IMAGE_UPLOAD_FAILED', 'The original image could not be uploaded.', { cause: error }); }
   try {
     let canonical = prepared?.canonical ?? await (dependencies.findCaption ?? findReusableImageCaption)(input.scopeKey, perceptualHash, input.ownerKey);
     let captionRecord: ImageCaptionRecord | undefined;
@@ -136,10 +155,12 @@ async function execute(input: ProcessImageInput, image: ValidatedImage, perceptu
     } else {
       let generated: GeneratedImageCaption;
       try { generated = prepared?.generated ?? generatedImageCaptionSchema.parse(await (dependencies.caption ?? ((value) => captionImageWithOpenAI(value, dependencies.openAI)))({ filename: image.filename, mimeType: image.mimeType, bytes: image.bytes, signal: input.signal })); } catch (error) { throw new ImageProcessingError('IMAGE_CAPTION_FAILED', 'The image caption and score could not be generated.', { cause: error }); }
+      await heartbeat.checkpoint();
       caption = generated.caption;
       if (!caption) throw new ImageProcessingError('IMAGE_CAPTION_FAILED', 'The image caption must not be blank.');
       const embeddingText = buildImageEmbeddingText({ filename: image.filename, caption });
       try { embedding = prepared?.generated?.embedding ?? (dependencies.embed ? await dependencies.embed(embeddingText, input.signal) : await embedText({ text: embeddingText, signal: input.signal })); currentEmbeddingSchema.parse(embedding); } catch (error) { throw new ImageProcessingError('IMAGE_EMBEDDING_FAILED', `The image embedding must contain exactly ${EMBEDDING_DIMENSIONS} finite values.`, { cause: error }); }
+      await heartbeat.checkpoint();
       const now = new Date().toISOString();
       const segments = perceptualHashSegments(perceptualHash);
       captionRecord = imageCaptionRecordSchema.parse({
@@ -164,14 +185,22 @@ async function execute(input: ProcessImageInput, image: ValidatedImage, perceptu
     if (input.location?.city || input.location?.country || input.location?.countryCode || input.location?.placeName || input.location?.placeSummary) {
       const embeddingText = buildImageEmbeddingText({ filename: image.filename, caption, ...input.location });
       try { embedding = dependencies.embed ? await dependencies.embed(embeddingText, input.signal) : await embedText({ text: embeddingText, signal: input.signal }); currentEmbeddingSchema.parse(embedding); } catch (error) { throw new ImageProcessingError('IMAGE_EMBEDDING_FAILED', `The image embedding must contain exactly ${EMBEDDING_DIMENSIONS} finite values.`, { cause: error }); }
+      await heartbeat.checkpoint();
     }
     const now = new Date().toISOString();
-    try { return await persistImage({ image: { key, scopeKey: input.scopeKey, filename: image.filename, caption, imageCaptionKey: canonical.key, createdByKey: input.ownerKey, storageKey, mimeType: image.mimeType, sizeBytes: image.sizeBytes, width: image.width, height: image.height, ...(input.location?.city ? { city: input.location.city } : {}), ...(input.location?.country ? { country: input.location.country } : {}), ...(input.location?.countryCode ? { countryCode: input.location.countryCode } : {}), ...(input.location?.placeName ? { placeName: input.location.placeName } : {}), ...(input.location?.placeSummary ? { placeSummary: input.location.placeSummary } : {}), ...(input.location?.latitude !== undefined ? { latitude: input.location.latitude } : {}), ...(input.location?.longitude !== undefined ? { longitude: input.location.longitude } : {}), ...(input.location?.locationSource ? { locationSource: input.location.locationSource } : {}), mutationPolicy: input.mutationPolicy ?? 'user', embedding, isFavorite: false, createdAt: now, updatedAt: now }, caption: captionRecord, actorKey: input.ownerKey }); } catch (error) { throw new ImageProcessingError('IMAGE_INSERT_FAILED', 'The prepared image could not be persisted.', { cause: error }); }
+    try {
+      const persisted = await persistImage({ image: { key, scopeKey: input.scopeKey, filename: image.filename, caption, imageCaptionKey: canonical.key, createdByKey: input.ownerKey, storageKey, mimeType: image.mimeType, sizeBytes: image.sizeBytes, width: image.width, height: image.height, ...(input.location?.city ? { city: input.location.city } : {}), ...(input.location?.country ? { country: input.location.country } : {}), ...(input.location?.countryCode ? { countryCode: input.location.countryCode } : {}), ...(input.location?.placeName ? { placeName: input.location.placeName } : {}), ...(input.location?.placeSummary ? { placeSummary: input.location.placeSummary } : {}), ...(input.location?.latitude !== undefined ? { latitude: input.location.latitude } : {}), ...(input.location?.longitude !== undefined ? { longitude: input.location.longitude } : {}), ...(input.location?.locationSource ? { locationSource: input.location.locationSource } : {}), mutationPolicy: input.mutationPolicy ?? 'user', embedding, isFavorite: false, createdAt: now, updatedAt: now }, caption: captionRecord, actorKey: input.ownerKey });
+      await heartbeat.checkpoint();
+      if (!await acknowledgeReservation(reservation)) throw new Error('Storage upload reservation acknowledgement fence was lost');
+      return persisted;
+    } catch (error) { throw new ImageProcessingError('IMAGE_INSERT_FAILED', 'The prepared image could not be persisted.', { cause: error }); }
   } catch (error) {
     let owner: Image | null; try { owner = await getImage(key); } catch (ownershipError) { throw new ImageProcessingError('IMAGE_CLEANUP_FAILED', 'Image ownership could not be verified; the uploaded object was retained.', { cause: new AggregateError([error, ownershipError]) }); }
-    if (owner?.storageKey === storageKey) { if (owner.scopeKey === input.scopeKey) return owner; throw error; }
-    try { await removeWithRetry(storage, storageKey); } catch (cleanupError) { throw new ImageProcessingError('IMAGE_CLEANUP_FAILED', 'Image processing failed and the uploaded object could not be removed.', { cause: new AggregateError([error, cleanupError]) }); }
+    if (owner?.storageKey === storageKey) { if (owner.scopeKey === input.scopeKey) { await acknowledgeReservation(reservation); return owner; } throw error; }
+    try { await removeWithRetry(storage, storageKey); await releaseReservation(reservation); } catch (cleanupError) { throw new ImageProcessingError('IMAGE_CLEANUP_FAILED', 'Image processing failed and the uploaded object could not be removed.', { cause: new AggregateError([error, cleanupError]) }); }
     throw error;
+  } finally {
+    await heartbeat.stop();
   }
 }
 

@@ -496,9 +496,7 @@ export function registerRoutes(app: Hono) {
   app.post('/email/inboxes/search', emailHandlers.searchInboxes);
   app.post('/email/tones/search', emailHandlers.searchTones);
   app.post('/email/connect', emailHandlers.startConnect);
-  app.post('/email/connect/icloud', emailHandlers.connectICloud);
   app.get('/email/connectors/gmail/callback', emailHandlers.callback);
-  app.get('/email/connectors/outlook/callback', emailHandlers.callback);
   app.post('/email/connect/exchange', emailHandlers.exchangeConnect);
   app.post('/email/sync', emailHandlers.sync);
   app.post('/email/subscribe', emailHandlers.subscribe);

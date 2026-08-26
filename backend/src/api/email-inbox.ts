@@ -2,7 +2,7 @@ import type { Context } from 'hono';
 import { z, ZodError } from 'zod';
 import { FoundersAccessError } from '@/lib/founders/access';
 import { createEmailOAuthService, type EmailOAuthService } from '@/lib/email-inbox/oauth';
-import { createEmailService, EmailIdempotencyError, EmailRepositoryError, emailDraftComposeInputSchema, emailDraftComposeInputShape, emailDraftCreateInputSchema, emailDraftDeleteInputSchema, emailDraftUpdateInputSchema, emailMessageGeneratedListInputSchema, emailMessageSummarizeInputSchema, emailMessageSummaryDeleteInputSchema, emailMessageTranslationDeleteInputSchema, emailOverviewInputSchema, emailOverviewInputShape, emailReplyContextCreateInputSchema, emailReplyContextDeleteInputSchema, emailReplyContextUpdateInputSchema, emailSemanticSearchInputSchema, emailSimilarFindInputSchema, emailThreadFavoriteInputSchema, emailThreadReadStateInputSchema, emailThreadTrashInputSchema, emailToneCreateInputSchema, emailToneDeleteInputSchema, emailToneUpdateInputSchema, emailTrashClearInputSchema, inboxUpdateInputSchema, publicEmailGeneratedDeleteResultSchema, publicEmailSummaryListResultSchema, publicEmailSummaryResultSchema, publicEmailTranslationListResultSchema, type EmailService } from '@/lib/email-inbox/service';
+import { createEmailService, EmailIdempotencyError, EmailRepositoryError, emailDraftComposeInputSchema, emailDraftComposeInputShape, emailDraftCreateInputSchema, emailDraftDeleteInputSchema, emailDraftUpdateInputSchema, emailMessageGeneratedListInputSchema, emailMessageSummarizeInputSchema, emailMessageSummaryDeleteInputSchema, emailMessageTranslationDeleteInputSchema, emailOverviewInputSchema, emailOverviewInputShape, emailReplyContextCreateInputSchema, emailReplyContextDeleteInputSchema, emailReplyContextUpdateInputSchema, emailSemanticSearchInputSchema, emailSimilarFindInputSchema, emailThreadFavoriteInputSchema, emailThreadReadStateInputSchema, emailThreadTrashInputSchema, emailToneCreateInputSchema, emailToneDeleteInputSchema, emailToneUpdateInputSchema, emailTrashClearInputSchema, inboxUpdateInputSchema, publicEmailDraftSchema, publicEmailGeneratedDeleteResultSchema, publicEmailOverviewSchema, publicEmailSummaryListResultSchema, publicEmailSummaryResultSchema, publicEmailTranslationListResultSchema, type EmailService } from '@/lib/email-inbox/service';
 import { getAuthIdentity } from './security';
 import { strictObject } from './validation';
 
@@ -53,7 +53,7 @@ export function createEmailHandlers(options: { service?: EmailService; oauth?: E
     overview: run(async (c) => {
       const body = strictObject({ ...contextSchema.shape, ...emailOverviewInputShape }).parse(await c.req.json());
       const { organizationKey: _organizationKey, scopeKey: _scopeKey, ...input } = body;
-      return service.overview(await actor(c, body), emailOverviewInputSchema.parse(input));
+      return publicEmailOverviewSchema.parse(await service.overview(await actor(c, body), emailOverviewInputSchema.parse(input)));
     }),
     searchInboxes: run(async (c) => {
       const body = strictObject({ ...contextSchema.shape, ...emailSemanticSearchInputSchema.shape }).parse(await c.req.json());
@@ -66,15 +66,10 @@ export function createEmailHandlers(options: { service?: EmailService; oauth?: E
       return service.searchTones(await actor(c, body), input, { signal: c.req.raw.signal, timeoutMs: 10_000 });
     }),
     startConnect: run(async (c) => {
-       const body = strictObject({ ...contextSchema.shape, provider: z.enum(['gmail', 'outlook']).default('gmail'), name: z.string().trim().min(1).max(255), description: z.string().trim().min(1).max(10_000).optional(), returnUri: z.string().url() }).parse(await c.req.json());
+       const body = strictObject({ ...contextSchema.shape, provider: z.literal('gmail').default('gmail'), name: z.string().trim().min(1).max(255), description: z.string().trim().min(1).max(10_000).optional(), returnUri: z.string().url() }).parse(await c.req.json());
       const current = await identity(c);
       return oauth.start({ userKey: current.key, organizationKey: body.organizationKey, scopeKey: body.scopeKey, provider: body.provider, name: body.name, description: body.description, returnUri: body.returnUri });
     }),
-    connectICloud: run(async (c) => {
-      const body = strictObject({ ...contextSchema.shape, email: z.string().trim().email().max(320), appPassword: z.string().trim().min(1).max(255), name: z.string().trim().min(1).max(255), description: z.string().trim().min(1).max(10_000).optional() }).parse(await c.req.json());
-      const current = await identity(c);
-      return oauth.connectICloud({ userKey: current.key, organizationKey: body.organizationKey, scopeKey: body.scopeKey, email: body.email, appPassword: body.appPassword, name: body.name, description: body.description });
-    }, 201),
     callback: async (c: Context) => {
       try {
         const input = strictObject({
@@ -111,13 +106,13 @@ export function createEmailHandlers(options: { service?: EmailService; oauth?: E
     draft: run(async (c) => {
       const body = strictObject({ ...contextSchema.shape, ...emailDraftCreateInputSchema.shape }).parse(await c.req.json());
       const { organizationKey: _organizationKey, scopeKey: _scopeKey, ...input } = body;
-      return service.draft(await actor(c, body), input, requestKey(c));
+      return publicEmailDraftSchema.parse(await service.draft(await actor(c, body), input, requestKey(c)));
     }, 201),
     draftNew: run(async (c) => {
       const body = strictObject({ ...contextSchema.shape, ...emailDraftComposeInputShape }).parse(await c.req.json());
       const { organizationKey: _organizationKey, scopeKey: _scopeKey, ...rawInput } = body;
       const input = emailDraftComposeInputSchema.parse(rawInput);
-      return service.draftNew(await actor(c, body), input, requestKey(c));
+      return publicEmailDraftSchema.parse(await service.draftNew(await actor(c, body), input, requestKey(c)));
     }, 201),
     tones: run(async (c) => { const body = contextSchema.parse(await c.req.json()); return service.tones(await actor(c, body)); }),
     listReplyContext: run(async (c) => { const body = contextSchema.parse(await c.req.json()); return service.listReplyContext(await actor(c, body)); }),
@@ -128,9 +123,9 @@ export function createEmailHandlers(options: { service?: EmailService; oauth?: E
     updateTone: run(async (c) => { const transport = strictObject({ ...contextSchema.shape, name: z.string().trim().min(1).max(255).optional(), instruction: z.string().trim().min(1).max(20_000).optional(), isFavorite: z.boolean().optional() }).parse(await c.req.json()); const { organizationKey: _organizationKey, scopeKey: _scopeKey, ...patch } = transport; const input = emailToneUpdateInputSchema.parse({ toneKey: c.req.param('toneKey'), ...patch }); return service.updateTone(await actor(c, transport), input, requestKey(c)); }),
     deleteTone: run(async (c) => { const body = contextSchema.parse(await c.req.json()); return service.deleteTone(await actor(c, body), emailToneDeleteInputSchema.parse({ toneKey: c.req.param('toneKey') }), requestKey(c)); }),
     updateInbox: run(async (c) => { const transport = strictObject({ ...contextSchema.shape, connectorKey: connectorKeySchema, name: z.string().trim().min(1).max(255).optional(), description: z.string().trim().min(1).max(10_000).nullable().optional(), coverImageKey: connectorKeySchema.nullable().optional(), isFavorite: z.boolean().optional() }).parse(await c.req.json()); const { organizationKey: _organizationKey, scopeKey: _scopeKey, ...rawInput } = transport; return service.updateInbox(await actor(c, transport), inboxUpdateInputSchema.parse(rawInput), requestKey(c)); }),
-    updateDraft: run(async (c) => { const body = strictObject({ ...contextSchema.shape, finalContent: emailDraftUpdateInputSchema.shape.finalContent }).parse(await c.req.json()); return service.updateDraft(await actor(c, body), z.string().cuid().parse(c.req.param('draftKey')), body.finalContent, requestKey(c)); }),
+    updateDraft: run(async (c) => { const body = strictObject({ ...contextSchema.shape, finalContent: z.string().max(50_000).optional(), attachments: z.array(z.object({ type: z.enum(['document', 'image']), key: z.string().cuid() }).strict()).max(20).optional() }).parse(await c.req.json()); return publicEmailDraftSchema.parse(await service.updateDraft(await actor(c, body), emailDraftUpdateInputSchema.parse({ draftKey: c.req.param('draftKey'), finalContent: body.finalContent, attachments: body.attachments }), requestKey(c))); }),
     deleteDraft: run(async (c) => { const body = contextSchema.parse(await c.req.json()); return service.deleteDraft(await actor(c, body), emailDraftDeleteInputSchema.parse({ draftKey: c.req.param('draftKey') }), requestKey(c)); }),
-    assignDraft: run(async (c) => { const body = strictObject({ ...contextSchema.shape, connectorKey: connectorKeySchema }).parse(await c.req.json()); return service.assignDraft(await actor(c, body), { draftKey: z.string().cuid().parse(c.req.param('draftKey')), connectorKey: body.connectorKey }, requestKey(c)); }),
+    assignDraft: run(async (c) => { const body = strictObject({ ...contextSchema.shape, connectorKey: connectorKeySchema }).parse(await c.req.json()); return publicEmailDraftSchema.parse(await service.assignDraft(await actor(c, body), { draftKey: z.string().cuid().parse(c.req.param('draftKey')), connectorKey: body.connectorKey }, requestKey(c))); }),
     sendDraft: run(async (c) => { const body = strictObject({ ...contextSchema.shape, connectorKey: connectorKeySchema.optional(), replyMode: z.enum(['reply', 'reply_all']).optional() }).parse(await c.req.json()); return service.sendDraft(await actor(c, body), z.string().cuid().parse(c.req.param('draftKey')), body.connectorKey, requestKey(c), body.replyMode); }),
     disconnect: run(async (c) => { const body = strictObject({ ...contextSchema.shape, connectorKey: connectorKeySchema }).parse(await c.req.json()); return service.disconnect(await actor(c, body), body.connectorKey); }),
   };

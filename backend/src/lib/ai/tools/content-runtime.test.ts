@@ -1083,6 +1083,16 @@ describe('Content runtime', () => {
     expect(f.documents.has(otherDocumentKey)).toBe(true);
   });
 
+  test('keeps managed mail attachments readable but rejects generic updates and deletion', async () => {
+    const f = fixture('owner');
+    const documentKey = f.addDocument();
+    f.documents.set(documentKey, { ...f.documents.get(documentKey), managedPurpose: 'mail-attachment', mutationPolicy: 'user' });
+    await expect(runContentTool('document.read', { documentKeys: [documentKey] }, f.context, { repository: f.repository })).resolves.toMatchObject({ summary: { succeeded: 1 } });
+    await expect(runContentTool('document.update', { updates: [{ documentKey, isFavorite: true }] }, f.context, { repository: f.repository })).resolves.toMatchObject({ summary: { failed: 1 }, results: [{ success: false, error: { code: 'CONTENT_FORBIDDEN', resourceKey: documentKey } }] });
+    await expect(runContentTool('document.delete', { documentKeys: [documentKey] }, f.context, { repository: f.repository, storage: { delete: async () => undefined } as never })).resolves.toMatchObject({ summary: { failed: 1 }, results: [{ success: false, error: { code: 'CONTENT_FORBIDDEN', resourceKey: documentKey } }] });
+    expect(f.documents.has(documentKey)).toBe(true);
+  });
+
   test('deletes storage before transaction-bound document metadata and retains pointers on failure', async () => {
     const f = fixture('owner');
     const documentKey = f.addDocument();

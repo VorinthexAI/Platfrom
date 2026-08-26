@@ -699,6 +699,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
     .filter((item) => includePendingDeletion || !item._internalDeletion);
   const descendants = (all: Folder[], key: string) => { const out: Folder[] = []; const pending = [key]; const seen = new Set(pending); while (pending.length) { const parentKey = pending.shift()!; for (const child of all.filter((f) => f.parentFolderKey === parentKey)) if (!seen.has(child.key)) { seen.add(child.key); out.push(child); pending.push(child.key); } } return out; };
   const forbidSystemMailMutation = (current: Document, action: string, resourceKey = current.key) => {
+    if (current.managedPurpose === 'mail-attachment') fail('CONTENT_FORBIDDEN', 'Managed documents are read-only.', tool, action, resourceKey);
     if (isSystemManagedMailDocument(current)) fail('CONTENT_FORBIDDEN', 'Mail documents are managed through their canonical email capabilities.', tool, action, resourceKey);
   };
   const forbidSystemMailInFolders = async (scopeKey: string, folderKeys: Set<string>, action: string, repository = repo) => {
