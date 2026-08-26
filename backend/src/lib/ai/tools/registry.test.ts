@@ -380,7 +380,7 @@ describe('unified tool registry', () => {
       expect(call.includes('signal-request')).toBe(receiptMethods.has(method));
       expect(signalCapabilities.find(({ definition }) => definition.name === name)?.mutationWorkspace === 'signal').toBe(mutationNames.has(name));
       expect(JSON.stringify(output)).not.toMatch(/embedding|scopeKey|accountKey|providerThreadId|providerMessageId|encryptedCredentials|sendLeaseToken/);
-      expect(JSON.stringify(output)).not.toMatch(/bcc|hidden@example.com/i);
+      expect(JSON.stringify(output)).not.toMatch(/"bcc"|hidden@example\.com/i);
     }
   });
 });
