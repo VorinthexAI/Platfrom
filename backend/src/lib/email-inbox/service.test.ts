@@ -695,6 +695,7 @@ describe('email synchronization', () => {
     const account: any = { ...connector, historyId: 'history-1', lastSyncedAt: now };
     const processed: string[] = [];
     const idleStates: Array<Record<string, any>> = [];
+    let enqueues = 0;
     let historyCalls = 0;
     const gmail = {
       profile: async () => ({ historyId: 'history-2' }),
@@ -724,12 +725,13 @@ describe('email synchronization', () => {
         return true;
       },
     };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', intent: 'Review' }), embed: async () => embedding, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', intent: 'Review' }), embed: async () => embedding, enqueueSyncContinuation: async () => { enqueues += 1; }, publishInboxChanged: async () => undefined });
     expect(await service.sync(actor, connector.key)).toMatchObject({ synced: 100 });
     expect(idleStates[0]).toMatchObject({ historyId: 'history-1', pendingHistoryId: 'history-2', pendingThreadIds: ids.slice(0, 5).reverse() });
     expect(await service.sync(actor, connector.key)).toMatchObject({ synced: 5 });
     expect(idleStates[1]).toMatchObject({ historyId: 'history-2', pendingHistoryId: null, pendingThreadIds: null });
     expect(historyCalls).toBe(1);
+    expect(enqueues).toBe(1);
     expect(processed).toHaveLength(105);
     expect(new Set(processed)).toEqual(new Set(ids));
   });
