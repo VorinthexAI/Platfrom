@@ -71,6 +71,13 @@ describe('personal assistant service capabilities', () => {
     expect(calls).toBe(0);
   });
 
+  test('rejects non-contract draft fields from a Core service result', async () => {
+    const draftKey = newId();
+    const capability = defaultAssistantCapabilityRegistry.resolve('signal-workspace').find(({ definition }) => definition.name === 'email.draft.compose')!;
+    const email = { draftNew: async () => ({ key: draftKey, variant: 'new', to: ['person@example.com'], subject: 'Subject', generatedContent: 'Body', status: 'generated', createdAt: '2026-08-23T00:00:00.000Z', updatedAt: '2026-08-23T00:00:00.000Z', scopeKey }) };
+    await expect(capability.execute({ to: ['person@example.com'], generationMode: 'preserve', subject: 'Subject', authoredBody: 'Body' }, { domain, email } as any)).rejects.toThrow('Unrecognized key');
+  });
+
   test('executes canonical services with identity derived only from the member principal', async () => {
     const threadKey = newId();
     const draftKey = newId();
@@ -78,6 +85,7 @@ describe('personal assistant service capabilities', () => {
     const chapterKey = newId();
     const calls: unknown[] = [];
     const generated = { key: newId(), documentKey: threadKey, version: 1, content: 'Bonjour.', summary: 'Summary.', style: 'brief', sourceTitle: 'Subject', sourceDocumentUpdatedAt: '2026-08-23T00:00:00.000Z', createdAt: '2026-08-23T00:00:00.000Z', embedding: [1], chunkEmbeddings: [[1]], scopeKey, createdByKey: userKey };
+    const draftOutput = { key: draftKey, variant: 'new' as const, connectorKey: threadKey, to: ['person@example.com'], bcc: ['hidden@example.com'], subject: 'Subject', generatedContent: 'Body', status: 'generated' as const, createdAt: generated.createdAt, updatedAt: generated.createdAt };
     const travel: any = {
       overview: async (...args: unknown[]) => { calls.push(['travel.overview', ...args]); return {}; },
       findPlaces: async (...args: unknown[]) => { calls.push(['travel.findPlaces', ...args]); return {}; },
@@ -98,7 +106,7 @@ describe('personal assistant service capabilities', () => {
     };
     const countries: any = { search: async (...args: unknown[]) => { calls.push(['countries.search', ...args]); return {}; } };
     const email: any = {
-      overview: async (...args: unknown[]) => { calls.push(['email.overview', ...args]); return {}; },
+      overview: async (...args: unknown[]) => { calls.push(['email.overview', ...args]); return { messages: [{ bcc: ['overview-hidden@example.com'], body: 'safe' }] }; },
       searchInboxes: async (...args: unknown[]) => { calls.push(['email.searchInboxes', ...args]); return {}; },
       searchTones: async (...args: unknown[]) => { calls.push(['email.searchTones', ...args]); return {}; },
       sync: async (...args: unknown[]) => { calls.push(['email.sync', ...args]); return {}; },
@@ -115,8 +123,8 @@ describe('personal assistant service capabilities', () => {
       summarizeMessage: async (...args: unknown[]) => { calls.push(['email.summarizeMessage', ...args]); return { messageKey: threadKey, text: 'Summary.', summary: generated }; },
       listMessageSummaries: async (...args: unknown[]) => { calls.push(['email.listMessageSummaries', ...args]); return { messageKey: threadKey, summaries: [generated] }; },
       deleteMessageSummaries: async (...args: unknown[]) => { calls.push(['email.deleteMessageSummaries', ...args]); return { messageKey: threadKey, deletedKeys: [generated.key] }; },
-      draft: async (...args: unknown[]) => { calls.push(['email.draft', ...args]); return {}; },
-      draftNew: async (...args: unknown[]) => { calls.push(['email.draftNew', ...args]); return {}; },
+      draft: async (...args: unknown[]) => { calls.push(['email.draft', ...args]); return draftOutput; },
+      draftNew: async (...args: unknown[]) => { calls.push(['email.draftNew', ...args]); return draftOutput; },
       tones: async (...args: unknown[]) => { calls.push(['email.tones', ...args]); return {}; },
       createTone: async (...args: unknown[]) => { calls.push(['email.createTone', ...args]); return {}; },
       updateTone: async (...args: unknown[]) => { calls.push(['email.updateTone', ...args]); return {}; },
@@ -125,8 +133,8 @@ describe('personal assistant service capabilities', () => {
       createReplyContext: async (...args: unknown[]) => { calls.push(['email.createReplyContext', ...args]); return {}; },
       updateReplyContext: async (...args: unknown[]) => { calls.push(['email.updateReplyContext', ...args]); return {}; },
       deleteReplyContext: async (...args: unknown[]) => { calls.push(['email.deleteReplyContext', ...args]); return {}; },
-      updateDraft: async (...args: unknown[]) => { calls.push(['email.updateDraft', ...args]); return {}; },
-      assignDraft: async (...args: unknown[]) => { calls.push(['email.assignDraft', ...args]); return {}; },
+      updateDraft: async (...args: unknown[]) => { calls.push(['email.updateDraft', ...args]); return draftOutput; },
+      assignDraft: async (...args: unknown[]) => { calls.push(['email.assignDraft', ...args]); return draftOutput; },
       sendDraft: async (...args: unknown[]) => { calls.push(['email.sendDraft', ...args]); return {}; },
       deleteDraft: async (...args: unknown[]) => { calls.push(['email.deleteDraft', ...args]); return {}; },
     };
@@ -177,7 +185,7 @@ describe('personal assistant service capabilities', () => {
       ['signal-workspace', 'email.reply-context.create', { name: 'Availability', text: 'Never promise Friday meetings.' }],
       ['signal-workspace', 'email.reply-context.update', { noteKey: threadKey, text: 'Never promise Monday meetings.' }],
       ['signal-workspace', 'email.reply-context.delete', { noteKeys: [threadKey] }],
-      ['signal-workspace', 'email.draft.update', { draftKey, finalContent: 'Thanks.' }],
+      ['signal-workspace', 'email.draft.update', { draftKey, finalContent: 'Thanks.', attachments: [{ type: 'document', key: threadKey }] }],
       ['signal-workspace', 'email.draft.assign', { draftKey, connectorKey: threadKey }],
       ['signal-workspace', 'email.draft.send', { draftKey }],
       ['signal-workspace', 'email.draft.delete', { draftKey }],
@@ -189,6 +197,7 @@ describe('personal assistant service capabilities', () => {
     const outputs = new Map<string, unknown>();
     for (const [surface, capabilityName, input] of cases) outputs.set(capabilityName, await defaultAssistantCapabilityRegistry.resolve(surface).find(({ definition }) => definition.name === capabilityName)!.execute(input, context));
     for (const name of ['app.translate', 'email.message.translation.list', 'email.message.translation.delete', 'email.message.summarize', 'email.message.summary.list', 'email.message.summary.delete']) expect(JSON.stringify(outputs.get(name))).not.toMatch(/embedding|chunkEmbeddings|scopeKey|createdByKey/);
+    for (const name of ['email.overview', 'email.draft.create', 'email.draft.compose', 'email.draft.update', 'email.draft.assign']) expect(JSON.stringify(outputs.get(name))).not.toMatch(/bcc|hidden@example.com/i);
     const serviceContext = { organizationKey, scopeKey };
     const actor = { userKey, ...serviceContext };
     expect(calls).toContainEqual(['travel.overview', serviceContext, userKey]);
@@ -217,6 +226,7 @@ describe('personal assistant service capabilities', () => {
     expect(calls).toContainEqual(['email.createReplyContext', actor, { name: 'Availability', text: 'Never promise Friday meetings.' }, 'request-1']);
     expect(calls).toContainEqual(['email.updateReplyContext', actor, { noteKey: threadKey, text: 'Never promise Monday meetings.' }, 'request-1']);
     expect(calls).toContainEqual(['email.deleteReplyContext', actor, { noteKeys: [threadKey] }, 'request-1']);
+    expect(calls).toContainEqual(['email.updateDraft', actor, { draftKey, finalContent: 'Thanks.', attachments: [{ type: 'document', key: threadKey }] }, 'request-1']);
     expect(calls).toContainEqual(['books.progress', bookKey, chapterKey, { ...serviceContext, progressSeconds: 30, isCompleted: false }, userKey]);
     expect(calls).toContainEqual(['books.create', { ...serviceContext, generationRequestKey: 'request-1', topic: 'Decision making', goal: 'Decide well', audience: 'Leaders', tone: 'Clear', length: 'short', language: 'English' }, userKey]);
     expect(JSON.stringify(calls)).not.toContain((domain.principal as Extract<ToolContext['principal'], { kind: 'member' }>).userOrganization.key);

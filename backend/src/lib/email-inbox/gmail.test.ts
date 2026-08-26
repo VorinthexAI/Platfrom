@@ -1,8 +1,23 @@
 import { describe, expect, test } from 'bun:test';
 import { deterministicEmailClassification, emailLabelsVisibleInInbox, inboxCategoryFor } from './classification';
-import { buildGmailAuthorizationUrl, createGmailClient, decodeRfc2047Words, emailAddresses, emailAddressWithName, GmailApiError, isRetryableGmailError, messageBodies } from './gmail';
+import { buildGmailAuthorizationUrl, createGmailClient, decodeGmailAttachmentData, decodeRfc2047Words, discoverGmailAttachmentParts, emailAddresses, emailAddressWithName, gmailAttachmentParts, GmailApiError, GmailPermanentAttachmentError, isRetryableGmailError, MAX_GMAIL_ATTACHMENT_BYTES, MAX_GMAIL_ATTACHMENTS, messageBodies, normalizeGmailAttachmentFilename } from './gmail';
 
 describe('Gmail connector protocol', () => {
+  test('reports supported attachments omitted by the canonical count bound', () => {
+    const discovery = discoverGmailAttachmentParts({ mimeType: 'multipart/mixed', parts: Array.from({ length: MAX_GMAIL_ATTACHMENTS + 3 }, (_, index) => ({ mimeType: 'text/plain', filename: `${index}.txt`, body: { size: 1, data: 'YQ' } })) });
+    expect(discovery.parts).toHaveLength(MAX_GMAIL_ATTACHMENTS);
+    expect(discovery).toMatchObject({ truncated: true, unavailableCount: 3 });
+  });
+  test('reports unsupported attached leaves and MIME subtrees omitted by the node budget', () => {
+    expect(discoverGmailAttachmentParts({ mimeType: 'multipart/mixed', parts: [
+      { mimeType: 'application/zip', filename: 'archive.zip', body: { size: 10, data: 'AA' } },
+      { mimeType: 'text/plain', filename: 'notes.txt', body: { size: 1, data: 'YQ' } },
+    ] })).toMatchObject({ parts: [{ filename: 'notes.txt' }], truncated: true, unavailableCount: 1 });
+
+    const wide = discoverGmailAttachmentParts({ mimeType: 'multipart/mixed', parts: Array.from({ length: 10_001 }, () => ({ mimeType: 'multipart/alternative', parts: [] })) });
+    expect(wide.truncated).toBe(true);
+    expect(wide.unavailableCount).toBeGreaterThan(0);
+  });
   test('builds offline PKCE consent with permanent-delete scope for reconnects', () => {
     const url = new URL(buildGmailAuthorizationUrl({ state: 'state', nonce: 'nonce', codeChallenge: 'challenge' }, { GOOGLE_OAUTH_CLIENT_ID: 'client', GOOGLE_OAUTH_CLIENT_SECRET: 'secret', BACKEND_PUBLIC_URL: 'https://api.example.com' }));
     expect(url.searchParams.get('access_type')).toBe('offline');
@@ -35,6 +50,30 @@ describe('Gmail connector protocol', () => {
       { mimeType: 'text/plain', headers: [{ name: 'Content-Disposition', value: 'attachment; filename="notes.txt"' }], body: { data: encoded('Attached notes') } },
       { mimeType: 'text/plain', body: { data: encoded('Main body') } },
     ] })).toEqual({ text: 'Main body', hasAttachments: true, html: undefined });
+  });
+
+  test('assigns deterministic safe filenames to supported attachment dispositions without names', () => {
+    const payload = { mimeType: 'multipart/mixed', parts: [
+      { mimeType: 'application/pdf', headers: [{ name: 'Content-Disposition', value: 'attachment' }], body: { attachmentId: 'pdf-part', size: 12 } },
+      { mimeType: 'image/png', headers: [{ name: 'Content-Disposition', value: 'attachment;' }], body: { attachmentId: 'image-part', size: 8 } },
+    ] };
+    const first = gmailAttachmentParts(payload);
+    expect(first).toEqual(gmailAttachmentParts(payload));
+    expect(first).toMatchObject([
+      { path: '0.0', type: 'document', mimeType: 'application/pdf', filename: expect.stringMatching(/^attachment-[a-f0-9]{12}\.pdf$/) },
+      { path: '0.1', type: 'image', mimeType: 'image/png', filename: expect.stringMatching(/^attachment-[a-f0-9]{12}\.png$/) },
+    ]);
+    expect(new Set(first.map(({ filename }) => filename)).size).toBe(2);
+  });
+
+  test('canonicalizes untrusted attachment filenames before source binding', () => {
+    const fallback = normalizeGmailAttachmentFilename('../secret\u202epdf.exe', '0.1', 'application/pdf');
+    expect(fallback).toMatch(/^attachment-[a-f0-9]{12}\.pdf$/);
+    expect(normalizeGmailAttachmentFilename('quarterly-report.exe', '0.2', 'application/pdf')).toBe('quarterly-report.pdf');
+    expect(normalizeGmailAttachmentFilename('photo.png', '0.3', 'image/jpeg')).toBe('photo.jpg');
+    expect(normalizeGmailAttachmentFilename('CON.txt', '0.4', 'text/plain')).toMatch(/^attachment-[a-f0-9]{12}\.txt$/);
+    expect(normalizeGmailAttachmentFilename(`${'a'.repeat(256)}.pdf`, '0.5', 'application/pdf')).toMatch(/^attachment-[a-f0-9]{12}\.pdf$/);
+    expect(normalizeGmailAttachmentFilename('', '0.6', 'image/png')).toMatch(/^attachment-[a-f0-9]{12}\.png$/);
   });
 
   test('decodes declared MIME charsets with a safe UTF-8 fallback', () => {
@@ -70,7 +109,7 @@ describe('Gmail connector protocol', () => {
     expect(emailLabelsVisibleInInbox(['SENT'])).toBe(false);
   });
 
-  test('requests paginated inbox and incremental history without exposing tokens in URLs', async () => {
+  test('requests an authoritative all-mail snapshot and incremental history without exposing tokens in URLs', async () => {
     const requests: string[] = [];
     const bodies: unknown[] = [];
     const client = createGmailClient('private-access-token', (async (input: string | URL | Request, init?: RequestInit) => {
@@ -88,6 +127,8 @@ describe('Gmail connector protocol', () => {
     await client.listTrashMessages(999, 'trash-page');
     await client.batchDeleteMessages(['message-1', 'message-2']);
     await client.revoke();
+    expect(requests[0]).not.toContain('labelIds=');
+    expect(requests[0]).not.toContain('q=');
     expect(requests[0]).toContain('includeSpamTrash=true');
     expect(requests[0]).toContain('pageToken=next-page');
     expect(requests[1]).toContain('startHistoryId=history-1');
@@ -224,5 +265,115 @@ describe('Gmail connector protocol', () => {
     }) as unknown as typeof fetch);
     await expect(client.message('message-1')).rejects.toBeInstanceOf(RangeError);
     expect(calls).toBe(1);
+  });
+
+  test('enumerates supported attachment leaves with stable part paths and excludes alternatives and attached mail', () => {
+    const payload = { mimeType: 'multipart/mixed', parts: [
+      { mimeType: 'multipart/alternative', parts: [{ mimeType: 'text/plain', body: { data: 'QQ', size: 1 } }, { mimeType: 'text/html', body: { data: 'QQ', size: 1 } }] },
+      { mimeType: 'application/pdf', filename: 'same.pdf', body: { attachmentId: 'a', size: 5 } },
+      { mimeType: 'application/pdf', filename: 'same.pdf', body: { attachmentId: 'b', size: 6 } },
+      { mimeType: 'message/rfc822', filename: 'mail.eml', body: { attachmentId: 'c', size: 7 }, parts: [{ mimeType: 'image/png', filename: 'nested.png', body: { attachmentId: 'd', size: 8 } }] },
+      { mimeType: 'application/zip', filename: 'skip.zip', body: { attachmentId: 'e', size: 9 } },
+    ] };
+    expect(gmailAttachmentParts(payload)).toEqual([
+      { path: '0.1', type: 'document', mimeType: 'application/pdf', filename: 'same.pdf', size: 5, attachmentId: 'a' },
+      { path: '0.2', type: 'document', mimeType: 'application/pdf', filename: 'same.pdf', size: 6, attachmentId: 'b' },
+    ]);
+    expect(discoverGmailAttachmentParts(payload)).toMatchObject({ unavailableCount: 2, truncated: true });
+  });
+
+  test('traverses deeply nested MIME trees and recognizes every supported alias case-insensitively', () => {
+    const supported = [
+      ['APPLICATION/PDF; name=x', 'document', 'pdf'], ['text/plain; charset=utf-8', 'document', 'txt'],
+      ['text/markdown', 'document', 'md'], ['text/x-markdown', 'document', 'md'], ['application/msword', 'document', 'doc'],
+      ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'document', 'docx'],
+      ['IMAGE/JPEG; name=x', 'image', 'jpg'], ['image/jpg', 'image', 'jpg'], ['image/png', 'image', 'png'],
+      ['image/webp', 'image', 'webp'], ['image/gif', 'image', 'gif'],
+    ] as const;
+    const leaves = supported.map(([mimeType], index) => ({ mimeType, filename: `duplicate.bin`, body: { attachmentId: `id-${index}`, size: index + 1 } }));
+    const payload = { mimeType: 'multipart/mixed', parts: [{ mimeType: 'multipart/related', parts: [{ mimeType: 'multipart/mixed', parts: leaves }] }, { mimeType: 'message/rfc822; name=mail', filename: 'mail.eml', parts: [leaves[0]] }, { mimeType: 'application/zip', filename: 'skip.zip', body: { attachmentId: 'zip', size: 1 } }] };
+    expect(gmailAttachmentParts(payload)).toEqual(supported.map(([mimeType, type, extension], index) => ({ path: `0.0.0.${index}`, type, mimeType: mimeType.toLowerCase().split(';')[0], filename: `duplicate.${extension}`, size: index + 1, attachmentId: `id-${index}` })));
+  });
+
+  test('retains supported leaves with missing payload identifiers for typed permanent rejection', () => {
+    expect(gmailAttachmentParts({ mimeType: 'multipart/mixed', parts: [
+      { mimeType: 'text/plain', filename: 'missing.txt', body: { size: 3 } },
+      { mimeType: 'image/png', filename: 'invalid.png', body: {} },
+    ] })).toMatchObject([{ path: '0.0', size: 3 }, { path: '0.1', size: -1 }]);
+  });
+
+  test('bounds malformed MIME discovery and caps attachment count and advertised bytes deterministically', () => {
+    const attachment = (index: number, size = 1) => ({ mimeType: 'text/plain', filename: `part-${index}.txt`, body: { attachmentId: `id-${index}`, size } });
+    const many = gmailAttachmentParts({ mimeType: 'multipart/mixed', parts: Array.from({ length: 30 }, (_, index) => attachment(index)) });
+    expect(many).toHaveLength(MAX_GMAIL_ATTACHMENTS);
+    expect(many.map(({ attachmentId }) => attachmentId)).toEqual(Array.from({ length: MAX_GMAIL_ATTACHMENTS }, (_, index) => `id-${index}`));
+
+    const aggregate = gmailAttachmentParts({ mimeType: 'multipart/mixed', parts: [attachment(0, MAX_GMAIL_ATTACHMENT_BYTES - 1), attachment(1, 2), attachment(2, 1)] });
+    expect(aggregate.map(({ attachmentId }) => attachmentId)).toEqual(['id-0', 'id-2']);
+
+    let deep: any = attachment(999);
+    for (let index = 0; index < 150; index += 1) deep = { mimeType: 'multipart/mixed', parts: [deep] };
+    expect(gmailAttachmentParts(deep)).toEqual([]);
+    expect(gmailAttachmentParts({ mimeType: 'multipart/mixed', parts: Array.from({ length: 20_000 }, (_, index) => index === 9_998 ? attachment(index) : { mimeType: 'multipart/mixed' }) })).toHaveLength(1);
+  });
+
+  test('validates exact canonical base64url bytes and advertised size', () => {
+    expect(decodeGmailAttachmentData(Buffer.from('hello').toString('base64url'), 5)).toEqual(new TextEncoder().encode('hello'));
+    expect(decodeGmailAttachmentData('', 0)).toEqual(new Uint8Array());
+    expect(() => decodeGmailAttachmentData('a===', 1)).toThrow(GmailPermanentAttachmentError);
+    expect(() => decodeGmailAttachmentData(Buffer.from('hello').toString('base64url'), 4)).toThrow(GmailPermanentAttachmentError);
+    expect(() => decodeGmailAttachmentData('', 1)).toThrow(GmailPermanentAttachmentError);
+  });
+
+  test('accepts an inline zero-byte document without attempting a download', async () => {
+    let downloads = 0;
+    const client = createGmailClient('token', (async () => { downloads += 1; throw new Error('must not download'); }) as never);
+    await expect(client.attachment('message', { path: '0', type: 'document', mimeType: 'text/plain', filename: 'empty.txt', size: 0, data: '' })).resolves.toEqual(new Uint8Array());
+    expect(downloads).toBe(0);
+  });
+
+  test('covers canonical base64url edge cases and source size boundaries', () => {
+    for (const encoded of ['YQ', 'YQ==', 'YWI', 'YWI=']) expect(decodeGmailAttachmentData(encoded, encoded.startsWith('YQ') ? 1 : 2)).toBeInstanceOf(Uint8Array);
+    for (const encoded of ['A', 'YQ=', 'YWI==', 'YQ===', 'YQ+', 'YQ/', 'YR', ' YQ', 'YQ\n']) expect(() => decodeGmailAttachmentData(encoded, 1)).toThrow(GmailPermanentAttachmentError);
+    expect(() => decodeGmailAttachmentData('YQ', MAX_GMAIL_ATTACHMENT_BYTES)).toThrowError(expect.objectContaining({ code: 'ATTACHMENT_SIZE_MISMATCH' }));
+    expect(() => decodeGmailAttachmentData('YQ', MAX_GMAIL_ATTACHMENT_BYTES + 1)).toThrowError(expect.objectContaining({ code: 'ATTACHMENT_INVALID_SIZE' }));
+  });
+
+  test('enforces document source and image download size boundaries before processing bytes', async () => {
+    let downloads = 0;
+    const client = createGmailClient('token', (async () => { downloads += 1; return Response.json({ data: 'YQ' }); }) as unknown as typeof fetch);
+    const document = { path: '0', type: 'document' as const, mimeType: 'text/plain', filename: 'large.txt', attachmentId: 'document' };
+    await expect(client.attachment('message', { ...document, size: MAX_GMAIL_ATTACHMENT_BYTES })).rejects.toMatchObject({ code: 'ATTACHMENT_SIZE_MISMATCH' });
+    await expect(client.attachment('message', { ...document, size: MAX_GMAIL_ATTACHMENT_BYTES + 1 })).rejects.toMatchObject({ code: 'ATTACHMENT_INVALID_SIZE' });
+    const image = { path: '1', type: 'image' as const, mimeType: 'image/jpeg', filename: 'large.jpg', attachmentId: 'image' };
+    await expect(client.attachment('message', { ...image, size: 20 * 1024 * 1024 })).rejects.toMatchObject({ code: 'ATTACHMENT_SIZE_MISMATCH' });
+    await expect(client.attachment('message', { ...image, size: 20 * 1024 * 1024 + 1 })).rejects.toMatchObject({ code: 'ATTACHMENT_INVALID_SIZE' });
+    expect(downloads).toBe(3);
+  });
+
+  test('accepts JPEG, GIF87a, GIF89a, and WebP signatures and rejects MIME mismatches', async () => {
+    const cases = [
+      ['image/jpeg', Uint8Array.from([0xff, 0xd8, 0xff, 0xd9])], ['image/jpg', Uint8Array.from([0xff, 0xd8, 0xff, 0xd9])],
+      ['image/gif', new TextEncoder().encode('GIF87a-data')], ['image/gif', new TextEncoder().encode('GIF89a-data')],
+      ['image/webp', new TextEncoder().encode('RIFFxxxxWEBP')],
+    ] as const;
+    const client = createGmailClient('token', (async () => { throw new Error('inline data must not download'); }) as never);
+    for (const [mimeType, bytes] of cases) await expect(client.attachment('message', { path: '0', type: 'image', mimeType, filename: 'image.bin', size: bytes.byteLength, data: Buffer.from(bytes).toString('base64url') })).resolves.toEqual(bytes);
+    const jpeg = cases[0][1];
+    await expect(client.attachment('message', { path: '0', type: 'image', mimeType: 'image/png', filename: 'image.png', size: jpeg.byteLength, data: Buffer.from(jpeg).toString('base64url') })).rejects.toMatchObject({ code: 'ATTACHMENT_MALFORMED_PAYLOAD' });
+  });
+
+  test('normalizes Unicode, bidi, controls, paths, devices, and UTF-8 byte boundaries', () => {
+    const fallback = (value: string, path: string) => expect(normalizeGmailAttachmentFilename(value, path, 'application/pdf')).toMatch(/^attachment-[a-f0-9]{12}\.pdf$/);
+    expect(normalizeGmailAttachmentFilename('Cafe\u0301.PDF', '0.0', 'application/pdf')).toBe('Café.pdf');
+    for (const [index, value] of ['safe\u202efile.pdf', 'safe\u0000file.pdf', '../file.pdf', 'C:\\file.pdf', 'NUL', 'COM9.txt', '.', '..', 'trailing.'].entries()) fallback(value, `0.${index}`);
+    expect(normalizeGmailAttachmentFilename(`${'é'.repeat(125)}.txt`, '0.20', 'text/plain')).toBe(`${'é'.repeat(125)}.txt`);
+    fallback(`${'é'.repeat(126)}.txt`, '0.21');
+  });
+
+  test('permanently rejects image bytes that do not match the declared MIME signature', async () => {
+    const bytes = new TextEncoder().encode('not a png');
+    const client = createGmailClient('token', (async () => { throw new Error('must not download inline data'); }) as never);
+    await expect(client.attachment('message', { path: '0', type: 'image', mimeType: 'image/png', filename: 'image.png', size: bytes.byteLength, data: Buffer.from(bytes).toString('base64url') })).rejects.toMatchObject({ code: 'ATTACHMENT_MALFORMED_PAYLOAD', permanent: true });
   });
 });

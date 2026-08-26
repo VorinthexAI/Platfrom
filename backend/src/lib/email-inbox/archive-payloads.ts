@@ -13,8 +13,10 @@ export const emailAttachmentRefSchema = z.object({
   type: z.enum(['document', 'image']),
   key,
 }).strict();
-export const emailAttachmentRefsSchema = z.array(emailAttachmentRefSchema).max(20);
+export const emailAttachmentRefsSchema = z.array(emailAttachmentRefSchema).max(20)
+  .refine((refs) => new Set(refs.map(({ type, key }) => `${type}:${key}`)).size === refs.length, 'Attachment references must be distinct');
 export type EmailAttachmentRef = z.infer<typeof emailAttachmentRefSchema>;
+export const emailAttachmentAvailabilitySchema = z.enum(['none', 'complete', 'truncated', 'failed']);
 
 const threadDataSchema = z.object({
   accountKey: key,
@@ -62,6 +64,8 @@ const messageDataSchema = z.object({
   direction: z.enum(['inbound', 'outbound']),
   sentAt: z.string().datetime(),
   hasAttachments: z.boolean(),
+  attachmentAvailability: emailAttachmentAvailabilitySchema.default('none'),
+  unavailableAttachmentCount: z.number().int().min(1).max(10_000).optional(),
   attachments: emailAttachmentRefsSchema.optional(),
   embeddingContentVersion: z.union([z.literal(2), z.literal(3)]).optional(),
   inboxCategory: inboxCategorySchema.default('Important'),
@@ -96,7 +100,15 @@ const newDraftDataSchema = draftCommonSchema.extend({
   cc: z.array(address).max(50).optional(),
   bcc: z.array(address).max(50).optional(),
   subject: z.string().max(998),
-}).strict();
+}).strict().superRefine((draft, context) => {
+  const seen = new Map<string, 'to' | 'cc' | 'bcc'>();
+  for (const field of ['to', 'cc', 'bcc'] as const) for (const [index, address] of (draft[field] ?? []).entries()) {
+    const normalized = address.trim().toLocaleLowerCase('en-US');
+    const previous = seen.get(normalized);
+    if (previous) context.addIssue({ code: z.ZodIssueCode.custom, path: [field, index], message: previous === field ? `Duplicate ${field.toUpperCase()} recipient` : `Recipient is already present in ${previous.toUpperCase()}` });
+    else seen.set(normalized, field);
+  }
+});
 
 export const emailToneDataSchema = z.object({
   identifier: z.string().trim().min(1).max(255).optional(),

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { loadEmailTrashGroups } from "./email-trash-aggregation";
+import { clearableEmailTrashGroups, loadEmailTrashGroups } from "./email-trash-aggregation";
 
 const connector = (key: string) => ({ connectorKey: key, name: key }) as never;
 const thread = (key: string) => ({ key }) as never;
@@ -12,7 +12,7 @@ test("retains successful inbox Trash results and the actual error when another i
   }, () => true, (error) => (error as Error).message);
   expect(result).toEqual([
     { connector: connector("one"), threads: [thread("thread-one")] },
-    { connector: connector("two"), threads: [], error: "Reconnect Gmail with permanent-delete scope" },
+    { connector: connector("two"), threads: [], error: "Reconnect Gmail with permanent-delete scope", errorKind: "load" },
   ]);
 });
 
@@ -27,4 +27,15 @@ test("contains repeated cursors and page-limit overflow to the affected inbox", 
 test("stops without committing groups when ownership changes during a page", async () => {
   let current = true;
   expect(await loadEmailTrashGroups([connector("one")], async () => { current = false; return { threads: [thread("late")], nextCursor: null }; }, () => current, (error) => String(error))).toBeUndefined();
+});
+
+test("keeps provider-only Gmail Trash eligible when no local threads were loaded", () => {
+  const empty = { connector: connector("provider-only"), threads: [] };
+  const failed = { connector: connector("failed"), threads: [], error: "Reconnect Gmail" };
+  expect(clearableEmailTrashGroups([empty, failed])).toEqual([empty]);
+});
+
+test("keeps a transient provider clear failure eligible for retry in the current sheet", () => {
+  const failedClear = { connector: connector("retry"), threads: [thread("one")], error: "Provider unavailable", errorKind: "clear" as const };
+  expect(clearableEmailTrashGroups([failedClear])).toEqual([failedClear]);
 });

@@ -10,7 +10,7 @@ export type GalleryCollection = {
   key: string;
   name: string;
   description: string | null;
-  purpose: "place-media" | null;
+  purpose: "place-media" | "email-media" | null;
   mutationPolicy: "user" | "system-only";
   isFavorite: boolean;
   count: number;
@@ -91,7 +91,7 @@ export type GalleryOverview = {
 const galleryCollectionRoleSchema = z.enum(["owner", "collaborator", "viewer"]);
 const galleryCollectionAccessSchema = z.strictObject({ canRead: z.boolean(), canContribute: z.boolean(), canManage: z.boolean() });
 export const galleryCollectionSchema = z.strictObject({
-  key: z.string().min(1), name: z.string().min(1), description: z.string().nullable(), purpose: z.enum(["place-media"]).nullable(), mutationPolicy: z.enum(["user", "system-only"]),
+  key: z.string().min(1), name: z.string().min(1), description: z.string().nullable(), purpose: z.enum(["place-media", "email-media"]).nullable(), mutationPolicy: z.enum(["user", "system-only"]),
   isFavorite: z.boolean(), count: z.number().int().nonnegative(), coverUrl: z.string().min(1).nullable(), memberKey: z.string().min(1), isOwned: z.boolean().optional(),
   role: galleryCollectionRoleSchema, access: galleryCollectionAccessSchema, createdAt: z.iso.datetime(), updatedAt: z.iso.datetime(),
 });
@@ -462,9 +462,9 @@ export function fetchGalleryUploadStatus(uploadKeys: string[], timeout = 60_000)
   );
 }
 
-export function searchGalleryImages(input: { query?: string; imageKey?: string; identityKey?: string; duplicates?: true; collectionKey?: string; recordHistory?: boolean; limit?: number }, signal?: AbortSignal) {
+export function searchGalleryImages(input: { query?: string; imageKey?: string; identityKey?: string; duplicates?: true; collectionKey?: string; recordHistory?: boolean; limit?: number; minimumScore?: number }, signal?: AbortSignal) {
   if (input.query !== undefined) {
-    return searchApp({ query: input.query, collectionSlugs: ["images"], recordHistory: input.recordHistory ?? true, limit: Math.min(input.limit ?? 10, 50), ...(input.collectionKey ? { filters: { collectionKey: input.collectionKey } } : {}) }, signal)
+    return searchApp({ query: input.query, collectionSlugs: ["images"], recordHistory: input.recordHistory ?? true, limit: Math.min(input.limit ?? 10, 50), ...(input.minimumScore !== undefined ? { minimumScore: input.minimumScore } : {}), ...(input.collectionKey ? { filters: { collectionKey: input.collectionKey } } : {}) }, signal)
       .then((output) => ({ images: appSearchResults(output, "images", galleryImageSchema) }));
   }
   return postGallery<unknown>("/gallery/images/search", input, 4 * 60_000, signal).then((value) => z.strictObject({ images: z.array(galleryImageSchema) }).parse(value));

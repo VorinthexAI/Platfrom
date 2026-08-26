@@ -5,9 +5,10 @@ import type { classifyEmailWithFallback } from './classification';
 import { emailLabelsVisibleInInbox, inboxCategoryFor, type InboxCategory } from './classification';
 import type { EmailRepository } from './repository';
 import { latestEmailMessage } from './message-order';
+import type { StagedEmailAttachment } from './attachment-ingestion';
 
 type StoredFields = 'key' | 'threadKey' | 'createdAt' | 'updatedAt';
-type PreparedMessageInput = Omit<EmailMessage, StoredFields | 'embedding' | 'embeddingContentVersion' | 'inboxCategory' | 'unread'> & Partial<Pick<EmailMessage, StoredFields | 'unread'>>;
+type PreparedMessageInput = Omit<EmailMessage, StoredFields | 'embedding' | 'embeddingContentVersion' | 'inboxCategory' | 'unread' | 'attachmentAvailability'> & Partial<Pick<EmailMessage, StoredFields | 'unread' | 'attachmentAvailability'>>;
 type PreparedThreadInput = Omit<EmailThread, 'key' | 'createdAt' | 'updatedAt' | 'embedding' | 'embeddingContentVersion' | 'inboxCategory' | 'priority' | 'state' | 'category' | 'intent' | 'action' | 'labels' | 'starred' | 'isFavorite' | 'inInbox' | 'latestFrom' | 'lastMessageAt' | 'subject' | 'summary' | 'snippet' | 'unread'>;
 
 function summary(value: string) { return value.replace(/\s+/g, ' ').trim().slice(0, 400) || '(Empty message)'; }
@@ -41,6 +42,7 @@ export async function classifyEmbedAndPersistThread(input: {
   repository: Pick<EmailRepository, 'syncThread'>;
   lease: { kind: 'sync'; connectorKey: string; token: string };
   beforePersist: () => Promise<void>;
+  attachmentCommits?: StagedEmailAttachment[];
 }) {
   if (!input.messages.length) throw new Error('Email thread has no messages');
   if (new Set(input.messages.map(({ providerMessageId }) => providerMessageId)).size !== input.messages.length) throw new Error('Email provider thread contains duplicate message IDs');
@@ -97,5 +99,6 @@ export async function classifyEmbedAndPersistThread(input: {
     messages,
     reconcileMessages: input.reconcileMessages,
     lease: input.lease,
+    attachmentCommits: input.attachmentCommits,
   });
 }

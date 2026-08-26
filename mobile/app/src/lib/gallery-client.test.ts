@@ -80,8 +80,11 @@ test("identifies backend-managed place media without inferring it from names", (
 
 test("strictly parses managed collection and image policies with geo metadata", () => {
   const managedCollection = { ...collection("Compass", "managed"), purpose: "place-media" as const, mutationPolicy: "system-only" as const };
+  const emailCollection = { ...collection("Signal", "email-managed"), purpose: "email-media" as const, mutationPolicy: "system-only" as const };
   const managedImage = { ...image("managed", "managed.jpg", "Managed place"), latitude: 59.33, longitude: 18.07, locationSource: "place" as const, mutationPolicy: "system-only" as const };
   expect(galleryCollectionSchema.parse(managedCollection).mutationPolicy).toBe("system-only");
+  expect(galleryCollectionSchema.parse(emailCollection).purpose).toBe("email-media");
+  expect(galleryCollectionSchema.parse({ ...emailCollection, purpose: null }).purpose).toBeNull();
   expect(galleryImageSchema.parse(managedImage)).toMatchObject({ latitude: 59.33, longitude: 18.07, locationSource: "place", mutationPolicy: "system-only" });
   expect(galleryImageSchema.safeParse({ ...managedImage, forbidden: true }).success).toBe(false);
 });
@@ -135,6 +138,15 @@ test("sends collection-scoped semantic searches through the canonical endpoint",
     body: { organizationKey: "organization", scopeKey: "scope", query: "rain", collectionSlugs: ["images"], recordHistory: false, limit: 50, minimumScore: 0.55, filters: { collectionKey: "collection" } },
     timeout: 15_000,
   }]);
+});
+
+test("can request up to ten image matches without a score cutoff", async () => {
+  await searchGalleryImages({ query: "rain", recordHistory: false, limit: 10, minimumScore: -1 });
+
+  expect(calls[0]).toMatchObject({
+    path: "/app/search",
+    body: { query: "rain", collectionSlugs: ["images"], recordHistory: false, limit: 10, minimumScore: -1 },
+  });
 });
 
 test("passes image search cancellation to the transport", async () => {

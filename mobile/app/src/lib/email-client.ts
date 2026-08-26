@@ -38,13 +38,17 @@ export function toggleEmailOverviewFacet(query: EmailOverviewQuery, facet: Email
 }
 export const emailOverviewInputSchema = z.strictObject({
   connectorKey: keySchema.optional(),
-  filter: z.literal("trash").optional(),
+  filter: emailFilterSchema.optional(),
   readState: emailReadStateSchema.optional(),
   facets: z.array(emailFacetSchema).max(4).optional(),
-  cursor: z.string().min(1).optional(),
+  search: z.string().trim().max(200).optional(),
+  cursor: z.string().min(1).max(2_000).optional(),
   limit: z.number().int().min(1).max(50).optional(),
 }).superRefine((value, context) => {
-  if (value.filter && (value.readState || value.facets)) context.addIssue({ code: "custom", message: "Trash cannot be combined with inbox facets." });
+  const hasCompositeField = value.readState !== undefined || value.facets !== undefined;
+  if (value.filter !== undefined && hasCompositeField) context.addIssue({ code: "custom", message: "filter cannot be combined with composite overview fields" });
+  if (hasCompositeField && (value.readState === undefined || value.facets === undefined)) context.addIssue({ code: "custom", message: "readState and facets must be provided together" });
+  if (!value.connectorKey && (value.filter !== undefined || hasCompositeField || value.search !== undefined || value.cursor !== undefined || value.limit !== undefined)) context.addIssue({ code: "custom", message: "connectorKey is required for an overview query" });
 }).transform((value) => {
   if (value.filter || !value.readState && !value.facets) return value;
   const normalized = normalizeEmailOverviewQuery(value);
@@ -100,6 +104,17 @@ export const emailToneUpdateInputSchema = z.strictObject({
 }).refine((value) => value.name !== undefined || value.instruction !== undefined || value.isFavorite !== undefined, "Tone metadata is required.");
 export const emailAttachmentRefSchema = z.strictObject({ type: z.enum(["document", "image"]), key: keySchema });
 export type EmailAttachmentRef = z.infer<typeof emailAttachmentRefSchema>;
+export const emailAttachmentRefsSchema = z.array(emailAttachmentRefSchema).max(20)
+  .refine((refs) => new Set(refs.map(({ type, key }) => `${type}:${key}`)).size === refs.length, "Attachment references must be distinct.");
+export type EmailRetainedRequestKey = Readonly<{ fingerprint: string; requestKey: string }>;
+export function retainEmailRequestKey(current: EmailRetainedRequestKey | undefined, fingerprint: string, createRequestKey: () => string): EmailRetainedRequestKey {
+  return current?.fingerprint === fingerprint ? current : Object.freeze({ fingerprint, requestKey: createRequestKey() });
+}
+export const emailDraftUpdateInputSchema = z.strictObject({
+  finalContent: z.string().max(50_000).optional(),
+  attachments: emailAttachmentRefsSchema.optional(),
+}).refine((input) => input.finalContent !== undefined || input.attachments !== undefined, "Draft content or attachments are required.");
+export type EmailDraftUpdateInput = z.infer<typeof emailDraftUpdateInputSchema>;
 export const emailReplyModeSchema = z.enum(["reply", "reply_all"]);
 export type EmailReplyMode = z.infer<typeof emailReplyModeSchema>;
 export const emailAddressSchema = z.string().trim().email();
@@ -109,7 +124,7 @@ export const emailReplyDraftInputSchema = z.strictObject({
   replyMode: emailReplyModeSchema,
   tone: emailToneSchema,
   instruction: z.string().trim().min(1).max(1_000).optional(),
-  attachments: z.array(emailAttachmentRefSchema).max(20).optional(),
+  attachments: emailAttachmentRefsSchema.optional(),
 });
 export const emailComposeDraftInputSchema = z.strictObject({
   connectorKey: keySchema.optional(),
@@ -121,19 +136,24 @@ export const emailComposeDraftInputSchema = z.strictObject({
   authoredBody: z.string().max(50_000).optional(),
   tone: emailToneSchema.optional(),
   instruction: z.string().trim().min(1).max(1_000).optional(),
-  attachments: z.array(emailAttachmentRefSchema).max(20).optional(),
+  attachments: emailAttachmentRefsSchema.optional(),
 }).superRefine((input, context) => {
   if (input.generationMode === "generate" && !input.tone) context.addIssue({ code: "custom", path: ["tone"], message: "tone is required in generate mode" });
   if (input.generationMode === "preserve" && input.tone !== undefined) context.addIssue({ code: "custom", path: ["tone"], message: "tone is not allowed in preserve mode" });
   if (input.generationMode === "preserve" && input.authoredBody === undefined) context.addIssue({ code: "custom", path: ["authoredBody"], message: "authoredBody is required in preserve mode" });
+  const seen = new Map<string, "to" | "cc" | "bcc">();
+  for (const field of ["to", "cc", "bcc"] as const) for (const [index, address] of (input[field] ?? []).entries()) {
+    const normalized = address.trim().toLocaleLowerCase("en-US");
+    const previous = seen.get(normalized);
+    if (previous) context.addIssue({ code: "custom", path: [field, index], message: previous === field ? `Duplicate ${field.toUpperCase()} recipient` : `Recipient is already present in ${previous.toUpperCase()}` });
+    else seen.set(normalized, field);
+  }
 });
 export const emailAssignDraftInputSchema = z.strictObject({ draftKey: keySchema, connectorKey: keySchema });
 export type EmailReplyDraftInput = z.infer<typeof emailReplyDraftInputSchema>;
 export type EmailComposeDraftInput = z.input<typeof emailComposeDraftInputSchema>;
 
-export const emailProviderSchema = z.enum(["gmail", "outlook", "icloud"]);
-export type EmailProvider = z.infer<typeof emailProviderSchema>;
-const emailOAuthProviderSchema = z.enum(["gmail", "outlook"]);
+export const emailProviderSchema = z.literal("gmail");
 
 export const emailConnectorSchema = z.strictObject({
   key: keySchema, connectorKey: keySchema, provider: emailProviderSchema, email: z.string().email(), name: z.string().min(1), description: z.string().optional(), coverUrl: z.string().url().optional(), isFavorite: z.boolean(),
@@ -142,11 +162,6 @@ export const emailConnectorSchema = z.strictObject({
 });
 export type EmailConnector = z.infer<typeof emailConnectorSchema>;
 export const emailConnectionMetadataSchema = z.strictObject({ name: z.string().trim().min(1).max(255), description: z.string().trim().min(1).max(10_000).optional() });
-export const emailOAuthConnectionInputSchema = emailConnectionMetadataSchema.extend({ provider: emailOAuthProviderSchema }).strict();
-export const emailIcloudConnectionInputSchema = emailConnectionMetadataSchema.extend({
-  email: z.string().trim().email(),
-  appPassword: z.string().trim().min(1),
-}).strict();
 export const emailInboxUpdateInputSchema = z.strictObject({
   connectorKey: keySchema,
   name: z.string().trim().min(1).max(255).optional(),
@@ -163,12 +178,12 @@ export const emailThreadSchema = z.strictObject({
 }).refine((thread) => thread.unread === undefined || thread.unread === !thread.isRead, "Email read fields must agree.");
 export const emailMessageSchema = z.strictObject({
   key: keySchema, threadKey: keySchema, from: z.string().email(), fromName: z.string().trim().min(1).max(320).optional(), to: z.array(z.string().email()), cc: z.array(z.string().email()).optional(), bcc: z.array(z.string().email()).optional(),
-  subject: z.string().min(1), body: z.string().min(1), summary: z.string().min(1), replyTo: z.string().email().optional(), replyDepth: z.number().int().nonnegative().optional(), labels: z.array(z.string()).optional(), attachments: z.array(emailAttachmentRefSchema).optional(), direction: z.enum(["inbound", "outbound"]), sentAt: dateSchema, hasAttachments: z.boolean(), isRead: z.boolean(), unread: z.boolean(), inboxCategory: emailInboxCategorySchema, createdAt: dateSchema, updatedAt: dateSchema,
+  subject: z.string().min(1), body: z.string().min(1), summary: z.string().min(1), replyTo: z.string().email().optional(), replyDepth: z.number().int().nonnegative().optional(), labels: z.array(z.string()).optional(), attachments: emailAttachmentRefsSchema.optional(), attachmentAvailability: z.enum(["none", "complete", "truncated", "failed"]), unavailableAttachmentCount: z.number().int().min(1).max(10_000).optional(), direction: z.enum(["inbound", "outbound"]), sentAt: dateSchema, hasAttachments: z.boolean(), isRead: z.boolean(), unread: z.boolean(), inboxCategory: emailInboxCategorySchema, createdAt: dateSchema, updatedAt: dateSchema,
 }).refine((message) => message.unread === undefined || message.unread === !message.isRead, "Email read fields must agree.");
 const emailDraftBaseShape = {
-  key: keySchema, tone: emailToneSchema.optional(), instruction: z.string().optional(), attachments: z.array(emailAttachmentRefSchema).optional(), generatedContent: z.string(), finalContent: z.string().optional(), status: z.enum(["generated", "edited", "sending", "sent", "discarded"]), createdAt: dateSchema, updatedAt: dateSchema,
+  key: keySchema, tone: emailToneSchema.optional(), instruction: z.string().optional(), attachments: emailAttachmentRefsSchema.optional(), generatedContent: z.string(), finalContent: z.string().optional(), status: z.enum(["generated", "edited", "sending", "sent", "discarded"]), createdAt: dateSchema, updatedAt: dateSchema,
 };
-const emailNewDraftSchema = z.strictObject({ ...emailDraftBaseShape, variant: z.literal("new"), connectorKey: keySchema, to: emailAddressListSchema, cc: z.array(z.string().email()).max(50).optional(), bcc: z.array(z.string().email()).max(50).optional(), subject: z.string().max(998) });
+const emailNewDraftSchema = z.strictObject({ ...emailDraftBaseShape, variant: z.literal("new"), connectorKey: keySchema.optional(), to: emailAddressListSchema, cc: z.array(z.string().email()).max(50).optional(), bcc: z.array(z.string().email()).max(50).optional(), subject: z.string().max(998) });
 const emailReplyDraftSchema = z.strictObject({ ...emailDraftBaseShape, variant: z.literal("reply"), threadKey: keySchema, messageKey: keySchema, replyMode: emailReplyModeSchema, to: z.array(z.string().email()).max(50), cc: z.array(z.string().email()).max(50), emailWritingProfileKey: keySchema.optional() });
 export const emailDraftSchema = z.discriminatedUnion("variant", [emailNewDraftSchema, emailReplyDraftSchema]);
 
@@ -215,6 +230,7 @@ export type EmailSimilarResult = z.infer<typeof emailSimilarResultSchema>;
 export type EmailAssistantResponse = z.infer<typeof emailAssistantResponseSchema>;
 export const emailBulkThreadItemSchema = z.discriminatedUnion("status", [
   z.strictObject({ threadKey: keySchema, status: z.literal("succeeded"), thread: emailThreadSchema }),
+  z.strictObject({ threadKey: keySchema, status: z.literal("deleted"), error: z.string() }),
   z.strictObject({ threadKey: keySchema, status: z.enum(["failed", "repairPending"]), error: z.string().min(1) }),
 ]);
 export const emailBulkThreadReportSchema = z.strictObject({ requested: z.number().int().nonnegative(), succeeded: z.number().int().nonnegative(), failed: z.number().int().nonnegative(), repairPending: z.number().int().nonnegative(), items: z.array(emailBulkThreadItemSchema) }).refine((value) => value.requested === value.items.length && value.succeeded + value.failed + value.repairPending === value.requested, "Email mutation result counts must match its items.");
@@ -349,8 +365,9 @@ export function assignEmailDraftForContext(context: EmailContext, draftKey: stri
   const input = emailAssignDraftInputSchema.parse({ draftKey, connectorKey });
   return requestForContext(context, "post", `/email/drafts/${input.draftKey}/assign`, { connectorKey: input.connectorKey }, emailDraftSchema, undefined, idempotencyKey);
 }
-export function updateEmailDraft(draftKey: string, finalContent: string) { return request("patch", `/email/drafts/${keySchema.parse(draftKey)}`, { finalContent: z.string().max(50_000).parse(finalContent) }, emailDraftSchema); }
-export function updateEmailDraftForContext(context: EmailContext, draftKey: string, finalContent: string, idempotencyKey?: string) { return requestForContext(context, "patch", `/email/drafts/${keySchema.parse(draftKey)}`, { finalContent: z.string().max(50_000).parse(finalContent) }, emailDraftSchema, undefined, idempotencyKey); }
+function draftUpdateInput(input: string | EmailDraftUpdateInput) { return emailDraftUpdateInputSchema.parse(typeof input === "string" ? { finalContent: input } : input); }
+export function updateEmailDraft(draftKey: string, input: string | EmailDraftUpdateInput) { return request("patch", `/email/drafts/${keySchema.parse(draftKey)}`, draftUpdateInput(input), emailDraftSchema); }
+export function updateEmailDraftForContext(context: EmailContext, draftKey: string, input: string | EmailDraftUpdateInput, idempotencyKey?: string) { return requestForContext(context, "patch", `/email/drafts/${keySchema.parse(draftKey)}`, draftUpdateInput(input), emailDraftSchema, undefined, idempotencyKey); }
 export function deleteEmailDraftForContext(context: EmailContext, draftKey: string, idempotencyKey?: string) { return requestForContext(context, "delete", `/email/drafts/${keySchema.parse(draftKey)}`, {}, z.strictObject({ deletedKey: keySchema }), undefined, idempotencyKey); }
 export function sendEmailDraft(draftKey: string) { return request("post", `/email/drafts/${keySchema.parse(draftKey)}/send`, {}, z.object({ sent: z.literal(true), providerMessageId: z.string().min(1), draftKey: keySchema.optional(), threadKey: keySchema.optional() })); }
 const emailSendResultSchema = z.strictObject({ sent: z.literal(true), providerMessageId: z.string().min(1).optional(), draftKey: keySchema.optional(), threadKey: keySchema.optional(), messageKey: keySchema.optional() }).transform(({ providerMessageId: _providerMessageId, ...result }) => result);
@@ -395,9 +412,9 @@ export function exchangeEmailConnection(code: string) {
   return operation;
 }
 
-export async function launchEmailConnection(connection: z.input<typeof emailOAuthConnectionInputSchema>) {
-  const input = emailOAuthConnectionInputSchema.parse(connection);
-  const start = await request("post", "/email/connect", { returnUri: EMAIL_RETURN_URI, ...input }, z.strictObject({ authorizationUrl: z.string().url() }));
+export async function launchEmailConnection(connection: z.input<typeof emailConnectionMetadataSchema>) {
+  const input = emailConnectionMetadataSchema.parse(connection);
+  const start = await request("post", "/email/connect", { provider: "gmail", returnUri: EMAIL_RETURN_URI, ...input }, z.strictObject({ authorizationUrl: z.string().url() }));
   const result = await WebBrowser.openAuthSessionAsync(start.authorizationUrl, EMAIL_RETURN_URI);
   if (result.type !== "success") return null;
   const params = Linking.parse(result.url).queryParams ?? {};
@@ -406,8 +423,4 @@ export async function launchEmailConnection(connection: z.input<typeof emailOAut
   if (error) throw new Error("Email connection was not completed.");
   if (!code) throw new Error("The email provider returned an incomplete connection response.");
   return exchangeEmailConnection(code);
-}
-
-export function connectIcloudEmail(connection: z.input<typeof emailIcloudConnectionInputSchema>) {
-  return request("post", "/email/connect/icloud", emailIcloudConnectionInputSchema.parse(connection), emailConnectorSchema);
 }

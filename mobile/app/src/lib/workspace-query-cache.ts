@@ -12,6 +12,38 @@ export { compassQueryKeys } from "./compass-query-keys";
 export type { WorkspaceContext } from "./compass-query-keys";
 
 const contextKey = (context: WorkspaceContext) => [context.organizationKey, context.scopeKey] as const;
+const signalTombstones = new Map<string, Set<string>>();
+const signalTombstoneKey = (context: WorkspaceContext, connectorKey: string) => JSON.stringify([...contextKey(context), connectorKey]);
+
+export function tombstoneSignalThreadKeys(context: WorkspaceContext, connectorKey: string, threadKeys: readonly string[]) {
+  const key = signalTombstoneKey(context, connectorKey);
+  const tombstones = signalTombstones.get(key) ?? new Set<string>();
+  for (const threadKey of threadKeys) tombstones.add(threadKey);
+  if (tombstones.size) signalTombstones.set(key, tombstones);
+}
+
+export function clearSignalThreadTombstones(context: WorkspaceContext, connectorKey?: string) {
+  if (connectorKey) {
+    signalTombstones.delete(signalTombstoneKey(context, connectorKey));
+    return;
+  }
+  const prefix = JSON.stringify(contextKey(context)).slice(0, -1);
+  for (const key of signalTombstones.keys()) if (key.startsWith(prefix)) signalTombstones.delete(key);
+}
+
+export function isSignalThreadTombstoned(context: WorkspaceContext, connectorKey: string, threadKey: string) {
+  return signalTombstones.get(signalTombstoneKey(context, connectorKey))?.has(threadKey) === true;
+}
+
+export function filterSignalTombstonedThreads(context: WorkspaceContext, connectorKey: string, threads: readonly EmailThread[]) {
+  const tombstones = signalTombstones.get(signalTombstoneKey(context, connectorKey));
+  return tombstones?.size ? threads.filter(({ key }) => !tombstones.has(key)) : [...threads];
+}
+
+export function filterSignalTombstonedOverview(context: WorkspaceContext, connectorKey: string, overview: EmailOverview): EmailOverview {
+  const threads = filterSignalTombstonedThreads(context, connectorKey, overview.threads);
+  return threads.length === overview.threads.length ? overview : removeSignalOverviewThreadKeys(overview, overview.threads.filter((thread) => !threads.includes(thread)).map(({ key }) => key));
+}
 
 export const galleryQueryKeys = {
   all: (context: WorkspaceContext) => ["gallery", ...contextKey(context)] as const,
@@ -280,6 +312,7 @@ export function removeCachedGalleryImages(queryClient: QueryClient, context: Wor
 }
 
 export function patchSignalThread(queryClient: QueryClient, context: WorkspaceContext, connectorKey: string, thread: EmailThread) {
+  if (isSignalThreadTombstoned(context, connectorKey, thread.key)) return;
   queryClient.setQueriesData<EmailOverview>({ queryKey: signalQueryKeys.accountOverviews(context, connectorKey) }, (overview) => overview ? {
     ...overview,
     threads: overview.threads.map((candidate) => candidate.key === thread.key ? thread : candidate),
@@ -390,6 +423,8 @@ export function reconcileSignalOverviewThreads(overview: EmailOverview, updates:
 }
 
 export function reconcileSignalThreads(queryClient: QueryClient, context: WorkspaceContext, connectorKey: string, updates: readonly EmailThread[], pending?: SignalPendingThreadFields) {
+  updates = filterSignalTombstonedThreads(context, connectorKey, updates);
+  if (!updates.length) return { previous: new Map<string, EmailThread>(), updates: [] };
   const snapshots = queryClient.getQueriesData<EmailOverview>({ queryKey: signalQueryKeys.accountOverviews(context, connectorKey) });
   const previous = new Map<string, EmailThread>();
   for (const update of updates) {
@@ -441,12 +476,43 @@ export function reconcileSignalSelectedThreads(current: readonly EmailThread[], 
   return current.map((thread) => byKey.get(thread.key) ?? thread);
 }
 
+export function removeSignalOverviewThreadKeys(overview: EmailOverview, threadKeys: readonly string[], previousThreads: readonly EmailThread[] = []) {
+  const removed = new Set(threadKeys);
+  const previous = new Map(previousThreads.filter(({ key }) => removed.has(key)).map((thread) => [thread.key, thread]));
+  for (const thread of overview.threads) if (removed.has(thread.key)) previous.set(thread.key, thread);
+  const contribution = [...previous.values()].reduce((total, thread) => {
+    const counts = signalCountContribution(thread);
+    for (const key of Object.keys(total) as (keyof typeof total)[]) total[key] += counts[key];
+    return total;
+  }, { all: 0, important: 0, urgent: 0, needsAction: 0, filtered: 0, unread: 0, favorite: 0, trash: 0 });
+  return {
+    ...overview,
+    threads: overview.threads.filter(({ key }) => !removed.has(key)),
+    counts: Object.fromEntries(Object.entries(overview.counts).map(([key, count]) => [key, Math.max(0, count - (contribution[key as keyof typeof contribution] ?? 0))])) as EmailOverview["counts"],
+  };
+}
+
+export function removeSignalThreadKeys(queryClient: QueryClient, context: WorkspaceContext, connectorKey: string, threadKeys: readonly string[], previousThreads: readonly EmailThread[] = []) {
+  const removed = new Set(threadKeys);
+  const snapshots = queryClient.getQueriesData<EmailOverview>({ queryKey: signalQueryKeys.accountOverviews(context, connectorKey) });
+  const known = new Map(previousThreads.filter(({ key }) => removed.has(key)).map((thread) => [thread.key, thread]));
+  for (const [, overview] of snapshots) for (const thread of overview?.threads ?? []) if (removed.has(thread.key)) known.set(thread.key, thread);
+  for (const [queryKey, detail] of queryClient.getQueriesData<{ thread: EmailThread }>({ queryKey: signalQueryKeys.details(context) })) {
+    if (queryKey[4] === connectorKey && detail && removed.has(detail.thread.key)) known.set(detail.thread.key, detail.thread);
+  }
+  const baselines = [...known.values()];
+  for (const [queryKey, overview] of snapshots) if (overview) queryClient.setQueryData(queryKey, removeSignalOverviewThreadKeys(overview, threadKeys, baselines));
+  for (const threadKey of removed) queryClient.removeQueries({ queryKey: signalQueryKeys.detail(context, connectorKey, threadKey), exact: true });
+}
+
 export function reconcileSignalTrashedThread(queryClient: QueryClient, context: WorkspaceContext, connectorKey: string, result: EmailThread) {
   reconcileSignalThreads(queryClient, context, connectorKey, [result]);
   return result;
 }
 
 export type SignalTrashCacheRemoval = {
+  context: WorkspaceContext;
+  connectorKey: string;
   overviews: [QueryKey, { threads: EmailThread[]; trashCount: number; optimisticVersion: number }][];
   details: [QueryKey, { detail: { thread: EmailThread; messages?: unknown[] }; version: number }][];
 };
@@ -466,7 +532,7 @@ export function clearSignalTrashCaches(queryClient: QueryClient, context: Worksp
       details.push([queryKey, { detail, version: queryClient.getQueryState(queryKey)?.dataUpdateCount ?? 0 }]);
     }
   }
-  return { overviews, details };
+  return { context, connectorKey, overviews, details };
 }
 
 export function restoreSignalTrashCaches(queryClient: QueryClient, removal: SignalTrashCacheRemoval) {
@@ -476,18 +542,25 @@ export function restoreSignalTrashCaches(queryClient: QueryClient, removal: Sign
   for (const [queryKey, snapshot] of removal.overviews) queryClient.setQueryData<EmailOverview>(queryKey, (current) => {
     if (!current) return current;
     const existing = new Set(current.threads.map(({ key }) => key));
-    const restored = snapshot.threads.filter(({ key }) => !existing.has(key));
+    const restored = snapshot.threads.filter(({ key }) => !existing.has(key) && !isSignalThreadTombstoned(removal.context, removal.connectorKey, key));
     return {
       ...current,
       threads: [...current.threads, ...restored].sort((left, right) => right.lastMessageAt.localeCompare(left.lastMessageAt) || left.key.localeCompare(right.key)),
       counts: { ...current.counts, trash: Math.max(current.counts.trash + restored.length, snapshot.trashCount, current.threads.filter(signalThreadIsTrash).length + restored.length) },
     };
   });
-  for (const [queryKey, snapshot] of removal.details) queryClient.setQueryData(queryKey, (current: typeof snapshot.detail | undefined) => current ?? snapshot.detail);
+  for (const [queryKey, snapshot] of removal.details) if (!isSignalThreadTombstoned(removal.context, removal.connectorKey, snapshot.detail.thread.key)) queryClient.setQueryData(queryKey, (current: typeof snapshot.detail | undefined) => current ?? snapshot.detail);
   return true;
 }
 
-export function commitSignalTrashCaches(queryClient: QueryClient, removal: SignalTrashCacheRemoval) {
+export function commitSignalTrashCaches(queryClient: QueryClient, removal: SignalTrashCacheRemoval, successfullyClearedThreadKeys: readonly string[] = []) {
+  const deletedKeys = [...new Set([
+    ...successfullyClearedThreadKeys,
+    ...removal.overviews.flatMap(([, snapshot]) => snapshot.threads.map(({ key }) => key)),
+    ...removal.details.map(([, snapshot]) => snapshot.detail.thread.key),
+  ])];
+  tombstoneSignalThreadKeys(removal.context, removal.connectorKey, deletedKeys);
+  removeSignalThreadKeys(queryClient, removal.context, removal.connectorKey, deletedKeys);
   for (const [queryKey, snapshot] of removal.details) {
     if (queryClient.getQueryState(queryKey)?.dataUpdateCount === snapshot.version) queryClient.removeQueries({ queryKey, exact: true });
   }

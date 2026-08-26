@@ -40,6 +40,9 @@ import { documentSummarySchema, type DocumentSummary } from '@/lib/db/document-s
 import type { InboxCategory } from './classification';
 import { ORGANIZATION_CONNECTORS_COLLECTION } from './connector-schema';
 import { compareEmailMessages } from './message-order';
+import { IMAGE_COLLECTION_HIGHLIGHTS_COLLECTION } from '@/lib/db/image-collection-highlights.node';
+import { IMAGE_COLLECTION_MEMORIES_COLLECTION } from '@/lib/db/image-collection-memories.node';
+import type { StagedEmailAttachment } from './attachment-ingestion';
 
 type Database = Pick<typeof db, 'query' | 'collection'> & Partial<Pick<typeof db, 'beginTransaction'>>;
 const REPLY_CONTEXT_MAX_NOTES = 20;
@@ -150,11 +153,19 @@ export function createEmailRepository(database: Database = db) {
     throw new EmailRepositoryError('conflict', 'Generated email content changed concurrently; retry the operation');
   };
   const mailDeletion = async <T>(operation: (executor: Pick<typeof db, 'query'>) => Promise<T>, fenceConnector = false): Promise<T> => database.beginTransaction
-    ? withDatabaseTransaction<T>(database as typeof db, { read: [], write: ['documents', 'documentVersions', 'documentSummaries', 'documentSummaryAudio', 'documentAudioVersions', 'storageDeletionJobs', ...(fenceConnector ? [ORGANIZATION_CONNECTORS_COLLECTION] : [])] }, operation)
+    ? withDatabaseTransaction<T>(database as typeof db, { read: ['scopes', 'scopeMembers', 'userOrganizations'], write: ['folders', 'documents', 'documentVersions', 'documentSummaries', 'documentSummaryAudio', 'documentAudioVersions', 'emailAttachmentBindings', 'images', 'imageCaptions', 'collectionImages', 'imageIdentities', IMAGE_COLLECTION_MEMORIES_COLLECTION, IMAGE_COLLECTION_HIGHLIGHTS_COLLECTION, 'placeImages', 'collections', 'trips', 'inboxes', 'tagAssignments', 'shares', 'userHiddens', 'storageDeletionJobs', ...(fenceConnector ? [ORGANIZATION_CONNECTORS_COLLECTION] : [])] }, operation)
     : operation(database);
   const contentDeletion = async <T>(operation: (executor: Pick<typeof db, 'query'>) => Promise<T>): Promise<T> => database.beginTransaction
     ? withDatabaseTransaction<T>(database as typeof db, { read: [], write: ['documents', 'documentVersions', 'documentSummaries', 'documentSummaryAudio', 'documentAudioVersions', 'storageDeletionJobs'] }, operation)
     : operation(database);
+  const cleanAttachmentDocumentReferences = async (executor: Pick<typeof db, 'query'>, scopeKey: string, targetKeys: string[], updatedAt: string) => {
+    if (!targetKeys.length) return;
+    await executor.query(`FOR document IN documents FILTER document.scopeKey == @scopeKey LET payload = document.mutationPolicy == "system-only" ? JSON_PARSE(document.content) : null LET hasRefs = payload != null && payload.kind IN ["mail-reply-draft", "mail-new-draft"] && IS_ARRAY(payload.data.attachments) && LENGTH(FOR ref IN payload.data.attachments FILTER ref.key IN @targetKeys RETURN 1) > 0 LET hasCover = document.coverImageKey IN @targetKeys FILTER hasRefs || hasCover LET data = hasRefs ? MERGE(payload.data, { attachments: (FOR ref IN payload.data.attachments FILTER ref.key NOT IN @targetKeys RETURN ref) }) : null LET patch = MERGE(hasRefs ? { content: JSON_STRINGIFY(MERGE(payload, { data })) } : {}, hasCover ? { coverImageKey: null } : {}, { updatedAt: @updatedAt }) UPDATE document WITH patch IN documents OPTIONS { keepNull: false }`, { scopeKey, targetKeys, updatedAt });
+  };
+  const cleanOrphanAttachmentCaptions = async (executor: Pick<typeof db, 'query'>, captionKeys: string[]) => {
+    if (!captionKeys.length) return;
+    await executor.query('FOR caption IN imageCaptions FILTER caption._key IN @captionKeys FILTER LENGTH(FOR retained IN images FILTER retained.imageCaptionKey == caption._key LIMIT 1 RETURN 1) == 0 REMOVE caption IN imageCaptions', { captionKeys });
+  };
   const transactReplyContext = async <T>(operation: (trx: Pick<typeof db, 'query'>) => Promise<T>): Promise<T> => {
     if (database.beginTransaction) {
       for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -253,9 +264,10 @@ export function createEmailRepository(database: Database = db) {
     },
     async syncThread(input: {
       thread: Omit<EmailThread, 'key' | 'createdAt' | 'updatedAt'>;
-      messages: Array<Omit<EmailMessage, 'key' | 'threadKey' | 'createdAt' | 'updatedAt'>>;
+      messages: Array<Omit<EmailMessage, 'key' | 'threadKey' | 'createdAt' | 'updatedAt' | 'attachmentAvailability'> & Partial<Pick<EmailMessage, 'attachmentAvailability'>>>;
       reconcileMessages?: boolean;
       lease?: { kind: 'sync' | 'send'; connectorKey: string; token: string };
+      attachmentCommits?: StagedEmailAttachment[];
     }) {
       if (input.messages.some((message) => message.scopeKey !== input.thread.scopeKey || message.accountKey !== input.thread.accountKey)) {
         throw new EmailRepositoryError('conflict', 'Email thread and messages must belong to the same account and scope');
@@ -267,6 +279,7 @@ export function createEmailRepository(database: Database = db) {
       const threadPayload = emailThreadPayloadSchema.parse({ version: 1, kind: 'mail-thread', data: withoutRecordFields({ ...input.thread, key: threadKey, createdAt: timestamp, updatedAt: timestamp }) });
       const threadDocument = archiveDocument({ key: threadKey, scopeKey: input.thread.scopeKey, folderKey: folders.threads, name: input.thread.subject, payload: threadPayload, embedding: input.thread.embedding, createdAt: timestamp, updatedAt: timestamp });
       return mailDeletion(async (trx) => {
+        let attachmentMutation = { documentKeys: [] as string[], imageKeys: [] as string[], collectionKeys: [] as string[] };
         if (input.lease) {
           const tokenField = input.lease.kind === 'sync' ? 'syncLeaseToken' : 'sendLeaseToken';
           const expiryField = input.lease.kind === 'sync' ? 'syncLeaseExpiresAt' : 'sendLeaseExpiresAt';
@@ -301,20 +314,60 @@ export function createEmailRepository(database: Database = db) {
               UPDATE draft WITH { content: JSON_STRINGIFY(MERGE(payload, { data })), updatedAt: @timestamp } IN documents`, { draftKey: recoveredDraftKey, scopeKey: inputMessage.scopeKey, draftFolderKey: folders.drafts, providerMessageId: inputMessage.providerMessageId, timestamp });
           }
         }
+        for (const attachment of input.attachmentCommits ?? []) {
+          const relationKey = stableKey('email-attachment-collection-image', attachment.bindingKey);
+          const committed = await trx.query(`LET binding = DOCUMENT(emailAttachmentBindings, @bindingKey) FILTER binding != null && binding.status == "processing" && binding.leaseToken == @attachmentLeaseToken && binding.leaseExpiresAt > @timestamp FILTER binding.scopeKey == @scopeKey && binding.connectorKey == @accountKey && binding.targetType == @targetType && binding.targetKey == @targetKey LET member = DOCUMENT(userOrganizations, @membershipKey) LET scope = DOCUMENT(scopes, @scopeKey) LET scopeMember = FIRST(FOR item IN scopeMembers FILTER item.scopeKey == @scopeKey && item.userOrganizationKey == @membershipKey && item.status == "active" LIMIT 1 RETURN item) FILTER member != null && member.status == "active" && scope != null && member.organizationId == scope.organizationKey && (member.orgRole IN ["owner", "admin"] || scopeMember != null) LET target = @targetType == "document" ? DOCUMENT(documents, @targetKey) : DOCUMENT(images, @targetKey) LET collection = @targetType == "image" ? DOCUMENT(collections, @collectionKey) : null FILTER target != null && target.scopeKey == @scopeKey FILTER (@targetType == "document" && target.managedPurpose == "mail-attachment" && target.managedOwnerKey == @bindingKey) || (@targetType == "image" && @targetKey == CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "email-attachment-target", @bindingKey)), 24)) && target.mutationPolicy == "system-only" && collection != null && collection.scopeKey == @scopeKey && collection.purpose == "email-media" && collection.mutationPolicy == "system-only") LET relation = @targetType == "image" ? FIRST(UPSERT { scopeKey: @scopeKey, collectionKey: @collectionKey, imageKey: @targetKey } INSERT { _key: @relationKey, scopeKey: @scopeKey, collectionKey: @collectionKey, imageKey: @targetKey, addedByKey: @membershipKey, createdAt: @timestamp } UPDATE {} IN collectionImages RETURN NEW) : null UPDATE binding WITH { status: "completed", leaseToken: null, leaseExpiresAt: null, updatedAt: @timestamp } IN emailAttachmentBindings OPTIONS { keepNull: false } RETURN true`, { bindingKey: attachment.bindingKey, attachmentLeaseToken: attachment.leaseToken, scopeKey: input.thread.scopeKey, accountKey: input.thread.accountKey, targetType: attachment.targetType, targetKey: attachment.targetKey, collectionKey: attachment.collectionKey ?? null, membershipKey: attachment.membershipKey, relationKey, timestamp });
+          if (await committed.next() !== true) throw new EmailRepositoryError('conflict', 'Attachment staging lease or target changed before mail persistence');
+        }
         if (input.reconcileMessages !== false) {
           const keep = input.messages.map(({ providerMessageId }) => stableKey('mail-message', input.thread.scopeKey, input.thread.accountKey, providerMessageId));
-          await trx.query(`LET stale = (FOR document IN documents FILTER document.scopeKey == @scopeKey && document.folderKey == @folderKey && document.mutationPolicy == "system-only" && document._key NOT IN @keep LET payload = JSON_PARSE(document.content) FILTER payload.version == 1 && payload.kind == "mail-message" && payload.data.threadKey == @threadKey RETURN document)
+          const cleanupCursor = await trx.query(`LET stale = (FOR document IN documents FILTER document.scopeKey == @scopeKey && document.folderKey == @folderKey && document.mutationPolicy == "system-only" && document._key NOT IN @keep LET payload = JSON_PARSE(document.content) FILTER payload.version == 1 && payload.kind == "mail-message" && payload.data.threadKey == @threadKey RETURN document)
             LET staleKeys = stale[*]._key
-            LET summaryKeys = (FOR summary IN documentSummaries FILTER summary.scopeKey == @scopeKey && summary.documentKey IN staleKeys RETURN summary._key)
-            LET summaryAudioStorageKeys = UNIQUE(FOR audio IN documentSummaryAudio FILTER audio.scopeKey == @scopeKey && audio.summaryKey IN summaryKeys && IS_STRING(audio.storageKey) RETURN audio.storageKey)
-            LET jobs = (FOR storageKey IN summaryAudioStorageKeys UPSERT { storageKey } INSERT { storageKey, createdAt: @timestamp } UPDATE {} IN storageDeletionJobs RETURN 1)
-            LET removedSummaryAudio = (FOR audio IN documentSummaryAudio FILTER audio.scopeKey == @scopeKey && audio.summaryKey IN summaryKeys REMOVE audio IN documentSummaryAudio RETURN 1)
-            LET removedSummaries = (FOR summary IN documentSummaries FILTER summary.scopeKey == @scopeKey && summary.documentKey IN staleKeys REMOVE summary IN documentSummaries RETURN 1)
-            LET removedVersions = (FOR version IN documentVersions FILTER version.scopeKey == @scopeKey && version.documentKey IN staleKeys REMOVE version IN documentVersions RETURN 1)
-            LET removedAudioVersions = (FOR audio IN documentAudioVersions FILTER audio.scopeKey == @scopeKey && audio.documentKey IN staleKeys REMOVE audio IN documentAudioVersions RETURN 1)
-             FOR document IN stale REMOVE document IN documents`, { scopeKey: input.thread.scopeKey, folderKey: folders.threads, threadKey, keep, timestamp });
+            LET staleProviderMessageIds = (FOR document IN stale LET payload = JSON_PARSE(document.content) FILTER payload.kind == "mail-message" RETURN payload.data.providerMessageId)
+            LET attachmentBindings = (FOR binding IN emailAttachmentBindings FILTER binding.scopeKey == @scopeKey && binding.connectorKey == @accountKey && binding.providerMessageId IN staleProviderMessageIds RETURN binding)
+            LET attachmentDocuments = (FOR binding IN attachmentBindings FILTER binding.targetType == "document" LET document = DOCUMENT(documents, binding.targetKey) FILTER document != null && document.scopeKey == @scopeKey && document.managedPurpose == "mail-attachment" && document.managedOwnerKey == binding._key RETURN document)
+            LET attachmentDocumentKeys = attachmentDocuments[*]._key
+            LET attachmentImages = (FOR binding IN attachmentBindings FILTER binding.targetType == "image" && binding.targetKey == CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "email-attachment-target", binding._key)), 24)) LET image = DOCUMENT(images, binding.targetKey) FILTER image != null && image.scopeKey == @scopeKey && image.mutationPolicy == "system-only" RETURN image)
+            LET attachmentTargetKeys = UNION(attachmentDocumentKeys, attachmentImages[*]._key)
+            LET affectedCollectionKeys = UNIQUE(UNION((FOR relation IN collectionImages FILTER relation.imageKey IN attachmentImages[*]._key RETURN relation.collectionKey), (FOR highlight IN imageCollecitionHightlights FILTER highlight.scopeKey == @scopeKey && LENGTH(INTERSECTION(highlight.imageKeys, attachmentImages[*]._key)) > 0 RETURN highlight.collectionKey), (FOR collection IN collections FILTER collection.scopeKey == @scopeKey && collection.coverImageKey IN attachmentImages[*]._key RETURN collection._key)))
+            LET attachmentRefDocuments = (FOR document IN documents FILTER document.scopeKey == @scopeKey && document.mutationPolicy == "system-only" LET payload = JSON_PARSE(document.content) FILTER payload.kind IN ["mail-reply-draft", "mail-new-draft"] && IS_ARRAY(payload.data.attachments) && LENGTH(FOR ref IN payload.data.attachments FILTER ref.key IN attachmentTargetKeys RETURN 1) > 0 RETURN { document, payload })
+            LET attachmentCoverDocuments = (FOR document IN documents FILTER document.scopeKey == @scopeKey && document.coverImageKey IN attachmentImages[*]._key RETURN document)
+            LET cleanedAttachmentRefs = []
+            LET dependentDocumentKeys = UNION(staleKeys, attachmentDocumentKeys)
+            LET summaryKeys = (FOR summary IN documentSummaries FILTER summary.scopeKey == @scopeKey && summary.documentKey IN dependentDocumentKeys RETURN summary._key)
+            LET candidateStorageKeys = UNIQUE(FLATTEN(UNION((FOR document IN documents FILTER document._key IN dependentDocumentKeys RETURN UNION(IS_STRING(document.storageKey) ? [document.storageKey] : [], IS_ARRAY(document.sourceStorageKeys) ? document.sourceStorageKeys : [], IS_ARRAY(document.speechStorageKeys) ? document.speechStorageKeys : [])), (FOR image IN attachmentImages FILTER IS_STRING(image.storageKey) RETURN image.storageKey), (FOR version IN documentVersions FILTER version.scopeKey == @scopeKey && version.documentKey IN dependentDocumentKeys && IS_STRING(version.storageKey) RETURN version.storageKey), (FOR audio IN documentAudioVersions FILTER audio.scopeKey == @scopeKey && audio.documentKey IN dependentDocumentKeys && IS_STRING(audio.storageKey) RETURN audio.storageKey), (FOR audio IN documentSummaryAudio FILTER audio.scopeKey == @scopeKey && (audio.documentKey IN dependentDocumentKeys || audio.summaryKey IN summaryKeys) && IS_STRING(audio.storageKey) RETURN audio.storageKey)), 2))
+            LET attachmentStorageKeys = (FOR storageKey IN candidateStorageKeys FILTER LENGTH(FOR document IN documents FILTER document._key NOT IN dependentDocumentKeys && (document.storageKey == storageKey || storageKey IN (document.sourceStorageKeys || []) || storageKey IN (document.speechStorageKeys || [])) LIMIT 1 RETURN 1) == 0 FILTER LENGTH(FOR image IN images FILTER image._key NOT IN attachmentImages[*]._key && image.storageKey == storageKey LIMIT 1 RETURN 1) == 0 FILTER LENGTH(FOR version IN documentVersions FILTER version.documentKey NOT IN dependentDocumentKeys && version.storageKey == storageKey LIMIT 1 RETURN 1) == 0 FILTER LENGTH(FOR audio IN documentAudioVersions FILTER audio.documentKey NOT IN dependentDocumentKeys && audio.storageKey == storageKey LIMIT 1 RETURN 1) == 0 FILTER LENGTH(FOR audio IN documentSummaryAudio FILTER audio.documentKey NOT IN dependentDocumentKeys && audio.summaryKey NOT IN summaryKeys && audio.storageKey == storageKey LIMIT 1 RETURN 1) == 0 RETURN storageKey)
+            LET attachmentJobs = []
+            LET removedAttachmentRelations = (FOR relation IN collectionImages FILTER relation.imageKey IN attachmentImages[*]._key REMOVE relation IN collectionImages RETURN 1)
+            LET removedAttachmentIdentities = (FOR relation IN imageIdentities FILTER relation.imageKey IN attachmentImages[*]._key REMOVE relation IN imageIdentities RETURN 1)
+            LET removedAttachmentMemories = (FOR memory IN imageCollectionMemories FILTER memory.scopeKey == @scopeKey && memory.imageKey IN attachmentImages[*]._key REMOVE memory IN imageCollectionMemories RETURN 1)
+            LET cleanedAttachmentHighlights = (FOR highlight IN imageCollecitionHightlights FILTER highlight.scopeKey == @scopeKey && LENGTH(INTERSECTION(highlight.imageKeys, attachmentImages[*]._key)) > 0 UPDATE highlight WITH { imageKeys: MINUS(highlight.imageKeys, attachmentImages[*]._key), updatedAt: @timestamp } IN imageCollecitionHightlights RETURN 1)
+            LET removedAttachmentPlaces = (FOR relation IN placeImages FILTER relation.scopeKey == @scopeKey && relation.imageKey IN attachmentImages[*]._key REMOVE relation IN placeImages RETURN 1)
+            LET cleanedAttachmentFolders = (FOR folder IN folders FILTER folder.scopeKey == @scopeKey && folder.coverImageKey IN attachmentImages[*]._key UPDATE folder WITH { coverImageKey: null, updatedAt: @timestamp } IN folders OPTIONS { keepNull: false } RETURN 1)
+            LET cleanedAttachmentCollections = (FOR collection IN collections FILTER collection.scopeKey == @scopeKey && collection.coverImageKey IN attachmentImages[*]._key UPDATE collection WITH { coverImageKey: null, updatedAt: @timestamp } IN collections OPTIONS { keepNull: false } RETURN 1)
+            LET cleanedAttachmentTrips = (FOR trip IN trips FILTER trip.scopeKey == @scopeKey && trip.coverImageKey IN attachmentImages[*]._key UPDATE trip WITH { coverImageKey: null, updatedAt: @timestamp } IN trips OPTIONS { keepNull: false } RETURN 1)
+            LET cleanedAttachmentInboxes = (FOR inbox IN inboxes FILTER inbox.scopeKey == @scopeKey && inbox.coverImageKey IN attachmentImages[*]._key UPDATE inbox WITH { coverImageKey: null, updatedAt: @timestamp } IN inboxes OPTIONS { keepNull: false } RETURN 1)
+            LET cleanedAttachmentCovers = []
+            LET removedAttachmentTags = (FOR assignment IN tagAssignments FILTER assignment.scopeKey == @scopeKey && assignment.sourceType == "image" && assignment.sourceKey IN attachmentImages[*]._key REMOVE assignment IN tagAssignments RETURN 1)
+            LET removedAttachmentShares = (FOR share IN shares FILTER share.scopeKey == @scopeKey && share.sourceType == "image" && share.sourceKey IN attachmentImages[*]._key REMOVE share IN shares RETURN 1)
+            LET removedAttachmentHiddens = (FOR hidden IN userHiddens FILTER hidden.source == "image" && hidden.sourceKey IN attachmentImages[*]._key REMOVE hidden IN userHiddens RETURN 1)
+            LET removedAttachmentImages = (FOR image IN attachmentImages REMOVE image IN images RETURN 1)
+            LET removedAttachmentCaptions = []
+            LET removedAttachmentDocuments = []
+            LET removedAttachmentBindings = (FOR binding IN attachmentBindings REMOVE binding IN emailAttachmentBindings RETURN 1)
+            LET jobs = (FOR storageKey IN attachmentStorageKeys UPSERT { storageKey } INSERT { storageKey, createdAt: @timestamp } UPDATE {} IN storageDeletionJobs RETURN 1)
+            LET removedSummaryAudio = (FOR audio IN documentSummaryAudio FILTER audio.scopeKey == @scopeKey && (audio.documentKey IN dependentDocumentKeys || audio.summaryKey IN summaryKeys) REMOVE audio IN documentSummaryAudio RETURN 1)
+            LET removedSummaries = (FOR summary IN documentSummaries FILTER summary.scopeKey == @scopeKey && summary.documentKey IN dependentDocumentKeys REMOVE summary IN documentSummaries RETURN 1)
+            LET removedVersions = (FOR version IN documentVersions FILTER version.scopeKey == @scopeKey && version.documentKey IN dependentDocumentKeys REMOVE version IN documentVersions RETURN 1)
+            LET removedAudioVersions = (FOR audio IN documentAudioVersions FILTER audio.scopeKey == @scopeKey && audio.documentKey IN dependentDocumentKeys REMOVE audio IN documentAudioVersions RETURN 1)
+            LET removedDocuments = (FOR document IN UNION_DISTINCT(attachmentDocuments, stale) REMOVE document IN documents RETURN 1)
+            RETURN { attachmentTargetKeys, attachmentDocumentKeys, attachmentImageKeys: attachmentImages[*]._key, affectedCollectionKeys, attachmentCaptionKeys: attachmentImages[*].imageCaptionKey }`, { scopeKey: input.thread.scopeKey, folderKey: folders.threads, threadKey, accountKey: input.thread.accountKey, keep, timestamp });
+          const cleanup = await cleanupCursor.next() as { attachmentTargetKeys: string[]; attachmentDocumentKeys: string[]; attachmentImageKeys: string[]; affectedCollectionKeys: string[]; attachmentCaptionKeys: string[] } | undefined;
+          await cleanAttachmentDocumentReferences(trx, input.thread.scopeKey, cleanup?.attachmentTargetKeys ?? [], timestamp);
+          await cleanOrphanAttachmentCaptions(trx, cleanup?.attachmentCaptionKeys ?? []);
+          attachmentMutation = { documentKeys: cleanup?.attachmentDocumentKeys ?? [], imageKeys: cleanup?.attachmentImageKeys ?? [], collectionKeys: cleanup?.affectedCollectionKeys ?? [] };
         }
-        return thread;
+        return Object.assign(thread, { attachmentMutation });
       }, Boolean(input.lease));
     },
     async overview(scopeKey: string, connectorKey: string, query: EmailOverviewRepositoryQuery) {
@@ -431,7 +484,7 @@ export function createEmailRepository(database: Database = db) {
             LET labels = @mutation == "favorite" ? (@enabled ? PUSH(payload.data.labels || [], "STARRED", true) : REMOVE_VALUE(payload.data.labels || [], "STARRED")) : @mutation == "read-state" ? (@enabled ? REMOVE_VALUE(payload.data.labels || [], "UNREAD") : PUSH(payload.data.labels || [], "UNREAD", true)) : PUSH(payload.data.labels || [], "TRASH", true)
             LET data = @mutation == "read-state" ? MERGE(payload.data, { unread: !@enabled, labels }) : MERGE(payload.data, { labels })
             UPDATE document WITH { content: JSON_STRINGIFY(MERGE(payload, { data })), updatedAt: @updatedAt } IN documents RETURN 1)
-          LET threadData = @mutation == "favorite" ? MERGE(threadPayload.data, { isFavorite: @enabled, starred: @enabled, labels: threadLabels }) : @mutation == "read-state" ? MERGE(threadPayload.data, { unread: !@enabled, labels: threadLabels }) : MERGE(threadPayload.data, { inInbox: true, labels: threadLabels })
+          LET threadData = @mutation == "favorite" ? MERGE(threadPayload.data, { isFavorite: @enabled, starred: @enabled, labels: threadLabels }) : @mutation == "read-state" ? MERGE(threadPayload.data, { unread: !@enabled, starred: "STARRED" IN threadLabels, isFavorite: "STARRED" IN threadLabels, labels: threadLabels }) : MERGE(threadPayload.data, { inInbox: true, labels: threadLabels })
           UPDATE thread WITH { content: JSON_STRINGIFY(MERGE(threadPayload, { data: threadData })), updatedAt: @updatedAt } IN documents RETURN NEW`, {
           '@connectors': ORGANIZATION_CONNECTORS_COLLECTION, connectorKey: input.lease.connectorKey, leaseToken: input.lease.token,
           scopeKey: input.scopeKey, folderKey: mailFolderKeys(input.scopeKey).threads, accountKey: input.accountKey, threadKey: input.threadKey, mutation, enabled, updatedAt,
@@ -455,18 +508,50 @@ export function createEmailRepository(database: Database = db) {
           LET threads = (FOR document IN documents FILTER document._key IN emptyThreadKeys && document.scopeKey == @scopeKey && document.folderKey == @threadFolderKey && document.mutationPolicy == "system-only" LET payload = JSON_PARSE(document.content) FILTER payload.version == 1 && payload.kind == "mail-thread" && payload.data.accountKey == @accountKey RETURN document)
           LET drafts = (FOR document IN documents FILTER document.scopeKey == @scopeKey && document.folderKey == @draftFolderKey && document.mutationPolicy == "system-only" LET payload = JSON_PARSE(document.content) FILTER payload.version == 1 && payload.kind == "mail-reply-draft" && payload.data.threadKey IN emptyThreadKeys RETURN document)
           LET stale = UNION(trashedMessages[*].document, threads, drafts)
-          LET staleKeys = stale[*]._key
-          LET summaryKeys = (FOR summary IN documentSummaries FILTER summary.scopeKey == @scopeKey && summary.documentKey IN staleKeys RETURN summary._key)
-          LET summaryAudioStorageKeys = UNIQUE(FOR audio IN documentSummaryAudio FILTER audio.scopeKey == @scopeKey && audio.summaryKey IN summaryKeys && IS_STRING(audio.storageKey) RETURN audio.storageKey)
-          LET jobs = (FOR storageKey IN summaryAudioStorageKeys UPSERT { storageKey } INSERT { storageKey, createdAt: @checkedAt } UPDATE {} IN storageDeletionJobs RETURN 1)
-          LET removedSummaryAudio = (FOR audio IN documentSummaryAudio FILTER audio.scopeKey == @scopeKey && audio.summaryKey IN summaryKeys REMOVE audio IN documentSummaryAudio RETURN 1)
-          LET removedSummaries = (FOR summary IN documentSummaries FILTER summary.scopeKey == @scopeKey && summary.documentKey IN staleKeys REMOVE summary IN documentSummaries RETURN 1)
-          LET removedVersions = (FOR version IN documentVersions FILTER version.scopeKey == @scopeKey && version.documentKey IN staleKeys REMOVE version IN documentVersions RETURN 1)
-          LET removedAudioVersions = (FOR audio IN documentAudioVersions FILTER audio.scopeKey == @scopeKey && audio.documentKey IN staleKeys REMOVE audio IN documentAudioVersions RETURN 1)
-          LET removedDocuments = (FOR document IN stale REMOVE document IN documents RETURN 1)
-          RETURN { threadsDeleted: LENGTH(threads), documentsDeleted: LENGTH(stale), survivingThreadKeys: MINUS(threadKeys, emptyThreadKeys) }`, { '@connectors': ORGANIZATION_CONNECTORS_COLLECTION, connectorKey: input.lease.connectorKey, leaseToken: input.lease.token, checkedAt, scopeKey: input.scopeKey, threadFolderKey: mailFolderKeys(input.scopeKey).threads, draftFolderKey: mailFolderKeys(input.scopeKey).drafts, accountKey: input.accountKey, providerMessageIds: input.providerMessageIds, trashSnapshotAt: input.trashSnapshotAt });
-        const result = await cursor.next() as { threadsDeleted: number; documentsDeleted: number; survivingThreadKeys: string[] } | undefined;
-        if (!result) throw new EmailRepositoryError('conflict', 'Email connector lease was lost before clearing Trash');
+           LET staleKeys = stale[*]._key
+           LET staleProviderMessageIds = trashedMessages[*].data.providerMessageId
+           LET attachmentBindings = (FOR binding IN emailAttachmentBindings FILTER binding.scopeKey == @scopeKey && binding.connectorKey == @accountKey && binding.providerMessageId IN staleProviderMessageIds RETURN binding)
+           LET attachmentDocuments = (FOR binding IN attachmentBindings FILTER binding.targetType == "document" LET document = DOCUMENT(documents, binding.targetKey) FILTER document != null && document.scopeKey == @scopeKey && document.managedPurpose == "mail-attachment" && document.managedOwnerKey == binding._key RETURN document)
+           LET attachmentDocumentKeys = attachmentDocuments[*]._key
+           LET attachmentImages = (FOR binding IN attachmentBindings FILTER binding.targetType == "image" && binding.targetKey == CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "email-attachment-target", binding._key)), 24)) LET image = DOCUMENT(images, binding.targetKey) FILTER image != null && image.scopeKey == @scopeKey && image.mutationPolicy == "system-only" RETURN image)
+           LET attachmentTargetKeys = UNION(attachmentDocumentKeys, attachmentImages[*]._key)
+           LET affectedCollectionKeys = UNIQUE(UNION((FOR relation IN collectionImages FILTER relation.imageKey IN attachmentImages[*]._key RETURN relation.collectionKey), (FOR highlight IN imageCollecitionHightlights FILTER highlight.scopeKey == @scopeKey && LENGTH(INTERSECTION(highlight.imageKeys, attachmentImages[*]._key)) > 0 RETURN highlight.collectionKey), (FOR collection IN collections FILTER collection.scopeKey == @scopeKey && collection.coverImageKey IN attachmentImages[*]._key RETURN collection._key)))
+           LET attachmentRefDocuments = (FOR document IN documents FILTER document.scopeKey == @scopeKey && document.mutationPolicy == "system-only" LET payload = JSON_PARSE(document.content) FILTER payload.kind IN ["mail-reply-draft", "mail-new-draft"] && IS_ARRAY(payload.data.attachments) && LENGTH(FOR ref IN payload.data.attachments FILTER ref.key IN attachmentTargetKeys RETURN 1) > 0 RETURN { document, payload })
+           LET attachmentCoverDocuments = (FOR document IN documents FILTER document.scopeKey == @scopeKey && document.coverImageKey IN attachmentImages[*]._key RETURN document)
+           LET cleanedAttachmentRefs = []
+           LET dependentDocumentKeys = UNION(staleKeys, attachmentDocumentKeys)
+           LET summaryKeys = (FOR summary IN documentSummaries FILTER summary.scopeKey == @scopeKey && summary.documentKey IN dependentDocumentKeys RETURN summary._key)
+           LET candidateStorageKeys = UNIQUE(FLATTEN(UNION((FOR document IN documents FILTER document._key IN dependentDocumentKeys RETURN UNION(IS_STRING(document.storageKey) ? [document.storageKey] : [], IS_ARRAY(document.sourceStorageKeys) ? document.sourceStorageKeys : [], IS_ARRAY(document.speechStorageKeys) ? document.speechStorageKeys : [])), (FOR image IN attachmentImages FILTER IS_STRING(image.storageKey) RETURN image.storageKey), (FOR version IN documentVersions FILTER version.scopeKey == @scopeKey && version.documentKey IN dependentDocumentKeys && IS_STRING(version.storageKey) RETURN version.storageKey), (FOR audio IN documentAudioVersions FILTER audio.scopeKey == @scopeKey && audio.documentKey IN dependentDocumentKeys && IS_STRING(audio.storageKey) RETURN audio.storageKey), (FOR audio IN documentSummaryAudio FILTER audio.scopeKey == @scopeKey && (audio.documentKey IN dependentDocumentKeys || audio.summaryKey IN summaryKeys) && IS_STRING(audio.storageKey) RETURN audio.storageKey)), 2))
+           LET attachmentStorageKeys = (FOR storageKey IN candidateStorageKeys FILTER LENGTH(FOR document IN documents FILTER document._key NOT IN dependentDocumentKeys && (document.storageKey == storageKey || storageKey IN (document.sourceStorageKeys || []) || storageKey IN (document.speechStorageKeys || [])) LIMIT 1 RETURN 1) == 0 FILTER LENGTH(FOR image IN images FILTER image._key NOT IN attachmentImages[*]._key && image.storageKey == storageKey LIMIT 1 RETURN 1) == 0 FILTER LENGTH(FOR version IN documentVersions FILTER version.documentKey NOT IN dependentDocumentKeys && version.storageKey == storageKey LIMIT 1 RETURN 1) == 0 FILTER LENGTH(FOR audio IN documentAudioVersions FILTER audio.documentKey NOT IN dependentDocumentKeys && audio.storageKey == storageKey LIMIT 1 RETURN 1) == 0 FILTER LENGTH(FOR audio IN documentSummaryAudio FILTER audio.documentKey NOT IN dependentDocumentKeys && audio.summaryKey NOT IN summaryKeys && audio.storageKey == storageKey LIMIT 1 RETURN 1) == 0 RETURN storageKey)
+           LET attachmentJobs = []
+           LET removedAttachmentRelations = (FOR relation IN collectionImages FILTER relation.imageKey IN attachmentImages[*]._key REMOVE relation IN collectionImages RETURN 1)
+           LET removedAttachmentIdentities = (FOR relation IN imageIdentities FILTER relation.imageKey IN attachmentImages[*]._key REMOVE relation IN imageIdentities RETURN 1)
+           LET removedAttachmentMemories = (FOR memory IN imageCollectionMemories FILTER memory.scopeKey == @scopeKey && memory.imageKey IN attachmentImages[*]._key REMOVE memory IN imageCollectionMemories RETURN 1)
+           LET cleanedAttachmentHighlights = (FOR highlight IN imageCollecitionHightlights FILTER highlight.scopeKey == @scopeKey && LENGTH(INTERSECTION(highlight.imageKeys, attachmentImages[*]._key)) > 0 UPDATE highlight WITH { imageKeys: MINUS(highlight.imageKeys, attachmentImages[*]._key), updatedAt: @checkedAt } IN imageCollecitionHightlights RETURN 1)
+           LET removedAttachmentPlaces = (FOR relation IN placeImages FILTER relation.scopeKey == @scopeKey && relation.imageKey IN attachmentImages[*]._key REMOVE relation IN placeImages RETURN 1)
+           LET cleanedAttachmentFolders = (FOR folder IN folders FILTER folder.scopeKey == @scopeKey && folder.coverImageKey IN attachmentImages[*]._key UPDATE folder WITH { coverImageKey: null, updatedAt: @checkedAt } IN folders OPTIONS { keepNull: false } RETURN 1)
+           LET cleanedAttachmentCollections = (FOR collection IN collections FILTER collection.scopeKey == @scopeKey && collection.coverImageKey IN attachmentImages[*]._key UPDATE collection WITH { coverImageKey: null, updatedAt: @checkedAt } IN collections OPTIONS { keepNull: false } RETURN 1)
+           LET cleanedAttachmentTrips = (FOR trip IN trips FILTER trip.scopeKey == @scopeKey && trip.coverImageKey IN attachmentImages[*]._key UPDATE trip WITH { coverImageKey: null, updatedAt: @checkedAt } IN trips OPTIONS { keepNull: false } RETURN 1)
+           LET cleanedAttachmentInboxes = (FOR inbox IN inboxes FILTER inbox.scopeKey == @scopeKey && inbox.coverImageKey IN attachmentImages[*]._key UPDATE inbox WITH { coverImageKey: null, updatedAt: @checkedAt } IN inboxes OPTIONS { keepNull: false } RETURN 1)
+           LET cleanedAttachmentCovers = []
+           LET removedAttachmentTags = (FOR assignment IN tagAssignments FILTER assignment.scopeKey == @scopeKey && assignment.sourceType == "image" && assignment.sourceKey IN attachmentImages[*]._key REMOVE assignment IN tagAssignments RETURN 1)
+           LET removedAttachmentShares = (FOR share IN shares FILTER share.scopeKey == @scopeKey && share.sourceType == "image" && share.sourceKey IN attachmentImages[*]._key REMOVE share IN shares RETURN 1)
+           LET removedAttachmentHiddens = (FOR hidden IN userHiddens FILTER hidden.source == "image" && hidden.sourceKey IN attachmentImages[*]._key REMOVE hidden IN userHiddens RETURN 1)
+           LET removedAttachmentImages = (FOR image IN attachmentImages REMOVE image IN images RETURN 1)
+           LET removedAttachmentCaptions = []
+           LET removedAttachmentDocuments = []
+           LET removedAttachmentBindings = (FOR binding IN attachmentBindings REMOVE binding IN emailAttachmentBindings RETURN 1)
+            LET jobs = (FOR storageKey IN attachmentStorageKeys UPSERT { storageKey } INSERT { storageKey, createdAt: @checkedAt } UPDATE {} IN storageDeletionJobs RETURN 1)
+           LET removedSummaryAudio = (FOR audio IN documentSummaryAudio FILTER audio.scopeKey == @scopeKey && (audio.documentKey IN dependentDocumentKeys || audio.summaryKey IN summaryKeys) REMOVE audio IN documentSummaryAudio RETURN 1)
+           LET removedSummaries = (FOR summary IN documentSummaries FILTER summary.scopeKey == @scopeKey && summary.documentKey IN dependentDocumentKeys REMOVE summary IN documentSummaries RETURN 1)
+           LET removedVersions = (FOR version IN documentVersions FILTER version.scopeKey == @scopeKey && version.documentKey IN dependentDocumentKeys REMOVE version IN documentVersions RETURN 1)
+           LET removedAudioVersions = (FOR audio IN documentAudioVersions FILTER audio.scopeKey == @scopeKey && audio.documentKey IN dependentDocumentKeys REMOVE audio IN documentAudioVersions RETURN 1)
+           LET removedDocuments = (FOR document IN UNION_DISTINCT(attachmentDocuments, stale) REMOVE document IN documents RETURN 1)
+           RETURN { threadsDeleted: LENGTH(threads), documentsDeleted: LENGTH(stale), survivingThreadKeys: MINUS(threadKeys, emptyThreadKeys), attachmentTargetKeys, attachmentDocumentKeys, attachmentImageKeys: attachmentImages[*]._key, affectedCollectionKeys, attachmentCaptionKeys: attachmentImages[*].imageCaptionKey }`, { '@connectors': ORGANIZATION_CONNECTORS_COLLECTION, connectorKey: input.lease.connectorKey, leaseToken: input.lease.token, checkedAt, scopeKey: input.scopeKey, threadFolderKey: mailFolderKeys(input.scopeKey).threads, draftFolderKey: mailFolderKeys(input.scopeKey).drafts, accountKey: input.accountKey, providerMessageIds: input.providerMessageIds, trashSnapshotAt: input.trashSnapshotAt });
+         const result = await cursor.next() as { threadsDeleted: number; documentsDeleted: number; survivingThreadKeys: string[]; attachmentTargetKeys: string[]; attachmentDocumentKeys: string[]; attachmentImageKeys: string[]; affectedCollectionKeys: string[]; attachmentCaptionKeys: string[] } | undefined;
+         if (!result) throw new EmailRepositoryError('conflict', 'Email connector lease was lost before clearing Trash');
+         await cleanAttachmentDocumentReferences(trx, input.scopeKey, result.attachmentTargetKeys ?? [], checkedAt);
+         await cleanOrphanAttachmentCaptions(trx, result.attachmentCaptionKeys ?? []);
         if (result.survivingThreadKeys.length) {
           await trx.query(`FOR threadKey IN @threadKeys
             LET thread = DOCUMENT(documents, threadKey)
@@ -478,7 +563,7 @@ export function createEmailRepository(database: Database = db) {
             LET data = MERGE(payload.data, { labels, unread: "UNREAD" IN labels, starred: "STARRED" IN labels, isFavorite: "STARRED" IN labels, inInbox: "INBOX" IN labels || "SPAM" IN labels || "TRASH" IN labels })
             UPDATE thread WITH { content: JSON_STRINGIFY(MERGE(payload, { data })), updatedAt: @checkedAt } IN documents`, { threadKeys: result.survivingThreadKeys, scopeKey: input.scopeKey, threadFolderKey: mailFolderKeys(input.scopeKey).threads, checkedAt });
         }
-        return { threadsDeleted: result.threadsDeleted, documentsDeleted: result.documentsDeleted };
+        return { threadsDeleted: result.threadsDeleted, documentsDeleted: result.documentsDeleted, attachmentMutation: { documentKeys: result.attachmentDocumentKeys, imageKeys: result.attachmentImageKeys, collectionKeys: result.affectedCollectionKeys } };
       }, true);
     },
     async createMessageTranslation(input: Omit<DocumentVersion, 'key' | 'version' | 'createdAt'>) {
@@ -560,21 +645,60 @@ export function createEmailRepository(database: Database = db) {
     async deleteProviderThread(scopeKey: string, accountKey: string, providerThreadId: string, lease: { connectorKey: string; token: string }) {
       const threadKey = stableKey('mail-thread', scopeKey, accountKey, providerThreadId);
       const checkedAt = new Date().toISOString();
-      const cursor = await mailDeletion(async (executor) => executor.query(`LET connector = DOCUMENT(@@connectors, @connectorKey)
+      const cursor = await mailDeletion(async (executor) => {
+        const deletionCursor = await executor.query(`LET connector = DOCUMENT(@@connectors, @connectorKey)
         FILTER connector != null && connector.status != "revoked" && connector.syncEnabled != false
         FILTER connector.syncLeaseToken == @leaseToken && connector.syncLeaseExpiresAt > @checkedAt
         LET stale = (FOR document IN documents FILTER document.scopeKey == @scopeKey && document.mutationPolicy == "system-only" LET payload = JSON_PARSE(document.content) FILTER payload.version == 1 && ((document.folderKey == @threadFolderKey && document._key == @threadKey && payload.kind == "mail-thread" && payload.data.accountKey == @accountKey) || (document.folderKey == @threadFolderKey && payload.kind == "mail-message" && payload.data.threadKey == @threadKey && payload.data.accountKey == @accountKey) || (document.folderKey == @draftFolderKey && payload.kind == "mail-reply-draft" && payload.data.threadKey == @threadKey)) RETURN document)
         LET staleKeys = stale[*]._key
-        LET summaryKeys = (FOR summary IN documentSummaries FILTER summary.scopeKey == @scopeKey && summary.documentKey IN staleKeys RETURN summary._key)
-        LET summaryAudioStorageKeys = UNIQUE(FOR audio IN documentSummaryAudio FILTER audio.scopeKey == @scopeKey && audio.summaryKey IN summaryKeys && IS_STRING(audio.storageKey) RETURN audio.storageKey)
-        LET jobs = (FOR storageKey IN summaryAudioStorageKeys UPSERT { storageKey } INSERT { storageKey, createdAt: @checkedAt } UPDATE {} IN storageDeletionJobs RETURN 1)
-        LET removedSummaryAudio = (FOR audio IN documentSummaryAudio FILTER audio.scopeKey == @scopeKey && audio.summaryKey IN summaryKeys REMOVE audio IN documentSummaryAudio RETURN 1)
-        LET removedSummaries = (FOR summary IN documentSummaries FILTER summary.scopeKey == @scopeKey && summary.documentKey IN staleKeys REMOVE summary IN documentSummaries RETURN 1)
-        LET removedVersions = (FOR version IN documentVersions FILTER version.scopeKey == @scopeKey && version.documentKey IN staleKeys REMOVE version IN documentVersions RETURN 1)
-        LET removedAudioVersions = (FOR audio IN documentAudioVersions FILTER audio.scopeKey == @scopeKey && audio.documentKey IN staleKeys REMOVE audio IN documentAudioVersions RETURN 1)
-        LET removed = (FOR document IN stale REMOVE document IN documents RETURN 1)
-        RETURN LENGTH(stale)`, { '@connectors': ORGANIZATION_CONNECTORS_COLLECTION, connectorKey: lease.connectorKey, leaseToken: lease.token, checkedAt, scopeKey, threadFolderKey: mailFolderKeys(scopeKey).threads, draftFolderKey: mailFolderKeys(scopeKey).drafts, accountKey, threadKey }), true);
-      if (await cursor.next() === undefined) throw new EmailRepositoryError('conflict', 'Email synchronization lease was lost before deleting a provider thread');
+        LET staleProviderMessageIds = (FOR document IN stale LET payload = JSON_PARSE(document.content) FILTER payload.kind == "mail-message" RETURN payload.data.providerMessageId)
+        LET attachmentBindings = (FOR binding IN emailAttachmentBindings FILTER binding.scopeKey == @scopeKey && binding.connectorKey == @accountKey && binding.providerMessageId IN staleProviderMessageIds RETURN binding)
+        LET attachmentDocuments = (FOR binding IN attachmentBindings FILTER binding.targetType == "document" LET document = DOCUMENT(documents, binding.targetKey) FILTER document != null && document.scopeKey == @scopeKey && document.managedPurpose == "mail-attachment" && document.managedOwnerKey == binding._key RETURN document)
+        LET attachmentDocumentKeys = attachmentDocuments[*]._key
+        LET attachmentImages = (FOR binding IN attachmentBindings FILTER binding.targetType == "image" && binding.targetKey == CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "email-attachment-target", binding._key)), 24)) LET image = DOCUMENT(images, binding.targetKey) FILTER image != null && image.scopeKey == @scopeKey && image.mutationPolicy == "system-only" RETURN image)
+        LET attachmentTargetKeys = UNION(attachmentDocumentKeys, attachmentImages[*]._key)
+        LET affectedCollectionKeys = UNIQUE(UNION((FOR relation IN collectionImages FILTER relation.imageKey IN attachmentImages[*]._key RETURN relation.collectionKey), (FOR highlight IN imageCollecitionHightlights FILTER highlight.scopeKey == @scopeKey && LENGTH(INTERSECTION(highlight.imageKeys, attachmentImages[*]._key)) > 0 RETURN highlight.collectionKey), (FOR collection IN collections FILTER collection.scopeKey == @scopeKey && collection.coverImageKey IN attachmentImages[*]._key RETURN collection._key)))
+        LET attachmentRefDocuments = (FOR document IN documents FILTER document.scopeKey == @scopeKey && document.mutationPolicy == "system-only" LET payload = JSON_PARSE(document.content) FILTER payload.kind IN ["mail-reply-draft", "mail-new-draft"] && IS_ARRAY(payload.data.attachments) && LENGTH(FOR ref IN payload.data.attachments FILTER ref.key IN attachmentTargetKeys RETURN 1) > 0 RETURN { document, payload })
+        LET attachmentCoverDocuments = (FOR document IN documents FILTER document.scopeKey == @scopeKey && document.coverImageKey IN attachmentImages[*]._key RETURN document)
+        LET cleanedAttachmentRefs = []
+        LET dependentDocumentKeys = UNION(staleKeys, attachmentDocumentKeys)
+        LET summaryKeys = (FOR summary IN documentSummaries FILTER summary.scopeKey == @scopeKey && summary.documentKey IN dependentDocumentKeys RETURN summary._key)
+        LET candidateStorageKeys = UNIQUE(FLATTEN(UNION((FOR document IN documents FILTER document._key IN dependentDocumentKeys RETURN UNION(IS_STRING(document.storageKey) ? [document.storageKey] : [], IS_ARRAY(document.sourceStorageKeys) ? document.sourceStorageKeys : [], IS_ARRAY(document.speechStorageKeys) ? document.speechStorageKeys : [])), (FOR image IN attachmentImages FILTER IS_STRING(image.storageKey) RETURN image.storageKey), (FOR version IN documentVersions FILTER version.scopeKey == @scopeKey && version.documentKey IN dependentDocumentKeys && IS_STRING(version.storageKey) RETURN version.storageKey), (FOR audio IN documentAudioVersions FILTER audio.scopeKey == @scopeKey && audio.documentKey IN dependentDocumentKeys && IS_STRING(audio.storageKey) RETURN audio.storageKey), (FOR audio IN documentSummaryAudio FILTER audio.scopeKey == @scopeKey && (audio.documentKey IN dependentDocumentKeys || audio.summaryKey IN summaryKeys) && IS_STRING(audio.storageKey) RETURN audio.storageKey)), 2))
+        LET attachmentStorageKeys = (FOR storageKey IN candidateStorageKeys FILTER LENGTH(FOR document IN documents FILTER document._key NOT IN dependentDocumentKeys && (document.storageKey == storageKey || storageKey IN (document.sourceStorageKeys || []) || storageKey IN (document.speechStorageKeys || [])) LIMIT 1 RETURN 1) == 0 FILTER LENGTH(FOR image IN images FILTER image._key NOT IN attachmentImages[*]._key && image.storageKey == storageKey LIMIT 1 RETURN 1) == 0 FILTER LENGTH(FOR version IN documentVersions FILTER version.documentKey NOT IN dependentDocumentKeys && version.storageKey == storageKey LIMIT 1 RETURN 1) == 0 FILTER LENGTH(FOR audio IN documentAudioVersions FILTER audio.documentKey NOT IN dependentDocumentKeys && audio.storageKey == storageKey LIMIT 1 RETURN 1) == 0 FILTER LENGTH(FOR audio IN documentSummaryAudio FILTER audio.documentKey NOT IN dependentDocumentKeys && audio.summaryKey NOT IN summaryKeys && audio.storageKey == storageKey LIMIT 1 RETURN 1) == 0 RETURN storageKey)
+        LET attachmentJobs = []
+        LET removedAttachmentRelations = (FOR relation IN collectionImages FILTER relation.imageKey IN attachmentImages[*]._key REMOVE relation IN collectionImages RETURN 1)
+        LET removedAttachmentIdentities = (FOR relation IN imageIdentities FILTER relation.imageKey IN attachmentImages[*]._key REMOVE relation IN imageIdentities RETURN 1)
+        LET removedAttachmentMemories = (FOR memory IN imageCollectionMemories FILTER memory.scopeKey == @scopeKey && memory.imageKey IN attachmentImages[*]._key REMOVE memory IN imageCollectionMemories RETURN 1)
+        LET cleanedAttachmentHighlights = (FOR highlight IN imageCollecitionHightlights FILTER highlight.scopeKey == @scopeKey && LENGTH(INTERSECTION(highlight.imageKeys, attachmentImages[*]._key)) > 0 UPDATE highlight WITH { imageKeys: MINUS(highlight.imageKeys, attachmentImages[*]._key), updatedAt: @checkedAt } IN imageCollecitionHightlights RETURN 1)
+        LET removedAttachmentPlaces = (FOR relation IN placeImages FILTER relation.scopeKey == @scopeKey && relation.imageKey IN attachmentImages[*]._key REMOVE relation IN placeImages RETURN 1)
+        LET cleanedAttachmentFolders = (FOR folder IN folders FILTER folder.scopeKey == @scopeKey && folder.coverImageKey IN attachmentImages[*]._key UPDATE folder WITH { coverImageKey: null, updatedAt: @checkedAt } IN folders OPTIONS { keepNull: false } RETURN 1)
+        LET cleanedAttachmentCollections = (FOR collection IN collections FILTER collection.scopeKey == @scopeKey && collection.coverImageKey IN attachmentImages[*]._key UPDATE collection WITH { coverImageKey: null, updatedAt: @checkedAt } IN collections OPTIONS { keepNull: false } RETURN 1)
+        LET cleanedAttachmentTrips = (FOR trip IN trips FILTER trip.scopeKey == @scopeKey && trip.coverImageKey IN attachmentImages[*]._key UPDATE trip WITH { coverImageKey: null, updatedAt: @checkedAt } IN trips OPTIONS { keepNull: false } RETURN 1)
+        LET cleanedAttachmentInboxes = (FOR inbox IN inboxes FILTER inbox.scopeKey == @scopeKey && inbox.coverImageKey IN attachmentImages[*]._key UPDATE inbox WITH { coverImageKey: null, updatedAt: @checkedAt } IN inboxes OPTIONS { keepNull: false } RETURN 1)
+        LET cleanedAttachmentCovers = []
+        LET removedAttachmentTags = (FOR assignment IN tagAssignments FILTER assignment.scopeKey == @scopeKey && assignment.sourceType == "image" && assignment.sourceKey IN attachmentImages[*]._key REMOVE assignment IN tagAssignments RETURN 1)
+        LET removedAttachmentShares = (FOR share IN shares FILTER share.scopeKey == @scopeKey && share.sourceType == "image" && share.sourceKey IN attachmentImages[*]._key REMOVE share IN shares RETURN 1)
+        LET removedAttachmentHiddens = (FOR hidden IN userHiddens FILTER hidden.source == "image" && hidden.sourceKey IN attachmentImages[*]._key REMOVE hidden IN userHiddens RETURN 1)
+        LET removedAttachmentImages = (FOR image IN attachmentImages REMOVE image IN images RETURN 1)
+        LET removedAttachmentCaptions = []
+        LET removedAttachmentDocuments = []
+        LET removedAttachmentBindings = (FOR binding IN attachmentBindings REMOVE binding IN emailAttachmentBindings RETURN 1)
+        LET jobs = (FOR storageKey IN attachmentStorageKeys UPSERT { storageKey } INSERT { storageKey, createdAt: @checkedAt } UPDATE {} IN storageDeletionJobs RETURN 1)
+        LET removedSummaryAudio = (FOR audio IN documentSummaryAudio FILTER audio.scopeKey == @scopeKey && (audio.documentKey IN dependentDocumentKeys || audio.summaryKey IN summaryKeys) REMOVE audio IN documentSummaryAudio RETURN 1)
+        LET removedSummaries = (FOR summary IN documentSummaries FILTER summary.scopeKey == @scopeKey && summary.documentKey IN dependentDocumentKeys REMOVE summary IN documentSummaries RETURN 1)
+        LET removedVersions = (FOR version IN documentVersions FILTER version.scopeKey == @scopeKey && version.documentKey IN dependentDocumentKeys REMOVE version IN documentVersions RETURN 1)
+        LET removedAudioVersions = (FOR audio IN documentAudioVersions FILTER audio.scopeKey == @scopeKey && audio.documentKey IN dependentDocumentKeys REMOVE audio IN documentAudioVersions RETURN 1)
+        LET removed = (FOR document IN UNION_DISTINCT(attachmentDocuments, stale) REMOVE document IN documents RETURN 1)
+        RETURN { count: LENGTH(stale), attachmentTargetKeys, attachmentDocumentKeys, attachmentImageKeys: attachmentImages[*]._key, affectedCollectionKeys, attachmentCaptionKeys: attachmentImages[*].imageCaptionKey }`, { '@connectors': ORGANIZATION_CONNECTORS_COLLECTION, connectorKey: lease.connectorKey, leaseToken: lease.token, checkedAt, scopeKey, threadFolderKey: mailFolderKeys(scopeKey).threads, draftFolderKey: mailFolderKeys(scopeKey).drafts, accountKey, threadKey });
+        const result = await deletionCursor.next() as { count: number; attachmentTargetKeys: string[]; attachmentDocumentKeys: string[]; attachmentImageKeys: string[]; affectedCollectionKeys: string[]; attachmentCaptionKeys: string[] } | undefined;
+        if (result) {
+          await cleanAttachmentDocumentReferences(executor, scopeKey, result.attachmentTargetKeys ?? [], checkedAt);
+          await cleanOrphanAttachmentCaptions(executor, result.attachmentCaptionKeys ?? []);
+        }
+        return result;
+      }, true);
+      if (!cursor) throw new EmailRepositoryError('conflict', 'Email synchronization lease was lost before deleting a provider thread');
+      return { documentsDeleted: cursor.count, attachmentMutation: { documentKeys: cursor.attachmentDocumentKeys ?? [], imageKeys: cursor.attachmentImageKeys ?? [], collectionKeys: cursor.affectedCollectionKeys ?? [] } };
     },
     async reconcileInbox(scopeKey: string, accountKey: string, providerThreadIds: string[], lease: { connectorKey: string; token: string }) {
       const keep = providerThreadIds.map((providerThreadId) => stableKey('mail-thread', scopeKey, accountKey, providerThreadId));
@@ -582,9 +706,11 @@ export function createEmailRepository(database: Database = db) {
       const cursor = await mailDeletion(async (executor) => executor.query(`LET connector = DOCUMENT(@@connectors, @connectorKey)
         FILTER connector != null && connector.status != "revoked" && connector.syncEnabled != false
         FILTER connector.syncLeaseToken == @leaseToken && connector.syncLeaseExpiresAt > @checkedAt
-        LET updated = (FOR document IN documents FILTER document.scopeKey == @scopeKey && document.folderKey == @folderKey && document.mutationPolicy == "system-only" && document._key NOT IN @keep LET payload = JSON_PARSE(document.content) FILTER payload.version == 1 && payload.kind == "mail-thread" && payload.data.accountKey == @accountKey && payload.data.inInbox != false LET data = MERGE(payload.data, { inInbox: false }) UPDATE document WITH { content: JSON_STRINGIFY(MERGE(payload, { data })), updatedAt: @checkedAt } IN documents RETURN 1)
-        RETURN LENGTH(updated)`, { '@connectors': ORGANIZATION_CONNECTORS_COLLECTION, connectorKey: lease.connectorKey, leaseToken: lease.token, checkedAt, scopeKey, folderKey: mailFolderKeys(scopeKey).threads, accountKey, keep }), true);
-      if (await cursor.next() === undefined) throw new EmailRepositoryError('conflict', 'Email synchronization lease was lost before reconciling the inbox');
+        LET stale = (FOR document IN documents FILTER document.scopeKey == @scopeKey && document.folderKey == @folderKey && document.mutationPolicy == "system-only" && document._key NOT IN @keep LET payload = JSON_PARSE(document.content) FILTER payload.version == 1 && payload.kind == "mail-thread" && payload.data.accountKey == @accountKey && IS_STRING(payload.data.providerThreadId) SORT payload.data.providerThreadId RETURN payload.data.providerThreadId)
+        RETURN stale`, { '@connectors': ORGANIZATION_CONNECTORS_COLLECTION, connectorKey: lease.connectorKey, leaseToken: lease.token, checkedAt, scopeKey, folderKey: mailFolderKeys(scopeKey).threads, accountKey, keep }), true);
+      const stale = await cursor.next() as string[] | undefined;
+      if (!stale) throw new EmailRepositoryError('conflict', 'Email synchronization lease was lost before reconciling the inbox');
+      return stale;
     },
     async writingProfile(scopeKey: string, profileKey?: string, toneSlug?: string) {
       const documents = [
@@ -619,6 +745,19 @@ export function createEmailRepository(database: Database = db) {
       const document = await getDocument(scopeKey, draftKey, mailFolderKeys(scopeKey).drafts, 'system-only');
       if (!document) throw new EmailRepositoryError('not_found');
       try { return decodeEmailDraft(document); } catch { throw new EmailRepositoryError('not_found'); }
+    },
+    async outboundDraftAttachments(scopeKey: string, connectorKey: string, draftKey: string) {
+      const cursor = await database.query(`FOR draft IN documents
+        FILTER draft._key == @draftKey && draft.scopeKey == @scopeKey && draft.folderKey == @draftFolderKey && draft.mutationPolicy == "system-only"
+        LET payload = JSON_PARSE(draft.content)
+        FILTER payload.version == 1 && payload.kind IN ["mail-reply-draft", "mail-new-draft"] && payload.data.status IN ["sending", "sent"]
+        LET thread = payload.kind == "mail-reply-draft" ? DOCUMENT(documents, payload.data.threadKey) : null
+        LET threadPayload = thread == null ? null : JSON_PARSE(thread.content)
+        FILTER (payload.kind == "mail-new-draft" && payload.data.accountKey == @connectorKey)
+          || (payload.kind == "mail-reply-draft" && thread != null && thread.scopeKey == @scopeKey && thread.folderKey == @threadFolderKey && thread.mutationPolicy == "system-only" && threadPayload.version == 1 && threadPayload.kind == "mail-thread" && threadPayload.data.accountKey == @connectorKey)
+        LIMIT 1 RETURN payload.data.attachments || []`, { scopeKey, connectorKey, draftKey, draftFolderKey: mailFolderKeys(scopeKey).drafts, threadFolderKey: mailFolderKeys(scopeKey).threads });
+      const refs = await cursor.next();
+      return refs === undefined || refs === null ? null : emailAttachmentRefsSchema.parse(refs);
     },
     async assignDraftConnector(scopeKey: string, draftKey: string, connectorKey: string) {
       const updatedAt = new Date().toISOString();
@@ -664,14 +803,21 @@ export function createEmailRepository(database: Database = db) {
         try { return [{ draft: decodeEmailDraft(parsedDocument(document)), score }]; } catch { return []; }
       });
     },
-    async updateDraft(scopeKey: string, draftKey: string, finalContent: string, embedding: number[]) {
+    async updateDraft(scopeKey: string, input: { draftKey: string; finalContent?: string; attachments?: EmailAttachmentRef[]; embedding?: number[] }) {
       const updatedAt = new Date().toISOString();
       const cursor = await database.query(`FOR document IN documents
         FILTER document._key == @draftKey && document.scopeKey == @scopeKey && document.folderKey == @folderKey && document.mutationPolicy == "system-only"
         LET payload = JSON_PARSE(document.content)
         FILTER payload.version == 1 && payload.kind IN ["mail-reply-draft", "mail-new-draft"] && payload.data.status IN ["generated", "edited"]
-        UPDATE document WITH { content: JSON_STRINGIFY(MERGE(payload, { data: MERGE(payload.data, { finalContent: @finalContent, status: "edited" }) })), embedding: @embedding, updatedAt: @updatedAt } IN documents
-        RETURN NEW`, { scopeKey, folderKey: mailFolderKeys(scopeKey).drafts, draftKey, finalContent, embedding, updatedAt });
+        LET contentPatch = @hasFinalContent ? { finalContent: @finalContent } : {}
+        LET attachmentPatch = @hasAttachments ? { attachments: @attachments } : {}
+        LET documentPatch = MERGE({ content: JSON_STRINGIFY(MERGE(payload, { data: MERGE(payload.data, contentPatch, attachmentPatch, { status: "edited" }) })), updatedAt: @updatedAt }, @hasFinalContent ? { embedding: @embedding } : {})
+        UPDATE document WITH documentPatch IN documents RETURN NEW`, {
+        scopeKey, folderKey: mailFolderKeys(scopeKey).drafts, draftKey: input.draftKey,
+        hasFinalContent: input.finalContent !== undefined, finalContent: input.finalContent ?? null,
+        hasAttachments: input.attachments !== undefined, attachments: input.attachments ?? null,
+        embedding: input.embedding ?? null, updatedAt,
+      });
       const raw = await cursor.next();
       if (!raw) throw new EmailRepositoryError('conflict', 'Draft is already sending or finalized');
       return decodeEmailDraft(parsedDocument(raw));

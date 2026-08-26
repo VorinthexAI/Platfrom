@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import sharp from 'sharp';
-import { clearImageLocationCache, reverseGeocodeImage, sanitizeGalleryImage } from './image-location';
+import { clearImageLocationCache, GalleryImageInputError, galleryImageInputErrorFromDecoder, reverseGeocodeImage, sanitizeGalleryImage } from './image-location';
 
 beforeEach(() => clearImageLocationCache());
 
@@ -26,6 +26,38 @@ describe('Gallery image location processing', () => {
     const source = await sharp({ create: { width: 4, height: 4, channels: 3, background: '#fff' } }).jpeg().toBuffer();
     const result = await sanitizeGalleryImage(source, { latitude: 40.7128, longitude: -74.006 });
     expect(result.coordinates).toEqual({ latitude: 40.7128, longitude: -74.006 });
+  });
+
+  test('reports structurally malformed image bytes with a typed input error', async () => {
+    await expect(sanitizeGalleryImage(new Uint8Array([0xff, 0xd8, 0xff, 0xd9]))).rejects.toBeInstanceOf(GalleryImageInputError);
+    await expect(sanitizeGalleryImage(new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]))).rejects.toMatchObject({ code: 'GALLERY_IMAGE_INVALID_INPUT' });
+  });
+
+  test('preserves PNG, GIF, and WebP sanitizer inputs', async () => {
+    for (const format of ['png', 'gif', 'webp'] as const) {
+      const source = await sharp({ create: { width: 3, height: 2, channels: 3, background: '#336699' } })[format]().toBuffer();
+      const result = await sanitizeGalleryImage(source);
+      await expect(sharp(result.bytes).metadata()).resolves.toMatchObject({ format: 'jpeg', width: 3, height: 2 });
+    }
+  });
+
+  test('classifies only recognizable decoder corruption diagnostics', () => {
+    for (const message of [
+      'Input buffer has corrupt header: VipsJpeg: premature end of JPEG image',
+      'pngload_buffer: IDAT stream error',
+      'Input buffer has corrupt header: gifload_buffer: Unexpected end of GIF source data',
+      'Input buffer has corrupt header: webp: unable to parse image',
+    ]) expect(galleryImageInputErrorFromDecoder(new Error(message))).toBeInstanceOf(GalleryImageInputError);
+
+    for (const message of [
+      'pngload_buffer: out of memory while reading corrupt image',
+      'VipsJpeg: unable to allocate memory',
+      'gifload_buffer: resource temporarily unavailable',
+      'webp: internal error',
+      'permission denied',
+      'worker concurrency limit reached',
+      'unknown libvips failure',
+    ]) expect(galleryImageInputErrorFromDecoder(new Error(message))).toBeNull();
   });
 
   test('reverse geocodes with storage terms and caches rounded coordinates', async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { completeEmailConnectorReconciliation, emailClearTrashJobId, emailPollingJobId, emailRepairJobId, emailRepairJobOptions, emailSyncJobSchema, emailWatchRenewalJobId, processEmailSyncJob } from './sync-queue';
+import { completeEmailConnectorReconciliation, emailClearTrashJobId, emailRepairJobId, emailRepairJobOptions, emailSyncJobSchema, emailWatchJobOptions, emailWatchRenewalJobId, enqueueEmailSyncContinuation, processEmailSyncJob } from './sync-queue';
 import { GmailApiError } from './gmail';
 
 const operationKey = '11111111-1111-4111-8111-111111111111';
@@ -32,8 +32,8 @@ describe('email synchronization jobs', () => {
     expect(emailClearTrashJobId({ connectorKey: 'connector', operationKey })).not.toBe(emailClearTrashJobId({ connectorKey: 'connector', operationKey: '22222222-2222-4222-8222-222222222222' }));
     expect(emailWatchRenewalJobId('2026-08-23')).toBe(emailWatchRenewalJobId('2026-08-23'));
     expect(emailWatchRenewalJobId('2026-08-23')).not.toBe(emailWatchRenewalJobId('2026-08-24'));
-    expect(emailPollingJobId('2026-08-23T12:00')).not.toBe(emailPollingJobId('2026-08-23T12:05'));
     expect(emailRepairJobOptions.removeOnComplete).toBe(true);
+    expect(emailWatchJobOptions.removeOnFail).toBe(true);
     const attempts = Number(emailRepairJobOptions.attempts);
     const delay = Number((emailRepairJobOptions.backoff as { delay: number }).delay);
     expect(Array.from({ length: attempts - 1 }, (_, index) => delay * 2 ** index).reduce((total, value) => total + value, 0)).toBeGreaterThan(30 * 60_000);
@@ -105,12 +105,57 @@ describe('email synchronization jobs', () => {
     expect(calls).toEqual([[{ userKey: 'system', organizationKey: 'org-1', scopeKey: 'scope-1' }, 'connector-1']]);
   });
 
+  test('deduplicates duplicate PubSub delivery while distinct and out-of-order notifications converge through persisted cursor', async () => {
+    const target = { organizationKey: 'org-1', scopeKey: 'scope-1', connectorKey: 'connector-1' };
+    const connectors = { listSyncTargetsByEmail: async () => [target] };
+    const queued = new Map<string, any>();
+    const queue = { add: async (_name: string, data: any, options: any) => { queued.set(options.jobId, data); return { id: options.jobId }; } };
+    const notification = (messageId: string, historyId: string) => ({ schemaVersion: 1 as const, kind: 'notification' as const, emailAddress: 'person@example.com', historyId, messageId, subscription: 'subscription' });
+    await processEmailSyncJob(notification('newer', '30'), { connectors: connectors as never, service: {} as never, queue: queue as never });
+    await processEmailSyncJob(notification('older', '20'), { connectors: connectors as never, service: {} as never, queue: queue as never });
+    await processEmailSyncJob(notification('newer', '30'), { connectors: connectors as never, service: {} as never, queue: queue as never });
+    expect(queued.size).toBe(2);
+
+    let persistedCursor = 10;
+    const observed: number[] = [];
+    const service = { sync: async () => { observed.push(persistedCursor); persistedCursor = 30; return { synced: persistedCursor === 30 ? 1 : 0 }; } };
+    for (const job of [...queued.values()].reverse()) await processEmailSyncJob(job, { service: service as never });
+    expect(observed).toEqual([10, 30]);
+    expect(persistedCursor).toBe(30);
+  });
+
+  test('retries ordinary connector-sync jobs when the canonical service reports a busy connector', async () => {
+    const target = { organizationKey: 'org-1', scopeKey: 'scope-1', connectorKey: 'connector-1', sourceKey: 'a'.repeat(64), requestedAt: '2026-08-23T12:00:00.000Z' };
+    await expect(processEmailSyncJob({ schemaVersion: 1, kind: 'connector-sync', ...target }, { service: { sync: async () => ({ synced: 0, busy: true }) } as never })).rejects.toThrow('synchronization is busy');
+  });
+
+  test('durably schedules deterministic history continuation work through canonical sync', async () => {
+    const queued: Array<{ data: any; options: any }> = [];
+    const queue = { add: async (_name: string, data: any, options: any) => { queued.push({ data, options }); return { id: options.jobId }; } };
+    const input = { organizationKey: 'org-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem5w', pendingHistoryId: 'history-2', pendingThreadIds: Array.from({ length: 5 }, (_, index) => `thread-${index}`) };
+    const first = await enqueueEmailSyncContinuation(input, queue as never);
+    const second = await enqueueEmailSyncContinuation(input, queue as never);
+    expect(first.jobId).toBe(second.jobId);
+    expect(queued[0]!.data).toMatchObject({ kind: 'connector-sync', organizationKey: input.organizationKey, scopeKey: input.scopeKey, connectorKey: input.connectorKey });
+    const calls: unknown[] = [];
+    await processEmailSyncJob(queued[0]!.data, { service: { sync: async (...args: unknown[]) => { calls.push(args); return { synced: 5 }; } } as never });
+    expect(calls).toEqual([[{ userKey: 'system', organizationKey: input.organizationKey, scopeKey: input.scopeKey }, input.connectorKey]]);
+  });
+
   test('schedules connector-specific watch renewals', async () => {
     const queued: any[] = [];
     const connectors = { listWatchRenewalTargets: async () => [{ organizationKey: 'broken', scopeKey: 'scope-1', connectorKey: 'connector-1' }, { organizationKey: 'healthy', scopeKey: 'scope-2', connectorKey: 'connector-2' }] };
     const queue = { add: async (_name: string, data: any) => { queued.push(data); return { id: 'job' }; } };
     expect(await processEmailSyncJob({ schemaVersion: 1, kind: 'renew-watches', day: '2026-08-12' }, { connectors: connectors as never, service: {} as never, queue: queue as never })).toEqual({ renewed: 2 });
     expect(queued.map(({ kind, connectorKey }) => ({ kind, connectorKey }))).toEqual([{ kind: 'connector-watch-renewal', connectorKey: 'connector-1' }, { kind: 'connector-watch-renewal', connectorKey: 'connector-2' }]);
+  });
+
+  test('keeps every watch renewal and reconciliation failure failed so BullMQ can retry it', async () => {
+    const target = { organizationKey: 'org-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem5w' };
+    const failure = new GmailApiError(403, ['forbidden']);
+    const service = { subscribe: async () => { throw failure; } };
+    await expect(processEmailSyncJob({ schemaVersion: 1, kind: 'connector-watch-renewal', ...target, sourceKey: 'a'.repeat(64), requestedAt: '2026-08-23T12:00:00.000Z' }, { service: service as never })).rejects.toBe(failure);
+    await expect(processEmailSyncJob({ schemaVersion: 1, kind: 'watch-reconciliation', ...target, operationKey, requestedAt: '2026-08-23T12:00:00.000Z' }, { service: service as never })).rejects.toBe(failure);
   });
 
   test('does not replay healthy connector work when aggregate scheduling retries', async () => {
@@ -126,11 +171,10 @@ describe('email synchronization jobs', () => {
     expect([...uniqueJobs.values()].filter(({ connectorKey }) => connectorKey === 'connector-2')).toHaveLength(1);
   });
 
-  test('fans polling out into stable Outlook and iCloud connector jobs', async () => {
+  test('safely drains persisted jobs from the removed connector polling scheduler', async () => {
     const queued: any[] = [];
-    const connectors = { listPollingTargets: async () => [{ organizationKey: 'org-1', scopeKey: 'scope-1', connectorKey: 'outlook-1' }, { organizationKey: 'org-1', scopeKey: 'scope-1', connectorKey: 'icloud-1' }] };
     const queue = { add: async (_name: string, data: any) => { queued.push(data); return { id: 'job' }; } };
-    expect(await processEmailSyncJob({ schemaVersion: 1, kind: 'poll-connectors', bucket: '2026-08-24T12:00' }, { connectors: connectors as never, service: {} as never, queue: queue as never })).toEqual({ synchronized: 2 });
-    expect(queued.map(({ connectorKey }) => connectorKey)).toEqual(['outlook-1', 'icloud-1']);
+    expect(await processEmailSyncJob({ schemaVersion: 1, kind: 'poll-connectors', bucket: '2026-08-24T12:00' }, { connectors: {} as never, service: {} as never, queue: queue as never })).toEqual({ synchronized: 0 });
+    expect(queued).toEqual([]);
   });
 });

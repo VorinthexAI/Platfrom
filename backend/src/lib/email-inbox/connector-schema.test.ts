@@ -12,14 +12,9 @@ describe('organization connector mail projection', () => {
     expect(() => organizationConnectorSchema.parse({ ...connector, accessToken: 'secret' })).toThrow();
   });
 
-  test('accepts OAuth and iCloud credentials without weakening strict parsing', () => {
+  test('accepts only strict Gmail OAuth credentials', () => {
     expect(emailConnectorCredentialsSchema.parse({ accessToken: 'token', tokenType: 'Bearer', expiresAt: now })).toMatchObject({ accessToken: 'token' });
-    expect(emailConnectorCredentialsSchema.parse({ username: 'person@icloud.com', appPassword: 'abcd-efgh-ijkl-mnop' })).toEqual({ username: 'person@icloud.com', appPassword: 'abcd-efgh-ijkl-mnop' });
-    expect(() => emailConnectorCredentialsSchema.parse({ username: 'person@icloud.com', appPassword: 'secret', accessToken: 'forged' })).toThrow();
-    for (const provider of ['gmail', 'outlook', 'icloud'] as const) {
-      expect(organizationConnectorSchema.parse({
-        key: 'cmrnlzf650002qc7k4p5zem5w', organizationKey: 'org-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', provider, providerAccountId: `${provider}-1`, email: 'person@example.com', encryptedCredentials: 'cipher', encryptionKeyId: 'v1', accessTokenFingerprint: 'a'.repeat(64), scopes: ['email'], createdByMembershipKey: 'cmrnlzf640001qc7kazsr96k5', status: 'active', createdAt: now, updatedAt: now,
-      }).provider).toBe(provider);
-    }
+    expect(() => emailConnectorCredentialsSchema.parse({ username: 'person@example.com', appPassword: 'secret' })).toThrow();
+    expect(() => organizationConnectorSchema.parse({ key: 'cmrnlzf650002qc7k4p5zem5w', organizationKey: 'org-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', provider: 'unsupported', providerAccountId: 'unsupported-1', email: 'person@example.com', encryptedCredentials: 'cipher', encryptionKeyId: 'v1', accessTokenFingerprint: 'a'.repeat(64), scopes: ['email'], createdByMembershipKey: 'cmrnlzf640001qc7kazsr96k5', status: 'active', createdAt: now, updatedAt: now })).toThrow();
   });
 });

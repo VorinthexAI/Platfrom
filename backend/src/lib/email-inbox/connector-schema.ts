@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 export const ORGANIZATION_CONNECTORS_COLLECTION = 'organizationConnectors';
 
-export const emailProviderSchema = z.enum(['gmail', 'outlook', 'icloud']);
+export const emailProviderSchema = z.literal('gmail');
 export type EmailProvider = z.infer<typeof emailProviderSchema>;
 
 export const oauthEmailConnectorCredentialsSchema = z.object({
@@ -11,14 +11,9 @@ export const oauthEmailConnectorCredentialsSchema = z.object({
   tokenType: z.string().min(1).default('Bearer'),
   expiresAt: z.string().datetime(),
 }).strict();
-export const icloudEmailConnectorCredentialsSchema = z.object({
-  username: z.string().email(),
-  appPassword: z.string().trim().min(1).max(255),
-}).strict();
-export const emailConnectorCredentialsSchema = z.union([oauthEmailConnectorCredentialsSchema, icloudEmailConnectorCredentialsSchema]);
+export const emailConnectorCredentialsSchema = oauthEmailConnectorCredentialsSchema;
 export type EmailConnectorCredentials = z.infer<typeof emailConnectorCredentialsSchema>;
 export type OAuthEmailConnectorCredentials = z.infer<typeof oauthEmailConnectorCredentialsSchema>;
-export type ICloudEmailConnectorCredentials = z.infer<typeof icloudEmailConnectorCredentialsSchema>;
 
 export const organizationConnectorSchema = z.object({
   key: z.string().cuid(),

@@ -1,5 +1,6 @@
 import { AiError } from '@/lib/ai/shared/result';
 import type { Scope, ScopeScope } from './schema';
+import type { db } from '@/lib/db/client';
 
 export interface CreateScopeInput {
   key?: string;
@@ -70,6 +71,7 @@ export class ScopeRelationNotFoundError extends AiError {
 }
 
 export interface ScopesDatabase {
+  beginTransaction?: typeof db.beginTransaction;
   query(
     query: string,
     bindVars?: Record<string, unknown>,

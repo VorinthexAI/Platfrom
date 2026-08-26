@@ -21,15 +21,17 @@ const [mobileSheet, webSheet, mobileButton, webButton, mobileToast, agents, them
 
 test("enforces medium buttons throughout every BottomSheet", () => {
   for (const button of [mobileButton, webButton]) {
-    expect(button).toContain("const ButtonSizeContext = createContext<ButtonSize | undefined>(undefined)");
-    expect(button).toContain("const size = useContext(ButtonSizeContext) ?? requestedSize");
+    expect(button).toContain("const ButtonSizeContext = createContext<ButtonSizeContextValue | undefined>(undefined)");
+    expect(button).toContain("const value = parent?.forced ? parent : { size, forced: force }");
+    expect(button).toContain("const size = useContext(ButtonSizeContext)?.size ?? requestedSize");
   }
   for (const sheet of [mobileSheet, webSheet]) {
-    expect(sheet).toContain('<ButtonSizeProvider size="md">');
+    expect(sheet).toContain('<ButtonSizeProvider force size="md">');
     expect(sheet).toContain('export type BottomSheetItemProps = Omit<ButtonProps, "size">');
     expect(sheet).toContain('size="md"');
     expect(sheet).not.toContain('size = "lg"');
   }
+  expect(mobileButton).toContain("const value = parent?.forced ? parent : { size, forced: force }");
   expect(agents).toContain("Every button rendered anywhere inside a `BottomSheet`");
   expect(agents).toContain("`BottomSheetItem` must not expose a size override");
 });
@@ -109,7 +111,7 @@ test("classifies every full-height sheet workflow explicitly", () => {
   expect(switcher).not.toContain("height=");
   expect(travel).toContain('height="full"');
   expect(email).toContain('height={sheet === "trashRoot" || formSheet ? "full" : undefined}');
-  for (const title of ["Recipients", "Write email", "Choose a tone", "Review email"]) expect(email).toMatch(new RegExp(`height="full"[\\s\\S]*?title="${title}"`));
+  for (const title of ["Recipients", "Write email", "Choose a tone", "Email draft"]) expect(email).toMatch(new RegExp(`height="full"[\\s\\S]*?title="${title}"`));
   expect(ascend).toContain('height={sheet === "create" || sheet === "reader" ? "full" : undefined}');
   expect(gallery).toContain('height="full"');
   expect(gallery).toContain('height={activeSheet === "destination" || activeSheet === "imageEdit"');

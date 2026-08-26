@@ -681,8 +681,8 @@ export async function scanContentDocument(pages: { name: string; size: number; b
 const appFolderResultSchema = z.strictObject({ key: z.string().min(1), scopeKey: z.string().min(1), parentFolderKey: z.string().min(1).optional(), name: z.string().min(1), description: z.string().optional(), isFavorite: z.boolean(), score: z.number() });
 const appDocumentResultSchema = z.strictObject({ key: z.string().min(1), scopeKey: z.string().min(1), folderKey: z.string().min(1).optional(), name: z.string().min(1), extension: z.string().optional(), isFavorite: z.boolean(), score: z.number() });
 
-async function searchAppContent(query: string, signal: AbortSignal | undefined, folderKey: string | undefined, includeDescendants: boolean, recordHistory: boolean): Promise<ContentSearchResponse> {
-  const output = await searchApp({ query, collectionSlugs: ["folders", "documents", "files"], recordHistory, limit: 50, minimumScore: 0.55, ...(folderKey ? { filters: { folderKey, includeDescendants } } : {}) }, signal);
+async function searchAppContent(query: string, signal: AbortSignal | undefined, folderKey: string | undefined, includeDescendants: boolean, recordHistory: boolean, limit = 50, minimumScore = 0.55): Promise<ContentSearchResponse> {
+  const output = await searchApp({ query, collectionSlugs: ["folders", "documents", "files"], recordHistory, limit, minimumScore, ...(folderKey ? { filters: { folderKey, includeDescendants } } : {}) }, signal);
   const folders = appSearchResults(output, "folders", appFolderResultSchema).map(({ scopeKey: _scopeKey, ...folder }) => folder);
   const documents = [...appSearchResults(output, "documents", appDocumentResultSchema), ...appSearchResults(output, "files", appDocumentResultSchema)].map(({ key, ...document }) => ({ documentKey: key, ...document }));
   return { query: output.query, folders, documents, cached: false };
@@ -692,8 +692,8 @@ export function searchContent(query: string, folderKey?: string, includeDescenda
   return searchAppContent(query, undefined, folderKey, includeDescendants, true);
 }
 
-export function searchContentMatches(query: string, signal?: AbortSignal, folderKey?: string, recordHistory = true) {
-  return searchAppContent(query, signal, folderKey, true, recordHistory);
+export function searchContentMatches(query: string, signal?: AbortSignal, folderKey?: string, recordHistory = true, options: { limit?: number; minimumScore?: number } = {}) {
+  return searchAppContent(query, signal, folderKey, true, recordHistory, options.limit, options.minimumScore);
 }
 
 export function findContentNeighbors(source: { folderKey: string } | { documentKey: string }, signal?: AbortSignal) {

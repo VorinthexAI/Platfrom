@@ -6,6 +6,7 @@ import { ensureScopeMembersCollection, ensureScopesCollection, ensureScopeScopes
 import { SCOPE_MEMBERS_COLLECTION, SCOPES_COLLECTION, SCOPE_SCOPES_COLLECTION, scopeSchema, scopesEmbedKeys, scopeScopeSchema } from './schema';
 import { archiveDocument, emailTonePayloadSchema, encodeEmailToneContent } from '@/lib/email-inbox/archive-payloads';
 import { mailFolderKeys } from '@/lib/email-inbox/folders';
+import { createHash } from 'node:crypto';
 import {
   DuplicateScopeSlugError,
   ScopeAlreadyHasParentError,
@@ -154,12 +155,12 @@ describe('scope repository', () => {
   test('hard-deletes managed place media and queues permanent object deletion during scope teardown', async () => {
     const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
     const teardown = source.slice(source.indexOf('async removeScope(scopeKey)'), source.indexOf('async addScopeRelation'));
-    for (const collection of ['generatedDocumentBindings', 'tripAttachments', 'tripCreationReceipts', 'placeImages', 'collectionImages', 'imageIdentities', 'imageCollecitionHightlights', 'imageCollectionMemories', 'collectionInvites', 'collectionMembers', 'tagAssignments', 'shares', 'userHiddens', 'places', 'images', 'imageCaptions', 'collections', 'documentSummaryAudio', 'documentSummaries', 'documentAudioVersions', 'documentVersions', 'documentShares', 'inboxes', 'scopeScopes', 'scopeMembers', 'scopes']) expect(teardown).toContain(collection);
+    for (const collection of ['generatedDocumentBindings', 'tripAttachments', 'tripCreationReceipts', 'placeImages', 'collectionImages', 'imageIdentities', 'imageCollecitionHightlights', 'imageCollectionMemories', 'collectionInvites', 'collectionMembers', 'tagAssignments', 'shares', 'userHiddens', 'places', 'images', 'imageCaptions', 'collections', 'documentSummaryAudio', 'documentSummaries', 'documentAudioVersions', 'documentVersions', 'documentShares', 'emailAttachmentBindings', 'inboxes', 'scopeScopes', 'scopeMembers', 'scopes']) expect(teardown).toContain(collection);
     expect(teardown.indexOf('LET cleanupMailVersions')).toBeLessThan(teardown.indexOf('LET cleanupMailDocuments'));
-    expect(teardown).toContain('UPSERT { storageKey: image.storageKey }');
-    expect(teardown).toContain('FOR storageKey IN mailStorageKeys UPSERT { storageKey }');
+    expect(teardown).toContain('FOR storageKey IN UNIQUE(UNION(mailStorageKeys');
+    expect(teardown).toContain('UPSERT { storageKey }');
     expect(teardown).toContain('storageDeletionJobs');
-    expect(teardown).toContain('collection.purpose == "place-media" && collection.mutationPolicy == "system-only"');
+    expect(teardown).toContain('collection.purpose IN ["place-media", "email-media"] && collection.mutationPolicy == "system-only"');
     expect(teardown).toContain('decodeEmailTone');
     expect(teardown).not.toContain('JSON_PARSE(document.content)');
     expect(teardown).toContain('document.folderKey == @toneFolderKey && document.mutationPolicy == "user"');
@@ -169,6 +170,51 @@ describe('scope repository', () => {
     expect(teardown).toContain('summary.documentKey IN mailDocumentKeys');
     expect(teardown).toContain('audio.summaryKey IN mailSummaryKeys');
     expect(teardown.indexOf('LET mailDeletionJobs')).toBeLessThan(teardown.indexOf('LET cleanupMailDocuments'));
+    expect(teardown).toContain('FOR folder IN folders FILTER folder.scopeKey == @scopeKey && folder.coverImageKey IN imageKeys');
+    expect(teardown.indexOf('LET cleanupFolderCovers')).toBeLessThan(teardown.indexOf('LET cleanupImages'));
+  });
+  test('scope teardown deletes an unbound processing attachment image from its receipt ownership', async () => {
+    const scopeKey = newId();
+    const bindingKey = newId();
+    const targetKey = `c${createHash('sha256').update(['email-attachment-target', bindingKey].join('\0')).digest('hex').slice(0, 24)}`;
+    const state = {
+      images: new Map([[targetKey, { key: targetKey, scopeKey, mutationPolicy: 'system-only', storageKey: 'attachments/unbound.jpg', imageCaptionKey: newId() }]]),
+      bindings: new Map([[bindingKey, { key: bindingKey, scopeKey, targetType: 'image', targetKey, status: 'processing' }]]),
+      memories: new Map([[newId(), { scopeKey, imageKey: targetKey }]]),
+      highlights: new Map([[newId(), { scopeKey, collectionKey: newId(), imageKeys: [targetKey, newId()] }]]),
+      folders: new Map([[newId(), { scopeKey, coverImageKey: targetKey as string | undefined }]]),
+      deletionJobs: new Set<string>(),
+    };
+    let teardownQuery = '';
+    const database: ScopesDatabase = {
+      collection: () => ({ document: async () => ({ _key: scopeKey, organizationKey: newId(), slug: 'scope', name: 'Scope', summary: 'Summary', description: null, position: 1, level: 1, embedding: [] }), save: async () => ({}), update: async () => ({}), remove: async () => ({}) }),
+      query: async (query) => {
+        if (query.trim().startsWith('FOR document')) return { all: async () => [], next: async () => undefined };
+        teardownQuery = query;
+        const binding = state.bindings.get(bindingKey);
+        const image = binding?.targetType === 'image' ? state.images.get(binding.targetKey) : undefined;
+        if (image && query.includes('LET boundAttachmentImages') && query.includes('UNION(boundAttachmentImages, relatedManagedImages)')) {
+          state.deletionJobs.add(image.storageKey);
+          state.images.delete(image.key);
+          state.bindings.delete(bindingKey);
+          for (const [key, memory] of state.memories) if (memory.imageKey === image.key) state.memories.delete(key);
+          for (const highlight of state.highlights.values()) highlight.imageKeys = highlight.imageKeys.filter((key) => key !== image.key);
+          for (const folder of state.folders.values()) if (folder.coverImageKey === image.key) folder.coverImageKey = undefined;
+        }
+        return { all: async () => [], next: async () => true };
+      },
+    };
+    await createScopeRepository(database).removeScope(scopeKey);
+    expect(teardownQuery).toContain('binding.targetKey == CONCAT("c", LEFT(SHA256');
+    expect(teardownQuery).not.toContain('\0');
+    expect(teardownQuery).toContain('CONCAT_SEPARATOR("\\u0000", "email-attachment-target"');
+    expect(state.images.has(targetKey)).toBe(false);
+    expect(state.bindings.has(bindingKey)).toBe(false);
+    expect(state.memories.size).toBe(0);
+    expect([...state.highlights.values()][0]?.imageKeys).not.toContain(targetKey);
+    expect([...state.folders.values()][0]?.coverImageKey).toBeUndefined();
+    expect(state.deletionJobs).toContain('attachments/unbound.jpg');
+    expect(teardownQuery.indexOf('LET cleanupFolderCovers')).toBeLessThan(teardownQuery.indexOf('LET cleanupImages'));
   });
   test('exactly decodes default and custom Markdown tones before hard-cleaning every dependent and storage object', async () => {
     const scopeKey = newId();

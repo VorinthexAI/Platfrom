@@ -35,6 +35,19 @@ describe('MediaLibrary repository transactions', () => {
     expect(query).not.toContain('FILTER scoped || elevated');
   });
 
+  test('uses live scope membership for direct managed email-media collection and image access', async () => {
+    const queries: string[] = [];
+    const database: MediaLibraryDatabase = { async query(value) { queries.push(value); return { async all() { return []; } }; } };
+    const repository = createMediaLibraryRepository(database, async (operation) => operation(database));
+    await repository.canAccessCollection(newId(), newId(), newId());
+    await repository.canAccessImage(newId(), newId(), newId());
+    expect(queries[0]).toContain('collection.purpose == "email-media"');
+    expect(queries[0]).toContain('collection.mutationPolicy == "system-only" && scoped');
+    expect(queries[0]).toContain('collection.mutationPolicy != "system-only" && LENGTH');
+    expect(queries[1]).toContain('collection.purpose == "email-media"');
+    expect(queries[1]).toContain('? scoped : collection.mutationPolicy != "system-only"');
+  });
+
   test('clears a source cover in the same transaction when moving its image', async () => {
     const scopeKey = newId(), sourceCollectionKey = newId(), collectionKey = newId(), imageKey = newId(), actorKey = newId(), relationKey = newId();
     const now = '2026-08-08T12:00:00.000Z';
@@ -57,7 +70,7 @@ describe('MediaLibrary repository transactions', () => {
 });
 
 describe('MediaLibrary image similarity search', () => {
-  test('enforces Gallery access and returns descending cosine matches', async () => {
+  test('grants semantic search access to live scope members without a managed collection membership', async () => {
     const organizationKey = newId(), scopeKey = newId(), actorKey = newId(), collectionKey = newId(), imageKey = newId();
     const embedding = currentEmbeddingSchema.parse(Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.25));
     const now = '2026-08-11T12:00:00.000Z';
@@ -77,6 +90,10 @@ describe('MediaLibrary image similarity search', () => {
     expect(query).toContain('actorScope.organizationKey == @organizationKey');
     expect(query).toContain('FILTER privileged || (image.createdByKey == @actorKey && relationCount == 0) || collectionAccess');
     expect(query).toContain('collectionImage.collectionKey == @collectionKey');
+    expect(query).toContain('LET managedViewer = collection.purpose == "email-media" && collection.mutationPolicy == "system-only" && scoped');
+    expect(query).toContain('LET member = collection.mutationPolicy == "system-only" ? null : FIRST(');
+    expect(query).toContain('FILTER managedViewer || member != null');
+    expect(query).not.toContain('FILTER collection.purpose == "email-media" && collection.mutationPolicy == "system-only" ? scoped');
     expect(query).toContain('LENGTH(image.embedding) == @dimensions');
     expect(query).toContain('COSINE_SIMILARITY(image.embedding, @embedding)');
     expect(query).toContain('FILTER @threshold == null || score >= @threshold');

@@ -344,7 +344,7 @@ export function BottomSheet({
               variant="ghost"
             />
           </Animated.View>
-          <ButtonSizeProvider size="md">
+          <ButtonSizeProvider force size="md">
             {pageKey !== undefined && fullHeight ? <GestureDetector gesture={horizontalSwipeGesture}><Animated.View style={[styles.layerHost, { bottom: androidBottomInset, top: insets.top, transform: [{ translateY }] }]}>
               {transitioningPage && pageTransition && pageTransition.previous.pageKey !== presentedPage.pageKey ? <SheetSurface key={pageTransition.previous.pageKey} bottomInset={insets.bottom} dismiss={dismiss} dismissible={dismissible} dragPanHandlers={panResponder.panHandlers} fullHeight inactive page={pageTransition.previous} sheetBottom={0} style={[styles.layerSurface, styles.underLayer]} /> : null}
               <SheetSurface key={presentedPage.pageKey} bottomInset={insets.bottom} dismiss={dismiss} dismissible={dismissible} dragPanHandlers={panResponder.panHandlers} fullHeight page={presentedPage} sheetBottom={0} style={[styles.layerSurface, transitioningPage && { transform: [{ translateX: pageTranslateX }] }]} />

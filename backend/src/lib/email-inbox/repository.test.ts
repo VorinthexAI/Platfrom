@@ -67,8 +67,11 @@ describe('mail provider mutations', () => {
     const embedding = Array(EMBEDDING_DIMENSIONS).fill(0);
     const documents = new Map<string, Record<string, unknown>>();
     const upsertedKeys: string[] = [];
+    let declaration: { write: string[] } | undefined;
+    const queries: string[] = [];
     const database = { collection: () => ({}), query: async (query: string, bindVars: Record<string, any> = {}) => {
-      if (query.includes('IN folders')) return {};
+      queries.push(query);
+      if (query.includes('UPSERT { scopeKey: @scopeKey, purpose: @purpose }')) return {};
       if (query.includes('LET existing = DOCUMENT')) return { next: async () => true };
       if (query.includes('UPSERT { _key: @key } INSERT @document')) {
         documents.set(bindVars.key, bindVars.document);
@@ -76,7 +79,7 @@ describe('mail provider mutations', () => {
         return { next: async () => bindVars.document };
       }
       return { next: async () => undefined };
-    } };
+    }, beginTransaction: async (input: { write: string[] }) => { declaration = input; return { step: async <T>(operation: () => Promise<T>) => operation(), commit: async () => undefined, abort: async () => undefined }; } };
     const repository = createEmailRepository(database as never);
     const input = {
       thread: { scopeKey, accountKey: documentKey, providerThreadId: 'provider-thread', subject: 'Subject', summary: 'Body', intent: 'Review', priority: 'normal' as const, state: 'needs_action' as const, unread: false, lastMessageAt: '2026-08-23T12:00:00.000Z', isFavorite: false, inboxCategory: 'Important' as const, embedding },
@@ -88,6 +91,13 @@ describe('mail provider mutations', () => {
     expect(new Set(upsertedKeys).size).toBe(2);
     expect(upsertedKeys[0]).toBe(upsertedKeys[2]);
     expect(upsertedKeys[1]).toBe(upsertedKeys[3]);
+    const cleanup = queries.find((query) => query.includes('LET staleProviderMessageIds'))!;
+    expect(cleanup).toContain('REMOVE memory IN imageCollectionMemories');
+    expect(cleanup).toContain('UPDATE highlight WITH { imageKeys: MINUS(');
+    expect(cleanup).toContain('FOR folder IN folders FILTER folder.scopeKey == @scopeKey && folder.coverImageKey IN attachmentImages[*]._key');
+    expect(cleanup.indexOf('LET cleanedAttachmentFolders')).toBeLessThan(cleanup.indexOf('LET removedAttachmentImages'));
+    expect(declaration?.write).toEqual(['folders', 'documents', 'documentVersions', 'documentSummaries', 'documentSummaryAudio', 'documentAudioVersions', 'emailAttachmentBindings', 'images', 'imageCaptions', 'collectionImages', 'imageIdentities', 'imageCollectionMemories', 'imageCollecitionHightlights', 'placeImages', 'collections', 'trips', 'inboxes', 'tagAssignments', 'shares', 'userHiddens', 'storageDeletionJobs']);
+    expect((declaration as { exclusive?: string[] } | undefined)?.exclusive).toEqual(declaration?.write);
   });
 
   test('aborts before UPSERT when a deterministic key belongs to another provider identity', async () => {
@@ -118,6 +128,7 @@ describe('mail provider mutations', () => {
     expect(mutationQueries.map(({ bindVars }) => bindVars.mutation)).toEqual(['favorite', 'read-state', 'trash']);
     expect(mutationQueries[0]!.query).toContain('isFavorite: @enabled, starred: @enabled');
     expect(mutationQueries[1]!.query).toContain('unread: !@enabled');
+    expect(mutationQueries[1]!.query).toContain('starred: "STARRED" IN threadLabels, isFavorite: "STARRED" IN threadLabels');
     expect(mutationQueries[2]!.query).toContain('MERGE(threadPayload.data, { inInbox: true, labels: threadLabels })');
     expect(mutationQueries[2]!.query).not.toContain('inboxCategory: "Filtered"');
     expect(mutationQueries[2]!.query).not.toContain('priority: "low"');
@@ -126,17 +137,56 @@ describe('mail provider mutations', () => {
 
   test('hard-deletes local Trash threads, messages, reply drafts, and generated dependents under the connector fence', async () => {
     let query = '';
+    let declaration: { write: string[] } | undefined;
     const database = {
       collection: () => ({}),
       query: async (value: string) => { query = value; return { next: async () => ({ threadsDeleted: 2, documentsDeleted: 6, survivingThreadKeys: [] }) }; },
-      beginTransaction: async () => ({ step: async <T>(operation: () => Promise<T>) => operation(), commit: async () => undefined, abort: async () => undefined }),
+      beginTransaction: async (input: { write: string[] }) => { declaration = input; return { step: async <T>(operation: () => Promise<T>) => operation(), commit: async () => undefined, abort: async () => undefined }; },
     };
-    expect(await createEmailRepository(database as never).clearTrash({ scopeKey, accountKey: documentKey, providerMessageIds: ['provider-message'], trashSnapshotAt: '2026-08-23T12:00:00.000Z', lease: { connectorKey: documentKey, token: '11111111-1111-4111-8111-111111111111' } })).toEqual({ threadsDeleted: 2, documentsDeleted: 6 });
+    expect(await createEmailRepository(database as never).clearTrash({ scopeKey, accountKey: documentKey, providerMessageIds: ['provider-message'], trashSnapshotAt: '2026-08-23T12:00:00.000Z', lease: { connectorKey: documentKey, token: '11111111-1111-4111-8111-111111111111' } })).toMatchObject({ threadsDeleted: 2, documentsDeleted: 6 });
     expect(query).toContain('connector.syncLeaseToken == @leaseToken');
     expect(query).toContain('payload.kind == "mail-reply-draft"');
     expect(query).toContain('document.updatedAt <= @trashSnapshotAt');
     for (const collection of ['documentVersions', 'documentSummaries', 'documentSummaryAudio', 'documentAudioVersions', 'storageDeletionJobs']) expect(query).toContain(collection);
+    expect(query).toContain('REMOVE memory IN imageCollectionMemories');
+    expect(query).toContain('UPDATE highlight WITH { imageKeys: MINUS(');
+    expect(query).toContain('FOR folder IN folders FILTER folder.scopeKey == @scopeKey && folder.coverImageKey IN attachmentImages[*]._key');
+    expect(query.indexOf('LET cleanedAttachmentFolders')).toBeLessThan(query.indexOf('LET removedAttachmentImages'));
+    expect(query).not.toContain('\0');
+    expect(query).toContain('CONCAT_SEPARATOR("\\u0000", "email-attachment-target"');
+    expect(declaration?.write).toEqual(['folders', 'documents', 'documentVersions', 'documentSummaries', 'documentSummaryAudio', 'documentAudioVersions', 'emailAttachmentBindings', 'images', 'imageCaptions', 'collectionImages', 'imageIdentities', 'imageCollectionMemories', 'imageCollecitionHightlights', 'placeImages', 'collections', 'trips', 'inboxes', 'tagAssignments', 'shares', 'userHiddens', 'storageDeletionJobs', 'organizationConnectors']);
+    expect((declaration as { exclusive?: string[] } | undefined)?.exclusive).toEqual(declaration?.write);
     expect(query.indexOf('IN storageDeletionJobs')).toBeLessThan(query.indexOf('REMOVE audio IN documentSummaryAudio'));
+  });
+
+  test('hard provider-thread deletion transaction removes managed image memories and highlight references', async () => {
+    let deletionQuery = '';
+    let declaration: { write: string[] } | undefined;
+    const database = {
+      collection: () => ({}),
+      query: async (query: string) => { deletionQuery = query; return { next: async () => ({ count: 4, attachmentTargetKeys: [], attachmentCaptionKeys: [] }) }; },
+      beginTransaction: async (input: { write: string[] }) => { declaration = input; return { step: async <T>(operation: () => Promise<T>) => operation(), commit: async () => undefined, abort: async () => undefined }; },
+    };
+    await expect(createEmailRepository(database as never).deleteProviderThread(scopeKey, documentKey, 'provider-thread', { connectorKey: documentKey, token: '11111111-1111-4111-8111-111111111111' })).resolves.toMatchObject({ documentsDeleted: 4, attachmentMutation: { documentKeys: [], imageKeys: [], collectionKeys: [] } });
+    expect(deletionQuery).toContain('REMOVE memory IN imageCollectionMemories');
+    expect(deletionQuery).toContain('UPDATE highlight WITH { imageKeys: MINUS(');
+    expect(deletionQuery).toContain('FOR folder IN folders FILTER folder.scopeKey == @scopeKey && folder.coverImageKey IN attachmentImages[*]._key');
+    expect(deletionQuery.indexOf('LET cleanedAttachmentFolders')).toBeLessThan(deletionQuery.indexOf('LET removedAttachmentImages'));
+    expect(declaration?.write).toEqual(expect.arrayContaining(['folders', 'imageCollectionMemories', 'imageCollecitionHightlights']));
+  });
+
+  test('authoritative reconciliation returns every stale provider thread under the lease without soft-hiding it', async () => {
+    let query = '';
+    const database = {
+      collection: () => ({}),
+      query: async (value: string) => { query = value; return { next: async () => ['stale-a', 'stale-b'] }; },
+      beginTransaction: async () => ({ step: async <T>(operation: () => Promise<T>) => operation(), commit: async () => undefined, abort: async () => undefined }),
+    };
+    await expect(createEmailRepository(database as never).reconcileInbox(scopeKey, documentKey, ['kept'], { connectorKey: documentKey, token: '11111111-1111-4111-8111-111111111111' })).resolves.toEqual(['stale-a', 'stale-b']);
+    expect(query).toContain('connector.syncLeaseToken == @leaseToken');
+    expect(query).toContain('RETURN payload.data.providerThreadId');
+    expect(query).not.toContain('inInbox: false');
+    expect(query).not.toContain('UPDATE document');
   });
 });
 
@@ -276,7 +326,30 @@ describe('mail Archive repository attachments', () => {
     const database = { query: async () => ({ all: async () => [] }), collection: () => ({}) };
     const repository = createEmailRepository(database as never);
     await expect(repository.resolveAttachments(scopeKey, [{ type: 'image', key: documentKey }])).rejects.toThrow('authorized scope');
-    await expect(repository.resolveAttachments(scopeKey, [{ type: 'document', key: documentKey }, { type: 'document', key: documentKey }])).rejects.toThrow('unique');
+    await expect(repository.resolveAttachments(scopeKey, [{ type: 'document', key: documentKey }, { type: 'document', key: documentKey }])).rejects.toThrow('distinct');
+  });
+
+  test('atomically patches only requested draft fields after canonical authorization', async () => {
+    let call: { query: string; bindVars: Record<string, unknown> } | undefined;
+    const database = { query: async (query: string, bindVars: Record<string, unknown>) => { call = { query, bindVars }; return { next: async () => undefined }; }, collection: () => ({}) };
+    const repository = createEmailRepository(database as never);
+    await expect(repository.updateDraft(scopeKey, { draftKey: documentKey, attachments: [] })).rejects.toThrow('already sending or finalized');
+    expect(call?.query).toContain('payload.data.status IN ["generated", "edited"]');
+    expect(call?.query).toContain('MERGE(payload.data, contentPatch, attachmentPatch');
+    expect(call?.query).toContain('@hasFinalContent ? { embedding: @embedding } : {}');
+    expect(call?.bindVars).toMatchObject({ hasFinalContent: false, hasAttachments: true, attachments: [] });
+  });
+
+  test('loads outbound refs only through same-scope and same-connector draft ownership', async () => {
+    let call: { query: string; bindVars: Record<string, unknown> } | undefined;
+    const refs = [{ type: 'document' as const, key: documentKey }];
+    const database = { query: async (query: string, bindVars: Record<string, unknown>) => { call = { query, bindVars }; return { next: async () => refs }; }, collection: () => ({}) };
+    expect(await createEmailRepository(database as never).outboundDraftAttachments(scopeKey, documentKey, documentKey)).toEqual(refs);
+    expect(call?.query).toContain('draft.scopeKey == @scopeKey');
+    expect(call?.query).toContain('payload.data.accountKey == @connectorKey');
+    expect(call?.query).toContain('threadPayload.data.accountKey == @connectorKey');
+    expect(call?.query).toContain('payload.data.status IN ["sending", "sent"]');
+    expect(call?.bindVars).toMatchObject({ scopeKey, connectorKey: documentKey, draftKey: documentKey });
   });
 });
 
@@ -497,14 +570,15 @@ describe('mail dependent persistence', () => {
         declaration = value;
         return { async step(run: () => Promise<unknown>) { return run(); }, async commit() {}, async abort() {} };
       },
-      async query(query: string) { deletion = query; return { next: async () => 1 }; },
+      async query(query: string) { deletion = query; return { next: async () => ({ count: 1, attachmentTargetKeys: [], attachmentCaptionKeys: [] }) }; },
       collection: () => ({}),
     };
     await createEmailRepository(database as never).deleteProviderThread(scopeKey, documentKey, 'provider-thread', { connectorKey: documentKey, token: '11111111-1111-4111-8111-111111111111' });
-    const collections = ['documents', 'documentVersions', 'documentSummaries', 'documentSummaryAudio', 'documentAudioVersions', 'storageDeletionJobs', 'organizationConnectors'];
+    const collections = ['folders', 'documents', 'documentVersions', 'documentSummaries', 'documentSummaryAudio', 'documentAudioVersions', 'emailAttachmentBindings', 'images', 'imageCaptions', 'collectionImages', 'imageIdentities', 'imageCollectionMemories', 'imageCollecitionHightlights', 'placeImages', 'collections', 'trips', 'inboxes', 'tagAssignments', 'shares', 'userHiddens', 'storageDeletionJobs', 'organizationConnectors'];
     expect(declaration?.write).toEqual(collections);
     expect(declaration?.exclusive).toEqual(collections);
-    for (const collection of collections.filter((name) => name !== 'organizationConnectors')) expect(deletion).toContain(`IN ${collection}`);
+    for (const collection of collections.filter((name) => !['organizationConnectors', 'imageCaptions'].includes(name))) expect(deletion).toContain(`IN ${collection}`);
+    expect(await Bun.file(new URL('./repository.ts', import.meta.url)).text()).toContain('REMOVE caption IN imageCaptions');
     expect(deletion).toContain('DOCUMENT(@@connectors, @connectorKey)');
     expect(deletion.indexOf('REMOVE audio IN documentSummaryAudio')).toBeLessThan(deletion.indexOf('REMOVE summary IN documentSummaries'));
     expect(deletion.indexOf('IN storageDeletionJobs')).toBeLessThan(deletion.indexOf('REMOVE audio IN documentSummaryAudio'));
@@ -539,7 +613,8 @@ describe('mail dependent persistence', () => {
     for (const marker of ['if (input.reconcileMessages !== false)', 'async clearTrash', 'async deleteProviderThread']) {
       const start = source.indexOf(marker);
       const section = source.slice(start, source.indexOf('\n    },', start));
-      expect(section).toContain('summaryAudioStorageKeys');
+      expect(section).toContain('documentSummaryAudio');
+      expect(section).toContain('candidateStorageKeys');
       expect(section).toContain('IN storageDeletionJobs');
       expect(section.indexOf('IN storageDeletionJobs')).toBeLessThan(section.indexOf('REMOVE audio IN documentSummaryAudio'));
     }

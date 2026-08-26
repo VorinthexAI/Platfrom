@@ -5,8 +5,9 @@ import { runContentTool } from '@/lib/ai/tools/content-runtime';
 import type { ContentToolName } from '@/lib/ai/tools/content-schemas';
 import { createTravelService, travelChildrenFindInputSchema, travelCityFindInputSchema, travelPlaceCreateInputSchema, travelPlaceDeleteToolInputSchema, travelPlaceFindInputSchema, travelPlaceGuideFindInputSchema, travelPlaceOpenInputSchema, travelPlaceReferenceGenerateInputSchema, travelPlaceReferenceListInputSchema, travelPlaceSearchInputSchema, travelPlaceUpdateToolInputSchema, travelTripAttachmentSetInputSchema, travelTripCreateInputSchema, travelTripDeleteInputSchema, travelTripGuideGenerateInputSchema, travelTripGuideListInputSchema, travelTripListInputSchema, travelTripSearchInputSchema, travelTripUpdateToolInputSchema } from '@/lib/travel/service';
 import { createCountrySearchService } from '@/lib/travel/country-search';
-import { createEmailService, emailDraftComposeInputSchema, emailDraftCreateInputSchema, emailDraftDeleteInputSchema, emailMessageGeneratedListInputSchema, emailMessageSummarizeInputSchema, emailMessageSummaryDeleteInputSchema, emailMessageTranslateInputSchema, emailMessageTranslationDeleteInputSchema, emailOverviewInputSchema, emailReplyContextCreateInputSchema, emailReplyContextDeleteInputSchema, emailReplyContextUpdateInputSchema, emailSemanticSearchInputSchema, emailSimilarFindInputSchema, emailThreadFavoriteInputSchema, emailThreadReadStateInputSchema, emailThreadTrashInputSchema, emailToneCreateInputSchema, emailToneDeleteInputSchema, emailToneUpdateInputSchema, emailTrashClearInputSchema, inboxUpdateInputSchema, publicEmailGeneratedDeleteResultSchema, publicEmailSummaryListResultSchema, publicEmailSummaryResultSchema, publicEmailTranslationListResultSchema, publicEmailTranslationResultSchema, type EmailActor } from '@/lib/email-inbox/service';
+import { createEmailService, emailDraftComposeInputSchema, emailDraftCreateInputSchema, emailDraftDeleteInputSchema, emailMessageGeneratedListInputSchema, emailMessageSummarizeInputSchema, emailMessageSummaryDeleteInputSchema, emailMessageTranslateInputSchema, emailMessageTranslationDeleteInputSchema, emailOverviewInputSchema, emailReplyContextCreateInputSchema, emailReplyContextDeleteInputSchema, emailReplyContextUpdateInputSchema, emailSemanticSearchInputSchema, emailSimilarFindInputSchema, emailThreadFavoriteInputSchema, emailThreadReadStateInputSchema, emailThreadTrashInputSchema, emailToneCreateInputSchema, emailToneDeleteInputSchema, emailToneUpdateInputSchema, emailTrashClearInputSchema, inboxUpdateInputSchema, publicEmailCoreDraftSchema, publicEmailGeneratedDeleteResultSchema, publicEmailSummaryListResultSchema, publicEmailSummaryResultSchema, publicEmailTranslationListResultSchema, publicEmailTranslationResultSchema, type EmailActor } from '@/lib/email-inbox/service';
 import { defaultBookService } from '@/lib/books/default-service';
+import { emailDraftUpdateInputSchema } from '@/lib/email-inbox/service';
 import { newId } from '@/lib/ids';
 import { userHiddenOperations } from '@/lib/user-hiddens/operations';
 import type { AssistantCapability, AssistantCapabilityContext } from './capabilities';
@@ -43,13 +44,27 @@ function identity(context: AssistantCapabilityContext) {
   };
 }
 
+function withoutBcc(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutBcc);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value).filter(([key]) => key.toLocaleLowerCase() !== 'bcc').map(([key, item]) => [key, withoutBcc(item)]));
+}
+
+function projectSignalOutput(name: string, value: unknown) {
+  const redacted = withoutBcc(value);
+  return ['email.draft.create', 'email.draft.compose', 'email.draft.update', 'email.draft.assign'].includes(name)
+    ? publicEmailCoreDraftSchema.parse(redacted)
+    : redacted;
+}
+
 function capability<Schema extends z.ZodTypeAny>(name: string, description: string, schema: Schema, execute: (input: z.output<Schema>, context: AssistantCapabilityContext) => Promise<unknown>, mutationWorkspace?: AssistantCapability['mutationWorkspace']): AssistantCapability<Schema> {
   return {
     inputSchema: schema,
     mutationWorkspace,
     definition: { name, description, inputSchema: contentZodToJsonSchema(schema) },
     async execute(rawInput, context) {
-      return { kind: 'continue', result: await execute(schema.parse(rawInput), context) };
+      const result = await execute(schema.parse(rawInput), context);
+      return { kind: 'continue', result: name.startsWith('email.') || name.startsWith('inbox.') ? projectSignalOutput(name, result) : result };
     },
   };
 }
@@ -217,7 +232,7 @@ export const signalCapabilities = [
   capability('email.reply-context.create', 'Create one protected fact or preference used automatically in email replies.', emailReplyContextCreateInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).createReplyContext(actor.emailActor, input, context.requestKey); }, 'signal'),
   capability('email.reply-context.update', 'Update one protected email reply-context note.', emailReplyContextUpdateInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).updateReplyContext(actor.emailActor, input, context.requestKey); }, 'signal'),
   capability('email.reply-context.delete', 'Atomically hard-delete one or more protected email reply-context notes.', emailReplyContextDeleteInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).deleteReplyContext(actor.emailActor, input, context.requestKey); }, 'signal'),
-  capability('email.draft.update', 'Replace the final content of a Signal reply draft without sending it.', z.object({ draftKey: key, finalContent: z.string().max(50_000) }).strict(), async ({ draftKey, finalContent }, context) => { const actor = identity(context); return (context.email ?? createEmailService()).updateDraft(actor.emailActor, draftKey, finalContent, context.requestKey); }, 'signal'),
+  capability('email.draft.update', 'Update the final content and/or canonical attachments of a Signal email draft without sending it.', emailDraftUpdateInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).updateDraft(actor.emailActor, input, context.requestKey); }, 'signal'),
   capability('email.draft.assign', 'Assign a legacy unassigned new email draft to one connected inbox.', z.object({ draftKey: key, connectorKey: key }).strict(), async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).assignDraft(actor.emailActor, input, context.requestKey); }, 'signal'),
   capability('email.draft.send', 'Send a reviewed Signal email draft. connectorKey is only needed for a legacy unassigned new draft. replyMode may override recipients for a reply draft.', z.object({ draftKey: key, connectorKey: key.optional(), replyMode: z.enum(['reply', 'reply_all']).optional() }).strict(), async ({ draftKey, connectorKey, replyMode }, context) => { const actor = identity(context); return (context.email ?? createEmailService()).sendDraft(actor.emailActor, draftKey, connectorKey, context.requestKey, replyMode); }, 'signal'),
   capability('email.draft.delete', 'Hard-delete one unsent, inactive email draft and its generated dependents.', emailDraftDeleteInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).deleteDraft(actor.emailActor, input, context.requestKey); }, 'signal'),

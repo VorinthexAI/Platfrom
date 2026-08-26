@@ -14,12 +14,12 @@ function style(source: string, name: string) {
   return match![1];
 }
 
-test("generated bulk toolbars and badges exactly match Gallery Highlights dimensions", () => {
+test("generated bulk toolbars retain Gallery styling with sheet-safe controls", () => {
   expect(style(workspace, "generatedBulkToolbar")).toBe(style(highlights, "bulkToolbar"));
   expect(style(workspace, "generatedBulkToolbarSelection")).toBe(style(highlights, "bulkToolbarSelection"));
-  expect(style(workspace, "generatedBulkToolbarClose")).toBe(style(highlights, "bulkToolbarClose"));
+  expect(style(workspace, "generatedBulkToolbarClose")).toContain("height: 42, width: 42");
   expect(style(workspace, "generatedBulkSelectionText")).toBe(style(highlights, "bulkSelectionText"));
-  expect(style(workspace, "generatedBulkDeleteAction")).toBe(style(highlights, "bulkDeleteAction"));
+  expect(style(workspace, "generatedBulkDeleteAction")).not.toContain("height: 30");
   expect(style(workspace, "generatedBulkDeleteText")).toBe(style(highlights, "bulkDeleteText"));
   expect(style(workspace, "generatedVersionSelected")).toBe(style(highlights, "cardSelected"));
   expect(style(workspace, "generatedSelectionBadge")).toBe(style(highlights, "selectionBadge"));

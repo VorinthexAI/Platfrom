@@ -32,6 +32,7 @@ export const documentSchema = z.object({
   sourceStorageKeys: z.array(z.string().trim().min(1)).max(12).optional(),
   currentVersionKey: z.string().cuid().nullable().optional(),
   mutationPolicy: z.enum(['user', 'system-only']).default('user'),
+  managedPurpose: z.enum(['mail-attachment']).optional(), managedOwnerKey: z.string().cuid().optional(),
   isFavorite: z.boolean().default(false),
   _internalDeletion: z.object({
     kind: z.literal('document'),

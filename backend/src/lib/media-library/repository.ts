@@ -109,12 +109,17 @@ export async function searchAccessibleImages(
           LET collection = DOCUMENT(collections, relation.collectionKey)
           FILTER collection != null
           FILTER collection.scopeKey == @scopeKey
-          FOR member IN collectionMembers
-            FILTER member.scopeKey == @scopeKey
-            FILTER member.collectionKey == relation.collectionKey
-            FILTER member.memberKey == @actorKey
-            LIMIT 1
-            RETURN 1
+          LET managedViewer = collection.purpose == "email-media" && collection.mutationPolicy == "system-only" && scoped
+          LET member = collection.mutationPolicy == "system-only" ? null : FIRST(
+            FOR item IN collectionMembers
+              FILTER item.scopeKey == @scopeKey
+              FILTER item.collectionKey == relation.collectionKey
+              FILTER item.memberKey == @actorKey
+              LIMIT 1
+              RETURN item
+          )
+          FILTER managedViewer || member != null
+          RETURN 1
       ) > 0
       LET relationCount = LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == image._key RETURN 1)
       FILTER privileged || (image.createdByKey == @actorKey && relationCount == 0) || collectionAccess
@@ -158,8 +163,8 @@ export function createMediaLibraryRepository(database: MediaLibraryDatabase = db
     async getImage(scopeKey, imageKey) { const value = await one(database, 'FOR image IN images FILTER image._key == @imageKey && image.scopeKey == @scopeKey LIMIT 1 RETURN image', { scopeKey, imageKey }); return value ? parse(imageSchema, value) : null; },
     async getCollection(scopeKey, collectionKey) { const value = await one(database, 'FOR collection IN collections FILTER collection._key == @collectionKey && collection.scopeKey == @scopeKey LIMIT 1 RETURN collection', { scopeKey, collectionKey }); return value ? parse(collectionSchema, value) : null; },
     ownsImage: (scopeKey, imageKey, ownerKey) => owns('image', scopeKey, imageKey, ownerKey),
-    canAccessImage: async (scopeKey, imageKey, actorKey) => Boolean(await one(database, `LET image = DOCUMENT(images, @imageKey) ${activeActor} LET privileged = elevated || scopedRole IN ["owner", "admin"] FILTER image != null && image.scopeKey == @scopeKey LET relationCount = LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == @imageKey RETURN 1) FILTER privileged || (image.createdByKey == @actorKey && relationCount == 0) || LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == @imageKey LET collection = DOCUMENT(collections, relation.collectionKey) FILTER collection != null FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == relation.collectionKey && member.memberKey == @actorKey LIMIT 1 RETURN 1) > 0 RETURN true`, { scopeKey, imageKey, actorKey })),
-    canAccessCollection: async (scopeKey, collectionKey, actorKey) => Boolean(await one(database, `LET collection = DOCUMENT(collections, @collectionKey) ${activeActor} LET privileged = elevated || scopedRole IN ["owner", "admin"] FILTER collection != null && collection.scopeKey == @scopeKey FILTER privileged || LENGTH(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == @collectionKey && member.memberKey == @actorKey LIMIT 1 RETURN 1) > 0 RETURN true`, { scopeKey, collectionKey, actorKey })),
+    canAccessImage: async (scopeKey, imageKey, actorKey) => Boolean(await one(database, `LET image = DOCUMENT(images, @imageKey) ${activeActor} LET privileged = elevated || scopedRole IN ["owner", "admin"] FILTER image != null && image.scopeKey == @scopeKey LET relationCount = LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == @imageKey RETURN 1) FILTER privileged || (image.createdByKey == @actorKey && relationCount == 0) || LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == @imageKey LET collection = DOCUMENT(collections, relation.collectionKey) FILTER collection != null FILTER collection.purpose == "email-media" && collection.mutationPolicy == "system-only" ? scoped : collection.mutationPolicy != "system-only" && LENGTH(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == relation.collectionKey && member.memberKey == @actorKey LIMIT 1 RETURN 1) > 0 RETURN 1) > 0 RETURN true`, { scopeKey, imageKey, actorKey })),
+    canAccessCollection: async (scopeKey, collectionKey, actorKey) => Boolean(await one(database, `LET collection = DOCUMENT(collections, @collectionKey) ${activeActor} LET privileged = elevated || scopedRole IN ["owner", "admin"] FILTER collection != null && collection.scopeKey == @scopeKey LET managedViewer = collection.purpose == "email-media" && collection.mutationPolicy == "system-only" && scoped FILTER privileged || managedViewer || (collection.mutationPolicy != "system-only" && LENGTH(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == @collectionKey && member.memberKey == @actorKey LIMIT 1 RETURN 1) > 0) RETURN true`, { scopeKey, collectionKey, actorKey })),
     canManageScope: async (scopeKey, actorKey) => Boolean(await one(database, `${activeActor} FILTER writable || elevated RETURN true`, { scopeKey, actorKey })),
     ownsCollection: (scopeKey, collectionKey, ownerKey) => owns('collection', scopeKey, collectionKey, ownerKey),
     addImageToCollection: add, copyImageToCollection: add,

@@ -43,7 +43,7 @@ const imageResultSchema = z.object({
   mutationPolicy: z.enum(['user', 'system-only']), isFavorite: z.boolean(), createdByKey: z.string().nullable().optional(), createdAt: z.string().datetime(), updatedAt: z.string().datetime(), url: z.string().url(), score: z.number().optional(),
 }).strict();
 const inboxResultSchema = z.object({
-  key: z.string(), connectorKey: z.string(), provider: z.enum(['gmail', 'outlook', 'icloud']), email: z.string().email(), name: z.string(), description: z.string().optional(), coverUrl: z.string().url().optional(), isFavorite: z.boolean(),
+  key: z.string(), connectorKey: z.string(), provider: z.literal('gmail'), email: z.string().email(), name: z.string(), description: z.string().optional(), coverUrl: z.string().url().optional(), isFavorite: z.boolean(),
   status: z.enum(['active', 'error', 'revoked']), syncEnabled: z.boolean(), syncStatus: z.enum(['idle', 'syncing', 'error']), lastSyncedAt: z.string().datetime().optional(), syncError: z.string().optional(), createdAt: z.string().datetime(), updatedAt: z.string().datetime(), score: z.number(),
 }).strict();
 const toneResultSchema = z.object({ key: z.string(), slug: z.enum(['casual', 'formal', 'concise', 'warm', 'direct']).optional(), name: z.string(), instruction: z.string(), isFavorite: z.boolean(), createdAt: z.string().datetime(), updatedAt: z.string().datetime(), score: z.number() }).strict();

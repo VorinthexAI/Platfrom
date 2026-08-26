@@ -6,9 +6,9 @@ const now = "2026-08-11T10:00:00.000Z";
 const connector = { key: "inbox-a", connectorKey: "connector-a", provider: "gmail" as const, email: "a@example.com", name: "Client inbox", description: "Priority client mail", isFavorite: true, status: "active" as const, syncEnabled: true, syncStatus: "idle" as const, createdAt: now, updatedAt: now };
 const connectorB = { ...connector, key: "inbox-b", connectorKey: "connector-b", email: "b@example.com", name: "Team inbox", isFavorite: false };
 const thread = { key: "thread-key", subject: "Subject", summary: "Summary", intent: "Review message", priority: "normal", state: "needs_action", inboxCategory: "Important", lastMessageAt: now, latestFrom: "sender@example.com", isFavorite: false, isRead: false, unread: true, createdAt: now, updatedAt: now };
-const message = { key: "message-key", threadKey: "thread-key", from: "sender@example.com", fromName: "Sender Name", to: ["a@example.com"], subject: "Subject", body: "Body", summary: "Summary", direction: "inbound", sentAt: now, hasAttachments: false, isRead: false, unread: true, inboxCategory: "Important", createdAt: now, updatedAt: now };
+const message = { key: "message-key", threadKey: "thread-key", from: "sender@example.com", fromName: "Sender Name", to: ["a@example.com"], subject: "Subject", body: "Body", summary: "Summary", direction: "inbound", sentAt: now, hasAttachments: false, attachmentAvailability: "none", isRead: false, unread: true, inboxCategory: "Important", createdAt: now, updatedAt: now };
 const draft = { key: "draft-key", variant: "reply", replyMode: "reply_all", threadKey: "thread-key", messageKey: "message-key", to: ["sender@example.com"], cc: ["team@example.com"], generatedContent: "Reply", status: "generated", createdAt: now, updatedAt: now };
-const unassignedDraft = { key: "legacy-draft", connectorKey: "connector-a", variant: "new", to: ["one@example.com"], subject: "Legacy proposal", generatedContent: "Proposal", status: "generated", createdAt: now, updatedAt: now };
+const unassignedDraft = { key: "legacy-draft", variant: "new", to: ["one@example.com"], subject: "Legacy proposal", generatedContent: "Proposal", status: "generated", createdAt: now, updatedAt: now };
 const translationVersion = { key: "translation-key", documentKey: "message-key", version: 1, type: "translation" as const, language: "French", label: "French translation", content: "Bonjour", createdAt: now };
 const summaryVersion = { key: "summary-key", documentKey: "message-key", version: 1, summary: "Brief summary", topic: "Decision", style: "brief" as const, language: "English", sourceTitle: "Subject", sourceDocumentUpdatedAt: now, createdAt: now };
 let includeUnassignedDrafts = true;
@@ -45,7 +45,7 @@ mock.module("./api-client", () => ({ apiClient: {
         : path === "/email/trash/clear" ? { connectorKey: connector.connectorKey, providerMessagesDeleted: 2, threadsDeleted: 1, documentsDeleted: 3 }
         : path === `/email/threads/${thread.key}` ? { thread, messages: [{ ...message, bodyTruncated: false }], nextCursor: null, truncated: false }
         : path.endsWith("/favorite") || path.endsWith("/trash") ? { ...thread, isFavorite: true }
-        : path.endsWith("/similar") ? { messageKey: "message-key", items: [{ key: "similar-key", threadKey: "other-thread", from: "sender@example.com", to: ["a@example.com"], subject: "Related", body: "Related body", summary: "Related", direction: "inbound", sentAt: now, hasAttachments: false, isRead: true, unread: false, inboxCategory: "Urgent", createdAt: now, updatedAt: now, similarity: 0.91 }] }
+        : path.endsWith("/similar") ? { messageKey: "message-key", items: [{ key: "similar-key", threadKey: "other-thread", from: "sender@example.com", to: ["a@example.com"], subject: "Related", body: "Related body", summary: "Related", direction: "inbound", sentAt: now, hasAttachments: false, attachmentAvailability: "none", isRead: true, unread: false, inboxCategory: "Urgent", createdAt: now, updatedAt: now, similarity: 0.91 }] }
         : path === "/app/translate" ? { messageKey: "message-key", language: "French", version: translationVersion }
         : path.endsWith("/translations/list") ? { messageKey: "message-key", versions: [translationVersion] }
         : path.endsWith("/translations") ? { messageKey: "message-key", language: "French", version: translationVersion }
@@ -55,7 +55,6 @@ mock.module("./api-client", () => ({ apiClient: {
           : path === "/email/sync" ? { synced: 1, lastSyncedAt: now }
             : path === "/email/subscribe" ? subscribeResult ?? { watchExpiresAt: now }
              : path === "/email/connect" ? { authorizationUrl: "https://accounts.example.com/oauth" }
-               : path === "/email/connect/icloud" ? { ...connectorB, provider: "icloud" }
                : path === "/email/connect/exchange" ? connectorB
                  : path === "/email/disconnect" ? { disconnected: true }
                : {};
@@ -146,6 +145,18 @@ test("sends strict new compose and reply attachment requests", async () => {
   expect(calls[1]).toMatchObject({ method: "POST", path: "/email/drafts", body: { organizationKey: "org-key", scopeKey: "scope-key", threadKey: "thread-key", replyMode: "reply_all", tone: "warm", instruction: "Confirm receipt", attachments } });
 });
 
+test("sends strict independent body and attachment draft updates", async () => {
+  const context = { organizationKey: "org-key", scopeKey: "scope-key" };
+  const attachments = [{ type: "document" as const, key: "document-key" }, { type: "image" as const, key: "image-key" }];
+  await client.updateEmailDraftForContext(context, "draft-key", { attachments }, "attachments-update");
+  await client.updateEmailDraft("draft-key", "Body only");
+  expect(calls[0]).toMatchObject({ method: "PATCH", path: "/email/drafts/draft-key", body: { ...context, attachments }, config: { headers: { "Idempotency-Key": "attachments-update" } } });
+  expect(calls[1]).toMatchObject({ method: "PATCH", path: "/email/drafts/draft-key", body: { ...context, finalContent: "Body only" } });
+  expect(() => client.emailDraftUpdateInputSchema.parse({})).toThrow();
+  expect(() => client.emailDraftUpdateInputSchema.parse({ attachments: [attachments[0], attachments[0]] })).toThrow("distinct");
+  expect(() => client.emailDraftUpdateInputSchema.parse({ finalContent: "Body", hidden: true })).toThrow();
+});
+
 test("rejects unknown compose fields and malformed attachment references before transport", async () => {
   expect(() => client.emailComposeDraftInputSchema.parse({ to: ["one@example.com"], subject: "Hello", tone: "warm", hidden: true })).toThrow();
   expect(() => client.emailReplyDraftInputSchema.parse({ threadKey: "thread-key", replyMode: "reply", tone: "warm", attachments: [{ type: "file", key: "file-key" }] })).toThrow();
@@ -164,7 +175,8 @@ test("matches generate and preserve compose modes with exact blank content", asy
   expect(() => client.emailComposeDraftInputSchema.parse({ to: ["one@example.com"], generationMode: "generate", subject: "" })).toThrow("tone is required");
   expect(() => client.emailComposeDraftInputSchema.parse({ to: ["one@example.com"], generationMode: "preserve", subject: "" })).toThrow("authoredBody is required");
   expect(() => client.emailComposeDraftInputSchema.parse({ to: ["one@example.com"], generationMode: "preserve", subject: "", authoredBody: "", tone: "direct" })).toThrow("tone is not allowed");
-  expect(client.emailDraftSchema.parse({ ...unassignedDraft, subject: "", generatedContent: "", finalContent: "" })).toMatchObject({ subject: "", generatedContent: "", finalContent: "" });
+  expect(client.emailDraftSchema.parse({ ...unassignedDraft, connectorKey: undefined, subject: "", generatedContent: "", finalContent: "" })).toMatchObject({ subject: "", generatedContent: "", finalContent: "" });
+  expect(() => client.emailComposeDraftInputSchema.parse({ to: ["One@example.com"], cc: ["one@example.com"], subject: "Hello", tone: "direct" })).toThrow("already present in TO");
 });
 
 test("forwards an optional abort signal when composing", async () => {
@@ -177,7 +189,7 @@ test("strictly parses reply modes, resolved recipients, and sender display names
   expect(client.emailDraftSchema.parse(draft)).toEqual(draft);
   expect(() => client.emailDraftSchema.parse({ ...draft, replyMode: undefined })).toThrow();
   expect(() => client.emailDraftSchema.parse({ ...draft, hidden: true })).toThrow();
-  const message = { key: "message-key", threadKey: "thread-key", from: "sender@example.com", fromName: "Sender Name", to: ["a@example.com"], subject: "Subject", body: "Body", summary: "Summary", direction: "inbound", sentAt: now, hasAttachments: false, isRead: true, unread: false, inboxCategory: "Important", createdAt: now, updatedAt: now };
+  const message = { key: "message-key", threadKey: "thread-key", from: "sender@example.com", fromName: "Sender Name", to: ["a@example.com"], subject: "Subject", body: "Body", summary: "Summary", direction: "inbound", sentAt: now, hasAttachments: false, attachmentAvailability: "none", isRead: true, unread: false, inboxCategory: "Important", createdAt: now, updatedAt: now };
   expect(client.emailMessageSchema.parse(message).fromName).toBe("Sender Name");
   expect(() => client.emailMessageSchema.parse({ ...message, displayName: "Wrong field" })).toThrow();
 });
@@ -219,7 +231,25 @@ test("sends and strictly parses reader and generated-version requests", async ()
 test("sends the normalized inbox cursor query without changing the product-neutral overview route", async () => {
   await client.fetchEmailOverview({ connectorKey: connector.connectorKey, readState: "read", facets: ["favorite", "urgent", "filtered", "important"], cursor: "cursor-1", limit: 50 });
   expect(calls[0]).toMatchObject({ path: "/email/overview", body: { organizationKey: "org-key", scopeKey: "scope-key", connectorKey: connector.connectorKey, readState: "read", facets: ["urgent", "important", "filtered", "favorite"], cursor: "cursor-1", limit: 50 } });
-  expect(() => client.emailOverviewInputSchema.parse({ connectorKey: connector.connectorKey, search: "client" })).toThrow();
+  expect(client.emailOverviewInputSchema.parse({ connectorKey: connector.connectorKey, search: " client " })).toMatchObject({ search: "client" });
+});
+
+test("mirrors backend overview cross-field requirements", () => {
+  expect(() => client.emailOverviewInputSchema.parse({ readState: "read", facets: [] })).toThrow("connectorKey");
+  expect(() => client.emailOverviewInputSchema.parse({ connectorKey: connector.connectorKey, readState: "read" })).toThrow("together");
+  expect(() => client.emailOverviewInputSchema.parse({ connectorKey: connector.connectorKey, facets: ["urgent"] })).toThrow("together");
+  expect(() => client.emailOverviewInputSchema.parse({ connectorKey: connector.connectorKey, filter: "trash", readState: "read", facets: [] })).toThrow("combined");
+  expect(() => client.emailOverviewInputSchema.parse({ search: "client" })).toThrow("connectorKey");
+  expect(client.emailOverviewInputSchema.parse({ connectorKey: connector.connectorKey, filter: "important" })).toMatchObject({ filter: "important" });
+});
+
+test("retains request identity for the same payload and replaces it when payload changes", () => {
+  let created = 0;
+  const create = () => `request-${++created}`;
+  const first = client.retainEmailRequestKey(undefined, "payload-a", create);
+  expect(client.retainEmailRequestKey(first, "payload-a", create)).toBe(first);
+  expect(client.retainEmailRequestKey(first, "payload-b", create)).toEqual({ fingerprint: "payload-b", requestKey: "request-2" });
+  expect(created).toBe(2);
 });
 
 test("normalizes default, all-facet, and intentional empty inbox queries immutably", () => {
@@ -230,7 +260,16 @@ test("normalizes default, all-facet, and intentional empty inbox queries immutab
   expect(Object.isFrozen(empty)).toBe(true);
   expect(Object.isFrozen(empty.facets)).toBe(true);
   expect(() => client.emailOverviewInputSchema.parse({ connectorKey: connector.connectorKey, filter: "trash", facets: ["urgent"] })).toThrow();
-  expect(() => client.emailOverviewInputSchema.parse({ connectorKey: connector.connectorKey, filter: "important" })).toThrow();
+  expect(() => client.emailOverviewInputSchema.parse({ connectorKey: connector.connectorKey, readState: "unread" })).toThrow();
+});
+
+test("constrains attachment references on message and draft output fields", () => {
+  const duplicate = [{ type: "image" as const, key: "same" }, { type: "image" as const, key: "same" }];
+  const tooMany = Array.from({ length: 21 }, (_, index) => ({ type: "document" as const, key: `document-${index}` }));
+  expect(() => client.emailMessageSchema.parse({ ...message, attachments: duplicate })).toThrow("distinct");
+  expect(() => client.emailDraftSchema.parse({ ...draft, attachments: duplicate })).toThrow("distinct");
+  expect(() => client.emailMessageSchema.parse({ ...message, attachments: tooMany })).toThrow();
+  expect(() => client.emailDraftSchema.parse({ ...draft, attachments: tooMany })).toThrow();
 });
 
 test("rapid facet requests compose from the latest requested query", () => {
@@ -339,18 +378,14 @@ test("reply context bulk delete accepts only the exact backend result", async ()
   await expect(client.deleteEmailReplyContextsForContext(context, ["context-client"])).rejects.toThrow();
 });
 
-test("OAuth start carries the strict provider and inbox metadata payload", async () => {
-  expect(await client.launchEmailConnection({ provider: "outlook", name: "Client inbox", description: "Priority mail" })).toBeNull();
-  expect(calls[0]).toEqual({ method: "POST", path: "/email/connect", body: { organizationKey: "org-key", scopeKey: "scope-key", provider: "outlook", returnUri: "vorinthexcore://capability/signal", name: "Client inbox", description: "Priority mail" }, config: {} });
+test("Gmail OAuth start carries strict inbox metadata and a fixed provider", async () => {
+  expect(await client.launchEmailConnection({ name: "Client inbox", description: "Priority mail" })).toBeNull();
+  expect(calls[0]).toEqual({ method: "POST", path: "/email/connect", body: { organizationKey: "org-key", scopeKey: "scope-key", provider: "gmail", returnUri: "vorinthexcore://capability/signal", name: "Client inbox", description: "Priority mail" }, config: {} });
   expect(() => client.emailConnectionMetadataSchema.parse({ name: "", description: "Invalid" })).toThrow();
-  expect(() => client.emailOAuthConnectionInputSchema.parse({ provider: "icloud", name: "Inbox" })).toThrow();
-  expect(() => client.emailOAuthConnectionInputSchema.parse({ provider: "gmail", name: "Inbox", extra: true })).toThrow();
-});
-
-test("iCloud connection sends credentials and metadata directly with a strict payload", async () => {
-  expect(await client.connectIcloudEmail({ email: "apple@example.com", appPassword: "abcd-efgh-ijkl-mnop", name: "Apple inbox", description: "Personal mail" })).toMatchObject({ provider: "icloud", name: "Team inbox" });
-  expect(calls[0]).toEqual({ method: "POST", path: "/email/connect/icloud", body: { organizationKey: "org-key", scopeKey: "scope-key", email: "apple@example.com", appPassword: "abcd-efgh-ijkl-mnop", name: "Apple inbox", description: "Personal mail" }, config: {} });
-  expect(() => client.emailIcloudConnectionInputSchema.parse({ email: "apple@example.com", appPassword: "password", name: "Inbox", provider: "icloud" })).toThrow();
+  expect(() => client.emailConnectionMetadataSchema.parse({ provider: "other", name: "Inbox" })).toThrow();
+  expect(() => client.emailConnectionMetadataSchema.parse({ name: "Inbox", email: "other@example.com", appPassword: "password" })).toThrow();
+  expect(client.emailProviderSchema.parse("gmail")).toBe("gmail");
+  expect(() => client.emailProviderSchema.parse("other")).toThrow();
 });
 
 test("parses unassigned drafts and defaults the legacy field to an empty list", async () => {
@@ -412,6 +447,24 @@ test("accepts the exact repairPending bulk item and preserves partial success or
   const report = await client.setEmailThreadsFavoriteForContext(context, [thread.key, "thread-two"], true);
   expect(report.items).toEqual([expect.objectContaining({ threadKey: thread.key, status: "succeeded" }), { threadKey: "thread-two", status: "repairPending", error: "database unavailable" }]);
   expect(() => client.emailBulkThreadReportSchema.parse({ ...(bulkReportOverride as object), items: [{ threadKey: "thread-two", status: "repair_pending", error: "legacy" }] })).toThrow();
+});
+
+test("accepts strict mixed succeeded, provider-deleted, failed, and repair-pending reports", () => {
+  const report = client.emailBulkThreadReportSchema.parse({
+    requested: 4,
+    succeeded: 2,
+    failed: 1,
+    repairPending: 1,
+    items: [
+      { threadKey: thread.key, status: "succeeded", thread },
+      { threadKey: "provider-deleted", status: "deleted", error: "Email thread was not found at the provider and was deleted locally" },
+      { threadKey: "failed", status: "failed", error: "permission denied" },
+      { threadKey: "repair", status: "repairPending", error: "database unavailable" },
+    ],
+  });
+  expect(report.items.map(({ status }) => status)).toEqual(["succeeded", "deleted", "failed", "repairPending"]);
+  expect(() => client.emailBulkThreadReportSchema.parse({ ...report, items: report.items.map((item) => item.status === "deleted" ? { ...item, thread } : item) })).toThrow();
+  expect(() => client.emailBulkThreadReportSchema.parse({ ...report, succeeded: 1 })).toThrow("counts");
 });
 
 test("clears one connector Trash with strict deletion counts", async () => {

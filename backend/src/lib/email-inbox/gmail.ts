@@ -118,6 +118,17 @@ export class GmailApiError extends Error {
   }
 }
 
+export type GmailPermanentAttachmentErrorCode = 'ATTACHMENT_INVALID_BASE64URL' | 'ATTACHMENT_INVALID_IDENTIFIER' | 'ATTACHMENT_INVALID_SIZE' | 'ATTACHMENT_MALFORMED_PAYLOAD' | 'ATTACHMENT_SIZE_MISMATCH';
+
+export class GmailPermanentAttachmentError extends Error {
+  readonly permanent = true;
+
+  constructor(readonly code: GmailPermanentAttachmentErrorCode, message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = 'GmailPermanentAttachmentError';
+  }
+}
+
 const RETRYABLE_GMAIL_REASONS = new Set(['backendError', 'internalError', 'quotaExceeded', 'rateLimitExceeded', 'userRateLimitExceeded', 'RESOURCE_EXHAUSTED', 'UNAVAILABLE']);
 const RETRYABLE_TRANSPORT_CODES = new Set(['ECONNREFUSED', 'ECONNRESET', 'EHOSTUNREACH', 'ENETUNREACH', 'ETIMEDOUT', 'EAI_AGAIN']);
 export function isRetryableGmailError(error: unknown) {
@@ -175,6 +186,133 @@ export function emailAddressWithName(value: string): { email?: string; name?: st
 
 const MAX_GMAIL_BODY_BYTES = 25 * 1024 * 1024;
 const MAX_GMAIL_BODY_BASE64_CHARACTERS = Math.ceil(MAX_GMAIL_BODY_BYTES / 3) * 4 + 4;
+export const MAX_GMAIL_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+const MAX_GMAIL_ATTACHMENT_BASE64_CHARACTERS = Math.ceil(MAX_GMAIL_ATTACHMENT_BYTES / 3) * 4 + 4;
+export const MAX_GMAIL_ATTACHMENTS = 20;
+const MAX_GMAIL_MIME_DEPTH = 100;
+const MAX_GMAIL_MIME_NODES = 10_000;
+const DOCUMENT_MIME_TYPES = new Map<string, string>([
+  ['application/pdf', 'pdf'], ['text/plain', 'txt'], ['text/markdown', 'md'], ['text/x-markdown', 'md'], ['application/msword', 'doc'],
+  ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'docx'],
+] as const);
+const IMAGE_MIME_TYPES = new Map<string, string>([['image/jpeg', 'jpg'], ['image/jpg', 'jpg'], ['image/png', 'png'], ['image/webp', 'webp'], ['image/gif', 'gif']]);
+const INVALID_ATTACHMENT_FILENAME = /[<>:"/\\|?*\p{Cc}\p{Cf}]/u;
+const RESERVED_ATTACHMENT_FILENAME = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
+
+export interface GmailAttachmentPart {
+  path: string;
+  type: 'document' | 'image';
+  mimeType: string;
+  filename: string;
+  size: number;
+  attachmentId?: string;
+  data?: string;
+}
+
+export interface GmailAttachmentDiscovery {
+  parts: GmailAttachmentPart[];
+  truncated: boolean;
+  unavailableCount: number;
+}
+
+export function normalizeGmailAttachmentFilename(filename: string | undefined, path: string, mimeType: string) {
+  const extension = DOCUMENT_MIME_TYPES.get(mimeType) ?? IMAGE_MIME_TYPES.get(mimeType);
+  if (!extension) throw new GmailPermanentAttachmentError('ATTACHMENT_MALFORMED_PAYLOAD', 'Gmail attachment MIME type is unsupported');
+  const fallback = () => `attachment-${createHash('sha256').update(path).digest('hex').slice(0, 12)}.${extension}`;
+  const normalized = (filename ?? '').normalize('NFC').trim();
+  if (!normalized || normalized === '.' || normalized === '..' || INVALID_ATTACHMENT_FILENAME.test(normalized) || RESERVED_ATTACHMENT_FILENAME.test(normalized) || normalized.endsWith('.') || Buffer.byteLength(normalized) > 255) return fallback();
+  const lastDot = normalized.lastIndexOf('.');
+  const stem = (lastDot > 0 ? normalized.slice(0, lastDot) : normalized).trim();
+  if (!stem || stem === '.' || stem === '..' || RESERVED_ATTACHMENT_FILENAME.test(stem)) return fallback();
+  const canonical = `${stem}.${extension}`;
+  return Buffer.byteLength(canonical) <= 255 ? canonical : fallback();
+}
+
+/** Discovers supported leaf attachments and reports every bounded omission. */
+export function discoverGmailAttachmentParts(root: GmailPart | undefined): GmailAttachmentDiscovery {
+  const attachments: GmailAttachmentPart[] = [];
+  if (!root) return { parts: attachments, truncated: false, unavailableCount: 0 };
+  const pending: Array<{ part: GmailPart; path: string; depth: number }> = [{ part: root, path: '0', depth: 0 }];
+  let nodes = 0;
+  let supported = 0;
+  let advertisedBytes = 0;
+  let unavailableCount = 0;
+  let truncated = false;
+  while (pending.length && nodes < MAX_GMAIL_MIME_NODES) {
+    const { part, path, depth } = pending.pop()!;
+    nodes += 1;
+    const mimeType = (part.mimeType ?? '').trim().toLowerCase().split(';', 1)[0]!;
+    const filename = part.filename ?? '';
+    const attached = Boolean(filename.trim()) || /^\s*attachment(?:\s*;|\s*$)/i.test(header(part.headers, 'content-disposition'));
+    if (mimeType === 'message/rfc822') {
+      if (attached) { unavailableCount += 1; truncated = true; }
+      continue;
+    }
+    if (attached) {
+      const documentExtension = DOCUMENT_MIME_TYPES.get(mimeType);
+      const type = documentExtension ? 'document' as const : IMAGE_MIME_TYPES.has(mimeType) ? 'image' as const : null;
+      if (type) {
+        supported += 1;
+        const safeFilename = normalizeGmailAttachmentFilename(filename, path, mimeType);
+        const size = Number.isSafeInteger(part.body?.size) ? part.body!.size! : -1;
+        if (supported > MAX_GMAIL_ATTACHMENTS || (size >= 0 && advertisedBytes + size > MAX_GMAIL_ATTACHMENT_BYTES)) {
+          unavailableCount += 1;
+          truncated = true;
+          continue;
+        }
+        if (size >= 0) advertisedBytes += size;
+        attachments.push({ path, type, mimeType, filename: safeFilename, size, ...(part.body?.attachmentId ? { attachmentId: part.body.attachmentId } : {}), ...(part.body?.data !== undefined ? { data: part.body.data } : {}) });
+      } else {
+        unavailableCount += 1;
+        truncated = true;
+      }
+      continue;
+    }
+    if (depth >= MAX_GMAIL_MIME_DEPTH) {
+      if (part.parts?.length) { unavailableCount += 1; truncated = true; }
+      continue;
+    }
+    const children = part.parts ?? [];
+    const remainingNodeBudget = MAX_GMAIL_MIME_NODES - nodes - pending.length;
+    const retainedChildren = Math.min(children.length, Math.max(0, remainingNodeBudget));
+    if (retainedChildren < children.length) { unavailableCount += 1; truncated = true; }
+    for (let index = retainedChildren - 1; index >= 0; index -= 1) pending.push({ part: children[index]!, path: `${path}.${index}`, depth: depth + 1 });
+  }
+  if (pending.length) { unavailableCount += 1; truncated = true; }
+  return { parts: attachments, truncated, unavailableCount: Math.min(unavailableCount, MAX_GMAIL_MIME_NODES) };
+}
+
+/** Returns retained parts for callers that do not need availability metadata. */
+export function gmailAttachmentParts(root: GmailPart | undefined): GmailAttachmentPart[] {
+  return discoverGmailAttachmentParts(root).parts;
+}
+
+export function decodeGmailAttachmentData(data: string, expectedSize: number): Uint8Array {
+  if (!Number.isSafeInteger(expectedSize) || expectedSize < 0 || expectedSize > MAX_GMAIL_ATTACHMENT_BYTES) throw new GmailPermanentAttachmentError('ATTACHMENT_INVALID_SIZE', 'Gmail attachment size is invalid');
+  const unpadded = data.replace(/=+$/, '');
+  const padding = data.length - unpadded.length;
+  const requiredPadding = (4 - unpadded.length % 4) % 4;
+  if (!/^(?:[A-Za-z0-9_-]+={0,2})?$/.test(data) || data.length > MAX_GMAIL_ATTACHMENT_BASE64_CHARACTERS || unpadded.length % 4 === 1 || (padding > 0 && padding !== requiredPadding)) throw new GmailPermanentAttachmentError('ATTACHMENT_INVALID_BASE64URL', 'Gmail attachment data is not valid base64url');
+  const bytes = new Uint8Array(Buffer.from(unpadded, 'base64url'));
+  if (bytes.byteLength !== expectedSize) throw new GmailPermanentAttachmentError('ATTACHMENT_SIZE_MISMATCH', 'Gmail attachment size did not match the provider metadata');
+  const canonical = Buffer.from(bytes).toString('base64url');
+  if (canonical !== unpadded) throw new GmailPermanentAttachmentError('ATTACHMENT_INVALID_BASE64URL', 'Gmail attachment data is not canonical base64url');
+  return bytes;
+}
+
+function validateGmailAttachmentPayload(part: GmailAttachmentPart, bytes: Uint8Array) {
+  if (part.type !== 'image') return bytes;
+  const ascii = (start: number, end: number) => Buffer.from(bytes.subarray(start, end)).toString('ascii');
+  const matches = part.mimeType === 'image/jpeg' || part.mimeType === 'image/jpg'
+    ? bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
+    : part.mimeType === 'image/png'
+      ? bytes.length >= 8 && bytes.slice(0, 8).every((value, index) => value === [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a][index])
+      : part.mimeType === 'image/gif'
+        ? ascii(0, 6) === 'GIF87a' || ascii(0, 6) === 'GIF89a'
+        : part.mimeType === 'image/webp' && ascii(0, 4) === 'RIFF' && ascii(8, 12) === 'WEBP';
+  if (!matches) throw new GmailPermanentAttachmentError('ATTACHMENT_MALFORMED_PAYLOAD', 'Gmail image attachment does not match its declared MIME type');
+  return bytes;
+}
 
 function isAttachedPart(part: GmailPart) {
   return part.mimeType?.toLowerCase() === 'message/rfc822'
@@ -307,6 +445,16 @@ export function createGmailClient(accessToken: string, fetcher: typeof fetch = f
       const message = await request<GmailMessageResource>(`/messages/${encodeURIComponent(id)}?format=full`);
       await hydrateTextAttachments(id, message.payload);
       return message;
+    },
+    async attachment(messageId: string, part: GmailAttachmentPart) {
+      if (!part.filename || Buffer.byteLength(part.filename) > 255 || INVALID_ATTACHMENT_FILENAME.test(part.filename)) throw new GmailPermanentAttachmentError('ATTACHMENT_MALFORMED_PAYLOAD', 'Gmail attachment filename is invalid');
+      if (part.type === 'image' && part.size > 20 * 1024 * 1024) throw new GmailPermanentAttachmentError('ATTACHMENT_INVALID_SIZE', 'Gmail image attachment exceeds the canonical size limit');
+      if (part.data !== undefined) return validateGmailAttachmentPayload(part, decodeGmailAttachmentData(part.data, part.size));
+      if (!part.attachmentId) throw new GmailPermanentAttachmentError('ATTACHMENT_INVALID_IDENTIFIER', 'Gmail attachment identifier is missing');
+      const attachment = await request<{ data?: unknown; size?: unknown }>(`/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(part.attachmentId)}`);
+      if (typeof attachment.data !== 'string') throw new GmailPermanentAttachmentError('ATTACHMENT_MALFORMED_PAYLOAD', 'Gmail attachment data is invalid');
+      if (attachment.size !== undefined && (!Number.isSafeInteger(attachment.size) || attachment.size !== part.size)) throw new GmailPermanentAttachmentError('ATTACHMENT_SIZE_MISMATCH', 'Gmail attachment provider sizes did not match');
+      return validateGmailAttachmentPayload(part, decodeGmailAttachmentData(attachment.data, part.size));
     },
     async findMessageByRfc822Id(messageId: string) {
       const query = new URLSearchParams({ q: `rfc822msgid:${messageId}`, maxResults: '1' });
