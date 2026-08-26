@@ -11,7 +11,7 @@ const keySchema = z.string().min(1);
 const dateSchema = z.iso.datetime();
 const contextSchema = z.strictObject({ organizationKey: keySchema, scopeKey: keySchema });
 export type EmailContext = z.infer<typeof contextSchema>;
-const EMAIL_RETURN_URI = "vorinthexcore://capability/signal";
+const EMAIL_RETURN_URI = "https://vorinthex.com/capability/signal";
 
 export const emailFilterSchema = z.enum(["all", "important", "urgent", "needs_action", "filtered", "unread", "favorite", "trash"]);
 export type EmailFilter = z.infer<typeof emailFilterSchema>;
@@ -157,7 +157,7 @@ export const emailProviderSchema = z.literal("gmail");
 
 export const emailConnectorSchema = z.strictObject({
   key: keySchema, connectorKey: keySchema, provider: emailProviderSchema, email: z.string().email(), name: z.string().min(1), description: z.string().optional(), coverUrl: z.string().url().optional(), isFavorite: z.boolean(),
-  status: z.enum(["active", "error", "revoked"]), syncEnabled: z.boolean(), syncStatus: z.enum(["idle", "syncing", "error"]), lastSyncedAt: dateSchema.optional(), syncError: z.string().optional(),
+  status: z.enum(["active", "error", "revoked"]), syncEnabled: z.boolean(), initialSyncCompleted: z.boolean().default(false), syncStatus: z.enum(["idle", "syncing", "error"]), lastSyncedAt: dateSchema.optional(), syncError: z.string().optional(),
   createdAt: dateSchema, updatedAt: dateSchema,
 });
 export type EmailConnector = z.infer<typeof emailConnectorSchema>;
@@ -273,9 +273,13 @@ async function request<T>(method: EmailRequestMethod, path: string, body: Record
 async function requestForContext<T>(context: EmailContext, method: EmailRequestMethod, path: string, body: Record<string, unknown>, schema: z.ZodType<T>, timeout?: number, idempotencyKey?: string, signal?: AbortSignal) {
   try {
     const data = { ...contextSchema.parse(context), ...body };
+    const currentConnectorTransport = path === "/email/overview" || path === "/email/connect/exchange" || path === "/email/inboxes";
     const config = {
       ...(timeout ? { timeout } : {}),
-      ...(idempotencyKey ? { headers: { "Idempotency-Key": z.string().trim().min(1).max(200).parse(idempotencyKey) } } : {}),
+      ...(idempotencyKey || currentConnectorTransport ? { headers: {
+        ...(idempotencyKey ? { "Idempotency-Key": z.string().trim().min(1).max(200).parse(idempotencyKey) } : {}),
+        ...(currentConnectorTransport ? { "X-Vorinthex-Email-Transport": "2" } : {}),
+      } } : {}),
       ...(signal ? { signal } : {}),
     };
     const response = method === "delete" ? await apiClient.delete(path, { ...config, data }) : await apiClient[method](path, data, config);
@@ -325,13 +329,8 @@ export async function askEmailAssistantForContext(context: EmailContext, message
     return unwrap(response.data, emailAssistantResponseSchema);
   } catch (error) { throw responseError(error); }
 }
-const emailSyncResultSchema = z.strictObject({ synced: z.number().int().nonnegative(), busy: z.boolean().optional(), lastSyncedAt: dateSchema.nullable() });
-export function syncEmail(connectorKey: string) { return syncEmailForContext(getEmailContext(), connectorKey); }
-export function syncEmailForContext(context: EmailContext, connectorKey: string) { return requestForContext(context, "post", "/email/sync", { connectorKey: keySchema.parse(connectorKey) }, emailSyncResultSchema, 120_000); }
-export function subscribeEmail(connectorKey: string) { return subscribeEmailForContext(getEmailContext(), connectorKey); }
-export function subscribeEmailForContext(context: EmailContext, connectorKey: string) { return requestForContext(context, "post", "/email/subscribe", { connectorKey: keySchema.parse(connectorKey) }, z.strictObject({ watchExpiresAt: dateSchema.optional(), skipped: z.literal(true).optional() })); }
-export function fetchEmailThread(threadKey: string) { return request("post", `/email/threads/${keySchema.parse(threadKey)}`, {}, threadDetailSchema); }
-export function fetchEmailThreadForContext(context: EmailContext, threadKey: string) { return requestForContext(context, "post", `/email/threads/${keySchema.parse(threadKey)}`, {}, threadDetailSchema); }
+export function fetchEmailThread(threadKey: string, cursor?: string) { return request("post", `/email/threads/${keySchema.parse(threadKey)}`, cursor ? { cursor: z.string().min(1).max(2_000).parse(cursor) } : {}, threadDetailSchema); }
+export function fetchEmailThreadForContext(context: EmailContext, threadKey: string, cursor?: string) { return requestForContext(context, "post", `/email/threads/${keySchema.parse(threadKey)}`, cursor ? { cursor: z.string().min(1).max(2_000).parse(cursor) } : {}, threadDetailSchema); }
 export function setEmailThreadFavorite(threadKey: string, isFavorite: boolean) { return request("post", `/email/threads/${keySchema.parse(threadKey)}/favorite`, { isFavorite }, emailThreadSchema); }
 export function setEmailThreadFavoriteForContext(context: EmailContext, threadKey: string, isFavorite: boolean, idempotencyKey?: string) { return requestForContext(context, "post", `/email/threads/${keySchema.parse(threadKey)}/favorite`, { isFavorite }, emailThreadSchema, undefined, idempotencyKey); }
 const emailBulkKeysSchema = z.array(keySchema).min(1).max(50).refine((keys) => new Set(keys).size === keys.length, "Thread keys must be distinct.");
@@ -343,6 +342,7 @@ export function trashEmailThreadForContext(context: EmailContext, threadKey: str
 export function findSimilarEmailMessagesForContext(context: EmailContext, messageKey: string, input: { limit?: number } = {}) { return requestForContext(context, "post", `/email/messages/${keySchema.parse(messageKey)}/similar`, z.strictObject({ limit: z.number().int().min(1).max(10).optional() }).parse(input), emailSimilarResponseSchema, 120_000); }
 export function translateEmailMessageForContext(context: EmailContext, messageKey: string, input: { targetLanguage: string; sourceLanguage?: string }, idempotencyKey?: string) { return requestForContext(context, "post", "/app/translate", { input: { messageKey: keySchema.parse(messageKey), ...z.strictObject({ targetLanguage: z.string().trim().min(2).max(100), sourceLanguage: z.string().trim().min(2).max(100).optional() }).parse(input) } }, emailTranslationResponseSchema, 4 * 60_000, idempotencyKey); }
 export function enhanceAppTextForContext(context: EmailContext, text: string) { return requestForContext(context, "post", "/app/enhance", { input: { text: z.string().trim().min(1).max(50_000).parse(text) } }, z.strictObject({ text: z.string().trim().min(1) }), 4 * 60_000); }
+export function translateAppTextForContext(context: EmailContext, text: string, targetLanguage: string) { return requestForContext(context, "post", "/app/translate", { input: { text: z.string().trim().min(1).max(50_000).parse(text), targetLanguage: z.string().trim().min(2).max(100).parse(targetLanguage) } }, z.strictObject({ text: z.string().trim().min(1) }), 4 * 60_000); }
 export function listEmailMessageTranslationsForContext(context: EmailContext, messageKey: string) { return requestForContext(context, "post", `/email/messages/${keySchema.parse(messageKey)}/translations/list`, {}, emailTranslationListResponseSchema); }
 export function deleteEmailMessageTranslationsForContext(context: EmailContext, input: z.input<typeof emailTranslationDeleteInputSchema>, idempotencyKey: string) {
   const { messageKey, translationKeys } = emailTranslationDeleteInputSchema.parse(input);
@@ -354,8 +354,8 @@ export function deleteEmailMessageSummariesForContext(context: EmailContext, inp
   const { messageKey, summaryKeys } = emailSummaryDeleteInputSchema.parse(input);
   return requestForContext(context, "delete", `/email/messages/${messageKey}/summaries`, { summaryKeys }, emailGeneratedDeleteResultSchema, undefined, idempotencyKey);
 }
-export function createEmailDraft(input: EmailReplyDraftInput) { return request("post", "/email/drafts", emailReplyDraftInputSchema.parse(input), emailDraftSchema); }
-export function createEmailDraftForContext(context: EmailContext, input: EmailReplyDraftInput, idempotencyKey?: string) { return requestForContext(context, "post", "/email/drafts", emailReplyDraftInputSchema.parse(input), emailDraftSchema, undefined, idempotencyKey); }
+export function createEmailDraft(input: EmailReplyDraftInput) { return requestForContext(getEmailContext(), "post", "/email/drafts", emailReplyDraftInputSchema.parse(input), emailDraftSchema, 4 * 60_000); }
+export function createEmailDraftForContext(context: EmailContext, input: EmailReplyDraftInput, idempotencyKey?: string) { return requestForContext(context, "post", "/email/drafts", emailReplyDraftInputSchema.parse(input), emailDraftSchema, 4 * 60_000, idempotencyKey); }
 export function composeEmailDraft(input: EmailComposeDraftInput) { return request("post", "/email/drafts/compose", emailComposeDraftInputSchema.parse(input), emailDraftSchema); }
 export function composeEmailDraftForContext(context: EmailContext, input: EmailComposeDraftInput, idempotencyKey?: string, signal?: AbortSignal) { return requestForContext(context, "post", "/email/drafts/compose", emailComposeDraftInputSchema.parse(input), emailDraftSchema, undefined, idempotencyKey, signal); }
 export function assignEmailDraft(draftKey: string, connectorKey: string) {

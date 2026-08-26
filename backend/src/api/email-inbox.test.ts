@@ -51,7 +51,8 @@ function appWith(overrides: Parameters<typeof createEmailHandlers>[0]) {
     .post('/email/tones', handlers.createTone)
     .patch('/email/tones/:toneKey', handlers.updateTone)
     .delete('/email/tones/:toneKey', handlers.deleteTone)
-    .patch('/email/inboxes', handlers.updateInbox);
+    .patch('/email/inboxes', handlers.updateInbox)
+    .post('/email/disconnect', handlers.disconnect);
 }
 
 describe('email inbox handlers', () => {
@@ -108,15 +109,49 @@ describe('email inbox handlers', () => {
     }
   });
 
-  test('keeps HTTP sync and subscription on the canonical service with strict selectors', async () => {
+  test('keeps deployed sync and subscribe aliases strict and projects their legacy response shapes', async () => {
     const calls: unknown[] = [];
-    const service = { sync: async (...args: unknown[]) => { calls.push(['sync', ...args]); return { synced: 0 }; }, subscribe: async (...args: unknown[]) => { calls.push(['subscribe', ...args]); return { watchExpiresAt: '2026-08-24T00:00:00.000Z' }; } };
+    const service = {
+      sync: async (...args: unknown[]) => { calls.push(['sync', ...args]); return { synced: 2, busy: false, lastSyncedAt: now, initialSyncCompleted: true }; },
+      registerWatch: async (...args: unknown[]) => { calls.push(['registerWatch', ...args]); return { watchExpiresAt: '2026-08-24T00:00:00.000Z', connectorRevision: 'new-revision' }; },
+    };
     const app = appWith({ getIdentity: identity as never, service: service as never, oauth: {} as never });
     const body = { organizationKey, scopeKey, connectorKey };
-    expect((await app.request('/email/sync', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).status).toBe(200);
-    expect((await app.request('/email/subscribe', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).status).toBe(200);
+    const sync = await app.request('/email/sync', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const subscribe = await app.request('/email/subscribe', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    expect(sync.status).toBe(200);
+    expect(subscribe.status).toBe(200);
+    expect((await sync.json() as any).data).toEqual({ synced: 2, busy: false, lastSyncedAt: now });
+    expect((await subscribe.json() as any).data).toEqual({ watchExpiresAt: '2026-08-24T00:00:00.000Z' });
     expect((await app.request('/email/subscribe', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, accessToken: 'untrusted' }) })).status).toBe(400);
-    expect(calls).toEqual([['sync', { userKey, organizationKey, scopeKey }, connectorKey], ['subscribe', { userKey, organizationKey, scopeKey }, connectorKey]]);
+    expect(calls).toEqual([
+      ['sync', { userKey, organizationKey, scopeKey }, connectorKey],
+      ['registerWatch', { userKey, organizationKey, scopeKey }, connectorKey],
+    ]);
+  });
+
+  test('omits new connector fields from legacy strict mobile transport responses', async () => {
+    const connector = { key: connectorKey, connectorKey, provider: 'gmail', email: 'mobile@example.com', name: 'Mobile', isFavorite: false, status: 'active', syncEnabled: true, initialSyncCompleted: true, syncStatus: 'idle', createdAt: now, updatedAt: now } as const;
+    const service = {
+      overview: async () => ({ ...overviewOutput, accounts: [connector], selectedAccount: connector }),
+      searchInboxes: async () => ({ inboxes: [{ ...connector, score: 0.9 }] }),
+      updateInbox: async () => connector,
+    };
+    const oauth = { exchange: async () => connector };
+    const app = appWith({ getIdentity: identity as never, service: service as never, oauth: oauth as never });
+    const request = (path: string, body: object, method = 'POST') => app.request(path, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey, ...body }) });
+    const responses = await Promise.all([
+      request('/email/overview', {}),
+      request('/email/inboxes/search', { query: 'mobile' }),
+      request('/email/connect/exchange', { code: `vrtx_email_grant_${'a'.repeat(20)}` }),
+      request('/email/inboxes', { connectorKey, name: 'Mobile' }, 'PATCH'),
+    ]);
+    expect(responses.map(({ status }) => status)).toEqual([200, 200, 200, 200]);
+    for (const response of responses) expect(await response.text()).not.toContain('initialSyncCompleted');
+
+    const current = await app.request('/email/overview', { method: 'POST', headers: { 'content-type': 'application/json', 'x-vorinthex-email-transport': '2' }, body: JSON.stringify({ organizationKey, scopeKey }) });
+    expect(current.status).toBe(200);
+    expect((await current.json() as any).data.accounts[0].initialSyncCompleted).toBe(true);
   });
 
   test('routes similarity, trash, and summaries through canonical service operations', async () => {
@@ -187,6 +222,16 @@ describe('email inbox handlers', () => {
     expect(calls).toEqual([
       ['oauth', { userKey, organizationKey, scopeKey, provider: 'gmail', name: 'Work', description: undefined, returnUri: 'vorinthexcore://capability/signal' }],
     ]);
+  });
+
+  test('routes strict disconnect through the authorized protocol boundary only', async () => {
+    const calls: unknown[] = [];
+    const service = { disconnect: async (...args: unknown[]) => { calls.push(args); return { disconnected: true }; } };
+    const app = appWith({ getIdentity: identity as never, service: service as never, oauth: {} as never });
+    const body = { organizationKey, scopeKey, connectorKey };
+    expect((await app.request('/email/disconnect', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).status).toBe(200);
+    expect((await app.request('/email/disconnect', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, deleteMessages: true }) })).status).toBe(400);
+    expect(calls).toEqual([[{ userKey, organizationKey, scopeKey }, connectorKey]]);
   });
 
   test('routes Gmail-backed favorite through the same canonical operation as Core', async () => {
@@ -320,7 +365,7 @@ describe('email inbox handlers', () => {
   test('routes strict inbox and custom tone mutations through the canonical service', async () => {
     const calls: unknown[] = [];
     const service = {
-      updateInbox: async (...args: unknown[]) => { calls.push(['updateInbox', ...args]); return {}; },
+      updateInbox: async (...args: unknown[]) => { calls.push(['updateInbox', ...args]); return { key: connectorKey, connectorKey, provider: 'gmail', email: 'work@example.com', name: 'Work', isFavorite: false, status: 'active', syncEnabled: true, initialSyncCompleted: true, syncStatus: 'idle', createdAt: now, updatedAt: now }; },
       createTone: async (...args: unknown[]) => { calls.push(['createTone', ...args]); return {}; },
       updateTone: async (...args: unknown[]) => { calls.push(['updateTone', ...args]); return {}; },
     };

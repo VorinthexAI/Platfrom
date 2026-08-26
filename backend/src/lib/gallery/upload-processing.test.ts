@@ -67,7 +67,7 @@ describe('Gallery upload batch processing', () => {
     const result = await processGalleryUploadBatch(keys, {
       repository: f.repository,
       storage: f.storage,
-      resolveImageReference: async (bytes) => imageDataUrl(bytes, 'image/jpeg'),
+      resolveImageReference: async (bytes) => imageDataUrl(bytes, 'image/png'),
       sanitizeImage: async (bytes) => ({ bytes: new Uint8Array(bytes), coordinates: sanitized++ === 0 ? { latitude: 59.3293, longitude: 18.0686 } : undefined }),
       reverseGeocode: async (coordinates) => { expect(coordinates).toEqual({ latitude: 59.3293, longitude: 18.0686 }); return { city: 'Stockholm', country: 'Sweden', countryCode: 'SE' }; },
       captionBatch: async (_organizationKey, urls) => { captionRequests.push(urls); return urls.map((_, index) => ({ caption: `Caption ${index + 1}`, score: 90 - index })); },
@@ -89,7 +89,7 @@ describe('Gallery upload batch processing', () => {
     expect(result).toEqual({ processed: 3 });
     expect(captionRequests).toHaveLength(1);
     expect(captionRequests[0]).toHaveLength(2);
-    expect(captionRequests[0]?.every((reference) => reference.startsWith('data:image/jpeg;base64,'))).toBe(true);
+    expect(captionRequests[0]?.every((reference) => reference.startsWith('data:image/png;base64,'))).toBe(true);
     expect(f.updates.filter(({ status }) => status === 'processing')).toHaveLength(3);
     expect(f.updates.filter(({ status }) => status === 'completed')).toHaveLength(3);
     expect(f.uploads.get(keys[0]!)!).toMatchObject({ city: 'Stockholm', country: 'Sweden', countryCode: 'SE' });
@@ -142,7 +142,7 @@ describe('Gallery upload batch processing', () => {
     expect((await f.repository.getUpload(keys[1]))?.status).toBe('failed');
     expect((await f.repository.getUpload(keys[2]))?.status).toBe('completed');
     expect(f.compensated).toEqual([imageKeys[1]]);
-    expect([...new Set(f.deleted)].sort()).toEqual([`media/${imageKeys[1]}`, 'pending/0.jpg', 'pending/0.jpg.sanitized.jpg', 'pending/1.jpg', 'pending/1.jpg.sanitized.jpg', 'pending/2.jpg', 'pending/2.jpg.sanitized.jpg']);
+    expect([...new Set(f.deleted)].sort()).toEqual([`media/${imageKeys[1]}`, 'pending/0.jpg', 'pending/0.jpg.sanitized.png', 'pending/1.jpg', 'pending/1.jpg.sanitized.png', 'pending/2.jpg', 'pending/2.jpg.sanitized.png']);
   });
 
   test('duplicate workers no-op when the queued batch claim is already held', async () => {

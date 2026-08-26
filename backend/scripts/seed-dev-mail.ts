@@ -40,6 +40,8 @@ async function main() {
     const first = expected[0]!.thread;
     const detail = await service.threadForTool(actor, mailDevFixtureKey('mail-thread', first.scopeKey, first.accountKey, first.providerThreadId));
     if (detail.messages.length !== expected[0]!.messages.length) throw new Error('Canonical mail thread fixture count mismatch.');
+    const expectedAttachments = expected[0]!.messages.map(({ attachments }) => attachments ?? []);
+    if (JSON.stringify(detail.messages.map(({ attachments }) => attachments ?? [])) !== JSON.stringify(expectedAttachments)) throw new Error('Canonical mail thread fixture attachments mismatch.');
   }
   console.log(JSON.stringify(counts));
 }

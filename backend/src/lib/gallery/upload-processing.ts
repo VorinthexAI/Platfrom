@@ -1,4 +1,5 @@
 import { performance } from 'node:perf_hooks';
+import { createHash } from 'node:crypto';
 import { collectionImageSchema } from '@/lib/db/collection-images.node';
 import { galleryUploadSchema } from '@/lib/db/gallery-uploads.node';
 import { insertPreparedImageWithCaption } from '@/lib/db/images.node';
@@ -89,8 +90,8 @@ export async function processGalleryUploadBatch(uploadKeys: readonly string[], d
       const object = await storage.download(upload.storageKey);
       if (object.bytes.byteLength !== upload.sizeBytes) throw new Error(`Uploaded image size changed for ${upload.key}.`);
       const sanitized = await sanitizeImage(object.bytes);
-      const stagingKey = `${upload.storageKey}.sanitized.jpg`;
-      await storage.upload({ key: stagingKey, bytes: sanitized.bytes, mimeType: 'image/jpeg' });
+      const stagingKey = `${upload.storageKey}.sanitized.png`;
+      await storage.upload({ key: stagingKey, bytes: sanitized.bytes, mimeType: 'image/png' });
       stagedKeys.push(stagingKey);
       let location = upload.city || upload.country || upload.countryCode ? { ...(upload.city ? { city: upload.city } : {}), ...(upload.country ? { country: upload.country } : {}), ...(upload.countryCode ? { countryCode: upload.countryCode } : {}) } : undefined;
       if (sanitized.coordinates) location = await reverseGeocode(sanitized.coordinates);
@@ -101,7 +102,8 @@ export async function processGalleryUploadBatch(uploadKeys: readonly string[], d
     if (preparationFailure) throw preparationFailure.reason;
     const stored = prepared.map((result) => (result as PromiseFulfilledResult<{ bytes: Uint8Array; stagingKey: string; location?: ImageLocation }>).value);
     const downloadDurationMs = performance.now() - downloadStartedAt;
-    const captionableBytes = new Set(uploads.flatMap((upload, index) => upload.processingMode === 'library' ? [stored[index]!.bytes] : []));
+    const bytesHash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
+    const captionableBytes = new Set(uploads.flatMap((upload, index) => upload.processingMode === 'library' ? [bytesHash(stored[index]!.bytes)] : []));
     const organizationKey = uploads[0]!.organizationKey;
     if (uploads.some((upload) => upload.organizationKey !== organizationKey)) throw new Error('Gallery upload batches must belong to one organization.');
     const captionBatch = dependencies.captionBatch ?? (async (organization, imageUrls) => (await imageCaptionTool.execute({ imageUrls }, { organizationKey: organization })).results);
@@ -110,14 +112,14 @@ export async function processGalleryUploadBatch(uploadKeys: readonly string[], d
       scopeKey: upload.scopeKey,
       ownerKey: upload.actorKey,
       imageKey: upload.imageKey,
-      file: { filename: upload.filename, mimeType: upload.mimeType, sizeBytes: stored[index]!.bytes.byteLength, bytes: stored[index]!.bytes },
+      file: { filename: `${upload.filename.replace(/\.[^.]+$/, '').slice(0, 251) || 'image'}.png`, mimeType: 'image/png', sizeBytes: stored[index]!.bytes.byteLength, bytes: stored[index]!.bytes },
       ...(stored[index]!.location ? { location: stored[index]!.location } : {}),
     })), {
       storage,
       hashBatch: computePerceptualHashBatch,
       captionBatch: async (values) => {
         const results: Array<GeneratedImageCaption | undefined> = Array(values.length);
-        const libraryIndices = values.map((value, index) => captionableBytes.has(value.bytes) ? index : -1).filter((index) => index >= 0);
+        const libraryIndices = values.map((value, index) => captionableBytes.has(bytesHash(value.bytes)) ? index : -1).filter((index) => index >= 0);
         if (libraryIndices.length > 0) {
           const generated = await captionBatch(organizationKey, await Promise.all(libraryIndices.map((index) => resolveImageReference(values[index]!.bytes))));
           if (generated.length !== libraryIndices.length) throw new Error('Gallery caption count did not match the unmatched image count.');

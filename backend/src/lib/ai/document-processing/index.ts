@@ -179,6 +179,7 @@ export * from './chunking';
 export * from './errors';
 export * from './exports';
 export * from './preview';
+export * from './representation';
 export * from './schemas';
 export * from './storage';
 export * from './textract';

@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-test('deploys compatible code before destructive migrations and data changes', async () => {
+test('migrates before activating backend code and running data changes', async () => {
   const workflow = await Bun.file(new URL('../../.github/workflows/deploy.yml', import.meta.url)).text();
   const early = workflow.indexOf('early-deploy:');
   const database = workflow.indexOf('backend-db:');
@@ -19,14 +19,14 @@ test('deploys compatible code before destructive migrations and data changes', a
   expect(databaseJob).toContain('run: bun run --cwd backend db:backfill-semantic-embeddings:ci');
   const migration = workflow.indexOf('\n  backend-migrate:');
   const migrationJob = workflow.slice(migration, workflow.indexOf('\n  seed-db-secrets:', migration));
-  expect(migrationJob).toContain('needs: [changes, backend-image, backend-secrets, early-deploy]');
+  expect(migrationJob).toContain('needs: [changes, backend-image, backend-secrets]');
   expect(migrationJob).toContain('always()');
-  expect(migrationJob).toContain("needs.early-deploy.result == 'success'");
+  expect(migrationJob).not.toContain('needs.early-deploy.result');
   expect(migrationJob).toContain('- name: Apply graph migrations');
   expect(migrationJob).toContain('run: bun run --cwd backend db:migrate:ci');
   const earlyJob = workflow.slice(early, workflow.indexOf('\n  # LATER REFERENCE ONLY', early));
-  expect(earlyJob).toContain('needs: [changes, deploy-web, backend-image, backend-secrets]');
-  expect(earlyJob).not.toContain('needs.backend-migrate.result');
+  expect(earlyJob).toContain('needs: [changes, deploy-web, backend-image, backend-secrets, backend-migrate]');
+  expect(earlyJob).toContain("needs.backend-migrate.result == 'success'");
   expect(workflow).not.toContain('document-worker-deploy:');
   expect(workflow).not.toContain('Roll warm document worker');
   const ecsJob = workflow.slice(workflow.indexOf('backend-deploy:'), workflow.indexOf('\n  # Optional render worker'));

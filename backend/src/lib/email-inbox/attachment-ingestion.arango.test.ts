@@ -6,7 +6,7 @@ import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
 import { newId } from '@/lib/ids';
 import { createScopeRepository } from '@/lib/ai/scopes/repository';
 import { documentKeyForRequest } from '@/lib/ai/document-processing';
-import { mailFolderKeys } from './folders';
+import { mailFolderKeys, mailInboxFilesFolderKey, mailInboxFolderKey } from './folders';
 import { createEmailRepository } from './repository';
 import { createEmailAttachmentRepository, EmailAttachmentIngestionError } from './attachment-ingestion';
 import { encodeEmailToneContent } from './archive-payloads';
@@ -23,7 +23,7 @@ const requiredCollections = [
   'folders', 'documents', 'documentVersions', 'documentSummaries', 'documentSummaryAudio', 'documentAudioVersions',
   'documentShares', 'emailAttachmentBindings', 'images', 'imageCaptions', 'collectionImages', 'imageIdentities',
   'imageCollectionMemories', 'imageCollecitionHightlights', 'placeImages', 'collections', 'collectionMembers',
-  'collectionInvites', 'trips', 'tripPlaces', 'tripAttachments', 'tripCreationReceipts', 'inboxes', 'tagAssignments',
+  'collectionInvites', 'trips', 'tripPlaces', 'tripAttachments', 'tripCreationReceipts', 'tagAssignments',
   'shares', 'userHiddens', 'storageDeletionJobs', 'generatedDocumentBindings', 'places',
 ] as const;
 
@@ -79,12 +79,13 @@ async function seedFixture(database: Database, suffix: string): Promise<Fixture>
     purpose: `communication-mail-${kind === 'root' ? 'root' : kind === 'replyContext' ? 'reply-context' : kind}`,
     mutationPolicy: 'system-container', embedding, isFavorite: false, createdAt: at, updatedAt: at,
   })));
+  await database.collection('folders').save({ _key: mailInboxFolderKey(scopeKey, connectorKey), scopeKey, parentFolderKey: folders.inboxes, name: `Inbox ${suffix}`, managedPurpose: 'mail-inbox', managedOwnerKey: connectorKey, mutationPolicy: 'system-container', archiveVisibility: 'visible', embedding, isFavorite: false, createdAt: at, updatedAt: at });
   return { organizationKey, membershipKey, scopeKey, connectorKey, leaseToken };
 }
 
 function claimInput(fixture: Fixture, partPath: string, targetType: 'document' | 'image' = 'document') {
   const key = stableKey('email-attachment-binding', fixture.scopeKey, fixture.connectorKey, `message-${partPath}`, partPath);
-  const folderKey = stableKey('mail-attachment-folder', fixture.scopeKey);
+  const folderKey = mailInboxFilesFolderKey(fixture.scopeKey, fixture.connectorKey);
   const targetKey = targetType === 'document' ? documentKeyForRequest(fixture.scopeKey, folderKey, key) : stableKey('email-attachment-target', key);
   return {
     key, organizationKey: fixture.organizationKey, scopeKey: fixture.scopeKey, connectorKey: fixture.connectorKey,
@@ -97,6 +98,10 @@ function mailDocument(key: string, scopeKey: string, folderKey: string, kind: st
   return { _key: key, scopeKey, folderKey, name: kind, content: JSON.stringify({ version: 1, kind, data }), embedding, isFavorite: false, mutationPolicy: 'system-only', createdAt: before, updatedAt: before, ...overrides };
 }
 
+function mailPlacement(fixture: Fixture) {
+  return { threadFolderKey: mailFolderKeys(fixture.scopeKey).threads, messageFolderKey: mailInboxFolderKey(fixture.scopeKey, fixture.connectorKey) };
+}
+
 async function seedAttachmentGraph(database: Database, fixture: Fixture, prefix: string, providerMessageId: string, threadKey: string) {
   const documentBindingKey = newId();
   const imageBindingKey = newId();
@@ -107,8 +112,8 @@ async function seedAttachmentGraph(database: Database, fixture: Fixture, prefix:
   const userCollectionKey = newId();
   const draftKey = newId();
   const folders = mailFolderKeys(fixture.scopeKey);
-  const attachmentFolderKey = stableKey('mail-attachment-folder', fixture.scopeKey);
-  await database.query('UPSERT { _key: @key } INSERT { _key: @key, scopeKey: @scopeKey, parentFolderKey: @rootKey, name: "Attachments", managedPurpose: "mail-attachment", managedOwnerKey: @rootKey, mutationPolicy: "system-container", createdAt: @at, updatedAt: @at } UPDATE {} IN folders', { key: attachmentFolderKey, scopeKey: fixture.scopeKey, rootKey: folders.root, at });
+  const attachmentFolderKey = mailInboxFilesFolderKey(fixture.scopeKey, fixture.connectorKey);
+  await database.query('UPSERT { _key: @key } INSERT { _key: @key, scopeKey: @scopeKey, parentFolderKey: @inboxFolderKey, name: "Files", managedPurpose: "mail-inbox-files", managedOwnerKey: @connectorKey, mutationPolicy: "system-container", archiveVisibility: "visible", createdAt: @at, updatedAt: @at } UPDATE {} IN folders', { key: attachmentFolderKey, scopeKey: fixture.scopeKey, inboxFolderKey: mailInboxFolderKey(fixture.scopeKey, fixture.connectorKey), connectorKey: fixture.connectorKey, at });
   const bindingBase = { organizationKey: fixture.organizationKey, scopeKey: fixture.scopeKey, connectorKey: fixture.connectorKey, providerMessageId, contentHash: 'b'.repeat(64), status: 'completed', sourceSize: 5, createdAt: before, updatedAt: before };
   await database.collection('emailAttachmentBindings').import([
     { _key: documentBindingKey, ...bindingBase, partPath: '0.1', sourceMimeType: 'text/plain', sourceFilename: `${prefix}.txt`, targetType: 'document', targetKey: documentKey },
@@ -246,7 +251,7 @@ liveArangoSuite('Gmail attachment ingestion and lifecycle live Arango', () => {
       const input = claimInput(fixture, '0.9');
       const token = randomUUID();
       await repository.claim(input, fixture.membershipKey, token, at, after);
-      const folderKey = stableKey('mail-attachment-folder', fixture.scopeKey);
+      const folderKey = mailInboxFilesFolderKey(fixture.scopeKey, fixture.connectorKey);
       await temporary.collection('documents').save({ _key: input.targetKey, scopeKey: fixture.scopeKey, folderKey, managedPurpose: 'mail-attachment', managedOwnerKey: input.key, mutationPolicy: 'user' });
       await temporary.query('UPDATE @key WITH { status: "inactive" } IN userOrganizations', { key: fixture.membershipKey });
       expect(await repository.complete(input.key, token, 'document', input.targetKey, undefined, fixture.membershipKey, at)).toBe(false);
@@ -276,13 +281,13 @@ liveArangoSuite('Gmail attachment ingestion and lifecycle live Arango', () => {
       const takeoverToken = randomUUID();
       expect((await repository.claim(input, fixture.membershipKey, takeoverToken, after, '2026-08-25T13:00:00.000Z')).binding.leaseToken).toBe(takeoverToken);
 
-      await temporary.collection('documents').save({ _key: input.targetKey, scopeKey: fixture.scopeKey, folderKey: stableKey('mail-attachment-folder', fixture.scopeKey), managedPurpose: 'mail-attachment', managedOwnerKey: input.key, mutationPolicy: 'user', name: 'target', content: 'target', extension: 'txt', mimeType: 'text/plain', sizeBytes: 5, embedding, isFavorite: false, createdAt: before, updatedAt: before });
+      await temporary.collection('documents').save({ _key: input.targetKey, scopeKey: fixture.scopeKey, folderKey: mailInboxFilesFolderKey(fixture.scopeKey, fixture.connectorKey), managedPurpose: 'mail-attachment', managedOwnerKey: input.key, mutationPolicy: 'user', name: 'target', content: 'target', extension: 'txt', mimeType: 'text/plain', sizeBytes: 5, embedding, isFavorite: false, createdAt: before, updatedAt: before });
       expect(await repository.complete(input.key, winner, 'document', input.targetKey, undefined, fixture.membershipKey, at)).toBe(false);
       await repository.release(input.key, winner);
       await repository.compensateTarget(input.key, winner, 'document', input.targetKey, fixture.scopeKey, at);
       expect(await temporary.collection('documents').document(input.targetKey)).toBeDefined();
 
-      const recovered = await repository.recoverDocumentTarget({ bindingKey: input.key, leaseToken: takeoverToken, targetKey: input.targetKey, scopeKey: fixture.scopeKey, folderKey: stableKey('mail-attachment-folder', fixture.scopeKey), membershipKey: fixture.membershipKey, now: at });
+      const recovered = await repository.recoverDocumentTarget({ bindingKey: input.key, leaseToken: takeoverToken, targetKey: input.targetKey, scopeKey: fixture.scopeKey, folderKey: mailInboxFilesFolderKey(fixture.scopeKey, fixture.connectorKey), membershipKey: fixture.membershipKey, now: at });
       expect(recovered?.key).toBe(input.targetKey);
       expect((await temporary.collection('emailAttachmentBindings').document(input.key) as { status: string }).status).toBe('processing');
       expect(await repository.complete(input.key, takeoverToken, 'document', input.targetKey, undefined, fixture.membershipKey, at)).toBe(true);
@@ -291,7 +296,7 @@ liveArangoSuite('Gmail attachment ingestion and lifecycle live Arango', () => {
       const transactionalInput = claimInput(fixture, '0.2');
       const transactionalToken = randomUUID();
       await repository.claim(transactionalInput, fixture.membershipKey, transactionalToken, at, '2099-01-01T00:00:00.000Z');
-      await temporary.collection('documents').save({ _key: transactionalInput.targetKey, scopeKey: fixture.scopeKey, folderKey: stableKey('mail-attachment-folder', fixture.scopeKey), managedPurpose: 'mail-attachment', managedOwnerKey: transactionalInput.key, mutationPolicy: 'user', name: 'transactional.txt', content: 'transactional', extension: 'txt', mimeType: 'text/plain', sizeBytes: 13, embedding, isFavorite: false, createdAt: before, updatedAt: before });
+      await temporary.collection('documents').save({ _key: transactionalInput.targetKey, scopeKey: fixture.scopeKey, folderKey: mailInboxFilesFolderKey(fixture.scopeKey, fixture.connectorKey), managedPurpose: 'mail-attachment', managedOwnerKey: transactionalInput.key, mutationPolicy: 'user', name: 'transactional.txt', content: 'transactional', extension: 'txt', mimeType: 'text/plain', sizeBytes: 13, embedding, isFavorite: false, createdAt: before, updatedAt: before });
       await createEmailRepository(temporary).syncThread({
         thread: { scopeKey: fixture.scopeKey, accountKey: fixture.connectorKey, providerThreadId: 'transactional-thread', subject: 'Transactional', summary: 'Transactional', intent: 'Review', priority: 'normal', state: 'done', lastMessageAt: at, unread: false, inboxCategory: 'Important', isFavorite: false, embedding },
         messages: [{ scopeKey: fixture.scopeKey, accountKey: fixture.connectorKey, providerMessageId: 'transactional-message', from: 'from@example.com', to: ['to@example.com'], subject: 'Transactional', body: 'Transactional', summary: 'Transactional', direction: 'inbound', sentAt: at, hasAttachments: true, attachments: [{ type: 'document', key: transactionalInput.targetKey }], unread: false, replyDepth: 0, inboxCategory: 'Important', embedding }],
@@ -302,9 +307,9 @@ liveArangoSuite('Gmail attachment ingestion and lifecycle live Arango', () => {
       expect((await temporary.collection('emailAttachmentBindings').document(transactionalInput.key) as { status: string }).status).toBe('completed');
       expect(await (await temporary.query('FOR document IN documents FILTER document.scopeKey == @scopeKey LET payload = JSON_PARSE(document.content) FILTER payload.kind == "mail-message" && payload.data.providerMessageId == "transactional-message" RETURN payload.data.attachments', { scopeKey: fixture.scopeKey })).next()).toEqual([{ type: 'document', key: transactionalInput.targetKey }]);
 
-      const folderKey = stableKey('mail-attachment-folder', fixture.scopeKey);
+      const folderKey = mailInboxFilesFolderKey(fixture.scopeKey, fixture.connectorKey);
       await temporary.collection('folders').save({ _key: folderKey, scopeKey: newId(), managedPurpose: 'other', mutationPolicy: 'user' });
-      await expect(repository.ensureDocumentFolder(fixture.scopeKey, at)).rejects.toMatchObject({ code: 'ATTACHMENT_PERSIST_FAILED' });
+      await expect(repository.ensureDocumentFolder(fixture.scopeKey, fixture.connectorKey, at)).rejects.toMatchObject({ code: 'ATTACHMENT_PERSIST_FAILED' });
       await temporary.collection('folders').remove(folderKey);
       const collectionKey = stableKey('email-media-collection', fixture.scopeKey);
       await temporary.collection('collections').save({ _key: collectionKey, scopeKey: newId(), purpose: 'other', mutationPolicy: 'user' });
@@ -361,13 +366,13 @@ liveArangoSuite('Gmail attachment ingestion and lifecycle live Arango', () => {
     try {
       const fixture = await seedFixture(temporary, 'lifecycle');
       const repository = createEmailRepository(temporary);
-      const folders = mailFolderKeys(fixture.scopeKey);
 
       const reconcileThreadKey = stableKey('mail-thread', fixture.scopeKey, fixture.connectorKey, 'reconcile-thread');
       const staleMessageKey = stableKey('mail-message', fixture.scopeKey, fixture.connectorKey, 'reconcile-stale');
+      const reconcilePlacement = mailPlacement(fixture);
       await temporary.collection('documents').import([
-        mailDocument(reconcileThreadKey, fixture.scopeKey, folders.threads, 'mail-thread', { accountKey: fixture.connectorKey, providerThreadId: 'reconcile-thread', subject: 'Reconcile', summary: 'Summary', intent: 'Review', priority: 'normal', state: 'done', lastMessageAt: before, isFavorite: false }),
-        mailDocument(staleMessageKey, fixture.scopeKey, folders.threads, 'mail-message', { accountKey: fixture.connectorKey, threadKey: reconcileThreadKey, providerMessageId: 'reconcile-stale', from: 'from@example.com', to: ['to@example.com'], subject: 'Stale', body: 'Body', summary: 'Body', direction: 'inbound', sentAt: before, hasAttachments: true }),
+        mailDocument(reconcileThreadKey, fixture.scopeKey, reconcilePlacement.threadFolderKey, 'mail-thread', { accountKey: fixture.connectorKey, providerThreadId: 'reconcile-thread', subject: 'Reconcile', summary: 'Summary', intent: 'Review', priority: 'normal', state: 'done', lastMessageAt: before, isFavorite: false }),
+        mailDocument(staleMessageKey, fixture.scopeKey, reconcilePlacement.messageFolderKey, 'mail-message', { accountKey: fixture.connectorKey, threadKey: reconcileThreadKey, providerMessageId: 'reconcile-stale', from: 'from@example.com', to: ['to@example.com'], subject: 'Stale', body: 'Body', summary: 'Body', direction: 'inbound', sentAt: before, hasAttachments: true }),
       ]);
       const reconcileGraph = await seedAttachmentGraph(temporary, fixture, 'reconcile', 'reconcile-stale', reconcileThreadKey);
       await repository.syncThread({
@@ -380,9 +385,10 @@ liveArangoSuite('Gmail attachment ingestion and lifecycle live Arango', () => {
 
       const deleteThreadKey = stableKey('mail-thread', fixture.scopeKey, fixture.connectorKey, 'delete-thread');
       const deleteMessageKey = stableKey('mail-message', fixture.scopeKey, fixture.connectorKey, 'delete-message');
+      const deletePlacement = mailPlacement(fixture);
       await temporary.collection('documents').import([
-        mailDocument(deleteThreadKey, fixture.scopeKey, folders.threads, 'mail-thread', { accountKey: fixture.connectorKey, providerThreadId: 'delete-thread', subject: 'Delete', summary: 'Summary', intent: 'Delete', priority: 'normal', state: 'done', lastMessageAt: at, isFavorite: false }),
-        mailDocument(deleteMessageKey, fixture.scopeKey, folders.threads, 'mail-message', { accountKey: fixture.connectorKey, threadKey: deleteThreadKey, providerMessageId: 'delete-message', from: 'from@example.com', to: ['to@example.com'], subject: 'Delete', body: 'Body', summary: 'Body', direction: 'inbound', sentAt: at, hasAttachments: true }),
+        mailDocument(deleteThreadKey, fixture.scopeKey, deletePlacement.threadFolderKey, 'mail-thread', { accountKey: fixture.connectorKey, providerThreadId: 'delete-thread', subject: 'Delete', summary: 'Summary', intent: 'Delete', priority: 'normal', state: 'done', lastMessageAt: at, isFavorite: false }),
+        mailDocument(deleteMessageKey, fixture.scopeKey, deletePlacement.messageFolderKey, 'mail-message', { accountKey: fixture.connectorKey, threadKey: deleteThreadKey, providerMessageId: 'delete-message', from: 'from@example.com', to: ['to@example.com'], subject: 'Delete', body: 'Body', summary: 'Body', direction: 'inbound', sentAt: at, hasAttachments: true }),
       ]);
       const deleteGraph = await seedAttachmentGraph(temporary, fixture, 'delete', 'delete-message', deleteThreadKey);
       await repository.deleteProviderThread(fixture.scopeKey, fixture.connectorKey, 'delete-thread', { connectorKey: fixture.connectorKey, token: fixture.leaseToken });
@@ -391,9 +397,10 @@ liveArangoSuite('Gmail attachment ingestion and lifecycle live Arango', () => {
 
       const trashThreadKey = stableKey('mail-thread', fixture.scopeKey, fixture.connectorKey, 'trash-thread');
       const trashMessageKey = stableKey('mail-message', fixture.scopeKey, fixture.connectorKey, 'trash-message');
+      const trashPlacement = mailPlacement(fixture);
       await temporary.collection('documents').import([
-        mailDocument(trashThreadKey, fixture.scopeKey, folders.threads, 'mail-thread', { accountKey: fixture.connectorKey, providerThreadId: 'trash-thread', subject: 'Trash', summary: 'Summary', intent: 'Delete', priority: 'normal', state: 'done', lastMessageAt: before, labels: ['TRASH'], isFavorite: false }),
-        mailDocument(trashMessageKey, fixture.scopeKey, folders.threads, 'mail-message', { accountKey: fixture.connectorKey, threadKey: trashThreadKey, providerMessageId: 'trash-message', from: 'from@example.com', to: ['to@example.com'], subject: 'Trash', body: 'Body', summary: 'Body', direction: 'inbound', sentAt: before, labels: ['TRASH'], hasAttachments: true }),
+        mailDocument(trashThreadKey, fixture.scopeKey, trashPlacement.threadFolderKey, 'mail-thread', { accountKey: fixture.connectorKey, providerThreadId: 'trash-thread', subject: 'Trash', summary: 'Summary', intent: 'Delete', priority: 'normal', state: 'done', lastMessageAt: before, labels: ['TRASH'], isFavorite: false }),
+        mailDocument(trashMessageKey, fixture.scopeKey, trashPlacement.messageFolderKey, 'mail-message', { accountKey: fixture.connectorKey, threadKey: trashThreadKey, providerMessageId: 'trash-message', from: 'from@example.com', to: ['to@example.com'], subject: 'Trash', body: 'Body', summary: 'Body', direction: 'inbound', sentAt: before, labels: ['TRASH'], hasAttachments: true }),
       ]);
       const trashGraph = await seedAttachmentGraph(temporary, fixture, 'trash', 'trash-message', trashThreadKey);
       const cleared = await repository.clearTrash({ scopeKey: fixture.scopeKey, accountKey: fixture.connectorKey, providerMessageIds: ['trash-message'], trashSnapshotAt: at, lease: { connectorKey: fixture.connectorKey, token: fixture.leaseToken } });
@@ -401,12 +408,12 @@ liveArangoSuite('Gmail attachment ingestion and lifecycle live Arango', () => {
       await assertAttachmentGraphDeleted(temporary, trashGraph);
 
       const teardown = await seedFixture(temporary, 'teardown');
-      const teardownFolders = mailFolderKeys(teardown.scopeKey);
       const teardownThreadKey = stableKey('mail-thread', teardown.scopeKey, teardown.connectorKey, 'scope-thread');
       const teardownMessageKey = stableKey('mail-message', teardown.scopeKey, teardown.connectorKey, 'scope-message');
+      const teardownPlacement = mailPlacement(teardown);
       await temporary.collection('documents').import([
-        mailDocument(teardownThreadKey, teardown.scopeKey, teardownFolders.threads, 'mail-thread', { accountKey: teardown.connectorKey, providerThreadId: 'scope-thread', subject: 'Scope', summary: 'Summary', intent: 'Delete', priority: 'normal', state: 'done', lastMessageAt: at, isFavorite: false }),
-        mailDocument(teardownMessageKey, teardown.scopeKey, teardownFolders.threads, 'mail-message', { accountKey: teardown.connectorKey, threadKey: teardownThreadKey, providerMessageId: 'scope-message', from: 'from@example.com', to: ['to@example.com'], subject: 'Scope', body: 'Body', summary: 'Body', direction: 'inbound', sentAt: at, hasAttachments: true }, { storageKey: 'storage/scope-message' }),
+        mailDocument(teardownThreadKey, teardown.scopeKey, teardownPlacement.threadFolderKey, 'mail-thread', { accountKey: teardown.connectorKey, providerThreadId: 'scope-thread', subject: 'Scope', summary: 'Summary', intent: 'Delete', priority: 'normal', state: 'done', lastMessageAt: at, isFavorite: false }),
+        mailDocument(teardownMessageKey, teardown.scopeKey, teardownPlacement.messageFolderKey, 'mail-message', { accountKey: teardown.connectorKey, threadKey: teardownThreadKey, providerMessageId: 'scope-message', from: 'from@example.com', to: ['to@example.com'], subject: 'Scope', body: 'Body', summary: 'Body', direction: 'inbound', sentAt: at, hasAttachments: true }, { storageKey: 'storage/scope-message' }),
       ]);
       const teardownGraph = await seedAttachmentGraph(temporary, teardown, 'scope', 'scope-message', teardownThreadKey);
       const managedCollectionKey = stableKey('email-media-collection', teardown.scopeKey);

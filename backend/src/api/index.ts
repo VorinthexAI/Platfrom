@@ -6,10 +6,11 @@ import { errorHandler } from './errors';
 import { autoRefreshAuthTokens, rateLimitByIp, requestLogger, requireEnvApiKey, validateQueryParams } from './middleware';
 import { handleResendWebhook, RESEND_WEBHOOK_V1_PATH } from './resend';
 import { GMAIL_WEBHOOK_V1_PATH, handleGmailWebhook } from './email-webhook';
-import { closeEmailSyncQueue, enqueueEmailWatchRenewal, startEmailSyncWorker } from '@/lib/email-inbox/sync-queue';
+import { closeEmailSyncQueue, enqueueEmailWatchRenewal, recoverEmailSyncQueue, startEmailSyncWorker } from '@/lib/email-inbox/sync-queue';
 import { closeGalleryUploadQueue, recoverGalleryUploadQueue, startGalleryUploadWorker } from '@/lib/gallery/upload-queue';
 import { registerRoutes } from './routes';
 import { drainStorageDeletionJobs } from '@/lib/storage-deletion';
+import { closeBookGenerationQueue, recoverBookGenerationQueue, startBookGenerationWorker } from '@/lib/books/generation-queue';
 
 export const app = new Hono();
 const api = app.basePath('/api/v1');
@@ -68,20 +69,30 @@ if (import.meta.main) {
   console.log(`vorinthex app listening on ${port}`);
   const emailWorker = startEmailSyncWorker();
   const galleryWorker = startGalleryUploadWorker();
+  const bookWorker = startBookGenerationWorker();
+  void recoverBookGenerationQueue().catch((error) => console.error('book generation queue recovery failed', { error }));
   void recoverGalleryUploadQueue().catch((error) => console.error('gallery upload queue recovery failed', { error }));
   void drainStorageDeletionJobs(1000).catch((error) => console.error('storage deletion recovery failed', { error }));
   void enqueueEmailWatchRenewal().catch((error) => console.error('email watch renewal enqueue failed', { error }));
+  void recoverEmailSyncQueue().catch((error) => console.error('email synchronization queue recovery failed', { error }));
   const storageDeletionTimer = setInterval(() => { void drainStorageDeletionJobs(1000).catch((error) => console.error('storage deletion recovery failed', { error })); }, 60_000);
   const renewalTimer = setInterval(() => { void enqueueEmailWatchRenewal().catch((error) => console.error('email watch renewal enqueue failed', { error })); }, 6 * 60 * 60_000);
+  const emailRecoveryTimer = setInterval(() => { void recoverEmailSyncQueue().catch((error) => console.error('email synchronization queue recovery failed', { error })); }, 60_000);
 
+  let shuttingDown = false;
   const shutdown = async () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    server.stop(false);
     clearInterval(storageDeletionTimer);
     clearInterval(renewalTimer);
+    clearInterval(emailRecoveryTimer);
     await emailWorker.close();
     await galleryWorker.close();
+    await bookWorker.close();
     await closeEmailSyncQueue();
     await closeGalleryUploadQueue();
-    server.stop();
+    await closeBookGenerationQueue();
     process.exit(0);
   };
 

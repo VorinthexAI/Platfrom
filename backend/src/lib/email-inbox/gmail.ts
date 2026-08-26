@@ -470,8 +470,10 @@ export function createGmailClient(accessToken: string, fetcher: typeof fetch = f
     },
     batchDeleteMessages: (ids: string[]) => request<unknown>('/messages/batchDelete', { method: 'POST', body: JSON.stringify({ ids: z.array(z.string().min(1)).min(1).max(500).parse(ids) }) }),
     sendRaw: (raw: string, threadId?: string) => request<{ id: string; threadId: string }>('/messages/send', { method: 'POST', body: JSON.stringify({ raw: Buffer.from(raw).toString('base64url'), ...(threadId ? { threadId } : {}) }) }, false),
-    async revoke() {
-      await fetcher('https://oauth2.googleapis.com/revoke', { method: 'POST', signal: AbortSignal.timeout(30_000), headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ token: accessToken }).toString() });
+    async revoke(token = accessToken) {
+      const response = await fetcher('https://oauth2.googleapis.com/revoke', { method: 'POST', signal: AbortSignal.timeout(30_000), headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ token }).toString() });
+      // Google returns 400 when a previously revoked token is submitted again.
+      if (!response.ok && response.status !== 400) throw new GmailApiError(response.status, [], { providerMessage: 'Google access revocation failed' });
     },
   };
 }

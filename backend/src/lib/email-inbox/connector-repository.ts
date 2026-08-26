@@ -4,11 +4,11 @@ import { isArangoUniqueConstraintError, toArangoDoc, withArangoKey } from '@/lib
 import { newId } from '@/lib/ids';
 import { decryptEmailConnectorCredentials, encryptEmailConnectorCredentials, tokenFingerprint } from './connector-crypto';
 import { ORGANIZATION_CONNECTORS_COLLECTION, organizationConnectorSchema, type EmailConnectorCredentials, type EmailProvider, type OrganizationConnector } from './connector-schema';
-import { ensureMailFolders } from './folders';
-import { INBOXES_COLLECTION, inboxSchema, type Inbox } from './inbox-schema';
+import { ensureMailFolders, mailFolderKeys, mailInboxFolderKey } from './folders';
+import { inboxSchema, type Inbox } from './inbox-schema';
 
 type Database = Pick<typeof db, 'query' | 'collection'>;
-export type ConnectorPublic = Pick<OrganizationConnector, 'key' | 'organizationKey' | 'scopeKey' | 'provider' | 'email' | 'status' | 'syncEnabled' | 'syncStatus' | 'lastSyncedAt' | 'createdAt' | 'updatedAt'> & { syncError?: string };
+export type ConnectorPublic = Pick<OrganizationConnector, 'key' | 'organizationKey' | 'scopeKey' | 'provider' | 'email' | 'status' | 'syncEnabled' | 'initialSyncCompleted' | 'syncStatus' | 'lastSyncedAt' | 'createdAt' | 'updatedAt'> & { syncError?: string };
 type RevisionedConnector = OrganizationConnector & { revision: string };
 
 function parse(raw: unknown) {
@@ -23,7 +23,7 @@ function revision(raw: unknown) {
 export function connectorPublic(connector: OrganizationConnector): ConnectorPublic {
   return {
     key: connector.key, organizationKey: connector.organizationKey, scopeKey: connector.scopeKey, provider: connector.provider,
-    email: connector.email, status: connector.status, syncEnabled: connector.syncEnabled, syncStatus: connector.syncStatus,
+    email: connector.email, status: connector.status, syncEnabled: connector.syncEnabled, initialSyncCompleted: connector.initialSyncCompleted, syncStatus: connector.syncStatus,
     ...(connector.syncError ? { syncError: 'Email synchronization needs attention.' } : {}), ...(connector.lastSyncedAt ? { lastSyncedAt: connector.lastSyncedAt } : {}),
     createdAt: connector.createdAt, updatedAt: connector.updatedAt,
   };
@@ -84,7 +84,7 @@ export function createConnectorRepository(database: Database = db) {
           FILTER !@fenceRevision || (existing == null ? @expectedRevision == null : existing._rev == @expectedRevision)
           UPSERT { organizationKey: @organizationKey, scopeKey: @scopeKey, provider: @provider, providerAccountId: @providerAccountId }
           INSERT @document
-           UPDATE MERGE(@document, { _key: OLD._key, createdAt: OLD.createdAt, revokedAt: null, historyId: null, lastSyncedAt: null, syncError: null, syncLeaseToken: null, syncLeaseExpiresAt: null, syncPendingHistoryId: null, syncPendingThreadIds: null, watchRegisteredAt: null, watchExpiresAt: null, lastError: null })
+            UPDATE MERGE(@document, { _key: OLD._key, createdAt: OLD.createdAt, initialSyncCompleted: false, revokedAt: null, historyId: null, pendingNotificationHistoryId: null, lastSyncedAt: null, syncError: null, syncLeaseToken: null, syncLeaseExpiresAt: null, syncPendingHistoryId: null, syncPendingThreadIds: null, watchRegisteredAt: null, watchExpiresAt: null, lastError: null })
           IN @@collection OPTIONS { keepNull: false }
           RETURN NEW
         `, {
@@ -128,33 +128,72 @@ export function createConnectorRepository(database: Database = db) {
       const raw = await cursor.next();
       return raw ? { ...parse(raw), revision: revision(raw) } : null;
     },
-    async rollbackReconnect(input: { connectorKey: string; connectorRevision: string; previousConnector: OrganizationConnector | null; inboxRevision?: string; previousInbox: Inbox | null }) {
+    async rollbackReconnect(input: { connectorKey: string; connectorRevision: string; previousConnector: OrganizationConnector | null; inboxKey?: string; inboxRevision?: string; previousInbox: Inbox | null }) {
       const timestamp = new Date().toISOString();
       const connectorMutation = input.previousConnector
         ? 'REPLACE connector WITH @previousConnector IN @@collection'
         : 'UPDATE connector WITH { status: "revoked", syncEnabled: false, encryptedCredentials: "revoked", revokedAt: @timestamp, updatedAt: @timestamp } IN @@collection';
       const inboxMutation = input.inboxRevision
-        ? input.previousInbox ? 'REPLACE inbox WITH @previousInbox IN @@inboxes' : 'REMOVE inbox IN @@inboxes'
+        ? input.previousInbox ? 'REPLACE inbox WITH @previousInbox IN folders' : 'REMOVE inbox IN folders'
         : '';
+      const previousInbox = input.previousInbox ? inboxSchema.parse(input.previousInbox) : null;
       const cursor = await database.query(`
         LET connector = DOCUMENT(@@collection, @connectorKey)
-        LET inbox = FIRST(FOR current IN @@inboxes FILTER current.connectorKey == @connectorKey LIMIT 1 RETURN current)
+        LET inbox = DOCUMENT(folders, @inboxKey)
         FILTER connector != null && connector._rev == @connectorRevision
-        FILTER @inboxRevision == null || (inbox != null && inbox._rev == @inboxRevision)
+        FILTER @inboxRevision == null || (inbox != null && inbox.scopeKey == connector.scopeKey && inbox.managedPurpose == "mail-inbox" && inbox.managedOwnerKey == connector._key && inbox._rev == @inboxRevision)
         ${connectorMutation}
         ${inboxMutation}
         RETURN true
       `, {
-        '@collection': ORGANIZATION_CONNECTORS_COLLECTION, '@inboxes': INBOXES_COLLECTION,
-        connectorKey: input.connectorKey, connectorRevision: input.connectorRevision, inboxRevision: input.inboxRevision ?? null, timestamp,
+        '@collection': ORGANIZATION_CONNECTORS_COLLECTION,
+        connectorKey: input.connectorKey, connectorRevision: input.connectorRevision, inboxKey: input.inboxKey ?? previousInbox?.key ?? (input.previousConnector ? mailInboxFolderKey(input.previousConnector.scopeKey, input.connectorKey) : null), inboxRevision: input.inboxRevision ?? null, timestamp,
         previousConnector: input.previousConnector ? toArangoDoc(organizationConnectorSchema.parse(input.previousConnector)) : null,
-        previousInbox: input.previousInbox ? toArangoDoc(inboxSchema.parse(input.previousInbox)) : null,
+        previousInbox: previousInbox ? toArangoDoc({ key: previousInbox.key, scopeKey: previousInbox.scopeKey, parentFolderKey: mailFolderKeys(previousInbox.scopeKey).inboxes, name: previousInbox.name, ...(previousInbox.description ? { description: previousInbox.description } : {}), ...(previousInbox.coverImageKey ? { coverImageKey: previousInbox.coverImageKey } : {}), managedPurpose: 'mail-inbox', managedOwnerKey: previousInbox.connectorKey, mutationPolicy: 'system-container', archiveVisibility: 'visible', embedding: previousInbox.embedding, isFavorite: previousInbox.isFavorite, createdAt: previousInbox.createdAt, updatedAt: previousInbox.updatedAt }) : null,
       });
       return (await cursor.next()) === true;
     },
     async listSyncTargetsByEmail(email: string) {
       const cursor = await database.query(`FOR connector IN @@collection FILTER connector.provider == "gmail" && connector.status != "revoked" && connector.syncEnabled != false && LOWER(connector.email) == @email RETURN { organizationKey: connector.organizationKey, scopeKey: connector.scopeKey, connectorKey: connector._key }`, { '@collection': ORGANIZATION_CONNECTORS_COLLECTION, email: email.toLowerCase() });
       return cursor.all() as Promise<Array<{ organizationKey: string; scopeKey: string; connectorKey: string }>>;
+    },
+    async markNotificationPending(key: string, historyId: string) {
+      const cursor = await database.query(`
+        FOR connector IN @@collection
+          FILTER connector._key == @key && connector.provider == "gmail" && connector.status != "revoked" && connector.syncEnabled != false
+          LET previous = connector.pendingNotificationHistoryId
+          LET newer = previous == null || LENGTH(@historyId) > LENGTH(previous) || (LENGTH(@historyId) == LENGTH(previous) && @historyId > previous)
+          UPDATE connector WITH { pendingNotificationHistoryId: newer ? @historyId : previous } IN @@collection
+          RETURN true
+      `, { '@collection': ORGANIZATION_CONNECTORS_COLLECTION, key, historyId: z.string().regex(/^\d+$/).parse(historyId) });
+      return (await cursor.next()) === true;
+    },
+    async clearPendingNotification(key: string, historyId: string) {
+      const cursor = await database.query(`
+        FOR connector IN @@collection
+          FILTER connector._key == @key && connector.pendingNotificationHistoryId == @historyId
+          FILTER LENGTH(NOT_NULL(connector.syncPendingThreadIds, [])) == 0
+          FILTER connector.historyId != null && (LENGTH(connector.historyId) > LENGTH(@historyId) || (LENGTH(connector.historyId) == LENGTH(@historyId) && connector.historyId >= @historyId))
+          UPDATE connector WITH { pendingNotificationHistoryId: null } IN @@collection OPTIONS { keepNull: false }
+          RETURN true
+      `, { '@collection': ORGANIZATION_CONNECTORS_COLLECTION, key, historyId: z.string().regex(/^\d+$/).parse(historyId) });
+      return (await cursor.next()) === true;
+    },
+    async listSyncRecoveryTargets() {
+      const cursor = await database.query(`
+        FOR connector IN @@collection
+          FILTER connector.provider == "gmail" && connector.status != "revoked" && connector.syncEnabled != false
+          FILTER connector.initialSyncCompleted != true || connector.pendingNotificationHistoryId != null || LENGTH(NOT_NULL(connector.syncPendingThreadIds, [])) > 0 || connector.syncStatus == "error"
+          RETURN {
+            organizationKey: connector.organizationKey,
+            scopeKey: connector.scopeKey,
+            connectorKey: connector._key,
+            initialSyncCompleted: connector.initialSyncCompleted == true,
+            pendingNotificationHistoryId: connector.pendingNotificationHistoryId,
+            pendingHistoryId: connector.syncPendingHistoryId
+          }
+      `, { '@collection': ORGANIZATION_CONNECTORS_COLLECTION });
+      return cursor.all() as Promise<Array<{ organizationKey: string; scopeKey: string; connectorKey: string; initialSyncCompleted: boolean; pendingNotificationHistoryId?: string; pendingHistoryId?: string }>>;
     },
     async listWatchRenewalTargets(before: string) {
       const cursor = await database.query(`FOR connector IN @@collection FILTER connector.provider == "gmail" && connector.status != "revoked" && connector.syncEnabled != false && (connector.watchExpiresAt == null || connector.watchExpiresAt <= @before) RETURN { organizationKey: connector.organizationKey, scopeKey: connector.scopeKey, connectorKey: connector._key }`, { '@collection': ORGANIZATION_CONNECTORS_COLLECTION, before });
@@ -184,9 +223,16 @@ export function createConnectorRepository(database: Database = db) {
     async releaseSend(key: string, token: string) {
       await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.sendLeaseToken == @token UPDATE connector WITH { sendLeaseToken: null, sendLeaseExpiresAt: null } IN @@collection OPTIONS { keepNull: false }', { '@collection': ORGANIZATION_CONNECTORS_COLLECTION, key, token });
     },
-    async setSyncState(key: string, status: 'idle' | 'syncing' | 'error', input: { historyId?: string; pendingHistoryId?: string | null; pendingThreadIds?: string[] | null; resetLastSynced?: boolean; error?: string; markSynced?: boolean; leaseToken?: string; expectedRevision?: string } = {}) {
+    async claimDisconnect(key: string, expectedUpdatedAt: string) {
       const updatedAt = new Date().toISOString();
-      const update = { syncStatus: status, syncError: input.error?.slice(0, 500) ?? null, historyId: input.historyId, syncPendingHistoryId: input.pendingHistoryId, syncPendingThreadIds: input.pendingThreadIds, ...(input.resetLastSynced ? { lastSyncedAt: null } : {}), ...(status === 'syncing' ? { status: 'active', lastError: null } : {}), ...(status === 'idle' && input.markSynced !== false ? { status: 'active', lastError: null, lastSyncedAt: updatedAt } : {}), ...(status === 'error' ? { status: 'error', lastError: input.error?.slice(0, 500) ?? 'Email synchronization failed' } : {}), updatedAt };
+      const cursor = await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.updatedAt == @expectedUpdatedAt && connector.status != "revoked" && (connector.syncLeaseExpiresAt == null || connector.syncLeaseExpiresAt <= @now) && (connector.sendLeaseExpiresAt == null || connector.sendLeaseExpiresAt <= @now) UPDATE connector WITH { status: "error", syncEnabled: false, syncStatus: "idle", lastError: "Email disconnect is pending", updatedAt: @updatedAt } IN @@collection RETURN NEW', { '@collection': ORGANIZATION_CONNECTORS_COLLECTION, key, expectedUpdatedAt, now: updatedAt, updatedAt });
+      const raw = await cursor.next();
+      return raw ? parse(raw) : null;
+    },
+    async setSyncState(key: string, status: 'idle' | 'syncing' | 'error', input: { historyId?: string; pendingHistoryId?: string | null; pendingThreadIds?: string[] | null; pendingSubscriptionMessages?: Array<{ id: string; threadId: string }> | null; resetLastSynced?: boolean; error?: string; markSynced?: boolean; completeInitialSync?: boolean; leaseToken?: string; expectedRevision?: string } = {}) {
+      if (input.completeInitialSync && (status !== 'idle' || input.pendingHistoryId != null || input.pendingThreadIds != null || input.pendingSubscriptionMessages != null)) throw new Error('Initial email synchronization can complete only in a final idle state');
+      const updatedAt = new Date().toISOString();
+      const update = { syncStatus: status, syncError: input.error?.slice(0, 500) ?? null, historyId: input.historyId, syncPendingHistoryId: input.pendingHistoryId, syncPendingThreadIds: input.pendingThreadIds, syncPendingSubscriptionMessages: input.pendingSubscriptionMessages, ...(input.resetLastSynced ? { lastSyncedAt: null } : {}), ...(status === 'syncing' ? { status: 'active', lastError: null } : {}), ...(status === 'idle' && input.markSynced !== false ? { status: 'active', lastError: null, lastSyncedAt: updatedAt } : {}), ...(input.completeInitialSync ? { initialSyncCompleted: true } : {}), ...(status === 'error' ? { status: 'error', lastError: input.error?.slice(0, 500) ?? 'Email synchronization failed' } : {}), updatedAt };
       const cursor = await database.query('FOR connector IN @@collection FILTER connector._key == @key && (@expectedRevision == null || connector._rev == @expectedRevision) && (@leaseToken == null || connector.syncLeaseToken == @leaseToken) UPDATE connector WITH @update IN @@collection OPTIONS { keepNull: false } RETURN NEW', { '@collection': ORGANIZATION_CONNECTORS_COLLECTION, key, expectedRevision: input.expectedRevision ?? null, leaseToken: input.leaseToken ?? null, update });
       const raw = await cursor.next();
       return raw ? revision(raw) : null;
@@ -201,7 +247,7 @@ export function createConnectorRepository(database: Database = db) {
       const timestamp = new Date().toISOString();
       const update = {
         status: 'revoked', syncEnabled: false, syncStatus: 'idle', revokedAt: timestamp, encryptedCredentials: 'revoked', accessTokenFingerprint: tokenFingerprint(`revoked:${key}:${timestamp}`),
-        historyId: null, syncError: null, syncLeaseToken: null, syncLeaseExpiresAt: null, sendLeaseToken: null, sendLeaseExpiresAt: null, syncPendingHistoryId: null, syncPendingThreadIds: null, watchRegisteredAt: null, watchExpiresAt: null, lastError: null, updatedAt: timestamp,
+        historyId: null, pendingNotificationHistoryId: null, syncError: null, syncLeaseToken: null, syncLeaseExpiresAt: null, sendLeaseToken: null, sendLeaseExpiresAt: null, syncPendingHistoryId: null, syncPendingThreadIds: null, syncPendingSubscriptionMessages: null, watchRegisteredAt: null, watchExpiresAt: null, lastError: null, updatedAt: timestamp,
       };
       const cursor = await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.updatedAt == @expectedUpdatedAt && connector.status != "revoked" && (connector.syncLeaseExpiresAt == null || connector.syncLeaseExpiresAt <= @now) && (connector.sendLeaseExpiresAt == null || connector.sendLeaseExpiresAt <= @now) UPDATE connector WITH @update IN @@collection OPTIONS { keepNull: false } RETURN true', { '@collection': ORGANIZATION_CONNECTORS_COLLECTION, key, expectedUpdatedAt, now: timestamp, update });
       return (await cursor.next()) === true;

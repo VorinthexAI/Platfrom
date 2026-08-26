@@ -50,7 +50,7 @@ describe('Gmail Pub/Sub webhook', () => {
     }
   });
 
-  test('carries Pub/Sub enqueue data through the worker to canonical service.sync', async () => {
+  test('carries Pub/Sub enqueue data through the dedicated subscription ingestion entry point', async () => {
     let queued: any, synced: unknown[] = [];
     const connectorJobs: unknown[] = [];
     const handler = createGmailWebhookHandler({ verify: async () => ({ subject: 'service', email: 'push@example.com' }), enqueue: async (input) => { queued = { schemaVersion: 1, kind: 'notification', ...input }; return { jobId: 'job-1' }; } });
@@ -60,12 +60,12 @@ describe('Gmail Pub/Sub webhook', () => {
     try {
       expect((await app.request('/hook', { method: 'POST', headers: { authorization: 'Bearer signed', 'content-type': 'application/json' }, body: JSON.stringify(envelope) })).status).toBe(204);
       await processEmailSyncJob(queued, {
-        connectors: { listSyncTargetsByEmail: async () => [{ organizationKey: 'org-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem5w' }] } as never,
+        connectors: { listSyncTargetsByEmail: async () => [{ organizationKey: 'org-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem5w' }], markNotificationPending: async () => true } as never,
         queue: { add: async (_name: string, job: unknown) => { connectorJobs.push(job); return {} as never; } },
       });
       expect(connectorJobs).toHaveLength(1);
-      await processEmailSyncJob(connectorJobs[0], { service: { sync: async (...args: unknown[]) => { synced.push(args); return {}; } } as never });
-      expect(synced).toEqual([[{ userKey: 'system', organizationKey: 'org-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5' }, 'cmrnlzf650002qc7k4p5zem5w']]);
+      await processEmailSyncJob(connectorJobs[0], { connectors: { clearPendingNotification: async () => true } as never, service: { sync: async () => { throw new Error('sync must not be called'); }, ingestSubscriptionNotification: async (...args: unknown[]) => { synced.push(args); return {}; } } as never });
+      expect(synced).toEqual([[{ userKey: 'system', organizationKey: 'org-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5' }, 'cmrnlzf650002qc7k4p5zem5w', payload.historyId]]);
     } finally {
       if (previous.audience === undefined) delete process.env.GMAIL_PUBSUB_PUSH_AUDIENCE; else process.env.GMAIL_PUBSUB_PUSH_AUDIENCE = previous.audience;
       if (previous.email === undefined) delete process.env.GMAIL_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL; else process.env.GMAIL_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL = previous.email;
@@ -84,6 +84,8 @@ describe('Gmail Pub/Sub webhook', () => {
     try {
       expect((await app.request('/hook', { method: 'POST', headers: { authorization: 'Bearer signed', 'content-type': 'application/json' }, body: JSON.stringify({ ...envelope, unexpected: true }) })).status).toBe(400);
       expect((await app.request('/hook', { method: 'POST', headers: { authorization: 'Bearer signed', 'content-type': 'application/json' }, body: JSON.stringify({ ...envelope, message: { ...envelope.message, unsupported: true } }) })).status).toBe(400);
+      expect((await app.request('/hook', { method: 'POST', headers: { authorization: 'Bearer signed', 'content-type': 'application/json' }, body: JSON.stringify({ ...envelope, message: { ...envelope.message, data: 'not base64' } }) })).status).toBe(400);
+      expect((await app.request('/hook', { method: 'POST', headers: { authorization: 'Bearer signed', 'content-type': 'application/json' }, body: JSON.stringify({ ...envelope, message: { ...envelope.message, data: Buffer.alloc(2049).toString('base64') } }) })).status).toBe(400);
     } finally {
       if (previousAudience === undefined) delete process.env.GMAIL_PUBSUB_PUSH_AUDIENCE; else process.env.GMAIL_PUBSUB_PUSH_AUDIENCE = previousAudience;
       if (previousEmail === undefined) delete process.env.GMAIL_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL; else process.env.GMAIL_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL = previousEmail;

@@ -231,4 +231,16 @@ describe('Content output contracts', () => {
     expect(contentToolOutputSchemas['document.list-shares'].safeParse({ results: [{ key: share.documentKey, success: true, data: { documentKey: share.documentKey, shares: [{ ...share, tokenHash: 'secret' }] } }], summary: { requested: 1, succeeded: 1, failed: 0 } }).success).toBe(false);
     expect(contentToolOutputSchemas['folder.find'].safeParse({ results: [{ key: newId(), success: true, data: { folder: { key: newId(), scopeKey: newId(), name: 'Folder', embedding: [0.1], createdAt: now, updatedAt: now } } }], summary: { requested: 1, succeeded: 1, failed: 0 } }).success).toBe(false);
   });
+
+  test('exposes only the product-neutral managed capability for protected Archive resources', () => {
+    const now = '2026-07-22T00:00:00.000Z';
+    const key = newId(), scopeKey = newId();
+    const base = { key, scopeKey, name: 'Managed', isFavorite: false, managed: true, createdAt: now, updatedAt: now };
+    expect(contentToolOutputSchemas['folder.list'].parse({ folders: [base] })).toMatchObject({ folders: [{ managed: true }] });
+    expect(contentToolOutputSchemas['document.list'].parse({ documents: [base] })).toMatchObject({ documents: [{ managed: true }] });
+    for (const internal of ['archiveVisibility', 'managedPurpose', 'managedOwnerKey', 'mutationPolicy']) {
+      expect(contentToolOutputSchemas['folder.list'].safeParse({ folders: [{ ...base, [internal]: 'internal' }] }).success, internal).toBe(false);
+      expect(contentToolOutputSchemas['document.list'].safeParse({ documents: [{ ...base, [internal]: 'internal' }] }).success, internal).toBe(false);
+    }
+  });
 });

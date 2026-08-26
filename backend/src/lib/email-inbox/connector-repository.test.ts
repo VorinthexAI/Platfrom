@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { createConnectorRepository } from './connector-repository';
+import { connectorPublic, createConnectorRepository } from './connector-repository';
 import { organizationConnectorSchema } from './connector-schema';
 
 const scopeKey = 'cmrnlzf640001qc7kazsr96k5';
@@ -41,8 +41,14 @@ describe('organization connector repository', () => {
     expect(accountA.key).not.toBe(accountB.key);
     expect(reconnectedA.key).toBe(accountA.key);
     expect(upserts).toHaveLength(3);
-    expect(upserts.every(({ query }) => query.includes('providerAccountId: @providerAccountId') && query.includes('syncPendingThreadIds: null') && query.includes('watchExpiresAt: null'))).toBe(true);
+    expect(upserts.every(({ query }) => query.includes('providerAccountId: @providerAccountId') && query.includes('initialSyncCompleted: false') && query.includes('pendingNotificationHistoryId: null') && query.includes('syncPendingThreadIds: null') && query.includes('watchExpiresAt: null'))).toBe(true);
+    expect(accountA.initialSyncCompleted).toBe(false);
     expect(upserts.every(({ query }) => !query.includes('sendLeaseToken: null'))).toBe(true);
+  });
+
+  test('requires initial synchronization completion in the public connector projection', () => {
+    const connector = organizationConnectorSchema.parse({ key: membershipKey, organizationKey: 'org-1', scopeKey, provider: 'gmail', providerAccountId: 'google-public', email: 'public@example.com', encryptedCredentials: 'cipher', encryptionKeyId: 'test', accessTokenFingerprint: 'a'.repeat(64), scopes: ['email'], createdByMembershipKey: membershipKey, status: 'active', initialSyncCompleted: true, createdAt: '2026-08-11T12:00:00.000Z', updatedAt: '2026-08-11T12:00:00.000Z' });
+    expect(connectorPublic(connector)).toMatchObject({ initialSyncCompleted: true });
   });
 
   test('exact lookup includes revoked connectors for reconnect recovery', async () => {
@@ -80,7 +86,8 @@ describe('organization connector repository', () => {
     expect(await createConnectorRepository(database as never).rollbackReconnect({ connectorKey: previous.key, connectorRevision: 'connector-rev', previousConnector: previous, inboxRevision: 'inbox-rev', previousInbox: null })).toBe(true);
     expect(call?.query).toContain('connector._rev == @connectorRevision');
     expect(call?.query).toContain('inbox._rev == @inboxRevision');
-    expect(call?.query).toContain('REMOVE inbox IN @@inboxes');
+    expect(call?.query).toContain('REMOVE inbox IN folders');
+    expect(call?.query).toContain('inbox.managedPurpose == "mail-inbox"');
     expect(call?.bindVars).toMatchObject({ connectorRevision: 'connector-rev', inboxRevision: 'inbox-rev' });
   });
 
@@ -110,6 +117,16 @@ describe('organization connector repository', () => {
     expect(call?.bindVars).toMatchObject({ key: membershipKey, expectedUpdatedAt: '2026-08-11T12:00:00.000Z' });
   });
 
+  test('blocks new connector work while provider revocation is pending', async () => {
+    let call: { query: string; bindVars: Record<string, unknown> } | undefined;
+    const database = { collection: () => ({}), query: async (query: string, bindVars: Record<string, unknown>) => { call = { query, bindVars }; return { next: async () => null }; } };
+    expect(await createConnectorRepository(database as never).claimDisconnect(membershipKey, '2026-08-11T12:00:00.000Z')).toBeNull();
+    expect(call?.query).toContain('syncEnabled: false');
+    expect(call?.query).toContain('status: "error"');
+    expect(call?.query).toContain('connector.syncLeaseExpiresAt == null || connector.syncLeaseExpiresAt <= @now');
+    expect(call?.query).toContain('connector.sendLeaseExpiresAt == null || connector.sendLeaseExpiresAt <= @now');
+  });
+
   test('makes connector sync and send claims mutually exclusive', async () => {
     const calls: string[] = [];
     const database = { collection: () => ({}), query: async (query: string) => { calls.push(query); return { next: async () => null }; } };
@@ -126,6 +143,17 @@ describe('organization connector repository', () => {
     expect(await createConnectorRepository(database as never).setSyncState(membershipKey, 'syncing', { leaseToken: '11111111-1111-4111-8111-111111111111' })).toBe('next');
     expect(call?.query).toContain('connector.syncLeaseToken == @leaseToken');
     expect(call?.bindVars.update).toMatchObject({ status: 'active', syncStatus: 'syncing', lastError: null });
+  });
+
+  test('atomically completes initial sync only with a final idle state and no continuation', async () => {
+    let call: { bindVars: Record<string, any> } | undefined;
+    const database = { collection: () => ({}), query: async (_query: string, bindVars: Record<string, any>) => { call = { bindVars }; return { next: async () => ({ _rev: 'complete' }) }; } };
+    const repository = createConnectorRepository(database as never);
+    await expect(repository.setSyncState(membershipKey, 'syncing', { completeInitialSync: true })).rejects.toThrow('final idle state');
+    await expect(repository.setSyncState(membershipKey, 'idle', { pendingHistoryId: 'pending', completeInitialSync: true })).rejects.toThrow('final idle state');
+    await expect(repository.setSyncState(membershipKey, 'idle', { pendingSubscriptionMessages: [{ id: 'message', threadId: 'thread' }], completeInitialSync: true })).rejects.toThrow('final idle state');
+    expect(await repository.setSyncState(membershipKey, 'idle', { pendingHistoryId: null, pendingThreadIds: null, completeInitialSync: true, leaseToken: '11111111-1111-4111-8111-111111111111' })).toBe('complete');
+    expect(call?.bindVars.update).toMatchObject({ syncStatus: 'idle', initialSyncCompleted: true, syncPendingHistoryId: null, syncPendingThreadIds: null, syncPendingSubscriptionMessages: undefined });
   });
 
   test('rejects renewal after lease expiry or connector disablement while allowing error recovery', async () => {
@@ -154,6 +182,21 @@ describe('organization connector repository', () => {
     expect(call?.query).toContain('connector.status != "revoked"');
     expect(call?.query).toContain('connector.syncEnabled != false');
     expect(call?.query).toContain('connector.updatedAt == @expectedUpdatedAt');
+  });
+
+  test('persists notification high-water marks and exposes durable recovery targets', async () => {
+    const calls: Array<{ query: string; bindVars: Record<string, unknown> }> = [];
+    const database = { collection: () => ({}), query: async (query: string, bindVars: Record<string, unknown>) => { calls.push({ query, bindVars }); return { next: async () => true, all: async () => [{ organizationKey: 'org-1', scopeKey, connectorKey: membershipKey, initialSyncCompleted: true, pendingNotificationHistoryId: '123' }] }; } };
+    const repository = createConnectorRepository(database as never);
+    expect(await repository.markNotificationPending(membershipKey, '123')).toBe(true);
+    expect(await repository.clearPendingNotification(membershipKey, '123')).toBe(true);
+    expect(await repository.listSyncRecoveryTargets()).toEqual([{ organizationKey: 'org-1', scopeKey, connectorKey: membershipKey, initialSyncCompleted: true, pendingNotificationHistoryId: '123' }]);
+    expect(calls[0]!.query).toContain('pendingNotificationHistoryId');
+    expect(calls[0]!.query).toContain('LENGTH(@historyId)');
+    expect(calls[1]!.query).toContain('connector.pendingNotificationHistoryId == @historyId');
+    expect(calls[1]!.query).toContain('LENGTH(NOT_NULL(connector.syncPendingThreadIds, [])) == 0');
+    expect(calls[1]!.query).toContain('connector.historyId >= @historyId');
+    expect(calls[2]!.query).toContain('connector.initialSyncCompleted != true');
   });
 
   test('renews watch metadata without changing the persisted History or pending continuation cursor', async () => {

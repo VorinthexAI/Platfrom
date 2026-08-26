@@ -44,6 +44,7 @@ import { contentSearchHistoryDeleteToolDefinition } from './content-search-histo
 import { contentNeighborsToolDefinition } from './content-neighbors';
 import { documentSearchToolDefinition } from './document-search';
 import { WORKSPACE_TOOL_DEFINITIONS } from './workspace-tool-definitions';
+import { TRUSTED_EMAIL_TOOL_DEFINITIONS } from './email-ingestion-tool-definitions';
 
 export const PUBLIC_TOOL_DEFINITIONS = Object.freeze([
   imageCaptionTool,
@@ -54,4 +55,13 @@ export const PUBLIC_TOOL_DEFINITIONS = Object.freeze([
   documentSearchAllToolDefinition,
   contentSearchToolDefinition, contentSearchHistoryListToolDefinition, contentSearchHistoryDeleteToolDefinition, documentSearchToolDefinition,
   ...WORKSPACE_TOOL_DEFINITIONS,
+] as const);
+
+/** Canonical registry entries that only authenticated server workflows may dispatch. */
+export const TRUSTED_TOOL_DEFINITIONS = TRUSTED_EMAIL_TOOL_DEFINITIONS;
+
+/** Every canonical business tool, including trusted protocol-triggered entries. */
+export const UNIFIED_TOOL_DEFINITIONS = Object.freeze([
+  ...PUBLIC_TOOL_DEFINITIONS,
+  ...TRUSTED_TOOL_DEFINITIONS,
 ] as const);

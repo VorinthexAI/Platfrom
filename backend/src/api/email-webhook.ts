@@ -5,12 +5,12 @@ import { enqueueEmailSyncNotification } from '@/lib/email-inbox/sync-queue';
 
 export const GMAIL_WEBHOOK_V1_PATH = '/api/v1/webhooks/gmail/pubsub';
 const pubsubMessageSchema = z.object({
-  data: z.string().min(1),
+  data: z.string().min(1).max(4096).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
   messageId: z.string().min(1).max(500).optional(),
   message_id: z.string().min(1).max(500).optional(),
   publishTime: z.string().datetime().optional(),
   publish_time: z.string().datetime().optional(),
-  attributes: z.record(z.string()).optional(),
+  attributes: z.record(z.string().max(1000)).optional(),
   orderingKey: z.string().max(1000).optional(),
   ordering_key: z.string().max(1000).optional(),
 }).strict().superRefine((message, context) => {
@@ -18,6 +18,7 @@ const pubsubMessageSchema = z.object({
   if (message.messageId && message.message_id && message.messageId !== message.message_id) context.addIssue({ code: z.ZodIssueCode.custom, message: 'message ID aliases disagree' });
   if (message.publishTime && message.publish_time && message.publishTime !== message.publish_time) context.addIssue({ code: z.ZodIssueCode.custom, message: 'publish time aliases disagree' });
   if (message.orderingKey && message.ordering_key && message.orderingKey !== message.ordering_key) context.addIssue({ code: z.ZodIssueCode.custom, message: 'ordering key aliases disagree' });
+  if (message.attributes && Object.keys(message.attributes).length > 20) context.addIssue({ code: z.ZodIssueCode.custom, message: 'too many message attributes' });
 }).transform((message) => ({
   data: message.data,
   messageId: message.messageId ?? message.message_id!,
@@ -56,7 +57,9 @@ export function createGmailWebhookHandler(options: {
     try {
       envelope = envelopeSchema.parse(await c.req.json());
       if (envelope.subscription !== required('GMAIL_PUBSUB_SUBSCRIPTION')) return c.json({ error: 'invalid webhook subscription' }, 403);
-      const decoded = Buffer.from(envelope.message.data, 'base64').toString('utf8');
+      const bytes = Buffer.from(envelope.message.data, 'base64');
+      if (bytes.byteLength > 2048) throw new Error('Webhook notification is too large');
+      const decoded = bytes.toString('utf8');
       notification = notificationSchema.parse(JSON.parse(decoded));
     } catch {
       return c.json({ error: 'invalid webhook payload' }, 400);

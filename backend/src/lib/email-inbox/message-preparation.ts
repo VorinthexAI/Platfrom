@@ -1,18 +1,20 @@
-import type { embedText } from '@/lib/embeddings';
+import type { PreparedDocumentRepresentation } from '@/lib/ai/document-processing';
 import type { EmailMessage, EmailThread } from './archive-payloads';
-import { emailMessageSemanticText } from './archive-payloads';
+import { emailMessagePayloadSchema, emailMessageSemanticText, emailThreadPayloadSchema } from './archive-payloads';
 import type { classifyEmailWithFallback } from './classification';
 import { emailLabelsVisibleInInbox, inboxCategoryFor, type InboxCategory } from './classification';
-import type { EmailRepository } from './repository';
+import { emailMessageKey, emailThreadKey, type EmailRepository } from './repository';
 import { latestEmailMessage } from './message-order';
 import type { StagedEmailAttachment } from './attachment-ingestion';
 
 type StoredFields = 'key' | 'threadKey' | 'createdAt' | 'updatedAt';
 type PreparedMessageInput = Omit<EmailMessage, StoredFields | 'embedding' | 'embeddingContentVersion' | 'inboxCategory' | 'unread' | 'attachmentAvailability'> & Partial<Pick<EmailMessage, StoredFields | 'unread' | 'attachmentAvailability'>>;
 type PreparedThreadInput = Omit<EmailThread, 'key' | 'createdAt' | 'updatedAt' | 'embedding' | 'embeddingContentVersion' | 'inboxCategory' | 'priority' | 'state' | 'category' | 'intent' | 'action' | 'labels' | 'starred' | 'isFavorite' | 'inInbox' | 'latestFrom' | 'lastMessageAt' | 'subject' | 'summary' | 'snippet' | 'unread'>;
+type SyncThreadInput = Parameters<EmailRepository['syncThread']>[0];
+type CurrentThreadInput = Omit<SyncThreadInput['thread'], 'embedding' | 'embeddingContentVersion' | 'archiveRepresentation'>;
+type CurrentMessageInput = Omit<SyncThreadInput['messages'][number], 'embedding' | 'embeddingContentVersion' | 'archiveRepresentation'>;
 
 function summary(value: string) { return value.replace(/\s+/g, ' ').trim().slice(0, 400) || '(Empty message)'; }
-function bounded(value: string) { return value.slice(0, 24_000); }
 const PREPARATION_CONCURRENCY = 8;
 async function mapConcurrent<T, R>(values: T[], concurrency: number, operation: (value: T) => Promise<R>) {
   const results = new Array<R>(values.length);
@@ -28,17 +30,47 @@ async function mapConcurrent<T, R>(values: T[], concurrency: number, operation: 
   return results;
 }
 function withoutStored<T extends Record<string, unknown>>(value: T) {
-  const { key: _key, threadKey: _threadKey, providerThreadId: _providerThreadId, createdAt: _createdAt, updatedAt: _updatedAt, embedding: _embedding, embeddingContentVersion: _version, inboxCategory: _category, ...rest } = value;
+  const { key: _key, threadKey: _threadKey, scopeKey: _scopeKey, createdAt: _createdAt, updatedAt: _updatedAt, embedding: _embedding, archiveRepresentation: _representation, ...rest } = value;
   return rest;
 }
 
-export async function classifyEmbedAndPersistThread(input: {
+export async function prepareAndPersistEmailThread(input: {
+  thread: CurrentThreadInput;
+  messages: CurrentMessageInput[];
+  reconcileMessages?: boolean;
+  prepareDocument: (input: { name: string; content: string; semanticSource: string }) => Promise<PreparedDocumentRepresentation>;
+  repository: Pick<EmailRepository, 'syncThread'>;
+  lease: { kind: 'sync' | 'send'; connectorKey: string; token: string };
+  beforePersist: () => Promise<void>;
+}) {
+  if (!input.messages.length) throw new Error('Email thread has no messages');
+  const threadKey = emailThreadKey(input.thread.scopeKey, input.thread.accountKey, input.thread.providerThreadId);
+  const messages = await mapConcurrent(input.messages, PREPARATION_CONCURRENCY, async (message) => {
+    const data = { ...message, embeddingContentVersion: 4 as const };
+    const payload = emailMessagePayloadSchema.parse({ version: 1, kind: 'mail-message', data: { ...withoutStored(data as unknown as Record<string, unknown>), threadKey } });
+    const archiveRepresentation = await input.prepareDocument({ name: message.subject, content: JSON.stringify(payload), semanticSource: emailMessageSemanticText(message) });
+    return { ...data, embedding: archiveRepresentation.embedding, archiveRepresentation };
+  }) as SyncThreadInput['messages'];
+  const thread = { ...input.thread, embeddingContentVersion: 4 as const };
+  const threadPayload = emailThreadPayloadSchema.parse({ version: 1, kind: 'mail-thread', data: withoutStored(thread as unknown as Record<string, unknown>) });
+  const latest = latestEmailMessage(input.messages)!;
+  const archiveRepresentation = await input.prepareDocument({ name: thread.subject, content: JSON.stringify(threadPayload), semanticSource: emailMessageSemanticText(latest) });
+  await input.beforePersist();
+  return input.repository.syncThread({
+    thread: { ...thread, embedding: archiveRepresentation.embedding, archiveRepresentation },
+    messages,
+    reconcileMessages: input.reconcileMessages,
+    lease: input.lease,
+  });
+}
+
+export async function sortAndPersistInboxThread(input: {
   organizationKey: string;
   thread: PreparedThreadInput;
   messages: PreparedMessageInput[];
   reconcileMessages?: boolean;
   classify: typeof classifyEmailWithFallback;
-  embed: typeof embedText;
+  prepareDocument: (input: { name: string; content: string; semanticSource: string }) => Promise<PreparedDocumentRepresentation>;
   repository: Pick<EmailRepository, 'syncThread'>;
   lease: { kind: 'sync'; connectorKey: string; token: string };
   beforePersist: () => Promise<void>;
@@ -50,8 +82,7 @@ export async function classifyEmbedAndPersistThread(input: {
     const classification = await input.classify(input.organizationKey, {
       labels: message.labels ?? [], subject: message.subject, from: message.from, body: message.body, direction: message.direction,
     });
-    const embedding = await input.embed({ text: bounded(emailMessageSemanticText(message)) });
-    return { message, classification, embedding };
+    return { message, classification };
   });
   const visible = classified.filter(({ message }) => message.labels?.includes('INBOX'));
   const relevant = visible.length ? visible : classified;
@@ -62,40 +93,49 @@ export async function classifyEmbedAndPersistThread(input: {
     ? 'Filtered'
     : relevant.some(({ message, classification }) => inboxCategoryFor(message.labels ?? [], classification) === 'Urgent') ? 'Urgent' : 'Important';
   const starred = labels.includes('STARRED');
-  const messages = classified.map(({ message, classification, embedding }) => ({
-    ...withoutStored(message as unknown as Record<string, unknown>),
-    scopeKey: message.scopeKey,
-    accountKey: message.accountKey,
-    providerMessageId: message.providerMessageId,
-    unread: message.unread ?? false,
-    summary: summary(message.body),
-    inboxCategory: inboxCategoryFor(message.labels ?? [], classification),
-    embedding,
-    embeddingContentVersion: 3 as const,
-  })) as Parameters<EmailRepository['syncThread']>[0]['messages'];
+  const threadKey = emailThreadKey(input.thread.scopeKey, input.thread.accountKey, input.thread.providerThreadId);
+  const messages = await mapConcurrent(classified, PREPARATION_CONCURRENCY, async ({ message, classification }) => {
+    const { providerThreadId: _providerThreadId, ...messageFields } = withoutStored(message as unknown as Record<string, unknown>);
+    const data = {
+      ...messageFields,
+      scopeKey: message.scopeKey,
+      accountKey: message.accountKey,
+      providerMessageId: message.providerMessageId,
+      unread: message.unread ?? false,
+      summary: summary(message.body),
+      inboxCategory: inboxCategoryFor(message.labels ?? [], classification),
+      embeddingContentVersion: 4 as const,
+    };
+    const payload = emailMessagePayloadSchema.parse({ version: 1, kind: 'mail-message', data: { ...withoutStored(data as unknown as Record<string, unknown>), threadKey } });
+    const archiveRepresentation = await input.prepareDocument({ name: message.subject, content: JSON.stringify(payload), semanticSource: emailMessageSemanticText(message) });
+    return { ...data, embedding: archiveRepresentation.embedding, archiveRepresentation };
+  }) as Parameters<EmailRepository['syncThread']>[0]['messages'];
+  const thread = {
+    ...input.thread,
+    subject: latest.message.subject,
+    summary: summary(latest.message.body),
+    snippet: summary(latest.message.body),
+    intent: latest.classification.intent,
+    ...(latest.classification.action ? { action: latest.classification.action } : {}),
+    priority: latest.classification.priority,
+    state: latest.classification.state,
+    category: latest.classification.category,
+    inboxCategory,
+    unread: labels.includes('UNREAD'),
+    starred,
+    isFavorite: starred,
+    labels,
+    latestFrom: latest.message.from,
+    inInbox: emailLabelsVisibleInInbox(labels),
+    lastMessageAt: latest.message.sentAt,
+    embedding: messages.find(({ providerMessageId }) => providerMessageId === latest.message.providerMessageId)!.embedding,
+    embeddingContentVersion: 4 as const,
+  };
+  const threadPayload = emailThreadPayloadSchema.parse({ version: 1, kind: 'mail-thread', data: withoutStored(thread as unknown as Record<string, unknown>) });
+  const archiveRepresentation = await input.prepareDocument({ name: thread.subject, content: JSON.stringify(threadPayload), semanticSource: emailMessageSemanticText(latest.message) });
   await input.beforePersist();
   return input.repository.syncThread({
-    thread: {
-      ...input.thread,
-      subject: latest.message.subject,
-      summary: summary(latest.message.body),
-      snippet: summary(latest.message.body),
-      intent: latest.classification.intent,
-      ...(latest.classification.action ? { action: latest.classification.action } : {}),
-      priority: latest.classification.priority,
-      state: latest.classification.state,
-      category: latest.classification.category,
-      inboxCategory,
-      unread: labels.includes('UNREAD'),
-      starred,
-      isFavorite: starred,
-      labels,
-      latestFrom: latest.message.from,
-      inInbox: emailLabelsVisibleInInbox(labels),
-      lastMessageAt: latest.message.sentAt,
-      embedding: latest.embedding,
-      embeddingContentVersion: 3,
-    },
+    thread: { ...thread, embedding: archiveRepresentation.embedding, archiveRepresentation },
     messages,
     reconcileMessages: input.reconcileMessages,
     lease: input.lease,

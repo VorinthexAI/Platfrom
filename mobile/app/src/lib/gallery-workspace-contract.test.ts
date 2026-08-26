@@ -212,7 +212,10 @@ test("supports direct empty-state upload and twelve removable camera captures", 
   expect(source).toContain("<GalleryCaptureModal");
   expect(source).toContain('refetchType: "none"');
   expect(captureSource).toContain("MAX_GALLERY_CAPTURES = 12");
-  expect(captureSource).toContain("normalizeCapturedJpeg");
+  expect(captureSource).toContain("normalizeCapturedPng");
+  expect(captureSource).toContain('filename: `gallery-${timestamp}.png`');
+  expect(source).toContain('filename: `gallery-${Date.now()}-${index + 1}.png`');
+  expect(source).toContain('mimeType: "image/png"');
   expect(captureSource).toContain("normalized.latitude");
   expect(captureSource).toContain("Remove image");
   expect(cameraSource).toContain("exif: true");
@@ -357,6 +360,16 @@ test("reloads the guarded collection singleton after confirmed global image dele
 test("remounts collection feature sheets with distinct keys", () => {
   expect(source).toContain('key={`highlights:${activeCollection.key}`}');
   expect(source).toContain('key={`memories:${activeCollection.key}`}');
+});
+
+test("direct image routes resolve exact keys beyond the loaded page and at Gallery root", () => {
+  const directRoute = source.slice(source.indexOf("if (!initialImageKey || initialImageOpened.current"), source.indexOf("const returnToTripAssets"));
+  expect(directRoute).toContain("galleryQueryKeys.image(galleryContext, initialCollectionKey, initialImageKey)");
+  expect(directRoute).toContain("searchGalleryImages({ imageKey: initialImageKey, ...(initialCollectionKey ? { collectionKey: initialCollectionKey } : {}) })");
+  expect(directRoute).toContain("request !== initialImageRequest.current || generation !== refreshContextGeneration.current");
+  expect(directRoute).toContain("setImages((current) => appendCursorItems(current, [image], ({ key }) => key))");
+  expect(directRoute).toContain("setSelectedImage(image)");
+  expect(directRoute).toContain('openSheet("image")');
 });
 
 test("settles duplicate and similar loading when event refresh supersedes the opening request", () => {

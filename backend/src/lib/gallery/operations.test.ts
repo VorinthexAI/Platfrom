@@ -3,7 +3,7 @@ import { newId } from '@/lib/ids';
 import { galleryOperationInputSchemas, galleryOperations, GalleryOperationError, normalizeGalleryOperationError, normalizeMemoryText, projectCollectionShare, projectCollectionShares, projectGalleryCollection, safeImage, selectMemoryCandidate } from './operations';
 import { collectionMemberSchema } from '@/lib/db/collection-members.node';
 import { collectionInviteSchema } from '@/lib/db/collection-invites.node';
-import { galleryUploadSchema } from '@/lib/db/gallery-uploads.node';
+import { galleryUploadSchema, type GalleryUpload } from '@/lib/db/gallery-uploads.node';
 import { imageSchema } from '@/lib/db/images.node';
 import { shareSchema } from '@/lib/db/shares.node';
 import { encryptAuthenticatedJson } from '@/lib/authenticated-encryption';
@@ -176,6 +176,24 @@ describe('Gallery operation boundaries', () => {
     } as any;
     await expect(galleryOperations.reserveUploads({ files: [{ clientKey: 'one', filename: 'one.jpg', sizeBytes: 10 }, { clientKey: 'two', filename: 'two.jpg', sizeBytes: 10 }] }, context)).rejects.toThrow('transaction rolled back');
     expect({ signed, insertCalls, publications }).toEqual({ signed: 2, insertCalls: 1, publications: 0 });
+  });
+
+  test('reserves PNG for canonical clients while retaining JPEG compatibility', async () => {
+    const organizationKey = 'organization', scopeKey = key(), actorKey = key(), userId = key();
+    const records: GalleryUpload[] = [];
+    const context = {
+      organizationKey, scopeKey, membership: { key: actorKey, organizationId: organizationKey, userId, status: 'active' },
+      canManageScope: async () => true,
+      signUpload: async () => 'https://uploads.example/object',
+      insertUploads: async (uploads: GalleryUpload[]) => { records.push(...uploads); },
+      publishUserEvent: async () => undefined,
+    } as any;
+    const result = await galleryOperations.reserveUploads({ files: [{ clientKey: 'canonical', filename: 'one.png', sizeBytes: 10 }, { clientKey: 'legacy', filename: 'two.jpeg', sizeBytes: 10 }] }, context);
+    expect(records.map(({ filename, mimeType, storageKey }) => ({ filename, mimeType, storageKey: storageKey.split('/').at(-1) }))).toEqual([
+      { filename: 'one.png', mimeType: 'image/png', storageKey: 'original.png' },
+      { filename: 'two.jpg', mimeType: 'image/jpeg', storageKey: 'original.jpg' },
+    ]);
+    expect(result.uploads.map(({ headers }) => headers)).toEqual([{ 'Content-Type': 'image/png' }, { 'Content-Type': 'image/jpeg' }]);
   });
 
   test('enforces mutually exclusive search sources', () => {

@@ -7,7 +7,7 @@ import { Button } from "@vorinthex/shared/ui/button";
 import { CloseIcon } from "@vorinthex/shared/ui/icons-mobile";
 
 import { BrandedCameraModal } from "@/components/capability/BrandedCameraModal";
-import { normalizeCapturedJpeg } from "@/lib/captured-image";
+import { normalizeCapturedPng } from "@/lib/captured-image";
 import type { PreparedGalleryUpload } from "@/lib/gallery-client";
 import { fonts, palette, radii, spacing } from "@/theme/tokens";
 
@@ -40,12 +40,12 @@ export function GalleryCaptureModal({ onClose, onSubmit }: Props) {
     setCapturing(true);
     setError(undefined);
     try {
-      const normalized = await normalizeCapturedJpeg(picture, { maxSide: 2400, compress: 0.88 });
+      const normalized = await normalizeCapturedPng(picture, { maxSide: 2400, compress: 0.88 });
       if (!active.current) { deleteCapturedFile(normalized.uri); return; }
       const timestamp = Date.now();
       const file: PreparedGalleryUpload = {
         clientKey: `${timestamp}-${Math.random().toString(36).slice(2)}`,
-        filename: `gallery-${timestamp}.jpg`,
+        filename: `gallery-${timestamp}.png`,
         uri: normalized.uri,
         sizeBytes: normalized.sizeBytes,
         ...(normalized.latitude !== undefined && normalized.longitude !== undefined ? { latitude: normalized.latitude, longitude: normalized.longitude } : {}),

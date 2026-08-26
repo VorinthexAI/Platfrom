@@ -150,6 +150,13 @@ describe('Gmail connector protocol', () => {
     expect(bodies[9]).toBe('token=private-access-token');
   });
 
+  test('validates Google revocation responses while allowing idempotent retries', async () => {
+    const responses = [new Response(null, { status: 400 }), new Response(null, { status: 503 })];
+    const client = createGmailClient('access', (async (_input: string | URL | Request, _init?: RequestInit) => responses.shift()!) as typeof fetch);
+    await expect(client.revoke('refresh')).resolves.toBeUndefined();
+    await expect(client.revoke('refresh')).rejects.toMatchObject({ name: 'GmailApiError', status: 503 });
+  });
+
   test('retains Gmail error reasons for retry classification', async () => {
     const client = createGmailClient('token', (async () => Response.json({ error: { message: 'quota wait', status: 'RESOURCE_EXHAUSTED', errors: [{ reason: 'rateLimitExceeded' }] } }, { status: 403 })) as unknown as typeof fetch, { sleep: async () => {}, random: () => 0 });
     let error: unknown;
@@ -229,6 +236,22 @@ describe('Gmail connector protocol', () => {
     const transportClient = createGmailClient('token', (async () => { calls += 1; throw new TypeError('fetch failed'); }) as unknown as typeof fetch, { sleep: async () => { throw new Error('must not sleep'); } });
     await expect(transportClient.sendRaw('Subject: test\r\n\r\nbody')).rejects.toBeInstanceOf(TypeError);
     expect(calls).toBe(2);
+  });
+
+  test('sends exact Gmail stop, lookup, and threaded raw-message requests', async () => {
+    const requests: Array<{ url: string; method: string; body: unknown }> = [];
+    const client = createGmailClient('token', (async (input: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: String(input), method: init?.method ?? 'GET', body: init?.body });
+      return Response.json(requests.length === 2 ? { messages: [{ id: 'existing', threadId: 'thread-1' }] } : requests.length === 3 ? { id: 'sent', threadId: 'thread-1' } : {});
+    }) as typeof fetch);
+    await client.stop();
+    await expect(client.findMessageByRfc822Id('<message@example.com>')).resolves.toEqual({ id: 'existing', threadId: 'thread-1' });
+    await client.sendRaw('Subject: Test\r\n\r\nBody', 'thread-1');
+    expect(requests).toEqual([
+      { url: 'https://gmail.googleapis.com/gmail/v1/users/me/stop', method: 'POST', body: '{}' },
+      { url: 'https://gmail.googleapis.com/gmail/v1/users/me/messages?q=rfc822msgid%3A%3Cmessage%40example.com%3E&maxResults=1', method: 'GET', body: undefined },
+      { url: 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send', method: 'POST', body: JSON.stringify({ raw: Buffer.from('Subject: Test\r\n\r\nBody').toString('base64url'), threadId: 'thread-1' }) },
+    ]);
   });
 
   test('bounds concurrent requests per Gmail client', async () => {

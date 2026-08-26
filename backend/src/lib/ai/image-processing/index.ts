@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import OpenAI from 'openai';
+import sharp from 'sharp';
 import { z } from 'zod';
 import { documentStorage, type DocumentStorage } from '@/lib/ai/document-processing/storage';
 import { EMBEDDING_DIMENSIONS, currentEmbeddingSchema, embedText } from '@/lib/embeddings';
@@ -85,6 +86,14 @@ function signature(extension: Extension, bytes: Uint8Array): boolean {
   return ascii(bytes, 0, 4) === 'RIFF' && ascii(bytes, 8, 4) === 'WEBP';
 }
 
+export async function canonicalizeImageToPng(bytes: Uint8Array, maxPixels = MAX_IMAGE_PIXELS) {
+  const result = await sharp(bytes, { animated: false, failOn: 'error', limitInputPixels: maxPixels })
+    .rotate()
+    .png()
+    .toBuffer({ resolveWithObject: true });
+  return { bytes: new Uint8Array(result.data), width: result.info.width, height: result.info.height };
+}
+
 async function validate(input: ProcessImageInput, dependencies: ImageProcessingDependencies) {
   if (!/^c[a-z0-9]{8,127}$/.test(input.scopeKey)) throw new ImageProcessingError('IMAGE_INVALID_INPUT', 'The image scope key is invalid.');
   if (!/^c[a-z0-9]{8,127}$/.test(input.ownerKey)) throw new ImageProcessingError('IMAGE_INVALID_INPUT', 'The image owner key is invalid.');
@@ -99,12 +108,30 @@ async function validate(input: ProcessImageInput, dependencies: ImageProcessingD
   if (bytes.byteLength !== sizeBytes || !signature(extension, bytes)) throw new ImageProcessingError('IMAGE_INVALID_INPUT', 'The image failed its integrity check.');
   const measured = dimensions(extension, bytes); const maxDimension = dependencies.maxDimension ?? MAX_IMAGE_DIMENSION;
   if (!measured || measured.width <= 0 || measured.height <= 0 || measured.width > maxDimension || measured.height > maxDimension || measured.width * measured.height > (dependencies.maxPixels ?? MAX_IMAGE_PIXELS)) throw new ImageProcessingError('IMAGE_DIMENSIONS_INVALID', 'The image dimensions are invalid or exceed the allowed limits.');
-  return { filename, mimeType, sizeBytes, bytes, extension, ...measured };
+  let canonical: Awaited<ReturnType<typeof canonicalizeImageToPng>>;
+  try {
+    canonical = await canonicalizeImageToPng(bytes, dependencies.maxPixels ?? MAX_IMAGE_PIXELS);
+  } catch (error) {
+    throw new ImageProcessingError('IMAGE_INVALID_INPUT', 'The image could not be converted to PNG.', { cause: error });
+  }
+  const canonicalBytes = canonical.bytes;
+  if (canonicalBytes.byteLength > (dependencies.maxBytes ?? MAX_IMAGE_BYTES)) throw new ImageProcessingError('IMAGE_TOO_LARGE', 'The canonical PNG image exceeds the maximum allowed size.');
+  const canonicalFilename = `${filename.replace(/\.[^.]+$/, '').slice(0, 251) || 'image'}.png`;
+  return { filename: canonicalFilename, mimeType: 'image/png' as const, sizeBytes: canonicalBytes.byteLength, bytes: canonicalBytes, extension: 'png' as const, width: canonical.width, height: canonical.height, source: { filename, mimeType, sizeBytes, bytes, extension } };
 }
 
 type ValidatedImage = Awaited<ReturnType<typeof validate>>;
 function imageRequestHash(scopeKey: string, ownerKey: string, image: ValidatedImage): string {
-  return hash(`${scopeKey}\0${ownerKey}\0${image.filename}\0${image.mimeType}\0${image.sizeBytes}\0${hash(image.bytes)}`);
+  return hash(`${scopeKey}\0${ownerKey}\0${image.source.filename}\0${image.source.mimeType}\0${image.source.sizeBytes}\0${hash(image.source.bytes)}`);
+}
+
+function persistedImageMatches(existing: Image, input: ProcessImageInput, image: ValidatedImage) {
+  const key = input.imageKey ?? `c${hash(`${input.scopeKey}\0${input.idempotencyKey}`).slice(0, 24)}`;
+  const canonicalKey = `media/${input.scopeKey}/${key}/${hash(image.bytes)}/original.png`;
+  const legacyKey = `media/${input.scopeKey}/${key}/${hash(image.source.bytes)}/original.${image.source.extension}`;
+  const canonical = existing.filename === image.filename && existing.mimeType === image.mimeType && existing.sizeBytes === image.sizeBytes && existing.storageKey === canonicalKey;
+  const legacy = existing.filename === image.source.filename && existing.mimeType === image.source.mimeType && existing.sizeBytes === image.source.sizeBytes && existing.storageKey === legacyKey;
+  return existing.width === image.width && existing.height === image.height && (canonical || legacy);
 }
 
 export async function captionImageWithOpenAI(input: { filename: string; mimeType: string; bytes: Uint8Array; signal?: AbortSignal }, client: ResponsesClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, baseURL: process.env.OPENAI_BASE_URL || undefined })) {
@@ -116,19 +143,18 @@ async function removeWithRetry(storage: DocumentStorage, key: string) { let last
 async function replayPersistedImage(input: ProcessImageInput, image: ValidatedImage, dependencies: ImageProcessingDependencies): Promise<Image | null> {
   if (!input.idempotencyKey && !input.imageKey) return null;
   const key = input.imageKey ?? `c${hash(`${input.scopeKey}\0${input.idempotencyKey}`).slice(0, 24)}`;
-  const requestedKey = `media/${input.scopeKey}/${key}/${hash(image.bytes)}/original.${image.extension}`;
   const existing = await (dependencies.getImage ?? getImageById)(key);
   if (!existing) return null;
   if (existing.scopeKey !== input.scopeKey) throw new ImageProcessingError('IMAGE_INSERT_FAILED', 'The idempotent image is unavailable.');
-  if (existing.filename !== image.filename || existing.mimeType !== image.mimeType || existing.sizeBytes !== image.sizeBytes || existing.width !== image.width || existing.height !== image.height || existing.storageKey !== requestedKey) throw new ImageProcessingError('IMAGE_IDEMPOTENCY_CONFLICT', 'The image idempotency key belongs to a different request.');
+  if (!persistedImageMatches(existing, input, image)) throw new ImageProcessingError('IMAGE_IDEMPOTENCY_CONFLICT', 'The image idempotency key belongs to a different request.');
   return existing;
 }
 async function execute(input: ProcessImageInput, image: ValidatedImage, perceptualHash: string, dependencies: ImageProcessingDependencies, prepared?: { canonical?: ImageCaptionRecord; generated?: GeneratedImageCaption & { embedding: number[] } }): Promise<Image> {
   const getImage = dependencies.getImage ?? getImageById;
   const persistImage = dependencies.persistImage ?? insertPreparedImageWithCaption;
   const key = input.imageKey ?? (input.idempotencyKey ? `c${hash(`${input.scopeKey}\0${input.idempotencyKey}`).slice(0, 24)}` : (dependencies.createKey ?? newId)());
-  const requestedKey = `media/${input.scopeKey}/${key}/${hash(image.bytes)}/original.${image.extension}`;
-  if (input.idempotencyKey) { const existing = await getImage(key); if (existing) { if (existing.scopeKey !== input.scopeKey) throw new ImageProcessingError('IMAGE_INSERT_FAILED', 'The idempotent image is unavailable.'); if (existing.filename !== image.filename || existing.mimeType !== image.mimeType || existing.sizeBytes !== image.sizeBytes || existing.width !== image.width || existing.height !== image.height || existing.storageKey !== requestedKey) throw new ImageProcessingError('IMAGE_IDEMPOTENCY_CONFLICT', 'The image idempotency key belongs to a different request.'); return existing; } }
+  const requestedKey = `media/${input.scopeKey}/${key}/${hash(image.bytes)}/original.png`;
+  if (input.idempotencyKey) { const existing = await getImage(key); if (existing) { if (existing.scopeKey !== input.scopeKey) throw new ImageProcessingError('IMAGE_INSERT_FAILED', 'The idempotent image is unavailable.'); if (!persistedImageMatches(existing, input, image)) throw new ImageProcessingError('IMAGE_IDEMPOTENCY_CONFLICT', 'The image idempotency key belongs to a different request.'); return existing; } }
   const storage = dependencies.storage ?? documentStorage; let storageKey: string;
   const customReservation = (storageKey: string): StorageUploadReservation => ({ storageKey, token: 'custom-storage' });
   const renewReservation = dependencies.renewStorageReservation ?? (dependencies.storage ? async () => true : renewStorageUploadReservation);

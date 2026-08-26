@@ -35,9 +35,9 @@ describe('generated Archive documents', () => {
     await persistence.updateFolder(scopeKey, key, { name: 'Renamed', embedding: [] });
     await persistence.updateFolder(scopeKey, key, { isFavorite: true, updatedAt: now });
     await persistence.deleteFolder(scopeKey, key);
-    expect(calls[0]?.query).toContain('current.mutationPolicy != "system-container" || @allowSystemContainerUpdate');
-    expect(calls[0]?.bindVars).toMatchObject({ allowSystemContainerUpdate: false });
-    expect(calls[1]?.bindVars).toMatchObject({ allowSystemContainerUpdate: true });
+    expect(calls[0]?.query).toContain('(current.mutationPolicy != "system-container" && current.managedPurpose == null) || @allowManagedUpdate');
+    expect(calls[0]?.bindVars).toMatchObject({ allowManagedUpdate: false });
+    expect(calls[1]?.bindVars).toMatchObject({ allowManagedUpdate: true });
     expect(calls[2]?.bindVars).toMatchObject({ protectSystemContainer: true });
   });
 

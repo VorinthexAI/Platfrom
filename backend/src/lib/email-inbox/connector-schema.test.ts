@@ -8,7 +8,7 @@ describe('organization connector mail projection', () => {
     const connector = organizationConnectorSchema.parse({
       key: 'cmrnlzf650002qc7k4p5zem5w', organizationKey: 'org-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', provider: 'gmail', providerAccountId: 'google-1', email: 'person@example.com', encryptedCredentials: 'cipher', encryptionKeyId: 'v1', accessTokenFingerprint: 'a'.repeat(64), scopes: ['email'], createdByMembershipKey: 'cmrnlzf640001qc7kazsr96k5', status: 'active', historyId: '123', syncLeaseToken: '123e4567-e89b-12d3-a456-426614174000', syncLeaseExpiresAt: now, watchExpiresAt: now, createdAt: now, updatedAt: now,
     });
-    expect(connector).toMatchObject({ syncEnabled: true, syncStatus: 'idle', historyId: '123', watchExpiresAt: now });
+    expect(connector).toMatchObject({ syncEnabled: true, initialSyncCompleted: false, syncStatus: 'idle', historyId: '123', watchExpiresAt: now });
     expect(() => organizationConnectorSchema.parse({ ...connector, accessToken: 'secret' })).toThrow();
   });
 

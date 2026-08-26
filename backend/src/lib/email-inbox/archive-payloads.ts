@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { currentEmbeddingSchema } from '@/lib/embeddings';
 import { documentSchema, type Document } from '@/lib/db/documents.node';
 import { chunkDocumentContent, documentSemanticHash } from '@/lib/ai/document-processing/chunking';
+import type { PreparedDocumentRepresentation } from '@/lib/ai/document-processing';
 import { inboxCategorySchema } from './classification';
 
 const key = z.string().cuid();
@@ -36,7 +37,7 @@ const threadDataSchema = z.object({
   latestFrom: address.optional(),
   inInbox: z.boolean().optional(),
   isFavorite: z.boolean().default(false),
-  embeddingContentVersion: z.union([z.literal(2), z.literal(3)]).optional(),
+  embeddingContentVersion: z.union([z.literal(2), z.literal(3), z.literal(4)]).optional(),
   inboxCategory: inboxCategorySchema.default('Important'),
 }).strict();
 
@@ -67,7 +68,7 @@ const messageDataSchema = z.object({
   attachmentAvailability: emailAttachmentAvailabilitySchema.default('none'),
   unavailableAttachmentCount: z.number().int().min(1).max(10_000).optional(),
   attachments: emailAttachmentRefsSchema.optional(),
-  embeddingContentVersion: z.union([z.literal(2), z.literal(3)]).optional(),
+  embeddingContentVersion: z.union([z.literal(2), z.literal(3), z.literal(4)]).optional(),
   inboxCategory: inboxCategorySchema.default('Important'),
 }).strict();
 
@@ -84,6 +85,7 @@ const draftCommonSchema = z.object({
 }).strict();
 
 const replyDraftDataSchema = draftCommonSchema.extend({
+  creationSource: z.enum(['manual', 'subscription']).default('manual'),
   variant: z.literal('reply').default('reply'),
   replyMode: z.enum(['reply', 'reply_all']).default('reply'),
   threadKey: key,
@@ -94,6 +96,7 @@ const replyDraftDataSchema = draftCommonSchema.extend({
 }).strict();
 
 const newDraftDataSchema = draftCommonSchema.extend({
+  creationSource: z.literal('manual').default('manual'),
   variant: z.literal('new'),
   accountKey: key,
   to: z.array(address).min(1).max(50),
@@ -181,7 +184,7 @@ type ArchiveRecord<Data> = Data & {
 export type EmailThread = ArchiveRecord<z.infer<typeof threadDataSchema>>;
 export type EmailMessage = ArchiveRecord<z.infer<typeof messageDataSchema>>;
 export type EmailDraft = ArchiveRecord<z.infer<typeof replyDraftDataSchema> | z.infer<typeof newDraftDataSchema>>;
-export type EmailDraftCreate = (z.infer<typeof replyDraftDataSchema> | z.infer<typeof newDraftDataSchema>) & { scopeKey: string; embedding: number[] };
+export type EmailDraftCreate = (z.input<typeof replyDraftDataSchema> | z.input<typeof newDraftDataSchema>) & { scopeKey: string; embedding: number[] };
 export type EmailTone = ArchiveRecord<z.infer<typeof emailToneDataSchema>> & { isFavorite: boolean };
 export type EmailReplyContext = ArchiveRecord<z.infer<typeof emailReplyContextDataSchema>>;
 export type EmailWritingProfile = ArchiveRecord<z.infer<typeof writingProfileDataSchema>>;
@@ -283,12 +286,29 @@ export function archiveDocument(input: {
   folderKey: string;
   name: string;
   payload: unknown;
-  embedding: z.input<typeof currentEmbeddingSchema>;
+  embedding?: z.input<typeof currentEmbeddingSchema>;
+  representation?: PreparedDocumentRepresentation;
   createdAt: string;
   updatedAt: string;
   mutationPolicy?: 'user' | 'system-only';
+  archiveVisibility?: 'visible' | 'domain-only';
   developmentFixtureIdentifier?: string;
 }): Document {
-  const { mutationPolicy = 'system-only', ...document } = input;
-  return documentSchema.parse({ ...document, content: JSON.stringify(document.payload), mutationPolicy, isFavorite: false });
+  const { mutationPolicy = 'system-only', archiveVisibility = 'visible', representation, embedding, ...document } = input;
+  const content = JSON.stringify(document.payload);
+  if (representation && representation.content !== content) throw new Error('Prepared Archive representation does not match the email payload.');
+  return documentSchema.parse({
+    ...document,
+    content,
+    embedding: representation?.embedding ?? embedding,
+    ...(representation ? {
+      contentChunks: representation.contentChunks,
+      chunkEmbeddings: representation.chunkEmbeddings,
+      semanticChunkCount: representation.semanticChunkCount,
+      semanticContentHash: representation.semanticContentHash,
+    } : {}),
+    mutationPolicy,
+    archiveVisibility,
+    isFavorite: false,
+  });
 }

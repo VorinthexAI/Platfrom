@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import sharp from 'sharp';
 import { hashUserEmail } from '@/api/users';
 import { documentStorage } from '@/lib/ai/document-processing/storage';
@@ -14,6 +13,7 @@ import { getUserByEmailHash } from '@/lib/db/users.node';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
 import { computePerceptualHash, perceptualHashSegments } from '@/lib/perceptual-hash';
 import { S3_BUCKET } from '@/lib/s3';
+import { galleryDevelopmentFixtureKey } from '@/lib/development-fixture-assets';
 
 const EMAIL = process.env.DEV_SEED_EMAIL?.trim().toLowerCase() || 'oscar.burman005@gmail.com';
 const FIXTURE_MARKER = 'Development Gallery fixture:';
@@ -72,10 +72,6 @@ function fixtureSvg(index: number, colors: readonly [string, string, string]) {
   </svg>`;
 }
 
-function fixtureKey(scopeKey: string, kind: string, logicalName: string) {
-  return `c${createHash('sha256').update(`${scopeKey}:${kind}:${logicalName}`).digest('hex').slice(0, 24)}`;
-}
-
 async function main() {
   requireLocalEndpoint('ARANGO_URL', process.env.ARANGO_URL);
   requireLocalEndpoint('S3 endpoint', process.env.S3_ENDPOINT_URL ?? process.env.AWS_ENDPOINT_URL);
@@ -96,24 +92,24 @@ async function main() {
   let imageIndex = 0;
 
   for (const [collectionIndex, fixtureCollection] of collections.entries()) {
-    const collectionKey = fixtureKey(scopeKey, 'collection', fixtureCollection.slug);
+    const collectionKey = galleryDevelopmentFixtureKey(scopeKey, 'collection', fixtureCollection.slug);
     const collectionImages = [];
     const collectionEmbedding = embedding(collectionIndex);
 
     for (let localIndex = 0; localIndex < fixtureCollection.count; localIndex += 1) {
       imageIndex += 1;
       const logicalName = `${fixtureCollection.slug}-${String(localIndex + 1).padStart(2, '0')}`;
-      const filename = `${logicalName}.jpg`;
-      const storageKey = `gallery/dev-seed/${scopeKey}/${logicalName}.jpg`;
-      const imageKey = fixtureKey(scopeKey, 'image', logicalName);
-      const captionKey = fixtureKey(scopeKey, 'caption', logicalName);
+      const filename = `${logicalName}.png`;
+      const storageKey = `gallery/dev-seed/${scopeKey}/${logicalName}.png`;
+      const imageKey = galleryDevelopmentFixtureKey(scopeKey, 'image', logicalName);
+      const captionKey = galleryDevelopmentFixtureKey(scopeKey, 'caption', logicalName);
       const caption = `${fixtureCollection.name} study ${localIndex + 1}: ${fixtureCollection.description.toLowerCase()}`;
       const visualIndex = fixtureCollection.slug === 'studio-objects' && localIndex === 1 ? imageIndex - 1 : imageIndex;
-      const bytes = await sharp(Buffer.from(fixtureSvg(visualIndex, fixtureCollection.colors))).jpeg({ quality: 88, chromaSubsampling: '4:4:4' }).toBuffer();
+      const bytes = await sharp(Buffer.from(fixtureSvg(visualIndex, fixtureCollection.colors))).png().toBuffer();
       const perceptualHash = await computePerceptualHash(bytes);
       const hashSegments = perceptualHashSegments(perceptualHash);
       const imageEmbedding = embedding(collectionIndex, localIndex);
-      await documentStorage.upload({ key: storageKey, bytes, mimeType: 'image/jpeg' });
+      await documentStorage.upload({ key: storageKey, bytes, mimeType: 'image/png' });
 
       captionDocuments.push(imageCaptionRecordSchema.parse({
         key: captionKey,
@@ -138,7 +134,7 @@ async function main() {
         filename,
         caption,
         storageKey,
-        mimeType: 'image/jpeg',
+        mimeType: 'image/png',
         sizeBytes: bytes.byteLength,
         width: 720,
         height: 720,
@@ -149,7 +145,7 @@ async function main() {
         updatedAt: NOW,
       }));
       collectionImages.push(imageKey);
-      imageRelations.push(collectionImageSchema.parse({ key: fixtureKey(scopeKey, 'placement', `${fixtureCollection.slug}:${logicalName}`), scopeKey, collectionKey, imageKey, addedByKey: actorKey, createdAt: NOW }));
+      imageRelations.push(collectionImageSchema.parse({ key: galleryDevelopmentFixtureKey(scopeKey, 'placement', `${fixtureCollection.slug}:${logicalName}`), scopeKey, collectionKey, imageKey, addedByKey: actorKey, createdAt: NOW }));
     }
 
     collectionDocuments.push(collectionSchema.parse({
@@ -163,7 +159,7 @@ async function main() {
       createdAt: NOW,
       updatedAt: NOW,
     }));
-    collectionMemberships.push(collectionMemberSchema.parse({ key: fixtureKey(scopeKey, 'membership', fixtureCollection.slug), scopeKey, collectionKey, memberKey: actorKey, role: 'owner', createdAt: NOW }));
+    collectionMemberships.push(collectionMemberSchema.parse({ key: galleryDevelopmentFixtureKey(scopeKey, 'membership', fixtureCollection.slug), scopeKey, collectionKey, memberKey: actorKey, role: 'owner', createdAt: NOW }));
   }
 
   await withTransaction({ write: ['collections', 'collectionMembers', 'images', 'imageCaptions', 'collectionImages'] }, async (transaction) => {

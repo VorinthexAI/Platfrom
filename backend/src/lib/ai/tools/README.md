@@ -13,6 +13,9 @@ expresses domain intent such as `folder.create`, `email.draft.send`, or
 - `workspace-tool-definitions.ts` adapts Core capabilities into the public
   registry while injecting trusted `ToolContext` identity, organization, and
   scope.
+- `email-ingestion-tool-definitions.ts` owns system-only inbox ingestion tools.
+  They are registered canonical tools but excluded from model/provider
+  definitions and every Core surface.
 
 ## Required Layering
 
@@ -31,6 +34,12 @@ product-neutral dot-notation tool. Authentication, OAuth, webhooks, SSE,
 health checks, and signed-byte transfers are protocol boundaries rather than
 tools. Never expose generic database, arbitrary query, or credential-management
 tools.
+
+Protocol boundaries may dispatch a system-only business tool after authenticating
+and reducing provider input to trusted server selectors. Gmail OAuth schedules
+`inbox.sync`; verified Gmail Pub/Sub delivery schedules `inbox.subscribe`. Both
+ingestion tools and the model-visible `inbox.sort` operation converge on the same
+canonical thread sorter and persistence path.
 
 `app.search` is the canonical cross-collection text search. The older
 `content.search`, `image.search`, `inbox.search`, `email.tone.search`,

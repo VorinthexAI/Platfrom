@@ -2,13 +2,28 @@ import type { Context } from 'hono';
 import { z, ZodError } from 'zod';
 import { FoundersAccessError } from '@/lib/founders/access';
 import { createEmailOAuthService, type EmailOAuthService } from '@/lib/email-inbox/oauth';
-import { createEmailService, EmailIdempotencyError, EmailRepositoryError, emailDraftComposeInputSchema, emailDraftComposeInputShape, emailDraftCreateInputSchema, emailDraftDeleteInputSchema, emailDraftUpdateInputSchema, emailMessageGeneratedListInputSchema, emailMessageSummarizeInputSchema, emailMessageSummaryDeleteInputSchema, emailMessageTranslationDeleteInputSchema, emailOverviewInputSchema, emailOverviewInputShape, emailReplyContextCreateInputSchema, emailReplyContextDeleteInputSchema, emailReplyContextUpdateInputSchema, emailSemanticSearchInputSchema, emailSimilarFindInputSchema, emailThreadFavoriteInputSchema, emailThreadReadStateInputSchema, emailThreadTrashInputSchema, emailToneCreateInputSchema, emailToneDeleteInputSchema, emailToneUpdateInputSchema, emailTrashClearInputSchema, inboxUpdateInputSchema, publicEmailDraftSchema, publicEmailGeneratedDeleteResultSchema, publicEmailOverviewSchema, publicEmailSummaryListResultSchema, publicEmailSummaryResultSchema, publicEmailTranslationListResultSchema, type EmailService } from '@/lib/email-inbox/service';
+import { createEmailService, EmailIdempotencyError, EmailRepositoryError, emailDraftComposeInputSchema, emailDraftComposeInputShape, emailDraftCreateInputSchema, emailDraftDeleteInputSchema, emailDraftUpdateInputSchema, emailMessageGeneratedListInputSchema, emailMessageSummarizeInputSchema, emailMessageSummaryDeleteInputSchema, emailMessageTranslationDeleteInputSchema, emailOverviewInputSchema, emailOverviewInputShape, emailReplyContextCreateInputSchema, emailReplyContextDeleteInputSchema, emailReplyContextUpdateInputSchema, emailSemanticSearchInputSchema, emailSimilarFindInputSchema, emailThreadFavoriteInputSchema, emailThreadReadStateInputSchema, emailThreadTrashInputSchema, emailToneCreateInputSchema, emailToneDeleteInputSchema, emailToneUpdateInputSchema, emailTrashClearInputSchema, inboxUpdateInputSchema, publicEmailDraftSchema, publicEmailGeneratedDeleteResultSchema, publicEmailInboxSchema, publicEmailOverviewSchema, publicEmailSummaryListResultSchema, publicEmailSummaryResultSchema, publicEmailTranslationListResultSchema, type EmailService } from '@/lib/email-inbox/service';
 import { getAuthIdentity } from './security';
 import { strictObject } from './validation';
 
 const contextSchema = strictObject({ organizationKey: z.string().trim().min(1).max(160), scopeKey: z.string().cuid() });
 const threadKeySchema = z.string().cuid();
 const connectorKeySchema = z.string().cuid();
+const connectorSelectorSchema = strictObject({ ...contextSchema.shape, connectorKey: connectorKeySchema });
+const legacyConnectorSchema = publicEmailInboxSchema.transform(({ initialSyncCompleted: _initialSyncCompleted, ...connector }) => connector);
+const legacyOverviewSchema = publicEmailOverviewSchema.transform((overview) => ({
+  ...overview,
+  accounts: overview.accounts.map((connector) => legacyConnectorSchema.parse(connector)),
+  selectedAccount: overview.selectedAccount ? legacyConnectorSchema.parse(overview.selectedAccount) : null,
+}));
+const legacyScoredConnectorSchema = publicEmailInboxSchema.extend({ score: z.number().min(-1).max(1) }).strict()
+  .transform(({ initialSyncCompleted: _initialSyncCompleted, ...connector }) => connector);
+const legacyInboxSearchSchema = z.object({ inboxes: z.array(legacyScoredConnectorSchema) }).strict();
+const legacySyncResultSchema = z.object({ synced: z.number().int().nonnegative(), busy: z.boolean().optional(), lastSyncedAt: z.string().datetime().nullable() }).passthrough()
+  .transform(({ synced, busy, lastSyncedAt }) => ({ synced, ...(busy === undefined ? {} : { busy }), lastSyncedAt }));
+const legacySubscribeResultSchema = z.object({ watchExpiresAt: z.string().datetime().nullable().optional(), skipped: z.literal(true).optional() }).passthrough()
+  .transform(({ watchExpiresAt, skipped }) => ({ ...(watchExpiresAt ? { watchExpiresAt } : {}), ...(skipped ? { skipped } : {}) }));
+const usesCurrentConnectorTransport = (c: Context) => c.req.header('x-vorinthex-email-transport') === '2';
 class EmailHttpError extends Error { constructor(readonly status: 400 | 401 | 403 | 404 | 409 | 503, readonly code: string, message: string) { super(message); } }
 
 export function createEmailHandlers(options: { service?: EmailService; oauth?: EmailOAuthService; getIdentity?: typeof getAuthIdentity } = {}) {
@@ -53,12 +68,16 @@ export function createEmailHandlers(options: { service?: EmailService; oauth?: E
     overview: run(async (c) => {
       const body = strictObject({ ...contextSchema.shape, ...emailOverviewInputShape }).parse(await c.req.json());
       const { organizationKey: _organizationKey, scopeKey: _scopeKey, ...input } = body;
-      return publicEmailOverviewSchema.parse(await service.overview(await actor(c, body), emailOverviewInputSchema.parse(input)));
+      const result = await service.overview(await actor(c, body), emailOverviewInputSchema.parse(input));
+      return (usesCurrentConnectorTransport(c) ? publicEmailOverviewSchema : legacyOverviewSchema).parse(result);
     }),
     searchInboxes: run(async (c) => {
       const body = strictObject({ ...contextSchema.shape, ...emailSemanticSearchInputSchema.shape }).parse(await c.req.json());
       const { organizationKey: _organizationKey, scopeKey: _scopeKey, ...input } = body;
-      return service.searchInboxes(await actor(c, body), input, { signal: c.req.raw.signal, timeoutMs: 10_000 });
+      const result = await service.searchInboxes(await actor(c, body), input, { signal: c.req.raw.signal, timeoutMs: 10_000 });
+      return usesCurrentConnectorTransport(c)
+        ? z.object({ inboxes: z.array(publicEmailInboxSchema.extend({ score: z.number().min(-1).max(1) }).strict()) }).strict().parse(result)
+        : legacyInboxSearchSchema.parse(result);
     }),
     searchTones: run(async (c) => {
       const body = strictObject({ ...contextSchema.shape, ...emailSemanticSearchInputSchema.shape }).parse(await c.req.json());
@@ -85,10 +104,10 @@ export function createEmailHandlers(options: { service?: EmailService; oauth?: E
       const current = await identity(c);
       const result = await oauth.exchange({ userKey: current.key, organizationKey: body.organizationKey, scopeKey: body.scopeKey, code: body.code });
       if (!result) throw new EmailHttpError(401, 'EMAIL_GRANT_INVALID', 'Email connection grant is invalid or expired.');
-      return result;
+      return (usesCurrentConnectorTransport(c) ? publicEmailInboxSchema : legacyConnectorSchema).parse(result);
     }),
-    sync: run(async (c) => { const body = strictObject({ ...contextSchema.shape, connectorKey: connectorKeySchema }).parse(await c.req.json()); return service.sync(await actor(c, body), body.connectorKey); }),
-    subscribe: run(async (c) => { const body = strictObject({ ...contextSchema.shape, connectorKey: connectorKeySchema }).parse(await c.req.json()); return service.subscribe(await actor(c, body), body.connectorKey); }),
+    sync: run(async (c) => { const body = connectorSelectorSchema.parse(await c.req.json()); return legacySyncResultSchema.parse(await service.sync(await actor(c, body), body.connectorKey)); }),
+    subscribe: run(async (c) => { const body = connectorSelectorSchema.parse(await c.req.json()); return legacySubscribeResultSchema.parse(await service.registerWatch(await actor(c, body), body.connectorKey)); }),
     thread: run(async (c) => { const body = strictObject({ ...contextSchema.shape, cursor: z.string().min(1).max(2_000).optional() }).parse(await c.req.json()); return service.threadForTool(await actor(c, body), threadKeySchema.parse(c.req.param('threadKey')), body.cursor); }),
     favorite: run(async (c) => { const body = strictObject({ ...contextSchema.shape, isFavorite: z.boolean() }).parse(await c.req.json()); return singularThread(await service.setFavorite(await actor(c, body), { threadKey: threadKeySchema.parse(c.req.param('threadKey')), isFavorite: body.isFavorite }, false, requestKey(c))); }),
     favoriteBulk: run(async (c) => { const body = strictObject({ ...contextSchema.shape, threadKeys: emailThreadFavoriteInputSchema.options[1].shape.threadKeys, isFavorite: z.boolean() }).parse(await c.req.json()); return service.setFavorite(await actor(c, body), { threadKeys: body.threadKeys, isFavorite: body.isFavorite }, false, requestKey(c)); }),
@@ -122,7 +141,7 @@ export function createEmailHandlers(options: { service?: EmailService; oauth?: E
     createTone: run(async (c) => { const body = strictObject({ ...contextSchema.shape, ...emailToneCreateInputSchema.shape }).parse(await c.req.json()); const { organizationKey: _organizationKey, scopeKey: _scopeKey, ...input } = body; return service.createTone(await actor(c, body), input, requestKey(c)); }, 201),
     updateTone: run(async (c) => { const transport = strictObject({ ...contextSchema.shape, name: z.string().trim().min(1).max(255).optional(), instruction: z.string().trim().min(1).max(20_000).optional(), isFavorite: z.boolean().optional() }).parse(await c.req.json()); const { organizationKey: _organizationKey, scopeKey: _scopeKey, ...patch } = transport; const input = emailToneUpdateInputSchema.parse({ toneKey: c.req.param('toneKey'), ...patch }); return service.updateTone(await actor(c, transport), input, requestKey(c)); }),
     deleteTone: run(async (c) => { const body = contextSchema.parse(await c.req.json()); return service.deleteTone(await actor(c, body), emailToneDeleteInputSchema.parse({ toneKey: c.req.param('toneKey') }), requestKey(c)); }),
-    updateInbox: run(async (c) => { const transport = strictObject({ ...contextSchema.shape, connectorKey: connectorKeySchema, name: z.string().trim().min(1).max(255).optional(), description: z.string().trim().min(1).max(10_000).nullable().optional(), coverImageKey: connectorKeySchema.nullable().optional(), isFavorite: z.boolean().optional() }).parse(await c.req.json()); const { organizationKey: _organizationKey, scopeKey: _scopeKey, ...rawInput } = transport; return service.updateInbox(await actor(c, transport), inboxUpdateInputSchema.parse(rawInput), requestKey(c)); }),
+    updateInbox: run(async (c) => { const transport = strictObject({ ...contextSchema.shape, connectorKey: connectorKeySchema, name: z.string().trim().min(1).max(255).optional(), description: z.string().trim().min(1).max(10_000).nullable().optional(), coverImageKey: connectorKeySchema.nullable().optional(), isFavorite: z.boolean().optional() }).parse(await c.req.json()); const { organizationKey: _organizationKey, scopeKey: _scopeKey, ...rawInput } = transport; const result = await service.updateInbox(await actor(c, transport), inboxUpdateInputSchema.parse(rawInput), requestKey(c)); return (usesCurrentConnectorTransport(c) ? publicEmailInboxSchema : legacyConnectorSchema).parse(result); }),
     updateDraft: run(async (c) => { const body = strictObject({ ...contextSchema.shape, finalContent: z.string().max(50_000).optional(), attachments: z.array(z.object({ type: z.enum(['document', 'image']), key: z.string().cuid() }).strict()).max(20).optional() }).parse(await c.req.json()); return publicEmailDraftSchema.parse(await service.updateDraft(await actor(c, body), emailDraftUpdateInputSchema.parse({ draftKey: c.req.param('draftKey'), finalContent: body.finalContent, attachments: body.attachments }), requestKey(c))); }),
     deleteDraft: run(async (c) => { const body = contextSchema.parse(await c.req.json()); return service.deleteDraft(await actor(c, body), emailDraftDeleteInputSchema.parse({ draftKey: c.req.param('draftKey') }), requestKey(c)); }),
     assignDraft: run(async (c) => { const body = strictObject({ ...contextSchema.shape, connectorKey: connectorKeySchema }).parse(await c.req.json()); return publicEmailDraftSchema.parse(await service.assignDraft(await actor(c, body), { draftKey: z.string().cuid().parse(c.req.param('draftKey')), connectorKey: body.connectorKey }, requestKey(c))); }),

@@ -52,7 +52,7 @@ const shareUpdateSchema = strictObject({ collectionKey: z.string().cuid(), share
 const shareRevokeSchema = strictObject({ collectionKey: z.string().cuid(), shareKey: z.string().cuid() });
 const shareActivateSchema = strictObject({ token: z.string().min(32).max(512) });
 const imageUpdateSchema = strictObject({ imageKey: z.string().cuid(), name: z.string().trim().min(1).max(255).refine((name) => !name.includes('/') && !name.includes('\\'), 'Image name cannot contain path separators.'), isFavorite: z.boolean() });
-const uploadFileSchema = strictObject({ clientKey: z.string().min(1).max(120), filename: z.string().trim().regex(/^[^/\\]+\.jpe?g$/i), sizeBytes: z.number().int().positive().max(20 * 1024 * 1024), processingMode: z.enum(['library', 'cover']).default('library'), latitude: z.number().finite().min(-90).max(90).optional(), longitude: z.number().finite().min(-180).max(180).optional() }).superRefine((value, context) => {
+const uploadFileSchema = strictObject({ clientKey: z.string().min(1).max(120), filename: z.string().trim().regex(/^[^/\\]+\.(?:png|jpe?g)$/i), sizeBytes: z.number().int().positive().max(20 * 1024 * 1024), processingMode: z.enum(['library', 'cover']).default('library'), latitude: z.number().finite().min(-90).max(90).optional(), longitude: z.number().finite().min(-180).max(180).optional() }).superRefine((value, context) => {
   if ((value.latitude === undefined) !== (value.longitude === undefined)) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Image coordinates require both latitude and longitude.' });
 });
 const presignSchema = strictObject({ collectionKey: z.string().cuid().nullable().optional(), files: z.array(uploadFileSchema).min(1).max(20) }).refine(({ files }) => new Set(files.map(({ clientKey }) => clientKey)).size === files.length, 'Upload client keys must be unique.');
@@ -351,13 +351,16 @@ async function reserveUploads(rawInput: unknown, context: GalleryOperationContex
     const locations = await Promise.all(input.files.map((file) => file.latitude === undefined || file.longitude === undefined ? undefined : reverseGeocodeImage({ latitude: file.latitude, longitude: file.longitude })));
     const records = input.files.map((file, index) => {
       const key = newId(), imageKey = newId();
-      const storageKey = `pending/gallery/${input.scopeKey}/${key}/original.jpg`;
+       const legacyJpeg = /\.jpe?g$/i.test(file.filename);
+       const mimeType = legacyJpeg ? 'image/jpeg' as const : 'image/png' as const;
+       const extension = legacyJpeg ? 'jpg' : 'png';
+       const storageKey = `pending/gallery/${input.scopeKey}/${key}/original.${extension}`;
       const location = locations[index];
-      return galleryUploadSchema.parse({ key, organizationKey: input.organizationKey, scopeKey: input.scopeKey, actorKey: membership.key, imageKey, collectionKey: input.collectionKey ?? null, filename: file.filename.replace(/\.jpeg$/i, '.jpg'), mimeType: 'image/jpeg', sizeBytes: file.sizeBytes, storageKey, processingMode: file.processingMode, city: location?.city ?? null, country: location?.country ?? null, countryCode: location?.countryCode ?? null, status: 'reserved', errorCode: null, createdAt: now.toISOString(), updatedAt: now.toISOString(), expiresAt: new Date(now.getTime() + 15 * 60_000).toISOString() });
+       return galleryUploadSchema.parse({ key, organizationKey: input.organizationKey, scopeKey: input.scopeKey, actorKey: membership.key, imageKey, collectionKey: input.collectionKey ?? null, filename: legacyJpeg ? file.filename.replace(/\.jpeg$/i, '.jpg') : file.filename, mimeType, sizeBytes: file.sizeBytes, storageKey, processingMode: file.processingMode, city: location?.city ?? null, country: location?.country ?? null, countryCode: location?.countryCode ?? null, status: 'reserved', errorCode: null, createdAt: now.toISOString(), updatedAt: now.toISOString(), expiresAt: new Date(now.getTime() + 15 * 60_000).toISOString() });
     });
-    const urls = await Promise.all(records.map((record) => context.signUpload ? context.signUpload(record) : signUrl(publicS3, new PutObjectCommand({ Bucket: S3_BUCKET, Key: record.storageKey, ContentType: 'image/jpeg' }), { expiresIn: 10 * 60 })));
+    const urls = await Promise.all(records.map((record) => context.signUpload ? context.signUpload(record) : signUrl(publicS3, new PutObjectCommand({ Bucket: S3_BUCKET, Key: record.storageKey, ContentType: record.mimeType }), { expiresIn: 10 * 60 })));
     await (context.insertUploads ?? repository.insertUploads)(records);
-    const uploads = records.map((record, index) => ({ clientKey: input.files[index]!.clientKey, uploadKey: record.key, imageKey: record.imageKey, url: urls[index]!, headers: { 'Content-Type': 'image/jpeg' } }));
+    const uploads = records.map((record, index) => ({ clientKey: input.files[index]!.clientKey, uploadKey: record.key, imageKey: record.imageKey, url: urls[index]!, headers: { 'Content-Type': record.mimeType } }));
     await publish(context, 'uploadReserved', { users: [membership.userId] });
     return { uploads };
 }
@@ -373,7 +376,7 @@ async function completeUploads(rawInput: unknown, context: GalleryOperationConte
       return upload;
     });
     await Promise.all(uploads.map(async (upload) => {
-      const matches = context.verifyUploadObject ? await context.verifyUploadObject(upload) : await s3.send(new HeadObjectCommand({ Bucket: S3_BUCKET, Key: upload.storageKey })).then((head) => head.ContentLength === upload.sizeBytes && head.ContentType === 'image/jpeg');
+      const matches = context.verifyUploadObject ? await context.verifyUploadObject(upload) : await s3.send(new HeadObjectCommand({ Bucket: S3_BUCKET, Key: upload.storageKey })).then((head) => head.ContentLength === upload.sizeBytes && head.ContentType === upload.mimeType);
       if (!matches) throw new GalleryOperationError(409, 'GALLERY_UPLOAD_MISMATCH', 'Uploaded image does not match its reservation.');
     }));
     const queued = await (context.queueUploads ?? repository.queueUploads)({ uploadKeys: input.uploadKeys, organizationKey: input.organizationKey, scopeKey: input.scopeKey, actorKey: membership.key, now: new Date().toISOString() });

@@ -4,7 +4,8 @@ import type { DocumentObjectStorage } from '@/lib/ai/document-processing/storage
 import { documentStorage } from '@/lib/ai/document-processing/storage';
 import { awsTextractImageOcr, type DocumentImageOcr } from '@/lib/ai/document-processing/textract';
 import { imageDataUrl } from '@/lib/gallery/image-reference';
-import type { DocumentScanInput } from './schemas';
+import { MAX_DOCUMENT_SCAN_PAGE_BYTES, type DocumentScanInput } from './schemas';
+import sharp from 'sharp';
 
 const RELIABLE_AVERAGE_CONFIDENCE = 95;
 const RELIABLE_MINIMUM_CONFIDENCE = 80;
@@ -41,20 +42,22 @@ export async function scanDocumentImages(input: DocumentScanInput, organizationK
   const ocr = dependencies.ocr ?? awsTextractImageOcr;
   const caption = dependencies.caption ?? imageCaptionTool.execute;
   const documentKey = documentKeyForRequest(input.scopeKey, input.folderKey, input.idempotencyKey);
-  const storageKeys = input.pages.map((page, index) => `content/${organizationKey}/${input.scopeKey}/${documentKey}/scan/page-${String(index + 1).padStart(2, '0')}.${page.mimeType === 'image/png' ? 'png' : 'jpg'}`);
+  const storageKeys = input.pages.map((_, index) => `content/${organizationKey}/${input.scopeKey}/${documentKey}/scan/page-${String(index + 1).padStart(2, '0')}.png`);
   const uploaded: string[] = [];
   try {
-    await Promise.all(input.pages.map(async (page, index) => {
-      await storage.upload({ key: storageKeys[index]!, bytes: page.bytes, mimeType: page.mimeType });
+    const pages = await Promise.all(input.pages.map(async (page) => new Uint8Array(await sharp(page.bytes, { animated: false, failOn: 'error', limitInputPixels: 100_000_000 }).rotate().png().toBuffer())));
+    if (pages.some((page) => page.byteLength > MAX_DOCUMENT_SCAN_PAGE_BYTES) || pages.reduce((sum, page) => sum + page.byteLength, 0) > MAX_DOCUMENT_SCAN_PAGE_BYTES * 2) throw new Error('Canonical PNG scan pages exceed the supported size limit.');
+    await Promise.all(pages.map(async (bytes, index) => {
+      await storage.upload({ key: storageKeys[index]!, bytes, mimeType: 'image/png' });
       uploaded.push(storageKeys[index]!);
     }));
-    const textractResults = await Promise.all(storageKeys.map((key, index) => ocr.extract(key, input.pages[index]!.bytes)));
+    const textractResults = await Promise.all(storageKeys.map((key, index) => ocr.extract(key, pages[index]!)));
     const textractPages = textractResults.map((result) => result.extractedText);
     const visualPages = textractPages.map(() => '');
     const unifiedPages = textractPages.map(normalizeDocumentTranscription);
     await Promise.all(textractResults.map(async (result, index) => {
       if (isReliableDocumentOcr(result)) return;
-      const url = imageDataUrl(input.pages[index]!.bytes, input.pages[index]!.mimeType);
+      const url = imageDataUrl(pages[index]!, 'image/png');
       try {
         visualPages[index] = (await caption({ imageUrls: [url], purpose: 'document-transcription' }, { organizationKey })).results[0]?.caption.trim() ?? '';
       } catch {

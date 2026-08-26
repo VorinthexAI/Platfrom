@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { BottomSheet } from "@vorinthex/shared/ui/bottom-sheet";
-import { Button } from "@vorinthex/shared/ui/button";
+import { Button, ButtonSizeProvider } from "@vorinthex/shared/ui/button";
 import { CheckIcon, CloseIcon, FileIcon, FilterIcon, SearchIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { Skeleton } from "@vorinthex/shared/ui/skeleton";
 import { Switch } from "@vorinthex/shared/ui/switch";
@@ -25,6 +25,7 @@ export type EmailAttachmentImageUrls = Record<string, string>;
 
 const MAX_ATTACHMENTS = 20;
 const MAX_VISIBLE_RESULTS = 10;
+const GALLERY_CANDIDATE_LIMIT = 50;
 const IMAGE_COLUMNS = 4;
 const IMAGE_GAP = 5;
 const SHEET_INPUT_FOCUS_DELAY_MS = 300;
@@ -103,8 +104,8 @@ export function EmailAttachmentPicker({ context, contextKey, imageUrls: selected
         }
       } else {
         const result = (value
-          ? (await searchGalleryImages({ query: value, recordHistory: false, limit: MAX_VISIBLE_RESULTS, minimumScore: -1 }, operation.signal)).images
-          : (await fetchGalleryOverview(undefined, undefined, MAX_VISIBLE_RESULTS, undefined, operation.signal)).images).filter((image) => !isManagedGalleryImage(image));
+          ? (await searchGalleryImages({ query: value, recordHistory: false, limit: GALLERY_CANDIDATE_LIMIT, minimumScore: -1 }, operation.signal)).images
+          : (await fetchGalleryOverview(undefined, undefined, GALLERY_CANDIDATE_LIMIT, undefined, operation.signal)).images).filter((image) => !isManagedGalleryImage(image));
         if (searchOwner.isCurrent(operation.generation)) {
           setImages(result);
           rememberLabels([], result);
@@ -137,7 +138,7 @@ export function EmailAttachmentPicker({ context, contextKey, imageUrls: selected
     const historyTimer = setTimeout(() => {
       const request = tab === "archive"
         ? searchContentMatches(value, controller.signal, undefined, true, { limit: MAX_VISIBLE_RESULTS, minimumScore: -1 })
-        : searchGalleryImages({ query: value, recordHistory: true, limit: MAX_VISIBLE_RESULTS, minimumScore: -1 }, controller.signal);
+        : searchGalleryImages({ query: value, recordHistory: true, limit: GALLERY_CANDIDATE_LIMIT, minimumScore: -1 }, controller.signal);
       void request.catch(() => undefined);
     }, 800);
     return () => { clearTimeout(historyTimer); controller.abort(); };
@@ -243,7 +244,7 @@ export function EmailAttachmentPicker({ context, contextKey, imageUrls: selected
       open={open}
       title="Attachments"
     >
-      <View style={styles.rootActions}><View style={styles.rootSearch}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel={`Search ${tab}`} onChangeText={changeQuery} onSubmitEditing={() => void load(tab, query)} placeholder="Search..." ref={searchInputRef} returnKeyType="search" style={styles.rootSearchInput} value={query} />{query.trim() ? <Button accessibilityLabel="Clear attachment search" contentMode="raw" iconOnly onPress={() => changeQuery("")} size="md" style={styles.searchClearButton} variant="secondary"><CloseIcon size="sm" /></Button> : null}</View><Button accessibilityLabel="Filter attachments" contentMode="raw" onPress={() => setFilterOpen(true)} size="md" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={filters.favoritesOnly || filters.showHidden ? "accent" : "default"} /></Button></View>
+      <View style={styles.rootActions}><View style={styles.rootSearch}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel={`Search ${tab}`} onChangeText={changeQuery} onSubmitEditing={() => void load(tab, query)} placeholder="Search..." ref={searchInputRef} returnKeyType="search" style={styles.rootSearchInput} value={query} />{query.trim() ? <ButtonSizeProvider overrideParent size="xs"><Button accessibilityLabel="Clear attachment search" contentMode="raw" iconOnly onPress={() => changeQuery("")} size="xs" variant="secondary"><CloseIcon size="sm" /></Button></ButtonSizeProvider> : null}</View><Button accessibilityLabel="Filter attachments" contentMode="raw" onPress={() => setFilterOpen(true)} size="md" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={filters.favoritesOnly || filters.showHidden ? "accent" : "default"} /></Button></View>
       <Tabs accessibilityLabel="Attachment sources" accessibilityRole="tablist" style={styles.folderTabs}>
         <Button accessibilityRole="tab" accessibilityState={{ selected: tab === "archive" }} onPress={() => changeTab("archive")} style={styles.folderTab} variant={tab === "archive" ? "secondary" : "ghost"}>Archive</Button>
         <Button accessibilityRole="tab" accessibilityState={{ selected: tab === "gallery" }} onPress={() => changeTab("gallery")} style={styles.folderTab} variant={tab === "gallery" ? "secondary" : "ghost"}>Gallery</Button>
@@ -272,7 +273,6 @@ const styles = StyleSheet.create({
   rootActions: { minHeight: 52, marginTop: -spacing.xs, flexDirection: "row", alignItems: "center", gap: 8 },
   rootSearch: { minHeight: 44, flex: 1, paddingLeft: 12, paddingRight: 8, flexDirection: "row", alignItems: "center", gap: 7, borderRadius: 999, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.page },
   rootSearchInput: { minHeight: 40, flex: 1, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", fontSize: 13 },
-  searchClearButton: { width: 42, height: 42, paddingHorizontal: 0, paddingVertical: 0 },
   searchHistoryButton: { width: 44, height: 44 },
   folderTabs: { flexDirection: "row", gap: 4, padding: 3, borderWidth: 1, backgroundColor: palette.panel },
   folderTab: { flex: 1 },

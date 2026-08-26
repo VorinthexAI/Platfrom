@@ -191,7 +191,7 @@ export function createScopeRepository(
         LET cleanupImages = (FOR image IN images FILTER image._key IN imageKeys REMOVE image IN images RETURN 1)
         LET cleanupCaptions = []
         LET cleanupCollections = (FOR collection IN collections FILTER collection._key IN managedCollections REMOVE collection IN collections RETURN 1)
-        LET mailFolderKeys = (FOR folder IN folders FILTER folder.scopeKey == @scopeKey && (STARTS_WITH(folder.purpose || "", "communication-mail-") || folder.managedPurpose == "mail-attachment") RETURN folder._key)
+        LET mailFolderKeys = (FOR folder IN folders FILTER folder.scopeKey == @scopeKey && (STARTS_WITH(folder.purpose || "", "communication-mail-") || folder.managedPurpose IN ["mail-attachment", "mail-inbox", "mail-inbox-files", "mail-thread"]) RETURN folder._key)
         LET mailDocumentKeys = (FOR document IN documents FILTER document.scopeKey == @scopeKey && document.folderKey IN mailFolderKeys RETURN document._key)
         LET toneDocumentKeys = @toneDocuments[*].key
         LET mailSummaryKeys = (FOR summary IN documentSummaries FILTER summary.scopeKey == @scopeKey && summary.documentKey IN mailDocumentKeys RETURN summary._key)
@@ -213,7 +213,6 @@ export function createScopeRepository(
         LET cleanupMailVersions = (FOR version IN documentVersions FILTER version.scopeKey == @scopeKey && version.documentKey IN mailDocumentKeys REMOVE version IN documentVersions RETURN 1)
         LET cleanupMailDocuments = (FOR document IN documents FILTER document.scopeKey == @scopeKey && document.folderKey IN mailFolderKeys REMOVE document IN documents RETURN 1)
         LET cleanupMailFolders = (FOR folder IN folders FILTER folder._key IN mailFolderKeys REMOVE folder IN folders RETURN 1)
-        LET cleanupInboxes = (FOR inbox IN inboxes FILTER inbox.scopeKey == @scopeKey REMOVE inbox IN inboxes RETURN 1)
         LET cleanupMailConnectors = (FOR connector IN organizationConnectors FILTER connector.scopeKey == @scopeKey REMOVE connector IN organizationConnectors RETURN 1)
         LET cleanupMailAttachmentBindings = (FOR binding IN emailAttachmentBindings FILTER binding.scopeKey == @scopeKey REMOVE binding IN emailAttachmentBindings RETURN 1)
         LET deletionJobs = (FOR storageKey IN UNIQUE(UNION(mailStorageKeys, (FOR image IN managedImages FILTER image.storageKey != null RETURN image.storageKey))) UPSERT { storageKey } INSERT { storageKey, createdAt: @now } UPDATE {} IN storageDeletionJobs RETURN 1)
@@ -226,7 +225,7 @@ export function createScopeRepository(
        if (attachmentCaptionKeys.length) await executor.query('FOR caption IN imageCaptions FILTER caption._key IN @captionKeys FILTER LENGTH(FOR retained IN images FILTER retained.imageCaptionKey == caption._key LIMIT 1 RETURN 1) == 0 REMOVE caption IN imageCaptions', { captionKeys: attachmentCaptionKeys });
       };
       if (!database.beginTransaction) return remove(database as unknown as Pick<typeof db, 'query'>, false);
-      const write = ['scopes', 'scopeScopes', 'scopeMembers', 'organizationConnectors', 'folders', 'documents', 'documentVersions', 'documentAudioVersions', 'documentSummaries', 'documentSummaryAudio', 'documentShares', 'generatedDocumentBindings', 'emailAttachmentBindings', 'images', 'imageCaptions', 'collectionImages', 'imageIdentities', 'imageCollecitionHightlights', 'imageCollectionMemories', 'placeImages', 'collections', 'collectionInvites', 'collectionMembers', 'places', 'trips', 'tripPlaces', 'tripAttachments', 'tripCreationReceipts', 'inboxes', 'tagAssignments', 'shares', 'userHiddens', 'storageDeletionJobs'];
+      const write = ['scopes', 'scopeScopes', 'scopeMembers', 'organizationConnectors', 'folders', 'documents', 'documentVersions', 'documentAudioVersions', 'documentSummaries', 'documentSummaryAudio', 'documentShares', 'generatedDocumentBindings', 'emailAttachmentBindings', 'images', 'imageCaptions', 'collectionImages', 'imageIdentities', 'imageCollecitionHightlights', 'imageCollectionMemories', 'placeImages', 'collections', 'collectionInvites', 'collectionMembers', 'places', 'trips', 'tripPlaces', 'tripAttachments', 'tripCreationReceipts', 'tagAssignments', 'shares', 'userHiddens', 'storageDeletionJobs'];
       await withDatabaseTransaction(database as typeof db, { write }, (executor) => remove(executor, true));
     },
 

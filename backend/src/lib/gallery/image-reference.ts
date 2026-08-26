@@ -19,9 +19,9 @@ export async function imageAnalysisDataUrl(bytes: Uint8Array, maxEdge: number) {
   const derivative = await sharp(bytes, { animated: false, failOn: 'error', limitInputPixels: 100_000_000 })
     .rotate()
     .resize({ width: maxEdge, height: maxEdge, fit: 'inside', withoutEnlargement: true })
-    .jpeg({ quality: 80 })
+    .png()
     .toBuffer();
-  return imageDataUrl(new Uint8Array(derivative), 'image/jpeg');
+  return imageDataUrl(new Uint8Array(derivative), 'image/png');
 }
 
 export async function storedImageAnalysisDataUrl(storageKey: string, maxEdge: number, storage: DocumentObjectStorage = documentStorage) {

@@ -1,11 +1,11 @@
 ﻿import type { SVGProps } from "react";
 export type CloseIconVariant = "default" | "inherit" | "muted" | "accent" | "danger" | "inverse";
-export type CloseIconSize = "sm" | "md" | "lg";
+export type CloseIconSize = "xs" | "sm" | "md" | "lg";
 export type CloseIconProps = Omit<SVGProps<SVGSVGElement>, "color"> & {
   variant?: CloseIconVariant;
   size?: CloseIconSize;
 };
-const sizes: Record<CloseIconSize, number> = { sm: 16, md: 20, lg: 24 };
+const sizes: Record<CloseIconSize, number> = { xs: 12, sm: 16, md: 20, lg: 24 };
 const colors: Record<CloseIconVariant, string> = {
   default: "var(--vui-color-text)",
   inherit: "currentColor",

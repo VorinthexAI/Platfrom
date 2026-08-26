@@ -84,11 +84,12 @@ describe('provider seeds', () => {
 
 describe('model and routing relation seeds', () => {
   test('seed model components through their service providers', () => {
-    expect(SEEDED_MODELS).toHaveLength(6);
-    expect(SEEDED_MODEL_PROVIDERS).toHaveLength(6);
+    expect(SEEDED_MODELS).toHaveLength(7);
+    expect(SEEDED_MODEL_PROVIDERS).toHaveLength(7);
     expect(SEEDED_MODELS.map(({ slug }) => slug)).toEqual([
       'openai.gpt-5.6-luna',
       'openai.gpt-image-2',
+      'openai.gpt-4o-mini-tts',
       'openai.text-embedding-3-small',
       'bfl.flux-2-klein-4b',
       'xai.grok-imagine-image-quality',
@@ -113,6 +114,7 @@ describe('model and routing relation seeds', () => {
     expect(SEEDED_MODEL_PROVIDERS.map(({ modelSlug, providerSlug, providerModelId, enabled }) => `${modelSlug}:${providerSlug}:${providerModelId}:${enabled}`)).toEqual([
       'openai.gpt-5.6-luna:openai:gpt-5.6-luna:true',
       'openai.gpt-image-2:openai:gpt-image-2:true',
+      'openai.gpt-4o-mini-tts:openai:gpt-4o-mini-tts:true',
       'openai.text-embedding-3-small:openai:text-embedding-3-small:true',
       'bfl.flux-2-klein-4b:openrouter:black-forest-labs/flux.2-klein-4b:true',
       'xai.grok-imagine-image-quality:openrouter:x-ai/grok-imagine-image-quality:true',

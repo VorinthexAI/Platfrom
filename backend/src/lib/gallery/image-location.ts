@@ -133,7 +133,7 @@ export async function sanitizeGalleryImage(bytes: Uint8Array, suppliedCoordinate
     const pipeline = sharp(bytes, { animated: false, failOn: 'error', limitInputPixels: 100_000_000 });
     const metadata = await pipeline.metadata();
     const coordinates = extractExifCoordinates(metadata.exif) ?? (validCoordinates(suppliedCoordinates) ? suppliedCoordinates : undefined);
-    const sanitized = await pipeline.rotate().jpeg({ quality: 92, chromaSubsampling: '4:4:4' }).toBuffer();
+    const sanitized = await pipeline.rotate().png().toBuffer();
     return { bytes: new Uint8Array(sanitized), coordinates };
   } catch (error) {
     throw galleryImageInputErrorFromDecoder(error) ?? error;

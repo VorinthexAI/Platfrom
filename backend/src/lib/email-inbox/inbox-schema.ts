@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import { currentEmbeddingSchema } from '@/lib/embeddings';
 
-export const INBOXES_COLLECTION = 'inboxes';
 export const inboxEmbeddingFields = ['name', 'description'] as const;
 
 export const inboxSchema = z.object({

@@ -5,7 +5,7 @@ export const ACTION_SLUGS = [
   'ask', 'embed', 'web-search',
   'traverse', 'read', 'insert', 'upsert', 'update', 'delete',
   'generate-image', 'edit-image', 'generate-video', 'edit-video', 'extend-video', 'analyze-video',
-  'analyze-audio', 'generate-music',
+  'analyze-audio', 'generate-music', 'generate-speech',
   'document-validate', 'storage-upload', 'document-extract', 'document-embed', 'document-insert', 'caption-image', 'describe-visual-identity',
 ] as const;
 export type ActionId = (typeof ACTION_SLUGS)[number];

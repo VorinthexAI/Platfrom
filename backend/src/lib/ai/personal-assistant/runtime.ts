@@ -115,9 +115,9 @@ function systemPrompt(surface: z.infer<typeof assistantSurfaceSchema>) {
 - After app.search or image.search, summarize what was found. Never claim that no image exists without searching first.`;
   const bookRules = `
 - Create a book only when the user explicitly asks to create, generate, or write a book. Otherwise discuss the idea or ask a clarifying question.
-- Before creating, gather or reasonably infer topic, goal, audience, tone, length, and language. Never call a book tool with placeholder values.
+- Before creating, gather or reasonably infer topic, goal, current knowledge, writing tone, length, language, narrator, pace, source documents, and chapter-image preference. Never call a book tool with placeholder values.
 - Call book.create exactly once with the complete brief.
-- Do not claim the book is ready until book.create succeeds.`;
+- A successful book.create only accepts background generation. Say it was queued, never that it is ready.`;
   if (surface === 'book-workspace') return `${BASE_SYSTEM_PROMPT}
 - You are operating inside the user's book library. Use app.search with the relevant collectionSlugs for text search.${bookRules}`;
   if (surface === 'travel-workspace') return `${BASE_SYSTEM_PROMPT}

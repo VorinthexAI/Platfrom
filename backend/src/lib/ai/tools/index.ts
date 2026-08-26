@@ -12,19 +12,23 @@ import type { ImageSearchInput } from './image-search';
 import type { galleryOperations } from '@/lib/gallery/operations';
 import type { AppSearchService } from '@/lib/app-search/service';
 import type { AppTransformationService } from '@/lib/app-transformation/service';
-import { PUBLIC_TOOL_DEFINITIONS } from './tool-definitions';
+import { PUBLIC_TOOL_DEFINITIONS, TRUSTED_TOOL_DEFINITIONS, UNIFIED_TOOL_DEFINITIONS } from './tool-definitions';
 import type { PublicToolDependencies } from './tool-definition';
 import { WORKSPACE_TOOL_DEFINITIONS, type WorkspaceToolDependencies } from './workspace-tool-definitions';
+import type { TrustedEmailToolDependencies, TrustedEmailToolName } from './email-ingestion-tool-definitions';
 
 /** A tool name has exactly one registry entry. */
-export const TOOL_NAMES = PUBLIC_TOOL_DEFINITIONS.map(({ name }) => name) as [string, ...string[]];
+export const TOOL_NAMES = UNIFIED_TOOL_DEFINITIONS.map(({ name }) => name) as [string, ...string[]];
 export const toolNameSchema = z.enum(TOOL_NAMES);
+export const MODEL_TOOL_NAMES = PUBLIC_TOOL_DEFINITIONS.map(({ name }) => name) as [string, ...string[]];
+const modelToolNameSchema = z.enum(MODEL_TOOL_NAMES);
 const publicToolDefinitionsByName = new Map(PUBLIC_TOOL_DEFINITIONS.map((definition) => [definition.name, definition]));
 const workspaceToolDefinitionsByName = new Map(WORKSPACE_TOOL_DEFINITIONS.map((definition) => [definition.name, definition]));
+const trustedToolDefinitionsByName = new Map(TRUSTED_TOOL_DEFINITIONS.map((definition) => [definition.name, definition]));
 
 /** Input validation for the one canonical definition of each public tool. */
 export const toolInputSchemas: Record<string, z.ZodTypeAny> = Object.fromEntries(
-  PUBLIC_TOOL_DEFINITIONS.map((definition) => [definition.name, definition.inputSchema]),
+  UNIFIED_TOOL_DEFINITIONS.map((definition) => [definition.name, definition.inputSchema]),
 );
 
 export const TOOL_DEFINITIONS = PUBLIC_TOOL_DEFINITIONS.map(({ providerDefinition }) => providerDefinition);
@@ -53,7 +57,7 @@ export function runTool(name: 'image.search', skill: string, rawInput: ImageSear
 export function runTool<Name extends ContentToolName>(name: Name, skill: string, rawInput: ContentToolInput<Name>, dependencies: ToolDependencies & { contentContext: ToolContext }): Promise<ContentToolOutput<Name>>;
 export function runTool(name: string, skill: string, rawInput: unknown, dependencies?: ToolDependencies): Promise<unknown>;
 export async function runTool(name: string, skill: string, rawInput: unknown, dependencies: ToolDependencies = {}): Promise<unknown> {
-  const toolName = toolNameSchema.parse(name);
+  const toolName = modelToolNameSchema.parse(name);
   if (toolName === imageCaptionTool.name) return imageCaptionTool.execute(rawInput, dependencies);
   if (toolName === imageCreateVisualIdentityTool.name) return imageCreateVisualIdentityTool.execute(rawInput, dependencies);
   if (!dependencies.contentContext) throw new Error(`Tool ${toolName} requires contentContext.`);
@@ -91,6 +95,13 @@ export async function runTool(name: string, skill: string, rawInput: unknown, de
       ingestion: { ...dependencies, ...dependencies.contentDependencies?.ingestion },
     },
   });
+}
+
+/** Executes a system-only tool without exposing it to Core or model providers. */
+export async function runTrustedTool(name: TrustedEmailToolName, rawInput: unknown, dependencies: TrustedEmailToolDependencies): Promise<unknown> {
+  const definition = trustedToolDefinitionsByName.get(name);
+  if (!definition) throw new Error(`Unknown trusted tool ${name}`);
+  return definition.execute(rawInput, dependencies);
 }
 
 export { sanitizeAgentInput, sanitizedAgentMessageSchema } from './input-sanitizer';

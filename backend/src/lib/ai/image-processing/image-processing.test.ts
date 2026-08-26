@@ -1,21 +1,54 @@
 import { describe, expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import sharp from 'sharp';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
 import { perceptualHashDistance, PERCEPTUAL_HASH_DUPLICATE_DISTANCE } from '@/lib/perceptual-hash';
 import { ImageProcessingError, processImage, processImages, type ImageProcessingMetrics } from './index';
 
-function png(width = 2, height = 3) { const bytes = new Uint8Array(24); bytes.set([137, 80, 78, 71, 13, 10, 26, 10]); bytes.set([73, 72, 68, 82], 12); new DataView(bytes.buffer).setUint32(16, width); new DataView(bytes.buffer).setUint32(20, height); return bytes; }
+const pngFixtures = new Map<string, Uint8Array>();
+for (const [width, height] of [[2, 3], [4, 3]] as const) pngFixtures.set(`${width}x${height}`, new Uint8Array(await sharp({ create: { width, height, channels: 3, background: '#336699' } }).png().toBuffer()));
+function png(width = 2, height = 3) { return pngFixtures.get(`${width}x${height}`)!; }
 function input(bytes = png()) { return { scopeKey: 'c123456789', ownerKey: 'c987654321', file: { filename: 'photo.png', mimeType: 'image/png', sizeBytes: bytes.length, bytes } }; }
+const alternateFormats = await Promise.all((['jpeg', 'gif', 'webp'] as const).map(async (format) => ({
+  format,
+  bytes: new Uint8Array(await sharp({ create: { width: 3, height: 2, channels: 3, background: '#663399' } })[format]().toBuffer()),
+})));
 describe('MediaLibrary image processing', () => {
+  test('normalizes accepted source formats to canonical PNG persistence', async () => {
+    const uploads: Array<{ key: string; mimeType: string; bytes: Uint8Array }> = [];
+    const files = alternateFormats.map(({ format, bytes }) => ({ scopeKey: 'c123456789', ownerKey: 'c987654321', file: { filename: `source.${format === 'jpeg' ? 'jpg' : format}`, mimeType: format === 'jpeg' ? 'image/jpeg' : `image/${format}`, sizeBytes: bytes.byteLength, bytes } }));
+    const results = await processImages(files, {
+      storage: { async upload(value) { uploads.push(value); return { storageKey: value.key }; }, async delete() {} },
+      hashBatch: async () => ['0000000000000000', 'ffffffffffffffff', 'aaaaaaaaaaaaaaaa'], findCaption: async () => null,
+      captionBatch: async (values) => values.map((_, index) => ({ caption: `Image ${index}`, score: 80 })),
+      embed: async () => Array(EMBEDDING_DIMENSIONS).fill(0.1), getImage: async () => null, persistImage: async ({ image }) => image,
+    });
+    expect(results.map(({ filename, mimeType, storageKey }) => ({ filename, mimeType, extension: storageKey.split('.').at(-1) }))).toEqual([
+      { filename: 'source.png', mimeType: 'image/png', extension: 'png' },
+      { filename: 'source.png', mimeType: 'image/png', extension: 'png' },
+      { filename: 'source.png', mimeType: 'image/png', extension: 'png' },
+    ]);
+    expect(uploads.every(({ mimeType, bytes }) => mimeType === 'image/png' && bytes.subarray(0, 8).every((byte, index) => byte === [137, 80, 78, 71, 13, 10, 26, 10][index]))).toBe(true);
+  });
+
+  test('replays historical JPEG persistence without migrating its object', async () => {
+    const source = alternateFormats[0]!.bytes;
+    const idempotencyKey = 'historical-jpeg';
+    const key = `c${createHash('sha256').update(`c123456789\0${idempotencyKey}`).digest('hex').slice(0, 24)}`;
+    const storageKey = `media/c123456789/${key}/${createHash('sha256').update(source).digest('hex')}/original.jpg`;
+    const existing = { key, scopeKey: 'c123456789', filename: 'legacy.jpg', caption: 'Historical', storageKey, mimeType: 'image/jpeg', sizeBytes: source.byteLength, width: 3, height: 2, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), imageCaptionKey: null, createdByKey: 'c987654321', mutationPolicy: 'user' as const, isFavorite: false, createdAt: '2026-08-01T00:00:00.000Z', updatedAt: '2026-08-01T00:00:00.000Z' };
+    const result = await processImage({ scopeKey: 'c123456789', ownerKey: 'c987654321', idempotencyKey, file: { filename: 'legacy.jpg', mimeType: 'image/jpeg', sizeBytes: source.byteLength, bytes: source } }, { getImage: async () => existing });
+    expect(result).toBe(existing);
+  });
   test('stores captions with current Qwen vectors', async () => {
     let stored: Record<string, unknown> | undefined;
     const embeddingTexts: string[] = [];
     const result = await processImage({ ...input(), location: { city: 'Stockholm', country: 'Sweden', countryCode: 'SE' } }, {
-      storage: { async upload({ key }) { return { storageKey: key }; }, async delete() {} }, hashBatch: async () => ['0123456789abcdef'], findCaption: async () => null, caption: async () => ({ caption: 'A blue square.', score: 84 }), embed: async (text) => { embeddingTexts.push(text); return Array(EMBEDDING_DIMENSIONS).fill(0.25); }, getImage: async () => null,
+      storage: { async upload({ key, bytes, mimeType }) { expect(key).toEndWith('/original.png'); expect(mimeType).toBe('image/png'); expect(bytes.subarray(0, 8)).toEqual(new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])); return { storageKey: key }; }, async delete() {} }, hashBatch: async () => ['0123456789abcdef'], findCaption: async () => null, caption: async () => ({ caption: 'A blue square.', score: 84 }), embed: async (text) => { embeddingTexts.push(text); return Array(EMBEDDING_DIMENSIONS).fill(0.25); }, getImage: async () => null,
       persistImage: async ({ image, caption }) => { stored = { image, caption }; return image; }, createKey: () => 'cmrnlzf650002qc7k4p5zem5w', createCaptionKey: () => 'cmrnlzf650002qc7k4p5zem5x',
     });
     expect(result.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
-    expect(stored).toMatchObject({ image: { width: 2, height: 3, sizeBytes: 24, city: 'Stockholm', country: 'Sweden', countryCode: 'SE', imageCaptionKey: 'cmrnlzf650002qc7k4p5zem5x', createdByKey: 'c987654321' }, caption: { perceptualHash: '0123456789abcdef', caption: 'A blue square.', score: 84 } });
+    expect(stored).toMatchObject({ image: { filename: 'photo.png', mimeType: 'image/png', width: 2, height: 3, sizeBytes: expect.any(Number), city: 'Stockholm', country: 'Sweden', countryCode: 'SE', imageCaptionKey: 'cmrnlzf650002qc7k4p5zem5x', createdByKey: 'c987654321' }, caption: { perceptualHash: '0123456789abcdef', caption: 'A blue square.', score: 84 } });
     expect(stored?.image).not.toHaveProperty('ownerKey');
     expect(stored?.image).not.toHaveProperty('embeddingProvider');
     expect(embeddingTexts).toEqual([

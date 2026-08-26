@@ -24,6 +24,7 @@ export const contentFolderSchema = z.object({
   description: textSchema.optional(),
   coverUrl: z.string().url().optional(),
   isFavorite: z.boolean().default(false),
+  managed: z.boolean().default(false),
   createdAt: dateTimeSchema,
   updatedAt: dateTimeSchema,
   childrenCount: z.number().int().nonnegative().optional(),
@@ -67,6 +68,7 @@ export const contentDocumentSchema = z.object({
   sourceImageCount: z.number().int().min(1).max(12).optional(),
   currentVersionKey: keySchema.nullable().optional(),
   isFavorite: z.boolean().default(false),
+  managed: z.boolean().default(false),
   createdAt: dateTimeSchema,
   updatedAt: dateTimeSchema,
 }).strict();
@@ -209,6 +211,7 @@ export const contentSearchResultSchema = z.object({
   extension: documentExtensionSchema.optional(),
   scopeKey: keySchema,
   folderKey: keySchema.optional(),
+  managed: z.boolean().default(false),
   score: normalizedScoreSchema,
   snippet: z.string().optional(),
   content: z.string().optional(),
@@ -218,8 +221,8 @@ export const contentSearchResultSchema = z.object({
   scoreBreakdown: searchScoreBreakdownSchema.optional(),
 }).strict();
 export const contentSearchOutputSchema = z.object({ query: textSchema, results: z.array(contentSearchResultSchema), totalCandidates: z.number().int().nonnegative().optional() }).strict();
-const workspaceFolderMatchSchema = z.object({ key: keySchema, scopeKey: keySchema, parentFolderKey: keySchema.optional(), name: nameSchema, description: z.string().optional(), isFavorite: z.boolean(), score: normalizedScoreSchema }).strict();
-const workspaceDocumentMatchSchema = z.object({ documentKey: keySchema, scopeKey: keySchema, folderKey: keySchema.optional(), name: nameSchema, extension: documentExtensionSchema.optional(), isFavorite: z.boolean(), score: normalizedScoreSchema, summary: z.string().trim().min(1).optional() }).strict();
+const workspaceFolderMatchSchema = z.object({ key: keySchema, scopeKey: keySchema, parentFolderKey: keySchema.optional(), name: nameSchema, description: z.string().optional(), isFavorite: z.boolean(), managed: z.boolean().default(false), score: normalizedScoreSchema }).strict();
+const workspaceDocumentMatchSchema = z.object({ documentKey: keySchema, scopeKey: keySchema, folderKey: keySchema.optional(), name: nameSchema, extension: documentExtensionSchema.optional(), isFavorite: z.boolean(), managed: z.boolean().default(false), score: normalizedScoreSchema, summary: z.string().trim().min(1).optional() }).strict();
 export const workspaceContentSearchOutputSchema = z.object({ query: textSchema, folders: z.array(workspaceFolderMatchSchema).max(4), documents: z.array(workspaceDocumentMatchSchema).max(10), cached: z.boolean() }).strict();
 export const contentSearchHistoryItemSchema = z.object({ query: textSchema, normalizedQuery: textSchema, searchedAt: dateTimeSchema, usageCount: z.number().int().positive() }).strict();
 

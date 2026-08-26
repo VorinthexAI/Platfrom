@@ -1,17 +1,18 @@
 import { describe, expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
 import type { ToolContext } from './tool-context';
-import { CONTENT_TOOL_NAMES, runTool, TOOL_DEFINITIONS, TOOL_NAMES, toolInputSchemas } from './index';
+import { CONTENT_TOOL_NAMES, MODEL_TOOL_NAMES, runTool, runTrustedTool, TOOL_DEFINITIONS, TOOL_NAMES, toolInputSchemas } from './index';
 import { signalCapabilities } from '@/lib/ai/personal-assistant/service-capabilities';
 
 describe('unified tool registry', () => {
   test('has one unique definition for every public tool name', () => {
     expect(new Set(TOOL_NAMES).size).toBe(TOOL_NAMES.length);
     expect(new Set(TOOL_DEFINITIONS.map(({ name }) => name)).size).toBe(TOOL_DEFINITIONS.length);
-    expect(TOOL_NAMES).toHaveLength(150);
-    expect(TOOL_DEFINITIONS).toHaveLength(150);
-    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 105);
-    expect(TOOL_DEFINITIONS.map(({ name }) => name)).toEqual([...TOOL_NAMES]);
+    expect(TOOL_NAMES).toHaveLength(156);
+    expect(MODEL_TOOL_NAMES).toHaveLength(153);
+    expect(TOOL_DEFINITIONS).toHaveLength(153);
+    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 108);
+    expect(TOOL_DEFINITIONS.map(({ name }) => name)).toEqual([...MODEL_TOOL_NAMES]);
     expect(TOOL_NAMES).not.toContain('chat');
     expect(TOOL_NAMES).not.toContain('orchestrator.chat');
     expect(TOOL_DEFINITIONS.some(({ name }) => name === 'chat')).toBe(false);
@@ -68,19 +69,30 @@ describe('unified tool registry', () => {
     const replyContextKey = newId();
     expect(() => toolInputSchemas['email.reply-context.delete'].parse({ noteKeys: [replyContextKey, replyContextKey] })).toThrow();
     expect(TOOL_NAMES).toContain('inbox.sync');
+    expect(MODEL_TOOL_NAMES).not.toContain('inbox.sync');
+    expect(TOOL_DEFINITIONS.some(({ name }) => name === 'inbox.sync')).toBe(false);
     expect(TOOL_NAMES).toEqual(expect.arrayContaining(['inbox.search', 'email.tone.search']));
     expect(toolInputSchemas['inbox.search'].parse({ query: 'leadership' })).toEqual({ query: 'leadership', minimumScore: 0.55, limit: 50, recordHistory: true });
     expect(toolInputSchemas['email.tone.search'].parse({ query: 'measured', recordHistory: false })).toMatchObject({ query: 'measured', recordHistory: false });
     expect(() => toolInputSchemas['inbox.search'].parse({ query: 'leadership', scopeKey: newId() })).toThrow('Unrecognized key');
     expect(TOOL_NAMES).toEqual(expect.arrayContaining(['email.similar.find', 'email.thread.trash', 'email.message.translation.list', 'email.message.translation.delete', 'email.message.summarize', 'email.message.summary.list', 'email.message.summary.delete']));
-    expect(TOOL_NAMES).not.toContain('inbox.sort');
+    expect(TOOL_NAMES).toContain('inbox.sort');
     expect(() => toolInputSchemas['email.similar.find'].parse({ messageKey: newId(), categories: ['Other'] })).toThrow();
-    expect(TOOL_NAMES).not.toContain('inbox.subscribe');
+    expect(TOOL_NAMES).toContain('inbox.subscribe');
+    expect(MODEL_TOOL_NAMES).not.toContain('inbox.subscribe');
+    expect(TOOL_DEFINITIONS.some(({ name }) => name === 'inbox.subscribe')).toBe(false);
+    expect(TOOL_NAMES).toContain('email.draft.create-if-needed');
+    expect(MODEL_TOOL_NAMES).not.toContain('email.draft.create-if-needed');
+    expect(TOOL_DEFINITIONS.some(({ name }) => name === 'email.draft.create-if-needed')).toBe(false);
     expect(TOOL_NAMES).not.toContain('email.disconnect');
     expect(TOOL_NAMES).not.toContain('email.sync');
-    expect(() => toolInputSchemas['inbox.sync'].parse({ scopeKey: newId() })).toThrow('Unrecognized key');
-    expect(() => toolInputSchemas['inbox.sync'].parse({})).toThrow();
-    expect(toolInputSchemas['inbox.sync'].parse({ connectorKey: newId() })).toHaveProperty('connectorKey');
+    const inboxSortConnectorKey = newId();
+    expect(toolInputSchemas['inbox.sort'].parse({ connectorKey: inboxSortConnectorKey })).toEqual({ connectorKey: inboxSortConnectorKey });
+    expect(toolInputSchemas['inbox.sync'].parse({ connectorKey: inboxSortConnectorKey })).toEqual({ connectorKey: inboxSortConnectorKey });
+    expect(toolInputSchemas['inbox.subscribe'].parse({ connectorKey: inboxSortConnectorKey, notificationHistoryId: '123' })).toEqual({ connectorKey: inboxSortConnectorKey, notificationHistoryId: '123' });
+    expect(toolInputSchemas['email.draft.create-if-needed'].parse({ connectorKey: inboxSortConnectorKey, threadKey: newId(), messageKey: newId() })).toHaveProperty('connectorKey', inboxSortConnectorKey);
+    for (const tool of ['inbox.sync', 'inbox.subscribe']) for (const field of ['organizationKey', 'scopeKey', 'userKey', 'accessToken']) expect(() => toolInputSchemas[tool].parse({ connectorKey: inboxSortConnectorKey, [field]: newId() })).toThrow('Unrecognized key');
+    for (const field of ['organizationKey', 'scopeKey', 'userKey']) expect(() => toolInputSchemas['inbox.sort'].parse({ connectorKey: inboxSortConnectorKey, [field]: newId() })).toThrow('Unrecognized key');
     expect(() => toolInputSchemas['email.draft.assign'].parse({ draftKey: newId(), connectorKey: newId(), scopeKey: newId() })).toThrow('Unrecognized key');
     expect(TOOL_NAMES).toEqual(expect.arrayContaining(['content.hidden.list', 'book.create', 'email.thread.read', 'email.thread.read-state', 'email.trash.clear']));
     expect(TOOL_NAMES).not.toContain('email.thread.mark-read');
@@ -98,6 +110,33 @@ describe('unified tool registry', () => {
     expect(TOOL_NAMES).not.toContain('user.settings.update');
     for (const name of ['access.agent.evaluate', 'agent.member.list', 'artifact.create', 'project.create', 'milestone.create', 'task.create', 'organization.member.list', 'scope.list']) expect(TOOL_NAMES).not.toContain(name);
     expect(TOOL_NAMES.every((name) => !name.includes('_'))).toBe(true);
+  });
+
+  test('executes inbox ingestion tools only through trusted system context', async () => {
+    const organizationKey = newId(), scopeKey = newId(), connectorKey = newId(), userKey = newId();
+    const calls: unknown[][] = [];
+    const emailService = {
+      initialSync: async (...args: unknown[]) => { calls.push(['sync', ...args]); return { synced: 4, initialSyncCompleted: true }; },
+      ingestSubscriptionNotification: async (...args: unknown[]) => { calls.push(['subscribe', ...args]); return { synced: 2 }; },
+      continueSubscription: async (...args: unknown[]) => { calls.push(['continue', ...args]); return { synced: 1 }; },
+      createDraftIfNeeded: async (...args: unknown[]) => { calls.push(['draft-if-needed', ...args]); return { decision: 'skip' }; },
+    } as any;
+    const systemContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'system' } } as ToolContext;
+    const memberContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+
+    await runTrustedTool('inbox.sync', { connectorKey }, { context: systemContext, email: emailService });
+    await runTrustedTool('inbox.subscribe', { connectorKey, notificationHistoryId: '456' }, { context: systemContext, email: emailService });
+    await runTrustedTool('inbox.subscribe', { connectorKey }, { context: systemContext, email: emailService });
+    const draftInput = { connectorKey, threadKey: newId(), messageKey: newId() };
+    await runTrustedTool('email.draft.create-if-needed', draftInput, { context: systemContext, email: emailService });
+    await expect(runTrustedTool('inbox.sync', { connectorKey }, { context: memberContext, email: emailService })).rejects.toThrow('system-only');
+    await expect(runTool('inbox.sync', '', { connectorKey }, { contentContext: systemContext, emailService })).rejects.toThrow();
+    expect(calls).toEqual([
+      ['sync', { userKey: 'system', organizationKey, scopeKey }, connectorKey],
+      ['subscribe', { userKey: 'system', organizationKey, scopeKey }, connectorKey, '456'],
+      ['continue', { userKey: 'system', organizationKey, scopeKey }, connectorKey],
+      ['draft-if-needed', { userKey: 'system', organizationKey, scopeKey }, draftInput],
+    ]);
   });
 
   test('does not expose any removed outside-domain tool', () => {
@@ -294,7 +333,7 @@ describe('unified tool registry', () => {
       findSimilar: async (...args: unknown[]) => { calls.push(['findSimilar', ...args]); return {}; },
     } as any;
     const bookService = { create: async (...args: unknown[]) => { calls.push(['create', ...args]); return {}; } } as any;
-    const brief = { topic: 'Decision making', goal: 'Decide well', audience: 'Leaders', tone: 'Clear', length: 'short', language: 'English' };
+    const brief = { topic: 'Decision making', goal: 'Decide well', currentKnowledge: 'Basic familiarity', writingTone: 'Clear', chapterCount: 10, language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear', narrationPace: 1, chapterImages: false };
     await expect(runTool('book.create', '', { ...brief, scopeKey }, { contentContext, bookService })).rejects.toThrow('Unrecognized key');
     await runTool('book.create', '', brief, { contentContext, bookService, requestKey: 'request-1' });
     await runTool('email.thread.read', '', { threadKey }, { contentContext, emailService });
@@ -316,7 +355,7 @@ describe('unified tool registry', () => {
       ['email.overview', 'overview', {}],
       ['inbox.search', 'searchInboxes', { query: 'leadership', recordHistory: false }],
       ['email.tone.search', 'searchTones', { query: 'measured', recordHistory: false }],
-      ['inbox.sync', 'sync', { connectorKey: key }],
+      ['inbox.sort', 'sort', { connectorKey: key }],
       ['inbox.update', 'updateInbox', { connectorKey: key, isFavorite: true }],
       ['email.thread.read', 'threadForTool', { threadKey: key }],
       ['email.thread.read-state', 'setReadState', { threadKey: key, isRead: true }],
@@ -364,7 +403,7 @@ describe('unified tool registry', () => {
     } }) as any;
     const actor = { userKey, organizationKey, scopeKey };
     const mutationNames = new Set([
-      'inbox.sync', 'inbox.update', 'email.thread.read-state', 'email.thread.favorite', 'email.thread.trash', 'email.trash.clear',
+      'inbox.sort', 'inbox.update', 'email.thread.read-state', 'email.thread.favorite', 'email.thread.trash', 'email.trash.clear',
       'email.message.translation.delete', 'email.message.summarize', 'email.message.summary.delete', 'email.draft.create', 'email.draft.compose', 'email.draft.update', 'email.draft.assign',
       'email.draft.send', 'email.draft.delete', 'email.tone.create', 'email.tone.update', 'email.tone.delete', 'email.reply-context.create',
       'email.reply-context.update', 'email.reply-context.delete',

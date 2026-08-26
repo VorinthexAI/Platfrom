@@ -112,6 +112,14 @@ export const SEEDED_MODELS = [
     enabled: true,
   },
   {
+    key: 'cmgpt4ominittsmodel000001',
+    slug: 'openai.gpt-4o-mini-tts',
+    name: 'OpenAI GPT-4o Mini TTS',
+    description: 'OpenAI speech generation model.',
+    supportedUseCases: 'Narration and speech generation.',
+    enabled: true,
+  },
+  {
     key: 'cmopenai3smallembed00001',
     slug: 'openai.text-embedding-3-small',
     name: 'OpenAI Text Embedding 3 Small',
@@ -173,6 +181,13 @@ export const SEEDED_MODEL_PROVIDERS = [
     modelSlug: 'openai.gpt-image-2',
     providerSlug: 'openai',
     providerModelId: 'gpt-image-2',
+    enabled: true,
+  },
+  {
+    key: 'cmgpt4ominittsroute000001',
+    modelSlug: 'openai.gpt-4o-mini-tts',
+    providerSlug: 'openai',
+    providerModelId: 'gpt-4o-mini-tts',
     enabled: true,
   },
   {

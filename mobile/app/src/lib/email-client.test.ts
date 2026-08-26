@@ -3,7 +3,8 @@ import { beforeEach, expect, mock, test } from "bun:test";
 const calls: { method: string; path: string; body: unknown; config?: unknown }[] = [];
 const authState = { organization: { key: "org-key", role: "member" }, scope: { key: "scope-key", role: "moderator" } };
 const now = "2026-08-11T10:00:00.000Z";
-const connector = { key: "inbox-a", connectorKey: "connector-a", provider: "gmail" as const, email: "a@example.com", name: "Client inbox", description: "Priority client mail", isFavorite: true, status: "active" as const, syncEnabled: true, syncStatus: "idle" as const, createdAt: now, updatedAt: now };
+const connector = { key: "inbox-a", connectorKey: "connector-a", provider: "gmail" as const, email: "a@example.com", name: "Client inbox", description: "Priority client mail", isFavorite: true, status: "active" as const, syncEnabled: true, initialSyncCompleted: true, syncStatus: "idle" as const, createdAt: now, updatedAt: now };
+
 const connectorB = { ...connector, key: "inbox-b", connectorKey: "connector-b", email: "b@example.com", name: "Team inbox", isFavorite: false };
 const thread = { key: "thread-key", subject: "Subject", summary: "Summary", intent: "Review message", priority: "normal", state: "needs_action", inboxCategory: "Important", lastMessageAt: now, latestFrom: "sender@example.com", isFavorite: false, isRead: false, unread: true, createdAt: now, updatedAt: now };
 const message = { key: "message-key", threadKey: "thread-key", from: "sender@example.com", fromName: "Sender Name", to: ["a@example.com"], subject: "Subject", body: "Body", summary: "Summary", direction: "inbound", sentAt: now, hasAttachments: false, attachmentAvailability: "none", isRead: false, unread: true, inboxCategory: "Important", createdAt: now, updatedAt: now };
@@ -14,7 +15,6 @@ const summaryVersion = { key: "summary-key", documentKey: "message-key", version
 let includeUnassignedDrafts = true;
 let replyContextDeleteResult: unknown;
 let bulkReportOverride: unknown;
-let subscribeResult: unknown;
 const tones = [
   { key: "tone-warm", slug: "casual" as const, name: "Casual", instruction: "Sound approachable and human.", isFavorite: true, createdAt: now, updatedAt: now },
   { key: "tone-direct", name: "Direct", instruction: "Lead with the answer.", isFavorite: false, createdAt: now, updatedAt: now },
@@ -46,15 +46,14 @@ mock.module("./api-client", () => ({ apiClient: {
         : path === `/email/threads/${thread.key}` ? { thread, messages: [{ ...message, bodyTruncated: false }], nextCursor: null, truncated: false }
         : path.endsWith("/favorite") || path.endsWith("/trash") ? { ...thread, isFavorite: true }
         : path.endsWith("/similar") ? { messageKey: "message-key", items: [{ key: "similar-key", threadKey: "other-thread", from: "sender@example.com", to: ["a@example.com"], subject: "Related", body: "Related body", summary: "Related", direction: "inbound", sentAt: now, hasAttachments: false, attachmentAvailability: "none", isRead: true, unread: false, inboxCategory: "Urgent", createdAt: now, updatedAt: now, similarity: 0.91 }] }
-        : path === "/app/translate" ? { messageKey: "message-key", language: "French", version: translationVersion }
+        : path === "/app/enhance" ? { text: "Enhanced text." }
+        : path === "/app/translate" ? "text" in (body as { input: Record<string, unknown> }).input ? { text: "Texte traduit." } : { messageKey: "message-key", language: "French", version: translationVersion }
         : path.endsWith("/translations/list") ? { messageKey: "message-key", versions: [translationVersion] }
         : path.endsWith("/translations") ? { messageKey: "message-key", language: "French", version: translationVersion }
         : path.endsWith("/summaries/list") ? { messageKey: "message-key", summaries: [summaryVersion] }
         : path.endsWith("/summaries") ? { messageKey: "message-key", text: "Brief summary", summary: summaryVersion }
         : path.endsWith("/send") ? { sent: true, providerMessageId: "sent-1", threadKey: "thread-key" }
-          : path === "/email/sync" ? { synced: 1, lastSyncedAt: now }
-            : path === "/email/subscribe" ? subscribeResult ?? { watchExpiresAt: now }
-             : path === "/email/connect" ? { authorizationUrl: "https://accounts.example.com/oauth" }
+          : path === "/email/connect" ? { authorizationUrl: "https://accounts.example.com/oauth" }
                : path === "/email/connect/exchange" ? connectorB
                  : path === "/email/disconnect" ? { disconnected: true }
                : {};
@@ -76,31 +75,33 @@ mock.module("./api-client", () => ({ apiClient: {
 } }));
 
 const client = await import("./email-client");
+
+test("defaults initial sync state for connector responses from the compatible backend transport", () => {
+  const { initialSyncCompleted: _initialSyncCompleted, ...legacyConnector } = connector;
+  expect(client.emailConnectorSchema.parse(legacyConnector).initialSyncCompleted).toBe(false);
+});
 beforeEach(() => {
   calls.splice(0);
   includeUnassignedDrafts = true;
   replyContextDeleteResult = undefined;
   bulkReportOverride = undefined;
-  subscribeResult = undefined;
   authState.organization.key = "org-key";
   authState.scope.key = "scope-key";
 });
 
-test("sends scoped overview, sync, draft, edit, and send requests", async () => {
+test("sends scoped overview, draft, edit, and send requests", async () => {
   expect((await client.fetchEmailOverview({ connectorKey: connector.connectorKey, readState: "unread", facets: ["urgent", "important"] })).threads).toHaveLength(1);
-  await client.syncEmail(connector.connectorKey);
   await client.setEmailThreadFavorite("thread-key", true);
   await client.createEmailDraft({ threadKey: "thread-key", replyMode: "reply", tone: "warm" });
   await client.updateEmailDraft("draft-key", "Edited");
   await client.sendEmailDraft("draft-key");
   expect(calls.map(({ method, path }) => `${method} ${path}`)).toEqual([
-    "POST /email/overview", "POST /email/sync", "POST /email/threads/thread-key/favorite", "POST /email/drafts", "PATCH /email/drafts/draft-key", "POST /email/drafts/draft-key/send",
+    "POST /email/overview", "POST /email/threads/thread-key/favorite", "POST /email/drafts", "PATCH /email/drafts/draft-key", "POST /email/drafts/draft-key/send",
   ]);
   expect(calls[0]?.body).toEqual({ organizationKey: "org-key", scopeKey: "scope-key", connectorKey: connector.connectorKey, readState: "unread", facets: ["urgent", "important"] });
-  expect(calls[1]?.body).toEqual({ organizationKey: "org-key", scopeKey: "scope-key", connectorKey: connector.connectorKey });
-  expect(calls[1]?.config).toEqual({ timeout: 120_000 });
-  expect(calls[2]?.body).toEqual({ organizationKey: "org-key", scopeKey: "scope-key", isFavorite: true });
-  expect(calls[3]?.body).toEqual({ organizationKey: "org-key", scopeKey: "scope-key", threadKey: "thread-key", replyMode: "reply", tone: "warm" });
+  expect(calls[0]?.config).toEqual({ headers: { "X-Vorinthex-Email-Transport": "2" } });
+  expect(calls[1]?.body).toEqual({ organizationKey: "org-key", scopeKey: "scope-key", isFavorite: true });
+  expect(calls[2]?.body).toEqual({ organizationKey: "org-key", scopeKey: "scope-key", threadKey: "thread-key", replyMode: "reply", tone: "warm" });
 });
 
 test("asks Core through the scoped Signal assistant surface", async () => {
@@ -319,6 +320,16 @@ test("sends strict inbox and tone metadata payloads", async () => {
   expect(() => client.emailInboxUpdateInputSchema.parse({ connectorKey: connector.connectorKey, name: "Inbox", instruction: "not allowed", isFavorite: false })).toThrow();
 });
 
+test("arbitrary email text enhancement and translation use unified app actions with AI timeouts", async () => {
+  const context = { organizationKey: "org-captured", scopeKey: "scope-captured" };
+  await expect(client.enhanceAppTextForContext(context, "bad words here")).resolves.toEqual({ text: "Enhanced text." });
+  await expect(client.translateAppTextForContext(context, "Clear sentence.", "French")).resolves.toEqual({ text: "Texte traduit." });
+  expect(calls).toEqual([
+    { method: "POST", path: "/app/enhance", body: { ...context, input: { text: "bad words here" } }, config: { timeout: 4 * 60_000 } },
+    { method: "POST", path: "/app/translate", body: { ...context, input: { text: "Clear sentence.", targetLanguage: "French" } }, config: { timeout: 4 * 60_000 } },
+  ]);
+});
+
 test("explicit-context draft and metadata operations ignore later auth scope changes", async () => {
   const context = { organizationKey: "org-captured", scopeKey: "scope-captured" };
   authState.organization.key = "org-current";
@@ -339,6 +350,7 @@ test("explicit-context draft and metadata operations ignore later auth scope cha
     const value = body as { organizationKey?: string; scopeKey?: string };
     return value.organizationKey === context.organizationKey && value.scopeKey === context.scopeKey;
   })).toBe(true);
+  expect(calls[5]?.config).toEqual({ timeout: 4 * 60_000 });
   expect(calls[8]?.body).toMatchObject({ replyMode: "reply_all" });
 });
 
@@ -380,7 +392,7 @@ test("reply context bulk delete accepts only the exact backend result", async ()
 
 test("Gmail OAuth start carries strict inbox metadata and a fixed provider", async () => {
   expect(await client.launchEmailConnection({ name: "Client inbox", description: "Priority mail" })).toBeNull();
-  expect(calls[0]).toEqual({ method: "POST", path: "/email/connect", body: { organizationKey: "org-key", scopeKey: "scope-key", provider: "gmail", returnUri: "vorinthexcore://capability/signal", name: "Client inbox", description: "Priority mail" }, config: {} });
+  expect(calls[0]).toEqual({ method: "POST", path: "/email/connect", body: { organizationKey: "org-key", scopeKey: "scope-key", provider: "gmail", returnUri: "https://vorinthex.com/capability/signal", name: "Client inbox", description: "Priority mail" }, config: {} });
   expect(() => client.emailConnectionMetadataSchema.parse({ name: "", description: "Invalid" })).toThrow();
   expect(() => client.emailConnectionMetadataSchema.parse({ provider: "other", name: "Inbox" })).toThrow();
   expect(() => client.emailConnectionMetadataSchema.parse({ name: "Inbox", email: "other@example.com", appPassword: "password" })).toThrow();
@@ -400,31 +412,20 @@ test("sends a strict draft assignment request without sending the draft", async 
   expect(() => client.emailAssignDraftInputSchema.parse({ draftKey: unassignedDraft.key, connectorKey: connector.connectorKey, send: true })).toThrow();
 });
 
-test("propagates connector selectors to sync, subscribe, compose, and disconnect", async () => {
-  await client.syncEmail(connector.connectorKey);
-  await client.subscribeEmail(connector.connectorKey);
+test("propagates connector selectors to compose and disconnect", async () => {
   await client.composeEmailDraft({ connectorKey: connector.connectorKey, to: ["one@example.com"], subject: "Hello", tone: "warm" });
   await client.disconnectEmail(connector.connectorKey);
-  expect(calls.map(({ body }) => (body as { connectorKey?: string }).connectorKey)).toEqual(Array(4).fill(connector.connectorKey));
+  expect(calls.map(({ body }) => (body as { connectorKey?: string }).connectorKey)).toEqual(Array(2).fill(connector.connectorKey));
 });
 
 test("explicit-context provider clients never reread ambient scope", async () => {
   const context = { organizationKey: "captured-org", scopeKey: "captured-scope" };
-  await client.syncEmailForContext(context, connector.connectorKey);
-  await client.subscribeEmailForContext(context, connector.connectorKey);
   await client.assignEmailDraftForContext(context, unassignedDraft.key, connector.connectorKey);
   await client.disconnectEmailForContext(context, connector.connectorKey);
   expect(calls.map(({ body }) => body)).toEqual([
     { ...context, connectorKey: connector.connectorKey },
     { ...context, connectorKey: connector.connectorKey },
-    { ...context, connectorKey: connector.connectorKey },
-    { ...context, connectorKey: connector.connectorKey },
   ]);
-});
-
-test("accepts polling subscriptions that skip provider watches", async () => {
-  subscribeResult = { skipped: true };
-  expect(await client.subscribeEmailForContext({ organizationKey: "org-key", scopeKey: "scope-key" }, connector.connectorKey)).toEqual({ skipped: true });
 });
 
 test("sends strict bulk thread mutations and parses ordered itemized reports", async () => {
@@ -538,7 +539,7 @@ test("forwards one supplied idempotency key for every supported mutation and nev
   await client.fetchEmailOverviewForContext(context);
   await client.fetchEmailThreadForContext(context, thread.key);
   await client.fetchEmailTonesForContext(context);
-  expect(calls.slice(-3).every(({ config }) => !config || !("headers" in (config as object)))).toBe(true);
+  expect(calls.slice(-3).every(({ config }) => !(config as { headers?: Record<string, string> } | undefined)?.headers?.["Idempotency-Key"])).toBe(true);
 });
 
 test("parses exact backend-shaped public projections and rejects private identities", async () => {
@@ -551,4 +552,9 @@ test("parses exact backend-shaped public projections and rejects private identit
   expect(() => client.emailThreadSchema.parse({ ...thread, providerThreadId: "private" })).toThrow();
   expect(() => client.emailMessageSchema.parse({ ...message, providerMessageId: "private" })).toThrow();
   expect(() => client.emailDraftSchema.parse({ ...draft, scopeKey: "private" })).toThrow();
+});
+
+test("thread detail continuations send the bounded cursor in the request body", async () => {
+  await client.fetchEmailThreadForContext({ organizationKey: "org-key", scopeKey: "scope-key" }, thread.key, "next-page");
+  expect(calls.at(-1)).toMatchObject({ method: "POST", path: `/email/threads/${thread.key}`, body: { organizationKey: "org-key", scopeKey: "scope-key", cursor: "next-page" } });
 });

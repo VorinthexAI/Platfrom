@@ -7,7 +7,7 @@ export const bookSourceTypeSchema = z.enum(['document', 'image', 'collection', '
 export const bookSourceSchema = z.object({
   key: z.string().cuid(), scopeKey: z.string().cuid(), bookKey: z.string().cuid(), sourceType: bookSourceTypeSchema,
   sourceKey: z.string().cuid().optional(), url: z.string().url().optional(), title: z.string().trim().min(1), content: z.string().trim().min(1),
-  relevance: z.string().trim().min(1), embedding: currentEmbeddingSchema, createdAt: z.string().datetime(),
+  relevance: z.string().trim().min(1), contentHash: z.string().regex(/^[a-f0-9]{64}$/), sourceUpdatedAt: z.string().datetime().optional(), embedding: currentEmbeddingSchema, createdAt: z.string().datetime(),
 }).superRefine((source, context) => {
   if (source.sourceType === 'web') {
     if (!source.url) context.addIssue({ code: z.ZodIssueCode.custom, path: ['url'], message: 'Web sources require url.' });

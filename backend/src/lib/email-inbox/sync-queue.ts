@@ -1,11 +1,14 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Queue, Worker, type Job, type JobsOptions } from 'bullmq';
 import { z } from 'zod';
 import { createRedisConnection } from '@/lib/redis';
 import { createConnectorRepository } from './connector-repository';
 import { createSystemEmailService } from './service';
+import { runTrustedTool } from '@/lib/ai/tools';
+import type { TrustedEmailToolDependencies, TrustedEmailToolName } from '@/lib/ai/tools/email-ingestion-tool-definitions';
 
 const SYNC_QUEUE_NAME = 'email-incremental-sync';
+const INITIAL_SYNC_QUEUE_NAME = 'email-initial-sync';
 const RENEWAL_QUEUE_NAME = 'email-watch-renewal';
 const jobOptions: JobsOptions = {
   attempts: 12,
@@ -26,6 +29,12 @@ const renewalJobSchema = z.object({ schemaVersion: z.literal(1), kind: z.literal
 const legacyPollingJobSchema = z.object({ schemaVersion: z.literal(1), kind: z.literal('poll-connectors'), bucket: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/) }).strict();
 const connectorSyncJobSchema = z.object({
   schemaVersion: z.literal(1), kind: z.literal('connector-sync'), organizationKey: z.string().min(1).max(160), scopeKey: z.string().min(1).max(160), connectorKey: z.string().min(1).max(160), sourceKey: z.string().regex(/^[a-f0-9]{64}$/), requestedAt: z.string().datetime(),
+}).strict();
+export const initialSyncJobSchema = z.object({
+  schemaVersion: z.literal(1), kind: z.literal('initial-sync'), organizationKey: z.string().min(1).max(160), scopeKey: z.string().cuid(), connectorKey: z.string().cuid(), operationKey: z.string().uuid(), requestedAt: z.string().datetime(),
+}).strict();
+const connectorNotificationJobSchema = z.object({
+  schemaVersion: z.literal(1), kind: z.literal('connector-notification'), organizationKey: z.string().min(1).max(160), scopeKey: z.string().min(1).max(160), connectorKey: z.string().min(1).max(160), sourceKey: z.string().regex(/^[a-f0-9]{64}$/), notificationHistoryId: z.string().regex(/^\d+$/), requestedAt: z.string().datetime(),
 }).strict();
 const connectorWatchJobSchema = z.object({
   schemaVersion: z.literal(1), kind: z.literal('connector-watch-renewal'), organizationKey: z.string().min(1).max(160), scopeKey: z.string().min(1).max(160), connectorKey: z.string().min(1).max(160), sourceKey: z.string().regex(/^[a-f0-9]{64}$/), requestedAt: z.string().datetime(),
@@ -48,7 +57,7 @@ const clearTrashJobSchema = z.object({
 const watchJobSchema = z.object({
   schemaVersion: z.literal(1), kind: z.literal('watch-reconciliation'), organizationKey: z.string().min(1).max(160), scopeKey: z.string().cuid(), connectorKey: z.string().cuid(), operationKey: z.string().uuid(), requestedAt: z.string().datetime(),
 }).strict();
-export const emailSyncJobSchema = z.discriminatedUnion('kind', [notificationJobSchema, renewalJobSchema, legacyPollingJobSchema, connectorSyncJobSchema, connectorWatchJobSchema, connectorJobSchema, clearTrashJobSchema, watchJobSchema]).superRefine((value, context) => {
+export const emailSyncJobSchema = z.discriminatedUnion('kind', [notificationJobSchema, renewalJobSchema, legacyPollingJobSchema, initialSyncJobSchema, connectorSyncJobSchema, connectorNotificationJobSchema, connectorWatchJobSchema, connectorJobSchema, clearTrashJobSchema, watchJobSchema]).superRefine((value, context) => {
   if (value.kind !== 'connector-reconciliation') return;
   if ((value.reason === 'send') === Boolean(value.operation)) context.addIssue({ code: 'custom', message: 'send repair must omit operation; thread repair must include operation', path: ['operation'] });
   if ((value.reason === 'send') !== Boolean(value.sendDraftKey)) context.addIssue({ code: 'custom', message: 'send repair must identify exactly one draft', path: ['sendDraftKey'] });
@@ -69,21 +78,24 @@ const getQueue = (name: string) => {
 };
 const stableId = (...parts: string[]) => createHash('sha256').update(parts.join('\0')).digest('hex');
 export const emailRepairJobId = (input: { connectorKey: string; reason: string; operationKey: string }) => stableId('connector-reconciliation', input.connectorKey, input.reason, input.operationKey);
+export const emailInitialSyncJobId = (input: { connectorKey: string; operationKey: string }) => stableId('initial-sync', input.connectorKey, input.operationKey);
 export const emailClearTrashJobId = (input: { connectorKey: string; operationKey: string }) => stableId('clear-trash-continuation', input.connectorKey, input.operationKey);
 export const emailWatchRepairJobId = (input: { connectorKey: string; operationKey: string }) => stableId('watch-reconciliation', input.connectorKey, input.operationKey);
 export const emailWatchRenewalJobId = (day: string) => stableId('renew-watches', day);
 type QueueAccess = Pick<Queue<EmailSyncJob, EmailSyncResult>, 'add' | 'getJob'>;
 type ChildQueueAccess = Pick<Queue<EmailSyncJob, EmailSyncResult>, 'add'>;
+type RecoveryQueueAccess = ChildQueueAccess & Partial<Pick<Queue<EmailSyncJob, EmailSyncResult>, 'getJob'>>;
 
-async function enqueueConnectorChildren(input: {
-  kind: 'connector-sync' | 'connector-watch-renewal';
+type ConnectorChildrenInput = {
   sourceKey: string;
   targets: Array<{ organizationKey: string; scopeKey: string; connectorKey: string }>;
   queue: ChildQueueAccess;
-}) {
+} & ({ kind: 'connector-notification'; notificationHistoryId: string } | { kind: 'connector-sync' | 'connector-watch-renewal' });
+
+async function enqueueConnectorChildren(input: ConnectorChildrenInput) {
   let failures = 0;
   for (const target of input.targets) {
-    const child = emailSyncJobSchema.parse({ schemaVersion: 1, kind: input.kind, ...target, sourceKey: input.sourceKey, requestedAt: new Date().toISOString() });
+    const child = emailSyncJobSchema.parse({ schemaVersion: 1, kind: input.kind, ...target, sourceKey: input.sourceKey, ...(input.kind === 'connector-notification' ? { notificationHistoryId: input.notificationHistoryId } : {}), requestedAt: new Date().toISOString() });
     try {
       await input.queue.add(input.kind, child, { ...(input.kind === 'connector-watch-renewal' ? emailWatchJobOptions : jobOptions), jobId: stableId(input.kind, input.sourceKey, target.organizationKey, target.scopeKey, target.connectorKey) });
     } catch { failures += 1; }
@@ -102,6 +114,52 @@ export async function enqueueEmailSyncContinuation(input: { organizationKey: str
   const job = connectorSyncJobSchema.parse({ schemaVersion: 1, kind: 'connector-sync', organizationKey: input.organizationKey, scopeKey: input.scopeKey, connectorKey: input.connectorKey, sourceKey, requestedAt: new Date().toISOString() });
   const queued = await targetQueue.add('connector-sync', job, { ...jobOptions, jobId: stableId('connector-sync', sourceKey, input.organizationKey, input.scopeKey, input.connectorKey) });
   return { jobId: queued.id! };
+}
+
+export async function enqueueEmailInitialSync(input: Omit<z.input<typeof initialSyncJobSchema>, 'schemaVersion' | 'kind' | 'requestedAt'>, targetQueue: ChildQueueAccess = getQueue(INITIAL_SYNC_QUEUE_NAME)) {
+  const job = initialSyncJobSchema.parse({ schemaVersion: 1, kind: 'initial-sync', ...input, requestedAt: new Date().toISOString() });
+  const queued = await targetQueue.add('initial-sync', job, { ...jobOptions, jobId: emailInitialSyncJobId(job) });
+  return { jobId: queued.id! };
+}
+
+export async function recoverEmailSyncQueue(dependencies: {
+  connectors?: ReturnType<typeof createConnectorRepository>;
+  initialQueue?: RecoveryQueueAccess;
+  syncQueue?: RecoveryQueueAccess;
+} = {}) {
+  const connectors = dependencies.connectors ?? createConnectorRepository();
+  const initialQueue = dependencies.initialQueue ?? getQueue(INITIAL_SYNC_QUEUE_NAME);
+  const syncQueue = dependencies.syncQueue ?? getQueue(SYNC_QUEUE_NAME);
+  const targets = await connectors.listSyncRecoveryTargets();
+  let failures = 0;
+  const removeFailed = async (queue: RecoveryQueueAccess, jobId: string) => {
+    const existing = await queue.getJob?.(jobId) as Pick<Job, 'getState' | 'remove'> | undefined;
+    if (existing && await existing.getState() === 'failed') await existing.remove();
+  };
+  for (const target of targets) {
+    try {
+      if (!target.initialSyncCompleted) {
+        const job = initialSyncJobSchema.parse({ schemaVersion: 1, kind: 'initial-sync', organizationKey: target.organizationKey, scopeKey: target.scopeKey, connectorKey: target.connectorKey, operationKey: randomUUID(), requestedAt: new Date().toISOString() });
+        const jobId = stableId('initial-sync-recovery', target.connectorKey);
+        await removeFailed(initialQueue, jobId);
+        await initialQueue.add('initial-sync', job, { ...jobOptions, removeOnComplete: true, jobId });
+      } else if (target.pendingNotificationHistoryId) {
+        const sourceKey = stableId('notification-recovery', target.connectorKey, target.pendingNotificationHistoryId);
+        const job = connectorNotificationJobSchema.parse({ schemaVersion: 1, kind: 'connector-notification', organizationKey: target.organizationKey, scopeKey: target.scopeKey, connectorKey: target.connectorKey, sourceKey, notificationHistoryId: target.pendingNotificationHistoryId, requestedAt: new Date().toISOString() });
+        const jobId = stableId('connector-notification', sourceKey, target.organizationKey, target.scopeKey, target.connectorKey);
+        await removeFailed(syncQueue, jobId);
+        await syncQueue.add('connector-notification', job, { ...jobOptions, jobId });
+      } else {
+        const sourceKey = stableId('sync-recovery', target.connectorKey, target.pendingHistoryId ?? 'error');
+        const job = connectorSyncJobSchema.parse({ schemaVersion: 1, kind: 'connector-sync', organizationKey: target.organizationKey, scopeKey: target.scopeKey, connectorKey: target.connectorKey, sourceKey, requestedAt: new Date().toISOString() });
+        const jobId = stableId('connector-sync', sourceKey, target.organizationKey, target.scopeKey, target.connectorKey);
+        await removeFailed(syncQueue, jobId);
+        await syncQueue.add('connector-sync', job, { ...jobOptions, jobId });
+      }
+    } catch { failures += 1; }
+  }
+  if (failures) throw new Error(`Email synchronization recovery scheduling failed for ${failures} connector(s)`);
+  return { enqueued: targets.length };
 }
 
 export async function enqueueEmailWatchRenewal(now = new Date(), targetQueue: QueueAccess = getQueue(RENEWAL_QUEUE_NAME)) {
@@ -150,25 +208,43 @@ export async function processEmailSyncJob(raw: unknown, dependencies: {
   connectors?: ReturnType<typeof createConnectorRepository>;
   service?: ReturnType<typeof createSystemEmailService>;
   queue?: ChildQueueAccess;
+  runTrusted?: (name: TrustedEmailToolName, input: unknown, dependencies: TrustedEmailToolDependencies) => Promise<unknown>;
 } = {}): Promise<EmailSyncResult> {
   const job = emailSyncJobSchema.parse(raw);
   const connectors = dependencies.connectors ?? createConnectorRepository();
   const service = dependencies.service ?? createSystemEmailService({ connectors });
+  const trusted = dependencies.runTrusted ?? runTrustedTool;
+  const trustedDependencies = (organizationKey: string, scopeKey: string): TrustedEmailToolDependencies => ({
+    context: { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'system' } },
+    email: service,
+  });
   if (job.kind === 'notification') {
     const targets = await connectors.listSyncTargetsByEmail(job.emailAddress);
-    await enqueueConnectorChildren({ kind: 'connector-sync', sourceKey: stableId(job.subscription, job.messageId), targets, queue: dependencies.queue ?? getQueue(SYNC_QUEUE_NAME) });
+    const marked = await Promise.all(targets.map(({ connectorKey }) => connectors.markNotificationPending(connectorKey, job.historyId)));
+    if (marked.some((value) => !value)) throw new Error('Email notification target changed before durable scheduling');
+    await enqueueConnectorChildren({ kind: 'connector-notification', sourceKey: stableId(job.subscription, job.messageId), notificationHistoryId: job.historyId, targets, queue: dependencies.queue ?? getQueue(SYNC_QUEUE_NAME) });
     return { synchronized: targets.length };
   }
   if (job.kind === 'poll-connectors') {
     return { synchronized: 0 };
   }
+  if (job.kind === 'initial-sync') {
+    const result = await trusted('inbox.sync', { connectorKey: job.connectorKey }, trustedDependencies(job.organizationKey, job.scopeKey)) as { initialSyncCompleted?: boolean; alreadyCompleted?: boolean };
+    if ('initialSyncCompleted' in result && !result.initialSyncCompleted) throw new Error('Email initial synchronization remains incomplete');
+    return { synchronized: 'alreadyCompleted' in result && result.alreadyCompleted ? 0 : 1 };
+  }
   if (job.kind === 'connector-sync') {
-    const result = await service.sync({ userKey: 'system', organizationKey: job.organizationKey, scopeKey: job.scopeKey }, job.connectorKey);
-    if (result.busy) throw new Error('Email connector synchronization is busy');
+    const result = await trusted('inbox.subscribe', { connectorKey: job.connectorKey }, trustedDependencies(job.organizationKey, job.scopeKey)) as { busy?: boolean };
+    if ('busy' in result && result.busy) throw new Error('Email connector synchronization is busy');
+    return { synchronized: 1 };
+  }
+  if (job.kind === 'connector-notification') {
+    const result = await trusted('inbox.subscribe', { connectorKey: job.connectorKey, notificationHistoryId: job.notificationHistoryId }, trustedDependencies(job.organizationKey, job.scopeKey)) as { busy?: boolean };
+    if ('busy' in result && result.busy) throw new Error('Email connector notification ingestion is busy');
     return { synchronized: 1 };
   }
   if (job.kind === 'connector-watch-renewal') {
-    await service.subscribe({ userKey: 'system', organizationKey: job.organizationKey, scopeKey: job.scopeKey }, job.connectorKey, undefined, true);
+    await service.registerWatch({ userKey: 'system', organizationKey: job.organizationKey, scopeKey: job.scopeKey }, job.connectorKey, undefined, true);
     return { renewed: 1 };
   }
   if (job.kind === 'connector-reconciliation') {
@@ -187,8 +263,8 @@ export async function processEmailSyncJob(raw: unknown, dependencies: {
       if (result.repairPending) throw new Error('Gmail thread reconciliation remains incomplete');
       return { synchronized: result.succeeded };
     }
-    const result = await service.sync(actor, job.connectorKey);
-    if (result.busy) throw new Error('Gmail connector reconciliation is busy');
+    const result = await trusted('inbox.subscribe', { connectorKey: job.connectorKey }, trustedDependencies(job.organizationKey, job.scopeKey)) as { busy?: boolean };
+    if ('busy' in result && result.busy) throw new Error('Gmail connector reconciliation is busy');
     return { synchronized: 1 };
   }
   if (job.kind === 'clear-trash-continuation') {
@@ -196,7 +272,7 @@ export async function processEmailSyncJob(raw: unknown, dependencies: {
     return { cleared: result.providerMessagesDeleted };
   }
   if (job.kind === 'watch-reconciliation') {
-    await service.subscribe({ userKey: 'system', organizationKey: job.organizationKey, scopeKey: job.scopeKey }, job.connectorKey, undefined, true);
+    await service.registerWatch({ userKey: 'system', organizationKey: job.organizationKey, scopeKey: job.scopeKey }, job.connectorKey, undefined, true);
     return { renewed: 1 };
   }
   const before = new Date(Date.now() + 24 * 60 * 60_000).toISOString();
@@ -207,10 +283,12 @@ export async function processEmailSyncJob(raw: unknown, dependencies: {
 
 export function startEmailSyncWorker() {
   const syncWorker = new Worker<EmailSyncJob, EmailSyncResult>(SYNC_QUEUE_NAME, (job) => processEmailSyncJob(job.data), { connection: connection(), concurrency: 4 });
+  const initialSyncWorker = new Worker<EmailSyncJob, EmailSyncResult>(INITIAL_SYNC_QUEUE_NAME, (job) => processEmailSyncJob(job.data), { connection: connection(), concurrency: 2 });
   const renewalWorker = new Worker<EmailSyncJob, EmailSyncResult>(RENEWAL_QUEUE_NAME, (job) => processEmailSyncJob(job.data), { connection: connection(), concurrency: 1 });
   syncWorker.on('error', () => console.error('email synchronization worker error'));
+  initialSyncWorker.on('error', () => console.error('email initial synchronization worker error'));
   renewalWorker.on('error', () => console.error('email watch renewal worker error'));
-  return { close: async () => { await Promise.all([syncWorker.close(), renewalWorker.close()]); } };
+  return { close: async () => { await Promise.all([syncWorker.close(), initialSyncWorker.close(), renewalWorker.close()]); } };
 }
 
 export async function closeEmailSyncQueue() {

@@ -45,9 +45,9 @@ export type ButtonProps = PressableProps & {
 type ButtonSizeContextValue = { size: ButtonSize; forced: boolean };
 const ButtonSizeContext = createContext<ButtonSizeContextValue | undefined>(undefined);
 
-export function ButtonSizeProvider({ children, force = false, size }: { children: ReactNode; force?: boolean; size: ButtonSize }) {
+export function ButtonSizeProvider({ children, force = false, overrideParent = false, size }: { children: ReactNode; force?: boolean; overrideParent?: boolean; size: ButtonSize }) {
   const parent = useContext(ButtonSizeContext);
-  const value = parent?.forced ? parent : { size, forced: force };
+  const value = parent?.forced && !overrideParent ? parent : { size, forced: force };
   return <ButtonSizeContext.Provider value={value}>{children}</ButtonSizeContext.Provider>;
 }
 

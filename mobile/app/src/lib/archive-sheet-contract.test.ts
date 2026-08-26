@@ -89,6 +89,27 @@ test("keeps transformation sheets dismissible and background errors out of the e
   expect(versionFooter).not.toContain('close(Boolean(documentActionLoading))');
 });
 
+test("keeps managed documents read-only without hiding read and history controls", () => {
+  expect(source).toContain('{!activeDocument?.managed && (editorEditing');
+  expect(source).toContain('{!activeDocument?.managed ? <Button accessibilityLabel="AI document actions"');
+  expect(source).not.toContain('workspaceMode !== "editor" || !activeDocument?.managed');
+  expect(source).toContain('<CoreComposer');
+  expect(source).toContain('!managedDocument && !loadingSummaries && summaries.length === 0');
+  expect(source).toContain('activeSheet === "summarize" && !selectedDocument?.managed');
+  expect(source).toContain('activeSheet === "enhance" && !activeDocument?.managed');
+  expect(source).toContain('if (activeDocument?.managed) return;');
+  expect(source).toContain('if (!document?.key || document.managed || generatingSummary) return;');
+  expect(source).toContain('accessibilityLabel="Search in document"');
+  expect(source).toContain('accessibilityLabel="Document versions and history"');
+  expect(source).toContain('onPress={() => void listenToSelectedDocument()}');
+});
+
+test("normalizes Archive scans and folder covers as PNG", () => {
+  expect(source).toContain('normalizeCapturedPng(coverChange');
+  expect(source).toContain('filename: `folder-cover-${Date.now()}.png`');
+  expect(source).toContain('name: `scan-page-${index + 1}.png`');
+});
+
 test("keeps folder actions titleless and cover removal circular", () => {
   expect(source).toContain('activeSheet === "filter" || activeSheet === "folderActions" || activeSheet === "bulkActions"');
   expect(source).toContain('accessibilityLabel="Remove folder cover" contentMode="raw" iconOnly');
@@ -234,4 +255,22 @@ test("makes post-archive invalidation best effort", () => {
 
 test("retains known favorite state on provisional selected search documents", () => {
   expect(source.match(/isFavorite: document\.isFavorite/g)).toHaveLength(2);
+});
+
+test("suppresses structural Archive actions for managed resources while retaining favorite and hide", () => {
+  expect(source).toContain("const selectionHasManaged = [...selectedFolders, ...selectedDocuments].some((item) => item.managed)");
+  expect(source).toContain("!currentFolder?.managed ? <Button");
+  expect(source).toContain("!selectionHasManaged ? <Button");
+  expect(source).toContain("!selectedDocument.managed ? <BottomSheetItem");
+  expect(source).toContain("!selectedFolder.managed ? <BottomSheetItem");
+  const bulkStart = source.lastIndexOf('{activeSheet === "bulkActions"');
+  const bulk = source.slice(bulkStart, source.indexOf('{activeSheet === "historyChooser"', bulkStart));
+  expect(bulk).toContain("updateSelectionFavorite()");
+  expect(bulk).toContain("!selectionHasManaged");
+  const documentActionsStart = source.lastIndexOf('{activeSheet === "documentActions" && selectedDocument');
+  const documentActions = source.slice(documentActionsStart, source.indexOf('{activeSheet === "scanSources"', documentActionsStart));
+  expect(documentActions).toContain('setHiddenOptimistically("document"');
+  const folderActionsStart = source.lastIndexOf('{activeSheet === "folderActions" && selectedFolder');
+  const folderActions = source.slice(folderActionsStart, source.indexOf('{activeSheet === "folderDetails"', folderActionsStart));
+  expect(folderActions).toContain('setHiddenOptimistically("folder"');
 });

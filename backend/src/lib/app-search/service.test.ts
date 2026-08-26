@@ -51,7 +51,7 @@ describe('app search service', () => {
       email: { searchInboxes: async (_actor: unknown, input: any, options: any) => {
         expect(input.recordHistory).toBe(false);
         await arrive('email', options.queryEmbedding);
-        return { inboxes: [{ key: newId(), connectorKey: newId(), provider: 'gmail', email: 'work@example.com', name: 'Work', isFavorite: false, status: 'active', syncEnabled: true, syncStatus: 'idle', createdAt: '2026-08-24T00:00:00.000Z', updatedAt: '2026-08-24T00:00:00.000Z', score: 0.75 }] };
+        return { inboxes: [{ key: newId(), connectorKey: newId(), provider: 'gmail', email: 'work@example.com', name: 'Work', isFavorite: false, status: 'active', syncEnabled: true, initialSyncCompleted: true, syncStatus: 'idle', createdAt: '2026-08-24T00:00:00.000Z', updatedAt: '2026-08-24T00:00:00.000Z', score: 0.75 }] };
       } } as never,
       userSearches: { record: async () => { events.push('history'); return {} as never; } } as never,
     });
@@ -64,7 +64,17 @@ describe('app search service', () => {
     expect(seenEmbeddings[0]).toEqual(embedding);
     expect(events.slice(0, 3).sort()).toEqual(['content:start', 'email:start', 'gallery:start']);
     expect(events.at(-1)).toBe('history');
-    expect(JSON.stringify(result)).not.toMatch(/embedding|organizationKey/);
+    expect(JSON.stringify(result)).not.toMatch(/embedding|organizationKey|initialSyncCompleted/);
+    expect(result.groups[2]).toEqual({ collectionSlug: 'inboxes', results: [{ key: expect.any(String), connectorKey: expect.any(String), provider: 'gmail', email: 'work@example.com', name: 'Work', isFavorite: false, status: 'active', syncEnabled: true, syncStatus: 'idle', createdAt: '2026-08-24T00:00:00.000Z', updatedAt: '2026-08-24T00:00:00.000Z', score: 0.75 }] });
+  });
+
+  test('strips only the versioned connector field and rejects any other non-legacy inbox field', async () => {
+    const connector = { key: newId(), connectorKey: newId(), provider: 'gmail', email: 'work@example.com', name: 'Work', isFavorite: false, status: 'active', syncEnabled: true, initialSyncCompleted: true, syncStatus: 'idle', createdAt: '2026-08-24T00:00:00.000Z', updatedAt: '2026-08-24T00:00:00.000Z', score: 0.75 };
+    const service = createAppSearchService({
+      executeEmbedding: async () => ({ embedding }),
+      email: { searchInboxes: async () => ({ inboxes: [{ ...connector, connectorRevision: 'unexpected' }] }) } as never,
+    });
+    await expect(service.search({ query: 'work', collectionSlugs: ['inboxes'], recordHistory: false }, context)).rejects.toThrow();
   });
 
   test('does not record history when an adapter fails or history is disabled', async () => {

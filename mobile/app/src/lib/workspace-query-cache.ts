@@ -1,6 +1,6 @@
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import type { AssistantChange } from "./assistant-changes";
-import type { Book, BookDetail } from "./books-client";
+import type { Book, BookChapter, BookDetail } from "./books-client";
 import { contentQueryKeys } from "./content-query-cache";
 import { normalizeEmailOverviewQuery, type EmailConnector, type EmailDraft, type EmailFacet, type EmailFilter, type EmailOverview, type EmailOverviewQuery, type EmailReplyContext, type EmailSummary, type EmailThread, type EmailToneRecord, type EmailTranslationVersion } from "./email-client";
 import { normalizeCollection } from "./collection-access";
@@ -51,6 +51,7 @@ export const galleryQueryKeys = {
   userHiddens: (context: WorkspaceContext) => [...galleryQueryKeys.all(context), "user-hiddens"] as const,
   overviews: (context: WorkspaceContext) => [...galleryQueryKeys.all(context), "overviews"] as const,
   overview: (context: WorkspaceContext, collectionKey?: string) => [...galleryQueryKeys.overviews(context), collectionKey ?? null] as const,
+  image: (context: WorkspaceContext, collectionKey: string | undefined, imageKey: string) => [...galleryQueryKeys.all(context), "image", collectionKey ?? null, imageKey] as const,
   members: (context: WorkspaceContext, collectionKey: string) => [...galleryQueryKeys.all(context), "sharing", collectionKey, "members"] as const,
   invites: (context: WorkspaceContext, collectionKey: string) => [...galleryQueryKeys.all(context), "sharing", collectionKey, "invites"] as const,
   incomingInvites: (context: WorkspaceContext) => [...galleryQueryKeys.all(context), "sharing", "incoming-invites"] as const,
@@ -212,6 +213,7 @@ export function parseSignalOverviewQuery(queryKey: QueryKey): ParsedSignalOvervi
 export const ascendQueryKeys = {
   all: (context: WorkspaceContext) => ["ascend", ...contextKey(context)] as const,
   overview: (context: WorkspaceContext) => [...ascendQueryKeys.all(context), "overview"] as const,
+  pending: (context: WorkspaceContext) => [...ascendQueryKeys.all(context), "pending"] as const,
   details: (context: WorkspaceContext) => [...ascendQueryKeys.all(context), "details"] as const,
   detail: (context: WorkspaceContext, bookKey: string) => [...ascendQueryKeys.details(context), bookKey] as const,
 };
@@ -661,9 +663,62 @@ export function addCachedBook(queryClient: QueryClient, context: WorkspaceContex
   } : overview);
 }
 
-export function patchCachedBookDetail(queryClient: QueryClient, context: WorkspaceContext, detail: BookDetail) {
-  queryClient.setQueryData(ascendQueryKeys.detail(context, detail.book.key), detail);
+export function patchCachedBook(queryClient: QueryClient, context: WorkspaceContext, book: Book) {
   queryClient.setQueryData<{ books: Book[] }>(ascendQueryKeys.overview(context), (overview) => overview ? {
-    books: overview.books.map((book) => book.key === detail.book.key ? detail.book : book),
+    books: overview.books.map((candidate) => candidate.key === book.key ? book : candidate),
+  } : overview);
+}
+
+export function removeCachedBook(queryClient: QueryClient, context: WorkspaceContext, bookKey: string) {
+  queryClient.setQueryData<{ books: Book[] }>(ascendQueryKeys.overview(context), (overview) => overview ? {
+    books: overview.books.filter(({ key }) => key !== bookKey),
+  } : overview);
+  queryClient.removeQueries({ queryKey: ascendQueryKeys.detail(context, bookKey), exact: true });
+}
+
+export function patchCachedBookDetail(queryClient: QueryClient, context: WorkspaceContext, detail: BookDetail) {
+  queryClient.setQueryData<BookDetail>(ascendQueryKeys.detail(context, detail.book.key), (current) => mergeBookDetailProgress(current, detail));
+  queryClient.setQueryData<{ books: Book[] }>(ascendQueryKeys.overview(context), (overview) => overview ? {
+    books: overview.books.map((book) => book.key === detail.book.key ? { ...detail.book, progressPercent: Math.max(book.progressPercent, detail.book.progressPercent) } : book),
+  } : overview);
+}
+
+export function mergeBookDetailProgress(current: BookDetail | undefined, incoming: BookDetail): BookDetail {
+  if (!current || current.book.key !== incoming.book.key) return incoming;
+  const currentChapters = new Map(current.chapters.map((chapter) => [chapter.key, chapter]));
+  return {
+    book: { ...incoming.book, progressPercent: Math.max(current.book.progressPercent, incoming.book.progressPercent) },
+    chapters: incoming.chapters.map((chapter) => {
+      const previous = currentChapters.get(chapter.key);
+      return previous ? {
+        ...chapter,
+        progressSeconds: Math.max(previous.progressSeconds, chapter.progressSeconds),
+        isCompleted: previous.isCompleted || chapter.isCompleted,
+      } : chapter;
+    }),
+  };
+}
+
+export function patchCachedBookProgress(queryClient: QueryClient, context: WorkspaceContext, book: Book, chapter: BookChapter) {
+  let mergedBook = book;
+  queryClient.setQueryData<BookDetail>(ascendQueryKeys.detail(context, book.key), (current) => {
+    if (!current) return current;
+    const currentChapter = current.chapters.find(({ key }) => key === chapter.key);
+    const mergedChapter = currentChapter ? {
+      ...chapter,
+      ...(currentChapter.audioUrl ? { audioUrl: currentChapter.audioUrl } : {}),
+      ...(currentChapter.imageUrl ? { imageUrl: currentChapter.imageUrl } : {}),
+      progressSeconds: Math.max(currentChapter.progressSeconds, chapter.progressSeconds),
+      isCompleted: currentChapter.isCompleted || chapter.isCompleted,
+    } : chapter;
+    mergedBook = {
+      ...book,
+      ...(current.book.coverUrl ? { coverUrl: current.book.coverUrl } : {}),
+      progressPercent: Math.max(current.book.progressPercent, book.progressPercent),
+    };
+    return { book: mergedBook, chapters: current.chapters.map((item) => item.key === chapter.key ? mergedChapter : item) };
+  });
+  queryClient.setQueryData<{ books: Book[] }>(ascendQueryKeys.overview(context), (overview) => overview ? {
+    books: overview.books.map((current) => current.key === book.key ? { ...mergedBook, ...(current.coverUrl ? { coverUrl: current.coverUrl } : {}), progressPercent: Math.max(current.progressPercent, mergedBook.progressPercent) } : current),
   } : overview);
 }

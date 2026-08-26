@@ -5,6 +5,7 @@ import { createNodeHelpers, toArangoDoc, withArangoKey } from './base';
 import { documentExtensionSchema } from '@/lib/ai/document-processing/schemas';
 import { EMBEDDING_DIMENSIONS, currentEmbeddingBatchSchema, currentEmbeddingSchema, embedTexts } from '@/lib/embeddings';
 import { chunkDocumentContent, documentContentChunksSchema, documentEmbeddingTexts, documentSemanticHash } from '@/lib/ai/document-processing/chunking';
+import { archiveVisibleFolderKeys } from './folders.node';
 
 export const DOCUMENTS_COLLECTION = 'documents';
 export { documentExtensionSchema } from '@/lib/ai/document-processing/schemas';
@@ -32,7 +33,8 @@ export const documentSchema = z.object({
   sourceStorageKeys: z.array(z.string().trim().min(1)).max(12).optional(),
   currentVersionKey: z.string().cuid().nullable().optional(),
   mutationPolicy: z.enum(['user', 'system-only']).default('user'),
-  managedPurpose: z.enum(['mail-attachment']).optional(), managedOwnerKey: z.string().cuid().optional(),
+  managedPurpose: z.enum(['audio-chapter', 'mail-attachment']).optional(), managedOwnerKey: z.string().cuid().optional(),
+  archiveVisibility: z.enum(['visible', 'domain-only']).default('visible'),
   isFavorite: z.boolean().default(false),
   _internalDeletion: z.object({
     kind: z.literal('document'),
@@ -44,7 +46,7 @@ export const documentSchema = z.object({
   updatedAt: z.string().datetime(),
 });
 
-export type Document = z.infer<typeof documentSchema>;
+export type Document = Omit<z.infer<typeof documentSchema>, 'archiveVisibility'> & { archiveVisibility?: 'visible' | 'domain-only' };
 export type DocumentExtension = z.infer<typeof documentExtensionSchema>;
 export const documentsEmbeddingFields = ['name', 'content'] as const;
 const helpers = createNodeHelpers(DOCUMENTS_COLLECTION, documentSchema, documentsEmbeddingFields, { includeEmbeddingMetadata: false });
@@ -52,7 +54,7 @@ export async function insertDocument(document: Document): Promise<Document> {
   const { contentPersistence } = await import('./content-persistence.node');
   return contentPersistence.insertDocument(document);
 }
-export const getDocumentById = helpers.getById;
+export const getDocumentById: (id: string) => Promise<Document | null> = helpers.getById;
 export async function upsertDocumentByKey(input: Omit<z.input<typeof documentSchema>, 'embedding' | 'contentChunks' | 'chunkEmbeddings'>): Promise<Document> {
   const content = input.content.trim();
   const contentChunks = chunkDocumentContent(content);
@@ -110,13 +112,15 @@ export async function getDocumentInScope(scopeKey: string, documentKey: string):
   const cursor = await db.query(aql`
     FOR document IN ${db.collection(DOCUMENTS_COLLECTION)}
       FILTER document._key == ${documentKey} && document.scopeKey == ${scopeKey}
-      FILTER document.mutationPolicy != "system-only"
+      FILTER (document.archiveVisibility || "visible") == "visible"
       FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
       LIMIT 1
       RETURN document
   `);
   const document = await cursor.next();
-  return document ? documentSchema.parse(withArangoKey(document)) : null;
+  if (!document) return null;
+  const parsed = documentSchema.parse(withArangoKey(document));
+  return !parsed.folderKey || (await archiveVisibleFolderKeys(scopeKey)).has(parsed.folderKey) ? parsed : null;
 }
 
 export async function listDocumentsByScope(
@@ -127,7 +131,7 @@ export async function listDocumentsByScope(
   const cursor = await db.query(aql`
     FOR document IN ${db.collection(DOCUMENTS_COLLECTION)}
       FILTER document.scopeKey == ${scopeKey}
-      FILTER document.mutationPolicy != "system-only"
+      FILTER (document.archiveVisibility || "visible") == "visible"
       FILTER ${options.includePendingDeletion ?? false} || !HAS(document, "_internalDeletion") || document._internalDeletion == null
       FILTER !${hasFolderBoundary} || (${options.folderKey ?? null} == null
         ? (!HAS(document, "folderKey") || document.folderKey == null)
@@ -135,7 +139,8 @@ export async function listDocumentsByScope(
       SORT document.name ASC, document._key ASC
       RETURN document
   `);
-  return (await cursor.all()).map((document) => documentSchema.parse(withArangoKey(document)));
+  const visibleFolderKeys = await archiveVisibleFolderKeys(scopeKey);
+  return (await cursor.all()).map((document) => documentSchema.parse(withArangoKey(document))).filter((document) => !document.folderKey || visibleFolderKeys.has(document.folderKey));
 }
 
 export function listDocumentsByFolder(scopeKey: string, folderKey: string | null): Promise<Document[]> {
@@ -150,12 +155,13 @@ export async function listDocumentsByKeysInScope(
   const cursor = await db.query(aql`
     FOR document IN ${db.collection(DOCUMENTS_COLLECTION)}
       FILTER document.scopeKey == ${scopeKey} && document._key IN ${documentKeys}
-      FILTER document.mutationPolicy != "system-only"
+      FILTER (document.archiveVisibility || "visible") == "visible"
       FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
       SORT POSITION(${documentKeys}, document._key) ASC
       RETURN document
   `);
-  return (await cursor.all()).map((document) => documentSchema.parse(withArangoKey(document)));
+  const visibleFolderKeys = await archiveVisibleFolderKeys(scopeKey);
+  return (await cursor.all()).map((document) => documentSchema.parse(withArangoKey(document))).filter((document) => !document.folderKey || visibleFolderKeys.has(document.folderKey));
 }
 
 export interface ContentSemanticSearchInput {
@@ -203,10 +209,11 @@ export async function semanticSearchContent(input: ContentSemanticSearchInput): 
       FOR document IN ${db.collection(DOCUMENTS_COLLECTION)}
         FILTER document.scopeKey IN ${input.authorizedScopeKeys}
         FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
-        FILTER document.mutationPolicy != "system-only"
+        FILTER (document.archiveVisibility || "visible") == "visible"
         LET folder = HAS(document, "folderKey") && document.folderKey != null ? DOCUMENT(${db.collection('folders')}, document.folderKey) : null
         FILTER folder == null || folder.scopeKey == document.scopeKey
         FILTER folder == null || !HAS(folder, "_internalDeletion") || folder._internalDeletion == null
+        FILTER folder == null || (folder.archiveVisibility || "visible") == "visible"
         FILTER ${folderKeys} == null || document.folderKey IN ${folderKeys ?? []}
         FILTER ${documentKeys} == null || document._key IN ${documentKeys ?? []}
         FILTER ${extensions} == null || document.extension IN ${extensions ?? []}
@@ -239,9 +246,10 @@ export async function semanticSearchContent(input: ContentSemanticSearchInput): 
         LET document = DOCUMENT(${db.collection(DOCUMENTS_COLLECTION)}, version.documentKey)
         FILTER document != null && document.scopeKey == version.scopeKey
         FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
-        FILTER document.mutationPolicy != "system-only"
+        FILTER (document.archiveVisibility || "visible") == "visible"
         LET folder = HAS(document, "folderKey") && document.folderKey != null ? DOCUMENT(${db.collection('folders')}, document.folderKey) : null
         FILTER folder == null || folder.scopeKey == document.scopeKey
+        FILTER folder == null || (folder.archiveVisibility || "visible") == "visible"
         FILTER ${folderKeys} == null || document.folderKey IN ${folderKeys ?? []}
         FILTER ${extensions} == null || document.extension IN ${extensions ?? []}
         FILTER ${mimeTypes} == null || document.mimeType IN ${mimeTypes ?? []}
@@ -254,8 +262,9 @@ export async function semanticSearchContent(input: ContentSemanticSearchInput): 
       RETURN match
   `);
   const { documentVersionSchema } = await import('./document-versions.node');
+  const visibleByScope = new Map(await Promise.all(input.authorizedScopeKeys.map(async (scopeKey) => [scopeKey, await archiveVisibleFolderKeys(scopeKey)] as const)));
   return (await cursor.all()).map((match: Record<string, unknown>) => {
-    const source = match.source === 'version' ? 'version' : 'document';
+    const source: ContentSemanticMatch['source'] = match.source === 'version' ? 'version' : 'document';
     return {
       source,
       score: Number(match.score),
@@ -263,7 +272,7 @@ export async function semanticSearchContent(input: ContentSemanticSearchInput): 
       ...(typeof match.matchedContent === 'string' ? { matchedContent: match.matchedContent } : {}),
       ...(source === 'version' ? { version: documentVersionSchema.parse(withArangoKey(match.version as Record<string, unknown>)) } : {}),
     };
-  });
+  }).filter(({ document }) => !document.folderKey || visibleByScope.get(document.scopeKey)?.has(document.folderKey));
 }
 
 export function semanticSearchDocuments(input: Omit<ContentSemanticSearchInput, 'sources'>): Promise<ContentSemanticMatch[]> {

@@ -3,7 +3,7 @@ import { promisify } from 'node:util';
 import { z } from 'zod';
 import { generateDocumentSummary, generateDocumentTranslation, generateTextEnhancement } from '@/lib/ai/actions/document-text-generation';
 import type { ToolContext } from './tool-context';
-import type { DocumentParseDependencies, DocumentParseInput } from '@/lib/ai/document-processing';
+import { prepareDocumentRepresentation, type DocumentParseDependencies, type DocumentParseInput } from '@/lib/ai/document-processing';
 import type { RouterDependencies } from '@/lib/ai/router';
 import type { DocumentObjectStorage } from '@/lib/ai/document-processing/storage';
 import type { Folder } from '@/lib/db/folders.node';
@@ -20,13 +20,13 @@ import type { ContentToolName, ContentToolOutput } from './content-schemas';
 import { ContentError, type ContentErrorCode } from './content-errors';
 import { contentToolInputSchemas, contentToolOutputSchemas, isContentToolName } from './content-registry';
 import { documentCleanup } from '@/lib/ai/document-processing/actions';
-import { sanitizeDocumentContent } from '@/lib/ai/document-processing/actions';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
 import { chunkDocumentContent, documentSemanticHash } from '@/lib/ai/document-processing/chunking';
 import type { DocumentScanInput } from '@/lib/ai/document-scanning';
 import type { UserSearchService } from '@/lib/user-searches/service';
 import type { GeneratedDocumentBinding } from '@/lib/db/generated-document-bindings.node';
 import { withArangoKey } from '@/lib/db/base';
+import { emailMessagePayloadSchema } from '@/lib/email-inbox/archive-payloads';
 
 type Role = 'viewer' | 'moderator' | 'admin' | 'owner';
 type SafeEvent = {
@@ -169,15 +169,25 @@ function mappedError(error: unknown, tool: ContentToolName, action?: string, res
 }
 
 async function folderView(folder: Folder, dependencies: Pick<RuntimeDefaults, 'getFolderCoverImage' | 'signFolderCoverUrl'>) {
-  const { embedding: _embedding, coverImageKey, purpose: _purpose, mutationPolicy: _mutationPolicy, _internalDeletion: _internalDeletion, ...safe } = folder;
-  if (!coverImageKey) return safe;
+  const { embedding: _embedding, coverImageKey, purpose: _purpose, managedPurpose: _managedPurpose, managedOwnerKey: _managedOwnerKey, mutationPolicy: _mutationPolicy, archiveVisibility: _archiveVisibility, _internalDeletion: _internalDeletion, ...safe } = folder;
+  const projected = { ...safe, managed: folder.mutationPolicy === 'system-container' || folder.managedPurpose !== undefined };
+  if (!coverImageKey) return projected;
   const image = await dependencies.getFolderCoverImage(folder.scopeKey, coverImageKey);
-  return { ...safe, ...(image ? { coverUrl: await dependencies.signFolderCoverUrl(image.storageKey) } : {}) };
+  return { ...projected, ...(image ? { coverUrl: await dependencies.signFolderCoverUrl(image.storageKey) } : {}) };
 }
 
 function documentView(document: Document) {
-  const { content: _content, embedding: _embedding, contentChunks: _contentChunks, chunkEmbeddings: _chunkEmbeddings, semanticChunkCount: _semanticChunkCount, semanticContentHash: _semanticContentHash, emailToneEmbeddingVersion: _emailToneEmbeddingVersion, emailReplyContextEmbeddingVersion: _emailReplyContextEmbeddingVersion, _semanticChunkingSkipped: _semanticChunkingSkipped, storageKey: _storageKey, speechStorageKeys: _speechStorageKeys, sourceStorageKeys: _sourceStorageKeys, mutationPolicy: _mutationPolicy, _internalDeletion: _internalDeletion, ...safe } = document;
-  return { ...safe, ...(document.sourceStorageKeys?.length ? { sourceImageCount: document.sourceStorageKeys.length } : {}) };
+  const { content: _content, embedding: _embedding, contentChunks: _contentChunks, chunkEmbeddings: _chunkEmbeddings, semanticChunkCount: _semanticChunkCount, semanticContentHash: _semanticContentHash, emailToneEmbeddingVersion: _emailToneEmbeddingVersion, emailReplyContextEmbeddingVersion: _emailReplyContextEmbeddingVersion, developmentFixtureIdentifier: _developmentFixtureIdentifier, _semanticChunkingSkipped: _semanticChunkingSkipped, storageKey: _storageKey, speechStorageKeys: _speechStorageKeys, sourceStorageKeys: _sourceStorageKeys, managedPurpose: _managedPurpose, managedOwnerKey: _managedOwnerKey, mutationPolicy: _mutationPolicy, archiveVisibility: _archiveVisibility, _internalDeletion: _internalDeletion, ...safe } = document;
+  return { ...safe, managed: document.mutationPolicy === 'system-only' || document.managedPurpose !== undefined, ...(document.sourceStorageKeys?.length ? { sourceImageCount: document.sourceStorageKeys.length } : {}) };
+}
+
+function publicDocumentContent(document: Document) {
+  if (document.mutationPolicy !== 'system-only') return document.content;
+  let raw: unknown;
+  try { raw = JSON.parse(document.content); } catch { return document.content; }
+  return raw && typeof raw === 'object' && 'kind' in raw && raw.kind === 'mail-message'
+    ? emailMessagePayloadSchema.parse(raw).data.body
+    : document.content;
 }
 
 function isSystemManagedMailDocument(document: Document) {
@@ -396,6 +406,7 @@ export async function authorizeDocumentParseLocation(input: { scopeKey: string; 
     if (!folder) throw new ContentError('CONTENT_NOT_FOUND', 'Folder was not found.', 'document.parse', { action: 'read', resourceKey: folderKey });
     if (folder.scopeKey !== input.scopeKey) throw new ContentError('CONTENT_FORBIDDEN', 'Folder does not belong to the requested scope.', 'document.parse', { action: 'authorization', resourceKey: folderKey });
     if (folder._internalDeletion) throw new ContentError('CONTENT_NOT_FOUND', 'Folder was not found.', 'document.parse', { action: 'read', resourceKey: folderKey });
+    if (folder.mutationPolicy === 'system-container' || folder.managedPurpose !== undefined) throw new ContentError('CONTENT_FORBIDDEN', 'Managed folders cannot contain generic documents.', 'document.parse', { action: 'insert', resourceKey: folderKey });
     folderKey = folder.parentFolderKey;
   }
 }
@@ -655,11 +666,23 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       throw error;
     }
   };
+  const archiveVisible = (value: Folder | Document) => value.archiveVisibility !== 'domain-only';
+  const managedFolder = (value: Folder) => value.mutationPolicy === 'system-container' || value.managedPurpose !== undefined;
+  const managedDocument = (value: Document) => value.mutationPolicy === 'system-only' || value.managedPurpose !== undefined;
   const folder = async (key: string, minimum: Role = 'viewer', pendingDeletion = false, repository = repo) => {
     const value = await repository.getFolder(key);
-    if (!value) fail('CONTENT_NOT_FOUND', 'Folder was not found.', tool, 'read', key);
+    if (!value || !archiveVisible(value)) fail('CONTENT_NOT_FOUND', 'Folder was not found.', tool, 'read', key);
     await roleFor(value.scopeKey, minimum, key, repository);
     if (!pendingDeletion && value._internalDeletion) fail('CONTENT_NOT_FOUND', 'Folder was not found.', tool, 'read', key);
+    let parentKey = value.parentFolderKey;
+    const visited = new Set([value.key]);
+    while (parentKey) {
+      if (visited.has(parentKey)) fail('FOLDER_CYCLE_DETECTED', 'The folder hierarchy contains a cycle.', tool, 'resolution', parentKey);
+      visited.add(parentKey);
+      const parent = await repository.getFolder(parentKey);
+      if (!parent || parent.scopeKey !== value.scopeKey || !archiveVisible(parent) || (!pendingDeletion && parent._internalDeletion)) fail('CONTENT_NOT_FOUND', 'Folder was not found.', tool, 'read', key);
+      parentKey = parent.parentFolderKey;
+    }
     return value;
   };
   const folderAncestors = async (parentKey: string | undefined, scopeKey: string, minimum: Role, repository = repo): Promise<Folder[]> => {
@@ -680,7 +703,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
   };
   const document = async (key: string, minimum: Role = 'viewer', pendingDeletion = false, repository = repo) => {
     const value = await repository.getDocument(key);
-    if (!value) fail('CONTENT_NOT_FOUND', 'Document was not found.', tool, 'read', key);
+    if (!value || !archiveVisible(value)) fail('CONTENT_NOT_FOUND', 'Document was not found.', tool, 'read', key);
     await roleFor(value.scopeKey, minimum, key, repository);
     if (!pendingDeletion && value._internalDeletion) fail('CONTENT_NOT_FOUND', 'Document was not found.', tool, 'read', key);
     let parentKey: string | undefined = value.folderKey;
@@ -689,22 +712,38 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       if (visited.has(parentKey)) fail('FOLDER_CYCLE_DETECTED', 'The document folder hierarchy contains a cycle.', tool, 'resolution', parentKey);
       visited.add(parentKey);
       const parent = await repository.getFolder(parentKey);
-      if (!parent || parent.scopeKey !== value.scopeKey) fail('CONTENT_CONFLICT', 'Document folder resolution failed.', tool, 'resolution', key);
+      if (!parent || parent.scopeKey !== value.scopeKey || !archiveVisible(parent)) fail('CONTENT_NOT_FOUND', 'Document was not found.', tool, 'read', key);
       if (!pendingDeletion && parent._internalDeletion) fail('CONTENT_NOT_FOUND', 'Document was not found.', tool, 'read', key);
       parentKey = parent.parentFolderKey;
     }
     return value;
   };
-  const foldersIn = async (scopeKey: string, includePendingDeletion = false) => (await repo.listFolders(scopeKey, includePendingDeletion))
-    .filter((item) => includePendingDeletion || !item._internalDeletion);
+  const foldersIn = async (scopeKey: string, includePendingDeletion = false) => {
+    const all = await repo.listFolders(scopeKey, includePendingDeletion);
+    const byKey = new Map(all.map((item) => [item.key, item]));
+    return all.filter((item) => {
+      const visited = new Set<string>();
+      let current: Folder | undefined = item;
+      while (current) {
+        if (visited.has(current.key) || !archiveVisible(current) || (!includePendingDeletion && current._internalDeletion)) return false;
+        visited.add(current.key);
+        if (!current.parentFolderKey) return true;
+        current = byKey.get(current.parentFolderKey);
+        if (!current) return false;
+      }
+      return false;
+    });
+  };
   const descendants = (all: Folder[], key: string) => { const out: Folder[] = []; const pending = [key]; const seen = new Set(pending); while (pending.length) { const parentKey = pending.shift()!; for (const child of all.filter((f) => f.parentFolderKey === parentKey)) if (!seen.has(child.key)) { seen.add(child.key); out.push(child); pending.push(child.key); } } return out; };
-  const forbidSystemMailMutation = (current: Document, action: string, resourceKey = current.key) => {
-    if (current.managedPurpose === 'mail-attachment') fail('CONTENT_FORBIDDEN', 'Managed documents are read-only.', tool, action, resourceKey);
+  const forbidManagedDocumentMutation = (current: Document, action: string, resourceKey = current.key) => {
+    if (managedDocument(current)) fail('CONTENT_FORBIDDEN', 'Managed documents are read-only.', tool, action, resourceKey);
     if (isSystemManagedMailDocument(current)) fail('CONTENT_FORBIDDEN', 'Mail documents are managed through their canonical email capabilities.', tool, action, resourceKey);
   };
-  const forbidSystemMailInFolders = async (scopeKey: string, folderKeys: Set<string>, action: string, repository = repo) => {
-    const current = (await repository.listDocuments(scopeKey, true)).find((item) => item.folderKey && folderKeys.has(item.folderKey) && isSystemManagedMailDocument(item));
-    if (current) forbidSystemMailMutation(current, action);
+  const forbidManagedInFolders = async (scopeKey: string, folderKeys: Set<string>, action: string, repository = repo) => {
+    const currentFolder = (await repository.listFolders(scopeKey, true)).find((item) => folderKeys.has(item.key) && managedFolder(item));
+    if (currentFolder) fail('CONTENT_FORBIDDEN', 'Managed folders are read-only.', tool, action, currentFolder.key);
+    const current = (await repository.listDocuments(scopeKey, true)).find((item) => item.folderKey && folderKeys.has(item.folderKey) && managedDocument(item));
+    if (current) forbidManagedDocumentMutation(current, action);
   };
   const activeFolderHierarchy = async (key: string | undefined, scopeKey: string) => {
     let currentKey: string | undefined = key;
@@ -713,7 +752,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       if (visited.has(currentKey)) return false;
       visited.add(currentKey);
       const current = await repo.getFolder(currentKey);
-      if (!current || current.scopeKey !== scopeKey || current._internalDeletion) return false;
+      if (!current || current.scopeKey !== scopeKey || current._internalDeletion || !archiveVisible(current)) return false;
       currentKey = current.parentFolderKey;
     }
     return true;
@@ -757,10 +796,10 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
     resourceKey: string,
     scopeKey: string,
   ) => {
-    const content = sanitizeDocumentContent(z.string().min(1).parse(source));
-    if (!content) fail('CONTENT_CONFLICT', 'Document content is empty.', tool, 'document-embed', resourceKey);
-    const embedded = await action('document-embed', { name: documentName, content }, resourceKey, scopeKey);
-    return { content, ...parsedSemantics(embedded, content, resourceKey) };
+    return prepareDocumentRepresentation({ content: source, name: documentName }, {
+      documentEmbed: (input) => action('document-embed', input, resourceKey, scopeKey),
+      embeddingDimensions: EMBEDDING_DIMENSIONS,
+    });
   };
   const isCurrentEmbedding = (embedding: readonly number[]) => embedding.length === EMBEDDING_DIMENSIONS && embedding.every(Number.isFinite);
   const hasCurrentSemantics = (source: Pick<Document, 'embedding' | 'content' | 'contentChunks' | 'chunkEmbeddings'>) => {
@@ -863,13 +902,23 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
   let result: unknown;
   let executionSucceeded = false;
   const changedTripScopeKeys = new Set<string>();
-  const linkedMutationKeys = tool === 'document.update' ? input.updates.map((item: any) => item.documentKey)
-    : tool === 'document.rename' ? input.renames.map((item: any) => item.documentKey)
-      : tool === 'document.move' ? input.moves.map((item: any) => item.documentKey)
-        : tool === 'document.delete' ? input.documentKeys : [];
+  const linkedMutationKeys = (() => {
+    if (!isContentMutation(tool, input)) return [] as string[];
+    const keys = new Set<string>();
+    const visit = (value: unknown, field?: string) => {
+      if (field === 'documentKey' && typeof value === 'string') keys.add(value);
+      else if (field === 'documentKeys' && Array.isArray(value)) for (const key of value) if (typeof key === 'string') keys.add(key);
+      if (Array.isArray(value)) for (const item of value) visit(item);
+      else if (value && typeof value === 'object') for (const [key, item] of Object.entries(value as Record<string, unknown>)) visit(item, key);
+    };
+    visit(input);
+    return [...keys];
+  })();
   let linkedBindings: GeneratedDocumentBinding[] = [];
   try {
     linkedBindings = linkedMutationKeys.length > 0 && repo.generatedDocumentBindings ? await repo.generatedDocumentBindings(linkedMutationKeys) : [];
+    const managedChapter = linkedBindings.find(({ subjectType, kind }) => subjectType === 'chapter' && kind === 'chapter');
+    if (managedChapter) fail('CONTENT_FORBIDDEN', 'Published audiobook chapters are managed by their canonical book capability.', tool, 'update', managedChapter.documentKey);
     if (tool === 'folder.create') {
       const creates = input.folders.map((item: any) => ({ ...item, key: item.key ?? d.id() }));
       result = await batch(tool, creates.map((item: any) => ({
@@ -879,7 +928,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           if (item.parentFolderKey) {
             const parent = await folder(item.parentFolderKey, 'moderator', false);
             if (parent.scopeKey !== item.scopeKey) fail('FOLDER_MOVE_FORBIDDEN', 'Parent belongs to another scope.', tool, 'insert', item.parentFolderKey);
-            if (parent.mutationPolicy === 'system-container') fail('CONTENT_FORBIDDEN', 'System container folders cannot contain child folders.', tool, 'insert', item.parentFolderKey);
+            if (managedFolder(parent)) fail('CONTENT_FORBIDDEN', 'Managed folders cannot contain generic child folders.', tool, 'insert', item.parentFolderKey);
           }
           if (item.coverImageKey && !await d.getFolderCoverImage(item.scopeKey, item.coverImageKey)) fail('CONTENT_NOT_FOUND', 'Folder cover image was not found in this scope.', tool, 'read', item.coverImageKey);
           const embedding = await embed([item.name, item.description].filter(Boolean).join('\n\n'), item.key, item.scopeKey);
@@ -952,7 +1001,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       const offset = input.cursor ? Number(Buffer.from(input.cursor, 'base64url').toString()) || 0 : 0;
       const limit = input.limit ?? 50;
       const documents = input.includeDocuments && input.parentFolderKey
-        ? (await repo.listDocuments(input.scopeKey)).filter((item) => item.folderKey === input.parentFolderKey).map(documentView)
+        ? (await repo.listDocuments(input.scopeKey)).filter((item) => archiveVisible(item) && item.folderKey === input.parentFolderKey).map(documentView)
         : undefined;
       result = {
         folders: await Promise.all(values.slice(offset, offset + limit).map((value) => folderView(value, d))),
@@ -968,7 +1017,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         preflight: async () => { await folder(item.folderKey, 'moderator', false); },
         run: async (mutationRepository: ContentRepository) => {
           const current = await folder(item.folderKey, 'moderator', false);
-          if (current.mutationPolicy === 'system-container' && (tool === 'folder.rename' || item.name !== undefined || item.description !== undefined || item.coverImageKey !== undefined)) fail('CONTENT_FORBIDDEN', 'System container folder metadata is managed by the system.', tool, 'update', current.key);
+          if (managedFolder(current) && (tool === 'folder.rename' || item.name !== undefined || item.description !== undefined || item.coverImageKey !== undefined)) fail('CONTENT_FORBIDDEN', 'Managed folder metadata is read-only.', tool, 'update', current.key);
           if (item.coverImageKey && !await d.getFolderCoverImage(current.scopeKey, item.coverImageKey)) fail('CONTENT_NOT_FOUND', 'Folder cover image was not found in this scope.', tool, 'read', item.coverImageKey);
           const changesEmbedding = item.name !== undefined || item.description !== undefined;
           const name = item.name ?? current.name;
@@ -990,18 +1039,19 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         key: item.folderKey,
         preflight: async () => {
           const source = await folder(item.folderKey, 'admin', false);
-          if (source.mutationPolicy === 'system-container') fail('CONTENT_FORBIDDEN', 'System container folders cannot be moved.', tool, 'update', source.key);
+          if (managedFolder(source)) fail('CONTENT_FORBIDDEN', 'Managed folders cannot be moved.', tool, 'update', source.key);
           const all = await foldersIn(source.scopeKey);
-          await forbidSystemMailInFolders(source.scopeKey, new Set([source.key, ...descendants(all, source.key).map((child) => child.key)]), 'move');
+          await forbidManagedInFolders(source.scopeKey, new Set([source.key, ...descendants(all, source.key).map((child) => child.key)]), 'move');
           if (!item.targetParentFolderKey) return;
           const target = await folder(item.targetParentFolderKey, 'admin', false);
+          if (managedFolder(target)) fail('CONTENT_FORBIDDEN', 'Managed folders cannot contain moved folders.', tool, 'update', target.key);
           if (source.scopeKey !== target.scopeKey) fail('FOLDER_MOVE_FORBIDDEN', 'Cross-scope folder moves are forbidden.', tool, 'update', source.key);
           if (target.key === source.key || descendants(all, source.key).some((child) => child.key === target.key)) fail('FOLDER_CYCLE_DETECTED', 'Folder move would create a cycle.', tool, 'update', source.key);
         },
         run: async (mutationRepository: ContentRepository) => {
           const source = await folder(item.folderKey, 'admin', false, mutationRepository);
           const all = await mutationRepository.listFolders(source.scopeKey, true);
-          await forbidSystemMailInFolders(source.scopeKey, new Set([source.key, ...descendants(all, source.key).map((child) => child.key)]), 'move', mutationRepository);
+          await forbidManagedInFolders(source.scopeKey, new Set([source.key, ...descendants(all, source.key).map((child) => child.key)]), 'move', mutationRepository);
           const moved = await mutationRepository.updateFolder(source.key, {
             parentFolderKey: item.targetParentFolderKey,
             updatedAt: now(),
@@ -1015,11 +1065,12 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         key: item.folderKey,
         run: async () => {
           const source = await folder(item.folderKey, 'viewer', false);
-          if (source.mutationPolicy === 'system-container') fail('CONTENT_FORBIDDEN', 'System container folders cannot be copied.', tool, 'copy', source.key);
+          if (managedFolder(source)) fail('CONTENT_FORBIDDEN', 'Managed folders cannot be copied.', tool, 'copy', source.key);
           const sourceScopeFolders = await foldersIn(source.scopeKey);
           const sourceFolders = [source, ...descendants(sourceScopeFolders, source.key)];
-          await forbidSystemMailInFolders(source.scopeKey, new Set(sourceFolders.map((current) => current.key)), 'copy');
+          await forbidManagedInFolders(source.scopeKey, new Set(sourceFolders.map((current) => current.key)), 'copy');
           const target = await location(item.targetScopeKey, item.targetParentFolderKey, 'moderator');
+          if (target && managedFolder(target)) fail('CONTENT_FORBIDDEN', 'Managed folders cannot contain copied folders.', tool, 'copy', target.key);
           const rootName = item.newName ?? source.name;
           const sourceFolderKeys = new Set(sourceFolders.map((candidate) => candidate.key));
           const sourceDocuments = (await repo.listDocuments(source.scopeKey)).filter((candidate) => candidate.folderKey && sourceFolderKeys.has(candidate.folderKey));
@@ -1144,9 +1195,9 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         key,
         preflight: async () => {
           const root = await folder(key, 'owner', true);
-          if (root.mutationPolicy === 'system-container') fail('CONTENT_FORBIDDEN', 'System container folders cannot be deleted.', tool, 'delete', key);
+          if (managedFolder(root)) fail('CONTENT_FORBIDDEN', 'Managed folders cannot be deleted.', tool, 'delete', key);
           const all = await foldersIn(root.scopeKey, true);
-          await forbidSystemMailInFolders(root.scopeKey, new Set([root.key, ...descendants(all, root.key).map((child) => child.key)]), 'delete');
+          await forbidManagedInFolders(root.scopeKey, new Set([root.key, ...descendants(all, root.key).map((child) => child.key)]), 'delete');
           if (root._internalDeletion) {
             const manifest = root._internalDeletion;
             if (input.atomic) fail('CONTENT_CONFLICT', 'Atomic folder deletion cannot resume an existing deletion manifest.', tool, 'transaction', key);
@@ -1164,8 +1215,8 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             const affected = input.recursive ? [candidate, ...children] : [candidate];
             const affectedKeys = new Set(affected.map((item) => item.key));
             const documents = (await mutationRepository.listDocuments(candidate.scopeKey, true)).filter((item) => item.folderKey !== undefined && affectedKeys.has(item.folderKey));
-            const systemMail = documents.find(isSystemManagedMailDocument);
-            if (systemMail) forbidSystemMailMutation(systemMail, 'delete');
+            const managed = documents.find((item) => managedDocument(item) || isSystemManagedMailDocument(item));
+            if (managed) forbidManagedDocumentMutation(managed, 'delete');
             if (!input.recursive && children.length > 0) fail('FOLDER_NOT_EMPTY', 'Folder is not empty.', tool, 'delete', key);
             if (documents.length > 0) fail('CONTENT_CONFLICT', 'Atomic folder deletion is unavailable when storage objects are involved.', tool, 'storage', key);
             for (const item of affected) {
@@ -1211,8 +1262,8 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
               const frozen = input.recursive ? [candidate, ...children] : [candidate];
               const frozenKeys = new Set(frozen.map((item) => item.key));
               const ownedDocuments = (await bound.listDocuments(candidate.scopeKey, true)).filter((item) => item.folderKey !== undefined && frozenKeys.has(item.folderKey));
-              const systemMail = ownedDocuments.find(isSystemManagedMailDocument);
-              if (systemMail) forbidSystemMailMutation(systemMail, 'delete');
+              const managed = ownedDocuments.find((item) => managedDocument(item) || isSystemManagedMailDocument(item));
+              if (managed) forbidManagedDocumentMutation(managed, 'delete');
               if (!input.recursive && (children.length > 0 || ownedDocuments.length > 0)) fail('FOLDER_NOT_EMPTY', 'Folder is not empty.', tool, 'delete', key);
               if (ownedDocuments.length > 0 && input.atomic) fail('CONTENT_CONFLICT', 'Atomic folder deletion is unavailable when storage objects are involved.', tool, 'storage', key);
               for (const item of frozen) {
@@ -1288,7 +1339,8 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       })), input.atomic, repo);
     } else if (tool === 'document.parse') {
       await roleFor(input.scopeKey, 'moderator');
-      await location(input.scopeKey, input.folderKey, 'moderator');
+      const target = await location(input.scopeKey, input.folderKey, 'moderator');
+      if (target && managedFolder(target)) fail('CONTENT_FORBIDDEN', 'Managed folders cannot contain generic documents.', tool, 'insert', target.key);
       const processingLogger = dependencies.ingestion?.logger;
       const processingInput = input.idempotencyKey ? {
         ...input,
@@ -1308,7 +1360,8 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       });
       result = { document: documentView(processed.document) };
     } else if (tool === 'document.scan') {
-      await location(input.scopeKey, input.folderKey, 'moderator');
+      const target = await location(input.scopeKey, input.folderKey, 'moderator');
+      if (target && managedFolder(target)) fail('CONTENT_FORBIDDEN', 'Managed folders cannot contain generic documents.', tool, 'insert', target.key);
       const processingInput = { ...input, idempotencyKey: input.idempotencyKey ? createHash('sha256').update(member.user.key).update('\0').update(input.idempotencyKey).digest('hex') : invocationKey };
       const scan = dependencies.scanDocument ?? (await import('@/lib/ai/document-scanning')).scanDocumentImages;
       const deterministicKey = (await import('@/lib/ai/document-processing')).documentKeyForRequest(input.scopeKey, input.folderKey, processingInput.idempotencyKey);
@@ -1360,7 +1413,8 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         }
       }
     } else if (tool === 'document.create') {
-      await location(input.scopeKey, input.folderKey, 'moderator');
+      const target = await location(input.scopeKey, input.folderKey, 'moderator');
+      if (target && managedFolder(target)) fail('CONTENT_FORBIDDEN', 'Managed folders cannot contain generic documents.', tool, 'insert', target.key);
       const key = d.id();
       const transformed = await representations(input.content, input.name, key, input.scopeKey);
       const timestamp = now();
@@ -1387,7 +1441,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           return {
             document: {
               ...documentView(current),
-              ...(include.includes('content') ? { content: current.content } : {}),
+               ...(include.includes('content') ? { content: publicDocumentContent(current) } : {}),
               ...(include.includes('embedding') ? { embedding: current.embedding } : {}),
               ...(parent ? { folder: await folderView(parent, d) } : {}),
               ...(include.includes('shares') ? { shares: (await repo.listShares(current.scopeKey, [current.key])).map(shareView) } : {}),
@@ -1400,7 +1454,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
     } else if (tool === 'document.list') {
       const parent = await location(input.scopeKey, input.folderKey, 'viewer');
       const values = (await repo.listDocuments(input.scopeKey))
-        .filter((item) => !item._internalDeletion && item.folderKey === parent?.key && (!input.extensions || item.extension !== undefined && input.extensions.includes(item.extension)));
+        .filter((item) => archiveVisible(item) && !item._internalDeletion && item.folderKey === parent?.key && (!input.extensions || item.extension !== undefined && input.extensions.includes(item.extension)));
       const sort = input.sort ?? { field: 'name', direction: 'asc' };
       values.sort((left: any, right: any) => String(left[sort.field]).localeCompare(String(right[sort.field])) * (sort.direction === 'asc' ? 1 : -1));
       const offset = input.cursor ? Number(Buffer.from(input.cursor, 'base64url').toString()) || 0 : 0;
@@ -1414,7 +1468,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         key,
         run: async () => {
           const current = await document(key, 'viewer', false);
-          return { documentKey: key, title: current.name, content: current.content };
+           return { documentKey: key, title: current.name, content: publicDocumentContent(current) };
         },
       })), false, repo);
     } else if (tool === 'document.update') {
@@ -1425,7 +1479,8 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         preflight: async () => { await document(item.documentKey, 'moderator', false); },
         run: async (mutationRepository: ContentRepository) => {
           const current = await document(item.documentKey, 'moderator', false, mutationRepository);
-          forbidSystemMailMutation(current, 'update');
+          if (managedDocument(current) && (item.content !== undefined || item.createVersion)) forbidManagedDocumentMutation(current, 'update');
+          if (!managedDocument(current)) forbidManagedDocumentMutation(current, 'update');
           if (item.expectedUpdatedAt && current.updatedAt !== item.expectedUpdatedAt) fail('DOCUMENT_VERSION_CONFLICT', 'Document changed after it was read.', tool, 'update', current.key);
           const hasRepresentation = item.content !== undefined;
           const transformed = hasRepresentation ? await representations(item.content, current.name, current.key, current.scopeKey) : undefined;
@@ -1464,7 +1519,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         preflight: async () => { await document(item.documentKey, 'moderator', false); },
         run: async (mutationRepository: ContentRepository) => {
           const current = await document(item.documentKey, 'moderator', false, mutationRepository);
-          forbidSystemMailMutation(current, 'rename');
+          forbidManagedDocumentMutation(current, 'rename');
           const semantics = await generatedSemantics(item.name, current.content, current.key, current.scopeKey);
           const renamed = await mutationRepository.updateDocument(current.key, { name: item.name, ...semantics, updatedAt: nextUpdatedAt(current.updatedAt) });
           return { document: documentView(renamed) };
@@ -1475,13 +1530,14 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         key: item.documentKey,
         preflight: async () => {
           const source = await document(item.documentKey, 'admin', false);
-          forbidSystemMailMutation(source, 'move');
-          await location(item.targetScopeKey, item.targetFolderKey, 'admin');
+          forbidManagedDocumentMutation(source, 'move');
+          const target = await location(item.targetScopeKey, item.targetFolderKey, 'admin');
+          if (target && managedFolder(target)) fail('CONTENT_FORBIDDEN', 'Managed folders cannot contain moved documents.', tool, 'update', target.key);
           if (source.scopeKey !== item.targetScopeKey) fail('FOLDER_MOVE_FORBIDDEN', 'Cross-scope document moves are not supported.', tool, 'update', source.key);
         },
         run: async (mutationRepository: ContentRepository) => {
           const current = await document(item.documentKey, 'admin', false, mutationRepository);
-          forbidSystemMailMutation(current, 'move');
+          forbidManagedDocumentMutation(current, 'move');
           const moved = await mutationRepository.updateDocument(current.key, { folderKey: item.targetFolderKey, updatedAt: now() });
           return { document: documentView(moved) };
         },
@@ -1492,8 +1548,9 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         key: item.documentKey,
         run: async () => {
           const source = await document(item.documentKey, 'viewer', false);
-          forbidSystemMailMutation(source, 'copy');
+          forbidManagedDocumentMutation(source, 'copy');
           const target = await location(item.targetScopeKey, item.targetFolderKey, 'moderator');
+          if (target && managedFolder(target)) fail('CONTENT_FORBIDDEN', 'Managed folders cannot contain copied documents.', tool, 'copy', target.key);
           const key = d.id();
           const name = item.newName ?? source.name;
           const storageKey = source.storageKey && source.extension
@@ -1573,7 +1630,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         preflight: async () => {
           const generatedByPrincipal = linkedBindings.some((binding) => binding.documentKey === key && binding.createdByKey === member.user.key);
           const current = await document(key, generatedByPrincipal ? 'moderator' : 'owner', true);
-          forbidSystemMailMutation(current, 'delete');
+          forbidManagedDocumentMutation(current, 'delete');
           if (current.isFavorite) fail('CONTENT_CONFLICT', 'Unfavorite the document before deleting it.', tool, 'delete', key);
         },
         run: async () => {
@@ -1583,7 +1640,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           let current = await repo.transaction(async (bound) => {
             const candidate = await bound.getDocument(key);
             if (!candidate) fail('CONTENT_NOT_FOUND', 'Document was not found.', tool, 'read', key);
-            forbidSystemMailMutation(candidate, 'delete');
+            forbidManagedDocumentMutation(candidate, 'delete');
             if (candidate._internalDeletion) {
               if (candidate._internalDeletion.kind !== 'document') fail('CONTENT_CONFLICT', 'A different deletion is already pending.', tool, 'delete', key);
               return candidate;
@@ -1702,12 +1759,12 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       result = await batch(tool, input.shares.map((item: any) => ({
         key: item.documentKey,
         preflight: async () => {
-          forbidSystemMailMutation(await document(item.documentKey, 'moderator', false), 'share');
+          forbidManagedDocumentMutation(await document(item.documentKey, 'moderator', false), 'share');
           if (item.expiresAt && item.expiresAt <= now()) fail('DOCUMENT_SHARE_INVALID', 'Share expiry must be in the future.', tool, 'insert', item.documentKey);
         },
         run: async () => {
           const current = await document(item.documentKey, 'moderator', false);
-          forbidSystemMailMutation(current, 'share');
+          forbidManagedDocumentMutation(current, 'share');
           const token = Buffer.from(d.random(32)).toString('base64url');
           const timestamp = now();
           const share = await repo.insertShare({
@@ -1732,11 +1789,11 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           if (input.shareKeys) {
             const share = await repo.getShare(key);
             if (!share) fail('CONTENT_NOT_FOUND', 'Share was not found.', tool, 'read', key);
-            forbidSystemMailMutation(await document(share.documentKey, 'viewer'), 'unshare', key);
+            forbidManagedDocumentMutation(await document(share.documentKey, 'viewer'), 'unshare', key);
             await roleFor(share.scopeKey, 'moderator', key);
           } else {
             const current = await document(key, 'moderator');
-            forbidSystemMailMutation(current, 'unshare');
+            forbidManagedDocumentMutation(current, 'unshare');
             const shares = await repo.listShares(current.scopeKey, [key], { includeExpired: true, includeRevoked: true });
             if (shares.length === 0) fail('CONTENT_NOT_FOUND', 'Document has no shares to revoke.', tool, 'read', key);
           }
@@ -1746,11 +1803,11 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           if (input.shareKeys) {
             const share = await repo.getShare(key);
             if (!share) fail('CONTENT_NOT_FOUND', 'Share was not found.', tool, 'read', key);
-            forbidSystemMailMutation(await document(share.documentKey, 'viewer', false, mutationRepository), 'unshare', key);
+            forbidManagedDocumentMutation(await document(share.documentKey, 'viewer', false, mutationRepository), 'unshare', key);
             return { share: shareView(await mutationRepository.updateShare(key, { revokedAt: timestamp, updatedAt: timestamp })) };
           }
           const current = await document(key, 'moderator', false, mutationRepository);
-          forbidSystemMailMutation(current, 'unshare');
+          forbidManagedDocumentMutation(current, 'unshare');
           const shares = await repo.listShares(current.scopeKey, [key], { includeExpired: true, includeRevoked: true });
           const revoked = [];
           for (const share of shares) revoked.push(shareView(await mutationRepository.updateShare(share.key, { revokedAt: timestamp, updatedAt: timestamp })));
@@ -1769,10 +1826,10 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
     } else if (tool === 'document.create-version') {
       result = await batch(tool, input.documentKeys.map((key: string) => ({
         key,
-        preflight: async () => { forbidSystemMailMutation(await document(key, 'moderator', false), 'create-version'); },
+        preflight: async () => { forbidManagedDocumentMutation(await document(key, 'moderator', false), 'create-version'); },
         run: async (mutationRepository: ContentRepository) => {
           const current = await document(key, 'moderator', false, mutationRepository);
-          forbidSystemMailMutation(current, 'create-version');
+          forbidManagedDocumentMutation(current, 'create-version');
           const content = input.contents?.[key] ?? current.content;
           const version = await mutationRepository.createVersion({
             scopeKey: current.scopeKey,
@@ -1801,14 +1858,14 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       if (!repo.getAudioVersion || !repo.updateAudioPlayback) fail('CONTENT_CONFLICT', 'Document audio playback state is unavailable.', tool, 'update', input.audioVersionKey);
       const audio = await repo.getAudioVersion(input.audioVersionKey);
       if (!audio) fail('CONTENT_NOT_FOUND', 'Audio version was not found.', tool, 'update', input.audioVersionKey);
-      forbidSystemMailMutation(await document(audio.documentKey, 'viewer', false), 'update-playback', input.audioVersionKey);
+      forbidManagedDocumentMutation(await document(audio.documentKey, 'viewer', false), 'update-playback', input.audioVersionKey);
       if (input.playbackPositionMs > audio.durationMs) fail('CONTENT_INVALID_INPUT', 'Playback position cannot exceed audio duration.', tool, 'update', input.audioVersionKey);
       const updated = await repo.updateAudioPlayback(audio.scopeKey, audio.key, input.playbackPositionMs);
       if (!updated) fail('CONTENT_CONFLICT', 'Audio playback state could not be updated.', tool, 'update', input.audioVersionKey);
       result = { audioVersionKey: updated.key, documentKey: updated.documentKey, playbackPositionMs: updated.playbackPositionMs };
     } else if (tool === 'document.audio.playback.clear') {
       const current = await document(input.documentKey, 'viewer', false);
-      forbidSystemMailMutation(current, 'clear-playback');
+      forbidManagedDocumentMutation(current, 'clear-playback');
       if (!repo.clearCurrentAudioVersion) fail('CONTENT_CONFLICT', 'Document audio playback state is unavailable.', tool, 'update', input.documentKey);
       await repo.clearCurrentAudioVersion(current.scopeKey, current.key);
       result = { documentKey: current.key };
@@ -1853,7 +1910,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         key: item.documentKey,
         preflight: async () => {
           const current = await document(item.documentKey, 'moderator', false);
-          forbidSystemMailMutation(current, 'restore-version');
+          forbidManagedDocumentMutation(current, 'restore-version');
           const rawVersion = await repo.getVersion(item.versionKey);
           const version = rawVersion ? documentVersionSchema.safeParse(rawVersion) : null;
           if (!version?.success || version.data.documentKey !== current.key || version.data.scopeKey !== current.scopeKey) {
@@ -1862,7 +1919,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         },
         run: async (mutationRepository: ContentRepository) => {
           const current = await document(item.documentKey, 'moderator', false, mutationRepository);
-          forbidSystemMailMutation(current, 'restore-version');
+          forbidManagedDocumentMutation(current, 'restore-version');
           const version = documentVersionSchema.parse(await mutationRepository.getVersion(item.versionKey));
           let backup: DocumentVersion | undefined;
           if (item.createBackupVersion) {
@@ -1894,13 +1951,13 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           const version = await repo.getVersion(key);
           if (!version) fail('CONTENT_NOT_FOUND', 'Version was not found.', tool, 'read', key);
           const current = await document(version.documentKey, 'owner', true);
-          forbidSystemMailMutation(current, 'delete-version', key);
+          forbidManagedDocumentMutation(current, 'delete-version', key);
           if (current._internalDeletion) fail('CONTENT_CONFLICT', 'Document deletion is already pending.', tool, 'delete', key);
         },
         run: async (mutationRepository: ContentRepository) => {
           const selected = await repo.getVersion(key);
           if (!selected) fail('CONTENT_NOT_FOUND', 'Version was not found.', tool, 'read', key);
-          forbidSystemMailMutation(await document(selected.documentKey, 'owner', true, mutationRepository), 'delete-version', key);
+          forbidManagedDocumentMutation(await document(selected.documentKey, 'owner', true, mutationRepository), 'delete-version', key);
           if (input.atomic) await mutationRepository.deleteVersion(selected.key);
           else {
             if (!repo.transaction) fail('CONTENT_CONFLICT', 'Transaction-bound version deletion is unavailable.', tool, 'transaction', key);
@@ -1939,6 +1996,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
        })), false, repo);
     } else if (tool === 'document.topics') {
       const current = await document(input.documentKey, 'viewer', false);
+      if (managedDocument(current)) forbidManagedDocumentMutation(current, 'generate-topics');
       const generated = await action('text.topics', {
         systemPrompt: 'Identify the document\'s distinct primary topics. Return strict JSON only in the form {"topics":["topic"]}. Include no more than 10 concise topic strings, with no duplicates or commentary.',
         messages: [{ role: 'user', content: [{ type: 'text', text: `Title: ${current.name}\n\n${current.content}` }] }],
@@ -1957,7 +2015,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       if (input.atomic && input.persist) fail('CONTENT_CONFLICT', 'Atomic persisted summaries are unavailable because generation is an external side effect.', tool, 'text.summarize');
       const sources: Document[] = [];
       for (const key of input.documentKeys) sources.push(await document(key, input.persist ? 'moderator' : 'viewer', false));
-      if (input.persist) for (const source of sources) forbidSystemMailMutation(source, 'persist-summary');
+      for (const source of sources) if (managedDocument(source)) forbidManagedDocumentMutation(source, 'generate-summary');
       const generateSummary = async (sourceDocuments: Document[]) => generateDocumentSummary({ documents: sourceDocuments, topic: input.topic, style: input.style, language: input.language }, async (request) => z.string().parse((await action('text.summarize', { systemPrompt: request.systemPrompt, messages: [{ role: 'user', content: [{ type: 'text', text: request.text }] }], options: { temperature: request.temperature, maxTokens: request.maxTokens } }, sourceDocuments[0]!.key, sourceDocuments[0]!.scopeKey)).text));
       if (input.combine) {
         const text = await generateSummary(sources);
@@ -1988,7 +2046,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           key: item.documentKey,
           run: async () => {
             const current = await document(item.documentKey, item.mode === 'preview' ? 'viewer' : 'moderator', false);
-            if (item.mode !== 'preview') forbidSystemMailMutation(current, item.mode);
+            forbidManagedDocumentMutation(current, item.mode);
             const instruction = tool === 'document.translate'
                 ? `Translate to ${input.targetLanguage}${input.sourceLanguage ? ` from ${input.sourceLanguage}` : ''}. ${input.preserveFormatting ? 'Preserve headings, lists, tables, paragraph boundaries, and inline emphasis.' : 'Return clear translated prose.'}`
                 : `${item.instruction}${item.tone ? ` Tone: ${item.tone}.` : ''}${item.audience ? ` Audience: ${item.audience}.` : ''}${item.length ? ` Length: ${item.length}.` : ''}`;
@@ -2046,7 +2104,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       const folders = matches.folders
         .filter(({ folder: current }) => current.scopeKey === source.scopeKey && current.key !== input.folderKey && activeFolderKeys.includes(current.key) && !current._internalDeletion)
         .slice(0, 10);
-      const activeDocument = (current: Document) => current.scopeKey === source.scopeKey && current.key !== input.documentKey && !current._internalDeletion && (!current.folderKey || activeFolderKeys.includes(current.folderKey));
+      const activeDocument = (current: Document) => archiveVisible(current) && current.scopeKey === source.scopeKey && current.key !== input.documentKey && !current._internalDeletion && (!current.folderKey || activeFolderKeys.includes(current.folderKey));
       const documents = matches.documents.filter(({ document: current }) => activeDocument(current) && !current.extension).slice(0, 10);
       const files = matches.files.filter(({ document: current }) => activeDocument(current) && Boolean(current.extension)).slice(0, 10);
       result = {
@@ -2073,8 +2131,10 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       const store = dependencies.searchQueries ?? (await import('@/lib/db/content-search-queries.node')).contentSearchQueries;
       const history = dependencies.userSearches ?? (await import('@/lib/user-searches/service')).getDefaultUserSearchService();
       const recordSearch = async (output: unknown) => {
-        await store.record({ key: d.id(), actorKey: member.user.key, scopeKey: input.scopeKey, query: input.query, normalizedQuery, folderKey, includeDescendants, cacheVersion, output, now: now() });
-        if (input.recordHistory) await history.record(member.user.key, input.query);
+        await Promise.allSettled([
+          store.record({ key: d.id(), actorKey: member.user.key, scopeKey: input.scopeKey, query: input.query, normalizedQuery, folderKey, includeDescendants, cacheVersion, output, now: now() }),
+          ...(input.recordHistory ? [history.record(member.user.key, input.query)] : []),
+        ]);
       };
       const [allFolders, allDocuments] = await Promise.all([repo.listFolders(input.scopeKey), repo.listDocuments(input.scopeKey)]);
       let folderKeys: string[] | undefined;
@@ -2092,7 +2152,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       const folderRevision = revisionFolders.map((item) => `${item.key}:${item.parentFolderKey ?? ''}:${item.updatedAt}:${item.isFavorite ? 'favorite' : ''}:${item._internalDeletion ? 'pending' : ''}`);
       const documentRevision = revisionDocuments.map((item) => `${item.key}:${item.name}:${item.folderKey ?? ''}:${item.semanticContentHash ?? ''}:${item.isFavorite ? 'favorite' : ''}:${item._internalDeletion ? 'pending' : ''}`);
       const sourceRevision = createHash('sha256').update([...folderRevision, ...documentRevision].sort().join('\n')).digest('hex');
-      const cached = await store.get({ actorKey: member.user.key, scopeKey: input.scopeKey, normalizedQuery, folderKey, includeDescendants, cacheVersion });
+      const cached = await store.get({ actorKey: member.user.key, scopeKey: input.scopeKey, normalizedQuery, folderKey, includeDescendants, cacheVersion }).catch(() => null);
       const cachedValue = cached?.output as { result?: unknown; sourceRevision?: string; minimumScore?: number; includeSummaries?: boolean; replayable?: boolean } | undefined;
       const reusable = Boolean(cachedValue?.replayable && cachedValue.result && cachedValue.sourceRevision === sourceRevision && cachedValue.minimumScore === input.minimumScore && cachedValue.includeSummaries === input.includeSummaries);
       if (reusable) {
@@ -2112,14 +2172,14 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         const activeFolders = [];
         for (const current of allFolders) {
           if (folderKeys && !folderKeys.includes(current.key)) continue;
-          if (current._internalDeletion || !await activeFolderHierarchy(current.key, current.scopeKey)) continue;
+          if (!archiveVisible(current) || current._internalDeletion || !await activeFolderHierarchy(current.key, current.scopeKey)) continue;
           const score = scoreText(`${current.name}\n${current.description ?? ''}`);
           if (score >= input.minimumScore) activeFolders.push({ folder: current, score });
         }
         const activeDocuments = [];
         for (const current of allDocuments) {
           if (folderKeys && (!current.folderKey || !folderKeys.includes(current.folderKey))) continue;
-          if (current._internalDeletion || !await activeFolderHierarchy(current.folderKey, current.scopeKey)) continue;
+          if (!archiveVisible(current) || current._internalDeletion || !await activeFolderHierarchy(current.folderKey, current.scopeKey)) continue;
           const score = scoreText(`${current.name}\n${current.content}`);
           if (score >= input.minimumScore) activeDocuments.push({ document: current, score });
         }
@@ -2137,21 +2197,21 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
               repo.semanticSearchFolders?.({ embedding: queryEmbedding, authorizedScopeKeys: [input.scopeKey], ...(folderKeys ? { folderKeys } : {}), minScore: input.minimumScore, limit: 20 }) ?? [],
             ]);
             for (const match of folderMatches) {
-              if (match.folder.scopeKey !== input.scopeKey || folderKeys && !folderKeys.includes(match.folder.key) || match.folder._internalDeletion || !await activeFolderHierarchy(match.folder.key, match.folder.scopeKey)) continue;
+              if (!archiveVisible(match.folder) || match.folder.scopeKey !== input.scopeKey || folderKeys && !folderKeys.includes(match.folder.key) || match.folder._internalDeletion || !await activeFolderHierarchy(match.folder.key, match.folder.scopeKey)) continue;
               const previous = activeFolders.find(({ folder: current }) => current.key === match.folder.key);
               if (previous) previous.score = Math.max(previous.score, match.score);
               else activeFolders.push(match);
             }
             for (const match of documentMatches) {
-              if (match.document.scopeKey !== input.scopeKey || folderKeys && (!match.document.folderKey || !folderKeys.includes(match.document.folderKey)) || match.document._internalDeletion || !await activeFolderHierarchy(match.document.folderKey, match.document.scopeKey)) continue;
+              if (!archiveVisible(match.document) || match.document.scopeKey !== input.scopeKey || folderKeys && (!match.document.folderKey || !folderKeys.includes(match.document.folderKey)) || match.document._internalDeletion || !await activeFolderHierarchy(match.document.folderKey, match.document.scopeKey)) continue;
               const previous = activeDocuments.find(({ document: current }) => current.key === match.document.key);
               if (previous) previous.score = Math.max(previous.score, match.score);
               else activeDocuments.push(match);
             }
           }
         }
-        const folders = activeFolders.sort((left, right) => right.score - left.score || left.folder.key.localeCompare(right.folder.key)).slice(0, 4).map(({ folder: current, score }) => ({ key: current.key, scopeKey: current.scopeKey, ...(current.parentFolderKey ? { parentFolderKey: current.parentFolderKey } : {}), name: current.name, ...(current.description ? { description: current.description } : {}), isFavorite: Boolean(current.isFavorite), score: Math.max(0, Math.min(1, score)) }));
-        const documents = activeDocuments.sort((left, right) => right.score - left.score || left.document.key.localeCompare(right.document.key)).slice(0, 10).map(({ document: current, score }) => ({ documentKey: current.key, scopeKey: current.scopeKey, ...(current.folderKey ? { folderKey: current.folderKey } : {}), name: current.name, ...(current.extension ? { extension: current.extension } : {}), isFavorite: Boolean(current.isFavorite), score: Math.max(0, Math.min(1, score)) }));
+        const folders = activeFolders.sort((left, right) => right.score - left.score || left.folder.key.localeCompare(right.folder.key)).slice(0, 4).map(({ folder: current, score }) => ({ key: current.key, scopeKey: current.scopeKey, ...(current.parentFolderKey ? { parentFolderKey: current.parentFolderKey } : {}), name: current.name, ...(current.description ? { description: current.description } : {}), isFavorite: Boolean(current.isFavorite), managed: managedFolder(current), score: Math.max(0, Math.min(1, score)) }));
+        const documents = activeDocuments.sort((left, right) => right.score - left.score || left.document.key.localeCompare(right.document.key)).slice(0, 10).map(({ document: current, score }) => ({ documentKey: current.key, scopeKey: current.scopeKey, ...(current.folderKey ? { folderKey: current.folderKey } : {}), name: current.name, ...(current.extension ? { extension: current.extension } : {}), isFavorite: Boolean(current.isFavorite), managed: managedDocument(current), score: Math.max(0, Math.min(1, score)) }));
         const freshResult = { query: input.query, folders, documents, cached: false };
         await recordSearch({ result: freshResult, sourceRevision, minimumScore: input.minimumScore, includeSummaries: false, replayable: true });
         result = freshResult;
@@ -2165,13 +2225,13 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         ]);
         const folders = [];
         for (const match of folderMatches) {
-          if (match.score < input.minimumScore || match.folder.scopeKey !== input.scopeKey || folderKeys && !folderKeys.includes(match.folder.key) || match.folder._internalDeletion || !await activeFolderHierarchy(match.folder.key, match.folder.scopeKey)) continue;
-          folders.push({ key: match.folder.key, scopeKey: match.folder.scopeKey, ...(match.folder.parentFolderKey ? { parentFolderKey: match.folder.parentFolderKey } : {}), name: match.folder.name, ...(match.folder.description ? { description: match.folder.description } : {}), isFavorite: Boolean(match.folder.isFavorite), score: Math.max(0, Math.min(1, match.score)) });
+          if (match.score < input.minimumScore || !archiveVisible(match.folder) || match.folder.scopeKey !== input.scopeKey || folderKeys && !folderKeys.includes(match.folder.key) || match.folder._internalDeletion || !await activeFolderHierarchy(match.folder.key, match.folder.scopeKey)) continue;
+          folders.push({ key: match.folder.key, scopeKey: match.folder.scopeKey, ...(match.folder.parentFolderKey ? { parentFolderKey: match.folder.parentFolderKey } : {}), name: match.folder.name, ...(match.folder.description ? { description: match.folder.description } : {}), isFavorite: Boolean(match.folder.isFavorite), managed: managedFolder(match.folder), score: Math.max(0, Math.min(1, match.score)) });
           if (folders.length === 4) break;
         }
         const selectedDocuments = [];
         for (const match of documentMatches) {
-          if (match.score >= input.minimumScore && match.document.scopeKey === input.scopeKey && (!folderKeys || match.document.folderKey !== undefined && folderKeys.includes(match.document.folderKey)) && !match.document._internalDeletion && await activeFolderHierarchy(match.document.folderKey, match.document.scopeKey)) selectedDocuments.push(match);
+          if (match.score >= input.minimumScore && archiveVisible(match.document) && match.document.scopeKey === input.scopeKey && (!folderKeys || match.document.folderKey !== undefined && folderKeys.includes(match.document.folderKey)) && !match.document._internalDeletion && await activeFolderHierarchy(match.document.folderKey, match.document.scopeKey)) selectedDocuments.push(match);
           if (selectedDocuments.length === 10) break;
         }
         const documents = [];
@@ -2191,7 +2251,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
               complete = false;
               summary = `This document contains semantically relevant information for "${input.query}".`;
             }
-            return { complete, document: { documentKey: current.key, scopeKey: current.scopeKey, ...(current.folderKey ? { folderKey: current.folderKey } : {}), name: current.name, ...(current.extension ? { extension: current.extension } : {}), isFavorite: Boolean(current.isFavorite), score: Math.max(0, Math.min(1, score)), summary } };
+            return { complete, document: { documentKey: current.key, scopeKey: current.scopeKey, ...(current.folderKey ? { folderKey: current.folderKey } : {}), name: current.name, ...(current.extension ? { extension: current.extension } : {}), isFavorite: Boolean(current.isFavorite), managed: managedDocument(current), score: Math.max(0, Math.min(1, score)), summary } };
           }));
           summariesComplete &&= batch.every(({ complete }) => complete);
           documents.push(...batch.map(({ document }) => document));
@@ -2239,7 +2299,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           return values;
         }))).flat();
         return documents.flatMap((document) => {
-          if (document._internalDeletion) return [];
+          if (!archiveVisible(document) || document._internalDeletion) return [];
           if (folderKeys && (!document.folderKey || !folderKeys.includes(document.folderKey))) return [];
           if (input.filters?.documentKeys && !input.filters.documentKeys.includes(document.key)) return [];
           if (input.filters?.extensions && (!document.extension || !input.filters.extensions.includes(document.extension))) return [];
@@ -2272,7 +2332,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       }
       const collectMatches = async (matches: Array<{ score: number; document: Document; matchedContent?: string }>, source: (typeof resolvedSources)[number]) => {
         for (const match of matches) {
-          if (match.document._internalDeletion) continue;
+          if (!archiveVisible(match.document) || match.document._internalDeletion) continue;
           if (!await activeFolderHierarchy(match.document.folderKey, match.document.scopeKey)) continue;
           const previous = candidates.get(match.document.key);
           if (!previous || match.score > previous.score) candidates.set(match.document.key, { ...match, source: { type: source.type, key: source.key } });
@@ -2322,6 +2382,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             ...(current.extension ? { extension: current.extension } : {}),
             scopeKey: current.scopeKey,
             ...(current.folderKey ? { folderKey: current.folderKey } : {}),
+            managed: managedDocument(current),
             score: normalizedScore,
             matchedSource: source,
             ...(input.include?.includes('snippet') ? { snippet: (matchedContent ?? current.content).slice(0, 300) } : {}),
