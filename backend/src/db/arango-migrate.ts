@@ -23,6 +23,7 @@ import { countryCodeSchema } from '../lib/db/users.node';
 import { retireAiPersistence } from './retire-ai-persistence';
 import { buildPlaceEmbeddingText, buildTripEmbeddingText, TRIP_EMBEDDING_CONTENT_VERSION } from '../lib/travel/semantic-text';
 import { generatedPlaceDetailSchema } from '../lib/db/places.node';
+import { isProviderError, type ProviderError } from '../lib/ai/providers/errors';
 import { buildImageEmbeddingText } from '../lib/image-embedding';
 import { decodeEmailTone, decodeEmailToneContent, emailMessageSemanticText, emailToneSemanticText, encodeEmailToneContent } from '../lib/email-inbox/archive-payloads';
 import { bookGenerationInputSchema } from '../lib/books/schemas';
@@ -855,6 +856,8 @@ export function needsExactSemanticEmbedding(embedding: unknown, dimensions = EMB
     || embedding.every((value) => value === 0);
 }
 
+let deferredSemanticEmbeddingError: ProviderError | null = null;
+
 export async function migrateExactSemanticRecords(targetDb: Database, collectionName: 'folders' | 'images' | 'collections' | 'tags' | 'imageCaptions' | 'visualIdentities' | 'books' | 'bookContexts' | 'bookThemes' | 'bookSources' | 'bookParts' | 'bookChapters' | 'chapterContexts' | 'emailInboxes' | 'emailDrafts' | 'emailTones' | 'emailReplyContext' | 'emailWritingProfiles', embedKeys: readonly string[]) {
   const dimensions = EMBEDDING_DIMENSIONS;
   let after = '';
@@ -885,7 +888,15 @@ export async function migrateExactSemanticRecords(targetDb: Database, collection
           placeName: typeof resource.placeName === 'string' ? resource.placeName : null, placeSummary: typeof resource.placeSummary === 'string' ? resource.placeSummary : null,
         }) : buildEmbeddingText(embedKeys, resource);
         if (!text) throw new Error(`Cannot migrate ${collectionName}: ${String(resource._key)} has no semantic embedding input.`);
-        embedding = await generateEmbedding(text);
+        if (deferredSemanticEmbeddingError) continue;
+        try {
+          embedding = await generateEmbedding(text);
+        } catch (error) {
+          if (!isProviderError(error) || !error.retryable) throw error;
+          deferredSemanticEmbeddingError = error;
+          console.warn(`${collectionName}: semantic embedding migration deferred because ${error.providerId} is unavailable (${error.code}).`);
+          continue;
+        }
       }
       updates.push({ _key: resource._key, _rev: resource._rev, embedding });
     }
@@ -908,7 +919,13 @@ export async function migrateExactSemanticRecords(targetDb: Database, collection
       RETURN 1)
   `, { '@collection': collectionName, dimensions, isImage: collectionName === 'images' });
   const invalid = await verification.next() ?? 0;
-  if (invalid > 0) throw new Error(`${collectionName} exact semantic migration verification failed for ${invalid} row(s).`);
+  if (invalid > 0) {
+    if (deferredSemanticEmbeddingError) {
+      console.warn(`${collectionName}: ${invalid} semantic row(s) remain eligible for retry after the provider recovers.`);
+      return;
+    }
+    throw new Error(`${collectionName} exact semantic migration verification failed for ${invalid} row(s).`);
+  }
 }
 
 export async function dropVerifiedLegacyInboxes(targetDb: Database) {

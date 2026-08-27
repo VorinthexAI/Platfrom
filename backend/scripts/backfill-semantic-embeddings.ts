@@ -3,6 +3,7 @@ import { buildEmbeddingText } from '../src/lib/db/base';
 import { db } from '../src/lib/db/client';
 import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, EMBEDDING_PROVIDER_ID, embedText, embeddingMetadata } from '../src/lib/embeddings';
 import { buildTripEmbeddingText, TRIP_EMBEDDING_CONTENT_VERSION } from '../src/lib/travel/semantic-text';
+import { isProviderError } from '../src/lib/ai/providers/errors';
 
 const BATCH_SIZE = 25;
 const MAX_CATCHUP_PASSES = 5;
@@ -21,6 +22,7 @@ const semanticCollections: SemanticSpec[] = SEMANTIC_COLLECTION_ALLOWLIST.filter
   if (!spec || spec.skipEmbedding || !spec.embedKeys?.length) throw new Error(`Semantic allowlist entry ${name} is not an embedding collection in authoritative specs.`);
   return { name, embedKeys: [...spec.embedKeys], includeMetadata: !['folders', 'documents', 'documentVersions', 'places', 'trips'].includes(name) };
 });
+async function run() {
 await migrateContentDocuments(db);
 await migrateContentVersions(db);
 
@@ -113,3 +115,11 @@ for (const spec of semanticCollections) {
 }
 
 console.log('Semantic embedding backfill complete with final stale verification.');
+}
+
+try {
+  await run();
+} catch (error) {
+  if (!isProviderError(error) || !error.retryable) throw error;
+  console.warn(`Semantic embedding backfill deferred because ${error.providerId} is unavailable (${error.code}).`);
+}

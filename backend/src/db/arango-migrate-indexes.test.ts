@@ -39,6 +39,16 @@ describe('Arango migration indexes', () => {
     expect(needsExactSemanticEmbedding([...embedding.slice(0, -1), Number.NaN])).toBe(true);
   });
 
+  test('defers retryable semantic provider outages without masking data errors', async () => {
+    const migration = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    const backfill = await Bun.file(new URL('../../scripts/backfill-semantic-embeddings.ts', import.meta.url)).text();
+
+    expect(migration).toContain('if (!isProviderError(error) || !error.retryable) throw error;');
+    expect(migration).toContain('remain eligible for retry after the provider recovers');
+    expect(backfill).toContain('Semantic embedding backfill deferred because');
+    expect(backfill).toContain('if (!isProviderError(error) || !error.retryable) throw error;');
+  });
+
   test('retires non-Gmail connector credentials before strict Gmail backfill reads', async () => {
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
     const retire = source.indexOf('await retireUnsupportedEmailConnectors(targetDb)');
