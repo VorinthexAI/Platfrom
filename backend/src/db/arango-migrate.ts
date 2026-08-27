@@ -848,6 +848,13 @@ export async function migrateTripAttachments(targetDb: Database, runTransaction:
   });
 }
 
+export function needsExactSemanticEmbedding(embedding: unknown, dimensions = EMBEDDING_DIMENSIONS) {
+  return !Array.isArray(embedding)
+    || embedding.length !== dimensions
+    || embedding.some((value) => typeof value !== 'number' || !Number.isFinite(value))
+    || embedding.every((value) => value === 0);
+}
+
 export async function migrateExactSemanticRecords(targetDb: Database, collectionName: 'folders' | 'images' | 'collections' | 'tags' | 'imageCaptions' | 'visualIdentities' | 'books' | 'bookContexts' | 'bookThemes' | 'bookSources' | 'bookParts' | 'bookChapters' | 'chapterContexts' | 'emailInboxes' | 'emailDrafts' | 'emailTones' | 'emailReplyContext' | 'emailWritingProfiles', embedKeys: readonly string[]) {
   const dimensions = EMBEDDING_DIMENSIONS;
   let after = '';
@@ -870,8 +877,7 @@ export async function migrateExactSemanticRecords(targetDb: Database, collection
     const updates: Array<Record<string, unknown>> = [];
     for (const resource of resources) {
       let embedding = resource.embedding;
-      const hasEmbeddingMetadata = resource.embeddingProvider !== undefined || resource.embeddingModel !== undefined || resource.embeddingDimensions !== undefined;
-      if ((hasEmbeddingMetadata && (resource.embeddingProvider !== EMBEDDING_PROVIDER_ID || resource.embeddingModel !== EMBEDDING_MODEL || resource.embeddingDimensions !== dimensions)) || !Array.isArray(embedding) || embedding.length !== dimensions || embedding.some((value) => typeof value !== 'number' || !Number.isFinite(value)) || embedding.every((value) => value === 0)) {
+      if (needsExactSemanticEmbedding(embedding, dimensions)) {
         const text = collectionName === 'images' ? buildImageEmbeddingText({
           filename: String(resource.filename ?? ''), caption: String(resource.caption ?? ''),
           city: typeof resource.city === 'string' ? resource.city : null, country: typeof resource.country === 'string' ? resource.country : null,

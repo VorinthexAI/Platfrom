@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { isLegacyIndex, LEGACY_REMOVAL_MARKER, normalizeLegacyDocumentSharePermission } from './arango-migrate-indexes';
 import { stageLegacyDocumentShares } from './content-migration';
-import { collections, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateGeneratedTravelDocuments, migrateImageCaptions, migrateMinimalPlacesAndRetireTrips, migrateModelActionSlugs, migratePlaceReports, migrateProviderIndependentEmailDrafts, migrateRetiredEmailDefaultTones, migrateTripAttachments, migrateTripCreationReceipts, migrateTripGuides, retireMomentumScope, retireTranscriptionDomain, retireUserSettings } from './arango-migrate';
+import { collections, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateGeneratedTravelDocuments, migrateImageCaptions, migrateMinimalPlacesAndRetireTrips, migrateModelActionSlugs, migratePlaceReports, migrateProviderIndependentEmailDrafts, migrateRetiredEmailDefaultTones, migrateTripAttachments, migrateTripCreationReceipts, migrateTripGuides, needsExactSemanticEmbedding, retireMomentumScope, retireTranscriptionDomain, retireUserSettings } from './arango-migrate';
 import { EMBEDDING_DIMENSIONS, LEGACY_EMBEDDING_DIMENSIONS, embeddingMetadata } from '../lib/embeddings';
 import { DOCUMENT_CHUNK_MAX_WORDS, DOCUMENT_MAX_CHUNKS, documentSemanticHash } from '../lib/ai/document-processing/chunking';
 import { RETAINED_MODEL_ACTION_BINDINGS, RETAINED_MODEL_PROVIDER_BINDINGS, RETAINED_MODEL_SLUGS, RETAINED_PROVIDER_SLUGS, retireAiPersistence } from './retire-ai-persistence';
@@ -30,6 +30,15 @@ function migrationDatabase(collection: 'documents' | 'documentVersions', row: Re
 }
 
 describe('Arango migration indexes', () => {
+  test('regenerates only malformed exact semantic vectors', () => {
+    const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, (_, index) => index + 1);
+
+    expect(needsExactSemanticEmbedding(embedding)).toBe(false);
+    expect(needsExactSemanticEmbedding(embedding.slice(1))).toBe(true);
+    expect(needsExactSemanticEmbedding(Array(EMBEDDING_DIMENSIONS).fill(0))).toBe(true);
+    expect(needsExactSemanticEmbedding([...embedding.slice(0, -1), Number.NaN])).toBe(true);
+  });
+
   test('retires non-Gmail connector credentials before strict Gmail backfill reads', async () => {
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
     const retire = source.indexOf('await retireUnsupportedEmailConnectors(targetDb)');
