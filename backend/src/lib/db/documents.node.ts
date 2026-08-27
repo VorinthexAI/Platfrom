@@ -18,6 +18,7 @@ export const documentSchema = z.object({
   extension: documentExtensionSchema.optional(),
   mimeType: z.string().trim().min(1).optional(),
   storageKey: z.string().trim().min(1).optional(),
+  coverImageKey: z.string().cuid().optional(),
   sizeBytes: z.number().int().positive().optional(),
   content: z.string().trim().min(1),
   embedding: currentEmbeddingSchema,
@@ -33,7 +34,7 @@ export const documentSchema = z.object({
   sourceStorageKeys: z.array(z.string().trim().min(1)).max(12).optional(),
   currentVersionKey: z.string().cuid().nullable().optional(),
   mutationPolicy: z.enum(['user', 'system-only']).default('user'),
-  managedPurpose: z.enum(['audio-chapter', 'mail-attachment']).optional(), managedOwnerKey: z.string().cuid().optional(),
+  managedPurpose: z.literal('mail-attachment').optional(), managedOwnerKey: z.string().cuid().optional(),
   archiveVisibility: z.enum(['visible', 'domain-only']).default('visible'),
   isFavorite: z.boolean().default(false),
   _internalDeletion: z.object({

@@ -7,6 +7,9 @@ import { tripPlaceSchema } from './trip-places.node';
 import { tripAttachmentSchema } from './trip-attachments.node';
 import { tripCreationReceiptSchema } from './trip-creation-receipts.node';
 import { generatedDocumentBindingSchema } from './generated-document-bindings.node';
+import { tripGuideSchema } from './trip-guides.node';
+import { placeReferenceSchema } from './place-references.node';
+import { placeHeroMediaSchema } from './place-hero-media.node';
 
 const key = 'cmrnlzf650002qc7k4p5zem5w';
 const otherKey = 'cmrnlzf640001qc7kazsr96k5';
@@ -47,6 +50,12 @@ describe('travel node contracts', () => {
     expect(binding).not.toHaveProperty('_rev');
     expect(generatedDocumentBindingSchema.safeParse({ ...binding, kind: 'report' }).success).toBe(false);
     expect(generatedDocumentBindingSchema.safeParse({ ...binding, requestHash: 'invalid' }).success).toBe(false);
+  });
+  test('validates canonical guide, reference, and hero records independently from copies', () => {
+    const semantic = { embedding, contentChunks: ['Content'], chunkEmbeddings: [embedding], semanticChunkCount: 1, semanticContentHash: 'a'.repeat(64) };
+    expect(tripGuideSchema.parse({ key, scopeKey: otherKey, userKey: key, tripKey: key, name: 'Guide', content: 'Content', ...semantic, idempotencyKey: 'request-1', requestHash: 'b'.repeat(64), createdAt: timestamp, updatedAt: timestamp })).toMatchObject({ tripKey: key });
+    expect(placeReferenceSchema.parse({ key, scopeKey: otherKey, userKey: key, placeKey: key, kind: 'activities', name: 'Activities', content: 'Content', ...semantic, idempotencyKey: 'request-2', requestHash: 'c'.repeat(64), createdAt: timestamp, updatedAt: timestamp })).toMatchObject({ placeKey: key, kind: 'activities' });
+    expect(placeHeroMediaSchema.parse({ key, scopeKey: otherKey, userKey: key, placeKey: key, storageKey: `compass/${otherKey}/place-heroes/${key}/original.png`, contentHash: 'd'.repeat(64), mimeType: 'image/png', sizeBytes: 24, width: 1536, height: 1024, createdAt: timestamp, updatedAt: timestamp })).not.toHaveProperty('imageKey');
   });
   test('hard-deleting a place also removes its trip relations', async () => {
     const source = await Bun.file(new URL('./places.node.ts', import.meta.url)).text();

@@ -6,10 +6,13 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useEffect, useRef, useState } from "react";
 import {
   AccessibilityInfo,
+  Animated,
+  Keyboard,
   KeyboardAvoidingView,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput as NativeTextInput,
   View,
   useWindowDimensions,
 } from "react-native";
@@ -18,15 +21,16 @@ import {
   BottomSheet,
   BottomSheetItem,
 } from "@vorinthex/shared/ui/bottom-sheet";
+import { AiTextEditor } from "@vorinthex/shared/ui/ai-text-editor";
 import { Button } from "@vorinthex/shared/ui/button";
 import { CoreComposer } from "@vorinthex/shared/ui/core-composer";
 import { Slider } from "@vorinthex/shared/ui/slider";
 import { Skeleton } from "@vorinthex/shared/ui/skeleton";
 import { Switch } from "@vorinthex/shared/ui/switch";
+import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 import { useToast } from "@vorinthex/shared/ui/toast";
 import {
-  AscendIcon,
   CheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -46,8 +50,11 @@ import {
 } from "@vorinthex/shared/ui/icons-mobile";
 
 import { ChromeIcon } from "@/components/ChromeIcon";
+import { SearchHistorySheet } from "@/components/SearchHistorySheet";
 import { WorkspaceAppSwitcher } from "@/components/capability/WorkspaceAppSwitcher";
 import { assistantIconSource } from "@/data/capability-icons";
+import { enhanceAppTextForContext, translateAppTextForContext } from "@/lib/app-transformation-client";
+import { languageForCountryCode } from "@/lib/auth-helpers";
 import { useBookPlayback } from "@/lib/book-playback";
 import { restoredBookDraft, retryBookCreateRequestKey, type FailedBookCreate } from "@/lib/book-create-retry";
 import {
@@ -63,18 +70,21 @@ import {
   fetchBooksOverview,
   getBooksContext,
   retryBook,
+  suggestBookGoals,
+  suggestBookTopics,
   type Book,
   type BookChapter,
   type BookDetail,
   type BookStatus,
   type CreateBookInput,
-  type NarratorVoice,
 } from "@/lib/books-client";
 import {
+  deleteContentSearchHistory,
   getContentContext,
   listContentFolderTree,
   searchContentMatches,
   type ContentDocument,
+  type ContentSearchHistoryItem,
 } from "@/lib/content-client";
 import {
   contentFolderStack,
@@ -89,6 +99,13 @@ import {
   patchCachedBook,
   removeCachedBook,
 } from "@/lib/workspace-query-cache";
+import {
+  getUserSearchHistory,
+  promoteCachedUserSearchHistory,
+  removeCachedUserSearchHistory,
+  userSearchHistoryQueryKey,
+} from "@/lib/user-search-history-cache";
+import { useAuthStore } from "@/state/auth";
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
 
 const COLUMNS = 3;
@@ -101,31 +118,16 @@ const ACTIVE_STATUSES: BookStatus[] = [
   "narrating",
   "finalizing",
 ];
-const STATUS_FILTERS: (BookStatus | "all")[] = [
-  "all",
-  "queued",
-  "researching",
-  "planning",
-  "writing",
-  "narrating",
-  "finalizing",
-  "failed",
-  "cancelled",
-  "ready",
-];
 const CHAPTER_OPTIONS = [
-  { count: 10, label: "Short · 10 chapters" },
-  { count: 25, label: "Standard · 25 chapters" },
-  { count: 50, label: "Deep · 50 chapters" },
+  { count: 10, label: "Short" },
+  { count: 25, label: "Standard" },
+  { count: 50, label: "Deep" },
 ] as const;
+const LANGUAGES = ["English", "Swedish", "Spanish", "French", "German", "Portuguese"] as const;
 const SPEEDS = [0.75, 1, 1.25, 1.5, 2] as const;
 const SLEEP_MINUTES = [0, 10, 20, 30, 45, 60] as const;
 const MAX_SOURCE_DOCUMENTS = 50;
-const VOICES: NarratorVoice[] = [
-  { key: "calm", name: "Calm", description: "Measured and reflective" },
-  { key: "clear", name: "Clear", description: "Direct and conversational" },
-  { key: "warm", name: "Warm", description: "Friendly and expressive" },
-];
+const DEFAULT_NARRATOR = { key: "clear" as const, name: "Clear" };
 const TONES = [
   "Clear and practical",
   "Warm and encouraging",
@@ -146,14 +148,21 @@ const GRADIENTS = [
 type LibrarySheet =
   | "actions"
   | "create"
+  | "createTopicCustom"
+  | "createGoal"
+  | "createGoalCustom"
+  | "createKnowledge"
+  | "createDetails"
   | "sources"
   | "filter"
-  | "detail"
+  | "searchHistory"
   | "reader"
   | "sleep"
   | "bookActions"
   | "delete";
 type Draft = CreateBookInput;
+type BriefEditorTarget = "topic" | "goal";
+type BriefTransformation = Readonly<{ target: BriefEditorTarget; action: "enhance" | "translate" }>;
 type PendingRequest = {
   book: Book;
   input: CreateBookInput;
@@ -166,7 +175,7 @@ const INITIAL_DRAFT: Draft = {
   chapterCount: 25,
   language: "English",
   writingTone: TONES[0]!.toString(),
-  narratorVoiceKey: VOICES[0]!.key,
+  narratorVoiceKey: DEFAULT_NARRATOR.key,
   narrationPace: 1,
   archiveDocumentKeys: [],
   chapterImages: true,
@@ -202,13 +211,32 @@ function Cover({ book, index = 0 }: { book: Book; index?: number }) {
       colors={GRADIENTS[index % GRADIENTS.length]!}
       end={{ x: 1, y: 1 }}
       start={{ x: 0, y: 0 }}
-      style={[styles.cover, styles.fallbackCover]}
-    >
-      <AscendIcon size="md" variant="muted" />
-      <Text numberOfLines={4} style={styles.coverTitle}>
-        {book.title}
-      </Text>
-    </LinearGradient>
+      style={styles.cover}
+    />
+  );
+}
+
+function ChapterCard({ chapter, reducedMotion, width, onPress }: { chapter: BookChapter; reducedMotion: boolean; width: number; onPress: () => void }) {
+  const entrance = useRef(new Animated.Value(reducedMotion ? 1 : 0)).current;
+  useEffect(() => {
+    if (reducedMotion) { entrance.setValue(1); return; }
+    const animation = Animated.spring(entrance, { toValue: 1, damping: 15, stiffness: 180, mass: 0.8, useNativeDriver: true });
+    animation.start();
+    return () => animation.stop();
+  }, [entrance, reducedMotion]);
+  return (
+    <Animated.View style={{ width, height: (width * 16) / 9, opacity: entrance, transform: [{ scale: entrance.interpolate({ inputRange: [0, 1], outputRange: [0.88, 1] }) }] }}>
+      <Button accessibilityLabel={`Chapter ${chapter.position}, ${chapter.title}${chapter.isCompleted ? ", completed" : ""}`} contentMode="raw" onPress={onPress} shape="rounded" size="md" style={[styles.chapterCard, styles.chapterCardFill]} variant="ghost">
+        {chapter.imageUrl ? <Image contentFit="cover" source={chapter.imageUrl} style={styles.cover} /> : <LinearGradient colors={GRADIENTS[(chapter.position - 1) % GRADIENTS.length]!} style={styles.cover} />}
+        <View style={styles.cardShade} />
+        <View style={styles.cardCopy}>
+          <Text style={styles.chapterNumber}>{String(chapter.position).padStart(2, "0")}</Text>
+          <Text numberOfLines={3} style={styles.cardTitle}>{chapter.title}</Text>
+          <Text style={styles.cardStatus}>{chapter.isCompleted ? "Completed" : `${chapter.estimatedMinutes ?? Math.ceil((chapter.audioDurationSeconds ?? 0) / 60)} min`}</Text>
+        </View>
+        {chapter.isCompleted ? <View style={styles.check}><CheckIcon size="sm" variant="inverse" /></View> : null}
+      </Button>
+    </Animated.View>
   );
 }
 
@@ -471,27 +499,50 @@ export function AscendWorkspace() {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const { showToast } = useToast();
+  const countryCode = useAuthStore((state) => state.user?.countryCode);
   const [gridWidth, setGridWidth] = useState(0);
   const [chapterGridWidth, setChapterGridWidth] = useState(0);
   const [sheet, setSheet] = useState<LibrarySheet>();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [selectedBookKey, setSelectedBookKey] = useState<string>();
+  const [autoOpenBookKey, setAutoOpenBookKey] = useState<string>();
+  const [bookPageOpen, setBookPageOpen] = useState(false);
+  const [revealedChapterCount, setRevealedChapterCount] = useState(0);
+  const [reducedChapterMotion, setReducedChapterMotion] = useState(false);
   const [query, setQuery] = useState("");
   const [chapterQuery, setChapterQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<BookStatus | "all">("all");
+  const [showOnlyFavorites, setShowOnlyFavorites] = useState(false);
+  const [rootSearchFocusable, setRootSearchFocusable] = useState(true);
+  const [aiInputFocused, setAiInputFocused] = useState(false);
+  const [history, setHistory] = useState<ContentSearchHistoryItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string>();
+  const [removingHistoryQuery, setRemovingHistoryQuery] = useState<string>();
   const [draft, setDraft] = useState<Draft>(INITIAL_DRAFT);
+  const [topicSuggestions, setTopicSuggestions] = useState<string[]>([]);
+  const [topicSuggestionsError, setTopicSuggestionsError] = useState<string>();
+  const [goalSuggestions, setGoalSuggestions] = useState<string[]>([]);
+  const [goalSuggestionsError, setGoalSuggestionsError] = useState<string>();
   const [archiveFolderKey, setArchiveFolderKey] = useState<string>();
   const [documentQuery, setDocumentQuery] = useState("");
   const [assistantInput, setAssistantInput] = useState("");
   const [assistantMessage, setAssistantMessage] = useState<string>();
   const [lifecycleError, setLifecycleError] = useState<string>();
   const [draftError, setDraftError] = useState<string>();
+  const [briefActionTarget, setBriefActionTarget] = useState<BriefEditorTarget>();
+  const [briefTranslateTarget, setBriefTranslateTarget] = useState<BriefEditorTarget>();
+  const [briefTargetLanguage, setBriefTargetLanguage] = useState(() => languageForCountryCode(countryCode));
+  const [briefTransformation, setBriefTransformation] = useState<BriefTransformation>();
   const assistantRequestKey = useRef<string | undefined>(undefined);
   const failedCreate = useRef<FailedBookCreate | undefined>(undefined);
+  const rootSearchInputRef = useRef<NativeTextInput>(null);
+  const rootSearchFocusTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const briefTransformationGeneration = useRef(0);
 
   const overviewQuery = useQuery({
     queryKey: ascendQueryKeys.overview(context),
     queryFn: fetchBooksOverview,
+    refetchInterval: (query) => autoOpenBookKey || query.state.data?.books.some(({ status }) => ACTIVE_STATUSES.includes(status)) ? 2_000 : false,
   });
   const pendingQuery = useQuery<PendingRequest[]>({
     enabled: false,
@@ -514,6 +565,7 @@ export function AscendWorkspace() {
         incoming,
       );
     },
+    refetchInterval: (query) => query.state.data && ACTIVE_STATUSES.includes(query.state.data.book.status) ? 2_000 : false,
   });
   const folderTreeQuery = useQuery({
     enabled: sheet === "sources",
@@ -557,7 +609,7 @@ export function AscendWorkspace() {
   const detail = detailQuery.data;
   const filteredBooks = books.filter(
     (book) =>
-      (statusFilter === "all" || book.status === statusFilter) &&
+      (!showOnlyFavorites || book.isFavorite) &&
       `${book.title} ${book.subtitle} ${book.description}`
         .toLowerCase()
         .includes(query.trim().toLowerCase()),
@@ -571,6 +623,27 @@ export function AscendWorkspace() {
       COLUMNS,
   );
   const dirty = JSON.stringify(draft) !== JSON.stringify(INITIAL_DRAFT);
+  const creating = Boolean(sheet?.startsWith("create") || sheet === "sources");
+  const creationParent: LibrarySheet | undefined =
+    sheet === "createTopicCustom" || sheet === "createGoal"
+      ? "create"
+      : sheet === "createGoalCustom" || sheet === "createKnowledge"
+        ? "createGoal"
+        : sheet === "createDetails"
+          ? "createKnowledge"
+          : sheet === "sources"
+            ? "createDetails"
+            : undefined;
+
+  useEffect(() => () => {
+    if (rootSearchFocusTimer.current) clearTimeout(rootSearchFocusTimer.current);
+  }, []);
+  useEffect(() => {
+    let mounted = true;
+    void AccessibilityInfo.isReduceMotionEnabled().then((enabled) => { if (mounted) setReducedChapterMotion(enabled); });
+    const subscription = AccessibilityInfo.addEventListener("reduceMotionChanged", setReducedChapterMotion);
+    return () => { mounted = false; subscription.remove(); };
+  }, []);
   const archiveStack = contentFolderStack(
     folderTreeQuery.data ?? [],
     archiveFolderKey,
@@ -591,7 +664,8 @@ export function AscendWorkspace() {
         subtitle: "Preparing your book",
         description: input.goal,
         status: "queued",
-        narrator: VOICES.find(({ key }) => key === input.narratorVoiceKey),
+        isFavorite: false,
+        narrator: DEFAULT_NARRATOR,
         estimatedMinutes: input.chapterCount * 4,
         chapterCount: input.chapterCount,
         progressPercent: 0,
@@ -617,6 +691,7 @@ export function AscendWorkspace() {
           ),
       );
       addCachedBook(queryClient, context, book);
+      setAutoOpenBookKey(book.key);
       await queryClient.invalidateQueries({
         queryKey: ascendQueryKeys.overview(context),
         exact: true,
@@ -640,7 +715,7 @@ export function AscendWorkspace() {
         setDraftError(
           `${errorMessage(error)} Your draft was restored so you can retry.`,
         );
-        setSheet("create");
+        setSheet("createDetails");
         setSheetOpen(true);
       }
       showToast({ title: errorMessage(error), duration: 3_000 });
@@ -676,6 +751,8 @@ export function AscendWorkspace() {
         removeCachedBook(queryClient, context, book.key);
         if (playback.playbackBookKey === book.key) playback.clear(false);
         setSelectedBookKey(undefined);
+        setBookPageOpen(false);
+        setAutoOpenBookKey((current) => current === book.key ? undefined : current);
         setSheetOpen(false);
       } else patchCachedBook(queryClient, context, book);
     },
@@ -705,6 +782,22 @@ export function AscendWorkspace() {
     },
     onError: (error) => setAssistantMessage(errorMessage(error)),
   });
+  const topicSuggestionsMutation = useMutation({
+    mutationFn: (excludeTopics: string[]) => suggestBookTopics(excludeTopics),
+    onSuccess: ({ topics }) => {
+      setTopicSuggestions(topics);
+      setTopicSuggestionsError(undefined);
+    },
+    onError: (error) => setTopicSuggestionsError(errorMessage(error)),
+  });
+  const goalSuggestionsMutation = useMutation({
+    mutationFn: ({ topic, excludeGoals }: { topic: string; excludeGoals: string[] }) => suggestBookGoals(topic, excludeGoals),
+    onSuccess: ({ goals }) => {
+      setGoalSuggestions(goals);
+      setGoalSuggestionsError(undefined);
+    },
+    onError: (error) => setGoalSuggestionsError(errorMessage(error)),
+  });
 
   function open(next: LibrarySheet) {
     setSheet(next);
@@ -712,20 +805,121 @@ export function AscendWorkspace() {
   }
   function beginCreate() {
     setDraft(INITIAL_DRAFT);
+    setTopicSuggestions([]);
+    setTopicSuggestionsError(undefined);
+    setGoalSuggestions([]);
     setDraftError(undefined);
     setDocumentQuery("");
     setArchiveFolderKey(undefined);
     open("create");
+    topicSuggestionsMutation.mutate([]);
+  }
+  function loadNewTopics() {
+    setTopicSuggestionsError(undefined);
+    topicSuggestionsMutation.mutate(topicSuggestions);
+  }
+  function briefEditorText(target: BriefEditorTarget) {
+    return target === "topic" ? draft.topic : draft.goal;
+  }
+  function applyBriefEditorText(target: BriefEditorTarget, value: string) {
+    setDraft((current) => ({ ...current, [target]: value }));
+  }
+  function openBriefEditorActions(target: BriefEditorTarget) {
+    if (briefTransformation || !briefEditorText(target).trim()) return;
+    setBriefActionTarget(target);
+  }
+  function openBriefEditorTranslation() {
+    if (!briefActionTarget) return;
+    setBriefTargetLanguage(languageForCountryCode(countryCode));
+    setBriefTranslateTarget(briefActionTarget);
+    setBriefActionTarget(undefined);
+  }
+  async function transformBriefEditor(target: BriefEditorTarget, action: BriefTransformation["action"]) {
+    if (briefTransformation) return;
+    const text = briefEditorText(target).trim();
+    const language = briefTargetLanguage.trim();
+    if (!text || action === "translate" && language.length < 2) return;
+    const capturedContext = getBooksContext();
+    const generation = ++briefTransformationGeneration.current;
+    setBriefActionTarget(undefined);
+    setBriefTranslateTarget(undefined);
+    setBriefTransformation({ target, action });
+    try {
+      const result = action === "enhance" ? await enhanceAppTextForContext(capturedContext, text) : await translateAppTextForContext(capturedContext, text, language);
+      const currentContext = getBooksContext();
+      if (generation === briefTransformationGeneration.current && currentContext.organizationKey === capturedContext.organizationKey && currentContext.scopeKey === capturedContext.scopeKey) applyBriefEditorText(target, result.text);
+    } catch (error) {
+      if (generation === briefTransformationGeneration.current) showToast({ title: errorMessage(error), duration: 2_000 });
+    } finally {
+      if (generation === briefTransformationGeneration.current) setBriefTransformation(undefined);
+    }
+  }
+  async function openSearchHistory() {
+    const key = userSearchHistoryQueryKey(contentContext.userKey);
+    const cached = queryClient.getQueryData<ContentSearchHistoryItem[]>(key);
+    const invalidated = queryClient.getQueryState(key)?.isInvalidated === true;
+    setHistory(cached ?? []);
+    setHistoryLoading(!cached || invalidated);
+    setHistoryError(undefined);
+    setRemovingHistoryQuery(undefined);
+    open("searchHistory");
+    if (cached && !invalidated) return;
+    try {
+      setHistory(await getUserSearchHistory(queryClient, contentContext));
+    } catch (error) {
+      setHistoryError(errorMessage(error));
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+  function useHistoryQuery(item: ContentSearchHistoryItem) {
+    const promoted = promoteCachedUserSearchHistory(queryClient, contentContext, item);
+    setHistory((current) => [promoted, ...current.filter(({ normalizedQuery }) => normalizedQuery !== item.normalizedQuery)]);
+    setQuery(item.query);
+    setSheetOpen(false);
+    setSheet(undefined);
+  }
+  async function removeHistoryQuery(item: ContentSearchHistoryItem) {
+    if (removingHistoryQuery) return;
+    const previous = removeCachedUserSearchHistory(queryClient, contentContext, item.normalizedQuery);
+    setHistory((current) => current.filter(({ normalizedQuery }) => normalizedQuery !== item.normalizedQuery));
+    setRemovingHistoryQuery(item.normalizedQuery);
+    setHistoryError(undefined);
+    try {
+      await deleteContentSearchHistory(item.normalizedQuery);
+    } catch (error) {
+      queryClient.setQueryData(userSearchHistoryQueryKey(contentContext.userKey), previous);
+      setHistory(previous);
+      setHistoryError(errorMessage(error));
+    } finally {
+      setRemovingHistoryQuery(undefined);
+    }
+  }
+  function openGoalStep(topic: string) {
+    setDraft((current) => ({ ...current, topic }));
+    setGoalSuggestions([]);
+    setGoalSuggestionsError(undefined);
+    setDraftError(undefined);
+    setSheet("createGoal");
+    goalSuggestionsMutation.mutate({ topic, excludeGoals: [] });
+  }
+  function loadNewGoals() {
+    setGoalSuggestionsError(undefined);
+    goalSuggestionsMutation.mutate({ topic: draft.topic, excludeGoals: goalSuggestions });
+  }
+  function openKnowledgeStep(goal: string) {
+    setDraft((current) => ({ ...current, goal }));
+    setDraftError(undefined);
+    setSheet("createKnowledge");
   }
   function submit() {
     if (
       draft.topic.trim().length < 3 ||
       draft.goal.trim().length < 3 ||
-      draft.currentKnowledge.trim().length < 2 ||
       draft.language.trim().length < 2
     ) {
       setDraftError(
-        "Complete the topic, goal, current knowledge, and language before creating your book.",
+        "Complete the topic, goal, and language before creating your book.",
       );
       return;
     }
@@ -737,6 +931,8 @@ export function AscendWorkspace() {
     }
     const input = {
       ...draft,
+      narratorVoiceKey: DEFAULT_NARRATOR.key,
+      narrationPace: 1,
       additionalInstructions: draft.additionalInstructions?.trim() || undefined,
     };
     const requestKey = retryBookCreateRequestKey(failedCreate.current, input, randomUUID);
@@ -749,17 +945,21 @@ export function AscendWorkspace() {
   function chooseBook(book: Book) {
     setSelectedBookKey(book.key);
     setChapterQuery("");
-    if (book.key.startsWith("pending-") || book.status !== "ready")
-      open("bookActions");
-    else open("detail");
+    if (book.status === "failed" || book.status === "cancelled") open("bookActions");
+    else if (book.coverUrl) {
+      setBookPageOpen(true);
+      setSheetOpen(false);
+      setSheet(undefined);
+    }
   }
   function startReader(chapterKey?: string) {
     if (!detail) return;
+    const playable = detail.chapters.filter((chapter) => chapter.content && chapter.audioUrl).sort((left, right) => left.position - right.position);
     const nextChapterKey =
       chapterKey ??
-      detail.book.currentChapterKey ??
-      detail.chapters.find(({ isCompleted }) => !isCompleted)?.key;
-    setSheet("reader");
+      playable.find(({ key }) => key === detail.book.currentChapterKey)?.key ??
+      playable.find(({ isCompleted }) => !isCompleted)?.key ??
+      playable[0]?.key;
     if (!nextChapterKey) {
       showToast({
         title: "This book has no available chapter to play.",
@@ -767,6 +967,7 @@ export function AscendWorkspace() {
       });
       return;
     }
+    open("reader");
     void playback.playBookChapter(detail.book.key, nextChapterKey, true);
   }
   function toggleDocument(document: ContentDocument) {
@@ -806,23 +1007,64 @@ export function AscendWorkspace() {
     if (!playback.readerRequest || !playback.playbackBookKey) return;
     const frame = requestAnimationFrame(() => {
       setSelectedBookKey(playback.playbackBookKey);
+      setBookPageOpen(true);
       setSheet("reader");
       setSheetOpen(true);
     });
     return () => cancelAnimationFrame(frame);
   }, [playback.playbackBookKey, playback.readerRequest]);
 
-  const chapters =
-    detail?.chapters.filter((chapter) =>
+  useEffect(() => {
+    if (!autoOpenBookKey) return;
+    const book = serverBooks.find(({ key }) => key === autoOpenBookKey);
+    if (!book) return;
+    if (book.status === "failed" || book.status === "cancelled") { setAutoOpenBookKey(undefined); return; }
+    if (!book.coverUrl) return;
+    setSelectedBookKey(book.key);
+    setChapterQuery("");
+    setBookPageOpen(true);
+    setSheetOpen(false);
+    setSheet(undefined);
+    setAutoOpenBookKey(undefined);
+  }, [autoOpenBookKey, serverBooks]);
+
+  const orderedReadyChapters: BookChapter[] = [];
+  for (const chapter of [...(detail?.chapters ?? [])].sort((left, right) => left.position - right.position)) {
+    if (!chapter.content || !chapter.audioUrl) break;
+    orderedReadyChapters.push(chapter);
+  }
+  useEffect(() => { setRevealedChapterCount(0); }, [selectedBookKey]);
+  useEffect(() => {
+    if (revealedChapterCount >= orderedReadyChapters.length) return;
+    if (reducedChapterMotion) { setRevealedChapterCount(orderedReadyChapters.length); return; }
+    const timer = setTimeout(() => setRevealedChapterCount((current) => Math.min(current + 1, orderedReadyChapters.length)), 110);
+    return () => clearTimeout(timer);
+  }, [orderedReadyChapters.length, reducedChapterMotion, revealedChapterCount]);
+  const revealedChapters = orderedReadyChapters.slice(0, revealedChapterCount);
+  const chapters = revealedChapters.filter((chapter) =>
       `${chapter.position} ${chapter.title} ${chapter.description}`
         .toLowerCase()
         .includes(chapterQuery.trim().toLowerCase()),
-    ) ?? [];
+    );
+  const showNextChapterSkeleton = !chapterQuery.trim() && Boolean(detail) && (
+    revealedChapterCount < orderedReadyChapters.length ||
+    ACTIVE_STATUSES.includes(detail!.book.status) && orderedReadyChapters.length < detail!.book.chapterCount
+  );
   const sheetTitle =
     sheet === "actions"
-      ? "New in Ascend"
+      ? ""
       : sheet === "create"
-        ? "Create book"
+        ? "Choose a topic"
+        : sheet === "createTopicCustom"
+          ? "Your topic"
+          : sheet === "createGoal"
+            ? "Choose a goal"
+            : sheet === "createGoalCustom"
+              ? "Your goal"
+              : sheet === "createKnowledge"
+                ? "What you already know"
+                : sheet === "createDetails"
+                  ? "Book details"
         : sheet === "sources"
           ? "Choose Archive documents"
           : sheet === "filter"
@@ -835,7 +1077,7 @@ export function AscendWorkspace() {
                   ? "Delete book?"
                   : (selectedBook?.title ?? "Book");
   return (
-    <KeyboardAvoidingView behavior="height" style={styles.root}>
+    <KeyboardAvoidingView behavior={aiInputFocused ? "height" : undefined} style={styles.root}>
       <View
         style={[
           styles.globalHeader,
@@ -849,173 +1091,49 @@ export function AscendWorkspace() {
         <WorkspaceAppSwitcher
           active="ascend"
           onBeforeSelect={() =>
-            !((sheet === "create" || sheet === "sources") && sheetOpen && dirty)
+            !(creating && sheetOpen && dirty)
           }
         />
       </View>
       <View style={styles.localHeader}>
-        <Text style={styles.localTitle}>Ascend</Text>
-        <Button
-          accessibilityLabel="New book"
-          contentMode="raw"
-          onPress={() => open("actions")}
-          size="md"
-          variant="icon"
-        >
-          <PlusIcon size="sm" />
-        </Button>
+        {bookPageOpen ? <Button accessibilityLabel="Back to books" contentMode="raw" onPress={() => { setBookPageOpen(false); setSelectedBookKey(undefined); setChapterQuery(""); }} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button> : <WorkspaceAppSwitcher active="ascend" trigger="back" />}
+        <Text numberOfLines={1} style={styles.localTitle}>{bookPageOpen ? selectedBook?.title ?? "Book" : "Ascend"}</Text>
+        {bookPageOpen ? <Button accessibilityLabel="Book actions" contentMode="raw" disabled={!selectedBook} onPress={() => open("bookActions")} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button> : <Button accessibilityLabel="Create in Ascend" contentMode="raw" onPress={() => open("actions")} size="xs" variant="icon"><PlusIcon size="sm" /></Button>}
       </View>
-      <View style={styles.searchRow}>
-        <View style={styles.searchPill}>
-          <SearchIcon size="sm" variant="muted" />
-          <TextInput
-            accessibilityLabel="Search books"
-            onChangeText={setQuery}
-            placeholder="Search books"
-            style={styles.searchInput}
-            value={query}
-          />
-          {query ? (
-            <Button
-              accessibilityLabel="Clear book search"
-              contentMode="raw"
-              onPress={() => setQuery("")}
-              size="xs"
-              variant="secondary"
-            >
-              <CloseIcon size="sm" />
-            </Button>
-          ) : null}
+      {bookPageOpen ? (
+        detailQuery.isPending ? <View accessibilityRole="progressbar" style={[styles.detailLoading, styles.detailPage]}><Skeleton style={styles.detailCoverSkeleton} /><Skeleton style={styles.detailLine} /><Skeleton style={[styles.chapterSkeleton, { width: chapterWidth, height: (chapterWidth * 16) / 9 }]} /></View> : detail ? (
+          <ScrollView contentContainerStyle={[styles.detail, styles.detailPage]} showsVerticalScrollIndicator={false}>
+            <View style={styles.detailHero}>
+              <View style={styles.detailCover}><Cover book={detail.book} /></View>
+              <View style={styles.detailCopy}>
+                <Text style={styles.detailTitle}>{detail.book.title}</Text>
+                <Text style={styles.detailMeta}>{detail.book.narrator?.name ?? "Narrator"} · {detail.book.estimatedMinutes} min</Text>
+                <Text style={styles.detailMeta}>{Math.round(detail.book.progressPercent)}% complete</Text>
+                <Button disabled={!orderedReadyChapters.length} icon={<PlayIcon size="sm" variant="inverse" />} onPress={() => { if (playback.playbackBookKey === detail.book.key) void playback.refreshUrl(); else startReader(); }} size="md" variant="primary">{detail.book.progressPercent ? "Resume" : "Play"}</Button>
+              </View>
+            </View>
+            {playback.refreshWarning ? <View accessibilityRole="alert" style={styles.playerNotice}><Text style={styles.noticeText}>{playback.refreshWarning}</Text><Button disabled={playback.refreshingUrl} loading={playback.refreshingUrl} onPress={() => startReader()} size="md" variant="secondary">Retry</Button></View> : null}
+            <View style={styles.chapterSearch}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel="Search chapters" onChangeText={setChapterQuery} placeholder="Search chapters" style={styles.rootSearchInput} value={chapterQuery} /></View>
+            <View onLayout={({ nativeEvent }) => setChapterGridWidth(nativeEvent.layout.width)} style={styles.grid}>
+              {chapters.map((chapter) => <ChapterCard chapter={chapter} key={chapter.key} onPress={() => startReader(chapter.key)} reducedMotion={reducedChapterMotion} width={chapterWidth} />)}
+              {showNextChapterSkeleton ? <Skeleton accessibilityLabel={`Preparing chapter ${revealedChapterCount + 1}`} accessibilityRole="progressbar" style={[styles.chapterSkeleton, { width: chapterWidth, height: (chapterWidth * 16) / 9 }]} /> : null}
+            </View>
+          </ScrollView>
+        ) : <View accessibilityRole="alert" style={styles.state}><Text style={styles.stateTitle}>Book details could not be loaded.</Text><Button onPress={() => void detailQuery.refetch()} size="sm" variant="secondary">Retry</Button></View>
+      ) : <>
+        <View style={styles.searchRow}>
+          <View style={styles.rootSearch}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel="Search books" editable={rootSearchFocusable} focusable={rootSearchFocusable} onChangeText={setQuery} placeholder="Search..." ref={rootSearchInputRef} style={styles.rootSearchInput} value={query} />{query ? <Button accessibilityLabel="Clear book search" contentMode="raw" iconOnly onPress={() => setQuery("")} size="xs" variant="secondary"><CloseIcon size="sm" /></Button> : null}</View>
+          <Button accessibilityLabel="Filter books" contentMode="raw" onPress={() => open("filter")} size="sm" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={showOnlyFavorites ? "accent" : "default"} /></Button>
         </View>
-        <Button
-          accessibilityLabel="Filter books"
-          contentMode="raw"
-          onPress={() => open("filter")}
-          size="sm"
-          style={styles.filterButton}
-          variant="icon"
-        >
-          <FilterIcon
-            size="sm"
-            variant={statusFilter === "all" ? "default" : "accent"}
-          />
-        </Button>
-      </View>
-      <ScrollView
-        contentContainerStyle={styles.library}
-        showsVerticalScrollIndicator={false}
-      >
-        {overviewQuery.isPending ? (
-          <View
-            accessibilityLabel="Loading books"
-            accessibilityRole="progressbar"
-            onLayout={({ nativeEvent }) =>
-              setGridWidth(nativeEvent.layout.width)
-            }
-            style={styles.grid}
-          >
-            {Array.from({ length: COLUMNS }, (_, index) => (
-              <Skeleton
-                key={index}
-                style={{
-                  width: cardWidth,
-                  height: (cardWidth * 16) / 9,
-                  borderRadius: radii.sm,
-                }}
-              />
-            ))}
-          </View>
-        ) : overviewQuery.error ? (
-          <View style={styles.state}>
-            <Text style={styles.stateTitle}>Books could not be loaded.</Text>
-            <Button
-              onPress={() => void overviewQuery.refetch()}
-              size="sm"
-              variant="secondary"
-            >
-              Retry
-            </Button>
-          </View>
-        ) : (
-          <View
-            onLayout={({ nativeEvent }) =>
-              setGridWidth(nativeEvent.layout.width)
-            }
-            style={styles.grid}
-          >
-            {filteredBooks.map((book, index) => (
-              <Button
-                accessibilityLabel={`${book.title}, ${statusLabel(book.status)}${book.failureMessage ? `, ${book.failureMessage}` : ""}`}
-                accessibilityRole="button"
-                contentMode="raw"
-                key={book.key}
-                onPress={() => chooseBook(book)}
-                size="md"
-                style={[
-                  styles.bookCard,
-                  { width: cardWidth, height: (cardWidth * 16) / 9 },
-                ]}
-                variant="ghost"
-              >
-                <Cover book={book} index={index} />
-                <View style={styles.cardShade} />
-                <View style={styles.cardCopy}>
-                  <Text numberOfLines={3} style={styles.cardTitle}>
-                    {book.title}
-                  </Text>
-                  <Text
-                    numberOfLines={2}
-                    style={[
-                      styles.cardStatus,
-                      book.status === "failed" && styles.failed,
-                    ]}
-                  >
-                    {book.status === "ready"
-                      ? `${Math.round(book.progressPercent)}% read`
-                      : book.failureMessage
-                        ? `${statusLabel(book.status)} · ${book.failureMessage}`
-                        : `${statusLabel(book.status)}${book.generationProgressPercent === undefined ? "" : ` ${Math.round(book.generationProgressPercent)}%`}`}
-                  </Text>
-                  {ACTIVE_STATUSES.includes(book.status) ? (
-                    <View
-                      accessibilityLabel={`${Math.round(book.generationProgressPercent ?? 0)} percent generated`}
-                      accessibilityRole="progressbar"
-                      accessibilityValue={{
-                        min: 0,
-                        max: 100,
-                        now: Math.round(book.generationProgressPercent ?? 0),
-                      }}
-                      style={styles.generationTrack}
-                    >
-                      <View
-                        style={[
-                          styles.generationFill,
-                          { width: `${book.generationProgressPercent ?? 0}%` },
-                        ]}
-                      />
-                    </View>
-                  ) : null}
-                </View>
-              </Button>
-            ))}
-          </View>
-        )}
-        {!overviewQuery.isPending &&
-        !overviewQuery.error &&
-        filteredBooks.length === 0 ? (
-          <View style={styles.state}>
-            <AscendIcon size="lg" variant="muted" />
-            <Text style={styles.stateTitle}>
-              {books.length
-                ? "No books match this view."
-                : "Your first book starts with an idea."}
-            </Text>
-            <Button onPress={beginCreate} size="sm" variant="primary">
-              Create book
-            </Button>
-          </View>
-        ) : null}
-      </ScrollView>
+        <ScrollView contentContainerStyle={styles.library} showsVerticalScrollIndicator={false}>
+          {overviewQuery.isPending ? <View accessibilityLabel="Loading books" accessibilityRole="progressbar" onLayout={({ nativeEvent }) => setGridWidth(nativeEvent.layout.width)} style={styles.grid}>{Array.from({ length: COLUMNS }, (_, index) => <Skeleton key={index} style={{ width: cardWidth, height: (cardWidth * 16) / 9, borderRadius: radii.sm }} />)}</View> : overviewQuery.error ? <View style={styles.state}><Text style={styles.stateTitle}>Books could not be loaded.</Text><Button onPress={() => void overviewQuery.refetch()} size="sm" variant="secondary">Retry</Button></View> : (
+            <View onLayout={({ nativeEvent }) => setGridWidth(nativeEvent.layout.width)} style={styles.grid}>
+              {filteredBooks.map((book, index) => book.key.startsWith("pending-") || ACTIVE_STATUSES.includes(book.status) && !book.coverUrl ? <Skeleton accessibilityLabel={`Preparing ${book.title}`} accessibilityRole="progressbar" key={book.key} style={{ width: cardWidth, height: (cardWidth * 16) / 9, borderRadius: radii.sm }} /> : <Button accessibilityLabel={book.title} accessibilityRole="button" contentMode="raw" key={book.key} onPress={() => chooseBook(book)} shape="rounded" size="md" style={[styles.bookCard, { width: cardWidth, height: (cardWidth * 16) / 9 }]} variant="ghost"><Cover book={book} index={index} /><View style={styles.cardShade} /><View style={styles.cardCopy}><Text numberOfLines={3} style={styles.cardTitle}>{book.title}</Text></View></Button>)}
+            </View>
+          )}
+          {!overviewQuery.isPending && !overviewQuery.error && filteredBooks.length === 0 ? <View style={styles.state}><Text style={styles.stateTitle}>{query.trim() ? "No books matched this search." : showOnlyFavorites ? "No favorite books." : books.length ? "No books match this view." : "No audio book yet."}</Text>{!books.length && !query.trim() && !showOnlyFavorites ? <Button accessibilityLabel="Create book" contentMode="raw" onPress={beginCreate} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button> : null}</View> : null}
+        </ScrollView>
+      </>}
       <CoreComposer
         accessibilityLabel="Ask Core about Ascend"
         disabled={assistantMutation.isPending}
@@ -1024,6 +1142,7 @@ export function AscendWorkspace() {
           <ChromeIcon glow={0.35} size={24} source={assistantIconSource} />
         }
         loading={assistantMutation.isPending}
+        maxLength={8_000}
         message={
           assistantMessage ? (
             <View style={styles.coreMessage}>
@@ -1035,27 +1154,45 @@ export function AscendWorkspace() {
           setAssistantInput(value);
           assistantRequestKey.current = undefined;
         }}
+        onFocusChange={(focused) => {
+          if (rootSearchFocusTimer.current) clearTimeout(rootSearchFocusTimer.current);
+          rootSearchInputRef.current?.blur();
+          Keyboard.dismiss();
+          setRootSearchFocusable(false);
+          if (!focused) {
+            rootSearchFocusTimer.current = setTimeout(() => {
+              rootSearchInputRef.current?.blur();
+              Keyboard.dismiss();
+              setRootSearchFocusable(true);
+            }, 300);
+          }
+          setAiInputFocused(focused);
+          if (!focused) setAssistantMessage(undefined);
+        }}
         onSubmit={askAssistant}
         prompts={CORE_PROMPTS}
-        sendIcon={<SendIcon size="sm" variant="inverse" />}
+        sendIcon={<SendIcon size="sm" />}
         value={assistantInput}
       />
 
+      <SearchHistorySheet error={historyError} history={history} loading={historyLoading} onClose={() => { setSheetOpen(false); setSheet(undefined); }} onRemove={(item) => void removeHistoryQuery(item)} onSelect={useHistoryQuery} open={sheetOpen && sheet === "searchHistory"} removingQuery={removingHistoryQuery} />
+
       <BottomSheet
         description={
-          sheet === "create"
-            ? "Nothing personal is included unless you select it."
+          sheet === "createKnowledge"
+            ? "Optional. Leave this blank to start from the beginning."
             : sheet === "sources"
               ? "Only documents you explicitly choose are included."
               : undefined
         }
-        dismissible={(sheet !== "create" && sheet !== "sources") || !dirty}
+        dismissible={!briefTransformation && (Boolean(creationParent) || !creating || !dirty)}
+        footer={sheet === "create" ? <><Button disabled={topicSuggestionsMutation.isPending} onPress={loadNewTopics} size="md" variant="primary">New topics</Button><Button onPress={() => { setSheetOpen(false); setSheet(undefined); }} size="md" variant="secondary">Close</Button></> : sheet === "createTopicCustom" ? <><Button disabled={Boolean(briefTransformation) || draft.topic.trim().length < 3} onPress={() => openGoalStep(draft.topic.trim())} size="md" variant="primary">Next</Button><Button disabled={Boolean(briefTransformation)} onPress={() => setSheet("create")} size="md" variant="secondary">Close</Button></> : sheet === "createGoal" ? <><Button disabled={goalSuggestionsMutation.isPending} onPress={loadNewGoals} size="md" variant="primary">New goals</Button><Button onPress={() => setSheet("create")} size="md" variant="secondary">Close</Button></> : sheet === "createGoalCustom" ? <><Button disabled={Boolean(briefTransformation) || draft.goal.trim().length < 3} onPress={() => openKnowledgeStep(draft.goal.trim())} size="md" variant="primary">Next</Button><Button disabled={Boolean(briefTransformation)} onPress={() => setSheet("createGoal")} size="md" variant="secondary">Close</Button></> : undefined}
         headerLeading={
           sheet === "sources" ? (
             <Button
               accessibilityLabel="Back to book creation"
               contentMode="raw"
-              onPress={() => setSheet("create")}
+              onPress={() => setSheet("createDetails")}
               size="md"
               variant="icon"
             >
@@ -1064,92 +1201,92 @@ export function AscendWorkspace() {
           ) : undefined
         }
         height={
-          ["create", "sources", "detail", "reader", "sleep"].includes(
+          ["create", "createTopicCustom", "createGoal", "createGoalCustom", "createKnowledge", "createDetails", "sources", "reader", "sleep"].includes(
             sheet ?? "",
           )
             ? "full"
             : undefined
         }
+        hideHeading={sheet === "actions" || sheet === "filter"}
+        onDismissRequest={creationParent ? () => setSheet(creationParent) : undefined}
         onOpenChange={(next) => {
           setSheetOpen(next);
           if (!next) setSheet(undefined);
         }}
-        open={sheetOpen}
+        open={sheetOpen && sheet !== "searchHistory"}
         pageKey={sheet}
         title={sheetTitle}
       >
         {sheet === "actions" ? (
           <BottomSheetItem
-            icon={<AscendIcon size="md" />}
             onPress={beginCreate}
+            style={styles.sheetAction}
+            variant="secondary"
           >
             Create book
           </BottomSheetItem>
         ) : null}
         {sheet === "filter" ? (
-          <View style={styles.sheetList}>
-            {STATUS_FILTERS.map((status) => (
-              <Button
-                accessibilityState={{ selected: statusFilter === status }}
-                key={status}
-                onPress={() => {
-                  setStatusFilter(status);
-                  setSheetOpen(false);
-                }}
-                size="md"
-                variant={statusFilter === status ? "primary" : "secondary"}
-              >
-                {status === "all" ? "All books" : statusLabel(status)}
-              </Button>
-            ))}
+          <View style={styles.filterPanel}>
+            <View style={styles.favoriteSwitchRow}>
+              <Switch accessibilityLabel="Show only favorite books" checked={showOnlyFavorites} onCheckedChange={(checked) => { setShowOnlyFavorites(checked); setSheetOpen(false); setSheet(undefined); }} />
+              <Text style={styles.favoriteSwitchLabel}>Favorites</Text>
+            </View>
+            <Button onPress={() => void openSearchHistory()} size="md" style={styles.searchHistoryOption} variant="secondary">Search history</Button>
           </View>
         ) : null}
         {sheet === "create" ? (
+          <ScrollView contentContainerStyle={styles.suggestionStep} showsVerticalScrollIndicator={false}>
+            <View style={styles.suggestionList}>
+              {!topicSuggestionsMutation.isPending && topicSuggestions.length ? <Button onPress={() => setSheet("createTopicCustom")} shape="pill" size="md" style={styles.suggestionPill} variant="secondary">Custom</Button> : null}
+              {topicSuggestionsMutation.isPending ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={styles.suggestionLoadingPill} />) : topicSuggestions.map((topic) => <Button contentMode="raw" key={topic} onPress={() => openGoalStep(topic)} shape="pill" size="md" style={styles.suggestionPill} variant="secondary"><Text numberOfLines={1} style={styles.suggestionText}>{topic}</Text></Button>)}
+            </View>
+            {topicSuggestionsError ? <Text accessibilityRole="alert" style={styles.noticeText}>{topicSuggestionsError}</Text> : null}
+          </ScrollView>
+        ) : null}
+        {sheet === "createTopicCustom" ? (
+          <View style={styles.customStep}>
+            <Text style={styles.inputLabel}>Topic</Text>
+            <AiTextEditor accessibilityLabel="Book topic" autoFocus editable={briefTransformation?.target !== "topic"} maxLength={2_000} multiline onChangeText={(topic) => setDraft((current) => ({ ...current, topic }))} onOpenActions={() => openBriefEditorActions("topic")} placeholder="What should this book explore?" style={styles.customTextArea} textAlignVertical="top" transformation={briefTransformation?.target === "topic" ? briefTransformation.action : undefined} value={draft.topic} />
+          </View>
+        ) : null}
+        {sheet === "createGoal" ? (
+          <ScrollView contentContainerStyle={styles.suggestionStep} showsVerticalScrollIndicator={false}>
+            <View style={styles.suggestionList}>
+              {!goalSuggestionsMutation.isPending && goalSuggestions.length ? <Button onPress={() => setSheet("createGoalCustom")} shape="pill" size="md" style={styles.suggestionPill} variant="secondary">Custom</Button> : null}
+              {goalSuggestionsMutation.isPending ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={styles.suggestionLoadingPill} />) : goalSuggestions.map((goal) => <Button contentMode="raw" key={goal} onPress={() => openKnowledgeStep(goal)} shape="pill" size="md" style={styles.suggestionPill} variant="secondary"><Text numberOfLines={1} style={styles.suggestionText}>{goal}</Text></Button>)}
+            </View>
+            {goalSuggestionsError ? <Text accessibilityRole="alert" style={styles.noticeText}>{goalSuggestionsError}</Text> : null}
+          </ScrollView>
+        ) : null}
+        {sheet === "createGoalCustom" ? (
+          <View style={styles.customStep}>
+            <Text style={styles.inputLabel}>Goal</Text>
+            <AiTextEditor accessibilityLabel="Reading goal" autoFocus editable={briefTransformation?.target !== "goal"} maxLength={2_000} multiline onChangeText={(goal) => setDraft((current) => ({ ...current, goal }))} onOpenActions={() => openBriefEditorActions("goal")} placeholder="What should change after reading it?" style={styles.customTextArea} textAlignVertical="top" transformation={briefTransformation?.target === "goal" ? briefTransformation.action : undefined} value={draft.goal} />
+          </View>
+        ) : null}
+        {sheet === "createKnowledge" ? (
+          <View style={styles.customStep}>
+            <Text style={styles.formLabel}>What you already know (Optional)</Text>
+            <TextInput accessibilityLabel="Current knowledge" autoFocus maxLength={2_000} multiline onChangeText={(currentKnowledge) => setDraft((current) => ({ ...current, currentKnowledge }))} placeholder="Share any experience or context, or leave this blank" style={styles.stepTextArea} textAlignVertical="top" value={draft.currentKnowledge} />
+            <View style={styles.footer}>
+              <Button onPress={() => setSheet("createDetails")} size="md" style={styles.footerButton} variant="primary">Next</Button>
+              <Button onPress={() => setSheet("createGoal")} size="md" style={styles.footerButton} variant="secondary">Close</Button>
+            </View>
+          </View>
+        ) : null}
+        {sheet === "createDetails" ? (
           <ScrollView
             contentContainerStyle={styles.form}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-            <Text style={styles.formHeading}>
-              Build a book around your outcome.
-            </Text>
-            <Text style={styles.formLabel}>TOPIC</Text>
-            <TextInput
-              accessibilityLabel="Book topic"
-              multiline
-              onChangeText={(topic) =>
-                setDraft((current) => ({ ...current, topic }))
-              }
-              placeholder="What should this book explore?"
-              style={styles.textArea}
-              value={draft.topic}
-            />
-            <Text style={styles.formLabel}>GOAL</Text>
-            <TextInput
-              accessibilityLabel="Reading goal"
-              multiline
-              onChangeText={(goal) =>
-                setDraft((current) => ({ ...current, goal }))
-              }
-              placeholder="What should change after reading it?"
-              style={styles.textArea}
-              value={draft.goal}
-            />
-            <Text style={styles.formLabel}>WHAT YOU ALREADY KNOW</Text>
-            <TextInput
-              accessibilityLabel="Current knowledge"
-              multiline
-              onChangeText={(currentKnowledge) =>
-                setDraft((current) => ({ ...current, currentKnowledge }))
-              }
-              placeholder="Start from the right level"
-              style={styles.textArea}
-              value={draft.currentKnowledge}
-            />
-            <Text style={styles.formLabel}>BOOK DEPTH</Text>
-            <View style={styles.sheetList}>
+            <Text style={styles.formHeading}>Fine-tune your book.</Text>
+            <Text style={styles.formLabel}>Book depth</Text>
+            <Tabs accessibilityLabel="Book depth" accessibilityRole="tablist" style={styles.detailTabs}>
               {CHAPTER_OPTIONS.map((option) => (
                 <Button
+                  accessibilityRole="tab"
                   accessibilityState={{
                     selected: draft.chapterCount === option.count,
                   }}
@@ -1160,27 +1297,44 @@ export function AscendWorkspace() {
                       chapterCount: option.count,
                     }))
                   }
-                  size="md"
+                  size="xs"
+                  style={styles.detailTab}
                   variant={
                     draft.chapterCount === option.count
-                      ? "primary"
-                      : "secondary"
+                      ? "secondary"
+                      : "ghost"
                   }
                 >
                   {option.label}
                 </Button>
               ))}
-            </View>
-            <Text style={styles.formLabel}>LANGUAGE</Text>
+            </Tabs>
+            <Text style={styles.helper}>{draft.chapterCount} chapters</Text>
+            <Text style={styles.formLabel}>Language</Text>
+            <Tabs accessibilityLabel="Common book languages" accessibilityRole="tablist" style={styles.languageTabs}>
+              {LANGUAGES.map((language) => (
+                <Button
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: draft.language === language }}
+                  key={language}
+                  onPress={() => setDraft((current) => ({ ...current, language }))}
+                  size="xs"
+                  style={styles.languageTab}
+                  variant={draft.language === language ? "secondary" : "ghost"}
+                >
+                  {language}
+                </Button>
+              ))}
+            </Tabs>
             <TextInput
               accessibilityLabel="Book language"
               onChangeText={(language) =>
                 setDraft((current) => ({ ...current, language }))
               }
-              placeholder="English"
+              placeholder="Or enter another language"
               value={draft.language}
             />
-            <Text style={styles.formLabel}>WRITING TONE</Text>
+            <Text style={styles.formLabel}>Writing tone</Text>
             <View style={styles.sheetList}>
               {TONES.map((writingTone) => (
                 <Button
@@ -1200,61 +1354,7 @@ export function AscendWorkspace() {
                 </Button>
               ))}
             </View>
-            <Text style={styles.formLabel}>NARRATOR</Text>
-            <View style={styles.voiceGrid}>
-              {VOICES.map((voice) => (
-                <Button
-                  accessibilityState={{
-                    selected: draft.narratorVoiceKey === voice.key,
-                  }}
-                  contentMode="raw"
-                  key={voice.key}
-                  onPress={() =>
-                    setDraft((current) => ({
-                      ...current,
-                      narratorVoiceKey: voice.key,
-                    }))
-                  }
-                  size="md"
-                  style={[
-                    styles.voice,
-                    draft.narratorVoiceKey === voice.key && styles.selected,
-                  ]}
-                  variant="secondary"
-                >
-                  <VolumeIcon
-                    size="sm"
-                    variant={
-                      draft.narratorVoiceKey === voice.key ? "accent" : "muted"
-                    }
-                  />
-                  <View style={styles.voiceCopy}>
-                    <Text style={styles.voiceName}>{voice.name}</Text>
-                    <Text style={styles.voiceDescription}>
-                      {voice.description}
-                    </Text>
-                  </View>
-                  {voice.previewUrl ? <PlayIcon size="sm" /> : null}
-                </Button>
-              ))}
-            </View>
-            <Text style={styles.formLabel}>NARRATION PACE</Text>
-            <Slider
-              accessibilityLabel="Narration pace"
-              max={2}
-              min={0.75}
-              onValueChange={(narrationPace) =>
-                setDraft((current) => ({
-                  ...current,
-                  narrationPace: Math.round(narrationPace * 20) / 20,
-                }))
-              }
-              value={draft.narrationPace}
-            />
-            <Text style={styles.valueLabel}>
-              {draft.narrationPace.toFixed(2)}x
-            </Text>
-            <Text style={styles.formLabel}>ARCHIVE SOURCES</Text>
+            <Text style={styles.formLabel}>Archive sources</Text>
             <Button
               icon={<FileIcon size="sm" />}
               onPress={() => setSheet("sources")}
@@ -1283,7 +1383,7 @@ export function AscendWorkspace() {
                 }
               />
             </View>
-            <Text style={styles.formLabel}>ADDITIONAL INSTRUCTIONS</Text>
+            <Text style={styles.formLabel}>Additional instructions (Optional)</Text>
             <TextInput
               accessibilityLabel="Additional instructions"
               multiline
@@ -1305,6 +1405,19 @@ export function AscendWorkspace() {
             ) : null}
             <View style={styles.footer}>
               <Button
+                disabled={
+                  draft.topic.trim().length < 3 ||
+                  draft.goal.trim().length < 3 ||
+                  draft.language.trim().length < 2
+                }
+                onPress={submit}
+                size="md"
+                style={styles.footerButton}
+                variant="primary"
+              >
+                Create book
+              </Button>
+              <Button
                 onPress={() => {
                   setDraft(INITIAL_DRAFT);
                   setDraftError(undefined);
@@ -1317,20 +1430,6 @@ export function AscendWorkspace() {
               >
                 Discard
               </Button>
-              <Button
-                disabled={
-                  draft.topic.trim().length < 3 ||
-                  draft.goal.trim().length < 3 ||
-                  draft.currentKnowledge.trim().length < 2 ||
-                  draft.language.trim().length < 2
-                }
-                onPress={submit}
-                size="md"
-                style={styles.footerButton}
-                variant="primary"
-              >
-                Create book
-              </Button>
             </View>
           </ScrollView>
         ) : null}
@@ -1342,7 +1441,7 @@ export function AscendWorkspace() {
                 accessibilityLabel="Search all Archive documents"
                 onChangeText={setDocumentQuery}
                 placeholder="Search all documents"
-                style={styles.searchInput}
+                style={styles.rootSearchInput}
                 value={documentQuery}
               />
             </View>
@@ -1452,7 +1551,7 @@ export function AscendWorkspace() {
             ) : null}
             <View style={styles.footer}>
               <Button
-                onPress={() => setSheet("create")}
+                onPress={() => setSheet("createDetails")}
                 size="md"
                 style={styles.footerButton}
                 variant="primary"
@@ -1571,159 +1670,13 @@ export function AscendWorkspace() {
             </Button>
             <Button
               disabled={lifecycleMutation.isPending}
-              onPress={() =>
-                setSheet(
-                  selectedBook.status === "ready" ? "detail" : "bookActions",
-                )
-              }
+              onPress={() => setSheet("bookActions")}
               size="md"
               variant="secondary"
             >
               Close
             </Button>
           </View>
-        ) : null}
-        {sheet === "detail" ? (
-          detailQuery.isPending ? (
-            <View accessibilityRole="progressbar" style={styles.detailLoading}>
-              <Skeleton style={styles.detailCoverSkeleton} />
-              <Skeleton style={styles.detailLine} />
-              <Skeleton style={styles.detailLine} />
-            </View>
-          ) : detail ? (
-            <ScrollView
-              contentContainerStyle={styles.detail}
-              showsVerticalScrollIndicator={false}
-            >
-              <View style={styles.detailHero}>
-                <View style={styles.detailCover}>
-                  <Cover book={detail.book} />
-                </View>
-                <View style={styles.detailCopy}>
-                  <Text style={styles.detailTitle}>{detail.book.title}</Text>
-                  <Text style={styles.detailMeta}>
-                    {detail.book.narrator?.name ?? "Narrator"} ·{" "}
-                    {detail.book.estimatedMinutes} min
-                  </Text>
-                  <Text style={styles.detailMeta}>
-                    {Math.round(detail.book.progressPercent)}% complete
-                  </Text>
-                  <Button
-                    icon={<PlayIcon size="sm" variant="inverse" />}
-                    onPress={() => {
-                      if (playback.playbackBookKey === detail.book.key) void playback.refreshUrl();
-                      else startReader();
-                    }}
-                    size="md"
-                    variant="primary"
-                  >
-                    {detail.book.progressPercent ? "Resume" : "Play"}
-                  </Button>
-                </View>
-                <Button
-                  accessibilityLabel="Book actions"
-                  contentMode="raw"
-                  onPress={() => setSheet("bookActions")}
-                  size="md"
-                  variant="icon"
-                >
-                  <MoreHorizontalIcon size="sm" />
-                </Button>
-              </View>
-              {playback.refreshWarning ? (
-                <View accessibilityRole="alert" style={styles.playerNotice}>
-                  <Text style={styles.noticeText}>{playback.refreshWarning}</Text>
-                  <Button
-                    disabled={playback.refreshingUrl}
-                    loading={playback.refreshingUrl}
-                    onPress={() => startReader()}
-                    size="md"
-                    variant="secondary"
-                  >
-                    Retry
-                  </Button>
-                </View>
-              ) : null}
-              <View style={styles.chapterSearch}>
-                <SearchIcon size="sm" variant="muted" />
-                <TextInput
-                  accessibilityLabel="Search chapters"
-                  onChangeText={setChapterQuery}
-                  placeholder="Search chapters"
-                  style={styles.searchInput}
-                  value={chapterQuery}
-                />
-              </View>
-              <View
-                onLayout={({ nativeEvent }) =>
-                  setChapterGridWidth(nativeEvent.layout.width)
-                }
-                style={styles.grid}
-              >
-                {chapters.map((chapter) => (
-                  <Button
-                    accessibilityLabel={`Chapter ${chapter.position}, ${chapter.title}${chapter.isCompleted ? ", completed" : ""}`}
-                    contentMode="raw"
-                    key={chapter.key}
-                    onPress={() => startReader(chapter.key)}
-                    size="md"
-                    style={[
-                      styles.chapterCard,
-                      { width: chapterWidth, height: (chapterWidth * 16) / 9 },
-                    ]}
-                    variant="ghost"
-                  >
-                    {chapter.imageUrl ? (
-                      <Image
-                        contentFit="cover"
-                        source={chapter.imageUrl}
-                        style={styles.cover}
-                      />
-                    ) : (
-                      <LinearGradient
-                        colors={
-                          GRADIENTS[(chapter.position - 1) % GRADIENTS.length]!
-                        }
-                        style={styles.cover}
-                      />
-                    )}
-                    <View style={styles.cardShade} />
-                    <View style={styles.cardCopy}>
-                      <Text style={styles.chapterNumber}>
-                        {String(chapter.position).padStart(2, "0")}
-                      </Text>
-                      <Text numberOfLines={3} style={styles.cardTitle}>
-                        {chapter.title}
-                      </Text>
-                      <Text style={styles.cardStatus}>
-                        {chapter.isCompleted
-                          ? "Completed"
-                          : `${chapter.estimatedMinutes ?? Math.ceil((chapter.audioDurationSeconds ?? 0) / 60)} min`}
-                      </Text>
-                    </View>
-                    {chapter.isCompleted ? (
-                      <View style={styles.check}>
-                        <CheckIcon size="sm" variant="inverse" />
-                      </View>
-                    ) : null}
-                  </Button>
-                ))}
-              </View>
-            </ScrollView>
-          ) : (
-            <View accessibilityRole="alert" style={styles.state}>
-              <Text style={styles.stateTitle}>
-                Book details could not be loaded.
-              </Text>
-              <Button
-                onPress={() => void detailQuery.refetch()}
-                size="md"
-                variant="secondary"
-              >
-                Retry
-              </Button>
-            </View>
-          )
         ) : null}
         {sheet === "reader" && playback.detail ? (
           <Reader
@@ -1733,7 +1686,7 @@ export function AscendWorkspace() {
             currentTime={playback.currentTime}
             detail={playback.detail}
             duration={playback.duration}
-            onBack={() => setSheet("detail")}
+            onBack={() => { setSheetOpen(false); setSheet(undefined); }}
             onMoveChapter={(offset) => void playback.moveChapter(offset)}
             onRefreshUrl={() => void playback.refreshUrl()}
             onSeek={playback.seek}
@@ -1791,6 +1744,16 @@ export function AscendWorkspace() {
           </View>
         ) : null}
       </BottomSheet>
+
+      <BottomSheet hideHeading onOpenChange={(open) => { if (!open) setBriefActionTarget(undefined); }} open={Boolean(briefActionTarget)} title="AI actions">
+        <View style={styles.sheetList}>
+          <BottomSheetItem onPress={() => { const target = briefActionTarget; if (target) void transformBriefEditor(target, "enhance"); }} style={styles.sheetAction} variant="secondary">Enhance</BottomSheetItem>
+          <BottomSheetItem onPress={openBriefEditorTranslation} style={styles.sheetAction} variant="secondary">Translate</BottomSheetItem>
+        </View>
+      </BottomSheet>
+      <BottomSheet footer={<><Button disabled={briefTargetLanguage.trim().length < 2} onPress={() => { const target = briefTranslateTarget; if (target) void transformBriefEditor(target, "translate"); }} size="md" variant="primary">Translate</Button><Button onPress={() => setBriefTranslateTarget(undefined)} size="md" variant="secondary">Close</Button></>} height="full" onOpenChange={(open) => { if (!open) setBriefTranslateTarget(undefined); }} open={Boolean(briefTranslateTarget)} title="Translate text">
+        <View style={styles.customStep}><Text style={styles.inputLabel}>Language</Text><TextInput accessibilityLabel="Book brief translation language" autoFocus maxLength={100} onChangeText={setBriefTargetLanguage} placeholder="Language" value={briefTargetLanguage} /></View>
+      </BottomSheet>
     </KeyboardAvoidingView>
   );
 }
@@ -1806,39 +1769,40 @@ const styles = StyleSheet.create({
     backgroundColor: palette.page,
   },
   localHeader: {
-    minHeight: 54,
+    minHeight: 48,
     paddingHorizontal: spacing.md,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    gap: 8,
   },
   localTitle: {
+    minWidth: 0,
+    flex: 1,
     color: palette.silver50,
-    fontFamily: fonts.light,
-    fontSize: 27,
-    letterSpacing: -0.6,
+    fontFamily: fonts.medium,
+    fontSize: 24,
   },
   searchRow: {
     paddingHorizontal: spacing.md,
+    paddingTop: spacing.xs,
     paddingBottom: spacing.md,
     flexDirection: "row",
     gap: GRID_GAP,
   },
-  searchPill: {
-    height: 44,
-    minWidth: 0,
+  rootSearch: {
+    minHeight: 44,
     flex: 1,
     paddingLeft: 12,
-    paddingRight: 5,
+    paddingRight: 8,
     flexDirection: "row",
     alignItems: "center",
     gap: 7,
     borderWidth: 1,
     borderColor: palette.hairline,
     borderRadius: 999,
-    backgroundColor: palette.panel,
+    backgroundColor: palette.page,
   },
-  searchInput: {
+  rootSearchInput: {
     minHeight: 40,
     flex: 1,
     paddingHorizontal: 0,
@@ -1846,7 +1810,7 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
     fontSize: 13,
   },
-  filterButton: { width: 44, height: 44 },
+  searchHistoryButton: { width: 44, height: 44 },
   library: { flexGrow: 1, paddingHorizontal: spacing.md, paddingBottom: 140 },
   grid: {
     width: "100%",
@@ -1872,13 +1836,6 @@ const styles = StyleSheet.create({
     left: 0,
     width: "100%",
     height: "100%",
-  },
-  fallbackCover: { padding: 10, justifyContent: "space-between" },
-  coverTitle: {
-    color: palette.silver50,
-    fontFamily: fonts.semibold,
-    fontSize: 13,
-    lineHeight: 16,
   },
   cardShade: {
     position: "absolute",
@@ -1911,11 +1868,12 @@ const styles = StyleSheet.create({
   },
   generationFill: { height: "100%", backgroundColor: palette.silver100 },
   state: {
-    minHeight: 320,
+    minHeight: 360,
     alignItems: "center",
     justifyContent: "center",
-    gap: spacing.md,
+    gap: 14,
   },
+  emptyPlusButton: { width: 44, height: 44 },
   stateTitle: {
     color: palette.silver300,
     fontFamily: fonts.medium,
@@ -1930,7 +1888,22 @@ const styles = StyleSheet.create({
     backgroundColor: palette.panel,
   },
   sheetList: { gap: spacing.sm },
+  filterPanel: { gap: 6 },
+  searchHistoryOption: { backgroundColor: palette.page },
+  favoriteSwitchRow: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  favoriteSwitchLabel: { color: palette.muted, fontFamily: fonts.regular, fontSize: 12 },
+  sheetAction: { justifyContent: "center" },
   form: { gap: spacing.sm, paddingBottom: spacing.xl },
+  suggestionStep: { flex: 1, gap: spacing.md },
+  suggestionList: { gap: 6 },
+  suggestionPill: { width: "100%", minHeight: 40, justifyContent: "flex-start", paddingHorizontal: spacing.md },
+  suggestionLoadingPill: { width: "100%", height: 40, borderRadius: 999 },
+  suggestionText: { color: palette.silver100, fontFamily: fonts.regular, fontSize: 13, lineHeight: 17, textAlign: "left" },
+  selectedPrompt: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 12, lineHeight: 17 },
+  customStep: { flex: 1, gap: spacing.sm },
+  stepTextArea: { flex: 1, minHeight: 220, textAlignVertical: "top" },
+  customTextArea: { minHeight: 280, paddingTop: 12, lineHeight: 22, backgroundColor: palette.page, textAlignVertical: "top" },
+  inputLabel: { marginLeft: 2, color: palette.silver300, fontFamily: fonts.medium, fontSize: 12, letterSpacing: 0.4 },
   formHeading: {
     marginBottom: spacing.sm,
     color: palette.silver50,
@@ -1939,11 +1912,12 @@ const styles = StyleSheet.create({
     lineHeight: 31,
   },
   formLabel: {
+    marginLeft: 2,
     marginTop: spacing.sm,
-    color: palette.silver500,
+    color: palette.silver300,
     fontFamily: fonts.medium,
-    fontSize: 9,
-    letterSpacing: tracking.micro,
+    fontSize: 12,
+    letterSpacing: 0.4,
   },
   textArea: { minHeight: 88, textAlignVertical: "top" },
   choiceRow: { flexDirection: "row", gap: GRID_GAP },
@@ -1989,8 +1963,12 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   switchCopy: { minWidth: 0, flex: 1 },
-  footer: { flexDirection: "row", gap: spacing.sm },
-  footerButton: { flex: 1 },
+  footer: { width: "100%", gap: spacing.sm },
+  footerButton: { width: "100%" },
+  detailTabs: { flexDirection: "row", gap: 4, padding: 3, borderWidth: 1, backgroundColor: palette.panel },
+  detailTab: { flex: 1 },
+  languageTabs: { flexDirection: "row", flexWrap: "wrap", gap: 4, padding: 3, borderWidth: 1, backgroundColor: palette.panel },
+  languageTab: { width: "32%" },
   actionStatus: {
     color: palette.silver300,
     fontFamily: fonts.regular,
@@ -2000,6 +1978,7 @@ const styles = StyleSheet.create({
   sourcePicker: { flex: 1, gap: spacing.sm },
   queryError: { gap: spacing.sm, padding: spacing.sm, borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.md, backgroundColor: palette.panel },
   detail: { gap: spacing.lg, paddingBottom: spacing.xl },
+  detailPage: { flexGrow: 1, paddingHorizontal: spacing.md, paddingBottom: 140 },
   detailHero: { flexDirection: "row", gap: spacing.md },
   detailCover: {
     width: 112,
@@ -2046,6 +2025,8 @@ const styles = StyleSheet.create({
     padding: 0,
     borderRadius: radii.sm,
   },
+  chapterCardFill: { width: "100%", height: "100%" },
+  chapterSkeleton: { borderRadius: radii.sm },
   chapterNumber: {
     color: palette.silver300,
     fontFamily: fonts.medium,

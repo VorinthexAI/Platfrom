@@ -345,6 +345,16 @@ test("patches authoritative server favorites across Gallery caches and candidate
   for (const setter of ["setImages", "setSimilarImages", "setCollectionSearchResults", "setCleanupImages", "setDuplicateImages", "setIdentityPickerImages", "setIdentityPickerResults", "setSelectedImage", "setIdentityPickerSelected"]) expect(patch).toContain(setter);
 });
 
+test("loads every collection page while the favorite-only filter is active", () => {
+  expect(source).toContain("const loadMoreFavoriteImages = useEffectEvent(loadMoreImages)");
+  expect(source).toContain("if (!showOnlyFavorites || loading)");
+  expect(source).toContain("if (!activeCollection || !nextCursor || loadingMore || query.trim() || activeSubject || showingSearchResults) return;");
+  expect(source).toContain('const request = `${activeCollection.key}:${nextCursor}`');
+  expect(source).toContain("if (favoritePageRequest.current === request) return;");
+  expect(source).toContain("void loadMoreFavoriteImages();");
+  expect(source).toContain("(searching || loadingMore && showOnlyFavorites) && visibleImages.length === 0");
+});
+
 test("reloads the guarded collection singleton after confirmed global image deletions", () => {
   const helperStart = source.indexOf("function refreshCollectionSingletonAfterImageDeletion");
   const helperEnd = source.indexOf("function updateCollectionSingleton", helperStart);

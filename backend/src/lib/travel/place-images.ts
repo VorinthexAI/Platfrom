@@ -23,7 +23,7 @@ export const placeImageTokenSchema = z.object({
   place: z.object({ kind: z.enum(['country', 'place']), name: z.string().trim().min(1).max(160), summary: z.string().trim().min(1), countryCode: placeCountryCodeSchema, latitude: z.number().finite().min(-90).max(90), longitude: z.number().finite().min(-180).max(180) }).strict(),
 }).strict();
 export type PlaceImageToken = z.infer<typeof placeImageTokenSchema>;
-export function stagedPlaceImageKey(nonce: string) { return `pending/gallery/place-media/${nonce}/preview.png`; }
+export function stagedPlaceImageKey(nonce: string) { return `pending/compass/place-hero/${nonce}/preview.png`; }
 const inlinePngSchema = z.string().max('data:image/png;base64,'.length + GENERATED_IMAGE_BASE64_MAX_LENGTH).regex(/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/);
 export const travelPlaceImageResponseSchema = z.object({
   status: z.literal('ready'),

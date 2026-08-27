@@ -4,54 +4,58 @@ import { newId } from '@/lib/ids';
 import { organizationConnectorSchema } from './connector-schema';
 import { createInboxRepository } from './inbox-repository';
 
-const now = '2026-08-23T00:00:00.000Z';
+const now = '2026-08-25T12:00:00.000Z';
 const embedding = Array(EMBEDDING_DIMENSIONS).fill(0);
 
-describe('inbox repository', () => {
-  test('ensures one row by connectorKey and preserves metadata unless reconnect explicitly overwrites it', async () => {
-    const connector = organizationConnectorSchema.parse({ key: newId(), organizationKey: 'organization', scopeKey: newId(), provider: 'gmail', providerAccountId: 'provider', email: 'person@example.com', encryptedCredentials: 'cipher', encryptionKeyId: 'v1', accessTokenFingerprint: 'a'.repeat(64), scopes: ['email'], createdByMembershipKey: newId(), status: 'active', createdAt: now, updatedAt: now });
-    const calls: Array<{ query: string; bindVars: Record<string, unknown> }> = [];
-    const database = { query: async (query: string, bindVars: Record<string, unknown>) => { calls.push({ query, bindVars }); if (query.includes('UPSERT { scopeKey: @scopeKey, purpose: @purpose }')) return {}; return { next: async () => ({ _key: bindVars.key, _rev: 'inbox-revision', organizationKey: connector.organizationKey, scopeKey: connector.scopeKey, connectorKey: connector.key, name: bindVars.name, isFavorite: false, embedding, createdAt: bindVars.updatedAt, updatedAt: bindVars.updatedAt }) }; }, collection: () => ({}) };
-    await createInboxRepository(database as never).ensure(connector, { name: 'Work' }, embedding, false);
-    const inboxCall = calls.find(({ query }) => query.includes('managedPurpose: "mail-inbox"'))!;
-    expect(inboxCall.query).toContain('@overwrite && OLD.scopeKey == @scopeKey');
-    expect(inboxCall.bindVars).toMatchObject({ connectorKey: connector.key, overwrite: false, name: 'Work' });
-    expect(inboxCall.bindVars.key).toBeDefined();
+function connector() {
+  return organizationConnectorSchema.parse({ key: newId(), organizationKey: 'organization', scopeKey: newId(), provider: 'gmail', providerAccountId: 'provider', email: 'person@example.com', encryptedCredentials: 'cipher', encryptionKeyId: 'v1', accessTokenFingerprint: 'a'.repeat(64), scopes: ['email'], createdByMembershipKey: newId(), status: 'active', createdAt: now, updatedAt: now });
+}
+
+describe('dedicated inbox repository', () => {
+  test('ensures one emailInboxes row by connector and preserves user metadata on overwrite', async () => {
+    const source = connector();
+    let call: { query: string; bindVars: Record<string, any> } | undefined;
+    const database = { query: async (query: string, bindVars: Record<string, any>) => {
+      call = { query, bindVars };
+      return { next: async () => ({ ...bindVars.value, _rev: 'inbox-revision' }) };
+    } };
+    const value = await createInboxRepository(database as never).ensure(source, { name: 'Work' }, embedding, true);
+    expect(value).toMatchObject({ connectorKey: source.key, name: 'Work', isFavorite: false });
+    expect(call?.query).toContain('IN @@inboxes');
+    expect(call?.query).toContain('createdAt: OLD.createdAt');
+    expect(call?.query).toContain('isFavorite: OLD.isFavorite');
+    expect(call?.bindVars).toMatchObject({ '@inboxes': 'emailInboxes' });
   });
 
-  test('authorizes cover images in the same scope inside the update query', async () => {
-    const calls: Array<{ query: string; bindVars: Record<string, unknown> }> = [];
-    const database = { query: async (query: string, bindVars: Record<string, unknown>) => { calls.push({ query, bindVars }); return { next: async () => undefined }; }, collection: () => ({}) };
-    const coverImageKey = newId();
-    await createInboxRepository(database as never).update('organization', newId(), newId(), now, { coverImageKey });
-    expect(calls[0]!.query).toContain('cover.scopeKey == @scopeKey');
-    expect(calls[0]!.query).not.toContain('cover.mutationPolicy');
-    expect(calls[0]!.query).toContain('inbox.updatedAt == @expectedUpdatedAt');
-    expect(calls[0]!.query).toContain('inbox.managedPurpose == "mail-inbox"');
-    expect(calls[0]!.bindVars).toMatchObject({ setCover: true, coverImageKey, expectedUpdatedAt: now });
-  });
-
-  test('fences reconnect metadata overwrite on the inbox revision captured before OAuth upsert', async () => {
-    const connector = organizationConnectorSchema.parse({ key: newId(), organizationKey: 'organization', scopeKey: newId(), provider: 'gmail', providerAccountId: 'provider', email: 'person@example.com', encryptedCredentials: 'cipher', encryptionKeyId: 'v1', accessTokenFingerprint: 'a'.repeat(64), scopes: ['email'], createdByMembershipKey: newId(), status: 'active', createdAt: now, updatedAt: now });
+  test('authorizes cover images and optimistic updates without managed folder markers', async () => {
     let call: { query: string; bindVars: Record<string, unknown> } | undefined;
-    const database = { query: async (query: string, bindVars: Record<string, unknown>) => { if (query.includes('UPSERT { scopeKey: @scopeKey, purpose: @purpose }')) return {}; call = { query, bindVars }; return { next: async () => null }; }, collection: () => ({}) };
-    expect(await createInboxRepository(database as never).ensure(connector, { name: 'Replacement' }, embedding, true, 'inbox-before-oauth')).toBeNull();
-    expect(call?.query).toContain('existing._rev == @expectedRevision');
-    expect(call?.query).toContain('IN folders');
-    expect(call?.bindVars).toMatchObject({ overwrite: true, expectedRevision: 'inbox-before-oauth' });
+    const database = { query: async (query: string, bindVars: Record<string, unknown>) => { call = { query, bindVars }; return { next: async () => null }; } };
+    await createInboxRepository(database as never).update('organization', newId(), newId(), now, { coverImageKey: newId() });
+    expect(call?.query).toContain('cover.scopeKey == @scopeKey');
+    expect(call?.query).toContain('inbox.updatedAt == @expectedUpdatedAt');
+    expect(call?.query).toContain('UPDATE inbox WITH patch IN @@inboxes');
+    expect(call?.query).not.toContain('managedPurpose');
   });
 
-  test('semantic search applies organization, scope, connector, and score boundaries before ranking', async () => {
+  test('fences reconnect overwrite on the captured emailInboxes revision', async () => {
+    const source = connector();
+    let call: { query: string; bindVars: Record<string, unknown> } | undefined;
+    const database = { query: async (query: string, bindVars: Record<string, unknown>) => { call = { query, bindVars }; return { next: async () => null }; } };
+    expect(await createInboxRepository(database as never).ensure(source, { name: 'Replacement' }, embedding, true, 'inbox-before-oauth')).toBeNull();
+    expect(call?.query).toContain('existing._rev == @expectedRevision');
+    expect(call?.query).toContain('IN @@inboxes');
+    expect(call?.bindVars).toMatchObject({ '@inboxes': 'emailInboxes', expectedRevision: 'inbox-before-oauth' });
+  });
+
+  test('semantic search enforces organization, scope, connector, and active Gmail boundaries', async () => {
     const scopeKey = newId();
     const connectorKey = newId();
     let call: { query: string; bindVars: Record<string, unknown> } | undefined;
-    const database = { query: async (query: string, bindVars: Record<string, unknown>) => { call = { query, bindVars }; return { all: async () => [] }; }, collection: () => ({}) };
+    const database = { query: async (query: string, bindVars: Record<string, unknown>) => { call = { query, bindVars }; return { all: async () => [] }; } };
     expect(await createInboxRepository(database as never).search('organization', scopeKey, [connectorKey], embedding, '  Leadership  ', 0.55, 10)).toEqual([]);
-    expect(call?.query).toContain('connector.organizationKey == @organizationKey && connector.scopeKey == @scopeKey');
-    expect(call?.query).toContain('connector._key IN @connectorKeys');
-    expect(call?.query).toContain('folder.managedPurpose == "mail-inbox"');
-    expect(call?.query).toContain('COSINE_SIMILARITY(folder.embedding, @embedding)');
-    expect(call?.query).toContain('SORT direct DESC, score DESC');
-    expect(call?.bindVars).toMatchObject({ organizationKey: 'organization', scopeKey, connectorKeys: [connectorKey], query: 'leadership', minimumScore: 0.55, limit: 10 });
+    expect(call?.query).toContain('inbox.organizationKey == @organizationKey && inbox.scopeKey == @scopeKey');
+    expect(call?.query).toContain('connector.provider == "gmail" && connector.status != "revoked"');
+    expect(call?.query).toContain('FOR inbox IN @@inboxes');
+    expect(call?.bindVars).toMatchObject({ '@inboxes': 'emailInboxes', connectorKeys: [connectorKey], query: 'leadership' });
   });
 });

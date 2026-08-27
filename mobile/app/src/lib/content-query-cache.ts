@@ -122,6 +122,14 @@ export async function refreshContentDocumentAudioVersions(queryClient: QueryClie
   return getContentDocumentAudioVersions(queryClient, context, documentKey);
 }
 
+export function addCachedContentDocumentAudioVersion(queryClient: QueryClient, context: ContentContext, version: ContentDocumentAudioVersion) {
+  queryClient.setQueryData<ContentDocumentAudioVersion[]>(contentQueryKeys.audioVersions(context, version.documentKey), (current = []) => [
+    version,
+    ...current.filter(({ key }) => key !== version.key),
+  ].sort((left, right) => right.version - left.version));
+  return version;
+}
+
 export function updateCachedContentDocumentAudioPlayback(queryClient: QueryClient, context: ContentContext, documentKey: string, audioVersionKey: string, playbackPositionMs: number) {
   queryClient.setQueryData<ContentDocumentAudioVersion[]>(contentQueryKeys.audioVersions(context, documentKey), (current = []) => current.map((version) => ({
     ...version,

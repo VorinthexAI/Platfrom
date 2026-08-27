@@ -21,7 +21,7 @@ export function generatedDocumentFolderKeys(scopeKey: string) {
   return Object.fromEntries(definitions.filter((item) => 'kind' in item).map((item) => [item.kind, generatedDocumentFolderKey(scopeKey, item.purpose)])) as Record<GeneratedDocumentFolderKind, string>;
 }
 
-/** Reconciles stable visible containers without overwriting user favorite state. */
+/** Recreates missing ordinary export destinations without changing surviving user-owned folders. */
 export async function ensureGeneratedDocumentFolders(database: Pick<TravelDatabase, 'query'>, scopeKey: string, at = new Date().toISOString()) {
   const root = definitions[0];
   const rootKey = generatedDocumentFolderKey(scopeKey, root.purpose);
@@ -29,10 +29,10 @@ export async function ensureGeneratedDocumentFolders(database: Pick<TravelDataba
   for (const item of definitions) {
     const key = generatedDocumentFolderKey(scopeKey, item.purpose);
     await database.query(`
-      UPSERT { scopeKey: @scopeKey, purpose: @purpose }
-        INSERT MERGE({ _key: @key, scopeKey: @scopeKey, name: @name, purpose: @purpose, mutationPolicy: "system-container", embedding: @embedding, isFavorite: false, createdAt: @at, updatedAt: @at }, @parentFolderKey == null ? {} : { parentFolderKey: @parentFolderKey })
-        UPDATE { parentFolderKey: @parentFolderKey, name: @name, mutationPolicy: "system-container", updatedAt: OLD.name == @name && OLD.parentFolderKey == @parentFolderKey && OLD.mutationPolicy == "system-container" ? OLD.updatedAt : @at } IN folders OPTIONS { keepNull: false }
-    `, { key, scopeKey, purpose: item.purpose, parentFolderKey: item === root ? null : rootKey, name: item.name, embedding, at });
+      UPSERT { _key: @key }
+        INSERT MERGE({ _key: @key, scopeKey: @scopeKey, name: @name, embedding: @embedding, isFavorite: false, createdAt: @at, updatedAt: @at }, @parentFolderKey == null ? {} : { parentFolderKey: @parentFolderKey })
+        UPDATE {} IN folders
+    `, { key, scopeKey, parentFolderKey: item === root ? null : rootKey, name: item.name, embedding, at });
   }
   return { rootKey, ...generatedDocumentFolderKeys(scopeKey) };
 }

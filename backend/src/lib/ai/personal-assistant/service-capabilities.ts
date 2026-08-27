@@ -7,6 +7,7 @@ import { createTravelService, travelChildrenFindInputSchema, travelCityFindInput
 import { createCountrySearchService } from '@/lib/travel/country-search';
 import { createEmailService, emailDraftComposeInputSchema, emailDraftCreateInputSchema, emailDraftDeleteInputSchema, emailMessageGeneratedListInputSchema, emailMessageSummarizeInputSchema, emailMessageSummaryDeleteInputSchema, emailMessageTranslateInputSchema, emailMessageTranslationDeleteInputSchema, emailOverviewInputSchema, emailReplyContextCreateInputSchema, emailReplyContextDeleteInputSchema, emailReplyContextUpdateInputSchema, emailSemanticSearchInputSchema, emailSimilarFindInputSchema, emailThreadFavoriteInputSchema, emailThreadReadStateInputSchema, emailThreadTrashInputSchema, emailToneCreateInputSchema, emailToneDeleteInputSchema, emailToneUpdateInputSchema, emailTrashClearInputSchema, inboxSortInputSchema, inboxUpdateInputSchema, publicEmailCoreDraftSchema, publicEmailGeneratedDeleteResultSchema, publicEmailSummaryListResultSchema, publicEmailSummaryResultSchema, publicEmailTranslationListResultSchema, publicEmailTranslationResultSchema } from '@/lib/email-inbox/service';
 import { defaultBookService } from '@/lib/books/default-service';
+import { bookGoalSuggestToolInputSchema, bookTopicSuggestToolInputSchema } from '@/lib/books/service';
 import { emailDraftUpdateInputSchema } from '@/lib/email-inbox/service';
 import type { EmailActor } from '@/lib/email-inbox/service';
 import { newId } from '@/lib/ids';
@@ -14,6 +15,7 @@ import { userHiddenOperations } from '@/lib/user-hiddens/operations';
 import type { AssistantCapability, AssistantCapabilityContext } from './capabilities';
 import { appSearchInputSchema, createAppSearchService } from '@/lib/app-search/service';
 import { appTextEnhanceInputSchema, appTextTranslateInputSchema, createAppTransformationService } from '@/lib/app-transformation/service';
+import { appAudioInputSchema, createAppAudioService } from '@/lib/app-audio/service';
 
 const key = z.string().cuid();
 const name = z.string().trim().min(1).max(255);
@@ -147,6 +149,10 @@ export const appTranslateCapability = capability('app.translate', 'Translate tex
   return input.messageKey ? 'signal' : !input.text && input.save ? 'archive' : undefined;
 });
 
+export const appAudioCapability = capability('app.audio', 'Generate and persist a narrated audio version of an Archive document.', appAudioInputSchema, async (input, context) => {
+  return (context.appAudio ?? createAppAudioService({ content: context.contentDependencies, executeContent: context.executeContent })).generateDocument(input, context.domain, { signal: context.signal, timeoutMs: context.timeoutMs });
+}, 'archive');
+
 export const hiddenListCapability = capability('content.hidden.list', 'List content hidden by the current user across Archive and Gallery.', z.object({}).strict(), async (_input, context) => {
   const rows = await userHiddenOperations.list({}, hiddenContext(context));
   return { items: rows.map(({ key, source, sourceKey, createdAt }) => ({ key, source, sourceKey, createdAt })) };
@@ -241,6 +247,8 @@ export const signalCapabilities = [
 
 export const ascendCapabilities = [
   capability('book.list', 'List Ascend books and reading progress.', z.object({}).strict(), async (_input, context) => { const actor = identity(context); return (context.books ?? defaultBookService).overview(actor.serviceContext, actor.userKey); }),
+  capability('book.topic.suggest', 'Suggest ten distinct, creative audiobook topics.', bookTopicSuggestToolInputSchema, async (input, context) => { const actor = identity(context); return (context.books ?? defaultBookService).suggestTopics({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }),
+  capability('book.goal.suggest', 'Suggest ten distinct reader goals for an audiobook topic.', bookGoalSuggestToolInputSchema, async (input, context) => { const actor = identity(context); return (context.books ?? defaultBookService).suggestGoals({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }),
   capability('book.detail', 'Read an Ascend book, chapters, and progress.', z.object({ bookKey: key }).strict(), async ({ bookKey }, context) => { const actor = identity(context); return (context.books ?? defaultBookService).detail(bookKey, actor.serviceContext, actor.userKey); }),
   capability('book.chapter.progress', 'Update progress for an Ascend chapter.', z.object({ bookKey: key, chapterKey: key, progressSeconds: z.number().int().nonnegative(), isCompleted: z.boolean() }).strict(), async ({ bookKey, chapterKey, ...input }, context) => { const actor = identity(context); return (context.books ?? defaultBookService).progress(bookKey, chapterKey, { ...actor.serviceContext, ...input }, actor.userKey); }, 'ascend'),
   capability('book.create', 'Accept a personalized audiobook for durable background generation.', z.object({ topic: z.string().trim().min(3).max(500), goal: z.string().trim().min(3).max(1_000), currentKnowledge: z.string().trim().min(2).max(2_000), writingTone: z.string().trim().min(2).max(200), chapterCount: z.union([z.literal(10), z.literal(25), z.literal(50)]), language: z.string().trim().min(2).max(100), archiveDocumentKeys: z.array(key).max(50), narratorVoiceKey: z.enum(['calm', 'clear', 'warm']), narrationPace: z.number().min(0.75).max(2), chapterImages: z.boolean(), additionalInstructions: z.string().trim().max(12_000).optional() }).strict(), async (input, context) => {

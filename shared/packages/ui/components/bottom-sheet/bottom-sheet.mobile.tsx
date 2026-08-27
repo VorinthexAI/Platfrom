@@ -103,6 +103,7 @@ export type BottomSheetProps = {
   height?: "full";
   hideHeading?: boolean;
   hideCloseButton?: boolean;
+  onDismissRequest?: () => void;
   onOpenChange: (open: boolean) => void;
   onSwipeLeft?: () => void;
   onSwipeRight?: () => void;
@@ -140,6 +141,7 @@ export function BottomSheet({
   height,
   hideHeading = false,
   hideCloseButton = false,
+  onDismissRequest,
   onOpenChange,
   onSwipeLeft,
   onSwipeRight,
@@ -160,6 +162,7 @@ export function BottomSheet({
   const translateY = useRef(new Animated.Value(closedOffsetRef.current)).current;
   const overlayOpacity = useRef(new Animated.Value(0)).current;
   const openRef = useRef(open);
+  const onDismissRequestRef = useRef(onDismissRequest);
   const onOpenChangeRef = useRef(onOpenChange);
   const onSwipeLeftRef = useRef(onSwipeLeft);
   const onSwipeRightRef = useRef(onSwipeRight);
@@ -173,6 +176,7 @@ export function BottomSheet({
   const pageSnapshotRef = useRef<BottomSheetPage>(livePage);
   const [pageTransition, setPageTransition] = useState<{ pageKey: string; previous: BottomSheetPage }>();
   openRef.current = open;
+  onDismissRequestRef.current = onDismissRequest;
   onOpenChangeRef.current = onOpenChange;
   onSwipeLeftRef.current = onSwipeLeft;
   onSwipeRightRef.current = onSwipeRight;
@@ -203,6 +207,10 @@ export function BottomSheet({
 
   const dismiss = () => {
     if (!dismissibleRef.current || dismissingRef.current) return;
+    if (onDismissRequestRef.current) {
+      onDismissRequestRef.current();
+      return;
+    }
     dismissingRef.current = true;
     openRef.current = false;
     animate(false);

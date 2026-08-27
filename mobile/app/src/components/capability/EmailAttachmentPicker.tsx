@@ -263,7 +263,7 @@ export function EmailAttachmentPicker({ context, contextKey, imageUrls: selected
       </ScrollView>
     </BottomSheet>
     <BottomSheet hideHeading onOpenChange={(next) => { if (!next) setFilterOpen(false); }} open={filterOpen} title="">
-      <View style={styles.filterPanel}><View style={styles.favoriteSwitchRow}><Switch accessibilityLabel="Show only favorite attachments" checked={filters.favoritesOnly} onCheckedChange={(checked) => { setFilters((current) => ({ ...current, favoritesOnly: checked })); setFilterOpen(false); }} /><Text style={styles.favoriteSwitchLabel}>Favorites</Text></View><View style={styles.favoriteSwitchRow}><Switch accessibilityLabel="Show hidden attachments" checked={filters.showHidden} onCheckedChange={(checked) => { setFilters((current) => ({ ...current, showHidden: checked })); setFilterOpen(false); }} /><Text style={styles.favoriteSwitchLabel}>Show hidden</Text></View><Button onPress={() => void openSearchHistory()} size="md" style={styles.filterSecondary} variant="secondary">Search history</Button></View>
+      <View style={styles.filterPanel}><View style={styles.favoriteSwitchRow}><Switch accessibilityLabel="Show only favorite attachments" checked={filters.favoritesOnly} onCheckedChange={(checked) => { setFilters((current) => ({ ...current, favoritesOnly: checked })); setFilterOpen(false); }} /><Text style={styles.favoriteSwitchLabel}>Favorites</Text></View><View style={styles.favoriteSwitchRow}><Switch accessibilityLabel="Show hidden attachments" checked={filters.showHidden} onCheckedChange={(checked) => { setFilters((current) => ({ ...current, showHidden: checked })); setFilterOpen(false); }} /><Text style={styles.favoriteSwitchLabel}>Show hidden</Text></View><Button onPress={() => void openSearchHistory()} size="md" style={styles.searchHistoryOption} variant="secondary">Search history</Button></View>
     </BottomSheet>
     <SearchHistorySheet error={historyError} history={history} loading={historyLoading} onClose={() => setHistoryOpen(false)} onRemove={(item) => void removeHistoryQuery(item)} onSelect={useHistoryQuery} open={historyOpen} removingQuery={removingHistoryQuery} />
   </>;
@@ -297,5 +297,5 @@ const styles = StyleSheet.create({
   filterPanel: { gap: 6 },
   favoriteSwitchRow: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: spacing.xs },
   favoriteSwitchLabel: { color: palette.muted, fontFamily: fonts.regular, fontSize: 12 },
-  filterSecondary: { backgroundColor: palette.voidBlack },
+  searchHistoryOption: { backgroundColor: palette.page },
 });

@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test';
 import { assertLocalMailSeedEnvironment, buildMailDevSeedManifest, mailDevFixtureKey, reconcileMailDevSeed, verifyMailDevSeed } from './dev-seed';
 import { folderSchema } from '@/lib/db/folders.node';
 import { toArangoDoc, withArangoKey } from '@/lib/db/base';
-import { mailFolderKeys } from './folders';
 import { createEmailRepository } from './repository';
 
 const scopeKey = 'cmrnlzf640001qc7kazsr96k5';
@@ -31,15 +30,18 @@ describe('mail development seed safety', () => {
     expect(first.attachmentAssets).toHaveLength(9);
     expect(first.connectors.every((connector) => connector.status === 'error' && !connector.syncEnabled && connector.initialSyncCompleted && connector.syncStatus === 'idle' && !connector.watchRegisteredAt && !connector.historyId)).toBe(true);
     expect(first.inboxes.map(({ connectorKey }) => connectorKey)).toEqual(first.connectors.map(({ key }) => key));
-    expect(first.inboxes.map(({ key }) => key)).toEqual(first.managedFolders.filter(({ managedPurpose }) => managedPurpose === 'mail-inbox').map(({ _key }) => String(_key)));
-    expect(first.managedFolders.every((folder) => folderSchema.safeParse(withArangoKey(folder)).success)).toBe(true);
-    expect(first.managedFolders.filter(({ managedPurpose }) => managedPurpose === 'mail-inbox')).toHaveLength(3);
-    expect(first.managedFolders.filter(({ managedPurpose }) => managedPurpose === 'mail-inbox-files')).toHaveLength(3);
-    expect(first.managedFolders.filter(({ managedPurpose }) => managedPurpose === 'mail-thread')).toHaveLength(0);
-    expect(first.documents.filter(({ archiveVisibility }) => archiveVisibility === 'domain-only')).toHaveLength(27);
-    const threadKeys = new Set(first.documents.filter(({ archiveVisibility }) => archiveVisibility === 'domain-only').map(({ key }) => key));
-    expect(first.documents.filter(({ key }) => threadKeys.has(key)).every(({ folderKey }) => folderKey === mailFolderKeys(scopeKey).threads)).toBe(true);
-    expect(first.documents.filter((document) => !threadKeys.has(document.key) && document.content.startsWith('{') && JSON.parse(document.content).kind === 'mail-message').every(({ folderKey }) => first.inboxes.some(({ key }) => key === folderKey))).toBe(true);
+    expect(first.inboxes.every(({ key }) => first.exportFolders.every(({ _key }) => _key !== key))).toBe(true);
+    expect(first.inboxes.every(({ connectorKey }) => first.exportFolders.some(({ _key }) => _key === mailDevFixtureKey('email-archive-export-inbox', scopeKey, connectorKey)))).toBe(true);
+    expect(first.exportFolders.every((folder) => folderSchema.safeParse(withArangoKey(folder)).success)).toBe(true);
+    expect(first.exportFolders.every(({ mutationPolicy, managedPurpose, managedOwnerKey }) => mutationPolicy === 'user' && managedPurpose == null && managedOwnerKey == null)).toBe(true);
+    expect(first.exportFolders.filter(({ name }) => name === 'Files')).toHaveLength(3);
+    const threadDocuments = first.documents.filter((document) => document.content.startsWith('{') && JSON.parse(document.content).kind === 'mail-thread');
+    expect(threadDocuments).toHaveLength(27);
+    expect(threadDocuments.every(({ key }) => !first.emailThreads.some((thread) => thread.key === key))).toBe(true);
+    const inboxExportKeys = new Set(first.inboxes.map(({ connectorKey }) => mailDevFixtureKey('email-archive-export-inbox', scopeKey, connectorKey)));
+    expect(threadDocuments.every(({ folderKey }) => typeof folderKey === 'string' && inboxExportKeys.has(folderKey))).toBe(true);
+    expect(first.documents.filter((document) => document.content.startsWith('{') && JSON.parse(document.content).kind === 'mail-message').every(({ folderKey }) => typeof folderKey === 'string' && inboxExportKeys.has(folderKey))).toBe(true);
+    expect(first.documents.every(({ mutationPolicy }) => mutationPolicy === 'user')).toBe(true);
     expect(new Set(first.documents.map(({ key }) => key)).size).toBe(first.documents.length);
     expect(first.documents.every(({ scopeKey: value, createdAt, updatedAt }) => value === scopeKey && createdAt === updatedAt)).toBe(true);
     expect(first.documents.every(({ developmentFixtureIdentifier }) => developmentFixtureIdentifier === 'vorinthex-local-signal-v1')).toBe(true);
@@ -54,15 +56,11 @@ describe('mail development seed safety', () => {
     const fixture = manifest.fixtures.threads.find(({ messages }) => messages.every(({ hasAttachments }) => hasAttachments));
     if (!fixture) throw new Error('Expected an attachment fixture spanning both thread messages.');
     const threadKey = mailDevFixtureKey('mail-thread', scopeKey, fixture.thread.accountKey, fixture.thread.providerThreadId);
-    const threadDocument = manifest.documents.find(({ key }) => key === threadKey)!;
-    const messageDocuments = manifest.documents.filter((document) => {
-      if (!document.content.startsWith('{')) return false;
-      const payload = JSON.parse(document.content);
-      return payload.kind === 'mail-message' && payload.data.threadKey === threadKey;
-    });
+    const threadRecord = manifest.emailThreads.find(({ key }) => key === threadKey)!;
+    const messageRecords = manifest.emailMessages.filter((message) => message.threadKey === threadKey);
     const database = {
-      async query(_query: string, bindVars?: Record<string, unknown>) {
-        const values = bindVars?.key === threadKey ? [toArangoDoc(threadDocument)] : bindVars?.folderKey ? messageDocuments.map(toArangoDoc) : [];
+      async query(query: string, bindVars?: Record<string, unknown>) {
+        const values = bindVars?.key === threadKey ? [toArangoDoc(threadRecord)] : query.includes('FOR message IN emailMessages') ? messageRecords.map(toArangoDoc) : [];
         return { async next() { return values[0]; }, async all() { return values; } };
       },
       collection() { return {}; },
@@ -77,12 +75,15 @@ describe('mail development seed safety', () => {
     const database = { async query(query: string, bindVars?: Record<string, unknown>) { queries.push({ query, bindVars }); return { async next() { return 0; }, async all() { return []; } }; } };
     const manifest = buildMailDevSeedManifest({ organizationKey, scopeKey, membershipKey, credentials });
     await reconcileMailDevSeed(database, manifest);
-    expect(queries.slice(0, 3).every(({ query }) => query.includes('FILTER current == null ||') && query.includes('UPSERT'))).toBe(true);
-    expect(queries[3]!.query).toContain('staleConnectorKeys');
-    expect(queries[3]!.query).not.toContain('inboxes');
-    expect(queries[4]!.query).toContain('document.developmentFixtureIdentifier == @prefix');
-    expect(queries[4]!.query).toContain('<!-- vorinthex-mail-tone ');
-    expect(queries[4]!.bindVars?.keep).toEqual(manifest.documents.map(({ key }) => key));
+    const upserts = queries.filter(({ query }) => query.includes('UPSERT'));
+    expect(upserts).toHaveLength(9);
+    expect(upserts.every(({ query }) => query.includes('FILTER current == null ||'))).toBe(true);
+    expect(upserts.map(({ bindVars }) => bindVars?.['@collection'])).toEqual(['organizationConnectors', 'emailInboxes', 'folders', 'emailThreads', 'emailMessages', 'emailDrafts', 'emailTones', 'emailReplyContext', 'documents']);
+    const staleConnectors = queries.find(({ query }) => query.includes('staleConnectorKeys'))!;
+    expect(staleConnectors.query).toContain('REMOVE inbox IN emailInboxes');
+    const staleDocuments = queries.find(({ query }) => query.includes('document.developmentFixtureIdentifier == @prefix'))!;
+    expect(staleDocuments.query).toContain('<!-- vorinthex-mail-tone ');
+    expect(staleDocuments.bindVars?.keep).toEqual(manifest.documents.map(({ key }) => key));
   });
 
   test('verification compares exact fixture state while preserving only encrypted credential fields', async () => {

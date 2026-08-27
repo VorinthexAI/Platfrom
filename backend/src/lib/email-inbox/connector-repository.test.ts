@@ -86,8 +86,9 @@ describe('organization connector repository', () => {
     expect(await createConnectorRepository(database as never).rollbackReconnect({ connectorKey: previous.key, connectorRevision: 'connector-rev', previousConnector: previous, inboxRevision: 'inbox-rev', previousInbox: null })).toBe(true);
     expect(call?.query).toContain('connector._rev == @connectorRevision');
     expect(call?.query).toContain('inbox._rev == @inboxRevision');
-    expect(call?.query).toContain('REMOVE inbox IN folders');
-    expect(call?.query).toContain('inbox.managedPurpose == "mail-inbox"');
+    expect(call?.query).toContain('REMOVE inbox IN @@inboxes');
+    expect(call?.bindVars).toMatchObject({ '@inboxes': 'emailInboxes' });
+    expect(call?.query).not.toContain('managedPurpose');
     expect(call?.bindVars).toMatchObject({ connectorRevision: 'connector-rev', inboxRevision: 'inbox-rev' });
   });
 

@@ -58,6 +58,7 @@ describe('default personal containers', () => {
   test('initializes canonical mail tones for new and existing personal contexts', () => {
     expect(provisioningSource).toContain('async function ensurePersonalMailDefaults(scopeKey: string)');
     expect(provisioningSource).toContain('createEmailRepository(db).initializeTones(scopeKey)');
+    expect(provisioningSource).not.toContain('ensureMailFolders');
     expect(provisioningSource.match(/ensurePersonalMailDefaults\(/g)).toHaveLength(3);
   });
 });

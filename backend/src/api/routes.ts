@@ -52,6 +52,7 @@ import { userHiddenHandlers } from './user-hiddens';
 import { streamEvents } from './events';
 import { searchApp } from './app-search';
 import { appTransformationHandlers } from './app-transformation';
+import { appAudioHandler } from './app-audio';
 
 const challengeHash = z.string().regex(/^[a-f0-9]{64}$/);
 const tokenHashBodyBase = strictObject({ token_hash: challengeHash });
@@ -493,6 +494,7 @@ export function registerRoutes(app: Hono) {
   app.post('/travel/trips/attachments/set', travelHandlers.setTripAttachments);
   app.post('/app/enhance', appTransformationHandlers.enhance);
   app.post('/app/translate', appTransformationHandlers.translate);
+  app.post('/app/audio', appAudioHandler);
   app.post('/email/overview', emailHandlers.overview);
   app.post('/email/inboxes/search', emailHandlers.searchInboxes);
   app.post('/email/tones/search', emailHandlers.searchTones);
@@ -532,6 +534,8 @@ export function registerRoutes(app: Hono) {
   app.post('/email/drafts/:draftKey/send', emailHandlers.sendDraft);
   app.post('/email/disconnect', emailHandlers.disconnect);
   app.post('/books/overview', bookHandlers.overview);
+  app.post('/books/topic-suggestions', bookHandlers.topicSuggestions);
+  app.post('/books/goal-suggestions', bookHandlers.goalSuggestions);
   app.post('/assistant/respond', respondToAssistant);
   app.post('/books', bookHandlers.create);
   app.post('/books/:bookKey/detail', bookHandlers.detail);

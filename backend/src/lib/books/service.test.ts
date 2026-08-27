@@ -11,12 +11,43 @@ const fingerprint = createHash('sha256').update(JSON.stringify((({ organizationK
 const row = (status: 'queued' | 'failed' | 'cancelled' | 'ready' = 'queued') => ({ book: { key: bookKey, scopeKey, title: input.topic, description: input.goal, goal: input.goal, audience: input.currentKnowledge, outcome: input.goal, language: input.language, narratorVoiceKey: input.narratorVoiceKey, narrationPace: 1, generationRequestKey: input.generationRequestKey, generationBriefFingerprint: fingerprint, generationInput: (({ organizationKey: _o, scopeKey: _s, generationRequestKey: _r, ...value }) => value)(input), generationOwnerKey: userKey, generationStage: 'accepted' as const, generationCompletedUnits: 0, generationTotalUnits: 34, generationAttempt: 0, estimatedMinutes: 0, chapterCount: 10, isFavorite: false, status, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), createdAt: now, updatedAt: now }, chapters: [] });
 
 describe('book service asynchronous lifecycle', () => {
+  test('authorizes and generates ten creative topic suggestions through the AI action boundary', async () => {
+    const calls: unknown[][] = [];
+    const topics = Array.from({ length: 10 }, (_, index) => `Unexpected learning topic ${index + 1}`);
+    const service = createBookService({
+      repository: { authorize: async (...args: unknown[]) => { calls.push(['authorize', ...args]); } } as never,
+      suggestTopics: async (...args) => { calls.push(['suggest', ...args]); return JSON.stringify({ topics }); },
+    });
+    await expect(service.suggestTopics({ organizationKey, scopeKey, excludeTopics: ['Old idea'] }, userKey)).resolves.toEqual({ topics });
+    expect(calls[0]).toEqual(['authorize', { organizationKey, scopeKey, userKey }, false]);
+    expect(calls[1]?.[1]).toMatchObject({ options: { temperature: 1, maxTokens: 800 } });
+    expect(JSON.stringify(calls[1]?.[1])).toContain('Old idea');
+    expect(calls[1]?.[2]).toBe(organizationKey);
+  });
+
+  test('strictly rejects invalid topic requests and malformed model output', async () => {
+    let generated = 0;
+    const service = createBookService({ repository: { authorize: async () => {} } as never, suggestTopics: async () => { generated += 1; return JSON.stringify({ topics: Array(10).fill('Duplicate topic') }); } });
+    await expect(service.suggestTopics({ organizationKey, scopeKey, unknown: true }, userKey)).rejects.toBeDefined();
+    expect(generated).toBe(0);
+    await expect(service.suggestTopics({ organizationKey, scopeKey }, userKey)).rejects.toThrow('Topics must be unique');
+  });
+
+  test('generates ten unique goals for the selected topic and excludes the previous batch', async () => {
+    const goals = Array.from({ length: 10 }, (_, index) => `Concrete reader outcome ${index + 1}`);
+    let prompt: unknown;
+    const service = createBookService({ repository: { authorize: async () => {} } as never, suggestTopics: async (input) => { prompt = input; return JSON.stringify({ goals }); } });
+    await expect(service.suggestGoals({ organizationKey, scopeKey, topic: 'Decision making', excludeGoals: ['Old goal'] }, userKey)).resolves.toEqual({ goals });
+    expect(JSON.stringify(prompt)).toContain('Decision making');
+    expect(JSON.stringify(prompt)).toContain('Old goal');
+  });
+
   test('accepts and enqueues without running generation', async () => {
     let current: any; const jobs: unknown[] = [];
     const repository: any = { authorize: async () => {}, findByGenerationRequest: async () => null, detail: async () => current };
     const generator: any = { create: async () => { current = row(); return bookKey; }, write: async () => { throw new Error('must be background'); } };
     const result = await createBookService({ repository, generator, enqueue: async (job) => { jobs.push(job); return { jobId: bookKey }; }, signUrl: async () => 'signed', publishChanged: async () => {} }).create(input, userKey);
-    expect(result).toMatchObject({ key: bookKey, status: 'queued', generationProgressPercent: 0 });
+    expect(result).toMatchObject({ key: bookKey, status: 'queued', isFavorite: false, generationProgressPercent: 0 });
     expect(jobs).toEqual([{ schemaVersion: 1, bookKey, organizationKey, scopeKey, userKey }]);
   });
 
@@ -26,13 +57,12 @@ describe('book service asynchronous lifecycle', () => {
     await expect(service.create({ ...input, unknown: true }, userKey)).rejects.toBeDefined();
   });
 
-  test('marks accepted work failed when durable queue insertion fails', async () => {
-    let current: any; const patches: any[] = [];
-    const repository: any = { authorize: async () => {}, findByGenerationRequest: async () => null, detail: async () => current, updateBook: async (_context: unknown, _bookKey: string, patch: unknown) => { patches.push(patch); current = row('failed'); return current.book; } };
+  test('keeps accepted work queued for recovery when Redis insertion fails', async () => {
+    let current: any;
+    const repository: any = { authorize: async () => {}, findByGenerationRequest: async () => null, detail: async () => current };
     const generator: any = { create: async () => { current = row(); return bookKey; } };
     const service = createBookService({ repository, generator, enqueue: async () => { throw new Error('queue unavailable'); }, publishChanged: async () => {} });
-    await expect(service.create(input, userKey)).rejects.toThrow('queue unavailable');
-    expect(patches).toContainEqual(expect.objectContaining({ status: 'failed', generationError: expect.stringContaining('could not be queued') }));
+    await expect(service.create(input, userKey)).resolves.toMatchObject({ key: bookKey, status: 'queued' });
   });
 
   test('repairs a missing stable job when create is replayed', async () => {
@@ -49,6 +79,14 @@ describe('book service asynchronous lifecycle', () => {
     const result = await createBookService({ repository, enqueue: async (job) => { jobs.push(job); return { jobId: bookKey }; }, signUrl: async () => 'signed', publishChanged: async () => {} }).retry(bookKey, { organizationKey, scopeKey }, userKey);
     expect(result).toMatchObject({ key: bookKey, status: 'queued' });
     expect(jobs).toHaveLength(1);
+  });
+
+  test('keeps a retried book queued when Redis is temporarily unavailable', async () => {
+    const current: any = row();
+    const repository: any = { retryGeneration: async () => current.book, detail: async () => current };
+    const service = createBookService({ repository, enqueue: async () => { throw new Error('redis unavailable'); }, signUrl: async () => 'signed', publishChanged: async () => {} });
+
+    await expect(service.retry(bookKey, { organizationKey, scopeKey }, userKey)).resolves.toMatchObject({ key: bookKey, status: 'queued' });
   });
 
   test('persists terminal worker failures through the repository guard', async () => {

@@ -4,8 +4,9 @@ import { isArangoUniqueConstraintError, toArangoDoc, withArangoKey } from '@/lib
 import { newId } from '@/lib/ids';
 import { decryptEmailConnectorCredentials, encryptEmailConnectorCredentials, tokenFingerprint } from './connector-crypto';
 import { ORGANIZATION_CONNECTORS_COLLECTION, organizationConnectorSchema, type EmailConnectorCredentials, type EmailProvider, type OrganizationConnector } from './connector-schema';
-import { ensureMailFolders, mailFolderKeys, mailInboxFolderKey } from './folders';
+import { emailInboxKey } from './inbox-key';
 import { inboxSchema, type Inbox } from './inbox-schema';
+import { EMAIL_INBOXES_COLLECTION } from '@/lib/db/email-inboxes.node';
 
 type Database = Pick<typeof db, 'query' | 'collection'>;
 export type ConnectorPublic = Pick<OrganizationConnector, 'key' | 'organizationKey' | 'scopeKey' | 'provider' | 'email' | 'status' | 'syncEnabled' | 'initialSyncCompleted' | 'syncStatus' | 'lastSyncedAt' | 'createdAt' | 'updatedAt'> & { syncError?: string };
@@ -65,7 +66,6 @@ export function createConnectorRepository(database: Database = db) {
       initializeInactive?: boolean;
       expectedRevision?: string | null;
     }) {
-      await ensureMailFolders(database, input.scopeKey);
       const timestamp = new Date().toISOString();
       const provider = input.provider ?? 'gmail';
       const binding = { organizationKey: input.organizationKey, scopeKey: input.scopeKey, providerAccountId: input.providerAccountId, provider };
@@ -134,22 +134,23 @@ export function createConnectorRepository(database: Database = db) {
         ? 'REPLACE connector WITH @previousConnector IN @@collection'
         : 'UPDATE connector WITH { status: "revoked", syncEnabled: false, encryptedCredentials: "revoked", revokedAt: @timestamp, updatedAt: @timestamp } IN @@collection';
       const inboxMutation = input.inboxRevision
-        ? input.previousInbox ? 'REPLACE inbox WITH @previousInbox IN folders' : 'REMOVE inbox IN folders'
+        ? input.previousInbox ? 'REPLACE inbox WITH @previousInbox IN @@inboxes' : 'REMOVE inbox IN @@inboxes'
         : '';
       const previousInbox = input.previousInbox ? inboxSchema.parse(input.previousInbox) : null;
       const cursor = await database.query(`
         LET connector = DOCUMENT(@@collection, @connectorKey)
-        LET inbox = DOCUMENT(folders, @inboxKey)
+        LET inbox = DOCUMENT(@@inboxes, @inboxKey)
         FILTER connector != null && connector._rev == @connectorRevision
-        FILTER @inboxRevision == null || (inbox != null && inbox.scopeKey == connector.scopeKey && inbox.managedPurpose == "mail-inbox" && inbox.managedOwnerKey == connector._key && inbox._rev == @inboxRevision)
+        FILTER @inboxRevision == null || (inbox != null && inbox.organizationKey == connector.organizationKey && inbox.scopeKey == connector.scopeKey && inbox.connectorKey == connector._key && inbox._rev == @inboxRevision)
         ${connectorMutation}
         ${inboxMutation}
         RETURN true
       `, {
         '@collection': ORGANIZATION_CONNECTORS_COLLECTION,
-        connectorKey: input.connectorKey, connectorRevision: input.connectorRevision, inboxKey: input.inboxKey ?? previousInbox?.key ?? (input.previousConnector ? mailInboxFolderKey(input.previousConnector.scopeKey, input.connectorKey) : null), inboxRevision: input.inboxRevision ?? null, timestamp,
+        '@inboxes': EMAIL_INBOXES_COLLECTION,
+        connectorKey: input.connectorKey, connectorRevision: input.connectorRevision, inboxKey: input.inboxKey ?? previousInbox?.key ?? (input.previousConnector ? emailInboxKey(input.previousConnector.scopeKey, input.connectorKey) : null), inboxRevision: input.inboxRevision ?? null, timestamp,
         previousConnector: input.previousConnector ? toArangoDoc(organizationConnectorSchema.parse(input.previousConnector)) : null,
-        previousInbox: previousInbox ? toArangoDoc({ key: previousInbox.key, scopeKey: previousInbox.scopeKey, parentFolderKey: mailFolderKeys(previousInbox.scopeKey).inboxes, name: previousInbox.name, ...(previousInbox.description ? { description: previousInbox.description } : {}), ...(previousInbox.coverImageKey ? { coverImageKey: previousInbox.coverImageKey } : {}), managedPurpose: 'mail-inbox', managedOwnerKey: previousInbox.connectorKey, mutationPolicy: 'system-container', archiveVisibility: 'visible', embedding: previousInbox.embedding, isFavorite: previousInbox.isFavorite, createdAt: previousInbox.createdAt, updatedAt: previousInbox.updatedAt }) : null,
+        previousInbox: previousInbox ? toArangoDoc(previousInbox) : null,
       });
       return (await cursor.next()) === true;
     },

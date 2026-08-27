@@ -53,9 +53,10 @@ inbox facets remain email-domain boundaries.
 
 Generated travel references use the same canonical travel service from HTTP
 and Core. `trip.guide.generate/list` and the parameterized
-`place.reference.generate/list` persist ordinary Archive documents plus one
-private `generatedDocumentBindings` relation; no travel adapter owns a second
-document implementation.
+`place.reference.generate/list` persist private `tripGuides` or
+`placeReferences` rows first, then create ordinary Archive exports just in
+time. `placeHeroMedia` owns generated hero bytes; Gallery rows are exports and
+do not control Compass lifecycle.
 
 ## Adding A Tool
 

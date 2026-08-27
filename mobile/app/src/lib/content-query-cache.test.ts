@@ -13,6 +13,7 @@ mock.module("./content-client", () => ({
 
 const {
   addCachedContentDocument,
+  addCachedContentDocumentAudioVersion,
   addCachedContentDocumentSummary,
   addCachedContentFolder,
   contentFolderChildren,
@@ -110,6 +111,19 @@ test("converges document audio selection, progress, and dismissal in cache", () 
   clearCachedContentDocumentAudioPlayback(client, context, "document-a");
   expect(client.getQueryData<any[]>(key)?.every(({ isCurrent }) => !isCurrent)).toBe(true);
   expect(client.getQueryData<any[]>(key)?.[1]?.playbackPositionMs).toBe(12_345);
+});
+
+test("adds generated audio versions in descending version order without duplicates", () => {
+  const client = new QueryClient();
+  const key = contentQueryKeys.audioVersions(context, "document-a");
+  const first = { key: "audio-a", documentKey: "document-a", version: 1 } as any;
+  const second = { key: "audio-b", documentKey: "document-a", version: 2 } as any;
+  client.setQueryData(key, [first]);
+
+  addCachedContentDocumentAudioVersion(client, context, second);
+  addCachedContentDocumentAudioVersion(client, context, { ...second, current: true });
+
+  expect(client.getQueryData<any[]>(key)).toEqual([{ ...second, current: true }, first]);
 });
 
 test("derives folder children, ancestry, and descendants from one tree", () => {

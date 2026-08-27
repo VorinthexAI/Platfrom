@@ -9,7 +9,6 @@ import { ProviderExecutionError } from '@/lib/ai/router/errors';
 import { processEmailSyncJob } from './sync-queue';
 import { createEmailAttachmentIngestionService, emailMediaCollectionKey } from './attachment-ingestion';
 import { documentExtract } from '@/lib/ai/document-processing';
-import { mailInboxFilesFolderKey } from './folders';
 
 const userKey = 'cmrnlzf650002qc7k4p5zem5w';
 const scopeKey = 'cmrnlzf640001qc7kazsr96k5';
@@ -1313,7 +1312,7 @@ describe('email synchronization', () => {
     const raw = { ...source, payload: { mimeType: 'multipart/mixed', headers: source.payload.headers, parts: [source.payload, { mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', filename: 'retry.docx', body: { attachmentId: 'retry-docx', size: docx.byteLength } }] } };
     const states: Array<{ state: string; input: any }> = [];
     const failure = new Error('Mammoth worker resource temporarily unavailable');
-    const attachmentFolderKey = mailInboxFilesFolderKey(scopeKey, connector.key);
+    const attachmentFolderKey = newId();
     const attachmentIngestion = createEmailAttachmentIngestionService({
       repository: {
         activeMembership: async () => scopeKey,
@@ -1900,25 +1899,27 @@ describe('new email drafting', () => {
     expect(() => emailDraftComposeInputSchema.parse({ to: ['person@example.com'], cc: ['copy@example.com'], bcc: ['COPY@example.com'], subject: 'Plan', tone: 'direct' })).toThrow('already present in CC');
   });
 
-  test('preserves exact authored content without tone lookup or AI execution', async () => {
+  test('preserves exact authored content without tone lookup or AI execution and embeds it', async () => {
     const calls: string[] = [];
     const created: any[] = [];
+    const semanticEmbedding = Array(EMBEDDING_DIMENSIONS).fill(0.25);
     const repository = {
       writingProfile: async () => { calls.push('tone'); throw new Error('must not resolve tone'); },
       resolveAttachments: async (_scopeKey: string, refs: unknown[]) => { calls.push('attachments'); return refs; },
       attachmentResources: async () => [{ type: 'document', key: userKey, name: 'attachment.txt', content: 'attachment' }],
       createDraft: async (input: any) => { calls.push('persist'); created.push(input); return { key: userKey, createdAt: now, updatedAt: now, ...input }; },
     };
-    const service = createEmailService({ repository: repository as never, connectors: { listAuthorizedScope: async () => [connector] } as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => { calls.push('embed'); throw new Error('must not embed'); }, ask: (async () => { calls.push('ask'); throw new Error('must not ask'); }) as never });
+    const service = createEmailService({ repository: repository as never, connectors: { listAuthorizedScope: async () => [connector] } as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => { calls.push('embed'); return semanticEmbedding; }, ask: (async () => { calls.push('ask'); throw new Error('must not ask'); }) as never });
     const result = await service.draftNew(actor, { to: ['person@example.com'], subject: '', authoredBody: '', generationMode: 'preserve', attachments: [{ type: 'document', key: userKey }] });
-    expect(calls).toEqual(['attachments', 'persist']);
+    expect(calls).toEqual(['attachments', 'embed', 'persist']);
     expect(result).toMatchObject({ subject: '', finalContent: '', status: 'edited' });
-    expect(created[0]).toMatchObject({ subject: '', generatedContent: '(Empty message)', finalContent: '', status: 'edited', embedding });
+    expect(created[0]).toMatchObject({ subject: '', generatedContent: '(Empty message)', finalContent: '', status: 'edited', embedding: semanticEmbedding });
     expect(created[0]).not.toHaveProperty('tone');
   });
 
-  test('preserves whitespace-only edits without invoking embedding', async () => {
+  test('preserves whitespace-only edits with a searchable empty-message embedding', async () => {
     let updated: any;
+    const semanticEmbedding = Array(EMBEDDING_DIMENSIONS).fill(0.25);
     const repository = {
       updateDraft: async (_scopeKey: string, input: any) => {
         updated = input;
@@ -1926,12 +1927,12 @@ describe('new email drafting', () => {
         return { key: userKey, scopeKey, variant: 'new', accountKey: connector.key, to: ['person@example.com'], subject: '', generatedContent: 'Generated', finalContent, status: 'edited', embedding: nextEmbedding, createdAt: now, updatedAt: now };
       },
     };
-    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => { throw new Error('must not embed'); } });
+    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => semanticEmbedding });
     const result = await service.updateDraft(actor, { draftKey: userKey, finalContent: '   ' });
     expect(result.finalContent).toBe('   ');
     expect(updated.finalContent).toBe('   ');
     expect(updated.embedding).toHaveLength(1536);
-    expect(updated.embedding.every((value: number) => value === 0)).toBe(true);
+    expect(updated.embedding).toEqual(semanticEmbedding);
   });
 
   test('requires a strict non-empty draft patch with at most twenty distinct attachment refs', () => {

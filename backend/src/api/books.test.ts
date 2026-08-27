@@ -18,7 +18,7 @@ describe('book HTTP handlers', () => {
 
   test('registers all mobile book routes', async () => {
     const app = new Hono(); registerRoutes(app); const book = newId(); const chapter = newId();
-    for (const [method, path] of [['POST', '/assistant/respond'], ['POST', '/books/overview'], ['POST', '/books'], ['POST', `/books/${book}/detail`], ['POST', `/books/${book}/retry`], ['POST', `/books/${book}/cancel`], ['DELETE', `/books/${book}`], ['PATCH', `/books/${book}/chapters/${chapter}/progress`]]) {
+    for (const [method, path] of [['POST', '/assistant/respond'], ['POST', '/books/overview'], ['POST', '/books/topic-suggestions'], ['POST', '/books/goal-suggestions'], ['POST', '/books'], ['POST', `/books/${book}/detail`], ['POST', `/books/${book}/retry`], ['POST', `/books/${book}/cancel`], ['DELETE', `/books/${book}`], ['PATCH', `/books/${book}/chapters/${chapter}/progress`]]) {
       expect((await app.request(path, { method, headers: { 'content-type': 'application/json' }, body: '{}' })).status).toBe(401);
     }
   });
@@ -32,6 +32,34 @@ describe('book HTTP handlers', () => {
     const response = await app.request('/books', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     expect(response.status).toBe(202);
     expect(calls).toEqual([[body, userKey]]);
+  });
+
+  test('keeps topic suggestion HTTP and Core callers on the same canonical service method', async () => {
+    const organizationKey = newId(); const scopeKey = newId(); const userKey = newId(); const calls: unknown[][] = [];
+    const service = { suggestTopics: async (...args: unknown[]) => { calls.push(args); return { topics: Array.from({ length: 10 }, (_, index) => `Topic ${index + 1}`) }; } } as never;
+    const handlers = createBookHandlers({ service, getIdentity: async () => ({ key: userKey, identityType: 'user' }) });
+    const app = new Hono(); app.post('/books/topic-suggestions', handlers.topicSuggestions);
+    const body = { organizationKey, scopeKey, excludeTopics: ['Old idea'] };
+    expect((await app.request('/books/topic-suggestions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).status).toBe(200);
+    const domain = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const capability = defaultAssistantCapabilityRegistry.resolve('book-workspace').find(({ definition }) => definition.name === 'book.topic.suggest')!;
+    await capability.execute({ excludeTopics: ['Old idea'] }, { domain, books: service } as any);
+    expect(calls[0]).toEqual([body, userKey, { signal: expect.any(AbortSignal), timeoutMs: 30_000 }]);
+    expect(calls[1]).toEqual([body, userKey, { signal: undefined, timeoutMs: undefined }]);
+  });
+
+  test('keeps goal suggestion HTTP and Core callers on the same canonical service method', async () => {
+    const organizationKey = newId(); const scopeKey = newId(); const userKey = newId(); const calls: unknown[][] = [];
+    const service = { suggestGoals: async (...args: unknown[]) => { calls.push(args); return { goals: Array.from({ length: 10 }, (_, index) => `Goal ${index + 1}`) }; } } as never;
+    const handlers = createBookHandlers({ service, getIdentity: async () => ({ key: userKey, identityType: 'user' }) });
+    const app = new Hono(); app.post('/books/goal-suggestions', handlers.goalSuggestions);
+    const body = { organizationKey, scopeKey, topic: 'Decision making', excludeGoals: ['Old goal'] };
+    expect((await app.request('/books/goal-suggestions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).status).toBe(200);
+    const domain = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const capability = defaultAssistantCapabilityRegistry.resolve('book-workspace').find(({ definition }) => definition.name === 'book.goal.suggest')!;
+    await capability.execute({ topic: 'Decision making', excludeGoals: ['Old goal'] }, { domain, books: service } as any);
+    expect(calls[0]).toEqual([body, userKey, { signal: expect.any(AbortSignal), timeoutMs: 30_000 }]);
+    expect(calls[1]).toEqual([body, userKey, { signal: undefined, timeoutMs: undefined }]);
   });
 
   test('maps generation request key conflicts to HTTP 409', async () => {

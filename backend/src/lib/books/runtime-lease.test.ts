@@ -27,10 +27,10 @@ describe('book runtime generation lease fencing', () => {
   });
 
   test('stops an active worker when its book is hard-deleted during provider work', async () => {
-    let checks = 0; let persistedSources = false; let uploaded = false;
-    const repository: any = { detail: async () => ({ book: {}, chapters: [] }), sources: async () => [], updateBook: async () => ({}), isCancellationRequested: async () => { checks += 1; if (checks > 1) throw new BookRepositoryError('not_found'); return false; }, addSources: async () => { persistedSources = true; }, enqueueUnreferencedStorage: async () => {} };
-    const runtime = createBookRuntime({ repository, research: async () => ({ text: 'Evidence', citations: [{ title: 'Source', url: 'https://example.com' }], sources: ['https://example.com'] }), storage: { upload: async () => { uploaded = true; return { storageKey: 'x' }; }, delete: async () => {}, copy: async () => ({ storageKey: 'x' }), download: async () => ({ bytes: new Uint8Array(), mimeType: 'text/plain' }) }, publishChanged: async () => {} });
+    let checks = 0; let uploaded = false;
+    const repository: any = { detail: async () => ({ book: {}, chapters: [] }), sources: async () => [], updateBook: async () => ({}), isCancellationRequested: async () => { checks += 1; if (checks > 1) throw new BookRepositoryError('not_found'); return false; }, enqueueUnreferencedStorage: async () => {} };
+    const runtime = createBookRuntime({ repository, ask: async () => JSON.stringify({ title: 'Book', description: 'Description', outcome: 'Outcome', summary: 'Summary' }), storage: { upload: async () => { uploaded = true; return { storageKey: 'x' }; }, delete: async () => {}, copy: async () => ({ storageKey: 'x' }), download: async () => ({ bytes: new Uint8Array(), mimeType: 'text/plain' }) }, publishChanged: async () => {} });
     await expect(runtime.write(bookKey, input, { organizationKey, scopeKey, userKey, generationLeaseToken: 'owner' })).rejects.toMatchObject({ reason: 'not_found' });
-    expect(persistedSources).toBe(false); expect(uploaded).toBe(false);
+    expect(uploaded).toBe(false);
   });
 });

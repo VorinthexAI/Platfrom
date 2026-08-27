@@ -21,6 +21,7 @@ export const bookSchema = z.strictObject({
   subtitle: z.string().min(1),
   description: z.string().min(1),
   status: bookStatusSchema,
+  isFavorite: z.boolean(),
   coverUrl: z.url().optional(),
   narrator: narratorVoiceSchema.optional(),
   estimatedMinutes: z.number().int().nonnegative(),
@@ -50,7 +51,7 @@ export const createBookRequestSchema = contextSchema.extend({
   generationRequestKey: z.string().trim().min(1).max(200),
   topic: z.string().trim().min(3).max(2_000),
   goal: z.string().trim().min(3).max(2_000),
-  currentKnowledge: z.string().trim().min(2).max(2_000),
+  currentKnowledge: z.string().trim().max(2_000),
   chapterCount: requestedChapterCountSchema,
   language: z.string().trim().min(2).max(100),
   writingTone: z.string().trim().min(2).max(200),
@@ -66,6 +67,14 @@ export const chapterProgressRequestSchema = contextSchema.extend({
   progressSeconds: z.number().int().nonnegative(),
   isCompleted: z.boolean(),
 });
+export const bookTopicSuggestionsRequestSchema = contextSchema.extend({ excludeTopics: z.array(z.string().trim().min(3).max(160)).max(40).default([]) });
+export const bookTopicSuggestionsResponseSchema = z.strictObject({ topics: z.array(z.string().trim().min(3).max(160)).length(10).superRefine((topics, context) => {
+  if (new Set(topics.map((topic) => topic.toLocaleLowerCase())).size !== topics.length) context.addIssue({ code: "custom", message: "Topics must be unique." });
+}) });
+export const bookGoalSuggestionsRequestSchema = contextSchema.extend({ topic: z.string().trim().min(3).max(2_000), excludeGoals: z.array(z.string().trim().min(3).max(160)).max(40).default([]) });
+export const bookGoalSuggestionsResponseSchema = z.strictObject({ goals: z.array(z.string().trim().min(3).max(160)).length(10).superRefine((goals, context) => {
+  if (new Set(goals.map((goal) => goal.toLocaleLowerCase())).size !== goals.length) context.addIssue({ code: "custom", message: "Goals must be unique." });
+}) });
 
 const overviewResponseSchema = z.strictObject({ books: z.array(bookSchema) });
 const detailResponseSchema = z.strictObject({ book: bookSchema, chapters: z.array(bookChapterSchema) });
@@ -124,6 +133,8 @@ async function request<T>(method: "post" | "patch" | "delete", path: string, bod
 }
 
 export function fetchBooksOverview() { return request("post", "/books/overview", {}, overviewRequestSchema, overviewResponseSchema); }
+export function suggestBookTopics(excludeTopics: string[] = []) { return request("post", "/books/topic-suggestions", { excludeTopics }, bookTopicSuggestionsRequestSchema, bookTopicSuggestionsResponseSchema, 30_000); }
+export function suggestBookGoals(topic: string, excludeGoals: string[] = []) { return request("post", "/books/goal-suggestions", { topic, excludeGoals }, bookGoalSuggestionsRequestSchema, bookGoalSuggestionsResponseSchema, 30_000); }
 export function createBook(input: CreateBookInput, generationRequestKey: string) { return request("post", "/books", { ...input, generationRequestKey }, createBookRequestSchema, bookSchema, 15 * 60_000); }
 export function fetchBookDetail(bookKey: string) { return request("post", `/books/${keySchema.parse(bookKey)}/detail`, {}, detailRequestSchema, detailResponseSchema); }
 export function retryBook(bookKey: string, requestKey: string) { return request("post", `/books/${keySchema.parse(bookKey)}/retry`, { requestKey }, mutationRequestSchema, bookSchema); }

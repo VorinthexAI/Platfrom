@@ -1,8 +1,5 @@
 import {
   Geist_300Light,
-  Geist_400Regular,
-  Geist_500Medium,
-  Geist_600SemiBold,
   useFonts,
 } from "@expo-google-fonts/geist";
 import { Stack, usePathname, useRouter, useSegments, type Href } from "expo-router";
@@ -30,9 +27,9 @@ let appOpenedTracked = false;
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({
     Geist_300Light,
-    Geist_400Regular,
-    Geist_500Medium,
-    Geist_600SemiBold,
+    Geist_400Regular: Geist_300Light,
+    Geist_500Medium: Geist_300Light,
+    Geist_600SemiBold: Geist_300Light,
   });
   const status = useAuthStore((state) => state.status);
   const bootstrap = useAuthStore((state) => state.bootstrap);

@@ -67,6 +67,7 @@ import {
   findContentDocumentSummary,
   findContentDocumentVersion,
   getContentContext,
+  generateContentDocumentAudio,
   isContentContextConfigured,
   listContentDocumentVersions,
   moveContentSelection,
@@ -101,6 +102,7 @@ import {
 } from "@/lib/content-client";
 import {
   addCachedContentDocument,
+  addCachedContentDocumentAudioVersion,
   addCachedContentDocumentSummary,
   addCachedContentFolder,
   clearCachedContentDocumentAudioPlayback,
@@ -346,6 +348,7 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
   const [loadingVersions, setLoadingVersions] = useState(false);
   const [audioVersions, setAudioVersions] = useState<ContentDocumentAudioVersion[]>([]);
   const [loadingAudioVersions, setLoadingAudioVersions] = useState(false);
+  const [generatingDocumentAudio, setGeneratingDocumentAudio] = useState(false);
   const [selectedAudioVersionKey, setSelectedAudioVersionKey] = useState<string>();
   const [saveState, setSaveState] = useState<SaveState>(hasContentContext ? "saved" : "local");
   const [folders, setFolders] = useState<ContentFolder[]>(cachedInitialLocation?.folders ?? (cachedInitialFolder && cachedInitialTree ? contentFolderChildren(cachedInitialTree, cachedInitialFolder.key) : []));
@@ -1782,6 +1785,23 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
   const listenToSelectedDocument = async () => {
     if (!selectedDocument) return;
     await openAudioVersionHistory(selectedDocument);
+  };
+
+  const generateSelectedDocumentAudio = async () => {
+    const document = selectedDocument;
+    if (!document || document.managed || generatingDocumentAudio) return;
+    setGeneratingDocumentAudio(true);
+    setSheetLoadError(undefined);
+    try {
+      const version = addCachedContentDocumentAudioVersion(queryClient, contentContext, await generateContentDocumentAudio(document.key));
+      const history = queryClient.getQueryData<ContentDocumentAudioVersion[]>(contentQueryKeys.audioVersions(contentContext, document.key)) ?? [version];
+      setAudioVersions(history);
+      await playAudioVersion(version, 0, true, false);
+    } catch (cause) {
+      setSheetLoadError(cause instanceof Error ? cause.message : "Audio could not be generated.");
+    } finally {
+      setGeneratingDocumentAudio(false);
+    }
   };
 
   const openSimilarContent = async (source: { folderKey: string } | { documentKey: string }, initialTab: FolderContentTab) => {
@@ -3539,7 +3559,8 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
     </>;
     if (activeSheet === "audioVersions") return <>
       {documentNarrationIsland}
-      {close(false)}
+      {!managedDocument ? <Button disabled={loadingAudioVersions || generatingDocumentAudio || saveState !== "saved"} loading={generatingDocumentAudio} onPress={() => void generateSelectedDocumentAudio()} size="md" variant="primary">Generate audio</Button> : null}
+      {close(generatingDocumentAudio)}
     </>;
     if (activeSheet === "folderDetails") return <>
       <Button disabled={!folderDetailsName.trim()} onPress={() => void submitFolderDetails()} size="md" variant="primary">Save</Button>
@@ -3972,7 +3993,7 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
             <Switch accessibilityLabel="Show hidden Archive items" checked={showHidden} onCheckedChange={(checked) => { setViewFilters((current) => ({ ...current, showHidden: checked })); closeSheet(); }} />
             <Text style={styles.favoriteSwitchLabel}>Show hidden</Text>
           </View>
-          <Button onPress={() => void openSearchHistory()} size="md" variant="secondary">Search history</Button>
+          <Button onPress={() => void openSearchHistory()} size="md" style={styles.searchHistoryOption} variant="secondary">Search history</Button>
         </View> : null}
         {activeSheet === "similar" ? (
           <View style={styles.similarPanel}>
@@ -4320,6 +4341,7 @@ const styles = StyleSheet.create({
   enhancePanel: { gap: 6 },
   transformationForm: { flex: 1, gap: spacing.sm },
   filterPanel: { gap: 6 },
+  searchHistoryOption: { backgroundColor: palette.page },
   filterBadgeRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: spacing.xs },
   similarPill: { alignSelf: "flex-start", maxWidth: "100%", minHeight: 38, padding: 4, paddingLeft: 5, flexDirection: "row", alignItems: "center", gap: 7, borderWidth: 1, borderColor: palette.hairline, borderRadius: 999, backgroundColor: palette.panel },
   similarPillText: { maxWidth: 210, color: palette.silver300, fontFamily: fonts.medium, fontSize: 11 },

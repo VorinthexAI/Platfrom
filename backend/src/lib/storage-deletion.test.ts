@@ -42,6 +42,7 @@ describe('storage deletion outbox', () => {
     expect(source).toContain('status: "reserved", reservationExpiresAt: @reservationExpiresAt, claimToken: @token');
     expect(source).toContain('job.status == "reserved" && job.claimToken == @token');
     expect(source).toContain('LET referenced = ${storageReferenceAql}');
+    for (const collection of ['books', 'bookChapters', 'emailAttachments', 'placeHeroMedia']) expect(source).toContain(`FOR ${collection === 'books' ? 'book' : collection === 'bookChapters' ? 'chapter' : collection === 'emailAttachments' ? 'attachment' : 'media'} IN ${collection}`);
     expect(source).toContain('UPDATE job WITH { claimedAt: @decidedAt }');
   });
 

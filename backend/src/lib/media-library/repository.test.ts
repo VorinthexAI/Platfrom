@@ -35,7 +35,7 @@ describe('MediaLibrary repository transactions', () => {
     expect(query).not.toContain('FILTER scoped || elevated');
   });
 
-  test('uses live scope membership for direct managed email-media collection and image access', async () => {
+  test('uses live scope membership for direct managed media collection and image access', async () => {
     const queries: string[] = [];
     const database: MediaLibraryDatabase = { async query(value) { queries.push(value); return { async all() { return []; } }; } };
     const repository = createMediaLibraryRepository(database, async (operation) => operation(database));

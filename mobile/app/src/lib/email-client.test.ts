@@ -75,6 +75,7 @@ mock.module("./api-client", () => ({ apiClient: {
 } }));
 
 const client = await import("./email-client");
+const transformations = await import("./app-transformation-client");
 
 test("defaults initial sync state for connector responses from the compatible backend transport", () => {
   const { initialSyncCompleted: _initialSyncCompleted, ...legacyConnector } = connector;
@@ -322,8 +323,8 @@ test("sends strict inbox and tone metadata payloads", async () => {
 
 test("arbitrary email text enhancement and translation use unified app actions with AI timeouts", async () => {
   const context = { organizationKey: "org-captured", scopeKey: "scope-captured" };
-  await expect(client.enhanceAppTextForContext(context, "bad words here")).resolves.toEqual({ text: "Enhanced text." });
-  await expect(client.translateAppTextForContext(context, "Clear sentence.", "French")).resolves.toEqual({ text: "Texte traduit." });
+  await expect(transformations.enhanceAppTextForContext(context, "bad words here")).resolves.toEqual({ text: "Enhanced text." });
+  await expect(transformations.translateAppTextForContext(context, "Clear sentence.", "French")).resolves.toEqual({ text: "Texte traduit." });
   expect(calls).toEqual([
     { method: "POST", path: "/app/enhance", body: { ...context, input: { text: "bad words here" } }, config: { timeout: 4 * 60_000 } },
     { method: "POST", path: "/app/translate", body: { ...context, input: { text: "Clear sentence.", targetLanguage: "French" } }, config: { timeout: 4 * 60_000 } },

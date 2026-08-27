@@ -20,6 +20,7 @@ export type BottomSheetProps = {
   height?: "full";
   hideHeading?: boolean;
   hideCloseButton?: boolean;
+  onDismissRequest?: () => void;
   onOpenChange: (open: boolean) => void;
   onSwipeLeft?: () => void;
   onSwipeRight?: () => void;
@@ -40,6 +41,7 @@ export function BottomSheet({
   height,
   hideHeading = false,
   hideCloseButton = false,
+  onDismissRequest,
   onOpenChange,
   open,
   title,
@@ -54,6 +56,12 @@ export function BottomSheet({
     if (!content) return;
     content.removeAttribute("data-dragging");
     content.style.removeProperty("--vui-bottom-sheet-drag-y");
+  };
+
+  const requestDismiss = () => {
+    if (!dismissible) return;
+    if (onDismissRequest) onDismissRequest();
+    else onOpenChange(false);
   };
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -79,11 +87,11 @@ export function BottomSheet({
     const velocity =
       distance / Math.max(performance.now() - dragStart.current.time, 1);
     resetDrag();
-    if (dismissible && (distance >= 96 || velocity >= 0.65)) onOpenChange(false);
+    if (distance >= 96 || velocity >= 0.65) requestDismiss();
   };
 
   return (
-    <Dialog.Root onOpenChange={(next) => { if (next || dismissible) onOpenChange(next); }} open={open}>
+    <Dialog.Root onOpenChange={(next) => { if (next) onOpenChange(true); else requestDismiss(); }} open={open}>
       <Dialog.Portal>
         <Dialog.Overlay className="vui-bottom-sheet-overlay" />
         <ButtonSizeProvider force size="md">

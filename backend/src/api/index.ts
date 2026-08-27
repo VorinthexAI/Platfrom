@@ -10,7 +10,7 @@ import { closeEmailSyncQueue, enqueueEmailWatchRenewal, recoverEmailSyncQueue, s
 import { closeGalleryUploadQueue, recoverGalleryUploadQueue, startGalleryUploadWorker } from '@/lib/gallery/upload-queue';
 import { registerRoutes } from './routes';
 import { drainStorageDeletionJobs } from '@/lib/storage-deletion';
-import { closeBookGenerationQueue, recoverBookGenerationQueue, startBookGenerationWorker } from '@/lib/books/generation-queue';
+import { closeBookGenerationQueue, startBookGenerationRecoveryScheduler, startBookGenerationWorker } from '@/lib/books/generation-queue';
 
 export const app = new Hono();
 const api = app.basePath('/api/v1');
@@ -70,7 +70,7 @@ if (import.meta.main) {
   const emailWorker = startEmailSyncWorker();
   const galleryWorker = startGalleryUploadWorker();
   const bookWorker = startBookGenerationWorker();
-  void recoverBookGenerationQueue().catch((error) => console.error('book generation queue recovery failed', { error }));
+  const bookRecovery = startBookGenerationRecoveryScheduler();
   void recoverGalleryUploadQueue().catch((error) => console.error('gallery upload queue recovery failed', { error }));
   void drainStorageDeletionJobs(1000).catch((error) => console.error('storage deletion recovery failed', { error }));
   void enqueueEmailWatchRenewal().catch((error) => console.error('email watch renewal enqueue failed', { error }));
@@ -87,6 +87,7 @@ if (import.meta.main) {
     clearInterval(storageDeletionTimer);
     clearInterval(renewalTimer);
     clearInterval(emailRecoveryTimer);
+    bookRecovery.close();
     await emailWorker.close();
     await galleryWorker.close();
     await bookWorker.close();

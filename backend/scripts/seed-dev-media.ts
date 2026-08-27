@@ -170,13 +170,15 @@ async function main() {
     for (const relation of imageRelations) await transaction.query('UPSERT { scopeKey: @scopeKey, collectionKey: @collectionKey, imageKey: @imageKey } INSERT @document UPDATE {} IN collectionImages', { scopeKey: relation.scopeKey, collectionKey: relation.collectionKey, imageKey: relation.imageKey, document: toArangoDoc(relation) });
   });
 
-  const verification = await db.query('FOR collection IN collections FILTER collection.scopeKey == @scopeKey && STARTS_WITH(collection.description, @marker) LET imageCount = LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.collectionKey == collection._key RETURN 1) SORT collection.name RETURN { collection: collection.name, imageCount }', { scopeKey, marker: FIXTURE_MARKER });
+  const verification = await db.query('FOR expected IN @collections LET collection = DOCUMENT(collections, expected.key) FILTER collection != null LET imageCount = LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.collectionKey == expected.key RETURN 1) SORT collection.name RETURN { collection: collection.name, imageCount }', { scopeKey, collections: collectionDocuments.map(({ key }) => ({ key })) });
   const seeded = await verification.all() as Array<{ collection: string; imageCount: number }>;
   const expectedImages = collections.reduce((total, collection) => total + collection.count, 0);
-  if (seeded.length !== collections.length || seeded.reduce((total, item) => total + item.imageCount, 0) !== expectedImages) {
+  const missingPlacementCursor = await db.query('FOR expected IN @placements FILTER LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == expected.scopeKey && relation.collectionKey == expected.collectionKey && relation.imageKey == expected.imageKey LIMIT 1 RETURN 1) == 0 RETURN 1', { placements: imageRelations.map(({ scopeKey: relationScopeKey, collectionKey, imageKey }) => ({ scopeKey: relationScopeKey, collectionKey, imageKey })) });
+  const missingPlacements = await missingPlacementCursor.all();
+  if (seeded.length !== collections.length || missingPlacements.length !== 0) {
     throw new Error('Gallery fixture verification failed.');
   }
-  console.log(`Seeded ${seeded.length} Gallery collections and ${seeded.reduce((total, item) => total + item.imageCount, 0)} image placements for ${EMAIL} in scope ${scopeKey}.`);
+  console.log(`Verified ${seeded.length} Gallery collections and ${expectedImages} fixture image placements for ${EMAIL} in scope ${scopeKey}.`);
   console.table(seeded);
 }
 

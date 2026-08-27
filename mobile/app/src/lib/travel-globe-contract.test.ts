@@ -223,10 +223,21 @@ test("toggles trip table and globe views with Compass markers and an arc place s
 });
 
 test("keeps the root search lane fixed when switching Compass layouts", () => {
-  expect(workspace).toContain('rootActions: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: 8 }');
-  expect(workspace).not.toContain('rootActions: { minHeight: 52, marginTop: -spacing.xs');
+  expect(workspace).toContain('rootActions: { minHeight: 52, marginTop: -spacing.xs, flexDirection: "row", alignItems: "center", gap: 8 }');
   expect(workspace).toContain('workspaceSearch: { minHeight: 44');
   expect(workspace).toContain('rootSearch: { minHeight: 44');
+});
+
+test("matches the Archive root title geometry in globe and table layouts", () => {
+  expect(workspace).toContain('<View style={styles.compassRoot}><View style={styles.rootTitleRow}>');
+  expect(workspace).toContain('<WorkspaceAppSwitcher active="compass" trigger="back" />');
+  expect(workspace).toContain('<Text numberOfLines={1} style={styles.rootTitle}>Compass</Text>');
+  expect(workspace).toContain('rootTitleRow: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: 8 }');
+  expect(workspace).toContain('rootTitle: { minWidth: 0, flex: 1, color: palette.silver50, fontFamily: fonts.medium, fontSize: 24 }');
+  expect(workspace).toContain('compassRoot: { flex: 1, minHeight: 0, gap: spacing.md }');
+  expect(workspace).toContain('tableView: { flex: 1, minHeight: 0, position: "relative", gap: spacing.md }');
+  expect(knowledgeWorkspace).toContain('folderTitleRow: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: 8 }');
+  expect(knowledgeWorkspace).toContain('folderTitle: { flex: 1, color: palette.silver50, fontFamily: fonts.medium, fontSize: 24 }');
 });
 
 test("uses compact sheet-specific controls without changing collapsed Core sizing", () => {
@@ -331,6 +342,8 @@ test("optimistically manages Places status, favorites, bulk actions, and filters
   expect(workspace).toContain('>Visited</Text>');
   expect(workspace).toContain('>Completed trips</Text>');
   expect(workspace).toContain('setTripFavoritesOnly(checked)');
+  expect(workspace).toContain('(!placeFavoritesOnly || place.isFavorite)');
+  expect(workspace).toContain('(!tripFavoritesOnly || trip.isFavorite)');
   expect(workspace).toContain('setTripCompletedOnly(checked)');
   expect(workspace).toContain('>No trips match these filters.</Text>');
   expect(workspace).toContain('setPlaceStatusFilter(checked ? "wishlist" : "all")');
