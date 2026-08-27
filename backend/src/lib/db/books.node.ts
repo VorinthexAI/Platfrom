@@ -8,7 +8,7 @@ export const bookGenerationStageSchema = z.enum(['accepted', 'outline', 'researc
 export const bookNarratorVoiceSchema = z.enum(['calm', 'clear', 'warm']);
 export const bookNarrationPaceSchema = z.number().min(0.75).max(2);
 export const bookGenerationInputSchema = z.object({
-  topic: z.string().trim().min(3).max(2_000), goal: z.string().trim().min(3).max(2_000), currentKnowledge: z.string().trim().min(2).max(2_000),
+  topic: z.string().trim().min(3).max(2_000), goal: z.string().trim().min(3).max(2_000), currentKnowledge: z.string().trim().max(2_000),
   writingTone: z.string().trim().min(2).max(200), chapterCount: z.union([z.literal(10), z.literal(25), z.literal(50)]), language: z.string().trim().min(2).max(100),
   archiveDocumentKeys: z.array(z.string().cuid()).max(50), narratorVoiceKey: bookNarratorVoiceSchema, narrationPace: bookNarrationPaceSchema, chapterImages: z.boolean(), additionalInstructions: z.string().trim().max(12_000).optional(),
 }).strict();

@@ -20,6 +20,7 @@ import {
   BottomSheet,
   BottomSheetItem,
 } from "@vorinthex/shared/ui/bottom-sheet";
+import { AiTextEditor } from "@vorinthex/shared/ui/ai-text-editor";
 import { Button, ButtonSizeProvider } from "@vorinthex/shared/ui/button";
 import { CoreComposer } from "@vorinthex/shared/ui/core-composer";
 import {
@@ -32,13 +33,11 @@ import {
   FileIcon,
   FilterIcon,
   InboxIcon,
-  ImageIcon,
   MailIcon,
   MoreHorizontalIcon,
   PlusIcon,
   SearchIcon,
   SendIcon,
-  TrashIcon,
 } from "@vorinthex/shared/ui/icons-mobile";
 import { Skeleton } from "@vorinthex/shared/ui/skeleton";
 import { Tabs } from "@vorinthex/shared/ui/tabs";
@@ -53,6 +52,7 @@ import { SearchHistorySheet } from "@/components/SearchHistorySheet";
 import { assistantIconSource } from "@/data/capability-icons";
 import { type CapabilitySlug } from "@/data/registry";
 import { subscribeAppEvent } from "@/lib/app-events";
+import { enhanceAppTextForContext, translateAppTextForContext } from "@/lib/app-transformation-client";
 import { languageForCountryCode } from "@/lib/auth-helpers";
 import { deleteContentSearchHistory, getContentContext, type ContentDocument, type ContentSearchHistoryItem } from "@/lib/content-client";
 import { getContentDocument } from "@/lib/content-query-cache";
@@ -71,7 +71,6 @@ import {
   deleteEmailReplyContextsForContext,
   deleteEmailToneForContext,
   exchangeEmailConnection,
-  enhanceAppTextForContext,
   findSimilarEmailMessagesForContext,
   fetchEmailOverviewForContext,
   fetchEmailReplyContextsForContext,
@@ -90,7 +89,6 @@ import {
   setEmailThreadsReadStateForContext,
   summarizeEmailMessageForContext,
   translateEmailMessageForContext,
-  translateAppTextForContext,
   trashEmailThreadsForContext,
   clearEmailTrashForContext,
   updateEmailInboxForContext,
@@ -167,19 +165,6 @@ const TextInput = forwardRef<ComponentRef<typeof SharedTextInput>, ComponentProp
 
 type EmailEditorTarget = "newEmail" | "newEmailReview" | "draft" | "reply";
 type EmailEditorTransformation = Readonly<{ target: EmailEditorTarget; action: "enhance" | "translate" }>;
-
-const EmailTextEditor = forwardRef<ComponentRef<typeof TextInput>, ComponentProps<typeof TextInput> & {
-  transformation?: EmailEditorTransformation["action"];
-  onOpenActions: () => void;
-}>(function EmailTextEditor({ accessibilityLabel, onOpenActions, style, transformation, value, ...props }, ref) {
-  const label = typeof accessibilityLabel === "string" ? accessibilityLabel : "Email text";
-  return <View style={styles.emailTextEditor}>
-    {transformation ? <View accessibilityLabel={`${transformation === "enhance" ? "Enhancing" : "Translating"} ${label.toLocaleLowerCase()}`} accessibilityRole="progressbar" style={styles.emailTextTransformation}>
-      <Skeleton style={styles.emailTextBodySkeleton} />
-    </View> : <TextInput {...props} accessibilityLabel={accessibilityLabel} ref={ref} style={[style, styles.emailTextInput]} value={value} />}
-    {!transformation ? <Button accessibilityLabel={`${label} AI actions`} contentMode="raw" disabled={typeof value !== "string" || !value.trim()} iconOnly onPress={onOpenActions} size="md" style={styles.emailTextAiButton} variant="secondary"><BrainIcon size="sm" /></Button> : null}
-  </View>;
-});
 
 type Sheet =
   "ai" | "plus" | "rootFilter" | "inboxFilter" | "rootCreate" | "searchHistory" | "connectForm" | "toneCreate" | "inboxEdit" | "toneEdit" | "toneDelete" | "account" | "disconnect" | "bulkActions" | "bulkTrash" | "trashRoot" | "clearTrash";
@@ -1484,6 +1469,7 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, initialMessa
     }
   }
   function toggleFacet(facet: EmailFacet) {
+    setSheetOpen(false);
     void changeInboxQuery(toggleEmailOverviewFacet(requestedInboxQuery.current, facet));
   }
   async function search(nextQuery = query, recordHistory = true, signal?: AbortSignal) {
@@ -1941,7 +1927,6 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, initialMessa
     const connectorKey = initialConnectorKey;
     const generation = ++bulkGeneration.current;
     const requestKey = randomUUID();
-    selectionGeneration.current += 1;
     const isFavorite = !snapshot.every((thread) => thread.isFavorite);
     const isRead = !snapshot.every((thread) => thread.isRead);
     const optimistic = snapshot.map((thread) => action === "favorite"
@@ -1957,6 +1942,7 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, initialMessa
     const pendingField = action === "favorite" ? { favorite: isFavorite } : action === "read" ? { read: isRead } : { trash: true };
     setPendingThreadFields(threadKeys, pendingField);
     applyOptimisticThreads(context, connectorKey, optimistic);
+    clearThreadSelection();
     setSheetOpen(false);
     notify(action === "trash" ? `${snapshot.length} moved to trash` : action === "favorite" ? (isFavorite ? `${snapshot.length} favorited` : `${snapshot.length} unfavorited`) : (isRead ? `${snapshot.length} marked read` : `${snapshot.length} marked unread`));
     try {
@@ -1977,9 +1963,7 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, initialMessa
       applyAuthoritativeThreads(context, connectorKey, succeeded);
       applyDeletedThreadKeys(context, connectorKey, deletedKeys, snapshot);
       applyOptimisticThreads(context, connectorKey, snapshot.filter(({ key }) => failedKeys.includes(key)));
-      setSelectedThreads((current) => current.filter(({ key }) => !succeededKeys.has(key) && !deletedKeys.includes(key)));
-      if (report.repairPending) notify(`Email update is pending repair for ${report.repairPending}; ${report.succeeded} succeeded, ${report.failed} failed.`);
-      else if (report.failed) notify(`${report.succeeded} succeeded, ${report.failed} failed.`);
+      if (report.repairPending) notify("Email update is pending repair.");
     } catch (failure) {
       if (generation === bulkGeneration.current && contextIsCurrent(context) && initialConnectorKey === connectorKey) {
         clearPendingThreadFields(threadKeys, [action]);
@@ -3011,7 +2995,7 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, initialMessa
   const sheetTransitionGeneration = formTransitionGeneration.current;
   const formSheet = sheet === "connectForm" || sheet === "toneCreate" || sheet === "inboxEdit" || sheet === "toneEdit";
   const menuSheet = sheet === "rootCreate" || sheet === "plus";
-  const hideSheetHeading = menuSheet || sheet === "ai" || sheet === "bulkActions" || sheet === "account";
+  const hideSheetHeading = menuSheet || sheet === "ai" || sheet === "bulkActions" || sheet === "account" || sheet === "rootFilter" || sheet === "inboxFilter";
   const selectionActive = selectedThreads.length > 0;
   const bulkToolbar = selectionActive ? <Tabs accessibilityLabel="Selected email toolbar" style={styles.bulkToolbar}><View style={styles.bulkToolbarSelection}><Button accessibilityLabel="Clear email selection" contentMode="raw" disabled={bulkBusy} hitSlop={8} onPress={clearThreadSelection} size="xs" style={styles.bulkToolbarClose} variant="secondary"><CloseIcon size="sm" /></Button><Text accessibilityLiveRegion="polite" style={styles.bulkSelectionText}>{selectedThreads.length} selected</Text></View><Button accessibilityLabel="Selected email actions" contentMode="raw" disabled={bulkBusy || bulkActionsLoading} hitSlop={8} onPress={() => void openBulkActions()} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button></Tabs> : null;
   const rootBulkToolbar = selectedInboxes.length ? <Tabs accessibilityLabel="Selected inbox toolbar" style={styles.rootBulkToolbar}><View style={styles.bulkToolbarSelection}><Button accessibilityLabel="Clear inbox selection" contentMode="raw" disabled={rootBulkBusy} hitSlop={8} onPress={clearRootInboxSelection} size="xs" style={styles.bulkToolbarClose} variant="secondary"><CloseIcon size="sm" /></Button><Text accessibilityLiveRegion="polite" style={styles.bulkSelectionText}>{selectedInboxes.length} selected</Text></View><Button accessibilityLabel="Selected inbox actions" contentMode="raw" disabled={rootBulkBusy} hitSlop={8} onPress={() => void openRootBulkActions()} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button></Tabs> : null;
@@ -3033,7 +3017,10 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, initialMessa
     {sheet === "toneEdit" && permissions.canMutate && !editingTone?.slug ? <Button disabled={Boolean(busy)} onPress={() => setSheet("toneDelete")} size="md" variant="danger">Delete tone</Button> : null}
     <Button disabled={Boolean(busy)} onPress={requestFormClose} size="md" variant="secondary">Close</Button>
   </> : undefined;
-  const sheetFooter = sheet === "trashRoot" ? <>
+  const sheetFooter = sheet === "bulkTrash" ? <>
+    <Button disabled={bulkBusy} onPress={() => void runBulkAction("trash")} size="md" variant="primary">Move to trash</Button>
+    <Button disabled={bulkBusy} onPress={() => setSheet("bulkActions")} size="md" variant="secondary">Cancel</Button>
+  </> : sheet === "trashRoot" ? <>
     {permissions.canManageConnector ? <Button disabled={trashRootLoading || trashClearBusy || !clearableEmailTrashGroups(trashGroups).length} onPress={() => setSheet("clearTrash")} size="md" variant="primary">Clear trash</Button> : null}
     <Button disabled={trashRootLoading || trashClearBusy} onPress={() => setSheetOpen(false)} size="md" variant="secondary">Close</Button>
   </> : formFooter;
@@ -3357,9 +3344,10 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, initialMessa
       />
 
       <BottomSheet footer={<Button disabled={threadPageLoading} onPress={() => setThreadSheetOpen(false)} size="md" variant="secondary">Close</Button>} height="full" onOpenChange={(open) => setThreadSheetOpen(open)} open={threadSheetOpen && Boolean(selected)} title="Thread">
-        <ScrollView accessibilityLabel="Email thread messages" accessibilityLiveRegion="polite" accessibilityState={{ busy: threadPageLoading }} contentContainerStyle={styles.threadMessageList} onScroll={({ nativeEvent }) => { if (isNearScrollEnd({ offset: nativeEvent.contentOffset.y, viewport: nativeEvent.layoutMeasurement.height, content: nativeEvent.contentSize.height })) void loadMoreThreadMessages(); }} scrollEventThrottle={120} showsVerticalScrollIndicator={false}>
+        <ScrollView accessibilityLabel="Email thread messages" accessibilityLiveRegion="polite" accessibilityState={{ busy: threadPageLoading }} contentContainerStyle={[styles.threadMessageList, !threadPageLoading && !orderedThreadMessages.length && styles.sheetEmptyContent]} onScroll={({ nativeEvent }) => { if (isNearScrollEnd({ offset: nativeEvent.contentOffset.y, viewport: nativeEvent.layoutMeasurement.height, content: nativeEvent.contentSize.height })) void loadMoreThreadMessages(); }} scrollEventThrottle={120} showsVerticalScrollIndicator={false}>
           {orderedThreadMessages.map((message) => { const current = message.key === selectedMessage?.key; return <Button accessibilityLabel={`${current ? "Current message, " : ""}${message.fromName ?? shortAddress(message.from)}, ${message.subject}, ${formatEmailTimestamp(message.sentAt)}`} accessibilityState={{ selected: current }} contentMode="raw" key={message.key} onPress={() => { setSelectedMessageKey(message.key); setThreadSheetOpen(false); }} shape="pill" size="md" style={[styles.threadMessagePill, current && styles.threadMessagePillSelected]} variant={current ? "ghost" : "secondary"}><MailIcon size="sm" /><View style={styles.threadMessageCopy}><View style={styles.threadMessageMeta}><Text numberOfLines={1} style={styles.threadMessageSender}>{message.fromName ?? shortAddress(message.from)}</Text><Text style={styles.threadMessageTime}>{formatEmailTimestamp(message.sentAt)}</Text></View><Text numberOfLines={1} style={styles.threadMessageSubject}>{message.subject}</Text></View></Button>; })}
           {threadPageLoading ? <Skeleton accessibilityLabel="Loading more thread messages" accessibilityRole="progressbar" style={styles.threadMessageSkeleton} /> : null}
+          {!threadPageLoading && !orderedThreadMessages.length ? <Text style={styles.centerText}>No messages in this thread.</Text> : null}
         </ScrollView>
       </BottomSheet>
 
@@ -3369,7 +3357,7 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, initialMessa
           <View onLayout={({ nativeEvent }) => setReceivedAttachmentGridWidth(nativeEvent.layout.width)} style={styles.receivedAttachmentGrid}>
           {receivedAttachmentsLoading ? Array.from({ length: 4 }, (_, index) => <Skeleton accessibilityLabel="Loading received attachments" accessibilityRole="progressbar" key={index} style={[styles.receivedAttachmentCard, { width: receivedAttachmentCardSize, height: receivedAttachmentCardSize }]} />) : receivedAttachments.map((attachment) => { const label = attachment.kind === "document" ? attachment.document.name : attachment.image.filename; return <Button accessibilityLabel={`Open ${attachment.kind === "document" ? "Archive" : "Gallery"} attachment ${label}`} contentMode="raw" key={attachmentIdentity(attachment.ref)} onPress={() => openReceivedAttachment(attachment)} shape="rounded" size="md" style={[styles.receivedAttachmentCard, { width: receivedAttachmentCardSize, height: receivedAttachmentCardSize }]} variant="ghost">{attachment.kind === "image" ? <Image contentFit="cover" source={attachment.image.url} style={styles.receivedAttachmentImage} transition={150} /> : <FileIcon size="lg" />}<Text ellipsizeMode="tail" numberOfLines={1} style={[styles.receivedAttachmentLabel, attachment.kind === "image" && styles.receivedAttachmentImageLabel]}>{label}</Text></Button>; })}
           </View>
-          {!receivedAttachmentsLoading && !receivedAttachmentsError && !receivedAttachments.length ? <View style={styles.receivedAttachmentEmpty}><ImageIcon size="lg" variant="muted" /><Text style={styles.centerText}>No received attachments.</Text></View> : null}
+          {!receivedAttachmentsLoading && !receivedAttachmentsError && !receivedAttachments.length ? <Text style={styles.centerText}>No received attachments.</Text> : null}
         </ScrollView>
       </BottomSheet>
 
@@ -3386,7 +3374,7 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, initialMessa
         open={Boolean(selectedInboxDraftKey)}
         title={selectedInboxDraft?.variant === "new" ? selectedInboxDraft.subject : "Reply"}
       >
-        {draftDetailQuery.isPending ? <Skeleton accessibilityLabel="Loading draft" accessibilityRole="progressbar" style={styles.readerBodySkeleton} /> : draftDetailQuery.error ? <View accessibilityRole="alert" style={styles.sheetError}><Text style={styles.sheetErrorText}>{messageFor(draftDetailQuery.error)}</Text></View> : <ScrollView contentContainerStyle={styles.generatedReader} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}><EmailTextEditor accessibilityLabel="Draft email text" editable={!draftSending && !draftTransformation} maxLength={50_000} multiline onChangeText={setDraftBody} onOpenActions={() => openEmailEditorActions("draft")} style={styles.draftEditor} textAlignVertical="top" transformation={draftTransformation} value={draftBody} /></ScrollView>}
+        {draftDetailQuery.isPending ? <Skeleton accessibilityLabel="Loading draft" accessibilityRole="progressbar" style={styles.readerBodySkeleton} /> : draftDetailQuery.error ? <View accessibilityRole="alert" style={styles.sheetError}><Text style={styles.sheetErrorText}>{messageFor(draftDetailQuery.error)}</Text></View> : <ScrollView contentContainerStyle={styles.generatedReader} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}><AiTextEditor accessibilityLabel="Draft email text" editable={!draftSending && !draftTransformation} maxLength={50_000} multiline onChangeText={setDraftBody} onOpenActions={() => openEmailEditorActions("draft")} style={styles.draftEditor} textAlignVertical="top" transformation={draftTransformation} value={draftBody} /></ScrollView>}
       </BottomSheet>
       <BottomSheet
         dismissible={!busy && !trashRootLoading && !trashClearBusy}
@@ -3422,7 +3410,7 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, initialMessa
                         : sheet === "bulkTrash" ? "Move to Trash?"
                           : sheet === "trashRoot" ? "Trash"
                             : sheet === "clearTrash" ? "Clear trash?"
-                               : sheet === "rootCreate" ? "Create" : sheet === "rootFilter" || sheet === "inboxFilter" ? "Filters" : sheet === "account" ? "" : selected ? "Email actions" : "Inbox actions"
+                               : sheet === "rootCreate" ? "Create" : sheet === "rootFilter" || sheet === "inboxFilter" ? "" : sheet === "account" ? "" : selected ? "Email actions" : "Inbox actions"
         }
       >
         {sheetError ? (
@@ -3433,7 +3421,7 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, initialMessa
         {sheet === "inboxFilter" ? (
           <View style={styles.rootFilterPanel}>
             {INBOX_FACETS.map(({ facet, label }) => <View key={facet} style={styles.favoriteRow}><Switch accessibilityLabel={`Filter ${label} email`} checked={inboxControlsQuery.facets.includes(facet)} onCheckedChange={() => toggleFacet(facet)} /><Text style={styles.favoriteLabel}>{label}</Text></View>)}
-            <Button onPress={() => void openSearchHistory()} size="md" variant="secondary">Search history</Button>
+            <Button onPress={() => void openSearchHistory()} size="md" style={styles.searchHistoryOption} variant="secondary">Search history</Button>
           </View>
         ) : sheet === "rootFilter" ? (
           <View style={styles.rootFilterPanel}>
@@ -3441,7 +3429,7 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, initialMessa
               <Switch accessibilityLabel="Show only favorite Signal items" checked={rootFavoritesOnly} onCheckedChange={(checked) => { setRootFavoritesOnly(checked); setSheetOpen(false); }} />
               <Text style={styles.favoriteLabel}>Favorites</Text>
             </View>
-            <Button onPress={() => void openSearchHistory()} size="md" variant="secondary">Search history</Button>
+            <Button onPress={() => void openSearchHistory()} size="md" style={styles.searchHistoryOption} variant="secondary">Search history</Button>
           </View>
         ) : sheet === "toneDelete" ? (
           <View style={styles.sheetItems}><Text style={styles.confirmText}>This permanently deletes the custom email tone.</Text><Button onPress={() => void deleteTone()} size="md" variant="danger">Delete tone</Button><Button onPress={() => setSheet("toneEdit")} size="md" variant="secondary">Cancel</Button></View>
@@ -3540,9 +3528,7 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, initialMessa
             <BottomSheetItem disabled={bulkBusy} onPress={() => void runBulkAction("read")} style={styles.sheetAction} variant="secondary">{selectedThreads.every((thread) => thread.isRead) ? "Mark unread" : "Mark read"}</BottomSheetItem>
             <BottomSheetItem disabled={bulkBusy || selectedThreads.every((thread) => thread.labels?.includes("TRASH"))} onPress={() => setSheet("bulkTrash")} style={styles.sheetAction} variant="secondary">Move to trash</BottomSheetItem>
           </View>
-        ) : sheet === "bulkTrash" ? (
-          <View style={styles.sheetItems}><Text style={styles.confirmText}>Move {selectedThreads.length} email thread{selectedThreads.length === 1 ? "" : "s"} to Trash?</Text><Button disabled={bulkBusy} onPress={() => void runBulkAction("trash")} size="md" variant="danger">Move to trash</Button><Button disabled={bulkBusy} onPress={() => setSheet("bulkActions")} size="md" variant="secondary">Cancel</Button></View>
-        ) : sheet === "account" ? (
+        ) : sheet === "bulkTrash" ? null : sheet === "account" ? (
           <View style={styles.sheetItems}>
             {selected ? <>
               {permissions.canMutate ? <BottomSheetItem disabled={trashBusy} onPress={openReplySuggestions} style={styles.sheetAction} variant="secondary">Reply</BottomSheetItem> : null}
@@ -3601,7 +3587,7 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, initialMessa
           <Text style={styles.inputLabel}>Subject</Text>
           <TextInput accessibilityLabel="Email subject" editable={!newEmailSending && !newEmailBodyTransformation} maxLength={998} onChangeText={(value) => changeNewEmailContent("subject", value)} placeholder="Subject" ref={newEmailSubjectInputRef} value={newEmailSubject} />
           <Text style={styles.inputLabel}>Message</Text>
-          <EmailTextEditor accessibilityLabel="Email body" editable={!newEmailSending && !newEmailBodyTransformation} maxLength={50_000} multiline onChangeText={(value) => changeNewEmailContent("body", value)} onOpenActions={() => openEmailEditorActions("newEmail")} placeholder="Message" style={styles.newEmailBodyInput} textAlignVertical="top" transformation={newEmailBodyTransformation} value={newEmailBody} />
+          <AiTextEditor accessibilityLabel="Email body" editable={!newEmailSending && !newEmailBodyTransformation} maxLength={50_000} multiline onChangeText={(value) => changeNewEmailContent("body", value)} onOpenActions={() => openEmailEditorActions("newEmail")} placeholder="Message" style={styles.newEmailBodyInput} textAlignVertical="top" transformation={newEmailBodyTransformation} value={newEmailBody} />
         </ScrollView>
       </BottomSheet>
       <BottomSheet
@@ -3629,7 +3615,7 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, initialMessa
         <ScrollView contentContainerStyle={styles.newEmailForm} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           {newEmailError ? <View accessibilityRole="alert" style={styles.sheetError}><Text style={styles.sheetErrorText}>{newEmailError}</Text></View> : null}
           <TextInput accessibilityLabel="Review email subject" editable={!newEmailSending && !newEmailReviewTransformation} maxLength={998} onChangeText={(value) => { setNewEmailReviewSubject(value); if (newEmailSelectedDraft && value !== newEmailSubject) setNewEmailSkipped(true); }} placeholder="Subject" value={newEmailReviewSubject} />
-          <EmailTextEditor accessibilityLabel="Review email body" editable={!newEmailSending && !newEmailReviewTransformation} maxLength={50_000} multiline onChangeText={setNewEmailReviewBody} onOpenActions={() => openEmailEditorActions("newEmailReview")} placeholder="Message" style={styles.newEmailBodyInput} textAlignVertical="top" transformation={newEmailReviewTransformation} value={newEmailReviewBody} />
+          <AiTextEditor accessibilityLabel="Review email body" editable={!newEmailSending && !newEmailReviewTransformation} maxLength={50_000} multiline onChangeText={setNewEmailReviewBody} onOpenActions={() => openEmailEditorActions("newEmailReview")} placeholder="Message" style={styles.newEmailBodyInput} textAlignVertical="top" transformation={newEmailReviewTransformation} value={newEmailReviewBody} />
           <ButtonSizeProvider overrideParent size="xs"><View style={styles.attachmentActions}><View style={[styles.recipientChip, styles.attachmentChip]}><Button accessibilityLabel="Open attachments" contentMode="raw" disabled={newEmailSending || Boolean(newEmailReviewTransformation)} onPress={openNewEmailAttachments} size="xs" style={[styles.recipientChipMain, styles.attachmentChipMain]} variant="ghost"><Text style={[styles.recipientChipText, styles.attachmentChipText]}>Attachments</Text></Button><Button accessibilityLabel="Add attachments" contentMode="raw" disabled={newEmailSending || Boolean(newEmailReviewTransformation)} hitSlop={10} iconOnly onPress={openNewEmailAttachments} shape="pill" size="xs" style={[styles.recipientChipRemove, styles.attachmentChipRemove]} variant="secondary"><PlusIcon size="xs" /></Button></View>{newEmailAttachments.length ? <View style={[styles.recipientChip, styles.attachmentChip]}><Button contentMode="raw" disabled={newEmailSending || Boolean(newEmailReviewTransformation)} onPress={removeAllNewEmailAttachments} size="xs" style={[styles.recipientChipMain, styles.attachmentChipMain]} variant="ghost"><Text style={[styles.recipientChipText, styles.attachmentChipText]}>Remove all</Text></Button><Button accessibilityLabel="Remove all attachments" contentMode="raw" disabled={newEmailSending || Boolean(newEmailReviewTransformation)} hitSlop={10} iconOnly onPress={removeAllNewEmailAttachments} shape="pill" size="xs" style={[styles.recipientChipRemove, styles.attachmentChipRemove]} variant="secondary"><CloseIcon size="xs" /></Button></View> : null}</View></ButtonSizeProvider>
           {newEmailAttachments.length ? <View accessibilityLabel={`${newEmailAttachments.length} email attachments`} onLayout={({ nativeEvent }) => setReviewAttachmentGridWidth(nativeEvent.layout.width)} style={styles.reviewAttachmentGrid}>{newEmailAttachments.map((ref) => { const identity = attachmentIdentity(ref); const label = newEmailAttachmentLabels[identity] ?? (ref.type === "document" ? "Archive document" : "Gallery image"); const imageUrl = ref.type === "image" ? newEmailAttachmentImageUrls[identity] : undefined; return <Button accessibilityLabel={`Edit attachment ${label}`} contentMode="raw" disabled={newEmailSending || Boolean(newEmailReviewTransformation)} key={identity} onPress={openNewEmailAttachments} shape="rounded" size="md" style={[styles.reviewAttachmentCard, { width: reviewAttachmentCardSize, height: reviewAttachmentCardSize }]} variant="ghost">{imageUrl ? <Image contentFit="cover" onError={() => void refreshNewEmailImageUrls()} source={imageUrl} style={styles.reviewAttachmentImage} transition={150} /> : <><FileIcon size="lg" /><Text ellipsizeMode="tail" numberOfLines={1} style={styles.reviewAttachmentLabel}>{label}</Text></>}</Button>; })}</View> : null}
         </ScrollView>
@@ -3641,7 +3627,7 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, initialMessa
         footer={readerFooter}
         height="full"
         onOpenChange={(open) => { if (!open) closeReaderFlow(); }}
-        open={readerSheetOpen}
+        open={readerSheetOpen && readerSheet !== "delete"}
         title={readerSheet === "translate" || readerSheet === "translationReader" ? "Translations" : readerSheet === "translationForm" ? "Translate email" : readerSheet === "summaryVersions" || readerSheet === "summaryReader" ? "Summaries" : readerSheet === "replies" ? "Replies" : readerSheet === "similar" ? "Similar email" : "Move to Trash?"}
       >
         {readerError ? <View accessibilityRole="alert" style={styles.sheetError}><Text style={styles.sheetErrorText}>{readerError}</Text></View> : null}
@@ -3670,7 +3656,7 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, initialMessa
         </BottomSheet>
         <BottomSheet dismissible={!replySending && !replyTransformation && !replyAttachmentsOpen} footer={replyEditorFooter} height="full" onOpenChange={(open) => { if (!open) closeReplyEditor(); }} open={readerSheetOpen && replyEditorOpen} title={emptyReply ? "Reply" : selectedReply?.tone ?? "Reply"}>
           <ScrollView contentContainerStyle={styles.newEmailForm} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-            <EmailTextEditor accessibilityLabel="Reply text" editable={!replySending && !replyTransformation} maxLength={50_000} multiline onChangeText={setReplyBody} onOpenActions={() => openEmailEditorActions("reply")} ref={readerInputRef} style={styles.newEmailBodyInput} textAlignVertical="top" transformation={replyTransformation} value={replyBody} />
+            <AiTextEditor accessibilityLabel="Reply text" editable={!replySending && !replyTransformation} maxLength={50_000} multiline onChangeText={setReplyBody} onOpenActions={() => openEmailEditorActions("reply")} ref={readerInputRef} style={styles.newEmailBodyInput} textAlignVertical="top" transformation={replyTransformation} value={replyBody} />
             <ButtonSizeProvider overrideParent size="xs">
               <View style={styles.attachmentActions}>
                 <View style={[styles.recipientChip, styles.attachmentChip]}>
@@ -3688,8 +3674,8 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, initialMessa
         </BottomSheet>
         <BottomSheet dismissible={!replySending} hideHeading onOpenChange={(open) => { if (!open && !replySending) setReplyModeOpen(false); }} open={readerSheetOpen && replyModeOpen} title="Choose reply recipients"><View style={styles.sheetItems}><BottomSheetItem disabled={replySending} onPress={() => void sendSuggestedReply("reply")} style={styles.sheetAction} variant="secondary">Reply</BottomSheetItem><BottomSheetItem disabled={replySending} onPress={() => void sendSuggestedReply("reply_all")} style={styles.sheetAction} variant="secondary">Reply all</BottomSheetItem></View></BottomSheet>
         {replyAttachmentsOpen && replyEditorOpen ? <EmailAttachmentPicker context={historyContext} contextKey={`${emailContext.organizationKey}:${emailContext.scopeKey}:reply:${selectedReply?.key ?? selected?.thread.key ?? "empty"}`} imageUrls={replyAttachmentImageUrls} labels={replyAttachmentLabels} onClose={() => setReplyAttachmentsOpen(false)} onDone={finishReplyAttachments} open selection={replyAttachments} /> : null}
-        {readerSheet === "delete" ? <View accessibilityState={{ busy: trashBusy }} style={styles.deleteFlow}><TrashIcon size="lg" variant="muted" /><Text style={styles.confirmText}>Move this email thread to Trash?</Text><Button disabled={trashBusy} onPress={() => void trashThread()} size="md" variant="danger">Move to trash</Button><Button disabled={trashBusy} onPress={closeReaderFlow} size="md" variant="secondary">Cancel</Button></View> : null}
       </BottomSheet>
+      <BottomSheet dismissible={!trashBusy} footer={<><Button disabled={trashBusy} onPress={() => void trashThread()} size="md" variant="primary">Move to trash</Button><Button disabled={trashBusy} onPress={closeReaderFlow} size="md" variant="secondary">Cancel</Button></>} onOpenChange={(open) => { if (!open) closeReaderFlow(); }} open={readerSheetOpen && readerSheet === "delete"} title="Move to Trash?" />
       <BottomSheet hideHeading onOpenChange={(open) => { if (!open) setEditorActionTarget(undefined); }} open={Boolean(editorActionTarget)} title="AI actions">
         <View style={styles.sheetItems}>
           <BottomSheetItem onPress={() => { const target = editorActionTarget; if (target) void transformEmailEditor(target, "enhance"); }} style={styles.sheetAction} variant="secondary">Enhance</BottomSheetItem>
@@ -3979,6 +3965,7 @@ const styles = StyleSheet.create({
   rootActions: { minHeight: 52, marginTop: -spacing.xs, flexDirection: "row", alignItems: "center", gap: 8 },
   rootMenuButton: { width: 44, height: 44 },
   rootFilterPanel: { gap: spacing.sm },
+  searchHistoryOption: { backgroundColor: palette.page },
   rootSearch: {
     minHeight: 44,
     flex: 1,
@@ -4177,7 +4164,6 @@ const styles = StyleSheet.create({
   receivedAttachmentImage: StyleSheet.absoluteFill,
   receivedAttachmentLabel: { width: "100%", color: palette.silver100, fontFamily: fonts.medium, fontSize: 11, textAlign: "center" },
   receivedAttachmentImageLabel: { position: "absolute", right: 4, bottom: 4, left: 4, width: "auto", paddingHorizontal: 4, paddingVertical: 3, overflow: "hidden", borderRadius: radii.sm, backgroundColor: "rgba(0,0,0,0.68)", color: palette.silver50 },
-  receivedAttachmentEmpty: { width: "100%", flex: 1, minHeight: 320, alignItems: "center", justifyContent: "center", gap: spacing.sm },
   sheetError: {
     marginBottom: 10,
     padding: 10,
@@ -4203,11 +4189,6 @@ const styles = StyleSheet.create({
   favoriteLabel: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 12 },
   newEmailForm: { flexGrow: 1, gap: spacing.sm, paddingBottom: spacing.xl },
   newEmailBodyInput: { minHeight: 280, paddingTop: 12, lineHeight: 22 },
-  emailTextEditor: { width: "100%", position: "relative" },
-  emailTextInput: { width: "100%", paddingBottom: 64 },
-  emailTextAiButton: { position: "absolute", right: spacing.sm, bottom: spacing.sm, width: 42, height: 42, paddingHorizontal: 0, paddingVertical: 0, zIndex: 2, elevation: 2 },
-  emailTextTransformation: { width: "100%", minHeight: 280, flex: 1 },
-  emailTextBodySkeleton: { width: "100%", minHeight: 280, flex: 1, borderRadius: radii.md, backgroundColor: palette.hairlineBright, opacity: 0.72 },
   inlineError: { paddingHorizontal: 2 },
   inlineErrorText: { color: palette.silver100, fontFamily: fonts.regular, fontSize: 12, lineHeight: 18 },
   recipientChips: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs },
@@ -4277,5 +4258,4 @@ const styles = StyleSheet.create({
   similarResults: { flexGrow: 1, gap: spacing.sm, paddingBottom: spacing.xl },
   similarResult: { width: "100%", minHeight: 42, justifyContent: "flex-start", paddingHorizontal: 14, gap: spacing.sm },
   similarResultText: { minWidth: 0, flex: 1, color: palette.silver100, fontFamily: fonts.medium, fontSize: 14, textAlign: "left" },
-  deleteFlow: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.md },
 });

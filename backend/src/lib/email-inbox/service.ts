@@ -1371,7 +1371,8 @@ export function createEmailService(options: {
       const attachments = await resolveValidatedAttachments(actor, input.attachments ?? []);
       if (input.generationMode === 'preserve') {
         const content = validateDraftIdentity(input.authoredBody!);
-        const draft = publicDraft(await repository.createDraft({ scopeKey: actor.scopeKey, variant: 'new', accountKey, to: input.to, cc: input.cc, bcc: input.bcc, subject: input.subject, generatedContent: content || '(Empty message)', finalContent: content, instruction: input.instruction, attachments, status: 'edited', embedding: Array(EMBEDDING_DIMENSIONS).fill(0) }));
+        const semanticText = `${input.subject}\n\n${content || '(Empty message)'}`.trim();
+        const draft = publicDraft(await repository.createDraft({ scopeKey: actor.scopeKey, variant: 'new', accountKey, to: input.to, cc: input.cc, bcc: input.bcc, subject: input.subject, generatedContent: content || '(Empty message)', finalContent: content, instruction: input.instruction, attachments, status: 'edited', embedding: await embed({ text: boundedEmbeddingText(semanticText), purpose: 'document' }, actor.organizationKey) }));
         await publishInboxChanged(actor.scopeKey);
         return draft;
       }
@@ -1521,7 +1522,8 @@ export function createEmailService(options: {
       const input = emailDraftUpdateInputSchema.parse(rawInput);
       if (input.finalContent !== undefined) validateDraftIdentity(input.finalContent);
       const attachments = input.attachments === undefined ? undefined : await resolveValidatedAttachments(actor, input.attachments);
-      const embedding = input.finalContent === undefined ? undefined : input.finalContent.trim() ? await embed({ text: boundedEmbeddingText(input.finalContent), purpose: 'document' }, actor.organizationKey) : Array(EMBEDDING_DIMENSIONS).fill(0);
+      const semanticText = input.finalContent === undefined ? undefined : input.finalContent.trim() || '(Empty message)';
+      const embedding = semanticText ? await embed({ text: boundedEmbeddingText(semanticText), purpose: 'document' }, actor.organizationKey) : undefined;
       const draft = publicDraft(await repository.updateDraft(actor.scopeKey, { ...input, ...(attachments !== undefined ? { attachments } : {}), ...(embedding ? { embedding } : {}) }));
       await publishInboxChanged(actor.scopeKey);
       return draft;

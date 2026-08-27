@@ -9,7 +9,6 @@ import { folderSchema, type Folder } from './folders.node';
 import { organizationSchema, type Organization } from './organizations.node';
 import { userOrganizationSchema, type UserOrganization } from './user-organization.node';
 import { scopeMemberSchema, scopeSchema, type Scope, type ScopeMember } from '@/lib/ai/scopes/schema';
-import { ensureMailFolders } from '@/lib/email-inbox/folders';
 
 export const DEFAULT_IMAGE_COLLECTION_NAME = 'My Images';
 export const DEFAULT_CONTENT_FOLDER_NAME = 'My Documents';
@@ -29,7 +28,6 @@ export interface PersonalAuthContext {
 
 async function ensurePersonalMailDefaults(scopeKey: string) {
   const { db } = await import('./client');
-  await ensureMailFolders(db, scopeKey);
   const { createEmailRepository } = await import('@/lib/email-inbox/repository');
   await createEmailRepository(db).initializeTones(scopeKey);
 }

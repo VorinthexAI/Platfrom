@@ -79,9 +79,9 @@ describe('mail Archive payload codecs', () => {
     expect(() => decodeEmailTone({ ...document, content: document.content.replace('"warm"', '"invented"') })).toThrow();
   });
 
-  test('keeps non-tone mail documents hidden and includes the tone backfill migration', async () => {
+  test('creates ordinary mail documents and retains the legacy tone backfill', async () => {
     const payload = emailDraftPayloadSchema.parse({ version: 1, kind: 'mail-new-draft', data: { variant: 'new', accountKey: key, to: ['person@example.com'], subject: 'Hello', generatedContent: 'Body', status: 'generated' } });
-    expect(archiveDocument({ key, scopeKey, folderKey: scopeKey, name: 'Draft', payload, embedding, createdAt: now, updatedAt: now }).mutationPolicy).toBe('system-only');
+    expect(archiveDocument({ key, scopeKey, folderKey: scopeKey, name: 'Draft', payload, embedding, createdAt: now, updatedAt: now }).mutationPolicy).toBe('user');
     const migration = await Bun.file(new URL('../../db/arango-migrate.ts', import.meta.url)).text();
     expect(migration).toContain('payload.kind == "mail-tone"');
     expect(migration).toContain('mutationPolicy: "user"');

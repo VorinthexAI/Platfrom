@@ -381,6 +381,17 @@ export async function listContentDocumentAudioVersions(documentKey: string) {
   return versions;
 }
 
+export async function generateContentDocumentAudio(documentKey: string, voice: "calm" | "clear" | "warm" = "clear", pace = 1) {
+  const context = getContentContext();
+  const response = await apiClient.post<ToolResponse<ContentDocumentAudioVersion>>("/app/audio", {
+    organizationKey: context.organizationKey,
+    scopeKey: context.scopeKey,
+    input: { documentKey, voice, pace, includeTitle: true, includeCode: false },
+  }, { timeout: 5 * 60_000 });
+  if (!response.data.success) throw contentToolError(response.data.error);
+  return response.data.data;
+}
+
 export async function updateContentDocumentAudioPlayback(audioVersionKey: string, playbackPositionMs: number) {
   return callContentTool<{ audioVersionKey: string; documentKey: string; playbackPositionMs: number }>("document.audio.playback.update", {
     audioVersionKey,

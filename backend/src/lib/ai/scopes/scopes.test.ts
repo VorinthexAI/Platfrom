@@ -4,8 +4,6 @@ import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
 import { createScopeRepository } from './repository';
 import { ensureScopeMembersCollection, ensureScopesCollection, ensureScopeScopesCollection } from './indexes';
 import { SCOPE_MEMBERS_COLLECTION, SCOPES_COLLECTION, SCOPE_SCOPES_COLLECTION, scopeSchema, scopesEmbedKeys, scopeScopeSchema } from './schema';
-import { archiveDocument, emailTonePayloadSchema, encodeEmailToneContent } from '@/lib/email-inbox/archive-payloads';
-import { mailFolderKeys } from '@/lib/email-inbox/folders';
 import { createHash } from 'node:crypto';
 import {
   DuplicateScopeSlugError,
@@ -155,7 +153,7 @@ describe('scope repository', () => {
   test('hard-deletes managed place media and queues permanent object deletion during scope teardown', async () => {
     const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
     const teardown = source.slice(source.indexOf('async removeScope(scopeKey)'), source.indexOf('async addScopeRelation'));
-    for (const collection of ['generatedDocumentBindings', 'tripAttachments', 'tripCreationReceipts', 'placeImages', 'collectionImages', 'imageIdentities', 'imageCollecitionHightlights', 'imageCollectionMemories', 'collectionInvites', 'collectionMembers', 'tagAssignments', 'shares', 'userHiddens', 'places', 'images', 'imageCaptions', 'collections', 'documentSummaryAudio', 'documentSummaries', 'documentAudioVersions', 'documentVersions', 'documentShares', 'emailAttachmentBindings', 'folders', 'scopeScopes', 'scopeMembers', 'scopes']) expect(teardown).toContain(collection);
+    for (const collection of ['generatedDocumentBindings', 'tripAttachments', 'tripCreationReceipts', 'tripGuides', 'placeReferences', 'placeHeroMedia', 'placeImages', 'collectionImages', 'imageIdentities', 'imageCollecitionHightlights', 'imageCollectionMemories', 'collectionInvites', 'collectionMembers', 'tagAssignments', 'shares', 'userHiddens', 'places', 'images', 'imageCaptions', 'collections', 'documentSummaryAudio', 'documentSummaries', 'documentAudioVersions', 'documentVersions', 'documentShares', 'emailAttachmentBindings', 'emailAttachments', 'emailInboxes', 'emailThreads', 'emailMessages', 'emailDrafts', 'emailTones', 'emailReplyContext', 'emailWritingProfiles', 'books', 'bookContexts', 'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'chapterContexts', 'bookProgress', 'folders', 'scopeScopes', 'scopeMembers', 'scopes']) expect(teardown).toContain(collection);
     expect(teardown).toContain('folder.managedPurpose IN ["mail-attachment", "mail-inbox", "mail-inbox-files", "mail-thread"]');
     expect(teardown).not.toContain('FOR inbox IN inboxes');
     expect(teardown.indexOf('LET cleanupMailVersions')).toBeLessThan(teardown.indexOf('LET cleanupMailDocuments'));
@@ -163,9 +161,11 @@ describe('scope repository', () => {
     expect(teardown).toContain('UPSERT { storageKey }');
     expect(teardown).toContain('storageDeletionJobs');
     expect(teardown).toContain('collection.purpose IN ["place-media", "email-media"] && collection.mutationPolicy == "system-only"');
-    expect(teardown).toContain('decodeEmailTone');
+    expect(teardown).toContain('LET canonicalStorageKeys = UNIQUE(UNION(');
+    expect(teardown).toContain('LET ordinaryStorageKeys = UNIQUE(UNION(');
+    expect(teardown).not.toContain('decodeEmailTone');
     expect(teardown).not.toContain('JSON_PARSE(document.content)');
-    expect(teardown).toContain('document.folderKey == @toneFolderKey && document.mutationPolicy == "user"');
+    expect(teardown).not.toContain('@toneFolderKey');
     expect(teardown).toContain('document.sourceStorageKeys');
     expect(teardown).toContain('document.speechStorageKeys');
     expect(teardown).toContain('LET mailDocumentKeys =');
@@ -174,6 +174,15 @@ describe('scope repository', () => {
     expect(teardown.indexOf('LET mailDeletionJobs')).toBeLessThan(teardown.indexOf('LET cleanupMailDocuments'));
     expect(teardown).toContain('FOR folder IN folders FILTER folder.scopeKey == @scopeKey && folder.coverImageKey IN imageKeys');
     expect(teardown.indexOf('LET cleanupFolderCovers')).toBeLessThan(teardown.indexOf('LET cleanupImages'));
+  });
+  test('does not eagerly create Compass or Signal export folders with a scope', async () => {
+    const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
+    const create = source.slice(source.indexOf('async createScope(input)'), source.indexOf('async updateScope'));
+    expect(create).not.toContain('ensureGeneratedDocumentFolders');
+    expect(create).not.toContain('ensureMailFolders');
+    const seed = await Bun.file(new URL('../../db/seed.ts', import.meta.url)).text();
+    expect(seed).not.toContain('ensureGeneratedDocumentFolders');
+    expect(seed).not.toContain('ensureMailFolders');
   });
   test('scope teardown deletes an unbound processing attachment image from its receipt ownership', async () => {
     const scopeKey = newId();
@@ -217,30 +226,6 @@ describe('scope repository', () => {
     expect([...state.folders.values()][0]?.coverImageKey).toBeUndefined();
     expect(state.deletionJobs).toContain('attachments/unbound.jpg');
     expect(teardownQuery.indexOf('LET cleanupFolderCovers')).toBeLessThan(teardownQuery.indexOf('LET cleanupImages'));
-  });
-  test('exactly decodes default and custom Markdown tones before hard-cleaning every dependent and storage object', async () => {
-    const scopeKey = newId();
-    const timestamp = '2026-08-23T00:00:00.000Z';
-    const toneDocument = (name: string, data: { identifier?: string; slug?: 'warm'; name: string; instruction: string }, revision: string) => {
-      const document = archiveDocument({ key: newId(), scopeKey, folderKey: mailFolderKeys(scopeKey).tones, name, payload: emailTonePayloadSchema.parse({ version: 1, kind: 'mail-tone', data }), embedding: Array(EMBEDDING_DIMENSIONS).fill(0), createdAt: timestamp, updatedAt: timestamp, mutationPolicy: 'user' });
-      return { ...document, key: undefined, _key: document.key, _rev: revision, content: encodeEmailToneContent(data), storageKey: `${name}.md`, sourceStorageKeys: [`${name}-source`], speechStorageKeys: [`${name}-speech`] };
-    };
-    const defaults = toneDocument('Warm', { slug: 'warm', name: 'Warm', instruction: 'Sound human.' }, 'default-revision');
-    const custom = toneDocument('Measured', { identifier: newId(), name: 'Measured', instruction: 'Be precise.' }, 'custom-revision');
-    let teardown: { query: string; bindVars: Record<string, any> } | undefined;
-    const database: ScopesDatabase = {
-      collection: () => ({ document: async () => ({ _key: scopeKey, organizationKey: newId(), slug: 'scope', name: 'Scope', summary: 'Summary', description: null, position: 1, level: 1, embedding: [] }), save: async () => ({}), update: async () => ({}), remove: async () => ({}) }),
-      query: async (query, bindVars = {}) => {
-        if (query.trim().startsWith('FOR document') && query.includes('@toneFolderKey')) return { all: async () => [defaults, custom], next: async () => defaults };
-        teardown = { query, bindVars };
-        return { all: async () => [], next: async () => true };
-      },
-    };
-    await createScopeRepository(database).removeScope(scopeKey);
-    expect(teardown?.bindVars.toneDocuments).toEqual([{ key: defaults._key, revision: defaults._rev }, { key: custom._key, revision: custom._rev }]);
-    for (const dependent of ['documentSummaryAudio', 'documentSummaries', 'documentAudioVersions', 'documentVersions', 'documentShares', 'shares', 'generatedDocumentBindings', 'tagAssignments', 'userHiddens']) expect(teardown?.query).toContain(dependent);
-    expect(teardown?.query.indexOf('LET mailDeletionJobs')).toBeLessThan(teardown!.query.indexOf('LET cleanupMailDocuments'));
-    for (const cleanup of ['cleanupMailSummaryAudio', 'cleanupMailSummaries', 'cleanupMailAudioVersions', 'cleanupMailVersions']) expect(teardown?.query.indexOf(`LET ${cleanup}`)).toBeLessThan(teardown!.query.indexOf('LET cleanupMailDocuments'));
   });
   const organizationKey = newId();
   const generateEmbedding = async (text: string) => {
@@ -290,7 +275,7 @@ describe('scope repository', () => {
     const query = fake.query.bind(fake);
     const seeded: Record<string, any>[] = [];
     fake.query = async (text, bindVars = {}) => {
-      if (bindVars.document) seeded.push(bindVars.document as Record<string, any>);
+      if (text.includes('IN emailTones') && bindVars.value) seeded.push(bindVars.value as Record<string, any>);
       return query(text, bindVars);
     };
     let embeddingCalls = 0;
@@ -306,10 +291,10 @@ describe('scope repository', () => {
     expect(embeddingCalls).toBe(1);
     expect(seeded.map(({ name }) => name)).toEqual(['Casual', 'Formal', 'Direct']);
     expect(seeded.map(({ embedding }) => embedding)).toEqual(Array.from({ length: 3 }, () => Array(EMBEDDING_DIMENSIONS).fill(0)));
-    expect(seeded.map(({ content }) => content)).toEqual([
-      encodeEmailToneContent({ slug: 'casual', name: 'Casual', instruction: 'Use conversational language, natural contractions, and an approachable tone.' }),
-      encodeEmailToneContent({ slug: 'formal', name: 'Formal', instruction: 'Use professional language, complete sentences, and a clear conventional structure.' }),
-      encodeEmailToneContent({ slug: 'direct', name: 'Direct', instruction: 'Lead with the answer or action and avoid hedging.' }),
+    expect(seeded.map(({ instruction }) => instruction)).toEqual([
+      'Use conversational language, natural contractions, and an approachable tone.',
+      'Use professional language, complete sentences, and a clear conventional structure.',
+      'Lead with the answer or action and avoid hedging.',
     ]);
   });
 

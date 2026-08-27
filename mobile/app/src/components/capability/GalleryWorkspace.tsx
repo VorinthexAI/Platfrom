@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { FlatList, Keyboard, KeyboardAvoidingView, ScrollView, StyleSheet, Text, View, useWindowDimensions, type TextInput as NativeTextInput } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomSheet, BottomSheetItem } from "@vorinthex/shared/ui/bottom-sheet";
@@ -203,6 +203,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
   const backgroundLoadRequest = useRef(0);
   const searchRequest = useRef(0);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const favoritePageRequest = useRef<string | undefined>(undefined);
   const searchFocusReleaseTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const collectionSearchInput = useRef<NativeTextInput>(null);
   const activeSearch = useRef<string | undefined>(undefined);
@@ -561,6 +562,18 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
       if (activeCollectionKey.current === collectionKey) setLoadingMore(false);
     }
   }
+  const loadMoreFavoriteImages = useEffectEvent(loadMoreImages);
+  useEffect(() => {
+    if (!showOnlyFavorites || loading) {
+      favoritePageRequest.current = undefined;
+      return;
+    }
+    if (!activeCollection || !nextCursor || loadingMore || query.trim() || activeSubject || showingSearchResults) return;
+    const request = `${activeCollection.key}:${nextCursor}`;
+    if (favoritePageRequest.current === request) return;
+    favoritePageRequest.current = request;
+    void loadMoreFavoriteImages();
+  }, [activeCollection?.key, activeSubject?.key, loading, loadingMore, nextCursor, query, showOnlyFavorites, showingSearchResults]);
 
   async function loadSubjects(silent = false) {
     const request = ++subjectsRequest.current;
@@ -2606,7 +2619,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
           {bulkToolbar}
           {filterBadges(true)}
           {status ? <View accessibilityLiveRegion="polite" style={styles.statusCard}><Text style={styles.status}>{status}</Text></View> : null}
-           {loading || searching && visibleImages.length === 0 ? <View accessibilityLabel={searching ? "Searching images" : "Loading images"} accessibilityRole="progressbar" style={styles.grid}>{Array.from({ length: IMAGE_COLUMNS }, (_, index) => <Skeleton key={index} style={[styles.imageSkeleton, { width: imageSize, height: imageSize }]} />)}</View> : visibleImages.length === 0 && visibleOptimisticItems.length === 0 && normalCollectionView ? <View style={styles.emptyState}><Text style={styles.emptyText}>{showOnlyFavorites ? "No favorite images here." : emptyGridMessage}</Text>{collectionSearchActive || showOnlyFavorites || !canAddImages ? null : <Button accessibilityLabel={`Upload images to ${activeCollection.name}`} contentMode="raw" onPress={() => void choosePhotos()} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button>}</View> : visibleImages.length === 0 && visibleOptimisticItems.length === 0 ? <Text style={styles.emptyText}>{showOnlyFavorites ? "No favorite images here." : emptyGridMessage}</Text> : (
+           {loading || (searching || loadingMore && showOnlyFavorites) && visibleImages.length === 0 ? <View accessibilityLabel={searching ? "Searching images" : "Loading images"} accessibilityRole="progressbar" style={styles.grid}>{Array.from({ length: IMAGE_COLUMNS }, (_, index) => <Skeleton key={index} style={[styles.imageSkeleton, { width: imageSize, height: imageSize }]} />)}</View> : visibleImages.length === 0 && visibleOptimisticItems.length === 0 && normalCollectionView ? <View style={styles.emptyState}><Text style={styles.emptyText}>{showOnlyFavorites ? "No favorite images here." : emptyGridMessage}</Text>{collectionSearchActive || showOnlyFavorites || !canAddImages ? null : <Button accessibilityLabel={`Upload images to ${activeCollection.name}`} contentMode="raw" onPress={() => void choosePhotos()} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button>}</View> : visibleImages.length === 0 && visibleOptimisticItems.length === 0 ? <Text style={styles.emptyText}>{showOnlyFavorites ? "No favorite images here." : emptyGridMessage}</Text> : (
             <View style={styles.imageSections}>
               {visibleImageGroups.map((group) => <View key={group.label} style={styles.dateGroup}>
                 <Text style={styles.dateHeading}>{group.label}</Text>
@@ -2799,7 +2812,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
             <Text style={styles.favoriteSwitchLabel}>Show hidden</Text>
           </View>
           <Button onPress={() => void openVisualIdentities()} size="md" variant="secondary">Visual identities</Button>
-          <Button onPress={() => void openSearchHistory("identityPicker")} size="md" variant="secondary">Search history</Button>
+          <Button onPress={() => void openSearchHistory("identityPicker")} size="md" style={styles.searchHistoryOption} variant="secondary">Search history</Button>
         </View> : null}
         {activeSheet === "visualIdentities" ? <View style={styles.identityLibrary}>
           {identityError && activeSubjects.length > 0 ? <View accessibilityLiveRegion="polite" style={styles.inlineError}><Text style={styles.inlineErrorText}>{identityError}</Text></View> : null}
@@ -2970,6 +2983,7 @@ const styles = StyleSheet.create({
   compactSheetActions: { width: "100%", gap: spacing.sm, padding: 2 },
   confirmationText: { color: palette.silver300, fontFamily: fonts.regular, fontSize: 13, lineHeight: 18, textAlign: "center" },
   filterPanel: { gap: 6 },
+  searchHistoryOption: { backgroundColor: palette.page },
   favoriteSwitchRow: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: spacing.xs },
   favoriteSwitchLabel: { color: palette.muted, fontFamily: fonts.regular, fontSize: 12 },
   sheetEmptyContent: { flexGrow: 1, alignContent: "center", alignItems: "center", justifyContent: "center" },

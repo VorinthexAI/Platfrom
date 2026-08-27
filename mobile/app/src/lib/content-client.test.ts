@@ -24,7 +24,7 @@ mock.module("expo-crypto", () => ({
 
 testRuntime.__archiveApiPost = async (url: string, body: Record<string, any>, config: Record<string, any>) => {
   calls.push({ url, body, config });
-  const tool = url === "/app/search" ? "app.search" : url === "/app/enhance" ? "app.enhance" : url === "/app/translate" ? "app.translate" : url.split("/").at(-1);
+  const tool = url === "/app/search" ? "app.search" : url === "/app/enhance" ? "app.enhance" : url === "/app/translate" ? "app.translate" : url === "/app/audio" ? "app.audio" : url.split("/").at(-1);
   const response = responseForTool?.(tool ?? "");
   if (response) return response;
   if (tool === "document.create" || tool === "document.parse" || tool === "document.scan") {
@@ -57,6 +57,7 @@ const {
   findContentDocumentSummary,
   findContentDocumentVersion,
   findContentNeighbors,
+  generateContentDocumentAudio,
   getContentContext,
   getContentDocumentTopics,
   loadInitialContentLocation,
@@ -118,6 +119,18 @@ test("lists independent persisted full-audio versions", async () => {
 
   await expect(listContentDocumentAudioVersions("document")).resolves.toMatchObject([{ key: "audio-version", current: true }]);
   expect(calls[0]?.body.input).toEqual({ documentKeys: ["document"], cursor: undefined, limit: 100 });
+});
+
+test("generates persisted document audio through app.audio", async () => {
+  const audio = { key: "audio-version", documentKey: "document", version: 1, sourceContentHash: "a".repeat(64), sourceTitle: "Note", sourceDocumentUpdatedAt: "2026-08-10T00:00:00.000Z", mimeType: "audio/mpeg", sizeBytes: 1024, durationMs: 65_000, isCurrent: false, playbackPositionMs: 0, voice: "clear", speakingRate: 1, includeTitle: true, includeCode: false, createdAt: "2026-08-10T00:02:00.000Z", current: true, url: "https://audio.example/version.mp3" };
+  responseForTool = (tool) => tool === "app.audio" ? { data: { success: true, data: audio } } : undefined;
+
+  await expect(generateContentDocumentAudio("document")).resolves.toEqual(audio);
+  expect(calls[0]).toMatchObject({
+    url: "/app/audio",
+    body: { organizationKey: "org-authenticated", scopeKey: "scope-authenticated", input: { documentKey: "document", voice: "clear", pace: 1, includeTitle: true, includeCode: false } },
+    config: { timeout: 5 * 60_000 },
+  });
 });
 
 test("updates and clears persisted document audio playback state", async () => {

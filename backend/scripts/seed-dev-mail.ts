@@ -5,7 +5,6 @@ import { getUserByEmailHash } from '@/lib/db/users.node';
 import { encryptEmailConnectorCredentials, tokenFingerprint } from '@/lib/email-inbox/connector-crypto';
 import { MAIL_DEV_FIXTURE_AT, MAIL_DEV_SEED_EMAIL } from '@/lib/email-inbox/dev-fixtures';
 import { assertLocalMailSeedEnvironment, buildMailDevSeedManifest, mailDevFixtureKey, reconcileMailDevSeed, verifyMailDevSeed } from '@/lib/email-inbox/dev-seed';
-import { ensureMailFolders } from '@/lib/email-inbox/folders';
 import { createEmailService } from '@/lib/email-inbox/service';
 
 async function main() {
@@ -16,7 +15,6 @@ async function main() {
   if (!user || normalizeEmail(user.email) !== targetEmail) throw new Error('The exact approved local development user is unavailable.');
   const context = await getPersonalAuthContext(user.key);
   if (!context) throw new Error('The approved local development user has no personal scope.');
-  await ensureMailFolders(db, context.scope.key, MAIL_DEV_FIXTURE_AT);
   const placeholder = `local-fixture:${context.scope.key}`;
   const manifest = buildMailDevSeedManifest({
     organizationKey: context.organization.key,

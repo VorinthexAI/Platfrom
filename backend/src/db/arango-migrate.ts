@@ -11,7 +11,7 @@ import { ensureScopeMembersCollection, ensureScopesCollection, ensureScopeScopes
 import { reconcileOrganizationScopeMemberships } from '../lib/ai/scopes/membership-invariant';
 import { actionIdSchema, type ActionId } from '../lib/ai/actions/types';
 import { organizationProviderSchema } from '../lib/ai/organization-providers/schema';
-import { buildEmbeddingText, withArangoKey } from '../lib/db/base';
+import { buildEmbeddingText, toArangoDoc, withArangoKey } from '../lib/db/base';
 import { NEXUS_SCOPE_KEY, SEEDED_SCOPES } from '../lib/db/seed';
 import { isLegacyIndex, LEGACY_REMOVAL_MARKER } from './arango-migrate-indexes';
 import { stageLegacyDocumentShares } from './content-migration';
@@ -24,9 +24,8 @@ import { retireAiPersistence } from './retire-ai-persistence';
 import { buildPlaceEmbeddingText, buildTripEmbeddingText, TRIP_EMBEDDING_CONTENT_VERSION } from '../lib/travel/semantic-text';
 import { generatedPlaceDetailSchema } from '../lib/db/places.node';
 import { buildImageEmbeddingText } from '../lib/image-embedding';
-import { decodeEmailToneContent, emailToneSemanticText, encodeEmailToneContent } from '../lib/email-inbox/archive-payloads';
-import { mailFolderKeys } from '../lib/email-inbox/folders';
-import { bookGenerationInputSchema } from '../lib/db/books.node';
+import { decodeEmailTone, decodeEmailToneContent, emailMessageSemanticText, emailToneSemanticText, encodeEmailToneContent } from '../lib/email-inbox/archive-payloads';
+import { bookGenerationInputSchema } from '../lib/books/schemas';
 
 const url = process.env.ARANGO_URL ?? 'http://127.0.0.1:8529';
 const databaseName = process.env.ARANGO_DATABASE ?? 'vorinthex';
@@ -188,7 +187,7 @@ function isCurrentVector(value: unknown): value is number[] {
 }
 
 function currentChunkEmbeddings(value: unknown, chunkCount: number): number[][] | null {
-  return Array.isArray(value) && value.length === chunkCount && value.every(isCurrentVector) ? value : null;
+  return Array.isArray(value) && value.length === chunkCount && value.every((embedding) => isCurrentVector(embedding) && embedding.some((item) => item !== 0)) ? value : null;
 }
 
 function migrationContentChunks(content: string): string[] | null {
@@ -668,122 +667,42 @@ export async function migratePlaceReports(targetDb: Database): Promise<void> {
 export async function migrateGeneratedTravelDocuments(targetDb: Database): Promise<void> {
   await migrateTripGuides(targetDb);
   await migratePlaceReports(targetDb);
-  const { ensureGeneratedDocumentFolders } = await import('@/lib/generated-documents/folders');
-  const { ensureMailFolders } = await import('@/lib/email-inbox/folders');
-  const scopes = await (await targetDb.query<{ _key: string }>('FOR scope IN scopes RETURN { _key: scope._key }')).all();
-  for (const scope of scopes) {
-    await ensureGeneratedDocumentFolders(targetDb, scope._key);
-    await ensureMailFolders(targetDb, scope._key);
-  }
-  const migrations = [
-    { source: 'tripGuides', subjectType: 'trip', subjectField: 'tripKey', kind: 'guide' },
-    { source: 'placeReports', subjectType: 'place', subjectField: 'placeKey', kind: 'brief' },
-  ] as const;
-  for (const migration of migrations) {
-    const source = targetDb.collection(migration.source);
-    if (!await source.exists()) continue;
-    await targetDb.query(`
-      FOR legacy IN @@source
-        LET folderPurpose = CONCAT("generated-documents-", @kind)
-        LET folder = FIRST(FOR candidate IN folders FILTER candidate.scopeKey == legacy.scopeKey && candidate.purpose == folderPurpose LIMIT 1 RETURN candidate)
-        FILTER folder != null
-        UPSERT { _key: legacy._key }
-          INSERT { _key: legacy._key, scopeKey: legacy.scopeKey, folderKey: folder._key, name: legacy.name, content: legacy.summary, embedding: legacy.embedding, contentChunks: [legacy.summary], chunkEmbeddings: [legacy.embedding], semanticChunkCount: 1, semanticContentHash: SHA256(legacy.summary), isFavorite: false, createdAt: legacy.createdAt, updatedAt: legacy.createdAt }
-          UPDATE {} IN documents
-        UPSERT { _key: legacy._key }
-          INSERT { _key: legacy._key, scopeKey: legacy.scopeKey, documentKey: legacy._key, subjectType: @subjectType, subjectKey: legacy[@subjectField], kind: @kind, provenance: "generated", createdByKey: legacy.userKey, idempotencyKey: CONCAT("migration:", legacy._key), requestHash: legacy.requestHash, createdAt: legacy.createdAt, updatedAt: legacy.createdAt }
-          UPDATE {} IN generatedDocumentBindings
-    `, { '@source': migration.source, subjectType: migration.subjectType, subjectField: migration.subjectField, kind: migration.kind });
-    const verification = await targetDb.query<number>(`
-      RETURN LENGTH(FOR legacy IN @@source
-        LET document = DOCUMENT(documents, legacy._key)
-        LET binding = DOCUMENT(generatedDocumentBindings, legacy._key)
-        LET folderPurpose = CONCAT("generated-documents-", @kind)
-        LET folder = FIRST(FOR candidate IN folders FILTER candidate.scopeKey == legacy.scopeKey && candidate.purpose == folderPurpose LIMIT 1 RETURN candidate)
-        FILTER document == null || binding == null || folder == null
-          || document.scopeKey != legacy.scopeKey || document.folderKey != folder._key || document.name != legacy.name || document.content != legacy.summary
-          || binding.scopeKey != legacy.scopeKey || binding.documentKey != legacy._key || binding.subjectType != @subjectType || binding.subjectKey != legacy[@subjectField]
-          || binding.kind != @kind || binding.createdByKey != legacy.userKey || binding.requestHash != legacy.requestHash
-        RETURN 1)
-    `, { '@source': migration.source, subjectType: migration.subjectType, subjectField: migration.subjectField, kind: migration.kind });
-    const invalid = await verification.next() ?? 0;
-    if (invalid > 0) throw new Error(`${migration.source} conversion failed for ${invalid} row(s); source collection was preserved.`);
-    await source.drop();
-  }
-  await migrateContentDocuments(targetDb);
-}
-
-/** Moves the retired mail collections into protected Archive documents before they are dropped. */
-export async function migrateMailArchiveDocuments(targetDb: Database): Promise<void> {
-  const documents = targetDb.collection('documents');
-  const folders = targetDb.collection('folders');
-  if (!await documents.exists() || !await folders.exists()) return;
-  const { ensureMailFolders, mailFolderKeys } = await import('../lib/email-inbox/folders');
-  const scopeKeys = await (await targetDb.query<string>('FOR scope IN scopes RETURN scope._key')).all();
-  for (const scopeKey of scopeKeys) await ensureMailFolders(targetDb, scopeKey);
-
-  const accounts = targetDb.collection('emailAccounts');
-  if (await accounts.exists() && await targetDb.collection('organizationConnectors').exists()) {
-    await targetDb.query(`FOR account IN emailAccounts FILTER account.syncEnabled != false LET connector = FIRST(FOR candidate IN organizationConnectors FILTER candidate.provider == "gmail" && candidate.scopeKey == account.scopeKey && candidate.providerAccountId == account.providerAccountId && (account.connectorKey == null || candidate._key == account.connectorKey) LIMIT 1 RETURN candidate) FILTER connector != null UPDATE connector WITH { syncEnabled: account.syncEnabled, historyId: account.historyId, lastSyncedAt: account.lastSyncedAt, syncStatus: account.syncStatus, syncError: account.syncError, watchRegisteredAt: account.watchRegisteredAt, watchExpiresAt: account.watchExpiresAt, updatedAt: MAX([connector.updatedAt, account.updatedAt]) } IN organizationConnectors OPTIONS { keepNull: false }`);
-    const unmatched = await (await targetDb.query<number>('RETURN LENGTH(FOR account IN emailAccounts FILTER account.syncEnabled != false LET connectors = (FOR candidate IN organizationConnectors FILTER candidate.provider == "gmail" && candidate.scopeKey == account.scopeKey && candidate.providerAccountId == account.providerAccountId && (account.connectorKey == null || candidate._key == account.connectorKey) LIMIT 2 RETURN candidate) FILTER LENGTH(connectors) != 1 RETURN 1)')).next() ?? 0;
-    if (unmatched > 0) throw new Error(`Mail migration preserved legacy collections because ${unmatched} account record(s) had no connector.`);
-    const invalidAccounts = await (await targetDb.query<number>('RETURN LENGTH(FOR account IN emailAccounts FILTER account.syncEnabled != false LET connector = FIRST(FOR candidate IN organizationConnectors FILTER candidate.provider == "gmail" && candidate.scopeKey == account.scopeKey && candidate.providerAccountId == account.providerAccountId && (account.connectorKey == null || candidate._key == account.connectorKey) LIMIT 1 RETURN candidate) FILTER connector == null || connector.syncEnabled != account.syncEnabled || (HAS(account, "historyId") && connector.historyId != account.historyId) || (HAS(account, "lastSyncedAt") && connector.lastSyncedAt != account.lastSyncedAt) || (HAS(account, "syncStatus") && connector.syncStatus != account.syncStatus) || (HAS(account, "syncError") && connector.syncError != account.syncError) || (HAS(account, "watchRegisteredAt") && connector.watchRegisteredAt != account.watchRegisteredAt) || (HAS(account, "watchExpiresAt") && connector.watchExpiresAt != account.watchExpiresAt) RETURN 1)')).next() ?? 0;
-    if (invalidAccounts > 0) throw new Error(`Mail migration preserved legacy collections because ${invalidAccounts} account record(s) were not verified.`);
-  }
-
-  const threads = targetDb.collection('emailThreads');
-  if (await threads.exists()) {
-    for (const scopeKey of scopeKeys) {
-      const folderKey = mailFolderKeys(scopeKey).threads;
-      await targetDb.query(`FOR source IN emailThreads FILTER source.scopeKey == @scopeKey LET account = DOCUMENT(emailAccounts, source.accountKey) LET connector = FIRST(FOR candidate IN organizationConnectors FILTER account != null && candidate.provider == "gmail" && candidate.scopeKey == account.scopeKey && candidate.providerAccountId == account.providerAccountId && (account.connectorKey == null || candidate._key == account.connectorKey) LIMIT 1 RETURN candidate) LET accountKey = connector != null ? connector._key : (account != null && account.syncEnabled == false ? account._key : null) FILTER accountKey != null LET targetKey = CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "mail-thread", source.scopeKey, accountKey, source.providerThreadId)), 24)) LET data = MERGE(UNSET(source, "_key", "_id", "_rev", "scopeKey", "embedding", "createdAt", "updatedAt"), { accountKey }) LET target = { _key: targetKey, scopeKey: source.scopeKey, folderKey: @folderKey, name: source.subject, content: JSON_STRINGIFY({ version: 1, kind: "mail-thread", data }), embedding: source.embedding, mutationPolicy: "system-only", isFavorite: false, createdAt: source.createdAt, updatedAt: source.updatedAt } UPSERT { _key: targetKey } INSERT target REPLACE target IN documents`, { scopeKey, folderKey });
+  await targetDb.query('FOR guide IN tripGuides FILTER !HAS(guide, "content") && IS_STRING(guide.summary) UPDATE guide WITH { content: guide.summary, contentChunks: [guide.summary], chunkEmbeddings: [guide.embedding], semanticChunkCount: 1, semanticContentHash: SHA256(guide.summary), idempotencyKey: CONCAT("migration:", guide._key), updatedAt: guide.createdAt, summary: null } IN tripGuides OPTIONS { keepNull: false }');
+  await targetDb.query(`FOR binding IN generatedDocumentBindings FILTER binding.subjectType == "trip" && binding.kind == "guide"
+    LET document = DOCUMENT(documents, binding.documentKey) LET trip = DOCUMENT(trips, binding.subjectKey)
+    FILTER document != null && trip != null && document.scopeKey == binding.scopeKey && trip.scopeKey == binding.scopeKey
+    LET value = { _key: binding._key, scopeKey: binding.scopeKey, userKey: binding.createdByKey, tripKey: binding.subjectKey, name: document.name, content: document.content, embedding: document.embedding, contentChunks: document.contentChunks || [document.content], chunkEmbeddings: document.chunkEmbeddings || [document.embedding], semanticChunkCount: document.semanticChunkCount || 1, semanticContentHash: document.semanticContentHash || SHA256(document.content), idempotencyKey: binding.idempotencyKey, requestHash: binding.requestHash, createdAt: binding.createdAt, updatedAt: binding.updatedAt }
+    UPSERT { _key: binding._key } INSERT value UPDATE {} IN tripGuides`);
+  await targetDb.query(`FOR binding IN generatedDocumentBindings FILTER binding.subjectType == "place" && binding.kind IN ["brief", "accommodations", "restaurants", "activities"]
+    LET document = DOCUMENT(documents, binding.documentKey) LET place = DOCUMENT(places, binding.subjectKey)
+    FILTER document != null && place != null && document.scopeKey == binding.scopeKey && place.scopeKey == binding.scopeKey
+    LET value = { _key: binding._key, scopeKey: binding.scopeKey, userKey: binding.createdByKey, placeKey: binding.subjectKey, kind: binding.kind, name: document.name, content: document.content, embedding: document.embedding, contentChunks: document.contentChunks || [document.content], chunkEmbeddings: document.chunkEmbeddings || [document.embedding], semanticChunkCount: document.semanticChunkCount || 1, semanticContentHash: document.semanticContentHash || SHA256(document.content), idempotencyKey: binding.idempotencyKey, requestHash: binding.requestHash, createdAt: binding.createdAt, updatedAt: binding.updatedAt }
+    UPSERT { _key: binding._key } INSERT value UPDATE {} IN placeReferences`);
+  if (await targetDb.collection('placeReports').exists()) await targetDb.query(`FOR report IN placeReports
+    LET value = { _key: report._key, scopeKey: report.scopeKey, userKey: report.userKey, placeKey: report.placeKey, kind: "brief", name: report.name, content: report.summary, embedding: report.embedding, contentChunks: [report.summary], chunkEmbeddings: [report.embedding], semanticChunkCount: 1, semanticContentHash: SHA256(report.summary), idempotencyKey: CONCAT("migration:", report._key), requestHash: report.requestHash, createdAt: report.createdAt, updatedAt: report.createdAt }
+    UPSERT { _key: report._key } INSERT value UPDATE {} IN placeReferences`);
+  for (const collectionName of ['tripGuides', 'placeReferences'] as const) {
+    const records = await (await targetDb.query<Record<string, unknown>>(`FOR record IN ${collectionName} RETURN record`)).all();
+    for (const record of records) {
+      if (typeof record._key !== 'string' || typeof record.name !== 'string' || typeof record.content !== 'string') continue;
+      const contentChunks = migrationContentChunks(record.content);
+      if (!contentChunks?.length) continue;
+      const semanticContentHash = documentSemanticHash(record.content);
+      const existingChunks = record.contentChunks;
+      const chunksCurrent = Array.isArray(existingChunks) && existingChunks.length === contentChunks.length && existingChunks.every((chunk, index) => chunk === contentChunks[index]);
+      const chunkEmbeddings = currentChunkEmbeddings(record.chunkEmbeddings, contentChunks.length);
+      if (chunksCurrent && chunkEmbeddings && isCurrentVector(record.embedding) && record.embedding.some((item) => item !== 0) && record.semanticChunkCount === contentChunks.length && record.semanticContentHash === semanticContentHash) continue;
+      const embeddings = await generateEmbeddings(documentEmbeddingTexts(record.name, contentChunks));
+      await targetDb.query(`UPDATE @key WITH { embedding: @embedding, contentChunks: @contentChunks, chunkEmbeddings: @chunkEmbeddings, semanticChunkCount: @semanticChunkCount, semanticContentHash: @semanticContentHash } IN ${collectionName}`, { key: record._key, embedding: embeddings[0], contentChunks, chunkEmbeddings: embeddings, semanticChunkCount: contentChunks.length, semanticContentHash });
     }
+    const invalid = await (await targetDb.query<number>(`RETURN LENGTH(FOR record IN ${collectionName} FILTER !IS_ARRAY(record.embedding) || LENGTH(record.embedding) != @dimensions || LENGTH(record.embedding[* FILTER CURRENT != 0]) == 0 || !IS_ARRAY(record.chunkEmbeddings) || LENGTH(record.chunkEmbeddings) != record.semanticChunkCount || LENGTH(record.chunkEmbeddings[* FILTER !IS_ARRAY(CURRENT) || LENGTH(CURRENT) != @dimensions || LENGTH(CURRENT[* FILTER CURRENT != 0]) == 0]) > 0 || !IS_ARRAY(record.contentChunks) || LENGTH(record.contentChunks) != record.semanticChunkCount RETURN 1)`, { dimensions: EMBEDDING_DIMENSIONS })).next() ?? 0;
+    if (invalid > 0) throw new Error(`${collectionName} semantic migration failed for ${invalid} row(s).`);
   }
-  const messages = targetDb.collection('emailMessages');
-  if (await messages.exists()) {
-    for (const scopeKey of scopeKeys) {
-      const folderKey = mailFolderKeys(scopeKey).threads;
-      await targetDb.query(`FOR source IN emailMessages FILTER source.scopeKey == @scopeKey LET legacyThread = DOCUMENT(emailThreads, source.threadKey) LET account = DOCUMENT(emailAccounts, source.accountKey) LET connector = FIRST(FOR candidate IN organizationConnectors FILTER account != null && candidate.provider == "gmail" && candidate.scopeKey == account.scopeKey && candidate.providerAccountId == account.providerAccountId && (account.connectorKey == null || candidate._key == account.connectorKey) LIMIT 1 RETURN candidate) LET accountKey = connector != null ? connector._key : (account != null && account.syncEnabled == false ? account._key : null) FILTER legacyThread != null && accountKey != null LET threadKey = CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "mail-thread", source.scopeKey, accountKey, legacyThread.providerThreadId)), 24)) LET targetKey = CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "mail-message", source.scopeKey, accountKey, source.providerMessageId)), 24)) LET data = MERGE(UNSET(source, "_key", "_id", "_rev", "scopeKey", "threadKey", "embedding", "createdAt", "updatedAt"), { accountKey, threadKey }) LET target = { _key: targetKey, scopeKey: source.scopeKey, folderKey: @folderKey, name: source.subject, content: JSON_STRINGIFY({ version: 1, kind: "mail-message", data }), embedding: source.embedding, mutationPolicy: "system-only", isFavorite: false, createdAt: source.createdAt, updatedAt: source.updatedAt } UPSERT { _key: targetKey } INSERT target REPLACE target IN documents`, { scopeKey, folderKey });
-    }
-  }
-  const drafts = targetDb.collection('emailReplyDrafts');
-  if (await drafts.exists()) {
-    for (const scopeKey of scopeKeys) {
-      const folderKey = mailFolderKeys(scopeKey).drafts;
-      await targetDb.query(`FOR source IN emailReplyDrafts FILTER source.scopeKey == @scopeKey LET legacyThread = DOCUMENT(emailThreads, source.threadKey) LET legacyMessage = DOCUMENT(emailMessages, source.messageKey) LET account = legacyThread == null ? null : DOCUMENT(emailAccounts, legacyThread.accountKey) LET connector = FIRST(FOR candidate IN organizationConnectors FILTER account != null && candidate.provider == "gmail" && candidate.scopeKey == account.scopeKey && candidate.providerAccountId == account.providerAccountId && (account.connectorKey == null || candidate._key == account.connectorKey) LIMIT 1 RETURN candidate) LET accountKey = connector != null ? connector._key : (account != null && account.syncEnabled == false ? account._key : null) FILTER legacyThread != null && legacyMessage != null && accountKey != null LET threadKey = CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "mail-thread", source.scopeKey, accountKey, legacyThread.providerThreadId)), 24)) LET messageKey = CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "mail-message", source.scopeKey, accountKey, legacyMessage.providerMessageId)), 24)) LET data = MERGE({ variant: "reply" }, UNSET(source, "_key", "_id", "_rev", "scopeKey", "threadKey", "messageKey", "embedding", "createdAt", "updatedAt"), { threadKey, messageKey }) LET target = { _key: source._key, scopeKey: source.scopeKey, folderKey: @folderKey, name: CONCAT("Reply ", legacyThread.subject), content: JSON_STRINGIFY({ version: 1, kind: "mail-reply-draft", data }), embedding: source.embedding, mutationPolicy: "system-only", isFavorite: false, createdAt: source.createdAt, updatedAt: source.updatedAt } UPSERT { _key: source._key } INSERT target REPLACE target IN documents`, { scopeKey, folderKey });
-    }
-  }
-  const profiles = targetDb.collection('emailWritingProfiles');
-  if (await profiles.exists()) {
-    for (const scopeKey of scopeKeys) {
-      const folderKey = mailFolderKeys(scopeKey).tones;
-      await targetDb.query(`FOR source IN emailWritingProfiles FILTER source.scopeKey == @scopeKey LET data = UNSET(source, "_key", "_id", "_rev", "scopeKey", "embedding", "createdAt", "updatedAt") LET target = { _key: source._key, scopeKey: source.scopeKey, folderKey: @folderKey, name: source.name, content: JSON_STRINGIFY({ version: 1, kind: "mail-writing-profile", data }), embedding: source.embedding, mutationPolicy: "system-only", isFavorite: false, createdAt: source.createdAt, updatedAt: source.updatedAt } UPSERT { _key: source._key } INSERT target REPLACE target IN documents`, { scopeKey, folderKey });
-    }
-  }
-  for (const legacy of [
-    { collection: 'emailContacts', kind: 'mail-contact', name: 'email' },
-    { collection: 'emailRules', kind: 'mail-rule', name: 'name' },
-  ] as const) {
-    const collection = targetDb.collection(legacy.collection);
-    if (!await collection.exists()) continue;
-    for (const scopeKey of scopeKeys) {
-      const folderKey = mailFolderKeys(scopeKey).settings;
-      await targetDb.query(`FOR source IN @@source FILTER source.scopeKey == @scopeKey LET data = UNSET(source, "_key", "_id", "_rev", "scopeKey", "embedding", "createdAt", "updatedAt") LET target = { _key: source._key, scopeKey: source.scopeKey, folderKey: @folderKey, name: source[@nameField], content: JSON_STRINGIFY({ version: 1, kind: @kind, data }), embedding: source.embedding, mutationPolicy: "system-only", isFavorite: false, createdAt: source.createdAt, updatedAt: source.updatedAt } UPSERT { _key: source._key } INSERT target REPLACE target IN documents`, { '@source': legacy.collection, scopeKey, folderKey, nameField: legacy.name, kind: legacy.kind });
-    }
-  }
-
-  const verificationQueries = [
-    ['emailThreads', 'FOR source IN emailThreads LET account = DOCUMENT(emailAccounts, source.accountKey) LET connector = FIRST(FOR candidate IN organizationConnectors FILTER account != null && candidate.provider == "gmail" && candidate.scopeKey == account.scopeKey && candidate.providerAccountId == account.providerAccountId && (account.connectorKey == null || candidate._key == account.connectorKey) LIMIT 1 RETURN candidate) LET folder = FIRST(FOR candidate IN folders FILTER candidate.scopeKey == source.scopeKey && candidate.purpose == "communication-mail-threads" LIMIT 1 RETURN candidate) LET accountKey = connector != null ? connector._key : (account != null && account.syncEnabled == false ? account._key : null) LET targetKey = accountKey == null ? null : CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "mail-thread", source.scopeKey, accountKey, source.providerThreadId)), 24)) LET data = MERGE(UNSET(source, "_key", "_id", "_rev", "scopeKey", "embedding", "createdAt", "updatedAt"), { accountKey }) LET target = targetKey == null ? null : DOCUMENT(documents, targetKey) FILTER accountKey == null || folder == null || target == null || target.scopeKey != source.scopeKey || target.folderKey != folder._key || target.name != source.subject || target.content != JSON_STRINGIFY({ version: 1, kind: "mail-thread", data }) || target.embedding != source.embedding || target.mutationPolicy != "system-only" || target.createdAt != source.createdAt || target.updatedAt != source.updatedAt RETURN 1'],
-    ['emailMessages', 'FOR source IN emailMessages LET legacyThread = DOCUMENT(emailThreads, source.threadKey) LET account = DOCUMENT(emailAccounts, source.accountKey) LET connector = FIRST(FOR candidate IN organizationConnectors FILTER account != null && candidate.provider == "gmail" && candidate.scopeKey == account.scopeKey && candidate.providerAccountId == account.providerAccountId && (account.connectorKey == null || candidate._key == account.connectorKey) LIMIT 1 RETURN candidate) LET folder = FIRST(FOR candidate IN folders FILTER candidate.scopeKey == source.scopeKey && candidate.purpose == "communication-mail-threads" LIMIT 1 RETURN candidate) LET accountKey = connector != null ? connector._key : (account != null && account.syncEnabled == false ? account._key : null) LET threadKey = legacyThread == null || accountKey == null ? null : CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "mail-thread", source.scopeKey, accountKey, legacyThread.providerThreadId)), 24)) LET targetKey = accountKey == null ? null : CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "mail-message", source.scopeKey, accountKey, source.providerMessageId)), 24)) LET data = MERGE(UNSET(source, "_key", "_id", "_rev", "scopeKey", "threadKey", "embedding", "createdAt", "updatedAt"), { accountKey, threadKey }) LET target = targetKey == null ? null : DOCUMENT(documents, targetKey) FILTER legacyThread == null || accountKey == null || folder == null || target == null || target.scopeKey != source.scopeKey || target.folderKey != folder._key || target.name != source.subject || target.content != JSON_STRINGIFY({ version: 1, kind: "mail-message", data }) || target.embedding != source.embedding || target.mutationPolicy != "system-only" || target.createdAt != source.createdAt || target.updatedAt != source.updatedAt RETURN 1'],
-    ['emailReplyDrafts', 'FOR source IN emailReplyDrafts LET legacyThread = DOCUMENT(emailThreads, source.threadKey) LET legacyMessage = DOCUMENT(emailMessages, source.messageKey) LET account = legacyThread == null ? null : DOCUMENT(emailAccounts, legacyThread.accountKey) LET connector = FIRST(FOR candidate IN organizationConnectors FILTER account != null && candidate.provider == "gmail" && candidate.scopeKey == account.scopeKey && candidate.providerAccountId == account.providerAccountId && (account.connectorKey == null || candidate._key == account.connectorKey) LIMIT 1 RETURN candidate) LET folder = FIRST(FOR candidate IN folders FILTER candidate.scopeKey == source.scopeKey && candidate.purpose == "communication-mail-drafts" LIMIT 1 RETURN candidate) LET accountKey = connector != null ? connector._key : (account != null && account.syncEnabled == false ? account._key : null) LET threadKey = legacyThread == null || accountKey == null ? null : CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "mail-thread", source.scopeKey, accountKey, legacyThread.providerThreadId)), 24)) LET messageKey = legacyMessage == null || accountKey == null ? null : CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "mail-message", source.scopeKey, accountKey, legacyMessage.providerMessageId)), 24)) LET data = MERGE({ variant: "reply" }, UNSET(source, "_key", "_id", "_rev", "scopeKey", "threadKey", "messageKey", "embedding", "createdAt", "updatedAt"), { threadKey, messageKey }) LET target = DOCUMENT(documents, source._key) FILTER legacyThread == null || legacyMessage == null || accountKey == null || folder == null || target == null || target.scopeKey != source.scopeKey || target.folderKey != folder._key || target.name != CONCAT("Reply ", legacyThread.subject) || target.content != JSON_STRINGIFY({ version: 1, kind: "mail-reply-draft", data }) || target.embedding != source.embedding || target.mutationPolicy != "system-only" || target.createdAt != source.createdAt || target.updatedAt != source.updatedAt RETURN 1'],
-    ['emailWritingProfiles', 'FOR source IN emailWritingProfiles LET folder = FIRST(FOR candidate IN folders FILTER candidate.scopeKey == source.scopeKey && candidate.purpose == "communication-mail-tones" LIMIT 1 RETURN candidate) LET data = UNSET(source, "_key", "_id", "_rev", "scopeKey", "embedding", "createdAt", "updatedAt") LET target = DOCUMENT(documents, source._key) FILTER folder == null || target == null || target.scopeKey != source.scopeKey || target.folderKey != folder._key || target.name != source.name || target.content != JSON_STRINGIFY({ version: 1, kind: "mail-writing-profile", data }) || target.embedding != source.embedding || target.mutationPolicy != "system-only" || target.createdAt != source.createdAt || target.updatedAt != source.updatedAt RETURN 1'],
-    ['emailContacts', 'FOR source IN emailContacts LET folder = FIRST(FOR candidate IN folders FILTER candidate.scopeKey == source.scopeKey && candidate.purpose == "communication-mail-settings" LIMIT 1 RETURN candidate) LET data = UNSET(source, "_key", "_id", "_rev", "scopeKey", "embedding", "createdAt", "updatedAt") LET target = DOCUMENT(documents, source._key) FILTER folder == null || target == null || target.scopeKey != source.scopeKey || target.folderKey != folder._key || target.name != source.email || target.content != JSON_STRINGIFY({ version: 1, kind: "mail-contact", data }) || target.embedding != source.embedding || target.mutationPolicy != "system-only" || target.createdAt != source.createdAt || target.updatedAt != source.updatedAt RETURN 1'],
-    ['emailRules', 'FOR source IN emailRules LET folder = FIRST(FOR candidate IN folders FILTER candidate.scopeKey == source.scopeKey && candidate.purpose == "communication-mail-settings" LIMIT 1 RETURN candidate) LET data = UNSET(source, "_key", "_id", "_rev", "scopeKey", "embedding", "createdAt", "updatedAt") LET target = DOCUMENT(documents, source._key) FILTER folder == null || target == null || target.scopeKey != source.scopeKey || target.folderKey != folder._key || target.name != source.name || target.content != JSON_STRINGIFY({ version: 1, kind: "mail-rule", data }) || target.embedding != source.embedding || target.mutationPolicy != "system-only" || target.createdAt != source.createdAt || target.updatedAt != source.updatedAt RETURN 1'],
-  ] as const;
-  for (const [collectionName, query] of verificationQueries) {
-    if (!await targetDb.collection(collectionName).exists()) continue;
-    const invalid = await (await targetDb.query<number>(`RETURN LENGTH(${query})`)).next() ?? 0;
-    if (invalid > 0) throw new Error(`Mail migration preserved legacy collections because ${invalid} ${collectionName} record(s) were not verified.`);
-  }
+  await targetDb.query(`FOR place IN places FILTER IS_STRING(place.coverImageKey)
+    LET image = DOCUMENT(images, place.coverImageKey) FILTER image != null && image.scopeKey == place.scopeKey && IS_STRING(image.storageKey)
+    LET value = { _key: CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "place-hero-media", place.scopeKey, place.userKey, place._key)), 24)), scopeKey: place.scopeKey, userKey: place.userKey, placeKey: place._key, storageKey: image.storageKey, contentHash: SHA256(image.storageKey), mimeType: "image/png", sizeBytes: image.sizeBytes, width: 1536, height: 1024, createdAt: image.createdAt, updatedAt: image.updatedAt }
+    UPSERT { scopeKey: place.scopeKey, userKey: place.userKey, placeKey: place._key } INSERT value UPDATE {} IN placeHeroMedia`);
+  await targetDb.query('FOR folder IN folders FILTER STARTS_WITH(folder.purpose || "", "generated-documents-") UPDATE folder WITH { purpose: null, managedPurpose: null, managedOwnerKey: null, mutationPolicy: "user" } IN folders OPTIONS { keepNull: false }');
 }
 
 export async function migrateEmailInitialSyncCompletion(targetDb: Database): Promise<void> {
@@ -791,6 +710,61 @@ export async function migrateEmailInitialSyncCompletion(targetDb: Database): Pro
   await targetDb.query(`FOR connector IN organizationConnectors
     FILTER connector.provider == "gmail" && !HAS(connector, "initialSyncCompleted")
     UPDATE connector WITH { initialSyncCompleted: HAS(connector, "lastSyncedAt") } IN organizationConnectors`);
+}
+
+/** Restores private Signal rows from the managed Archive/Gallery representation shipped by the previous migration. */
+export async function migrateCanonicalEmailPersistence(targetDb: Database): Promise<void> {
+  if (!await targetDb.collection('documents').exists()) return;
+  await targetDb.query(`FOR folder IN folders FILTER folder.managedPurpose == "mail-inbox" && IS_STRING(folder.managedOwnerKey)
+    LET connector = DOCUMENT(organizationConnectors, folder.managedOwnerKey) FILTER connector != null && connector.scopeKey == folder.scopeKey
+    LET value = { _key: folder._key, organizationKey: connector.organizationKey, scopeKey: folder.scopeKey, connectorKey: connector._key, name: folder.name, description: folder.description, coverImageKey: folder.coverImageKey, isFavorite: folder.isFavorite || false, embedding: folder.embedding, createdAt: folder.createdAt, updatedAt: folder.updatedAt }
+    UPSERT { _key: folder._key } INSERT value UPDATE {} IN emailInboxes OPTIONS { keepNull: false }`);
+  await targetDb.query('FOR inbox IN emailInboxes FILTER inbox.description == null || inbox.coverImageKey == null UPDATE inbox WITH { description: inbox.description, coverImageKey: inbox.coverImageKey } IN emailInboxes OPTIONS { keepNull: false }');
+  const records = [
+    { kind: 'mail-thread', collection: 'emailThreads' },
+    { kind: 'mail-message', collection: 'emailMessages' },
+    { kind: 'mail-reply-draft', collection: 'emailDrafts' },
+    { kind: 'mail-new-draft', collection: 'emailDrafts' },
+    { kind: 'mail-reply-context', collection: 'emailReplyContext' },
+    { kind: 'mail-writing-profile', collection: 'emailWritingProfiles' },
+  ] as const;
+  for (const { kind, collection } of records) await targetDb.query(`FOR document IN documents FILTER document.mutationPolicy == "system-only" && IS_STRING(document.content) LET payload = JSON_PARSE(document.content) FILTER payload != null && payload.version == 1 && payload.kind == @kind LET targetKey = @kind == "mail-thread" ? CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "mail-thread", document.scopeKey, payload.data.accountKey, payload.data.providerThreadId)), 24)) : @kind == "mail-message" ? CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "mail-message", document.scopeKey, payload.data.accountKey, payload.data.providerMessageId)), 24)) : document._key LET value = MERGE(payload.data, { _key: targetKey, scopeKey: document.scopeKey, embedding: document.embedding, developmentFixtureIdentifier: document.developmentFixtureIdentifier, createdAt: document.createdAt, updatedAt: document.updatedAt }) UPSERT { _key: targetKey } INSERT value UPDATE {} IN @@collection OPTIONS { keepNull: false }`, { kind, '@collection': collection });
+  const toneDocuments = await (await targetDb.query<Record<string, unknown>>('FOR document IN documents FILTER IS_STRING(document.content) LET payload = JSON_PARSE(document.content) FILTER payload != null && payload.version == 1 && payload.kind == "mail-tone" || CONTAINS(document.content, "<!-- vorinthex-mail-tone ") RETURN document')).all();
+  for (const raw of toneDocuments) {
+    try {
+      const document = withArangoKey(raw);
+      if (!isCanonicalEmailToneDocument(document)) continue;
+      const tone = decodeEmailTone(document);
+      await targetDb.query('UPSERT { _key: @key } INSERT @value UPDATE {} IN emailTones', { key: tone.key, value: toArangoDoc(tone) });
+    } catch { /* Unrelated or malformed ordinary Archive documents remain untouched. */ }
+  }
+  for (const collection of ['emailInboxes', 'emailThreads', 'emailMessages', 'emailDrafts', 'emailTones', 'emailReplyContext', 'emailWritingProfiles']) await targetDb.query('FOR value IN @@collection FILTER value.developmentFixtureIdentifier == null UPDATE value WITH { developmentFixtureIdentifier: null } IN @@collection OPTIONS { keepNull: false }', { '@collection': collection });
+  if (await targetDb.collection('emailAttachmentBindings').exists()) await targetDb.query(`FOR binding IN emailAttachmentBindings
+    LET target = binding.targetType == "document" ? DOCUMENT(documents, binding.targetKey) : DOCUMENT(images, binding.targetKey)
+    LET storageKey = target != null ? target.storageKey : null
+    FILTER binding.status != "completed" || IS_STRING(storageKey)
+    LET value = { _key: binding._key, organizationKey: binding.organizationKey, scopeKey: binding.scopeKey, connectorKey: binding.connectorKey, providerMessageId: binding.providerMessageId, partPath: binding.partPath, contentHash: binding.contentHash, kind: binding.targetType, filename: binding.sourceFilename, mimeType: binding.sourceMimeType, sizeBytes: binding.sourceSize, storageKey, status: binding.status, leaseToken: binding.leaseToken, leaseExpiresAt: binding.leaseExpiresAt, archiveDocumentKey: binding.targetType == "document" ? binding.targetKey : null, galleryImageKey: binding.targetType == "image" ? binding.targetKey : null, createdAt: binding.createdAt, updatedAt: binding.updatedAt }
+    UPSERT { _key: binding._key } INSERT value UPDATE {} IN emailAttachments OPTIONS { keepNull: false }`);
+  await targetDb.query('FOR document IN documents FILTER document.mutationPolicy == "system-only" && IS_STRING(document.content) LET payload = JSON_PARSE(document.content) FILTER payload != null && STARTS_WITH(payload.kind || "", "mail-") UPDATE document WITH { managedPurpose: null, managedOwnerKey: null, mutationPolicy: "user", archiveVisibility: "visible" } IN documents OPTIONS { keepNull: false }');
+  await targetDb.query('FOR folder IN folders FILTER STARTS_WITH(folder.purpose || "", "communication-mail-") || STARTS_WITH(folder.managedPurpose || "", "mail-") UPDATE folder WITH { purpose: null, managedPurpose: null, managedOwnerKey: null, mutationPolicy: "user", archiveVisibility: "visible" } IN folders OPTIONS { keepNull: false }');
+  await targetDb.query('FOR collection IN collections FILTER collection.purpose == "email-media" UPDATE collection WITH { purpose: null, mutationPolicy: "user" } IN collections OPTIONS { keepNull: false }');
+}
+
+export async function migrateCanonicalEmailEmbeddings(targetDb: Database): Promise<void> {
+  if (!await targetDb.collection('emailMessages').exists()) return;
+  const cursor = await targetDb.query<Record<string, unknown>>('FOR message IN emailMessages FILTER message.embeddingContentVersion != 4 || !IS_ARRAY(message.embedding) || LENGTH(message.embedding) != @dimensions || LENGTH(message.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0 || LENGTH(message.embedding[* FILTER CURRENT != 0]) == 0 RETURN message', { dimensions: EMBEDDING_DIMENSIONS });
+  for (const message of await cursor.all()) {
+    if (typeof message._key !== 'string' || typeof message.from !== 'string' || typeof message.subject !== 'string' || typeof message.body !== 'string') continue;
+    const embedding = await generateEmbedding(emailMessageSemanticText({ from: message.from, subject: message.subject, body: message.body }));
+    await targetDb.query('UPDATE @key WITH { embedding: @embedding, embeddingContentVersion: 4 } IN emailMessages', { key: message._key, embedding });
+  }
+  await targetDb.query(`FOR thread IN emailThreads
+    LET latest = FIRST(FOR message IN emailMessages FILTER message.scopeKey == thread.scopeKey && message.threadKey == thread._key && message.embeddingContentVersion == 4 SORT message.sentAt DESC, message._key DESC LIMIT 1 RETURN message)
+    FILTER latest != null && (thread.embeddingContentVersion != 4 || thread.embedding != latest.embedding)
+    UPDATE thread WITH { embedding: latest.embedding, embeddingContentVersion: 4 } IN emailThreads`);
+  for (const [collectionName, fields] of [['emailInboxes', ['name', 'description']], ['emailDrafts', ['subject', 'generatedContent', 'finalContent']], ['emailTones', ['name']], ['emailReplyContext', ['name', 'text']], ['emailWritingProfiles', ['name', 'description', 'tone', 'style', 'structure', 'vocabulary', 'conventions']]] as const) await migrateExactSemanticRecords(targetDb, collectionName, fields);
+  const invalid = await (await targetDb.query<number>('RETURN LENGTH(FOR message IN emailMessages FILTER message.embeddingContentVersion != 4 || !IS_ARRAY(message.embedding) || LENGTH(message.embedding) != @dimensions || LENGTH(message.embedding[* FILTER CURRENT != 0]) == 0 RETURN 1)', { dimensions: EMBEDDING_DIMENSIONS })).next() ?? 0;
+  if (invalid > 0) throw new Error(`Canonical email embedding migration failed for ${invalid} message(s).`);
 }
 
 export async function migrateProviderIndependentEmailDrafts(targetDb: Database): Promise<void> {
@@ -874,7 +848,7 @@ export async function migrateTripAttachments(targetDb: Database, runTransaction:
   });
 }
 
-export async function migrateExactSemanticRecords(targetDb: Database, collectionName: 'folders' | 'images' | 'collections' | 'tags' | 'imageCaptions' | 'visualIdentities', embedKeys: readonly string[]) {
+export async function migrateExactSemanticRecords(targetDb: Database, collectionName: 'folders' | 'images' | 'collections' | 'tags' | 'imageCaptions' | 'visualIdentities' | 'books' | 'bookContexts' | 'bookThemes' | 'bookSources' | 'bookParts' | 'bookChapters' | 'chapterContexts' | 'emailInboxes' | 'emailDrafts' | 'emailTones' | 'emailReplyContext' | 'emailWritingProfiles', embedKeys: readonly string[]) {
   const dimensions = EMBEDDING_DIMENSIONS;
   let after = '';
   while (true) {
@@ -883,6 +857,7 @@ export async function migrateExactSemanticRecords(targetDb: Database, collection
         FILTER resource._key > @after
         FILTER !IS_ARRAY(resource.embedding) || LENGTH(resource.embedding) != @dimensions
           || LENGTH(resource.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
+          || LENGTH(resource.embedding[* FILTER CURRENT != 0]) == 0
           || HAS(resource, "embeddingProvider") || HAS(resource, "embeddingModel") || HAS(resource, "embeddingDimensions")
           || HAS(resource, "embeddingState") || HAS(resource, "embeddedAt")
           || (@isImage && (HAS(resource, "ownerKey") || HAS(resource, "requestHash")))
@@ -896,7 +871,7 @@ export async function migrateExactSemanticRecords(targetDb: Database, collection
     for (const resource of resources) {
       let embedding = resource.embedding;
       const hasEmbeddingMetadata = resource.embeddingProvider !== undefined || resource.embeddingModel !== undefined || resource.embeddingDimensions !== undefined;
-      if ((hasEmbeddingMetadata && (resource.embeddingProvider !== EMBEDDING_PROVIDER_ID || resource.embeddingModel !== EMBEDDING_MODEL || resource.embeddingDimensions !== dimensions)) || !Array.isArray(embedding) || embedding.length !== dimensions || embedding.some((value) => typeof value !== 'number' || !Number.isFinite(value))) {
+      if ((hasEmbeddingMetadata && (resource.embeddingProvider !== EMBEDDING_PROVIDER_ID || resource.embeddingModel !== EMBEDDING_MODEL || resource.embeddingDimensions !== dimensions)) || !Array.isArray(embedding) || embedding.length !== dimensions || embedding.some((value) => typeof value !== 'number' || !Number.isFinite(value)) || embedding.every((value) => value === 0)) {
         const text = collectionName === 'images' ? buildImageEmbeddingText({
           filename: String(resource.filename ?? ''), caption: String(resource.caption ?? ''),
           city: typeof resource.city === 'string' ? resource.city : null, country: typeof resource.country === 'string' ? resource.country : null,
@@ -920,6 +895,7 @@ export async function migrateExactSemanticRecords(targetDb: Database, collection
     RETURN LENGTH(FOR resource IN @@collection
       FILTER !IS_ARRAY(resource.embedding) || LENGTH(resource.embedding) != @dimensions
         || LENGTH(resource.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
+        || LENGTH(resource.embedding[* FILTER CURRENT != 0]) == 0
         || HAS(resource, "embeddingProvider") || HAS(resource, "embeddingModel") || HAS(resource, "embeddingDimensions")
         || HAS(resource, "embeddingState") || HAS(resource, "embeddedAt")
         || (@isImage && (HAS(resource, "ownerKey") || HAS(resource, "requestHash")))
@@ -927,143 +903,6 @@ export async function migrateExactSemanticRecords(targetDb: Database, collection
   `, { '@collection': collectionName, dimensions, isImage: collectionName === 'images' });
   const invalid = await verification.next() ?? 0;
   if (invalid > 0) throw new Error(`${collectionName} exact semantic migration verification failed for ${invalid} row(s).`);
-}
-
-export async function migrateCanonicalInboxFolders(targetDb: Database) {
-  if (!await targetDb.collection('organizationConnectors').exists() || !await targetDb.collection('folders').exists()) return;
-  const { ensureMailFolders, mailFolderKeys, mailInboxFolderKey } = await import('../lib/email-inbox/folders');
-  const connectors = await (await targetDb.query<{ key: string; organizationKey: string; scopeKey: string; email: string; createdAt: string; updatedAt: string }>('FOR connector IN organizationConnectors FILTER connector.provider == "gmail" RETURN { key: connector._key, organizationKey: connector.organizationKey, scopeKey: connector.scopeKey, email: connector.email, createdAt: connector.createdAt, updatedAt: connector.updatedAt }')).all();
-  for (const scopeKey of new Set(connectors.map(({ scopeKey }) => scopeKey))) await ensureMailFolders(targetDb, scopeKey);
-
-  const legacyExists = await targetDb.collection('inboxes').exists();
-  const legacyRows = legacyExists ? await (await targetDb.query<Record<string, unknown>>('FOR inbox IN inboxes RETURN inbox')).all() : [];
-  for (const raw of legacyRows) {
-    const connectorKey = String(raw.connectorKey ?? '');
-    const scopeKey = String(raw.scopeKey ?? '');
-    const connector = connectors.find((candidate) => candidate.key === connectorKey && candidate.scopeKey === scopeKey && candidate.organizationKey === raw.organizationKey);
-    if (!connector) {
-      const scopeExists = await (await targetDb.query<boolean>('RETURN DOCUMENT(scopes, @scopeKey) != null', { scopeKey })).next();
-      if (raw[LEGACY_REMOVAL_MARKER] != null || !scopeExists) continue;
-      throw new Error(`Legacy inbox ${String(raw._key)} has no matching organization connector.`);
-    }
-    const key = mailInboxFolderKey(scopeKey, connectorKey);
-    await targetDb.query(`LET existing = DOCUMENT(folders, @key)
-      FILTER existing == null || (existing.scopeKey == @scopeKey && existing.managedPurpose == "mail-inbox" && existing.managedOwnerKey == @connectorKey)
-      UPSERT { _key: @key }
-        INSERT MERGE({ _key: @key, scopeKey: @scopeKey, parentFolderKey: @parentFolderKey, name: @name, managedPurpose: "mail-inbox", managedOwnerKey: @connectorKey, mutationPolicy: "system-container", archiveVisibility: "visible", embedding: @embedding, isFavorite: @isFavorite, createdAt: @createdAt, updatedAt: @updatedAt }, @description == null ? {} : { description: @description }, @coverImageKey == null ? {} : { coverImageKey: @coverImageKey })
-        UPDATE { parentFolderKey: @parentFolderKey, name: @name, description: @description, coverImageKey: @coverImageKey, managedPurpose: "mail-inbox", managedOwnerKey: @connectorKey, mutationPolicy: "system-container", archiveVisibility: "visible", embedding: @embedding, isFavorite: @isFavorite, createdAt: @createdAt, updatedAt: @updatedAt } IN folders OPTIONS { keepNull: false }`, {
-      key, scopeKey, parentFolderKey: mailFolderKeys(scopeKey).inboxes, connectorKey, name: raw.name, description: raw.description ?? null, coverImageKey: raw.coverImageKey ?? null, embedding: raw.embedding, isFavorite: raw.isFavorite === true, createdAt: raw.createdAt, updatedAt: raw.updatedAt,
-    });
-  }
-  for (const connector of connectors) {
-    const key = mailInboxFolderKey(connector.scopeKey, connector.key);
-    const exists = await (await targetDb.query<boolean>('LET folder = DOCUMENT(folders, @key) RETURN folder != null && folder.scopeKey == @scopeKey && folder.managedPurpose == "mail-inbox" && folder.managedOwnerKey == @connectorKey', { key, scopeKey: connector.scopeKey, connectorKey: connector.key })).next();
-    if (exists) continue;
-    const embedding = await embedText({ text: buildEmbeddingText(['name', 'description'], { name: connector.email })! });
-    await targetDb.query('INSERT { _key: @key, scopeKey: @scopeKey, parentFolderKey: @parentFolderKey, name: @name, managedPurpose: "mail-inbox", managedOwnerKey: @connectorKey, mutationPolicy: "system-container", archiveVisibility: "visible", embedding: @embedding, isFavorite: false, createdAt: @createdAt, updatedAt: @updatedAt } IN folders', { key, scopeKey: connector.scopeKey, parentFolderKey: mailFolderKeys(connector.scopeKey).inboxes, connectorKey: connector.key, name: connector.email, embedding, createdAt: connector.createdAt, updatedAt: connector.updatedAt });
-  }
-
-  const invalidManaged = await (await targetDb.query<number>(`RETURN LENGTH(FOR connector IN organizationConnectors FILTER connector.provider == "gmail"
-    LET folderKey = CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "managed-mail-folder", connector.scopeKey, CONCAT("mail-inbox\\u0000", connector._key))), 24))
-    LET folder = DOCUMENT(folders, folderKey) LET parent = folder == null ? null : DOCUMENT(folders, folder.parentFolderKey)
-    FILTER folder == null || folder.scopeKey != connector.scopeKey || folder.managedPurpose != "mail-inbox" || folder.managedOwnerKey != connector._key || folder.mutationPolicy != "system-container" || parent == null || parent.scopeKey != connector.scopeKey || parent.purpose != "communication-mail-inboxes" RETURN 1)`)).next() ?? 0;
-  if (invalidManaged > 0) throw new Error(`Canonical inbox folder migration verification failed for ${invalidManaged} connector(s).`);
-  if (legacyExists) {
-    const invalidLegacy = await (await targetDb.query<number>(`RETURN LENGTH(FOR inbox IN inboxes
-      FILTER inbox.deletedAt == null && DOCUMENT(scopes, inbox.scopeKey) != null
-      LET connector = DOCUMENT(organizationConnectors, inbox.connectorKey)
-      LET folderKey = CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "managed-mail-folder", inbox.scopeKey, CONCAT("mail-inbox\\u0000", inbox.connectorKey))), 24))
-      LET folder = DOCUMENT(folders, folderKey)
-      FILTER connector == null || connector.organizationKey != inbox.organizationKey || connector.scopeKey != inbox.scopeKey || folder == null || folder.name != inbox.name || folder.description != inbox.description || folder.coverImageKey != inbox.coverImageKey || folder.embedding != inbox.embedding || folder.isFavorite != inbox.isFavorite || folder.createdAt != inbox.createdAt || folder.updatedAt != inbox.updatedAt RETURN 1)`)).next() ?? 0;
-    if (invalidLegacy > 0) throw new Error(`Legacy inbox migration verification failed for ${invalidLegacy} row(s).`);
-  }
-}
-
-/** Reconciles hidden Signal thread records and visible inbox message documents. */
-export async function migrateCanonicalMailArchiveHierarchy(targetDb: Database) {
-  if (!await targetDb.collection('documents').exists() || !await targetDb.collection('folders').exists()) return;
-  const { ensureMailFolders, ensureMailInboxFilesFolder } = await import('../lib/email-inbox/folders');
-  const scopeKeys = await (await targetDb.query<string>('FOR scope IN scopes RETURN scope._key')).all();
-  for (const scopeKey of scopeKeys) await ensureMailFolders(targetDb, scopeKey);
-  if (await targetDb.collection('organizationConnectors').exists()) {
-    const connectors = await (await targetDb.query<{ key: string; scopeKey: string }>('FOR connector IN organizationConnectors FILTER connector.provider == "gmail" RETURN { key: connector._key, scopeKey: connector.scopeKey }')).all();
-    for (const connector of connectors) await ensureMailInboxFilesFolder(targetDb, connector.scopeKey, connector.key);
-  }
-
-  await targetDb.query(`FOR folder IN folders
-    FILTER folder.managedPurpose == "mail-attachment" && folder.archiveVisibility != "domain-only"
-    UPDATE folder WITH { archiveVisibility: "domain-only" } IN folders`);
-  if (await targetDb.collection('emailAttachmentBindings').exists()) {
-    await targetDb.query(`FOR binding IN emailAttachmentBindings
-      FILTER binding.targetType == "document"
-      LET document = DOCUMENT(documents, binding.targetKey)
-      LET folderKey = CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "managed-mail-folder", binding.scopeKey, CONCAT("mail-inbox-files\\u0000", binding.connectorKey))), 24))
-      LET folder = DOCUMENT(folders, folderKey)
-      FILTER document != null && document.scopeKey == binding.scopeKey && document.managedPurpose == "mail-attachment" && document.managedOwnerKey == binding._key
-      FILTER folder != null && folder.scopeKey == binding.scopeKey && folder.managedPurpose == "mail-inbox-files" && folder.managedOwnerKey == binding.connectorKey
-      UPDATE document WITH { folderKey, archiveVisibility: "visible" } IN documents`);
-    const invalidAttachments = await (await targetDb.query<number>(`RETURN LENGTH(FOR binding IN emailAttachmentBindings
-      FILTER binding.targetType == "document"
-      LET document = DOCUMENT(documents, binding.targetKey)
-      FILTER document != null && document.scopeKey == binding.scopeKey && document.managedPurpose == "mail-attachment" && document.managedOwnerKey == binding._key
-      LET folderKey = CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "managed-mail-folder", binding.scopeKey, CONCAT("mail-inbox-files\\u0000", binding.connectorKey))), 24))
-      LET folder = DOCUMENT(folders, folderKey)
-      FILTER folder == null || folder.managedPurpose != "mail-inbox-files" || folder.managedOwnerKey != binding.connectorKey || document.folderKey != folderKey || document.archiveVisibility != "visible" RETURN 1)`)).next() ?? 0;
-    if (invalidAttachments > 0) throw new Error(`Canonical inbox Files migration is incomplete for ${invalidAttachments} attachment(s).`);
-  }
-
-  const batchSize = 100;
-  let after = '';
-  while (true) {
-    const rows = await (await targetDb.query<{ key: string }>(`FOR document IN documents
-      FILTER document._key > @after && document.mutationPolicy == "system-only" && IS_STRING(document.content)
-      LET payload = JSON_PARSE(document.content)
-      FILTER payload != null && payload.version == 1 && payload.kind == "mail-thread" && IS_STRING(payload.data.accountKey)
-      SORT document._key LIMIT @batchSize RETURN { key: document._key }`, { after, batchSize })).all();
-    if (!rows.length) break;
-    const threadKeys = rows.map(({ key }) => key);
-    const assignments = await (await targetDb.query<{ threadKey: string; scopeKey: string; inboxFolderKey: string; threadFolderKey: string }>(`FOR threadKey IN @threadKeys
-       LET thread = DOCUMENT(documents, threadKey)
-       LET payload = thread == null ? null : JSON_PARSE(thread.content)
-       LET inboxFolderKey = CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "managed-mail-folder", thread.scopeKey, CONCAT("mail-inbox\\u0000", payload.data.accountKey))), 24))
-       LET inboxFolder = DOCUMENT(folders, inboxFolderKey)
-       LET threadFolderKey = CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "managed-mail-folder", thread.scopeKey, "communication-mail-threads")), 24))
-       LET threadFolder = DOCUMENT(folders, threadFolderKey)
-       FILTER thread != null && payload != null && payload.version == 1 && payload.kind == "mail-thread"
-       FILTER inboxFolder != null && inboxFolder.scopeKey == thread.scopeKey && inboxFolder.managedPurpose == "mail-inbox" && inboxFolder.managedOwnerKey == payload.data.accountKey
-       FILTER threadFolder != null && threadFolder.scopeKey == thread.scopeKey && threadFolder.purpose == "communication-mail-threads" && threadFolder.archiveVisibility == "domain-only"
-       RETURN { threadKey: thread._key, scopeKey: thread.scopeKey, inboxFolderKey, threadFolderKey }`, { threadKeys })).all();
-    await targetDb.query(`FOR assignment IN @assignments
-       FOR message IN documents
-         FILTER message.scopeKey == assignment.scopeKey && message.mutationPolicy == "system-only"
-         LET payload = JSON_PARSE(message.content)
-         FILTER payload != null && payload.version == 1 && payload.kind == "mail-message" && payload.data.threadKey == assignment.threadKey
-         UPDATE message WITH { folderKey: assignment.inboxFolderKey, name: payload.data.subject, archiveVisibility: "visible" } IN documents`, { assignments });
-    await targetDb.query(`FOR assignment IN @assignments
-       LET thread = DOCUMENT(documents, assignment.threadKey)
-       LET payload = JSON_PARSE(thread.content)
-       UPDATE thread WITH { folderKey: assignment.threadFolderKey, name: payload.data.subject, archiveVisibility: "domain-only" } IN documents`, { assignments });
-    after = threadKeys.at(-1)!;
-    if (rows.length < batchSize) break;
-  }
-
-  await targetDb.query(`FOR folder IN folders
-    FILTER folder.managedPurpose == "mail-thread"
-    FILTER LENGTH(FOR document IN documents FILTER document.folderKey == folder._key LIMIT 1 RETURN 1) == 0
-    REMOVE folder IN folders`);
-
-  const invalid = await (await targetDb.query<number>(`RETURN LENGTH(FOR thread IN documents
-    FILTER thread.mutationPolicy == "system-only" LET payload = JSON_PARSE(thread.content)
-    FILTER payload != null && payload.version == 1 && payload.kind == "mail-thread"
-    LET connector = DOCUMENT(organizationConnectors, payload.data.accountKey)
-    LET inboxFolderKey = CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "managed-mail-folder", thread.scopeKey, CONCAT("mail-inbox\\u0000", payload.data.accountKey))), 24))
-    LET inboxFolder = DOCUMENT(folders, inboxFolderKey)
-    LET inboxParent = inboxFolder == null ? null : DOCUMENT(folders, inboxFolder.parentFolderKey)
-    LET threadFolderKey = CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "managed-mail-folder", thread.scopeKey, "communication-mail-threads")), 24))
-    LET threadFolder = DOCUMENT(folders, threadFolderKey)
-    LET invalidMessage = FIRST(FOR message IN documents FILTER message.scopeKey == thread.scopeKey && message.mutationPolicy == "system-only" LET messagePayload = JSON_PARSE(message.content) FILTER messagePayload != null && messagePayload.version == 1 && messagePayload.kind == "mail-message" && messagePayload.data.threadKey == thread._key FILTER messagePayload.data.accountKey != payload.data.accountKey || message.folderKey != inboxFolderKey || message.name != messagePayload.data.subject || message.archiveVisibility != "visible" LIMIT 1 RETURN true)
-    FILTER connector == null || connector.scopeKey != thread.scopeKey || inboxFolder == null || inboxFolder.managedPurpose != "mail-inbox" || inboxFolder.managedOwnerKey != connector._key || inboxParent == null || inboxParent.purpose != "communication-mail-inboxes" || threadFolder == null || threadFolder.purpose != "communication-mail-threads" || threadFolder.archiveVisibility != "domain-only" || thread.folderKey != threadFolderKey || thread.name != payload.data.subject || thread.archiveVisibility != "domain-only" || invalidMessage == true RETURN 1)`)).next() ?? 0;
-  if (invalid > 0) throw new Error(`Canonical mail Archive hierarchy migration is incomplete for ${invalid} thread(s).`);
 }
 
 export async function dropVerifiedLegacyInboxes(targetDb: Database) {
@@ -1089,15 +928,12 @@ export async function retireUnsupportedEmailConnectors(targetDb: Database) {
 }
 
 export async function migrateEmailAttachmentAvailability(targetDb: Database) {
-  if (!await targetDb.collection('documents').exists()) return;
-  await targetDb.query(`FOR document IN documents
-    FILTER document.mutationPolicy == "system-only" && IS_STRING(document.content)
-    LET payload = JSON_PARSE(document.content)
-    FILTER payload != null && payload.kind == "mail-message" && !HAS(payload.data, "attachmentAvailability")
-    LET availability = payload.data.hasAttachments == true ? "failed" : "none"
-    LET unavailable = payload.data.hasAttachments == true ? { unavailableAttachmentCount: 1 } : {}
-    LET data = MERGE(payload.data, { attachmentAvailability: availability }, unavailable)
-    UPDATE document WITH { content: JSON_STRINGIFY(MERGE(payload, { data })) } IN documents`);
+  if (!await targetDb.collection('emailMessages').exists()) return;
+  await targetDb.query(`FOR message IN emailMessages
+    FILTER !HAS(message, "attachmentAvailability")
+    LET availability = message.hasAttachments == true ? "failed" : "none"
+    LET unavailable = message.hasAttachments == true ? { unavailableAttachmentCount: 1 } : {}
+    UPDATE message WITH MERGE({ attachmentAvailability: availability }, unavailable) IN emailMessages`);
 }
 
 function emailToneSemanticsCurrent(document: Record<string, unknown>, canonicalContent: string, contentChunks: string[], semanticText: string, dimensions: number) {
@@ -1113,7 +949,9 @@ function emailToneSemanticsCurrent(document: Record<string, unknown>, canonicalC
 }
 
 function isCanonicalEmailToneDocument(document: Record<string, unknown>) {
-  return typeof document.scopeKey === 'string' && document.folderKey === mailFolderKeys(document.scopeKey).tones;
+  if (typeof document.scopeKey !== 'string') return false;
+  const key = `c${createHash('sha256').update(`managed-mail-folder\0${document.scopeKey}\0communication-mail-tones`).digest('hex').slice(0, 24)}`;
+  return document.folderKey === key;
 }
 
 export async function migrateEmailToneEmbeddings(targetDb: Database) {
@@ -1563,29 +1401,29 @@ export function legacyReadyBookPatch(book: Record<string, unknown>, chapters: Re
   };
 }
 export async function migrateDurableBookGeneration(targetDb: Database): Promise<void> {
-  const chaptersExist = await targetDb.collection('bookChapters').exists();
-  const documentsExist = await targetDb.collection('documents').exists();
-  const foldersExist = await targetDb.collection('folders').exists();
-  const bindingsExist = await targetDb.collection('generatedDocumentBindings').exists();
-  const chapters = chaptersExist ? await (await targetDb.query('FOR record IN bookChapters RETURN record')).all() as Record<string, unknown>[] : [];
-  const publishedDocuments = documentsExist ? await (await targetDb.query('FOR record IN documents FILTER record.managedPurpose == "audio-chapter" RETURN record')).all() as Record<string, unknown>[] : [];
-  const managedFolders = foldersExist ? await (await targetDb.query('FOR record IN folders FILTER record.managedPurpose == "audio-book" RETURN record')).all() as Record<string, unknown>[] : [];
-  const chapterBindings = bindingsExist ? await (await targetDb.query('FOR record IN generatedDocumentBindings FILTER record.subjectType == "chapter" && record.kind == "chapter" RETURN record')).all() as Record<string, unknown>[] : [];
-  const chaptersByBook = new Map<string, Record<string, unknown>[]>();
-  for (const chapter of chapters) { const values = chaptersByBook.get(String(chapter.bookKey)) ?? []; values.push(chapter); chaptersByBook.set(String(chapter.bookKey), values); }
-  const foldersByKey = new Map(managedFolders.flatMap((folder) => typeof folder._key === 'string' ? [[folder._key, folder] as const] : []));
-  const bindingsByDocument = new Map(chapterBindings.flatMap((binding) => typeof binding.documentKey === 'string' ? [[binding.documentKey, binding] as const] : []));
-  const publishedDocumentKeys = new Set(publishedDocuments.flatMap((document) => {
-    if (typeof document._key !== 'string' || typeof document.scopeKey !== 'string' || typeof document.folderKey !== 'string') return [];
-    const folder = foldersByKey.get(document.folderKey); const binding = bindingsByDocument.get(document._key);
-    if (!folder || !binding || folder.scopeKey !== document.scopeKey || binding.scopeKey !== document.scopeKey || typeof folder.managedOwnerKey !== 'string' || typeof binding.subjectKey !== 'string') return [];
-    return [`${document.scopeKey}:${folder.managedOwnerKey}:${document.folderKey}:${document._key}:${binding.subjectKey}`];
-  }));
-  for (const [collectionName, patch] of [['books', legacyBookPatch], ['bookChapters', legacyBookChapterPatch], ['bookSources', legacyBookSourcePatch]] as const) {
-    const collection = targetDb.collection(collectionName); if (!await collection.exists()) continue;
-    const records = await (await targetDb.query(`FOR record IN ${collectionName} RETURN record`)).all() as Record<string, unknown>[];
-    for (const raw of records) { const record = withArangoKey(raw); const value = collectionName === 'books' ? { ...patch(record), ...legacyReadyBookPatch(record, chaptersByBook.get(record.key) ?? [], publishedDocumentKeys) } : patch(record); await targetDb.query(`UPDATE @key WITH @patch IN ${collectionName}`, { key: record.key, patch: value }); }
+  if (!await targetDb.collection('books').exists()) return;
+  await targetDb.query(`FOR folder IN folders FILTER folder.managedPurpose == "audio-book" && IS_OBJECT(folder.audioBook)
+    LET cover = IS_STRING(folder.coverImageKey) ? DOCUMENT(images, folder.coverImageKey) : null
+    LET value = MERGE(folder.audioBook, { _key: folder._key, scopeKey: folder.scopeKey, title: folder.name, description: folder.description, coverStorageKey: cover != null ? cover.storageKey : null, isFavorite: folder.isFavorite || false, embedding: folder.embedding, archiveFolderKey: folder._key, createdAt: folder.createdAt, updatedAt: folder.updatedAt })
+    UPSERT { _key: folder._key } INSERT value UPDATE {} IN books OPTIONS { keepNull: false }`);
+  await targetDb.query(`FOR document IN documents FILTER document.managedPurpose == "audio-chapter" && IS_OBJECT(document.audioChapter)
+    LET art = IS_STRING(document.coverImageKey) ? DOCUMENT(images, document.coverImageKey) : null
+    LET value = MERGE(document.audioChapter, { _key: document._key, scopeKey: document.scopeKey, title: document.name, content: document.content, imageStorageKey: art != null ? art.storageKey : null, archiveDocumentKey: document._key, embedding: document.embedding, createdAt: document.createdAt, updatedAt: document.updatedAt })
+    UPSERT { _key: document._key } INSERT value UPDATE {} IN bookChapters OPTIONS { keepNull: false }`);
+  for (const [field, collectionName] of [['bookContext', 'bookContexts'], ['sources', 'bookSources'], ['themes', 'bookThemes'], ['parts', 'bookParts']] as const) {
+    await targetDb.query(`FOR folder IN folders FILTER folder.managedPurpose == "audio-book" LET records = @single ? (IS_OBJECT(folder.audioBook[@field]) ? [folder.audioBook[@field]] : []) : (IS_ARRAY(folder.audioBook[@field]) ? folder.audioBook[@field] : []) FOR record IN records FILTER IS_STRING(record.key) LET value = MERGE(record, { _key: record.key, scopeKey: folder.scopeKey, bookKey: folder._key }) UPSERT { _key: record.key } INSERT UNSET(value, "key") UPDATE {} IN @@collection`, { field, single: field === 'bookContext', '@collection': collectionName });
   }
+  await targetDb.query('FOR document IN documents FILTER document.managedPurpose == "audio-chapter" && IS_OBJECT(document.audioChapter.chapterContext) LET record = document.audioChapter.chapterContext FILTER IS_STRING(record.key) LET value = MERGE(record, { _key: record.key, scopeKey: document.scopeKey, chapterKey: document._key }) UPSERT { _key: record.key } INSERT UNSET(value, "key") UPDATE {} IN chapterContexts');
+  await targetDb.query('FOR document IN documents FILTER document.managedPurpose == "audio-chapter" && IS_ARRAY(document.audioChapter.readerProgress) FOR record IN document.audioChapter.readerProgress FILTER IS_STRING(record.key) && IS_STRING(record.userKey) LET value = MERGE(record, { _key: record.key, scopeKey: document.scopeKey, bookKey: document.audioChapter.bookKey, chapterKey: document._key }) UPSERT { _key: record.key } INSERT UNSET(value, "key") UPDATE {} IN bookProgress');
+  for (const [collectionName, patch] of [['books', legacyBookPatch], ['bookChapters', legacyBookChapterPatch], ['bookSources', legacyBookSourcePatch]] as const) {
+    const records = await (await targetDb.query(`FOR record IN ${collectionName} RETURN record`)).all() as Record<string, unknown>[];
+    for (const raw of records) { const record = withArangoKey(raw); await targetDb.query(`UPDATE @key WITH @patch IN ${collectionName}`, { key: record.key, patch: patch(record) }); }
+  }
+  await targetDb.query('FOR progress IN bookProgress FILTER !HAS(progress, "userKey") REMOVE progress IN bookProgress');
+  await targetDb.query('FOR folder IN folders FILTER folder.managedPurpose == "audio-book" UPDATE folder WITH { audioBook: null, managedPurpose: null, managedOwnerKey: null, mutationPolicy: "user" } IN folders OPTIONS { keepNull: false }');
+  await targetDb.query('FOR document IN documents FILTER document.managedPurpose == "audio-chapter" UPDATE document WITH { audioChapter: null, managedPurpose: null, managedOwnerKey: null, mutationPolicy: "user" } IN documents OPTIONS { keepNull: false }');
+  await targetDb.query('FOR collection IN collections FILTER collection.purpose == "audio-book-media" UPDATE collection WITH { purpose: null, mutationPolicy: "user" } IN collections OPTIONS { keepNull: false }');
+  for (const [collectionName, embedKeys] of [['books', ['title', 'subtitle', 'description', 'goal', 'audience', 'outcome']], ['bookContexts', ['userContext', 'priorKnowledge', 'priorBookContext', 'personalizationContext', 'researchContext', 'noveltyContext', 'generationBrief']], ['bookThemes', ['name', 'description']], ['bookSources', ['title', 'content', 'relevance']], ['bookParts', ['title', 'description', 'objective']], ['bookChapters', ['title', 'description', 'objective', 'content']], ['chapterContexts', ['previousContext', 'objectiveContext', 'sourceContext', 'personalizationContext', 'noveltyContext', 'nextContext', 'generationBrief']]] as const) await migrateExactSemanticRecords(targetDb, collectionName, embedKeys);
 }
 
 export async function removeLegacyTombstones(targetDb: Database): Promise<void> {
@@ -1667,6 +1505,8 @@ export async function removeLegacyTombstones(targetDb: Database): Promise<void> 
   if (uploadKeys.length && await exists('galleryUploads')) storageKeys.push(...await (await transaction.query('FOR upload IN galleryUploads FILTER upload._key IN @keys && IS_STRING(upload.storageKey) RETURN upload.storageKey', { keys: uploadKeys })).all() as string[]);
   if (bookKeys.length && await exists('books')) storageKeys.push(...await (await transaction.query('FOR book IN books FILTER book._key IN @keys && IS_STRING(book.coverStorageKey) RETURN book.coverStorageKey', { keys: bookKeys })).all() as string[]);
   if (bookKeys.length && await exists('bookChapters')) storageKeys.push(...((await (await transaction.query('FOR chapter IN bookChapters FILTER chapter.bookKey IN @keys RETURN REMOVE_VALUE([chapter.audioStorageKey, chapter.imageStorageKey], null)', { keys: bookKeys })).all()) as string[][]).flat().filter((key): key is string => typeof key === 'string' && key.length > 0));
+  if (scopeKeys.length && await exists('emailAttachments')) storageKeys.push(...await (await transaction.query('FOR attachment IN emailAttachments FILTER attachment.scopeKey IN @scopeKeys && IS_STRING(attachment.storageKey) RETURN attachment.storageKey', { scopeKeys })).all() as string[]);
+  if (scopeKeys.length && await exists('placeHeroMedia')) storageKeys.push(...await (await transaction.query('FOR media IN placeHeroMedia FILTER media.scopeKey IN @scopeKeys && IS_STRING(media.storageKey) RETURN media.storageKey', { scopeKeys })).all() as string[]);
   await transaction.query('FOR storageKey IN UNIQUE(@storageKeys) FILTER IS_STRING(storageKey) && LENGTH(storageKey) > 0 UPSERT { storageKey } INSERT { storageKey, createdAt: @now } UPDATE {} IN storageDeletionJobs', { storageKeys, now: cleanupAt });
 
   if (scopeKeys.length) {
@@ -1675,8 +1515,9 @@ export async function removeLegacyTombstones(targetDb: Database): Promise<void> 
        'galleryUploads', 'collections', 'collectionImages', 'imageCollecitionHightlights', 'imageCollectionMemories',
       'collectionMembers', 'collectionInvites', 'tags', 'tagAssignments', 'documents',
       'documentVersions', 'documentAudioVersions', 'documentSummaries', 'documentSummaryAudio',
-       'shares', 'places', 'generatedDocumentBindings', 'trips', 'tripCreationReceipts', 'tripPlaces', 'tripAttachments', 'placeVisits', 'books', 'bookContexts',
-      'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'chapterContexts', 'bookProgress',
+        'shares', 'places', 'generatedDocumentBindings', 'trips', 'tripCreationReceipts', 'tripPlaces', 'tripAttachments', 'tripGuides', 'placeReferences', 'placeHeroMedia', 'placeVisits',
+        'books', 'bookContexts', 'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'chapterContexts', 'bookProgress',
+        'emailInboxes', 'emailThreads', 'emailMessages', 'emailDrafts', 'emailTones', 'emailReplyContext', 'emailWritingProfiles', 'emailAttachments',
        'organizationConnectors', 'channels', 'threads', 'messages', 'messageMentions',
       'messageReactions', 'polls', 'pollOptions', 'pollVotes',
     ]) await removeBy(name, 'scopeKey', scopeKeys);
@@ -1736,10 +1577,8 @@ export async function removeLegacyTombstones(targetDb: Database): Promise<void> 
   await removeTyped('tagAssignments', 'sourceType', 'place', placeKeys, 'places');
   await removeKeys('places', placeKeys);
 
-  if (bookKeys.length && await exists('bookChapters')) {
-    const cursor = await transaction.query('FOR chapter IN bookChapters FILTER chapter.bookKey IN @keys RETURN chapter._key', { keys: bookKeys });
-    await removeBy('chapterContexts', 'chapterKey', await cursor.all() as string[]);
-  }
+  const chapterKeys = bookKeys.length && await exists('bookChapters') ? await (await transaction.query('FOR chapter IN bookChapters FILTER chapter.bookKey IN @keys RETURN chapter._key', { keys: bookKeys })).all() as string[] : [];
+  await removeBy('chapterContexts', 'chapterKey', chapterKeys);
   for (const name of ['bookContexts', 'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'bookProgress']) await removeBy(name, 'bookKey', bookKeys);
   await removeKeys('books', bookKeys);
 
@@ -1952,7 +1791,7 @@ export const collections: CollectionSpec[] = [
   { name: 'collectionInvites', skipEmbedding: true, indexes: [{ fields: ['tokenHash'], unique: true }, { fields: ['scopeKey', 'collectionKey'] }, { fields: ['expiresAt'] }, { fields: ['acceptedAt'], sparse: true }, { fields: ['revokedAt'], sparse: true }] },
   { name: 'tags', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey', 'name'] }] },
   { name: 'tagAssignments', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'tagKey', 'sourceType', 'sourceKey'], unique: true }, { fields: ['scopeKey', 'sourceType', 'sourceKey'] }, { fields: ['scopeKey', 'tagKey'] }] },
-  { name: 'documents', embedKeys: ['name', 'content'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'folderKey'] }, { fields: ['scopeKey', 'isFavorite'] }, { fields: ['storageKey'], unique: true, sparse: true }, { fields: ['folderKey', 'name'] }] },
+  { name: 'documents', embedKeys: ['name', 'content'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'folderKey'] }, { fields: ['scopeKey', 'isFavorite'] }, { fields: ['storageKey'], unique: true, sparse: true }, { fields: ['folderKey', 'name'] }, { fields: ['scopeKey', 'managedPurpose', 'managedOwnerKey'], unique: true, sparse: true }] },
   { name: 'documentVersions', embedKeys: ['label', 'content'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'documentKey'] }, { fields: ['documentKey', 'version'], unique: true }] },
   { name: 'documentAudioVersions', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'documentKey', 'version'], unique: true }, { fields: ['scopeKey', 'documentKey', 'createdAt'] }, { fields: ['scopeKey', 'documentKey', 'isCurrent'] }, { fields: ['storageKey'], unique: true }] },
   // Private immutable generated summaries. Never expose through the generic node registry.
@@ -1967,6 +1806,9 @@ export const collections: CollectionSpec[] = [
   { name: 'tripCreationReceipts', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'userKey', 'createdAt'] }, { fields: ['scopeKey', 'tripKey'], unique: true }] },
   { name: 'tripPlaces', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'tripKey', 'position'], unique: true }, { fields: ['scopeKey', 'tripKey', 'placeKey'], unique: true }, { fields: ['scopeKey', 'placeKey'] }] },
   { name: 'tripAttachments', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'tripKey', 'position'], unique: true }, { fields: ['scopeKey', 'tripKey', 'targetType', 'targetKey'], unique: true }, { fields: ['scopeKey', 'targetType', 'targetKey'] }] },
+  { name: 'tripGuides', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'userKey', 'tripKey', 'createdAt'] }, { fields: ['scopeKey', 'userKey', 'idempotencyKey'], unique: true }] },
+  { name: 'placeReferences', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'userKey', 'placeKey', 'kind', 'createdAt'] }, { fields: ['scopeKey', 'userKey', 'idempotencyKey'], unique: true }] },
+  { name: 'placeHeroMedia', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'userKey', 'placeKey'], unique: true }, { fields: ['storageKey'], unique: true }] },
   { name: 'countries', embedKeys: ['name'], indexes: [{ fields: ['countryCode'], unique: true }, { fields: ['name'] }] },
   { name: 'books', embedKeys: ['title', 'subtitle', 'description', 'goal', 'audience', 'outcome'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'status'] }, { fields: ['scopeKey', 'isFavorite'] }, { fields: ['scopeKey', 'generationRequestKey'], unique: true, sparse: true }, { fields: ['scopeKey', 'archiveFolderKey'], unique: true, sparse: true }] },
   { name: 'bookContexts', embedKeys: ['userContext', 'priorKnowledge', 'priorBookContext', 'personalizationContext', 'researchContext', 'noveltyContext', 'generationBrief'], indexes: [{ fields: ['scopeKey', 'bookKey'], unique: true }] },
@@ -1976,6 +1818,15 @@ export const collections: CollectionSpec[] = [
   { name: 'bookChapters', embedKeys: ['title', 'description', 'objective', 'topics', 'content'], indexes: [{ fields: ['scopeKey', 'bookKey', 'position'], unique: true }, { fields: ['scopeKey', 'bookKey'] }, { fields: ['scopeKey', 'partKey'], sparse: true }, { fields: ['scopeKey', 'archiveDocumentKey'], unique: true, sparse: true }] },
   { name: 'chapterContexts', embedKeys: ['previousContext', 'objectiveContext', 'sourceContext', 'personalizationContext', 'noveltyContext', 'nextContext', 'generationBrief'], indexes: [{ fields: ['scopeKey', 'chapterKey'], unique: true }] },
   { name: 'bookProgress', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'userKey', 'bookKey', 'chapterKey'], unique: true }, { fields: ['scopeKey', 'userKey', 'bookKey'] }, { fields: ['scopeKey', 'userKey', 'isCompleted'] }] },
+  // Private Signal persistence. These collections are intentionally absent from NODE_REGISTRY.
+  { name: 'emailInboxes', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey', 'connectorKey'], unique: true }, { fields: ['organizationKey', 'scopeKey'] }] },
+  { name: 'emailThreads', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'accountKey', 'providerThreadId'], unique: true }, { fields: ['scopeKey', 'accountKey', 'lastMessageAt'] }, { fields: ['scopeKey', 'accountKey', 'inboxCategory'] }] },
+  { name: 'emailMessages', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'accountKey', 'providerMessageId'], unique: true }, { fields: ['scopeKey', 'threadKey', 'sentAt'] }, { fields: ['scopeKey', 'accountKey', 'embeddingContentVersion'] }] },
+  { name: 'emailDrafts', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'status', 'updatedAt'] }, { fields: ['scopeKey', 'threadKey'], sparse: true }, { fields: ['scopeKey', 'accountKey'], sparse: true }, { fields: ['providerMessageId'], unique: true, sparse: true }] },
+  { name: 'emailTones', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'slug'], unique: true, sparse: true }, { fields: ['scopeKey', 'isFavorite'] }] },
+  { name: 'emailReplyContext', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'updatedAt'] }] },
+  { name: 'emailWritingProfiles', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'updatedAt'] }] },
+  { name: 'emailAttachments', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'connectorKey', 'providerMessageId', 'partPath'], unique: true }, { fields: ['storageKey'], unique: true, sparse: true }, { fields: ['scopeKey', 'status'] }, { fields: ['leaseExpiresAt'], sparse: true }] },
   // Private replay ledger. Responses may contain one-time share tokens, so this
   // collection is deliberately not registered as a generic application node.
   { name: 'contentIdempotency', skipEmbedding: true, indexes: [{ fields: ['organizationKey', 'actorKey', 'tool', 'idempotencyKey'], unique: true }, { fields: ['leaseExpiresAt'], sparse: true }, { fields: ['expiresAt'], sparse: true }] },
@@ -2046,10 +1897,7 @@ const droppedCollections = [
   'templates',
   'placeVisits',
   'emailAccounts',
-  'emailThreads',
-  'emailMessages',
   'emailContacts',
-  'emailWritingProfiles',
   'emailRules',
   'emailReplyDrafts',
 ];
@@ -2069,7 +1917,6 @@ async function main() {
   await migrateModelActionSlugs(targetDb);
   await migrateMinimalPlacesAndRetireTrips(targetDb);
   await migrateTripAttachments(targetDb);
-  await migrateMailArchiveDocuments(targetDb);
   await migrateEmailInitialSyncCompletion(targetDb);
 
   for (const name of droppedCollections) {
@@ -2320,20 +2167,6 @@ async function main() {
     if (spec.name === 'shares') {
       await migrateContentShares(targetDb);
     }
-    if (spec.name === 'bookProgress') {
-      // Progress created before reader ownership was introduced cannot be
-      // assigned safely. Remove those rows and the scope-shared indexes before
-      // creating the per-user constraints.
-      await targetDb.query('FOR progress IN bookProgress FILTER !HAS(progress, "userKey") REMOVE progress IN bookProgress');
-      for (const index of await collection.indexes()) {
-        const fields = 'fields' in index && Array.isArray(index.fields) ? index.fields.map(String) : [];
-        if (fields.join('\0') === ['scopeKey', 'bookKey', 'chapterKey'].join('\0') || fields.join('\0') === ['scopeKey', 'bookKey'].join('\0') || fields.join('\0') === ['scopeKey', 'isCompleted'].join('\0')) {
-          await collection.dropIndex(index.id);
-          console.log(`Dropped obsolete scope-shared book progress index ${index.id}`);
-        }
-      }
-    }
-    if (spec.name === 'bookChapters') await migrateDurableBookGeneration(targetDb);
     const existingIndexes = await collection.indexes();
     for (const index of existingIndexes) {
       const fields = 'fields' in index && Array.isArray(index.fields) ? index.fields.map(String) : [];
@@ -2380,6 +2213,7 @@ async function main() {
   }
 
   await migrateRetiredEmailDefaultTones(targetDb);
+  await migrateDurableBookGeneration(targetDb);
   await migrateGeneratedTravelDocuments(targetDb);
 
   await targetDb.query(`
@@ -2503,11 +2337,11 @@ async function main() {
   await ensureOrganizationCredentialsCollection(targetDb);
   await ensureOrganizationConnectorsCollection(targetDb);
   await retireUnsupportedEmailConnectors(targetDb);
-  await migrateEmailAttachmentAvailability(targetDb);
-  await migrateCanonicalInboxFolders(targetDb);
-  await migrateCanonicalMailArchiveHierarchy(targetDb);
-  await dropVerifiedLegacyInboxes(targetDb);
   await migrateProviderIndependentEmailDrafts(targetDb);
+  await migrateCanonicalEmailPersistence(targetDb);
+  await migrateCanonicalEmailEmbeddings(targetDb);
+  await migrateEmailAttachmentAvailability(targetDb);
+  await dropVerifiedLegacyInboxes(targetDb);
   await retireTranscriptionDomain(targetDb);
   await retireAiPersistence(targetDb);
 

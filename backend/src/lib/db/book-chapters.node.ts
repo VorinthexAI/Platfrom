@@ -13,7 +13,7 @@ export const bookChapterSchema = z.object({
   audioStorageKey: z.string().trim().min(1).optional(), audioDurationSeconds: z.number().int().positive().optional(), imageStorageKey: z.string().trim().min(1).optional(), archiveDocumentKey: z.string().cuid().optional(), embedding: currentEmbeddingSchema, createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
 });
 export type BookChapter = z.infer<typeof bookChapterSchema>;
-export const bookChaptersEmbeddingFields = ['title', 'description', 'objective', 'topics', 'content'] as const;
+export const bookChaptersEmbeddingFields = ['title', 'description', 'objective', 'content'] as const;
 const helpers = createNodeHelpers(BOOK_CHAPTERS_COLLECTION, bookChapterSchema, bookChaptersEmbeddingFields, { includeEmbeddingMetadata: false });
 export const insertBookChapter = helpers.insert;
 export const getBookChapterById = helpers.getById;

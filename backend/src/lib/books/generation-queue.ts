@@ -18,4 +18,20 @@ export async function removeBookGenerationJob(bookKey: string) { const job = awa
 export async function processBookGenerationJob(job: { data: BookGenerationJob; attemptsMade: number; opts: { attempts?: number } }, service: Pick<BookService, 'process' | 'terminalFailure'>) { const data = bookGenerationJobSchema.parse(job.data); try { return await service.process(data, { persistFailure: false }); } catch (error) { if (job.attemptsMade + 1 >= Number(job.opts.attempts ?? 1)) await service.terminalFailure(data).catch((failureError) => console.error('book terminal failure persistence failed', { error: failureError, bookKey: data.bookKey })); throw error; } }
 export function startBookGenerationWorker() { const worker = new Worker<BookGenerationJob>(QUEUE_NAME, async (job) => processBookGenerationJob(job, (await import('./default-service')).defaultBookService), { connection: connection(), concurrency: 2 }); worker.on('error', (error) => console.error('book generation worker error', { error })); return { close: () => worker.close() }; }
 export async function recoverBookGenerationQueue() { const service = (await import('./default-service')).defaultBookService; const jobs = await service.recoverableJobs(); let enqueued = 0; for (const job of jobs) { await enqueueBookGeneration(job); enqueued += 1; } return { recovered: enqueued }; }
+export function startBookGenerationRecoveryScheduler(options: { intervalMs?: number; recover?: typeof recoverBookGenerationQueue } = {}) {
+  const recover = options.recover ?? recoverBookGenerationQueue;
+  let running: Promise<void> | undefined;
+  const run = () => {
+    if (running) return running;
+    running = recover()
+      .then(() => undefined)
+      .catch((error) => console.error('book generation queue recovery failed', { error }))
+      .finally(() => { running = undefined; });
+    return running;
+  };
+  void run();
+  const timer = setInterval(() => void run(), options.intervalMs ?? 60_000);
+  timer.unref();
+  return { close: () => clearInterval(timer), run };
+}
 export async function closeBookGenerationQueue() { await queue?.close(); queue = undefined; }

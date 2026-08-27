@@ -38,9 +38,9 @@ export const spacing = sharedSpacing;
 
 export const fonts = {
   light: "Geist_300Light",
-  regular: "Geist_400Regular",
-  medium: "Geist_500Medium",
-  semibold: "Geist_600SemiBold",
+  regular: "Geist_300Light",
+  medium: "Geist_300Light",
+  semibold: "Geist_300Light",
 } as const;
 
 /** Wide-tracked uppercase labels are the core typographic voice of Core. */

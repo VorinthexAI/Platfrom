@@ -94,7 +94,7 @@ export function BookPlaybackProvider({ children }: { children: ReactNode }) {
     },
   });
   const detail = detailQuery.data;
-  const orderedChapters = useMemo(() => [...(detail?.chapters ?? [])].sort((left, right) => left.position - right.position), [detail?.chapters]);
+  const orderedChapters = useMemo(() => [...(detail?.chapters ?? [])].filter((chapter) => chapter.content && chapter.audioUrl).sort((left, right) => left.position - right.position), [detail?.chapters]);
   const chapterIndex = orderedChapters.findIndex(({ key }) => key === playbackChapterKey);
   const chapter = chapterIndex >= 0 ? orderedChapters[chapterIndex] : undefined;
   const duration = audio.isLoaded && audio.duration > 0 ? audio.duration : chapter?.audioDurationSeconds ?? 0;

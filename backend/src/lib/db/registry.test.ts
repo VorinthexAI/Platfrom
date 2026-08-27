@@ -54,14 +54,6 @@ describe('node registry schema contracts', () => {
       'tags',
       'tagAssignments',
       'places',
-      'books',
-      'bookContexts',
-      'bookThemes',
-      'bookSources',
-      'bookParts',
-      'bookChapters',
-      'chapterContexts',
-      'bookProgress',
     ]));
     expect(NODE_NAMES).not.toContain('agentTools');
     expect(NODE_NAMES).not.toContain('tools');
@@ -109,6 +101,8 @@ describe('node registry schema contracts', () => {
     expect(documentSchema.shape).toHaveProperty('folderKey');
     expect(documentSchema.shape).toHaveProperty('storageKey');
     expect(documentSchema.shape).toHaveProperty('sizeBytes');
+    expect(folderSchema.shape).not.toHaveProperty('audioBook');
+    expect(documentSchema.shape).not.toHaveProperty('audioChapter');
     expect(documentVersionSchema.shape).toHaveProperty('key');
     expect(documentVersionSchema.shape).toHaveProperty('scopeKey');
     expect(documentVersionSchema.shape).toHaveProperty('createdAt');
@@ -123,6 +117,8 @@ describe('node registry schema contracts', () => {
     expect(NODE_NAMES).not.toContain('tripPlaces');
     expect(NODE_NAMES).not.toContain('tripAttachments');
     expect(NODE_NAMES).not.toContain('placeVisits');
+    for (const historical of ['books', 'bookContexts', 'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'chapterContexts', 'bookProgress']) expect(NODE_NAMES).toContain(historical);
+    for (const privateDomain of ['emailInboxes', 'emailThreads', 'emailMessages', 'emailDrafts', 'emailTones', 'emailReplyContext', 'emailWritingProfiles', 'emailAttachments', 'tripGuides', 'placeReferences', 'placeHeroMedia']) expect(NODE_NAMES).not.toContain(privateDomain);
     expect(NODE_NAMES).not.toContain('shares');
     expect(NODE_NAMES).not.toContain('collectionInvites');
     expect(NODE_NAMES).not.toContain('documentShares');

@@ -1,16 +1,18 @@
 import { expect, test } from "bun:test";
 
 const read = (path: string) => Bun.file(new URL(path, import.meta.url)).text();
-const [archive, gallery, signal, compass, appSearch] = await Promise.all([
+const [archive, gallery, signal, compass, ascend, attachmentPicker, appSearch] = await Promise.all([
   read("../components/capability/KnowledgeWorkspace.tsx"),
   read("../components/capability/GalleryWorkspace.tsx"),
   read("../components/capability/EmailWorkspace.tsx"),
   read("../components/capability/TravelWorkspace.tsx"),
+  read("../components/capability/AscendWorkspace.tsx"),
+  read("../components/capability/EmailAttachmentPicker.tsx"),
   read("./app-search-client.ts"),
 ]);
 
 test("every workspace search history sheet uses the singleton user cache", () => {
-  for (const workspace of [archive, gallery, signal, compass]) {
+  for (const workspace of [archive, gallery, signal, compass, ascend]) {
     expect(workspace).toContain("<SearchHistorySheet");
     expect(workspace).toContain('from "@/lib/user-search-history-cache"');
     expect(workspace).toContain("userSearchHistoryQueryKey(");
@@ -21,9 +23,18 @@ test("every workspace search history sheet uses the singleton user cache", () =>
   }
 });
 
+test("every filter-sheet Search history option matches the sheet background", () => {
+  const workspaces = [archive, gallery, signal, compass, ascend, attachmentPicker];
+  const expectedCounts = [1, 1, 2, 1, 1, 1];
+  for (const [index, workspace] of workspaces.entries()) {
+    expect(workspace.match(/style=\{styles\.searchHistoryOption\} variant="secondary">Search history<\/Button>/g)).toHaveLength(expectedCounts[index]!);
+    expect(workspace).toContain("searchHistoryOption: { backgroundColor: palette.page }");
+  }
+});
+
 test("recorded searches invalidate history only through the shared app-search boundary", () => {
   expect(appSearch).toContain("if (parsed.recordHistory) publishUserSearchHistoryAppend");
-  for (const workspace of [archive, gallery, signal, compass]) {
+  for (const workspace of [archive, gallery, signal, compass, ascend]) {
     expect(workspace).not.toMatch(/invalidateQueries\(\{ queryKey: (?:contentQueryKeys\.history|userSearchHistoryQueryKey)/);
   }
 });

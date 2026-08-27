@@ -16,6 +16,10 @@
       "react-native": "./packages/ui/components/text-input/text-input.mobile.tsx",
       "default": "./packages/ui/components/text-input/text-input.web.tsx"
     },
+    "./ui/ai-text-editor": {
+      "react-native": "./packages/ui/components/ai-text-editor/ai-text-editor.mobile.tsx",
+      "default": "./packages/ui/components/ai-text-editor/ai-text-editor.web.tsx"
+    },
     "./ui/spinner": {
       "react-native": "./packages/ui/components/spinner/spinner.mobile.tsx",
       "default": "./packages/ui/components/spinner/spinner.web.tsx"

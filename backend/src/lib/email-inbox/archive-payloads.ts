@@ -19,7 +19,7 @@ export const emailAttachmentRefsSchema = z.array(emailAttachmentRefSchema).max(2
 export type EmailAttachmentRef = z.infer<typeof emailAttachmentRefSchema>;
 export const emailAttachmentAvailabilitySchema = z.enum(['none', 'complete', 'truncated', 'failed']);
 
-const threadDataSchema = z.object({
+export const emailThreadDataSchema = z.object({
   accountKey: key,
   providerThreadId: text,
   subject: text,
@@ -41,7 +41,7 @@ const threadDataSchema = z.object({
   inboxCategory: inboxCategorySchema.default('Important'),
 }).strict();
 
-const messageDataSchema = z.object({
+export const emailMessageDataSchema = z.object({
   accountKey: key,
   threadKey: key,
   providerMessageId: text,
@@ -84,7 +84,7 @@ const draftCommonSchema = z.object({
   attachments: emailAttachmentRefsSchema.optional(),
 }).strict();
 
-const replyDraftDataSchema = draftCommonSchema.extend({
+export const emailReplyDraftDataSchema = draftCommonSchema.extend({
   creationSource: z.enum(['manual', 'subscription']).default('manual'),
   variant: z.literal('reply').default('reply'),
   replyMode: z.enum(['reply', 'reply_all']).default('reply'),
@@ -95,7 +95,7 @@ const replyDraftDataSchema = draftCommonSchema.extend({
   emailWritingProfileKey: key.optional(),
 }).strict();
 
-const newDraftDataSchema = draftCommonSchema.extend({
+export const emailNewDraftBaseDataSchema = draftCommonSchema.extend({
   creationSource: z.literal('manual').default('manual'),
   variant: z.literal('new'),
   accountKey: key,
@@ -103,7 +103,8 @@ const newDraftDataSchema = draftCommonSchema.extend({
   cc: z.array(address).max(50).optional(),
   bcc: z.array(address).max(50).optional(),
   subject: z.string().max(998),
-}).strict().superRefine((draft, context) => {
+}).strict();
+export const emailNewDraftDataSchema = emailNewDraftBaseDataSchema.superRefine((draft, context) => {
   const seen = new Map<string, 'to' | 'cc' | 'bcc'>();
   for (const field of ['to', 'cc', 'bcc'] as const) for (const [index, address] of (draft[field] ?? []).entries()) {
     const normalized = address.trim().toLocaleLowerCase('en-US');
@@ -127,7 +128,7 @@ export const emailReplyContextDataSchema = z.object({
   text: text.max(4_000),
 }).strict();
 
-const writingProfileDataSchema = z.object({
+export const emailWritingProfileDataSchema = z.object({
   name: text,
   description: text,
   tone: text,
@@ -137,7 +138,7 @@ const writingProfileDataSchema = z.object({
   conventions: text,
 }).strict();
 
-const contactDataSchema = z.object({
+export const emailContactDataSchema = z.object({
   email: address,
   name: text.optional(),
   relationship: text.optional(),
@@ -145,7 +146,7 @@ const contactDataSchema = z.object({
   emailWritingProfileKey: key.optional(),
 }).strict();
 
-const ruleDataSchema = z.object({
+export const emailRuleDataSchema = z.object({
   name: text,
   description: text,
   condition: text,
@@ -159,19 +160,19 @@ function envelope<Kind extends string, Schema extends z.ZodTypeAny>(kind: Kind, 
   return z.object({ version: z.literal(1), kind: z.literal(kind), data }).strict();
 }
 
-export const emailThreadPayloadSchema = envelope('mail-thread', threadDataSchema);
-export const emailMessagePayloadSchema = envelope('mail-message', messageDataSchema);
-const emailReplyDraftPayloadSchema = envelope('mail-reply-draft', replyDraftDataSchema);
-const emailNewDraftPayloadSchema = envelope('mail-new-draft', newDraftDataSchema);
+export const emailThreadPayloadSchema = envelope('mail-thread', emailThreadDataSchema);
+export const emailMessagePayloadSchema = envelope('mail-message', emailMessageDataSchema);
+const emailReplyDraftPayloadSchema = envelope('mail-reply-draft', emailReplyDraftDataSchema);
+const emailNewDraftPayloadSchema = envelope('mail-new-draft', emailNewDraftDataSchema);
 export const emailDraftPayloadSchema = z.discriminatedUnion('kind', [
   emailReplyDraftPayloadSchema,
   emailNewDraftPayloadSchema,
 ]);
 export const emailTonePayloadSchema = envelope('mail-tone', emailToneDataSchema);
 export const emailReplyContextPayloadSchema = envelope('mail-reply-context', emailReplyContextDataSchema);
-export const emailWritingProfilePayloadSchema = envelope('mail-writing-profile', writingProfileDataSchema);
-export const emailContactPayloadSchema = envelope('mail-contact', contactDataSchema);
-export const emailRulePayloadSchema = envelope('mail-rule', ruleDataSchema);
+export const emailWritingProfilePayloadSchema = envelope('mail-writing-profile', emailWritingProfileDataSchema);
+export const emailContactPayloadSchema = envelope('mail-contact', emailContactDataSchema);
+export const emailRulePayloadSchema = envelope('mail-rule', emailRuleDataSchema);
 export const emailArchivePayloadSchema = z.discriminatedUnion('kind', [emailThreadPayloadSchema, emailMessagePayloadSchema, emailReplyDraftPayloadSchema, emailNewDraftPayloadSchema, emailTonePayloadSchema, emailReplyContextPayloadSchema, emailWritingProfilePayloadSchema, emailContactPayloadSchema, emailRulePayloadSchema]);
 
 type ArchiveRecord<Data> = Data & {
@@ -181,15 +182,15 @@ type ArchiveRecord<Data> = Data & {
   createdAt: string;
   updatedAt: string;
 };
-export type EmailThread = ArchiveRecord<z.infer<typeof threadDataSchema>>;
-export type EmailMessage = ArchiveRecord<z.infer<typeof messageDataSchema>>;
-export type EmailDraft = ArchiveRecord<z.infer<typeof replyDraftDataSchema> | z.infer<typeof newDraftDataSchema>>;
-export type EmailDraftCreate = (z.input<typeof replyDraftDataSchema> | z.input<typeof newDraftDataSchema>) & { scopeKey: string; embedding: number[] };
+export type EmailThread = ArchiveRecord<z.infer<typeof emailThreadDataSchema>>;
+export type EmailMessage = ArchiveRecord<z.infer<typeof emailMessageDataSchema>>;
+export type EmailDraft = ArchiveRecord<z.infer<typeof emailReplyDraftDataSchema> | z.infer<typeof emailNewDraftDataSchema>>;
+export type EmailDraftCreate = (z.input<typeof emailReplyDraftDataSchema> | z.input<typeof emailNewDraftDataSchema>) & { scopeKey: string; embedding: number[] };
 export type EmailTone = ArchiveRecord<z.infer<typeof emailToneDataSchema>> & { isFavorite: boolean };
 export type EmailReplyContext = ArchiveRecord<z.infer<typeof emailReplyContextDataSchema>>;
-export type EmailWritingProfile = ArchiveRecord<z.infer<typeof writingProfileDataSchema>>;
-export type EmailContact = ArchiveRecord<z.infer<typeof contactDataSchema>>;
-export type EmailRule = ArchiveRecord<z.infer<typeof ruleDataSchema>>;
+export type EmailWritingProfile = ArchiveRecord<z.infer<typeof emailWritingProfileDataSchema>>;
+export type EmailContact = ArchiveRecord<z.infer<typeof emailContactDataSchema>>;
+export type EmailRule = ArchiveRecord<z.infer<typeof emailRuleDataSchema>>;
 
 export function emailMessageSemanticText(message: Pick<EmailMessage, 'from' | 'subject' | 'body'>) {
   return `${message.from.trim().toLowerCase()}\n\n${message.subject.replace(/\s+/g, ' ').trim()}\n\n${message.body.replace(/\r\n?/g, '\n').trim()}`;
@@ -205,9 +206,9 @@ function decode<Data>(document: unknown, schema: z.ZodTypeAny): ArchiveRecord<Da
   return { ...payload.data, key: parsedDocument.key, scopeKey: parsedDocument.scopeKey, embedding: parsedDocument.embedding, createdAt: parsedDocument.createdAt, updatedAt: parsedDocument.updatedAt };
 }
 
-export const decodeEmailThread = (document: unknown) => decode<z.infer<typeof threadDataSchema>>(document, emailThreadPayloadSchema);
-export const decodeEmailMessage = (document: unknown) => decode<z.infer<typeof messageDataSchema>>(document, emailMessagePayloadSchema);
-export const decodeEmailDraft = (document: unknown) => decode<z.infer<typeof replyDraftDataSchema> | z.infer<typeof newDraftDataSchema>>(document, emailDraftPayloadSchema);
+export const decodeEmailThread = (document: unknown) => decode<z.infer<typeof emailThreadDataSchema>>(document, emailThreadPayloadSchema);
+export const decodeEmailMessage = (document: unknown) => decode<z.infer<typeof emailMessageDataSchema>>(document, emailMessagePayloadSchema);
+export const decodeEmailDraft = (document: unknown) => decode<z.infer<typeof emailReplyDraftDataSchema> | z.infer<typeof emailNewDraftDataSchema>>(document, emailDraftPayloadSchema);
 export const decodeEmailReplyContext = (document: unknown) => decode<z.infer<typeof emailReplyContextDataSchema>>(document, emailReplyContextPayloadSchema);
 export function encodeEmailToneContent(tone: z.input<typeof emailToneDataSchema>) {
   const value = emailToneDataSchema.parse(tone);
@@ -276,9 +277,9 @@ export function decodeEmailTone(document: unknown): EmailTone {
     return { ...data, key: parsedDocument.key, scopeKey: parsedDocument.scopeKey, embedding: parsedDocument.embedding, isFavorite: parsedDocument.isFavorite, createdAt: parsedDocument.createdAt, updatedAt: parsedDocument.updatedAt };
   }
 }
-export const decodeEmailWritingProfile = (document: unknown) => decode<z.infer<typeof writingProfileDataSchema>>(document, emailWritingProfilePayloadSchema);
-export const decodeEmailContact = (document: unknown) => decode<z.infer<typeof contactDataSchema>>(document, emailContactPayloadSchema);
-export const decodeEmailRule = (document: unknown) => decode<z.infer<typeof ruleDataSchema>>(document, emailRulePayloadSchema);
+export const decodeEmailWritingProfile = (document: unknown) => decode<z.infer<typeof emailWritingProfileDataSchema>>(document, emailWritingProfilePayloadSchema);
+export const decodeEmailContact = (document: unknown) => decode<z.infer<typeof emailContactDataSchema>>(document, emailContactPayloadSchema);
+export const decodeEmailRule = (document: unknown) => decode<z.infer<typeof emailRuleDataSchema>>(document, emailRulePayloadSchema);
 
 export function archiveDocument(input: {
   key: string;
@@ -294,7 +295,7 @@ export function archiveDocument(input: {
   archiveVisibility?: 'visible' | 'domain-only';
   developmentFixtureIdentifier?: string;
 }): Document {
-  const { mutationPolicy = 'system-only', archiveVisibility = 'visible', representation, embedding, ...document } = input;
+  const { mutationPolicy = 'user', archiveVisibility = 'visible', representation, embedding, ...document } = input;
   const content = JSON.stringify(document.payload);
   if (representation && representation.content !== content) throw new Error('Prepared Archive representation does not match the email payload.');
   return documentSchema.parse({

@@ -33,7 +33,7 @@ describe('book generation node contracts', () => {
     expect(bookThemesEmbeddingFields).toEqual(['name', 'description']);
     expect(bookSourcesEmbeddingFields).toEqual(['title', 'content', 'relevance']);
     expect(bookPartsEmbeddingFields).toEqual(['title', 'description', 'objective']);
-    expect(bookChaptersEmbeddingFields).toEqual(['title', 'description', 'objective', 'topics', 'content']);
+    expect(bookChaptersEmbeddingFields).toEqual(['title', 'description', 'objective', 'content']);
     expect(chapterContextsEmbeddingFields).toEqual(['previousContext', 'objectiveContext', 'sourceContext', 'personalizationContext', 'noveltyContext', 'nextContext', 'generationBrief']);
     expect(buildEmbeddingText(booksEmbeddingFields, { title: 'Leadership', description: 'Grow', goal: 'Lead', audience: 'Managers', outcome: 'Coach' })).toBe('Leadership\n\nGrow\n\nLead\n\nManagers\n\nCoach');
   });
@@ -47,6 +47,7 @@ describe('book generation node contracts', () => {
     const progress = bookProgressSchema.parse({ key, scopeKey: otherKey, userKey: key, bookKey: key, chapterKey: otherKey, progressSeconds: 0, createdAt: now, updatedAt: now });
     expect(progress.isCompleted).toBe(false);
     expect(progress.completedAt).toBeNull();
+    for (const schema of [bookContextSchema, bookThemeSchema, bookSourceSchema, bookPartSchema, chapterContextSchema, bookProgressSchema]) expect(schema.safeParse({ unknown: true }).success).toBe(false);
   });
 
   test('strictly validates generation fingerprint and lease metadata', () => {

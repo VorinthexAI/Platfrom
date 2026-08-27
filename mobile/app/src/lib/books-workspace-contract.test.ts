@@ -10,13 +10,51 @@ const layout = readFileSync(join(import.meta.dir, "../app/_layout.tsx"), "utf8")
 
 test("uses the standard shell and exact phone book geometry", () => {
   expect(workspace).toMatch(/<WorkspaceAppSwitcher\s+active="ascend"/);
-  expect(workspace).toMatch(/<Text style=\{styles\.localTitle\}>Ascend<\/Text>/);
+  expect(workspace).toContain('<WorkspaceAppSwitcher active="ascend" trigger="back" />');
+  expect(workspace).toContain('{bookPageOpen ? selectedBook?.title ?? "Book" : "Ascend"}');
+  expect(workspace).toContain('accessibilityLabel="Create in Ascend"');
+  expect(workspace).toMatch(/accessibilityLabel="Create in Ascend"[\s\S]*?size="xs"[\s\S]*?variant="icon"/);
+  expect(workspace).toContain('localHeader: {\n    minHeight: 48,');
+  expect(workspace).toContain('fontFamily: fonts.medium,\n    fontSize: 24,');
+  expect(workspace).toContain('paddingTop: spacing.xs,\n    paddingBottom: spacing.md,');
   expect(workspace).toContain("const COLUMNS = 3");
   expect(workspace).toContain("const GRID_GAP = 8");
   expect(workspace).toContain("height: (cardWidth * 16) / 9");
+  expect(workspace).toMatch(/accessibilityLabel=\{book\.title\}[\s\S]*?shape="rounded"/);
+  expect(workspace).not.toContain("<AscendIcon");
+  expect(workspace).not.toContain("styles.coverTitle");
+  const bookGrid = workspace.slice(workspace.indexOf("{filteredBooks.map"), workspace.indexOf("{!overviewQuery.isPending"));
+  const bookCard = bookGrid.slice(bookGrid.indexOf(": <Button"));
+  expect(bookCard).not.toContain("styles.cardStatus");
+  expect(bookCard).not.toContain('accessibilityRole="progressbar"');
+  expect(bookCard).not.toContain("generationProgressPercent");
   expect(workspace).toContain("Array.from({ length: COLUMNS }");
   expect(workspace).toContain("contentMode=\"raw\"");
   expect(workspace).toContain("<CoreComposer");
+});
+
+test("uses a titleless centered text-only Ascend create menu", () => {
+  expect(workspace).toContain('sheet === "actions"\n      ? ""');
+  expect(workspace).toContain('hideHeading={sheet === "actions" || sheet === "filter"}');
+  const actions = workspace.slice(workspace.indexOf('{sheet === "actions" ? ('), workspace.indexOf('{sheet === "filter" ? ('));
+  expect(actions).toContain('style={styles.sheetAction}');
+  expect(actions).toContain('variant="secondary"');
+  expect(actions).toContain('Create book');
+  expect(actions).not.toContain('icon=');
+  expect(actions).not.toContain('<AscendIcon');
+  expect(workspace).toContain('sheetAction: { justifyContent: "center" }');
+});
+
+test("matches Archive root search, history, favorite, empty, and focus behavior", () => {
+  expect(workspace).toContain('placeholder="Search..."');
+  expect(workspace).toContain('iconOnly');
+  expect(workspace).toContain('backgroundColor: palette.page');
+  expect(workspace).toContain('<SearchHistorySheet');
+  expect(workspace).toContain('checked={showOnlyFavorites}');
+  expect(workspace).toContain('"No audio book yet."');
+  expect(workspace).toContain('accessibilityLabel="Create book"');
+  expect(workspace).toContain('behavior={aiInputFocused ? "height" : undefined}');
+  expect(workspace).toContain('setRootSearchFocusable(false)');
 });
 
 test("keeps source selection explicit and generation asynchronous", () => {
@@ -25,15 +63,81 @@ test("keeps source selection explicit and generation asynchronous", () => {
   expect(workspace).toContain("setSheetOpen(false)");
   expect(workspace.indexOf("setSheetOpen(false)")).toBeLessThan(workspace.indexOf("createMutation.mutate"));
   expect(workspace).toContain('chapterCount: 25');
-  expect(workspace).toContain('Short · 10 chapters');
-  expect(workspace).toContain('Standard · 25 chapters');
-  expect(workspace).toContain('Deep · 50 chapters');
+  expect(workspace).toContain('{ count: 10, label: "Short" }');
+  expect(workspace).toContain('{ count: 25, label: "Standard" }');
+  expect(workspace).toContain('{ count: 50, label: "Deep" }');
   expect(workspace).not.toContain('lengthMinutes');
   expect(workspace).toContain('getContentLocation(queryClient, contentContext, archiveFolderKey)');
   expect(workspace).toMatch(/searchContentMatches\(\s*documentQuery\.trim\(\),\s*signal/);
   expect(workspace).toContain("const MAX_SOURCE_DOCUMENTS = 50");
   expect(workspace).toContain("draft.archiveDocumentKeys.length >= MAX_SOURCE_DOCUMENTS");
-  for (const status of ["queued", "researching", "planning", "writing", "narrating", "finalizing", "failed", "ready"]) expect(workspace).toContain(`\"${status}\"`);
+  for (const status of ["queued", "researching", "planning", "writing", "narrating", "finalizing"]) expect(workspace).toContain(`\"${status}\"`);
+  expect(workspace).toContain('book.status === "failed" || book.status === "cancelled"');
+});
+
+test("reveals generated books and playable chapters progressively", () => {
+  expect(workspace).toContain('setAutoOpenBookKey(book.key)');
+  expect(workspace).toContain('if (!book.coverUrl) return;');
+  expect(workspace).toContain('setBookPageOpen(true)');
+  expect(workspace).toContain('book.key.startsWith("pending-") || ACTIVE_STATUSES.includes(book.status) && !book.coverUrl');
+  expect(workspace).toContain('if (!chapter.content || !chapter.audioUrl) break;');
+  expect(workspace).toContain('const showNextChapterSkeleton');
+  expect(workspace).toContain('Preparing chapter ${revealedChapterCount + 1}');
+  expect(workspace).toContain('Math.min(current + 1, orderedReadyChapters.length)');
+  expect(workspace).not.toContain('sheet === "detail"');
+  expect(playback).toContain('.filter((chapter) => chapter.content && chapter.audioUrl)');
+});
+
+test("uses a persistent multi-step book brief with fresh self-improvement suggestions", () => {
+  for (const step of ["createTopicCustom", "createGoal", "createGoalCustom", "createKnowledge", "createDetails"]) expect(workspace).toContain(`\"${step}\"`);
+  expect(workspace).toContain("suggestBookTopics(excludeTopics)");
+  expect(workspace).toContain("topicSuggestionsMutation.mutate(topicSuggestions)");
+  expect(workspace).toContain("Array.from({ length: 3 }");
+  expect(workspace).toContain('!topicSuggestionsMutation.isPending && topicSuggestions.length ? <Button onPress={() => setSheet("createTopicCustom")}');
+  expect(workspace).toContain('<Text numberOfLines={1} style={styles.suggestionText}>{topic}</Text>');
+  expect(workspace).toContain('<Text numberOfLines={1} style={styles.suggestionText}>{goal}</Text>');
+  expect(workspace).toContain('<Text style={styles.inputLabel}>Topic</Text>');
+  expect(workspace).toContain('<Text style={styles.inputLabel}>Goal</Text>');
+  expect(workspace).toContain('inputLabel: { marginLeft: 2, color: palette.silver300, fontFamily: fonts.medium, fontSize: 12, letterSpacing: 0.4 }');
+  expect(workspace).toContain('customTextArea: { minHeight: 280, paddingTop: 12, lineHeight: 22, backgroundColor: palette.page, textAlignVertical: "top" }');
+  expect(workspace.match(/<AiTextEditor accessibilityLabel=/g)).toHaveLength(2);
+  expect(workspace).toContain('onOpenActions={() => openBriefEditorActions("topic")}');
+  expect(workspace).toContain('onOpenActions={() => openBriefEditorActions("goal")}');
+  expect(workspace).toContain('title="AI actions"');
+  expect(workspace).toContain('variant="secondary">Enhance</BottomSheetItem>');
+  expect(workspace).toContain('variant="secondary">Translate</BottomSheetItem>');
+  expect(workspace).toContain('title="Translate text"');
+  expect(workspace).toContain('enhanceAppTextForContext(capturedContext, text)');
+  expect(workspace).toContain('translateAppTextForContext(capturedContext, text, language)');
+  expect(workspace).toContain('suggestionLoadingPill: { width: "100%", height: 40, borderRadius: 999 }');
+  expect(workspace).toContain('footer={sheet === "create" ? <><Button disabled={topicSuggestionsMutation.isPending} onPress={loadNewTopics} size="md" variant="primary">New topics</Button><Button');
+  expect(workspace).toContain('sheet === "createTopicCustom" ? <><Button disabled={Boolean(briefTransformation) || draft.topic.trim().length < 3}');
+  expect(workspace).toContain('sheet === "createGoalCustom" ? <><Button disabled={Boolean(briefTransformation) || draft.goal.trim().length < 3}');
+  expect(workspace).not.toContain("Show different ideas");
+  expect(workspace).not.toContain("What do you want to improve?");
+  expect(workspace).toContain("suggestBookGoals(topic, excludeGoals)");
+  expect(workspace).toContain("goalSuggestionsMutation.mutate({ topic: draft.topic, excludeGoals: goalSuggestions })");
+  expect(workspace).not.toContain("Show different goals");
+  expect(workspace).not.toContain("What should this book help you achieve?");
+  expect(workspace).toContain('sheet === "createGoal" ? <><Button disabled={goalSuggestionsMutation.isPending} onPress={loadNewGoals} size="md" variant="primary">New goals</Button>');
+  expect(workspace).toContain('!goalSuggestionsMutation.isPending && goalSuggestions.length ? <Button onPress={() => setSheet("createGoalCustom")}');
+  expect(workspace).toContain('shape="pill" size="md" style={styles.suggestionPill}');
+  expect(workspace).toContain("What you already know (Optional)");
+  expect(workspace).toContain('onPress={() => setSheet("createGoal")}');
+  expect(workspace).toContain('onPress={() => setSheet("createDetails")}');
+  expect(workspace).toContain('fontSize: 12,\n    letterSpacing: 0.4,');
+  expect(workspace).toContain('<Tabs accessibilityLabel="Book depth" accessibilityRole="tablist" style={styles.detailTabs}>');
+  expect(workspace).toContain('detailTabs: { flexDirection: "row", gap: 4, padding: 3, borderWidth: 1, backgroundColor: palette.panel }');
+  expect(workspace).toContain('const LANGUAGES = ["English", "Swedish", "Spanish", "French", "German", "Portuguese"]');
+  expect(workspace).toContain('onPress={() => setDraft((current) => ({ ...current, language }))}');
+  expect(workspace).toContain('const DEFAULT_NARRATOR = { key: "clear" as const, name: "Clear" }');
+  expect(workspace).toContain('narratorVoiceKey: DEFAULT_NARRATOR.key');
+  expect(workspace).toContain('narrationPace: 1');
+  expect(workspace).not.toContain('<Text style={styles.formLabel}>Narrator</Text>');
+  expect(workspace).not.toContain('<Text style={styles.formLabel}>Narration pace</Text>');
+  expect(workspace).toContain('footer: { width: "100%", gap: spacing.sm }');
+  expect(workspace).toContain('footerButton: { width: "100%" }');
+  for (const label of ["TOPIC", "GOAL", "BOOK DEPTH", "LANGUAGE", "WRITING TONE", "NARRATOR", "NARRATION PACE", "ARCHIVE SOURCES", "ADDITIONAL INSTRUCTIONS"]) expect(workspace).not.toContain(`>${label}<`);
 });
 
 test("provides detail, synchronized reading, and lifecycle controls", () => {
@@ -55,7 +159,6 @@ test("provides detail, synchronized reading, and lifecycle controls", () => {
   expect(unmountCleanup).not.toContain("player.clearLockScreenControls()");
   expect(workspace).toContain("pageKey={sheet}");
   expect(workspace).toContain("if (!next) setSheet(undefined)");
-  expect(workspace).toMatch(/accessibilityValue=\{\{\s*min: 0,\s*max: 100/);
   expect(workspace).toContain("Retry generation");
   expect(workspace).toContain("Cancel generation");
   expect(workspace).toContain("Delete book");

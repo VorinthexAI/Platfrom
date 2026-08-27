@@ -390,7 +390,9 @@ function signalThreadBelongs(thread: EmailThread, filter: EmailFilter) {
 }
 export function signalThreadBelongsToOverview(thread: EmailThread, query: EmailOverviewQuery) {
   if (signalThreadIsTrash(thread) || thread.isRead !== (query.readState === "read")) return false;
-  return query.facets.some((facet) => facet === "favorite" ? thread.isFavorite : thread.inboxCategory.toLowerCase() === facet);
+  const favoriteOnly = query.facets.includes("favorite");
+  const categoryFacets = query.facets.filter((facet) => facet !== "favorite");
+  return (!favoriteOnly || thread.isFavorite) && (categoryFacets.length ? categoryFacets.some((facet) => facet === thread.inboxCategory.toLowerCase()) : favoriteOnly);
 }
 function signalCountContribution(thread: EmailThread) {
   const trash = signalThreadIsTrash(thread);

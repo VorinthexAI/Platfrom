@@ -33,7 +33,7 @@ describe('Arango migration indexes', () => {
   test('retires non-Gmail connector credentials before strict Gmail backfill reads', async () => {
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
     const retire = source.indexOf('await retireUnsupportedEmailConnectors(targetDb)');
-    const backfill = source.indexOf('await migrateCanonicalInboxFolders(targetDb)');
+    const backfill = source.indexOf('await migrateCanonicalEmailPersistence(targetDb)');
     expect(retire).toBeGreaterThan(-1);
     expect(retire).toBeLessThan(backfill);
     expect(source).toContain('FILTER connector.provider != "gmail"');
@@ -347,7 +347,7 @@ describe('Arango migration indexes', () => {
   test('declares exact managed audiobook folder ownership uniqueness', () => {
     expect(collections.find(({ name }) => name === 'folders')?.indexes).toContainEqual({ fields: ['scopeKey', 'managedPurpose', 'managedOwnerKey'], unique: true, sparse: true });
   });
-  test('retains minimal places and private ordered trips and declares book-generation collection indexes', () => {
+  test('retains minimal places and private ordered trips and declares book-generation collection indexes', async () => {
     expect(collections.filter(({ name }) => ['places', 'generatedDocumentBindings', 'trips', 'tripCreationReceipts', 'tripPlaces', 'tripAttachments', 'placeVisits'].includes(name)).map(({ name }) => name)).toEqual(['places', 'generatedDocumentBindings', 'trips', 'tripCreationReceipts', 'tripPlaces', 'tripAttachments']);
     expect(collections.find(({ name }) => name === 'places')).toEqual({
       name: 'places',
@@ -379,55 +379,50 @@ describe('Arango migration indexes', () => {
     const bookNames = ['books', 'bookContexts', 'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'chapterContexts', 'bookProgress'];
     expect(collections.filter(({ name }) => bookNames.includes(name)).map(({ name }) => name)).toEqual(bookNames);
     expect(collections.find(({ name }) => name === 'bookChapters')?.indexes).toContainEqual({ fields: ['scopeKey', 'bookKey', 'position'], unique: true });
-    expect(collections.find(({ name }) => name === 'bookProgress')?.indexes).toContainEqual({ fields: ['scopeKey', 'userKey', 'bookKey', 'chapterKey'], unique: true });
-    expect(collections.find(({ name }) => name === 'books')?.indexes).toContainEqual({ fields: ['scopeKey', 'generationRequestKey'], unique: true, sparse: true });
-    const emailNames = ['emailAccounts', 'emailThreads', 'emailMessages', 'emailContacts', 'emailWritingProfiles', 'emailRules', 'emailReplyDrafts'];
-    expect(collections.filter(({ name }) => emailNames.includes(name))).toEqual([]);
-  });
-  test('migrates mail state into Archive and connectors before dropping retired collections', async () => {
+    expect(collections.find(({ name }) => name === 'folders')?.indexes).toContainEqual({ fields: ['scopeKey', 'managedPurpose', 'managedOwnerKey'], unique: true, sparse: true });
+    const emailNames = ['emailInboxes', 'emailThreads', 'emailMessages', 'emailDrafts', 'emailTones', 'emailReplyContext', 'emailWritingProfiles', 'emailAttachments'];
+    expect(collections.filter(({ name }) => emailNames.includes(name)).map(({ name }) => name)).toEqual(emailNames);
+    expect(collections.filter(({ name }) => ['tripGuides', 'placeReferences', 'placeHeroMedia'].includes(name)).map(({ name }) => name)).toEqual(['tripGuides', 'placeReferences', 'placeHeroMedia']);
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
-    const migrate = source.indexOf('await migrateMailArchiveDocuments(targetDb);');
-    const drop = source.indexOf('for (const name of droppedCollections)');
+    const dropped = source.slice(source.indexOf('const droppedCollections = ['), source.indexOf('async function main()'));
+    for (const name of [...bookNames, ...emailNames, 'tripGuides', 'placeReferences', 'placeHeroMedia']) expect(dropped).not.toContain(`'${name}'`);
+  });
+  test('reverse-backfills private Signal rows after canonical collections exist', async () => {
+    const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    const migrate = source.indexOf('await migrateCanonicalEmailPersistence(targetDb);');
+    const embeddings = source.indexOf('await migrateCanonicalEmailEmbeddings(targetDb);');
+    const loop = source.indexOf('for (const spec of collections)');
     expect(migrate).toBeGreaterThan(-1);
-    expect(migrate).toBeLessThan(drop);
-    expect(source).toContain('kind: "mail-thread"');
-    expect(source).toContain('kind: "mail-message"');
-    expect(source).toContain('kind: "mail-reply-draft"');
-    expect(source).toContain('kind: "mail-writing-profile"');
-    expect(source).toContain('UPDATE connector WITH { syncEnabled: account.syncEnabled');
+    expect(migrate).toBeGreaterThan(loop);
+    expect(embeddings).toBeGreaterThan(migrate);
+    expect(source).toContain("kind: 'mail-thread'");
+    expect(source).toContain("kind: 'mail-message'");
+    expect(source).toContain("collection: 'emailDrafts'");
+    expect(source).toContain('IN emailInboxes');
+    expect(source).toContain('IN emailAttachments');
+    expect(source).toContain('embeddingContentVersion: 4');
+    expect(source).toContain("emailMessageSemanticText({ from: message.from, subject: message.subject, body: message.body })");
+    expect(source).not.toContain('await migrateMailArchiveDocuments(targetDb);');
   });
   test('backfills Gmail initial sync completion after legacy mail state without adding an index', async () => {
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
-    const mail = source.indexOf('await migrateMailArchiveDocuments(targetDb);');
+    const mail = source.indexOf('await migrateCanonicalEmailPersistence(targetDb);');
     const backfill = source.indexOf('await migrateEmailInitialSyncCompletion(targetDb);');
     const drop = source.indexOf('for (const name of droppedCollections)');
-    expect(mail).toBeLessThan(backfill);
+    expect(backfill).toBeLessThan(mail);
     expect(backfill).toBeLessThan(drop);
     const migration = source.slice(source.indexOf('export async function migrateEmailInitialSyncCompletion'), source.indexOf('export async function migrateProviderIndependentEmailDrafts'));
     expect(migration).toContain('!HAS(connector, "initialSyncCompleted")');
     expect(migration).toContain('initialSyncCompleted: HAS(connector, "lastSyncedAt")');
     expect(migration).not.toContain('ensureIndex');
   });
-  test('migrates hidden thread records and visible messages into the canonical Archive hierarchy', async () => {
+  test('demotes managed mail exports to ordinary Archive and Gallery copies', async () => {
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
-    const migration = source.slice(source.indexOf('export async function migrateCanonicalMailArchiveHierarchy'), source.indexOf('export async function retireUnsupportedEmailConnectors'));
-    expect(source.indexOf('await migrateCanonicalInboxFolders(targetDb)')).toBeLessThan(source.indexOf('await migrateCanonicalMailArchiveHierarchy(targetDb)'));
-    expect(migration).toContain('ensureMailInboxFilesFolder');
-    expect(migration).toContain('managedPurpose != "mail-inbox-files"');
-    expect(migration).toContain('Canonical inbox Files migration is incomplete');
-    expect(migration).toContain('"communication-mail-threads"');
-    expect(migration).toContain('CONCAT("mail-inbox\\\\u0000", payload.data.accountKey)');
-    expect(migration).toContain('archiveVisibility: "domain-only"');
+    const migration = source.slice(source.indexOf('export async function migrateCanonicalEmailPersistence'), source.indexOf('export async function migrateProviderIndependentEmailDrafts'));
+    expect(migration).toContain('mutationPolicy: "user"');
     expect(migration).toContain('archiveVisibility: "visible"');
-    expect(migration).toContain('name: payload.data.subject');
-    expect(migration).toContain('FILTER document._key > @after');
-    expect(migration).toContain('const assignments = await');
-    expect(migration).not.toContain('LET movedMessages');
-    expect(migration).toContain('inboxFolder.managedOwnerKey != connector._key');
-    expect(migration).toContain('folder.managedPurpose == "mail-thread"');
-    expect(migration).toContain('REMOVE folder IN folders');
-    expect(migration).not.toContain('managedOwnerKey: thread._key');
-    expect(migration).toContain('Canonical mail Archive hierarchy migration is incomplete');
+    expect(migration).toContain('purpose: null');
+    expect(migration).not.toContain('ensureMailFolders');
   });
   test('assigns provider-independent active drafts only when one active organization connector exists', async () => {
     const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
@@ -632,12 +627,17 @@ describe('Arango migration indexes', () => {
       },
     };
     await migrateGeneratedTravelDocuments(database as never);
-    const tripCleanup = calls.findIndex((query) => query.includes('REMOVE guide IN tripGuides'));
+    const tripCleanup = calls.findIndex((query) => query.includes('UPDATE guide WITH { content: guide.summary'));
+    const tripValidation = calls.findIndex((query) => query.includes('REMOVE guide IN tripGuides'));
     const reportCleanup = calls.findIndex((query) => query.includes('REMOVE report IN placeReports'));
-    const conversion = calls.findIndex((query) => query.includes('INSERT { _key: legacy._key'));
+    const conversion = calls.findIndex((query) => query.includes('IN placeReferences'));
     expect(tripCleanup).toBeGreaterThanOrEqual(0);
-    expect(reportCleanup).toBeGreaterThan(tripCleanup);
-    expect(conversion).toBeGreaterThan(reportCleanup);
+    expect(tripValidation).toBeGreaterThanOrEqual(0);
+    expect(reportCleanup).toBeGreaterThanOrEqual(0);
+    expect(tripCleanup).toBeGreaterThan(reportCleanup);
+    expect(tripCleanup).toBeGreaterThan(tripValidation);
+    expect(conversion).toBeGreaterThan(tripCleanup);
+    expect(calls.some((query) => query.includes('semantic migration failed'))).toBe(false);
   });
   test('drops obsolete place indexes while preserving current indexes', () => {
     const desired = [['scopeKey', 'userKey', 'saved'], ['scopeKey', 'userKey', 'openedAt'], ['scopeKey', 'userKey', 'countryCode'], ['scopeKey', 'userKey', 'countryCode', 'name']];
@@ -816,10 +816,11 @@ describe('Arango migration indexes', () => {
     await expect(migrateMinimalPlacesAndRetireTrips(database as never)).rejects.toThrow('cannot safely derive user ownership');
     expect(updates).toBe(0);
   });
-  test('removes legacy scope-shared book progress before per-user indexes', async () => {
+  test('removes unowned legacy progress before folding metadata into canonical documents', async () => {
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
     expect(source).toContain('FILTER !HAS(progress, "userKey") REMOVE progress IN bookProgress');
-    expect(source).toContain('Dropped obsolete scope-shared book progress index');
+    expect(source).toContain('document.audioChapter.readerProgress');
+    expect(source).toContain("'bookProgress',");
   });
   test('migration never hashes missing data or borrows current documents for version history', async () => {
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
@@ -1025,16 +1026,13 @@ describe('Arango migration indexes', () => {
     expect(source).toContain("{ fields: ['distinctId', 'createdAt'] }");
   });
 
-  test('retires inbox rows only after verified canonical folder migration', async () => {
+  test('retires inbox rows only after canonical Signal backfill', async () => {
     expect(collections.find(({ name }) => name === 'inboxes')).toBeUndefined();
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
-    const migration = source.slice(source.indexOf('export async function migrateCanonicalInboxFolders'), source.indexOf('export async function migrateCanonicalMailArchiveHierarchy'));
-    expect(migration).toContain('FOR inbox IN inboxes RETURN inbox');
-    expect(migration).toContain('managedPurpose: "mail-inbox"');
-    expect(migration).toContain('folder.name != inbox.name');
-    expect(migration).toContain('folder.embedding != inbox.embedding');
-    expect(source.indexOf('await migrateCanonicalInboxFolders(targetDb)')).toBeLessThan(source.indexOf('await migrateCanonicalMailArchiveHierarchy(targetDb)'));
-    expect(source.indexOf('await migrateCanonicalMailArchiveHierarchy(targetDb)')).toBeLessThan(source.indexOf('await dropVerifiedLegacyInboxes(targetDb)'));
+    const migration = source.slice(source.indexOf('export async function migrateCanonicalEmailPersistence'), source.indexOf('export async function migrateProviderIndependentEmailDrafts'));
+    expect(migration).toContain('folder.managedPurpose == "mail-inbox"');
+    expect(migration).toContain('IN emailInboxes');
+    expect(source.indexOf('await migrateCanonicalEmailPersistence(targetDb)')).toBeLessThan(source.indexOf('await dropVerifiedLegacyInboxes(targetDb)'));
     expect(source).toContain("const legacy = targetDb.collection('inboxes')");
   });
 

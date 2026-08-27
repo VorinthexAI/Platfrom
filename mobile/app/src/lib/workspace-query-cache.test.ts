@@ -218,12 +218,13 @@ test("Signal composite keys normalize and parse every facet combination", () => 
   expect(parseSignalOverviewQuery(signalQueryKeys.overview(context, "connector", "trash"))).toEqual({ kind: "legacy", filter: "trash", search: null });
 });
 
-test("Signal membership is OR across facets and AND with read state", () => {
+test("Signal favorite membership is optional when off and required when on", () => {
   const at = "2026-08-23T10:00:00.000Z";
   const base = { key: "thread", subject: "Subject", summary: "Summary", intent: "Review", priority: "normal" as const, state: "needs_action" as const, inboxCategory: "Important" as const, lastMessageAt: at, isFavorite: false, isRead: false, unread: true, createdAt: at, updatedAt: at };
   expect(signalThreadBelongsToOverview(base, { readState: "unread", facets: ["urgent", "important"], search: "" })).toBe(true);
-  expect(signalThreadBelongsToOverview({ ...base, inboxCategory: "Urgent" }, { readState: "unread", facets: ["urgent", "favorite"], search: "" })).toBe(true);
-  expect(signalThreadBelongsToOverview({ ...base, inboxCategory: "Filtered", isFavorite: true }, { readState: "unread", facets: ["important", "favorite"], search: "" })).toBe(true);
+  expect(signalThreadBelongsToOverview({ ...base, inboxCategory: "Urgent" }, { readState: "unread", facets: ["urgent", "favorite"], search: "" })).toBe(false);
+  expect(signalThreadBelongsToOverview({ ...base, isFavorite: true }, { readState: "unread", facets: ["important", "favorite"], search: "" })).toBe(true);
+  expect(signalThreadBelongsToOverview({ ...base, inboxCategory: "Filtered", isFavorite: true }, { readState: "unread", facets: ["favorite"], search: "" })).toBe(true);
   expect(signalThreadBelongsToOverview({ ...base, isRead: true, unread: false }, { readState: "unread", facets: ["important"], search: "" })).toBe(false);
   expect(signalThreadBelongsToOverview(base, { readState: "unread", facets: [], search: "" })).toBe(false);
 });
@@ -234,7 +235,7 @@ test("Signal reconciliation honors default, all-active, and zero-facet cache mem
   const overview = { accounts: [], selectedAccount: null, threads: [thread], drafts: [], unassignedDrafts: [], counts: { all: 1, important: 1, urgent: 0, needsAction: 1, filtered: 0, unread: 1, favorite: 0, trash: 0 }, nextCursor: null };
   const filtered = { ...thread, inboxCategory: "Filtered" as const, updatedAt: "2026-08-23T10:01:00.000Z" };
   expect(reconcileSignalOverviewThreads(overview, [filtered], { readState: "unread", facets: ["urgent", "important"], search: "" }).threads).toEqual([]);
-  expect(reconcileSignalOverviewThreads(overview, [filtered], { readState: "unread", facets: ["urgent", "important", "filtered", "favorite"], search: "" }).threads).toEqual([filtered]);
+  expect(reconcileSignalOverviewThreads(overview, [{ ...filtered, isFavorite: true }], { readState: "unread", facets: ["urgent", "important", "filtered", "favorite"], search: "" }).threads).toEqual([{ ...filtered, isFavorite: true }]);
   expect(reconcileSignalOverviewThreads(overview, [filtered], { readState: "unread", facets: [], search: "" }).threads).toEqual([]);
   expect(reconcileSignalOverviewThreads(overview, [{ ...filtered, isRead: true, unread: false }], { readState: "unread", facets: ["filtered"], search: "" }).threads).toEqual([]);
 });
