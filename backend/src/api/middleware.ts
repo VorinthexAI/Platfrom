@@ -30,6 +30,7 @@ const PUBLIC_AUTH_PATHS = new Set([
   '/api/v1/auth/totp/verify',
 ]);
 const isProviderWebhookPath = (path: string) => isResendWebhookPath(path) || isGmailWebhookPath(path);
+export const isPublicBookSharePath = (path: string) => /^\/api\/v1\/public\/books\/shares\/(read|stream)\/?$/.test(path);
 
 export function isPublicFounderAuthPath(path: string) {
   return PUBLIC_AUTH_PATHS.has(path.replace(/\/$/, ''))
@@ -161,7 +162,8 @@ function querySchemaForPath(path: string, method: string) {
   if (method === 'GET' && apiPath === '/gallery/highlights') return strictObject({ organizationKey: z.string(), scopeKey: z.string(), collectionKey: z.string() });
   if (method === 'GET' && apiPath === '/gallery/memories') return strictObject({ organizationKey: z.string(), scopeKey: z.string(), collectionKey: z.string() });
   if (/^\/content\/tools\/[^/]+$/.test(apiPath)) return strictObject({});
-  if (apiPath === '/books' || apiPath === '/books/overview' || apiPath === '/books/topic-suggestions' || apiPath === '/books/goal-suggestions' || /^\/books\/[^/]+(?:\/detail|\/(?:retry|cancel))?$/.test(apiPath) || /^\/books\/[^/]+\/chapters\/[^/]+\/progress$/.test(apiPath)) return strictObject({});
+  if (method === 'GET' && apiPath === '/public/books/shares/stream') return strictObject({ token: z.string().regex(/^[A-Za-z0-9_-]{43}$/) });
+  if (apiPath === '/books' || apiPath === '/books/overview' || apiPath === '/books/topic-suggestions' || apiPath === '/books/goal-suggestions' || /^\/books\/[^/]+(?:\/detail|\/(?:retry|cancel|favorite)|\/share\/(?:detail|update))?$/.test(apiPath) || /^\/books\/[^/]+\/chapters\/[^/]+\/progress$/.test(apiPath)) return strictObject({});
   return strictObject({});
 }
 
@@ -182,6 +184,7 @@ export const requireEnvApiKey: MiddlewareHandler = async (c, next) => {
   // OAuth providers redirect here directly and cannot attach application headers.
   if (/^\/api\/v1\/auth\/mobile\/oauth\/(google|apple)\/callback\/?$/.test(c.req.path)) return next();
   if (/^\/api\/v1\/email\/connectors\/gmail\/callback\/?$/.test(c.req.path)) return next();
+  if (isPublicBookSharePath(c.req.path)) return next();
   const expected = process.env.API_KEY;
   if (!expected) {
     if (process.env.NODE_ENV === 'production') {
@@ -246,7 +249,7 @@ export function createAutoRefreshAuthTokens(dependencies: AutoRefreshDependencie
 
     // Public authentication handlers issue their own session and only need the
     // selected response transport; stale credentials must not block sign-in.
-    if (isPublicFounderAuthPath(c.req.path) || c.req.path === '/api/v1/health' || isProviderWebhookPath(c.req.path)) {
+    if (isPublicFounderAuthPath(c.req.path) || isPublicBookSharePath(c.req.path) || c.req.path === '/api/v1/health' || isProviderWebhookPath(c.req.path)) {
       return next();
     }
 
@@ -292,10 +295,13 @@ export const rateLimitByIp: MiddlewareHandler = async (c, next) => {
   if (isProviderWebhookPath(c.req.path)) return next();
 
   const authPath = isPublicFounderAuthPath(c.req.path);
-  if (!authPath && process.env.RATE_LIMIT_ENABLED !== 'true') return next();
+  const publicBookShare = isPublicBookSharePath(c.req.path);
+  if (!authPath && !publicBookShare && process.env.RATE_LIMIT_ENABLED !== 'true') return next();
   const handoffRead = /^\/api\/v1\/auth\/handoff\/(stream|status)\/?$/.test(c.req.path);
 
-  const limit = handoffRead
+  const limit = publicBookShare
+    ? 60
+    : handoffRead
     ? 120
     : authPath
       ? 20
@@ -311,7 +317,7 @@ export const rateLimitByIp: MiddlewareHandler = async (c, next) => {
   }
 
   const ip = getClientIp(c);
-  const bucket = handoffRead ? 'auth-handoff-read' : authPath ? 'auth' : 'global';
+  const bucket = publicBookShare ? 'public-book-share' : handoffRead ? 'auth-handoff-read' : authPath ? 'auth' : 'global';
   const key = `rate-limit:${bucket}:${ip}:${Math.floor(Date.now() / (windowSeconds * 1000))}`;
 
   try {
@@ -328,7 +334,7 @@ export const rateLimitByIp: MiddlewareHandler = async (c, next) => {
     }
   } catch (error) {
     console.warn('rate limit check failed', error);
-    if (authPath) return c.json({ error: 'authentication temporarily unavailable' }, 503);
+    if (authPath || publicBookShare) return c.json({ error: 'service temporarily unavailable' }, 503);
   }
 
   return next();

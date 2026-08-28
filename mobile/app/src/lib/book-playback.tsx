@@ -34,7 +34,7 @@ type BookPlaybackValue = {
   refreshingUrl: boolean;
   refreshUrl: () => Promise<void>;
   requestReader: () => void;
-  seek: (seconds: number) => void;
+  seek: (seconds: number) => Promise<void>;
   setSleepMinutes: (minutes: number) => void;
   setSpeed: (speed: number) => void;
   sleepMinutes: number;
@@ -256,6 +256,18 @@ export function BookPlaybackProvider({ children }: { children: ReactNode }) {
     await playBookChapter(playbackBookKey, chapter.key, true, audio.didJustFinish ? 0 : currentTime);
   }
 
+  async function seek(seconds: number) {
+    const target = clampBookSeek(seconds, duration);
+    await player.seekTo(target);
+    if (!detail || !chapter || !identity) return;
+    const key = getBookProgressKey(identity, detail.book.key, chapter.key);
+    const progressSeconds = Math.max(0, Math.floor(target));
+    const persistedSeconds = Math.max(lastSaved.current.get(key) ?? 0, chapter.progressSeconds);
+    if (progressSeconds <= persistedSeconds) return;
+    lastSaved.current.set(key, progressSeconds);
+    await writeProgress({ bookKey: detail.book.key, chapterKey: chapter.key, context: getBooksContext(), identity, intent: { progressSeconds, isCompleted: chapter.isCompleted } }).catch(() => undefined);
+  }
+
   async function moveChapter(offset: number) {
     const next = adjacentBookChapter(orderedChapters, chapter?.key, offset < 0 ? -1 : 1);
     if (!next || !playbackBookKey) return;
@@ -406,7 +418,7 @@ export function BookPlaybackProvider({ children }: { children: ReactNode }) {
     refreshingUrl,
     refreshUrl,
     requestReader: () => setReaderRequest((current) => current + 1),
-    seek: (seconds) => { void player.seekTo(clampBookSeek(seconds, duration)); },
+    seek,
     setSleepMinutes: (minutes) => {
       setSleepMinutesState(minutes);
       setSleepDeadline(minutes ? Date.now() + minutes * 60_000 : undefined);
@@ -421,6 +433,6 @@ export function BookPlaybackProvider({ children }: { children: ReactNode }) {
 
 export function useBookPlayback() {
   const value = useContext(BookPlaybackContext);
-  if (!value) throw new Error("Book playback must be used inside BookPlaybackProvider.");
+  if (!value) throw new Error("Audio book playback must be used inside BookPlaybackProvider.");
   return value;
 }

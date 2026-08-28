@@ -42,7 +42,7 @@ describe('book generation node contracts', () => {
     const book = bookSchema.parse({ key, scopeKey: otherKey, title: 'Leadership', description: 'A personal guide', goal: 'Lead better', audience: 'Managers', outcome: 'Build leaders', language: 'en', status: 'planning', embedding, createdAt: now, updatedAt: now });
     expect(book).toMatchObject({ isFavorite: false, status: 'planning' });
     expect(book).toMatchObject({ chapterCount: 0, estimatedMinutes: 0 });
-    const chapter = bookChapterSchema.parse({ key, scopeKey: otherKey, bookKey: key, title: 'Start', description: 'Opening', objective: 'Orient the reader', evidenceKeyPoints: ['Use the selected evidence.'], priorTransition: 'Open the argument.', nextTransition: 'Lead into the next chapter.', repetitionBoundaries: ['Do not repeat the opening.'], targetWordMin: 500, targetWordMax: 750, embedding, position: 1, createdAt: now, updatedAt: now });
+    const chapter = bookChapterSchema.parse({ key, scopeKey: otherKey, bookKey: key, title: 'Start', description: 'Opening', objective: 'Orient the reader', evidenceKeyPoints: ['Use the selected evidence.'], priorTransition: 'Open the argument.', nextTransition: 'Lead into the next chapter.', repetitionBoundaries: ['Do not repeat the opening.'], targetWordMin: 775, targetWordMax: 850, embedding, position: 1, createdAt: now, updatedAt: now });
     expect(chapter).toMatchObject({ status: 'planned', topics: [], estimatedMinutes: 0 });
     const progress = bookProgressSchema.parse({ key, scopeKey: otherKey, userKey: key, bookKey: key, chapterKey: otherKey, progressSeconds: 0, createdAt: now, updatedAt: now });
     expect(progress.isCompleted).toBe(false);

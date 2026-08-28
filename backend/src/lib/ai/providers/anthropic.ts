@@ -32,6 +32,7 @@ const PROVIDER_ID = 'anthropic' as const;
 const DEFAULT_MAX_OUTPUT_TOKENS = 4096;
 
 function buildMessageParams(externalModelId: string, input: ChatInput): Anthropic.Messages.MessageCreateParamsNonStreaming {
+  if (input.responseFormat) throw new ProviderError(PROVIDER_ID, 'unsupported_action', 'Anthropic adapter does not support strict structured core.chat responses');
   const messages: Anthropic.Messages.MessageParam[] = [];
   const systemParts: string[] = input.systemPrompt ? [input.systemPrompt] : [];
   for (const message of input.messages) {

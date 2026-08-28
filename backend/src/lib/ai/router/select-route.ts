@@ -1,7 +1,6 @@
 import { getDefaultOrganizationProviderRepository } from '@/lib/ai/organization-providers/repository';
 import { getActionDefinition } from '@/lib/ai/actions';
-import { getModelById, getModelBySlug } from '@/lib/db/models.node';
-import { listEnabledModelActionsByActionSlug } from '@/lib/db/model-actions.node';
+import { getModelBySlug } from '@/lib/db/models.node';
 import { listEnabledModelProvidersByModelKey } from '@/lib/db/model-providers.node';
 import { getProviderById, getProviderBySlug } from '@/lib/db/providers.node';
 import { NoEligibleRouteError, ProviderNotEnabledForOrganizationError, RouteValidationError, UnknownModelError, UnknownProviderError } from './errors';
@@ -11,15 +10,13 @@ import type { RouteDecision, RouterDataSource, RouterDependencies } from './type
 
 const defaultDataSource: RouterDataSource = {
   getModelBySlug,
-  getModelByKey: getModelById,
   getProviderBySlug,
   getProviderByKey: getProviderById,
-  listModelActions: listEnabledModelActionsByActionSlug,
   listModelProviders: listEnabledModelProvidersByModelKey,
   listOrganizationProviderKeys: (organizationKey) => getDefaultOrganizationProviderRepository().listProviderKeys(organizationKey),
 };
 
-/** Selects the first valid persisted route using modelAction priority only. */
+/** Selects the first operational route in action-definition priority order. */
 export async function selectRoute(input: RouteRequestInput, deps: RouterDependencies = {}): Promise<RouteDecision> {
   const parsed = routeRequestSchema.safeParse(input);
   if (!parsed.success) throw new RouteValidationError(parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; '));
@@ -27,43 +24,47 @@ export async function selectRoute(input: RouteRequestInput, deps: RouterDependen
   const data = deps.data ?? defaultDataSource;
   const action = getActionDefinition(request.actionSlug);
   if (!action) throw new NoEligibleRouteError(request.actionSlug, 'action is not registered');
+  if (action.modelPolicy === 'none' || action.models.length === 0) {
+    throw new NoEligibleRouteError(request.actionSlug, 'action does not declare a model route');
+  }
+
+  let candidates = action.models
+    .map((binding, declarationOrder) => ({ binding, declarationOrder }))
+    .sort((left, right) => right.binding.priority - left.binding.priority || left.declarationOrder - right.declarationOrder);
+  if (request.mode === 'model' || request.mode === 'fixed') candidates = candidates.filter(({ binding }) => binding.model === request.modelSlug);
+  if (request.mode === 'fixed') candidates = candidates.filter(({ binding }) => binding.provider === request.providerSlug);
 
   const selectedModel = request.mode === 'model' || request.mode === 'fixed' ? await data.getModelBySlug(request.modelSlug) : null;
   if ((request.mode === 'model' || request.mode === 'fixed') && !selectedModel) throw new UnknownModelError(request.modelSlug);
-  const selectedProvider = request.mode === 'fixed'
-    ? await data.getProviderBySlug(request.providerSlug)
-    : request.organizationProviderKey
-      ? await data.getProviderByKey(request.organizationProviderKey)
-      : null;
-  if ((request.mode === 'fixed' || request.organizationProviderKey) && !selectedProvider) {
-    throw new UnknownProviderError(request.mode === 'fixed' ? request.providerSlug : request.organizationProviderKey!);
-  }
+  const fixedProvider = request.mode === 'fixed' ? await data.getProviderBySlug(request.providerSlug) : null;
+  if (request.mode === 'fixed' && !fixedProvider) throw new UnknownProviderError(request.providerSlug);
+  const organizationProvider = request.organizationProviderKey ? await data.getProviderByKey(request.organizationProviderKey) : null;
+  if (request.organizationProviderKey && !organizationProvider) throw new UnknownProviderError(request.organizationProviderKey);
 
   const allowedProviderKeys = new Set(await data.listOrganizationProviderKeys(request.organizationKey));
-  const selectedStaticProvider = selectedProvider && !request.organizationProviderKey && isStaticProvider(selectedProvider.slug);
-  if (selectedProvider && !allowedProviderKeys.has(selectedProvider.key) && !selectedStaticProvider) {
-    throw new ProviderNotEnabledForOrganizationError(request.organizationKey, selectedProvider.slug);
+  for (const provider of [fixedProvider, organizationProvider]) {
+    const staticProvider = provider && !request.organizationProviderKey && isStaticProvider(provider.slug);
+    if (provider && !allowedProviderKeys.has(provider.key) && !staticProvider) {
+      throw new ProviderNotEnabledForOrganizationError(request.organizationKey, provider.slug);
+    }
   }
 
-  let modelActions = await data.listModelActions(action.id);
-  modelActions = modelActions
-    .filter((link) => link.enabled)
-    .sort((left, right) => right.priority - left.priority || left.key.localeCompare(right.key));
-  if (selectedModel) modelActions = modelActions.filter((link) => link.modelKey === selectedModel.key);
-
-  for (const modelAction of modelActions) {
-    const model = selectedModel?.key === modelAction.modelKey ? selectedModel : await data.getModelByKey(modelAction.modelKey);
+  for (const { binding } of candidates) {
+    const model = selectedModel?.slug === binding.model ? selectedModel : await data.getModelBySlug(binding.model);
     if (!model?.enabled) continue;
+    const provider = fixedProvider?.slug === binding.provider
+      ? fixedProvider
+      : organizationProvider?.slug === binding.provider
+        ? organizationProvider
+        : await data.getProviderBySlug(binding.provider);
+    if (!provider || organizationProvider && organizationProvider.key !== provider.key) continue;
     let modelProviders = await data.listModelProviders(model.key);
     modelProviders = modelProviders
-      .filter((link) => link.enabled)
+      .filter((link) => link.enabled && link.providerKey === provider.key)
       .sort((left, right) => left.providerKey.localeCompare(right.providerKey) || left.key.localeCompare(right.key));
-    if (selectedProvider) modelProviders = modelProviders.filter((link) => link.providerKey === selectedProvider.key);
     for (const modelProvider of modelProviders) {
-      const provider = selectedProvider?.key === modelProvider.providerKey ? selectedProvider : await data.getProviderByKey(modelProvider.providerKey);
-      if (!provider) continue;
       const staticProvider = !request.organizationProviderKey && isStaticProvider(provider.slug);
-      if (!staticProvider && !allowedProviderKeys.has(modelProvider.providerKey)) continue;
+      if (!staticProvider && !allowedProviderKeys.has(provider.key)) continue;
       return {
         organizationKey: request.organizationKey,
         actionSlug: action.id,
@@ -74,7 +75,7 @@ export async function selectRoute(input: RouteRequestInput, deps: RouterDependen
         providerModelId: modelProvider.providerModelId,
         ...(staticProvider
           ? { credentialSource: 'environment' as const }
-          : { credentialSource: 'organization' as const, orgProviderKey: request.organizationProviderKey ?? provider.key }),
+          : { credentialSource: 'organization' as const, orgProviderKey: provider.key }),
       };
     }
   }

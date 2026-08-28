@@ -19,7 +19,6 @@ import { useOnboardingStore } from "@/state/onboarding";
 import { palette } from "@/theme/tokens";
 import { readPendingReturnRoute, savePendingReturnRoute } from "@/lib/pending-return-route";
 import { BookPlaybackProvider } from "@/lib/book-playback";
-import { BookMiniPlayer } from "@/components/BookMiniPlayer";
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 let appOpenedTracked = false;
@@ -61,9 +60,10 @@ export default function RootLayout() {
   useEffect(() => {
     if (status === "bootstrapping") return;
     const root = segments[0] as string | undefined;
-    const isPublic = root === "auth" || root === "public" || root === undefined;
+    const isPublicBookShare = root === "share" && segments[1] === "books";
+    const isPublic = root === "auth" || root === "public" || isPublicBookShare || root === undefined;
     const isOnboarded = useAuthStore.getState().user?.isOnboarded === true;
-    if (status === "unauthenticated" && root === "share") {
+    if (status === "unauthenticated" && root === "share" && !isPublicBookShare) {
       void savePendingReturnRoute(pathname).finally(() => router.replace({ pathname: "/auth", params: { returnTo: pathname } } as Href));
       return;
     }
@@ -103,7 +103,6 @@ export default function RootLayout() {
                     animation: "fade",
                   }}
                 />
-                <BookMiniPlayer />
               </BookPlaybackProvider>
             </BottomSheetScene>
           </ToastProvider>

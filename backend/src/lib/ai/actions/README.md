@@ -9,7 +9,10 @@ speech, image analysis, web search, and structured extraction.
 - `index.ts` is the action registry and execution entry point.
 - `types.ts` defines action contracts and provider-routing types.
 - Individual action modules define their provider-neutral input/output contract.
-- `modelActions.actionSlug` is the persisted model-routing identity.
+- Each `ActionDefinition.models` list owns exact model/provider candidates and
+  routing priorities; declaration order breaks equal-priority ties.
+- Persisted model, provider, and model-provider records only determine whether a
+  declared route is operational.
 
 ## Tools Versus Actions
 

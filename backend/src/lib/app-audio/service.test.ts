@@ -37,6 +37,15 @@ describe('canonical app audio service', () => {
     expect(deleted).toEqual(['audio/failure.mp3']);
   });
 
+  test('estimates 810 normal-pace words as five minutes when the provider omits duration', async () => {
+    const service = createAppAudioService({
+      speech: async () => ({ bytes: new Uint8Array([1]), mimeType: 'audio/mpeg' }),
+      storage: { upload: async ({ key }) => ({ storageKey: key }), delete: async () => {} },
+    });
+    const output = await service.generateForTarget({ organizationKey, storageKey: 'audio/five-minutes.mp3', text: Array(810).fill('word').join(' '), voice: 'clear', pace: 1 }, { persist: async (audio) => audio });
+    expect(output).toMatchObject({ storageKey: 'audio/five-minutes.mp3', durationSeconds: 300 });
+  });
+
   test('does not upload after provider failure or persist after storage failure', async () => {
     let uploads = 0, persists = 0;
     const providerFailure = createAppAudioService({ speech: async () => { throw new Error('provider failed'); }, storage: { upload: async ({ key }) => { uploads += 1; return { storageKey: key }; }, delete: async () => {} } });

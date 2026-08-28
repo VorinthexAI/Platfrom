@@ -46,7 +46,7 @@ describe('canonical book persistence migration', () => {
 
   test('backfills durable legacy defaults without inventing resumable input', () => {
     expect(legacyBookPatch({ status: 'planning', chapterCount: 10 })).toMatchObject({ status: 'failed', generationStage: 'accepted', narratorVoiceKey: 'clear', narrationPace: 1 });
-    expect(legacyBookChapterPatch({ title: 'Opening', description: 'Brief', objective: 'Orient' })).toMatchObject({ evidenceKeyPoints: ['Orient'], targetWordMin: 500, targetWordMax: 750 });
+    expect(legacyBookChapterPatch({ title: 'Opening', description: 'Brief', objective: 'Orient' })).toMatchObject({ evidenceKeyPoints: ['Orient'], targetWordMin: 775, targetWordMax: 850 });
     expect(legacyBookSourcePatch({ content: 'snapshot', sourceType: 'document', createdAt: now })).toMatchObject({ sourceUpdatedAt: now, contentHash: expect.stringMatching(/^[a-f0-9]{64}$/) });
   });
 

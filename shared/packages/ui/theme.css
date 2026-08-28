@@ -96,9 +96,9 @@
 .vui-button {
   --vui-button-loading-background: linear-gradient(
     135deg,
-    rgba(221, 226, 229, 0.08),
-    rgba(221, 226, 229, 0.22),
-    rgba(221, 226, 229, 0.08)
+    #030507,
+    #080b0f,
+    #030507
   );
   --vui-button-loading-color: var(--vui-color-accent-light);
   align-items: center;
@@ -332,16 +332,20 @@
 }
 
 .vui-button-secondary,
-.vui-button-outline {
-  background: rgba(255, 255, 255, 0.03);
-  border-color: rgba(221, 226, 229, 0.18);
+.vui-button-outline,
+.vui-button-danger,
+.vui-button-icon {
+  background: #030507;
+  border-color: #262d36;
   color: var(--vui-color-accent);
 }
 
 .vui-button-secondary:hover:not(:disabled),
-.vui-button-outline:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(221, 226, 229, 0.4);
+.vui-button-outline:hover:not(:disabled),
+.vui-button-danger:hover:not(:disabled),
+.vui-button-icon:hover:not(:disabled) {
+  background: #080b0f;
+  border-color: #262d36;
   color: var(--vui-color-accent-light);
 }
 
@@ -354,22 +358,6 @@
 .vui-button-ghost:hover:not(:disabled) {
   color: var(--vui-color-accent-light);
   text-decoration: underline;
-}
-
-.vui-button-danger {
-  --vui-button-loading-background: linear-gradient(
-    135deg,
-    #8f3939,
-    #c05555,
-    #8f3939
-  );
-  --vui-button-loading-color: var(--vui-color-text);
-  background: var(--vui-color-danger);
-  color: var(--vui-color-text);
-}
-
-.vui-button-danger:hover:not(:disabled) {
-  background: #c05555;
 }
 
 .vui-button-icon {
@@ -390,7 +378,7 @@
 .vui-button-icon-only.vui-button-xl { height: 58px; width: 58px; }
 
 .vui-control {
-  background: var(--vui-color-secondary);
+  background: var(--vui-color-page, #030507) !important;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: var(--vui-radius-pill);
   color: var(--vui-color-text);

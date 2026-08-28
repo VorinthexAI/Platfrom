@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { MODEL_SLUGS } from '@/lib/ai/models';
 import { modelSchema, modelSlugSchema, modelsEmbedKeys } from './models.node';
-import { modelActionSchema } from './model-actions.node';
 import { modelProviderSchema } from './model-providers.node';
 import { newId } from '@/lib/ids';
 
@@ -26,7 +25,6 @@ describe('model graph node schemas', () => {
 
   test('relation nodes store keys and never semantic embeddings', () => {
     const modelKey = newId();
-    const modelAction = modelActionSchema.parse({ key: newId(), modelKey, actionSlug: 'ask' });
     const modelProvider = modelProviderSchema.parse({
       key: newId(),
       modelKey,
@@ -34,16 +32,7 @@ describe('model graph node schemas', () => {
       providerModelId: 'gpt-5.4-nano',
     });
 
-    expect(modelAction).toMatchObject({ priority: 100, enabled: true });
     expect(modelProvider).toMatchObject({ enabled: true });
-    expect(modelAction).not.toHaveProperty('embedding');
     expect(modelProvider).not.toHaveProperty('embedding');
-  });
-
-  test('model action relations require only a registered action slug', () => {
-    const input = { key: newId(), modelKey: newId(), actionSlug: 'ask' };
-    expect(modelActionSchema.parse(input).actionSlug).toBe('ask');
-    expect(() => modelActionSchema.parse({ ...input, actionSlug: 'unknown-action' })).toThrow();
-    expect(() => modelActionSchema.parse({ ...input, actionKey: newId() })).toThrow();
   });
 });

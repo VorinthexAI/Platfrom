@@ -12,11 +12,11 @@ export function isSelectableEmailDocument(document: EmailDocumentCandidate) {
 
 export function attachmentIdentity(ref: EmailAttachmentRef) { return `${ref.type}:${ref.key}`; }
 
-export function toggleEmailAttachment(selection: EmailAttachmentRef[], ref: EmailAttachmentRef) {
+export function toggleEmailAttachment(selection: EmailAttachmentRef[], ref: EmailAttachmentRef, maxSelection = 20) {
   const identity = attachmentIdentity(ref);
   return selection.some((item) => attachmentIdentity(item) === identity)
     ? selection.filter((item) => attachmentIdentity(item) !== identity)
-    : selection.length >= 20 ? selection : [...selection, ref];
+    : selection.length >= maxSelection ? selection : [...selection, ref];
 }
 
 export function mergeEmailAttachmentSelection(selection: EmailAttachmentRef[], additions: EmailAttachmentRef[]) {

@@ -682,7 +682,7 @@ test("attachment picker loads and searches both real stores with persistent mult
   expect(picker).not.toContain('searchClearButton:');
   expect(picker).toContain('style={styles.searchHistoryOption} variant="secondary">Search history</Button>');
   expect(picker).toContain('searchHistoryOption: { backgroundColor: palette.page }');
-  expect(picker).toContain('toggleEmailAttachment(current, ref)');
+  expect(picker).toContain('toggleEmailAttachment(current, ref, maxSelection)');
   expect(picker).toContain('const MAX_VISIBLE_RESULTS = 10');
   expect(picker).toContain('const GALLERY_CANDIDATE_LIMIT = 50');
   expect(picker).toContain('const renderedDocuments = visibleDocuments.slice(0, MAX_VISIBLE_RESULTS)');
@@ -705,7 +705,12 @@ test("attachment picker loads and searches both real stores with persistent mult
   expect(picker).toContain('favoriteSwitchRow: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: spacing.xs }');
   expect(picker).toContain('favoriteSwitchLabel: { color: palette.muted, fontFamily: fonts.regular, fontSize: 12 }');
   expect(picker).toContain("<SearchHistorySheet");
-  expect(picker).toContain('title="Attachments"');
+  expect(picker).toContain('title = "Attachments"');
+  expect(picker).toContain('maxSelection = DEFAULT_MAX_SELECTION');
+  expect(picker).toContain('const activeTab: PickerTab = archiveOnly ? "archive" : tab');
+  expect(picker).toContain('{!archiveOnly ? <Tabs accessibilityLabel="Attachment sources"');
+  expect(picker).toContain('if (!open || archiveOnly) return;');
+  expect(picker).toContain('archiveOnly ? `You can select up to ${maxSelection} items.` : `You can attach up to ${maxSelection} items.`');
   expect(picker.indexOf("styles.rootActions")).toBeLessThan(picker.indexOf('accessibilityLabel="Attachment sources"'));
   expect(picker).not.toContain('description="Choose Archive documents or Gallery images');
   expect(picker).toContain('folderTabs: { flexDirection: "row", gap: 4, padding: 3, borderWidth: 1, backgroundColor: palette.panel }');
@@ -730,9 +735,9 @@ test("attachment queries and working selection are invalidated across every owne
   expect(picker).toContain('const operation = searchOwner.begin()');
   expect(picker).toContain('searchOwner.isCurrent(operation.generation)');
   expect(picker).toMatch(/return \(\) => \{\s*clearTimeout\(timer\);\s*searchOwner\.invalidate\(\);/);
-  expect(picker).toContain('}, [contextKey, open, query, searchOwner, tab]);');
+  expect(picker).toContain('}, [activeTab, contextKey, open, query, searchOwner]);');
   expect(picker).toContain('onOpenChange={(next) => { if (!next && !filterOpen && !historyOpen) closePicker(); }}');
-  expect(picker).toMatch(/function changeQuery\(next: string\) \{\s*searchOwner\.invalidate\(\);\s*if \(tab === "archive"\) setDocuments\(\[\]\);\s*else setImages\(\[\]\);\s*setQuery\(next\);/);
+  expect(picker).toMatch(/function changeQuery\(next: string\) \{\s*searchOwner\.invalidate\(\);\s*if \(activeTab === "archive"\) setDocuments\(\[\]\);\s*else setImages\(\[\]\);\s*setQuery\(next\);/);
   expect(picker).toMatch(/function changeTab[\s\S]*?searchOwner\.invalidate\(\);[\s\S]*?setTab\(next\);/);
   expect(workspace).toContain("newEmailAttachmentsOpen ? <EmailAttachmentPicker");
 });
@@ -747,7 +752,7 @@ test("attachment selection is represented only on result pills and cards", () =>
 });
 
 test("attachment loading renders one compact row per source", () => {
-  expect(picker).toContain('Array.from({ length: tab === "gallery" ? 4 : 3 }');
+  expect(picker).toContain('Array.from({ length: activeTab === "gallery" ? 4 : 3 }');
 });
 
 test("opened threads use a latest-message document reader and guarded immutable AI versions", () => {
@@ -1053,12 +1058,15 @@ test("all four email body editors share direct enhance and translate actions", (
   expect(workspace.match(/<AiTextEditor accessibilityLabel=/g)).toHaveLength(4);
   for (const target of ["newEmail", "newEmailReview", "draft", "reply"]) expect(workspace).toContain(`onOpenActions={() => openEmailEditorActions("${target}")}`);
   expect(aiTextEditor).toContain('accessibilityLabel={`${label} AI actions`}');
-  expect(aiTextEditor).toContain('disabled={!value.trim()}');
-  expect(aiTextEditor).toContain('zIndex: 2, elevation: 2');
+  expect(aiTextEditor).not.toContain('disabled={!value.trim()}');
+  expect(aiTextEditor).toContain('<View style={styles.actions}><Button');
+  expect(aiTextEditor).toContain('Keyboard.dismiss(); onOpenActions();');
+  expect(aiTextEditor).not.toContain('position: "absolute"');
   expect(aiTextEditor).toContain('<BrainIcon size="sm" />');
   expect(aiTextEditor).toContain('accessibilityRole="progressbar"');
   expect(aiTextEditor).toContain('<Skeleton style={styles.skeleton} />');
-  expect(aiTextEditor).toContain('skeleton: { width: "100%", minHeight: 280');
+  expect(aiTextEditor).toContain('root: { width: "100%", height: 280');
+  expect(aiTextEditor).toContain('skeleton: { width: "100%", height: "100%"');
   expect(workspace).not.toContain('emailTextSkeletonShort');
   expect(workspace).toContain('enhanceAppTextForContext(context, text)');
   expect(workspace).toContain('translateAppTextForContext(context, text, language)');

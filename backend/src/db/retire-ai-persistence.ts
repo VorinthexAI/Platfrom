@@ -1,5 +1,4 @@
 import type { Database } from 'arangojs';
-import { ACTION_DEFINITIONS } from '@/lib/ai/actions';
 import { PROVIDER_SLUGS } from '@/lib/ai/providers/types';
 
 export const RETAINED_MODEL_SLUGS = [
@@ -12,7 +11,6 @@ export const RETAINED_MODEL_SLUGS = [
 ] as const;
 
 export const RETAINED_PROVIDER_SLUGS = PROVIDER_SLUGS;
-export const RETAINED_MODEL_ACTION_BINDINGS = ACTION_DEFINITIONS.flatMap(({ id, models }) => models.map(({ model }) => `${model}:${id}`));
 export const RETAINED_MODEL_PROVIDER_BINDINGS = [
   'openai.gpt-5.6-luna:openai:gpt-5.6-luna',
   'openai.gpt-image-2:openai:gpt-image-2',
@@ -24,12 +22,6 @@ export const RETAINED_MODEL_PROVIDER_BINDINGS = [
 
 /** Hard-delete retired runtime configuration without rewriting historical usage. */
 export async function retireAiPersistence(targetDb: Database): Promise<void> {
-  await targetDb.query(`
-    FOR relation IN modelActions
-      LET model = DOCUMENT(models, relation.modelKey)
-      FILTER model == null || CONCAT(model.slug, ":", relation.actionSlug) NOT IN @retainedModelActionBindings
-      REMOVE relation IN modelActions
-  `, { retainedModelActionBindings: RETAINED_MODEL_ACTION_BINDINGS });
   await targetDb.query(`
     FOR relation IN modelProviders
       LET model = DOCUMENT(models, relation.modelKey)

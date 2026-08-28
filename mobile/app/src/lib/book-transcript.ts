@@ -5,17 +5,15 @@ export type TranscriptPhrase = {
 };
 
 export function buildTranscriptPhrases(content: string): TranscriptPhrase[] {
-  const sentences = content
-    .split(/(?<=[.!?])\s+|\n+/)
+  const normalized = content.replace(/\r\n?/g, "\n").replace(/\\n/g, "\n").trim();
+  const paragraphs = normalized.includes("\n")
+    ? normalized.split(/\n\s*\n|\n+/).map((value) => value.replace(/\s+/g, " ").trim()).filter(Boolean)
+    : normalized.split(/(?<=[.!?])\s+/).map((value) => value.trim()).filter(Boolean);
+  const sentences = paragraphs.flatMap((paragraph) => paragraph.length <= 420 ? [paragraph] : paragraph
+    .split(/(?<=[.!?])\s+/)
     .map((value) => value.trim())
     .filter(Boolean)
-    .flatMap((sentence) => {
-      if (sentence.length <= 180) return [sentence];
-      return sentence
-        .split(/(?<=[,;:])\s+/)
-        .map((value) => value.trim())
-        .filter(Boolean);
-    });
+    .flatMap((sentence) => sentence.length <= 420 ? [sentence] : sentence.split(/(?<=[,;:])\s+/).map((value) => value.trim()).filter(Boolean)));
   const total = Math.max(
     1,
     sentences.reduce((sum, sentence) => sum + sentence.length, 0),

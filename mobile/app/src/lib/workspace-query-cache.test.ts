@@ -35,6 +35,7 @@ const {
   patchCachedCompassPlace,
   patchGalleryImage,
   patchCachedBook,
+  patchCachedBookMetadata,
   patchCachedBookProgress,
   mergeBookDetailProgress,
   removeCachedBook,
@@ -115,6 +116,17 @@ test("progress patches retain active signed media and monotonic completion", () 
   client.setQueryData(ascendQueryKeys.overview(context), { books: [book] });
   patchCachedBookProgress(client, context, { ...book, coverUrl: "https://new/cover", progressPercent: 0 }, { ...chapter, audioUrl: "https://new/audio", imageUrl: "https://new/image", progressSeconds: 10, isCompleted: false });
   expect(client.getQueryData<{ book: typeof book; chapters: (typeof chapter)[] }>(ascendQueryKeys.detail(context, book.key))).toEqual({ book, chapters: [chapter] });
+});
+
+test("extension metadata patches preserve cached chapters", () => {
+  const client = new QueryClient();
+  const book = { key: "book", title: "Book", subtitle: "Subtitle", description: "Description", status: "ready" as const, estimatedMinutes: 10, chapterCount: 1, progressPercent: 50 };
+  const chapter = { key: "chapter", title: "Chapter", description: "Description", position: 1, progressSeconds: 20, isCompleted: false };
+  client.setQueryData(ascendQueryKeys.overview(context), { books: [book] });
+  client.setQueryData(ascendQueryKeys.detail(context, book.key), { book, chapters: [chapter] });
+  patchCachedBookMetadata(client, context, { ...book, status: "queued", chapterCount: 4 });
+  expect(client.getQueryData<{ books: (typeof book)[] }>(ascendQueryKeys.overview(context))?.books[0]).toMatchObject({ status: "queued", chapterCount: 4 });
+  expect(client.getQueryData<{ book: typeof book; chapters: (typeof chapter)[] }>(ascendQueryKeys.detail(context, book.key))).toEqual({ book: { ...book, status: "queued", chapterCount: 4 }, chapters: [chapter] });
 });
 
 test("merges every detail ingress monotonically while accepting refreshed media", () => {

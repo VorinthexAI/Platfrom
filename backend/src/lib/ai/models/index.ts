@@ -9,13 +9,6 @@ export {
   type Model,
 } from '@/lib/db/models.node';
 export {
-  modelActionSchema,
-  getModelActionById,
-  getModelActionByPair,
-  listEnabledModelActionsByActionSlug,
-  type ModelAction,
-} from '@/lib/db/model-actions.node';
-export {
   modelProviderSchema,
   getModelProviderById,
   getModelProviderByPair,

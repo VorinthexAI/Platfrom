@@ -4,7 +4,7 @@ import { createNodeHelpers, withArangoKey } from './base';
 import { db } from './client';
 
 export const SHARES_COLLECTION = 'shares';
-export const shareSourceTypeSchema = z.enum(['document', 'image', 'collection', 'place']);
+export const shareSourceTypeSchema = z.enum(['document', 'image', 'collection', 'place', 'book']);
 export const sharePermissionSchema = z.enum(['read', 'comment', 'viewer', 'collaborator']);
 export const shareSchema = z.object({
   key: z.string().cuid(), scopeKey: z.string().cuid(), sourceType: shareSourceTypeSchema, sourceKey: z.string().cuid(), permission: sharePermissionSchema,
@@ -12,6 +12,8 @@ export const shareSchema = z.object({
   createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
 });
 export type Share = z.infer<typeof shareSchema>;
+export const replayableShareSchema = shareSchema.extend({ responseCiphertext: z.string().regex(/^v1:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+$/) });
+export type ReplayableShare = z.infer<typeof replayableShareSchema>;
 export const sharesEmbeddingFields = [] as const;
 const helpers = createNodeHelpers(SHARES_COLLECTION, shareSchema, sharesEmbeddingFields, { requireEmbedding: false });
 export const insertShare = helpers.insert;
@@ -37,6 +39,7 @@ export async function getActiveShareByTokenHash(tokenHash: string, at = new Date
       LET source = share.sourceType == "document" ? DOCUMENT(${db.collection('documents')}, share.sourceKey)
         : share.sourceType == "image" ? DOCUMENT(${db.collection('images')}, share.sourceKey)
         : share.sourceType == "collection" ? DOCUMENT(${db.collection('collections')}, share.sourceKey)
+        : share.sourceType == "book" ? DOCUMENT(${db.collection('books')}, share.sourceKey)
         : DOCUMENT(${db.collection('places')}, share.sourceKey)
       FILTER scope != null
       FILTER source != null && source.scopeKey == share.scopeKey

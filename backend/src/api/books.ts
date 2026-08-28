@@ -2,7 +2,7 @@ import type { Context } from 'hono';
 import { z, ZodError } from 'zod';
 import { defaultBookService } from '@/lib/books/default-service';
 import { BookRepositoryError } from '@/lib/books/repository';
-import type { BookService } from '@/lib/books/service';
+import { bookFavoriteInputSchema, bookShareDetailInputSchema, bookShareUpdateInputSchema, type BookService } from '@/lib/books/service';
 import { getAuthIdentity } from './security';
 
 const pathKeySchema = z.string().cuid();
@@ -17,9 +17,9 @@ export function createBookHandlers(options: { service?: BookService; getIdentity
       return c.json({ success: true, data: await operation(c, service, current.key) }, status);
     } catch (error) {
       if (error instanceof BookHttpError) return c.json({ success: false, error: { code: error.code, message: error.message } }, error.status);
-      if (error instanceof BookRepositoryError) { const status = error.reason === 'forbidden' ? 403 : error.reason === 'conflict' ? 409 : 404; const code = error.reason === 'forbidden' ? 'BOOK_FORBIDDEN' : error.reason === 'conflict' ? 'BOOK_CONFLICT' : 'BOOK_NOT_FOUND'; const message = error.reason === 'forbidden' ? 'Book scope access denied.' : error.reason === 'conflict' ? error.message : 'Book not found.'; return c.json({ success: false, error: { code, message } }, status); }
-      if (error instanceof ZodError || error instanceof SyntaxError) return c.json({ success: false, error: { code: 'BOOK_INVALID_INPUT', message: 'Book request input was invalid.' } }, 400);
-      return c.json({ success: false, error: { code: 'BOOK_FAILED', message: 'Book request failed.' } }, 500);
+      if (error instanceof BookRepositoryError) { const status = error.reason === 'forbidden' ? 403 : error.reason === 'conflict' || error.reason === 'favorite' ? 409 : 404; const code = error.reason === 'forbidden' ? 'BOOK_FORBIDDEN' : error.reason === 'favorite' ? 'BOOK_FAVORITE' : error.reason === 'conflict' ? 'BOOK_CONFLICT' : 'BOOK_NOT_FOUND'; const message = error.reason === 'forbidden' ? 'Audio book scope access denied.' : error.reason === 'conflict' || error.reason === 'favorite' ? error.message : 'Audio book not found.'; return c.json({ success: false, error: { code, message } }, status); }
+      if (error instanceof ZodError || error instanceof SyntaxError) return c.json({ success: false, error: { code: 'BOOK_INVALID_INPUT', message: 'Audio book request input was invalid.' } }, 400);
+      return c.json({ success: false, error: { code: 'BOOK_FAILED', message: 'Audio book request failed.' } }, 500);
     }
   };
   return {
@@ -28,9 +28,14 @@ export function createBookHandlers(options: { service?: BookService; getIdentity
     goalSuggestions: run((c, books, userKey) => c.req.json().then((body) => books.suggestGoals(body, userKey, { signal: c.req.raw.signal, timeoutMs: 30_000 }))),
     create: run((c, books, userKey) => c.req.json().then((body) => books.create(body, userKey)), 202),
     detail: run(async (c, books, userKey) => books.detail(pathKeySchema.parse(c.req.param('bookKey')), await c.req.json(), userKey)),
+    extensionPreview: run(async (c, books, userKey) => { const body = await c.req.json() as Record<string, unknown>; return books.extend(pathKeySchema.parse(c.req.param('bookKey')), { ...body, mode: 'preview' }, userKey, { signal: c.req.raw.signal, timeoutMs: 30_000 }); }),
+    extensionGenerate: run(async (c, books, userKey) => { const body = await c.req.json() as Record<string, unknown>; return books.extend(pathKeySchema.parse(c.req.param('bookKey')), { ...body, mode: 'generate' }, userKey); }, 202),
+    shareDetail: run(async (c, books, userKey) => books.shareDetail(pathKeySchema.parse(c.req.param('bookKey')), bookShareDetailInputSchema.parse(await c.req.json()), userKey)),
+    shareUpdate: run(async (c, books, userKey) => books.setShareActive(pathKeySchema.parse(c.req.param('bookKey')), bookShareUpdateInputSchema.parse(await c.req.json()), userKey)),
     progress: run(async (c, books, userKey) => books.progress(pathKeySchema.parse(c.req.param('bookKey')), pathKeySchema.parse(c.req.param('chapterKey')), await c.req.json(), userKey)),
     retry: run(async (c, books, userKey) => books.retry(pathKeySchema.parse(c.req.param('bookKey')), await c.req.json(), userKey), 202),
     cancel: run(async (c, books, userKey) => books.cancel(pathKeySchema.parse(c.req.param('bookKey')), await c.req.json(), userKey)),
+    setFavorite: run(async (c, books, userKey) => books.setFavorite(pathKeySchema.parse(c.req.param('bookKey')), bookFavoriteInputSchema.parse(await c.req.json()), userKey)),
     delete: run(async (c, books, userKey) => books.delete(pathKeySchema.parse(c.req.param('bookKey')), await c.req.json(), userKey)),
   };
 }

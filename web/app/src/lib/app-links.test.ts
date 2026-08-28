@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { buildAndroidAssetLinks, buildAppleAppSiteAssociation } from "./app-links";
 
 describe("mobile app associations", () => {
-  test("limits iOS universal links to supported authentication routes", () => {
+  test("limits iOS universal links to supported app routes", () => {
     expect(buildAppleAppSiteAssociation()).toEqual({
       applinks: {
         details: [{
@@ -10,6 +10,7 @@ describe("mobile app associations", () => {
           components: [
             { "/": "/public/auth/token", comment: "Mobile magic-link sign in" },
             { "/": "/capability/signal", comment: "Signal Gmail connection return" },
+            { "/": "/share/books/*", comment: "Shared books" },
           ],
         }],
       },

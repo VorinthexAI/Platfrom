@@ -81,7 +81,7 @@ const UNSUPPORTED_MESSAGES = {
 const EMPTY_RESPONSE_MESSAGES = {
   'knowledge-workspace': 'Core completed the Archive request but could not provide a response.',
   'media-workspace': 'Core completed the Gallery search but could not provide a response.',
-  'book-workspace': 'Your book request completed in Ascend.',
+  'book-workspace': 'Your audio book request completed in Ascend.',
   'travel-workspace': 'Core found saved travel context but could not summarize it.',
   'signal-workspace': 'Core completed the Signal request but could not provide a response.',
 } as const;

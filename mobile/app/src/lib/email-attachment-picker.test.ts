@@ -22,6 +22,12 @@ test("enforces the attachment limit without displacing existing selections", () 
   expect(mergeEmailAttachmentSelection(full, [{ type: "image", key: "extra" }])).toHaveLength(20);
 });
 
+test("supports a custom selection limit while preserving removal", () => {
+  const selected = [{ type: "document" as const, key: "document-1" }];
+  expect(toggleEmailAttachment(selected, { type: "document", key: "document-2" }, 1)).toEqual(selected);
+  expect(toggleEmailAttachment(selected, selected[0], 1)).toEqual([]);
+});
+
 test("all twenty selected attachments remain individually removable", () => {
   let selected = Array.from({ length: 20 }, (_, index) => ({ type: "document" as const, key: `document-${index}` }));
   for (const ref of [...selected]) selected = toggleEmailAttachment(selected, ref);

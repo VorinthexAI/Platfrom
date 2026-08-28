@@ -671,6 +671,14 @@ export function patchCachedBook(queryClient: QueryClient, context: WorkspaceCont
   } : overview);
 }
 
+export function patchCachedBookMetadata(queryClient: QueryClient, context: WorkspaceContext, book: Book) {
+  patchCachedBook(queryClient, context, book);
+  queryClient.setQueryData<BookDetail>(ascendQueryKeys.detail(context, book.key), (detail) => detail ? {
+    book,
+    chapters: detail.chapters,
+  } : detail);
+}
+
 export function removeCachedBook(queryClient: QueryClient, context: WorkspaceContext, bookKey: string) {
   queryClient.setQueryData<{ books: Book[] }>(ascendQueryKeys.overview(context), (overview) => overview ? {
     books: overview.books.filter(({ key }) => key !== bookKey),

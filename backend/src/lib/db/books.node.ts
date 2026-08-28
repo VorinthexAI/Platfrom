@@ -19,7 +19,7 @@ export const bookSchema = z.object({
   generationStage: bookGenerationStageSchema.default('accepted'), generationCompletedUnits: z.number().int().nonnegative().default(0), generationTotalUnits: z.number().int().nonnegative().default(0), generationAttempt: z.number().int().nonnegative().default(0), generationError: z.string().trim().min(1).max(4_000).optional(), cancelRequestedAt: z.string().datetime().optional(),
   generationLeaseToken: z.string().trim().min(1).max(200).optional(), generationLeaseExpiresAt: z.string().datetime().optional(), coverStorageKey: z.string().trim().min(1).optional(), coverInputHash: z.string().regex(/^[a-f0-9]{64}$/).optional(), estimatedMinutes: z.number().int().nonnegative().default(0),
   chapterCount: z.number().int().nonnegative().default(0), isFavorite: z.boolean().default(false), status: bookStatusSchema, embedding: currentEmbeddingSchema,
-  archiveFolderKey: z.string().cuid().optional(), createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
+  archiveFolderKey: z.string().cuid().optional(), activeExtensionKey: z.string().cuid().optional(), createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
 });
 export type Book = z.infer<typeof bookSchema>;
 export const booksEmbeddingFields = ['title', 'subtitle', 'description', 'goal', 'audience', 'outcome'] as const;

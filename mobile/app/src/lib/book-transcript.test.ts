@@ -19,3 +19,11 @@ test("builds duration-weighted transcript phrases", () => {
   expect(activeTranscriptPhrase(phrases, 0)).toBe(0);
   expect(activeTranscriptPhrase(phrases, 1)).toBe(2);
 });
+
+test("preserves generated paragraph blocks and converts escaped newlines", () => {
+  const phrases = buildTranscriptPhrases("First paragraph has two sentences. They stay together.\\n\\nSecond paragraph stays separate.");
+  expect(phrases.map(({ text }) => text)).toEqual([
+    "First paragraph has two sentences. They stay together.",
+    "Second paragraph stays separate.",
+  ]);
+});

@@ -53,6 +53,7 @@ import { streamEvents } from './events';
 import { searchApp } from './app-search';
 import { appTransformationHandlers } from './app-transformation';
 import { appAudioHandler } from './app-audio';
+import { publicBookShareHandlers } from './public-book-shares';
 
 const challengeHash = z.string().regex(/^[a-f0-9]{64}$/);
 const tokenHashBodyBase = strictObject({ token_hash: challengeHash });
@@ -539,10 +540,17 @@ export function registerRoutes(app: Hono) {
   app.post('/assistant/respond', respondToAssistant);
   app.post('/books', bookHandlers.create);
   app.post('/books/:bookKey/detail', bookHandlers.detail);
+  app.post('/books/:bookKey/extension/preview', bookHandlers.extensionPreview);
+  app.post('/books/:bookKey/extension', bookHandlers.extensionGenerate);
+  app.post('/books/:bookKey/share/detail', bookHandlers.shareDetail);
+  app.post('/books/:bookKey/share/update', bookHandlers.shareUpdate);
   app.patch('/books/:bookKey/chapters/:chapterKey/progress', bookHandlers.progress);
   app.post('/books/:bookKey/retry', bookHandlers.retry);
   app.post('/books/:bookKey/cancel', bookHandlers.cancel);
+  app.post('/books/:bookKey/favorite', bookHandlers.setFavorite);
   app.delete('/books/:bookKey', bookHandlers.delete);
+  app.post('/public/books/shares/read', publicBookShareHandlers.read);
+  app.get('/public/books/shares/stream', publicBookShareHandlers.stream);
 
   app.get('/founders/me', getFoundersAccount);
   app.get('/founders/organizations', listFoundersOrganizations);

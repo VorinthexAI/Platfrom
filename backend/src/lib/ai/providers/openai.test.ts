@@ -29,6 +29,7 @@ test('preserves structured caption and visual identity contracts on direct OpenA
   const bodies: Record<string, any>[] = [];
   const outputs = [
     { results: [{ caption: 'A detailed scene.', score: 91 }] },
+    { results: [{ caption: 'visible writing', score: 1 }] },
     { description: 'A black dog with a white chest blaze.' },
   ];
   globalThis.fetch = (async (_input, init) => {
@@ -39,9 +40,12 @@ test('preserves structured caption and visual identity contracts on direct OpenA
   const provider = createOpenAIProvider({ apiKey: 'test-key' });
   const base = { modelId: IMAGE_CAPTION_MODEL, externalModelId: IMAGE_CAPTION_EXTERNAL_MODEL_ID, organizationKey: 'organization' };
   expect((await provider.execute({ ...base, actionId: 'caption-image', input: { imageUrls: ['https://cdn.example.com/image.jpg'] } })).output).toEqual({ results: [{ caption: 'A detailed scene.', score: 91 }] });
+  expect((await provider.execute({ ...base, actionId: 'caption-image', input: { imageUrls: ['https://cdn.example.com/art.jpg'], purpose: 'artwork-compliance' } })).output).toEqual({ results: [{ caption: 'visible writing', score: 1 }] });
   expect((await provider.execute({ ...base, actionId: 'describe-visual-identity', input: { imageUrls: ['https://cdn.example.com/dog.jpg'] } })).output).toEqual({ description: 'A black dog with a white chest blaze.' });
-  expect(bodies.map(({ model }) => model)).toEqual(['gpt-5.6-luna', 'gpt-5.6-luna']);
-  expect(bodies.map(({ response_format }) => response_format.json_schema.name)).toEqual(['image_caption_results', 'visual_identity_description']);
+  expect(bodies.map(({ model }) => model)).toEqual(['gpt-5.6-luna', 'gpt-5.6-luna', 'gpt-5.6-luna']);
+  expect(bodies.map(({ response_format }) => response_format.json_schema.name)).toEqual(['image_caption_results', 'image_caption_results', 'visual_identity_description']);
+  expect(bodies[1].messages[0].content[0].text).toContain('no person or human-like subject, no visible writing');
+  expect(bodies[1].messages[0].content[0].text).toContain('no botanical, fungal, or vegetation imagery');
   expect(bodies.every((body) => !('provider' in body))).toBe(true);
 });
 

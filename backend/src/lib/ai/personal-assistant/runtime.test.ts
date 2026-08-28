@@ -241,7 +241,7 @@ describe('personal assistant runtime', () => {
       execute: async (_request, nextInput) => {
         modelCalls += 1;
         if (modelCalls === 1) {
-          expect(nextInput.tools?.map(({ name }) => name)).toEqual(['app.search', 'book.list', 'book.topic.suggest', 'book.goal.suggest', 'book.detail', 'book.chapter.progress', 'book.create', 'book.generation.retry', 'book.generation.cancel', 'book.delete', 'assistant.unsupported']);
+          expect(nextInput.tools?.map(({ name }) => name)).toEqual(['app.search', 'book.list', 'book.topic.suggest', 'book.goal.suggest', 'book.detail', 'book.extend', 'book.share.detail', 'book.share.update', 'book.chapter.progress', 'book.create', 'book.generation.retry', 'book.generation.cancel', 'book.favorite', 'book.delete', 'assistant.unsupported']);
           expect(nextInput.systemPrompt).toContain('Call book.create exactly once');
           return response({ text: '', toolCalls: [{ id: 'book-create-1', name: 'book.create', arguments: brief }], stopReason: 'tool_use' });
         }

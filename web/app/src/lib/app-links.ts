@@ -9,6 +9,7 @@ export function buildAppleAppSiteAssociation() {
         components: [
           { "/": "/public/auth/token", comment: "Mobile magic-link sign in" },
           { "/": "/capability/signal", comment: "Signal Gmail connection return" },
+          { "/": "/share/books/*", comment: "Shared books" },
         ],
       }],
     },

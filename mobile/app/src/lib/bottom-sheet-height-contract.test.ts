@@ -112,9 +112,11 @@ test("classifies every full-height sheet workflow explicitly", () => {
   expect(travel).toContain('height="full"');
   expect(email).toContain('height={sheet === "trashRoot" || formSheet ? "full" : undefined}');
   for (const title of ["Recipients", "Write email", "Choose a tone", "Email draft"]) expect(email).toMatch(new RegExp(`height="full"[\\s\\S]*?title="${title}"`));
-  for (const sheet of ["create", "createTopicCustom", "createGoal", "createGoalCustom", "createKnowledge", "createDetails", "sources", "reader", "sleep"]) expect(ascend).toContain(`\"${sheet}\"`);
+  for (const title of ["Choose a topic", "Your topic", "Choose a goal", "Your goal", "Audio book details", "Extend audio book"]) expect(ascend).toMatch(new RegExp(`height="full"[\\s\\S]*?title="${title}"`));
+  expect(ascend).toContain('{sheet === "chapterRead" ? <ChapterReading chapter={readingChapter} /> : null}');
+  expect(ascend).not.toContain('"sleep"');
   expect(ascend).not.toContain('sheet === "detail"');
-  expect(ascend).toMatch(/height=\{[\s\S]*?\.includes\(\s*sheet \?\? "",\s*\)\s*\? "full"\s*: undefined\s*\}/);
+  expect(ascend).toContain('height={sheet === "reader" || sheet === "chapterRead" || sheet === "bookSummary" ? "full" : undefined}');
   expect(gallery).toContain('height="full"');
   expect(gallery).toContain('height={activeSheet === "destination" || activeSheet === "imageEdit"');
   expect(sharing).toContain('height={fullHeight ? "full" : undefined}');

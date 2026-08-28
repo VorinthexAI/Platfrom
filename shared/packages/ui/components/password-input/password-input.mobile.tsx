@@ -17,7 +17,7 @@ export function PasswordInput({
     <TextInput
       placeholderTextColor={placeholderTextColor}
       secureTextEntry
-      style={[styles.input, style]}
+      style={[styles.input, style, styles.background]}
       {...props}
     />
   );
@@ -25,7 +25,6 @@ export function PasswordInput({
 
 const styles = StyleSheet.create({
   input: {
-    backgroundColor: colors.page,
     borderColor: colors.border,
     borderRadius: radii.md,
     borderWidth: 1,
@@ -36,4 +35,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
+  background: { backgroundColor: colors.page },
 });

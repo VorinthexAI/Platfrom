@@ -16,7 +16,7 @@ const expected: Array<[AssistantSurface, string[]]> = [
   ['knowledge-workspace', ['app.enhance', 'app.translate', 'app.audio', 'content.hidden.list', 'folder.hide', 'folder.reveal', 'document.hide', 'document.reveal', 'folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy', 'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.list-versions', 'document.restore-version', 'document.download', 'content.neighbors', 'content.search-history.delete', 'note.write']],
   ['travel-workspace', ['place.find', 'place.list', 'place.reference.generate', 'place.reference.list', 'trip.list', 'trip.guide.generate', 'trip.guide.list', 'trip.create', 'trip.update', 'trip.delete', 'trip.attachment.set', 'place.guide.find', 'place.find-city', 'place.find-children', 'place.create', 'place.update', 'place.delete', 'place.open']],
   ['signal-workspace', ['app.enhance', 'app.translate', 'email.overview', 'inbox.sort', 'inbox.update', 'email.thread.read', 'email.thread.read-state', 'email.thread.favorite', 'email.thread.trash', 'email.trash.clear', 'email.similar.find', 'email.message.translation.list', 'email.message.translation.delete', 'email.message.summarize', 'email.message.summary.list', 'email.message.summary.delete', 'email.draft.create', 'email.draft.compose', 'email.tone.list', 'email.tone.create', 'email.tone.update', 'email.tone.delete', 'email.reply-context.list', 'email.reply-context.create', 'email.reply-context.update', 'email.reply-context.delete', 'email.draft.update', 'email.draft.assign', 'email.draft.send', 'email.draft.delete']],
-  ['book-workspace', ['book.list', 'book.topic.suggest', 'book.goal.suggest', 'book.detail', 'book.chapter.progress', 'book.create', 'book.generation.retry', 'book.generation.cancel', 'book.delete']],
+  ['book-workspace', ['book.list', 'book.topic.suggest', 'book.goal.suggest', 'book.detail', 'book.extend', 'book.share.detail', 'book.share.update', 'book.chapter.progress', 'book.create', 'book.generation.retry', 'book.generation.cancel', 'book.favorite', 'book.delete']],
 ];
 
 describe('personal assistant service capabilities', () => {
@@ -164,6 +164,7 @@ describe('personal assistant service capabilities', () => {
       detail: async (...args: unknown[]) => { calls.push(['books.detail', ...args]); return {}; },
       progress: async (...args: unknown[]) => { calls.push(['books.progress', ...args]); return {}; },
       create: async (...args: unknown[]) => { calls.push(['books.create', ...args]); return {}; },
+      setFavorite: async (...args: unknown[]) => { calls.push(['books.setFavorite', ...args]); return {}; },
     };
     const context: any = { domain, requestKey: 'request-1', travel, countries, email, books };
     const cases: Array<[AssistantSurface, string, unknown]> = [
@@ -216,6 +217,7 @@ describe('personal assistant service capabilities', () => {
       ['book-workspace', 'book.detail', { bookKey }],
       ['book-workspace', 'book.chapter.progress', { bookKey, chapterKey, progressSeconds: 30, isCompleted: false }],
       ['book-workspace', 'book.create', { topic: 'Decision making', goal: 'Decide well', currentKnowledge: 'Basic familiarity', writingTone: 'Clear', chapterCount: 10, language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear', narrationPace: 1, chapterImages: false }],
+      ['book-workspace', 'book.favorite', { bookKey, isFavorite: true }],
     ];
     const outputs = new Map<string, unknown>();
     for (const [surface, capabilityName, input] of cases) outputs.set(capabilityName, await defaultAssistantCapabilityRegistry.resolve(surface).find(({ definition }) => definition.name === capabilityName)!.execute(input, context));
@@ -254,6 +256,7 @@ describe('personal assistant service capabilities', () => {
     expect(calls).toContainEqual(['books.suggestTopics', { ...serviceContext, excludeTopics: ['Old idea'] }, userKey, { signal: undefined, timeoutMs: undefined }]);
     expect(calls).toContainEqual(['books.suggestGoals', { ...serviceContext, topic: 'Decision making', excludeGoals: ['Old goal'] }, userKey, { signal: undefined, timeoutMs: undefined }]);
     expect(calls).toContainEqual(['books.create', { ...serviceContext, generationRequestKey: 'request-1', topic: 'Decision making', goal: 'Decide well', currentKnowledge: 'Basic familiarity', writingTone: 'Clear', chapterCount: 10, language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear', narrationPace: 1, chapterImages: false }, userKey]);
+    expect(calls).toContainEqual(['books.setFavorite', bookKey, { ...serviceContext, isFavorite: true }, userKey]);
     expect(JSON.stringify(calls)).not.toContain((domain.principal as Extract<ToolContext['principal'], { kind: 'member' }>).userOrganization.key);
   });
 
@@ -287,6 +290,12 @@ describe('personal assistant service capabilities', () => {
     for (const name of ['inbox.sort', 'inbox.update', 'email.thread.read-state', 'email.thread.favorite', 'email.thread.trash', 'email.trash.clear', 'email.message.translation.delete', 'email.message.summarize', 'email.message.summary.delete', 'email.draft.create', 'email.draft.compose', 'email.draft.update', 'email.draft.assign', 'email.draft.send', 'email.draft.delete', 'email.tone.create', 'email.tone.update', 'email.tone.delete', 'email.reply-context.create', 'email.reply-context.update', 'email.reply-context.delete']) expect(capabilities.find(({ definition }) => definition.name === name)?.mutationWorkspace).toBe('signal');
     const translateMutation = capabilities.find(({ definition }) => definition.name === 'app.translate')?.mutationWorkspace;
     expect(typeof translateMutation === 'function' ? translateMutation({ messageKey: newId(), targetLanguage: 'French' }) : undefined).toBe('signal');
+  });
+
+  test('marks favorite changes as Ascend mutations with strict model input', () => {
+    const capability = defaultAssistantCapabilityRegistry.resolve('book-workspace').find(({ definition }) => definition.name === 'book.favorite')!;
+    expect(capability.mutationWorkspace).toBe('ascend');
+    expect(() => capability.inputSchema.parse({ bookKey: newId(), isFavorite: true, organizationKey })).toThrow('Unrecognized key');
   });
 
   test('injects runtime scope and stable request idempotency into Archive mutations', async () => {

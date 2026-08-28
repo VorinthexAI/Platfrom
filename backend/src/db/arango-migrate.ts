@@ -9,7 +9,6 @@ import { ensureOrganizationCredentialsCollection } from '../lib/ai/organization-
 import { ensureOrganizationConnectorsCollection } from '../lib/email-inbox/indexes';
 import { ensureScopeMembersCollection, ensureScopesCollection, ensureScopeScopesCollection } from '../lib/ai/scopes/indexes';
 import { reconcileOrganizationScopeMemberships } from '../lib/ai/scopes/membership-invariant';
-import { actionIdSchema, type ActionId } from '../lib/ai/actions/types';
 import { organizationProviderSchema } from '../lib/ai/organization-providers/schema';
 import { buildEmbeddingText, toArangoDoc, withArangoKey } from '../lib/db/base';
 import { NEXUS_SCOPE_KEY, SEEDED_SCOPES } from '../lib/db/seed';
@@ -27,6 +26,7 @@ import { isProviderError, type ProviderError } from '../lib/ai/providers/errors'
 import { buildImageEmbeddingText } from '../lib/image-embedding';
 import { decodeEmailTone, decodeEmailToneContent, emailMessageSemanticText, emailToneSemanticText, encodeEmailToneContent } from '../lib/email-inbox/archive-payloads';
 import { bookGenerationInputSchema } from '../lib/books/schemas';
+import { BOOK_CHAPTER_WORD_MAX, BOOK_CHAPTER_WORD_MIN } from '../lib/db/book-chapters.node';
 
 const url = process.env.ARANGO_URL ?? 'http://127.0.0.1:8529';
 const databaseName = process.env.ARANGO_DATABASE ?? 'vorinthex';
@@ -231,52 +231,9 @@ async function runMigrationTransaction(targetDb: Database, collectionName: strin
   }
 }
 
-export async function migrateModelActionSlugs(targetDb: Database): Promise<void> {
-  const modelActions = targetDb.collection('modelActions');
-  if (!await modelActions.exists()) return;
-  for (const index of await modelActions.indexes()) {
-    const fields = 'fields' in index && Array.isArray(index.fields) ? index.fields.map(String) : [];
-    if (fields.includes('actionKey')) await modelActions.dropIndex(index.id);
-  }
-  const actions = new Map<string, unknown>();
-  if (await targetDb.collection('actions').exists()) {
-    const cursor = await targetDb.query<{ key: string; slug: unknown }>('FOR action IN actions RETURN { key: action._key, slug: action.slug }');
-    for (const action of await cursor.all()) actions.set(action.key, action.slug);
-  }
-  const cursor = await targetDb.query<Record<string, unknown>>('FOR relation IN modelActions SORT relation._key RETURN relation');
-  const pairs = new Map<string, Array<{ key: string; actionSlug: ActionId; enabled: boolean; priority: number }>>();
-  for (const relation of await cursor.all()) {
-    const key = nonEmptyString(relation._key);
-    const modelKey = nonEmptyString(relation.modelKey);
-    const currentSlug = actionIdSchema.safeParse(relation.actionSlug);
-    const legacySlug = actionIdSchema.safeParse(actions.get(String(relation.actionKey)));
-    const actionSlug = currentSlug.success ? currentSlug.data : legacySlug.success ? legacySlug.data : null;
-    const pair = modelKey && actionSlug ? `${modelKey}\0${actionSlug}` : null;
-    if (!key || !pair || !actionSlug) {
-      if (key) await targetDb.query('REMOVE @key IN modelActions', { key });
-      continue;
-    }
-    const candidates = pairs.get(pair) ?? [];
-    candidates.push({ key, actionSlug, enabled: relation.enabled === true, priority: typeof relation.priority === 'number' && Number.isFinite(relation.priority) ? relation.priority : 0 });
-    pairs.set(pair, candidates);
-  }
-  for (const candidates of pairs.values()) {
-    candidates.sort((left, right) => Number(right.enabled) - Number(left.enabled) || right.priority - left.priority || left.key.localeCompare(right.key));
-    const [winner, ...duplicates] = candidates;
-    await targetDb.query('UPDATE @key WITH { actionSlug: @actionSlug, actionKey: null } IN modelActions OPTIONS { keepNull: false }', { key: winner!.key, actionSlug: winner!.actionSlug });
-    for (const duplicate of duplicates) await targetDb.query('REMOVE @key IN modelActions', { key: duplicate.key });
-  }
-}
-
 export async function retireTranscriptionDomain(targetDb: Database): Promise<void> {
   const modelSlugs = ['openai.gpt-4o-mini-transcribe', 'aws.transcribe-standard'];
   const providerSlugs = ['aws-transcribe'];
-  await targetDb.query(`
-    LET modelKeys = (FOR model IN models FILTER model.slug IN @modelSlugs RETURN model._key)
-    FOR relation IN modelActions
-      FILTER relation.modelKey IN modelKeys
-      REMOVE relation IN modelActions
-  `, { modelSlugs });
   await targetDb.query(`
     LET modelKeys = (FOR model IN models FILTER model.slug IN @modelSlugs RETURN model._key)
     LET providerKeys = (FOR provider IN providers FILTER provider.slug IN @providerSlugs RETURN provider._key)
@@ -1386,7 +1343,7 @@ export function legacyBookPatch(book: Record<string, unknown>) {
     generationBriefFingerprint: typeof book.generationBriefFingerprint === 'string' && /^[a-f0-9]{64}$/.test(book.generationBriefFingerprint) ? book.generationBriefFingerprint : sha256(brief),
     narratorVoiceKey: ['calm', 'clear', 'warm'].includes(String(book.narratorVoiceKey)) ? book.narratorVoiceKey : 'clear',
     narrationPace: typeof book.narrationPace === 'number' && book.narrationPace >= 0.75 && book.narrationPace <= 2 ? book.narrationPace : 1,
-    ...((originalStatus === 'generating' || interrupted) && typeof book.generationError !== 'string' ? { generationError: hasGenerationInput && hasGenerationOwner ? 'Generation was interrupted during the durable-generation migration. Retry the book.' : 'This legacy generation has no resumable input. Create a new book.' } : {}),
+    ...((originalStatus === 'generating' || interrupted) && typeof book.generationError !== 'string' ? { generationError: hasGenerationInput && hasGenerationOwner ? 'Generation was interrupted during the durable-generation migration. Retry the audio book.' : 'This legacy generation has no resumable input. Create a new audio book.' } : {}),
   };
 }
 export function legacyBookChapterPatch(chapter: Record<string, unknown>) {
@@ -1396,7 +1353,7 @@ export function legacyBookChapterPatch(chapter: Record<string, unknown>) {
     priorTransition: typeof chapter.priorTransition === 'string' && chapter.priorTransition.trim() ? chapter.priorTransition : 'Continue naturally from the preceding chapter.',
     nextTransition: typeof chapter.nextTransition === 'string' && chapter.nextTransition.trim() ? chapter.nextTransition : 'Prepare the reader for the following chapter.',
     repetitionBoundaries: Array.isArray(chapter.repetitionBoundaries) && chapter.repetitionBoundaries.length ? chapter.repetitionBoundaries : [`Avoid repeating the core material from ${String(chapter.title ?? 'this chapter')}.`],
-    targetWordMin: 500 as const, targetWordMax: 750 as const,
+    targetWordMin: BOOK_CHAPTER_WORD_MIN, targetWordMax: BOOK_CHAPTER_WORD_MAX,
   };
 }
 export function legacyBookSourcePatch(source: Record<string, unknown>) {
@@ -1419,8 +1376,8 @@ export function legacyReadyBookPatch(book: Record<string, unknown>, chapters: Re
   return {
     status: 'failed', generationStage,
     generationError: resumable
-      ? 'This legacy ready book is missing playable audio or canonical Archive publication. Retry the book to repair it.'
-      : 'This legacy ready book is missing playable audio or canonical Archive publication and has no resumable input. Create a new book.',
+      ? 'This legacy ready audio book is missing playable audio or canonical Archive publication. Retry the audio book to repair it.'
+      : 'This legacy ready audio book is missing playable audio or canonical Archive publication and has no resumable input. Create a new audio book.',
   };
 }
 export async function migrateDurableBookGeneration(targetDb: Database): Promise<void> {
@@ -1539,7 +1496,7 @@ export async function removeLegacyTombstones(targetDb: Database): Promise<void> 
       'collectionMembers', 'collectionInvites', 'tags', 'tagAssignments', 'documents',
       'documentVersions', 'documentAudioVersions', 'documentSummaries', 'documentSummaryAudio',
         'shares', 'places', 'generatedDocumentBindings', 'trips', 'tripCreationReceipts', 'tripPlaces', 'tripAttachments', 'tripGuides', 'placeReferences', 'placeHeroMedia', 'placeVisits',
-        'books', 'bookContexts', 'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'chapterContexts', 'bookProgress',
+        'books', 'bookContexts', 'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'chapterContexts', 'bookProgress', 'bookExtensions',
         'emailInboxes', 'emailThreads', 'emailMessages', 'emailDrafts', 'emailTones', 'emailReplyContext', 'emailWritingProfiles', 'emailAttachments',
        'organizationConnectors', 'channels', 'threads', 'messages', 'messageMentions',
       'messageReactions', 'polls', 'pollOptions', 'pollVotes',
@@ -1602,7 +1559,8 @@ export async function removeLegacyTombstones(targetDb: Database): Promise<void> 
 
   const chapterKeys = bookKeys.length && await exists('bookChapters') ? await (await transaction.query('FOR chapter IN bookChapters FILTER chapter.bookKey IN @keys RETURN chapter._key', { keys: bookKeys })).all() as string[] : [];
   await removeBy('chapterContexts', 'chapterKey', chapterKeys);
-  for (const name of ['bookContexts', 'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'bookProgress']) await removeBy(name, 'bookKey', bookKeys);
+  for (const name of ['bookContexts', 'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'bookProgress', 'bookExtensions']) await removeBy(name, 'bookKey', bookKeys);
+  await removeTyped('shares', 'sourceType', 'book', bookKeys, 'books');
   await removeKeys('books', bookKeys);
 
   const messageKeys = await keysFor('messages');
@@ -1667,14 +1625,6 @@ export const collections: CollectionSpec[] = [
     name: 'models',
     embedKeys: ['name', 'description', 'supportedUseCases'],
     indexes: [{ fields: ['slug'], unique: true }],
-  },
-  {
-    name: 'modelActions',
-    skipEmbedding: true,
-    indexes: [
-      { fields: ['modelKey', 'actionSlug'], unique: true },
-      { fields: ['actionSlug', 'enabled', 'priority'] },
-    ],
   },
   {
     name: 'modelProviders',
@@ -1841,6 +1791,8 @@ export const collections: CollectionSpec[] = [
   { name: 'bookChapters', embedKeys: ['title', 'description', 'objective', 'topics', 'content'], indexes: [{ fields: ['scopeKey', 'bookKey', 'position'], unique: true }, { fields: ['scopeKey', 'bookKey'] }, { fields: ['scopeKey', 'partKey'], sparse: true }, { fields: ['scopeKey', 'archiveDocumentKey'], unique: true, sparse: true }] },
   { name: 'chapterContexts', embedKeys: ['previousContext', 'objectiveContext', 'sourceContext', 'personalizationContext', 'noveltyContext', 'nextContext', 'generationBrief'], indexes: [{ fields: ['scopeKey', 'chapterKey'], unique: true }] },
   { name: 'bookProgress', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'userKey', 'bookKey', 'chapterKey'], unique: true }, { fields: ['scopeKey', 'userKey', 'bookKey'] }, { fields: ['scopeKey', 'userKey', 'isCompleted'] }] },
+  // Private durable extension intents consumed by the existing per-book generation queue.
+  { name: 'bookExtensions', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'bookKey', 'requestKey'], unique: true }, { fields: ['scopeKey', 'bookKey', 'status'] }] },
   // Private Signal persistence. These collections are intentionally absent from NODE_REGISTRY.
   { name: 'emailInboxes', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey', 'connectorKey'], unique: true }, { fields: ['organizationKey', 'scopeKey'] }] },
   { name: 'emailThreads', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'accountKey', 'providerThreadId'], unique: true }, { fields: ['scopeKey', 'accountKey', 'lastMessageAt'] }, { fields: ['scopeKey', 'accountKey', 'inboxCategory'] }] },
@@ -1911,6 +1863,7 @@ const droppedCollections = [
   'mindCapabilities',
   'minds',
   'actions',
+  'modelActions',
   'agentArtifactsLegacy',
   'agentRunsLegacy',
   'agent_runs',
@@ -1937,7 +1890,6 @@ async function main() {
   await removeLegacyTombstones(targetDb);
   await migrateGenericContentContracts(targetDb);
   await retireUserSettings(targetDb);
-  await migrateModelActionSlugs(targetDb);
   await migrateMinimalPlacesAndRetireTrips(targetDb);
   await migrateTripAttachments(targetDb);
   await migrateEmailInitialSyncCompletion(targetDb);

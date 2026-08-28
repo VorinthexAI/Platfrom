@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useId, useState, type ReactNode } from "react";
 import {
   AccessibilityInfo,
   Animated,
@@ -69,7 +69,7 @@ function useReducedMotion() {
   return reducedMotion;
 }
 
-function ChromeGradient({ muted = false }: { muted?: boolean }) {
+function ChromeGradient() {
   const gradientId = useId().replaceAll(":", "");
   const [size, setSize] = useState<{ width: number; height: number }>();
   const onLayout = (event: LayoutChangeEvent) => {
@@ -78,20 +78,14 @@ function ChromeGradient({ muted = false }: { muted?: boolean }) {
       setSize((current) => current?.width === width && current.height === height ? current : { width, height });
     }
   };
-  const stops = muted
-    ? [
-      <Stop key="start" offset="0" stopColor="#DDE2E5" stopOpacity="0.08" />,
-      <Stop key="middle" offset="0.5" stopColor="#DDE2E5" stopOpacity="0.22" />,
-      <Stop key="end" offset="1" stopColor="#DDE2E5" stopOpacity="0.08" />,
-    ]
-    : [
-      <Stop key="white-start" offset="0" stopColor="#FFFFFF" />,
-      <Stop key="silver" offset="0.18" stopColor="#AEB6BC" />,
-      <Stop key="graphite" offset="0.38" stopColor="#3C434A" />,
-      <Stop key="white-middle" offset="0.55" stopColor="#F5F7F8" />,
-      <Stop key="steel" offset="0.76" stopColor="#7B858C" />,
-      <Stop key="white-end" offset="1" stopColor="#FFFFFF" />,
-    ];
+  const stops = [
+    <Stop key="white-start" offset="0" stopColor="#FFFFFF" />,
+    <Stop key="silver" offset="0.18" stopColor="#AEB6BC" />,
+    <Stop key="graphite" offset="0.38" stopColor="#3C434A" />,
+    <Stop key="white-middle" offset="0.55" stopColor="#F5F7F8" />,
+    <Stop key="steel" offset="0.76" stopColor="#7B858C" />,
+    <Stop key="white-end" offset="1" stopColor="#FFFFFF" />,
+  ];
   return (
     <View onLayout={onLayout} pointerEvents="none" style={StyleSheet.absoluteFill}>
       {size ? (
@@ -109,7 +103,7 @@ function ChromeGradient({ muted = false }: { muted?: boolean }) {
 }
 
 function ButtonLoadingFill({ primary, reducedMotion }: { primary: boolean; reducedMotion: boolean }) {
-  const rise = useRef(new Animated.Value(0)).current;
+  const [rise] = useState(() => new Animated.Value(0));
 
   useEffect(() => {
     rise.stopAnimation();
@@ -131,7 +125,7 @@ function ButtonLoadingFill({ primary, reducedMotion }: { primary: boolean; reduc
 
   return (
     <Animated.View style={[styles.loadingFill, { transform: [{ scaleY: rise }] }]}>
-      <ChromeGradient muted={!primary} />
+      {primary ? <ChromeGradient /> : <View style={styles.darkLoadingSurface} />}
     </Animated.View>
   );
 }
@@ -254,11 +248,11 @@ const variantStyles: Record<ButtonVariant, ViewStyle> = {
     borderColor: "transparent",
     boxShadow: "0 0 34px rgba(221, 226, 229, 0.18)",
   },
-  secondary: { backgroundColor: "rgba(255, 255, 255, 0.03)", borderColor: "rgba(221, 226, 229, 0.18)" },
+  secondary: { backgroundColor: "#030507", borderColor: "#262D36" },
   ghost: { backgroundColor: "transparent", borderColor: "transparent" },
-  outline: { backgroundColor: "rgba(255, 255, 255, 0.03)", borderColor: "rgba(221, 226, 229, 0.18)" },
-  danger: { backgroundColor: "#B04A4A", borderColor: "#B04A4A" },
-  icon: { backgroundColor: "transparent", borderColor: "#262D36", paddingHorizontal: 0, paddingVertical: 0 },
+  outline: { backgroundColor: "#030507", borderColor: "#262D36" },
+  danger: { backgroundColor: "#030507", borderColor: "#262D36" },
+  icon: { backgroundColor: "#030507", borderColor: "#262D36", paddingHorizontal: 0, paddingVertical: 0 },
 };
 
 const pressedVariantStyles: Record<ButtonVariant, ViewStyle> = {
@@ -266,11 +260,11 @@ const pressedVariantStyles: Record<ButtonVariant, ViewStyle> = {
     boxShadow: "0 0 44px rgba(221, 226, 229, 0.3)",
     transform: [{ translateY: -1 }],
   },
-  secondary: { backgroundColor: "rgba(255, 255, 255, 0.06)", borderColor: "rgba(221, 226, 229, 0.4)" },
-  outline: { backgroundColor: "rgba(255, 255, 255, 0.06)", borderColor: "rgba(221, 226, 229, 0.4)" },
+  secondary: { backgroundColor: "#080B0F", borderColor: "#262D36" },
+  outline: { backgroundColor: "#080B0F", borderColor: "#262D36" },
   ghost: {},
-  danger: {},
-  icon: {},
+  danger: { backgroundColor: "#080B0F", borderColor: "#262D36" },
+  icon: { backgroundColor: "#080B0F", borderColor: "#262D36" },
 };
 
 const textVariantStyles: Record<ButtonVariant, TextStyle> = {
@@ -308,7 +302,7 @@ const styles = StyleSheet.create({
     opacity: 0.8,
   },
   disabledNonPrimary: {
-    backgroundColor: "rgba(255, 255, 255, 0.04)",
+    backgroundColor: "#030507",
   },
   disabledText: { color: "#7B858C" },
   pressed: {
@@ -343,4 +337,5 @@ const styles = StyleSheet.create({
     top: 0,
     transformOrigin: "bottom",
   },
+  darkLoadingSurface: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundColor: "#080B0F" },
 });

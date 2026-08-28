@@ -2090,12 +2090,13 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, initialMessa
     else setReplyBody(value);
   }
   function openEmailEditorActions(target: EmailEditorTarget) {
-    if (editorTransformation || !emailEditorText(target).trim()) return;
+    if (editorTransformation) return;
     setEditorActionTarget(target);
   }
   function openEmailEditorTranslation() {
     const target = editorActionTarget;
     if (!target) return;
+    if (!emailEditorText(target).trim()) { notify("Enter text before using an AI action."); return; }
     setEditorTargetLanguage(languageForCountryCode(countryCode));
     setEditorActionTarget(undefined);
     setEditorTranslateTarget(target);
@@ -2104,7 +2105,8 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, initialMessa
     if (editorTransformation) return;
     const text = emailEditorText(target).trim();
     const language = editorTargetLanguage.trim();
-    if (!text || action === "translate" && language.length < 2) return;
+    if (!text) { notify("Enter text before using an AI action."); return; }
+    if (action === "translate" && language.length < 2) return;
     const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
     const generation = ++editorTransformationGeneration.current;
     setEditorActionTarget(undefined);
@@ -3374,7 +3376,7 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, initialMessa
         open={Boolean(selectedInboxDraftKey)}
         title={selectedInboxDraft?.variant === "new" ? selectedInboxDraft.subject : "Reply"}
       >
-        {draftDetailQuery.isPending ? <Skeleton accessibilityLabel="Loading draft" accessibilityRole="progressbar" style={styles.readerBodySkeleton} /> : draftDetailQuery.error ? <View accessibilityRole="alert" style={styles.sheetError}><Text style={styles.sheetErrorText}>{messageFor(draftDetailQuery.error)}</Text></View> : <ScrollView contentContainerStyle={styles.generatedReader} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}><AiTextEditor accessibilityLabel="Draft email text" editable={!draftSending && !draftTransformation} maxLength={50_000} multiline onChangeText={setDraftBody} onOpenActions={() => openEmailEditorActions("draft")} style={styles.draftEditor} textAlignVertical="top" transformation={draftTransformation} value={draftBody} /></ScrollView>}
+        {draftDetailQuery.isPending ? <Skeleton accessibilityLabel="Loading draft" accessibilityRole="progressbar" style={styles.readerBodySkeleton} /> : draftDetailQuery.error ? <View accessibilityRole="alert" style={styles.sheetError}><Text style={styles.sheetErrorText}>{messageFor(draftDetailQuery.error)}</Text></View> : <ScrollView contentContainerStyle={styles.generatedReader} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}><AiTextEditor accessibilityLabel="Draft email text" containerStyle={styles.draftEditor} editable={!draftSending && !draftTransformation} maxLength={50_000} multiline onChangeText={setDraftBody} onOpenActions={() => openEmailEditorActions("draft")} textAlignVertical="top" transformation={draftTransformation} value={draftBody} /></ScrollView>}
       </BottomSheet>
       <BottomSheet
         dismissible={!busy && !trashRootLoading && !trashClearBusy}
@@ -4188,7 +4190,7 @@ const styles = StyleSheet.create({
   favoriteRow: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: spacing.xs },
   favoriteLabel: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 12 },
   newEmailForm: { flexGrow: 1, gap: spacing.sm, paddingBottom: spacing.xl },
-  newEmailBodyInput: { minHeight: 280, paddingTop: 12, lineHeight: 22 },
+  newEmailBodyInput: { paddingTop: 12, lineHeight: 22 },
   inlineError: { paddingHorizontal: 2 },
   inlineErrorText: { color: palette.silver100, fontFamily: fonts.regular, fontSize: 12, lineHeight: 18 },
   recipientChips: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs },
@@ -4232,7 +4234,7 @@ const styles = StyleSheet.create({
   readerFlowContent: { flexGrow: 1, gap: spacing.md, paddingBottom: spacing.xl },
   transformationForm: { flex: 1, gap: spacing.sm },
   generatedReader: { flexGrow: 1, paddingVertical: spacing.md, paddingBottom: spacing.xl },
-  draftEditor: { minHeight: 320 },
+  draftEditor: { height: 320 },
   languageChoices: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs },
   versionPanel: { gap: 6 },
   versionSkeleton: { width: "100%", height: 42, borderRadius: 999 },

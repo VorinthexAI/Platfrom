@@ -4,6 +4,7 @@ import { AppState } from "react-native";
 
 import { getEventStream } from "./api-client";
 import { publishAppEvent } from "./app-events";
+import { publishBookChanged } from "./book-events";
 import { compassQueryKeys } from "./compass-query-keys";
 import { contentQueryKeys } from "./content-query-cache";
 import { galleryRefreshPlan, isCurrentContextGeneration, type GalleryRefreshFamily } from "./gallery-convergence";
@@ -88,6 +89,7 @@ export function AuthenticatedEventBridge() {
         }
         if (event.event === "book.changed") {
           invalidateBooks();
+          publishBookChanged();
         }
         if (event.event === "content.changed") {
           invalidateArchive();

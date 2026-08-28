@@ -57,6 +57,16 @@ describe('book service asynchronous lifecycle', () => {
     await expect(service.create({ ...input, unknown: true }, userKey)).rejects.toBeDefined();
   });
 
+  test('previews one exact continuation batch and durably accepts generation', async () => {
+    const current: any = row('ready'); current.chapters = Array.from({ length: 10 }, (_, index) => ({ chapter: { key: newId(), position: index + 1, title: `Chapter ${index + 1}`, description: `Summary ${index + 1}`, status: 'audio-ready', content: 'Content', audioStorageKey: `audio-${index}.mp3`, audioDurationSeconds: 60 }, progress: null }));
+    const jobs: unknown[] = []; const receipts: unknown[] = []; let suggestions = 0;
+    const repository: any = { detail: async () => current, acceptExtension: async (_context: unknown, extension: any) => { receipts.push(extension); current.book = { ...current.book, status: 'queued', chapterCount: extension.targetChapterCount }; return { extension, book: current.book, replayed: false }; } };
+    const service = createBookService({ repository, suggestTopics: async (request) => { suggestions += 1; const text = JSON.stringify(request); expect(text).toContain(current.book.description); expect(text).toContain('Summary 10'); return JSON.stringify({ titles: ['The Next Decision'] }); }, enqueue: async (job) => { jobs.push(job); return { jobId: bookKey }; }, signUrl: async () => 'signed', publishChanged: async () => {}, now: () => now });
+    await expect(service.extend(bookKey, { organizationKey, scopeKey, mode: 'preview', chapterCount: 1 }, userKey)).resolves.toEqual({ titles: ['The Next Decision'] }); expect(suggestions).toBe(1);
+    await expect(service.extend(bookKey, { organizationKey, scopeKey, mode: 'generate', chapterCount: 1, titles: ['The Next Decision'], requestKey: 'extension-1' }, userKey)).resolves.toMatchObject({ key: bookKey, status: 'queued', chapterCount: 11 });
+    expect(receipts).toHaveLength(1); expect(receipts[0]).toMatchObject({ bookKey, requestKey: 'extension-1', baseChapterCount: 10, targetChapterCount: 11, status: 'pending' }); expect(jobs).toHaveLength(1);
+  });
+
   test('keeps accepted work queued for recovery when Redis insertion fails', async () => {
     let current: any;
     const repository: any = { authorize: async () => {}, findByGenerationRequest: async () => null, detail: async () => current };
@@ -94,15 +104,24 @@ describe('book service asynchronous lifecycle', () => {
     const repository: any = { failTerminalGeneration: async (...args: unknown[]) => { calls.push(args); return true; } };
     const service = createBookService({ repository, now: () => now });
     await expect(service.terminalFailure({ schemaVersion: 1, bookKey, organizationKey, scopeKey, userKey })).resolves.toBe(true);
-    expect(calls).toEqual([[{ schemaVersion: 1, bookKey, organizationKey, scopeKey, userKey }, 'Book generation failed after all retry attempts. Retry the book to continue.', now]]);
+    expect(calls).toEqual([[{ schemaVersion: 1, bookKey, organizationKey, scopeKey, userKey }, 'Audio book generation failed after all retry attempts. Retry the audio book to continue.', now]]);
   });
 
   test('retries, cancels, and hard deletes through repository and queue', async () => {
     let current: any = row('failed'); const calls: string[] = [];
-    const repository: any = { retryGeneration: async () => { calls.push('retry'); current = row(); return current.book; }, cancelGeneration: async () => { calls.push('cancel'); current = row('cancelled'); }, deleteBook: async () => { calls.push('delete'); }, detail: async () => current };
-    const service = createBookService({ repository, enqueue: async () => { calls.push('enqueue'); return { jobId: bookKey }; }, removeJob: async () => { calls.push('remove'); }, signUrl: async () => 'signed', publishChanged: async () => {} });
+    const repository: any = { retryGeneration: async () => { calls.push('retry'); current = row(); return current.book; }, cancelGeneration: async () => { calls.push('cancel'); current = row('cancelled'); }, deleteBook: async () => { calls.push('delete'); return { deleted: true, bookKey, shareTokenHash: 'a'.repeat(64) }; }, detail: async () => current };
+    const service = createBookService({ repository, enqueue: async () => { calls.push('enqueue'); return { jobId: bookKey }; }, removeJob: async () => { calls.push('remove'); }, signUrl: async () => 'signed', publishChanged: async () => {}, publishShareChanged: async () => {} });
     await service.retry(bookKey, { organizationKey, scopeKey }, userKey); await service.cancel(bookKey, { organizationKey, scopeKey }, userKey); expect(await service.delete(bookKey, { organizationKey, scopeKey }, userKey)).toEqual({ key: bookKey });
     expect(calls).toEqual(['retry', 'enqueue', 'cancel', 'remove', 'delete', 'remove']);
+  });
+
+  test('strictly sets favorite state through the repository and publishes the updated summary', async () => {
+    const current: any = row('ready'); const calls: unknown[][] = [];
+    const repository: any = { setFavorite: async (...args: unknown[]) => { calls.push(args); current.book.isFavorite = (args[2] as boolean); }, detail: async () => current };
+    const service = createBookService({ repository, signUrl: async () => 'signed', now: () => now, publishChanged: async (key) => { calls.push(['publish', key]); } });
+    await expect(service.setFavorite(bookKey, { organizationKey, scopeKey, isFavorite: true }, userKey)).resolves.toMatchObject({ key: bookKey, isFavorite: true });
+    expect(calls).toEqual([[{ organizationKey, scopeKey, userKey }, bookKey, true, now], ['publish', scopeKey]]);
+    await expect(service.setFavorite(bookKey, { organizationKey, scopeKey, isFavorite: false, forged: true }, userKey)).rejects.toThrow('Unrecognized key');
   });
 
   test('does not touch BullMQ when authorized hard deletion fails', async () => {
@@ -113,8 +132,8 @@ describe('book service asynchronous lifecycle', () => {
   });
 
   test('keeps successful hard deletion successful when queue cleanup fails', async () => {
-    const calls: string[] = []; const repository: any = { deleteBook: async () => { calls.push('delete'); } };
-    const service = createBookService({ repository, removeJob: async () => { calls.push('remove'); throw new Error('redis unavailable'); }, publishChanged: async () => { calls.push('publish'); } });
+    const calls: string[] = []; const repository: any = { deleteBook: async () => { calls.push('delete'); return { deleted: true, bookKey, shareTokenHash: 'a'.repeat(64) }; } };
+    const service = createBookService({ repository, removeJob: async () => { calls.push('remove'); throw new Error('redis unavailable'); }, publishChanged: async () => { calls.push('publish'); }, publishShareChanged: async () => {} });
     await expect(service.delete(bookKey, { organizationKey, scopeKey }, userKey)).resolves.toEqual({ key: bookKey }); expect(calls).toEqual(['delete', 'remove', 'publish']);
   });
 

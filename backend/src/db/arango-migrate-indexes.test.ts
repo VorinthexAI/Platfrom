@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import { isLegacyIndex, LEGACY_REMOVAL_MARKER, normalizeLegacyDocumentSharePermission } from './arango-migrate-indexes';
 import { stageLegacyDocumentShares } from './content-migration';
-import { collections, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateGeneratedTravelDocuments, migrateImageCaptions, migrateMinimalPlacesAndRetireTrips, migrateModelActionSlugs, migratePlaceReports, migrateProviderIndependentEmailDrafts, migrateRetiredEmailDefaultTones, migrateTripAttachments, migrateTripCreationReceipts, migrateTripGuides, needsExactSemanticEmbedding, retireMomentumScope, retireTranscriptionDomain, retireUserSettings } from './arango-migrate';
+import { collections, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateGeneratedTravelDocuments, migrateImageCaptions, migrateMinimalPlacesAndRetireTrips, migratePlaceReports, migrateProviderIndependentEmailDrafts, migrateRetiredEmailDefaultTones, migrateTripAttachments, migrateTripCreationReceipts, migrateTripGuides, needsExactSemanticEmbedding, retireMomentumScope, retireTranscriptionDomain, retireUserSettings } from './arango-migrate';
 import { EMBEDDING_DIMENSIONS, LEGACY_EMBEDDING_DIMENSIONS, embeddingMetadata } from '../lib/embeddings';
 import { DOCUMENT_CHUNK_MAX_WORDS, DOCUMENT_MAX_CHUNKS, documentSemanticHash } from '../lib/ai/document-processing/chunking';
-import { RETAINED_MODEL_ACTION_BINDINGS, RETAINED_MODEL_PROVIDER_BINDINGS, RETAINED_MODEL_SLUGS, RETAINED_PROVIDER_SLUGS, retireAiPersistence } from './retire-ai-persistence';
+import { RETAINED_MODEL_PROVIDER_BINDINGS, RETAINED_MODEL_SLUGS, RETAINED_PROVIDER_SLUGS, retireAiPersistence } from './retire-ai-persistence';
 
 function migrationDatabase(collection: 'documents' | 'documentVersions', row: Record<string, unknown>) {
   let page = 0;
@@ -59,71 +59,9 @@ describe('Arango migration indexes', () => {
     expect(source).toContain('encryptedCredentials: null');
     expect(source).toContain('await migrateEmailAttachmentAvailability(targetDb)');
   });
-  test('retires action-key model routing indexes after slug indexes replace them', () => {
-    const desired = [['modelKey', 'actionSlug'], ['actionSlug', 'enabled', 'priority']];
-    expect(isLegacyIndex('modelActions', ['modelKey', 'actionKey'], desired)).toBe(true);
-    expect(isLegacyIndex('modelActions', ['actionKey', 'enabled', 'priority'], desired)).toBe(true);
-    expect(isLegacyIndex('modelActions', ['modelKey', 'actionSlug'], desired)).toBe(false);
-  });
-  test('migrates legacy model routes to strict action slugs and safely removes invalid routes', async () => {
-    const updates: Array<Record<string, unknown>> = [];
-    const removals: string[] = [];
-    const droppedIndexes: string[] = [];
-    const updateQueries: string[] = [];
-    const relations = [
-      { _key: 'current', modelKey: 'model-a', actionSlug: 'ask', enabled: false, priority: 7 },
-      { _key: 'legacy', modelKey: 'model-b', actionKey: 'action-ask', enabled: true, priority: 3 },
-      { _key: 'invalid', modelKey: 'model-c', actionKey: 'action-invalid', enabled: true, priority: 1 },
-      { _key: 'stale-chat', modelKey: 'model-d', actionSlug: 'chat', enabled: true, priority: 100 },
-      { _key: 'duplicate', modelKey: 'model-a', actionKey: 'action-ask', enabled: true, priority: 9 },
-    ];
-    const database = {
-      collection(name: string) { return {
-        async exists() { return name === 'modelActions' || name === 'actions'; },
-        async indexes() { return name === 'modelActions' ? [{ id: 'legacy-unique', fields: ['modelKey', 'actionKey'] }, { id: 'current', fields: ['modelKey', 'actionSlug'] }] : []; },
-        async dropIndex(id: string) { droppedIndexes.push(id); },
-      }; },
-      async query(query: string, bindVars: Record<string, unknown> = {}) {
-        if (query.includes('FOR action IN actions')) return { async all() { return [{ key: 'action-ask', slug: 'ask' }, { key: 'action-chat', slug: 'chat' }, { key: 'action-invalid', slug: 'not.current' }]; } };
-        if (query.includes('FOR relation IN modelActions')) return { async all() { return relations; } };
-        if (query.startsWith('UPDATE')) { updates.push(bindVars); updateQueries.push(query); }
-        if (query.startsWith('REMOVE')) removals.push(bindVars.key as string);
-        return { async all() { return []; } };
-      },
-    };
-
-    await migrateModelActionSlugs(database as never);
-
-    expect(updates).toEqual([
-      { key: 'duplicate', actionSlug: 'ask' },
-      { key: 'legacy', actionSlug: 'ask' },
-    ]);
-    expect(updateQueries.every((query) => query.includes('actionKey: null') && query.includes('keepNull: false'))).toBe(true);
-    expect(removals).toEqual(['invalid', 'stale-chat', 'current']);
-    expect(droppedIndexes).toEqual(['legacy-unique']);
-    expect(relations[4]).toMatchObject({ enabled: true, priority: 9, modelKey: 'model-a' });
-  });
-  test('model route migration works when actions are absent and routes already use slugs', async () => {
-    const calls: string[] = [];
-    const database = {
-      collection(name: string) { return { async exists() { return name === 'modelActions'; }, async indexes() { return []; }, async dropIndex() {} }; },
-      async query(query: string) {
-        calls.push(query);
-        if (query.includes('FOR relation IN modelActions')) return { async all() { return [{ _key: 'route', modelKey: 'model', actionSlug: 'reason', enabled: true, priority: 100 }]; } };
-        return { async all() { return []; } };
-      },
-    };
-    await migrateModelActionSlugs(database as never);
-    expect(calls).not.toContain(expect.stringContaining('FOR action IN actions'));
-    expect(calls.at(-1)).toContain('REMOVE @key IN modelActions');
-  });
   test('hard-drops retired persistence without recreating it and retains collaboration collections', async () => {
-    const retired = ['agents', 'skills', 'agentSkills', 'scopeAgents', 'agentMembers', 'agentRuns', 'agentRunSteps', 'agentRunCalls', 'agentRunSources', 'agentArtifacts', 'agentArtifactChecks', 'agentMemories', 'runtimeVariables', 'capabilities', 'mindCapabilities', 'minds', 'actions', 'agentArtifactsLegacy', 'agentRunsLegacy', 'agent_runs', 'agentTools', 'toolActions', 'tools', 'templates'];
+    const retired = ['agents', 'skills', 'agentSkills', 'scopeAgents', 'agentMembers', 'agentRuns', 'agentRunSteps', 'agentRunCalls', 'agentRunSources', 'agentArtifacts', 'agentArtifactChecks', 'agentMemories', 'runtimeVariables', 'capabilities', 'mindCapabilities', 'minds', 'actions', 'modelActions', 'agentArtifactsLegacy', 'agentRunsLegacy', 'agent_runs', 'agentTools', 'toolActions', 'tools', 'templates'];
     expect(collections.filter(({ name }) => retired.includes(name))).toEqual([]);
-    expect(collections.find(({ name }) => name === 'modelActions')?.indexes).toEqual([
-      { fields: ['modelKey', 'actionSlug'], unique: true },
-      { fields: ['actionSlug', 'enabled', 'priority'] },
-    ]);
     for (const retained of ['scopes', 'channels', 'channelParticipants', 'orchestrators']) expect(collections.some(({ name }) => name === retained)).toBe(true);
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
     for (const retained of ['ensureScopeScopesCollection', 'ensureScopeMembersCollection']) expect(source).toContain(retained);
@@ -133,7 +71,8 @@ describe('Arango migration indexes', () => {
       expect(source).not.toContain(`collection('${name}').create`);
     }
     expect(source).not.toMatch(/ensure(?:Agent|RuntimeVariable|Skill|Action|Capability|Mind)/);
-    expect(source.indexOf('await migrateModelActionSlugs(targetDb)')).toBeLessThan(source.indexOf('for (const name of droppedCollections)'));
+    expect(source).not.toContain('migrateModelActionSlugs');
+    expect(source).not.toContain('IN modelActions');
   });
   test('removes retired actions from semantic backfill and global retrieval policy', async () => {
     const backfill = await Bun.file(new URL('../../scripts/backfill-semantic-embeddings.ts', import.meta.url)).text();
@@ -229,14 +168,13 @@ describe('Arango migration indexes', () => {
     const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
     const database = { async query(query: string, bindVars?: Record<string, unknown>) { calls.push({ query, bindVars }); return { async all() { return []; }, async next() { return undefined; } }; } };
     await retireTranscriptionDomain(database as never);
-    expect(calls).toHaveLength(6);
-    expect(calls[0]?.query).toContain('REMOVE relation IN modelActions');
-    expect(calls[1]?.query).toContain('REMOVE relation IN modelProviders');
-    expect(calls.slice(2, 4).map(({ bindVars }) => bindVars?.['@collection'])).toEqual(['organizationProviders', 'orgCredentials']);
-    expect(calls[4]?.query).toContain('REMOVE model IN models');
-    expect(calls[5]?.query).toContain('REMOVE provider IN providers');
+    expect(calls).toHaveLength(5);
+    expect(calls[0]?.query).toContain('REMOVE relation IN modelProviders');
+    expect(calls.slice(1, 3).map(({ bindVars }) => bindVars?.['@collection'])).toEqual(['organizationProviders', 'orgCredentials']);
+    expect(calls[3]?.query).toContain('REMOVE model IN models');
+    expect(calls[4]?.query).toContain('REMOVE provider IN providers');
     expect(calls[0]?.bindVars?.modelSlugs).toEqual(['openai.gpt-4o-mini-transcribe', 'aws.transcribe-standard']);
-    expect(calls[1]?.bindVars?.providerSlugs).toEqual(['aws-transcribe']);
+    expect(calls[0]?.bindVars?.providerSlugs).toEqual(['aws-transcribe']);
   });
 
   test('hard-retires obsolete AI catalog configuration idempotently before seeding', async () => {
@@ -244,27 +182,19 @@ describe('Arango migration indexes', () => {
     const database = { async query(query: string, bindVars?: Record<string, unknown>) { calls.push({ query, bindVars }); return { async all() { return []; }, async next() { return undefined; } }; } };
     await retireAiPersistence(database as never);
     await retireAiPersistence(database as never);
-    expect(calls).toHaveLength(12);
-    expect(calls[0]?.query).toContain('REMOVE relation IN modelActions');
-    expect(calls[1]?.query).toContain('REMOVE relation IN modelProviders');
-    expect(calls.slice(2, 4).map(({ bindVars }) => bindVars?.['@collection'])).toEqual(['organizationProviders', 'orgCredentials']);
-    expect(calls[4]?.query).toContain('REMOVE model IN models');
-    expect(calls[5]?.query).toContain('REMOVE provider IN providers');
-    expect(calls[0]?.bindVars?.retainedModelActionBindings).toEqual(RETAINED_MODEL_ACTION_BINDINGS);
-    expect(calls[1]?.bindVars?.retainedModelProviderBindings).toEqual(RETAINED_MODEL_PROVIDER_BINDINGS);
+    expect(calls).toHaveLength(10);
+    expect(calls[0]?.query).toContain('REMOVE relation IN modelProviders');
+    expect(calls.slice(1, 3).map(({ bindVars }) => bindVars?.['@collection'])).toEqual(['organizationProviders', 'orgCredentials']);
+    expect(calls[3]?.query).toContain('REMOVE model IN models');
+    expect(calls[4]?.query).toContain('REMOVE provider IN providers');
+    expect(calls[0]?.bindVars?.retainedModelProviderBindings).toEqual(RETAINED_MODEL_PROVIDER_BINDINGS);
     expect(RETAINED_MODEL_SLUGS).toContain('google.gemini-2.5-flash-lite');
-    expect(RETAINED_MODEL_ACTION_BINDINGS).toContain('google.gemini-2.5-flash-lite:ask');
-    expect(RETAINED_MODEL_ACTION_BINDINGS).toContain('openai.gpt-5.6-luna:ask');
-    expect(RETAINED_MODEL_ACTION_BINDINGS).toContain('google.gemini-2.5-flash-lite:web-search');
-    expect(RETAINED_MODEL_ACTION_BINDINGS).toContain('openai.gpt-5.6-luna:web-search');
-    expect(RETAINED_MODEL_ACTION_BINDINGS.some((binding) => binding.endsWith(':chat') || binding.endsWith(':reason'))).toBe(false);
     expect(RETAINED_MODEL_PROVIDER_BINDINGS).toContain('google.gemini-2.5-flash-lite:openrouter:google/gemini-2.5-flash-lite');
-    expect(calls[0]?.query).toContain('CONCAT(model.slug, ":", relation.actionSlug) NOT IN @retainedModelActionBindings');
-    expect(calls[1]?.query).toContain('CONCAT(model.slug, ":", provider.slug, ":", relation.providerModelId) NOT IN @retainedModelProviderBindings');
-    expect(calls[2]?.bindVars?.retainedProviderSlugs).toEqual(RETAINED_PROVIDER_SLUGS);
-    expect(calls[2]?.query).toContain('relation.providerKey NOT IN retainedProviderKeys');
-    expect(calls[4]?.query).toContain('model.slug NOT IN @retainedModelSlugs');
-    expect(calls[5]?.query).toContain('provider.slug NOT IN @retainedProviderSlugs');
+    expect(calls[0]?.query).toContain('CONCAT(model.slug, ":", provider.slug, ":", relation.providerModelId) NOT IN @retainedModelProviderBindings');
+    expect(calls[1]?.bindVars?.retainedProviderSlugs).toEqual(RETAINED_PROVIDER_SLUGS);
+    expect(calls[1]?.query).toContain('relation.providerKey NOT IN retainedProviderKeys');
+    expect(calls[3]?.query).toContain('model.slug NOT IN @retainedModelSlugs');
+    expect(calls[4]?.query).toContain('provider.slug NOT IN @retainedProviderSlugs');
     expect(calls.map(({ query }) => query).join('\n')).not.toMatch(/usage/i);
 
     const seedSource = await Bun.file(new URL('../lib/db/seed.ts', import.meta.url)).text();
@@ -322,6 +252,7 @@ describe('Arango migration indexes', () => {
     expect(source.indexOf('FOR trip IN trips FILTER trip.coverImageKey IN @keys')).toBeLessThan(source.indexOf("await removeKeys('images', imageKeys)"));
     for (const [owner, collection] of [['collection', 'collections'], ['folder', 'folders'], ['document', 'documents'], ['trip', 'trips']]) expect(source).toContain(`FOR ${owner} IN ${collection} FILTER ${owner}.coverImageKey IN @keys UPDATE ${owner} WITH { coverImageKey: null, updatedAt: @now }`);
     expect(source.indexOf("await removeBy('tripAttachments', 'tripKey', tripKeys)")).toBeLessThan(source.indexOf("await removeKeys('trips', tripKeys)"));
+    expect(source.indexOf("await removeTyped('shares', 'sourceType', 'book', bookKeys, 'books')")).toBeLessThan(source.indexOf("await removeKeys('books', bookKeys)"));
     expect(source).toContain('fields.includes(LEGACY_REMOVAL_MARKER)');
     expect(source).toContain('OPTIONS { keepNull: false }');
   });
@@ -395,9 +326,10 @@ describe('Arango migration indexes', () => {
         { fields: ['scopeKey', 'targetType', 'targetKey'] },
       ],
     });
-    const bookNames = ['books', 'bookContexts', 'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'chapterContexts', 'bookProgress'];
+    const bookNames = ['books', 'bookContexts', 'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'chapterContexts', 'bookProgress', 'bookExtensions'];
     expect(collections.filter(({ name }) => bookNames.includes(name)).map(({ name }) => name)).toEqual(bookNames);
     expect(collections.find(({ name }) => name === 'bookChapters')?.indexes).toContainEqual({ fields: ['scopeKey', 'bookKey', 'position'], unique: true });
+    expect(collections.find(({ name }) => name === 'bookExtensions')?.indexes).toContainEqual({ fields: ['scopeKey', 'bookKey', 'requestKey'], unique: true });
     expect(collections.find(({ name }) => name === 'folders')?.indexes).toContainEqual({ fields: ['scopeKey', 'managedPurpose', 'managedOwnerKey'], unique: true, sparse: true });
     const emailNames = ['emailInboxes', 'emailThreads', 'emailMessages', 'emailDrafts', 'emailTones', 'emailReplyContext', 'emailWritingProfiles', 'emailAttachments'];
     expect(collections.filter(({ name }) => emailNames.includes(name)).map(({ name }) => name)).toEqual(emailNames);

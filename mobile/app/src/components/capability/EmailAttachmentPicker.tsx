@@ -23,7 +23,7 @@ type PickerTab = "archive" | "gallery";
 export type EmailAttachmentLabels = Record<string, string>;
 export type EmailAttachmentImageUrls = Record<string, string>;
 
-const MAX_ATTACHMENTS = 20;
+const DEFAULT_MAX_SELECTION = 20;
 const MAX_VISIBLE_RESULTS = 10;
 const GALLERY_CANDIDATE_LIMIT = 50;
 const IMAGE_COLUMNS = 4;
@@ -31,20 +31,24 @@ const IMAGE_GAP = 5;
 const SHEET_INPUT_FOCUS_DELAY_MS = 300;
 const SHEET_TRANSITION_DELAY_MS = 180;
 
-type EmailAttachmentPickerProps = {
+export type EmailAttachmentPickerProps = {
+  archiveOnly?: boolean;
   context: ContentContext;
   contextKey: string;
   imageUrls?: EmailAttachmentImageUrls;
   labels?: EmailAttachmentLabels;
+  maxSelection?: number;
   onClose: () => void;
   onDone: (selection: EmailAttachmentRef[], labels: EmailAttachmentLabels, imageUrls: EmailAttachmentImageUrls) => void;
   open: boolean;
   selection: EmailAttachmentRef[];
+  title?: string;
 };
 
-export function EmailAttachmentPicker({ context, contextKey, imageUrls: selectedImageUrls, labels: selectedLabels, open, selection, onClose, onDone }: EmailAttachmentPickerProps) {
+export function EmailAttachmentPicker({ archiveOnly = false, context, contextKey, imageUrls: selectedImageUrls, labels: selectedLabels, maxSelection = DEFAULT_MAX_SELECTION, open, selection, title = "Attachments", onClose, onDone }: EmailAttachmentPickerProps) {
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<PickerTab>("archive");
+  const activeTab: PickerTab = archiveOnly ? "archive" : tab;
   const [working, setWorking] = useState<EmailAttachmentRef[]>(() => selection);
   const [labels, setLabels] = useState<EmailAttachmentLabels>(() => selectedLabels ?? {});
   const [imageUrls, setImageUrls] = useState<EmailAttachmentImageUrls>(() => selectedImageUrls ?? {});
@@ -125,31 +129,31 @@ export function EmailAttachmentPicker({ context, contextKey, imageUrls: selected
 
   useEffect(() => {
     if (!open) return;
-    const timer = setTimeout(() => void loadLatest(tab, query), query.trim() ? 300 : 0);
+    const timer = setTimeout(() => void loadLatest(activeTab, query), query.trim() ? 300 : 0);
     return () => {
       clearTimeout(timer);
       searchOwner.invalidate();
     };
-  }, [contextKey, open, query, searchOwner, tab]);
+  }, [activeTab, contextKey, open, query, searchOwner]);
   useEffect(() => {
     const value = query.trim();
     if (!open || !value) return;
     const controller = new AbortController();
     const historyTimer = setTimeout(() => {
-      const request = tab === "archive"
+      const request = activeTab === "archive"
         ? searchContentMatches(value, controller.signal, undefined, true, { limit: MAX_VISIBLE_RESULTS, minimumScore: -1 })
         : searchGalleryImages({ query: value, recordHistory: true, limit: GALLERY_CANDIDATE_LIMIT, minimumScore: -1 }, controller.signal);
       void request.catch(() => undefined);
     }, 800);
     return () => { clearTimeout(historyTimer); controller.abort(); };
-  }, [contextKey, open, query, tab]);
+  }, [activeTab, contextKey, open, query]);
   useEffect(() => {
     if (!open || filterOpen || historyOpen) return;
     const timer = setTimeout(() => searchInputRef.current?.focus(), SHEET_INPUT_FOCUS_DELAY_MS);
     return () => clearTimeout(timer);
   }, [filterOpen, historyOpen, open]);
   useEffect(() => {
-    if (!open) return;
+    if (!open || archiveOnly) return;
     const imageRefs = selection.filter((ref): ref is EmailAttachmentRef & { type: "image" } => ref.type === "image");
     if (!imageRefs.length) return;
     const controller = new AbortController();
@@ -160,16 +164,16 @@ export function EmailAttachmentPicker({ context, contextKey, imageUrls: selected
       setLabels((current) => ({ ...current, [`image:${ref.key}`]: image.caption || image.filename }));
     }));
     return () => controller.abort();
-  }, [contextKey, open, selection]);
+  }, [archiveOnly, contextKey, open, selection]);
 
   function isSelected(ref: EmailAttachmentRef) { return working.some((item) => attachmentIdentity(item) === attachmentIdentity(ref)); }
   function toggle(ref: EmailAttachmentRef) {
-    if (!isSelected(ref) && working.length >= MAX_ATTACHMENTS) {
-      setSelectionNotice(`You can attach up to ${MAX_ATTACHMENTS} items.`);
+    if (!isSelected(ref) && working.length >= maxSelection) {
+      setSelectionNotice(archiveOnly ? `You can select up to ${maxSelection} items.` : `You can attach up to ${maxSelection} items.`);
       return;
     }
     setSelectionNotice(undefined);
-    setWorking((current) => toggleEmailAttachment(current, ref));
+    setWorking((current) => toggleEmailAttachment(current, ref, maxSelection));
   }
   function changeTab(next: PickerTab) {
     searchOwner.invalidate();
@@ -179,7 +183,7 @@ export function EmailAttachmentPicker({ context, contextKey, imageUrls: selected
   }
   function changeQuery(next: string) {
     searchOwner.invalidate();
-    if (tab === "archive") setDocuments([]);
+    if (activeTab === "archive") setDocuments([]);
     else setImages([]);
     setQuery(next);
   }
@@ -242,24 +246,24 @@ export function EmailAttachmentPicker({ context, contextKey, imageUrls: selected
       height="full"
       onOpenChange={(next) => { if (!next && !filterOpen && !historyOpen) closePicker(); }}
       open={open}
-      title="Attachments"
+      title={title}
     >
-      <View style={styles.rootActions}><View style={styles.rootSearch}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel={`Search ${tab}`} onChangeText={changeQuery} onSubmitEditing={() => void load(tab, query)} placeholder="Search..." ref={searchInputRef} returnKeyType="search" style={styles.rootSearchInput} value={query} />{query.trim() ? <ButtonSizeProvider overrideParent size="xs"><Button accessibilityLabel="Clear attachment search" contentMode="raw" iconOnly onPress={() => changeQuery("")} size="xs" variant="secondary"><CloseIcon size="sm" /></Button></ButtonSizeProvider> : null}</View><Button accessibilityLabel="Filter attachments" contentMode="raw" onPress={() => setFilterOpen(true)} size="md" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={filters.favoritesOnly || filters.showHidden ? "accent" : "default"} /></Button></View>
-      <Tabs accessibilityLabel="Attachment sources" accessibilityRole="tablist" style={styles.folderTabs}>
+      <View style={styles.rootActions}><View style={styles.rootSearch}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel={`Search ${activeTab}`} onChangeText={changeQuery} onSubmitEditing={() => void load(activeTab, query)} placeholder="Search..." ref={searchInputRef} returnKeyType="search" style={styles.rootSearchInput} value={query} />{query.trim() ? <ButtonSizeProvider overrideParent size="xs"><Button accessibilityLabel="Clear attachment search" contentMode="raw" iconOnly onPress={() => changeQuery("")} size="xs" variant="secondary"><CloseIcon size="sm" /></Button></ButtonSizeProvider> : null}</View><Button accessibilityLabel="Filter attachments" contentMode="raw" onPress={() => setFilterOpen(true)} size="md" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={filters.favoritesOnly || filters.showHidden ? "accent" : "default"} /></Button></View>
+      {!archiveOnly ? <Tabs accessibilityLabel="Attachment sources" accessibilityRole="tablist" style={styles.folderTabs}>
         <Button accessibilityRole="tab" accessibilityState={{ selected: tab === "archive" }} onPress={() => changeTab("archive")} style={styles.folderTab} variant={tab === "archive" ? "secondary" : "ghost"}>Archive</Button>
         <Button accessibilityRole="tab" accessibilityState={{ selected: tab === "gallery" }} onPress={() => changeTab("gallery")} style={styles.folderTab} variant={tab === "gallery" ? "secondary" : "ghost"}>Gallery</Button>
-      </Tabs>
+      </Tabs> : null}
       {selectionNotice ? <Text accessibilityLiveRegion="assertive" style={styles.notice}>{selectionNotice}</Text> : null}
-      {error ? <View accessibilityRole="alert" style={styles.error}><Text style={styles.errorText}>{error}</Text><Button onPress={() => void load(tab, query)} size="md" variant="secondary">Retry</Button></View> : null}
-      <ScrollView accessibilityLabel={`${tab} attachment results`} accessibilityLiveRegion="polite" accessibilityState={{ busy: loading }} contentContainerStyle={styles.results} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-        {loading ? <View accessibilityLabel="Loading attachment results" accessibilityRole="progressbar" style={tab === "gallery" ? styles.imageGrid : styles.rootDocuments}>{Array.from({ length: tab === "gallery" ? 4 : 3 }, (_, index) => <Skeleton key={index} style={tab === "gallery" ? [styles.imageSkeleton, { width: imageSize, height: imageSize }] : styles.documentSkeleton} />)}</View> : tab === "archive" ? <View style={styles.rootDocuments}>{renderedDocuments.map((document) => {
+      {error ? <View accessibilityRole="alert" style={styles.error}><Text style={styles.errorText}>{error}</Text><Button onPress={() => void load(activeTab, query)} size="md" variant="secondary">Retry</Button></View> : null}
+      <ScrollView accessibilityLabel={`${activeTab} attachment results`} accessibilityLiveRegion="polite" accessibilityState={{ busy: loading }} contentContainerStyle={styles.results} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+        {loading ? <View accessibilityLabel="Loading attachment results" accessibilityRole="progressbar" style={activeTab === "gallery" ? styles.imageGrid : styles.rootDocuments}>{Array.from({ length: activeTab === "gallery" ? 4 : 3 }, (_, index) => <Skeleton key={index} style={activeTab === "gallery" ? [styles.imageSkeleton, { width: imageSize, height: imageSize }] : styles.documentSkeleton} />)}</View> : activeTab === "archive" ? <View style={styles.rootDocuments}>{renderedDocuments.map((document) => {
           const ref = { type: "document" as const, key: document.key }; const active = isSelected(ref);
           return <Button accessibilityLabel={`${active ? "Deselect" : "Select"} ${document.name}`} accessibilityState={{ selected: active }} contentMode="raw" key={document.key} onPress={() => toggle(ref)} size="md" style={[styles.documentButton, active && styles.selectedDocumentItem]} variant={active ? "ghost" : "secondary"}><FileIcon size="sm" /><Text numberOfLines={1} style={styles.documentButtonLabel}>{document.name}</Text></Button>;
         })}</View> : <View onLayout={({ nativeEvent }) => setGridWidth(nativeEvent.layout.width)} style={styles.imageGrid}>{renderedImages.map((image) => {
           const ref = { type: "image" as const, key: image.key }; const active = isSelected(ref);
           return <Button accessibilityLabel={`${active ? "Deselect" : "Select"} ${image.caption || image.filename}`} accessibilityState={{ selected: active }} contentMode="raw" key={image.key} onPress={() => toggle(ref)} size="xl" style={[styles.imageButton, { width: imageSize, height: imageSize }]} variant="ghost"><View style={[styles.imageFrame, active && styles.imageFrameSelected]}><Image accessibilityLabel={image.caption || image.filename} contentFit="cover" source={image.url} style={styles.image} transition={150} />{active ? <View pointerEvents="none" style={styles.selectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}</View></Button>;
         })}</View>}
-        {!loading && !error && (tab === "archive" ? visibleDocuments.length === 0 : visibleImages.length === 0) ? <Text style={styles.empty}>No {tab === "archive" ? "documents" : "images"} found.</Text> : null}
+        {!loading && !error && (activeTab === "archive" ? visibleDocuments.length === 0 : visibleImages.length === 0) ? <Text style={styles.empty}>No {activeTab === "archive" ? "documents" : "images"} found.</Text> : null}
       </ScrollView>
     </BottomSheet>
     <BottomSheet hideHeading onOpenChange={(next) => { if (!next) setFilterOpen(false); }} open={filterOpen} title="">

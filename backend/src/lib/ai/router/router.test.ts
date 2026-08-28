@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { askAction } from '@/lib/ai/actions/ask';
 import { newId } from '@/lib/ids';
 import { modelSchema, type Model } from '@/lib/db/models.node';
-import { modelActionSchema, type ModelAction } from '@/lib/db/model-actions.node';
 import { modelProviderSchema, type ModelProvider } from '@/lib/db/model-providers.node';
 import { providerSchema, type Provider } from '@/lib/db/providers.node';
 import type { ProviderAdapter } from '@/lib/ai/providers';
@@ -11,124 +11,129 @@ import type { RouterDataSource, RouterDependencies } from './types';
 import { NoEligibleRouteError } from './errors';
 
 const organizationKey = newId();
-function model(slug: string): Model { return modelSchema.parse({ key: newId(), slug, name: slug, description: 'Model', supportedUseCases: 'Agent execution', enabled: true }); }
-const openai = providerSchema.parse({ key: newId(), slug: 'openai', name: 'OpenAI', description: 'Provider', supportedUseCases: 'AI', handlerKey: 'openai', enabled: true });
-const adapter: ProviderAdapter = { id: 'openai', name: 'OpenAI', async execute() { throw new Error('not executed in selection tests'); } };
+const model = (slug: string): Model => modelSchema.parse({ key: newId(), slug, name: slug, description: 'Model', supportedUseCases: 'Agent execution', enabled: true });
+const provider = (slug: 'openai' | 'openrouter'): Provider => providerSchema.parse({ key: newId(), slug, name: slug, handlerKey: slug });
+const adapter = (id: 'openai' | 'openrouter'): ProviderAdapter => ({ id, name: id, async execute() { throw new Error('not executed in selection tests'); } });
 
-function fixture(overrides: { allowed?: string[]; modelActions?: ModelAction[]; modelProviders?: ModelProvider[]; models?: Model[]; providers?: Provider[] } = {}): RouterDependencies & { nano: Model; mini: Model } {
-  const nano = model('openai.gpt-5.4-nano');
-  const mini = model('openai.gpt-5.4-mini');
-  const models = overrides.models ?? [nano, mini];
-  const providers = overrides.providers ?? [openai];
-  const modelActions = overrides.modelActions ?? [
-    modelActionSchema.parse({ key: newId(), modelKey: nano.key, actionSlug: 'ask', priority: 100, enabled: true }),
-    modelActionSchema.parse({ key: newId(), modelKey: mini.key, actionSlug: 'embed', priority: 100, enabled: true }),
+function fixture(overrides: { allowed?: string[]; modelProviders?: ModelProvider[]; models?: Model[]; providers?: Provider[] } = {}): RouterDependencies & {
+  flash: Model;
+  luna: Model;
+  openai: Provider;
+  openrouter: Provider;
+} {
+  const flash = model('google.gemini-2.5-flash-lite');
+  const luna = model('openai.gpt-5.6-luna');
+  const openai = provider('openai');
+  const openrouter = provider('openrouter');
+  const models = overrides.models ?? [flash, luna];
+  const providers = overrides.providers ?? [openrouter, openai];
+  const modelProviders = overrides.modelProviders ?? [
+    modelProviderSchema.parse({ key: newId(), modelKey: flash.key, providerKey: openrouter.key, providerModelId: 'google/gemini-2.5-flash-lite', enabled: true }),
+    modelProviderSchema.parse({ key: newId(), modelKey: luna.key, providerKey: openai.key, providerModelId: 'gpt-5.6-luna', enabled: true }),
   ];
-  const modelProviders = overrides.modelProviders ?? models.map((entry) => modelProviderSchema.parse({ key: newId(), modelKey: entry.key, providerKey: openai.key, providerModelId: entry.slug.replace('openai.', ''), enabled: true }));
   const data: RouterDataSource = {
     async getModelBySlug(slug) { return models.find((entry) => entry.slug === slug) ?? null; },
-    async getModelByKey(key) { return models.find((entry) => entry.key === key) ?? null; },
     async getProviderBySlug(slug) { return providers.find((entry) => entry.slug === slug) ?? null; },
     async getProviderByKey(key) { return providers.find((entry) => entry.key === key) ?? null; },
-    async listModelActions(actionSlug) { return modelActions.filter((entry) => entry.actionSlug === actionSlug).sort((a, b) => b.priority - a.priority || a.key.localeCompare(b.key)); },
-    async listModelProviders(modelKey) { return modelProviders.filter((entry) => entry.modelKey === modelKey).sort((a, b) => a.providerKey.localeCompare(b.providerKey)); },
-    async listOrganizationProviderKeys() { return overrides.allowed ?? [openai.key]; },
+    async listModelProviders(modelKey) { return modelProviders.filter((entry) => entry.modelKey === modelKey); },
+    async listOrganizationProviderKeys() { return overrides.allowed ?? [openrouter.key, openai.key]; },
   };
-  return { data, adapters: { openai: adapter }, nano, mini };
+  return { data, adapters: { openai: adapter('openai'), openrouter: adapter('openrouter') }, flash, luna, openai, openrouter };
 }
 
-describe('priority-only persisted router', () => {
-  test('routes omitted/default ask to Flash Lite and explicit deep ask to Luna without forwarding mode', async () => {
-    const flash = model('google.gemini-2.5-flash-lite');
-    const luna = model('openai.gpt-5.6-luna');
-    const openrouter = providerSchema.parse({ key: newId(), slug: 'openrouter', name: 'OpenRouter', description: 'Provider', supportedUseCases: 'AI', handlerKey: 'openrouter', enabled: true });
-    const models = [flash, luna], providers = [openrouter, openai];
-    const modelActions = models.flatMap((entry, index) => ['ask', 'web-search'].map((actionSlug) => modelActionSchema.parse({ key: newId(), modelKey: entry.key, actionSlug, priority: 100 - index, enabled: true })));
-    const modelProviders = [
-      modelProviderSchema.parse({ key: newId(), modelKey: flash.key, providerKey: openrouter.key, providerModelId: 'google/gemini-2.5-flash-lite', enabled: true }),
-      modelProviderSchema.parse({ key: newId(), modelKey: luna.key, providerKey: openai.key, providerModelId: 'gpt-5.6-luna', enabled: true }),
-    ];
-    const data: RouterDataSource = {
-      async getModelBySlug(slug) { return models.find((entry) => entry.slug === slug) ?? null; }, async getModelByKey(key) { return models.find((entry) => entry.key === key) ?? null; },
-      async getProviderBySlug(slug) { return providers.find((entry) => entry.slug === slug) ?? null; }, async getProviderByKey(key) { return providers.find((entry) => entry.key === key) ?? null; },
-    async listModelActions(actionSlug) { return modelActions.filter((entry) => entry.actionSlug === actionSlug); }, async listModelProviders(modelKey) { return modelProviders.filter((entry) => entry.modelKey === modelKey); }, async listOrganizationProviderKeys() { return [openrouter.key, openai.key]; },
-    };
-    const calls: Array<{ provider: string; model: string; input: unknown }> = [];
-    const makeAdapter = (id: 'openai' | 'openrouter'): ProviderAdapter => ({ id, name: id, async execute<TInput, TOutput>(request: import('@/lib/ai/providers').ProviderExecuteRequest<TInput>) { calls.push({ provider: id, model: request.modelId, input: request.input }); return { output: { text: 'ok', toolCalls: [], stopReason: 'stop' } as TOutput, usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }, providerId: id, modelId: request.modelId, externalModelId: request.externalModelId }; } });
-    const input = { messages: [{ role: 'user' as const, content: [{ type: 'text' as const, text: 'Hello' }] }] };
-    await executeAsk(organizationKey, input, { data, adapters: { openrouter: makeAdapter('openrouter'), openai: makeAdapter('openai') } });
-    await executeAsk(organizationKey, { ...input, mode: 'deep' }, { data, adapters: { openrouter: makeAdapter('openrouter'), openai: makeAdapter('openai') } });
-    await executeAsk(organizationKey, { ...input, organizationProviderKey: openrouter.key }, { data, adapters: { openrouter: makeAdapter('openrouter'), openai: makeAdapter('openai') } });
-    await expect(executeAsk(organizationKey, { ...input, organizationProviderKey: openai.key }, { data, adapters: { openrouter: makeAdapter('openrouter'), openai: makeAdapter('openai') } })).rejects.toBeInstanceOf(NoEligibleRouteError);
-    await executeWebSearch(organizationKey, { prompt: 'Current facts' }, { data, adapters: { openrouter: makeAdapter('openrouter'), openai: makeAdapter('openai') } });
-    await executeWebSearch(organizationKey, { prompt: 'Current facts', mode: 'deep' }, { data, adapters: { openrouter: makeAdapter('openrouter'), openai: makeAdapter('openai') } });
-    await expect(executeAsk(organizationKey, { ...input, mode: 'deep', organizationProviderKey: openrouter.key }, { data })).rejects.toThrow('cannot be combined');
-    expect(calls.map(({ provider, model }) => [provider, model])).toEqual([['openrouter', 'google.gemini-2.5-flash-lite'], ['openai', 'openai.gpt-5.6-luna'], ['openrouter', 'google.gemini-2.5-flash-lite'], ['openrouter', 'google.gemini-2.5-flash-lite'], ['openai', 'openai.gpt-5.6-luna']]);
-    expect(calls.every(({ input: value }) => !('mode' in (value as Record<string, unknown>)))).toBe(true);
-    expect(calls.every(({ input: value }) => !('organizationProviderKey' in (value as Record<string, unknown>)))).toBe(true);
-  });
-
-  test('routes registered actions directly by slug', async () => {
+describe('action-definition router', () => {
+  test('uses descending code priority and falls back through operational catalog gates', async () => {
     const deps = fixture();
-    expect((await selectRoute({ mode: 'auto', organizationKey, actionSlug: 'ask' }, deps)).modelSlug).toBe('openai.gpt-5.4-nano');
-    expect((await selectRoute({ mode: 'auto', organizationKey, actionSlug: 'embed' }, deps)).modelSlug).toBe('openai.gpt-5.4-mini');
-  });
+    await expect(selectRoute({ mode: 'auto', organizationKey, actionSlug: 'ask' }, deps)).resolves.toMatchObject({
+      modelSlug: 'google.gemini-2.5-flash-lite',
+      providerSlug: 'openrouter',
+    });
 
-  test('uses descending modelAction priority with deterministic key tie-breaking', async () => {
-    const base = fixture();
-    const low = modelActionSchema.parse({ key: newId(), modelKey: base.nano.key, actionSlug: 'ask', priority: 10, enabled: true });
-    const high = modelActionSchema.parse({ key: newId(), modelKey: base.mini.key, actionSlug: 'ask', priority: 100, enabled: true });
-    const deps = fixture({ modelActions: [low, high], models: [base.nano, base.mini] });
-    expect((await selectRoute({ mode: 'auto', organizationKey, actionSlug: 'ask' }, deps)).modelKey).toBe(base.mini.key);
-
-    const tied = fixture();
-    const left = modelActionSchema.parse({ key: newId(), modelKey: tied.nano.key, actionSlug: 'ask', priority: 50, enabled: true });
-    const right = modelActionSchema.parse({ key: newId(), modelKey: tied.mini.key, actionSlug: 'ask', priority: 50, enabled: true });
-    tied.data!.listModelActions = async () => [right, left];
-    const expected = left.key.localeCompare(right.key) < 0 ? left.modelKey : right.modelKey;
-    expect((await selectRoute({ mode: 'auto', organizationKey, actionSlug: 'ask' }, tied)).modelKey).toBe(expected);
-  });
-
-  test('uses environment-backed OpenAI without organization credentials', async () => {
-    const deps = fixture({ allowed: [] });
-    await expect(selectRoute({ mode: 'auto', organizationKey, actionSlug: 'ask' }, deps)).resolves.toMatchObject({ providerSlug: 'openai', credentialSource: 'environment' });
-    await expect(selectRoute({ mode: 'fixed', organizationKey, actionSlug: 'ask', modelSlug: 'openai.gpt-5.4-nano', providerSlug: 'openai' }, deps)).resolves.toMatchObject({ providerSlug: 'openai', credentialSource: 'environment' });
-  });
-
-  test('routes every action supported by a static provider without an organization provider', async () => {
-    const embeddingModel = model('openai.text-embedding-3-small');
-    const openai = providerSchema.parse({ key: newId(), slug: 'openai', name: 'OpenAI', description: 'Provider', supportedUseCases: 'AI', handlerKey: 'openai', enabled: true });
-    const modelActions = ['embed'].map((actionSlug) => modelActionSchema.parse({ key: newId(), modelKey: embeddingModel.key, actionSlug, priority: 100, enabled: true }));
-    const modelProvider = modelProviderSchema.parse({ key: newId(), modelKey: embeddingModel.key, providerKey: openai.key, providerModelId: 'text-embedding-3-small', enabled: true });
-    const data: RouterDataSource = {
-      async getModelBySlug(slug) { return slug === embeddingModel.slug ? embeddingModel : null; },
-      async getModelByKey(key) { return key === embeddingModel.key ? embeddingModel : null; },
-      async getProviderBySlug(slug) { return slug === openai.slug ? openai : null; },
-      async getProviderByKey(key) { return key === openai.key ? openai : null; },
-      async listModelActions(actionSlug) { return modelActions.filter((entry) => entry.actionSlug === actionSlug); },
-      async listModelProviders(modelKey) { return modelKey === embeddingModel.key ? [modelProvider] : []; },
-      async listOrganizationProviderKeys() { return []; },
-    };
-
-    await expect(selectRoute({ mode: 'auto', organizationKey, actionSlug: 'embed' }, { data })).resolves.toMatchObject({
-      actionSlug: 'embed', modelSlug: 'openai.text-embedding-3-small', providerSlug: 'openai', credentialSource: 'environment',
+    deps.data!.listModelProviders = async (modelKey) => modelKey === deps.flash.key ? [] : [
+      modelProviderSchema.parse({ key: newId(), modelKey: deps.luna.key, providerKey: deps.openai.key, providerModelId: 'gpt-5.6-luna', enabled: true }),
+    ];
+    await expect(selectRoute({ mode: 'auto', organizationKey, actionSlug: 'ask' }, deps)).resolves.toMatchObject({
+      modelSlug: 'openai.gpt-5.6-luna',
+      providerSlug: 'openai',
     });
   });
 
-  test('model and fixed modes never silently change their requested route', async () => {
+  test('uses declaration order to break equal code-priority ties', async () => {
     const deps = fixture();
-    await expect(selectRoute({ mode: 'model', organizationKey, actionSlug: 'ask', modelSlug: 'openai.gpt-5.4-mini' }, deps)).rejects.toBeInstanceOf(NoEligibleRouteError);
-    const fixed = await selectRoute({ mode: 'fixed', organizationKey, actionSlug: 'ask', modelSlug: 'openai.gpt-5.4-nano', providerSlug: 'openai' }, deps);
-    expect(fixed).toMatchObject({ modelSlug: 'openai.gpt-5.4-nano', providerSlug: 'openai' });
+    const bindings = askAction.models as Array<{ provider: 'openai' | 'openrouter'; model: string; priority: number }>;
+    const priorities = bindings.map(({ priority }) => priority);
+    try {
+      bindings[0]!.priority = 50;
+      bindings[1]!.priority = 50;
+      expect((await selectRoute({ mode: 'auto', organizationKey, actionSlug: 'ask' }, deps)).modelSlug).toBe(bindings[0]!.model);
+    } finally {
+      bindings.forEach((binding, index) => { binding.priority = priorities[index]!; });
+    }
   });
 
-  test('filters disabled relation nodes even when a data source returns them', async () => {
+  test('model and fixed modes filter exact declared bindings', async () => {
     const deps = fixture();
-    deps.data!.listModelActions = async (actionSlug) => [modelActionSchema.parse({ key: newId(), modelKey: deps.nano.key, actionSlug, priority: 100, enabled: false })];
-    await expect(selectRoute({ mode: 'auto', organizationKey, actionSlug: 'ask' }, deps)).rejects.toBeInstanceOf(NoEligibleRouteError);
+    await expect(selectRoute({ mode: 'model', organizationKey, actionSlug: 'ask', modelSlug: 'openai.gpt-5.6-luna' }, deps)).resolves.toMatchObject({ providerSlug: 'openai' });
+    await expect(selectRoute({ mode: 'fixed', organizationKey, actionSlug: 'ask', modelSlug: 'google.gemini-2.5-flash-lite', providerSlug: 'openai' }, deps)).rejects.toBeInstanceOf(NoEligibleRouteError);
+    await expect(selectRoute({ mode: 'fixed', organizationKey, actionSlug: 'ask', modelSlug: 'google.gemini-2.5-flash-lite', providerSlug: 'openrouter' }, deps)).resolves.toMatchObject({ providerSlug: 'openrouter' });
+  });
 
-    const enabledDeps = fixture();
-    enabledDeps.data!.listModelProviders = async (modelKey) => [modelProviderSchema.parse({ key: newId(), modelKey, providerKey: openai.key, providerModelId: 'gpt-5.4-nano', enabled: false })];
-    await expect(selectRoute({ mode: 'auto', organizationKey, actionSlug: 'ask' }, enabledDeps)).rejects.toBeInstanceOf(NoEligibleRouteError);
+  test('uses only the exact provider declared for a model binding', async () => {
+    const deps = fixture();
+    const wrongRelation = modelProviderSchema.parse({ key: newId(), modelKey: deps.flash.key, providerKey: deps.openai.key, providerModelId: 'wrong-provider-model', enabled: true });
+    const exactRelation = modelProviderSchema.parse({ key: newId(), modelKey: deps.flash.key, providerKey: deps.openrouter.key, providerModelId: 'exact-provider-model', enabled: true });
+    deps.data!.listModelProviders = async (modelKey) => modelKey === deps.flash.key ? [wrongRelation, exactRelation] : [];
+    await expect(selectRoute({ mode: 'auto', organizationKey, actionSlug: 'ask' }, deps)).resolves.toMatchObject({
+      providerSlug: 'openrouter', providerModelId: 'exact-provider-model',
+    });
+  });
+
+  test('keeps explicit organization provider identity aligned with the candidate provider', async () => {
+    const deps = fixture();
+    await expect(selectRoute({ mode: 'auto', organizationKey, actionSlug: 'ask', organizationProviderKey: deps.openai.key }, deps)).resolves.toMatchObject({
+      modelSlug: 'openai.gpt-5.6-luna', providerSlug: 'openai', credentialSource: 'organization', orgProviderKey: deps.openai.key,
+    });
+    await expect(selectRoute({ mode: 'fixed', organizationKey, actionSlug: 'ask', modelSlug: 'google.gemini-2.5-flash-lite', providerSlug: 'openrouter', organizationProviderKey: deps.openai.key }, deps)).rejects.toBeInstanceOf(NoEligibleRouteError);
+  });
+
+  test('retains static provider routing without organization-provider permission', async () => {
+    const deps = fixture({ allowed: [] });
+    await expect(selectRoute({ mode: 'auto', organizationKey, actionSlug: 'ask' }, deps)).resolves.toMatchObject({ providerSlug: 'openrouter', credentialSource: 'environment' });
+    await expect(selectRoute({ mode: 'fixed', organizationKey, actionSlug: 'ask', modelSlug: 'openai.gpt-5.6-luna', providerSlug: 'openai' }, deps)).resolves.toMatchObject({ credentialSource: 'environment' });
+  });
+
+  test('rejects none and empty model policies before any catalog lookup', async () => {
+    let lookups = 0;
+    const fail = async () => { lookups += 1; throw new Error('catalog lookup must not run'); };
+    const data: RouterDataSource = {
+      getModelBySlug: fail, getProviderBySlug: fail, getProviderByKey: fail,
+      listModelProviders: fail, listOrganizationProviderKeys: fail,
+    };
+    await expect(selectRoute({ mode: 'auto', organizationKey, actionSlug: 'traverse' }, { data })).rejects.toBeInstanceOf(NoEligibleRouteError);
+    await expect(selectRoute({ mode: 'auto', organizationKey, actionSlug: 'extend-video' }, { data })).rejects.toBeInstanceOf(NoEligibleRouteError);
+    expect(lookups).toBe(0);
+  });
+
+  test('filters disabled model-provider relations returned by a data source', async () => {
+    const deps = fixture();
+    deps.data!.listModelProviders = async (modelKey) => [modelProviderSchema.parse({ key: newId(), modelKey, providerKey: modelKey === deps.flash.key ? deps.openrouter.key : deps.openai.key, providerModelId: 'disabled', enabled: false })];
+    await expect(selectRoute({ mode: 'auto', organizationKey, actionSlug: 'ask' }, deps)).rejects.toBeInstanceOf(NoEligibleRouteError);
+  });
+
+  test('executes default and deep action modes without forwarding routing fields', async () => {
+    const deps = fixture();
+    const calls: Array<{ provider: string; model: string; input: unknown }> = [];
+    const makeAdapter = (id: 'openai' | 'openrouter'): ProviderAdapter => ({ id, name: id, async execute<TInput, TOutput>(request: import('@/lib/ai/providers').ProviderExecuteRequest<TInput>) { calls.push({ provider: id, model: request.modelId, input: request.input }); return { output: { text: 'ok', toolCalls: [], stopReason: 'stop' } as TOutput, usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }, providerId: id, modelId: request.modelId, externalModelId: request.externalModelId }; } });
+    const options = { ...deps, adapters: { openrouter: makeAdapter('openrouter'), openai: makeAdapter('openai') } };
+    const input = { messages: [{ role: 'user' as const, content: [{ type: 'text' as const, text: 'Hello' }] }] };
+    await executeAsk(organizationKey, input, options);
+    await executeAsk(organizationKey, { ...input, mode: 'deep' }, options);
+    await executeWebSearch(organizationKey, { prompt: 'Current facts' }, options);
+    await executeWebSearch(organizationKey, { prompt: 'Current facts', mode: 'deep' }, options);
+    expect(calls.map(({ provider, model }) => [provider, model])).toEqual([
+      ['openrouter', 'google.gemini-2.5-flash-lite'], ['openai', 'openai.gpt-5.6-luna'],
+      ['openrouter', 'google.gemini-2.5-flash-lite'], ['openai', 'openai.gpt-5.6-luna'],
+    ]);
+    expect(calls.every(({ input: value }) => !('mode' in (value as Record<string, unknown>)))).toBe(true);
   });
 });
