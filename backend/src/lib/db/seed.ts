@@ -19,6 +19,7 @@ import { ACTION_DEFINITIONS } from '@/lib/ai/actions';
 import { COUNTRY_CATALOG } from '@/lib/travel/country-catalog';
 import { currentEmbeddingSchema, embedText } from '@/lib/embeddings';
 import { createHash } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 
 export type SeedResult = {
   collection: string;
@@ -379,6 +380,7 @@ async function upsertSeedProvider(seed: (typeof SEEDED_PROVIDERS)[number]): Prom
     await insertProvider(seed);
     return { collection: 'providers', key: seed.key, status: 'created' };
   }
+  if (existing.name === seed.name && existing.handlerKey === seed.handlerKey) return { collection: 'providers', key: existing.key, status: 'updated' };
 
   const patch: Partial<Omit<Provider, 'key' | 'embedding'>> = {
     name: seed.name,
@@ -394,6 +396,7 @@ async function upsertSeedModel(seed: (typeof SEEDED_MODELS)[number]): Promise<Se
     await insertModel(seed);
     return { collection: 'models', key: seed.key, status: 'created' };
   }
+  if (existing.name === seed.name && existing.description === seed.description && isDeepStrictEqual(existing.supportedUseCases, seed.supportedUseCases) && existing.enabled === seed.enabled) return { collection: 'models', key: existing.key, status: 'updated' };
 
   const patch: Partial<Omit<Model, 'key' | 'embedding'>> = {
     name: seed.name,
@@ -482,6 +485,7 @@ async function upsertSeedOrganization(seed: typeof SEEDED_ORGANIZATION): Promise
     });
     return { collection: 'organizations', key, status: 'created' };
   }
+  if (existing.name === seed.name && existing.is_root === seed.is_root && isDeepStrictEqual(existing.metadata, seed.metadata)) return { collection: 'organizations', key: existing.key, status: 'updated' };
 
   const patch: Partial<Omit<Organization, 'key' | 'embedding'>> = {
     name: seed.name,
@@ -507,6 +511,7 @@ async function upsertSeedOrchestrator(seed: (typeof SEEDED_ORCHESTRATOR_SOURCES)
     });
     return { collection: 'orchestrators', key, status: 'created' };
   }
+  if (existing.role === seed.role && isDeepStrictEqual(existing.skill, seed.skill)) return { collection: 'orchestrators', key: existing.key, status: 'updated' };
 
   const patch: Partial<Omit<Orchestrator, 'key' | 'embedding'>> = {
     role: seed.role,
