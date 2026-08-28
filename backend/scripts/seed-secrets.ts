@@ -6,6 +6,7 @@ import { getRootOrganizationId } from '@/lib/db/organizations.node';
 import { normalizeEmail } from '@/api/users';
 import { sha256 } from '@/lib/crypto';
 import { getUserByEmailHash } from '@/lib/db/users.node';
+import { isProviderError } from '@/lib/ai/providers/errors';
 import {
   getUserOrganizationByOrganizationAndUser,
   upsertUserOrganizationByKey,
@@ -200,6 +201,9 @@ async function main() {
 
 try {
   await main();
+} catch (error) {
+  if (!isProviderError(error) || !error.retryable) throw error;
+  console.warn(`Secret seed deferred because ${error.providerId} is unavailable (${error.code}).`);
 } finally {
   await closeDb();
 }
