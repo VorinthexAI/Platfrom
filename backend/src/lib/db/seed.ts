@@ -20,6 +20,7 @@ import { COUNTRY_CATALOG } from '@/lib/travel/country-catalog';
 import { currentEmbeddingSchema, embedText } from '@/lib/embeddings';
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
+import { isProviderError } from '@/lib/ai/providers/errors';
 
 export type SeedResult = {
   collection: string;
@@ -42,6 +43,16 @@ export interface AiRuntimeSeedUpserters {
 }
 
 const now = () => new Date().toISOString();
+
+async function updateSemanticSeed(collection: string, key: string, update: () => Promise<unknown>): Promise<SeedResult> {
+  try {
+    await update();
+  } catch (error) {
+    if (!isProviderError(error) || !error.retryable) throw error;
+    console.warn(`${collection}: semantic seed refresh deferred because ${error.providerId} is unavailable (${error.code}).`);
+  }
+  return { collection, key, status: 'updated' };
+}
 
 export const SEEDED_PROVIDERS = [
   {
@@ -386,8 +397,7 @@ async function upsertSeedProvider(seed: (typeof SEEDED_PROVIDERS)[number]): Prom
     name: seed.name,
     handlerKey: seed.handlerKey,
   };
-  await updateProvider(existing.key, patch);
-  return { collection: 'providers', key: existing.key, status: 'updated' };
+  return updateSemanticSeed('providers', existing.key, () => updateProvider(existing.key, patch));
 }
 
 async function upsertSeedModel(seed: (typeof SEEDED_MODELS)[number]): Promise<SeedResult> {
@@ -404,8 +414,7 @@ async function upsertSeedModel(seed: (typeof SEEDED_MODELS)[number]): Promise<Se
     supportedUseCases: seed.supportedUseCases,
     enabled: seed.enabled,
   };
-  await updatePersistedModel(existing.key, patch);
-  return { collection: 'models', key: existing.key, status: 'updated' };
+  return updateSemanticSeed('models', existing.key, () => updatePersistedModel(existing.key, patch));
 }
 
 async function upsertSeedModelAction(seed: (typeof SEEDED_MODEL_ACTIONS)[number]): Promise<SeedResult> {
@@ -493,8 +502,7 @@ async function upsertSeedOrganization(seed: typeof SEEDED_ORGANIZATION): Promise
     metadata: seed.metadata,
     updatedAt: now(),
   };
-  await updateOrganization(existing.key, patch);
-  return { collection: 'organizations', key: existing.key, status: 'updated' };
+  return updateSemanticSeed('organizations', existing.key, () => updateOrganization(existing.key, patch));
 }
 
 async function upsertSeedOrchestrator(seed: (typeof SEEDED_ORCHESTRATOR_SOURCES)[number]): Promise<SeedResult> {
@@ -518,8 +526,7 @@ async function upsertSeedOrchestrator(seed: (typeof SEEDED_ORCHESTRATOR_SOURCES)
     skill: seed.skill,
     updatedAt: now(),
   };
-  await updateOrchestrator(existing.key, patch);
-  return { collection: 'orchestrators', key: existing.key, status: 'updated' };
+  return updateSemanticSeed('orchestrators', existing.key, () => updateOrchestrator(existing.key, patch));
 }
 
 async function assignSeededFounderOrchestrators(rootOrganizationKey: string): Promise<SeedResult[]> {
@@ -564,7 +571,14 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
       results.push({ collection: 'countries', key: current.key, status: 'updated' });
       continue;
     }
-    const embedding = currentEmbeddingSchema.parse(await embedText({ text: country.name }));
+    let embedding: number[];
+    try {
+      embedding = currentEmbeddingSchema.parse(await embedText({ text: country.name }));
+    } catch (error) {
+      if (!isProviderError(error) || !error.retryable) throw error;
+      console.warn(`countries: semantic seed refresh for ${country.countryCode} deferred because ${error.providerId} is unavailable (${error.code}).`);
+      continue;
+    }
     const cursor = await db.query(`UPSERT { countryCode: @countryCode } INSERT @country UPDATE { name: @name, latitude: @latitude, longitude: @longitude, embedding: @embedding, semanticVersion: 1, semanticHash: @semanticHash } IN countries RETURN NEW._key`, { countryCode: country.countryCode, name: country.name, latitude: country.latitude, longitude: country.longitude, semanticHash, country: { _key: country.key, ...country, embedding, semanticVersion: 1, semanticHash }, embedding });
     results.push({ collection: 'countries', key: String(await cursor.next()), status: current ? 'updated' : 'created' });
   }
