@@ -694,6 +694,9 @@ if (import.meta.main) {
   try {
     const results = await seedCoreDbNodes();
     console.table(results);
+  } catch (error) {
+    if (!isProviderError(error) || !error.retryable) throw error;
+    console.warn(`Database seed deferred because ${error.providerId} is unavailable (${error.code}).`);
   } finally {
     await closeDb();
   }
