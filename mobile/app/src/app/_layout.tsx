@@ -60,7 +60,7 @@ export default function RootLayout() {
   useEffect(() => {
     if (status === "bootstrapping") return;
     const root = segments[0] as string | undefined;
-    const isPublicBookShare = root === "share" && segments[1] === "books";
+    const isPublicBookShare = root === "share" && (segments as readonly string[])[1] === "books";
     const isPublic = root === "auth" || root === "public" || isPublicBookShare || root === undefined;
     const isOnboarded = useAuthStore.getState().user?.isOnboarded === true;
     if (status === "unauthenticated" && root === "share" && !isPublicBookShare) {

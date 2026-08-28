@@ -9,7 +9,7 @@ const stream = await Bun.file(new URL("./public-book-share-stream.ts", import.me
 const publicApi = await Bun.file(new URL("./public-api-client.ts", import.meta.url)).text();
 
 test("keeps nested book shares public without changing Gallery activation returns", () => {
-  expect(layout).toContain('const isPublicBookShare = root === "share" && segments[1] === "books"');
+  expect(layout).toContain('const isPublicBookShare = root === "share" && (segments as readonly string[])[1] === "books"');
   expect(layout).toContain('root === "share" && !isPublicBookShare');
   expect(layout).toContain('isPublicBookShare || root === undefined');
   expect(layout).not.toContain("BookMiniPlayer");
