@@ -200,7 +200,7 @@ const inlineImageUrlSchema = z.string().max(28 * 1024 * 1024).regex(/^data:image
 
 export const imageCaptionInputSchema = z.object({
   imageUrls: z.array(z.union([httpImageUrlSchema, inlineImageUrlSchema])).min(1).max(MAX_IMAGE_CAPTION_URLS),
-  purpose: z.enum(['caption', 'document-transcription', 'document-reconciliation']).default('caption'),
+  purpose: z.enum(['caption', 'artwork-compliance', 'document-transcription', 'document-reconciliation']).default('caption'),
   referenceTexts: z.array(z.object({ primary: z.string().max(40_000), secondary: z.string().max(40_000) }).strict()).min(1).max(MAX_IMAGE_CAPTION_URLS).optional(),
 }).strict().superRefine((input, context) => {
   if (input.purpose === 'document-reconciliation' && input.referenceTexts?.length !== input.imageUrls.length) context.addIssue({ code: z.ZodIssueCode.custom, path: ['referenceTexts'], message: 'Reconciliation requires one text pair per image.' });

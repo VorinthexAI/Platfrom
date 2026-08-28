@@ -18,7 +18,7 @@ describe('book HTTP handlers', () => {
 
   test('registers all mobile book routes', async () => {
     const app = new Hono(); registerRoutes(app); const book = newId(); const chapter = newId();
-    for (const [method, path] of [['POST', '/assistant/respond'], ['POST', '/books/overview'], ['POST', '/books/topic-suggestions'], ['POST', '/books/goal-suggestions'], ['POST', '/books'], ['POST', `/books/${book}/detail`], ['POST', `/books/${book}/retry`], ['POST', `/books/${book}/cancel`], ['DELETE', `/books/${book}`], ['PATCH', `/books/${book}/chapters/${chapter}/progress`]]) {
+    for (const [method, path] of [['POST', '/assistant/respond'], ['POST', '/books/overview'], ['POST', '/books/topic-suggestions'], ['POST', '/books/goal-suggestions'], ['POST', '/books'], ['POST', `/books/${book}/detail`], ['POST', `/books/${book}/extension/preview`], ['POST', `/books/${book}/extension`], ['POST', `/books/${book}/share/detail`], ['POST', `/books/${book}/share/update`], ['POST', `/books/${book}/retry`], ['POST', `/books/${book}/cancel`], ['POST', `/books/${book}/favorite`], ['DELETE', `/books/${book}`], ['PATCH', `/books/${book}/chapters/${chapter}/progress`]]) {
       expect((await app.request(path, { method, headers: { 'content-type': 'application/json' }, body: '{}' })).status).toBe(401);
     }
   });
@@ -68,6 +68,61 @@ describe('book HTTP handlers', () => {
     const response = await app.request('/books', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
     expect(response.status).toBe(409);
     expect(await response.json()).toMatchObject({ error: { code: 'BOOK_CONFLICT' } });
+  });
+
+  test('keeps strict favorite HTTP and Core callers on the same canonical service method', async () => {
+    const organizationKey = newId(); const scopeKey = newId(); const userKey = newId(); const bookKey = newId(); const calls: unknown[][] = [];
+    const service = { setFavorite: async (...args: unknown[]) => { calls.push(args); return { key: bookKey, isFavorite: true }; } } as never;
+    const app = new Hono(); app.post('/books/:bookKey/favorite', createBookHandlers({ service, getIdentity: async () => ({ key: userKey, identityType: 'user' }) }).setFavorite);
+    const body = { organizationKey, scopeKey, isFavorite: true };
+    expect((await app.request(`/books/${bookKey}/favorite`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, userKey }) })).status).toBe(400);
+    expect((await app.request(`/books/${bookKey}/favorite`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).status).toBe(200);
+    const domain = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const capability = defaultAssistantCapabilityRegistry.resolve('book-workspace').find(({ definition }) => definition.name === 'book.favorite')!;
+    await expect(capability.execute({ bookKey, isFavorite: false, scopeKey }, { domain, books: service } as any)).rejects.toThrow('Unrecognized key');
+    await capability.execute({ bookKey, isFavorite: true }, { domain, books: service } as any);
+    expect(calls).toEqual([[bookKey, body, userKey], [bookKey, body, userKey]]);
+    expect(capability.mutationWorkspace).toBe('ascend');
+  });
+
+  test('keeps extension HTTP and Core callers on the canonical service with trusted context and request key injection', async () => {
+    const organizationKey = newId(); const scopeKey = newId(); const userKey = newId(); const bookKey = newId(); const calls: unknown[][] = [];
+    const service: any = { extend: async (...args: unknown[]) => { calls.push(args); return args[1] && (args[1] as any).mode === 'preview' ? { titles: ['Next'] } : { key: bookKey }; } };
+    const handlers = createBookHandlers({ service, getIdentity: async () => ({ key: userKey, identityType: 'user' }) }); const app = new Hono(); app.post('/books/:bookKey/extension/preview', handlers.extensionPreview); app.post('/books/:bookKey/extension', handlers.extensionGenerate);
+    const context = { organizationKey, scopeKey };
+    expect((await app.request(`/books/${bookKey}/extension/preview`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...context, chapterCount: 1 }) })).status).toBe(200);
+    expect((await app.request(`/books/${bookKey}/extension`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...context, chapterCount: 1, titles: ['Next'], requestKey: 'http-request' }) })).status).toBe(202);
+    const domain = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const capability = defaultAssistantCapabilityRegistry.resolve('book-workspace').find(({ definition }) => definition.name === 'book.extend')!;
+    await expect(capability.execute({ mode: 'generate', bookKey, chapterCount: 1, titles: ['Next'], userKey }, { domain, books: service, requestKey: 'core-request' } as any)).rejects.toThrow('Unrecognized key');
+    await capability.execute({ mode: 'preview', bookKey, chapterCount: 1 }, { domain, books: service } as any); await capability.execute({ mode: 'generate', bookKey, chapterCount: 1, titles: ['Next'] }, { domain, books: service, requestKey: 'core-request' } as any);
+    expect(calls[0]?.slice(0, 3)).toEqual([bookKey, { ...context, chapterCount: 1, mode: 'preview' }, userKey]);
+    expect(calls[1]?.slice(0, 3)).toEqual([bookKey, { ...context, chapterCount: 1, titles: ['Next'], requestKey: 'http-request', mode: 'generate' }, userKey]);
+    expect(calls[2]?.slice(0, 3)).toEqual([bookKey, { ...context, mode: 'preview', chapterCount: 1 }, userKey]);
+    expect(calls[3]?.slice(0, 3)).toEqual([bookKey, { ...context, mode: 'generate', chapterCount: 1, titles: ['Next'], requestKey: 'core-request' }, userKey]);
+    expect(capability.mutationWorkspace).toBeInstanceOf(Function); expect((capability.mutationWorkspace as any)({ mode: 'preview' })).toBeUndefined(); expect((capability.mutationWorkspace as any)({ mode: 'generate' })).toBe('ascend');
+  });
+
+  test('keeps strict share HTTP and Core callers on canonical methods while Core redacts the URL', async () => {
+    const organizationKey = newId(); const scopeKey = newId(); const userKey = newId(); const bookKey = newId(); const calls: unknown[][] = []; const url = `https://vorinthex.com/share/books/${'A'.repeat(43)}`;
+    const service: any = { shareDetail: async (...args: unknown[]) => { calls.push(['detail', ...args]); return { key: newId(), url, active: false, createdAt: '2026-08-28T12:00:00.000Z', updatedAt: '2026-08-28T12:00:00.000Z' }; }, setShareActive: async (...args: unknown[]) => { calls.push(['update', ...args]); return { key: newId(), url, active: true, createdAt: '2026-08-28T12:00:00.000Z', updatedAt: '2026-08-28T12:00:00.000Z' }; } };
+    const handlers = createBookHandlers({ service, getIdentity: async () => ({ key: userKey, identityType: 'user' }) }); const app = new Hono(); app.post('/books/:bookKey/share/detail', handlers.shareDetail); app.post('/books/:bookKey/share/update', handlers.shareUpdate);
+    expect((await app.request(`/books/${bookKey}/share/detail`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey, forged: true }) })).status).toBe(400);
+    const response = await app.request(`/books/${bookKey}/share/detail`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey }) }); expect(JSON.stringify(await response.json())).toContain(url);
+    const domain = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const detail = defaultAssistantCapabilityRegistry.resolve('book-workspace').find(({ definition }) => definition.name === 'book.share.detail')!; const update = defaultAssistantCapabilityRegistry.resolve('book-workspace').find(({ definition }) => definition.name === 'book.share.update')!;
+    expect(JSON.stringify(await detail.execute({ bookKey }, { domain, books: service } as any))).not.toContain(url);
+    expect(JSON.stringify(await update.execute({ bookKey, active: true }, { domain, books: service } as any))).not.toContain(url);
+    expect(update.mutationWorkspace).toBe('ascend');
+    expect(calls).toEqual([['detail', bookKey, { organizationKey, scopeKey }, userKey], ['detail', bookKey, { organizationKey, scopeKey }, userKey], ['update', bookKey, { organizationKey, scopeKey, active: true }, userKey]]);
+  });
+
+  test('maps favorite deletion to a stable conflict', async () => {
+    const bookKey = newId(); const app = new Hono();
+    app.delete('/books/:bookKey', createBookHandlers({ service: { delete: async () => { throw new BookRepositoryError('favorite', 'Unfavorite the audio book before deleting it.'); } } as never, getIdentity: async () => ({ key: newId(), identityType: 'user' }) }).delete);
+    const response = await app.request(`/books/${bookKey}`, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: '{}' });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: { code: 'BOOK_FAVORITE', message: 'Unfavorite the audio book before deleting it.' } });
   });
 
   test('keeps HTTP and Core retry, cancel, and delete on the same authorized service methods', async () => {

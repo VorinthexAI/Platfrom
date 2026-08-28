@@ -101,11 +101,11 @@ export const CORE_CAPABILITIES = [
     id: "ascend",
     name: "Ascend",
     icon: "/logos/entities/capability-ascend.png",
-    description: "Personalized books researched and created around your goals.",
+    description: "Personalized audio books researched and created around your goals.",
     promise: "A learning experience written specifically for you.",
     details: [
       "Tell Ascend what you want to learn or improve. It researches the subject, understands your goals, builds a unique structure, writes every chapter, and creates a cover.",
-      "Each new book can build on what you have already explored, avoiding repetition and taking your learning deeper over time.",
+      "Each new audio book can build on what you have already explored, avoiding repetition and taking your learning deeper over time.",
     ],
     connection:
       "Ascend uses knowledge, communication and discoveries a user chooses to connect, grounding guidance in actual priorities.",

@@ -57,8 +57,9 @@ interface AppAudioDependencies {
 }
 
 const voiceMap: Record<AppAudioVoice, SpeechInput['voice']> = { calm: 'sage', clear: 'alloy', warm: 'coral' };
+export const APP_AUDIO_WORDS_PER_MINUTE = 162;
 const words = (value: string) => value.trim().split(/\s+/).filter(Boolean).length;
-const fallbackDurationSeconds = (text: string, pace: number) => Math.max(1, Math.ceil(words(text) / (2.7 * pace)));
+const fallbackDurationSeconds = (text: string, pace: number) => Math.max(1, Math.ceil(words(text) / (APP_AUDIO_WORDS_PER_MINUTE / 60 * pace)));
 
 function member(context: ToolContext) {
   if (context.principal.kind !== 'member') throw new ContentError('CONTENT_UNAUTHORIZED', 'A resolved human principal is required.', 'app.audio', { action: 'authorization' });

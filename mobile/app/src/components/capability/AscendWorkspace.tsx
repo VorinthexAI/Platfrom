@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { AudioStatus } from "expo-audio";
 import { randomUUID } from "expo-crypto";
+import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useEffect, useRef, useState } from "react";
@@ -21,11 +21,12 @@ import {
   BottomSheet,
   BottomSheetItem,
 } from "@vorinthex/shared/ui/bottom-sheet";
+import { ActionPill } from "@vorinthex/shared/ui/action-pill";
 import { AiTextEditor } from "@vorinthex/shared/ui/ai-text-editor";
-import { Button } from "@vorinthex/shared/ui/button";
+import { Button, ButtonSizeProvider } from "@vorinthex/shared/ui/button";
 import { CoreComposer } from "@vorinthex/shared/ui/core-composer";
-import { Slider } from "@vorinthex/shared/ui/slider";
 import { Skeleton } from "@vorinthex/shared/ui/skeleton";
+import { Slider } from "@vorinthex/shared/ui/slider";
 import { Switch } from "@vorinthex/shared/ui/switch";
 import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
@@ -34,69 +35,60 @@ import {
   CheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
-  ClockIcon,
   CloseIcon,
   FileIcon,
   FilterIcon,
-  FolderIcon,
   MoreHorizontalIcon,
   PauseIcon,
   PlayIcon,
   PlusIcon,
   SearchIcon,
   SendIcon,
-  TrashIcon,
-  VolumeIcon,
 } from "@vorinthex/shared/ui/icons-mobile";
 
 import { ChromeIcon } from "@/components/ChromeIcon";
 import { SearchHistorySheet } from "@/components/SearchHistorySheet";
+import { BookSharing } from "@/components/capability/BookSharing";
+import { EmailAttachmentPicker, type EmailAttachmentLabels } from "@/components/capability/EmailAttachmentPicker";
 import { WorkspaceAppSwitcher } from "@/components/capability/WorkspaceAppSwitcher";
 import { assistantIconSource } from "@/data/capability-icons";
 import { enhanceAppTextForContext, translateAppTextForContext } from "@/lib/app-transformation-client";
 import { languageForCountryCode } from "@/lib/auth-helpers";
+import { audioTimelineDuration, audioTimelinePosition, formatAudioTime, resolveAudioTimelinePosition } from "@/lib/audio-playback-timeline";
 import { useBookPlayback } from "@/lib/book-playback";
 import { restoredBookDraft, retryBookCreateRequestKey, type FailedBookCreate } from "@/lib/book-create-retry";
-import {
-  activeTranscriptPhrase,
-  buildTranscriptPhrases,
-} from "@/lib/book-transcript";
 import {
   askBookAssistant,
   cancelBook,
   createBook,
   deleteBook,
+  extendBook,
   fetchBookDetail,
   fetchBooksOverview,
   getBooksContext,
+  previewBookExtension,
   retryBook,
+  setBookFavorite,
   suggestBookGoals,
   suggestBookTopics,
   type Book,
   type BookChapter,
+  BookClientError,
   type BookDetail,
   type BookStatus,
   type CreateBookInput,
+  type ExtensionChapterCount,
 } from "@/lib/books-client";
-import {
-  deleteContentSearchHistory,
-  getContentContext,
-  listContentFolderTree,
-  searchContentMatches,
-  type ContentDocument,
-  type ContentSearchHistoryItem,
-} from "@/lib/content-client";
-import {
-  contentFolderStack,
-  contentQueryKeys,
-  getContentLocation,
-} from "@/lib/content-query-cache";
+import { deleteContentSearchHistory, getContentContext, type ContentSearchHistoryItem } from "@/lib/content-client";
+import { attachmentIdentity } from "@/lib/email-attachment-picker";
+import type { EmailAttachmentRef } from "@/lib/email-client";
 import {
   addCachedBook,
   ascendQueryKeys,
   invalidateAssistantChanges,
   mergeBookDetailProgress,
   patchCachedBook,
+  patchCachedBookMetadata,
   removeCachedBook,
 } from "@/lib/workspace-query-cache";
 import {
@@ -123,20 +115,12 @@ const CHAPTER_OPTIONS = [
   { count: 25, label: "Standard" },
   { count: 50, label: "Deep" },
 ] as const;
-const LANGUAGES = ["English", "Swedish", "Spanish", "French", "German", "Portuguese"] as const;
-const SPEEDS = [0.75, 1, 1.25, 1.5, 2] as const;
-const SLEEP_MINUTES = [0, 10, 20, 30, 45, 60] as const;
-const MAX_SOURCE_DOCUMENTS = 50;
+const EXTENSION_CHAPTER_OPTIONS = [1, 3, 5] as const;
+const MAX_CONTEXT_DOCUMENTS = 50;
 const DEFAULT_NARRATOR = { key: "clear" as const, name: "Clear" };
-const TONES = [
-  "Clear and practical",
-  "Warm and encouraging",
-  "Rigorous and analytical",
-  "Narrative and vivid",
-] as const;
 const CORE_PROMPTS = [
   "Write a field guide to deep work",
-  "Create a book about lucid dreaming",
+  "Create an audio book about lucid dreaming",
   "Turn my idea into a short handbook",
 ] as const;
 const GRADIENTS = [
@@ -145,20 +129,23 @@ const GRADIENTS = [
   ["#3B3A38", "#171512", "#050504"],
 ] as const;
 
+function formatBookDuration(minutes: number) {
+  const safeMinutes = Math.max(1, Math.ceil(minutes));
+  const hours = Math.floor(safeMinutes / 60);
+  const remainingMinutes = safeMinutes % 60;
+  return [hours ? `${hours}h` : "", remainingMinutes ? `${remainingMinutes}${remainingMinutes === 1 ? "min" : "mins"}` : ""].filter(Boolean).join(" ");
+}
+
 type LibrarySheet =
   | "actions"
-  | "create"
-  | "createTopicCustom"
-  | "createGoal"
-  | "createGoalCustom"
-  | "createKnowledge"
-  | "createDetails"
-  | "sources"
   | "filter"
   | "searchHistory"
   | "reader"
-  | "sleep"
+  | "chapterRead"
+  | "bookSummary"
   | "bookActions"
+  | "bulkActions"
+  | "bulkDelete"
   | "delete";
 type Draft = CreateBookInput;
 type BriefEditorTarget = "topic" | "goal";
@@ -172,14 +159,13 @@ const INITIAL_DRAFT: Draft = {
   topic: "",
   goal: "",
   currentKnowledge: "",
-  chapterCount: 25,
+  chapterCount: 10,
   language: "English",
-  writingTone: TONES[0]!.toString(),
+  writingTone: "Clear and practical",
   narratorVoiceKey: DEFAULT_NARRATOR.key,
   narrationPace: 1,
   archiveDocumentKeys: [],
   chapterImages: true,
-  additionalInstructions: "",
 };
 
 function errorMessage(error: unknown) {
@@ -187,19 +173,15 @@ function errorMessage(error: unknown) {
     ? error.message
     : "The request could not be completed.";
 }
-function formatTime(seconds: number) {
-  const safe = Math.max(0, Math.floor(seconds));
-  return `${Math.floor(safe / 60)}:${String(safe % 60).padStart(2, "0")}`;
-}
 function statusLabel(status: BookStatus) {
   return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
-function Cover({ book, index = 0 }: { book: Book; index?: number }) {
+export function Cover({ book, index = 0 }: { book: Book; index?: number }) {
   if (book.coverUrl)
     return (
       <Image
-        accessibilityLabel={`${book.title} cover`}
+        accessibilityLabel={`${book.title} audio book cover`}
         contentFit="cover"
         source={book.coverUrl}
         style={styles.cover}
@@ -216,8 +198,8 @@ function Cover({ book, index = 0 }: { book: Book; index?: number }) {
   );
 }
 
-function ChapterCard({ chapter, reducedMotion, width, onPress }: { chapter: BookChapter; reducedMotion: boolean; width: number; onPress: () => void }) {
-  const entrance = useRef(new Animated.Value(reducedMotion ? 1 : 0)).current;
+export function ChapterCard({ chapter, reducedMotion, width, onPress }: { chapter: BookChapter; reducedMotion: boolean; width: number; onPress?: () => void }) {
+  const [entrance] = useState(() => new Animated.Value(reducedMotion ? 1 : 0));
   useEffect(() => {
     if (reducedMotion) { entrance.setValue(1); return; }
     const animation = Animated.spring(entrance, { toValue: 1, damping: 15, stiffness: 180, mass: 0.8, useNativeDriver: true });
@@ -226,268 +208,42 @@ function ChapterCard({ chapter, reducedMotion, width, onPress }: { chapter: Book
   }, [entrance, reducedMotion]);
   return (
     <Animated.View style={{ width, height: (width * 16) / 9, opacity: entrance, transform: [{ scale: entrance.interpolate({ inputRange: [0, 1], outputRange: [0.88, 1] }) }] }}>
-      <Button accessibilityLabel={`Chapter ${chapter.position}, ${chapter.title}${chapter.isCompleted ? ", completed" : ""}`} contentMode="raw" onPress={onPress} shape="rounded" size="md" style={[styles.chapterCard, styles.chapterCardFill]} variant="ghost">
+      <Button accessibilityLabel={`Chapter ${chapter.position}, ${chapter.title}. ${chapter.description}${chapter.isCompleted ? ", completed" : ""}`} contentMode="raw" disabled={!onPress} onPress={onPress} shape="rounded" size="md" style={[styles.chapterCard, styles.chapterCardFill]} variant="ghost">
         {chapter.imageUrl ? <Image contentFit="cover" source={chapter.imageUrl} style={styles.cover} /> : <LinearGradient colors={GRADIENTS[(chapter.position - 1) % GRADIENTS.length]!} style={styles.cover} />}
         <View style={styles.cardShade} />
         <View style={styles.cardCopy}>
           <Text style={styles.chapterNumber}>{String(chapter.position).padStart(2, "0")}</Text>
-          <Text numberOfLines={3} style={styles.cardTitle}>{chapter.title}</Text>
-          <Text style={styles.cardStatus}>{chapter.isCompleted ? "Completed" : `${chapter.estimatedMinutes ?? Math.ceil((chapter.audioDurationSeconds ?? 0) / 60)} min`}</Text>
+          <Text numberOfLines={2} style={styles.cardTitle}>{chapter.title}</Text>
+          {!chapter.content || !chapter.audioUrl ? <Text numberOfLines={4} style={styles.cardSummary}>{chapter.description}</Text> : null}
         </View>
-        {chapter.isCompleted ? <View style={styles.check}><CheckIcon size="sm" variant="inverse" /></View> : null}
       </Button>
     </Animated.View>
   );
 }
 
 type ReaderProps = {
-  audio: AudioStatus;
   chapter?: BookChapter;
-  chapterIndex: number;
-  currentTime: number;
-  detail: BookDetail;
-  duration: number;
-  onBack: () => void;
-  onMoveChapter: (offset: number) => void;
-  onRefreshUrl: () => void;
-  onSeek: (seconds: number) => void;
-  onSleep: () => void;
-  onSpeed: () => void;
-  onToggle: () => void;
-  ordered: BookChapter[];
-  playbackError?: string;
-  persistenceError?: string;
-  refreshingUrl: boolean;
-  sleepMinutes: number;
-  speed: number;
 };
 
-function Reader({
-  audio,
-  chapter,
-  chapterIndex,
-  currentTime,
-  detail,
-  duration,
-  onBack,
-  onMoveChapter,
-  onRefreshUrl,
-  onSeek,
-  onSleep,
-  onSpeed,
-  onToggle,
-  ordered,
-  playbackError,
-  persistenceError,
-  refreshingUrl,
-  sleepMinutes,
-  speed,
-}: ReaderProps) {
-  const phrases = buildTranscriptPhrases(chapter?.content ?? "");
-  const activePhrase = activeTranscriptPhrase(
-    phrases,
-    duration ? currentTime / duration : 0,
-  );
-  const transcriptScroll = useRef<ScrollView>(null);
-  const phraseOffsets = useRef(new Map<number, number>());
-  const [reducedMotion, setReducedMotion] = useState(false);
-  useEffect(() => {
-    let mounted = true;
-    void AccessibilityInfo.isReduceMotionEnabled().then((enabled) => {
-      if (mounted) setReducedMotion(enabled);
-    });
-    const subscription = AccessibilityInfo.addEventListener(
-      "reduceMotionChanged",
-      setReducedMotion,
-    );
-    return () => {
-      mounted = false;
-      subscription.remove();
-    };
-  }, []);
-  useEffect(() => {
-    if (!audio.playing || activePhrase < 0) return;
-    const y = phraseOffsets.current.get(activePhrase);
-    if (y !== undefined)
-      transcriptScroll.current?.scrollTo({
-        y: Math.max(0, y - 120),
-        animated: !reducedMotion,
-      });
-  }, [activePhrase, audio.playing, reducedMotion]);
+export function Reader({ chapter }: ReaderProps) {
   return (
-    <View style={styles.reader}>
-      <View style={styles.readerHeader}>
-        <Button
-          accessibilityLabel="Back to book"
-          contentMode="raw"
-          onPress={onBack}
-          size="md"
-          variant="icon"
-        >
-          <ChevronLeftIcon size="sm" />
-        </Button>
-        <View style={styles.readerIdentity}>
-          <Text style={styles.micro}>
-            CHAPTER {chapter?.position ?? 0} OF {ordered.length}
-          </Text>
-          <Text numberOfLines={1} style={styles.readerTitle}>
-            {chapter?.title ?? "Chapter"}
-          </Text>
-        </View>
-        <Button
-          accessibilityLabel="Sleep timer"
-          contentMode="raw"
-          onPress={onSleep}
-          size="md"
-          variant="icon"
-        >
-          <ClockIcon size="sm" variant={sleepMinutes ? "accent" : "default"} />
-        </Button>
-      </View>
-      <ScrollView
-        ref={transcriptScroll}
-        contentContainerStyle={styles.transcript}
-        showsVerticalScrollIndicator={false}
-      >
-        {phrases.length ? (
-          phrases.map((phrase, index) => (
-            <Text
-              key={`${index}-${phrase.text.slice(0, 16)}`}
-              onLayout={({ nativeEvent }) =>
-                phraseOffsets.current.set(index, nativeEvent.layout.y)
-              }
-              selectable
-              style={[
-                styles.phrase,
-                index === activePhrase && styles.activePhrase,
-                index < activePhrase && styles.pastPhrase,
-              ]}
-            >
-              {phrase.text}
-            </Text>
-          ))
-        ) : (
-          <Text selectable style={styles.chapterBody}>
-            {chapter?.content || "Transcript is unavailable for this chapter."}
-          </Text>
-        )}
-      </ScrollView>
-      <View style={styles.playerPanel}>
-        {playbackError || audio.error ? (
-          <View accessibilityRole="alert" style={styles.playerNotice}>
-            <Text numberOfLines={2} style={styles.noticeText}>
-              {playbackError ?? "Audio needs a fresh connection."}
-            </Text>
-            <Button
-              disabled={refreshingUrl}
-              loading={refreshingUrl}
-              onPress={onRefreshUrl}
-              size="md"
-              variant="secondary"
-            >
-              Retry
-            </Button>
-          </View>
-        ) : null}
-        {audio.isBuffering ? (
-          <Text accessibilityLiveRegion="polite" style={styles.buffering}>
-            Buffering audio...
-          </Text>
-        ) : null}
-        {persistenceError ? (
-          <Text
-            accessibilityLiveRegion="polite"
-            style={styles.persistenceNotice}
-          >
-            {persistenceError}
-          </Text>
-        ) : null}
-        <Slider
-          accessibilityLabel="Chapter position"
-          disabled={!duration || Boolean(audio.error) || Boolean(playbackError)}
-          max={Math.max(1, duration)}
-          min={0}
-          onSlidingComplete={onSeek}
-          value={currentTime}
-        />
-        <View style={styles.timeRow}>
-          <Text style={styles.time}>{formatTime(currentTime)}</Text>
-          <Text style={styles.time}>
-            -{formatTime(Math.max(0, duration - currentTime))}
-          </Text>
-        </View>
-        <View style={styles.playbackRow}>
-          <Button
-            accessibilityLabel="Previous chapter"
-            contentMode="raw"
-            disabled={chapterIndex <= 0}
-            onPress={() => onMoveChapter(-1)}
-            size="md"
-            variant="icon"
-          >
-            <ChevronLeftIcon />
-          </Button>
-          <Button
-            accessibilityLabel="Skip back 15 seconds"
-            onPress={() => onSeek(currentTime - 15)}
-            size="md"
-            variant="secondary"
-          >
-            -15
-          </Button>
-          <Button
-            accessibilityLabel={audio.playing ? "Pause" : "Play"}
-            contentMode="raw"
-            disabled={
-              !chapter?.audioUrl ||
-              Boolean(audio.error) ||
-              Boolean(playbackError)
-            }
-            onPress={onToggle}
-            size="md"
-            style={styles.playButton}
-            variant="primary"
-          >
-            {audio.playing ? (
-              <PauseIcon variant="inverse" />
-            ) : (
-              <PlayIcon variant="inverse" />
-            )}
-          </Button>
-          <Button
-            accessibilityLabel="Skip forward 15 seconds"
-            onPress={() => onSeek(currentTime + 15)}
-            size="md"
-            variant="secondary"
-          >
-            +15
-          </Button>
-          <Button
-            accessibilityLabel="Next chapter"
-            contentMode="raw"
-            disabled={chapterIndex < 0 || chapterIndex >= ordered.length - 1}
-            onPress={() => onMoveChapter(1)}
-            size="md"
-            variant="icon"
-          >
-            <ChevronRightIcon />
-          </Button>
-        </View>
-        <View style={styles.secondaryControls}>
-          <Button
-            icon={<VolumeIcon size="sm" />}
-            onPress={onSpeed}
-            size="md"
-            variant="secondary"
-          >
-            {speed}x
-          </Button>
-          <Text numberOfLines={1} style={styles.readerBook}>
-            {detail.book.title}
-          </Text>
-        </View>
-      </View>
+    <View style={styles.chapterSummaryPanel}>
+      <Text selectable style={styles.chapterSummaryText}>{chapter?.description || "Summary is unavailable for this chapter."}</Text>
     </View>
+  );
+}
+
+function ChapterReading({ chapter }: { chapter?: BookChapter }) {
+  const paragraphs = (chapter?.content ?? "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/\\n/g, "\n")
+    .split(/\n\s*\n|\n+/)
+    .map((paragraph) => paragraph.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  return (
+    <ScrollView contentContainerStyle={styles.chapterReadingContent} showsVerticalScrollIndicator={false} style={styles.chapterReadingScroll}>
+      {paragraphs.length ? paragraphs.map((paragraph, index) => <Text key={index} selectable style={styles.chapterReadingParagraph}>{paragraph}</Text>) : <Text style={styles.chapterReadingUnavailable}>Full chapter text is unavailable.</Text>}
+    </ScrollView>
   );
 }
 
@@ -504,13 +260,31 @@ export function AscendWorkspace() {
   const [chapterGridWidth, setChapterGridWidth] = useState(0);
   const [sheet, setSheet] = useState<LibrarySheet>();
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [createTopicOpen, setCreateTopicOpen] = useState(false);
+  const [createTopicCustomOpen, setCreateTopicCustomOpen] = useState(false);
+  const [createGoalOpen, setCreateGoalOpen] = useState(false);
+  const [createGoalCustomOpen, setCreateGoalCustomOpen] = useState(false);
+  const [createDetailsOpen, setCreateDetailsOpen] = useState(false);
+  const [contextPickerOpen, setContextPickerOpen] = useState(false);
+  const [contextLabels, setContextLabels] = useState<EmailAttachmentLabels>({});
+  const [contextGridWidth, setContextGridWidth] = useState(0);
   const [selectedBookKey, setSelectedBookKey] = useState<string>();
-  const [autoOpenBookKey, setAutoOpenBookKey] = useState<string>();
+  const [readerChapterKey, setReaderChapterKey] = useState<string>();
+  const [readingChapterKey, setReadingChapterKey] = useState<string>();
+  const [playbackScrubValue, setPlaybackScrubValue] = useState<number>();
+  const [playbackIslandDismissed, setPlaybackIslandDismissed] = useState(false);
+  const [sharingBook, setSharingBook] = useState<Book>();
+  const [extensionOpen, setExtensionOpen] = useState(false);
+  const [extensionChapterCount, setExtensionChapterCount] = useState<ExtensionChapterCount>(1);
+  const [extensionTitles, setExtensionTitles] = useState<string[]>([]);
+  const [extensionPreviewReady, setExtensionPreviewReady] = useState(false);
+  const [extensionError, setExtensionError] = useState<string>();
+  const [selectedBookKeys, setSelectedBookKeys] = useState<string[]>([]);
+  const [bulkLoading, setBulkLoading] = useState(false);
   const [bookPageOpen, setBookPageOpen] = useState(false);
   const [revealedChapterCount, setRevealedChapterCount] = useState(0);
   const [reducedChapterMotion, setReducedChapterMotion] = useState(false);
   const [query, setQuery] = useState("");
-  const [chapterQuery, setChapterQuery] = useState("");
   const [showOnlyFavorites, setShowOnlyFavorites] = useState(false);
   const [rootSearchFocusable, setRootSearchFocusable] = useState(true);
   const [aiInputFocused, setAiInputFocused] = useState(false);
@@ -523,8 +297,6 @@ export function AscendWorkspace() {
   const [topicSuggestionsError, setTopicSuggestionsError] = useState<string>();
   const [goalSuggestions, setGoalSuggestions] = useState<string[]>([]);
   const [goalSuggestionsError, setGoalSuggestionsError] = useState<string>();
-  const [archiveFolderKey, setArchiveFolderKey] = useState<string>();
-  const [documentQuery, setDocumentQuery] = useState("");
   const [assistantInput, setAssistantInput] = useState("");
   const [assistantMessage, setAssistantMessage] = useState<string>();
   const [lifecycleError, setLifecycleError] = useState<string>();
@@ -538,11 +310,14 @@ export function AscendWorkspace() {
   const rootSearchInputRef = useRef<NativeTextInput>(null);
   const rootSearchFocusTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const briefTransformationGeneration = useRef(0);
+  const longPressedBook = useRef<string | undefined>(undefined);
+  const bulkMutationLocked = useRef(false);
+  const extensionPreviewGeneration = useRef(0);
 
   const overviewQuery = useQuery({
     queryKey: ascendQueryKeys.overview(context),
     queryFn: fetchBooksOverview,
-    refetchInterval: (query) => autoOpenBookKey || query.state.data?.books.some(({ status }) => ACTIVE_STATUSES.includes(status)) ? 2_000 : false,
+    refetchInterval: (query) => query.state.data?.books.some(({ status }) => ACTIVE_STATUSES.includes(status)) ? 2_000 : false,
   });
   const pendingQuery = useQuery<PendingRequest[]>({
     enabled: false,
@@ -567,45 +342,13 @@ export function AscendWorkspace() {
     },
     refetchInterval: (query) => query.state.data && ACTIVE_STATUSES.includes(query.state.data.book.status) ? 2_000 : false,
   });
-  const folderTreeQuery = useQuery({
-    enabled: sheet === "sources",
-    queryKey: contentQueryKeys.folderTree(contentContext),
-    queryFn: ({ signal }) => listContentFolderTree(signal, contentContext),
-  });
-  const documentsQuery = useQuery({
-    enabled: sheet === "sources",
-    queryKey: [
-      ...contentQueryKeys.all(contentContext),
-      "book-source-picker",
-      documentQuery.trim() || archiveFolderKey || null,
-    ],
-    queryFn: async ({ signal }) => {
-      if (documentQuery.trim()) {
-        const result = await searchContentMatches(
-          documentQuery.trim(),
-          signal,
-          undefined,
-          false,
-        );
-        return {
-          folders: result.folders,
-          documents: result.documents.map((document) => ({
-            key: document.documentKey,
-            name: document.name,
-            extension: document.extension,
-            folderKey: document.folderKey,
-            isFavorite: document.isFavorite,
-            updatedAt: "",
-          })),
-        };
-      }
-      return getContentLocation(queryClient, contentContext, archiveFolderKey);
-    },
-  });
   const serverBooks = overviewQuery.data?.books ?? [];
   const books = [...pendingQuery.data.map(({ book }) => book), ...serverBooks];
   const selectedBook =
     books.find(({ key }) => key === selectedBookKey) ?? detailQuery.data?.book;
+  const selectedBooks = books.filter(({ key }) => selectedBookKeys.includes(key));
+  const selectionActive = selectedBooks.length > 0;
+  const allSelectedFavorite = selectionActive && selectedBooks.every(({ isFavorite }) => isFavorite);
   const detail = detailQuery.data;
   const filteredBooks = books.filter(
     (book) =>
@@ -623,17 +366,9 @@ export function AscendWorkspace() {
       COLUMNS,
   );
   const dirty = JSON.stringify(draft) !== JSON.stringify(INITIAL_DRAFT);
-  const creating = Boolean(sheet?.startsWith("create") || sheet === "sources");
-  const creationParent: LibrarySheet | undefined =
-    sheet === "createTopicCustom" || sheet === "createGoal"
-      ? "create"
-      : sheet === "createGoalCustom" || sheet === "createKnowledge"
-        ? "createGoal"
-        : sheet === "createDetails"
-          ? "createKnowledge"
-          : sheet === "sources"
-            ? "createDetails"
-            : undefined;
+  const creating = createTopicOpen || createTopicCustomOpen || createGoalOpen || createGoalCustomOpen || createDetailsOpen;
+  const contextSelection: EmailAttachmentRef[] = draft.archiveDocumentKeys.map((key) => ({ type: "document", key }));
+  const contextCardSize = Math.floor(((contextGridWidth || width - 40) - 18) / 4);
 
   useEffect(() => () => {
     if (rootSearchFocusTimer.current) clearTimeout(rootSearchFocusTimer.current);
@@ -644,11 +379,6 @@ export function AscendWorkspace() {
     const subscription = AccessibilityInfo.addEventListener("reduceMotionChanged", setReducedChapterMotion);
     return () => { mounted = false; subscription.remove(); };
   }, []);
-  const archiveStack = contentFolderStack(
-    folderTreeQuery.data ?? [],
-    archiveFolderKey,
-  );
-
   const createMutation = useMutation({
     mutationFn: ({
       input,
@@ -661,7 +391,7 @@ export function AscendWorkspace() {
       const book: Book = {
         key: `pending-${requestKey}`,
         title: input.topic,
-        subtitle: "Preparing your book",
+        subtitle: "Preparing your audio book",
         description: input.goal,
         status: "queued",
         isFavorite: false,
@@ -691,7 +421,6 @@ export function AscendWorkspace() {
           ),
       );
       addCachedBook(queryClient, context, book);
-      setAutoOpenBookKey(book.key);
       await queryClient.invalidateQueries({
         queryKey: ascendQueryKeys.overview(context),
         exact: true,
@@ -715,8 +444,8 @@ export function AscendWorkspace() {
         setDraftError(
           `${errorMessage(error)} Your draft was restored so you can retry.`,
         );
-        setSheet("createDetails");
-        setSheetOpen(true);
+        closeCreationSheets();
+        setCreateDetailsOpen(true);
       }
       showToast({ title: errorMessage(error), duration: 3_000 });
       await queryClient.invalidateQueries({
@@ -752,11 +481,17 @@ export function AscendWorkspace() {
         if (playback.playbackBookKey === book.key) playback.clear(false);
         setSelectedBookKey(undefined);
         setBookPageOpen(false);
-        setAutoOpenBookKey((current) => current === book.key ? undefined : current);
         setSheetOpen(false);
       } else patchCachedBook(queryClient, context, book);
     },
-    onError: (error) => {
+    onError: (error, variables) => {
+      if (error instanceof BookClientError && error.code === "BOOK_FAVORITE" && variables.action === "delete") {
+        patchCachedBook(queryClient, context, { ...variables.book, isFavorite: true });
+        setSheetOpen(false);
+        setSheet(undefined);
+        showToast({ title: "Can't delete favorite audio book", duration: 2_500 });
+        return;
+      }
       const message = errorMessage(error);
       setLifecycleError(message);
       showToast({ title: message, duration: 2_500 });
@@ -798,20 +533,97 @@ export function AscendWorkspace() {
     },
     onError: (error) => setGoalSuggestionsError(errorMessage(error)),
   });
+  const extensionPreviewMutation = useMutation({
+    mutationFn: ({ bookKey, chapterCount, generation }: { bookKey: string; chapterCount: ExtensionChapterCount; generation: number }) => previewBookExtension(bookKey, chapterCount).then((preview) => ({ ...preview, generation })),
+    onSuccess: ({ titles, generation }) => {
+      if (generation !== extensionPreviewGeneration.current) return;
+      setExtensionTitles(titles);
+      setExtensionPreviewReady(true);
+      setExtensionError(undefined);
+    },
+    onError: (error, { generation }) => {
+      if (generation !== extensionPreviewGeneration.current) return;
+      setExtensionPreviewReady(false);
+      setExtensionError(errorMessage(error));
+    },
+  });
+  const extensionMutation = useMutation({
+    mutationFn: ({ bookKey, chapterCount, titles, requestKey }: { bookKey: string; chapterCount: ExtensionChapterCount; titles: string[]; requestKey: string }) => extendBook(bookKey, chapterCount, titles, requestKey),
+    onMutate: () => setExtensionOpen(false),
+    onSuccess: async (book) => {
+      patchCachedBookMetadata(queryClient, context, book);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ascendQueryKeys.overview(context), exact: true, refetchType: "active" }),
+        queryClient.invalidateQueries({ queryKey: ascendQueryKeys.detail(context, book.key), exact: true, refetchType: "active" }),
+      ]);
+    },
+    onError: async (error, { bookKey }) => {
+      showToast({ title: errorMessage(error), duration: 3_000 });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ascendQueryKeys.overview(context), exact: true, refetchType: "active" }),
+        queryClient.invalidateQueries({ queryKey: ascendQueryKeys.detail(context, bookKey), exact: true, refetchType: "active" }),
+      ]);
+    },
+  });
 
   function open(next: LibrarySheet) {
     setSheet(next);
     setSheetOpen(true);
   }
+  function closeCreationSheets() {
+    setContextPickerOpen(false);
+    setCreateDetailsOpen(false);
+    setCreateGoalCustomOpen(false);
+    setCreateGoalOpen(false);
+    setCreateTopicCustomOpen(false);
+    setCreateTopicOpen(false);
+  }
+  function openExtension() {
+    extensionPreviewGeneration.current += 1;
+    extensionPreviewMutation.reset();
+    setExtensionChapterCount(1);
+    setExtensionTitles([]);
+    setExtensionPreviewReady(false);
+    setExtensionError(undefined);
+    setSheetOpen(false);
+    setSheet(undefined);
+    setExtensionOpen(true);
+  }
+  function closeExtension() {
+    extensionPreviewGeneration.current += 1;
+    setExtensionOpen(false);
+  }
+  function chooseExtensionChapterCount(chapterCount: ExtensionChapterCount) {
+    extensionPreviewGeneration.current += 1;
+    extensionPreviewMutation.reset();
+    setExtensionChapterCount(chapterCount);
+    setExtensionTitles([]);
+    setExtensionPreviewReady(false);
+    setExtensionError(undefined);
+  }
+  function previewExtension() {
+    if (!selectedBook || extensionPreviewMutation.isPending) return;
+    const generation = ++extensionPreviewGeneration.current;
+    setExtensionTitles([]);
+    setExtensionPreviewReady(false);
+    setExtensionError(undefined);
+    extensionPreviewMutation.mutate({ bookKey: selectedBook.key, chapterCount: extensionChapterCount, generation });
+  }
+  function generateExtension() {
+    if (!selectedBook || !extensionPreviewReady || extensionMutation.isPending) return;
+    extensionMutation.mutate({ bookKey: selectedBook.key, chapterCount: extensionChapterCount, titles: extensionTitles, requestKey: randomUUID() });
+  }
   function beginCreate() {
+    closeCreationSheets();
     setDraft(INITIAL_DRAFT);
+    setContextLabels({});
     setTopicSuggestions([]);
     setTopicSuggestionsError(undefined);
     setGoalSuggestions([]);
     setDraftError(undefined);
-    setDocumentQuery("");
-    setArchiveFolderKey(undefined);
-    open("create");
+    setSheetOpen(false);
+    setSheet(undefined);
+    setCreateTopicOpen(true);
     topicSuggestionsMutation.mutate([]);
   }
   function loadNewTopics() {
@@ -819,17 +631,18 @@ export function AscendWorkspace() {
     topicSuggestionsMutation.mutate(topicSuggestions);
   }
   function briefEditorText(target: BriefEditorTarget) {
-    return target === "topic" ? draft.topic : draft.goal;
+    return draft[target];
   }
   function applyBriefEditorText(target: BriefEditorTarget, value: string) {
     setDraft((current) => ({ ...current, [target]: value }));
   }
   function openBriefEditorActions(target: BriefEditorTarget) {
-    if (briefTransformation || !briefEditorText(target).trim()) return;
+    if (briefTransformation) return;
     setBriefActionTarget(target);
   }
   function openBriefEditorTranslation() {
     if (!briefActionTarget) return;
+    if (!briefEditorText(briefActionTarget).trim()) { showToast({ title: "Enter text before using an AI action.", duration: 2_000 }); return; }
     setBriefTargetLanguage(languageForCountryCode(countryCode));
     setBriefTranslateTarget(briefActionTarget);
     setBriefActionTarget(undefined);
@@ -838,7 +651,8 @@ export function AscendWorkspace() {
     if (briefTransformation) return;
     const text = briefEditorText(target).trim();
     const language = briefTargetLanguage.trim();
-    if (!text || action === "translate" && language.length < 2) return;
+    if (!text) { showToast({ title: "Enter text before using an AI action.", duration: 2_000 }); return; }
+    if (action === "translate" && language.length < 2) return;
     const capturedContext = getBooksContext();
     const generation = ++briefTransformationGeneration.current;
     setBriefActionTarget(undefined);
@@ -900,51 +714,53 @@ export function AscendWorkspace() {
     setGoalSuggestions([]);
     setGoalSuggestionsError(undefined);
     setDraftError(undefined);
-    setSheet("createGoal");
+    Keyboard.dismiss();
+    setCreateGoalOpen(true);
     goalSuggestionsMutation.mutate({ topic, excludeGoals: [] });
   }
   function loadNewGoals() {
     setGoalSuggestionsError(undefined);
     goalSuggestionsMutation.mutate({ topic: draft.topic, excludeGoals: goalSuggestions });
   }
-  function openKnowledgeStep(goal: string) {
+  function openDetailsStep(goal: string) {
     setDraft((current) => ({ ...current, goal }));
     setDraftError(undefined);
-    setSheet("createKnowledge");
+    Keyboard.dismiss();
+    setCreateDetailsOpen(true);
   }
   function submit() {
+    if (createMutation.isPending) return;
     if (
       draft.topic.trim().length < 3 ||
-      draft.goal.trim().length < 3 ||
-      draft.language.trim().length < 2
+      draft.goal.trim().length < 3
     ) {
       setDraftError(
-        "Complete the topic, goal, and language before creating your book.",
+        "Complete the topic and goal before creating your audio book.",
       );
       return;
     }
-    if (draft.archiveDocumentKeys.length > MAX_SOURCE_DOCUMENTS) {
+    if (draft.archiveDocumentKeys.length > MAX_CONTEXT_DOCUMENTS) {
       setDraftError(
-        `Choose no more than ${MAX_SOURCE_DOCUMENTS} Archive documents.`,
+        `Choose no more than ${MAX_CONTEXT_DOCUMENTS} Archive documents.`,
       );
       return;
     }
     const input = {
       ...draft,
+      currentKnowledge: "",
       narratorVoiceKey: DEFAULT_NARRATOR.key,
       narrationPace: 1,
-      additionalInstructions: draft.additionalInstructions?.trim() || undefined,
+      additionalInstructions: undefined,
     };
     const requestKey = retryBookCreateRequestKey(failedCreate.current, input, randomUUID);
     setDraftError(undefined);
-    setSheetOpen(false);
-    setSheet(undefined);
+    closeCreationSheets();
     setDraft(INITIAL_DRAFT);
     createMutation.mutate({ input, requestKey });
   }
   function chooseBook(book: Book) {
+    setRevealedChapterCount(0);
     setSelectedBookKey(book.key);
-    setChapterQuery("");
     if (book.status === "failed" || book.status === "cancelled") open("bookActions");
     else if (book.coverUrl) {
       setBookPageOpen(true);
@@ -952,46 +768,107 @@ export function AscendWorkspace() {
       setSheet(undefined);
     }
   }
-  function startReader(chapterKey?: string) {
-    if (!detail) return;
-    const playable = detail.chapters.filter((chapter) => chapter.content && chapter.audioUrl).sort((left, right) => left.position - right.position);
-    const nextChapterKey =
-      chapterKey ??
-      playable.find(({ key }) => key === detail.book.currentChapterKey)?.key ??
-      playable.find(({ isCompleted }) => !isCompleted)?.key ??
-      playable[0]?.key;
-    if (!nextChapterKey) {
-      showToast({
-        title: "This book has no available chapter to play.",
-        duration: 2_500,
-      });
-      return;
-    }
-    open("reader");
-    void playback.playBookChapter(detail.book.key, nextChapterKey, true);
+  function toggleBookSelection(bookKey: string) {
+    setSelectedBookKeys((current) => current.includes(bookKey) ? current.filter((key) => key !== bookKey) : [...current, bookKey]);
   }
-  function toggleDocument(document: ContentDocument) {
-    if (draft.archiveDocumentKeys.includes(document.key)) {
-      setDraft((current) => ({
-        ...current,
-        archiveDocumentKeys: current.archiveDocumentKeys.filter(
-          (key) => key !== document.key,
-        ),
-      }));
-      setDraftError(undefined);
+  function handleBookLongPress(bookKey: string) {
+    longPressedBook.current = bookKey;
+    toggleBookSelection(bookKey);
+    void Haptics.selectionAsync();
+    requestAnimationFrame(() => {
+      if (longPressedBook.current === bookKey) longPressedBook.current = undefined;
+    });
+  }
+  function handleBookPress(book: Book) {
+    if (longPressedBook.current === book.key) {
+      longPressedBook.current = undefined;
       return;
     }
-    if (draft.archiveDocumentKeys.length >= MAX_SOURCE_DOCUMENTS) {
-      setDraftError(
-        `You can select up to ${MAX_SOURCE_DOCUMENTS} Archive documents.`,
-      );
+    if (selectionActive) toggleBookSelection(book.key);
+    else chooseBook(book);
+  }
+  async function updateBooksFavorite(targets: readonly Book[], isFavorite: boolean, bulk: boolean) {
+    if (!targets.length || bulkMutationLocked.current) return;
+    bulkMutationLocked.current = true;
+    setBulkLoading(true);
+    setLifecycleError(undefined);
+    const results = await Promise.allSettled(targets.map((book) => setBookFavorite(book.key, isFavorite)));
+    const failedKeys: string[] = [];
+    results.forEach((result, index) => {
+      if (result.status === "fulfilled") patchCachedBook(queryClient, context, result.value);
+      else failedKeys.push(targets[index]!.key);
+    });
+    setBulkLoading(false);
+    bulkMutationLocked.current = false;
+    if (bulk) setSelectedBookKeys(failedKeys);
+    if (!failedKeys.length) {
+      setSheetOpen(false);
+      setSheet(undefined);
+      showToast({ title: `${targets.length} ${targets.length === 1 ? "audio book" : "audio books"} ${isFavorite ? "favorited" : "unfavorited"}`, duration: 2_000 });
       return;
     }
-    setDraft((current) => ({
-      ...current,
-      archiveDocumentKeys: [...current.archiveDocumentKeys, document.key],
+    const message = failedKeys.length === targets.length ? "Favorites could not be updated." : `${targets.length - failedKeys.length} updated, ${failedKeys.length} failed`;
+    setLifecycleError(message);
+    showToast({ title: message, duration: 2_500 });
+  }
+  async function deleteSelectedBooks() {
+    if (!selectedBooks.length || bulkMutationLocked.current) return;
+    bulkMutationLocked.current = true;
+    setBulkLoading(true);
+    setLifecycleError(undefined);
+    const favorites = selectedBooks.filter(({ isFavorite }) => isFavorite);
+    const eligible = selectedBooks.filter(({ isFavorite }) => !isFavorite);
+    const results = await Promise.allSettled(eligible.map(async (book) => {
+      await deleteBook(book.key, randomUUID());
+      return book;
     }));
+    const staleFavorites = results.flatMap((result, index) => result.status === "rejected" && result.reason instanceof BookClientError && result.reason.code === "BOOK_FAVORITE" ? [{ ...eligible[index]!, isFavorite: true }] : []);
+    const failedKeys = results.flatMap((result, index) => result.status === "rejected" && !(result.reason instanceof BookClientError && result.reason.code === "BOOK_FAVORITE") ? [eligible[index]!.key] : []);
+    const firstFailure = results.find((result) => result.status === "rejected" && !(result.reason instanceof BookClientError && result.reason.code === "BOOK_FAVORITE"));
+    const failureMessage = firstFailure?.status === "rejected" && firstFailure.reason instanceof Error ? firstFailure.reason.message : undefined;
+    results.forEach((result) => {
+      if (result.status === "fulfilled") {
+        removeCachedBook(queryClient, context, result.value.key);
+        if (playback.playbackBookKey === result.value.key) playback.clear(false);
+      }
+    });
+    staleFavorites.forEach((book) => patchCachedBook(queryClient, context, book));
+    const retainedFavorites = [...favorites, ...staleFavorites];
+    setSelectedBookKeys([...retainedFavorites.map(({ key }) => key), ...failedKeys]);
+    setBulkLoading(false);
+    bulkMutationLocked.current = false;
+    setSheetOpen(false);
+    setSheet(undefined);
+    if (retainedFavorites.length) showToast({ title: `Can't delete ${retainedFavorites.length} favorite audio book${retainedFavorites.length === 1 ? "" : "s"}`, duration: 2_500 });
+    else if (failedKeys.length) {
+      setLifecycleError(failureMessage ?? `${eligible.length - failedKeys.length} deleted, ${failedKeys.length} failed`);
+      showToast({ title: failureMessage ?? `${eligible.length - failedKeys.length} deleted, ${failedKeys.length} failed`, duration: 4_000 });
+    }
+    else showToast({ title: `${eligible.length} ${eligible.length === 1 ? "audio book" : "audio books"} deleted`, duration: 2_000 });
+  }
+  function deleteSelectedBook() {
+    if (!selectedBook) return;
+    if (selectedBook.isFavorite) {
+      setSheetOpen(false);
+      setSheet(undefined);
+      showToast({ title: "Can't delete favorite audio book", duration: 2_500 });
+      return;
+    }
+    lifecycleMutation.mutate({ action: "delete", book: selectedBook });
+  }
+  function openChapterSummary(chapterKey: string) {
+    setReaderChapterKey(chapterKey);
+    open("reader");
+  }
+  function finishContextSelection(selection: EmailAttachmentRef[], labels: EmailAttachmentLabels) {
+    setDraft((current) => ({ ...current, archiveDocumentKeys: selection.filter(({ type }) => type === "document").map(({ key }) => key) }));
+    setContextLabels(labels);
+    setContextPickerOpen(false);
     setDraftError(undefined);
+  }
+  function removeAllContext() {
+    setDraft((current) => ({ ...current, archiveDocumentKeys: [] }));
+    setContextLabels({});
   }
   function askAssistant() {
     const message = assistantInput.trim();
@@ -1006,76 +883,119 @@ export function AscendWorkspace() {
   useEffect(() => {
     if (!playback.readerRequest || !playback.playbackBookKey) return;
     const frame = requestAnimationFrame(() => {
+      setRevealedChapterCount(0);
       setSelectedBookKey(playback.playbackBookKey);
+      setReaderChapterKey(playback.chapter?.key);
       setBookPageOpen(true);
       setSheet("reader");
       setSheetOpen(true);
     });
     return () => cancelAnimationFrame(frame);
-  }, [playback.playbackBookKey, playback.readerRequest]);
+  }, [playback.chapter?.key, playback.playbackBookKey, playback.readerRequest]);
 
-  useEffect(() => {
-    if (!autoOpenBookKey) return;
-    const book = serverBooks.find(({ key }) => key === autoOpenBookKey);
-    if (!book) return;
-    if (book.status === "failed" || book.status === "cancelled") { setAutoOpenBookKey(undefined); return; }
-    if (!book.coverUrl) return;
-    setSelectedBookKey(book.key);
-    setChapterQuery("");
-    setBookPageOpen(true);
+  const orderedChapters = [...(detail?.chapters ?? [])].sort((left, right) => left.position - right.position);
+  const readerChapter = orderedChapters.find(({ key }) => key === readerChapterKey) ?? playback.chapter;
+  const readableChapters = orderedChapters.filter(({ content }) => Boolean(content));
+  const readingChapter = readableChapters.find(({ key }) => key === readingChapterKey);
+  const bookReadingChapter =
+    readableChapters.find(({ key }) => key === detail?.book.currentChapterKey) ??
+    readableChapters.find(({ isCompleted }) => !isCompleted) ??
+    readableChapters[0];
+  function openChapterReading(chapterKey?: string) {
+    const chapter = readableChapters.find(({ key }) => key === chapterKey) ?? bookReadingChapter;
+    if (!chapter) {
+      showToast({ title: "Full chapter text is not available yet.", duration: 2_500 });
+      return;
+    }
+    setReadingChapterKey(chapter.key);
+    setSheet("chapterRead");
+    setSheetOpen(true);
+  }
+  function stepReadingChapter(offset: -1 | 1) {
+    if (!readingChapter || readableChapters.length < 2) return;
+    const index = readableChapters.findIndex(({ key }) => key === readingChapter.key);
+    setReadingChapterKey(readableChapters[(index + offset + readableChapters.length) % readableChapters.length]!.key);
+  }
+  function closeContentSheet() {
     setSheetOpen(false);
     setSheet(undefined);
-    setAutoOpenBookKey(undefined);
-  }, [autoOpenBookKey, serverBooks]);
-
-  const orderedReadyChapters: BookChapter[] = [];
-  for (const chapter of [...(detail?.chapters ?? [])].sort((left, right) => left.position - right.position)) {
-    if (!chapter.content || !chapter.audioUrl) break;
-    orderedReadyChapters.push(chapter);
+    setReaderChapterKey(undefined);
+    setReadingChapterKey(undefined);
   }
-  useEffect(() => { setRevealedChapterCount(0); }, [selectedBookKey]);
+  const playableChapters = orderedChapters.filter((chapter) => chapter.content && chapter.audioUrl);
+  const bookTimeline = playableChapters.map((chapter) => ({ durationMs: (chapter.audioDurationSeconds ?? (chapter.estimatedMinutes ?? 0) * 60) * 1_000 }));
+  const bookDuration = audioTimelineDuration(bookTimeline);
+  const fallbackPlaybackChapter =
+    playableChapters.find(({ key }) => key === detail?.book.currentChapterKey) ??
+    playableChapters.find(({ isCompleted }) => !isCompleted) ??
+    playableChapters[0];
+  const playbackMatchesBook = playback.playbackBookKey === detail?.book.key;
+  const islandChapter = playbackMatchesBook ? playback.chapter ?? fallbackPlaybackChapter : fallbackPlaybackChapter;
+  const islandChapterIndex = playableChapters.findIndex(({ key }) => key === islandChapter?.key);
+  const bookPlaybackPosition = islandChapterIndex < 0 ? 0 : audioTimelinePosition(bookTimeline, islandChapterIndex, playbackMatchesBook ? playback.currentTime : islandChapter?.progressSeconds ?? 0);
+  const islandElapsed = playbackScrubValue ?? bookPlaybackPosition;
+  const islandPlaying = playbackMatchesBook && playback.audio.playing;
+  const islandError = playbackMatchesBook ? playback.error ?? playback.persistenceError ?? playback.refreshWarning : undefined;
   useEffect(() => {
-    if (revealedChapterCount >= orderedReadyChapters.length) return;
-    if (reducedChapterMotion) { setRevealedChapterCount(orderedReadyChapters.length); return; }
-    const timer = setTimeout(() => setRevealedChapterCount((current) => Math.min(current + 1, orderedReadyChapters.length)), 110);
+    setPlaybackIslandDismissed(false);
+    setPlaybackScrubValue(undefined);
+  }, [bookPageOpen, selectedBookKey]);
+  useEffect(() => {
+    if (playbackScrubValue === undefined || Math.abs(bookPlaybackPosition - playbackScrubValue) > 0.75) return;
+    const timeout = setTimeout(() => setPlaybackScrubValue(undefined), 0);
+    return () => clearTimeout(timeout);
+  }, [bookPlaybackPosition, playbackScrubValue]);
+  const bookPlaybackIsland = bookPageOpen && detail && islandChapter && !playbackIslandDismissed ? (
+    <View style={styles.narrationPlayer}>
+      <View style={styles.narrationHeading}>
+        <View style={styles.narrationTitleBlock}><Text numberOfLines={1} style={styles.narrationTitle}>{islandChapter.title}</Text></View>
+        <Button accessibilityLabel="Close audio player" contentMode="raw" onPress={() => { setPlaybackIslandDismissed(true); if (playbackMatchesBook) playback.clear(); }} size="xs" variant="icon"><CloseIcon size="sm" /></Button>
+      </View>
+      <View style={styles.narrationControls}>
+        <Button accessibilityLabel={islandPlaying ? "Pause listening" : "Play audio"} contentMode="raw" loading={playback.refreshingUrl} onPress={() => { if (playbackMatchesBook && playback.chapter) void playback.toggle(); else void playback.playBookChapter(detail.book.key, islandChapter.key, true); }} size="sm" variant="icon">{islandPlaying ? <PauseIcon size="sm" /> : <PlayIcon size="sm" />}</Button>
+        <Text style={styles.narrationTime}>{formatAudioTime(islandElapsed)}</Text>
+        <Slider accessibilityLabel="Audio book progress" disabled={bookDuration <= 0} max={Math.max(1, bookDuration)} onSlidingComplete={(value) => { setPlaybackScrubValue(value); const destination = resolveAudioTimelinePosition(bookTimeline, value); const destinationChapter = playableChapters[destination.index]; if (!destinationChapter) return; if (playbackMatchesBook && playback.chapter?.key === destinationChapter.key) void playback.seek(destination.seconds); else void playback.playBookChapter(detail.book.key, destinationChapter.key, islandPlaying, destination.seconds); }} onValueChange={setPlaybackScrubValue} style={styles.narrationSlider} value={Math.min(islandElapsed, bookDuration)} />
+        <Text style={styles.narrationTime}>{formatAudioTime(bookDuration)}</Text>
+      </View>
+      {islandError ? <Text accessibilityRole="alert" numberOfLines={2} style={styles.narrationError}>{islandError}</Text> : null}
+    </View>
+  ) : undefined;
+  useEffect(() => {
+    if (reducedChapterMotion || revealedChapterCount >= orderedChapters.length) return;
+    const timer = setTimeout(() => setRevealedChapterCount((current) => Math.min(current + 1, orderedChapters.length)), 110);
     return () => clearTimeout(timer);
-  }, [orderedReadyChapters.length, reducedChapterMotion, revealedChapterCount]);
-  const revealedChapters = orderedReadyChapters.slice(0, revealedChapterCount);
-  const chapters = revealedChapters.filter((chapter) =>
-      `${chapter.position} ${chapter.title} ${chapter.description}`
-        .toLowerCase()
-        .includes(chapterQuery.trim().toLowerCase()),
-    );
-  const showNextChapterSkeleton = !chapterQuery.trim() && Boolean(detail) && (
-    revealedChapterCount < orderedReadyChapters.length ||
-    ACTIVE_STATUSES.includes(detail!.book.status) && orderedReadyChapters.length < detail!.book.chapterCount
+  }, [orderedChapters.length, reducedChapterMotion, revealedChapterCount]);
+  const visibleChapterCount = reducedChapterMotion ? orderedChapters.length : revealedChapterCount;
+  const revealedChapters = orderedChapters.slice(0, visibleChapterCount);
+  const showNextChapterSkeleton = Boolean(detail) && (
+    visibleChapterCount < orderedChapters.length ||
+    ACTIVE_STATUSES.includes(detail!.book.status) && orderedChapters.length < detail!.book.chapterCount
   );
   const sheetTitle =
     sheet === "actions"
       ? ""
-      : sheet === "create"
-        ? "Choose a topic"
-        : sheet === "createTopicCustom"
-          ? "Your topic"
-          : sheet === "createGoal"
-            ? "Choose a goal"
-            : sheet === "createGoalCustom"
-              ? "Your goal"
-              : sheet === "createKnowledge"
-                ? "What you already know"
-                : sheet === "createDetails"
-                  ? "Book details"
-        : sheet === "sources"
-          ? "Choose Archive documents"
-          : sheet === "filter"
-            ? "Filter books"
-            : sheet === "reader"
-              ? "Reader"
-              : sheet === "sleep"
-                ? "Sleep timer"
-                : sheet === "delete"
-                  ? "Delete book?"
-                  : (selectedBook?.title ?? "Book");
+      : sheet === "filter"
+        ? "Filter audio books"
+        : sheet === "reader"
+          ? "Audio book chapter"
+          : sheet === "chapterRead"
+            ? "Audio book chapter"
+          : sheet === "bookSummary"
+            ? "Audio book"
+          : sheet === "delete"
+            ? "Delete audio book?"
+            : sheet === "bulkDelete"
+              ? `Delete ${selectedBooks.length} ${selectedBooks.length === 1 ? "audio book" : "audio books"}?`
+              : (selectedBook?.title ?? "Audio book");
+  const sheetFooter = sheet === "chapterRead" ? (
+    <View style={styles.chapterReadingFooter}>
+      <View style={styles.chapterReadingSteps}>
+        <Button accessibilityLabel="Previous chapter" contentMode="raw" disabled={readableChapters.length < 2} onPress={() => stepReadingChapter(-1)} size="md" variant="icon"><ChevronLeftIcon size="sm" /></Button>
+        <Button accessibilityLabel="Next chapter" contentMode="raw" disabled={readableChapters.length < 2} onPress={() => stepReadingChapter(1)} size="md" variant="icon"><ChevronRightIcon size="sm" /></Button>
+      </View>
+      <Button onPress={closeContentSheet} size="md" variant="secondary">Close</Button>
+    </View>
+  ) : sheet === "reader" || sheet === "bookSummary" ? <Button onPress={closeContentSheet} size="md" variant="secondary">Close</Button> : undefined;
   return (
     <KeyboardAvoidingView behavior={aiInputFocused ? "height" : undefined} style={styles.root}>
       <View
@@ -1091,51 +1011,59 @@ export function AscendWorkspace() {
         <WorkspaceAppSwitcher
           active="ascend"
           onBeforeSelect={() =>
-            !(creating && sheetOpen && dirty)
+            !(creating && dirty)
           }
         />
       </View>
       <View style={styles.localHeader}>
-        {bookPageOpen ? <Button accessibilityLabel="Back to books" contentMode="raw" onPress={() => { setBookPageOpen(false); setSelectedBookKey(undefined); setChapterQuery(""); }} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button> : <WorkspaceAppSwitcher active="ascend" trigger="back" />}
-        <Text numberOfLines={1} style={styles.localTitle}>{bookPageOpen ? selectedBook?.title ?? "Book" : "Ascend"}</Text>
-        {bookPageOpen ? <Button accessibilityLabel="Book actions" contentMode="raw" disabled={!selectedBook} onPress={() => open("bookActions")} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button> : <Button accessibilityLabel="Create in Ascend" contentMode="raw" onPress={() => open("actions")} size="xs" variant="icon"><PlusIcon size="sm" /></Button>}
+        {bookPageOpen ? <Button accessibilityLabel="Back to audio books" contentMode="raw" onPress={() => { setBookPageOpen(false); setSelectedBookKey(undefined); }} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button> : <WorkspaceAppSwitcher active="ascend" trigger="back" />}
+        <Text numberOfLines={1} style={styles.localTitle}>{bookPageOpen ? selectedBook?.title ?? "Audio book" : "Ascend"}</Text>
+        {bookPageOpen ? <Button accessibilityLabel="Audio book actions" contentMode="raw" disabled={!selectedBook} onPress={() => open("bookActions")} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button> : <Button accessibilityLabel="Create in Ascend" contentMode="raw" onPress={() => open("actions")} size="xs" variant="icon"><PlusIcon size="sm" /></Button>}
       </View>
       {bookPageOpen ? (
         detailQuery.isPending ? <View accessibilityRole="progressbar" style={[styles.detailLoading, styles.detailPage]}><Skeleton style={styles.detailCoverSkeleton} /><Skeleton style={styles.detailLine} /><Skeleton style={[styles.chapterSkeleton, { width: chapterWidth, height: (chapterWidth * 16) / 9 }]} /></View> : detail ? (
           <ScrollView contentContainerStyle={[styles.detail, styles.detailPage]} showsVerticalScrollIndicator={false}>
-            <View style={styles.detailHero}>
+            <Button accessibilityLabel={`About ${detail.book.title}`} contentMode="raw" onPress={() => open("bookSummary")} shape="rounded" size="md" style={styles.detailHero} variant="ghost">
               <View style={styles.detailCover}><Cover book={detail.book} /></View>
               <View style={styles.detailCopy}>
-                <Text style={styles.detailTitle}>{detail.book.title}</Text>
-                <Text style={styles.detailMeta}>{detail.book.narrator?.name ?? "Narrator"} · {detail.book.estimatedMinutes} min</Text>
-                <Text style={styles.detailMeta}>{Math.round(detail.book.progressPercent)}% complete</Text>
-                <Button disabled={!orderedReadyChapters.length} icon={<PlayIcon size="sm" variant="inverse" />} onPress={() => { if (playback.playbackBookKey === detail.book.key) void playback.refreshUrl(); else startReader(); }} size="md" variant="primary">{detail.book.progressPercent ? "Resume" : "Play"}</Button>
+                {detail.book.currentChapterKey ? <><Text style={styles.detailCurrentLabel}>CURRENT CHAPTER</Text><Text style={styles.detailCurrentChapter}>{orderedChapters.find(({ key }) => key === detail.book.currentChapterKey)?.title ?? detail.book.title}</Text></> : null}
+                <Text style={styles.detailDuration}>{formatBookDuration((bookDuration || detail.book.estimatedMinutes * 60) / 60)}</Text>
               </View>
-            </View>
-            {playback.refreshWarning ? <View accessibilityRole="alert" style={styles.playerNotice}><Text style={styles.noticeText}>{playback.refreshWarning}</Text><Button disabled={playback.refreshingUrl} loading={playback.refreshingUrl} onPress={() => startReader()} size="md" variant="secondary">Retry</Button></View> : null}
-            <View style={styles.chapterSearch}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel="Search chapters" onChangeText={setChapterQuery} placeholder="Search chapters" style={styles.rootSearchInput} value={chapterQuery} /></View>
+            </Button>
             <View onLayout={({ nativeEvent }) => setChapterGridWidth(nativeEvent.layout.width)} style={styles.grid}>
-              {chapters.map((chapter) => <ChapterCard chapter={chapter} key={chapter.key} onPress={() => startReader(chapter.key)} reducedMotion={reducedChapterMotion} width={chapterWidth} />)}
-              {showNextChapterSkeleton ? <Skeleton accessibilityLabel={`Preparing chapter ${revealedChapterCount + 1}`} accessibilityRole="progressbar" style={[styles.chapterSkeleton, { width: chapterWidth, height: (chapterWidth * 16) / 9 }]} /> : null}
+              {revealedChapters.map((chapter) => <ChapterCard chapter={chapter} key={chapter.key} onPress={() => openChapterSummary(chapter.key)} reducedMotion={reducedChapterMotion} width={chapterWidth} />)}
+              {showNextChapterSkeleton ? <Skeleton accessibilityLabel={`Preparing chapter ${visibleChapterCount + 1}`} accessibilityRole="progressbar" style={[styles.chapterSkeleton, { width: chapterWidth, height: (chapterWidth * 16) / 9 }]} /> : null}
             </View>
           </ScrollView>
-        ) : <View accessibilityRole="alert" style={styles.state}><Text style={styles.stateTitle}>Book details could not be loaded.</Text><Button onPress={() => void detailQuery.refetch()} size="sm" variant="secondary">Retry</Button></View>
+        ) : <View accessibilityRole="alert" style={styles.state}><Text style={styles.stateTitle}>Audio book details could not be loaded.</Text><Button onPress={() => void detailQuery.refetch()} size="sm" variant="secondary">Retry</Button></View>
       ) : <>
         <View style={styles.searchRow}>
-          <View style={styles.rootSearch}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel="Search books" editable={rootSearchFocusable} focusable={rootSearchFocusable} onChangeText={setQuery} placeholder="Search..." ref={rootSearchInputRef} style={styles.rootSearchInput} value={query} />{query ? <Button accessibilityLabel="Clear book search" contentMode="raw" iconOnly onPress={() => setQuery("")} size="xs" variant="secondary"><CloseIcon size="sm" /></Button> : null}</View>
-          <Button accessibilityLabel="Filter books" contentMode="raw" onPress={() => open("filter")} size="sm" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={showOnlyFavorites ? "accent" : "default"} /></Button>
+          <View style={styles.rootSearch}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel="Search audio books" editable={rootSearchFocusable} focusable={rootSearchFocusable} onChangeText={setQuery} placeholder="Search..." ref={rootSearchInputRef} style={styles.rootSearchInput} value={query} />{query ? <Button accessibilityLabel="Clear audio book search" contentMode="raw" iconOnly onPress={() => setQuery("")} size="xs" variant="secondary"><CloseIcon size="sm" /></Button> : null}</View>
+          <Button accessibilityLabel="Filter audio books" contentMode="raw" onPress={() => open("filter")} size="sm" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={showOnlyFavorites ? "accent" : "default"} /></Button>
         </View>
+        {selectionActive ? <Tabs accessibilityLabel="Selected audio book toolbar" style={styles.bulkToolbar}>
+          <View style={styles.bulkToolbarSelection}>
+            <Button accessibilityLabel="Clear selection" contentMode="raw" disabled={bulkLoading} onPress={() => setSelectedBookKeys([])} size="xs" style={styles.bulkToolbarClose} variant="secondary"><CloseIcon size="sm" /></Button>
+            <Text accessibilityLiveRegion="polite" style={styles.bulkSelectionText}>{selectedBooks.length} selected</Text>
+          </View>
+          <Button accessibilityLabel="Selected audio book actions" contentMode="raw" disabled={bulkLoading} onPress={() => open("bulkActions")} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
+        </Tabs> : null}
         <ScrollView contentContainerStyle={styles.library} showsVerticalScrollIndicator={false}>
-          {overviewQuery.isPending ? <View accessibilityLabel="Loading books" accessibilityRole="progressbar" onLayout={({ nativeEvent }) => setGridWidth(nativeEvent.layout.width)} style={styles.grid}>{Array.from({ length: COLUMNS }, (_, index) => <Skeleton key={index} style={{ width: cardWidth, height: (cardWidth * 16) / 9, borderRadius: radii.sm }} />)}</View> : overviewQuery.error ? <View style={styles.state}><Text style={styles.stateTitle}>Books could not be loaded.</Text><Button onPress={() => void overviewQuery.refetch()} size="sm" variant="secondary">Retry</Button></View> : (
+          {overviewQuery.isPending ? <View accessibilityLabel="Loading audio books" accessibilityRole="progressbar" onLayout={({ nativeEvent }) => setGridWidth(nativeEvent.layout.width)} style={styles.grid}>{Array.from({ length: COLUMNS }, (_, index) => <Skeleton key={index} style={{ width: cardWidth, height: (cardWidth * 16) / 9, borderRadius: radii.sm }} />)}</View> : overviewQuery.error ? <View style={styles.state}><Text style={styles.stateTitle}>Audio books could not be loaded.</Text><Button onPress={() => void overviewQuery.refetch()} size="sm" variant="secondary">Retry</Button></View> : (
             <View onLayout={({ nativeEvent }) => setGridWidth(nativeEvent.layout.width)} style={styles.grid}>
-              {filteredBooks.map((book, index) => book.key.startsWith("pending-") || ACTIVE_STATUSES.includes(book.status) && !book.coverUrl ? <Skeleton accessibilityLabel={`Preparing ${book.title}`} accessibilityRole="progressbar" key={book.key} style={{ width: cardWidth, height: (cardWidth * 16) / 9, borderRadius: radii.sm }} /> : <Button accessibilityLabel={book.title} accessibilityRole="button" contentMode="raw" key={book.key} onPress={() => chooseBook(book)} shape="rounded" size="md" style={[styles.bookCard, { width: cardWidth, height: (cardWidth * 16) / 9 }]} variant="ghost"><Cover book={book} index={index} /><View style={styles.cardShade} /><View style={styles.cardCopy}><Text numberOfLines={3} style={styles.cardTitle}>{book.title}</Text></View></Button>)}
+              {filteredBooks.map((book, index) => {
+                if (book.key.startsWith("pending-")) return <Skeleton accessibilityLabel={`Preparing ${book.title}`} accessibilityRole="progressbar" key={book.key} style={{ width: cardWidth, height: (cardWidth * 16) / 9, borderRadius: radii.sm }} />;
+                const selected = selectedBookKeys.includes(book.key);
+                return <View key={book.key} style={[styles.bookCardFrame, selected && styles.selectedItem, { width: cardWidth, height: (cardWidth * 16) / 9 }]}><Button accessibilityActions={[{ name: "longpress", label: selected ? `Deselect ${book.title}` : `Select ${book.title}` }]} accessibilityLabel={book.title} accessibilityRole="button" accessibilityState={{ selected }} contentMode="raw" onAccessibilityAction={({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") handleBookLongPress(book.key); }} onLongPress={() => handleBookLongPress(book.key)} onPress={() => handleBookPress(book)} shape="rounded" size="md" style={styles.bookCard} variant="ghost"><Cover book={book} index={index} /><View style={styles.cardShade} /><View style={styles.cardCopy}><Text numberOfLines={3} style={styles.cardTitle}>{book.title}</Text></View></Button>{selected ? <View pointerEvents="none" style={styles.selectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}</View>;
+              })}
             </View>
           )}
-          {!overviewQuery.isPending && !overviewQuery.error && filteredBooks.length === 0 ? <View style={styles.state}><Text style={styles.stateTitle}>{query.trim() ? "No books matched this search." : showOnlyFavorites ? "No favorite books." : books.length ? "No books match this view." : "No audio book yet."}</Text>{!books.length && !query.trim() && !showOnlyFavorites ? <Button accessibilityLabel="Create book" contentMode="raw" onPress={beginCreate} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button> : null}</View> : null}
+          {!overviewQuery.isPending && !overviewQuery.error && filteredBooks.length === 0 ? <View style={styles.state}><Text style={styles.stateTitle}>{query.trim() ? "No audio books matched this search." : showOnlyFavorites ? "No favorite audio books." : books.length ? "No audio books match this view." : "No audio books yet."}</Text>{!books.length && !query.trim() && !showOnlyFavorites ? <Button accessibilityLabel="Create audio book" contentMode="raw" onPress={beginCreate} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button> : null}</View> : null}
         </ScrollView>
       </>}
       <CoreComposer
         accessibilityLabel="Ask Core about Ascend"
+        accessory={bookPlaybackIsland}
         disabled={assistantMutation.isPending}
         editable={!assistantMutation.isPending}
         leading={
@@ -1178,43 +1106,19 @@ export function AscendWorkspace() {
       <SearchHistorySheet error={historyError} history={history} loading={historyLoading} onClose={() => { setSheetOpen(false); setSheet(undefined); }} onRemove={(item) => void removeHistoryQuery(item)} onSelect={useHistoryQuery} open={sheetOpen && sheet === "searchHistory"} removingQuery={removingHistoryQuery} />
 
       <BottomSheet
-        description={
-          sheet === "createKnowledge"
-            ? "Optional. Leave this blank to start from the beginning."
-            : sheet === "sources"
-              ? "Only documents you explicitly choose are included."
-              : undefined
-        }
-        dismissible={!briefTransformation && (Boolean(creationParent) || !creating || !dirty)}
-        footer={sheet === "create" ? <><Button disabled={topicSuggestionsMutation.isPending} onPress={loadNewTopics} size="md" variant="primary">New topics</Button><Button onPress={() => { setSheetOpen(false); setSheet(undefined); }} size="md" variant="secondary">Close</Button></> : sheet === "createTopicCustom" ? <><Button disabled={Boolean(briefTransformation) || draft.topic.trim().length < 3} onPress={() => openGoalStep(draft.topic.trim())} size="md" variant="primary">Next</Button><Button disabled={Boolean(briefTransformation)} onPress={() => setSheet("create")} size="md" variant="secondary">Close</Button></> : sheet === "createGoal" ? <><Button disabled={goalSuggestionsMutation.isPending} onPress={loadNewGoals} size="md" variant="primary">New goals</Button><Button onPress={() => setSheet("create")} size="md" variant="secondary">Close</Button></> : sheet === "createGoalCustom" ? <><Button disabled={Boolean(briefTransformation) || draft.goal.trim().length < 3} onPress={() => openKnowledgeStep(draft.goal.trim())} size="md" variant="primary">Next</Button><Button disabled={Boolean(briefTransformation)} onPress={() => setSheet("createGoal")} size="md" variant="secondary">Close</Button></> : undefined}
-        headerLeading={
-          sheet === "sources" ? (
-            <Button
-              accessibilityLabel="Back to book creation"
-              contentMode="raw"
-              onPress={() => setSheet("createDetails")}
-              size="md"
-              variant="icon"
-            >
-              <ChevronLeftIcon size="sm" />
-            </Button>
-          ) : undefined
-        }
-        height={
-          ["create", "createTopicCustom", "createGoal", "createGoalCustom", "createKnowledge", "createDetails", "sources", "reader", "sleep"].includes(
-            sheet ?? "",
-          )
-            ? "full"
-            : undefined
-        }
-        hideHeading={sheet === "actions" || sheet === "filter"}
-        onDismissRequest={creationParent ? () => setSheet(creationParent) : undefined}
+        description={sheet === "reader" ? readerChapter?.title : sheet === "chapterRead" ? readingChapter?.title : sheet === "bookSummary" ? detail?.book.title : undefined}
+        dismissible={!bulkLoading && !lifecycleMutation.isPending}
+        footer={sheetFooter}
+        height={sheet === "reader" || sheet === "chapterRead" || sheet === "bookSummary" ? "full" : undefined}
+        hideHeading={sheet === "actions" || sheet === "filter" || sheet === "bookActions" || sheet === "bulkActions"}
         onOpenChange={(next) => {
           setSheetOpen(next);
-          if (!next) setSheet(undefined);
+          if (!next) { setSheet(undefined); setReaderChapterKey(undefined); setReadingChapterKey(undefined); }
         }}
+        onSwipeLeft={sheet === "chapterRead" ? () => stepReadingChapter(1) : undefined}
+        onSwipeRight={sheet === "chapterRead" ? () => stepReadingChapter(-1) : undefined}
         open={sheetOpen && sheet !== "searchHistory"}
-        pageKey={sheet}
+        pageKey={sheet === "chapterRead" ? `${sheet}:${readingChapterKey ?? "none"}` : sheet}
         title={sheetTitle}
       >
         {sheet === "actions" ? (
@@ -1223,376 +1127,30 @@ export function AscendWorkspace() {
             style={styles.sheetAction}
             variant="secondary"
           >
-            Create book
+            Create audio book
           </BottomSheetItem>
         ) : null}
         {sheet === "filter" ? (
           <View style={styles.filterPanel}>
             <View style={styles.favoriteSwitchRow}>
-              <Switch accessibilityLabel="Show only favorite books" checked={showOnlyFavorites} onCheckedChange={(checked) => { setShowOnlyFavorites(checked); setSheetOpen(false); setSheet(undefined); }} />
+              <Switch accessibilityLabel="Show only favorite audio books" checked={showOnlyFavorites} onCheckedChange={(checked) => { setShowOnlyFavorites(checked); setSheetOpen(false); setSheet(undefined); }} />
               <Text style={styles.favoriteSwitchLabel}>Favorites</Text>
             </View>
             <Button onPress={() => void openSearchHistory()} size="md" style={styles.searchHistoryOption} variant="secondary">Search history</Button>
           </View>
         ) : null}
-        {sheet === "create" ? (
-          <ScrollView contentContainerStyle={styles.suggestionStep} showsVerticalScrollIndicator={false}>
-            <View style={styles.suggestionList}>
-              {!topicSuggestionsMutation.isPending && topicSuggestions.length ? <Button onPress={() => setSheet("createTopicCustom")} shape="pill" size="md" style={styles.suggestionPill} variant="secondary">Custom</Button> : null}
-              {topicSuggestionsMutation.isPending ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={styles.suggestionLoadingPill} />) : topicSuggestions.map((topic) => <Button contentMode="raw" key={topic} onPress={() => openGoalStep(topic)} shape="pill" size="md" style={styles.suggestionPill} variant="secondary"><Text numberOfLines={1} style={styles.suggestionText}>{topic}</Text></Button>)}
-            </View>
-            {topicSuggestionsError ? <Text accessibilityRole="alert" style={styles.noticeText}>{topicSuggestionsError}</Text> : null}
-          </ScrollView>
-        ) : null}
-        {sheet === "createTopicCustom" ? (
-          <View style={styles.customStep}>
-            <Text style={styles.inputLabel}>Topic</Text>
-            <AiTextEditor accessibilityLabel="Book topic" autoFocus editable={briefTransformation?.target !== "topic"} maxLength={2_000} multiline onChangeText={(topic) => setDraft((current) => ({ ...current, topic }))} onOpenActions={() => openBriefEditorActions("topic")} placeholder="What should this book explore?" style={styles.customTextArea} textAlignVertical="top" transformation={briefTransformation?.target === "topic" ? briefTransformation.action : undefined} value={draft.topic} />
-          </View>
-        ) : null}
-        {sheet === "createGoal" ? (
-          <ScrollView contentContainerStyle={styles.suggestionStep} showsVerticalScrollIndicator={false}>
-            <View style={styles.suggestionList}>
-              {!goalSuggestionsMutation.isPending && goalSuggestions.length ? <Button onPress={() => setSheet("createGoalCustom")} shape="pill" size="md" style={styles.suggestionPill} variant="secondary">Custom</Button> : null}
-              {goalSuggestionsMutation.isPending ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={styles.suggestionLoadingPill} />) : goalSuggestions.map((goal) => <Button contentMode="raw" key={goal} onPress={() => openKnowledgeStep(goal)} shape="pill" size="md" style={styles.suggestionPill} variant="secondary"><Text numberOfLines={1} style={styles.suggestionText}>{goal}</Text></Button>)}
-            </View>
-            {goalSuggestionsError ? <Text accessibilityRole="alert" style={styles.noticeText}>{goalSuggestionsError}</Text> : null}
-          </ScrollView>
-        ) : null}
-        {sheet === "createGoalCustom" ? (
-          <View style={styles.customStep}>
-            <Text style={styles.inputLabel}>Goal</Text>
-            <AiTextEditor accessibilityLabel="Reading goal" autoFocus editable={briefTransformation?.target !== "goal"} maxLength={2_000} multiline onChangeText={(goal) => setDraft((current) => ({ ...current, goal }))} onOpenActions={() => openBriefEditorActions("goal")} placeholder="What should change after reading it?" style={styles.customTextArea} textAlignVertical="top" transformation={briefTransformation?.target === "goal" ? briefTransformation.action : undefined} value={draft.goal} />
-          </View>
-        ) : null}
-        {sheet === "createKnowledge" ? (
-          <View style={styles.customStep}>
-            <Text style={styles.formLabel}>What you already know (Optional)</Text>
-            <TextInput accessibilityLabel="Current knowledge" autoFocus maxLength={2_000} multiline onChangeText={(currentKnowledge) => setDraft((current) => ({ ...current, currentKnowledge }))} placeholder="Share any experience or context, or leave this blank" style={styles.stepTextArea} textAlignVertical="top" value={draft.currentKnowledge} />
-            <View style={styles.footer}>
-              <Button onPress={() => setSheet("createDetails")} size="md" style={styles.footerButton} variant="primary">Next</Button>
-              <Button onPress={() => setSheet("createGoal")} size="md" style={styles.footerButton} variant="secondary">Close</Button>
-            </View>
-          </View>
-        ) : null}
-        {sheet === "createDetails" ? (
-          <ScrollView
-            contentContainerStyle={styles.form}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
-          >
-            <Text style={styles.formHeading}>Fine-tune your book.</Text>
-            <Text style={styles.formLabel}>Book depth</Text>
-            <Tabs accessibilityLabel="Book depth" accessibilityRole="tablist" style={styles.detailTabs}>
-              {CHAPTER_OPTIONS.map((option) => (
-                <Button
-                  accessibilityRole="tab"
-                  accessibilityState={{
-                    selected: draft.chapterCount === option.count,
-                  }}
-                  key={option.count}
-                  onPress={() =>
-                    setDraft((current) => ({
-                      ...current,
-                      chapterCount: option.count,
-                    }))
-                  }
-                  size="xs"
-                  style={styles.detailTab}
-                  variant={
-                    draft.chapterCount === option.count
-                      ? "secondary"
-                      : "ghost"
-                  }
-                >
-                  {option.label}
-                </Button>
-              ))}
-            </Tabs>
-            <Text style={styles.helper}>{draft.chapterCount} chapters</Text>
-            <Text style={styles.formLabel}>Language</Text>
-            <Tabs accessibilityLabel="Common book languages" accessibilityRole="tablist" style={styles.languageTabs}>
-              {LANGUAGES.map((language) => (
-                <Button
-                  accessibilityRole="tab"
-                  accessibilityState={{ selected: draft.language === language }}
-                  key={language}
-                  onPress={() => setDraft((current) => ({ ...current, language }))}
-                  size="xs"
-                  style={styles.languageTab}
-                  variant={draft.language === language ? "secondary" : "ghost"}
-                >
-                  {language}
-                </Button>
-              ))}
-            </Tabs>
-            <TextInput
-              accessibilityLabel="Book language"
-              onChangeText={(language) =>
-                setDraft((current) => ({ ...current, language }))
-              }
-              placeholder="Or enter another language"
-              value={draft.language}
-            />
-            <Text style={styles.formLabel}>Writing tone</Text>
-            <View style={styles.sheetList}>
-              {TONES.map((writingTone) => (
-                <Button
-                  accessibilityState={{
-                    selected: draft.writingTone === writingTone,
-                  }}
-                  key={writingTone}
-                  onPress={() =>
-                    setDraft((current) => ({ ...current, writingTone }))
-                  }
-                  size="md"
-                  variant={
-                    draft.writingTone === writingTone ? "primary" : "secondary"
-                  }
-                >
-                  {writingTone}
-                </Button>
-              ))}
-            </View>
-            <Text style={styles.formLabel}>Archive sources</Text>
-            <Button
-              icon={<FileIcon size="sm" />}
-              onPress={() => setSheet("sources")}
-              size="md"
-              variant="secondary"
-            >
-              {draft.archiveDocumentKeys.length
-                ? `${draft.archiveDocumentKeys.length} selected`
-                : "Choose documents"}
-            </Button>
-            <Text style={styles.helper}>
-              No Archive document is selected automatically.
-            </Text>
-            <View style={styles.switchRow}>
-              <View style={styles.switchCopy}>
-                <Text style={styles.voiceName}>Chapter images</Text>
-                <Text style={styles.helper}>
-                  Generate an image for each chapter.
-                </Text>
-              </View>
-              <Switch
-                accessibilityLabel="Generate chapter images"
-                checked={draft.chapterImages}
-                onCheckedChange={(chapterImages) =>
-                  setDraft((current) => ({ ...current, chapterImages }))
-                }
-              />
-            </View>
-            <Text style={styles.formLabel}>Additional instructions (Optional)</Text>
-            <TextInput
-              accessibilityLabel="Additional instructions"
-              multiline
-              onChangeText={(additionalInstructions) =>
-                setDraft((current) => ({ ...current, additionalInstructions }))
-              }
-              placeholder="Optional constraints, examples, or emphasis"
-              style={styles.textArea}
-              value={draft.additionalInstructions}
-            />
-            {draftError ? (
-              <Text
-                accessibilityLiveRegion="assertive"
-                accessibilityRole="alert"
-                style={styles.failed}
-              >
-                {draftError}
-              </Text>
-            ) : null}
-            <View style={styles.footer}>
-              <Button
-                disabled={
-                  draft.topic.trim().length < 3 ||
-                  draft.goal.trim().length < 3 ||
-                  draft.language.trim().length < 2
-                }
-                onPress={submit}
-                size="md"
-                style={styles.footerButton}
-                variant="primary"
-              >
-                Create book
-              </Button>
-              <Button
-                onPress={() => {
-                  setDraft(INITIAL_DRAFT);
-                  setDraftError(undefined);
-                  setSheetOpen(false);
-                  setSheet(undefined);
-                }}
-                size="md"
-                style={styles.footerButton}
-                variant="secondary"
-              >
-                Discard
-              </Button>
-            </View>
-          </ScrollView>
-        ) : null}
-        {sheet === "sources" ? (
-          <View style={styles.sourcePicker}>
-            <View style={styles.chapterSearch}>
-              <SearchIcon size="sm" variant="muted" />
-              <TextInput
-                accessibilityLabel="Search all Archive documents"
-                onChangeText={setDocumentQuery}
-                placeholder="Search all documents"
-                style={styles.rootSearchInput}
-                value={documentQuery}
-              />
-            </View>
-            {!documentQuery.trim() && archiveFolderKey ? (
-              <Button
-                icon={<ChevronLeftIcon size="sm" />}
-                onPress={() => setArchiveFolderKey(archiveStack.at(-2)?.key)}
-                size="md"
-                variant="secondary"
-              >
-                {archiveStack.length > 1
-                  ? archiveStack.at(-2)!.name
-                  : "Archive"}
-              </Button>
-            ) : null}
-            {folderTreeQuery.error || documentsQuery.error ? (
-              <View accessibilityRole="alert" style={styles.queryError}>
-                <Text style={styles.noticeText}>
-                  Archive documents could not be loaded.
-                </Text>
-                <Button
-                  onPress={() => {
-                    void folderTreeQuery.refetch();
-                    void documentsQuery.refetch();
-                  }}
-                  size="md"
-                  variant="secondary"
-                >
-                  Retry
-                </Button>
-              </View>
-            ) : null}
-            <ScrollView contentContainerStyle={styles.documentList}>
-              {documentsQuery.isPending ? (
-                Array.from({ length: 4 }, (_, index) => (
-                  <Skeleton key={index} style={styles.documentSkeleton} />
-                ))
-              ) : (
-                <>
-                  {documentsQuery.data?.folders.map((folder) => (
-                    <Button
-                      accessibilityLabel={`Open folder ${folder.name}`}
-                      contentMode="raw"
-                      key={folder.key}
-                      onPress={() => {
-                        setDocumentQuery("");
-                        setArchiveFolderKey(folder.key);
-                      }}
-                      size="md"
-                      style={styles.document}
-                      variant="secondary"
-                    >
-                      <FolderIcon size="md" variant="muted" />
-                      <View style={styles.voiceCopy}>
-                        <Text numberOfLines={1} style={styles.voiceName}>
-                          {folder.name}
-                        </Text>
-                        <Text style={styles.voiceDescription}>FOLDER</Text>
-                      </View>
-                      <ChevronRightIcon size="sm" />
-                    </Button>
-                  ))}
-                  {documentsQuery.data?.documents.map((document) => {
-                    const selected = draft.archiveDocumentKeys.includes(
-                      document.key,
-                    );
-                    return (
-                      <Button
-                        accessibilityLabel={`${selected ? "Deselect" : "Select"} ${document.name}`}
-                        accessibilityState={{ selected }}
-                        contentMode="raw"
-                        key={document.key}
-                        onPress={() => toggleDocument(document)}
-                        size="md"
-                        style={[styles.document, selected && styles.selected]}
-                        variant="secondary"
-                      >
-                        <FileIcon
-                          size="md"
-                          variant={selected ? "accent" : "muted"}
-                        />
-                        <View style={styles.voiceCopy}>
-                          <Text numberOfLines={1} style={styles.voiceName}>
-                            {document.name}
-                          </Text>
-                          <Text style={styles.voiceDescription}>
-                            {document.extension?.toUpperCase() || "DOCUMENT"}
-                          </Text>
-                        </View>
-                        {selected ? (
-                          <CheckIcon size="sm" variant="accent" />
-                        ) : null}
-                      </Button>
-                    );
-                  })}
-                </>
-              )}
-            </ScrollView>
-            {draftError ? (
-              <Text
-                accessibilityLiveRegion="assertive"
-                accessibilityRole="alert"
-                style={styles.failed}
-              >
-                {draftError}
-              </Text>
-            ) : null}
-            <View style={styles.footer}>
-              <Button
-                onPress={() => setSheet("createDetails")}
-                size="md"
-                style={styles.footerButton}
-                variant="primary"
-              >
-                Done · {draft.archiveDocumentKeys.length} selected
-              </Button>
-              <Button
-                onPress={() => {
-                  setDraft((current) => ({
-                    ...current,
-                    archiveDocumentKeys: [],
-                  }));
-                  setDraftError(undefined);
-                }}
-                size="md"
-                style={styles.footerButton}
-                variant="secondary"
-              >
-                Clear
-              </Button>
-            </View>
-          </View>
-        ) : null}
         {sheet === "bookActions" && selectedBook ? (
           <View style={styles.sheetList}>
-            <Text accessibilityLiveRegion="polite" style={styles.actionStatus}>
-              {statusLabel(selectedBook.status)}
-              {selectedBook.generationProgressPercent === undefined
-                ? ""
-                : ` · ${Math.round(selectedBook.generationProgressPercent)}%`}
-              {selectedBook.failureMessage
-                ? `: ${selectedBook.failureMessage}`
-                : ""}
-            </Text>
             {lifecycleError ? (
               <Text accessibilityRole="alert" style={styles.failed}>
                 {lifecycleError}
               </Text>
             ) : null}
+            <BottomSheetItem disabled={bulkLoading || selectedBook.key.startsWith("pending-")} onPress={() => void updateBooksFavorite([selectedBook], !selectedBook.isFavorite, false)} style={styles.sheetAction} variant="secondary">{selectedBook.isFavorite ? "Unfavorite" : "Favorite"}</BottomSheetItem>
+            <BottomSheetItem disabled={selectedBook.key.startsWith("pending-")} onPress={() => { setSheetOpen(false); setSheet(undefined); setSharingBook(selectedBook); }} style={styles.sheetAction} variant="secondary">Share</BottomSheetItem>
+            {selectedBook.status === "ready" ? <BottomSheetItem disabled={extensionMutation.isPending} onPress={openExtension} style={styles.sheetAction} variant="secondary">Extend</BottomSheetItem> : null}
             {selectedBook.status === "failed" ? (
-              <Button
+              <BottomSheetItem
                 disabled={
                   lifecycleMutation.isPending ||
                   selectedBook.key.startsWith("pending-")
@@ -1603,14 +1161,14 @@ export function AscendWorkspace() {
                     book: selectedBook,
                   })
                 }
-                size="md"
-                variant="primary"
+                style={styles.sheetAction}
+                variant="secondary"
               >
                 Retry generation
-              </Button>
+              </BottomSheetItem>
             ) : null}
             {ACTIVE_STATUSES.includes(selectedBook.status) ? (
-              <Button
+              <BottomSheetItem
                 disabled={
                   lifecycleMutation.isPending ||
                   selectedBook.key.startsWith("pending-")
@@ -1621,48 +1179,39 @@ export function AscendWorkspace() {
                     book: selectedBook,
                   })
                 }
-                size="md"
+                style={styles.sheetAction}
                 variant="secondary"
               >
                 Cancel generation
-              </Button>
+              </BottomSheetItem>
             ) : null}
-            <Button
+            <BottomSheetItem
               disabled={
                 lifecycleMutation.isPending ||
                 selectedBook.key.startsWith("pending-")
               }
-              icon={<TrashIcon size="sm" />}
               onPress={() => setSheet("delete")}
-              size="md"
+              style={styles.sheetAction}
               variant="secondary"
             >
-              Delete book
-            </Button>
-            <Button
-              onPress={() => setSheetOpen(false)}
-              size="md"
-              variant="secondary"
-            >
-              Close
-            </Button>
+              Delete
+            </BottomSheetItem>
           </View>
         ) : null}
+        {sheet === "bulkActions" ? <View style={styles.bulkActionList}>
+          <Button disabled={bulkLoading} loading={bulkLoading} onPress={() => void updateBooksFavorite(selectedBooks, !allSelectedFavorite, true)} size="md" variant="secondary">{allSelectedFavorite ? "Unfavorite" : "Favorite"}</Button>
+          <Button disabled={bulkLoading} onPress={() => setSheet("bulkDelete")} size="md" variant="secondary">Delete</Button>
+        </View> : null}
+        {sheet === "bulkDelete" ? <View style={styles.compactSheetActions}>
+          <Button disabled={bulkLoading} loading={bulkLoading} onPress={() => void deleteSelectedBooks()} size="md" variant="primary">Delete</Button>
+          <Button disabled={bulkLoading} onPress={() => { setSheetOpen(false); setSheet(undefined); }} size="md" variant="secondary">Close</Button>
+        </View> : null}
         {sheet === "delete" && selectedBook ? (
-          <View style={styles.sheetList}>
-            <Text style={styles.actionStatus}>
-              This permanently deletes “{selectedBook.title}” and its reading
-              progress.
-            </Text>
+          <View style={styles.compactSheetActions}>
             <Button
               disabled={lifecycleMutation.isPending}
               loading={lifecycleMutation.isPending}
-              onPress={() =>
-                lifecycleMutation.mutate({
-                  action: "delete",
-                  book: selectedBook,
-                })
-              }
+              onPress={deleteSelectedBook}
               size="md"
               variant="primary"
             >
@@ -1670,7 +1219,7 @@ export function AscendWorkspace() {
             </Button>
             <Button
               disabled={lifecycleMutation.isPending}
-              onPress={() => setSheet("bookActions")}
+              onPress={() => { setSheetOpen(false); setSheet(undefined); }}
               size="md"
               variant="secondary"
             >
@@ -1678,72 +1227,134 @@ export function AscendWorkspace() {
             </Button>
           </View>
         ) : null}
-        {sheet === "reader" && playback.detail ? (
-          <Reader
-            audio={playback.audio}
-            chapter={playback.chapter}
-            chapterIndex={playback.chapterIndex}
-            currentTime={playback.currentTime}
-            detail={playback.detail}
-            duration={playback.duration}
-            onBack={() => { setSheetOpen(false); setSheet(undefined); }}
-            onMoveChapter={(offset) => void playback.moveChapter(offset)}
-            onRefreshUrl={() => void playback.refreshUrl()}
-            onSeek={playback.seek}
-            onSleep={() => setSheet("sleep")}
-            onSpeed={() => {
-              const index = SPEEDS.indexOf(
-                playback.speed as (typeof SPEEDS)[number],
-              );
-              playback.setSpeed(SPEEDS[(index + 1) % SPEEDS.length]!);
-            }}
-            onToggle={() => void playback.toggle()}
-            ordered={playback.orderedChapters}
-            persistenceError={playback.persistenceError}
-            playbackError={playback.error}
-            refreshingUrl={playback.refreshingUrl}
-            sleepMinutes={playback.sleepMinutes}
-            speed={playback.speed}
-          />
-        ) : null}
-        {sheet === "reader" && !playback.detail ? (
-          <View
-            accessibilityRole={playback.error ? "alert" : "progressbar"}
-            style={styles.detailLoading}
-          >
-            <Text style={styles.noticeText}>
-              {playback.error ?? "Loading reader..."}
-            </Text>
-            {playback.error ? (
-              <Button
-                onPress={() => void playback.refreshUrl()}
-                size="md"
-                variant="secondary"
-              >
-                Retry
-              </Button>
-            ) : null}
-          </View>
-        ) : null}
-        {sheet === "sleep" ? (
-          <View style={styles.sheetList}>
-            {SLEEP_MINUTES.map((minutes) => (
-              <BottomSheetItem
-                key={minutes}
-                onPress={() => {
-                  playback.setSleepMinutes(minutes);
-                  setSheet("reader");
-                }}
-                variant={
-                  playback.sleepMinutes === minutes ? "primary" : "secondary"
-                }
-              >
-                {minutes ? `${minutes} minutes` : "Off"}
-              </BottomSheetItem>
-            ))}
-          </View>
-        ) : null}
+        {sheet === "reader" ? <View style={styles.summarySheetContent}><Reader chapter={readerChapter} /><Button disabled={!readerChapter?.content} onPress={() => openChapterReading(readerChapter?.key)} size="md" variant="primary">Read</Button></View> : null}
+        {sheet === "chapterRead" ? <ChapterReading chapter={readingChapter} /> : null}
+        {sheet === "bookSummary" ? <View style={styles.summarySheetContent}><View style={styles.chapterSummaryPanel}><Text selectable style={styles.chapterSummaryText}>{detail?.book.description || "A description is unavailable for this audio book."}</Text></View><Button disabled={!bookReadingChapter} onPress={() => openChapterReading(bookReadingChapter?.key)} size="md" variant="primary">Read</Button></View> : null}
       </BottomSheet>
+
+      <BottomSheet
+        dismissible={!extensionPreviewMutation.isPending}
+        footer={<><Button disabled={extensionPreviewMutation.isPending || extensionMutation.isPending} loading={extensionPreviewMutation.isPending} onPress={extensionPreviewReady ? generateExtension : previewExtension} size="md" variant="primary">{extensionPreviewReady ? "Generate" : "Preview"}</Button><Button disabled={extensionMutation.isPending} onPress={closeExtension} size="md" variant="secondary">Close</Button></>}
+        height="full"
+        onOpenChange={(open) => { if (!open) closeExtension(); }}
+        open={extensionOpen}
+        title="Extend audio book"
+      >
+        <View style={styles.extensionStep}>
+          <Text style={styles.formLabel}>New chapters</Text>
+          <Tabs accessibilityLabel="Extension chapter count" accessibilityRole="tablist" style={styles.detailTabs}>
+            {EXTENSION_CHAPTER_OPTIONS.map((count) => <Button accessibilityRole="tab" accessibilityState={{ selected: extensionChapterCount === count }} key={count} onPress={() => chooseExtensionChapterCount(count)} size="md" style={styles.detailTab} variant={extensionChapterCount === count ? "secondary" : "ghost"}>{count}</Button>)}
+          </Tabs>
+          <ScrollView accessibilityLiveRegion="polite" accessibilityState={{ busy: extensionPreviewMutation.isPending }} contentContainerStyle={styles.extensionTitles} showsVerticalScrollIndicator={false}>
+            {extensionPreviewMutation.isPending ? Array.from({ length: extensionChapterCount }, (_, index) => <Skeleton accessibilityLabel="Previewing extension chapters" accessibilityRole="progressbar" key={index} style={styles.extensionTitleSkeleton} />) : extensionTitles.map((title, index) => <ActionPill key={`${index}-${title}`}><Text numberOfLines={2} style={styles.extensionTitle}>{title}</Text></ActionPill>)}
+            {extensionError ? <Text accessibilityRole="alert" style={styles.failed}>{extensionError}</Text> : null}
+          </ScrollView>
+        </View>
+      </BottomSheet>
+
+      <BottomSheet
+        dismissible={!topicSuggestionsMutation.isPending}
+        footer={<><Button disabled={topicSuggestionsMutation.isPending} onPress={loadNewTopics} size="md" variant="primary">New topics</Button><Button onPress={closeCreationSheets} size="md" variant="secondary">Close</Button></>}
+        height="full"
+        onOpenChange={(open) => { if (!open && !createTopicCustomOpen && !createGoalOpen) closeCreationSheets(); }}
+        open={createTopicOpen}
+        title="Choose a topic"
+      >
+        <ScrollView contentContainerStyle={styles.suggestionStep} showsVerticalScrollIndicator={false}>
+          <View style={styles.suggestionList}>
+            {!topicSuggestionsMutation.isPending && topicSuggestions.length ? <Button onPress={() => setCreateTopicCustomOpen(true)} shape="pill" size="md" style={styles.suggestionPill} variant="secondary">Custom</Button> : null}
+            {topicSuggestionsMutation.isPending ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={styles.suggestionLoadingPill} />) : topicSuggestions.map((topic) => <Button contentMode="raw" key={topic} onPress={() => openGoalStep(topic)} shape="pill" size="md" style={styles.suggestionPill} variant="secondary"><Text numberOfLines={1} style={styles.suggestionText}>{topic}</Text></Button>)}
+          </View>
+          {topicSuggestionsError ? <Text accessibilityRole="alert" style={styles.noticeText}>{topicSuggestionsError}</Text> : null}
+        </ScrollView>
+      </BottomSheet>
+
+      <BottomSheet
+        dismissible={!briefTransformation}
+        footer={<><Button disabled={Boolean(briefTransformation) || draft.topic.trim().length < 3} onPress={() => openGoalStep(draft.topic.trim())} size="md" variant="primary">Next</Button><Button disabled={Boolean(briefTransformation)} onPress={() => setCreateTopicCustomOpen(false)} size="md" variant="secondary">Close</Button></>}
+        height="full"
+        onOpenChange={(open) => { if (!open && !createGoalOpen) setCreateTopicCustomOpen(false); }}
+        open={createTopicCustomOpen}
+        title="Your topic"
+      >
+        <View style={styles.customStep}>
+          <Text style={styles.inputLabel}>Topic</Text>
+          <AiTextEditor accessibilityLabel="Audio book topic" autoFocus editable={briefTransformation?.target !== "topic"} maxLength={2_000} multiline onChangeText={(topic) => setDraft((current) => ({ ...current, topic }))} onOpenActions={() => openBriefEditorActions("topic")} placeholder="What should this audio book explore?" style={styles.customTextArea} textAlignVertical="top" transformation={briefTransformation?.target === "topic" ? briefTransformation.action : undefined} value={draft.topic} />
+        </View>
+      </BottomSheet>
+
+      <BottomSheet
+        dismissible={!goalSuggestionsMutation.isPending}
+        footer={<><Button disabled={goalSuggestionsMutation.isPending} onPress={loadNewGoals} size="md" variant="primary">New goals</Button><Button onPress={() => setCreateGoalOpen(false)} size="md" variant="secondary">Close</Button></>}
+        height="full"
+        onOpenChange={(open) => { if (!open && !createGoalCustomOpen && !createDetailsOpen) setCreateGoalOpen(false); }}
+        open={createGoalOpen}
+        title="Choose a goal"
+      >
+        <ScrollView contentContainerStyle={styles.suggestionStep} showsVerticalScrollIndicator={false}>
+          <View style={styles.suggestionList}>
+            {!goalSuggestionsMutation.isPending && goalSuggestions.length ? <Button onPress={() => setCreateGoalCustomOpen(true)} shape="pill" size="md" style={styles.suggestionPill} variant="secondary">Custom</Button> : null}
+            {goalSuggestionsMutation.isPending ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={styles.suggestionLoadingPill} />) : goalSuggestions.map((goal) => <Button contentMode="raw" key={goal} onPress={() => openDetailsStep(goal)} shape="pill" size="md" style={styles.suggestionPill} variant="secondary"><Text numberOfLines={1} style={styles.suggestionText}>{goal}</Text></Button>)}
+          </View>
+          {goalSuggestionsError ? <Text accessibilityRole="alert" style={styles.noticeText}>{goalSuggestionsError}</Text> : null}
+        </ScrollView>
+      </BottomSheet>
+
+      <BottomSheet
+        dismissible={!briefTransformation}
+        footer={<><Button disabled={Boolean(briefTransformation) || draft.goal.trim().length < 3} onPress={() => openDetailsStep(draft.goal.trim())} size="md" variant="primary">Next</Button><Button disabled={Boolean(briefTransformation)} onPress={() => setCreateGoalCustomOpen(false)} size="md" variant="secondary">Close</Button></>}
+        height="full"
+        onOpenChange={(open) => { if (!open && !createDetailsOpen) setCreateGoalCustomOpen(false); }}
+        open={createGoalCustomOpen}
+        title="Your goal"
+      >
+        <View style={styles.customStep}>
+          <Text style={styles.inputLabel}>Goal</Text>
+          <AiTextEditor accessibilityLabel="Listening goal" autoFocus editable={briefTransformation?.target !== "goal"} maxLength={2_000} multiline onChangeText={(goal) => setDraft((current) => ({ ...current, goal }))} onOpenActions={() => openBriefEditorActions("goal")} placeholder="What should change after listening?" style={styles.customTextArea} textAlignVertical="top" transformation={briefTransformation?.target === "goal" ? briefTransformation.action : undefined} value={draft.goal} />
+        </View>
+      </BottomSheet>
+
+      <BottomSheet
+        dismissible={!createMutation.isPending && !contextPickerOpen}
+        footer={<><Button disabled={createMutation.isPending || draft.topic.trim().length < 3 || draft.goal.trim().length < 3} onPress={submit} size="md" variant="primary">Create audio book</Button><Button disabled={createMutation.isPending} onPress={() => setCreateDetailsOpen(false)} size="md" variant="secondary">Close</Button></>}
+        height="full"
+        onOpenChange={(open) => { if (!open && !contextPickerOpen) setCreateDetailsOpen(false); }}
+        open={createDetailsOpen}
+        title="Audio book details"
+      >
+        <ScrollView contentContainerStyle={styles.form} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          <Text style={styles.formLabel}>Audio book depth</Text>
+          <Tabs accessibilityLabel="Audio book depth" accessibilityRole="tablist" style={styles.detailTabs}>
+            {CHAPTER_OPTIONS.map((option) => <Button accessibilityRole="tab" accessibilityState={{ selected: draft.chapterCount === option.count }} key={option.count} onPress={() => setDraft((current) => ({ ...current, chapterCount: option.count }))} size="xs" style={styles.detailTab} variant={draft.chapterCount === option.count ? "secondary" : "ghost"}>{option.label}</Button>)}
+          </Tabs>
+          <Text style={styles.helper}>{draft.chapterCount} chapters</Text>
+          <View style={styles.switchRow}>
+            <View style={styles.switchCopy}>
+              <Text style={styles.voiceName}>Chapter images</Text>
+              <Text style={styles.helper}>Generate an image for each chapter.</Text>
+            </View>
+            <Switch accessibilityLabel="Generate chapter images" checked={draft.chapterImages} onCheckedChange={(chapterImages) => setDraft((current) => ({ ...current, chapterImages }))} />
+          </View>
+          <ButtonSizeProvider overrideParent size="xs">
+            <View style={styles.contextActions}>
+              <View style={styles.contextChip}>
+                <Button accessibilityLabel="Open audio book context" contentMode="raw" onPress={() => setContextPickerOpen(true)} size="xs" style={styles.contextChipMain} variant="ghost"><Text style={styles.contextChipText}>Context</Text></Button>
+                <Button accessibilityLabel="Add audio book context" contentMode="raw" hitSlop={10} iconOnly onPress={() => setContextPickerOpen(true)} shape="pill" size="xs" style={styles.contextChipAction} variant="secondary"><PlusIcon size="xs" /></Button>
+              </View>
+              {contextSelection.length ? <View style={styles.contextChip}>
+                <Button contentMode="raw" onPress={removeAllContext} size="xs" style={styles.contextChipMain} variant="ghost"><Text style={styles.contextChipText}>Remove all</Text></Button>
+                <Button accessibilityLabel="Remove all audio book context" contentMode="raw" hitSlop={10} iconOnly onPress={removeAllContext} shape="pill" size="xs" style={styles.contextChipAction} variant="secondary"><CloseIcon size="xs" /></Button>
+              </View> : null}
+            </View>
+          </ButtonSizeProvider>
+          {contextSelection.length ? <View accessibilityLabel={`${contextSelection.length} audio book context documents`} onLayout={({ nativeEvent }) => setContextGridWidth(nativeEvent.layout.width)} style={styles.contextGrid}>{contextSelection.map((ref) => { const identity = attachmentIdentity(ref); const label = contextLabels[identity] ?? "Archive document"; return <Button accessibilityLabel={`Edit context ${label}`} contentMode="raw" key={identity} onPress={() => setContextPickerOpen(true)} shape="rounded" size="md" style={[styles.contextCard, { width: contextCardSize, height: contextCardSize }]} variant="ghost"><FileIcon size="lg" /><Text ellipsizeMode="tail" numberOfLines={1} style={styles.contextCardLabel}>{label}</Text></Button>; })}</View> : null}
+          {draftError ? <Text accessibilityLiveRegion="assertive" accessibilityRole="alert" style={styles.failed}>{draftError}</Text> : null}
+        </ScrollView>
+      </BottomSheet>
+
+      {contextPickerOpen && createDetailsOpen ? <EmailAttachmentPicker archiveOnly context={contentContext} contextKey={`${context.organizationKey}:${context.scopeKey}:audio-book-context`} labels={contextLabels} maxSelection={MAX_CONTEXT_DOCUMENTS} onClose={() => setContextPickerOpen(false)} onDone={finishContextSelection} open selection={contextSelection} title="Context" /> : null}
+
+      {sharingBook ? <BookSharing book={sharingBook} onClose={() => setSharingBook(undefined)} open={Boolean(sharingBook)} /> : null}
 
       <BottomSheet hideHeading onOpenChange={(open) => { if (!open) setBriefActionTarget(undefined); }} open={Boolean(briefActionTarget)} title="AI actions">
         <View style={styles.sheetList}>
@@ -1752,7 +1363,7 @@ export function AscendWorkspace() {
         </View>
       </BottomSheet>
       <BottomSheet footer={<><Button disabled={briefTargetLanguage.trim().length < 2} onPress={() => { const target = briefTranslateTarget; if (target) void transformBriefEditor(target, "translate"); }} size="md" variant="primary">Translate</Button><Button onPress={() => setBriefTranslateTarget(undefined)} size="md" variant="secondary">Close</Button></>} height="full" onOpenChange={(open) => { if (!open) setBriefTranslateTarget(undefined); }} open={Boolean(briefTranslateTarget)} title="Translate text">
-        <View style={styles.customStep}><Text style={styles.inputLabel}>Language</Text><TextInput accessibilityLabel="Book brief translation language" autoFocus maxLength={100} onChangeText={setBriefTargetLanguage} placeholder="Language" value={briefTargetLanguage} /></View>
+        <View style={styles.customStep}><Text style={styles.inputLabel}>Language</Text><TextInput accessibilityLabel="Audio book brief translation language" autoFocus maxLength={100} onChangeText={setBriefTargetLanguage} placeholder="Language" value={briefTargetLanguage} /></View>
       </BottomSheet>
     </KeyboardAvoidingView>
   );
@@ -1770,6 +1381,7 @@ const styles = StyleSheet.create({
   },
   localHeader: {
     minHeight: 48,
+    marginTop: spacing.md,
     paddingHorizontal: spacing.md,
     flexDirection: "row",
     alignItems: "center",
@@ -1811,6 +1423,10 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   searchHistoryButton: { width: 44, height: 44 },
+  bulkToolbar: { minHeight: 40, marginHorizontal: spacing.md, marginBottom: spacing.md, padding: 5, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderWidth: 1, backgroundColor: palette.panel },
+  bulkToolbarSelection: { flexDirection: "row", alignItems: "center", gap: 8 },
+  bulkToolbarClose: { height: 28, width: 28, paddingHorizontal: 0, paddingVertical: 0 },
+  bulkSelectionText: { color: palette.silver100, fontFamily: fonts.medium, fontSize: 12 },
   library: { flexGrow: 1, paddingHorizontal: spacing.md, paddingBottom: 140 },
   grid: {
     width: "100%",
@@ -1818,16 +1434,25 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: GRID_GAP,
   },
-  bookCard: {
+  bookCardFrame: {
+    position: "relative",
     overflow: "hidden",
-    alignItems: "stretch",
-    justifyContent: "flex-end",
-    padding: 0,
     borderWidth: 1,
     borderColor: palette.hairline,
     borderRadius: radii.sm,
     backgroundColor: palette.panelRaised,
   },
+  bookCard: {
+    width: "100%",
+    height: "100%",
+    overflow: "hidden",
+    alignItems: "stretch",
+    justifyContent: "flex-end",
+    padding: 0,
+    borderRadius: radii.sm,
+  },
+  selectedItem: { borderColor: palette.silver50, shadowColor: palette.silver50, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.62, shadowRadius: 5, elevation: 4 },
+  selectionBadge: { position: "absolute", top: 4, right: 4, width: 20, height: 20, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: palette.silver50 },
   cover: {
     position: "absolute",
     top: 0,
@@ -1852,11 +1477,11 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 14,
   },
-  cardStatus: {
+  cardSummary: {
     color: palette.silver300,
-    fontFamily: fonts.medium,
+    fontFamily: fonts.regular,
     fontSize: 8,
-    textTransform: "uppercase",
+    lineHeight: 11,
   },
   failed: { color: "#F39A9A" },
   generationTrack: {
@@ -1888,12 +1513,18 @@ const styles = StyleSheet.create({
     backgroundColor: palette.panel,
   },
   sheetList: { gap: spacing.sm },
+  bulkActionList: { width: "100%", gap: spacing.sm },
+  compactSheetActions: { width: "100%", gap: spacing.sm, padding: 2 },
   filterPanel: { gap: 6 },
   searchHistoryOption: { backgroundColor: palette.page },
   favoriteSwitchRow: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: spacing.xs },
   favoriteSwitchLabel: { color: palette.muted, fontFamily: fonts.regular, fontSize: 12 },
   sheetAction: { justifyContent: "center" },
   form: { gap: spacing.sm, paddingBottom: spacing.xl },
+  extensionStep: { flex: 1, gap: spacing.sm },
+  extensionTitles: { gap: 6, paddingTop: spacing.sm, paddingBottom: spacing.xl },
+  extensionTitleSkeleton: { width: "100%", height: 48, borderRadius: 999 },
+  extensionTitle: { color: palette.silver100, fontFamily: fonts.regular, fontSize: 13, lineHeight: 17 },
   suggestionStep: { flex: 1, gap: spacing.md },
   suggestionList: { gap: 6 },
   suggestionPill: { width: "100%", minHeight: 40, justifyContent: "flex-start", paddingHorizontal: spacing.md },
@@ -1902,7 +1533,7 @@ const styles = StyleSheet.create({
   selectedPrompt: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 12, lineHeight: 17 },
   customStep: { flex: 1, gap: spacing.sm },
   stepTextArea: { flex: 1, minHeight: 220, textAlignVertical: "top" },
-  customTextArea: { minHeight: 280, paddingTop: 12, lineHeight: 22, backgroundColor: palette.page, textAlignVertical: "top" },
+  customTextArea: { paddingTop: 12, lineHeight: 22 },
   inputLabel: { marginLeft: 2, color: palette.silver300, fontFamily: fonts.medium, fontSize: 12, letterSpacing: 0.4 },
   formHeading: {
     marginBottom: spacing.sm,
@@ -1929,19 +1560,11 @@ const styles = StyleSheet.create({
     justifyContent: "flex-start",
     gap: spacing.sm,
   },
-  voiceCopy: { minWidth: 0, flex: 1, alignItems: "flex-start" },
   voiceName: {
     color: palette.silver100,
     fontFamily: fonts.medium,
     fontSize: 13,
   },
-  voiceDescription: {
-    marginTop: 2,
-    color: palette.silver500,
-    fontFamily: fonts.regular,
-    fontSize: 11,
-  },
-  selected: { borderWidth: 1, borderColor: palette.silver300 },
   valueLabel: {
     color: palette.silver500,
     fontFamily: fonts.medium,
@@ -1963,61 +1586,40 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   switchCopy: { minWidth: 0, flex: 1 },
-  footer: { width: "100%", gap: spacing.sm },
-  footerButton: { width: "100%" },
+  contextActions: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: spacing.xs },
+  contextChip: { alignSelf: "flex-start", minHeight: 34, maxWidth: "100%", flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1, borderColor: "rgba(221, 226, 229, 0.18)", borderRadius: 999, backgroundColor: "rgba(255, 255, 255, 0.03)" },
+  contextChipMain: { minWidth: 0, flexShrink: 1, justifyContent: "center", paddingLeft: 7, paddingRight: 0 },
+  contextChipAction: { width: 24, minWidth: 24, maxWidth: 24, height: 24, minHeight: 24, maxHeight: 24, marginRight: 3, borderRadius: 12 },
+  contextChipText: { minWidth: 0, flexShrink: 1, color: palette.silver100, fontFamily: fonts.medium, fontSize: 12, textAlign: "center" },
+  contextGrid: { width: "100%", flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  contextCard: { width: "100%", height: "100%", position: "relative", overflow: "hidden", flexDirection: "column", justifyContent: "center", gap: 8, paddingHorizontal: 6, borderWidth: 1, borderColor: palette.hairline, backgroundColor: palette.panelRaised },
+  contextCardLabel: { width: "100%", color: palette.silver100, fontFamily: fonts.medium, fontSize: 12, textAlign: "center" },
   detailTabs: { flexDirection: "row", gap: 4, padding: 3, borderWidth: 1, backgroundColor: palette.panel },
   detailTab: { flex: 1 },
   languageTabs: { flexDirection: "row", flexWrap: "wrap", gap: 4, padding: 3, borderWidth: 1, backgroundColor: palette.panel },
   languageTab: { width: "32%" },
-  actionStatus: {
-    color: palette.silver300,
-    fontFamily: fonts.regular,
-    fontSize: 13,
-    lineHeight: 19,
-  },
-  sourcePicker: { flex: 1, gap: spacing.sm },
-  queryError: { gap: spacing.sm, padding: spacing.sm, borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.md, backgroundColor: palette.panel },
   detail: { gap: spacing.lg, paddingBottom: spacing.xl },
-  detailPage: { flexGrow: 1, paddingHorizontal: spacing.md, paddingBottom: 140 },
-  detailHero: { flexDirection: "row", gap: spacing.md },
+  detailPage: { flexGrow: 1, paddingHorizontal: spacing.md },
+  detailHero: { width: "100%", minHeight: (144 * 16) / 9, flexDirection: "row", alignItems: "center", justifyContent: "flex-start", gap: spacing.md, padding: 0 },
   detailCover: {
-    width: 112,
-    height: (112 * 16) / 9,
+    width: 144,
+    height: (144 * 16) / 9,
+    flexShrink: 0,
     overflow: "hidden",
     borderRadius: radii.sm,
   },
   detailCopy: {
     minWidth: 0,
     flex: 1,
-    justifyContent: "center",
     alignItems: "flex-start",
-    gap: spacing.sm,
+    gap: spacing.xs,
   },
-  detailTitle: {
-    color: palette.silver50,
-    fontFamily: fonts.light,
-    fontSize: 24,
-    lineHeight: 29,
-  },
-  detailMeta: {
-    color: palette.silver500,
-    fontFamily: fonts.regular,
-    fontSize: 11,
-  },
+  detailCurrentLabel: { marginTop: spacing.xs, color: palette.silver300, fontFamily: fonts.medium, fontSize: 8, letterSpacing: tracking.micro },
+  detailCurrentChapter: { marginTop: spacing.sm, color: palette.silver100, fontFamily: fonts.medium, fontSize: 12, lineHeight: 17 },
+  detailDuration: { marginTop: spacing.sm, color: palette.silver300, fontFamily: fonts.regular, fontSize: 11 },
   detailLoading: { gap: spacing.md },
-  detailCoverSkeleton: { width: 112, height: 199, borderRadius: radii.sm },
+  detailCoverSkeleton: { width: 144, height: 256, borderRadius: radii.sm },
   detailLine: { width: "70%", height: 14, borderRadius: 7 },
-  chapterSearch: {
-    height: 44,
-    paddingHorizontal: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 7,
-    borderWidth: 1,
-    borderColor: palette.hairline,
-    borderRadius: 999,
-    backgroundColor: palette.panel,
-  },
   chapterCard: {
     overflow: "hidden",
     alignItems: "stretch",
@@ -2032,77 +1634,28 @@ const styles = StyleSheet.create({
     fontFamily: fonts.medium,
     fontSize: 9,
   },
-  check: {
-    position: "absolute",
-    top: 5,
-    right: 5,
-    width: 20,
-    height: 20,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 10,
-    backgroundColor: palette.silver100,
-  },
-  reader: { flex: 1, marginHorizontal: -spacing.xs },
-  readerHeader: {
-    minHeight: 52,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  readerIdentity: { minWidth: 0, flex: 1 },
-  micro: {
-    color: palette.silver500,
-    fontFamily: fonts.medium,
-    fontSize: 8,
-    letterSpacing: tracking.micro,
-  },
-  readerTitle: {
-    marginTop: 3,
-    color: palette.silver100,
-    fontFamily: fonts.medium,
-    fontSize: 14,
-  },
-  transcript: {
-    flexGrow: 1,
-    gap: 17,
-    paddingHorizontal: spacing.sm,
-    paddingTop: spacing.md,
-    paddingBottom: 210,
-  },
-  phrase: {
-    color: palette.silver500,
-    fontFamily: fonts.regular,
-    fontSize: 20,
-    lineHeight: 29,
-    opacity: 0.6,
-  },
-  activePhrase: {
-    color: palette.silver50,
-    fontSize: 23,
-    lineHeight: 32,
-    opacity: 1,
-  },
-  pastPhrase: { color: palette.silver700, opacity: 0.45 },
-  chapterBody: {
+  chapterSummaryPanel: { paddingVertical: spacing.xs },
+  summarySheetContent: { flex: 1, gap: spacing.md },
+  chapterSummaryText: {
     color: palette.silver300,
     fontFamily: fonts.regular,
     fontSize: 17,
     lineHeight: 28,
   },
-  playerPanel: {
-    position: "absolute",
-    right: 0,
-    bottom: 0,
-    left: 0,
-    padding: spacing.sm,
-    gap: 5,
-    borderTopWidth: 1,
-    borderColor: palette.hairline,
-    borderRadius: radii.md,
-    backgroundColor: palette.panelRaised,
-  },
-  playerNotice: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  chapterReadingScroll: { flex: 1 },
+  chapterReadingContent: { gap: spacing.md, paddingBottom: spacing.lg },
+  chapterReadingParagraph: { color: palette.silver100, fontFamily: fonts.regular, fontSize: 17, lineHeight: 29 },
+  chapterReadingUnavailable: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 14, lineHeight: 21 },
+  chapterReadingFooter: { width: "100%", gap: spacing.sm },
+  chapterReadingSteps: { width: "100%", flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  narrationPlayer: { marginHorizontal: 4, marginBottom: spacing.xs, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, gap: spacing.xs, borderRadius: radii.lg, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.voidBlack },
+  narrationHeading: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  narrationTitleBlock: { flex: 1, gap: 2 },
+  narrationTitle: { color: palette.silver50, fontFamily: fonts.medium, fontSize: 13 },
+  narrationControls: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  narrationSlider: { flex: 1 },
+  narrationTime: { minWidth: 32, color: palette.silver300, fontFamily: fonts.regular, fontSize: 10, textAlign: "center" },
+  narrationError: { color: "#D98B8B", fontFamily: fonts.regular, fontSize: 10, lineHeight: 14 },
   noticeText: {
     minWidth: 0,
     flex: 1,
@@ -2110,41 +1663,4 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     fontSize: 12,
   },
-  buffering: {
-    color: palette.silver500,
-    fontFamily: fonts.regular,
-    fontSize: 10,
-    textAlign: "center",
-  },
-  persistenceNotice: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 10, lineHeight: 14 },
-  timeRow: { flexDirection: "row", justifyContent: "space-between" },
-  time: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 9 },
-  playbackRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 5,
-  },
-  playButton: { width: 44, paddingHorizontal: 0 },
-  secondaryControls: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  readerBook: {
-    minWidth: 0,
-    flex: 1,
-    color: palette.silver500,
-    fontFamily: fonts.regular,
-    fontSize: 11,
-    textAlign: "right",
-  },
-  documentList: { gap: spacing.sm, paddingVertical: spacing.md },
-  document: {
-    width: "100%",
-    minHeight: 58,
-    justifyContent: "flex-start",
-    gap: spacing.sm,
-  },
-  documentSkeleton: { width: "100%", height: 58, borderRadius: radii.md },
 });

@@ -39,7 +39,7 @@ import { providerSchema } from './providers.node';
 import { scopeSchema, scopeScopeSchema } from '@/lib/ai/scopes';
 import { newId } from '@/lib/ids';
 import { join } from 'node:path';
-import { NEXUS_SCOPE_KEY, SEEDED_MODELS, SEEDED_MODEL_ACTIONS, SEEDED_MODEL_PROVIDERS, SEEDED_ORCHESTRATOR_SOURCES, SEEDED_PROVIDERS, SEEDED_SCOPES, seedAiRuntimeNodes, seededModelActionKey, type AiRuntimeSeedUpserters, type SeedResult } from './seed';
+import { NEXUS_SCOPE_KEY, SEEDED_MODELS, SEEDED_MODEL_PROVIDERS, SEEDED_ORCHESTRATOR_SOURCES, SEEDED_PROVIDERS, SEEDED_SCOPES, seedAiRuntimeNodes, type AiRuntimeSeedUpserters, type SeedResult } from './seed';
 import { CANONICAL_ORCHESTRATOR_NAMES } from '@/lib/orchestrators/roster';
 
 describe('scope seeds', () => {
@@ -109,7 +109,7 @@ describe('provider seeds', () => {
   });
 });
 
-describe('model and routing relation seeds', () => {
+describe('model and provider relation seeds', () => {
   test('seed model components through their service providers', () => {
     expect(SEEDED_MODELS).toHaveLength(7);
     expect(SEEDED_MODEL_PROVIDERS).toHaveLength(7);
@@ -122,22 +122,6 @@ describe('model and routing relation seeds', () => {
       'xai.grok-imagine-image-quality',
       'google.gemini-2.5-flash-lite',
     ]);
-    expect(new Set(SEEDED_MODEL_ACTIONS.map(({ modelSlug }) => modelSlug))).toEqual(new Set(SEEDED_MODELS.map(({ slug }) => slug)));
-    expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'caption-image')?.modelSlug).toBe('openai.gpt-5.6-luna');
-    expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'generate-image')?.modelSlug).toBe('bfl.flux-2-klein-4b');
-    expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'embed')?.modelSlug).toBe('openai.text-embedding-3-small');
-    expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'ask').map(({ actionSlug, modelSlug, priority }) => ({ actionSlug, modelSlug, priority }))).toEqual([
-      { actionSlug: 'ask', modelSlug: 'google.gemini-2.5-flash-lite', priority: 100 },
-      { actionSlug: 'ask', modelSlug: 'openai.gpt-5.6-luna', priority: 90 },
-    ]);
-    expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'web-search').map(({ modelSlug, priority }) => ({ modelSlug, priority }))).toEqual([
-      { modelSlug: 'google.gemini-2.5-flash-lite', priority: 100 }, { modelSlug: 'openai.gpt-5.6-luna', priority: 90 },
-    ]);
-    expect(new Set(SEEDED_MODEL_ACTIONS.map(({ key }) => key)).size).toBe(SEEDED_MODEL_ACTIONS.length);
-    expect(SEEDED_MODEL_ACTIONS.every(({ key }) => /^c[a-f0-9]{24}$/.test(key))).toBe(true);
-    expect(seededModelActionKey('ask', 'google.gemini-2.5-flash-lite')).toBe(seededModelActionKey('ask', 'google.gemini-2.5-flash-lite'));
-    expect(seededModelActionKey('ask', 'google.gemini-2.5-flash-lite')).not.toBe(seededModelActionKey('web-search', 'google.gemini-2.5-flash-lite'));
-    expect(SEEDED_MODEL_ACTIONS.map(({ key }) => key)).not.toContain('cmmodelaction00000000001');
     expect(SEEDED_MODEL_PROVIDERS.map(({ modelSlug, providerSlug, providerModelId, enabled }) => `${modelSlug}:${providerSlug}:${providerModelId}:${enabled}`)).toEqual([
       'openai.gpt-5.6-luna:openai:gpt-5.6-luna:true',
       'openai.gpt-image-2:openai:gpt-image-2:true',
@@ -150,9 +134,8 @@ describe('model and routing relation seeds', () => {
     for (const model of SEEDED_MODELS) expect(SEEDED_MODEL_PROVIDERS.find((route) => route.modelSlug === model.slug && route.enabled)).toBeDefined();
     for (const action of ACTION_DEFINITIONS) {
       for (const binding of action.models) {
-        expect(SEEDED_MODELS.some(({ slug }) => slug === binding.model)).toBe(true);
-        expect(SEEDED_MODEL_PROVIDERS.some(({ modelSlug, providerSlug, enabled }) => modelSlug === binding.model && providerSlug === binding.provider && enabled)).toBe(true);
-        expect(SEEDED_MODEL_ACTIONS.some(({ actionSlug, modelSlug, enabled }) => actionSlug === action.id && modelSlug === binding.model && enabled)).toBe(true);
+        expect(SEEDED_MODELS.filter(({ slug, enabled }) => slug === binding.model && enabled)).toHaveLength(1);
+        expect(SEEDED_MODEL_PROVIDERS.filter(({ modelSlug, providerSlug, enabled }) => modelSlug === binding.model && providerSlug === binding.provider && enabled)).toHaveLength(1);
       }
     }
   });
@@ -201,7 +184,6 @@ describe('AI runtime seed orchestration', () => {
     const upserters: AiRuntimeSeedUpserters = {
       provider: upsert('providers'),
       model: upsert('models'),
-      modelAction: upsert('modelActions'),
       modelProvider: upsert('modelProviders'),
     };
 

@@ -87,6 +87,7 @@ function buildGenerateContentBody(input: ChatInput): Record<string, unknown> {
   const generationConfig: Record<string, unknown> = {};
   if (input.options?.maxTokens !== undefined) generationConfig.maxOutputTokens = input.options.maxTokens;
   if (input.options?.temperature !== undefined) generationConfig.temperature = input.options.temperature;
+  if (input.responseFormat) { generationConfig.responseMimeType = 'application/json'; generationConfig.responseSchema = input.responseFormat.schema; }
   if (Object.keys(generationConfig).length > 0) body.generationConfig = generationConfig;
   return body;
 }

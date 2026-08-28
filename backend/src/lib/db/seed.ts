@@ -3,8 +3,6 @@ import { closeDb, db } from './client';
 import { newId } from '@/lib/ids';
 import { getProviderBySlug, insertProvider, updateProvider, type Provider } from './providers.node';
 import { getModelBySlug, insertModel, updateModel as updatePersistedModel, type Model } from './models.node';
-import { getModelActionById, getModelActionByPair, insertModelAction, modelActionSeedSchema, updateModelAction } from './model-actions.node';
-import { isArangoUniqueConstraintError } from './base';
 import { getModelProviderById, getModelProviderByPair, insertModelProvider, modelProviderSeedSchema, updateModelProvider, type ModelProvider } from './model-providers.node';
 import { getRootOrganization, insertOrganization, updateOrganization, type Organization } from './organizations.node';
 import { getUserOrganizationByOrganizationAndUser, updateUserOrganization } from './user-organization.node';
@@ -15,7 +13,6 @@ import { reconcileOrganizationScopeMemberships } from '@/lib/ai/scopes/membershi
 import { SEEDED_ORCHESTRATOR_SKILLS } from '@/lib/orchestrators/seeded-skills';
 import { CANONICAL_ORCHESTRATOR_NAMES } from '@/lib/orchestrators/roster';
 import { retireAiPersistence } from '@/db/retire-ai-persistence';
-import { ACTION_DEFINITIONS } from '@/lib/ai/actions';
 import { COUNTRY_CATALOG } from '@/lib/travel/country-catalog';
 import { currentEmbeddingSchema, embedText } from '@/lib/embeddings';
 import { createHash } from 'node:crypto';
@@ -38,7 +35,6 @@ export class SeedReferenceError extends Error {
 export interface AiRuntimeSeedUpserters {
   provider(seed: (typeof SEEDED_PROVIDERS)[number]): Promise<SeedResult>;
   model(seed: (typeof SEEDED_MODELS)[number]): Promise<SeedResult>;
-  modelAction(seed: (typeof SEEDED_MODEL_ACTIONS)[number]): Promise<SeedResult>;
   modelProvider(seed: (typeof SEEDED_MODEL_PROVIDERS)[number]): Promise<SeedResult>;
 }
 
@@ -163,21 +159,6 @@ export const SEEDED_MODELS = [
     enabled: true,
   },
 ] as const;
-
-const SEEDED_MODEL_SLUGS = new Set<string>(SEEDED_MODELS.map(({ slug }) => slug));
-
-/** Persist only runtime bindings backed by the retained model catalog. */
-export const seededModelActionKey = (actionSlug: string, modelSlug: string) => `c${createHash('sha256').update(`${actionSlug}\0${modelSlug}`).digest('hex').slice(0, 24)}`;
-
-export const SEEDED_MODEL_ACTIONS = ACTION_DEFINITIONS.flatMap((definition) =>
-  definition.models.filter(({ model }) => SEEDED_MODEL_SLUGS.has(model)).map((binding) => ({
-    key: seededModelActionKey(definition.id, binding.model),
-    modelSlug: binding.model,
-    actionSlug: definition.id,
-    priority: binding.priority,
-    enabled: true,
-  })),
-);
 
 export const SEEDED_MODEL_PROVIDERS = [
   {
@@ -417,41 +398,6 @@ async function upsertSeedModel(seed: (typeof SEEDED_MODELS)[number]): Promise<Se
   return updateSemanticSeed('models', existing.key, () => updatePersistedModel(existing.key, patch));
 }
 
-async function upsertSeedModelAction(seed: (typeof SEEDED_MODEL_ACTIONS)[number]): Promise<SeedResult> {
-  const parsed = modelActionSeedSchema.parse(seed);
-  const model = await getModelBySlug(parsed.modelSlug);
-  if (!model) throw new SeedReferenceError('model', parsed.modelSlug, 'modelAction');
-
-  const existing = await getModelActionByPair(model.key, parsed.actionSlug);
-  if (!existing) {
-    const seededKeyOwner = await getModelActionById(parsed.key);
-    let key = seededKeyOwner ? newId() : parsed.key;
-    try {
-      await insertModelAction({
-        key,
-        modelKey: model.key,
-        actionSlug: parsed.actionSlug,
-        priority: parsed.priority,
-        enabled: parsed.enabled,
-      });
-    } catch (error) {
-      if (!isArangoUniqueConstraintError(error)) throw error;
-      key = newId();
-      await insertModelAction({
-        key,
-        modelKey: model.key,
-        actionSlug: parsed.actionSlug,
-        priority: parsed.priority,
-        enabled: parsed.enabled,
-      });
-    }
-    return { collection: 'modelActions', key, status: 'created' };
-  }
-
-  await updateModelAction(existing.key, { priority: parsed.priority, enabled: parsed.enabled });
-  return { collection: 'modelActions', key: existing.key, status: 'updated' };
-}
-
 async function upsertSeedModelProvider(seed: (typeof SEEDED_MODEL_PROVIDERS)[number]): Promise<SeedResult> {
   const parsed = modelProviderSeedSchema.parse(seed);
   const model = await getModelBySlug(parsed.modelSlug);
@@ -548,13 +494,11 @@ async function assignSeededFounderOrchestrators(rootOrganizationKey: string): Pr
 export async function seedAiRuntimeNodes(upserters: AiRuntimeSeedUpserters = {
   provider: upsertSeedProvider,
   model: upsertSeedModel,
-  modelAction: upsertSeedModelAction,
   modelProvider: upsertSeedModelProvider,
 }): Promise<SeedResult[]> {
   const results: SeedResult[] = [];
   for (const seed of SEEDED_PROVIDERS) results.push(await upserters.provider(seed));
   for (const seed of SEEDED_MODELS) results.push(await upserters.model(seed));
-  for (const seed of SEEDED_MODEL_ACTIONS) results.push(await upserters.modelAction(seed));
   for (const seed of SEEDED_MODEL_PROVIDERS) results.push(await upserters.modelProvider(seed));
   return results;
 }

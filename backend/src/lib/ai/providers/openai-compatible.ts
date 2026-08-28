@@ -81,6 +81,7 @@ export function buildChatCompletionParams(
     else params.max_tokens = input.options.maxTokens;
   }
   if (input.options?.temperature !== undefined) params.temperature = input.options.temperature;
+  if (input.responseFormat) params.response_format = { type: 'json_schema', json_schema: { name: input.responseFormat.name, strict: true, schema: input.responseFormat.schema } } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming['response_format'];
   if (input.tools && input.tools.length > 0) {
     params.tools = input.tools.map((tool) => ({
       type: 'function' as const,

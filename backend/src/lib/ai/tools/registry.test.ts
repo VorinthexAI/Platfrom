@@ -8,10 +8,10 @@ describe('unified tool registry', () => {
   test('has one unique definition for every public tool name', () => {
     expect(new Set(TOOL_NAMES).size).toBe(TOOL_NAMES.length);
     expect(new Set(TOOL_DEFINITIONS.map(({ name }) => name)).size).toBe(TOOL_DEFINITIONS.length);
-    expect(TOOL_NAMES).toHaveLength(159);
-    expect(MODEL_TOOL_NAMES).toHaveLength(156);
-    expect(TOOL_DEFINITIONS).toHaveLength(156);
-    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 111);
+    expect(TOOL_NAMES).toHaveLength(163);
+    expect(MODEL_TOOL_NAMES).toHaveLength(160);
+    expect(TOOL_DEFINITIONS).toHaveLength(160);
+    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 115);
     expect(TOOL_DEFINITIONS.map(({ name }) => name)).toEqual([...MODEL_TOOL_NAMES]);
     expect(TOOL_NAMES).not.toContain('chat');
     expect(TOOL_NAMES).not.toContain('orchestrator.chat');
@@ -25,6 +25,8 @@ describe('unified tool registry', () => {
     expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'app.search')).toHaveLength(1);
     expect(TOOL_NAMES).toEqual(expect.arrayContaining(['app.enhance', 'app.translate', 'app.audio']));
     expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'app.audio')).toHaveLength(1);
+    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['book.extend', 'book.share.detail', 'book.share.update']));
+    expect(() => toolInputSchemas['book.share.update'].parse({ bookKey: newId(), active: true, scopeKey: newId() })).toThrow('Unrecognized key');
     expect(toolInputSchemas['app.audio'].parse({ documentKey: newId() })).toMatchObject({ voice: 'clear', pace: 1, includeTitle: true, includeCode: false });
     for (const field of ['organizationKey', 'scopeKey', 'userKey', 'model', 'provider', 'storageKey', 'text']) expect(() => toolInputSchemas['app.audio'].parse({ documentKey: newId(), [field]: 'forged' })).toThrow('Unrecognized key');
     expect(TOOL_NAMES).not.toContain('document.enhance');
@@ -97,7 +99,9 @@ describe('unified tool registry', () => {
     for (const tool of ['inbox.sync', 'inbox.subscribe']) for (const field of ['organizationKey', 'scopeKey', 'userKey', 'accessToken']) expect(() => toolInputSchemas[tool].parse({ connectorKey: inboxSortConnectorKey, [field]: newId() })).toThrow('Unrecognized key');
     for (const field of ['organizationKey', 'scopeKey', 'userKey']) expect(() => toolInputSchemas['inbox.sort'].parse({ connectorKey: inboxSortConnectorKey, [field]: newId() })).toThrow('Unrecognized key');
     expect(() => toolInputSchemas['email.draft.assign'].parse({ draftKey: newId(), connectorKey: newId(), scopeKey: newId() })).toThrow('Unrecognized key');
-    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['content.hidden.list', 'book.topic.suggest', 'book.goal.suggest', 'book.create', 'email.thread.read', 'email.thread.read-state', 'email.trash.clear']));
+    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['content.hidden.list', 'book.topic.suggest', 'book.goal.suggest', 'book.create', 'book.favorite', 'email.thread.read', 'email.thread.read-state', 'email.trash.clear']));
+    expect(toolInputSchemas['book.favorite'].parse({ bookKey: newId(), isFavorite: true })).toMatchObject({ isFavorite: true });
+    expect(() => toolInputSchemas['book.favorite'].parse({ bookKey: newId(), isFavorite: true, scopeKey: newId() })).toThrow('Unrecognized key');
     expect(TOOL_NAMES).not.toContain('email.thread.mark-read');
     for (const tool of ['email.thread.favorite', 'email.thread.read-state', 'email.thread.trash']) {
       expect(() => toolInputSchemas[tool].parse({ threadKey: newId(), threadKeys: [newId()], ...(tool === 'email.thread.favorite' ? { isFavorite: true } : tool === 'email.thread.read-state' ? { isRead: true } : {}) })).toThrow();
@@ -326,7 +330,7 @@ describe('unified tool registry', () => {
     expect(JSON.stringify(listed)).not.toContain(userKey);
   });
 
-  test('executes book creation and Signal read-state tools through injected services', async () => {
+  test('executes book creation, favorite, and Signal read-state tools through injected services', async () => {
     const organizationKey = newId(), scopeKey = newId(), userKey = newId(), threadKey = newId();
     const contentContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
     const calls: unknown[][] = [];
@@ -335,13 +339,16 @@ describe('unified tool registry', () => {
       setReadState: async (...args: unknown[]) => { calls.push(['setReadState', ...args]); return {}; },
       findSimilar: async (...args: unknown[]) => { calls.push(['findSimilar', ...args]); return {}; },
     } as any;
-    const bookService = { suggestTopics: async (...args: unknown[]) => { calls.push(['suggestTopics', ...args]); return { topics: [] }; }, suggestGoals: async (...args: unknown[]) => { calls.push(['suggestGoals', ...args]); return { goals: [] }; }, create: async (...args: unknown[]) => { calls.push(['create', ...args]); return {}; } } as any;
+    const bookService = { suggestTopics: async (...args: unknown[]) => { calls.push(['suggestTopics', ...args]); return { topics: [] }; }, suggestGoals: async (...args: unknown[]) => { calls.push(['suggestGoals', ...args]); return { goals: [] }; }, create: async (...args: unknown[]) => { calls.push(['create', ...args]); return {}; }, setFavorite: async (...args: unknown[]) => { calls.push(['setFavorite', ...args]); return {}; } } as any;
     const brief = { topic: 'Decision making', goal: 'Decide well', currentKnowledge: 'Basic familiarity', writingTone: 'Clear', chapterCount: 10, language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear', narrationPace: 1, chapterImages: false };
     await expect(runTool('book.create', '', { ...brief, scopeKey }, { contentContext, bookService })).rejects.toThrow('Unrecognized key');
     await expect(runTool('book.topic.suggest', '', { scopeKey }, { contentContext, bookService })).rejects.toThrow('Unrecognized key');
     await runTool('book.topic.suggest', '', { excludeTopics: ['Old idea'] }, { contentContext, bookService });
     await runTool('book.goal.suggest', '', { topic: 'Decision making', excludeGoals: ['Old goal'] }, { contentContext, bookService });
     await runTool('book.create', '', brief, { contentContext, bookService, requestKey: 'request-1' });
+    const bookKey = newId();
+    await expect(runTool('book.favorite', '', { bookKey, isFavorite: true, organizationKey }, { contentContext, bookService })).rejects.toThrow('Unrecognized key');
+    await runTool('book.favorite', '', { bookKey, isFavorite: true }, { contentContext, bookService });
     await runTool('email.thread.read', '', { threadKey }, { contentContext, emailService });
     await runTool('email.thread.read-state', '', { threadKey, isRead: true }, { contentContext, emailService });
     await runTool('email.similar.find', '', { messageKey: threadKey }, { contentContext, emailService });
@@ -350,6 +357,7 @@ describe('unified tool registry', () => {
       ['suggestTopics', { organizationKey, scopeKey, excludeTopics: ['Old idea'] }, userKey, { signal: undefined, timeoutMs: undefined }],
       ['suggestGoals', { organizationKey, scopeKey, topic: 'Decision making', excludeGoals: ['Old goal'] }, userKey, { signal: undefined, timeoutMs: undefined }],
       ['create', { organizationKey, scopeKey, generationRequestKey: 'request-1', ...brief }, userKey],
+      ['setFavorite', bookKey, { organizationKey, scopeKey, isFavorite: true }, userKey],
       ['threadForTool', actor, threadKey, undefined],
       ['setReadState', actor, { threadKey, isRead: true }, false, undefined],
       ['findSimilar', actor, { messageKey: threadKey, limit: 10 }],

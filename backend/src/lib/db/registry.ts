@@ -1,7 +1,6 @@
 import type { Page } from './base';
 import { getAllProvidersChunked, listProvidersPage, upsertProviderByKey } from './providers.node';
 import { getAllModelsChunked, listModelsPage, upsertModelByKey } from './models.node';
-import { getAllModelActionsChunked, listModelActionsPage, upsertModelActionByKey } from './model-actions.node';
 import { getAllModelProvidersChunked, listModelProvidersPage, upsertModelProviderByKey } from './model-providers.node';
 import { getAllVisitorSessionsChunked, listVisitorSessionsPage, upsertVisitorSessionByKey } from './visitor-sessions.node';
 import { getAllUserSessionsChunked, listUserSessionsPage, upsertUserSessionByKey } from './user-sessions.node';
@@ -99,7 +98,6 @@ export const NODE_REGISTRY: Record<string, NodeAccessors> = {
   bookChapters: { listPage: listBookChaptersPage, getAllChunked: getAllBookChaptersChunked, upsertByKey: upsertBookChapterByKey },
   chapterContexts: { listPage: listChapterContextsPage, getAllChunked: getAllChapterContextsChunked, upsertByKey: upsertChapterContextByKey },
   bookProgress: { listPage: listBookProgressPage, getAllChunked: getAllBookProgressChunked, upsertByKey: upsertBookProgressByKey },
-  modelActions: { listPage: listModelActionsPage, getAllChunked: getAllModelActionsChunked, upsertByKey: upsertModelActionByKey },
   modelProviders: { listPage: listModelProvidersPage, getAllChunked: getAllModelProvidersChunked, upsertByKey: upsertModelProviderByKey },
   models: { listPage: listModelsPage, getAllChunked: getAllModelsChunked, upsertByKey: upsertModelByKey },
   orchestrators: { listPage: listOrchestratorsPage, getAllChunked: getAllOrchestratorsChunked, upsertByKey: upsertOrchestratorByKey },

@@ -32,8 +32,8 @@ describe('MediaLibrary node contracts', () => {
     const invite = { key, scopeKey, collectionKey: key, invitedByKey: scopeKey, tokenHash: 'a'.repeat(64), expiresAt: now, createdAt: now, updatedAt: now };
     expect(collectionInviteSchema.safeParse({ ...invite, email: ' PERSON@EXAMPLE.COM ' }).success).toBe(true);
     expect(collectionInviteSchema.safeParse(invite).success).toBe(false);
-    const share = shareSchema.parse({ key, scopeKey, sourceType: 'image', sourceKey: key, permission: 'read', tokenHash: 'b'.repeat(64), token: 'plaintext', createdAt: now, updatedAt: now });
-    expect(share).not.toHaveProperty('token'); expect(share).not.toHaveProperty('embedding');
+    const share = shareSchema.parse({ key, scopeKey, sourceType: 'image', sourceKey: key, permission: 'read', tokenHash: 'b'.repeat(64), token: 'plaintext', responseCiphertext: 'v1:private:replay:value', createdAt: now, updatedAt: now });
+    expect(share).not.toHaveProperty('token'); expect(share).not.toHaveProperty('responseCiphertext'); expect(share).not.toHaveProperty('embedding');
     expect(sourceTypeSchema.safeParse('place').success).toBe(true); expect(sourceTypeSchema.safeParse('trip').success).toBe(false);
     expect(shareSourceTypeSchema.safeParse('place').success).toBe(true); expect(shareSourceTypeSchema.safeParse('trip').success).toBe(false);
   });

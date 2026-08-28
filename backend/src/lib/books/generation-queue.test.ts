@@ -63,6 +63,6 @@ describe('book generation queue', () => {
     await expect(processBookGenerationJob({ data, attemptsMade: 0, opts: { attempts: 2 } }, service)).rejects.toThrow('provider secret');
     expect(book.status).toBe('planning'); expect(book.generationError).toBeUndefined(); expect(terminalFailures).toBe(0);
     await expect(processBookGenerationJob({ data, attemptsMade: 1, opts: { attempts: 2 } }, service)).rejects.toThrow('provider secret');
-    expect(book.status).toBe('failed'); expect(book.generationError).toBe('Book generation failed after all retry attempts. Retry the book to continue.'); expect(terminalFailures).toBe(1);
+    expect(book.status).toBe('failed'); expect(book.generationError).toBe('Audio book generation failed after all retry attempts. Retry the audio book to continue.'); expect(terminalFailures).toBe(1);
   });
 });

@@ -6,3 +6,4 @@ export * from '@/lib/db/book-sources.node';
 export * from '@/lib/db/book-parts.node';
 export * from '@/lib/db/book-themes.node';
 export * from '@/lib/db/chapter-contexts.node';
+export * from '@/lib/db/book-extensions.node';

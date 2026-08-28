@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import { FOUNDER_ACCESS_MAX_AGE_SECONDS, FOUNDER_REFRESH_MAX_AGE_SECONDS } from './auth';
 import { isResendWebhookPath } from './resend';
 import { isGmailWebhookPath } from './email-webhook';
-import { createAutoRefreshAuthTokens, isPublicFounderAuthPath, rateLimitByIp, requireEnvApiKey, sessionTokenPayload, setSessionCookies, setSessionForRequest, setSessionTokenHeaders, validateQueryParams } from './middleware';
+import { createAutoRefreshAuthTokens, isPublicBookSharePath, isPublicFounderAuthPath, rateLimitByIp, requireEnvApiKey, sessionTokenPayload, setSessionCookies, setSessionForRequest, setSessionTokenHeaders, validateQueryParams } from './middleware';
 
 function middlewareContext(path: string, headers: Record<string, string> = {}, search = '', method = 'GET') {
   return {
@@ -69,6 +69,35 @@ describe('api middleware webhook exemptions', () => {
       if (previousRateLimitEnabled === undefined) delete process.env.RATE_LIMIT_ENABLED;
       else process.env.RATE_LIMIT_ENABLED = previousRateLimitEnabled;
     }
+  });
+});
+
+describe('public book share middleware', () => {
+  test('exempts only exact read and stream paths from the API key and validates stream query strictly', async () => {
+    expect(isPublicBookSharePath('/api/v1/public/books/shares/read')).toBe(true);
+    expect(isPublicBookSharePath('/api/v1/public/books/shares/stream/')).toBe(true);
+    expect(isPublicBookSharePath('/api/v1/public/books/shares/other')).toBe(false);
+    const previousApiKey = process.env.API_KEY; process.env.API_KEY = 'server-key'; let calls = 0;
+    try {
+      await requireEnvApiKey(middlewareContext('/api/v1/public/books/shares/read', {}, '', 'POST'), async () => { calls += 1; });
+      expect(calls).toBe(1);
+      await expect(validateQueryParams(middlewareContext('/api/v1/public/books/shares/stream', {}, `?token=${'A'.repeat(43)}&forged=true`), async () => {})).rejects.toBeDefined();
+      await expect(validateQueryParams(middlewareContext('/api/v1/public/books/shares/stream', {}, `?token=${'A'.repeat(43)}`), async () => {})).resolves.toBeUndefined();
+    } finally { if (previousApiKey === undefined) delete process.env.API_KEY; else process.env.API_KEY = previousApiKey; }
+  });
+
+  test('does not let stale user-session credentials block share-token authentication', async () => {
+    let verified = 0; let nextCalls = 0;
+    const middleware = createAutoRefreshAuthTokens({
+      verifyAccessToken: async () => { verified += 1; return null; },
+      refreshAccessToken: async () => null,
+    });
+    const app = new Hono();
+    app.use('*', middleware);
+    app.post('/api/v1/public/books/shares/read', (c) => { nextCalls += 1; return c.json({ success: true }); });
+    expect((await app.request('/api/v1/public/books/shares/read', { method: 'POST', headers: { authorization: 'Bearer stale' } })).status).toBe(200);
+    expect(verified).toBe(0);
+    expect(nextCalls).toBe(1);
   });
 });
 

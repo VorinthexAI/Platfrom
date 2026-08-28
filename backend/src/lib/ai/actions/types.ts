@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { DOT_NOTATION_PATTERN } from '@/lib/ai/shared/ids';
+import type { ProviderSlug } from '@/lib/ai/providers/types';
 
 export const ACTION_SLUGS = [
   'ask', 'embed', 'web-search',
@@ -14,5 +15,5 @@ export function isValidActionIdFormat(id: string): boolean {
   return /^[a-z]+(?:-[a-z]+)*$/.test(id) && !DOT_NOTATION_PATTERN.test(id);
 }
 export type ActionModelPolicy = 'required' | 'configurable' | 'none';
-export interface ActionModelBinding { provider: string; model: string; priority: number }
+export interface ActionModelBinding { provider: ProviderSlug; model: string; priority: number }
 export interface ActionDefinition { id: ActionId; modelPolicy: ActionModelPolicy; models: readonly ActionModelBinding[] }

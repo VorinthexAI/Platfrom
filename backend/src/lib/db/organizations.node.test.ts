@@ -3,7 +3,6 @@ import { z } from 'zod';
 import { organizationSchema } from './organizations.node';
 import { authChallengeSchema } from './auth-challenges.node';
 import { modelSchema } from './models.node';
-import { modelActionSchema } from './model-actions.node';
 import { modelProviderSchema } from './model-providers.node';
 import { orchestratorSchema } from './orchestrators.node';
 import { processedWebhookEventSchema } from './processed-webhook-events.node';
@@ -75,7 +74,6 @@ describe('organization node schema', () => {
 describe('no node field mentions the retired platform or team nodes', () => {
   const nodeSchemas: Record<string, z.ZodTypeAny> = {
     authChallenges: authChallengeSchema,
-    modelActions: modelActionSchema,
     modelProviders: modelProviderSchema,
     models: modelSchema,
     orchestrators: orchestratorSchema,
