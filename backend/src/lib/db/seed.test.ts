@@ -25,6 +25,14 @@ test('runtime seeds defer only retryable refreshes of existing semantic records'
   expect(source).toContain('semantic seed refresh for ${country.countryCode} deferred');
   expect(source.indexOf('await insertProvider(seed)')).toBeLessThan(source.indexOf("updateSemanticSeed('providers', existing.key"));
 });
+
+test('seed command defers only normalized retryable provider outages', async () => {
+  const source = await Bun.file(new URL('./seed.ts', import.meta.url)).text();
+  const command = source.slice(source.indexOf('if (import.meta.main)'));
+  expect(command).toContain('if (!isProviderError(error) || !error.retryable) throw error;');
+  expect(command).toContain('Database seed deferred because');
+  expect(command).toContain('await closeDb()');
+});
 import { PROVIDER_SLUGS } from '@/lib/ai/providers';
 import { ACTION_DEFINITIONS } from '@/lib/ai/actions';
 import { providerSchema } from './providers.node';
