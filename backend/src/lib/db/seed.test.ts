@@ -6,6 +6,14 @@ test('country seeds embed only missing or stale semantic content', async () => {
   expect(source).toContain("createHash('sha256').update(country.name)");
   expect(source.indexOf('if (current?.semanticVersion')).toBeLessThan(source.indexOf('embedText({ text: country.name })'));
 });
+
+test('runtime seeds avoid re-embedding unchanged semantic records', async () => {
+  const source = await Bun.file(new URL('./seed.ts', import.meta.url)).text();
+  expect(source.indexOf('existing.name === seed.name && existing.handlerKey === seed.handlerKey')).toBeLessThan(source.indexOf('await updateProvider(existing.key, patch)'));
+  expect(source.indexOf('isDeepStrictEqual(existing.supportedUseCases, seed.supportedUseCases)')).toBeLessThan(source.indexOf('await updatePersistedModel(existing.key, patch)'));
+  expect(source.indexOf('isDeepStrictEqual(existing.metadata, seed.metadata)')).toBeLessThan(source.indexOf('await updateOrganization(existing.key, patch)'));
+  expect(source.indexOf('isDeepStrictEqual(existing.skill, seed.skill)')).toBeLessThan(source.indexOf('await updateOrchestrator(existing.key, patch)'));
+});
 import { PROVIDER_SLUGS } from '@/lib/ai/providers';
 import { ACTION_DEFINITIONS } from '@/lib/ai/actions';
 import { providerSchema } from './providers.node';
