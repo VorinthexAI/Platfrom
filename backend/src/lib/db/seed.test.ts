@@ -9,10 +9,21 @@ test('country seeds embed only missing or stale semantic content', async () => {
 
 test('runtime seeds avoid re-embedding unchanged semantic records', async () => {
   const source = await Bun.file(new URL('./seed.ts', import.meta.url)).text();
-  expect(source.indexOf('existing.name === seed.name && existing.handlerKey === seed.handlerKey')).toBeLessThan(source.indexOf('await updateProvider(existing.key, patch)'));
-  expect(source.indexOf('isDeepStrictEqual(existing.supportedUseCases, seed.supportedUseCases)')).toBeLessThan(source.indexOf('await updatePersistedModel(existing.key, patch)'));
-  expect(source.indexOf('isDeepStrictEqual(existing.metadata, seed.metadata)')).toBeLessThan(source.indexOf('await updateOrganization(existing.key, patch)'));
-  expect(source.indexOf('isDeepStrictEqual(existing.skill, seed.skill)')).toBeLessThan(source.indexOf('await updateOrchestrator(existing.key, patch)'));
+  expect(source.indexOf('existing.name === seed.name && existing.handlerKey === seed.handlerKey')).toBeLessThan(source.indexOf("updateSemanticSeed('providers', existing.key"));
+  expect(source.indexOf('isDeepStrictEqual(existing.supportedUseCases, seed.supportedUseCases)')).toBeLessThan(source.indexOf("updateSemanticSeed('models', existing.key"));
+  expect(source.indexOf('isDeepStrictEqual(existing.metadata, seed.metadata)')).toBeLessThan(source.indexOf("updateSemanticSeed('organizations', existing.key"));
+  expect(source.indexOf('isDeepStrictEqual(existing.skill, seed.skill)')).toBeLessThan(source.indexOf("updateSemanticSeed('orchestrators', existing.key"));
+});
+
+test('runtime seeds defer only retryable refreshes of existing semantic records', async () => {
+  const source = await Bun.file(new URL('./seed.ts', import.meta.url)).text();
+  expect(source).toContain('if (!isProviderError(error) || !error.retryable) throw error;');
+  expect(source).toContain("updateSemanticSeed('providers', existing.key");
+  expect(source).toContain("updateSemanticSeed('models', existing.key");
+  expect(source).toContain("updateSemanticSeed('organizations', existing.key");
+  expect(source).toContain("updateSemanticSeed('orchestrators', existing.key");
+  expect(source).toContain('semantic seed refresh for ${country.countryCode} deferred');
+  expect(source.indexOf('await insertProvider(seed)')).toBeLessThan(source.indexOf("updateSemanticSeed('providers', existing.key"));
 });
 import { PROVIDER_SLUGS } from '@/lib/ai/providers';
 import { ACTION_DEFINITIONS } from '@/lib/ai/actions';
