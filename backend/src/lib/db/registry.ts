@@ -1,7 +1,4 @@
 import type { Page } from './base';
-import { getAllProvidersChunked, listProvidersPage, upsertProviderByKey } from './providers.node';
-import { getAllModelsChunked, listModelsPage, upsertModelByKey } from './models.node';
-import { getAllModelProvidersChunked, listModelProvidersPage, upsertModelProviderByKey } from './model-providers.node';
 import { getAllVisitorSessionsChunked, listVisitorSessionsPage, upsertVisitorSessionByKey } from './visitor-sessions.node';
 import { getAllUserSessionsChunked, listUserSessionsPage, upsertUserSessionByKey } from './user-sessions.node';
 import { getAllAuthChallengesChunked, listAuthChallengesPage, upsertAuthChallengeByKey } from './auth-challenges.node';
@@ -98,12 +95,9 @@ export const NODE_REGISTRY: Record<string, NodeAccessors> = {
   bookChapters: { listPage: listBookChaptersPage, getAllChunked: getAllBookChaptersChunked, upsertByKey: upsertBookChapterByKey },
   chapterContexts: { listPage: listChapterContextsPage, getAllChunked: getAllChapterContextsChunked, upsertByKey: upsertChapterContextByKey },
   bookProgress: { listPage: listBookProgressPage, getAllChunked: getAllBookProgressChunked, upsertByKey: upsertBookProgressByKey },
-  modelProviders: { listPage: listModelProvidersPage, getAllChunked: getAllModelProvidersChunked, upsertByKey: upsertModelProviderByKey },
-  models: { listPage: listModelsPage, getAllChunked: getAllModelsChunked, upsertByKey: upsertModelByKey },
   orchestrators: { listPage: listOrchestratorsPage, getAllChunked: getAllOrchestratorsChunked, upsertByKey: upsertOrchestratorByKey },
   organizations: { listPage: listOrganizationsPage, getAllChunked: getAllOrganizationsChunked, upsertByKey: upsertOrganization },
   processedWebhookEvents: { listPage: listProcessedWebhookEventsPage, getAllChunked: getAllProcessedWebhookEventsChunked, upsertByKey: upsertProcessedWebhookEventByKey },
-  providers: { listPage: listProvidersPage, getAllChunked: getAllProvidersChunked, upsertByKey: upsertProviderByKey },
   userSessions: { listPage: listUserSessionsPage, getAllChunked: getAllUserSessionsChunked, upsertByKey: upsertUserSessionByKey },
   userOrganizations: { listPage: listUserOrganizationsPage, getAllChunked: getAllUserOrganizationsChunked, upsertByKey: upsertUserOrganizationByKey },
   users: { listPage: listUsersPage, getAllChunked: getAllUsersChunked, upsertByKey: upsertUserByKey },

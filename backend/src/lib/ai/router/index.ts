@@ -1,4 +1,4 @@
-export { type RouteDecision, type RouterDataSource, type RouterDependencies } from './types';
+export { type RouteDecision, type RouterDependencies } from './types';
 export {
   routeRequestSchema,
   autoRouteRequestSchema,
@@ -15,12 +15,10 @@ export {
   UnsupportedActionError,
   UnknownModelError,
   UnknownProviderError,
-  ProviderNotEnabledForOrganizationError,
   NoEligibleRouteError,
   ProviderExecutionError,
   RouteValidationError,
   type RouteAttemptFailure,
 } from './errors';
 export { selectRoute } from './select-route';
-export { STATIC_PROVIDER_IDS, isStaticProvider, createStaticProviderAdapter } from './static-routes';
 export { executeRoute, executeAction, executeAsk, executeWebSearch, streamRoute, type ExecuteRouteOptions, type ExecuteActionOptions, type RouteAttemptTelemetry } from './execute-route';

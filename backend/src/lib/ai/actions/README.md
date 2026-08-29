@@ -11,8 +11,9 @@ speech, image analysis, web search, and structured extraction.
 - Individual action modules define their provider-neutral input/output contract.
 - Each `ActionDefinition.models` list owns exact model/provider candidates and
   routing priorities; declaration order breaks equal-priority ties.
-- Persisted model, provider, and model-provider records only determine whether a
-  declared route is operational.
+- `../providers/registry.ts` owns provider adapters, environment resolution,
+  model metadata, and internal-to-external model identifiers. A route is
+  operational only when its environment configuration validates.
 
 ## Tools Versus Actions
 

@@ -25,10 +25,10 @@ import { placeSchema } from './places.node';
 describe('node registry schema contracts', () => {
   test('registry serves organizations and user links, never the retired team/platform nodes', () => {
     expect(NODE_NAMES).not.toContain('actions');
-    expect(NODE_NAMES).toContain('providers');
-    expect(NODE_NAMES).toContain('models');
+    expect(NODE_NAMES).not.toContain('providers');
+    expect(NODE_NAMES).not.toContain('models');
     expect(NODE_NAMES).not.toContain('modelActions');
-    expect(NODE_NAMES).toContain('modelProviders');
+    expect(NODE_NAMES).not.toContain('modelProviders');
     expect(NODE_NAMES).not.toContain('agents');
     expect(NODE_NAMES).not.toContain('agentSkills');
     expect(NODE_NAMES).not.toContain('scopeAgents');

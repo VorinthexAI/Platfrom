@@ -326,7 +326,7 @@ describe('travel HTTP handlers', () => {
     app.post('/travel/places/guide', createTravelHandlers({ service, getIdentity: async () => ({ key: 'trusted-user', identityType: 'user' }) }).findPlaceGuide);
     const response = await app.request('/travel/places/guide', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey: 'organization', scopeKey: newId(), query: 'Japan' }) });
     expect(response.status).toBe(503);
-    expect(await response.json()).toMatchObject({ error: { code: 'TRAVEL_PROVIDER_CONFIGURATION_REQUIRED', message: 'Country generation requires updated AI provider credentials.' } });
+    expect(await response.json()).toMatchObject({ error: { code: 'TRAVEL_PROVIDER_CONFIGURATION_REQUIRED', message: 'Country generation is unavailable because the AI service is not configured.' } });
   });
 
   test('keeps transient place hero generation behind the authenticated strict HTTP protocol boundary', async () => {

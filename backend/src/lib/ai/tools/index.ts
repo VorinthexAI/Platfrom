@@ -82,7 +82,7 @@ export async function runTool(name: string, skill: string, rawInput: unknown, de
     timeoutMs: dependencies.timeoutMs,
     content: {
       adapters: dependencies.adapters,
-      credentials: dependencies.credentials,
+      env: dependencies.env,
       ...dependencies.contentDependencies,
       ingestion: { ...dependencies, ...dependencies.contentDependencies?.ingestion },
     },
@@ -93,7 +93,7 @@ export async function runTool(name: string, skill: string, rawInput: unknown, de
     executeContent: dependencies.executeWorkspaceContent,
     content: {
       adapters: dependencies.adapters,
-      credentials: dependencies.credentials,
+      env: dependencies.env,
       ...dependencies.contentDependencies,
       ingestion: { ...dependencies, ...dependencies.contentDependencies?.ingestion },
     },

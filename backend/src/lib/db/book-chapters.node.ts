@@ -3,8 +3,8 @@ import { currentEmbeddingSchema } from '@/lib/embeddings';
 import { createNodeHelpers } from './base';
 
 export const BOOK_CHAPTERS_COLLECTION = 'bookChapters';
-export const BOOK_CHAPTER_WORD_MIN = 775;
-export const BOOK_CHAPTER_WORD_MAX = 850;
+export const BOOK_CHAPTER_WORD_MIN = 400;
+export const BOOK_CHAPTER_WORD_MAX = 450;
 export const bookChapterStatusSchema = z.enum(['planned', 'writing', 'written', 'finalizing', 'finalized', 'narrating', 'audio-ready', 'failed']);
 export const bookChapterSchema = z.object({
   key: z.string().cuid(), scopeKey: z.string().cuid(), bookKey: z.string().cuid(), partKey: z.string().cuid().optional(),

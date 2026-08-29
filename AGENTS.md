@@ -225,7 +225,7 @@ After SEO-affecting changes, verify `/llms.txt`, `/llms-full.txt`,
 - Every user-facing API capability for Archive, Gallery, Signal, Compass, or Ascend must follow the Unified Tools And Actions rules above.
 - Tool names always use product-neutral dot notation (`folder.create`, `email.draft.send`), never underscores or current/future product names.
 - Database deletion is hard deletion: schemas must not define tombstone timestamps, and delete operations clean dependents transactionally. Archive or status fields may represent only an explicit non-deletion domain lifecycle.
-- AI action definitions, identities, exact model/provider bindings, and routing priorities live only in `backend/src/lib/ai/actions`. Persisted models, providers, and model-provider relations are operational catalog gates, not action-routing priority sources. Do not recreate persisted model-action, agent, skill, run, artifact, memory, capability-catalog, mind, or action-catalog collections. Runtime authorization derives from authenticated organization and scope membership.
+- AI action definitions, identities, exact model/provider bindings, and routing priorities live only in `backend/src/lib/ai/actions`. Provider adapters, environment configuration, model metadata, and external provider model IDs live only in `backend/src/lib/ai/providers`; provider configuration is never database-backed. Do not recreate provider, model, model-provider, organization-provider, organization-credential, persisted model-action, agent, skill, run, artifact, memory, capability-catalog, mind, or action-catalog collections. Runtime authorization derives from authenticated organization and scope membership.
 
 ## Notes For Agents
 

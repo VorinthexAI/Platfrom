@@ -2,11 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import { z } from 'zod';
 import { organizationSchema } from './organizations.node';
 import { authChallengeSchema } from './auth-challenges.node';
-import { modelSchema } from './models.node';
-import { modelProviderSchema } from './model-providers.node';
 import { orchestratorSchema } from './orchestrators.node';
 import { processedWebhookEventSchema } from './processed-webhook-events.node';
-import { providerObjectSchema } from './providers.node';
 import { userOrganizationSchema } from './user-organization.node';
 import { userSchema } from './users.node';
 import { userSessionSchema } from './user-sessions.node';
@@ -74,12 +71,9 @@ describe('organization node schema', () => {
 describe('no node field mentions the retired platform or team nodes', () => {
   const nodeSchemas: Record<string, z.ZodTypeAny> = {
     authChallenges: authChallengeSchema,
-    modelProviders: modelProviderSchema,
-    models: modelSchema,
     orchestrators: orchestratorSchema,
     organizations: organizationSchema,
     processedWebhookEvents: processedWebhookEventSchema,
-    providers: providerObjectSchema,
     userOrganizations: userOrganizationSchema,
     userSessions: userSessionSchema,
     users: userSchema,

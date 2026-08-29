@@ -472,7 +472,7 @@ async function defaults(deps: ContentToolDependencies, context: ToolContext): Pr
       if (operation.startsWith('text.')) {
         const deep = operation === 'text.rewrite';
         const request = deep
-          ? { mode: 'model' as const, organizationKey: context.organizationKey, actionSlug: 'ask' as const, modelSlug: 'openai.gpt-5.6-luna' }
+          ? { mode: 'model' as const, organizationKey: context.organizationKey, actionSlug: 'ask' as const, modelSlug: 'openai.gpt-5.6-luna' as const }
           : { mode: 'auto' as const, organizationKey: context.organizationKey, actionSlug: 'ask' as const };
         const response = await executeAction<Record<string, unknown>, ContentActionResult>(request, input, deps);
         return response.output;

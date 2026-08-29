@@ -39,9 +39,7 @@ Expected parameters include:
 - `REDIS_URL` for the app and render service to reach the production Redis endpoint
 - `ANTHROPIC_API_KEY`
 - `OPENAI_API_KEY`
-- `GROK_API_KEY`
-- `PERPLEXITY_API_KEY`
-- `GOOGLE_API_KEY`
+- `OPENROUTER_API_KEY`
 - S3/AWS variables used by the runtime
 
 ## Deploy Behavior

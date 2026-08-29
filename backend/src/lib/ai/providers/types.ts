@@ -27,11 +27,7 @@ export type ProviderId = ProviderSlug;
 export const providerSlugSchema = z.enum(PROVIDER_SLUGS);
 export const providerIdSchema = providerSlugSchema;
 
-/**
- * Human-readable display name per provider. Static (unlike the adapter
- * `name`, which lives on runtime-constructed instances behind secrets) so
- * persistence and migrations can stamp names without touching adapters.
- */
+/** Human-readable display names for code-defined provider metadata. */
 export const PROVIDER_NAMES: Record<ProviderId, string> = {
   openai: 'OpenAI',
   openrouter: 'OpenRouter',

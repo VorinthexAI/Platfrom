@@ -29,7 +29,7 @@ export function createTravelHandlers(options: { service?: TravelService; getIden
       if (error instanceof ProviderExecutionError) {
         const label = generationKind[0]!.toUpperCase() + generationKind.slice(1);
         const codes = new Set(error.attempts.map(({ code }) => code));
-        if (codes.has('authentication_failed') || codes.has('not_configured') || codes.has('adapter_unavailable')) return c.json({ success: false, error: { code: 'TRAVEL_PROVIDER_CONFIGURATION_REQUIRED', message: `${label} generation requires updated AI provider credentials.` } }, 503);
+        if (codes.has('authentication_failed') || codes.has('not_configured') || codes.has('adapter_unavailable')) return c.json({ success: false, error: { code: 'TRAVEL_PROVIDER_CONFIGURATION_REQUIRED', message: `${label} generation is unavailable because the AI service is not configured.` } }, 503);
         if (codes.has('rate_limited')) return c.json({ success: false, error: { code: 'TRAVEL_RATE_LIMITED', message: `${label} generation is temporarily busy. Try again shortly.` } }, 429);
         if (codes.has('timeout') || codes.has('aborted')) return c.json({ success: false, error: { code: 'TRAVEL_LOOKUP_TIMEOUT', message: `${label} generation took too long. Try again.` } }, 504);
         return c.json({ success: false, error: { code: 'TRAVEL_PROVIDER_UNAVAILABLE', message: `${label} generation is temporarily unavailable.` } }, 503);

@@ -4,12 +4,9 @@ import { Database } from 'arangojs';
 import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, EMBEDDING_PROVIDER_ID, LEGACY_EMBEDDING_DIMENSIONS, embedText, embedTexts, embeddingMetadata } from '../lib/embeddings';
 import { ALIAS_SLUG_PREFIX_SPACE, generateAlias, generateAliasSlug } from '../lib/alias';
 import { newId } from '../lib/ids';
-import { ensureOrganizationProvidersCollection } from '../lib/ai/organization-providers/indexes';
-import { ensureOrganizationCredentialsCollection } from '../lib/ai/organization-credentials/indexes';
 import { ensureOrganizationConnectorsCollection } from '../lib/email-inbox/indexes';
 import { ensureScopeMembersCollection, ensureScopesCollection, ensureScopeScopesCollection } from '../lib/ai/scopes/indexes';
 import { reconcileOrganizationScopeMemberships } from '../lib/ai/scopes/membership-invariant';
-import { organizationProviderSchema } from '../lib/ai/organization-providers/schema';
 import { buildEmbeddingText, toArangoDoc, withArangoKey } from '../lib/db/base';
 import { NEXUS_SCOPE_KEY, SEEDED_SCOPES } from '../lib/db/seed';
 import { isLegacyIndex, LEGACY_REMOVAL_MARKER } from './arango-migrate-indexes';
@@ -19,7 +16,6 @@ import { chunkDocumentContent, chunkDocumentText, documentEmbeddingTexts, docume
 import { z } from 'zod';
 import { withDatabaseTransaction } from '../lib/db/client';
 import { countryCodeSchema } from '../lib/db/users.node';
-import { retireAiPersistence } from './retire-ai-persistence';
 import { buildPlaceEmbeddingText, buildTripEmbeddingText, TRIP_EMBEDDING_CONTENT_VERSION } from '../lib/travel/semantic-text';
 import { generatedPlaceDetailSchema } from '../lib/db/places.node';
 import { isProviderError, type ProviderError } from '../lib/ai/providers/errors';
@@ -229,28 +225,6 @@ async function runMigrationTransaction(targetDb: Database, collectionName: strin
     await transaction.abort();
     throw error;
   }
-}
-
-export async function retireTranscriptionDomain(targetDb: Database): Promise<void> {
-  const modelSlugs = ['openai.gpt-4o-mini-transcribe', 'aws.transcribe-standard'];
-  const providerSlugs = ['aws-transcribe'];
-  await targetDb.query(`
-    LET modelKeys = (FOR model IN models FILTER model.slug IN @modelSlugs RETURN model._key)
-    LET providerKeys = (FOR provider IN providers FILTER provider.slug IN @providerSlugs RETURN provider._key)
-    FOR relation IN modelProviders
-      FILTER relation.modelKey IN modelKeys || relation.providerKey IN providerKeys
-      REMOVE relation IN modelProviders
-  `, { modelSlugs, providerSlugs });
-  for (const collection of ['organizationProviders', 'orgCredentials']) {
-    await targetDb.query(`
-      LET providerKeys = (FOR provider IN providers FILTER provider.slug IN @providerSlugs RETURN provider._key)
-      FOR relation IN @@collection
-        FILTER relation.providerKey IN providerKeys
-        REMOVE relation IN @@collection
-    `, { '@collection': collection, providerSlugs });
-  }
-  await targetDb.query('FOR model IN models FILTER model.slug IN @modelSlugs REMOVE model IN models', { modelSlugs });
-  await targetDb.query('FOR provider IN providers FILTER provider.slug IN @providerSlugs REMOVE provider IN providers', { providerSlugs });
 }
 
 export async function retireMomentumScope(targetDb: Database, organizationKey: string, archiveScopeKey: string): Promise<void> {
@@ -1614,27 +1588,6 @@ async function removeDocumentDependents(
 
 export const collections: CollectionSpec[] = [
   {
-    name: 'providers',
-    embedKeys: ['name', 'slug'],
-    indexes: [
-      { fields: ['slug'], unique: true },
-      { fields: ['handlerKey'] },
-    ],
-  },
-  {
-    name: 'models',
-    embedKeys: ['name', 'description', 'supportedUseCases'],
-    indexes: [{ fields: ['slug'], unique: true }],
-  },
-  {
-    name: 'modelProviders',
-    skipEmbedding: true,
-    indexes: [
-      { fields: ['modelKey', 'providerKey'], unique: true },
-      { fields: ['providerKey', 'enabled'] },
-    ],
-  },
-  {
     name: 'users',
     embedKeys: ['email', 'name'],
     indexes: [
@@ -1815,6 +1768,12 @@ export const collections: CollectionSpec[] = [
 ];
 
 const droppedCollections = [
+  'orgCredentials',
+  'organizationProviders',
+  'organization_providers',
+  'modelProviders',
+  'models',
+  'providers',
   'tasks',
   'milestones',
   'projects',
@@ -2016,9 +1975,6 @@ async function main() {
     await legacyScopeChildren.drop();
     console.log(`Copied ${seenChildren.size} scopeChildren relations -> scopeScopes and dropped scopeChildren`);
   }
-  // Providers written before the display-name field existed: stamp the
-  // static PROVIDER_NAMES text (the embedded field — ids are never embed
-  // text) so the embedding backfill below has something to embed.
   for (const spec of collections) {
     const collection = targetDb.collection(spec.name);
     const exists = await collection.exists();
@@ -2098,16 +2054,6 @@ async function main() {
     if (spec.name === 'visualIdentities') await migrateExactSemanticRecords(targetDb, 'visualIdentities', ['name', 'description']);
     if (spec.name === 'collections' || spec.name === 'tags') {
       await targetDb.query(`FOR resource IN @@collection FILTER IS_STRING(resource.description) && LENGTH(TRIM(resource.description)) == 0 UPDATE resource WITH { description: null } IN @@collection OPTIONS { keepNull: false }`, { '@collection': spec.name });
-    }
-    if (spec.name === 'providers') {
-      await targetDb.query(`
-        FOR doc IN providers
-          UPDATE doc WITH {
-            description: null,
-            supportedUseCases: null,
-            enabled: null
-          } IN providers OPTIONS { keepNull: false }
-      `);
     }
     if (spec.name === 'documents') {
       await targetDb.query(`FOR document IN documents
@@ -2214,7 +2160,6 @@ async function main() {
   // BEFORE the ensure* calls below so indexes land on the new names.
   // overwriteMode ignore makes reruns no-ops.
   const aiCollectionRenames: Array<{ legacy: string; current: string }> = [
-    { legacy: 'organization_providers', current: 'organizationProviders' },
     { legacy: 'organization_scopes', current: 'organizationScopes' },
   ];
   for (const { legacy, current } of aiCollectionRenames) {
@@ -2235,81 +2180,6 @@ async function main() {
     console.log(`Copied ${legacy} -> ${current} and dropped ${legacy}`);
   }
 
-  // Resolve legacy provider links to the full organization-provider node.
-  // Invalid legacy references abort the migration rather than creating an
-  // orphaned credential authorization target.
-  const organizationProviders = targetDb.collection('organizationProviders');
-  if (!(await organizationProviders.exists())) await organizationProviders.create();
-  const organizationProviderCursor = await targetDb.query<Record<string, unknown>>(`
-    FOR link IN organizationProviders
-      RETURN link
-  `);
-  for (const legacyLink of await organizationProviderCursor.all()) {
-    const legacyKey = nonEmptyString(legacyLink._key);
-    const organizationKey = nonEmptyString(legacyLink.organizationKey)
-      ?? nonEmptyString(legacyLink.organizationId);
-    let providerKey = nonEmptyString(legacyLink.providerKey);
-    let providerName = nonEmptyString(legacyLink.name);
-    if (!providerKey) {
-      const providerSlug = nonEmptyString(legacyLink.providerId);
-      if (providerSlug) {
-        const providerCursor = await targetDb.query<{ _key: string; name: string }>(`
-          FOR provider IN providers
-            FILTER provider.slug == @providerSlug
-            LIMIT 1
-            RETURN { _key: provider._key, name: provider.name }
-        `, { providerSlug });
-        const provider = await providerCursor.next();
-        providerKey = provider?._key ?? null;
-        providerName ??= provider?.name ?? null;
-      }
-    }
-    if (providerKey && !providerName) {
-      const providerCursor = await targetDb.query<{ name: string }>(`
-        FOR provider IN providers
-          FILTER provider._key == @providerKey
-          LIMIT 1
-          RETURN { name: provider.name }
-      `, { providerKey });
-      providerName = (await providerCursor.next())?.name ?? null;
-    }
-    if (!legacyKey || !organizationKey || !providerKey || !providerName) {
-      throw new Error(`Cannot migrate organizationProviders/${legacyKey ?? 'unknown'}: unresolved organization or provider reference`);
-    }
-    const key = organizationProviderSchema.shape.key.safeParse(legacyKey).success ? legacyKey : newId();
-    const timestamp = new Date().toISOString();
-    const migrated = organizationProviderSchema.parse({
-      key,
-      organizationKey,
-      providerKey,
-      name: providerName,
-      description: nonEmptyString(legacyLink.description),
-      inputTokens: typeof legacyLink.inputTokens === 'number' && legacyLink.inputTokens >= 0 ? legacyLink.inputTokens : 0,
-      outputTokens: typeof legacyLink.outputTokens === 'number' && legacyLink.outputTokens >= 0 ? legacyLink.outputTokens : 0,
-      totalTokens: typeof legacyLink.totalTokens === 'number' && legacyLink.totalTokens >= 0 ? legacyLink.totalTokens : 0,
-      lastUsedAt: nonEmptyString(legacyLink.lastUsedAt),
-      createdAt: nonEmptyString(legacyLink.createdAt) ?? timestamp,
-      updatedAt: nonEmptyString(legacyLink.updatedAt) ?? timestamp,
-      embedding: [],
-    });
-    const { key: _migratedKey, ...migratedDocument } = migrated;
-    if (key === legacyKey) {
-      await organizationProviders.replace(legacyKey, { _key: key, ...migratedDocument });
-    } else {
-      await organizationProviders.save({ _key: key, ...migratedDocument });
-      await organizationProviders.remove(legacyKey);
-    }
-  }
-  for (const index of await organizationProviders.indexes()) {
-    const fields: string[] = 'fields' in index && Array.isArray(index.fields)
-      ? index.fields.map(String)
-      : [];
-    if (fields.includes('organizationId') || fields.includes('providerId')) {
-      await organizationProviders.dropIndex(index.id);
-    }
-  }
-  await ensureOrganizationProvidersCollection(targetDb);
-  await ensureOrganizationCredentialsCollection(targetDb);
   await ensureOrganizationConnectorsCollection(targetDb);
   await retireUnsupportedEmailConnectors(targetDb);
   await migrateProviderIndependentEmailDrafts(targetDb);
@@ -2317,8 +2187,6 @@ async function main() {
   await migrateCanonicalEmailEmbeddings(targetDb);
   await migrateEmailAttachmentAvailability(targetDb);
   await dropVerifiedLegacyInboxes(targetDb);
-  await retireTranscriptionDomain(targetDb);
-  await retireAiPersistence(targetDb);
 
   // Legacy scratch collection the org-migration steps below write into
   // before the final user_organization -> userOrganizations copy. Not part

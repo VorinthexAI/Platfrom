@@ -1,20 +1,4 @@
-import { anthropicProviderFactory } from './anthropic';
-import { awsBedrockProviderFactory } from './aws-bedrock';
-import { awsBedrockMantleProviderFactory } from './aws-bedrock-mantle';
-import { azureAIFoundryProviderFactory } from './azure-ai-foundry';
-import { googleVertexProviderFactory } from './google-vertex';
-import { openAIProviderFactory } from './openai';
-import { openRouterProviderFactory } from './openrouter';
-import { xaiProviderFactory } from './xai';
-import type { AnthropicCredentials } from './anthropic';
-import type { AwsBedrockCredentials } from './aws-bedrock';
-import type { AwsBedrockMantleCredentials } from './aws-bedrock-mantle';
-import type { AzureAIFoundryCredentials } from './azure-ai-foundry';
-import type { GoogleVertexCredentials } from './google-vertex';
-import type { OpenAICredentials } from './openai';
-import type { OpenRouterCredentials } from './openrouter';
-import type { XaiCredentials } from './xai';
-import type { ProviderAdapter, ProviderFactory, ProviderId } from './types';
+import { PROVIDER_REGISTRY } from './registry';
 
 export {
   PROVIDER_SLUGS,
@@ -89,54 +73,4 @@ export {
 } from './azure-ai-foundry';
 export { createAwsBedrockProvider, awsBedrockCredentialsSchema, awsBedrockProviderConfigSchema, awsBedrockProviderFactory, type AwsBedrockCredentials, type AwsBedrockProviderConfig } from './aws-bedrock';
 export { createAwsBedrockMantleProvider, awsBedrockMantleCredentialsSchema, awsBedrockMantleProviderConfigSchema, awsBedrockMantleProviderFactory, type AwsBedrockMantleCredentials, type AwsBedrockMantleProviderConfig } from './aws-bedrock-mantle';
-export {
-  providerSchema,
-  getProviderById,
-  getProviderBySlug,
-  insertProvider,
-  updateProvider,
-  deleteProvider,
-  type Provider,
-} from '@/lib/db/providers.node';
-
-/**
- * Adapter factories for every provider. Factories (not initialized
- * adapters) because secrets load at runtime — no external SDK client is
- * constructed at module import time.
- */
-export const PROVIDER_REGISTRY: Record<ProviderId, ProviderFactory> = {
-  openai: openAIProviderFactory,
-  openrouter: openRouterProviderFactory,
-  anthropic: anthropicProviderFactory,
-  xai: xaiProviderFactory,
-  'google-vertex': googleVertexProviderFactory,
-  'azure-ai-foundry': azureAIFoundryProviderFactory,
-  'aws-bedrock': awsBedrockProviderFactory,
-  'aws-bedrock-mantle': awsBedrockMantleProviderFactory,
-};
-
-export type ProviderCredentials = {
-  openai: OpenAICredentials;
-  openrouter: OpenRouterCredentials;
-  anthropic: AnthropicCredentials;
-  xai: XaiCredentials;
-  'google-vertex': GoogleVertexCredentials;
-  'azure-ai-foundry': AzureAIFoundryCredentials;
-  'aws-bedrock': AwsBedrockCredentials;
-  'aws-bedrock-mantle': AwsBedrockMantleCredentials;
-};
-
-/** A future provider call always receives model, prompt, and credentials explicitly. */
-export type ProviderCallOptions = {
-  [Id in ProviderId]: {
-    provider: Id;
-    model: string;
-    prompt: string;
-    credentials: ProviderCredentials[Id];
-  };
-}[ProviderId];
-
-/** Creates one adapter from credentials supplied by the caller, never process.env. */
-export function createProviderAdapter(options: ProviderCallOptions): ProviderAdapter {
-  return PROVIDER_REGISTRY[options.provider].create(options.credentials);
-}
+export { PROVIDER_REGISTRY, MODEL_REGISTRY, MODEL_IDS, modelIdSchema, getModel, getExternalModelId, isProviderAvailable, createRegisteredProviderAdapter, assertProviderRegistryIntegrity, type ModelId, type ProviderEnvironment, type ProviderRegistration } from './registry';

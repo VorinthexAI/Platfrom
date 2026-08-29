@@ -25,10 +25,8 @@ import { joinNewsletter } from './newsletter';
 import { parseJson, parseQuery, strictObject } from './validation';
 import {
   getFoundersAccount,
-  listFoundersOrganizationProviders,
   listFoundersOrganizationScopes,
   listFoundersOrganizations,
-  upsertFoundersOrganizationProvider,
 } from './founders';
 import { joinPresence, leavePresence, presenceBeat, streamPresence } from './presence';
 import { unsubscribeFromUpdates } from './updates';
@@ -555,8 +553,6 @@ export function registerRoutes(app: Hono) {
   app.get('/founders/me', getFoundersAccount);
   app.get('/founders/organizations', listFoundersOrganizations);
   app.get('/founders/organizations/:organizationKey/scopes', listFoundersOrganizationScopes);
-  app.get('/founders/organizations/:organizationKey/providers', listFoundersOrganizationProviders);
-  app.put('/founders/organizations/:organizationKey/providers/:provider', upsertFoundersOrganizationProvider);
   app.get('/founders/organizations/:organizationKey/communication/channels', communicationHandlers.listChannels);
   app.get('/founders/organizations/:organizationKey/communication/channels/:channelKey/messages', communicationHandlers.listMessages);
   app.get('/founders/organizations/:organizationKey/communication/channels/:channelKey/typing', communicationHandlers.typingStream);

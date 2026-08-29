@@ -55,7 +55,7 @@ describe('retrieval tool', () => {
   test('rejects filters that could broaden or do not apply to a node', async () => {
     await expect(retrievalTool.execute({ nodes: [{ node: 'messages', filters: { organizationKey: 'another-org' } }], limit: 5 }, context, { retrieveNode: async () => [] })).rejects.toThrow('authorized organization');
     await expect(retrievalTool.execute({ nodes: [{ node: 'messages', filters: { statuses: ['open'] } }], limit: 5 }, context, { retrieveNode: async () => [] })).rejects.toThrow('does not support status filters');
-    await expect(retrievalTool.execute({ nodes: [{ node: 'models', filters: { organizationKey: 'org' } }], limit: 5 }, context, { retrieveNode: async () => [] })).rejects.toThrow('does not support organization filters');
+    await expect(retrievalTool.execute({ nodes: [{ node: 'orchestrators', filters: { organizationKey: 'org' } }], limit: 5 }, context, { retrieveNode: async () => [] })).rejects.toThrow('does not support organization filters');
     expect(() => retrievalInputSchema.parse({ nodes: [{ node: 'messages', filters: { arbitrary: ['value'] } }], limit: 5 })).toThrow();
   });
 

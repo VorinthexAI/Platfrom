@@ -10,13 +10,15 @@ test('migrates before activating backend code and running data changes', async (
   expect(databaseJob).toContain('timeout-minutes: 60');
   expect(databaseJob).toContain('needs: [changes, backend-secrets, backend-migrate]');
   expect(databaseJob).toContain("needs.backend-migrate.result == 'success'");
-  const seed = databaseJob.indexOf('- name: Seed deterministic/runtime catalog');
+  const seed = databaseJob.indexOf('- name: Seed deterministic application data');
   const backfill = databaseJob.indexOf('- name: Backfill semantic embeddings');
   expect(databaseJob).not.toContain('- name: Apply graph migrations');
   expect(seed).toBeGreaterThan(-1);
   expect(backfill).toBeGreaterThan(seed);
   expect(databaseJob).toContain('run: bun run --cwd backend db:seed:ci');
   expect(databaseJob).toContain('run: bun run --cwd backend db:backfill-semantic-embeddings:ci');
+  expect(databaseJob).not.toContain('BEDROCK_AWS_ACCESS_KEY_ID');
+  expect(databaseJob).not.toContain('BEDROCK_AWS_SECRET_ACCESS_KEY');
   const migration = workflow.indexOf('\n  backend-migrate:');
   const migrationJob = workflow.slice(migration, workflow.indexOf('\n  seed-db-secrets:', migration));
   expect(migrationJob).toContain('needs: [changes, backend-image, backend-secrets]');
