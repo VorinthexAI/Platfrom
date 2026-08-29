@@ -1,9 +1,6 @@
 import { aql } from 'arangojs';
 import { closeDb, db } from './client';
 import { newId } from '@/lib/ids';
-import { getProviderBySlug, insertProvider, updateProvider, type Provider } from './providers.node';
-import { getModelBySlug, insertModel, updateModel as updatePersistedModel, type Model } from './models.node';
-import { getModelProviderById, getModelProviderByPair, insertModelProvider, modelProviderSeedSchema, updateModelProvider, type ModelProvider } from './model-providers.node';
 import { getRootOrganization, insertOrganization, updateOrganization, type Organization } from './organizations.node';
 import { getUserOrganizationByOrganizationAndUser, updateUserOrganization } from './user-organization.node';
 import { getUserByEmail } from './users.node';
@@ -12,7 +9,6 @@ import { getDefaultScopeRepository, NEXUS_SCOPE_KEY } from '@/lib/ai/scopes';
 import { reconcileOrganizationScopeMemberships } from '@/lib/ai/scopes/membership-invariant';
 import { SEEDED_ORCHESTRATOR_SKILLS } from '@/lib/orchestrators/seeded-skills';
 import { CANONICAL_ORCHESTRATOR_NAMES } from '@/lib/orchestrators/roster';
-import { retireAiPersistence } from '@/db/retire-ai-persistence';
 import { COUNTRY_CATALOG } from '@/lib/travel/country-catalog';
 import { currentEmbeddingSchema, embedText } from '@/lib/embeddings';
 import { createHash } from 'node:crypto';
@@ -32,12 +28,6 @@ export class SeedReferenceError extends Error {
   }
 }
 
-export interface AiRuntimeSeedUpserters {
-  provider(seed: (typeof SEEDED_PROVIDERS)[number]): Promise<SeedResult>;
-  model(seed: (typeof SEEDED_MODELS)[number]): Promise<SeedResult>;
-  modelProvider(seed: (typeof SEEDED_MODEL_PROVIDERS)[number]): Promise<SeedResult>;
-}
-
 const now = () => new Date().toISOString();
 
 async function updateSemanticSeed(collection: string, key: string, update: () => Promise<unknown>): Promise<SeedResult> {
@@ -49,168 +39,6 @@ async function updateSemanticSeed(collection: string, key: string, update: () =>
   }
   return { collection, key, status: 'updated' };
 }
-
-export const SEEDED_PROVIDERS = [
-  {
-    key: 'cmrl6mtn60005a1b23aushlt0',
-    slug: 'openai',
-    name: 'OpenAI',
-    handlerKey: 'openai',
-  },
-  {
-    key: 'cmopenrouterprovider000001',
-    slug: 'openrouter',
-    name: 'OpenRouter',
-    handlerKey: 'openrouter',
-  },
-  {
-    key: 'cmrl6mtn60007a1b23aushlt0',
-    slug: 'anthropic',
-    name: 'Anthropic',
-    handlerKey: 'anthropic',
-  },
-  {
-    key: 'cmrl6mtn60008a1b23aushlt0',
-    slug: 'aws-bedrock',
-    name: 'AWS Bedrock',
-    handlerKey: 'aws-bedrock',
-  },
-  {
-    key: 'cmrl6mtn60014a1b23aushlt0',
-    slug: 'aws-bedrock-mantle',
-    name: 'AWS Bedrock Mantle',
-    handlerKey: 'aws-bedrock-mantle',
-  },
-  {
-    key: 'cmrl6mtn60009a1b23aushlt0',
-    slug: 'google-vertex',
-    name: 'Google Vertex AI',
-    handlerKey: 'google-vertex',
-  },
-  {
-    key: 'cmrl6mtn60010a1b23aushlt0',
-    slug: 'azure-ai-foundry',
-    name: 'Azure AI Foundry',
-    handlerKey: 'azure-ai-foundry',
-  },
-  {
-    key: 'cmrl6mtn60011a1b23aushlt0',
-    slug: 'xai',
-    name: 'xAI',
-    handlerKey: 'xai',
-  },
-] as const;
-
-export const SEEDED_MODELS = [
-  {
-    key: 'cmgpt56lunamodel0000001',
-    slug: 'openai.gpt-5.6-luna',
-    name: 'OpenAI GPT-5.6 Luna',
-    description: 'OpenAI general-purpose reasoning model for agent execution, analysis, and multimodal understanding.',
-    supportedUseCases: 'Agent execution, reasoning, coding, tool use, classification, extraction, and visual understanding.',
-    enabled: true,
-  },
-  {
-    key: 'cmgptimage2model000000001',
-    slug: 'openai.gpt-image-2',
-    name: 'OpenAI GPT Image 2',
-    description: 'OpenAI image generation and editing model.',
-    supportedUseCases: 'Image generation, image editing, and visual asset creation.',
-    enabled: true,
-  },
-  {
-    key: 'cmgpt4ominittsmodel000001',
-    slug: 'openai.gpt-4o-mini-tts',
-    name: 'OpenAI GPT-4o Mini TTS',
-    description: 'OpenAI speech generation model.',
-    supportedUseCases: 'Narration and speech generation.',
-    enabled: true,
-  },
-  {
-    key: 'cmopenai3smallembed00001',
-    slug: 'openai.text-embedding-3-small',
-    name: 'OpenAI Text Embedding 3 Small',
-    description: 'OpenAI embedding model at 1536 dimensions.',
-    supportedUseCases: 'Retrieval-augmented generation, semantic search, vector retrieval, classification, and document similarity.',
-    enabled: true,
-  },
-  {
-    key: 'cmflux2klein4bmodel000001',
-    slug: 'bfl.flux-2-klein-4b',
-    name: 'Black Forest Labs FLUX.2 Klein 4B',
-    description: 'Low-latency image generation model routed through OpenRouter.',
-    supportedUseCases: 'Fast image generation and visual asset creation.',
-    enabled: true,
-  },
-  {
-    key: 'cmgrokimagequalitymodel001',
-    slug: 'xai.grok-imagine-image-quality',
-    name: 'xAI Grok Imagine Image Quality',
-    description: 'Quality-focused image generation model routed through OpenRouter.',
-    supportedUseCases: 'Image generation and visual asset creation.',
-    enabled: true,
-  },
-  {
-    key: 'cmgemini25flashlitemodel1',
-    slug: 'google.gemini-2.5-flash-lite',
-    name: 'Google Gemini 2.5 Flash Lite',
-    description: 'Fast, cost-efficient Google text generation model routed through OpenRouter.',
-    supportedUseCases: 'Destination guides, image briefs, summarization, and structured text generation.',
-    enabled: true,
-  },
-] as const;
-
-export const SEEDED_MODEL_PROVIDERS = [
-  {
-    key: 'cmgpt56lunaroute0000001',
-    modelSlug: 'openai.gpt-5.6-luna',
-    providerSlug: 'openai',
-    providerModelId: 'gpt-5.6-luna',
-    enabled: true,
-  },
-  {
-    key: 'cmgptimage2route000000001',
-    modelSlug: 'openai.gpt-image-2',
-    providerSlug: 'openai',
-    providerModelId: 'gpt-image-2',
-    enabled: true,
-  },
-  {
-    key: 'cmgpt4ominittsroute000001',
-    modelSlug: 'openai.gpt-4o-mini-tts',
-    providerSlug: 'openai',
-    providerModelId: 'gpt-4o-mini-tts',
-    enabled: true,
-  },
-  {
-    key: 'cmopenai3smallembedroute1',
-    modelSlug: 'openai.text-embedding-3-small',
-    providerSlug: 'openai',
-    providerModelId: 'text-embedding-3-small',
-    enabled: true,
-  },
-  {
-    key: 'cmflux2klein4broute000001',
-    modelSlug: 'bfl.flux-2-klein-4b',
-    providerSlug: 'openrouter',
-    providerModelId: 'black-forest-labs/flux.2-klein-4b',
-    enabled: true,
-  },
-  {
-    key: 'cmgrokimagequalityroute001',
-    modelSlug: 'xai.grok-imagine-image-quality',
-    providerSlug: 'openrouter',
-    providerModelId: 'x-ai/grok-imagine-image-quality',
-    enabled: true,
-  },
-  {
-    key: 'cmgemini25flashliteroute1',
-    modelSlug: 'google.gemini-2.5-flash-lite',
-    providerSlug: 'openrouter',
-    providerModelId: 'google/gemini-2.5-flash-lite',
-    enabled: true,
-  },
-] as const;
 
 export const SEEDED_ORGANIZATION = {
   name: 'Vorinthex AI',
@@ -234,7 +62,7 @@ Every interaction contributes to a persistent understanding of the user, the org
 
 The platform is designed to coordinate both human and artificial intelligence. Large objectives can be transformed into structured plans, broken into smaller tasks and executed through specialized agents that work together toward a shared goal. As work progresses, new knowledge is captured, summarized and connected back into the system, creating an intelligence network that becomes increasingly valuable over time.
 
-Vorinthex is built to remain flexible as artificial intelligence continues to evolve. Users can connect their preferred models, providers and services while interacting through a single consistent experience. This allows the platform to adopt new capabilities without requiring people to change how they work.
+Vorinthex is built to remain flexible as artificial intelligence continues to evolve. New intelligence capabilities can be integrated behind a single consistent experience without requiring people to change how they work.
 
 The long term vision is to create a new way of interacting with software. Rather than opening dozens of separate applications for different tasks, people will work alongside an intelligent system that understands their objectives, coordinates specialized capabilities and continuously learns from every action. Vorinthex represents a future where intelligence is persistent, collaborative and deeply integrated into everything people create, allowing individuals and organizations to focus less on software and more on achieving meaningful outcomes.`,
     position: 1,
@@ -366,66 +194,6 @@ const SEEDED_FOUNDER_ORCHESTRATORS = {
   'anton@vorinthex.com': 'Apollo',
 } as const;
 
-async function upsertSeedProvider(seed: (typeof SEEDED_PROVIDERS)[number]): Promise<SeedResult> {
-  const existing = await getProviderBySlug(seed.slug);
-  if (!existing) {
-    await insertProvider(seed);
-    return { collection: 'providers', key: seed.key, status: 'created' };
-  }
-  if (existing.name === seed.name && existing.handlerKey === seed.handlerKey) return { collection: 'providers', key: existing.key, status: 'updated' };
-
-  const patch: Partial<Omit<Provider, 'key' | 'embedding'>> = {
-    name: seed.name,
-    handlerKey: seed.handlerKey,
-  };
-  return updateSemanticSeed('providers', existing.key, () => updateProvider(existing.key, patch));
-}
-
-async function upsertSeedModel(seed: (typeof SEEDED_MODELS)[number]): Promise<SeedResult> {
-  const existing = await getModelBySlug(seed.slug);
-  if (!existing) {
-    await insertModel(seed);
-    return { collection: 'models', key: seed.key, status: 'created' };
-  }
-  if (existing.name === seed.name && existing.description === seed.description && isDeepStrictEqual(existing.supportedUseCases, seed.supportedUseCases) && existing.enabled === seed.enabled) return { collection: 'models', key: existing.key, status: 'updated' };
-
-  const patch: Partial<Omit<Model, 'key' | 'embedding'>> = {
-    name: seed.name,
-    description: seed.description,
-    supportedUseCases: seed.supportedUseCases,
-    enabled: seed.enabled,
-  };
-  return updateSemanticSeed('models', existing.key, () => updatePersistedModel(existing.key, patch));
-}
-
-async function upsertSeedModelProvider(seed: (typeof SEEDED_MODEL_PROVIDERS)[number]): Promise<SeedResult> {
-  const parsed = modelProviderSeedSchema.parse(seed);
-  const model = await getModelBySlug(parsed.modelSlug);
-  if (!model) throw new SeedReferenceError('model', parsed.modelSlug, 'modelProvider');
-  const provider = await getProviderBySlug(parsed.providerSlug);
-  if (!provider) throw new SeedReferenceError('provider', parsed.providerSlug, 'modelProvider');
-
-  const existing = await getModelProviderByPair(model.key, provider.key);
-  if (!existing) {
-    const keyOwner = await getModelProviderById(parsed.key);
-    const key = keyOwner ? newId() : parsed.key;
-    await insertModelProvider({
-      key,
-      modelKey: model.key,
-      providerKey: provider.key,
-      providerModelId: parsed.providerModelId,
-      enabled: parsed.enabled,
-    });
-    return { collection: 'modelProviders', key, status: 'created' };
-  }
-
-  await updateModelProvider(existing.key, {
-    providerModelId: parsed.providerModelId,
-    enabled: parsed.enabled,
-  });
-  return { collection: 'modelProviders', key: existing.key, status: 'updated' };
-}
-
 async function upsertSeedOrganization(seed: typeof SEEDED_ORGANIZATION): Promise<SeedResult> {
   const existing = await getRootOrganization();
   if (!existing) {
@@ -491,21 +259,8 @@ async function assignSeededFounderOrchestrators(rootOrganizationKey: string): Pr
   return results;
 }
 
-export async function seedAiRuntimeNodes(upserters: AiRuntimeSeedUpserters = {
-  provider: upsertSeedProvider,
-  model: upsertSeedModel,
-  modelProvider: upsertSeedModelProvider,
-}): Promise<SeedResult[]> {
-  const results: SeedResult[] = [];
-  for (const seed of SEEDED_PROVIDERS) results.push(await upserters.provider(seed));
-  for (const seed of SEEDED_MODELS) results.push(await upserters.model(seed));
-  for (const seed of SEEDED_MODEL_PROVIDERS) results.push(await upserters.modelProvider(seed));
-  return results;
-}
-
 export async function seedCoreDbNodes(): Promise<SeedResult[]> {
-  await retireAiPersistence(db);
-  const results = await seedAiRuntimeNodes();
+  const results: SeedResult[] = [];
   for (const country of COUNTRY_CATALOG) {
     const semanticHash = createHash('sha256').update(country.name).digest('hex');
     const currentCursor = await db.query<{ key: string; semanticVersion?: number; semanticHash?: string }>('FOR country IN countries FILTER country.countryCode == @countryCode LIMIT 1 RETURN { key: country._key, semanticVersion: country.semanticVersion, semanticHash: country.semanticHash }', { countryCode: country.countryCode });

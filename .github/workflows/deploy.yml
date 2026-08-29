@@ -618,34 +618,26 @@ jobs:
           done
           echo "::error::ArangoDB did not become reachable through the SSH tunnel within 120 seconds."
           exit 1
-      - name: Fetch ArangoDB and AI provider credentials from SSM
+      - name: Fetch ArangoDB and embedding credentials from SSM
         run: |
           creds=$(aws ssm get-parameters-by-path --region "$AWS_REGION" --path "$SSM_PATH" --recursive --with-decryption --query "Parameters[].{n:Name,v:Value}" --output json)
           arango_password=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/ARANGO_ROOT_PASSWORD")) | .v')
           arango_database=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/ARANGO_DATABASE")) | .v')
-          bedrock_aws_access_key_id=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/BEDROCK_AWS_ACCESS_KEY_ID")) | .v')
-          bedrock_aws_secret_access_key=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/BEDROCK_AWS_SECRET_ACCESS_KEY")) | .v')
           openai_api_key=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENAI_API_KEY")) | .v')
           openai_base_url=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENAI_BASE_URL")) | .v')
           openai_organization=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENAI_ORGANIZATION")) | .v')
           openai_project=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENAI_PROJECT")) | .v')
           test -n "$arango_password" || { echo "::error::ARANGO_ROOT_PASSWORD not found under $SSM_PATH"; exit 1; }
-          test -n "$bedrock_aws_access_key_id" || { echo "::error::BEDROCK_AWS_ACCESS_KEY_ID not found under $SSM_PATH"; exit 1; }
-          test -n "$bedrock_aws_secret_access_key" || { echo "::error::BEDROCK_AWS_SECRET_ACCESS_KEY not found under $SSM_PATH"; exit 1; }
           test -n "$openai_api_key" || { echo "::error::OPENAI_API_KEY not found under $SSM_PATH; the OpenAI runtime cannot run"; exit 1; }
           echo "::add-mask::$arango_password"
-          echo "::add-mask::$bedrock_aws_access_key_id"
-          echo "::add-mask::$bedrock_aws_secret_access_key"
           echo "::add-mask::$openai_api_key"
           echo "ARANGO_ROOT_PASSWORD=$arango_password" >> "$GITHUB_ENV"
           echo "ARANGO_DATABASE=$arango_database" >> "$GITHUB_ENV"
-          echo "BEDROCK_AWS_ACCESS_KEY_ID=$bedrock_aws_access_key_id" >> "$GITHUB_ENV"
-          echo "BEDROCK_AWS_SECRET_ACCESS_KEY=$bedrock_aws_secret_access_key" >> "$GITHUB_ENV"
           echo "OPENAI_API_KEY=$openai_api_key" >> "$GITHUB_ENV"
           test -z "$openai_base_url" || echo "OPENAI_BASE_URL=$openai_base_url" >> "$GITHUB_ENV"
           test -z "$openai_organization" || echo "OPENAI_ORGANIZATION=$openai_organization" >> "$GITHUB_ENV"
           test -z "$openai_project" || echo "OPENAI_PROJECT=$openai_project" >> "$GITHUB_ENV"
-      - name: Seed deterministic/runtime catalog
+      - name: Seed deterministic application data
         env:
           ARANGO_URL: http://127.0.0.1:8529
           ARANGO_USERNAME: root

@@ -23,7 +23,7 @@ export interface AppTransformationService {
 
 export function createAppTransformationService(dependencies: { generate?: (organizationKey: string, request: Parameters<TextGeneration>[0], options?: ExecuteActionOptions) => Promise<string> } = {}): AppTransformationService {
   const generate = dependencies.generate ?? (async (organizationKey, request, options) => {
-    const { mode: _mode, organizationProviderKey: _organizationProviderKey, ...input } = coreChatInputSchema.parse({
+    const { mode: _mode, ...input } = coreChatInputSchema.parse({
       systemPrompt: request.systemPrompt,
       messages: [{ role: 'user', content: [{ type: 'text', text: request.text }] }],
       options: { temperature: request.temperature, maxTokens: request.maxTokens },

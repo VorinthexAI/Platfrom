@@ -138,8 +138,8 @@ function memberContext(context: ToolContext) {
 const extensionByMimeType = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' } as const;
 const aspectRatioBySize = { '1024x1024': '1:1', '1024x1536': '2:3', '1536x1024': '3:2' } as const;
 export const imageGenerationRoute = (mode: ImageGenerateModelInput['mode'], organizationKey: string) => mode === 'fast'
-  ? { mode: 'fixed' as const, organizationKey, actionSlug: 'generate-image' as const, modelSlug: 'bfl.flux-2-klein-4b', providerSlug: 'openrouter' as const }
-  : { mode: 'fixed' as const, organizationKey, actionSlug: 'generate-image' as const, modelSlug: 'openai.gpt-image-2', providerSlug: 'openai' as const };
+  ? { mode: 'fixed' as const, organizationKey, actionSlug: 'generate-image' as const, modelSlug: 'bfl.flux-2-klein-4b' as const, providerSlug: 'openrouter' as const }
+  : { mode: 'fixed' as const, organizationKey, actionSlug: 'generate-image' as const, modelSlug: 'openai.gpt-image-2' as const, providerSlug: 'openai' as const };
 const inFlight = new Map<string, { hash: string; promise: Promise<ImageGenerateOutput> }>();
 const generatedImageKey = (scopeKey: string, idempotencyKey: string, index: number) => `c${createHash('sha256').update(`${scopeKey}\0${idempotencyKey}:${index}`).digest('hex').slice(0, 24)}`;
 

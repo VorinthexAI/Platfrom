@@ -6,7 +6,6 @@ export const ROUTER_ERROR_CODES = {
   unsupportedAction: 'unsupported_action',
   unknownModel: 'unknown_model',
   unknownProvider: 'unknown_provider',
-  providerNotEnabledForOrganization: 'provider_not_enabled_for_organization',
   noEligibleRoute: 'no_eligible_route',
   providerExecutionFailed: 'provider_execution_failed',
   routeValidationFailed: 'route_validation_failed',
@@ -27,15 +26,6 @@ export class UnknownModelError extends AiError {
 export class UnknownProviderError extends AiError {
   constructor(providerId: string) {
     super(ROUTER_ERROR_CODES.unknownProvider, `Unknown provider: ${providerId}`);
-  }
-}
-
-export class ProviderNotEnabledForOrganizationError extends AiError {
-  constructor(organizationKey: string, providerId: string) {
-    super(
-      ROUTER_ERROR_CODES.providerNotEnabledForOrganization,
-      `Provider ${providerId} is not enabled for organization ${organizationKey}`,
-    );
   }
 }
 

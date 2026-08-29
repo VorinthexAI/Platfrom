@@ -9,8 +9,6 @@ test('country seeds embed only missing or stale semantic content', async () => {
 
 test('runtime seeds avoid re-embedding unchanged semantic records', async () => {
   const source = await Bun.file(new URL('./seed.ts', import.meta.url)).text();
-  expect(source.indexOf('existing.name === seed.name && existing.handlerKey === seed.handlerKey')).toBeLessThan(source.indexOf("updateSemanticSeed('providers', existing.key"));
-  expect(source.indexOf('isDeepStrictEqual(existing.supportedUseCases, seed.supportedUseCases)')).toBeLessThan(source.indexOf("updateSemanticSeed('models', existing.key"));
   expect(source.indexOf('isDeepStrictEqual(existing.metadata, seed.metadata)')).toBeLessThan(source.indexOf("updateSemanticSeed('organizations', existing.key"));
   expect(source.indexOf('isDeepStrictEqual(existing.skill, seed.skill)')).toBeLessThan(source.indexOf("updateSemanticSeed('orchestrators', existing.key"));
 });
@@ -18,12 +16,9 @@ test('runtime seeds avoid re-embedding unchanged semantic records', async () => 
 test('runtime seeds defer only retryable refreshes of existing semantic records', async () => {
   const source = await Bun.file(new URL('./seed.ts', import.meta.url)).text();
   expect(source).toContain('if (!isProviderError(error) || !error.retryable) throw error;');
-  expect(source).toContain("updateSemanticSeed('providers', existing.key");
-  expect(source).toContain("updateSemanticSeed('models', existing.key");
   expect(source).toContain("updateSemanticSeed('organizations', existing.key");
   expect(source).toContain("updateSemanticSeed('orchestrators', existing.key");
   expect(source).toContain('semantic seed refresh for ${country.countryCode} deferred');
-  expect(source.indexOf('await insertProvider(seed)')).toBeLessThan(source.indexOf("updateSemanticSeed('providers', existing.key"));
 });
 
 test('seed command defers only normalized retryable provider outages', async () => {
@@ -33,13 +28,10 @@ test('seed command defers only normalized retryable provider outages', async () 
   expect(command).toContain('Database seed deferred because');
   expect(command).toContain('await closeDb()');
 });
-import { PROVIDER_SLUGS } from '@/lib/ai/providers';
-import { ACTION_DEFINITIONS } from '@/lib/ai/actions';
-import { providerSchema } from './providers.node';
 import { scopeSchema, scopeScopeSchema } from '@/lib/ai/scopes';
 import { newId } from '@/lib/ids';
 import { join } from 'node:path';
-import { NEXUS_SCOPE_KEY, SEEDED_MODELS, SEEDED_MODEL_PROVIDERS, SEEDED_ORCHESTRATOR_SOURCES, SEEDED_PROVIDERS, SEEDED_SCOPES, seedAiRuntimeNodes, type AiRuntimeSeedUpserters, type SeedResult } from './seed';
+import { NEXUS_SCOPE_KEY, SEEDED_ORCHESTRATOR_SOURCES, SEEDED_SCOPES } from './seed';
 import { CANONICAL_ORCHESTRATOR_NAMES } from '@/lib/orchestrators/roster';
 
 describe('scope seeds', () => {
@@ -89,58 +81,6 @@ describe('scope seeds', () => {
   });
 });
 
-describe('provider seeds', () => {
-  test('seed every supported provider while keeping its slug registered', () => {
-    const slugs = SEEDED_PROVIDERS.map((provider) => provider.slug);
-
-    expect(slugs).toEqual(['openai', 'openrouter', 'anthropic', 'aws-bedrock', 'aws-bedrock-mantle', 'google-vertex', 'azure-ai-foundry', 'xai']);
-    expect(slugs.every((slug) => PROVIDER_SLUGS.includes(slug))).toBe(true);
-    expect(new Set(slugs).size).toBe(slugs.length);
-    expect(new Set(SEEDED_PROVIDERS.map((provider) => provider.key)).size).toBe(SEEDED_PROVIDERS.length);
-  });
-
-  test('match the persisted provider schema and handler slug', () => {
-    for (const seed of SEEDED_PROVIDERS) {
-      const parsed = providerSchema.parse(seed);
-
-      expect(parsed.handlerKey).toBe(parsed.slug);
-      expect(parsed.embedding).toEqual([]);
-    }
-  });
-});
-
-describe('model and provider relation seeds', () => {
-  test('seed model components through their service providers', () => {
-    expect(SEEDED_MODELS).toHaveLength(7);
-    expect(SEEDED_MODEL_PROVIDERS).toHaveLength(7);
-    expect(SEEDED_MODELS.map(({ slug }) => slug)).toEqual([
-      'openai.gpt-5.6-luna',
-      'openai.gpt-image-2',
-      'openai.gpt-4o-mini-tts',
-      'openai.text-embedding-3-small',
-      'bfl.flux-2-klein-4b',
-      'xai.grok-imagine-image-quality',
-      'google.gemini-2.5-flash-lite',
-    ]);
-    expect(SEEDED_MODEL_PROVIDERS.map(({ modelSlug, providerSlug, providerModelId, enabled }) => `${modelSlug}:${providerSlug}:${providerModelId}:${enabled}`)).toEqual([
-      'openai.gpt-5.6-luna:openai:gpt-5.6-luna:true',
-      'openai.gpt-image-2:openai:gpt-image-2:true',
-      'openai.gpt-4o-mini-tts:openai:gpt-4o-mini-tts:true',
-      'openai.text-embedding-3-small:openai:text-embedding-3-small:true',
-      'bfl.flux-2-klein-4b:openrouter:black-forest-labs/flux.2-klein-4b:true',
-      'xai.grok-imagine-image-quality:openrouter:x-ai/grok-imagine-image-quality:true',
-      'google.gemini-2.5-flash-lite:openrouter:google/gemini-2.5-flash-lite:true',
-    ]);
-    for (const model of SEEDED_MODELS) expect(SEEDED_MODEL_PROVIDERS.find((route) => route.modelSlug === model.slug && route.enabled)).toBeDefined();
-    for (const action of ACTION_DEFINITIONS) {
-      for (const binding of action.models) {
-        expect(SEEDED_MODELS.filter(({ slug, enabled }) => slug === binding.model && enabled)).toHaveLength(1);
-        expect(SEEDED_MODEL_PROVIDERS.filter(({ modelSlug, providerSlug, enabled }) => modelSlug === binding.model && providerSlug === binding.provider && enabled)).toHaveLength(1);
-      }
-    }
-  });
-});
-
 describe('orchestrator seeds', () => {
   test('seed exactly the 20 executive orchestrator sources', () => {
     expect(SEEDED_ORCHESTRATOR_SOURCES).toHaveLength(20);
@@ -170,30 +110,4 @@ describe('orchestrator seeds', () => {
     expect(source).toContain('UPSERT { channelKey: @channelKey, orchestratorKey: @orchestratorKey }');
     expect(source).toContain("collection: 'channelParticipants'");
   });
-});
-
-describe('AI runtime seed orchestration', () => {
-  test('is idempotent across every v1 seed collection', async () => {
-    const persisted = new Set<string>();
-    const upsert = (collection: string) => async (seed: { key: string }): Promise<SeedResult> => {
-      const identity = `${collection}:${seed.key}`;
-      const status = persisted.has(identity) ? 'updated' : 'created';
-      persisted.add(identity);
-      return { collection, key: seed.key, status };
-    };
-    const upserters: AiRuntimeSeedUpserters = {
-      provider: upsert('providers'),
-      model: upsert('models'),
-      modelProvider: upsert('modelProviders'),
-    };
-
-    const first = await seedAiRuntimeNodes(upserters);
-    const second = await seedAiRuntimeNodes(upserters);
-    expect(first.every((result) => result.status === 'created')).toBe(true);
-    expect(second.every((result) => result.status === 'updated')).toBe(true);
-    expect(second.map(({ collection, key }) => `${collection}:${key}`))
-      .toEqual(first.map(({ collection, key }) => `${collection}:${key}`));
-    expect(persisted.size).toBe(first.length);
-  });
-
 });

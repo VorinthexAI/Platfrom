@@ -1,10 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { isLegacyIndex, LEGACY_REMOVAL_MARKER, normalizeLegacyDocumentSharePermission } from './arango-migrate-indexes';
 import { stageLegacyDocumentShares } from './content-migration';
-import { collections, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateGeneratedTravelDocuments, migrateImageCaptions, migrateMinimalPlacesAndRetireTrips, migratePlaceReports, migrateProviderIndependentEmailDrafts, migrateRetiredEmailDefaultTones, migrateTripAttachments, migrateTripCreationReceipts, migrateTripGuides, needsExactSemanticEmbedding, retireMomentumScope, retireTranscriptionDomain, retireUserSettings } from './arango-migrate';
+import { collections, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateGeneratedTravelDocuments, migrateImageCaptions, migrateMinimalPlacesAndRetireTrips, migratePlaceReports, migrateProviderIndependentEmailDrafts, migrateRetiredEmailDefaultTones, migrateTripAttachments, migrateTripCreationReceipts, migrateTripGuides, needsExactSemanticEmbedding, retireMomentumScope, retireUserSettings } from './arango-migrate';
 import { EMBEDDING_DIMENSIONS, LEGACY_EMBEDDING_DIMENSIONS, embeddingMetadata } from '../lib/embeddings';
 import { DOCUMENT_CHUNK_MAX_WORDS, DOCUMENT_MAX_CHUNKS, documentSemanticHash } from '../lib/ai/document-processing/chunking';
-import { RETAINED_MODEL_PROVIDER_BINDINGS, RETAINED_MODEL_SLUGS, RETAINED_PROVIDER_SLUGS, retireAiPersistence } from './retire-ai-persistence';
 
 function migrationDatabase(collection: 'documents' | 'documentVersions', row: Record<string, unknown>) {
   let page = 0;
@@ -60,7 +59,7 @@ describe('Arango migration indexes', () => {
     expect(source).toContain('await migrateEmailAttachmentAvailability(targetDb)');
   });
   test('hard-drops retired persistence without recreating it and retains collaboration collections', async () => {
-    const retired = ['agents', 'skills', 'agentSkills', 'scopeAgents', 'agentMembers', 'agentRuns', 'agentRunSteps', 'agentRunCalls', 'agentRunSources', 'agentArtifacts', 'agentArtifactChecks', 'agentMemories', 'runtimeVariables', 'capabilities', 'mindCapabilities', 'minds', 'actions', 'modelActions', 'agentArtifactsLegacy', 'agentRunsLegacy', 'agent_runs', 'agentTools', 'toolActions', 'tools', 'templates'];
+    const retired = ['orgCredentials', 'organizationProviders', 'organization_providers', 'modelProviders', 'models', 'providers', 'agents', 'skills', 'agentSkills', 'scopeAgents', 'agentMembers', 'agentRuns', 'agentRunSteps', 'agentRunCalls', 'agentRunSources', 'agentArtifacts', 'agentArtifactChecks', 'agentMemories', 'runtimeVariables', 'capabilities', 'mindCapabilities', 'minds', 'actions', 'modelActions', 'agentArtifactsLegacy', 'agentRunsLegacy', 'agent_runs', 'agentTools', 'toolActions', 'tools', 'templates'];
     expect(collections.filter(({ name }) => retired.includes(name))).toEqual([]);
     for (const retained of ['scopes', 'channels', 'channelParticipants', 'orchestrators']) expect(collections.some(({ name }) => name === retained)).toBe(true);
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
@@ -162,43 +161,6 @@ describe('Arango migration indexes', () => {
     expect(calls.map(({ query }) => query).join('\n')).toContain('REMOVE relation IN scopeScopes');
     expect(calls.map(({ query }) => query).join('\n')).toContain('REMOVE relation IN scopeMembers');
     expect(calls.at(-1)?.query).toContain('REMOVE scope IN scopes');
-  });
-
-  test('removes dedicated transcription models, routes, provider access, and credentials', async () => {
-    const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
-    const database = { async query(query: string, bindVars?: Record<string, unknown>) { calls.push({ query, bindVars }); return { async all() { return []; }, async next() { return undefined; } }; } };
-    await retireTranscriptionDomain(database as never);
-    expect(calls).toHaveLength(5);
-    expect(calls[0]?.query).toContain('REMOVE relation IN modelProviders');
-    expect(calls.slice(1, 3).map(({ bindVars }) => bindVars?.['@collection'])).toEqual(['organizationProviders', 'orgCredentials']);
-    expect(calls[3]?.query).toContain('REMOVE model IN models');
-    expect(calls[4]?.query).toContain('REMOVE provider IN providers');
-    expect(calls[0]?.bindVars?.modelSlugs).toEqual(['openai.gpt-4o-mini-transcribe', 'aws.transcribe-standard']);
-    expect(calls[0]?.bindVars?.providerSlugs).toEqual(['aws-transcribe']);
-  });
-
-  test('hard-retires obsolete AI catalog configuration idempotently before seeding', async () => {
-    const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
-    const database = { async query(query: string, bindVars?: Record<string, unknown>) { calls.push({ query, bindVars }); return { async all() { return []; }, async next() { return undefined; } }; } };
-    await retireAiPersistence(database as never);
-    await retireAiPersistence(database as never);
-    expect(calls).toHaveLength(10);
-    expect(calls[0]?.query).toContain('REMOVE relation IN modelProviders');
-    expect(calls.slice(1, 3).map(({ bindVars }) => bindVars?.['@collection'])).toEqual(['organizationProviders', 'orgCredentials']);
-    expect(calls[3]?.query).toContain('REMOVE model IN models');
-    expect(calls[4]?.query).toContain('REMOVE provider IN providers');
-    expect(calls[0]?.bindVars?.retainedModelProviderBindings).toEqual(RETAINED_MODEL_PROVIDER_BINDINGS);
-    expect(RETAINED_MODEL_SLUGS).toContain('google.gemini-2.5-flash-lite');
-    expect(RETAINED_MODEL_PROVIDER_BINDINGS).toContain('google.gemini-2.5-flash-lite:openrouter:google/gemini-2.5-flash-lite');
-    expect(calls[0]?.query).toContain('CONCAT(model.slug, ":", provider.slug, ":", relation.providerModelId) NOT IN @retainedModelProviderBindings');
-    expect(calls[1]?.bindVars?.retainedProviderSlugs).toEqual(RETAINED_PROVIDER_SLUGS);
-    expect(calls[1]?.query).toContain('relation.providerKey NOT IN retainedProviderKeys');
-    expect(calls[3]?.query).toContain('model.slug NOT IN @retainedModelSlugs');
-    expect(calls[4]?.query).toContain('provider.slug NOT IN @retainedProviderSlugs');
-    expect(calls.map(({ query }) => query).join('\n')).not.toMatch(/usage/i);
-
-    const seedSource = await Bun.file(new URL('../lib/db/seed.ts', import.meta.url)).text();
-    expect(seedSource.indexOf('await retireAiPersistence(db)')).toBeLessThan(seedSource.indexOf('const results = await seedAiRuntimeNodes()'));
   });
 
   test('normalizes legacy share permissions without granting additional access', () => {

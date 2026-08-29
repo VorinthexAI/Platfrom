@@ -49,14 +49,10 @@ export function prepareEmbeddingText(text: string, _purpose: EmbeddingPurpose): 
 
 export async function embedTexts(input: EmbedTextsInput): Promise<number[][]> {
   const parsed = batchInputSchema.parse(input);
-  const { createOpenAIProvider } = await import('@/lib/ai/providers/openai');
-  const { resolveStaticOpenAIConfig } = await import('@/lib/ai/router/static-routes');
-  const adapter = createOpenAIProvider(resolveStaticOpenAIConfig({
-    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
-    OPENAI_BASE_URL: process.env.OPENAI_BASE_URL,
-    OPENAI_ORGANIZATION: process.env.OPENAI_ORGANIZATION,
-    OPENAI_PROJECT: process.env.OPENAI_PROJECT,
-  }));
+  const { createRegisteredProviderAdapter } = await import('@/lib/ai/providers');
+  const adapter = createRegisteredProviderAdapter('openai');
+  if (!adapter?.embed) throw new Error('OpenAI embedding provider environment configuration is unavailable.');
+  const embed = adapter.embed.bind(adapter);
   const prepared = parsed.texts.map((text) => prepareEmbeddingText(text, parsed.purpose));
   const batches = Array.from({ length: Math.ceil(prepared.length / 16) }, (_, index) => prepared.slice(index * 16, (index + 1) * 16));
   const batchEmbeddings = new Array<number[][]>(batches.length);
@@ -65,7 +61,7 @@ export async function embedTexts(input: EmbedTextsInput): Promise<number[][]> {
     while (cursor < batches.length) {
       const index = cursor++;
       const batch = batches[index]!;
-      const response = await adapter.embed!({
+      const response = await embed({
         externalModelId: EXTERNAL_EMBEDDING_MODEL_ID,
         input: batch,
         dimensions: EMBEDDING_DIMENSIONS,

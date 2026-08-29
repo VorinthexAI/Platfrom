@@ -210,7 +210,7 @@ export function ChapterCard({ chapter, reducedMotion, width, onPress }: { chapte
     <Animated.View style={{ width, height: (width * 16) / 9, opacity: entrance, transform: [{ scale: entrance.interpolate({ inputRange: [0, 1], outputRange: [0.88, 1] }) }] }}>
       <Button accessibilityLabel={`Chapter ${chapter.position}, ${chapter.title}. ${chapter.description}${chapter.isCompleted ? ", completed" : ""}`} contentMode="raw" disabled={!onPress} onPress={onPress} shape="rounded" size="md" style={[styles.chapterCard, styles.chapterCardFill]} variant="ghost">
         {chapter.imageUrl ? <Image contentFit="cover" source={chapter.imageUrl} style={styles.cover} /> : <LinearGradient colors={GRADIENTS[(chapter.position - 1) % GRADIENTS.length]!} style={styles.cover} />}
-        <View style={styles.cardShade} />
+        <LinearGradient colors={["transparent", "rgba(0,0,0,0.08)", "rgba(0,0,0,0.58)"]} locations={[0, 0.58, 1]} style={styles.cardShade} />
         <View style={styles.cardCopy}>
           <Text style={styles.chapterNumber}>{String(chapter.position).padStart(2, "0")}</Text>
           <Text numberOfLines={2} style={styles.cardTitle}>{chapter.title}</Text>
@@ -761,12 +761,9 @@ export function AscendWorkspace() {
   function chooseBook(book: Book) {
     setRevealedChapterCount(0);
     setSelectedBookKey(book.key);
-    if (book.status === "failed" || book.status === "cancelled") open("bookActions");
-    else if (book.coverUrl) {
-      setBookPageOpen(true);
-      setSheetOpen(false);
-      setSheet(undefined);
-    }
+    setBookPageOpen(true);
+    setSheetOpen(false);
+    setSheet(undefined);
   }
   function toggleBookSelection(bookKey: string) {
     setSelectedBookKeys((current) => current.includes(bookKey) ? current.filter((key) => key !== bookKey) : [...current, bookKey]);
@@ -995,7 +992,9 @@ export function AscendWorkspace() {
       </View>
       <Button onPress={closeContentSheet} size="md" variant="secondary">Close</Button>
     </View>
-  ) : sheet === "reader" || sheet === "bookSummary" ? <Button onPress={closeContentSheet} size="md" variant="secondary">Close</Button> : undefined;
+  ) : sheet === "reader" ? <><Button disabled={!readerChapter?.content} onPress={() => openChapterReading(readerChapter?.key)} size="md" variant="primary">Read</Button><Button onPress={closeContentSheet} size="md" variant="secondary">Close</Button></>
+    : sheet === "bookSummary" ? <><Button disabled={!bookReadingChapter} onPress={() => openChapterReading(bookReadingChapter?.key)} size="md" variant="primary">Read</Button><Button onPress={closeContentSheet} size="md" variant="secondary">Close</Button></>
+      : undefined;
   return (
     <KeyboardAvoidingView behavior={aiInputFocused ? "height" : undefined} style={styles.root}>
       <View
@@ -1054,7 +1053,7 @@ export function AscendWorkspace() {
               {filteredBooks.map((book, index) => {
                 if (book.key.startsWith("pending-")) return <Skeleton accessibilityLabel={`Preparing ${book.title}`} accessibilityRole="progressbar" key={book.key} style={{ width: cardWidth, height: (cardWidth * 16) / 9, borderRadius: radii.sm }} />;
                 const selected = selectedBookKeys.includes(book.key);
-                return <View key={book.key} style={[styles.bookCardFrame, selected && styles.selectedItem, { width: cardWidth, height: (cardWidth * 16) / 9 }]}><Button accessibilityActions={[{ name: "longpress", label: selected ? `Deselect ${book.title}` : `Select ${book.title}` }]} accessibilityLabel={book.title} accessibilityRole="button" accessibilityState={{ selected }} contentMode="raw" onAccessibilityAction={({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") handleBookLongPress(book.key); }} onLongPress={() => handleBookLongPress(book.key)} onPress={() => handleBookPress(book)} shape="rounded" size="md" style={styles.bookCard} variant="ghost"><Cover book={book} index={index} /><View style={styles.cardShade} /><View style={styles.cardCopy}><Text numberOfLines={3} style={styles.cardTitle}>{book.title}</Text></View></Button>{selected ? <View pointerEvents="none" style={styles.selectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}</View>;
+                return <View key={book.key} style={[styles.bookCardFrame, selected && styles.selectedItem, { width: cardWidth, height: (cardWidth * 16) / 9 }]}><Button accessibilityActions={[{ name: "longpress", label: selected ? `Deselect ${book.title}` : `Select ${book.title}` }]} accessibilityLabel={book.title} accessibilityRole="button" accessibilityState={{ selected }} contentMode="raw" onAccessibilityAction={({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") handleBookLongPress(book.key); }} onLongPress={() => handleBookLongPress(book.key)} onPress={() => handleBookPress(book)} shape="rounded" size="md" style={styles.bookCard} variant="ghost"><Cover book={book} index={index} /><LinearGradient colors={["transparent", "rgba(0,0,0,0.08)", "rgba(0,0,0,0.58)"]} locations={[0, 0.58, 1]} style={styles.cardShade} /><View style={styles.cardCopy}><Text numberOfLines={3} style={styles.cardTitle}>{book.title}</Text></View></Button>{selected ? <View pointerEvents="none" style={styles.selectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}</View>;
               })}
             </View>
           )}
@@ -1227,9 +1226,9 @@ export function AscendWorkspace() {
             </Button>
           </View>
         ) : null}
-        {sheet === "reader" ? <View style={styles.summarySheetContent}><Reader chapter={readerChapter} /><Button disabled={!readerChapter?.content} onPress={() => openChapterReading(readerChapter?.key)} size="md" variant="primary">Read</Button></View> : null}
+        {sheet === "reader" ? <View style={styles.summarySheetContent}><Reader chapter={readerChapter} /></View> : null}
         {sheet === "chapterRead" ? <ChapterReading chapter={readingChapter} /> : null}
-        {sheet === "bookSummary" ? <View style={styles.summarySheetContent}><View style={styles.chapterSummaryPanel}><Text selectable style={styles.chapterSummaryText}>{detail?.book.description || "A description is unavailable for this audio book."}</Text></View><Button disabled={!bookReadingChapter} onPress={() => openChapterReading(bookReadingChapter?.key)} size="md" variant="primary">Read</Button></View> : null}
+        {sheet === "bookSummary" ? <View style={styles.summarySheetContent}><View style={styles.chapterSummaryPanel}><Text selectable style={styles.chapterSummaryText}>{detail?.book.description || "A description is unavailable for this audio book."}</Text></View></View> : null}
       </BottomSheet>
 
       <BottomSheet
@@ -1468,7 +1467,6 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     left: 0,
-    backgroundColor: "rgba(0,0,0,0.35)",
   },
   cardCopy: { marginTop: "auto", padding: 8, gap: 3 },
   cardTitle: {

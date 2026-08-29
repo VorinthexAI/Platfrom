@@ -7,9 +7,9 @@ priorities. Callers invoke the action without depending on provider APIs.
 
 `selectRoute` resolves the action from the code registry and considers its exact
 declared model/provider bindings by descending priority, using declaration order
-to break ties. Persisted models, providers, model-provider relations, and
-organization-provider access remain operational gates. Fixed model or provider
-selection does not bypass those checks.
+to break ties. The provider code registry resolves model metadata, external
+model identifiers, adapters, and environment configuration. Fixed model or
+provider selection does not bypass registry or environment validation.
 
 Actions with `none` policy or no declared bindings are not routable. A
 `configurable` action becomes routable only when its code definition declares

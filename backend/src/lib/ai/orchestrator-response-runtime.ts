@@ -62,7 +62,7 @@ export const orchestratorResponseRuntime = {
           decision,
           input: chatInput,
           adapters: dependencies.adapters,
-          credentials: dependencies.credentials,
+          env: dependencies.env,
           timeoutMs: 300_000,
           signal: dependencies.signal,
         }), modelSlug, providerSlug, () => { emittedText = true; });

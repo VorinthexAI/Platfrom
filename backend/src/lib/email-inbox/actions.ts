@@ -5,12 +5,10 @@ import type { ChatOutput } from '@/lib/ai/providers/types';
 import { currentEmbeddingSchema, prepareEmbeddingText, type EmbedTextInput } from '@/lib/embeddings';
 
 export async function executeEmailAsk<TOutput = ChatOutput>(organizationKey: string, rawInput: CoreChatInput, options: ExecuteActionOptions = {}) {
-  const { mode, organizationProviderKey, ...input } = coreChatInputSchema.parse(rawInput);
-  if (mode === 'deep' && organizationProviderKey) throw new Error('Deep ask cannot be combined with an organization provider.');
+  const { mode, ...input } = coreChatInputSchema.parse(rawInput);
   return executeAction<typeof input, TOutput>({
     mode: 'model', organizationKey, actionSlug: 'ask',
     modelSlug: mode === 'deep' ? 'openai.gpt-5.6-luna' : 'google.gemini-2.5-flash-lite',
-    ...(organizationProviderKey ? { organizationProviderKey } : {}),
   }, input, options);
 }
 

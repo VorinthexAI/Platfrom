@@ -29,10 +29,7 @@
         { "name": "AWS_SECRET_ACCESS_KEY", "valueFrom": "/vorinthex/prod/AWS_SECRET_ACCESS_KEY" },
         { "name": "ANTHROPIC_API_KEY", "valueFrom": "/vorinthex/prod/ANTHROPIC_API_KEY" },
         { "name": "OPENAI_API_KEY", "valueFrom": "/vorinthex/prod/OPENAI_API_KEY" },
-        { "name": "OPENROUTER_API_KEY", "valueFrom": "/vorinthex/prod/OPENROUTER_API_KEY" },
-        { "name": "GROK_API_KEY", "valueFrom": "/vorinthex/prod/GROK_API_KEY" },
-        { "name": "PERPLEXITY_API_KEY", "valueFrom": "/vorinthex/prod/PERPLEXITY_API_KEY" },
-        { "name": "GOOGLE_API_KEY", "valueFrom": "/vorinthex/prod/GOOGLE_API_KEY" }
+        { "name": "OPENROUTER_API_KEY", "valueFrom": "/vorinthex/prod/OPENROUTER_API_KEY" }
       ],
       "logConfiguration": {
         "logDriver": "awslogs",

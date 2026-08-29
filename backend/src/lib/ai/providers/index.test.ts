@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { createProviderAdapter, PROVIDER_REGISTRY, type ProviderCallOptions } from './index';
+import { ACTION_DEFINITIONS } from '@/lib/ai/actions';
+import { assertProviderRegistryIntegrity, getExternalModelId, getModel, MODEL_IDS, PROVIDER_REGISTRY } from './index';
 import { normalizeProviderError, PRE_EXECUTION_ERROR_CODES, ProviderError, providerErrorCodeForStatus } from './errors';
 import { PROVIDER_SLUGS, chatInputSchema } from './types';
 
@@ -9,40 +10,44 @@ describe('provider registry', () => {
   });
 
   test('every factory id matches its registry key', () => {
-    for (const [key, factory] of Object.entries(PROVIDER_REGISTRY)) {
-      expect(factory.id).toBe(key as (typeof PROVIDER_SLUGS)[number]);
+    for (const [key, provider] of Object.entries(PROVIDER_REGISTRY)) {
+      expect(provider.id).toBe(key as (typeof PROVIDER_SLUGS)[number]);
+      expect(provider.factory.id).toBe(key as (typeof PROVIDER_SLUGS)[number]);
     }
   });
 
   test('every factory rejects an empty config', () => {
-    for (const factory of Object.values(PROVIDER_REGISTRY)) {
-      expect(() => factory.create({})).toThrow();
+    for (const provider of Object.values(PROVIDER_REGISTRY)) {
+      expect(() => provider.factory.create({})).toThrow();
     }
   });
 
   test('adapters built from create() carry the right id', () => {
-    const adapter = PROVIDER_REGISTRY.openai.create({ apiKey: 'test-key' });
+    const adapter = PROVIDER_REGISTRY.openai.factory.create({ apiKey: 'test-key' });
     expect(adapter.id).toBe('openai');
     expect(adapter.name).toBe('OpenAI');
   });
 
+  test('registers unique models and resolves every action binding to a non-empty external id', () => {
+    expect(() => assertProviderRegistryIntegrity()).not.toThrow();
+    expect(new Set(MODEL_IDS).size).toBe(MODEL_IDS.length);
+    for (const action of ACTION_DEFINITIONS) {
+      for (const binding of action.models) {
+        expect(getModel(binding.model)).toBeDefined();
+        expect(PROVIDER_REGISTRY[binding.provider]).toBeDefined();
+        expect(getExternalModelId(binding.model, binding.provider)?.trim()).not.toBe('');
+      }
+    }
+  });
+
   test('google-vertex requires apiKey or accessToken + projectId', () => {
-    const factory = PROVIDER_REGISTRY['google-vertex'];
+    const factory = PROVIDER_REGISTRY['google-vertex'].factory;
     expect(() => factory.create({ location: 'us-central1' })).toThrow();
     expect(() => factory.create({ accessToken: 'tok' })).toThrow();
     expect(factory.create({ apiKey: 'k' }).id).toBe('google-vertex');
     expect(factory.create({ accessToken: 'tok', projectId: 'proj' }).id).toBe('google-vertex');
   });
 
-  test('creates an adapter from explicit per-call credentials', () => {
-    const options: ProviderCallOptions = {
-      provider: 'openai',
-      model: 'gpt-5.4-mini',
-      prompt: 'Hello',
-      credentials: { apiKey: 'test-key' },
-    };
-    expect(createProviderAdapter(options).id).toBe('openai');
-  });
 });
 
 describe('provider error normalization', () => {
@@ -91,8 +96,8 @@ describe('provider error normalization', () => {
 
 describe('normalized chat input', () => {
   test('accepts a minimal chat request and rejects unknown fields', () => {
-    expect(chatInputSchema.parse({ organizationProviderKey: 'provider', messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }] }).messages).toHaveLength(1);
-    expect(() => chatInputSchema.parse({ organizationProviderKey: 'provider', messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }], extra: true })).toThrow();
-    expect(() => chatInputSchema.parse({ organizationProviderKey: 'provider', messages: [] })).toThrow();
+    expect(chatInputSchema.parse({ messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }] }).messages).toHaveLength(1);
+    expect(() => chatInputSchema.parse({ messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }], organizationProviderKey: 'retired' })).toThrow();
+    expect(() => chatInputSchema.parse({ messages: [] })).toThrow();
   });
 });

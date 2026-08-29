@@ -10,7 +10,7 @@ const MAX_CATCHUP_PASSES = 5;
 
 // These are the existing semantic collections intentionally approved for external embedding.
 export const SEMANTIC_COLLECTION_ALLOWLIST = [
-  'providers', 'models', 'users', 'orchestrators', 'voices',
+  'users', 'orchestrators', 'voices',
   'organizations', 'scopes', 'channels', 'threads', 'messages', 'messageReactions', 'polls', 'pollOptions', 'folders',
   'documents', 'documentVersions', 'places', 'trips',
 ] as const;

@@ -1,8 +1,9 @@
 import { expect, test } from 'bun:test';
+import { BOOK_CHAPTER_WORD_MIN } from '@/lib/db/book-chapters.node';
 import { formatChapterParagraphs, narrationText } from './runtime';
 
 test('formats chapter prose into readable real-newline paragraphs', () => {
-  const formatted = formatChapterParagraphs(Array.from({ length: 775 }, (_, index) => `word${index}`).join(' '));
+  const formatted = formatChapterParagraphs(Array.from({ length: BOOK_CHAPTER_WORD_MIN }, (_, index) => `word${index}`).join(' '));
   const paragraphs = formatted.split('\n\n');
 
   expect(paragraphs.length).toBeGreaterThan(1);

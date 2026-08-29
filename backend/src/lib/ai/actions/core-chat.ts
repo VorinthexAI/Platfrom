@@ -22,7 +22,6 @@ export const coreChatResponseFormatSchema = z.object({ name: z.string().regex(/^
 /** Provider-neutral multimodal message protocol used by text actions. */
 export const coreChatInputSchema = z.object({
   mode: z.enum(['default', 'deep']).optional().default('default'),
-  organizationProviderKey: z.string().min(1).optional(),
   messages: z.array(coreChatMessageSchema).min(1),
   systemPrompt: z.string().min(1).optional(),
   tools: z.array(coreChatToolDefinitionSchema).optional(),

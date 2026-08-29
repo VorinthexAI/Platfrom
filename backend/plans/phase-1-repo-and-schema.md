@@ -352,48 +352,9 @@ This JSONB blob holds the live Agent/Role/Task structure for a company. Build th
 
 Do not write example/seed rows. Just confirm the schema applies cleanly and supports the JSON shapes documented above. Seed only the four fixed global `company_roles` rows (owner/admin/moderator/viewer) — these are permanent system data, not examples, and the system cannot function without them.
 
-## Part 4 — AI provider abstraction (`src/core/ai-providers.ts`)
+## Part 4 — AI provider abstraction
 
-Build a single file that centralizes every AI provider client the system can call. This is NOT model selection logic (that's a separate concern built in Phase 3) — this file only sets up the actual SDK clients/connections.
-
-```typescript
-// src/core/ai-providers.ts
-//
-// Single source of truth for every AI provider client. Add a new
-// provider here once, every Action/mode that needs it imports from
-// this file rather than instantiating its own client.
-
-import Anthropic from '@anthropic-ai/sdk';
-import OpenAI from 'openai';
-
-export const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
-
-export const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-// xAI / Grok — OpenAI-compatible API surface
-export const grok = new OpenAI({
-  apiKey: process.env.GROK_API_KEY,
-  baseURL: 'https://api.x.ai/v1',
-});
-
-// Perplexity — OpenAI-compatible API surface, used for live web search
-export const perplexity = new OpenAI({
-  apiKey: process.env.PERPLEXITY_API_KEY,
-  baseURL: 'https://api.perplexity.ai',
-});
-
-// Google generative API - separate SDK shape
-import { GoogleGenerativeAI } from '@google/generative-ai';
-export const google = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY ?? '');
-
-export type ProviderName = 'anthropic' | 'openai' | 'grok' | 'perplexity' | 'google';
-```
-
-Add the corresponding env vars to `.env.example`: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GROK_API_KEY`, `PERPLEXITY_API_KEY`, `GOOGLE_API_KEY`.
+This phase's original provider-client sketch has been superseded. Provider adapters and deployment environment configuration now live in `src/lib/ai/providers`, while exact model bindings and routing priorities live in `src/lib/ai/actions`.
 
 ## Part 5 — Package list
 
