@@ -531,9 +531,9 @@ describe('Content runtime', () => {
       return {
         output,
         usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-        providerId: 'openai',
-        modelId: request.actionSlug === 'embed' ? 'openai.text-embedding-3-small' : 'openai.gpt-5.6-luna',
-        externalModelId: request.actionSlug === 'embed' ? 'text-embedding-3-small' : 'gpt-5.6-luna',
+        providerId: request.actionSlug === 'embed' ? 'azure-ai-foundry' : 'google-vertex',
+        modelId: request.actionSlug === 'embed' ? 'openai.text-embedding-3-small' : 'google.gemini-3.7-flash',
+        externalModelId: request.actionSlug === 'embed' ? 'text-embedding-3-small' : 'gemini-3.7-flash',
       };
     };
     const dependencies = { repository: f.repository, executeAction };

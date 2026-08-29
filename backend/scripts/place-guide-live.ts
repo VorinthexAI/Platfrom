@@ -5,8 +5,7 @@ import type { TravelRepository } from '@/lib/travel/repository';
 import { createTravelService } from '@/lib/travel/service';
 import sharp from 'sharp';
 
-if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY is required for the live place guide benchmark.');
-if (!process.env.OPENROUTER_API_KEY) throw new Error('OPENROUTER_API_KEY is required for the live place guide benchmark.');
+if (!process.env.GOOGLE_VERTEX_API_KEY && !(process.env.GOOGLE_VERTEX_ACCESS_TOKEN && process.env.GOOGLE_VERTEX_PROJECT_ID)) throw new Error('Google Vertex credentials are required for the live place guide benchmark.');
 
 const destinations = [
   { country: { name: 'Japan', code: 'JP', continent: 'Asia', lat: 36.2048, lon: 138.2529 }, city: 'Tokyo' },

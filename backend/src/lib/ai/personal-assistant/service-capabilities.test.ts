@@ -216,7 +216,7 @@ describe('personal assistant service capabilities', () => {
       ['book-workspace', 'book.goal.suggest', { topic: 'Decision making', excludeGoals: ['Old goal'] }],
       ['book-workspace', 'book.detail', { bookKey }],
       ['book-workspace', 'book.chapter.progress', { bookKey, chapterKey, progressSeconds: 30, isCompleted: false }],
-      ['book-workspace', 'book.create', { topic: 'Decision making', goal: 'Decide well', currentKnowledge: 'Basic familiarity', writingTone: 'Clear', chapterCount: 10, language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear', narrationPace: 1, chapterImages: false }],
+      ['book-workspace', 'book.create', { topic: 'Decision making', goal: 'Decide well', currentKnowledge: 'Basic familiarity', writingTone: 'Clear', language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear', narrationPace: 1, chapterImages: false }],
       ['book-workspace', 'book.favorite', { bookKey, isFavorite: true }],
     ];
     const outputs = new Map<string, unknown>();
@@ -255,7 +255,7 @@ describe('personal assistant service capabilities', () => {
     expect(calls).toContainEqual(['books.progress', bookKey, chapterKey, { ...serviceContext, progressSeconds: 30, isCompleted: false }, userKey]);
     expect(calls).toContainEqual(['books.suggestTopics', { ...serviceContext, excludeTopics: ['Old idea'] }, userKey, { signal: undefined, timeoutMs: undefined }]);
     expect(calls).toContainEqual(['books.suggestGoals', { ...serviceContext, topic: 'Decision making', excludeGoals: ['Old goal'] }, userKey, { signal: undefined, timeoutMs: undefined }]);
-    expect(calls).toContainEqual(['books.create', { ...serviceContext, generationRequestKey: 'request-1', topic: 'Decision making', goal: 'Decide well', currentKnowledge: 'Basic familiarity', writingTone: 'Clear', chapterCount: 10, language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear', narrationPace: 1, chapterImages: false }, userKey]);
+    expect(calls).toContainEqual(['books.create', { ...serviceContext, generationRequestKey: 'request-1', topic: 'Decision making', goal: 'Decide well', currentKnowledge: 'Basic familiarity', writingTone: 'Clear', language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear', narrationPace: 1, chapterImages: false }, userKey]);
     expect(calls).toContainEqual(['books.setFavorite', bookKey, { ...serviceContext, isFavorite: true }, userKey]);
     expect(JSON.stringify(calls)).not.toContain((domain.principal as Extract<ToolContext['principal'], { kind: 'member' }>).userOrganization.key);
   });
@@ -366,7 +366,7 @@ describe('personal assistant service capabilities', () => {
     const calls: unknown[] = [];
     const books: any = { create: async (...args: unknown[]) => { calls.push(args); return {}; } };
     const create = defaultAssistantCapabilityRegistry.resolve('book-workspace').find(({ definition }) => definition.name === 'book.create')!;
-    const brief = { topic: 'Decision making', goal: 'Decide well', currentKnowledge: 'Basic familiarity', writingTone: 'Clear', chapterCount: 10, language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear', narrationPace: 1, chapterImages: false };
+    const brief = { topic: 'Decision making', goal: 'Decide well', currentKnowledge: 'Basic familiarity', writingTone: 'Clear', language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear', narrationPace: 1, chapterImages: false };
     await create.execute(brief, { domain, books } as any);
     await create.execute(brief, { domain, books } as any);
     await create.execute(brief, { domain, books, requestKey: 'derived-invocation-key', clientRequestKey: null } as any);
@@ -380,6 +380,7 @@ describe('personal assistant service capabilities', () => {
     expect((calls[3] as any)[0].generationRequestKey).toMatch(/^[a-f0-9]{64}$/);
     expect((calls[3] as any)[0].generationRequestKey).not.toBe('x'.repeat(201));
     expect(() => create.inputSchema.parse({ ...brief, generationRequestKey })).toThrow('Unrecognized key');
+    expect(() => create.inputSchema.parse({ ...brief, chapterCount: 10 })).toThrow('Unrecognized key');
     expect(create.mutationWorkspace).toBe('ascend');
   });
 

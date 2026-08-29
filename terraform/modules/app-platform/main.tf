@@ -541,6 +541,11 @@ resource "aws_iam_role_policy" "api_runtime" {
       },
       {
         Effect   = "Allow"
+        Action   = ["polly:SynthesizeSpeech"]
+        Resource = ["*"]
+      },
+      {
+        Effect   = "Allow"
         Action   = ["textract:StartDocumentTextDetection", "textract:GetDocumentTextDetection", "textract:DetectDocumentText"]
         Resource = ["*"]
       },

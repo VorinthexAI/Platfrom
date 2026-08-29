@@ -3,10 +3,7 @@ import { askAction } from './ask';
 import { coreChatInputSchema } from './core-chat';
 
 test('defines one ask action with default and deep model bindings', () => {
-  expect(askAction.models).toEqual([
-    { provider: 'openrouter', model: 'google.gemini-2.5-flash-lite', priority: 100 },
-    { provider: 'openai', model: 'openai.gpt-5.6-luna', priority: 90 },
-  ]);
+  expect(askAction.models).toEqual([{ provider: 'google-vertex', model: 'google.gemini-3.5-flash-lite', priority: 100 }]);
   const input = { messages: [{ role: 'user' as const, content: [{ type: 'text' as const, text: 'Hello' }] }] };
   expect(coreChatInputSchema.parse(input).mode).toBe('default');
   expect(coreChatInputSchema.parse({ ...input, mode: 'deep' }).mode).toBe('deep');

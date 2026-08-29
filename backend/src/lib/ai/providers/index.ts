@@ -51,10 +51,6 @@ export {
   PRE_EXECUTION_ERROR_CODES,
   type ProviderErrorCode,
 } from './errors';
-export { createOpenAIProvider, openAICredentialsSchema, openAIProviderConfigSchema, openAIProviderFactory, type OpenAICredentials, type OpenAIProviderConfig } from './openai';
-export { createOpenRouterProvider, openRouterProviderConfigSchema, openRouterProviderFactory, type OpenRouterCredentials, type OpenRouterProviderConfig } from './openrouter';
-export { createAnthropicProvider, anthropicCredentialsSchema, anthropicProviderConfigSchema, anthropicProviderFactory, type AnthropicCredentials, type AnthropicProviderConfig } from './anthropic';
-export { createXaiProvider, xaiCredentialsSchema, xaiProviderConfigSchema, xaiProviderFactory, type XaiCredentials, type XaiProviderConfig } from './xai';
 export {
   createGoogleVertexProvider,
   googleVertexCredentialsSchema,
@@ -64,6 +60,15 @@ export {
   type GoogleVertexProviderConfig,
 } from './google-vertex';
 export {
+  createAwsPollyProvider,
+  awsPollyProviderConfigSchema,
+  awsPollyProviderFactory,
+  buildPollySpeechSsml,
+  splitPollySpeechText,
+  extractPollyMp3Frames,
+  type AwsPollyProviderConfig,
+} from './aws-polly';
+export {
   createAzureAIFoundryProvider,
   azureAIFoundryCredentialsSchema,
   azureAIFoundryProviderConfigSchema,
@@ -71,6 +76,4 @@ export {
   type AzureAIFoundryCredentials,
   type AzureAIFoundryProviderConfig,
 } from './azure-ai-foundry';
-export { createAwsBedrockProvider, awsBedrockCredentialsSchema, awsBedrockProviderConfigSchema, awsBedrockProviderFactory, type AwsBedrockCredentials, type AwsBedrockProviderConfig } from './aws-bedrock';
-export { createAwsBedrockMantleProvider, awsBedrockMantleCredentialsSchema, awsBedrockMantleProviderConfigSchema, awsBedrockMantleProviderFactory, type AwsBedrockMantleCredentials, type AwsBedrockMantleProviderConfig } from './aws-bedrock-mantle';
 export { PROVIDER_REGISTRY, MODEL_REGISTRY, MODEL_IDS, modelIdSchema, getModel, getExternalModelId, isProviderAvailable, createRegisteredProviderAdapter, assertProviderRegistryIntegrity, type ModelId, type ProviderEnvironment, type ProviderRegistration } from './registry';

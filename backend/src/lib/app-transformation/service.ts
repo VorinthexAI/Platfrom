@@ -28,7 +28,7 @@ export function createAppTransformationService(dependencies: { generate?: (organ
       messages: [{ role: 'user', content: [{ type: 'text', text: request.text }] }],
       options: { temperature: request.temperature, maxTokens: request.maxTokens },
     });
-    const response = await executeAction<typeof input, ChatOutput>({ mode: 'model', organizationKey, actionSlug: 'ask', modelSlug: 'google.gemini-2.5-flash-lite' }, input, options);
+    const response = await executeAction<typeof input, ChatOutput>({ mode: 'model', organizationKey, actionSlug: 'ask', modelSlug: 'google.gemini-3.5-flash-lite' }, input, options);
     return response.output.text;
   });
   return {

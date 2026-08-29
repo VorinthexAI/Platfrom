@@ -24,8 +24,8 @@ export function createBookHandlers(options: { service?: BookService; getIdentity
   };
   return {
     overview: run((c, books, userKey) => c.req.json().then((body) => books.overview(body, userKey))),
-    topicSuggestions: run((c, books, userKey) => c.req.json().then((body) => books.suggestTopics(body, userKey, { signal: c.req.raw.signal, timeoutMs: 30_000 }))),
-    goalSuggestions: run((c, books, userKey) => c.req.json().then((body) => books.suggestGoals(body, userKey, { signal: c.req.raw.signal, timeoutMs: 30_000 }))),
+    topicSuggestions: run((c, books, userKey) => c.req.json().then((body) => books.suggestTopics(body, userKey, { signal: c.req.raw.signal, timeoutMs: 45_000 }))),
+    goalSuggestions: run((c, books, userKey) => c.req.json().then((body) => books.suggestGoals(body, userKey, { signal: c.req.raw.signal, timeoutMs: 45_000 }))),
     create: run((c, books, userKey) => c.req.json().then((body) => books.create(body, userKey)), 202),
     detail: run(async (c, books, userKey) => books.detail(pathKeySchema.parse(c.req.param('bookKey')), await c.req.json(), userKey)),
     extensionPreview: run(async (c, books, userKey) => { const body = await c.req.json() as Record<string, unknown>; return books.extend(pathKeySchema.parse(c.req.param('bookKey')), { ...body, mode: 'preview' }, userKey, { signal: c.req.raw.signal, timeoutMs: 30_000 }); }),

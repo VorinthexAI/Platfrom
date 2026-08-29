@@ -340,7 +340,8 @@ describe('unified tool registry', () => {
       findSimilar: async (...args: unknown[]) => { calls.push(['findSimilar', ...args]); return {}; },
     } as any;
     const bookService = { suggestTopics: async (...args: unknown[]) => { calls.push(['suggestTopics', ...args]); return { topics: [] }; }, suggestGoals: async (...args: unknown[]) => { calls.push(['suggestGoals', ...args]); return { goals: [] }; }, create: async (...args: unknown[]) => { calls.push(['create', ...args]); return {}; }, setFavorite: async (...args: unknown[]) => { calls.push(['setFavorite', ...args]); return {}; } } as any;
-    const brief = { topic: 'Decision making', goal: 'Decide well', currentKnowledge: 'Basic familiarity', writingTone: 'Clear', chapterCount: 10, language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear', narrationPace: 1, chapterImages: false };
+    const brief = { topic: 'Decision making', goal: 'Decide well', currentKnowledge: 'Basic familiarity', writingTone: 'Clear', language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear', narrationPace: 1, chapterImages: false };
+    await expect(runTool('book.create', '', { ...brief, chapterCount: 10 }, { contentContext, bookService })).rejects.toThrow('Unrecognized key');
     await expect(runTool('book.create', '', { ...brief, scopeKey }, { contentContext, bookService })).rejects.toThrow('Unrecognized key');
     await expect(runTool('book.topic.suggest', '', { scopeKey }, { contentContext, bookService })).rejects.toThrow('Unrecognized key');
     await runTool('book.topic.suggest', '', { excludeTopics: ['Old idea'] }, { contentContext, bookService });

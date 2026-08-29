@@ -6,9 +6,11 @@ import { bookCreateInputSchema, createBookService } from './service';
 import { BookRepositoryError } from './repository';
 
 const organizationKey = 'organization'; const scopeKey = newId(); const userKey = newId(); const bookKey = newId(); const now = '2026-08-12T12:00:00.000Z';
-const input = { organizationKey, scopeKey, generationRequestKey: 'request-1', topic: 'Decision making', goal: 'Decide well', currentKnowledge: 'I know the basics', writingTone: 'Clear and practical', chapterCount: 10 as const, language: 'English', narratorVoiceKey: 'clear' as const, narrationPace: 1, archiveDocumentKeys: [], chapterImages: false };
-const fingerprint = createHash('sha256').update(JSON.stringify((({ organizationKey: _o, scopeKey: _s, generationRequestKey: _r, ...value }) => value)(bookCreateInputSchema.parse(input)))).digest('hex');
-const row = (status: 'queued' | 'failed' | 'cancelled' | 'ready' = 'queued') => ({ book: { key: bookKey, scopeKey, title: input.topic, description: input.goal, goal: input.goal, audience: input.currentKnowledge, outcome: input.goal, language: input.language, narratorVoiceKey: input.narratorVoiceKey, narrationPace: 1, generationRequestKey: input.generationRequestKey, generationBriefFingerprint: fingerprint, generationInput: (({ organizationKey: _o, scopeKey: _s, generationRequestKey: _r, ...value }) => value)(input), generationOwnerKey: userKey, generationStage: 'accepted' as const, generationCompletedUnits: 0, generationTotalUnits: 34, generationAttempt: 0, estimatedMinutes: 0, chapterCount: 10, isFavorite: false, status, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), createdAt: now, updatedAt: now }, chapters: [] });
+const input = { organizationKey, scopeKey, generationRequestKey: 'request-1', topic: 'Decision making', goal: 'Decide well', currentKnowledge: 'I know the basics', writingTone: 'Clear and practical', language: 'English', narratorVoiceKey: 'clear' as const, narrationPace: 1, archiveDocumentKeys: [], chapterImages: false };
+const requestInput = bookCreateInputSchema.parse(input);
+const parsedInput = { organizationKey: requestInput.organizationKey, scopeKey: requestInput.scopeKey, generationRequestKey: requestInput.generationRequestKey, topic: requestInput.topic, goal: requestInput.goal, currentKnowledge: requestInput.currentKnowledge, writingTone: requestInput.writingTone, chapterCount: 10 as const, language: requestInput.language, archiveDocumentKeys: requestInput.archiveDocumentKeys, narratorVoiceKey: requestInput.narratorVoiceKey, narrationPace: requestInput.narrationPace, chapterImages: requestInput.chapterImages };
+const fingerprint = createHash('sha256').update(JSON.stringify((({ organizationKey: _o, scopeKey: _s, generationRequestKey: _r, ...value }) => value)(parsedInput))).digest('hex');
+const row = (status: 'queued' | 'failed' | 'cancelled' | 'ready' = 'queued') => ({ book: { key: bookKey, scopeKey, title: input.topic, description: input.goal, goal: input.goal, audience: input.currentKnowledge, outcome: input.goal, language: input.language, narratorVoiceKey: input.narratorVoiceKey, narrationPace: 1, generationRequestKey: input.generationRequestKey, generationBriefFingerprint: fingerprint, generationInput: (({ organizationKey: _o, scopeKey: _s, generationRequestKey: _r, ...value }) => value)(parsedInput), generationOwnerKey: userKey, generationStage: 'accepted' as const, generationCompletedUnits: 0, generationTotalUnits: 34, generationAttempt: 0, estimatedMinutes: 0, chapterCount: 10, isFavorite: false, status, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), createdAt: now, updatedAt: now }, chapters: [] });
 
 describe('book service asynchronous lifecycle', () => {
   test('authorizes and generates ten creative topic suggestions through the AI action boundary', async () => {
@@ -20,7 +22,7 @@ describe('book service asynchronous lifecycle', () => {
     });
     await expect(service.suggestTopics({ organizationKey, scopeKey, excludeTopics: ['Old idea'] }, userKey)).resolves.toEqual({ topics });
     expect(calls[0]).toEqual(['authorize', { organizationKey, scopeKey, userKey }, false]);
-    expect(calls[1]?.[1]).toMatchObject({ options: { temperature: 1, maxTokens: 800 } });
+    expect(calls[1]?.[1]).toMatchObject({ options: { temperature: 1, maxTokens: 2_000 }, responseFormat: { name: 'book_topic_suggestions', schema: { additionalProperties: false, required: ['topics'], properties: { topics: { minItems: 10, maxItems: 10 } } } } });
     expect(JSON.stringify(calls[1]?.[1])).toContain('Old idea');
     expect(calls[1]?.[2]).toBe(organizationKey);
   });
@@ -40,20 +42,24 @@ describe('book service asynchronous lifecycle', () => {
     await expect(service.suggestGoals({ organizationKey, scopeKey, topic: 'Decision making', excludeGoals: ['Old goal'] }, userKey)).resolves.toEqual({ goals });
     expect(JSON.stringify(prompt)).toContain('Decision making');
     expect(JSON.stringify(prompt)).toContain('Old goal');
+    expect(prompt).toMatchObject({ options: { maxTokens: 2_000 }, responseFormat: { name: 'book_goal_suggestions', schema: { required: ['goals'], properties: { goals: { minItems: 10, maxItems: 10 } } } } });
   });
 
   test('accepts and enqueues without running generation', async () => {
-    let current: any; const jobs: unknown[] = [];
+    let current: any; let generationInput: unknown; const jobs: unknown[] = [];
     const repository: any = { authorize: async () => {}, findByGenerationRequest: async () => null, detail: async () => current };
-    const generator: any = { create: async () => { current = row(); return bookKey; }, write: async () => { throw new Error('must be background'); } };
+    const generator: any = { create: async (nextInput: unknown) => { generationInput = nextInput; current = row(); return bookKey; }, write: async () => { throw new Error('must be background'); } };
     const result = await createBookService({ repository, generator, enqueue: async (job) => { jobs.push(job); return { jobId: bookKey }; }, signUrl: async () => 'signed', publishChanged: async () => {} }).create(input, userKey);
     expect(result).toMatchObject({ key: bookKey, status: 'queued', isFavorite: false, generationProgressPercent: 0 });
+    expect(generationInput).toMatchObject({ chapterCount: 10 });
     expect(jobs).toEqual([{ schemaVersion: 1, bookKey, organizationKey, scopeKey, userKey }]);
   });
 
-  test('strictly rejects unsupported chapter counts and unknown fields', async () => {
+  test('owns the ten-chapter count and strictly rejects overrides and unknown fields', async () => {
     const service = createBookService({ repository: {} as never });
-    await expect(service.create({ ...input, chapterCount: 12 }, userKey)).rejects.toBeDefined();
+    expect(bookCreateInputSchema.parse(input)).not.toHaveProperty('chapterCount');
+    await expect(service.create({ ...input, chapterCount: 10 }, userKey)).rejects.toBeDefined();
+    await expect(service.create({ ...input, chapterCount: 25 }, userKey)).rejects.toBeDefined();
     await expect(service.create({ ...input, unknown: true }, userKey)).rejects.toBeDefined();
   });
 

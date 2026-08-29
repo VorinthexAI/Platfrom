@@ -2,32 +2,29 @@ import { describe, expect, test } from 'bun:test';
 import { resolvePublicS3ClientConfig, resolveS3ClientConfig } from './s3';
 
 describe('S3 client configuration', () => {
-  test('prefers storage credentials over generic and provider credentials', () => {
+  test('prefers storage credentials over generic credentials', () => {
     const config = resolveS3ClientConfig({
       S3_REGION: 'storage-region',
       AWS_REGION: 'generic-region',
-      BEDROCK_REGION: 'provider-region',
       S3_AWS_ACCESS_KEY_ID: 'storage-key',
       S3_AWS_SECRET_ACCESS_KEY: 'storage-secret',
       AWS_ACCESS_KEY_ID: 'generic-key',
       AWS_SECRET_ACCESS_KEY: 'generic-secret',
-      BEDROCK_AWS_ACCESS_KEY_ID: 'provider-key',
-      BEDROCK_AWS_SECRET_ACCESS_KEY: 'provider-secret',
     });
 
     expect(config.region).toBe('storage-region');
     expect(config.credentials).toEqual({ accessKeyId: 'storage-key', secretAccessKey: 'storage-secret', sessionToken: undefined });
   });
 
-  test('falls back to the deployed provider credentials', () => {
+  test('falls back to generic AWS credentials', () => {
     const config = resolveS3ClientConfig({
-      BEDROCK_REGION: 'provider-region',
-      BEDROCK_AWS_ACCESS_KEY_ID: 'provider-key',
-      BEDROCK_AWS_SECRET_ACCESS_KEY: 'provider-secret',
+      AWS_REGION: 'generic-region',
+      AWS_ACCESS_KEY_ID: 'generic-key',
+      AWS_SECRET_ACCESS_KEY: 'generic-secret',
     });
 
-    expect(config.region).toBe('provider-region');
-    expect(config.credentials).toEqual({ accessKeyId: 'provider-key', secretAccessKey: 'provider-secret', sessionToken: undefined });
+    expect(config.region).toBe('generic-region');
+    expect(config.credentials).toEqual({ accessKeyId: 'generic-key', secretAccessKey: 'generic-secret', sessionToken: undefined });
   });
 
   test('uses the default AWS credential chain when no complete static pair exists', () => {

@@ -132,10 +132,17 @@ resource "aws_iam_role_policy" "early_app_archive_processing" {
         Action = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
         Resource = [
           "${module.storage.s3_bucket_arn}/archive/*",
+          "${module.storage.s3_bucket_arn}/books/*",
           "${module.storage.s3_bucket_arn}/content/*",
+          "${module.storage.s3_bucket_arn}/document-audio/*",
           "${module.storage.s3_bucket_arn}/pending/image-hashing/*",
           "${aws_s3_bucket.textract_staging.arn}/textract/*"
         ]
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["polly:SynthesizeSpeech"]
+        Resource = ["*"]
       },
       {
         Effect   = "Allow"

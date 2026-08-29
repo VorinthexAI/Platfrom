@@ -63,9 +63,8 @@ test("keeps context selection explicit and generation asynchronous", () => {
   expect(workspace.indexOf("closeCreationSheets();", workspace.indexOf("function submit()"))).toBeLessThan(workspace.indexOf("createMutation.mutate"));
   expect(workspace).toContain('chapterCount: 10');
   expect(workspace).toContain('chapterImages: true');
-  expect(workspace).toContain('{ count: 10, label: "Short" }');
-  expect(workspace).toContain('{ count: 25, label: "Standard" }');
-  expect(workspace).toContain('{ count: 50, label: "Deep" }');
+  expect(workspace).not.toContain("const CHAPTER_OPTIONS =");
+  expect(workspace).not.toContain("Audio book depth");
   expect(workspace).not.toContain('lengthMinutes');
   expect(workspace).toContain("const MAX_CONTEXT_DOCUMENTS = 50");
   expect(workspace).toContain("archiveOnly context={contentContext}");
@@ -73,7 +72,7 @@ test("keeps context selection explicit and generation asynchronous", () => {
   expect(workspace).not.toContain("Archive sources");
   expect(workspace).not.toContain("listContentFolderTree");
   for (const status of ["queued", "researching", "planning", "writing", "narrating", "finalizing"]) expect(workspace).toContain(`\"${status}\"`);
-  expect(workspace).toContain('book.status === "failed" || book.status === "cancelled"');
+  expect(workspace).toContain('selectedBook.status === "failed" || selectedBook.status === "cancelled"');
 });
 
 test("reveals generated books and chapter summaries progressively", () => {
@@ -145,7 +144,7 @@ test("uses persistent stacked brief sheets with fresh self-improvement suggestio
   expect(openDetailsStep).not.toContain("setCreateGoalCustomOpen(false)");
   expect(workspace).not.toContain("transitionCreationSheet");
   expect(workspace).toContain('fontSize: 12,\n    letterSpacing: 0.4,');
-  expect(workspace).toContain('<Tabs accessibilityLabel="Audio book depth" accessibilityRole="tablist" style={styles.detailTabs}>');
+  expect(workspace).not.toContain('<Tabs accessibilityLabel="Audio book depth"');
   expect(workspace).toContain('detailTabs: { flexDirection: "row", gap: 4, padding: 3, borderWidth: 1, backgroundColor: palette.panel }');
   expect(workspace).not.toContain('const LANGUAGES =');
   expect(workspace).not.toContain('onPress={() => setDraft((current) => ({ ...current, language }))}');

@@ -22,7 +22,7 @@ import { isProviderError, type ProviderError } from '../lib/ai/providers/errors'
 import { buildImageEmbeddingText } from '../lib/image-embedding';
 import { decodeEmailTone, decodeEmailToneContent, emailMessageSemanticText, emailToneSemanticText, encodeEmailToneContent } from '../lib/email-inbox/archive-payloads';
 import { bookGenerationInputSchema } from '../lib/books/schemas';
-import { BOOK_CHAPTER_WORD_MAX, BOOK_CHAPTER_WORD_MIN } from '../lib/db/book-chapters.node';
+import { LEGACY_BOOK_CHAPTER_WORD_MAX, LEGACY_BOOK_CHAPTER_WORD_MIN } from '../lib/db/book-chapters.node';
 
 const url = process.env.ARANGO_URL ?? 'http://127.0.0.1:8529';
 const databaseName = process.env.ARANGO_DATABASE ?? 'vorinthex';
@@ -1327,7 +1327,7 @@ export function legacyBookChapterPatch(chapter: Record<string, unknown>) {
     priorTransition: typeof chapter.priorTransition === 'string' && chapter.priorTransition.trim() ? chapter.priorTransition : 'Continue naturally from the preceding chapter.',
     nextTransition: typeof chapter.nextTransition === 'string' && chapter.nextTransition.trim() ? chapter.nextTransition : 'Prepare the reader for the following chapter.',
     repetitionBoundaries: Array.isArray(chapter.repetitionBoundaries) && chapter.repetitionBoundaries.length ? chapter.repetitionBoundaries : [`Avoid repeating the core material from ${String(chapter.title ?? 'this chapter')}.`],
-    targetWordMin: BOOK_CHAPTER_WORD_MIN, targetWordMax: BOOK_CHAPTER_WORD_MAX,
+    targetWordMin: LEGACY_BOOK_CHAPTER_WORD_MIN, targetWordMax: LEGACY_BOOK_CHAPTER_WORD_MAX,
   };
 }
 export function legacyBookSourcePatch(source: Record<string, unknown>) {

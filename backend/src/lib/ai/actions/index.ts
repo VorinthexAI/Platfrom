@@ -1,5 +1,3 @@
-import { analyzeAudioAction } from './analyze-audio';
-import { analyzeVideoAction } from './analyze-video';
 import { captionImageAction } from './caption-image';
 import { askAction } from './ask';
 import { describeVisualIdentityAction } from './describe-visual-identity';
@@ -26,8 +24,6 @@ import { upsertAction } from './upsert';
 import { webSearchAction } from './web-search';
 
 export type { ActionDefinition, ActionId, ActionModelBinding, ActionModelPolicy } from './types';
-export { analyzeAudioAction } from './analyze-audio';
-export { analyzeVideoAction } from './analyze-video';
 export { captionImageAction } from './caption-image';
 export { askAction } from './ask';
 export { describeVisualIdentityAction } from './describe-visual-identity';
@@ -60,8 +56,8 @@ export { webSearchInputSchema, webSearchOutputSchema, type WebSearchInput, type 
 export const ACTION_DEFINITIONS: readonly ActionDefinition[] = [
   askAction, embedAction, webSearchAction,
   traverseAction, readAction, insertActionDefinition, upsertAction, updateActionDefinition, deleteActionDefinition,
-  generateImageAction, editImageAction, generateVideoAction, editVideoAction, extendVideoAction, analyzeVideoAction,
-  analyzeAudioAction, generateMusicAction, generateSpeechAction,
+  generateImageAction, editImageAction, generateVideoAction, editVideoAction, extendVideoAction,
+  generateMusicAction, generateSpeechAction,
   documentValidateAction, storageUploadAction, documentExtractAction, documentEmbedAction, documentInsertAction, captionImageAction, describeVisualIdentityAction,
 ];
 export const getActionDefinition = (id: ActionId): ActionDefinition | undefined => ACTION_DEFINITIONS.find((definition) => definition.id === id);

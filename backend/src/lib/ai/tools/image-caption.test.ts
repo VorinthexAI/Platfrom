@@ -34,15 +34,15 @@ describe('image.caption tool', () => {
     })).rejects.toThrow();
   });
 
-  test('pins default execution to the static OpenAI vision route', async () => {
+  test('pins default execution to the static Vertex vision route', async () => {
     const source = await Bun.file(new URL('./image-caption.ts', import.meta.url)).text();
     expect(imageCaptionTool.name).toBe('image.caption');
     expect(imageCaptionTool.providerDefinition.description).toContain('integer quality score from 1 to 100');
     expect(imageCaptionTool.providerDefinition.inputSchema.properties.imageUrls.items.pattern).toBe('^https?://');
     expect(source).toContain("mode: 'fixed'");
     expect(source).toContain("actionSlug: 'caption-image'");
-    expect(source).toContain("providerSlug: 'openai'");
-    expect(IMAGE_CAPTION_MODEL).toBe('openai.gpt-5.6-luna');
+    expect(source).toContain("providerSlug: 'google-vertex'");
+    expect(IMAGE_CAPTION_MODEL).toBe('google.gemini-3.7-flash');
   });
 
   test('rejects malformed executor output', async () => {

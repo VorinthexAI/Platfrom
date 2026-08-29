@@ -110,11 +110,6 @@ const ACTIVE_STATUSES: BookStatus[] = [
   "narrating",
   "finalizing",
 ];
-const CHAPTER_OPTIONS = [
-  { count: 10, label: "Short" },
-  { count: 25, label: "Standard" },
-  { count: 50, label: "Deep" },
-] as const;
 const EXTENSION_CHAPTER_OPTIONS = [1, 3, 5] as const;
 const MAX_CONTEXT_DOCUMENTS = 50;
 const DEFAULT_NARRATOR = { key: "clear" as const, name: "Clear" };
@@ -159,7 +154,6 @@ const INITIAL_DRAFT: Draft = {
   topic: "",
   goal: "",
   currentKnowledge: "",
-  chapterCount: 10,
   language: "English",
   writingTone: "Clear and practical",
   narratorVoiceKey: DEFAULT_NARRATOR.key,
@@ -396,8 +390,8 @@ export function AscendWorkspace() {
         status: "queued",
         isFavorite: false,
         narrator: DEFAULT_NARRATOR,
-        estimatedMinutes: input.chapterCount * 4,
-        chapterCount: input.chapterCount,
+        estimatedMinutes: 10,
+        chapterCount: 10,
         progressPercent: 0,
         generationProgressPercent: 0,
       };
@@ -1148,7 +1142,7 @@ export function AscendWorkspace() {
             <BottomSheetItem disabled={bulkLoading || selectedBook.key.startsWith("pending-")} onPress={() => void updateBooksFavorite([selectedBook], !selectedBook.isFavorite, false)} style={styles.sheetAction} variant="secondary">{selectedBook.isFavorite ? "Unfavorite" : "Favorite"}</BottomSheetItem>
             <BottomSheetItem disabled={selectedBook.key.startsWith("pending-")} onPress={() => { setSheetOpen(false); setSheet(undefined); setSharingBook(selectedBook); }} style={styles.sheetAction} variant="secondary">Share</BottomSheetItem>
             {selectedBook.status === "ready" ? <BottomSheetItem disabled={extensionMutation.isPending} onPress={openExtension} style={styles.sheetAction} variant="secondary">Extend</BottomSheetItem> : null}
-            {selectedBook.status === "failed" ? (
+            {selectedBook.status === "failed" || selectedBook.status === "cancelled" ? (
               <BottomSheetItem
                 disabled={
                   lifecycleMutation.isPending ||
@@ -1322,11 +1316,6 @@ export function AscendWorkspace() {
         title="Audio book details"
       >
         <ScrollView contentContainerStyle={styles.form} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-          <Text style={styles.formLabel}>Audio book depth</Text>
-          <Tabs accessibilityLabel="Audio book depth" accessibilityRole="tablist" style={styles.detailTabs}>
-            {CHAPTER_OPTIONS.map((option) => <Button accessibilityRole="tab" accessibilityState={{ selected: draft.chapterCount === option.count }} key={option.count} onPress={() => setDraft((current) => ({ ...current, chapterCount: option.count }))} size="xs" style={styles.detailTab} variant={draft.chapterCount === option.count ? "secondary" : "ghost"}>{option.label}</Button>)}
-          </Tabs>
-          <Text style={styles.helper}>{draft.chapterCount} chapters</Text>
           <View style={styles.switchRow}>
             <View style={styles.switchCopy}>
               <Text style={styles.voiceName}>Chapter images</Text>

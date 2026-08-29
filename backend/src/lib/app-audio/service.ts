@@ -26,6 +26,7 @@ const trustedTargetInputSchema = z.object({
   organizationKey: z.string().trim().min(1),
   storageKey: z.string().trim().min(1),
   text: z.string().trim().min(1).max(50_000),
+  language: z.string().trim().min(2).max(100).default('English'),
   voice: appAudioVoiceSchema,
   pace: z.number().finite().min(0.75).max(2),
 }).strict();
@@ -89,7 +90,7 @@ export function createAppAudioService(dependencies: AppAudioDependencies = {}): 
   const generateForTarget: AppAudioService['generateForTarget'] = async (rawInput, options) => {
     const input = trustedTargetInputSchema.parse(rawInput);
     const { afterSpeech, persist, compensate, ...actionOptions } = options;
-    const generated = await speech({ text: input.text, voice: voiceMap[input.voice], pace: input.pace, format: 'mp3' }, input.organizationKey, actionOptions);
+    const generated = await speech({ text: input.text, language: input.language, voice: voiceMap[input.voice], pace: input.pace, format: 'mp3' }, input.organizationKey, actionOptions);
     await afterSpeech?.();
     const durationSeconds = generated.durationSeconds ?? fallbackDurationSeconds(input.text, input.pace);
     const stored = await storage.upload({ key: input.storageKey, bytes: generated.bytes, mimeType: generated.mimeType });

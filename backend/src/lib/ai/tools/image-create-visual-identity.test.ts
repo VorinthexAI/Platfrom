@@ -20,11 +20,11 @@ describe('image.create-visual-identity tool', () => {
     await expect(imageCreateVisualIdentityTool.execute({ imageUrls: ['https://cdn.example.com/viggo.jpg'] }, { executeDescription: async () => ({}) as never })).rejects.toThrow('authorized organization');
   });
 
-  test('pins execution to the direct OpenAI vision model', async () => {
+  test('pins execution to the Vertex vision model', async () => {
     const source = await Bun.file(new URL('./image-create-visual-identity.ts', import.meta.url)).text();
     expect(imageCreateVisualIdentityTool.name).toBe('image.create-visual-identity');
-    expect(IMAGE_CAPTION_MODEL).toBe('openai.gpt-5.6-luna');
+    expect(IMAGE_CAPTION_MODEL).toBe('google.gemini-3.7-flash');
     expect(source).toContain("actionSlug: 'describe-visual-identity'");
-    expect(source).toContain("providerSlug: 'openai'");
+    expect(source).toContain("providerSlug: 'google-vertex'");
   });
 });

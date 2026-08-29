@@ -784,7 +784,7 @@ test("opened threads use a latest-message document reader and guarded immutable 
 
 test("opening an email reads detail without changing Gmail read state", () => {
   const opening = workspace.slice(workspace.indexOf("async function openThread"), workspace.indexOf("async function loadMoreThreadMessages"));
-  expect(opening).not.toContain("notify(");
+  expect(opening).toContain("notify(messageFor(failure))");
   expect(opening).not.toContain("setEmailThreadsReadStateForContext");
   expect(opening).toContain("applyAuthoritativeThreads(context, connectorKey, [detail.thread])");
 });

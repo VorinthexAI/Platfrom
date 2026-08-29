@@ -23,7 +23,7 @@ export const imageCreateVisualIdentityTool = {
     if (!organizationKey) throw new Error('image.create-visual-identity requires an authorized organization.');
     const response = dependencies.executeDescription
       ? await dependencies.executeDescription(organizationKey, input)
-      : await executeAction<VisualIdentityDescriptionInput, VisualIdentityDescriptionOutput>({ mode: 'fixed', organizationKey, actionSlug: 'describe-visual-identity', modelSlug: IMAGE_CAPTION_MODEL, providerSlug: 'openai' }, input, dependencies);
+      : await executeAction<VisualIdentityDescriptionInput, VisualIdentityDescriptionOutput>({ mode: 'fixed', organizationKey, actionSlug: 'describe-visual-identity', modelSlug: IMAGE_CAPTION_MODEL, providerSlug: 'google-vertex' }, input, dependencies);
     return visualIdentityDescriptionOutputSchema.parse(response.output);
   },
 } as const;

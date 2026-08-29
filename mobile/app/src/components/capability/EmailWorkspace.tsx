@@ -1546,8 +1546,9 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, initialMessa
       setSelected(detail);
       applyAuthoritativeThreads(context, connectorKey, [detail.thread]);
       setSelectedMessageKey([...detail.messages].sort((left, right) => right.sentAt.localeCompare(left.sentAt) || right.key.localeCompare(left.key))[0]?.key);
-    } catch {
+    } catch (failure) {
       if (generation === detailGeneration.current && contextIsCurrent(context) && initialConnectorKey === connectorKey) {
+        notify(messageFor(failure));
         if (!cached) setSelected((current) => current?.thread.key === thread.key ? undefined : current);
       }
     } finally {

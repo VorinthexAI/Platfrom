@@ -75,6 +75,7 @@ services:
       - ../src:/app/src
       - ../tsconfig.json:/app/tsconfig.json
       - ../../shared:/shared:ro
+      - ${HOME}/.aws:/root/.aws:ro
     depends_on:
       arangodb:
         condition: service_healthy
@@ -107,6 +108,7 @@ services:
       - ../src:/app/src
       - ../tsconfig.json:/app/tsconfig.json
       - ../../shared:/shared:ro
+      - ${HOME}/.aws:/root/.aws:ro
     depends_on:
       arangodb:
         condition: service_healthy
@@ -117,4 +119,3 @@ volumes:
   arangodata:
   redisdata:
   localstack-data:
-

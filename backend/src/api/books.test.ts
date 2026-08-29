@@ -25,7 +25,7 @@ describe('book HTTP handlers', () => {
 
   test('keeps POST /books as a thin call to BookService.create', async () => {
     const userKey = newId();
-    const body = { organizationKey: 'organization', scopeKey: newId(), generationRequestKey: 'request-1', topic: 'Decision making', goal: 'Decide well', currentKnowledge: 'Basic familiarity', writingTone: 'Clear', chapterCount: 10, language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear', narrationPace: 1, chapterImages: false };
+    const body = { organizationKey: 'organization', scopeKey: newId(), generationRequestKey: 'request-1', topic: 'Decision making', goal: 'Decide well', currentKnowledge: 'Basic familiarity', writingTone: 'Clear', language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear', narrationPace: 1, chapterImages: false };
     const calls: unknown[][] = [];
     const app = new Hono();
     app.post('/books', createBookHandlers({ service: { create: async (...args: unknown[]) => { calls.push(args); return { key: newId() }; } } as never, getIdentity: async () => ({ key: userKey, identityType: 'user' }) }).create);
@@ -44,7 +44,7 @@ describe('book HTTP handlers', () => {
     const domain = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
     const capability = defaultAssistantCapabilityRegistry.resolve('book-workspace').find(({ definition }) => definition.name === 'book.topic.suggest')!;
     await capability.execute({ excludeTopics: ['Old idea'] }, { domain, books: service } as any);
-    expect(calls[0]).toEqual([body, userKey, { signal: expect.any(AbortSignal), timeoutMs: 30_000 }]);
+    expect(calls[0]).toEqual([body, userKey, { signal: expect.any(AbortSignal), timeoutMs: 45_000 }]);
     expect(calls[1]).toEqual([body, userKey, { signal: undefined, timeoutMs: undefined }]);
   });
 
@@ -58,7 +58,7 @@ describe('book HTTP handlers', () => {
     const domain = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
     const capability = defaultAssistantCapabilityRegistry.resolve('book-workspace').find(({ definition }) => definition.name === 'book.goal.suggest')!;
     await capability.execute({ topic: 'Decision making', excludeGoals: ['Old goal'] }, { domain, books: service } as any);
-    expect(calls[0]).toEqual([body, userKey, { signal: expect.any(AbortSignal), timeoutMs: 30_000 }]);
+    expect(calls[0]).toEqual([body, userKey, { signal: expect.any(AbortSignal), timeoutMs: 45_000 }]);
     expect(calls[1]).toEqual([body, userKey, { signal: undefined, timeoutMs: undefined }]);
   });
 

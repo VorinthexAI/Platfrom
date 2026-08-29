@@ -286,7 +286,7 @@ describe('travel HTTP handlers', () => {
   });
 
   test('maps transient place lookup failures to retryable HTTP responses', async () => {
-    const service = { findPlaceGuide: async () => { throw new ProviderExecutionError('ask', [{ modelId: 'model', providerId: 'openai', externalModelId: 'model', code: 'timeout', message: 'timed out' }]); } } as never;
+    const service = { findPlaceGuide: async () => { throw new ProviderExecutionError('ask', [{ modelId: 'model', providerId: 'google-vertex', externalModelId: 'model', code: 'timeout', message: 'timed out' }]); } } as never;
     const app = new Hono();
     app.post('/travel/places/guide', createTravelHandlers({ service, getIdentity: async () => ({ key: 'trusted-user', identityType: 'user' }) }).findPlaceGuide);
     const response = await app.request('/travel/places/guide', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey: 'organization', scopeKey: newId(), query: 'Japan' }) });
@@ -313,7 +313,7 @@ describe('travel HTTP handlers', () => {
   });
 
   test('uses the place-specific unavailable provider message', async () => {
-    const service = { findPlaceGuide: async () => { throw new ProviderExecutionError('ask', [{ modelId: 'model', providerId: 'openai', externalModelId: 'model', code: 'provider_unavailable', message: 'offline' }]); } } as never;
+    const service = { findPlaceGuide: async () => { throw new ProviderExecutionError('ask', [{ modelId: 'model', providerId: 'google-vertex', externalModelId: 'model', code: 'provider_unavailable', message: 'offline' }]); } } as never;
     const app = new Hono();
     app.post('/travel/places/guide', createTravelHandlers({ service, getIdentity: async () => ({ key: 'trusted-user', identityType: 'user' }) }).findPlaceGuide);
     const response = await app.request('/travel/places/guide', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey: 'organization', scopeKey: newId(), query: 'Japan' }) });
@@ -321,7 +321,7 @@ describe('travel HTTP handlers', () => {
   });
 
   test('identifies provider credential failures instead of reporting an outage', async () => {
-    const service = { findPlaceGuide: async () => { throw new ProviderExecutionError('ask', [{ modelId: 'model', providerId: 'openai', externalModelId: 'model', code: 'authentication_failed', message: 'failed with status 401' }]); } } as never;
+    const service = { findPlaceGuide: async () => { throw new ProviderExecutionError('ask', [{ modelId: 'model', providerId: 'google-vertex', externalModelId: 'model', code: 'authentication_failed', message: 'failed with status 401' }]); } } as never;
     const app = new Hono();
     app.post('/travel/places/guide', createTravelHandlers({ service, getIdentity: async () => ({ key: 'trusted-user', identityType: 'user' }) }).findPlaceGuide);
     const response = await app.request('/travel/places/guide', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey: 'organization', scopeKey: newId(), query: 'Japan' }) });

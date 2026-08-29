@@ -10,4 +10,5 @@ test('production runtime has no summary-only or serial continuity generation pat
   expect(source).not.toContain('imageStorageKey: undefined');
   expect(source).toContain("size: '1024x1536'");
   expect(source).toContain("resize(864, 1_536, { fit: 'cover', position: 'centre' })");
+  expect(source).toContain('await Promise.all([dumpArchiveCopies(exportDetail, context), dumpGalleryCopies(exportDetail, context)])');
 });

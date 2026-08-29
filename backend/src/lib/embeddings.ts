@@ -50,8 +50,8 @@ export function prepareEmbeddingText(text: string, _purpose: EmbeddingPurpose): 
 export async function embedTexts(input: EmbedTextsInput): Promise<number[][]> {
   const parsed = batchInputSchema.parse(input);
   const { createRegisteredProviderAdapter } = await import('@/lib/ai/providers');
-  const adapter = createRegisteredProviderAdapter('openai');
-  if (!adapter?.embed) throw new Error('OpenAI embedding provider environment configuration is unavailable.');
+  const adapter = createRegisteredProviderAdapter('azure-ai-foundry');
+  if (!adapter?.embed) throw new Error('Azure AI Foundry embedding provider environment configuration is unavailable.');
   const embed = adapter.embed.bind(adapter);
   const prepared = parsed.texts.map((text) => prepareEmbeddingText(text, parsed.purpose));
   const batches = Array.from({ length: Math.ceil(prepared.length / 16) }, (_, index) => prepared.slice(index * 16, (index + 1) * 16));

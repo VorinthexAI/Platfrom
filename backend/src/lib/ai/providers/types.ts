@@ -11,14 +11,9 @@ import { MAX_IMAGE_CAPTION_URLS } from '@/lib/image-caption-constants';
  * runtime perspective all of these are simply providers.
  */
 export const PROVIDER_SLUGS = [
-  'openai',
-  'openrouter',
-  'anthropic',
-  'xai',
   'google-vertex',
   'azure-ai-foundry',
-  'aws-bedrock',
-  'aws-bedrock-mantle',
+  'aws-polly',
 ] as const;
 
 export type ProviderSlug = (typeof PROVIDER_SLUGS)[number];
@@ -29,14 +24,9 @@ export const providerIdSchema = providerSlugSchema;
 
 /** Human-readable display names for code-defined provider metadata. */
 export const PROVIDER_NAMES: Record<ProviderId, string> = {
-  openai: 'OpenAI',
-  openrouter: 'OpenRouter',
-  anthropic: 'Anthropic',
-  xai: 'xAI',
   'google-vertex': 'Google Vertex AI',
   'azure-ai-foundry': 'Azure AI Foundry',
-  'aws-bedrock': 'AWS Bedrock',
-  'aws-bedrock-mantle': 'AWS Bedrock Mantle',
+  'aws-polly': 'Amazon Polly',
 };
 
 /**
@@ -145,11 +135,12 @@ export interface NormalizedToolCall {
   id: string;
   name: string;
   arguments: unknown;
+  opaqueState?: string;
 }
 
 export const chatOutputSchema = z.object({
   text: z.string(),
-  toolCalls: z.array(z.object({ id: z.string().min(1), name: z.string().min(1), arguments: z.unknown() }).strict()),
+  toolCalls: z.array(z.object({ id: z.string().min(1), name: z.string().min(1), arguments: z.unknown(), opaqueState: z.string().min(1).optional() }).strict()),
   stopReason: z.string().nullable(),
 }).strict();
 export type ChatOutput = z.infer<typeof chatOutputSchema>;
