@@ -623,20 +623,17 @@ jobs:
           creds=$(aws ssm get-parameters-by-path --region "$AWS_REGION" --path "$SSM_PATH" --recursive --with-decryption --query "Parameters[].{n:Name,v:Value}" --output json)
           arango_password=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/ARANGO_ROOT_PASSWORD")) | .v')
           arango_database=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/ARANGO_DATABASE")) | .v')
-          openai_api_key=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENAI_API_KEY")) | .v')
-          openai_base_url=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENAI_BASE_URL")) | .v')
-          openai_organization=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENAI_ORGANIZATION")) | .v')
-          openai_project=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENAI_PROJECT")) | .v')
+          azure_openai_api_key=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/AZURE_OPENAI_API_KEY")) | .v')
+          azure_openai_endpoint=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/AZURE_OPENAI_ENDPOINT")) | .v')
           test -n "$arango_password" || { echo "::error::ARANGO_ROOT_PASSWORD not found under $SSM_PATH"; exit 1; }
-          test -n "$openai_api_key" || { echo "::error::OPENAI_API_KEY not found under $SSM_PATH; the OpenAI runtime cannot run"; exit 1; }
+          test -n "$azure_openai_api_key" || { echo "::error::AZURE_OPENAI_API_KEY not found under $SSM_PATH; embedding backfill cannot run"; exit 1; }
+          test -n "$azure_openai_endpoint" || { echo "::error::AZURE_OPENAI_ENDPOINT not found under $SSM_PATH; embedding backfill cannot run"; exit 1; }
           echo "::add-mask::$arango_password"
-          echo "::add-mask::$openai_api_key"
+          echo "::add-mask::$azure_openai_api_key"
           echo "ARANGO_ROOT_PASSWORD=$arango_password" >> "$GITHUB_ENV"
           echo "ARANGO_DATABASE=$arango_database" >> "$GITHUB_ENV"
-          echo "OPENAI_API_KEY=$openai_api_key" >> "$GITHUB_ENV"
-          test -z "$openai_base_url" || echo "OPENAI_BASE_URL=$openai_base_url" >> "$GITHUB_ENV"
-          test -z "$openai_organization" || echo "OPENAI_ORGANIZATION=$openai_organization" >> "$GITHUB_ENV"
-          test -z "$openai_project" || echo "OPENAI_PROJECT=$openai_project" >> "$GITHUB_ENV"
+          echo "AZURE_OPENAI_API_KEY=$azure_openai_api_key" >> "$GITHUB_ENV"
+          echo "AZURE_OPENAI_ENDPOINT=$azure_openai_endpoint" >> "$GITHUB_ENV"
       - name: Seed deterministic application data
         env:
           ARANGO_URL: http://127.0.0.1:8529
@@ -775,25 +772,22 @@ jobs:
           ssh-keyscan -T 10 -H "$EC2_HOST" >> ~/.ssh/known_hosts 2>/dev/null || echo "::warning::ssh-keyscan failed for graph database host; SSH will use accept-new."
           printf 'Host graphdbbox\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking accept-new\n' "$EC2_HOST" "$EC2_USER" >> ~/.ssh/config
           ssh -f -N -L 8529:127.0.0.1:8529 graphdbbox
-      - name: Fetch ArangoDB and OpenAI credentials from SSM
+      - name: Fetch ArangoDB and embedding credentials from SSM
         run: |
           creds=$(aws ssm get-parameters-by-path --region "$AWS_REGION" --path "$SSM_PATH" --recursive --with-decryption --query "Parameters[].{n:Name,v:Value}" --output json)
           arango_password=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/ARANGO_ROOT_PASSWORD")) | .v')
           arango_database=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/ARANGO_DATABASE")) | .v')
-          openai_api_key=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENAI_API_KEY")) | .v')
-          openai_base_url=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENAI_BASE_URL")) | .v')
-          openai_organization=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENAI_ORGANIZATION")) | .v')
-          openai_project=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENAI_PROJECT")) | .v')
+          azure_openai_api_key=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/AZURE_OPENAI_API_KEY")) | .v')
+          azure_openai_endpoint=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/AZURE_OPENAI_ENDPOINT")) | .v')
           test -n "$arango_password" || { echo "::error::ARANGO_ROOT_PASSWORD not found under $SSM_PATH"; exit 1; }
-          test -n "$openai_api_key" || { echo "::error::OPENAI_API_KEY not found under $SSM_PATH; embedding migrations cannot run"; exit 1; }
+          test -n "$azure_openai_api_key" || { echo "::error::AZURE_OPENAI_API_KEY not found under $SSM_PATH; embedding migrations cannot run"; exit 1; }
+          test -n "$azure_openai_endpoint" || { echo "::error::AZURE_OPENAI_ENDPOINT not found under $SSM_PATH; embedding migrations cannot run"; exit 1; }
           echo "::add-mask::$arango_password"
-          echo "::add-mask::$openai_api_key"
+          echo "::add-mask::$azure_openai_api_key"
           echo "ARANGO_ROOT_PASSWORD=$arango_password" >> "$GITHUB_ENV"
           echo "ARANGO_DATABASE=$arango_database" >> "$GITHUB_ENV"
-          echo "OPENAI_API_KEY=$openai_api_key" >> "$GITHUB_ENV"
-          test -z "$openai_base_url" || echo "OPENAI_BASE_URL=$openai_base_url" >> "$GITHUB_ENV"
-          test -z "$openai_organization" || echo "OPENAI_ORGANIZATION=$openai_organization" >> "$GITHUB_ENV"
-          test -z "$openai_project" || echo "OPENAI_PROJECT=$openai_project" >> "$GITHUB_ENV"
+          echo "AZURE_OPENAI_API_KEY=$azure_openai_api_key" >> "$GITHUB_ENV"
+          echo "AZURE_OPENAI_ENDPOINT=$azure_openai_endpoint" >> "$GITHUB_ENV"
       - name: Apply graph migrations
         working-directory: .
         env:
@@ -906,33 +900,15 @@ jobs:
           ssh-keyscan -T 10 -H "$EC2_HOST" >> ~/.ssh/known_hosts 2>/dev/null || echo "::warning::ssh-keyscan failed for graph database host; SSH will use accept-new."
           printf 'Host graphdbbox\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking accept-new\n' "$EC2_HOST" "$EC2_USER" >> ~/.ssh/config
           ssh -f -N -L 8529:127.0.0.1:8529 graphdbbox
-      - name: Fetch ArangoDB and AI provider credentials from SSM
+      - name: Fetch ArangoDB credentials from SSM
         run: |
           creds=$(aws ssm get-parameters-by-path --region "$AWS_REGION" --path "$SSM_PATH" --recursive --with-decryption --query "Parameters[].{n:Name,v:Value}" --output json)
           arango_password=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/ARANGO_ROOT_PASSWORD")) | .v')
           arango_database=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/ARANGO_DATABASE")) | .v')
-          bedrock_aws_access_key_id=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/BEDROCK_AWS_ACCESS_KEY_ID")) | .v')
-          bedrock_aws_secret_access_key=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/BEDROCK_AWS_SECRET_ACCESS_KEY")) | .v')
-          openai_api_key=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENAI_API_KEY")) | .v')
-          openai_base_url=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENAI_BASE_URL")) | .v')
-          openai_organization=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENAI_ORGANIZATION")) | .v')
-          openai_project=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENAI_PROJECT")) | .v')
           test -n "$arango_password" || { echo "::error::ARANGO_ROOT_PASSWORD not found under $SSM_PATH"; exit 1; }
-          test -n "$bedrock_aws_access_key_id" || { echo "::error::BEDROCK_AWS_ACCESS_KEY_ID not found under $SSM_PATH; Bedrock models cannot run"; exit 1; }
-          test -n "$bedrock_aws_secret_access_key" || { echo "::error::BEDROCK_AWS_SECRET_ACCESS_KEY not found under $SSM_PATH; Bedrock models cannot run"; exit 1; }
-          test -n "$openai_api_key" || { echo "::error::OPENAI_API_KEY not found under $SSM_PATH; the OpenAI runtime cannot run"; exit 1; }
           echo "::add-mask::$arango_password"
-          echo "::add-mask::$bedrock_aws_access_key_id"
-          echo "::add-mask::$bedrock_aws_secret_access_key"
-          echo "::add-mask::$openai_api_key"
           echo "ARANGO_ROOT_PASSWORD=$arango_password" >> "$GITHUB_ENV"
           echo "ARANGO_DATABASE=$arango_database" >> "$GITHUB_ENV"
-          echo "BEDROCK_AWS_ACCESS_KEY_ID=$bedrock_aws_access_key_id" >> "$GITHUB_ENV"
-          echo "BEDROCK_AWS_SECRET_ACCESS_KEY=$bedrock_aws_secret_access_key" >> "$GITHUB_ENV"
-          echo "OPENAI_API_KEY=$openai_api_key" >> "$GITHUB_ENV"
-          test -z "$openai_base_url" || echo "OPENAI_BASE_URL=$openai_base_url" >> "$GITHUB_ENV"
-          test -z "$openai_organization" || echo "OPENAI_ORGANIZATION=$openai_organization" >> "$GITHUB_ENV"
-          test -z "$openai_project" || echo "OPENAI_PROJECT=$openai_project" >> "$GITHUB_ENV"
       - name: Upsert db.seeds.secrets.json
         env:
           ARANGO_URL: http://127.0.0.1:8529

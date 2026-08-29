@@ -23,9 +23,15 @@ describe('provider registry', () => {
   });
 
   test('adapters built from create() carry the right id', () => {
-    const adapter = PROVIDER_REGISTRY.openai.factory.create({ apiKey: 'test-key' });
-    expect(adapter.id).toBe('openai');
-    expect(adapter.name).toBe('OpenAI');
+    const adapter = PROVIDER_REGISTRY['azure-ai-foundry'].factory.create({ apiKey: 'test-key', endpoint: 'https://test.openai.azure.com' });
+    expect(adapter.id).toBe('azure-ai-foundry');
+    expect(adapter.name).toBe('Azure AI Foundry');
+  });
+
+  test('aws-polly uses an explicit region and the AWS default credential chain', () => {
+    const factory = PROVIDER_REGISTRY['aws-polly'].factory;
+    expect(() => factory.create({})).toThrow();
+    expect(factory.create({ region: 'eu-central-1' }).id).toBe('aws-polly');
   });
 
   test('registers unique models and resolves every action binding to a non-empty external id', () => {
@@ -64,25 +70,25 @@ describe('provider error normalization', () => {
 
   test('normalizes SDK errors carrying a status', () => {
     const err = Object.assign(new Error('Too Many Requests'), { status: 429 });
-    const normalized = normalizeProviderError('openai', err);
+    const normalized = normalizeProviderError('azure-ai-foundry', err);
     expect(normalized).toBeInstanceOf(ProviderError);
     expect(normalized.code).toBe('rate_limited');
     expect(normalized.retryable).toBe(true);
-    expect(normalized.providerId).toBe('openai');
+    expect(normalized.providerId).toBe('azure-ai-foundry');
   });
 
   test('normalizes abort and timeout errors', () => {
     const abort = new DOMException('The operation was aborted.', 'AbortError');
-    expect(normalizeProviderError('anthropic', abort).code).toBe('aborted');
-    expect(normalizeProviderError('anthropic', abort).retryable).toBe(false);
+    expect(normalizeProviderError('google-vertex', abort).code).toBe('aborted');
+    expect(normalizeProviderError('google-vertex', abort).retryable).toBe(false);
 
     const timeout = Object.assign(new Error('timed out'), { name: 'TimeoutError' });
-    expect(normalizeProviderError('anthropic', timeout).code).toBe('timeout');
+    expect(normalizeProviderError('google-vertex', timeout).code).toBe('timeout');
   });
 
   test('passes existing ProviderErrors through untouched', () => {
-    const original = new ProviderError('xai', 'invalid_input', 'bad input');
-    expect(normalizeProviderError('xai', original)).toBe(original);
+    const original = new ProviderError('google-vertex', 'invalid_input', 'bad input');
+    expect(normalizeProviderError('google-vertex', original)).toBe(original);
     expect(original.retryable).toBe(false);
   });
 

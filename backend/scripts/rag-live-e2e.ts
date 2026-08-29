@@ -1,7 +1,7 @@
 import { Database } from 'arangojs';
 
 if (process.env.RAG_E2E !== 'true') throw new Error('Refusing live RAG E2E without RAG_E2E=true.');
-if (!process.env.OPENAI_API_KEY?.trim()) throw new Error('OPENAI_API_KEY is required for live RAG E2E.');
+if (!process.env.AZURE_OPENAI_API_KEY?.trim() || !process.env.AZURE_OPENAI_ENDPOINT?.trim()) throw new Error('Azure AI Foundry credentials are required for live RAG E2E.');
 const url = process.env.ARANGO_URL ?? 'http://127.0.0.1:8529';
 const parsedUrl = new URL(url);
 const allowlisted = new Set(['localhost', '127.0.0.1', '::1', ...(process.env.RAG_E2E_ARANGO_HOST_ALLOWLIST ?? '').split(',').map((host) => host.trim()).filter(Boolean)]);

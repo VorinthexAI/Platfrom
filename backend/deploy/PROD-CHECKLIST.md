@@ -37,16 +37,19 @@ Expected parameters include:
 - `ARANGO_USERNAME`
 - `ARANGO_ROOT_PASSWORD`
 - `REDIS_URL` for the app and render service to reach the production Redis endpoint
-- `ANTHROPIC_API_KEY`
-- `OPENAI_API_KEY`
-- `OPENROUTER_API_KEY`
+- `GOOGLE_VERTEX_API_KEY`
+- `GOOGLE_VERTEX_PROJECT_ID` (`vorinthex-ai`)
+- `AZURE_OPENAI_API_KEY`
+- `AZURE_OPENAI_ENDPOINT`
+- Optional `GOOGLE_VERTEX_LOCATION` override
 - S3/AWS variables used by the runtime
 
 ## Deploy Behavior
 
 - Merges to `main` through a closed pull request trigger the production workflow.
 - Manual `workflow_dispatch` can build-only or build-and-deploy.
-- Embedding requests use `text-embedding-3-small` at 1536 dimensions through OpenAI. The migration and semantic backfill re-embed existing 4096-dimension vectors before the application rollout.
+- Embedding requests use the `text-embedding-3-small` Azure deployment at 1536 dimensions. The migration and semantic backfill re-embed existing 4096-dimension vectors before the application rollout.
+- Speech requests use Amazon Polly Neural in `eu-central-1` and return native 24 kHz MP3 without local audio encoding.
 - The graph-db host receives `deploy/docker-compose.db.yml` and is brought up with `docker compose up -d` before migrations run.
 - The app host receives `deploy/docker-compose.app.yml` and `deploy/deploy-app.sh`.
 - App deploy starts the idle color, waits for health, flips Caddy, then stops the old color.

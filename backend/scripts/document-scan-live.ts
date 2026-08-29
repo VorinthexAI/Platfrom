@@ -10,12 +10,6 @@ const visualOnly = process.env.LIVE_SCAN_VISUAL_ONLY === 'true';
 loadEnvironment(environment);
 if (bucketOverride) process.env.S3_BUCKET = bucketOverride;
 if (environment === 'prod' && /^https?:\/\/(?:127\.0\.0\.1|localhost)(?::|\/)/.test(process.env.AWS_ENDPOINT_URL ?? '')) delete process.env.AWS_ENDPOINT_URL;
-if (environment === 'prod' && process.env.BEDROCK_AWS_ACCESS_KEY_ID) {
-  process.env.AWS_ACCESS_KEY_ID = process.env.BEDROCK_AWS_ACCESS_KEY_ID;
-  process.env.AWS_SECRET_ACCESS_KEY = process.env.BEDROCK_AWS_SECRET_ACCESS_KEY;
-  if (process.env.BEDROCK_AWS_SESSION_TOKEN && process.env.BEDROCK_AWS_SESSION_TOKEN !== 'undefined') process.env.AWS_SESSION_TOKEN = process.env.BEDROCK_AWS_SESSION_TOKEN;
-  else delete process.env.AWS_SESSION_TOKEN;
-}
 if (!textractOnly && !visualOnly) await verifyDatabaseConnection(environment);
 
 const defaultImages = [
@@ -23,13 +17,13 @@ const defaultImages = [
   '../../mobile/scripts/assets/screenshots/google/phone/02.png',
 ];
 const imagePaths = (process.argv.slice(3).length ? process.argv.slice(3) : defaultImages).map((path) => resolve(import.meta.dir, path));
-const [{ scanDocumentImages }, { documentStorage }, { awsTextractImageOcr }, { newId }, { signedImageUrl }, openai, captionConstants] = await Promise.all([
+const [{ scanDocumentImages }, { documentStorage }, { awsTextractImageOcr }, { newId }, { signedImageUrl }, router, captionConstants] = await Promise.all([
   import('../src/lib/ai/document-scanning'),
   import('../src/lib/ai/document-processing/storage'),
   import('../src/lib/ai/document-processing/textract'),
   import('../src/lib/ids'),
   import('../src/lib/gallery/image-url'),
-  import('../src/lib/ai/providers/openai'),
+  import('../src/lib/ai/router'),
   import('../src/lib/image-caption-constants'),
 ]);
 const pages = await Promise.all(imagePaths.map(async (path) => {
@@ -58,13 +52,7 @@ try {
       return key;
     }));
     const urls = await Promise.all(storageKeys.map(signedImageUrl));
-    const provider = openai.createOpenAIProvider({
-      apiKey: process.env.OPENAI_API_KEY ?? '',
-      ...(process.env.OPENAI_BASE_URL ? { baseUrl: process.env.OPENAI_BASE_URL } : {}),
-      ...(process.env.OPENAI_ORGANIZATION ? { organization: process.env.OPENAI_ORGANIZATION } : {}),
-      ...(process.env.OPENAI_PROJECT ? { project: process.env.OPENAI_PROJECT } : {}),
-    });
-    const response = await provider.execute<{ imageUrls: string[]; purpose: 'document-transcription' }, { results: { caption: string; score: number }[] }>({ actionId: 'caption-image', modelId: captionConstants.IMAGE_CAPTION_MODEL, externalModelId: captionConstants.IMAGE_CAPTION_EXTERNAL_MODEL_ID, input: { imageUrls: urls, purpose: 'document-transcription' }, organizationKey: 'nexus' });
+    const response = await router.executeAction<{ imageUrls: string[]; purpose: 'document-transcription' }, { results: { caption: string; score: number }[] }>({ mode: 'fixed', actionSlug: 'caption-image', modelSlug: captionConstants.IMAGE_CAPTION_MODEL, providerSlug: 'google-vertex', organizationKey: 'nexus' }, { imageUrls: urls, purpose: 'document-transcription' });
     const visual = response.output;
     visual.results.forEach(({ caption }, index) => console.log(`\n===== PAGE ${index + 1}: VISUAL AI =====\n${caption}`));
     console.log(`\nVerified visual transcription for ${visual.results.length} real image page(s).`);

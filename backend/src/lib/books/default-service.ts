@@ -32,7 +32,7 @@ const signPublicBookUrl = (key: string) => signObject(publicS3, new GetObjectCom
 
 export const defaultBookService = createBookService({
   repository,
-  generator: createBookRuntime({ repository }),
+  generator: createBookRuntime({ repository, artworkRetryDelayMs: 30_000 }),
   enqueue: enqueueBookGeneration,
   removeJob: removeBookGenerationJob,
   signUrl: signBookUrl,

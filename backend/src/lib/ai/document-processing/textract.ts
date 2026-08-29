@@ -25,10 +25,10 @@ function positiveLimit(value: unknown, fallback: number): number {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-const documentTextractAccessKeyId = process.env.CONTENT_TEXTRACT_AWS_ACCESS_KEY_ID ?? process.env.BEDROCK_AWS_ACCESS_KEY_ID ?? process.env.AWS_ACCESS_KEY_ID;
-const documentTextractSecretAccessKey = process.env.CONTENT_TEXTRACT_AWS_SECRET_ACCESS_KEY ?? process.env.BEDROCK_AWS_SECRET_ACCESS_KEY ?? process.env.AWS_SECRET_ACCESS_KEY;
-const documentTextractSessionToken = process.env.CONTENT_TEXTRACT_AWS_SESSION_TOKEN ?? process.env.BEDROCK_AWS_SESSION_TOKEN ?? process.env.AWS_SESSION_TOKEN;
-const documentTextractUsesAwsCredentials = Boolean(process.env.CONTENT_TEXTRACT_AWS_ACCESS_KEY_ID || process.env.BEDROCK_AWS_ACCESS_KEY_ID);
+const documentTextractAccessKeyId = process.env.CONTENT_TEXTRACT_AWS_ACCESS_KEY_ID ?? process.env.AWS_ACCESS_KEY_ID;
+const documentTextractSecretAccessKey = process.env.CONTENT_TEXTRACT_AWS_SECRET_ACCESS_KEY ?? process.env.AWS_SECRET_ACCESS_KEY;
+const documentTextractSessionToken = process.env.CONTENT_TEXTRACT_AWS_SESSION_TOKEN ?? process.env.AWS_SESSION_TOKEN;
+const documentTextractUsesAwsCredentials = Boolean(process.env.CONTENT_TEXTRACT_AWS_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY_ID);
 const documentTextractRegion = process.env.CONTENT_TEXTRACT_REGION ?? (documentTextractUsesAwsCredentials ? undefined : process.env.AWS_ENDPOINT_URL ? process.env.AWS_REGION : undefined) ?? 'eu-west-1';
 const documentTextractEndpoint = process.env.CONTENT_TEXTRACT_ENDPOINT ?? (documentTextractUsesAwsCredentials ? `https://textract.${documentTextractRegion}.amazonaws.com` : process.env.AWS_ENDPOINT_URL);
 const documentTextractStorageEndpoint = process.env.CONTENT_TEXTRACT_S3_ENDPOINT ?? (documentTextractUsesAwsCredentials ? `https://s3.${documentTextractRegion}.amazonaws.com` : process.env.AWS_ENDPOINT_URL);
@@ -117,10 +117,10 @@ async function ensureDevelopmentBucket(bucket: string) {
   await developmentBucketReady;
 }
 
-const imageTextractAccessKeyId = process.env.CONTENT_SCAN_TEXTRACT_AWS_ACCESS_KEY_ID ?? process.env.BEDROCK_AWS_ACCESS_KEY_ID ?? process.env.AWS_ACCESS_KEY_ID;
-const imageTextractSecretAccessKey = process.env.CONTENT_SCAN_TEXTRACT_AWS_SECRET_ACCESS_KEY ?? process.env.BEDROCK_AWS_SECRET_ACCESS_KEY ?? process.env.AWS_SECRET_ACCESS_KEY;
-const imageTextractSessionToken = process.env.CONTENT_SCAN_TEXTRACT_AWS_SESSION_TOKEN ?? process.env.BEDROCK_AWS_SESSION_TOKEN ?? process.env.AWS_SESSION_TOKEN;
-const imageTextractUsesAwsCredentials = Boolean(process.env.CONTENT_SCAN_TEXTRACT_AWS_ACCESS_KEY_ID || process.env.BEDROCK_AWS_ACCESS_KEY_ID);
+const imageTextractAccessKeyId = process.env.CONTENT_SCAN_TEXTRACT_AWS_ACCESS_KEY_ID ?? process.env.AWS_ACCESS_KEY_ID;
+const imageTextractSecretAccessKey = process.env.CONTENT_SCAN_TEXTRACT_AWS_SECRET_ACCESS_KEY ?? process.env.AWS_SECRET_ACCESS_KEY;
+const imageTextractSessionToken = process.env.CONTENT_SCAN_TEXTRACT_AWS_SESSION_TOKEN ?? process.env.AWS_SESSION_TOKEN;
+const imageTextractUsesAwsCredentials = Boolean(process.env.CONTENT_SCAN_TEXTRACT_AWS_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY_ID);
 const imageTextractRegion = process.env.CONTENT_SCAN_TEXTRACT_REGION ?? (imageTextractUsesAwsCredentials ? undefined : process.env.AWS_ENDPOINT_URL ? process.env.AWS_REGION : undefined) ?? 'eu-west-1';
 
 const imageTextract = new TextractClient({

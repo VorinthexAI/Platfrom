@@ -37,7 +37,7 @@ export type PersonalAssistantOutput = z.infer<typeof personalAssistantOutputSche
 
 const chatOutputSchema = z.object({
   text: z.string(),
-  toolCalls: z.array(z.object({ id: z.string().min(1), name: z.string().min(1), arguments: z.unknown() }).strict()),
+  toolCalls: z.array(z.object({ id: z.string().min(1), name: z.string().min(1), arguments: z.unknown(), opaqueState: z.string().min(1).optional() }).strict()),
   stopReason: z.string().nullable(),
 }).strict();
 
@@ -227,7 +227,7 @@ export async function runPersonalAssistant(
       role: 'assistant',
       content: [
         ...(output.text.trim() ? [{ type: 'text' as const, text: output.text.trim() }] : []),
-        { type: 'tool-call', toolCallId: toolCall.id, name: toolCall.name, arguments: toolCall.arguments },
+        { type: 'tool-call', toolCallId: toolCall.id, name: toolCall.name, arguments: toolCall.arguments, ...(toolCall.opaqueState ? { opaqueState: toolCall.opaqueState } : {}) },
       ],
     });
     messages.push({ role: 'tool', content: [{ type: 'tool-result', toolCallId: toolCall.id, result: result.result }] });

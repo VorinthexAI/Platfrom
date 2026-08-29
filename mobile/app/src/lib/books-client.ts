@@ -7,7 +7,6 @@ import { useAuthStore } from "@/state/auth";
 
 const keySchema = z.string().trim().min(1);
 const contextSchema = z.strictObject({ organizationKey: keySchema, scopeKey: keySchema });
-export const requestedChapterCountSchema = z.union([z.literal(10), z.literal(25), z.literal(50)]);
 export const extensionChapterCountSchema = z.union([z.literal(1), z.literal(3), z.literal(5)]);
 export const bookStatusSchema = z.enum(["queued", "researching", "planning", "writing", "narrating", "finalizing", "failed", "ready", "cancelled"]);
 export const narratorVoiceSchema = z.strictObject({
@@ -54,7 +53,6 @@ export const createBookRequestSchema = contextSchema.extend({
   topic: z.string().trim().min(3).max(2_000),
   goal: z.string().trim().min(3).max(2_000),
   currentKnowledge: z.string().trim().max(2_000),
-  chapterCount: requestedChapterCountSchema,
   language: z.string().trim().min(2).max(100),
   writingTone: z.string().trim().min(2).max(200),
   narratorVoiceKey: narratorVoiceSchema.shape.key,
@@ -168,8 +166,8 @@ async function request<T>(method: "post" | "patch" | "delete", path: string, bod
 }
 
 export function fetchBooksOverview() { return request("post", "/books/overview", {}, overviewRequestSchema, overviewResponseSchema); }
-export function suggestBookTopics(excludeTopics: string[] = []) { return request("post", "/books/topic-suggestions", { excludeTopics }, bookTopicSuggestionsRequestSchema, bookTopicSuggestionsResponseSchema, 30_000); }
-export function suggestBookGoals(topic: string, excludeGoals: string[] = []) { return request("post", "/books/goal-suggestions", { topic, excludeGoals }, bookGoalSuggestionsRequestSchema, bookGoalSuggestionsResponseSchema, 30_000); }
+export function suggestBookTopics(excludeTopics: string[] = []) { return request("post", "/books/topic-suggestions", { excludeTopics }, bookTopicSuggestionsRequestSchema, bookTopicSuggestionsResponseSchema, 50_000); }
+export function suggestBookGoals(topic: string, excludeGoals: string[] = []) { return request("post", "/books/goal-suggestions", { topic, excludeGoals }, bookGoalSuggestionsRequestSchema, bookGoalSuggestionsResponseSchema, 50_000); }
 export function createBook(input: CreateBookInput, generationRequestKey: string) { return request("post", "/books", { ...input, generationRequestKey }, createBookRequestSchema, bookSchema, 15 * 60_000); }
 export function fetchBookDetail(bookKey: string) { return request("post", `/books/${keySchema.parse(bookKey)}/detail`, {}, detailRequestSchema, detailResponseSchema); }
 export function previewBookExtension(bookKey: string, chapterCount: ExtensionChapterCount) { return request("post", `/books/${keySchema.parse(bookKey)}/extension/preview`, { chapterCount }, bookExtensionPreviewRequestSchema, bookExtensionPreviewResponseSchema, 30_000); }

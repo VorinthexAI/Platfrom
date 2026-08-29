@@ -20,16 +20,16 @@
       "environment": [
         { "name": "ROLE", "value": "render" },
         { "name": "NODE_ENV", "value": "production" },
-        { "name": "AWS_REGION", "value": "eu-north-1" }
+        { "name": "AWS_REGION", "value": "eu-north-1" },
+        { "name": "AWS_POLLY_REGION", "value": "eu-central-1" }
       ],
       "secrets": [
         { "name": "REDIS_URL", "valueFrom": "/vorinthex/prod/REDIS_URL" },
         { "name": "S3_BUCKET", "valueFrom": "/vorinthex/prod/S3_BUCKET" },
-        { "name": "AWS_ACCESS_KEY_ID", "valueFrom": "/vorinthex/prod/AWS_ACCESS_KEY_ID" },
-        { "name": "AWS_SECRET_ACCESS_KEY", "valueFrom": "/vorinthex/prod/AWS_SECRET_ACCESS_KEY" },
-        { "name": "ANTHROPIC_API_KEY", "valueFrom": "/vorinthex/prod/ANTHROPIC_API_KEY" },
-        { "name": "OPENAI_API_KEY", "valueFrom": "/vorinthex/prod/OPENAI_API_KEY" },
-        { "name": "OPENROUTER_API_KEY", "valueFrom": "/vorinthex/prod/OPENROUTER_API_KEY" }
+        { "name": "GOOGLE_VERTEX_API_KEY", "valueFrom": "/vorinthex/prod/GOOGLE_VERTEX_API_KEY" },
+        { "name": "GOOGLE_VERTEX_PROJECT_ID", "valueFrom": "/vorinthex/prod/GOOGLE_VERTEX_PROJECT_ID" },
+        { "name": "AZURE_OPENAI_API_KEY", "valueFrom": "/vorinthex/prod/AZURE_OPENAI_API_KEY" },
+        { "name": "AZURE_OPENAI_ENDPOINT", "valueFrom": "/vorinthex/prod/AZURE_OPENAI_ENDPOINT" }
       ],
       "logConfiguration": {
         "logDriver": "awslogs",

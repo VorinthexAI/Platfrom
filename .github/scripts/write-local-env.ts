@@ -42,15 +42,7 @@ const sourceValues = mode === "dev"
     ? parsed?.secrets?.prod?.env
     : parsed?.secrets?.prod?.[section]?.env;
 
-const productionBackend = parsed?.secrets?.prod?.env;
-const values = mode === "dev" && section === "backend" && sourceValues && productionBackend
-  ? {
-      ...sourceValues,
-      CONTENT_TEXTRACT_AWS_ACCESS_KEY_ID: productionBackend.BEDROCK_AWS_ACCESS_KEY_ID,
-      CONTENT_TEXTRACT_AWS_SECRET_ACCESS_KEY: productionBackend.BEDROCK_AWS_SECRET_ACCESS_KEY,
-      ...(productionBackend.BEDROCK_AWS_SESSION_TOKEN ? { CONTENT_TEXTRACT_AWS_SESSION_TOKEN: productionBackend.BEDROCK_AWS_SESSION_TOKEN } : {}),
-    }
-  : sourceValues;
+const values = sourceValues;
 
 if (!values || typeof values !== "object") {
   console.error(`::error::secrets.${mode}.${section} not found in ${ENVIRONMENTS_JSON_PATH}.`);

@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto';
-import OpenAI from 'openai';
 import sharp from 'sharp';
 import { z } from 'zod';
+import { executeAction } from '@/lib/ai/router';
+import { IMAGE_CAPTION_MODEL } from '@/lib/image-caption-constants';
+import { imageCaptionOutputSchema, type ImageCaptionInput, type ImageCaptionOutput } from '@/lib/ai/providers';
 import { documentStorage, type DocumentStorage } from '@/lib/ai/document-processing/storage';
 import { EMBEDDING_DIMENSIONS, currentEmbeddingSchema, embedText } from '@/lib/embeddings';
 import { type Image, getImageById, insertPreparedImageWithCaption } from '@/lib/db/images.node';
@@ -17,7 +19,6 @@ import { startStorageUploadHeartbeat } from '@/lib/storage-upload-reservation';
 export const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 export const MAX_IMAGE_DIMENSION = 16_384;
 export const MAX_IMAGE_PIXELS = 100_000_000;
-export const OPENAI_VISION_MODEL = 'gpt-4.1-mini';
 const formats = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' } as const;
 type Extension = keyof typeof formats;
 export type UploadedImageFile = File | { filename: string; mimeType: string; sizeBytes: number; bytes: Uint8Array };
@@ -25,7 +26,6 @@ export interface ProcessImageInput { scopeKey: string; ownerKey: string; file: U
 export const generatedImageCaptionSchema = z.object({ caption: z.string().trim().min(1).max(20_000), score: z.number().int().min(1).max(100) }).strict();
 export type GeneratedImageCaption = z.infer<typeof generatedImageCaptionSchema>;
 export interface ImageProcessingMetrics { count: number; generated: number; reused: number; hashDurationMs: number; captionDurationMs: number; durationMs: number; }
-interface ResponsesClient { responses: { create(input: Record<string, unknown>, options?: { signal?: AbortSignal }): Promise<{ output_text?: string | null }> } }
 export interface ImageProcessingDependencies {
   storage?: DocumentStorage; getImage?: typeof getImageById;
   persistImage?: (input: { image: Image; caption?: ImageCaptionRecord; actorKey: string }) => Promise<Image>;
@@ -33,7 +33,7 @@ export interface ImageProcessingDependencies {
   hashBatch?: (images: readonly Uint8Array[]) => Promise<string[]>;
   caption?: (input: { filename: string; mimeType: string; bytes: Uint8Array; signal?: AbortSignal }) => Promise<GeneratedImageCaption>;
   captionBatch?: (inputs: readonly { filename: string; mimeType: string; bytes: Uint8Array; signal?: AbortSignal }[]) => Promise<GeneratedImageCaption[]>;
-  embed?: (text: string, signal?: AbortSignal) => Promise<number[]>; openAI?: ResponsesClient;
+  embed?: (text: string, signal?: AbortSignal) => Promise<number[]>;
   maxBytes?: number; maxDimension?: number; maxPixels?: number; createKey?: () => string; createCaptionKey?: () => string;
   onMetrics?: (metrics: ImageProcessingMetrics) => void;
   reserveStorageKey?: (storageKey: string) => Promise<StorageUploadReservation | null>;
@@ -134,9 +134,11 @@ function persistedImageMatches(existing: Image, input: ProcessImageInput, image:
   return existing.width === image.width && existing.height === image.height && (canonical || legacy);
 }
 
-export async function captionImageWithOpenAI(input: { filename: string; mimeType: string; bytes: Uint8Array; signal?: AbortSignal }, client: ResponsesClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, baseURL: process.env.OPENAI_BASE_URL || undefined })) {
-  const response = await client.responses.create({ model: OPENAI_VISION_MODEL, max_output_tokens: 1_500, input: [{ role: 'user', content: [{ type: 'input_text', text: `Describe this image accurately for a searchable media library. Include visible subjects, setting, composition, colors, style, and readable text. The filename is ${JSON.stringify(input.filename)}.` }, { type: 'input_image', image_url: `data:${input.mimeType};base64,${Buffer.from(input.bytes).toString('base64')}`, detail: 'high' }] }] }, input.signal ? { signal: input.signal } : undefined);
-  return generatedImageCaptionSchema.parse({ caption: response.output_text?.trim() ?? '', score: 1 });
+export async function captionImageWithVertex(organizationKey: string, input: { filename: string; mimeType: string; bytes: Uint8Array; signal?: AbortSignal }) {
+  const providerInput: ImageCaptionInput = { imageUrls: [`data:${input.mimeType};base64,${Buffer.from(input.bytes).toString('base64')}`], purpose: 'caption' };
+  const response = await executeAction<ImageCaptionInput, ImageCaptionOutput>({ mode: 'fixed', organizationKey, actionSlug: 'caption-image', modelSlug: IMAGE_CAPTION_MODEL, providerSlug: 'google-vertex' }, providerInput, { signal: input.signal, timeoutMs: 180_000 });
+  const output = imageCaptionOutputSchema.parse(response.output);
+  return generatedImageCaptionSchema.parse(output.results[0]);
 }
 
 async function removeWithRetry(storage: DocumentStorage, key: string) { let last: unknown; for (let attempt = 0; attempt < 3; attempt += 1) try { await storage.delete(key); return; } catch (error) { last = error; if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 25 * 2 ** attempt)); } throw last; }
@@ -180,7 +182,7 @@ async function execute(input: ProcessImageInput, image: ValidatedImage, perceptu
       embedding = canonical.embedding;
     } else {
       let generated: GeneratedImageCaption;
-      try { generated = prepared?.generated ?? generatedImageCaptionSchema.parse(await (dependencies.caption ?? ((value) => captionImageWithOpenAI(value, dependencies.openAI)))({ filename: image.filename, mimeType: image.mimeType, bytes: image.bytes, signal: input.signal })); } catch (error) { throw new ImageProcessingError('IMAGE_CAPTION_FAILED', 'The image caption and score could not be generated.', { cause: error }); }
+      try { generated = prepared?.generated ?? generatedImageCaptionSchema.parse(await (dependencies.caption ? dependencies.caption({ filename: image.filename, mimeType: image.mimeType, bytes: image.bytes, signal: input.signal }) : captionImageWithVertex(input.scopeKey, { filename: image.filename, mimeType: image.mimeType, bytes: image.bytes, signal: input.signal }))); } catch (error) { throw new ImageProcessingError('IMAGE_CAPTION_FAILED', 'The image caption and score could not be generated.', { cause: error }); }
       await heartbeat.checkpoint();
       caption = generated.caption;
       if (!caption) throw new ImageProcessingError('IMAGE_CAPTION_FAILED', 'The image caption must not be blank.');
@@ -285,7 +287,7 @@ export async function processImages(inputs: readonly ProcessImageInput[], depend
     try {
       generatedCaptions = dependencies.captionBatch
         ? (await dependencies.captionBatch(captionInputs)).map((result) => generatedImageCaptionSchema.parse(result))
-        : await Promise.all(captionInputs.map((value) => (dependencies.caption ?? ((input) => captionImageWithOpenAI(input, dependencies.openAI)))(value).then((result) => generatedImageCaptionSchema.parse(result))));
+        : await Promise.all(captionInputs.map((value, position) => (dependencies.caption ? dependencies.caption(value) : captionImageWithVertex(inputs[representatives[position]!.index]!.scopeKey, value)).then((result) => generatedImageCaptionSchema.parse(result))));
     } catch (error) {
       throw new ImageProcessingError('IMAGE_CAPTION_FAILED', 'The image caption batch could not be generated.', { cause: error });
     }

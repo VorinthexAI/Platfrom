@@ -224,7 +224,7 @@ function publicThread(value: EmailThread) {
   return { key, subject, summary, intent, ...(action ? { action } : {}), priority, state, lastMessageAt, ...(snippet !== undefined ? { snippet } : {}), ...(category ? { category } : {}), unread, isRead: !unread, ...(starred !== undefined ? { starred } : {}), ...(labels ? { labels } : {}), ...(latestFrom ? { latestFrom } : {}), ...(inInbox !== undefined ? { inInbox } : {}), isFavorite, inboxCategory, createdAt, updatedAt };
 }
 function publicMessage<T extends { embedding: number[]; bodyHtml?: string; unread: boolean }>(value: T) {
-  const { embedding: _embedding, bodyHtml: _html, scopeKey: _scopeKey, accountKey: _accountKey, providerMessageId: _providerMessageId, messageIdHeader: _messageIdHeader, inReplyTo: _inReplyTo, references: _references, parentMessageId: _parentMessageId, embeddingContentVersion: _embeddingContentVersion, ...safe } = value as T & Partial<EmailMessage>;
+  const { embedding: _embedding, bodyHtml: _html, scopeKey: _scopeKey, accountKey: _accountKey, providerMessageId: _providerMessageId, messageIdHeader: _messageIdHeader, inReplyTo: _inReplyTo, references: _references, parentMessageId: _parentMessageId, embeddingContentVersion: _embeddingContentVersion, developmentFixtureIdentifier: _developmentFixtureIdentifier, ...safe } = value as T & Partial<EmailMessage> & { developmentFixtureIdentifier?: string };
   return { ...safe, isRead: !value.unread };
 }
 type ReadEmailMessage = ReturnType<typeof publicMessage<EmailMessage>> & { bodyTruncated: boolean };

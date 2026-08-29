@@ -89,7 +89,7 @@ export async function executeAsk<TOutput>(organizationKey: string, input: CoreCh
     mode: 'model',
     organizationKey,
     actionSlug: 'ask',
-    modelSlug: mode === 'deep' ? 'openai.gpt-5.6-luna' : 'google.gemini-2.5-flash-lite',
+    modelSlug: 'google.gemini-3.5-flash-lite',
   };
   return executeAction<typeof providerInput, TOutput>(request, providerInput, options);
 }
@@ -99,7 +99,7 @@ export async function executeWebSearch<TOutput>(organizationKey: string, input: 
   const { mode, ...providerInput } = webSearchInputSchema.parse(input);
   return executeAction<typeof providerInput, TOutput>({
     mode: 'model', organizationKey, actionSlug: 'web-search',
-    modelSlug: mode === 'deep' ? 'openai.gpt-5.6-luna' : 'google.gemini-2.5-flash-lite',
+    modelSlug: 'google.gemini-3.7-flash',
   }, providerInput, options);
 }
 

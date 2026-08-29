@@ -2816,7 +2816,7 @@ describe('multi-inbox account authorization', () => {
 
 describe('model-safe email thread reads', () => {
   test('returns at most 50 messages with bounded bodies and explicit truncation', async () => {
-    const child = { ...message, key: 'cmsp3gwac0009r07kdlin5eoi', providerMessageId: 'message-2', messageIdHeader: '<child@example.com>', inReplyTo: '<source@example.com>', parentMessageId: '<source@example.com>', replyDepth: 1, body: 'x'.repeat(9_000) };
+    const child = { ...message, key: 'cmsp3gwac0009r07kdlin5eoi', providerMessageId: 'message-2', messageIdHeader: '<child@example.com>', inReplyTo: '<source@example.com>', parentMessageId: '<source@example.com>', replyDepth: 1, body: 'x'.repeat(9_000), developmentFixtureIdentifier: 'internal-fixture' };
     let received: unknown[] = [];
     const repository = { readThreadPage: async (...input: unknown[]) => { received = input; return { thread, messages: [message, child], nextCursor: 'next' }; } };
     const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'viewer' }) });
@@ -2828,6 +2828,7 @@ describe('model-safe email thread reads', () => {
     expect(output.messages[1]?.bodyTruncated).toBe(true);
     expect(output.messages[1]?.replyDepth).toBe(1);
     expect(output.messages[1]).not.toHaveProperty('parentMessageId');
+    expect(output.messages[1]).not.toHaveProperty('developmentFixtureIdentifier');
     expect(output.nextCursor).toBe('next');
     expect(output.truncated).toBe(true);
   });

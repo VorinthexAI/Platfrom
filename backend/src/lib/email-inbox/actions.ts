@@ -8,7 +8,7 @@ export async function executeEmailAsk<TOutput = ChatOutput>(organizationKey: str
   const { mode, ...input } = coreChatInputSchema.parse(rawInput);
   return executeAction<typeof input, TOutput>({
     mode: 'model', organizationKey, actionSlug: 'ask',
-    modelSlug: mode === 'deep' ? 'openai.gpt-5.6-luna' : 'google.gemini-2.5-flash-lite',
+    modelSlug: 'google.gemini-3.5-flash-lite',
   }, input, options);
 }
 

@@ -4,6 +4,7 @@ import { generateSpeechAction, speechInputSchema, speechOutputSchema } from './g
 describe('generate-speech action', () => {
   test('defines a strict provider-neutral narration contract', () => {
     expect(generateSpeechAction).toMatchObject({ id: 'generate-speech', modelPolicy: 'required' });
+    expect(generateSpeechAction.models).toEqual([{ provider: 'aws-polly', model: 'amazon.polly-neural', priority: 100 }]);
     expect(speechInputSchema.parse({ text: 'Chapter prose', voice: 'coral', pace: 1.37, format: 'mp3' })).toMatchObject({ pace: 1.37 });
     expect(() => speechInputSchema.parse({ text: 'Chapter prose', voice: 'custom', pace: 1, format: 'mp3' })).toThrow();
     expect(() => speechInputSchema.parse({ text: 'Chapter prose', voice: 'coral', pace: 2.1, format: 'mp3' })).toThrow();

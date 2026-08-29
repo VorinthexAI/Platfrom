@@ -19,8 +19,8 @@ describe('action registry', () => {
     expect(ACTION_SLUGS).toEqual([
       'ask', 'embed', 'web-search',
       'traverse', 'read', 'insert', 'upsert', 'update', 'delete',
-      'generate-image', 'edit-image', 'generate-video', 'edit-video', 'extend-video', 'analyze-video',
-      'analyze-audio', 'generate-music', 'generate-speech',
+      'generate-image', 'edit-image', 'generate-video', 'edit-video', 'extend-video',
+      'generate-music', 'generate-speech',
       'document-validate', 'storage-upload', 'document-extract', 'document-embed', 'document-insert', 'caption-image', 'describe-visual-identity',
     ]);
     expect(ACTION_DEFINITIONS.filter((action) => action.modelPolicy === 'none').map((action) => action.id))
@@ -29,22 +29,17 @@ describe('action registry', () => {
         'document-validate', 'storage-upload', 'document-extract', 'document-embed', 'document-insert',
       ]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'ask')?.models)
-      .toEqual([
-        { provider: 'openrouter', model: 'google.gemini-2.5-flash-lite', priority: 100 },
-        { provider: 'openai', model: 'openai.gpt-5.6-luna', priority: 90 },
-      ]);
+      .toEqual([{ provider: 'google-vertex', model: 'google.gemini-3.5-flash-lite', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'caption-image')?.models)
-      .toEqual([{ provider: 'openai', model: 'openai.gpt-5.6-luna', priority: 100 }]);
+      .toEqual([{ provider: 'google-vertex', model: 'google.gemini-3.7-flash', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'describe-visual-identity')?.models)
-      .toEqual([{ provider: 'openai', model: 'openai.gpt-5.6-luna', priority: 100 }]);
+      .toEqual([{ provider: 'google-vertex', model: 'google.gemini-3.7-flash', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'generate-image')?.models)
-      .toEqual([
-        { provider: 'openrouter', model: 'bfl.flux-2-klein-4b', priority: 100 },
-        { provider: 'openai', model: 'openai.gpt-image-2', priority: 90 },
-        { provider: 'openrouter', model: 'xai.grok-imagine-image-quality', priority: 80 },
-      ]);
+      .toEqual([{ provider: 'google-vertex', model: 'google.gemini-3.1-flash-lite-image', priority: 100 }]);
+    expect(ACTION_DEFINITIONS.find((action) => action.id === 'generate-speech')?.models)
+      .toEqual([{ provider: 'aws-polly', model: 'amazon.polly-neural', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'embed')?.models)
-      .toEqual([{ provider: 'openai', model: 'openai.text-embedding-3-small', priority: 100 }]);
+      .toEqual([{ provider: 'azure-ai-foundry', model: 'openai.text-embedding-3-small', priority: 100 }]);
   });
 
   test('delegates generic data primitives to the node helper implementation', async () => {

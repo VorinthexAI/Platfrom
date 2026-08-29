@@ -21,7 +21,7 @@ describe('canonical app audio service', () => {
       publishChanged: async (key) => { calls.push(['publish', key]); }, id: () => audioKey, now: () => timestamp,
     });
     const output = await service.generateDocument({ documentKey, voice: 'warm', pace: 1, includeTitle: true, includeCode: false }, context);
-    expect(calls[0]?.[1]).toEqual({ text: 'Architecture.\n\nRead this.', voice: 'coral', pace: 1, format: 'mp3' });
+    expect(calls[0]?.[1]).toEqual({ text: 'Architecture.\n\nRead this.', language: 'English', voice: 'coral', pace: 1, format: 'mp3' });
     expect(output).toMatchObject({ key: audioKey, documentKey, version: 1, mimeType: 'audio/mpeg', sizeBytes: 3, durationMs: 2_000, voice: 'warm', speakingRate: 1, includeTitle: true, includeCode: false, current: true, url: expect.stringContaining('https://audio.example/') });
     expect(JSON.stringify(output)).not.toMatch(/storageKey|createdByKey|scopeKey/);
     expect(calls).toContainEqual(['publish', scopeKey]);
