@@ -899,10 +899,14 @@ jobs:
           creds=$(aws ssm get-parameters-by-path --region "$AWS_REGION" --path "$SSM_PATH" --recursive --with-decryption --query "Parameters[].{n:Name,v:Value}" --output json)
           arango_password=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/ARANGO_ROOT_PASSWORD")) | .v')
           arango_database=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/ARANGO_DATABASE")) | .v')
+          openrouter_api_key=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENROUTER_API_KEY")) | .v')
           test -n "$arango_password" || { echo "::error::ARANGO_ROOT_PASSWORD not found under $SSM_PATH"; exit 1; }
+          test -n "$openrouter_api_key" || { echo "::error::OPENROUTER_API_KEY not found under $SSM_PATH; seeded roster embeddings cannot run"; exit 1; }
           echo "::add-mask::$arango_password"
+          echo "::add-mask::$openrouter_api_key"
           echo "ARANGO_ROOT_PASSWORD=$arango_password" >> "$GITHUB_ENV"
           echo "ARANGO_DATABASE=$arango_database" >> "$GITHUB_ENV"
+          echo "OPENROUTER_API_KEY=$openrouter_api_key" >> "$GITHUB_ENV"
       - name: Upsert db.seeds.secrets.json
         env:
           ARANGO_URL: http://127.0.0.1:8529
