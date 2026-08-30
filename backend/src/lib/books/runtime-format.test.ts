@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
-import { BOOK_CHAPTER_WORD_MIN } from '@/lib/db/book-chapters.node';
+import { APP_SPEECH_WORDS_PER_MINUTE } from '@/lib/app-speech/service';
+import { BOOK_CHAPTER_WORD_MAX, BOOK_CHAPTER_WORD_MIN } from '@/lib/db/book-chapters.node';
 import { formatChapterParagraphs, narrationText } from './runtime';
 
 test('formats chapter prose into readable real-newline paragraphs', () => {
@@ -16,4 +17,12 @@ test('normalizes escaped breaks for storage and removes them from narration', ()
 
   expect(formatted).toBe('First short paragraph.\n\nSecond short paragraph.');
   expect(narrationText(formatted)).toBe('First short paragraph. Second short paragraph.');
+});
+
+test('targets approximately one narrated minute per chapter', () => {
+  const minimumSeconds = BOOK_CHAPTER_WORD_MIN / APP_SPEECH_WORDS_PER_MINUTE * 60;
+  const maximumSeconds = BOOK_CHAPTER_WORD_MAX / APP_SPEECH_WORDS_PER_MINUTE * 60;
+
+  expect(minimumSeconds).toBeGreaterThanOrEqual(55);
+  expect(maximumSeconds).toBeLessThanOrEqual(62);
 });

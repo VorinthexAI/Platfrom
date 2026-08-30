@@ -6,7 +6,7 @@ import {
   type ImageCaptionOutput,
   type ProviderExecuteResponse,
 } from '@/lib/ai/providers';
-import { IMAGE_CAPTION_MODEL, MAX_IMAGE_CAPTION_URLS } from '@/lib/image-caption-constants';
+import { MAX_IMAGE_CAPTION_URLS } from '@/lib/image-caption-constants';
 
 export interface ImageCaptionToolDependencies extends ExecuteActionOptions {
   organizationKey?: string;
@@ -46,13 +46,11 @@ export const imageCaptionTool = {
     const organizationKey = dependencies.organizationKey ?? 'nexus';
     const response = dependencies.executeImageCaption
       ? await dependencies.executeImageCaption(organizationKey, input)
-      : await executeAction<ImageCaptionInput, ImageCaptionOutput>({
-          mode: 'fixed',
+      : await executeAction<ImageCaptionInput & { operation: 'caption' }, ImageCaptionOutput>({
+          mode: 'auto',
           organizationKey,
-          actionSlug: 'caption-image',
-          modelSlug: IMAGE_CAPTION_MODEL,
-          providerSlug: 'google-vertex',
-        }, input, dependencies);
+          actionSlug: 'image',
+        }, { operation: 'caption', ...input }, { providers: ['image.primary'], ...dependencies });
     const output = imageCaptionOutputSchema.parse(response.output);
     if (output.results.length !== input.imageUrls.length) {
       throw new Error('Image result count must match the supplied image count.');

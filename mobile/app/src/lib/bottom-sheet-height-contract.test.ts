@@ -112,7 +112,9 @@ test("classifies every full-height sheet workflow explicitly", () => {
   expect(travel).toContain('height="full"');
   expect(email).toContain('height={sheet === "trashRoot" || formSheet ? "full" : undefined}');
   for (const title of ["Recipients", "Write email", "Choose a tone", "Email draft"]) expect(email).toMatch(new RegExp(`height="full"[\\s\\S]*?title="${title}"`));
-  for (const title of ["Choose a topic", "Your topic", "Choose a goal", "Your goal", "Audio book details", "Extend audio book"]) expect(ascend).toMatch(new RegExp(`height="full"[\\s\\S]*?title="${title}"`));
+  for (const title of ["Choose a topic", "Your topic", "Choose a goal", "Your goal"]) expect(ascend).toMatch(new RegExp(`height="full"[\\s\\S]*?title="${title}"`));
+  expect(ascend).toContain('? "Extend audio book?"');
+  expect(ascend).toContain('title="Create custom audio book"');
   expect(ascend).toContain('{sheet === "chapterRead" ? <ChapterReading chapter={readingChapter} /> : null}');
   expect(ascend).not.toContain('"sleep"');
   expect(ascend).not.toContain('sheet === "detail"');

@@ -3,6 +3,12 @@
 Provider-neutral actions own their exact model/provider candidates and routing
 priorities. Callers invoke the action without depending on provider APIs.
 
+Detailed guides:
+
+- [Providers](providers/README.md)
+- [Actions](actions/README.md)
+- [Unified tools](tools/README.md)
+
 ## Routing
 
 `selectRoute` resolves the action from the code registry and considers its exact

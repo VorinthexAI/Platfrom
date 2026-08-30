@@ -46,18 +46,18 @@ export const orchestratorResponseRuntime = {
     const chatInput = await prepareChatInput(skill, rawInput, dependencies);
     const organizationKey = dependencies.organizationKey ?? 'nexus';
     if (dependencies.stream) {
-      yield* validateStream(dependencies.stream(organizationKey, chatInput), 'google.gemini-3.5-flash-lite', 'google-vertex');
+      yield* validateStream(dependencies.stream(organizationKey, chatInput), 'google.gemini-3.1-flash-lite-preview', 'openrouter');
       return;
     }
     const select = dependencies.selectRoute ?? selectRoute;
     const stream = dependencies.streamRoute ?? streamRoute;
-    const routes = [{ modelSlug: 'google.gemini-3.5-flash-lite', providerSlug: 'google-vertex' }] as const;
+    const routes = [{ modelSlug: 'google.gemini-3.1-flash-lite-preview', providerSlug: 'openrouter' }] as const;
     let lastError: unknown;
     for (const { modelSlug, providerSlug } of routes) {
       if (dependencies.signal?.aborted) throw dependencies.signal.reason ?? new DOMException('The operation was aborted', 'AbortError');
       let emittedText = false;
       try {
-        const decision = await select({ mode: 'fixed', organizationKey, actionSlug: 'ask', modelSlug, providerSlug }, dependencies);
+        const decision = await select({ mode: 'fixed', organizationKey, actionSlug: 'text', modelSlug, providerSlug }, dependencies);
         const chunks = validateStream(stream({
           decision,
           input: chatInput,

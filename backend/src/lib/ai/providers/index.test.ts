@@ -23,15 +23,15 @@ describe('provider registry', () => {
   });
 
   test('adapters built from create() carry the right id', () => {
-    const adapter = PROVIDER_REGISTRY['azure-ai-foundry'].factory.create({ apiKey: 'test-key', endpoint: 'https://test.openai.azure.com' });
-    expect(adapter.id).toBe('azure-ai-foundry');
-    expect(adapter.name).toBe('Azure AI Foundry');
+    const adapter = PROVIDER_REGISTRY.openrouter.factory.create({ apiKey: 'test-key' });
+    expect(adapter.id).toBe('openrouter');
+    expect(adapter.name).toBe('OpenRouter');
   });
 
-  test('aws-polly uses an explicit region and the AWS default credential chain', () => {
-    const factory = PROVIDER_REGISTRY['aws-polly'].factory;
+  test('OpenRouter requires an API key and creates configured instances', () => {
+    const factory = PROVIDER_REGISTRY.openrouter.factory;
     expect(() => factory.create({})).toThrow();
-    expect(factory.create({ region: 'eu-central-1' }).id).toBe('aws-polly');
+    expect(factory.create({ apiKey: 'openrouter-key' }).id).toBe('openrouter');
   });
 
   test('registers unique models and resolves every action binding to a non-empty external id', () => {
@@ -44,14 +44,6 @@ describe('provider registry', () => {
         expect(getExternalModelId(binding.model, binding.provider)?.trim()).not.toBe('');
       }
     }
-  });
-
-  test('google-vertex requires apiKey or accessToken + projectId', () => {
-    const factory = PROVIDER_REGISTRY['google-vertex'].factory;
-    expect(() => factory.create({ location: 'us-central1' })).toThrow();
-    expect(() => factory.create({ accessToken: 'tok' })).toThrow();
-    expect(factory.create({ apiKey: 'k' }).id).toBe('google-vertex');
-    expect(factory.create({ accessToken: 'tok', projectId: 'proj' }).id).toBe('google-vertex');
   });
 
 });
@@ -70,25 +62,25 @@ describe('provider error normalization', () => {
 
   test('normalizes SDK errors carrying a status', () => {
     const err = Object.assign(new Error('Too Many Requests'), { status: 429 });
-    const normalized = normalizeProviderError('azure-ai-foundry', err);
+    const normalized = normalizeProviderError('openrouter', err);
     expect(normalized).toBeInstanceOf(ProviderError);
     expect(normalized.code).toBe('rate_limited');
     expect(normalized.retryable).toBe(true);
-    expect(normalized.providerId).toBe('azure-ai-foundry');
+    expect(normalized.providerId).toBe('openrouter');
   });
 
   test('normalizes abort and timeout errors', () => {
     const abort = new DOMException('The operation was aborted.', 'AbortError');
-    expect(normalizeProviderError('google-vertex', abort).code).toBe('aborted');
-    expect(normalizeProviderError('google-vertex', abort).retryable).toBe(false);
+    expect(normalizeProviderError('openrouter', abort).code).toBe('aborted');
+    expect(normalizeProviderError('openrouter', abort).retryable).toBe(false);
 
     const timeout = Object.assign(new Error('timed out'), { name: 'TimeoutError' });
-    expect(normalizeProviderError('google-vertex', timeout).code).toBe('timeout');
+    expect(normalizeProviderError('openrouter', timeout).code).toBe('timeout');
   });
 
   test('passes existing ProviderErrors through untouched', () => {
-    const original = new ProviderError('google-vertex', 'invalid_input', 'bad input');
-    expect(normalizeProviderError('google-vertex', original)).toBe(original);
+    const original = new ProviderError('openrouter', 'invalid_input', 'bad input');
+    expect(normalizeProviderError('openrouter', original)).toBe(original);
     expect(original.retryable).toBe(false);
   });
 

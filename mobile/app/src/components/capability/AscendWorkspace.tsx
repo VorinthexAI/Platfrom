@@ -21,10 +21,10 @@ import {
   BottomSheet,
   BottomSheetItem,
 } from "@vorinthex/shared/ui/bottom-sheet";
-import { ActionPill } from "@vorinthex/shared/ui/action-pill";
 import { AiTextEditor } from "@vorinthex/shared/ui/ai-text-editor";
 import { Button, ButtonSizeProvider } from "@vorinthex/shared/ui/button";
 import { CoreComposer } from "@vorinthex/shared/ui/core-composer";
+import { LoadingText } from "@vorinthex/shared/ui/loading-text";
 import { Skeleton } from "@vorinthex/shared/ui/skeleton";
 import { Slider } from "@vorinthex/shared/ui/slider";
 import { Switch } from "@vorinthex/shared/ui/switch";
@@ -59,7 +59,6 @@ import { useBookPlayback } from "@/lib/book-playback";
 import { restoredBookDraft, retryBookCreateRequestKey, type FailedBookCreate } from "@/lib/book-create-retry";
 import {
   askBookAssistant,
-  cancelBook,
   createBook,
   deleteBook,
   extendBook,
@@ -67,7 +66,6 @@ import {
   fetchBooksOverview,
   getBooksContext,
   previewBookExtension,
-  retryBook,
   setBookFavorite,
   suggestBookGoals,
   suggestBookTopics,
@@ -77,7 +75,6 @@ import {
   type BookDetail,
   type BookStatus,
   type CreateBookInput,
-  type ExtensionChapterCount,
 } from "@/lib/books-client";
 import { deleteContentSearchHistory, getContentContext, type ContentSearchHistoryItem } from "@/lib/content-client";
 import { attachmentIdentity } from "@/lib/email-attachment-picker";
@@ -110,8 +107,7 @@ const ACTIVE_STATUSES: BookStatus[] = [
   "narrating",
   "finalizing",
 ];
-const EXTENSION_CHAPTER_OPTIONS = [1, 3, 5] as const;
-const MAX_CONTEXT_DOCUMENTS = 50;
+const MAX_CONTEXT_DOCUMENTS = 10;
 const DEFAULT_NARRATOR = { key: "clear" as const, name: "Clear" };
 const CORE_PROMPTS = [
   "Write a field guide to deep work",
@@ -141,9 +137,10 @@ type LibrarySheet =
   | "bookActions"
   | "bulkActions"
   | "bulkDelete"
+  | "extend"
   | "delete";
 type Draft = CreateBookInput;
-type BriefEditorTarget = "topic" | "goal";
+type BriefEditorTarget = "topic" | "goal" | "additionalInstructions";
 type BriefTransformation = Readonly<{ target: BriefEditorTarget; action: "enhance" | "translate" }>;
 type PendingRequest = {
   book: Book;
@@ -159,7 +156,6 @@ const INITIAL_DRAFT: Draft = {
   narratorVoiceKey: DEFAULT_NARRATOR.key,
   narrationPace: 1,
   archiveDocumentKeys: [],
-  chapterImages: true,
 };
 
 function errorMessage(error: unknown) {
@@ -167,10 +163,6 @@ function errorMessage(error: unknown) {
     ? error.message
     : "The request could not be completed.";
 }
-function statusLabel(status: BookStatus) {
-  return status.charAt(0).toUpperCase() + status.slice(1);
-}
-
 export function Cover({ book, index = 0 }: { book: Book; index?: number }) {
   if (book.coverUrl)
     return (
@@ -201,14 +193,12 @@ export function ChapterCard({ chapter, reducedMotion, width, onPress }: { chapte
     return () => animation.stop();
   }, [entrance, reducedMotion]);
   return (
-    <Animated.View style={{ width, height: (width * 16) / 9, opacity: entrance, transform: [{ scale: entrance.interpolate({ inputRange: [0, 1], outputRange: [0.88, 1] }) }] }}>
+    <Animated.View style={{ width, height: 132, opacity: entrance, transform: [{ scale: entrance.interpolate({ inputRange: [0, 1], outputRange: [0.88, 1] }) }] }}>
       <Button accessibilityLabel={`Chapter ${chapter.position}, ${chapter.title}. ${chapter.description}${chapter.isCompleted ? ", completed" : ""}`} contentMode="raw" disabled={!onPress} onPress={onPress} shape="rounded" size="md" style={[styles.chapterCard, styles.chapterCardFill]} variant="ghost">
-        {chapter.imageUrl ? <Image contentFit="cover" source={chapter.imageUrl} style={styles.cover} /> : <LinearGradient colors={GRADIENTS[(chapter.position - 1) % GRADIENTS.length]!} style={styles.cover} />}
-        <LinearGradient colors={["transparent", "rgba(0,0,0,0.08)", "rgba(0,0,0,0.58)"]} locations={[0, 0.58, 1]} style={styles.cardShade} />
         <View style={styles.cardCopy}>
           <Text style={styles.chapterNumber}>{String(chapter.position).padStart(2, "0")}</Text>
           <Text numberOfLines={2} style={styles.cardTitle}>{chapter.title}</Text>
-          {!chapter.content || !chapter.audioUrl ? <Text numberOfLines={4} style={styles.cardSummary}>{chapter.description}</Text> : null}
+          <Text numberOfLines={4} style={styles.cardSummary}>{chapter.description}</Text>
         </View>
       </Button>
     </Animated.View>
@@ -259,6 +249,7 @@ export function AscendWorkspace() {
   const [createGoalOpen, setCreateGoalOpen] = useState(false);
   const [createGoalCustomOpen, setCreateGoalCustomOpen] = useState(false);
   const [createDetailsOpen, setCreateDetailsOpen] = useState(false);
+  const [customCreate, setCustomCreate] = useState(false);
   const [contextPickerOpen, setContextPickerOpen] = useState(false);
   const [contextLabels, setContextLabels] = useState<EmailAttachmentLabels>({});
   const [contextGridWidth, setContextGridWidth] = useState(0);
@@ -268,15 +259,9 @@ export function AscendWorkspace() {
   const [playbackScrubValue, setPlaybackScrubValue] = useState<number>();
   const [playbackIslandDismissed, setPlaybackIslandDismissed] = useState(false);
   const [sharingBook, setSharingBook] = useState<Book>();
-  const [extensionOpen, setExtensionOpen] = useState(false);
-  const [extensionChapterCount, setExtensionChapterCount] = useState<ExtensionChapterCount>(1);
-  const [extensionTitles, setExtensionTitles] = useState<string[]>([]);
-  const [extensionPreviewReady, setExtensionPreviewReady] = useState(false);
-  const [extensionError, setExtensionError] = useState<string>();
   const [selectedBookKeys, setSelectedBookKeys] = useState<string[]>([]);
   const [bulkLoading, setBulkLoading] = useState(false);
   const [bookPageOpen, setBookPageOpen] = useState(false);
-  const [revealedChapterCount, setRevealedChapterCount] = useState(0);
   const [reducedChapterMotion, setReducedChapterMotion] = useState(false);
   const [query, setQuery] = useState("");
   const [showOnlyFavorites, setShowOnlyFavorites] = useState(false);
@@ -302,11 +287,12 @@ export function AscendWorkspace() {
   const assistantRequestKey = useRef<string | undefined>(undefined);
   const failedCreate = useRef<FailedBookCreate | undefined>(undefined);
   const rootSearchInputRef = useRef<NativeTextInput>(null);
+  const customTopicInputRef = useRef<NativeTextInput>(null);
+  const customGoalInputRef = useRef<NativeTextInput>(null);
   const rootSearchFocusTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const briefTransformationGeneration = useRef(0);
   const longPressedBook = useRef<string | undefined>(undefined);
   const bulkMutationLocked = useRef(false);
-  const extensionPreviewGeneration = useRef(0);
 
   const overviewQuery = useQuery({
     queryKey: ascendQueryKeys.overview(context),
@@ -373,6 +359,16 @@ export function AscendWorkspace() {
     const subscription = AccessibilityInfo.addEventListener("reduceMotionChanged", setReducedChapterMotion);
     return () => { mounted = false; subscription.remove(); };
   }, []);
+  useEffect(() => {
+    if (!createTopicCustomOpen) return;
+    const timer = setTimeout(() => customTopicInputRef.current?.focus(), 300);
+    return () => clearTimeout(timer);
+  }, [createTopicCustomOpen]);
+  useEffect(() => {
+    if (!createGoalCustomOpen) return;
+    const timer = setTimeout(() => customGoalInputRef.current?.focus(), 300);
+    return () => clearTimeout(timer);
+  }, [createGoalCustomOpen]);
   const createMutation = useMutation({
     mutationFn: ({
       input,
@@ -389,6 +385,7 @@ export function AscendWorkspace() {
         description: input.goal,
         status: "queued",
         isFavorite: false,
+        isExtending: false,
         narrator: DEFAULT_NARRATOR,
         estimatedMinutes: 10,
         chapterCount: 10,
@@ -435,11 +432,14 @@ export function AscendWorkspace() {
           requestKey: mutationContext.pending.requestKey,
         };
         setDraft(restoredBookDraft(failedCreate.current));
+        const restoringCustomCreate = Boolean(mutationContext.pending.input.additionalInstructions?.trim());
+        setCustomCreate(restoringCustomCreate);
         setDraftError(
           `${errorMessage(error)} Your draft was restored so you can retry.`,
         );
         closeCreationSheets();
-        setCreateDetailsOpen(true);
+        if (restoringCustomCreate) setCreateDetailsOpen(true);
+        else setCreateGoalOpen(true);
       }
       showToast({ title: errorMessage(error), duration: 3_000 });
       await queryClient.invalidateQueries({
@@ -450,39 +450,31 @@ export function AscendWorkspace() {
     },
   });
   const lifecycleMutation = useMutation({
-    onMutate: () => setLifecycleError(undefined),
+    onMutate: ({ book }: { action: "delete"; book: Book }) => {
+      setLifecycleError(undefined);
+      removeCachedBook(queryClient, context, book.key);
+      if (playback.playbackBookKey === book.key) playback.clear(false);
+      setSelectedBookKey(undefined);
+      setBookPageOpen(false);
+      setSheetOpen(false);
+      setSheet(undefined);
+      return { deletedBook: book };
+    },
     mutationFn: async ({
       action,
       book,
     }: {
-      action: "retry" | "cancel" | "delete";
+      action: "delete";
       book: Book;
     }) => {
       const requestKey = randomUUID();
-      if (action === "delete") {
-        await deleteBook(book.key, requestKey);
-        return { action, book };
-      }
-      const updated =
-        action === "retry"
-          ? await retryBook(book.key, requestKey)
-          : await cancelBook(book.key, requestKey);
-      return { action, book: updated };
+      await deleteBook(book.key, requestKey);
+      return { action, book };
     },
-    onSuccess: ({ action, book }) => {
-      if (action === "delete") {
-        removeCachedBook(queryClient, context, book.key);
-        if (playback.playbackBookKey === book.key) playback.clear(false);
-        setSelectedBookKey(undefined);
-        setBookPageOpen(false);
-        setSheetOpen(false);
-      } else patchCachedBook(queryClient, context, book);
-    },
-    onError: (error, variables) => {
+    onError: (error, variables, mutationContext) => {
+      if (mutationContext?.deletedBook) addCachedBook(queryClient, context, mutationContext.deletedBook);
       if (error instanceof BookClientError && error.code === "BOOK_FAVORITE" && variables.action === "delete") {
-        patchCachedBook(queryClient, context, { ...variables.book, isFavorite: true });
-        setSheetOpen(false);
-        setSheet(undefined);
+        addCachedBook(queryClient, context, { ...variables.book, isFavorite: true });
         showToast({ title: "Can't delete favorite audio book", duration: 2_500 });
         return;
       }
@@ -527,23 +519,15 @@ export function AscendWorkspace() {
     },
     onError: (error) => setGoalSuggestionsError(errorMessage(error)),
   });
-  const extensionPreviewMutation = useMutation({
-    mutationFn: ({ bookKey, chapterCount, generation }: { bookKey: string; chapterCount: ExtensionChapterCount; generation: number }) => previewBookExtension(bookKey, chapterCount).then((preview) => ({ ...preview, generation })),
-    onSuccess: ({ titles, generation }) => {
-      if (generation !== extensionPreviewGeneration.current) return;
-      setExtensionTitles(titles);
-      setExtensionPreviewReady(true);
-      setExtensionError(undefined);
-    },
-    onError: (error, { generation }) => {
-      if (generation !== extensionPreviewGeneration.current) return;
-      setExtensionPreviewReady(false);
-      setExtensionError(errorMessage(error));
-    },
-  });
   const extensionMutation = useMutation({
-    mutationFn: ({ bookKey, chapterCount, titles, requestKey }: { bookKey: string; chapterCount: ExtensionChapterCount; titles: string[]; requestKey: string }) => extendBook(bookKey, chapterCount, titles, requestKey),
-    onMutate: () => setExtensionOpen(false),
+    mutationFn: async ({ bookKey, requestKey }: { bookKey: string; requestKey: string }) => {
+      const { titles } = await previewBookExtension(bookKey, 1);
+      return extendBook(bookKey, 1, titles, requestKey);
+    },
+    onMutate: () => {
+      setSheetOpen(false);
+      setSheet(undefined);
+    },
     onSuccess: async (book) => {
       patchCachedBookMetadata(queryClient, context, book);
       await Promise.all([
@@ -573,42 +557,15 @@ export function AscendWorkspace() {
     setCreateTopicOpen(false);
   }
   function openExtension() {
-    extensionPreviewGeneration.current += 1;
-    extensionPreviewMutation.reset();
-    setExtensionChapterCount(1);
-    setExtensionTitles([]);
-    setExtensionPreviewReady(false);
-    setExtensionError(undefined);
-    setSheetOpen(false);
-    setSheet(undefined);
-    setExtensionOpen(true);
-  }
-  function closeExtension() {
-    extensionPreviewGeneration.current += 1;
-    setExtensionOpen(false);
-  }
-  function chooseExtensionChapterCount(chapterCount: ExtensionChapterCount) {
-    extensionPreviewGeneration.current += 1;
-    extensionPreviewMutation.reset();
-    setExtensionChapterCount(chapterCount);
-    setExtensionTitles([]);
-    setExtensionPreviewReady(false);
-    setExtensionError(undefined);
-  }
-  function previewExtension() {
-    if (!selectedBook || extensionPreviewMutation.isPending) return;
-    const generation = ++extensionPreviewGeneration.current;
-    setExtensionTitles([]);
-    setExtensionPreviewReady(false);
-    setExtensionError(undefined);
-    extensionPreviewMutation.mutate({ bookKey: selectedBook.key, chapterCount: extensionChapterCount, generation });
+    open("extend");
   }
   function generateExtension() {
-    if (!selectedBook || !extensionPreviewReady || extensionMutation.isPending) return;
-    extensionMutation.mutate({ bookKey: selectedBook.key, chapterCount: extensionChapterCount, titles: extensionTitles, requestKey: randomUUID() });
+    if (!selectedBook || extensionMutation.isPending) return;
+    extensionMutation.mutate({ bookKey: selectedBook.key, requestKey: randomUUID() });
   }
   function beginCreate() {
     closeCreationSheets();
+    setCustomCreate(false);
     setDraft(INITIAL_DRAFT);
     setContextLabels({});
     setTopicSuggestions([]);
@@ -620,12 +577,22 @@ export function AscendWorkspace() {
     setCreateTopicOpen(true);
     topicSuggestionsMutation.mutate([]);
   }
+  function beginCustomCreate() {
+    closeCreationSheets();
+    setCustomCreate(true);
+    setDraft(INITIAL_DRAFT);
+    setContextLabels({});
+    setDraftError(undefined);
+    setSheetOpen(false);
+    setSheet(undefined);
+    setCreateDetailsOpen(true);
+  }
   function loadNewTopics() {
     setTopicSuggestionsError(undefined);
     topicSuggestionsMutation.mutate(topicSuggestions);
   }
   function briefEditorText(target: BriefEditorTarget) {
-    return draft[target];
+    return draft[target] ?? "";
   }
   function applyBriefEditorText(target: BriefEditorTarget, value: string) {
     setDraft((current) => ({ ...current, [target]: value }));
@@ -709,6 +676,8 @@ export function AscendWorkspace() {
     setGoalSuggestionsError(undefined);
     setDraftError(undefined);
     Keyboard.dismiss();
+    setCreateTopicOpen(false);
+    setCreateTopicCustomOpen(false);
     setCreateGoalOpen(true);
     goalSuggestionsMutation.mutate({ topic, excludeGoals: [] });
   }
@@ -716,44 +685,63 @@ export function AscendWorkspace() {
     setGoalSuggestionsError(undefined);
     goalSuggestionsMutation.mutate({ topic: draft.topic, excludeGoals: goalSuggestions });
   }
-  function openDetailsStep(goal: string) {
-    setDraft((current) => ({ ...current, goal }));
+  function completeNormalGoal(goal: string) {
+    const nextDraft = { ...draft, goal };
+    setDraft(nextDraft);
     setDraftError(undefined);
     Keyboard.dismiss();
-    setCreateDetailsOpen(true);
+    submitDraft(nextDraft);
   }
-  function submit() {
+  function submitDraft(sourceDraft: Draft) {
     if (createMutation.isPending) return;
-    if (
-      draft.topic.trim().length < 3 ||
-      draft.goal.trim().length < 3
-    ) {
+    const customBrief = sourceDraft.additionalInstructions?.trim() ?? "";
+    if (customCreate && customBrief.length < 3) {
+      setDraftError("Add some text for your custom audio book.");
+      return;
+    }
+    if (!customCreate && (
+      sourceDraft.topic.trim().length < 3 ||
+      sourceDraft.goal.trim().length < 3
+    )) {
       setDraftError(
         "Complete the topic and goal before creating your audio book.",
       );
       return;
     }
-    if (draft.archiveDocumentKeys.length > MAX_CONTEXT_DOCUMENTS) {
+    if (sourceDraft.archiveDocumentKeys.length > MAX_CONTEXT_DOCUMENTS) {
       setDraftError(
         `Choose no more than ${MAX_CONTEXT_DOCUMENTS} Archive documents.`,
       );
       return;
     }
-    const input = {
-      ...draft,
-      currentKnowledge: "",
-      narratorVoiceKey: DEFAULT_NARRATOR.key,
-      narrationPace: 1,
-      additionalInstructions: undefined,
-    };
+    const input: CreateBookInput = customCreate
+      ? {
+          ...sourceDraft,
+          topic: customBrief.slice(0, 2_000),
+          goal: "Create an audio book that follows the supplied custom brief.",
+          currentKnowledge: "",
+          narratorVoiceKey: DEFAULT_NARRATOR.key,
+          narrationPace: 1,
+          additionalInstructions: customBrief,
+        }
+      : {
+          ...sourceDraft,
+          currentKnowledge: "",
+          narratorVoiceKey: DEFAULT_NARRATOR.key,
+          narrationPace: 1,
+          additionalInstructions: undefined,
+        };
     const requestKey = retryBookCreateRequestKey(failedCreate.current, input, randomUUID);
     setDraftError(undefined);
     closeCreationSheets();
+    setCustomCreate(false);
     setDraft(INITIAL_DRAFT);
     createMutation.mutate({ input, requestKey });
   }
+  function submit() {
+    submitDraft(draft);
+  }
   function chooseBook(book: Book) {
-    setRevealedChapterCount(0);
     setSelectedBookKey(book.key);
     setBookPageOpen(true);
     setSheetOpen(false);
@@ -874,7 +862,6 @@ export function AscendWorkspace() {
   useEffect(() => {
     if (!playback.readerRequest || !playback.playbackBookKey) return;
     const frame = requestAnimationFrame(() => {
-      setRevealedChapterCount(0);
       setSelectedBookKey(playback.playbackBookKey);
       setReaderChapterKey(playback.chapter?.key);
       setBookPageOpen(true);
@@ -885,6 +872,9 @@ export function AscendWorkspace() {
   }, [playback.chapter?.key, playback.playbackBookKey, playback.readerRequest]);
 
   const orderedChapters = [...(detail?.chapters ?? [])].sort((left, right) => left.position - right.position);
+  const detailReady = detail?.book.status === "ready" && !detail.book.isExtending;
+  const detailBusy = Boolean(detail && !detailReady && (detail.book.isExtending || ACTIVE_STATUSES.includes(detail.book.status)));
+  const chapterLoadingText = detail?.book.isExtending ? "Extending audio book..." : "Creating audio book...";
   const readerChapter = orderedChapters.find(({ key }) => key === readerChapterKey) ?? playback.chapter;
   const readableChapters = orderedChapters.filter(({ content }) => Boolean(content));
   const readingChapter = readableChapters.find(({ key }) => key === readingChapterKey);
@@ -928,15 +918,18 @@ export function AscendWorkspace() {
   const islandPlaying = playbackMatchesBook && playback.audio.playing;
   const islandError = playbackMatchesBook ? playback.error ?? playback.persistenceError ?? playback.refreshWarning : undefined;
   useEffect(() => {
-    setPlaybackIslandDismissed(false);
-    setPlaybackScrubValue(undefined);
+    const timer = setTimeout(() => {
+      setPlaybackIslandDismissed(false);
+      setPlaybackScrubValue(undefined);
+    }, 0);
+    return () => clearTimeout(timer);
   }, [bookPageOpen, selectedBookKey]);
   useEffect(() => {
     if (playbackScrubValue === undefined || Math.abs(bookPlaybackPosition - playbackScrubValue) > 0.75) return;
     const timeout = setTimeout(() => setPlaybackScrubValue(undefined), 0);
     return () => clearTimeout(timeout);
   }, [bookPlaybackPosition, playbackScrubValue]);
-  const bookPlaybackIsland = bookPageOpen && detail && islandChapter && !playbackIslandDismissed ? (
+  const bookPlaybackIsland = bookPageOpen && detailReady && detail && islandChapter && !playbackIslandDismissed ? (
     <View style={styles.narrationPlayer}>
       <View style={styles.narrationHeading}>
         <View style={styles.narrationTitleBlock}><Text numberOfLines={1} style={styles.narrationTitle}>{islandChapter.title}</Text></View>
@@ -951,17 +944,6 @@ export function AscendWorkspace() {
       {islandError ? <Text accessibilityRole="alert" numberOfLines={2} style={styles.narrationError}>{islandError}</Text> : null}
     </View>
   ) : undefined;
-  useEffect(() => {
-    if (reducedChapterMotion || revealedChapterCount >= orderedChapters.length) return;
-    const timer = setTimeout(() => setRevealedChapterCount((current) => Math.min(current + 1, orderedChapters.length)), 110);
-    return () => clearTimeout(timer);
-  }, [orderedChapters.length, reducedChapterMotion, revealedChapterCount]);
-  const visibleChapterCount = reducedChapterMotion ? orderedChapters.length : revealedChapterCount;
-  const revealedChapters = orderedChapters.slice(0, visibleChapterCount);
-  const showNextChapterSkeleton = Boolean(detail) && (
-    visibleChapterCount < orderedChapters.length ||
-    ACTIVE_STATUSES.includes(detail!.book.status) && orderedChapters.length < detail!.book.chapterCount
-  );
   const sheetTitle =
     sheet === "actions"
       ? ""
@@ -975,6 +957,8 @@ export function AscendWorkspace() {
             ? "Audio book"
           : sheet === "delete"
             ? "Delete audio book?"
+            : sheet === "extend"
+              ? "Extend audio book?"
             : sheet === "bulkDelete"
               ? `Delete ${selectedBooks.length} ${selectedBooks.length === 1 ? "audio book" : "audio books"}?`
               : (selectedBook?.title ?? "Audio book");
@@ -1014,18 +998,18 @@ export function AscendWorkspace() {
         {bookPageOpen ? <Button accessibilityLabel="Audio book actions" contentMode="raw" disabled={!selectedBook} onPress={() => open("bookActions")} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button> : <Button accessibilityLabel="Create in Ascend" contentMode="raw" onPress={() => open("actions")} size="xs" variant="icon"><PlusIcon size="sm" /></Button>}
       </View>
       {bookPageOpen ? (
-        detailQuery.isPending ? <View accessibilityRole="progressbar" style={[styles.detailLoading, styles.detailPage]}><Skeleton style={styles.detailCoverSkeleton} /><Skeleton style={styles.detailLine} /><Skeleton style={[styles.chapterSkeleton, { width: chapterWidth, height: (chapterWidth * 16) / 9 }]} /></View> : detail ? (
+        detailQuery.isPending ? <View accessibilityLabel="Loading audio book" accessibilityRole="progressbar" style={[styles.detailLoading, styles.detailPage]}><Skeleton style={styles.detailHeroSkeleton} /><View style={styles.chapterHeadingRow}><Text style={styles.chapterHeading}>Chapters</Text></View><View onLayout={({ nativeEvent }) => setChapterGridWidth(nativeEvent.layout.width)} style={styles.grid}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.chapterSkeleton, { width: chapterWidth, height: 132 }]} />)}</View></View> : detail ? (
           <ScrollView contentContainerStyle={[styles.detail, styles.detailPage]} showsVerticalScrollIndicator={false}>
             <Button accessibilityLabel={`About ${detail.book.title}`} contentMode="raw" onPress={() => open("bookSummary")} shape="rounded" size="md" style={styles.detailHero} variant="ghost">
-              <View style={styles.detailCover}><Cover book={detail.book} /></View>
+              <View style={styles.detailCover}>{detail.book.coverUrl ? <Cover book={detail.book} /> : <Skeleton accessibilityLabel="Creating audio book cover" accessibilityRole="progressbar" style={styles.detailCoverLoading} />}</View>
               <View style={styles.detailCopy}>
                 {detail.book.currentChapterKey ? <><Text style={styles.detailCurrentLabel}>CURRENT CHAPTER</Text><Text style={styles.detailCurrentChapter}>{orderedChapters.find(({ key }) => key === detail.book.currentChapterKey)?.title ?? detail.book.title}</Text></> : null}
                 <Text style={styles.detailDuration}>{formatBookDuration((bookDuration || detail.book.estimatedMinutes * 60) / 60)}</Text>
               </View>
             </Button>
+            <View style={styles.chapterHeadingRow}>{detailBusy ? <LoadingText text={chapterLoadingText} /> : <Text style={styles.chapterHeading}>Chapters</Text>}</View>
             <View onLayout={({ nativeEvent }) => setChapterGridWidth(nativeEvent.layout.width)} style={styles.grid}>
-              {revealedChapters.map((chapter) => <ChapterCard chapter={chapter} key={chapter.key} onPress={() => openChapterSummary(chapter.key)} reducedMotion={reducedChapterMotion} width={chapterWidth} />)}
-              {showNextChapterSkeleton ? <Skeleton accessibilityLabel={`Preparing chapter ${visibleChapterCount + 1}`} accessibilityRole="progressbar" style={[styles.chapterSkeleton, { width: chapterWidth, height: (chapterWidth * 16) / 9 }]} /> : null}
+              {detailBusy ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel={`Preparing audio book chapter ${index + 1}`} accessibilityRole="progressbar" key={index} style={[styles.chapterSkeleton, { width: chapterWidth, height: 132 }]} />) : orderedChapters.map((chapter) => <ChapterCard chapter={chapter} key={chapter.key} onPress={() => openChapterSummary(chapter.key)} reducedMotion={reducedChapterMotion} width={chapterWidth} />)}
             </View>
           </ScrollView>
         ) : <View accessibilityRole="alert" style={styles.state}><Text style={styles.stateTitle}>Audio book details could not be loaded.</Text><Button onPress={() => void detailQuery.refetch()} size="sm" variant="secondary">Retry</Button></View>
@@ -1045,7 +1029,7 @@ export function AscendWorkspace() {
           {overviewQuery.isPending ? <View accessibilityLabel="Loading audio books" accessibilityRole="progressbar" onLayout={({ nativeEvent }) => setGridWidth(nativeEvent.layout.width)} style={styles.grid}>{Array.from({ length: COLUMNS }, (_, index) => <Skeleton key={index} style={{ width: cardWidth, height: (cardWidth * 16) / 9, borderRadius: radii.sm }} />)}</View> : overviewQuery.error ? <View style={styles.state}><Text style={styles.stateTitle}>Audio books could not be loaded.</Text><Button onPress={() => void overviewQuery.refetch()} size="sm" variant="secondary">Retry</Button></View> : (
             <View onLayout={({ nativeEvent }) => setGridWidth(nativeEvent.layout.width)} style={styles.grid}>
               {filteredBooks.map((book, index) => {
-                if (book.key.startsWith("pending-")) return <Skeleton accessibilityLabel={`Preparing ${book.title}`} accessibilityRole="progressbar" key={book.key} style={{ width: cardWidth, height: (cardWidth * 16) / 9, borderRadius: radii.sm }} />;
+                if (book.key.startsWith("pending-") || ["queued", "researching", "planning"].includes(book.status)) return <Skeleton accessibilityLabel="Preparing audio book metadata" accessibilityRole="progressbar" key={book.key} style={{ width: cardWidth, height: (cardWidth * 16) / 9, borderRadius: radii.sm }} />;
                 const selected = selectedBookKeys.includes(book.key);
                 return <View key={book.key} style={[styles.bookCardFrame, selected && styles.selectedItem, { width: cardWidth, height: (cardWidth * 16) / 9 }]}><Button accessibilityActions={[{ name: "longpress", label: selected ? `Deselect ${book.title}` : `Select ${book.title}` }]} accessibilityLabel={book.title} accessibilityRole="button" accessibilityState={{ selected }} contentMode="raw" onAccessibilityAction={({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") handleBookLongPress(book.key); }} onLongPress={() => handleBookLongPress(book.key)} onPress={() => handleBookPress(book)} shape="rounded" size="md" style={styles.bookCard} variant="ghost"><Cover book={book} index={index} /><LinearGradient colors={["transparent", "rgba(0,0,0,0.08)", "rgba(0,0,0,0.58)"]} locations={[0, 0.58, 1]} style={styles.cardShade} /><View style={styles.cardCopy}><Text numberOfLines={3} style={styles.cardTitle}>{book.title}</Text></View></Button>{selected ? <View pointerEvents="none" style={styles.selectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}</View>;
               })}
@@ -1115,13 +1099,14 @@ export function AscendWorkspace() {
         title={sheetTitle}
       >
         {sheet === "actions" ? (
-          <BottomSheetItem
-            onPress={beginCreate}
-            style={styles.sheetAction}
-            variant="secondary"
-          >
-            Create audio book
-          </BottomSheetItem>
+          <View style={styles.sheetList}>
+            <BottomSheetItem onPress={beginCreate} style={styles.sheetAction} variant="secondary">
+              Create audio book
+            </BottomSheetItem>
+            <BottomSheetItem onPress={beginCustomCreate} style={styles.sheetAction} variant="secondary">
+              Create custom audio book
+            </BottomSheetItem>
+          </View>
         ) : null}
         {sheet === "filter" ? (
           <View style={styles.filterPanel}>
@@ -1142,42 +1127,6 @@ export function AscendWorkspace() {
             <BottomSheetItem disabled={bulkLoading || selectedBook.key.startsWith("pending-")} onPress={() => void updateBooksFavorite([selectedBook], !selectedBook.isFavorite, false)} style={styles.sheetAction} variant="secondary">{selectedBook.isFavorite ? "Unfavorite" : "Favorite"}</BottomSheetItem>
             <BottomSheetItem disabled={selectedBook.key.startsWith("pending-")} onPress={() => { setSheetOpen(false); setSheet(undefined); setSharingBook(selectedBook); }} style={styles.sheetAction} variant="secondary">Share</BottomSheetItem>
             {selectedBook.status === "ready" ? <BottomSheetItem disabled={extensionMutation.isPending} onPress={openExtension} style={styles.sheetAction} variant="secondary">Extend</BottomSheetItem> : null}
-            {selectedBook.status === "failed" || selectedBook.status === "cancelled" ? (
-              <BottomSheetItem
-                disabled={
-                  lifecycleMutation.isPending ||
-                  selectedBook.key.startsWith("pending-")
-                }
-                onPress={() =>
-                  lifecycleMutation.mutate({
-                    action: "retry",
-                    book: selectedBook,
-                  })
-                }
-                style={styles.sheetAction}
-                variant="secondary"
-              >
-                Retry generation
-              </BottomSheetItem>
-            ) : null}
-            {ACTIVE_STATUSES.includes(selectedBook.status) ? (
-              <BottomSheetItem
-                disabled={
-                  lifecycleMutation.isPending ||
-                  selectedBook.key.startsWith("pending-")
-                }
-                onPress={() =>
-                  lifecycleMutation.mutate({
-                    action: "cancel",
-                    book: selectedBook,
-                  })
-                }
-                style={styles.sheetAction}
-                variant="secondary"
-              >
-                Cancel generation
-              </BottomSheetItem>
-            ) : null}
             <BottomSheetItem
               disabled={
                 lifecycleMutation.isPending ||
@@ -1202,8 +1151,6 @@ export function AscendWorkspace() {
         {sheet === "delete" && selectedBook ? (
           <View style={styles.compactSheetActions}>
             <Button
-              disabled={lifecycleMutation.isPending}
-              loading={lifecycleMutation.isPending}
               onPress={deleteSelectedBook}
               size="md"
               variant="primary"
@@ -1211,7 +1158,6 @@ export function AscendWorkspace() {
               Delete
             </Button>
             <Button
-              disabled={lifecycleMutation.isPending}
               onPress={() => { setSheetOpen(false); setSheet(undefined); }}
               size="md"
               variant="secondary"
@@ -1220,29 +1166,15 @@ export function AscendWorkspace() {
             </Button>
           </View>
         ) : null}
+        {sheet === "extend" && selectedBook ? (
+          <View style={styles.compactSheetActions}>
+            <Button disabled={extensionMutation.isPending} onPress={generateExtension} size="md" variant="primary">Extend</Button>
+            <Button disabled={extensionMutation.isPending} onPress={() => { setSheetOpen(false); setSheet(undefined); }} size="md" variant="secondary">Close</Button>
+          </View>
+        ) : null}
         {sheet === "reader" ? <View style={styles.summarySheetContent}><Reader chapter={readerChapter} /></View> : null}
         {sheet === "chapterRead" ? <ChapterReading chapter={readingChapter} /> : null}
         {sheet === "bookSummary" ? <View style={styles.summarySheetContent}><View style={styles.chapterSummaryPanel}><Text selectable style={styles.chapterSummaryText}>{detail?.book.description || "A description is unavailable for this audio book."}</Text></View></View> : null}
-      </BottomSheet>
-
-      <BottomSheet
-        dismissible={!extensionPreviewMutation.isPending}
-        footer={<><Button disabled={extensionPreviewMutation.isPending || extensionMutation.isPending} loading={extensionPreviewMutation.isPending} onPress={extensionPreviewReady ? generateExtension : previewExtension} size="md" variant="primary">{extensionPreviewReady ? "Generate" : "Preview"}</Button><Button disabled={extensionMutation.isPending} onPress={closeExtension} size="md" variant="secondary">Close</Button></>}
-        height="full"
-        onOpenChange={(open) => { if (!open) closeExtension(); }}
-        open={extensionOpen}
-        title="Extend audio book"
-      >
-        <View style={styles.extensionStep}>
-          <Text style={styles.formLabel}>New chapters</Text>
-          <Tabs accessibilityLabel="Extension chapter count" accessibilityRole="tablist" style={styles.detailTabs}>
-            {EXTENSION_CHAPTER_OPTIONS.map((count) => <Button accessibilityRole="tab" accessibilityState={{ selected: extensionChapterCount === count }} key={count} onPress={() => chooseExtensionChapterCount(count)} size="md" style={styles.detailTab} variant={extensionChapterCount === count ? "secondary" : "ghost"}>{count}</Button>)}
-          </Tabs>
-          <ScrollView accessibilityLiveRegion="polite" accessibilityState={{ busy: extensionPreviewMutation.isPending }} contentContainerStyle={styles.extensionTitles} showsVerticalScrollIndicator={false}>
-            {extensionPreviewMutation.isPending ? Array.from({ length: extensionChapterCount }, (_, index) => <Skeleton accessibilityLabel="Previewing extension chapters" accessibilityRole="progressbar" key={index} style={styles.extensionTitleSkeleton} />) : extensionTitles.map((title, index) => <ActionPill key={`${index}-${title}`}><Text numberOfLines={2} style={styles.extensionTitle}>{title}</Text></ActionPill>)}
-            {extensionError ? <Text accessibilityRole="alert" style={styles.failed}>{extensionError}</Text> : null}
-          </ScrollView>
-        </View>
       </BottomSheet>
 
       <BottomSheet
@@ -1255,7 +1187,7 @@ export function AscendWorkspace() {
       >
         <ScrollView contentContainerStyle={styles.suggestionStep} showsVerticalScrollIndicator={false}>
           <View style={styles.suggestionList}>
-            {!topicSuggestionsMutation.isPending && topicSuggestions.length ? <Button onPress={() => setCreateTopicCustomOpen(true)} shape="pill" size="md" style={styles.suggestionPill} variant="secondary">Custom</Button> : null}
+            {!topicSuggestionsMutation.isPending && topicSuggestions.length ? <Button onPress={() => { setCreateTopicOpen(false); setCreateTopicCustomOpen(true); }} shape="pill" size="md" style={styles.suggestionPill} variant="secondary">Custom</Button> : null}
             {topicSuggestionsMutation.isPending ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={styles.suggestionLoadingPill} />) : topicSuggestions.map((topic) => <Button contentMode="raw" key={topic} onPress={() => openGoalStep(topic)} shape="pill" size="md" style={styles.suggestionPill} variant="secondary"><Text numberOfLines={1} style={styles.suggestionText}>{topic}</Text></Button>)}
           </View>
           {topicSuggestionsError ? <Text accessibilityRole="alert" style={styles.noticeText}>{topicSuggestionsError}</Text> : null}
@@ -1264,7 +1196,7 @@ export function AscendWorkspace() {
 
       <BottomSheet
         dismissible={!briefTransformation}
-        footer={<><Button disabled={Boolean(briefTransformation) || draft.topic.trim().length < 3} onPress={() => openGoalStep(draft.topic.trim())} size="md" variant="primary">Next</Button><Button disabled={Boolean(briefTransformation)} onPress={() => setCreateTopicCustomOpen(false)} size="md" variant="secondary">Close</Button></>}
+        footer={<><Button disabled={Boolean(briefTransformation) || draft.topic.trim().length < 3} onPress={() => openGoalStep(draft.topic.trim())} size="md" variant="primary">Next</Button><Button disabled={Boolean(briefTransformation)} onPress={closeCreationSheets} size="md" variant="secondary">Close</Button></>}
         height="full"
         onOpenChange={(open) => { if (!open && !createGoalOpen) setCreateTopicCustomOpen(false); }}
         open={createTopicCustomOpen}
@@ -1272,7 +1204,7 @@ export function AscendWorkspace() {
       >
         <View style={styles.customStep}>
           <Text style={styles.inputLabel}>Topic</Text>
-          <AiTextEditor accessibilityLabel="Audio book topic" autoFocus editable={briefTransformation?.target !== "topic"} maxLength={2_000} multiline onChangeText={(topic) => setDraft((current) => ({ ...current, topic }))} onOpenActions={() => openBriefEditorActions("topic")} placeholder="What should this audio book explore?" style={styles.customTextArea} textAlignVertical="top" transformation={briefTransformation?.target === "topic" ? briefTransformation.action : undefined} value={draft.topic} />
+          <AiTextEditor accessibilityLabel="Audio book topic" editable={briefTransformation?.target !== "topic"} maxLength={2_000} multiline onChangeText={(topic) => setDraft((current) => ({ ...current, topic }))} onOpenActions={() => openBriefEditorActions("topic")} placeholder="What should this audio book explore?" ref={customTopicInputRef} style={styles.customTextArea} textAlignVertical="top" transformation={briefTransformation?.target === "topic" ? briefTransformation.action : undefined} value={draft.topic} />
         </View>
       </BottomSheet>
 
@@ -1286,8 +1218,8 @@ export function AscendWorkspace() {
       >
         <ScrollView contentContainerStyle={styles.suggestionStep} showsVerticalScrollIndicator={false}>
           <View style={styles.suggestionList}>
-            {!goalSuggestionsMutation.isPending && goalSuggestions.length ? <Button onPress={() => setCreateGoalCustomOpen(true)} shape="pill" size="md" style={styles.suggestionPill} variant="secondary">Custom</Button> : null}
-            {goalSuggestionsMutation.isPending ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={styles.suggestionLoadingPill} />) : goalSuggestions.map((goal) => <Button contentMode="raw" key={goal} onPress={() => openDetailsStep(goal)} shape="pill" size="md" style={styles.suggestionPill} variant="secondary"><Text numberOfLines={1} style={styles.suggestionText}>{goal}</Text></Button>)}
+            {!goalSuggestionsMutation.isPending && goalSuggestions.length ? <Button onPress={() => { setCreateGoalOpen(false); setCreateGoalCustomOpen(true); }} shape="pill" size="md" style={styles.suggestionPill} variant="secondary">Custom</Button> : null}
+            {goalSuggestionsMutation.isPending ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={styles.suggestionLoadingPill} />) : goalSuggestions.map((goal) => <Button contentMode="raw" key={goal} onPress={() => completeNormalGoal(goal)} shape="pill" size="md" style={styles.suggestionPill} variant="secondary"><Text numberOfLines={1} style={styles.suggestionText}>{goal}</Text></Button>)}
           </View>
           {goalSuggestionsError ? <Text accessibilityRole="alert" style={styles.noticeText}>{goalSuggestionsError}</Text> : null}
         </ScrollView>
@@ -1295,7 +1227,7 @@ export function AscendWorkspace() {
 
       <BottomSheet
         dismissible={!briefTransformation}
-        footer={<><Button disabled={Boolean(briefTransformation) || draft.goal.trim().length < 3} onPress={() => openDetailsStep(draft.goal.trim())} size="md" variant="primary">Next</Button><Button disabled={Boolean(briefTransformation)} onPress={() => setCreateGoalCustomOpen(false)} size="md" variant="secondary">Close</Button></>}
+        footer={<><Button disabled={Boolean(briefTransformation) || draft.goal.trim().length < 3} onPress={() => completeNormalGoal(draft.goal.trim())} size="md" variant="primary">Create audio book</Button><Button disabled={Boolean(briefTransformation)} onPress={closeCreationSheets} size="md" variant="secondary">Close</Button></>}
         height="full"
         onOpenChange={(open) => { if (!open && !createDetailsOpen) setCreateGoalCustomOpen(false); }}
         open={createGoalCustomOpen}
@@ -1303,26 +1235,24 @@ export function AscendWorkspace() {
       >
         <View style={styles.customStep}>
           <Text style={styles.inputLabel}>Goal</Text>
-          <AiTextEditor accessibilityLabel="Listening goal" autoFocus editable={briefTransformation?.target !== "goal"} maxLength={2_000} multiline onChangeText={(goal) => setDraft((current) => ({ ...current, goal }))} onOpenActions={() => openBriefEditorActions("goal")} placeholder="What should change after listening?" style={styles.customTextArea} textAlignVertical="top" transformation={briefTransformation?.target === "goal" ? briefTransformation.action : undefined} value={draft.goal} />
+          <AiTextEditor accessibilityLabel="Listening goal" editable={briefTransformation?.target !== "goal"} maxLength={2_000} multiline onChangeText={(goal) => setDraft((current) => ({ ...current, goal }))} onOpenActions={() => openBriefEditorActions("goal")} placeholder="What should change after listening?" ref={customGoalInputRef} style={styles.customTextArea} textAlignVertical="top" transformation={briefTransformation?.target === "goal" ? briefTransformation.action : undefined} value={draft.goal} />
         </View>
       </BottomSheet>
 
       <BottomSheet
+        description="Write or paste the content and direction for your audio book."
         dismissible={!createMutation.isPending && !contextPickerOpen}
-        footer={<><Button disabled={createMutation.isPending || draft.topic.trim().length < 3 || draft.goal.trim().length < 3} onPress={submit} size="md" variant="primary">Create audio book</Button><Button disabled={createMutation.isPending} onPress={() => setCreateDetailsOpen(false)} size="md" variant="secondary">Close</Button></>}
+        footer={<><Button disabled={createMutation.isPending || (customCreate ? (draft.additionalInstructions?.trim().length ?? 0) < 3 : draft.topic.trim().length < 3 || draft.goal.trim().length < 3)} onPress={submit} size="md" variant="primary">Create audio book</Button><Button disabled={createMutation.isPending} onPress={() => setCreateDetailsOpen(false)} size="md" variant="secondary">Close</Button></>}
         height="full"
         onOpenChange={(open) => { if (!open && !contextPickerOpen) setCreateDetailsOpen(false); }}
         open={createDetailsOpen}
-        title="Audio book details"
+        title="Create custom audio book"
       >
         <ScrollView contentContainerStyle={styles.form} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-          <View style={styles.switchRow}>
-            <View style={styles.switchCopy}>
-              <Text style={styles.voiceName}>Chapter images</Text>
-              <Text style={styles.helper}>Generate an image for each chapter.</Text>
-            </View>
-            <Switch accessibilityLabel="Generate chapter images" checked={draft.chapterImages} onCheckedChange={(chapterImages) => setDraft((current) => ({ ...current, chapterImages }))} />
-          </View>
+          {customCreate ? <View style={styles.customStep}>
+            <Text style={styles.inputLabel}>Content</Text>
+            <AiTextEditor accessibilityLabel="Custom audio book content" autoFocus editable={briefTransformation?.target !== "additionalInstructions"} maxLength={12_000} multiline onChangeText={(additionalInstructions) => setDraft((current) => ({ ...current, additionalInstructions }))} onOpenActions={() => openBriefEditorActions("additionalInstructions")} placeholder="Write or paste your audio book brief, notes, or source text..." style={styles.customTextArea} textAlignVertical="top" transformation={briefTransformation?.target === "additionalInstructions" ? briefTransformation.action : undefined} value={draft.additionalInstructions ?? ""} />
+          </View> : null}
           <ButtonSizeProvider overrideParent size="xs">
             <View style={styles.contextActions}>
               <View style={styles.contextChip}>
@@ -1340,7 +1270,7 @@ export function AscendWorkspace() {
         </ScrollView>
       </BottomSheet>
 
-      {contextPickerOpen && createDetailsOpen ? <EmailAttachmentPicker archiveOnly context={contentContext} contextKey={`${context.organizationKey}:${context.scopeKey}:audio-book-context`} labels={contextLabels} maxSelection={MAX_CONTEXT_DOCUMENTS} onClose={() => setContextPickerOpen(false)} onDone={finishContextSelection} open selection={contextSelection} title="Context" /> : null}
+      {contextPickerOpen && createDetailsOpen ? <EmailAttachmentPicker archiveOnly context={contentContext} contextKey={`${context.organizationKey}:${context.scopeKey}:audio-book-context`} labels={contextLabels} maxSelection={MAX_CONTEXT_DOCUMENTS} onClose={() => setContextPickerOpen(false)} onDone={finishContextSelection} onSelectionLimitReached={(limit) => showToast({ title: `You can add up to ${limit} context documents.`, duration: 2_500 })} open selection={contextSelection} title="Context" /> : null}
 
       {sharingBook ? <BookSharing book={sharingBook} onClose={() => setSharingBook(undefined)} open={Boolean(sharingBook)} /> : null}
 
@@ -1425,8 +1355,6 @@ const styles = StyleSheet.create({
   bookCardFrame: {
     position: "relative",
     overflow: "hidden",
-    borderWidth: 1,
-    borderColor: palette.hairline,
     borderRadius: radii.sm,
     backgroundColor: palette.panelRaised,
   },
@@ -1439,7 +1367,7 @@ const styles = StyleSheet.create({
     padding: 0,
     borderRadius: radii.sm,
   },
-  selectedItem: { borderColor: palette.silver50, shadowColor: palette.silver50, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.62, shadowRadius: 5, elevation: 4 },
+  selectedItem: { shadowColor: palette.silver50, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.62, shadowRadius: 5, elevation: 4 },
   selectionBadge: { position: "absolute", top: 4, right: 4, width: 20, height: 20, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: palette.silver50 },
   cover: {
     position: "absolute",
@@ -1457,12 +1385,13 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
   },
-  cardCopy: { marginTop: "auto", padding: 8, gap: 3 },
+  cardCopy: { maxWidth: "90%", alignSelf: "center", alignItems: "center", marginTop: "auto", marginBottom: 8, paddingHorizontal: 8, paddingVertical: 5, borderRadius: radii.sm, backgroundColor: "rgba(0,0,0,0.62)" },
   cardTitle: {
     color: palette.silver50,
     fontFamily: fonts.semibold,
     fontSize: 11,
     lineHeight: 14,
+    textAlign: "center",
   },
   cardSummary: {
     color: palette.silver300,
@@ -1508,10 +1437,6 @@ const styles = StyleSheet.create({
   favoriteSwitchLabel: { color: palette.muted, fontFamily: fonts.regular, fontSize: 12 },
   sheetAction: { justifyContent: "center" },
   form: { gap: spacing.sm, paddingBottom: spacing.xl },
-  extensionStep: { flex: 1, gap: spacing.sm },
-  extensionTitles: { gap: 6, paddingTop: spacing.sm, paddingBottom: spacing.xl },
-  extensionTitleSkeleton: { width: "100%", height: 48, borderRadius: 999 },
-  extensionTitle: { color: palette.silver100, fontFamily: fonts.regular, fontSize: 13, lineHeight: 17 },
   suggestionStep: { flex: 1, gap: spacing.md },
   suggestionList: { gap: 6 },
   suggestionPill: { width: "100%", minHeight: 40, justifyContent: "flex-start", paddingHorizontal: spacing.md },
@@ -1564,15 +1489,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 16,
   },
-  switchRow: {
-    minHeight: 54,
-    marginTop: spacing.sm,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: spacing.sm,
-  },
-  switchCopy: { minWidth: 0, flex: 1 },
   contextActions: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: spacing.xs },
   contextChip: { alignSelf: "flex-start", minHeight: 34, maxWidth: "100%", flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1, borderColor: "rgba(221, 226, 229, 0.18)", borderRadius: 999, backgroundColor: "rgba(255, 255, 255, 0.03)" },
   contextChipMain: { minWidth: 0, flexShrink: 1, justifyContent: "center", paddingLeft: 7, paddingRight: 0 },
@@ -1605,14 +1521,19 @@ const styles = StyleSheet.create({
   detailCurrentChapter: { marginTop: spacing.sm, color: palette.silver100, fontFamily: fonts.medium, fontSize: 12, lineHeight: 17 },
   detailDuration: { marginTop: spacing.sm, color: palette.silver300, fontFamily: fonts.regular, fontSize: 11 },
   detailLoading: { gap: spacing.md },
-  detailCoverSkeleton: { width: 144, height: 256, borderRadius: radii.sm },
-  detailLine: { width: "70%", height: 14, borderRadius: 7 },
+  detailHeroSkeleton: { width: "100%", height: (144 * 16) / 9, borderRadius: radii.sm },
+  detailCoverLoading: { width: "100%", height: "100%", borderRadius: radii.sm },
+  chapterHeadingRow: { width: "100%", minHeight: 28, justifyContent: "center" },
+  chapterHeading: { color: palette.silver300, fontFamily: fonts.medium, fontSize: 12 },
   chapterCard: {
     overflow: "hidden",
     alignItems: "stretch",
     justifyContent: "flex-end",
     padding: 0,
+    borderWidth: 1,
+    borderColor: palette.hairline,
     borderRadius: radii.sm,
+    backgroundColor: palette.panelRaised,
   },
   chapterCardFill: { width: "100%", height: "100%" },
   chapterSkeleton: { borderRadius: radii.sm },

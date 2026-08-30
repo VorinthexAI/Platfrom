@@ -43,6 +43,7 @@ describe('book Archive publication', () => {
     const canonical = queries.find((query) => query.includes('UPDATE book WITH { status: "ready"'))!;
     expect(canonical).toContain('book.archiveFolderKey != null');
     expect(canonical).toContain('chapter.archiveDocumentKey == null');
+    expect(canonical).not.toContain('imageStorageKey');
     expect(canonical).not.toContain('folders');
     expect(canonical).not.toContain('documents');
   });

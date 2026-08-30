@@ -18,7 +18,7 @@ import {
   type UploadedDocumentFile,
 } from './schemas';
 import { documentStorage, type DocumentStorage } from './storage';
-import { awsTextractDocumentOcr, type DocumentOcr } from './textract';
+import { awsFileAction, type FileActionClient } from './file';
 import { chunkDocumentContent, chunkDocumentText, documentEmbeddingTexts, documentSemanticHash } from './chunking';
 
 export const DEFAULT_MAX_DOCUMENT_BYTES = 25 * 1024 * 1024;
@@ -199,7 +199,7 @@ async function localExtraction<T>(run: () => Promise<T>, code: string): Promise<
 }
 
 export async function documentExtract(input: NormalizedDocument & { storageKey: string }, options: {
-  ocr?: DocumentOcr;
+  fileAction?: FileActionClient;
   extractDoc?: (bytes: Uint8Array) => Promise<string>;
   extractDocx?: (bytes: Uint8Array) => Promise<string>;
   logger?: DocumentActionLogger;
@@ -207,7 +207,8 @@ export async function documentExtract(input: NormalizedDocument & { storageKey: 
   return observed('document-extract', { scopeKey: input.scopeKey, folderKey: input.folderKey, extension: input.extension, mimeType: input.mimeType, sizeBytes: input.sizeBytes }, options.logger ?? defaultLogger, async () => {
     try {
       if (input.extension === 'pdf') {
-        const result = extractionResultSchema.parse(await (options.ocr ?? awsTextractDocumentOcr).extract(input.storageKey, input.fileInput));
+        const output = await (options.fileAction ?? awsFileAction).execute({ operation: 'document', storageKey: input.storageKey, filename: `${input.name}.pdf`, mimeType: 'application/pdf', bytes: input.fileInput }, input.scopeKey);
+        const result = extractionResultSchema.parse({ extractedText: output.text, metadata: output.metadata });
         if (result.extractedText.length > maxExtractedCharacters()) throw new DocumentInputError('DOCUMENT_EXTRACTED_CONTENT_TOO_LARGE', 'Extracted document content exceeds the configured limit.', 'document-extract');
         if (!result.extractedText.trim()) throw new DocumentInputError('DOCUMENT_EMPTY_CONTENT', 'The document contains no extractable text.', 'document-extract');
         return result;

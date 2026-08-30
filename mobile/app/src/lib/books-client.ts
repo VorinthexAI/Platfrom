@@ -23,6 +23,7 @@ export const bookSchema = z.strictObject({
   description: z.string().min(1),
   status: bookStatusSchema,
   isFavorite: z.boolean(),
+  isExtending: z.boolean(),
   coverUrl: z.url().optional(),
   narrator: narratorVoiceSchema.optional(),
   estimatedMinutes: z.number().int().nonnegative(),
@@ -40,7 +41,6 @@ export const bookChapterSchema = z.strictObject({
   content: z.string().min(1).optional(),
   position: z.number().int().positive(),
   estimatedMinutes: z.number().int().nonnegative().optional(),
-  imageUrl: z.url().optional(),
   audioUrl: z.url().optional(),
   audioDurationSeconds: z.number().int().nonnegative().optional(),
   progressSeconds: z.number().nonnegative(),
@@ -57,8 +57,7 @@ export const createBookRequestSchema = contextSchema.extend({
   writingTone: z.string().trim().min(2).max(200),
   narratorVoiceKey: narratorVoiceSchema.shape.key,
   narrationPace: z.number().min(0.75).max(2),
-  archiveDocumentKeys: z.array(keySchema).max(50),
-  chapterImages: z.boolean(),
+  archiveDocumentKeys: z.array(keySchema).max(10),
   additionalInstructions: z.string().trim().max(12_000).optional(),
 });
 const detailRequestSchema = contextSchema;

@@ -10,7 +10,7 @@ import { exportAssetPackage, createFullAssetPackage } from "./export";
 import { atomicWrite, ensureRuntime, readText, appendMarkdown } from "./filesystem";
 import { copyLatest, createReviewSheet, createSolidFromTransparent, createTransparentFromSolid, normalizeLogo, validatePng } from "./image";
 import { defaultLockRules, isFrozen } from "./locks";
-import { OpenAIClient } from "./openai";
+import { OpenRouterClient } from "./openrouter";
 import { composePrompt } from "./prompts";
 import { RegistryStore } from "./registry";
 import { createLogoSvgs } from "./svg";
@@ -22,7 +22,7 @@ import { hashText, nowIso, rel, slugify } from "./utils";
 export type EngineContext = {
   config: EngineConfig;
   registry: RegistryStore;
-  client?: OpenAIClient;
+  client?: OpenRouterClient;
 };
 
 const menuChoices = [
@@ -82,9 +82,9 @@ async function selectVersion(asset: AssetRecord): Promise<AssetVersion | undefin
   return asset.versions.find((version) => version.id === answer.id);
 }
 
-async function requireClient(context: EngineContext): Promise<OpenAIClient | undefined> {
+async function requireClient(context: EngineContext): Promise<OpenRouterClient | undefined> {
   if (context.client) return context.client;
-  console.log(chalk.red("No OpenAI API key found. Add OPENAI_API_KEY to scripts/image/.env before generating or reviewing images."));
+  console.log(chalk.red("No OpenRouter API key found. Configure OPENROUTER_API_KEY in .github/environments.json before generating or reviewing images."));
   return undefined;
 }
 
@@ -521,16 +521,16 @@ export async function runCli(): Promise<void> {
   const config = loadConfig();
   await ensureRuntime(config);
   const registry = new RegistryStore(config.rootDir);
-  let client: OpenAIClient | undefined;
+  let client: OpenRouterClient | undefined;
   try {
-    client = new OpenAIClient(config);
+    client = new OpenRouterClient(config);
   } catch {
     client = undefined;
   }
   const context: EngineContext = { config, registry, client };
   console.log(chalk.bold("Vorinthex AI Local Design Engine"));
   if (!client) {
-    console.log(chalk.yellow("OPENAI_API_KEY is not configured. You can list, validate, backup, edit prompts, and manage existing files, but generation/review will be blocked."));
+    console.log(chalk.yellow("OPENROUTER_API_KEY is not configured. You can list, validate, backup, edit prompts, and manage existing files, but generation/review will be blocked."));
   }
   let running = true;
   while (running) {

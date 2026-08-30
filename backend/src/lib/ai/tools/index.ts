@@ -12,7 +12,7 @@ import type { ImageSearchInput } from './image-search';
 import type { galleryOperations } from '@/lib/gallery/operations';
 import type { AppSearchService } from '@/lib/app-search/service';
 import type { AppTransformationService } from '@/lib/app-transformation/service';
-import type { AppAudioService } from '@/lib/app-audio/service';
+import type { AppSpeechService } from '@/lib/app-speech/service';
 import { PUBLIC_TOOL_DEFINITIONS, TRUSTED_TOOL_DEFINITIONS, UNIFIED_TOOL_DEFINITIONS } from './tool-definitions';
 import type { PublicToolDependencies } from './tool-definition';
 import { WORKSPACE_TOOL_DEFINITIONS, type WorkspaceToolDependencies } from './workspace-tool-definitions';
@@ -50,7 +50,7 @@ export interface ToolDependencies extends RouterDependencies, DocumentParseDepen
   images?: WorkspaceToolDependencies['images'];
   appSearchService?: AppSearchService;
   appTransformationService?: AppTransformationService;
-  appAudioService?: AppAudioService;
+  appSpeechService?: AppSpeechService;
 }
 
 /** Executes one of the capabilities exposed by the unified tool registry. */
@@ -77,7 +77,7 @@ export async function runTool(name: string, skill: string, rawInput: unknown, de
     images: dependencies.images,
     appSearch: dependencies.appSearchService,
     appTransformation: dependencies.appTransformationService,
-    appAudio: dependencies.appAudioService,
+    appSpeech: dependencies.appSpeechService,
     signal: dependencies.signal,
     timeoutMs: dependencies.timeoutMs,
     content: {

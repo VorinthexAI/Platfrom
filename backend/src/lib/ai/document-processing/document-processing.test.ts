@@ -1,11 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { DeleteObjectCommand, PutObjectCommand, type S3Client } from '@aws-sdk/client-s3';
-import { GetDocumentTextDetectionCommand, StartDocumentTextDetectionCommand, type Block, type TextractClient } from '@aws-sdk/client-textract';
 import { parseDocument } from '.';
 import type { Document } from '@/lib/db/documents.node';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
 import {
-  createAwsTextractDocumentOcr,
   documentCleanup,
   documentEmbed,
   documentExtract,
@@ -14,7 +11,6 @@ import {
   documentSemanticHash,
   documentValidate,
   storageUpload,
-  textractBlocksToExtractionResult,
   type DocumentPipelineActions,
   type DocumentParseResult,
   type DocumentStorage,
@@ -180,131 +176,18 @@ describe('document-extract action', () => {
     await expect(documentExtract({ ...normalized('docx'), storageKey: 'docx' }, { logger: quiet, extractDocx: async () => { throw failure; } })).rejects.toMatchObject({ code: 'DOCUMENT_EXTRACTION_FAILED', retryable: true, cause: failure });
   });
 
-  test('normalizes text-based and scanned PDFs through OCR', async () => {
+  test('routes text-based and scanned PDFs through the file action', async () => {
     for (const text of ['Selectable PDF', 'Scanned OCR']) {
-      const result = await documentExtract({ ...normalized('pdf'), storageKey: 'pdf' }, { logger: quiet, ocr: { extract: async () => ({ extractedText: text, metadata: { provider: 'aws-textract' } }) } });
+      const calls: unknown[] = [];
+      const result = await documentExtract({ ...normalized('pdf'), storageKey: 'pdf' }, { logger: quiet, fileAction: { execute: async (input, organizationKey) => { calls.push({ input, organizationKey }); return { text, metadata: { provider: 'aws-textract' } }; } } });
       expect(result.extractedText).toBe(text);
+      expect(result.metadata).toEqual({ provider: 'aws-textract' });
+      expect(calls).toEqual([{ input: { operation: 'document', storageKey: 'pdf', filename: 'Report.pdf', mimeType: 'application/pdf', bytes: normalized('pdf').fileInput }, organizationKey: scopeKey }]);
     }
-  });
-
-  test('stages and extracts selectable, scanned, and multi-page dummy PDFs through Textract', async () => {
-    const fixtures: Array<{ name: string; pdf: Uint8Array; blocks: Block[]; text: string; pages: number }> = [
-      {
-        name: 'selectable',
-        pdf: bytes('%PDF-1.7\n1 0 obj<</Type/Page/Contents 2 0 R>>endobj\n2 0 obj<</Length 36>>stream\nBT (Selectable quarterly report) Tj ET\nendstream\nendobj\n%%EOF'),
-        blocks: [{ Id: 'selectable', BlockType: 'LINE', Page: 1, Text: 'Selectable quarterly report' }],
-        text: 'Selectable quarterly report',
-        pages: 1,
-      },
-      {
-        name: 'scanned',
-        pdf: bytes('%PDF-1.7\n1 0 obj<</Type/Page/Resources<</XObject<</Scan 2 0 R>>>>>>endobj\n2 0 obj<</Subtype/Image/Width 1200/Height 1600/BitsPerComponent 8>>stream\nDUMMY-SCANNED-PIXELS\nendstream\nendobj\n%%EOF'),
-        blocks: [{ Id: 'scan-line', BlockType: 'LINE', Page: 1, Text: 'OCR from scanned invoice' }],
-        text: 'OCR from scanned invoice',
-        pages: 1,
-      },
-      {
-        name: 'multi-page-table',
-        pdf: bytes('%PDF-1.7\n1 0 obj<</Type/Pages/Count 2/Kids[2 0 R 3 0 R]>>endobj\n2 0 obj<</Type/Page/Parent 1 0 R>>endobj\n3 0 obj<</Type/Page/Parent 1 0 R>>endobj\n%%EOF'),
-        blocks: [
-          { Id: 'page-one', BlockType: 'LINE', Page: 1, Text: 'Annual results' },
-          { Id: 'page-two', BlockType: 'LINE', Page: 2, Text: 'Revenue' },
-        ],
-        text: 'Annual results\n\nRevenue',
-        pages: 2,
-      },
-    ];
-
-    for (const fixture of fixtures) {
-      const storageCommands: Array<PutObjectCommand | DeleteObjectCommand> = [];
-      const textractCommands: Array<StartDocumentTextDetectionCommand | GetDocumentTextDetectionCommand> = [];
-      const storageClient = {
-        send: async (command: PutObjectCommand | DeleteObjectCommand) => {
-          storageCommands.push(command);
-          return {};
-        },
-      } as unknown as Pick<S3Client, 'send'>;
-      const textractClient = {
-        send: async (command: StartDocumentTextDetectionCommand | GetDocumentTextDetectionCommand) => {
-          textractCommands.push(command);
-          return command instanceof StartDocumentTextDetectionCommand
-            ? { JobId: `job-${fixture.name}` }
-            : { JobStatus: 'SUCCEEDED', Blocks: fixture.blocks };
-        },
-      } as unknown as Pick<TextractClient, 'send'>;
-      const ocr = createAwsTextractDocumentOcr({
-        stagingBucket: 'dummy-textract-eu-west-1',
-        sourceBucket: 'dummy-source-eu-north-1',
-        storageClient,
-        textractClient,
-      });
-
-      const validated = await documentValidate({
-        file: { filename: `${fixture.name}.pdf`, mimeType: 'application/pdf', sizeBytes: fixture.pdf.byteLength, bytes: fixture.pdf },
-        scopeKey,
-        folderKey,
-      }, { logger: quiet });
-      const result = await documentExtract({ ...validated, storageKey: `content/${fixture.name}.pdf` }, { logger: quiet, ocr });
-
-      expect(storageCommands).toHaveLength(2);
-      expect(storageCommands[0]).toBeInstanceOf(PutObjectCommand);
-      expect(storageCommands[0]!.input).toMatchObject({ Bucket: 'dummy-textract-eu-west-1', Body: fixture.pdf, ContentType: 'application/pdf' });
-      expect(storageCommands[1]).toBeInstanceOf(DeleteObjectCommand);
-      expect(storageCommands[1]!.input).toMatchObject({ Bucket: 'dummy-textract-eu-west-1', Key: storageCommands[0]!.input.Key });
-      expect(textractCommands[0]).toBeInstanceOf(StartDocumentTextDetectionCommand);
-      expect(textractCommands[0]!.input).toMatchObject({
-        DocumentLocation: { S3Object: { Bucket: 'dummy-textract-eu-west-1', Name: storageCommands[0]!.input.Key } },
-      });
-      expect(textractCommands[1]).toBeInstanceOf(GetDocumentTextDetectionCommand);
-      expect(result.extractedText).toBe(fixture.text);
-      expect(result.metadata).toMatchObject({ provider: 'aws-textract', pages: fixture.pages });
-    }
-  });
-
-  test('removes a staged PDF when Textract rejects it', async () => {
-    const storageCommands: Array<PutObjectCommand | DeleteObjectCommand> = [];
-    const ocr = createAwsTextractDocumentOcr({
-      stagingBucket: 'dummy-textract-eu-west-1',
-      storageClient: {
-        send: async (command: PutObjectCommand | DeleteObjectCommand) => {
-          storageCommands.push(command);
-          return {};
-        },
-      } as unknown as Pick<S3Client, 'send'>,
-      textractClient: {
-        send: async (command: StartDocumentTextDetectionCommand | GetDocumentTextDetectionCommand) => command instanceof StartDocumentTextDetectionCommand
-          ? { JobId: 'failed-job' }
-          : { JobStatus: 'FAILED' },
-      } as unknown as Pick<TextractClient, 'send'>,
-    });
-
-    await expect(ocr.extract('content/rejected.pdf', fileFor('pdf').bytes)).rejects.toThrow('could not extract');
-    expect(storageCommands.map((command) => command.constructor)).toEqual([PutObjectCommand, DeleteObjectCommand]);
-    expect(storageCommands[1]!.input.Key).toBe(storageCommands[0]!.input.Key);
-  });
-
-  test('orders detected lines by page and position', () => {
-    const result = textractBlocksToExtractionResult([
-      { Id: 'value', BlockType: 'LINE', Page: 1, Text: '$10M', Confidence: 96, Geometry: { BoundingBox: { Top: 0.2, Left: 0.1 } } },
-      { Id: 'title', BlockType: 'LINE', Page: 1, Text: 'Annual report', Confidence: 99, Geometry: { BoundingBox: { Top: 0.05, Left: 0.1 } } },
-      { Id: 'second-page', BlockType: 'LINE', Page: 2, Text: 'Appendix', Confidence: 93, Geometry: { BoundingBox: { Top: 0.05, Left: 0.1 } } },
-    ]);
-    expect(result.extractedText).toBe('Annual report\n$10M\n\nAppendix');
-    expect(result.metadata).toMatchObject({ averageConfidence: 96, minimumConfidence: 93 });
-    expect(result.metadata).toMatchObject({ provider: 'aws-textract', pages: 2 });
-  });
-
-  test('deduplicates detected lines', () => {
-    const title = { Id: 'title', BlockType: 'LINE' as const, Page: 1, Text: 'Unique title' };
-    const result = textractBlocksToExtractionResult([
-      title,
-      { ...title },
-    ]);
-    expect(result.extractedText).toBe('Unique title');
   });
 
   test('returns a structured extraction failure', async () => {
-    await expect(documentExtract({ ...normalized('pdf'), storageKey: 'pdf' }, { logger: quiet, ocr: { extract: async () => { throw new Error('provider payload'); } } })).rejects.toMatchObject({ code: 'DOCUMENT_EXTRACTION_FAILED', action: 'document-extract' });
+    await expect(documentExtract({ ...normalized('pdf'), storageKey: 'pdf' }, { logger: quiet, fileAction: { execute: async () => { throw new Error('provider payload'); } } })).rejects.toMatchObject({ code: 'DOCUMENT_EXTRACTION_FAILED', action: 'document-extract' });
   });
 });
 

@@ -16,6 +16,7 @@ export {
   imageCaptionOutputSchema,
   visualIdentityDescriptionInputSchema,
   visualIdentityDescriptionOutputSchema,
+  imageActionInputSchema,
   embeddingInputSchema,
   resolveRequestSignal,
   type ProviderId,
@@ -39,6 +40,7 @@ export {
   type ImageCaptionOutput,
   type VisualIdentityDescriptionInput,
   type VisualIdentityDescriptionOutput,
+  type ImageActionInput,
   type EmbeddingInput,
   type EmbeddingOutput,
 } from './types';
@@ -52,28 +54,11 @@ export {
   type ProviderErrorCode,
 } from './errors';
 export {
-  createGoogleVertexProvider,
-  googleVertexCredentialsSchema,
-  googleVertexProviderConfigSchema,
-  googleVertexProviderFactory,
-  type GoogleVertexCredentials,
-  type GoogleVertexProviderConfig,
-} from './google-vertex';
-export {
-  createAwsPollyProvider,
-  awsPollyProviderConfigSchema,
-  awsPollyProviderFactory,
-  buildPollySpeechSsml,
-  splitPollySpeechText,
-  extractPollyMp3Frames,
-  type AwsPollyProviderConfig,
-} from './aws-polly';
-export {
-  createAzureAIFoundryProvider,
-  azureAIFoundryCredentialsSchema,
-  azureAIFoundryProviderConfigSchema,
-  azureAIFoundryProviderFactory,
-  type AzureAIFoundryCredentials,
-  type AzureAIFoundryProviderConfig,
-} from './azure-ai-foundry';
+  createOpenRouterProvider,
+  openRouterProviderConfigSchema,
+  openRouterProviderFactory,
+  extractOpenRouterMp3Frames,
+  splitOpenRouterSpeechText,
+  type OpenRouterProviderConfig,
+} from './openrouter';
 export { PROVIDER_REGISTRY, MODEL_REGISTRY, MODEL_IDS, modelIdSchema, getModel, getExternalModelId, isProviderAvailable, createRegisteredProviderAdapter, assertProviderRegistryIntegrity, type ModelId, type ProviderEnvironment, type ProviderRegistration } from './registry';

@@ -9,13 +9,13 @@ describe('book hard deletion', () => {
     const database: BookDatabase = { async query(query, bind = {}) {
       queries.push(query);
       if (query.includes('RETURN membership._key')) return { all: async () => ['membership'] };
-      if (query.includes('RETURN { book, chapters }')) return { all: async () => [{ book: { isFavorite: false, coverStorageKey: 'books/cover.png', archiveFolderKey: newId() }, chapters: [{ _key: chapterKey, archiveDocumentKey: newId(), audioStorageKey: 'books/chapter.mp3', imageStorageKey: 'books/chapter.png' }] }] };
+      if (query.includes('RETURN { book, chapters }')) return { all: async () => [{ book: { isFavorite: false, coverStorageKey: 'books/cover.png', archiveFolderKey: newId() }, chapters: [{ _key: chapterKey, archiveDocumentKey: newId(), audioStorageKey: 'books/chapter.mp3' }] }] };
       if (query.includes('RETURN OLD.tokenHash')) return { all: async () => [shareTokenHash] };
       return { all: async () => [] };
     } };
     const transact = async <T>(collections: { write: string[] }, run: (executor: BookDatabase) => Promise<T>) => { writes = collections.write; return run(database); };
     await expect(createBookRepository(database, transact).deleteBook({ organizationKey: 'org', scopeKey, userKey: newId() }, bookKey, '2026-08-25T12:00:00.000Z')).resolves.toEqual({ deleted: true, bookKey, shareTokenHash });
-    expect(queries.filter((query) => query.includes('IN storageDeletionJobs'))).toHaveLength(3);
+    expect(queries.filter((query) => query.includes('IN storageDeletionJobs'))).toHaveLength(2);
     expect(queries.some((query) => query.includes('REMOVE @bookKey IN books'))).toBe(true);
     expect(queries.some((query) => query.includes('REMOVE item IN bookChapters'))).toBe(true);
     expect(queries.some((query) => query.includes('REMOVE binding IN generatedDocumentBindings'))).toBe(true);

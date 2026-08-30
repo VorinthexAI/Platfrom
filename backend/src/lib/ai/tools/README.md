@@ -67,3 +67,28 @@ do not control Compass lifecycle.
 5. Register the capability in the applicable Core surface and mutation metadata.
 6. Add strict-input, authorization, registry uniqueness, and HTTP/Core parity
    tests.
+
+## Calling Actions
+
+A model-backed tool may pass trusted execution options to an action. These
+options are dependencies supplied by server code, never fields in the tool's
+strict model-visible input schema.
+
+```ts
+await executeAction(
+  { mode: 'auto', organizationKey: context.organizationKey, actionSlug: 'image' },
+  actionInput,
+  {
+    providers: ['image.primary'],
+    retry: { intervalMs: 2_000, attempts: 10 },
+    timeoutMs: context.timeoutMs,
+    signal: context.signal,
+  },
+);
+```
+
+The `providers` array contains ordered action route slots. The action registry
+maps those slots to exact providers and models. `retry.intervalMs` controls the
+initial exponential-backoff interval, while `retry.attempts` controls the total
+number of full route cycles. Defaults and failure behavior are documented in
+[the actions guide](../actions/README.md).

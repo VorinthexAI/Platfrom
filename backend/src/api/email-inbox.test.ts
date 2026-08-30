@@ -2,6 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import { Hono } from 'hono';
 import { createEmailHandlers } from './email-inbox';
 import { EmailIdempotencyError } from '@/lib/email-inbox/service';
+import { runTool } from '@/lib/ai/tools';
+import type { ToolContext } from '@/lib/ai/tools/tool-context';
 
 const userKey = 'cmrnlzf650002qc7k4p5zem5w';
 const organizationKey = 'org-1';
@@ -127,6 +129,26 @@ describe('email inbox handlers', () => {
     expect(calls).toEqual([
       ['sync', { userKey, organizationKey, scopeKey }, connectorKey],
       ['registerWatch', { userKey, organizationKey, scopeKey }, connectorKey],
+    ]);
+  });
+
+  test('keeps POST /email/sync and inbox.refresh on canonical EmailService.sync', async () => {
+    const calls: unknown[][] = [];
+    const service = { sync: async (...args: unknown[]) => { calls.push(args); return { synced: 2, lastSyncedAt: now }; } };
+    const app = appWith({ getIdentity: identity as never, service: service as never, oauth: {} as never });
+    const contentContext = {
+      organizationKey,
+      runtimeScopeKey: scopeKey,
+      principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: connectorKey, organizationId: organizationKey, userId: userKey, status: 'active' } },
+    } as unknown as ToolContext;
+
+    const response = await app.request('/email/sync', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey, connectorKey }) });
+    expect(response.status).toBe(200);
+    await runTool('inbox.refresh', '', { connectorKey }, { contentContext, emailService: service as never });
+    await expect(runTool('inbox.refresh', '', { connectorKey, userKey }, { contentContext, emailService: service as never })).rejects.toThrow('Unrecognized key');
+    expect(calls).toEqual([
+      [{ userKey, organizationKey, scopeKey }, connectorKey],
+      [{ userKey, organizationKey, scopeKey }, connectorKey],
     ]);
   });
 

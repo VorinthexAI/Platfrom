@@ -5,7 +5,7 @@ let lifecycleFailure = false;
 let favoriteDeleteFailure = false;
 let publicFailure = false;
 const authState: { organization: { key: string } | null; scope: { key: string } | null } = { organization: { key: "org-key" }, scope: { key: "scope-key" } };
-const book = { key: "book-key", title: "A Better Practice", subtitle: "Small systems, durable change", description: "A practical guide.", status: "ready", isFavorite: false, estimatedMinutes: 45, chapterCount: 1, progressPercent: 25, currentChapterKey: "chapter-key" };
+const book = { key: "book-key", title: "A Better Practice", subtitle: "Small systems, durable change", description: "A practical guide.", status: "ready", isFavorite: false, isExtending: false, estimatedMinutes: 45, chapterCount: 1, progressPercent: 25, currentChapterKey: "chapter-key" };
 const chapter = { key: "chapter-key", title: "Begin", description: "Start with the useful part.", content: "Chapter body", position: 1, estimatedMinutes: 8, audioUrl: "https://example.com/chapter.mp3", audioDurationSeconds: 480, progressSeconds: 120, isCompleted: false };
 const share = { key: "share-key", url: "https://vorinthex.com/share/books/token", active: true, createdAt: "2026-08-28T10:00:00.000Z", updatedAt: "2026-08-28T10:00:00.000Z" };
 
@@ -40,12 +40,12 @@ beforeEach(() => { calls.splice(0); lifecycleFailure = false; favoriteDeleteFail
 
 test("sends strictly scoped overview, creation, detail, and progress requests", async () => {
   expect((await client.fetchBooksOverview()).books).toHaveLength(1);
-  await client.createBook({ topic: "Useful habits", goal: "Build a durable practice", currentKnowledge: "A curious beginner", writingTone: "Warm and direct", language: "English", narratorVoiceKey: "clear", narrationPace: 1, archiveDocumentKeys: ["document-key"], chapterImages: true, additionalInstructions: "Use concrete examples." }, "request-key");
+  await client.createBook({ topic: "Useful habits", goal: "Build a durable practice", currentKnowledge: "A curious beginner", writingTone: "Warm and direct", language: "English", narratorVoiceKey: "clear", narrationPace: 1, archiveDocumentKeys: ["document-key"], additionalInstructions: "Use concrete examples." }, "request-key");
   await client.fetchBookDetail("book-key");
   await client.updateBookChapterProgress("book-key", "chapter-key", { progressSeconds: 480, isCompleted: true });
   expect(calls.map(({ method, path }) => `${method} ${path}`)).toEqual(["POST /books/overview", "POST /books", "POST /books/book-key/detail", "PATCH /books/book-key/chapters/chapter-key/progress"]);
   expect(calls[0]?.body).toEqual({ organizationKey: "org-key", scopeKey: "scope-key" });
-  expect(calls[1]?.body).toEqual({ organizationKey: "org-key", scopeKey: "scope-key", generationRequestKey: "request-key", topic: "Useful habits", goal: "Build a durable practice", currentKnowledge: "A curious beginner", writingTone: "Warm and direct", language: "English", narratorVoiceKey: "clear", narrationPace: 1, archiveDocumentKeys: ["document-key"], chapterImages: true, additionalInstructions: "Use concrete examples." });
+  expect(calls[1]?.body).toEqual({ organizationKey: "org-key", scopeKey: "scope-key", generationRequestKey: "request-key", topic: "Useful habits", goal: "Build a durable practice", currentKnowledge: "A curious beginner", writingTone: "Warm and direct", language: "English", narratorVoiceKey: "clear", narrationPace: 1, archiveDocumentKeys: ["document-key"], additionalInstructions: "Use concrete examples." });
   expect(calls[1]?.config).toEqual({ timeout: 15 * 60_000 });
   expect(calls[3]?.body).toEqual({ organizationKey: "org-key", scopeKey: "scope-key", progressSeconds: 480, isCompleted: true });
 });
@@ -74,8 +74,9 @@ test("previews and generates strict scoped book extensions", async () => {
 });
 
 test("rejects invalid requests and unsafe response fields", async () => {
-  expect(client.createBookRequestSchema.safeParse({ organizationKey: "org", scopeKey: "scope", generationRequestKey: "request", topic: "Useful habits", goal: "Build a durable practice", currentKnowledge: "", writingTone: "warm", language: "en", chapterCount: 25, narratorVoiceKey: "clear", narrationPace: 1, archiveDocumentKeys: [], chapterImages: true }).success).toBe(false);
-  expect(client.createBookRequestSchema.safeParse({ organizationKey: "org", scopeKey: "scope", generationRequestKey: "request", topic: "Useful habits", goal: "Build a durable practice", currentKnowledge: "", writingTone: "warm", language: "en", narratorVoiceKey: "clear", narrationPace: 1, archiveDocumentKeys: [], chapterImages: true }).success).toBe(true);
+  expect(client.createBookRequestSchema.safeParse({ organizationKey: "org", scopeKey: "scope", generationRequestKey: "request", topic: "Useful habits", goal: "Build a durable practice", currentKnowledge: "", writingTone: "warm", language: "en", chapterCount: 25, narratorVoiceKey: "clear", narrationPace: 1, archiveDocumentKeys: [] }).success).toBe(false);
+  expect(client.createBookRequestSchema.safeParse({ organizationKey: "org", scopeKey: "scope", generationRequestKey: "request", topic: "Useful habits", goal: "Build a durable practice", currentKnowledge: "", writingTone: "warm", language: "en", narratorVoiceKey: "clear", narrationPace: 1, archiveDocumentKeys: [] }).success).toBe(true);
+  expect(client.createBookRequestSchema.safeParse({ organizationKey: "org", scopeKey: "scope", generationRequestKey: "request", topic: "Useful habits", goal: "Build a durable practice", currentKnowledge: "", writingTone: "warm", language: "en", narratorVoiceKey: "clear", narrationPace: 1, archiveDocumentKeys: Array.from({ length: 11 }, (_, index) => `document-${index}`) }).success).toBe(false);
   expect(client.bookSchema.safeParse({ ...book, internalPrompt: "secret" }).success).toBe(false);
   expect(client.bookChapterSchema.safeParse({ ...chapter, storageKey: "private/audio.mp3" }).success).toBe(false);
   await expect(client.updateBookChapterProgress("book-key", "chapter-key", { progressSeconds: -1, isCompleted: false })).rejects.toThrow();
@@ -85,7 +86,7 @@ test("rejects invalid requests and unsafe response fields", async () => {
 test("parses the final lifecycle and media DTO strictly", () => {
   expect(client.bookSchema.parse({ ...book, status: "failed", narrator: { key: "warm", name: "Warm" }, generationProgressPercent: 64, failureMessage: "Narration failed." })).toMatchObject({ status: "failed", generationProgressPercent: 64 });
   expect(client.bookSchema.parse({ ...book, status: "cancelled" }).status).toBe("cancelled");
-  expect(client.bookChapterSchema.parse({ ...chapter, imageUrl: "https://example.com/chapter.jpg" }).imageUrl).toBe("https://example.com/chapter.jpg");
+  expect(client.bookChapterSchema.safeParse({ ...chapter, imageUrl: "https://example.com/chapter.jpg" }).success).toBe(false);
   expect(client.bookSchema.safeParse({ ...book, narrator: { key: "unknown", name: "Unknown" } }).success).toBe(false);
   expect(client.chapterProgressRequestSchema.safeParse({ organizationKey: "org", scopeKey: "scope", progressSeconds: 1.5, isCompleted: false }).success).toBe(false);
 });

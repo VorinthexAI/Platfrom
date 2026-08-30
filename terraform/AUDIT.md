@@ -252,7 +252,7 @@ of this task (see the WAF section).
   `render-service/local.secret_keys` includes `AWS_ACCESS_KEY_ID` /
   `AWS_SECRET_ACCESS_KEY` even though the task has an IAM task role. Drop the
   static-cred injection and rely on the task role. It also injects LLM keys
-  (`GOOGLE_VERTEX_API_KEY`, etc.) that may not exist in SSM — if render is scaled up
+  (`OPENROUTER_API_KEY`, etc.) that may not exist in SSM - if render is scaled up
   before those params exist, task startup fails (see F6).
 
 ### Consistency / correctness (non-blocking)

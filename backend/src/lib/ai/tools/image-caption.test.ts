@@ -39,10 +39,10 @@ describe('image.caption tool', () => {
     expect(imageCaptionTool.name).toBe('image.caption');
     expect(imageCaptionTool.providerDefinition.description).toContain('integer quality score from 1 to 100');
     expect(imageCaptionTool.providerDefinition.inputSchema.properties.imageUrls.items.pattern).toBe('^https?://');
-    expect(source).toContain("mode: 'fixed'");
-    expect(source).toContain("actionSlug: 'caption-image'");
-    expect(source).toContain("providerSlug: 'google-vertex'");
-    expect(IMAGE_CAPTION_MODEL).toBe('google.gemini-3.7-flash');
+    expect(source).toContain("mode: 'auto'");
+    expect(source).toContain("providers: ['image.primary']");
+    expect(source).toContain("actionSlug: 'image'");
+    expect(IMAGE_CAPTION_MODEL).toBe('google.gemini-3.1-flash-lite-image');
   });
 
   test('rejects malformed executor output', async () => {

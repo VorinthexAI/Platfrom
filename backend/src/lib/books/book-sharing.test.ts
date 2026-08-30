@@ -29,15 +29,15 @@ describe('book sharing service', () => {
 
   test('requires an active ready share and projects only safe playback fields with fresh URLs', async () => {
     let active = false; const signed: string[] = [];
-    const repository: any = { publicShare: async (hash: string) => hash === tokenHash ? { share: share(active), book: { key: bookKey, title: 'Decisions', subtitle: 'A guide', description: 'Decide well', status: 'ready', narratorVoiceKey: 'clear', coverStorageKey: 'private/cover', estimatedMinutes: 5, chapterCount: 1, scopeKey, generationOwnerKey: userKey, generationInput: { secret: true } }, chapters: [{ key: newId(), scopeKey, bookKey, title: 'Start', description: 'Opening', content: 'Safe prose', position: 1, estimatedMinutes: 5, audioStorageKey: 'private/audio', imageStorageKey: 'private/image', audioDurationSeconds: 300, storageInternal: 'secret' }] } : null };
+    const repository: any = { publicShare: async (hash: string) => hash === tokenHash ? { share: share(active), book: { key: bookKey, title: 'Decisions', subtitle: 'A guide', description: 'Decide well', status: 'ready', narratorVoiceKey: 'clear', coverStorageKey: 'private/cover', estimatedMinutes: 5, chapterCount: 1, scopeKey, generationOwnerKey: userKey, generationInput: { secret: true } }, chapters: [{ key: newId(), scopeKey, bookKey, title: 'Start', description: 'Opening', content: 'Safe prose', position: 1, estimatedMinutes: 5, audioStorageKey: 'private/audio', audioDurationSeconds: 300, storageInternal: 'secret' }] } : null };
     const service = createBookService({ repository, publicSignUrl: async (key) => { signed.push(key); return `signed:${key}:${signed.length}`; } });
     await expect(service.readPublicShare(token)).rejects.toMatchObject({ reason: 'not_found' });
     active = true;
     const result = await service.readPublicShare(token);
-    expect(result).toMatchObject({ book: { key: bookKey, status: 'ready', isFavorite: false, progressPercent: 0, coverUrl: 'signed:private/cover:1' }, chapters: [{ audioUrl: 'signed:private/audio:2', imageUrl: 'signed:private/image:3', progressSeconds: 0, isCompleted: false }] });
+    expect(result).toMatchObject({ book: { key: bookKey, status: 'ready', isFavorite: false, progressPercent: 0, coverUrl: 'signed:private/cover:1' }, chapters: [{ audioUrl: 'signed:private/audio:2', progressSeconds: 0, isCompleted: false }] });
     expect(JSON.stringify(result)).not.toMatch(/scopeKey|generationOwnerKey|generationInput|storageKey|token|secret/);
     await service.readPublicShare(token);
-    expect(signed).toHaveLength(6);
+    expect(signed).toHaveLength(4);
   });
 
   test('reports a non-ready shared book as inactive', async () => {

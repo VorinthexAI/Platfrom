@@ -623,17 +623,14 @@ jobs:
           creds=$(aws ssm get-parameters-by-path --region "$AWS_REGION" --path "$SSM_PATH" --recursive --with-decryption --query "Parameters[].{n:Name,v:Value}" --output json)
           arango_password=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/ARANGO_ROOT_PASSWORD")) | .v')
           arango_database=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/ARANGO_DATABASE")) | .v')
-          azure_openai_api_key=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/AZURE_OPENAI_API_KEY")) | .v')
-          azure_openai_endpoint=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/AZURE_OPENAI_ENDPOINT")) | .v')
+          openrouter_api_key=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENROUTER_API_KEY")) | .v')
           test -n "$arango_password" || { echo "::error::ARANGO_ROOT_PASSWORD not found under $SSM_PATH"; exit 1; }
-          test -n "$azure_openai_api_key" || { echo "::error::AZURE_OPENAI_API_KEY not found under $SSM_PATH; embedding backfill cannot run"; exit 1; }
-          test -n "$azure_openai_endpoint" || { echo "::error::AZURE_OPENAI_ENDPOINT not found under $SSM_PATH; embedding backfill cannot run"; exit 1; }
+          test -n "$openrouter_api_key" || { echo "::error::OPENROUTER_API_KEY not found under $SSM_PATH; embedding backfill cannot run"; exit 1; }
           echo "::add-mask::$arango_password"
-          echo "::add-mask::$azure_openai_api_key"
+          echo "::add-mask::$openrouter_api_key"
           echo "ARANGO_ROOT_PASSWORD=$arango_password" >> "$GITHUB_ENV"
           echo "ARANGO_DATABASE=$arango_database" >> "$GITHUB_ENV"
-          echo "AZURE_OPENAI_API_KEY=$azure_openai_api_key" >> "$GITHUB_ENV"
-          echo "AZURE_OPENAI_ENDPOINT=$azure_openai_endpoint" >> "$GITHUB_ENV"
+          echo "OPENROUTER_API_KEY=$openrouter_api_key" >> "$GITHUB_ENV"
       - name: Seed deterministic application data
         env:
           ARANGO_URL: http://127.0.0.1:8529
@@ -777,17 +774,14 @@ jobs:
           creds=$(aws ssm get-parameters-by-path --region "$AWS_REGION" --path "$SSM_PATH" --recursive --with-decryption --query "Parameters[].{n:Name,v:Value}" --output json)
           arango_password=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/ARANGO_ROOT_PASSWORD")) | .v')
           arango_database=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/ARANGO_DATABASE")) | .v')
-          azure_openai_api_key=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/AZURE_OPENAI_API_KEY")) | .v')
-          azure_openai_endpoint=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/AZURE_OPENAI_ENDPOINT")) | .v')
+          openrouter_api_key=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENROUTER_API_KEY")) | .v')
           test -n "$arango_password" || { echo "::error::ARANGO_ROOT_PASSWORD not found under $SSM_PATH"; exit 1; }
-          test -n "$azure_openai_api_key" || { echo "::error::AZURE_OPENAI_API_KEY not found under $SSM_PATH; embedding migrations cannot run"; exit 1; }
-          test -n "$azure_openai_endpoint" || { echo "::error::AZURE_OPENAI_ENDPOINT not found under $SSM_PATH; embedding migrations cannot run"; exit 1; }
+          test -n "$openrouter_api_key" || { echo "::error::OPENROUTER_API_KEY not found under $SSM_PATH; embedding migrations cannot run"; exit 1; }
           echo "::add-mask::$arango_password"
-          echo "::add-mask::$azure_openai_api_key"
+          echo "::add-mask::$openrouter_api_key"
           echo "ARANGO_ROOT_PASSWORD=$arango_password" >> "$GITHUB_ENV"
           echo "ARANGO_DATABASE=$arango_database" >> "$GITHUB_ENV"
-          echo "AZURE_OPENAI_API_KEY=$azure_openai_api_key" >> "$GITHUB_ENV"
-          echo "AZURE_OPENAI_ENDPOINT=$azure_openai_endpoint" >> "$GITHUB_ENV"
+          echo "OPENROUTER_API_KEY=$openrouter_api_key" >> "$GITHUB_ENV"
       - name: Apply graph migrations
         working-directory: .
         env:
@@ -905,17 +899,10 @@ jobs:
           creds=$(aws ssm get-parameters-by-path --region "$AWS_REGION" --path "$SSM_PATH" --recursive --with-decryption --query "Parameters[].{n:Name,v:Value}" --output json)
           arango_password=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/ARANGO_ROOT_PASSWORD")) | .v')
           arango_database=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/ARANGO_DATABASE")) | .v')
-          azure_api_key=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/AZURE_OPENAI_API_KEY")) | .v')
-          azure_endpoint=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/AZURE_OPENAI_ENDPOINT")) | .v')
           test -n "$arango_password" || { echo "::error::ARANGO_ROOT_PASSWORD not found under $SSM_PATH"; exit 1; }
-          test -n "$azure_api_key" || { echo "::error::AZURE_OPENAI_API_KEY not found under $SSM_PATH"; exit 1; }
-          test -n "$azure_endpoint" || { echo "::error::AZURE_OPENAI_ENDPOINT not found under $SSM_PATH"; exit 1; }
           echo "::add-mask::$arango_password"
-          echo "::add-mask::$azure_api_key"
           echo "ARANGO_ROOT_PASSWORD=$arango_password" >> "$GITHUB_ENV"
           echo "ARANGO_DATABASE=$arango_database" >> "$GITHUB_ENV"
-          echo "AZURE_OPENAI_API_KEY=$azure_api_key" >> "$GITHUB_ENV"
-          echo "AZURE_OPENAI_ENDPOINT=$azure_endpoint" >> "$GITHUB_ENV"
       - name: Upsert db.seeds.secrets.json
         env:
           ARANGO_URL: http://127.0.0.1:8529

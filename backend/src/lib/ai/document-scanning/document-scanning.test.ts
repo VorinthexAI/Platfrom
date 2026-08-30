@@ -12,18 +12,11 @@ test('preserves ordered pages and reconciles Textract with visual transcription'
   const captionInputs: any[] = [];
   const storage = {
     async upload(input: any) { uploaded.push(input.key); return { storageKey: input.key }; },
-    async delete() {},
-    async download() { return { bytes: new Uint8Array() }; },
-    async copy() { return { storageKey: '' }; },
+    async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; },
   };
-  const output = await scanDocumentImages({
-    scopeKey: newId(),
-    name: 'Receipt',
-    idempotencyKey: 'stable-scan',
-    pages: [scanPage(0), scanPage(1)],
-  }, 'organization', {
+  const output = await scanDocumentImages({ scopeKey: newId(), name: 'Receipt', idempotencyKey: 'stable-scan', pages: [scanPage(0), scanPage(1)] }, 'organization', {
     storage,
-    ocr: { extract: async (key) => ({ extractedText: `textract:${key.at(-5)}`, blocks: [], metadata: {} }) },
+    fileAction: { execute: async (input) => ({ text: `textract:${input.storageKey.at(-5)}`, metadata: {} }) },
     caption: async (input: any) => {
       captionInputs.push(input);
       const first = input.imageUrls[0] === firstCanonicalUrl;
@@ -44,7 +37,7 @@ test('cleans retained scan objects when processing fails', async () => {
   const deleted: string[] = [];
   await expect(scanDocumentImages({ scopeKey: newId(), pages: [scanPage()], idempotencyKey: 'failed' }, 'organization', {
     storage: { async upload(input) { return { storageKey: input.key }; }, async delete(key) { deleted.push(key); }, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
-    ocr: { extract: async () => { throw new Error('offline'); } },
+    fileAction: { execute: async () => { throw new Error('offline'); } },
     caption: async () => ({ results: [{ caption: 'visual', score: 80 }] }),
   })).rejects.toThrow('offline');
   expect(deleted).toHaveLength(1);
@@ -52,13 +45,9 @@ test('cleans retained scan objects when processing fails', async () => {
 
 test('creates OCR content when the visual provider is unavailable', async () => {
   let captionCalls = 0;
-  const output = await scanDocumentImages({
-    scopeKey: newId(),
-    idempotencyKey: 'ocr-fallback',
-    pages: [scanPage()],
-  }, 'organization', {
+  const output = await scanDocumentImages({ scopeKey: newId(), idempotencyKey: 'ocr-fallback', pages: [scanPage()] }, 'organization', {
     storage: { async upload(input) { return { storageKey: input.key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
-    ocr: { extract: async () => ({ extractedText: 'Reliable Textract text', blocks: [], metadata: { averageConfidence: 99, minimumConfidence: 98 } }) },
+    fileAction: { execute: async () => ({ text: 'Reliable Textract text', metadata: { averageConfidence: 99, minimumConfidence: 98 } }) },
     caption: async () => { captionCalls += 1; throw new Error('visual provider unavailable'); },
   });
   expect(output.content).toBe('Reliable Textract text');
@@ -66,13 +55,9 @@ test('creates OCR content when the visual provider is unavailable', async () => 
 });
 
 test('uses OCR content when visual reconciliation fails', async () => {
-  const output = await scanDocumentImages({
-    scopeKey: newId(),
-    idempotencyKey: 'reconciliation-fallback',
-    pages: [scanPage()],
-  }, 'organization', {
+  const output = await scanDocumentImages({ scopeKey: newId(), idempotencyKey: 'reconciliation-fallback', pages: [scanPage()] }, 'organization', {
     storage: { async upload(input) { return { storageKey: input.key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
-    ocr: { extract: async () => ({ extractedText: 'Primary OCR', blocks: [], metadata: {} }) },
+    fileAction: { execute: async () => ({ text: 'Primary OCR', metadata: {} }) },
     caption: async (input: any) => {
       if (input.purpose === 'document-transcription') return { results: [{ caption: 'Visual OCR', score: 80 }] };
       throw new Error('reconciliation unavailable');
@@ -90,13 +75,9 @@ test('finishes parallel OCR before starting visual work only for uncertain pages
   const extractionGate = new Promise<void>((resolve) => { releaseExtraction = resolve; });
   let allOcrStarted!: () => void;
   const ocrStartedSignal = new Promise<void>((resolve) => { allOcrStarted = resolve; });
-  const operation = scanDocumentImages({
-    scopeKey: newId(),
-    idempotencyKey: 'parallel-scan',
-    pages: Array.from({ length: pageCount }, (_, index) => scanPage(index)),
-  }, 'organization', {
+  const operation = scanDocumentImages({ scopeKey: newId(), idempotencyKey: 'parallel-scan', pages: Array.from({ length: pageCount }, (_, index) => scanPage(index)) }, 'organization', {
     storage: { async upload(input) { return { storageKey: input.key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
-    ocr: { extract: async () => { ocrStarted += 1; if (ocrStarted === pageCount) allOcrStarted(); await extractionGate; return { extractedText: 'primary', blocks: [], metadata: {} }; } },
+    fileAction: { execute: async () => { ocrStarted += 1; if (ocrStarted === pageCount) allOcrStarted(); await extractionGate; return { text: 'primary', metadata: {} }; } },
     caption: async (input: any) => {
       if (input.purpose === 'document-transcription') { visualStarted += 1; return { results: [{ caption: 'secondary', score: 80 }] }; }
       reconciliationStarted += 1;
@@ -127,7 +108,7 @@ test('collapses Textract-style blank lines between every detected line', () => {
 });
 
 test('requires both average and minimum confidence before skipping visual reconciliation', () => {
-  expect(isReliableDocumentOcr({ extractedText: 'Reliable', metadata: { averageConfidence: 99, minimumConfidence: 95 } })).toBe(true);
-  expect(isReliableDocumentOcr({ extractedText: 'Uncertain', metadata: { averageConfidence: 99, minimumConfidence: 70 } })).toBe(false);
-  expect(isReliableDocumentOcr({ extractedText: 'Unknown', metadata: {} })).toBe(false);
+  expect(isReliableDocumentOcr({ text: 'Reliable', metadata: { averageConfidence: 99, minimumConfidence: 95 } })).toBe(true);
+  expect(isReliableDocumentOcr({ text: 'Uncertain', metadata: { averageConfidence: 99, minimumConfidence: 70 } })).toBe(false);
+  expect(isReliableDocumentOcr({ text: 'Unknown', metadata: {} })).toBe(false);
 });

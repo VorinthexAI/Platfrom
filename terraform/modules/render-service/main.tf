@@ -10,11 +10,7 @@ locals {
     "ARANGO_ROOT_PASSWORD",
     "REDIS_URL",
     "S3_BUCKET",
-    "AWS_POLLY_REGION",
-    "GOOGLE_VERTEX_API_KEY",
-    "GOOGLE_VERTEX_PROJECT_ID",
-    "AZURE_OPENAI_API_KEY",
-    "AZURE_OPENAI_ENDPOINT"
+    "OPENROUTER_API_KEY"
   ]
 }
 
@@ -113,11 +109,6 @@ resource "aws_iam_role_policy" "task_runtime" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
-      {
-        Effect   = "Allow"
-        Action   = ["polly:SynthesizeSpeech"]
-        Resource = ["*"]
-      },
       {
         Effect = "Allow"
         Action = [

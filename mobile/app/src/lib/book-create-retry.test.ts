@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 
 import { restoredBookDraft, retryBookCreateRequestKey } from "./book-create-retry";
 
-const input = { topic: "Useful habits", goal: "Build a practice", currentKnowledge: "Beginner", language: "English", writingTone: "Clear", narratorVoiceKey: "clear" as const, narrationPace: 1, archiveDocumentKeys: ["document"], chapterImages: true, additionalInstructions: undefined };
+const input = { topic: "Useful habits", goal: "Build a practice", currentKnowledge: "Beginner", language: "English", writingTone: "Clear", narratorVoiceKey: "clear" as const, narrationPace: 1, archiveDocumentKeys: ["document"], additionalInstructions: undefined };
 
 test("restores failed input and reuses its idempotency key unchanged", () => {
   const failed = { input, requestKey: "original" };

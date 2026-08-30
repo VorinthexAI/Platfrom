@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto';
 import sharp from 'sharp';
 import { z } from 'zod';
 import { executeAction } from '@/lib/ai/router';
-import { IMAGE_CAPTION_MODEL } from '@/lib/image-caption-constants';
 import { imageCaptionOutputSchema, type ImageCaptionInput, type ImageCaptionOutput } from '@/lib/ai/providers';
 import { documentStorage, type DocumentStorage } from '@/lib/ai/document-processing/storage';
 import { EMBEDDING_DIMENSIONS, currentEmbeddingSchema, embedText } from '@/lib/embeddings';
@@ -136,7 +135,7 @@ function persistedImageMatches(existing: Image, input: ProcessImageInput, image:
 
 export async function captionImageWithVertex(organizationKey: string, input: { filename: string; mimeType: string; bytes: Uint8Array; signal?: AbortSignal }) {
   const providerInput: ImageCaptionInput = { imageUrls: [`data:${input.mimeType};base64,${Buffer.from(input.bytes).toString('base64')}`], purpose: 'caption' };
-  const response = await executeAction<ImageCaptionInput, ImageCaptionOutput>({ mode: 'fixed', organizationKey, actionSlug: 'caption-image', modelSlug: IMAGE_CAPTION_MODEL, providerSlug: 'google-vertex' }, providerInput, { signal: input.signal, timeoutMs: 180_000 });
+  const response = await executeAction<ImageCaptionInput & { operation: 'caption' }, ImageCaptionOutput>({ mode: 'auto', organizationKey, actionSlug: 'image' }, { operation: 'caption', ...providerInput }, { providers: ['image.primary'], signal: input.signal, timeoutMs: 180_000 });
   const output = imageCaptionOutputSchema.parse(response.output);
   return generatedImageCaptionSchema.parse(output.results[0]);
 }

@@ -19,6 +19,7 @@ export function createBookHandlers(options: { service?: BookService; getIdentity
       if (error instanceof BookHttpError) return c.json({ success: false, error: { code: error.code, message: error.message } }, error.status);
       if (error instanceof BookRepositoryError) { const status = error.reason === 'forbidden' ? 403 : error.reason === 'conflict' || error.reason === 'favorite' ? 409 : 404; const code = error.reason === 'forbidden' ? 'BOOK_FORBIDDEN' : error.reason === 'favorite' ? 'BOOK_FAVORITE' : error.reason === 'conflict' ? 'BOOK_CONFLICT' : 'BOOK_NOT_FOUND'; const message = error.reason === 'forbidden' ? 'Audio book scope access denied.' : error.reason === 'conflict' || error.reason === 'favorite' ? error.message : 'Audio book not found.'; return c.json({ success: false, error: { code, message } }, status); }
       if (error instanceof ZodError || error instanceof SyntaxError) return c.json({ success: false, error: { code: 'BOOK_INVALID_INPUT', message: 'Audio book request input was invalid.' } }, 400);
+      console.error('audio book request failed', { method: c.req.method, path: c.req.path, error });
       return c.json({ success: false, error: { code: 'BOOK_FAILED', message: 'Audio book request failed.' } }, 500);
     }
   };

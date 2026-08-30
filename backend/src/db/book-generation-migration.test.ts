@@ -9,7 +9,7 @@ describe('canonical book persistence migration', () => {
   test('reverse-backfills managed Archive state into canonical rows idempotently', async () => {
     const scopeKey = newId(); const bookKey = newId(); const chapterKey = newId(); const calls: Array<{ query: string; bind?: Record<string, unknown> }> = [];
     const book = { _key: bookKey, scopeKey, title: 'Legacy book', description: 'Description', goal: 'Learn', audience: 'Reader', outcome: 'Understand', language: 'English', status: 'ready', chapterCount: 1, estimatedMinutes: 2, coverStorageKey: 'legacy-cover', embedding, createdAt: now, updatedAt: now };
-    const chapter = { _key: chapterKey, scopeKey, bookKey, title: 'Opening', description: 'Opening brief', objective: 'Orient', content: 'Published prose', status: 'audio-ready', position: 1, audioStorageKey: 'audio', audioDurationSeconds: 60, imageStorageKey: 'legacy-art', embedding, createdAt: now, updatedAt: now };
+    const chapter = { _key: chapterKey, scopeKey, bookKey, title: 'Opening', description: 'Opening brief', objective: 'Orient', content: 'Published prose', status: 'audio-ready', position: 1, audioStorageKey: 'audio', audioDurationSeconds: 60, embedding, createdAt: now, updatedAt: now };
     const target: any = {
       collection: () => ({ exists: async () => true, create: async () => {} }),
       query: async (query: string, bind?: Record<string, unknown>) => {

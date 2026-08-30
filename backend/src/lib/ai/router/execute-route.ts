@@ -1,11 +1,11 @@
 import { normalizeProviderError } from '@/lib/ai/providers/errors';
-import type { ActionId } from '@/lib/ai/actions';
-import { webSearchInputSchema, type WebSearchInput } from '@/lib/ai/actions/web-search';
-import type { ProviderAdapter, ProviderExecuteResponse, ProviderId } from '@/lib/ai/providers/types';
+import { executeQueueAction, type ActionId, type ActionRouteId } from '@/lib/ai/actions';
+import { webInputSchema, type WebInput } from '@/lib/ai/actions/web';
+import { imageActionInputSchema, imageOutputSchema, type ImageOutput, type ProviderAdapter, type ProviderExecuteResponse, type ProviderId } from '@/lib/ai/providers/types';
 import { createRegisteredProviderAdapter } from '@/lib/ai/providers';
-import { ZERO_TOKEN_USAGE, type TokenUsage } from '@/lib/ai/shared/usage';
+import { tokenUsage, ZERO_TOKEN_USAGE, type TokenUsage } from '@/lib/ai/shared/usage';
 import { ProviderExecutionError } from './errors';
-import { selectRoute } from './select-route';
+import { selectRoutes } from './select-route';
 import type { RouteRequestInput } from './route-request';
 import type { RouteDecision, RouterDependencies } from './types';
 import { coreChatInputSchema, type CoreChatInput } from '@/lib/ai/actions/core-chat';
@@ -76,30 +76,77 @@ export async function executeRoute<TInput, TOutput>(options: ExecuteRouteOptions
   }
 }
 
-export interface ExecuteActionOptions extends RouterDependencies { timeoutMs?: number; signal?: AbortSignal }
+export interface ExecuteActionOptions extends RouterDependencies {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  providers?: readonly ActionRouteId[];
+  retry?: { intervalMs?: number; attempts?: number };
+}
 export async function executeAction<TInput, TOutput>(request: RouteRequestInput, input: TInput, options: ExecuteActionOptions = {}) {
-  const decision = await selectRoute(request, options);
-  return executeRoute<TInput, TOutput>({ decision, input, adapters: options.adapters, env: options.env, timeoutMs: options.timeoutMs, signal: options.signal });
+  const decisions = await selectRoutes(request, options, options.providers);
+  const executeSelected = async <TSelectedInput, TSelectedOutput>(selectedInput: TSelectedInput) => executeQueueAction({
+    action: decisions[0]!.actionSlug,
+    signal: options.signal,
+    baseDelayMs: options.retry?.intervalMs,
+    maxAttempts: options.retry?.attempts,
+    shouldRetry: (error) => error instanceof ProviderExecutionError && error.attempts.length > 0 && error.attempts.every(({ code }) => code === 'rate_limited'),
+    run: async () => {
+    const failures: ProviderExecutionError['attempts'][number][] = [];
+    for (const decision of decisions) {
+      try {
+        return await executeRoute<TSelectedInput, TSelectedOutput>({ decision, input: selectedInput, adapters: options.adapters, env: options.env, timeoutMs: options.timeoutMs, signal: options.signal });
+      } catch (error) {
+        if (!(error instanceof ProviderExecutionError)) throw error;
+        failures.push(...error.attempts);
+        if (error.attempts.at(-1)?.code !== 'rate_limited') throw new ProviderExecutionError(decision.actionSlug, failures, { cause: error });
+      }
+    }
+    throw new ProviderExecutionError(decisions[0]!.actionSlug, failures);
+    },
+  });
+  if (decisions[0]!.actionSlug === 'image') {
+    const parsed = imageActionInputSchema.parse(input);
+    if (parsed.operation !== 'generate') return executeSelected<TInput, TOutput>(input);
+    const responses = await Promise.all(Array.from({ length: parsed.count }, async () => {
+      return executeSelected<typeof parsed, ImageOutput>({ ...parsed, count: 1 });
+    }));
+    if (responses.length === 1) return responses[0] as ProviderExecuteResponse<TOutput>;
+    const usage = tokenUsage(
+      responses.reduce((sum, response) => sum + response.usage.inputTokens, 0),
+      responses.reduce((sum, response) => sum + response.usage.outputTokens, 0),
+      responses.reduce((sum, response) => sum + response.usage.totalTokens, 0),
+    );
+    const costs = responses.flatMap(({ costUsd }) => costUsd === undefined ? [] : [costUsd]);
+    return {
+      output: imageOutputSchema.parse({ images: responses.flatMap(({ output }) => output.images) }) as TOutput,
+      usage,
+      ...(costs.length ? { costUsd: costs.reduce((sum, cost) => sum + cost, 0) } : {}),
+      providerId: responses[0]!.providerId,
+      modelId: responses[0]!.modelId,
+      externalModelId: responses[0]!.externalModelId,
+      rawResponse: responses.map(({ rawResponse }) => rawResponse),
+    };
+  }
+  return executeSelected<TInput, TOutput>(input);
 }
 
 /** Executes the canonical text action using the model selected by its provider-neutral mode. */
 export async function executeAsk<TOutput>(organizationKey: string, input: CoreChatInput, options: ExecuteActionOptions = {}) {
   const { mode, ...providerInput } = coreChatInputSchema.parse(input);
   const request: RouteRequestInput = {
-    mode: 'model',
+    mode: 'auto',
     organizationKey,
-    actionSlug: 'ask',
-    modelSlug: 'google.gemini-3.5-flash-lite',
+    actionSlug: 'text',
   };
   return executeAction<typeof providerInput, TOutput>(request, providerInput, options);
 }
 
 /** Executes grounded web search using the model selected by its provider-neutral mode. */
-export async function executeWebSearch<TOutput>(organizationKey: string, input: WebSearchInput, options: ExecuteActionOptions = {}) {
-  const { mode, ...providerInput } = webSearchInputSchema.parse(input);
+export async function executeWebSearch<TOutput>(organizationKey: string, input: WebInput, options: ExecuteActionOptions = {}) {
+  const { mode, ...providerInput } = webInputSchema.parse(input);
   return executeAction<typeof providerInput, TOutput>({
-    mode: 'model', organizationKey, actionSlug: 'web-search',
-    modelSlug: 'google.gemini-3.7-flash',
+    mode: 'model', organizationKey, actionSlug: 'web',
+    modelSlug: 'google.gemini-3.1-flash-lite-preview',
   }, providerInput, options);
 }
 

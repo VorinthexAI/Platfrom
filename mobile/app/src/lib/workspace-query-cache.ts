@@ -717,7 +717,6 @@ export function patchCachedBookProgress(queryClient: QueryClient, context: Works
     const mergedChapter = currentChapter ? {
       ...chapter,
       ...(currentChapter.audioUrl ? { audioUrl: currentChapter.audioUrl } : {}),
-      ...(currentChapter.imageUrl ? { imageUrl: currentChapter.imageUrl } : {}),
       progressSeconds: Math.max(currentChapter.progressSeconds, chapter.progressSeconds),
       isCompleted: currentChapter.isCompleted || chapter.isCompleted,
     } : chapter;

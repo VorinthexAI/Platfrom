@@ -7,14 +7,12 @@ Local Bun CLI for generating, reviewing, locking, versioning, exporting, and bac
 ```bash
 cd scripts/image
 bun install
-cp .env.example .env
 ```
 
-Set `OPENAI_API_KEY` in `.env`. Model names are configurable:
+The CLI reads `OPENROUTER_API_KEY` from `secrets.dev.backend` in the encrypted repository file `.github/environments.json`. The image model handles generation, editing, review, and comparison. Optional non-secret overrides can be supplied through the process environment:
 
 ```env
-OPENAI_IMAGE_MODEL=gpt-image-1
-OPENAI_TEXT_MODEL=gpt-5.1
+OPENROUTER_IMAGE_MODEL=google/gemini-3.1-flash-lite-image
 DEFAULT_SIZE=1024x1024
 DEFAULT_SOLID_BACKGROUND=#030405
 DEFAULT_OUTPUT_FORMAT=png

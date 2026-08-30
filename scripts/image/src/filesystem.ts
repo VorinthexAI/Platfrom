@@ -129,7 +129,6 @@ export async function ensureRuntime(config: EngineConfig): Promise<void> {
   for (const dir of runtimeDirs) await mkdir(path.join(config.rootDir, dir), { recursive: true });
 
   const seeds: Record<string, string> = {
-    ".env": "OPENAI_API_KEY=your_key_here\nOPENAI_IMAGE_MODEL=gpt-image-1\nOPENAI_TEXT_MODEL=gpt-5.1\nDEFAULT_SIZE=1024x1024\nDEFAULT_SOLID_BACKGROUND=#030405\nDEFAULT_OUTPUT_FORMAT=png\n",
     "design-system.md": designSystem,
     "baseline-prompt.md": baselinePrompt,
     "memory/history.md": "# History\n",

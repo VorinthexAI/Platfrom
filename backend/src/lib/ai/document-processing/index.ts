@@ -13,7 +13,7 @@ import {
 } from './actions';
 import { DocumentProcessingError } from './errors';
 import { documentStorage, type DocumentStorage } from './storage';
-import type { DocumentOcr } from './textract';
+import type { FileActionClient } from './file';
 import type { embedText } from '@/lib/embeddings';
 import type { embedTexts } from '@/lib/embeddings';
 import { acknowledgeStorageUploadReservation, releaseStorageUploadReservation, renewStorageUploadReservation, reserveStorageKeyForUpload, type StorageUploadReservation } from '@/lib/db/storage-deletion-jobs.node';
@@ -21,7 +21,7 @@ import { startStorageUploadHeartbeat } from '@/lib/storage-upload-reservation';
 
 export interface DocumentParseDependencies extends DocumentInsertDependencies {
   storage?: DocumentStorage;
-  ocr?: DocumentOcr;
+  fileAction?: FileActionClient;
   embed?: typeof embedText;
   embedBatch?: typeof embedTexts;
   embeddingDimensions?: number;
@@ -104,7 +104,7 @@ export async function parseDocument(rawInput: DocumentParseInput, dependencies: 
   const reservation = uploaded.reservation ?? customReservation(uploaded.storageKey);
   const heartbeat = uploaded.reservationHeartbeat ?? startStorageUploadHeartbeat(reservation, renewReservation, dependencies.reservationHeartbeatMs);
   try {
-    const extraction = await actions.extract({ ...normalized, storageKey: uploaded.storageKey }, { ocr: dependencies.ocr, logger });
+    const extraction = await actions.extract({ ...normalized, storageKey: uploaded.storageKey }, { fileAction: dependencies.fileAction, logger });
     await heartbeat.checkpoint();
     if (!extraction.extractedText.trim()) throw new DocumentProcessingError('DOCUMENT_EXTRACTION_FAILED', 'No text could be extracted from the document.', 'document-extract');
     const { content } = await actions.cleanup({ text: extraction.extractedText }, { clean: dependencies.cleanText, logger });
@@ -177,6 +177,7 @@ export async function parseDocument(rawInput: DocumentParseInput, dependencies: 
 export * from './actions';
 export * from './chunking';
 export * from './errors';
+export * from './file';
 export * from './exports';
 export * from './preview';
 export * from './representation';

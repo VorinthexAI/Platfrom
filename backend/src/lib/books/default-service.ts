@@ -4,7 +4,6 @@ import { createPublicS3Client, S3_BUCKET } from '@/lib/s3';
 import { createBookRepository } from './repository';
 import { createBookRuntime } from './runtime';
 import { createBookService } from './service';
-import { enqueueBookGeneration, removeBookGenerationJob } from './generation-queue';
 
 const repository = createBookRepository();
 const publicS3 = createPublicS3Client();
@@ -32,9 +31,7 @@ const signPublicBookUrl = (key: string) => signObject(publicS3, new GetObjectCom
 
 export const defaultBookService = createBookService({
   repository,
-  generator: createBookRuntime({ repository, artworkRetryDelayMs: 30_000 }),
-  enqueue: enqueueBookGeneration,
-  removeJob: removeBookGenerationJob,
+  generator: createBookRuntime({ repository }),
   signUrl: signBookUrl,
   publicSignUrl: signPublicBookUrl,
 });

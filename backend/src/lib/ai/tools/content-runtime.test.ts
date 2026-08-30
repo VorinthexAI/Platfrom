@@ -531,9 +531,9 @@ describe('Content runtime', () => {
       return {
         output,
         usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-        providerId: request.actionSlug === 'embed' ? 'azure-ai-foundry' : 'google-vertex',
-        modelId: request.actionSlug === 'embed' ? 'openai.text-embedding-3-small' : 'google.gemini-3.7-flash',
-        externalModelId: request.actionSlug === 'embed' ? 'text-embedding-3-small' : 'gemini-3.7-flash',
+        providerId: 'openrouter',
+        modelId: request.actionSlug === 'embed' ? 'openai.text-embedding-3-small' : 'google.gemini-3.1-flash-lite-preview',
+        externalModelId: request.actionSlug === 'embed' ? 'openai/text-embedding-3-small' : 'google/gemini-3.1-flash-lite-preview',
       };
     };
     const dependencies = { repository: f.repository, executeAction };
@@ -1625,7 +1625,7 @@ describe('Content runtime', () => {
       repository: f.repository,
       executeAction: (async (candidate: any, input: any) => { request = candidate; expect(input).toMatchObject({ messages: [{ role: 'user' }] }); return { output: { text: 'Traduisez ce texte.' } }; }) as any,
     });
-    expect(request).toMatchObject({ mode: 'auto', organizationKey: f.context.organizationKey, actionSlug: 'ask' });
+    expect(request).toMatchObject({ mode: 'auto', organizationKey: f.context.organizationKey, actionSlug: 'text' });
     expect(request).not.toHaveProperty('modelSlug');
     expect(output.results[0]).toMatchObject({ success: true, data: { documentKey, text: 'Traduisez ce texte.', language: 'French' } });
   });
