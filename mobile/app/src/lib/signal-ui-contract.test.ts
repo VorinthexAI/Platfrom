@@ -711,6 +711,7 @@ test("attachment picker loads and searches both real stores with persistent mult
   expect(picker).toContain('{!archiveOnly ? <Tabs accessibilityLabel="Attachment sources"');
   expect(picker).toContain('if (!open || archiveOnly) return;');
   expect(picker).toContain('archiveOnly ? `You can select up to ${maxSelection} items.` : `You can attach up to ${maxSelection} items.`');
+  expect(picker).toContain('onSelectionLimitReached(maxSelection)');
   expect(picker.indexOf("styles.rootActions")).toBeLessThan(picker.indexOf('accessibilityLabel="Attachment sources"'));
   expect(picker).not.toContain('description="Choose Archive documents or Gallery images');
   expect(picker).toContain('folderTabs: { flexDirection: "row", gap: 4, padding: 3, borderWidth: 1, backgroundColor: palette.panel }');

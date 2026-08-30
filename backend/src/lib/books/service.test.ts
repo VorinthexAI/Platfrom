@@ -6,9 +6,9 @@ import { bookCreateInputSchema, createBookService } from './service';
 import { BookRepositoryError } from './repository';
 
 const organizationKey = 'organization'; const scopeKey = newId(); const userKey = newId(); const bookKey = newId(); const now = '2026-08-12T12:00:00.000Z';
-const input = { organizationKey, scopeKey, generationRequestKey: 'request-1', topic: 'Decision making', goal: 'Decide well', currentKnowledge: 'I know the basics', writingTone: 'Clear and practical', language: 'English', narratorVoiceKey: 'clear' as const, narrationPace: 1, archiveDocumentKeys: [], chapterImages: false };
+const input = { organizationKey, scopeKey, generationRequestKey: 'request-1', topic: 'Decision making', goal: 'Decide well', currentKnowledge: 'I know the basics', writingTone: 'Clear and practical', language: 'English', narratorVoiceKey: 'clear' as const, narrationPace: 1, archiveDocumentKeys: [] };
 const requestInput = bookCreateInputSchema.parse(input);
-const parsedInput = { organizationKey: requestInput.organizationKey, scopeKey: requestInput.scopeKey, generationRequestKey: requestInput.generationRequestKey, topic: requestInput.topic, goal: requestInput.goal, currentKnowledge: requestInput.currentKnowledge, writingTone: requestInput.writingTone, chapterCount: 10 as const, language: requestInput.language, archiveDocumentKeys: requestInput.archiveDocumentKeys, narratorVoiceKey: requestInput.narratorVoiceKey, narrationPace: requestInput.narrationPace, chapterImages: requestInput.chapterImages };
+const parsedInput = { organizationKey: requestInput.organizationKey, scopeKey: requestInput.scopeKey, generationRequestKey: requestInput.generationRequestKey, topic: requestInput.topic, goal: requestInput.goal, currentKnowledge: requestInput.currentKnowledge, writingTone: requestInput.writingTone, chapterCount: 10 as const, language: requestInput.language, archiveDocumentKeys: requestInput.archiveDocumentKeys, narratorVoiceKey: requestInput.narratorVoiceKey, narrationPace: requestInput.narrationPace };
 const fingerprint = createHash('sha256').update(JSON.stringify((({ organizationKey: _o, scopeKey: _s, generationRequestKey: _r, ...value }) => value)(parsedInput))).digest('hex');
 const row = (status: 'queued' | 'failed' | 'cancelled' | 'ready' = 'queued') => ({ book: { key: bookKey, scopeKey, title: input.topic, description: input.goal, goal: input.goal, audience: input.currentKnowledge, outcome: input.goal, language: input.language, narratorVoiceKey: input.narratorVoiceKey, narrationPace: 1, generationRequestKey: input.generationRequestKey, generationBriefFingerprint: fingerprint, generationInput: (({ organizationKey: _o, scopeKey: _s, generationRequestKey: _r, ...value }) => value)(parsedInput), generationOwnerKey: userKey, generationStage: 'accepted' as const, generationCompletedUnits: 0, generationTotalUnits: 34, generationAttempt: 0, estimatedMinutes: 0, chapterCount: 10, isFavorite: false, status, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), createdAt: now, updatedAt: now }, chapters: [] });
 
@@ -45,14 +45,14 @@ describe('book service asynchronous lifecycle', () => {
     expect(prompt).toMatchObject({ options: { maxTokens: 2_000 }, responseFormat: { name: 'book_goal_suggestions', schema: { required: ['goals'], properties: { goals: { minItems: 10, maxItems: 10 } } } } });
   });
 
-  test('accepts and enqueues without running generation', async () => {
-    let current: any; let generationInput: unknown; const jobs: unknown[] = [];
+  test('accepts and detaches without awaiting generation', async () => {
+    let current: any; let generationInput: unknown; const detached: Array<() => Promise<void>> = [];
     const repository: any = { authorize: async () => {}, findByGenerationRequest: async () => null, detail: async () => current };
     const generator: any = { create: async (nextInput: unknown) => { generationInput = nextInput; current = row(); return bookKey; }, write: async () => { throw new Error('must be background'); } };
-    const result = await createBookService({ repository, generator, enqueue: async (job) => { jobs.push(job); return { jobId: bookKey }; }, signUrl: async () => 'signed', publishChanged: async () => {} }).create(input, userKey);
+    const result = await createBookService({ repository, generator, detach: (run) => { detached.push(run); }, signUrl: async () => 'signed', publishChanged: async () => {} }).create(input, userKey);
     expect(result).toMatchObject({ key: bookKey, status: 'queued', isFavorite: false, generationProgressPercent: 0 });
     expect(generationInput).toMatchObject({ chapterCount: 10 });
-    expect(jobs).toEqual([{ schemaVersion: 1, bookKey, organizationKey, scopeKey, userKey }]);
+    expect(detached).toHaveLength(1);
   });
 
   test('owns the ten-chapter count and strictly rejects overrides and unknown fields', async () => {
@@ -65,60 +65,54 @@ describe('book service asynchronous lifecycle', () => {
 
   test('previews one exact continuation batch and durably accepts generation', async () => {
     const current: any = row('ready'); current.chapters = Array.from({ length: 10 }, (_, index) => ({ chapter: { key: newId(), position: index + 1, title: `Chapter ${index + 1}`, description: `Summary ${index + 1}`, status: 'audio-ready', content: 'Content', audioStorageKey: `audio-${index}.mp3`, audioDurationSeconds: 60 }, progress: null }));
-    const jobs: unknown[] = []; const receipts: unknown[] = []; let suggestions = 0;
-    const repository: any = { detail: async () => current, acceptExtension: async (_context: unknown, extension: any) => { receipts.push(extension); current.book = { ...current.book, status: 'queued', chapterCount: extension.targetChapterCount }; return { extension, book: current.book, replayed: false }; } };
-    const service = createBookService({ repository, suggestTopics: async (request) => { suggestions += 1; const text = JSON.stringify(request); expect(text).toContain(current.book.description); expect(text).toContain('Summary 10'); return JSON.stringify({ titles: ['The Next Decision'] }); }, enqueue: async (job) => { jobs.push(job); return { jobId: bookKey }; }, signUrl: async () => 'signed', publishChanged: async () => {}, now: () => now });
+    const detached: Array<() => Promise<void>> = []; const receipts: unknown[] = []; let suggestions = 0;
+    const repository: any = { detail: async () => current, acceptExtension: async (_context: unknown, extension: any) => { receipts.push(extension); current.book = { ...current.book, status: 'queued', chapterCount: extension.targetChapterCount, activeExtensionKey: extension.key }; return { extension, book: current.book, replayed: false }; } };
+    const service = createBookService({ repository, generator: { create: async () => bookKey, write: async () => {} }, suggestTopics: async (request) => { suggestions += 1; const text = JSON.stringify(request); expect(text).toContain(current.book.description); expect(text).toContain('Summary 10'); return JSON.stringify({ titles: ['The Next Decision'] }); }, detach: (run) => { detached.push(run); }, signUrl: async () => 'signed', publishChanged: async () => {}, now: () => now });
     await expect(service.extend(bookKey, { organizationKey, scopeKey, mode: 'preview', chapterCount: 1 }, userKey)).resolves.toEqual({ titles: ['The Next Decision'] }); expect(suggestions).toBe(1);
-    await expect(service.extend(bookKey, { organizationKey, scopeKey, mode: 'generate', chapterCount: 1, titles: ['The Next Decision'], requestKey: 'extension-1' }, userKey)).resolves.toMatchObject({ key: bookKey, status: 'queued', chapterCount: 11 });
-    expect(receipts).toHaveLength(1); expect(receipts[0]).toMatchObject({ bookKey, requestKey: 'extension-1', baseChapterCount: 10, targetChapterCount: 11, status: 'pending' }); expect(jobs).toHaveLength(1);
+    await expect(service.extend(bookKey, { organizationKey, scopeKey, mode: 'generate', chapterCount: 1, titles: ['The Next Decision'], requestKey: 'extension-1' }, userKey)).resolves.toMatchObject({ key: bookKey, status: 'queued', chapterCount: 11, isExtending: true });
+    expect(receipts).toHaveLength(1); expect(receipts[0]).toMatchObject({ bookKey, requestKey: 'extension-1', baseChapterCount: 10, targetChapterCount: 11, status: 'pending' }); expect(detached).toHaveLength(1);
   });
 
-  test('keeps accepted work queued for recovery when Redis insertion fails', async () => {
-    let current: any;
-    const repository: any = { authorize: async () => {}, findByGenerationRequest: async () => null, detail: async () => current };
-    const generator: any = { create: async () => { current = row(); return bookKey; } };
-    const service = createBookService({ repository, generator, enqueue: async () => { throw new Error('queue unavailable'); }, publishChanged: async () => {} });
-    await expect(service.create(input, userKey)).resolves.toMatchObject({ key: bookKey, status: 'queued' });
-  });
-
-  test('repairs a missing stable job when create is replayed', async () => {
-    const jobs: unknown[] = []; const current: any = row();
+  test('detaches generation when durable create is replayed', async () => {
+    const detached: Array<() => Promise<void>> = []; const current: any = row();
     const repository: any = { authorize: async () => {}, findByGenerationRequest: async () => current };
-    const result = await createBookService({ repository, enqueue: async (job) => { jobs.push(job); return { jobId: bookKey }; }, signUrl: async () => 'signed' }).create(input, userKey);
+    const generator: any = { create: async () => { throw new Error('unexpected'); }, write: async () => {} };
+    const result = await createBookService({ repository, generator, detach: (run) => { detached.push(run); }, signUrl: async () => 'signed' }).create(input, userKey);
     expect(result).toMatchObject({ key: bookKey, status: 'queued' });
-    expect(jobs).toEqual([{ schemaVersion: 1, bookKey, organizationKey, scopeKey, userKey }]);
+    expect(detached).toHaveLength(1);
   });
 
-  test('repairs a queued retry replay after the database-to-queue crash window', async () => {
-    const jobs: unknown[] = []; const current: any = row();
+  test('detaches a queued retry replay', async () => {
+    const detached: Array<() => Promise<void>> = []; const current: any = row();
     const repository: any = { retryGeneration: async () => { throw new BookRepositoryError('conflict'); }, detail: async () => current };
-    const result = await createBookService({ repository, enqueue: async (job) => { jobs.push(job); return { jobId: bookKey }; }, signUrl: async () => 'signed', publishChanged: async () => {} }).retry(bookKey, { organizationKey, scopeKey }, userKey);
+    const result = await createBookService({ repository, generator: { create: async () => bookKey, write: async () => {} }, detach: (run) => { detached.push(run); }, signUrl: async () => 'signed', publishChanged: async () => {} }).retry(bookKey, { organizationKey, scopeKey }, userKey);
     expect(result).toMatchObject({ key: bookKey, status: 'queued' });
-    expect(jobs).toHaveLength(1);
+    expect(detached).toHaveLength(1);
   });
 
-  test('keeps a retried book queued when Redis is temporarily unavailable', async () => {
-    const current: any = row();
-    const repository: any = { retryGeneration: async () => current.book, detail: async () => current };
-    const service = createBookService({ repository, enqueue: async () => { throw new Error('redis unavailable'); }, signUrl: async () => 'signed', publishChanged: async () => {} });
-
-    await expect(service.retry(bookKey, { organizationKey, scopeKey }, userKey)).resolves.toMatchObject({ key: bookKey, status: 'queued' });
+  test('consumes detached failures, releases the lease, and persists only a safe error', async () => {
+    let current: any; const calls: string[] = []; const detached: Array<() => Promise<void>> = [];
+    const repository: any = {
+      authorize: async () => {}, findByGenerationRequest: async () => null, detail: async () => current,
+      claimGeneration: async () => { calls.push('claim'); return true; }, renewGeneration: async () => true, isCancellationRequested: async () => false,
+      releaseGeneration: async () => { calls.push('release'); return true; },
+      failGeneration: async (_job: unknown, message: string) => { calls.push(`fail:${message}`); current.book = { ...current.book, status: 'failed', generationError: message }; return true; },
+    };
+    const generator: any = { create: async () => { current = row(); return bookKey; }, write: async (_key: string, _input: unknown, context: any) => { calls.push(`write:${context.persistFailure}`); throw new Error('raw provider secret'); } };
+    const service = createBookService({ repository, generator, detach: (run) => { detached.push(run); }, scheduleLeaseRenewal: () => () => {}, signUrl: async () => 'signed', publishChanged: async () => { calls.push('publish'); }, now: () => now });
+    await expect(service.create(input, userKey)).resolves.toMatchObject({ status: 'queued' });
+    expect(calls).toEqual(['publish']);
+    await expect(detached[0]!()).resolves.toBeUndefined();
+    expect(calls).toEqual(['publish', 'claim', 'write:false', 'release', 'fail:Audio book generation failed. Retry the audio book to continue.', 'publish']);
+    expect(current.book.generationError).not.toContain('provider');
   });
 
-  test('persists terminal worker failures through the repository guard', async () => {
-    const calls: unknown[][] = [];
-    const repository: any = { failTerminalGeneration: async (...args: unknown[]) => { calls.push(args); return true; } };
-    const service = createBookService({ repository, now: () => now });
-    await expect(service.terminalFailure({ schemaVersion: 1, bookKey, organizationKey, scopeKey, userKey })).resolves.toBe(true);
-    expect(calls).toEqual([[{ schemaVersion: 1, bookKey, organizationKey, scopeKey, userKey }, 'Audio book generation failed after all retry attempts. Retry the audio book to continue.', now]]);
-  });
-
-  test('retries, cancels, and hard deletes through repository and queue', async () => {
+  test('retries in-process while cancellation and hard deletion remain durable-first', async () => {
     let current: any = row('failed'); const calls: string[] = [];
     const repository: any = { retryGeneration: async () => { calls.push('retry'); current = row(); return current.book; }, cancelGeneration: async () => { calls.push('cancel'); current = row('cancelled'); }, deleteBook: async () => { calls.push('delete'); return { deleted: true, bookKey, shareTokenHash: 'a'.repeat(64) }; }, detail: async () => current };
-    const service = createBookService({ repository, enqueue: async () => { calls.push('enqueue'); return { jobId: bookKey }; }, removeJob: async () => { calls.push('remove'); }, signUrl: async () => 'signed', publishChanged: async () => {}, publishShareChanged: async () => {} });
+    const service = createBookService({ repository, generator: { create: async () => bookKey, write: async () => {} }, detach: () => { calls.push('detach'); }, signUrl: async () => 'signed', publishChanged: async () => {}, publishShareChanged: async () => {} });
     await service.retry(bookKey, { organizationKey, scopeKey }, userKey); await service.cancel(bookKey, { organizationKey, scopeKey }, userKey); expect(await service.delete(bookKey, { organizationKey, scopeKey }, userKey)).toEqual({ key: bookKey });
-    expect(calls).toEqual(['retry', 'enqueue', 'cancel', 'remove', 'delete', 'remove']);
+    expect(calls).toEqual(['retry', 'detach', 'cancel', 'delete']);
   });
 
   test('strictly sets favorite state through the repository and publishes the updated summary', async () => {
@@ -130,17 +124,17 @@ describe('book service asynchronous lifecycle', () => {
     await expect(service.setFavorite(bookKey, { organizationKey, scopeKey, isFavorite: false, forged: true }, userKey)).rejects.toThrow('Unrecognized key');
   });
 
-  test('does not touch BullMQ when authorized hard deletion fails', async () => {
+  test('does not publish when authorized hard deletion fails', async () => {
     const calls: string[] = []; const repository: any = { deleteBook: async () => { calls.push('delete'); throw new Error('forbidden'); } };
-    const service = createBookService({ repository, removeJob: async () => { calls.push('remove'); }, publishChanged: async () => {} });
+    const service = createBookService({ repository, publishChanged: async () => { calls.push('publish'); } });
     await expect(service.delete(bookKey, { organizationKey, scopeKey }, userKey)).rejects.toThrow('forbidden');
     expect(calls).toEqual(['delete']);
   });
 
-  test('keeps successful hard deletion successful when queue cleanup fails', async () => {
+  test('publishes successful hard deletion without external cleanup', async () => {
     const calls: string[] = []; const repository: any = { deleteBook: async () => { calls.push('delete'); return { deleted: true, bookKey, shareTokenHash: 'a'.repeat(64) }; } };
-    const service = createBookService({ repository, removeJob: async () => { calls.push('remove'); throw new Error('redis unavailable'); }, publishChanged: async () => { calls.push('publish'); }, publishShareChanged: async () => {} });
-    await expect(service.delete(bookKey, { organizationKey, scopeKey }, userKey)).resolves.toEqual({ key: bookKey }); expect(calls).toEqual(['delete', 'remove', 'publish']);
+    const service = createBookService({ repository, publishChanged: async () => { calls.push('publish'); }, publishShareChanged: async () => {} });
+    await expect(service.delete(bookKey, { organizationKey, scopeKey }, userKey)).resolves.toEqual({ key: bookKey }); expect(calls).toEqual(['delete', 'publish']);
   });
 
   test('computes listening progress from audio duration rather than chapter count', async () => {
@@ -153,13 +147,13 @@ describe('book service asynchronous lifecycle', () => {
   });
 
   test('does not presign chapter media for overview summaries', async () => {
-    const current: any = row('ready'); current.book.coverStorageKey = 'cover'; current.chapters = [{ chapter: { key: newId(), title: 'One', description: 'One', position: 1, estimatedMinutes: 2, audioStorageKey: 'audio', imageStorageKey: 'image', audioDurationSeconds: 120 }, progress: null }];
+    const current: any = row('ready'); current.book.coverStorageKey = 'cover'; current.chapters = [{ chapter: { key: newId(), title: 'One', description: 'One', position: 1, estimatedMinutes: 2, audioStorageKey: 'audio', audioDurationSeconds: 120 }, progress: null }];
     const signed: string[] = []; const repository: any = { list: async () => [current], detail: async () => current };
     const service = createBookService({ repository, signUrl: async (key) => { signed.push(key); return `signed:${key}`; } });
     await service.overview({ organizationKey, scopeKey }, userKey);
     expect(signed).toEqual(['cover']);
     signed.length = 0;
     await service.detail(bookKey, { organizationKey, scopeKey }, userKey);
-    expect(signed).toEqual(['cover', 'audio', 'image']);
+    expect(signed).toEqual(['cover', 'audio']);
   });
 });

@@ -8,10 +8,10 @@ describe('unified tool registry', () => {
   test('has one unique definition for every public tool name', () => {
     expect(new Set(TOOL_NAMES).size).toBe(TOOL_NAMES.length);
     expect(new Set(TOOL_DEFINITIONS.map(({ name }) => name)).size).toBe(TOOL_DEFINITIONS.length);
-    expect(TOOL_NAMES).toHaveLength(163);
-    expect(MODEL_TOOL_NAMES).toHaveLength(160);
-    expect(TOOL_DEFINITIONS).toHaveLength(160);
-    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 115);
+    expect(TOOL_NAMES).toHaveLength(164);
+    expect(MODEL_TOOL_NAMES).toHaveLength(161);
+    expect(TOOL_DEFINITIONS).toHaveLength(161);
+    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 116);
     expect(TOOL_DEFINITIONS.map(({ name }) => name)).toEqual([...MODEL_TOOL_NAMES]);
     expect(TOOL_NAMES).not.toContain('chat');
     expect(TOOL_NAMES).not.toContain('orchestrator.chat');
@@ -23,12 +23,12 @@ describe('unified tool registry', () => {
     expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'image.create-visual-identity')).toHaveLength(1);
     expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'image.search')).toHaveLength(1);
     expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'app.search')).toHaveLength(1);
-    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['app.enhance', 'app.translate', 'app.audio']));
-    expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'app.audio')).toHaveLength(1);
+    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['app.enhance', 'app.translate', 'app.speech']));
+    expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'app.speech')).toHaveLength(1);
     expect(TOOL_NAMES).toEqual(expect.arrayContaining(['book.extend', 'book.share.detail', 'book.share.update']));
     expect(() => toolInputSchemas['book.share.update'].parse({ bookKey: newId(), active: true, scopeKey: newId() })).toThrow('Unrecognized key');
-    expect(toolInputSchemas['app.audio'].parse({ documentKey: newId() })).toMatchObject({ voice: 'clear', pace: 1, includeTitle: true, includeCode: false });
-    for (const field of ['organizationKey', 'scopeKey', 'userKey', 'model', 'provider', 'storageKey', 'text']) expect(() => toolInputSchemas['app.audio'].parse({ documentKey: newId(), [field]: 'forged' })).toThrow('Unrecognized key');
+    expect(toolInputSchemas['app.speech'].parse({ documentKey: newId() })).toMatchObject({ voice: 'clear', pace: 1, includeTitle: true, includeCode: false });
+    for (const field of ['organizationKey', 'scopeKey', 'userKey', 'model', 'provider', 'storageKey', 'text']) expect(() => toolInputSchemas['app.speech'].parse({ documentKey: newId(), [field]: 'forged' })).toThrow('Unrecognized key');
     expect(TOOL_NAMES).not.toContain('document.enhance');
     expect(TOOL_NAMES).not.toContain('document.translate');
     expect(TOOL_NAMES).not.toContain('email.message.translate');
@@ -82,6 +82,7 @@ describe('unified tool registry', () => {
     expect(() => toolInputSchemas['inbox.search'].parse({ query: 'leadership', scopeKey: newId() })).toThrow('Unrecognized key');
     expect(TOOL_NAMES).toEqual(expect.arrayContaining(['email.similar.find', 'email.thread.trash', 'email.message.translation.list', 'email.message.translation.delete', 'email.message.summarize', 'email.message.summary.list', 'email.message.summary.delete']));
     expect(TOOL_NAMES).toContain('inbox.sort');
+    expect(TOOL_NAMES).toContain('inbox.refresh');
     expect(() => toolInputSchemas['email.similar.find'].parse({ messageKey: newId(), categories: ['Other'] })).toThrow();
     expect(TOOL_NAMES).toContain('inbox.subscribe');
     expect(MODEL_TOOL_NAMES).not.toContain('inbox.subscribe');
@@ -93,11 +94,12 @@ describe('unified tool registry', () => {
     expect(TOOL_NAMES).not.toContain('email.sync');
     const inboxSortConnectorKey = newId();
     expect(toolInputSchemas['inbox.sort'].parse({ connectorKey: inboxSortConnectorKey })).toEqual({ connectorKey: inboxSortConnectorKey });
+    expect(toolInputSchemas['inbox.refresh'].parse({ connectorKey: inboxSortConnectorKey })).toEqual({ connectorKey: inboxSortConnectorKey });
     expect(toolInputSchemas['inbox.sync'].parse({ connectorKey: inboxSortConnectorKey })).toEqual({ connectorKey: inboxSortConnectorKey });
     expect(toolInputSchemas['inbox.subscribe'].parse({ connectorKey: inboxSortConnectorKey, notificationHistoryId: '123' })).toEqual({ connectorKey: inboxSortConnectorKey, notificationHistoryId: '123' });
     expect(toolInputSchemas['email.draft.create-if-needed'].parse({ connectorKey: inboxSortConnectorKey, threadKey: newId(), messageKey: newId() })).toHaveProperty('connectorKey', inboxSortConnectorKey);
     for (const tool of ['inbox.sync', 'inbox.subscribe']) for (const field of ['organizationKey', 'scopeKey', 'userKey', 'accessToken']) expect(() => toolInputSchemas[tool].parse({ connectorKey: inboxSortConnectorKey, [field]: newId() })).toThrow('Unrecognized key');
-    for (const field of ['organizationKey', 'scopeKey', 'userKey']) expect(() => toolInputSchemas['inbox.sort'].parse({ connectorKey: inboxSortConnectorKey, [field]: newId() })).toThrow('Unrecognized key');
+    for (const tool of ['inbox.refresh', 'inbox.sort']) for (const field of ['organizationKey', 'scopeKey', 'userKey']) expect(() => toolInputSchemas[tool].parse({ connectorKey: inboxSortConnectorKey, [field]: newId() })).toThrow('Unrecognized key');
     expect(() => toolInputSchemas['email.draft.assign'].parse({ draftKey: newId(), connectorKey: newId(), scopeKey: newId() })).toThrow('Unrecognized key');
     expect(TOOL_NAMES).toEqual(expect.arrayContaining(['content.hidden.list', 'book.topic.suggest', 'book.goal.suggest', 'book.create', 'book.favorite', 'email.thread.read', 'email.thread.read-state', 'email.trash.clear']));
     expect(toolInputSchemas['book.favorite'].parse({ bookKey: newId(), isFavorite: true })).toMatchObject({ isFavorite: true });
@@ -340,7 +342,7 @@ describe('unified tool registry', () => {
       findSimilar: async (...args: unknown[]) => { calls.push(['findSimilar', ...args]); return {}; },
     } as any;
     const bookService = { suggestTopics: async (...args: unknown[]) => { calls.push(['suggestTopics', ...args]); return { topics: [] }; }, suggestGoals: async (...args: unknown[]) => { calls.push(['suggestGoals', ...args]); return { goals: [] }; }, create: async (...args: unknown[]) => { calls.push(['create', ...args]); return {}; }, setFavorite: async (...args: unknown[]) => { calls.push(['setFavorite', ...args]); return {}; } } as any;
-    const brief = { topic: 'Decision making', goal: 'Decide well', currentKnowledge: 'Basic familiarity', writingTone: 'Clear', language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear', narrationPace: 1, chapterImages: false };
+    const brief = { topic: 'Decision making', goal: 'Decide well', currentKnowledge: 'Basic familiarity', writingTone: 'Clear', language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear', narrationPace: 1 };
     await expect(runTool('book.create', '', { ...brief, chapterCount: 10 }, { contentContext, bookService })).rejects.toThrow('Unrecognized key');
     await expect(runTool('book.create', '', { ...brief, scopeKey }, { contentContext, bookService })).rejects.toThrow('Unrecognized key');
     await expect(runTool('book.topic.suggest', '', { scopeKey }, { contentContext, bookService })).rejects.toThrow('Unrecognized key');
@@ -365,11 +367,12 @@ describe('unified tool registry', () => {
     ]);
   });
 
-  test('dispatches all 30 Signal-specific tools through runTool with strict trusted contracts', async () => {
+  test('dispatches all 31 Signal-specific tools through runTool with strict trusted contracts', async () => {
     const organizationKey = newId(), scopeKey = newId(), userKey = newId(), key = newId();
     const contentContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
     const cases = [
       ['email.overview', 'overview', {}],
+      ['inbox.refresh', 'sync', { connectorKey: key }],
       ['inbox.search', 'searchInboxes', { query: 'leadership', recordHistory: false }],
       ['email.tone.search', 'searchTones', { query: 'measured', recordHistory: false }],
       ['inbox.sort', 'sort', { connectorKey: key }],
@@ -420,13 +423,13 @@ describe('unified tool registry', () => {
     } }) as any;
     const actor = { userKey, organizationKey, scopeKey };
     const mutationNames = new Set([
-      'inbox.sort', 'inbox.update', 'email.thread.read-state', 'email.thread.favorite', 'email.thread.trash', 'email.trash.clear',
+      'inbox.refresh', 'inbox.sort', 'inbox.update', 'email.thread.read-state', 'email.thread.favorite', 'email.thread.trash', 'email.trash.clear',
       'email.message.translation.delete', 'email.message.summarize', 'email.message.summary.delete', 'email.draft.create', 'email.draft.compose', 'email.draft.update', 'email.draft.assign',
       'email.draft.send', 'email.draft.delete', 'email.tone.create', 'email.tone.update', 'email.tone.delete', 'email.reply-context.create',
       'email.reply-context.update', 'email.reply-context.delete',
     ]);
     expect(cases.map(([name]): string => name)).toEqual(signalCapabilities.map(({ definition }) => definition.name));
-    expect(cases).toHaveLength(30);
+    expect(cases).toHaveLength(31);
     for (const [name, method, input] of cases) {
       await expect(runTool(name, '', { ...input, unexpected: true }, { contentContext, emailService, requestKey: 'signal-request' })).rejects.toThrow('Unrecognized key');
       const output = await runTool(name, '', input, { contentContext, emailService, requestKey: 'signal-request' });

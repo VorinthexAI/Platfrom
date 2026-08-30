@@ -7,8 +7,7 @@ import { currentEmbeddingSchema, prepareEmbeddingText, type EmbedTextInput } fro
 export async function executeEmailAsk<TOutput = ChatOutput>(organizationKey: string, rawInput: CoreChatInput, options: ExecuteActionOptions = {}) {
   const { mode, ...input } = coreChatInputSchema.parse(rawInput);
   return executeAction<typeof input, TOutput>({
-    mode: 'model', organizationKey, actionSlug: 'ask',
-    modelSlug: 'google.gemini-3.5-flash-lite',
+    mode: 'auto', organizationKey, actionSlug: 'text',
   }, input, options);
 }
 

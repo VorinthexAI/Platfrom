@@ -137,7 +137,7 @@ function memberContext(context: ToolContext) {
 
 const extensionByMimeType = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' } as const;
 const aspectRatioBySize = { '1024x1024': '1:1', '1024x1536': '2:3', '1536x1024': '3:2' } as const;
-export const imageGenerationRoute = (_mode: ImageGenerateModelInput['mode'], organizationKey: string) => ({ mode: 'fixed' as const, organizationKey, actionSlug: 'generate-image' as const, modelSlug: 'google.gemini-3.1-flash-lite-image' as const, providerSlug: 'google-vertex' as const });
+export const imageGenerationRoute = (_mode: ImageGenerateModelInput['mode'], organizationKey: string) => ({ mode: 'auto' as const, organizationKey, actionSlug: 'image' as const });
 const inFlight = new Map<string, { hash: string; promise: Promise<ImageGenerateOutput> }>();
 const generatedImageKey = (scopeKey: string, idempotencyKey: string, index: number) => `c${createHash('sha256').update(`${scopeKey}\0${idempotencyKey}:${index}`).digest('hex').slice(0, 24)}`;
 
@@ -172,9 +172,9 @@ export function createImageGenerationService(dependencies: ImageGenerationServic
     const input = imageGenerateModelInputSchema.parse(rawInput);
     const startedAt = now();
     const providerInput = input.mode === 'fast'
-      ? { prompt: input.prompt, count: input.count, aspectRatio: aspectRatioBySize[input.size], outputFormat: 'png' as const }
-      : { prompt: input.prompt, count: input.count, size: input.size, quality: input.quality };
-    const response: ProviderExecuteResponse<ImageOutput> = await execute(imageGenerationRoute(input.mode, organizationKey), providerInput, { ...dependencies, ...execution });
+      ? { operation: 'generate' as const, prompt: input.prompt, count: input.count, aspectRatio: aspectRatioBySize[input.size], outputFormat: 'png' as const }
+      : { operation: 'generate' as const, prompt: input.prompt, count: input.count, size: input.size, quality: input.quality };
+    const response: ProviderExecuteResponse<ImageOutput> = await execute(imageGenerationRoute(input.mode, organizationKey), providerInput, { providers: ['image.primary'], ...dependencies, ...execution });
     const output = imageOutputSchema.parse(response.output);
     if (output.images.length !== input.count) throw new Error(`Image provider returned ${output.images.length} images; expected ${input.count}.`);
     return { output, durationMs: Math.max(0, Math.round(now() - startedAt)), costUsd: response.costUsd ?? null };

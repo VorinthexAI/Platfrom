@@ -11,9 +11,7 @@ import { MAX_IMAGE_CAPTION_URLS } from '@/lib/image-caption-constants';
  * runtime perspective all of these are simply providers.
  */
 export const PROVIDER_SLUGS = [
-  'google-vertex',
-  'azure-ai-foundry',
-  'aws-polly',
+  'openrouter',
 ] as const;
 
 export type ProviderSlug = (typeof PROVIDER_SLUGS)[number];
@@ -24,9 +22,7 @@ export const providerIdSchema = providerSlugSchema;
 
 /** Human-readable display names for code-defined provider metadata. */
 export const PROVIDER_NAMES: Record<ProviderId, string> = {
-  'google-vertex': 'Google Vertex AI',
-  'azure-ai-foundry': 'Azure AI Foundry',
-  'aws-polly': 'Amazon Polly',
+  openrouter: 'OpenRouter',
 };
 
 /**
@@ -145,6 +141,12 @@ export const chatOutputSchema = z.object({
 }).strict();
 export type ChatOutput = z.infer<typeof chatOutputSchema>;
 
+const httpImageUrlSchema = z.string().url().refine((value) => {
+  const protocol = new URL(value).protocol;
+  return protocol === 'http:' || protocol === 'https:';
+}, 'Image URL must use HTTP or HTTPS');
+const inlineImageUrlSchema = z.string().max(28 * 1024 * 1024).regex(/^data:image\/(?:gif|jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/, 'Inline image URL is invalid');
+
 export const imageGenerateInputSchema = z
   .object({
     prompt: z.string().trim().min(1).max(32_000),
@@ -154,6 +156,7 @@ export const imageGenerateInputSchema = z
     outputFormat: z.enum(['png', 'jpeg', 'webp']).optional(),
     count: z.number().int().min(1).max(4).default(1),
     quality: z.enum(['low', 'medium', 'high']).optional(),
+    inputReferences: z.array(z.union([httpImageUrlSchema, inlineImageUrlSchema])).min(1).max(8).optional(),
   })
   .strict();
 
@@ -179,20 +182,16 @@ export const imageOutputSchema = z.object({
 }).strict();
 export type ImageOutput = z.infer<typeof imageOutputSchema>;
 
-const httpImageUrlSchema = z.string().url().refine((value) => {
-  const protocol = new URL(value).protocol;
-  return protocol === 'http:' || protocol === 'https:';
-}, 'Image URL must use HTTP or HTTPS');
-const inlineImageUrlSchema = z.string().max(28 * 1024 * 1024).regex(/^data:image\/(?:gif|jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/, 'Inline image URL is invalid');
-
-export const imageCaptionInputSchema = z.object({
+const imageCaptionInputBaseSchema = z.object({
   imageUrls: z.array(z.union([httpImageUrlSchema, inlineImageUrlSchema])).min(1).max(MAX_IMAGE_CAPTION_URLS),
   purpose: z.enum(['caption', 'artwork-compliance', 'document-transcription', 'document-reconciliation']).default('caption'),
   referenceTexts: z.array(z.object({ primary: z.string().max(40_000), secondary: z.string().max(40_000) }).strict()).min(1).max(MAX_IMAGE_CAPTION_URLS).optional(),
-}).strict().superRefine((input, context) => {
+}).strict();
+function validateImageCaptionInput(input: z.infer<typeof imageCaptionInputBaseSchema>, context: z.RefinementCtx) {
   if (input.purpose === 'document-reconciliation' && input.referenceTexts?.length !== input.imageUrls.length) context.addIssue({ code: z.ZodIssueCode.custom, path: ['referenceTexts'], message: 'Reconciliation requires one text pair per image.' });
   if (input.purpose !== 'document-reconciliation' && input.referenceTexts !== undefined) context.addIssue({ code: z.ZodIssueCode.custom, path: ['referenceTexts'], message: 'Reference texts are only valid for document reconciliation.' });
-});
+}
+export const imageCaptionInputSchema = imageCaptionInputBaseSchema.superRefine(validateImageCaptionInput);
 export type ImageCaptionInput = z.infer<typeof imageCaptionInputSchema>;
 
 export const imageCaptionOutputSchema = z.object({
@@ -213,9 +212,25 @@ export const visualIdentityDescriptionOutputSchema = z.object({
 }).strict();
 export type VisualIdentityDescriptionOutput = z.infer<typeof visualIdentityDescriptionOutputSchema>;
 
-export const embeddingInputSchema = z.object({ text: z.string().min(1) }).strict();
+export const imageActionInputSchema = z.union([
+  imageGenerateInputSchema.extend({ operation: z.literal('generate') }),
+  imageCaptionInputBaseSchema.extend({ operation: z.literal('caption') }).superRefine(validateImageCaptionInput),
+  visualIdentityDescriptionInputSchema.extend({ operation: z.literal('describe-visual-identity') }),
+]);
+export type ImageActionInput = z.infer<typeof imageActionInputSchema>;
+
+export const embeddingInputSchema = z.object({
+  text: z.string().min(1),
+  chunking: z.object({
+    enabled: z.boolean(),
+    maxCharacters: z.number().int().min(100).max(20_000).default(8_000),
+    overlapCharacters: z.number().int().min(0).max(2_000).default(400),
+  }).strict().optional(),
+}).strict().superRefine((input, context) => {
+  if (input.chunking?.enabled && input.chunking.overlapCharacters >= input.chunking.maxCharacters) context.addIssue({ code: z.ZodIssueCode.custom, path: ['chunking', 'overlapCharacters'], message: 'Embedding chunk overlap must be smaller than the chunk size' });
+});
 export type EmbeddingInput = z.infer<typeof embeddingInputSchema>;
-export interface EmbeddingOutput { embedding: number[]; }
+export interface EmbeddingOutput { embedding: number[]; chunks?: Array<{ text: string; embedding: number[] }> }
 
 /**
  * Combines the request's abort signal with its timeout into one signal

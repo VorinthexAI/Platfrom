@@ -40,12 +40,13 @@ export type EmailAttachmentPickerProps = {
   maxSelection?: number;
   onClose: () => void;
   onDone: (selection: EmailAttachmentRef[], labels: EmailAttachmentLabels, imageUrls: EmailAttachmentImageUrls) => void;
+  onSelectionLimitReached?: (maxSelection: number) => void;
   open: boolean;
   selection: EmailAttachmentRef[];
   title?: string;
 };
 
-export function EmailAttachmentPicker({ archiveOnly = false, context, contextKey, imageUrls: selectedImageUrls, labels: selectedLabels, maxSelection = DEFAULT_MAX_SELECTION, open, selection, title = "Attachments", onClose, onDone }: EmailAttachmentPickerProps) {
+export function EmailAttachmentPicker({ archiveOnly = false, context, contextKey, imageUrls: selectedImageUrls, labels: selectedLabels, maxSelection = DEFAULT_MAX_SELECTION, open, selection, title = "Attachments", onClose, onDone, onSelectionLimitReached }: EmailAttachmentPickerProps) {
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<PickerTab>("archive");
   const activeTab: PickerTab = archiveOnly ? "archive" : tab;
@@ -169,7 +170,10 @@ export function EmailAttachmentPicker({ archiveOnly = false, context, contextKey
   function isSelected(ref: EmailAttachmentRef) { return working.some((item) => attachmentIdentity(item) === attachmentIdentity(ref)); }
   function toggle(ref: EmailAttachmentRef) {
     if (!isSelected(ref) && working.length >= maxSelection) {
-      setSelectionNotice(archiveOnly ? `You can select up to ${maxSelection} items.` : `You can attach up to ${maxSelection} items.`);
+      if (onSelectionLimitReached) {
+        setSelectionNotice(undefined);
+        onSelectionLimitReached(maxSelection);
+      } else setSelectionNotice(archiveOnly ? `You can select up to ${maxSelection} items.` : `You can attach up to ${maxSelection} items.`);
       return;
     }
     setSelectionNotice(undefined);

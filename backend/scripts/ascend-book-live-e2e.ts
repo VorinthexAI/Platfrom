@@ -56,6 +56,7 @@ async function api(path: string, body: Record<string, unknown>, method = 'POST')
   return object(payload.data, `${path} data`);
 }
 
+const generationStartedAt = performance.now();
 const created = await api('/books', {
   organizationKey,
   scopeKey,
@@ -64,14 +65,13 @@ const created = await api('/books', {
   goal: 'Create a practical introduction to bicycle inspection, cleaning, lubrication, tire care, brake adjustment, drivetrain care, and preventive maintenance.',
   currentKnowledge: 'The reader rides a bicycle regularly but is new to bicycle maintenance and owns only basic hand tools.',
   writingTone: 'Clear, practical, technically accurate, and encouraging',
-  chapterCount: 10,
   language: 'English',
   archiveDocumentKeys: [],
   narratorVoiceKey: 'clear',
   narrationPace: 1,
-  chapterImages: false,
   additionalInstructions: 'Use concrete examples and end each chapter with a concise practical takeaway.',
 });
+const acceptedAt = performance.now();
 const bookKey = string(created.key, 'book key');
 console.log(`Ascend accepted 10-chapter book ${bookKey}.`);
 
@@ -90,9 +90,10 @@ while (Date.now() < deadline) {
   }
   if (status === 'failed' || status === 'cancelled') throw new Error(`Ascend generation ${status}: ${String(book.failureMessage ?? 'no failure detail')}`);
   if (status === 'ready') break;
-  await Bun.sleep(10_000);
+  await Bun.sleep(250);
 }
 if (!detail || object(detail.book, 'book').status !== 'ready') throw new Error(`Ascend book ${bookKey} did not finish within ${timeoutMs}ms.`);
+const readyAt = performance.now();
 
 const book = object(detail.book, 'book');
 const chapters = detail.chapters;
@@ -116,5 +117,5 @@ for (const [index, value] of chapters.entries()) {
   totalAudioBytes += audio.length;
 }
 
-console.log(JSON.stringify({ bookKey, title: book.title, chapters: chapters.length, totalAudioSeconds, totalAudioBytes, coverBytes: Number(coverResponse.headers.get('content-length') ?? 0) }, null, 2));
+console.log(JSON.stringify({ bookKey, title: book.title, chapters: chapters.length, acceptanceMs: Math.round(acceptedAt - generationStartedAt), readyMs: Math.round(readyAt - generationStartedAt), generationAfterAcceptanceMs: Math.round(readyAt - acceptedAt), totalAudioSeconds, totalAudioBytes, coverBytes: Number(coverResponse.headers.get('content-length') ?? 0) }, null, 2));
 console.log('Ascend 10-chapter live E2E passed.');

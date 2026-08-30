@@ -17,29 +17,21 @@ describe('action registry', () => {
 
   test('contains only generic runtime primitives with explicit model policies', () => {
     expect(ACTION_SLUGS).toEqual([
-      'ask', 'embed', 'web-search',
+      'text', 'web', 'image', 'speech', 'embed', 'file', 'upload', 'queue',
       'traverse', 'read', 'insert', 'upsert', 'update', 'delete',
-      'generate-image', 'edit-image', 'generate-video', 'edit-video', 'extend-video',
-      'generate-music', 'generate-speech',
-      'document-validate', 'storage-upload', 'document-extract', 'document-embed', 'document-insert', 'caption-image', 'describe-visual-identity',
     ]);
     expect(ACTION_DEFINITIONS.filter((action) => action.modelPolicy === 'none').map((action) => action.id))
-      .toEqual([
-        'traverse', 'read', 'insert', 'upsert', 'update', 'delete',
-        'document-validate', 'storage-upload', 'document-extract', 'document-embed', 'document-insert',
-      ]);
-    expect(ACTION_DEFINITIONS.find((action) => action.id === 'ask')?.models)
-      .toEqual([{ provider: 'google-vertex', model: 'google.gemini-3.5-flash-lite', priority: 100 }]);
-    expect(ACTION_DEFINITIONS.find((action) => action.id === 'caption-image')?.models)
-      .toEqual([{ provider: 'google-vertex', model: 'google.gemini-3.7-flash', priority: 100 }]);
-    expect(ACTION_DEFINITIONS.find((action) => action.id === 'describe-visual-identity')?.models)
-      .toEqual([{ provider: 'google-vertex', model: 'google.gemini-3.7-flash', priority: 100 }]);
-    expect(ACTION_DEFINITIONS.find((action) => action.id === 'generate-image')?.models)
-      .toEqual([{ provider: 'google-vertex', model: 'google.gemini-3.1-flash-lite-image', priority: 100 }]);
-    expect(ACTION_DEFINITIONS.find((action) => action.id === 'generate-speech')?.models)
-      .toEqual([{ provider: 'aws-polly', model: 'amazon.polly-neural', priority: 100 }]);
+      .toEqual(['file', 'upload', 'queue', 'traverse', 'read', 'insert', 'upsert', 'update', 'delete']);
+    expect(ACTION_DEFINITIONS.find((action) => action.id === 'text')?.models)
+      .toEqual([{ slot: 'primary', provider: 'openrouter', model: 'google.gemini-3.1-flash-lite-preview', priority: 100 }]);
+    expect(ACTION_DEFINITIONS.find((action) => action.id === 'image')?.models)
+      .toEqual([{ slot: 'primary', provider: 'openrouter', model: 'google.gemini-3.1-flash-lite-image', priority: 100 }]);
+    expect(ACTION_DEFINITIONS.find((action) => action.id === 'speech')?.models)
+      .toEqual([{ slot: 'primary', provider: 'openrouter', model: 'xai.grok-voice-tts-1.0', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'embed')?.models)
-      .toEqual([{ provider: 'azure-ai-foundry', model: 'openai.text-embedding-3-small', priority: 100 }]);
+      .toEqual([{ slot: 'primary', provider: 'openrouter', model: 'openai.text-embedding-3-small', priority: 100 }]);
+    expect(ACTION_DEFINITIONS.find((action) => action.id === 'file')?.models)
+      .toEqual([]);
   });
 
   test('delegates generic data primitives to the node helper implementation', async () => {

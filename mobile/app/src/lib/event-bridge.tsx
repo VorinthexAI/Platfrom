@@ -5,6 +5,7 @@ import { AppState } from "react-native";
 import { getEventStream } from "./api-client";
 import { publishAppEvent } from "./app-events";
 import { publishBookChanged } from "./book-events";
+import { createCoalescedRefresh } from "./async-refresh";
 import { compassQueryKeys } from "./compass-query-keys";
 import { contentQueryKeys } from "./content-query-cache";
 import { galleryRefreshPlan, isCurrentContextGeneration, type GalleryRefreshFamily } from "./gallery-convergence";
@@ -52,7 +53,10 @@ export function AuthenticatedEventBridge() {
       void queryClient.invalidateQueries({ queryKey: signalQueryKeys.details(compassContext), refetchType: "active" });
       void queryClient.invalidateQueries({ queryKey: signalQueryKeys.replyContexts(compassContext), refetchType: "active" });
     };
-    const invalidateBooks = () => void queryClient.invalidateQueries({ queryKey: ascendQueryKeys.all(compassContext), refetchType: "active" });
+    const invalidateBooks = createCoalescedRefresh(
+      () => queryClient.invalidateQueries({ queryKey: ascendQueryKeys.all(compassContext), refetchType: "active" }),
+      isCurrent,
+    );
     const inCurrentGallery = (queryKey: readonly unknown[]) => root.every((value, index) => queryKey[index] === value);
     const invalidateSharingSuffix = (suffixes: readonly string[]) => {
       void queryClient.invalidateQueries({ predicate: ({ queryKey }) => inCurrentGallery(queryKey) && queryKey[3] === "sharing" && suffixes.includes(String(queryKey.at(-1))), refetchType: "none" });

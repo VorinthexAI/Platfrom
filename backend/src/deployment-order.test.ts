@@ -19,8 +19,7 @@ test('migrates before activating backend code and running data changes', async (
   expect(databaseJob).toContain('run: bun run --cwd backend db:backfill-semantic-embeddings:ci');
   expect(databaseJob).not.toContain('BEDROCK_AWS_ACCESS_KEY_ID');
   expect(databaseJob).not.toContain('BEDROCK_AWS_SECRET_ACCESS_KEY');
-  expect(databaseJob).toContain('AZURE_OPENAI_API_KEY');
-  expect(databaseJob).toContain('AZURE_OPENAI_ENDPOINT');
+  expect(databaseJob).toContain('OPENROUTER_API_KEY');
   const migration = workflow.indexOf('\n  backend-migrate:');
   const migrationJob = workflow.slice(migration, workflow.indexOf('\n  seed-db-secrets:', migration));
   expect(migrationJob).toContain('needs: [changes, backend-image, backend-secrets]');

@@ -1,1 +1,0 @@
-import { expect, test } from 'bun:test'; import { documentValidateAction } from './document-validate'; test('defines document-validate', () => expect(documentValidateAction.id).toBe('document-validate'));

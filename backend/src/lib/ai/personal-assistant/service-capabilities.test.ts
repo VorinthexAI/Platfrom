@@ -13,9 +13,9 @@ const domain = {
 } as unknown as ToolContext;
 
 const expected: Array<[AssistantSurface, string[]]> = [
-  ['knowledge-workspace', ['app.enhance', 'app.translate', 'app.audio', 'content.hidden.list', 'folder.hide', 'folder.reveal', 'document.hide', 'document.reveal', 'folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy', 'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.list-versions', 'document.restore-version', 'document.download', 'content.neighbors', 'content.search-history.delete', 'note.write']],
+  ['knowledge-workspace', ['app.enhance', 'app.translate', 'app.speech', 'content.hidden.list', 'folder.hide', 'folder.reveal', 'document.hide', 'document.reveal', 'folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy', 'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.list-versions', 'document.restore-version', 'document.download', 'content.neighbors', 'content.search-history.delete', 'note.write']],
   ['travel-workspace', ['place.find', 'place.list', 'place.reference.generate', 'place.reference.list', 'trip.list', 'trip.guide.generate', 'trip.guide.list', 'trip.create', 'trip.update', 'trip.delete', 'trip.attachment.set', 'place.guide.find', 'place.find-city', 'place.find-children', 'place.create', 'place.update', 'place.delete', 'place.open']],
-  ['signal-workspace', ['app.enhance', 'app.translate', 'email.overview', 'inbox.sort', 'inbox.update', 'email.thread.read', 'email.thread.read-state', 'email.thread.favorite', 'email.thread.trash', 'email.trash.clear', 'email.similar.find', 'email.message.translation.list', 'email.message.translation.delete', 'email.message.summarize', 'email.message.summary.list', 'email.message.summary.delete', 'email.draft.create', 'email.draft.compose', 'email.tone.list', 'email.tone.create', 'email.tone.update', 'email.tone.delete', 'email.reply-context.list', 'email.reply-context.create', 'email.reply-context.update', 'email.reply-context.delete', 'email.draft.update', 'email.draft.assign', 'email.draft.send', 'email.draft.delete']],
+  ['signal-workspace', ['app.enhance', 'app.translate', 'email.overview', 'inbox.refresh', 'inbox.sort', 'inbox.update', 'email.thread.read', 'email.thread.read-state', 'email.thread.favorite', 'email.thread.trash', 'email.trash.clear', 'email.similar.find', 'email.message.translation.list', 'email.message.translation.delete', 'email.message.summarize', 'email.message.summary.list', 'email.message.summary.delete', 'email.draft.create', 'email.draft.compose', 'email.tone.list', 'email.tone.create', 'email.tone.update', 'email.tone.delete', 'email.reply-context.list', 'email.reply-context.create', 'email.reply-context.update', 'email.reply-context.delete', 'email.draft.update', 'email.draft.assign', 'email.draft.send', 'email.draft.delete']],
   ['book-workspace', ['book.list', 'book.topic.suggest', 'book.goal.suggest', 'book.detail', 'book.extend', 'book.share.detail', 'book.share.update', 'book.chapter.progress', 'book.create', 'book.generation.retry', 'book.generation.cancel', 'book.favorite', 'book.delete']],
 ];
 
@@ -40,7 +40,7 @@ describe('personal assistant service capabilities', () => {
 
   test('keeps inbox and tone mutation model inputs strict and non-empty', () => {
     const signal = defaultAssistantCapabilityRegistry.resolve('signal-workspace');
-    for (const name of ['inbox.sort', 'inbox.update', 'email.thread.favorite', 'email.thread.read-state', 'email.thread.trash', 'email.trash.clear', 'email.tone.create', 'email.tone.update', 'email.tone.delete', 'email.reply-context.list', 'email.reply-context.create', 'email.reply-context.update', 'email.reply-context.delete', 'email.draft.delete']) {
+    for (const name of ['inbox.refresh', 'inbox.sort', 'inbox.update', 'email.thread.favorite', 'email.thread.read-state', 'email.thread.trash', 'email.trash.clear', 'email.tone.create', 'email.tone.update', 'email.tone.delete', 'email.reply-context.list', 'email.reply-context.create', 'email.reply-context.update', 'email.reply-context.delete', 'email.draft.delete']) {
       const schema = signal.find(({ definition }) => definition.name === name)!.inputSchema;
       expect(() => schema.parse({ forged: true })).toThrow();
     }
@@ -126,6 +126,7 @@ describe('personal assistant service capabilities', () => {
     const countries: any = { search: async (...args: unknown[]) => { calls.push(['countries.search', ...args]); return {}; } };
     const email: any = {
       overview: async (...args: unknown[]) => { calls.push(['email.overview', ...args]); return { messages: [{ bcc: ['overview-hidden@example.com'], body: 'safe' }] }; },
+      sync: async (...args: unknown[]) => { calls.push(['email.sync', ...args]); return {}; },
       searchInboxes: async (...args: unknown[]) => { calls.push(['email.searchInboxes', ...args]); return {}; },
       searchTones: async (...args: unknown[]) => { calls.push(['email.searchTones', ...args]); return {}; },
       sort: async (...args: unknown[]) => { calls.push(['email.sort', ...args]); return {}; },
@@ -183,6 +184,7 @@ describe('personal assistant service capabilities', () => {
       ['travel-workspace', 'place.find-children', { childrenRequestToken: 'children-token' }],
       ['travel-workspace', 'place.open', { name: 'Japan', countryCode: 'JP' }],
       ['signal-workspace', 'email.overview', { connectorKey: threadKey, readState: 'unread', facets: ['urgent', 'favorite'] }],
+      ['signal-workspace', 'inbox.refresh', { connectorKey: threadKey }],
       ['signal-workspace', 'inbox.sort', { connectorKey: threadKey }],
       ['signal-workspace', 'inbox.update', { connectorKey: threadKey, isFavorite: true }],
       ['signal-workspace', 'email.thread.read', { threadKey }],
@@ -216,7 +218,7 @@ describe('personal assistant service capabilities', () => {
       ['book-workspace', 'book.goal.suggest', { topic: 'Decision making', excludeGoals: ['Old goal'] }],
       ['book-workspace', 'book.detail', { bookKey }],
       ['book-workspace', 'book.chapter.progress', { bookKey, chapterKey, progressSeconds: 30, isCompleted: false }],
-      ['book-workspace', 'book.create', { topic: 'Decision making', goal: 'Decide well', currentKnowledge: 'Basic familiarity', writingTone: 'Clear', language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear', narrationPace: 1, chapterImages: false }],
+      ['book-workspace', 'book.create', { topic: 'Decision making', goal: 'Decide well', currentKnowledge: 'Basic familiarity', writingTone: 'Clear', language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear', narrationPace: 1 }],
       ['book-workspace', 'book.favorite', { bookKey, isFavorite: true }],
     ];
     const outputs = new Map<string, unknown>();
@@ -240,6 +242,7 @@ describe('personal assistant service capabilities', () => {
     expect(calls).toContainEqual(['travel.findChildren', { ...serviceContext, childrenRequestToken: 'children-token' }, userKey, { signal: undefined, timeoutMs: undefined }]);
     expect(calls).toContainEqual(['travel.openPlace', { ...serviceContext, name: 'Japan', countryCode: 'JP' }, userKey]);
     expect(calls).toContainEqual(['email.overview', actor, { connectorKey: threadKey, readState: 'unread', facets: ['urgent', 'favorite'] }]);
+    expect(calls).toContainEqual(['email.sync', actor, threadKey]);
     expect(calls).toContainEqual(['email.sort', actor, { connectorKey: threadKey }]);
     expect(calls).toContainEqual(['email.threadForTool', actor, threadKey, undefined]);
     expect(calls).toContainEqual(['email.setReadState', actor, { threadKey, isRead: true }, false, 'request-1']);
@@ -255,7 +258,7 @@ describe('personal assistant service capabilities', () => {
     expect(calls).toContainEqual(['books.progress', bookKey, chapterKey, { ...serviceContext, progressSeconds: 30, isCompleted: false }, userKey]);
     expect(calls).toContainEqual(['books.suggestTopics', { ...serviceContext, excludeTopics: ['Old idea'] }, userKey, { signal: undefined, timeoutMs: undefined }]);
     expect(calls).toContainEqual(['books.suggestGoals', { ...serviceContext, topic: 'Decision making', excludeGoals: ['Old goal'] }, userKey, { signal: undefined, timeoutMs: undefined }]);
-    expect(calls).toContainEqual(['books.create', { ...serviceContext, generationRequestKey: 'request-1', topic: 'Decision making', goal: 'Decide well', currentKnowledge: 'Basic familiarity', writingTone: 'Clear', language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear', narrationPace: 1, chapterImages: false }, userKey]);
+    expect(calls).toContainEqual(['books.create', { ...serviceContext, generationRequestKey: 'request-1', topic: 'Decision making', goal: 'Decide well', currentKnowledge: 'Basic familiarity', writingTone: 'Clear', language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear', narrationPace: 1 }, userKey]);
     expect(calls).toContainEqual(['books.setFavorite', bookKey, { ...serviceContext, isFavorite: true }, userKey]);
     expect(JSON.stringify(calls)).not.toContain((domain.principal as Extract<ToolContext['principal'], { kind: 'member' }>).userOrganization.key);
   });
@@ -285,9 +288,9 @@ describe('personal assistant service capabilities', () => {
 
   test('marks Signal mutations, including permanent Trash clearing, as workspace changes', () => {
     const capabilities = defaultAssistantCapabilityRegistry.resolve('signal-workspace');
-    expect(capabilities).toHaveLength(31);
+    expect(capabilities).toHaveLength(32);
     expect(capabilities.find(({ definition }) => definition.name === 'email.reply-context.list')?.mutationWorkspace).toBeUndefined();
-    for (const name of ['inbox.sort', 'inbox.update', 'email.thread.read-state', 'email.thread.favorite', 'email.thread.trash', 'email.trash.clear', 'email.message.translation.delete', 'email.message.summarize', 'email.message.summary.delete', 'email.draft.create', 'email.draft.compose', 'email.draft.update', 'email.draft.assign', 'email.draft.send', 'email.draft.delete', 'email.tone.create', 'email.tone.update', 'email.tone.delete', 'email.reply-context.create', 'email.reply-context.update', 'email.reply-context.delete']) expect(capabilities.find(({ definition }) => definition.name === name)?.mutationWorkspace).toBe('signal');
+    for (const name of ['inbox.refresh', 'inbox.sort', 'inbox.update', 'email.thread.read-state', 'email.thread.favorite', 'email.thread.trash', 'email.trash.clear', 'email.message.translation.delete', 'email.message.summarize', 'email.message.summary.delete', 'email.draft.create', 'email.draft.compose', 'email.draft.update', 'email.draft.assign', 'email.draft.send', 'email.draft.delete', 'email.tone.create', 'email.tone.update', 'email.tone.delete', 'email.reply-context.create', 'email.reply-context.update', 'email.reply-context.delete']) expect(capabilities.find(({ definition }) => definition.name === name)?.mutationWorkspace).toBe('signal');
     const translateMutation = capabilities.find(({ definition }) => definition.name === 'app.translate')?.mutationWorkspace;
     expect(typeof translateMutation === 'function' ? translateMutation({ messageKey: newId(), targetLanguage: 'French' }) : undefined).toBe('signal');
   });
@@ -304,7 +307,7 @@ describe('personal assistant service capabilities', () => {
     const create = defaultAssistantCapabilityRegistry.resolve('knowledge-workspace').find(({ definition }) => definition.name === 'folder.create')!;
     const copy = defaultAssistantCapabilityRegistry.resolve('knowledge-workspace').find(({ definition }) => definition.name === 'folder.copy')!;
     const playback = defaultAssistantCapabilityRegistry.resolve('knowledge-workspace').find(({ definition }) => definition.name === 'document.audio.playback.update')!;
-    const generateAudio = defaultAssistantCapabilityRegistry.resolve('knowledge-workspace').find(({ definition }) => definition.name === 'app.audio')!;
+    const generateAudio = defaultAssistantCapabilityRegistry.resolve('knowledge-workspace').find(({ definition }) => definition.name === 'app.speech')!;
     const folderKey = newId(), targetParentFolderKey = newId();
     const context: any = { domain, requestKey: 'stable-request', executeContent };
     await expect(create.execute({ name: 'xyz', scopeKey: newId() }, context)).rejects.toThrow('Unrecognized key');
@@ -366,7 +369,7 @@ describe('personal assistant service capabilities', () => {
     const calls: unknown[] = [];
     const books: any = { create: async (...args: unknown[]) => { calls.push(args); return {}; } };
     const create = defaultAssistantCapabilityRegistry.resolve('book-workspace').find(({ definition }) => definition.name === 'book.create')!;
-    const brief = { topic: 'Decision making', goal: 'Decide well', currentKnowledge: 'Basic familiarity', writingTone: 'Clear', language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear', narrationPace: 1, chapterImages: false };
+    const brief = { topic: 'Decision making', goal: 'Decide well', currentKnowledge: 'Basic familiarity', writingTone: 'Clear', language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear', narrationPace: 1 };
     await create.execute(brief, { domain, books } as any);
     await create.execute(brief, { domain, books } as any);
     await create.execute(brief, { domain, books, requestKey: 'derived-invocation-key', clientRequestKey: null } as any);

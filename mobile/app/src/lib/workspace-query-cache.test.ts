@@ -111,10 +111,10 @@ test("isolates pending book requests from authoritative overview refreshes", () 
 test("progress patches retain active signed media and monotonic completion", () => {
   const client = new QueryClient();
   const book = { key: "book", title: "Book", subtitle: "Subtitle", description: "Description", status: "ready" as const, coverUrl: "https://old/cover", estimatedMinutes: 10, chapterCount: 1, progressPercent: 50 };
-  const chapter = { key: "chapter", title: "Chapter", description: "Description", position: 1, audioUrl: "https://old/audio", imageUrl: "https://old/image", progressSeconds: 50, isCompleted: true };
+  const chapter = { key: "chapter", title: "Chapter", description: "Description", position: 1, audioUrl: "https://old/audio", progressSeconds: 50, isCompleted: true };
   client.setQueryData(ascendQueryKeys.detail(context, book.key), { book, chapters: [chapter] });
   client.setQueryData(ascendQueryKeys.overview(context), { books: [book] });
-  patchCachedBookProgress(client, context, { ...book, coverUrl: "https://new/cover", progressPercent: 0 }, { ...chapter, audioUrl: "https://new/audio", imageUrl: "https://new/image", progressSeconds: 10, isCompleted: false });
+  patchCachedBookProgress(client, context, { ...book, coverUrl: "https://new/cover", progressPercent: 0 }, { ...chapter, audioUrl: "https://new/audio", progressSeconds: 10, isCompleted: false });
   expect(client.getQueryData<{ book: typeof book; chapters: (typeof chapter)[] }>(ascendQueryKeys.detail(context, book.key))).toEqual({ book, chapters: [chapter] });
 });
 

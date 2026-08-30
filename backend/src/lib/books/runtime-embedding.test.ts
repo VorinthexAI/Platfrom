@@ -22,11 +22,12 @@ test('persists accepted audio book intent without waiting for embedding provider
     now: () => '2026-08-27T12:00:00.000Z',
   });
 
-  await runtime.create({ organizationKey: 'organization', scopeKey, generationRequestKey: 'request', generationBriefFingerprint: 'a'.repeat(64), topic: 'Build useful habits', goal: 'Create a durable daily practice', currentKnowledge: '', writingTone: 'Clear and practical', chapterCount: 10, language: 'English', archiveDocumentKeys: [newId()], narratorVoiceKey: 'clear', narrationPace: 1, chapterImages: false }, { organizationKey: 'organization', scopeKey, userKey });
+  await runtime.create({ organizationKey: 'organization', scopeKey, generationRequestKey: 'request', generationBriefFingerprint: 'a'.repeat(64), topic: 'Build useful habits', goal: 'Create a durable daily practice', currentKnowledge: '', writingTone: 'Clear and practical', chapterCount: 10, language: 'English', archiveDocumentKeys: [newId()], narratorVoiceKey: 'clear', narrationPace: 1 }, { organizationKey: 'organization', scopeKey, userKey });
 
   expect(persisted).toHaveLength(1);
   expect(persisted[0]!.book.audience).toBe('No prior knowledge provided');
   expect(persisted[0]!.book.generationTotalUnits).toBe(33);
+  expect(persisted[0]!.book.generationInput).not.toHaveProperty('chapterImages');
   expect(persisted[0]!.book.embedding).toEqual(Array(EMBEDDING_DIMENSIONS).fill(0));
   expect(persisted[0]!.context.embedding).toEqual(Array(EMBEDDING_DIMENSIONS).fill(0));
   expect(persisted[0]!.sources[0].embedding).toEqual(Array(EMBEDDING_DIMENSIONS).fill(0));

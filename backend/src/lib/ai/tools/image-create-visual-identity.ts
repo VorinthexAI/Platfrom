@@ -1,6 +1,5 @@
 import { executeAction, type ExecuteActionOptions } from '@/lib/ai/router';
 import { visualIdentityDescriptionInputSchema, visualIdentityDescriptionOutputSchema, type ProviderExecuteResponse, type VisualIdentityDescriptionInput, type VisualIdentityDescriptionOutput } from '@/lib/ai/providers';
-import { IMAGE_CAPTION_MODEL } from '@/lib/image-caption-constants';
 
 export interface ImageCreateVisualIdentityToolDependencies extends ExecuteActionOptions {
   organizationKey?: string;
@@ -23,7 +22,7 @@ export const imageCreateVisualIdentityTool = {
     if (!organizationKey) throw new Error('image.create-visual-identity requires an authorized organization.');
     const response = dependencies.executeDescription
       ? await dependencies.executeDescription(organizationKey, input)
-      : await executeAction<VisualIdentityDescriptionInput, VisualIdentityDescriptionOutput>({ mode: 'fixed', organizationKey, actionSlug: 'describe-visual-identity', modelSlug: IMAGE_CAPTION_MODEL, providerSlug: 'google-vertex' }, input, dependencies);
+      : await executeAction<VisualIdentityDescriptionInput & { operation: 'describe-visual-identity' }, VisualIdentityDescriptionOutput>({ mode: 'auto', organizationKey, actionSlug: 'image' }, { operation: 'describe-visual-identity', ...input }, { providers: ['image.primary'], ...dependencies });
     return visualIdentityDescriptionOutputSchema.parse(response.output);
   },
 } as const;

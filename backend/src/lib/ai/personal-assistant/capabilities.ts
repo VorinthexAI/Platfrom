@@ -12,8 +12,8 @@ import type { GalleryOperationContext, GalleryOperationName } from '@/lib/galler
 import type { ImageGenerationService } from '@/lib/image-generation/service';
 import type { AppSearchService } from '@/lib/app-search/service';
 import type { AppTransformationService } from '@/lib/app-transformation/service';
-import type { AppAudioService } from '@/lib/app-audio/service';
-import { appAudioCapability, appEnhanceCapability, appSearchCapability, appTranslateCapability, archiveCapabilities, ascendCapabilities, compassCapabilities, hiddenListCapability, signalCapabilities } from './service-capabilities';
+import type { AppSpeechService } from '@/lib/app-speech/service';
+import { appSpeechCapability, appEnhanceCapability, appSearchCapability, appTranslateCapability, archiveCapabilities, ascendCapabilities, compassCapabilities, hiddenListCapability, signalCapabilities } from './service-capabilities';
 import { galleryAssistantCapabilities, galleryAssistantCapabilityNames } from './gallery-capabilities';
 
 export const assistantSurfaceSchema = z.enum(['knowledge-workspace', 'media-workspace', 'book-workspace', 'travel-workspace', 'signal-workspace']);
@@ -49,7 +49,7 @@ export interface AssistantCapabilityContext {
   images?: ImageGenerationService;
   appSearch?: AppSearchService;
   appTransformation?: AppTransformationService;
-  appAudio?: AppAudioService;
+  appSpeech?: AppSpeechService;
 }
 
 export type MutationWorkspace = 'archive' | 'gallery' | 'signal' | 'compass' | 'ascend';
@@ -109,11 +109,11 @@ const writeNoteCapability: AssistantCapability = {
 
 export const defaultAssistantCapabilityRegistry = new AssistantCapabilityRegistry();
 
-for (const item of [appSearchCapability, appEnhanceCapability, appTranslateCapability, appAudioCapability, hiddenListCapability, ...archiveCapabilities, ...galleryAssistantCapabilities, ...compassCapabilities, ...signalCapabilities, ...ascendCapabilities]) defaultAssistantCapabilityRegistry.register(item);
+for (const item of [appSearchCapability, appEnhanceCapability, appTranslateCapability, appSpeechCapability, hiddenListCapability, ...archiveCapabilities, ...galleryAssistantCapabilities, ...compassCapabilities, ...signalCapabilities, ...ascendCapabilities]) defaultAssistantCapabilityRegistry.register(item);
 
 defaultAssistantCapabilityRegistry
   .register(writeNoteCapability)
-  .registerSurface('knowledge-workspace', ['app.search', 'app.enhance', 'app.translate', 'app.audio', 'content.hidden.list', ...archiveCapabilities.map(({ definition }) => definition.name), 'note.write'])
+  .registerSurface('knowledge-workspace', ['app.search', 'app.enhance', 'app.translate', 'app.speech', 'content.hidden.list', ...archiveCapabilities.map(({ definition }) => definition.name), 'note.write'])
   .registerSurface('media-workspace', ['app.search', 'content.hidden.list', ...galleryAssistantCapabilityNames])
   .registerSurface('book-workspace', ['app.search', ...ascendCapabilities.map(({ definition }) => definition.name)])
   .registerSurface('travel-workspace', ['app.search', ...compassCapabilities.filter(({ definition }) => !['country.search', 'place.search', 'trip.search'].includes(definition.name)).map(({ definition }) => definition.name)])

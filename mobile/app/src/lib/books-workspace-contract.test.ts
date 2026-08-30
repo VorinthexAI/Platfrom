@@ -39,6 +39,7 @@ test("uses a titleless centered text-only Ascend create menu", () => {
   expect(actions).toContain('style={styles.sheetAction}');
   expect(actions).toContain('variant="secondary"');
   expect(actions).toContain('Create audio book');
+  expect(actions).toContain('Create custom audio book');
   expect(actions).not.toContain('icon=');
   expect(actions).not.toContain('<AscendIcon');
   expect(workspace).toContain('sheetAction: { justifyContent: "center" }');
@@ -60,44 +61,49 @@ test("keeps context selection explicit and generation asynchronous", () => {
   expect(workspace).toContain("archiveDocumentKeys: []");
   expect(workspace).toContain('currentKnowledge: ""');
   expect(workspace).toContain("closeCreationSheets();");
-  expect(workspace.indexOf("closeCreationSheets();", workspace.indexOf("function submit()"))).toBeLessThan(workspace.indexOf("createMutation.mutate"));
+  const submitStart = workspace.indexOf("function submitDraft");
+  expect(workspace.indexOf("closeCreationSheets();", submitStart)).toBeLessThan(workspace.indexOf("createMutation.mutate", submitStart));
   expect(workspace).toContain('chapterCount: 10');
-  expect(workspace).toContain('chapterImages: true');
+  expect(workspace).not.toContain('chapterImages');
+  expect(workspace).not.toContain('accessibilityLabel="Generate chapter images"');
+  expect(workspace).not.toContain('>Chapter images</Text>');
   expect(workspace).not.toContain("const CHAPTER_OPTIONS =");
   expect(workspace).not.toContain("Audio book depth");
   expect(workspace).not.toContain('lengthMinutes');
-  expect(workspace).toContain("const MAX_CONTEXT_DOCUMENTS = 50");
+  expect(workspace).toContain("const MAX_CONTEXT_DOCUMENTS = 10");
   expect(workspace).toContain("archiveOnly context={contentContext}");
   expect(workspace).toContain("maxSelection={MAX_CONTEXT_DOCUMENTS}");
+  expect(workspace).toContain('onSelectionLimitReached={(limit) => showToast({ title: `You can add up to ${limit} context documents.`');
   expect(workspace).not.toContain("Archive sources");
   expect(workspace).not.toContain("listContentFolderTree");
   for (const status of ["queued", "researching", "planning", "writing", "narrating", "finalizing"]) expect(workspace).toContain(`\"${status}\"`);
-  expect(workspace).toContain('selectedBook.status === "failed" || selectedBook.status === "cancelled"');
 });
 
-test("reveals generated books and chapter summaries progressively", () => {
+test("holds chapter cards behind a complete three-card generation skeleton", () => {
   expect(workspace).not.toContain('setAutoOpenBookKey(book.key)');
   expect(workspace).toContain('key: `pending-${requestKey}`');
-  expect(workspace).toContain('if (book.key.startsWith("pending-")) return <Skeleton');
+  expect(workspace).toContain('book.key.startsWith("pending-") || ["queued", "researching", "planning"].includes(book.status)');
   expect(workspace).not.toContain('ACTIVE_STATUSES.includes(book.status) && !book.coverUrl');
   expect(workspace).not.toContain("orderedReadyChapters");
   expect(workspace).toContain('const orderedChapters =');
   expect(workspace).toContain('{chapter.description}</Text>');
   expect(workspace).toContain('onPress={() => openChapterSummary(chapter.key)}');
   expect(workspace).not.toContain('accessibilityLabel="Search chapters"');
-  expect(workspace).toContain('const showNextChapterSkeleton');
-  expect(workspace).toContain('Preparing chapter ${visibleChapterCount + 1}');
-  expect(workspace).toContain('Math.min(current + 1, orderedChapters.length)');
+  expect(workspace).toContain('const detailBusy = Boolean(detail && !detailReady');
+  expect(workspace).toContain('detailBusy ? Array.from({ length: 3 }');
+  expect(workspace).toContain('Preparing audio book chapter ${index + 1}');
+  expect(workspace).not.toContain('showNextChapterSkeleton');
+  expect(workspace).not.toContain('revealedChapterCount');
   expect(workspace).not.toContain('sheet === "detail"');
   expect(playback).toContain('.filter((chapter) => chapter.content && chapter.audioUrl)');
 });
 
-test("uses persistent stacked brief sheets with fresh self-improvement suggestions", () => {
+test("uses sequential brief sheets with fresh self-improvement suggestions", () => {
   for (const state of ["createTopicOpen", "createTopicCustomOpen", "createGoalOpen", "createGoalCustomOpen", "createDetailsOpen"]) expect(workspace).toContain(state);
   expect(workspace).toContain("suggestBookTopics(excludeTopics)");
   expect(workspace).toContain("topicSuggestionsMutation.mutate(topicSuggestions)");
   expect(workspace).toContain("Array.from({ length: 3 }");
-  expect(workspace).toContain('!topicSuggestionsMutation.isPending && topicSuggestions.length ? <Button onPress={() => setCreateTopicCustomOpen(true)}');
+  expect(workspace).toContain('!topicSuggestionsMutation.isPending && topicSuggestions.length ? <Button onPress={() => { setCreateTopicOpen(false); setCreateTopicCustomOpen(true); }}');
   expect(workspace).toContain('<Text numberOfLines={1} style={styles.suggestionText}>{topic}</Text>');
   expect(workspace).toContain('<Text numberOfLines={1} style={styles.suggestionText}>{goal}</Text>');
   expect(workspace).toContain('<Text style={styles.inputLabel}>Topic</Text>');
@@ -106,13 +112,17 @@ test("uses persistent stacked brief sheets with fresh self-improvement suggestio
   expect(workspace).not.toContain("What you already know");
   expect(workspace).not.toContain('accessibilityLabel="Book language"');
   expect(workspace).not.toContain('<Text style={styles.formLabel}>Writing tone</Text>');
-  expect(workspace).not.toContain('accessibilityLabel="Additional instructions"');
+  expect(workspace).toContain('accessibilityLabel="Custom audio book content"');
+  expect(workspace).toContain('description="Write or paste the content and direction for your audio book."');
+  expect(workspace).toContain('title="Create custom audio book"');
+  expect(workspace).toContain('additionalInstructions: customBrief');
   expect(workspace).toContain('inputLabel: { marginLeft: 2, color: palette.silver300, fontFamily: fonts.medium, fontSize: 12, letterSpacing: 0.4 }');
   expect(workspace).toContain('customTextArea: { paddingTop: 12, lineHeight: 22 }');
-  expect(workspace.match(/<AiTextEditor accessibilityLabel=/g)).toHaveLength(2);
+  expect(workspace.match(/<AiTextEditor accessibilityLabel=/g)).toHaveLength(3);
   expect(workspace).not.toContain("customEditorStep");
   expect(workspace).toContain('onOpenActions={() => openBriefEditorActions("topic")}');
   expect(workspace).toContain('onOpenActions={() => openBriefEditorActions("goal")}');
+  expect(workspace).toContain('onOpenActions={() => openBriefEditorActions("additionalInstructions")}');
   expect(workspace).toContain('title="AI actions"');
   expect(workspace).toContain('variant="secondary">Enhance</BottomSheetItem>');
   expect(workspace).toContain('variant="secondary">Translate</BottomSheetItem>');
@@ -132,16 +142,18 @@ test("uses persistent stacked brief sheets with fresh self-improvement suggestio
   expect(workspace).not.toContain("Show different goals");
   expect(workspace).not.toContain("What should this book help you achieve?");
   expect(workspace).toContain('footer={<><Button disabled={goalSuggestionsMutation.isPending} onPress={loadNewGoals} size="md" variant="primary">New goals</Button>');
-  expect(workspace).toContain('!goalSuggestionsMutation.isPending && goalSuggestions.length ? <Button onPress={() => setCreateGoalCustomOpen(true)}');
+  expect(workspace).toContain('!goalSuggestionsMutation.isPending && goalSuggestions.length ? <Button onPress={() => { setCreateGoalOpen(false); setCreateGoalCustomOpen(true); }}');
   expect(workspace).toContain('shape="pill" size="md" style={styles.suggestionPill}');
   expect(workspace).toContain("setCreateGoalOpen(true);");
   expect(workspace).toContain("setCreateDetailsOpen(true);");
   const openGoalStep = workspace.slice(workspace.indexOf("function openGoalStep"), workspace.indexOf("function loadNewGoals"));
-  const openDetailsStep = workspace.slice(workspace.indexOf("function openDetailsStep"), workspace.indexOf("function submit"));
-  expect(openGoalStep).not.toContain("setCreateTopicOpen(false)");
-  expect(openGoalStep).not.toContain("setCreateTopicCustomOpen(false)");
-  expect(openDetailsStep).not.toContain("setCreateGoalOpen(false)");
-  expect(openDetailsStep).not.toContain("setCreateGoalCustomOpen(false)");
+  const completeNormalGoal = workspace.slice(workspace.indexOf("function completeNormalGoal"), workspace.indexOf("function submitDraft"));
+  expect(openGoalStep).toContain("setCreateTopicOpen(false)");
+  expect(openGoalStep).toContain("setCreateTopicCustomOpen(false)");
+  expect(completeNormalGoal).toContain("submitDraft(nextDraft)");
+  expect(completeNormalGoal).not.toContain("setCreateDetailsOpen(true)");
+  expect(workspace).toContain('onPress={() => completeNormalGoal(goal)}');
+  expect(workspace).toContain('onPress={() => completeNormalGoal(draft.goal.trim())}');
   expect(workspace).not.toContain("transitionCreationSheet");
   expect(workspace).toContain('fontSize: 12,\n    letterSpacing: 0.4,');
   expect(workspace).not.toContain('<Tabs accessibilityLabel="Audio book depth"');
@@ -169,7 +181,11 @@ test("matches Signal attachment presentation for Archive context", () => {
 });
 
 test("provides detail, chapter summaries, playback infrastructure, and lifecycle controls", () => {
-  expect(workspace).toContain('<View style={styles.detailCover}><Cover book={detail.book} /></View>');
+  expect(workspace).toContain('detail.book.coverUrl ? <Cover book={detail.book} /> : <Skeleton accessibilityLabel="Creating audio book cover"');
+  expect(workspace).toContain('<Skeleton style={styles.detailHeroSkeleton} />');
+  expect(workspace).toContain('<Text style={styles.chapterHeading}>Chapters</Text>');
+  expect(workspace).toContain('<LoadingText text={chapterLoadingText} />');
+  expect(workspace).toContain('detail?.book.isExtending ? "Extending audio book..." : "Creating audio book..."');
   expect(workspace).not.toContain("detailHeroShade");
   expect(workspace).not.toContain("styles.detailTitle");
   expect(workspace).not.toContain("styles.detailMeta");
@@ -180,7 +196,7 @@ test("provides detail, chapter summaries, playback infrastructure, and lifecycle
   expect(workspace).toContain('onPress={() => open("bookSummary")}');
   expect(workspace).toContain('detailHero: { width: "100%", minHeight: (144 * 16) / 9, flexDirection: "row"');
   expect(workspace).toContain('width: 144,\n    height: (144 * 16) / 9,\n    flexShrink: 0,');
-  expect(workspace).toContain("height: (chapterWidth * 16) / 9");
+  expect(workspace).toContain("width: chapterWidth, height: 132");
   expect(workspace).toContain('sheet === "reader" ? <View style={styles.summarySheetContent}><Reader chapter={readerChapter} />');
   expect(workspace).toContain('description={sheet === "reader" ? readerChapter?.title : sheet === "chapterRead" ? readingChapter?.title : sheet === "bookSummary" ? detail?.book.title : undefined}');
   expect(workspace).toContain('height={sheet === "reader" || sheet === "chapterRead" || sheet === "bookSummary" ? "full" : undefined}');
@@ -202,7 +218,7 @@ test("provides detail, chapter summaries, playback infrastructure, and lifecycle
   expect(playback).toContain("audio.didJustFinish");
   expect(playback).toContain("setActiveForLockScreen");
   expect(playback).toContain("refreshUrl");
-  expect(workspace).toContain("const bookPlaybackIsland = bookPageOpen && detail && islandChapter && !playbackIslandDismissed");
+  expect(workspace).toContain("const bookPlaybackIsland = bookPageOpen && detailReady && detail && islandChapter && !playbackIslandDismissed");
   expect(workspace).toContain("accessory={bookPlaybackIsland}");
   expect(workspace).toContain('accessibilityLabel="Audio book progress"');
   expect(workspace).toContain('accessibilityLabel={islandPlaying ? "Pause listening" : "Play audio"}');
@@ -228,30 +244,56 @@ test("provides detail, chapter summaries, playback infrastructure, and lifecycle
   expect(unmountCleanup).not.toContain("player.clearLockScreenControls()");
   expect(workspace).toContain('pageKey={sheet === "chapterRead" ? `${sheet}:${readingChapterKey ?? "none"}` : sheet}');
   expect(workspace).toContain("if (!next) { setSheet(undefined); setReaderChapterKey(undefined); setReadingChapterKey(undefined); }");
-  expect(workspace).toContain("Retry generation");
-  expect(workspace).toContain("Cancel generation");
+  expect(workspace).not.toContain("Retry generation");
+  expect(workspace).not.toContain("Cancel generation");
   expect(workspace).toContain("Delete audio book");
   expect(workspace).not.toContain('accessibilityLabel="Back to audio book creation"');
   expect(bridge).toContain('event.event === "book.changed"');
+  expect(bridge).toContain("createCoalescedRefresh(");
+  expect(bridge).toContain('queryClient.invalidateQueries({ queryKey: ascendQueryKeys.all(compassContext), refetchType: "active" })');
   expect(bridge).toContain("invalidateBooks()");
 });
 
-test("extends ready audio books through an uncached preview sheet", () => {
+test("centers book titles and keeps chapter status text unboxed", () => {
+  expect(workspace).toContain('backgroundColor: "rgba(0,0,0,0.62)"');
+  expect(workspace).toContain('textAlign: "center"');
+  expect(workspace).not.toContain("chapterHeadingPill");
+  expect(workspace).toContain('chapterHeadingRow: { width: "100%", minHeight: 28, justifyContent: "center" }');
+  const cardFrame = workspace.slice(workspace.indexOf("bookCardFrame:"), workspace.indexOf("bookCard:", workspace.indexOf("bookCardFrame:")));
+  expect(cardFrame).not.toContain("borderWidth");
+  expect(cardFrame).not.toContain("borderColor");
+});
+
+test("delays focus until custom topic and goal sheets finish opening", () => {
+  expect(workspace).toContain("setTimeout(() => customTopicInputRef.current?.focus(), 300)");
+  expect(workspace).toContain("setTimeout(() => customGoalInputRef.current?.focus(), 300)");
+  expect(workspace).toContain("ref={customTopicInputRef}");
+  expect(workspace).toContain("ref={customGoalInputRef}");
+});
+
+test("extends ready audio books through a compact one-chapter confirmation", () => {
   expect(workspace).toContain('selectedBook.status === "ready" ? <BottomSheetItem');
   expect(workspace).toContain('>Extend</BottomSheetItem>');
-  expect(workspace).toContain('title="Extend audio book"');
-  expect(workspace).toContain('height="full"');
-  expect(workspace).toContain('const EXTENSION_CHAPTER_OPTIONS = [1, 3, 5] as const');
-  expect(workspace).toContain('accessibilityLabel="Extension chapter count"');
-  expect(workspace).toContain('size="md" style={styles.detailTab}');
-  expect(workspace).toContain('Array.from({ length: extensionChapterCount }');
-  expect(workspace).toContain('<ActionPill key={`${index}-${title}`}>');
-  expect(workspace).toContain('{extensionPreviewReady ? "Generate" : "Preview"}');
-  expect(workspace).toContain('extensionPreviewMutation.reset()');
-  expect(workspace).toContain('setExtensionChapterCount(1)');
+  expect(workspace).toContain('sheet === "extend"');
+  expect(workspace).toContain('? "Extend audio book?"');
+  expect(workspace).toContain('<Button disabled={extensionMutation.isPending} onPress={generateExtension} size="md" variant="primary">Extend</Button>');
+  expect(workspace).toContain('previewBookExtension(bookKey, 1)');
+  expect(workspace).toContain('extendBook(bookKey, 1, titles, requestKey)');
+  expect(workspace).not.toContain('EXTENSION_CHAPTER_OPTIONS');
+  expect(workspace).not.toContain('Extension chapter count');
+  expect(workspace).not.toContain('extensionPreviewReady');
   expect(workspace).toContain('patchCachedBookMetadata(queryClient, context, book)');
   expect(workspace).toContain('requestKey: randomUUID()');
   expect(workspace).not.toContain('ascendQueryKeys.extension');
+});
+
+test("optimistically removes a single deleted audio book without a loading button", () => {
+  const lifecycle = workspace.slice(workspace.indexOf("const lifecycleMutation"), workspace.indexOf("const assistantMutation"));
+  const deleteSheet = workspace.slice(workspace.indexOf('{sheet === "delete"'), workspace.indexOf('{sheet === "extend"'));
+  expect(lifecycle.indexOf("removeCachedBook(queryClient, context, book.key)")).toBeLessThan(lifecycle.indexOf("await deleteBook(book.key, requestKey)"));
+  expect(lifecycle).toContain("if (mutationContext?.deletedBook) addCachedBook");
+  expect(deleteSheet).not.toContain("loading=");
+  expect(deleteSheet).not.toContain("lifecycleMutation.isPending");
 });
 
 test("matches Archive bulk actions and uses cover-backed progress surfaces", () => {

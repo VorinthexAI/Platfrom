@@ -34,7 +34,7 @@ describe('personal assistant runtime', () => {
     expect(request).toBe(organizationKey);
     expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual([
       'app.search',
-      'app.enhance', 'app.translate', 'app.audio',
+      'app.enhance', 'app.translate', 'app.speech',
       'content.hidden.list',
       'folder.hide', 'folder.reveal', 'document.hide', 'document.reveal',
       'folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy',
@@ -234,7 +234,7 @@ describe('personal assistant runtime', () => {
 
   test('creates a book through one canonical service call', async () => {
     const bookKey = newId();
-    const brief = { topic: 'Decision making', goal: 'Make clearer decisions', currentKnowledge: 'Basic familiarity', writingTone: 'Warm and rigorous', language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'warm', narrationPace: 1, chapterImages: false } as const;
+    const brief = { topic: 'Decision making', goal: 'Make clearer decisions', currentKnowledge: 'Basic familiarity', writingTone: 'Warm and rigorous', language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'warm', narrationPace: 1 } as const;
     const serviceCalls: unknown[][] = [];
     let modelCalls = 0;
     const result = await runPersonalAssistant({ ...input, surface: 'book-workspace', requestKey: 'book-request-1', message: 'Create a short book about decision making for leaders.' }, domain, {
@@ -261,7 +261,7 @@ describe('personal assistant runtime', () => {
     await expect(runPersonalAssistant({ ...input, surface: 'book-workspace' }, domain, {
       execute: async () => {
         call += 1;
-        return response({ text: '', toolCalls: [{ id: `create-${call}`, name: 'book.create', arguments: { topic: 'Topic', goal: 'Goal', currentKnowledge: 'Basic familiarity', writingTone: 'Clear', language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear', narrationPace: 1, chapterImages: false } }], stopReason: 'tool_use' });
+        return response({ text: '', toolCalls: [{ id: `create-${call}`, name: 'book.create', arguments: { topic: 'Topic', goal: 'Goal', currentKnowledge: 'Basic familiarity', writingTone: 'Clear', language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear', narrationPace: 1 } }], stopReason: 'tool_use' });
       },
       books: { create: async () => ({ key: newId(), status: 'ready' }) } as any,
     })).rejects.toThrow('more than one book');

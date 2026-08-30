@@ -472,8 +472,8 @@ async function defaults(deps: ContentToolDependencies, context: ToolContext): Pr
       if (operation.startsWith('text.')) {
         const deep = operation === 'text.rewrite';
         const request = deep
-          ? { mode: 'model' as const, organizationKey: context.organizationKey, actionSlug: 'ask' as const, modelSlug: 'google.gemini-3.5-flash-lite' as const }
-          : { mode: 'auto' as const, organizationKey: context.organizationKey, actionSlug: 'ask' as const };
+          ? { mode: 'auto' as const, organizationKey: context.organizationKey, actionSlug: 'text' as const }
+          : { mode: 'auto' as const, organizationKey: context.organizationKey, actionSlug: 'text' as const };
         const response = await executeAction<Record<string, unknown>, ContentActionResult>(request, input, deps);
         return response.output;
       }

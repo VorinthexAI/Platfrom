@@ -25,7 +25,7 @@ describe('book HTTP handlers', () => {
 
   test('keeps POST /books as a thin call to BookService.create', async () => {
     const userKey = newId();
-    const body = { organizationKey: 'organization', scopeKey: newId(), generationRequestKey: 'request-1', topic: 'Decision making', goal: 'Decide well', currentKnowledge: 'Basic familiarity', writingTone: 'Clear', language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear', narrationPace: 1, chapterImages: false };
+    const body = { organizationKey: 'organization', scopeKey: newId(), generationRequestKey: 'request-1', topic: 'Decision making', goal: 'Decide well', currentKnowledge: 'Basic familiarity', writingTone: 'Clear', language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear', narrationPace: 1 };
     const calls: unknown[][] = [];
     const app = new Hono();
     app.post('/books', createBookHandlers({ service: { create: async (...args: unknown[]) => { calls.push(args); return { key: newId() }; } } as never, getIdentity: async () => ({ key: userKey, identityType: 'user' }) }).create);

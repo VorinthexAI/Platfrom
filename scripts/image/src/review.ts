@@ -1,10 +1,10 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { atomicWrite } from "./filesystem";
-import type { OpenAIClient } from "./openai";
+import type { OpenRouterClient } from "./openrouter";
 
 export async function writeReview(input: {
-  client?: OpenAIClient;
+  client?: OpenRouterClient;
   imagePath: string;
   prompt: string;
   reviewPath: string;
@@ -14,11 +14,11 @@ export async function writeReview(input: {
   if (!input.client) {
     markdown = `# Review
 
-Review skipped because OPENAI_API_KEY is not configured.
+Review skipped because OPENROUTER_API_KEY is not configured.
 
 ## Recommended next prompt
 
-Set OPENAI_API_KEY and run Review asset for model-based critique.
+Set OPENROUTER_API_KEY and run Review asset for model-based critique.
 `;
   } else {
     markdown = (await input.client.reviewImage({ imagePath: input.imagePath, prompt: input.prompt })).markdown;

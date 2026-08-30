@@ -2,18 +2,14 @@ import { describe, expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
 import { createBookRepository, type BookDatabase } from './repository';
 
-describe('book generation recovery persistence', () => {
-  test('enumerates persisted recoverable work and conditionally records terminal failure', async () => {
-    const bookKey = newId(); const scopeKey = newId(); const userKey = newId(); const now = '2026-08-25T12:00:00.000Z'; let failed = false;
-    const database: BookDatabase = { async query(query, bind = {}) {
-      if (query.includes('RETURN { bookKey:')) return { all: async () => [{ bookKey, organizationKey: 'organization', scopeKey, userKey }] };
-      if (query.includes('generationOwnerKey == @userKey')) { failed = bind.bookKey === bookKey && bind.scopeKey === scopeKey && bind.userKey === userKey && !('schemaVersion' in bind); return { all: async () => failed ? [1] : [] }; }
-      return { all: async () => [] };
-    } };
+describe('book generation failure persistence', () => {
+  test('records failure only through the released-or-expired lease guard', async () => {
+    const bookKey = newId(); const scopeKey = newId(); const userKey = newId(); const now = '2026-08-25T12:00:00.000Z'; let queryText = ''; let bindings: Record<string, unknown> = {};
+    const database: BookDatabase = { async query(query, bind = {}) { queryText = query; bindings = bind; return { all: async () => [1] }; } };
     const repository = createBookRepository(database);
-    const job = { schemaVersion: 1 as const, bookKey, organizationKey: 'organization', scopeKey, userKey };
-    await expect(repository.listRecoverableGenerations(now)).resolves.toEqual([{ bookKey, organizationKey: 'organization', scopeKey, userKey }]);
-    await expect(repository.failTerminalGeneration(job, 'exhausted', now)).resolves.toBe(true);
-    expect(failed).toBe(true);
+
+    await expect(repository.failGeneration({ bookKey, organizationKey: 'organization', scopeKey, userKey }, 'safe failure', now)).resolves.toBe(true);
+    expect(queryText).toContain('book.generationLeaseToken == null || book.generationLeaseExpiresAt == null || book.generationLeaseExpiresAt <= @now');
+    expect(bindings).toEqual({ bookKey, organizationKey: 'organization', scopeKey, userKey, message: 'safe failure', now });
   });
 });

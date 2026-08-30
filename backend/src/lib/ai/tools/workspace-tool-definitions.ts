@@ -7,7 +7,7 @@ import {
   appSearchCapability,
   appEnhanceCapability,
   appTranslateCapability,
-  appAudioCapability,
+  appSpeechCapability,
   archiveCapabilities,
   ascendCapabilities,
   compassCapabilities,
@@ -20,7 +20,7 @@ import { runContentTool, type ContentToolDependencies } from './content-runtime'
 import type { ToolContext } from './tool-context';
 import type { AppSearchService } from '@/lib/app-search/service';
 import type { AppTransformationService } from '@/lib/app-transformation/service';
-import type { AppAudioService } from '@/lib/app-audio/service';
+import type { AppSpeechService } from '@/lib/app-speech/service';
 
 export interface WorkspaceToolDependencies {
   context: ToolContext;
@@ -36,7 +36,7 @@ export interface WorkspaceToolDependencies {
   images?: AssistantCapabilityContext['images'];
   appSearch?: AppSearchService;
   appTransformation?: AppTransformationService;
-  appAudio?: AppAudioService;
+  appSpeech?: AppSpeechService;
   signal?: AbortSignal;
   timeoutMs?: number;
 }
@@ -62,7 +62,7 @@ function publicDefinition(capability: AssistantCapability) {
         images: dependencies.images,
         appSearch: dependencies.appSearch,
         appTransformation: dependencies.appTransformation,
-        appAudio: dependencies.appAudio,
+        appSpeech: dependencies.appSpeech,
         signal: dependencies.signal,
         timeoutMs: dependencies.timeoutMs,
       };
@@ -78,7 +78,7 @@ export const WORKSPACE_TOOL_DEFINITIONS = Object.freeze([
     appSearchCapability,
     appEnhanceCapability,
     appTranslateCapability,
-    appAudioCapability,
+    appSpeechCapability,
     hiddenListCapability,
     ...archiveCapabilities,
     ...galleryAssistantCapabilities,

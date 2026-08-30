@@ -15,7 +15,7 @@ import { userHiddenOperations } from '@/lib/user-hiddens/operations';
 import type { AssistantCapability, AssistantCapabilityContext } from './capabilities';
 import { appSearchInputSchema, createAppSearchService } from '@/lib/app-search/service';
 import { appTextEnhanceInputSchema, appTextTranslateInputSchema, createAppTransformationService } from '@/lib/app-transformation/service';
-import { appAudioInputSchema, createAppAudioService } from '@/lib/app-audio/service';
+import { appSpeechInputSchema, createAppSpeechService } from '@/lib/app-speech/service';
 
 const key = z.string().cuid();
 const name = z.string().trim().min(1).max(255);
@@ -149,8 +149,8 @@ export const appTranslateCapability = capability('app.translate', 'Translate tex
   return input.messageKey ? 'signal' : !input.text && input.save ? 'archive' : undefined;
 });
 
-export const appAudioCapability = capability('app.audio', 'Generate and persist a narrated audio version of an Archive document.', appAudioInputSchema, async (input, context) => {
-  return (context.appAudio ?? createAppAudioService({ content: context.contentDependencies, executeContent: context.executeContent })).generateDocument(input, context.domain, { signal: context.signal, timeoutMs: context.timeoutMs });
+export const appSpeechCapability = capability('app.speech', 'Generate and persist a narrated audio version of an Archive document.', appSpeechInputSchema, async (input, context) => {
+  return (context.appSpeech ?? createAppSpeechService({ content: context.contentDependencies, executeContent: context.executeContent })).generateDocument(input, context.domain, { signal: context.signal, timeoutMs: context.timeoutMs });
 }, 'archive');
 
 export const hiddenListCapability = capability('content.hidden.list', 'List content hidden by the current user across Archive and Gallery.', z.object({}).strict(), async (_input, context) => {
@@ -214,6 +214,7 @@ export const compassCapabilities = [
 
 export const signalCapabilities = [
   capability('email.overview', 'List connected email accounts, or query one selected account by read state and enabled facets with stable cursor pagination.', emailOverviewInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).overview(actor.emailActor, input); }),
+  capability('inbox.refresh', 'Refresh one connected inbox from its email provider.', z.object({ connectorKey: key }).strict(), async ({ connectorKey }, context) => { const actor = identity(context); return (context.email ?? createEmailService()).sync(actor.emailActor, connectorKey); }, 'signal'),
   capability('inbox.search', 'Semantically search connected Signal inboxes by their names and descriptions.', emailSemanticSearchInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).searchInboxes(actor.emailActor, input, { signal: context.signal, timeoutMs: context.timeoutMs }); }),
   capability('email.tone.search', 'Semantically search available Signal email tones by name.', emailSemanticSearchInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).searchTones(actor.emailActor, input, { signal: context.signal, timeoutMs: context.timeoutMs }); }),
   capability('inbox.sort', 'Sort every persisted email in one connected inbox into Urgent, Important, or Filtered and refresh its Archive representation.', inboxSortInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).sort(actor.emailActor, input); }, 'signal'),
@@ -259,7 +260,7 @@ export const ascendCapabilities = [
   capability('book.share.detail', 'Read whether an audiobook share link is active. The private URL is not exposed to the model.', bookShareDetailToolInputSchema, async ({ bookKey }, context) => { const actor = identity(context); const { url: _url, ...safe } = await (context.books ?? defaultBookService).shareDetail(bookKey, actor.serviceContext, actor.userKey); return safe; }),
   capability('book.share.update', 'Activate or deactivate an audiobook share link. The private URL is not exposed to the model.', bookShareUpdateToolInputSchema, async ({ bookKey, active }, context) => { const actor = identity(context); const { url: _url, ...safe } = await (context.books ?? defaultBookService).setShareActive(bookKey, { ...actor.serviceContext, active }, actor.userKey); return safe; }, 'ascend'),
   capability('book.chapter.progress', 'Update progress for an Ascend chapter.', z.object({ bookKey: key, chapterKey: key, progressSeconds: z.number().int().nonnegative(), isCompleted: z.boolean() }).strict(), async ({ bookKey, chapterKey, ...input }, context) => { const actor = identity(context); return (context.books ?? defaultBookService).progress(bookKey, chapterKey, { ...actor.serviceContext, ...input }, actor.userKey); }, 'ascend'),
-  capability('book.create', 'Accept a personalized ten-chapter audiobook for durable background generation.', z.object({ topic: z.string().trim().min(3).max(500), goal: z.string().trim().min(3).max(1_000), currentKnowledge: z.string().trim().max(2_000), writingTone: z.string().trim().min(2).max(200), language: z.string().trim().min(2).max(100), archiveDocumentKeys: z.array(key).max(50), narratorVoiceKey: z.enum(['calm', 'clear', 'warm']), narrationPace: z.number().min(0.75).max(2), chapterImages: z.boolean(), additionalInstructions: z.string().trim().max(12_000).optional() }).strict(), async (input, context) => {
+  capability('book.create', 'Accept a personalized ten-chapter audiobook for durable background generation.', z.object({ topic: z.string().trim().min(3).max(500), goal: z.string().trim().min(3).max(1_000), currentKnowledge: z.string().trim().max(2_000), writingTone: z.string().trim().min(2).max(200), language: z.string().trim().min(2).max(100), archiveDocumentKeys: z.array(key).max(50), narratorVoiceKey: z.enum(['calm', 'clear', 'warm']), narrationPace: z.number().min(0.75).max(2), additionalInstructions: z.string().trim().max(12_000).optional() }).strict(), async (input, context) => {
     const actor = identity(context);
     const requestKey = ('clientRequestKey' in context ? context.clientRequestKey : context.requestKey)?.trim();
     const generationRequestKey = !requestKey ? newId() : requestKey.length <= 200 ? requestKey : createHash('sha256').update(requestKey).digest('hex');

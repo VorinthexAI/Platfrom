@@ -2,7 +2,7 @@ import { CORE_CAPABILITIES } from "../../../web/app/src/lib/core";
 import { generateVersion, type EngineContext } from "./cli";
 import { loadConfig } from "./config";
 import { ensureRuntime } from "./filesystem";
-import { OpenAIClient } from "./openai";
+import { OpenRouterClient } from "./openrouter";
 import { RegistryStore } from "./registry";
 
 async function createContext(): Promise<EngineContext> {
@@ -11,7 +11,7 @@ async function createContext(): Promise<EngineContext> {
   return {
     config,
     registry: new RegistryStore(config.rootDir),
-    client: new OpenAIClient(config)
+    client: new OpenRouterClient(config)
   };
 }
 

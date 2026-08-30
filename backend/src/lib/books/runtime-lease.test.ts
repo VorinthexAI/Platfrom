@@ -4,7 +4,7 @@ import { createBookRuntime } from './runtime';
 import { BookRepositoryError } from './repository';
 
 const organizationKey = 'organization'; const scopeKey = newId(); const userKey = newId(); const bookKey = newId();
-const input = { organizationKey, scopeKey, topic: 'Thinking', goal: 'Decide well', currentKnowledge: 'Basic familiarity', writingTone: 'Clear', chapterCount: 10 as const, language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear' as const, narrationPace: 1, chapterImages: false };
+const input = { organizationKey, scopeKey, topic: 'Thinking', goal: 'Decide well', currentKnowledge: 'Basic familiarity', writingTone: 'Clear', chapterCount: 10 as const, language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear' as const, narrationPace: 1 };
 
 describe('book runtime generation lease fencing', () => {
   test('requires a generation lease token before runtime writes', async () => {

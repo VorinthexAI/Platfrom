@@ -50,7 +50,7 @@ import { userHiddenHandlers } from './user-hiddens';
 import { streamEvents } from './events';
 import { searchApp } from './app-search';
 import { appTransformationHandlers } from './app-transformation';
-import { appAudioHandler } from './app-audio';
+import { appSpeechHandler } from './app-speech';
 import { publicBookShareHandlers } from './public-book-shares';
 
 const challengeHash = z.string().regex(/^[a-f0-9]{64}$/);
@@ -493,7 +493,7 @@ export function registerRoutes(app: Hono) {
   app.post('/travel/trips/attachments/set', travelHandlers.setTripAttachments);
   app.post('/app/enhance', appTransformationHandlers.enhance);
   app.post('/app/translate', appTransformationHandlers.translate);
-  app.post('/app/audio', appAudioHandler);
+  app.post('/app/speech', appSpeechHandler);
   app.post('/email/overview', emailHandlers.overview);
   app.post('/email/inboxes/search', emailHandlers.searchInboxes);
   app.post('/email/tones/search', emailHandlers.searchTones);

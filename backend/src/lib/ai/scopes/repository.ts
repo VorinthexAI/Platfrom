@@ -182,7 +182,7 @@ export function createScopeRepository(
         ), 2) FILTER IS_STRING(storageKey) RETURN storageKey)
         LET canonicalStorageKeys = UNIQUE(UNION(
           (FOR book IN books FILTER book.scopeKey == @scopeKey && IS_STRING(book.coverStorageKey) RETURN book.coverStorageKey),
-          (FOR chapter IN bookChapters FILTER chapter.scopeKey == @scopeKey FOR storageKey IN [chapter.audioStorageKey, chapter.imageStorageKey] FILTER IS_STRING(storageKey) RETURN storageKey),
+          (FOR chapter IN bookChapters FILTER chapter.scopeKey == @scopeKey FOR storageKey IN [chapter.audioStorageKey] FILTER IS_STRING(storageKey) RETURN storageKey),
           (FOR attachment IN emailAttachments FILTER attachment.scopeKey == @scopeKey && IS_STRING(attachment.storageKey) RETURN attachment.storageKey),
           (FOR media IN placeHeroMedia FILTER media.scopeKey == @scopeKey && IS_STRING(media.storageKey) RETURN media.storageKey)
         ))

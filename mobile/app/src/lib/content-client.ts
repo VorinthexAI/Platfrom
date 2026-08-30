@@ -383,7 +383,7 @@ export async function listContentDocumentAudioVersions(documentKey: string) {
 
 export async function generateContentDocumentAudio(documentKey: string, voice: "calm" | "clear" | "warm" = "clear", pace = 1) {
   const context = getContentContext();
-  const response = await apiClient.post<ToolResponse<ContentDocumentAudioVersion>>("/app/audio", {
+  const response = await apiClient.post<ToolResponse<ContentDocumentAudioVersion>>("/app/speech", {
     organizationKey: context.organizationKey,
     scopeKey: context.scopeKey,
     input: { documentKey, voice, pace, includeTitle: true, includeCode: false },

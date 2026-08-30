@@ -9,7 +9,7 @@ import { slideshowNegativePrompt, slideshowSystemPrompt } from "../prompts/slide
 import { loadConfig } from "./config";
 import { atomicWrite, ensureRuntime, exists, readText } from "./filesystem";
 import { normalizeVerticalSlide } from "./image";
-import { OpenAIClient } from "./openai";
+import { OpenRouterClient } from "./openrouter";
 import { RegistryStore } from "./registry";
 import { assetCategorySchema } from "./types";
 import type { AssetCategory, EngineConfig } from "./types";
@@ -239,7 +239,7 @@ export async function generateSlideshow(options: SlideshowOptions = {}): Promise
   const config = loadConfig();
   await ensureRuntime(config);
   const registry = new RegistryStore(config.rootDir);
-  const client = new OpenAIClient(config);
+  const client = new OpenRouterClient(config);
   const brief = await resolveBrief(options, config);
   const slug = slugify(brief.slug || brief.title);
   const assetSlug = slugify(brief.assetSlug || slug);

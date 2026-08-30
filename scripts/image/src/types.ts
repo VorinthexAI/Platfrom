@@ -88,9 +88,8 @@ export type ExportRecord = z.infer<typeof exportRecordSchema>;
 
 export type EngineConfig = {
   rootDir: string;
-  openAiApiKey?: string;
+  openRouterApiKey?: string;
   imageModel: string;
-  textModel: string;
   defaultSize: `${number}x${number}`;
   defaultSolidBackground: string;
   defaultOutputFormat: "png";

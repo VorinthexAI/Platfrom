@@ -1,64 +1,42 @@
-import { captionImageAction } from './caption-image';
-import { askAction } from './ask';
-import { describeVisualIdentityAction } from './describe-visual-identity';
 import { deleteActionDefinition } from './delete';
-import { documentEmbedAction } from './document-embed';
-import { documentExtractAction } from './document-extract';
-import { documentInsertAction } from './document-insert';
-import { documentValidateAction } from './document-validate';
-import { editImageAction } from './edit-image';
-import { editVideoAction } from './edit-video';
 import { embedAction } from './embed';
-import { extendVideoAction } from './extend-video';
-import { generateImageAction } from './generate-image';
-import { generateMusicAction } from './generate-music';
-import { generateSpeechAction } from './generate-speech';
-import { generateVideoAction } from './generate-video';
 import { insertActionDefinition } from './insert';
 import { readAction } from './read';
-import { storageUploadAction } from './storage-upload';
 import { traverseAction } from './traverse';
 import { ACTION_SLUGS, actionIdSchema, isValidActionIdFormat, type ActionDefinition, type ActionId } from './types';
 import { updateActionDefinition } from './update';
 import { upsertAction } from './upsert';
-import { webSearchAction } from './web-search';
+import { textAction } from './text';
+import { imageAction } from './image';
+import { speechAction } from './speech';
+import { webAction } from './web';
+import { fileAction } from './file';
+import { uploadAction } from './upload';
+import { queueAction } from './queue';
 
-export type { ActionDefinition, ActionId, ActionModelBinding, ActionModelPolicy } from './types';
-export { captionImageAction } from './caption-image';
-export { askAction } from './ask';
-export { describeVisualIdentityAction } from './describe-visual-identity';
+export type { ActionDefinition, ActionId, ActionModelBinding, ActionModelPolicy, ActionRouteId, ActionRouteSuffix } from './types';
 export { deleteActionDefinition } from './delete';
-export { documentEmbedAction } from './document-embed';
-export { documentExtractAction } from './document-extract';
-export { documentInsertAction } from './document-insert';
-export { documentValidateAction } from './document-validate';
-export { editImageAction } from './edit-image';
-export { editVideoAction } from './edit-video';
 export { embedAction } from './embed';
-export { extendVideoAction } from './extend-video';
-export { generateImageAction } from './generate-image';
-export { generateMusicAction } from './generate-music';
-export { generateSpeechAction, speechInputSchema, speechOutputSchema, type SpeechInput, type SpeechOutput } from './generate-speech';
-export { generateVideoAction } from './generate-video';
 export { insertActionDefinition } from './insert';
 export { readAction } from './read';
-export { storageUploadAction } from './storage-upload';
 export { traverseAction } from './traverse';
 export { updateActionDefinition } from './update';
 export { upsertAction } from './upsert';
-export { webSearchAction } from './web-search';
-export { ACTION_SLUGS, actionIdSchema, isValidActionIdFormat } from './types';
+export { textAction } from './text';
+export { imageAction } from './image';
+export { speechAction, speechInputSchema, speechOutputSchema, type SpeechInput, type SpeechOutput } from './speech';
+export { webAction, webInputSchema, webOutputSchema, type WebInput, type ParsedWebInput, type WebOutput } from './web';
+export { fileAction, fileInputSchema, fileOutputSchema, MAX_FILE_ACTION_BYTES, MAX_FILE_ACTION_TEXT_CHARACTERS, type FileInput, type FileOutput } from './file';
+export { uploadAction } from './upload';
+export { queueAction, executeQueueAction, type QueueActionInput } from './queue';
+export { ACTION_ROUTE_SUFFIXES, ACTION_SLUGS, actionIdSchema, isValidActionIdFormat } from './types';
 export { createDataActions, traverseInputSchema, traverseNodes, type ActionNode, type TraverseInput } from './data';
 export { coreChatContentSchema, coreChatMessageSchema, coreChatToolDefinitionSchema, coreChatInputSchema, type CoreChatContent, type CoreChatMessage, type CoreChatToolDefinition, type CoreChatInput, type ParsedCoreChatInput } from './core-chat';
-export { webSearchInputSchema, webSearchOutputSchema, type WebSearchInput, type ParsedWebSearchInput, type WebSearchOutput } from './web-search';
 
 /** Stable, provider- and domain-neutral runtime primitives. */
 export const ACTION_DEFINITIONS: readonly ActionDefinition[] = [
-  askAction, embedAction, webSearchAction,
+  textAction, webAction, imageAction, speechAction, embedAction, fileAction, uploadAction, queueAction,
   traverseAction, readAction, insertActionDefinition, upsertAction, updateActionDefinition, deleteActionDefinition,
-  generateImageAction, editImageAction, generateVideoAction, editVideoAction, extendVideoAction,
-  generateMusicAction, generateSpeechAction,
-  documentValidateAction, storageUploadAction, documentExtractAction, documentEmbedAction, documentInsertAction, captionImageAction, describeVisualIdentityAction,
 ];
 export const getActionDefinition = (id: ActionId): ActionDefinition | undefined => ACTION_DEFINITIONS.find((definition) => definition.id === id);
 
@@ -78,5 +56,6 @@ export function assertActionRegistryIntegrity(): void {
   for (const definition of ACTION_DEFINITIONS) {
     if (definition.modelPolicy === 'none' && definition.models.length > 0) throw new Error(`${definition.id} cannot bind models with modelPolicy none`);
     if (definition.modelPolicy === 'required' && definition.models.length === 0) throw new Error(`${definition.id} requires at least one model binding`);
+    if (new Set(definition.models.map(({ slot }) => slot)).size !== definition.models.length) throw new Error(`${definition.id} contains duplicate route slots`);
   }
 }

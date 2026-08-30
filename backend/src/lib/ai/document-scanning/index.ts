@@ -2,7 +2,7 @@ import { imageCaptionTool } from '@/lib/ai/tools/image-caption';
 import { documentKeyForRequest } from '@/lib/ai/document-processing';
 import type { DocumentObjectStorage } from '@/lib/ai/document-processing/storage';
 import { documentStorage } from '@/lib/ai/document-processing/storage';
-import { awsTextractImageOcr, type DocumentImageOcr } from '@/lib/ai/document-processing/textract';
+import { awsFileAction, type FileActionClient } from '@/lib/ai/document-processing/file';
 import { imageDataUrl } from '@/lib/gallery/image-reference';
 import { MAX_DOCUMENT_SCAN_PAGE_BYTES, type DocumentScanInput } from './schemas';
 import sharp from 'sharp';
@@ -12,7 +12,7 @@ const RELIABLE_MINIMUM_CONFIDENCE = 80;
 
 export interface DocumentScanDependencies {
   storage?: DocumentObjectStorage;
-  ocr?: DocumentImageOcr;
+  fileAction?: FileActionClient;
   caption?: typeof imageCaptionTool.execute;
   onPageResults?: (pages: Array<{ textract: string; visual: string; unified: string }>) => void | Promise<void>;
 }
@@ -31,15 +31,15 @@ export function normalizeDocumentTranscription(value: string) {
   return lines.join('\n').replace(textractLineSpacing ? /\n{2,}/g : /\n{3,}/g, textractLineSpacing ? '\n' : '\n\n').trim();
 }
 
-export function isReliableDocumentOcr(result: { extractedText: string; metadata?: Record<string, unknown> }) {
+export function isReliableDocumentOcr(result: { text: string; metadata?: Record<string, unknown> }) {
   const average = Number(result.metadata?.averageConfidence);
   const minimum = Number(result.metadata?.minimumConfidence);
-  return Boolean(result.extractedText.trim()) && Number.isFinite(average) && average >= RELIABLE_AVERAGE_CONFIDENCE && Number.isFinite(minimum) && minimum >= RELIABLE_MINIMUM_CONFIDENCE;
+  return Boolean(result.text.trim()) && Number.isFinite(average) && average >= RELIABLE_AVERAGE_CONFIDENCE && Number.isFinite(minimum) && minimum >= RELIABLE_MINIMUM_CONFIDENCE;
 }
 
 export async function scanDocumentImages(input: DocumentScanInput, organizationKey: string, dependencies: DocumentScanDependencies = {}) {
   const storage = dependencies.storage ?? documentStorage;
-  const ocr = dependencies.ocr ?? awsTextractImageOcr;
+  const fileAction = dependencies.fileAction ?? awsFileAction;
   const caption = dependencies.caption ?? imageCaptionTool.execute;
   const documentKey = documentKeyForRequest(input.scopeKey, input.folderKey, input.idempotencyKey);
   const storageKeys = input.pages.map((_, index) => `content/${organizationKey}/${input.scopeKey}/${documentKey}/scan/page-${String(index + 1).padStart(2, '0')}.png`);
@@ -51,11 +51,11 @@ export async function scanDocumentImages(input: DocumentScanInput, organizationK
       await storage.upload({ key: storageKeys[index]!, bytes, mimeType: 'image/png' });
       uploaded.push(storageKeys[index]!);
     }));
-    const textractResults = await Promise.all(storageKeys.map((key, index) => ocr.extract(key, pages[index]!)));
-    const textractPages = textractResults.map((result) => result.extractedText);
+    const fileResults = await Promise.all(storageKeys.map((storageKey, index) => fileAction.execute({ operation: 'scan', storageKey, mimeType: 'image/png', bytes: pages[index]! }, organizationKey)));
+    const textractPages = fileResults.map((result) => result.text);
     const visualPages = textractPages.map(() => '');
     const unifiedPages = textractPages.map(normalizeDocumentTranscription);
-    await Promise.all(textractResults.map(async (result, index) => {
+    await Promise.all(fileResults.map(async (result, index) => {
       if (isReliableDocumentOcr(result)) return;
       const url = imageDataUrl(pages[index]!, 'image/png');
       try {

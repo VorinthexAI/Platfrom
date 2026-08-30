@@ -20,5 +20,5 @@ export {
   RouteValidationError,
   type RouteAttemptFailure,
 } from './errors';
-export { selectRoute } from './select-route';
+export { selectRoute, selectRoutes } from './select-route';
 export { executeRoute, executeAction, executeAsk, executeWebSearch, streamRoute, type ExecuteRouteOptions, type ExecuteActionOptions, type RouteAttemptTelemetry } from './execute-route';
