@@ -27,6 +27,10 @@ test('migrates before activating backend code and running data changes', async (
   expect(migrationJob).not.toContain('needs.early-deploy.result');
   expect(migrationJob).toContain('- name: Apply graph migrations');
   expect(migrationJob).toContain('run: bun run --cwd backend db:migrate:ci');
+  const seedSecrets = workflow.indexOf('\n  seed-db-secrets:');
+  const seedSecretsJob = workflow.slice(seedSecrets, workflow.indexOf('\n  backend-deploy:', seedSecrets));
+  expect(seedSecretsJob).toContain('OPENROUTER_API_KEY');
+  expect(seedSecretsJob).toContain('seeded roster embeddings cannot run');
   const earlyJob = workflow.slice(early, workflow.indexOf('\n  # LATER REFERENCE ONLY', early));
   expect(earlyJob).toContain('needs: [changes, deploy-web, backend-image, backend-secrets, backend-migrate]');
   expect(earlyJob).toContain("needs.backend-migrate.result == 'success'");
