@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
 import type { ProcessImageInput } from '@/lib/ai/image-processing';
-import { createImageGenerationService, imageGenerateModelInputSchema, imageIdeasInputSchema, parseImageIdeas } from './service';
+import { createImageGenerationService as createProductionImageGenerationService, imageGenerateModelInputSchema, imageIdeasInputSchema, parseImageIdeas } from './service';
 
 const organizationKey = newId(), scopeKey = newId(), membershipKey = newId(), collectionKey = newId();
 const context = {
@@ -17,6 +17,7 @@ const safeAsk = (async () => ({ output: { text: '{"safe":true}', toolCalls: [], 
 const history = { record: async () => ({}), list: async () => [], remove: async () => ({ normalizedPrompt: '', deleted: false }) } as any;
 const claimedLedger = () => ({ claim: async () => ({ status: 'claimed' as const }), start: async () => true, renew: async () => true, complete: async () => {}, fail: async () => {}, release: async () => {} });
 const persistedImage = (key = newId()) => ({ key, scopeKey, filename: 'generated.png', caption: 'Earth', imageCaptionKey: newId(), createdByKey: membershipKey, storageKey: `durable/${key}.png`, mimeType: 'image/png', sizeBytes: 8, width: 1024, height: 1024, embedding: [], origin: 'generated', isFavorite: false, createdAt: '2026-08-19T00:00:00.000Z', updatedAt: '2026-08-19T00:00:00.000Z' }) as any;
+const createImageGenerationService = (dependencies: Parameters<typeof createProductionImageGenerationService>[0] = {}) => createProductionImageGenerationService({ publishGeneratedImages: async () => {}, ...dependencies });
 
 describe('image generation service', () => {
   test('uses strict bounded contracts and an exact distinct fallback', () => {
