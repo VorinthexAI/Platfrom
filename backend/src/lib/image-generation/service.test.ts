@@ -114,7 +114,7 @@ describe('image generation service', () => {
       history, gallery: authorizedGallery, getImage: async () => null, idempotency: claimedLedger(),
       executeAsk: (async () => { throw new Error('text action should not run'); }) as any,
       execute: (async (...args: unknown[]) => { calls.push(args); return { output: { images: [{ base64: png, mimeType: 'image/png' }] }, usage: {}, providerId: 'openrouter', modelId: 'model', externalModelId: 'model' }; }) as any,
-      process: async () => [persistedImage()], signUrl: async () => 'https://images.example/generated.png',
+      process: async () => [persistedImage()], publishGeneratedImages: async () => {}, signUrl: async () => 'https://images.example/generated.png',
     });
     await expect(service.generate({ collectionKey, prompt: 'request', count: 1 }, context, 'direct-image-action')).resolves.toMatchObject({ images: [{ origin: 'generated' }] });
     expect(calls).toHaveLength(1);
