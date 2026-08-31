@@ -26,7 +26,7 @@ function result(scopeKey: string, key = newId()) {
       image: {
       key, scopeKey, filename: 'mountain.jpg', caption: 'Snow-covered mountains beneath a blue sky.',
       storageKey: 'private/mountain.jpg', mimeType: 'image/jpeg', sizeBytes: 100, width: 1_200, height: 800,
-      embedding, imageCaptionKey: null, createdByKey: null, mutationPolicy: 'user' as const, isFavorite: false, createdAt: now, updatedAt: now,
+      embedding, imageCaptionKey: null, createdByKey: null, origin: 'uploaded' as const, mutationPolicy: 'user' as const, isFavorite: false, createdAt: now, updatedAt: now,
     },
     score: 0.92,
   };

@@ -4,15 +4,17 @@ import type { EmbeddingInput, EmbeddingOutput } from '@/lib/ai/providers';
 import { currentEmbeddingSchema, prepareEmbeddingText } from '@/lib/embeddings';
 import { runContentTool, type ContentToolDependencies } from '@/lib/ai/tools/content-runtime';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
-import { galleryOperations, type GalleryOperationContext } from '@/lib/gallery/operations';
+import { galleryOperations, searchGalleryCollections, type GalleryOperationContext } from '@/lib/gallery/operations';
 import { createEmailService, type EmailService } from '@/lib/email-inbox/service';
 import { emailAttachmentRefsSchema } from '@/lib/email-inbox/archive-payloads';
 import { createTravelService, travelTripPlaceDtoSchema, travelTripSchema, type TravelService } from '@/lib/travel/service';
 import { createCountrySearchService, type CountrySearchService } from '@/lib/travel/country-search';
 import { getDefaultUserSearchService, type UserSearchService } from '@/lib/user-searches/service';
+import { defaultBookService } from '@/lib/books/default-service';
+import type { BookService } from '@/lib/books/service';
 
 export const appSearchCollectionSlugSchema = z.enum([
-  'folders', 'documents', 'files', 'images', 'inboxes', 'email-tones', 'email-messages', 'email-drafts', 'places', 'trips', 'countries',
+  'folders', 'documents', 'files', 'collections', 'images', 'inboxes', 'email-tones', 'email-messages', 'email-drafts', 'places', 'trips', 'countries', 'books',
 ]);
 export type AppSearchCollectionSlug = z.infer<typeof appSearchCollectionSlugSchema>;
 
@@ -40,7 +42,11 @@ const documentResultSchema = z.object({ key: z.string(), scopeKey: z.string(), n
 const imageResultSchema = z.object({
   key: z.string(), filename: z.string(), caption: z.string(), imageCaptionKey: z.string().nullable(), mimeType: z.string(), sizeBytes: z.number().int().nonnegative(), width: z.number().int(), height: z.number().int(),
   city: z.string().nullable(), country: z.string().nullable(), countryCode: z.string().nullable(), latitude: z.number().nullable(), longitude: z.number().nullable(), locationSource: z.enum(['exif', 'supplied', 'place']).nullable(),
-  mutationPolicy: z.enum(['user', 'system-only']), isFavorite: z.boolean(), createdByKey: z.string().nullable().optional(), createdAt: z.string().datetime(), updatedAt: z.string().datetime(), url: z.string().url(), score: z.number().optional(),
+  origin: z.enum(['uploaded', 'generated']), mutationPolicy: z.enum(['user', 'system-only']), isFavorite: z.boolean(), createdByKey: z.string().nullable().optional(), createdAt: z.string().datetime(), updatedAt: z.string().datetime(), url: z.string().url(), score: z.number().optional(),
+}).strict();
+const collectionResultSchema = z.object({
+  key: z.string(), name: z.string(), description: z.string().nullable(), purpose: z.enum(['place-media', 'email-media']).nullable(), mutationPolicy: z.enum(['user', 'system-only']), presentation: z.enum(['travel', 'communication', 'learning']).optional(),
+  isFavorite: z.boolean(), count: z.number().int().nonnegative(), coverUrl: z.string().url().nullable(), memberKey: z.string(), isOwned: z.boolean(), role: z.enum(['owner', 'collaborator', 'viewer']), access: z.object({ canRead: z.boolean(), canContribute: z.boolean(), canManage: z.boolean() }).strict(), createdAt: z.string().datetime(), updatedAt: z.string().datetime(), score: z.number(),
 }).strict();
 const inboxResultSchema = z.object({
   key: z.string(), connectorKey: z.string(), provider: z.literal('gmail'), email: z.string().email(), name: z.string(), description: z.string().optional(), coverUrl: z.string().url().optional(), isFavorite: z.boolean(),
@@ -61,11 +67,13 @@ const emailDraftResultSchema = z.discriminatedUnion('variant', [
 const placeResultSchema = travelTripPlaceDtoSchema;
 const tripResultSchema = travelTripSchema;
 const countryResultSchema = z.object({ name: z.string(), countryCode: z.string(), latitude: z.number(), longitude: z.number() }).strict();
+const bookResultSchema = z.object({ key: z.string(), title: z.string(), subtitle: z.string(), description: z.string(), status: z.enum(['queued', 'researching', 'planning', 'writing', 'narrating', 'finalizing', 'failed', 'ready', 'cancelled']), isFavorite: z.boolean(), isExtending: z.boolean(), coverUrl: z.string().url().optional(), narrator: z.object({ key: z.enum(['calm', 'clear', 'warm']), name: z.string(), description: z.string().optional(), previewUrl: z.string().url().optional() }).strict().optional(), estimatedMinutes: z.number().int().nonnegative(), chapterCount: z.number().int().nonnegative(), progressPercent: z.number().min(0).max(100), generationProgressPercent: z.number().min(0).max(100).optional(), failureMessage: z.string().optional(), currentChapterKey: z.string().optional(), score: z.number() }).strict();
 
 export const appSearchGroupSchema = z.discriminatedUnion('collectionSlug', [
   z.object({ collectionSlug: z.literal('folders'), results: z.array(folderResultSchema) }).strict(),
   z.object({ collectionSlug: z.literal('documents'), results: z.array(documentResultSchema) }).strict(),
   z.object({ collectionSlug: z.literal('files'), results: z.array(documentResultSchema) }).strict(),
+  z.object({ collectionSlug: z.literal('collections'), results: z.array(collectionResultSchema) }).strict(),
   z.object({ collectionSlug: z.literal('images'), results: z.array(imageResultSchema) }).strict(),
   z.object({ collectionSlug: z.literal('inboxes'), results: z.array(inboxResultSchema) }).strict(),
   z.object({ collectionSlug: z.literal('email-tones'), results: z.array(toneResultSchema) }).strict(),
@@ -74,6 +82,7 @@ export const appSearchGroupSchema = z.discriminatedUnion('collectionSlug', [
   z.object({ collectionSlug: z.literal('places'), results: z.array(placeResultSchema) }).strict(),
   z.object({ collectionSlug: z.literal('trips'), results: z.array(tripResultSchema) }).strict(),
   z.object({ collectionSlug: z.literal('countries'), results: z.array(countryResultSchema) }).strict(),
+  z.object({ collectionSlug: z.literal('books'), results: z.array(bookResultSchema) }).strict(),
 ]);
 export const appSearchOutputSchema = z.object({ query: z.string(), groups: z.array(appSearchGroupSchema) }).strict();
 export type AppSearchOutput = z.infer<typeof appSearchOutputSchema>;
@@ -87,9 +96,11 @@ export interface AppSearchDependencies extends Pick<ExecuteActionOptions, 'signa
   contentDependencies?: ContentToolDependencies;
   executeContent?: typeof runContentTool;
   gallerySearch?: typeof galleryOperations.search;
+  galleryCollectionSearch?: typeof searchGalleryCollections;
   email?: EmailService;
   travel?: TravelService;
   countries?: CountrySearchService;
+  books?: BookService;
   userSearches?: UserSearchService;
   executeEmbedding?: (organizationKey: string, input: EmbeddingInput, options: Pick<ExecuteActionOptions, 'signal' | 'timeoutMs'>) => Promise<EmbeddingOutput>;
 }
@@ -157,6 +168,11 @@ export function createAppSearchService(defaults: AppSearchDependencies = {}) {
           const output = await (dependencies.gallerySearch ?? galleryOperations.search)({ query: input.query, ...(input.filters?.collectionKey ? { collectionKey: input.filters.collectionKey } : {}), threshold: input.minimumScore, limit: input.limit, recordHistory: false }, galleryContext) as { images: unknown[] };
           return { collectionSlug, results: output.images.map((item) => imageResultSchema.parse(item)) };
         }
+        if (collectionSlug === 'collections') {
+          const galleryContext = { ...trusted.serviceContext, membership: trusted.membership, signal: dependencies.signal, queryEmbedding } as GalleryOperationContext;
+          const output = await (dependencies.galleryCollectionSearch ?? searchGalleryCollections)({ query: input.query, minimumScore: input.minimumScore, limit: input.limit }, galleryContext) as { collections: unknown[] };
+          return { collectionSlug, results: output.collections.map((item) => collectionResultSchema.parse(item)) };
+        }
         if (collectionSlug === 'inboxes') {
           const output = await email.searchInboxes({ ...trusted.serviceContext, userKey: trusted.userKey }, commonSearchInput, { signal: dependencies.signal, timeoutMs: dependencies.timeoutMs, queryEmbedding });
           return { collectionSlug, results: output.inboxes.map(({ initialSyncCompleted: _initialSyncCompleted, ...item }) => inboxResultSchema.parse(item)) };
@@ -182,6 +198,10 @@ export function createAppSearchService(defaults: AppSearchDependencies = {}) {
         if (collectionSlug === 'trips') {
           const output = await travel.searchTrips({ ...trusted.serviceContext, query: input.query, recordHistory: false }, trusted.userKey, { signal: dependencies.signal, timeoutMs: dependencies.timeoutMs, queryEmbedding });
           return { collectionSlug, results: output.trips.slice(0, input.limit).map((item) => tripResultSchema.parse(item)) };
+        }
+        if (collectionSlug === 'books') {
+          const output = await (dependencies.books ?? defaultBookService).search({ ...trusted.serviceContext, query: input.query, minimumScore: input.minimumScore, limit: input.limit }, trusted.userKey, { queryEmbedding });
+          return { collectionSlug, results: output.books.map((item) => bookResultSchema.parse(item)) };
         }
         const output = await countries.search({ organizationKey: context.organizationKey, query: input.query }, trusted.userKey, { signal: dependencies.signal, timeoutMs: dependencies.timeoutMs, queryEmbedding, recordHistory: false, minimumScore: input.minimumScore });
         return { collectionSlug, results: output.country ? [output.country] : [] };

@@ -4,6 +4,15 @@ const source = await Bun.file(new URL("../components/capability/KnowledgeWorkspa
 const searchHistorySheet = await Bun.file(new URL("../components/SearchHistorySheet.tsx", import.meta.url)).text();
 const searchHistoryPill = await Bun.file(new URL("../../../../shared/packages/ui/components/search-history-pill/search-history-pill.mobile.tsx", import.meta.url)).text();
 
+test("uses persisted app presentation metadata for generated folder covers", () => {
+  expect(source).toContain("folder.parentFolderKey ? undefined : folder.presentation");
+  expect(source).toContain("contentPresentationIconSource[presentation]");
+  expect(source).toContain("style={styles.managedFolderLogo}");
+  expect(source).toContain("<FolderCover folder={folder} />");
+  expect(source).toContain('`${folder.name} app folder`');
+  expect(source).not.toMatch(/folder\.name\s*===\s*["'](?:Compass|Signal|Ascend)/);
+});
+
 test("opens routed cached folders without flashing Archive root", () => {
   expect(source).toContain("const cachedTargetFolderKey = cachedInitialDocument?.folderKey ?? initialFolderKey");
   expect(source).toContain("const cachedInitialTree = cachedTargetFolderKey ? queryClient.getQueryData<ContentFolder[]>");
@@ -29,13 +38,82 @@ test("uses the root header spacing rhythm inside folders", () => {
 
 test("keeps root and folder tab-to-content spacing aligned", () => {
   expect(source).toContain("archiveFolder: { flexGrow: 1, gap: spacing.md }");
-  expect(source).toContain("rootContent: { gap: spacing.md }");
+  expect(source).toContain('rootContent: { width: "100%", gap: spacing.md }');
 });
 
-test("locks the Archive viewport only for resolved empty tabs", () => {
-  expect(source).toContain("const archiveEmpty = workspaceMode");
-  expect(source).toContain("scrollEnabled={scrollEnabled}");
-  expect(source).toContain('scrollEnabled={!archiveEmpty}');
+test("keeps empty Archive views scrollable for pull-to-refresh", () => {
+  expect(source).toContain('refreshControl={<PullToRefresh enabled={refreshEnabled}');
+  expect(source).not.toContain("const archiveEmpty = workspaceMode");
+  expect(source).not.toContain('scrollEnabled={!archiveEmpty}');
+});
+
+test("fences pull-to-refresh results to the initiating Archive view", () => {
+  const refresh = source.slice(source.indexOf("const refreshArchive = async"), source.indexOf("useEffect(() => { if (userHiddensQuery.data)", source.indexOf("const refreshArchive = async")));
+  expect(source).toContain("refreshViewKey.current = JSON.stringify([contentContextKey, workspaceMode, currentFolder?.key, folderContentTab, query.trim(), rootSearchQuery.trim(), documentKeyRef.current])");
+  expect(refresh).toContain("const navigationRequest = navigationGeneration.current");
+  expect(refresh).toContain("refreshViewKey.current === viewKey && navigationGeneration.current === navigationRequest");
+  expect(refresh).toContain("if (!isCurrent()) return;");
+  expect(refresh).toContain("refreshContentLocation(queryClient, contentContext, folderKey)");
+  expect(refresh.indexOf("if (!isCurrent()) return;", refresh.indexOf("await Promise.all"))).toBeLessThan(refresh.indexOf("setFolders(location.folders)"));
+  expect(refresh).toContain("if (isCurrent()) setError(");
+});
+
+test("keeps newly created folder cards fully interactive with their canonical optimistic key", () => {
+  const createFlow = source.slice(source.indexOf("const submitFolder"), source.indexOf("const selectRootFolder"));
+  expect(createFlow).toContain("const folderKey = createContentRecordKey()");
+  expect(createFlow).toContain("seedCachedContentFolderLocation(queryClient, contentContext, folderKey)");
+  expect(createFlow).toContain("pendingFolderCreates.current.set(folderKey, creation)");
+  expect(createFlow).toContain("createContentFolder(name, parentFolderKey, optimistic.description, folderKey, mutationKey)");
+  expect(createFlow).not.toContain("temporaryKey");
+  expect(source).toContain("if (pendingFolderCreates.current.has(folder.key))");
+  expect(source).not.toContain('disabled={folder.key.startsWith("optimistic-")}');
+  expect(source).not.toContain("styles.optimisticCard");
+});
+
+test("lets document AI actions flush autosave and reports empty content without disabled-menu loading", () => {
+  const request = source.slice(source.indexOf("const requestDocumentAiAction"), source.indexOf("const generateDocumentTransformation"));
+  const menu = source.slice(source.indexOf('{activeSheet === "enhance"'), source.indexOf('{activeSheet === "transform"'));
+  expect(request).toContain('notify("Enter some text before using an AI action.")');
+  expect(request).toContain("await flushDocumentSave()");
+  expect(request.indexOf("await flushDocumentSave()")).toBeLessThan(request.indexOf("openSummarizeSheet()"));
+  expect(menu).toContain('requestDocumentAiAction("summarize")');
+  expect(menu).toContain('requestDocumentAiAction("enhance")');
+  expect(menu).toContain('requestDocumentAiAction("translate")');
+  expect(menu).not.toContain("saveState");
+  expect(menu).not.toContain("loading=");
+  expect(source).toContain('accessibilityLabel="AI document actions" contentMode="raw" onPress={openEnhanceSheet}');
+  expect(source).toContain('leadingDisabled={!hasContentContext || instructing}');
+  expect(source).toContain('accessibilityLabel="Finish editing document"');
+  expect(source).not.toContain('accessibilityLabel="Save and lock document"');
+  expect(source).toContain("selectedDocumentKeyRef.current = undefined");
+  expect(source).toContain("setSelectedDocument(undefined)");
+});
+
+test("centers settled empty Archive searches without changing ordinary empty states", () => {
+  expect(source).toContain("rootSearchEmpty && styles.searchRootContent");
+  expect(source).toContain("rootSearchFolders.length === 0 && styles.searchEmptyContent");
+  expect(source).toContain("rootSearchDocuments.length === 0 && styles.searchEmptyContent");
+  expect(source).toContain("folderSearchFolders.length === 0 && styles.searchEmptyContent");
+  expect(source).toContain("folderSearchDocuments.length === 0 && styles.searchEmptyContent");
+  expect(source).toContain('searchEmptyContent: { flexGrow: 1, width: "100%", flexDirection: "column", alignContent: "center", alignItems: "center", justifyContent: "center" }');
+  expect(source).toContain('filteredRootFolders.length === 0 && !archiveLocationLoading && styles.emptyTabContent');
+  expect(source).toContain('filteredFolders.length === 0 && !archiveLocationLoading && styles.emptyTabContent');
+  expect(source).toContain('emptyTabContent: { flexDirection: "column", flexWrap: "nowrap", alignContent: "stretch" }');
+  expect(source).toContain('folderEmptyState: { flexGrow: 1, minHeight: 360, width: "100%", alignItems: "center", justifyContent: "center"');
+  expect(source).toContain('<View style={styles.folderEmptyState}>');
+});
+
+test("keeps scanned originals complete and ignores stale source-page requests", () => {
+  expect(source).toContain('<Image contentFit="contain" source={source.url} style={styles.sourceImage} />');
+  expect(source).toContain("const sourceImagesGeneration = useRef(0)");
+  expect(source).toContain('activeSheetRef.current === "scanSources"');
+  expect(source).toContain("generation === sourceImagesGeneration.current && selectedDocumentKeyRef.current === document.key");
+});
+
+test("uses explicit original availability rather than file extension for original actions", () => {
+  expect(source).toContain("document.originalAvailable ? \"original\" : \"txt\"");
+  expect(source).toContain("selectedDocument.extension && selectedDocument.originalAvailable");
+  expect(source).toContain('selectedDocument.originalAvailable ? "Download original" : "Download text"');
 });
 
 test("uses folder cards while root and nested folder searches load", () => {

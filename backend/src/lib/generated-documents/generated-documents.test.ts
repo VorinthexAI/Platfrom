@@ -17,8 +17,8 @@ describe('generated Archive documents', () => {
     expect(first).toEqual({ rootKey: expect.stringMatching(/^c[a-f0-9]{24}$/), ...generatedDocumentFolderKeys(scopeKey) });
     expect(calls).toHaveLength(12);
     expect(calls.map(({ bindVars }) => bindVars?.name).slice(0, 6)).toEqual(['Compass', 'Guides', 'Briefs', 'Accommodations', 'Restaurants', 'Activities']);
-    expect(calls.every(({ query }) => query.includes('UPSERT { _key: @key }') && query.includes('UPDATE {} IN folders'))).toBe(true);
-    expect(calls.every(({ query }) => query.includes('@parentFolderKey == null ? {} : { parentFolderKey: @parentFolderKey }'))).toBe(true);
+    expect(calls.every(({ query }) => query.includes('UPSERT { _key: @key }') && query.includes('@parentFolderKey == null ? { presentation: "travel" } : { parentFolderKey: @parentFolderKey }'))).toBe(true);
+    expect(calls.every(({ query }) => query.includes('UPDATE @parentFolderKey == null ? { presentation: "travel" } : { presentation: null } IN folders OPTIONS { keepNull: false }'))).toBe(true);
     expect(calls.every(({ query, bindVars }) => !query.includes('purpose') && !query.includes('managedPurpose') && !query.includes('mutationPolicy') && !Object.prototype.hasOwnProperty.call(bindVars ?? {}, 'purpose'))).toBe(true);
     expect(calls.every(({ bindVars }) => !Object.prototype.hasOwnProperty.call(bindVars ?? {}, 'legacyFields'))).toBe(true);
   });

@@ -4,7 +4,7 @@ import type { Book, BookChapter, BookDetail } from "./books-client";
 import { contentQueryKeys } from "./content-query-cache";
 import { normalizeEmailOverviewQuery, type EmailConnector, type EmailDraft, type EmailFacet, type EmailFilter, type EmailOverview, type EmailOverviewQuery, type EmailReplyContext, type EmailSummary, type EmailThread, type EmailToneRecord, type EmailTranslationVersion } from "./email-client";
 import { normalizeCollection } from "./collection-access";
-import type { GalleryCollection, GalleryCollectionInvite, GalleryCollectionMember, GalleryCollectionShareLink, GalleryImage, GalleryOverview } from "./gallery-client";
+import type { GalleryCollection, GalleryCollectionInvite, GalleryCollectionMember, GalleryCollectionShareLink, GalleryImage, GalleryImageOrigin, GalleryOverview } from "./gallery-client";
 import type { Place, RecentPlace, Trip } from "./travel-client";
 import type { UserHiddenRecord } from "./user-hidden-client";
 import { compassQueryKeys, type WorkspaceContext } from "./compass-query-keys";
@@ -50,7 +50,9 @@ export const galleryQueryKeys = {
   collections: (context: WorkspaceContext) => [...galleryQueryKeys.all(context), "collections"] as const,
   userHiddens: (context: WorkspaceContext) => [...galleryQueryKeys.all(context), "user-hiddens"] as const,
   overviews: (context: WorkspaceContext) => [...galleryQueryKeys.all(context), "overviews"] as const,
-  overview: (context: WorkspaceContext, collectionKey?: string) => [...galleryQueryKeys.overviews(context), collectionKey ?? null] as const,
+  overview: (context: WorkspaceContext, collectionKey?: string, origin?: GalleryImageOrigin) => origin
+    ? [...galleryQueryKeys.overviews(context), collectionKey ?? null, origin] as const
+    : [...galleryQueryKeys.overviews(context), collectionKey ?? null] as const,
   image: (context: WorkspaceContext, collectionKey: string | undefined, imageKey: string) => [...galleryQueryKeys.all(context), "image", collectionKey ?? null, imageKey] as const,
   members: (context: WorkspaceContext, collectionKey: string) => [...galleryQueryKeys.all(context), "sharing", collectionKey, "members"] as const,
   invites: (context: WorkspaceContext, collectionKey: string) => [...galleryQueryKeys.all(context), "sharing", collectionKey, "invites"] as const,
@@ -214,6 +216,8 @@ export const ascendQueryKeys = {
   all: (context: WorkspaceContext) => ["ascend", ...contextKey(context)] as const,
   overview: (context: WorkspaceContext) => [...ascendQueryKeys.all(context), "overview"] as const,
   pending: (context: WorkspaceContext) => [...ascendQueryKeys.all(context), "pending"] as const,
+  searches: (context: WorkspaceContext) => [...ascendQueryKeys.all(context), "searches"] as const,
+  search: (context: WorkspaceContext, query: string) => [...ascendQueryKeys.searches(context), query.trim().toLocaleLowerCase()] as const,
   details: (context: WorkspaceContext) => [...ascendQueryKeys.all(context), "details"] as const,
   detail: (context: WorkspaceContext, bookKey: string) => [...ascendQueryKeys.details(context), bookKey] as const,
 };
@@ -252,6 +256,14 @@ export function restoreGalleryOverviews(queryClient: QueryClient, snapshot: Gall
   for (const [queryKey, overview] of snapshot) queryClient.setQueryData(queryKey, overview);
 }
 
+function parseGalleryOverviewQueryKey(queryKey: QueryKey) {
+  const collectionKey = queryKey[4];
+  if (typeof collectionKey !== "string" && collectionKey !== null) return undefined;
+  if (queryKey.length === 5) return { collectionKey, origin: undefined };
+  const origin = queryKey[5];
+  return queryKey.length === 6 && (origin === "uploaded" || origin === "generated") ? { collectionKey, origin } : undefined;
+}
+
 export function transferCachedGalleryImages(queryClient: QueryClient, context: WorkspaceContext, input: {
   sourceCollectionKey: string;
   destinationCollectionKeys: string[];
@@ -261,19 +273,23 @@ export function transferCachedGalleryImages(queryClient: QueryClient, context: W
   const imageKeys = new Set(input.images.map(({ key }) => key));
   const destinationKeys = new Set(input.destinationCollectionKeys);
   const snapshots = snapshotGalleryOverviews(queryClient, context);
-  const destinationAdditions = new Map(input.destinationCollectionKeys.map((key) => [key, input.images.length]));
+  const destinationMemberships = new Map<string, Set<string>>();
   for (const [queryKey, overview] of snapshots) {
-    const location = queryKey.at(-1);
-    if (!overview || typeof location !== "string" || !destinationKeys.has(location)) continue;
-    destinationAdditions.set(location, input.images.filter(({ key }) => !overview.images.some((image) => image.key === key)).length);
+    const parsed = parseGalleryOverviewQueryKey(queryKey);
+    if (!overview || !parsed || typeof parsed.collectionKey !== "string" || !destinationKeys.has(parsed.collectionKey)) continue;
+    const membership = destinationMemberships.get(parsed.collectionKey) ?? new Set<string>();
+    for (const image of overview.images) membership.add(image.key);
+    destinationMemberships.set(parsed.collectionKey, membership);
   }
+  const destinationAdditions = new Map([...destinationKeys].map((key) => [key, input.images.filter(({ key: imageKey }) => !destinationMemberships.get(key)?.has(imageKey)).length]));
   for (const [queryKey, overview] of snapshots) {
     if (!overview) continue;
-    const location = queryKey.at(-1);
-    const removeFromLocation = input.mode === "move" && location === input.sourceCollectionKey;
-    const addToLocation = typeof location === "string" && destinationKeys.has(location);
+    const parsed = parseGalleryOverviewQueryKey(queryKey);
+    if (!parsed) continue;
+    const removeFromLocation = input.mode === "move" && parsed.collectionKey === input.sourceCollectionKey;
+    const addToLocation = typeof parsed.collectionKey === "string" && destinationKeys.has(parsed.collectionKey);
     const existingKeys = new Set(overview.images.map(({ key }) => key));
-    const added = input.images.filter(({ key }) => !existingKeys.has(key));
+    const added = input.images.filter((image) => !existingKeys.has(image.key) && (!parsed.origin || image.origin === parsed.origin));
     const images = removeFromLocation
       ? overview.images.filter(({ key }) => !imageKeys.has(key))
       : addToLocation ? [...added, ...overview.images] : overview.images;
@@ -284,12 +300,16 @@ export function transferCachedGalleryImages(queryClient: QueryClient, context: W
     });
     queryClient.setQueryData(queryKey, { ...overview, collections, images });
   }
-  const root = snapshots.find(([queryKey]) => queryKey.at(-1) === null)?.[1];
+  const rootQueryKey = snapshots.find(([queryKey]) => {
+    const parsed = parseGalleryOverviewQueryKey(queryKey);
+    return parsed?.collectionKey === null && !parsed.origin;
+  })?.[0];
+  const root = rootQueryKey ? queryClient.getQueryData<GalleryOverview>(rootQueryKey) : undefined;
   if (!root) return;
-  for (const collectionKey of input.destinationCollectionKeys) {
+  for (const collectionKey of destinationKeys) {
     const queryKey = galleryQueryKeys.overview(context, collectionKey);
     if (queryClient.getQueryData(queryKey)) continue;
-    queryClient.setQueryData<GalleryOverview>(queryKey, { collections: root.collections.map((collection) => collection.key === collectionKey ? { ...collection, count: collection.count + input.images.length, coverUrl: collection.coverUrl ?? input.images[0]?.url ?? null } : collection), images: input.images, nextCursor: null, canCreateCollections: root.canCreateCollections });
+    queryClient.setQueryData<GalleryOverview>(queryKey, { collections: root.collections, images: input.images, nextCursor: null, canCreateCollections: root.canCreateCollections });
   }
 }
 
@@ -298,11 +318,15 @@ export function removeCachedGalleryImages(queryClient: QueryClient, context: Wor
   const removedUrls = new Set(images.map(({ url }) => url));
   const membershipCounts = new Map<string, number>();
   const snapshots = snapshotGalleryOverviews(queryClient, context);
+  const memberships = new Map<string, Set<string>>();
   for (const [queryKey, overview] of snapshots) {
-    const collectionKey = queryKey.at(-1);
+    const collectionKey = parseGalleryOverviewQueryKey(queryKey)?.collectionKey;
     if (!overview || typeof collectionKey !== "string") continue;
-    membershipCounts.set(collectionKey, overview.images.filter(({ key }) => removed.has(key)).length);
+    const membership = memberships.get(collectionKey) ?? new Set<string>();
+    for (const { key } of overview.images) if (removed.has(key)) membership.add(key);
+    memberships.set(collectionKey, membership);
   }
+  for (const [collectionKey, membership] of memberships) membershipCounts.set(collectionKey, membership.size);
   for (const [queryKey, overview] of snapshots) {
     if (!overview) continue;
     queryClient.setQueryData(queryKey, {
@@ -669,6 +693,7 @@ export function patchCachedBook(queryClient: QueryClient, context: WorkspaceCont
   queryClient.setQueryData<{ books: Book[] }>(ascendQueryKeys.overview(context), (overview) => overview ? {
     books: overview.books.map((candidate) => candidate.key === book.key ? book : candidate),
   } : overview);
+  queryClient.setQueriesData<Book[]>({ queryKey: ascendQueryKeys.searches(context) }, (books) => books?.map((candidate) => candidate.key === book.key ? book : candidate));
 }
 
 export function patchCachedBookMetadata(queryClient: QueryClient, context: WorkspaceContext, book: Book) {
@@ -683,6 +708,7 @@ export function removeCachedBook(queryClient: QueryClient, context: WorkspaceCon
   queryClient.setQueryData<{ books: Book[] }>(ascendQueryKeys.overview(context), (overview) => overview ? {
     books: overview.books.filter(({ key }) => key !== bookKey),
   } : overview);
+  queryClient.setQueriesData<Book[]>({ queryKey: ascendQueryKeys.searches(context) }, (books) => books?.filter(({ key }) => key !== bookKey));
   queryClient.removeQueries({ queryKey: ascendQueryKeys.detail(context, bookKey), exact: true });
 }
 

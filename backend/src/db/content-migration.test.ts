@@ -20,6 +20,7 @@ describe('Content share migration staging', () => {
   test('creates global search history and a separate contextual replay cache', async () => {
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
     expect(source).toContain("name: 'userSearches'");
+    expect(source).toContain("name: 'userGenerations'");
     expect(source).toContain("fields: ['userKey', 'normalizedQuery'], unique: true");
     expect(source).toContain("name: 'contentSearchQueries'");
     expect(source).toContain("fields: ['actorKey', 'scopeKey', 'normalizedQuery', 'folderKey', 'includeDescendants'], unique: true");

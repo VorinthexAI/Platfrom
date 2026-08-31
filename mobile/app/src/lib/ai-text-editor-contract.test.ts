@@ -7,7 +7,7 @@ const ascend = await Bun.file(new URL("../components/capability/AscendWorkspace.
 test("uses one non-overlapping AI editor control across Signal and Ascend", () => {
   expect(signal.match(/<AiTextEditor accessibilityLabel=/g)).toHaveLength(4);
   expect(ascend.match(/<AiTextEditor accessibilityLabel=/g)).toHaveLength(3);
-  expect(editor).toContain("<View style={styles.actions}><Button");
+  expect(editor).toContain("<View style={styles.actions}>{onOpenHistory ? <Button");
   expect(editor).toContain("Keyboard.dismiss(); onOpenActions();");
   expect(editor).toContain("style={[styles.input, style]}");
   expect(editor).toContain('root: { width: "100%", height: 280');

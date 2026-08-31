@@ -11,16 +11,15 @@ import { EMAIL_ATTACHMENTS_COLLECTION, emailAttachmentSchema, type EmailAttachme
 import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
 import { discoverGmailAttachmentParts, GmailPermanentAttachmentError, gmailAttachmentParts, messageBodies, type GmailAttachmentPart, type GmailClient, type GmailMessageResource } from './gmail';
 import type { EmailAttachmentRef } from './archive-payloads';
+import { emailExportContainerKeys } from './export-container-keys';
+
+export { emailArchiveInboxFolderKey, emailArchiveRootFolderKey, emailMediaCollectionKey } from './export-container-keys';
 
 const PROCESSING_LEASE_MS = 30 * 60_000;
 const PROCESSING_HEARTBEAT_MS = 5 * 60_000;
 const zeroEmbedding = () => Array(EMBEDDING_DIMENSIONS).fill(0);
 const stableKey = (kind: string, ...values: string[]) => `c${createHash('sha256').update([kind, ...values].join('\0')).digest('hex').slice(0, 24)}`;
 const safeSegment = (value: string) => value.replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 120) || 'attachment';
-export const emailMediaCollectionKey = (scopeKey: string) => stableKey('email-gallery-export-collection', scopeKey);
-export const emailArchiveRootFolderKey = (scopeKey: string) => stableKey('email-archive-export-root', scopeKey);
-export const emailArchiveInboxFolderKey = (scopeKey: string, connectorKey: string) => stableKey('email-archive-export-inbox', scopeKey, connectorKey);
-
 export class EmailAttachmentIngestionError extends Error {
   constructor(readonly code: 'ATTACHMENT_CONFLICT' | 'ATTACHMENT_BUSY' | 'ATTACHMENT_ACCESS_REVOKED' | 'ATTACHMENT_PERSIST_FAILED', message: string, readonly retryable: boolean) { super(message); }
 }
@@ -73,8 +72,9 @@ export interface EmailAttachmentIngestionDependencies {
 }
 
 async function ensureExportContainers(database: Pick<typeof db, 'query'>, scopeKey: string, connectorKey: string, membershipKey: string, now: string) {
-  const rootKey = emailArchiveRootFolderKey(scopeKey), inboxKey = emailArchiveInboxFolderKey(scopeKey, connectorKey), collectionKey = emailMediaCollectionKey(scopeKey), embedding = zeroEmbedding();
-  await database.query(`LET inboxName = FIRST(FOR inbox IN emailInboxes FILTER inbox.scopeKey == @scopeKey && inbox.connectorKey == @connectorKey LIMIT 1 RETURN inbox.name) FILTER inboxName != null UPSERT { _key: @rootKey } INSERT { _key: @rootKey, scopeKey: @scopeKey, name: "Signal", mutationPolicy: "user", embedding: @embedding, isFavorite: false, createdAt: @now, updatedAt: @now } UPDATE {} IN folders UPSERT { _key: @inboxKey } INSERT { _key: @inboxKey, scopeKey: @scopeKey, parentFolderKey: @rootKey, name: inboxName, mutationPolicy: "user", embedding: @embedding, isFavorite: false, createdAt: @now, updatedAt: @now } UPDATE {} IN folders UPSERT { _key: @collectionKey } INSERT { _key: @collectionKey, scopeKey: @scopeKey, name: "Signal", mutationPolicy: "user", embedding: @embedding, isFavorite: false, createdAt: @now, updatedAt: @now } UPDATE {} IN collections UPSERT { scopeKey: @scopeKey, collectionKey: @collectionKey, memberKey: @membershipKey } INSERT { _key: @memberKey, scopeKey: @scopeKey, collectionKey: @collectionKey, memberKey: @membershipKey, role: "owner", createdAt: @now, updatedAt: @now } UPDATE {} IN collectionMembers`, { rootKey, inboxKey, collectionKey, memberKey: stableKey('email-gallery-export-member', scopeKey, membershipKey), membershipKey, scopeKey, connectorKey, embedding, now });
+  const { rootKey, inboxKey, collectionKey } = emailExportContainerKeys(scopeKey, connectorKey);
+  const embedding = zeroEmbedding();
+  await database.query(`LET inboxName = FIRST(FOR inbox IN emailInboxes FILTER inbox.scopeKey == @scopeKey && inbox.connectorKey == @connectorKey LIMIT 1 RETURN inbox.name) FILTER inboxName != null UPSERT { _key: @rootKey } INSERT { _key: @rootKey, scopeKey: @scopeKey, name: "Signal", presentation: "communication", mutationPolicy: "user", embedding: @embedding, isFavorite: false, createdAt: @now, updatedAt: @now } UPDATE { presentation: "communication" } IN folders UPSERT { _key: @inboxKey } INSERT { _key: @inboxKey, scopeKey: @scopeKey, parentFolderKey: @rootKey, name: inboxName, mutationPolicy: "user", embedding: @embedding, isFavorite: false, createdAt: @now, updatedAt: @now } UPDATE { presentation: null } IN folders OPTIONS { keepNull: false } UPSERT { _key: @collectionKey } INSERT { _key: @collectionKey, scopeKey: @scopeKey, name: "Signal", presentation: "communication", mutationPolicy: "user", embedding: @embedding, isFavorite: false, createdAt: @now, updatedAt: @now } UPDATE { presentation: "communication" } IN collections UPSERT { scopeKey: @scopeKey, collectionKey: @collectionKey, memberKey: @membershipKey } INSERT { _key: @memberKey, scopeKey: @scopeKey, collectionKey: @collectionKey, memberKey: @membershipKey, role: "owner", createdAt: @now, updatedAt: @now } UPDATE {} IN collectionMembers`, { rootKey, inboxKey, collectionKey, memberKey: stableKey('email-gallery-export-member', scopeKey, membershipKey), membershipKey, scopeKey, connectorKey, embedding, now });
   return { inboxKey, collectionKey };
 }
 
@@ -92,7 +92,7 @@ export function createEmailAttachmentIngestionService(dependencies: EmailAttachm
       } else {
         const sanitized = await (dependencies.sanitizeImage ?? sanitizeGalleryImage)(input.bytes);
         const exportKey = stableKey('email-gallery-export', input.bindingKey);
-        await (dependencies.processImage ?? processImage)({ scopeKey: input.scopeKey, ownerKey: input.membershipKey, imageKey: exportKey, idempotencyKey: `export:${input.bindingKey}`, file: { filename: `${safeSegment(input.part.filename.replace(/\.[^.]+$/, ''))}.png`, mimeType: 'image/png', sizeBytes: sanitized.bytes.byteLength, bytes: sanitized.bytes }, mutationPolicy: 'user' }, { ...dependencies.imageDependencies, persistImage: async ({ image, caption }) => {
+        await (dependencies.processImage ?? processImage)({ scopeKey: input.scopeKey, ownerKey: input.membershipKey, origin: 'uploaded', imageKey: exportKey, idempotencyKey: `export:${input.bindingKey}`, file: { filename: `${safeSegment(input.part.filename.replace(/\.[^.]+$/, ''))}.png`, mimeType: 'image/png', sizeBytes: sanitized.bytes.byteLength, bytes: sanitized.bytes }, mutationPolicy: 'user' }, { ...dependencies.imageDependencies, persistImage: async ({ image, caption }) => {
           const bindVars = { imageKey: exportKey, image: toArangoDoc(imageSchema.parse({ ...image, key: exportKey, mutationPolicy: 'user' })), scopeKey: input.scopeKey, collectionKey: containers.collectionKey, relationKey: stableKey('email-gallery-export-relation', input.bindingKey), membershipKey: input.membershipKey, now: now().toISOString() };
           const cursor = caption
             ? await exportDatabase.query('UPSERT { _key: @captionKey } INSERT @caption UPDATE {} IN imageCaptions LET stored = FIRST(UPSERT { _key: @imageKey } INSERT @image UPDATE {} IN images RETURN NEW) UPSERT { scopeKey: @scopeKey, collectionKey: @collectionKey, imageKey: @imageKey } INSERT { _key: @relationKey, scopeKey: @scopeKey, collectionKey: @collectionKey, imageKey: @imageKey, addedByKey: @membershipKey, createdAt: @now } UPDATE {} IN collectionImages RETURN stored', { ...bindVars, captionKey: caption.key, caption: toArangoDoc(caption) })

@@ -1,7 +1,7 @@
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import { BottomSheet, BottomSheetItem } from "@vorinthex/shared/ui/bottom-sheet";
+import { BottomSheet, BottomSheetItem, BottomSheetMenu } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
 import { ChevronLeftIcon, ChevronRightIcon } from "@vorinthex/shared/ui/icons-mobile";
 
@@ -40,7 +40,7 @@ export function WorkspaceAppSwitcher({ active, backSize = "xs", onBeforeSelect, 
           </View>
         </Button>}
       <BottomSheet open={open} onOpenChange={setOpen} title="Switch app" description="Choose a workspace.">
-        {AVAILABLE_APPS.map((app) => (
+        <BottomSheetMenu>{AVAILABLE_APPS.map((app) => (
           <BottomSheetItem
             accessibilityState={{ selected: app.slug === active }}
             key={app.slug}
@@ -52,7 +52,7 @@ export function WorkspaceAppSwitcher({ active, backSize = "xs", onBeforeSelect, 
           >
             {app.name}
           </BottomSheetItem>
-        ))}
+        ))}</BottomSheetMenu>
       </BottomSheet>
     </>
   );

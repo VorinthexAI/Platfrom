@@ -8,6 +8,7 @@ import { currentEmbeddingSchema } from '@/lib/embeddings';
 import { findReusableImageCaption, imageCaptionRecordSchema, type ImageCaptionRecord } from './image-captions.node';
 
 export const IMAGES_COLLECTION = 'images';
+export const imageOriginSchema = z.enum(['uploaded', 'generated']);
 export const imageSchema = z.object({
   key: z.string().cuid(), scopeKey: z.string().cuid(), filename: z.string().trim().min(1), caption: z.string().trim().min(1),
   storageKey: z.string().trim().min(1), mimeType: z.string().trim().min(1), sizeBytes: z.number().int().positive(),
@@ -16,7 +17,7 @@ export const imageSchema = z.object({
   city: z.string().trim().min(1).max(200).nullable().optional(), country: z.string().trim().min(1).max(200).nullable().optional(), countryCode: z.string().trim().length(2).toUpperCase().nullable().optional(),
   placeName: z.string().trim().min(1).nullable().optional(), placeSummary: z.string().trim().min(1).nullable().optional(),
   latitude: z.number().finite().min(-90).max(90).nullable().optional(), longitude: z.number().finite().min(-180).max(180).nullable().optional(),
-  locationSource: z.enum(['exif', 'supplied', 'place']).nullable().optional(), mutationPolicy: mutationPolicySchema.default('user'),
+  locationSource: z.enum(['exif', 'supplied', 'place']).nullable().optional(), origin: imageOriginSchema, mutationPolicy: mutationPolicySchema.default('user'),
   isFavorite: z.boolean().default(false), createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
 });
 export type Image = z.infer<typeof imageSchema>;

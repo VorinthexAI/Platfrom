@@ -20,6 +20,7 @@ mock.module("./api-client", () => ({
 mock.module("expo-crypto", () => ({
   CryptoDigestAlgorithm: { SHA256: "SHA-256" },
   digestStringAsync: async (_algorithm: string, value: string) => { digestInputs.push(value); return "upload-digest"; },
+  randomUUID: () => "12345678-1234-4123-8123-123456789abc",
 }));
 
 testRuntime.__archiveApiPost = async (url: string, body: Record<string, any>, config: Record<string, any>) => {
@@ -154,7 +155,7 @@ test("updates and clears persisted document audio playback state", async () => {
 test("sends document and folder mutations with the authenticated Archive context", async () => {
   await createContentDocument("Plan", "Initial plan", "parent", "create-key");
   await saveContentDocument("document", "Updated plan", "2026-08-10T00:00:00.000Z");
-  await createContentFolder("Work", "parent", "Active projects");
+  await createContentFolder("Work", "parent", "Active projects", "cfolder123", "folder-create:cfolder123");
 
   expect(calls.map(({ url }) => url)).toEqual([
     "/api/v1/content/tools/document.create",
@@ -171,7 +172,8 @@ test("sends document and folder mutations with the authenticated Archive context
   });
   expect(calls[1]?.body.input.updates[0]).toMatchObject({ documentKey: "document", content: "Updated plan", expectedUpdatedAt: "2026-08-10T00:00:00.000Z" });
   expect(calls[1]?.body.input.updates[0].createVersion).toBe(false);
-  expect(calls[2]?.body.input.folders[0]).toEqual({ scopeKey: "scope-authenticated", parentFolderKey: "parent", name: "Work", description: "Active projects" });
+  expect(calls[2]?.body.input.folders[0]).toEqual({ key: "cfolder123", scopeKey: "scope-authenticated", parentFolderKey: "parent", name: "Work", description: "Active projects" });
+  expect(calls[2]?.body.input.idempotencyKey).toBe("folder-create:cfolder123");
 });
 
 test("uploads documents through the authenticated Archive context", async () => {
@@ -525,7 +527,7 @@ test("scopes fast semantic search to a folder and its descendants", async () => 
   });
 });
 
-test("loads an existing My Documents folder as the initial Archive location", async () => {
+test("keeps Archive at the root regardless of folder names", async () => {
   responseForTool = (tool) => {
     if (tool === "folder.list") {
       return { data: { success: true, data: { folders: [
@@ -538,22 +540,10 @@ test("loads an existing My Documents folder as the initial Archive location", as
 
   const initial = await loadInitialContentLocation();
 
-  expect(initial.initialFolder).toEqual({ key: "my-documents", name: "My Documents" });
-  expect(initial.root.folders).toEqual([{ key: "my-documents", name: "My Documents" }]);
-  expect(initial.location.folders).toEqual([{ key: "nested", parentFolderKey: "my-documents", name: "Projects" }]);
-  expect(calls.filter(({ url }) => url.endsWith("folder.list")).map(({ body }) => body.input.includeDescendants)).toEqual([true]);
-});
-
-test("keeps legacy accounts at the root when My Documents is absent", async () => {
-  responseForTool = (tool) => tool === "folder.list"
-    ? { data: { success: true, data: { folders: [{ key: "legacy", name: "Legacy" }] } } }
-    : { data: { success: true, data: { documents: [{ key: "root-note", name: "Root note", isFavorite: false, updatedAt: "2026-08-10T00:00:00.000Z" }] } } };
-
-  const initial = await loadInitialContentLocation();
-
   expect(initial.initialFolder).toBeUndefined();
+  expect(initial.root.folders).toEqual([{ key: "my-documents", name: "My Documents" }]);
   expect(initial.location).toBe(initial.root);
-  expect(calls.filter(({ url }) => url.endsWith("folder.list"))).toHaveLength(1);
+  expect(calls.filter(({ url }) => url.endsWith("folder.list")).map(({ body }) => body.input.includeDescendants)).toEqual([true]);
   expect(calls.filter(({ url }) => url.endsWith("document.list"))).toHaveLength(1);
 });
 

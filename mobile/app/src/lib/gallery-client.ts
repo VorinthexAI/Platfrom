@@ -1,10 +1,12 @@
 import { z } from "zod";
+import { File } from "expo-file-system";
 
 import { apiClient } from "@/lib/api-client";
 import { appSearchResults, searchApp } from "@/lib/app-search-client";
 import type { AssistantChange } from "@/lib/assistant-changes";
 import { normalizeCollection, type CollectionRole } from "@/lib/collection-access";
 import { useAuthStore } from "@/state/auth";
+import type { ContentPresentation } from "@/data/capability-icons";
 
 export type GalleryCollection = {
   key: string;
@@ -15,12 +17,14 @@ export type GalleryCollection = {
   isFavorite: boolean;
   count: number;
   coverUrl: string | null;
+  presentation?: ContentPresentation;
   memberKey: string;
   isOwned?: boolean;
   role: GalleryCollectionRole;
   access: { canRead: boolean; canContribute: boolean; canManage: boolean };
   createdAt: string;
   updatedAt: string;
+  score?: number;
 };
 
 export type GalleryCollectionRole = CollectionRole;
@@ -72,6 +76,7 @@ export type GalleryImage = {
   latitude: number | null;
   longitude: number | null;
   locationSource: "exif" | "supplied" | "place" | null;
+  origin: GalleryImageOrigin;
   mutationPolicy: "user" | "system-only";
   isFavorite: boolean;
   createdAt: string;
@@ -79,6 +84,23 @@ export type GalleryImage = {
   url: string;
   score?: number;
   createdByKey?: string | null;
+};
+
+export type GalleryImageOrigin = "uploaded" | "generated";
+
+export const MAX_GALLERY_GENERATION_REFERENCES = 8;
+export type GalleryGenerationHistoryItem = {
+  prompt: string;
+  normalizedPrompt: string;
+  usageCount: number;
+  generatedAt: string;
+  type: "image";
+};
+export type GalleryGenerationInput = {
+  collectionKey: string;
+  prompt: string;
+  count: 1 | 2 | 3;
+  referenceImageKeys: string[];
 };
 
 export type GalleryOverview = {
@@ -92,17 +114,23 @@ const galleryCollectionRoleSchema = z.enum(["owner", "collaborator", "viewer"]);
 const galleryCollectionAccessSchema = z.strictObject({ canRead: z.boolean(), canContribute: z.boolean(), canManage: z.boolean() });
 export const galleryCollectionSchema = z.strictObject({
   key: z.string().min(1), name: z.string().min(1), description: z.string().nullable(), purpose: z.enum(["place-media", "email-media"]).nullable(), mutationPolicy: z.enum(["user", "system-only"]),
-  isFavorite: z.boolean(), count: z.number().int().nonnegative(), coverUrl: z.string().min(1).nullable(), memberKey: z.string().min(1), isOwned: z.boolean().optional(),
-  role: galleryCollectionRoleSchema, access: galleryCollectionAccessSchema, createdAt: z.iso.datetime(), updatedAt: z.iso.datetime(),
+  isFavorite: z.boolean(), count: z.number().int().nonnegative(), coverUrl: z.string().min(1).nullable(), presentation: z.enum(["travel", "communication", "learning"]).optional(), memberKey: z.string().min(1), isOwned: z.boolean().optional(),
+  role: galleryCollectionRoleSchema, access: galleryCollectionAccessSchema, createdAt: z.iso.datetime(), updatedAt: z.iso.datetime(), score: z.number().optional(),
 });
 export const galleryImageSchema = z.strictObject({
   key: z.string().min(1), filename: z.string().min(1), caption: z.string().min(1), imageCaptionKey: z.string().min(1).nullable(), mimeType: z.string().min(1),
   sizeBytes: z.number().int().positive(), width: z.number().int().positive(), height: z.number().int().positive(), city: z.string().min(1).nullable(), country: z.string().min(1).nullable(),
   countryCode: z.string().length(2).nullable(), latitude: z.number().finite().min(-90).max(90).nullable(), longitude: z.number().finite().min(-180).max(180).nullable(),
-  locationSource: z.enum(["exif", "supplied", "place"]).nullable(), mutationPolicy: z.enum(["user", "system-only"]), isFavorite: z.boolean(),
+  locationSource: z.enum(["exif", "supplied", "place"]).nullable(), origin: z.enum(["uploaded", "generated"]), mutationPolicy: z.enum(["user", "system-only"]), isFavorite: z.boolean(),
   createdAt: z.iso.datetime(), updatedAt: z.iso.datetime(), url: z.string().min(1), score: z.number().optional(), createdByKey: z.string().min(1).nullable(),
 });
 const galleryOverviewSchema = z.strictObject({ collections: z.array(galleryCollectionSchema), images: z.array(galleryImageSchema), nextCursor: z.string().nullable(), canCreateCollections: z.boolean() });
+const galleryGenerationHistoryItemSchema = z.strictObject({ type: z.literal("image"), prompt: z.string().trim().min(1).max(8_000), normalizedPrompt: z.string().trim().min(1).max(8_000), usageCount: z.number().int().positive(), generatedAt: z.iso.datetime() });
+const galleryGenerationHistorySchema = z.strictObject({ generations: z.array(galleryGenerationHistoryItemSchema) });
+const galleryGenerationHistoryDeleteSchema = z.strictObject({ normalizedPrompt: z.string().trim().min(1).max(8_000), deleted: z.boolean() });
+const savedGeneratedImageSchema = z.strictObject({ key: z.string().min(1), filename: z.string().min(1).max(255), caption: z.string().min(1).max(20_000), mimeType: z.enum(["image/png", "image/jpeg", "image/webp"]), sizeBytes: z.number().int().positive(), width: z.number().int().positive(), height: z.number().int().positive(), origin: z.literal("generated"), createdByKey: z.string().min(1), url: z.url(), createdAt: z.iso.datetime() });
+const galleryGenerationOutputSchema = z.strictObject({ images: z.array(savedGeneratedImageSchema).min(1).max(3), provider: z.strictObject({ durationMs: z.number().int().nonnegative(), costUsd: z.number().nonnegative().nullable() }) });
+const galleryGenerationInputSchema = z.strictObject({ collectionKey: z.string().min(1), prompt: z.string().trim().min(1).max(8_000), count: z.union([z.literal(1), z.literal(2), z.literal(3)]), referenceImageKeys: z.array(z.string().min(1)).max(MAX_GALLERY_GENERATION_REFERENCES).refine((keys) => new Set(keys).size === keys.length) });
 
 export type GalleryHighlight = {
   key: string;
@@ -292,8 +320,12 @@ export const GALLERY_COLLECTION_MEMORY_ENDPOINTS = {
   delete: "/gallery/memories/delete",
 } as const;
 
-export function createGalleryCollectionHighlight(collectionKey: string) {
-  return postGallery<{ highlight: GalleryHighlightProjection }>(GALLERY_COLLECTION_HIGHLIGHT_ENDPOINTS.create, { collectionKey })
+const galleryHighlightCreateInputSchema = z.strictObject({ collectionKey: z.string().min(1), imageKeys: z.array(z.string().min(1)).min(2).max(10).optional() });
+const galleryMemoryCreateInputSchema = z.strictObject({ collectionKey: z.string().min(1), imageKey: z.string().min(1).optional() });
+
+export function createGalleryCollectionHighlight(collectionKey: string, imageKeys?: string[]) {
+  const input = galleryHighlightCreateInputSchema.parse({ collectionKey, ...(imageKeys ? { imageKeys } : {}) });
+  return postGallery<{ highlight: GalleryHighlightProjection }>(GALLERY_COLLECTION_HIGHLIGHT_ENDPOINTS.create, input)
     .then(({ highlight }) => ({ highlight: normalizeGalleryHighlight(highlight) }));
 }
 
@@ -315,8 +347,9 @@ export function deleteGalleryCollectionHighlight(highlightKey: string) {
   return postGallery<{ highlightKey: string }>(GALLERY_COLLECTION_HIGHLIGHT_ENDPOINTS.delete, { highlightKey });
 }
 
-export function createGalleryCollectionMemory(collectionKey: string) {
-  return postGallery<{ memory: GalleryMemory }>(GALLERY_COLLECTION_MEMORY_ENDPOINTS.create, { collectionKey })
+export function createGalleryCollectionMemory(collectionKey: string, imageKey?: string) {
+  const input = galleryMemoryCreateInputSchema.parse({ collectionKey, ...(imageKey !== undefined ? { imageKey } : {}) });
+  return postGallery<{ memory: GalleryMemory }>(GALLERY_COLLECTION_MEMORY_ENDPOINTS.create, input)
     .then(({ memory }) => ({ memory: normalizeGalleryMemory(memory) }));
 }
 
@@ -393,10 +426,45 @@ async function fetchWithTimeout(input: string, init: RequestInit | undefined, ti
   }
 }
 
-export function fetchGalleryOverview(collectionKey?: string, cursor?: string, limit = 100, maxCaptionScore?: number, signal?: AbortSignal) {
-  return postGallery<unknown>("/gallery/overview", { ...(collectionKey ? { collectionKey } : {}), ...(cursor ? { cursor } : {}), limit, ...(maxCaptionScore !== undefined ? { maxCaptionScore } : {}) }, 60_000, signal)
+export function fetchGalleryOverview(collectionKey?: string, cursor?: string, limit = 100, maxCaptionScore?: number, signal?: AbortSignal, origin?: GalleryImageOrigin) {
+  return postGallery<unknown>("/gallery/overview", { ...(collectionKey ? { collectionKey } : {}), ...(cursor ? { cursor } : {}), limit, ...(maxCaptionScore !== undefined ? { maxCaptionScore } : {}), ...(origin ? { origin } : {}) }, 60_000, signal)
     .then((overview) => galleryOverviewSchema.parse(overview))
     .then((overview) => ({ ...overview, collections: overview.collections.map(normalizeCollection) }));
+}
+
+export async function listGalleryGenerationHistory(limit = 20) {
+  try {
+    const response = await apiClient.get<ApiResponse<unknown>>("/images/generation-history", { params: { ...getGalleryContext(), limit }, timeout: 60_000 });
+    if (!response.data || response.data.success !== true || !("data" in response.data)) throw galleryClientError(response.data && "error" in response.data ? response.data.error : undefined);
+    const { generations } = galleryGenerationHistorySchema.parse(response.data.data);
+    return generations;
+  } catch (error) {
+    if (error instanceof GalleryClientError) throw error;
+    const response = error && typeof error === "object" && "response" in error ? (error as { response?: { data?: { error?: unknown }; status?: number } }).response : undefined;
+    throw galleryClientError(response?.data?.error ?? error, response?.status);
+  }
+}
+
+export async function deleteGalleryGenerationHistory(prompt: string) {
+  const input = z.strictObject({ prompt: z.string().trim().min(1).max(8_000) }).parse({ prompt });
+  const response = await apiClient.delete<ApiResponse<unknown>>("/images/generation-history", { data: { ...getGalleryContext(), ...input }, timeout: 60_000 });
+  if (!response.data || response.data.success !== true || !("data" in response.data)) throw galleryClientError(response.data && "error" in response.data ? response.data.error : undefined);
+  return galleryGenerationHistoryDeleteSchema.parse(response.data.data);
+}
+
+export async function generateGalleryImages(rawInput: GalleryGenerationInput, requestKey: string): Promise<GalleryImage[]> {
+  try {
+    const input = galleryGenerationInputSchema.parse(rawInput);
+    const key = z.string().trim().min(1).max(256).parse(requestKey);
+    const response = await apiClient.post<ApiResponse<unknown>>("/images/generate", { ...getGalleryContext(), ...input }, { headers: { "Idempotency-Key": key }, timeout: 4 * 60_000 });
+    if (!response.data || response.data.success !== true || !("data" in response.data)) throw galleryClientError(response.data && "error" in response.data ? response.data.error : undefined);
+    const output = galleryGenerationOutputSchema.parse(response.data.data);
+    return output.images.map((image) => ({ ...image, imageCaptionKey: null, city: null, country: null, countryCode: null, latitude: null, longitude: null, locationSource: null, mutationPolicy: "user" as const, isFavorite: false, updatedAt: image.createdAt }));
+  } catch (error) {
+    if (error instanceof GalleryClientError) throw error;
+    const response = error && typeof error === "object" && "response" in error ? (error as { response?: { data?: { error?: unknown }; status?: number } }).response : undefined;
+    throw galleryClientError(response?.data?.error ?? error, response?.status);
+  }
 }
 
 export function createGalleryCollection(name: string, isFavorite: boolean) {
@@ -424,6 +492,7 @@ export type PreparedGalleryUpload = {
 };
 
 export async function uploadGalleryImages(files: PreparedGalleryUpload[], collectionKey?: string) {
+  if (files.some(({ filename }) => !/^[^/\\]+\.png$/i.test(filename))) throw new Error("Gallery images must be converted to PNG before upload.");
   const reservation = await postGallery<{
     uploads: { clientKey: string; uploadKey: string; imageKey: string; url: string; headers: Record<string, string> }[];
   }>("/gallery/uploads/presign", {
@@ -435,7 +504,9 @@ export async function uploadGalleryImages(files: PreparedGalleryUpload[], collec
     await Promise.all(reservation.uploads.slice(index, index + 3).map(async (upload) => {
       const file = files.find((candidate) => candidate.clientKey === upload.clientKey);
       if (!file) throw new Error("An upload reservation could not be matched.");
-      const bytes = await (await fetchWithTimeout(file.uri, undefined, 30_000)).arrayBuffer();
+      const bytes = await new File(file.uri).arrayBuffer();
+      const signature = new Uint8Array(bytes, 0, Math.min(8, bytes.byteLength));
+      if (bytes.byteLength !== file.sizeBytes || signature.length !== 8 || ![137, 80, 78, 71, 13, 10, 26, 10].every((value, signatureIndex) => signature[signatureIndex] === value)) throw new Error("Gallery images must contain valid PNG data before upload.");
       const response = await fetchWithTimeout(upload.url, { method: "PUT", headers: upload.headers, body: bytes }, 2 * 60_000);
       if (!response.ok) throw new Error(`Image upload failed (${response.status}).`);
     }));
@@ -468,6 +539,11 @@ export function searchGalleryImages(input: { query?: string; imageKey?: string; 
       .then((output) => ({ images: appSearchResults(output, "images", galleryImageSchema) }));
   }
   return postGallery<unknown>("/gallery/images/search", input, 4 * 60_000, signal).then((value) => z.strictObject({ images: z.array(galleryImageSchema) }).parse(value));
+}
+
+export function searchGalleryCollections(query: string, recordHistory = true, signal?: AbortSignal) {
+  return searchApp({ query, collectionSlugs: ["collections"], recordHistory, limit: 50, minimumScore: -1 }, signal)
+    .then((output) => ({ collections: appSearchResults(output, "collections", galleryCollectionSchema) }));
 }
 
 export function setGalleryImageFavorite(imageKey: string, isFavorite: boolean) {

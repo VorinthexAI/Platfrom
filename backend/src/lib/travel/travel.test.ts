@@ -330,7 +330,7 @@ describe('travel contracts and service', () => {
     const repository = { authorizeRead: async () => {}, authorizeWrite: async () => key, convergePlace: async ({ place, hero }: any) => { converges += 1; canonicalStorageKey = hero.storageKey; return { place, heroStorageKey: hero.storageKey }; }, ensureGalleryExportCollection: async () => { exportOrder.push('ensure'); }, linkGalleryExport: async () => { exportOrder.push('link'); } } as unknown as TravelRepository;
     const service = createTravelService({ repository, storage, decryptImageRequest: () => token, embed: async () => embedding, now: () => timestamp, signImageUrl: async (storageKey) => `https://signed.test/${storageKey}`,
       placeImages: { execute: (async () => { providerCalls += 1; return { output: { images: [{ base64: placePngBase64, mimeType: 'image/png' }] }, costUsd: 0.01 }; }) as any, now: () => Date.parse(timestamp), log: () => {} },
-      process: (async (input: any) => { exportOrder.push('dump'); processed.push(input.file.bytes); expect(input.mutationPolicy).toBe('user'); return imageSchema.parse({ key: input.imageKey, scopeKey, filename: input.file.filename, caption: 'Japan landscape', imageCaptionKey: key, createdByKey: key, storageKey: 'media/japan.png', mimeType: 'image/png', sizeBytes: 3, width: 1536, height: 1024, embedding, mutationPolicy: 'user', isFavorite: false, createdAt: timestamp, updatedAt: timestamp }); }) as any });
+      process: (async (input: any) => { exportOrder.push('dump'); processed.push(input.file.bytes); expect(input).toMatchObject({ origin: 'generated', mutationPolicy: 'user' }); return imageSchema.parse({ key: input.imageKey, scopeKey, filename: input.file.filename, caption: 'Japan landscape', imageCaptionKey: key, createdByKey: key, storageKey: 'media/japan.png', mimeType: 'image/png', sizeBytes: 3, width: 1536, height: 1024, embedding, origin: 'generated', mutationPolicy: 'user', isFavorite: false, createdAt: timestamp, updatedAt: timestamp }); }) as any });
     const input = { organizationKey: 'organization', scopeKey, name: 'Japan', summary: 'Island country.', countryCode: 'JP', latitude: 36.2, longitude: 138.2, imageRequestToken: 'token' };
     await expect(service.createPlace(input, key)).resolves.toMatchObject({ place: { name: 'Japan', kind: 'country', coverUrl: expect.stringContaining('https://signed.test/compass/') } });
     expect(providerCalls).toBe(1); expect(processed).toEqual([placePngBytes]); expect(converges).toBe(1);
@@ -790,16 +790,18 @@ describe('travel repository', () => {
     const repository = createTravelRepository(database, async (_collections, operation) => operation(database));
     const context = { organizationKey: 'organization', scopeKey, userKey: key };
     await repository.ensureGalleryExportCollection(context, { key, scopeKey, ownerKey: key, memberKey: scopeKey, name: 'Compass', embedding, createdAt: timestamp, updatedAt: timestamp });
+    await repository.ensureGalleryExportCollection(context, { key, scopeKey, ownerKey: key, memberKey: scopeKey, name: 'Compass', embedding, createdAt: timestamp, updatedAt: timestamp });
     await repository.linkGalleryExport(context, { key, scopeKey, collectionKey: key, imageKey: key, addedByKey: key, createdAt: timestamp });
-    expect(calls).toHaveLength(3);
+    expect(calls).toHaveLength(5);
     expect(calls[0]!.query).toContain('UPSERT { _key: @collectionKey }');
-    expect(calls[0]!.query).toContain('UPDATE {} IN collections');
+    expect(calls[0]!.query).toContain('UPDATE { presentation: "travel" } IN collections');
     expect(calls[0]!.query).not.toMatch(/purpose|managedPurpose|mutationPolicy/);
     expect(calls[0]!.bindVars).not.toHaveProperty('legacyFields');
     expect(calls[1]!.query).toContain('UPDATE {} IN collectionMembers');
     expect(calls[1]!.query).toContain('role: "owner"');
-    expect(calls[2]!.query).toContain('UPSERT { _key: @relationKey } INSERT @relation UPDATE {} IN collectionImages');
-    expect(calls[2]!.query).toContain('image.createdByKey == @addedByKey');
+    expect(calls[0]!.bindVars?.collectionKey).toBe(calls[2]!.bindVars?.collectionKey);
+    expect(calls[4]!.query).toContain('UPSERT { _key: @relationKey } INSERT @relation UPDATE {} IN collectionImages');
+    expect(calls[4]!.query).toContain('image.createdByKey == @addedByKey');
   });
   test('lists authorized places and exposes the same read authorization', async () => {
     const queries: string[] = [];

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { apiClient } from "@/lib/api-client";
 import { assistantChangesSchema } from "@/lib/assistant-changes";
 import { publicApiClient } from "@/lib/public-api-client";
+import { appSearchResults, searchApp } from "@/lib/app-search-client";
 import { useAuthStore } from "@/state/auth";
 
 const keySchema = z.string().trim().min(1);
@@ -165,6 +166,10 @@ async function request<T>(method: "post" | "patch" | "delete", path: string, bod
 }
 
 export function fetchBooksOverview() { return request("post", "/books/overview", {}, overviewRequestSchema, overviewResponseSchema); }
+export async function searchBooks(query: string, signal?: AbortSignal, recordHistory = false) {
+  const output = await searchApp({ query, collectionSlugs: ["books"], recordHistory, limit: 50, minimumScore: 0.55 }, signal);
+  return appSearchResults(output, "books", bookSchema.extend({ score: z.number() })).map(({ score: _score, ...book }) => book);
+}
 export function suggestBookTopics(excludeTopics: string[] = []) { return request("post", "/books/topic-suggestions", { excludeTopics }, bookTopicSuggestionsRequestSchema, bookTopicSuggestionsResponseSchema, 50_000); }
 export function suggestBookGoals(topic: string, excludeGoals: string[] = []) { return request("post", "/books/goal-suggestions", { topic, excludeGoals }, bookGoalSuggestionsRequestSchema, bookGoalSuggestionsResponseSchema, 50_000); }
 export function createBook(input: CreateBookInput, generationRequestKey: string) { return request("post", "/books", { ...input, generationRequestKey }, createBookRequestSchema, bookSchema, 15 * 60_000); }

@@ -97,7 +97,7 @@ const styles = StyleSheet.create({
   hint: { color: palette.muted, fontFamily: fonts.regular, fontSize: 12, textAlign: "center" },
   controls: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   controlSide: { alignItems: "center", minWidth: 82 },
-  shutter: { height: 83, overflow: "hidden", paddingHorizontal: 0, paddingVertical: 0, width: 80 },
+  shutter: { height: 74, overflow: "hidden", paddingHorizontal: 0, paddingVertical: 0, width: 74 },
   error: { color: palette.danger, fontFamily: fonts.regular, fontSize: 12, textAlign: "center" },
   permission: { alignItems: "center", flex: 1, gap: spacing.md, justifyContent: "center", paddingHorizontal: spacing.xl },
   permissionTitle: { color: palette.text, fontFamily: fonts.semibold, fontSize: 22 },

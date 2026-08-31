@@ -38,6 +38,7 @@ export * from './components/context-menu';
 export * from './components/accordion';
 export * from './components/stepper';
 export * from './components/progress';
+export * from './components/pull-to-refresh';
 export * from './components/spinner';
 export * from './components/skeleton';
 export * from './components/empty-state';

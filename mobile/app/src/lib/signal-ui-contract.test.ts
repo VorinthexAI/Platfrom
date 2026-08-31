@@ -94,10 +94,8 @@ test("new email validates recipient chips and preserves exact blank-safe review 
   expect(workspace).toContain("recipientChipRemove: { width: 42, height: 42");
   expect(workspace).toContain("recipientChipCompact: { minHeight: 34 }");
   expect(workspace).toContain("recipientChipRemoveCompact: { width: 24, minWidth: 24, maxWidth: 24, height: 24, minHeight: 24, maxHeight: 24, marginRight: 3, borderRadius: 12 }");
-  expect(workspace).toContain('useDelayedInputFocus(newEmailRecipientsOpen ? "newEmailRecipients" : undefined, newEmailRecipientInputRef, !newEmailSending)');
+  expect(workspace).not.toContain("useDelayedInputFocus");
   expect(workspace).toContain('ref={newEmailRecipientInputRef}');
-  expect(workspace).toContain('useDelayedInputFocus(newEmailContentOpen ? "newEmailSubject" : undefined, newEmailSubjectInputRef, !newEmailSending)');
-  expect(workspace).toContain('const SHEET_INPUT_FOCUS_DELAY_MS = 300');
   expect(workspace).toContain('ref={newEmailSubjectInputRef}');
   expect(workspace).toContain('<Text style={styles.inputLabel}>Subject</Text>');
   expect(workspace).toContain('<Text style={styles.inputLabel}>Message</Text>');
@@ -221,12 +219,13 @@ test("Signal root puts shared search before tabs and uses a measured exact three
   expect(workspace).not.toContain("<Pressable");
 });
 
-test("Signal follows the authenticated scope and locks resolved empty lists", () => {
+test("Signal follows the authenticated scope and keeps resolved empty lists refreshable", () => {
   expect(workspace).toContain('const organizationKey = useAuthStore((state) => typeof state.organization?.key === "string" ? state.organization.key : "")');
   expect(workspace).toContain('const scopeKey = useAuthStore((state) => typeof state.scope?.key === "string" ? state.scope.key : "")');
   expect(workspace).toContain("const emailContext = { organizationKey, scopeKey }");
-  expect(workspace).toContain("scrollEnabled={!rootEmpty}");
-  expect(workspace).toContain("scrollEnabled={!inboxEmpty}");
+  expect(workspace).not.toContain("scrollEnabled={!rootEmpty}");
+  expect(workspace).not.toContain("scrollEnabled={!inboxEmpty}");
+  expect(workspace).toContain("refreshControl={<PullToRefresh onRefresh={refreshActiveView} refreshing={userRefreshing} />}");
 });
 
 test("Signal exposes Core with the Archive root-search focus gate", () => {
@@ -456,10 +455,9 @@ test("root Filter and Plus expose filtering, history, utility, and creation acti
   expect(workspace).toContain('onPress={() => void openTrashRoot()} style={styles.sheetAction} variant="secondary">Trash</BottomSheetItem>');
   expect(workspace).toContain('accessibilityLabel={sheet === "inboxEdit" ? "Inbox name" : "Tone name"} editable={permissions.canMutate && !busy}');
   expect(workspace).not.toContain("autoFocus");
-  expect(workspace).toContain("const SHEET_INPUT_FOCUS_DELAY_MS = 300");
-  expect(workspace).toContain("setTimeout(() => inputRef.current?.focus(), SHEET_INPUT_FOCUS_DELAY_MS)");
-  expect(workspace).toContain('useDelayedInputFocus(sheetOpen && inputSheet ? sheet : undefined, sheetInputRef');
-  expect(workspace).toContain('useDelayedInputFocus(readerSheetOpen && replyEditorOpen ? "replyEditor" : undefined, readerInputRef');
+  expect(workspace).not.toContain("useDelayedInputFocus");
+  expect(workspace).toContain("focusKey={sheet}");
+  expect(workspace).toContain("focusKey={readerSheet}");
   expect(workspace).toContain('maxLength={255}');
   expect(workspace).toContain('maxLength={10000} multiline');
   expect(workspace).toContain('maxLength={20000} multiline');
@@ -500,7 +498,7 @@ test("reply context manager uses full-height pills, guarded bulk delete, and one
   expect(workspace).toContain('accessibilityLabel="Create context note"');
   expect(workspace).toContain('title={editor?.mode === "create" ? "New context note" : "Edit context note"}');
   expect(workspace).toContain('accessibilityLabel="Context note text"');
-  expect(workspace).toContain('useDelayedInputFocus(open && editor ? editor.mode : undefined, editorInputRef, canMutate)');
+  expect(workspace).not.toContain("useDelayedInputFocus");
   expect(workspace).toContain('maxLength={4000} multiline');
   expect(workspace).toContain('<Text style={styles.inputLabel}>Name</Text>');
   expect(workspace).toContain('<Text style={styles.inputLabel}>Context</Text>');
@@ -522,8 +520,7 @@ test("Signal menu options use the darker sheet treatment", () => {
 });
 
 test("attachment picker focuses search after its sheet opens", () => {
-  expect(picker).toContain("const SHEET_INPUT_FOCUS_DELAY_MS = 300");
-  expect(picker).toContain("setTimeout(() => searchInputRef.current?.focus(), SHEET_INPUT_FOCUS_DELAY_MS)");
+  expect(picker).toContain("focusKey={activeTab}");
   expect(picker).toContain("ref={searchInputRef}");
   expect(picker).not.toContain("autoFocus");
 });
@@ -617,6 +614,11 @@ test("Signal filtered lists use the centered text-only empty-state pattern", () 
   expect(workspace).toContain('<View style={styles.empty}><Text style={styles.centerText}>Trash is empty.</Text></View>');
   expect(workspace).not.toContain('<Text style={styles.emptyTitle}>No messages in this view</Text>');
   expect(workspace).not.toContain('<Text style={styles.emptyTitle}>No drafts</Text>');
+  expect(workspace).toContain('(draftSearchEmpty || messageSearchEmpty) && styles.searchEmptyList');
+  expect(workspace).toContain('searchEmptyList: { flexGrow: 1, alignItems: "center", justifyContent: "center" }');
+  expect(workspace).toContain('!readerLoading && !similarResults.length && styles.sheetEmptyContent');
+  expect(picker).toContain('styles.searchEmptyResults');
+  expect(picker).toContain('searchEmptyResults: { alignItems: "center", justifyContent: "center" }');
 });
 
 test("Signal root search is debounced, semantic, cancellable, and tab-specific", () => {
@@ -707,10 +709,10 @@ test("attachment picker loads and searches both real stores with persistent mult
   expect(picker).toContain("<SearchHistorySheet");
   expect(picker).toContain('title = "Attachments"');
   expect(picker).toContain('maxSelection = DEFAULT_MAX_SELECTION');
-  expect(picker).toContain('const activeTab: PickerTab = archiveOnly ? "archive" : tab');
-  expect(picker).toContain('{!archiveOnly ? <Tabs accessibilityLabel="Attachment sources"');
-  expect(picker).toContain('if (!open || archiveOnly) return;');
-  expect(picker).toContain('archiveOnly ? `You can select up to ${maxSelection} items.` : `You can attach up to ${maxSelection} items.`');
+  expect(picker).toContain('const activeTab: PickerTab = archiveOnly ? "archive" : galleryOnly ? "gallery" : tab');
+  expect(picker).toContain('{!archiveOnly && !galleryOnly ? <Tabs accessibilityLabel="Attachment sources"');
+  expect(picker).toContain('if (!open || activeTab !== "gallery") return;');
+  expect(picker).toContain('archiveOnly || galleryOnly ? `You can select up to ${maxSelection} items.` : `You can attach up to ${maxSelection} items.`');
   expect(picker).toContain('onSelectionLimitReached(maxSelection)');
   expect(picker.indexOf("styles.rootActions")).toBeLessThan(picker.indexOf('accessibilityLabel="Attachment sources"'));
   expect(picker).not.toContain('description="Choose Archive documents or Gallery images');
@@ -738,7 +740,7 @@ test("attachment queries and working selection are invalidated across every owne
   expect(picker).toMatch(/return \(\) => \{\s*clearTimeout\(timer\);\s*searchOwner\.invalidate\(\);/);
   expect(picker).toContain('}, [activeTab, contextKey, open, query, searchOwner]);');
   expect(picker).toContain('onOpenChange={(next) => { if (!next && !filterOpen && !historyOpen) closePicker(); }}');
-  expect(picker).toMatch(/function changeQuery\(next: string\) \{\s*searchOwner\.invalidate\(\);\s*if \(activeTab === "archive"\) setDocuments\(\[\]\);\s*else setImages\(\[\]\);\s*setQuery\(next\);/);
+  expect(picker).toMatch(/function changeQuery\(next: string\) \{\s*searchOwner\.invalidate\(\);\s*setLoading\(true\);\s*setError\(undefined\);\s*if \(activeTab === "archive"\) setDocuments\(\[\]\);\s*else setImages\(\[\]\);\s*setQuery\(next\);/);
   expect(picker).toMatch(/function changeTab[\s\S]*?searchOwner\.invalidate\(\);[\s\S]*?setTab\(next\);/);
   expect(workspace).toContain("newEmailAttachmentsOpen ? <EmailAttachmentPicker");
 });
@@ -909,7 +911,8 @@ test("translation and summary pills open separate detail sheets over their versi
 });
 
 test("translation versions open immediately without focusing the language form or losing a new result", () => {
-  expect(workspace).toContain('readerSheetOpen && replyEditorOpen ? "replyEditor" : undefined');
+  expect(workspace).toContain("focusKey={readerSheet}");
+  expect(workspace).not.toContain("useDelayedInputFocus");
   expect(workspace).toMatch(/function openReaderFlow\(next: ReaderSheet\)[\s\S]*?setSheetOpen\(false\);[\s\S]*?if \(next === "translate" \|\| next === "summaryVersions"\) setReaderLoading\(true\);[\s\S]*?setReaderSheet\(next\);[\s\S]*?setReaderSheetOpen\(true\);/);
   expect(workspace).toContain("pendingTranslationReaderKey.current = result.version.key");
   expect(workspace).toContain("pendingTranslationReaderKey.current !== selectedTranslationKey");
@@ -1060,7 +1063,7 @@ test("all four email body editors share direct enhance and translate actions", (
   for (const target of ["newEmail", "newEmailReview", "draft", "reply"]) expect(workspace).toContain(`onOpenActions={() => openEmailEditorActions("${target}")}`);
   expect(aiTextEditor).toContain('accessibilityLabel={`${label} AI actions`}');
   expect(aiTextEditor).not.toContain('disabled={!value.trim()}');
-  expect(aiTextEditor).toContain('<View style={styles.actions}><Button');
+  expect(aiTextEditor).toContain('<View style={styles.actions}>{onOpenHistory ? <Button');
   expect(aiTextEditor).toContain('Keyboard.dismiss(); onOpenActions();');
   expect(aiTextEditor).not.toContain('position: "absolute"');
   expect(aiTextEditor).toContain('<BrainIcon size="sm" />');

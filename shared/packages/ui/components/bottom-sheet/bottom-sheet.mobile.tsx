@@ -30,6 +30,8 @@ import { scheduleOnRN } from "react-native-worklets";
 
 import { Button, ButtonSizeProvider, type ButtonProps } from "../button/button.mobile";
 import { ToastViewport } from "../toast/toast.mobile";
+import { BottomSheetFocusProvider } from "./bottom-sheet-focus.mobile";
+import { bottomSheetFocusCoordinator } from "./bottom-sheet-focus";
 import { CloseIcon } from "../../icons/close/close.mobile";
 import { colors } from "../../tokens";
 
@@ -98,6 +100,7 @@ export type BottomSheetProps = {
   description?: string;
   dismissible?: boolean;
   footer?: ReactNode;
+  focusKey?: string;
   headerLeading?: ReactNode;
   headerTrailing?: ReactNode;
   height?: "full";
@@ -109,13 +112,14 @@ export type BottomSheetProps = {
   onSwipeRight?: () => void;
   open: boolean;
   pageKey?: string;
+  pageTransitionOrigin?: "edge" | "bottom";
   title: string;
 };
 
 type BottomSheetPage = Pick<BottomSheetProps, "children" | "description" | "footer" | "headerLeading" | "headerTrailing" | "hideCloseButton" | "hideHeading" | "pageKey" | "title">;
 
-function SheetSurface({ bottomInset, dismiss, dismissible, dragPanHandlers, fullHeight, inactive = false, page, sheetBottom, style }: { bottomInset: number; dismiss: () => void; dismissible: boolean; dragPanHandlers: GestureResponderHandlers; fullHeight: boolean; inactive?: boolean; page: BottomSheetPage; sheetBottom?: number; style?: StyleProp<ViewStyle> }) {
-  return <Animated.View accessibilityElementsHidden={inactive} accessibilityLabel={[page.title, page.description].filter(Boolean).join(". ")} accessibilityRole="summary" collapsable={false} importantForAccessibility={inactive ? "no-hide-descendants" : "auto"} pointerEvents={inactive ? "none" : "auto"} style={[styles.sheet, fullHeight && styles.fullSheet, { bottom: fullHeight ? sheetBottom : undefined, paddingBottom: Platform.OS === "android" ? 16 : Math.max(bottomInset, 16) }, style]}>
+function SheetSurface({ bottomInset, dismiss, dismissible, dragPanHandlers, focusActive = true, focusCycleKey, fullHeight, inactive = false, page, sheetBottom, sheetId, style }: { bottomInset: number; dismiss: () => void; dismissible: boolean; dragPanHandlers: GestureResponderHandlers; focusActive?: boolean; focusCycleKey: string; fullHeight: boolean; inactive?: boolean; page: BottomSheetPage; sheetBottom?: number; sheetId: symbol; style?: StyleProp<ViewStyle> }) {
+  return <BottomSheetFocusProvider active={focusActive && !inactive} cycleKey={focusCycleKey} sheetId={sheetId}><Animated.View accessibilityElementsHidden={inactive} accessibilityLabel={[page.title, page.description].filter(Boolean).join(". ")} accessibilityRole="summary" collapsable={false} importantForAccessibility={inactive ? "no-hide-descendants" : "auto"} pointerEvents={inactive ? "none" : "auto"} style={[styles.sheet, fullHeight && styles.fullSheet, { bottom: fullHeight ? sheetBottom : undefined, paddingBottom: Platform.OS === "android" ? 16 : Math.max(bottomInset, 16) }, style]}>
     <View style={styles.headerDragTarget}>
       <View collapsable={false} style={styles.dragTarget} {...dragPanHandlers}><View style={styles.dragHandle} /></View>
       <View style={[styles.header, Boolean(page.headerLeading) && !page.hideHeading && styles.headerWithLeading, page.hideHeading && styles.headerWithoutHeading]}>
@@ -128,7 +132,7 @@ function SheetSurface({ bottomInset, dismiss, dismissible, dragPanHandlers, full
     </View>
     <View style={[styles.content, fullHeight && styles.flexContent]}>{page.children}</View>
     {page.footer ? <View style={styles.footer}>{page.footer}</View> : null}
-  </Animated.View>;
+  </Animated.View></BottomSheetFocusProvider>;
 }
 
 export function BottomSheet({
@@ -136,6 +140,7 @@ export function BottomSheet({
   description,
   dismissible = true,
   footer,
+  focusKey,
   headerLeading,
   headerTrailing,
   height,
@@ -147,6 +152,7 @@ export function BottomSheet({
   onSwipeRight,
   open,
   pageKey,
+  pageTransitionOrigin = "edge",
   title,
 }: BottomSheetProps) {
   const insets = useSafeAreaInsets();
@@ -155,6 +161,9 @@ export function BottomSheet({
   const fullHeight = height === "full";
   const setSceneSheetOpen = useContext(BottomSheetSceneContext);
   const sceneSheetId = useRef(Symbol("bottom-sheet")).current;
+  const focusCycleKey = focusKey ?? pageKey ?? "presentation";
+  const focusCycleKeyRef = useRef(focusCycleKey);
+  const focusPresentedRef = useRef(false);
   const [visible, setVisible] = useState(open);
   const [reducedMotion, setReducedMotion] = useState(false);
   const closedOffsetRef = useRef(windowHeight + 64);
@@ -171,7 +180,7 @@ export function BottomSheet({
   const dismissingRef = useRef(false);
   const pageWasOpenRef = useRef(open);
   const pageDirectionRef = useRef<1 | -1>(1);
-  const pageTranslateX = useRef(new Animated.Value(0)).current;
+  const pageTranslate = useRef(new Animated.Value(0)).current;
   const livePage = { children, description, footer, headerLeading, headerTrailing, hideCloseButton, hideHeading, pageKey, title };
   const pageSnapshotRef = useRef<BottomSheetPage>(livePage);
   const [pageTransition, setPageTransition] = useState<{ pageKey: string; previous: BottomSheetPage }>();
@@ -238,6 +247,28 @@ export function BottomSheet({
     return () => setSceneSheetOpen?.(sceneSheetId, false);
   }, [open, sceneSheetId, setSceneSheetOpen]);
 
+  useLayoutEffect(() => {
+    focusCycleKeyRef.current = focusCycleKey;
+  }, [focusCycleKey]);
+
+  useLayoutEffect(() => {
+    if (visible || !focusPresentedRef.current) return;
+    focusPresentedRef.current = false;
+    bottomSheetFocusCoordinator.deactivate(sceneSheetId);
+  }, [sceneSheetId, visible]);
+
+  useEffect(() => () => bottomSheetFocusCoordinator.deactivate(sceneSheetId), [sceneSheetId]);
+
+  useLayoutEffect(() => {
+    if (open && focusPresentedRef.current) bottomSheetFocusCoordinator.setCycle(sceneSheetId, focusCycleKey);
+  }, [focusCycleKey, open, sceneSheetId]);
+
+  const presentFocusCycle = () => {
+    if (!openRef.current) return;
+    focusPresentedRef.current = true;
+    bottomSheetFocusCoordinator.activate(sceneSheetId, focusCycleKeyRef.current);
+  };
+
   useEffect(() => {
     if (open) {
       dismissingRef.current = false;
@@ -301,8 +332,8 @@ export function BottomSheet({
     const wasOpen = pageWasOpenRef.current;
     pageWasOpenRef.current = open;
     if (!open || !wasOpen || pageKey === undefined) {
-      pageSnapshotRef.current = livePage;
-      pageTranslateX.setValue(0);
+      if (open) pageSnapshotRef.current = livePage;
+      pageTranslate.setValue(0);
       if (pageTransition) setPageTransition(undefined);
       return;
     }
@@ -312,15 +343,15 @@ export function BottomSheet({
     }
     const previous = pageSnapshotRef.current;
     pageSnapshotRef.current = livePage;
-    pageTranslateX.stopAnimation();
-    pageTranslateX.setValue(reducedMotionRef.current ? 0 : pageDirectionRef.current * windowWidth);
+    pageTranslate.stopAnimation();
+    pageTranslate.setValue(reducedMotionRef.current ? 0 : pageTransitionOrigin === "bottom" ? windowHeight : pageDirectionRef.current * windowWidth);
     if (reducedMotionRef.current) {
       setPageTransition({ pageKey, previous });
       requestAnimationFrame(() => setPageTransition((current) => current?.pageKey === pageKey ? undefined : current));
       return;
     }
     setPageTransition({ pageKey, previous });
-    requestAnimationFrame(() => Animated.timing(pageTranslateX, { duration: 280, easing: Easing.out(Easing.cubic), toValue: 0, useNativeDriver: false }).start(({ finished }) => {
+    requestAnimationFrame(() => Animated.timing(pageTranslate, { duration: 280, easing: Easing.out(Easing.cubic), toValue: 0, useNativeDriver: false }).start(({ finished }) => {
       if (finished) setPageTransition((current) => current?.pageKey === pageKey ? undefined : current);
     }));
   });
@@ -335,6 +366,7 @@ export function BottomSheet({
       accessibilityViewIsModal
       animationType="none"
       navigationBarTranslucent={false}
+      onShow={presentFocusCycle}
       onRequestClose={dismiss}
       statusBarTranslucent
       transparent
@@ -354,9 +386,9 @@ export function BottomSheet({
           </Animated.View>
           <ButtonSizeProvider force size="md">
             {pageKey !== undefined && fullHeight ? <GestureDetector gesture={horizontalSwipeGesture}><Animated.View style={[styles.layerHost, { bottom: androidBottomInset, top: insets.top, transform: [{ translateY }] }]}>
-              {transitioningPage && pageTransition && pageTransition.previous.pageKey !== presentedPage.pageKey ? <SheetSurface key={pageTransition.previous.pageKey} bottomInset={insets.bottom} dismiss={dismiss} dismissible={dismissible} dragPanHandlers={panResponder.panHandlers} fullHeight inactive page={pageTransition.previous} sheetBottom={0} style={[styles.layerSurface, styles.underLayer]} /> : null}
-              <SheetSurface key={presentedPage.pageKey} bottomInset={insets.bottom} dismiss={dismiss} dismissible={dismissible} dragPanHandlers={panResponder.panHandlers} fullHeight page={presentedPage} sheetBottom={0} style={[styles.layerSurface, transitioningPage && { transform: [{ translateX: pageTranslateX }] }]} />
-            </Animated.View></GestureDetector> : <SheetSurface bottomInset={insets.bottom} dismiss={dismiss} dismissible={dismissible} dragPanHandlers={panResponder.panHandlers} fullHeight={fullHeight} page={livePage} sheetBottom={androidBottomInset} style={{ top: fullHeight ? insets.top : undefined, transform: [{ translateY }] }} />}
+              {transitioningPage && pageTransition && pageTransition.previous.pageKey !== presentedPage.pageKey ? <SheetSurface key={pageTransition.previous.pageKey} bottomInset={insets.bottom} dismiss={dismiss} dismissible={dismissible} dragPanHandlers={panResponder.panHandlers} focusCycleKey={focusCycleKey} fullHeight inactive page={pageTransition.previous} sheetBottom={0} sheetId={sceneSheetId} style={[styles.layerSurface, styles.underLayer]} /> : null}
+              <SheetSurface key={presentedPage.pageKey} bottomInset={insets.bottom} dismiss={dismiss} dismissible={dismissible} dragPanHandlers={panResponder.panHandlers} focusActive={open} focusCycleKey={focusCycleKey} fullHeight page={presentedPage} sheetBottom={0} sheetId={sceneSheetId} style={[styles.layerSurface, transitioningPage && { transform: [pageTransitionOrigin === "bottom" ? { translateY: pageTranslate } : { translateX: pageTranslate }] }]} />
+            </Animated.View></GestureDetector> : <SheetSurface bottomInset={insets.bottom} dismiss={dismiss} dismissible={dismissible} dragPanHandlers={panResponder.panHandlers} focusActive={open} focusCycleKey={focusCycleKey} fullHeight={fullHeight} page={open ? livePage : pageSnapshotRef.current} sheetBottom={androidBottomInset} sheetId={sceneSheetId} style={{ top: fullHeight ? insets.top : undefined, transform: [{ translateY }] }} />}
           </ButtonSizeProvider>
         </KeyboardAvoidingView>
         <ToastViewport />
@@ -366,6 +398,10 @@ export function BottomSheet({
 }
 
 export type BottomSheetItemProps = Omit<ButtonProps, "size">;
+
+export function BottomSheetMenu({ children, style }: { children: ReactNode; style?: StyleProp<ViewStyle> }) {
+  return <View style={[styles.menu, style]}>{children}</View>;
+}
 
 export function BottomSheetItem({
   style,
@@ -446,6 +482,7 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   content: { gap: 6 },
+  menu: { gap: 12 },
   flexContent: { flex: 1 },
   footer: { gap: 8, marginHorizontal: -20, paddingHorizontal: 22, paddingBottom: 2, paddingTop: 18, backgroundColor: colors.page },
   item: { justifyContent: "flex-start", width: "100%" },

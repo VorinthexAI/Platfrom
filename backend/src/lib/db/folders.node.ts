@@ -5,6 +5,7 @@ import { db } from './client';
 import { currentEmbeddingSchema } from '@/lib/embeddings';
 
 export const FOLDERS_COLLECTION = 'folders';
+export const contentPresentationSchema = z.enum(['travel', 'communication', 'learning']);
 
 export const folderSchema = z.object({
   key: z.string().cuid(),
@@ -13,6 +14,7 @@ export const folderSchema = z.object({
   name: z.string().trim().min(1),
   description: z.string().trim().min(1).optional(),
   coverImageKey: z.string().cuid().optional(),
+  presentation: contentPresentationSchema.optional(),
   purpose: z.enum(['generated-documents-root', 'generated-documents-guide', 'generated-documents-brief', 'generated-documents-accommodations', 'generated-documents-restaurants', 'generated-documents-activities', 'communication-mail-root', 'communication-mail-inboxes', 'communication-mail-threads', 'communication-mail-drafts', 'communication-mail-tones', 'communication-mail-reply-context', 'communication-mail-settings']).optional(),
   managedPurpose: z.enum(['mail-attachment', 'mail-inbox', 'mail-inbox-files', 'mail-thread']).optional(), managedOwnerKey: z.string().cuid().optional(),
   mutationPolicy: z.enum(['user', 'system-container']).optional(),

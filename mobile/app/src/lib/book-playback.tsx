@@ -187,7 +187,6 @@ export function BookPlaybackProvider({ children }: { children: ReactNode }) {
       playWhenLoaded.current = false;
       loadedSource.current = undefined;
       pauseOwnedPlayer(player, audioPlayerActive.current);
-      player.replace(null);
     }
     const sourceKey = `${bookKey}:${chapterKey}`;
     const sameLoadedSource = loadedSource.current?.bookKey === bookKey && loadedSource.current.chapterKey === chapterKey;
@@ -287,7 +286,7 @@ export function BookPlaybackProvider({ children }: { children: ReactNode }) {
       lastSaved.current.clear();
     }
     pauseOwnedPlayer(player, audioPlayerActive.current);
-    player.replace(null);
+    void player.seekTo(0).catch(() => undefined);
     player.clearLockScreenControls();
     loadedSource.current = undefined;
     refreshAttempts.current.clear();

@@ -56,6 +56,10 @@
       "react-native": "./packages/ui/components/loading-text/loading-text.mobile.tsx",
       "default": "./packages/ui/components/loading-text/loading-text.web.tsx"
     },
+    "./ui/pull-to-refresh": {
+      "react-native": "./packages/ui/components/pull-to-refresh/pull-to-refresh.mobile.tsx",
+      "default": "./packages/ui/components/pull-to-refresh/pull-to-refresh.web.tsx"
+    },
     "./ui/search-history-pill": {
       "react-native": "./packages/ui/components/search-history-pill/search-history-pill.mobile.tsx",
       "default": "./packages/ui/components/search-history-pill/search-history-pill.web.tsx"

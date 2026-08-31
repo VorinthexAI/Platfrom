@@ -10,7 +10,7 @@ test("opens persistent highlights from the active collection brain menu", () => 
   expect(workspace).toContain('setHighlightsOpen(true)');
   expect(workspace).toContain('>Highlights</BottomSheetItem>');
   expect(workspace).not.toContain('>Create highlight</BottomSheetItem>');
-  const cleanupStart = workspace.indexOf('{activeSheet === "cleanupMenu" ? <>');
+  const cleanupStart = workspace.indexOf('{activeSheet === "cleanupMenu" ? <BottomSheetMenu>');
   const cleanupMenu = workspace.slice(cleanupStart, workspace.indexOf('activeSheet === "imageActions"', cleanupStart));
   expect(cleanupMenu).toContain('>Highlights</BottomSheetItem>');
   expect(cleanupMenu.indexOf('>Highlights</BottomSheetItem>')).toBeLessThan(cleanupMenu.indexOf('{isCollectionOwner ?'));
@@ -45,10 +45,11 @@ test("uses separate full-height grid and player sheets with footer actions", () 
   expect(highlights).toContain('height: cardWidth * 16 / 9');
   expect(highlights).toContain('<Button accessibilityLabel="Previous slide"');
   expect(highlights).toContain("<ChevronLeftIcon />");
-  expect(highlights).toContain('<PauseIcon variant="inverse" />');
-  expect(highlights).toContain('<PlayIcon variant="inverse" />');
-  expect(highlights).toContain('style={styles.playbackToggle} variant="primary"');
-  expect(highlights).toContain('playbackToggle: { height: 39, minHeight: 39, width: 39 }');
+  expect(highlights).toContain('<PauseIcon />');
+  expect(highlights).toContain('<PlayIcon />');
+  expect(highlights).toContain('style={styles.playbackToggle} variant="secondary"');
+  expect(highlights.match(/size="md" variant="secondary"><Chevron/g)).toHaveLength(2);
+  expect(highlights).toContain('playbackToggle: { height: 35, minHeight: 35, width: 35 }');
   expect(highlights).toContain('<Button accessibilityLabel="Next slide"');
   expect(highlights).toContain("<ChevronRightIcon />");
   expect(highlights).not.toContain('accessibilityLabel="Open highlight actions"');
@@ -71,7 +72,8 @@ test("uses owner-only creation and long-press bulk deletion from the grid", () =
   expect(highlights).toContain('bulkToolbar: { width: "100%", minHeight: 36, marginBottom: spacing.xs, padding: 3');
   expect(highlights).toContain('bulkDeleteText: { fontFamily: fonts.regular, fontSize: 11, letterSpacing: 0.4 }');
   expect(highlights).not.toContain('activeSheet === "actions"');
-  expect(highlights).not.toContain('BottomSheetItem');
+  expect(highlights).toContain('>Random</BottomSheetItem>');
+  expect(highlights).toContain('>Custom</BottomSheetItem>');
   expect(highlights).toContain('activeSheet === "confirmDelete"');
   expect(highlights).toContain('title={`Delete ${selectedHighlightKeys.length === 1 ? "highlight" : `${selectedHighlightKeys.length} highlights`}?`}');
   expect(highlights).not.toContain('dismissible={!deleting} hideHeading');
@@ -86,12 +88,18 @@ test("uses owner-only creation and long-press bulk deletion from the grid", () =
   expect(highlights).toContain('size="md" variant="secondary">Close</Button>');
 });
 
-test("rotates each incoming slide as a reduced-motion-aware 3D cube face", () => {
+test("fades each incoming rounded slide with reduced-motion support", () => {
+  expect(highlights).toContain("requestAnimationFrame(tick)");
+  expect(highlights).toContain("elapsedMs: now - previous");
+  expect(highlights).toContain("cancelAnimationFrame(frame)");
+  expect(highlights).not.toContain("elapsedMs: 100");
   expect(highlights).toContain("useReducedMotion()");
-  expect(highlights).toContain("withTiming(1, { duration: 420");
-  expect(highlights).toContain("{ perspective: 900 }");
-  expect(highlights).toContain("rotateY:");
-  expect(highlights).toContain("<Animated.View style={[styles.cubeFace, cubeStyle]}");
+  expect(highlights).toContain("withTiming(1, { duration: 300");
+  expect(highlights).toContain("const fadeStyle = useAnimatedStyle(() => ({ opacity: fadeProgress.value }))");
+  expect(highlights).toContain("<Animated.View style={[styles.slideFrame, fadeStyle]}");
+  expect(highlights).toContain('slideFrame: { width: "100%", height: "100%", overflow: "hidden", borderRadius: radii.lg }');
+  expect(highlights).toContain('image: { width: "100%", height: "100%", borderRadius: radii.lg }');
+  expect(highlights).not.toContain("rotateY:");
 });
 
 test("prefetches direct image URLs and pauses playback in the background with timer cleanup", () => {
@@ -99,7 +107,8 @@ test("prefetches direct image URLs and pauses playback in the background with ti
   expect(highlights).toContain('Image.prefetch(url)');
   expect(highlights).toContain('AppState.addEventListener("change"');
   expect(highlights).toContain('if (state !== "active") dispatch({ type: "pause" })');
-  expect(highlights).toContain("return () => clearInterval(timer)");
+  expect(highlights).toContain("cancelAnimationFrame(frame)");
+  expect(highlights).toContain('AppState.currentState !== "active"');
 });
 
 test("matches the backend highlight operation routes and event cache family", () => {

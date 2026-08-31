@@ -33,6 +33,9 @@ describe('Content idempotency encryption', () => {
     expect(source).not.toContain('existing.status == "completed" && existing.expiresAt <= @now');
     expect(source).toContain('existing.executionStartedAt == null');
     expect(source).toContain('failureCiphertext: @failureCiphertext');
+    expect(source).toContain('failureRetryable: @failureRetryable');
+    expect(source).toContain('@retryFailed && existing.status == "failed" && existing.requestHash == @requestHash && existing.failureRetryable == true');
+    expect(source).toContain('failureCiphertext: null, failureRetryable: null');
     expect(source).not.toContain('failure: @failure');
   });
 

@@ -1,23 +1,9 @@
 import { aql } from 'arangojs';
-import { embedTexts } from '@/lib/embeddings';
 import { newId } from '@/lib/ids';
-import { toArangoDoc } from './base';
 import { withTransaction } from './client';
-import { collectionMemberSchema, type CollectionMember } from './collection-members.node';
-import { collectionSchema, type Collection } from './collections.node';
-import { folderSchema, type Folder } from './folders.node';
 import { organizationSchema, type Organization } from './organizations.node';
 import { userOrganizationSchema, type UserOrganization } from './user-organization.node';
 import { scopeMemberSchema, scopeSchema, type Scope, type ScopeMember } from '@/lib/ai/scopes/schema';
-
-export const DEFAULT_IMAGE_COLLECTION_NAME = 'My Images';
-export const DEFAULT_CONTENT_FOLDER_NAME = 'My Documents';
-
-export interface DefaultPersonalContainers {
-  collection: Collection;
-  collectionMembership: CollectionMember;
-  folder: Folder;
-}
 
 export interface PersonalAuthContext {
   organization: Organization;
@@ -38,50 +24,6 @@ function personalOrganizationName(name: string | null, email: string) {
   return `${verifiedName}'s Organization`;
 }
 
-export function isGuestPersonalIdentity(user: { guestBootstrapSecretHash?: string | null }): boolean {
-  return Boolean(user.guestBootstrapSecretHash);
-}
-
-export function buildDefaultPersonalContainers(input: {
-  scopeKey: string;
-  membershipKey: string;
-  collectionKey: string;
-  collectionMembershipKey: string;
-  folderKey: string;
-  collectionEmbedding: number[];
-  folderEmbedding: number[];
-  now: string;
-}): DefaultPersonalContainers {
-  const collection = collectionSchema.parse({
-    key: input.collectionKey,
-    scopeKey: input.scopeKey,
-    name: DEFAULT_IMAGE_COLLECTION_NAME,
-    embedding: input.collectionEmbedding,
-    isFavorite: false,
-    createdAt: input.now,
-    updatedAt: input.now,
-  });
-  return {
-    collection,
-    collectionMembership: collectionMemberSchema.parse({
-      key: input.collectionMembershipKey,
-      scopeKey: input.scopeKey,
-      collectionKey: collection.key,
-      memberKey: input.membershipKey,
-      role: 'owner',
-      createdAt: input.now,
-    }),
-    folder: folderSchema.parse({
-      key: input.folderKey,
-      scopeKey: input.scopeKey,
-      name: DEFAULT_CONTENT_FOLDER_NAME,
-      embedding: input.folderEmbedding,
-      createdAt: input.now,
-      updatedAt: input.now,
-    }),
-  };
-}
-
 /** Creates the complete personal workspace atomically after identity verification. */
 export async function provisionPersonalAuthContext(user: { key: string; name: string | null; email: string; guestBootstrapSecretHash?: string | null }): Promise<PersonalAuthContext> {
   const existing = await getPersonalAuthContext(user.key);
@@ -94,25 +36,8 @@ export async function provisionPersonalAuthContext(user: { key: string; name: st
   const membershipKey = newId();
   const scopeKey = newId();
   const scopeMembershipKey = newId();
-  let defaultContainers: DefaultPersonalContainers | null = null;
-  if (!isGuestPersonalIdentity(user)) {
-    const [collectionEmbedding, folderEmbedding] = await embedTexts({ texts: [DEFAULT_IMAGE_COLLECTION_NAME, DEFAULT_CONTENT_FOLDER_NAME] });
-    defaultContainers = buildDefaultPersonalContainers({
-      scopeKey,
-      membershipKey,
-      collectionKey: newId(),
-      collectionMembershipKey: newId(),
-      folderKey: newId(),
-      collectionEmbedding: collectionEmbedding!,
-      folderEmbedding: folderEmbedding!,
-      now,
-    });
-  }
-  const defaultCollectionDocuments = defaultContainers ? [toArangoDoc(defaultContainers.collection)] : [];
-  const defaultCollectionMembershipDocuments = defaultContainers ? [toArangoDoc(defaultContainers.collectionMembership)] : [];
-  const defaultFolderDocuments = defaultContainers ? [toArangoDoc(defaultContainers.folder)] : [];
   const result = await withTransaction(
-    ['organizations', 'userOrganizations', 'scopes', 'scopeMembers', 'collections', 'collectionMembers', 'folders'],
+    ['organizations', 'userOrganizations', 'scopes', 'scopeMembers'],
     async (transaction) => {
       const cursor = await transaction.query(aql`
         UPSERT { personalOwnerUserId: ${user.key} }
@@ -124,7 +49,6 @@ export async function provisionPersonalAuthContext(user: { key: string; name: st
           }
           UPDATE {} IN organizations
         LET organization = NEW
-        LET createdPersonalContext = OLD == null
         UPSERT { organizationId: organization._key, userId: ${user.key} }
           INSERT {
             _key: ${membershipKey}, organizationId: organization._key, userId: ${user.key},
@@ -149,24 +73,6 @@ export async function provisionPersonalAuthContext(user: { key: string; name: st
           }
           UPDATE { role: "owner", status: "active" } IN scopeMembers
         LET scopeMembership = NEW
-        LET defaultCollection = FIRST(
-          FOR document IN ${defaultCollectionDocuments}
-            FILTER createdPersonalContext
-            INSERT document INTO collections
-            RETURN NEW
-        )
-        LET defaultCollectionMembership = FIRST(
-          FOR document IN ${defaultCollectionMembershipDocuments}
-            FILTER createdPersonalContext && defaultCollection != null
-            INSERT document INTO collectionMembers
-            RETURN NEW
-        )
-        LET defaultFolder = FIRST(
-          FOR document IN ${defaultFolderDocuments}
-            FILTER createdPersonalContext
-            INSERT document INTO folders
-            RETURN NEW
-        )
         RETURN { organization, membership, scope, scopeMembership }
       `);
       return cursor.next();

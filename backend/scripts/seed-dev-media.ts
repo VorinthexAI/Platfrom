@@ -140,6 +140,7 @@ async function main() {
         height: 720,
         embedding: imageEmbedding,
         imageCaptionKey: captionKey,
+        origin: 'generated',
         isFavorite: imageIndex % 11 === 0,
         createdAt: NOW,
         updatedAt: NOW,

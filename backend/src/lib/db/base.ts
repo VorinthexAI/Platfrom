@@ -199,6 +199,7 @@ export function createNodeHelpers<
       return schema.parse(withArangoKey(result.new as Record<string, unknown>));
     },
     async getById(id: string): Promise<T | null> {
+      if (typeof id !== 'string' || !id.trim()) return null;
       try {
         const doc = await collection().document(id);
         return schema.parse(withArangoKey(doc as Record<string, unknown>));

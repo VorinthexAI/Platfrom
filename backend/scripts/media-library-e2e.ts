@@ -30,14 +30,14 @@ try {
   await database.collection('collections').save({ _key: collectionKey, scopeKey, name: 'Launch', description: 'Launch imagery', embedding: Array(EMBEDDING_DIMENSIONS).fill(0), isFavorite: false, createdAt: now, updatedAt: now });
   const sourceOwnerMembershipKey = newId();
   await database.collection('collectionMembers').save({ _key: sourceOwnerMembershipKey, scopeKey, collectionKey, memberKey: actorKey, role: 'owner', createdAt: now });
-  await database.collection('images').save({ _key: imageKey, scopeKey, filename: 'launch.png', caption: 'A launch vehicle', storageKey: 'mediaLibrary/e2e.png', mimeType: 'image/png', sizeBytes: 24, width: 1, height: 1, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), isFavorite: false, createdAt: now, updatedAt: now });
+  await database.collection('images').save({ _key: imageKey, scopeKey, filename: 'launch.png', caption: 'A launch vehicle', storageKey: 'mediaLibrary/e2e.png', mimeType: 'image/png', sizeBytes: 24, width: 1, height: 1, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), origin: 'uploaded', isFavorite: false, createdAt: now, updatedAt: now });
   await database.collection('tags').save({ _key: tagKey, scopeKey, name: 'Launch', embedding: Array(EMBEDDING_DIMENSIONS).fill(0), createdAt: now, updatedAt: now });
   const membership = await service.addImageToCollection({ scopeKey, collectionKey, imageKey, actorKey, now });
   const assignment = await service.assignTag({ scopeKey, tagKey, sourceType: 'image', sourceKey: imageKey, source: 'user', actorKey, now });
   const cover = await service.setCollectionCoverImage({ scopeKey, collectionKey, imageKey, ownerKey: actorKey, now });
   if (cover.coverImageKey !== imageKey) throw new Error('Collection cover membership verification failed.');
   const unrelatedImageKey = newId();
-  await database.collection('images').save({ _key: unrelatedImageKey, scopeKey, filename: 'other.png', caption: 'Other', storageKey: 'mediaLibrary/other.png', mimeType: 'image/png', sizeBytes: 24, width: 1, height: 1, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), isFavorite: false, createdAt: now, updatedAt: now });
+  await database.collection('images').save({ _key: unrelatedImageKey, scopeKey, filename: 'other.png', caption: 'Other', storageKey: 'mediaLibrary/other.png', mimeType: 'image/png', sizeBytes: 24, width: 1, height: 1, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), origin: 'uploaded', isFavorite: false, createdAt: now, updatedAt: now });
   let unrelatedCoverRejected = false;
   try { await service.setCollectionCoverImage({ scopeKey, collectionKey, imageKey: unrelatedImageKey, ownerKey: actorKey, now }); } catch { unrelatedCoverRejected = true; }
   if (!unrelatedCoverRejected) throw new Error('Unrelated image was accepted as collection cover.');
@@ -61,7 +61,7 @@ try {
   const storage = { async upload({ key, bytes }: { key: string; bytes: Uint8Array }) { uploads += 1; objects.set(key, bytes); return { storageKey: key }; }, async delete(key: string) { deletes += 1; objects.delete(key); }, async download(key: string) { return { bytes: objects.get(key) ?? new Uint8Array() }; }, async copy(sourceKey: string, destinationKey: string) { objects.set(destinationKey, objects.get(sourceKey) ?? new Uint8Array()); return { storageKey: destinationKey }; } };
   const getProcessedImage = async (key: string) => { const raw = await database.collection('images').document(key).catch(() => null); return raw ? imageSchema.parse({ ...raw, key: (raw as { _key: string })._key }) : null; };
   const insertProcessedImage = async (image: ReturnType<typeof imageSchema.parse>) => { const { key, ...document } = image; await database.collection('images').save({ _key: key, ...document }); return image; };
-  const processingInput = { scopeKey, ownerKey: actorKey, file: { filename: 'processed.png', mimeType: 'image/png', sizeBytes: 24, bytes: png(8, 6) }, idempotencyKey: 'processed-e2e' };
+  const processingInput = { scopeKey, ownerKey: actorKey, origin: 'uploaded' as const, file: { filename: 'processed.png', mimeType: 'image/png', sizeBytes: 24, bytes: png(8, 6) }, idempotencyKey: 'processed-e2e' };
   const processingDependencies = { storage, caption: async () => ({ caption: 'A deterministic processed image.', score: 80 }), embed: async () => Array(EMBEDDING_DIMENSIONS).fill(0.125), getImage: getProcessedImage, persistImage: async ({ image, caption }: any) => { if (caption) { const { key, ...document } = caption; await database.collection('imageCaptions').save({ _key: key, ...document }); } return insertProcessedImage(image); } };
   const processed = await processImage(processingInput, processingDependencies);
   const processedReplay = await processImage(processingInput, processingDependencies);

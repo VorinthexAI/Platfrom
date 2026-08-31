@@ -8,7 +8,7 @@ import { ImageProcessingError, processImage, processImages, type ImageProcessing
 const pngFixtures = new Map<string, Uint8Array>();
 for (const [width, height] of [[2, 3], [4, 3]] as const) pngFixtures.set(`${width}x${height}`, new Uint8Array(await sharp({ create: { width, height, channels: 3, background: '#336699' } }).png().toBuffer()));
 function png(width = 2, height = 3) { return pngFixtures.get(`${width}x${height}`)!; }
-function input(bytes = png()) { return { scopeKey: 'c123456789', ownerKey: 'c987654321', file: { filename: 'photo.png', mimeType: 'image/png', sizeBytes: bytes.length, bytes } }; }
+function input(bytes = png()) { return { scopeKey: 'c123456789', ownerKey: 'c987654321', origin: 'uploaded' as const, file: { filename: 'photo.png', mimeType: 'image/png', sizeBytes: bytes.length, bytes } }; }
 const alternateFormats = await Promise.all((['jpeg', 'gif', 'webp'] as const).map(async (format) => ({
   format,
   bytes: new Uint8Array(await sharp({ create: { width: 3, height: 2, channels: 3, background: '#663399' } })[format]().toBuffer()),
@@ -16,7 +16,7 @@ const alternateFormats = await Promise.all((['jpeg', 'gif', 'webp'] as const).ma
 describe('MediaLibrary image processing', () => {
   test('normalizes accepted source formats to canonical PNG persistence', async () => {
     const uploads: Array<{ key: string; mimeType: string; bytes: Uint8Array }> = [];
-    const files = alternateFormats.map(({ format, bytes }) => ({ scopeKey: 'c123456789', ownerKey: 'c987654321', file: { filename: `source.${format === 'jpeg' ? 'jpg' : format}`, mimeType: format === 'jpeg' ? 'image/jpeg' : `image/${format}`, sizeBytes: bytes.byteLength, bytes } }));
+    const files = alternateFormats.map(({ format, bytes }) => ({ scopeKey: 'c123456789', ownerKey: 'c987654321', origin: 'uploaded' as const, file: { filename: `source.${format === 'jpeg' ? 'jpg' : format}`, mimeType: format === 'jpeg' ? 'image/jpeg' : `image/${format}`, sizeBytes: bytes.byteLength, bytes } }));
     const results = await processImages(files, {
       storage: { async upload(value) { uploads.push(value); return { storageKey: value.key }; }, async delete() {} },
       hashBatch: async () => ['0000000000000000', 'ffffffffffffffff', 'aaaaaaaaaaaaaaaa'], findCaption: async () => null,
@@ -36,8 +36,8 @@ describe('MediaLibrary image processing', () => {
     const idempotencyKey = 'historical-jpeg';
     const key = `c${createHash('sha256').update(`c123456789\0${idempotencyKey}`).digest('hex').slice(0, 24)}`;
     const storageKey = `media/c123456789/${key}/${createHash('sha256').update(source).digest('hex')}/original.jpg`;
-    const existing = { key, scopeKey: 'c123456789', filename: 'legacy.jpg', caption: 'Historical', storageKey, mimeType: 'image/jpeg', sizeBytes: source.byteLength, width: 3, height: 2, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), imageCaptionKey: null, createdByKey: 'c987654321', mutationPolicy: 'user' as const, isFavorite: false, createdAt: '2026-08-01T00:00:00.000Z', updatedAt: '2026-08-01T00:00:00.000Z' };
-    const result = await processImage({ scopeKey: 'c123456789', ownerKey: 'c987654321', idempotencyKey, file: { filename: 'legacy.jpg', mimeType: 'image/jpeg', sizeBytes: source.byteLength, bytes: source } }, { getImage: async () => existing });
+    const existing = { key, scopeKey: 'c123456789', filename: 'legacy.jpg', caption: 'Historical', storageKey, mimeType: 'image/jpeg', sizeBytes: source.byteLength, width: 3, height: 2, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), imageCaptionKey: null, createdByKey: 'c987654321', origin: 'uploaded' as const, mutationPolicy: 'user' as const, isFavorite: false, createdAt: '2026-08-01T00:00:00.000Z', updatedAt: '2026-08-01T00:00:00.000Z' };
+    const result = await processImage({ scopeKey: 'c123456789', ownerKey: 'c987654321', origin: 'uploaded', idempotencyKey, file: { filename: 'legacy.jpg', mimeType: 'image/jpeg', sizeBytes: source.byteLength, bytes: source } }, { getImage: async () => existing });
     expect(result).toBe(existing);
   });
   test('stores captions with current Qwen vectors', async () => {
@@ -163,6 +163,7 @@ describe('MediaLibrary image processing', () => {
     const hashesAfterInsert = hashCalls;
     await expect(processImage({ ...input(), idempotencyKey: 'same-key' }, dependencies)).resolves.toBe(stored);
     expect(hashCalls).toBe(hashesAfterInsert);
+    await expect(processImage({ ...input(), origin: 'generated', idempotencyKey: 'same-key' }, dependencies)).rejects.toMatchObject({ code: 'IMAGE_IDEMPOTENCY_CONFLICT' });
     await expect(processImage({ ...input(png(4, 3)), idempotencyKey: 'same-key' }, { ...dependencies, caption: async () => ({ caption: 'Caption', score: 80 }) })).rejects.toMatchObject({ code: 'IMAGE_IDEMPOTENCY_CONFLICT' });
     expect(stored).not.toHaveProperty('requestHash');
   });
@@ -222,7 +223,7 @@ describe('MediaLibrary image processing', () => {
     const captionCalls: number[] = [];
     let metrics: ImageProcessingMetrics | undefined;
     const inputs = [exact, near, different].map((bytes, index) => ({
-      scopeKey: 'c123456789', ownerKey: 'c987654321', imageKey: `cmrnlzf650002qc7k4p5zem${index + 5}`,
+      scopeKey: 'c123456789', ownerKey: 'c987654321', origin: 'uploaded' as const, imageKey: `cmrnlzf650002qc7k4p5zem${index + 5}`,
       file: { filename: `photo-${index}.png`, mimeType: 'image/png', sizeBytes: bytes.byteLength, bytes },
     }));
     const results = await processImages(inputs, {

@@ -37,7 +37,7 @@ import { executeAsk } from '@/lib/ai/router/execute-route';
 import type { ChatOutput } from '@/lib/ai/providers';
 import { performance } from 'node:perf_hooks';
 
-const overviewSchema = strictObject({ collectionKey: z.string().cuid().optional(), maxCaptionScore: z.number().int().min(1).max(100).optional(), ...cursorPaginationInputShape });
+const overviewSchema = strictObject({ collectionKey: z.string().cuid().optional(), origin: z.enum(['uploaded', 'generated']).optional(), maxCaptionScore: z.number().int().min(1).max(100).optional(), ...cursorPaginationInputShape });
 const collectionCreateSchema = strictObject({ name: z.string().trim().min(1).max(120), isFavorite: z.boolean().default(false) });
 const collectionUpdateSchema = strictObject({ collectionKey: z.string().cuid(), name: z.string().trim().min(1).max(120), isFavorite: z.boolean(), coverImageKey: z.string().cuid().nullable().optional() });
 const collectionDeleteSchema = strictObject({ collectionKey: z.string().cuid() });
@@ -52,12 +52,13 @@ const shareUpdateSchema = strictObject({ collectionKey: z.string().cuid(), share
 const shareRevokeSchema = strictObject({ collectionKey: z.string().cuid(), shareKey: z.string().cuid() });
 const shareActivateSchema = strictObject({ token: z.string().min(32).max(512) });
 const imageUpdateSchema = strictObject({ imageKey: z.string().cuid(), name: z.string().trim().min(1).max(255).refine((name) => !name.includes('/') && !name.includes('\\'), 'Image name cannot contain path separators.'), isFavorite: z.boolean() });
-const uploadFileSchema = strictObject({ clientKey: z.string().min(1).max(120), filename: z.string().trim().regex(/^[^/\\]+\.(?:png|jpe?g)$/i), sizeBytes: z.number().int().positive().max(20 * 1024 * 1024), processingMode: z.enum(['library', 'cover']).default('library'), latitude: z.number().finite().min(-90).max(90).optional(), longitude: z.number().finite().min(-180).max(180).optional() }).superRefine((value, context) => {
+const uploadFileSchema = strictObject({ clientKey: z.string().min(1).max(120), filename: z.string().trim().regex(/^[^/\\]+\.png$/i), sizeBytes: z.number().int().positive().max(20 * 1024 * 1024), processingMode: z.enum(['library', 'cover']).default('library'), latitude: z.number().finite().min(-90).max(90).optional(), longitude: z.number().finite().min(-180).max(180).optional() }).superRefine((value, context) => {
   if ((value.latitude === undefined) !== (value.longitude === undefined)) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Image coordinates require both latitude and longitude.' });
 });
 const presignSchema = strictObject({ collectionKey: z.string().cuid().nullable().optional(), files: z.array(uploadFileSchema).min(1).max(20) }).refine(({ files }) => new Set(files.map(({ clientKey }) => clientKey)).size === files.length, 'Upload client keys must be unique.');
 const completeSchema = strictObject({ uploadKeys: z.array(z.string().cuid()).min(1).max(20) }).refine(({ uploadKeys }) => new Set(uploadKeys).size === uploadKeys.length, 'Upload keys must be unique.');
 const searchSchema = imageSearchInputSchema;
+const collectionSearchSchema = strictObject({ query: z.string().trim().min(1).max(500), minimumScore: z.number().min(-1).max(1).default(0.55), limit: z.number().int().min(1).max(50).default(10) });
 const statusSchema = strictObject({ uploadKeys: z.array(z.string().cuid()).min(1).max(20) });
 const favoriteSchema = strictObject({ imageKey: z.string().cuid(), isFavorite: z.boolean() });
 const deleteImagesSchema = strictObject({ imageKeys: z.array(z.string().cuid()).min(1).max(100) }).refine(({ imageKeys }) => new Set(imageKeys).size === imageKeys.length, 'Image keys must be unique');
@@ -74,10 +75,10 @@ const collectionTransferSchema = strictObject({
   if (new Set(value.imageKeys).size !== value.imageKeys.length) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Image keys must be unique.', path: ['imageKeys'] });
   if (value.destinationCollectionKeys.includes(value.sourceCollectionKey)) context.addIssue({ code: z.ZodIssueCode.custom, message: 'The source collection cannot be a destination.', path: ['destinationCollectionKeys'] });
 });
-const highlightCreateSchema = strictObject({ collectionKey: z.string().cuid() });
+const highlightCreateSchema = strictObject({ collectionKey: z.string().cuid(), imageKeys: z.array(z.string().cuid()).min(2).max(10).optional() }).refine(({ imageKeys }) => imageKeys === undefined || new Set(imageKeys).size === imageKeys.length, 'Highlight image keys must be unique');
 const highlightListSchema = strictObject({ collectionKey: z.string().cuid().optional() });
 const highlightKeySchema = strictObject({ highlightKey: z.string().cuid() });
-const memoryCreateSchema = strictObject({ collectionKey: z.string().cuid() });
+const memoryCreateSchema = strictObject({ collectionKey: z.string().cuid(), imageKey: z.string().cuid().optional() });
 const memoryListSchema = strictObject({ collectionKey: z.string().cuid() });
 const memoryKeySchema = strictObject({ memoryKey: z.string().cuid() });
 const memoryDeleteSchema = strictObject({ memoryKey: z.string().cuid(), collectionKey: z.string().cuid() });
@@ -209,7 +210,7 @@ export async function safeImage(image: z.infer<typeof imageSchema>, score?: numb
     key: image.key, filename: image.filename, caption: image.caption, imageCaptionKey: image.imageCaptionKey ?? null,
     mimeType: image.mimeType, sizeBytes: image.sizeBytes, width: image.width, height: image.height,
     city: image.city ?? null, country: image.country ?? null, countryCode: image.countryCode ?? null,
-    latitude: image.latitude ?? null, longitude: image.longitude ?? null, locationSource: image.locationSource ?? null,
+    latitude: image.latitude ?? null, longitude: image.longitude ?? null, locationSource: image.locationSource ?? null, origin: image.origin,
     mutationPolicy: image.mutationPolicy, isFavorite: image.isFavorite, createdByKey: image.createdByKey, createdAt: image.createdAt, updatedAt: image.updatedAt,
     url: await imageUrl(image.storageKey), ...(score === undefined ? {} : { score }),
   };
@@ -217,7 +218,7 @@ export async function safeImage(image: z.infer<typeof imageSchema>, score?: numb
 
 export function projectGalleryCollection(collection: z.infer<typeof collectionSchema>, count: number, coverUrl: string | null, memberKey: string, role: 'owner' | 'collaborator' | 'viewer' = 'owner', isOwned = true) {
   const managed = collection.mutationPolicy === 'system-only';
-  return { key: collection.key, name: collection.name, description: collection.description ?? null, purpose: collection.purpose, mutationPolicy: collection.mutationPolicy, isFavorite: collection.isFavorite, count, coverUrl, memberKey, role, isOwned, access: { canRead: true, canContribute: !managed && role !== 'viewer', canManage: !managed && role === 'owner' }, createdAt: collection.createdAt, updatedAt: collection.updatedAt };
+  return { key: collection.key, name: collection.name, description: collection.description ?? null, purpose: collection.purpose, mutationPolicy: collection.mutationPolicy, ...(collection.presentation ? { presentation: collection.presentation } : {}), isFavorite: collection.isFavorite, count, coverUrl, memberKey, role, isOwned, access: { canRead: true, canContribute: !managed && role !== 'viewer', canManage: !managed && role === 'owner' }, createdAt: collection.createdAt, updatedAt: collection.updatedAt };
 }
 
 async function reconcileVisualIdentity(identity: z.infer<typeof visualIdentitySchema>, organizationKey: string, actorKey: string, context: GalleryOperationContext) {
@@ -285,7 +286,7 @@ async function overview(rawInput: unknown, context: GalleryOperationContext) {
     const input = { ...overviewSchema.parse(rawInput), ...context };
     const membership = await authorize(context);
     if (input.collectionKey && !await repository.getCollectionRole(input.scopeKey, input.collectionKey, membership.key)) throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.');
-    const { collections, images } = await repository.listOverview({ scopeKey: input.scopeKey, actorKey: membership.key, collectionKey: input.collectionKey, maxCaptionScore: input.maxCaptionScore, cursor: input.cursor, limit: input.limit });
+    const { collections, images } = await repository.listOverview({ scopeKey: input.scopeKey, actorKey: membership.key, collectionKey: input.collectionKey, origin: input.origin, maxCaptionScore: input.maxCaptionScore, cursor: input.cursor, limit: input.limit });
     const canCreateCollections = await repository.canManageScope(input.scopeKey, membership.key);
     return {
       collections: await Promise.all(collections.map(async ({ collection, count, cover, role, isOwned }) => projectGalleryCollection(collection, count, cover ? await imageUrl(cover.storageKey) : null, membership.key, role, isOwned))),
@@ -351,12 +352,10 @@ async function reserveUploads(rawInput: unknown, context: GalleryOperationContex
     const locations = await Promise.all(input.files.map((file) => file.latitude === undefined || file.longitude === undefined ? undefined : reverseGeocodeImage({ latitude: file.latitude, longitude: file.longitude })));
     const records = input.files.map((file, index) => {
       const key = newId(), imageKey = newId();
-       const legacyJpeg = /\.jpe?g$/i.test(file.filename);
-       const mimeType = legacyJpeg ? 'image/jpeg' as const : 'image/png' as const;
-       const extension = legacyJpeg ? 'jpg' : 'png';
-       const storageKey = `pending/gallery/${input.scopeKey}/${key}/original.${extension}`;
-      const location = locations[index];
-       return galleryUploadSchema.parse({ key, organizationKey: input.organizationKey, scopeKey: input.scopeKey, actorKey: membership.key, imageKey, collectionKey: input.collectionKey ?? null, filename: legacyJpeg ? file.filename.replace(/\.jpeg$/i, '.jpg') : file.filename, mimeType, sizeBytes: file.sizeBytes, storageKey, processingMode: file.processingMode, city: location?.city ?? null, country: location?.country ?? null, countryCode: location?.countryCode ?? null, status: 'reserved', errorCode: null, createdAt: now.toISOString(), updatedAt: now.toISOString(), expiresAt: new Date(now.getTime() + 15 * 60_000).toISOString() });
+       const mimeType = 'image/png' as const;
+       const storageKey = `pending/gallery/${input.scopeKey}/${key}/original.png`;
+       const location = locations[index];
+       return galleryUploadSchema.parse({ key, organizationKey: input.organizationKey, scopeKey: input.scopeKey, actorKey: membership.key, imageKey, collectionKey: input.collectionKey ?? null, filename: file.filename, mimeType, sizeBytes: file.sizeBytes, storageKey, processingMode: file.processingMode, city: location?.city ?? null, country: location?.country ?? null, countryCode: location?.countryCode ?? null, status: 'reserved', errorCode: null, createdAt: now.toISOString(), updatedAt: now.toISOString(), expiresAt: new Date(now.getTime() + 15 * 60_000).toISOString() });
     });
     const urls = await Promise.all(records.map((record) => context.signUpload ? context.signUpload(record) : signUrl(publicS3, new PutObjectCommand({ Bucket: S3_BUCKET, Key: record.storageKey, ContentType: record.mimeType }), { expiresIn: 10 * 60 })));
     await (context.insertUploads ?? repository.insertUploads)(records);
@@ -448,6 +447,19 @@ async function search(rawInput: unknown, context: GalleryOperationContext) {
     const images = await Promise.all(matches.map(({ image, score }) => safeImage(image, score)));
     if ('query' in input && input.recordHistory) await (context.recordUserSearch ?? getDefaultUserSearchService().record)(membership.userId, input.query);
     return { images };
+}
+
+export async function searchGalleryCollections(rawInput: unknown, context: GalleryOperationContext) {
+    const input = { ...collectionSearchSchema.parse(rawInput), ...context };
+    const membership = await authorize(context);
+    const queryEmbedding = currentEmbeddingSchema.parse(context.queryEmbedding ?? await embedText({ text: input.query }));
+    const rows = await repository.searchAccessibleCollections({ scopeKey: input.scopeKey, actorKey: membership.key, embedding: queryEmbedding, minimumScore: input.minimumScore, limit: input.limit });
+    return {
+      collections: await Promise.all(rows.map(async ({ collection, count, cover, role, isOwned, score }) => ({
+        ...projectGalleryCollection(collection, count, cover ? await imageUrl(cover.storageKey) : null, membership.key, role, isOwned),
+        score,
+      }))),
+    };
 }
 
 async function setFavorite(rawInput: unknown, context: GalleryOperationContext) {
@@ -708,13 +720,22 @@ async function deleteSubject(rawInput: unknown, context: GalleryOperationContext
 async function createHighlight(rawInput: unknown, context: GalleryOperationContext) {
   const input = { ...highlightCreateSchema.parse(rawInput), ...context };
   const membership = await requireOwner(context, input.collectionKey);
-  const candidates = await (context.listHighlightCandidates ?? repository.listHighlightCandidates)(input.scopeKey, input.collectionKey, membership.key);
-  if (!candidates) throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.');
-  const selected = selectHighlightCandidates(candidates, context.random);
+  let imageKeys = input.imageKeys;
+  if (imageKeys === undefined) {
+    const candidates = await (context.listHighlightCandidates ?? repository.listHighlightCandidates)(input.scopeKey, input.collectionKey, membership.key);
+    if (!candidates) throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.');
+    imageKeys = selectHighlightCandidates(candidates, context.random).map(({ image }) => image.key);
+  }
   const now = new Date().toISOString();
-  const highlight = imageCollectionHighlightSchema.parse({ key: requestIdentity('highlight-create', context), scopeKey: input.scopeKey, collectionKey: input.collectionKey, imageKeys: selected.map(({ image }) => image.key), createdByKey: membership.key, createdAt: now, updatedAt: now });
-  const saved = await (context.createHighlight ?? repository.createHighlight)(highlight, membership.key);
-  if (!saved) throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.');
+  const highlight = imageCollectionHighlightSchema.parse({ key: requestIdentity('highlight-create', context), scopeKey: input.scopeKey, collectionKey: input.collectionKey, imageKeys, createdByKey: membership.key, createdAt: now, updatedAt: now });
+  const persist = context.createHighlight ?? repository.createHighlight;
+  const saved = input.imageKeys === undefined
+    ? await persist(highlight, membership.key)
+    : await persist(highlight, membership.key, { requireExactImageKeys: true });
+  if (!saved) {
+    if (input.imageKeys !== undefined) throw new GalleryOperationError(409, 'GALLERY_HIGHLIGHT_IMAGES_UNAVAILABLE', 'Every selected image must still belong to this collection.');
+    throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.');
+  }
   const row = await (context.getHighlight ?? repository.getHighlight)(input.scopeKey, saved.key, membership.key);
   await publish(context, 'highlightChanged', { collections: [input.collectionKey] });
   return { highlight: await safeHighlight(row?.highlight ?? saved, row?.images ?? []) };
@@ -758,7 +779,9 @@ async function createMemory(rawInput: unknown, context: GalleryOperationContext)
   }
   const candidates = await (context.listMemoryCandidates ?? repository.listMemoryCandidates)(input.scopeKey, input.collectionKey, membership.key);
   if (!candidates) throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.');
-  const candidate = selectMemoryCandidate(candidates, context.random);
+  const candidate = input.imageKey === undefined
+    ? selectMemoryCandidate(candidates, context.random)
+    : candidates.find(({ image }) => image.key === input.imageKey);
   if (!candidate) throw new GalleryOperationError(409, 'GALLERY_MEMORY_IMAGES_EXHAUSTED', 'Add more unique images to this collection to create another memory.');
   const generationStartedAt = performance.now();
   const generated = context.generateMemory

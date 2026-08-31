@@ -222,6 +222,19 @@ describe('validateQueryParams', () => {
     expect(nextCalls).toBe(2);
   });
 
+  test('allows strict generation-history selectors on GET requests', async () => {
+    let nextCalls = 0;
+    await validateQueryParams(
+      middlewareContext('/api/v1/images/generation-history', {}, '?organizationKey=organization&scopeKey=cm0000000000000000000000&limit=20'),
+      async () => { nextCalls += 1; },
+    );
+    await expect(validateQueryParams(
+      middlewareContext('/api/v1/images/generation-history', {}, '?organizationKey=organization&scopeKey=cm0000000000000000000000&limit=20&userKey=forged'),
+      async () => { nextCalls += 1; },
+    )).rejects.toThrow();
+    expect(nextCalls).toBe(1);
+  });
+
   test('allows hidden-content selectors only on reveal requests', async () => {
     let nextCalls = 0;
     await validateQueryParams(

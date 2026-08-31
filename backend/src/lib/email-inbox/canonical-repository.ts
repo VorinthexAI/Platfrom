@@ -25,6 +25,7 @@ import type { StagedEmailAttachment } from './attachment-ingestion';
 import { exportEmailMessageToArchive, exportEmailThreadToArchive } from './exports';
 import { documentVersionSchema, type DocumentVersion } from '@/lib/db/document-versions.node';
 import { documentSummarySchema, type DocumentSummary } from '@/lib/db/document-summaries.node';
+import { emailExportContainerKeys } from './export-container-keys';
 
 type Database = Pick<typeof db, 'query'> & Partial<Pick<typeof db, 'beginTransaction'>>;
 type RepositoryError = (reason: 'not_found' | 'forbidden' | 'conflict', message?: string) => Error;
@@ -57,13 +58,12 @@ export function createCanonicalEmailRepository(database: Database, error: Reposi
   };
   const exportThread = async (thread: z.infer<typeof emailThreadRecordSchema>, messages: Array<z.infer<typeof emailMessageRecordSchema>>, timestamp: string) => {
     try {
-      const rootKey = stableKey('email-archive-export-root', thread.scopeKey);
-      const inboxKey = stableKey('email-archive-export-inbox', thread.scopeKey, thread.accountKey);
+      const { rootKey, inboxKey } = emailExportContainerKeys(thread.scopeKey, thread.accountKey);
       const embedding = Array(EMBEDDING_DIMENSIONS).fill(0);
-      const root = await database.query('UPSERT { _key: @key } INSERT { _key: @key, scopeKey: @scopeKey, name: "Signal", mutationPolicy: "user", embedding: @embedding, isFavorite: false, createdAt: @now, updatedAt: @now } UPDATE {} IN folders RETURN NEW', { key: rootKey, scopeKey: thread.scopeKey, embedding, now: timestamp });
+      const root = await database.query('UPSERT { _key: @key } INSERT { _key: @key, scopeKey: @scopeKey, name: "Signal", presentation: "communication", mutationPolicy: "user", embedding: @embedding, isFavorite: false, createdAt: @now, updatedAt: @now } UPDATE { presentation: "communication" } IN folders RETURN NEW', { key: rootKey, scopeKey: thread.scopeKey, embedding, now: timestamp });
       const rootValue = await root.next() as { scopeKey?: unknown } | undefined;
       if (rootValue?.scopeKey !== thread.scopeKey) return;
-      const inbox = await database.query('LET source = FIRST(FOR value IN emailInboxes FILTER value.scopeKey == @scopeKey && value.connectorKey == @connectorKey LIMIT 1 RETURN value) FILTER source != null UPSERT { _key: @key } INSERT { _key: @key, scopeKey: @scopeKey, parentFolderKey: @rootKey, name: source.name, mutationPolicy: "user", embedding: source.embedding, isFavorite: false, createdAt: @now, updatedAt: @now } UPDATE {} IN folders RETURN NEW', { key: inboxKey, rootKey, scopeKey: thread.scopeKey, connectorKey: thread.accountKey, now: timestamp });
+      const inbox = await database.query('LET source = FIRST(FOR value IN emailInboxes FILTER value.scopeKey == @scopeKey && value.connectorKey == @connectorKey LIMIT 1 RETURN value) FILTER source != null UPSERT { _key: @key } INSERT { _key: @key, scopeKey: @scopeKey, parentFolderKey: @rootKey, name: source.name, mutationPolicy: "user", embedding: source.embedding, isFavorite: false, createdAt: @now, updatedAt: @now } UPDATE { presentation: null } IN folders OPTIONS { keepNull: false } RETURN NEW', { key: inboxKey, rootKey, scopeKey: thread.scopeKey, connectorKey: thread.accountKey, now: timestamp });
       const inboxValue = await inbox.next() as { scopeKey?: unknown } | undefined;
       if (inboxValue?.scopeKey !== thread.scopeKey) return;
       const exports = [

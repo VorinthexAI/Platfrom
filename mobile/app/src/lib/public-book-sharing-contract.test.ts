@@ -23,8 +23,11 @@ test("keeps nested book shares public without changing Gallery activation return
 test("provides owner link controls that converge on book changed events", () => {
   expect(workspace).toContain('>Share</BottomSheetItem>');
   expect(sharing).toContain('height="full"');
-  expect(sharing).toContain('accessibilityLabel="Audio book share active"');
-  expect(sharing).toContain('active === share.active ? share : await updateBookShare(book.key, active)');
+  expect(sharing).toContain('share.active ? share : await updateBookShare(book.key, true)');
+  expect(sharing).toContain('accessibilityLabel={`Share ${book.title} audio book link`}');
+  expect(sharing).toContain('style={styles.pillButton}');
+  expect(sharing).not.toContain("<Switch");
+  expect(sharing).not.toContain("loading={busy}");
   expect(sharing).toContain("NativeShare.share");
   expect(sharing).toContain('size="md" variant="primary">Share</Button>');
   expect(sharing).toContain('size="md" variant="secondary">Close</Button>');

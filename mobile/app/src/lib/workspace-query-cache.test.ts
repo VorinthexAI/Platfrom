@@ -794,7 +794,7 @@ test("isolates and updates collection sharing caches", () => {
   expect(galleryQueryKeys.members(context, "collection")).not.toEqual(galleryQueryKeys.members(context, "other"));
 });
 
-const image = (key: string, isFavorite = false): GalleryImage => ({ key, filename: `${key}.jpg`, caption: key, imageCaptionKey: null, mimeType: "image/jpeg", sizeBytes: 100, width: 10, height: 10, isFavorite, createdAt: "2026-08-14T00:00:00.000Z", updatedAt: "2026-08-14T00:00:00.000Z", url: `https://images.example/${key}` });
+const image = (key: string, isFavorite = false, origin: GalleryImage["origin"] = "uploaded"): GalleryImage => ({ key, filename: `${key}.jpg`, caption: key, imageCaptionKey: null, mimeType: "image/jpeg", sizeBytes: 100, width: 10, height: 10, city: null, country: null, countryCode: null, latitude: null, longitude: null, locationSource: null, origin, mutationPolicy: "user", isFavorite, createdAt: "2026-08-14T00:00:00.000Z", updatedAt: "2026-08-14T00:00:00.000Z", url: `https://images.example/${key}` });
 
 test("optimistically patches favorites across every Gallery overview", () => {
   const client = new QueryClient();
@@ -829,6 +829,49 @@ test("optimistically copies and moves many images to many collection caches", ()
   expect(client.getQueryData<GalleryOverview>(galleryQueryKeys.overview(context, "two"))?.images).toEqual([first, second]);
 });
 
+test("moves uploaded and generated images across origin-specific Gallery caches", () => {
+  const client = new QueryClient();
+  const uploaded = image("uploaded"), generated = image("generated", false, "generated"), retained = image("retained");
+  const collections = [
+    { key: "source", name: "Source", description: null, isFavorite: false, count: 3, coverUrl: uploaded.url, memberKey: "membership", role: "owner" as const, access: { canRead: true, canContribute: true, canManage: true } },
+    { key: "destination", name: "Destination", description: null, isFavorite: false, count: 0, coverUrl: null, memberKey: "membership", role: "owner" as const, access: { canRead: true, canContribute: true, canManage: true } },
+  ];
+  const overview = (images: GalleryImage[]): GalleryOverview => ({ collections, images, nextCursor: null, canCreateCollections: true });
+  client.setQueryData(galleryQueryKeys.overview(context), overview([uploaded, generated, retained]));
+  client.setQueryData(galleryQueryKeys.overview(context, "source", "uploaded"), overview([uploaded, retained]));
+  client.setQueryData(galleryQueryKeys.overview(context, "source", "generated"), overview([generated]));
+  client.setQueryData(galleryQueryKeys.overview(context, "destination", "uploaded"), overview([]));
+  client.setQueryData(galleryQueryKeys.overview(context, "destination", "generated"), overview([]));
+
+  transferCachedGalleryImages(client, context, { sourceCollectionKey: "source", destinationCollectionKeys: ["destination"], images: [uploaded, generated], mode: "move" });
+
+  expect(client.getQueryData<GalleryOverview>(galleryQueryKeys.overview(context, "source", "uploaded"))?.images).toEqual([retained]);
+  expect(client.getQueryData<GalleryOverview>(galleryQueryKeys.overview(context, "source", "generated"))?.images).toEqual([]);
+  expect(client.getQueryData<GalleryOverview>(galleryQueryKeys.overview(context, "destination", "uploaded"))?.images).toEqual([uploaded]);
+  expect(client.getQueryData<GalleryOverview>(galleryQueryKeys.overview(context, "destination", "generated"))?.images).toEqual([generated]);
+  expect(client.getQueryData<GalleryOverview>(galleryQueryKeys.overview(context))?.collections).toMatchObject([{ count: 1 }, { count: 2 }]);
+  expect(client.getQueryData<GalleryOverview>(galleryQueryKeys.overview(context, "destination"))).toMatchObject({ collections: [{ count: 1 }, { count: 2 }], images: [uploaded, generated] });
+});
+
+test("copies only missing memberships across origin-specific Gallery caches", () => {
+  const client = new QueryClient();
+  const uploaded = image("uploaded"), generated = image("generated", false, "generated");
+  const collections = [
+    { key: "source", name: "Source", description: null, isFavorite: false, count: 2, coverUrl: uploaded.url, memberKey: "membership", role: "owner" as const, access: { canRead: true, canContribute: true, canManage: true } },
+    { key: "destination", name: "Destination", description: null, isFavorite: false, count: 1, coverUrl: uploaded.url, memberKey: "membership", role: "owner" as const, access: { canRead: true, canContribute: true, canManage: true } },
+  ];
+  const overview = (images: GalleryImage[]): GalleryOverview => ({ collections, images, nextCursor: null, canCreateCollections: true });
+  client.setQueryData(galleryQueryKeys.overview(context), overview([uploaded, generated]));
+  client.setQueryData(galleryQueryKeys.overview(context, "destination", "uploaded"), overview([uploaded]));
+  client.setQueryData(galleryQueryKeys.overview(context, "destination", "generated"), overview([]));
+
+  transferCachedGalleryImages(client, context, { sourceCollectionKey: "source", destinationCollectionKeys: ["destination"], images: [uploaded, generated], mode: "copy" });
+
+  expect(client.getQueryData<GalleryOverview>(galleryQueryKeys.overview(context, "destination", "uploaded"))?.images).toEqual([uploaded]);
+  expect(client.getQueryData<GalleryOverview>(galleryQueryKeys.overview(context, "destination", "generated"))?.images).toEqual([generated]);
+  expect(client.getQueryData<GalleryOverview>(galleryQueryKeys.overview(context))?.collections).toMatchObject([{ count: 2 }, { count: 2 }]);
+});
+
 test("removes deleted images everywhere and restores exact optimistic snapshots", () => {
   const client = new QueryClient();
   const deleted = image("deleted"), retained = image("retained");
@@ -840,4 +883,20 @@ test("removes deleted images everywhere and restores exact optimistic snapshots"
   expect(client.getQueryData<GalleryOverview>(key)).toMatchObject({ collections: [{ count: 1 }], images: [retained] });
   restoreGalleryOverviews(client, snapshot);
   expect(client.getQueryData<GalleryOverview>(key)?.images).toEqual([deleted, retained]);
+});
+
+test("removes images and reconciles membership once across origin-specific Gallery caches", () => {
+  const client = new QueryClient();
+  const uploaded = image("uploaded"), generated = image("generated", false, "generated"), retained = image("retained");
+  const collection = { key: "collection", name: "Collection", description: null, isFavorite: false, count: 3, coverUrl: uploaded.url, memberKey: "membership", role: "owner" as const, access: { canRead: true, canContribute: true, canManage: true } };
+  const overview = (images: GalleryImage[]): GalleryOverview => ({ collections: [collection], images, nextCursor: null, canCreateCollections: true });
+  client.setQueryData(galleryQueryKeys.overview(context), overview([uploaded, generated, retained]));
+  client.setQueryData(galleryQueryKeys.overview(context, "collection", "uploaded"), overview([uploaded, retained]));
+  client.setQueryData(galleryQueryKeys.overview(context, "collection", "generated"), overview([generated]));
+
+  removeCachedGalleryImages(client, context, [uploaded, generated]);
+
+  expect(client.getQueryData<GalleryOverview>(galleryQueryKeys.overview(context, "collection", "uploaded"))).toMatchObject({ collections: [{ count: 1, coverUrl: null }], images: [retained] });
+  expect(client.getQueryData<GalleryOverview>(galleryQueryKeys.overview(context, "collection", "generated"))).toMatchObject({ collections: [{ count: 1 }], images: [] });
+  expect(client.getQueryData<GalleryOverview>(galleryQueryKeys.overview(context))).toMatchObject({ collections: [{ count: 1 }], images: [retained] });
 });

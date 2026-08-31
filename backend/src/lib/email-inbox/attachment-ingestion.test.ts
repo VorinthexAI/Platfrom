@@ -75,7 +75,7 @@ function fixture(options: { exportFailure?: boolean } = {}) {
     },
     parse: async () => ({ document: {} as never }),
     sanitizeImage: async (bytes) => ({ bytes: Uint8Array.from(bytes), coordinates: undefined }),
-    processImage: async (input) => ({ key: input.imageKey } as never),
+    processImage: async (input) => { expect(input.origin).toBe('uploaded'); return { key: input.imageKey } as never; },
     now: () => at,
   });
   return { service, repository, bindings, events, uploads, deleted };

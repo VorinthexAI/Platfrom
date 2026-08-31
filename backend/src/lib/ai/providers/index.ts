@@ -10,6 +10,7 @@ export {
   chatToolSchema,
   chatOutputSchema,
   imageGenerateInputSchema,
+  MAX_IMAGE_GENERATION_REFERENCES,
   imageOutputSchema,
   generatedImageMimeTypeSchema,
   imageCaptionInputSchema,

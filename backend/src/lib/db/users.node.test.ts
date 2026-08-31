@@ -59,4 +59,11 @@ describe('user node schema', () => {
   test('strips the retired settings blob', () => {
     expect(userSchema.parse({ ...baseUser, settings: { archive: { showOnlyFavorites: true } } })).not.toHaveProperty('settings');
   });
+
+  test('hard deletion atomically removes user generation history', async () => {
+    const source = await Bun.file(new URL('./users.node.ts', import.meta.url)).text();
+    expect(source).toContain("withTransaction(['users', 'userHiddens', 'userGenerations']");
+    expect(source).toContain('FOR generation IN userGenerations FILTER generation.userKey == @userKey REMOVE generation IN userGenerations');
+    expect(source.indexOf('REMOVE generation IN userGenerations')).toBeLessThan(source.indexOf('REMOVE @userKey IN users'));
+  });
 });

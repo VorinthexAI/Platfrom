@@ -87,7 +87,7 @@ export function buildMailDevSeedManifest(input: {
     updatedAt: MAIL_DEV_FIXTURE_AT,
   }));
   const exportFolders: Array<Record<string, unknown>> = [{
-    _key: folders.root, scopeKey: input.scopeKey, name: 'Signal', mutationPolicy: 'user', embedding: fixtures.threads[0]!.thread.embedding, isFavorite: false, createdAt: MAIL_DEV_FIXTURE_AT, updatedAt: MAIL_DEV_FIXTURE_AT,
+    _key: folders.root, scopeKey: input.scopeKey, name: 'Signal', presentation: 'communication', mutationPolicy: 'user', embedding: fixtures.threads[0]!.thread.embedding, isFavorite: false, createdAt: MAIL_DEV_FIXTURE_AT, updatedAt: MAIL_DEV_FIXTURE_AT,
   }, ...([['drafts', 'Drafts'], ['tones', 'Tones'], ['replyContext', 'Reply context']] as const).map(([kind, name]) => ({
     _key: folders[kind], scopeKey: input.scopeKey, parentFolderKey: folders.root, name, mutationPolicy: 'user', embedding: fixtures.threads[0]!.thread.embedding, isFavorite: false, createdAt: MAIL_DEV_FIXTURE_AT, updatedAt: MAIL_DEV_FIXTURE_AT,
   })), ...inboxes.flatMap((inbox) => [{

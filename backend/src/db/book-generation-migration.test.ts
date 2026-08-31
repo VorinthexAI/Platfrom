@@ -30,6 +30,7 @@ describe('canonical book persistence migration', () => {
     expect(first.some(({ query }) => query.includes('document.audioChapter.readerProgress') && query.includes('IN bookProgress'))).toBe(true);
     expect(first.some(({ query }) => query.includes('audioBook: null') && query.includes('mutationPolicy: "user"'))).toBe(true);
     expect(first.some(({ query }) => query.includes('audioChapter: null') && query.includes('mutationPolicy: "user"'))).toBe(true);
+    expect(first.some(({ query }) => query.includes('binding.subjectType == "chapter"') && query.includes('extension: null') && query.includes('sourceStorageKeys: null'))).toBe(true);
     expect(first.some(({ query }) => query.includes('purpose == "audio-book-media"') && query.includes('purpose: null'))).toBe(true);
     expect(first.some(({ query, bind }) => query.includes('FOR resource IN @@collection') && bind?.['@collection'] === 'books')).toBe(true);
     expect(first.some(({ query, bind }) => query.includes('FOR resource IN @@collection') && bind?.['@collection'] === 'bookChapters')).toBe(true);

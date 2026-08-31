@@ -6,6 +6,7 @@ import {
   useId,
   useRef,
   type PointerEvent as ReactPointerEvent,
+  type HTMLAttributes,
   type ReactNode,
 } from "react";
 
@@ -17,6 +18,7 @@ export type BottomSheetProps = {
   description?: string;
   dismissible?: boolean;
   footer?: ReactNode;
+  focusKey?: string;
   height?: "full";
   hideHeading?: boolean;
   hideCloseButton?: boolean;
@@ -26,6 +28,7 @@ export type BottomSheetProps = {
   onSwipeRight?: () => void;
   open: boolean;
   pageKey?: string;
+  pageTransitionOrigin?: "edge" | "bottom";
   title: string;
 };
 
@@ -148,6 +151,10 @@ export function BottomSheet({
 }
 
 export type BottomSheetItemProps = Omit<ButtonProps, "size">;
+
+export function BottomSheetMenu({ className = "", ...props }: HTMLAttributes<HTMLDivElement>) {
+  return <div className={["vui-bottom-sheet-menu", className].filter(Boolean).join(" ")} {...props} />;
+}
 
 export const BottomSheetItem = forwardRef<
   HTMLButtonElement,

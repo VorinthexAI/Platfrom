@@ -23,6 +23,7 @@ import { buildImageEmbeddingText } from '../lib/image-embedding';
 import { decodeEmailTone, decodeEmailToneContent, emailMessageSemanticText, emailToneSemanticText, encodeEmailToneContent } from '../lib/email-inbox/archive-payloads';
 import { bookGenerationInputSchema } from '../lib/books/schemas';
 import { LEGACY_BOOK_CHAPTER_WORD_MAX, LEGACY_BOOK_CHAPTER_WORD_MIN } from '../lib/db/book-chapters.node';
+import { emailArchiveRootFolderKey, emailMediaCollectionKey } from '../lib/email-inbox/export-container-keys';
 
 const url = process.env.ARANGO_URL ?? 'http://127.0.0.1:8529';
 const databaseName = process.env.ARANGO_DATABASE ?? 'vorinthex';
@@ -150,6 +151,41 @@ export async function migrateGenericContentContracts(targetDb: Database): Promis
       }
     }
   }
+}
+
+/** Repairs app-logo presentation metadata on containers created before that field existed. */
+export async function migrateContainerPresentations(targetDb: Database): Promise<void> {
+  const emailContainerCursor = await targetDb.query<{ scopeKey: string; connectorKey: string }>(`
+    FOR inbox IN emailInboxes
+      FILTER IS_STRING(inbox.scopeKey) && IS_STRING(inbox.connectorKey)
+      COLLECT scopeKey = inbox.scopeKey, connectorKey = inbox.connectorKey
+      RETURN { scopeKey, connectorKey }
+  `);
+  const emailContainers = await emailContainerCursor.all();
+  const communicationFolderKeys = [...new Set(emailContainers.map(({ scopeKey }) => emailArchiveRootFolderKey(scopeKey)))];
+  const communicationCollectionKeys = [...new Set(emailContainers.map(({ scopeKey }) => emailMediaCollectionKey(scopeKey)))];
+  await targetDb.query(`
+    FOR folder IN folders
+      LET presentation = folder.parentFolderKey != null ? null
+        : folder.presentation IN ["travel", "communication", "learning"] ? folder.presentation
+        : folder._key IN @communicationFolderKeys ? "communication"
+        : folder.purpose IN ["generated-documents-root", "generated-documents-guide", "generated-documents-brief", "generated-documents-accommodations", "generated-documents-restaurants", "generated-documents-activities"] ? "travel"
+        : folder.purpose IN ["communication-mail-root", "communication-mail-inboxes", "communication-mail-threads", "communication-mail-drafts", "communication-mail-tones", "communication-mail-reply-context"] || STARTS_WITH(folder.managedPurpose || "", "mail-") ? "communication"
+        : folder.purpose == "generated-audio-root" ? "learning"
+        : null
+      FILTER (presentation != null && folder.presentation != presentation) || (presentation == null && HAS(folder, "presentation"))
+      UPDATE folder WITH { presentation } IN folders OPTIONS { keepNull: false }
+  `, { communicationFolderKeys });
+  await targetDb.query(`
+    FOR collection IN collections
+      LET presentation = collection.presentation IN ["travel", "communication", "learning"] ? collection.presentation
+        : collection._key IN @communicationCollectionKeys ? "communication"
+        : collection.purpose == "place-media" ? "travel"
+        : collection.purpose == "email-media" ? "communication"
+        : null
+      FILTER presentation != null && collection.presentation != presentation
+      UPDATE collection WITH { presentation } IN collections
+  `, { communicationCollectionKeys });
 }
 
 export async function retireUserSettings(targetDb: Database): Promise<void> {
@@ -1375,6 +1411,7 @@ export async function migrateDurableBookGeneration(targetDb: Database): Promise<
   await targetDb.query('FOR progress IN bookProgress FILTER !HAS(progress, "userKey") REMOVE progress IN bookProgress');
   await targetDb.query('FOR folder IN folders FILTER folder.managedPurpose == "audio-book" UPDATE folder WITH { audioBook: null, managedPurpose: null, managedOwnerKey: null, mutationPolicy: "user" } IN folders OPTIONS { keepNull: false }');
   await targetDb.query('FOR document IN documents FILTER document.managedPurpose == "audio-chapter" UPDATE document WITH { audioChapter: null, managedPurpose: null, managedOwnerKey: null, mutationPolicy: "user" } IN documents OPTIONS { keepNull: false }');
+  await targetDb.query('FOR binding IN generatedDocumentBindings FILTER binding.subjectType == "chapter" && binding.kind == "chapter" LET document = DOCUMENT(documents, binding.documentKey) FILTER document != null && document.scopeKey == binding.scopeKey UPDATE document WITH { extension: null, mimeType: null, storageKey: null, sizeBytes: null, sourceStorageKeys: null } IN documents OPTIONS { keepNull: false }');
   await targetDb.query('FOR collection IN collections FILTER collection.purpose == "audio-book-media" UPDATE collection WITH { purpose: null, mutationPolicy: "user" } IN collections OPTIONS { keepNull: false }');
   for (const [collectionName, embedKeys] of [['books', ['title', 'subtitle', 'description', 'goal', 'audience', 'outcome']], ['bookContexts', ['userContext', 'priorKnowledge', 'priorBookContext', 'personalizationContext', 'researchContext', 'noveltyContext', 'generationBrief']], ['bookThemes', ['name', 'description']], ['bookSources', ['title', 'content', 'relevance']], ['bookParts', ['title', 'description', 'objective']], ['bookChapters', ['title', 'description', 'objective', 'content']], ['chapterContexts', ['previousContext', 'objectiveContext', 'sourceContext', 'personalizationContext', 'noveltyContext', 'nextContext', 'generationBrief']]] as const) await migrateExactSemanticRecords(targetDb, collectionName, embedKeys);
 }
@@ -1759,6 +1796,8 @@ export const collections: CollectionSpec[] = [
   { name: 'contentIdempotency', skipEmbedding: true, indexes: [{ fields: ['organizationKey', 'actorKey', 'tool', 'idempotencyKey'], unique: true }, { fields: ['leaseExpiresAt'], sparse: true }, { fields: ['expiresAt'], sparse: true }] },
   // Private global user history. Identity is deliberately independent of every product and scope.
   { name: 'userSearches', skipEmbedding: true, indexes: [{ fields: ['userKey', 'normalizedQuery'], unique: true }, { fields: ['userKey', 'searchedAt'] }] },
+  // Private generation prompt history. Generated media and storage references never belong here.
+  { name: 'userGenerations', skipEmbedding: true, indexes: [{ fields: ['userKey', 'type', 'normalizedPrompt'], unique: true }, { fields: ['userKey', 'type', 'generatedAt'] }] },
   // Private durable outbox for object deletion after metadata commits.
   { name: 'storageDeletionJobs', skipEmbedding: true, indexes: [{ fields: ['storageKey'], unique: true }, { fields: ['createdAt'] }, { fields: ['status'] }, { fields: ['reservationExpiresAt'], sparse: true }, { fields: ['claimedAt'], sparse: true }] },
   // Private Archive contextual replay cache. The collection itself identifies the context.
@@ -1991,7 +2030,10 @@ async function main() {
     if (spec.name === 'folders' || spec.name === 'images' || spec.name === 'collections' || spec.name === 'documents') {
       await migrateContentFavorites(targetDb, spec.name);
     }
-    if (spec.name === 'images') await targetDb.query('FOR image IN images FILTER !HAS(image, "mutationPolicy") UPDATE image WITH { mutationPolicy: "user" } IN images');
+    if (spec.name === 'images') {
+      await targetDb.query('FOR image IN images FILTER !HAS(image, "origin") UPDATE image WITH { origin: "uploaded" } IN images');
+      await targetDb.query('FOR image IN images FILTER !HAS(image, "mutationPolicy") UPDATE image WITH { mutationPolicy: "user" } IN images');
+    }
     if (spec.name === 'collections') await targetDb.query('FOR collection IN collections FILTER !HAS(collection, "mutationPolicy") || !HAS(collection, "purpose") UPDATE collection WITH { mutationPolicy: HAS(collection, "mutationPolicy") ? collection.mutationPolicy : "user", purpose: HAS(collection, "purpose") ? collection.purpose : null } IN collections OPTIONS { keepNull: true }');
     if (spec.name === 'tripCreationReceipts') await migrateTripCreationReceipts(targetDb);
     if (spec.name === 'imageCaptions') {
@@ -2185,6 +2227,7 @@ async function main() {
   await migrateCanonicalEmailPersistence(targetDb);
   await migrateCanonicalEmailEmbeddings(targetDb);
   await migrateEmailAttachmentAvailability(targetDb);
+  await migrateContainerPresentations(targetDb);
   await dropVerifiedLegacyInboxes(targetDb);
 
   // Legacy scratch collection the org-migration steps below write into

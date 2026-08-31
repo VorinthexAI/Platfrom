@@ -4,7 +4,7 @@ import { apiClient } from "@/lib/api-client";
 import { publishUserSearchHistoryAppend } from "@/lib/user-search-history-events";
 import { useAuthStore } from "@/state/auth";
 
-export const appSearchCollectionSlugSchema = z.enum(["folders", "documents", "files", "images", "inboxes", "email-tones", "email-messages", "email-drafts", "places", "trips", "countries"]);
+export const appSearchCollectionSlugSchema = z.enum(["folders", "documents", "files", "collections", "images", "inboxes", "email-tones", "email-messages", "email-drafts", "places", "trips", "countries", "books"]);
 export type AppSearchCollectionSlug = z.infer<typeof appSearchCollectionSlugSchema>;
 
 const appSearchInputSchema = z.strictObject({

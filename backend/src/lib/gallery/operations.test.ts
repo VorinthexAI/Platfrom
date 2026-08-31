@@ -4,12 +4,13 @@ import { galleryOperationInputSchemas, galleryOperations, GalleryOperationError,
 import { collectionMemberSchema } from '@/lib/db/collection-members.node';
 import { collectionInviteSchema } from '@/lib/db/collection-invites.node';
 import { galleryUploadSchema, type GalleryUpload } from '@/lib/db/gallery-uploads.node';
-import { imageSchema } from '@/lib/db/images.node';
+import { imageSchema as persistedImageSchema } from '@/lib/db/images.node';
 import { shareSchema } from '@/lib/db/shares.node';
 import { encryptAuthenticatedJson } from '@/lib/authenticated-encryption';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
 
 const key = () => newId();
+const imageSchema = { parse: (value: unknown) => persistedImageSchema.parse({ origin: 'uploaded', ...(value as object) }) };
 const validInputs = {
   overview: {},
   createCollection: { name: 'Summer', isFavorite: true },
@@ -29,7 +30,7 @@ const validInputs = {
   updateShare: { collectionKey: key(), shareKey: key(), active: true },
   revokeShare: { collectionKey: key(), shareKey: key() },
   activateShare: { token: 'x'.repeat(32) },
-  reserveUploads: { files: [{ clientKey: 'local-1', filename: 'photo.jpeg', sizeBytes: 1_024 }] },
+  reserveUploads: { files: [{ clientKey: 'local-1', filename: 'photo.png', sizeBytes: 1_024 }] },
   completeUploads: { uploadKeys: [key()] },
   uploadStatus: { uploadKeys: [key()] },
   search: { query: 'red dog', limit: 25 },
@@ -147,14 +148,15 @@ describe('Gallery operation boundaries', () => {
 
   test('exposes persisted image mutation policy in safe DTOs', async () => {
     const image = imageSchema.parse({ key: key(), scopeKey: key(), filename: 'place.webp', caption: 'Place', storageKey: 'media/place.webp', mimeType: 'image/webp', sizeBytes: 10, width: 1, height: 1, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), mutationPolicy: 'system-only', isFavorite: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
-    await expect(safeImage(image)).resolves.toMatchObject({ mutationPolicy: 'system-only' });
+    await expect(safeImage(image)).resolves.toMatchObject({ origin: 'uploaded', mutationPolicy: 'system-only' });
   });
 
   test('accepts only complete image coordinate pairs', () => {
-    const file = { clientKey: 'local-1', filename: 'photo.jpg', sizeBytes: 1_024 };
+    const file = { clientKey: 'local-1', filename: 'photo.png', sizeBytes: 1_024 };
     expect(galleryOperationInputSchemas.reserveUploads.parse({ files: [{ ...file, latitude: 59.3293, longitude: 18.0686 }] })).toMatchObject({ files: [{ latitude: 59.3293, longitude: 18.0686 }] });
     expect(() => galleryOperationInputSchemas.reserveUploads.parse({ files: [{ ...file, latitude: 59.3293 }] })).toThrow('both latitude and longitude');
-    expect(() => galleryOperationInputSchemas.reserveUploads.parse({ files: [file, { ...file, filename: 'second.jpg' }] })).toThrow('unique');
+    expect(() => galleryOperationInputSchemas.reserveUploads.parse({ files: [file, { ...file, filename: 'second.png' }] })).toThrow('unique');
+    expect(() => galleryOperationInputSchemas.reserveUploads.parse({ files: [{ ...file, filename: 'photo.jpg' }] })).toThrow();
   });
 
   test('signs every upload before the atomic reservation insert and publishes only afterward', async () => {
@@ -174,11 +176,11 @@ describe('Gallery operation boundaries', () => {
       insertUploads: async () => { insertCalls += 1; throw new Error('transaction rolled back'); },
       publishUserEvent: async () => { publications += 1; },
     } as any;
-    await expect(galleryOperations.reserveUploads({ files: [{ clientKey: 'one', filename: 'one.jpg', sizeBytes: 10 }, { clientKey: 'two', filename: 'two.jpg', sizeBytes: 10 }] }, context)).rejects.toThrow('transaction rolled back');
+    await expect(galleryOperations.reserveUploads({ files: [{ clientKey: 'one', filename: 'one.png', sizeBytes: 10 }, { clientKey: 'two', filename: 'two.png', sizeBytes: 10 }] }, context)).rejects.toThrow('transaction rolled back');
     expect({ signed, insertCalls, publications }).toEqual({ signed: 2, insertCalls: 1, publications: 0 });
   });
 
-  test('reserves PNG for canonical clients while retaining JPEG compatibility', async () => {
+  test('reserves only canonical PNG uploads', async () => {
     const organizationKey = 'organization', scopeKey = key(), actorKey = key(), userId = key();
     const records: GalleryUpload[] = [];
     const context = {
@@ -188,12 +190,11 @@ describe('Gallery operation boundaries', () => {
       insertUploads: async (uploads: GalleryUpload[]) => { records.push(...uploads); },
       publishUserEvent: async () => undefined,
     } as any;
-    const result = await galleryOperations.reserveUploads({ files: [{ clientKey: 'canonical', filename: 'one.png', sizeBytes: 10 }, { clientKey: 'legacy', filename: 'two.jpeg', sizeBytes: 10 }] }, context);
+    const result = await galleryOperations.reserveUploads({ files: [{ clientKey: 'canonical', filename: 'one.png', sizeBytes: 10 }] }, context);
     expect(records.map(({ filename, mimeType, storageKey }) => ({ filename, mimeType, storageKey: storageKey.split('/').at(-1) }))).toEqual([
       { filename: 'one.png', mimeType: 'image/png', storageKey: 'original.png' },
-      { filename: 'two.jpg', mimeType: 'image/jpeg', storageKey: 'original.jpg' },
     ]);
-    expect(result.uploads.map(({ headers }) => headers)).toEqual([{ 'Content-Type': 'image/png' }, { 'Content-Type': 'image/jpeg' }]);
+    expect(result.uploads.map(({ headers }) => headers)).toEqual([{ 'Content-Type': 'image/png' }]);
   });
 
   test('enforces mutually exclusive search sources', () => {
@@ -218,6 +219,17 @@ describe('Gallery operation boundaries', () => {
     expect(() => galleryOperationInputSchemas.deleteImages.parse({ imageKeys: [image, image] })).toThrow('unique');
     expect(() => galleryOperationInputSchemas.deleteDuplicates.parse({ collectionKey: sourceCollectionKey, imageKeys: [image, image] })).toThrow('unique');
     expect(() => galleryOperationInputSchemas.completeUploads.parse({ uploadKeys: [image, image] })).toThrow('unique');
+  });
+
+  test('enforces strict custom highlight and memory selectors', () => {
+    const collectionKey = key(), imageKeys = [key(), key()];
+    expect(galleryOperationInputSchemas.createHighlight.parse({ collectionKey, imageKeys })).toEqual({ collectionKey, imageKeys });
+    expect(() => galleryOperationInputSchemas.createHighlight.parse({ collectionKey, imageKeys: [imageKeys[0]] })).toThrow();
+    expect(() => galleryOperationInputSchemas.createHighlight.parse({ collectionKey, imageKeys: Array.from({ length: 11 }, key) })).toThrow();
+    expect(() => galleryOperationInputSchemas.createHighlight.parse({ collectionKey, imageKeys: [imageKeys[0], imageKeys[0]] })).toThrow('unique');
+    expect(() => galleryOperationInputSchemas.createHighlight.parse({ collectionKey, imageKeys, unexpected: true })).toThrow();
+    expect(galleryOperationInputSchemas.createMemory.parse({ collectionKey, imageKey: imageKeys[0] })).toEqual({ collectionKey, imageKey: imageKeys[0] });
+    expect(() => galleryOperationInputSchemas.createMemory.parse({ collectionKey, imageKey: imageKeys[0], unexpected: true })).toThrow();
   });
 
   test('validates every upload before one atomic queue transition and deduped publication', async () => {
@@ -307,6 +319,35 @@ describe('Gallery operation boundaries', () => {
     const organizationKey = 'organization', scopeKey = key(), actorKey = key(), collectionKey = key();
     const context = { organizationKey, scopeKey, membership: { key: actorKey, organizationId: organizationKey, userId: key(), status: 'active' }, getCollectionRole: async () => 'collaborator' } as any;
     await expect(galleryOperations.createHighlight({ collectionKey }, context)).rejects.toMatchObject({ status: 403, code: 'GALLERY_OWNER_REQUIRED' });
+  });
+
+  test('creates a custom highlight with exactly the supplied image order', async () => {
+    process.env.AWS_ACCESS_KEY_ID ??= 'test';
+    process.env.AWS_SECRET_ACCESS_KEY ??= 'test';
+    const organizationKey = 'organization', scopeKey = key(), actorKey = key(), collectionKey = key(), imageKeys = [key(), key(), key()], now = new Date().toISOString();
+    const images = imageKeys.map((imageKey) => imageSchema.parse({ key: imageKey, scopeKey, filename: `${imageKey}.jpg`, caption: 'Selected', storageKey: `private/${imageKey}.jpg`, mimeType: 'image/jpeg', sizeBytes: 1, width: 1, height: 1, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), createdByKey: actorKey, isFavorite: false, createdAt: now, updatedAt: now }));
+    let candidateReads = 0, persisted: any, options: unknown;
+    const context = {
+      organizationKey, scopeKey, membership: { key: actorKey, organizationId: organizationKey, userId: key(), status: 'active' },
+      getCollectionRole: async () => 'owner',
+      listHighlightCandidates: async () => { candidateReads += 1; return []; },
+      createHighlight: async (highlight: any, _actorKey: string, value: unknown) => { persisted = highlight; options = value; return highlight; },
+      getHighlight: async () => ({ highlight: persisted, images }),
+      publishCollectionEvent: async () => undefined,
+    } as any;
+    const output = await galleryOperations.createHighlight({ collectionKey, imageKeys }, context);
+    expect(candidateReads).toBe(0);
+    expect(persisted.imageKeys).toEqual(imageKeys);
+    expect(options).toEqual({ requireExactImageKeys: true });
+    expect(output.highlight.imageKeys).toEqual(imageKeys);
+  });
+
+  test('rejects custom highlight membership races without publishing', async () => {
+    const organizationKey = 'organization', scopeKey = key(), actorKey = key(), collectionKey = key(), imageKeys = [key(), key()];
+    let events = 0;
+    const context = { organizationKey, scopeKey, membership: { key: actorKey, organizationId: organizationKey, userId: key(), status: 'active' }, getCollectionRole: async () => 'owner', createHighlight: async () => null, publishCollectionEvent: async () => { events += 1; } } as any;
+    await expect(galleryOperations.createHighlight({ collectionKey, imageKeys }, context)).rejects.toMatchObject({ status: 409, code: 'GALLERY_HIGHLIGHT_IMAGES_UNAVAILABLE' });
+    expect(events).toBe(0);
   });
 
   test('lists highlights for collection collaborators and viewers without requiring ownership', async () => {
@@ -399,6 +440,40 @@ describe('Gallery operation boundaries', () => {
     expect(source).toContain('executeAsk<ChatOutput>(input.organizationKey');
     expect(source).toContain('maxTokens: 220');
     expect(source).toContain('timeoutMs: 15_000');
+  });
+
+  test('creates a memory for exactly the requested eligible image without randomness', async () => {
+    process.env.AWS_ACCESS_KEY_ID ??= 'test';
+    process.env.AWS_SECRET_ACCESS_KEY ??= 'test';
+    const organizationKey = 'organization', scopeKey = key(), actorKey = key(), collectionKey = key(), now = new Date().toISOString();
+    const makeImage = (imageKey: string) => imageSchema.parse({ key: imageKey, scopeKey, filename: `${imageKey}.jpg`, caption: 'A day.', storageKey: `private/${imageKey}.jpg`, mimeType: 'image/jpeg', sizeBytes: 1, width: 1, height: 1, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), createdByKey: actorKey, isFavorite: false, createdAt: now, updatedAt: now });
+    const first = makeImage(key()), selected = makeImage(key());
+    let randomCalls = 0, persistedImageKey = '';
+    const context = {
+      organizationKey, scopeKey, membership: { key: actorKey, organizationId: organizationKey, userId: key(), status: 'active' }, getCollectionRole: async () => 'owner',
+      random: () => { randomCalls += 1; return 0; },
+      listMemoryCandidates: async () => [first, selected].map((image) => ({ image, caption: image.caption, captionScore: 50, identityNames: [] })),
+      generateMemory: async () => 'First section.\n\nSecond section.\n\nThird section.',
+      createMemory: async (memory: any) => { persistedImageKey = memory.imageKey; return { status: 'created', collectionKeys: [collectionKey] }; },
+      publishCollectionEvent: async () => undefined,
+    } as any;
+    const output = await galleryOperations.createMemory({ collectionKey, imageKey: selected.key }, context);
+    expect({ randomCalls, persistedImageKey }).toEqual({ randomCalls: 0, persistedImageKey: selected.key });
+    expect(output.memory.image.key).toBe(selected.key);
+  });
+
+  test('uses stable exhaustion semantics for unavailable custom memory images', async () => {
+    const organizationKey = 'organization', scopeKey = key(), actorKey = key(), collectionKey = key(), imageKey = key();
+    const base = { organizationKey, scopeKey, membership: { key: actorKey, organizationId: organizationKey, userId: key(), status: 'active' }, getCollectionRole: async () => 'owner' } as any;
+    await expect(galleryOperations.createMemory({ collectionKey, imageKey }, { ...base, listMemoryCandidates: async () => [] })).rejects.toMatchObject({ status: 409, code: 'GALLERY_MEMORY_IMAGES_EXHAUSTED' });
+  });
+
+  test('requires collection ownership before resolving a custom memory image', async () => {
+    const organizationKey = 'organization', scopeKey = key(), actorKey = key(), collectionKey = key(), imageKey = key();
+    let candidateReads = 0;
+    const context = { organizationKey, scopeKey, membership: { key: actorKey, organizationId: organizationKey, userId: key(), status: 'active' }, getCollectionRole: async () => 'collaborator', listMemoryCandidates: async () => { candidateReads += 1; return []; } } as any;
+    await expect(galleryOperations.createMemory({ collectionKey, imageKey }, context)).rejects.toMatchObject({ status: 403, code: 'GALLERY_OWNER_REQUIRED' });
+    expect(candidateReads).toBe(0);
   });
 
   test('reports memory exhaustion before and after generation races', async () => {

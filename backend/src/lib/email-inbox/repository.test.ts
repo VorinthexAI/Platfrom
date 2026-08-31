@@ -44,7 +44,7 @@ describe('canonical email persistence', () => {
     const database = { query: async (query: string, bindVars: Record<string, any>) => {
       calls.push({ query, bindVars });
       if (query.includes('IN emailThreads RETURN NEW')) return cursor(bindVars.value);
-      if (query.includes('IN folders RETURN NEW')) return cursor({ _key: bindVars.key, scopeKey });
+      if (query.includes('IN folders')) return cursor({ _key: bindVars.key, scopeKey });
       return cursor();
     } };
     const stored = await createEmailRepository(database as never).syncThread({

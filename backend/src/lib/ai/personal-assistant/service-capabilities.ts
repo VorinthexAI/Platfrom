@@ -119,6 +119,7 @@ export const appSearchCapability: AssistantCapability<typeof appSearchInputSchem
       email: context.email,
       travel: context.travel,
       countries: context.countries,
+      books: context.books,
     });
     const sources = output.groups.flatMap((group) => group.collectionSlug === 'documents' || group.collectionSlug === 'files'
       ? group.results.map(({ key: documentKey, name }) => ({ documentKey, name }))
