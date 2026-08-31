@@ -486,8 +486,8 @@ test("longpress accessibility toggles selected items and Find Place reuses the c
   expect(detailLongpress).toContain("current.includes(key) ? current.filter((candidate) => candidate !== key) : [...current, key]");
   expect(workspace).toContain('style={styles.workspaceSearchInput}');
   expect(workspace).toContain("styles.sheetSearchClear");
-  expect(workspace).toContain("setTimeout(() => placeSearchInput.current?.focus(), 300)");
-  expect(workspace).toContain("return () => clearTimeout(timer)");
+  expect(workspace).not.toContain("setTimeout(() => placeSearchInput.current?.focus(), 300)");
+  expect(workspace).toContain('focusKey="findPlace"');
   expect(workspace).toContain("ref={placeSearchInput}");
 });
 
@@ -534,6 +534,17 @@ test("limits country child cities to root globe exploration", () => {
   expect(workspace).toContain('countryCityList: { paddingBottom: 0 }');
 });
 
+test("stacks independent full-height country and city detail sheets", () => {
+  const countrySheet = workspace.indexOf('height="full" onOpenChange={setCountryDetailOpen} open={countryDetailOpen} title={selectedCountry?.name ?? "Country"}');
+  const citySheet = workspace.indexOf('height="full" onOpenChange={setCityDetailOpen} open={cityDetailOpen} title={selectedCity?.name ?? "City"}');
+  expect(countrySheet).toBeGreaterThan(-1);
+  expect(citySheet).toBeGreaterThan(countrySheet);
+  expect(workspace).toContain('onPress={() => setCountryDetailOpen(false)} size="md"');
+  expect(workspace).toContain('onPress={() => setCityDetailOpen(false)} size="md"');
+  expect(workspace).not.toContain("open={countryDetailOpen || cityDetailOpen}");
+  expect(workspace).not.toContain("if (cityDetailOpen) setCityDetailOpen(false); else setCountryDetailOpen(false)");
+});
+
 test("matches the Gallery root filter sheet spacing", () => {
   expect(workspace).toContain('filterSheet: { gap: 6 }');
   expect(workspace).toContain('filterSwitchRow: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: spacing.xs }');
@@ -564,6 +575,7 @@ test("retains generated guide caching and persisted hero reuse", () => {
   expect(workspace).toContain("!savedCityImage && !cityDetailQuery.isFetching");
   expect(workspace).toContain("findPlaceChildren(countryDetailQuery.data.childrenRequestToken, signal)");
   expect(workspace).toContain("hydratePlaceChildren(queryClient");
+  expect(workspace).not.toContain("Promise.allSettled(heroQueries)");
   expect(workspace).toContain('cachePolicy="none"');
   expect(workspace).toContain('key={image?.url ?? "hero"}');
   expect(workspace).not.toContain("removeQueries");

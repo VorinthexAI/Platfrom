@@ -5,7 +5,7 @@ import { executeAction } from '@/lib/ai/router';
 import { imageCaptionOutputSchema, type ImageCaptionInput, type ImageCaptionOutput } from '@/lib/ai/providers';
 import { documentStorage, type DocumentStorage } from '@/lib/ai/document-processing/storage';
 import { EMBEDDING_DIMENSIONS, currentEmbeddingSchema, embedText } from '@/lib/embeddings';
-import { type Image, getImageById, insertPreparedImageWithCaption } from '@/lib/db/images.node';
+import { type Image, type imageOriginSchema, getImageById, insertPreparedImageWithCaption } from '@/lib/db/images.node';
 import { findReusableImageCaption, imageCaptionRecordSchema, PERCEPTUAL_HASH_ALGORITHM, type ImageCaptionRecord } from '@/lib/db/image-captions.node';
 import { perceptualHashDistance, perceptualHashSegments, PERCEPTUAL_HASH_DUPLICATE_DISTANCE } from '@/lib/perceptual-hash';
 import { computePerceptualHashBatchDispatched } from './perceptual-hash-queue';
@@ -21,7 +21,7 @@ export const MAX_IMAGE_PIXELS = 100_000_000;
 const formats = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' } as const;
 type Extension = keyof typeof formats;
 export type UploadedImageFile = File | { filename: string; mimeType: string; sizeBytes: number; bytes: Uint8Array };
-export interface ProcessImageInput { scopeKey: string; ownerKey: string; file: UploadedImageFile; imageKey?: string; idempotencyKey?: string; location?: ImageLocation; mutationPolicy?: 'user' | 'system-only'; signal?: AbortSignal; }
+export interface ProcessImageInput { scopeKey: string; ownerKey: string; origin: z.infer<typeof imageOriginSchema>; file: UploadedImageFile; imageKey?: string; idempotencyKey?: string; location?: ImageLocation; mutationPolicy?: 'user' | 'system-only'; signal?: AbortSignal; }
 export const generatedImageCaptionSchema = z.object({ caption: z.string().trim().min(1).max(20_000), score: z.number().int().min(1).max(100) }).strict();
 export type GeneratedImageCaption = z.infer<typeof generatedImageCaptionSchema>;
 export interface ImageProcessingMetrics { count: number; generated: number; reused: number; hashDurationMs: number; captionDurationMs: number; durationMs: number; }
@@ -120,8 +120,8 @@ async function validate(input: ProcessImageInput, dependencies: ImageProcessingD
 }
 
 type ValidatedImage = Awaited<ReturnType<typeof validate>>;
-function imageRequestHash(scopeKey: string, ownerKey: string, image: ValidatedImage): string {
-  return hash(`${scopeKey}\0${ownerKey}\0${image.source.filename}\0${image.source.mimeType}\0${image.source.sizeBytes}\0${hash(image.source.bytes)}`);
+function imageRequestHash(scopeKey: string, ownerKey: string, origin: ProcessImageInput['origin'], image: ValidatedImage): string {
+  return hash(`${scopeKey}\0${ownerKey}\0${origin}\0${image.source.filename}\0${image.source.mimeType}\0${image.source.sizeBytes}\0${hash(image.source.bytes)}`);
 }
 
 function persistedImageMatches(existing: Image, input: ProcessImageInput, image: ValidatedImage) {
@@ -130,7 +130,7 @@ function persistedImageMatches(existing: Image, input: ProcessImageInput, image:
   const legacyKey = `media/${input.scopeKey}/${key}/${hash(image.source.bytes)}/original.${image.source.extension}`;
   const canonical = existing.filename === image.filename && existing.mimeType === image.mimeType && existing.sizeBytes === image.sizeBytes && existing.storageKey === canonicalKey;
   const legacy = existing.filename === image.source.filename && existing.mimeType === image.source.mimeType && existing.sizeBytes === image.source.sizeBytes && existing.storageKey === legacyKey;
-  return existing.width === image.width && existing.height === image.height && (canonical || legacy);
+  return existing.origin === input.origin && existing.width === image.width && existing.height === image.height && (canonical || legacy);
 }
 
 export async function captionImageWithVertex(organizationKey: string, input: { filename: string; mimeType: string; bytes: Uint8Array; signal?: AbortSignal }) {
@@ -216,7 +216,7 @@ async function execute(input: ProcessImageInput, image: ValidatedImage, perceptu
     }
     const now = new Date().toISOString();
     try {
-      const persisted = await persistImage({ image: { key, scopeKey: input.scopeKey, filename: image.filename, caption, imageCaptionKey: canonical.key, createdByKey: input.ownerKey, storageKey, mimeType: image.mimeType, sizeBytes: image.sizeBytes, width: image.width, height: image.height, ...(input.location?.city ? { city: input.location.city } : {}), ...(input.location?.country ? { country: input.location.country } : {}), ...(input.location?.countryCode ? { countryCode: input.location.countryCode } : {}), ...(input.location?.placeName ? { placeName: input.location.placeName } : {}), ...(input.location?.placeSummary ? { placeSummary: input.location.placeSummary } : {}), ...(input.location?.latitude !== undefined ? { latitude: input.location.latitude } : {}), ...(input.location?.longitude !== undefined ? { longitude: input.location.longitude } : {}), ...(input.location?.locationSource ? { locationSource: input.location.locationSource } : {}), mutationPolicy: input.mutationPolicy ?? 'user', embedding, isFavorite: false, createdAt: now, updatedAt: now }, caption: captionRecord, actorKey: input.ownerKey });
+      const persisted = await persistImage({ image: { key, scopeKey: input.scopeKey, filename: image.filename, caption, imageCaptionKey: canonical.key, createdByKey: input.ownerKey, storageKey, mimeType: image.mimeType, sizeBytes: image.sizeBytes, width: image.width, height: image.height, ...(input.location?.city ? { city: input.location.city } : {}), ...(input.location?.country ? { country: input.location.country } : {}), ...(input.location?.countryCode ? { countryCode: input.location.countryCode } : {}), ...(input.location?.placeName ? { placeName: input.location.placeName } : {}), ...(input.location?.placeSummary ? { placeSummary: input.location.placeSummary } : {}), ...(input.location?.latitude !== undefined ? { latitude: input.location.latitude } : {}), ...(input.location?.longitude !== undefined ? { longitude: input.location.longitude } : {}), ...(input.location?.locationSource ? { locationSource: input.location.locationSource } : {}), origin: input.origin, mutationPolicy: input.mutationPolicy ?? 'user', embedding, isFavorite: false, createdAt: now, updatedAt: now }, caption: captionRecord, actorKey: input.ownerKey });
       await heartbeat.checkpoint();
       if (!await acknowledgeReservation(reservation)) throw new Error('Storage upload reservation acknowledgement fence was lost');
       return persisted;
@@ -233,7 +233,7 @@ async function execute(input: ProcessImageInput, image: ValidatedImage, perceptu
 
 export async function processImage(input: ProcessImageInput, dependencies: ImageProcessingDependencies = {}): Promise<Image> {
   const image = await validate(input, dependencies);
-  const requestHash = imageRequestHash(input.scopeKey, input.ownerKey, image);
+  const requestHash = imageRequestHash(input.scopeKey, input.ownerKey, input.origin, image);
   const replay = await replayPersistedImage(input, image, dependencies);
   if (replay) return replay;
   let hashes: string[];

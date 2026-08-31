@@ -33,7 +33,9 @@ const {
   removeCachedContentDocumentEverywhere,
   removeCachedContentDocumentsEverywhere,
   removeCachedContentFolder,
+  removeCachedContentFolderLocation,
   removeCachedContentFoldersEverywhere,
+  seedCachedContentFolderLocation,
   updateCachedContentDocumentAudioPlayback,
 } = await import("./content-query-cache");
 import type { ContentContext } from "./content-client";
@@ -241,6 +243,16 @@ test("optimistically adds and removes documents and folders in exact locations",
     documents: [{ ...document, folderKey: "destination" }],
   });
   expect(client.getQueryData<any>(contentQueryKeys.folderTree(context))).toEqual([{ ...folder, parentFolderKey: "destination" }]);
+});
+
+test("seeds and removes the empty location for an immediately navigable folder", () => {
+  const client = new QueryClient();
+  const key = contentQueryKeys.location(context, "folder-a");
+  seedCachedContentFolderLocation(client, context, "folder-a");
+  seedCachedContentFolderLocation(client, context, "folder-a");
+  expect(client.getQueryData(key)).toEqual({ folders: [], documents: [] });
+  removeCachedContentFolderLocation(client, context, "folder-a");
+  expect(client.getQueryData(key)).toBeUndefined();
 });
 
 test("removes deleted documents and evicts detail and nested generated-resource queries", () => {

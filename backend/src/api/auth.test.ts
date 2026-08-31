@@ -196,6 +196,17 @@ describe('auth helpers', () => {
     expect(timingSafeEqual('abcdef', 'abcdeg')).toBe(false);
   });
 
+  test('rejects signed access tokens with malformed identity claims before database lookup', async () => {
+    process.env.ACCESS_TOKEN_SECRET = 'test-access-secret';
+    const tokenFor = async (claims: Record<string, unknown>) => {
+      const payload = Buffer.from(JSON.stringify({ ...claims, exp: Math.floor(Date.now() / 1000) + 60 })).toString('base64url');
+      return `vrtx_access_${payload}.${await sha256(`${payload}.test-access-secret`)}`;
+    };
+
+    expect(await verifyAccessToken(await tokenFor({ sub: [] }))).toBeNull();
+    expect(await verifyAccessToken(await tokenFor({ sub: 'user', sid: [] }))).toBeNull();
+  });
+
   test('binds issued access claims to a durable session id', async () => {
     process.env.ACCESS_TOKEN_SECRET = 'test-access-secret';
     const token = await createAccessToken({ key: 'usr_test', identityType: 'user', sessionId: 'session-test' });

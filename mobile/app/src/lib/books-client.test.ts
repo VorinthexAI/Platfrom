@@ -14,7 +14,7 @@ mock.module("./api-client", () => ({ apiClient: {
   post: async (path: string, body: unknown, config?: unknown) => {
     calls.push({ method: "POST", path, body, config });
     if (lifecycleFailure && path.endsWith("/cancel")) throw { response: { data: { success: false, error: { code: "BOOK_CONFLICT", message: "Completed audio books cannot be cancelled." } } } };
-    const data = path.endsWith("/share/detail") || path.endsWith("/share/update") ? { ...share, active: (body as { active?: boolean }).active ?? share.active } : path.endsWith("/extension/preview") ? { titles: ["Continue the Practice", "Make It Durable", "Teach the System"] } : path.endsWith("/extension") ? { ...book, status: "queued", chapterCount: 4 } : path === "/books/overview" ? { books: [book] } : path === "/books/topic-suggestions" ? { topics: Array.from({ length: 10 }, (_, index) => `Creative topic ${index + 1}`) } : path === "/books/goal-suggestions" ? { goals: Array.from({ length: 10 }, (_, index) => `Useful reader goal ${index + 1}`) } : path === "/books" || path.endsWith("/retry") || path.endsWith("/cancel") || path.endsWith("/favorite") ? book : path === "/assistant/respond" ? (body as { input?: { message?: string } }).input?.message.includes("weather") ? { type: "unsupported", message: "This request is not supported in Ascend.", sources: [] } : { type: "answer", message: "Your book is ready.", sources: [] } : { book, chapters: [chapter] };
+    const data = path === "/app/search" ? { query: "practice", groups: [{ collectionSlug: "books", results: [{ ...book, score: 0.9 }] }] } : path.endsWith("/share/detail") || path.endsWith("/share/update") ? { ...share, active: (body as { active?: boolean }).active ?? share.active } : path.endsWith("/extension/preview") ? { titles: ["Continue the Practice", "Make It Durable", "Teach the System"] } : path.endsWith("/extension") ? { ...book, status: "queued", chapterCount: 4 } : path === "/books/overview" ? { books: [book] } : path === "/books/topic-suggestions" ? { topics: Array.from({ length: 10 }, (_, index) => `Creative topic ${index + 1}`) } : path === "/books/goal-suggestions" ? { goals: Array.from({ length: 10 }, (_, index) => `Useful reader goal ${index + 1}`) } : path === "/books" || path.endsWith("/retry") || path.endsWith("/cancel") || path.endsWith("/favorite") ? book : path === "/assistant/respond" ? (body as { input?: { message?: string } }).input?.message.includes("weather") ? { type: "unsupported", message: "This request is not supported in Ascend.", sources: [] } : { type: "answer", message: "Your book is ready.", sources: [] } : { book, chapters: [chapter] };
     return { data: { success: true, data } };
   },
   patch: async (path: string, body: unknown, config?: unknown) => {
@@ -48,6 +48,12 @@ test("sends strictly scoped overview, creation, detail, and progress requests", 
   expect(calls[1]?.body).toEqual({ organizationKey: "org-key", scopeKey: "scope-key", generationRequestKey: "request-key", topic: "Useful habits", goal: "Build a durable practice", currentKnowledge: "A curious beginner", writingTone: "Warm and direct", language: "English", narratorVoiceKey: "clear", narrationPace: 1, archiveDocumentKeys: ["document-key"], additionalInstructions: "Use concrete examples." });
   expect(calls[1]?.config).toEqual({ timeout: 15 * 60_000 });
   expect(calls[3]?.body).toEqual({ organizationKey: "org-key", scopeKey: "scope-key", progressSeconds: 480, isCompleted: true });
+});
+
+test("searches books through app.search without recording history for result refreshes", async () => {
+  const controller = new AbortController();
+  expect(await client.searchBooks("practice", controller.signal, false)).toEqual([book]);
+  expect(calls[0]).toEqual({ method: "POST", path: "/app/search", body: { organizationKey: "org-key", scopeKey: "scope-key", query: "practice", collectionSlugs: ["books"], recordHistory: false, limit: 50, minimumScore: 0.55 }, config: { signal: controller.signal, timeout: 15_000 } });
 });
 
 test("requests ten fresh topic suggestions with exclusions", async () => {

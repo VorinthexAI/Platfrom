@@ -13,6 +13,7 @@ import { BOOK_GENERATION_LEASE_MS, BOOK_GENERATION_RENEW_MS } from './generation
 
 const contextShape = { organizationKey: z.string().trim().min(1).max(160), scopeKey: z.string().cuid() };
 export const bookOverviewInputSchema = strictObject(contextShape);
+export const bookSearchInputSchema = strictObject({ ...contextShape, query: z.string().trim().min(1).max(500), minimumScore: z.number().min(-1).max(1).default(0.55), limit: z.number().int().min(1).max(50).default(10) });
 export const bookCreateInputSchema = strictObject({ ...contextShape, generationRequestKey: z.string().trim().min(1).max(200), ...bookGenerationInputSchema.omit({ chapterCount: true }).shape });
 export const bookDetailInputSchema = strictObject(contextShape);
 export const bookMutationInputSchema = strictObject({ ...contextShape, requestKey: z.string().trim().min(1).max(200).optional() });
@@ -130,6 +131,7 @@ export function createBookService(options: { repository?: BookRepository; genera
   };
   return {
     async overview(raw: unknown, userKey: string) { const input = bookOverviewInputSchema.parse(raw); return { books: await Promise.all((await repository.list(access(input, userKey))).map((row) => bookDto(row, sign))) }; },
+    async search(raw: unknown, userKey: string, execution: { queryEmbedding: number[] }) { const input = bookSearchInputSchema.parse(raw); return { books: await Promise.all((await repository.search(access(input, userKey), input.query, execution.queryEmbedding, input.minimumScore, input.limit)).map(async (row) => ({ ...await bookDto(row, sign), score: row.score }))) }; },
     async suggestTopics(raw: unknown, userKey: string, execution: { signal?: AbortSignal; timeoutMs?: number } = {}) {
       const input = bookTopicSuggestInputSchema.parse(raw); await repository.authorize(access(input, userKey), false);
       const excluded = input.excludeTopics.length ? `\nDo not repeat or closely paraphrase any of these previous ideas:\n${input.excludeTopics.map((topic) => `- ${topic}`).join('\n')}` : '';

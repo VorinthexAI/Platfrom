@@ -25,7 +25,7 @@ test("every workspace search history sheet uses the singleton user cache", () =>
 
 test("every filter-sheet Search history option matches the sheet background", () => {
   const workspaces = [archive, gallery, signal, compass, ascend, attachmentPicker];
-  const expectedCounts = [1, 1, 2, 1, 1, 1];
+  const expectedCounts = [1, 2, 2, 1, 1, 1];
   for (const [index, workspace] of workspaces.entries()) {
     expect(workspace.match(/style=\{styles\.searchHistoryOption\} variant="secondary">Search history<\/Button>/g)).toHaveLength(expectedCounts[index]!);
     expect(workspace).toContain("searchHistoryOption: { backgroundColor: palette.page }");

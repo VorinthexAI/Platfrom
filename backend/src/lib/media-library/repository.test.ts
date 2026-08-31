@@ -80,7 +80,7 @@ describe('MediaLibrary image similarity search', () => {
       async query(value, variables) {
         query = value;
         bindVars = variables ?? {};
-        return { async all() { return [{ image: { _key: imageKey, scopeKey, filename: 'image.jpg', caption: 'Caption', storageKey: 'private/image.jpg', mimeType: 'image/jpeg', sizeBytes: 100, width: 10, height: 10, embedding, isFavorite: false, createdAt: now, updatedAt: now }, score: 0.9 }]; } };
+        return { async all() { return [{ image: { _key: imageKey, scopeKey, filename: 'image.jpg', caption: 'Caption', storageKey: 'private/image.jpg', mimeType: 'image/jpeg', sizeBytes: 100, width: 10, height: 10, embedding, origin: 'uploaded', isFavorite: false, createdAt: now, updatedAt: now }, score: 0.9 }]; } };
       },
     };
 

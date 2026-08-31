@@ -6,7 +6,7 @@ const workspace = readFileSync(join(import.meta.dir, "../components/capability/G
 const memories = readFileSync(join(import.meta.dir, "../components/capability/GalleryMemories.tsx"), "utf8");
 
 test("places Memories first in the member-visible collection AI menu", () => {
-  const start = workspace.indexOf('{activeSheet === "cleanupMenu" ? <>');
+  const start = workspace.indexOf('{activeSheet === "cleanupMenu" ? <BottomSheetMenu>');
   const menu = workspace.slice(start, workspace.indexOf('activeSheet === "imageActions"', start));
   expect(menu.indexOf(">Memories</BottomSheetItem>")).toBeGreaterThan(0);
   expect(menu.indexOf(">Memories</BottomSheetItem>")).toBeLessThan(menu.indexOf(">Highlights</BottomSheetItem>"));
@@ -43,6 +43,8 @@ test("guards auto-open and preserves typing across zoom and event refresh", () =
   expect(memories).toContain('style={[styles.detailImageStage, imageStageStyle]}');
   expect(memories).toContain('style={[styles.detailThumbnailLayer, compactImageStyle]}');
   expect(memories).toContain('thumbnailImageClip: { width: "100%", height: "100%", overflow: "hidden", borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.sm');
+  expect(memories).toContain('style={[styles.detailImage, styles.expandedDetailImage]}');
+  expect(memories).toContain('expandedDetailImage: { borderRadius: radii.lg }');
   expect(memories).toContain('const expandedImageHeight = Math.max(120, detailViewportHeight - spacing.lg * 2)');
   expect(memories).toContain('onLayout={({ nativeEvent }) => setDetailViewportHeight(nativeEvent.layout.height)}');
   expect(memories).toContain('{showImage ? null : <View style={styles.memoryCopy}>');
@@ -85,7 +87,7 @@ test("uses the global memory projection without collection membership or unsafe 
   expect(projection).not.toContain("collectionKey");
   expect(projection).toContain("image: { key: string; url: string }");
   expect(projection).not.toContain("GalleryImage");
-  expect(client).toContain("createGalleryCollectionMemory(collectionKey: string)");
+  expect(client).toContain("createGalleryCollectionMemory(collectionKey: string, imageKey?: string)");
   expect(client).toContain("listGalleryCollectionMemories(collectionKey: string)");
   expect(client).toContain("deleteGalleryCollectionMemory(memoryKey: string, collectionKey: string)");
   expect(client).toContain("{ memoryKey, collectionKey }");

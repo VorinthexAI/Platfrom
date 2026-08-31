@@ -2,6 +2,7 @@ import { forwardRef } from "react";
 import { Keyboard, StyleSheet, View, type StyleProp, type TextInput as NativeTextInput, type ViewStyle } from "react-native";
 
 import { BrainIcon } from "../../icons/brain/brain.mobile";
+import { ClockIcon } from "../../icons/clock/clock.mobile";
 import { colors, radii, spacing } from "../../tokens";
 import { Button } from "../button/button.mobile";
 import { Skeleton } from "../skeleton/skeleton.mobile";
@@ -9,17 +10,18 @@ import { TextInput, type TextInputProps } from "../text-input/text-input.mobile"
 
 export type AiTextEditorProps = TextInputProps & {
   containerStyle?: StyleProp<ViewStyle>;
-  onOpenActions: () => void;
+  onOpenActions?: () => void;
+  onOpenHistory?: () => void;
   transformation?: "enhance" | "translate";
   value: string;
 };
 
-export const AiTextEditor = forwardRef<NativeTextInput, AiTextEditorProps>(function AiTextEditor({ accessibilityLabel, containerStyle, onOpenActions, style, transformation, value, ...props }, ref) {
+export const AiTextEditor = forwardRef<NativeTextInput, AiTextEditorProps>(function AiTextEditor({ accessibilityLabel, containerStyle, onOpenActions, onOpenHistory, style, transformation, value, ...props }, ref) {
   const label = typeof accessibilityLabel === "string" ? accessibilityLabel : "Text";
   return <View style={[styles.root, containerStyle, styles.background]}>
     {transformation ? <View accessibilityLabel={`${transformation === "enhance" ? "Enhancing" : "Translating"} ${label.toLocaleLowerCase()}`} accessibilityRole="progressbar" style={styles.transformation}><Skeleton style={styles.skeleton} /></View> : <>
       <TextInput {...props} accessibilityLabel={accessibilityLabel} ref={ref} style={[styles.input, style]} value={value} />
-      <View style={styles.actions}><Button accessibilityLabel={`${label} AI actions`} icon={<BrainIcon size="sm" />} iconOnly onPress={() => { Keyboard.dismiss(); onOpenActions(); }} size="md" style={styles.aiButton} variant="icon" /></View>
+      <View style={styles.actions}>{onOpenHistory ? <Button accessibilityLabel={`${label} history`} icon={<ClockIcon size="sm" />} iconOnly onPress={() => { Keyboard.dismiss(); onOpenHistory(); }} size="md" style={styles.aiButton} variant="icon" /> : null}{onOpenActions ? <Button accessibilityLabel={`${label} AI actions`} icon={<BrainIcon size="sm" />} iconOnly onPress={() => { Keyboard.dismiss(); onOpenActions(); }} size="md" style={styles.aiButton} variant="icon" /> : null}</View>
     </>}
   </View>;
 });

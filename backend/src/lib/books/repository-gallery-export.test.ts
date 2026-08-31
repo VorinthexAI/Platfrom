@@ -14,7 +14,10 @@ describe('book Gallery export persistence', () => {
     } };
     const context = { organizationKey: 'organization', scopeKey, userKey };
     const repository = createBookRepository(database, async (_collections, operation) => operation(database));
-    const ensured = await repository.ensureGalleryExportCollection(context, newId(), 'A Better Book', Array(EMBEDDING_DIMENSIONS).fill(0), '2026-08-27T12:00:00.000Z');
+    const bookKey = newId();
+    const ensured = await repository.ensureGalleryExportCollection(context, bookKey, 'A Better Book', Array(EMBEDDING_DIMENSIONS).fill(0), '2026-08-27T12:00:00.000Z');
+    const replayed = await repository.ensureGalleryExportCollection(context, bookKey, 'A Better Book', Array(EMBEDDING_DIMENSIONS).fill(0), '2026-08-27T12:00:00.000Z');
+    expect(replayed).toEqual(ensured);
     await repository.linkGalleryExportImages(context, ensured.collectionKey, ensured.ownerKey, [imageKey], '2026-08-27T12:00:00.000Z');
     const collection = calls.find(({ query }) => query.includes('IN collections'))!.query;
     const membership = calls.find(({ query }) => query.includes('IN collectionMembers'))!.query;

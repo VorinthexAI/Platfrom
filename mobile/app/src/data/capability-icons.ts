@@ -14,6 +14,14 @@ export const capabilityIconSource: Record<CapabilitySlug, ImageSource> = {
   ascend: require("../../assets/brand/capability-ascend.png"),
 };
 
+export type ContentPresentation = "travel" | "communication" | "learning";
+
+export const contentPresentationIconSource: Record<ContentPresentation, ImageSource> = {
+  travel: capabilityIconSource.compass,
+  communication: capabilityIconSource.signal,
+  learning: capabilityIconSource.ascend,
+};
+
 /** The real Vorinthex mark from web/app/public/logos. */
 export const vorinthexMarkSource: ImageSource = require("../../assets/brand/vorinthex-mark.png");
 

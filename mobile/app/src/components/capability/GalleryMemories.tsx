@@ -4,7 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import Animated, { Easing, interpolate, useAnimatedStyle, useReducedMotion, useSharedValue, withTiming } from "react-native-reanimated";
-import { BottomSheet } from "@vorinthex/shared/ui/bottom-sheet";
+import { BottomSheet, BottomSheetItem, BottomSheetMenu } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
 import { CheckIcon, CloseIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { Skeleton } from "@vorinthex/shared/ui/skeleton";
@@ -16,6 +16,7 @@ import { galleryMemoryTypedText, galleryMemoryTypingDuration, splitGalleryMemory
 import { subscribeAppEvent } from "@/lib/app-events";
 import { galleryQueryKeys } from "@/lib/workspace-query-cache";
 import { fonts, palette, radii, spacing } from "@/theme/tokens";
+import { GalleryCollectionImagePicker } from "@/components/capability/GalleryCollectionImagePicker";
 
 type GalleryMemoriesProps = { collection: GalleryCollection; onClose: () => void; open: boolean };
 type MemorySheet = "list" | "confirmDelete";
@@ -42,6 +43,8 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
   const [deleting, setDeleting] = useState(false);
   const [selectedMemoryKeys, setSelectedMemoryKeys] = useState<string[]>([]);
   const [activeSheet, setActiveSheet] = useState<MemorySheet>("list");
+  const [createMenuOpen, setCreateMenuOpen] = useState(false);
+  const [customCreateOpen, setCustomCreateOpen] = useState(false);
   const imageExpansion = useSharedValue(0);
   const listRequest = useRef(0);
   const detailRequest = useRef(0);
@@ -111,12 +114,12 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
     }
   }
 
-  async function createMemory() {
+  async function createMemory(imageKey?: string) {
     if (!owner || creating) return;
     const generation = ++createRequest.current;
     setCreating(true);
     try {
-      const { memory } = await createGalleryCollectionMemory(collection.key);
+      const { memory } = await createGalleryCollectionMemory(collection.key, imageKey);
       if (generation !== createRequest.current || !open) return;
       queryClient.setQueryData(galleryQueryKeys.memory(galleryContext, collection.key, memory.key), { memory });
       setMemories((current) => [...current.filter(({ key }) => key !== memory.key), memory]);
@@ -173,8 +176,8 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
   }
 
   useEffect(() => {
-    listSheetOpen.current = open && !detail && !opening && activeSheet === "list";
-  }, [activeSheet, detail, open, opening]);
+    listSheetOpen.current = open && !detail && !opening && activeSheet === "list" && !createMenuOpen && !customCreateOpen;
+  }, [activeSheet, createMenuOpen, customCreateOpen, detail, open, opening]);
 
   useEffect(() => {
     if (!open) {
@@ -224,12 +227,12 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [collection.key, creating, deleting, detail?.key, open, opening]);
 
-  const close = () => { listSheetOpen.current = false; listRequest.current += 1; detailRequest.current += 1; createRequest.current += 1; setDetail(undefined); setCreating(false); setDeleting(false); setSelectedMemoryKeys([]); setActiveSheet("list"); onClose(); };
-  const listFooter = <>{owner ? <Button disabled={creating || listLoading || opening} loading={creating} onPress={() => void createMemory()} size="md" variant="primary">Create</Button> : null}<Button disabled={creating} onPress={close} size="md" variant="secondary">Close</Button></>;
+  const close = () => { listSheetOpen.current = false; listRequest.current += 1; detailRequest.current += 1; createRequest.current += 1; setDetail(undefined); setCreating(false); setDeleting(false); setSelectedMemoryKeys([]); setActiveSheet("list"); setCreateMenuOpen(false); setCustomCreateOpen(false); onClose(); };
+  const listFooter = <>{owner ? <Button disabled={creating || listLoading || opening} loading={creating} onPress={() => { listSheetOpen.current = false; setCreateMenuOpen(true); }} size="md" variant="primary">Create</Button> : null}<Button disabled={creating} onPress={close} size="md" variant="secondary">Close</Button></>;
   const detailFooter = <><Button onPress={() => setShowImage((current) => !current)} size="md" variant="primary">{showImage ? "Read memory" : "Show image"}</Button><Button onPress={close} size="md" variant="secondary">Close</Button></>;
 
   return <>
-    <BottomSheet footer={listFooter} height="full" onOpenChange={(next) => { if (!next) close(); }} open={open && !detail} title="Memories">
+    <BottomSheet footer={listFooter} height="full" onOpenChange={(next) => { if (!next && !createMenuOpen && !customCreateOpen) close(); }} open={open && !detail} title="Memories">
       <ScrollView contentContainerStyle={[styles.grid, listEmpty && styles.emptyGrid]} onLayout={({ nativeEvent }) => setGridWidth(nativeEvent.layout.width)} showsVerticalScrollIndicator={false}>
         {selectedMemoryKeys.length ? <Tabs style={styles.bulkToolbar}><View style={styles.bulkToolbarSelection}><Button accessibilityLabel="Clear memory selection" contentMode="raw" disabled={deleting} onPress={() => setSelectedMemoryKeys([])} size="md" style={styles.bulkToolbarClose} variant="secondary"><CloseIcon size="sm" /></Button><Text style={styles.bulkSelectionText}>{selectedMemoryKeys.length} selected</Text></View><Button disabled={deleting} onPress={() => { listSheetOpen.current = false; setActiveSheet("confirmDelete"); }} size="md" style={styles.bulkDeleteAction} textStyle={styles.bulkDeleteText} variant="secondary">Delete</Button></Tabs> : null}
         {listLoading ? Array.from({ length: 4 }, (_, index) => <Skeleton key={index} style={[styles.cardFrame, { width: cardWidth, height: cardWidth }]} />) : memories.map((memory) => { const selected = selectedMemoryKeys.includes(memory.key); return <Button accessibilityActions={owner ? [{ name: "longpress", label: selected ? "Deselect memory" : "Select memory" }] : undefined} accessibilityLabel="Open memory" accessibilityState={{ selected }} contentMode="raw" disabled={creating || opening || deleting} key={memory.key} onAccessibilityAction={owner ? ({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") toggleSelection(memory.key); } : undefined} onLongPress={owner ? () => handleLongPress(memory.key) : undefined} onPress={() => handlePress(memory)} shape="rounded" size="md" style={[styles.cardFrame, styles.card, selected && styles.cardSelected, { width: cardWidth, height: cardWidth }]} variant="ghost"><Image contentFit="cover" source={memory.image.url} style={StyleSheet.absoluteFill} transition={150} />{selected ? <View pointerEvents="none" style={styles.selectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}</Button>; })}
@@ -238,8 +241,11 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
       </ScrollView>
     </BottomSheet>
 
+    <BottomSheet hideHeading onOpenChange={setCreateMenuOpen} open={open && createMenuOpen} title=""><BottomSheetMenu><BottomSheetItem disabled={creating} onPress={() => { setCreateMenuOpen(false); listSheetOpen.current = true; void createMemory(); }} style={styles.menuItem} variant="secondary">Random</BottomSheetItem><BottomSheetItem disabled={creating} onPress={() => { setCreateMenuOpen(false); setCustomCreateOpen(true); }} style={styles.menuItem} variant="secondary">Custom</BottomSheetItem></BottomSheetMenu></BottomSheet>
+    <GalleryCollectionImagePicker collection={collection} description="Tap one image to create a memory from it." mode="single" onClose={() => setCustomCreateOpen(false)} onSelect={([imageKey]) => { if (!imageKey) return; setCustomCreateOpen(false); listSheetOpen.current = true; void createMemory(imageKey); }} open={open && customCreateOpen} title="Custom memory" />
+
     <BottomSheet footer={detailFooter} height="full" onOpenChange={(next) => { if (!next) close(); }} open={open && Boolean(detail)} title="Memory">
-      {detail ? <ScrollView contentContainerStyle={styles.detail} onLayout={({ nativeEvent }) => setDetailViewportHeight(nativeEvent.layout.height)} showsVerticalScrollIndicator={false}><Animated.View style={[styles.detailImageStage, imageStageStyle]}><Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, expandedImageStyle]}><Image contentFit="contain" source={detail.image.url} style={styles.detailImage} transition={180} /></Animated.View><Animated.View pointerEvents="none" style={[styles.detailThumbnailLayer, compactImageStyle]}><View collapsable={false} style={styles.thumbnailImageClip}><Image contentFit="cover" source={detail.image.url} style={styles.detailImage} transition={180} /></View></Animated.View></Animated.View>{showImage ? null : <View style={styles.memoryCopy}>{splitGalleryMemoryText(typedText).map((section, index) => <Text key={`${index}:${section.length}`} style={styles.memoryText}>{section}</Text>)}</View>}</ScrollView> : null}
+      {detail ? <ScrollView contentContainerStyle={styles.detail} onLayout={({ nativeEvent }) => setDetailViewportHeight(nativeEvent.layout.height)} showsVerticalScrollIndicator={false}><Animated.View style={[styles.detailImageStage, imageStageStyle]}><Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, expandedImageStyle]}><Image contentFit="contain" source={detail.image.url} style={[styles.detailImage, styles.expandedDetailImage]} transition={180} /></Animated.View><Animated.View pointerEvents="none" style={[styles.detailThumbnailLayer, compactImageStyle]}><View collapsable={false} style={styles.thumbnailImageClip}><Image contentFit="cover" source={detail.image.url} style={styles.detailImage} transition={180} /></View></Animated.View></Animated.View>{showImage ? null : <View style={styles.memoryCopy}>{splitGalleryMemoryText(typedText).map((section, index) => <Text key={`${index}:${section.length}`} style={styles.memoryText}>{section}</Text>)}</View>}</ScrollView> : null}
     </BottomSheet>
 
     <BottomSheet dismissible={!deleting} onOpenChange={(next) => { if (!next) setActiveSheet("list"); }} open={open && !detail && selectedMemoryKeys.length > 0 && activeSheet === "confirmDelete"} title={`Delete ${selectedMemoryKeys.length === 1 ? "memory" : `${selectedMemoryKeys.length} memories`}?`}>
@@ -267,7 +273,9 @@ const styles = StyleSheet.create({
   detailThumbnailLayer: { position: "absolute", top: 0, left: "50%", width: 120, height: 120, marginLeft: -60 },
   thumbnailImageClip: { width: "100%", height: "100%", overflow: "hidden", borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.sm, backgroundColor: palette.voidBlack },
   detailImage: { width: "100%", height: "100%" },
+  expandedDetailImage: { borderRadius: radii.lg },
   memoryCopy: { width: "100%", gap: spacing.md, paddingBottom: spacing.xl },
   memoryText: { color: palette.silver100, fontFamily: fonts.regular, fontSize: 17, lineHeight: 27 },
   confirmActions: { gap: spacing.sm },
+  menuItem: { justifyContent: "center" },
 });

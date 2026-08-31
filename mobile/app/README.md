@@ -63,3 +63,14 @@ MFA links remain web-only at `https://vorinthex.com/auth/mfa`.
 - `src/theme` — tokens extending `@vorinthex/shared/ui/tokens`, motion vocabulary
 - `assets/brand` — approved chrome icons and the Vorinthex mark, copied
   from `web/app/public/logos` (never redrawn)
+
+## UI Conventions
+
+Every user-facing screen must support pull-down-to-refresh. Attach the shared
+`PullToRefresh` component from `@vorinthex/shared/ui/pull-to-refresh` to the
+screen's scroll container and keep empty states vertically scrollable so the
+gesture remains available when no content is present. Refresh the active view's
+server-backed data and expose its in-progress state through `refreshing`.
+
+Do not import or implement React Native's `RefreshControl` directly in the
+mobile app. Extend the shared component if additional behavior is required.

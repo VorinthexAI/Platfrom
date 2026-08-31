@@ -135,6 +135,7 @@ describe('Content runtime', () => {
     expect(stored.sourceStorageKeys).toEqual(['scan/page-01.jpg', 'scan/page-02.jpg']);
     expect(stored.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
     expect(first.document.sourceImageCount).toBe(2);
+    expect(first.document.originalAvailable).toBe(false);
     const sources = await runContentTool('document.find', { documentKeys: [first.document.key], include: ['sourceImages'] }, f.context, dependencies);
     expect(sources.results[0]).toMatchObject({ success: true, data: { document: { sourceImageCount: 2, sourceImages: [
       { page: 1, url: 'https://images.example/scan/page-01.jpg' },
@@ -833,6 +834,60 @@ describe('Content runtime', () => {
     expect(copied.results[0]?.data?.document.isFavorite).toBe(false);
   });
 
+  test('copies scanned pages and speech objects into independent document storage', async () => {
+    const f = fixture('moderator');
+    const documentKey = f.addDocument('Scanned content');
+    const source = f.documents.get(documentKey);
+    source.extension = undefined;
+    source.mimeType = undefined;
+    source.storageKey = undefined;
+    source.sourceStorageKeys = ['scans/page-01.png', 'scans/page-02.png'];
+    source.speechStorageKeys = ['speech/current.mp3'];
+    const copiedObjects: Array<{ sourceKey: string; destinationKey: string }> = [];
+    const copied = await runContentTool('document.copy', { copies: [{ documentKey, targetScopeKey: f.scopeKey, targetFolderKey: f.folderKey }] }, f.context, {
+      repository: f.repository,
+      embed: async () => embedding,
+      storage: {
+        async upload() { return { storageKey: '' }; },
+        async download() { return { bytes: new Uint8Array() }; },
+        async copy(input) { copiedObjects.push(input); return { storageKey: input.destinationKey }; },
+        async delete() {},
+      },
+    });
+    const copiedKey = copied.results[0]?.data?.document.key;
+    if (!copiedKey) throw new Error('Document copy did not return a key.');
+    const copy = f.documents.get(copiedKey);
+    expect(copiedObjects.map(({ sourceKey }) => sourceKey)).toEqual([...source.sourceStorageKeys, ...source.speechStorageKeys]);
+    expect(copy.sourceStorageKeys).toHaveLength(2);
+    expect(copy.sourceStorageKeys).not.toEqual(source.sourceStorageKeys);
+    expect(copy.speechStorageKeys).toHaveLength(1);
+    expect(copied.results[0]?.data?.document.sourceImageCount).toBe(2);
+  });
+
+  test('deletes copied scan sources when document copy persistence fails', async () => {
+    const f = fixture('moderator');
+    const documentKey = f.addDocument('Scanned content');
+    const source = f.documents.get(documentKey);
+    source.sourceStorageKeys = ['scans/page-01.png', 'scans/page-02.png'];
+    const insertDocument = f.repository.insertDocument.bind(f.repository);
+    f.repository.insertDocument = async (document) => document.key === documentKey ? insertDocument(document) : Promise.reject(new Error('insert failed'));
+    const copiedObjects: string[] = [];
+    const deletedObjects: string[] = [];
+    const failed = await runContentTool('document.copy', { copies: [{ documentKey, targetScopeKey: f.scopeKey, targetFolderKey: f.folderKey }] }, f.context, {
+      repository: f.repository,
+      embed: async () => embedding,
+      storage: {
+        async upload() { return { storageKey: '' }; },
+        async download() { return { bytes: new Uint8Array() }; },
+        async copy(input) { copiedObjects.push(input.destinationKey); return { storageKey: input.destinationKey }; },
+        async delete(key) { deletedObjects.push(key); },
+      },
+    });
+    expect(failed.results[0]?.success).toBe(false);
+    expect(copiedObjects).toHaveLength(3);
+    expect(deletedObjects.sort()).toEqual(copiedObjects.sort());
+  });
+
   test('copies complete folder subtrees with independent storage and compensates failed copies', async () => {
     const f = fixture('moderator');
     const childKey = newId(), nestedKey = newId(), targetKey = newId();
@@ -965,6 +1020,8 @@ describe('Content runtime', () => {
     const fileName = downloaded.results[0]?.data?.fileName;
     expect(fileName).toHaveLength(255);
     expect(fileName?.endsWith('.txt')).toBe(true);
+    const found = await runContentTool('document.find', { documentKeys: [documentKey] }, f.context, { repository: f.repository });
+    expect(found.results[0]?.data?.document.originalAvailable).toBe(true);
   });
 
   test('generates an HTML preview from authorized original bytes', async () => {

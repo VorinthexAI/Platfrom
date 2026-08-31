@@ -139,7 +139,7 @@ export function createBookRuntime(options: BookRuntimeDependencies = {}): BookGe
       const requestHash = hash({ book: detail.book.generationBriefFingerprint, chapter: chapter.key, title: chapter.title, content });
       exports[index] = {
         chapterKey: chapter.key,
-        document: documentSchema.parse({ key: documentKey, scopeKey: context.scopeKey, folderKey, name: chapter.title, extension: 'txt', mimeType: 'text/plain', content, embedding: chunkEmbeddings[0], contentChunks, chunkEmbeddings, semanticChunkCount: contentChunks.length, semanticContentHash: documentSemanticHash(content), mutationPolicy: 'user', isFavorite: false, createdAt: chapter.createdAt, updatedAt: timestamp }),
+        document: documentSchema.parse({ key: documentKey, scopeKey: context.scopeKey, folderKey, name: chapter.title, content, embedding: chunkEmbeddings[0], contentChunks, chunkEmbeddings, semanticChunkCount: contentChunks.length, semanticContentHash: documentSemanticHash(content), mutationPolicy: 'user', isFavorite: false, createdAt: chapter.createdAt, updatedAt: timestamp }),
         binding: generatedDocumentBindingSchema.parse({ key: `c${hash(`archive-chapter-binding\0${chapter.key}`).slice(0, 24)}`, scopeKey: context.scopeKey, documentKey, subjectType: 'chapter', subjectKey: chapter.key, kind: 'chapter', provenance: 'generated', createdByKey: context.userKey, idempotencyKey: `book-chapter-export:${chapter.key}`, requestHash, createdAt: chapter.createdAt, updatedAt: timestamp }),
       };
     });
@@ -155,7 +155,7 @@ export function createBookRuntime(options: BookRuntimeDependencies = {}): BookGe
       const inputs = await Promise.all(batch.map(async (item) => {
         const object = await storage.download(item.sourceKey);
         const filename = `${item.filename.replace(/\.png$/i, '').replace(/[\\/]/g, '-').slice(0, 251) || 'image'}.png`;
-        return { scopeKey: context.scopeKey, ownerKey, imageKey: `c${hash(`book-gallery-image\0${item.identity}\0${item.version}`).slice(0, 24)}`, idempotencyKey: `book-image-export:${hash(`${item.identity}\0${item.version}`)}`, mutationPolicy: 'user' as const, file: { filename, mimeType: object.mimeType ?? 'image/png', sizeBytes: object.bytes.byteLength, bytes: object.bytes }, signal: context.signal };
+        return { scopeKey: context.scopeKey, ownerKey, origin: 'generated' as const, imageKey: `c${hash(`book-gallery-image\0${item.identity}\0${item.version}`).slice(0, 24)}`, idempotencyKey: `book-image-export:${hash(`${item.identity}\0${item.version}`)}`, mutationPolicy: 'user' as const, file: { filename, mimeType: object.mimeType ?? 'image/png', sizeBytes: object.bytes.byteLength, bytes: object.bytes }, signal: context.signal };
       }));
       const images = await processImageBatch(inputs, {
         storage,

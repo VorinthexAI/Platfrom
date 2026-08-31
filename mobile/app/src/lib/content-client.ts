@@ -4,6 +4,7 @@ import { z } from "zod";
 import { useAuthStore } from "@/state/auth";
 import { appSearchResults, searchApp } from "./app-search-client";
 import type { AssistantChange } from "./assistant-changes";
+import type { ContentPresentation } from "@/data/capability-icons";
 import {
   planContentSelectionDelete,
   planContentSelectionCopy,
@@ -28,6 +29,7 @@ export type ContentFolder = {
   name: string;
   description?: string;
   coverUrl?: string;
+  presentation?: ContentPresentation;
   isFavorite?: boolean;
   managed?: boolean;
 };
@@ -40,6 +42,7 @@ export type ContentDocument = {
   mimeType?: string;
   sizeBytes?: number;
   sourceImageCount?: number;
+  originalAvailable?: boolean;
   currentVersionKey?: string | null;
   isFavorite: boolean;
   managed?: boolean;
@@ -250,6 +253,10 @@ export function isContentContextConfigured(context: ContentContext) {
 
 export function createContentMutationKey() {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+export function createContentRecordKey() {
+  return `c${Crypto.randomUUID().replace(/-/g, "")}`;
 }
 
 function documentMimeType(name: string, reported: string) {
@@ -494,10 +501,7 @@ export async function listContentLocation(folderKey?: string) {
 export async function loadInitialContentLocation() {
   const [tree, rootDocuments] = await Promise.all([listContentFolderTree(), listContentDocumentsAtLocation()]);
   const root = { folders: tree.filter((folder) => !folder.parentFolderKey), documents: rootDocuments };
-  const initialFolder = root.folders.find((folder) => folder.name === "My Documents");
-  if (!initialFolder) return { root, location: root };
-  const documents = await listContentDocumentsAtLocation(initialFolder.key);
-  return { root, location: { folders: tree.filter((folder) => folder.parentFolderKey === initialFolder.key), documents }, initialFolder };
+  return { root, location: root, initialFolder: undefined };
 }
 
 export async function readContentDocument(documentKey: string, contentContext = getContentContext(), signal?: AbortSignal) {
@@ -586,13 +590,13 @@ export async function downloadContentDocument(documentKey: string, format: "orig
   return result.data;
 }
 
-export async function createContentFolder(name: string, parentFolderKey?: string, description?: string) {
+export async function createContentFolder(name: string, parentFolderKey?: string, description?: string, folderKey = createContentRecordKey(), mutationKey = `folder-create:${folderKey}`) {
   const contentContext = getContentContext();
   const data = await callContentTool<{
     results: { success: boolean; data?: { folder: ContentFolder }; error?: { message: string } }[];
   }>("folder.create", {
-    folders: [{ scopeKey: contentContext.scopeKey, parentFolderKey, name, ...(description ? { description } : {}) }],
-    idempotencyKey: createContentMutationKey(),
+    folders: [{ key: folderKey, scopeKey: contentContext.scopeKey, parentFolderKey, name, ...(description ? { description } : {}) }],
+    idempotencyKey: mutationKey,
   });
   const result = data.results[0];
   if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The folder could not be created.");

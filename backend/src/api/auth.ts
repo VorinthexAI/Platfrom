@@ -330,7 +330,11 @@ export async function verifyAccessToken(token: string): Promise<AuthIdentity | n
       founderMfaVersion?: number;
       exp?: number;
     };
-    if (!parsed.sub || !parsed.exp || parsed.exp <= Math.floor(Date.now() / 1000)) return null;
+    if (typeof parsed.sub !== 'string' || !parsed.sub.trim() || typeof parsed.exp !== 'number' || parsed.exp <= Math.floor(Date.now() / 1000)) return null;
+    if (parsed.sid !== undefined && (typeof parsed.sid !== 'string' || !parsed.sid.trim())) return null;
+    if (parsed.identityType !== undefined && !['user', 'member', 'superAdmin'].includes(parsed.identityType)) return null;
+    if (parsed.founderMembershipKey !== undefined && typeof parsed.founderMembershipKey !== 'string') return null;
+    if (parsed.founderMfaVersion !== undefined && typeof parsed.founderMfaVersion !== 'number') return null;
     if (parsed.sid) {
       const session = await getAuthSessionById(parsed.sid);
       if (!session || session.userId !== parsed.sub || session.revokedAt || !isRefreshTokenActive(session.expiresAt)) return null;

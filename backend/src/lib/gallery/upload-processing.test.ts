@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import sharp from 'sharp';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
 import { galleryUploadSchema, type GalleryUpload } from '@/lib/db/gallery-uploads.node';
-import { imageSchema } from '@/lib/db/images.node';
+import { imageSchema as persistedImageSchema } from '@/lib/db/images.node';
 import { processImages } from '@/lib/ai/image-processing';
 import { perceptualHashDistance, PERCEPTUAL_HASH_DUPLICATE_DISTANCE } from '@/lib/perceptual-hash';
 import { newId } from '@/lib/ids';
@@ -13,6 +13,7 @@ import { imageDataUrl } from './image-reference';
 
 const now = '2026-08-17T12:00:00.000Z';
 const keys = ['cmrnlzf650002qc7k4p5zem5w', 'cmrnlzf650002qc7k4p5zem5x', 'cmrnlzf650002qc7k4p5zem5y'];
+const imageSchema = { parse: (value: unknown) => persistedImageSchema.parse({ origin: 'uploaded', ...(value as object) }) };
 const passthroughSanitizer: typeof sanitizeGalleryImage = async (bytes) => ({ bytes: new Uint8Array(bytes), coordinates: undefined });
 const processGalleryUploadBatch = (uploadKeys: readonly string[], dependencies: GalleryUploadProcessingDependencies) => executeGalleryUploadBatch(uploadKeys, {
   publishCollectionEvent: async () => undefined,
@@ -72,6 +73,7 @@ describe('Gallery upload batch processing', () => {
       reverseGeocode: async (coordinates) => { expect(coordinates).toEqual({ latitude: 59.3293, longitude: 18.0686 }); return { city: 'Stockholm', country: 'Sweden', countryCode: 'SE' }; },
       captionBatch: async (_organizationKey, urls) => { captionRequests.push(urls); return urls.map((_, index) => ({ caption: `Caption ${index + 1}`, score: 90 - index })); },
       processBatch: async (inputs, dependencies) => {
+        expect(inputs.every(({ origin }) => origin === 'uploaded')).toBe(true);
         expect(inputs[0]?.location).toEqual({ city: 'Stockholm', country: 'Sweden', countryCode: 'SE' });
         const generated = await dependencies!.captionBatch!([inputs[0]!.file as any, inputs[2]!.file as any]);
         expect(generated.map(({ score }) => score)).toEqual([90, 89]);

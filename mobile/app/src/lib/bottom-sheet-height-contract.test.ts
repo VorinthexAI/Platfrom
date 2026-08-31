@@ -89,9 +89,9 @@ test("layers complete mobile sheet pages over a stationary previous page", () =>
   expect(mobileSheet).toContain("onSwipeLeft?: () => void");
   expect(mobileSheet).toContain("onSwipeRight?: () => void");
   expect(mobileSheet).toContain("const previous = pageSnapshotRef.current");
-  expect(mobileSheet).toContain("pageDirectionRef.current * windowWidth");
+  expect(mobileSheet).toContain('pageTransitionOrigin === "bottom" ? windowHeight : pageDirectionRef.current * windowWidth');
   expect(mobileSheet).toContain("page={pageTransition.previous}");
-  expect(mobileSheet).toContain("translateX: pageTranslateX");
+  expect(mobileSheet).toContain('pageTransitionOrigin === "bottom" ? { translateY: pageTranslate } : { translateX: pageTranslate }');
   expect(mobileSheet).toContain("duration: 280");
   expect(mobileSheet).toContain('<GestureDetector gesture={horizontalSwipeGesture}><Animated.View');
   expect(mobileSheet).toContain("key={pageTransition.previous.pageKey}");
@@ -103,7 +103,12 @@ test("layers complete mobile sheet pages over a stationary previous page", () =>
   expect(mobileSheet).toContain("scheduleOnRN(navigateHorizontal, translationX < 0 ? 1 : -1)");
   expect(mobileSheet).not.toContain(".runOnJS(true)");
   expect(mobileSheet).toContain("toValue: 0, useNativeDriver: false");
-  expect(mobileSheet).toContain("style={[styles.layerSurface, transitioningPage && { transform: [{ translateX: pageTranslateX }] }]}");
+  expect(mobileSheet).toContain('style={[styles.layerSurface, transitioningPage && { transform: [pageTransitionOrigin === "bottom" ? { translateY: pageTranslate } : { translateX: pageTranslate }] }]}');
+});
+
+test("retains the last populated page throughout the close animation", () => {
+  expect(mobileSheet).toContain("if (open) pageSnapshotRef.current = livePage");
+  expect(mobileSheet).toContain("page={open ? livePage : pageSnapshotRef.current}");
 });
 
 test("classifies every full-height sheet workflow explicitly", () => {

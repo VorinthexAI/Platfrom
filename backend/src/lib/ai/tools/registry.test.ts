@@ -8,10 +8,10 @@ describe('unified tool registry', () => {
   test('has one unique definition for every public tool name', () => {
     expect(new Set(TOOL_NAMES).size).toBe(TOOL_NAMES.length);
     expect(new Set(TOOL_DEFINITIONS.map(({ name }) => name)).size).toBe(TOOL_DEFINITIONS.length);
-    expect(TOOL_NAMES).toHaveLength(164);
-    expect(MODEL_TOOL_NAMES).toHaveLength(161);
-    expect(TOOL_DEFINITIONS).toHaveLength(161);
-    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 116);
+    expect(TOOL_NAMES).toHaveLength(166);
+    expect(MODEL_TOOL_NAMES).toHaveLength(163);
+    expect(TOOL_DEFINITIONS).toHaveLength(163);
+    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 118);
     expect(TOOL_DEFINITIONS.map(({ name }) => name)).toEqual([...MODEL_TOOL_NAMES]);
     expect(TOOL_NAMES).not.toContain('chat');
     expect(TOOL_NAMES).not.toContain('orchestrator.chat');
@@ -168,7 +168,7 @@ describe('unified tool registry', () => {
   });
 
   test('executes workspace tools with strict input and trusted context', async () => {
-    const organizationKey = newId(), scopeKey = newId(), userKey = newId();
+    const organizationKey = newId(), scopeKey = newId(), userKey = newId(), collectionKey = newId();
     const membership = { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' };
     const contentContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: membership } } as unknown as ToolContext;
     const calls: unknown[][] = [];
@@ -292,7 +292,7 @@ describe('unified tool registry', () => {
   });
 
   test('executes canonical image tools with trusted context and request idempotency', async () => {
-    const organizationKey = newId(), scopeKey = newId(), userKey = newId();
+    const organizationKey = newId(), scopeKey = newId(), userKey = newId(), collectionKey = newId();
     const contentContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
     const calls: unknown[][] = [];
     const images = {
@@ -300,12 +300,12 @@ describe('unified tool registry', () => {
       generate: async (...args: unknown[]) => { calls.push(['generate', ...args]); return { images: [], provider: {} }; },
     } as any;
     await runTool('image.ideas.create', '', { prompt: 'Earth', requestedCount: 2 }, { contentContext, images });
-    await runTool('image.generate', '', { prompt: 'Earth', count: 1, size: '1024x1024', quality: 'high' }, { contentContext, requestKey: 'request-1', images });
+    await runTool('image.generate', '', { prompt: 'Earth', count: 1, collectionKey }, { contentContext, requestKey: 'request-1', images });
     expect(calls).toEqual([
       ['ideas', { prompt: 'Earth', requestedCount: 2 }, contentContext],
-      ['generate', { prompt: 'Earth', count: 1, size: '1024x1024', quality: 'high', mode: 'default' }, contentContext, 'request-1'],
+      ['generate', { prompt: 'Earth', count: 1, size: '1024x1024', quality: 'medium', mode: 'default', referenceImageKeys: [], collectionKey }, contentContext, 'request-1'],
     ]);
-    await expect(runTool('image.generate', '', { prompt: 'Earth', count: 1, size: '1024x1024', quality: 'high', scopeKey }, { contentContext, images })).rejects.toThrow('Unrecognized key');
+    await expect(runTool('image.generate', '', { prompt: 'Earth', count: 1, collectionKey, scopeKey }, { contentContext, images })).rejects.toThrow('Unrecognized key');
   });
 
   test('keeps canonical Content mutations in dot notation', async () => {

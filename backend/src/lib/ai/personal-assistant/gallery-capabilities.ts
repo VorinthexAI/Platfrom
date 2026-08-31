@@ -4,7 +4,7 @@ import type { AssistantCapability, AssistantCapabilityContext } from './capabili
 import { GalleryOperationError, galleryOperationInputSchemas, galleryOperations, redactCollectionShareOutput, type GalleryOperationContext, type GalleryOperationName } from '@/lib/gallery/operations';
 import { nonTextImageSearchInputSchema, nonTextImageSearchProviderInputSchema } from '@/lib/ai/tools/image-search';
 import { userHiddenOperations } from '@/lib/user-hiddens/operations';
-import { createImageGenerationService, imageGenerateModelInputSchema, imageIdeasInputSchema, type ImageGenerationService } from '@/lib/image-generation/service';
+import { createImageGenerationService, imageGenerateModelInputSchema, imageGenerationHistoryDeleteInputSchema, imageGenerationHistoryListInputSchema, imageIdeasInputSchema, type ImageGenerationService } from '@/lib/image-generation/service';
 
 type GalleryExecutor = (input: unknown, context: GalleryOperationContext) => Promise<unknown>;
 
@@ -104,8 +104,19 @@ export function createGalleryAssistantCapabilities(operations: Partial<Record<Ga
     {
       inputSchema: imageGenerateModelInputSchema,
       mutationWorkspace: 'gallery',
-      definition: { name: 'image.generate', description: 'Generate images and save them into the current user Gallery scope. Use default mode for maximum quality or fast mode for low-latency generation.', inputSchema: contentZodToJsonSchema(imageGenerateModelInputSchema) },
+      definition: { name: 'image.generate', description: 'Generate images and save them into an authorized Gallery collection, optionally using accessible reference images.', inputSchema: contentZodToJsonSchema(imageGenerateModelInputSchema) },
       async execute(input, context) { return { kind: 'continue', result: await (context.images ?? imageService).generate(imageGenerateModelInputSchema.parse(input), context.domain, context.requestKey) }; },
+    },
+    {
+      inputSchema: imageGenerationHistoryListInputSchema,
+      definition: { name: 'image.generation-history.list', description: 'List the authenticated user\'s recent image-generation prompts.', inputSchema: contentZodToJsonSchema(imageGenerationHistoryListInputSchema) },
+      async execute(input, context) { return { kind: 'continue', result: await (context.images ?? imageService).listHistory(input, context.domain) }; },
+    },
+    {
+      inputSchema: imageGenerationHistoryDeleteInputSchema,
+      mutationWorkspace: 'gallery',
+      definition: { name: 'image.generation-history.delete', description: 'Delete one matching image-generation prompt from the authenticated user\'s history.', inputSchema: contentZodToJsonSchema(imageGenerationHistoryDeleteInputSchema) },
+      async execute(input, context) { return { kind: 'continue', result: await (context.images ?? imageService).deleteHistory(input, context.domain) }; },
     },
   ];
   return [...gallery, ...hidden, ...generated];

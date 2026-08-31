@@ -12,8 +12,11 @@ describe('book extension repository', () => {
     const extension = { key: extensionKey, scopeKey, bookKey, userKey, requestKey: 'request-1', requestFingerprint: 'a'.repeat(64), titles: ['Continuation'], baseChapterCount: 10, targetChapterCount: 11, status: 'pending' as const, createdAt: timestamp, updatedAt: timestamp };
     await expect(repository.acceptExtension({ organizationKey: 'organization', scopeKey, userKey }, extension, timestamp)).resolves.toMatchObject({ replayed: false, extension, book: { key: bookKey, status: 'queued', chapterCount: 11 } });
     expect(collections).toMatchObject({ write: expect.arrayContaining(['books', 'bookExtensions']) });
+    const replay = queries.find(({ query }) => query.includes('FOR item IN bookExtensions'))!;
+    expect(Object.keys(replay.bind).sort()).toEqual(['bookKey', 'requestKey', 'scopeKey']);
     const acceptance = queries.find(({ query }) => query.includes('INSERT @extension INTO bookExtensions'))!;
     expect(acceptance.query).toContain('book.status == "ready"'); expect(acceptance.query).toContain('chapter.status != "audio-ready"'); expect(acceptance.query).toContain('UNIQUE(APPEND(normalizedExisting, normalizedNew))'); expect(acceptance.query).toContain('activeExtensionKey');
+    expect(Object.keys(acceptance.bind).sort()).toEqual(['baseChapterCount', 'bookKey', 'extension', 'extensionKey', 'generationTotalUnits', 'now', 'scopeKey', 'targetChapterCount', 'titles']);
   });
 
   test('appends one contiguous chapter only while the book lease is owned', async () => {

@@ -1,9 +1,21 @@
 import { beforeEach, expect, mock, test } from "bun:test";
 
-const calls: { path: string; body: Record<string, unknown>; timeout?: number; signal?: AbortSignal; method?: "GET" }[] = [];
+const calls: { path: string; body: Record<string, unknown>; timeout?: number; signal?: AbortSignal; method?: "GET" | "DELETE"; headers?: Record<string, string> }[] = [];
 const responses = new Map<string, unknown>();
 const failures = new Map<string, { message: string; code?: string; transport?: boolean }>();
 const malformed = new Set<string>();
+const localFiles = new Map<string, Uint8Array>();
+
+mock.module("expo-file-system", () => ({
+  File: class {
+    constructor(private readonly uri: string) {}
+    async arrayBuffer() {
+      const bytes = localFiles.get(this.uri);
+      if (!bytes) throw new Error(`Missing local file ${this.uri}`);
+      return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    }
+  },
+}));
 
 mock.module("@/state/auth", () => ({
   useAuthStore: { getState: () => ({ user: { email: "recipient@example.com" }, organization: { key: "organization", membership_key: "membership" }, scope: { key: "scope" } }) },
@@ -15,15 +27,18 @@ mock.module("./api-client", () => ({
     if (malformed.has(path)) return { data: { success: false } };
     const response = responses.get(`GET ${path}`);
     return { data: { success: true, data: response } };
-  }, post: async (path: string, body: Record<string, unknown>, options?: { timeout?: number; signal?: AbortSignal }) => {
-    calls.push({ path, body, timeout: options?.timeout, ...(options?.signal ? { signal: options.signal } : {}) });
+  }, delete: async (path: string, options?: { data?: Record<string, unknown>; timeout?: number }) => {
+    calls.push({ path, body: options?.data ?? {}, timeout: options?.timeout, method: "DELETE" });
+    return { data: { success: true, data: responses.get(`DELETE ${path}`) ?? true } };
+  }, post: async (path: string, body: Record<string, unknown>, options?: { timeout?: number; signal?: AbortSignal; headers?: Record<string, string> }) => {
+    calls.push({ path, body, timeout: options?.timeout, ...(options?.signal ? { signal: options.signal } : {}), ...(options?.headers ? { headers: options.headers } : {}) });
     if (malformed.has(path)) return { data: { success: false } };
     const failure = failures.get(path);
     if (failure?.transport) throw { response: { data: { success: false, error: { message: failure.message, code: failure.code } } } };
     if (failure) return { data: { success: false, error: { message: failure.message, code: failure.code } } };
     if (responses.has(path)) return { data: { success: true, data: responses.get(path) } };
-    if (path === "/app/search") return { data: { success: true, data: { query: body.query, groups: [{ collectionSlug: "images", results: [] }] } } };
-    if (path === "/gallery/uploads/presign") return { data: { success: true, data: { uploads: [{ clientKey: "local-image", uploadKey: "upload", imageKey: "image", url: "https://uploads.example/image", headers: { "Content-Type": "image/jpeg" } }] } } };
+    if (path === "/app/search") return { data: { success: true, data: { query: body.query, groups: [{ collectionSlug: (body.collectionSlugs as string[])[0], results: [] }] } } };
+    if (path === "/gallery/uploads/presign") return { data: { success: true, data: { uploads: [{ clientKey: "local-image", uploadKey: "upload", imageKey: "image", url: "https://uploads.example/image", headers: { "Content-Type": "image/png" } }] } } };
     if (path === "/gallery/uploads/complete") return { data: { success: true, data: { jobs: [{ key: "upload", imageKey: "image", status: "queued" }] } } };
     if (path === "/gallery/collections/members") return { data: { success: true, data: { owners: [], collaborators: [], viewers: [] } } };
     if (path === "/gallery/invites/pending") return { data: { success: true, data: { invites: [
@@ -35,7 +50,7 @@ mock.module("./api-client", () => ({
     if (path === "/gallery/collections/shares/update") return { data: { success: true, data: { share: { key: "link", url: "https://vorinthex.com/share/secure-created-token", role: "viewer", active: false, createdAt: "2026-08-18T00:00:00.000Z" } } } };
     if (path === "/gallery/shares/activate") return { data: { success: true, data: { scopeKey: "scope", collectionKey: "shared", role: "viewer" } } };
     const collection = { key: "collection", name: "Collection", description: null, purpose: null, mutationPolicy: "user", isFavorite: false, count: 0, coverUrl: null, memberKey: "membership", role: "owner", access: { canRead: true, canContribute: true, canManage: true }, createdAt: "2026-08-14T00:00:00.000Z", updatedAt: "2026-08-14T00:00:00.000Z" };
-    const persistedImage = { key: "image", filename: "image.jpg", caption: "Image", imageCaptionKey: null, mimeType: "image/jpeg", sizeBytes: 100, width: 10, height: 10, city: null, country: null, countryCode: null, latitude: null, longitude: null, locationSource: null, mutationPolicy: "user", isFavorite: false, createdByKey: "membership", createdAt: "2026-08-14T00:00:00.000Z", updatedAt: "2026-08-14T00:00:00.000Z", url: "https://images.example/image" };
+    const persistedImage = { key: "image", filename: "image.jpg", caption: "Image", imageCaptionKey: null, mimeType: "image/jpeg", sizeBytes: 100, width: 10, height: 10, city: null, country: null, countryCode: null, latitude: null, longitude: null, locationSource: null, origin: "uploaded", mutationPolicy: "user", isFavorite: false, createdByKey: "membership", createdAt: "2026-08-14T00:00:00.000Z", updatedAt: "2026-08-14T00:00:00.000Z", url: "https://images.example/image" };
     if (path === "/gallery/overview") return { data: { success: true, data: { collections: [], images: [], nextCursor: null, canCreateCollections: true } } };
     if (path === "/gallery/collections") return { data: { success: true, data: collection } };
     if (path === "/gallery/collections/update") return { data: { success: true, data: { collection } } };
@@ -44,9 +59,9 @@ mock.module("./api-client", () => ({
   } },
 }));
 
-const { activateGalleryShare, createGalleryCollection, createGalleryCollectionHighlight, createGalleryCollectionMemory, createGalleryCollectionShareLink, deleteGalleryCollection, deleteGalleryCollectionDuplicates, deleteGalleryCollectionHighlight, deleteGalleryCollectionMemory, deleteGalleryImages, deleteGallerySubject, fetchGalleryCollectionHighlight, fetchGalleryCollectionMemory, fetchGalleryOverview, filterGalleryShareLinks, findGalleryCollectionDuplicates, galleryCollectionSchema, galleryImageSchema, groupGalleryImagesByCreatedDate, isGalleryClientErrorCode, isGalleryCollectionOwned, isGalleryMemoryExhaustion, isManagedGalleryCollection, isManagedGalleryImage, leaveGalleryCollection, listGalleryCollectionHighlights, listGalleryCollectionInvites, listGalleryCollectionMemories, listGalleryCollectionMembers, listGalleryCollectionShareLinks, mergeMediaItems, partitionFavoriteGalleryImages, reconcileGalleryDuplicateDeletion, reconcileGalleryImageDeletion, removeGalleryCollectionMember, resolveGalleryHighlightSlides, respondToGalleryCollectionInvite, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryCollectionMember, updateGalleryCollectionShareLink, updateGalleryImage, uploadGalleryImages } = await import("./gallery-client");
+const { activateGalleryShare, createGalleryCollection, createGalleryCollectionHighlight, createGalleryCollectionMemory, createGalleryCollectionShareLink, deleteGalleryCollection, deleteGalleryCollectionDuplicates, deleteGalleryCollectionHighlight, deleteGalleryCollectionMemory, deleteGalleryGenerationHistory, deleteGalleryImages, deleteGallerySubject, fetchGalleryCollectionHighlight, fetchGalleryCollectionMemory, fetchGalleryOverview, filterGalleryShareLinks, findGalleryCollectionDuplicates, galleryCollectionSchema, galleryImageSchema, generateGalleryImages, groupGalleryImagesByCreatedDate, isGalleryClientErrorCode, isGalleryCollectionOwned, isGalleryMemoryExhaustion, isManagedGalleryCollection, isManagedGalleryImage, leaveGalleryCollection, listGalleryCollectionHighlights, listGalleryCollectionInvites, listGalleryCollectionMemories, listGalleryCollectionMembers, listGalleryCollectionShareLinks, listGalleryGenerationHistory, mergeMediaItems, partitionFavoriteGalleryImages, reconcileGalleryDuplicateDeletion, reconcileGalleryImageDeletion, removeGalleryCollectionMember, resolveGalleryHighlightSlides, respondToGalleryCollectionInvite, searchGalleryCollections, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryCollectionMember, updateGalleryCollectionShareLink, updateGalleryImage, uploadGalleryImages } = await import("./gallery-client");
 
-beforeEach(() => { calls.splice(0); responses.clear(); failures.clear(); malformed.clear(); });
+beforeEach(() => { calls.splice(0); responses.clear(); failures.clear(); malformed.clear(); localFiles.clear(); });
 
 const collection = (name: string, key: string) => ({
   key,
@@ -78,6 +93,12 @@ test("identifies backend-managed place media without inferring it from names", (
   expect(isManagedGalleryImage({ mutationPolicy: "user" })).toBe(false);
 });
 
+test("accepts neutral app presentation metadata on collection projections", () => {
+  const base = { key: "collection", name: "Collection", description: null, purpose: null, mutationPolicy: "system-only", isFavorite: false, count: 0, coverUrl: null, memberKey: "membership", role: "owner", access: { canRead: true, canContribute: false, canManage: false }, createdAt: "2026-08-14T00:00:00.000Z", updatedAt: "2026-08-14T00:00:00.000Z" };
+  for (const presentation of ["travel", "communication", "learning"] as const) expect(galleryCollectionSchema.parse({ ...base, presentation }).presentation).toBe(presentation);
+  expect(galleryCollectionSchema.safeParse({ ...base, presentation: "unknown" }).success).toBe(false);
+});
+
 test("strictly parses managed collection and image policies with geo metadata", () => {
   const managedCollection = { ...collection("Compass", "managed"), purpose: "place-media" as const, mutationPolicy: "system-only" as const };
   const emailCollection = { ...collection("Signal", "email-managed"), purpose: "email-media" as const, mutationPolicy: "system-only" as const };
@@ -104,6 +125,7 @@ const image = (key: string, filename: string, caption: string) => ({
   latitude: null,
   longitude: null,
   locationSource: null,
+  origin: "uploaded" as const,
   mutationPolicy: "user" as const,
   isFavorite: false,
   createdByKey: "membership",
@@ -134,6 +156,26 @@ test("groups collection images by created date without changing image order", ()
   ]);
 });
 
+test("strictly validates generation history and deletes by prompt with content selectors", async () => {
+  responses.set("GET /images/generation-history", { generations: [{ type: "image", prompt: "A moonlit lake", normalizedPrompt: "a moonlit lake", usageCount: 2, generatedAt: "2026-08-31T10:00:00.000Z" }] });
+  expect(await listGalleryGenerationHistory()).toEqual([{ type: "image", prompt: "A moonlit lake", normalizedPrompt: "a moonlit lake", usageCount: 2, generatedAt: "2026-08-31T10:00:00.000Z" }]);
+  responses.set("DELETE /images/generation-history", { normalizedPrompt: "a moonlit lake", deleted: true });
+  expect(await deleteGalleryGenerationHistory("A moonlit lake")).toEqual({ normalizedPrompt: "a moonlit lake", deleted: true });
+  expect(calls[1]).toMatchObject({ method: "DELETE", path: "/images/generation-history", body: { organizationKey: "organization", scopeKey: "scope", prompt: "A moonlit lake" } });
+  responses.set("GET /images/generation-history", { generations: [{ type: "image", prompt: "Lake", normalizedPrompt: "lake", usageCount: 1, generatedAt: "2026-08-31T10:00:00.000Z", extra: true }] });
+  expect(listGalleryGenerationHistory()).rejects.toThrow();
+});
+
+test("strictly validates generation requests and sends a stable idempotency key", async () => {
+  responses.set("/images/generate", { images: [{ key: "generated", filename: "generated.png", caption: "A moonlit lake", mimeType: "image/png", sizeBytes: 100, width: 1024, height: 1024, origin: "generated", createdByKey: "membership", url: "https://images.example/generated", createdAt: "2026-08-31T10:00:00.000Z" }], provider: { durationMs: 123, costUsd: null } });
+  const generated = await generateGalleryImages({ collectionKey: "collection", prompt: "A moonlit lake", count: 1, referenceImageKeys: ["reference"] }, "stable-request");
+  expect(generated[0]).toMatchObject({ key: "generated", filename: "generated.png", origin: "generated", mutationPolicy: "user", imageCaptionKey: null });
+  expect(calls[0]).toMatchObject({ path: "/images/generate", headers: { "Idempotency-Key": "stable-request" }, body: { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection", prompt: "A moonlit lake", count: 1, referenceImageKeys: ["reference"] } });
+  expect(generateGalleryImages({ collectionKey: "collection", prompt: "Lake", count: 3, referenceImageKeys: Array.from({ length: 9 }, (_, index) => `reference-${index}`) }, "request")).rejects.toThrow();
+  responses.set("/images/generate", { images: [], provider: { durationMs: 1, costUsd: null } });
+  expect(generateGalleryImages({ collectionKey: "collection", prompt: "Lake", count: 1, referenceImageKeys: [] }, "unsafe")).rejects.toThrow();
+});
+
 test("sends collection-scoped semantic searches through the canonical endpoint", async () => {
   await searchGalleryImages({ query: "rain", collectionKey: "collection", recordHistory: false, limit: 50 });
 
@@ -144,6 +186,11 @@ test("sends collection-scoped semantic searches through the canonical endpoint",
   }]);
 });
 
+test("searches Gallery collections through app.search without a score cutoff", async () => {
+  await searchGalleryCollections("road trips", false);
+  expect(calls[0]).toMatchObject({ path: "/app/search", body: { query: "road trips", collectionSlugs: ["collections"], recordHistory: false, limit: 50, minimumScore: -1 } });
+});
+
 test("can request up to ten image matches without a score cutoff", async () => {
   await searchGalleryImages({ query: "rain", recordHistory: false, limit: 10, minimumScore: -1 });
 
@@ -151,6 +198,22 @@ test("can request up to ten image matches without a score cutoff", async () => {
     path: "/app/search",
     body: { query: "rain", collectionSlugs: ["images"], recordHistory: false, limit: 10, minimumScore: -1 },
   });
+});
+
+test("validates and sends ordered custom highlight and memory image payloads", async () => {
+  responses.set("/gallery/highlights", { highlight: { key: "highlight", collectionKey: "collection", imageKeys: ["first", "second"], images: [], createdByKey: "membership", createdAt: "2026-08-14T00:00:00.000Z", updatedAt: "2026-08-14T00:00:00.000Z" } });
+  responses.set("/gallery/memories", { memory: { key: "memory", imageKey: "first", text: "Memory", image: { key: "first", url: "https://images.example/first" }, createdByKey: "membership", createdAt: "2026-08-14T00:00:00.000Z", updatedAt: "2026-08-14T00:00:00.000Z" } });
+
+  await createGalleryCollectionHighlight("collection", ["first", "second"]);
+  await createGalleryCollectionMemory("collection", "first");
+
+  expect(calls.slice(-2).map(({ path, body }) => ({ path, body }))).toEqual([
+    { path: "/gallery/highlights", body: { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection", imageKeys: ["first", "second"] } },
+    { path: "/gallery/memories", body: { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection", imageKey: "first" } },
+  ]);
+  expect(() => createGalleryCollectionHighlight("collection", ["only-one"])).toThrow();
+  expect(() => createGalleryCollectionHighlight("collection", Array.from({ length: 11 }, (_, index) => `image-${index}`))).toThrow();
+  expect(() => createGalleryCollectionMemory("collection", "")).toThrow();
 });
 
 test("passes image search cancellation to the transport", async () => {
@@ -419,19 +482,27 @@ test("maps accepted upload jobs back to optimistic client images", async () => {
   const uploads: { url: string; method?: string }[] = [];
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
-    if (url === "file://image") return new Response(new Blob(["jpeg"]), { status: 200 });
     uploads.push({ url, method: init?.method });
     return new Response(null, { status: 200 });
   }) as typeof fetch;
+  localFiles.set("file://image", new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]));
 
   try {
-    const result = await uploadGalleryImages([{ clientKey: "local-image", filename: "image.jpg", uri: "file://image", sizeBytes: 4, latitude: 59.3293, longitude: 18.0686 }], "collection");
+    const result = await uploadGalleryImages([{ clientKey: "local-image", filename: "image.png", uri: "file://image", sizeBytes: 8, latitude: 59.3293, longitude: 18.0686 }], "collection");
 
     expect(result.jobs).toEqual([{ key: "upload", imageKey: "image", status: "queued", clientKey: "local-image" }]);
     expect(uploads).toEqual([{ url: "https://uploads.example/image", method: "PUT" }]);
     expect(calls.map(({ path }) => path)).toEqual(["/gallery/uploads/presign", "/gallery/uploads/complete"]);
-    expect(calls[0]?.body).toMatchObject({ files: [{ clientKey: "local-image", filename: "image.jpg", sizeBytes: 4, latitude: 59.3293, longitude: 18.0686 }] });
+    expect(calls[0]?.body).toMatchObject({ files: [{ clientKey: "local-image", filename: "image.png", sizeBytes: 8, latitude: 59.3293, longitude: 18.0686 }] });
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("rejects non-PNG names before reserving and non-PNG bytes before PUT", async () => {
+  await expect(uploadGalleryImages([{ clientKey: "local-image", filename: "image.jpg", uri: "file://image", sizeBytes: 4 }], "collection")).rejects.toThrow("converted to PNG");
+  expect(calls).toHaveLength(0);
+  localFiles.set("file://image", new TextEncoder().encode("jpeg"));
+  await expect(uploadGalleryImages([{ clientKey: "local-image", filename: "image.png", uri: "file://image", sizeBytes: 4 }], "collection")).rejects.toThrow("valid PNG data");
+  expect(calls.map(({ path }) => path)).toEqual(["/gallery/uploads/presign"]);
 });

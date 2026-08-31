@@ -178,7 +178,7 @@ async function folderView(folder: Folder, dependencies: Pick<RuntimeDefaults, 'g
 
 function documentView(document: Document) {
   const { content: _content, embedding: _embedding, contentChunks: _contentChunks, chunkEmbeddings: _chunkEmbeddings, semanticChunkCount: _semanticChunkCount, semanticContentHash: _semanticContentHash, emailToneEmbeddingVersion: _emailToneEmbeddingVersion, emailReplyContextEmbeddingVersion: _emailReplyContextEmbeddingVersion, developmentFixtureIdentifier: _developmentFixtureIdentifier, _semanticChunkingSkipped: _semanticChunkingSkipped, storageKey: _storageKey, speechStorageKeys: _speechStorageKeys, sourceStorageKeys: _sourceStorageKeys, managedPurpose: _managedPurpose, managedOwnerKey: _managedOwnerKey, mutationPolicy: _mutationPolicy, archiveVisibility: _archiveVisibility, _internalDeletion: _internalDeletion, ...safe } = document;
-  return { ...safe, managed: document.mutationPolicy === 'system-only' || document.managedPurpose !== undefined, ...(document.sourceStorageKeys?.length ? { sourceImageCount: document.sourceStorageKeys.length } : {}) };
+  return { ...safe, managed: document.mutationPolicy === 'system-only' || document.managedPurpose !== undefined, originalAvailable: Boolean(document.storageKey && document.extension && document.mimeType), ...(document.sourceStorageKeys?.length ? { sourceImageCount: document.sourceStorageKeys.length } : {}) };
 }
 
 function publicDocumentContent(document: Document) {
@@ -1553,14 +1553,31 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           if (target && managedFolder(target)) fail('CONTENT_FORBIDDEN', 'Managed folders cannot contain copied documents.', tool, 'copy', target.key);
           const key = d.id();
           const name = item.newName ?? source.name;
-          const storageKey = source.storageKey && source.extension
-            ? `content/${context.organizationKey}/${item.targetScopeKey}/${key}/original.${source.extension}`
-            : undefined;
+          const base = `content/${context.organizationKey}/${item.targetScopeKey}/${key}`;
+          let storageKey: string | undefined;
+          const sourceStorageKeys: string[] = [];
+          const speechStorageKeys: string[] = [];
+          const copiedStorageKeys: string[] = [];
+          const copyObject = async (sourceKey: string, destinationKey: string, mimeType?: string) => {
+            const copied = await storageOperation('copy', key, item.targetScopeKey, () => d.storage.copy({ sourceKey, destinationKey, mimeType }));
+            copiedStorageKeys.push(copied.storageKey);
+            return copied.storageKey;
+          };
           const insertedVersionKeys: string[] = [];
           const insertedShareKeys: string[] = [];
           let insertedDocument = false;
-          if (storageKey && source.storageKey) await storageOperation('copy', key, item.targetScopeKey, () => d.storage.copy({ sourceKey: source.storageKey!, destinationKey: storageKey, mimeType: source.mimeType }));
           try {
+            if (source.storageKey && source.extension) storageKey = await copyObject(source.storageKey, `${base}/original.${source.extension}`, source.mimeType);
+            for (let index = 0; index < (source.sourceStorageKeys?.length ?? 0); index += 1) {
+              const sourceKey = source.sourceStorageKeys![index]!;
+              const suffix = sourceKey.match(/\.[a-z0-9]+$/i)?.[0] ?? '';
+              sourceStorageKeys.push(await copyObject(sourceKey, `${base}/sources/${index + 1}${suffix}`));
+            }
+            for (let index = 0; index < (source.speechStorageKeys?.length ?? 0); index += 1) {
+              const sourceKey = source.speechStorageKeys![index]!;
+              const suffix = sourceKey.match(/\.[a-z0-9]+$/i)?.[0] ?? '';
+              speechStorageKeys.push(await copyObject(sourceKey, `${base}/speech/${index + 1}${suffix}`));
+            }
             const semantics = await currentDocumentSemantics(source, name);
             const timestamp = now();
             const copy = await repo.insertDocument({
@@ -1572,7 +1589,8 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
               isFavorite: false,
               ...semantics,
                ...(storageKey ? { storageKey } : {}),
-              sourceStorageKeys: undefined,
+               ...(sourceStorageKeys.length ? { sourceStorageKeys } : { sourceStorageKeys: undefined }),
+               ...(speechStorageKeys.length ? { speechStorageKeys } : { speechStorageKeys: undefined }),
               createdAt: timestamp,
               updatedAt: timestamp,
             });
@@ -1615,7 +1633,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
               for (const shareKey of insertedShareKeys.reverse()) await repo.deleteShare(shareKey);
               for (const versionKey of insertedVersionKeys.reverse()) await repo.deleteVersion(versionKey);
               if (insertedDocument) await repo.deleteDocument(key);
-               if (storageKey) await storageOperation('delete', key, item.targetScopeKey, () => d.storage.delete(storageKey));
+               for (const copiedStorageKey of copiedStorageKeys.reverse()) await storageOperation('delete', key, item.targetScopeKey, () => d.storage.delete(copiedStorageKey));
             } catch (cleanupError) {
               throw new ContentError('CONTENT_CONFLICT', 'Document copy failed and compensation requires retry.', tool, { action: 'cleanup', resourceKey: key, cause: new AggregateError([error, cleanupError]), retryable: true });
             }
@@ -1733,7 +1751,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
               content: Buffer.from(preview.bytes).toString('base64'),
             };
           }
-          const exported = await d.generateExport({ format: item.format, content: current.content });
+          const exported = await d.generateExport({ format: item.format, content: publicDocumentContent(current) });
           downloadedBytes += exported.bytes.byteLength;
           if (downloadedBytes > byteBudget) fail('DOCUMENT_TOO_LARGE', 'Combined export byte budget exceeded.', tool, 'export', current.key);
           return {

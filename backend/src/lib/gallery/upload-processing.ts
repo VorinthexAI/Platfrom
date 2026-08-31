@@ -111,6 +111,7 @@ export async function processGalleryUploadBatch(uploadKeys: readonly string[], d
     const images = await processBatch(uploads.map((upload, index) => ({
       scopeKey: upload.scopeKey,
       ownerKey: upload.actorKey,
+      origin: 'uploaded' as const,
       imageKey: upload.imageKey,
       file: { filename: `${upload.filename.replace(/\.[^.]+$/, '').slice(0, 251) || 'image'}.png`, mimeType: 'image/png', sizeBytes: stored[index]!.bytes.byteLength, bytes: stored[index]!.bytes },
       ...(stored[index]!.location ? { location: stored[index]!.location } : {}),

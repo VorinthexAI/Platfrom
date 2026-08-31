@@ -122,6 +122,7 @@ async function main() {
       const image = await processImage({
         scopeKey: auth.scope.key,
         ownerKey: auth.membership.key,
+        origin: 'generated',
         imageKey: fixture.key,
         file: { filename: fixture.filename, mimeType: 'image/png', sizeBytes: bytes[index]!.byteLength, bytes: bytes[index]! },
         location: { city: fixture.city, country: fixture.country, countryCode: fixture.countryCode },

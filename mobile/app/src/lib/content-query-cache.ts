@@ -16,6 +16,16 @@ import {
 } from "./content-client";
 
 export type ContentLocation = { folders: ContentFolder[]; documents: ContentDocument[] };
+export type FolderContentTab = "folders" | "documents" | "files";
+
+export function populatedContentTab(location: ContentLocation, selected: FolderContentTab): FolderContentTab {
+  const populated: Record<FolderContentTab, boolean> = {
+    folders: location.folders.length > 0,
+    documents: location.documents.some(({ extension }) => !extension),
+    files: location.documents.some(({ extension }) => Boolean(extension)),
+  };
+  return (["folders", "documents", "files"] as const).find((tab) => populated[tab]) ?? selected;
+}
 
 const contextKey = (context: ContentContext) => [context.userKey ?? "", context.organizationKey, context.scopeKey] as const;
 
@@ -208,6 +218,14 @@ export function addCachedContentFolder(queryClient: QueryClient, context: Conten
     folders: [...location.folders.filter((current) => current.key !== folder.key), folder]
       .sort((left, right) => left.name.localeCompare(right.name)),
   } : location);
+}
+
+export function seedCachedContentFolderLocation(queryClient: QueryClient, context: ContentContext, folderKey: string) {
+  queryClient.setQueryData<ContentLocation>(contentQueryKeys.location(context, folderKey), (location) => location ?? { folders: [], documents: [] });
+}
+
+export function removeCachedContentFolderLocation(queryClient: QueryClient, context: ContentContext, folderKey: string) {
+  queryClient.removeQueries({ queryKey: contentQueryKeys.location(context, folderKey), exact: true });
 }
 
 export function removeCachedContentDocument(queryClient: QueryClient, context: ContentContext, folderKey: string | undefined, documentKey: string) {

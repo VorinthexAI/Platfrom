@@ -147,6 +147,7 @@ const httpImageUrlSchema = z.string().url().refine((value) => {
 }, 'Image URL must use HTTP or HTTPS');
 const inlineImageUrlSchema = z.string().max(28 * 1024 * 1024).regex(/^data:image\/(?:gif|jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/, 'Inline image URL is invalid');
 
+export const MAX_IMAGE_GENERATION_REFERENCES = 8;
 export const imageGenerateInputSchema = z
   .object({
     prompt: z.string().trim().min(1).max(32_000),
@@ -156,7 +157,7 @@ export const imageGenerateInputSchema = z
     outputFormat: z.enum(['png', 'jpeg', 'webp']).optional(),
     count: z.number().int().min(1).max(4).default(1),
     quality: z.enum(['low', 'medium', 'high']).optional(),
-    inputReferences: z.array(z.union([httpImageUrlSchema, inlineImageUrlSchema])).min(1).max(8).optional(),
+    inputReferences: z.array(z.union([httpImageUrlSchema, inlineImageUrlSchema])).min(1).max(MAX_IMAGE_GENERATION_REFERENCES).optional(),
   })
   .strict();
 

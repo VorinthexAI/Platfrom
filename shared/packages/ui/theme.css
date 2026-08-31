@@ -526,6 +526,11 @@
   gap: 6px;
 }
 
+.vui-bottom-sheet-menu {
+  display: grid;
+  gap: 12px;
+}
+
 .vui-bottom-sheet-footer {
   background: var(--vui-color-page, #030507);
   display: grid;

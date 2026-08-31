@@ -667,8 +667,8 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
       await transaction({ read: ['userOrganizations', 'scopes', 'scopeMembers'], write: ['collections', 'collectionMembers'] }, async (executor) => {
         const cursor = await executor.query(`${writeAuthorizationFilter}
           UPSERT { _key: @collectionKey }
-            INSERT { _key: @collectionKey, scopeKey: @scopeKey, name: @name, embedding: @embedding, isFavorite: false, createdAt: @createdAt, updatedAt: @updatedAt }
-            UPDATE {} IN collections
+            INSERT { _key: @collectionKey, scopeKey: @scopeKey, name: @name, presentation: "travel", embedding: @embedding, isFavorite: false, createdAt: @createdAt, updatedAt: @updatedAt }
+            UPDATE { presentation: "travel" } IN collections
           RETURN membership._key
         `, { ...context, collectionKey: valid.key, name: valid.name, embedding: valid.embedding, createdAt: valid.createdAt, updatedAt: valid.updatedAt });
         if ((await cursor.all())[0] !== valid.ownerKey) throw new TravelRepositoryError('forbidden');

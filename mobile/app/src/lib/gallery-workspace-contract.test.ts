@@ -27,7 +27,7 @@ test("opens collection-scoped image similarity in an invalidated full-screen she
 
 test("uses four-column cursor grids and one skeleton row for initial and append loading", () => {
   expect(source).toContain("const IMAGE_COLUMNS = 4");
-  expect(source).toContain("fetchGalleryOverview(collectionKey, cursor)");
+  expect(source).toContain("fetchGalleryOverview(collectionKey, cursor, 100, undefined, undefined, origin)");
   expect(source).toContain("Array.from({ length: IMAGE_COLUMNS }");
   expect(source).toContain("loadingMore ? <View style={styles.grid}>{Array.from({ length: IMAGE_COLUMNS }");
 });
@@ -38,6 +38,15 @@ test("groups collection images by created date", () => {
   expect(source).toContain('entry.kind === "optimistic"');
   expect(source).toContain("visibleImageGroups.map((group)");
   expect(source).toContain("styles.dateHeading");
+});
+
+test("uses origin-bound collection tabs and focuses generated images after generation", () => {
+  expect(source).toContain('accessibilityLabel="Image origin"');
+  expect(source).toContain('>Uploaded</Button>');
+  expect(source).toContain('>Generated</Button>');
+  expect(source).toContain('galleryQueryKeys.overview(galleryContext, collectionKey, origin)');
+  expect(source).toContain('setImageOrigin("generated")');
+  expect(source).toContain('void load(activeCollection, true, "generated")');
 });
 
 test("provides edit and confirmed delete flows for images and collections", () => {
@@ -52,42 +61,63 @@ test("provides edit and confirmed delete flows for images and collections", () =
   expect(imageMenu).not.toContain('openVisualIdentities');
 });
 
-test("uses a singleton collection cache without root search or filtering", () => {
+test("uses canonical root collection search and filtering with the singleton cache", () => {
   expect(source).toContain("getGalleryCollections(queryClient");
   expect(source).toContain("setCachedGalleryCollections");
-  expect(source).not.toContain('accessibilityLabel="Search Gallery collections and images"');
-  expect(source).not.toContain('accessibilityLabel="Filter Gallery"');
+  expect(source).toContain('searchGalleryCollections(normalized, false, controller.signal)');
+  expect(source).toContain('accessibilityLabel="Search Gallery collections"');
+  expect(source).toContain('accessibilityLabel="Filter Gallery"');
   expect(source).toContain('accessibilityLabel="Create in Gallery"');
 });
 
-test("locks the workspace scroller only for resolved empty Gallery views", () => {
-  expect(source).toContain("const galleryEmpty = !loading && (");
-  expect(source).toContain("scrollEnabled={!galleryEmpty}");
-  expect(source).toContain("visibleOptimisticItems.length === 0");
+test("keeps empty Gallery views scrollable for pull-to-refresh", () => {
+  expect(source).toContain('refreshControl={<PullToRefresh onRefresh={refreshGallery} refreshing={userRefreshing} />}');
+  expect(source).not.toContain("const galleryEmpty = !loading && (");
+  expect(source).not.toContain("scrollEnabled={!galleryEmpty}");
 });
 
-test("keeps the Gallery filter sheet limited to favorite and hidden toggles", () => {
+test("fences pull-to-refresh results to the initiating Gallery view", () => {
+  const refresh = source.slice(source.indexOf("async function refreshGallery"), source.indexOf("const activeSubjects", source.indexOf("async function refreshGallery")));
+  expect(source).toContain("refreshViewKey.current = JSON.stringify([activeCollection?.key, imageOrigin, visibleGalleryView.current, collectionTab, query.trim(), rootSearchQuery.trim(), activeSubject?.key, activeIdentityFilter?.key])");
+  expect(source).toContain("isCurrentContextGeneration(generation, refreshContextGeneration.current) && isViewCurrent()");
+  expect(refresh).toContain("const viewKey = refreshViewKey.current");
+  expect(refresh).toContain("const viewGeneration = viewRequest.current");
+  expect(refresh).toContain("const searchGeneration = searchRequest.current");
+  expect(refresh).toContain("refreshViewKey.current === viewKey && viewRequest.current === viewGeneration && searchRequest.current === searchGeneration");
+});
+
+test("uses direct plus actions for owned root and origin-specific empty states", () => {
+  expect(source).toContain('collectionTab === "mine" && canCreateCollections');
+  expect(source).toContain('accessibilityLabel="Create collection"');
+  expect(source).toContain('accessibilityLabel={`Upload images to ${activeCollection.name}`}');
+  expect(source).toContain('accessibilityLabel={`Generate images in ${activeCollection.name}`}');
+  expect(source).toContain('imageOrigin === "uploaded" ? <Button');
+});
+
+test("keeps Gallery favorites, hidden items, and search history in the root filter sheet", () => {
   const start = source.indexOf('activeSheet === "filter" ?');
   const filterSheet = source.slice(start, source.indexOf('activeSheet === "identityPickerFilter"', start));
   expect(filterSheet).toContain('>Favorites</Text>');
   expect(filterSheet).toContain('>Show hidden</Text>');
   expect(filterSheet).not.toContain('>Visual identities</Button>');
-  expect(filterSheet).not.toContain('>Search history</Button>');
+  expect(filterSheet).toContain('>Search history</Button>');
 });
 
-test("presents managed place media as readable Compass content with collection-only visibility control", () => {
+test("presents managed media with its persisted app identity and collection-only visibility control", () => {
   expect(source).toContain("isManagedGalleryCollection(activeCollection)");
-  expect(source).toContain("capabilityIconSource.compass");
-  expect(source).toContain('accessibilityLabel="Compass collection"');
-  expect(source.indexOf('isManagedGalleryCollection(collection) ? <Image accessibilityLabel="Compass collection"')).toBeLessThan(source.indexOf('collection.coverUrl ? <Image source={collection.coverUrl}'));
+  expect(source).toContain("contentPresentationIconSource[collection.presentation]");
+  expect(source).toContain('`${collection.name} app collection`');
+  expect(source).toContain("style={styles.managedCollectionLogo}");
   expect(source).toContain("!managedCollection && !isManagedGalleryImage(image)");
   expect(source).toContain("activeCollection && !managedCollection ? <GalleryHighlights");
   expect(source).toContain("activeCollection && !managedCollection ? <GalleryMemories");
   expect(source).toContain("!managedCollection ? <View style={styles.sharingRow}");
-  const collectionMenuStart = source.indexOf('{activeSheet === "collectionMenu" ? <>');
+  const collectionMenuStart = source.indexOf('{activeSheet === "collectionMenu" ? <BottomSheetMenu>');
   const collectionMenu = source.slice(collectionMenuStart, source.indexOf('activeSheet === "cleanupMenu"', collectionMenuStart));
   expect(collectionMenu).toContain('!managedCollection');
   expect(collectionMenu).toContain('setHiddenOptimistically("collection"');
+  expect(collectionMenu).not.toContain("Select images");
+  expect(collectionMenu).not.toContain("Find duplicates");
   const imageMenuStart = source.indexOf('activeSheet === "imageActions" && selectedImage');
   const imageMenu = source.slice(imageMenuStart, source.indexOf('activeSheet === "imageEdit"', imageMenuStart));
   expect(imageMenu).toContain("Find similar");
@@ -145,9 +175,9 @@ test("keeps new collection creation to a required name", () => {
 });
 
 test("provides the full visual identity library and image picker workflow", () => {
-  const rootActionsStart = source.indexOf('{activeSheet === "rootActions" ? <>');
+  const rootActionsStart = source.indexOf('{activeSheet === "rootActions" ? <BottomSheetMenu>');
   const rootActions = source.slice(rootActionsStart, source.indexOf('activeSheet === "actions"', rootActionsStart));
-  const collectionActionsStart = source.indexOf('{activeSheet === "actions" ? <>');
+  const collectionActionsStart = source.indexOf('{activeSheet === "actions" ? <BottomSheetMenu>');
   const collectionActions = source.slice(collectionActionsStart, source.indexOf('activeSheet === "destination"', collectionActionsStart));
   expect(rootActions).toContain('onPress={() => void openIdentityPicker()}');
   expect(rootActions).not.toContain('openVisualIdentities()');
@@ -220,6 +250,8 @@ test("supports direct empty-state upload and twelve removable camera captures", 
   expect(captureSource).toContain("Remove image");
   expect(cameraSource).toContain("exif: true");
   expect(cameraSource).toContain('setFacing((current) => current === "back" ? "front" : "back")');
+  expect(cameraSource).toContain('shutter: { height: 74');
+  expect(cameraSource).toContain('width: 74');
   expect(captureSource).toContain('hint=""');
   expect(source).toContain("showOptimisticImage(entry.item)");
   expect(source).toContain("Image.prefetch(image.url)");
@@ -230,8 +262,12 @@ test("supports direct empty-state upload and twelve removable camera captures", 
   expect(source).not.toContain('`${matches.length} image${matches.length === 1 ? "" : "s"}${collection ? ` in ${collection.name}` : ""}.`');
 });
 
-test("allows duplicate exclusions and optimistic visual identity deletion", () => {
-  expect(source).toContain('accessibilityLabel={`Keep ${image.filename}`}');
+test("selects returned duplicates for deletion and lets each image be preserved", () => {
+  expect(source).toContain('setDuplicateSelectedImageKeys(result.images.map(({ key }) => key))');
+  expect(source).toContain('accessibilityLabel={`${selected ? "Deselect" : "Select"} ${image.filename} for duplicate deletion`}');
+  expect(source).toContain('toggleDeletionSelection(image.key, setDuplicateSelectedImageKeys)');
+  expect(source).toContain('const targets = duplicateImages.filter(({ key }) => selectedKeys.has(key))');
+  expect(source).toContain('const remainingDuplicates = duplicateImages.filter(({ key }) => !removedKeys.has(key))');
   expect(source).toContain('pushSheet("confirmDeleteIdentity")');
   expect(source).toContain("deleteGallerySubject(identity.key)");
   expect(source.indexOf("setSubjects((current) => current.filter")).toBeLessThan(source.indexOf("deleteGallerySubject(identity.key)"));
@@ -250,25 +286,30 @@ test("uses standard right-side close controls and hides collection menu headings
   expect(sheet).toContain('hideHeading={activeSheet === "rootActions" || activeSheet === "actions" || activeSheet === "collectionMenu" || activeSheet === "filter" || activeSheet === "imageActions" || activeSheet === "bulkActions" || activeSheet === "cleanupMenu"}');
 });
 
-test("provides collection cleanup discovery, pagination, exclusion, and confirmed canonical deletion", () => {
+test("provides collection cleanup discovery, pagination, selection, and confirmed canonical deletion", () => {
   const cleanupIcon = source.indexOf('<BrainIcon size="sm"');
   const sharingIcon = source.indexOf('<MemberIcon size="sm"');
   expect(cleanupIcon).toBeGreaterThan(-1);
   expect(cleanupIcon).toBeLessThan(sharingIcon);
   expect(source).toContain('<Button accessibilityLabel={`AI actions for ${activeCollection.name}`}');
   expect(source).toContain('{isCollectionOwner ? <BottomSheetItem onPress={() => void showCleanup()}');
-  expect(source).toContain('activeSheet === "cleanupMenu" ? <>');
+  expect(source).toContain('activeSheet === "cleanupMenu" ? <BottomSheetMenu>');
+  const intelligenceMenuStart = source.indexOf('{activeSheet === "cleanupMenu" ? <BottomSheetMenu>');
+  const intelligenceMenu = source.slice(intelligenceMenuStart, source.indexOf('activeSheet === "imageActions"', intelligenceMenuStart));
+  expect(intelligenceMenu.indexOf('>Find duplicates</BottomSheetItem>')).toBeLessThan(intelligenceMenu.indexOf('>Clean up</BottomSheetItem>'));
   expect(source).toContain('>Clean up</BottomSheetItem>');
   expect(source).toContain('activeSheet === "cleanup" ? "Clean up"');
   expect(source).toContain('Choose a quality threshold to find and remove lower-quality images. Images are scored from 1 to 100.');
   expect(source).toContain('const CLEANUP_THRESHOLDS = [10, 25, 50, 75, 90] as const');
   expect(source).toContain('fetchGalleryOverview(collection.key, cursor, 100, threshold)');
   expect(source).toContain('appendCursorItems(cached?.images ?? [], result.images');
-  expect(source).toContain('accessibilityLabel={`Exclude ${image.filename} from cleanup`}');
-  expect(source).toContain('setCleanupImages((current) => current.filter');
+  expect(source).toContain('setCleanupSelectedImageKeys(result.images.map(({ key }) => key))');
+  expect(source).toContain('accessibilityLabel={`${selected ? "Deselect" : "Select"} ${image.filename} for cleanup`}');
+  expect(source).toContain('toggleDeletionSelection(image.key, setCleanupSelectedImageKeys)');
+  expect(source).toContain('const targets = cleanupImages.filter(({ key }) => selectedKeys.has(key))');
   expect(source).toContain('for (let index = 0; index < targets.length; index += DELETE_IMAGE_CHUNK_SIZE)');
   expect(source).toContain('await deleteGalleryImages(eligibleChunk.map(({ key }) => key))');
-  expect(source).toContain('activeSheet === "confirmCleanupDelete" ? `Delete ${cleanupImages.length === 1 ? "image" : `${cleanupImages.length} images`}?`');
+  expect(source).toContain('activeSheet === "confirmCleanupDelete" ? `Delete ${cleanupSelectedCount === 1 ? "image" : `${cleanupSelectedCount} images`}?`');
   expect(source).toContain('height={activeSheet === "destination" || activeSheet === "imageEdit" || activeSheet === "newCollection" || activeSheet === "collectionEdit" || activeSheet === "similar" || activeSheet === "duplicates" || activeSheet === "cleanup"');
   expect(source).toContain('!collection || !isGalleryCollectionOwned(collection)');
   expect(source).not.toContain('cleanupScore');
@@ -392,11 +433,11 @@ test("settles duplicate and similar loading when event refresh supersedes the op
   expect(refresh).toContain('setSimilarLoading(false)');
 });
 
-test("caches cleanup thresholds for one sheet session while keeping exclusions and cursors safe", () => {
-  expect(source).toContain('const cleanupExcludedKeys = useRef(new Set<string>())');
-  expect(source).toContain('cleanupExcludedKeys.current.add(imageKey)');
-  expect(source).toContain('result.images.filter(({ key }) => !cleanupExcludedKeys.current.has(key))');
-  expect(source.match(/cleanupExcludedKeys\.current\.clear\(\)/g)).toHaveLength(3);
+test("caches cleanup thresholds while keeping selection and cursors safe", () => {
+  expect(source).not.toContain('cleanupExcludedKeys');
+  expect(source).toContain('setCleanupSelectedImageKeys(cached.images.map(({ key }) => key))');
+  expect(source).toContain('setCleanupSelectedImageKeys(result.images.map(({ key }) => key))');
+  expect(source).toContain('setCleanupSelectedImageKeys((current) => [...new Set([...current, ...result.images.map(({ key }) => key)])])');
   expect(source).toContain('const cleanupCursorRef = useRef<string | null>(null)');
   expect(source).toContain('const cleanupLoadingRef = useRef(false)');
   expect(source).toContain('cleanupCursorRef.current = null;\n    cleanupLoadingRef.current = true;');
@@ -431,7 +472,7 @@ test("invalidates and authoritatively reloads cleanup for permission and externa
   expect(source).toContain('cleanupCollectionKeyRef.current === collectionKey');
 });
 
-test("virtualizes cleanup directly and keeps later pages reachable after exclusions", () => {
+test("virtualizes cleanup directly and keeps later pages reachable after deselection", () => {
   expect(source).toContain('activeSheet === "cleanup" ? <FlatList');
   expect(source).toContain('numColumns={IMAGE_COLUMNS}');
   expect(source).toContain('keyExtractor={({ key }) => key}');
@@ -439,8 +480,8 @@ test("virtualizes cleanup directly and keeps later pages reachable after exclusi
   expect(source).toContain('ListHeaderComponent={<View style={styles.cleanupHeader}>');
   expect(source).toContain('ListEmptyComponent={cleanupLoading ?');
   expect(source).toContain('ListFooterComponent={cleanupLoadingMore ?');
-  expect(source).toContain('remainingCount <= IMAGE_COLUMNS && cleanupCursorRef.current');
-  expect(source).toContain('setTimeout(() => { void loadMoreCleanupImages(); }, 0)');
+  expect(source).toContain('setCleanupImages(next.images)');
+  expect(source).toContain('...result.images.map(({ key }) => key)');
   const cleanupListStart = source.indexOf('activeSheet === "cleanup" ? <FlatList');
   const normalSheetScroll = source.indexOf(': <ScrollView', cleanupListStart);
   expect(cleanupListStart).toBeGreaterThan(-1);
@@ -500,8 +541,7 @@ test("opens duplicates with exact invalidation, a direct request, cache write, a
 
 test("shows the selected cleanup count in the visible confirmation question", () => {
   expect(source).toContain('activeSheet === "confirmCleanupDelete" ? <View');
-  expect(source).toContain('activeSheet === "confirmCleanupDelete" ? `Delete ${cleanupImages.length === 1 ? "image" : `${cleanupImages.length} images`}?`');
-  expect(source).not.toContain('Delete {cleanupImages.length} selected image{cleanupImages.length === 1 ? "" : "s"}?');
+  expect(source).toContain('activeSheet === "confirmCleanupDelete" ? `Delete ${cleanupSelectedCount === 1 ? "image" : `${cleanupSelectedCount} images`}?`');
   expect(source).not.toContain('hideHeading={activeSheet === "confirmCleanupDelete"');
 });
 
@@ -580,9 +620,9 @@ test("edits owner collection covers from existing images with tri-state changes"
 });
 
 test("uses covered collection cards in every collection browser and destination picker", () => {
-  expect(source.match(/collection\.coverUrl \? <Image source=\{collection\.coverUrl\}/g)?.length).toBeGreaterThanOrEqual(4);
-  expect(source.match(/collection\.coverUrl && styles\.coveredCollectionMain/g)?.length).toBeGreaterThanOrEqual(3);
-  expect(source).toContain("(collection.coverUrl || isManagedGalleryCollection(collection)) && styles.coveredCollectionMain");
+  expect(source.match(/<CollectionCover collection=\{collection\} \/>/g)?.length).toBeGreaterThanOrEqual(4);
+  expect(source.match(/collectionHasCover\(collection\) && styles\.coveredCollectionMain/g)?.length).toBeGreaterThanOrEqual(4);
+  expect(source).toContain("Boolean(collection.presentation || collection.coverUrl)");
   expect(source).toContain('accessibilityLabel={`Upload to ${collection.name}`}');
   expect(source).toContain('accessibilityLabel={`${selected ? "Remove" : "Select"} ${collection.name}`}');
   expect(source).toContain('openIdentityPickerCollection(collection)');
@@ -636,13 +676,13 @@ test("uses semantic-only collection search with loading skeletons and no inline 
   const end = source.indexOf("function clearCollectionSearch", start);
   const search = source.slice(start, end);
   expect(search).toContain("recordHistory: true");
-  expect(search).toContain("setCollectionSearchResults(result.images)");
+  expect(search).toContain("result.images.filter((image) => image.origin === origin)");
   expect(search).toContain("setCollectionSearchResults([])");
   expect(search).toContain("setStatus(undefined)");
   expect(search).not.toContain("setStatus(errorMessage(error))");
   expect(search).not.toContain("immediateMatches");
   expect(source).not.toContain("historyTimer");
-  expect(source).toContain('searching && visibleImages.length === 0');
+  expect(source).toContain('(searching || loadingMore && showOnlyFavorites) && visibleImages.length === 0');
   expect(source).toContain('collectionSearchActive ? collectionSearchResults ?? [] : images');
 });
 
@@ -794,7 +834,7 @@ test("centers every collection access menu option", () => {
 });
 
 test("keeps non-owner leave at the end of the collection menu with compact confirmation", () => {
-  const menuStart = source.indexOf('{activeSheet === "collectionMenu" ? <>');
+  const menuStart = source.indexOf('{activeSheet === "collectionMenu" ? <BottomSheetMenu>');
   const menuEnd = source.indexOf('{activeSheet === "cleanupMenu"', menuStart);
   const menu = source.slice(menuStart, menuEnd);
   expect(menu).toContain('isCollectionOwner ? <BottomSheetItem');

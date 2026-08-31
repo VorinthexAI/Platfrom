@@ -52,6 +52,7 @@ import { searchApp } from './app-search';
 import { appTransformationHandlers } from './app-transformation';
 import { appSpeechHandler } from './app-speech';
 import { publicBookShareHandlers } from './public-book-shares';
+import { deleteImageGenerationHistory, generateImage, listImageGenerationHistory } from './image-generation';
 
 const challengeHash = z.string().regex(/^[a-f0-9]{64}$/);
 const tokenHashBodyBase = strictObject({ token_hash: challengeHash });
@@ -399,6 +400,9 @@ export function registerRoutes(app: Hono) {
 
   app.post('/app/events', recordPlatformEvent);
   app.post('/app/search', searchApp);
+  app.post('/images/generate', generateImage);
+  app.get('/images/generation-history', listImageGenerationHistory);
+  app.delete('/images/generation-history', deleteImageGenerationHistory);
   app.get('/events/stream', streamEvents);
 
   app.post('/presence/join', joinPresence);

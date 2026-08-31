@@ -26,6 +26,9 @@ describe('Gallery HTTP transport', () => {
     expect(routes).toContain('GET /gallery/highlights');
     expect(routes).toContain('POST /gallery/highlights');
     expect(routes).not.toContain('POST /gallery/highlights/list');
+    const collectionKey = newId(), imageKeys = [newId(), newId()];
+    expect(galleryOperationInputSchemas.createHighlight.parse({ collectionKey, imageKeys })).toEqual({ collectionKey, imageKeys });
+    expect(() => galleryOperationInputSchemas.createHighlight.parse({ collectionKey, imageKeys, unknown: true })).toThrow();
   });
 
   test('exposes strict memory CRUD routes', () => {
@@ -40,5 +43,8 @@ describe('Gallery HTTP transport', () => {
     expect(galleryOperationInputSchemas.deleteMemory.parse({ memoryKey, collectionKey })).toEqual({ memoryKey, collectionKey });
     expect(() => galleryOperationInputSchemas.deleteMemory.parse({ memoryKey })).toThrow();
     expect(() => galleryOperationInputSchemas.deleteMemory.parse({ memoryKey, collectionKey, unexpected: true })).toThrow();
+    const imageKey = newId();
+    expect(galleryOperationInputSchemas.createMemory.parse({ collectionKey, imageKey })).toEqual({ collectionKey, imageKey });
+    expect(() => galleryOperationInputSchemas.createMemory.parse({ collectionKey, imageKey, unknown: true })).toThrow();
   });
 });

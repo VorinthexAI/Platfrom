@@ -90,6 +90,7 @@ export async function claimContentIdempotency(
   requestHash: string,
   leaseOwner: string,
   now: string,
+  retryFailed = false,
 ): Promise<ContentIdempotencyClaim> {
   const key = ledgerKey(identity);
   const collection = await resolveContentLedgerCollection(db, CONTENT_IDEMPOTENCY_COLLECTION);
@@ -98,12 +99,13 @@ export async function claimContentIdempotency(
     LET existing = DOCUMENT(@@collection, @key)
     FILTER existing == null
       || (existing.status == "claimed" && existing.requestHash == @requestHash && existing.leaseExpiresAt <= @now && existing.executionStartedAt == null)
+      || (@retryFailed && existing.status == "failed" && existing.requestHash == @requestHash && existing.failureRetryable == true)
     UPSERT { _key: @key }
       INSERT MERGE(@identity, { _key: @key, requestHash: @requestHash, status: "claimed", leaseOwner: @leaseOwner, leaseExpiresAt: @leaseExpiresAt, createdAt: @now, updatedAt: @now })
-      UPDATE MERGE(@identity, { requestHash: @requestHash, status: "claimed", leaseOwner: @leaseOwner, leaseExpiresAt: @leaseExpiresAt, executionStartedAt: null, responseCiphertext: null, expiresAt: null, updatedAt: @now })
+      UPDATE MERGE(@identity, { requestHash: @requestHash, status: "claimed", leaseOwner: @leaseOwner, leaseExpiresAt: @leaseExpiresAt, executionStartedAt: null, responseCiphertext: null, failureCiphertext: null, failureRetryable: null, expiresAt: null, updatedAt: @now })
       IN @@collection OPTIONS { keepNull: false }
     RETURN NEW
-  `, { '@collection': collection, key, identity, requestHash, leaseOwner, leaseExpiresAt, now });
+  `, { '@collection': collection, key, identity, requestHash, leaseOwner, leaseExpiresAt, now, retryFailed });
   if (await cursor.next()) return { status: 'claimed' };
 
   const existing = await db.collection(collection).document(key) as Record<string, unknown>;
@@ -161,10 +163,10 @@ export async function failContentIdempotency(
     FOR claim IN @@collection
       FILTER claim._key == @key && claim.requestHash == @requestHash
         && claim.status == "started" && claim.leaseOwner == @leaseOwner
-      UPDATE claim WITH { status: "failed", failureCiphertext: @failureCiphertext, responseCiphertext: null, leaseOwner: null, leaseExpiresAt: null, expiresAt: null, updatedAt: @now }
+      UPDATE claim WITH { status: "failed", failureCiphertext: @failureCiphertext, failureRetryable: @failureRetryable, responseCiphertext: null, leaseOwner: null, leaseExpiresAt: null, expiresAt: null, updatedAt: @now }
         IN @@collection OPTIONS { keepNull: false }
       RETURN NEW
-  `, { '@collection': collection, key: ledgerKey(identity), requestHash, leaseOwner, failureCiphertext, now });
+  `, { '@collection': collection, key: ledgerKey(identity), requestHash, leaseOwner, failureCiphertext, failureRetryable: failure.retryable, now });
   if (!await cursor.next()) throw new Error('Content idempotency claim could not be failed.');
 }
 

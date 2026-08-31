@@ -715,7 +715,7 @@ export function createTravelService(options: { repository?: TravelRepository; ex
         });
         const galleryImageKey = stableKey('place-hero-gallery-copy', token.nonce);
         const image = await (options.process ?? processImage)({
-          scopeKey: input.scopeKey, ownerKey: membershipKey, imageKey: galleryImageKey, idempotencyKey: `compass-copy-${token.nonce}`,
+          scopeKey: input.scopeKey, ownerKey: membershipKey, origin: 'generated', imageKey: galleryImageKey, idempotencyKey: `compass-copy-${token.nonce}`,
           file: { filename: `${input.name.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').toLowerCase() || 'place'}.png`, mimeType: 'image/png', sizeBytes: staged.bytes.byteLength, bytes: staged.bytes },
           location: { placeName: input.name, placeSummary: input.summary, country: token.country.name, countryCode: input.countryCode, latitude: input.latitude, longitude: input.longitude, locationSource: 'place' },
           mutationPolicy: 'user', signal: execution.signal,

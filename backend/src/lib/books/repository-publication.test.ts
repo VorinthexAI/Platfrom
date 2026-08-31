@@ -15,7 +15,7 @@ describe('book Archive publication', () => {
     const context = { organizationKey: 'org', scopeKey, userKey, generationLeaseToken: 'owner' };
     await repository.publishArchive(context, bookKey, [{
       chapterKey,
-      document: { key: documentKey, scopeKey, folderKey: `c${'a'.repeat(24)}`, name: 'Chapter', extension: 'txt', mimeType: 'text/plain', content: 'Chapter summary', embedding, contentChunks: ['Chapter summary'], chunkEmbeddings: [embedding], semanticChunkCount: 1, semanticContentHash: 'b'.repeat(64), mutationPolicy: 'user', isFavorite: false, createdAt: timestamp, updatedAt: timestamp },
+      document: { key: documentKey, scopeKey, folderKey: `c${'a'.repeat(24)}`, name: 'Chapter', content: 'Chapter summary', embedding, contentChunks: ['Chapter summary'], chunkEmbeddings: [embedding], semanticChunkCount: 1, semanticContentHash: 'b'.repeat(64), mutationPolicy: 'user', isFavorite: false, createdAt: timestamp, updatedAt: timestamp },
       binding: { key: newId(), scopeKey, documentKey, subjectType: 'chapter', subjectKey: chapterKey, kind: 'chapter', provenance: 'generated', createdByKey: userKey, idempotencyKey: `book-chapter-export:${chapterKey}`, requestHash: 'c'.repeat(64), createdAt: timestamp, updatedAt: timestamp },
     }], timestamp).catch((error) => {
       // The folder key is deterministic and intentionally validated before any write.
@@ -26,13 +26,15 @@ describe('book Archive publication', () => {
     const folderKey = `c${createHash('sha256').update(['archive-book-export', scopeKey, bookKey].join('\0')).digest('hex').slice(0, 24)}`;
     await repository.publishArchive(context, bookKey, [{
       chapterKey,
-      document: { key: documentKey, scopeKey, folderKey, name: 'Chapter', extension: 'txt', mimeType: 'text/plain', content: 'Chapter summary', embedding, contentChunks: ['Chapter summary'], chunkEmbeddings: [embedding], semanticChunkCount: 1, semanticContentHash: 'b'.repeat(64), mutationPolicy: 'user', isFavorite: false, createdAt: timestamp, updatedAt: timestamp },
+      document: { key: documentKey, scopeKey, folderKey, name: 'Chapter', content: 'Chapter summary', embedding, contentChunks: ['Chapter summary'], chunkEmbeddings: [embedding], semanticChunkCount: 1, semanticContentHash: 'b'.repeat(64), mutationPolicy: 'user', isFavorite: false, createdAt: timestamp, updatedAt: timestamp },
       binding: { key: newId(), scopeKey, documentKey, subjectType: 'chapter', subjectKey: chapterKey, kind: 'chapter', provenance: 'generated', createdByKey: userKey, idempotencyKey: `book-chapter-export:${chapterKey}`, requestHash: 'c'.repeat(64), createdAt: timestamp, updatedAt: timestamp },
     }], timestamp);
     expect(calls.some(({ query }) => query.includes('contentChunks: @document.contentChunks'))).toBe(true);
+    expect(calls.some(({ query }) => query.includes('extension: null') && query.includes('sourceStorageKeys: null') && query.includes('keepNull: false'))).toBe(true);
     expect(calls.some(({ query }) => query.includes('IN generatedDocumentBindings'))).toBe(true);
     expect(calls.some(({ query }) => query.includes('archiveDocumentKey: @documentKey'))).toBe(true);
     expect(calls.some(({ query }) => query.includes('archiveFolderKey: @folderKey'))).toBe(true);
+    expect(calls.filter(({ query }) => query.includes('UPSERT { _key: @') && query.includes('IN folders'))).toHaveLength(2);
   });
 
   test('requires completed Archive links before canonical readiness', async () => {

@@ -34,6 +34,8 @@ describe('mail development seed safety', () => {
     expect(first.inboxes.every(({ connectorKey }) => first.exportFolders.some(({ _key }) => _key === mailDevFixtureKey('email-archive-export-inbox', scopeKey, connectorKey)))).toBe(true);
     expect(first.exportFolders.every((folder) => folderSchema.safeParse(withArangoKey(folder)).success)).toBe(true);
     expect(first.exportFolders.every(({ mutationPolicy, managedPurpose, managedOwnerKey }) => mutationPolicy === 'user' && managedPurpose == null && managedOwnerKey == null)).toBe(true);
+    expect(first.exportFolders.filter(({ parentFolderKey }) => parentFolderKey == null).every(({ presentation }) => presentation === 'communication')).toBe(true);
+    expect(first.exportFolders.filter(({ parentFolderKey }) => parentFolderKey != null).every(({ presentation }) => presentation == null)).toBe(true);
     expect(first.exportFolders.filter(({ name }) => name === 'Files')).toHaveLength(3);
     const threadDocuments = first.documents.filter((document) => document.content.startsWith('{') && JSON.parse(document.content).kind === 'mail-thread');
     expect(threadDocuments).toHaveLength(27);

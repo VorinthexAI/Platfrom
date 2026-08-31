@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import { isLegacyIndex, LEGACY_REMOVAL_MARKER, normalizeLegacyDocumentSharePermission } from './arango-migrate-indexes';
 import { stageLegacyDocumentShares } from './content-migration';
-import { collections, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateGeneratedTravelDocuments, migrateImageCaptions, migrateMinimalPlacesAndRetireTrips, migratePlaceReports, migrateProviderIndependentEmailDrafts, migrateRetiredEmailDefaultTones, migrateTripAttachments, migrateTripCreationReceipts, migrateTripGuides, needsExactSemanticEmbedding, retireMomentumScope, retireUserSettings } from './arango-migrate';
+import { collections, migrateContainerPresentations, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateGeneratedTravelDocuments, migrateImageCaptions, migrateMinimalPlacesAndRetireTrips, migratePlaceReports, migrateProviderIndependentEmailDrafts, migrateRetiredEmailDefaultTones, migrateTripAttachments, migrateTripCreationReceipts, migrateTripGuides, needsExactSemanticEmbedding, retireMomentumScope, retireUserSettings } from './arango-migrate';
 import { EMBEDDING_DIMENSIONS, LEGACY_EMBEDDING_DIMENSIONS, embeddingMetadata } from '../lib/embeddings';
 import { DOCUMENT_CHUNK_MAX_WORDS, DOCUMENT_MAX_CHUNKS, documentSemanticHash } from '../lib/ai/document-processing/chunking';
+import { emailArchiveRootFolderKey, emailMediaCollectionKey } from '../lib/email-inbox/export-container-keys';
 
 function migrationDatabase(collection: 'documents' | 'documentVersions', row: Record<string, unknown>) {
   let page = 0;
@@ -29,6 +30,29 @@ function migrationDatabase(collection: 'documents' | 'documentVersions', row: Re
 }
 
 describe('Arango migration indexes', () => {
+  test('backfills app-logo presentation metadata for legacy managed containers', async () => {
+    const scopeKey = 'cmrnlzf640001qc7kazsr96k5';
+    const connectorKey = 'cmrnlzf650002qc7k4p5zem5w';
+    const queries: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
+    await migrateContainerPresentations({ query: async (query: string, bindVars?: Record<string, unknown>) => {
+      queries.push({ query, bindVars });
+      return { all: async () => query.includes('FOR inbox IN emailInboxes') ? [{ scopeKey, connectorKey }] : [] };
+    } } as never);
+    expect(queries).toHaveLength(3);
+    expect(queries[1]!.query).toContain('folder.parentFolderKey != null ? null');
+    expect(queries[1]!.query).toContain('folder._key IN @communicationFolderKeys ? "communication"');
+    expect(queries[1]!.query).toContain('folder.purpose == "generated-audio-root" ? "learning"');
+    expect(queries[1]!.query).toContain('STARTS_WITH(folder.managedPurpose || "", "mail-") ? "communication"');
+    expect(queries[1]!.query).toContain('folder.purpose IN ["generated-documents-root"');
+    expect(queries[1]!.query).toContain('OPTIONS { keepNull: false }');
+    expect(queries[1]!.bindVars?.communicationFolderKeys).toEqual([emailArchiveRootFolderKey(scopeKey)]);
+    expect(queries[2]!.query).toContain('collection._key IN @communicationCollectionKeys ? "communication"');
+    expect(queries[2]!.query).toContain('collection.purpose == "place-media" ? "travel"');
+    expect(queries[2]!.query).toContain('collection.purpose == "email-media" ? "communication"');
+    expect(queries[2]!.bindVars?.communicationCollectionKeys).toEqual([emailMediaCollectionKey(scopeKey)]);
+    expect(queries.slice(1).every(({ query }) => query.includes('presentation != null') && query.includes('presentation != presentation'))).toBe(true);
+  });
+
   test('regenerates only malformed exact semantic vectors', () => {
     const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, (_, index) => index + 1);
 
@@ -50,6 +74,7 @@ describe('Arango migration indexes', () => {
 
   test('retires non-Gmail connector credentials before strict Gmail backfill reads', async () => {
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    expect(source).toContain('FILTER !HAS(image, "origin") UPDATE image WITH { origin: "uploaded" } IN images');
     const retire = source.indexOf('await retireUnsupportedEmailConnectors(targetDb)');
     const backfill = source.indexOf('await migrateCanonicalEmailPersistence(targetDb)');
     expect(retire).toBeGreaterThan(-1);
@@ -299,6 +324,9 @@ describe('Arango migration indexes', () => {
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
     const dropped = source.slice(source.indexOf('const droppedCollections = ['), source.indexOf('async function main()'));
     for (const name of [...bookNames, ...emailNames, 'tripGuides', 'placeReferences', 'placeHeroMedia']) expect(dropped).not.toContain(`'${name}'`);
+  });
+  test('declares private user generation history indexes', () => {
+    expect(collections.find(({ name }) => name === 'userGenerations')).toEqual({ name: 'userGenerations', skipEmbedding: true, indexes: [{ fields: ['userKey', 'type', 'normalizedPrompt'], unique: true }, { fields: ['userKey', 'type', 'generatedAt'] }] });
   });
   test('reverse-backfills private Signal rows after canonical collections exist', async () => {
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();

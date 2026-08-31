@@ -7,7 +7,7 @@ import { highlightTargetCount, selectHighlightCandidates } from './highlight-sel
 const candidate = (embedding: number[], qualityScore = 50) => {
   const now = new Date().toISOString();
   const vector = Array.from({ length: EMBEDDING_DIMENSIONS }, (_, index) => embedding[index] ?? 0);
-  return { qualityScore, image: imageSchema.parse({ key: newId(), scopeKey: newId(), filename: 'image.jpg', caption: 'Image', storageKey: newId(), mimeType: 'image/jpeg', sizeBytes: 1, width: 1, height: 1, embedding: vector, createdByKey: null, isFavorite: false, createdAt: now, updatedAt: now }) };
+  return { qualityScore, image: imageSchema.parse({ key: newId(), scopeKey: newId(), filename: 'image.jpg', caption: 'Image', storageKey: newId(), mimeType: 'image/jpeg', sizeBytes: 1, width: 1, height: 1, embedding: vector, createdByKey: null, origin: 'uploaded', isFavorite: false, createdAt: now, updatedAt: now }) };
 };
 
 describe('highlight selection', () => {

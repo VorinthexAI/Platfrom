@@ -9,14 +9,14 @@ const context = { domain: { organizationKey, runtimeScopeKey: scopeKey, principa
 
 describe('Gallery assistant capabilities', () => {
   test('covers every canonical operation and exposes no trusted context fields', () => {
-    expect(galleryAssistantCapabilityNames).toHaveLength(42);
-    expect(new Set(galleryAssistantCapabilityNames).size).toBe(42);
+    expect(galleryAssistantCapabilityNames).toHaveLength(44);
+    expect(new Set(galleryAssistantCapabilityNames).size).toBe(44);
     expect(galleryAssistantCapabilityNames).not.toContain('collection.duplicates.find');
     expect(galleryAssistantCapabilityNames).not.toEqual(expect.arrayContaining(['image.upload.reserve', 'image.upload.status', 'image.upload.complete']));
     expect(galleryAssistantCapabilityNames).toEqual(expect.arrayContaining(['highlight.create', 'highlight.list', 'highlight.read', 'highlight.delete']));
     expect(galleryAssistantCapabilityNames).toEqual(expect.arrayContaining(['image.create-memory', 'image.memory.list', 'image.memory.read', 'image.memory.delete']));
     expect(galleryAssistantCapabilityNames).toEqual(expect.arrayContaining(['collection.hide', 'collection.reveal', 'image.hide', 'image.reveal']));
-    expect(galleryAssistantCapabilityNames).toEqual(expect.arrayContaining(['image.ideas.create', 'image.generate']));
+    expect(galleryAssistantCapabilityNames).toEqual(expect.arrayContaining(['image.ideas.create', 'image.generate', 'image.generation-history.list', 'image.generation-history.delete']));
     const search = createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'image.search')!;
     const listCollections = createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'collection.list')!;
     const createCollection = createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'collection.create')!;
@@ -53,6 +53,13 @@ describe('Gallery assistant capabilities', () => {
     const deleteMemory = createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'image.memory.delete')!;
     expect(deleteMemory.inputSchema.parse({ memoryKey: newId(), collectionKey: newId() })).toEqual({ memoryKey: expect.any(String), collectionKey: expect.any(String) });
     expect(() => deleteMemory.inputSchema.parse({ memoryKey: newId() })).toThrow();
+    const createHighlight = createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'highlight.create')!;
+    const createMemory = createGalleryAssistantCapabilities().find(({ definition }) => definition.name === 'image.create-memory')!;
+    const selectedImageKeys = [newId(), newId()];
+    expect(createHighlight.inputSchema.parse({ collectionKey, imageKeys: selectedImageKeys })).toEqual({ collectionKey, imageKeys: selectedImageKeys });
+    expect(createMemory.inputSchema.parse({ collectionKey, imageKey: selectedImageKeys[0] })).toEqual({ collectionKey, imageKey: selectedImageKeys[0] });
+    expect(() => createHighlight.inputSchema.parse({ collectionKey, imageKeys: selectedImageKeys, unknown: true })).toThrow();
+    expect(() => createMemory.inputSchema.parse({ collectionKey, imageKey: selectedImageKeys[0], unknown: true })).toThrow();
   });
 
   test('routes every tool to its canonical operation with trusted context injected', async () => {
@@ -95,6 +102,7 @@ describe('Gallery assistant capabilities', () => {
 
   test('injects trusted image context and keeps generation fields model-invisible', async () => {
     const calls: unknown[][] = [];
+    const collectionKey = newId();
     const images = {
       createIdeas: async (...args: unknown[]) => { calls.push(['ideas', ...args]); return { concepts: [] }; },
       generate: async (...args: unknown[]) => { calls.push(['generate', ...args]); return { images: [], provider: {} }; },
@@ -104,10 +112,10 @@ describe('Gallery assistant capabilities', () => {
     const generate = capabilities.find(({ definition }) => definition.name === 'image.generate')!;
     await expect(ideas.execute({ prompt: 'Earth', requestedCount: 1, scopeKey }, context)).rejects.toThrow('Unrecognized key');
     await ideas.execute({ prompt: 'Earth', requestedCount: 1 }, context);
-    await generate.execute({ prompt: 'Earth', count: 1, size: '1024x1024', quality: 'high' }, { ...context, requestKey: 'request-1' });
+    await generate.execute({ prompt: 'Earth', count: 1, collectionKey }, { ...context, requestKey: 'request-1' });
     expect(calls).toEqual([
       ['ideas', { prompt: 'Earth', requestedCount: 1 }, context.domain],
-      ['generate', { prompt: 'Earth', count: 1, size: '1024x1024', quality: 'high', mode: 'default' }, context.domain, 'request-1'],
+      ['generate', { prompt: 'Earth', count: 1, size: '1024x1024', quality: 'medium', mode: 'default', referenceImageKeys: [], collectionKey }, context.domain, 'request-1'],
     ]);
     for (const capability of [ideas, generate]) {
       const schema = JSON.stringify(capability.definition.inputSchema);

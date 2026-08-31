@@ -6,7 +6,7 @@ import { collectionInviteSchema, type CollectionInvite } from '@/lib/db/collecti
 import { shareSchema, type Share } from '@/lib/db/shares.node';
 import { collectionImageSchema, type CollectionImage } from '@/lib/db/collection-images.node';
 import { galleryUploadSchema, getGalleryUploadById, updateGalleryUpload, type GalleryUpload } from '@/lib/db/gallery-uploads.node';
-import { getImageById, imageSchema, type Image } from '@/lib/db/images.node';
+import { getImageById, imageOriginSchema, imageSchema, type Image } from '@/lib/db/images.node';
 import { visualIdentitySchema, type VisualIdentity } from '@/lib/db/visual-identities.node';
 import { imageIdentitySchema, type ImageIdentity } from '@/lib/db/image-identities.node';
 import { createMediaLibraryRepository, searchAccessibleImages, type AccessibleImageSearchInput, type AccessibleImageSearchResult, type MediaLibraryDatabase } from '@/lib/media-library';
@@ -19,6 +19,7 @@ import { imageCollectionMemorySchema, type ImageCollectionMemory } from '@/lib/d
 
 export interface GallerySubjectRow { identity: VisualIdentity; reference: Image; imageCount: number; }
 export interface GalleryCollectionRow { collection: Collection; count: number; cover: Image | null; isOwned: boolean; }
+export interface GalleryCollectionSearchRow extends GalleryCollectionRow { role: GalleryCollectionRole; score: number; }
 export type GalleryCollectionRole = 'owner' | 'collaborator' | 'viewer';
 export interface GalleryMemberRow { member: CollectionMember; displayName: string; joinedAt: string; }
 export interface GalleryInviteRow { invite: CollectionInvite; collection: Collection; inviterDisplayName: string; }
@@ -38,8 +39,10 @@ export interface GalleryRepository {
   getImage(imageKey: string): Promise<Image | null>;
   getVisualIdentity(scopeKey: string, identityKey: string, actorKey: string): Promise<VisualIdentity | null>;
   addImageToCollection(relation: CollectionImage): Promise<CollectionImage>;
+  attachGeneratedImages(scopeKey: string, collectionKey: string, imageKeys: string[], actorKey: string, now: string): Promise<boolean>;
   createCollection(collection: Collection, member: CollectionMember): Promise<boolean>;
-  listOverview(input: { scopeKey: string; actorKey: string; collectionKey?: string; maxCaptionScore?: number; cursor?: string; limit: number }): Promise<{ collections: Array<GalleryCollectionRow & { role: GalleryCollectionRole }>; images: CursorPage<Image> }>;
+  listOverview(input: { scopeKey: string; actorKey: string; collectionKey?: string; origin?: z.infer<typeof imageOriginSchema>; maxCaptionScore?: number; cursor?: string; limit: number }): Promise<{ collections: Array<GalleryCollectionRow & { role: GalleryCollectionRole }>; images: CursorPage<Image> }>;
+  searchAccessibleCollections(input: { scopeKey: string; actorKey: string; embedding: number[]; minimumScore: number; limit: number }): Promise<GalleryCollectionSearchRow[]>;
   listCollectionMembers(scopeKey: string, collectionKey: string): Promise<GalleryMemberRow[]>;
   listPendingInvites(scopeKey: string, actorKey: string, now: string): Promise<GalleryInviteRow[]>;
   createCollectionInvite(invite: CollectionInvite, replay: { requestHash: string; responseCiphertext: string }): Promise<{ invite: CollectionInvite; requestHash: string; responseCiphertext: string } | null>;
@@ -85,7 +88,7 @@ export interface GalleryRepository {
   listSubjectImages(scopeKey: string, identityKey: string, actorKey: string, collectionKey?: string): Promise<Array<{ image: Image; confidence: number }>>;
   deleteSubject(scopeKey: string, identityKey: string, actorKey: string): Promise<boolean>;
   listHighlightCandidates(scopeKey: string, collectionKey: string, actorKey: string): Promise<Array<{ image: Image; qualityScore: number }> | null>;
-  createHighlight(highlight: ImageCollectionHighlight, actorKey: string): Promise<ImageCollectionHighlight | null>;
+  createHighlight(highlight: ImageCollectionHighlight, actorKey: string, options?: { requireExactImageKeys?: boolean }): Promise<ImageCollectionHighlight | null>;
   listHighlights(scopeKey: string, collectionKey: string | undefined, actorKey: string): Promise<GalleryHighlightRow[]>;
   getHighlight(scopeKey: string, highlightKey: string, actorKey: string): Promise<GalleryHighlightRow | null>;
   deleteHighlight(scopeKey: string, highlightKey: string, actorKey: string): Promise<ImageCollectionHighlight | null>;
@@ -134,6 +137,8 @@ const overviewCursorV1Schema = z.object({
 }).strict();
 const overviewCursorSchema = z.discriminatedUnion('version', [overviewCursorV1Schema, z.object({
   version: z.literal(2), scopeKey: z.string().cuid(), collectionKey: z.string().cuid().nullable(), maxCaptionScore: z.number().int().min(1).max(100), createdAt: z.string().datetime(), imageKey: z.string().cuid(),
+}).strict(), z.object({
+  version: z.literal(3), scopeKey: z.string().cuid(), collectionKey: z.string().cuid().nullable(), origin: imageOriginSchema, maxCaptionScore: z.number().int().min(1).max(100).nullable(), createdAt: z.string().datetime(), imageKey: z.string().cuid(),
 }).strict()]);
 
 async function compensateProcessingUpload(database: MediaLibraryDatabase, uploadKey: string, scopeKey: string, leaseId: string | null, errorCode: string, status: 'queued' | 'failed', now: string): Promise<GalleryUploadCompensation | null> {
@@ -209,6 +214,30 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
       return value ? parse(visualIdentitySchema, value) : null;
     },
     addImageToCollection: media.addImageToCollection,
+    attachGeneratedImages(scopeKey, collectionKey, imageKeys, actorKey, now) {
+      const relations = imageKeys.map((imageKey) => toArangoDoc(collectionImageSchema.parse({ key: newId(), scopeKey, collectionKey, imageKey, addedByKey: actorKey, createdAt: now })));
+      return transaction({ read: ['images', 'collections', 'collectionMembers', 'scopes', 'scopeMembers', 'userOrganizations'], write: ['collectionImages'] }, async (tx) => {
+        const attached = await all(tx, `
+          LET actor = DOCUMENT(userOrganizations, @actorKey)
+          LET scope = DOCUMENT(scopes, @scopeKey)
+          LET collection = DOCUMENT(collections, @collectionKey)
+          LET scopeRole = FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == @actorKey && member.status == "active" LIMIT 1 RETURN member.role)
+          LET collectionMember = FIRST(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == @collectionKey && member.memberKey == @actorKey LIMIT 1 RETURN member)
+          FILTER actor != null && actor.status == "active" && scope != null && actor.organizationId == scope.organizationKey
+          FILTER collection != null && collection.scopeKey == @scopeKey && collection.mutationPolicy != "system-only"
+          FILTER actor.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"] || collectionMember.role IN ["owner", "collaborator", "member"]
+          FOR relation IN @relations
+            LET image = DOCUMENT(images, relation.imageKey)
+            FILTER image != null && image.scopeKey == @scopeKey && image.createdByKey == @actorKey && image.mutationPolicy != "system-only"
+            UPSERT { scopeKey: @scopeKey, collectionKey: @collectionKey, imageKey: relation.imageKey }
+              INSERT relation
+              UPDATE {}
+              IN collectionImages
+            RETURN relation.imageKey
+        `, { scopeKey, collectionKey, relations, actorKey, now });
+        return attached.length === imageKeys.length;
+      });
+    },
     createCollection(collection, member) {
       return transaction(
         {
@@ -236,6 +265,7 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
       scopeKey,
       actorKey,
       collectionKey,
+      origin,
       maxCaptionScore,
       cursor,
       limit,
@@ -246,8 +276,10 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
         (after.scopeKey !== scopeKey ||
           after.collectionKey !== (collectionKey ?? null) ||
           (after.version === 1
-            ? maxCaptionScore !== undefined
-            : after.maxCaptionScore !== maxCaptionScore))
+            ? origin !== undefined || maxCaptionScore !== undefined
+            : after.version === 2
+              ? origin !== undefined || after.maxCaptionScore !== maxCaptionScore
+              : after.origin !== origin || (after.maxCaptionScore ?? undefined) !== maxCaptionScore))
       )
         throw new z.ZodError([
           {
@@ -275,11 +307,12 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
           : " LET caption = DOCUMENT(imageCaptions, image.imageCaptionKey) FILTER caption != null && caption.scopeKey == @scopeKey && IS_NUMBER(caption.score) && caption.score >= 1 && caption.score <= 100 && caption.score <= @maxCaptionScore && (caption.scoreVersion == 1 || (caption.scoreVersion == 0 && caption.score > 1))";
       const imageRows = await all(
         database,
-        `${access} FOR image IN images FILTER image.scopeKey == @scopeKey LET relationCount = LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == image._key RETURN 1) LET accessibleCollections = (FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == image._key FILTER @collectionKey == null || relation.collectionKey == @collectionKey LET collection = DOCUMENT(collections, relation.collectionKey) FILTER collection != null LET managedViewer = collection.purpose == "email-media" && collection.mutationPolicy == "system-only" && scoped LET member = collection.mutationPolicy == "system-only" ? null : FIRST(FOR item IN collectionMembers FILTER item.scopeKey == @scopeKey && item.collectionKey == relation.collectionKey && item.memberKey == @actorKey LIMIT 1 RETURN item) FILTER elevated || managedViewer || member != null RETURN 1) FILTER @collectionKey == null ? (elevated || (image.createdByKey == @actorKey && relationCount == 0) || LENGTH(accessibleCollections) > 0) : LENGTH(accessibleCollections) > 0${captionFilter} FILTER @afterCreatedAt == null || image.createdAt < @afterCreatedAt || (image.createdAt == @afterCreatedAt && image._key > @afterImageKey) SORT image.createdAt DESC, image._key ASC LIMIT @queryLimit RETURN image`,
+        `${access} FOR image IN images FILTER image.scopeKey == @scopeKey && (@origin == null || image.origin == @origin) LET relationCount = LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == image._key RETURN 1) LET accessibleCollections = (FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == image._key FILTER @collectionKey == null || relation.collectionKey == @collectionKey LET collection = DOCUMENT(collections, relation.collectionKey) FILTER collection != null LET managedViewer = collection.purpose == "email-media" && collection.mutationPolicy == "system-only" && scoped LET member = collection.mutationPolicy == "system-only" ? null : FIRST(FOR item IN collectionMembers FILTER item.scopeKey == @scopeKey && item.collectionKey == relation.collectionKey && item.memberKey == @actorKey LIMIT 1 RETURN item) FILTER elevated || managedViewer || member != null RETURN 1) FILTER @collectionKey == null ? (elevated || (image.createdByKey == @actorKey && relationCount == 0) || LENGTH(accessibleCollections) > 0) : LENGTH(accessibleCollections) > 0${captionFilter} FILTER @afterCreatedAt == null || image.createdAt < @afterCreatedAt || (image.createdAt == @afterCreatedAt && image._key > @afterImageKey) SORT image.createdAt DESC, image._key ASC LIMIT @queryLimit RETURN image`,
         {
           scopeKey,
           actorKey,
           collectionKey: collectionKey ?? null,
+          origin: origin ?? null,
           ...(maxCaptionScore === undefined ? {} : { maxCaptionScore }),
           afterCreatedAt: after?.createdAt ?? null,
           afterImageKey: after?.imageKey ?? "",
@@ -296,7 +329,17 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
           isOwned: row.isOwned,
         })),
         images: cursorPage(parsedImages, limit, (image) =>
-          maxCaptionScore === undefined
+          origin !== undefined
+            ? encodeCursor({
+                version: 3,
+                scopeKey,
+                collectionKey: collectionKey ?? null,
+                origin,
+                maxCaptionScore: maxCaptionScore ?? null,
+                createdAt: image.createdAt,
+                imageKey: image.key,
+              })
+            : maxCaptionScore === undefined
             ? encodeCursor({
                 version: 1,
                 scopeKey,
@@ -314,6 +357,21 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
               }),
         ),
       };
+    },
+    async searchAccessibleCollections({ scopeKey, actorKey, embedding, minimumScore, limit }) {
+      const rows = (await all(
+        database,
+        `LET membership = DOCUMENT(userOrganizations, @actorKey) LET scope = DOCUMENT(scopes, @scopeKey) FILTER membership != null && membership.status == "active" && scope != null && membership.organizationId == scope.organizationKey LET scopeRole = FIRST(FOR item IN scopeMembers FILTER item.scopeKey == @scopeKey && item.userOrganizationKey == @actorKey && item.status == "active" LIMIT 1 RETURN item.role) LET scoped = scopeRole != null LET elevated = membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"] FOR collection IN collections FILTER collection.scopeKey == @scopeKey LET managedViewer = collection.purpose == "email-media" && collection.mutationPolicy == "system-only" && scoped LET member = collection.mutationPolicy == "system-only" ? null : FIRST(FOR item IN collectionMembers FILTER item.scopeKey == @scopeKey && item.collectionKey == collection._key && item.memberKey == @actorKey LIMIT 1 RETURN item) FILTER elevated || managedViewer || member != null LET score = COSINE_SIMILARITY(collection.embedding, @embedding) FILTER IS_NUMBER(score) && score >= @minimumScore LET role = elevated ? "owner" : (managedViewer ? "viewer" : (member.role == "member" ? "collaborator" : member.role)) LET explicitOwnerCount = LENGTH(FOR item IN collectionMembers FILTER item.scopeKey == @scopeKey && item.collectionKey == collection._key && item.role == "owner" RETURN 1) LET isOwned = member != null && member.role == "owner" || elevated && explicitOwnerCount == 0 LET imageKeys = (FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.collectionKey == collection._key SORT relation.createdAt ASC, relation._key ASC RETURN relation.imageKey) LET cover = collection.coverImageKey == null ? (LENGTH(imageKeys) == 0 ? null : DOCUMENT(images, imageKeys[0])) : DOCUMENT(images, collection.coverImageKey) SORT score DESC, collection.name ASC LIMIT @limit RETURN { collection, count: LENGTH(imageKeys), cover, role, isOwned, score }`,
+        { scopeKey, actorKey, embedding, minimumScore, limit },
+      )) as Array<{ collection: unknown; count: number; cover: unknown | null; role: GalleryCollectionRole; isOwned: boolean; score: number }>;
+      return rows.map((row) => ({
+        collection: parse(collectionSchema, row.collection),
+        count: row.count,
+        cover: row.cover ? parse(imageSchema, row.cover) : null,
+        role: row.role,
+        isOwned: row.isOwned,
+        score: row.score,
+      }));
     },
     async listCollectionMembers(scopeKey, collectionKey) {
       return (
@@ -1533,7 +1591,7 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
           }))
         : null;
     },
-    async createHighlight(highlight, actorKey) {
+    async createHighlight(highlight, actorKey, options) {
       if (!await userMutableCollection(database, highlight.scopeKey, highlight.collectionKey)) return null;
       return transaction(
         {
@@ -1562,6 +1620,7 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
             )) as Array<{ selected: string[] }>
           )[0];
           if (!access) return null;
+          if (options?.requireExactImageKeys && (access.selected.length !== highlight.imageKeys.length || access.selected.some((imageKey, index) => imageKey !== highlight.imageKeys[index]))) return null;
           const current = { ...highlight, imageKeys: access.selected };
           const value = (
             await all(
