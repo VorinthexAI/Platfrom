@@ -21,7 +21,8 @@ test("opens Core as an in-layout page and returns without routing", () => {
   expect(core).toContain('animationType="none"');
   expect(core).toContain("setPageOpen(false)");
   expect(core).toContain('presentationStyle="fullScreen"');
-  expect(core).toContain("accessibilityViewIsModal onAccessibilityEscape={closePage}");
+  expect(core).toContain("accessibilityViewIsModal behavior={Platform.OS");
+  expect(core).toContain("onAccessibilityEscape={closePage}");
   expect(core).toContain("AccessibilityInfo.setAccessibilityFocus(inputHandle)");
   expect(core).toContain("showSoftInputOnFocus={expanded}");
   expect(core).toContain("valueRef.current.length");
@@ -37,11 +38,14 @@ test("matches the Archive header rhythm and keeps the Core prompt composer", () 
   expect(core).toContain("fontSize: 24");
   expect(core).toContain("<RotatingPrompt prompts={prompts} />");
   expect(core).toContain("multiline={expanded}");
-  expect(core).toContain('size={expanded ? "md" : "sm"}');
+  expect(core).not.toContain('size={expanded ? "md" : "sm"}');
+  expect(core).toContain('size="sm"');
+  expect(core).not.toContain("expandedSend");
 });
 
 test("keeps the workspace composer compact and grows the Core input only when text wraps", () => {
   expect(core).toContain("const multiline = expanded && inputHeight > COLLAPSED_INPUT_HEIGHT");
+  expect(core).toContain("return <View style={[styles.composer, multiline && styles.composerOpen]}>");
   expect(core).toContain("height: expanded ? inputHeight : COLLAPSED_INPUT_HEIGHT");
   expect(core).toContain("{expanded && value.length > 0 ? <Text");
   expect(core).toContain("const lineCount = Math.min(6, Math.max(1, nativeEvent.lines.length))");
@@ -49,11 +53,13 @@ test("keeps the workspace composer compact and grows the Core input only when te
   expect(core).not.toContain('borderColor: "#55616C"');
 });
 
-test("reuses the 300ms Core keyboard lift without double keyboard avoidance", () => {
-  expect(core).toContain("const keyboardVisible = useKeyboard()");
-  expect(core).toContain("withTiming(pageOpen && keyboardVisible ? 300 : 0, { duration: 300 })");
-  expect(core).toContain('<Reanimated.View pointerEvents="none" style={keyboardSpacerStyle} />');
-  expect(core).not.toContain("KeyboardAvoidingView");
+test("uses native Android keyboard resize and iOS-only keyboard padding", () => {
+  expect(core).toContain("KeyboardAvoidingView");
+  expect(core).toContain('behavior={Platform.OS === "ios" ? "padding" : undefined}');
+  expect(core).toContain("navigationBarTranslucent={false}");
+  expect(core).not.toContain("useKeyboard");
+  expect(core).not.toContain("keyboardSpacerHeight");
+  expect(core).not.toContain("Reanimated.View");
 });
 
 test("temporarily displays Core while the selector remains limited to five apps", () => {
