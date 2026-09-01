@@ -176,7 +176,7 @@ function CorePage({ bottomInset, closePage, composer, inputRef, leftInset, messa
   });
   const keyboardSpacerStyle = useAnimatedStyle(() => {
     const keyboardMoving = [KeyboardState.OPENING, KeyboardState.OPEN, KeyboardState.CLOSING].includes(keyboard.state.value);
-    return { height: keyboardMoving ? Math.max(0, keyboard.height.value - bottomInset) : 0 };
+    return { height: keyboardMoving ? Math.max(0, keyboard.height.value - bottomInset) + spacing.md : 0 };
   }, [bottomInset]);
 
   useEffect(() => {
