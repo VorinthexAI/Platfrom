@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { LinearGradient } from "expo-linear-gradient";
 import {
   AccessibilityInfo,
   Animated,
@@ -65,6 +66,17 @@ function useReducedMotion() {
   }, []);
 
   return reducedMotion;
+}
+
+function ChromeGradient() {
+  return <LinearGradient
+    colors={["#FFFFFF", "#AEB6BC", "#3C434A", "#F5F7F8", "#7B858C", "#FFFFFF"]}
+    end={{ x: 1, y: 1 }}
+    locations={[0, 0.18, 0.38, 0.55, 0.76, 1]}
+    pointerEvents="none"
+    start={{ x: 0, y: 0 }}
+    style={StyleSheet.absoluteFill}
+  />;
 }
 
 function ButtonLoadingFill({ primary, reducedMotion }: { primary: boolean; reducedMotion: boolean }) {
@@ -155,9 +167,10 @@ export function Button({
         const showPress = pressed && !inactive && pressFeedback === "opacity";
         return (
           <>
-            {loading && (
+            {(variant === "primary" || loading) && (
               <View pointerEvents="none" style={styles.surface}>
-                <ButtonLoadingFill primary={variant === "primary"} reducedMotion={reducedMotion} />
+                {variant === "primary" && <ChromeGradient />}
+                {loading && <ButtonLoadingFill primary={variant === "primary"} reducedMotion={reducedMotion} />}
               </View>
             )}
             {(!loading || variant !== "primary") && icon}
@@ -208,8 +221,8 @@ const iconSizeStyles: Record<ButtonSize, ViewStyle> = {
 
 const variantStyles: Record<ButtonVariant, ViewStyle> = {
   primary: {
-    backgroundColor: "#3C434A",
-    borderColor: "#262D36",
+    backgroundColor: "transparent",
+    borderColor: "transparent",
   },
   secondary: { backgroundColor: "#030507", borderColor: "#262D36" },
   ghost: { backgroundColor: "transparent", borderColor: "transparent" },
@@ -220,7 +233,7 @@ const variantStyles: Record<ButtonVariant, ViewStyle> = {
 
 const pressedVariantStyles: Record<ButtonVariant, ViewStyle> = {
   primary: {
-    opacity: 0.82,
+    transform: [{ translateY: -1 }],
   },
   secondary: { backgroundColor: "#080B0F", borderColor: "#262D36" },
   outline: { backgroundColor: "#080B0F", borderColor: "#262D36" },
@@ -230,7 +243,7 @@ const pressedVariantStyles: Record<ButtonVariant, ViewStyle> = {
 };
 
 const textVariantStyles: Record<ButtonVariant, TextStyle> = {
-  primary: { color: "#DDE2E5" },
+  primary: { color: "#030507" },
   secondary: { color: "#DDE2E5" },
   ghost: { color: "#DDE2E5" },
   outline: { color: "#DDE2E5" },
@@ -259,6 +272,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     flexDirection: "row",
     justifyContent: "center",
+    overflow: "hidden",
   },
   disabled: {
     opacity: 0.8,
@@ -299,6 +313,6 @@ const styles = StyleSheet.create({
     top: 0,
     transformOrigin: "bottom",
   },
-  primaryLoadingSurface: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundColor: "rgba(221, 226, 229, 0.12)" },
+  primaryLoadingSurface: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundColor: "rgba(3, 5, 7, 0.12)" },
   darkLoadingSurface: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundColor: "#080B0F" },
 });

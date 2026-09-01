@@ -110,6 +110,7 @@
     "zod": "^4.4.3"
   },
   "peerDependencies": {
+    "expo-linear-gradient": ">=14",
     "react": "19.2.3",
     "react-native": ">=0.86",
     "react-native-pdf": ">=7",
