@@ -21,7 +21,7 @@ import {
 } from "@vorinthex/shared/ui/bottom-sheet";
 import { AiTextEditor } from "@vorinthex/shared/ui/ai-text-editor";
 import { Button, ButtonSizeProvider } from "@vorinthex/shared/ui/button";
-import { CoreComposer } from "@vorinthex/shared/ui/core-composer";
+import { PersistentCoreComposer as CoreComposer } from "@/components/PersistentCoreComposer";
 import {
   BrainIcon,
   ChatBubbleIcon,

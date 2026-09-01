@@ -161,3 +161,10 @@ export async function* streamRoute<TInput>(options: ExecuteRouteOptions<TInput>)
     throw new ProviderExecutionError(options.decision.actionSlug, [{ modelId: options.decision.modelSlug, providerId: options.decision.providerSlug, externalModelId: options.decision.providerModelId, code: normalized.code, message: normalized.message }], { cause: normalized });
   }
 }
+
+/** Streams the canonical provider-neutral text action over its selected server-owned route. */
+export async function* streamAsk(organizationKey: string, input: CoreChatInput, options: ExecuteActionOptions = {}) {
+  const { mode: _mode, ...providerInput } = coreChatInputSchema.parse(input);
+  const decision = (await selectRoutes({ mode: 'auto', organizationKey, actionSlug: 'text' }, options, options.providers))[0]!;
+  yield* streamRoute({ decision, input: providerInput, adapters: options.adapters, env: options.env, timeoutMs: options.timeoutMs, signal: options.signal });
+}

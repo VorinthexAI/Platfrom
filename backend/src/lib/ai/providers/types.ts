@@ -62,6 +62,7 @@ export interface ProviderExecuteResponse<TOutput = unknown> {
 }
 
 export type ProviderStreamChunk =
+  | { type: 'tool-call'; toolCall: NormalizedToolCall }
   | { type: 'text-delta'; text: string }
   | { type: 'usage'; usage: TokenUsage }
   | { type: 'done' };

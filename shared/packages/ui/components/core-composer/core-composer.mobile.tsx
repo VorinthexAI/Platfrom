@@ -46,6 +46,7 @@ export type CoreComposerProps = {
   onLeadingPress?: () => void;
   onSubmit: () => void;
   openRequest?: number;
+  pageActions?: ReactNode;
   pageIdentity: (closePage: () => void) => ReactNode;
   prompts: readonly string[];
   sendIcon: ReactNode;
@@ -163,6 +164,7 @@ type CorePageProps = {
   inputRef: RefObject<NativeTextInput | null>;
   leftInset: number;
   message?: ReactNode;
+  pageActions?: ReactNode;
   pageIdentity: (closePage: () => void) => ReactNode;
   releaseSelection: () => void;
   rightInset: number;
@@ -170,7 +172,7 @@ type CorePageProps = {
   topInset: number;
 };
 
-function CorePage({ bottomInset, closePage, composer, inputRef, leftInset, message, pageIdentity, releaseSelection, rightInset, style, topInset }: CorePageProps) {
+function CorePage({ bottomInset, closePage, composer, inputRef, leftInset, message, pageActions, pageIdentity, releaseSelection, rightInset, style, topInset }: CorePageProps) {
   const keyboard = useAnimatedKeyboard();
   const keyboardSpacerStyle = useAnimatedStyle(() => {
     const keyboardMoving = [KeyboardState.OPENING, KeyboardState.OPEN, KeyboardState.CLOSING].includes(keyboard.state.value);
@@ -209,7 +211,7 @@ function CorePage({ bottomInset, closePage, composer, inputRef, leftInset, messa
       <View style={styles.pageTitleRow}>
         <Button accessibilityLabel="Back from Core" contentMode="raw" onPress={closePage} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button>
         <Text numberOfLines={1} style={styles.pageTitle}>Core</Text>
-        <View style={styles.pageTitleSpacer} />
+        {pageActions ?? <View style={styles.pageTitleSpacer} />}
       </View>
       <View style={styles.pageConversation}>{message}</View>
       <View>
@@ -237,6 +239,7 @@ export function CoreComposer({
   onLeadingPress,
   onSubmit,
   openRequest = 0,
+  pageActions,
   pageIdentity,
   prompts,
   sendIcon,
@@ -440,7 +443,7 @@ export function CoreComposer({
       }]}>
         {accessory}{composer(false)}
       </View> : null}
-      {pageOpen ? <CorePage bottomInset={insets.bottom} closePage={closePage} composer={composer(true)} inputRef={inputRef} leftInset={insets.left} message={message} pageIdentity={pageIdentity} releaseSelection={releaseInputSelection} rightInset={insets.right} style={style} topInset={insets.top} /> : null}
+      {pageOpen ? <CorePage bottomInset={insets.bottom} closePage={closePage} composer={composer(true)} inputRef={inputRef} leftInset={insets.left} message={message} pageActions={pageActions} pageIdentity={pageIdentity} releaseSelection={releaseInputSelection} rightInset={insets.right} style={style} topInset={insets.top} /> : null}
     </>
   );
 }

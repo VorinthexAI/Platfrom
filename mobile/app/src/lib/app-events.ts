@@ -3,6 +3,7 @@ import type { GalleryEventSlug } from "./gallery-convergence";
 export type AppEvent =
   | { type: "gallery.changed"; slug: GalleryEventSlug }
   | { type: "inbox.changed" }
+  | { type: "conversation.changed" }
   | { type: "event-stream.connected" };
 
 const listeners = new Set<(event: AppEvent) => void>();

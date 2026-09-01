@@ -19,6 +19,7 @@ export type CoreComposerProps = {
   onFocusChange?: (focused: boolean) => void;
   onLeadingPress?: () => void;
   onSubmit: () => void;
+  pageActions?: ReactNode;
   prompts: readonly string[];
   sendIcon: ReactNode;
   style?: React.CSSProperties;
@@ -40,6 +41,7 @@ export function CoreComposer({
   onFocusChange,
   onLeadingPress,
   onSubmit,
+  pageActions,
   prompts,
   sendIcon,
   style,
@@ -48,6 +50,7 @@ export function CoreComposer({
   return (
     <div style={style}>
       {accessory}
+      {pageActions}
       {message}
       <div>
         {onLeadingPress ? (

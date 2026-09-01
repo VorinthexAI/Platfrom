@@ -3,15 +3,16 @@ import { newId } from '@/lib/ids';
 import type { ToolContext } from './tool-context';
 import { CONTENT_TOOL_NAMES, MODEL_TOOL_NAMES, runTool, runTrustedTool, TOOL_DEFINITIONS, TOOL_NAMES, toolInputSchemas } from './index';
 import { signalCapabilities } from '@/lib/ai/personal-assistant/service-capabilities';
+import { defaultAssistantCapabilityRegistry } from '@/lib/ai/personal-assistant/capabilities';
 
 describe('unified tool registry', () => {
   test('has one unique definition for every public tool name', () => {
     expect(new Set(TOOL_NAMES).size).toBe(TOOL_NAMES.length);
     expect(new Set(TOOL_DEFINITIONS.map(({ name }) => name)).size).toBe(TOOL_DEFINITIONS.length);
-    expect(TOOL_NAMES).toHaveLength(166);
-    expect(MODEL_TOOL_NAMES).toHaveLength(163);
-    expect(TOOL_DEFINITIONS).toHaveLength(163);
-    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 118);
+    expect(TOOL_NAMES).toHaveLength(175);
+    expect(MODEL_TOOL_NAMES).toHaveLength(172);
+    expect(TOOL_DEFINITIONS).toHaveLength(172);
+    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 127);
     expect(TOOL_DEFINITIONS.map(({ name }) => name)).toEqual([...MODEL_TOOL_NAMES]);
     expect(TOOL_NAMES).not.toContain('chat');
     expect(TOOL_NAMES).not.toContain('orchestrator.chat');
@@ -119,6 +120,26 @@ describe('unified tool registry', () => {
     expect(TOOL_NAMES).not.toContain('user.settings.update');
     for (const name of ['access.agent.evaluate', 'agent.member.list', 'artifact.create', 'project.create', 'milestone.create', 'task.create', 'organization.member.list', 'scope.list']) expect(TOOL_NAMES).not.toContain(name);
     expect(TOOL_NAMES.every((name) => !name.includes('_'))).toBe(true);
+    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['conversation.create', 'conversation.list', 'conversation.search', 'conversation.rename', 'conversation.favorite', 'conversation.delete', 'conversation.message.list', 'conversation.message.send', 'assistant.query']));
+    expect(() => toolInputSchemas['assistant.query'].parse({ query: 'history', conversationKey: newId() })).toThrow('Unrecognized key');
+    expect(() => toolInputSchemas['conversation.message.send'].parse({ conversationKey: newId(), message: 'hello', requestKey: 'forged' })).toThrow('Unrecognized key');
+    expect(toolInputSchemas['conversation.list'].parse({})).toMatchObject({ favoriteOnly: false, limit: 25 });
+    expect(toolInputSchemas['conversation.search'].parse({ query: 'saved', favoriteOnly: true })).toMatchObject({ favoriteOnly: true, recordHistory: true });
+    expect(() => toolInputSchemas['app.search'].parse({ query: 'chat', collectionSlugs: ['conversations'] })).toThrow();
+    const conversationNames = new Set(TOOL_NAMES.filter((name) => name.startsWith('conversation.')));
+    for (const surface of ['knowledge-workspace', 'media-workspace', 'book-workspace', 'travel-workspace', 'signal-workspace'] as const) {
+      expect(defaultAssistantCapabilityRegistry.resolve(surface).some(({ definition }) => conversationNames.has(definition.name))).toBe(false);
+      expect(defaultAssistantCapabilityRegistry.resolve(surface).some(({ definition }) => definition.name === 'assistant.query')).toBe(false);
+    }
+  });
+
+  test('injects trusted request and current-conversation context into conversation adapters', async () => {
+    const organizationKey = newId(), scopeKey = newId(), userKey = newId(), conversationKey = newId(); const calls: unknown[] = [];
+    const contentContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const conversations = { turn: async (input: unknown, _context: ToolContext, emit: (event: unknown) => void) => { calls.push(input); emit({ type: 'done' }); }, query: async (_context: ToolContext, selected: string, input: unknown) => { calls.push({ selected, input }); return { messages: [] }; } } as any;
+    await runTool('conversation.message.send', '', { conversationKey, message: 'hello' }, { contentContext, conversationService: conversations, requestKey: 'trusted-request' });
+    await runTool('assistant.query', '', { query: 'prior' }, { contentContext, conversationService: conversations, currentConversationKey: conversationKey });
+    expect(calls).toEqual([{ conversationKey, message: 'hello', requestKey: 'trusted-request' }, { selected: conversationKey, input: { query: 'prior', limit: 50 } }]);
   });
 
   test('executes inbox ingestion tools only through trusted system context', async () => {

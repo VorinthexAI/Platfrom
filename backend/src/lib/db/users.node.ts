@@ -60,9 +60,11 @@ export const insertUser = helpers.insert;
 export const getUserById = helpers.getById;
 export const updateUser = helpers.updateById;
 export async function deleteUser(userKey: string): Promise<void> {
-  await withTransaction(['users', 'userHiddens', 'userGenerations'], async (transaction) => {
+  await withTransaction(['users', 'userHiddens', 'userGenerations', 'conversations', 'conversationMessages'], async (transaction) => {
     await transaction.query('FOR hidden IN userHiddens FILTER hidden.userKey == @userKey REMOVE hidden IN userHiddens', { userKey });
     await transaction.query('FOR generation IN userGenerations FILTER generation.userKey == @userKey REMOVE generation IN userGenerations', { userKey });
+    await transaction.query('FOR message IN conversationMessages FILTER message.userKey == @userKey REMOVE message IN conversationMessages', { userKey });
+    await transaction.query('FOR conversation IN conversations FILTER conversation.userKey == @userKey REMOVE conversation IN conversations', { userKey });
     const cursor = await transaction.query('REMOVE @userKey IN users RETURN OLD._key', { userKey });
     if (await cursor.next() === undefined) throw new Error(`User ${userKey} was not found.`);
   });

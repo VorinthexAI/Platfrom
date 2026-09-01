@@ -45,6 +45,7 @@ import { contentNeighborsToolDefinition } from './content-neighbors';
 import { documentSearchToolDefinition } from './document-search';
 import { WORKSPACE_TOOL_DEFINITIONS } from './workspace-tool-definitions';
 import { TRUSTED_EMAIL_TOOL_DEFINITIONS } from './email-ingestion-tool-definitions';
+import { CONVERSATION_TOOL_DEFINITIONS } from './conversation-tool-definitions';
 
 export const PUBLIC_TOOL_DEFINITIONS = Object.freeze([
   imageCaptionTool,
@@ -55,6 +56,7 @@ export const PUBLIC_TOOL_DEFINITIONS = Object.freeze([
   documentSearchAllToolDefinition,
   contentSearchToolDefinition, contentSearchHistoryListToolDefinition, contentSearchHistoryDeleteToolDefinition, documentSearchToolDefinition,
   ...WORKSPACE_TOOL_DEFINITIONS,
+  ...CONVERSATION_TOOL_DEFINITIONS,
 ] as const);
 
 /** Canonical registry entries that only authenticated server workflows may dispatch. */
