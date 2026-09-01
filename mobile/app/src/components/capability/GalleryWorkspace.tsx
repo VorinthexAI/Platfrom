@@ -5,7 +5,7 @@ import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
-import { FlatList, Keyboard, KeyboardAvoidingView, ScrollView, StyleSheet, Text, View, useWindowDimensions, type TextInput as NativeTextInput } from "react-native";
+import { FlatList, Keyboard, ScrollView, StyleSheet, Text, View, useWindowDimensions, type TextInput as NativeTextInput } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomSheet, BottomSheetItem, BottomSheetMenu } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
@@ -215,7 +215,6 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
   const [busy, setBusy] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [assistantBusy, setAssistantBusy] = useState(false);
-  const [aiInputFocused, setAiInputFocused] = useState(false);
   const [collectionSearchFocusBlocked, setCollectionSearchFocusBlocked] = useState(false);
   const [searching, setSearching] = useState(false);
   const [userRefreshing, setUserRefreshing] = useState(false);
@@ -743,7 +742,6 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
 
   function handleCoreFocusChange(focused: boolean) {
     if (searchFocusReleaseTimer.current) clearTimeout(searchFocusReleaseTimer.current);
-    setAiInputFocused(focused);
     if (focused) {
       setCollectionSearchFocusBlocked(true);
       collectionSearchInput.current?.blur();
@@ -2718,7 +2716,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
   </View> : undefined;
 
   return (
-    <KeyboardAvoidingView behavior={aiInputFocused ? "height" : undefined} style={styles.root}>
+    <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
         <WorkspaceAppSwitcher active="gallery" />
       </View>
@@ -3057,7 +3055,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
       </BottomSheet>
       {activeCollection ? <GalleryCollectionSharing collection={activeCollection} context={galleryContext} memberKeys={memberKeys} onClose={() => setSharingOpen(false)} open={sharingOpen} /> : null}
       {cameraOpen ? <GalleryCaptureModal onClose={() => setCameraOpen(false)} onSubmit={uploadCapturedPhotos} /> : null}
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 

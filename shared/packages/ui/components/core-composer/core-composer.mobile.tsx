@@ -5,15 +5,14 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from "react";
 import {
   AccessibilityInfo,
   Animated,
+  BackHandler,
   findNodeHandle,
   Keyboard,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
   StyleSheet,
   Text,
   TextInput as NativeTextInput,
@@ -22,6 +21,7 @@ import {
   type ViewStyle,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Reanimated, { KeyboardState, useAnimatedKeyboard, useAnimatedStyle } from "react-native-reanimated";
 import Svg, { Defs, LinearGradient, Stop, Text as SvgText } from "react-native-svg";
 
 import { Button } from "../button/button.mobile";
@@ -57,6 +57,7 @@ const COLLAPSED_INPUT_HEIGHT = 38;
 const INPUT_LINE_HEIGHT = 18;
 const INPUT_VERTICAL_PADDING = 10;
 const MAX_INPUT_HEIGHT = INPUT_LINE_HEIGHT * 6 + INPUT_VERTICAL_PADDING * 2;
+const CORE_FOCUS_DELAY_MS = 300;
 
 function useReducedMotion() {
   const [reducedMotion, setReducedMotion] = useState(true);
@@ -154,6 +155,70 @@ function RotatingPrompt({ prompts }: { prompts: readonly string[] }) {
   );
 }
 
+type CorePageProps = {
+  bottomInset: number;
+  closePage: () => void;
+  composer: ReactNode;
+  inputRef: RefObject<NativeTextInput | null>;
+  leftInset: number;
+  message?: ReactNode;
+  pageIdentity: (closePage: () => void) => ReactNode;
+  releaseSelection: () => void;
+  rightInset: number;
+  style?: StyleProp<ViewStyle>;
+  topInset: number;
+};
+
+function CorePage({ bottomInset, closePage, composer, inputRef, leftInset, message, pageIdentity, releaseSelection, rightInset, style, topInset }: CorePageProps) {
+  const keyboard = useAnimatedKeyboard({
+    isNavigationBarTranslucentAndroid: true,
+    isStatusBarTranslucentAndroid: true,
+  });
+  const keyboardSpacerStyle = useAnimatedStyle(() => {
+    const keyboardMoving = [KeyboardState.OPENING, KeyboardState.OPEN, KeyboardState.CLOSING].includes(keyboard.state.value);
+    return { height: keyboardMoving ? Math.max(0, keyboard.height.value - bottomInset) : 0 };
+  }, [bottomInset]);
+
+  useEffect(() => {
+    let selectionFrame: number | undefined;
+    const focusTimeout = setTimeout(() => {
+      inputRef.current?.focus();
+      selectionFrame = requestAnimationFrame(releaseSelection);
+    }, CORE_FOCUS_DELAY_MS);
+    return () => {
+      clearTimeout(focusTimeout);
+      if (selectionFrame !== undefined) cancelAnimationFrame(selectionFrame);
+    };
+  }, [inputRef, releaseSelection]);
+
+  useEffect(() => BackHandler.addEventListener("hardwareBackPress", () => {
+    closePage();
+    return true;
+  }).remove, [closePage]);
+
+  return <View accessibilityLabel="Core" accessibilityViewIsModal onAccessibilityEscape={closePage} style={styles.page}>
+    <View style={[styles.pageIdentityHeader, {
+      paddingTop: topInset + 6,
+      paddingLeft: Math.max(leftInset, spacing.md),
+      paddingRight: Math.max(rightInset, spacing.md),
+    }]}>{pageIdentity(closePage)}</View>
+    <View style={[styles.pageContent, style, {
+      paddingBottom: Math.max(bottomInset, spacing.sm),
+      paddingLeft: Math.max(leftInset, spacing.md),
+      paddingRight: Math.max(rightInset, spacing.md),
+    }]}>
+      <View style={styles.pageTitleRow}>
+        <Button accessibilityLabel="Back from Core" contentMode="raw" onPress={closePage} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button>
+        <Text numberOfLines={1} style={styles.pageTitle}>Core</Text>
+        <View style={styles.pageTitleSpacer} />
+      </View>
+      <View style={styles.pageConversation}>{message}</View>
+      {composer}
+      <Reanimated.View pointerEvents="none" style={keyboardSpacerStyle} />
+    </View>
+  </View>;
+}
+
 export function CoreComposer({
   accessory,
   accessibilityHint,
@@ -185,14 +250,12 @@ export function CoreComposer({
   const intentionalFocus = useRef(false);
   const onFocusChangeRef = useRef(onFocusChange);
   const pageWasOpenRef = useRef(false);
-  const selectionReleaseTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const valueRef = useRef(value);
   onFocusChangeRef.current = onFocusChange;
   valueRef.current = value;
   const showPrompt = value.length === 0;
 
   const closePage = useCallback(() => {
-    if (selectionReleaseTimeoutRef.current) clearTimeout(selectionReleaseTimeoutRef.current);
     Keyboard.dismiss();
     inputRef.current?.blur();
     intentionalFocus.current = false;
@@ -202,10 +265,7 @@ export function CoreComposer({
     onFocusChangeRef.current?.(false);
   }, []);
 
-  const focusPageInput = useCallback(() => {
-    inputRef.current?.focus();
-    selectionReleaseTimeoutRef.current = setTimeout(() => setInputSelection(undefined), 300);
-  }, []);
+  const releaseInputSelection = useCallback(() => setInputSelection(undefined), []);
 
   const openPage = useCallback(() => {
     if (pageOpen) return;
@@ -343,28 +403,7 @@ export function CoreComposer({
       }]}>
         {accessory}{composer(false)}
       </View> : null}
-      {pageOpen ? <Modal animationType="none" navigationBarTranslucent={false} onRequestClose={closePage} onShow={focusPageInput} presentationStyle="fullScreen" statusBarTranslucent visible>
-      <KeyboardAvoidingView accessibilityLabel="Core" accessibilityViewIsModal behavior={Platform.OS === "ios" ? "padding" : undefined} onAccessibilityEscape={closePage} style={styles.page}>
-        <View style={[styles.pageIdentityHeader, {
-          paddingTop: insets.top + 6,
-          paddingLeft: Math.max(insets.left, spacing.md),
-          paddingRight: Math.max(insets.right, spacing.md),
-        }]}>{pageIdentity(closePage)}</View>
-        <View style={[styles.pageContent, style, {
-          paddingBottom: Math.max(insets.bottom, spacing.sm),
-          paddingLeft: Math.max(insets.left, spacing.md),
-          paddingRight: Math.max(insets.right, spacing.md),
-        }]}>
-          <View style={styles.pageTitleRow}>
-            <Button accessibilityLabel="Back from Core" contentMode="raw" onPress={closePage} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button>
-            <Text numberOfLines={1} style={styles.pageTitle}>Core</Text>
-            <View style={styles.pageTitleSpacer} />
-          </View>
-          <View style={styles.pageConversation}>{message}</View>
-          {composer(true)}
-        </View>
-      </KeyboardAvoidingView>
-      </Modal> : null}
+      {pageOpen ? <CorePage bottomInset={insets.bottom} closePage={closePage} composer={composer(true)} inputRef={inputRef} leftInset={insets.left} message={message} pageIdentity={pageIdentity} releaseSelection={releaseInputSelection} rightInset={insets.right} style={style} topInset={insets.top} /> : null}
     </>
   );
 }
@@ -375,8 +414,14 @@ const styles = StyleSheet.create({
     zIndex: 20,
   },
   page: {
+    bottom: 0,
     backgroundColor: colors.page,
-    flex: 1,
+    elevation: 30,
+    left: 0,
+    position: "absolute",
+    right: 0,
+    top: 0,
+    zIndex: 100,
   },
   pageIdentityHeader: {
     minHeight: 64,

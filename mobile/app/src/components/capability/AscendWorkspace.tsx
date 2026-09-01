@@ -8,7 +8,6 @@ import {
   AccessibilityInfo,
   Animated,
   Keyboard,
-  KeyboardAvoidingView,
   ScrollView,
   StyleSheet,
   Text,
@@ -264,7 +263,6 @@ export function AscendWorkspace() {
   const [searchTerm, setSearchTerm] = useState("");
   const [showOnlyFavorites, setShowOnlyFavorites] = useState(false);
   const [rootSearchFocusable, setRootSearchFocusable] = useState(true);
-  const [aiInputFocused, setAiInputFocused] = useState(false);
   const [history, setHistory] = useState<ContentSearchHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string>();
@@ -1015,7 +1013,7 @@ export function AscendWorkspace() {
     : sheet === "bookSummary" ? <><Button disabled={!bookReadingChapter} onPress={() => openChapterReading(bookReadingChapter?.key)} size="md" variant="primary">Read</Button><Button onPress={closeContentSheet} size="md" variant="secondary">Close</Button></>
       : undefined;
   return (
-    <KeyboardAvoidingView behavior={aiInputFocused ? "height" : undefined} style={styles.root}>
+    <View style={styles.root}>
       <View
         style={[
           styles.globalHeader,
@@ -1111,7 +1109,6 @@ export function AscendWorkspace() {
               setRootSearchFocusable(true);
             }, 300);
           }
-          setAiInputFocused(focused);
           if (!focused) setAssistantMessage(undefined);
         }}
         onSubmit={askAssistant}
@@ -1326,7 +1323,7 @@ export function AscendWorkspace() {
       <BottomSheet footer={<><Button disabled={briefTargetLanguage.trim().length < 2} onPress={() => { const target = briefTranslateTarget; if (target) void transformBriefEditor(target, "translate"); }} size="md" variant="primary">Translate</Button><Button onPress={() => setBriefTranslateTarget(undefined)} size="md" variant="secondary">Close</Button></>} height="full" onOpenChange={(open) => { if (!open) setBriefTranslateTarget(undefined); }} open={Boolean(briefTranslateTarget)} title="Translate text">
         <View style={styles.customStep}><Text style={styles.inputLabel}>Language</Text><TextInput accessibilityLabel="Audio book brief translation language" maxLength={100} onChangeText={setBriefTargetLanguage} placeholder="Language" value={briefTargetLanguage} /></View>
       </BottomSheet>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 

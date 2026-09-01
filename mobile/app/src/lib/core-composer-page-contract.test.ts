@@ -13,15 +13,15 @@ const [core, switcher, archive, gallery, compass, signal, ascend] = await Promis
 
 test("opens Core as an in-layout page and returns without routing", () => {
   expect(core).not.toContain("BottomSheet");
+  expect(core).not.toContain("<Modal");
   expect(core).not.toContain("useRouter");
   expect(core).toContain('const [pageOpen, setPageOpen] = useState(false)');
   expect(core).toContain('accessibilityLabel="Back from Core"');
-  expect(core).toContain("onRequestClose={closePage}");
-  expect(core).toContain("onShow={focusPageInput}");
-  expect(core).toContain('animationType="none"');
+  expect(core).toContain("<CorePage");
+  expect(core).toContain("CORE_FOCUS_DELAY_MS = 300");
+  expect(core).toContain("inputRef.current?.focus()");
   expect(core).toContain("setPageOpen(false)");
-  expect(core).toContain('presentationStyle="fullScreen"');
-  expect(core).toContain("accessibilityViewIsModal behavior={Platform.OS");
+  expect(core).toContain("accessibilityViewIsModal onAccessibilityEscape={closePage}");
   expect(core).toContain("onAccessibilityEscape={closePage}");
   expect(core).toContain("AccessibilityInfo.setAccessibilityFocus(inputHandle)");
   expect(core).toContain("showSoftInputOnFocus={expanded}");
@@ -31,7 +31,7 @@ test("opens Core as an in-layout page and returns without routing", () => {
 test("matches the Archive header rhythm and keeps the Core prompt composer", () => {
   expect(core).toContain("pageIdentityHeader: {");
   expect(core).toContain("minHeight: 64");
-  expect(core).toContain("paddingTop: insets.top + 6");
+  expect(core).toContain("paddingTop: topInset + 6");
   expect(core).toContain("pageTitleRow: {");
   expect(core).toContain("minHeight: 48");
   expect(core).toContain("gap: spacing.xs");
@@ -53,13 +53,18 @@ test("keeps the workspace composer compact and grows the Core input only when te
   expect(core).not.toContain('borderColor: "#55616C"');
 });
 
-test("uses native Android keyboard resize and iOS-only keyboard padding", () => {
-  expect(core).toContain("KeyboardAvoidingView");
-  expect(core).toContain('behavior={Platform.OS === "ios" ? "padding" : undefined}');
-  expect(core).toContain("navigationBarTranslucent={false}");
-  expect(core).not.toContain("useKeyboard");
-  expect(core).not.toContain("keyboardSpacerHeight");
-  expect(core).not.toContain("Reanimated.View");
+test("delays focus and grows a hidden container with the animated keyboard height", () => {
+  expect(core).toContain("useAnimatedKeyboard({");
+  expect(core).toContain("KeyboardState.OPENING");
+  expect(core).toContain("keyboard.height.value - bottomInset");
+  expect(core).toContain("}, CORE_FOCUS_DELAY_MS)");
+  expect(core).toContain('<Reanimated.View pointerEvents="none" style={keyboardSpacerStyle} />');
+  expect(core).not.toContain("KeyboardAvoidingView");
+  expect(core).not.toContain("withTiming");
+});
+
+test("keeps workspace keyboard avoidance from competing with the Core page", () => {
+  for (const workspace of [archive, gallery, compass, signal, ascend]) expect(workspace).not.toContain("KeyboardAvoidingView");
 });
 
 test("temporarily displays Core while the selector remains limited to five apps", () => {

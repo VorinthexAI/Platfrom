@@ -5,7 +5,7 @@ import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Keyboard, KeyboardAvoidingView, Linking, PanResponder, ScrollView, StyleSheet, Text, useWindowDimensions, View, type TextInput as NativeTextInput } from "react-native";
+import { Keyboard, Linking, PanResponder, ScrollView, StyleSheet, Text, useWindowDimensions, View, type TextInput as NativeTextInput } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomSheet, BottomSheetItem, BottomSheetMenu } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
@@ -259,7 +259,6 @@ export function TravelWorkspace({ initialTripKey, openTripAssets: shouldOpenTrip
   const [lastOpenedCountryCode, setLastOpenedCountryCode] = useState<string>();
   const [assistantInput, setAssistantInput] = useState("");
   const [assistantBusy, setAssistantBusy] = useState(false);
-  const [assistantInputFocused, setAssistantInputFocused] = useState(false);
   const [countrySearchFocusBlocked, setCountrySearchFocusBlocked] = useState(false);
   const [assistantMessage, setAssistantMessage] = useState<string>();
   const [assistantFailed, setAssistantFailed] = useState(false);
@@ -1243,7 +1242,6 @@ export function TravelWorkspace({ initialTripKey, openTripAssets: shouldOpenTrip
 
   function handleCoreFocusChange(focused: boolean) {
     if (searchFocusReleaseTimer.current) clearTimeout(searchFocusReleaseTimer.current);
-    setAssistantInputFocused(focused);
     if (focused) { setCountrySearchFocusBlocked(true); countrySearchInput.current?.blur(); Keyboard.dismiss(); return; }
     setAssistantMessage(undefined);
     setAssistantFailed(false);
@@ -1300,7 +1298,7 @@ export function TravelWorkspace({ initialTripKey, openTripAssets: shouldOpenTrip
   const tripGlobePlace = selectedTrip?.places[tripGlobePlaceIndex];
   const availableTripAddPlaces = selectedTrip ? places.filter((place) => !selectedTrip.places.some(({ key }) => key === place.key)) : [];
   const selectTripGlobePlace = (key: string) => { setTripGlobePlaceKey(key); setTripGlobeFocusRequest((current) => current + 1); };
-  return <KeyboardAvoidingView behavior={assistantInputFocused ? "height" : undefined} style={styles.root}>
+  return <View style={styles.root}>
     <View style={[styles.header, { paddingTop: insets.top + 6, paddingLeft: Math.max(insets.left, spacing.md), paddingRight: Math.max(insets.right, spacing.md) }]}><WorkspaceAppSwitcher active="compass" /></View>
     <View style={[styles.workspaceViewport, { paddingLeft: Math.max(insets.left, spacing.md), paddingRight: Math.max(insets.right, spacing.md) }]}>
       {selectedPlace ? <>
@@ -1377,7 +1375,7 @@ export function TravelWorkspace({ initialTripKey, openTripAssets: shouldOpenTrip
     <GeneratedDocumentSheets appendGeneration createLabel="Request new" documents={tripGuidesQuery.data} emptyMessage="No travel guides yet. Request one for this trip." error={tripGuidesQuery.error} generating={tripGuideGenerating} label="Travel guides" loading={tripGuidesQuery.isPending} onClose={closeTripGuides} onCreate={() => void createTripGuide()} onDetailClose={() => setSelectedTripGuide(undefined)} onOpen={setSelectedTripGuide} onRetry={() => void tripGuidesQuery.refetch()} open={tripGuidesOpen} selected={currentTripGuide}>{currentTripGuide ? <GeneratedDocumentDetail document={currentTripGuide} hero={<TripGuideHero places={selectedTrip?.places ?? []} />} /> : null}</GeneratedDocumentSheets>
 
     <BottomSheet footer={<Button onPress={() => setImageViewerKey(undefined)} size="md" style={styles.sheetSecondary} variant="secondary">Close</Button>} height="full" onOpenChange={(open) => { if (!open) setImageViewerKey(undefined); }} onSwipeLeft={tripImages.length > 1 ? () => focusTripImage(1) : undefined} onSwipeRight={tripImages.length > 1 ? () => focusTripImage(-1) : undefined} open={Boolean(imageViewer)} pageKey={imageViewer?.key} title={imageViewer?.title ?? "Image"}>{imageViewer ? <View style={styles.viewerContent}><View accessibilityActions={tripImages.length > 1 ? [{ name: "decrement", label: "Previous image" }, { name: "increment", label: "Next image" }] : undefined} accessibilityLabel={`${imageViewer.title} trip image`} accessibilityRole="adjustable" accessibilityValue={{ text: `${imageViewerIndex + 1} of ${tripImages.length}` }} onAccessibilityAction={({ nativeEvent }) => { if (nativeEvent.actionName === "decrement") focusTripImage(-1); if (nativeEvent.actionName === "increment") focusTripImage(1); }} style={styles.viewerFrame}><Image contentFit="contain" source={imageViewer.url} style={styles.viewerImage} /></View></View> : null}</BottomSheet>
-  </KeyboardAvoidingView>;
+  </View>;
 }
 
 function PlaceCard({ accessibilityLongPress = false, cardSize, disabled = false, onLongPress, onPress, place, selectable = false, selected = false }: { accessibilityLongPress?: boolean; cardSize?: number; disabled?: boolean; onLongPress?: () => void; onPress: () => void; place: Place; selectable?: boolean; selected?: boolean }) {

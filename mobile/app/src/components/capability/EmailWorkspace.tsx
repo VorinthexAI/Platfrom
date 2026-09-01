@@ -6,9 +6,7 @@ import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { Image } from "expo-image";
 import {
-  KeyboardAvoidingView,
   Keyboard,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -360,7 +358,6 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, initialMessa
   const [assistantResponse, setAssistantResponse] = useState<EmailAssistantResponse>();
   const [assistantError, setAssistantError] = useState<string>();
   const [assistantBusy, setAssistantBusy] = useState(false);
-  const [assistantInputFocused, setAssistantInputFocused] = useState(false);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<{
     thread: EmailThread;
@@ -3066,10 +3063,7 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, initialMessa
   const draftSearchEmpty = Boolean(inboxTab === "drafts" && normalizedInboxSearch && !draftsQuery.isPending && !draftSearching && !draftsQuery.error && !draftSearchError && !visibleInboxDrafts.length);
   const messageSearchEmpty = Boolean(inboxTab !== "drafts" && inboxQuery.search && !loading && !inboxQueryPending && !initialSyncPending && !loadError && !overview?.threads.length);
   return (
-    <KeyboardAvoidingView
-      behavior={assistantInputFocused ? "height" : Platform.OS === "ios" ? "padding" : undefined}
-      style={styles.root}
-    >
+    <View style={styles.root}>
       <View accessibilityElementsHidden={readerSheetOpen} importantForAccessibility={readerSheetOpen ? "no-hide-descendants" : "auto"} pointerEvents={readerSheetOpen ? "none" : "auto"} style={styles.workspaceSurface}>
       <View style={[styles.globalHeader, { paddingTop: insets.top + 6 }]}>
         <WorkspaceAppSwitcher
@@ -3357,7 +3351,6 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, initialMessa
               setRootSearchFocusable(true);
             }, 300);
           }
-          setAssistantInputFocused(focused);
           if (!focused) {
             setAssistantResponse(undefined);
             setAssistantError(undefined);
@@ -3724,7 +3717,7 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, initialMessa
       <View accessibilityElementsHidden={readerSheetOpen} importantForAccessibility={readerSheetOpen ? "no-hide-descendants" : "auto"} pointerEvents={readerSheetOpen ? "none" : "auto"}>
       <ReplyContextSheets canMutate={permissions.canMutate} context={emailContext} onClose={() => setReplyContextsOpen(false)} open={replyContextsOpen} />
       </View>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 

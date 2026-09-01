@@ -10,7 +10,7 @@ const [layout, sheet, core, camera] = await Promise.all([
 
 test("lets native presentations handle Android back before router history", () => {
   expect(sheet).toContain("onRequestClose={dismiss}");
-  expect(core).toContain("onRequestClose={closePage}");
+  expect(core).toContain('BackHandler.addEventListener("hardwareBackPress"');
   expect(camera).toContain('onRequestClose={() => { if (!capturing && !disabled) onClose(); }}');
 });
 

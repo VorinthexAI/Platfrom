@@ -53,7 +53,7 @@ test("matches Archive root search, history, favorite, empty, and focus behavior"
   expect(workspace).toContain('checked={showOnlyFavorites}');
   expect(workspace).toContain('"No audio books yet."');
   expect(workspace).toContain('accessibilityLabel="Create audio book"');
-  expect(workspace).toContain('behavior={aiInputFocused ? "height" : undefined}');
+  expect(workspace).not.toContain("KeyboardAvoidingView");
   expect(workspace).toContain('setRootSearchFocusable(false)');
   expect(workspace).toContain('queryFn: ({ signal }) => searchBooks(searchTerm, signal, true)');
   expect(workspace).toContain('const BOOK_SEARCH_DEBOUNCE_MS = 300');

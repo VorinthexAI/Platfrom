@@ -6,7 +6,7 @@ import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, type ComponentRef, type ReactNode } from "react";
-import { BackHandler, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View, useWindowDimensions, type NativeSyntheticEvent, type TextLayoutEventData } from "react-native";
+import { BackHandler, Keyboard, Platform, ScrollView, StyleSheet, Text, View, useWindowDimensions, type NativeSyntheticEvent, type TextLayoutEventData } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { BottomSheet, BottomSheetItem, BottomSheetMenu } from "@vorinthex/shared/ui/bottom-sheet";
@@ -3813,7 +3813,7 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
   </View>;
   const rootSearchEmpty = Boolean(rootSearchQuery.trim() && !rootSearching && rootSearchResults && (folderContentTab === "folders" ? rootSearchFolders.length === 0 : rootSearchDocuments.length === 0));
   return (
-    <KeyboardAvoidingView behavior={aiInputFocused ? "height" : undefined} style={styles.root}>
+    <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + 6 }]}><WorkspaceAppSwitcher active="archive" /></View>
       {workspaceMode === "viewer" ? <FileViewer
         error={filePreviewError}
@@ -4368,7 +4368,7 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
         </>}
       </BottomSheet>
       {scanOpen ? <DocumentScanModal busy={scanBusy} error={scanError} onClose={() => { setScanOpen(false); setScanError(undefined); }} onSubmit={(pages) => void submitDocumentScan(pages)} /> : null}
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
