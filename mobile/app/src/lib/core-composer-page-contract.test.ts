@@ -65,7 +65,8 @@ test("waits for the keyboard to hide before restoring the workspace composer", (
 test("delays focus by 100ms and keeps the horizontal page inset above the keyboard", () => {
   expect(core).toContain("useAnimatedKeyboard({");
   expect(core).toContain("KeyboardState.OPENING");
-  expect(core).toContain("keyboard.height.value - bottomInset) + spacing.md");
+  expect(core).toContain("const keyboardLift = Math.max(0, keyboard.height.value - bottomInset)");
+  expect(core).toContain("keyboardMoving ? keyboardLift + Math.min(spacing.md, keyboardLift) : 0");
   expect(core).toContain("}, CORE_FOCUS_DELAY_MS)");
   expect(core).toContain('{composer}\n        <Reanimated.View pointerEvents="none" style={keyboardSpacerStyle} />');
   expect(core).not.toContain("KeyboardAvoidingView");
