@@ -16,15 +16,6 @@
   --vui-font-ui: var(--font-geist), Geist, Inter, system-ui, sans-serif;
   --vui-font-mono: var(--font-jetbrains), "JetBrains Mono", "IBM Plex Mono",
     monospace;
-  --vui-gradient-chrome: linear-gradient(
-    135deg,
-    #ffffff 0%,
-    #aeb6bc 18%,
-    #3c434a 38%,
-    #f5f7f8 55%,
-    #7b858c 76%,
-    #ffffff 100%
-  );
   --vui-gradient-panel: var(--vui-color-page);
   --vui-gradient-border: linear-gradient(
     135deg,
@@ -305,26 +296,23 @@
 }
 
 .vui-button-primary {
-  --vui-button-loading-background: var(--vui-gradient-chrome);
-  --vui-button-loading-color: #030507;
-  background: var(--vui-gradient-chrome);
-  background-position: 0% 0%;
-  background-size: 200% 200%;
-  color: #030507;
-  box-shadow: 0 0 34px rgba(221, 226, 229, 0.18);
+  --vui-button-loading-background: rgba(221, 226, 229, 0.12);
+  --vui-button-loading-color: #dde2e5;
+  background: #3c434a;
+  border-color: #262d36;
+  color: #dde2e5;
 }
 
 .vui-button-primary:disabled,
 .vui-button-primary[aria-disabled="true"] {
-  background: var(--vui-gradient-chrome);
-  color: #030507;
+  background: #3c434a;
+  border-color: #262d36;
+  color: #dde2e5;
   opacity: 0.8;
 }
 
 .vui-button-primary:hover:not(:disabled) {
-  background-position: 100% 100%;
-  box-shadow: 0 0 44px rgba(221, 226, 229, 0.3);
-  transform: translateY(-1px);
+  opacity: 0.9;
 }
 
 .vui-button-secondary,

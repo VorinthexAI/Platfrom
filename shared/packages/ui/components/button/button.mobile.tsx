@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useId, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import {
   AccessibilityInfo,
   Animated,
@@ -7,14 +7,12 @@ import {
   StyleSheet,
   Text,
   View,
-  type LayoutChangeEvent,
   type PressableProps,
   type PressableStateCallbackType,
   type StyleProp,
   type TextStyle,
   type ViewStyle,
 } from "react-native";
-import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
 import { radii } from "../../tokens";
 
 export type ButtonVariant =
@@ -69,39 +67,6 @@ function useReducedMotion() {
   return reducedMotion;
 }
 
-function ChromeGradient() {
-  const gradientId = useId().replaceAll(":", "");
-  const [size, setSize] = useState<{ width: number; height: number }>();
-  const onLayout = (event: LayoutChangeEvent) => {
-    const { width, height } = event.nativeEvent.layout;
-    if (width > 0 && height > 0) {
-      setSize((current) => current?.width === width && current.height === height ? current : { width, height });
-    }
-  };
-  const stops = [
-    <Stop key="white-start" offset="0" stopColor="#FFFFFF" />,
-    <Stop key="silver" offset="0.18" stopColor="#AEB6BC" />,
-    <Stop key="graphite" offset="0.38" stopColor="#3C434A" />,
-    <Stop key="white-middle" offset="0.55" stopColor="#F5F7F8" />,
-    <Stop key="steel" offset="0.76" stopColor="#7B858C" />,
-    <Stop key="white-end" offset="1" stopColor="#FFFFFF" />,
-  ];
-  return (
-    <View onLayout={onLayout} pointerEvents="none" style={StyleSheet.absoluteFill}>
-      {size ? (
-        <Svg height={size.height} style={StyleSheet.absoluteFill} width={size.width}>
-          <Defs>
-            <LinearGradient id={gradientId} x1="0" x2="1" y1="0" y2="1">
-              {stops}
-            </LinearGradient>
-          </Defs>
-          <Rect fill={`url(#${gradientId})`} height={size.height} rx={size.height / 2} ry={size.height / 2} width={size.width} />
-        </Svg>
-      ) : null}
-    </View>
-  );
-}
-
 function ButtonLoadingFill({ primary, reducedMotion }: { primary: boolean; reducedMotion: boolean }) {
   const [rise] = useState(() => new Animated.Value(0));
 
@@ -125,7 +90,7 @@ function ButtonLoadingFill({ primary, reducedMotion }: { primary: boolean; reduc
 
   return (
     <Animated.View style={[styles.loadingFill, { transform: [{ scaleY: rise }] }]}>
-      {primary ? <ChromeGradient /> : <View style={styles.darkLoadingSurface} />}
+      <View style={primary ? styles.primaryLoadingSurface : styles.darkLoadingSurface} />
     </Animated.View>
   );
 }
@@ -190,10 +155,9 @@ export function Button({
         const showPress = pressed && !inactive && pressFeedback === "opacity";
         return (
           <>
-            {(variant === "primary" || loading) && (
+            {loading && (
               <View pointerEvents="none" style={styles.surface}>
-                {variant === "primary" && <ChromeGradient />}
-                {loading && <ButtonLoadingFill primary={variant === "primary"} reducedMotion={reducedMotion} />}
+                <ButtonLoadingFill primary={variant === "primary"} reducedMotion={reducedMotion} />
               </View>
             )}
             {(!loading || variant !== "primary") && icon}
@@ -244,9 +208,8 @@ const iconSizeStyles: Record<ButtonSize, ViewStyle> = {
 
 const variantStyles: Record<ButtonVariant, ViewStyle> = {
   primary: {
-    backgroundColor: "transparent",
-    borderColor: "transparent",
-    boxShadow: "0 0 34px rgba(221, 226, 229, 0.18)",
+    backgroundColor: "#3C434A",
+    borderColor: "#262D36",
   },
   secondary: { backgroundColor: "#030507", borderColor: "#262D36" },
   ghost: { backgroundColor: "transparent", borderColor: "transparent" },
@@ -257,8 +220,7 @@ const variantStyles: Record<ButtonVariant, ViewStyle> = {
 
 const pressedVariantStyles: Record<ButtonVariant, ViewStyle> = {
   primary: {
-    boxShadow: "0 0 44px rgba(221, 226, 229, 0.3)",
-    transform: [{ translateY: -1 }],
+    opacity: 0.82,
   },
   secondary: { backgroundColor: "#080B0F", borderColor: "#262D36" },
   outline: { backgroundColor: "#080B0F", borderColor: "#262D36" },
@@ -268,7 +230,7 @@ const pressedVariantStyles: Record<ButtonVariant, ViewStyle> = {
 };
 
 const textVariantStyles: Record<ButtonVariant, TextStyle> = {
-  primary: { color: "#030507" },
+  primary: { color: "#DDE2E5" },
   secondary: { color: "#DDE2E5" },
   ghost: { color: "#DDE2E5" },
   outline: { color: "#DDE2E5" },
@@ -337,5 +299,6 @@ const styles = StyleSheet.create({
     top: 0,
     transformOrigin: "bottom",
   },
+  primaryLoadingSurface: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundColor: "rgba(221, 226, 229, 0.12)" },
   darkLoadingSurface: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundColor: "#080B0F" },
 });
