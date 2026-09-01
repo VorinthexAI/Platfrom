@@ -171,10 +171,7 @@ type CorePageProps = {
 };
 
 function CorePage({ bottomInset, closePage, composer, inputRef, leftInset, message, pageIdentity, releaseSelection, rightInset, style, topInset }: CorePageProps) {
-  const keyboard = useAnimatedKeyboard({
-    isNavigationBarTranslucentAndroid: true,
-    isStatusBarTranslucentAndroid: true,
-  });
+  const keyboard = useAnimatedKeyboard();
   const keyboardSpacerStyle = useAnimatedStyle(() => {
     const keyboardMoving = [KeyboardState.OPENING, KeyboardState.OPEN, KeyboardState.CLOSING].includes(keyboard.state.value);
     const keyboardLift = Math.max(0, keyboard.height.value - bottomInset);
@@ -378,7 +375,7 @@ export function CoreComposer({
           pointerEvents="none"
           style={styles.prompt}
         >
-          <RotatingPrompt prompts={expanded ? CORE_PAGE_PROMPTS : prompts} />
+          <RotatingPrompt key={expanded ? "core-page" : "workspace"} prompts={expanded ? CORE_PAGE_PROMPTS : prompts} />
         </View>
       ) : null}
       <TextInput

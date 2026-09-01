@@ -30,7 +30,7 @@ test("shared mobile TextInput registers while preserving refs and consumer focus
 test("shared mobile TextInput lets Core expose its animated gradient prompt", () => {
   expect(input).toContain("style={[styles.input, styles.background, style]}");
   expect(composer).toContain('backgroundColor: "transparent"');
-  expect(composer).toContain("<RotatingPrompt prompts={prompts} />");
+  expect(composer).toContain('<RotatingPrompt key={expanded ? "core-page" : "workspace"}');
   expect(composer).toContain("fill={`url(#${gradientId})`}");
 });
 

@@ -37,7 +37,7 @@ test("matches the Archive header rhythm and keeps the Core prompt composer", () 
   expect(core).toContain("gap: spacing.xs");
   expect(core).toContain("fontSize: 24");
   expect(core).toContain('const CORE_PAGE_PROMPTS = ["Ask anything"] as const');
-  expect(core).toContain("<RotatingPrompt prompts={expanded ? CORE_PAGE_PROMPTS : prompts} />");
+  expect(core).toContain('<RotatingPrompt key={expanded ? "core-page" : "workspace"} prompts={expanded ? CORE_PAGE_PROMPTS : prompts} />');
   expect(core).toContain("{showPrompt ? (");
   expect(core).toContain('placeholder=""');
   expect(core).toContain("multiline={expanded}");
@@ -66,7 +66,9 @@ test("waits for the keyboard to hide and restores the workspace composer without
 });
 
 test("delays focus by 100ms and keeps the horizontal page inset above the keyboard", () => {
-  expect(core).toContain("useAnimatedKeyboard({");
+  expect(core).toContain("useAnimatedKeyboard()");
+  expect(core).not.toContain("isStatusBarTranslucentAndroid");
+  expect(core).not.toContain("isNavigationBarTranslucentAndroid");
   expect(core).toContain("KeyboardState.OPENING");
   expect(core).toContain("const keyboardLift = Math.max(0, keyboard.height.value - bottomInset)");
   expect(core).toContain("keyboardMoving ? keyboardLift + Math.min(spacing.md, keyboardLift) : 0");
