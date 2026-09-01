@@ -360,7 +360,7 @@ const styles = StyleSheet.create({
   },
   composer: {
     alignItems: "center",
-    backgroundColor: "#0B0F14",
+    backgroundColor: colors.page,
     borderColor: colors.border,
     borderRadius: 999,
     borderWidth: 1,

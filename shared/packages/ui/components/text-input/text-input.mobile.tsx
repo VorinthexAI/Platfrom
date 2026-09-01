@@ -50,7 +50,7 @@ export const TextInput = forwardRef<NativeTextInput, TextInputProps>(function Te
       placeholderTextColor={placeholderTextColor}
       readOnly={readOnly}
       ref={setRef}
-      style={[styles.input, style, styles.background]}
+      style={[styles.input, styles.background, style]}
       {...props}
     />
   );
