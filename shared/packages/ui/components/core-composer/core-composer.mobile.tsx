@@ -244,8 +244,13 @@ export function CoreComposer({
 }: CoreComposerProps) {
   const insets = useSafeAreaInsets();
   const [pageOpen, setPageOpen] = useState(false);
+  const [collapsedVisible, setCollapsedVisible] = useState(true);
   const [inputHeight, setInputHeight] = useState(COLLAPSED_INPUT_HEIGHT);
+  const [inputLineCount, setInputLineCount] = useState(1);
   const [inputSelection, setInputSelection] = useState<{ start: number; end: number }>();
+  const closeFallbackRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const closeSubscriptionRef = useRef<{ remove: () => void } | undefined>(undefined);
+  const closingRef = useRef(false);
   const inputRef = useRef<NativeTextInput>(null);
   const intentionalFocus = useRef(false);
   const onFocusChangeRef = useRef(onFocusChange);
@@ -255,21 +260,40 @@ export function CoreComposer({
   valueRef.current = value;
   const showPrompt = value.length === 0;
 
-  const closePage = useCallback(() => {
-    Keyboard.dismiss();
-    inputRef.current?.blur();
+  const finishClose = useCallback(() => {
+    if (!closingRef.current) return;
+    closeSubscriptionRef.current?.remove();
+    closeSubscriptionRef.current = undefined;
+    if (closeFallbackRef.current) clearTimeout(closeFallbackRef.current);
+    closeFallbackRef.current = undefined;
+    closingRef.current = false;
     intentionalFocus.current = false;
     setPageOpen(false);
     setInputHeight(COLLAPSED_INPUT_HEIGHT);
+    setInputLineCount(1);
     setInputSelection(undefined);
     onFocusChangeRef.current?.(false);
   }, []);
+
+  const closePage = useCallback(() => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    if (Keyboard.isVisible()) {
+      closeSubscriptionRef.current = Keyboard.addListener("keyboardDidHide", finishClose);
+      closeFallbackRef.current = setTimeout(finishClose, 500);
+    }
+    inputRef.current?.blur();
+    Keyboard.dismiss();
+    if (!Keyboard.isVisible()) finishClose();
+  }, [finishClose]);
 
   const releaseInputSelection = useCallback(() => setInputSelection(undefined), []);
 
   const openPage = useCallback(() => {
     if (pageOpen) return;
+    setCollapsedVisible(false);
     setInputHeight(COLLAPSED_INPUT_HEIGHT);
+    setInputLineCount(1);
     setInputSelection({ start: valueRef.current.length, end: valueRef.current.length });
     onFocusChangeRef.current?.(true);
     setPageOpen(true);
@@ -287,16 +311,38 @@ export function CoreComposer({
   }, [pageOpen]);
 
   useEffect(() => {
+    if (pageOpen) return;
+    let secondFrame: number | undefined;
+    const firstFrame = requestAnimationFrame(() => {
+      secondFrame = requestAnimationFrame(() => setCollapsedVisible(true));
+    });
+    return () => {
+      cancelAnimationFrame(firstFrame);
+      if (secondFrame !== undefined) cancelAnimationFrame(secondFrame);
+    };
+  }, [pageOpen]);
+
+  useEffect(() => {
     if (openRequest <= 0) return;
+    setCollapsedVisible(false);
     setInputHeight(COLLAPSED_INPUT_HEIGHT);
+    setInputLineCount(1);
     setInputSelection({ start: valueRef.current.length, end: valueRef.current.length });
     onFocusChangeRef.current?.(true);
     setPageOpen(true);
   }, [openRequest]);
 
+  useEffect(() => () => {
+    closeSubscriptionRef.current?.remove();
+    if (closeFallbackRef.current) clearTimeout(closeFallbackRef.current);
+  }, []);
+
   useEffect(() => {
     if (value.length !== 0) return;
-    const timeout = setTimeout(() => setInputHeight(COLLAPSED_INPUT_HEIGHT), 0);
+    const timeout = setTimeout(() => {
+      setInputHeight(COLLAPSED_INPUT_HEIGHT);
+      setInputLineCount(1);
+    }, 0);
     return () => clearTimeout(timeout);
   }, [value]);
 
@@ -306,6 +352,7 @@ export function CoreComposer({
 
   const composer = (expanded: boolean) => {
     const multiline = expanded && inputHeight > COLLAPSED_INPUT_HEIGHT;
+    const inputValue = expanded ? value : (value.split(/\r?\n/)[0] ?? "");
     return <View style={[styles.composer, multiline && styles.composerOpen]}>
     {onLeadingPress ? (
       <Button
@@ -327,8 +374,9 @@ export function CoreComposer({
         accessibilityElementsHidden
         importantForAccessibility="no-hide-descendants"
         onTextLayout={({ nativeEvent }) => {
-          const lineCount = Math.min(6, Math.max(1, nativeEvent.lines.length));
-          const nextHeight = INPUT_VERTICAL_PADDING * 2 + INPUT_LINE_HEIGHT * lineCount;
+          const lineCount = Math.max(1, nativeEvent.lines.length);
+          const nextHeight = INPUT_VERTICAL_PADDING * 2 + INPUT_LINE_HEIGHT * Math.min(6, lineCount);
+          setInputLineCount(lineCount);
           setInputHeight((current) => current === nextHeight ? current : nextHeight);
         }}
         pointerEvents="none"
@@ -352,7 +400,10 @@ export function CoreComposer({
         multiline={expanded}
         numberOfLines={expanded ? undefined : 1}
         onChangeText={(nextValue) => {
-          if (expanded && nextValue.length === 0) setInputHeight(COLLAPSED_INPUT_HEIGHT);
+          if (expanded && nextValue.length === 0) {
+            setInputHeight(COLLAPSED_INPUT_HEIGHT);
+            setInputLineCount(1);
+          }
           onChangeText(nextValue);
         }}
         onFocus={() => {
@@ -370,12 +421,12 @@ export function CoreComposer({
         placeholder=""
         ref={inputRef}
         returnKeyType={expanded ? "default" : "send"}
-        scrollEnabled={expanded && inputHeight >= MAX_INPUT_HEIGHT - 1}
+        scrollEnabled={expanded && inputLineCount > 6}
         selection={expanded ? inputSelection : undefined}
         showSoftInputOnFocus={expanded}
         style={[styles.input, !multiline && styles.inputSingleLine]}
         textAlignVertical={multiline ? "top" : "center"}
-        value={value}
+        value={inputValue}
       />
     </View>
     <Button
@@ -395,7 +446,7 @@ export function CoreComposer({
 
   return (
     <>
-      {!pageOpen ? <View pointerEvents="box-none" style={[styles.layer, {
+      {!pageOpen && collapsedVisible ? <View pointerEvents="box-none" style={[styles.layer, {
         marginTop: spacing.sm,
         paddingBottom: Math.max(insets.bottom, spacing.sm),
         paddingLeft: Math.max(insets.left, spacing.md),

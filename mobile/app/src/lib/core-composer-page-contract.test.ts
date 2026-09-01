@@ -48,9 +48,18 @@ test("keeps the workspace composer compact and grows the Core input only when te
   expect(core).toContain("return <View style={[styles.composer, multiline && styles.composerOpen]}>");
   expect(core).toContain("height: expanded ? inputHeight : COLLAPSED_INPUT_HEIGHT");
   expect(core).toContain("{expanded && value.length > 0 ? <Text");
-  expect(core).toContain("const lineCount = Math.min(6, Math.max(1, nativeEvent.lines.length))");
+  expect(core).toContain("const lineCount = Math.max(1, nativeEvent.lines.length)");
   expect(core).toContain("setInputHeight((current) => current === nextHeight ? current : nextHeight)");
+  expect(core).toContain('const inputValue = expanded ? value : (value.split(/\\r?\\n/)[0] ?? "")');
+  expect(core).toContain("scrollEnabled={expanded && inputLineCount > 6}");
   expect(core).not.toContain('borderColor: "#55616C"');
+});
+
+test("waits for the keyboard to hide before restoring the workspace composer", () => {
+  expect(core).toContain('Keyboard.addListener("keyboardDidHide", finishClose)');
+  expect(core).toContain("if (!Keyboard.isVisible()) finishClose()");
+  expect(core).toContain("secondFrame = requestAnimationFrame(() => setCollapsedVisible(true))");
+  expect(core).toContain("!pageOpen && collapsedVisible ? <View");
 });
 
 test("delays focus and grows a hidden container with the animated keyboard height", () => {
