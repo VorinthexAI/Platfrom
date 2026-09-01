@@ -377,7 +377,7 @@ export function CoreComposer({
           pointerEvents="none"
           style={styles.prompt}
         >
-          <RotatingPrompt prompts={prompts} />
+          {expanded ? <Text style={styles.staticPrompt}>Ask anything...</Text> : <RotatingPrompt prompts={prompts} />}
         </View>
       ) : null}
       <TextInput
@@ -532,6 +532,12 @@ const styles = StyleSheet.create({
     position: "absolute",
     right: 0,
     top: 0,
+  },
+  staticPrompt: {
+    color: colors.muted,
+    fontFamily: "Geist_400Regular",
+    fontSize: 13,
+    lineHeight: COLLAPSED_INPUT_HEIGHT,
   },
   input: {
     backgroundColor: "transparent",
