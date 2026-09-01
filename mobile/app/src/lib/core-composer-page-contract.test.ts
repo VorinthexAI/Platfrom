@@ -18,8 +18,8 @@ test("opens Core as an in-layout page and returns without routing", () => {
   expect(core).toContain('const [pageOpen, setPageOpen] = useState(false)');
   expect(core).toContain('accessibilityLabel="Back from Core"');
   expect(core).toContain("<CorePage");
+  expect(core).toContain("CORE_FOCUS_DELAY_MS = 100");
   expect(core).toContain("inputRef.current?.focus()");
-  expect(core).not.toContain("CORE_FOCUS_DELAY_MS");
   expect(core).toContain("setPageOpen(false)");
   expect(core).toContain("accessibilityViewIsModal onAccessibilityEscape={closePage}");
   expect(core).toContain("onAccessibilityEscape={closePage}");
@@ -62,11 +62,11 @@ test("waits for the keyboard to hide before restoring the workspace composer", (
   expect(core).toContain("!pageOpen && collapsedVisible ? <View");
 });
 
-test("focuses immediately and grows a gap-free hidden container with the animated keyboard height", () => {
+test("delays focus by 100ms and grows a gap-free hidden container with the animated keyboard height", () => {
   expect(core).toContain("useAnimatedKeyboard({");
   expect(core).toContain("KeyboardState.OPENING");
   expect(core).toContain("keyboard.height.value - bottomInset");
-  expect(core).toContain("inputRef.current?.focus();");
+  expect(core).toContain("}, CORE_FOCUS_DELAY_MS)");
   expect(core).toContain('{composer}\n        <Reanimated.View pointerEvents="none" style={keyboardSpacerStyle} />');
   expect(core).not.toContain("KeyboardAvoidingView");
   expect(core).not.toContain("withTiming");
