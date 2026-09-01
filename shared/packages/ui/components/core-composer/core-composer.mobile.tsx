@@ -57,7 +57,6 @@ const COLLAPSED_INPUT_HEIGHT = 38;
 const INPUT_LINE_HEIGHT = 18;
 const INPUT_VERTICAL_PADDING = 10;
 const MAX_INPUT_HEIGHT = INPUT_LINE_HEIGHT * 6 + INPUT_VERTICAL_PADDING * 2;
-const CORE_FOCUS_DELAY_MS = 300;
 
 function useReducedMotion() {
   const [reducedMotion, setReducedMotion] = useState(true);
@@ -180,15 +179,9 @@ function CorePage({ bottomInset, closePage, composer, inputRef, leftInset, messa
   }, [bottomInset]);
 
   useEffect(() => {
-    let selectionFrame: number | undefined;
-    const focusTimeout = setTimeout(() => {
-      inputRef.current?.focus();
-      selectionFrame = requestAnimationFrame(releaseSelection);
-    }, CORE_FOCUS_DELAY_MS);
-    return () => {
-      clearTimeout(focusTimeout);
-      if (selectionFrame !== undefined) cancelAnimationFrame(selectionFrame);
-    };
+    inputRef.current?.focus();
+    const selectionFrame = requestAnimationFrame(releaseSelection);
+    return () => cancelAnimationFrame(selectionFrame);
   }, [inputRef, releaseSelection]);
 
   useEffect(() => BackHandler.addEventListener("hardwareBackPress", () => {
@@ -213,8 +206,10 @@ function CorePage({ bottomInset, closePage, composer, inputRef, leftInset, messa
         <View style={styles.pageTitleSpacer} />
       </View>
       <View style={styles.pageConversation}>{message}</View>
-      {composer}
-      <Reanimated.View pointerEvents="none" style={keyboardSpacerStyle} />
+      <View>
+        {composer}
+        <Reanimated.View pointerEvents="none" style={keyboardSpacerStyle} />
+      </View>
     </View>
   </View>;
 }
