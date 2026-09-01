@@ -58,6 +58,7 @@ const INPUT_LINE_HEIGHT = 18;
 const INPUT_VERTICAL_PADDING = 10;
 const MAX_INPUT_HEIGHT = INPUT_LINE_HEIGHT * 6 + INPUT_VERTICAL_PADDING * 2;
 const CORE_FOCUS_DELAY_MS = 100;
+const CORE_PAGE_PROMPTS = ["Ask anything"] as const;
 
 function useReducedMotion() {
   const [reducedMotion, setReducedMotion] = useState(true);
@@ -377,7 +378,7 @@ export function CoreComposer({
           pointerEvents="none"
           style={styles.prompt}
         >
-          {expanded ? <Text style={styles.staticPrompt}>Ask anything...</Text> : <RotatingPrompt prompts={prompts} />}
+          <RotatingPrompt prompts={expanded ? CORE_PAGE_PROMPTS : prompts} />
         </View>
       ) : null}
       <TextInput
@@ -532,12 +533,6 @@ const styles = StyleSheet.create({
     position: "absolute",
     right: 0,
     top: 0,
-  },
-  staticPrompt: {
-    color: colors.muted,
-    fontFamily: "Geist_400Regular",
-    fontSize: 13,
-    lineHeight: COLLAPSED_INPUT_HEIGHT,
   },
   input: {
     backgroundColor: "transparent",

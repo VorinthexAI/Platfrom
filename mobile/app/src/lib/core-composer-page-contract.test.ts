@@ -36,8 +36,10 @@ test("matches the Archive header rhythm and keeps the Core prompt composer", () 
   expect(core).toContain("minHeight: 48");
   expect(core).toContain("gap: spacing.xs");
   expect(core).toContain("fontSize: 24");
-  expect(core).toContain("<RotatingPrompt prompts={prompts} />");
-  expect(core).toContain("{expanded ? <Text style={styles.staticPrompt}>Ask anything...</Text> : <RotatingPrompt prompts={prompts} />}");
+  expect(core).toContain('const CORE_PAGE_PROMPTS = ["Ask anything"] as const');
+  expect(core).toContain("<RotatingPrompt prompts={expanded ? CORE_PAGE_PROMPTS : prompts} />");
+  expect(core).toContain("{showPrompt ? (");
+  expect(core).toContain('placeholder=""');
   expect(core).toContain("multiline={expanded}");
   expect(core).not.toContain('size={expanded ? "md" : "sm"}');
   expect(core).toContain('size="sm"');
