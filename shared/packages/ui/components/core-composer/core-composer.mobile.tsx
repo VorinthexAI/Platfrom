@@ -9,7 +9,11 @@ import {
 import {
   AccessibilityInfo,
   Animated,
+  findNodeHandle,
   Keyboard,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
   StyleSheet,
   Text,
   TextInput as NativeTextInput,
@@ -18,13 +22,11 @@ import {
   type ViewStyle,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Reanimated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import Svg, { Defs, LinearGradient, Stop, Text as SvgText } from "react-native-svg";
 
 import { Button } from "../button/button.mobile";
-import { BottomSheet } from "../bottom-sheet/bottom-sheet.mobile";
+import { ChevronLeftIcon } from "../../icons/chevron-left/chevron-left.mobile";
 import { TextInput } from "../text-input/text-input.mobile";
-import { useKeyboard } from "../../hooks/use-keyboard.mobile";
 import { colors, spacing } from "../../tokens";
 
 export type CoreComposerProps = {
@@ -44,6 +46,7 @@ export type CoreComposerProps = {
   onLeadingPress?: () => void;
   onSubmit: () => void;
   openRequest?: number;
+  pageIdentity: (closePage: () => void) => ReactNode;
   prompts: readonly string[];
   sendIcon: ReactNode;
   style?: StyleProp<ViewStyle>;
@@ -168,66 +171,68 @@ export function CoreComposer({
   onLeadingPress,
   onSubmit,
   openRequest = 0,
+  pageIdentity,
   prompts,
   sendIcon,
   style,
   value,
 }: CoreComposerProps) {
   const insets = useSafeAreaInsets();
-  const keyboardVisible = useKeyboard();
-  const [sheetOpen, setSheetOpen] = useState(false);
+  const [pageOpen, setPageOpen] = useState(false);
   const [inputHeight, setInputHeight] = useState(COLLAPSED_INPUT_HEIGHT);
   const [inputSelection, setInputSelection] = useState<{ start: number; end: number }>();
   const inputRef = useRef<NativeTextInput>(null);
   const intentionalFocus = useRef(false);
   const onFocusChangeRef = useRef(onFocusChange);
+  const pageWasOpenRef = useRef(false);
+  const selectionReleaseTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const valueRef = useRef(value);
   onFocusChangeRef.current = onFocusChange;
+  valueRef.current = value;
   const showPrompt = value.length === 0;
-  const keyboardSpacerHeight = useSharedValue(0);
-  const keyboardSpacerStyle = useAnimatedStyle(() => ({ height: keyboardSpacerHeight.value }));
 
-  useEffect(() => {
-    keyboardSpacerHeight.value = withTiming(keyboardVisible ? 300 : 0, { duration: 300 });
-  }, [keyboardSpacerHeight, keyboardVisible]);
-
-  const closeSheet = useCallback(() => {
+  const closePage = useCallback(() => {
+    if (selectionReleaseTimeoutRef.current) clearTimeout(selectionReleaseTimeoutRef.current);
     Keyboard.dismiss();
     inputRef.current?.blur();
     intentionalFocus.current = false;
-    setSheetOpen(false);
+    setPageOpen(false);
     setInputHeight(COLLAPSED_INPUT_HEIGHT);
     setInputSelection(undefined);
-    onFocusChange?.(false);
-  }, [onFocusChange]);
+    onFocusChangeRef.current?.(false);
+  }, []);
 
-  function openSheet() {
-    if (sheetOpen) return;
+  const focusPageInput = useCallback(() => {
+    inputRef.current?.focus();
+    selectionReleaseTimeoutRef.current = setTimeout(() => setInputSelection(undefined), 300);
+  }, []);
+
+  const openPage = useCallback(() => {
+    if (pageOpen) return;
     setInputHeight(COLLAPSED_INPUT_HEIGHT);
-    setInputSelection({ start: 0, end: 0 });
+    setInputSelection({ start: valueRef.current.length, end: valueRef.current.length });
     onFocusChangeRef.current?.(true);
-    setSheetOpen(true);
-  }
+    setPageOpen(true);
+  }, [pageOpen]);
+
+  useEffect(() => {
+    const pageWasOpen = pageWasOpenRef.current;
+    pageWasOpenRef.current = pageOpen;
+    if (!pageWasOpen || pageOpen) return;
+    const timeout = setTimeout(() => {
+      const inputHandle = findNodeHandle(inputRef.current);
+      if (inputHandle) AccessibilityInfo.setAccessibilityFocus(inputHandle);
+    }, 0);
+    return () => clearTimeout(timeout);
+  }, [pageOpen]);
 
   useEffect(() => {
     if (openRequest <= 0) return;
     setInputHeight(COLLAPSED_INPUT_HEIGHT);
-    setInputSelection({ start: 0, end: 0 });
-    onFocusChange?.(true);
-    setSheetOpen(true);
+    setInputSelection({ start: valueRef.current.length, end: valueRef.current.length });
+    onFocusChangeRef.current?.(true);
+    setPageOpen(true);
   }, [openRequest]);
-
-  useEffect(() => {
-    if (!sheetOpen) return;
-    let selectionReleaseTimeout: ReturnType<typeof setTimeout> | undefined;
-    const focusTimeout = setTimeout(() => {
-      inputRef.current?.focus();
-      selectionReleaseTimeout = setTimeout(() => setInputSelection(undefined), 300);
-    }, 300);
-    return () => {
-      clearTimeout(focusTimeout);
-      if (selectionReleaseTimeout) clearTimeout(selectionReleaseTimeout);
-    };
-  }, [sheetOpen]);
 
   useEffect(() => {
     if (value.length !== 0) return;
@@ -294,7 +299,7 @@ export function CoreComposer({
           if (expanded) return;
           if (intentionalFocus.current) {
             intentionalFocus.current = false;
-            openSheet();
+            openPage();
             return;
           }
           inputRef.current?.blur();
@@ -307,6 +312,7 @@ export function CoreComposer({
         returnKeyType={expanded ? "default" : "send"}
         scrollEnabled={expanded && inputHeight >= MAX_INPUT_HEIGHT - 1}
         selection={expanded ? inputSelection : undefined}
+        showSoftInputOnFocus={expanded}
         style={[styles.input, !multiline && styles.inputSingleLine]}
         textAlignVertical={multiline ? "top" : "center"}
         value={value}
@@ -329,21 +335,36 @@ export function CoreComposer({
 
   return (
     <>
-      <View pointerEvents="box-none" style={[styles.layer, {
+      {!pageOpen ? <View pointerEvents="box-none" style={[styles.layer, {
         marginTop: spacing.sm,
         paddingBottom: Math.max(insets.bottom, spacing.sm),
         paddingLeft: Math.max(insets.left, spacing.md),
         paddingRight: Math.max(insets.right, spacing.md),
       }]}>
-        {!sheetOpen ? <>{accessory}{composer(false)}</> : null}
-      </View>
-      <BottomSheet height="full" onOpenChange={(open) => { if (!open) closeSheet(); }} open={sheetOpen} title="Core">
-        {sheetOpen ? <View style={[styles.sheetBodyOpen, style]}>
-          {message}
+        {accessory}{composer(false)}
+      </View> : null}
+      {pageOpen ? <Modal animationType="none" navigationBarTranslucent onRequestClose={closePage} onShow={focusPageInput} presentationStyle="fullScreen" statusBarTranslucent visible>
+      <KeyboardAvoidingView accessibilityLabel="Core" accessibilityViewIsModal behavior={Platform.OS === "ios" ? "padding" : "height"} onAccessibilityEscape={closePage} style={styles.page}>
+        <View style={[styles.pageIdentityHeader, {
+          paddingTop: insets.top + 6,
+          paddingLeft: Math.max(insets.left, spacing.md),
+          paddingRight: Math.max(insets.right, spacing.md),
+        }]}>{pageIdentity(closePage)}</View>
+        <View style={[styles.pageContent, style, {
+          paddingBottom: Math.max(insets.bottom, spacing.sm),
+          paddingLeft: Math.max(insets.left, spacing.md),
+          paddingRight: Math.max(insets.right, spacing.md),
+        }]}>
+          <View style={styles.pageTitleRow}>
+            <Button accessibilityLabel="Back from Core" contentMode="raw" onPress={closePage} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button>
+            <Text numberOfLines={1} style={styles.pageTitle}>Core</Text>
+            <View style={styles.pageTitleSpacer} />
+          </View>
+          <View style={styles.pageConversation}>{message}</View>
           {composer(true)}
-          <Reanimated.View pointerEvents="none" style={keyboardSpacerStyle} />
-        </View> : null}
-      </BottomSheet>
+        </View>
+      </KeyboardAvoidingView>
+      </Modal> : null}
     </>
   );
 }
@@ -353,9 +374,38 @@ const styles = StyleSheet.create({
     gap: 6,
     zIndex: 20,
   },
-  sheetBodyOpen: {
+  page: {
+    backgroundColor: colors.page,
     flex: 1,
-    gap: 6,
+  },
+  pageIdentityHeader: {
+    minHeight: 64,
+    paddingBottom: 8,
+    justifyContent: "center",
+    borderBottomColor: colors.hairline,
+    borderBottomWidth: 1,
+  },
+  pageContent: {
+    flex: 1,
+    gap: spacing.md,
+    paddingTop: spacing.md,
+  },
+  pageTitleRow: {
+    minHeight: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+  },
+  pageTitle: {
+    flex: 1,
+    minWidth: 0,
+    color: colors.text,
+    fontFamily: "Geist_300Light",
+    fontSize: 24,
+  },
+  pageTitleSpacer: { width: 28 },
+  pageConversation: {
+    flex: 1,
     justifyContent: "flex-end",
   },
   composer: {

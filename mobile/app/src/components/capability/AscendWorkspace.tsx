@@ -1115,6 +1115,7 @@ export function AscendWorkspace() {
           if (!focused) setAssistantMessage(undefined);
         }}
         onSubmit={askAssistant}
+        pageIdentity={(closeCore) => <WorkspaceAppSwitcher active="ascend" identity="core" onBeforeSelect={() => !(creating && dirty)} onSelectActive={closeCore} />}
         prompts={CORE_PROMPTS}
         sendIcon={<SendIcon size="sm" />}
         value={assistantInput}

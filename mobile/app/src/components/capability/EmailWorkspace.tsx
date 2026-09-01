@@ -3364,6 +3364,7 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, initialMessa
           }
         }}
         onSubmit={() => void askAssistant()}
+        pageIdentity={(closeCore) => <WorkspaceAppSwitcher active="signal" identity="core" onBeforeSelect={(slug) => requestExit(slug)} onSelectActive={closeCore} />}
         prompts={CORE_PROMPTS}
         sendIcon={<SendIcon size="sm" variant="inverse" />}
         style={styles.signalComposer}

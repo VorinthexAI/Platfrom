@@ -4073,6 +4073,7 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
         }}
         onLeadingPress={openEnhanceSheet}
         onSubmit={() => void runNoteInstruction()}
+        pageIdentity={(closeCore) => <WorkspaceAppSwitcher active="archive" identity="core" onSelectActive={closeCore} />}
         prompts={CORE_PROMPTS}
         sendIcon={<SendIcon size="sm" />}
         value={aiInstruction}

@@ -2830,6 +2830,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
         onChangeText={setAiInput}
         onFocusChange={handleCoreFocusChange}
         onSubmit={() => void askAssistant()}
+        pageIdentity={(closeCore) => <WorkspaceAppSwitcher active="gallery" identity="core" onSelectActive={closeCore} />}
         prompts={CORE_PROMPTS}
         sendIcon={<SendIcon size="sm" variant="inverse" />}
         value={aiInput}
