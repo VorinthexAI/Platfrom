@@ -1,6 +1,8 @@
 ﻿import { useEffect, useState, type ReactNode } from "react";
 import { AccessibilityInfo, Animated, Easing, StyleSheet, View, type LayoutChangeEvent, type ViewProps } from "react-native";
 
+import { colors } from "../../tokens";
+
 export type SkeletonProps = ViewProps & { children?: ReactNode };
 
 export function Skeleton({ children, onLayout, style, ...props }: SkeletonProps) {
@@ -72,7 +74,7 @@ export function Skeleton({ children, onLayout, style, ...props }: SkeletonProps)
 
 const styles = StyleSheet.create({
   root: {
-    backgroundColor: "#141922",
+    backgroundColor: colors.page,
     borderColor: "#262D36",
     borderRadius: 12,
     overflow: "hidden",

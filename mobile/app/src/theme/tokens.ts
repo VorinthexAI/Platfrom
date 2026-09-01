@@ -11,9 +11,9 @@ import {
 export const palette = {
   ...sharedColors,
   voidBlack: "#000000",
-  obsidian900: "#080B0F",
-  obsidian850: "#0D1117",
-  obsidian800: "#141922",
+  obsidian900: sharedColors.page,
+  obsidian850: sharedColors.page,
+  obsidian800: sharedColors.page,
   gunmetal: "#1B232C",
   platinum: "#C9CED2",
   silver50: "#F5F7F8",
@@ -25,8 +25,6 @@ export const palette = {
   hairline: "rgba(221, 226, 229, 0.14)",
   hairlineBright: "rgba(255, 255, 255, 0.30)",
   insetHighlight: "rgba(255, 255, 255, 0.07)",
-  panel: "#0A0E13",
-  panelRaised: "#10151C",
 } as const;
 
 export const radii = {

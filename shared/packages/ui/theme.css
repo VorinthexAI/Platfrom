@@ -1,7 +1,7 @@
 :root {
   --vui-color-page: #030507;
-  --vui-color-secondary: #0d1117;
-  --vui-color-surface: #141922;
+  --vui-color-secondary: var(--vui-color-page);
+  --vui-color-surface: var(--vui-color-page);
   --vui-color-text: #f5f7f8;
   --vui-color-muted: #7b858c;
   --vui-color-accent: #dde2e5;
@@ -25,11 +25,7 @@
     #7b858c 76%,
     #ffffff 100%
   );
-  --vui-gradient-panel: linear-gradient(
-    180deg,
-    rgba(20, 25, 34, 0.88),
-    rgba(3, 5, 7, 0.96)
-  );
+  --vui-gradient-panel: var(--vui-color-page);
   --vui-gradient-border: linear-gradient(
     135deg,
     rgba(255, 255, 255, 0.42),
