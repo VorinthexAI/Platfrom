@@ -55,11 +55,11 @@ test("keeps the workspace composer compact and grows the Core input only when te
   expect(core).not.toContain('borderColor: "#55616C"');
 });
 
-test("waits for the keyboard to hide before restoring the workspace composer", () => {
+test("waits for the keyboard to hide and restores the workspace composer without a delayed flash", () => {
   expect(core).toContain('Keyboard.addListener("keyboardDidHide", finishClose)');
   expect(core).toContain("if (!Keyboard.isVisible()) finishClose()");
-  expect(core).toContain("secondFrame = requestAnimationFrame(() => setCollapsedVisible(true))");
-  expect(core).toContain("!pageOpen && collapsedVisible ? <View");
+  expect(core).toContain('!pageOpen ? <View pointerEvents="box-none"');
+  expect(core).not.toContain("collapsedVisible");
 });
 
 test("delays focus by 100ms and keeps the horizontal page inset above the keyboard", () => {

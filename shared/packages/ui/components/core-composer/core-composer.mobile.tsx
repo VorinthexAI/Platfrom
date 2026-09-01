@@ -247,7 +247,6 @@ export function CoreComposer({
 }: CoreComposerProps) {
   const insets = useSafeAreaInsets();
   const [pageOpen, setPageOpen] = useState(false);
-  const [collapsedVisible, setCollapsedVisible] = useState(true);
   const [inputHeight, setInputHeight] = useState(COLLAPSED_INPUT_HEIGHT);
   const [inputLineCount, setInputLineCount] = useState(1);
   const [inputSelection, setInputSelection] = useState<{ start: number; end: number }>();
@@ -294,7 +293,6 @@ export function CoreComposer({
 
   const openPage = useCallback(() => {
     if (pageOpen) return;
-    setCollapsedVisible(false);
     setInputHeight(COLLAPSED_INPUT_HEIGHT);
     setInputLineCount(1);
     setInputSelection({ start: valueRef.current.length, end: valueRef.current.length });
@@ -314,20 +312,7 @@ export function CoreComposer({
   }, [pageOpen]);
 
   useEffect(() => {
-    if (pageOpen) return;
-    let secondFrame: number | undefined;
-    const firstFrame = requestAnimationFrame(() => {
-      secondFrame = requestAnimationFrame(() => setCollapsedVisible(true));
-    });
-    return () => {
-      cancelAnimationFrame(firstFrame);
-      if (secondFrame !== undefined) cancelAnimationFrame(secondFrame);
-    };
-  }, [pageOpen]);
-
-  useEffect(() => {
     if (openRequest <= 0) return;
-    setCollapsedVisible(false);
     setInputHeight(COLLAPSED_INPUT_HEIGHT);
     setInputLineCount(1);
     setInputSelection({ start: valueRef.current.length, end: valueRef.current.length });
@@ -449,7 +434,7 @@ export function CoreComposer({
 
   return (
     <>
-      {!pageOpen && collapsedVisible ? <View pointerEvents="box-none" style={[styles.layer, {
+      {!pageOpen ? <View pointerEvents="box-none" style={[styles.layer, {
         marginTop: spacing.sm,
         paddingBottom: Math.max(insets.bottom, spacing.sm),
         paddingLeft: Math.max(insets.left, spacing.md),
