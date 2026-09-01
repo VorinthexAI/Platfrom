@@ -1,18 +1,19 @@
 import { contentZodToJsonSchema } from './content-json-schema';
-import { assistantQueryInputSchema } from '@/lib/conversations/schemas';
+import { agentQueryInputSchema } from '@/lib/conversations/schemas';
 
-export const assistantQueryToolContract = Object.freeze({
-  name: 'assistant.query',
-  description: 'Retrieve semantically relevant completed assistant answers from this conversation only. Use only when the current question depends on prior conversation context.',
-  inputSchema: assistantQueryInputSchema,
+const description = 'Semantically search completed private messages across the authenticated user\'s conversations in the current organization and scope. Use only when context beyond the supplied recent messages is needed.';
+
+export const agentQueryToolContract = Object.freeze({
+  name: 'agent.query',
+  description,
+  inputSchema: agentQueryInputSchema,
   providerDefinition: Object.freeze({
-    name: 'assistant.query',
-    description: 'Retrieve semantically relevant completed assistant answers from this conversation only. Use only when the current question depends on prior conversation context.',
-    inputSchema: contentZodToJsonSchema(assistantQueryInputSchema),
+    name: 'agent.query',
+    description,
+    inputSchema: contentZodToJsonSchema(agentQueryInputSchema),
   }),
 });
 
-export async function executeAssistantQueryAdapter(raw: unknown, trusted: { currentConversationKey?: string; query: (conversationKey: string, input: unknown) => Promise<unknown> }) {
-  if (!trusted.currentConversationKey) throw new Error('assistant.query requires trusted current conversation context.');
-  return trusted.query(trusted.currentConversationKey, assistantQueryInputSchema.parse(raw));
+export async function executeAgentQueryAdapter(raw: unknown, trusted: { query: (input: unknown) => Promise<unknown> }) {
+  return trusted.query(agentQueryInputSchema.parse(raw));
 }

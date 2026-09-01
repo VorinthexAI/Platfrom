@@ -26,15 +26,13 @@ export const conversationFavoriteInputSchema = conversationKeyInputSchema.extend
 export const conversationMessageListInputSchema = conversationKeyInputSchema.extend({ cursor: z.string().min(1).max(1_000).optional(), limit: z.number().int().min(1).max(100).default(25) }).strict();
 export const conversationModelSendInputSchema = conversationKeyInputSchema.extend({ message: z.string().trim().min(1).max(20_000) }).strict();
 export const conversationSendInputSchema = conversationModelSendInputSchema.extend({ requestKey: z.string().trim().min(1).max(180) }).strict();
-export const assistantQueryInputSchema = z.object({ query: z.string().trim().min(1).max(20_000), limit: z.number().int().min(1).max(50).default(50) }).strict();
+export const agentQueryInputSchema = z.object({ query: z.string().trim().min(1).max(20_000), limit: z.number().int().min(1).max(20).default(20) }).strict();
 
 export const conversationSafeMessageSchema = conversationMessageSchema.omit({ embedding: true, organizationKey: true, scopeKey: true, userKey: true, requestHash: true });
 export function projectConversationMessage(message: ConversationMessage) {
   const { embedding: _embedding, organizationKey: _organizationKey, scopeKey: _scopeKey, userKey: _userKey, requestHash: _requestHash, ...safe } = message;
   return conversationSafeMessageSchema.parse(safe);
 }
-export const firstConversationAnswerSchema = z.object({ name: z.string().trim().min(1).max(200), response: z.string().trim().min(1).max(100_000) }).strict();
-
 export function encodeCursor(value: Record<string, unknown>) { return Buffer.from(JSON.stringify(value)).toString('base64url'); }
 export function decodeCursor<T>(cursor: string | undefined, schema: z.ZodType<T>): T | undefined {
   if (!cursor) return undefined;

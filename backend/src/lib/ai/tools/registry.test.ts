@@ -9,10 +9,10 @@ describe('unified tool registry', () => {
   test('has one unique definition for every public tool name', () => {
     expect(new Set(TOOL_NAMES).size).toBe(TOOL_NAMES.length);
     expect(new Set(TOOL_DEFINITIONS.map(({ name }) => name)).size).toBe(TOOL_DEFINITIONS.length);
-    expect(TOOL_NAMES).toHaveLength(175);
-    expect(MODEL_TOOL_NAMES).toHaveLength(172);
-    expect(TOOL_DEFINITIONS).toHaveLength(172);
-    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 127);
+    expect(TOOL_NAMES).toHaveLength(176);
+    expect(MODEL_TOOL_NAMES).toHaveLength(173);
+    expect(TOOL_DEFINITIONS).toHaveLength(173);
+    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 128);
     expect(TOOL_DEFINITIONS.map(({ name }) => name)).toEqual([...MODEL_TOOL_NAMES]);
     expect(TOOL_NAMES).not.toContain('chat');
     expect(TOOL_NAMES).not.toContain('orchestrator.chat');
@@ -120,26 +120,51 @@ describe('unified tool registry', () => {
     expect(TOOL_NAMES).not.toContain('user.settings.update');
     for (const name of ['access.agent.evaluate', 'agent.member.list', 'artifact.create', 'project.create', 'milestone.create', 'task.create', 'organization.member.list', 'scope.list']) expect(TOOL_NAMES).not.toContain(name);
     expect(TOOL_NAMES.every((name) => !name.includes('_'))).toBe(true);
-    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['conversation.create', 'conversation.list', 'conversation.search', 'conversation.rename', 'conversation.favorite', 'conversation.delete', 'conversation.message.list', 'conversation.message.send', 'assistant.query']));
-    expect(() => toolInputSchemas['assistant.query'].parse({ query: 'history', conversationKey: newId() })).toThrow('Unrecognized key');
+    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['conversation.create', 'conversation.list', 'conversation.search', 'conversation.rename', 'conversation.favorite', 'conversation.delete', 'conversation.message.list', 'conversation.message.send', 'agent.query', 'agents.core']));
+    expect(TOOL_NAMES.filter((name) => name === 'agents.core')).toHaveLength(1);
+    expect(TOOL_NAMES).not.toContain('assistant.query');
+    expect(toolInputSchemas['agent.query'].parse({ query: 'history' })).toEqual({ query: 'history', limit: 20 });
+    expect(toolInputSchemas['agent.query'].parse({ query: 'history', limit: 20 })).toEqual({ query: 'history', limit: 20 });
+    expect(() => toolInputSchemas['agent.query'].parse({ query: 'history', limit: 21 })).toThrow();
+    expect(() => toolInputSchemas['agent.query'].parse({ query: 'history', conversationKey: newId() })).toThrow('Unrecognized key');
+    const agentQueryDefinition = TOOL_DEFINITIONS.find(({ name }) => name === 'agent.query')!;
+    expect(agentQueryDefinition.description).toContain('completed private messages across the authenticated user\'s conversations in the current organization and scope');
+    expect(agentQueryDefinition.description).toContain('only when context beyond the supplied recent messages is needed');
+    expect(agentQueryDefinition.inputSchema).toMatchObject({ type: 'object', additionalProperties: false, required: ['query'], properties: { limit: { default: 20, maximum: 20 } } });
     expect(() => toolInputSchemas['conversation.message.send'].parse({ conversationKey: newId(), message: 'hello', requestKey: 'forged' })).toThrow('Unrecognized key');
+    expect(toolInputSchemas['agents.core'].parse({ message: 'hello' })).toEqual({ message: 'hello', generateName: false });
+    for (const field of ['systemPrompt', 'currentDate', 'requestKey', 'organizationKey', 'scopeKey', 'userKey', 'membership']) expect(() => toolInputSchemas['agents.core'].parse({ message: 'hello', [field]: 'forged' })).toThrow('Unrecognized key');
     expect(toolInputSchemas['conversation.list'].parse({})).toMatchObject({ favoriteOnly: false, limit: 25 });
     expect(toolInputSchemas['conversation.search'].parse({ query: 'saved', favoriteOnly: true })).toMatchObject({ favoriteOnly: true, recordHistory: true });
     expect(() => toolInputSchemas['app.search'].parse({ query: 'chat', collectionSlugs: ['conversations'] })).toThrow();
     const conversationNames = new Set(TOOL_NAMES.filter((name) => name.startsWith('conversation.')));
     for (const surface of ['knowledge-workspace', 'media-workspace', 'book-workspace', 'travel-workspace', 'signal-workspace'] as const) {
       expect(defaultAssistantCapabilityRegistry.resolve(surface).some(({ definition }) => conversationNames.has(definition.name))).toBe(false);
-      expect(defaultAssistantCapabilityRegistry.resolve(surface).some(({ definition }) => definition.name === 'assistant.query')).toBe(false);
+      expect(defaultAssistantCapabilityRegistry.resolve(surface).some(({ definition }) => definition.name === 'agent.query')).toBe(false);
     }
   });
 
-  test('injects trusted request and current-conversation context into conversation adapters', async () => {
+  test('injects trusted request context and keeps agent recall scope-wide', async () => {
     const organizationKey = newId(), scopeKey = newId(), userKey = newId(), conversationKey = newId(); const calls: unknown[] = [];
     const contentContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
-    const conversations = { turn: async (input: unknown, _context: ToolContext, emit: (event: unknown) => void) => { calls.push(input); emit({ type: 'done' }); }, query: async (_context: ToolContext, selected: string, input: unknown) => { calls.push({ selected, input }); return { messages: [] }; } } as any;
+    const conversations = { turn: async (input: unknown, _context: ToolContext, emit: (event: unknown) => void) => { calls.push(input); emit({ type: 'done' }); }, query: async (_context: ToolContext, input: unknown) => { calls.push(input); return { messages: [] }; } } as any;
     await runTool('conversation.message.send', '', { conversationKey, message: 'hello' }, { contentContext, conversationService: conversations, requestKey: 'trusted-request' });
-    await runTool('assistant.query', '', { query: 'prior' }, { contentContext, conversationService: conversations, currentConversationKey: conversationKey });
-    expect(calls).toEqual([{ conversationKey, message: 'hello', requestKey: 'trusted-request' }, { selected: conversationKey, input: { query: 'prior', limit: 50 } }]);
+    await runTool('agent.query', '', { query: 'prior' }, { contentContext, conversationService: conversations });
+    expect(calls).toEqual([{ conversationKey, message: 'hello', requestKey: 'trusted-request' }, { query: 'prior', limit: 20 }]);
+  });
+
+  test('dispatches the unique agents.core tool through the canonical lazy agent adapter', async () => {
+    const organizationKey = newId(), scopeKey = newId(), userKey = newId();
+    const contentContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const inputs: unknown[] = [];
+    const result = await runTool('agents.core', '', { message: 'hello' }, {
+      contentContext, requestKey: 'trusted-agent-request',
+      conversationService: {} as any,
+      agentDependencies: { stream: async function* (_organization, input) { inputs.push(input); yield { type: 'text-delta', text: '{"tools":[],"message":"Hello."}' }; yield { type: 'done' }; } },
+    });
+    expect(result).toEqual({ message: 'Hello.', tools: [] });
+    expect(inputs).toHaveLength(1);
+    await expect(runTool('agents.core', '', { message: 'hello' }, { contentContext, agentDependencies: { stream: async function* () {} } })).rejects.toThrow('trusted request key');
   });
 
   test('executes inbox ingestion tools only through trusted system context', async () => {
@@ -282,11 +307,13 @@ describe('unified tool registry', () => {
     await runTool('folder.list', '', {}, { contentContext, executeWorkspaceContent: executeWorkspaceContent as any });
     await runTool('folder.create', '', { folders: [{ name: 'Plans' }] }, { contentContext, executeWorkspaceContent: executeWorkspaceContent as any });
     await runTool('document.search-all', '', { query: 'roadmap' }, { contentContext, executeWorkspaceContent: executeWorkspaceContent as any });
+    await runTool('folder.create', '', { folders: [{ name: 'Idempotent' }] }, { contentContext, requestKey: 'agent-request-key', executeWorkspaceContent: executeWorkspaceContent as any });
 
     expect(calls).toEqual([
       ['folder.list', { scopeKey }, contentContext, expect.any(Object)],
       ['folder.create', { folders: [{ scopeKey, name: 'Plans' }] }, contentContext, expect.any(Object)],
       ['document.search-all', { organizationKey, query: 'roadmap' }, contentContext, expect.any(Object)],
+      ['folder.create', { folders: [{ scopeKey, name: 'Idempotent' }], idempotencyKey: 'agent-request-key' }, contentContext, expect.any(Object)],
     ]);
   });
 

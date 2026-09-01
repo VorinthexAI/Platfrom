@@ -90,13 +90,13 @@ describe('OpenRouter provider', () => {
   test('assembles strict streamed tool-call argument fragments', async () => {
     const encoder = new TextEncoder();
     const stream = new ReadableStream({ start(controller) {
-      controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"name":"assistant.query","arguments":"{\\"query\\":\\"prior"}}]}}]}\n\n'));
+      controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"name":"agent.query","arguments":"{\\"query\\":\\"prior"}}]}}]}\n\n'));
       controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":" context\\"}"}}]},"finish_reason":"tool_calls"}]}\n\ndata: [DONE]'));
       controller.close();
     } });
     const provider = createOpenRouterProvider({ apiKey: 'key' }, (async (_target, _init) => new Response(stream, { headers: { 'content-type': 'text/event-stream' } })) as typeof fetch);
-    const chunks = []; for await (const chunk of provider.stream!(request('text', { ...chatInput, tools: [{ name: 'assistant.query', description: 'History', inputSchema: { type: 'object' } }] }))) chunks.push(chunk);
-    expect(chunks).toEqual([{ type: 'tool-call', toolCall: { id: 'call-1', name: 'assistant.query', arguments: { query: 'prior context' } } }, { type: 'done' }]);
+    const chunks = []; for await (const chunk of provider.stream!(request('text', { ...chatInput, tools: [{ name: 'agent.query', description: 'History', inputSchema: { type: 'object' } }] }))) chunks.push(chunk);
+    expect(chunks).toEqual([{ type: 'tool-call', toolCall: { id: 'call-1', name: 'agent.query', arguments: { query: 'prior context' } } }, { type: 'done' }]);
   });
 
   test('orders streamed tool calls by index and rejects malformed completion semantics', async () => {

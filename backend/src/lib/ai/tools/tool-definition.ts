@@ -7,6 +7,7 @@ export interface PublicToolDependencies {
   context: ToolContext;
   content?: ContentToolDependencies;
   executeContent?: typeof runContentTool;
+  requestKey?: string;
 }
 
 const contentDefinitions = new Map(CONTENT_TOOL_DEFINITIONS.map((definition) => [definition.name, definition]));
@@ -29,7 +30,8 @@ export function createPublicToolDefinition<Name extends ContentToolName>(name: N
           : hasPrimaryModelScope(name)
             ? { scopeKey: dependencies.context.runtimeScopeKey, ...input }
             : input;
-      return (dependencies.executeContent ?? runContentTool)(name, canonicalInput as never, dependencies.context, dependencies.content);
+      const trustedInput = dependencies.requestKey ? { ...canonicalInput, idempotencyKey: dependencies.requestKey } : canonicalInput;
+      return (dependencies.executeContent ?? runContentTool)(name, trustedInput as never, dependencies.context, dependencies.content);
     },
   };
 }

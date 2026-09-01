@@ -30,15 +30,46 @@ describe('conversation repository boundaries', () => {
     expect(vars).toMatchObject({ ...owner, query: 'roadmap', favoriteOnly: true, cursor, limit: 11 });
   });
 
-  test('filters semantic retrieval before cosine ranking and caps it to the requested current conversation limit', async () => {
+  test('loads the latest 50 owned completed user and assistant messages chronologically', async () => {
     let query = ''; let vars: any;
-    const database: any = { query: async (value: string, bind: unknown) => { query = value; vars = bind; return { next: async () => [] }; } };
-    const repository = createConversationRepository(database);
     const owner = { organizationKey: 'organization', scopeKey: newId(), userKey: newId() }, conversationKey = newId();
-    await repository.semanticMessages(owner, conversationKey, [1, 0], 50);
-    for (const filter of ['message.conversationKey == conversation._key', 'message.organizationKey == @organizationKey', 'message.scopeKey == @scopeKey', 'message.userKey == @userKey', 'message.role == "ASSISTANT"', 'message.status == "COMPLETED"']) expect(query).toContain(filter);
-    expect(query.indexOf('message.conversationKey')).toBeLessThan(query.indexOf('COSINE_SIMILARITY'));
-    expect(vars).toMatchObject({ ...owner, conversationKey, limit: 50 });
+    const older = turnMessage('USER', { conversationKey, ...owner, createdAt: '2026-08-31T23:59:00.000Z', completedAt: '2026-08-31T23:59:00.000Z' });
+    const newer = turnMessage('ASSISTANT', { conversationKey, ...owner, status: 'COMPLETED', content: 'answer', createdAt: timestamp, completedAt: timestamp });
+    const database: any = { query: async (value: string, bind: unknown) => { query = value; vars = bind; return { next: async () => [raw(newer), raw(older)] }; } };
+
+    const messages = await createConversationRepository(database).latestCompletedMessages(owner, conversationKey, 50);
+
+    expect(messages?.map(({ key }) => key)).toEqual([older.key, newer.key]);
+    for (const filter of ['conversation != null', 'conversation.organizationKey == @organizationKey', 'conversation.scopeKey == @scopeKey', 'conversation.userKey == @userKey', 'message.conversationKey == conversation._key', 'message.organizationKey == @organizationKey', 'message.scopeKey == @scopeKey', 'message.userKey == @userKey', 'message.role IN ["USER", "ASSISTANT"]', 'message.status == "COMPLETED"']) expect(query).toContain(filter);
+    expect(query).toContain('SORT message.createdAt DESC, message.turnKey DESC, message.role ASC, message._key DESC LIMIT @limit');
+    expect(vars).toEqual({ '@conversations': 'conversations', '@messages': 'conversationMessages', ...owner, conversationKey, limit: 50 });
+  });
+
+  test('retrieves both completed roles scope-wide only through existing same-owner conversations', async () => {
+    let query = ''; let vars: any;
+    const owner = { organizationKey: 'organization', scopeKey: newId(), userKey: newId() };
+    const user = turnMessage('USER', { ...owner, status: 'COMPLETED', embedding: [1, 0] });
+    const assistant = turnMessage('ASSISTANT', { ...owner, status: 'COMPLETED', content: 'answer', completedAt: timestamp, embedding: [0.9, 0.1] });
+    const database: any = { query: async (value: string, bind: unknown) => { query = value; vars = bind; return { all: async () => [{ message: raw(user), similarity: 1 }, { message: raw(assistant), similarity: 0.9 }] }; } };
+
+    const rows = await createConversationRepository(database).semanticMessages(owner, [1, 0], 20);
+
+    expect(rows.map(({ message, similarity }) => ({ role: message.role, similarity }))).toEqual([{ role: 'USER', similarity: 1 }, { role: 'ASSISTANT', similarity: 0.9 }]);
+    for (const filter of ['message.organizationKey == @organizationKey', 'message.scopeKey == @scopeKey', 'message.userKey == @userKey', 'message.role IN ["USER", "ASSISTANT"]', 'message.status == "COMPLETED"', 'IS_ARRAY(message.embedding)', 'conversation != null', 'conversation.organizationKey == @organizationKey', 'conversation.scopeKey == @scopeKey', 'conversation.userKey == @userKey', 'message.conversationKey == conversation._key']) expect(query).toContain(filter);
+    expect(query).toContain('LET conversation = DOCUMENT(@@conversations, message.conversationKey)');
+    expect(query.indexOf('conversation != null')).toBeLessThan(query.indexOf('COSINE_SIMILARITY'));
+    expect(query).toContain('SORT similarity DESC, message.createdAt DESC, message._key DESC LIMIT @limit');
+    expect(query).not.toContain('@conversationKey');
+    expect(vars).toEqual({ '@conversations': 'conversations', '@messages': 'conversationMessages', ...owner, embedding: [1, 0], limit: 20 });
+  });
+
+  test('stores a completed message embedding only through its owned conversation', async () => {
+    let query = ''; let vars: any;
+    const owner = { organizationKey: 'organization', scopeKey: newId(), userKey: newId() };
+    const database: any = { query: async (value: string, bind: unknown) => { query = value; vars = bind; return { next: async () => true }; } };
+    expect(await createConversationRepository(database).setMessageEmbedding(owner, newId(), newId(), [1, 0])).toBe(true);
+    for (const filter of ['conversation != null', 'conversation.organizationKey == @organizationKey', 'conversation.scopeKey == @scopeKey', 'conversation.userKey == @userKey', 'message.conversationKey == conversation._key', 'message.organizationKey == @organizationKey', 'message.scopeKey == @scopeKey', 'message.userKey == @userKey', 'message.status == "COMPLETED"']) expect(query).toContain(filter);
+    expect(vars).toMatchObject({ ...owner, embedding: [1, 0] });
   });
 
   test('declares transactional hard deletion of messages before the conversation', async () => {
