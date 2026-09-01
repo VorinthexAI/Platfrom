@@ -14,8 +14,6 @@ const [core, switcher, archive, gallery, compass, signal, ascend] = await Promis
 test("opens Core as an in-layout page and returns without routing", () => {
   expect(core).not.toContain("BottomSheet");
   expect(core).not.toContain("useRouter");
-  expect(core).not.toContain("useKeyboard");
-  expect(core).not.toContain("keyboardSpacer");
   expect(core).toContain('const [pageOpen, setPageOpen] = useState(false)');
   expect(core).toContain('accessibilityLabel="Back from Core"');
   expect(core).toContain("onRequestClose={closePage}");
@@ -23,8 +21,7 @@ test("opens Core as an in-layout page and returns without routing", () => {
   expect(core).toContain('animationType="none"');
   expect(core).toContain("setPageOpen(false)");
   expect(core).toContain('presentationStyle="fullScreen"');
-  expect(core).toContain("accessibilityViewIsModal behavior={Platform.OS");
-  expect(core).toContain("onAccessibilityEscape={closePage}");
+  expect(core).toContain("accessibilityViewIsModal onAccessibilityEscape={closePage}");
   expect(core).toContain("AccessibilityInfo.setAccessibilityFocus(inputHandle)");
   expect(core).toContain("showSoftInputOnFocus={expanded}");
   expect(core).toContain("valueRef.current.length");
@@ -41,6 +38,22 @@ test("matches the Archive header rhythm and keeps the Core prompt composer", () 
   expect(core).toContain("<RotatingPrompt prompts={prompts} />");
   expect(core).toContain("multiline={expanded}");
   expect(core).toContain('size={expanded ? "md" : "sm"}');
+});
+
+test("keeps the workspace composer compact and grows the Core input only when text wraps", () => {
+  expect(core).toContain("const multiline = expanded && inputHeight > COLLAPSED_INPUT_HEIGHT");
+  expect(core).toContain("height: expanded ? inputHeight : COLLAPSED_INPUT_HEIGHT");
+  expect(core).toContain("{expanded && value.length > 0 ? <Text");
+  expect(core).toContain("const lineCount = Math.min(6, Math.max(1, nativeEvent.lines.length))");
+  expect(core).toContain("setInputHeight((current) => current === nextHeight ? current : nextHeight)");
+  expect(core).not.toContain('borderColor: "#55616C"');
+});
+
+test("reuses the 300ms Core keyboard lift without double keyboard avoidance", () => {
+  expect(core).toContain("const keyboardVisible = useKeyboard()");
+  expect(core).toContain("withTiming(pageOpen && keyboardVisible ? 300 : 0, { duration: 300 })");
+  expect(core).toContain('<Reanimated.View pointerEvents="none" style={keyboardSpacerStyle} />');
+  expect(core).not.toContain("KeyboardAvoidingView");
 });
 
 test("temporarily displays Core while the selector remains limited to five apps", () => {

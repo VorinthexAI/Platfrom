@@ -11,9 +11,7 @@ import {
   Animated,
   findNodeHandle,
   Keyboard,
-  KeyboardAvoidingView,
   Modal,
-  Platform,
   StyleSheet,
   Text,
   TextInput as NativeTextInput,
@@ -22,11 +20,13 @@ import {
   type ViewStyle,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Reanimated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import Svg, { Defs, LinearGradient, Stop, Text as SvgText } from "react-native-svg";
 
 import { Button } from "../button/button.mobile";
 import { ChevronLeftIcon } from "../../icons/chevron-left/chevron-left.mobile";
 import { TextInput } from "../text-input/text-input.mobile";
+import { useKeyboard } from "../../hooks/use-keyboard.mobile";
 import { colors, spacing } from "../../tokens";
 
 export type CoreComposerProps = {
@@ -178,6 +178,7 @@ export function CoreComposer({
   value,
 }: CoreComposerProps) {
   const insets = useSafeAreaInsets();
+  const keyboardVisible = useKeyboard();
   const [pageOpen, setPageOpen] = useState(false);
   const [inputHeight, setInputHeight] = useState(COLLAPSED_INPUT_HEIGHT);
   const [inputSelection, setInputSelection] = useState<{ start: number; end: number }>();
@@ -190,6 +191,12 @@ export function CoreComposer({
   onFocusChangeRef.current = onFocusChange;
   valueRef.current = value;
   const showPrompt = value.length === 0;
+  const keyboardSpacerHeight = useSharedValue(0);
+  const keyboardSpacerStyle = useAnimatedStyle(() => ({ height: keyboardSpacerHeight.value }));
+
+  useEffect(() => {
+    keyboardSpacerHeight.value = withTiming(pageOpen && keyboardVisible ? 300 : 0, { duration: 300 });
+  }, [keyboardSpacerHeight, keyboardVisible, pageOpen]);
 
   const closePage = useCallback(() => {
     if (selectionReleaseTimeoutRef.current) clearTimeout(selectionReleaseTimeoutRef.current);
@@ -344,7 +351,7 @@ export function CoreComposer({
         {accessory}{composer(false)}
       </View> : null}
       {pageOpen ? <Modal animationType="none" navigationBarTranslucent onRequestClose={closePage} onShow={focusPageInput} presentationStyle="fullScreen" statusBarTranslucent visible>
-      <KeyboardAvoidingView accessibilityLabel="Core" accessibilityViewIsModal behavior={Platform.OS === "ios" ? "padding" : "height"} onAccessibilityEscape={closePage} style={styles.page}>
+      <View accessibilityLabel="Core" accessibilityViewIsModal onAccessibilityEscape={closePage} style={styles.page}>
         <View style={[styles.pageIdentityHeader, {
           paddingTop: insets.top + 6,
           paddingLeft: Math.max(insets.left, spacing.md),
@@ -362,8 +369,9 @@ export function CoreComposer({
           </View>
           <View style={styles.pageConversation}>{message}</View>
           {composer(true)}
+          <Reanimated.View pointerEvents="none" style={keyboardSpacerStyle} />
         </View>
-      </KeyboardAvoidingView>
+      </View>
       </Modal> : null}
     </>
   );
@@ -425,7 +433,6 @@ const styles = StyleSheet.create({
     shadowRadius: 18,
   },
   composerOpen: {
-    borderColor: "#55616C",
     borderRadius: 24,
     shadowOpacity: 0.7,
   },
