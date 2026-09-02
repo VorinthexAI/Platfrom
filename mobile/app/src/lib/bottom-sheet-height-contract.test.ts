@@ -112,7 +112,8 @@ test("retains the last populated page throughout the close animation", () => {
 });
 
 test("classifies every full-height sheet workflow explicitly", () => {
-  expect(core).toContain('<BottomSheet height="full"');
+  expect(core).not.toContain("<BottomSheet");
+  expect(core).toContain("<CorePage");
   expect(switcher).not.toContain("height=");
   expect(travel).toContain('height="full"');
   expect(email).toContain('height={sheet === "trashRoot" || formSheet ? "full" : undefined}');

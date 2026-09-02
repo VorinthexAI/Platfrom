@@ -26,14 +26,27 @@ describe('OpenRouter provider', () => {
     expect(result).toMatchObject({ output: { toolCalls: [{ id: 'call-1', name: 'weather', arguments: { city: 'Oslo' } }], stopReason: 'tool_use' }, usage: { totalTokens: 6 }, costUsd: 0.001, providerId: 'openrouter' });
   });
 
-  test('normalizes grounded web annotations and enables the web plugin', async () => {
+  test('pins the flash-lite text model to its upstream provider without fallbacks and leaves other models unpinned', async () => {
+    const bodies: any[] = [];
+    const provider = createOpenRouterProvider({ apiKey: 'key' }, (async (_target, init) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return Response.json({ choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } });
+    }) as typeof fetch);
+    await provider.execute(request('text', chatInput, 'google/gemini-3.1-flash-lite'));
+    await provider.execute(request('text', chatInput, 'vendor/model'));
+    expect(bodies[0]).toMatchObject({ model: 'google/gemini-3.1-flash-lite', provider: { order: ['google-vertex/us'], allow_fallbacks: false } });
+    expect(bodies[1].provider).toBeUndefined();
+  });
+
+  test('normalizes grounded web annotations and enables bounded native server search', async () => {
     let body: any;
     const provider = createOpenRouterProvider({ apiKey: 'key' }, (async (_target, init) => {
       body = JSON.parse(String(init?.body));
       return Response.json({ choices: [{ message: { content: 'Current answer', annotations: [{ type: 'url_citation', url_citation: { url: 'https://example.com/news', title: 'News' } }] }, finish_reason: 'stop' }], usage: { prompt_tokens: 3, completion_tokens: 4, total_tokens: 7 } });
     }) as typeof fetch);
     const result = await provider.execute(request('web', { prompt: 'What changed?' }));
-    expect(body).toMatchObject({ model: 'vendor/model', plugins: [{ id: 'web', engine: 'exa', max_results: 5 }] });
+    expect(body).toMatchObject({ model: 'vendor/model', tools: [{ type: 'openrouter:web_search', parameters: { engine: 'native', max_results: 5, max_uses: 2, max_total_results: 10 } }], max_tool_calls: 2 });
+    expect(body.plugins).toBeUndefined();
     expect(result.output).toEqual({ text: 'Current answer', citations: [{ title: 'News', url: 'https://example.com/news' }], sources: ['https://example.com/news'] });
   });
 
@@ -78,13 +91,36 @@ describe('OpenRouter provider', () => {
 
   test('streams text and usage across fragmented SSE chunks', async () => {
     const encoder = new TextEncoder();
-    const stream = new ReadableStream({ start(controller) { controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"Hel"}}]}\n\n')); controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"lo"}}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}\n\ndata: [DONE]\n\n')); controller.close(); } });
+    const stream = new ReadableStream({ start(controller) { controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"Hel"}}]}\n\n')); controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"lo"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}\n\ndata: [DONE]')); controller.close(); } });
     const provider = createOpenRouterProvider({ apiKey: 'key' }, (async (_target, init) => {
       expect(JSON.parse(String(init?.body))).toMatchObject({ stream: true, stream_options: { include_usage: true } });
       return new Response(stream, { headers: { 'content-type': 'text/event-stream' } });
     }) as typeof fetch);
     const chunks = []; for await (const chunk of provider.stream!(request('text', chatInput))) chunks.push(chunk);
     expect(chunks).toEqual([{ type: 'text-delta', text: 'Hel' }, { type: 'text-delta', text: 'lo' }, { type: 'usage', usage: { inputTokens: 2, outputTokens: 1, totalTokens: 3 } }, { type: 'done' }]);
+  });
+
+  test('assembles strict streamed tool-call argument fragments', async () => {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({ start(controller) {
+      controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"name":"agent.query","arguments":"{\\"query\\":\\"prior"}}]}}]}\n\n'));
+      controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":" context\\"}"}}]},"finish_reason":"tool_calls"}]}\n\ndata: [DONE]'));
+      controller.close();
+    } });
+    const provider = createOpenRouterProvider({ apiKey: 'key' }, (async (_target, _init) => new Response(stream, { headers: { 'content-type': 'text/event-stream' } })) as typeof fetch);
+    const chunks = []; for await (const chunk of provider.stream!(request('text', { ...chatInput, tools: [{ name: 'agent.query', description: 'History', inputSchema: { type: 'object' } }] }))) chunks.push(chunk);
+    expect(chunks).toEqual([{ type: 'tool-call', toolCall: { id: 'call-1', name: 'agent.query', arguments: { query: 'prior context' } } }, { type: 'done' }]);
+  });
+
+  test('orders streamed tool calls by index and rejects malformed completion semantics', async () => {
+    const responseStream = (body: string) => new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode(body)); controller.close(); } });
+    const providerFor = (body: string) => createOpenRouterProvider({ apiKey: 'key' }, (async () => new Response(responseStream(body), { headers: { 'content-type': 'text/event-stream' } })) as unknown as typeof fetch);
+    const collect = async (body: string) => { const chunks = []; for await (const chunk of providerFor(body).stream!(request('text', chatInput))) chunks.push(chunk); return chunks; };
+    const ordered = []; for await (const chunk of providerFor('data: {"choices":[{"delta":{"tool_calls":[{"index":1,"id":"b","function":{"name":"second","arguments":"{}"}},{"index":0,"id":"a","function":{"name":"first","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}\n\ndata: [DONE]').stream!(request('text', chatInput))) ordered.push(chunk);
+    expect(ordered).toEqual([{ type: 'tool-call', toolCall: { id: 'a', name: 'first', arguments: {} } }, { type: 'tool-call', toolCall: { id: 'b', name: 'second', arguments: {} } }, { type: 'done' }]);
+    await expect(collect('data: {"choices":[{"delta":{"content":"x"},"finish_reason":"tool_calls"}]}\n\ndata: [DONE]')).rejects.toThrow('finish reason');
+    await expect(collect('data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{"}}]},"finish_reason":"tool_calls"}]}\n\ndata: [DONE]')).rejects.toThrow('incomplete streamed tool call');
+    await expect(collect('data: {bad}\n\ndata: [DONE]')).rejects.toThrow('malformed stream JSON');
   });
 
   test('maps voices, splits speech, and concatenates only valid MP3 frames', async () => {

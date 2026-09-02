@@ -106,7 +106,7 @@ export const appSearchCapability: AssistantCapability<typeof appSearchInputSchem
   inputSchema: appSearchInputSchema,
   definition: {
     name: 'app.search',
-    description: 'Search selected user collections with one unified text query.',
+    description: 'Standard semantic search for any user resource: folders, documents, files, image collections, images, audio books (collection slug "books"), inboxes, email tones, email messages, email drafts, saved places, trips, and countries. Choose collectionSlugs for the resource kinds implied by the request; include multiple slugs in one search when the request spans kinds. Infer limit from the requested number of results, using the default when the user gives no count.',
     inputSchema: contentZodToJsonSchema(appSearchInputSchema),
   },
   async execute(rawInput, context) {

@@ -5,11 +5,11 @@ import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
-import { FlatList, Keyboard, KeyboardAvoidingView, ScrollView, StyleSheet, Text, View, useWindowDimensions, type TextInput as NativeTextInput } from "react-native";
+import { FlatList, Keyboard, ScrollView, StyleSheet, Text, View, useWindowDimensions, type TextInput as NativeTextInput } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomSheet, BottomSheetItem, BottomSheetMenu } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
-import { CoreComposer } from "@vorinthex/shared/ui/core-composer";
+import { PersistentCoreComposer as CoreComposer } from "@/components/PersistentCoreComposer";
 import { PullToRefresh } from "@vorinthex/shared/ui/pull-to-refresh";
 import { Skeleton } from "@vorinthex/shared/ui/skeleton";
 import { Switch } from "@vorinthex/shared/ui/switch";
@@ -215,7 +215,6 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
   const [busy, setBusy] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [assistantBusy, setAssistantBusy] = useState(false);
-  const [aiInputFocused, setAiInputFocused] = useState(false);
   const [collectionSearchFocusBlocked, setCollectionSearchFocusBlocked] = useState(false);
   const [searching, setSearching] = useState(false);
   const [userRefreshing, setUserRefreshing] = useState(false);
@@ -584,7 +583,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
   }
 
   useEffect(() => subscribeAppEvent((event) => {
-    if (event.type === "inbox.changed") return;
+    if (event.type === "inbox.changed" || event.type === "conversation.changed") return;
     const plan = galleryRefreshPlan(event.type === "event-stream.connected" ? "reconnect" : event.slug);
     if (!busyRef.current && (plan.has("access") || plan.has("cleanup")) && (activeSheetRef.current === "cleanup" || activeSheetRef.current === "confirmCleanupDelete")) invalidateCleanupLoad();
     scheduleGalleryRefresh(plan);
@@ -743,7 +742,6 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
 
   function handleCoreFocusChange(focused: boolean) {
     if (searchFocusReleaseTimer.current) clearTimeout(searchFocusReleaseTimer.current);
-    setAiInputFocused(focused);
     if (focused) {
       setCollectionSearchFocusBlocked(true);
       collectionSearchInput.current?.blur();
@@ -2718,7 +2716,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
   </View> : undefined;
 
   return (
-    <KeyboardAvoidingView behavior={aiInputFocused ? "height" : undefined} style={styles.root}>
+    <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
         <WorkspaceAppSwitcher active="gallery" />
       </View>
@@ -2830,6 +2828,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
         onChangeText={setAiInput}
         onFocusChange={handleCoreFocusChange}
         onSubmit={() => void askAssistant()}
+        pageIdentity={(closeCore) => <WorkspaceAppSwitcher active="gallery" identity="core" onSelectActive={closeCore} />}
         prompts={CORE_PROMPTS}
         sendIcon={<SendIcon size="sm" variant="inverse" />}
         value={aiInput}
@@ -3056,7 +3055,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
       </BottomSheet>
       {activeCollection ? <GalleryCollectionSharing collection={activeCollection} context={galleryContext} memberKeys={memberKeys} onClose={() => setSharingOpen(false)} open={sharingOpen} /> : null}
       {cameraOpen ? <GalleryCaptureModal onClose={() => setCameraOpen(false)} onSubmit={uploadCapturedPhotos} /> : null}
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 

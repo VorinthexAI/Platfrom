@@ -51,7 +51,7 @@ describe('image generation service', () => {
         calls.push(args);
         return { output: { images: [{ base64: png, mimeType: 'image/png' }] }, usage: {}, costUsd: 0.12, providerId: 'openrouter', modelId: 'google.gemini-3.1-flash-lite-image', externalModelId: 'google/gemini-3.1-flash-lite-image' };
       }) as any,
-      executeAsk: (async (...args: unknown[]) => { calls.push(args); return { output: { text: '{"concepts":[{"title":"Orbit","prompt":"A complete orbital image"}]}', toolCalls: [], stopReason: 'completed' }, usage: {}, providerId: 'openrouter', modelId: 'google.gemini-3.1-flash-lite-preview', externalModelId: 'google/gemini-3.1-flash-lite-preview' }; }) as any,
+      executeAsk: (async (...args: unknown[]) => { calls.push(args); return { output: { text: '{"concepts":[{"title":"Orbit","prompt":"A complete orbital image"}]}', toolCalls: [], stopReason: 'completed' }, usage: {}, providerId: 'openrouter', modelId: 'google.gemini-3.1-flash-lite', externalModelId: 'google/gemini-3.1-flash-lite' }; }) as any,
       now: (() => { let value = 10; return () => value += 25; })(),
     });
     await service.createRawIdeas({ prompt: 'Earth', requestedCount: 1 }, organizationKey);

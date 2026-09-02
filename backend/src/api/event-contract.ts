@@ -15,6 +15,7 @@ export const APP_EVENT_SLUGS = [
   'content.changed',
   'inbox.changed',
   'book.changed',
+  'conversation.changed',
 ] as const;
 export type AppEventSlug = (typeof APP_EVENT_SLUGS)[number];
 export type EventEnvelope =

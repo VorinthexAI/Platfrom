@@ -8,7 +8,6 @@ import {
   AccessibilityInfo,
   Animated,
   Keyboard,
-  KeyboardAvoidingView,
   ScrollView,
   StyleSheet,
   Text,
@@ -24,7 +23,7 @@ import {
 } from "@vorinthex/shared/ui/bottom-sheet";
 import { AiTextEditor } from "@vorinthex/shared/ui/ai-text-editor";
 import { Button, ButtonSizeProvider } from "@vorinthex/shared/ui/button";
-import { CoreComposer } from "@vorinthex/shared/ui/core-composer";
+import { PersistentCoreComposer as CoreComposer } from "@/components/PersistentCoreComposer";
 import { LoadingText } from "@vorinthex/shared/ui/loading-text";
 import { PullToRefresh } from "@vorinthex/shared/ui/pull-to-refresh";
 import { Skeleton } from "@vorinthex/shared/ui/skeleton";
@@ -228,7 +227,7 @@ function ChapterReading({ chapter }: { chapter?: BookChapter }) {
   );
 }
 
-export function AscendWorkspace() {
+export function AscendWorkspace({ initialBookKey, initialSearchQuery }: { initialBookKey?: string; initialSearchQuery?: string } = {}) {
   const queryClient = useQueryClient();
   const playback = useBookPlayback();
   const context = getBooksContext();
@@ -250,7 +249,7 @@ export function AscendWorkspace() {
   const [contextPickerOpen, setContextPickerOpen] = useState(false);
   const [contextLabels, setContextLabels] = useState<EmailAttachmentLabels>({});
   const [contextGridWidth, setContextGridWidth] = useState(0);
-  const [selectedBookKey, setSelectedBookKey] = useState<string>();
+  const [selectedBookKey, setSelectedBookKey] = useState<string | undefined>(initialBookKey);
   const [readerChapterKey, setReaderChapterKey] = useState<string>();
   const [readingChapterKey, setReadingChapterKey] = useState<string>();
   const [playbackScrubValue, setPlaybackScrubValue] = useState<number>();
@@ -258,13 +257,12 @@ export function AscendWorkspace() {
   const [sharingBook, setSharingBook] = useState<Book>();
   const [selectedBookKeys, setSelectedBookKeys] = useState<string[]>([]);
   const [bulkLoading, setBulkLoading] = useState(false);
-  const [bookPageOpen, setBookPageOpen] = useState(false);
+  const [bookPageOpen, setBookPageOpen] = useState(Boolean(initialBookKey));
   const [reducedChapterMotion, setReducedChapterMotion] = useState(false);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(() => initialSearchQuery?.slice(0, 500) ?? "");
   const [searchTerm, setSearchTerm] = useState("");
   const [showOnlyFavorites, setShowOnlyFavorites] = useState(false);
   const [rootSearchFocusable, setRootSearchFocusable] = useState(true);
-  const [aiInputFocused, setAiInputFocused] = useState(false);
   const [history, setHistory] = useState<ContentSearchHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string>();
@@ -1015,7 +1013,7 @@ export function AscendWorkspace() {
     : sheet === "bookSummary" ? <><Button disabled={!bookReadingChapter} onPress={() => openChapterReading(bookReadingChapter?.key)} size="md" variant="primary">Read</Button><Button onPress={closeContentSheet} size="md" variant="secondary">Close</Button></>
       : undefined;
   return (
-    <KeyboardAvoidingView behavior={aiInputFocused ? "height" : undefined} style={styles.root}>
+    <View style={styles.root}>
       <View
         style={[
           styles.globalHeader,
@@ -1111,10 +1109,10 @@ export function AscendWorkspace() {
               setRootSearchFocusable(true);
             }, 300);
           }
-          setAiInputFocused(focused);
           if (!focused) setAssistantMessage(undefined);
         }}
         onSubmit={askAssistant}
+        pageIdentity={(closeCore) => <WorkspaceAppSwitcher active="ascend" identity="core" onBeforeSelect={() => !(creating && dirty)} onSelectActive={closeCore} />}
         prompts={CORE_PROMPTS}
         sendIcon={<SendIcon size="sm" />}
         value={assistantInput}
@@ -1325,7 +1323,7 @@ export function AscendWorkspace() {
       <BottomSheet footer={<><Button disabled={briefTargetLanguage.trim().length < 2} onPress={() => { const target = briefTranslateTarget; if (target) void transformBriefEditor(target, "translate"); }} size="md" variant="primary">Translate</Button><Button onPress={() => setBriefTranslateTarget(undefined)} size="md" variant="secondary">Close</Button></>} height="full" onOpenChange={(open) => { if (!open) setBriefTranslateTarget(undefined); }} open={Boolean(briefTranslateTarget)} title="Translate text">
         <View style={styles.customStep}><Text style={styles.inputLabel}>Language</Text><TextInput accessibilityLabel="Audio book brief translation language" maxLength={100} onChangeText={setBriefTargetLanguage} placeholder="Language" value={briefTargetLanguage} /></View>
       </BottomSheet>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 

@@ -7,6 +7,7 @@ import { publishAppEvent } from "./app-events";
 import { publishBookChanged } from "./book-events";
 import { createCoalescedRefresh } from "./async-refresh";
 import { compassQueryKeys } from "./compass-query-keys";
+import { conversationQueryKeys } from "./conversation-cache";
 import { contentQueryKeys } from "./content-query-cache";
 import { galleryRefreshPlan, isCurrentContextGeneration, type GalleryRefreshFamily } from "./gallery-convergence";
 import { eventStreamRetryDelay, invalidatesGalleryQueries } from "./sse";
@@ -45,6 +46,7 @@ export function AuthenticatedEventBridge() {
     const root = ["gallery", organizationKey, scopeKey] as const;
     const compassContext = { organizationKey, scopeKey };
     const contentContext = { userKey, organizationKey, scopeKey };
+    const conversationContext = { userKey, organizationKey, scopeKey };
     const invalidateCompassTrips = () => void queryClient.invalidateQueries({ queryKey: compassQueryKeys.trips(compassContext) });
     const invalidateCompassPlaceReferences = () => void queryClient.invalidateQueries({ queryKey: compassQueryKeys.places(compassContext) });
     const invalidateArchive = () => void queryClient.invalidateQueries({ queryKey: contentQueryKeys.all(contentContext), refetchType: "active" });
@@ -91,6 +93,10 @@ export function AuthenticatedEventBridge() {
           invalidateArchive();
           publishAppEvent({ type: "inbox.changed" });
         }
+        if (event.event === "conversation.changed") {
+          void queryClient.invalidateQueries({ queryKey: conversationQueryKeys.all(conversationContext), refetchType: "active" });
+          publishAppEvent({ type: "conversation.changed" });
+        }
         if (event.event === "book.changed") {
           invalidateBooks();
           publishBookChanged();
@@ -118,6 +124,7 @@ export function AuthenticatedEventBridge() {
         invalidateCompassPlaceReferences();
         invalidateSignal();
         invalidateBooks();
+        void queryClient.invalidateQueries({ queryKey: conversationQueryKeys.all(conversationContext), refetchType: "active" });
         publishAppEvent({ type: "event-stream.connected" });
       }).catch((error: unknown) => {
         if (error instanceof Error && error.name === "AbortError") return;

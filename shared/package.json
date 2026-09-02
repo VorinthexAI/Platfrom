@@ -40,6 +40,10 @@
       "react-native": "./packages/ui/components/core-composer/core-composer.mobile.tsx",
       "default": "./packages/ui/components/core-composer/core-composer.web.tsx"
     },
+    "./ui/chrome-icon": {
+      "react-native": "./packages/ui/components/chrome-icon/chrome-icon.mobile.tsx",
+      "default": "./packages/ui/components/chrome-icon/chrome-icon.web.tsx"
+    },
     "./ui/tabs": {
       "react-native": "./packages/ui/components/tabs/tabs.mobile.tsx",
       "default": "./packages/ui/components/tabs/tabs.web.tsx"
@@ -110,6 +114,8 @@
     "zod": "^4.4.3"
   },
   "peerDependencies": {
+    "expo-image": ">=3",
+    "expo-linear-gradient": ">=14",
     "react": "19.2.3",
     "react-native": ">=0.86",
     "react-native-pdf": ">=7",

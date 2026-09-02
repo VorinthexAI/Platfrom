@@ -45,16 +45,22 @@ import { contentNeighborsToolDefinition } from './content-neighbors';
 import { documentSearchToolDefinition } from './document-search';
 import { WORKSPACE_TOOL_DEFINITIONS } from './workspace-tool-definitions';
 import { TRUSTED_EMAIL_TOOL_DEFINITIONS } from './email-ingestion-tool-definitions';
+import { CONVERSATION_TOOL_DEFINITIONS } from './conversation-tool-definitions';
+import { AGENT_TOOL_DEFINITIONS } from './agent-tool-definitions';
+import { webSearchTool } from './web-search';
 
 export const PUBLIC_TOOL_DEFINITIONS = Object.freeze([
   imageCaptionTool,
   imageCreateVisualIdentityTool,
+  webSearchTool,
   contentNeighborsToolDefinition,
   documentAudioPlaybackClearToolDefinition, documentAudioPlaybackUpdateToolDefinition, documentCreateToolDefinition, documentCopyToolDefinition, documentCreateVersionToolDefinition, documentDeleteToolDefinition, documentDeleteVersionToolDefinition, documentDownloadToolDefinition, documentExportToolDefinition, documentFindToolDefinition, documentFindSummaryToolDefinition, documentFindVersionToolDefinition, documentListToolDefinition, documentListAudioVersionsToolDefinition, documentListSummariesToolDefinition, documentListSharesToolDefinition, documentListVersionsToolDefinition, documentMoveToolDefinition, documentParseToolDefinition, documentReadToolDefinition, documentRenameToolDefinition, documentScanToolDefinition, documentRestoreVersionToolDefinition, documentRewriteToolDefinition, documentShareToolDefinition, documentSummarizeToolDefinition, documentTopicsToolDefinition, documentUnshareToolDefinition, documentUpdateToolDefinition,
   folderCopyToolDefinition, folderCreateToolDefinition, folderDeleteToolDefinition, folderFindToolDefinition, folderListToolDefinition, folderMoveToolDefinition, folderRenameToolDefinition, folderUpdateToolDefinition,
   documentSearchAllToolDefinition,
   contentSearchToolDefinition, contentSearchHistoryListToolDefinition, contentSearchHistoryDeleteToolDefinition, documentSearchToolDefinition,
   ...WORKSPACE_TOOL_DEFINITIONS,
+  ...CONVERSATION_TOOL_DEFINITIONS,
+  ...AGENT_TOOL_DEFINITIONS,
 ] as const);
 
 /** Canonical registry entries that only authenticated server workflows may dispatch. */

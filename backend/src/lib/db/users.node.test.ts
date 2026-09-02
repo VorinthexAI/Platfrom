@@ -62,7 +62,7 @@ describe('user node schema', () => {
 
   test('hard deletion atomically removes user generation history', async () => {
     const source = await Bun.file(new URL('./users.node.ts', import.meta.url)).text();
-    expect(source).toContain("withTransaction(['users', 'userHiddens', 'userGenerations']");
+    expect(source).toContain("withTransaction(['users', 'userHiddens', 'userGenerations', 'conversations', 'conversationMessages']");
     expect(source).toContain('FOR generation IN userGenerations FILTER generation.userKey == @userKey REMOVE generation IN userGenerations');
     expect(source.indexOf('REMOVE generation IN userGenerations')).toBeLessThan(source.indexOf('REMOVE @userKey IN users'));
   });

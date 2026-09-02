@@ -16,7 +16,7 @@ export const PROVIDER_REGISTRY: Readonly<Record<ProviderId, ProviderRegistration
 };
 
 export const MODEL_REGISTRY = [
-  { id: 'google.gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Flash-Lite Preview', description: 'Low-latency general-purpose and multimodal text model.' },
+  { id: 'google.gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash-Lite', description: 'Low-latency general-purpose and multimodal text model.' },
   { id: 'google.gemini-3.1-flash-lite-image', name: 'Nano Banana 2 Lite', description: 'Fast image generation, editing, and multimodal analysis model.' },
   { id: 'xai.grok-voice-tts-1.0', name: 'Grok Voice TTS 1.0', description: 'Speech generation model with native MP3 output.' },
   { id: 'openai.text-embedding-3-small', name: 'OpenAI Text Embedding 3 Small', description: 'Text embedding model.' },
@@ -26,7 +26,7 @@ export const MODEL_IDS = MODEL_REGISTRY.map(({ id }) => id) as readonly ModelId[
 export const modelIdSchema = z.enum(MODEL_IDS as [ModelId, ...ModelId[]]);
 
 const EXTERNAL_MODEL_IDS = {
-  'google.gemini-3.1-flash-lite-preview:openrouter': 'google/gemini-3.1-flash-lite-preview',
+  'google.gemini-3.1-flash-lite:openrouter': 'google/gemini-3.1-flash-lite',
   'google.gemini-3.1-flash-lite-image:openrouter': 'google/gemini-3.1-flash-lite-image',
   'xai.grok-voice-tts-1.0:openrouter': 'x-ai/grok-voice-tts-1.0',
   'openai.text-embedding-3-small:openrouter': 'openai/text-embedding-3-small',

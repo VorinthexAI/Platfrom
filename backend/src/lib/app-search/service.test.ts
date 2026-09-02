@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
 import { newId } from '@/lib/ids';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
-import { appSearchInputSchema, createAppSearchService } from './service';
+import { MAX_APP_SEARCH_RETRIEVAL_RESULTS, appSearchInputSchema, appSearchRetrievalSchema, createAppSearchService, projectAppSearchRetrieval } from './service';
 
 const organizationKey = newId();
 const scopeKey = newId();
@@ -22,6 +22,54 @@ describe('app search service', () => {
       { query: 'roadmap', collectionSlugs: ['folders'], organizationKey },
       { query: 'roadmap', collectionSlugs: ['folders'], queryEmbedding: embedding },
     ]) expect(() => appSearchInputSchema.parse(invalid)).toThrow();
+  });
+
+  test('projects every collection into strict compact message-owned identities and labels', () => {
+    const date = '2026-08-24T00:00:00.000Z';
+    const keyed = (name: string) => ({ key: newId(), scopeKey, name, isFavorite: false, score: 0.8 });
+    const folder = keyed('Folder');
+    const document = keyed('Document');
+    const file = { ...keyed('File'), extension: 'pdf' };
+    const collection = { key: newId(), name: 'Collection', description: null, purpose: null, mutationPolicy: 'user', isFavorite: false, count: 1, coverUrl: null, memberKey: newId(), isOwned: true, role: 'owner', access: { canRead: true, canContribute: true, canManage: true }, createdAt: date, updatedAt: date, score: 0.8 };
+    const image = { key: newId(), filename: 'fallback.jpg', caption: '  ', imageCaptionKey: null, mimeType: 'image/jpeg', sizeBytes: 1, width: 1, height: 1, city: null, country: null, countryCode: null, latitude: null, longitude: null, locationSource: null, origin: 'uploaded', mutationPolicy: 'user', isFavorite: false, createdAt: date, updatedAt: date, url: 'https://example.test/image.jpg', score: 0.8 };
+    const inbox = { key: newId(), connectorKey: newId(), provider: 'gmail', email: 'person@example.com', name: '', isFavorite: false, status: 'active', syncEnabled: true, syncStatus: 'idle', createdAt: date, updatedAt: date, score: 0.8 };
+    const tone = { key: newId(), name: 'Warm', instruction: 'Be warm', isFavorite: false, createdAt: date, updatedAt: date, score: 0.8 };
+    const emailMessage = { key: newId(), subject: 'Subject', summary: 'Summary', intent: 'Intent', priority: 'normal', state: 'informational', lastMessageAt: date, unread: false, isRead: true, isFavorite: false, inboxCategory: 'Important', createdAt: date, updatedAt: date, score: 0.8 };
+    const newDraft = { key: newId(), variant: 'new', connectorKey: newId(), to: ['person@example.com'], subject: 'Draft subject', generatedContent: 'Draft', status: 'generated', createdAt: date, updatedAt: date, score: 0.8 };
+    const replyDraft = { key: newId(), variant: 'reply', threadKey: newId(), messageKey: newId(), replyMode: 'reply', to: ['person@example.com'], cc: [], generatedContent: 'Reply', status: 'generated', createdAt: date, updatedAt: date, score: 0.8 };
+    const place = { key: newId(), kind: 'place', name: 'Paris', summary: 'City', countryCode: 'FR', latitude: 48.8, longitude: 2.3, status: 'wishlist', isFavorite: false, createdAt: date };
+    const trip = { key: newId(), name: 'Spring trip', status: 'planned', isFavorite: false, createdAt: date, updatedAt: date, places: [], attachments: [] };
+    const country = { name: 'France', countryCode: 'FR', latitude: 46, longitude: 2 };
+    const book = { key: newId(), title: 'Clear Decisions', subtitle: 'Guide', description: 'Description', status: 'ready', isFavorite: false, isExtending: false, estimatedMinutes: 10, chapterCount: 2, progressPercent: 0, score: 0.8 };
+    const groups = [
+      { collectionSlug: 'folders', results: [folder] }, { collectionSlug: 'documents', results: [document] }, { collectionSlug: 'files', results: [file] },
+      { collectionSlug: 'collections', results: [collection] }, { collectionSlug: 'images', results: [image] }, { collectionSlug: 'inboxes', results: [inbox] },
+      { collectionSlug: 'email-tones', results: [tone] }, { collectionSlug: 'email-messages', results: [emailMessage] }, { collectionSlug: 'email-drafts', results: [newDraft, replyDraft] },
+      { collectionSlug: 'places', results: [place] }, { collectionSlug: 'trips', results: [trip] }, { collectionSlug: 'countries', results: [country] }, { collectionSlug: 'books', results: [book] },
+    ];
+    const first = projectAppSearchRetrieval({ query: ' find ', collectionSlugs: groups.slice(0, 10).map(({ collectionSlug }) => collectionSlug), limit: 7, minimumScore: 0.4, filters: { readState: 'unread' } }, { query: 'find', groups: groups.slice(0, 10) })!;
+    const second = projectAppSearchRetrieval({ query: 'find', collectionSlugs: groups.slice(10).map(({ collectionSlug }) => collectionSlug) }, { query: 'find', groups: groups.slice(10) })!;
+    expect(first).toMatchObject({ query: 'find', limit: 7, minimumScore: 0.4, filters: { readState: 'unread' } });
+    expect(first.groups.find(({ collectionSlug }) => collectionSlug === 'inboxes')?.results[0]).toMatchObject({ key: inbox.key, destinationKey: inbox.connectorKey });
+    expect([...first.groups, ...second.groups].map((group) => [group.collectionSlug, group.results.map(({ key, label }) => [key, label])])).toEqual([
+      ['folders', [[folder.key, 'Folder']]], ['documents', [[document.key, 'Document']]], ['files', [[file.key, 'File']]], ['collections', [[collection.key, 'Collection']]],
+      ['images', [[image.key, 'fallback.jpg']]], ['inboxes', [[inbox.key, 'person@example.com']]], ['email-tones', [[tone.key, 'Warm']]],
+      ['email-messages', [[emailMessage.key, 'Subject']]], ['email-drafts', [[newDraft.key, 'Draft subject'], [replyDraft.key, 'Reply draft']]],
+      ['places', [[place.key, 'Paris']]], ['trips', [[trip.key, 'Spring trip']]], ['countries', [['FR', 'France']]], ['books', [[book.key, 'Clear Decisions']]],
+    ]);
+    expect(projectAppSearchRetrieval({ query: 'none', collectionSlugs: ['folders'] }, { query: 'none', groups: [{ collectionSlug: 'folders', results: [] }] })).toBeNull();
+    expect(() => appSearchRetrievalSchema.parse({ ...first, unexpected: true })).toThrow('Unrecognized key');
+    expect(JSON.stringify(first)).not.toMatch(/url|summary|score|filename/);
+  });
+
+  test('bounds persisted results and normalizes unsafe labels without failing a successful search', () => {
+    const results = Array.from({ length: 50 }, (_, index) => ({ key: newId(), scopeKey, name: index === 0 ? '   ' : 'x'.repeat(300), isFavorite: false, score: 0.8 }));
+    const retrieval = projectAppSearchRetrieval({ query: 'many', collectionSlugs: ['folders', 'documents', 'files'] }, { query: 'many', groups: [
+      { collectionSlug: 'folders', results }, { collectionSlug: 'documents', results }, { collectionSlug: 'files', results },
+    ] })!;
+    expect(retrieval.groups.flatMap(({ results: items }) => items)).toHaveLength(MAX_APP_SEARCH_RETRIEVAL_RESULTS);
+    expect(retrieval.groups[0]!.results[0]!.label).toBe('Resource');
+    expect(retrieval.groups[0]!.results[1]!.label).toHaveLength(200);
   });
 
   test('embeds once, dispatches adapters in parallel, shares the embedding, and records once last', async () => {

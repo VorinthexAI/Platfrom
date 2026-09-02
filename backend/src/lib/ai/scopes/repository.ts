@@ -148,6 +148,8 @@ export function createScopeRepository(
         LET imageKeys = managedImages[*].key
         LET captionKeys = managedImages[*].captionKey
         LET cleanupGeneratedDocumentBindings = (FOR binding IN generatedDocumentBindings FILTER binding.scopeKey == @scopeKey REMOVE binding IN generatedDocumentBindings RETURN 1)
+        LET cleanupConversationMessages = (FOR item IN conversationMessages FILTER item.scopeKey == @scopeKey REMOVE item IN conversationMessages RETURN 1)
+        LET cleanupConversations = (FOR item IN conversations FILTER item.scopeKey == @scopeKey REMOVE item IN conversations RETURN 1)
         LET cleanupTripAttachments = (FOR attachment IN tripAttachments FILTER attachment.scopeKey == @scopeKey REMOVE attachment IN tripAttachments RETURN 1)
         LET cleanupTripCreationReceipts = (FOR receipt IN tripCreationReceipts FILTER receipt.scopeKey == @scopeKey REMOVE receipt IN tripCreationReceipts RETURN 1)
         LET cleanupPlaceImages = (FOR relation IN placeImages FILTER relation.scopeKey == @scopeKey REMOVE relation IN placeImages RETURN 1)
@@ -253,7 +255,7 @@ export function createScopeRepository(
        if (attachmentCaptionKeys.length) await executor.query('FOR caption IN imageCaptions FILTER caption._key IN @captionKeys FILTER LENGTH(FOR retained IN images FILTER retained.imageCaptionKey == caption._key LIMIT 1 RETURN 1) == 0 REMOVE caption IN imageCaptions', { captionKeys: attachmentCaptionKeys });
       };
       if (!database.beginTransaction) return remove(database as unknown as Pick<typeof db, 'query'>);
-      const write = ['scopes', 'scopeScopes', 'scopeMembers', 'organizationConnectors', 'folders', 'documents', 'documentVersions', 'documentAudioVersions', 'documentSummaries', 'documentSummaryAudio', 'documentShares', 'generatedDocumentBindings', 'emailAttachmentBindings', 'emailAttachments', 'emailInboxes', 'emailThreads', 'emailMessages', 'emailDrafts', 'emailTones', 'emailReplyContext', 'emailWritingProfiles', 'images', 'imageCaptions', 'collectionImages', 'imageIdentities', 'imageCollecitionHightlights', 'imageCollectionMemories', 'placeImages', 'collections', 'collectionInvites', 'collectionMembers', 'places', 'trips', 'tripPlaces', 'tripAttachments', 'tripCreationReceipts', 'tripGuides', 'placeReferences', 'placeHeroMedia', 'books', 'bookContexts', 'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'chapterContexts', 'bookProgress', 'tagAssignments', 'shares', 'userHiddens', 'storageDeletionJobs'];
+      const write = ['scopes', 'scopeScopes', 'scopeMembers', 'conversations', 'conversationMessages', 'organizationConnectors', 'folders', 'documents', 'documentVersions', 'documentAudioVersions', 'documentSummaries', 'documentSummaryAudio', 'documentShares', 'generatedDocumentBindings', 'emailAttachmentBindings', 'emailAttachments', 'emailInboxes', 'emailThreads', 'emailMessages', 'emailDrafts', 'emailTones', 'emailReplyContext', 'emailWritingProfiles', 'images', 'imageCaptions', 'collectionImages', 'imageIdentities', 'imageCollecitionHightlights', 'imageCollectionMemories', 'placeImages', 'collections', 'collectionInvites', 'collectionMembers', 'places', 'trips', 'tripPlaces', 'tripAttachments', 'tripCreationReceipts', 'tripGuides', 'placeReferences', 'placeHeroMedia', 'books', 'bookContexts', 'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'chapterContexts', 'bookProgress', 'tagAssignments', 'shares', 'userHiddens', 'storageDeletionJobs'];
       await withDatabaseTransaction(database as typeof db, { write }, (executor) => remove(executor));
     },
 

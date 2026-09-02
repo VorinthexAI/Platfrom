@@ -36,7 +36,8 @@ test("delivers app events to active subscribers only", () => {
   const unsubscribe = subscribeAppEvent((event) => events.push(event.type));
   publishAppEvent({ type: "gallery.changed", slug: "collection.index.changed" });
   publishAppEvent({ type: "inbox.changed" });
+  publishAppEvent({ type: "conversation.changed" });
   unsubscribe();
   publishAppEvent({ type: "event-stream.connected" });
-  expect(events).toEqual(["gallery.changed", "inbox.changed"]);
+  expect(events).toEqual(["gallery.changed", "inbox.changed", "conversation.changed"]);
 });

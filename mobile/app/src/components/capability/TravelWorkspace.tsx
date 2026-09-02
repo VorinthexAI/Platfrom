@@ -5,11 +5,11 @@ import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Keyboard, KeyboardAvoidingView, Linking, PanResponder, ScrollView, StyleSheet, Text, useWindowDimensions, View, type TextInput as NativeTextInput } from "react-native";
+import { Keyboard, Linking, PanResponder, ScrollView, StyleSheet, Text, useWindowDimensions, View, type TextInput as NativeTextInput } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomSheet, BottomSheetItem, BottomSheetMenu } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
-import { CoreComposer } from "@vorinthex/shared/ui/core-composer";
+import { PersistentCoreComposer as CoreComposer } from "@/components/PersistentCoreComposer";
 import { BrainIcon, CheckIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ChevronUpIcon, CloseIcon, FilterIcon, FolderIcon, GlobeIcon, GlobeViewIcon, LocationPinIcon, MoreHorizontalIcon, PlusIcon, SearchIcon, SendIcon, StarIcon, TableViewIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { LoadingText } from "@vorinthex/shared/ui/loading-text";
 import { PullToRefresh } from "@vorinthex/shared/ui/pull-to-refresh";
@@ -166,7 +166,7 @@ export function formatGuideDate(value: string) {
 
 const wait = (duration: number) => new Promise((resolve) => setTimeout(resolve, duration));
 
-export function TravelWorkspace({ initialTripKey, openTripAssets: shouldOpenTripAssets = false }: { initialTripKey?: string; openTripAssets?: boolean } = {}) {
+export function TravelWorkspace({ initialCollectionKind, initialCountryCode, initialPlaceKey, initialSearchQuery, initialTripKey, openTripAssets: shouldOpenTripAssets = false }: { initialCollectionKind?: string; initialCountryCode?: string; initialPlaceKey?: string; initialSearchQuery?: string; initialTripKey?: string; openTripAssets?: boolean } = {}) {
   const queryClient = useQueryClient();
   const router = useRouter();
   const { showToast } = useToast();
@@ -174,11 +174,11 @@ export function TravelWorkspace({ initialTripKey, openTripAssets: shouldOpenTrip
   const contentContext = useMemo(() => getContentContext(), []);
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
-  const [rootView, setRootView] = useState<RootView>("globe");
+  const [rootView, setRootView] = useState<RootView>(initialCollectionKind === "places" || initialCollectionKind === "trips" ? "table" : "globe");
   const [tripView, setTripView] = useState<RootView>("globe");
-  const [tableTab, setTableTab] = useState<TableTab>("places");
+  const [tableTab, setTableTab] = useState<TableTab>(initialCollectionKind === "trips" ? "trips" : "places");
   const [tableGridWidth, setTableGridWidth] = useState(0);
-  const [placeTableQuery, setPlaceTableQuery] = useState("");
+  const [placeTableQuery, setPlaceTableQuery] = useState(() => initialCollectionKind === "places" || initialCollectionKind === "trips" ? initialSearchQuery?.slice(0, 500) ?? "" : "");
   const [tableSearchTerm, setTableSearchTerm] = useState("");
   const [placeSearchHistory, setPlaceSearchHistory] = useState<ContentSearchHistoryItem[]>([]);
   const [placeHistoryLoading, setPlaceHistoryLoading] = useState(false);
@@ -201,10 +201,10 @@ export function TravelWorkspace({ initialTripKey, openTripAssets: shouldOpenTrip
   const [selectedPlaceReference, setSelectedPlaceReference] = useState<PlaceReference>();
   const [placeReferenceGenerating, setPlaceReferenceGenerating] = useState(false);
   const [tripGridWidth, setTripGridWidth] = useState(0);
-  const [selectedCountry, setSelectedCountry] = useState<CountryProperties>();
+  const [selectedCountry, setSelectedCountry] = useState<CountryProperties | undefined>(() => initialCountryCode ? COUNTRIES.features.find(({ properties }) => properties.countryCode.toLocaleUpperCase() === initialCountryCode.toLocaleUpperCase())?.properties : undefined);
   const [selectedCity, setSelectedCity] = useState<GeneratedCity>();
   const [detailSource, setDetailSource] = useState<DetailSource>("globe");
-  const [countryDetailOpen, setCountryDetailOpen] = useState(false);
+  const [countryDetailOpen, setCountryDetailOpen] = useState(Boolean(initialCountryCode));
   const [cityDetailOpen, setCityDetailOpen] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
   const [createPlaceOpen, setCreatePlaceOpen] = useState(false);
@@ -253,13 +253,12 @@ export function TravelWorkspace({ initialTripKey, openTripAssets: shouldOpenTrip
   const [assetsLoading, setAssetsLoading] = useState(false);
   const [imageViewerKey, setImageViewerKey] = useState<string>();
   const [pendingPlaceSaves, setPendingPlaceSaves] = useState<string[]>([]);
-  const [countryQuery, setCountryQuery] = useState("");
+  const [countryQuery, setCountryQuery] = useState(() => initialCollectionKind === "countries" ? initialSearchQuery?.slice(0, 500) ?? "" : "");
   const [searchFocus, setSearchFocus] = useState<NonNullable<CountrySearchResult>>();
   const [globeFocusTarget, setGlobeFocusTarget] = useState<NonNullable<CountrySearchResult>>();
-  const [lastOpenedCountryCode, setLastOpenedCountryCode] = useState<string>();
+  const [lastOpenedCountryCode, setLastOpenedCountryCode] = useState<string | undefined>(initialCountryCode);
   const [assistantInput, setAssistantInput] = useState("");
   const [assistantBusy, setAssistantBusy] = useState(false);
-  const [assistantInputFocused, setAssistantInputFocused] = useState(false);
   const [countrySearchFocusBlocked, setCountrySearchFocusBlocked] = useState(false);
   const [assistantMessage, setAssistantMessage] = useState<string>();
   const [assistantFailed, setAssistantFailed] = useState(false);
@@ -289,6 +288,7 @@ export function TravelWorkspace({ initialTripKey, openTripAssets: shouldOpenTrip
   const sheetTransitionTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const assetsGeneration = useRef(0);
   const initialAssetsOpened = useRef(false);
+  const initialPlaceOpened = useRef(false);
   const assetLongPress = useRef<string | undefined>(undefined);
   const tripGuideGeneratingRef = useRef(false);
   const placeReferenceGeneratingRef = useRef(false);
@@ -505,11 +505,11 @@ export function TravelWorkspace({ initialTripKey, openTripAssets: shouldOpenTrip
   }, [places]);
 
   useEffect(() => {
-    if (!shouldOpenTripAssets || initialAssetsOpened.current || !initialTripKey) return;
+    if (initialAssetsOpened.current || !initialTripKey) return;
     const trip = trips.find(({ key }) => key === initialTripKey);
     if (!trip) return;
     initialAssetsOpened.current = true;
-    const timer = setTimeout(() => { setTripView("globe"); setSelectedTripKey(trip.key); beginAssetSelection(trip); }, 0);
+    const timer = setTimeout(() => { setTripView("globe"); setSelectedTripKey(trip.key); if (shouldOpenTripAssets) beginAssetSelection(trip); }, 0);
     return () => clearTimeout(timer);
     // The route restoration is intentionally consumed once for the matching trip.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -556,6 +556,16 @@ export function TravelWorkspace({ initialTripKey, openTripAssets: shouldOpenTrip
     setSelectedPlaceSnapshot(place);
     setSelectedPlaceKey(place.key);
   }
+  useEffect(() => {
+    if (initialPlaceOpened.current || !initialPlaceKey) return;
+    const place = places.find(({ key }) => key === initialPlaceKey);
+    if (!place) return;
+    initialPlaceOpened.current = true;
+    const timer = setTimeout(() => openSavedPlace(place), 0);
+    return () => clearTimeout(timer);
+    // The route restoration is intentionally consumed once for the matching place.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialPlaceKey, places]);
 
   function openSelectedPlaceOnWeb() {
     if (!selectedPlace) return;
@@ -1243,7 +1253,6 @@ export function TravelWorkspace({ initialTripKey, openTripAssets: shouldOpenTrip
 
   function handleCoreFocusChange(focused: boolean) {
     if (searchFocusReleaseTimer.current) clearTimeout(searchFocusReleaseTimer.current);
-    setAssistantInputFocused(focused);
     if (focused) { setCountrySearchFocusBlocked(true); countrySearchInput.current?.blur(); Keyboard.dismiss(); return; }
     setAssistantMessage(undefined);
     setAssistantFailed(false);
@@ -1300,7 +1309,7 @@ export function TravelWorkspace({ initialTripKey, openTripAssets: shouldOpenTrip
   const tripGlobePlace = selectedTrip?.places[tripGlobePlaceIndex];
   const availableTripAddPlaces = selectedTrip ? places.filter((place) => !selectedTrip.places.some(({ key }) => key === place.key)) : [];
   const selectTripGlobePlace = (key: string) => { setTripGlobePlaceKey(key); setTripGlobeFocusRequest((current) => current + 1); };
-  return <KeyboardAvoidingView behavior={assistantInputFocused ? "height" : undefined} style={styles.root}>
+  return <View style={styles.root}>
     <View style={[styles.header, { paddingTop: insets.top + 6, paddingLeft: Math.max(insets.left, spacing.md), paddingRight: Math.max(insets.right, spacing.md) }]}><WorkspaceAppSwitcher active="compass" /></View>
     <View style={[styles.workspaceViewport, { paddingLeft: Math.max(insets.left, spacing.md), paddingRight: Math.max(insets.right, spacing.md) }]}>
       {selectedPlace ? <>
@@ -1330,7 +1339,7 @@ export function TravelWorkspace({ initialTripKey, openTripAssets: shouldOpenTrip
       </View>}</View>}
     </View>
 
-    <CoreComposer accessory={rootView === "globe" && !selectedPlace && !selectedTrip && selectedCountry && !countryDetailOpen && !cityDetailOpen ? <Button accessibilityLabel={`Reopen ${selectedCountry.name}`} contentMode="raw" onPress={() => openCountryDetail(selectedCountry, "globe", true)} size="sm" style={styles.placeIsland} variant="secondary"><LocationPinIcon size="sm" /><Text numberOfLines={1} style={styles.placeIslandText}>{selectedCountry.name}</Text><ChevronRightIcon size="sm" /></Button> : undefined} accessibilityLabel="Ask Core about saved cities" disabled={assistantBusy} editable={!assistantBusy} leading={<ChromeIcon glow={0.35} size={24} source={assistantIconSource} />} loading={assistantBusy} message={assistantMessage ? <View style={assistantFailed ? styles.inlineError : styles.inlineNotice}><Text style={styles.messageText}>{assistantMessage}</Text></View> : null} onChangeText={(value) => { setAssistantInput(value); assistantRequestKey.current = undefined; }} onFocusChange={handleCoreFocusChange} onSubmit={() => void askAssistant()} prompts={CORE_PROMPTS} sendIcon={<SendIcon size="sm" variant="inverse" />} value={assistantInput} />
+    <CoreComposer accessory={rootView === "globe" && !selectedPlace && !selectedTrip && selectedCountry && !countryDetailOpen && !cityDetailOpen ? <Button accessibilityLabel={`Reopen ${selectedCountry.name}`} contentMode="raw" onPress={() => openCountryDetail(selectedCountry, "globe", true)} size="sm" style={styles.placeIsland} variant="secondary"><LocationPinIcon size="sm" /><Text numberOfLines={1} style={styles.placeIslandText}>{selectedCountry.name}</Text><ChevronRightIcon size="sm" /></Button> : undefined} accessibilityLabel="Ask Core about saved cities" disabled={assistantBusy} editable={!assistantBusy} leading={<ChromeIcon glow={0.35} size={24} source={assistantIconSource} />} loading={assistantBusy} message={assistantMessage ? <View style={assistantFailed ? styles.inlineError : styles.inlineNotice}><Text style={styles.messageText}>{assistantMessage}</Text></View> : null} onChangeText={(value) => { setAssistantInput(value); assistantRequestKey.current = undefined; }} onFocusChange={handleCoreFocusChange} onSubmit={() => void askAssistant()} pageIdentity={(closeCore) => <WorkspaceAppSwitcher active="compass" identity="core" onSelectActive={closeCore} />} prompts={CORE_PROMPTS} sendIcon={<SendIcon size="sm" variant="inverse" />} value={assistantInput} />
 
     <BottomSheet footer={<View style={styles.sheetFooter}>{!countryAlreadySaved && countryDetail ? <Button disabled={countryImage?.status !== "ready"} onPress={saveCountry} size="md" variant="primary">Save</Button> : null}<Button onPress={() => setCountryDetailOpen(false)} size="md" style={styles.sheetSecondary} variant="secondary">Close</Button></View>} height="full" onOpenChange={setCountryDetailOpen} open={countryDetailOpen} title={selectedCountry?.name ?? "Country"}>
       <ScrollView contentContainerStyle={[styles.sheetContent, countryDetailError && styles.sheetEmptyContent]} keyboardShouldPersistTaps="handled" ref={countryScrollRef} showsVerticalScrollIndicator={false} style={styles.fullSheetScroll}><View style={[styles.countryDetail, countryDetailError && styles.sheetEmptyContent]}>{countryDetailLoading ? <GuideLoading label={`Loading information about ${selectedCountry?.name ?? "country"}`} text="Generating country guide..." /> : countryDetailError ? <View style={styles.countryDetailFailure}><GlobeIcon size="lg" variant="muted" /><Text style={styles.loadFailureText}>{countryDetailError}</Text></View> : countryDetail ? <><GuideHero detail={countryDetail} image={countryImage?.image} onImageError={() => { if (savedCountryImage) void overviewQuery.refetch(); }} />{detailSource === "globe" ? <><Text style={styles.popularCitiesTitle}>Popular cities</Text><View style={[styles.cityList, styles.countryCityList]}>{countryDetail.popularCities.map((city) => <Button accessibilityLabel={`Open ${city.name}, ${selectedCountry?.name ?? "country"}`} contentMode="raw" key={city.name} onPress={() => { if (selectedCountry) openCityDetail(city, selectedCountry, detailSource); }} size="md" style={[styles.cityPill, styles.sheetSecondary]} variant="secondary"><Text style={styles.cityName}>{city.name}</Text><ChevronRightIcon size="sm" /></Button>)}</View></> : null}</> : null}</View></ScrollView>
@@ -1377,7 +1386,7 @@ export function TravelWorkspace({ initialTripKey, openTripAssets: shouldOpenTrip
     <GeneratedDocumentSheets appendGeneration createLabel="Request new" documents={tripGuidesQuery.data} emptyMessage="No travel guides yet. Request one for this trip." error={tripGuidesQuery.error} generating={tripGuideGenerating} label="Travel guides" loading={tripGuidesQuery.isPending} onClose={closeTripGuides} onCreate={() => void createTripGuide()} onDetailClose={() => setSelectedTripGuide(undefined)} onOpen={setSelectedTripGuide} onRetry={() => void tripGuidesQuery.refetch()} open={tripGuidesOpen} selected={currentTripGuide}>{currentTripGuide ? <GeneratedDocumentDetail document={currentTripGuide} hero={<TripGuideHero places={selectedTrip?.places ?? []} />} /> : null}</GeneratedDocumentSheets>
 
     <BottomSheet footer={<Button onPress={() => setImageViewerKey(undefined)} size="md" style={styles.sheetSecondary} variant="secondary">Close</Button>} height="full" onOpenChange={(open) => { if (!open) setImageViewerKey(undefined); }} onSwipeLeft={tripImages.length > 1 ? () => focusTripImage(1) : undefined} onSwipeRight={tripImages.length > 1 ? () => focusTripImage(-1) : undefined} open={Boolean(imageViewer)} pageKey={imageViewer?.key} title={imageViewer?.title ?? "Image"}>{imageViewer ? <View style={styles.viewerContent}><View accessibilityActions={tripImages.length > 1 ? [{ name: "decrement", label: "Previous image" }, { name: "increment", label: "Next image" }] : undefined} accessibilityLabel={`${imageViewer.title} trip image`} accessibilityRole="adjustable" accessibilityValue={{ text: `${imageViewerIndex + 1} of ${tripImages.length}` }} onAccessibilityAction={({ nativeEvent }) => { if (nativeEvent.actionName === "decrement") focusTripImage(-1); if (nativeEvent.actionName === "increment") focusTripImage(1); }} style={styles.viewerFrame}><Image contentFit="contain" source={imageViewer.url} style={styles.viewerImage} /></View></View> : null}</BottomSheet>
-  </KeyboardAvoidingView>;
+  </View>;
 }
 
 function PlaceCard({ accessibilityLongPress = false, cardSize, disabled = false, onLongPress, onPress, place, selectable = false, selected = false }: { accessibilityLongPress?: boolean; cardSize?: number; disabled?: boolean; onLongPress?: () => void; onPress: () => void; place: Place; selectable?: boolean; selected?: boolean }) {

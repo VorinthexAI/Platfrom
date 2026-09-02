@@ -43,6 +43,13 @@ export type OpenRouterProviderConfig = z.input<typeof openRouterProviderConfigSc
 const PROVIDER_ID = 'openrouter' as ProviderId;
 const SPEECH_CHARACTER_LIMIT = 15_000;
 
+const UPSTREAM_PROVIDER_ROUTING: Readonly<Record<string, { order: readonly string[]; allow_fallbacks: boolean }>> = {
+  'google/gemini-3.1-flash-lite': { order: ['google-vertex/us'], allow_fallbacks: false },
+};
+function upstreamRouting(model: string) {
+  return (UPSTREAM_PROVIDER_ROUTING as Record<string, { order: readonly string[]; allow_fallbacks: boolean } | undefined>)[model];
+}
+
 const usageSchema = z.object({
   prompt_tokens: z.number().optional(), completion_tokens: z.number().optional(), total_tokens: z.number().optional(), cost: z.number().nullable().optional(),
 }).passthrough();
@@ -154,9 +161,11 @@ function chatMessages(chat: ChatInput) {
 }
 
 function chatBody(chat: ChatInput, model: string, stream = false) {
+  const routing = upstreamRouting(model);
   return {
     model,
     messages: chatMessages(chat),
+    ...(routing ? { provider: routing } : {}),
     ...(chat.tools?.length ? { tools: chat.tools.map((tool) => ({ type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.inputSchema } })) } : {}),
     ...(chat.responseFormat ? { response_format: { type: 'json_schema', json_schema: { name: chat.responseFormat.name, strict: true, schema: chat.responseFormat.schema } } } : {}),
     ...(chat.options?.temperature !== undefined ? { temperature: chat.options.temperature } : {}),
@@ -188,7 +197,9 @@ async function executeWeb<TInput, TOutput>(fetcher: typeof fetch, config: z.outp
   const result = await post(fetcher, config, '/chat/completions', {
     model: request.externalModelId,
     messages: [{ role: 'user', content: value.prompt }],
-    plugins: [{ id: 'web', engine: 'exa', max_results: 5 }],
+    ...(upstreamRouting(request.externalModelId) ? { provider: upstreamRouting(request.externalModelId) } : {}),
+    tools: [{ type: 'openrouter:web_search', parameters: { engine: 'native', max_results: 5, max_uses: 2, max_total_results: 10 } }],
+    max_tool_calls: 2,
     ...(value.responseFormat ? { response_format: { type: 'json_schema', json_schema: { name: value.responseFormat.name, strict: true, schema: value.responseFormat.schema } } } : {}),
   }, request, 'web request');
   const raw = response(chatResponseSchema, await result.json().catch(() => undefined), 'web');
@@ -354,24 +365,46 @@ async function* streamChat<TInput>(fetcher: typeof fetch, config: z.output<typeo
     const chat = input(chatInputSchema, request.input, 'text stream');
     const result = await post(fetcher, config, '/chat/completions', chatBody(chat, request.externalModelId, true), request, 'text stream');
     if (!result.body) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter returned no stream body');
-    const reader = result.body.getReader(); const decoder = new TextDecoder(); let buffer = ''; let sawDone = false;
+    const reader = result.body.getReader(); const decoder = new TextDecoder(); let buffer = ''; let sawDone = false; let finishReason: string | null | undefined;
+    const toolCalls = new Map<number, { id: string; name: string; arguments: string }>();
+    const parseEvent = (event: string): ProviderStreamChunk[] => {
+      const data = event.split(/\r?\n/).filter((line) => line.startsWith('data:')).map((line) => line.slice(5).trim()).join('');
+      if (!data) return [];
+      if (data === '[DONE]') { sawDone = true; return []; }
+      let json: unknown; try { json = JSON.parse(data); } catch (error) { throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter returned malformed stream JSON', { cause: error }); }
+      const parsed = response(z.object({ choices: z.array(z.object({ delta: z.object({ content: z.string().nullable().optional(), tool_calls: z.array(z.object({ index: z.number().int().nonnegative(), id: z.string().optional(), function: z.object({ name: z.string().optional(), arguments: z.string().optional() }).optional() }).passthrough()).optional() }).passthrough(), finish_reason: z.string().nullable().optional() }).passthrough()).optional(), usage: usageSchema.optional() }).passthrough(), json, 'stream event');
+      const chunks: ProviderStreamChunk[] = []; const choice = parsed.choices?.[0];
+      if (choice?.finish_reason != null) {
+        if (finishReason !== undefined && finishReason !== null && finishReason !== choice.finish_reason) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter returned conflicting stream finish reasons');
+        finishReason = choice.finish_reason;
+      }
+      const text = choice?.delta.content; if (text) chunks.push({ type: 'text-delta', text });
+      for (const part of choice?.delta.tool_calls ?? []) {
+        const current = toolCalls.get(part.index) ?? { id: '', name: '', arguments: '' };
+        if (part.id && current.id && current.id !== part.id) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter changed a streamed tool call id');
+        if (part.id) current.id = part.id;
+        if (part.function?.name) current.name += part.function.name;
+        if (part.function?.arguments) current.arguments += part.function.arguments;
+        toolCalls.set(part.index, current);
+      }
+      if (parsed.usage) chunks.push({ type: 'usage', usage: tokenUsage(parsed.usage.prompt_tokens, parsed.usage.completion_tokens, parsed.usage.total_tokens) });
+      return chunks;
+    };
     try {
       while (true) {
         const read = await reader.read(); buffer += decoder.decode(read.value, { stream: !read.done });
         const events = buffer.split(/\r?\n\r?\n/); buffer = events.pop() ?? '';
-        for (const event of events) {
-          const data = event.split(/\r?\n/).filter((line) => line.startsWith('data:')).map((line) => line.slice(5).trim()).join('');
-          if (!data) continue;
-          if (data === '[DONE]') { sawDone = true; continue; }
-          let json: unknown; try { json = JSON.parse(data); } catch (error) { throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter returned malformed stream JSON', { cause: error }); }
-          const parsed = response(z.object({ choices: z.array(z.object({ delta: z.object({ content: z.string().nullable().optional() }).passthrough() }).passthrough()).optional(), usage: usageSchema.optional() }).passthrough(), json, 'stream event');
-          const text = parsed.choices?.[0]?.delta.content; if (text) yield { type: 'text-delta', text };
-          if (parsed.usage) yield { type: 'usage', usage: tokenUsage(parsed.usage.prompt_tokens, parsed.usage.completion_tokens, parsed.usage.total_tokens) };
-        }
+        for (const event of events) for (const chunk of parseEvent(event)) yield chunk;
         if (read.done) break;
       }
+      if (buffer.trim()) for (const chunk of parseEvent(buffer)) yield chunk;
     } finally { reader.releaseLock(); }
     if (!sawDone) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter stream ended before completion');
+    if (toolCalls.size ? finishReason !== 'tool_calls' : finishReason === 'tool_calls' || finishReason == null) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter stream finish reason did not match its tool calls');
+    for (const [, call] of [...toolCalls.entries()].sort(([left], [right]) => left - right)) {
+      if (!call.id || !call.name) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter returned an incomplete streamed tool call');
+      yield { type: 'tool-call', toolCall: { id: call.id, name: call.name, arguments: parseToolArguments(call.arguments) } };
+    }
     yield { type: 'done' };
   } catch (error) { throw normalizeProviderError(PROVIDER_ID, error); }
 }

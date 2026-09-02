@@ -17,6 +17,11 @@ import { PUBLIC_TOOL_DEFINITIONS, TRUSTED_TOOL_DEFINITIONS, UNIFIED_TOOL_DEFINIT
 import type { PublicToolDependencies } from './tool-definition';
 import { WORKSPACE_TOOL_DEFINITIONS, type WorkspaceToolDependencies } from './workspace-tool-definitions';
 import type { TrustedEmailToolDependencies, TrustedEmailToolName } from './email-ingestion-tool-definitions';
+import { CONVERSATION_TOOL_DEFINITIONS } from './conversation-tool-definitions';
+import type { AgentRuntimeDependencies } from '@/lib/ai/agents';
+import { AGENT_TOOL_DEFINITIONS } from './agent-tool-definitions';
+import type { AgentToolDependencies } from './agent-tool-definitions';
+import { webSearchTool, type WebSearchToolDependencies } from './web-search';
 
 /** A tool name has exactly one registry entry. */
 export const TOOL_NAMES = UNIFIED_TOOL_DEFINITIONS.map(({ name }) => name) as [string, ...string[]];
@@ -26,6 +31,8 @@ const modelToolNameSchema = z.enum(MODEL_TOOL_NAMES);
 const publicToolDefinitionsByName = new Map(PUBLIC_TOOL_DEFINITIONS.map((definition) => [definition.name, definition]));
 const workspaceToolDefinitionsByName = new Map(WORKSPACE_TOOL_DEFINITIONS.map((definition) => [definition.name, definition]));
 const trustedToolDefinitionsByName = new Map(TRUSTED_TOOL_DEFINITIONS.map((definition) => [definition.name, definition]));
+const conversationToolDefinitionsByName = new Map(CONVERSATION_TOOL_DEFINITIONS.map((definition) => [definition.name, definition]));
+const agentToolDefinitionsByName = new Map(AGENT_TOOL_DEFINITIONS.map((definition) => [definition.name, definition]));
 
 /** Input validation for the one canonical definition of each public tool. */
 export const toolInputSchemas: Record<string, z.ZodTypeAny> = Object.fromEntries(
@@ -33,7 +40,7 @@ export const toolInputSchemas: Record<string, z.ZodTypeAny> = Object.fromEntries
 );
 
 export const TOOL_DEFINITIONS = PUBLIC_TOOL_DEFINITIONS.map(({ providerDefinition }) => providerDefinition);
-export interface ToolDependencies extends RouterDependencies, DocumentParseDependencies, Pick<ImageCaptionToolDependencies, 'executeImageCaption'>, Pick<ImageCreateVisualIdentityToolDependencies, 'executeDescription'> {
+export interface ToolDependencies extends RouterDependencies, DocumentParseDependencies, Pick<ImageCaptionToolDependencies, 'executeImageCaption'>, Pick<ImageCreateVisualIdentityToolDependencies, 'executeDescription'>, Pick<WebSearchToolDependencies, 'executeSearch'> {
   signal?: AbortSignal;
   organizationKey?: string;
   contentContext?: ToolContext;
@@ -51,6 +58,8 @@ export interface ToolDependencies extends RouterDependencies, DocumentParseDepen
   appSearchService?: AppSearchService;
   appTransformationService?: AppTransformationService;
   appSpeechService?: AppSpeechService;
+  conversationService?: AgentToolDependencies['conversations'];
+  agentDependencies?: AgentRuntimeDependencies;
 }
 
 /** Executes one of the capabilities exposed by the unified tool registry. */
@@ -63,6 +72,18 @@ export async function runTool(name: string, skill: string, rawInput: unknown, de
   if (toolName === imageCaptionTool.name) return imageCaptionTool.execute(rawInput, dependencies);
   if (toolName === imageCreateVisualIdentityTool.name) return imageCreateVisualIdentityTool.execute(rawInput, dependencies);
   if (!dependencies.contentContext) throw new Error(`Tool ${toolName} requires contentContext.`);
+  if (toolName === webSearchTool.name) return webSearchTool.execute(rawInput, {
+    organizationKey: dependencies.contentContext.organizationKey,
+    executeSearch: dependencies.executeSearch,
+    adapters: dependencies.adapters,
+    env: dependencies.env,
+    signal: dependencies.signal,
+    timeoutMs: dependencies.timeoutMs,
+  });
+  const agentDefinition = agentToolDefinitionsByName.get(toolName);
+  if (agentDefinition) return agentDefinition.execute(rawInput, { context: dependencies.contentContext, conversations: dependencies.conversationService, requestKey: dependencies.requestKey, agentDependencies: dependencies.agentDependencies });
+  const conversationDefinition = conversationToolDefinitionsByName.get(toolName);
+  if (conversationDefinition) return conversationDefinition.execute(rawInput, { context: dependencies.contentContext, conversations: dependencies.conversationService, requestKey: dependencies.requestKey });
   const workspaceDefinition = workspaceToolDefinitionsByName.get(toolName);
   if (workspaceDefinition) return workspaceDefinition.execute(rawInput, {
     context: dependencies.contentContext,
@@ -90,6 +111,7 @@ export async function runTool(name: string, skill: string, rawInput: unknown, de
   const definition = publicToolDefinitionsByName.get(toolName)!;
   return (definition.execute as (input: unknown, dependencies: PublicToolDependencies) => Promise<unknown>)(rawInput, {
     context: dependencies.contentContext,
+    requestKey: dependencies.requestKey,
     executeContent: dependencies.executeWorkspaceContent,
     content: {
       adapters: dependencies.adapters,
@@ -110,6 +132,7 @@ export async function runTrustedTool(name: TrustedEmailToolName, rawInput: unkno
 export { sanitizeAgentInput, sanitizedAgentMessageSchema } from './input-sanitizer';
 export { retrievalTool, retrievalInputSchema, retrievalFiltersSchema, retrieveNodeDocuments } from './retrieval';
 export { imageCaptionTool, imageCreateVisualIdentityTool };
+export { webSearchInputSchema, webSearchTool } from './web-search';
 export { imageSearchTool } from './image-search';
 export { imageSearchInputSchema } from './image-search';
 export { imageSimilarityOutputSchema } from './image-similarity';

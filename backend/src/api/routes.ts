@@ -53,6 +53,7 @@ import { appTransformationHandlers } from './app-transformation';
 import { appSpeechHandler } from './app-speech';
 import { publicBookShareHandlers } from './public-book-shares';
 import { deleteImageGenerationHistory, generateImage, listImageGenerationHistory } from './image-generation';
+import { conversationHandlers } from './conversations';
 
 const challengeHash = z.string().regex(/^[a-f0-9]{64}$/);
 const tokenHashBodyBase = strictObject({ token_hash: challengeHash });
@@ -404,6 +405,14 @@ export function registerRoutes(app: Hono) {
   app.get('/images/generation-history', listImageGenerationHistory);
   app.delete('/images/generation-history', deleteImageGenerationHistory);
   app.get('/events/stream', streamEvents);
+  app.post('/conversations', conversationHandlers.create);
+  app.post('/conversations/list', conversationHandlers.list);
+  app.post('/conversations/search', conversationHandlers.search);
+  app.patch('/conversations/:conversationKey', conversationHandlers.rename);
+  app.post('/conversations/:conversationKey/favorite', conversationHandlers.favorite);
+  app.delete('/conversations/:conversationKey', conversationHandlers.delete);
+  app.post('/conversations/:conversationKey/messages/list', conversationHandlers.messages);
+  app.post('/conversations/:conversationKey/turn/stream', conversationHandlers.turn);
 
   app.post('/presence/join', joinPresence);
   app.post('/presence/beat', presenceBeat);

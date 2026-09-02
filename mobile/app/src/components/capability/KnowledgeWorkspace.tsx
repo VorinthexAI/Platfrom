@@ -6,13 +6,13 @@ import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, type ComponentRef, type ReactNode } from "react";
-import { BackHandler, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View, useWindowDimensions, type NativeSyntheticEvent, type TextLayoutEventData } from "react-native";
+import { BackHandler, Keyboard, Platform, ScrollView, StyleSheet, Text, View, useWindowDimensions, type NativeSyntheticEvent, type TextLayoutEventData } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { BottomSheet, BottomSheetItem, BottomSheetMenu } from "@vorinthex/shared/ui/bottom-sheet";
 import { Badge } from "@vorinthex/shared/ui/badge";
 import { Button } from "@vorinthex/shared/ui/button";
-import { CoreComposer } from "@vorinthex/shared/ui/core-composer";
+import { PersistentCoreComposer as CoreComposer } from "@/components/PersistentCoreComposer";
 import { FileViewer } from "@vorinthex/shared/ui/file-viewer";
 import { LoadingText } from "@vorinthex/shared/ui/loading-text";
 import { PullToRefresh } from "@vorinthex/shared/ui/pull-to-refresh";
@@ -303,7 +303,7 @@ function ProcessingDocumentButton({ name }: { name: string }) {
   return <Skeleton accessibilityLabel={`Processing ${name}`} accessibilityRole="progressbar" style={styles.documentSkeleton} />;
 }
 
-export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, returnSignalConnectorKey, returnSignalMessageKey, returnSignalThreadKey, returnTripKey, returnTripName }: { initialDocumentKey?: string; initialFolderKey?: string; returnSignalConnectorKey?: string; returnSignalMessageKey?: string; returnSignalThreadKey?: string; returnTripKey?: string; returnTripName?: string } = {}) {
+export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, initialFolderKey, initialSearchQuery, returnSignalConnectorKey, returnSignalMessageKey, returnSignalThreadKey, returnTripKey, returnTripName }: { initialCollectionKind?: string; initialDocumentKey?: string; initialFolderKey?: string; initialSearchQuery?: string; returnSignalConnectorKey?: string; returnSignalMessageKey?: string; returnSignalThreadKey?: string; returnTripKey?: string; returnTripName?: string } = {}) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
@@ -371,7 +371,7 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
   const [rootDocuments, setRootDocuments] = useState<ContentDocument[]>([]);
   const [folderStack, setFolderStack] = useState<ContentFolder[]>(cachedInitialStack);
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>(cachedInitialFolder ? "folder" : "folders");
-  const [folderContentTab, setFolderContentTab] = useState<FolderContentTab>("folders");
+  const [folderContentTab, setFolderContentTab] = useState<FolderContentTab>(initialCollectionKind === "documents" || initialCollectionKind === "files" ? initialCollectionKind : "folders");
   const [similarContentTab, setSimilarContentTab] = useState<FolderContentTab>("folders");
   const [similarResults, setSimilarResults] = useState<ContentNeighbors>();
   const [similarLoading, setSimilarLoading] = useState(false);
@@ -426,7 +426,7 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
   const [libraryQuery, setLibraryQuery] = useState("");
   const [librarySearchResults, setLibrarySearchResults] = useState<ContentSearchResponse>();
   const [librarySearching, setLibrarySearching] = useState(false);
-  const [rootSearchQuery, setRootSearchQuery] = useState("");
+  const [rootSearchQuery, setRootSearchQuery] = useState(() => initialSearchQuery?.slice(0, 500) ?? "");
   const [rootSearchResults, setRootSearchResults] = useState<ContentSearchResponse>();
   const [rootSearching, setRootSearching] = useState(false);
   const [rootSearchRevision, setRootSearchRevision] = useState(0);
@@ -3813,7 +3813,7 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
   </View>;
   const rootSearchEmpty = Boolean(rootSearchQuery.trim() && !rootSearching && rootSearchResults && (folderContentTab === "folders" ? rootSearchFolders.length === 0 : rootSearchDocuments.length === 0));
   return (
-    <KeyboardAvoidingView behavior={aiInputFocused ? "height" : undefined} style={styles.root}>
+    <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + 6 }]}><WorkspaceAppSwitcher active="archive" /></View>
       {workspaceMode === "viewer" ? <FileViewer
         error={filePreviewError}
@@ -4073,6 +4073,7 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
         }}
         onLeadingPress={openEnhanceSheet}
         onSubmit={() => void runNoteInstruction()}
+        pageIdentity={(closeCore) => <WorkspaceAppSwitcher active="archive" identity="core" onSelectActive={closeCore} />}
         prompts={CORE_PROMPTS}
         sendIcon={<SendIcon size="sm" />}
         value={aiInstruction}
@@ -4367,7 +4368,7 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
         </>}
       </BottomSheet>
       {scanOpen ? <DocumentScanModal busy={scanBusy} error={scanError} onClose={() => { setScanOpen(false); setScanError(undefined); }} onSubmit={(pages) => void submitDocumentScan(pages)} /> : null}
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 

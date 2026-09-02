@@ -5,10 +5,13 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from "react";
 import {
   AccessibilityInfo,
   Animated,
+  BackHandler,
+  findNodeHandle,
   Keyboard,
   StyleSheet,
   Text,
@@ -18,13 +21,12 @@ import {
   type ViewStyle,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Reanimated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
+import Reanimated, { KeyboardState, useAnimatedKeyboard, useAnimatedStyle } from "react-native-reanimated";
 import Svg, { Defs, LinearGradient, Stop, Text as SvgText } from "react-native-svg";
 
 import { Button } from "../button/button.mobile";
-import { BottomSheet } from "../bottom-sheet/bottom-sheet.mobile";
+import { ChevronLeftIcon } from "../../icons/chevron-left/chevron-left.mobile";
 import { TextInput } from "../text-input/text-input.mobile";
-import { useKeyboard } from "../../hooks/use-keyboard.mobile";
 import { colors, spacing } from "../../tokens";
 
 export type CoreComposerProps = {
@@ -44,6 +46,8 @@ export type CoreComposerProps = {
   onLeadingPress?: () => void;
   onSubmit: () => void;
   openRequest?: number;
+  pageActions?: ReactNode;
+  pageIdentity: (closePage: () => void) => ReactNode;
   prompts: readonly string[];
   sendIcon: ReactNode;
   style?: StyleProp<ViewStyle>;
@@ -54,6 +58,8 @@ const COLLAPSED_INPUT_HEIGHT = 38;
 const INPUT_LINE_HEIGHT = 18;
 const INPUT_VERTICAL_PADDING = 10;
 const MAX_INPUT_HEIGHT = INPUT_LINE_HEIGHT * 6 + INPUT_VERTICAL_PADDING * 2;
+const CORE_FOCUS_DELAY_MS = 100;
+const CORE_PAGE_PROMPTS = ["Ask anything"] as const;
 
 function useReducedMotion() {
   const [reducedMotion, setReducedMotion] = useState(true);
@@ -151,6 +157,67 @@ function RotatingPrompt({ prompts }: { prompts: readonly string[] }) {
   );
 }
 
+type CorePageProps = {
+  bottomInset: number;
+  closePage: () => void;
+  composer: ReactNode;
+  inputRef: RefObject<NativeTextInput | null>;
+  leftInset: number;
+  message?: ReactNode;
+  pageActions?: ReactNode;
+  pageIdentity: (closePage: () => void) => ReactNode;
+  releaseSelection: () => void;
+  rightInset: number;
+  style?: StyleProp<ViewStyle>;
+  topInset: number;
+};
+
+function CorePage({ bottomInset, closePage, composer, inputRef, leftInset, message, pageActions, pageIdentity, releaseSelection, rightInset, style, topInset }: CorePageProps) {
+  const keyboard = useAnimatedKeyboard();
+  const keyboardInsetStyle = useAnimatedStyle(() => {
+    const keyboardMoving = [KeyboardState.OPENING, KeyboardState.OPEN, KeyboardState.CLOSING].includes(keyboard.state.value);
+    const keyboardLift = Math.max(0, keyboard.height.value - bottomInset);
+    return { paddingBottom: Math.max(bottomInset, spacing.sm) + (keyboardMoving ? keyboardLift + Math.min(spacing.md, keyboardLift) : 0) };
+  }, [bottomInset]);
+
+  useEffect(() => {
+    let selectionFrame: number | undefined;
+    const focusTimeout = setTimeout(() => {
+      inputRef.current?.focus();
+      selectionFrame = requestAnimationFrame(releaseSelection);
+    }, CORE_FOCUS_DELAY_MS);
+    return () => {
+      clearTimeout(focusTimeout);
+      if (selectionFrame !== undefined) cancelAnimationFrame(selectionFrame);
+    };
+  }, [inputRef, releaseSelection]);
+
+  useEffect(() => BackHandler.addEventListener("hardwareBackPress", () => {
+    closePage();
+    return true;
+  }).remove, [closePage]);
+
+  return <View accessibilityLabel="Core" accessibilityViewIsModal onAccessibilityEscape={closePage} style={styles.page}>
+    <View style={[styles.pageIdentityHeader, {
+      paddingTop: topInset + 6,
+      paddingLeft: Math.max(leftInset, spacing.md),
+      paddingRight: Math.max(rightInset, spacing.md),
+    }]}>{pageIdentity(closePage)}</View>
+    <Reanimated.View style={[styles.pageContent, style, keyboardInsetStyle, {
+      paddingLeft: Math.max(leftInset, spacing.md),
+      paddingRight: Math.max(rightInset, spacing.md),
+    }]}>
+      <View style={styles.pageTitleRow}>
+        <Button accessibilityLabel="Back from Core" contentMode="raw" onPress={closePage} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button>
+        <Text numberOfLines={1} style={styles.pageTitle}>Core</Text>
+        {pageActions ?? <View style={styles.pageTitleSpacer} />}
+      </View>
+      <View style={styles.pageConversation}>{message}</View>
+      <View>{composer}</View>
+    </Reanimated.View>
+  </View>;
+}
+
 export function CoreComposer({
   accessory,
   accessibilityHint,
@@ -168,70 +235,105 @@ export function CoreComposer({
   onLeadingPress,
   onSubmit,
   openRequest = 0,
+  pageActions,
+  pageIdentity,
   prompts,
   sendIcon,
   style,
   value,
 }: CoreComposerProps) {
   const insets = useSafeAreaInsets();
-  const keyboardVisible = useKeyboard();
-  const [sheetOpen, setSheetOpen] = useState(false);
+  const [pageOpen, setPageOpen] = useState(false);
   const [inputHeight, setInputHeight] = useState(COLLAPSED_INPUT_HEIGHT);
+  const [inputLineCount, setInputLineCount] = useState(1);
   const [inputSelection, setInputSelection] = useState<{ start: number; end: number }>();
+  const closeFallbackRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const closeSubscriptionRef = useRef<{ remove: () => void } | undefined>(undefined);
+  const closingRef = useRef(false);
   const inputRef = useRef<NativeTextInput>(null);
   const intentionalFocus = useRef(false);
   const onFocusChangeRef = useRef(onFocusChange);
+  const pageWasOpenRef = useRef(false);
+  const valueRef = useRef(value);
   onFocusChangeRef.current = onFocusChange;
+  valueRef.current = value;
   const showPrompt = value.length === 0;
-  const keyboardSpacerHeight = useSharedValue(0);
-  const keyboardSpacerStyle = useAnimatedStyle(() => ({ height: keyboardSpacerHeight.value }));
+
+  const finishClose = useCallback(() => {
+    if (!closingRef.current) return;
+    closeSubscriptionRef.current?.remove();
+    closeSubscriptionRef.current = undefined;
+    if (closeFallbackRef.current) clearTimeout(closeFallbackRef.current);
+    closeFallbackRef.current = undefined;
+    closingRef.current = false;
+    intentionalFocus.current = false;
+    setPageOpen(false);
+    setInputHeight(COLLAPSED_INPUT_HEIGHT);
+    setInputLineCount(1);
+    setInputSelection(undefined);
+    onFocusChangeRef.current?.(false);
+  }, []);
+
+  const closePage = useCallback(() => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    if (Keyboard.isVisible()) {
+      closeSubscriptionRef.current = Keyboard.addListener("keyboardDidHide", finishClose);
+      closeFallbackRef.current = setTimeout(finishClose, 500);
+    }
+    inputRef.current?.blur();
+    Keyboard.dismiss();
+    if (!Keyboard.isVisible()) finishClose();
+  }, [finishClose]);
+
+  const releaseInputSelection = useCallback(() => setInputSelection(undefined), []);
+
+  const openPage = useCallback(() => {
+    if (pageOpen) return;
+    setInputHeight(COLLAPSED_INPUT_HEIGHT);
+    setInputLineCount(1);
+    setInputSelection({ start: valueRef.current.length, end: valueRef.current.length });
+    onFocusChangeRef.current?.(true);
+    setPageOpen(true);
+  }, [pageOpen]);
 
   useEffect(() => {
-    keyboardSpacerHeight.value = withTiming(keyboardVisible ? 300 : 0, { duration: 300 });
-  }, [keyboardSpacerHeight, keyboardVisible]);
-
-  const closeSheet = useCallback(() => {
-    Keyboard.dismiss();
-    inputRef.current?.blur();
-    intentionalFocus.current = false;
-    setSheetOpen(false);
-    setInputHeight(COLLAPSED_INPUT_HEIGHT);
-    setInputSelection(undefined);
-    onFocusChange?.(false);
-  }, [onFocusChange]);
-
-  function openSheet() {
-    if (sheetOpen) return;
-    setInputHeight(COLLAPSED_INPUT_HEIGHT);
-    setInputSelection({ start: 0, end: 0 });
-    onFocusChangeRef.current?.(true);
-    setSheetOpen(true);
-  }
+    const pageWasOpen = pageWasOpenRef.current;
+    pageWasOpenRef.current = pageOpen;
+    if (!pageWasOpen || pageOpen) return;
+    const timeout = setTimeout(() => {
+      const inputHandle = findNodeHandle(inputRef.current);
+      if (inputHandle) AccessibilityInfo.setAccessibilityFocus(inputHandle);
+    }, 0);
+    return () => clearTimeout(timeout);
+  }, [pageOpen]);
 
   useEffect(() => {
     if (openRequest <= 0) return;
     setInputHeight(COLLAPSED_INPUT_HEIGHT);
-    setInputSelection({ start: 0, end: 0 });
-    onFocusChange?.(true);
-    setSheetOpen(true);
+    setInputLineCount(1);
+    setInputSelection({ start: valueRef.current.length, end: valueRef.current.length });
+    onFocusChangeRef.current?.(true);
+    setPageOpen(true);
   }, [openRequest]);
 
+  useEffect(() => () => {
+    closeSubscriptionRef.current?.remove();
+    if (closeFallbackRef.current) clearTimeout(closeFallbackRef.current);
+  }, []);
+
   useEffect(() => {
-    if (!sheetOpen) return;
-    let selectionReleaseTimeout: ReturnType<typeof setTimeout> | undefined;
-    const focusTimeout = setTimeout(() => {
-      inputRef.current?.focus();
-      selectionReleaseTimeout = setTimeout(() => setInputSelection(undefined), 300);
-    }, 300);
-    return () => {
-      clearTimeout(focusTimeout);
-      if (selectionReleaseTimeout) clearTimeout(selectionReleaseTimeout);
-    };
-  }, [sheetOpen]);
+    if (editable) return;
+    inputRef.current?.blur();
+    Keyboard.dismiss();
+  }, [editable]);
 
   useEffect(() => {
     if (value.length !== 0) return;
-    const timeout = setTimeout(() => setInputHeight(COLLAPSED_INPUT_HEIGHT), 0);
+    const timeout = setTimeout(() => {
+      setInputHeight(COLLAPSED_INPUT_HEIGHT);
+      setInputLineCount(1);
+    }, 0);
     return () => clearTimeout(timeout);
   }, [value]);
 
@@ -241,14 +343,15 @@ export function CoreComposer({
 
   const composer = (expanded: boolean) => {
     const multiline = expanded && inputHeight > COLLAPSED_INPUT_HEIGHT;
-    return <View style={[styles.composer, expanded && styles.composerOpen]}>
+    const inputValue = expanded ? value : (value.split(/\r?\n/)[0] ?? "");
+    return <View style={[styles.composer, multiline && styles.composerOpen]}>
     {onLeadingPress ? (
       <Button
         accessibilityLabel={leadingAccessibilityLabel ?? "Core actions"}
         contentMode="raw"
         disabled={leadingDisabled}
         onPress={onLeadingPress}
-        size={expanded ? "md" : "sm"}
+        size="sm"
         style={multiline ? styles.leadingTop : undefined}
         variant="icon"
       >
@@ -262,8 +365,9 @@ export function CoreComposer({
         accessibilityElementsHidden
         importantForAccessibility="no-hide-descendants"
         onTextLayout={({ nativeEvent }) => {
-          const lineCount = Math.min(6, Math.max(1, nativeEvent.lines.length));
-          const nextHeight = INPUT_VERTICAL_PADDING * 2 + INPUT_LINE_HEIGHT * lineCount;
+          const lineCount = Math.max(1, nativeEvent.lines.length);
+          const nextHeight = INPUT_VERTICAL_PADDING * 2 + INPUT_LINE_HEIGHT * Math.min(6, lineCount);
+          setInputLineCount(lineCount);
           setInputHeight((current) => current === nextHeight ? current : nextHeight);
         }}
         pointerEvents="none"
@@ -276,7 +380,7 @@ export function CoreComposer({
           pointerEvents="none"
           style={styles.prompt}
         >
-          <RotatingPrompt prompts={prompts} />
+          <RotatingPrompt key={expanded ? "core-page" : "workspace"} prompts={expanded ? CORE_PAGE_PROMPTS : prompts} />
         </View>
       ) : null}
       <TextInput
@@ -287,14 +391,17 @@ export function CoreComposer({
         multiline={expanded}
         numberOfLines={expanded ? undefined : 1}
         onChangeText={(nextValue) => {
-          if (expanded && nextValue.length === 0) setInputHeight(COLLAPSED_INPUT_HEIGHT);
+          if (expanded && nextValue.length === 0) {
+            setInputHeight(COLLAPSED_INPUT_HEIGHT);
+            setInputLineCount(1);
+          }
           onChangeText(nextValue);
         }}
         onFocus={() => {
           if (expanded) return;
           if (intentionalFocus.current) {
             intentionalFocus.current = false;
-            openSheet();
+            openPage();
             return;
           }
           inputRef.current?.blur();
@@ -305,11 +412,12 @@ export function CoreComposer({
         placeholder=""
         ref={inputRef}
         returnKeyType={expanded ? "default" : "send"}
-        scrollEnabled={expanded && inputHeight >= MAX_INPUT_HEIGHT - 1}
+        scrollEnabled={expanded && inputLineCount > 6}
         selection={expanded ? inputSelection : undefined}
+        showSoftInputOnFocus={expanded}
         style={[styles.input, !multiline && styles.inputSingleLine]}
         textAlignVertical={multiline ? "top" : "center"}
-        value={value}
+        value={inputValue}
       />
     </View>
     <Button
@@ -318,8 +426,8 @@ export function CoreComposer({
       disabled={disabled || !value.trim()}
       loading={loading}
       onPress={submit}
-      size={expanded ? "md" : "sm"}
-      style={[multiline ? styles.sendBottom : undefined, expanded ? styles.expandedSend : undefined]}
+      size="sm"
+      style={multiline ? styles.sendBottom : undefined}
       variant="primary"
     >
       {sendIcon}
@@ -329,21 +437,15 @@ export function CoreComposer({
 
   return (
     <>
-      <View pointerEvents="box-none" style={[styles.layer, {
+      {!pageOpen ? <View pointerEvents="box-none" style={[styles.layer, {
         marginTop: spacing.sm,
         paddingBottom: Math.max(insets.bottom, spacing.sm),
         paddingLeft: Math.max(insets.left, spacing.md),
         paddingRight: Math.max(insets.right, spacing.md),
       }]}>
-        {!sheetOpen ? <>{accessory}{composer(false)}</> : null}
-      </View>
-      <BottomSheet height="full" onOpenChange={(open) => { if (!open) closeSheet(); }} open={sheetOpen} title="Core">
-        {sheetOpen ? <View style={[styles.sheetBodyOpen, style]}>
-          {message}
-          {composer(true)}
-          <Reanimated.View pointerEvents="none" style={keyboardSpacerStyle} />
-        </View> : null}
-      </BottomSheet>
+        {accessory}{composer(false)}
+      </View> : null}
+      {pageOpen ? <CorePage bottomInset={insets.bottom} closePage={closePage} composer={composer(true)} inputRef={inputRef} leftInset={insets.left} message={message} pageActions={pageActions} pageIdentity={pageIdentity} releaseSelection={releaseInputSelection} rightInset={insets.right} style={style} topInset={insets.top} /> : null}
     </>
   );
 }
@@ -353,14 +455,49 @@ const styles = StyleSheet.create({
     gap: 6,
     zIndex: 20,
   },
-  sheetBodyOpen: {
+  page: {
+    bottom: 0,
+    backgroundColor: colors.page,
+    elevation: 30,
+    left: 0,
+    position: "absolute",
+    right: 0,
+    top: 0,
+    zIndex: 100,
+  },
+  pageIdentityHeader: {
+    minHeight: 64,
+    paddingBottom: 8,
+    justifyContent: "center",
+    borderBottomColor: colors.hairline,
+    borderBottomWidth: 1,
+  },
+  pageContent: {
     flex: 1,
-    gap: 6,
+    gap: spacing.md,
+    paddingTop: spacing.md,
+  },
+  pageTitleRow: {
+    minHeight: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+  },
+  pageTitle: {
+    flex: 1,
+    minWidth: 0,
+    color: colors.text,
+    fontFamily: "Geist_300Light",
+    fontSize: 24,
+  },
+  pageTitleSpacer: { width: 28 },
+  pageConversation: {
+    flex: 1,
     justifyContent: "flex-end",
   },
   composer: {
     alignItems: "center",
-    backgroundColor: "#0B0F14",
+    backgroundColor: colors.page,
     borderColor: colors.border,
     borderRadius: 999,
     borderWidth: 1,
@@ -375,7 +512,6 @@ const styles = StyleSheet.create({
     shadowRadius: 18,
   },
   composerOpen: {
-    borderColor: "#55616C",
     borderRadius: 24,
     shadowOpacity: 0.7,
   },
@@ -387,7 +523,6 @@ const styles = StyleSheet.create({
   },
   leadingTop: { alignSelf: "flex-start" },
   sendBottom: { alignSelf: "flex-end" },
-  expandedSend: { height: 39, minHeight: 39, width: 39 },
   inputArea: {
     flex: 1,
     justifyContent: "center",

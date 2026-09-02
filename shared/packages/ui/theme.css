@@ -1,7 +1,7 @@
 :root {
   --vui-color-page: #030507;
-  --vui-color-secondary: #0d1117;
-  --vui-color-surface: #141922;
+  --vui-color-secondary: var(--vui-color-page);
+  --vui-color-surface: var(--vui-color-page);
   --vui-color-text: #f5f7f8;
   --vui-color-muted: #7b858c;
   --vui-color-accent: #dde2e5;
@@ -25,11 +25,7 @@
     #7b858c 76%,
     #ffffff 100%
   );
-  --vui-gradient-panel: linear-gradient(
-    180deg,
-    rgba(20, 25, 34, 0.88),
-    rgba(3, 5, 7, 0.96)
-  );
+  --vui-gradient-panel: var(--vui-color-page);
   --vui-gradient-border: linear-gradient(
     135deg,
     rgba(255, 255, 255, 0.42),
@@ -246,9 +242,9 @@
 }
 
 .vui-action-pill-main {
-  align-items: flex-start;
+  align-items: center;
   flex: 1;
-  justify-content: center;
+  justify-content: flex-start;
   min-height: 42px;
   min-width: 0;
   overflow: hidden;
@@ -262,6 +258,50 @@
   margin-right: 6px;
   padding: 0;
   width: 32px;
+}
+
+.vui-action-pill--compact {
+  min-height: 38px;
+  height: 38px;
+  border-color: rgba(221, 226, 229, 0.14);
+  background: transparent;
+}
+
+.vui-action-pill--compact .vui-action-pill-main {
+  min-height: 32px;
+  height: 32px;
+  padding-inline: 10px;
+}
+
+.vui-action-pill--compact .vui-action-pill-action {
+  width: 22px;
+  height: 22px;
+  min-height: 22px;
+}
+
+.vui-chrome-icon {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  justify-content: center;
+  position: relative;
+}
+
+.vui-chrome-icon::before {
+  background: radial-gradient(circle, rgb(221 226 229 / 28%) 0%, rgb(221 226 229 / 10%) 55%, transparent 100%);
+  content: "";
+  inset: -45%;
+  opacity: var(--vui-chrome-icon-glow, 0.55);
+  pointer-events: none;
+  position: absolute;
+}
+
+.vui-chrome-icon img {
+  display: block;
+  height: 100%;
+  object-fit: contain;
+  position: relative;
+  width: 100%;
 }
 
 /* Loading keeps each variant recognizable while the rising melt carries
@@ -309,7 +349,7 @@
 }
 
 .vui-button-primary {
-  --vui-button-loading-background: var(--vui-gradient-chrome);
+  --vui-button-loading-background: rgba(3, 5, 7, 0.12);
   --vui-button-loading-color: #030507;
   background: var(--vui-gradient-chrome);
   background-position: 0% 0%;

@@ -125,9 +125,8 @@ test("presents managed media with its persisted app identity and collection-only
   expect(source).toContain("selectedImage && (activeCollection || !isManagedGalleryImage(selectedImage))");
 });
 
-test("only lifts Core for its own focus and uses distinct image sheet presentations", () => {
-  expect(source).toContain('behavior={aiInputFocused ? "height" : undefined}');
-  expect(source).toContain("setAiInputFocused(focused)");
+test("leaves Core keyboard movement to its composer and uses distinct image sheet presentations", () => {
+  expect(source).not.toContain("KeyboardAvoidingView");
   expect(source).toContain('hideHeading={activeSheet === "rootActions" || activeSheet === "actions" || activeSheet === "collectionMenu" || activeSheet === "filter" || activeSheet === "imageActions" || activeSheet === "bulkActions" || activeSheet === "cleanupMenu"}');
   expect(source).toContain('open={!sharingOpen && sheetOpen && (activeSheet === "image" || activeSheet === "imageActions") && Boolean(selectedImage || selectedOptimisticItem)}');
   expect(source).toContain('height="full"\n        onOpenChange');
@@ -806,9 +805,10 @@ test("gates member editing to owners and keeps removal inside one shared pill", 
   expect(sharingSource).toContain('view === "member" && selectedMember && owner && selectedMember.role !== "owner"');
   expect(sharingSource).toContain('view === "member" ? selectedMember?.name ?? "Member"');
   expect(sharingSource).toContain('Joined {dateTime(selectedMember.joinedAt)}');
-  expect(actionPillSource).toContain('style={styles.action} variant="secondary">{action}</Button>');
+  expect(actionPillSource).toContain('style={[styles.action, compact && styles.compactAction]} variant="secondary">{action}</Button>');
   expect(actionPillSource).toContain('marginRight: 6');
   expect(actionPillSource).toContain('borderRadius: 999');
+  expect(actionPillSource).toContain('alignItems: "center", justifyContent: "flex-start"');
 });
 
 test("keeps pending-invite rejection inside the shared pill", () => {

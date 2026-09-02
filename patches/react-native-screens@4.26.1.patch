@@ -1,0 +1,39 @@
+diff --git a/android/src/main/java/com/swmansion/rnscreens/gamma/stack/header/config/StackHeaderType.kt b/android/src/main/java/com/swmansion/rnscreens/gamma/stack/header/config/StackHeaderType.kt
+index 13fbe182d48b8874ea5319e3db1133baa2f346d1..601b21a50086fbb43ab289e2b1591453c126defd 100644
+--- a/android/src/main/java/com/swmansion/rnscreens/gamma/stack/header/config/StackHeaderType.kt
++++ b/android/src/main/java/com/swmansion/rnscreens/gamma/stack/header/config/StackHeaderType.kt
+@@ -1,6 +1,6 @@
+ package com.swmansion.rnscreens.gamma.stack.header.config
+ 
+-internal enum class StackHeaderType {
++enum class StackHeaderType {
+     SMALL,
+     MEDIUM,
+     LARGE,
+diff --git a/android/src/main/java/com/swmansion/rnscreens/gamma/stack/header/subview/StackHeaderSubview.kt b/android/src/main/java/com/swmansion/rnscreens/gamma/stack/header/subview/StackHeaderSubview.kt
+index fde735dbde4808cceb90b2c595be4985b26c5c2a..705aa18829491913b27ad0aba9905dc0a8689d96 100644
+--- a/android/src/main/java/com/swmansion/rnscreens/gamma/stack/header/subview/StackHeaderSubview.kt
++++ b/android/src/main/java/com/swmansion/rnscreens/gamma/stack/header/subview/StackHeaderSubview.kt
+@@ -43,7 +43,7 @@ class StackHeaderSubview(
+ 
+     internal var stateWrapper by shadowStateProxy::stateWrapper
+ 
+-    fun updateContentOriginOffset(
++    override fun updateContentOriginOffset(
+         x: Int,
+         y: Int,
+     ) {
+diff --git a/android/src/main/java/com/swmansion/rnscreens/gamma/stack/header/subview/StackHeaderSubviewProviding.kt b/android/src/main/java/com/swmansion/rnscreens/gamma/stack/header/subview/StackHeaderSubviewProviding.kt
+index 0f8c0cb9871711b82c15860dfa5a13f389503cc9..02bccf151d3d5855930f50226465f42d3a1723ec 100644
+--- a/android/src/main/java/com/swmansion/rnscreens/gamma/stack/header/subview/StackHeaderSubviewProviding.kt
++++ b/android/src/main/java/com/swmansion/rnscreens/gamma/stack/header/subview/StackHeaderSubviewProviding.kt
+@@ -6,4 +6,9 @@ interface StackHeaderSubviewProviding {
+     val type: StackHeaderSubviewType
+     val collapseMode: StackHeaderSubviewCollapseMode
+     val view: View
++
++    fun updateContentOriginOffset(
++        x: Int,
++        y: Int,
++    )
+ }

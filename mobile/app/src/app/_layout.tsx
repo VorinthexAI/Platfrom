@@ -8,7 +8,6 @@ import { StatusBar } from "expo-status-bar";
 import { BottomSheetScene } from "@vorinthex/shared/ui/bottom-sheet";
 import { ToastProvider } from "@vorinthex/shared/ui/toast";
 import { useEffect } from "react";
-import { BackHandler, Platform } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
@@ -75,14 +74,6 @@ export default function RootLayout() {
     if (status === "authenticated" && !isOnboarded && !isPublic && root !== "onboarding") router.replace("/onboarding");
     if (status === "authenticated" && isOnboarded && root === "onboarding") router.replace("/capability/archive");
   }, [pathname, router, segments, status]);
-
-  useEffect(() => {
-    if (Platform.OS !== "android" || !pathname.startsWith("/capability/")) return;
-    return BackHandler.addEventListener("hardwareBackPress", () => {
-      if (pathname !== "/capability/archive") router.replace("/capability/archive");
-      return true;
-    }).remove;
-  }, [pathname, router]);
 
   if ((!fontsLoaded && !fontError) || status === "bootstrapping") {
     return null;

@@ -1796,6 +1796,9 @@ export const collections: CollectionSpec[] = [
   { name: 'contentIdempotency', skipEmbedding: true, indexes: [{ fields: ['organizationKey', 'actorKey', 'tool', 'idempotencyKey'], unique: true }, { fields: ['leaseExpiresAt'], sparse: true }, { fields: ['expiresAt'], sparse: true }] },
   // Private global user history. Identity is deliberately independent of every product and scope.
   { name: 'userSearches', skipEmbedding: true, indexes: [{ fields: ['userKey', 'normalizedQuery'], unique: true }, { fields: ['userKey', 'searchedAt'] }] },
+  // Private Core conversations. Assistant embeddings are written only after completed turns.
+  { name: 'conversations', skipEmbedding: true, indexes: [{ fields: ['organizationKey', 'scopeKey', 'userKey', 'isFavorite', 'updatedAt'] }, { fields: ['organizationKey', 'scopeKey', 'userKey', 'updatedAt'] }] },
+  { name: 'conversationMessages', skipEmbedding: true, indexes: [{ fields: ['conversationKey', 'userKey', 'turnKey', 'role'], unique: true }, { fields: ['organizationKey', 'scopeKey', 'userKey', 'conversationKey', 'createdAt'] }, { fields: ['conversationKey', 'role', 'status'] }] },
   // Private generation prompt history. Generated media and storage references never belong here.
   { name: 'userGenerations', skipEmbedding: true, indexes: [{ fields: ['userKey', 'type', 'normalizedPrompt'], unique: true }, { fields: ['userKey', 'type', 'generatedAt'] }] },
   // Private durable outbox for object deletion after metadata commits.
@@ -2046,6 +2049,9 @@ async function main() {
       for (const index of await collection.indexes()) {
         if (JSON.stringify(index.fields ?? []) === JSON.stringify(['scopeKey', 'collectionKey', 'imageKey'])) await collection.dropIndex(index.id);
       }
+    }
+    if (spec.name === 'conversationMessages') {
+      await targetDb.query('FOR message IN conversationMessages FILTER !IS_STRING(message.requestHash) || !REGEX_TEST(message.requestHash, "^[a-f0-9]{64}$") LET userMessage = message.role == "USER" ? message : FIRST(FOR candidate IN conversationMessages FILTER candidate.conversationKey == message.conversationKey && candidate.turnKey == message.turnKey && candidate.role == "USER" LIMIT 1 RETURN candidate) LET payload = userMessage == null ? message.content : userMessage.content UPDATE message WITH { requestHash: SHA256(CONCAT_SEPARATOR("\\u0000", message.conversationKey, payload)) } IN conversationMessages');
     }
     if (spec.name === 'contentSearchQueries') {
       await targetDb.query('FOR query IN contentSearchQueries FILTER IS_STRING(query.expiresAt) && query.expiresAt <= DATE_ISO8601(DATE_NOW()) && query.output != null UPDATE query WITH { output: null } IN contentSearchQueries');

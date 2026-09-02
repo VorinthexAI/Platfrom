@@ -533,8 +533,8 @@ describe('Content runtime', () => {
         output,
         usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
         providerId: 'openrouter',
-        modelId: request.actionSlug === 'embed' ? 'openai.text-embedding-3-small' : 'google.gemini-3.1-flash-lite-preview',
-        externalModelId: request.actionSlug === 'embed' ? 'openai/text-embedding-3-small' : 'google/gemini-3.1-flash-lite-preview',
+        modelId: request.actionSlug === 'embed' ? 'openai.text-embedding-3-small' : 'google.gemini-3.1-flash-lite',
+        externalModelId: request.actionSlug === 'embed' ? 'openai/text-embedding-3-small' : 'google/gemini-3.1-flash-lite',
       };
     };
     const dependencies = { repository: f.repository, executeAction };

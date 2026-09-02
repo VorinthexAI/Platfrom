@@ -145,8 +145,7 @@ export async function executeAsk<TOutput>(organizationKey: string, input: CoreCh
 export async function executeWebSearch<TOutput>(organizationKey: string, input: WebInput, options: ExecuteActionOptions = {}) {
   const { mode, ...providerInput } = webInputSchema.parse(input);
   return executeAction<typeof providerInput, TOutput>({
-    mode: 'model', organizationKey, actionSlug: 'web',
-    modelSlug: 'google.gemini-3.1-flash-lite-preview',
+    mode: 'auto', organizationKey, actionSlug: 'web',
   }, providerInput, options);
 }
 
@@ -159,5 +158,32 @@ export async function* streamRoute<TInput>(options: ExecuteRouteOptions<TInput>)
   } catch (error) {
     const normalized = normalizeProviderError(options.decision.providerSlug, error);
     throw new ProviderExecutionError(options.decision.actionSlug, [{ modelId: options.decision.modelSlug, providerId: options.decision.providerSlug, externalModelId: options.decision.providerModelId, code: normalized.code, message: normalized.message }], { cause: normalized });
+  }
+}
+
+/** Streams the canonical provider-neutral text action over its selected server-owned route. */
+export async function* streamAsk(organizationKey: string, input: CoreChatInput, options: ExecuteActionOptions = {}) {
+  const { mode: _mode, ...providerInput } = coreChatInputSchema.parse(input);
+  const decision = (await selectRoutes({ mode: 'auto', organizationKey, actionSlug: 'text' }, options, options.providers))[0]!;
+  const attempts = options.retry?.attempts ?? 3;
+  const intervalMs = options.retry?.intervalMs ?? 2_000;
+  for (let attempt = 0; ; attempt += 1) {
+    let emitted = false;
+    try {
+      for await (const chunk of streamRoute({ decision, input: providerInput, adapters: options.adapters, env: options.env, timeoutMs: options.timeoutMs, signal: options.signal })) {
+        emitted = true;
+        yield chunk;
+      }
+      return;
+    } catch (error) {
+      const rateLimited = error instanceof ProviderExecutionError && error.attempts.length > 0 && error.attempts.every(({ code }) => code === 'rate_limited');
+      if (emitted || !rateLimited || attempt >= attempts - 1) throw error;
+      await new Promise<void>((resolve, reject) => {
+        if (options.signal?.aborted) { reject(options.signal.reason ?? new DOMException('The operation was aborted', 'AbortError')); return; }
+        const aborted = () => { clearTimeout(timer); reject(options.signal?.reason ?? new DOMException('The operation was aborted', 'AbortError')); };
+        const timer = setTimeout(() => { options.signal?.removeEventListener('abort', aborted); resolve(); }, Math.min(30_000, intervalMs * 2 ** attempt));
+        options.signal?.addEventListener('abort', aborted, { once: true });
+      });
+    }
   }
 }

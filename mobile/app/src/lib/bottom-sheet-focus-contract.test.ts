@@ -6,6 +6,7 @@ const root = resolve(import.meta.dir, "../../../..");
 const sheet = readFileSync(resolve(root, "shared/packages/ui/components/bottom-sheet/bottom-sheet.mobile.tsx"), "utf8");
 const webSheet = readFileSync(resolve(root, "shared/packages/ui/components/bottom-sheet/bottom-sheet.web.tsx"), "utf8");
 const input = readFileSync(resolve(root, "shared/packages/ui/components/text-input/text-input.mobile.tsx"), "utf8");
+const composer = readFileSync(resolve(root, "shared/packages/ui/components/core-composer/core-composer.mobile.tsx"), "utf8");
 
 test("mobile BottomSheet owns focus cycles and excludes inactive transition surfaces", () => {
   expect(sheet).toContain("focusKey?: string");
@@ -24,6 +25,13 @@ test("shared mobile TextInput registers while preserving refs and consumer focus
   expect(input).toContain("else if (ref) ref.current = instance");
   expect(input).toContain("registration?.claim()");
   expect(input).toContain("onFocus?.(event)");
+});
+
+test("shared mobile TextInput lets Core expose its animated gradient prompt", () => {
+  expect(input).toContain("style={[styles.input, styles.background, style]}");
+  expect(composer).toContain('backgroundColor: "transparent"');
+  expect(composer).toContain('<RotatingPrompt key={expanded ? "core-page" : "workspace"}');
+  expect(composer).toContain("fill={`url(#${gradientId})`}");
 });
 
 test("web BottomSheet accepts focusKey without mobile focus coordination", () => {

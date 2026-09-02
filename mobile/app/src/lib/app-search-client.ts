@@ -7,7 +7,7 @@ import { useAuthStore } from "@/state/auth";
 export const appSearchCollectionSlugSchema = z.enum(["folders", "documents", "files", "collections", "images", "inboxes", "email-tones", "email-messages", "email-drafts", "places", "trips", "countries", "books"]);
 export type AppSearchCollectionSlug = z.infer<typeof appSearchCollectionSlugSchema>;
 
-const appSearchInputSchema = z.strictObject({
+export const appSearchInputSchema = z.strictObject({
   query: z.string().trim().min(1).max(500),
   collectionSlugs: z.array(appSearchCollectionSlugSchema).min(1).max(10).refine((slugs) => new Set(slugs).size === slugs.length, "Collection slugs must be distinct."),
   recordHistory: z.boolean().default(true),
@@ -22,12 +22,18 @@ const appSearchInputSchema = z.strictObject({
     emailFacets: z.array(z.enum(["urgent", "important", "filtered", "favorite"])).max(4).optional(),
   }).optional(),
 });
+export type AppSearchInput = z.input<typeof appSearchInputSchema>;
 
 const appSearchOutputSchema = z.strictObject({
   query: z.string(),
   groups: z.array(z.strictObject({ collectionSlug: appSearchCollectionSlugSchema, results: z.array(z.unknown()) })),
 });
 export type AppSearchOutput = z.infer<typeof appSearchOutputSchema>;
+
+export function appSearchQueryKey(contextIdentity: string, input: AppSearchInput) {
+  const parsed = appSearchInputSchema.parse({ ...input, recordHistory: false });
+  return ["app-search", contextIdentity, parsed] as const;
+}
 
 function context() {
   const state = useAuthStore.getState();
@@ -44,7 +50,7 @@ function responseError(error: unknown) {
   return error;
 }
 
-export async function searchApp(input: z.input<typeof appSearchInputSchema>, signal?: AbortSignal) {
+export async function searchApp(input: AppSearchInput, signal?: AbortSignal) {
   try {
     const parsed = appSearchInputSchema.parse(input);
     const state = useAuthStore.getState();

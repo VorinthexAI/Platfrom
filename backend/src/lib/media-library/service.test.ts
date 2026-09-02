@@ -38,7 +38,7 @@ describe('MediaLibrary service boundaries', () => {
     expect(await verifyMediaLibrarySharePassword('correct password', passwordHash)).toBe(true);
     expect(await verifyMediaLibrarySharePassword('wrong password', passwordHash)).toBe(false);
     const active = { key: newId(), scopeKey: newId(), sourceType: 'image' as const, sourceKey: newId(), permission: 'read' as const, tokenHash: 'a'.repeat(64), passwordHash, createdAt: now, updatedAt: now };
-    const service = createMediaLibraryService({ repository: repository({ getActiveGlobalShareByTokenHash: async () => active }) });
+    const service = createMediaLibraryService({ repository: repository({ getActiveGlobalShareByTokenHash: async () => active }), verifyPassword: async (password) => password === 'correct password' });
     await expect(service.accessGlobalShare({ token: 'a'.repeat(32), password: 'wrong password', at: now })).rejects.toThrow('unavailable');
     const result = await service.accessGlobalShare({ token: 'a'.repeat(32), password: 'correct password', at: now });
     expect(result.share).not.toHaveProperty('tokenHash');
